@@ -38,7 +38,7 @@ def _module_path(short_name: str) -> Path:
 # Modules that make up (or will make up) the relocatable forge application.
 _FORGE_APP_MODULES = (
     "input_data",
-    "source_data",
+    "source_datasets",
     "source_registry",
     "settings",
     "forge_blueprint",

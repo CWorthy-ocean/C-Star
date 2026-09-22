@@ -3,16 +3,16 @@ Tests for the config.py module.
 
 Tests cover:
 - DataPaths dataclass
-- System detection functions
-- Path resolution and layout functions
-- CLI functionality
+- detect_system (the seam onto C-Star's HostNameEvaluator)
+- System layout registry / source-data path resolution
+- Bouchet scratch-root heuristic
+- _hpc_scratch_root / relocate_working_dir
+- get_data_paths / ensure_data_dirs
 """
 
-import json
-import os
+import logging
 from dataclasses import FrozenInstanceError
 from pathlib import Path
-from unittest.mock import patch
 
 import pytest
 
@@ -20,82 +20,46 @@ import cstar_forge.config as config_module
 from cstar_forge.config import (
     SYSTEM_LAYOUT_REGISTRY,
     DataPaths,
-    _default_cluster_type,
-    _detect_system,
-    _get_hostname,
     get_data_paths,
-    main,
     register_system,
-    with_catalog,
 )
 from cstar_forge.domain_catalog import user_catalog_root
 
+# The env vars C-Star's hpc_data_directory() searches (CSTAR_SCRATCH_DIRS' default),
+# plus CSTAR_SCRATCH_DIRS itself. Cleared in tests that exercise _hpc_scratch_root /
+# relocate_working_dir so the result doesn't depend on the real host's environment.
+_SCRATCH_ENV_VARS = ("SCRATCH", "SCRATCH_DIR", "LOCAL_SCRATCH", "CSTAR_SCRATCH_DIRS")
+
+
+@pytest.fixture
+def clean_scratch_env(monkeypatch):
+    """Clear the env vars hpc_data_directory() searches, for determinism."""
+    for var in _SCRATCH_ENV_VARS:
+        monkeypatch.delenv(var, raising=False)
+
 
 class TestDataPaths:
-    """Tests for DataPaths dataclass."""
+    """Tests for the DataPaths dataclass (now just source_data + catalog)."""
 
     def test_datapaths_creation(self, tmp_path):
-        """Test creating DataPaths with all required fields."""
         cat = tmp_path / "catalog"
-        paths = DataPaths(
-            here=tmp_path,
-            source_data=tmp_path / "source-data",
-            input_data=tmp_path / "input-data",
-            scratch=tmp_path / "run-dir",
-            catalog=cat,
-            blueprints=cat / "blueprints",
-            models_yaml=tmp_path / "models.yaml",
-            builds_yaml=tmp_path / "builds.yaml",
-        )
+        paths = DataPaths(source_data=tmp_path / "source-data", catalog=cat)
 
-        assert paths.here == tmp_path
         assert paths.source_data == tmp_path / "source-data"
-        assert paths.input_data == tmp_path / "input-data"
-        assert paths.scratch == tmp_path / "run-dir"
         assert paths.catalog == cat
-        assert paths.blueprints == cat / "blueprints"
-        assert paths.models_yaml == tmp_path / "models.yaml"
-        assert paths.builds_yaml == tmp_path / "builds.yaml"
 
     def test_datapaths_frozen(self, tmp_path):
-        """Test that DataPaths is frozen (immutable)."""
         cat = tmp_path / "catalog"
-        paths = DataPaths(
-            here=tmp_path,
-            source_data=tmp_path / "source-data",
-            input_data=tmp_path / "input-data",
-            scratch=tmp_path / "run-dir",
-            catalog=cat,
-            blueprints=cat / "blueprints",
-            models_yaml=tmp_path / "models.yaml",
-            builds_yaml=tmp_path / "builds.yaml",
-        )
+        paths = DataPaths(source_data=tmp_path / "source-data", catalog=cat)
 
         with pytest.raises(FrozenInstanceError):
-            paths.here = tmp_path / "new"
-
-    def test_with_catalog(self, tmp_path):
-        """Relocating catalog updates blueprints."""
-        cat = tmp_path / "catalog"
-        paths = DataPaths(
-            here=tmp_path,
-            source_data=tmp_path / "source-data",
-            input_data=tmp_path / "input-data",
-            scratch=tmp_path / "run-dir",
-            catalog=cat,
-            blueprints=cat / "blueprints",
-            models_yaml=tmp_path / "models.yaml",
-            builds_yaml=tmp_path / "builds.yaml",
-        )
-        other = tmp_path / "other_catalog"
-        moved = with_catalog(paths, other)
-        assert moved.catalog == other
-        assert moved.blueprints == other / "blueprints"
-        assert moved.here == paths.here
+            paths.catalog = tmp_path / "new"
 
 
 # NB: catalog_root anchoring (resolve_catalog_dir) was removed with the executor's
 # config/catalog decoupling — the forge app writes under the injected host.working_dir.
+# with_catalog (config.py's own catalog-relocation helper) was removed for the same
+# reason: nothing outside config.py and its tests read the field it moved.
 
 
 class TestUserCatalogRoot:
@@ -105,6 +69,8 @@ class TestUserCatalogRoot:
     """
 
     def test_env_override_uses_first_pathsep_entry(self, monkeypatch, tmp_path):
+        import os
+
         first = tmp_path / "first-catalog"
         second = tmp_path / "second-catalog"
         monkeypatch.setenv(
@@ -130,144 +96,45 @@ class TestUserCatalogRoot:
         assert not result.exists()
 
 
-class TestSystemDetection:
-    """Tests for system detection functions."""
+class TestDetectSystem:
+    """detect_system() is a one-line seam onto C-Star's HostNameEvaluator.
 
-    @patch("cstar_forge.config.platform.system")
-    @patch("cstar_forge.config._get_hostname")
-    @patch.dict(os.environ, {}, clear=True)
-    def test_detect_system_macos(self, mock_hostname, mock_system):
-        """Test system detection for MacOS."""
-        mock_system.return_value = "Darwin"
-        result = _detect_system()
-        assert result == "MacOS"
+    C-Star's own hostname/LMOD/is_match matching heuristics belong to C-Star's
+    test suite, not forge's — these tests only check that the seam delegates,
+    not how HostNameEvaluator itself decides a name.
+    """
 
-    @patch("cstar_forge.config.platform.system")
-    @patch("cstar_forge.config._get_hostname")
-    @patch.dict(os.environ, {}, clear=True)
-    def test_detect_system_anvil(self, mock_hostname, mock_system):
-        """Test system detection for RCAC Anvil."""
-        mock_system.return_value = "Linux"
-        mock_hostname.return_value = "anvil-login01"
-        result = _detect_system()
-        assert result == "RCAC_anvil"
+    def test_delegates_to_host_name_evaluator(self, monkeypatch):
+        class _FakeEvaluator:
+            name = "anvil"
 
-    @patch("cstar_forge.config.platform.system")
-    @patch("cstar_forge.config._get_hostname")
-    @patch.dict(os.environ, {"NERSC_HOST": "perlmutter"})
-    def test_detect_system_perlmutter(self, mock_hostname, mock_system):
-        """Test system detection for NERSC Perlmutter."""
-        mock_system.return_value = "Linux"
-        mock_hostname.return_value = "unknown"
-        result = _detect_system()
-        assert result == "NERSC_perlmutter"
+        monkeypatch.setattr(config_module, "HostNameEvaluator", _FakeEvaluator)
+        assert config_module.detect_system() == "anvil"
 
-    @patch("cstar_forge.config.platform.system")
-    @patch("cstar_forge.config._get_hostname")
-    @patch.dict(os.environ, {}, clear=True)
-    def test_detect_system_unknown(self, mock_hostname, mock_system):
-        """Test system detection for unknown system."""
-        mock_system.return_value = "Linux"
-        mock_hostname.return_value = "unknown-host"
-        result = _detect_system()
-        assert result == "unknown"
-
-    @patch("cstar_forge.config.platform.system")
-    @patch("cstar_forge.config._get_hostname")
-    @patch.dict(os.environ, {"CLUSTER": "bouchet"}, clear=True)
-    def test_detect_system_bouchet_via_cluster_env(self, mock_hostname, mock_system):
-        """Test system detection for Bouchet via the CLUSTER env var."""
-        mock_system.return_value = "Linux"
-        mock_hostname.return_value = "bouchet-login01"
-        result = _detect_system()
-        assert result == "YCRC_bouchet"
-
-    @patch("cstar_forge.config.platform.system")
-    @patch("cstar_forge.config._get_hostname")
-    @patch.dict(os.environ, {"SLURM_CLUSTER_NAME": "bouchet"}, clear=True)
-    def test_detect_system_bouchet_via_slurm_cluster_name(
-        self, mock_hostname, mock_system
-    ):
-        """Test system detection for Bouchet via the SLURM_CLUSTER_NAME env var."""
-        mock_system.return_value = "Linux"
-        mock_hostname.return_value = "unknown-host"
-        result = _detect_system()
-        assert result == "YCRC_bouchet"
-
-    @patch("cstar_forge.config.platform.system")
-    @patch("cstar_forge.config._get_hostname")
-    @patch.dict(os.environ, {"CLUSTER": "BOUCHET"}, clear=True)
-    def test_detect_system_bouchet_exact_match_only(self, mock_hostname, mock_system):
-        """Bouchet detection matches exactly, mirroring C-Star's is_match (no case folding)."""
-        mock_system.return_value = "Linux"
-        mock_hostname.return_value = "unknown-host"
-        result = _detect_system()
-        assert result == "unknown"
-
-    @patch.dict(os.environ, {"HOSTNAME": "test-host"})
-    @patch("cstar_forge.config.socket.gethostname", return_value="")
-    @patch("cstar_forge.config.platform.node", return_value="")
-    def test_get_hostname_from_env(self, mock_node, mock_gethostname):
-        """Test getting hostname from HOSTNAME environment variable."""
-        result = _get_hostname()
-        assert result == "test-host"
-        mock_gethostname.assert_called_once()
-        mock_node.assert_called_once()
-
-    @patch.dict(os.environ, {}, clear=True)
-    @patch("cstar_forge.config.socket.gethostname")
-    @patch("cstar_forge.config.platform.node")
-    def test_get_hostname_from_socket(self, mock_node, mock_gethostname):
-        """Test getting hostname from socket.gethostname()."""
-        mock_gethostname.return_value = "socket-host"
-        mock_node.return_value = "platform-host"
-        result = _get_hostname()
-        assert result == "socket-host"
-        mock_node.assert_not_called()
-
-    @patch.dict(os.environ, {}, clear=True)
-    @patch("cstar_forge.config.socket.gethostname")
-    @patch("cstar_forge.config.platform.node")
-    def test_get_hostname_from_platform(self, mock_node, mock_gethostname):
-        """Test getting hostname from platform.node() as fallback."""
-        mock_gethostname.return_value = None
-        mock_node.return_value = "platform-host"
-        result = _get_hostname()
-        assert result == "platform-host"
-
-    @patch.dict(os.environ, {}, clear=True)
-    @patch("cstar_forge.config.socket.gethostname")
-    @patch("cstar_forge.config.platform.node")
-    def test_get_hostname_unknown(self, mock_node, mock_gethostname):
-        """Test getting hostname when all methods fail."""
-        mock_gethostname.return_value = None
-        mock_node.return_value = None
-        result = _get_hostname()
-        assert result == "unknown"
+    def test_real_evaluator_returns_a_nonempty_name(self):
+        # No mocking: exercises the actual import wiring end to end (the dev
+        # box this runs on is never one of the registered HPC systems, so this
+        # only asserts C-Star could name *something*, not which name).
+        assert config_module.detect_system()
 
 
 class TestSystemLayoutRegistry:
-    """Tests for system layout registry."""
+    """Tests for the system layout registry, keyed by C-Star's system names."""
 
     def test_system_layout_registry_has_defaults(self):
-        """Test that default system layouts are registered."""
-        assert "MacOS" in SYSTEM_LAYOUT_REGISTRY
-        assert "RCAC_anvil" in SYSTEM_LAYOUT_REGISTRY
-        assert "NERSC_perlmutter" in SYSTEM_LAYOUT_REGISTRY
-        assert "YCRC_bouchet" in SYSTEM_LAYOUT_REGISTRY
-        assert "unknown" in SYSTEM_LAYOUT_REGISTRY
+        assert "anvil" in SYSTEM_LAYOUT_REGISTRY
+        assert "perlmutter" in SYSTEM_LAYOUT_REGISTRY
+        assert "bouchet" in SYSTEM_LAYOUT_REGISTRY
+        assert "darwin_arm64" in SYSTEM_LAYOUT_REGISTRY
+        assert "linux_x86_64" in SYSTEM_LAYOUT_REGISTRY
+        assert "linux_aarch64" in SYSTEM_LAYOUT_REGISTRY
 
     def test_register_system_decorator(self):
         """Test registering a custom system layout."""
 
         @register_system("test_system")
-        def test_layout(home: Path, env: dict):
-            return (
-                home / "test-source",
-                home / "test-input",
-                home / "test-run",
-                home / "test-code",
-            )
+        def test_layout(home: Path, env: dict) -> Path:
+            return home / "test-source"
 
         assert "test_system" in SYSTEM_LAYOUT_REGISTRY
         assert SYSTEM_LAYOUT_REGISTRY["test_system"] == test_layout
@@ -275,147 +142,117 @@ class TestSystemLayoutRegistry:
         # Clean up
         del SYSTEM_LAYOUT_REGISTRY["test_system"]
 
-    def test_macos_layout(self, tmp_path):
-        """Test MacOS layout function."""
-        layout_fn = SYSTEM_LAYOUT_REGISTRY["MacOS"]
-        source_data, input_data, scratch = layout_fn(tmp_path, {})
+    def test_home_anchored_layout_registered_under_each_local_dev_name(self, tmp_path):
+        """darwin_arm64/linux_x86_64/linux_aarch64 all share one function."""
+        for tag in ("darwin_arm64", "linux_x86_64", "linux_aarch64"):
+            layout_fn = SYSTEM_LAYOUT_REGISTRY[tag]
+            assert layout_fn is config_module._layout_home_anchored
+            source_data = layout_fn(tmp_path, {})
+            assert source_data == tmp_path / "cstar-forge-data" / "source-data"
 
-        assert source_data == tmp_path / "cstar-forge-data" / "source-data"
-        assert input_data == tmp_path / "cstar-forge-data" / "input-data"
-        assert scratch == tmp_path / "cstar" / "_forge_bp_runs"
-
-    def test_unknown_layout(self, tmp_path):
-        """Test unknown layout function."""
-        layout_fn = SYSTEM_LAYOUT_REGISTRY["unknown"]
-        source_data, input_data, scratch = layout_fn(tmp_path, {})
-
-        assert source_data == tmp_path / "cstar-forge-data" / "source-data"
-        assert input_data == tmp_path / "cstar-forge-data" / "input-data"
-        assert scratch == tmp_path / "cstar" / "_forge_bp_runs"
+    def test_unregistered_system_name_falls_back_to_home_anchored_layout(self):
+        """.get(name, fallback): any C-Star name with no dedicated HPC layout below
+        (e.g. "derecho", which forge doesn't special-case) gets the home-anchored
+        default -- a deliberate fallback, not a second detection heuristic.
+        """
+        fallback = SYSTEM_LAYOUT_REGISTRY.get(
+            "derecho", config_module._layout_home_anchored
+        )
+        assert fallback is config_module._layout_home_anchored
 
     def test_anvil_layout(self, tmp_path):
-        """Test RCAC Anvil layout function."""
-        from cstar_forge.config import USER
-
-        layout_fn = SYSTEM_LAYOUT_REGISTRY["RCAC_anvil"]
-        env = {"PROJECT": str(tmp_path / "proj"), "SCRATCH": str(tmp_path / "scratch")}
-        source_data, input_data, scratch = layout_fn(tmp_path, env)
+        """Test Anvil layout function."""
+        layout_fn = SYSTEM_LAYOUT_REGISTRY["anvil"]
+        env = {"PROJECT": str(tmp_path / "proj")}
+        source_data = layout_fn(tmp_path, env)
 
         assert source_data == tmp_path / "proj" / "cstar-forge-data" / "source-data"
-        assert (
-            input_data == tmp_path / "proj" / "cstar-forge-data" / USER / "input-data"
-        )
-        assert scratch == tmp_path / "scratch" / "cstar" / "_forge_bp_runs"
 
     def test_perlmutter_layout(self, tmp_path):
-        """Test NERSC Perlmutter layout function."""
-        from cstar_forge.config import USER
-
-        layout_fn = SYSTEM_LAYOUT_REGISTRY["NERSC_perlmutter"]
+        """Test Perlmutter layout function."""
+        layout_fn = SYSTEM_LAYOUT_REGISTRY["perlmutter"]
         env = {"SCRATCH": str(tmp_path / "scratch")}
-        source_data, input_data, scratch = layout_fn(tmp_path, env)
+        source_data = layout_fn(tmp_path, env)
 
         assert source_data == tmp_path / "scratch" / "cstar-forge-data" / "source-data"
-        assert (
-            input_data
-            == tmp_path / "scratch" / "cstar-forge-data" / USER / "input-data"
-        )
-        assert scratch == tmp_path / "scratch" / "cstar" / "_forge_bp_runs"
 
     def test_bouchet_layout(self, tmp_path, monkeypatch):
-        """Test YCRC Bouchet layout function using the discovered scratch_pi_* dir."""
+        """Test Bouchet layout function using the discovered scratch_pi_* dir."""
         monkeypatch.setattr(config_module, "USER", "testuser")
         (tmp_path / "scratch_pi_abc" / "testuser").mkdir(parents=True)
 
-        layout_fn = SYSTEM_LAYOUT_REGISTRY["YCRC_bouchet"]
-        source_data, input_data, scratch = layout_fn(tmp_path, {})
+        layout_fn = SYSTEM_LAYOUT_REGISTRY["bouchet"]
+        source_data = layout_fn(tmp_path, {})
 
         scratch_root = tmp_path / "scratch_pi_abc" / "testuser"
         assert source_data == scratch_root / "cstar-forge-data" / "source-data"
-        assert input_data == scratch_root / "cstar-forge-data" / "input-data"
-        assert scratch == scratch_root / "cstar" / "_forge_bp_runs"
 
     def test_bouchet_layout_scratch_env_override_wins(self, tmp_path, monkeypatch):
-        """An explicit $SCRATCH override wins over the scratch_pi_* glob."""
+        """An explicit $SCRATCH override (in the layout's own env dict, distinct from
+        the real-process lookup _hpc_scratch_root does) wins over the scratch_pi_*
+        glob.
+        """
         monkeypatch.setattr(config_module, "USER", "testuser")
         (tmp_path / "scratch_pi_abc" / "testuser").mkdir(parents=True)
 
-        layout_fn = SYSTEM_LAYOUT_REGISTRY["YCRC_bouchet"]
+        layout_fn = SYSTEM_LAYOUT_REGISTRY["bouchet"]
         env = {"SCRATCH": str(tmp_path / "explicit-scratch")}
-        source_data, input_data, scratch = layout_fn(tmp_path, env)
+        source_data = layout_fn(tmp_path, env)
 
-        scratch_root = tmp_path / "explicit-scratch"
-        assert source_data == scratch_root / "cstar-forge-data" / "source-data"
-        assert input_data == scratch_root / "cstar-forge-data" / "input-data"
-        assert scratch == scratch_root / "cstar" / "_forge_bp_runs"
+        assert (
+            source_data
+            == tmp_path / "explicit-scratch" / "cstar-forge-data" / "source-data"
+        )
 
-    def test_bouchet_layout_falls_back_to_unknown_without_scratch_pi(
+    def test_bouchet_layout_falls_back_to_home_anchored_without_scratch_pi(
         self, tmp_path, monkeypatch
     ):
-        """No scratch_pi_* dir and no $SCRATCH falls back to the unknown layout."""
+        """No scratch_pi_* dir and no $SCRATCH falls back to the home-anchored layout."""
         monkeypatch.setattr(config_module, "USER", "testuser")
 
-        bouchet_fn = SYSTEM_LAYOUT_REGISTRY["YCRC_bouchet"]
-        unknown_fn = SYSTEM_LAYOUT_REGISTRY["unknown"]
-        assert bouchet_fn(tmp_path, {}) == unknown_fn(tmp_path, {})
+        bouchet_fn = SYSTEM_LAYOUT_REGISTRY["bouchet"]
+        home_fn = config_module._layout_home_anchored
+        assert bouchet_fn(tmp_path, {}) == home_fn(tmp_path, {})
 
     # ---- $PROJECT: standard env var for the (shared) data-base parent dir ----
 
-    def test_anvil_project_drives_everything_work_ignored(self, tmp_path):
-        """$PROJECT drives the data base AND the scratch fallback; $WORK is never
-        consulted, so a user-overridden $PROJECT moves everything with it.
+    def test_anvil_project_drives_source_data_work_ignored(self, tmp_path):
+        """$PROJECT drives the data base; $WORK is never consulted, so a
+        user-overridden $PROJECT moves everything with it.
         """
-        from cstar_forge.config import USER
-
-        layout_fn = SYSTEM_LAYOUT_REGISTRY["RCAC_anvil"]
+        layout_fn = SYSTEM_LAYOUT_REGISTRY["anvil"]
         env = {"PROJECT": str(tmp_path / "proj"), "WORK": str(tmp_path / "work")}
-        source_data, input_data, scratch = layout_fn(tmp_path, env)
+        source_data = layout_fn(tmp_path, env)
 
-        base = tmp_path / "proj" / "cstar-forge-data"
-        assert source_data == base / "source-data"
-        assert input_data == base / USER / "input-data"
-        # No $SCRATCH: the scratch fallback derives from $PROJECT, not $WORK.
-        assert scratch == tmp_path / "proj" / "scratch" / "cstar" / "_forge_bp_runs"
+        assert source_data == tmp_path / "proj" / "cstar-forge-data" / "source-data"
 
     def test_anvil_without_project_uses_home_even_if_work_set(self, tmp_path):
         """No $PROJECT falls back to home/work; a lone $WORK is ignored."""
-        layout_fn = SYSTEM_LAYOUT_REGISTRY["RCAC_anvil"]
+        layout_fn = SYSTEM_LAYOUT_REGISTRY["anvil"]
         env = {"WORK": str(tmp_path / "elsewhere")}
-        source_data, _, _ = layout_fn(tmp_path, env)
+        source_data = layout_fn(tmp_path, env)
         assert source_data == tmp_path / "work" / "cstar-forge-data" / "source-data"
 
-    def test_perlmutter_project_moves_data_base_not_run_scratch(self, tmp_path):
-        """$PROJECT relocates the data base only; run scratch stays on $SCRATCH."""
-        from cstar_forge.config import USER
-
-        layout_fn = SYSTEM_LAYOUT_REGISTRY["NERSC_perlmutter"]
+    def test_perlmutter_project_moves_data_base(self, tmp_path):
+        """$PROJECT relocates the data base, overriding the $SCRATCH-based default."""
+        layout_fn = SYSTEM_LAYOUT_REGISTRY["perlmutter"]
         env = {"PROJECT": str(tmp_path / "proj"), "SCRATCH": str(tmp_path / "scratch")}
-        source_data, input_data, scratch = layout_fn(tmp_path, env)
+        source_data = layout_fn(tmp_path, env)
 
-        base = tmp_path / "proj" / "cstar-forge-data"
-        assert source_data == base / "source-data"
-        assert input_data == base / USER / "input-data"
-        assert scratch == tmp_path / "scratch" / "cstar" / "_forge_bp_runs"
+        assert source_data == tmp_path / "proj" / "cstar-forge-data" / "source-data"
 
-    def test_bouchet_project_moves_data_base_and_adds_user_layer(
-        self, tmp_path, monkeypatch
-    ):
-        """$PROJECT relocates the data base and restores the per-user input-data
-        layer (the shared project dir, unlike the discovered scratch root, does
-        not end in the username); run scratch stays on the discovered root.
+    def test_bouchet_project_moves_data_base(self, tmp_path, monkeypatch):
+        """$PROJECT relocates the data base; the discovered scratch_pi_* root is
+        only consulted to decide whether the home-anchored fallback applies.
         """
         monkeypatch.setattr(config_module, "USER", "testuser")
         (tmp_path / "scratch_pi_abc" / "testuser").mkdir(parents=True)
 
-        layout_fn = SYSTEM_LAYOUT_REGISTRY["YCRC_bouchet"]
+        layout_fn = SYSTEM_LAYOUT_REGISTRY["bouchet"]
         env = {"PROJECT": str(tmp_path / "proj")}
-        source_data, input_data, scratch = layout_fn(tmp_path, env)
+        source_data = layout_fn(tmp_path, env)
 
-        base = tmp_path / "proj" / "cstar-forge-data"
-        assert source_data == base / "source-data"
-        assert input_data == base / "testuser" / "input-data"
-        scratch_root = tmp_path / "scratch_pi_abc" / "testuser"
-        assert scratch == scratch_root / "cstar" / "_forge_bp_runs"
+        assert source_data == tmp_path / "proj" / "cstar-forge-data" / "source-data"
 
     def test_bouchet_project_ignored_without_scratch_root(self, tmp_path, monkeypatch):
         """Documented edge: with no discoverable scratch root, the home-anchored
@@ -423,10 +260,10 @@ class TestSystemLayoutRegistry:
         """
         monkeypatch.setattr(config_module, "USER", "testuser")
 
-        bouchet_fn = SYSTEM_LAYOUT_REGISTRY["YCRC_bouchet"]
-        unknown_fn = SYSTEM_LAYOUT_REGISTRY["unknown"]
+        bouchet_fn = SYSTEM_LAYOUT_REGISTRY["bouchet"]
+        home_fn = config_module._layout_home_anchored
         env = {"PROJECT": str(tmp_path / "proj")}
-        assert bouchet_fn(tmp_path, env) == unknown_fn(tmp_path, {})
+        assert bouchet_fn(tmp_path, env) == home_fn(tmp_path, {})
 
 
 class TestBouchetScratchRoot:
@@ -476,36 +313,107 @@ class TestBouchetScratchRoot:
         assert "scratch_pi_*" in caplog.text
 
 
+class TestHpcScratchRoot:
+    """_hpc_scratch_root reads the passed environment: $SCRATCH first, then the
+    per-system fallback, and None for non-HPC names even if $SCRATCH is set.
+    """
+
+    def test_scratch_env_wins_on_every_hpc_system(self, tmp_path):
+        env = {"SCRATCH": str(tmp_path / "scratch"), "PROJECT": str(tmp_path / "proj")}
+        for tag in ("perlmutter", "anvil", "bouchet"):
+            assert config_module._hpc_scratch_root(tag, env, tmp_path / "home") == (
+                tmp_path / "scratch"
+            ), tag
+
+    def test_perlmutter_falls_back_to_home_scratch(self, tmp_path):
+        home = tmp_path / "home"
+        assert (
+            config_module._hpc_scratch_root("perlmutter", {}, home) == home / "scratch"
+        )
+
+    def test_anvil_fallback_when_scratch_unset(self, tmp_path):
+        home = tmp_path / "home"
+        env = {"PROJECT": str(tmp_path / "proj")}
+        assert (
+            config_module._hpc_scratch_root("anvil", env, home)
+            == tmp_path / "proj" / "scratch"
+        )
+
+    def test_anvil_fallback_without_project(self, tmp_path):
+        home = tmp_path / "home"
+        assert (
+            config_module._hpc_scratch_root("anvil", {}, home)
+            == home / "work" / "scratch"
+        )
+
+    def test_bouchet_fallback_uses_scratch_pi_glob(self, tmp_path, monkeypatch):
+        home = tmp_path / "home"
+        (home / "scratch_pi_abc" / "testuser").mkdir(parents=True)
+        monkeypatch.setattr(config_module, "USER", "testuser")
+        assert (
+            config_module._hpc_scratch_root("bouchet", {}, home)
+            == home / "scratch_pi_abc" / "testuser"
+        )
+
+    def test_bouchet_returns_none_without_scratch_pi(self, tmp_path):
+        home = tmp_path / "home"
+        home.mkdir()
+        assert config_module._hpc_scratch_root("bouchet", {}, home) is None
+
+    def test_other_scratch_variables_are_not_consulted(self, tmp_path):
+        # Unchanged pre-relocation behaviour: only $SCRATCH is read here; C-Star's
+        # CSTAR_SCRATCH_DIRS list ($SCRATCH_DIR, $LOCAL_SCRATCH) is adopted later.
+        home = tmp_path / "home"
+        env = {"SCRATCH_DIR": "/sdir", "LOCAL_SCRATCH": "/tmp/job"}
+        assert (
+            config_module._hpc_scratch_root("perlmutter", env, home) == home / "scratch"
+        )
+
+    def test_non_hpc_name_returns_none_even_if_scratch_is_set(self, tmp_path):
+        env = {"SCRATCH": str(tmp_path / "scratch")}
+        for tag in ("darwin_arm64", "linux_x86_64", "derecho"):
+            assert (
+                config_module._hpc_scratch_root(tag, env, tmp_path / "home") is None
+            ), tag
+
+
 class TestRelocateWorkingDir:
     """Tests for relocate_working_dir (default-form paths rebase onto HPC scratch)."""
 
-    def test_default_path_rebases_to_scratch_on_perlmutter(self, tmp_path):
+    def test_default_path_rebases_to_scratch_on_perlmutter(
+        self, tmp_path, monkeypatch, clean_scratch_env
+    ):
         from cstar_forge.config import relocate_working_dir
 
         home = tmp_path / "home"
-        env = {"SCRATCH": str(tmp_path / "scratch")}
         wd = relocate_working_dir(
             home / "cstar" / "_forge_bp_runs" / "my-run",
-            system_tag="NERSC_perlmutter",
-            env=env,
+            system_tag="perlmutter",
+            env={"SCRATCH": str(tmp_path / "scratch")},
             home=home,
         )
         assert wd == tmp_path / "scratch" / "cstar" / "_forge_bp_runs" / "my-run"
 
-    def test_default_path_rebases_to_scratch_on_anvil(self, tmp_path):
+    def test_default_path_rebases_to_scratch_on_anvil(
+        self, tmp_path, monkeypatch, clean_scratch_env
+    ):
         from cstar_forge.config import relocate_working_dir
 
         home = tmp_path / "home"
-        env = {"PROJECT": str(tmp_path / "proj"), "SCRATCH": str(tmp_path / "scratch")}
         wd = relocate_working_dir(
             home / "cstar" / "_forge_bp_runs" / "my-run",
-            system_tag="RCAC_anvil",
-            env=env,
+            system_tag="anvil",
+            env={
+                "SCRATCH": str(tmp_path / "scratch"),
+                "PROJECT": str(tmp_path / "proj"),
+            },
             home=home,
         )
         assert wd == tmp_path / "scratch" / "cstar" / "_forge_bp_runs" / "my-run"
 
-    def test_anvil_falls_back_to_project_scratch(self, tmp_path):
+    def test_anvil_falls_back_to_project_scratch(
+        self, tmp_path, monkeypatch, clean_scratch_env
+    ):
         """No $SCRATCH: the fallback derives from $PROJECT; $WORK is ignored."""
         from cstar_forge.config import relocate_working_dir
 
@@ -513,7 +421,7 @@ class TestRelocateWorkingDir:
         env = {"PROJECT": str(tmp_path / "proj"), "WORK": str(tmp_path / "work")}
         wd = relocate_working_dir(
             home / "cstar" / "_forge_bp_runs" / "my-run",
-            system_tag="RCAC_anvil",
+            system_tag="anvil",
             env=env,
             home=home,
         )
@@ -521,7 +429,9 @@ class TestRelocateWorkingDir:
             wd == tmp_path / "proj" / "scratch" / "cstar" / "_forge_bp_runs" / "my-run"
         )
 
-    def test_legacy_cstar_forge_run_root_rebases_to_scratch(self, tmp_path):
+    def test_legacy_cstar_forge_run_root_rebases_to_scratch(
+        self, tmp_path, monkeypatch, clean_scratch_env
+    ):
         """The legacy sentinel (``~/cstar-forge-run``, the default before this
         rename) rebases onto the *current* scratch working root, so old
         blueprints no longer write into the old sibling location on HPC.
@@ -531,38 +441,43 @@ class TestRelocateWorkingDir:
         home = tmp_path / "home"
         wd = relocate_working_dir(
             home / "cstar-forge-run" / "my-run",
-            system_tag="NERSC_perlmutter",
+            system_tag="perlmutter",
             env={"SCRATCH": str(tmp_path / "scratch")},
             home=home,
         )
         assert wd == tmp_path / "scratch" / "cstar" / "_forge_bp_runs" / "my-run"
 
-    def test_non_hpc_leaves_path_alone(self, tmp_path):
+    def test_non_hpc_leaves_path_alone(self, tmp_path, monkeypatch, clean_scratch_env):
         from cstar_forge.config import relocate_working_dir
 
         home = tmp_path / "home"
         wd = relocate_working_dir(
             home / "cstar-forge-run" / "my-run",
-            system_tag="MacOS",
+            system_tag="darwin_arm64",
             env={"SCRATCH": str(tmp_path / "scratch")},
             home=home,
         )
         assert wd == home / "cstar-forge-run" / "my-run"
 
-    def test_custom_path_passes_through_on_hpc(self, tmp_path):
+    def test_custom_path_passes_through_on_hpc(
+        self, tmp_path, monkeypatch, clean_scratch_env
+    ):
         from cstar_forge.config import relocate_working_dir
 
         home = tmp_path / "home"
+        monkeypatch.setenv("SCRATCH", str(tmp_path / "scratch"))
         custom = tmp_path / "elsewhere" / "my-run"
         wd = relocate_working_dir(
             custom,
-            system_tag="NERSC_perlmutter",
-            env={"SCRATCH": str(tmp_path / "scratch")},
+            system_tag="perlmutter",
+            env={},
             home=home,
         )
         assert wd == custom
 
-    def test_legacy_default_root_rebases_to_scratch(self, tmp_path):
+    def test_legacy_default_root_rebases_to_scratch(
+        self, tmp_path, monkeypatch, clean_scratch_env
+    ):
         """The legacy sentinel (``~/cstar-forge-data/cstar-forge-run``, from blueprints
         authored before the default was renamed) rebases onto the *current* scratch
         working root, so old blueprints no longer write into home on HPC.
@@ -572,69 +487,76 @@ class TestRelocateWorkingDir:
         home = tmp_path / "home"
         wd = relocate_working_dir(
             home / "cstar-forge-data" / "cstar-forge-run" / "my-run",
-            system_tag="NERSC_perlmutter",
+            system_tag="perlmutter",
             env={"SCRATCH": str(tmp_path / "scratch")},
             home=home,
         )
         assert wd == tmp_path / "scratch" / "cstar" / "_forge_bp_runs" / "my-run"
 
-    def test_bare_cstar_forge_data_path_passes_through(self, tmp_path):
+    def test_bare_cstar_forge_data_path_passes_through(
+        self, tmp_path, monkeypatch, clean_scratch_env
+    ):
         """The legacy match is deliberately narrow: only the nested
         ``cstar-forge-data/cstar-forge-run`` sentinel rebases. A bare path under
-        ``~/cstar-forge-data`` (which is also the mac/unknown source_data and
-        input_data base) is a user choice and passes through untouched.
+        ``~/cstar-forge-data`` (which is also the mac/dev source_data cache base)
+        is a user choice and passes through untouched.
         """
         from cstar_forge.config import relocate_working_dir
 
         home = tmp_path / "home"
+        monkeypatch.setenv("SCRATCH", str(tmp_path / "scratch"))
         custom = home / "cstar-forge-data" / "my-hand-picked-run"
         wd = relocate_working_dir(
             custom,
-            system_tag="NERSC_perlmutter",
-            env={"SCRATCH": str(tmp_path / "scratch")},
+            system_tag="perlmutter",
+            env={},
             home=home,
         )
         assert wd == custom
 
-    def test_home_rooted_nondefault_warns_on_hpc(self, tmp_path, caplog):
+    def test_home_rooted_nondefault_warns_on_hpc(
+        self, tmp_path, monkeypatch, clean_scratch_env, caplog
+    ):
         """A home-rooted path that matches no default root is left in home on HPC;
         warn so an unrelocated (e.g. very old default) run doesn't go unnoticed.
         """
-        import logging
-
         from cstar_forge.config import relocate_working_dir
 
         home = tmp_path / "home"
+        monkeypatch.setenv("SCRATCH", str(tmp_path / "scratch"))
         custom = home / "cstar-forge-data" / "my-hand-picked-run"
         with caplog.at_level(logging.WARNING, logger="cstar_forge.config"):
             wd = relocate_working_dir(
                 custom,
-                system_tag="NERSC_perlmutter",
-                env={"SCRATCH": str(tmp_path / "scratch")},
+                system_tag="perlmutter",
+                env={},
                 home=home,
             )
         assert wd == custom
         assert "was not relocated to scratch" in caplog.text
 
-    def test_off_home_custom_path_does_not_warn(self, tmp_path, caplog):
+    def test_off_home_custom_path_does_not_warn(
+        self, tmp_path, monkeypatch, clean_scratch_env, caplog
+    ):
         """A deliberate path outside home is normal and must not warn."""
-        import logging
-
         from cstar_forge.config import relocate_working_dir
 
         home = tmp_path / "home"
+        monkeypatch.setenv("SCRATCH", str(tmp_path / "scratch"))
         custom = tmp_path / "elsewhere" / "my-run"
         with caplog.at_level(logging.WARNING, logger="cstar_forge.config"):
             wd = relocate_working_dir(
                 custom,
-                system_tag="NERSC_perlmutter",
-                env={"SCRATCH": str(tmp_path / "scratch")},
+                system_tag="perlmutter",
+                env={},
                 home=home,
             )
         assert wd == custom
         assert caplog.text == ""
 
-    def test_default_path_rebases_to_scratch_on_bouchet(self, tmp_path, monkeypatch):
+    def test_default_path_rebases_to_scratch_on_bouchet(
+        self, tmp_path, monkeypatch, clean_scratch_env
+    ):
         from cstar_forge.config import relocate_working_dir
 
         monkeypatch.setattr(config_module, "USER", "testuser")
@@ -642,7 +564,7 @@ class TestRelocateWorkingDir:
         (home / "scratch_pi_abc" / "testuser").mkdir(parents=True)
         wd = relocate_working_dir(
             home / "cstar" / "_forge_bp_runs" / "my-run",
-            system_tag="YCRC_bouchet",
+            system_tag="bouchet",
             env={},
             home=home,
         )
@@ -656,7 +578,9 @@ class TestRelocateWorkingDir:
             / "my-run"
         )
 
-    def test_bouchet_without_scratch_pi_leaves_path_alone(self, tmp_path, monkeypatch):
+    def test_bouchet_without_scratch_pi_leaves_path_alone(
+        self, tmp_path, monkeypatch, clean_scratch_env
+    ):
         """With no scratch_pi_* dir discoverable, _hpc_scratch_root returns None,
         so relocate_working_dir returns the path unchanged (same as any other
         HPC system with no resolvable scratch root -- no warning in this branch,
@@ -670,20 +594,22 @@ class TestRelocateWorkingDir:
         custom = home / "cstar" / "_forge_bp_runs" / "my-run"
         wd = relocate_working_dir(
             custom,
-            system_tag="YCRC_bouchet",
+            system_tag="bouchet",
             env={},
             home=home,
         )
         assert wd == custom
 
-    def test_tilde_default_expands_then_rebases(self, tmp_path, monkeypatch):
+    def test_tilde_default_expands_then_rebases(
+        self, tmp_path, monkeypatch, clean_scratch_env
+    ):
         from cstar_forge.config import relocate_working_dir
 
         home = tmp_path / "home"
         monkeypatch.setenv("HOME", str(home))
         wd = relocate_working_dir(
             "~/cstar/_forge_bp_runs/my-run",
-            system_tag="NERSC_perlmutter",
+            system_tag="perlmutter",
             env={"SCRATCH": str(tmp_path / "scratch")},
             home=home,
         )
@@ -693,210 +619,75 @@ class TestRelocateWorkingDir:
 class TestGetDataPaths:
     """Tests for get_data_paths function."""
 
-    @patch("cstar_forge.config._detect_system")
-    def test_get_data_paths(self, mock_detect, tmp_path, monkeypatch):
+    def test_get_data_paths(self, monkeypatch, tmp_path):
         """Test get_data_paths returns DataPaths object without creating directories.
 
         Importing cstar_forge.config must not have filesystem side effects, so the
         default (``create=False``) only builds Path objects.
         """
-        mock_detect.return_value = "MacOS"
+        monkeypatch.setattr(config_module, "detect_system", lambda: "darwin_arm64")
 
         # conftest.py forces CSTAR_FORGE_CATALOG to an already-created temp dir
         # (for global test isolation), which would make the "not exists()"
-        # assertions below meaningless -- point it at a not-yet-created path
+        # assertion below meaningless -- point it at a not-yet-created path
         # instead so this test still checks that get_data_paths() itself
         # creates nothing.
         monkeypatch.setenv("CSTAR_FORGE_CATALOG", str(tmp_path / "not-yet-created"))
         # Use a real home directory that exists for the test
-        with patch.dict(os.environ, {"HOME": str(tmp_path)}):
-            paths = get_data_paths()
+        monkeypatch.setenv("HOME", str(tmp_path))
+        paths = get_data_paths()
 
         assert isinstance(paths, DataPaths)
-        # 'here' is the parent of __file__, so it should exist and be a directory
-        # (it's not created by get_data_paths, it's the package directory)
-        assert paths.here.exists(), f"'here' path does not exist: {paths.here}"
-        assert paths.here.is_dir(), f"'here' path is not a directory: {paths.here}"
         # No directories are created by default
         assert not paths.source_data.exists()
-        assert not paths.input_data.exists()
-        assert not paths.scratch.exists()
         assert not paths.catalog.exists()
-        assert not paths.blueprints.exists()
         assert paths.catalog == user_catalog_root()
-        assert paths.blueprints == paths.catalog / "blueprints"
 
-    @patch("cstar_forge.config._detect_system")
-    def test_get_data_paths_creates_directories(
-        self, mock_detect, tmp_path, monkeypatch
-    ):
+    def test_get_data_paths_creates_directories(self, monkeypatch, tmp_path):
         """Test that get_data_paths(create=True) creates necessary directories."""
-        mock_detect.return_value = "MacOS"
+        monkeypatch.setattr(config_module, "detect_system", lambda: "darwin_arm64")
 
         # See test_get_data_paths above: repoint the catalog at a not-yet-created
         # path so this test actually exercises directory creation for it too.
         monkeypatch.setenv("CSTAR_FORGE_CATALOG", str(tmp_path / "not-yet-created"))
-        # Use a temporary directory as HOME for the test
-        with patch.dict(os.environ, {"HOME": str(tmp_path)}):
-            paths = get_data_paths(create=True)
+        monkeypatch.setenv("HOME", str(tmp_path))
+        paths = get_data_paths(create=True)
 
         # Verify directories were created (they should exist after get_data_paths)
         assert paths.source_data.exists()
-        assert paths.input_data.exists()
-        assert paths.scratch.exists()
         assert paths.catalog.exists()
-        assert paths.blueprints.exists()
 
 
-class TestCLI:
-    """Tests for CLI functionality."""
+class TestFormatPaths:
+    """format_paths backs `cstar forge show-paths` in both text and JSON forms."""
 
-    def test_cli_show_paths(self, capsys):
-        """Test show-paths command."""
-        # Create a real DataPaths object for testing
-        test_paths = DataPaths(
-            here=Path("/test/here"),
-            source_data=Path("/test/source"),
-            input_data=Path("/test/input"),
-            scratch=Path("/test/run"),
-            catalog=Path("/test/catalog"),
-            blueprints=Path("/test/catalog/blueprints"),
-            models_yaml=Path("/test/models.yaml"),
-            builds_yaml=Path("/test/builds.yaml"),
-        )
+    @pytest.fixture
+    def fake_paths(self, monkeypatch, tmp_path):
+        dp = DataPaths(source_data=tmp_path / "src", catalog=tmp_path / "cat")
+        monkeypatch.setattr(config_module, "paths", dp)
+        monkeypatch.setattr(config_module, "detect_system", lambda: "anvil")
+        monkeypatch.setattr(config_module, "_hostname", lambda: "node01")
+        return dp
 
-        # Patch everything in one context manager
-        with (
-            patch.object(config_module, "paths", test_paths),
-            patch("cstar_forge.config._detect_system", return_value="MacOS"),
-            patch("cstar_forge.config._get_hostname", return_value="test-host"),
-        ):
-            exit_code = main(["show-paths"])
+    def test_text_output(self, fake_paths):
+        out = config_module.format_paths()
+        assert "System tag : anvil" in out
+        assert "Hostname   : node01" in out
+        assert str(fake_paths.source_data) in out and str(fake_paths.catalog) in out
 
-        assert exit_code == 0
-        captured = capsys.readouterr()
-        assert "System tag" in captured.out
-        assert "MacOS" in captured.out
-        assert "test-host" in captured.out
+    def test_json_output(self, fake_paths):
+        import json
 
-    def test_cli_show_paths_json(self, capsys):
-        """Test show-paths command with --json flag."""
-        # Create a real DataPaths object for testing
-        test_paths = DataPaths(
-            here=Path("/test/here"),
-            source_data=Path("/test/source"),
-            input_data=Path("/test/input"),
-            scratch=Path("/test/run"),
-            catalog=Path("/test/catalog"),
-            blueprints=Path("/test/catalog/blueprints"),
-            models_yaml=Path("/test/models.yaml"),
-            builds_yaml=Path("/test/builds.yaml"),
-        )
+        payload = json.loads(config_module.format_paths(as_json=True))
+        assert payload["system"] == "anvil"
+        assert payload["hostname"] == "node01"
+        assert payload["paths"] == {
+            "source_data": str(fake_paths.source_data),
+            "catalog": str(fake_paths.catalog),
+        }
 
-        # Patch everything in one context manager
-        with (
-            patch.object(config_module, "paths", test_paths),
-            patch("cstar_forge.config._detect_system", return_value="MacOS"),
-            patch("cstar_forge.config._get_hostname", return_value="test-host"),
-        ):
-            exit_code = main(["show-paths", "--json"])
-
-        assert exit_code == 0
-        captured = capsys.readouterr()
-        # Should be valid JSON
-        data = json.loads(captured.out)
-        assert data["system"] == "MacOS"
-        assert data["hostname"] == "test-host"
-        assert "paths" in data
-
-    def test_cli_default_command(self, capsys):
-        """Test that default command is show-paths."""
-        # Create a real DataPaths object for testing
-        test_paths = DataPaths(
-            here=Path("/test"),
-            source_data=Path("/test/source"),
-            input_data=Path("/test/input"),
-            scratch=Path("/test/run"),
-            catalog=Path("/test/catalog"),
-            blueprints=Path("/test/catalog/blueprints"),
-            models_yaml=Path("/test/models.yaml"),
-            builds_yaml=Path("/test/builds.yaml"),
-        )
-
-        with (
-            patch.object(config_module, "paths", test_paths),
-            patch("cstar_forge.config._detect_system") as mock_detect,
-            patch("cstar_forge.config._get_hostname") as mock_hostname,
-        ):
-            mock_detect.return_value = "MacOS"
-            mock_hostname.return_value = "test-host"
-
-            exit_code = main([])
-
-            assert exit_code == 0
-            captured = capsys.readouterr()
-            assert "System tag" in captured.out
-
-    def test_cli_unknown_command(self, capsys):
-        """Test CLI with unknown command."""
-        # argparse raises SystemExit(2) for invalid commands
-        with pytest.raises(SystemExit) as exc_info:
-            main(["unknown-command"])
-
-        # argparse exits with code 2 for invalid arguments
-        assert exc_info.value.code == 2
-        captured = capsys.readouterr()
-        assert (
-            "error" in captured.err.lower() or "invalid choice" in captured.err.lower()
-        )
-
-
-class TestClusterType:
-    """Tests for ClusterType class and _default_cluster_type function."""
-
-    def test_cluster_type_constants(self):
-        """Test that ClusterType constants are defined correctly."""
-        assert config_module.ClusterType.LOCAL == "LocalCluster"
-        assert config_module.ClusterType.SLURM == "SLURMCluster"
-        assert config_module.ClusterType.PBS == "PBSCluster"
-
-    def test_default_cluster_type_macos(self):
-        """Test default cluster type for MacOS."""
-        result = _default_cluster_type("MacOS")
-        assert result == config_module.ClusterType.LOCAL
-
-    def test_default_cluster_type_unknown(self):
-        """Test default cluster type for unknown system."""
-        result = _default_cluster_type("unknown")
-        assert result == config_module.ClusterType.LOCAL
-
-    def test_default_cluster_type_anvil(self):
-        """Test default cluster type for RCAC Anvil."""
-        result = _default_cluster_type("RCAC_anvil")
-        assert result == config_module.ClusterType.SLURM
-
-    def test_default_cluster_type_perlmutter(self):
-        """Test default cluster type for NERSC Perlmutter."""
-        result = _default_cluster_type("NERSC_perlmutter")
-        assert result == config_module.ClusterType.SLURM
-
-    def test_default_cluster_type_bouchet(self):
-        """Test default cluster type for YCRC Bouchet."""
-        result = _default_cluster_type("YCRC_bouchet")
-        assert result == config_module.ClusterType.SLURM
-
-    def test_default_cluster_type_unsupported(self):
-        """Test that unsupported systems raise NotImplementedError."""
-        with pytest.raises(NotImplementedError) as exc_info:
-            _default_cluster_type("unsupported_system")
-        assert "unsupported_system" in str(exc_info.value)
-
-    def test_cluster_type_module_level(self):
-        """Test that config.cluster_type is set correctly."""
-        # The cluster_type should be set based on the detected system
-        assert hasattr(config_module, "cluster_type")
-        assert config_module.cluster_type in [
-            config_module.ClusterType.LOCAL,
-            config_module.ClusterType.SLURM,
-            config_module.ClusterType.PBS,
-        ]
+    def test_hostname_falls_back_when_socket_is_empty(self, monkeypatch):
+        monkeypatch.setattr(config_module.socket, "gethostname", lambda: "")
+        monkeypatch.setattr(config_module.platform, "node", lambda: "")
+        monkeypatch.setenv("HOSTNAME", "from-env")
+        assert config_module._hostname() == "from-env"

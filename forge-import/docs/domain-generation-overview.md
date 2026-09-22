@@ -20,7 +20,7 @@ flowchart TD
 
     C["User input / wizard UI"] -->|domain, forcing, run window, overrides| B
 
-    B -->|"cstar blueprint run forge_blueprint.yaml<br/>(= python -m cstar_forge.run)"| D[ForgeExecutor]
+    B -->|"cstar blueprint run forge_blueprint.yaml<br/>(= cstar forge run)"| D[ForgeExecutor]
 
     D -->|model_post_init| E["Initialize<br/>Create Grid<br/>Init roms_marbl Blueprint (in memory)<br/>Load Default Settings<br/>."]
 

@@ -1,12 +1,12 @@
 """
-Tests for the source_data.py module.
+Tests for the source_datasets.py module.
 
 Tests cover:
 - DatasetHandler class
 - register_dataset decorator
 - map_source_to_dataset_key function
-- SourceData dataclass initialization and validation
-- SourceData methods (without actual downloads)
+- SourceDatasets dataclass initialization and validation
+- SourceDatasets methods (without actual downloads)
 - Constants and registry consistency
 """
 
@@ -17,8 +17,8 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from cstar_forge.forge import source_data
-from cstar_forge.forge.source_data import (
+from cstar_forge.forge import source_datasets
+from cstar_forge.forge.source_datasets import (
     DATASET_REGISTRY,
     GLOFAS_FILENAME,
     SOURCE_ALIAS,
@@ -29,7 +29,7 @@ from cstar_forge.forge.source_data import (
     UNIFIED_BGC_URL,
     UNIFIED_BGC_VERSION,
     DatasetHandler,
-    SourceData,
+    SourceDatasets,
     map_source_to_dataset_key,
     register_dataset,
 )
@@ -147,12 +147,12 @@ class TestMapSourceToDatasetKey:
 
 
 class TestSourceDataInitialization:
-    """Tests for SourceData dataclass initialization."""
+    """Tests for SourceDatasets dataclass initialization."""
 
     def test_source_data_basic_creation(self):
-        """Test creating SourceData with minimal arguments."""
+        """Test creating SourceDatasets with minimal arguments."""
         # Use UNIFIED_BGC which is in registry and doesn't require aliasing issues
-        sd = SourceData(datasets=["UNIFIED_BGC"])
+        sd = SourceDatasets(datasets=["UNIFIED_BGC"])
 
         assert "UNIFIED_BGC" in sd.datasets
         assert sd.clobber is False
@@ -164,16 +164,16 @@ class TestSourceDataInitialization:
         assert sd.paths == {}
 
     def test_source_data_with_clobber(self):
-        """Test creating SourceData with clobber=True."""
+        """Test creating SourceDatasets with clobber=True."""
         # Use UNIFIED_BGC which is in registry
-        sd = SourceData(datasets=["UNIFIED_BGC"], clobber=True)
+        sd = SourceDatasets(datasets=["UNIFIED_BGC"], clobber=True)
 
         assert sd.clobber is True
 
     def test_source_data_normalizes_dataset_names(self):
         """Test that dataset names are normalized through SOURCE_ALIAS."""
         # Test with UNIFIED which maps to UNIFIED_BGC
-        sd = SourceData(datasets=["unified", "TPXO"])
+        sd = SourceDatasets(datasets=["unified", "TPXO"])
 
         assert "UNIFIED_BGC" in sd.datasets
         assert "TPXO" in sd.datasets
@@ -181,14 +181,14 @@ class TestSourceDataInitialization:
     def test_source_data_unknown_dataset_raises_error(self):
         """Test that unknown datasets raise ValueError."""
         with pytest.raises(ValueError, match="Unknown dataset"):
-            SourceData(datasets=["UNKNOWN_DATASET"])
+            SourceDatasets(datasets=["UNKNOWN_DATASET"])
 
     def test_unstaged_datasets_do_not_raise(self):
         """Recognized-but-not-Forge-staged keys (ETOPO5 fetched by roms-tools; DAI
         streamed) must validate alongside real staged datasets — regression guard for
         the resolver-emitted `datasets` list (decision #2).
         """
-        sd = SourceData(
+        sd = SourceDatasets(
             datasets=["GLORYS_REGIONAL", "UNIFIED_BGC", "ERA5", "TPXO", "ETOPO5", "DAI"]
         )
         assert "ETOPO5" in sd.datasets and "DAI" in sd.datasets
@@ -197,7 +197,7 @@ class TestSourceDataInitialization:
         """prepare_all skips unstaged datasets rather than trying (and failing) to stage
         them — no handler lookup, no error.
         """
-        sd = SourceData(datasets=["ETOPO5", "DAI"])
+        sd = SourceDatasets(datasets=["ETOPO5", "DAI"])
         # Nothing stageable requested → prepare_all completes without touching a handler.
         sd.prepare_all(include_streamable=False)
         assert sd.paths == {}
@@ -207,18 +207,18 @@ class TestSourceDataInitialization:
         ``@register_dataset("SRTM15")`` handler, so construction is accepted (not rejected as
         an unknown dataset) and normalizes to the un-versioned key.
         """
-        sd = SourceData(datasets=["SRTM15"])
+        sd = SourceDatasets(datasets=["SRTM15"])
         assert "SRTM15" in sd.datasets
         assert sd.dataset_key_for_source("SRTM15") == "SRTM15"
 
     def test_source_data_with_optional_attributes(self):
-        """Test creating SourceData with optional attributes."""
+        """Test creating SourceDatasets with optional attributes."""
         mock_grid = MagicMock()
         start = datetime(2020, 1, 1)
         end = datetime(2020, 1, 31)
 
         # Use GLORYS_REGIONAL which requires these attributes
-        sd = SourceData(
+        sd = SourceDatasets(
             datasets=["GLORYS_REGIONAL"],
             grid=mock_grid,
             grid_name="test_grid",
@@ -233,11 +233,11 @@ class TestSourceDataInitialization:
 
 
 class TestSourceDataMethods:
-    """Tests for SourceData methods."""
+    """Tests for SourceDatasets methods."""
 
     def test_dataset_key_for_source(self):
         """Test dataset_key_for_source method."""
-        sd = SourceData(datasets=["UNIFIED_BGC"])
+        sd = SourceDatasets(datasets=["UNIFIED_BGC"])
 
         assert sd.dataset_key_for_source("GLORYS") == "GLORYS_REGIONAL"
         assert (
@@ -255,24 +255,24 @@ class TestSourceDataMethods:
 
         Uses a non-GLORYS name deliberately -- GLORYS-with-explicit-layout is the
         one case that intentionally always resolves live (see
-        SourceData.dataset_key_for_source's docstring).
+        SourceDatasets.dataset_key_for_source's docstring).
         """
         import cstar_forge.forge.source_registry as reg
 
         monkeypatch.setitem(reg.SOURCE_ALIAS, "UNIFIED", "WRONG_KEY")
 
         snap = {"UNIFIED": {"dataset_key": "UNIFIED_BGC", "streamable": False}}
-        sd = SourceData(datasets=["UNIFIED_BGC"], resolved_datasets=snap)
+        sd = SourceDatasets(datasets=["UNIFIED_BGC"], resolved_datasets=snap)
         assert sd.dataset_key_for_source("UNIFIED") == "UNIFIED_BGC"  # snapshot wins
         assert sd.streamable_for_source("UNIFIED") is False
 
-        sd2 = SourceData(datasets=["UNIFIED_BGC"])  # no snapshot -> live fallback
+        sd2 = SourceDatasets(datasets=["UNIFIED_BGC"])  # no snapshot -> live fallback
         assert sd2.dataset_key_for_source("UNIFIED") == "WRONG_KEY"
 
     def test_path_for_source_not_prepared(self):
         """Test path_for_source when dataset hasn't been prepared."""
         # Use UNIFIED_BGC which is in registry and not streamable
-        sd = SourceData(datasets=["UNIFIED_BGC"])
+        sd = SourceDatasets(datasets=["UNIFIED_BGC"])
 
         # Should raise KeyError for non-streamable sources
         with pytest.raises(KeyError):
@@ -280,10 +280,10 @@ class TestSourceDataMethods:
 
     def test_path_for_source_streamable(self):
         """Test path_for_source for streamable sources returns None."""
-        # ERA5 is streamable but not in registry, so we can't create SourceData with it
+        # ERA5 is streamable but not in registry, so we can't create SourceDatasets with it
         # Instead, test the behavior by checking the method logic
         # For streamable sources, path_for_source returns None if not in paths
-        sd = SourceData(datasets=["UNIFIED_BGC"])
+        sd = SourceDatasets(datasets=["UNIFIED_BGC"])
 
         # Manually test the streamable logic by checking DAI (which is streamable)
         # But DAI might not be in registry either, so let's just test the method exists
@@ -293,7 +293,7 @@ class TestSourceDataMethods:
     def test_path_for_source_after_preparation(self):
         """Test path_for_source after dataset is prepared (mocked)."""
         # Use UNIFIED_BGC which maps correctly
-        sd = SourceData(datasets=["UNIFIED_BGC"])
+        sd = SourceDatasets(datasets=["UNIFIED_BGC"])
         test_path = Path("/test/unified_bgc.nc")
         # Use the registry key, not the alias
         sd.paths["UNIFIED_BGC"] = test_path
@@ -304,7 +304,7 @@ class TestSourceDataMethods:
     def test_prepare_all_skips_streamable_by_default(self):
         """Test that prepare_all skips streamable sources by default."""
         # Use UNIFIED_BGC and TPXO which are not streamable
-        sd = SourceData(
+        sd = SourceDatasets(
             datasets=["UNIFIED_BGC", "TPXO"], source_data_dir=Path("/tmp/test_srcdata")
         )
 
@@ -333,7 +333,7 @@ class TestSourceDataMethods:
     def test_prepare_all_includes_streamable(self):
         """Test that prepare_all includes streamable sources when requested."""
         # Use UNIFIED_BGC which is in registry
-        sd = SourceData(
+        sd = SourceDatasets(
             datasets=["UNIFIED_BGC"], source_data_dir=Path("/tmp/test_srcdata")
         )
 
@@ -349,7 +349,7 @@ class TestSourceDataMethods:
 
     def test_prepare_all_validates_required_attributes(self):
         """Test that prepare_all validates required attributes."""
-        sd = SourceData(datasets=["GLORYS_REGIONAL"])
+        sd = SourceDatasets(datasets=["GLORYS_REGIONAL"])
         # Don't provide required attributes
 
         with pytest.raises(ValueError, match="requires attributes"):
@@ -374,7 +374,7 @@ class TestShareWithGroup:
         f.chmod(0o600)  # what NamedTemporaryFile leaves behind
         root.chmod(0o700)
 
-        sd = SourceData(datasets=["SRTM15"], source_data_dir=root)
+        sd = SourceDatasets(datasets=["SRTM15"], source_data_dir=root)
         sd.paths["SRTM15"] = f
         sd.share_with_group()
 
@@ -402,7 +402,7 @@ class TestShareWithGroup:
             f.write_text("x")
             f.chmod(0o600)
 
-        sd = SourceData(datasets=["GLORYS_REGIONAL"], source_data_dir=root)
+        sd = SourceDatasets(datasets=["GLORYS_REGIONAL"], source_data_dir=root)
         sd.paths = {
             "GLORYS_REGIONAL": [glorys / "day1.nc", glorys / "day2.nc"],
             "TPXO": {"grid": tpxo / "grid.nc"},
@@ -421,7 +421,7 @@ class TestShareWithGroup:
         f.parent.mkdir()
         f.write_text("x")
 
-        sd = SourceData(datasets=["UNIFIED_BGC"], source_data_dir=root)
+        sd = SourceDatasets(datasets=["UNIFIED_BGC"], source_data_dir=root)
         sd.paths = {
             "UNIFIED_BGC": f,
             "GONE": root / "GONE" / "missing.nc",  # stat() raises OSError
@@ -446,7 +446,7 @@ class TestShareWithGroup:
         handler.requires = []
         handler.func = fake_handler
 
-        sd = SourceData(datasets=["UNIFIED_BGC"], source_data_dir=root)
+        sd = SourceDatasets(datasets=["UNIFIED_BGC"], source_data_dir=root)
         with patch.dict(DATASET_REGISTRY, {"UNIFIED_BGC": handler}):
             sd.prepare_all()
 
@@ -471,7 +471,7 @@ class TestShareWithGroup:
         tpxo.requires = []
         tpxo.func = MagicMock(side_effect=FileNotFoundError("no TPXO"))
 
-        sd = SourceData(datasets=["UNIFIED_BGC", "TPXO"], source_data_dir=root)
+        sd = SourceDatasets(datasets=["UNIFIED_BGC", "TPXO"], source_data_dir=root)
         with patch.dict(DATASET_REGISTRY, {"UNIFIED_BGC": unified, "TPXO": tpxo}):
             with pytest.raises(FileNotFoundError):
                 sd.prepare_all()
@@ -543,7 +543,9 @@ class TestPrepareUnifiedBgc:
         The installed roms-tools may predate v2.1 support, in which case the handler
         refuses to stage; that guard has its own tests below.
         """
-        monkeypatch.setattr(source_data, "_roms_tools_reads_unified_v2_1", lambda: True)
+        monkeypatch.setattr(
+            source_datasets, "_roms_tools_reads_unified_v2_1", lambda: True
+        )
 
     def test_downloads_to_versioned_filename(self, tmp_path, monkeypatch):
         """A missing file is downloaded from UNIFIED_BGC_URL to the versioned path."""
@@ -554,9 +556,9 @@ class TestPrepareUnifiedBgc:
             Path(out).touch()
             return out
 
-        monkeypatch.setattr(source_data.gdown, "download", fake_download)
+        monkeypatch.setattr(source_datasets.gdown, "download", fake_download)
 
-        sd = SourceData(datasets=["UNIFIED_BGC"], source_data_dir=tmp_path)
+        sd = SourceDatasets(datasets=["UNIFIED_BGC"], source_data_dir=tmp_path)
         sd.prepare_all()
 
         expected = tmp_path / "UNIFIED_BGC" / UNIFIED_BGC_FILENAME
@@ -569,13 +571,13 @@ class TestPrepareUnifiedBgc:
         def fail_download(*args, **kwargs):
             raise AssertionError("gdown.download should not be called")
 
-        monkeypatch.setattr(source_data.gdown, "download", fail_download)
+        monkeypatch.setattr(source_datasets.gdown, "download", fail_download)
 
         staged = tmp_path / "UNIFIED_BGC" / UNIFIED_BGC_FILENAME
         staged.parent.mkdir(parents=True)
         staged.touch()
 
-        sd = SourceData(datasets=["UNIFIED_BGC"], source_data_dir=tmp_path)
+        sd = SourceDatasets(datasets=["UNIFIED_BGC"], source_data_dir=tmp_path)
         sd.prepare_all()
 
         assert sd.paths["UNIFIED_BGC"] == staged
@@ -589,13 +591,13 @@ class TestPrepareUnifiedBgc:
             Path(out).touch()
             return out
 
-        monkeypatch.setattr(source_data.gdown, "download", fake_download)
+        monkeypatch.setattr(source_datasets.gdown, "download", fake_download)
 
         dataset_dir = tmp_path / "UNIFIED_BGC"
         dataset_dir.mkdir(parents=True)
         (dataset_dir / "BGCdataset.nc").touch()
 
-        sd = SourceData(datasets=["UNIFIED_BGC"], source_data_dir=tmp_path)
+        sd = SourceDatasets(datasets=["UNIFIED_BGC"], source_data_dir=tmp_path)
         sd.prepare_all()
 
         assert downloaded == [str(dataset_dir / UNIFIED_BGC_FILENAME)]
@@ -603,7 +605,7 @@ class TestPrepareUnifiedBgc:
     def test_stale_unversioned_file_is_reported(self, tmp_path, monkeypatch, capsys):
         """The orphaned pre-v2.1 file is called out so it can be reclaimed."""
         monkeypatch.setattr(
-            source_data.gdown,
+            source_datasets.gdown,
             "download",
             lambda url, out, quiet=False: Path(out).touch(),
         )
@@ -612,7 +614,7 @@ class TestPrepareUnifiedBgc:
         dataset_dir.mkdir(parents=True)
         (dataset_dir / "BGCdataset.nc").touch()
 
-        SourceData(datasets=["UNIFIED_BGC"], source_data_dir=tmp_path).prepare_all()
+        SourceDatasets(datasets=["UNIFIED_BGC"], source_data_dir=tmp_path).prepare_all()
 
         assert "no longer" in capsys.readouterr().out
 
@@ -632,12 +634,12 @@ class TestUnifiedBgcRomsToolsCapability:
         def fail_download(*args, **kwargs):
             raise AssertionError("must not download for an unusable roms-tools")
 
-        monkeypatch.setattr(source_data.gdown, "download", fail_download)
+        monkeypatch.setattr(source_datasets.gdown, "download", fail_download)
         monkeypatch.setattr(
-            source_data, "_roms_tools_reads_unified_v2_1", lambda: False
+            source_datasets, "_roms_tools_reads_unified_v2_1", lambda: False
         )
 
-        sd = SourceData(datasets=["UNIFIED_BGC"], source_data_dir=tmp_path)
+        sd = SourceDatasets(datasets=["UNIFIED_BGC"], source_data_dir=tmp_path)
         with pytest.raises(RuntimeError, match="predates v2.1"):
             sd.prepare_all()
 
@@ -657,7 +659,7 @@ class TestUnifiedBgcRomsToolsCapability:
             monkeypatch.setattr(
                 lld, "UnifiedBGCDataset", FakeUnifiedBGCDataset, raising=True
             )
-            return source_data._roms_tools_reads_unified_v2_1()
+            return source_datasets._roms_tools_reads_unified_v2_1()
 
         assert _probe_with(
             {"longitude": "longitude", "latitude": "latitude", "depth": "depth"}
@@ -707,7 +709,7 @@ class TestPrepareGlofas:
 
     def test_missing_file_raises_with_instructions(self, tmp_path):
         """Missing GloFAS file raises FileNotFoundError pointing at the expected path."""
-        sd = SourceData(datasets=["GLOFAS"], source_data_dir=tmp_path)
+        sd = SourceDatasets(datasets=["GLOFAS"], source_data_dir=tmp_path)
 
         with pytest.raises(FileNotFoundError, match="GloFAS"):
             sd.prepare_all()
@@ -719,14 +721,14 @@ class TestPrepareGlofas:
         glofas_file = glofas_dir / GLOFAS_FILENAME
         glofas_file.touch()
 
-        sd = SourceData(datasets=["GLOFAS"], source_data_dir=tmp_path)
+        sd = SourceDatasets(datasets=["GLOFAS"], source_data_dir=tmp_path)
         sd.prepare_all()
 
         assert sd.paths["GLOFAS"] == glofas_file
 
     def test_dataset_key_for_source(self):
         """Logical name 'GLOFAS' resolves to the 'GLOFAS' dataset key."""
-        sd = SourceData(datasets=["GLOFAS"])
+        sd = SourceDatasets(datasets=["GLOFAS"])
         assert sd.dataset_key_for_source("GLOFAS") == "GLOFAS"
 
 
@@ -735,7 +737,7 @@ class TestPrepareEmod:
 
     def test_missing_dir_raises_with_instructions(self, tmp_path):
         """Missing EMOD directory raises FileNotFoundError pointing at the expected path."""
-        sd = SourceData(datasets=["EMOD"], source_data_dir=tmp_path)
+        sd = SourceDatasets(datasets=["EMOD"], source_data_dir=tmp_path)
 
         with pytest.raises(FileNotFoundError, match="EMOD"):
             sd.prepare_all()
@@ -743,7 +745,7 @@ class TestPrepareEmod:
     def test_empty_dir_raises_with_instructions(self, tmp_path):
         """EMOD directory present but with no .nc file still raises."""
         (tmp_path / "EMOD").mkdir(parents=True)
-        sd = SourceData(datasets=["EMOD"], source_data_dir=tmp_path)
+        sd = SourceDatasets(datasets=["EMOD"], source_data_dir=tmp_path)
 
         with pytest.raises(FileNotFoundError, match="EMOD"):
             sd.prepare_all()
@@ -755,14 +757,14 @@ class TestPrepareEmod:
         emod_file = emod_dir / "emodnet_bathymetry.nc"
         emod_file.touch()
 
-        sd = SourceData(datasets=["EMOD"], source_data_dir=tmp_path)
+        sd = SourceDatasets(datasets=["EMOD"], source_data_dir=tmp_path)
         sd.prepare_all()
 
         assert sd.paths["EMOD"] == emod_file
 
     def test_dataset_key_for_source(self):
         """Logical name 'EMOD' resolves to the 'EMOD' dataset key."""
-        sd = SourceData(datasets=["EMOD"])
+        sd = SourceDatasets(datasets=["EMOD"])
         assert sd.dataset_key_for_source("EMOD") == "EMOD"
 
 
@@ -771,7 +773,7 @@ class TestPrepareRivr2o:
 
     def test_missing_dir_raises_with_instructions(self, tmp_path):
         """Missing RIVR2O directory raises FileNotFoundError pointing at the expected path."""
-        sd = SourceData(datasets=["RIVR2O"], source_data_dir=tmp_path)
+        sd = SourceDatasets(datasets=["RIVR2O"], source_data_dir=tmp_path)
 
         with pytest.raises(FileNotFoundError, match="RIVR2O"):
             sd.prepare_all()
@@ -783,14 +785,14 @@ class TestPrepareRivr2o:
         (rivr2o_dir / "rivr2o_riverinputs_2000.nc").touch()
         (rivr2o_dir / "rivr2o_riverinputs_2001.nc").touch()
 
-        sd = SourceData(datasets=["RIVR2O"], source_data_dir=tmp_path)
+        sd = SourceDatasets(datasets=["RIVR2O"], source_data_dir=tmp_path)
         sd.prepare_all()
 
         assert sd.paths["RIVR2O"] == rivr2o_dir / "*.nc"
 
     def test_dataset_key_for_source(self):
         """Logical name 'RIVR2O' resolves to the 'RIVR2O' dataset key."""
-        sd = SourceData(datasets=["RIVR2O"])
+        sd = SourceDatasets(datasets=["RIVR2O"])
         assert sd.dataset_key_for_source("RIVR2O") == "RIVR2O"
 
 
@@ -805,7 +807,7 @@ class TestPrepareGlodap:
         """Missing GLODAP directory raises FileNotFoundError naming every
         required per-variable file.
         """
-        sd = SourceData(datasets=["GLODAP"], source_data_dir=tmp_path)
+        sd = SourceDatasets(datasets=["GLODAP"], source_data_dir=tmp_path)
 
         with pytest.raises(FileNotFoundError) as excinfo:
             sd.prepare_all()
@@ -822,7 +824,7 @@ class TestPrepareGlodap:
         glodap_dir.mkdir(parents=True)
         (glodap_dir / "GLODAPv2.2016b.TAlk.nc").touch()
 
-        sd = SourceData(datasets=["GLODAP"], source_data_dir=tmp_path)
+        sd = SourceDatasets(datasets=["GLODAP"], source_data_dir=tmp_path)
         with pytest.raises(FileNotFoundError) as excinfo:
             sd.prepare_all()
         msg = str(excinfo.value)
@@ -841,7 +843,7 @@ class TestPrepareGlodap:
         for var in self._REQUIRED:
             (glodap_dir / f"GLODAPv2.2016b.{var}.nc").touch()
 
-        sd = SourceData(datasets=["GLODAP"], source_data_dir=tmp_path)
+        sd = SourceDatasets(datasets=["GLODAP"], source_data_dir=tmp_path)
         with caplog.at_level("WARNING"):
             sd.prepare_all()
 
@@ -857,7 +859,7 @@ class TestPrepareGlodap:
         for var in (*self._REQUIRED, "temperature", "salinity"):
             (glodap_dir / f"GLODAPv2.2016b.{var}.nc").touch()
 
-        sd = SourceData(datasets=["GLODAP"], source_data_dir=tmp_path)
+        sd = SourceDatasets(datasets=["GLODAP"], source_data_dir=tmp_path)
         with caplog.at_level("WARNING"):
             sd.prepare_all()
 
@@ -866,7 +868,7 @@ class TestPrepareGlodap:
 
     def test_dataset_key_for_source(self):
         """Logical name 'GLODAP' resolves to the 'GLODAP' dataset key."""
-        sd = SourceData(datasets=["GLODAP"])
+        sd = SourceDatasets(datasets=["GLODAP"])
         assert sd.dataset_key_for_source("GLODAP") == "GLODAP"
 
 
@@ -880,11 +882,11 @@ class TestConstantsRiverBgcSource:
     """
 
     def test_streamable(self):
-        sd = SourceData(datasets=["DAI"])
+        sd = SourceDatasets(datasets=["DAI"])
         assert sd.streamable_for_source("CONSTANTS") is True
 
     def test_path_for_source_returns_none_without_raising(self):
-        sd = SourceData(datasets=["DAI"])
+        sd = SourceDatasets(datasets=["DAI"])
         assert sd.path_for_source("CONSTANTS") is None
 
     def test_has_no_staging_handler(self):
@@ -895,11 +897,11 @@ class TestConstantsRiverBgcSource:
 
 
 class TestSourceDataHelperMethods:
-    """Tests for SourceData helper methods."""
+    """Tests for SourceDatasets helper methods."""
 
     def test_construct_glorys_path_regional(self, tmp_path):
         """Test _construct_glorys_path for regional data."""
-        sd = SourceData(
+        sd = SourceDatasets(
             datasets=["GLORYS_REGIONAL"],
             grid_name="test_grid",
             source_data_dir=tmp_path / "source_data",
@@ -915,7 +917,7 @@ class TestSourceDataHelperMethods:
 
     def test_construct_glorys_path_global(self, tmp_path):
         """Test _construct_glorys_path for global data."""
-        sd = SourceData(
+        sd = SourceDatasets(
             datasets=["GLORYS_GLOBAL"], source_data_dir=tmp_path / "source_data"
         )
         date = datetime(2020, 1, 15)
@@ -937,7 +939,7 @@ class TestWOABGCHandler:
     """
 
     def test_woa_bgc_key_reconciles_to_handler(self):
-        sd = SourceData(datasets=["WOA_BGC"])
+        sd = SourceDatasets(datasets=["WOA_BGC"])
         assert "WOA_BGC" in sd.datasets
         assert sd.dataset_key_for_source("WOA_BGC") == "WOA_BGC"
         assert "WOA_BGC" in DATASET_REGISTRY
@@ -984,7 +986,7 @@ class TestWOABGCHandler:
 
     def test_handler_stages_into_the_shared_woa_directory(self, tmp_path):
         """Both WOA sources live in source_data_dir/"WOA"; only the files differ."""
-        sd = SourceData(datasets=["WOA_BGC"], source_data_dir=tmp_path)
+        sd = SourceDatasets(datasets=["WOA_BGC"], source_data_dir=tmp_path)
         woa_dir = tmp_path / "WOA"
         woa_dir.mkdir()
         # Pre-create every expected file so the handler short-circuits the download.
@@ -998,7 +1000,7 @@ class TestWOABGCHandler:
             for period in WOA23_PERIODS:
                 (woa_dir / f"woa23_{decade}_{code}{period:02d}_{WOA23_GRID}.nc").touch()
 
-        with patch.object(source_data, "urlopen") as fake:
+        with patch.object(source_datasets, "urlopen") as fake:
             sd.prepare_all()
         fake.assert_not_called()
         result = sd.paths["WOA_BGC"]
@@ -1008,7 +1010,7 @@ class TestWOABGCHandler:
 
     def test_handler_downloads_only_the_missing_files(self, tmp_path):
         """Staging must be resumable: present files are skipped, absent ones fetched."""
-        sd = SourceData(datasets=["WOA_BGC"], source_data_dir=tmp_path)
+        sd = SourceDatasets(datasets=["WOA_BGC"], source_data_dir=tmp_path)
         woa_dir = tmp_path / "WOA"
         woa_dir.mkdir()
         from cstar_forge.forge.source_registry import (
@@ -1026,8 +1028,8 @@ class TestWOABGCHandler:
             (woa_dir / name).touch()
 
         with (
-            patch.object(source_data, "urlopen") as fake_urlopen,
-            patch.object(source_data.shutil, "copyfileobj") as fake_copy,
+            patch.object(source_datasets, "urlopen") as fake_urlopen,
+            patch.object(source_datasets.shutil, "copyfileobj") as fake_copy,
         ):
             fake_urlopen.return_value.__enter__.return_value = MagicMock()
             sd.prepare_all()
@@ -1041,7 +1043,7 @@ class TestWOABGCHandler:
         salinity ("_01") into the same directory, and the restoring glob must not
         match it -- otherwise matches[0] can silently pick the wrong resolution.
         """
-        sd = SourceData(datasets=["WOA"], source_data_dir=tmp_path)
+        sd = SourceDatasets(datasets=["WOA"], source_data_dir=tmp_path)
         woa_dir = tmp_path / "WOA"
         woa_dir.mkdir()
         for month in range(1, 13):

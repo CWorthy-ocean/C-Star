@@ -24,7 +24,7 @@ reference and hand its path through the existing ``source["path"]`` plumbing
 
 This remains an *interim, experimental* module (not something roms-tools documents or
 guarantees) rather than a permanent feature, pending review from the roms-tools
-maintainers. It is nonetheless *on by default* (``python -m cstar_forge.run``;
+maintainers. It is nonetheless *on by default* (``cstar forge run``;
 disable with ``--no-subchunk``), so its dependencies are ordinary runtime
 dependencies of forge, not optional extras.
 
@@ -43,11 +43,13 @@ from __future__ import annotations
 
 import glob
 import logging
-from datetime import datetime
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import xarray as xr
+
+if TYPE_CHECKING:
+    from datetime import datetime
 
 logger = logging.getLogger(__name__)
 
@@ -335,4 +337,7 @@ def build_ref_for_files(
         data_vars_4d=DEFAULT_DATA_VARS_4D,
         overwrite=overwrite,
     )
+    # build_subchunk_refs only returns a dict for output_format="in-memory"; with
+    # ".json" (hardcoded above) it always returns the output path as a str.
+    assert isinstance(out_path, str)
     return Path(out_path)

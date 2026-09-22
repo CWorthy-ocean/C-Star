@@ -467,7 +467,9 @@ class TestForgeExecutorModelPostInit:
         host = HostPaths(working_dir=tmp, source_data_cache=tmp, system="test")
         staged = tmp / "SRTM15" / "SRTM15_V2.7.nc"
         # Mock the staging download: prepare_all() is a no-op, path_for_source returns the path.
-        with patch("cstar_forge.forge.executor.source_data.SourceData") as mock_sd:
+        with patch(
+            "cstar_forge.forge.executor.source_datasets.SourceDatasets"
+        ) as mock_sd:
             inst = mock_sd.return_value
             inst.prepare_all.return_value = inst
             inst.path_for_source.return_value = staged
@@ -483,7 +485,7 @@ class TestForgeExecutorModelPostInit:
         self, minimal_cstar_spec_builder_args, mock_grid
     ):
         """An explicit ``topography_path`` is injected verbatim with no staging call —
-        it overrides the derive-from-SourceData behavior for any source name.
+        it overrides the derive-from-SourceDatasets behavior for any source name.
         """
         args = minimal_cstar_spec_builder_args
         cfg = build_forge_blueprint(
@@ -508,7 +510,9 @@ class TestForgeExecutorModelPostInit:
         tmp = Path(tempfile.mkdtemp(prefix="forge-test-topopath-"))
         host = HostPaths(working_dir=tmp, source_data_cache=tmp, system="test")
         # Staging must NOT be invoked when an explicit path is given.
-        with patch("cstar_forge.forge.executor.source_data.SourceData") as mock_sd:
+        with patch(
+            "cstar_forge.forge.executor.source_datasets.SourceDatasets"
+        ) as mock_sd:
             builder = ForgeExecutor.from_forge_blueprint(cfg, host=host)
             mock_sd.assert_not_called()
 
@@ -728,7 +732,9 @@ class TestNestedGridTopography:
                 "cstar_forge.forge.executor.rt.align_grids",
                 return_value=_create_grid_mock(),
             ),
-            patch("cstar_forge.forge.executor.source_data.SourceData") as mock_sd,
+            patch(
+                "cstar_forge.forge.executor.source_datasets.SourceDatasets"
+            ) as mock_sd,
         ):
             inst = mock_sd.return_value
             inst.prepare_all.return_value = inst
@@ -1087,9 +1093,9 @@ class TestForgeExecutorEnsureSourceData:
     def test_ensure_source_data_calls_source_data_prepare_all(
         self, minimal_cstar_spec_builder_args
     ):
-        """Test that ensure_source_data calls SourceData.prepare_all."""
+        """Test that ensure_source_data calls SourceDatasets.prepare_all."""
         with patch(
-            "cstar_forge.forge.executor.source_data.SourceData"
+            "cstar_forge.forge.executor.source_datasets.SourceDatasets"
         ) as mock_source_data_class:
             mock_source_data_instance = MagicMock()
             mock_source_data_class.return_value = mock_source_data_instance
@@ -2610,7 +2616,7 @@ class TestGoldenNamelist:
 
     @staticmethod
     def _mock_source_data(tmp_path):
-        """A SourceData stand-in covering every source name the glorys-era5-unified
+        """A SourceDatasets stand-in covering every source name the glorys-era5-unified
         ForcingSpec references (GLORYS/UNIFIED/ERA5/TPXO/DAI/MBL_co2/WOA); mirrors
         ``sample_source_data`` in tests/test_input_data.py.
         """
@@ -2706,7 +2712,7 @@ class TestGoldenNamelist:
             patch("cstar_forge.forge.input_data.rt.RiverForcing") as mock_river,
             patch("cstar_forge.forge.input_data.rt.CDRForcing") as mock_cdr,
             patch(
-                "cstar_forge.forge.input_data.source_data.STREAMABLE_SOURCES",
+                "cstar_forge.forge.input_data.source_datasets.STREAMABLE_SOURCES",
                 {"ERA5"},
             ),
         ):
@@ -3029,7 +3035,7 @@ class TestChildDomainNoInitialConditionsValidatesAtEmit:
             patch("cstar_forge.forge.input_data.rt.TidalForcing") as mock_tidal,
             patch("cstar_forge.forge.input_data.rt.RiverForcing") as mock_river,
             patch(
-                "cstar_forge.forge.input_data.source_data.STREAMABLE_SOURCES",
+                "cstar_forge.forge.input_data.source_datasets.STREAMABLE_SOURCES",
                 {"ERA5"},
             ),
         ):
@@ -3185,7 +3191,7 @@ class TestForgeRunnerEndToEnd:
             patch("cstar_forge.forge.input_data.rt.RiverForcing") as mock_river,
             patch("cstar_forge.forge.input_data.rt.CDRForcing") as mock_cdr,
             patch(
-                "cstar_forge.forge.input_data.source_data.STREAMABLE_SOURCES",
+                "cstar_forge.forge.input_data.source_datasets.STREAMABLE_SOURCES",
                 {"ERA5"},
             ),
             patch("cstar_forge.forge.executor.render_roms_settings") as mock_render,
@@ -3441,7 +3447,7 @@ class TestOnlyInputsReuseIsIdempotent:
             patch("cstar_forge.forge.input_data.rt.RiverForcing") as mock_river,
             patch("cstar_forge.forge.input_data.rt.CDRForcing") as mock_cdr,
             patch(
-                "cstar_forge.forge.input_data.source_data.STREAMABLE_SOURCES",
+                "cstar_forge.forge.input_data.source_datasets.STREAMABLE_SOURCES",
                 {"ERA5"},
             ),
         ):

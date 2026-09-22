@@ -56,4 +56,4 @@ A few optional datasets follow the same "you download, Forge verifies"
 pattern as TPXO — for example WOA climatology, GLOFAS river discharge, and
 EMOD topography. Each handler checks a documented location under
 `<source_data>/` and raises with instructions if files are missing; see the
-[SourceData documentation](source-data-intro.md) for the full inventory.
+[SourceDatasets documentation](source-data-intro.md) for the full inventory.

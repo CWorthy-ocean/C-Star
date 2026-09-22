@@ -2,7 +2,7 @@
 
 Forge hands its item configs to roms-tools, which serializes objects with its own
 ``NoAliasDumper(yaml.SafeDumper)``. ``SafeDumper`` cannot represent a Forge enum
-(``class X(str, Enum)``) even though it subclasses ``str`` — it fails with
+(``class X(StrEnum)``) even though it subclasses ``str`` — it fails with
 ``('cannot represent an object', <SurfaceType.PHYSICS: 'physics'>)``.
 
 The primary defense is coercing enums to their values at the Forge/roms-tools boundary
@@ -23,7 +23,7 @@ import enum
 import yaml
 
 
-def _represent_enum(dumper: yaml.Dumper, data: enum.Enum):
+def _represent_enum(dumper: yaml.SafeDumper, data: enum.Enum) -> yaml.Node:
     """Represent any Enum as its underlying value (str/int/…)."""
     return dumper.represent_data(data.value)
 

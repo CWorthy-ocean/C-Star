@@ -1,5 +1,6 @@
 """Tests for the `cstar forge` CLI sub-app (cstar_forge/cli.py)."""
 
+import re
 from unittest.mock import patch
 
 import pytest
@@ -9,28 +10,104 @@ from cstar_forge import cli
 
 runner = CliRunner()
 
+# rich colours the help when the environment forces colour (GitHub Actions does),
+# and its option highlighter emits style changes inside a flag name, so assertions
+# on help text compare against the escape-stripped output.
+_ANSI = re.compile(r"\x1b\[[0-9;]*m")
 
-class TestRunPassthrough:
-    def test_args_are_passed_through_verbatim(self):
-        argv = ["some_blueprint.yaml", "--clobber", "--only-inputs", "grid", "tidal"]
-        with patch("cstar_forge.run.main", return_value=0) as mock_main:
-            result = runner.invoke(cli.app, ["run", *argv])
+
+def _plain(text: str) -> str:
+    return _ANSI.sub("", text)
+
+
+class TestRun:
+    def test_help_lists_every_option(self):
+        # Wide terminal: rich's default 80-column help renderer truncates long
+        # flag names (e.g. "--serialize-dask-write" -> "--serialize-dask-wr…").
+        result = runner.invoke(
+            cli.app, ["run", "--help"], env={"COLUMNS": "250", "LINES": "50"}
+        )
         assert result.exit_code == 0
-        mock_main.assert_called_once_with(argv, prog="cstar forge run")
+        output = _plain(result.output)
+        for option in (
+            "--no-data",
+            "--no-generate",
+            "--no-configure",
+            "--clobber",
+            "--no-dask",
+            "--dask-num-workers",
+            "--serialize-dask-write",
+            "--no-serialize-dask-write",
+            "--subchunk",
+            "--no-subchunk",
+            "--only-inputs",
+            "--host-only",
+            "--verbose",
+            "--working-dir",
+            "--dask",
+            "--dask-workers",
+            "--dask-threads-per-worker",
+            "--dask-memory-limit",
+            "--dask-processes",
+            "--no-dask-processes",
+            "--dask-dashboard-address",
+        ):
+            assert option in output, option
+        assert "python -m cstar_forge.run" not in output
+
+    def test_options_map_to_run_blueprint_kwargs(self):
+        with patch(
+            "cstar_forge.run.run_blueprint", return_value=0
+        ) as mock_run_blueprint:
+            result = runner.invoke(
+                cli.app,
+                [
+                    "run",
+                    "bp.yaml",
+                    "--clobber",
+                    "--only-inputs",
+                    "grid,surface",
+                    "--only-inputs",
+                    "tidal",
+                    "--dask-num-workers",
+                    "4",
+                    "--no-serialize-dask-write",
+                ],
+            )
+        assert result.exit_code == 0, result.output
+        kwargs = mock_run_blueprint.call_args.kwargs
+        assert kwargs["forge_blueprint"] == "bp.yaml"
+        assert kwargs["clobber"] is True
+        assert kwargs["only_inputs"] == ["grid", "surface", "tidal"]
+        assert kwargs["dask_num_workers"] == 4
+        assert kwargs["serialize_dask_write"] is False
+        assert kwargs["subchunk"] is True
+        assert kwargs["no_data"] is False
+        assert kwargs["no_generate"] is False
+        assert kwargs["no_configure"] is False
+        assert kwargs["no_dask"] is False
+        assert kwargs["host_only"] is False
+        assert kwargs["verbose"] is False
+        assert kwargs["working_dir"] is None
+        assert kwargs["dask"] is False
+        assert kwargs["dask_workers"] is None
+        assert kwargs["dask_threads_per_worker"] is None
+        assert kwargs["dask_memory_limit"] is None
+        assert kwargs["dask_processes"] is None
+        assert kwargs["dask_dashboard_address"] is None
+
+    def test_no_only_inputs_passes_none(self):
+        with patch(
+            "cstar_forge.run.run_blueprint", return_value=0
+        ) as mock_run_blueprint:
+            result = runner.invoke(cli.app, ["run", "bp.yaml"])
+        assert result.exit_code == 0, result.output
+        assert mock_run_blueprint.call_args.kwargs["only_inputs"] is None
 
     def test_exit_code_is_propagated(self):
-        with patch("cstar_forge.run.main", return_value=3):
+        with patch("cstar_forge.run.run_blueprint", return_value=3):
             result = runner.invoke(cli.app, ["run", "bp.yaml"])
         assert result.exit_code == 3
-
-    def test_help_flag_reaches_argparse_not_typer(self):
-        # --help must reach the executor's argparse (which lists the real
-        # options and SystemExits), not be swallowed by typer's own help.
-        result = runner.invoke(cli.app, ["run", "--help"])
-        assert "--only-inputs" in result.output
-        # ...and the usage line names the command the user actually typed.
-        assert "cstar forge run" in result.output
-        assert "python -m cstar_forge.run" not in result.output
 
 
 class TestWizard:
@@ -229,7 +306,7 @@ class TestImportCost:
         code = (
             "import sys, cstar_forge.cli; "
             "heavy = sorted(m for m in ('roms_tools', 'xarray', 'dask', "
-            "'copernicusmarine', 'cstar_forge.forge.source_data', "
+            "'copernicusmarine', 'cstar_forge.forge.source_datasets', "
             "'cstar_forge.forge.executor') if m in sys.modules); "
             "print(','.join(heavy))"
         )

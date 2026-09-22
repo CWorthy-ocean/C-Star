@@ -14,11 +14,10 @@ import os
 import re
 import subprocess
 import warnings
-from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any, TypeVar
 
 import cstar.applications.roms_marbl.models as cstar_models
 import dask
@@ -30,12 +29,15 @@ from cstar.orchestration.models import Resource
 from pydantic import BaseModel, ConfigDict, Field
 from threadpoolctl import threadpool_limits
 
-from cstar_forge.forge import source_data
+from cstar_forge.forge import source_datasets
 from cstar_forge.forge.forge_blueprint import OpenBoundaries, UserProvidedFile
 from cstar_forge.forge.source_registry import ROMS_TOOLS_SOURCE_NAME
 from cstar_forge.forge.user_files import stage_user_netcdf, verify_user_file
+from cstar_forge.forge.util import mem_log
 from cstar_forge.forge.xarray_lockfix import apply_combinedlock_leak_fix
-from cstar_forge.utils import mem_log
+
+if TYPE_CHECKING:
+    from collections.abc import Callable, Iterable
 
 log = logging.getLogger(__name__)
 
@@ -129,7 +131,7 @@ def filter_paths_by_time_window(
     """
     Subset per-day source files to those whose filename date falls in [start, end].
 
-    Daily-staged sources (e.g. GLORYS, see ``SourceData._construct_glorys_path``)
+    Daily-staged sources (e.g. GLORYS, see ``SourceDatasets._construct_glorys_path``)
     encode the date as a trailing ``YYYYMMDD`` in the stem. Dates are compared at
     day resolution, inclusive on both ends. If any filename has no parseable date,
     or the filter would leave nothing, the original list is returned unchanged —
@@ -355,6 +357,25 @@ def register_input(name: str, order: int, label: str | None = None):
     return decorator
 
 
+_T = TypeVar("_T")
+
+
+def _require_element(value: _T | None, field_name: str) -> _T:
+    """Narrow a ``roms_marbl_blueprint_elements`` field to non-``None``.
+
+    ``RomsMarblInputData.__post_init__`` creates the placeholder for each field
+    (``grid``/``initial_conditions``/``cdr_forcing``/``forcing``) exactly when a
+    generator that fills it is scheduled in ``input_list``; the only callers are
+    those generators, so the field is always set by the time they run.
+    """
+    if value is None:
+        raise ValueError(
+            f"roms_marbl_blueprint_elements.{field_name} was not initialized before "
+            "generation; its input step must be scheduled in input_list."
+        )
+    return value
+
+
 @dataclass
 class RomsMarblInputData(InputData):
     """
@@ -373,7 +394,7 @@ class RomsMarblInputData(InputData):
 
     grid: rt.Grid
     boundaries: OpenBoundaries
-    source_data: source_data.SourceData
+    source_data: source_datasets.SourceDatasets
     roms_marbl_blueprint_dir: Path
     partitioning: cstar_models.PartitioningParameterSet
     cdr_mode: str = "none"
@@ -824,9 +845,16 @@ class RomsMarblInputData(InputData):
         # sched_getaffinity respects cgroup/cpuset/taskset restrictions (Slurm
         # allocations, containers); os.cpu_count() reports the whole node and
         # would oversubscribe a restricted allocation.
-        try:
-            cpu_count = len(os.sched_getaffinity(0))
-        except (AttributeError, OSError):  # non-Linux fallback
+        # getattr, not a direct os.sched_getaffinity reference: typeshed only
+        # declares that attribute on Linux, so a direct call fails mypy's
+        # attr-defined check on other platforms even inside this try/except.
+        sched_getaffinity = getattr(os, "sched_getaffinity", None)
+        if sched_getaffinity is not None:
+            try:
+                cpu_count = len(sched_getaffinity(0))
+            except OSError:  # non-Linux fallback
+                cpu_count = os.cpu_count() or 1
+        else:
             cpu_count = os.cpu_count() or 1
         # Guard against a non-positive dask_num_workers (misconfiguration, or an
         # explicit 0/negative override) -- it would otherwise divide by zero (0)
@@ -1217,12 +1245,18 @@ class RomsMarblInputData(InputData):
 
     def _resolve_source_block(
         self,
-        block: str | dict[str, Any],
+        block: object,
         time_window: tuple[datetime, datetime] | None = None,
     ) -> dict[str, Any]:
         """
         Normalize a "source"/"bgc_source" block and inject a 'path'
-        based on SourceData.
+        based on SourceDatasets.
+
+        ``block`` is typed ``object``, not ``str | dict[str, Any]``, because a
+        caller may hand this an unresolved ``dict.get(...)`` result (e.g. a
+        missing/``None`` ``bgc_sources[i]["source"]``) -- anything else is a
+        configuration error the ``isinstance`` checks below turn into a clear
+        ``TypeError``/``ValueError`` rather than a silent pass-through.
 
         When ``time_window`` is given and the resolved path is a per-day file list,
         it is trimmed to the files covering that window (see
@@ -1232,6 +1266,7 @@ class RomsMarblInputData(InputData):
         and shared with full-window consumers (boundary forcing), so it must only
         ever be built from the full list.
         """
+        name: str | None
         if isinstance(block, str):
             name = block
             out: dict[str, Any] = {"name": name}
@@ -1263,7 +1298,7 @@ class RomsMarblInputData(InputData):
 
         # Streamable sources are not staged locally -- nothing to inject.
         # streamable_for_source prefers the pinned ForgeBlueprint resolved_datasets
-        # snapshot over a live source_registry check (see SourceData.streamable_for_source).
+        # snapshot over a live source_registry check (see SourceDatasets.streamable_for_source).
         if self.source_data.streamable_for_source(name, glorys_layout=glorys_layout):
             return _rename_for_roms_tools(out, name)
 
@@ -1324,15 +1359,31 @@ class RomsMarblInputData(InputData):
         key = self.source_data.dataset_key_for_source(name, glorys_layout=glorys_layout)
         ref = self._subchunk_refs.get(key)
         if ref is None:
+            out_dir, start, end = self._require_glorys_subchunk_inputs()
             ref = build_ref_for_files(
                 path,
-                out_dir=self.source_data.source_data_dir,
+                out_dir=out_dir,
                 key=key,
-                start=self.source_data.start_time,
-                end=self.source_data.end_time,
+                start=start,
+                end=end,
             )
             self._subchunk_refs[key] = ref
         return ref
+
+    def _require_glorys_subchunk_inputs(self) -> tuple[Path, datetime, datetime]:
+        """``self.source_data``'s cache dir and time window, narrowed to non-``None``.
+
+        ``SourceDatasets.cache_root`` owns the cache-dir check; the time window is set
+        alongside it before any GLORYS day is staged, so a subchunked reference --
+        only ever built from already-staged per-day files -- can assume both here.
+        """
+        sd = self.source_data
+        if sd.start_time is None or sd.end_time is None:
+            raise ValueError(
+                "SourceDatasets.start_time/end_time must be set before building a "
+                "subchunked GLORYS reference."
+            )
+        return sd.cache_root, sd.start_time, sd.end_time
 
     def _build_input_args(
         self,
@@ -1346,7 +1397,7 @@ class RomsMarblInputData(InputData):
 
         Uses base_kwargs (always provided from input_list).
         Resolves "source", "bgc_source", and "surface_forcing_source" through
-        SourceData.
+        SourceDatasets.
         Merges with extra, where extra overrides defaults.
         """
         # base_kwargs always comes from input_list entries.
@@ -1408,7 +1459,7 @@ class RomsMarblInputData(InputData):
         bgc_sources: list[dict[str, Any]] | None,
         time_window: tuple[datetime, datetime] | None = None,
     ) -> list[dict[str, Any]]:
-        """Resolve each ``bgc_sources[i]["source"]`` block through ``SourceData``
+        """Resolve each ``bgc_sources[i]["source"]`` block through ``SourceDatasets``
         (see ``_resolve_source_block``), passing ``use_vars``/
         ``bgc_interpolation_method`` through unchanged -- the per-item shape
         ``rt.InitialConditions``/``rt.BoundaryForcing``'s own ``bgc_sources=``
@@ -1533,7 +1584,9 @@ class RomsMarblInputData(InputData):
 
         # Append Resource directly to roms_marbl_blueprint_elements.grid
         resource = Resource(location=str(out_path), partitioned=False)
-        self.roms_marbl_blueprint_elements.grid.data.append(resource)
+        _require_element(self.roms_marbl_blueprint_elements.grid, "grid").data.append(
+            resource
+        )
 
         self._settings_run_time.setdefault("grid", {})["grid_file"] = out_path
 
@@ -1560,6 +1613,10 @@ class RomsMarblInputData(InputData):
                 self._settings_run_time["param"]["np_eta"] = self.partitioning.n_procs_y
 
         if out_path_nesting is not None:
+            # out_path_nesting is only ever set inside `if self.grid_child is not
+            # None:` above, so the two are always both-or-neither; restated here
+            # so the grid_child.* accesses below narrow cleanly.
+            assert self.grid_child is not None
             if "extract_data" not in self._settings_run_time:
                 self._settings_run_time["extract_data"] = {}
             self._settings_run_time["extract_data"]["do_extract"] = True
@@ -1660,15 +1717,16 @@ class RomsMarblInputData(InputData):
                 )
 
         # Append Resources directly to roms_marbl_blueprint_elements.initial_conditions
+        ic_dataset = _require_element(
+            self.roms_marbl_blueprint_elements.initial_conditions, "initial_conditions"
+        )
         if isinstance(paths, (list, tuple)):
             for path in paths:
                 resource = Resource(location=path, partitioned=False)
-                self.roms_marbl_blueprint_elements.initial_conditions.data.append(
-                    resource
-                )
+                ic_dataset.data.append(resource)
         else:
             resource = Resource(location=paths, partitioned=False)
-            self.roms_marbl_blueprint_elements.initial_conditions.data.append(resource)
+            ic_dataset.data.append(resource)
 
         self._settings_run_time.setdefault("initial", {})["initial_file"] = paths[0]
 
@@ -1699,7 +1757,12 @@ class RomsMarblInputData(InputData):
                 f"Expected 'type' to be 'physics', 'bgc', or 'restoring'."
             )
 
-        source_name = input_args.get("source").get("name")
+        source = input_args.get("source")
+        if source is None:
+            raise ValueError(
+                f"Missing required 'source' key in input_args for '{key}'."
+            )
+        source_name = source.get("name")
         # bgc items get a source-name(+use_vars) suffix (e.g. "bgc-unified",
         # "bgc-mbl_co2") disambiguating multiple type='bgc' surface items in the
         # same run, including the documented same-source/different-use_vars
@@ -1827,9 +1890,12 @@ class RomsMarblInputData(InputData):
         for ``type_='physics'`` the single physics path is stored as before.
         """
         path_list = list(paths) if isinstance(paths, (list, tuple)) else [paths]
+        boundary = _require_element(
+            self.roms_marbl_blueprint_elements.forcing, "forcing"
+        ).boundary
         for path in path_list:
             resource = Resource(location=path, partitioned=False)
-            self.roms_marbl_blueprint_elements.forcing.boundary.data.append(resource)
+            boundary.data.append(resource)
 
         if "forcing" not in self._settings_run_time:
             self._settings_run_time["forcing"] = {}
@@ -2534,7 +2600,9 @@ class RomsMarblInputData(InputData):
         self._settings_run_time["cdr_output"]["do_cdr_output"] = True
 
         resource = Resource(location=str(output_path), partitioned=False)
-        self.roms_marbl_blueprint_elements.cdr_forcing.data.append(resource)
+        _require_element(
+            self.roms_marbl_blueprint_elements.cdr_forcing, "cdr_forcing"
+        ).data.append(resource)
 
     @register_input(name="cdr_forcing", order=80, label="Generating CDR forcing")
     def _generate_cdr_forcing(
@@ -2582,9 +2650,12 @@ class RomsMarblInputData(InputData):
         paths = normalized_paths
 
         # Append Resources directly to roms_marbl_blueprint_elements.cdr_forcing
+        cdr_dataset = _require_element(
+            self.roms_marbl_blueprint_elements.cdr_forcing, "cdr_forcing"
+        )
         for path in paths:
             resource = Resource(location=path, partitioned=False)
-            self.roms_marbl_blueprint_elements.cdr_forcing.data.append(resource)
+            cdr_dataset.data.append(resource)
 
         if "cppdefs" not in self._settings_compile_time:
             self._settings_compile_time["cppdefs"] = {}

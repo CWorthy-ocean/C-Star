@@ -19,7 +19,6 @@ import pytest
 import yaml
 
 import cstar_forge
-import cstar_forge.forge.namelist_model as _nm
 from cstar_forge.domain_catalog import default_catalog as _CATALOG
 from cstar_forge.forge.forge_blueprint import FORGE_BLUEPRINT_VERSION, ForgeBlueprint
 from cstar_forge.forge.settings import render_roms_settings
@@ -1501,7 +1500,7 @@ def test_build_forge_blueprint_source_path_skips_dataset_noting():
     """An item whose source carries an explicit path bypasses staging entirely
     (mirrors topography_path semantics) -- it must not be noted into
     resolved_datasets/datasets, since input_data._resolve_source_block returns
-    the explicit path verbatim without ever staging/verifying via SourceData.
+    the explicit path verbatim without ever staging/verifying via SourceDatasets.
     """
     import copy
 
@@ -2116,7 +2115,7 @@ def test_resolver_threads_river_surface_forcing_source():
 def test_resolver_river_surface_forcing_source_with_path_not_noted():
     """An explicit path bypasses staging entirely (mirrors SourceSpec.path
     semantics), so ERA5 must not be noted into resolved_datasets/datasets when a
-    path is already given -- it is never fetched via SourceData in that case.
+    path is already given -- it is never fetched via SourceDatasets in that case.
     """
     import copy
 
@@ -2145,10 +2144,10 @@ def test_resolver_river_surface_forcing_source_with_path_not_noted():
 def test_resolver_ic_bgc_esper_source_excluded_from_datasets():
     """Regression: an ESPER-named IC-BGC source (SourceSpec.name == "ESPER") is
     derived from physics T/S via PyESPER at generation time -- Forge has no
-    SourceData handler for it and never will, so it must never land in
+    SourceDatasets handler for it and never will, so it must never land in
     datasets/resolved_datasets (see DERIVED_BGC_SOURCES in source_registry.py);
     doing so previously raised "Unknown dataset(s) requested: ESPER" downstream
-    in SourceData.__post_init__.
+    in SourceDatasets.__post_init__.
     """
     import copy
 
@@ -2734,10 +2733,6 @@ def _standard_output_settings_with_bad_frc():
     return settings
 
 
-@pytest.mark.skipif(
-    _nm._check_output_streams_divide_rst is None,
-    reason="cstar.roms.precheck not available in this cstar release; check is guarded off",
-)
 def test_resolver_rejects_non_extract_stream_not_dividing_rst_for_roms050():
     """The general C-Star `check_output_streams_divide_rst` check (which covers
     every ucla-roms >= 0.5.0 precheck stream, not just `extract`) also fires at
@@ -2755,22 +2750,6 @@ def test_resolver_non_extract_stream_check_gated_off_for_legacy_roms():
     -- older ucla-roms has no such precheck, so authoring isn't blocked.
     """
     cfg = _build(  # default _MODEL_DIR pins roms 0.2.0 (legacy schema)
-        output_settings=_standard_output_settings_with_bad_frc(),
-    )
-    assert cfg.model_settings["frc_output"]["wrt_frc"] is True
-
-
-def test_resolver_skips_output_stream_check_when_cstar_precheck_absent(monkeypatch):
-    """Forge installed against a cstar release predating ``cstar.roms.precheck``
-    degrades gracefully: the guarded shim no-ops, so a would-be-violating >= 0.5.0
-    config still resolves at authoring time (ROMS still enforces it at run start).
-    """
-    from cstar_forge.forge import namelist_model
-
-    # Simulate the older-cstar import fallback (`_check... = None`).
-    monkeypatch.setattr(namelist_model, "_check_output_streams_divide_rst", None)
-    cfg = _build(
-        model_dir=_MODEL_DIR_ROMS050,
         output_settings=_standard_output_settings_with_bad_frc(),
     )
     assert cfg.model_settings["frc_output"]["wrt_frc"] is True

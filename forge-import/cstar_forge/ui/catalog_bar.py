@@ -14,10 +14,12 @@ import asyncio
 import html
 import re
 import threading
-from collections.abc import Callable
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from cstar_forge.ui import branding
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 #: Strips HTML tags from a status string to build its ``title=`` plain-text.
 _TAG_RE = re.compile(r"<[^>]+>")

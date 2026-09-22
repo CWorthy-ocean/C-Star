@@ -33,8 +33,8 @@ import copy
 import logging
 import warnings
 from collections.abc import Callable, Iterable
-from pathlib import Path
 from typing import (
+    TYPE_CHECKING,
     Any,
     Protocol,
     runtime_checkable,
@@ -43,6 +43,9 @@ from typing import (
 from cstar_forge.forge.forge_blueprint import ForgeBlueprint
 from cstar_forge.forge.host import HostPaths
 from cstar_forge.forge.namelist_model import validate_run_time_sections
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 
 @runtime_checkable

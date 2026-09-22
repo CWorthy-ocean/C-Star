@@ -34,7 +34,6 @@ from __future__ import annotations
 
 import shutil
 import typing as t
-from pathlib import Path
 
 from cstar.applications.core import (
     ApplicationDefinition,
@@ -46,6 +45,9 @@ from cstar.execution.file_system import JobFileSystemManager
 from cstar.execution.handler import ExecutionStatus
 
 from cstar_forge.forge.forge_blueprint import DEFAULT_APPLICATION, ForgeBlueprint
+
+if t.TYPE_CHECKING:
+    from pathlib import Path
 
 APP_NAME: t.Final[str] = DEFAULT_APPLICATION
 

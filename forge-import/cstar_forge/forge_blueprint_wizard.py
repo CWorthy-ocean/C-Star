@@ -97,7 +97,7 @@ from cstar_forge.ui.labels import known_keys, label_for, section_for
 # category ("surface","boundary","tidal","river","ic"), a grid section ("grid"),
 # a nesting section ("nesting"), or a run-window field ("run").
 # Falls back to just field_name for unambiguous global names.
-HELP_TEXT: dict[str, str] = {
+HELP_TEXT: dict[str | tuple[str, str], str] = {
     # ---- identity / run window ------------------------------------------------
     (
         "run",
@@ -734,7 +734,7 @@ def _read_field_widget(
         return float(v)
     if base is list:
         parts = [p.strip() for p in str(v).split(",") if p.strip()]
-        out = []
+        out: list[int | float | str] = []
         for p in parts:
             try:
                 out.append(int(p))
@@ -3339,7 +3339,7 @@ class _ForcingEditor:
             src["esper_method"] = w["esper_method"].value
         if "esper_equation" in w and w["esper_equation"].value and name_val == "ESPER":
             src["esper_equation"] = int(w["esper_equation"].value)
-        item: dict[str, Any] = {"source": src}
+        item = {"source": src}
         if "type" in w:
             item["type"] = w["type"].value
         if "use_vars" in w and w["use_vars"].value.strip():
@@ -3432,7 +3432,7 @@ class _ForcingEditor:
         return item
 
     def gather(self) -> dict[str, Any]:
-        forcing = {
+        forcing: dict[str, list[dict[str, Any]] | dict[str, Any] | None] = {
             cat: [self._gather_item(cat, w) for w in self._rows[cat]]
             for cat in _FORCING_CATEGORIES
         }
@@ -4763,6 +4763,8 @@ class ForgeBlueprintWizard:
         self._sync_marbl_ref_visibility()
         self._sync_auto_tiling()
         self._build_forcing_editor(self.catalog.forcing_data(self.forcing_dd.value))
+        if self._forcing_editor is None:
+            raise RuntimeError("_build_forcing_editor did not set _forcing_editor")
         self._forcing_seed = self._forcing_editor.gather()
         self._apply_cdr_mode()
         self._wire()
@@ -6855,6 +6857,8 @@ class ForgeBlueprintWizard:
             )
             kw["grid_kwargs_parent"] = pk
         # forcing/output are always required now (no more model-default fallback).
+        if self._forcing_editor is None:
+            raise RuntimeError("_gather called before the forcing editor was built")
         kw["forcing_inputs"] = self._forcing_editor.gather()
         if self.parent_enable.value and self._grid_file is None:
             # Durable guarantee (authoritative, independent of forcing-editor UI
@@ -7196,7 +7200,7 @@ class ForgeBlueprintWizard:
             f"<a class='step' href='#forge-sec-{key}'>{i} {title}</a>"
             for i, (key, title) in enumerate(_STICKY_STEPS, start=1)
         )
-        if valid:
+        if cfg is not None:
             domain_label = cfg.composition.domain.name or "custom"
             summary = (
                 f"Model <b>{model_name}</b> &middot; "
@@ -7233,7 +7237,7 @@ class ForgeBlueprintWizard:
             chips["grid"].value = components.chip(f"● {n} fields to check", "warn")
         else:
             chips["grid"].value = components.chip("● Complete", "ok")
-        forcing_modified = bool(valid and cfg.composition.forcing.modified)
+        forcing_modified = bool(cfg is not None and cfg.composition.forcing.modified)
         chips["forcing"].value = (
             components.chip("● Modified", "info")
             if forcing_modified
@@ -7918,15 +7922,15 @@ class ForgeBlueprintWizard:
         Uses the ``cstar`` console script installed alongside the running
         interpreter, so the subprocess stays in this environment rather than
         taking whatever is first on PATH. Where that script is absent (C-Star's
-        CLI not installed), falls back to ``python -m cstar_forge.run``, which
-        drives the same executor without needing C-Star's CLI at all.
+        CLI not installed), falls back to ``python -m cstar_forge.cli run``,
+        forge's own typer entry onto the same executor.
         """
         import sys
 
         cstar_exe = Path(sys.executable).with_name("cstar")
         if cstar_exe.exists():
             return [str(cstar_exe), "blueprint", "run", blueprint_path]
-        return [sys.executable, "-m", "cstar_forge.run", blueprint_path]
+        return [sys.executable, "-m", "cstar_forge.cli", "run", blueprint_path]
 
     def _on_run(self, _):
         if not self._ensure_boundaries_derived():
@@ -8061,6 +8065,8 @@ class ForgeBlueprintWizard:
             raise RuntimeError(msg) from exc
 
         cfg = self.config
+        if cfg is None:
+            raise RuntimeError("_build_workplan called before a blueprint was resolved")
         # No cpus override for the forge step: the scheduler falls back to
         # ForgeBlueprint.cpus_needed (the grid-sized estimate), and because
         # ForgeBlueprint.single_node is True, C-Star pins the step to one node
@@ -8623,6 +8629,7 @@ class ForgeBlueprintWizardApp:
 
         from cstar_forge.domain_catalog import (
             DomainCatalog,
+            LayeredCatalog,
             _is_github_catalog_url,
             build_catalog_stack,
             default_catalog_stack,
@@ -8630,6 +8637,7 @@ class ForgeBlueprintWizardApp:
 
         val = (catalog_root_value or "").strip()
         try:
+            cat: DomainCatalog | LayeredCatalog
             if not val:
                 # Blank -> the default layered stack (writable user layer over
                 # the read-only bundled catalog), not the bundled catalog alone.

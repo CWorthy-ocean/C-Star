@@ -82,6 +82,9 @@ from cstar.roms.namelist import (
     ZsliceSettings,
     namelist_schema_for_ref,
 )
+from cstar.roms.precheck import (
+    check_output_streams_divide_rst as _check_output_streams_divide_rst,
+)
 from pydantic import (
     AliasChoices,
     BaseModel,
@@ -410,26 +413,13 @@ def cppdefs_for_precheck(
     return result
 
 
-try:  # cstar >= the release that ships cstar.roms.precheck
-    from cstar.roms.precheck import (
-        check_output_streams_divide_rst as _check_output_streams_divide_rst,
-    )
-except ImportError:  # older cstar without the module -- degrade gracefully
-    _check_output_streams_divide_rst = None
-
-
 def check_output_streams_divide_rst(settings: Any, cppdefs: Any = None) -> None:
-    """Guarded shim around ``cstar.roms.precheck.check_output_streams_divide_rst``.
+    """Forge-side entry to ``cstar.roms.precheck.check_output_streams_divide_rst``.
 
     The general ucla-roms output-stream / restart-rollover precheck lives in
-    C-Star. Forge installed against a ``cstar`` release predating that module
-    (no ``cstar.roms.precheck``) silently skips this authoring-time check rather
-    than failing to import -- ROMS still enforces the same rule at run start via
-    ``precheck.F90``. Once forge's ``cstar-ocean`` floor is raised to the release
-    that ships it, this shim always delegates and the fallback is dead code.
+    C-Star; this keeps the resolver and executor on one forge-side import path
+    alongside the forge-shaped helpers above.
     """
-    if _check_output_streams_divide_rst is None:
-        return
     _check_output_streams_divide_rst(settings, cppdefs)
 
 

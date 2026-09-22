@@ -1200,7 +1200,7 @@ class DomainCatalog:
         catalog._scan_models()
 
     # ------------------------------------------------------------------
-    # Blueprint DataFrame methods (merged from BlueprintCatalog)
+    # Blueprint DataFrame methods
     # ------------------------------------------------------------------
 
     def _find_roms_marbl_blueprint_files(self) -> list[Path]:
@@ -1718,9 +1718,8 @@ class LayeredCatalog:
     # ------------------------------------------------------------------
     # Blueprint DataFrame / misc
     # ------------------------------------------------------------------
-    # The private _find/_load/_extract methods below back the deprecated
-    # catalog.BlueprintCatalog shim, whose no-args construction now holds a
-    # LayeredCatalog -- they must exist here with union semantics.
+    # Union-semantics counterparts of DomainCatalog's private _find/_load/_extract
+    # helpers, so a LayeredCatalog duck-types the single-store surface.
 
     def _find_roms_marbl_blueprint_files(self) -> list[Path]:
         files: list[Path] = []

@@ -2,7 +2,7 @@
 
 ## Module Design Philosophy
 
-The `cstar_forge.forge.source_data` module provides a **registry-based framework** for managing heterogeneous source datasets used in ROMS preprocessing. The design emphasizes:
+The `cstar_forge.forge.source_datasets` module provides a **registry-based framework** for managing heterogeneous source datasets used in ROMS preprocessing. The design emphasizes:
 
 - **Extensibility**: New datasets can be added by registering handler functions without modifying core logic
 - **Dependency Management**: Each dataset declares its requirements (grid, time range, etc.) explicitly
@@ -11,16 +11,16 @@ The `cstar_forge.forge.source_data` module provides a **registry-based framework
 
 The module is split across two files:
 
-- `cstar_forge/forge/source_data.py` — the `SourceData` dataclass, the `@register_dataset` decorator, `DATASET_REGISTRY`, and every dataset handler function. This is the "heavy" layer: it imports `copernicusmarine`, `gdown`, and `roms_tools`.
-- `cstar_forge/forge/source_registry.py` — a dependency-light, stdlib-only module holding `SOURCE_ALIAS`, `STREAMABLE_SOURCES`, `UNSTAGED_DATASETS`, `DATASET_METADATA`, and the resolution helpers (`map_source_to_dataset_key`, `resolve_dataset_key`, `resolve_source`). It exists so the alias/metadata tables can be imported by lightweight callers (e.g. the blueprint resolver) without pulling in the acquisition dependencies. It also holds the versioned dataset-id/URL constants (`SRTM15_URL`, `GLORYS_DATASET_ID`, `MBL_CO2_URL`, `WOA_DOWNLOAD_URL`, `UNIFIED_BGC_URL`/`UNIFIED_BGC_VERSION`/`UNIFIED_BGC_FILENAME`, `GLOFAS_CDS_URL`). `source_data.py` re-exports the alias map, the streamable/unstaged sets, the versioned URL constants, and `map_source_to_dataset_key` for existing consumers, so `from cstar_forge.forge.source_data import SOURCE_ALIAS` still works; `DATASET_METADATA`, `resolve_dataset_key`, and `resolve_source` must be imported from `cstar_forge.forge.source_registry` directly.
+- `cstar_forge/forge/source_datasets.py` — the `SourceDatasets` dataclass, the `@register_dataset` decorator, `DATASET_REGISTRY`, and every dataset handler function. This is the "heavy" layer: it imports `copernicusmarine`, `gdown`, and `roms_tools`.
+- `cstar_forge/forge/source_registry.py` — a dependency-light, stdlib-only module holding `SOURCE_ALIAS`, `STREAMABLE_SOURCES`, `UNSTAGED_DATASETS`, `DATASET_METADATA`, and the resolution helpers (`map_source_to_dataset_key`, `resolve_dataset_key`, `resolve_source`). It exists so the alias/metadata tables can be imported by lightweight callers (e.g. the blueprint resolver) without pulling in the acquisition dependencies. It also holds the versioned dataset-id/URL constants (`SRTM15_URL`, `GLORYS_DATASET_ID`, `MBL_CO2_URL`, `WOA_DOWNLOAD_URL`, `UNIFIED_BGC_URL`/`UNIFIED_BGC_VERSION`/`UNIFIED_BGC_FILENAME`, `GLOFAS_CDS_URL`). `source_datasets.py` re-exports the alias map, the streamable/unstaged sets, the versioned URL constants, and `map_source_to_dataset_key` for existing consumers, so `from cstar_forge.forge.source_datasets import SOURCE_ALIAS` still works; `DATASET_METADATA`, `resolve_dataset_key`, and `resolve_source` must be imported from `cstar_forge.forge.source_registry` directly.
 
 ## Core Architecture
 
 The module consists of three main components:
 
-1. **Registry System**: Decorator-based registration of dataset handlers (`source_data.py`)
-2. **SourceData Class**: Main interface for preparing and accessing datasets (`source_data.py`)
-3. **Source Name Mapping**: Translation layer between logical names and dataset keys (`source_registry.py`, re-exported from `source_data.py`)
+1. **Registry System**: Decorator-based registration of dataset handlers (`source_datasets.py`)
+2. **SourceDatasets Class**: Main interface for preparing and accessing datasets (`source_datasets.py`)
+3. **Source Name Mapping**: Translation layer between logical names and dataset keys (`source_registry.py`, re-exported from `source_datasets.py`)
 
 ```
 User Request ("GLORYS") 
@@ -38,13 +38,13 @@ Handler execution → Path(s) to prepared data
 
 ## Core Objects
 
-### `SourceData` (Dataclass)
+### `SourceDatasets` (Dataclass)
 
 The main interface for preparing and accessing source datasets.
 
 **Constructor:**
 ```python
-SourceData(
+SourceDatasets(
     datasets: list[str],                        # Dataset names to prepare
     clobber: bool = False,                       # Force re-download if True
     grid: object | None = None,
@@ -56,7 +56,7 @@ SourceData(
 )
 ```
 
-`SourceData` no longer resolves a cache directory from `cstar_forge.config` internally — the caller (typically `ForgeExecutor`) must inject `source_data_dir`, e.g. from a `HostPaths.source_data_cache` built by `cstar_forge.config.resolve_host()`. If `source_data_dir` is `None`, `prepare_all()` raises `ValueError` for the first dataset it actually stages (unstaged/streamable skips happen first).
+`SourceDatasets` no longer resolves a cache directory from `cstar_forge.config` internally — the caller (typically `ForgeExecutor`) must inject `source_data_dir`, e.g. from a `HostPaths.source_data_cache` built by `cstar_forge.config.resolve_host()`. If `source_data_dir` is `None`, `prepare_all()` raises `ValueError` for the first dataset it actually stages (unstaged/streamable skips happen first).
 
 **Key Attributes:**
 - `datasets`: Normalized list of dataset keys (after alias resolution)
@@ -82,9 +82,9 @@ Container for a dataset preparation function and its dependency requirements.
 
 ```python
 class DatasetHandler:
-    def __init__(self, func: Callable[["SourceData"], Path], requires: List[str]):
+    def __init__(self, func: Callable[["SourceDatasets"], Path], requires: List[str]):
         self.func = func      # Handler function
-        self.requires = requires  # Required SourceData attributes
+        self.requires = requires  # Required SourceDatasets attributes
 ```
 
 **Purpose:**
@@ -101,9 +101,9 @@ The `@register_dataset` decorator registers dataset preparation functions:
 ```python
 @register_dataset(
     name: str,                    # Dataset key (e.g., "GLORYS_REGIONAL")
-    requires: Optional[List[str]] = None  # Required SourceData attributes
+    requires: Optional[List[str]] = None  # Required SourceDatasets attributes
 )
-def _prepare_dataset(self: SourceData) -> Union[Path, List[Path], Dict]:
+def _prepare_dataset(self: SourceDatasets) -> Union[Path, List[Path], Dict]:
     """Handler function that prepares the dataset."""
     # Implementation...
     return path_or_paths
@@ -120,7 +120,7 @@ def _prepare_dataset(self: SourceData) -> Union[Path, List[Path], Dict]:
     "GLORYS_REGIONAL",
     requires=["grid", "grid_name", "start_time", "end_time"]
 )
-def _prepare_glorys_regional(self: SourceData) -> List[Path]:
+def _prepare_glorys_regional(self: SourceDatasets) -> List[Path]:
     """Download daily regional GLORYS subsets."""
     bounds = rt.get_glorys_bounds(self.grid)
     paths = self._prepare_glorys_daily(is_regional=True, bounds=bounds)
@@ -130,7 +130,7 @@ def _prepare_glorys_regional(self: SourceData) -> List[Path]:
 
 ### Registry Dictionary
 
-`DATASET_REGISTRY: Dict[str, DatasetHandler]` (defined in `source_data.py`, alongside the handlers it registers) maps dataset keys to their handlers.
+`DATASET_REGISTRY: Dict[str, DatasetHandler]` (defined in `source_datasets.py`, alongside the handlers it registers) maps dataset keys to their handlers.
 
 - Keys are **uppercase** (normalized during registration)
 - Values are `DatasetHandler` instances
@@ -139,7 +139,7 @@ def _prepare_glorys_regional(self: SourceData) -> List[Path]:
 ### Handler Function Signature
 
 Handler functions must:
-- Accept `self: SourceData` as first parameter, which `prepare_all` passes explicitly (`handler.func(self)`) — these are module-level functions, not methods
+- Accept `self: SourceDatasets` as first parameter, which `prepare_all` passes explicitly (`handler.func(self)`) — these are module-level functions, not methods
 - Return `Path`, `List[Path]`, or `Dict[str, Path]` (stored in `self.paths[dataset_key]`)
 - Access required attributes via `self` (e.g., `self.grid`, `self.start_time`)
 - Use `self.clobber` to determine if re-download is needed
@@ -156,7 +156,7 @@ Users specify **logical source names** in a **ForcingSpec** (`catalog/ForcingSpe
 
 ### `SOURCE_ALIAS` Dictionary
 
-Defined in `cstar_forge/forge/source_registry.py` (re-exported from `source_data.py`). Maps logical names to dataset registry keys:
+Defined in `cstar_forge/forge/source_registry.py` (re-exported from `source_datasets.py`). Maps logical names to dataset registry keys:
 
 ```python
 SOURCE_ALIAS: dict[str, str] = {
@@ -188,7 +188,7 @@ def map_source_to_dataset_key(name: str) -> str:
 `resolve_dataset_key(name, glorys_layout=None)` wraps this and additionally handles the one case the table can't: logical `"GLORYS"` disambiguated by an explicit `glorys_layout` (`"global"` vs. `"regional"`, defaulting to regional).
 
 **Normalization:**
-- `SourceData.__post_init__()` normalizes all dataset names through `SOURCE_ALIAS`
+- `SourceDatasets.__post_init__()` normalizes all dataset names through `SOURCE_ALIAS`
 - Unknown names are uppercased and used as-is (must exist in `DATASET_REGISTRY` or `UNSTAGED_DATASETS`, or `__post_init__` raises `ValueError`)
 
 ### Streamable and Unstaged Sources
@@ -201,9 +201,9 @@ STREAMABLE_SOURCES = ["ERA5", "DAI", "CONSTANTS"]
 
 - Skipped by default in `prepare_all()` unless `include_streamable=True`
 - `path_for_source()` returns `None` for streamable sources if not prepared
-- `CONSTANTS` is streamable but has **no registry entry at all** — the resolver strips it upstream; passing it to `SourceData` raises `ValueError: Unknown dataset(s) requested`
+- `CONSTANTS` is streamable but has **no registry entry at all** — the resolver strips it upstream; passing it to `SourceDatasets` raises `ValueError: Unknown dataset(s) requested`
 
-A distinct set, `UNSTAGED_DATASETS = {"ETOPO5", "DAI"}`, covers recognized keys that Forge never stages *at all* — no `@register_dataset` handler exists because something else supplies the file (roms-tools auto-fetches `ETOPO5` at grid-build time; `DAI` is streamed). `SourceData.__post_init__()` treats these as valid-but-skipped, distinguishing them from a genuinely unknown/typo'd name, which still raises. `prepare_all()` always skips them, even with `include_streamable=True`.
+A distinct set, `UNSTAGED_DATASETS = {"ETOPO5", "DAI"}`, covers recognized keys that Forge never stages *at all* — no `@register_dataset` handler exists because something else supplies the file (roms-tools auto-fetches `ETOPO5` at grid-build time; `DAI` is streamed). `SourceDatasets.__post_init__()` treats these as valid-but-skipped, distinguishing them from a genuinely unknown/typo'd name, which still raises. `prepare_all()` always skips them, even with `include_streamable=True`.
 
 ## Adding a New Dataset
 
@@ -211,7 +211,7 @@ A distinct set, `UNSTAGED_DATASETS = {"ETOPO5", "DAI"}`, covers recognized keys 
 
 ```python
 @register_dataset("MY_DATASET", requires=["grid", "grid_name"])
-def _prepare_my_dataset(self: SourceData) -> Path:
+def _prepare_my_dataset(self: SourceDatasets) -> Path:
     """
     Prepare MY_DATASET for the given grid.
     
@@ -266,7 +266,7 @@ Add a provenance entry to `DATASET_METADATA` in `cstar_forge/forge/source_regist
 
 ```python
 @register_dataset("SRTM15")
-def _prepare_srtm15(self: SourceData) -> Path:
+def _prepare_srtm15(self: SourceDatasets) -> Path:
     """Download SRTM15 bathymetry."""
     path = self.source_data_dir / "SRTM15" / f"SRTM15_{SRTM15_VERSION}.nc"
     
@@ -290,7 +290,7 @@ def _prepare_srtm15(self: SourceData) -> Path:
     "GLORYS_REGIONAL",
     requires=["grid", "grid_name", "start_time", "end_time"]
 )
-def _prepare_glorys_regional(self: SourceData) -> List[Path]:
+def _prepare_glorys_regional(self: SourceDatasets) -> List[Path]:
     """Download daily regional GLORYS subsets."""
     bounds = rt.get_glorys_bounds(self.grid)
     paths = self._prepare_glorys_daily(is_regional=True, bounds=bounds)
@@ -308,7 +308,7 @@ def _prepare_glorys_regional(self: SourceData) -> List[Path]:
 
 ```python
 @register_dataset("TPXO")
-def _prepare_tpxo(self: SourceData) -> Dict[str, Path]:
+def _prepare_tpxo(self: SourceDatasets) -> Dict[str, Path]:
     """Verify user-provided TPXO tidal data exists."""
     tpxo_path = self.source_data_dir / "TPXO" / "TPXO10.v2a"
     
@@ -333,14 +333,14 @@ def _prepare_tpxo(self: SourceData) -> Dict[str, Path]:
 ## Usage Pattern
 
 ```python
-from cstar_forge.forge.source_data import SourceData
+from cstar_forge.forge.source_datasets import SourceDatasets
 from cstar_forge.config import resolve_host
 from datetime import datetime
 
 host = resolve_host(working_dir="~/cstar/_forge_bp_runs/my-grid")
 
-# Create SourceData instance
-src = SourceData(
+# Create SourceDatasets instance
+src = SourceDatasets(
     datasets=["GLORYS", "UNIFIED", "SRTM15"],  # Logical names
     clobber=False,
     grid=my_grid,
@@ -366,14 +366,14 @@ glorys_path = src.paths["GLORYS_REGIONAL"]
 
 ### Dependency Injection
 
-Required attributes are injected into `SourceData` and accessed by handlers via `self`. This enables:
+Required attributes are injected into `SourceDatasets` and accessed by handlers via `self`. This enables:
 - Lazy evaluation (attributes only needed if dataset is requested)
 - Clear dependency declaration via `requires` parameter
 - Runtime validation before handler execution
 
 ### Caching Strategy
 
-- Files are cached in `self.source_data_dir / {dataset_name} /`, where `source_data_dir` is injected by the caller (e.g. `ForgeExecutor`, from `HostPaths.source_data_cache`) — `source_data.py` no longer imports `cstar_forge.config` to resolve this path itself (some handlers nest one level deeper or use a fixed filename — e.g. `TPXO/TPXO10.v2a/`, `GLOFAS/glofas_v4_rivers_daily_w_rivr2o.nc`)
+- Files are cached in `self.source_data_dir / {dataset_name} /`, where `source_data_dir` is injected by the caller (e.g. `ForgeExecutor`, from `HostPaths.source_data_cache`) — `source_datasets.py` no longer imports `cstar_forge.config` to resolve this path itself (some handlers nest one level deeper or use a fixed filename — e.g. `TPXO/TPXO10.v2a/`, `GLOFAS/glofas_v4_rivers_daily_w_rivr2o.nc`)
 - Existence check: `if self.clobber or (not path.exists())`
 - Clobber mode: Remove existing file before download
 

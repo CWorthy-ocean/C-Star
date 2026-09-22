@@ -2804,7 +2804,8 @@ def test_build_run_command_uses_cstar_blueprint_run_from_this_env():
         assert cmd == [
             sys.executable,
             "-m",
-            "cstar_forge.run",
+            "cstar_forge.cli",
+            "run",
             "/tmp/some_blueprint.yaml",
         ]
 

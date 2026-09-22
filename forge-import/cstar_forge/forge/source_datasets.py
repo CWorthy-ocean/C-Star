@@ -21,9 +21,9 @@ logger = logging.getLogger(__name__)
 
 
 class DatasetHandler:
-    """Container for a dataset handler and its required SourceData attributes."""
+    """Container for a dataset handler and its required SourceDatasets attributes."""
 
-    def __init__(self, func: Callable[["SourceData"], Path], requires: list[str]):
+    def __init__(self, func: Callable[["SourceDatasets"], Path], requires: list[str]):
         self.func = func
         self.requires = requires
 
@@ -75,7 +75,7 @@ def register_dataset(name: str, requires: list[str] | None = None) -> Callable:
         Dataset name (e.g. "GLORYS_REGIONAL", "UNIFIED_BGC", "SRTM15").
         Stored in upper case.
     requires : list of str, optional
-        Names of SourceData attributes that must be non-None for this
+        Names of SourceDatasets attributes that must be non-None for this
         dataset to be prepared (e.g. ["grid", "grid_name", "start_time", "end_time"]).
 
     Usage
@@ -86,7 +86,7 @@ def register_dataset(name: str, requires: list[str] | None = None) -> Callable:
     if requires is None:
         requires = []
 
-    def decorator(func: Callable[["SourceData"], Path]) -> Callable:
+    def decorator(func: Callable[["SourceDatasets"], Path]) -> Callable:
         DATASET_REGISTRY[name.upper()] = DatasetHandler(func=func, requires=requires)
         return func
 
@@ -131,12 +131,12 @@ WOA_FILENAMES: list[str] = [f"woa*_decav_s{month:02d}_04.nc" for month in range(
 
 
 # -----------------------------------------
-# SourceData
+# SourceDatasets
 # -----------------------------------------
 
 
 @dataclass
-class SourceData:
+class SourceDatasets:
     """
     Handles creation and caching of source data files
     (GLORYS_REGIONAL, UNIFIED_BGC, SRTM15, etc.) for ROMS preprocessing.
@@ -159,8 +159,8 @@ class SourceData:
     # Optional attributes — only required if a dataset handler declares them
     grid: object | None = None
     grid_name: str | None = None
-    start_time: object | None = None
-    end_time: object | None = None
+    start_time: datetime | None = None
+    end_time: datetime | None = None
     # Injected by the caller (executor). Root dir under which datasets are cached.
     # Host-independent: source_data no longer resolves paths from cstar_forge.config,
     # so this can be supplied by C-Star when the forge application relocates.
@@ -169,7 +169,7 @@ class SourceData:
     # (ForgeBlueprint.forcing.resolved_datasets, frozen at blueprint-build time). When
     # present, key/streamable resolution in dataset_key_for_source/streamable_for_source
     # reads this first; source_registry.resolve_dataset_key is the fallback for names
-    # not in the snapshot (e.g. a hand-built SourceData outside the ForgeBlueprint path).
+    # not in the snapshot (e.g. a hand-built SourceDatasets outside the ForgeBlueprint path).
     # This is what makes the executor behave deterministically across hosts/forge
     # versions even if source_registry's tables drift after the blueprint was built.
     resolved_datasets: dict[str, dict] | None = None
@@ -202,8 +202,11 @@ class SourceData:
         if self.source_data_dir is not None:
             self.source_data_dir = Path(self.source_data_dir)
 
-        # Per-dataset paths (generic) + convenience attrs
-        self.paths: dict[str, Path] = {}
+        # Per-dataset paths (generic) + convenience attrs. Most handlers store a
+        # single Path; GLORYS_REGIONAL/GLORYS_GLOBAL store a list[Path] (one per
+        # staged day) when more than one day is fetched, and ERA5 (streamable, no
+        # local file) stores None -- see path_for_source's return type.
+        self.paths: dict[str, Path | list[Path] | None] = {}
         self.srtm15_path: Path | None = None
 
     # -----------------------------------------
@@ -240,11 +243,11 @@ class SourceData:
                 if missing_attrs:
                     raise ValueError(
                         f"Dataset '{name}' requires attributes {missing_attrs}, "
-                        "but they were not provided to SourceData()."
+                        "but they were not provided to SourceDatasets()."
                     )
                 if self.source_data_dir is None:
                     raise ValueError(
-                        f"SourceData.source_data_dir must be set to prepare '{name}' — the "
+                        f"SourceDatasets.source_data_dir must be set to prepare '{name}' — the "
                         "caller must inject the dataset cache root (source_data no longer "
                         "reads cstar_forge.config)."
                     )
@@ -351,7 +354,7 @@ class SourceData:
         self,
         logical_name: str,
         glorys_layout: str | None = None,
-    ) -> Path:
+    ) -> Path | list[Path] | None:
         """
         Return the prepared file path associated with a logical source name.
 
@@ -364,8 +367,10 @@ class SourceData:
 
         Returns
         -------
-        Path
-            Path to the corresponding dataset file.
+        Path, list of Path, or None
+            Path (or, for a multi-day GLORYS fetch, list of paths) to the
+            corresponding dataset file(s). ``None`` for a streamable source with
+            nothing staged locally (see ``streamable_for_source``).
 
         Raises
         ------
@@ -391,6 +396,22 @@ class SourceData:
     # Internals / helpers
     # -----------------------------------------
 
+    @property
+    def cache_root(self) -> Path:
+        """``source_data_dir`` narrowed to ``Path``.
+
+        ``prepare_all`` already raises a clear ``ValueError`` if ``source_data_dir``
+        is unset before invoking any handler, so every handler/helper below is always
+        called with it set. Centralizes that narrowing here instead of repeating an
+        ``assert``/raise at each of the many ``source_data_dir / "..."`` call sites.
+        """
+        if self.source_data_dir is None:
+            raise ValueError(
+                "SourceDatasets.source_data_dir must be set before staging datasets — "
+                "the caller must inject the dataset cache root."
+            )
+        return self.source_data_dir
+
     def _construct_glorys_path(self, date: datetime, is_regional: bool) -> Path:
         """Construct filename for a single day of GLORYS data."""
         date_str = date.strftime("%Y%m%d")
@@ -399,7 +420,7 @@ class SourceData:
             fn = f"{glorys_dataset_id}_REGIONAL_{self.grid_name}_{date_str}.nc"
         else:
             fn = f"{glorys_dataset_id}_GLOBAL_{date_str}.nc"
-        dataset_dir = self.source_data_dir / dataset_name
+        dataset_dir = self.cache_root / dataset_name
         dataset_dir.mkdir(parents=True, exist_ok=True)
         return dataset_dir / fn
 
@@ -423,6 +444,16 @@ class SourceData:
         (start_time - 1 day to end_time + 1 day) to ensure boundary/initial
         condition interpolation has temporal context.
         """
+        # GLORYS_REGIONAL/GLORYS_GLOBAL both declare start_time/end_time in their
+        # @register_dataset(requires=[...]), so prepare_all() already guarantees
+        # these are set before this method is reached; this just makes that
+        # guarantee explicit for a caller that invokes it directly.
+        if self.start_time is None or self.end_time is None:
+            raise ValueError(
+                "SourceDatasets.start_time and end_time must be set before staging "
+                "GLORYS data."
+            )
+
         paths = []
 
         # Iterate over each day with a ±1 day temporal padding window.
@@ -497,7 +528,7 @@ def _pad_date_range(
     "GLORYS_REGIONAL",
     requires=["grid", "grid_name", "start_time", "end_time"],
 )
-def _prepare_glorys_regional(self: SourceData) -> list[Path]:
+def _prepare_glorys_regional(self: SourceDatasets) -> list[Path]:
     """Download or reuse daily regional GLORYS subsets for this grid and time range."""
     is_regional = True
     bounds = rt.get_glorys_bounds(self.grid)
@@ -516,10 +547,10 @@ def _prepare_glorys_regional(self: SourceData) -> list[Path]:
     "GLORYS_GLOBAL",
     requires=["start_time", "end_time"],
 )
-def _prepare_glorys_global(self: SourceData) -> list[Path]:
+def _prepare_glorys_global(self: SourceDatasets) -> list[Path]:
     """Download or reuse daily global GLORYS subsets for this time range."""
     is_regional = False
-    bounds = {
+    bounds: dict[str, float | None] = {
         "minimum_longitude": None,
         "maximum_longitude": None,
         "minimum_latitude": None,
@@ -561,7 +592,7 @@ def _roms_tools_reads_unified_v2_1() -> bool:
 
 
 @register_dataset("UNIFIED_BGC")
-def _prepare_unified_bgc_dataset(self: SourceData) -> Path:
+def _prepare_unified_bgc_dataset(self: SourceDatasets) -> Path:
     """Ensure the UNIFIED_BGC dataset exists locally."""
     if not _roms_tools_reads_unified_v2_1():
         raise RuntimeError(
@@ -574,7 +605,7 @@ def _prepare_unified_bgc_dataset(self: SourceData) -> Path:
         )
 
     url_bgc_forcing = UNIFIED_BGC_URL
-    dataset_dir = self.source_data_dir / "UNIFIED_BGC"
+    dataset_dir = self.cache_root / "UNIFIED_BGC"
     dataset_dir.mkdir(parents=True, exist_ok=True)
     path = dataset_dir / UNIFIED_BGC_FILENAME
     needs_download = self.clobber or (not path.exists())
@@ -596,7 +627,6 @@ def _prepare_unified_bgc_dataset(self: SourceData) -> Path:
     else:
         print(f"✔️  Using existing BGC dataset: {path}")
 
-    self.bgc_forcing_path = path
     self.paths["UNIFIED_BGC"] = path
     return path
 
@@ -607,7 +637,7 @@ def _prepare_unified_bgc_dataset(self: SourceData) -> Path:
 
 
 @register_dataset("SRTM15")
-def _prepare_srtm15(self: SourceData) -> Path:
+def _prepare_srtm15(self: SourceDatasets) -> Path:
     """
     Ensure the SRTM15 bathymetry dataset exists locally.
 
@@ -617,7 +647,7 @@ def _prepare_srtm15(self: SourceData) -> Path:
 
     The file is stored under self.source_data_dir / "SRTM15" / "SRTM15_{SRTM15_VERSION}.nc".
     """
-    dataset_dir = self.source_data_dir / "SRTM15"
+    dataset_dir = self.cache_root / "SRTM15"
     dataset_dir.mkdir(parents=True, exist_ok=True)
     path = dataset_dir / f"SRTM15_{SRTM15_VERSION}.nc"
 
@@ -650,7 +680,7 @@ def _prepare_srtm15(self: SourceData) -> Path:
 
 
 @register_dataset("MBL_CO2")
-def _prepare_mblco2(self: SourceData) -> Path:
+def _prepare_mblco2(self: SourceDatasets) -> Path:
     """
     Ensure the MBL xco2 dataset exists locally.
 
@@ -660,7 +690,7 @@ def _prepare_mblco2(self: SourceData) -> Path:
 
     The file is stored under self.source_data_dir / "MBL_CO2" / "co2_GHGreference.1785677502_surface.txt".
     """
-    dataset_dir = self.source_data_dir / "MBL_CO2"
+    dataset_dir = self.cache_root / "MBL_CO2"
     dataset_dir.mkdir(parents=True, exist_ok=True)
     path = dataset_dir / "co2_GHGreference.1785677502_surface.txt"
 
@@ -683,12 +713,11 @@ def _prepare_mblco2(self: SourceData) -> Path:
     else:
         print(f"✔️  Using existing MBL_CO2 dataset: {path}")
 
-    self.mblco2_path = path
     return path
 
 
 @register_dataset("ERA5")
-def _prepare_era5(self: SourceData) -> None:
+def _prepare_era5(self: SourceDatasets) -> None:
     """
     No-op handler for ERA5.
 
@@ -714,7 +743,7 @@ def _prepare_era5(self: SourceData) -> None:
 
 
 @register_dataset("TPXO")
-def _prepare_tpxo(self: SourceData) -> dict[str, Path]:
+def _prepare_tpxo(self: SourceDatasets) -> dict[str, Path]:
     """
     Verify that the user has provided TPXO tidal data files.
 
@@ -735,7 +764,7 @@ def _prepare_tpxo(self: SourceData) -> dict[str, Path]:
     FileNotFoundError
         If the TPXO directory or any required files are missing.
     """
-    tpxo_path = self.source_data_dir / "TPXO" / "TPXO10.v2a"
+    tpxo_path = self.cache_root / "TPXO" / "TPXO10.v2a"
 
     tpxo_dict = {
         "grid": tpxo_path / "grid_tpxo10v2a.nc",
@@ -775,7 +804,7 @@ def _prepare_tpxo(self: SourceData) -> dict[str, Path]:
 
 
 @register_dataset("WOA")
-def _prepare_woa(self: SourceData) -> Path:
+def _prepare_woa(self: SourceDatasets) -> Path:
     """
     Verify that the user has provided 12 monthly WOA climatology files (s01..s12).
 
@@ -797,7 +826,7 @@ def _prepare_woa(self: SourceData) -> Path:
     FileNotFoundError
         If the WOA directory or any of the 12 monthly files are missing.
     """
-    woa_path = self.source_data_dir / "WOA"
+    woa_path = self.cache_root / "WOA"
 
     # The "_04" suffix pins the quarter-degree grid. Without it this glob would also
     # match the 1-degree salinity files that the WOA_BGC handler stages into the same
@@ -845,7 +874,7 @@ def _prepare_woa(self: SourceData) -> Path:
 
 
 @register_dataset("WOA_BGC")
-def _prepare_woa_bgc(self: SourceData) -> Path:
+def _prepare_woa_bgc(self: SourceDatasets) -> Path:
     """
     Ensure the WOA23 1-degree BGC climatology exists locally.
 
@@ -873,7 +902,7 @@ def _prepare_woa_bgc(self: SourceData) -> Path:
         The directory holding the files, which is what roms-tools expects as the
         source ``path`` for a ``{"name": "WOA"}`` BGC source.
     """
-    woa_path = self.source_data_dir / "WOA"
+    woa_path = self.cache_root / "WOA"
     woa_path.mkdir(parents=True, exist_ok=True)
 
     targets: list[tuple[str, str]] = []
@@ -926,7 +955,7 @@ def _prepare_woa_bgc(self: SourceData) -> Path:
 
 
 @register_dataset("GLOFAS")
-def _prepare_glofas(self: SourceData) -> Path:
+def _prepare_glofas(self: SourceDatasets) -> Path:
     """
     Verify that the user has provided a preprocessed GloFAS v4.0 river discharge file.
 
@@ -948,7 +977,7 @@ def _prepare_glofas(self: SourceData) -> Path:
     FileNotFoundError
         If the file is missing at the expected location.
     """
-    glofas_path = self.source_data_dir / "GLOFAS" / GLOFAS_FILENAME
+    glofas_path = self.cache_root / "GLOFAS" / GLOFAS_FILENAME
 
     if not glofas_path.exists():
         raise FileNotFoundError(
@@ -970,7 +999,7 @@ def _prepare_glofas(self: SourceData) -> Path:
 
 
 @register_dataset("EMOD")
-def _prepare_emod(self: SourceData) -> Path:
+def _prepare_emod(self: SourceDatasets) -> Path:
     """
     Verify that the user has provided an EMODnet bathymetry/topography file.
 
@@ -992,7 +1021,7 @@ def _prepare_emod(self: SourceData) -> Path:
     FileNotFoundError
         If the EMOD directory or no matching NetCDF file is found.
     """
-    emod_dir = self.source_data_dir / "EMOD"
+    emod_dir = self.cache_root / "EMOD"
     matches = sorted(emod_dir.glob("*.nc")) if emod_dir.exists() else []
 
     if not matches:
@@ -1015,7 +1044,7 @@ def _prepare_emod(self: SourceData) -> Path:
 
 
 @register_dataset("RIVR2O")
-def _prepare_rivr2o(self: SourceData) -> Path:
+def _prepare_rivr2o(self: SourceDatasets) -> Path:
     """
     Verify that the user has provided RIVR2O river biogeochemistry export files.
 
@@ -1037,7 +1066,7 @@ def _prepare_rivr2o(self: SourceData) -> Path:
     FileNotFoundError
         If the RIVR2O directory or no matching NetCDF file is found.
     """
-    rivr2o_dir = self.source_data_dir / "RIVR2O"
+    rivr2o_dir = self.cache_root / "RIVR2O"
     matches = sorted(rivr2o_dir.glob("*.nc")) if rivr2o_dir.exists() else []
 
     if not matches:
@@ -1069,7 +1098,7 @@ GLODAP_OPTIONAL_FILES = ("temperature", "salinity")
 
 
 @register_dataset("GLODAP")
-def _prepare_glodap(self: SourceData) -> Path:
+def _prepare_glodap(self: SourceDatasets) -> Path:
     """
     Verify that the user has provided GLODAPv2.2016b mapped-climatology files.
 
@@ -1095,7 +1124,7 @@ def _prepare_glodap(self: SourceData) -> Path:
     FileNotFoundError
         If the GLODAP directory or any required variable file is missing.
     """
-    glodap_dir = self.source_data_dir / "GLODAP"
+    glodap_dir = self.cache_root / "GLODAP"
 
     missing_required = [
         f"{GLODAP_FILE_PREFIX}.{var}.nc"

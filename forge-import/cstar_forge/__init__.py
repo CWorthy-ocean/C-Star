@@ -19,12 +19,10 @@ os.environ["UCX_LOG_LEVEL"] = "error"
 # Public name -> (module, attribute-or-None). ``None`` means the name *is* the
 # submodule.
 _LAZY: dict[str, tuple[str, str | None]] = {
-    "catalog": ("cstar_forge.catalog", None),
     "config": ("cstar_forge.config", None),
-    "diagnostics": ("cstar_forge.diagnostics", None),
     "models": ("cstar_forge.models", None),
     "settings": ("cstar_forge.forge.settings", None),
-    "source_data": ("cstar_forge.forge.source_data", None),
+    "source_datasets": ("cstar_forge.forge.source_datasets", None),
     "DomainCatalog": ("cstar_forge.domain_catalog", "DomainCatalog"),
     "LayeredCatalog": ("cstar_forge.domain_catalog", "LayeredCatalog"),
     "build_catalog_stack": ("cstar_forge.domain_catalog", "build_catalog_stack"),
@@ -39,14 +37,12 @@ __all__ = [
     "ForgeExecutor",
     "LayeredCatalog",
     "build_catalog_stack",
-    "catalog",
     "config",
     "default_catalog",
     "default_catalog_stack",
-    "diagnostics",
     "models",
     "settings",
-    "source_data",
+    "source_datasets",
     "user_catalog_root",
 ]
 

@@ -1,7 +1,7 @@
 # Input Data Generation Overview
 
 > **This subsystem is driven by the forge application** (`cstar forge run <forge_blueprint.yaml>`, or equivalently
-> `python -m cstar_forge.run`), which loads a `ForgeBlueprint` and calls `ForgeExecutor.generate_inputs()`
+> `cstar forge run`), which loads a `ForgeBlueprint` and calls `ForgeExecutor.generate_inputs()`
 > (`cstar_forge/forge/executor.py`). That method constructs a `RomsMarblInputData`
 > instance and calls `generate_all()` on it. Constructing `RomsMarblInputData` directly
 > (as shown later in this doc) is for developers debugging or extending input generation
@@ -81,7 +81,7 @@ The `RomsMarblInputData` class provides ROMS-MARBL specific input generation:
 - `domain_name`, `start_date`, `end_date`, `input_data_dir`: core config, inherited from `InputData`
 - `grid`: ROMS grid object (`rt.Grid`), plus optional `grid_parent`/`grid_child`/`metadata_child` for nesting
 - `boundaries`: Open boundary configuration (`OpenBoundaries`)
-- `source_data`: Prepared source datasets (`SourceData`)
+- `source_data`: Prepared source datasets (`SourceDatasets`)
 - `forcing_override`: the fully-resolved initial-conditions + forcing selection driving generation
   (keys mirror the blueprint's `inputs` block: `initial_conditions`, `forcing.surface`, `forcing.boundary`, etc.)
 - `cdr_forcing`: optional user-provided CDR forcing dict
@@ -119,17 +119,17 @@ forcing selection injected by the caller — see `cstar_forge.forge.forge_bluepr
 For each item in `input_list`:
 1. Look up handler in `INPUT_REGISTRY`
 2. Build input arguments from defaults + kwargs
-3. Resolve source paths via `SourceData`
+3. Resolve source paths via `SourceDatasets`
 4. Call handler function
 5. Update blueprint and settings
 
 ### Step 3: Source Resolution
 
 Source blocks (e.g., `{"name": "GLORYS"}`) are resolved:
-- Check streamability via `SourceData.streamable_for_source()` (no local path needed for
+- Check streamability via `SourceDatasets.streamable_for_source()` (no local path needed for
   streamable sources, e.g. ERA5)
-- Get prepared file path via `SourceData.path_for_source()` for non-streamable sources
-- `SourceData.dataset_key_for_source()` is used elsewhere (subchunk-reference memoization for
+- Get prepared file path via `SourceDatasets.path_for_source()` for non-streamable sources
+- `SourceDatasets.dataset_key_for_source()` is used elsewhere (subchunk-reference memoization for
   multi-file GLORYS sources), not in this resolution step itself
 
 ### Step 4: Settings Population

@@ -1,6 +1,6 @@
 # ROMS-MARBL blueprint (`B_{name}.yaml`)
 
-Processing a forge blueprint (`cstar forge run`, or `python -m cstar_forge.run`)
+Processing a forge blueprint (`cstar forge run`, or `cstar forge run`)
 emits a **ROMS-MARBL blueprint** — the YAML handoff that
 [C-Star](https://c-star.readthedocs.io) builds and runs (`cstar blueprint run
 B_{name}.yaml`). It is written to the blueprint's working directory alongside a

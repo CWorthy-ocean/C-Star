@@ -5,7 +5,7 @@ download URL), and the resolution helpers.
 
 This module holds ONLY pure data + functions (stdlib/typing) so it can be imported
 by both:
-  * ``cstar_forge.forge.source_data`` (the heavy acquisition layer — copernicusmarine /
+  * ``cstar_forge.forge.source_datasets`` (the heavy acquisition layer — copernicusmarine /
     gdown / roms_tools), which re-exports these names for its existing consumers, and
   * ``cstar_forge.forge_blueprint_resolve`` (the dependency-light resolver),
     which previously carried a hand-copied duplicate of this table.
@@ -115,12 +115,12 @@ ROMS_TOOLS_SOURCE_NAME: dict[str, str] = {"WOA_BGC": "WOA"}
 # @register_dataset("CONSTANTS") handler and none is needed).
 STREAMABLE_SOURCES = ["ERA5", "DAI", "CONSTANTS"]
 
-# Recognized dataset keys that Forge does NOT stage locally — they have no SourceData
+# Recognized dataset keys that Forge does NOT stage locally — they have no SourceDatasets
 # handler because something else provides them:
 #   - "ETOPO5": roms-tools fetches this topography itself at grid-build time (the
 #               SRTM15 alternative IS staged by Forge and injected into grid_kwargs).
 #   - "DAI":    river dataset streamed at run time (placeholder; no handler yet).
-# `SourceData` treats these as valid-but-skipped, distinct from a genuinely unknown key
+# `SourceDatasets` treats these as valid-but-skipped, distinct from a genuinely unknown key
 # (a typo), which still raises. NOTE: "GLOFAS" (the other river source) is NOT here —
 # unlike DAI it has no roms-tools auto-download, so it IS staged (verified) by Forge via
 # a real @register_dataset("GLOFAS") handler, same as the TPXO/WOA user-provided pattern.
@@ -128,7 +128,7 @@ UNSTAGED_DATASETS: set[str] = {"ETOPO5", "DAI"}
 
 # Pseudo-source names that are computed/derived at generation time, not fetched or staged
 # by Forge at all -- unlike UNSTAGED_DATASETS above, these aren't datasets in any sense
-# (no @register_dataset handler exists or ever will), so they must never reach SourceData
+# (no @register_dataset handler exists or ever will), so they must never reach SourceDatasets
 # or land in ForgeBlueprint.datasets/resolved_datasets in the first place:
 #   - "CONSTANTS": depth-invariant constant value(s) supplied inline in the blueprint
 #                  (SourceSpec.constants), or roms-tools' own auto-downloaded river-BGC

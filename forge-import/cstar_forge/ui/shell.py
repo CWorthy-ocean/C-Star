@@ -41,7 +41,9 @@ class AppShell:
     def __init__(self, pages: list[tuple[str, Any]], *, W: Any = None) -> None:
         """Build the shell from ``pages``; imports ``ipywidgets`` lazily if ``W`` is omitted."""
         if W is None:
-            import ipywidgets as W
+            import ipywidgets
+
+            W = ipywidgets
         self.W = W
         self.pages = pages
 

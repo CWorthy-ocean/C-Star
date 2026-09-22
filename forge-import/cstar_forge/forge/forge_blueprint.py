@@ -59,7 +59,7 @@ import re
 import subprocess
 import warnings
 from datetime import UTC, datetime
-from enum import Enum
+from enum import StrEnum
 from importlib.metadata import PackageNotFoundError
 from importlib.metadata import version as _pkg_version
 from pathlib import Path
@@ -125,7 +125,7 @@ def _installed_version(package_name: str) -> str | None:
 # ===========================================================================
 
 
-class SurfaceType(str, Enum):
+class SurfaceType(StrEnum):
     """Accepted values for ``SurfaceForcing.type``."""
 
     PHYSICS = "physics"  # wind, heat, freshwater fluxes (ERA5)
@@ -133,7 +133,7 @@ class SurfaceType(str, Enum):
     RESTORING = "restoring"  # SSS restoring (WOA, UNIFIED)
 
 
-class CoarseGridMode(str, Enum):
+class CoarseGridMode(StrEnum):
     """Accepted values for ``SurfaceForcing.coarse_grid_mode``."""
 
     AUTO = "auto"  # coarsen only when source is coarser than ROMS grid (default)
@@ -141,13 +141,13 @@ class CoarseGridMode(str, Enum):
     NEVER = "never"  # always use the full-resolution source
 
 
-class RestoringForce(str, Enum):
+class RestoringForce(StrEnum):
     """Variables accepted in ``SurfaceForcing.restoring_forces``."""
 
     SSS = "sss"  # sea-surface salinity restoring (WOA or UNIFIED)
 
 
-class ClimatologyMode(str, Enum):
+class ClimatologyMode(StrEnum):
     """Accepted values for ``RiverForcing.convert_to_climatology``."""
 
     NEVER = "never"
@@ -155,7 +155,7 @@ class ClimatologyMode(str, Enum):
     ALWAYS = "always"
 
 
-class BgcInterpMethod(str, Enum):
+class BgcInterpMethod(StrEnum):
     """Accepted values for ``bgc_interpolation_method`` on ``InitialConditions``
     and ``BoundaryForcing`` (roms-tools >=4). Selects the vertical interpolation
     used for BGC tracers.
@@ -166,7 +166,7 @@ class BgcInterpMethod(str, Enum):
     DENSITY_MLD = "density_mld"  # mixed-layer-depth-anchored density interpolation
 
 
-class Prefill(str, Enum):
+class Prefill(StrEnum):
     """Accepted values for ``prefill`` on ``SurfaceForcing``, ``BoundaryForcing``,
     ``TidalForcing``, and ``InitialConditions`` (roms-tools >=4): how to fill NaN
     (land/void) cells in the *source* before regridding. ``None`` (the default,
@@ -181,7 +181,7 @@ class Prefill(str, Enum):
     )
 
 
-class RegridMethod(str, Enum):
+class RegridMethod(StrEnum):
     """Accepted values for ``regrid_method`` on ``SurfaceForcing``,
     ``BoundaryForcing``, ``TidalForcing``, and ``InitialConditions`` (roms-tools
     >=4): the horizontal regrid engine, chosen independently of ``prefill``.
@@ -192,7 +192,7 @@ class RegridMethod(str, Enum):
     SCIPY = "scipy"  # force scipy interp (byte-reproducible with prefill)
 
 
-class ExtrapMethod(str, Enum):
+class ExtrapMethod(StrEnum):
     """Accepted values for ``extrap_method`` on ``SurfaceForcing``,
     ``BoundaryForcing``, ``TidalForcing``, and ``InitialConditions`` (roms-tools
     >=4): xESMF destination extrapolation on the default (prefill=None) path.
@@ -203,7 +203,7 @@ class ExtrapMethod(str, Enum):
     NEAREST_S2D = "nearest_s2d"  # single nearest source point
 
 
-class FillValues(str, Enum):
+class FillValues(StrEnum):
     """Accepted values for ``VolumeRelease.fill_values``."""
 
     AUTO = "auto"  # fill missing tracer concentrations with dataset defaults
@@ -214,13 +214,13 @@ class FillValues(str, Enum):
 # Mirrors the dataset-registry dicts / if-elif chains in the installed roms-tools.
 
 
-class PhysicsSurfaceSource(str, Enum):
+class PhysicsSurfaceSource(StrEnum):
     """Source names accepted by SurfaceForcing when type='physics'."""
 
     ERA5 = "ERA5"
 
 
-class BgcSurfaceSource(str, Enum):
+class BgcSurfaceSource(StrEnum):
     """Source names accepted by SurfaceForcing when type='bgc'."""
 
     UNIFIED = "UNIFIED"
@@ -228,20 +228,20 @@ class BgcSurfaceSource(str, Enum):
     MBL_CO2 = "MBL_co2"
 
 
-class RestoringSurfaceSource(str, Enum):
+class RestoringSurfaceSource(StrEnum):
     """Source names accepted by SurfaceForcing when type='restoring'."""
 
     WOA = "WOA"
     UNIFIED = "UNIFIED"
 
 
-class PhysicsBoundarySource(str, Enum):
+class PhysicsBoundarySource(StrEnum):
     """Source names accepted by BoundaryForcing when type='physics'."""
 
     GLORYS = "GLORYS"
 
 
-class BgcBoundarySource(str, Enum):
+class BgcBoundarySource(StrEnum):
     """Source names accepted by BoundaryForcing when type='bgc'."""
 
     UNIFIED = "UNIFIED"
@@ -258,13 +258,13 @@ class BgcBoundarySource(str, Enum):
     ESPER = "ESPER"  # derived from physics T/S via PyESPER; see SourceSpec.esper_*
 
 
-class InitialConditionsSource(str, Enum):
+class InitialConditionsSource(StrEnum):
     """Source names accepted by InitialConditions (physics)."""
 
     GLORYS = "GLORYS"
 
 
-class BgcInitialConditionsSource(str, Enum):
+class BgcInitialConditionsSource(StrEnum):
     """Source names accepted by InitialConditions (bgc_sources[].source)."""
 
     UNIFIED = "UNIFIED"
@@ -281,13 +281,13 @@ class BgcInitialConditionsSource(str, Enum):
     ESPER = "ESPER"  # derived from physics T/S via PyESPER; see SourceSpec.esper_*
 
 
-class TidalSource(str, Enum):
+class TidalSource(StrEnum):
     """Source names accepted by TidalForcing."""
 
     TPXO = "TPXO"
 
 
-class RiverSource(str, Enum):
+class RiverSource(StrEnum):
     """Source names accepted by RiverForcing."""
 
     DAI = "DAI"
@@ -295,14 +295,14 @@ class RiverSource(str, Enum):
     CUSTOM_FILE = "CUSTOM_FILE"  # user-supplied pre-made river forcing netCDF
 
 
-class RiverBgcSource(str, Enum):
+class RiverBgcSource(StrEnum):
     """Source names accepted by RiverForcing's ``bgc_source`` (river biogeochemistry)."""
 
     CONSTANTS = "CONSTANTS"
     RIVR2O = "RIVR2O"
 
 
-class RiverTemperatureSource(str, Enum):
+class RiverTemperatureSource(StrEnum):
     """Source names accepted by RiverForcing's ``surface_forcing_source`` (the
     air-temperature dataset river temperature is sampled from). roms-tools
     currently accepts only ERA5.
@@ -311,7 +311,7 @@ class RiverTemperatureSource(str, Enum):
     ERA5 = "ERA5"
 
 
-class TopographySource(str, Enum):
+class TopographySource(StrEnum):
     """Source names accepted by Grid (without a custom path)."""
 
     ETOPO5 = "ETOPO5"
@@ -346,7 +346,7 @@ _HASH_EXCLUDE = {
 #
 # v3 (2026-07): ``identity`` dropped ``model_name``/``grid_name``/``ensemble_id`` in
 # favor of a single user-editable ``name``; ``grid_name`` moved onto ``domain`` (it is
-# results-affecting -- SourceData keys cache filenames off it -- so it belongs in the
+# results-affecting -- SourceDatasets keys cache filenames off it -- so it belongs in the
 # hashed section, not the excluded ``identity`` block). ``from_yaml`` migrates v2 files.
 # v4 (2026-07): ``ForgeBlueprint`` became a ``cstar.orchestration.models.Blueprint``
 # subclass, which requires top-level ``name``/``description`` fields; the ``identity``
@@ -805,14 +805,14 @@ class Domain(_Section):
     """
 
     grid_name: (
-        str  # e.g. "test-tiny" -- results-affecting (SourceData cache keys off it)
+        str  # e.g. "test-tiny" -- results-affecting (SourceDatasets cache keys off it)
     )
     grid_kwargs: dict[str, Any]
     topography_source: TopographySource | str = TopographySource.ETOPO5
     # str fallback allows a custom path dict to be passed through grid_kwargs
     topography_path: str | None = None
     """Explicit path to a custom topography file. ``None`` (the default) means the
-    executor derives it: staged from :class:`SourceData` for non-ETOPO5 sources, or
+    executor derives it: staged from :class:`SourceDatasets` for non-ETOPO5 sources, or
     fetched by roms-tools itself for ETOPO5. Set this to point at a non-default file."""
     open_boundaries: OpenBoundaries
     partitioning: Partitioning
@@ -914,7 +914,7 @@ class SourceSpec(_Section):
     glorys_layout: Literal["global", "regional"] | None = None
     path: str | None = None
     """Explicit dataset path override. ``None`` (the default) means the path is
-    derived from :class:`SourceData` at processing time (the standard staged/streamed
+    derived from :class:`SourceDatasets` at processing time (the standard staged/streamed
     location). Set this only to point at a non-default local file. For an ``ESPER``
     source, this is the path to a PyESPER repository checkout (containing
     ``Mat_fullgrid/`` and ``NeuralNetworks/``), not a dataset file -- optional: when
@@ -1311,7 +1311,7 @@ class Forcing(_Section):
     a domain with every open boundary disabled."""
     tidal: list[TidalForcingItem] = Field(default_factory=list)
     river: list[RiverForcingItem] = Field(default_factory=list)
-    # logical-name -> resolved registry entry (snapshot of source_data.py tables)
+    # logical-name -> resolved registry entry (snapshot of source_datasets.py tables)
     resolved_datasets: dict[str, ResolvedDataset] = Field(default_factory=dict)
 
 

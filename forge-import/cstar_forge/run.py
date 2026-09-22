@@ -6,12 +6,12 @@ This is the **disposable host-resolution glue**: it auto-detects the host via
 typed. When the forge application relocates into C-Star, C-Star provides its own entry
 point + host resolution, and this module is not carried over.
 
-CLI:  ``python -m cstar_forge.run <forge_blueprint.yaml> [options]``
+CLI:  ``cstar forge run <forge_blueprint.yaml> [options]`` (``cstar_forge.cli``
+parses the options and calls ``run_blueprint`` below).
 """
 
 from __future__ import annotations
 
-import argparse
 import contextlib
 import logging
 import os
@@ -208,130 +208,65 @@ def process(spec, *, working_dir=None, **kwargs):
         return process_forge_blueprint(cfg, host=host, **kwargs)
 
 
-def main(argv: list | None = None, *, prog: str = "python -m cstar_forge.run") -> int:
-    """Process a forge blueprint from the command line.
+def _dask_client_kwargs(
+    *,
+    dask_workers: int | None,
+    dask_threads_per_worker: int | None,
+    dask_memory_limit: str | None,
+    dask_processes: bool | None,
+    dask_dashboard_address: str | None,
+) -> dict:
+    """Assemble the ``dask.distributed.Client`` kwargs for ``--dask``.
 
-    ``prog`` names the invoking command in ``--help`` output; ``cstar_forge.cli``
-    passes ``"cstar forge run"`` so the usage line matches what the user typed.
+    Node-local disk beats network scratch for dask spill; respects ``TMPDIR``
+    when set, but defaults to ``/tmp`` rather than network-mounted scratch.
+    Each ``--dask-*`` flag is omitted from the kwargs (letting dask apply its
+    own default) unless explicitly given.
     """
-    parser = argparse.ArgumentParser(
-        prog=prog,
-        description="Process a forge_blueprint.yaml on this machine "
-        "(generate inputs + configure build).",
-    )
-    parser.add_argument("forge_blueprint", help="path to a forge_blueprint.yaml")
-    parser.add_argument(
-        "--no-data", action="store_true", help="skip ensure_source_data"
-    )
-    parser.add_argument(
-        "--no-generate", action="store_true", help="skip generate_inputs"
-    )
-    parser.add_argument(
-        "--no-configure", action="store_true", help="skip configure_build"
-    )
-    parser.add_argument(
-        "--clobber", action="store_true", help="overwrite existing input files"
-    )
-    parser.add_argument(
-        "--no-dask", action="store_true", help="disable dask in input generation"
-    )
-    parser.add_argument(
-        "--dask-num-workers",
-        type=int,
-        default=8,
-        help="cap on dask's default local threaded-scheduler worker count during "
-        "input generation (each worker's own BLAS/numba call is, in turn, capped "
-        "to its own share of the remaining cores), to avoid thread oversubscription "
-        "hangs on high-core HPC nodes. Ignored with --no-dask. Distinct from "
-        "--dask-workers, which sizes the opt-in --dask distributed Client.",
-    )
-    parser.add_argument(
-        "--serialize-dask-write",
-        action=argparse.BooleanOptionalAction,
-        default=None,
-        help="force every IC/boundary NetCDF write onto dask's synchronous "
-        "scheduler, one task at a time with BLAS/numba boosted to every core, "
-        "with --serialize-dask-write: a manual low-memory/troubleshooting tool "
-        "that bounds peak memory to one task's footprint at a wall-time cost "
-        "(default and --no-serialize-dask-write are the ordinary concurrent "
-        "write; PyESPER protects its own chunks). This is only the FALLBACK: a "
-        "bgc source that sets its own 'serialize_dask' in the blueprint "
-        "(BgcSourceItem) always wins for that source, whatever this flag is "
-        "set to -- this flag only decides the write behavior for sources that "
-        "leave it unset (None). Ignored with --no-dask.",
-    )
-    parser.add_argument(
-        "--subchunk",
-        action=argparse.BooleanOptionalAction,
-        default=True,
-        help="just-in-time build a kerchunk-subchunked reference for multi-file "
-        "GLORYS sources and read from it instead of the raw per-day files "
-        "(see cstar_forge/forge/glorys_subchunk.py). On by default; disable "
-        "with --no-subchunk",
-    )
-    parser.add_argument(
-        "--only-inputs",
-        nargs="+",
-        default=None,
-        metavar="INPUT",
-        help="generate only these input categories (grid, initial_conditions, "
-        "surface, boundary, tidal, river, cdr) and skip configure_build/blueprint "
-        "emission -- a one-off run for slow or human-checked inputs. Existing "
-        "files are still reused per the normal skip-existing logic. Re-run "
-        "without this flag later to generate the rest and emit the blueprint.",
-    )
-    parser.add_argument(
-        "--host-only", action="store_true", help="just print the resolved host and exit"
-    )
-    parser.add_argument(
-        "--verbose",
-        action="store_true",
-        help="enable verbose diagnostics: timestamped logging throughout the "
-        "executor, roms-tools verbose=True on the calls that support it, and "
-        "timing/memory instrumentation around roms-tools constructors and saves",
-    )
-    parser.add_argument(
-        "--working-dir",
-        default=None,
-        help="override the spec's working_dir (per-run artifact root) for this host",
-    )
-    parser.add_argument(
-        "--dask",
-        action="store_true",
-        help="start a dask.distributed Client for this run, so input generation "
-        "uses it instead of dask's default local threaded scheduler. Omitting "
-        "this flag leaves current behavior unchanged. Combine with the other "
-        "--dask-* flags to sweep cluster configs.",
-    )
-    parser.add_argument(
-        "--dask-workers", type=int, default=None, help="n_workers (requires --dask)"
-    )
-    parser.add_argument(
-        "--dask-threads-per-worker",
-        type=int,
-        default=None,
-        help="threads_per_worker (requires --dask)",
-    )
-    parser.add_argument(
-        "--dask-memory-limit",
-        default=None,
-        help="per-worker memory_limit, e.g. '4GB' (requires --dask)",
-    )
-    parser.add_argument(
-        "--dask-processes",
-        action=argparse.BooleanOptionalAction,
-        default=None,
-        help="process-based workers (--dask-processes) vs thread-based "
-        "(--no-dask-processes); omit to use dask's own default (requires --dask)",
-    )
-    parser.add_argument(
-        "--dask-dashboard-address",
-        default=None,
-        help="dashboard address, e.g. ':8787' (requires --dask)",
-    )
-    args = parser.parse_args(argv)
+    client_kwargs: dict = {"local_directory": os.environ.get("TMPDIR", "/tmp")}
+    if dask_workers is not None:
+        client_kwargs["n_workers"] = dask_workers
+    if dask_threads_per_worker is not None:
+        client_kwargs["threads_per_worker"] = dask_threads_per_worker
+    if dask_memory_limit is not None:
+        client_kwargs["memory_limit"] = dask_memory_limit
+    if dask_processes is not None:
+        client_kwargs["processes"] = dask_processes
+    if dask_dashboard_address is not None:
+        client_kwargs["dashboard_address"] = dask_dashboard_address
+    return client_kwargs
 
-    if args.verbose:
+
+def run_blueprint(
+    *,
+    forge_blueprint: str,
+    no_data: bool = False,
+    no_generate: bool = False,
+    no_configure: bool = False,
+    clobber: bool = False,
+    no_dask: bool = False,
+    dask_num_workers: int = 8,
+    serialize_dask_write: bool | None = None,
+    subchunk: bool = True,
+    only_inputs: list[str] | None = None,
+    host_only: bool = False,
+    verbose: bool = False,
+    working_dir: str | None = None,
+    dask: bool = False,
+    dask_workers: int | None = None,
+    dask_threads_per_worker: int | None = None,
+    dask_memory_limit: str | None = None,
+    dask_processes: bool | None = None,
+    dask_dashboard_address: str | None = None,
+) -> int:
+    """Process a forge blueprint given already-parsed option values.
+
+    Body of the former ``main()`` after argument parsing -- ``cstar_forge.cli``'s
+    typer ``run`` command parses ``sys.argv`` and calls this with one keyword
+    argument per option, so the argument surface (names, types, defaults) lives
+    once, in the typer command, and this function only executes it.
+    """
+    if verbose:
         logging.basicConfig(
             level=logging.INFO,
             format="%(asctime)s | %(levelname)s | %(name)s | %(message)s",
@@ -341,33 +276,27 @@ def main(argv: list | None = None, *, prog: str = "python -m cstar_forge.run") -
             logging.getLogger(name).setLevel(logging.DEBUG)
     else:
         logging.basicConfig(level=logging.INFO, format="%(message)s", force=True)
-    cfg = ForgeBlueprint.from_yaml(args.forge_blueprint)
-    wd = args.working_dir if args.working_dir is not None else cfg.working_dir
+    cfg = ForgeBlueprint.from_yaml(forge_blueprint)
+    wd = working_dir if working_dir is not None else cfg.working_dir
     config.ensure_data_dirs()
     host = config.resolve_host(wd)
 
-    with _capture_output(host.working_dir, verbose=args.verbose, cfg=cfg):
+    with _capture_output(host.working_dir, verbose=verbose, cfg=cfg):
         print(host.summary(casename=cfg.casename))
-        if args.host_only:
+        if host_only:
             return 0
 
         dask_client = None
-        if args.dask:
+        if dask:
             from dask.distributed import Client
 
-            # Node-local disk beats network scratch for dask spill; respect TMPDIR
-            # when set, but default to /tmp rather than network-mounted scratch.
-            client_kwargs = {"local_directory": os.environ.get("TMPDIR", "/tmp")}
-            if args.dask_workers is not None:
-                client_kwargs["n_workers"] = args.dask_workers
-            if args.dask_threads_per_worker is not None:
-                client_kwargs["threads_per_worker"] = args.dask_threads_per_worker
-            if args.dask_memory_limit is not None:
-                client_kwargs["memory_limit"] = args.dask_memory_limit
-            if args.dask_processes is not None:
-                client_kwargs["processes"] = args.dask_processes
-            if args.dask_dashboard_address is not None:
-                client_kwargs["dashboard_address"] = args.dask_dashboard_address
+            client_kwargs = _dask_client_kwargs(
+                dask_workers=dask_workers,
+                dask_threads_per_worker=dask_threads_per_worker,
+                dask_memory_limit=dask_memory_limit,
+                dask_processes=dask_processes,
+                dask_dashboard_address=dask_dashboard_address,
+            )
             dask_client = Client(**client_kwargs)
             print(f"\n{dask_client}")
             print(f"Dask dashboard: {dask_client.dashboard_link}")
@@ -376,27 +305,30 @@ def main(argv: list | None = None, *, prog: str = "python -m cstar_forge.run") -
             executor = process_forge_blueprint(
                 cfg,
                 host=host,
-                ensure_data=not args.no_data,
-                generate=not args.no_generate,
-                configure=not args.no_configure,
-                clobber=args.clobber,
-                use_dask=not args.no_dask,
-                dask_num_workers=args.dask_num_workers,
-                serialize_dask_write=args.serialize_dask_write,
-                subchunk=args.subchunk,
-                only_inputs=args.only_inputs,
-                verbose=args.verbose,
+                ensure_data=not no_data,
+                generate=not no_generate,
+                configure=not no_configure,
+                clobber=clobber,
+                use_dask=not no_dask,
+                dask_num_workers=dask_num_workers,
+                serialize_dask_write=serialize_dask_write,
+                subchunk=subchunk,
+                only_inputs=only_inputs,
+                verbose=verbose,
             )
         finally:
             if dask_client is not None:
                 dask_client.close()
 
-        if not args.no_configure and not args.only_inputs:
+        if not no_configure and not only_inputs:
             blueprint_path = executor.path_roms_marbl_blueprint()
             print(f"\nBlueprint: {blueprint_path}")
             print(f"Run it with:  cstar blueprint run {blueprint_path}")
         return 0
 
 
-if __name__ == "__main__":  # pragma: no cover
-    raise SystemExit(main())
+if __name__ == "__main__":  # pragma: no cover - retired entry point
+    raise SystemExit(
+        "cstar_forge.run is no longer a command; use `cstar forge run <blueprint>` "
+        "(or `python -m cstar_forge.cli run <blueprint>` without C-Star's CLI)."
+    )

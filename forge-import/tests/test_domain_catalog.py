@@ -700,22 +700,6 @@ class TestReviewFixes:
         # Bundled entries visible through a hand-built stack, same as the env path.
         assert "wio-toy" in stack.domain_names
 
-    def test_blueprint_shim_works_on_layered_default(self, monkeypatch, tmp_path):
-        monkeypatch.setenv("CSTAR_FORGE_CATALOG", str(tmp_path / "user-layer"))
-        import cstar_forge.catalog as catalog_shim
-
-        bp = catalog_shim.BlueprintCatalog()
-        files = bp.find_blueprint_files()
-        assert isinstance(files, list)
-        df = bp.blueprintDF()
-        assert hasattr(df, "empty")
-        assert bp._extract_model_and_grid_name(
-            "cson_roms-marbl_v0.1_wio-toy_10procs"
-        ) == (
-            "cson_roms-marbl_v0.1",
-            "wio-toy",
-        )
-
     def test_layered_copy_domain_into_standalone_and_uniqueness(
         self, monkeypatch, tmp_path
     ):

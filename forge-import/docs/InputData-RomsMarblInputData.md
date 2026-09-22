@@ -1,7 +1,7 @@
 # RomsMarblInputData Class Documentation
 
 > **This subsystem is driven by the forge application** (`cstar forge run`, or the
-> `python -m cstar_forge.run` module CLI it wraps), which
+> `cstar forge run` module CLI it wraps), which
 > calls `ForgeExecutor.generate_inputs()` (`cstar_forge/forge/executor.py`), which constructs a
 > `RomsMarblInputData` and calls `generate_all()` on it. Direct construction, as shown in this
 > document, is for developers debugging or extending input generation.
@@ -24,7 +24,7 @@ class RomsMarblInputData(InputData):
 
     grid: rt.Grid
     boundaries: OpenBoundaries
-    source_data: source_data.SourceData
+    source_data: source_datasets.SourceDatasets
     roms_marbl_blueprint_dir: Path
     partitioning: cstar_models.PartitioningParameterSet
     cdr_forcing: dict | None = None
@@ -295,7 +295,7 @@ def _generate_input(self, key: str = "input_key", **kwargs):
 
 **Source Resolution:**
 - Uses `source` and optional `bgc_sources` (zero or more `BgcSourceItem`-shaped entries) from kwargs
-- Resolves paths via `_resolve_source_block()` / `_resolve_bgc_sources_list()` → `SourceData.path_for_source()`
+- Resolves paths via `_resolve_source_block()` / `_resolve_bgc_sources_list()` → `SourceDatasets.path_for_source()`
 - Per-day source file lists are trimmed to `[start_date, start_date + 1 day]` (roms-tools only
   needs the day-of and next-day files for `ini_time`) — see `filter_paths_by_time_window()`
 
@@ -533,7 +533,7 @@ def _resolve_source_block(
     time_window: tuple[datetime, datetime] | None = None,
 ) -> dict[str, Any]:
     """
-    Normalize a "source"/"bgc_source" block and inject a 'path' based on SourceData.
+    Normalize a "source"/"bgc_source" block and inject a 'path' based on SourceDatasets.
 
     Parameters
     ----------
@@ -553,9 +553,9 @@ def _resolve_source_block(
 **Process:**
 1. Normalize to dict: If string, convert to `{"name": str}`
 2. Extract name: Get `name` field from dict (raises if a dict block has no `name`)
-3. Check streamability: `SourceData.streamable_for_source(name, glorys_layout=...)` — if
+3. Check streamability: `SourceDatasets.streamable_for_source(name, glorys_layout=...)` — if
    streamable (e.g. ERA5), don't add a path unless one was explicitly provided
-4. Get path: `SourceData.path_for_source(name, glorys_layout=...)` for non-streamable sources
+4. Get path: `SourceDatasets.path_for_source(name, glorys_layout=...)` for non-streamable sources
 5. **Either** time-window trim (when `time_window` is given and the path is a multi-file list,
    via `filter_paths_by_time_window()`) **or** subchunking (when `subchunk` is on and the source
    is a multi-file GLORYS path: the path is replaced with a memoized kerchunk-subchunked
@@ -563,7 +563,7 @@ def _resolve_source_block(
    subchunk branch so the memoized reference is only ever built from the full file list
 7. Return: Dict with `name` and optional `path`
 
-`SourceData.dataset_key_for_source()` is used elsewhere (subchunk-reference memoization), not
+`SourceDatasets.dataset_key_for_source()` is used elsewhere (subchunk-reference memoization), not
 inside this method.
 
 **Examples:**
@@ -595,7 +595,7 @@ def _build_input_args(
 
     Uses base_kwargs (always provided from input_list).
     Resolves "source", "bgc_source", and "surface_forcing_source" through
-    SourceData.
+    SourceDatasets.
     Merges with extra, where extra overrides defaults.
     """
 ```

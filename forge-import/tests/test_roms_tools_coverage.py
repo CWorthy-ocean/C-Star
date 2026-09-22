@@ -38,7 +38,7 @@ _RT_DATA_INPUTS = {
     "forcings",
     # InitialConditions/BoundaryForcing (roms-tools >=5 monolithic wrapper): the
     # resolved bgc_sources list (forge_blueprint.BgcSourceItem, each already
-    # resolved through SourceData) and the BGCModel class Forge always passes
+    # resolved through SourceDatasets) and the BGCModel class Forge always passes
     # (rt.BGCMarbl) when bgc_sources is non-empty -- both pure data, never a raw
     # user-facing option knob.
     "bgc_sources",

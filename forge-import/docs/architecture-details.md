@@ -51,7 +51,8 @@ cstar-forge/
 │   │                           # or CSTAR_FORGE_CATALOG) over the read-only bundled
 │   │                           # catalog — this stack is the module's default_catalog
 │   ├── config.py               # Path management and system detection
-│   ├── run.py                  # CLI entry point: python -m cstar_forge.run forge_blueprint.yaml
+│   ├── run.py                  # run_blueprint(...): executes a forge_blueprint.yaml
+│   │                           # given already-parsed option values (called by cli.py's 'run')
 │   ├── cli.py                  # 'cstar forge run'/'wizard'/'register-kernel' typer sub-app (cstar.cli entry point)
 │   ├── register_kernel.py      # Jupyter kernelspec + activation wrapper (backs 'cstar forge register-kernel')
 │   ├── ui/                     # Wizard presentation layer (shared UI kit + Voilà front-end)
@@ -74,12 +75,12 @@ cstar-forge/
 │   │   ├── executor.py         # ForgeExecutor — the processing engine
 │   │   ├── host.py             # HostPaths — frozen host-boundary contract injected into the executor
 │   │   ├── input_data.py       # Input file generation
-│   │   ├── source_data.py      # Dataset download and preparation
+│   │   ├── source_datasets.py  # Dataset download and preparation
 │   │   ├── source_registry.py  # Dataset alias map / provenance metadata (stdlib-only)
 │   │   ├── glorys_subchunk.py  # Just-in-time kerchunk subchunking for GLORYS
 │   │   ├── settings.py         # Template rendering
 │   │   └── namelist_model.py   # RunTimeSettings + build_namelist
-│   └── catalog/                # Bundled spec catalog (+ BlueprintCatalog API)
+│   └── catalog/                # Bundled spec catalog
 │       ├── ModelSpec/{model}/model.yaml    # Code repos, templates, settings, defaults
 │       ├── DomainSpec/{grid}/Domain.yaml   # Grid definitions
 │       ├── ForcingSpec/{name}/Forcing.yaml # Forcing source configurations
@@ -140,7 +141,7 @@ into a single `BoundaryForcing` section with `source` + `bgc_sources`, mirroring
 `InitialConditions`) to the current shape, reproducing derived names
 bit-for-bit. `model_name`/`grid_name` live in
 `composition.model.name`/`domain.grid_name`; `grid_name` is results-affecting —
-`SourceData` keys cache filenames off it.
+`SourceDatasets` keys cache filenames off it.
 
 - **`working_dir`** (default `~/cstar/_forge_bp_runs`) is the single per-run artifact root —
   everything the executor *produces* lands under it. It's host/location, not
@@ -187,21 +188,18 @@ mechanism for out-of-tree applications (the older `CSTAR_APP_MODULES` env var wa
 removed); a name already used by a built-in C-Star application cannot be claimed
 this way.
 
-Three ways to run a forge blueprint:
+Two ways to run a forge blueprint:
 
 1. `cstar blueprint run forge_blueprint.yaml` — the app-framework path
    (defaults only; no forge-specific options), the no-frills front door.
    Resolves `application: forge` via the entry point above, so it needs a C-Star
-   release that consults that group; on an older C-Star use one of the entries
-   below.
+   release that consults that group; on an older C-Star use the entry below.
 2. `cstar forge run forge_blueprint.yaml` — the `cli.py` typer sub-app,
    registered via the `cstar.cli` entry-point group (requires a C-Star
-   release with the discovery hook); a full-option argv passthrough to
-   `run.main`. Reach for this for per-run options `cstar blueprint run`
-   doesn't expose (stage selection, `--clobber`, dask tuning,
-   `--only-inputs`, verbosity).
-3. `python -m cstar_forge.run forge_blueprint.yaml` — the module CLI both of
-   the above ultimately reach; always available.
+   release with the discovery hook); a native typer command with the full
+   executor option set, calling `run.run_blueprint`. Reach for this for
+   per-run options `cstar blueprint run` doesn't expose (stage selection,
+   `--clobber`, dask tuning, `--only-inputs`, verbosity).
 
 The app lives in this repo (not relocated into the C-Star repo) — deliberate,
 per §1's target: the blueprint/executor design is still iterating, so

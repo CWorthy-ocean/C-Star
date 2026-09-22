@@ -20,93 +20,74 @@ What this does NOT do (by design — it is host- and artifact-independent):
 * no ``s_coord`` / file paths / ``title`` / ``output_root_name`` (filled at
   processing or derived from the blueprint's own ``name``).
 
-NOTE: the dataset registry below is a *snapshot* of ``cstar_forge.forge.source_data``
+NOTE: the dataset registry below is a *snapshot* of ``cstar_forge.forge.source_datasets``
 mappings, duplicated here to keep this module importable without the heavy stack.
-It should be unified with ``source_data.py`` once the two-phase refactor lands.
+It should be unified with ``source_datasets.py`` once the two-phase refactor lands.
 """
 
 from __future__ import annotations
 
 import copy
 import warnings
-from datetime import datetime
 from pathlib import Path
-from typing import Any, Literal
+from typing import TYPE_CHECKING, Any, Literal
 
 import yaml
 
-# Dual import: package context (production) or standalone file (lightweight / UI / test).
-try:  # pragma: no cover - exercised both ways
-    from cstar_forge.forge.forge_blueprint import (
-        BgcSourceItem,
-        BoundaryForcing,
-        CdrSpec,
-        Code,
-        CodeRepo,
-        Composition,
-        Domain,
-        Forcing,
-        ForgeBlueprint,
-        InitialConditions,
-        OpenBoundaries,
-        Partitioning,
-        Provenance,
-        ResolvedDataset,
-        RiverForcingItem,
-        RunWindow,
-        SourceSpec,
-        SpecRef,
-        SurfaceForcingItem,
-        TemplateRepo,
-        TidalForcingItem,
-        TopographySource,
-        UserProvidedFile,
-        infer_cdr_mode,
-        sanitize_name,
-        vert_kwargs_from_grid_kwargs,
-    )
-except ImportError:  # pragma: no cover
-    from forge_blueprint import (  # type: ignore
-        BgcSourceItem,
-        BoundaryForcing,
-        CdrSpec,
-        Code,
-        CodeRepo,
-        Composition,
-        Domain,
-        Forcing,
-        ForgeBlueprint,
-        InitialConditions,
-        OpenBoundaries,
-        Partitioning,
-        Provenance,
-        ResolvedDataset,
-        RiverForcingItem,
-        RunWindow,
-        SourceSpec,
-        SpecRef,
-        SurfaceForcingItem,
-        TemplateRepo,
-        TidalForcingItem,
-        TopographySource,
-        infer_cdr_mode,
-        sanitize_name,
-    )
+from cstar_forge.forge.forge_blueprint import (
+    BgcSourceItem,
+    BoundaryForcing,
+    CdrSpec,
+    Code,
+    CodeRepo,
+    Composition,
+    Domain,
+    Forcing,
+    ForgeBlueprint,
+    InitialConditions,
+    OpenBoundaries,
+    Partitioning,
+    Provenance,
+    ResolvedDataset,
+    RiverForcingItem,
+    RunWindow,
+    SourceSpec,
+    SpecRef,
+    SurfaceForcingItem,
+    TemplateRepo,
+    TidalForcingItem,
+    TopographySource,
+    UserProvidedFile,
+    infer_cdr_mode,
+    sanitize_name,
+    vert_kwargs_from_grid_kwargs,
+)
+
+# Canonical CDR-output diagnostics helper lives in namelist_model (forge side) so
+# the executor can share it.
+from cstar_forge.forge.namelist_model import (
+    RunTimeSettings,
+    _RunTimeSettingsCommon,
+    canonical_output_sections_for_precheck,
+    check_extract_divides_rst,
+    check_output_streams_divide_rst,
+    check_rst_period_divisible,
+    cppdefs_for_precheck,
+    ensure_cdr_output_marbl_diagnostics,
+    run_time_settings_for_ref,
+    version_gated_section_names,
+)
 
 # Source-name resolution (alias map, metadata, streamable) — single source of truth,
-# dependency-free. Dual import to keep the resolver standalone-importable.
-try:  # pragma: no cover - exercised both ways
-    from cstar_forge.forge.source_registry import (
-        DERIVED_BGC_SOURCES,
-        resolve_dataset_key,
-        resolve_source,
-    )
-except ImportError:  # pragma: no cover
-    from source_registry import (  # type: ignore
-        DERIVED_BGC_SOURCES,
-        resolve_dataset_key,
-        resolve_source,
-    )
+# dependency-free.
+from cstar_forge.forge.source_registry import (
+    DERIVED_BGC_SOURCES,
+    resolve_dataset_key,
+    resolve_source,
+)
+
+if TYPE_CHECKING:
+    from datetime import datetime
 
 # Default repo serving the render templates (now at the forge repo root `templates/`,
 # decoupled from the ModelSpec). A ModelSpec pins the serving commit via
@@ -114,26 +95,6 @@ except ImportError:  # pragma: no cover
 DEFAULT_TEMPLATE_REPO = CodeRepo(
     location="https://github.com/CWorthy-ocean/cstar-forge.git", branch="main"
 )
-
-# Canonical CDR-output diagnostics helper lives in namelist_model (forge side) so
-# the executor can share it. Dual import keeps the resolver standalone-importable.
-try:  # pragma: no cover - exercised both ways
-    from cstar_forge.forge.namelist_model import (
-        RunTimeSettings,
-        canonical_output_sections_for_precheck,
-        check_extract_divides_rst,
-        check_output_streams_divide_rst,
-        check_rst_period_divisible,
-        cppdefs_for_precheck,
-        ensure_cdr_output_marbl_diagnostics,
-        run_time_settings_for_ref,
-        version_gated_section_names,
-    )
-except ImportError:  # pragma: no cover
-    from namelist_model import (  # type: ignore
-        check_rst_period_divisible,
-        ensure_cdr_output_marbl_diagnostics,
-    )
 
 
 # Source-name resolution is single-sourced in ``source_registry`` (a lightweight,
@@ -158,6 +119,7 @@ def _parse_source(block: Any) -> SourceSpec:
     ``forcing_inputs`` caller) actually reaches ``SourceSpec`` instead of being
     silently dropped.
     """
+    name: str | None
     if isinstance(block, str):
         name = block
         d: dict[str, Any] = {}
@@ -319,7 +281,9 @@ def extract_output_settings(model_settings: dict[str, Any]) -> dict[str, Any]:
     return out
 
 
-def _prune_version_gated_sections(settings: dict[str, Any], settings_cls: type) -> None:
+def _prune_version_gated_sections(
+    settings: dict[str, Any], settings_cls: type[_RunTimeSettingsCommon]
+) -> None:
     """Drop ``settings`` keys that are version-gated (modeled by SOME run-time
     settings tier -- :func:`version_gated_section_names`) but not modeled by
     ``settings_cls``, the tier actually selected for this blueprint's pinned
@@ -1116,7 +1080,13 @@ def build_forge_blueprint(
         marbl_ref=marbl_ref,
     )
 
-    default_n_procs = n_cores if auto_tiling else npx * npy
+    if auto_tiling:
+        default_n_procs = n_cores
+    else:
+        # Guaranteed by the "n_procs_x/n_procs_y required unless auto_tiling"
+        # check above; restated so this multiplication narrows cleanly.
+        assert npx is not None and npy is not None
+        default_n_procs = npx * npy
     default_name = sanitize_name(f"{model_name}_{grid_name}_{default_n_procs}procs")
     return ForgeBlueprint(
         name=name or default_name,
@@ -1317,12 +1287,12 @@ def _build_forcing(
             return
         # DERIVED_BGC_SOURCES (CONSTANTS/ESPER) are computed at generation time, not
         # fetched/staged by Forge -- noting them here would land them in
-        # resolved_datasets/datasets and raise "Unknown dataset" downstream in SourceData.
+        # resolved_datasets/datasets and raise "Unknown dataset" downstream in SourceDatasets.
         if str(src.name).upper() in DERIVED_BGC_SOURCES:
             return
         # CUSTOM_FILE (river.source) has no registry entry -- the file is
         # verified/staged directly from RiverForcingItem.custom_file, not from
-        # SourceData, so noting it here would either raise "Unknown dataset"
+        # SourceDatasets, so noting it here would either raise "Unknown dataset"
         # downstream or cause bogus staging of a source that is never used.
         if src.name.upper() == "CUSTOM_FILE":
             return
@@ -1347,7 +1317,7 @@ def _build_forcing(
             _note(it.source)
     # River BGC source (a plain dict, not a SourceSpec — separate from it.source, the
     # river discharge source). DERIVED_BGC_SOURCES (CONSTANTS) is not noted: it is
-    # roms-tools' own auto-downloaded default and has no Forge SourceData handler/registry
+    # roms-tools' own auto-downloaded default and has no Forge SourceDatasets handler/registry
     # entry, so staging it here would raise "Unknown dataset" downstream. Only a genuinely
     # Forge-staged BGC source (e.g. RIVR2O) needs to land in resolved_datasets/datasets
     # so the executor verifies it -- and, as in `_note`, not when an explicit path is
@@ -1364,7 +1334,7 @@ def _build_forcing(
             resolved.setdefault(str(bgc_name).upper(), _resolved_dataset(bgc_name))
     # River temperature source (surface_forcing_source, also a plain dict). An
     # explicit path bypasses staging entirely -- same as `_note` -- but ERA5 is
-    # streamable with a no-op SourceData handler (_prepare_era5), so noting it
+    # streamable with a no-op SourceDatasets handler (_prepare_era5), so noting it
     # here keeps resolved_datasets/datasets honest without triggering staging.
     for it in river:
         temp_src = it.surface_forcing_source or {}
