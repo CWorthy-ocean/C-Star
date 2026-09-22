@@ -267,14 +267,3 @@ Next steps
   customize a domain's grid parameters.
 - See :doc:`reference` for the forge blueprint and model spec schemas, and
   :doc:`internals` for the developer-facing architecture guide.
-
-.. toctree::
-   :maxdepth: 1
-   :hidden:
-
-   reference
-   source_data
-   input_data
-   model_spec
-   catalog
-   internals
