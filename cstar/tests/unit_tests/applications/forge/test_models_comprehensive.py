@@ -511,3 +511,19 @@ def test_repo_root_templates_dir_matches_models_py_assumption():
     )
     assert (bundled_templates_root / "compile-time" / "cppdefs.opt.j2").exists()
     assert (bundled_templates_root / "run-time" / "marbl_in").exists()
+
+
+def test_load_model_spec_carries_template_file_hashes():
+    """The typed ModelSpec path keeps the authored per-file template hashes, like the
+    resolver's raw-dict path does (roms-marbl-0.8-default pins the bundled copy).
+    """
+    from cstar.catalog import default_catalog
+
+    spec = default_catalog.load_model_spec("roms-marbl-0.8-default")
+    compile_time = spec.code.templates_compile_time.file_hashes
+    run_time = spec.code.templates_run_time.file_hashes
+    assert (
+        set(compile_time) == {"cppdefs.opt.j2"}
+        and len(compile_time["cppdefs.opt.j2"]) == 64
+    )
+    assert set(run_time) == {"marbl_in"} and len(run_time["marbl_in"]) == 64

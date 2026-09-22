@@ -49,10 +49,11 @@ Here's a view of the schema:
        location: https://github.com/CWorthy-ocean/ParallelIO.git
        commit: 2.7.1-fork
 
-     # Render templates are fetched from the standalone cstar-forge GitHub repo
-     # (at its repo root `templates/`), decoupled from this ModelSpec.
-     # `templates_commit` pins the commit they're fetched from (defaults to
-     # branch `main` if omitted); `directory` is relative to that repo root.
+     # Render templates are pinned to a commit of the template repo (the
+     # standalone cstar-forge repo for the bundled specs; `directory` is
+     # relative to that repo root) and, per file, to a sha256 of its content at
+     # that commit. The executor stages C-Star's bundled copy when it matches
+     # the hashes and otherwise fetches and verifies the pinned commit.
      templates_commit: <cstar-forge-commit-sha>
      templates_compile_time:
        directory: "templates/compile-time"
@@ -96,14 +97,13 @@ Field descriptions
       and ``branch`` or ``commit``)
     - ``pio``: ParallelIO source code repository (optional; specify
       ``location`` and ``branch`` or ``commit``)
-    - ``templates_commit``: the ``cstar-forge`` GitHub repo commit that
-      ``templates_compile_time``/``templates_run_time`` are fetched from
-      (defaults to branch ``main`` when omitted). Render templates are not
-      yet part of this bundled catalog -- they are still fetched by cloning
-      the standalone ``cstar-forge`` repo at its ``templates/`` root (see
-      :doc:`internals`); a copy is also bundled locally at
-      ``cstar/additional_files/templates/forge/`` for other consumers, but
-      this resolution path does not yet read from it.
+    - ``templates_commit``: the template-repository commit that
+      ``templates_compile_time``/``templates_run_time`` are pinned to
+      (defaults to branch ``main`` when omitted). Each stage may also carry
+      ``file_hashes`` (filename -> sha256 at that commit); when they match the
+      copy bundled at ``cstar/additional_files/templates/forge/`` the executor
+      stages locally, otherwise it fetches the commit and verifies against them
+      (regenerate with ``git show <commit>:<directory>/<file> | shasum -a 256``).
     - ``templates_compile_time`` / ``templates_run_time``: each a
       ``directory`` (relative to the ``cstar-forge`` repo root) plus a
       ``files`` list. ``*.j2`` files have Jinja2 templating applied; files
@@ -149,12 +149,11 @@ Templates
 A model specification in ``model.yaml`` references its code templates under
 ``code.templates_compile_time`` and ``code.templates_run_time``. ``directory``
 is relative to the standalone ``cstar-forge`` GitHub repo root (these
-templates still live at ``templates/`` in that repo, decoupled from any one
-``ModelSpec``; a copy is also bundled locally at
-``cstar/additional_files/templates/forge/``, not yet wired into this
-resolution path -- see :doc:`internals`); ``code.templates_commit`` pins the
-commit they're fetched from (defaults to branch ``main`` if omitted). For
-example:
+templates live at ``templates/`` in that repo, decoupled from any one
+``ModelSpec``, and C-Star bundles a copy at
+``cstar/additional_files/templates/forge/`` that is used whenever it matches the
+pinned content -- see :doc:`internals`); ``code.templates_commit`` pins the
+commit and ``file_hashes`` pin the content. For example:
 
 .. code-block:: yaml
 

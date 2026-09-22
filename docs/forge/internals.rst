@@ -162,12 +162,16 @@ filenames off it.
   ``verify_content_hash`` warns (doesn't block) on a mismatched hand-edit at
   load.
 
-Render templates note: ``code.templates_compile_time``/``_run_time`` still
-resolve, by default, against the standalone ``cstar-forge`` GitHub repo's
-``templates/`` tree (pinned by ``code.templates_commit``, see
-:doc:`model_spec`) -- not the copy now bundled locally at
-``cstar/additional_files/templates/forge/``, which this git-clone-based
-resolution flow does not yet consume. See the open items in section 6.
+Render templates: ``code.templates_compile_time``/``_run_time`` pin a git
+commit (``code.templates_commit``, see :doc:`model_spec`) and, per file, the
+sha256 of its content at that commit (``file_hashes``, authored in the bundled
+ModelSpecs). At ``configure_build`` the executor stages the copy bundled at
+``cstar/additional_files/templates/forge/<stage>`` when every listed file
+matches those hashes, and otherwise fetches the pinned commit through
+C-Star's ``AdditionalCode`` and verifies the fetched files against them
+(a mismatch is an error). Blueprints without ``file_hashes`` fetch as they
+always did. ``cstar/applications/forge/templates.py`` owns the mapping from a
+ModelSpec's ``templates/<stage>`` directory onto the bundled copy.
 
 3a. Forge as a real C-Star application
 -------------------------------------------
@@ -355,20 +359,14 @@ suite.
 6. Known gaps / open items
 -------------------------------
 
-1. **Template staging has no CI coverage for the cross-repo flat-staging
-   contract** (``ForgeExecutor._stage_templates``, ``executor.py``).
-   Rendering silently assumes C-Star's ``AdditionalCode`` stages filtered
-   files *flat*; only manually verified against the real remote. A
-   ``@pytest.mark.slow`` network test staging from the real repo would close
-   this.
-2. **Templates are re-fetched every ``configure_build``** (rmtree +
-   re-clone under ``working_dir/templates/<stage>``), not cached like source
-   data / code. A commit-keyed template cache (mirroring
-   ``source_data_cache``) would fix this. Related: render templates are
-   still fetched from the standalone ``cstar-forge`` GitHub repo rather than
-   the copy now bundled at ``cstar/additional_files/templates/forge/`` --
-   switching ``ModelSpec`` template resolution over to the bundled copy is a
-   follow-on, not yet done (see section 3).
+1. **The flat-staging contract with ``AdditionalCode`` is verified only by
+   hash.** Rendering reads ``template_dir/<file>`` directly, so it relies on
+   C-Star staging filtered files flat; the per-file hash check catches a
+   wrong layout as a mismatch, but no network test stages from the real remote.
+2. **Bundled ModelSpecs still pin the archived ``cstar-forge`` repository**
+   (``DEFAULT_TEMPLATE_REPO``). Six pin an older ``cppdefs.opt.j2`` than the
+   bundled copy and therefore fetch that stage; re-pinning to a C-Star tag
+   (and refreshing ``file_hashes``) is a release-time step.
 3. **No real-generated-data integration test** (actual GLORYS/ERA5/TPXO
    network fetch with no roms-tools mocking) -- the golden tests below mock
    roms-tools construction classes.

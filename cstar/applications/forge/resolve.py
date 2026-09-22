@@ -90,11 +90,16 @@ if TYPE_CHECKING:
     from datetime import datetime
 
 # Default repo serving the render templates: the standalone cstar-forge GitHub repo
-# (at its repo root `templates/`, decoupled from the ModelSpec) -- not the templates
-# now bundled locally at `cstar/additional_files/templates/forge/`, which this
-# git-clone-based resolution flow does not yet consume; that switch lands in a later
-# commit. A ModelSpec pins the serving commit via `templates.commit:`; until pinned we
-# track branch `main`.
+# (at its repo root `templates/`, decoupled from the ModelSpec). ``_build_code``
+# separately copies each ModelSpec's own authored `file_hashes` (of its
+# `templates_commit` pin's files -- see `ModelTemplates.file_hashes`'s docstring)
+# into `TemplateRepo.file_hashes`, which lets the executor's fast path use the
+# bundled copy at `cstar/additional_files/templates/forge/` in place of this git
+# fetch WHEN that bundled copy matches those hashes -- but this default (and each
+# bundled ModelSpec's `templates_commit:` pin) intentionally still points at the
+# standalone repo/commit, not a C-Star tag. Re-pinning to a C-Star release tag
+# happens at release time, not here. A ModelSpec pins the serving commit via
+# `templates_commit:`; until pinned we track branch `main`.
 DEFAULT_TEMPLATE_REPO = CodeRepo(
     location="https://github.com/CWorthy-ocean/cstar-forge.git", branch="main"
 )
@@ -528,11 +533,14 @@ def build_forge_blueprint(
     ``model_settings["time_stepping"]["dt"]`` leaves -- each pair is always
     written together and must never diverge.
 
-    ``forge_version``/``roms_tools_version`` are left ``None`` here by default --
-    ``ForgeBlueprint.to_yaml_str`` stamps each with a best-effort value on first
-    save (see ``cstar.applications.forge.blueprint._forge_version`` /
-    ``_installed_version``), preserving an explicit value passed here instead
-    (e.g. carrying one forward through a re-resolve).
+    ``roms_tools_version`` is left ``None`` here by default -- ``ForgeBlueprint.
+    to_yaml_str`` stamps it with a best-effort value on first save (see
+    ``cstar.applications.forge.blueprint._installed_version``), preserving an
+    explicit value passed here instead (e.g. carrying one forward through a
+    re-resolve). ``forge_version`` is likewise never computed here -- it is no
+    longer stamped anywhere (Forge is in-tree now; see ``Provenance``'s
+    docstring) -- this parameter only lets a caller carry an old file's value
+    forward verbatim through a re-resolve.
 
     ``grid_file``, if given, is a user-supplied pre-made grid netCDF used in place
     of one Forge would otherwise generate from ``grid_kwargs``. A ``str``/``Path``
@@ -1400,14 +1408,22 @@ def _build_code(
 
     def _template(stage) -> TemplateRepo:
         t = code_block.get(f"templates_{stage}", {}) or {}
-        files = t.get("files", []) or []
+        files = list(t.get("files", []) or [])
+        directory = t.get("directory", t.get("location"))
+        # Authored hashes (of the files as they exist AT `templates_commit`, hand-
+        # computed -- see ModelTemplates.file_hashes' docstring), copied verbatim.
+        # No filesystem access, no hashing here: hashing the *bundled* copy instead
+        # would silently trust it as if it were the pinned commit's content, which
+        # isn't always true (a ModelSpec's pin may predate the bundled templates).
+        file_hashes = dict(t.get("file_hashes", {}) or {})
         return TemplateRepo(
             location=templates_repo.location,
             commit=pinned_commit or templates_repo.commit,
             branch=None if pinned_commit else templates_repo.branch,
             # repo-root-relative dir (legacy key: `location`)
-            directory=t.get("directory", t.get("location")),
-            files=list(files),
+            directory=directory,
+            files=files,
+            file_hashes=file_hashes,
         )
 
     roms = _repo("roms")

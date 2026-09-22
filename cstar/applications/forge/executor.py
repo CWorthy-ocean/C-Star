@@ -50,6 +50,7 @@ from cstar.applications.forge.namelist_model import (
     run_time_settings_for_ref,
 )
 from cstar.applications.forge.settings import render_roms_settings, write_roms_namelist
+from cstar.applications.forge.templates import bundled_template_dir, hash_template_files
 from cstar.applications.forge.user_files import verify_user_file
 from cstar.applications.forge.util import mem_log
 from cstar.base.additional_code import AdditionalCode
@@ -1350,10 +1351,25 @@ class ForgeExecutor(BaseModel):
     def _stage_templates(self, stage: str) -> Path:
         """Stage the ``stage`` template files locally and return their directory.
 
-        Reuses C-Star's :class:`AdditionalCode` to materialize the templates from the
-        ``code_spec`` git ref: a remote repo (``https://…`` + commit/branch) fetches the
-        filtered files; a local directory copies them. Nothing is read from the bundled
-        catalog, so the executor stays relocatable (decision #4 in the portability plan).
+        Two paths:
+
+        1. **Local fast path.** If ``code_spec.templates_{stage}.file_hashes`` is
+           non-empty (a hand-authored pin of the ModelSpec's own
+           ``templates_commit`` files -- see ``ModelTemplates.file_hashes``'s
+           docstring in ``models.py``, copied verbatim by ``resolve.py``'s
+           ``_build_code``) and the bundled copy
+           (``cstar.applications.forge.templates.bundled_template_dir``) has
+           every listed file with a matching sha256, copy those files flat into
+           ``dest`` directly -- no git fetch. This only fires when the bundled
+           templates genuinely are the pinned commit's files; a ModelSpec pinned
+           at an older/different commit than what's bundled correctly falls
+           through to fetching below instead of silently substituting newer
+           bundled content.
+        2. **Fetch via** :class:`AdditionalCode`, exactly as before this fast path
+           existed: a remote repo (``https://…`` + commit/branch) fetches the
+           filtered files; a local directory copies them. ``_verify_template_hashes``
+           then checks the fetch against ``file_hashes`` (a no-op when empty --
+           old blueprints, or a ModelSpec that hasn't authored hashes yet).
 
         **Cross-repo contract (unguarded in CI):** we rely on C-Star staging the filtered
         files *flat* into ``local_dir`` (``dest/cppdefs.opt.j2``, NOT ``dest/<subdir>/…``),
@@ -1367,11 +1383,62 @@ class ForgeExecutor(BaseModel):
         participates in ``content_hash`` — so a template edit changes build output without a
         hash bump until a commit is pinned. Tracked in docs/dev-notes/executor-portability-plan.md.
         """
+        repo = getattr(self.code_spec, f"templates_{stage}")
         dest = self._require_host().working_dir / "templates" / stage
         if dest.exists():
             shutil.rmtree(dest)
+
+        if repo.file_hashes:
+            bundled_dir = bundled_template_dir(repo.directory)
+            if bundled_dir is not None:
+                try:
+                    bundled_hashes = hash_template_files(bundled_dir, repo.files)
+                except FileNotFoundError:
+                    bundled_hashes = None
+                if bundled_hashes == repo.file_hashes:
+                    log.debug("templates staged from the bundled copy")
+                    dest.mkdir(parents=True)
+                    for f in repo.files:
+                        shutil.copy2(bundled_dir / f, dest / f)
+                    return dest
+
         AdditionalCode(**self._template_repo_args(stage)).get(local_dir=dest)
+        self._verify_template_hashes(stage, dest)
         return dest
+
+    def _verify_template_hashes(self, stage: str, dest: Path) -> None:
+        """Verify a freshly-fetched ``stage`` template directory against
+        ``code_spec.templates_{stage}.file_hashes`` (see ``_stage_templates``).
+
+        A separate method (rather than inlined in ``_stage_templates``) so tests
+        can patch it independently: the offline test fixture
+        (``tests/conftest.py``'s ``_offline_template_staging``) redirects the
+        *fetch* to the local working tree, whose files may legitimately differ
+        from an older ``templates_commit`` pin's hashes, so it also no-ops this
+        check -- see that fixture's docstring.
+
+        Raises
+        ------
+        ValueError
+            If a staged file's sha256 doesn't match its pinned hash: the
+            blueprint pins template content that the fetched commit doesn't
+            match.
+        """
+        repo = getattr(self.code_spec, f"templates_{stage}")
+        if not repo.file_hashes:
+            return
+        staged_hashes = hash_template_files(dest, repo.files)
+        for f in repo.files:
+            expected = repo.file_hashes.get(f)
+            actual = staged_hashes.get(f)
+            if expected is not None and expected != actual:
+                raise ValueError(
+                    f"Fetched template file {f!r} does not match the blueprint's "
+                    f"pinned content: the blueprint pins template content that "
+                    f"the fetched commit does not match "
+                    f"(commit={repo.commit!r}, location={repo.location!r}). "
+                    f"expected sha256={expected}, actual sha256={actual}"
+                )
 
     def _template_files(self, stage: str) -> list[str]:
         """File list for the ``stage`` templates (from ``code_spec``)."""

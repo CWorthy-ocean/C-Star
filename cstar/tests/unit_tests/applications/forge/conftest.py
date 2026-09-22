@@ -71,3 +71,11 @@ def _offline_template_staging(monkeypatch, request):
         }
 
     monkeypatch.setattr(ForgeExecutor, "_template_repo_args", _local_args)
+    # The redirect above serves the *working tree*'s bundled templates regardless of
+    # which commit a ModelSpec's `file_hashes` actually pins, so a real hash check
+    # here would fail for any ModelSpec pinned at a commit older than the bundled
+    # copy (see the drift documented in ModelTemplates.file_hashes' docstring) --
+    # no-op it; ``real_template_staging`` tests exercise the real check instead.
+    monkeypatch.setattr(
+        ForgeExecutor, "_verify_template_hashes", lambda self, stage, dest: None
+    )

@@ -18,8 +18,7 @@ callers that import them from ``cstar.applications.forge.models``.
 
 from __future__ import annotations
 
-from pathlib import Path
-from typing import Any, Literal
+from typing import TYPE_CHECKING, Any, Literal
 
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, model_validator
@@ -43,6 +42,10 @@ from cstar.applications.forge.blueprint import (
 from cstar.applications.forge.blueprint import (
     OpenBoundaries as OpenBoundaries,
 )
+from cstar.applications.forge.templates import bundled_template_dir
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 __all__ = [
     "CDR_MODES",
@@ -76,6 +79,18 @@ class ModelTemplates(BaseModel):
 
     directory: str
     files: list[str] = Field(default_factory=list)
+    # sha256 hex digest of each of ``files``, *as they exist at the ModelSpec's own
+    # ``templates_commit`` pin* -- authored by hand (not computed from the bundled
+    # copy, which may be a newer commit -- see roms-marbl-0.8-default/model.yaml for
+    # the regeneration recipe), keyed by filename. ``resolve.py``'s ``_build_code``
+    # copies this straight into ``TemplateRepo.file_hashes``: the executor's local
+    # fast path only fires when the bundled copy matches these hashes exactly, so a
+    # ModelSpec pinned at an older commit than the bundled templates correctly
+    # falls back to fetching (and verifying against) the real pinned commit instead
+    # of silently substituting newer bundled content. Empty (the default) for a
+    # ModelSpec that hasn't authored hashes yet -- the executor then skips
+    # verification entirely, today's (pre-hash) behaviour.
+    file_hashes: dict[str, str] = Field(default_factory=dict)
 
 
 class ModelCode(BaseModel):
@@ -167,32 +182,19 @@ class ModelSpec(BaseModel):
     @model_validator(mode="after")
     def _validate_template_files_exist(self) -> ModelSpec:
         """Best-effort: check that template files exist in C-Star's own bundled
-        forge templates (``cstar/additional_files/templates/forge``). Each
-        stage's ``directory`` (e.g. ``templates/compile-time``) is written
-        relative to the standalone cstar-forge repo root, which is where
-        ``DEFAULT_TEMPLATE_REPO`` (see ``resolve.py``) still serves templates
-        from at runtime -- the leading ``templates/`` segment is stripped so the
-        rest resolves under the bundled copy instead. Silently skipped if the
-        bundled directory doesn't exist for this stage (e.g. an
-        installed-package-only environment, or once template resolution
-        switches over to the bundled copy and directory naming is revisited) --
-        this is a development-time nicety, not a runtime requirement.
+        forge templates (``cstar/additional_files/templates/forge``), via the
+        single ``directory`` mapping in ``cstar.applications.forge.templates.
+        bundled_template_dir`` (also used by ``resolve.py`` and ``executor.py``).
+        Silently skipped if the bundled directory doesn't exist for this stage
+        (e.g. an installed-package-only environment) -- this is a
+        development-time nicety, not a runtime requirement.
         """
-        bundled_templates_root = (
-            Path(__file__).resolve().parents[2]
-            / "additional_files"
-            / "templates"
-            / "forge"
-        )
         for stage_name, stage in (
             ("compile_time", self.code.templates_compile_time),
             ("run_time", self.code.templates_run_time),
         ):
-            stage_dir_parts = Path(stage.directory).parts
-            if stage_dir_parts and stage_dir_parts[0] == "templates":
-                stage_dir_parts = stage_dir_parts[1:]
-            template_dir = bundled_templates_root.joinpath(*stage_dir_parts)
-            if not template_dir.exists():
+            template_dir = bundled_template_dir(stage.directory)
+            if template_dir is None:
                 continue
             missing = [f for f in stage.files if not (template_dir / f).exists()]
             if missing:
@@ -261,7 +263,11 @@ def load_models_yaml(path: Path, model_name: str) -> ModelSpec:
 
     def _templates(stage: str) -> ModelTemplates:
         t = code_block.get(f"templates_{stage}", {}) or {}
-        return ModelTemplates(directory=t.get("directory"), files=t.get("files", []))
+        return ModelTemplates(
+            directory=t.get("directory"),
+            files=t.get("files", []),
+            file_hashes=t.get("file_hashes", {}),
+        )
 
     model_code = ModelCode(
         roms=roms,

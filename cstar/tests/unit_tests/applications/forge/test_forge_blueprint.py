@@ -11,7 +11,6 @@ NOTE: imports the in-package modules, so these run once the environment's editab
 assertions were validated standalone during development.
 """
 
-import subprocess
 from datetime import date, datetime
 from pathlib import Path
 
@@ -3415,6 +3414,55 @@ def test_build_code_coerces_numeric_commit_to_string():
     assert isinstance(code.roms.commit, str)
 
 
+def test_build_code_copies_file_hashes_verbatim_from_modelspec():
+    """``_build_code`` copies a ModelSpec's authored ``file_hashes`` straight into
+    ``TemplateRepo.file_hashes`` -- no hashing, no filesystem access. It doesn't
+    matter whether the value corresponds to anything on disk; that's the
+    executor's problem at stage time (``ForgeExecutor._stage_templates``), not
+    the resolver's.
+    """
+    from cstar.applications.forge.blueprint import CodeRepo
+    from cstar.applications.forge.resolve import _build_code
+
+    model = {
+        "code": {
+            "roms": {"location": "https://example.com/roms.git", "commit": "x"},
+            "templates_compile_time": {
+                "directory": "templates/compile-time",
+                "files": ["cppdefs.opt.j2"],
+                "file_hashes": {"cppdefs.opt.j2": "deadbeef" * 8},
+            },
+            "templates_run_time": {"directory": "templates/run-time", "files": []},
+        },
+    }
+    templates_repo = CodeRepo(location="https://example.com/forge.git", branch="main")
+    code = _build_code(model, templates_repo, bgc_mode="none")
+    assert code.templates_compile_time.file_hashes == {"cppdefs.opt.j2": "deadbeef" * 8}
+
+
+def test_build_code_defaults_file_hashes_empty_when_absent():
+    """A ModelSpec that hasn't authored ``file_hashes`` yet resolves to an empty
+    mapping -- ``ForgeExecutor._stage_templates`` then skips both the fast path
+    and fetch verification, exactly as it did before ``file_hashes`` existed.
+    """
+    from cstar.applications.forge.blueprint import CodeRepo
+    from cstar.applications.forge.resolve import _build_code
+
+    model = {
+        "code": {
+            "roms": {"location": "https://example.com/roms.git", "commit": "x"},
+            "templates_compile_time": {
+                "directory": "templates/compile-time",
+                "files": ["cppdefs.opt.j2"],
+            },
+            "templates_run_time": {"directory": "templates/run-time", "files": []},
+        },
+    }
+    templates_repo = CodeRepo(location="https://example.com/forge.git", branch="main")
+    code = _build_code(model, templates_repo, bgc_mode="none")
+    assert code.templates_compile_time.file_hashes == {}
+
+
 def test_content_hash_changes_with_roms_ref():
     cfg = _build()
     h = cfg.content_hash()
@@ -3509,6 +3557,110 @@ def test_templates_are_repo_refs():
     assert t.files == ["cppdefs.opt.j2"]
     assert cfg.code.templates_run_time.files == ["marbl_in"]
     assert cfg.code.roms.commit == "0.2.0"
+
+
+def test_resolved_templates_carry_modelspec_authored_hashes():
+    """Resolving a bundled ModelSpec (``cson_roms-marbl_v0.1``, pinned at
+    ``templates_commit: 692e04ce...``) copies its hand-authored ``file_hashes``
+    straight onto the resolved ``TemplateRepo`` -- not a hash of whatever happens
+    to be bundled in this C-Star build (which may be a newer commit).
+    """
+    cfg = _build()
+    authored = yaml.safe_load((_MODEL_DIR / "model.yaml").read_text())["code"]
+    assert (
+        cfg.code.templates_compile_time.file_hashes
+        == authored["templates_compile_time"]["file_hashes"]
+    )
+    assert (
+        cfg.code.templates_run_time.file_hashes
+        == authored["templates_run_time"]["file_hashes"]
+    )
+    # sanity: this ModelSpec's pin actually has authored hashes to compare (not
+    # vacuously true because both sides are empty)
+    assert cfg.code.templates_compile_time.file_hashes
+
+
+@pytest.mark.parametrize(
+    "model_spec_name,compile_time_fast_path",
+    [
+        # Pinned at templates_commit 692e04ce..., whose compile-time cppdefs.opt.j2
+        # predates two cppdefs blocks (UPSTREAM_TS_LAND_CURV, PARABOLIC_SPLINES)
+        # that the bundled copy (== templates_commit 3852cc99... below) has -- the
+        # authored hash correctly does NOT match the bundled file, so staging must
+        # fetch-and-verify the real pinned commit instead of the fast path.
+        ("cson_roms-marbl_v0.1", False),
+        ("roms-marbl-0.3-default", False),
+        ("roms-marbl-0.4-default", False),
+        ("roms-marbl-0.5-default", False),
+        ("roms-marbl-0.6-default", False),
+        ("roms-marbl-0.7-default", False),
+        # Pinned at templates_commit 3852cc99..., which IS what's bundled in this
+        # C-Star build -- the authored hash matches, so the fast path fires.
+        ("roms-marbl-0.8-default", True),
+        ("pio-dev", True),
+    ],
+)
+def test_bundled_modelspec_fast_path_eligibility_by_stage(
+    model_spec_name, compile_time_fast_path
+):
+    """Whether ``ForgeExecutor._stage_templates`` takes the local fast path (vs.
+    fetch-and-verify) is decided per stage by comparing each ModelSpec's authored
+    ``file_hashes`` against the bundled copy actually shipped with this C-Star
+    build. ``marbl_in`` (run-time) is identical across both pinned commits, so it
+    always takes the fast path; ``cppdefs.opt.j2`` (compile-time) only does for
+    the two ModelSpecs pinned at the commit the bundled copy matches.
+    """
+    from cstar.applications.forge.templates import (
+        bundled_template_dir,
+        hash_template_files,
+    )
+
+    code = yaml.safe_load(
+        (_BUNDLED_CATALOG / "ModelSpec" / model_spec_name / "model.yaml").read_text()
+    )["code"]
+    expected = {
+        "templates_compile_time": compile_time_fast_path,
+        "templates_run_time": True,
+    }
+    for stage_field, want_fast_path in expected.items():
+        stage = code[stage_field]
+        bundled_dir = bundled_template_dir(stage["directory"])
+        assert bundled_dir is not None
+        try:
+            bundled_hashes = hash_template_files(bundled_dir, stage["files"])
+        except FileNotFoundError:
+            bundled_hashes = None
+        takes_fast_path = bundled_hashes == stage["file_hashes"]
+        assert takes_fast_path is want_fast_path, (
+            f"{model_spec_name}.{stage_field}: expected fast_path={want_fast_path}, "
+            f"authored={stage['file_hashes']}, bundled={bundled_hashes}"
+        )
+
+
+def test_content_hash_unaffected_by_file_hashes():
+    """``file_hashes`` is a locally-derived cache (the pinned commit's own bundled
+    content), not independent results-affecting content -- adding or clearing it
+    must not change ``content_hash``.
+    """
+    cfg = _build()
+    assert cfg.code.templates_compile_time.file_hashes  # sanity: actually recorded
+    with_hashes = cfg.content_hash()
+
+    cleared = cfg.model_copy(
+        update={
+            "code": cfg.code.model_copy(
+                update={
+                    "templates_compile_time": cfg.code.templates_compile_time.model_copy(
+                        update={"file_hashes": {}}
+                    ),
+                    "templates_run_time": cfg.code.templates_run_time.model_copy(
+                        update={"file_hashes": {}}
+                    ),
+                }
+            )
+        }
+    )
+    assert cleared.content_hash() == with_hashes
 
 
 def test_no_host_or_machine_in_config():
@@ -3775,88 +3927,6 @@ def test_shipped_blueprint_hygiene(path):
     )
 
 
-# ---------------------------------------------------------------------------
-# _forge_version -- best-effort git describe / package-version identifier for
-# provenance.forge_version (see test_forge_version_* above for the resolver wiring)
-# ---------------------------------------------------------------------------
-class TestForgeVersion:
-    """``_REPO_ROOT`` is monkeypatched to a real ``tmp_path`` (with/without an actual
-    ``.git`` subdirectory) rather than stubbing ``Path.exists`` globally, so these
-    don't risk affecting unrelated filesystem checks during the test.
-    """
-
-    def test_uses_git_describe_when_repo_present(self, monkeypatch, tmp_path):
-        from cstar.applications.forge import blueprint as fb
-
-        (tmp_path / ".git").mkdir()
-        monkeypatch.setattr(fb, "_REPO_ROOT", tmp_path)
-        mock_result = subprocess.CompletedProcess(
-            args=[], returncode=0, stdout="abc1234-dirty\n"
-        )
-        monkeypatch.setattr(fb.subprocess, "run", lambda *a, **k: mock_result)
-        assert fb._forge_version() == "abc1234-dirty"
-
-    def test_falls_back_to_package_version_when_no_git_dir(self, monkeypatch, tmp_path):
-        from cstar.applications.forge import blueprint as fb
-
-        monkeypatch.setattr(fb, "_REPO_ROOT", tmp_path)  # no .git subdir
-        monkeypatch.setattr(fb, "_pkg_version", lambda name: "0.1.0")
-        assert fb._forge_version() == "cstar-forge==0.1.0"
-
-    def test_falls_back_to_package_version_when_git_fails(self, monkeypatch, tmp_path):
-        from cstar.applications.forge import blueprint as fb
-
-        (tmp_path / ".git").mkdir()
-        monkeypatch.setattr(fb, "_REPO_ROOT", tmp_path)
-
-        def _raise(*a, **k):
-            raise FileNotFoundError("git not installed")
-
-        monkeypatch.setattr(fb.subprocess, "run", _raise)
-        monkeypatch.setattr(fb, "_pkg_version", lambda name: "0.1.0")
-        assert fb._forge_version() == "cstar-forge==0.1.0"
-
-    @pytest.mark.parametrize(
-        "exc",
-        [
-            subprocess.TimeoutExpired(cmd=["git"], timeout=2),
-            subprocess.CalledProcessError(1, ["git"]),
-        ],
-        ids=["timeout", "nonzero_exit"],
-    )
-    def test_falls_back_on_slow_or_failing_git(self, monkeypatch, tmp_path, exc):
-        """A slow/unreachable git (e.g. an HPC home dir) or a non-zero exit
-        (``check=True``) must fall back like a missing git binary -- both
-        ``TimeoutExpired`` and ``CalledProcessError`` are ``SubprocessError``.
-        """
-        from cstar.applications.forge import blueprint as fb
-
-        (tmp_path / ".git").mkdir()
-        monkeypatch.setattr(fb, "_REPO_ROOT", tmp_path)
-
-        def _raise(*a, **k):
-            raise exc
-
-        monkeypatch.setattr(fb.subprocess, "run", _raise)
-        monkeypatch.setattr(fb, "_pkg_version", lambda name: "0.1.0")
-        assert fb._forge_version() == "cstar-forge==0.1.0"
-
-    def test_returns_none_when_neither_git_nor_package_available(
-        self, monkeypatch, tmp_path
-    ):
-        from importlib.metadata import PackageNotFoundError
-
-        from cstar.applications.forge import blueprint as fb
-
-        monkeypatch.setattr(fb, "_REPO_ROOT", tmp_path)  # no .git subdir
-
-        def _raise(name):
-            raise PackageNotFoundError(name)
-
-        monkeypatch.setattr(fb, "_pkg_version", _raise)
-        assert fb._forge_version() is None
-
-
 class TestInstalledVersion:
     """``_installed_version`` backs ``provenance.cstar_version``/``roms_tools_version``
     -- no git-describe fallback needed, since both packages version themselves via
@@ -3883,16 +3953,18 @@ class TestInstalledVersion:
 
 
 class TestProvenanceStamping:
-    """``ForgeBlueprint.to_yaml_str`` stamps generated_at/forge_version/
-    cstar_version/roms_tools_version on first save; a resave preserves whatever
-    was already stamped (or explicitly set), same "first save wins" semantics as
+    """``ForgeBlueprint.to_yaml_str`` stamps generated_at/cstar_version/
+    roms_tools_version on first save; a resave preserves whatever was already
+    stamped (or explicitly set), same "first save wins" semantics as
     ``content_hash`` is exempt from (content_hash always recomputes; these don't).
+    ``forge_version`` is never stamped (Forge is in-tree now -- see
+    ``Provenance``'s docstring); it round-trips untouched if a file already has
+    one (see ``test_forge_version_survives_resave_even_when_never_stamped``).
     """
 
     def _patched_fb(self, monkeypatch):
         from cstar.applications.forge import blueprint as fb
 
-        monkeypatch.setattr(fb, "_forge_version", lambda: "abc1234")
         monkeypatch.setattr(
             fb,
             "_installed_version",
@@ -3912,7 +3984,7 @@ class TestProvenanceStamping:
         # must round-trip as tz-aware (UTC), not silently go naive/local through
         # model_dump(mode="json") -> yaml.safe_dump -> yaml.safe_load -> Pydantic
         assert back.provenance.generated_at.tzinfo is not None
-        assert back.provenance.forge_version == "abc1234"
+        assert back.provenance.forge_version is None
         assert back.provenance.cstar_version == "cstar-ocean==9.9.9"
         assert back.provenance.roms_tools_version == "roms-tools==9.9.9"
 
@@ -3922,15 +3994,14 @@ class TestProvenanceStamping:
         path = cfg.to_yaml(tmp_path / "forge_blueprint.yaml")
         first = fb.ForgeBlueprint.from_yaml(path)
 
-        # a later save, from a different Forge/roms_tools/cstar install, must not
+        # a later save, from a different roms_tools/cstar install, must not
         # overwrite the original values
-        monkeypatch.setattr(fb, "_forge_version", lambda: "def5678")
         monkeypatch.setattr(fb, "_installed_version", lambda name: f"{name}==1.0.0")
         first.to_yaml(path)
         second = fb.ForgeBlueprint.from_yaml(path)
 
         assert second.provenance.generated_at == first.provenance.generated_at
-        assert second.provenance.forge_version == "abc1234"
+        assert second.provenance.forge_version is None
         assert second.provenance.cstar_version == "cstar-ocean==9.9.9"
         assert second.provenance.roms_tools_version == "roms-tools==9.9.9"
 
@@ -3955,7 +4026,31 @@ class TestProvenanceStamping:
         assert back.provenance.generated_at == explicit_dt
         assert back.provenance.roms_tools_version == "pinned"
         # fields left unset are still stamped as normal
-        assert back.provenance.forge_version == "abc1234"
+        assert back.provenance.cstar_version == "cstar-ocean==9.9.9"
+
+    def test_forge_version_survives_resave_even_when_never_stamped(
+        self, monkeypatch, tmp_path
+    ):
+        """An old blueprint that already has a ``forge_version`` (from before Forge
+        moved in-tree) keeps it through a save/reload/resave cycle -- the field is
+        kept for backward compatibility even though nothing stamps it anymore.
+        """
+        fb = self._patched_fb(monkeypatch)
+        cfg = _build()
+        cfg = cfg.model_copy(
+            update={
+                "provenance": cfg.provenance.model_copy(
+                    update={"forge_version": "0.2.0"}
+                )
+            }
+        )
+        path = cfg.to_yaml(tmp_path / "forge_blueprint.yaml")
+        first = fb.ForgeBlueprint.from_yaml(path)
+        assert first.provenance.forge_version == "0.2.0"
+
+        first.to_yaml(path)
+        second = fb.ForgeBlueprint.from_yaml(path)
+        assert second.provenance.forge_version == "0.2.0"
 
 
 class _ReadOnlyValueGuard:

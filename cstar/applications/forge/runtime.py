@@ -20,10 +20,10 @@ import traceback
 from datetime import datetime
 from pathlib import Path
 
+import cstar
 from cstar.applications.forge import config
 from cstar.applications.forge.blueprint import (
     ForgeBlueprint,
-    _forge_version,
     _installed_version,
 )
 from cstar.applications.forge.engine import process_forge_blueprint
@@ -84,31 +84,21 @@ class _Tee:
 def _version_banner_lines(cfg=None) -> list[str]:
     """Best-effort CWorthy library/version lines for the run-log startup banner.
 
-    ``cstar-forge``/``cstar-ocean``/``roms-tools`` come from installed-package
-    metadata (see ``_forge_version``/``_installed_version``); ``ucla-roms`` and
+    Forge is ``cstar.applications.forge`` now -- it has no separate version from
+    ``cstar-ocean`` -- so the banner's own library line is ``cstar.__version__``
+    directly (a dev/editable install's ``setuptools_scm`` version already embeds
+    commit info, e.g. ``0.13.7.dev2+gcb931baef``); ``roms-tools`` comes from
+    installed-package metadata (see ``_installed_version``). ``ucla-roms`` and
     MARBL have no pip package, so their pinned git ref is read off ``cfg.code``
     instead, if a blueprint was supplied. Entries with no available value are
     skipped. Never raises -- this is logging, not a dependency check.
     """
     # TODO(punchlist follow-up): warn when installed/pinned versions are known
     # incompatible with each other -- deferred, this only records what's present.
-    lines = []
-    forge_version = _forge_version()
-    if forge_version:
-        # _forge_version() returns either a bare `git describe` or an already
-        # labeled `cstar-forge==x` fallback -- label the former so every line
-        # names its library.
-        lines.append(
-            f"  {forge_version}"
-            if forge_version.startswith("cstar-forge")
-            else f"  cstar-forge: {forge_version}"
-        )
-    for value in (
-        _installed_version("cstar-ocean"),
-        _installed_version("roms-tools"),
-    ):
-        if value:
-            lines.append(f"  {value}")
+    lines = [f"  cstar-ocean=={cstar.__version__}"]
+    roms_tools_version = _installed_version("roms-tools")
+    if roms_tools_version:
+        lines.append(f"  {roms_tools_version}")
 
     code = getattr(cfg, "code", None)
     for label, repo in (

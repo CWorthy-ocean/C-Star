@@ -67,10 +67,14 @@ code:
     directory: "templates/compile-time"
     files:
     - cppdefs.opt.j2
+    file_hashes:
+      cppdefs.opt.j2: b0b9c1ff951b5f7564d674c2f02269102049a17c371d8c58dffac5e4f48974a4
   templates_run_time:
     directory: "templates/run-time"
     files:
     - marbl_in
+    file_hashes:
+      marbl_in: 218976e818e81001b798c1eecbbc2f659c6e3f311db24da50d990cd69c300f8f
 
 model_settings:
   cppdefs:

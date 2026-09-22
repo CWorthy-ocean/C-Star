@@ -56,7 +56,6 @@ import hashlib
 import json
 import math
 import re
-import subprocess
 import warnings
 from datetime import UTC, datetime
 from enum import StrEnum
@@ -70,47 +69,18 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 
 from cstar.orchestration.models import Blueprint
 
-# Repo root anchor for ``_forge_version()`` -- four levels up from this file
-# (cstar/applications/forge/blueprint.py -> forge/ -> applications/ -> cstar/ -> repo root).
-_REPO_ROOT = Path(__file__).resolve().parents[3]
-
-
-def _forge_version() -> str | None:
-    """Best-effort identifier for the Forge code that saved this blueprint -- lets a
-    later reader know which Forge commit to check out to reproduce it.
-
-    Prefers ``git describe`` on this file's own checkout (a ``-dirty`` suffix flags
-    uncommitted changes at save time); Forge's own package version is static
-    (unlike ``cstar-ocean``/``roms-tools``, it carries no ``setuptools_scm`` commit
-    info), so a wheel/PyPI install without a ``.git`` directory falls back to that
-    static version, and no install info at all falls back to ``None``. Never
-    raises -- this is provenance, not a dependency.
-    """
-    if (_REPO_ROOT / ".git").exists():
-        try:
-            result = subprocess.run(
-                ["git", "describe", "--always", "--dirty"],
-                cwd=_REPO_ROOT,
-                capture_output=True,
-                text=True,
-                timeout=2,
-                check=True,
-            )
-            return result.stdout.strip()
-        except (OSError, subprocess.SubprocessError):
-            pass
-    try:
-        return f"cstar-forge=={_pkg_version('cstar-forge')}"
-    except PackageNotFoundError:
-        return None
-
 
 def _installed_version(package_name: str) -> str | None:
     """Best-effort installed version of ``package_name``, or ``None`` if it isn't
-    installed. Unlike ``_forge_version``, no separate git-describe step is needed:
-    both ``cstar-ocean`` and ``roms-tools`` version themselves via
-    ``setuptools_scm``, so an editable/dev checkout's installed version already
-    embeds commit info (e.g. ``0.8.1.dev2+gcb931baef``). Never raises.
+    installed. Backs ``provenance.cstar_version``/``roms_tools_version``. No
+    git-describe step is needed: both ``cstar-ocean`` and ``roms-tools`` version
+    themselves via ``setuptools_scm``, so an editable/dev checkout's installed
+    version already embeds commit info (e.g. ``0.8.1.dev2+gcb931baef`` -- the
+    same string ``cstar.__version__`` itself resolves to, via this same
+    ``importlib.metadata`` lookup on ``"cstar-ocean"``; going through this
+    function instead of importing ``cstar`` directly keeps this module free of
+    ``cstar`` imports -- see ``test_forge_blueprint_is_portable_no_forge_or_
+    heavy_cstar_imports``). Never raises.
     """
     try:
         return f"{package_name}=={_pkg_version(package_name)}"
@@ -1443,6 +1413,17 @@ class TemplateRepo(CodeRepo):
 
     directory: str | None = None
     files: list[str] = Field(default_factory=list)
+    # sha256 (per filename, keyed on ``files``) of the pinned commit's files *as
+    # shipped with this C-Star build* -- i.e. of the bundled copy at
+    # ``cstar/additional_files/templates/forge/<stage>``
+    # (``cstar.applications.forge.templates.bundled_template_dir``), recorded by
+    # ``resolve.py`` when that bundled copy has every listed file. Lets
+    # ``ForgeExecutor._stage_templates`` stage directly from the bundled copy
+    # instead of git-fetching ``location``@``commit``, and verify a fetched copy
+    # against it when it does fetch. Empty (the default) for blueprints resolved
+    # before this field existed, or when no matching bundled copy exists --
+    # either way ``_stage_templates`` falls back to today's fetch-only behaviour.
+    file_hashes: dict[str, str] = Field(default_factory=dict)
 
 
 class Code(_Section):
@@ -1493,13 +1474,20 @@ class Composition(_Section):
 
 
 class Provenance(_Section):
-    """Audit trail. ``generated_at``/``forge_version``/``cstar_version``/
-    ``roms_tools_version`` are never computed inside the resolver (to keep resolution
-    deterministic/reproducible, and because ``roms_tools`` isn't guaranteed
-    installed there) -- ``ForgeBlueprint.to_yaml_str`` stamps each on first save
-    only (a later resave preserves the original value, same as an explicit
-    constructor override); a caller may still pass one explicitly (e.g. carrying
-    an original value forward through a re-resolve).
+    """Audit trail. ``generated_at``/``cstar_version``/``roms_tools_version`` are
+    never computed inside the resolver (to keep resolution deterministic/
+    reproducible, and because ``roms_tools`` isn't guaranteed installed there) --
+    ``ForgeBlueprint.to_yaml_str`` stamps each on first save only (a later resave
+    preserves the original value, same as an explicit constructor override); a
+    caller may still pass one explicitly (e.g. carrying an original value
+    forward through a re-resolve).
+
+    ``forge_version`` was a ``git describe`` of the standalone cstar-forge
+    checkout, from back when Forge was its own repo. Forge now lives in-tree as
+    ``cstar.applications.forge``, so its provenance is just ``cstar_version``
+    (below) -- ``forge_version`` is no longer stamped and is kept only, as
+    ``None`` on every newly-saved file, so older blueprints that do carry a
+    value still load and round-trip.
     """
 
     generated_at: datetime | None = None
@@ -1725,7 +1713,10 @@ class ForgeBlueprint(Blueprint):
         # host/transport, not content: the same commit checked out from a different
         # remote (or a local mirror) must hash identically. Only commit/branch/
         # directory/files are results-affecting, so scrub `location` from each code
-        # repo before hashing.
+        # repo before hashing. `file_hashes` (templates_* repos only) is likewise
+        # scrubbed: it's a locally-computed cache of the pinned commit/directory/
+        # files' own hashes (derived, not independent content) -- adding or dropping
+        # it must not perturb `content_hash`.
         code = data.get("code")
         if code:
             for repo_key in (
@@ -1738,6 +1729,7 @@ class ForgeBlueprint(Blueprint):
                 repo = code.get(repo_key)
                 if repo:
                     repo.pop("location", None)
+                    repo.pop("file_hashes", None)
         # Same rationale as `code.<repo>.location` above: a user-provided file's
         # `location` is host/transport (where the executor finds it on *this*
         # machine), not results-affecting content -- the same file staged at a
@@ -1785,15 +1777,14 @@ class ForgeBlueprint(Blueprint):
     def to_yaml_str(self) -> str:
         # Stamp provenance on the way out (the hash itself excludes provenance, so
         # this doesn't perturb it). content_hash always recomputes (it must reflect
-        # current content, for hand-edit detection); generated_at/forge_version/
-        # cstar_version/roms_tools_version are stamped only if not already set --
-        # first save wins, so a later resave preserves the original values.
+        # current content, for hand-edit detection); generated_at/cstar_version/
+        # roms_tools_version are stamped only if not already set -- first save
+        # wins, so a later resave preserves the original values. forge_version is
+        # no longer stamped (Forge is in-tree now; see Provenance's docstring).
         prov = self.provenance
         updates: dict[str, Any] = {"content_hash": self.content_hash()}
         if prov.generated_at is None:
             updates["generated_at"] = datetime.now(UTC)
-        if prov.forge_version is None:
-            updates["forge_version"] = _forge_version()
         if prov.cstar_version is None:
             updates["cstar_version"] = _installed_version("cstar-ocean")
         if prov.roms_tools_version is None:

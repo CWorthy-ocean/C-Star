@@ -1246,6 +1246,86 @@ class TestForgeExecutorBuildAndRun:
             # was materialized into the staged directory.
             assert (Path(template_dir) / "cppdefs.opt.j2").exists()
 
+    @pytest.mark.real_template_staging
+    def test_stage_templates_uses_bundled_fast_path_when_hashes_match(
+        self, minimal_cstar_spec_builder_args
+    ):
+        """When a ModelSpec's authored ``file_hashes`` match the bundled copy --
+        true for ``cson_roms-marbl_v0.1``'s run-time stage (``marbl_in`` is
+        identical across both pinned forge commits; see
+        ``test_bundled_modelspec_fast_path_eligibility_by_stage`` in
+        test_forge_blueprint.py for the full per-ModelSpec/stage matrix) --
+        staging copies directly from
+        ``cstar/additional_files/templates/forge/<stage>`` and never constructs
+        :class:`AdditionalCode`, no git fetch. ``real_template_staging`` opts out
+        of the offline fixture so this exercises the real fast-path check, not
+        the working-tree redirect.
+        """
+        builder = _make_builder(minimal_cstar_spec_builder_args)
+        repo = builder.code_spec.templates_run_time
+        assert repo.file_hashes, "sanity: ModelSpec should have authored hashes"
+
+        with patch("cstar.applications.forge.executor.AdditionalCode") as mock_ac:
+            template_dir = builder._stage_templates("run_time")
+
+        mock_ac.assert_not_called()
+        assert (template_dir / "marbl_in").exists()
+
+    def test_stage_templates_falls_back_to_additional_code_when_hashes_empty(
+        self, minimal_cstar_spec_builder_args
+    ):
+        """Empty ``file_hashes`` (old blueprints, or no matching bundled copy at
+        resolve time) stages exactly as before this fast path existed: via
+        :class:`AdditionalCode`, with no verification.
+        """
+        builder = _make_builder(minimal_cstar_spec_builder_args)
+        builder.code_spec = builder.code_spec.model_copy(
+            update={
+                "templates_compile_time": builder.code_spec.templates_compile_time.model_copy(
+                    update={"file_hashes": {}}
+                )
+            }
+        )
+
+        with patch("cstar.applications.forge.executor.AdditionalCode") as mock_ac:
+            mock_ac.return_value.get.side_effect = lambda local_dir: (
+                Path(local_dir).mkdir(parents=True, exist_ok=True),
+                (Path(local_dir) / "cppdefs.opt.j2").write_text("staged"),
+            )
+            template_dir = builder._stage_templates("compile_time")
+
+        mock_ac.assert_called_once()
+        assert (template_dir / "cppdefs.opt.j2").read_text() == "staged"
+
+    @pytest.mark.real_template_staging
+    def test_stage_templates_raises_on_fetched_content_mismatch(
+        self, minimal_cstar_spec_builder_args
+    ):
+        """If ``file_hashes`` is non-empty but the bundled copy doesn't match
+        (forcing the ``AdditionalCode`` fetch path), a fetched file's content that
+        doesn't match the pinned hash raises ``ValueError`` naming the file and
+        both digests -- the blueprint pins template content the fetched commit
+        doesn't match. ``real_template_staging`` opts out of the offline
+        fixture's ``_verify_template_hashes`` no-op so this exercises the real
+        check.
+        """
+        builder = _make_builder(minimal_cstar_spec_builder_args)
+        # cson_roms-marbl_v0.1's compile-time stage is already a real fast-path
+        # miss (its 692e04ce-pinned hash doesn't match the bundled copy -- see
+        # test_bundled_modelspec_fast_path_eligibility_by_stage), so staging falls
+        # through to the AdditionalCode fetch path below unaided.
+        assert builder.code_spec.templates_compile_time.file_hashes
+
+        with patch("cstar.applications.forge.executor.AdditionalCode") as mock_ac:
+            mock_ac.return_value.get.side_effect = lambda local_dir: (
+                Path(local_dir).mkdir(parents=True, exist_ok=True),
+                (Path(local_dir) / "cppdefs.opt.j2").write_text(
+                    "not the pinned content"
+                ),
+            )
+            with pytest.raises(ValueError, match="cppdefs.opt.j2"):
+                builder._stage_templates("compile_time")
+
     @requires_cstar_pio
     def test_build_with_use_pio_emits_code_pio_and_partitioning_use_pio(
         self, minimal_cstar_spec_builder_args
