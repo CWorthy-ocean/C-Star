@@ -4,6 +4,10 @@ Custom C-Star Applications
 Custom applications enable users to execute new types of behavior with C-Star. The real
 power of custom applications becomes clear when they are integrated into a workplan.
 
+For a complete, in-tree example of a custom application built this way, see
+:doc:`forge/index` -- the domain-generation application ``forge`` (source at
+``cstar/applications/forge/``) follows exactly the pattern described below.
+
 
 Applications Overview
 ---------------------

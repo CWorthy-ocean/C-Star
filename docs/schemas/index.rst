@@ -42,3 +42,11 @@ running a custom application with user-provided blueprints.
 
 
 - :download:`Plotter Blueprint Schema v1.0.0 <https://raw.githubusercontent.com/CWorthy-ocean/C-Star/refs/heads/main/docs/schemas/bp/plotter/plotter_schema.1.0.0.json>`
+
+
+Forge Blueprint
+~~~~~~~~~~~~~~~
+
+The `forge` blueprint (see :doc:`../forge/index`) configures the domain-generation
+application that produces ROMS-MARBL blueprints; its JSON schema is not yet published
+here.
