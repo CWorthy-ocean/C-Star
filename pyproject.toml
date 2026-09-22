@@ -99,7 +99,7 @@ line-length = 88
 target-version = "py311"
 
 [tool.ruff.lint]
-extend-select = ["I", "F", "E", "W", "D", "UP", "TCH"] #  "RUF", "UP"]
+extend-select = ["I", "F", "E", "W", "D", "UP", "TCH", "RUF"]
 ignore = [
     # will fix eventually
     "E501",
@@ -116,11 +116,22 @@ ignore = [
     # won't fix
     "D105",
     "D107", # if you're doing wacky init stuff, please document
-
-]#, "D205", "D102", "D100", "D401", "D101", "D105", "D103", "D104"]
+    # RUF rules both this repo and cstar-forge found too noisy (same ignore list
+    # there): regex metacharacters in pytest.raises(match=...) are intentional,
+    # and unused unpacked names document a tuple's shape.
+    "RUF043",
+    "RUF059",
+]
 
 [tool.ruff.lint.pydocstyle]
 convention = "pep257"
+
+[tool.ruff.lint.flake8-type-checking]
+# Pydantic evaluates field annotations at runtime, including those of dataclasses
+# used as model field types, so TCH must not move their imports into
+# `if TYPE_CHECKING:` blocks. Same settings as cstar-forge (relocating here).
+runtime-evaluated-base-classes = ["pydantic.BaseModel", "pydantic_settings.BaseSettings"]
+runtime-evaluated-decorators = ["dataclasses.dataclass"]
 
 
 [tool.pre-commit]
@@ -137,6 +148,12 @@ norecursedirs = [".tox", ".git", "__pycache__", ".#*", "*~"]
 log_cli_format = "%(asctime)s | %(levelname)s | %(name)s::%(funcName)s:%(lineno)d: %(message)s"
 log_cli_level = "INFO"
 asyncio_mode = "auto"
+# Registered for the forge test suite (relocating here): `network` needs live
+# GitHub/data access, `slow` is deselected in quick runs. Selection stays by path.
+markers = [
+    "network: tests requiring live network access (deselect with -m 'not network')",
+    "slow: slow-running tests (deselect with -m 'not slow')",
+]
 
 
 # Use addopts to ignore specific files and directories

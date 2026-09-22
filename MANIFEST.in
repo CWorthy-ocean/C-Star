@@ -1,1 +1,4 @@
-recursive-include cstar_ocean/additional_files/ROMS_Makefiles *
+# Package data outside the .py tree: machine env files, lmod lists, templates.
+# (setuptools_scm already includes tracked files; this keeps sdists built without
+# git metadata complete.)
+recursive-include cstar/additional_files *

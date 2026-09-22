@@ -1,4 +1,3 @@
-# ruff: noqa: SLF001, S101
 import logging
 import os
 import shutil
@@ -218,7 +217,7 @@ def test_override_transform(
 
     steps = transform(step)
 
-    transformed = list(steps)[0]
+    transformed = next(iter(steps))
 
     # confirm a attribute of the blueprint is changed (bp.blueprint_path)
     dir_orig = test_working_dir
@@ -278,7 +277,7 @@ def test_override_transform_system_precedence(
 
     steps = transform(step)
 
-    transformed = list(steps)[0]
+    transformed = next(iter(steps))
 
     # confirm a attribute of the blueprint is changed (bp.blueprint_path)
     dir_orig = test_working_dir

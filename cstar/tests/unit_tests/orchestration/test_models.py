@@ -1,5 +1,3 @@
-# ruff: noqa: S101
-
 import json
 import pathlib
 import typing as t

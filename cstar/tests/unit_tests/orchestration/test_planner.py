@@ -1,5 +1,3 @@
-# ruff: noqa: S101
-
 import typing as t
 from collections.abc import Callable, Generator
 from pathlib import Path
@@ -166,7 +164,7 @@ def test_planner_bfs_breaker(
     #   ________ O4
     #  [          \
     # O0--O1--O2--O3--05-->End
-    assert num_steps >= 2, "Test assumes at least two tasks"  # noqa: PLR2004
+    assert num_steps >= 2, "Test assumes at least two tasks"
 
     steps = list(gen_fake_steps(num_steps))
 

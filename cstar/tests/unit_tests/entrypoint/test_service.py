@@ -127,7 +127,7 @@ class PrintingService(Service):
 
     def summarize(
         self,
-        finalize: bool = False,  # noqa: FBT001, FBT002
+        finalize: bool = False,
     ) -> dict[str, int]:
         """Return a summary of the test tracking queue contents.
 
@@ -312,7 +312,7 @@ async def test_event_loop_task_service(loop_count: int) -> None:
 
         # Service should run until _on_iteration is invoked
         # ...but internally it should aggregate the service config.
-        assert not service._can_shutdown()  # noqa: SLF001
+        assert not service._can_shutdown()
         assert service.can_shutdown
 
         # .execute should run the complete service life-cycle
@@ -460,7 +460,7 @@ async def test_delay(loop_delay: float, loop_count: int) -> None:
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("fail_on_shutdown", [False, True])
-async def test_signal_handling(fail_on_shutdown: bool) -> None:  # noqa: FBT001
+async def test_signal_handling(fail_on_shutdown: bool) -> None:
     """Verify that the service shuts down gracefully when signals are sent.
 
     If the service is configured to fail on shutdown, the signal handler must gracefully

@@ -264,12 +264,12 @@ def model_to_yaml(model: SerializableModel) -> str:
     # 'application' is required by the base Blueprint type for deserialization
     # routing; always include it even when it equals the subclass default.
     if hasattr(model, "application"):
-        dumped["application"] = str(getattr(model, "application"))  # noqa: B009
+        dumped["application"] = str(getattr(model, "application"))
 
     # 'schema_version' records which schema wrote the document; always include
     # it (even at the current default) so persisted artifacts self-describe.
     if hasattr(model, "schema_version"):
-        dumped["schema_version"] = str(getattr(model, "schema_version"))  # noqa: B009
+        dumped["schema_version"] = str(getattr(model, "schema_version"))
 
     dumper = yaml.Dumper
     dumper.ignore_aliases = lambda *_args: True  # type: ignore[method-assign]

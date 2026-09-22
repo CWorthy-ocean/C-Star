@@ -1,4 +1,3 @@
-# ruff: noqa: S101
 import itertools
 import logging
 import os
@@ -166,7 +165,6 @@ def test_create_parser_happy_path() -> None:
     """Verify that a help argument is present in the parser."""
     parser = create_parser()
 
-    # ruff: noqa: SLF001
     assert ARG_URI_LONG in parser._option_string_actions
     assert ARG_LOGLEVEL_LONG in parser._option_string_actions
 
@@ -177,7 +175,6 @@ def test_create_parser_accepts_resume_flag() -> None:
     """
     parser = create_parser()
 
-    # ruff: noqa: SLF001
     assert ARG_RESUME in parser._option_string_actions
 
     parsed_default = parser.parse_args([ARG_URI_LONG, "blueprint.yaml"])
@@ -629,7 +626,7 @@ async def test_runner_on_start_without_uri(
     ):
         # clear blueprint URI from the default RomsMarblRunner from the fixture
         # use `setattr` to force-change the Final
-        setattr(sim_runner.request, "blueprint_uri", None)  # noqa: B010
+        setattr(sim_runner.request, "blueprint_uri", None)
 
         # Trigger a run through the lifecycle as a task. Without a blueprint URI,
         # this should fail but it should still shutdown gracefully.

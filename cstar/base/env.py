@@ -296,6 +296,28 @@ ENV_CSTAR_DATA_HOME: t.Annotated[
 ] = "CSTAR_DATA_HOME"
 """Environment variable used to override the home directory for C-Star dataset storage."""
 
+
+def default_catalog_root(env_var: EnvVar) -> str:
+    """Default catalog location: ``<CSTAR_DATA_HOME>/catalog``.
+
+    Catalog entries are durable, user-registered content, so they live under the
+    data home (scratch on HPC, ``~/cstar`` elsewhere) rather than the cache.
+    """
+    return (Path(get_env_item(ENV_CSTAR_DATA_HOME).value) / "catalog").as_posix()
+
+
+ENV_CSTAR_CATALOG: t.Annotated[
+    t.Literal["CSTAR_CATALOG"],
+    EnvVar(
+        "Catalog locations for forge blueprint authoring, os.pathsep-separated "
+        "(local paths, GitHub or http URLs), stacked over the bundled catalog; the "
+        "first entry is the writable user layer.",
+        GROUP_FS,
+        default_factory=default_catalog_root,
+    ),
+] = "CSTAR_CATALOG"
+"""Catalog locations for forge blueprint authoring (first entry = writable user layer)."""
+
 ENV_CSTAR_STATE_HOME: t.Annotated[
     t.Literal["CSTAR_STATE_HOME"],
     EnvVar(

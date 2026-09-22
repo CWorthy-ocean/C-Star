@@ -2,7 +2,14 @@ import logging
 
 import pytest
 
-from cstar.base.env import ENV_CSTAR_ORCH_MAX_CONC, max_concurrency
+from cstar.base.env import (
+    ENV_CSTAR_CATALOG,
+    ENV_CSTAR_DATA_HOME,
+    ENV_CSTAR_ORCH_MAX_CONC,
+    discover_env_vars,
+    get_env_item,
+    max_concurrency,
+)
 
 
 def test_max_concurrency_default_when_unset(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -53,3 +60,21 @@ def test_max_concurrency_falls_back_on_non_positive(
 
     assert value == 10
     assert "invalid" in caplog.text
+
+
+def test_catalog_defaults_under_data_home(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv(ENV_CSTAR_CATALOG, raising=False)
+    monkeypatch.setenv(ENV_CSTAR_DATA_HOME, "/data/home")
+    assert get_env_item(ENV_CSTAR_CATALOG).value == "/data/home/catalog"
+
+
+def test_catalog_explicit_value_wins(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv(ENV_CSTAR_CATALOG, "/mine:https://github.com/org/repo/catalog")
+    assert (
+        get_env_item(ENV_CSTAR_CATALOG).value
+        == "/mine:https://github.com/org/repo/catalog"
+    )
+
+
+def test_catalog_is_discoverable() -> None:
+    assert ENV_CSTAR_CATALOG in discover_env_vars()

@@ -554,7 +554,7 @@ class ROMSSimulation(Simulation):
         """Ensure input dataset date ranges align with the simulation date range.
 
         For each input dataset with a plaintext (yaml) source, this method verifies that
-        its `start_date` and `end_date` match the simulation’s `start_date` and
+        its `start_date` and `end_date` match the simulation's `start_date` and
         `end_date`. If they do not match, a warning is issued and the dataset's
         dates are overwritten to enforce alignment.
 
@@ -1454,8 +1454,10 @@ class ROMSSimulation(Simulation):
                     or (not isinstance(inp.end_date, datetime))
                     or (not isinstance(self.start_date, datetime))
                     or (not isinstance(self.end_date, datetime))
-                    or (inp.start_date <= self.end_date)
-                    and (inp.end_date >= self.start_date)
+                    or (
+                        (inp.start_date <= self.end_date)
+                        and (inp.end_date >= self.start_date)
+                    )
                 ):
                     return False
         return True
@@ -1482,8 +1484,9 @@ class ROMSSimulation(Simulation):
         return (
             ((inp.start_date is None) or (inp.end_date is None))
             or ((self.start_date is None) or (self.end_date is None))
-            or (inp.start_date <= self.end_date)
-            and (self.end_date >= self.start_date)
+            or (
+                (inp.start_date <= self.end_date) and (self.end_date >= self.start_date)
+            )
         )
 
     _ATTACH_COMPONENT_ERRORS: ClassVar[tuple[type[Exception], ...]] = (
