@@ -9,7 +9,13 @@ Unreleased
 Breaking Changes
 ~~~~~~~~~~~~~~~~
 
-- N/A
+
+- ``cstar-ocean`` now requires forge's runtime stack (copernicusmarine, gdown, dask, distributed, numba, threadpoolctl, kerchunk, nest-asyncio, ujson, fastparquet, fsspec, jinja2, pandas, xarray) and the wizard stack (ipywidgets, voila, jupyterlab, matplotlib, ipython) as core dependencies; ``environment-laptop.yml`` and ``environment-hpc.yml`` carry the conda equivalents. (`#699 <https://github.com/CWorthy-ocean/C-Star/pull/699>`_)
+- A third-party ``cstar.cli`` plugin named ``forge`` now conflicts with the core ``cstar forge`` subcommand and is skipped with a warning. (`#699 <https://github.com/CWorthy-ocean/C-Star/pull/699>`_)
+- ``cstar --version`` and the ``cstar blueprint run`` startup log no longer report a ``cstar-forge`` distribution. (`#699 <https://github.com/CWorthy-ocean/C-Star/pull/699>`_)
+- Forge's catalog location is ``CSTAR_CATALOG`` (os.pathsep-separated layers; the first entry is the writable user layer), replacing ``CSTAR_FORGE_CATALOG``; the default is ``~/cstar/catalog`` instead of ``~/cstar-forge-data/catalog``. A catalog left at the old location is not read; forge logs a one-time hint saying where it is expected. (`#699 <https://github.com/CWorthy-ocean/C-Star/pull/699>`_)
+- Forge blueprints no longer receive a ``forge_version`` provenance stamp; ``cstar_version`` identifies the code that wrote them (the field is kept so older blueprints load). (`#699 <https://github.com/CWorthy-ocean/C-Star/pull/699>`_)
+- The pre-commit ``check-yaml`` hook allows multi-document YAML (roms-tools' ``to_yaml`` format) and ``RUF001`` is ignored for forge's intentional user-facing glyphs. (`#699 <https://github.com/CWorthy-ocean/C-Star/pull/699>`_)
 
 New features
 ~~~~~~~~~~~~
@@ -19,11 +25,22 @@ New features
 - ``cstar bp ...`` is now shorthand for ``cstar blueprint ...`` (e.g. ``cstar bp run``, ``cstar bp check``). (`#697 <https://github.com/CWorthy-ocean/C-Star/pull/697>`_)
 - ``cstar workplan list`` now works as an alternate name for ``cstar workplan ls``, with an identical set of options. (`#697 <https://github.com/CWorthy-ocean/C-Star/pull/697>`_)
 - ``CSTAR_CATALOG`` is a registered C-Star environment variable (shown by ``cstar env show`` under File System Configuration): ``os.pathsep``-separated catalog locations for forge blueprint authoring (local paths, GitHub or http URLs), stacked over the bundled catalog, with the first entry as the writable user layer. Default ``<CSTAR_DATA_HOME>/catalog``. Nothing reads it yet; forge's catalog switches to it when it moves here. (`#698 <https://github.com/CWorthy-ocean/C-Star/pull/698>`_)
+- ``forge`` is a built-in C-Star application: ``cstar blueprint run forge_blueprint.yaml`` (defaults) and ``cstar forge run forge_blueprint.yaml`` (the full executor option set: stage selection, ``--clobber``, dask tuning, ``--only-inputs``, ``--host-only``, ``--verbose``, ``--working-dir``) generate ROMS-MARBL inputs and emit the downstream ``roms_marbl`` blueprint, as cstar-forge did. (`#699 <https://github.com/CWorthy-ocean/C-Star/pull/699>`_)
+- ``cstar forge wizard`` (voila web app), ``cstar forge copy-notebook`` (Jupyter alternative) and ``cstar forge show-paths`` move over from cstar-forge. (`#699 <https://github.com/CWorthy-ocean/C-Star/pull/699>`_)
+- ``cstar env register-kernel`` registers a Jupyter kernelspec for the active conda/micromamba environment that launches through an activation wrapper (for Jupyter servers hosted outside the environment, e.g. HPC OnDemand); it was ``cstar forge register-kernel``. (`#699 <https://github.com/CWorthy-ocean/C-Star/pull/699>`_)
+- ``cstar.catalog``: ``DomainCatalog``/``LayeredCatalog`` with the bundled Model/Domain/Forcing/Output specs and example blueprints, a scan-free package import and a lazy ``default_catalog``. (`#699 <https://github.com/CWorthy-ocean/C-Star/pull/699>`_)
+- Render templates are pinned by content: each bundled ModelSpec carries the sha256 of its template files at its pinned ``templates_commit``, the resolver copies them into the blueprint (``code.templates_*.file_hashes``, excluded from ``content_hash``), and the executor stages C-Star's bundled copy when it matches those hashes and otherwise fetches the pinned commit and verifies it, failing loudly on a mismatch. Blueprints without hashes behave exactly as before. (`#699 <https://github.com/CWorthy-ocean/C-Star/pull/699>`_)
+- Documentation: a "Domain generation (Forge)" section with an overview, a getting-started walkthrough (data-access registration, wizard, processing, running, login-node use), reference, source data, input data, model specs with the example notebook, catalog design and developer internals; forge's standalone release history under Releases; and forge's advanced-installation/HPC, system-detection and installation-changes pages carried over as-is pending the docs reconciliation PR. (`#699 <https://github.com/CWorthy-ocean/C-Star/pull/699>`_)
 
 Bug Fixes
 ~~~~~~~~~
 
-- N/A
+
+- Two path anchors in the moved code assumed forge's two-level package layout and resolved to the wrong directory at the new depth: the repo-root anchor behind provenance, and the ModelSpec template-existence check, which had become a silent no-op. (`#699 <https://github.com/CWorthy-ocean/C-Star/pull/699>`_)
+- The typed ``ModelSpec`` loader dropped the new per-file template hashes; it now carries them like the resolver's raw-YAML path. (`#699 <https://github.com/CWorthy-ocean/C-Star/pull/699>`_)
+- ``generate_inputs(test=True)`` returned ``None`` from a function annotated to return a blueprint; the annotation now admits it. (`#699 <https://github.com/CWorthy-ocean/C-Star/pull/699>`_)
+- The shipped example blueprint (``docs/forge-blueprint-example.wio-toy.yaml``) pinned a ``cppdefs.opt.j2`` older than the settings it carried, so ``cstar forge run`` on it failed at the render stage with "keys that template never references" (found testing on Anvil); it is re-pinned to forge commit 692e04ce with template hashes and a restamped ``content_hash``, and a test now checks the shipped cppdefs keys against the bundled template. (`#699 <https://github.com/CWorthy-ocean/C-Star/pull/699>`_)
+- CLI tests' colour suppression was order-dependent: typer bakes ``GITHUB_ACTIONS``/``FORCE_COLOR`` into ``typer.rich_utils.FORCE_TERMINAL`` at first import, so a forge ``--help`` test running first in CI left later ``cstar workplan run`` usage errors ANSI-split; the autouse fixture now also patches that constant. (`#699 <https://github.com/CWorthy-ocean/C-Star/pull/699>`_)
 
 Improvements
 ~~~~~~~~~~~~
@@ -33,9 +50,18 @@ Improvements
 - Ruff selects ``RUF`` in addition to ``I, F, E, W, D, UP, TCH``, matching cstar-forge exactly (``RUF043`` regex metacharacters in ``pytest.raises(match=)`` and ``RUF059`` unused unpacked names are ignored in both repos). The findings were mechanical: stale ``noqa`` comments, two ``[0]`` slices on list copies, two chained comparisons, one f-string conversion, four curly apostrophes in docstrings. (`#698 <https://github.com/CWorthy-ocean/C-Star/pull/698>`_)
 - ``flake8-type-checking`` is configured with ``runtime-evaluated-base-classes`` (``pydantic.BaseModel``, ``pydantic_settings.BaseSettings``) and ``runtime-evaluated-decorators`` (``dataclasses.dataclass``), so TCH never moves an import that Pydantic evaluates at runtime into a ``TYPE_CHECKING`` block. Nothing in ``cstar/`` trips this today; forge's executor (``host: HostPaths | None`` where ``HostPaths`` is a dataclass) does, and broke without it. (`#698 <https://github.com/CWorthy-ocean/C-Star/pull/698>`_)
 - ``network`` and ``slow`` pytest markers are registered for forge's test suite; test selection in this repo remains by path. (`#698 <https://github.com/CWorthy-ocean/C-Star/pull/698>`_)
+- One shared mapping (``cstar/applications/forge/templates.py``) from a ModelSpec's ``templates/<stage>`` directory onto the bundled copy, used by the ModelSpec validation and the executor. (`#699 <https://github.com/CWorthy-ocean/C-Star/pull/699>`_)
+- Forge's loggers live under ``cstar.applications.forge.*``, so a ``cstar forge run`` log capture lowers only the ``cstar`` and ``roms_tools`` loggers. (`#699 <https://github.com/CWorthy-ocean/C-Star/pull/699>`_)
+- ``runtime.py`` (was forge's ``run.py``) exposes ``run_blueprint()`` behind explicit keyword arguments; the ``python -m`` entry point is gone. (`#699 <https://github.com/CWorthy-ocean/C-Star/pull/699>`_)
+- The boundary guard test now discovers the application's modules from the package directory and additionally asserts that nothing under ``cstar/`` imports ``cstar_forge``. (`#699 <https://github.com/CWorthy-ocean/C-Star/pull/699>`_)
 
 Miscellaneous
 ~~~~~~~~~~~~~
 
 - pre-commit: ``types-ujson`` added to the mypy hook (forge's GLORYS subchunking imports ``ujson``, and typeshed knows the stub package, so ``ignore_missing_imports`` does not silence it); ``check-added-large-files`` raised from 100 kB to 200 kB, matching forge (the hook fires only on files newly staged as added; two tracked test files already exceed 100 kB). (`#698 <https://github.com/CWorthy-ocean/C-Star/pull/698>`_)
 - ``MANIFEST.in`` points at ``cstar/additional_files`` instead of the long-gone ``cstar_ocean/additional_files/ROMS_Makefiles``. (`#698 <https://github.com/CWorthy-ocean/C-Star/pull/698>`_)
+- History: 323 filtered cstar-forge commits merged under ``forge-import/``, then relocated with pure ``git mv`` commits (zero content changes) and removed once empty. (`#699 <https://github.com/CWorthy-ocean/C-Star/pull/699>`_)
+- Packaging: ``MANIFEST.in`` ships the bundled catalog and the wizard's labels, notebooks and logo; ``netCDF4`` joins the dev extra. (`#699 <https://github.com/CWorthy-ocean/C-Star/pull/699>`_)
+- Tests: forge's suite lives under ``cstar/tests/unit_tests/applications/forge/`` and ``cstar/tests/unit_tests/wizard/``, its CLI tests under ``orchestration/cli/``; its conftest sets ``CSTAR_CATALOG`` to a temp dir before collection and stages templates offline from the working tree; golden namelist and settings fixtures are byte-identical to forge's. (`#699 <https://github.com/CWorthy-ocean/C-Star/pull/699>`_)
+- Docs: ``docs/forge/index.rst`` no longer declares its own toctree (it duplicated ``docs/index.rst``'s and nested the sidebar section inside itself). (`#699 <https://github.com/CWorthy-ocean/C-Star/pull/699>`_)
+- ``DEFAULT_TEMPLATE_REPO`` and the bundled ModelSpecs still pin the archived ``cstar-forge`` repository; re-pinning to a C-Star tag is a release-time step and does not affect correctness (the content hashes do). (`#699 <https://github.com/CWorthy-ocean/C-Star/pull/699>`_)
