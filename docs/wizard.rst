@@ -57,6 +57,10 @@ The cards
 Cards are worked top to bottom. Required cards are marked; the rest can be
 left at their defaults.
 
+.. figure:: images/wizard-overview.png
+   :alt: The wizard's header with the step navigation, the Start card and the Model card
+   :width: 100%
+
 Start from an existing blueprint
    Load a blueprint saved in your catalog, or paste YAML, to edit it. Skip
    this card to build one from scratch.
@@ -76,6 +80,10 @@ Domain and grid
    you override them, and an optional nesting section relates this grid to a
    parent or child domain.
 
+.. figure:: images/wizard-domain.png
+   :alt: The Domain and grid card: grid geometry, vertical coordinate, bathymetry, derived values and nesting
+   :width: 100%
+
 Boundaries and forcing
    The datasets that set the ocean state at the start and drive it at the
    edges: a **ForcingSpec** from the catalog, or your own selection of
@@ -84,10 +92,18 @@ Boundaries and forcing
    that you must download yourself (TPXO tides, for example) are noted here;
    see :doc:`data_access`.
 
+.. figure:: images/wizard-forcing.png
+   :alt: The Boundaries and forcing card with one collapsed section per forcing type
+   :width: 100%
+
 Run setup
    The run window (start, end and model reference date), the processor
    layout and PIO or automatic-tiling options, and optional carbon dioxide
    removal forcing, imported from a netCDF file or described by hand.
+
+.. figure:: images/wizard-run.png
+   :alt: The Run setup card: run window, partitioning and carbon dioxide removal
+   :width: 100%
 
 Advanced settings
    Individual ROMS-MARBL namelist settings beyond what the other cards
@@ -95,12 +111,20 @@ Advanced settings
    each output stream, and so on), plus the compile-time switches. An
    **OutputSpec** from the catalog fills the output sections.
 
+.. figure:: images/wizard-advanced.png
+   :alt: The Advanced settings card with collapsed namelist sections
+   :width: 100%
+
 Review and export
    The resolved blueprint as YAML, with validation messages. From here you
    can **Download** the file, **Save** it to your catalog, save any spec you
    modified as a new named catalog entry, run the blueprint through the
    C-Star command line, or save a deferred workplan that runs it later
    (experimental).
+
+.. figure:: images/wizard-review.png
+   :alt: The Review and export card: validation result, resolved YAML, download, save and run
+   :width: 100%
 
 Where your work goes
 --------------------
