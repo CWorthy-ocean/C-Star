@@ -11,6 +11,7 @@ Breaking Changes
 
 
 - ``--resume`` can no longer be combined with ``--var`` or ``--varfile``; a resumed run always continues with the variables it was started with. (`#702 <https://github.com/CWorthy-ocean/C-Star/pull/702>`_)
+- Upscaler blueprints now default to ``pio: true``, so the upscaled CDR forcing file is written as CDF-5 and ``nccopy`` must be available on ``PATH``. Set ``pio: false`` to keep the previous NETCDF4 output. (`#705 <https://github.com/CWorthy-ocean/C-Star/pull/705>`_)
 
 New features
 ~~~~~~~~~~~~
@@ -18,6 +19,7 @@ New features
 
 - ``cstar workplan run my_workplan.yaml --resume`` resumes the run that workplan started, deriving the run-id from the workplan name; ``--run-id <id> my_workplan.yaml --resume`` uses the explicit id. (`#702 <https://github.com/CWorthy-ocean/C-Star/pull/702>`_)
 - A workplan path given with ``--resume`` is checked against the run's recorded original workplan; a changed, missing or unreadable record is reported as a usage error naming ``--run-id <id>`` as the way to resume the run as recorded. (`#702 <https://github.com/CWorthy-ocean/C-Star/pull/702>`_)
+- New ``pio`` field on upscaler blueprints: when enabled (the default), the CDR forcing file is written as NETCDF4 and then converted to CDF-5 with ``nccopy -k cdf5``, keeping the original output filename (``output/upscaled_cdr.nc``). (`#705 <https://github.com/CWorthy-ocean/C-Star/pull/705>`_)
 
 Bug Fixes
 ~~~~~~~~~
@@ -38,6 +40,7 @@ Improvements
 - ``bundled_template_dir`` maps the current directory form and the legacy ``templates/<stage>`` form onto the bundled copy; ``BUNDLED_TEMPLATES_DIRECTORY`` names the prefix. (`#707 <https://github.com/CWorthy-ocean/C-Star/pull/707>`_)
 - When a codebase cannot be adopted on resume, the error names the failed check: target not present in the clone, HEAD at a different commit (both hashes shown), tracked files modified, build artifacts missing, or git's own error for an unreadable repository. (`#704 <https://github.com/CWorthy-ocean/C-Star/pull/704>`_)
 - Setup-time detection of local modifications is content-based as well, avoiding unnecessary recompiles caused by stale index metadata. (`#704 <https://github.com/CWorthy-ocean/C-Star/pull/704>`_)
+- The NETCDF4 → CDF-5 conversion is now a shared utility used by both the ``nest_ic`` and ``upscaler`` applications. (`#705 <https://github.com/CWorthy-ocean/C-Star/pull/705>`_)
 
 Miscellaneous
 ~~~~~~~~~~~~~
