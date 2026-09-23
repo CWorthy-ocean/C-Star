@@ -14,8 +14,8 @@ on a laptop or on a supported HPC system, from the same description of the run.
    <video autoplay loop muted playsinline width="100%"
           style="display:block;margin:0 auto 1.5rem;border-radius:4px"
           aria-label="Simulated air-sea CO2 uptake following an alkalinity release">
-     <source src="https://raw.githubusercontent.com/CWorthy-ocean/.github/draft/ALK_FG_CO2uptake_highres.webm" type="video/webm">
-     <source src="https://raw.githubusercontent.com/CWorthy-ocean/.github/draft/ALK_FG_CO2uptake_highres.mp4" type="video/mp4">
+     <source src="https://raw.githubusercontent.com/CWorthy-ocean/.github/6680cccc924b6676281eaeb6939d2c32b629caac/ALK_FG_CO2uptake_highres.webm" type="video/webm">
+     <source src="https://raw.githubusercontent.com/CWorthy-ocean/.github/6680cccc924b6676281eaeb6939d2c32b629caac/ALK_FG_CO2uptake_highres.mp4" type="video/mp4">
      Your browser does not play embedded video.
    </video>
 
