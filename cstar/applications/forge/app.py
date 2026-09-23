@@ -25,6 +25,7 @@ applications.
 
 from __future__ import annotations
 
+import asyncio
 import shutil
 import typing as t
 
@@ -56,9 +57,22 @@ class ForgeRunner(BlueprintRunner[ForgeBlueprint]):
         Delegates to ``cstar.applications.forge.runtime.process`` (host-resolution glue) ->
         ``forge_blueprint_engine.process_forge_blueprint`` -> the ``ForgeExecutor``
         substitution seam (``ensure_source_data`` -> ``generate_inputs`` ->
-        ``configure_build``). Synchronous and heavy (network fetches, roms-tools
-        NetCDF generation) -- runs inline on the event loop for this first cut;
-        ``asyncio.to_thread`` is a candidate refinement if that becomes a problem.
+        ``configure_build``). Synchronous and heavy (network fetches, roms-tools NetCDF
+        generation), so it is run via ``asyncio.to_thread`` rather than inline, keeping
+        the event loop free for this ``Service``'s own concurrent work (healthcheck
+        heartbeat, cancellation, status updates) while forge does its work.
+
+        Note: ``runtime.process`` tees ``sys.stdout``/``sys.stderr`` and adds a root
+        logging handler for the duration of the run (see ``runtime._capture_output``).
+        Those are process-global, not thread-local, so anything else in this process
+        that writes to stdout/stderr or logs through the captured loggers while this
+        call is in flight is also captured into the forge run log; and two ``run()``
+        calls active at once in the same process (not something C-Star's orchestrator
+        does today -- each forge step runs in its own process) would race on the same
+        globals. Neither is new exposure from moving this call to a worker thread --
+        the previous inline call held the same global state for the same duration --
+        but the thread makes concurrent interleaving possible where blocking the loop
+        previously ruled it out.
 
         Returns
         -------
@@ -68,7 +82,7 @@ class ForgeRunner(BlueprintRunner[ForgeBlueprint]):
         from cstar.applications.forge import runtime as forge_run
 
         try:
-            executor = forge_run.process(self.blueprint)
+            executor = await asyncio.to_thread(forge_run.process, self.blueprint)
         except Exception as ex:
             msg = "An error occurred while generating forge inputs"
             self.log.exception(msg)

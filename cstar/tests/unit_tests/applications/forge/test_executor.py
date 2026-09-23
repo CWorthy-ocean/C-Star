@@ -19,11 +19,13 @@ Tests cover:
 """
 
 import asyncio
+import contextlib
 import copy
 import logging
 import os
 import sys
 import tempfile
+import time
 from datetime import datetime
 from pathlib import Path
 from typing import ClassVar
@@ -3397,6 +3399,96 @@ class TestForgeRunnerEndToEnd:
         published = list((run_dir / "output").glob("*.yaml"))
         assert [p.name for p in published] == [blueprint_yaml_paths[0].name]
         assert published[0].read_bytes() == blueprint_yaml_paths[0].read_bytes()
+
+
+class TestForgeRunnerDoesNotBlockEventLoop:
+    """``ForgeRunner.run()`` offloads ``runtime.process`` onto a worker thread via
+    ``asyncio.to_thread`` (see the docstring on ``cstar.applications.forge.app.
+    ForgeRunner.run``) specifically so the event loop keeps servicing this
+    ``Service``'s own concurrent work -- healthcheck heartbeat, cancellation,
+    status updates -- while forge's synchronous, heavy processing runs.
+
+    Proves that by racing a slow, synchronous fake ``process`` (blocking via
+    ``time.sleep``, as the real one does under network/NetCDF work) against a
+    plain ``asyncio`` task that increments a counter on a short interval: if
+    ``run()`` still awaited ``process`` inline, the counter task would never get
+    a turn until ``process`` returned, and the count would be 0 or 1. Offloaded to
+    a thread, the loop keeps ticking the counter task while the thread blocks.
+    """
+
+    def test_run_offloads_process_and_keeps_loop_responsive(self, tmp_path):
+        cfg = build_forge_blueprint(
+            model_dir=_MODEL_DIR,
+            grid_name="test-tiny",
+            grid_kwargs=TestGoldenNamelist._GRID_KWARGS,
+            open_boundaries=TestGoldenNamelist._BOUNDARIES,
+            partitioning=TestGoldenNamelist._PARTITIONING,
+            start_date=datetime(2012, 1, 1),
+            end_date=datetime(2012, 1, 2),
+            description="ForgeRunner non-blocking test",
+            dt=7200,
+            forcing_inputs=_FORCING_INPUTS,
+            output_settings=_OUTPUT_SETTINGS,
+        )
+        bp_path = tmp_path / "forge_blueprint.yaml"
+        cfg.to_yaml(bp_path)
+
+        run_dir = tmp_path / "run"
+        blueprints_dir = run_dir / "blueprints"
+        blueprints_dir.mkdir(parents=True)
+        emitted_blueprint = blueprints_dir / "B_test.yaml"
+        emitted_blueprint.write_text("application: roms_marbl\n")
+
+        fake_executor = MagicMock()
+        fake_executor.path_roms_marbl_blueprint.return_value = emitted_blueprint
+
+        process_sleep_s = 0.2
+
+        def slow_process(spec, **_kwargs):
+            # Stand-in for the real, synchronous network/NetCDF work: blocks
+            # whatever thread calls it for a fixed duration.
+            time.sleep(process_sleep_s)
+            return fake_executor
+
+        counter = {"ticks": 0}
+
+        async def bump_counter() -> None:
+            while True:
+                counter["ticks"] += 1
+                await asyncio.sleep(0.02)
+
+        async def scenario():
+            job_cfg = get_job_config()
+            service_cfg = get_service_config("INFO", name="ForgeRunnerThreadingTest")
+            request = RunnerRequest(str(bp_path), ForgeBlueprint)
+            runner = ForgeRunner(request, service_cfg, job_cfg)
+
+            counter_task = asyncio.ensure_future(bump_counter())
+            try:
+                with patch(
+                    "cstar.applications.forge.runtime.process",
+                    side_effect=slow_process,
+                ) as mock_process:
+                    result = await runner.run()
+            finally:
+                counter_task.cancel()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await counter_task
+
+            return result, mock_process
+
+        result, mock_process = asyncio.run(scenario())
+
+        mock_process.assert_called_once()
+        assert result.state.status == ExecutionStatus.COMPLETED, result.errors
+        # The counter task runs on a 0.02s cadence; if `process` had run inline
+        # on the loop it would have gotten zero or one tick during its 0.2s
+        # sleep. Offloaded to a thread, the loop is free to tick throughout.
+        assert counter["ticks"] >= 5, (
+            f"event loop only advanced {counter['ticks']} times during a "
+            f"{process_sleep_s}s synchronous process() call -- run() may be "
+            "blocking the loop instead of using asyncio.to_thread"
+        )
 
 
 class TestOnlyInputsReuseIsIdempotent:
