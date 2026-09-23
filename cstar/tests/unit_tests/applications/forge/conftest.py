@@ -88,3 +88,10 @@ def _offline_template_staging(monkeypatch, request):
     monkeypatch.setattr(
         ForgeExecutor, "_verify_template_hashes", lambda self, stage, dest: None
     )
+
+
+# No separate cache-home isolation fixture needed here: the repo-wide autouse
+# ``mock_xdg_dirs`` fixture (``cstar/tests/unit_tests/conftest.py``) already
+# points ``CSTAR_CACHE_HOME`` -- and so ``DirectoryManager.cache_home()``,
+# where ``ForgeExecutor._template_cache_dir`` puts the staging cache -- at a
+# throwaway per-test directory for every test in the suite.

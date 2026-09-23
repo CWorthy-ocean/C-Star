@@ -99,3 +99,24 @@ written against the standalone cstar-forge repository carry the legacy
 ``templates/<stage>`` directory form; ``bundled_template_dir`` maps both forms
 onto the bundled copy, and such a blueprint still fetches its pinned forge
 commit when the hashes differ.
+
+Staging cache
+~~~~~~~~~~~~~~~~
+
+A commit pin (as opposed to a ``branch`` pin) with authored ``file_hashes`` is
+content-addressed, so a fetch that verifies successfully is cached under
+C-Star's cache home (``cstar.execution.file_system.DirectoryManager.cache_home``,
+i.e. ``CSTAR_CACHE_HOME`` / ``XDG_CACHE_HOME``) at a key derived from the pin's
+``location``, ``commit``, and ``directory``. A later run for the same pin copies
+from that cache instead of fetching again; a cache entry whose files no longer
+match ``file_hashes`` -- corrupted, or left partial by an interrupted earlier
+run -- is treated as a miss and re-fetched. Branch pins and blueprints without
+``file_hashes`` are never cached, since neither is content-addressed enough to
+trust a cache entry without re-fetching to check it.
+
+Each file is written into the cache via a temp-file-then-rename, so two runs
+staging the same pin at once never see a partially-written file -- worst case
+they both write the same, already-verified bytes. Failing to write the cache
+(a read-only or over-quota ``CSTAR_CACHE_HOME``, common on shared HPC
+filesystems) is logged and otherwise ignored: the run already has its verified
+templates in the working directory, and simply re-fetches next time.
