@@ -46,10 +46,11 @@ def _offline_template_staging(monkeypatch, request):
     """Stage render templates from the local working tree instead of GitHub.
 
     The executor fetches templates via C-Star's ``AdditionalCode`` from the git ref in
-    ``code.templates_*`` (``https://…/cstar-forge.git`` @ main). The bundled ModelSpecs
-    still pin the old forge repo layout (``directory="templates/<stage>"``), so in the
-    suite we map that onto the new in-repo location,
-    ``cstar/additional_files/templates/forge/<stage>``, and point ``location`` there so
+    ``code.templates_*`` (this repository at the ModelSpec's ``templates_commit``). In
+    the suite we map a stage's ``directory`` (the current
+    ``cstar/additional_files/templates/forge/<stage>`` form, or the legacy
+    ``templates/<stage>`` form of older blueprints) onto the working tree's bundled
+    copy and point ``location`` there so
     staging is offline and sees the working tree — the *real* AdditionalCode local-copy
     path is exercised, only the source location is redirected (no network, no clone, no
     mock of the staging).
@@ -62,7 +63,15 @@ def _offline_template_staging(monkeypatch, request):
 
     def _local_args(self, stage):
         repo = getattr(self.code_spec, f"templates_{stage}")
-        sub = PurePosixPath(repo.directory).relative_to("templates")
+        parts = PurePosixPath(repo.directory).parts
+        for prefix in (
+            ("cstar", "additional_files", "templates", "forge"),
+            ("templates",),
+        ):
+            if parts[: len(prefix)] == prefix:
+                parts = parts[len(prefix) :]
+                break
+        sub = PurePosixPath(*parts)
         return {
             "location": str(_NEW_TEMPLATES_ROOT / sub),
             "subdir": "",

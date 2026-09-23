@@ -1310,13 +1310,18 @@ class TestForgeExecutorBuildAndRun:
         check.
         """
         builder = _make_builder(minimal_cstar_spec_builder_args)
-        # cson_roms-marbl_v0.1's compile-time stage is already a real fast-path
-        # miss (its 692e04ce-pinned hash doesn't match the bundled copy -- see
-        # test_bundled_modelspec_fast_path_eligibility_by_stage), so staging falls
-        # through to the AdditionalCode fetch path below unaided.
+        # Every bundled ModelSpec now pins the commit whose templates are bundled,
+        # so the fast path would fire; hide the bundled copy (as an installed-only
+        # environment would) to force the AdditionalCode fetch path below.
         assert builder.code_spec.templates_compile_time.file_hashes
 
-        with patch("cstar.applications.forge.executor.AdditionalCode") as mock_ac:
+        with (
+            patch(
+                "cstar.applications.forge.executor.bundled_template_dir",
+                return_value=None,
+            ),
+            patch("cstar.applications.forge.executor.AdditionalCode") as mock_ac,
+        ):
             mock_ac.return_value.get.side_effect = lambda local_dir: (
                 Path(local_dir).mkdir(parents=True, exist_ok=True),
                 (Path(local_dir) / "cppdefs.opt.j2").write_text(
@@ -1785,8 +1790,8 @@ class TestForgeExecutorBuildAndRun:
             "templates_commit"
         ]
         ct = builder._template_repo_args("compile_time")
-        assert ct["location"].endswith("cstar-forge.git")
-        assert ct["subdir"] == "templates/compile-time"
+        assert ct["location"].endswith("C-Star.git")
+        assert ct["subdir"] == "cstar/additional_files/templates/forge/compile-time"
         assert ct["checkout_target"] == pinned
         assert ct["files"] == ["cppdefs.opt.j2"]
 

@@ -69,13 +69,13 @@ A ``model.yaml`` has this shape:
      pio:                       # optional; needed when use_pio can be true
        location: https://github.com/CWorthy-ocean/ParallelIO.git
        commit: 2.7.1-fork
-     templates_commit: <commit>
+     templates_commit: <C-Star commit>
      templates_compile_time:
-       directory: templates/compile-time
+       directory: cstar/additional_files/templates/forge/compile-time
        files: [cppdefs.opt.j2]
        file_hashes: {cppdefs.opt.j2: <sha256>}
      templates_run_time:
-       directory: templates/run-time
+       directory: cstar/additional_files/templates/forge/run-time
        files: [marbl_in]
        file_hashes: {marbl_in: <sha256>}
 

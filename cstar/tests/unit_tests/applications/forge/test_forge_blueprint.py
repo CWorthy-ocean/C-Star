@@ -3553,7 +3553,7 @@ def test_sources_resolved_from_modelspec():
 def test_templates_are_repo_refs():
     cfg = _build()
     t = cfg.code.templates_compile_time
-    assert t.location.endswith("cstar-forge.git")
+    assert t.location.endswith("C-Star.git")
     assert t.files == ["cppdefs.opt.j2"]
     assert cfg.code.templates_run_time.files == ["marbl_in"]
     assert cfg.code.roms.commit == "0.2.0"
@@ -3561,7 +3561,7 @@ def test_templates_are_repo_refs():
 
 def test_resolved_templates_carry_modelspec_authored_hashes():
     """Resolving a bundled ModelSpec (``cson_roms-marbl_v0.1``, pinned at
-    ``templates_commit: 692e04ce...``) copies its hand-authored ``file_hashes``
+    ``templates_commit`` = the C-Star 0.15.0 commit) copies its hand-authored ``file_hashes``
     straight onto the resolved ``TemplateRepo`` -- not a hash of whatever happens
     to be bundled in this C-Star build (which may be a newer commit).
     """
@@ -3583,19 +3583,17 @@ def test_resolved_templates_carry_modelspec_authored_hashes():
 @pytest.mark.parametrize(
     "model_spec_name,compile_time_fast_path",
     [
-        # Pinned at templates_commit 692e04ce..., whose compile-time cppdefs.opt.j2
-        # predates two cppdefs blocks (UPSTREAM_TS_LAND_CURV, PARABOLIC_SPLINES)
-        # that the bundled copy (== templates_commit 3852cc99... below) has -- the
-        # authored hash correctly does NOT match the bundled file, so staging must
-        # fetch-and-verify the real pinned commit instead of the fast path.
-        ("cson_roms-marbl_v0.1", False),
-        ("roms-marbl-0.3-default", False),
-        ("roms-marbl-0.4-default", False),
-        ("roms-marbl-0.5-default", False),
-        ("roms-marbl-0.6-default", False),
-        ("roms-marbl-0.7-default", False),
-        # Pinned at templates_commit 3852cc99..., which IS what's bundled in this
-        # C-Star build -- the authored hash matches, so the fast path fires.
+        # Every bundled ModelSpec pins templates_commit to the C-Star 0.15.0 commit,
+        # whose cppdefs.opt.j2 / marbl_in are exactly the copies bundled in this
+        # build, so both stages take the local fast path (no fetch). A ModelSpec
+        # pinned elsewhere would show False here and fetch-and-verify instead --
+        # see the real_template_staging tests in test_executor.py for that path.
+        ("cson_roms-marbl_v0.1", True),
+        ("roms-marbl-0.3-default", True),
+        ("roms-marbl-0.4-default", True),
+        ("roms-marbl-0.5-default", True),
+        ("roms-marbl-0.6-default", True),
+        ("roms-marbl-0.7-default", True),
         ("roms-marbl-0.8-default", True),
         ("pio-dev", True),
     ],
@@ -3606,9 +3604,8 @@ def test_bundled_modelspec_fast_path_eligibility_by_stage(
     """Whether ``ForgeExecutor._stage_templates`` takes the local fast path (vs.
     fetch-and-verify) is decided per stage by comparing each ModelSpec's authored
     ``file_hashes`` against the bundled copy actually shipped with this C-Star
-    build. ``marbl_in`` (run-time) is identical across both pinned commits, so it
-    always takes the fast path; ``cppdefs.opt.j2`` (compile-time) only does for
-    the two ModelSpecs pinned at the commit the bundled copy matches.
+    build. With every bundled ModelSpec pinned at the commit the bundled copy
+    matches, both stages qualify for every spec.
     """
     from cstar.applications.forge.templates import (
         bundled_template_dir,

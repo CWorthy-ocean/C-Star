@@ -58,19 +58,19 @@ code:
 
   # Render templates live at the forge repo root (templates/), decoupled from this
   # ModelSpec: they track a ROMS version, change infrequently, and may move into the
-  # ucla-roms repo later. `directory` is relative to the repo root. At processing time
-  # the executor fetches these via C-Star's AdditionalCode from the forge git ref.
-  # Pin the serving forge commit with `templates_commit:` (until pinned, the resolver
+  # ucla-roms repo later. `directory` is relative to the C-Star repo root. At processing time
+  # the executor fetches these via C-Star's AdditionalCode from the pinned C-Star commit.
+  # Pin the serving C-Star commit with `templates_commit:` (until pinned, the resolver
   # defaults to branch `main`).
-  templates_commit: 692e04cebf1735951b377fcf44b1bde59a06bbc9
+  templates_commit: 6a0a4ee55b944db316e33f58ba7aa2403e880b92  # C-Star 0.15.0
   templates_compile_time:
-    directory: "templates/compile-time"
+    directory: cstar/additional_files/templates/forge/compile-time
     files:
     - cppdefs.opt.j2
     file_hashes:
-      cppdefs.opt.j2: b0b9c1ff951b5f7564d674c2f02269102049a17c371d8c58dffac5e4f48974a4
+      cppdefs.opt.j2: 2942d94da83cdcad7a324f50eb4fe8728fdf7df51e522abd276f40d92ff0be73
   templates_run_time:
-    directory: "templates/run-time"
+    directory: cstar/additional_files/templates/forge/run-time
     files:
     - marbl_in
     file_hashes:

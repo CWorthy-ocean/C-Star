@@ -43,13 +43,13 @@ relative to that template repository's root. For example:
 .. code-block:: yaml
 
    code:
-     templates_commit: 692e04cebf1735951b377fcf44b1bde59a06bbc9
+     templates_commit: 6a0a4ee55b944db316e33f58ba7aa2403e880b92  # C-Star 0.15.0
      templates_compile_time:
-       directory: "templates/compile-time"
+       directory: cstar/additional_files/templates/forge/compile-time
        files:
        - cppdefs.opt.j2
      templates_run_time:
-       directory: "templates/run-time"
+       directory: cstar/additional_files/templates/forge/run-time
        files:
        - marbl_in
 
@@ -92,6 +92,10 @@ of two paths:
    fetched file's sha256 and its pinned hash raises ``ValueError``: the
    blueprint pins template content that the fetched commit does not match.
 
-Bundled ModelSpecs still pin their ``templates_commit`` against the archived
-``cstar-forge`` repository (``resolve.DEFAULT_TEMPLATE_REPO``); the local
-fast path above is what lets most builds avoid fetching from it at all.
+The template repository is this one (``resolve.DEFAULT_TEMPLATE_REPO``), and every
+bundled ModelSpec pins ``templates_commit`` to a C-Star release commit whose
+templates are the bundled copy, so a release build never fetches. Blueprints
+written against the standalone cstar-forge repository carry the legacy
+``templates/<stage>`` directory form; ``bundled_template_dir`` maps both forms
+onto the bundled copy, and such a blueprint still fetches its pinned forge
+commit when the hashes differ.
