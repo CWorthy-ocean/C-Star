@@ -95,6 +95,7 @@ C-Star is built with these principles in mind:
 .. toctree::
     :maxdepth: 1
     :caption: Getting Started
+    :hidden:
 
     Installing C-Star <installation>
     Registering for datasets <data_access>
@@ -103,18 +104,21 @@ C-Star is built with these principles in mind:
 .. toctree::
     :maxdepth: 1
     :caption: Terminology and Concepts
+    :hidden:
 
     terminology
 
 .. toctree::
     :maxdepth: 1
     :caption: Laptop-Runnable Examples
+    :hidden:
 
     End to end: a new domain to a running simulation <tutorials/end_to_end>
 
 .. toctree::
     :maxdepth: 2
     :caption: User Guide
+    :hidden:
 
     blueprints
     workplans
@@ -124,6 +128,7 @@ C-Star is built with these principles in mind:
 .. toctree::
     :maxdepth: 1
     :caption: Domain generation (Forge)
+    :hidden:
 
     forge/index
     forge/specs
@@ -132,6 +137,7 @@ C-Star is built with these principles in mind:
 .. toctree::
     :maxdepth: 1
     :caption: Deployment
+    :hidden:
 
     machines
     hpc
@@ -139,6 +145,7 @@ C-Star is built with these principles in mind:
 .. toctree::
     :maxdepth: 1
     :caption: Reference
+    :hidden:
 
     api-blueprint
     api-orchestration
@@ -149,6 +156,7 @@ C-Star is built with these principles in mind:
 .. toctree::
     :maxdepth: 1
     :caption: For Developers
+    :hidden:
 
     contributing
     custom_applications
