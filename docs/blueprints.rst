@@ -161,6 +161,12 @@ declare themselves resumable accept it -- the CLI rejects the flag for any other
 application before execution begins. No workplan or run-id is needed; this is a
 standalone alternative to running a blueprint fresh.
 
+A resumed ROMS-MARBL run adopts the codebases already cloned and compiled in the
+working directory, provided each is a clean checkout of the blueprint's
+``checkout_target`` with its build artifacts present. The target is resolved in
+the local clone, so the check needs no network access and is unaffected by a
+branch that has moved on the remote since the first attempt.
+
 .. toctree::
    :hidden:
 
