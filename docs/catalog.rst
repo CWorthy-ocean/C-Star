@@ -74,8 +74,8 @@ catalog, moving or relayering catalogs never breaks an existing blueprint.
 Adding your own entries
 -----------------------
 
-The simplest way is through the wizard: edit a spec on its card and use
-**Save specs to catalog** on the Review card to store it under a new name.
+The simplest way is through the wizard: edit a spec in its section and use
+**Save specs to catalog** in the Review section to store it under a new name.
 You can also create the directory and YAML file by hand, following a bundled
 entry of the same kind as a template; the catalog is rescanned when the
 wizard is reloaded.

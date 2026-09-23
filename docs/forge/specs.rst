@@ -11,7 +11,7 @@ spec afterwards does not change blueprints already built from it.
 
 Specs live in the :doc:`catalog <../catalog>` as one directory per entry,
 ``<Kind>/<name>/<file>.yaml``. C-Star bundles a small set of each kind to
-start from; save your own from the wizard's Review card or copy a bundled
+start from; save your own from the wizard's Review section or copy a bundled
 directory and edit it.
 
 Kinds
@@ -47,7 +47,7 @@ OutputSpec (``OutputSpec/<name>/Output.yaml``)
 
 CdrSpec
    Optional carbon dioxide removal forcing. Nothing is bundled; the wizard's
-   Run setup card creates one from a netCDF file or by hand.
+   Run setup section creates one from a netCDF file or by hand.
 
 Model specs in detail
 ---------------------

@@ -44,7 +44,7 @@ sections:
    The resolved ROMS-MARBL settings, one section per namelist group plus the
    compile-time ``cppdefs`` switches. These start from the model spec's
    defaults and are adjusted by the resolver for the chosen domain and
-   forcing; the *Advanced settings* card of the wizard edits them.
+   forcing; the *Advanced settings* section of the wizard edits them.
 ``code``
    The pinned ROMS, MARBL and PIO repositories and the render templates, by
    commit.

@@ -28,7 +28,13 @@ this or any other domain reuse it.
    cstar forge wizard
 
 This serves the wizard at ``http://localhost:8866`` and opens it in your
-browser. Work down the cards:
+browser. You should see the following interface:
+
+.. figure:: ../images/wizard-overview.png
+   :alt: The wizard's header with the step navigation, the Start and Model sections
+   :width: 100%
+
+Work down the sections:
 
 - **Model**: keep the default model preset.
 - **Domain and grid**: choose ``wio-toy (bundled)`` from the domain
@@ -38,7 +44,7 @@ browser. Work down the cards:
 - **Review and export**: read through the resolved YAML, then **Save** it
   to your catalog or **Download** ``forge_blueprint.yaml``.
 
-:doc:`../wizard` describes each card. If you would rather skip the wizard, a
+:doc:`../wizard` describes each section. If you would rather skip the wizard, a
 ready-made blueprint for this domain ships with the documentation:
 :download:`forge-blueprint-example.wio-toy.yaml <../forge-blueprint-example.wio-toy.yaml>`.
 

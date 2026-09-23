@@ -5,7 +5,7 @@ The Forge wizard
 
 The wizard is Forge's interface for building a :doc:`forge blueprint
 <blueprints/forge>` without writing YAML. It presents the choices as a series
-of cards, fills each from the catalog, shows the resolved blueprint for review,
+of sections, fills each from the catalog, shows the resolved blueprint for review,
 and saves or downloads it. The wizard only writes the blueprint; nothing is
 downloaded or generated until you run it.
 
@@ -51,19 +51,19 @@ As a Jupyter notebook
    ``--dest`` places it elsewhere. A copy is used rather than the installed
    file because Jupyter saves executed output back into the notebook.
 
-The cards
----------
+The sections
+------------
 
-Cards are worked top to bottom. Required cards are marked; the rest can be
-left at their defaults.
+The sections are worked top to bottom. Required sections are marked; the rest
+can be left at their defaults.
 
 .. figure:: images/wizard-overview.png
-   :alt: The wizard's header with the step navigation, the Start card and the Model card
+   :alt: The wizard's header with the step navigation, the Start and Model sections
    :width: 100%
 
 Start from an existing blueprint
    Load a blueprint saved in your catalog, or paste YAML, to edit it. Skip
-   this card to build one from scratch.
+   this section to build one from scratch.
 
 Model
    The model preset (a **ModelSpec** from the catalog), which pins the ROMS,
@@ -81,7 +81,7 @@ Domain and grid
    parent or child domain.
 
 .. figure:: images/wizard-domain.png
-   :alt: The Domain and grid card: grid geometry, vertical coordinate, bathymetry, derived values and nesting
+   :alt: The Domain and grid section: grid geometry, vertical coordinate, bathymetry, derived values and nesting
    :width: 100%
 
 Boundaries and forcing
@@ -93,7 +93,7 @@ Boundaries and forcing
    see :doc:`data_access`.
 
 .. figure:: images/wizard-forcing.png
-   :alt: The Boundaries and forcing card with one collapsed section per forcing type
+   :alt: The Boundaries and forcing section with one collapsed panel per forcing type
    :width: 100%
 
 Run setup
@@ -102,17 +102,17 @@ Run setup
    removal forcing, imported from a netCDF file or described by hand.
 
 .. figure:: images/wizard-run.png
-   :alt: The Run setup card: run window, partitioning and carbon dioxide removal
+   :alt: The Run setup section: run window, partitioning and carbon dioxide removal
    :width: 100%
 
 Advanced settings
-   Individual ROMS-MARBL namelist settings beyond what the other cards
+   Individual ROMS-MARBL namelist settings beyond what the other sections
    expose, grouped by namelist section (mixing, bottom drag, tides, MARBL,
    each output stream, and so on), plus the compile-time switches. An
    **OutputSpec** from the catalog fills the output sections.
 
 .. figure:: images/wizard-advanced.png
-   :alt: The Advanced settings card with collapsed namelist sections
+   :alt: The Advanced settings section with collapsed namelist panels
    :width: 100%
 
 Review and export
@@ -123,7 +123,7 @@ Review and export
    (experimental).
 
 .. figure:: images/wizard-review.png
-   :alt: The Review and export card: validation result, resolved YAML, download, save and run
+   :alt: The Review and export section: validation result, resolved YAML, download, save and run
    :width: 100%
 
 Where your work goes
