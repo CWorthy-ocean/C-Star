@@ -3,6 +3,7 @@ from pathlib import Path
 
 import numpy as np
 import xarray as xr
+from pydantic import Field
 
 from cstar.applications.core import (
     ApplicationDefinition,
@@ -10,6 +11,7 @@ from cstar.applications.core import (
     register_application,
 )
 from cstar.base.log import get_logger
+from cstar.base.utils import convert_to_cdf5
 from cstar.entrypoint.runner import BlueprintRunner
 from cstar.execution.handler import ExecutionStatus
 from cstar.orchestration.models import Blueprint
@@ -29,6 +31,12 @@ class UpscalerBlueprint(Blueprint):
     """The application identifier."""
     uscl_file_location: str
     """Path to the .uscl file."""
+    pio: bool = Field(default=True)
+    """Whether the target ROMS build reads its inputs via ParallelIO, which requires
+    CDF-5 (``NETCDF3_64BIT_DATA``) files. When True (the default), the CDR forcing
+    file is written in xarray's default NETCDF4 format (fast) under an
+    ``_nc4``-suffixed name, then converted to CDF-5 at the intended filename via an
+    ``nccopy -k cdf5`` subprocess. When False, the NETCDF4 file is written directly."""
 
 
 class UpscalerRunner(BlueprintRunner[UpscalerBlueprint]):
@@ -71,7 +79,12 @@ class UpscalerRunner(BlueprintRunner[UpscalerBlueprint]):
         cdr_upscaler = CDRUpscaler(files)
         cdr_upscaler.create_cdr_dataset()
         cdr_upscaler.populate_cdr_dataset()
-        cdr_upscaler.save(str(out_file))
+        if self.blueprint.pio:
+            nc4_file = out_file.with_name(out_file.stem + "_nc4" + out_file.suffix)
+            cdr_upscaler.save(nc4_file)
+            convert_to_cdf5(nc4_file, out_file)
+        else:
+            cdr_upscaler.save(out_file)
         self.add_state(ExecutionStatus.COMPLETED)
         return self.result
 

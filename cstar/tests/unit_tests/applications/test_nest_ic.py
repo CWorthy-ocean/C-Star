@@ -1,5 +1,4 @@
 import logging
-import subprocess
 from collections.abc import Generator
 from pathlib import Path
 from typing import Any
@@ -89,45 +88,6 @@ class TestNestIcBlueprintPio:
         assert bp.pio is True
 
 
-class TestConvertToCdf5:
-    """Tests for `NestIcRunner._convert_to_cdf5`."""
-
-    def test_success_invokes_nccopy_and_removes_source(self, tmp_path: Path) -> None:
-        """Verify the exact `nccopy` command is invoked and the nc4 source file
-        is removed once the conversion succeeds.
-        """
-        nc4_path = tmp_path / "ic_nc4.nc"
-        final_path = tmp_path / "ic.nc"
-        nc4_path.write_bytes(b"fake netcdf4 content")
-
-        with mock.patch("cstar.applications.nest_ic.subprocess.run") as mock_run:
-            NestIcRunner._convert_to_cdf5(nc4_path, final_path)
-
-        mock_run.assert_called_once_with(
-            ["nccopy", "-k", "cdf5", str(nc4_path), str(final_path)],
-            check=True,
-        )
-        assert not nc4_path.exists()
-
-    def test_failure_propagates_and_keeps_source(self, tmp_path: Path) -> None:
-        """Verify that a `nccopy` failure propagates as `CalledProcessError`
-        and leaves the nc4 source file untouched.
-        """
-        nc4_path = tmp_path / "ic_nc4.nc"
-        final_path = tmp_path / "ic.nc"
-        nc4_path.write_bytes(b"fake netcdf4 content")
-
-        with mock.patch(
-            "cstar.applications.nest_ic.subprocess.run",
-            side_effect=subprocess.CalledProcessError(1, "nccopy"),
-        ):
-            with pytest.raises(subprocess.CalledProcessError):
-                NestIcRunner._convert_to_cdf5(nc4_path, final_path)
-
-        assert nc4_path.exists()
-        assert not final_path.exists()
-
-
 class TestCreateInitialConditionsRouting:
     """Tests for the PIO-conditional save/convert routing in
     `NestIcRunner._create_initial_conditions`.
@@ -177,7 +137,7 @@ class TestCreateInitialConditionsRouting:
         mock_ic: mock.Mock,
     ) -> None:
         """Verify that with `pio=True`, the `InitialConditions` is saved to the
-        `_nc4`-mangled path, `_convert_to_cdf5` is invoked with the mangled and
+        `_nc4`-mangled path, `convert_to_cdf5` is invoked with the mangled and
         final paths, and the unmangled final path is returned.
         """
         bp = NestIcBlueprint(**blueprint_kwargs, pio=True)
@@ -188,7 +148,7 @@ class TestCreateInitialConditionsRouting:
         # botched change to the mangling scheme fails this assertion.
         nc4_path = final_path.with_name("ic_from_parent_rst.20240101000000_nc4.nc")
 
-        with mock.patch.object(NestIcRunner, "_convert_to_cdf5") as mock_convert:
+        with mock.patch("cstar.applications.nest_ic.convert_to_cdf5") as mock_convert:
             result = runner._create_initial_conditions()
 
         mock_ic.save.assert_called_once_with(nc4_path)
@@ -249,7 +209,7 @@ class TestCreateInitialConditionsRouting:
 
         final_path = self._expected_final_path(bp, "20240101000000")
 
-        with mock.patch.object(NestIcRunner, "_convert_to_cdf5") as mock_convert:
+        with mock.patch("cstar.applications.nest_ic.convert_to_cdf5") as mock_convert:
             result = runner._create_initial_conditions()
 
         mock_ic.save.assert_called_once_with(final_path)

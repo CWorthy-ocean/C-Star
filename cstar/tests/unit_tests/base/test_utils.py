@@ -1,4 +1,7 @@
 import hashlib
+import subprocess
+from pathlib import Path
+from unittest import mock
 
 import pytest
 
@@ -7,6 +10,7 @@ from cstar.base.utils import (
     _get_sha256_hash,
     _list_to_concise_str,
     _replace_text_in_file,
+    convert_to_cdf5,
     deep_merge,
 )
 
@@ -407,3 +411,42 @@ def test_deep_merge_purity() -> None:
     # confirm the list was merged by index
     assert "y" in d3["l"]
     assert "x" not in d3["l"]
+
+
+class TestConvertToCdf5:
+    """Tests for `convert_to_cdf5`."""
+
+    def test_success_invokes_nccopy_and_removes_source(self, tmp_path: Path) -> None:
+        """Verify the exact `nccopy` command is invoked and the nc4 source file
+        is removed once the conversion succeeds.
+        """
+        nc4_path = tmp_path / "ic_nc4.nc"
+        final_path = tmp_path / "ic.nc"
+        nc4_path.write_bytes(b"fake netcdf4 content")
+
+        with mock.patch("cstar.base.utils.subprocess.run") as mock_run:
+            convert_to_cdf5(nc4_path, final_path)
+
+        mock_run.assert_called_once_with(
+            ["nccopy", "-k", "cdf5", str(nc4_path), str(final_path)],
+            check=True,
+        )
+        assert not nc4_path.exists()
+
+    def test_failure_propagates_and_keeps_source(self, tmp_path: Path) -> None:
+        """Verify that a `nccopy` failure propagates as `CalledProcessError`
+        and leaves the nc4 source file untouched.
+        """
+        nc4_path = tmp_path / "ic_nc4.nc"
+        final_path = tmp_path / "ic.nc"
+        nc4_path.write_bytes(b"fake netcdf4 content")
+
+        with mock.patch(
+            "cstar.base.utils.subprocess.run",
+            side_effect=subprocess.CalledProcessError(1, "nccopy"),
+        ):
+            with pytest.raises(subprocess.CalledProcessError):
+                convert_to_cdf5(nc4_path, final_path)
+
+        assert nc4_path.exists()
+        assert not final_path.exists()
