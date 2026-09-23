@@ -53,10 +53,10 @@ Verify the installation
 .. code-block:: console
 
    cstar --version
-   cstar forge --help
+   cstar --help
 
 The first command prints the C-Star version and the versions of its companion
-packages; the second lists Forge's subcommands.
+packages; the second lists subcommands you may wish to explore in more detail.
 
 After installing
 ----------------
@@ -68,15 +68,15 @@ Register for dataset access
    setup step. See :doc:`data_access`.
 
 Register a Jupyter kernel
-   The example notebooks and the notebook form of the Forge wizard run in
-   Jupyter. To make the environment available as a kernel, including in a
-   Jupyter server that is not itself installed in the environment (an HPC
-   OnDemand portal, for example), run, with the environment active:
+   If you intend to use Jupyter notebooks with your C-Star environment, for either your own analysis or
+   to use the Jupyter version of the Forge wizard, activate your ``cstar_env`` conda environment
+   and run:
 
    .. code-block:: console
 
       cstar env register-kernel
 
+   This custom registration mechanism helps ensure compatibility with HPC Jupyter servers.
    The kernel launches through a wrapper that activates the environment
    first, so shell commands inside notebooks see the same ``PATH`` and
    variables you do. Run ``cstar env register-kernel --help`` for naming

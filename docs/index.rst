@@ -14,17 +14,20 @@ How it works
 
 C-Star is organized around two ideas.
 
-An **application** is something you can run: the ROMS-MARBL model, or Forge,
-the tool that builds a new ROMS-MARBL domain. A **blueprint** is a YAML file
-holding every input an application needs to produce its result: which model
+An **application** is something you can run:
+- the ROMS-MARBL model
+- Forge, the tool that builds a new ROMS-MARBL domain
+- any number of smaller data transformation steps or analysis packages
+
+A **blueprint** is a YAML file holding every input an application needs to produce its result: which model
 code to build, which input files to use, which settings to apply. Given the
 same blueprint, an application produces the same result on any supported
 machine, which is what makes a C-Star simulation shareable and reproducible.
 
-A typical project moves through three steps, each driven by a blueprint:
+A simple ocean modeling project moves through three basic steps:
 
-1. **Describe the domain.** The Forge wizard, a form that runs in your
-   browser, walks you through choosing a model configuration, a region and
+1. **Describe the domain.** The Forge :ref:`wizard <wizard>`, a form that runs in your
+   browser or as a Jupyter notebook, walks you through choosing a model configuration, a region and
    grid, forcing datasets, and a run window. It writes a *forge blueprint*.
 2. **Generate the inputs.** Running that forge blueprint downloads the source
    datasets, builds the grid, initial conditions, boundary and surface forcing,
@@ -34,16 +37,17 @@ A typical project moves through three steps, each driven by a blueprint:
    compiles the model code and executes the simulation. Output lands in the
    blueprint's working directory.
 
-Each step is one command, ``cstar blueprint run <blueprint.yaml>``, and each
-can happen on a different machine: build the blueprint on your laptop, generate
-inputs and run on the cluster where the data lives.
+The wizard can be run on any machine, even your laptop, and the Forge blueprint can
+then be moved to a different machine, like an HPC, where you want heavier computations to take place,
+or where collections of source data may be staged among your working group.
 
+Running any blueprint independently can be done with the command  ``cstar blueprint run <blueprint.yaml>``.
 To run several simulations as one unit, a **workplan** lists the blueprints
 to run as *steps*, with dependencies between them. C-Star schedules the steps,
 submits them to the cluster's job scheduler, and tracks their status, so a
 chain such as a spin-up followed by an experiment and its control can be
 launched and monitored with a single run ID. Steps can pass information to one
-another at run time, for example a restart file from one simulation becoming
+another at run time: for example, a restart file from one simulation becoming
 the initial conditions of the next.
 
 Reusable pieces of a domain description live in a **catalog**: model

@@ -101,6 +101,6 @@ On a cluster
 Each step can run on a different machine. A common pattern is to build the
 blueprint in a browser on your laptop, copy the YAML to the cluster, and run
 steps 2 and 3 there, where the forcing data and the compute are. On an HPC
-system Forge places default-form working directories on scratch, and the
+system, Forge places default-form working directories on scratch, and the
 ROMS-MARBL step should be submitted through a workplan so it runs on compute
 nodes rather than the login node. See :doc:`../hpc`.
