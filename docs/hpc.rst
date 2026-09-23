@@ -52,9 +52,13 @@ yourself.
 
 Forge keeps two kinds of data. The **source-data cache** holds the
 downloaded and user-staged datasets (GLORYS, TPXO, and so on) and is shared
-by every domain you generate. A forge blueprint's **working directory**
-holds the generated inputs and rendered files for one domain. Both are
-placed per system:
+by every domain you generate; on HPC it follows ``$PROJECT``, or
+specifically ``$SCRATCH`` where the system has no ``$PROJECT``. A forge
+blueprint's **working directory** holds the generated inputs and rendered
+files for one domain; on HPC it is placed on scratch using C-Star's own
+``CSTAR_SCRATCH_DIRS`` search (see :doc:`configuration`): the first of
+``$SCRATCH``, ``$SCRATCH_DIR``, ``$LOCAL_SCRATCH`` (in that order) that is
+set. Both are placed per system:
 
 .. list-table::
    :header-rows: 1
@@ -68,15 +72,29 @@ placed per system:
      - ``~/cstar/_forge_bp_runs/<name>``
    * - Anvil
      - ``$PROJECT/cstar-forge-data/source-data``
-     - ``$SCRATCH/cstar/_forge_bp_runs/<name>``
+     - ``$SCRATCH`` (or ``$SCRATCH_DIR``/``$LOCAL_SCRATCH``)
+       ``/cstar/_forge_bp_runs/<name>``
    * - Perlmutter
      - ``$PROJECT/cstar-forge-data/source-data`` if ``PROJECT`` is set,
        otherwise ``$SCRATCH/cstar-forge-data/source-data``
-     - ``$SCRATCH/cstar/_forge_bp_runs/<name>``
+     - ``$SCRATCH`` (or ``$SCRATCH_DIR``/``$LOCAL_SCRATCH``)
+       ``/cstar/_forge_bp_runs/<name>``
    * - Bouchet
      - ``$PROJECT/cstar-forge-data/source-data`` if ``PROJECT`` is set,
        otherwise ``<scratch_pi_*>/<user>/cstar-forge-data/source-data``
-     - ``<scratch_pi_*>/<user>/cstar/_forge_bp_runs/<name>``
+     - ``$SCRATCH_DIR``/``$LOCAL_SCRATCH``
+       ``/cstar/_forge_bp_runs/<name>`` if set, otherwise
+       ``<scratch_pi_*>/<user>/cstar/_forge_bp_runs/<name>``
+
+None of the three HPC systems above export ``$SCRATCH_DIR`` or
+``$LOCAL_SCRATCH`` on their own -- only ``$SCRATCH`` (Anvil, Perlmutter) or
+nothing (Bouchet) -- so the defaults you get by doing nothing are unchanged;
+``$SCRATCH_DIR``/``$LOCAL_SCRATCH`` only come into play if you (or a job
+scheduler) set them yourself, and when set they take priority over Forge's
+own per-system convention (``$PROJECT/scratch`` on Anvil, ``~/scratch`` on
+Perlmutter, the ``scratch_pi_*`` glob on Bouchet) for the working directory
+only -- the source-data cache above is unaffected and never consults
+``$SCRATCH_DIR``/``$LOCAL_SCRATCH``.
 
 Some systems define ``PROJECT`` and ``SCRATCH`` for you (Anvil exports both,
 Perlmutter exports ``SCRATCH``); check with ``echo $PROJECT $SCRATCH`` and set

@@ -314,24 +314,70 @@ class TestBouchetScratchRoot:
 
 
 class TestHpcScratchRoot:
-    """_hpc_scratch_root reads the passed environment: $SCRATCH first, then the
-    per-system fallback, and None for non-HPC names even if $SCRATCH is set.
+    """_hpc_scratch_root's primary mechanism is C-Star's own
+    ``find_scratch_dir``/``CSTAR_SCRATCH_DIRS`` search (``$SCRATCH``,
+    ``$SCRATCH_DIR``, ``$LOCAL_SCRATCH`` by default, in that order) against the
+    passed environment; only when none of those variables is set does Forge's
+    own per-system fallback apply. None for non-HPC names even if one of the
+    listed variables is set.
+
+    All tests use ``clean_scratch_env`` so the search's own list
+    (``CSTAR_SCRATCH_DIRS``, read from the real process environment by
+    ``find_scratch_dir``) can't pick up a leftover value from the host running
+    the tests.
     """
 
-    def test_scratch_env_wins_on_every_hpc_system(self, tmp_path):
+    def test_scratch_env_wins_on_every_hpc_system(self, tmp_path, clean_scratch_env):
         env = {"SCRATCH": str(tmp_path / "scratch"), "PROJECT": str(tmp_path / "proj")}
         for tag in ("perlmutter", "anvil", "bouchet"):
             assert config_module._hpc_scratch_root(tag, env, tmp_path / "home") == (
                 tmp_path / "scratch"
             ), tag
 
-    def test_perlmutter_falls_back_to_home_scratch(self, tmp_path):
+    def test_scratch_dir_wins_when_scratch_unset(self, tmp_path, clean_scratch_env):
+        """$SCRATCH_DIR (second in CSTAR_SCRATCH_DIRS) is honoured when $SCRATCH
+        is not set -- new precedence the old $SCRATCH-only code ignored.
+        """
+        env = {"SCRATCH_DIR": str(tmp_path / "sdir"), "PROJECT": str(tmp_path / "proj")}
+        for tag in ("perlmutter", "anvil", "bouchet"):
+            assert config_module._hpc_scratch_root(tag, env, tmp_path / "home") == (
+                tmp_path / "sdir"
+            ), tag
+
+    def test_local_scratch_wins_when_scratch_and_scratch_dir_unset(
+        self, tmp_path, clean_scratch_env
+    ):
+        """$LOCAL_SCRATCH (third/last in CSTAR_SCRATCH_DIRS) is honoured when
+        neither $SCRATCH nor $SCRATCH_DIR is set.
+        """
+        env = {"LOCAL_SCRATCH": str(tmp_path / "ljob")}
+        for tag in ("perlmutter", "anvil", "bouchet"):
+            assert config_module._hpc_scratch_root(tag, env, tmp_path / "home") == (
+                tmp_path / "ljob"
+            ), tag
+
+    def test_scratch_wins_over_scratch_dir_and_local_scratch(
+        self, tmp_path, clean_scratch_env
+    ):
+        """CSTAR_SCRATCH_DIRS search order: $SCRATCH first even when the others
+        are also set.
+        """
+        env = {
+            "SCRATCH": str(tmp_path / "scratch"),
+            "SCRATCH_DIR": str(tmp_path / "sdir"),
+            "LOCAL_SCRATCH": str(tmp_path / "ljob"),
+        }
+        assert config_module._hpc_scratch_root(
+            "perlmutter", env, tmp_path / "home"
+        ) == (tmp_path / "scratch")
+
+    def test_perlmutter_falls_back_to_home_scratch(self, tmp_path, clean_scratch_env):
         home = tmp_path / "home"
         assert (
             config_module._hpc_scratch_root("perlmutter", {}, home) == home / "scratch"
         )
 
-    def test_anvil_fallback_when_scratch_unset(self, tmp_path):
+    def test_anvil_fallback_when_scratch_unset(self, tmp_path, clean_scratch_env):
         home = tmp_path / "home"
         env = {"PROJECT": str(tmp_path / "proj")}
         assert (
@@ -339,14 +385,27 @@ class TestHpcScratchRoot:
             == tmp_path / "proj" / "scratch"
         )
 
-    def test_anvil_fallback_without_project(self, tmp_path):
+    def test_anvil_fallback_without_project(self, tmp_path, clean_scratch_env):
         home = tmp_path / "home"
         assert (
             config_module._hpc_scratch_root("anvil", {}, home)
             == home / "work" / "scratch"
         )
 
-    def test_bouchet_fallback_uses_scratch_pi_glob(self, tmp_path, monkeypatch):
+    def test_anvil_project_fallback_only_applies_when_no_scratch_dirs_var_set(
+        self, tmp_path, clean_scratch_env
+    ):
+        """A bare $SCRATCH_DIR pre-empts the $PROJECT/scratch fallback -- Forge's
+        own convention only kicks in once the CSTAR_SCRATCH_DIRS search comes up
+        empty.
+        """
+        home = tmp_path / "home"
+        env = {"SCRATCH_DIR": str(tmp_path / "sdir"), "PROJECT": str(tmp_path / "proj")}
+        assert config_module._hpc_scratch_root("anvil", env, home) == tmp_path / "sdir"
+
+    def test_bouchet_fallback_uses_scratch_pi_glob(
+        self, tmp_path, monkeypatch, clean_scratch_env
+    ):
         home = tmp_path / "home"
         (home / "scratch_pi_abc" / "testuser").mkdir(parents=True)
         monkeypatch.setattr(config_module, "USER", "testuser")
@@ -355,26 +414,59 @@ class TestHpcScratchRoot:
             == home / "scratch_pi_abc" / "testuser"
         )
 
-    def test_bouchet_returns_none_without_scratch_pi(self, tmp_path):
+    def test_bouchet_returns_none_without_scratch_pi(self, tmp_path, clean_scratch_env):
         home = tmp_path / "home"
         home.mkdir()
         assert config_module._hpc_scratch_root("bouchet", {}, home) is None
 
-    def test_other_scratch_variables_are_not_consulted(self, tmp_path):
-        # Unchanged pre-relocation behaviour: only $SCRATCH is read here; C-Star's
-        # CSTAR_SCRATCH_DIRS list ($SCRATCH_DIR, $LOCAL_SCRATCH) is adopted later.
+    def test_bouchet_glob_only_applies_when_no_scratch_dirs_var_set(
+        self, tmp_path, monkeypatch, clean_scratch_env
+    ):
+        """A bare $LOCAL_SCRATCH pre-empts the scratch_pi_* glob fallback."""
         home = tmp_path / "home"
-        env = {"SCRATCH_DIR": "/sdir", "LOCAL_SCRATCH": "/tmp/job"}
+        (home / "scratch_pi_abc" / "testuser").mkdir(parents=True)
+        monkeypatch.setattr(config_module, "USER", "testuser")
+        env = {"LOCAL_SCRATCH": str(tmp_path / "ljob")}
         assert (
-            config_module._hpc_scratch_root("perlmutter", env, home) == home / "scratch"
+            config_module._hpc_scratch_root("bouchet", env, home) == tmp_path / "ljob"
         )
 
-    def test_non_hpc_name_returns_none_even_if_scratch_is_set(self, tmp_path):
+    def test_non_hpc_name_returns_none_even_if_scratch_is_set(
+        self, tmp_path, clean_scratch_env
+    ):
         env = {"SCRATCH": str(tmp_path / "scratch")}
         for tag in ("darwin_arm64", "linux_x86_64", "derecho"):
             assert (
                 config_module._hpc_scratch_root(tag, env, tmp_path / "home") is None
             ), tag
+
+    def test_non_hpc_name_returns_none_even_if_scratch_dir_is_set(
+        self, tmp_path, clean_scratch_env
+    ):
+        env = {"SCRATCH_DIR": str(tmp_path / "sdir")}
+        for tag in ("darwin_arm64", "linux_x86_64", "derecho"):
+            assert (
+                config_module._hpc_scratch_root(tag, env, tmp_path / "home") is None
+            ), tag
+
+    def test_uses_cstar_find_scratch_dir_not_a_reimplemented_loop(
+        self, tmp_path, clean_scratch_env, monkeypatch
+    ):
+        """_hpc_scratch_root defers to cstar.base.env.find_scratch_dir (the
+        single definition of the CSTAR_SCRATCH_DIRS search) rather than
+        re-implementing the loop -- assert the seam is actually called.
+        """
+        calls = []
+
+        def _fake_find_scratch_dir(env):
+            calls.append(dict(env))
+            return None
+
+        monkeypatch.setattr(config_module, "find_scratch_dir", _fake_find_scratch_dir)
+        home = tmp_path / "home"
+        env = {"SCRATCH": str(tmp_path / "scratch")}
+        config_module._hpc_scratch_root("perlmutter", env, home)
+        assert calls == [env]
 
 
 class TestRelocateWorkingDir:

@@ -2,7 +2,7 @@ import os
 import sys
 import typing as t
 from collections import defaultdict
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from functools import lru_cache
@@ -129,6 +129,35 @@ def get_env_item(var_name: str) -> EnvItem:
     raise ValueError(msg)
 
 
+def find_scratch_dir(env: Mapping[str, str]) -> str | None:
+    """Search *env* for the first ``CSTAR_SCRATCH_DIRS``-listed variable that is set.
+
+    Shared search-order logic behind :func:`hpc_data_directory` (which reads the
+    real process environment) and other callers -- e.g. Forge's own scratch-root
+    resolution -- that need to run the same search against an explicit
+    environment mapping, so the ``CSTAR_SCRATCH_DIRS`` default list and its
+    search order are defined once.
+
+    Parameters
+    ----------
+    env : Mapping[str, str]
+        The environment to search, e.g. ``os.environ`` or a test double.
+
+    Returns
+    -------
+    str | None
+        The first configured scratch path found (as a POSIX string), or
+        ``None`` if none of the listed variables is set in *env*.
+    """
+    scratch_variables = get_env_item(ENV_CSTAR_SCRATCH_DIRS).value.split(",")
+
+    for env_var in scratch_variables:
+        if scratch_path := env.get(env_var, ""):
+            return Path(scratch_path).as_posix()
+
+    return None
+
+
 def hpc_data_directory() -> str | None:
     """A path-locator function that looks for standard scratch file-systems.
 
@@ -137,13 +166,7 @@ def hpc_data_directory() -> str | None:
     Path | None
         If a scratch file system is identified, return it's paty, otherwise return None.
     """
-    scratch_variables = get_env_item(ENV_CSTAR_SCRATCH_DIRS).value.split(",")
-
-    for env_var in scratch_variables:
-        if scratch_path := os.getenv(env_var, ""):
-            return Path(scratch_path).as_posix()
-
-    return None
+    return find_scratch_dir(os.environ)
 
 
 def nprocs_factory() -> str:

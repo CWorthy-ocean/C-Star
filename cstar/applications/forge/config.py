@@ -20,6 +20,7 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 
+from cstar.base.env import find_scratch_dir
 from cstar.catalog.domain_catalog import user_catalog_root
 from cstar.system.manager import HostNameEvaluator
 
@@ -264,34 +265,43 @@ paths = get_data_paths()
 system = detect_system()
 
 
+_HPC_SYSTEM_TAGS = frozenset({"perlmutter", "anvil", "bouchet"})
+
+
 def _hpc_scratch_root(
     system_tag: str, env: Mapping[str, str], home: Path
 ) -> Path | None:
     """Bare scratch root for HPC systems, ``None`` elsewhere.
 
-    Per-system conventions, unchanged from before the C-Star system layer was
-    adopted for machine identity: ``$SCRATCH`` (falling back to ``~/scratch``) on
-    Perlmutter; ``$SCRATCH`` falling back to ``$PROJECT/scratch`` (or
-    ``~/work/scratch``) on Anvil; ``$SCRATCH`` falling back to the globbed
-    ``scratch_pi_*/<user>`` root on Bouchet, which exports no scratch env var at
-    all. ``$SCRATCH`` is per-user on all of these machines, so no extra username
-    layer is inserted. Non-HPC names (``"darwin_arm64"``, ``"linux_x86_64"``)
-    return ``None`` even if the environment happens to carry ``$SCRATCH``.
-
-    Adopting C-Star's ``CSTAR_SCRATCH_DIRS`` search (``$SCRATCH_DIR``,
-    ``$LOCAL_SCRATCH``) is deferred to the relocation, when the forge data
-    locations move under ``CSTAR_DATA_HOME`` anyway.
+    Primary mechanism is C-Star's own :func:`cstar.base.env.find_scratch_dir`,
+    which tries the ``CSTAR_SCRATCH_DIRS`` variables (``$SCRATCH``,
+    ``$SCRATCH_DIR``, ``$LOCAL_SCRATCH`` by default) in order -- the same
+    search :func:`cstar.base.env.hpc_data_directory` runs for
+    ``CSTAR_DATA_HOME``, so there is one definition of "where scratch is" in
+    the package. Only when none of those variables is set does Forge fall back
+    to its own per-system convention, because C-Star's search cannot know
+    these: ``~/scratch`` on Perlmutter; ``$PROJECT/scratch`` (or
+    ``~/work/scratch``) on Anvil; the globbed ``scratch_pi_*/<user>`` root on
+    Bouchet, which exports no scratch env var at all. On the real default
+    environment of each of these systems this returns the same path as
+    before: Anvil and Perlmutter both export ``$SCRATCH``, which
+    ``find_scratch_dir`` finds first; Bouchet exports none of the listed
+    variables, so the search falls through to the glob exactly as it did
+    before. ``$SCRATCH``/``$SCRATCH_DIR``/``$LOCAL_SCRATCH`` are per-user on
+    these machines, so no extra username layer is inserted. Non-HPC names
+    (``"darwin_arm64"``, ``"linux_x86_64"``) return ``None`` even if the
+    environment happens to carry one of those variables.
     """
+    if system_tag not in _HPC_SYSTEM_TAGS:
+        return None
+    if scratch_dir := find_scratch_dir(env):
+        return Path(scratch_dir)
     if system_tag == "perlmutter":
-        return Path(env.get("SCRATCH", home / "scratch"))
+        return home / "scratch"
     if system_tag == "anvil":
         project = Path(env.get("PROJECT", home / "work"))
-        return Path(env.get("SCRATCH", project / "scratch"))
-    if system_tag == "bouchet":
-        if "SCRATCH" in env:
-            return Path(env["SCRATCH"])
-        return _bouchet_scratch_root(home)
-    return None
+        return project / "scratch"
+    return _bouchet_scratch_root(home)  # system_tag == "bouchet"
 
 
 # Home-relative default working roots a stored ``working_dir`` may carry, all
