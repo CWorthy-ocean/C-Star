@@ -15,10 +15,11 @@ Used by the two consumers that must never duplicate this mapping: ``models.py``
 
 import hashlib
 from collections.abc import Iterable
+from importlib.resources import files
 from pathlib import Path
 
 _BUNDLED_TEMPLATES_ROOT = (
-    Path(__file__).resolve().parents[2] / "additional_files" / "templates" / "forge"
+    Path(str(files("cstar"))) / "additional_files" / "templates" / "forge"
 )
 
 
