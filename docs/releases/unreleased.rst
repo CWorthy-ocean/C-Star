@@ -22,7 +22,8 @@ New features
 Bug Fixes
 ~~~~~~~~~
 
-- N/A
+
+- Reading or writing a file with an unrecognized extension no longer prints "Using default persistence mode ``yaml`` for file ``{path}``" to the terminal. (`#703 <https://github.com/CWorthy-ocean/C-Star/pull/703>`_)
 
 Improvements
 ~~~~~~~~~~~~
@@ -49,4 +50,5 @@ Miscellaneous
   - Banners: the Sphinx prolog "early phase of development" attention block and the README warning are removed, along with the "in development" snippet; the workplan state and compute-environment sections describe the current behaviour factually instead.
 
 - Workplan guide and ``--resume`` help text describe resuming by workplan path and the ``--var``/``--varfile`` restriction. (`#702 <https://github.com/CWorthy-ocean/C-Star/pull/702>`_)
+- Added a test that an unrecognized extension resolves to YAML without printing anything. (`#703 <https://github.com/CWorthy-ocean/C-Star/pull/703>`_)
 
