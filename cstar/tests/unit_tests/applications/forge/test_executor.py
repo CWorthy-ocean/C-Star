@@ -1623,82 +1623,6 @@ class TestForgeExecutorBuildAndRun:
         with pytest.raises(ValueError, match="requires MARBL"):
             self._run_configure_build(cfg, host)
 
-    def test_configure_build_user_cdr_tracer_output_without_forcing(
-        self, sample_grid_kwargs, sample_open_boundaries, sample_partitioning
-    ):
-        """Mirrors test_configure_build_user_cdr_output_without_forcing for the
-        ucla-roms >= 0.7.0 CDR tracer output stream: a stored blueprint (or a
-        wizard accordion edit applied after the resolver) can carry
-        ``cdr_tracer_output.do_cdr_tracer_output=True`` alongside a stale
-        ``cppdefs.cdr_forcing=False`` -- before the fix, configure_build never
-        re-checked this, so CDR_FORCING stayed undefined and ucla-roms silently
-        never compiled the tracer output module the namelist enables.
-
-        Uses the default (0.2.0-pinned) ``model_dir`` like the ``do_cdr_output``
-        tests above and injects the (version-gated, normally 0.7.0+-only)
-        ``cdr_tracer_output`` section directly -- this exercises configure_build's
-        net in isolation, independent of the resolver's own version-gating
-        (covered separately by
-        ``test_cdr_tracer_gas_exch_output_sections_pruned_before_0_7_0`` in
-        test_forge_blueprint.py).
-        """
-        cfg, host = self._cdr_cfg_and_builder(
-            sample_grid_kwargs, sample_open_boundaries, sample_partitioning
-        )
-        cfg.model_settings.setdefault("cdr_tracer_output", {})[
-            "do_cdr_tracer_output"
-        ] = True
-        assert cfg.model_settings["cppdefs"]["cdr_forcing"] is False
-
-        builder = self._run_configure_build(cfg, host)
-
-        assert (
-            builder._settings_run_time["cdr_tracer_output"]["do_cdr_tracer_output"]
-            is True
-        )
-        assert builder._settings_compile_time["cppdefs"]["cdr_forcing"] is True
-
-    def test_configure_build_user_cdr_gas_exch_output_without_forcing(
-        self, sample_grid_kwargs, sample_open_boundaries, sample_partitioning
-    ):
-        """Mirrors test_configure_build_user_cdr_tracer_output_without_forcing for
-        the gas-exchange output stream.
-        """
-        cfg, host = self._cdr_cfg_and_builder(
-            sample_grid_kwargs, sample_open_boundaries, sample_partitioning
-        )
-        cfg.model_settings.setdefault("cdr_gas_exch_output", {})[
-            "do_cdr_gas_exch_output"
-        ] = True
-        assert cfg.model_settings["cppdefs"]["cdr_forcing"] is False
-
-        builder = self._run_configure_build(cfg, host)
-
-        assert (
-            builder._settings_run_time["cdr_gas_exch_output"]["do_cdr_gas_exch_output"]
-            is True
-        )
-        assert builder._settings_compile_time["cppdefs"]["cdr_forcing"] is True
-
-    def test_configure_build_rejects_cdr_tracer_output_without_marbl(
-        self, sample_grid_kwargs, sample_open_boundaries, sample_partitioning
-    ):
-        """Mirrors test_configure_build_rejects_cdr_output_without_marbl: the
-        resolver's CDR-tracer-output-requires-MARBL guard is re-checked at
-        configure_build for a stored/hand-edited blueprint that reaches here
-        without re-resolving.
-        """
-        cfg, host = self._cdr_cfg_and_builder(
-            sample_grid_kwargs, sample_open_boundaries, sample_partitioning
-        )
-        cfg.model_settings.setdefault("cdr_tracer_output", {})[
-            "do_cdr_tracer_output"
-        ] = True
-        cfg.model_settings["cppdefs"]["marbl"] = False
-
-        with pytest.raises(ValueError, match="do_cdr_tracer_output"):
-            self._run_configure_build(cfg, host)
-
     def test_configure_build_rejects_non_divisible_rst_period(
         self, sample_grid_kwargs, sample_open_boundaries, sample_partitioning
     ):
@@ -3004,6 +2928,191 @@ class TestGoldenNamelist:
             "regression."
         )
         return normalized
+
+    def _generate_inputs_no_cdr_forcing(self, mock_grid, tmp_path):
+        """Builds against the 0.7.0-pinned ``_MODEL_DIR_ROMS070`` (so
+        ``cdr_tracer_output``/``cdr_gas_exch_output`` exist in
+        ``model_settings``) and runs the real ``generate_inputs()``, but --
+        unlike ``_run_golden_namelist_case`` -- with NO CDR forcing configured
+        (no ``_CDR_FORCING`` kwarg), so ``cdr_output.do_cdr_output`` and
+        ``cppdefs.cdr_forcing`` both stay False. That isolates the CDR
+        tracer/gas-exchange output tests below from the ``do_cdr_output`` net:
+        with CDR forcing on, that net would flip ``cdr_forcing`` first and the
+        tracer/gas-exchange net's own effect couldn't be observed.
+
+        Reuses the same mocked roms-tools construction classes as
+        ``_run_golden_namelist_case``, minus ``rt.CDRForcing`` (never invoked
+        here -- no CDR forcing is configured). Returns ``(cfg, builder)`` after
+        ``generate_inputs()`` -- callers mutate ``cfg.model_settings`` (as a
+        wizard accordion edit would, after the resolver and generation both
+        already ran) and then drive ``configure_build`` themselves.
+        """
+        cfg = build_forge_blueprint(
+            model_dir=_MODEL_DIR_ROMS070,
+            grid_name="test-tiny",
+            grid_kwargs=self._GRID_KWARGS,
+            open_boundaries=self._BOUNDARIES,
+            partitioning=self._PARTITIONING,
+            start_date=datetime(2012, 1, 1),
+            end_date=datetime(2012, 1, 2),
+            dt=7200,
+            forcing_inputs=_FORCING_INPUTS,
+            output_settings=_OUTPUT_SETTINGS,
+            use_pio=False,
+        )
+        assert cfg.model_settings["cdr_output"]["do_cdr_output"] is False
+        assert cfg.model_settings["cppdefs"]["cdr_forcing"] is False
+
+        grid_mock = _create_grid_mock()
+        grid_mock.nx = self._GRID_KWARGS["nx"]
+        grid_mock.ny = self._GRID_KWARGS["ny"]
+        grid_mock.N = self._GRID_KWARGS["N"]
+        grid_mock.theta_s = self._GRID_KWARGS["theta_s"]
+        grid_mock.theta_b = self._GRID_KWARGS["theta_b"]
+        grid_mock.hc = self._GRID_KWARGS["hc"]
+        grid_mock.save.side_effect = self._touch_save
+        mock_grid.return_value = grid_mock
+
+        run_dir = tmp_path / "run"
+        host = HostPaths(working_dir=run_dir, source_data_cache=run_dir, system="test")
+        builder = ForgeExecutor.from_forge_blueprint(cfg, host=host)
+        builder.src_data = self._mock_source_data(tmp_path)
+
+        with (
+            patch(
+                "cstar.applications.forge.input_data.rt.InitialConditions"
+            ) as mock_ic,
+            patch(
+                "cstar.applications.forge.input_data.rt.SurfaceForcing"
+            ) as mock_surface,
+            patch(
+                "cstar.applications.forge.input_data.rt.BoundaryForcing"
+            ) as mock_boundary,
+            patch("cstar.applications.forge.input_data.rt.TidalForcing") as mock_tidal,
+            patch("cstar.applications.forge.input_data.rt.RiverForcing") as mock_river,
+            patch(
+                "cstar.applications.forge.input_data.source_datasets.STREAMABLE_SOURCES",
+                {"ERA5"},
+            ),
+        ):
+            mock_ic_instance = MagicMock()
+            mock_ic_instance.save.side_effect = self._touch_save_list
+            mock_ic.return_value = mock_ic_instance
+
+            mock_surface_instance = MagicMock()
+            mock_surface_instance.save.side_effect = self._touch_save
+            mock_surface_instance.use_coarse_grid = False
+            mock_surface.return_value = mock_surface_instance
+
+            mock_boundary_instance = MagicMock()
+            mock_boundary_instance.physics.save.side_effect = self._touch_save_list
+            mock_boundary_bgc = MagicMock()
+            mock_boundary_bgc.save.side_effect = self._touch_save_list
+            mock_boundary_instance.bgc = [mock_boundary_bgc]
+            mock_boundary.return_value = mock_boundary_instance
+
+            mock_tidal_instance = MagicMock()
+            mock_tidal_instance.save.side_effect = self._touch_save
+            mock_tidal_instance.ntides = 15
+            mock_tidal.return_value = mock_tidal_instance
+
+            mock_river_instance = MagicMock()
+            mock_river_instance.save.side_effect = self._touch_save
+            mock_river_instance.ds = xr.Dataset(
+                {
+                    "river_volume": (["nriver", "time"], np.zeros((3, 2))),
+                    "river_tracer": (
+                        ["nriver", "time", "tracer"],
+                        np.zeros((3, 2, 2)),
+                    ),
+                }
+            )
+            mock_river.return_value = mock_river_instance
+
+            builder.generate_inputs(clobber=True, use_dask=False, test=False)
+
+        assert builder._settings_run_time["cdr_output"]["do_cdr_output"] is False
+        assert builder._settings_compile_time["cppdefs"]["cdr_forcing"] is False
+        return cfg, builder
+
+    def _configure_build_for(self, cfg, builder):
+        """Drives ``configure_build`` from ``cfg.model_settings`` (post any test
+        mutation), mirroring the second half of ``_run_golden_namelist_case``.
+        """
+        from cstar.applications.forge.engine import split_model_settings
+
+        run_ov, compile_ov = split_model_settings(cfg)
+        with patch(
+            "cstar.applications.forge.executor.render_roms_settings"
+        ) as mock_render:
+            mock_render.return_value = {
+                "location": str(builder.compile_time_code_dir),
+                "filter": {"files": ["cppdefs.opt"]},
+                "branch": "main",
+            }
+            builder.configure_build(
+                compile_time_settings=compile_ov, run_time_settings=run_ov
+            )
+
+    def test_configure_build_cdr_tracer_output_forces_cdr_forcing_end_to_end(
+        self, mock_grid, tmp_path
+    ):
+        """The CDR tracer/gas-exchange output net added alongside the
+        do_cdr_output net (see TestForgeExecutorBuildAndRun): a 0.7.0-pinned
+        blueprint where a wizard accordion edit sets
+        ``cdr_tracer_output.do_cdr_tracer_output=True`` *after* the resolver
+        (and generation) ran -- ``cppdefs.cdr_forcing`` stays at its
+        resolved-False value -- must still get ``cdr_forcing`` forced True at
+        ``configure_build`` time. Before the fix, configure_build never
+        re-checked this, so CDR_FORCING stayed undefined and ucla-roms
+        silently never compiled the tracer output module the namelist
+        enables.
+        """
+        cfg, builder = self._generate_inputs_no_cdr_forcing(mock_grid, tmp_path)
+        cfg.model_settings["cdr_tracer_output"]["do_cdr_tracer_output"] = True
+        assert cfg.model_settings["cppdefs"]["cdr_forcing"] is False
+
+        self._configure_build_for(cfg, builder)
+
+        assert (
+            builder._settings_run_time["cdr_tracer_output"]["do_cdr_tracer_output"]
+            is True
+        )
+        assert builder._settings_compile_time["cppdefs"]["cdr_forcing"] is True
+
+    def test_configure_build_cdr_gas_exch_output_forces_cdr_forcing_end_to_end(
+        self, mock_grid, tmp_path
+    ):
+        """Mirrors test_configure_build_cdr_tracer_output_forces_cdr_forcing_end_to_end
+        for the gas-exchange output stream.
+        """
+        cfg, builder = self._generate_inputs_no_cdr_forcing(mock_grid, tmp_path)
+        cfg.model_settings["cdr_gas_exch_output"]["do_cdr_gas_exch_output"] = True
+        assert cfg.model_settings["cppdefs"]["cdr_forcing"] is False
+
+        self._configure_build_for(cfg, builder)
+
+        assert (
+            builder._settings_run_time["cdr_gas_exch_output"]["do_cdr_gas_exch_output"]
+            is True
+        )
+        assert builder._settings_compile_time["cppdefs"]["cdr_forcing"] is True
+
+    def test_configure_build_rejects_cdr_tracer_output_without_marbl_end_to_end(
+        self, mock_grid, tmp_path
+    ):
+        """Mirrors test_configure_build_rejects_cdr_output_without_marbl (in
+        TestForgeExecutorBuildAndRun) for the CDR tracer output stream: a
+        stored/hand-edited blueprint that turns MARBL off after the resolver
+        ran must not silently bake CDR_FORCING into cppdefs.opt for an output
+        module ucla-roms can't compile without MARBL.
+        """
+        cfg, builder = self._generate_inputs_no_cdr_forcing(mock_grid, tmp_path)
+        cfg.model_settings["cdr_tracer_output"]["do_cdr_tracer_output"] = True
+        cfg.model_settings["cppdefs"]["marbl"] = False
+
+        with pytest.raises(ValueError, match="do_cdr_tracer_output"):
+            self._configure_build_for(cfg, builder)
 
     def test_golden_namelist_test_tiny(self, mock_grid, tmp_path):
         self._run_golden_namelist_case(
