@@ -132,11 +132,4 @@ Working with model specs in Python
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 :class:`~cstar.applications.forge.models.ModelSpec` loads a ``model.yaml``
-into a validated object. :doc:`model_spec_example` walks through loading one
-from the catalog and inspecting its fields.
-
-.. toctree::
-   :maxdepth: 1
-   :hidden:
-
-   model_spec_example
+into a validated object; see :doc:`../api-forge`.

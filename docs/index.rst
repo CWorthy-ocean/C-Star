@@ -92,8 +92,6 @@ C-Star is built with these principles in mind:
     :caption: Laptop-Runnable Examples
 
     End to end: a new domain to a running simulation <tutorials/end_to_end>
-    Understanding a ROMS-MARBL blueprint <tutorials/tutorial_bp>
-    Understanding the basics of a workplan <tutorials/tutorial_wp>
 
 .. toctree::
     :maxdepth: 2

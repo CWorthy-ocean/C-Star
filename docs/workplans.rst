@@ -374,3 +374,5 @@ layout before continuing from it or gathering it:
    :hidden:
 
    workplans/directives
+
+   tutorials/tutorial_wp

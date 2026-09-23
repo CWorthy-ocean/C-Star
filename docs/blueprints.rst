@@ -145,3 +145,4 @@ standalone alternative to running a blueprint fresh.
 
    blueprints/roms_marbl
    blueprints/forge
+   tutorials/tutorial_bp

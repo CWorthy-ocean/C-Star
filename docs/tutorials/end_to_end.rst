@@ -91,9 +91,9 @@ the blueprint, partitions the inputs, runs the simulation, and joins the
 output. Results land under that blueprint's own working directory.
 
 Both steps use the same command; the blueprint's ``application`` field
-decides which application handles it. :doc:`tutorial_bp` walks through what
-is in the ROMS-MARBL blueprint Forge just wrote, and :doc:`tutorial_wp` shows
-how to chain simulations into a workplan.
+decides which application handles it. The :doc:`ROMS-MARBL blueprint example
+<tutorial_bp>` walks through what is in the blueprint Forge just wrote, and the
+:doc:`workplan example <tutorial_wp>` shows how to chain simulations.
 
 On a cluster
 ------------
