@@ -5,8 +5,9 @@ Custom applications enable users to execute new types of behavior with C-Star. T
 power of custom applications becomes clear when they are integrated into a workplan.
 
 For a complete, in-tree example of a custom application built this way, see
-:doc:`forge/index` -- the domain-generation application ``forge`` (source at
-``cstar/applications/forge/``) follows exactly the pattern described below.
+:doc:`developers/forge_internals` -- the domain-generation application
+``forge`` (source at ``cstar/applications/forge/``) follows exactly the
+pattern described below.
 
 
 Applications Overview
@@ -183,7 +184,7 @@ Remember - a `Blueprint` defines the available configuration. The
 blueprint files specify how an *execution* of the application should behave.
 
 Executing the `Blueprint`
------------------------
+-------------------------
 
 We've created our blueprint and runner classes and created two separate blueprint instances.
 We have finally reached the point where we can execute the application using the *C-Star* CLI:

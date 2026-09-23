@@ -1042,6 +1042,7 @@ class DomainCatalog:
 
         ``mode`` selects how CDR forcing is configured for a domain that picks
         this spec:
+
           - ``"none"`` / ``"upscaled"``: no CDR-forcing configuration is stored
             (``upscaled`` reads CDR forcing supplied at runtime from a parent
             domain); neither ``cdr_forcing`` nor ``cdr_forcing_file`` may be given.

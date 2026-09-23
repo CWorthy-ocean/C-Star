@@ -11,7 +11,7 @@ Core Blueprint Schema
 ---------------------
 
 The core attributes of a blueprint come from :class:`cstar.orchestration.models.Blueprint`.
-See the blueprint YAML below for example usage fo the attributes.
+The example on the :doc:`ROMS-MARBL blueprint <blueprints/roms_marbl>` page shows them in use.
 
 .. rubric:: Core Blueprint Attributes
 
@@ -21,42 +21,19 @@ See the blueprint YAML below for example usage fo the attributes.
   ~cstar.orchestration.models.Blueprint.description
   ~cstar.orchestration.models.Blueprint.application
   ~cstar.orchestration.models.Blueprint.state
+  ~cstar.orchestration.models.Blueprint.schema_version
+  ~cstar.orchestration.models.Blueprint.working_dir
   ~cstar.orchestration.models.Blueprint.cpus_needed
 
 The core blueprint attributes do not contain enough information to be executed alone.
 
 Customizing Blueprints
-----------------------
+-----------------------
 
-`Blueprint` subclasses are created to define attributes for each supported
-application. These classes are responsible for exposing the set of configurable
-parameters that are user-facing.
-
-
-Custom Blueprint Example: ``RomsMarblBlueprint``
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-
-:class:`cstar.applications.roms_marbl.app.RomsMarblBlueprint` contains all information
-necessary to execute a coupled simulation using **UCLA-ROMS** with biogeochemistry
-handled by **MARBL**. It adds the following attributes:
-
-.. rubric:: RomsMarblBlueprint Attributes
-
-.. autosummary::
-
-  ~cstar.applications.roms_marbl.app.RomsMarblBlueprint.valid_start_date
-  ~cstar.applications.roms_marbl.app.RomsMarblBlueprint.valid_end_date
-  ~cstar.applications.roms_marbl.app.RomsMarblBlueprint.code
-  ~cstar.applications.roms_marbl.app.RomsMarblBlueprint.initial_conditions
-  ~cstar.applications.roms_marbl.app.RomsMarblBlueprint.grid
-  ~cstar.applications.roms_marbl.app.RomsMarblBlueprint.forcing
-  ~cstar.applications.roms_marbl.app.RomsMarblBlueprint.partitioning
-  ~cstar.applications.roms_marbl.app.RomsMarblBlueprint.namelist_overrides
-  ~cstar.applications.roms_marbl.app.RomsMarblBlueprint.runtime_params
-  ~cstar.applications.roms_marbl.app.RomsMarblBlueprint.cdr_forcing
-
-Explore the API reference of :class:`cstar.applications.roms_marbl.app.RomsMarblBlueprint` 
-for more detail on each item.
+Each supported application defines its own ``Blueprint`` subclass, adding the
+attributes needed to configure that application. See :doc:`blueprints/roms_marbl`
+for the ROMS-MARBL blueprint and :doc:`blueprints/forge` for the blueprint
+produced by Forge.
 
 
 Preparing a Blueprint
@@ -64,102 +41,12 @@ Preparing a Blueprint
 
 A blueprint can be prepared for execution in a few ways:
 
-1. If you are creating a brand new domain, consider using `C-SON Forge <https://github.com/CWorthy-ocean/cson-forge/>`__ to prepare your input files and blueprint all at once.
-2. For an existing set of inputs, you manually write a YAML file with the desired blueprint configuration.
-3. Write python code to define a ``RomsMarblBlueprint`` instance and export it to YAML.
-
-
-RomsMarblBlueprint Example
---------------------------
-
-This example YAML demonstrates a configured ``RomsMarblBlueprint``. Notice that:
-
-- ROMS code can be built from a fork, branch, or even a git commit hash, by specifying :attr:`branch:` or :attr:`commit:`
-- Remote or local resources can be used to build and execute a simulation, under :attr:`compile_time:`
-- C-Star handles both partitioned and unpartitioned data
-- Runtime and compile-time behaviors can be customized in the ``.opt`` and ``.in`` files
-- ``use_pio`` (whether to use the ParallelIO library for model input/output) is set under ``partitioning:``
-- ``namelist_overrides`` maps a ROMS namelist group to key/value overrides. These are applied last, over C-Star's own derived runtime namelist settings, so user-supplied values win. For example, the model time step is set via ``namelist_overrides.time_stepping.dt`` (or directly in the namelist file itself).
-
-.. code:: yaml
-
-    name: 2node_1wk_example
-    description: this is mainly to test infra like containers and workplans. it should run on 256 processors (2 nodes)
-    application: roms_marbl
-    schema_version: 3.0.0
-    working_dir: /anvil/scratch/x-seilerman/2node_1wk_job1/
-    state: draft
-    valid_start_date: 2000-01-15 0:00:00
-    valid_end_date: 2000-01-23 0:00:00
-    code:
-      roms:
-        location: https://github.com/CWorthy-ocean/ucla-roms.git
-        branch: main
-      marbl:
-        location: https://github.com/marbl-ecosys/MARBL.git
-        branch: marbl0.45.0
-
-      run_time:
-        location: /anvil/scratch/x-seilerman/2node_test_domain
-        branch: "na"
-        filter:
-          files:
-          - test_domain_1wk.in
-          - marbl_in
-          - marbl_tracer_output_list
-          - marbl_diagnostic_output_list
-      compile_time:
-        location: /anvil/scratch/x-seilerman/2node_test_domain/compile
-        branch: "na"
-        filter:
-          files:
-          - bgc.opt
-          - bulk_frc.opt
-          - cppdefs.opt
-          - diagnostics.opt
-          - ocean_vars.opt
-          - param.opt
-          - tracers.opt
-          - Makefile
-
-    grid:
-      data:
-        - location: /anvil/scratch/x-seilerman/2node_test_domain/input_files/partitioned_files/grid_64x64x5.000.nc
-          partitioned: true
-    initial_conditions:
-      data:
-        - location: /anvil/scratch/x-seilerman/2node_test_domain/input_files/partitioned_files/init_condis_bgc.000.nc
-          partitioned: true
-
-    forcing:
-      tidal:
-        data:
-          - location: /anvil/scratch/x-seilerman/2node_test_domain/input_files/partitioned_files/tides_Jan1_2000.000.nc
-            partitioned: true
-      surface:
-        data:
-          - location: /anvil/scratch/x-seilerman/2node_test_domain/input_files/partitioned_files/surf_phys_filepath_200001.000.nc
-            partitioned: true
-          - location: /anvil/scratch/x-seilerman/2node_test_domain/input_files/partitioned_files/surf_frc_bgc_clim.000.nc
-            partitioned: true
-      boundary:
-        data:
-          - location: /anvil/scratch/x-seilerman/2node_test_domain/input_files/partitioned_files/boundary_force_phys_jan15_feb21_200001.000.nc
-            partitioned: true
-          - location: /anvil/scratch/x-seilerman/2node_test_domain/input_files/partitioned_files/boundary_force_bgc_jan15_feb21_clim.000.nc
-            partitioned: true
-
-    partitioning:
-      n_procs_x: 16
-      n_procs_y: 16
-
-    namelist_overrides:
-      time_stepping:
-        dt: 900
-
-    runtime_params:
-      start_date: "2000-01-15 00:00:00"
-      end_date: "2000-01-22 00:00:00"
+1. If you are creating a brand new domain, use Forge (``cstar forge wizard``) to
+   prepare your input files and blueprint together. See :doc:`wizard` and
+   :doc:`blueprints/forge`.
+2. For an existing set of inputs, manually write a YAML file with the desired
+   blueprint configuration.
+3. Write Python code to define a blueprint instance and export it to YAML.
 
 
 Checking validity
@@ -194,6 +81,27 @@ Execution
 
 .. include:: snippets/review-config.rst
 
+Where a blueprint runs
+^^^^^^^^^^^^^^^^^^^^^^
+
+``cstar blueprint run`` runs on the machine you invoke it on. What happens
+next depends on the application:
+
+- The ``roms_marbl`` application submits the model run to the job scheduler
+  itself when one is available, so on a cluster it is fine to invoke it from
+  a login node: the code is fetched and compiled there, and the simulation
+  runs in a SLURM job. Without a scheduler it runs the model in place.
+- The ``forge`` application does no submitting. Downloading source data,
+  building the grid and generating input files all happen wherever you run
+  the command. For anything beyond a toy domain, run it from a compute node
+  (an interactive allocation, or your own batch script that calls
+  ``cstar blueprint run``), or put it in a :doc:`workplan <workplans>` and
+  let C-Star submit it.
+
+A workplan submits every step to the scheduler, whatever its application,
+using the account, queue and walltime from your environment unless a step
+overrides them.
+
 .. warning::
     The post-processing step joining partitioned data may consume all available cores of a login node and be terminated (and make the admins angry).
 
@@ -210,7 +118,7 @@ Use the ``run`` command from the ``cstar`` CLI to execute a blueprint.
 
    .. tab-item:: Run via CLI
 
-    Use the ``run`` command from the ``cstar` CLI.
+    Use the ``run`` command from the ``cstar`` CLI.
 
     .. code-block:: console
 
@@ -224,12 +132,13 @@ Use the ``run`` command from the ``cstar`` CLI to execute a blueprint.
       :caption: Executing a blueprint YAML file in python.
 
         from cstar.entrypoint.config import JobConfig, ServiceConfiguration
-        from cstar.applications.roms_marbl.app import RomsMarblBlueprint, RomsMarblRunner
+        from cstar.applications.roms_marbl.app import RomsMarblRunner
+        from cstar.applications.roms_marbl.models import RomsMarblBlueprint
         from cstar.applications.core import RunnerRequest
 
         account_id = "your-account-id"
         queue_id = "wholenode"
-        
+
         request = RunnerRequest("my_blueprint.yaml", RomsMarblBlueprint)
         service_cfg = ServiceConfiguration()
         job_cfg = JobConfig(account_id=account_id, walltime="00:90:00", priority=queue_id)
@@ -238,7 +147,7 @@ Use the ``run`` command from the ``cstar`` CLI to execute a blueprint.
         await runner.execute()
 
 Resuming an interrupted run
-"""""""""""""""""""""""""""
+""""""""""""""""""""""""""""
 
 If a run is lost or interrupted mid-execution, pass ``--resume`` to continue it in
 place from the blueprint's working directory, rather than starting over:
@@ -251,3 +160,10 @@ place from the blueprint's working directory, rather than starting over:
 declare themselves resumable accept it -- the CLI rejects the flag for any other
 application before execution begins. No workplan or run-id is needed; this is a
 standalone alternative to running a blueprint fresh.
+
+.. toctree::
+   :hidden:
+
+   blueprints/roms_marbl
+   blueprints/forge
+   tutorials/tutorial_bp

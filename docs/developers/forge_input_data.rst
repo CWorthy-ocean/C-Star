@@ -1,7 +1,7 @@
 .. _forge-input-data:
 
-Input data generation
-======================
+Forge internals: input data generation
+=========================================
 
 .. note::
 
@@ -17,7 +17,7 @@ Input data generation
 The ``input_data`` module (``cstar/applications/forge/input_data.py``)
 provides classes and utilities for generating input data files for ocean
 models. It uses a **registry-based framework** similar to the
-``source_data`` module (see :doc:`source_data`), allowing extensible input
+``source_data`` module (see :doc:`forge_source_data`), allowing extensible input
 generation through decorator-based registration.
 
 Module purpose
@@ -878,7 +878,7 @@ Integration with ``ForgeExecutor``
 
 The ``RomsMarblInputData`` class is used internally by
 ``ForgeExecutor.generate_inputs()`` (``cstar/applications/forge/executor.py``;
-see :doc:`internals` for the architecture). That method is in turn called by
+see :doc:`forge_internals` for the architecture). That method is in turn called by
 ``process_forge_blueprint()`` (``cstar/applications/forge/engine.py``), which
 is what ``cstar forge run`` invokes:
 

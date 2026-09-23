@@ -1,82 +1,169 @@
-Welcome to the C-Star Documentation!
-====================================
+C-Star
+======
 
-**C-Star** is an open-source ocean modeling system developed by a team of ocean/biogeochemical modelers and scientific software engineers at `[\C\]Worthy <https://cworthy.org>`_. It currently runs ucla-roms and MARBL, and is designed to support Monitoring, Reporting, and Verification (MRV) for research and commercial ocean-based Carbon Dioxide Removal (CDR) projects. C-Star aims to provide an accessible, common, framework for creating, sharing, and reproducing ocean biogeochemical simulations.
+**C-Star** is an open-source system for building, running and sharing regional
+ocean simulations. It is developed by ocean and biogeochemical modelers and
+scientific software engineers at `[C]Worthy <https://cworthy.org>`_ to support
+Monitoring, Reporting and Verification (MRV) of ocean-based carbon dioxide
+removal. Today it runs `UCLA-ROMS <https://github.com/CWorthy-ocean/ucla-roms>`_
+coupled to the `MARBL <https://marbl-ecosys.github.io>`_ biogeochemistry model,
+on a laptop or on a supported HPC system, from the same description of the run.
 
-We are designing and building C-Star with these high-level principles in mind:
+.. raw:: html
 
-- **Scientific Integrity:** The C-Star modeling system utilizes trusted biogeochemical ocean models that have been developed in the public domain through decades of scientific R&D. Community involvement and iteration ensures that we are tracking the best-available science.
-- **Transparency and Accessibility of our code:** Facilitates broad trust and adoption by both academic and commercial actors.
-- **Reproducible and auditable:** Modeling simulations used to underpin carbon removal claims must be shareable and reproducible by a range of users.
-- **Ease of use:** Ensures consistent application by diverse user groups including the commercial sector.
-- **Standardization:** Ensures a consistent level of quality across CDR projects.
+   <video autoplay loop muted playsinline width="100%"
+          style="display:block;margin:0 auto 1.5rem;border-radius:4px"
+          aria-label="Simulated air-sea CO2 uptake following an alkalinity release">
+     <source src="https://raw.githubusercontent.com/CWorthy-ocean/.github/6680cccc924b6676281eaeb6939d2c32b629caac/ALK_FG_CO2uptake_highres.webm" type="video/webm">
+     <source src="https://raw.githubusercontent.com/CWorthy-ocean/.github/6680cccc924b6676281eaeb6939d2c32b629caac/ALK_FG_CO2uptake_highres.mp4" type="video/mp4">
+     Your browser does not play embedded video.
+   </video>
 
-A key strength of C-Star lies in its ability to run regional ocean simulations using a `“blueprint” <https://c-star.readthedocs.io/en/latest/terminology.html#term-blueprint>`_ that consolidates all the necessary data to define a model setup. This enables the creation of curated databases containing both scientifically validated and research-grade blueprints. These blueprints offer users the flexibility to easily reproduce simulations, making the modeling process more accessible and consistent.
+How it works
+------------
+
+C-Star is organized around two ideas.
+
+An **application** is something you can run:
+- the ROMS-MARBL model
+- Forge, the tool that builds a new ROMS-MARBL domain
+- any number of smaller data transformation steps or analysis packages
+
+A **blueprint** is a YAML file holding every input an application needs to produce its result: which model
+code to build, which input files to use, which settings to apply. Given the
+same blueprint, an application produces the same result on any supported
+machine, which is what makes a C-Star simulation shareable and reproducible.
+
+A simple ocean modeling project moves through three basic steps:
+
+1. **Describe the domain.** The Forge :ref:`wizard <wizard>`, a form that runs in your
+   browser or as a Jupyter notebook, walks you through choosing a model configuration, a region and
+   grid, forcing datasets, and a run window. It writes a *forge blueprint*.
+2. **Generate the inputs.** Running that forge blueprint downloads the source
+   datasets, builds the grid, initial conditions, boundary and surface forcing,
+   and rivers and tides where requested, and writes the ROMS namelist. Its
+   output is a *ROMS-MARBL blueprint* pointing at everything the model needs.
+3. **Run the simulation.** Running the ROMS-MARBL blueprint fetches and
+   compiles the model code and executes the simulation. Output lands in the
+   blueprint's working directory.
+
+The wizard can be run on any machine, even your laptop, and the Forge blueprint can
+then be moved to a different machine, like an HPC, where you want heavier computations to take place,
+or where collections of source data may be staged among your working group.
+
+Running any blueprint independently can be done with the command  ``cstar blueprint run <blueprint.yaml>``.
+To run several simulations as one unit, a **workplan** lists the blueprints
+to run as *steps*, with dependencies between them. C-Star schedules the steps,
+submits them to the cluster's job scheduler, and tracks their status, so a
+chain such as a spin-up followed by an experiment and its control can be
+launched and monitored with a single run ID. Steps can pass information to one
+another at run time: for example, a restart file from one simulation becoming
+the initial conditions of the next.
+
+The same building blocks cover most regional modeling projects: an outer
+domain feeding boundary conditions to a nested inner domain, an ensemble that
+varies the forcing of one blueprint across steps, a post-processing or
+diagnostics application run on the output of an earlier step. A finished
+workplan is a file, so a colleague can reproduce the whole sequence or change
+one input and rerun it. Blueprints are versioned and hashed, and every run
+keeps its inputs, rendered configuration and logs alongside its output, so
+what produced a result can be checked afterwards.
+
+Reusable pieces of a domain description live in a **catalog**: model
+configurations, domains, forcing selections and output settings, plus saved
+blueprints. C-Star ships a small bundled catalog to start from, and everything
+you save from the wizard goes into your own catalog layer.
+
+Principles
+----------
+
+C-Star is built with these principles in mind:
+
+- **Scientific integrity.** The models are trusted, community-developed
+  codes with decades of development behind them, and community involvement
+  keeps the system tracking the best available science.
+- **Transparency and accessibility.** The code is open, so both academic and
+  commercial users can inspect and trust what it does.
+- **Reproducibility and auditability.** Simulations that underpin carbon
+  removal claims must be shareable and reproducible by others. Blueprints
+  make a simulation a complete, reviewable document.
+- **Ease of use.** A consistent workflow that diverse users can apply the
+  same way.
+- **Standardization.** A common framework gives a consistent level of quality
+  across projects.
 
 .. toctree::
     :maxdepth: 1
     :caption: Getting Started
+    :hidden:
 
     Installing C-Star <installation>
+    Registering for datasets <data_access>
     configuration
 
 .. toctree::
     :maxdepth: 1
     :caption: Terminology and Concepts
+    :hidden:
 
     terminology
 
 .. toctree::
     :maxdepth: 1
     :caption: Laptop-Runnable Examples
+    :hidden:
 
-    Run a ROMS-MARBL Blueprint <tutorials/tutorial_bp>
-    Orchestrate multiple blueprints <tutorials/tutorial_wp>
+    End to end: a new domain to a running simulation <tutorials/end_to_end>
 
 .. toctree::
-    :maxdepth: 1
+    :maxdepth: 2
     :caption: User Guide
+    :hidden:
 
     blueprints
     workplans
+    catalog
+    wizard
 
 .. toctree::
     :maxdepth: 1
     :caption: Domain generation (Forge)
+    :hidden:
 
     forge/index
-    forge/getting_started
-    forge/reference
-    forge/source_data
-    forge/input_data
-    forge/model_spec
-    forge/catalog
-    forge/internals
-    forge/installation_hpc
-    forge/machine_config
-    forge/installation_changes
-
+    forge/specs
+    forge/source_datasets
 
 .. toctree::
     :maxdepth: 1
     :caption: Deployment
+    :hidden:
 
     machines
+    hpc
 
 .. toctree::
     :maxdepth: 1
     :caption: Reference
+    :hidden:
 
     api-blueprint
     api-orchestration
+    api-forge
     api
     schemas/index
 
 .. toctree::
     :maxdepth: 1
     :caption: For Developers
+    :hidden:
 
     contributing
     custom_applications
     system-registration
+    developers/forge_internals
+    developers/forge_templates
+    developers/forge_source_data
+    developers/forge_input_data
+    developers/catalog_design
     releases

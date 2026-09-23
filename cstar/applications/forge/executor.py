@@ -2107,6 +2107,7 @@ class ForgeExecutor(BaseModel):
         2. Merges user-provided settings overrides with existing settings
         3. Clears compile-time and run-time code output directories
         4. Produces configuration files:
+
            - Compile-time: renders cppdefs.opt from its Jinja2 template
            - Run-time: writes namelist.nml (write_roms_namelist) and copies
              static run-time files (e.g., marbl_in)

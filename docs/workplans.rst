@@ -1,7 +1,7 @@
 Workplans
 =========
 
-Workplans define the contract for requesting the execution of one or more 
+Workplans define the contract for requesting the execution of one or more
 :doc:`blueprints`. A user-configured workplan informs C-Star which ``Blueprint``
 to execute, and in what order.
 
@@ -14,7 +14,7 @@ Workplans are defined in :class:`cstar.orchestration.models.Workplan`.
 .. rubric:: Workplan Attributes
 
 .. autosummary::
-    
+
   ~cstar.orchestration.models.Workplan.name
   ~cstar.orchestration.models.Workplan.description
   ~cstar.orchestration.models.Workplan.steps
@@ -26,31 +26,45 @@ Workplans are defined in :class:`cstar.orchestration.models.Workplan`.
 State
 ^^^^^
 
-.. include:: snippets/in-development.rst
-
-A workplan may be configured in a *draft* or *validated* state using :attr:`~cstar.orchestration.models.Workplan.state`
-
-- a *draft* workplan can be freely edited and submitted for execution.
-- modifications to a *validated* workplan are restricted to ensure reproducibility.
+A workplan is marked *draft* or *validated* with :attr:`~cstar.orchestration.models.Workplan.state`.
+A draft workplan can be edited freely and submitted for execution. The validated
+state is reserved for workplans whose modification will be restricted to preserve
+reproducibility; C-Star does not yet enforce that restriction, so today the field
+is informational.
 
 
 Compute Environment
 ^^^^^^^^^^^^^^^^^^^
 
-.. include:: snippets/in-development.rst
-
-The desired compute environment characteristic are specified using :attr:`~cstar.orchestration.models.Workplan.compute_environment`
+The compute environment a workplan expects is described with
+:attr:`~cstar.orchestration.models.Workplan.compute_environment`. Per-step compute
+requirements are set with each step's ``compute_overrides`` (see below).
 
 
 Runtime Variables
 ^^^^^^^^^^^^^^^^^
 
-.. include:: snippets/in-development.rst
+C-Star fills ``{{ }}`` placeholders inside a step's ``blueprint_overrides`` before
+applying them. Two forms are supported:
 
-C-Star performs some simple templating for user convenience. The variables identified in
-:attr:`~cstar.orchestration.models.Workplan.runtime_vars` are meant to be provided at runtime,
-such that one workplan could be shared and used for a range of supported values without needing
-to modify the yaml. The user API for specifying runtime variables is still in development.
+- ``{{name}}`` is replaced with a value supplied at runtime. Declare the allowed
+  names in :attr:`~cstar.orchestration.models.Workplan.runtime_vars`, then supply
+  values when running the workplan with ``cstar workplan run --var name=value``
+  (repeatable) or ``--varfile path`` (a file with one ``key=value`` pair per
+  line). A name supplied that was not declared in ``runtime_vars`` is rejected.
+- ``{{<scope>: <step>}}`` is replaced with a directory path from another step's
+  file layout, where ``<step>`` names any step in the workplan and ``<scope>``
+  is one of:
+
+  - ``root_dir`` -- the step's root directory, containing everything else below
+  - ``input_dir`` -- inputs staged for the step, such as datasets, code, and runtime configuration
+  - ``run_dir`` -- generated run scripts and other work items
+  - ``tasks_dir`` -- per-subtask working directories, for steps split into subtasks
+  - ``logs_dir`` -- log files written during the step
+  - ``output_dir`` -- the step's final outputs
+
+  For example, ``{{output_dir: outer}}`` resolves to the ``output`` directory
+  of the step named ``outer``.
 
 
 Steps
@@ -70,14 +84,65 @@ See :class:`cstar.orchestration.models.Step` for complete details on configuring
 .. rubric:: Step Attributes
 
 .. autosummary::
-    
+
   ~cstar.orchestration.models.Step.name
   ~cstar.orchestration.models.Step.application
-  ~cstar.orchestration.models.Step.blueprint
+  ~cstar.orchestration.models.Step.blueprint_path
   ~cstar.orchestration.models.Step.depends_on
   ~cstar.orchestration.models.Step.blueprint_overrides
   ~cstar.orchestration.models.Step.compute_overrides
   ~cstar.orchestration.models.Step.workflow_overrides
+  ~cstar.orchestration.models.Step.directives
+
+``workflow_overrides`` recognizes two keys: ``clobber`` (clear the step's prior
+state and re-execute it from scratch) and ``resume`` (continue the step's
+failed prior attempt in place instead). The two are mutually exclusive on a
+single step.
+
+Compute overrides
+^^^^^^^^^^^^^^^^^
+
+By default every step is submitted with the account, queue and walltime
+from your environment (``CSTAR_SLURM_ACCOUNT``, ``CSTAR_SLURM_QUEUE``,
+``CSTAR_SLURM_MAX_WALLTIME``; see :doc:`hpc`). A step's ``compute_overrides``
+replaces any of them, under a key naming the launcher:
+
+.. code-block:: yaml
+
+    steps:
+    - name: make_inputs
+      application: forge
+      blueprint: forge_blueprint.yaml
+      compute_overrides:
+        slurm:
+          queue_name: day          # a general-purpose queue for data processing
+          max_walltime: "04:00:00"
+          num_cpus: 8
+    - name: simulate
+      application: roms_marbl
+      blueprint:
+        from_step: make_inputs
+      depends_on: [make_inputs]
+      compute_overrides:
+        slurm:
+          queue_name: mpi
+          account_name: my-allocation
+          num_cpus: 128
+
+The ``slurm`` keys are ``account_name``, ``queue_name``, ``max_walltime``
+(``HH:MM:SS``), ``num_cpus``, ``num_nodes``, ``cpus_per_node`` and
+``single_node``. Running on a laptop, the ``local`` launcher accepts
+``num_cpus``. ``num_cpus`` is also where a deferred-blueprint step declares
+its allocation, since C-Star cannot read the blueprint at submit time.
+
+Directives
+^^^^^^^^^^
+
+A step's ``directives`` run on the compute node just before the application
+starts, and modify the blueprint using information that only exists at run
+time -- such as a restart file written by an earlier step. See
+:doc:`workplans/directives` for the available directives and how to configure
+them.
 
 
 .. _workplan_examples:
@@ -90,7 +155,7 @@ Workplan Examples
    .. tab-item:: Single-step
 
     The following example demonstrates the minimum possible workplan.
-    
+
     It contains a single step to be executed.
 
     .. code:: yaml
@@ -114,8 +179,8 @@ Workplan Examples
     *job1* must complete successfully before *job2* will start.
 
     .. important::
-        A multi-step workplan without dependencies has no ordering guarantees. 
-        
+        A multi-step workplan without dependencies has no ordering guarantees.
+
         Jobs are scheduled immediately and executed as the system launcher permits.
 
     .. code:: yaml
@@ -139,12 +204,12 @@ Workplan Examples
 
    .. tab-item:: Overriding Blueprints
 
-    The following example demonstrates how to override configuration in a 
+    The following example demonstrates how to override configuration in a
     blueprint from the workplan. Overriding blueprints enables the same
     blueprint to be used with different inputs, data sources, etc.
 
     .. tip::
-        Blueprint overrides are supplied as a dictionary with 
+        Blueprint overrides are supplied as a dictionary with
         :ref:`Blueprint schema<blueprint_schema>`
 
     .. code:: yaml
@@ -256,7 +321,7 @@ Execution
 
 .. attention::
     An error will occur if the SLURM **account** and **queue** are not configured when running on a HPC.
-    
+
 
 .. tab-set::
 
@@ -340,3 +405,10 @@ layout before continuing from it or gathering it:
 
     cstar admin migrate-outputs <path-to-run-or-step-directory> --dry-run
     cstar admin migrate-outputs <path-to-run-or-step-directory>
+
+.. toctree::
+   :hidden:
+
+   workplans/directives
+
+   tutorials/tutorial_wp

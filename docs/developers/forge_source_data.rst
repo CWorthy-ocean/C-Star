@@ -1,177 +1,10 @@
-.. _forge-source-data:
+.. _forge-source-data-internals:
 
-Source data
-===========
-
-Overview
---------
-
-The ``cstar.applications.forge.source_datasets`` module manages the
-acquisition, preparation, and caching of model input datasets required for
-ROMS/MARBL domain generation and simulation.
-
-These datasets are documented in `ROMS Tools
-<https://roms-tools.readthedocs.io/en/latest/datasets.html>`__.
-
-``source_datasets.py`` provides a registry-driven system for handling diverse
-data sources, allowing for flexible workflows whether datasets are streamed
-or locally cached. The alias map, streamable-source list, and per-dataset
-provenance metadata it uses live in the lighter-weight sibling module
-``cstar.applications.forge.source_registry`` (see `Developer's guide`_
-below).
-
-.. important:: Register for dataset access
-
-   The ``source_datasets.py`` module provides automated downloading of data
-   assets used to force the model; however, some of these require
-   registration to permit access.
-
-   - GLORYS data is provided via the Copernicus Marine Service. Learn how to
-     register for access `here
-     <https://help.marine.copernicus.eu/en/articles/4220332-how-to-sign-up-for-copernicus-marine-service>`__.
-     That process should result in a ``.copernicusmarine`` or
-     ``.copernicusmarine-credentials`` file in your home directory.
-   - Access to the TPXO Global Tidal Model data requires registration,
-     available `here <https://www.tpxo.net/global>`__.
-
-Dataset preparation logic
---------------------------
-
-- **SRTM15**: Downloads topography from Scripps (version controlled, e.g.
-  ``SRTM15_V2.7``). Returns a single Path.
-- **GLORYS**: Global or regional ocean initial conditions; subset and
-  time-extract logic depends on whether the request is regional (grid-based,
-  dataset key ``GLORYS_REGIONAL``) or global (``GLORYS_GLOBAL``). Returns a
-  ``List[Path]`` (one file per day, with the window padded +/-1 day);
-  ``src.paths["GLORYS_REGIONAL"]`` is always a list after ``prepare_all()``.
-- **UNIFIED_BGC**: `Unified biogeochemistry forcing & initial conditions from
-  ROMS Tools
-  <https://roms-tools.readthedocs.io/en/latest/initial_conditions.html#Adding-Biogeochemical-(BGC)-Initial-Conditions>`__.
-  Downloaded from Google Drive; version controlled like SRTM15, so the staged
-  filename carries the version (``BGCdataset_v2_1.nc``) and a version bump
-  re-downloads rather than reusing the stale cached file. **Requires a
-  roms-tools newer than 4.0.1**: v2.1 files name their dimensions
-  ``longitude``/``latitude``/``depth``, which older roms-tools renames
-  unconditionally and chokes on, so the handler refuses to stage and says so.
-  Returns a single Path.
-- **MBL_CO2**: NOAA marine boundary-layer xCO2 surface reference data.
-  Downloaded once and cached; returns a single Path.
-- **WOA_BGC**: World Ocean Atlas 2023 nutrients and oxygen (``NO3``,
-  ``PO4``, ``SiO3``, ``O2``) as a gridded BGC source for initial and boundary
-  conditions, plus the matching monthly temperature and salinity that
-  roms-tools needs to convert umol/kg to mmol/m3 and to supply the source
-  density coordinate for ``density``/``density_mld`` interpolation.
-  Downloaded from NCEI: 78 files (12 monthly + 1 annual per variable, ~3 GB)
-  staged flat into ``source_data_dir / "WOA"``, the same directory as the
-  restoring **WOA** source. The two do not collide -- BGC files carry the
-  ``_01`` (1 degree) suffix and the restoring files ``_04`` (0.25 degree) --
-  and staging is resumable, skipping files already present. Returns the
-  **directory**, which is what roms-tools' ``WOABGCDataset`` expects as its
-  ``path``. Note that WOA has no DIC, alkalinity or iron, so a MARBL run must
-  pair this with GLODAP, ESPER or a constants source. Blueprints name it
-  ``WOA_BGC``; Forge renames it to ``WOA`` on the way to roms-tools (see
-  ``ROMS_TOOLS_SOURCE_NAME``).
-- **ERA5**: Atmospheric surface forcing (streamable, no local download
-  needed). Handler is an intentional no-op: it logs and returns ``None`` (so
-  ``paths["ERA5"]`` is ``None``).
-- **TPXO**, **WOA**, **GLOFAS**, **EMOD**, **RIVR2O**: User-provided datasets
-  (tidal harmonics, restoring salinity climatology, river discharge/BGC,
-  alternative topography). Note **WOA** here is the 0.25 degree
-  sea-surface-salinity restoring source, distinct from the auto-downloaded
-  **WOA_BGC** above. Forge cannot download these itself; each handler only
-  verifies that the expected files already exist under the dataset's cache
-  directory and raises ``FileNotFoundError`` with instructions if they don't.
-  TPXO's handler returns a dictionary with keys ``"grid"``, ``"h"``, and
-  ``"u"`` mapping to file paths, stored in ``src.paths["TPXO"]``.
-- **GLODAP**: The GLODAPv2.2016b mapped climatology (``ALK``, ``DIC``,
-  ``NO3``, ``PO4``, ``SiO3``, ``O2``), usable as an
-  ``InitialConditions``/``BoundaryForcing`` ``bgc_sources`` entry alongside
-  ``WOA_BGC`` or ``ESPER``. User-staged, like EMOD/RIVR2O: place one file per
-  variable,
-  ``GLODAPv2.2016b.{TAlk,TCO2,NO3,PO4,silicate,oxygen}.nc``, under
-  ``<source_data_dir>/GLODAP/``; the ``GLODAP`` handler in
-  ``source_datasets.py`` verifies them and hands roms-tools the directory.
-  ``GLODAPv2.2016b.temperature.nc``/``.salinity.nc`` are optional but
-  recommended: roms-tools uses them for the umol/kg to mmol/m3 conversion
-  (in-situ density) and warns and falls back to a uniform 1025 kg/m3 without
-  them. It is a static field with no time axis, so the wizard hides the
-  ``climatology`` checkbox for it, as for ``constants``/``ESPER``.
-- **ESPER** *(experimental)*: BGC fields (e.g. DIC/alkalinity) estimated
-  from the physics temperature/salinity at generation time via PyESPER,
-  rather than read from any staged dataset -- ``SourceSpec.esper_method``/
-  ``esper_equation`` configure the estimator. Needs the CWorthy fork of
-  PyESPER; either point ``SourceSpec.path`` at a checkout (containing
-  ``Mat_fullgrid/``/``NeuralNetworks/``) or have it pip-installed with
-  ``pip install -e`` into the environment so it locates its own data
-  directories. Like
-  ``constants``, it carries no time axis, so no ``climatology`` option. Large
-  domains may need a source's ``serialize_dask`` set (see ``BgcSourceItem``)
-  -- PyESPER's own numba kernels already use every core, so the ordinary
-  concurrent NetCDF write can exhaust memory.
-- **CONSTANTS** (blueprints spell it lowercase ``constants``), **DAI**:
-  Streamed/auto-downloaded by roms-tools itself at generation time -- Forge
-  never stages a local path for these -- ``CONSTANTS`` additionally has no
-  registry entry at all: the resolver never places it in a blueprint's
-  ``datasets`` list, and requesting it from ``SourceDatasets`` directly
-  raises ``ValueError``.
-- **ETOPO5**: The default topography source; like CONSTANTS/DAI, roms-tools
-  fetches it itself (at grid-build time), so Forge does not stage it either.
-
-Each preparation routine ensures datasets exist locally and are subsetted for
-the target domain/grid (handlers check existence, never freshness).
-
-Example
--------
-
-Normally you don't call ``SourceDatasets`` directly: ``cstar forge run
-<forge_blueprint.yaml>`` (or ``cstar blueprint run ...``) runs source-data
-preparation as one step of executing a ``ForgeBlueprint``, auto-detecting the
-host's shared download cache for you. The snippet below is the lower-level
-API that ``ForgeExecutor`` calls internally -- useful for pre-staging data
-outside of a full blueprint run.
-
-``SourceDatasets`` does not resolve its cache location from
-``cstar.applications.forge.config`` internally; the caller must inject it via
-``source_data_dir``. ``cstar.applications.forge.config.resolve_host()``
-builds the same ``HostPaths`` the forge application would use, whose
-``source_data_cache`` is the shared download cache root.
-
-.. code-block:: python
-
-   from datetime import datetime
-   from cstar.applications.forge.source_datasets import SourceDatasets
-   from cstar.applications.forge.config import resolve_host
-
-   host = resolve_host(working_dir="~/cstar/_forge_bp_runs/my_domain")
-
-   start_time = datetime(2012, 1, 1)
-   end_time = datetime(2012, 1, 2)
-
-   domain_grid = roms_tools.Grid(...)  # the domain's Grid (as built by the executor)
-
-   src = SourceDatasets(
-       datasets=["GLORYS", "SRTM15", "UNIFIED_BGC"],
-       clobber=True,
-       grid=domain_grid,
-       grid_name="my_domain",
-       start_time=start_time,
-       end_time=end_time,
-       source_data_dir=host.source_data_cache,
-   )
-
-   # Prepares and caches the datasets needed
-   src.prepare_all()
-   # Paths to prepared files are available as: src.paths[<DATASET_KEY>]
-   # Note: src.paths["GLORYS_REGIONAL"] is a List[Path] (one file per day, window padded +/-1 day)
-   # For streamable sources (e.g., ERA5), use: src.prepare_all(include_streamable=True)
-   # (ERA5 still stages no file; paths["ERA5"] is None)
-   # You can also use: src.path_for_source("GLORYS") to get the path using the logical name
-
-Developer's guide
-------------------
+Forge internals: source datasets
+====================================
 
 Module design philosophy
-~~~~~~~~~~~~~~~~~~~~~~~~~~
+--------------------------
 
 The ``cstar.applications.forge.source_datasets`` module provides a
 **registry-based framework** for managing heterogeneous source datasets used
@@ -211,7 +44,7 @@ The module is split across two files:
   ``cstar.applications.forge.source_registry`` directly.
 
 Core architecture
-~~~~~~~~~~~~~~~~~~
+------------------
 
 The module consists of three main components:
 
@@ -243,10 +76,10 @@ The module consists of three main components:
    Handler execution -> Path(s) to prepared data
 
 Core objects
-~~~~~~~~~~~~~
+-------------
 
 ``SourceDatasets`` (dataclass)
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 The main interface for preparing and accessing source datasets.
 
@@ -314,7 +147,7 @@ Lifecycle:
    directly.
 
 ``DatasetHandler`` (class)
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 Container for a dataset preparation function and its dependency
 requirements.
@@ -333,10 +166,10 @@ Purpose:
 - Stored in ``DATASET_REGISTRY`` keyed by dataset name.
 
 Registry framework
-~~~~~~~~~~~~~~~~~~~~
+--------------------
 
 Registration decorator
-^^^^^^^^^^^^^^^^^^^^^^^^
+~~~~~~~~~~~~~~~~~~~~~~~~
 
 The ``@register_dataset`` decorator registers dataset preparation functions:
 
@@ -373,7 +206,7 @@ Example:
        return paths
 
 Registry dictionary
-^^^^^^^^^^^^^^^^^^^^^
+~~~~~~~~~~~~~~~~~~~~~
 
 ``DATASET_REGISTRY: Dict[str, DatasetHandler]`` (defined in
 ``source_datasets.py``, alongside the handlers it registers) maps dataset
@@ -384,7 +217,7 @@ keys to their handlers.
 - Populated at module import time via decorators.
 
 Handler function signature
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 Handler functions must:
 
@@ -399,10 +232,10 @@ Handler functions must:
 - Store result in ``self.paths[dataset_key]`` (convention, not required).
 
 Source name mapping
-~~~~~~~~~~~~~~~~~~~~~
+---------------------
 
 Logical names vs. dataset keys
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 Users specify **logical source names** in a **ForcingSpec**
 (``catalog/ForcingSpec/<name>/Forcing.yaml``); the topography source is
@@ -415,7 +248,7 @@ Domain-level (``model.yaml`` no longer carries source selection):
   staged filename ``SRTM15_V2.7.nc``)
 
 ``SOURCE_ALIAS`` dictionary
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 Defined in ``cstar/applications/forge/source_registry.py`` (re-exported from
 ``source_datasets.py``). Maps logical names to dataset registry keys:
@@ -462,7 +295,7 @@ Normalization:
   ``ValueError``).
 
 Streamable and unstaged sources
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 Some datasets don't require local caching (e.g., ERA5, DAI, CONSTANTS).
 Listed in ``STREAMABLE_SOURCES`` (``source_registry.py``):
@@ -488,10 +321,10 @@ raises. ``prepare_all()`` always skips them, even with
 ``include_streamable=True``.
 
 Adding a new dataset
-~~~~~~~~~~~~~~~~~~~~~~
+----------------------
 
 Step 1: Implement handler function
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 .. code-block:: python
 
@@ -519,7 +352,7 @@ Step 1: Implement handler function
        return path
 
 Step 2: Add source alias (if needed)
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 If users should reference it by a logical name, add the entry to
 ``SOURCE_ALIAS`` in ``cstar/applications/forge/source_registry.py``:
@@ -529,7 +362,7 @@ If users should reference it by a logical name, add the entry to
    "MY_SOURCE": "MY_DATASET",
 
 Step 3: Add to streamable sources (if applicable)
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 If the dataset doesn't need local caching, add it to ``STREAMABLE_SOURCES``
 in ``cstar/applications/forge/source_registry.py``:
@@ -539,7 +372,7 @@ in ``cstar/applications/forge/source_registry.py``:
    "MY_DATASET",
 
 Step 4: Add a ``DATASET_METADATA`` entry
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 Add a provenance entry to ``DATASET_METADATA`` in
 ``cstar/applications/forge/source_registry.py`` (``{"dataset_id": ...}`` or
@@ -547,10 +380,10 @@ Add a provenance entry to ``DATASET_METADATA`` in
 snapshotted into ``ForgeBlueprint.forcing.resolved_datasets``.
 
 Design patterns
-~~~~~~~~~~~~~~~~~
+-----------------
 
 Dependency injection
-^^^^^^^^^^^^^^^^^^^^^^
+~~~~~~~~~~~~~~~~~~~~~~
 
 Required attributes are injected into ``SourceDatasets`` and accessed by
 handlers via ``self``. This enables:
@@ -560,7 +393,7 @@ handlers via ``self``. This enables:
 - Runtime validation before handler execution.
 
 Caching strategy
-^^^^^^^^^^^^^^^^^^
+~~~~~~~~~~~~~~~~~~
 
 - Files are cached in ``self.source_data_dir / {dataset_name} /``, where
   ``source_data_dir`` is injected by the caller (e.g. ``ForgeExecutor``,
@@ -572,7 +405,7 @@ Caching strategy
 - Clobber mode: Remove existing file before download.
 
 Return value flexibility
-^^^^^^^^^^^^^^^^^^^^^^^^^^
+~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 Handlers can return:
 

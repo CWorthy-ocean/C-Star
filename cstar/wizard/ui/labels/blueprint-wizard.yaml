@@ -28,7 +28,7 @@ sections:
     required: true
   advanced:
     title: Advanced settings
-    desc: Fine-tune individual ROMS-MARBL namelist settings beyond what the other cards expose.
+    desc: Fine-tune individual ROMS-MARBL namelist settings beyond what the other sections expose.
     required: false
   review:
     title: Review and export
