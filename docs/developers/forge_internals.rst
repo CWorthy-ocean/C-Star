@@ -360,10 +360,10 @@ suite.
    hash.** Rendering reads ``template_dir/<file>`` directly, so it relies on
    C-Star staging filtered files flat; the per-file hash check catches a
    wrong layout as a mismatch, but no network test stages from the real remote.
-2. **Bundled ModelSpecs still pin the archived ``cstar-forge`` repository**
-   (``DEFAULT_TEMPLATE_REPO``). Six pin an older ``cppdefs.opt.j2`` than the
-   bundled copy and therefore fetch that stage; re-pinning to a C-Star tag
-   (and refreshing ``file_hashes``) is a release-time step.
+2. **Re-pinning templates is a release step.** Bundled ModelSpecs pin
+   ``templates_commit`` to a C-Star release commit and author ``file_hashes``
+   for it; after a template change, the pins and hashes must be refreshed to
+   the commit that ships them or the fast path stops firing.
 3. **No real-generated-data integration test** (actual GLORYS/ERA5/TPXO
    network fetch with no roms-tools mocking) -- the golden tests below mock
    roms-tools construction classes.
