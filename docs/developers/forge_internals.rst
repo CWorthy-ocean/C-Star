@@ -6,7 +6,7 @@ Forge internals
 The primary architecture reference for Forge, describing the current state
 of the code inside C-Star.
 
-1. The big picture
+The big picture
 ----------------------
 
 Forge is split into two layers along a hard boundary:
@@ -36,7 +36,7 @@ blueprint" means producing that downstream artifact, not forge's own input.
                                                         input NetCDFs, namelist.nml,
                                                         cppdefs.opt, roms_marbl blueprint
 
-2. Directory map
+Directory map
 --------------------
 
 .. code-block:: text
@@ -60,6 +60,8 @@ blueprint" means producing that downstream artifact, not forge's own input.
     |   |   +-- util.py                    # Shared helpers, memory/timing instrumentation
     |   |   +-- xarray_lockfix.py          # xarray/dask locking workaround
     |   |   +-- _yaml_representers.py      # PyYAML Enum representer registration (import side effect)
+    |   |   +-- templates.py               # bundled_template_dir(): ModelSpec templates/<stage> -> the
+    |   |   |                              # bundled copy, plus hashing it (see forge_templates)
     |   |   +-- resolve.py                 # resolver: build_forge_blueprint(...) (authoring, not execution)
     |   |   +-- config.py                  # Host/path resolution, system detection (host glue, not execution)
     |   |   +-- models.py                  # Spec classes (ModelSpec, etc.) (authoring, not execution)
@@ -90,20 +92,22 @@ blueprint" means producing that downstream artifact, not forge's own input.
     |   +-- forge/                     # 'cstar forge run'/'wizard'/'copy-notebook'/'show-paths' typer sub-app
     |   +-- environment/register_kernel.py  # 'cstar env register-kernel'
     +-- additional_files/templates/forge/  # Bundled render templates (compile-time/run-time);
-                                            # see the templates note in section 3 below.
+                                            # see forge_templates.rst.
 
-Note ``glorys_subchunk.py`` is live (called from ``input_data.py``) and, unlike
-before this code moved into C-Star, is now automatically covered by the
-boundary guard described in section 4 -- the guard discovers the module list
-from the package directory rather than maintaining a manual allowlist.
+``glorys_subchunk.py`` is called from ``input_data.py`` and is covered by the
+boundary guard test (below) like any other execution module: the guard's
+module list is every ``.py`` file in ``cstar/applications/forge`` minus a
+small, fixed exclusion set for the authoring/host modules (``resolve``,
+``models``, ``config``, ``runtime``, ``app``, ``__init__``), so a new
+execution module is picked up without editing that set.
 
-3. ``ForgeBlueprint`` -- the forge blueprint
+``ForgeBlueprint`` -- the forge blueprint
 ------------------------------------------------
 
 Defined in ``cstar/applications/forge/blueprint.py``, which subclasses
 ``cstar.orchestration.models.Blueprint`` -- this is what makes forge a real
-C-Star application (see section 3a), not just a Pydantic model that happens
-to carry an ``application`` string.
+C-Star application (see `Forge as a real C-Star application`_ below), not
+just a Pydantic model that happens to carry an ``application`` string.
 
 Top-level shape: ``forge_blueprint_version`` (int, bump only on breaking
 change; currently 8) - ``application`` (=``"forge"``, C-Star app
@@ -153,30 +157,28 @@ filenames off it.
 - **``content_hash()``** -- sha256 over everything *except*
   ``forge_blueprint_version``, ``name``, ``description``, ``composition``,
   ``provenance``, ``working_dir``, ``state``, ``schema_version``,
-  ``$schema`` (see ``_HASH_EXCLUDE``), plus each code repo's ``location``
-  field (the fetch address; only ``commit``/``branch``/``directory``/
-  ``files`` are results-affecting). Stamped on ``to_yaml``;
-  ``verify_content_hash`` warns (doesn't block) on a mismatched hand-edit at
-  load.
+  ``$schema`` (see ``_HASH_EXCLUDE``); each code repo's ``location`` (fetch
+  address) and ``file_hashes`` (a derived cache, not independent content);
+  each user-provided file's ``location`` (host path, not its pinned
+  ``content_hash``); and, on ``initial_conditions``/``boundary``, the
+  execution-environment knobs ``bypass_validation`` and each bgc source's
+  ``serialize_dask`` -- none of these change what the run produces, only how
+  or where it's produced. Stamped on ``to_yaml``; ``verify_content_hash``
+  warns (doesn't block) on a mismatched hand-edit at load.
 
 Render templates: ``code.templates_compile_time``/``_run_time`` pin a git
-commit (``code.templates_commit``, see :doc:`forge_templates`) and, per file, the
-sha256 of its content at that commit (``file_hashes``, authored in the bundled
-ModelSpecs). At ``configure_build`` the executor stages the copy bundled at
-``cstar/additional_files/templates/forge/<stage>`` when every listed file
-matches those hashes, and otherwise fetches the pinned commit through
-C-Star's ``AdditionalCode`` and verifies the fetched files against them
-(a mismatch is an error). Blueprints without ``file_hashes`` fetch as they
-always did. ``cstar/applications/forge/templates.py`` owns the mapping from a
-ModelSpec's ``templates/<stage>`` directory onto the bundled copy.
+commit (``code.templates_commit``) and, per file, the sha256 of its content
+at that commit (``file_hashes``, authored in the bundled ModelSpecs). See
+:doc:`forge_templates` for the pinning format and the fast-path-vs-fetch
+staging logic at ``configure_build``.
 
-3a. Forge as a real C-Star application
+Forge as a real C-Star application
 -------------------------------------------
 
-``cstar/applications/forge/app.py`` (NOT part of the ``forge`` application
-boundary guarded by section 4 / ``test_forge_app_boundary.py`` -- like
-``runtime.py``, it's disposable host-resolution glue) defines the pieces
-the :doc:`custom-applications contract <../custom_applications>` requires:
+``cstar/applications/forge/app.py`` (excluded from the ``test_forge_app_boundary.py``
+guard described below -- like ``runtime.py``, it's disposable host-resolution glue)
+defines the pieces the :doc:`custom-applications contract <../custom_applications>`
+requires:
 
 - ``ForgeRunner(BlueprintRunner[ForgeBlueprint])`` -- ``run()`` delegates to
   ``cstar.applications.forge.runtime.process`` (host resolution) ->
@@ -189,9 +191,9 @@ the :doc:`custom-applications contract <../custom_applications>` requires:
   ``ApplicationDefinition`` wiring ``ForgeBlueprint`` + ``ForgeRunner``
   together under ``name = "forge"``.
 
-Unlike a standalone out-of-tree application, Forge is now discovered by
-``cstar.applications.core.get_application`` as a **built-in** application,
-the same way ``roms_marbl`` is: ``get_application`` imports the in-tree
+Forge is discovered by ``cstar.applications.core.get_application`` as a
+**built-in** application, the same way ``roms_marbl`` is: ``get_application``
+imports the in-tree
 ``cstar.applications.forge`` package, whose ``__init__.py`` imports
 ``app.py`` so its ``@register_application`` decorator runs. No entry point
 or environment variable is involved -- an installed ``cstar-ocean`` is the
@@ -207,7 +209,7 @@ Two ways to run a forge blueprint:
    this for per-run options ``cstar blueprint run`` doesn't expose (stage
    selection, ``--clobber``, dask tuning, ``--only-inputs``, verbosity).
 
-4. The call chain end to end
+The call chain end to end
 ---------------------------------
 
 **Authoring (catalog -> resolver/wizard -> blueprint):**
@@ -271,13 +273,18 @@ Two ways to run a forge blueprint:
 ``cstar.catalog``/``cstar.applications.forge.resolve``/``cstar.wizard`` --
 verified both by grep and by a dedicated boundary-guard test
 (``cstar/tests/unit_tests/applications/forge/test_forge_app_boundary.py``,
-an AST-based guard whose known-violations allowlist is currently empty).
-``namelist_model.py`` and ``util.py`` are same-package siblings inside
-``cstar.applications.forge`` and are covered by the guard's module list
-(auto-discovered from the package directory, so a new module is guarded
-automatically rather than needing to be added to a manual allowlist).
+an AST-based check). The guard walks every ``.py`` file in
+``cstar/applications/forge`` except a small, fixed exclusion set for the
+authoring/host modules themselves (``resolve``, ``models``, ``config``,
+``runtime``, ``app``, ``__init__``) and asserts none of the rest imports
+``cstar.catalog``, ``cstar.applications.forge.resolve``,
+``cstar.applications.forge.config``, ``cstar.applications.forge.runtime``, or
+``cstar.wizard``. Its known-violations allowlist (for pre-existing breaks
+still being worked off) is currently empty. ``namelist_model.py`` and
+``util.py`` are same-package siblings inside ``cstar.applications.forge`` and
+are covered by this module list like any other execution module.
 
-4a. Versioned namelist schemas (ucla-roms 0.5.0+)
+Versioned namelist schemas (ucla-roms 0.5.0+)
 -------------------------------------------------------
 
 ucla-roms 0.5.0 made its first breaking namelist change (``nrpf_rst``
@@ -335,7 +342,7 @@ at authoring time instead: ``check_extract_divides_rst``
 (``namelist_model.py``), called from the resolver and gated to >= 0.5.0
 pins.
 
-5. ``models.py`` vs ``blueprint.py``
+``models.py`` vs ``blueprint.py``
 ------------------------------------------
 
 The forcing/IC item models (``BoundaryForcing``, ``SurfaceForcingItem``,
@@ -353,22 +360,21 @@ What guards drift today: a roms-tools option coverage test and a
 resolver/executor settings-parity assertion in the forge blueprint test
 suite.
 
-6. Known gaps / open items
+Known gaps / open items
 -------------------------------
 
 1. **The flat-staging contract with ``AdditionalCode`` is verified only by
    hash.** Rendering reads ``template_dir/<file>`` directly, so it relies on
-   C-Star staging filtered files flat; the per-file hash check catches a
-   wrong layout as a mismatch, but no network test stages from the real remote.
-2. **Re-pinning templates is a release step.** Bundled ModelSpecs pin
-   ``templates_commit`` to a C-Star release commit and author ``file_hashes``
-   for it; after a template change, the pins and hashes must be refreshed to
-   the commit that ships them or the fast path stops firing.
-3. **No real-generated-data integration test** (actual GLORYS/ERA5/TPXO
+   C-Star staging fetched files flat; the per-file hash check catches a wrong
+   layout as a mismatch, but every staging test patches ``AdditionalCode`` --
+   no test stages from the real remote. (This path only runs for a blueprint
+   whose pinned commit doesn't match the bundled templates; see
+   :doc:`forge_templates`.)
+2. **No real-generated-data integration test** (actual GLORYS/ERA5/TPXO
    network fetch with no roms-tools mocking) -- the golden tests below mock
    roms-tools construction classes.
 
-7. Golden fixtures
+Golden fixtures
 -----------------------
 
 Two committed goldens pin the resolved-settings and namelist contracts
