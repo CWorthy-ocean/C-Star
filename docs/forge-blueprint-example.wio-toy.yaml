@@ -549,19 +549,19 @@ code:
     branch: null
   pio: null
   templates_compile_time:
-    location: https://github.com/CWorthy-ocean/cstar-forge.git
-    commit: 692e04cebf1735951b377fcf44b1bde59a06bbc9
+    location: https://github.com/CWorthy-ocean/C-Star.git
+    commit: 6a0a4ee55b944db316e33f58ba7aa2403e880b92
     branch: null
-    directory: templates/compile-time
+    directory: cstar/additional_files/templates/forge/compile-time
     files:
     - cppdefs.opt.j2
     file_hashes:
-      cppdefs.opt.j2: b0b9c1ff951b5f7564d674c2f02269102049a17c371d8c58dffac5e4f48974a4
+      cppdefs.opt.j2: 2942d94da83cdcad7a324f50eb4fe8728fdf7df51e522abd276f40d92ff0be73
   templates_run_time:
-    location: https://github.com/CWorthy-ocean/cstar-forge.git
-    commit: 692e04cebf1735951b377fcf44b1bde59a06bbc9
+    location: https://github.com/CWorthy-ocean/C-Star.git
+    commit: 6a0a4ee55b944db316e33f58ba7aa2403e880b92
     branch: null
-    directory: templates/run-time
+    directory: cstar/additional_files/templates/forge/run-time
     files:
     - marbl_in
     file_hashes:
@@ -594,5 +594,5 @@ provenance:
   cstar_version: cstar-ocean==0.12.0
   roms_tools_version: roms-tools==4.1.1.dev2+g1a564489a
   override_files_applied: []
-  content_hash: 3b085d484ccf5e88aa4a8c58fd9cb807cbfc10ce2671898a3be4a81622cc43a3
+  content_hash: 82e577f09cf8e0be369f0eeeccd4c4a64d56b7d718f11ba92a1f556efbe484d7
   notes: null

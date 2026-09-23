@@ -89,19 +89,16 @@ from cstar.applications.forge.source_registry import (
 if TYPE_CHECKING:
     from datetime import datetime
 
-# Default repo serving the render templates: the standalone cstar-forge GitHub repo
-# (at its repo root `templates/`, decoupled from the ModelSpec). ``_build_code``
-# separately copies each ModelSpec's own authored `file_hashes` (of its
-# `templates_commit` pin's files -- see `ModelTemplates.file_hashes`'s docstring)
-# into `TemplateRepo.file_hashes`, which lets the executor's fast path use the
-# bundled copy at `cstar/additional_files/templates/forge/` in place of this git
-# fetch WHEN that bundled copy matches those hashes -- but this default (and each
-# bundled ModelSpec's `templates_commit:` pin) intentionally still points at the
-# standalone repo/commit, not a C-Star tag. Re-pinning to a C-Star release tag
-# happens at release time, not here. A ModelSpec pins the serving commit via
-# `templates_commit:`; until pinned we track branch `main`.
+# Default repo serving the render templates: this repository, whose bundled copy
+# lives at `cstar/additional_files/templates/forge/`. Every bundled ModelSpec pins
+# `templates_commit:` to a C-Star release commit and authors `file_hashes` of the
+# files at that commit (see `ModelTemplates.file_hashes`); ``_build_code`` copies
+# those hashes into `TemplateRepo.file_hashes`, and the executor stages from the
+# bundled copy when it matches them, fetching `location`@`templates_commit` only
+# when it does not (an older or newer C-Star build than the pin). Until a
+# ModelSpec pins a commit, we track branch `main`.
 DEFAULT_TEMPLATE_REPO = CodeRepo(
-    location="https://github.com/CWorthy-ocean/cstar-forge.git", branch="main"
+    location="https://github.com/CWorthy-ocean/C-Star.git", branch="main"
 )
 
 

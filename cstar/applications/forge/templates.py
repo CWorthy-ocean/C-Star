@@ -22,17 +22,27 @@ _BUNDLED_TEMPLATES_ROOT = (
 )
 
 
+BUNDLED_TEMPLATES_DIRECTORY = "cstar/additional_files/templates/forge"
+"""Repo-relative ``directory`` prefix the bundled ModelSpecs pin (a stage is
+``<prefix>/compile-time`` or ``<prefix>/run-time``)."""
+
+_LEGACY_PREFIX = ("templates",)
+"""Directory prefix used by blueprints and ModelSpecs written against the
+standalone cstar-forge repository, where the templates lived at ``templates/``."""
+
+
 def bundled_template_dir(directory: str | None) -> Path | None:
     """Map a template stage's ``directory`` onto its bundled copy.
 
     Parameters
     ----------
     directory : str | None
-        A ``code.templates_*.directory`` value (e.g. ``templates/compile-time``).
-        The leading ``templates`` path segment -- an artifact of the standalone
-        cstar-forge repo layout that ``directory`` is still written relative to
-        -- is stripped so the remainder (e.g. ``compile-time``) resolves under
-        the bundled root instead.
+        A ``code.templates_*.directory`` value, written relative to the root of
+        the repository that serves the templates: either the current form,
+        ``cstar/additional_files/templates/forge/<stage>``, or the legacy form
+        from the standalone cstar-forge repository, ``templates/<stage>``. The
+        repository prefix is stripped and the stage resolves under the bundled
+        root.
 
     Returns
     -------
@@ -46,8 +56,11 @@ def bundled_template_dir(directory: str | None) -> Path | None:
     if not directory:
         return None
     parts = Path(directory).parts
-    if parts and parts[0] == "templates":
-        parts = parts[1:]
+    bundled_prefix = Path(BUNDLED_TEMPLATES_DIRECTORY).parts
+    if parts[: len(bundled_prefix)] == bundled_prefix:
+        parts = parts[len(bundled_prefix) :]
+    elif parts[: len(_LEGACY_PREFIX)] == _LEGACY_PREFIX:
+        parts = parts[len(_LEGACY_PREFIX) :]
     template_dir = _BUNDLED_TEMPLATES_ROOT.joinpath(*parts)
     return template_dir if template_dir.exists() else None
 
