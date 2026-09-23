@@ -227,7 +227,10 @@ class TestAttach:
         monkeypatch.delenv(fakeexternalcodebase.root_env_var, raising=False)
 
         fakeexternalcodebase._configured = True
-        fakeexternalcodebase.attach(repo_dir)
+        with mock.patch(
+            "cstar.base.external_codebase._local_repo_mismatch", return_value=""
+        ):
+            fakeexternalcodebase.attach(repo_dir)
 
         assert fakeexternalcodebase.working_copy.path == repo_dir
         assert os.environ[fakeexternalcodebase.root_env_var] == str(repo_dir)
@@ -246,7 +249,7 @@ class TestAttach:
         self, fakeexternalcodebase, tmp_path, monkeypatch
     ):
         """Confirms `attach` raises CstarExpectationFailed and never calls `_configure`
-        when the checkout is not configured.
+        when the checkout's build artifacts are missing.
         """
         repo_dir = tmp_path / "repo"
         repo_dir.mkdir()
@@ -254,10 +257,68 @@ class TestAttach:
         monkeypatch.delenv(fakeexternalcodebase.root_env_var, raising=False)
 
         fakeexternalcodebase._configured = False
-        with mock.patch.object(fakeexternalcodebase, "_configure") as mock_configure:
-            with pytest.raises(CstarExpectationFailed, match="has not been configured"):
+        with (
+            mock.patch(
+                "cstar.base.external_codebase._local_repo_mismatch", return_value=""
+            ),
+            mock.patch.object(fakeexternalcodebase, "_configure") as mock_configure,
+        ):
+            with pytest.raises(
+                CstarExpectationFailed, match="build artifacts are missing"
+            ):
                 fakeexternalcodebase.attach(repo_dir)
         mock_configure.assert_not_called()
         # `working_copy` and the env var are still set: only configuration failed
         assert fakeexternalcodebase.working_copy.path == repo_dir
         assert os.environ[fakeexternalcodebase.root_env_var] == str(repo_dir)
+
+    def test_attach_reports_checkout_mismatch_before_build_check(
+        self, fakeexternalcodebase, tmp_path, monkeypatch
+    ):
+        """Confirms `attach` reports a checkout-target mismatch, and does not even
+        check for build artifacts, when the clone does not match the source's
+        checkout target.
+        """
+        repo_dir = tmp_path / "repo"
+        repo_dir.mkdir()
+        _init_git_repo(repo_dir)
+        monkeypatch.delenv(fakeexternalcodebase.root_env_var, raising=False)
+
+        mismatch = "HEAD is at abc but 'x' resolves to def"
+        with (
+            mock.patch(
+                "cstar.base.external_codebase._local_repo_mismatch",
+                return_value=mismatch,
+            ),
+            mock.patch.object(fakeexternalcodebase, "_is_built_at") as mock_is_built_at,
+        ):
+            with pytest.raises(
+                CstarExpectationFailed,
+                match=f"cannot be adopted: {mismatch}",
+            ):
+                fakeexternalcodebase.attach(repo_dir)
+        mock_is_built_at.assert_not_called()
+
+    def test_attach_is_offline_and_names_missing_target(
+        self, fakeexternalcodebase, tmp_path, monkeypatch
+    ):
+        """Confirms `attach` resolves the checkout target in the local clone only,
+        never contacting the remote, and names the missing target in the error.
+        """
+        repo_dir = tmp_path / "repo"
+        repo_dir.mkdir()
+        _init_git_repo(repo_dir)
+        monkeypatch.delenv(fakeexternalcodebase.root_env_var, raising=False)
+
+        fakeexternalcodebase._configured = True
+        mock_get_hash = mock.Mock(
+            side_effect=AssertionError("attach must not contact the remote")
+        )
+        with mock.patch(
+            "cstar.base.gitutils._get_hash_from_checkout_target", mock_get_hash
+        ):
+            with pytest.raises(
+                CstarExpectationFailed, match="not present in the clone"
+            ):
+                fakeexternalcodebase.attach(repo_dir)
+        mock_get_hash.assert_not_called()

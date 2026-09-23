@@ -2,7 +2,10 @@ from abc import ABC, abstractmethod
 from pathlib import Path
 
 from cstar.base.exceptions import CstarExpectationFailed
-from cstar.base.gitutils import _check_local_repo_changed_from_remote
+from cstar.base.gitutils import (
+    _check_local_repo_changed_from_remote,
+    _local_repo_mismatch,
+)
 from cstar.base.log import LoggingMixin
 from cstar.io.source_data import SourceData
 from cstar.io.staged_data import StagedRepository
@@ -177,10 +180,12 @@ class ExternalCodeBase(ABC, LoggingMixin):
         """Adopt an existing, already-configured checkout of this ExternalCodeBase.
 
         Counterpart of `setup()`: instead of cloning and compiling the codebase,
-        this verifies that a git checkout already exists at `target_dir` and that
-        it is correctly configured (e.g. by a previous, interrupted run), and sets
-        `working_copy` and the process environment accordingly. This method never
-        compiles anything.
+        this verifies that a git checkout already exists at `target_dir`, that it
+        is a clean checkout of the source's checkout target and holds this
+        codebase's build artifacts (e.g. from a previous, interrupted run), and
+        sets `working_copy` and the process environment accordingly. The target
+        is resolved in the clone itself, without contacting the remote. This
+        method never compiles anything.
 
         Parameters
         ----------
@@ -192,7 +197,8 @@ class ExternalCodeBase(ABC, LoggingMixin):
         FileNotFoundError
             If `target_dir` does not contain a git checkout.
         CstarExpectationFailed
-            If the checkout at `target_dir` has not been configured for use.
+            If the checkout at `target_dir` cannot be adopted; the message names
+            the check that failed.
         """
         if not (target_dir / ".git").is_dir():
             raise FileNotFoundError(
@@ -202,11 +208,25 @@ class ExternalCodeBase(ABC, LoggingMixin):
         self._working_copy = StagedRepository(self.source, target_dir)
         self._export_env()
 
-        if not self._is_configured_at(target_dir):
+        if problem := self._attach_problem(target_dir):
             raise CstarExpectationFailed(
-                f"{self.__class__.__name__} at {target_dir} has not been configured "
-                "(e.g. compiled) for use. Call setup() instead of attach()."
+                f"{self.__class__.__name__} at {target_dir} cannot be adopted: "
+                f"{problem}. Call setup() instead of attach()."
             )
+
+    def _attach_problem(self, root: Path) -> str:
+        """Return why the checkout at `root` cannot be adopted, or an empty string.
+
+        Attach-time counterpart of `_is_configured_at`: the checkout target is
+        resolved in the local clone rather than on the remote, since `attach()`
+        adopts what a previous run built instead of checking for drift.
+        """
+        assert self.source.checkout_target is not None  # cannot be for ExternalCodeBase
+        if mismatch := _local_repo_mismatch(root, self.source.checkout_target):
+            return mismatch
+        if not self._is_built_at(root):
+            return "build artifacts are missing"
+        return ""
 
     @property
     def is_configured(self) -> bool:
