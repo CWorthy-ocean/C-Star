@@ -9,12 +9,15 @@ Unreleased
 Breaking Changes
 ~~~~~~~~~~~~~~~~
 
-- N/A
+
+- ``--resume`` can no longer be combined with ``--var`` or ``--varfile``; a resumed run always continues with the variables it was started with. (`#702 <https://github.com/CWorthy-ocean/C-Star/pull/702>`_)
 
 New features
 ~~~~~~~~~~~~
 
-- N/A
+
+- ``cstar workplan run my_workplan.yaml --resume`` resumes the run that workplan started, deriving the run-id from the workplan name; ``--run-id <id> my_workplan.yaml --resume`` uses the explicit id. (`#702 <https://github.com/CWorthy-ocean/C-Star/pull/702>`_)
+- A workplan path given with ``--resume`` is checked against the run's recorded original workplan; a changed, missing or unreadable record is reported as a usage error naming ``--run-id <id>`` as the way to resume the run as recorded. (`#702 <https://github.com/CWorthy-ocean/C-Star/pull/702>`_)
 
 Bug Fixes
 ~~~~~~~~~
@@ -24,7 +27,8 @@ Bug Fixes
 Improvements
 ~~~~~~~~~~~~
 
-- N/A
+
+- The run-directory backup of the original workplan now has a single owner shared by the run preparation and the resume check. (`#702 <https://github.com/CWorthy-ocean/C-Star/pull/702>`_)
 
 Miscellaneous
 ~~~~~~~~~~~~~
@@ -43,4 +47,6 @@ Miscellaneous
 
   - For Developers: ``developers/forge_internals``, ``developers/forge_input_data``, ``developers/forge_source_data``, ``developers/catalog_design`` (moved or extracted from the Forge pages) and a new ``developers/forge_templates`` (rendering, commit/hash pinning, bundled-vs-fetch staging); ``custom_applications`` points at the internals page as its worked example.
   - Banners: the Sphinx prolog "early phase of development" attention block and the README warning are removed, along with the "in development" snippet; the workplan state and compute-environment sections describe the current behaviour factually instead.
+
+- Workplan guide and ``--resume`` help text describe resuming by workplan path and the ``--var``/``--varfile`` restriction. (`#702 <https://github.com/CWorthy-ocean/C-Star/pull/702>`_)
 
