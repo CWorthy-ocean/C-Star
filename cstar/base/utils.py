@@ -481,3 +481,24 @@ def min_padded_indices(n: int) -> Generator[str]:
     pad_size = len(str(n - 1))
     for i in range(n):
         yield str(i).zfill(pad_size)
+
+
+def convert_to_cdf5(nc4_path: Path, final_path: Path) -> None:
+    """Convert a NETCDF4 file to CDF-5 (``NETCDF3_64BIT_DATA``, as required by
+    ParallelIO-enabled ROMS builds) via ``nccopy -k cdf5``, then delete the source.
+
+    Raises on a non-zero ``nccopy`` exit; the source file is left in place (and the
+    final name unclaimed) so a re-run regenerates cleanly.
+
+    Parameters
+    ----------
+    nc4_path : Path
+        The NETCDF4 source file.
+    final_path : Path
+        The destination for the CDF-5 file.
+    """
+    subprocess.run(
+        ["nccopy", "-k", "cdf5", str(nc4_path), str(final_path)],
+        check=True,
+    )
+    nc4_path.unlink()
