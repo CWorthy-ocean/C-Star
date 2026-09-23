@@ -1,11 +1,14 @@
 import logging
 import subprocess
 from collections.abc import Generator
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 from unittest import mock
 
+import numpy as np
 import pytest
+import xarray as xr
 
 from cstar.applications.core import RunnerRequest
 from cstar.applications.nest_ic import NestIcBlueprint, NestIcRunner
@@ -128,6 +131,48 @@ class TestConvertToCdf5:
         assert not final_path.exists()
 
 
+class TestModelReferenceDate:
+    """Tests for `NestIcRunner._model_reference_date`."""
+
+    @staticmethod
+    def _write_rst(path: Path, attrs: dict[str, str] | None) -> Path:
+        """Write a minimal restart-like file; `attrs=None` omits `ocean_time`."""
+        ds = xr.Dataset({"temp": ("time", np.zeros(1))})
+        if attrs is not None:
+            ds["ocean_time"] = ("time", np.zeros(1), attrs)
+        ds.to_netcdf(path)
+        return path
+
+    def test_parses_roms_long_name(self, tmp_path: Path) -> None:
+        """A non-default reference date is read from ROMS' `ocean_time` long_name."""
+        path = self._write_rst(
+            tmp_path / "rst.nc",
+            {"long_name": "Time since 1990/03/15", "units": "second"},
+        )
+
+        assert NestIcRunner._model_reference_date(path) == datetime(1990, 3, 15)
+
+    @pytest.mark.parametrize(
+        "attrs",
+        [
+            pytest.param(None, id="no-ocean-time"),
+            pytest.param({"units": "second"}, id="no-long-name"),
+            pytest.param({"long_name": "Time"}, id="unparseable-long-name"),
+            pytest.param({"long_name": "Time since 0000/00/00"}, id="invalid-date"),
+        ],
+    )
+    def test_missing_or_invalid_metadata_raises(
+        self, tmp_path: Path, attrs: dict[str, str] | None
+    ) -> None:
+        """Without a valid reference date roms-tools cannot read the ROMS source
+        either, so fail early with a message naming the file.
+        """
+        path = self._write_rst(tmp_path / "rst.nc", attrs)
+
+        with pytest.raises(ValueError, match="model reference date"):
+            NestIcRunner._model_reference_date(path)
+
+
 class TestCreateInitialConditionsRouting:
     """Tests for the PIO-conditional save/convert routing in
     `NestIcRunner._create_initial_conditions`.
@@ -163,6 +208,14 @@ class TestCreateInitialConditionsRouting:
     def _mock_has_bgc(self) -> Generator[mock.Mock, None, None]:
         """Stub `_has_bgc` so it never inspects a (nonexistent) netCDF file."""
         with mock.patch.object(NestIcRunner, "_has_bgc", return_value=False) as mocked:
+            yield mocked
+
+    @pytest.fixture(autouse=True)
+    def _mock_ref_date(self) -> Generator[mock.Mock, None, None]:
+        """Stub `_model_reference_date` so it never opens a (nonexistent) netCDF file."""
+        with mock.patch.object(
+            NestIcRunner, "_model_reference_date", return_value=datetime(2000, 1, 1)
+        ) as mocked:
             yield mocked
 
     def _expected_final_path(
@@ -217,6 +270,24 @@ class TestCreateInitialConditionsRouting:
         assert kwargs["bgc_source"]["name"] == "ROMS"
         assert kwargs["bgc_source"]["path"] == bp.parent_rst
         assert kwargs["bgc_model"] is mocked_roms_tools.BGCMarbl
+
+    def test_parent_reference_date_passed_to_initial_conditions(
+        self,
+        blueprint_kwargs: dict[str, Any],
+        _mock_ref_date: mock.Mock,
+    ) -> None:
+        """The parent's reference date reaches `InitialConditions`, so the child IC
+        `ocean_time` shares the parent's time origin.
+        """
+        from cstar.applications import nest_ic as nest_ic_module
+
+        _mock_ref_date.return_value = datetime(1990, 3, 15)
+        runner = _make_runner(NestIcBlueprint(**blueprint_kwargs, pio=False))
+
+        runner._create_initial_conditions()
+
+        kwargs = nest_ic_module.roms_tools.InitialConditions.call_args.kwargs
+        assert kwargs["model_reference_date"] == datetime(1990, 3, 15)
 
     def test_physics_only_parent_passes_no_bgc_kwargs(
         self,

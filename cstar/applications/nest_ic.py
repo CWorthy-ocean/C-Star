@@ -1,5 +1,7 @@
+import re
 import subprocess
 import typing as t
+from datetime import datetime
 from pathlib import Path
 
 import xarray as xr
@@ -101,6 +103,48 @@ class NestIcRunner(BlueprintRunner[NestIcBlueprint]):
             ds_vars = {str(v).lower() for v in ds.variables}
             return bool(ds_vars.intersection(bgc_vars))
 
+    @staticmethod
+    def _model_reference_date(filepath: Path) -> datetime:
+        """Read the parent simulation's model reference date from a restart file.
+
+        ROMS records the namelist ``reference_date`` only in the ``long_name``
+        attribute of ``ocean_time``, formatted as ``Time since YYYY/MM/DD``.
+
+        Parameters
+        ----------
+        filepath : Path
+            The path to a ROMS restart file.
+
+        Returns
+        -------
+        datetime
+
+        Raises
+        ------
+        ValueError
+            If the metadata is missing or does not hold a valid date; roms-tools
+            cannot read a ROMS source without it either.
+        """
+        with xr.open_dataset(filepath.as_posix()) as ds:
+            ocean_time = ds.variables.get("ocean_time")
+            long_name = (
+                ocean_time.attrs.get("long_name", "") if ocean_time is not None else ""
+            )
+
+        if match := re.search(r"(\d{4})/(\d{2})/(\d{2})", str(long_name)):
+            year, month, day = map(int, match.groups())
+            try:
+                return datetime(year, month, day)
+            except ValueError:
+                pass
+
+        msg = (
+            f"Unable to read the model reference date from {filepath}: expected an "
+            f"`ocean_time` long_name of the form 'Time since YYYY/MM/DD', found "
+            f"{long_name!r}."
+        )
+        raise ValueError(msg)
+
     def _create_initial_conditions(
         self,
     ) -> Path:
@@ -137,6 +181,11 @@ class NestIcRunner(BlueprintRunner[NestIcBlueprint]):
                 "path": self.blueprint.parent_rst,
             }
             ic_kwargs["bgc_model"] = roms_tools.BGCMarbl
+
+        # the child's initial conditions must share the parent's time origin
+        ic_kwargs["model_reference_date"] = self._model_reference_date(
+            self.blueprint.parent_rst
+        )
 
         fname = f"ic_from_parent_rst.{rst.formatted_timestamp}.nc"
         path = Path(self.blueprint.working_dir).expanduser() / "output" / fname
