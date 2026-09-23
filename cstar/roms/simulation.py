@@ -79,8 +79,8 @@ from cstar.roms.input_dataset import (
     ROMSSurfaceForcing,
     ROMSTidalForcing,
 )
-from cstar.roms.namelist import RomsNamelist, RomsNamelistBase, namelist_schema_for_ref
-from cstar.roms.precheck import check_output_streams_divide_rst
+from cstar.roms.namelist import RomsNamelistBase, namelist_schema_for_ref
+from cstar.roms.precheck import applies_to, check_output_streams_divide_rst
 from cstar.simulation import Simulation
 from cstar.system.manager import get_sysmgr
 
@@ -907,16 +907,13 @@ class ROMSSimulation(Simulation):
         # output/restart periods via namelist_overrides (or a hand-edited
         # namelist file) can produce a config ucla-roms rejects at startup;
         # catch it here so the failure surfaces with the override still in
-        # hand, mirroring the `dt <= 0` check above. Version-gated: the
-        # precheck landed in ucla-roms 0.5.0, so it's skipped for the legacy
-        # (< 0.5.0) `RomsNamelist` schema (`RomsNamelistV0_5_0`/`V0_6_0` are
-        # separate `RomsNamelistBase` subclasses, not subclasses of
-        # `RomsNamelist` -- this isinstance check is exactly the >= 0.5.0
-        # gate).
-        if not isinstance(nml, RomsNamelist):
-            check_output_streams_divide_rst(
-                nml.model_dump(), self._active_cppdefs_for_precheck()
-            )
+        # hand, mirroring the `dt <= 0` check above. Version-gated via
+        # applies_to (the precheck landed in ucla-roms 0.5.0) -- gated on
+        # `nml`'s own concrete type rather than `schema` (which selected it),
+        # since `nml` may have been reassigned to a fresh, still-same-type
+        # instance by the override merge above.
+        if applies_to(type(nml)):
+            check_output_streams_divide_rst(nml, self._active_cppdefs_for_precheck())
 
         return nml
 

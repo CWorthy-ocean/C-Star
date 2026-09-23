@@ -41,12 +41,12 @@ from cstar.applications.forge.blueprint import (
 )
 from cstar.applications.forge.host import HostPaths
 from cstar.applications.forge.namelist_model import (
-    RunTimeSettings,
     build_namelist,
     check_output_streams_divide_rst,
     check_rst_period_divisible,
     cppdefs_for_precheck,
     ensure_cdr_output_marbl_diagnostics,
+    output_precheck_applies_to,
     run_time_settings_for_ref,
 )
 from cstar.applications.forge.settings import render_roms_settings, write_roms_namelist
@@ -2262,9 +2262,9 @@ class ForgeExecutor(BaseModel):
         # (build_forge_blueprint): stored blueprints reach configure_build without
         # re-resolving, and the CDR-output net above and wizard accordion overrides
         # can both still change do_cdr_output/cppdefs after the resolver ran, so
-        # this is the enforcement point of record for that path. Unlike the
-        # resolver, there's no separate check_extract_divides_rst call here to
-        # de-duplicate against, so `extract` is covered by this general check too.
+        # this is the enforcement point of record for that path. `extract` is
+        # covered by this general check too, like every other stream (unlike the
+        # resolver, there's no friendlier extract-specific message to append here).
         #
         # The checker is keyed on C-Star's canonical namelist vocabulary
         # (RomsNamelistBase group field names / real Fortran keys), not forge's
@@ -2287,7 +2287,7 @@ class ForgeExecutor(BaseModel):
             settings_cls = run_time_settings_for_ref(
                 str(effective_roms_ref) if effective_roms_ref is not None else None
             )
-        if settings_cls is not RunTimeSettings:
+        if output_precheck_applies_to(settings_cls):
             rt = settings_cls.model_validate(self._settings_run_time)
             nml = build_namelist(rt, n_tracers)
             check_output_streams_divide_rst(
