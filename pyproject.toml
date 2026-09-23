@@ -71,6 +71,7 @@ keywords = ["MCDR", "CDR", "ocean carbon", "climate"]
 
 [project.optional-dependencies]
 dev = [
+    "check-manifest",
     "coverage>=7.13",
     "mypy>=1.16.1",
     # forge's test suite (cstar/tests/unit_tests/applications/forge/) reads/writes
@@ -104,7 +105,26 @@ requires = [
     "setuptools>=61.0.0",
     "wheel",
     "setuptools_scm[toml]>=7.0",
-    "check-manifest"
+]
+build-backend = "setuptools.build_meta"
+
+# check-manifest builds a clean sdist from a git-free copy of the tree, so files
+# that setuptools_scm's VCS file finder would normally pick up (it needs .git)
+# are reported missing unless MANIFEST.in covers them too. These are dev-only
+# files intentionally not shipped in the sdist/wheel: docs, CI/release tooling,
+# lint/coverage config, conda env pins, and non-.py test fixtures (test .py
+# files are still picked up via normal package discovery).
+[tool.check-manifest]
+ignore = [
+    ".pre-commit-config.yaml",
+    ".readthedocs.yaml",
+    "ci/**",
+    "codecov.yml",
+    "coverage.toml",
+    "cstar/tests/**",
+    "docs/**",
+    "environment-hpc.yml",
+    "environment-laptop.yml",
 ]
 
 [tool.setuptools_scm]
