@@ -1623,6 +1623,82 @@ class TestForgeExecutorBuildAndRun:
         with pytest.raises(ValueError, match="requires MARBL"):
             self._run_configure_build(cfg, host)
 
+    def test_configure_build_user_cdr_tracer_output_without_forcing(
+        self, sample_grid_kwargs, sample_open_boundaries, sample_partitioning
+    ):
+        """Mirrors test_configure_build_user_cdr_output_without_forcing for the
+        ucla-roms >= 0.7.0 CDR tracer output stream: a stored blueprint (or a
+        wizard accordion edit applied after the resolver) can carry
+        ``cdr_tracer_output.do_cdr_tracer_output=True`` alongside a stale
+        ``cppdefs.cdr_forcing=False`` -- before the fix, configure_build never
+        re-checked this, so CDR_FORCING stayed undefined and ucla-roms silently
+        never compiled the tracer output module the namelist enables.
+
+        Uses the default (0.2.0-pinned) ``model_dir`` like the ``do_cdr_output``
+        tests above and injects the (version-gated, normally 0.7.0+-only)
+        ``cdr_tracer_output`` section directly -- this exercises configure_build's
+        net in isolation, independent of the resolver's own version-gating
+        (covered separately by
+        ``test_cdr_tracer_gas_exch_output_sections_pruned_before_0_7_0`` in
+        test_forge_blueprint.py).
+        """
+        cfg, host = self._cdr_cfg_and_builder(
+            sample_grid_kwargs, sample_open_boundaries, sample_partitioning
+        )
+        cfg.model_settings.setdefault("cdr_tracer_output", {})[
+            "do_cdr_tracer_output"
+        ] = True
+        assert cfg.model_settings["cppdefs"]["cdr_forcing"] is False
+
+        builder = self._run_configure_build(cfg, host)
+
+        assert (
+            builder._settings_run_time["cdr_tracer_output"]["do_cdr_tracer_output"]
+            is True
+        )
+        assert builder._settings_compile_time["cppdefs"]["cdr_forcing"] is True
+
+    def test_configure_build_user_cdr_gas_exch_output_without_forcing(
+        self, sample_grid_kwargs, sample_open_boundaries, sample_partitioning
+    ):
+        """Mirrors test_configure_build_user_cdr_tracer_output_without_forcing for
+        the gas-exchange output stream.
+        """
+        cfg, host = self._cdr_cfg_and_builder(
+            sample_grid_kwargs, sample_open_boundaries, sample_partitioning
+        )
+        cfg.model_settings.setdefault("cdr_gas_exch_output", {})[
+            "do_cdr_gas_exch_output"
+        ] = True
+        assert cfg.model_settings["cppdefs"]["cdr_forcing"] is False
+
+        builder = self._run_configure_build(cfg, host)
+
+        assert (
+            builder._settings_run_time["cdr_gas_exch_output"]["do_cdr_gas_exch_output"]
+            is True
+        )
+        assert builder._settings_compile_time["cppdefs"]["cdr_forcing"] is True
+
+    def test_configure_build_rejects_cdr_tracer_output_without_marbl(
+        self, sample_grid_kwargs, sample_open_boundaries, sample_partitioning
+    ):
+        """Mirrors test_configure_build_rejects_cdr_output_without_marbl: the
+        resolver's CDR-tracer-output-requires-MARBL guard is re-checked at
+        configure_build for a stored/hand-edited blueprint that reaches here
+        without re-resolving.
+        """
+        cfg, host = self._cdr_cfg_and_builder(
+            sample_grid_kwargs, sample_open_boundaries, sample_partitioning
+        )
+        cfg.model_settings.setdefault("cdr_tracer_output", {})[
+            "do_cdr_tracer_output"
+        ] = True
+        cfg.model_settings["cppdefs"]["marbl"] = False
+
+        with pytest.raises(ValueError, match="do_cdr_tracer_output"):
+            self._run_configure_build(cfg, host)
+
     def test_configure_build_rejects_non_divisible_rst_period(
         self, sample_grid_kwargs, sample_open_boundaries, sample_partitioning
     ):

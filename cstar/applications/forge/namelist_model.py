@@ -601,6 +601,57 @@ class CdrGasExchOutputCfg(_SettingsSection):
     nrpf: int = Field(default=4, serialization_alias="nrpf_cdr_gas")
 
 
+# (section key, its do-flag) for the two ucla-roms >= 0.7.0 CDR output streams
+# that :func:`require_marbl_for_cdr_output_sections` enforces.
+CDR_OUTPUT_SECTIONS: tuple[tuple[str, str], ...] = (
+    ("cdr_tracer_output", "do_cdr_tracer_output"),
+    ("cdr_gas_exch_output", "do_cdr_gas_exch_output"),
+)
+
+
+def require_marbl_for_cdr_output_sections(
+    run_time_settings: dict[str, Any],
+    *,
+    bgc_mode_is_marbl: bool,
+) -> bool:
+    """Enforce the MARBL requirement for ``cdr_tracer_output``/
+    ``cdr_gas_exch_output`` (ucla-roms >= 0.7.0's dedicated CDR output
+    streams, PR #351) and report whether ``cppdefs.cdr_forcing`` must be
+    forced on.
+
+    Unlike ``cdr_output`` (see ``CdrOutputCfg``), these two sections are
+    never forced on by an active CDR forcing mode -- they're opt-in extras a
+    user enables explicitly, so only the flag actually present in
+    ``run_time_settings`` is read here. Either flag being True still needs
+    MARBL plus the ``CDR_FORCING`` cppdef, because ucla-roms only compiles
+    the CDR tracer/gas-exchange output modules under ``MARBL &&
+    CDR_FORCING``.
+
+    Both the resolver (authoring time) and the executor's ``configure_build``
+    (the build-time net for stored blueprints and wizard accordion edits that
+    reach the build without re-resolving) call this so the rule and its
+    message stay in one place; each caller is responsible for actually
+    setting ``cppdefs["cdr_forcing"] = True`` when this returns ``True``, since
+    ``cppdefs`` lives in a different dict in each caller.
+
+    Raises ``ValueError`` if either flag is set while ``bgc_mode_is_marbl`` is
+    False.
+    """
+    force_cdr_forcing = False
+    for section_name, do_flag in CDR_OUTPUT_SECTIONS:
+        section = run_time_settings.get(section_name)
+        if not section or not section.get(do_flag):
+            continue
+        if not bgc_mode_is_marbl:
+            raise ValueError(
+                f'{do_flag}=True but bgc_mode != "marbl": ucla-roms only '
+                "compiles the CDR tracer/gas-exchange output modules under "
+                "MARBL && CDR_FORCING."
+            )
+        force_cdr_forcing = True
+    return force_cdr_forcing
+
+
 class UpscaleOutputCfg(_SettingsSection):
     do_upscale: bool
     nrpf_uscl: int
