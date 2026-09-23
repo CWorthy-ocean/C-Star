@@ -350,6 +350,18 @@ Execution
       declares itself resumable; other failed steps are re-run from scratch
       with a warning, and completed steps are left untouched.
 
+    ``--resume`` also accepts the workplan path the run was started from in
+    place of ``--run-id``. The :term:`run ID` is derived from the workplan
+    ``name`` exactly as on the first run, and the file is used only to identify
+    that run: it must be unchanged since (edits, and blueprint schema
+    migrations applied on load, both count), otherwise the command refuses and
+    points you at ``--run-id``. ``--var`` and ``--varfile`` cannot be combined
+    with ``--resume``; the run continues with the variables it was started with.
+
+    .. code-block:: console
+
+        cstar workplan run my_workplan.yaml --resume
+
 
    .. tab-item:: Programmatic Execution
 

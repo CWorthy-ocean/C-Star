@@ -40,6 +40,10 @@ from cstar.entrypoint.utils import (
     ARG_LOGLEVEL_SHORT,
     ARG_RESUME,
     ARG_RESUME_WORKPLAN_HELP,
+    ARG_VAR_LONG,
+    ARG_VAR_SHORT,
+    ARG_VARFILE_LONG,
+    ARG_VARFILE_SHORT,
     OPT_CLOBBER_ALL,
 )
 from cstar.execution.file_system import local_copy
@@ -51,11 +55,13 @@ from cstar.orchestration.dag_runner import (
     build_and_run_dag,
     check_clobber_targets,
     get_launcher,
+    original_workplan_backup,
     run_dag,
 )
 from cstar.orchestration.models import BlueprintCore, Step, Workplan
 from cstar.orchestration.orchestration import LiveWorkplan, Planner, ProcessHandle
 from cstar.orchestration.serialization import (
+    PersistenceMode,
     deserialize,
     serialize,
     try_deserialize,
@@ -79,9 +85,10 @@ Specify a previously used `run_id` to re-start (or reattach) to a prior run.
 
 If a path to a blueprint is supplied, it will be executed as a single-step workplan.
 
-Pass `--resume` alongside `--run-id` (and no workplan path) to re-enter a prior
-run and resume its failed steps in place, rather than re-running them from
-scratch.
+Pass `--resume` to re-enter a prior run and resume its failed steps in place,
+rather than re-running them from scratch. Identify the run with `--run-id`, or
+with the workplan path it was started from (the run-id is derived from the
+workplan name exactly as on the first run; the file must be unchanged since).
 """
 
 CATEGORY_HEADER_COLOR: t.Final[str] = "white"
@@ -492,7 +499,7 @@ def preprocess_path(workplan_path: str | None) -> str | None:
     return workplan_path
 
 
-async def handle_run_reloading(run_id: str) -> tuple[Path, Path]:
+async def handle_run_reloading(run_id: str) -> WorkplanRun:
     """Locate the prior run for the run-id and restore its environment.
 
     The environment variables captured when the run was originally started
@@ -505,8 +512,8 @@ async def handle_run_reloading(run_id: str) -> tuple[Path, Path]:
 
     Returns
     -------
-    tuple[Path, Path]
-        2-Tuple containing the original and prepared workplan paths.
+    WorkplanRun
+        The recorded run, carrying the original and prepared workplan paths.
 
     Raises
     ------
@@ -526,7 +533,63 @@ async def handle_run_reloading(run_id: str) -> tuple[Path, Path]:
     msg = f"Re-starting run-id {run_id!r} with workplan originating in {source!r}"
     log.info(msg)
 
-    return wp_run.workplan_path, wp_run.trx_workplan_path
+    return wp_run
+
+
+def verify_resume_source(wp_path: Path, wp_run: WorkplanRun) -> None:
+    """Ensure the workplan supplied with `--resume` is the one `wp_run` started from.
+
+    The path only identifies the run; its content is never re-transformed, so a
+    file that changed since the run started is rejected rather than silently
+    resumed under the recorded plan.
+
+    Parameters
+    ----------
+    wp_path : Path
+        The workplan path supplied on the command line.
+    wp_run : WorkplanRun
+        The recorded run being re-entered.
+
+    Raises
+    ------
+    typer.BadParameter
+        If the recorded backup of the original workplan is missing or unreadable,
+        or the supplied workplan no longer matches it.
+    """
+    escape = (
+        f"Pass --run-id {wp_run.run_id} without a workplan path to resume the run "
+        "as recorded"
+    )
+    backup = original_workplan_backup(wp_run.workplan_path, wp_run.output_path)
+    if not backup.exists():
+        msg = (
+            f"Unable to verify {str(wp_path)!r} against run {wp_run.run_id!r}: "
+            f"its original workplan backup {str(backup)!r} is missing. {escape}."
+        )
+        raise typer.BadParameter(msg)
+
+    # the backup is a re-serialization of the parsed workplan, so compare models
+    try:
+        recorded = deserialize(backup, Workplan, mode=PersistenceMode.yaml)
+        supplied = deserialize(wp_path, Workplan)
+    except Exception as ex:
+        msg = (
+            f"Unable to verify {str(wp_path)!r} against run {wp_run.run_id!r}: "
+            f"{ex}. {escape}."
+        )
+        raise typer.BadParameter(msg) from ex
+
+    if supplied != recorded:
+        msg = (
+            f"The workplan at {str(wp_path)!r} differs from the one run {wp_run.run_id!r} "
+            f"was started from ({str(backup)!r}), e.g. it was edited or its blueprints "
+            f"were auto-migrated since; {ARG_RESUME} re-enters the recorded run. "
+            f"{escape}, or supply a new --run-id to start a fresh run."
+        )
+        raise typer.BadParameter(msg)
+
+    msg = f"Workplan {str(wp_path)!r} matches the recorded original for run {wp_run.run_id!r}"
+    log.debug(msg)
 
 
 @app.command(name="run", help=HELP_LONG, short_help=HELP_SHORT)
@@ -545,8 +608,8 @@ def run(
     user_variables: t.Annotated[
         list[str] | None,
         typer.Option(
-            "--var",
-            "-v",
+            ARG_VAR_LONG,
+            ARG_VAR_SHORT,
             help=(
                 "Specify 0-to-many replacements as key-value pairs in "
                 "the form `key=value`."
@@ -557,8 +620,8 @@ def run(
     user_variables_path: t.Annotated[
         Path | None,
         typer.Option(
-            "--varfile",
-            "-f",
+            ARG_VARFILE_LONG,
+            ARG_VARFILE_SHORT,
             help=(
                 "Specify the path to a file containing one replacement per line "
                 "as key-value pairs in the form `key=value`."
@@ -622,21 +685,28 @@ def run(
     problems = [
         msg
         for condition, msg in (
-            (
-                resume and path,
-                f"{ARG_RESUME} re-enters a prior run; pass --run-id without a workplan path",
-            ),
             (resume and clobber, f"{ARG_RESUME} cannot be combined with {ARG_CLOBBER}"),
+            (
+                resume
+                and (user_variables is not None or user_variables_path is not None),
+                (
+                    f"{ARG_RESUME} re-enters a prior run with its recorded variables; "
+                    f"{ARG_VAR_LONG}/{ARG_VARFILE_LONG} cannot be supplied"
+                ),
+            ),
         )
         if condition
     ]
     if problems:
         raise typer.BadParameter("; ".join(problems), param_hint=ARG_RESUME)
 
-    reload = not path
+    reload = resume or not path
 
     if reload:
-        original_path, trx_path = asyncio.run(handle_run_reloading(run_id))
+        wp_run = asyncio.run(handle_run_reloading(run_id))
+        if path:
+            verify_resume_source(Path(path), wp_run)
+        original_path, trx_path = wp_run.workplan_path, wp_run.trx_workplan_path
         path = str(trx_path)
 
     try:
