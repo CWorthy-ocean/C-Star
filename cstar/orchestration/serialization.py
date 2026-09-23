@@ -302,7 +302,7 @@ def _mode_detect(path: Path) -> PersistenceMode:
     if path.suffix in {".yaml", ".yml"}:
         return PersistenceMode.yaml
 
-    print("Using default persistence mode `yaml` for file `{path}`")
+    log.debug(f"Using default persistence mode `yaml` for file `{path}`")
     return PersistenceMode.yaml
 
 
