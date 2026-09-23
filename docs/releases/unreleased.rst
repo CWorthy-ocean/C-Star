@@ -24,6 +24,10 @@ Bug Fixes
 
 
 - Reading or writing a file with an unrecognized extension no longer prints "Using default persistence mode ``yaml`` for file ``{path}``" to the terminal. (`#703 <https://github.com/CWorthy-ocean/C-Star/pull/703>`_)
+- ``--resume`` no longer refuses a correctly built codebase whose git index metadata is stale (for example after C-Star's copy-based staging); modifications are now detected by file contents. (`#704 <https://github.com/CWorthy-ocean/C-Star/pull/704>`_)
+- ``--resume`` no longer refuses a codebase because its ``checkout_target`` branch has moved on the remote, or because the compute node has no network access. (`#704 <https://github.com/CWorthy-ocean/C-Star/pull/704>`_)
+- A checkout target that is an annotated git tag now resolves to its commit, so such checkouts are recognized as up to date. (`#704 <https://github.com/CWorthy-ocean/C-Star/pull/704>`_)
+- A name that is both a branch and a tag resolves to the branch, matching what ``git checkout`` did when the codebase was cloned. (`#704 <https://github.com/CWorthy-ocean/C-Star/pull/704>`_)
 
 Improvements
 ~~~~~~~~~~~~
@@ -32,6 +36,8 @@ Improvements
 - The run-directory backup of the original workplan now has a single owner shared by the run preparation and the resume check. (`#702 <https://github.com/CWorthy-ocean/C-Star/pull/702>`_)
 - All eight bundled ModelSpecs and the example blueprint pin the C-Star 0.15.0 commit; the six specs that pinned forge commit 692e04ce move forward to it. Their ``cppdefs.opt.j2`` differed from the current one only by the two flag-gated blocks added for ucla-roms 0.8.0 (``UPSTREAM_TS_LAND_CURV``, ``PARABOLIC_SPLINES``, rendered as ``#undef`` when a spec does not set the flag) and a comment; older ROMS releases ignore both macros, so no rendered build changes. ``marbl_in`` is identical at both pins. (`#707 <https://github.com/CWorthy-ocean/C-Star/pull/707>`_)
 - ``bundled_template_dir`` maps the current directory form and the legacy ``templates/<stage>`` form onto the bundled copy; ``BUNDLED_TEMPLATES_DIRECTORY`` names the prefix. (`#707 <https://github.com/CWorthy-ocean/C-Star/pull/707>`_)
+- When a codebase cannot be adopted on resume, the error names the failed check: target not present in the clone, HEAD at a different commit (both hashes shown), tracked files modified, build artifacts missing, or git's own error for an unreadable repository. (`#704 <https://github.com/CWorthy-ocean/C-Star/pull/704>`_)
+- Setup-time detection of local modifications is content-based as well, avoiding unnecessary recompiles caused by stale index metadata. (`#704 <https://github.com/CWorthy-ocean/C-Star/pull/704>`_)
 
 Miscellaneous
 ~~~~~~~~~~~~~
@@ -56,4 +62,5 @@ Miscellaneous
 - The example blueprint's ``content_hash`` is restamped (``3b085d48`` to ``82e577f0``) since the pin is part of the hashed content. (`#707 <https://github.com/CWorthy-ocean/C-Star/pull/707>`_)
 - Tests: the fast-path eligibility test expects every bundled spec to qualify for both stages; the fetched-content mismatch test hides the bundled copy to reach the fetch path; the offline staging fixture maps both directory forms; location assertions read ``C-Star.git``. (`#707 <https://github.com/CWorthy-ocean/C-Star/pull/707>`_)
 - Docs: the templates developer page, the internals known-gaps list and the specs page describe the C-Star pin instead of the archived repository. (`#707 <https://github.com/CWorthy-ocean/C-Star/pull/707>`_)
+- Blueprint guide describes how a resumed run adopts existing codebases. (`#704 <https://github.com/CWorthy-ocean/C-Star/pull/704>`_)
 
