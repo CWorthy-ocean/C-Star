@@ -27,6 +27,48 @@ write order the golden fixtures pin byte-for-byte. Do **not** populate this
 table by introspecting the classes at import time; that would make it a
 mirror of the classes rather than an independent fact base the equivalence
 test can check them against.
+
+Step 2 adds :func:`tier_versions`, deriving the tier version set from this
+table's ``since``/``until`` values and proving (in
+``test_namelist_keys.py``) that it agrees with
+:data:`cstar.roms.namelist.NAMELIST_SCHEMA_REGISTRY` and the keys of
+:data:`cstar.applications.forge.namelist_model._RUN_TIME_SETTINGS_BY_NAMELIST_SCHEMA`
+— without yet replacing either registry with something derived from the
+table (that is step 3, once a generator exists to keep codegen and registry
+selection in sync).
+
+Adding a namelist key today (before step 3's generator exists)
+----------------------------------------------------------------
+Until the classes are generated from this table, a new key is maintained in
+**both** places by hand; this table does not yet drive anything at runtime.
+The procedure (a spec for step 3, which should collapse it to "edit the
+table, regenerate"):
+
+1. Add the key to the ucla-roms Fortran ``namelist /GROUP/`` declaration and
+   ``src/namelist.nml`` reference file (source of the `doc`/default this
+   table and the Pydantic field both transcribe).
+2. Add the field to the matching ``_NmlGroup`` subclass in
+   :mod:`cstar.roms.namelist` (name = Fortran key unless a
+   ``serialization_alias`` is needed), and to
+   :mod:`cstar.tests.unit_tests.roms.fixtures.example_namelist*.nml`.
+3. Add the corresponding field to the matching settings-section class in
+   :mod:`cstar.applications.forge.namelist_model` (name = forge's authoring
+   vocabulary; ``serialization_alias`` = the Fortran key if it differs), wire
+   it into ``build_namelist``, and regenerate the four
+   ``golden_namelist_*.nml`` / ``golden_model_settings_*.json`` fixtures
+   (``UPDATE_GOLDEN=1``) — see the ``/namelist-key`` skill for the full
+   propagation-path checklist (resolver, ``sources_to_forcing_override``,
+   wizard load-back).
+4. Add exactly one :class:`NamelistKey` row to :data:`NAMELIST_KEYS` here
+   (group, key, type, default, doc, ``since``/``until`` if the key is
+   version-gated, `constraint`/`validator` if the field has either) — plus an
+   overlay row in
+   :mod:`cstar.applications.forge.namelist_settings_overlay` only if step 3's
+   Forge field name, alias, or optionality differs from the key itself (the
+   common case needs zero overlay changes; the group's overlay row already
+   exists).
+5. Run ``test_namelist_keys.py``; it fails loudly if the new row doesn't
+   match the classes from steps 2-3 exactly.
 """
 
 from __future__ import annotations
@@ -1653,3 +1695,22 @@ NAMELIST_KEYS: tuple[NamelistKey, ...] = (
         since=_V0_7_0,
     ),
 )
+
+
+def tier_versions() -> tuple[tuple[int, int, int], ...]:
+    """The sorted, deduplicated ucla-roms versions this table's `since`/`until`
+    values reference.
+
+    Each value is a breaking-namelist-change release: the lower bound of a
+    ``RomsNamelist*`` tier (and its matching ``RunTimeSettings*`` tier).
+    ``test_namelist_keys.py`` proves this equals the non-`None` bounds of
+    :data:`cstar.roms.namelist.NAMELIST_SCHEMA_REGISTRY` and (mapped through
+    that same registry) the keys of
+    :data:`cstar.applications.forge.namelist_model._RUN_TIME_SETTINGS_BY_NAMELIST_SCHEMA`
+    — this function does not replace either registry; it only derives the
+    version *set* both must agree with.
+    """
+    versions = {
+        v for row in NAMELIST_KEYS for v in (row.since, row.until) if v is not None
+    }
+    return tuple(sorted(versions))

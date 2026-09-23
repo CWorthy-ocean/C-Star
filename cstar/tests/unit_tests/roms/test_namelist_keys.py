@@ -30,7 +30,7 @@ from cstar.applications.forge.namelist_settings_overlay import (
     NAMELIST_SETTINGS_OVERLAY,
 )
 from cstar.roms.namelist import NAMELIST_SCHEMA_REGISTRY, RomsNamelistBase
-from cstar.roms.namelist_keys import NAMELIST_KEYS, REQUIRED, NamelistKey
+from cstar.roms.namelist_keys import NAMELIST_KEYS, REQUIRED, NamelistKey, tier_versions
 
 # ---------------------------------------------------------------------------
 # Known, deliberate C-Star/Forge inconsistencies the walk below would
@@ -346,3 +346,47 @@ def _check_field(
         assert field.is_required(), f"{loc}: table says REQUIRED, field has a default"
     else:
         assert not field.is_required(), f"{loc}: table has a default, field is required"
+
+
+# ---------------------------------------------------------------------------
+# Step 2: tier_versions() derives the tier version set from the table alone;
+# prove it agrees with both hand-written registries without replacing either.
+# ---------------------------------------------------------------------------
+def test_tier_versions_matches_namelist_schema_registry():
+    expected = tuple(
+        sorted(
+            {
+                v
+                for lower, upper, _cls in NAMELIST_SCHEMA_REGISTRY
+                for v in (lower, upper)
+                if v is not None
+            }
+        )
+    )
+    assert tier_versions() == expected
+
+
+def test_tier_versions_matches_run_time_settings_registry():
+    rt_versions = {
+        _NS_LOWER_BOUND[ns_cls] for ns_cls in _RUN_TIME_SETTINGS_BY_NAMELIST_SCHEMA
+    }
+    rt_versions.discard(None)
+    assert set(tier_versions()) == rt_versions
+
+
+def test_registry_lower_bounds_match_tier_versions_in_order():
+    """`NAMELIST_SCHEMA_REGISTRY`'s lower bounds, oldest first, are exactly
+    `(None, *tier_versions())` -- the base tier has no lower bound, and every
+    other tier's lower bound is one of this table's versions, in order.
+    """
+    expected = (None, *tier_versions())
+    actual = tuple(lower for lower, _upper, _cls in NAMELIST_SCHEMA_REGISTRY)
+    assert actual == expected
+
+
+def test_run_time_settings_schema_keys_match_registry_classes_in_order():
+    """`_RUN_TIME_SETTINGS_BY_NAMELIST_SCHEMA`'s keys are exactly the
+    `NAMELIST_SCHEMA_REGISTRY` classes, in the same order.
+    """
+    registry_classes = tuple(cls for _lower, _upper, cls in NAMELIST_SCHEMA_REGISTRY)
+    assert tuple(_RUN_TIME_SETTINGS_BY_NAMELIST_SCHEMA.keys()) == registry_classes
