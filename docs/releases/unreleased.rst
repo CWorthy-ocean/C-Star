@@ -30,6 +30,8 @@ Improvements
 
 
 - The run-directory backup of the original workplan now has a single owner shared by the run preparation and the resume check. (`#702 <https://github.com/CWorthy-ocean/C-Star/pull/702>`_)
+- All eight bundled ModelSpecs and the example blueprint pin the C-Star 0.15.0 commit; the six specs that pinned forge commit 692e04ce move forward to it. Their ``cppdefs.opt.j2`` differed from the current one only by the two flag-gated blocks added for ucla-roms 0.8.0 (``UPSTREAM_TS_LAND_CURV``, ``PARABOLIC_SPLINES``, rendered as ``#undef`` when a spec does not set the flag) and a comment; older ROMS releases ignore both macros, so no rendered build changes. ``marbl_in`` is identical at both pins. (`#707 <https://github.com/CWorthy-ocean/C-Star/pull/707>`_)
+- ``bundled_template_dir`` maps the current directory form and the legacy ``templates/<stage>`` form onto the bundled copy; ``BUNDLED_TEMPLATES_DIRECTORY`` names the prefix. (`#707 <https://github.com/CWorthy-ocean/C-Star/pull/707>`_)
 
 Miscellaneous
 ~~~~~~~~~~~~~
@@ -51,4 +53,7 @@ Miscellaneous
 
 - Workplan guide and ``--resume`` help text describe resuming by workplan path and the ``--var``/``--varfile`` restriction. (`#702 <https://github.com/CWorthy-ocean/C-Star/pull/702>`_)
 - Added a test that an unrecognized extension resolves to YAML without printing anything. (`#703 <https://github.com/CWorthy-ocean/C-Star/pull/703>`_)
+- The example blueprint's ``content_hash`` is restamped (``3b085d48`` to ``82e577f0``) since the pin is part of the hashed content. (`#707 <https://github.com/CWorthy-ocean/C-Star/pull/707>`_)
+- Tests: the fast-path eligibility test expects every bundled spec to qualify for both stages; the fetched-content mismatch test hides the bundled copy to reach the fetch path; the offline staging fixture maps both directory forms; location assertions read ``C-Star.git``. (`#707 <https://github.com/CWorthy-ocean/C-Star/pull/707>`_)
+- Docs: the templates developer page, the internals known-gaps list and the specs page describe the C-Star pin instead of the archived repository. (`#707 <https://github.com/CWorthy-ocean/C-Star/pull/707>`_)
 
