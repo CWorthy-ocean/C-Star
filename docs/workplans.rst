@@ -99,6 +99,42 @@ state and re-execute it from scratch) and ``resume`` (continue the step's
 failed prior attempt in place instead). The two are mutually exclusive on a
 single step.
 
+Compute overrides
+^^^^^^^^^^^^^^^^^
+
+By default every step is submitted with the account, queue and walltime
+from your environment (``CSTAR_SLURM_ACCOUNT``, ``CSTAR_SLURM_QUEUE``,
+``CSTAR_SLURM_MAX_WALLTIME``; see :doc:`hpc`). A step's ``compute_overrides``
+replaces any of them, under a key naming the launcher:
+
+.. code-block:: yaml
+
+    steps:
+    - name: make_inputs
+      application: forge
+      blueprint: forge_blueprint.yaml
+      compute_overrides:
+        slurm:
+          queue_name: day          # a general-purpose queue for data processing
+          max_walltime: "04:00:00"
+          num_cpus: 8
+    - name: simulate
+      application: roms_marbl
+      blueprint:
+        from_step: make_inputs
+      depends_on: [make_inputs]
+      compute_overrides:
+        slurm:
+          queue_name: mpi
+          account_name: my-allocation
+          num_cpus: 128
+
+The ``slurm`` keys are ``account_name``, ``queue_name``, ``max_walltime``
+(``HH:MM:SS``), ``num_cpus``, ``num_nodes``, ``cpus_per_node`` and
+``single_node``. Running on a laptop, the ``local`` launcher accepts
+``num_cpus``. ``num_cpus`` is also where a deferred-blueprint step declares
+its allocation, since C-Star cannot read the blueprint at submit time.
+
 Directives
 ^^^^^^^^^^
 

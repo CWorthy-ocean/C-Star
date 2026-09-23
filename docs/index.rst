@@ -60,6 +60,15 @@ launched and monitored with a single run ID. Steps can pass information to one
 another at run time: for example, a restart file from one simulation becoming
 the initial conditions of the next.
 
+The same building blocks cover most regional modeling projects: an outer
+domain feeding boundary conditions to a nested inner domain, an ensemble that
+varies the forcing of one blueprint across steps, a post-processing or
+diagnostics application run on the output of an earlier step. A finished
+workplan is a file, so a colleague can reproduce the whole sequence or change
+one input and rerun it. Blueprints are versioned and hashed, and every run
+keeps its inputs, rendered configuration and logs alongside its output, so
+what produced a result can be checked afterwards.
+
 Reusable pieces of a domain description live in a **catalog**: model
 configurations, domains, forcing selections and output settings, plus saved
 blueprints. C-Star ships a small bundled catalog to start from, and everything

@@ -144,3 +144,19 @@ suite and documentation dependencies.
 
 See :doc:`contributing` for running the tests and building this
 documentation.
+
+Updating
+--------
+
+Released versions update with conda:
+
+.. code-block:: console
+
+   conda update -n cstar-env -c conda-forge cstar-ocean
+
+C-Star, ROMS-Tools and UCLA-ROMS are released together, and the conda
+packages pin versions that are known to work with one another. Installing
+a package from its GitHub ``main`` branch (``pip install
+git+https://github.com/CWorthy-ocean/C-Star.git@main``) gets you an
+unreleased change, but can pair versions that are not yet compatible; prefer
+tagged releases unless you need a specific fix.

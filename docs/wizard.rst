@@ -120,7 +120,10 @@ Review and export
    can **Download** the file, **Save** it to your catalog, save any spec you
    modified as a new named catalog entry, run the blueprint through the
    C-Star command line, or save a deferred workplan that runs it later
-   (experimental).
+   (experimental). **Run** executes ``cstar blueprint run`` on the machine
+   the wizard is running on, so on a cluster's login node use it only for
+   toy domains; for real domains save the blueprint and submit it through a
+   workplan or from a compute node (see :doc:`hpc`).
 
 .. figure:: images/wizard-review.png
    :alt: The Review and export section: validation result, resolved YAML, download, save and run

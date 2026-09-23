@@ -81,6 +81,27 @@ Execution
 
 .. include:: snippets/review-config.rst
 
+Where a blueprint runs
+^^^^^^^^^^^^^^^^^^^^^^
+
+``cstar blueprint run`` runs on the machine you invoke it on. What happens
+next depends on the application:
+
+- The ``roms_marbl`` application submits the model run to the job scheduler
+  itself when one is available, so on a cluster it is fine to invoke it from
+  a login node: the code is fetched and compiled there, and the simulation
+  runs in a SLURM job. Without a scheduler it runs the model in place.
+- The ``forge`` application does no submitting. Downloading source data,
+  building the grid and generating input files all happen wherever you run
+  the command. For anything beyond a toy domain, run it from a compute node
+  (an interactive allocation, or your own batch script that calls
+  ``cstar blueprint run``), or put it in a :doc:`workplan <workplans>` and
+  let C-Star submit it.
+
+A workplan submits every step to the scheduler, whatever its application,
+using the account, queue and walltime from your environment unless a step
+overrides them.
+
 .. warning::
     The post-processing step joining partitioned data may consume all available cores of a login node and be terminated (and make the admins angry).
 

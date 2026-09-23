@@ -11,13 +11,35 @@ system, and Python environments need protecting from the module system.
 Configure the scheduler
 -----------------------
 
-Before running a workplan, set your SLURM account and queue and review the
-other settings with ``cstar env show``; see :doc:`configuration`. A workplan
-run fails early if the account and queue are missing.
+Most settings are environment variables; :doc:`configuration` lists them
+all and ``cstar env show`` prints the values in effect. Only the SLURM ones
+are required, and a workplan run stops early if the account and queue are
+missing. A shell profile for a cluster typically carries:
 
-Do not run simulations on a login node. Submit them through a workplan, even
-a :ref:`single-step one <workplan_examples>`, so the work goes to compute
-nodes. If you must run a ROMS-MARBL blueprint directly on a login node, set
+.. code-block:: bash
+
+   export CSTAR_SLURM_ACCOUNT="my-allocation"     # the account or allocation jobs are charged to
+   export CSTAR_SLURM_QUEUE="mpi"                 # the partition or queue to submit to
+   export CSTAR_SLURM_MAX_WALLTIME="01:00:00"     # default time requested per job
+
+   # Only if your system does not already define them (see "Where data goes"):
+   # export PROJECT=/path/to/your/project/directory
+   # export SCRATCH=/path/to/your/scratch/directory
+
+These are the defaults for every step of a workplan; a step can override
+them, for example to send Forge steps to a general-purpose queue and ROMS
+steps to an MPI queue. See the compute overrides on the :doc:`workplans`
+page.
+
+Where a blueprint runs
+----------------------
+
+``cstar blueprint run`` runs where you invoke it. The ROMS-MARBL application
+submits the model run to SLURM itself, so it can be started from a login
+node; Forge does not, and generates every input file wherever the command
+runs. For anything beyond a toy domain, run Forge from a compute node or
+through a workplan, even a :ref:`single-step one <workplan_examples>`. If
+you must run a ROMS-MARBL blueprint directly on a login node, set
 ``CSTAR_NPROCS_POST`` to a small number (about 2): the post-processing step
 that joins partitioned output otherwise uses every core it can find.
 
@@ -56,9 +78,11 @@ placed per system:
        otherwise ``<scratch_pi_*>/<user>/cstar-forge-data/source-data``
      - ``<scratch_pi_*>/<user>/cstar/_forge_bp_runs/<name>``
 
-Set ``PROJECT`` to a group directory to share one source-data cache with
-your collaborators; set ``SCRATCH`` to override the scratch root where the
-system does not export one. A forge blueprint whose ``working_dir`` is the
+Some systems define ``PROJECT`` and ``SCRATCH`` for you (Anvil exports both,
+Perlmutter exports ``SCRATCH``); check with ``echo $PROJECT $SCRATCH`` and set
+them in your shell profile only if they are empty. ``PROJECT`` pointing at a
+group directory shares one source-data cache with your collaborators;
+``SCRATCH`` names the scratch root where the system does not export one. A forge blueprint whose ``working_dir`` is the
 default form (``~/cstar/_forge_bp_runs/...``) is rebased onto scratch on
 these systems; a working directory you set explicitly is used as written.
 

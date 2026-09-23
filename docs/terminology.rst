@@ -7,9 +7,10 @@ Definitions
 .. glossary::
 
     Application
-      Something C-Star can run. Each application declares the blueprint it
-      accepts and knows how to turn one into a result. C-Star ships two
-      applications for ocean modeling:
+      Something C-Star can run: an ocean model, a data-processing tool, or an
+      analysis. Each application declares the blueprint it accepts and knows
+      how to turn one into a result. C-Star ships two applications for ocean
+      modeling:
 
       * ``roms_marbl`` runs a UCLA-ROMS simulation, optionally coupled to
         MARBL biogeochemistry.
