@@ -340,6 +340,23 @@ async def process_plan(orchestrator: Orchestrator, mode: RunMode) -> DagStatus:
     return DagStatus({**open_set, **closed_set})
 
 
+def original_workplan_backup(wp_path: Path, output_dir: Path) -> Path:
+    """The path where `prepare_workplan` keeps an untouched copy of the source workplan.
+
+    Parameters
+    ----------
+    wp_path : Path
+        The path to the source workplan.
+    output_dir : Path
+        The run-specific directory where workplan artifacts are written.
+
+    Returns
+    -------
+    Path
+    """
+    return WorkplanTransformer.derived_path(wp_path, output_dir, "_original", ".bak")
+
+
 async def prepare_workplan(
     wp_path: Path,
     output_dir: Path,
@@ -402,9 +419,7 @@ async def prepare_workplan(
     apply_clobber_overrides(wp, clobber_steps)
 
     # make a copy of the original and modified blueprint in the output directory
-    persist_orig = WorkplanTransformer.derived_path(
-        wp_path, output_dir, "_original", ".bak"
-    )
+    persist_orig = original_workplan_backup(wp_path, output_dir)
     persist_as = WorkplanTransformer.derived_path(wp_path, output_dir, "_transformed")
 
     file_io: list[Awaitable[int]] = [
