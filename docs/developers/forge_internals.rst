@@ -46,6 +46,8 @@ blueprint" means producing that downstream artifact, not forge's own input.
     |   +-- forge/                     # The forge application (execution engine)
     |   |   +-- app.py                     # ForgeRunner/ForgeApplication (C-Star application)
     |   |   +-- blueprint.py               # ForgeBlueprint -- the forge application's blueprint
+    |   |   +-- migration.py               # forge_blueprint_version forward-migrations (split out so
+    |   |   |                              # importing blueprint.py alone stays light)
     |   |   +-- engine.py                  # process_forge_blueprint(); ForgeBlueprintExecutor Protocol;
     |   |   |                              # sources_to_forcing_override()
     |   |   +-- executor.py                # ForgeExecutor -- the processing engine
@@ -129,7 +131,9 @@ namelist sections) - ``code`` (roms/marbl repos +
 (stripped back out on load).
 
 Older blueprint files load transparently: a ``model_validator(mode="before")``
-(``migrate_forge_blueprint_data``) migrates v2/v3 layouts (removed
+(``cstar.applications.forge.migration.migrate_forge_blueprint_data``, imported
+lazily by ``blueprint.py`` so a plain import of the blueprint schema stays
+light) migrates v2/v3 layouts (removed
 ``identity`` sub-model, removed ``ensemble_id``), the v4->v5
 ``do_cdr``->``do_cdr_output`` rename, the v6->v7 CDR move
 (``forcing.cdr_forcing``/``cdr_forcing_file`` -> the top-level ``cdr``
