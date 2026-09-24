@@ -46,6 +46,7 @@ Bug Fixes
 - ROMS input datasets pointed at a text file (e.g. a roms-tools YAML) are now rejected when the blueprint is loaded; previously only forcing corrections rejected them and every other dataset type failed later with an unclear error. (`#706 <https://github.com/CWorthy-ocean/C-Star/pull/706>`_)
 - Enabling CDR tracer or gas-exchange output in a stored blueprint or a wizard edit now forces ``CDR_FORCING`` on at build time, matching the resolver. (`#715 <https://github.com/CWorthy-ocean/C-Star/pull/715>`_)
 - ``do_cdr_tracer_output: true`` no longer requires ``bgc_mode: marbl``. On ucla-roms 0.7.0 and 0.8.0 a run without MARBL that enables it aborts at ROMS start-up ("cdr_tracer_output must have MARBL enabled") rather than failing validation, until the upstream compile guard is fixed. (`#715 <https://github.com/CWorthy-ocean/C-Star/pull/715>`_)
+- Loading a ``forge_blueprint.yaml`` newer than the installed build told users to upgrade ``cstar-forge``, a package that no longer ships Forge. (`#720 <https://github.com/CWorthy-ocean/C-Star/pull/720>`_)
 
 Improvements
 ~~~~~~~~~~~~
@@ -103,4 +104,5 @@ Miscellaneous
 - Machine-specific paths in the nesting tutorials are replaced with ``/path/to/...`` placeholders, and the workplan references the tutorial blueprint by relative path. (`#717 <https://github.com/CWorthy-ocean/C-Star/pull/717>`_)
 - The configuration page's Default column now shows the real directories for the four ``CSTAR_*_HOME`` variables. (`#718 <https://github.com/CWorthy-ocean/C-Star/pull/718>`_)
 - Removed leftover date-correction code for roms-tools YAML inputs, which C-Star stopped generating datasets from in #355. (`#706 <https://github.com/CWorthy-ocean/C-Star/pull/706>`_)
+- Forge blueprint docstrings now reference the current developer guide and describe ``provenance.forge_version`` as a legacy field from the standalone cstar-forge era. (`#720 <https://github.com/CWorthy-ocean/C-Star/pull/720>`_)
 
