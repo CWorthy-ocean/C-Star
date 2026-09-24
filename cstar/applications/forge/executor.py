@@ -910,14 +910,13 @@ class ForgeExecutor(BaseModel):
         blueprint_seg = ROMS_RUN_SEGMENT
         run_dir = self.run_output_dir
         parts = run_dir.parts
-        # Anchor on the full two-segment default root ("cstar/_forge_bp_runs"),
-        # matching config.relocate_working_dir -- a lone "_forge_bp_runs" segment
-        # elsewhere in a custom path is not the default root.
+        # Anchor on the full two-segment default root ("cstar/_forge_bp_runs"):
+        # a lone "_forge_bp_runs" segment elsewhere in a custom path is not the
+        # default root.
         for i in range(1, len(parts)):
             if parts[i] == forge_seg and parts[i - 1] == forge_parent:
                 return Path(*parts[:i], blueprint_seg, *parts[i + 1 :])
-        # Legacy sibling swap for explicit old-form paths (pre-rename default) on
-        # non-HPC hosts, where relocate_working_dir leaves them untouched.
+        # Legacy sibling swap for explicit old-form paths (the pre-rename default).
         if "cstar-forge-run" in run_dir.parts:
             return Path(
                 *(

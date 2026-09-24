@@ -5,8 +5,7 @@ Tests cover:
 - DataPaths dataclass
 - detect_system (the seam onto C-Star's HostNameEvaluator)
 - System layout registry / source-data path resolution
-- Bouchet scratch-root heuristic
-- _hpc_scratch_root / relocate_working_dir
+- scratch_data_home / default_working_dir / resolve_host (working_dir used as written)
 - get_data_paths / ensure_data_dirs
 """
 
@@ -24,18 +23,6 @@ from cstar.applications.forge.config import (
     register_system,
 )
 from cstar.catalog.domain_catalog import user_catalog_root
-
-# The env vars C-Star's hpc_data_directory() searches (CSTAR_SCRATCH_DIRS' default),
-# plus CSTAR_SCRATCH_DIRS itself. Cleared in tests that exercise _hpc_scratch_root /
-# relocate_working_dir so the result doesn't depend on the real host's environment.
-_SCRATCH_ENV_VARS = ("SCRATCH", "SCRATCH_DIR", "LOCAL_SCRATCH", "CSTAR_SCRATCH_DIRS")
-
-
-@pytest.fixture
-def clean_scratch_env(monkeypatch):
-    """Clear the env vars hpc_data_directory() searches, for determinism."""
-    for var in _SCRATCH_ENV_VARS:
-        monkeypatch.delenv(var, raising=False)
 
 
 class TestDataPaths:
@@ -188,9 +175,8 @@ class TestSystemLayoutRegistry:
         assert source_data == scratch_root / "cstar-forge-data" / "source-data"
 
     def test_bouchet_layout_scratch_env_override_wins(self, tmp_path, monkeypatch):
-        """An explicit $SCRATCH override (in the layout's own env dict, distinct from
-        the real-process lookup _hpc_scratch_root does) wins over the scratch_pi_*
-        glob.
+        """An explicit $SCRATCH override in the layout's env dict wins over the
+        scratch_pi_* glob.
         """
         monkeypatch.setattr(config_module, "USER", "testuser")
         (tmp_path / "scratch_pi_abc" / "testuser").mkdir(parents=True)
@@ -264,448 +250,6 @@ class TestSystemLayoutRegistry:
         home_fn = config_module._layout_home_anchored
         env = {"PROJECT": str(tmp_path / "proj")}
         assert bouchet_fn(tmp_path, env) == home_fn(tmp_path, {})
-
-
-class TestBouchetScratchRoot:
-    """Tests for _bouchet_scratch_root (the scratch_pi_* glob heuristic)."""
-
-    def test_picks_sorted_first_scratch_pi_dir(self, tmp_path, monkeypatch):
-        from cstar.applications.forge.config import _bouchet_scratch_root
-
-        monkeypatch.setattr(config_module, "USER", "testuser")
-        (tmp_path / "scratch_pi_zeta").mkdir()
-        (tmp_path / "scratch_pi_alpha").mkdir()
-        (tmp_path / "scratch_pi_mid").mkdir()
-
-        result = _bouchet_scratch_root(tmp_path)
-        assert result == tmp_path / "scratch_pi_alpha" / "testuser"
-
-    def test_skips_non_directory_matches(self, tmp_path, monkeypatch):
-        from cstar.applications.forge.config import _bouchet_scratch_root
-
-        monkeypatch.setattr(config_module, "USER", "testuser")
-        (tmp_path / "scratch_pi_notadir").write_text("not a directory")
-        (tmp_path / "scratch_pi_real").mkdir()
-
-        result = _bouchet_scratch_root(tmp_path)
-        assert result == tmp_path / "scratch_pi_real" / "testuser"
-
-    def test_returns_none_when_no_matches(self, tmp_path, monkeypatch):
-        from cstar.applications.forge.config import _bouchet_scratch_root
-
-        monkeypatch.setattr(config_module, "USER", "testuser")
-        result = _bouchet_scratch_root(tmp_path)
-        assert result is None
-
-    def test_returns_none_on_oserror(self, tmp_path, monkeypatch, caplog):
-        """A failed scan (e.g. stale mount) degrades to None instead of raising."""
-        from cstar.applications.forge.config import _bouchet_scratch_root
-
-        monkeypatch.setattr(config_module, "USER", "testuser")
-
-        def _boom(self, pattern):
-            raise OSError("stale NFS handle")
-
-        monkeypatch.setattr(Path, "glob", _boom)
-        with caplog.at_level("WARNING", logger="cstar.applications.forge.config"):
-            result = _bouchet_scratch_root(tmp_path)
-        assert result is None
-        assert "scratch_pi_*" in caplog.text
-
-
-class TestHpcScratchRoot:
-    """_hpc_scratch_root's primary mechanism is C-Star's own
-    ``find_scratch_dir``/``CSTAR_SCRATCH_DIRS`` search (``$SCRATCH``,
-    ``$SCRATCH_DIR``, ``$LOCAL_SCRATCH`` by default, in that order) against the
-    passed environment; only when none of those variables is set does Forge's
-    own per-system fallback apply. None for non-HPC names even if one of the
-    listed variables is set.
-
-    All tests use ``clean_scratch_env`` so the search's own list
-    (``CSTAR_SCRATCH_DIRS``, read from the real process environment by
-    ``find_scratch_dir``) can't pick up a leftover value from the host running
-    the tests.
-    """
-
-    def test_scratch_env_wins_on_every_hpc_system(self, tmp_path, clean_scratch_env):
-        env = {"SCRATCH": str(tmp_path / "scratch"), "PROJECT": str(tmp_path / "proj")}
-        for tag in ("perlmutter", "anvil", "bouchet"):
-            assert config_module._hpc_scratch_root(tag, env, tmp_path / "home") == (
-                tmp_path / "scratch"
-            ), tag
-
-    def test_scratch_dir_wins_when_scratch_unset(self, tmp_path, clean_scratch_env):
-        """$SCRATCH_DIR (second in CSTAR_SCRATCH_DIRS) is honoured when $SCRATCH
-        is not set -- new precedence the old $SCRATCH-only code ignored.
-        """
-        env = {"SCRATCH_DIR": str(tmp_path / "sdir"), "PROJECT": str(tmp_path / "proj")}
-        for tag in ("perlmutter", "anvil", "bouchet"):
-            assert config_module._hpc_scratch_root(tag, env, tmp_path / "home") == (
-                tmp_path / "sdir"
-            ), tag
-
-    def test_local_scratch_wins_when_scratch_and_scratch_dir_unset(
-        self, tmp_path, clean_scratch_env
-    ):
-        """$LOCAL_SCRATCH (third/last in CSTAR_SCRATCH_DIRS) is honoured when
-        neither $SCRATCH nor $SCRATCH_DIR is set.
-        """
-        env = {"LOCAL_SCRATCH": str(tmp_path / "ljob")}
-        for tag in ("perlmutter", "anvil", "bouchet"):
-            assert config_module._hpc_scratch_root(tag, env, tmp_path / "home") == (
-                tmp_path / "ljob"
-            ), tag
-
-    def test_scratch_wins_over_scratch_dir_and_local_scratch(
-        self, tmp_path, clean_scratch_env
-    ):
-        """CSTAR_SCRATCH_DIRS search order: $SCRATCH first even when the others
-        are also set.
-        """
-        env = {
-            "SCRATCH": str(tmp_path / "scratch"),
-            "SCRATCH_DIR": str(tmp_path / "sdir"),
-            "LOCAL_SCRATCH": str(tmp_path / "ljob"),
-        }
-        assert config_module._hpc_scratch_root(
-            "perlmutter", env, tmp_path / "home"
-        ) == (tmp_path / "scratch")
-
-    def test_perlmutter_falls_back_to_home_scratch(self, tmp_path, clean_scratch_env):
-        home = tmp_path / "home"
-        assert (
-            config_module._hpc_scratch_root("perlmutter", {}, home) == home / "scratch"
-        )
-
-    def test_anvil_fallback_when_scratch_unset(self, tmp_path, clean_scratch_env):
-        home = tmp_path / "home"
-        env = {"PROJECT": str(tmp_path / "proj")}
-        assert (
-            config_module._hpc_scratch_root("anvil", env, home)
-            == tmp_path / "proj" / "scratch"
-        )
-
-    def test_anvil_fallback_without_project(self, tmp_path, clean_scratch_env):
-        home = tmp_path / "home"
-        assert (
-            config_module._hpc_scratch_root("anvil", {}, home)
-            == home / "work" / "scratch"
-        )
-
-    def test_anvil_project_fallback_only_applies_when_no_scratch_dirs_var_set(
-        self, tmp_path, clean_scratch_env
-    ):
-        """A bare $SCRATCH_DIR pre-empts the $PROJECT/scratch fallback -- Forge's
-        own convention only kicks in once the CSTAR_SCRATCH_DIRS search comes up
-        empty.
-        """
-        home = tmp_path / "home"
-        env = {"SCRATCH_DIR": str(tmp_path / "sdir"), "PROJECT": str(tmp_path / "proj")}
-        assert config_module._hpc_scratch_root("anvil", env, home) == tmp_path / "sdir"
-
-    def test_bouchet_fallback_uses_scratch_pi_glob(
-        self, tmp_path, monkeypatch, clean_scratch_env
-    ):
-        home = tmp_path / "home"
-        (home / "scratch_pi_abc" / "testuser").mkdir(parents=True)
-        monkeypatch.setattr(config_module, "USER", "testuser")
-        assert (
-            config_module._hpc_scratch_root("bouchet", {}, home)
-            == home / "scratch_pi_abc" / "testuser"
-        )
-
-    def test_bouchet_returns_none_without_scratch_pi(self, tmp_path, clean_scratch_env):
-        home = tmp_path / "home"
-        home.mkdir()
-        assert config_module._hpc_scratch_root("bouchet", {}, home) is None
-
-    def test_bouchet_glob_only_applies_when_no_scratch_dirs_var_set(
-        self, tmp_path, monkeypatch, clean_scratch_env
-    ):
-        """A bare $LOCAL_SCRATCH pre-empts the scratch_pi_* glob fallback."""
-        home = tmp_path / "home"
-        (home / "scratch_pi_abc" / "testuser").mkdir(parents=True)
-        monkeypatch.setattr(config_module, "USER", "testuser")
-        env = {"LOCAL_SCRATCH": str(tmp_path / "ljob")}
-        assert (
-            config_module._hpc_scratch_root("bouchet", env, home) == tmp_path / "ljob"
-        )
-
-    def test_non_hpc_name_returns_none_even_if_scratch_is_set(
-        self, tmp_path, clean_scratch_env
-    ):
-        env = {"SCRATCH": str(tmp_path / "scratch")}
-        for tag in ("darwin_arm64", "linux_x86_64", "derecho"):
-            assert (
-                config_module._hpc_scratch_root(tag, env, tmp_path / "home") is None
-            ), tag
-
-    def test_non_hpc_name_returns_none_even_if_scratch_dir_is_set(
-        self, tmp_path, clean_scratch_env
-    ):
-        env = {"SCRATCH_DIR": str(tmp_path / "sdir")}
-        for tag in ("darwin_arm64", "linux_x86_64", "derecho"):
-            assert (
-                config_module._hpc_scratch_root(tag, env, tmp_path / "home") is None
-            ), tag
-
-    def test_uses_cstar_find_scratch_dir_not_a_reimplemented_loop(
-        self, tmp_path, clean_scratch_env, monkeypatch
-    ):
-        """_hpc_scratch_root defers to cstar.base.env.find_scratch_dir (the
-        single definition of the CSTAR_SCRATCH_DIRS search) rather than
-        re-implementing the loop -- assert the seam is actually called.
-        """
-        calls = []
-
-        def _fake_find_scratch_dir(env):
-            calls.append(dict(env))
-            return None
-
-        monkeypatch.setattr(config_module, "find_scratch_dir", _fake_find_scratch_dir)
-        home = tmp_path / "home"
-        env = {"SCRATCH": str(tmp_path / "scratch")}
-        config_module._hpc_scratch_root("perlmutter", env, home)
-        assert calls == [env]
-
-
-class TestRelocateWorkingDir:
-    """Tests for relocate_working_dir (default-form paths rebase onto HPC scratch)."""
-
-    def test_default_path_rebases_to_scratch_on_perlmutter(
-        self, tmp_path, monkeypatch, clean_scratch_env
-    ):
-        from cstar.applications.forge.config import relocate_working_dir
-
-        home = tmp_path / "home"
-        wd = relocate_working_dir(
-            home / "cstar" / "_forge_bp_runs" / "my-run",
-            system_tag="perlmutter",
-            env={"SCRATCH": str(tmp_path / "scratch")},
-            home=home,
-        )
-        assert wd == tmp_path / "scratch" / "cstar" / "_forge_bp_runs" / "my-run"
-
-    def test_default_path_rebases_to_scratch_on_anvil(
-        self, tmp_path, monkeypatch, clean_scratch_env
-    ):
-        from cstar.applications.forge.config import relocate_working_dir
-
-        home = tmp_path / "home"
-        wd = relocate_working_dir(
-            home / "cstar" / "_forge_bp_runs" / "my-run",
-            system_tag="anvil",
-            env={
-                "SCRATCH": str(tmp_path / "scratch"),
-                "PROJECT": str(tmp_path / "proj"),
-            },
-            home=home,
-        )
-        assert wd == tmp_path / "scratch" / "cstar" / "_forge_bp_runs" / "my-run"
-
-    def test_anvil_falls_back_to_project_scratch(
-        self, tmp_path, monkeypatch, clean_scratch_env
-    ):
-        """No $SCRATCH: the fallback derives from $PROJECT; $WORK is ignored."""
-        from cstar.applications.forge.config import relocate_working_dir
-
-        home = tmp_path / "home"
-        env = {"PROJECT": str(tmp_path / "proj"), "WORK": str(tmp_path / "work")}
-        wd = relocate_working_dir(
-            home / "cstar" / "_forge_bp_runs" / "my-run",
-            system_tag="anvil",
-            env=env,
-            home=home,
-        )
-        assert (
-            wd == tmp_path / "proj" / "scratch" / "cstar" / "_forge_bp_runs" / "my-run"
-        )
-
-    def test_legacy_cstar_forge_run_root_rebases_to_scratch(
-        self, tmp_path, monkeypatch, clean_scratch_env
-    ):
-        """The legacy sentinel (``~/cstar-forge-run``, the default before this
-        rename) rebases onto the *current* scratch working root, so old
-        blueprints no longer write into the old sibling location on HPC.
-        """
-        from cstar.applications.forge.config import relocate_working_dir
-
-        home = tmp_path / "home"
-        wd = relocate_working_dir(
-            home / "cstar-forge-run" / "my-run",
-            system_tag="perlmutter",
-            env={"SCRATCH": str(tmp_path / "scratch")},
-            home=home,
-        )
-        assert wd == tmp_path / "scratch" / "cstar" / "_forge_bp_runs" / "my-run"
-
-    def test_non_hpc_leaves_path_alone(self, tmp_path, monkeypatch, clean_scratch_env):
-        from cstar.applications.forge.config import relocate_working_dir
-
-        home = tmp_path / "home"
-        wd = relocate_working_dir(
-            home / "cstar-forge-run" / "my-run",
-            system_tag="darwin_arm64",
-            env={"SCRATCH": str(tmp_path / "scratch")},
-            home=home,
-        )
-        assert wd == home / "cstar-forge-run" / "my-run"
-
-    def test_custom_path_passes_through_on_hpc(
-        self, tmp_path, monkeypatch, clean_scratch_env
-    ):
-        from cstar.applications.forge.config import relocate_working_dir
-
-        home = tmp_path / "home"
-        monkeypatch.setenv("SCRATCH", str(tmp_path / "scratch"))
-        custom = tmp_path / "elsewhere" / "my-run"
-        wd = relocate_working_dir(
-            custom,
-            system_tag="perlmutter",
-            env={},
-            home=home,
-        )
-        assert wd == custom
-
-    def test_legacy_default_root_rebases_to_scratch(
-        self, tmp_path, monkeypatch, clean_scratch_env
-    ):
-        """The legacy sentinel (``~/cstar-forge-data/cstar-forge-run``, from blueprints
-        authored before the default was renamed) rebases onto the *current* scratch
-        working root, so old blueprints no longer write into home on HPC.
-        """
-        from cstar.applications.forge.config import relocate_working_dir
-
-        home = tmp_path / "home"
-        wd = relocate_working_dir(
-            home / "cstar-forge-data" / "cstar-forge-run" / "my-run",
-            system_tag="perlmutter",
-            env={"SCRATCH": str(tmp_path / "scratch")},
-            home=home,
-        )
-        assert wd == tmp_path / "scratch" / "cstar" / "_forge_bp_runs" / "my-run"
-
-    def test_bare_cstar_forge_data_path_passes_through(
-        self, tmp_path, monkeypatch, clean_scratch_env
-    ):
-        """The legacy match is deliberately narrow: only the nested
-        ``cstar-forge-data/cstar-forge-run`` sentinel rebases. A bare path under
-        ``~/cstar-forge-data`` (which is also the mac/dev source_data cache base)
-        is a user choice and passes through untouched.
-        """
-        from cstar.applications.forge.config import relocate_working_dir
-
-        home = tmp_path / "home"
-        monkeypatch.setenv("SCRATCH", str(tmp_path / "scratch"))
-        custom = home / "cstar-forge-data" / "my-hand-picked-run"
-        wd = relocate_working_dir(
-            custom,
-            system_tag="perlmutter",
-            env={},
-            home=home,
-        )
-        assert wd == custom
-
-    def test_home_rooted_nondefault_warns_on_hpc(
-        self, tmp_path, monkeypatch, clean_scratch_env, caplog
-    ):
-        """A home-rooted path that matches no default root is left in home on HPC;
-        warn so an unrelocated (e.g. very old default) run doesn't go unnoticed.
-        """
-        from cstar.applications.forge.config import relocate_working_dir
-
-        home = tmp_path / "home"
-        monkeypatch.setenv("SCRATCH", str(tmp_path / "scratch"))
-        custom = home / "cstar-forge-data" / "my-hand-picked-run"
-        with caplog.at_level(logging.WARNING, logger="cstar.applications.forge.config"):
-            wd = relocate_working_dir(
-                custom,
-                system_tag="perlmutter",
-                env={},
-                home=home,
-            )
-        assert wd == custom
-        assert "was not relocated to scratch" in caplog.text
-
-    def test_off_home_custom_path_does_not_warn(
-        self, tmp_path, monkeypatch, clean_scratch_env, caplog
-    ):
-        """A deliberate path outside home is normal and must not warn."""
-        from cstar.applications.forge.config import relocate_working_dir
-
-        home = tmp_path / "home"
-        monkeypatch.setenv("SCRATCH", str(tmp_path / "scratch"))
-        custom = tmp_path / "elsewhere" / "my-run"
-        with caplog.at_level(logging.WARNING, logger="cstar.applications.forge.config"):
-            wd = relocate_working_dir(
-                custom,
-                system_tag="perlmutter",
-                env={},
-                home=home,
-            )
-        assert wd == custom
-        assert caplog.text == ""
-
-    def test_default_path_rebases_to_scratch_on_bouchet(
-        self, tmp_path, monkeypatch, clean_scratch_env
-    ):
-        from cstar.applications.forge.config import relocate_working_dir
-
-        monkeypatch.setattr(config_module, "USER", "testuser")
-        home = tmp_path / "home"
-        (home / "scratch_pi_abc" / "testuser").mkdir(parents=True)
-        wd = relocate_working_dir(
-            home / "cstar" / "_forge_bp_runs" / "my-run",
-            system_tag="bouchet",
-            env={},
-            home=home,
-        )
-        assert (
-            wd
-            == home
-            / "scratch_pi_abc"
-            / "testuser"
-            / "cstar"
-            / "_forge_bp_runs"
-            / "my-run"
-        )
-
-    def test_bouchet_without_scratch_pi_leaves_path_alone(
-        self, tmp_path, monkeypatch, clean_scratch_env
-    ):
-        """With no scratch_pi_* dir discoverable, _hpc_scratch_root returns None,
-        so relocate_working_dir returns the path unchanged (same as any other
-        HPC system with no resolvable scratch root -- no warning in this branch,
-        since the function returns before the home-rooted-warning check).
-        """
-        from cstar.applications.forge.config import relocate_working_dir
-
-        monkeypatch.setattr(config_module, "USER", "testuser")
-        home = tmp_path / "home"
-        home.mkdir(parents=True)
-        custom = home / "cstar" / "_forge_bp_runs" / "my-run"
-        wd = relocate_working_dir(
-            custom,
-            system_tag="bouchet",
-            env={},
-            home=home,
-        )
-        assert wd == custom
-
-    def test_tilde_default_expands_then_rebases(
-        self, tmp_path, monkeypatch, clean_scratch_env
-    ):
-        from cstar.applications.forge.config import relocate_working_dir
-
-        home = tmp_path / "home"
-        monkeypatch.setenv("HOME", str(home))
-        wd = relocate_working_dir(
-            "~/cstar/_forge_bp_runs/my-run",
-            system_tag="perlmutter",
-            env={"SCRATCH": str(tmp_path / "scratch")},
-            home=home,
-        )
-        assert wd == tmp_path / "scratch" / "cstar" / "_forge_bp_runs" / "my-run"
 
 
 class TestGetDataPaths:
@@ -783,3 +327,97 @@ class TestFormatPaths:
         monkeypatch.setattr(config_module.platform, "node", lambda: "")
         monkeypatch.setenv("HOSTNAME", "from-env")
         assert config_module._hostname() == "from-env"
+
+
+@pytest.fixture
+def fake_home(monkeypatch, tmp_path):
+    """Point ``$HOME`` (what ``Path.home()`` and ``expanduser`` read) at a temp dir."""
+    home = tmp_path / "home"
+    home.mkdir()
+    monkeypatch.setenv("HOME", str(home))
+    return home
+
+
+def _patch_data_home(monkeypatch, path: Path) -> None:
+    monkeypatch.setattr(
+        config_module.DirectoryManager, "data_home", classmethod(lambda cls: path)
+    )
+
+
+class TestScratchDataHome:
+    """scratch_data_home: C-Star's data home when it is off $HOME, else None."""
+
+    def test_returns_data_home_when_off_home(self, monkeypatch, tmp_path, fake_home):
+        scratch = (tmp_path / "scratch" / "cstar").resolve()
+        _patch_data_home(monkeypatch, scratch)
+        assert config_module.scratch_data_home() == scratch
+
+    def test_returns_none_when_data_home_is_under_home(
+        self, monkeypatch, tmp_path, fake_home
+    ):
+        _patch_data_home(monkeypatch, (fake_home / "cstar" / "cstar").resolve())
+        assert config_module.scratch_data_home() is None
+
+
+class TestDefaultWorkingDir:
+    """default_working_dir: what the wizard writes for a new blueprint."""
+
+    def test_uses_scratch_data_home_when_available(self, monkeypatch, tmp_path):
+        scratch = tmp_path / "scratch" / "cstar"
+        monkeypatch.setattr(config_module, "scratch_data_home", lambda: scratch)
+        assert (
+            config_module.default_working_dir("run1")
+            == (scratch / "_forge_bp_runs" / "run1").as_posix()
+        )
+
+    def test_falls_back_to_portable_default(self, monkeypatch):
+        monkeypatch.setattr(config_module, "scratch_data_home", lambda: None)
+        assert (
+            config_module.default_working_dir("run1") == "~/cstar/_forge_bp_runs/run1"
+        )
+
+
+class TestResolveHost:
+    """resolve_host uses the blueprint's working_dir as written (after ~ expansion)."""
+
+    def test_expands_tilde_and_keeps_path(self, monkeypatch, fake_home):
+        monkeypatch.setattr(config_module, "scratch_data_home", lambda: None)
+        host = config_module.resolve_host("~/cstar/_forge_bp_runs/run1")
+        assert host.working_dir == fake_home / "cstar" / "_forge_bp_runs" / "run1"
+        assert host.source_data_cache == config_module.paths.source_data
+        assert host.system == config_module.system
+
+    def test_default_form_path_is_not_relocated(self, monkeypatch, tmp_path, fake_home):
+        """No scratch rebase any more: even with a scratch data home, the stored
+        path is honoured (with a warning, tested below).
+        """
+        scratch = tmp_path / "scratch" / "cstar"
+        monkeypatch.setattr(config_module, "scratch_data_home", lambda: scratch)
+        host = config_module.resolve_host("~/cstar/_forge_bp_runs/run1")
+        assert host.working_dir == fake_home / "cstar" / "_forge_bp_runs" / "run1"
+
+    def test_warns_when_home_rooted_on_scratch_host(
+        self, monkeypatch, tmp_path, fake_home, caplog
+    ):
+        scratch = tmp_path / "scratch" / "cstar"
+        monkeypatch.setattr(config_module, "scratch_data_home", lambda: scratch)
+        with caplog.at_level(logging.WARNING, logger="cstar.applications.forge.config"):
+            config_module.resolve_host("~/cstar/_forge_bp_runs/run1")
+        assert "under $HOME" in caplog.text
+        assert str(scratch / "_forge_bp_runs") in caplog.text
+
+    def test_no_warning_without_scratch_data_home(self, monkeypatch, fake_home, caplog):
+        monkeypatch.setattr(config_module, "scratch_data_home", lambda: None)
+        with caplog.at_level(logging.WARNING, logger="cstar.applications.forge.config"):
+            config_module.resolve_host("~/cstar/_forge_bp_runs/run1")
+        assert caplog.text == ""
+
+    def test_no_warning_for_off_home_path(
+        self, monkeypatch, tmp_path, fake_home, caplog
+    ):
+        scratch = tmp_path / "scratch" / "cstar"
+        monkeypatch.setattr(config_module, "scratch_data_home", lambda: scratch)
+        with caplog.at_level(logging.WARNING, logger="cstar.applications.forge.config"):
+            host = config_module.resolve_host(tmp_path / "elsewhere" / "run1")
+        assert host.working_dir == tmp_path / "elsewhere" / "run1"
+        assert caplog.text == ""

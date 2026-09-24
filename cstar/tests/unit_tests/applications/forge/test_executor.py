@@ -2029,7 +2029,7 @@ class TestForgeExecutorRomsBlueprintWorkingDir:
     ):
         """A ``_forge_bp_runs`` segment NOT under ``cstar/`` is a coincidence in a
         custom path, not the default root -- it falls through to the fallback
-        instead of being rewritten (mirrors relocate_working_dir's anchored match).
+        instead of being rewritten (the anchored two-segment match).
         """
         builder = _make_builder(minimal_cstar_spec_builder_args)
         run_dir = Path("/custom/_forge_bp_runs/my_run_name")

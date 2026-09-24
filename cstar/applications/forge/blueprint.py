@@ -361,9 +361,9 @@ FORGE_BLUEPRINT_VERSION = 8
 DEFAULT_APPLICATION = "forge"
 
 # Default per-run artifact root. The bare root (no run-name subdirectory) is the
-# spec-default sentinel: ForgeBlueprint expands it to ``<root>/<name>`` on validation,
-# and host providers (Forge's ``config.resolve_host``; eventually C-Star) may rebase
-# default-form paths onto host scratch at run time.
+# spec-default sentinel: ForgeBlueprint expands it to ``<root>/<name>`` on validation.
+# The value is used as written at run time (``config.resolve_host``); the wizard
+# substitutes ``config.default_working_dir`` when it saves a new blueprint.
 DEFAULT_WORKING_ROOT = "~/cstar/_forge_bp_runs"
 
 # Sibling root segment under the shared ``cstar/`` root (alongside
@@ -1610,8 +1610,8 @@ class ForgeBlueprint(Blueprint):
         """Override the ``Blueprint`` base validator of the same name, which expects
         a ``Path`` and eagerly expands/resolves it. Forge's ``working_dir`` is a
         ``str`` sentinel that ``_default_working_dir_includes_name`` (below) rewrites
-        relative to the blueprint name; expansion to an absolute host path happens
-        later, at processing time, once the real host's scratch root is known.
+        relative to the blueprint name; ``~`` expansion happens later, at
+        processing time.
         """
         return value
 
@@ -1626,6 +1626,15 @@ class ForgeBlueprint(Blueprint):
         if self.working_dir.rstrip("/") == DEFAULT_WORKING_ROOT:
             self.working_dir = f"{DEFAULT_WORKING_ROOT}/{self.name}"
         return self
+
+    @property
+    def has_default_working_dir(self) -> bool:
+        """``True`` while ``working_dir`` is still the expanded spec default.
+
+        The wizard uses this to decide whether to substitute the machine's own
+        default location when it saves a file.
+        """
+        return self.working_dir == f"{DEFAULT_WORKING_ROOT}/{self.name}"
 
     # ---- derived naming (single source of truth: name + dates) ----
     @property

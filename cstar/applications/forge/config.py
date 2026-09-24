@@ -1,16 +1,15 @@
-"""Forge's disposable host-resolution layer.
+"""Forge's host-resolution layer.
 
 A thin adapter over C-Star's own system layer (:mod:`cstar.system.manager`,
-:mod:`cstar.base.env`): :func:`detect_system` is the single seam that asks
-C-Star who we're running on, and everything below it only maps that name onto
-the on-disk paths Forge has always used. When Forge relocates into C-Star this
-module is dropped and callers take C-Star's equivalent host resolution
-instead -- see :mod:`cstar.applications.forge.host`.
+:mod:`cstar.base.env`, :mod:`cstar.execution.file_system`): :func:`detect_system`
+is the single seam that asks C-Star who we're running on, the layout registry maps
+that name onto the durable source-data cache, and :func:`resolve_host` packages the
+result with the blueprint's own ``working_dir`` -- used as written, like every other
+C-Star application -- into :class:`cstar.applications.forge.host.HostPaths`.
 """
 
 from __future__ import annotations
 
-import getpass
 import json
 import logging
 import os
@@ -20,25 +19,19 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 
-from cstar.base.env import find_scratch_dir
+from cstar.applications.forge.blueprint import DEFAULT_WORKING_ROOT
 from cstar.catalog.domain_catalog import user_catalog_root
-from cstar.system.manager import HostNameEvaluator
+from cstar.execution.file_system import DirectoryManager
+from cstar.system.manager import (
+    HostNameEvaluator,
+    current_user,
+    find_bouchet_scratch_root,
+)
 
 logger = logging.getLogger(__name__)
 
 
-def _detect_user() -> str:
-    """Best-effort current username; never raises (containers/CI may lack $USER)."""
-    user = os.environ.get("USER")
-    if user:
-        return user
-    try:
-        return getpass.getuser()
-    except Exception:
-        return "unknown"
-
-
-USER = _detect_user()
+USER = current_user()
 
 
 def _ensure_dir(path: Path) -> Path:
@@ -77,36 +70,6 @@ def detect_system() -> str:
     exist alongside this one -- see ``SYSTEM_LAYOUT_REGISTRY`` below.
     """
     return HostNameEvaluator().name
-
-
-def _bouchet_scratch_root(home: Path) -> Path | None:
-    """Best-effort per-user scratch root on Yale's Bouchet cluster.
-
-    Bouchet exposes no ``$SCRATCH`` env var. Instead, each user's home carries
-    per-project symlinks named ``scratch_pi_<pi-netid>`` (the suffix is
-    unpredictable), and inside each of those the user has a subdirectory named
-    after their own username. We glob ``home/scratch_pi_*``, keep only
-    directories (``is_dir()`` follows symlinks, so the per-project symlinks
-    themselves qualify), sort for determinism, and take the first match,
-    appending the current username. Returns ``None`` if no such directory is
-    found or the scan fails (e.g. a stale/permission-restricted mount behind
-    one of the symlinks) -- this runs at module import via ``get_data_paths``,
-    so it must never raise. C-Star's own ``BouchetSystemContext`` (see
-    ``cstar/system/manager.py``) has no equivalent scratch helper of its own,
-    so this heuristic stays forge-local.
-    """
-    try:
-        candidates = sorted(p for p in home.glob("scratch_pi_*") if p.is_dir())
-    except OSError:
-        logger.warning(
-            "Failed to scan %s for scratch_pi_* directories; falling back to a "
-            "home-anchored layout. Set $SCRATCH to override.",
-            home,
-        )
-        return None
-    if not candidates:
-        return None
-    return candidates[0] / USER
 
 
 # --------------------------------------------------------
@@ -182,9 +145,9 @@ def _layout_bouchet(home: Path, env: Mapping[str, str]) -> Path:
     """Path layout for Yale's Bouchet cluster.
 
     Bouchet has no ``$SCRATCH`` env var, so the scratch root is discovered via
-    :func:`_bouchet_scratch_root`'s ``scratch_pi_*`` glob heuristic unless an
-    explicit ``$SCRATCH`` override is set (consistent with the other HPC
-    layouts above). ``$PROJECT``, when set, moves the data base to
+    C-Star's :func:`cstar.system.manager.find_bouchet_scratch_root` (the
+    ``scratch_pi_*`` directories under home) unless an explicit ``$SCRATCH``
+    override is set (consistent with the other HPC layouts above). ``$PROJECT``, when set, moves the data base to
     ``$PROJECT/cstar-forge-data``, like the other layouts. Falls back to the
     home-anchored layout -- ignoring ``$PROJECT`` -- if no scratch root can be
     found.
@@ -193,7 +156,7 @@ def _layout_bouchet(home: Path, env: Mapping[str, str]) -> Path:
     if "SCRATCH" in env:
         scratch_root = Path(env["SCRATCH"])
     else:
-        scratch_root = _bouchet_scratch_root(home)
+        scratch_root = find_bouchet_scratch_root(home, USER)
 
     if scratch_root is None:
         logger.warning(
@@ -206,7 +169,7 @@ def _layout_bouchet(home: Path, env: Mapping[str, str]) -> Path:
     if "PROJECT" in env:
         base = Path(env["PROJECT"]) / "cstar-forge-data"
     else:
-        # Per-user scratch: the root discovered by _bouchet_scratch_root
+        # Per-user scratch: the root discovered by find_bouchet_scratch_root
         # already ends in the username, so no extra USER layer is added. This
         # also means source_data is per-user in this mode (not project-shared
         # as on Anvil) -- set $PROJECT to share it.
@@ -265,132 +228,70 @@ paths = get_data_paths()
 system = detect_system()
 
 
-_HPC_SYSTEM_TAGS = frozenset({"perlmutter", "anvil", "bouchet"})
+FORGE_RUNS_SEGMENT = Path(DEFAULT_WORKING_ROOT).name  # "_forge_bp_runs"
 
 
-def _hpc_scratch_root(
-    system_tag: str, env: Mapping[str, str], home: Path
-) -> Path | None:
-    """Bare scratch root for HPC systems, ``None`` elsewhere.
+def scratch_data_home() -> Path | None:
+    """C-Star's data home when it lies outside ``$HOME``, else ``None``.
 
-    Primary mechanism is C-Star's own :func:`cstar.base.env.find_scratch_dir`,
-    which tries the ``CSTAR_SCRATCH_DIRS`` variables (``$SCRATCH``,
-    ``$SCRATCH_DIR``, ``$LOCAL_SCRATCH`` by default) in order -- the same
-    search :func:`cstar.base.env.hpc_data_directory` runs for
-    ``CSTAR_DATA_HOME``, so there is one definition of "where scratch is" in
-    the package. Only when none of those variables is set does Forge fall back
-    to its own per-system convention, because C-Star's search cannot know
-    these: ``~/scratch`` on Perlmutter; ``$PROJECT/scratch`` (or
-    ``~/work/scratch``) on Anvil; the globbed ``scratch_pi_*/<user>`` root on
-    Bouchet, which exports no scratch env var at all. On the real default
-    environment of each of these systems this returns the same path as
-    before: Anvil and Perlmutter both export ``$SCRATCH``, which
-    ``find_scratch_dir`` finds first; Bouchet exports none of the listed
-    variables, so the search falls through to the glob exactly as it did
-    before. ``$SCRATCH``/``$SCRATCH_DIR``/``$LOCAL_SCRATCH`` are per-user on
-    these machines, so no extra username layer is inserted. Non-HPC names
-    (``"darwin_arm64"``, ``"linux_x86_64"``) return ``None`` even if the
-    environment happens to carry one of those variables.
+    ``DirectoryManager.data_home()`` resolves onto the scratch file system on
+    supported HPC systems, and wherever ``CSTAR_DATA_HOME`` points explicitly; on
+    a laptop it stays under home, which is not a scratch location and so reads as
+    ``None`` here.
     """
-    if system_tag not in _HPC_SYSTEM_TAGS:
-        return None
-    if scratch_dir := find_scratch_dir(env):
-        return Path(scratch_dir)
-    if system_tag == "perlmutter":
-        return home / "scratch"
-    if system_tag == "anvil":
-        project = Path(env.get("PROJECT", home / "work"))
-        return project / "scratch"
-    return _bouchet_scratch_root(home)  # system_tag == "bouchet"
+    data_home = DirectoryManager.data_home()
+    return None if data_home.is_relative_to(Path.home().resolve()) else data_home
 
 
-# Home-relative default working roots a stored ``working_dir`` may carry, all
-# rebased onto ``$SCRATCH/cstar/_forge_bp_runs/<relative part>`` on HPC. The current
-# default (``~/cstar/_forge_bp_runs``) plus the two legacy sentinels from blueprints
-# authored before this rename (``~/cstar-forge-run``, current since commit 3826bbee)
-# and before that one (``~/cstar-forge-data/cstar-forge-run``), which the current
-# prefix would otherwise miss -- leaving those runs writing into home. The roots are
-# disjoint, so match order is irrelevant. Kept intentionally narrow: a bare
-# ``~/cstar-forge-data`` match would also rebase the home-anchored source_data
-# cache, which lives under that same base.
-_DEFAULT_WORKING_ROOTS: tuple[str, ...] = (
-    "cstar/_forge_bp_runs",
-    "cstar-forge-run",
-    "cstar-forge-data/cstar-forge-run",
-)
-_SCRATCH_WORKING_ROOT = "cstar/_forge_bp_runs"
+def default_working_dir(name: str) -> str:
+    """The ``working_dir`` the wizard writes into a new blueprint named *name*.
 
-
-def relocate_working_dir(
-    working_dir,
-    *,
-    system_tag: str | None = None,
-    env: dict | None = None,
-    home: Path | None = None,
-) -> Path:
-    """Rebase a default-form ``working_dir`` onto the host's scratch data root.
-
-    The ForgeBlueprint stores ``working_dir`` with a home-rooted default
-    (``~/cstar/_forge_bp_runs/<name>``, or a legacy root -- ``~/cstar-forge-run`` or
-    ``~/cstar-forge-data/cstar-forge-run`` -- from older blueprints). On HPC systems
-    that path belongs on scratch, so any path under one of those default roots is
-    rebased to ``$SCRATCH/cstar/_forge_bp_runs/<same relative part>``. Paths outside
-    the default roots are a deliberate user choice and pass through untouched
-    (expanded only).
-
-    This is a stand-in for C-Star's eventual runtime override of the spec's
-    ``working_dir``; keyword args exist for tests and default to the live host.
+    ``<data home>/_forge_bp_runs/<name>`` when this machine's C-Star data home is
+    off ``$HOME`` (scratch on HPC, or an explicit ``CSTAR_DATA_HOME``), so a
+    blueprint authored on a login node lands beside the workplan runs; otherwise
+    the portable ``~/cstar/_forge_bp_runs/<name>`` default. Nothing rewrites the
+    value afterwards: Forge writes exactly where the blueprint says.
     """
-    env = dict(os.environ) if env is None else env
-    home = Path.home() if home is None else Path(home)
-    system_tag = system if system_tag is None else system_tag
+    root = scratch_data_home()
+    if root is None:
+        return f"{DEFAULT_WORKING_ROOT}/{name}"
+    return (root / FORGE_RUNS_SEGMENT / name).as_posix()
 
-    wd = Path(working_dir).expanduser()
-    scratch_root = _hpc_scratch_root(system_tag, env, home)
-    if scratch_root is None:
-        return wd
-    for root in _DEFAULT_WORKING_ROOTS:
-        try:
-            rel = wd.relative_to(home / root)
-        except ValueError:
-            continue
-        return scratch_root / _SCRATCH_WORKING_ROOT / rel
-    if wd.is_relative_to(home):
-        # HPC, but the path is home-rooted and matched no default root, so it is left
-        # in home instead of being relocated to scratch. Usually a deliberate choice;
-        # occasionally an unrecognized (e.g. very old) default that should have landed
-        # on scratch -- worth a heads-up either way.
-        logger.warning(
-            "working_dir %s is under $HOME on an HPC system and was not relocated to "
-            "scratch (%s); generated data will be written to home. If this was not "
-            "intended, set working_dir under %s.",
-            wd,
-            scratch_root / _SCRATCH_WORKING_ROOT,
-            home / _SCRATCH_WORKING_ROOT,
-        )
-    return wd
+
+def _warn_if_home_rooted_on_scratch_host(wd: Path) -> None:
+    """Warn when *wd* sits under ``$HOME`` on a machine whose data home is on scratch.
+
+    Usually a blueprint authored elsewhere that kept the portable default. The
+    inputs are still written where the blueprint says, which on a cluster means
+    the quota-limited home file system.
+    """
+    root = scratch_data_home()
+    if root is None or not wd.is_relative_to(Path.home()):
+        return
+    logger.warning(
+        "working_dir %s is under $HOME while this system's C-Star data home is %s; "
+        "generated inputs will be written to home. Set working_dir under %s if "
+        "this was not intended.",
+        wd,
+        root,
+        root / FORGE_RUNS_SEGMENT,
+    )
 
 
 def resolve_host(working_dir):
-    """Build the forge application's ``HostPaths`` from auto-detected Forge config.
+    """Build the forge application's ``HostPaths`` for this machine.
 
-    ``working_dir`` is the per-run artifact root (typically the spec's ``working_dir``,
-    expanded, or a host override); everything the executor produces lands under it.
-    Default-form paths (under ``~/cstar/_forge_bp_runs``) are rebased onto host
-    scratch on HPC systems via :func:`relocate_working_dir`.
-
-    This is Forge's **disposable** host provider: it auto-detects the machine (via
-    C-Star's own :func:`detect_system`) for the source-data cache + machine identity.
-    When the forge application relocates into C-Star, C-Star supplies an equivalent
-    ``HostPaths`` from its own host resolution and this function is not carried over.
+    ``working_dir`` is the blueprint's own value (or a ``--working-dir`` override),
+    used exactly as written after ``~`` expansion -- the same contract as every
+    other C-Star application; inside a workplan the step's assigned directory
+    arrives here already. The source-data cache and machine identity come from
+    this module's system detection.
     """
     from cstar.applications.forge.host import HostPaths
 
-    return HostPaths(
-        working_dir=relocate_working_dir(working_dir),
-        source_data_cache=paths.source_data,
-        system=system,
-    )
+    wd = Path(working_dir).expanduser()
+    _warn_if_home_rooted_on_scratch_host(wd)
+    return HostPaths(working_dir=wd, source_data_cache=paths.source_data, system=system)
 
 
 def _paths_to_dict(dp: DataPaths) -> dict:
