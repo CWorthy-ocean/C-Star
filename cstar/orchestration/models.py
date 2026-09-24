@@ -25,7 +25,7 @@ from pydantic import (
     model_validator,
 )
 
-from cstar.base.utils import generate_schema_ref, slugify
+from cstar.base.utils import generate_schema_ref, lazy_import, slugify
 from cstar.orchestration.serialization import register_representer, strenum_representer
 
 RequiredString: t.TypeAlias = t.Annotated[
@@ -33,6 +33,8 @@ RequiredString: t.TypeAlias = t.Annotated[
     StringConstraints(strip_whitespace=True, min_length=1),
 ]
 """A non-empty string with no leading or trailing whitespace."""
+
+nx = lazy_import("networkx")
 
 KeyValueStore: t.TypeAlias = dict[
     str,
@@ -612,6 +614,28 @@ class Workplan(ConfiguredBaseModel):
             raise ValueError(msg)
 
         return value
+
+    @field_validator("steps", mode="after")
+    @classmethod
+    def _check_dependency_cycles(cls, value: Sequence[Step]) -> Sequence[Step]:
+        """Verify the step dependency graph contains no cycles.
+
+        Parameters
+        ----------
+        value : Sequence[Step]
+            The steps in the workplan.
+        """
+        graph = nx.DiGraph(
+            (dep, step.name) for step in value for dep in step.depends_on
+        )
+        try:
+            cycle = nx.find_cycle(graph)
+        except nx.NetworkXNoCycle:
+            return value
+
+        names = " -> ".join([cycle[0][0], *(dst for _, dst in cycle)])
+        msg = f"Dependency cycle detected: {names}"
+        raise ValueError(msg)
 
     @field_validator("steps", mode="after")
     @classmethod
