@@ -1,4 +1,3 @@
-import re
 import subprocess
 import typing as t
 from datetime import datetime
@@ -17,6 +16,7 @@ from cstar.base.utils import lazy_import
 from cstar.entrypoint.runner import BlueprintRunner
 from cstar.execution.handler import ExecutionStatus
 from cstar.orchestration.models import Blueprint
+from cstar.roms.input_dataset import read_model_reference_date
 
 roms_tools = lazy_import("roms_tools")
 
@@ -107,9 +107,6 @@ class NestIcRunner(BlueprintRunner[NestIcBlueprint]):
     def _model_reference_date(filepath: Path) -> datetime:
         """Read the parent simulation's model reference date from a restart file.
 
-        ROMS records the namelist ``reference_date`` only in the ``long_name``
-        attribute of ``ocean_time``, formatted as ``Time since YYYY/MM/DD``.
-
         Parameters
         ----------
         filepath : Path
@@ -125,25 +122,15 @@ class NestIcRunner(BlueprintRunner[NestIcBlueprint]):
             If the metadata is missing or does not hold a valid date; roms-tools
             cannot read a ROMS source without it either.
         """
-        with xr.open_dataset(filepath.as_posix()) as ds:
-            ocean_time = ds.variables.get("ocean_time")
-            long_name = (
-                ocean_time.attrs.get("long_name", "") if ocean_time is not None else ""
+        recorded = read_model_reference_date(filepath)
+        if recorded is None:
+            msg = (
+                f"Unable to read the model reference date from {filepath}: expected "
+                "a `model_reference_date` global attribute or an `ocean_time` "
+                "long_name of the form 'Time since YYYY/MM/DD'."
             )
-
-        if match := re.search(r"(\d{4})/(\d{2})/(\d{2})", str(long_name)):
-            year, month, day = map(int, match.groups())
-            try:
-                return datetime(year, month, day)
-            except ValueError:
-                pass
-
-        msg = (
-            f"Unable to read the model reference date from {filepath}: expected an "
-            f"`ocean_time` long_name of the form 'Time since YYYY/MM/DD', found "
-            f"{long_name!r}."
-        )
-        raise ValueError(msg)
+            raise ValueError(msg)
+        return recorded.date
 
     def _create_initial_conditions(
         self,

@@ -1,4 +1,5 @@
 import datetime as dt
+import re
 import shutil
 import tempfile
 from abc import ABC
@@ -122,6 +123,133 @@ class DatasetLinker(LoggingMixin):
         self.log.info(msg)
 
 
+_ROMS_TIME_LONG_NAME_RE = re.compile(r"Time since (\d{4})/(\d{2})/(\d{2})")
+_ROMS_TOOLS_TIME_LONG_NAME_RE = re.compile(
+    r"relative time: (?:days|seconds) since (.+)"
+)
+
+
+@dataclass(frozen=True)
+class RecordedReferenceDate:
+    """A model reference date read from a file, together with whether the
+    file's time axis is cyclic (a roms-tools climatology).
+
+    ROMS treats a time axis as cyclic when its time variable carries a
+    ``cycle_length`` attribute. roms-tools writes each record of a
+    climatology file as a day-of-year offset from Jan 1, less the same
+    offset for ``model_reference_date`` -- so for a cyclic file the
+    calendar *year* of the reference date is arbitrary noise: only its
+    offset from Jan 1 of its own year survives into the record values.
+    """
+
+    date: dt.datetime
+    """The reference date recorded in the file."""
+    cyclic: bool
+    """Whether the file's time axis is cyclic (a roms-tools climatology)."""
+
+    def aligns_with(self, reference_date: dt.datetime) -> bool:
+        """Check this recorded date against a simulation's namelist reference date.
+
+        A non-cyclic file's date must match exactly. A cyclic file's records
+        only encode an offset from Jan 1 of the reference date's own year
+        (see class docstring), so only that offset has to match -- e.g. a
+        climatology recorded against 2000-01-01 aligns with a namelist
+        reference date of 1995-01-01, but not with 2000-07-01.
+
+        Parameters
+        ----------
+        reference_date : datetime
+            The namelist reference date to compare against.
+
+        Returns
+        -------
+        bool
+        """
+        if not self.cyclic:
+            return self.date == reference_date
+        this_offset = self.date - dt.datetime(self.date.year, 1, 1)
+        other_offset = reference_date - dt.datetime(reference_date.year, 1, 1)
+        return this_offset == other_offset
+
+
+def read_model_reference_date(path: Path) -> RecordedReferenceDate | None:
+    """Read a file's model reference date (the calendar origin ROMS time values
+    are relative to), if recorded.
+
+    ucla-roms reads input time values raw and never adjusts them for a file's
+    reference date -- the namelist ``reference_date`` alone defines the
+    calendar. Files record their own reference date in one of these ways (the
+    global attribute takes precedence):
+
+    1. roms-tools-generated files carry it as the global attribute
+       ``model_reference_date``, written as ``str(datetime)``, e.g.
+       ``"1995-01-01 00:00:00"``.
+    2. ROMS-written files (restarts, and parent-extracted boundary files from
+       ucla-roms versions that label them correctly) instead label a time variable
+       (``ocean_time``, ``bry_time``, or ``<name>_time``) with a
+       ``long_name`` of the exact form ``Time since YYYY/MM/DD``, e.g.
+       ``Time since 1995/01/01``.
+    3. roms-tools also labels each time variable ``relative time: days since
+       <date>`` (or ``seconds since``); this is the only record in files that
+       lack the global attribute, e.g. roms-tools river forcing.
+
+    Older ucla-roms extraction files write a hardcoded ``"Time since 2000"``
+    (no month/day) regardless of the namelist -- that label is deliberately not
+    matched here, since it does not reliably identify the date.
+
+    Whether the file is a cyclic (climatological) roms-tools forcing file is
+    read in the same pass, from the global attribute ``climatology`` (written
+    as the string ``"True"``) or the presence of a ``cycle_length`` attribute
+    on any variable -- see `RecordedReferenceDate`.
+
+    Parameters
+    ----------
+    path : Path
+        The netCDF file to inspect.
+
+    Returns
+    -------
+    RecordedReferenceDate or None
+        The file's model reference date and cyclic flag, or None if no
+        reference date is recorded.
+    """
+    # Lazy import: only needed when this check runs
+    import xarray as xr
+
+    with xr.open_dataset(path, decode_times=False) as ds:
+        cyclic = str(
+            ds.attrs.get("climatology", "")
+        ).strip().casefold() == "true" or any(
+            "cycle_length" in var.attrs for var in ds.variables.values()
+        )
+
+        if (raw := ds.attrs.get("model_reference_date")) is not None:
+            try:
+                return RecordedReferenceDate(
+                    date=dt.datetime.fromisoformat(str(raw).strip()), cyclic=cyclic
+                )
+            except ValueError:
+                pass
+
+        for name, var in ds.variables.items():
+            if name != "ocean_time" and not str(name).endswith("_time"):
+                continue
+            long_name = str(var.attrs.get("long_name", "")).strip()
+            try:
+                if match := _ROMS_TIME_LONG_NAME_RE.fullmatch(long_name):
+                    year, month, day = map(int, match.groups())
+                    date = dt.datetime(year, month, day)
+                elif match := _ROMS_TOOLS_TIME_LONG_NAME_RE.fullmatch(long_name):
+                    date = dt.datetime.fromisoformat(match.group(1).strip())
+                else:
+                    continue
+            except ValueError:
+                continue
+            return RecordedReferenceDate(date=date, cyclic=cyclic)
+
+    return None
+
+
 class ROMSInputDataset(InputDataset, ABC):
     """Describes spatiotemporal data needed to run a unique instance of a ROMS model
     simulation.
@@ -176,6 +304,26 @@ class ROMSInputDataset(InputDataset, ABC):
             )
         self._working_copy = None
         self.validate()
+
+    def validate(self) -> None:
+        """Reject text sources (e.g. a roms-tools YAML): ROMS input datasets must
+        point directly at netCDF files, and C-Star no longer generates them from
+        YAML. Rejected up front rather than failing later with an opaque error.
+
+        Raises
+        ------
+        TypeError
+            If the source is classified as text (e.g. a roms-tools YAML).
+        """
+        if self.source.classification.value.file_encoding == FileEncoding.TEXT:
+            msg = (
+                f"{self.__class__.__name__} requires a netCDF source, but "
+                f"{self.source.location} is a text file (e.g. a roms-tools "
+                "YAML). C-Star no longer generates input datasets from "
+                "roms-tools YAML files; generate the netCDF with roms-tools "
+                "or forge and point the blueprint at it."
+            )
+            raise TypeError(msg)
 
     @property
     def source_partitioning(self) -> tuple[int, int] | None:
@@ -615,6 +763,23 @@ class ROMSInputDataset(InputDataset, ABC):
                         )
         return problems
 
+    def read_model_reference_date(self) -> RecordedReferenceDate | None:
+        """Read this dataset's model reference date from its first staged file.
+
+        Only the first file of `working_copy` is read: all files backing a
+        single dataset come from one generator run and share the same
+        reference date, so reading more would only add HPC filesystem cost
+        without a chance of a different answer.
+
+        Returns
+        -------
+        RecordedReferenceDate or None
+            The dataset's model reference date and cyclic flag, or None if it
+            has no working copy or the file records no reference date.
+        """
+        files = self._working_copy_files()
+        return read_model_reference_date(files[0]) if files else None
+
 
 class ROMSModelGrid(ROMSInputDataset):
     """An implementation of the ROMSInputDataset class for model grid files."""
@@ -650,18 +815,7 @@ class ROMSForcingCorrections(ROMSInputDataset):
     """ROMS forcing correction file, such as SW correction or restoring fields.
 
     These are used by older ROMS configurations, and included in C-Star to support them.
-
-    This file must not be generated from a roms-tools YAML. It should point directly to
-    a NetCDF or similar file.
     """
-
-    def validate(self) -> None:
-        if self.source.classification.value.file_encoding == FileEncoding.TEXT:
-            msg = (
-                f"{self.__class__.__name__} cannot be initialized with a source YAML file. "
-                "Please provide a direct path or URL to a dataset (e.g., NetCDF)."
-            )
-            raise TypeError(msg)
 
 
 class ROMSCdrForcing(ROMSInputDataset):

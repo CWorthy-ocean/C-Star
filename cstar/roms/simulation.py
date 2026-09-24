@@ -55,7 +55,6 @@ from cstar.execution.file_system import remove_files, rotate_file
 from cstar.execution.handler import ExecutionStatus
 from cstar.execution.local_process import LocalProcess
 from cstar.execution.scheduler_job import create_scheduler_job
-from cstar.io.constants import FileEncoding
 from cstar.io.source_data import SourceData
 from cstar.marbl.external_codebase import MARBLExternalCodeBase
 from cstar.pio.external_codebase import PIOExternalCodeBase
@@ -68,6 +67,7 @@ from cstar.roms.build_verification import (
 from cstar.roms.discretization import ROMSDiscretization
 from cstar.roms.external_codebase import ROMSExternalCodeBase
 from cstar.roms.input_dataset import (
+    RecordedReferenceDate,
     ROMSBoundaryForcing,
     ROMSCdrForcing,
     ROMSForcingCorrections,
@@ -553,54 +553,40 @@ class ROMSSimulation(Simulation):
     def _check_inputdataset_dates(self, inp: T | list[T]) -> None:
         """Ensure input dataset date ranges align with the simulation date range.
 
-        For each input dataset with a plaintext (yaml) source, this method verifies that
-        its `start_date` and `end_date` match the simulation's `start_date` and
-        `end_date`. If they do not match, a warning is issued and the dataset's
-        dates are overwritten to enforce alignment.
+        For each input dataset, this method verifies that its `start_date` and
+        `end_date` match the simulation's `start_date` and `end_date` (or, for
+        a list of datasets, a complementary bound on another dataset in the
+        list).
 
         Raises
         ------
         ValueError
-            If a mismatched date range cannot be corrected (e.g. for netCDF inputs)
+            If a dataset's date range does not align with the simulation (or,
+            for a list, with another dataset in the list).
 
         Notes
         -----
-        - Only datasets with a `yaml` source are modified.
         - `ROMSInitialConditions` datasets only have their `start_date` checked;
           `end_date` is not required or enforced for initial conditions.
         """
 
-        def is_correctable(inp: ROMSInputDataset) -> bool:
-            """roms-tools yaml files' dates can be meaningfully corrected, netCDF dates cannot"""
-            return inp.source._classification.value.file_encoding == FileEncoding.TEXT
-
-        def correct_date_bound_or_raise(inp: ROMSInputDataset, bound: str):
-            """Correct (if possible) a mismatched date value between this ROMSSimulation and dataset, or raise."""
+        def check_date_bound(inp: ROMSInputDataset, bound: str) -> None:
+            """Raise if `bound` on `inp` mismatches this ROMSSimulation's."""
             sim_bound = getattr(self, bound)
 
             inp_bound = getattr(inp, bound, None)
-            if inp_bound == sim_bound:
-                return
-            if is_correctable(inp):
-                if inp_bound is not None:
-                    self.log.warning(
-                        f"{inp.__class__.__name__} has a date attribute {bound} "
-                        f"whose value {inp_bound} does not match that of ROMSSimulation ({sim_bound}). "
-                        f"C-Star will enforce {sim_bound} as the date"
-                    )
-                setattr(inp, bound, getattr(self, bound))
-                return
-            if inp_bound is None:
+            if inp_bound in (sim_bound, None):
                 return
             raise ValueError(
-                f"Uncorrectable mismatch between {bound} in {inp.__class__.__name__} and ROMSSimulation"
+                f"{bound} of {inp.__class__.__name__} ({inp_bound}) does not match that of "
+                f"ROMSSimulation ({sim_bound})"
             )
 
         # For a single ROMSInputDataset, start and end must match simulation
         if not isinstance(inp, list):
-            correct_date_bound_or_raise(inp, "start_date")
+            check_date_bound(inp, "start_date")
             if not isinstance(inp, ROMSInitialConditions):
-                correct_date_bound_or_raise(inp, "end_date")
+                check_date_bound(inp, "end_date")
             return
 
         # For a list, depends on context: could be a list of sequential files or a list of different vars
@@ -611,12 +597,7 @@ class ROMSSimulation(Simulation):
             filter(None, [getattr(i, "start_date", None) for i in inp])
         )
         for i in inp:
-            # If a file is yaml, it always covers the whole simulation:
-            if is_correctable(i):
-                correct_date_bound_or_raise(i, "start_date")
-                correct_date_bound_or_raise(i, "end_date")
-                continue
-            # if it's netCDF, check it either matches bounds of simulation OR another InputDataset:
+            # check it either matches bounds of simulation OR another InputDataset:
             if (
                 hasattr(i, "start_date")
                 and (i.start_date not in [self.start_date, None])
@@ -734,6 +715,91 @@ class ROMSSimulation(Simulation):
 
         return forcing_paths
 
+    def _read_raw_namelist(
+        self,
+    ) -> tuple["RomsNamelistBase", type["RomsNamelistBase"], str | None]:
+        """Parse the runtime namelist file into the schema selected for this
+        simulation's ucla-roms `checkout_target`, without applying any of
+        `roms_runtime_settings`'s simulation-derived settings.
+
+        Shared by `roms_runtime_settings` (which layers derived settings and
+        `namelist_overrides` on top) and `_validate_reference_dates` (which
+        only needs `reference_date_settings`, so it can run before input
+        datasets are partitioned -- `roms_runtime_settings`'s derived
+        grid/initial-condition paths require that to have already happened
+        for a non-`use_pio` simulation).
+
+        Returns
+        -------
+        tuple[RomsNamelistBase, type[RomsNamelistBase], str]
+            The parsed namelist, the schema class it was validated against,
+            and the ucla-roms `checkout_target` used to select that schema.
+
+        Raises
+        ------
+        ValueError
+            If the runtime namelist has not been retrieved locally via `setup()` or
+            `runtime_code.get()`, or if it fails validation against the schema
+            selected for this simulation's ucla-roms `checkout_target` (the
+            original `pydantic.ValidationError` is chained as `__cause__`).
+        """
+        if self.runtime_code.working_copy is None:
+            raise ValueError(
+                "Cannot access runtime settings without local "
+                + "namelist file. Call ROMSSimulation.setup() or "
+                + "ROMSSimulation.runtime_code.get() and try again."
+            )
+
+        checkout_target = self.codebase.source.checkout_target
+        codebase_copy = self.codebase.working_copy
+        schema = namelist_schema_for_ref(
+            checkout_target,
+            repo_path=codebase_copy.path if codebase_copy is not None else None,
+        )
+        namelist_path = (
+            self.runtime_code.working_copy.common_parent / self._namelist_file
+        )
+        try:
+            nml = schema.read(namelist_path)
+        except ValidationError as err:
+            raise ValueError(
+                f"namelist at {namelist_path} failed validation against "
+                f"{schema.__name__} (selected for ucla-roms ref "
+                f"{checkout_target!r}). The namelist file may target a "
+                f"different ucla-roms version than the one this simulation pins."
+            ) from err
+
+        return nml, schema, checkout_target
+
+    def _layer_namelist_overrides(
+        self,
+        nml: "RomsNamelistBase",
+        schema: type["RomsNamelistBase"],
+        checkout_target: str | None,
+    ) -> "RomsNamelistBase":
+        """Deep-merge `namelist_overrides` onto *nml*, re-validating the result.
+
+        Shared by `roms_runtime_settings` and `_validate_reference_dates`.
+
+        Raises
+        ------
+        ValueError
+            If `namelist_overrides` fails validation against *schema*.
+        """
+        overrides = self.namelist_overrides
+        if not overrides:
+            return nml
+        try:
+            return type(nml).model_validate(
+                deep_merge(nml.model_dump(), overrides, replace_lists=True)
+            )
+        except ValidationError as err:
+            raise ValueError(
+                f"namelist_overrides failed validation against {schema.__name__} "
+                f"(selected for ucla-roms ref {checkout_target!r}); check group and "
+                "key names against that schema."
+            ) from err
+
     @property
     def roms_runtime_settings(self) -> "RomsNamelistBase":
         """Generate and return a :class:`RomsNamelistBase` for the simulation.
@@ -779,31 +845,7 @@ class ROMSSimulation(Simulation):
             If a simulation-derived override value is invalid for its namelist
             field (the namelist models re-validate on assignment).
         """
-        if self.runtime_code.working_copy is None:
-            raise ValueError(
-                "Cannot access runtime settings without local "
-                + "namelist file. Call ROMSSimulation.setup() or "
-                + "ROMSSimulation.runtime_code.get() and try again."
-            )
-
-        checkout_target = self.codebase.source.checkout_target
-        codebase_copy = self.codebase.working_copy
-        schema = namelist_schema_for_ref(
-            checkout_target,
-            repo_path=codebase_copy.path if codebase_copy is not None else None,
-        )
-        namelist_path = (
-            self.runtime_code.working_copy.common_parent / self._namelist_file
-        )
-        try:
-            nml = schema.read(namelist_path)
-        except ValidationError as err:
-            raise ValueError(
-                f"namelist at {namelist_path} failed validation against "
-                f"{schema.__name__} (selected for ucla-roms ref "
-                f"{checkout_target!r}). The namelist file may target a "
-                f"different ucla-roms version than the one this simulation pins."
-            ) from err
+        nml, schema, checkout_target = self._read_raw_namelist()
 
         if self.initial_conditions:
             nml.initial_conditions.inifile = str(
@@ -823,6 +865,8 @@ class ROMSSimulation(Simulation):
 
         runtime_code_filenames = [f.basename for f in self.runtime_code.source]
         if "marbl_in" in runtime_code_filenames:
+            # `_read_raw_namelist` already confirmed `working_copy` is set.
+            assert self.runtime_code.working_copy is not None
             runtime_code_path = self.runtime_code.working_copy.common_parent
             nml.marbl_biogeochemistry_settings.marbl_config_file = str(
                 runtime_code_path / "marbl_in"
@@ -858,17 +902,7 @@ class ROMSSimulation(Simulation):
         # User overrides are layered on last, so they take precedence over
         # any of the derived settings above.
         overrides = self.namelist_overrides
-        if overrides:
-            try:
-                nml = type(nml).model_validate(
-                    deep_merge(nml.model_dump(), overrides, replace_lists=True)
-                )
-            except ValidationError as err:
-                raise ValueError(
-                    f"namelist_overrides failed validation against {schema.__name__} "
-                    f"(selected for ucla-roms ref {checkout_target!r}); check group and "
-                    "key names against that schema."
-                ) from err
+        nml = self._layer_namelist_overrides(nml, schema, checkout_target)
 
         # The discretization is authoritative for the processor grid: applied
         # after the override merge so np_xi/np_eta cannot drift from the
@@ -1938,6 +1972,9 @@ class ROMSSimulation(Simulation):
         ------
         ValueError
             If any input dataset exists but has not been partitioned correctly.
+        ValueError
+            If a locally staged input dataset's model reference date does not
+            match the namelist `reference_date_settings.reference_date`.
 
         Notes
         -----
@@ -1951,6 +1988,8 @@ class ROMSSimulation(Simulation):
         run : Executes the compiled ROMS model.
         post_run : Performs post-processing steps after execution.
         """
+        self._validate_reference_dates()
+
         if self.use_pio:
             self._validate_pio_inputs()
             self.log.info(
@@ -1979,6 +2018,69 @@ class ROMSSimulation(Simulation):
                 np_eta=n_procs_y,
                 overwrite_existing_files=overwrite_existing_files,
             )
+
+    def _validate_reference_dates(self) -> None:
+        """Ensure locally staged input datasets share the namelist's model
+        reference date.
+
+        ucla-roms reads input time values raw and never adjusts them for a
+        file's own reference date -- the namelist `reference_date` alone
+        defines the calendar. A dataset generated against a different
+        reference date silently shifts the calendar or mismatches forcing
+        records at run time instead of failing loudly, so this is checked
+        up front.
+
+        Raises
+        ------
+        ValueError
+            If any staged input dataset's model reference date does not align
+            with the namelist reference date, listing every offending dataset.
+        """
+        file_reference_dates: list[tuple[ROMSInputDataset, RecordedReferenceDate]] = []
+        for dataset in self.input_datasets:
+            if not dataset.exists_locally:
+                continue
+            file_reference_date = dataset.read_model_reference_date()
+            if file_reference_date is None:
+                continue
+            file_reference_dates.append((dataset, file_reference_date))
+
+        if not file_reference_dates:
+            return
+
+        # Read the namelist's reference date directly (schema parse +
+        # namelist_overrides only), not via `roms_runtime_settings`: that
+        # property also derives per-dataset grid/initial-condition paths,
+        # which for a non-`use_pio` simulation require partitioning -- the
+        # very step this check must run before.
+        nml, schema, checkout_target = self._read_raw_namelist()
+        nml = self._layer_namelist_overrides(nml, schema, checkout_target)
+        year, month, day = nml.reference_date_settings.reference_date
+        namelist_reference_date = datetime(year, month, day)
+
+        problems: list[str] = []
+        for dataset, file_reference_date in file_reference_dates:
+            if not file_reference_date.aligns_with(namelist_reference_date):
+                climatology_note = (
+                    " (climatological file: only the day of year of the "
+                    "reference date matters)"
+                    if file_reference_date.cyclic
+                    else ""
+                )
+                problems.append(
+                    f"{dataset.__class__.__name__} {dataset.source.location}: model "
+                    f"reference date {file_reference_date.date}, but the namelist "
+                    f"reference_date is {namelist_reference_date}{climatology_note}"
+                )
+
+        if problems:
+            msg = (
+                "ROMS does not shift input times to match a file's own "
+                "reference date, so the namelist reference_date must match "
+                "every input dataset's model reference date. Mismatches "
+                "found:\n- " + "\n- ".join(problems)
+            )
+            raise ValueError(msg)
 
     def _validate_pio_inputs(self) -> None:
         """Ensure all locally staged input datasets are readable by ROMS with
