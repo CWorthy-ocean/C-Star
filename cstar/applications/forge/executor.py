@@ -47,6 +47,7 @@ from cstar.applications.forge.namelist_model import (
     check_rst_period_divisible,
     cppdefs_for_precheck,
     ensure_cdr_output_marbl_diagnostics,
+    n_tracers_from_param,
     output_precheck_applies_to,
     run_time_settings_for_ref,
 )
@@ -2359,15 +2360,14 @@ class ForgeExecutor(BaseModel):
             )
 
         # Derive n_tracers up front: prefer the value passed by the processing
-        # engine; otherwise derive it from the resolved settings (T + S + BGC
-        # ntrc_bio + passive). Needed below both to build the namelist for the
+        # engine; otherwise derive it from the resolved settings (T + S + BGC +
+        # passive + CDR tracers). Needed below both to build the namelist for the
         # output-stream precheck and later to render cppdefs.opt/namelist.nml.
         if "n_tracers" in kwargs:
             n_tracers = int(kwargs["n_tracers"])
         elif self.resolved_settings is not None:
-            param = self.resolved_settings.get("param", {}) or {}
-            n_tracers = (
-                2 + int(param.get("ntrc_bio", 0)) + int(param.get("nt_passive", 0))
+            n_tracers = n_tracers_from_param(
+                self.resolved_settings.get("param", {}) or {}
             )
         else:
             raise ValueError(
@@ -2468,7 +2468,7 @@ class ForgeExecutor(BaseModel):
             output_dir=self.run_time_code_dir,
             n_tracers=n_tracers,
             # Selects the namelist schema variant; None (code_spec unset) keeps
-            # the legacy (< 0.5.0) schema.
+            # the legacy (< 0.4.0) schema.
             roms_ref=(
                 self.code_spec.roms.commit or self.code_spec.roms.branch
                 if self.code_spec is not None

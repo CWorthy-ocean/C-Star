@@ -412,12 +412,14 @@ def write_roms_namelist(
     output_dir : str or Path
         Directory to write ``namelist.nml`` into (must already exist).
     n_tracers : int
-        Total tracers (temp + salt + passive + bgc); used to expand scalar
-        mixing/diffusion defaults into per-tracer arrays (``akt_bak``, ``tnu2``).
+        Total tracers (temp + salt + passive + bgc + CDR, see
+        :func:`~cstar.applications.forge.namelist_model.n_tracers_from_param`);
+        used to expand scalar mixing/diffusion defaults into per-tracer arrays
+        (``akt_bak``, ``tnu2``).
     roms_ref : str or None
         The ucla-roms git ref (tag, branch, or commit hash) the blueprint's
         code is pinned to; selects the namelist schema variant. ``None``
-        (default) preserves the legacy (< 0.5.0) schema.
+        (default) preserves the legacy (< 0.4.0) schema.
     """
     rt = run_time_settings_for_ref(roms_ref).model_validate(settings_run_time)
     build_namelist(rt, n_tracers).write(Path(output_dir) / "namelist.nml")

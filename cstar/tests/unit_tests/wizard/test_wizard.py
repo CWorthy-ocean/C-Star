@@ -2338,6 +2338,47 @@ def test_wizard_editor_cdr_output_streams_gated_by_model_spec_pin():
     assert ("cdr_gas_exch_output", "do_cdr_gas_exch_output") in wiz.editor._widgets
 
 
+def test_cdr_tracer_counts_survive_wizard_save_and_load_round_trip(tmp_path):
+    """``param.nt_cdr_oae``/``param.nt_cdr_dor`` (ucla-roms >= 0.4.0's passive
+    CDR tracer counts) have no dedicated accordion widget: every bundled
+    ModelSpec (including ``roms-marbl-0.7-default``) predates them, so its
+    YAML's ``param`` dict never carries the keys and ``_SettingsEditor`` (which
+    type-infers widgets from that dict, not from ``ParamCfgV0_4_0``'s field
+    set) builds none. Same situation as a hand-edited override with no widget
+    to show it -- see ``_SettingsEditor``'s and ``_diff_overrides``'s
+    docstrings ("hiding the widget cannot drop or reset the value"). Recorded
+    directly on the overrides layer (as a real UI edit would be, had a widget
+    existed), both values must still flow into ``model_settings`` and survive
+    a save/load round trip.
+    """
+    wiz = ForgeBlueprintWizard()
+    wiz.start.value = date(2012, 1, 1)
+    wiz.end.value = date(2012, 1, 2)
+    wiz.model_dd.value = "roms-marbl-0.7-default"
+    wiz._overrides[("param", "nt_cdr_oae")] = 2
+    wiz._overrides[("param", "nt_cdr_dor")] = 1
+    wiz._rebuild()
+    assert ("param", "nt_cdr_oae") not in wiz.editor._widgets
+    assert ("param", "nt_cdr_dor") not in wiz.editor._widgets
+    assert wiz.config.model_settings["param"]["nt_cdr_oae"] == 2
+    assert wiz.config.model_settings["param"]["nt_cdr_dor"] == 1
+
+    saved = tmp_path / "forge_blueprint.yaml"
+    wiz.config.to_yaml(saved)
+
+    wiz2 = ForgeBlueprintWizard()
+    wiz2.load_path.value = str(saved)
+    wiz2._on_load_path(None)
+
+    assert wiz2.config is not None
+    assert wiz2.config.model_settings["param"]["nt_cdr_oae"] == 2
+    assert wiz2.config.model_settings["param"]["nt_cdr_dor"] == 1
+    # ... and a rebuild after load (any later UI edit) re-emits them.
+    wiz2._rebuild()
+    assert wiz2.config.model_settings["param"]["nt_cdr_oae"] == 2
+    assert wiz2.config.model_settings["param"]["nt_cdr_dor"] == 1
+
+
 @pytest.mark.parametrize(
     "section",
     ["cdr_output", "cdr_tracer_output", "cdr_gas_exch_output"],

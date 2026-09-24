@@ -6946,9 +6946,10 @@ class ForgeBlueprintWizard:
         # layer applied on top (effective = composed ⊕ overrides). The editor is
         # rebuilt when the *model* changes (its field set depends on the model) or
         # when the effective ucla-roms ref crosses a schema boundary (e.g. editing
-        # the roms_ref override across the 0.5.0, 0.6.0, or 0.7.0 line with the
-        # same model selected) -- see run_time_settings_for_ref /
-        # RunTimeSettingsV0_5_0 / RunTimeSettingsV0_6_0 / RunTimeSettingsV0_7_0.
+        # the roms_ref override across the 0.4.0, 0.5.0, 0.6.0, or 0.7.0 line with
+        # the same model selected) -- see run_time_settings_for_ref /
+        # RunTimeSettingsV0_4_0 / RunTimeSettingsV0_5_0 / RunTimeSettingsV0_6_0 /
+        # RunTimeSettingsV0_7_0.
         composed = cfg.model_settings
         # Computed once per rebuild (each call re-reads the ModelSpec YAML) and
         # reused for the validation call below.

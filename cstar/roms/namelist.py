@@ -11,9 +11,12 @@ machinery (:meth:`RomsNamelistBase.read` / :meth:`RomsNamelistBase.write`
 etc.). It is not meant to be instantiated directly — use one of its versioned
 subclasses:
 
-- :class:`RomsNamelist` — the schema for ucla-roms **< 0.5.0**. Kept
+- :class:`RomsNamelist` — the schema for ucla-roms **< 0.4.0**. Kept
   unversioned (no suffix) for backward compatibility: this is the name
   historically imported by C-Star Forge and other consumers.
+- :class:`RomsNamelistV0_4_0` — the schema for ucla-roms **>= 0.4.0, < 0.5.0**.
+  Adds ``nt_cdr_oae``/``nt_cdr_dor`` to ``&PARAM_SETTINGS`` on top of
+  :class:`RomsNamelist`.
 - :class:`RomsNamelistV0_5_0` — the schema for ucla-roms **>= 0.5.0, < 0.6.0**.
 - :class:`RomsNamelistV0_6_0` — the schema for ucla-roms **>= 0.6.0, < 0.7.0**.
   Adds the ``&PIO_SETTINGS`` group (ucla-roms PR #346) on top of 0.5.0.
@@ -171,6 +174,20 @@ class ParamSettings(_NmlGroup):
     """Number of passive tracers"""
     nt_bgc: int
     """Number of BGC tracers"""
+
+
+class ParamSettingsV0_4_0(ParamSettings):
+    """``&PARAM_SETTINGS`` for ucla-roms >= 0.4.0: adds the passive CDR tracer counts.
+
+    Both default to the Fortran initializer (0), so a namelist without them
+    still validates. ROMS adds ``2*nt_cdr_oae + nt_cdr_dor`` tracers
+    (``CDR_OAE_ALK<i>``/``CDR_OAE_DIC<i>`` pairs, ``CDR_DOR_DIC<i>``) to the total.
+    """
+
+    nt_cdr_oae: int = Field(default=0, ge=0)
+    """Number of OAE (ALK-mimicking) passive CDR tracers"""
+    nt_cdr_dor: int = Field(default=0, ge=0)
+    """Number of DOR (DIC-mimicking) passive CDR tracers"""
 
 
 class PioSettings(_NmlGroup):
@@ -762,7 +779,9 @@ class RomsNamelistBase(BaseModel):
     Group order matches ``write_roms_namelist`` / the reference namelist.
 
     Not meant to be instantiated directly: use a versioned subclass
-    (:class:`RomsNamelist` for ucla-roms < 0.5.0, :class:`RomsNamelistV0_5_0`
+    (:class:`RomsNamelist` for ucla-roms < 0.4.0, :class:`RomsNamelistV0_4_0`
+    for ucla-roms >= 0.4.0, < 0.5.0, which adds the CDR tracer counts to
+    ``&PARAM_SETTINGS``, :class:`RomsNamelistV0_5_0`
     for ucla-roms >= 0.5.0, < 0.6.0, :class:`RomsNamelistV0_6_0` for
     ucla-roms >= 0.6.0, < 0.7.0, which adds ``&PIO_SETTINGS``, or
     :class:`RomsNamelistV0_7_0` for ucla-roms >= 0.7.0, which adds the two
@@ -941,7 +960,7 @@ class RomsNamelistBase(BaseModel):
 
 
 class RomsNamelist(RomsNamelistBase):
-    """The ROMS namelist schema for ucla-roms < 0.5.0.
+    """The ROMS namelist schema for ucla-roms < 0.4.0.
 
     Kept unversioned (no suffix) for backward compatibility: this is the name
     historically imported by C-Star Forge and other consumers.
@@ -951,9 +970,24 @@ class RomsNamelist(RomsNamelistBase):
     particles_settings: ParticlesSettings
 
 
-class RomsNamelistV0_5_0(RomsNamelistBase):
-    """The ROMS namelist schema for ucla-roms >= 0.5.0, < 0.6.0 (PR #336)."""
+class RomsNamelistV0_4_0(RomsNamelist):
+    """The ROMS namelist schema for ucla-roms >= 0.4.0, < 0.5.0.
 
+    Adds `nt_cdr_oae`/`nt_cdr_dor` to `&PARAM_SETTINGS` (ucla-roms 839f21e8) on
+    top of the < 0.4.0 schema; otherwise unchanged. Subclasses
+    :class:`RomsNamelist` because the output groups are still the pre-0.5.0 ones.
+    """
+
+    param_settings: ParamSettingsV0_4_0
+
+
+class RomsNamelistV0_5_0(RomsNamelistBase):
+    """The ROMS namelist schema for ucla-roms >= 0.5.0, < 0.6.0 (PR #336).
+
+    Carries the >= 0.4.0 `&PARAM_SETTINGS` (CDR tracer counts).
+    """
+
+    param_settings: ParamSettingsV0_4_0
     basic_output_settings: BasicOutputSettingsV0_5_0
     particles_settings: ParticlesSettingsV0_5_0
 
@@ -989,6 +1023,7 @@ class RomsNamelistV0_7_0(RomsNamelistV0_6_0):
 
 # ucla-roms releases with breaking namelist changes, as comparable version
 # tuples (named so registry entries read as versions, not bare tuples).
+UCLA_ROMS_0_4_0: Final[tuple[int, int, int]] = (0, 4, 0)
 UCLA_ROMS_0_5_0: Final[tuple[int, int, int]] = (0, 5, 0)
 UCLA_ROMS_0_6_0: Final[tuple[int, int, int]] = (0, 6, 0)
 UCLA_ROMS_0_7_0: Final[tuple[int, int, int]] = (0, 7, 0)
@@ -1011,7 +1046,8 @@ NAMELIST_SCHEMA_REGISTRY: tuple[
     ],
     ...,
 ] = (
-    (None, UCLA_ROMS_0_5_0, RomsNamelist),
+    (None, UCLA_ROMS_0_4_0, RomsNamelist),
+    (UCLA_ROMS_0_4_0, UCLA_ROMS_0_5_0, RomsNamelistV0_4_0),
     (UCLA_ROMS_0_5_0, UCLA_ROMS_0_6_0, RomsNamelistV0_5_0),
     (UCLA_ROMS_0_6_0, UCLA_ROMS_0_7_0, RomsNamelistV0_6_0),
     (UCLA_ROMS_0_7_0, None, RomsNamelistV0_7_0),
