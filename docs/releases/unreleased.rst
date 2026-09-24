@@ -47,6 +47,8 @@ Bug Fixes
 - Enabling CDR tracer or gas-exchange output in a stored blueprint or a wizard edit now forces ``CDR_FORCING`` on at build time, matching the resolver. (`#715 <https://github.com/CWorthy-ocean/C-Star/pull/715>`_)
 - ``do_cdr_tracer_output: true`` no longer requires ``bgc_mode: marbl``. On ucla-roms 0.7.0 and 0.8.0 a run without MARBL that enables it aborts at ROMS start-up ("cdr_tracer_output must have MARBL enabled") rather than failing validation, until the upstream compile guard is fixed. (`#715 <https://github.com/CWorthy-ocean/C-Star/pull/715>`_)
 - Loading a ``forge_blueprint.yaml`` newer than the installed build told users to upgrade ``cstar-forge``, a package that no longer ships Forge. (`#720 <https://github.com/CWorthy-ocean/C-Star/pull/720>`_)
+- A Forge blueprint pinned to ucla-roms before 0.7.0 whose stored settings enabled the 0.7.0-only CDR tracer or gas-exchange output no longer compiles CDR_FORCING into the build. (`#722 <https://github.com/CWorthy-ocean/C-Star/pull/722>`_)
+- The same blueprint with MARBL off no longer fails with a gas-exchange MARBL error for an output stream its ucla-roms release cannot write. (`#722 <https://github.com/CWorthy-ocean/C-Star/pull/722>`_)
 
 Improvements
 ~~~~~~~~~~~~
@@ -70,6 +72,8 @@ Improvements
 - ``Directive.validate_directives(config, step)`` returns a ``Sequence[str]`` of problems instead of raising, replacing the ``(config, directives)`` signature; third-party directives that overrode it must be updated. (`#719 <https://github.com/CWorthy-ocean/C-Star/pull/719>`_)
 - The ROMS directives' config-shape rules live in one ``_config_problems`` classmethod per directive, used both at schedule time and by ``_generate_overrides`` on the compute node, so directive files written by older versions stay guarded. (`#719 <https://github.com/CWorthy-ocean/C-Star/pull/719>`_)
 - Input dataset date-range mismatches now report the field and both dates. (`#706 <https://github.com/CWorthy-ocean/C-Star/pull/706>`_)
+- Forge's settings-to-namelist mapping now handles ``title.casename`` and ``vertical_mixing.akv`` like every other renamed field, so all Forge-to-namelist renames are declared in one place. (`#721 <https://github.com/CWorthy-ocean/C-Star/pull/721>`_)
+- Forge logs, at build time, which run-time settings sections it dropped because the pinned ucla-roms release's namelist schema does not model them. (`#722 <https://github.com/CWorthy-ocean/C-Star/pull/722>`_)
 
 Miscellaneous
 ~~~~~~~~~~~~~
@@ -105,4 +109,5 @@ Miscellaneous
 - The configuration page's Default column now shows the real directories for the four ``CSTAR_*_HOME`` variables. (`#718 <https://github.com/CWorthy-ocean/C-Star/pull/718>`_)
 - Removed leftover date-correction code for roms-tools YAML inputs, which C-Star stopped generating datasets from in #355. (`#706 <https://github.com/CWorthy-ocean/C-Star/pull/706>`_)
 - Forge blueprint docstrings now reference the current developer guide and describe ``provenance.forge_version`` as a legacy field from the standalone cstar-forge era. (`#720 <https://github.com/CWorthy-ocean/C-Star/pull/720>`_)
+- The Forge developer notes describe the shared version-gated pruning used by the resolver and the build step. (`#722 <https://github.com/CWorthy-ocean/C-Star/pull/722>`_)
 
