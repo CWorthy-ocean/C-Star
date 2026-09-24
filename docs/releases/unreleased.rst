@@ -44,6 +44,8 @@ Bug Fixes
 - ``nest_ic`` now fails with a clear error if the parent restart file lacks a readable reference date (``ocean_time`` ``long_name`` of the form ``Time since YYYY/MM/DD``). Such files already failed inside roms-tools; the error is now raised earlier and names the file. (`#706 <https://github.com/CWorthy-ocean/C-Star/pull/706>`_)
 - ROMS simulations now fail before running when a staged input file records a model reference date that differs from the namelist ``reference_date``, listing every mismatched file. Files that record no reference date are not checked. (`#706 <https://github.com/CWorthy-ocean/C-Star/pull/706>`_)
 - ROMS input datasets pointed at a text file (e.g. a roms-tools YAML) are now rejected when the blueprint is loaded; previously only forcing corrections rejected them and every other dataset type failed later with an unclear error. (`#706 <https://github.com/CWorthy-ocean/C-Star/pull/706>`_)
+- Enabling CDR tracer or gas-exchange output in a stored blueprint or a wizard edit now forces ``CDR_FORCING`` on at build time, matching the resolver. (`#715 <https://github.com/CWorthy-ocean/C-Star/pull/715>`_)
+- ``do_cdr_tracer_output: true`` no longer requires ``bgc_mode: marbl``. On ucla-roms 0.7.0 and 0.8.0 a run without MARBL that enables it aborts at ROMS start-up ("cdr_tracer_output must have MARBL enabled") rather than failing validation, until the upstream compile guard is fixed. (`#715 <https://github.com/CWorthy-ocean/C-Star/pull/715>`_)
 
 Improvements
 ~~~~~~~~~~~~
