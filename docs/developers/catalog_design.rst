@@ -6,8 +6,7 @@ Catalog design notes
 ForgeBlueprint design rationale
 -----------------------------------
 
-Two invariants, set when the catalog was first designed, still govern how it
-can evolve:
+Two invariants govern how the catalog can evolve:
 
 1. **Snapshot, don't reference.** A resolved ``ForgeBlueprint`` embeds the
    values it needs (grid kwargs, forcing selections, settings) rather than a
@@ -23,8 +22,13 @@ can evolve:
 Longer-term architecture
 ----------------------------
 
-Beyond the layered-store slice above, the plan of record for the catalog's
-evolution rests on one core principle and a few concrete follow-on pieces.
+.. note::
+
+   Nothing in this section is implemented. It records the plan of record for
+   the catalog's evolution, for design discussion -- not the current
+   behavior of ``cstar.catalog``.
+
+The plan rests on one core principle and a few concrete follow-on pieces.
 
 Files-in-git stay canonical; a database is a derived index
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -32,10 +36,10 @@ Files-in-git stay canonical; a database is a derived index
 - **System of record:** YAML files in directory trees, each tree optionally a
   git repo. This keeps human-readable diffs, PR-based contribution, no
   services required on HPC, and offline operation.
-- **Query layer (not yet implemented):** a per-user SQLite index (single
-  file, stdlib, zero services) built by scanning the stores. A disposable
-  cache -- gitignored, rebuildable, never authoritative. Corrupt or stale?
-  Delete and rescan.
+- **Query layer:** a per-user SQLite index (single file, stdlib, zero
+  services) built by scanning the stores. A disposable cache -- gitignored,
+  rebuildable, never authoritative; a corrupt or stale index is deleted and
+  rescanned.
 
 A client-server database, or SQLite-as-canonical, is deliberately avoided:
 multi-writer SQLite on Lustre/NFS is exactly where its locking breaks (a
@@ -88,6 +92,8 @@ file hygiene in shared git stores would then need git-lfs/DataLad, or an
 
 Open questions
 ------------------
+
+Unresolved design questions for the (also unimplemented) architecture above.
 
 - ID scheme (UUID vs. ``name@hash``), and whether IDs get stamped
   retroactively on bundled entries at first index build.

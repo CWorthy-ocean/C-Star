@@ -2661,7 +2661,7 @@ class TestGoldenNamelist:
 
     This is the deterministic, mocked-forcing golden referenced in the Follow-ups
     section of ``docs/dev-notes/forge-blueprint-parameter-audit.md`` and in
-    ``docs/architecture-details.md`` Sec 6 — it is NOT the real-generated-data integration
+    ``docs/developers/forge_internals.rst`` Sec 6 — it is NOT the real-generated-data integration
     test those docs separately name as still deferred (this one mocks every
     roms-tools construction class; a real run against GLORYS/ERA5/TPXO/DAI data is a
     different, heavier test that doesn't exist yet).
@@ -2976,7 +2976,7 @@ class TestGoldenNamelist:
 
         Test name note: this must NOT contain ``roms050`` -- the legacy golden
         is selected with ``-k "golden_namelist_test_tiny and not roms050 and not
-        roms060"`` (see ``docs/architecture-details.md`` Sec 7), which would
+        roms060"`` (see ``docs/developers/forge_internals.rst`` Sec 7), which would
         otherwise also catch this test.
         """
         normalized = self._run_golden_namelist_case(
