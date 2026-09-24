@@ -2792,7 +2792,7 @@ def test_extract_output_settings_helper():
     )
 
     # OUTPUT_SECTIONS now includes cdr_tracer_output/cdr_gas_exch_output
-    # (ucla-roms >= 0.7.0, PR #351), which _prune_version_gated_sections drops
+    # (ucla-roms >= 0.7.0, PR #351), which prune_version_gated_sections drops
     # from an older-pinned build's model_settings -- use a 0.7.0-pinned
     # ModelSpec so every OUTPUT_SECTIONS entry actually survives resolution.
     cfg = _build(model_dir=_MODEL_DIR_ROMS070)
@@ -3078,8 +3078,8 @@ def test_active_cdr_forcing_does_not_enable_tracer_gas_exch_output():
 def test_cdr_tracer_gas_exch_output_sections_pruned_before_0_7_0():
     """A blueprint pinned to ucla-roms 0.6.x (RunTimeSettingsV0_6_0, which has
     no cdr_tracer_output/cdr_gas_exch_output fields) must not carry either
-    section in model_settings -- see _prune_version_gated_sections in
-    forge_blueprint_resolve.py. The matching 0.7.0-pinned build keeps both.
+    section in model_settings -- see prune_version_gated_sections in
+    namelist_model.py. The matching 0.7.0-pinned build keeps both.
     """
     cfg_060 = _build(model_dir=_MODEL_DIR_ROMS060)
     assert "cdr_tracer_output" not in cfg_060.model_settings

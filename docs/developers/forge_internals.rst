@@ -327,7 +327,11 @@ byte-identical legacy namelists. ``version_gated_section_names()``
 non-legacy tier (``pio_settings``, ``cdr_tracer_output``,
 ``cdr_gas_exch_output``) -- used by the wizard's ``_SettingsEditor``
 (``cstar/wizard/wizard.py``) to skip rendering a widget for a
-version-gated section absent from the *active* schema.
+version-gated section absent from the *active* schema, and by
+``prune_version_gated_sections()``, which drops such a section from the
+settings dict before the CDR output nets and the output-stream precheck read
+it -- called by both the resolver and the executor's ``configure_build``
+(the net for stored blueprints; it logs what it drops at INFO).
 
 ucla-roms 0.5.0 also added a run-start precheck (``check_output_divides_rst``):
 each enabled output stream's ``nrpf x output_period`` must evenly divide

@@ -67,7 +67,6 @@ from cstar.applications.forge.blueprint import (
 # the executor can share it.
 from cstar.applications.forge.namelist_model import (
     NamelistConsistencyError,
-    _RunTimeSettingsCommon,
     canonical_output_sections_for_precheck,
     check_cdr_output_sections,
     check_output_streams_divide_rst,
@@ -75,8 +74,8 @@ from cstar.applications.forge.namelist_model import (
     cppdefs_for_precheck,
     ensure_cdr_output_marbl_diagnostics,
     output_precheck_applies_to,
+    prune_version_gated_sections,
     run_time_settings_for_ref,
-    version_gated_section_names,
 )
 
 # Source-name resolution (alias map, metadata, streamable) — single source of truth,
@@ -285,32 +284,6 @@ def extract_output_settings(model_settings: dict[str, Any]) -> dict[str, Any]:
         if partial:
             out[sec] = copy.deepcopy(partial)
     return out
-
-
-def _prune_version_gated_sections(
-    settings: dict[str, Any], settings_cls: type[_RunTimeSettingsCommon]
-) -> None:
-    """Drop ``settings`` keys that are version-gated (modeled by SOME run-time
-    settings tier -- :func:`version_gated_section_names`) but not modeled by
-    ``settings_cls``, the tier actually selected for this blueprint's pinned
-    ucla-roms ref.
-
-    OutputSpecs are shared across ModelSpecs pinned to different ucla-roms
-    releases (e.g. the same "daily-restarts" OutputSpec can be selected against
-    both a 0.6- and a 0.7-pinned ModelSpec), so the ``_deep_merge(settings,
-    output_settings)`` above can introduce a section a newer schema tier models
-    (e.g. ``cdr_tracer_output``, ucla-roms >= 0.7.0) into a settings dict pinned
-    to an older tier with no matching field. Left alone, that stale section
-    would ride unpruned into ``model_settings``: the top-level
-    ``extra="ignore"`` on ``_SettingsSection`` would silently drop it again at
-    ``build_namelist``/write time, but only after the blueprint had already
-    snapshotted an inert section nobody can act on. Prune it here instead,
-    right after schema selection and before any precheck/freeze into the
-    blueprint, so a blueprint pinned to an older ucla-roms release never
-    stores a section that release's namelist schema doesn't understand.
-    """
-    for name in version_gated_section_names() - set(settings_cls.model_fields):
-        settings.pop(name, None)
 
 
 # ``river_frc``/``cdr_frc`` namelist run-time defaults: these are Forcing-owned (not
@@ -943,12 +916,17 @@ def build_forge_blueprint(
             str(effective_roms_ref) if effective_roms_ref is not None else None
         )
     # Drop any version-gated section (e.g. cdr_tracer_output, ucla-roms >= 0.7.0)
-    # this pin's schema doesn't model -- see _prune_version_gated_sections.
-    # Must run before the consistency checks below (so a section this pin can't
-    # emit never flips cppdefs), before the precheck (which reads `settings`
-    # directly, not a validated model), and before `settings` is frozen into
-    # the blueprint's `model_settings`.
-    _prune_version_gated_sections(settings, settings_cls)
+    # this pin's schema doesn't model. OutputSpecs are shared across ModelSpecs
+    # pinned to different ucla-roms releases (the same "daily-restarts"
+    # OutputSpec is selected against both 0.6- and 0.7-pinned ModelSpecs), so
+    # the _deep_merge(settings, output_settings) above can introduce a section
+    # only a newer tier models. Must run before the consistency checks below
+    # (so a section this pin can't emit never flips cppdefs), before the
+    # precheck (which reads `settings` directly, not a validated model), and
+    # before `settings` is frozen into the blueprint's `model_settings`, so a
+    # blueprint never stores a section its release's namelist schema doesn't
+    # understand. Silent here: this is the expected shared-OutputSpec case.
+    prune_version_gated_sections(settings, settings_cls)
 
     # ----- CDR tracer / gas-exchange output consistency (ucla-roms >= 0.7.0) --
     # Unlike do_cdr_output above, these two dedicated output streams (PR #351)
