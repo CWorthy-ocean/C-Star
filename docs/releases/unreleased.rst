@@ -42,6 +42,9 @@ Improvements
 - Setup-time detection of local modifications is content-based as well, avoiding unnecessary recompiles caused by stale index metadata. (`#704 <https://github.com/CWorthy-ocean/C-Star/pull/704>`_)
 - The NETCDF4 → CDF-5 conversion is now a shared utility used by both the ``nest_ic`` and ``upscaler`` applications. (`#705 <https://github.com/CWorthy-ocean/C-Star/pull/705>`_)
 - Extracted ``migrate_forge_blueprint_data`` and ``migrate_forcing_inputs`` from ``cstar/applications/forge/blueprint.py`` into a new ``cstar/applications/forge/migration.py``. (`#709 <https://github.com/CWorthy-ocean/C-Star/pull/709>`_)
+- Fetched template pins are cached under ``CSTAR_CACHE_HOME/forge-templates`` and reused on later runs. (`#713 <https://github.com/CWorthy-ocean/C-Star/pull/713>`_)
+- A cache entry whose files no longer match the blueprint's ``file_hashes`` is re-fetched; branch pins and blueprints without hashes are never cached. (`#713 <https://github.com/CWorthy-ocean/C-Star/pull/713>`_)
+- A cache directory that cannot be written (read-only or over quota on shared HPC filesystems) is logged and skipped rather than failing the build. (`#713 <https://github.com/CWorthy-ocean/C-Star/pull/713>`_)
 
 Miscellaneous
 ~~~~~~~~~~~~~
@@ -72,4 +75,5 @@ Miscellaneous
 - ``pyproject.toml`` now names its setuptools build backend explicitly; the missing key was tolerated by pip but broke check-manifest's PEP 517 detection. (`#712 <https://github.com/CWorthy-ocean/C-Star/pull/712>`_)
 - A ``check-manifest`` pre-commit hook verifies the sdist includes every tracked file not deliberately excluded. ``check-manifest`` moves from the build requirements to the ``dev`` extra. (`#712 <https://github.com/CWorthy-ocean/C-Star/pull/712>`_)
 - The publish workflow checks that the installed wheel carries the eight bundled model specs, the two forge templates and the wizard files, and smoke-tests ``cstar forge --help``. (`#712 <https://github.com/CWorthy-ocean/C-Star/pull/712>`_)
+- The forge templates developer page gains a "Staging cache" section. (`#713 <https://github.com/CWorthy-ocean/C-Star/pull/713>`_)
 
