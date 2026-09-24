@@ -302,6 +302,17 @@ Workplans can be checked for errors using the CLI and in code.
 
         cstar workplan check my_workplan.yaml
 
+    By default ``check`` performs the same resolution that ``run`` performs
+    before submitting anything: it validates the file's structure, then
+    imports each step's application, loads and validates each blueprint,
+    merges ``blueprint_overrides``, and validates every directive (unknown
+    directive keys, malformed configuration, and ``step`` references that do
+    not name an upstream dependency are all reported together). Nothing is
+    written to disk. If the workplan declares ``runtime_vars``, supply them
+    with ``--var``/``--varfile`` exactly as you would for ``run``. Pass
+    ``--schema-only`` to validate only the file's structure, for example
+    when the referenced blueprints are not available on the current machine.
+
    .. tab-item:: Programmatic Validation
 
     Use the ``deserialize`` method to validate a YAML file in Python.

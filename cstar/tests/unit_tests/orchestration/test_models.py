@@ -1339,6 +1339,125 @@ def test_workplan_deferred_producer_not_dependency(
     assert "depends_on" in str(error.value)
 
 
+def test_workplan_dependency_cycle_two_steps_rejected(
+    fake_blueprint_path: Path,
+) -> None:
+    """Verify a direct A <-> B dependency cycle is rejected, naming both steps.
+
+    Parameters
+    ----------
+    fake_blueprint_path : Path
+        A path to a file that meets minimum expectations (it exists).
+    """
+    a = Step(
+        name="A",
+        application="hello_world",
+        blueprint=fake_blueprint_path,
+        depends_on=["B"],
+    )
+    b = Step(
+        name="B",
+        application="hello_world",
+        blueprint=fake_blueprint_path,
+        depends_on=["A"],
+    )
+
+    with pytest.raises(ValidationError) as error:
+        _ = Workplan(
+            name="test-plan",
+            description="test-description",
+            steps=[a, b],
+        )
+
+    assert "Dependency cycle" in str(error.value)
+    assert "A" in str(error.value)
+    assert "B" in str(error.value)
+
+
+def test_workplan_dependency_cycle_three_steps_rejected(
+    fake_blueprint_path: Path,
+) -> None:
+    """Verify a transitive A -> B -> C -> A dependency cycle is rejected.
+
+    Parameters
+    ----------
+    fake_blueprint_path : Path
+        A path to a file that meets minimum expectations (it exists).
+    """
+    a = Step(
+        name="A",
+        application="hello_world",
+        blueprint=fake_blueprint_path,
+        depends_on=["C"],
+    )
+    b = Step(
+        name="B",
+        application="hello_world",
+        blueprint=fake_blueprint_path,
+        depends_on=["A"],
+    )
+    c = Step(
+        name="C",
+        application="hello_world",
+        blueprint=fake_blueprint_path,
+        depends_on=["B"],
+    )
+
+    with pytest.raises(ValidationError) as error:
+        _ = Workplan(
+            name="test-plan",
+            description="test-description",
+            steps=[a, b, c],
+        )
+
+    assert "Dependency cycle" in str(error.value)
+    assert "A" in str(error.value)
+    assert "B" in str(error.value)
+    assert "C" in str(error.value)
+
+
+def test_workplan_dependency_diamond_accepted(
+    fake_blueprint_path: Path,
+) -> None:
+    """Verify a diamond dependency shape (no cycle) is accepted.
+
+    A <- B, A <- C, {B, C} <- D: two independent paths reconverge on D
+    without ever looping back to an ancestor.
+
+    Parameters
+    ----------
+    fake_blueprint_path : Path
+        A path to a file that meets minimum expectations (it exists).
+    """
+    a = Step(name="A", application="hello_world", blueprint=fake_blueprint_path)
+    b = Step(
+        name="B",
+        application="hello_world",
+        blueprint=fake_blueprint_path,
+        depends_on=["A"],
+    )
+    c = Step(
+        name="C",
+        application="hello_world",
+        blueprint=fake_blueprint_path,
+        depends_on=["A"],
+    )
+    d = Step(
+        name="D",
+        application="hello_world",
+        blueprint=fake_blueprint_path,
+        depends_on=["B", "C"],
+    )
+
+    wp = Workplan(
+        name="test-plan",
+        description="test-description",
+        steps=[a, b, c, d],
+    )
+
+    assert [step.name for step in wp.steps] == ["A", "B", "C", "D"]
+
+
 def test_workplan_deferred_roundtrip(
     tmp_path: Path,
     fake_blueprint_path: Path,

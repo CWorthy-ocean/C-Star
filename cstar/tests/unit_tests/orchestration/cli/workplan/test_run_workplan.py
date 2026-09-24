@@ -2323,3 +2323,62 @@ def test_workplan_run_step_blueprint_migration_invalid(
     stderr_squashed = squash_cli_output(result.stderr)
     assert bp_path.name in stderr_squashed
     assert wp_path.name not in stderr_squashed
+
+
+def test_workplan_run_reports_all_directive_problems_before_submission(
+    tmp_path: Path,
+    hello_world_bp_path: Path,
+) -> None:
+    """Verify `workplan run` rejects a workplan whose directives are
+    misconfigured as a usage error listing every problem, and never reaches
+    the DAG runner.
+
+    The pipeline is exercised for real up to `prepare_workplan`; only the
+    submission stage is patched out so the assertion that it was never
+    reached is meaningful.
+
+    Parameters
+    ----------
+    tmp_path : Path
+        Temporary directory to read/write test inputs and outputs
+    hello_world_bp_path : Path
+        Fixture providing the path to a minimal hello-world blueprint
+    """
+    wp = Workplan(
+        name="Bad Directives",
+        description="Two steps, two distinct directive problems.",
+        steps=[
+            Step(
+                name="typo",
+                application="hello_world",
+                blueprint=hello_world_bp_path,
+                directives={"continue_from": {"path": "prior/run"}},
+            ),
+            Step(
+                name="not-a-mapping",
+                application="hello_world",
+                blueprint=hello_world_bp_path,
+                directives={"apply-overrides": "oops"},
+            ),
+        ],
+    )
+    wp_path = tmp_path / "bad-directives.yaml"
+    assert serialize(wp_path, wp)
+
+    with mock.patch("cstar.orchestration.dag_runner.run_dag") as mock_run_dag:
+        runner = CliRunner()
+        result = runner.invoke(
+            app,
+            ["--run-id", "bad-directives", "--dry-run", wp_path.as_posix()],
+            color=False,
+        )
+
+    assert result.exit_code == 2, result.output
+    # typer renders the usage error in a bordered panel that wraps long lines;
+    # strip the border and collapse whitespace before matching phrases
+    message = " ".join(result.stderr.replace("│", " ").split())
+    assert "2 directive problem(s)" in message
+    assert "'continue_from'" in message
+    assert "'apply-overrides'" in message
+    assert "must be a mapping" in message
+    mock_run_dag.assert_not_called()
