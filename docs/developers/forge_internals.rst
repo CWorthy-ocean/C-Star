@@ -339,9 +339,13 @@ byte-identical legacy namelists. ``version_gated_section_names()``
 non-legacy tier (``pio_settings``, ``cdr_tracer_output``,
 ``cdr_gas_exch_output``) -- used by the wizard's ``_SettingsEditor``
 (``cstar/wizard/wizard.py``) to skip rendering a widget for a
-version-gated section absent from the *active* schema. ``param`` is modeled
-by every tier (with a different sub-model above/below 0.4.0), so it is never
-section-gated; no bundled ModelSpec declares ``nt_cdr_oae``/``nt_cdr_dor``,
+version-gated section absent from the *active* schema, and by
+``prune_version_gated_sections()``, which drops such a section from the
+settings dict before the CDR output nets and the output-stream precheck read
+it -- called by both the resolver and the executor's ``configure_build``
+(the net for stored blueprints; it logs what it drops at INFO). ``param`` is
+modeled by every tier (with a different sub-model above/below 0.4.0), so it is
+never section-gated; no bundled ModelSpec declares ``nt_cdr_oae``/``nt_cdr_dor``,
 so the editor shows no widget for them, but a loaded blueprint's values are
 carried through unchanged.
 

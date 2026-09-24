@@ -88,7 +88,7 @@ def migrate_forge_blueprint_data(data: dict[str, Any] | None) -> dict[str, Any]:
     if version is not None and version > FORGE_BLUEPRINT_VERSION:
         raise ValueError(
             f"forge_blueprint_version {version} is newer than this build supports "
-            f"({FORGE_BLUEPRINT_VERSION}); upgrade cstar-forge to read this file."
+            f"({FORGE_BLUEPRINT_VERSION}); upgrade cstar-ocean to read this file."
         )
 
     if version is None or version < 3:

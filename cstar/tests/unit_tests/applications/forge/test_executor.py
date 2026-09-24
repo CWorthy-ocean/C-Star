@@ -3150,10 +3150,16 @@ class TestGoldenNamelist:
         )
         return normalized
 
-    def _generate_inputs_no_cdr_forcing(self, mock_grid, tmp_path):
-        """Builds against the 0.7.0-pinned ``_MODEL_DIR_ROMS070`` (so
-        ``cdr_tracer_output``/``cdr_gas_exch_output`` exist in
-        ``model_settings``) and runs the real ``generate_inputs()``, but --
+    def _generate_inputs_no_cdr_forcing(
+        self,
+        mock_grid,
+        tmp_path,
+        model_dir=_MODEL_DIR_ROMS070,
+        stored_model_settings=None,
+    ):
+        """Builds against ``model_dir`` (default: the 0.7.0-pinned
+        ``_MODEL_DIR_ROMS070``, so ``cdr_tracer_output``/``cdr_gas_exch_output``
+        exist in ``model_settings``) and runs the real ``generate_inputs()``, but --
         unlike ``_run_golden_namelist_case`` -- with NO CDR forcing configured
         (no ``_CDR_FORCING`` kwarg), so ``cdr_output.do_cdr_output`` and
         ``cppdefs.cdr_forcing`` both stay False. That isolates the CDR
@@ -3167,9 +3173,14 @@ class TestGoldenNamelist:
         ``generate_inputs()`` -- callers mutate ``cfg.model_settings`` (as a
         wizard accordion edit would, after the resolver and generation both
         already ran) and then drive ``configure_build`` themselves.
+
+        ``stored_model_settings`` sections are written into
+        ``cfg.model_settings`` *before* the executor is constructed, i.e. as a
+        stored (hand-edited or older) blueprint carries them rather than as a
+        post-resolve edit.
         """
         cfg = build_forge_blueprint(
-            model_dir=_MODEL_DIR_ROMS070,
+            model_dir=model_dir,
             grid_name="test-tiny",
             grid_kwargs=self._GRID_KWARGS,
             open_boundaries=self._BOUNDARIES,
@@ -3183,6 +3194,7 @@ class TestGoldenNamelist:
         )
         assert cfg.model_settings["cdr_output"]["do_cdr_output"] is False
         assert cfg.model_settings["cppdefs"]["cdr_forcing"] is False
+        cfg.model_settings.update(copy.deepcopy(stored_model_settings or {}))
 
         grid_mock = _create_grid_mock()
         grid_mock.nx = self._GRID_KWARGS["nx"]
@@ -3352,6 +3364,87 @@ class TestGoldenNamelist:
 
         with pytest.raises(ValueError, match="do_cdr_gas_exch_output"):
             self._configure_build_for(cfg, builder)
+
+    def test_configure_build_prunes_version_gated_sections_for_0_6_pin_end_to_end(
+        self, mock_grid, tmp_path, caplog
+    ):
+        """The build-time twin of the resolver's version-gated pruning: a
+        0.6.x-pinned blueprint (``RunTimeSettingsV0_6_0``, no CDR tracer/
+        gas-exchange streams) whose stored settings gained the 0.7.0-only
+        ``cdr_tracer_output``/``cdr_gas_exch_output`` sections -- a hand edit,
+        or a snapshot taken before the resolver pruned them -- builds without
+        them. Before the fix, the stale enabled flags still reached the CDR
+        output net, which forced ``cppdefs.cdr_forcing`` on for streams this
+        ucla-roms release cannot write, while the namelist silently dropped
+        the sections.
+        """
+        stale = {
+            "cdr_tracer_output": {
+                "do_cdr_tracer_output": True,
+                "output_period": 3600.0,
+                "nrpf": 4,
+            },
+            "cdr_gas_exch_output": {
+                "do_cdr_gas_exch_output": True,
+                "output_period": 3600.0,
+                "nrpf": 4,
+            },
+        }
+        cfg, builder = self._generate_inputs_no_cdr_forcing(
+            mock_grid,
+            tmp_path,
+            model_dir=_MODEL_DIR_ROMS060,
+            stored_model_settings=stale,
+        )
+
+        with caplog.at_level(logging.INFO, logger="cstar.applications.forge.executor"):
+            self._configure_build_for(cfg, builder)
+
+        assert "cdr_tracer_output" not in builder._settings_run_time
+        assert "cdr_gas_exch_output" not in builder._settings_run_time
+        assert builder._settings_compile_time["cppdefs"]["cdr_forcing"] is False
+        namelist = (builder.run_time_code_dir / "namelist.nml").read_text()
+        assert "&cdr_tracer_output_settings" not in namelist
+        assert "&cdr_gas_exch_output_settings" not in namelist
+        prune_logs = [
+            r.getMessage()
+            for r in caplog.records
+            if r.levelno == logging.INFO and "pruned" in r.getMessage()
+        ]
+        assert len(prune_logs) == 1
+        assert "cdr_gas_exch_output" in prune_logs[0]
+        assert "cdr_tracer_output" in prune_logs[0]
+        assert "RunTimeSettingsV0_6_0" in prune_logs[0]
+
+        # Re-entry: the incoming overrides still carry the stale sections, so
+        # they are pruned too, not rejected by the unknown-key merge guard.
+        self._configure_build_for(cfg, builder)
+        assert "cdr_tracer_output" not in builder._settings_run_time
+
+    def test_configure_build_keeps_version_gated_sections_for_0_7_pin_end_to_end(
+        self, mock_grid, tmp_path, caplog
+    ):
+        """Counterpart of the 0.6.x pruning test: a 0.7.0-pinned blueprint's
+        schema models ``cdr_tracer_output``/``cdr_gas_exch_output``, so
+        ``configure_build`` keeps both sections (and the enabled tracer stream
+        still forces ``cppdefs.cdr_forcing``) and logs no prune.
+        """
+        cfg, builder = self._generate_inputs_no_cdr_forcing(mock_grid, tmp_path)
+        cfg.model_settings["cdr_tracer_output"]["do_cdr_tracer_output"] = True
+
+        with caplog.at_level(logging.INFO, logger="cstar.applications.forge.executor"):
+            self._configure_build_for(cfg, builder)
+
+        assert (
+            builder._settings_run_time["cdr_tracer_output"]["do_cdr_tracer_output"]
+            is True
+        )
+        assert "cdr_gas_exch_output" in builder._settings_run_time
+        assert builder._settings_compile_time["cppdefs"]["cdr_forcing"] is True
+        namelist = (builder.run_time_code_dir / "namelist.nml").read_text()
+        assert "&cdr_tracer_output_settings" in namelist
+        assert "&cdr_gas_exch_output_settings" in namelist
+        assert not [r for r in caplog.records if "pruned" in r.getMessage()]
 
     def test_golden_namelist_test_tiny(self, mock_grid, tmp_path):
         self._run_golden_namelist_case(

@@ -3,7 +3,7 @@
 forge application's blueprint. It is fully wired into ``ForgeExecutor`` (see
 ``cstar.applications.forge.executor.ForgeExecutor.from_forge_blueprint`` and
 ``cstar.applications.forge.engine.process_forge_blueprint``), split into two phases
-(see ``docs/architecture-details.md``):
+(see ``docs/developers/forge_internals.rst``):
 
 1. **Collection / curation** — assemble every option from its source (constructor
    args, the ModelSpec, and the *pure* derived values), validate it, and write one
@@ -82,10 +82,7 @@ def _installed_version(package_name: str) -> str | None:
     themselves via ``setuptools_scm``, so an editable/dev checkout's installed
     version already embeds commit info (e.g. ``0.8.1.dev2+gcb931baef`` -- the
     same string ``cstar.__version__`` itself resolves to, via this same
-    ``importlib.metadata`` lookup on ``"cstar-ocean"``; going through this
-    function instead of importing ``cstar`` directly keeps this module free of
-    ``cstar`` imports -- see ``test_forge_blueprint_is_portable_no_forge_or_
-    heavy_cstar_imports``). Never raises.
+    ``importlib.metadata`` lookup on ``"cstar-ocean"``). Never raises.
     """
     try:
         return f"{package_name}=={_pkg_version(package_name)}"
@@ -1246,12 +1243,12 @@ class Provenance(_Section):
     caller may still pass one explicitly (e.g. carrying an original value
     forward through a re-resolve).
 
-    ``forge_version`` was a ``git describe`` of the standalone cstar-forge
-    checkout, from back when Forge was its own repo. Forge now lives in-tree as
-    ``cstar.applications.forge``, so its provenance is just ``cstar_version``
-    (below) -- ``forge_version`` is no longer stamped and is kept only, as
-    ``None`` on every newly-saved file, so older blueprints that do carry a
-    value still load and round-trip.
+    ``forge_version`` is a legacy field: blueprints written by the former
+    standalone cstar-forge package recorded a ``git describe`` of its checkout.
+    Forge now ships in ``cstar-ocean`` as ``cstar.applications.forge``, so its
+    provenance is just ``cstar_version`` (below) -- ``forge_version`` is no
+    longer stamped and is kept only, as ``None`` on every newly-saved file, so
+    older blueprints that do carry a value still load and round-trip.
     """
 
     generated_at: datetime | None = None
@@ -1555,7 +1552,7 @@ class ForgeBlueprint(Blueprint):
         # current content, for hand-edit detection); generated_at/cstar_version/
         # roms_tools_version are stamped only if not already set -- first save
         # wins, so a later resave preserves the original values. forge_version is
-        # no longer stamped (Forge is in-tree now; see Provenance's docstring).
+        # a legacy field and no longer stamped (see Provenance's docstring).
         prov = self.provenance
         updates: dict[str, Any] = {"content_hash": self.content_hash()}
         if prov.generated_at is None:
