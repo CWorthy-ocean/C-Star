@@ -31,6 +31,7 @@ from cstar.orchestration.dag_runner import (
     get_status_detail_map,
     load_run_state,
     on_status_changed,
+    original_workplan_backup,
     prepare_workplan,
 )
 from cstar.orchestration.launch.local import LocalHandle, LocalLauncher
@@ -44,7 +45,7 @@ from cstar.orchestration.models import (
     WorkplanState,
 )
 from cstar.orchestration.orchestration import LiveStep, LiveWorkplan, Planner, Status
-from cstar.orchestration.serialization import deserialize, serialize
+from cstar.orchestration.serialization import PersistenceMode, deserialize, serialize
 from cstar.orchestration.state import StateRepository
 from cstar.orchestration.tracking import TrackingRepository, WorkplanRun
 
@@ -624,6 +625,27 @@ async def test_prepare_workplan_persists_clobber_overrides(
 
     assert by_name["Prepare"].workflow_overrides[KEY_CLOBBER] is True
     assert not by_name["Ensemble X"].workflow_overrides.get(KEY_CLOBBER, False)
+
+
+@pytest.mark.usefixtures("read_yaml_intercept")
+@pytest.mark.asyncio
+async def test_prepare_workplan_persists_original_backup(
+    tmp_path: Path,
+    wp_templates_dir: Path,
+) -> None:
+    """Verify `prepare_workplan` writes an untouched copy of the source
+    workplan that a later `--resume` with a path can verify against.
+    """
+    wp_path = wp_templates_dir / "workplan.yaml"
+    output_dir = tmp_path / "output"
+
+    await prepare_workplan(wp_path, output_dir, clobber_steps=["Prepare"])
+
+    backup_path = original_workplan_backup(wp_path, output_dir)
+    assert backup_path.exists()
+
+    backup = deserialize(backup_path, Workplan, mode=PersistenceMode.yaml)
+    assert backup == deserialize(wp_path, Workplan)
 
 
 @pytest.mark.asyncio

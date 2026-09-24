@@ -805,26 +805,25 @@ def resolve_step_output_dir(workplan: "LiveWorkplan", name: str) -> Path:
     return fsm.output_dir
 
 
-def _rst_path_continue_from_conflict_message(step_name: str | None) -> str:
+def _rst_path_continue_from_conflict_message(step_name: str) -> str:
     """Build the error message for a conflicting `rst_path` + `continue-from`.
 
-    Shared between `NestingDirective.__call__` (runtime, where the step name
-    is known) and `NestingDirective.validate_directives` (schedule time,
-    where only the directives mapping is available).
+    Shared between `NestingDirective.__call__` (runtime) and
+    `NestingDirective.validate_directives` (schedule time); both are
+    invoked with the step and so always know its name.
 
     Parameters
     ----------
-    step_name : str | None
-        The step's name, when known; `None` when unavailable.
+    step_name : str
+        The step's name.
 
     Returns
     -------
     str
     """
-    subject = f"step {step_name!r}" if step_name is not None else "a step"
     return (
         "nest-from rst_path and continue-from both set initial conditions for "
-        f"{subject}; remove rst_path"
+        f"step {step_name!r}; remove rst_path"
     )
 
 
@@ -877,6 +876,74 @@ class ContinuanceDirective(OverrideDirective):
     def key(cls) -> str:
         return "continue-from"
 
+    @classmethod
+    def _config_problems(cls, config: Mapping[str, t.Any]) -> list[str]:
+        """Return config-shape problems in a `continue-from` directive config.
+
+        Parameters
+        ----------
+        config : Mapping[str, t.Any]
+            This directive's own configuration mapping.
+
+        Returns
+        -------
+        list[str]
+        """
+        found_keys = set(config.keys())
+        minimal_keys = {cls.KEY_PATH, cls.KEY_STEP}
+        problems: list[str] = []
+
+        if (found_keys - minimal_keys) or not found_keys.intersection(minimal_keys):
+            problems.append(
+                "Invalid continuance transform configuration; supported configuration: "
+                f"{', '.join(minimal_keys)}, provided configuration: {', '.join(found_keys)}"
+            )
+            return problems
+
+        if minimal_keys.issubset(found_keys):
+            problems.append(
+                f"Invalid continuance transform configuration: {cls.KEY_PATH!r} and "
+                f"{cls.KEY_STEP!r} are mutually exclusive; supply only one restart source."
+            )
+
+        return problems
+
+    @classmethod
+    def validate_directives(
+        cls, config: Mapping[str, t.Any], step: LiveStep
+    ) -> Sequence[str]:
+        """Validate a `continue-from` directive's config at schedule time.
+
+        Parameters
+        ----------
+        config : Mapping[str, t.Any]
+            This directive's own configuration mapping.
+        step : LiveStep
+            The step the directive is configured on.
+
+        Returns
+        -------
+        Sequence[str]
+        """
+        return cls._config_problems(config)
+
+    @classmethod
+    def referenced_steps(cls, config: Mapping[str, t.Any]) -> Sequence[str]:
+        """Return the step named by this directive's `step` config, if any.
+
+        Parameters
+        ----------
+        config : Mapping[str, t.Any]
+            This directive's own configuration mapping.
+
+        Returns
+        -------
+        Sequence[str]
+        """
+        if not (value := config.get(cls.KEY_STEP)):
+            return ()
+        return (str(value).strip(),)
+
     @t.override
     def __call__(self, step: LiveStep) -> Sequence[LiveStep]:
         """Warn on an explicit start_date/restart mismatch, then transform.
@@ -927,29 +994,17 @@ class ContinuanceDirective(OverrideDirective):
         ValueError
             If a restart file cannot be located with the supplied configuration.
         """
-        found_keys = set(self._config.keys())
-        minimal_keys = {self.KEY_PATH, self.KEY_STEP}
-
-        if found_keys and not found_keys.intersection(minimal_keys):
-            msg = (
-                "Invalid continuance transform configuration; supported configuration: "
-                f"{', '.join(minimal_keys)}, provided configuration: {', '.join(found_keys)}"
-            )
-            raise NotImplementedError(msg)
-
-        if minimal_keys.issubset(found_keys):
-            msg = (
-                f"Invalid continuance transform configuration: {self.KEY_PATH!r} and "
-                f"{self.KEY_STEP!r} are mutually exclusive; supply only one restart source."
-            )
-            raise NotImplementedError(msg)
+        if problems := self._config_problems(self._config):
+            raise NotImplementedError("; ".join(problems))
 
         search_path: Path | None = None
 
         if target_path := self._config.get(self.KEY_PATH, None):
             search_path = Path(target_path)
 
-        if name := self._config.get(self.KEY_STEP, None):
+        step_refs = self.referenced_steps(self._config)
+        name = step_refs[0] if step_refs else None
+        if name:
             search_path = _require_step_output_dir(self.workplan, name)
 
         if search_path:
@@ -1020,30 +1075,112 @@ class NestingDirective(OverrideDirective):
         return "nest-from"
 
     @classmethod
-    def validate_directives(
-        cls, config: Mapping[str, t.Any], directives: Mapping[str, t.Any]
-    ) -> None:
-        """Reject a `rst_path` config combined with a `continue-from` directive.
-
-        Called at schedule time (see `package_runtime_overrides`) so the
-        conflict, which would otherwise only surface on the compute node, is
-        caught before the workplan runs.
+    def _config_problems(cls, config: Mapping[str, t.Any]) -> list[str]:
+        """Return config-shape problems in a `nest-from` directive config.
 
         Parameters
         ----------
         config : Mapping[str, t.Any]
             This directive's own configuration mapping.
-        directives : Mapping[str, t.Any]
-            The step's full directives mapping (this directive's key
+
+        Returns
+        -------
+        list[str]
+        """
+        found_keys = set(config.keys())
+        boundary_keys = {cls.KEY_PATH, cls.KEY_STEP, cls.KEY_BRY_PATH}
+        supported_keys = boundary_keys | {cls.KEY_RST_PATH}
+        problems: list[str] = []
+
+        if cls.KEY_BRY_PATH in found_keys and found_keys.intersection(
+            {cls.KEY_PATH, cls.KEY_STEP}
+        ):
+            problems.append(
+                f"Invalid nesting transform configuration: {cls.KEY_BRY_PATH!r} "
+                f"conflicts with {cls.KEY_PATH!r}/{cls.KEY_STEP!r}; supply "
+                "only one boundary source."
+            )
+
+        if (found_keys - supported_keys) or not found_keys.intersection(boundary_keys):
+            problems.append(
+                "Invalid nesting transform configuration; supported configuration: "
+                f"{', '.join(sorted(supported_keys))}, provided configuration: "
+                f"{', '.join(found_keys)}"
+            )
+            return problems
+
+        if {cls.KEY_PATH, cls.KEY_STEP}.issubset(found_keys):
+            problems.append(
+                f"Invalid nesting transform configuration: {cls.KEY_PATH!r} and "
+                f"{cls.KEY_STEP!r} are mutually exclusive; supply only one boundary source."
+            )
+
+        target_value = config.get(cls.KEY_PATH) or config.get(cls.KEY_BRY_PATH)
+        sources = (
+            list(_split_sources(target_value, cls.SOURCE_DELIMITER))
+            if target_value
+            else []
+        )
+        sources.extend(cls.referenced_steps(config))
+
+        if not sources:
+            key = next(
+                k
+                for k in (cls.KEY_PATH, cls.KEY_BRY_PATH, cls.KEY_STEP)
+                if k in found_keys
+            )
+            problems.append(
+                f"Invalid nesting transform configuration: no boundary source "
+                f"given in {key!r}"
+            )
+
+        return problems
+
+    @classmethod
+    def validate_directives(
+        cls, config: Mapping[str, t.Any], step: LiveStep
+    ) -> Sequence[str]:
+        """Validate a `nest-from` directive's config at schedule time.
+
+        In addition to the config-shape rules in `_config_problems`, rejects
+        a `rst_path` config combined with a `continue-from` directive on the
+        same step (both would set `initial_conditions`), a conflict that
+        would otherwise only surface on the compute node.
+
+        Parameters
+        ----------
+        config : Mapping[str, t.Any]
+            This directive's own configuration mapping.
+        step : LiveStep
+            The step the directive is configured on; `step.directives`
+            carries its full directives mapping (this directive's key
             included).
 
-        Raises
-        ------
-        ValueError
-            If `rst_path` is set alongside a `continue-from` directive.
+        Returns
+        -------
+        Sequence[str]
         """
-        if cls.KEY_RST_PATH in config and ContinuanceDirective.key() in directives:
-            raise ValueError(_rst_path_continue_from_conflict_message(None))
+        problems = list(cls._config_problems(config))
+        if cls.KEY_RST_PATH in config and ContinuanceDirective.key() in step.directives:
+            problems.append(_rst_path_continue_from_conflict_message(step.name))
+        return problems
+
+    @classmethod
+    def referenced_steps(cls, config: Mapping[str, t.Any]) -> Sequence[str]:
+        """Return the steps named by this directive's `step` config, if any.
+
+        Parameters
+        ----------
+        config : Mapping[str, t.Any]
+            This directive's own configuration mapping.
+
+        Returns
+        -------
+        Sequence[str]
+        """
+        if not (value := config.get(cls.KEY_STEP)):
+            return ()
+        return _split_sources(value, cls.SOURCE_DELIMITER)
 
     @t.override
     def __call__(self, step: LiveStep) -> Sequence[LiveStep]:
@@ -1088,10 +1225,10 @@ class NestingDirective(OverrideDirective):
         ------
         NotImplementedError
             If the supplied configuration is not supported, or if the
-            deprecated `bry_path` key conflicts with `path`/`step`.
+            deprecated `bry_path` key conflicts with `path`/`step`, or the
+            value is empty after splitting.
         ValueError
-            If the value is empty after splitting, or (when `rst_path` is
-            supplied) no restart file can be located.
+            If `rst_path` is supplied and no restart file can be located.
         FileNotFoundError
             If a listed source contains no boundary files, or a listed step
             has no `output` directory.
@@ -1105,31 +1242,8 @@ class NestingDirective(OverrideDirective):
             warnings.warn(msg, FutureWarning, stacklevel=2)
             log.warning(msg)
 
-            if self.KEY_PATH in self._config or self.KEY_STEP in self._config:
-                msg = (
-                    f"Invalid nesting transform configuration: {self.KEY_BRY_PATH!r} "
-                    f"conflicts with {self.KEY_PATH!r}/{self.KEY_STEP!r}; supply "
-                    "only one boundary source."
-                )
-                raise NotImplementedError(msg)
-
-        found_keys = set(self._config.keys())
-        boundary_keys = {self.KEY_PATH, self.KEY_STEP, self.KEY_BRY_PATH}
-
-        if not found_keys.intersection(boundary_keys):
-            msg = (
-                "Invalid nesting transform configuration; supported configuration: "
-                f"{', '.join(sorted(boundary_keys))}, provided configuration: "
-                f"{', '.join(found_keys)}"
-            )
-            raise NotImplementedError(msg)
-
-        if {self.KEY_PATH, self.KEY_STEP}.issubset(found_keys):
-            msg = (
-                f"Invalid nesting transform configuration: {self.KEY_PATH!r} and "
-                f"{self.KEY_STEP!r} are mutually exclusive; supply only one boundary source."
-            )
-            raise NotImplementedError(msg)
+        if problems := self._config_problems(self._config):
+            raise NotImplementedError("; ".join(problems))
 
         sources: list[tuple[Path, str | None]] = []
 
@@ -1141,23 +1255,10 @@ class NestingDirective(OverrideDirective):
                 for token in _split_sources(target_value, self.SOURCE_DELIMITER)
             )
 
-        if step_value := self._config.get(self.KEY_STEP):
-            sources.extend(
-                (_require_step_output_dir(self.workplan, token), token)
-                for token in _split_sources(step_value, self.SOURCE_DELIMITER)
-            )
-
-        if not sources:
-            key = next(
-                k
-                for k in (self.KEY_PATH, self.KEY_BRY_PATH, self.KEY_STEP)
-                if k in self._config
-            )
-            msg = (
-                f"Invalid nesting transform configuration: no boundary source "
-                f"given in {key!r}"
-            )
-            raise ValueError(msg)
+        sources.extend(
+            (_require_step_output_dir(self.workplan, token), token)
+            for token in self.referenced_steps(self._config)
+        )
 
         boundary_files: list[BoundaryFile] = []
         for search_path, step_name in sources:

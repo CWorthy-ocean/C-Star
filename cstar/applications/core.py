@@ -18,6 +18,7 @@ from cstar.orchestration.serialization import SerializableModel, deserialize
 
 if t.TYPE_CHECKING:
     from cstar.entrypoint.config import JobConfig, ServiceConfiguration
+    from cstar.orchestration.transforms import Directive
 
 APP_PLUGIN_GROUP: t.Final[str] = "cstar.applications"
 """Entry-point group third-party packages use to register applications.
@@ -351,6 +352,8 @@ class ApplicationDefinition(t.Protocol, t.Generic[TBlueprint, TRunner]):
     """The blueprint containing the application configuration."""
     applicable_transforms: Sequence[type[Transform[t.Any]]]
     """Transforms that must be executed prior to execution."""
+    directives: Sequence[type["Directive"]] = ()
+    """Directives a step of this application may declare; schedule-time validation rejects any other key."""
     migrations: Sequence[type[SchemaAdapter]] | None = None
     """The available adapters for performing schema migrations."""
     resumable: bool = False

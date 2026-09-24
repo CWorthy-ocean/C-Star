@@ -1,4 +1,5 @@
 import re
+import shlex
 import warnings
 from pathlib import Path
 
@@ -126,16 +127,112 @@ def _check_local_repo_changed_from_remote(
             )
             return True  # HEAD is not at the expected hash
 
-        # if HEAD is at expected hash, check if dirty:
-        status_output = _run_cmd(
-            cmd="git diff-index HEAD", cwd=local_repo, raise_on_error=True
-        )
-
-        return bool(status_output.strip())  # True if any changes
+        return _has_local_modifications(local_repo)
 
     except RuntimeError:
         log.exception("An error occurred while verifying repository status")
         return True
+
+
+def _has_local_modifications(local_repo: str | Path) -> bool:
+    """Return `True` if any tracked file in `local_repo` differs from HEAD.
+
+    Uses `git status`, which re-hashes files whose cached stat data is stale,
+    rather than plumbing `git diff-index HEAD`, which trusts that cache and
+    reports every file as modified when the checkout was copied or its ctimes
+    changed. `--no-optional-locks` keeps the check read-only: the refreshed
+    stat data is not written back to `.git/index`.
+
+    Parameters
+    ----------
+    local_repo : str | Path
+        The path to a local directory where a git repository is cloned.
+
+    Raises
+    ------
+    RuntimeError
+        If git cannot inspect the repository.
+    """
+    status_output = _run_cmd(
+        cmd="git --no-optional-locks status --porcelain --untracked-files=no",
+        cwd=Path(local_repo),
+        raise_on_error=True,
+    )
+    return bool(status_output.strip())
+
+
+def _resolve_local_target(local_repo: Path, checkout_target: str) -> str:
+    """Resolve `checkout_target` to a commit hash inside the clone at `local_repo`.
+
+    Candidates are tried in the order `git checkout` (and
+    `_get_hash_from_checkout_target`) honour: a local branch, then a tag, then
+    the bare name (a commit hash). Git's own `rev-parse` order would prefer a tag
+    over a same-named branch. Annotated tags are peeled to their commit.
+
+    Returns
+    -------
+    str
+        The commit hash, or an empty string if no candidate resolves.
+    """
+    for ref in (
+        f"refs/heads/{checkout_target}",
+        f"refs/tags/{checkout_target}",
+        checkout_target,
+    ):
+        try:
+            return _run_cmd(
+                cmd=f"git rev-parse --verify --quiet {shlex.quote(ref + '^{commit}')}",
+                cwd=local_repo,
+                raise_on_error=True,
+            )
+        except RuntimeError:
+            continue
+    return ""
+
+
+def _local_repo_mismatch(local_repo: str | Path, checkout_target: str) -> str:
+    """Explain why the clone in `local_repo` is not a clean checkout of `checkout_target`.
+
+    Offline counterpart of `_check_local_repo_changed_from_remote` for adopting a
+    clone a previous run already built: the target is resolved in the clone
+    itself, so a branch that has since moved on the remote, or a node without
+    network access, does not invalidate it.
+
+    Parameters
+    ----------
+    local_repo : str | Path
+        The path to a local directory where a git repository is cloned.
+    checkout_target : str
+        A git tag, branch, or commit identifier.
+
+    Returns
+    -------
+    str
+        A one-clause reason the clone does not match, or an empty string if it does.
+    """
+    local_repo = Path(local_repo)
+    try:
+        # read HEAD first: an unreadable repository (e.g. git's "dubious
+        # ownership" refusal) must surface as such, not as a missing target
+        head = _run_cmd(cmd="git rev-parse HEAD", cwd=local_repo, raise_on_error=True)
+        expected = _resolve_local_target(local_repo, checkout_target)
+        if not expected:
+            reason = f"checkout target {checkout_target!r} is not present in the clone"
+        else:
+            if head != expected:
+                reason = (
+                    f"HEAD is at {head[:12]} but {checkout_target!r} resolves to "
+                    f"{expected[:12]}"
+                )
+            elif _has_local_modifications(local_repo):
+                reason = "tracked files have local modifications"
+            else:
+                return ""
+    except RuntimeError as ex:
+        reason = f"git inspection failed: {ex}"
+
+    log.debug("Clone at %s does not match %r: %s", local_repo, checkout_target, reason)
+    return reason
 
 
 def _get_repo_remote(local_path: str | Path) -> str:
@@ -246,11 +343,15 @@ def _get_hash_from_checkout_target(repo_url: str, checkout_target: str) -> str:
     if checkout_target in ref_dict.values():
         return checkout_target
 
-    # Otherwise, see if it is listed as a branch or tag
-    alt_refs = {f"refs/heads/{checkout_target}", f"refs/tags/{checkout_target}"}
-    for ref, has in ref_dict.items():
-        if ref in alt_refs:
-            return has
+    # Otherwise, see if it is listed as a branch or tag. An annotated tag is
+    # listed twice: prefer its peeled (`^{}`) commit over the tag object.
+    for ref in (
+        f"refs/heads/{checkout_target}",
+        f"refs/tags/{checkout_target}^{{}}",
+        f"refs/tags/{checkout_target}",
+    ):
+        if ref in ref_dict:
+            return ref_dict[ref]
 
     # Lastly, if NOTA worked, see if the checkout target is a 7 or 40 digit hexadecimal string
     is_potential_hash = bool(re.fullmatch(r"^[0-9a-f]{7}$", checkout_target)) or bool(

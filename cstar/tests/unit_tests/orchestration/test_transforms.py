@@ -50,6 +50,7 @@ from cstar.orchestration.transforms import (
     TemplateFillTransform,
     WorkplanTransformer,
     apply_automatic_overrides,
+    collect_directive_problems,
     effective_blueprint,
     get_fsm_resolver,
     get_system_overrides,
@@ -587,6 +588,27 @@ def test_continuance_directive_path_and_step_are_mutually_exclusive(
             {
                 ContinuanceDirective.KEY_PATH: str(test_working_dir),
                 ContinuanceDirective.KEY_STEP: "previous",
+            }
+        )
+
+
+def test_continuance_directive_extra_unknown_key_rejected(
+    test_working_dir: Path,
+) -> None:
+    """Verify an unrecognized key alongside a valid `path` is rejected, not
+    silently ignored.
+
+    Parameters
+    ----------
+    test_working_dir : Path
+        The value that replaced the static content of the blueprint template
+        and was written to the test directory, tmp_path.
+    """
+    with pytest.raises(NotImplementedError, match="supported"):
+        _ = ContinuanceDirective(
+            {
+                ContinuanceDirective.KEY_PATH: str(test_working_dir),
+                "unknown-key": "value",
             }
         )
 
@@ -1362,6 +1384,36 @@ def test_nesting_directive_path_and_step_are_mutually_exclusive(tmp_path: Path) 
         )
 
 
+def test_nesting_directive_extra_unknown_key_rejected(tmp_path: Path) -> None:
+    """Verify an unrecognized key alongside a valid `path` is rejected, not
+    silently ignored.
+    """
+    with pytest.raises(NotImplementedError, match="supported"):
+        NestingDirective(
+            {
+                NestingDirective.KEY_PATH: str(tmp_path),
+                "unknown-key": "value",
+            }
+        )
+
+
+def test_nesting_directive_rst_path_alone_has_no_boundary_source(
+    tmp_path: Path,
+) -> None:
+    """Verify `rst_path` alone (a recognized key, but not itself a boundary
+    source) is rejected for lacking a boundary source, not treated as an
+    unrecognized key.
+
+    Config-shape validation runs before the deprecated-key warnings, so no
+    `FutureWarning` is emitted for this rejected config.
+    """
+    rst_dir = tmp_path / "rst"
+    rst_dir.mkdir()
+
+    with pytest.raises(NotImplementedError, match="supported"):
+        NestingDirective({NestingDirective.KEY_RST_PATH: str(rst_dir)})
+
+
 @pytest.mark.parametrize(
     ("value", "expected"),
     [
@@ -1601,7 +1653,7 @@ def test_nesting_directive_duplicate_paths_deduplicated(
 
 def test_nesting_directive_empty_sources_raises() -> None:
     """Verify a `path` value that is empty after splitting is rejected."""
-    with pytest.raises(ValueError, match="no boundary source"):
+    with pytest.raises(NotImplementedError, match="no boundary source"):
         NestingDirective({NestingDirective.KEY_PATH: " ; "})
 
 
@@ -1743,14 +1795,78 @@ def test_package_runtime_overrides_orders_apply_overrides_first(
     ]
 
 
-def test_package_runtime_overrides_rejects_nest_from_rst_path_with_continue_from(
+def test_collect_directive_problems_rejects_nest_from_rst_path_with_continue_from(
     tmp_path: Path,
     hello_world_bp_path: Path,
 ) -> None:
-    """Verify `package_runtime_overrides` rejects a `nest-from` `rst_path`
+    """Verify `collect_directive_problems` reports a `nest-from` `rst_path`
     combined with `continue-from` on the same step at schedule time, before
     the workplan is submitted (rather than failing later on the compute
     node).
+
+    Parameters
+    ----------
+    tmp_path : Path
+        The pytest-provided temporary directory.
+    hello_world_bp_path : Path
+        Fixture returning the path to a blueprint file; `collect_directive_problems`
+        never reads it, so any existing file works.
+    """
+    step = LiveStep(
+        name="ordering-step",
+        application="roms_marbl",
+        blueprint=hello_world_bp_path.as_posix(),
+        working_dir=tmp_path / "step-root",
+        directives={
+            ContinuanceDirective.key(): {"path": "prior/run"},
+            NestingDirective.key(): {
+                NestingDirective.KEY_RST_PATH: "prior/run",
+                NestingDirective.KEY_BRY_PATH: "prior/bry",
+            },
+        },
+    )
+
+    problems = collect_directive_problems([step])
+
+    assert any("continue-from" in problem for problem in problems)
+
+
+def test_collect_directive_problems_allows_boundary_only_nest_from(
+    tmp_path: Path,
+    hello_world_bp_path: Path,
+) -> None:
+    """Verify a boundary-only `nest-from` (no `rst_path`) passes schedule-time
+    validation even when `continue-from` is also present on the step.
+
+    Parameters
+    ----------
+    tmp_path : Path
+        The pytest-provided temporary directory.
+    hello_world_bp_path : Path
+        Fixture returning the path to a blueprint file; `collect_directive_problems`
+        never reads it, so any existing file works.
+    """
+    step = LiveStep(
+        name="ordering-step",
+        application="roms_marbl",
+        blueprint=hello_world_bp_path.as_posix(),
+        working_dir=tmp_path / "step-root",
+        directives={
+            ContinuanceDirective.key(): {"path": "prior/run"},
+            NestingDirective.key(): {NestingDirective.KEY_PATH: "prior/bry"},
+        },
+    )
+
+    assert collect_directive_problems([step]) == []
+
+
+def test_package_runtime_overrides_no_longer_validates_directives(
+    tmp_path: Path,
+    hello_world_bp_path: Path,
+) -> None:
+    """Verify `package_runtime_overrides` no longer validates directive
+    configuration -- that responsibility moved to `collect_directive_problems`,
+    called once by `WorkplanTransformer.apply` before any step is packaged.
 
     Parameters
     ----------
@@ -1773,16 +1889,22 @@ def test_package_runtime_overrides_rejects_nest_from_rst_path_with_continue_from
         },
     )
 
-    with pytest.raises(ValueError, match="continue-from"):
-        package_runtime_overrides(step)
+    packaged = package_runtime_overrides(step)
+
+    assert list(packaged.directives) == [
+        ApplyOverridesDirective.key(),
+        ContinuanceDirective.key(),
+        NestingDirective.key(),
+    ]
 
 
-def test_package_runtime_overrides_allows_boundary_only_nest_from(
+def test_collect_directive_problems_unknown_key_on_hello_world_step(
     tmp_path: Path,
     hello_world_bp_path: Path,
 ) -> None:
-    """Verify a boundary-only `nest-from` (no `rst_path`) passes schedule-time
-    validation even when `continue-from` is also present on the step.
+    """Verify an unrecognized directive key on a `hello_world` step (which
+    declares no directives) is reported, naming the step, the key, and the
+    application's allowed keys.
 
     Parameters
     ----------
@@ -1792,23 +1914,263 @@ def test_package_runtime_overrides_allows_boundary_only_nest_from(
         Fixture returning the path to a hello-world blueprint file.
     """
     step = LiveStep(
-        name="ordering-step",
+        name="s1",
         application="hello_world",
         blueprint=hello_world_bp_path.as_posix(),
-        working_dir=tmp_path / "step-root",
+        working_dir=tmp_path / "s1",
+        directives={"not-a-directive": {"key": "value"}},
+    )
+
+    problems = collect_directive_problems([step])
+
+    assert len(problems) == 1
+    assert "s1" in problems[0]
+    assert "not-a-directive" in problems[0]
+    assert ApplyOverridesDirective.key() in problems[0]
+
+
+def test_collect_directive_problems_roms_directive_on_hello_world_step(
+    tmp_path: Path,
+    hello_world_bp_path: Path,
+) -> None:
+    """Verify a `roms_marbl` directive (`nest-from`) on a `hello_world` step
+    is reported as unknown -- `hello_world` does not declare it.
+
+    Parameters
+    ----------
+    tmp_path : Path
+        The pytest-provided temporary directory.
+    hello_world_bp_path : Path
+        Fixture returning the path to a hello-world blueprint file.
+    """
+    step = LiveStep(
+        name="s1",
+        application="hello_world",
+        blueprint=hello_world_bp_path.as_posix(),
+        working_dir=tmp_path / "s1",
+        directives={NestingDirective.key(): {NestingDirective.KEY_PATH: "bry"}},
+    )
+
+    problems = collect_directive_problems([step])
+
+    assert len(problems) == 1
+    assert NestingDirective.key() in problems[0]
+
+
+def test_collect_directive_problems_non_mapping_config(
+    tmp_path: Path,
+    hello_world_bp_path: Path,
+) -> None:
+    """Verify a directive config that is not a mapping is reported.
+
+    Parameters
+    ----------
+    tmp_path : Path
+        The pytest-provided temporary directory.
+    hello_world_bp_path : Path
+        Fixture returning the path to a hello-world blueprint file.
+    """
+    step = LiveStep(
+        name="s1",
+        application="roms_marbl",
+        blueprint=hello_world_bp_path.as_posix(),
+        working_dir=tmp_path / "s1",
+        directives={ContinuanceDirective.key(): "not-a-mapping"},
+    )
+
+    problems = collect_directive_problems([step])
+
+    assert len(problems) == 1
+    assert "mapping" in problems[0]
+
+
+def test_collect_directive_problems_unknown_step_reference(
+    tmp_path: Path,
+    hello_world_bp_path: Path,
+) -> None:
+    """Verify a `step:` reference to a step absent from the workplan is reported.
+
+    Parameters
+    ----------
+    tmp_path : Path
+        The pytest-provided temporary directory.
+    hello_world_bp_path : Path
+        Fixture returning the path to a hello-world blueprint file.
+    """
+    step = LiveStep(
+        name="s1",
+        application="roms_marbl",
+        blueprint=hello_world_bp_path.as_posix(),
+        working_dir=tmp_path / "s1",
         directives={
-            ContinuanceDirective.key(): {"path": "prior/run"},
-            NestingDirective.key(): {NestingDirective.KEY_PATH: "prior/bry"},
+            ContinuanceDirective.key(): {ContinuanceDirective.KEY_STEP: "ghost"}
         },
     )
 
-    packaged = package_runtime_overrides(step)
+    problems = collect_directive_problems([step])
 
-    assert list(packaged.directives) == [
-        ApplyOverridesDirective.key(),
-        ContinuanceDirective.key(),
-        NestingDirective.key(),
-    ]
+    assert len(problems) == 1
+    assert "unknown step" in problems[0]
+    assert "ghost" in problems[0]
+
+
+def test_collect_directive_problems_sibling_not_ancestor(
+    tmp_path: Path,
+    hello_world_bp_path: Path,
+) -> None:
+    """Verify a `step:` reference to a step that exists but is not an
+    upstream dependency (via `depends_on`) is reported.
+
+    Parameters
+    ----------
+    tmp_path : Path
+        The pytest-provided temporary directory.
+    hello_world_bp_path : Path
+        Fixture returning the path to a hello-world blueprint file.
+    """
+    sibling = LiveStep(
+        name="sibling",
+        application="hello_world",
+        blueprint=hello_world_bp_path.as_posix(),
+        working_dir=tmp_path / "sibling",
+    )
+    step = LiveStep(
+        name="s1",
+        application="roms_marbl",
+        blueprint=hello_world_bp_path.as_posix(),
+        working_dir=tmp_path / "s1",
+        directives={
+            ContinuanceDirective.key(): {ContinuanceDirective.KEY_STEP: "sibling"}
+        },
+    )
+
+    problems = collect_directive_problems([sibling, step])
+
+    assert len(problems) == 1
+    assert "not an upstream dependency" in problems[0]
+
+
+def test_collect_directive_problems_accepts_transitive_ancestor(
+    tmp_path: Path,
+    hello_world_bp_path: Path,
+) -> None:
+    """Verify a `step:` reference to a transitive ancestor (A -> B -> C, C
+    refers to A) passes, not only a direct dependency.
+
+    Parameters
+    ----------
+    tmp_path : Path
+        The pytest-provided temporary directory.
+    hello_world_bp_path : Path
+        Fixture returning the path to a hello-world blueprint file.
+    """
+    a = LiveStep(
+        name="A",
+        application="hello_world",
+        blueprint=hello_world_bp_path.as_posix(),
+        working_dir=tmp_path / "A",
+    )
+    b = LiveStep(
+        name="B",
+        application="hello_world",
+        blueprint=hello_world_bp_path.as_posix(),
+        working_dir=tmp_path / "B",
+        depends_on=["A"],
+    )
+    c = LiveStep(
+        name="C",
+        application="roms_marbl",
+        blueprint=hello_world_bp_path.as_posix(),
+        working_dir=tmp_path / "C",
+        depends_on=["B"],
+        directives={ContinuanceDirective.key(): {ContinuanceDirective.KEY_STEP: "A"}},
+    )
+
+    assert collect_directive_problems([a, b, c]) == []
+
+
+def test_collect_directive_problems_aggregates_across_steps_and_directives(
+    tmp_path: Path,
+    hello_world_bp_path: Path,
+) -> None:
+    """Verify problems from two steps and two directives are reported
+    together in one list, not just the first found.
+
+    Parameters
+    ----------
+    tmp_path : Path
+        The pytest-provided temporary directory.
+    hello_world_bp_path : Path
+        Fixture returning the path to a hello-world blueprint file.
+    """
+    step_a = LiveStep(
+        name="a",
+        application="hello_world",
+        blueprint=hello_world_bp_path.as_posix(),
+        working_dir=tmp_path / "a",
+        directives={"not-a-directive": {"key": "value"}},
+    )
+    step_b = LiveStep(
+        name="b",
+        application="roms_marbl",
+        blueprint=hello_world_bp_path.as_posix(),
+        working_dir=tmp_path / "b",
+        directives={
+            ContinuanceDirective.key(): {ContinuanceDirective.KEY_STEP: "ghost"},
+            NestingDirective.key(): {"not-a-boundary-key": "value"},
+        },
+    )
+
+    problems = collect_directive_problems([step_a, step_b])
+
+    assert len(problems) == 3
+
+
+def test_workplan_transformer_reports_all_directive_problems_in_one_error(
+    hello_world_bp_path: Path,
+) -> None:
+    """Verify `WorkplanTransformer.apply` aggregates directive problems from
+    every step into a single `ValueError`, rather than failing on the first.
+
+    Uses `hello_world` steps, since unknown-key problems are detected before
+    any blueprint is loaded.
+
+    Parameters
+    ----------
+    hello_world_bp_path : Path
+        Fixture returning the path to a hello-world blueprint file.
+    """
+    step_a = Step(
+        name="a",
+        application="hello_world",
+        blueprint=hello_world_bp_path.as_posix(),
+        directives={"not-a-directive": {"key": "value"}},
+    )
+    step_b = Step(
+        name="b",
+        application="hello_world",
+        blueprint=hello_world_bp_path.as_posix(),
+        directives={"also-not-a-directive": {"key": "value"}},
+    )
+    wp = Workplan(
+        name="bad-directives-plan",
+        description="two steps with unknown directive keys",
+        steps=[step_a, step_b],
+    )
+
+    with pytest.raises(ValueError, match="2 directive problem") as error:
+        WorkplanTransformer(wp).apply()
+
+    assert "not-a-directive" in str(error.value)
+    assert "also-not-a-directive" in str(error.value)
+
+
+def test_nesting_directive_referenced_steps_tokenizes_step_value() -> None:
+    """Verify `NestingDirective.referenced_steps` splits `a; b` into ordered
+    step-name tokens, matching `_split_sources`.
+    """
+    config = {NestingDirective.KEY_STEP: "a; b"}
+    assert NestingDirective.referenced_steps(config) == ["a", "b"]
 
 
 def test_apply_directives_applies_overrides_before_content_directives(

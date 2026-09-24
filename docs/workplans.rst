@@ -302,6 +302,17 @@ Workplans can be checked for errors using the CLI and in code.
 
         cstar workplan check my_workplan.yaml
 
+    By default ``check`` performs the same resolution that ``run`` performs
+    before submitting anything: it validates the file's structure, then
+    imports each step's application, loads and validates each blueprint,
+    merges ``blueprint_overrides``, and validates every directive (unknown
+    directive keys, malformed configuration, and ``step`` references that do
+    not name an upstream dependency are all reported together). Nothing is
+    written to disk. If the workplan declares ``runtime_vars``, supply them
+    with ``--var``/``--varfile`` exactly as you would for ``run``. Pass
+    ``--schema-only`` to validate only the file's structure, for example
+    when the referenced blueprints are not available on the current machine.
+
    .. tab-item:: Programmatic Validation
 
     Use the ``deserialize`` method to validate a YAML file in Python.
@@ -349,6 +360,18 @@ Execution
       restart, instead of clearing it -- provided the step's application
       declares itself resumable; other failed steps are re-run from scratch
       with a warning, and completed steps are left untouched.
+
+    ``--resume`` also accepts the workplan path the run was started from in
+    place of ``--run-id``. The :term:`run ID` is derived from the workplan
+    ``name`` exactly as on the first run, and the file is used only to identify
+    that run: it must be unchanged since (edits, and blueprint schema
+    migrations applied on load, both count), otherwise the command refuses and
+    points you at ``--run-id``. ``--var`` and ``--varfile`` cannot be combined
+    with ``--resume``; the run continues with the variables it was started with.
+
+    .. code-block:: console
+
+        cstar workplan run my_workplan.yaml --resume
 
 
    .. tab-item:: Programmatic Execution

@@ -241,8 +241,9 @@ Users specify **logical source names** in a **ForcingSpec**
 (``catalog/ForcingSpec/<name>/Forcing.yaml``); the topography source is
 Domain-level (``model.yaml`` no longer carries source selection):
 
-- ``"GLORYS"`` -> maps to ``"GLORYS_REGIONAL"`` or ``"GLORYS_GLOBAL"``
-  (platform-dependent)
+- ``"GLORYS"`` -> ``"GLORYS_REGIONAL"`` by default, or ``"GLORYS_GLOBAL"``
+  when an explicit ``glorys_layout="global"`` is given (see
+  ``resolve_dataset_key``)
 - ``"UNIFIED"`` -> maps to ``"UNIFIED_BGC"``
 - ``"SRTM15"`` -> ``"SRTM15"`` (un-versioned key; the version appears in the
   staged filename ``SRTM15_V2.7.nc``)
@@ -265,11 +266,13 @@ Defined in ``cstar/applications/forge/source_registry.py`` (re-exported from
        "SRTM15": "SRTM15",
        "MBL_CO2": "MBL_CO2",
        "TPXO": "TPXO",
-       "WOA": "WOA",
+       "WOA": "WOA",           # SSS-restoring salinity (0.25 deg); user-staged
+       "WOA_BGC": "WOA_BGC",   # WOA23 1-deg gridded BGC source; auto-downloaded
        "DAI": "DAI",
        "GLOFAS": "GLOFAS",
        "EMOD": "EMOD",
        "RIVR2O": "RIVR2O",
+       "GLODAP": "GLODAP",     # GLODAPv2.2016b mapped BGC climatology; user-staged
        "CONSTANTS": "CONSTANTS",
    }
 

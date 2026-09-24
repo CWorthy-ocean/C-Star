@@ -6,12 +6,14 @@ import yaml
 from typer.testing import CliRunner
 
 from cstar.cli.workplan.check import app
-from cstar.orchestration.models import Workplan
+from cstar.entrypoint.utils import ARG_SCHEMA_ONLY
+from cstar.orchestration.models import Step, Workplan
 from cstar.orchestration.serialization import (
     deserialize,
     enum_representer,
     path_representer,
     register_representer,
+    serialize,
 )
 
 
@@ -136,10 +138,11 @@ def test_cli_workplan_check_valid_input(
     wp_path = package_path / repo_relative_path
 
     runner = CliRunner()
-    result = runner.invoke(app, [wp_path.as_posix()], color=False)
+    result = runner.invoke(app, [wp_path.as_posix(), ARG_SCHEMA_ONLY], color=False)
 
     msg = f"`{wp_path}` does not contain a valid workplan"
     assert "is valid" in result.stdout, msg
+    assert result.exit_code == 0, msg
 
 
 @pytest.mark.parametrize(
@@ -299,3 +302,291 @@ def test_workplan_check_remote_workplan(
     result = runner.invoke(app, [wp_uri], color=False)
 
     assert "is valid" in result.stdout
+
+
+def _write_workplan(wp_path: Path, steps: list[Step], **kwargs: object) -> Path:
+    """Serialize a minimal workplan containing the supplied steps.
+
+    Parameters
+    ----------
+    wp_path : Path
+        The path to write the workplan to.
+    steps : list[Step]
+        The steps to include in the workplan.
+    **kwargs : object
+        Additional `Workplan` fields, e.g. `runtime_vars`.
+
+    Returns
+    -------
+    Path
+        The path to the serialized workplan.
+    """
+    wp = Workplan(
+        name="Deep Check Test Workplan",
+        description="A workplan exercising the default deep resolution pass.",
+        steps=steps,
+        **kwargs,
+    )
+    assert serialize(wp_path, wp), "serializing test workplan failed"
+    return wp_path
+
+
+def test_deep_check_resolves_hello_world_steps(
+    tmp_path: Path,
+    hello_world_bp_path: Path,
+    hello_world_bp_content: str,
+) -> None:
+    """Verify the default deep check resolves applications, blueprints and
+    overrides for a workplan with multiple valid steps, and writes nothing.
+
+    Parameters
+    ----------
+    tmp_path : Path
+        Temporary directory to read/write test inputs and outputs
+    hello_world_bp_path : Path
+        Fixture providing the path to a minimal hello-world blueprint
+    hello_world_bp_content : str
+        Fixture providing the content of a minimal hello-world blueprint
+    """
+    second_bp_path = tmp_path / "helloworld2.yaml"
+    second_bp_path.write_text(hello_world_bp_content)
+
+    steps = [
+        Step(
+            name="Say Hello", application="hello_world", blueprint=hello_world_bp_path
+        ),
+        Step(
+            name="Say Hello Again",
+            application="hello_world",
+            blueprint=second_bp_path,
+        ),
+    ]
+    wp_path = _write_workplan(tmp_path / "hw-workplan.yaml", steps)
+
+    before = sorted(p.relative_to(tmp_path).as_posix() for p in tmp_path.rglob("*"))
+
+    runner = CliRunner()
+    result = runner.invoke(app, [wp_path.as_posix()], color=False)
+
+    after = sorted(p.relative_to(tmp_path).as_posix() for p in tmp_path.rglob("*"))
+
+    assert result.exit_code == 0, result.stdout
+    assert "is valid" in result.stdout
+    assert "resolved for 2 step(s)" in result.stdout
+    assert before == after, "the deep check must not write to disk"
+    assert not list(tmp_path.rglob("*_trx*"))
+    assert not list(tmp_path.rglob("*_transformed*"))
+
+
+def test_deep_check_unknown_application(
+    tmp_path: Path,
+    hello_world_bp_path: Path,
+) -> None:
+    """Verify an unresolvable application name fails the deep check and
+    names the application in the output.
+
+    Parameters
+    ----------
+    tmp_path : Path
+        Temporary directory to read/write test inputs and outputs
+    hello_world_bp_path : Path
+        Fixture providing the path to a minimal hello-world blueprint
+    """
+    step = Step(
+        name="Mystery", application="does-not-exist", blueprint=hello_world_bp_path
+    )
+    wp_path = _write_workplan(tmp_path / "wp.yaml", [step])
+
+    runner = CliRunner()
+    result = runner.invoke(app, [wp_path.as_posix()], color=False)
+
+    assert result.exit_code == 1
+    assert "does-not-exist" in result.stdout
+
+
+def test_deep_check_invalid_blueprint_override(
+    tmp_path: Path,
+    hello_world_bp_path: Path,
+) -> None:
+    """Verify a `blueprint_overrides` key the blueprint model rejects fails
+    the deep check and names the offending field.
+
+    Parameters
+    ----------
+    tmp_path : Path
+        Temporary directory to read/write test inputs and outputs
+    hello_world_bp_path : Path
+        Fixture providing the path to a minimal hello-world blueprint
+    """
+    step = Step(
+        name="Say Hello",
+        application="hello_world",
+        blueprint=hello_world_bp_path,
+        blueprint_overrides={"no_such_field": 1},
+    )
+    wp_path = _write_workplan(tmp_path / "wp.yaml", [step])
+
+    runner = CliRunner()
+    result = runner.invoke(app, [wp_path.as_posix()], color=False)
+
+    assert result.exit_code == 1
+    assert "no_such_field" in result.stdout
+
+
+def test_deep_check_schema_only_skips_invalid_override(
+    tmp_path: Path,
+    hello_world_bp_path: Path,
+) -> None:
+    """Verify `--schema-only` reports only the schema tier, so an override
+    the deep check would reject does not fail the command.
+
+    Parameters
+    ----------
+    tmp_path : Path
+        Temporary directory to read/write test inputs and outputs
+    hello_world_bp_path : Path
+        Fixture providing the path to a minimal hello-world blueprint
+    """
+    step = Step(
+        name="Say Hello",
+        application="hello_world",
+        blueprint=hello_world_bp_path,
+        blueprint_overrides={"no_such_field": 1},
+    )
+    wp_path = _write_workplan(tmp_path / "wp.yaml", [step])
+
+    runner = CliRunner()
+    result = runner.invoke(app, [wp_path.as_posix(), ARG_SCHEMA_ONLY], color=False)
+
+    assert result.exit_code == 0
+    assert "is valid" in result.stdout
+
+
+def test_deep_check_missing_blueprint_file(
+    tmp_path: Path,
+    hello_world_bp_path: Path,
+) -> None:
+    """Verify a blueprint that no longer exists on disk fails the deep check
+    and names the missing path.
+
+    Parsing the workplan's serialized YAML does not itself confirm a
+    referenced blueprint file exists -- only the deep pass, which actually
+    loads it, does -- so this case exercises the deep check specifically.
+
+    Parameters
+    ----------
+    tmp_path : Path
+        Temporary directory to read/write test inputs and outputs
+    hello_world_bp_path : Path
+        Fixture providing the path to a minimal hello-world blueprint
+    """
+    step = Step(
+        name="Say Hello", application="hello_world", blueprint=hello_world_bp_path
+    )
+    wp_path = _write_workplan(tmp_path / "wp.yaml", [step])
+    hello_world_bp_path.unlink()
+
+    runner = CliRunner()
+    result = runner.invoke(app, [wp_path.as_posix()], color=False)
+
+    assert result.exit_code == 1
+    assert str(hello_world_bp_path) in result.stdout
+
+
+@pytest.mark.parametrize(
+    ("var_args", "expect_success"),
+    [
+        pytest.param([], False, id="missing"),
+        pytest.param(["--var", "alpha=1"], True, id="supplied"),
+    ],
+)
+def test_deep_check_runtime_vars(
+    tmp_path: Path,
+    hello_world_bp_path: Path,
+    var_args: list[str],
+    expect_success: bool,
+) -> None:
+    """Verify a declared runtime variable is required by the deep check
+    when unsupplied, and satisfied once passed via `--var`.
+
+    Parameters
+    ----------
+    tmp_path : Path
+        Temporary directory to read/write test inputs and outputs
+    hello_world_bp_path : Path
+        Fixture providing the path to a minimal hello-world blueprint
+    var_args : list[str]
+        Extra CLI arguments supplying (or omitting) the runtime variable.
+    expect_success : bool
+        Whether the deep check is expected to pass.
+    """
+    step = Step(
+        name="Say Hello", application="hello_world", blueprint=hello_world_bp_path
+    )
+    wp_path = _write_workplan(tmp_path / "wp.yaml", [step], runtime_vars=["alpha"])
+
+    runner = CliRunner()
+    result = runner.invoke(app, [wp_path.as_posix(), *var_args], color=False)
+
+    if expect_success:
+        assert result.exit_code == 0, result.stdout
+    else:
+        assert result.exit_code == 1
+        assert "alpha" in result.stdout
+
+
+def test_deep_check_tutorial_workplan(
+    package_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Verify the laptop tutorial workplan resolves cleanly end-to-end.
+
+    Its blueprints are referenced relative to `docs/tutorials`, so the
+    check is run with that directory as the working directory, matching how
+    a user would invoke it there.
+
+    Parameters
+    ----------
+    package_path : Path
+        Absolute path to the c-star package on disk
+    monkeypatch : pytest.MonkeyPatch
+        Fixture used to change the working directory for the invocation.
+    """
+    monkeypatch.chdir(package_path / "docs" / "tutorials")
+
+    runner = CliRunner()
+    result = runner.invoke(app, ["workplan_laptop_example.yaml"], color=False)
+
+    assert result.exit_code == 0, result.stdout
+    assert "is valid" in result.stdout
+    assert "resolved for 2 step(s)" in result.stdout
+
+
+def test_deep_check_undeclared_placeholder(
+    tmp_path: Path,
+    hello_world_bp_path: Path,
+) -> None:
+    """Verify a `{{placeholder}}` naming a variable the workplan never
+    declares is reported as a resolution problem, not a traceback.
+
+    Parameters
+    ----------
+    tmp_path : Path
+        Temporary directory to read/write test inputs and outputs
+    hello_world_bp_path : Path
+        Fixture providing the path to a minimal hello-world blueprint
+    """
+    step = Step(
+        name="Say Hello",
+        application="hello_world",
+        blueprint=hello_world_bp_path,
+        blueprint_overrides={"working_dir": "{{beta}}"},
+    )
+    wp_path = _write_workplan(tmp_path / "wp.yaml", [step])
+
+    runner = CliRunner()
+    result = runner.invoke(app, [wp_path.as_posix()], color=False)
+
+    assert result.exit_code == 1, result.stdout
+    assert "beta" in result.stdout
+    assert "Traceback" not in result.stdout

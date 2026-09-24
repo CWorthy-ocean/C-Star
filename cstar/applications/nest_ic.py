@@ -1,4 +1,3 @@
-import subprocess
 import typing as t
 from datetime import datetime
 from pathlib import Path
@@ -12,7 +11,7 @@ from cstar.applications.core import (
 )
 from cstar.applications.roms_marbl.transforms import RestartFile
 from cstar.base.log import get_logger
-from cstar.base.utils import lazy_import
+from cstar.base.utils import convert_to_cdf5, lazy_import
 from cstar.entrypoint.runner import BlueprintRunner
 from cstar.execution.handler import ExecutionStatus
 from cstar.orchestration.models import Blueprint
@@ -184,24 +183,12 @@ class NestIcRunner(BlueprintRunner[NestIcBlueprint]):
         if self.blueprint.pio:
             nc4_path = path.with_name(path.stem + "_nc4" + path.suffix)
             ic.save(nc4_path)
-            self._convert_to_cdf5(nc4_path, path)
+            convert_to_cdf5(nc4_path, path)
         else:
             ic.save(path)
         self.log.debug(f"Initial conditions created and persisted to: {path}")
 
         return path
-
-    @staticmethod
-    def _convert_to_cdf5(nc4_path: Path, final_path: Path) -> None:
-        """Convert a NETCDF4 file to CDF-5 via ``nccopy -k cdf5``, then delete the
-        source. Raises on a non-zero ``nccopy`` exit; the source file is left in
-        place (and the final name unclaimed) so a re-run regenerates cleanly.
-        """
-        subprocess.run(
-            ["nccopy", "-k", "cdf5", str(nc4_path), str(final_path)],
-            check=True,
-        )
-        nc4_path.unlink()
 
 
 @register_application

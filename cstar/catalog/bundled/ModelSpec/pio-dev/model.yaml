@@ -11,15 +11,15 @@ code:
   pio:
     location: https://github.com/CWorthy-ocean/ParallelIO.git
     commit: 2.7.1-fork
-  templates_commit: 3852cc9960033f844e014029b31d7011f04f4eb3
+  templates_commit: 6a0a4ee55b944db316e33f58ba7aa2403e880b92  # C-Star 0.15.0
   templates_compile_time:
-    directory: templates/compile-time
+    directory: cstar/additional_files/templates/forge/compile-time
     files:
     - cppdefs.opt.j2
     file_hashes:
       cppdefs.opt.j2: 2942d94da83cdcad7a324f50eb4fe8728fdf7df51e522abd276f40d92ff0be73
   templates_run_time:
-    directory: templates/run-time
+    directory: cstar/additional_files/templates/forge/run-time
     files:
     - marbl_in
     file_hashes:

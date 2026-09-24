@@ -11,40 +11,47 @@
             "type": "string"
         }
     },
-    "additionalProperties": true,
+    "additionalProperties": false,
     "description": "A simple blueprint demonstrating the integration of a Blueprint and it's\nrunner application.",
     "properties": {
         "name": {
+            "description": "A unique, user-friendly name for this blueprint.",
             "minLength": 1,
             "title": "Name",
             "type": "string"
         },
         "description": {
+            "description": "A user-friendly description of the scenario to be executed by the blueprint.",
             "minLength": 1,
             "title": "Description",
             "type": "string"
         },
         "application": {
             "default": "hello_world",
+            "description": "The application identifier.",
             "title": "Application",
             "type": "string"
         },
         "state": {
             "$ref": "#/$defs/BlueprintState",
-            "default": "notset"
+            "default": "notset",
+            "description": "The current validation status of the blueprint."
         },
         "schema_version": {
             "default": "1.0.0",
+            "description": "The schema version for the document.",
             "title": "Schema Version",
             "type": "string"
         },
         "working_dir": {
             "default": ".",
+            "description": "Path to a directory where assets are stored when executing the blueprint.",
             "format": "path",
             "title": "Working Dir",
             "type": "string"
         },
         "target": {
+            "description": "The person to say hello to.",
             "title": "Target",
             "type": "string"
         }

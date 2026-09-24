@@ -26,7 +26,7 @@ from cstar.base.exceptions import CstarExpectationFailed
 from cstar.cli.common import normalize_runid
 from cstar.cli.workplan.run import app, auto_compose
 from cstar.entrypoint.utils import ARG_CLOBBER, ARG_RESUME
-from cstar.orchestration.dag_runner import get_launcher
+from cstar.orchestration.dag_runner import get_launcher, original_workplan_backup
 from cstar.orchestration.launch.local import LocalHandle
 from cstar.orchestration.launch.slurm import SlurmHandle, SlurmLauncher
 from cstar.orchestration.models import (
@@ -851,7 +851,7 @@ def test_workplan_run_reload_invokes_run_dag_not_build_and_run_dag(
     with (
         mock.patch(
             "cstar.cli.workplan.run.handle_run_reloading",
-            mock.AsyncMock(return_value=(wp_path, trx_path)),
+            mock.AsyncMock(return_value=fake_run_result),
         ) as mock_reload,
         mock.patch(
             "cstar.cli.workplan.run.run_dag",
@@ -883,14 +883,335 @@ def test_workplan_run_reload_invokes_run_dag_not_build_and_run_dag(
 
 
 @pytest.mark.usefixtures("read_yaml_intercept")
-def test_workplan_run_resume_with_path_fails_fast(
+def test_workplan_run_resume_with_path_reloads_by_derived_run_id(
+    tmp_path: Path,
     wp_templates_dir: Path,
 ) -> None:
-    """Verify `--resume` combined with an explicit workplan path exits with a
-    usage error before `build_and_run_dag` is invoked: `--resume` re-enters a
-    prior run via `--run-id` alone.
+    """Verify `--resume` combined with a workplan path derives the run-id from
+    the workplan's name and reloads that run, once the path is verified
+    against the recorded original-workplan backup.
     """
+    run_id = "sample-workplan"
     wp_path = wp_templates_dir / "workplan.yaml"
+    wp = deserialize(wp_path, Workplan)
+    live_steps = [LiveStep.from_step(step) for step in wp.steps]
+    lwp = LiveWorkplan(**wp.model_dump(exclude={"steps"}), steps=live_steps)
+    trx_path = tmp_path / f"live-{wp_path.name}"
+    assert serialize(trx_path, lwp), "serializing live workplan failed in test"
+    assert serialize(original_workplan_backup(wp_path, tmp_path), wp), (
+        "serializing the original workplan backup failed in test"
+    )
+
+    fake_run_result = WorkplanRun(
+        workplan_path=wp_path,
+        trx_workplan_path=trx_path,
+        output_path=tmp_path,
+        run_id=run_id,
+    )
+
+    with (
+        mock.patch(
+            "cstar.cli.workplan.run.handle_run_reloading",
+            mock.AsyncMock(return_value=fake_run_result),
+        ) as mock_reload,
+        mock.patch(
+            "cstar.cli.workplan.run.run_dag",
+            mock.AsyncMock(return_value=fake_run_result),
+        ) as mock_run_dag,
+        mock.patch(
+            "cstar.cli.workplan.run.apply_resume_overrides",
+            mock.AsyncMock(return_value=[]),
+        ),
+        mock.patch(
+            "cstar.cli.workplan.run.build_and_run_dag",
+            wraps=fake_build_and_run_dag,
+        ) as mock_build_and_run_dag,
+    ):
+        runner = CliRunner()
+        result = runner.invoke(
+            app,
+            [wp_path.as_posix(), ARG_RESUME],
+            color=False,
+        )
+
+    assert result.exit_code == 0, result.output
+    mock_reload.assert_awaited_once_with(run_id)
+    mock_build_and_run_dag.assert_not_awaited()
+
+    mock_run_dag.assert_awaited_once()
+    assert mock_run_dag.await_args is not None
+    call_args = mock_run_dag.await_args.args
+    assert call_args[0] == wp_path
+    assert call_args[1] == trx_path
+    assert call_args[2] == run_id
+
+
+@pytest.mark.usefixtures("read_yaml_intercept")
+def test_workplan_run_resume_with_explicit_run_id_and_path(
+    tmp_path: Path,
+    wp_templates_dir: Path,
+    mock_run_id: str,
+) -> None:
+    """Verify `--resume` combined with an explicit `--run-id` and a workplan
+    path reloads that run-id, rather than one derived from the path.
+    """
+    run_id = mock_run_id
+    wp_path = wp_templates_dir / "workplan.yaml"
+    wp = deserialize(wp_path, Workplan)
+    live_steps = [LiveStep.from_step(step) for step in wp.steps]
+    lwp = LiveWorkplan(**wp.model_dump(exclude={"steps"}), steps=live_steps)
+    trx_path = tmp_path / f"live-{wp_path.name}"
+    assert serialize(trx_path, lwp), "serializing live workplan failed in test"
+    assert serialize(original_workplan_backup(wp_path, tmp_path), wp), (
+        "serializing the original workplan backup failed in test"
+    )
+
+    fake_run_result = WorkplanRun(
+        workplan_path=wp_path,
+        trx_workplan_path=trx_path,
+        output_path=tmp_path,
+        run_id=run_id,
+    )
+
+    with (
+        mock.patch(
+            "cstar.cli.workplan.run.handle_run_reloading",
+            mock.AsyncMock(return_value=fake_run_result),
+        ) as mock_reload,
+        mock.patch(
+            "cstar.cli.workplan.run.run_dag",
+            mock.AsyncMock(return_value=fake_run_result),
+        ) as mock_run_dag,
+        mock.patch(
+            "cstar.cli.workplan.run.apply_resume_overrides",
+            mock.AsyncMock(return_value=[]),
+        ),
+        mock.patch(
+            "cstar.cli.workplan.run.build_and_run_dag",
+            wraps=fake_build_and_run_dag,
+        ) as mock_build_and_run_dag,
+    ):
+        runner = CliRunner()
+        result = runner.invoke(
+            app,
+            ["--run-id", run_id, wp_path.as_posix(), ARG_RESUME],
+            color=False,
+        )
+
+    assert result.exit_code == 0, result.output
+    mock_reload.assert_awaited_once_with(run_id)
+    mock_build_and_run_dag.assert_not_awaited()
+
+    mock_run_dag.assert_awaited_once()
+    assert mock_run_dag.await_args is not None
+    call_args = mock_run_dag.await_args.args
+    assert call_args[0] == wp_path
+    assert call_args[1] == trx_path
+    assert call_args[2] == run_id
+
+
+@pytest.mark.usefixtures("read_yaml_intercept")
+def test_workplan_run_resume_with_changed_workplan_fails_fast(
+    tmp_path: Path,
+    wp_templates_dir: Path,
+) -> None:
+    """Verify `--resume` combined with a path that no longer matches the
+    recorded original-workplan backup exits with a usage error before
+    `run_dag` or `build_and_run_dag` is invoked.
+    """
+    run_id = "sample-workplan"
+    wp_path = wp_templates_dir / "workplan.yaml"
+    wp = deserialize(wp_path, Workplan)
+    live_steps = [LiveStep.from_step(step) for step in wp.steps]
+    lwp = LiveWorkplan(**wp.model_dump(exclude={"steps"}), steps=live_steps)
+    trx_path = tmp_path / f"live-{wp_path.name}"
+    assert serialize(trx_path, lwp), "serializing live workplan failed in test"
+
+    changed = wp.model_copy(update={"description": "changed since the run started"})
+    assert serialize(original_workplan_backup(wp_path, tmp_path), changed), (
+        "serializing the original workplan backup failed in test"
+    )
+
+    fake_run_result = WorkplanRun(
+        workplan_path=wp_path,
+        trx_workplan_path=trx_path,
+        output_path=tmp_path,
+        run_id=run_id,
+    )
+
+    with (
+        mock.patch(
+            "cstar.cli.workplan.run.handle_run_reloading",
+            mock.AsyncMock(return_value=fake_run_result),
+        ),
+        mock.patch(
+            "cstar.cli.workplan.run.run_dag",
+            mock.AsyncMock(return_value=fake_run_result),
+        ) as mock_run_dag,
+        mock.patch(
+            "cstar.cli.workplan.run.build_and_run_dag",
+            wraps=fake_build_and_run_dag,
+        ) as mock_build_and_run_dag,
+    ):
+        runner = CliRunner()
+        result = runner.invoke(
+            app,
+            [wp_path.as_posix(), ARG_RESUME],
+            color=False,
+        )
+
+    assert result.exit_code == 2
+    assert "differs" in result.output
+    assert "--run-id" in result.output
+    mock_run_dag.assert_not_awaited()
+    mock_build_and_run_dag.assert_not_awaited()
+
+
+@pytest.mark.usefixtures("read_yaml_intercept")
+def test_workplan_run_resume_with_missing_backup_fails_fast(
+    tmp_path: Path,
+    wp_templates_dir: Path,
+) -> None:
+    """Verify `--resume` combined with a path exits with a usage error when
+    no original-workplan backup was recorded for the run, before `run_dag`
+    or `build_and_run_dag` is invoked.
+    """
+    run_id = "sample-workplan"
+    wp_path = wp_templates_dir / "workplan.yaml"
+    wp = deserialize(wp_path, Workplan)
+    live_steps = [LiveStep.from_step(step) for step in wp.steps]
+    lwp = LiveWorkplan(**wp.model_dump(exclude={"steps"}), steps=live_steps)
+    trx_path = tmp_path / f"live-{wp_path.name}"
+    assert serialize(trx_path, lwp), "serializing live workplan failed in test"
+
+    fake_run_result = WorkplanRun(
+        workplan_path=wp_path,
+        trx_workplan_path=trx_path,
+        output_path=tmp_path,
+        run_id=run_id,
+    )
+
+    with (
+        mock.patch(
+            "cstar.cli.workplan.run.handle_run_reloading",
+            mock.AsyncMock(return_value=fake_run_result),
+        ),
+        mock.patch(
+            "cstar.cli.workplan.run.run_dag",
+            mock.AsyncMock(return_value=fake_run_result),
+        ) as mock_run_dag,
+        mock.patch(
+            "cstar.cli.workplan.run.build_and_run_dag",
+            wraps=fake_build_and_run_dag,
+        ) as mock_build_and_run_dag,
+    ):
+        runner = CliRunner()
+        result = runner.invoke(
+            app,
+            [wp_path.as_posix(), ARG_RESUME],
+            color=False,
+        )
+
+    assert result.exit_code == 2
+    assert "Unable to verify" in result.output
+    assert "--run-id" in result.output
+    mock_run_dag.assert_not_awaited()
+    mock_build_and_run_dag.assert_not_awaited()
+
+
+@pytest.mark.usefixtures("read_yaml_intercept")
+def test_workplan_run_resume_with_unreadable_backup_fails_fast(
+    tmp_path: Path,
+    wp_templates_dir: Path,
+) -> None:
+    """Verify `--resume` combined with a path exits with a usage error, not a
+    traceback, when the recorded original-workplan backup cannot be parsed.
+    """
+    run_id = "sample-workplan"
+    wp_path = wp_templates_dir / "workplan.yaml"
+    wp = deserialize(wp_path, Workplan)
+    live_steps = [LiveStep.from_step(step) for step in wp.steps]
+    lwp = LiveWorkplan(**wp.model_dump(exclude={"steps"}), steps=live_steps)
+    trx_path = tmp_path / f"live-{wp_path.name}"
+    assert serialize(trx_path, lwp), "serializing live workplan failed in test"
+    original_workplan_backup(wp_path, tmp_path).write_text("name: [truncated")
+
+    fake_run_result = WorkplanRun(
+        workplan_path=wp_path,
+        trx_workplan_path=trx_path,
+        output_path=tmp_path,
+        run_id=run_id,
+    )
+
+    with (
+        mock.patch(
+            "cstar.cli.workplan.run.handle_run_reloading",
+            mock.AsyncMock(return_value=fake_run_result),
+        ),
+        mock.patch(
+            "cstar.cli.workplan.run.run_dag",
+            mock.AsyncMock(return_value=fake_run_result),
+        ) as mock_run_dag,
+    ):
+        runner = CliRunner()
+        result = runner.invoke(
+            app,
+            [wp_path.as_posix(), ARG_RESUME],
+            color=False,
+        )
+
+    assert result.exit_code == 2, result.output
+    assert "Unable to verify" in result.output
+    assert "--run-id" in result.output
+    mock_run_dag.assert_not_awaited()
+
+
+@pytest.mark.usefixtures("read_yaml_intercept")
+def test_workplan_run_resume_with_path_no_record(
+    tmp_path: Path,
+    wp_templates_dir: Path,
+) -> None:
+    """Verify `--resume` combined with a path whose derived run-id has no
+    recorded run fails with the same "no runs" error as an unknown
+    `--run-id`, before `build_and_run_dag` is invoked.
+    """
+    state_dir = tmp_path / "state"
+    wp_path = wp_templates_dir / "workplan.yaml"
+
+    with (
+        mock.patch.dict(os.environ, {ENV_CSTAR_STATE_HOME: state_dir.as_posix()}),
+        mock.patch(
+            "cstar.cli.workplan.run.build_and_run_dag",
+            wraps=fake_build_and_run_dag,
+        ) as mock_build_and_run_dag,
+    ):
+        runner = CliRunner()
+        result = runner.invoke(
+            app,
+            [wp_path.as_posix(), ARG_RESUME],
+            color=False,
+        )
+
+    assert result.exit_code != 0
+    assert "runs with the id" in result.stderr
+    mock_build_and_run_dag.assert_not_awaited()
+
+
+@pytest.mark.parametrize("flag", ["var", "varfile"])
+def test_workplan_run_resume_with_vars_fails_fast(
+    tmp_path: Path,
+    flag: str,
+) -> None:
+    """Verify `--resume` combined with `--var` or `--varfile` exits with a
+    usage error before `build_and_run_dag` is invoked: `--resume` re-enters
+    a prior run with its recorded variables.
+    """
+    if flag == "var":
+        var_args = ["--var", "key=value"]
+    else:
+        varfile_path = tmp_path / "vars.txt"
+        varfile_path.write_text("key=value\n")
+        var_args = ["--varfile", varfile_path.as_posix()]
 
     with mock.patch(
         "cstar.cli.workplan.run.build_and_run_dag",
@@ -899,12 +1220,13 @@ def test_workplan_run_resume_with_path_fails_fast(
         runner = CliRunner()
         result = runner.invoke(
             app,
-            [ARG_RESUME, wp_path.as_posix()],
+            ["--run-id", "12345", ARG_RESUME, *var_args],
             color=False,
         )
 
     assert result.exit_code == 2
     assert "--resume" in result.output
+    assert "--var/--varfile" in result.output
     mock_build_and_run_dag.assert_not_awaited()
 
 
@@ -956,7 +1278,7 @@ def test_workplan_run_resume_reload_invokes_apply_resume_overrides(
     with (
         mock.patch(
             "cstar.cli.workplan.run.handle_run_reloading",
-            mock.AsyncMock(return_value=(wp_path, trx_path)),
+            mock.AsyncMock(return_value=fake_run_result),
         ),
         mock.patch(
             "cstar.cli.workplan.run.run_dag",
@@ -2001,3 +2323,62 @@ def test_workplan_run_step_blueprint_migration_invalid(
     stderr_squashed = squash_cli_output(result.stderr)
     assert bp_path.name in stderr_squashed
     assert wp_path.name not in stderr_squashed
+
+
+def test_workplan_run_reports_all_directive_problems_before_submission(
+    tmp_path: Path,
+    hello_world_bp_path: Path,
+) -> None:
+    """Verify `workplan run` rejects a workplan whose directives are
+    misconfigured as a usage error listing every problem, and never reaches
+    the DAG runner.
+
+    The pipeline is exercised for real up to `prepare_workplan`; only the
+    submission stage is patched out so the assertion that it was never
+    reached is meaningful.
+
+    Parameters
+    ----------
+    tmp_path : Path
+        Temporary directory to read/write test inputs and outputs
+    hello_world_bp_path : Path
+        Fixture providing the path to a minimal hello-world blueprint
+    """
+    wp = Workplan(
+        name="Bad Directives",
+        description="Two steps, two distinct directive problems.",
+        steps=[
+            Step(
+                name="typo",
+                application="hello_world",
+                blueprint=hello_world_bp_path,
+                directives={"continue_from": {"path": "prior/run"}},
+            ),
+            Step(
+                name="not-a-mapping",
+                application="hello_world",
+                blueprint=hello_world_bp_path,
+                directives={"apply-overrides": "oops"},
+            ),
+        ],
+    )
+    wp_path = tmp_path / "bad-directives.yaml"
+    assert serialize(wp_path, wp)
+
+    with mock.patch("cstar.orchestration.dag_runner.run_dag") as mock_run_dag:
+        runner = CliRunner()
+        result = runner.invoke(
+            app,
+            ["--run-id", "bad-directives", "--dry-run", wp_path.as_posix()],
+            color=False,
+        )
+
+    assert result.exit_code == 2, result.output
+    # typer renders the usage error in a bordered panel that wraps long lines;
+    # strip the border and collapse whitespace before matching phrases
+    message = " ".join(result.stderr.replace("│", " ").split())
+    assert "2 directive problem(s)" in message
+    assert "'continue_from'" in message
+    assert "'apply-overrides'" in message
+    assert "must be a mapping" in message
+    mock_run_dag.assert_not_called()

@@ -11,45 +11,53 @@
             "type": "string"
         }
     },
-    "additionalProperties": true,
+    "additionalProperties": false,
     "description": "A blueprint for an example plotting application.",
     "properties": {
         "name": {
+            "description": "A unique, user-friendly name for this blueprint.",
             "minLength": 1,
             "title": "Name",
             "type": "string"
         },
         "description": {
+            "description": "A user-friendly description of the scenario to be executed by the blueprint.",
             "minLength": 1,
             "title": "Description",
             "type": "string"
         },
         "application": {
             "default": "plotter",
+            "description": "The application identifier.",
             "title": "Application",
             "type": "string"
         },
         "state": {
             "$ref": "#/$defs/BlueprintState",
-            "default": "notset"
+            "default": "notset",
+            "description": "The current validation status of the blueprint."
         },
         "schema_version": {
             "default": "2.0.0",
+            "description": "The current schema version for this blueprint.",
             "title": "Schema Version",
             "type": "string"
         },
         "working_dir": {
             "default": ".",
+            "description": "Path to a directory where assets are stored when executing the blueprint.",
             "format": "path",
             "title": "Working Dir",
             "type": "string"
         },
         "input_dir": {
+            "description": "The location of the inputs for this step (the outputs from ROMS).",
             "format": "path",
             "title": "Input Dir",
             "type": "string"
         },
         "variables": {
+            "description": "The variables that the application will plot.",
             "items": {
                 "type": "string"
             },
@@ -57,6 +65,7 @@
             "type": "array"
         },
         "time_indices": {
+            "description": "The time indices to plot",
             "items": {
                 "type": "integer"
             },
@@ -64,6 +73,7 @@
             "type": "array"
         },
         "s_indices": {
+            "description": "The s (depth) indices to plot",
             "items": {
                 "type": "integer"
             },
@@ -71,12 +81,14 @@
             "type": "array"
         },
         "grid_file_path": {
+            "description": "The path to the grid file matching the outputs.",
             "format": "path",
             "title": "Grid File Path",
             "type": "string"
         },
         "file_glob": {
             "default": "*rst*.nc",
+            "description": "The glob pattern to match the file names to open for plotting.",
             "title": "File Glob",
             "type": "string"
         }

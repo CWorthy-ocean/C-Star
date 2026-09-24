@@ -28,7 +28,8 @@ def test_directory_mgr_cachedir_no_config(
     fn_under_test: Callable[[], Path], default_value: str
 ) -> None:
     """Verify the default state directory is returned if no environment config is set."""
-    expected_path = (Path(default_value) / "cstar").expanduser().resolve()
+    # the declared default already names the cstar directory
+    expected_path = Path(default_value).expanduser().resolve()
 
     with mock.patch.dict(os.environ, {}, clear=True):
         actual_path = fn_under_test()

@@ -18,6 +18,7 @@ from cstar.orchestration.models import Application, Workplan
 from cstar.orchestration.orchestration import LiveStep, LiveWorkplan
 from cstar.orchestration.serialization import (
     PersistenceMode,
+    _mode_detect,
     deserialize,
     deserialize_all,
     read_json_to_raw,
@@ -400,6 +401,22 @@ def test_serializaton_yaml_schema(plotter_v2_0_0_bp: Path, tmp_path: Path) -> No
     content = target.read_text()
     assert "# yaml-language-server: $schema=" in content
     assert f"{bp.application}_schema.{bp.schema_version}.json" in content
+
+
+def test_mode_detect_unknown_extension_defaults_to_yaml(
+    plotter_v2_0_0_bp: Path,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Verify an unrecognized extension falls back to YAML without printing to stdout."""
+    target = tmp_path / "workplan_original.bak"
+    bp = deserialize(plotter_v2_0_0_bp, PlotterBlueprint)
+    assert serialize(target, bp, mode=PersistenceMode.yaml)
+    capsys.readouterr()
+
+    assert _mode_detect(target) == PersistenceMode.yaml
+    assert deserialize(target, PlotterBlueprint, mode=PersistenceMode.auto) == bp
+    assert capsys.readouterr().out == ""
 
 
 @pytest.fixture

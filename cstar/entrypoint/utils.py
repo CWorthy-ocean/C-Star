@@ -20,11 +20,13 @@ ARG_RESUME_HELP: t.Final[str] = (
     "cannot be combined with --clobber."
 )
 ARG_RESUME_WORKPLAN_HELP: t.Final[str] = (
-    "Re-enter a prior run (requires --run-id and no workplan path) and resume its "
-    "failed steps in place. Failed steps whose application supports resume continue "
+    "Re-enter a prior run and resume its failed steps in place. Identify the run "
+    "with --run-id, or with the workplan path it was started from (the run-id is "
+    "derived from the workplan name as on the first run; the file must be "
+    "unchanged since). Failed steps whose application supports resume continue "
     "from their last usable restart; failed steps of other applications are re-run "
     "from scratch with a warning; completed steps are reused. Cannot be combined "
-    "with --clobber."
+    "with --clobber, --var or --varfile."
 )
 OPT_CLOBBER_ALL: t.Final[str] = "all"
 """Reserved `--clobber` value that selects every step in the workplan. It
@@ -46,8 +48,26 @@ ARG_OUTPUT_SHORT: t.Final[str] = "-o"
 ARG_URI_LONG: t.Final[str] = "--blueprint-uri"
 ARG_URI_SHORT: t.Final[str] = "-b"
 
+ARG_VAR_LONG: t.Final[str] = "--var"
+ARG_VAR_SHORT: t.Final[str] = "-v"
+ARG_VAR_HELP: t.Final[str] = (
+    "Specify 0-to-many replacements as key-value pairs in the form `key=value`."
+)
+ARG_VARFILE_LONG: t.Final[str] = "--varfile"
+ARG_VARFILE_SHORT: t.Final[str] = "-f"
+ARG_VARFILE_HELP: t.Final[str] = (
+    "Specify the path to a file containing one replacement per line as key-value "
+    "pairs in the form `key=value`."
+)
+
 ARG_VERBOSE: t.Final[str] = "--verbose"
 ARG_VERBOSE_HELP: t.Final[str] = "Set this flag to print verbose CLI outputs."
 
 ARG_SIZE: t.Final[str] = "--size"
 ARG_SIZE_HELP: t.Final[str] = "Set this flag to refresh disk-usage statistics."
+
+ARG_SCHEMA_ONLY: t.Final[str] = "--schema-only"
+ARG_SCHEMA_ONLY_HELP: t.Final[str] = (
+    "Only validate the workplan file's structure; skip resolving applications, "
+    "blueprints, overrides and directives."
+)
