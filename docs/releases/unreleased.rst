@@ -20,6 +20,8 @@ New features
 - ``cstar workplan run my_workplan.yaml --resume`` resumes the run that workplan started, deriving the run-id from the workplan name; ``--run-id <id> my_workplan.yaml --resume`` uses the explicit id. (`#702 <https://github.com/CWorthy-ocean/C-Star/pull/702>`_)
 - A workplan path given with ``--resume`` is checked against the run's recorded original workplan; a changed, missing or unreadable record is reported as a usage error naming ``--run-id <id>`` as the way to resume the run as recorded. (`#702 <https://github.com/CWorthy-ocean/C-Star/pull/702>`_)
 - New ``pio`` field on upscaler blueprints: when enabled (the default), the CDR forcing file is written as NETCDF4 and then converted to CDF-5 with ``nccopy -k cdf5``, keeping the original output filename (``output/upscaled_cdr.nc``). (`#705 <https://github.com/CWorthy-ocean/C-Star/pull/705>`_)
+- ``collect_directive_problems`` (orchestration) runs once in ``WorkplanTransformer.apply``: unknown directive key, non-mapping config, the directive's own ``validate_directives`` problems, and every ``referenced_steps`` name must exist and be a transitive ``depends_on`` ancestor of the referencing step. Problems are prefixed with step and directive and raised together as one ``ValueError``, which the CLI reports as a usage error. (`#719 <https://github.com/CWorthy-ocean/C-Star/pull/719>`_)
+- ``Workplan`` rejects dependency cycles via ``depends_on`` with a message naming the cycle (previously a raw ``NetworkXUnfeasible`` at exit 3). (`#719 <https://github.com/CWorthy-ocean/C-Star/pull/719>`_)
 
 Bug Fixes
 ~~~~~~~~~
@@ -54,6 +56,11 @@ Improvements
 - A cache directory that cannot be written (read-only or over quota on shared HPC filesystems) is logged and skipped rather than failing the build. (`#713 <https://github.com/CWorthy-ocean/C-Star/pull/713>`_)
 - Namelist-consistency violations are centralized in one place and raise ``NamelistConsistencyError``, a ``ValueError`` that names the rule, namelist section and keys involved. (`#714 <https://github.com/CWorthy-ocean/C-Star/pull/714>`_)
 - Schema field descriptions are now populated from the model docstrings, so editors show inline help. (`#717 <https://github.com/CWorthy-ocean/C-Star/pull/717>`_)
+- ``cstar workplan check`` is now "deep" by default: it imports each step's application, loads each blueprint, merges ``blueprint_overrides``, and validates directives, so it needs the blueprints reachable and any declared ``runtime_vars`` supplied via ``--var``/``--varfile``. Pass ``--schema-only`` for the previous structure-only behaviour. A workplan that already parses only as a transformed ``LiveWorkplan`` gets the schema pass only. (`#719 <https://github.com/CWorthy-ocean/C-Star/pull/719>`_)
+- Directive keys are scoped per application (``ApplicationDefinition.directives``). A ``continue-from``/``nest-from`` on a non-``roms_marbl`` step, or any unknown key, is now a schedule-time error instead of a silent pass. (`#719 <https://github.com/CWorthy-ocean/C-Star/pull/719>`_)
+- ``continue-from``/``nest-from`` reject an unrecognised config key sitting beside a valid one, and an empty config; ``nest-from``'s empty-source case now raises ``NotImplementedError`` at runtime (was ``ValueError``), matching its sibling shape rules. (`#719 <https://github.com/CWorthy-ocean/C-Star/pull/719>`_)
+- ``Directive.validate_directives(config, step)`` returns a ``Sequence[str]`` of problems instead of raising, replacing the ``(config, directives)`` signature; third-party directives that overrode it must be updated. (`#719 <https://github.com/CWorthy-ocean/C-Star/pull/719>`_)
+- The ROMS directives' config-shape rules live in one ``_config_problems`` classmethod per directive, used both at schedule time and by ``_generate_overrides`` on the compute node, so directive files written by older versions stay guarded. (`#719 <https://github.com/CWorthy-ocean/C-Star/pull/719>`_)
 
 Miscellaneous
 ~~~~~~~~~~~~~
