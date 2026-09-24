@@ -504,8 +504,13 @@ class CdrOutputCfg(_SettingsSection):
 class CdrTracerOutputCfg(_SettingsSection):
     """``cdr_tracer_output`` settings -- ucla-roms >= 0.7.0's dedicated
     ``&CDR_TRACER_OUTPUT_SETTINGS`` group (PR #351), a separate output stream
-    for the CDR tracers (``CDR_OAE_ALK``/``CDR_OAE_DIC``/``CDR_DOR_DIC``),
-    active only under MARBL && CDR_FORCING.
+    for the CDR tracers (``CDR_OAE_ALK``/``CDR_OAE_DIC``/``CDR_DOR_DIC``).
+    The tracers themselves exist whenever ``nt_cdr_oae``/``nt_cdr_dor`` are
+    non-zero, with or without MARBL, so this stream needs ``CDR_FORCING`` but
+    not MARBL. ucla-roms 0.7.0 and 0.8.0 nevertheless compile the module only
+    under ``MARBL && CDR_FORCING`` (a guard bug reported upstream); C-Star
+    encodes the intended rule, so on those releases a no-MARBL run that enables
+    this stream aborts at ROMS init instead of at authoring time.
 
     Every field carries a Pydantic default (the ucla-roms reference default):
     unlike :class:`CdrOutputCfg`, this section is not forced on by an active
@@ -535,8 +540,9 @@ class CdrGasExchOutputCfg(_SettingsSection):
     """``cdr_gas_exch_output`` settings -- ucla-roms >= 0.7.0's dedicated
     ``&CDR_GAS_EXCH_OUTPUT_SETTINGS`` group (PR #351), a separate output
     stream for the gas-exchange sensitivities (``ddic_dco2``/``ddic_dalk``),
-    active only under MARBL && CDR_FORCING. Defaults mirror
-    :class:`CdrTracerOutputCfg`.
+    active only under MARBL && CDR_FORCING: it reads MARBL's alternative-CO2
+    tracers and carbonate-sensitivity code, so MARBL is a genuine requirement
+    here. Defaults mirror :class:`CdrTracerOutputCfg`.
     """
 
     do_cdr_gas_exch_output: bool = False
@@ -548,6 +554,57 @@ class CdrGasExchOutputCfg(_SettingsSection):
         default=3600.0, serialization_alias="output_period_cdr_gas"
     )
     nrpf: int = Field(default=4, serialization_alias="nrpf_cdr_gas")
+
+
+# (section key, its do-flag, whether the stream needs MARBL) for the two
+# ucla-roms >= 0.7.0 CDR output streams that :func:`check_cdr_output_sections`
+# enforces. Both compile under CDR_FORCING; only the gas-exchange stream reads
+# MARBL state (see the two Cfg docstrings above).
+CDR_OUTPUT_SECTIONS: tuple[tuple[str, str, bool], ...] = (
+    ("cdr_tracer_output", "do_cdr_tracer_output", False),
+    ("cdr_gas_exch_output", "do_cdr_gas_exch_output", True),
+)
+
+
+def check_cdr_output_sections(
+    run_time_settings: dict[str, Any],
+    *,
+    bgc_mode_is_marbl: bool,
+) -> bool:
+    """Validate ``cdr_tracer_output``/``cdr_gas_exch_output`` (ucla-roms >= 0.7.0's
+    dedicated CDR output streams, PR #351) and report whether
+    ``cppdefs.cdr_forcing`` must be forced on.
+
+    Unlike ``cdr_output`` (see ``CdrOutputCfg``), these two sections are never
+    forced on by an active CDR forcing mode -- they're opt-in extras a user
+    enables explicitly, so only the flag actually present in
+    ``run_time_settings`` is read here. Either flag being True needs the
+    ``CDR_FORCING`` cppdef; the gas-exchange stream additionally needs MARBL,
+    the tracer stream does not (``CDR_OUTPUT_SECTIONS`` records which).
+
+    Both the resolver (authoring time) and the executor's ``configure_build``
+    (the build-time net for stored blueprints and wizard accordion edits that
+    reach the build without re-resolving) call this so the rule and its
+    message stay in one place; each caller is responsible for actually
+    setting ``cppdefs["cdr_forcing"] = True`` when this returns ``True``, since
+    ``cppdefs`` lives in a different dict in each caller.
+
+    Raises ``ValueError`` if a MARBL-requiring flag is set while
+    ``bgc_mode_is_marbl`` is False.
+    """
+    force_cdr_forcing = False
+    for section_name, do_flag, requires_marbl in CDR_OUTPUT_SECTIONS:
+        section = run_time_settings.get(section_name)
+        if not section or not section.get(do_flag):
+            continue
+        if requires_marbl and not bgc_mode_is_marbl:
+            raise ValueError(
+                f'{do_flag}=True but bgc_mode != "marbl": ucla-roms compiles the '
+                "CDR gas-exchange output module only under MARBL && CDR_FORCING "
+                "(it reads MARBL's alternative-CO2 tracers)."
+            )
+        force_cdr_forcing = True
+    return force_cdr_forcing
 
 
 class UpscaleOutputCfg(_SettingsSection):

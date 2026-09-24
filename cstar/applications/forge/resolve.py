@@ -69,6 +69,7 @@ from cstar.applications.forge.namelist_model import (
     NamelistConsistencyError,
     _RunTimeSettingsCommon,
     canonical_output_sections_for_precheck,
+    check_cdr_output_sections,
     check_output_streams_divide_rst,
     check_rst_period_divisible,
     cppdefs_for_precheck,
@@ -958,20 +959,10 @@ def build_forge_blueprint(
     # (added by RunTimeSettingsV0_7_0 -- older ModelSpec/OutputSpec pairings
     # simply don't carry them), so `settings.get(...)` rather than
     # `settings.setdefault(...)` -- a section absent here has nothing to
-    # enable and is left absent.
-    for section_name, do_flag in (
-        ("cdr_tracer_output", "do_cdr_tracer_output"),
-        ("cdr_gas_exch_output", "do_cdr_gas_exch_output"),
-    ):
-        section = settings.get(section_name)
-        if not section or not section.get(do_flag):
-            continue
-        if bgc_mode != "marbl":
-            raise ValueError(
-                f'{do_flag}=True but bgc_mode != "marbl": ucla-roms only '
-                "compiles the CDR tracer/gas-exchange output modules under "
-                "MARBL && CDR_FORCING."
-            )
+    # enable and is left absent. The per-stream MARBL requirement (gas exchange
+    # only) and its message are shared with the executor's build-time net
+    # (configure_build) via check_cdr_output_sections -- see its docstring.
+    if check_cdr_output_sections(settings, bgc_mode_is_marbl=bgc_mode == "marbl"):
         settings["cppdefs"]["cdr_forcing"] = True
 
     # ----- restart period consistency ----------------------------------------

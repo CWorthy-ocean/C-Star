@@ -42,6 +42,7 @@ from cstar.applications.forge.blueprint import (
 from cstar.applications.forge.host import HostPaths
 from cstar.applications.forge.namelist_model import (
     build_namelist,
+    check_cdr_output_sections,
     check_output_streams_divide_rst,
     check_rst_period_divisible,
     cppdefs_for_precheck,
@@ -2339,6 +2340,23 @@ class ForgeExecutor(BaseModel):
                     "diagnostics to marbl_bgc.marbl_diagnostics_to_write (%s).",
                     sorted(set(after) - set(before)),
                 )
+
+        # CDR tracer / gas-exchange output consistency net, mirroring the
+        # resolver's equivalent block: stored blueprints and wizard accordion
+        # edits can set do_cdr_tracer_output/do_cdr_gas_exch_output after
+        # resolve time, so this is the enforcement point of record for that
+        # path too. The per-stream MARBL requirement (gas exchange only) and its
+        # message are shared with the resolver via check_cdr_output_sections.
+        cppdefs = self._settings_compile_time.setdefault("cppdefs", {})
+        if check_cdr_output_sections(
+            self._settings_run_time, bgc_mode_is_marbl=cppdefs.get("marbl", False)
+        ) and not cppdefs.get("cdr_forcing"):
+            cppdefs["cdr_forcing"] = True
+            log.info(
+                "configure_build: CDR tracer/gas-exchange output is enabled; forcing "
+                "cppdefs.cdr_forcing=True (CDR_FORCING gates ucla-roms' CDR tracer/"
+                "gas-exchange output modules)."
+            )
 
         # Derive n_tracers up front: prefer the value passed by the processing
         # engine; otherwise derive it from the resolved settings (T + S + BGC

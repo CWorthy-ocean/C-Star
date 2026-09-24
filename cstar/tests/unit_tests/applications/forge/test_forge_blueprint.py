@@ -2999,24 +2999,28 @@ def test_cdr_output_requires_marbl():
         )
 
 
-def test_cdr_tracer_output_requires_marbl():
-    """do_cdr_tracer_output=True with bgc_mode="none" must raise -- ucla-roms
-    only compiles the CDR tracer output module under MARBL && CDR_FORCING.
-    Unlike do_cdr_output, this flag is never derived from cdr_spec.mode, so no
-    active CDR forcing is needed to trigger the check.
+def test_cdr_tracer_output_does_not_require_marbl():
+    """do_cdr_tracer_output=True with bgc_mode="none" is accepted: the CDR
+    tracers exist without MARBL, so C-Star encodes the intended rule (only
+    CDR_FORCING is needed) rather than ucla-roms 0.7.0/0.8.0's MARBL-only
+    compile guard. cppdefs.cdr_forcing is still forced on.
     """
-    with pytest.raises(ValueError, match="do_cdr_tracer_output"):
-        _build(
-            model_dir=_MODEL_DIR_ROMS070,
-            bgc_mode="none",
-            forcing_inputs=_PHYSICS_ONLY_FORCING,
-            run_time_overrides={"cdr_tracer_output": {"do_cdr_tracer_output": True}},
-        )
+    cfg = _build(
+        model_dir=_MODEL_DIR_ROMS070,
+        bgc_mode="none",
+        forcing_inputs=_PHYSICS_ONLY_FORCING,
+        run_time_overrides={"cdr_tracer_output": {"do_cdr_tracer_output": True}},
+    )
+    settings = cfg.model_settings
+    assert settings["cdr_tracer_output"]["do_cdr_tracer_output"] is True
+    assert settings["cppdefs"]["cdr_forcing"] is True
+    assert settings["cppdefs"]["marbl"] is False
 
 
 def test_cdr_gas_exch_output_requires_marbl():
-    """do_cdr_gas_exch_output=True with bgc_mode="none" must raise, mirroring
-    test_cdr_tracer_output_requires_marbl.
+    """do_cdr_gas_exch_output=True with bgc_mode="none" must raise: the
+    gas-exchange stream reads MARBL's alternative-CO2 tracers, so MARBL is a
+    genuine requirement (unlike the tracer stream above).
     """
     with pytest.raises(ValueError, match="do_cdr_gas_exch_output"):
         _build(
