@@ -2247,6 +2247,9 @@ class ForgeExecutor(BaseModel):
             Run-time settings to override defaults. If a "time_stepping" dict
             with a "dt" key is provided, it will be used for timestep calculation;
             otherwise, the timestep is computed from CFL criterion.
+            A version-gated section the pinned ucla-roms release's schema
+            doesn't model (e.g. ``cdr_tracer_output`` under a 0.6.x pin) is
+            dropped with an INFO log, not rejected as an unknown key.
             Defaults to empty dict.
         **kwargs
             Additional keyword arguments (currently unused, reserved for future use).
