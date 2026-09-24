@@ -45,6 +45,7 @@ Improvements
 - Fetched template pins are cached under ``CSTAR_CACHE_HOME/forge-templates`` and reused on later runs. (`#713 <https://github.com/CWorthy-ocean/C-Star/pull/713>`_)
 - A cache entry whose files no longer match the blueprint's ``file_hashes`` is re-fetched; branch pins and blueprints without hashes are never cached. (`#713 <https://github.com/CWorthy-ocean/C-Star/pull/713>`_)
 - A cache directory that cannot be written (read-only or over quota on shared HPC filesystems) is logged and skipped rather than failing the build. (`#713 <https://github.com/CWorthy-ocean/C-Star/pull/713>`_)
+- Namelist-consistency violations are centralized in one place and raise ``NamelistConsistencyError``, a ``ValueError`` that names the rule, namelist section and keys involved. (`#714 <https://github.com/CWorthy-ocean/C-Star/pull/714>`_)
 
 Miscellaneous
 ~~~~~~~~~~~~~
