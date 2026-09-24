@@ -10,7 +10,7 @@ Tests cover:
 
 ModelSpec was consolidated into a single YAML (code + flat model_settings, no more
 inputs/split templates-settings/placeholder code repos) -- see
-docs/architecture-details.md and cstar/applications/forge/models.py's module
+docs/developers/forge_internals.rst and cstar/applications/forge/models.py's module
 docstring.
 """
 

@@ -43,3 +43,17 @@ repos:
     hooks:
       - id: absolufy-imports
         args: [--application-directories=.]
+
+  - repo: https://github.com/mgedmin/check-manifest
+    rev: "0.51"
+    hooks:
+      - id: check-manifest
+        # Build the comparison sdist without spinning up a nested isolated
+        # build env each run (faster, no extra network round trip); the
+        # build-system requirements are installed into the hook's own env
+        # instead via additional_dependencies.
+        args: ["--no-build-isolation"]
+        additional_dependencies:
+          - setuptools>=61.0.0
+          - setuptools_scm[toml]>=7.0
+          - wheel

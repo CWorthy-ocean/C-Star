@@ -64,8 +64,8 @@ from cstar.applications.forge.blueprint import (
     SurfaceType,
     TidalForcingItem,
     TidalSource,
-    migrate_forcing_inputs,
 )
+from cstar.applications.forge.migration import migrate_forcing_inputs
 from cstar.applications.forge.namelist_model import (
     RunTimeSettings,
     run_time_settings_for_ref,

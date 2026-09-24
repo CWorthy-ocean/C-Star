@@ -64,6 +64,44 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install dist/cstar*.whl
           python -c "import cstar; print(cstar.__version__)"
+          # The wheel ships data outside the .py tree (MANIFEST.in: bundled
+          # catalog specs, forge templates, wizard assets); confirm it actually
+          # made it into the installed wheel, not just the sdist.
+          python - <<'PY'
+          from importlib.resources import files
+
+          root = files("cstar")
+
+          model_spec_dir = root / "catalog" / "bundled" / "ModelSpec"
+          found_specs = {
+              p.name for p in model_spec_dir.iterdir() if (p / "model.yaml").is_file()
+          }
+          expected_specs = {
+              "cson_roms-marbl_v0.1",
+              "pio-dev",
+              "roms-marbl-0.3-default",
+              "roms-marbl-0.4-default",
+              "roms-marbl-0.5-default",
+              "roms-marbl-0.6-default",
+              "roms-marbl-0.7-default",
+              "roms-marbl-0.8-default",
+          }
+          missing_specs = expected_specs - found_specs
+          assert not missing_specs, f"missing bundled ModelSpecs: {sorted(missing_specs)}"
+
+          required_files = [
+              root / "additional_files" / "templates" / "forge" / "compile-time" / "cppdefs.opt.j2",
+              root / "additional_files" / "templates" / "forge" / "run-time" / "marbl_in",
+              root / "wizard" / "ui" / "labels" / "blueprint-wizard.yaml",
+              root / "wizard" / "forge-blueprint-wizard.ipynb",
+              root / "wizard" / "_voila_app.ipynb",
+          ]
+          missing_files = [str(p) for p in required_files if not p.is_file()]
+          assert not missing_files, f"missing bundled files: {missing_files}"
+
+          print(f"OK: {len(found_specs)} ModelSpecs, {len(required_files)} template/wizard files present")
+          PY
+          cstar forge --help
 
   upload-to-pypi:
     needs: test-built-dist

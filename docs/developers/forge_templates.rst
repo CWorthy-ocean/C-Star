@@ -61,6 +61,16 @@ template with:
 
    git show <commit>:<directory>/<file> | shasum -a 256
 
+Editing a bundled template without re-pinning ``templates_commit`` and
+``file_hashes`` is caught by CI, not just a manual step: a bundled
+ModelSpec's authored ``file_hashes`` are compared against the bundled copy's
+actual content in
+``test_bundled_modelspec_fast_path_eligibility_by_stage``
+(``cstar/tests/unit_tests/applications/forge/test_forge_blueprint.py``),
+which asserts every bundled spec takes the local fast path below. A template
+edit that isn't followed by re-pinning makes the bundled copy's hash diverge
+from the authored one, so that test fails.
+
 Staging: bundled copy vs. fetching the pinned commit
 --------------------------------------------------------
 
@@ -85,12 +95,12 @@ of two paths:
    what is currently bundled falls through to fetching instead of silently
    substituting newer bundled content.
 2. **Fetch via** ``AdditionalCode``: a remote repository (location + commit
-   or branch) is fetched, or a local directory is copied, exactly as before
-   the fast path existed. ``_verify_template_hashes`` then checks the fetch
-   against ``file_hashes`` -- a no-op when empty, which covers old blueprints
-   and ModelSpecs that have not authored hashes yet. A mismatch between a
-   fetched file's sha256 and its pinned hash raises ``ValueError``: the
-   blueprint pins template content that the fetched commit does not match.
+   or branch) is fetched, or a local directory is copied.
+   ``_verify_template_hashes`` then checks the fetch against ``file_hashes``
+   -- a no-op when empty, which covers old blueprints and ModelSpecs that
+   have not authored hashes yet. A mismatch between a fetched file's sha256
+   and its pinned hash raises ``ValueError``: the blueprint pins template
+   content that the fetched commit does not match.
 
 The template repository is this one (``resolve.DEFAULT_TEMPLATE_REPO``), and every
 bundled ModelSpec pins ``templates_commit`` to a C-Star release commit whose
