@@ -21,6 +21,7 @@ from cstar.pio.external_codebase import PIOExternalCodeBase
 from cstar.roms.discretization import ROMSDiscretization
 from cstar.roms.external_codebase import ROMSExternalCodeBase
 from cstar.roms.input_dataset import (
+    RecordedReferenceDate,
     ROMSBoundaryForcing,
     ROMSCdrForcing,
     ROMSForcingCorrections,
@@ -1259,61 +1260,21 @@ class TestROMSSimulationInitialization:
 
             assert substring in str(exception_info.value)
 
-    def test_check_inputdataset_dates_warns_and_sets_start_date(
-        self,
-        stub_romssimulation,
-        roms_river_forcing,
-        mocksourcedata_remote_text_file,
-        caplog,
+    def test_check_inputdataset_dates_raises_for_mismatched_netcdf(
+        self, stub_romssimulation, roms_river_forcing
     ):
-        """Test that `_check_inputdataset_dates` warns and overrides mismatched
-        `end_date`.
+        """Test that `_check_inputdataset_dates` raises for a single dataset
+        whose `start_date` mismatches the simulation's.
 
-        This test ensures that when an input dataset (with `source_type='yaml'`) defines a
-        `end_date` that differs from the simulation's `end_date`, a warning is issued,
-        and the input dataset's `end_date` is overwritten.
+        Dates are never corrected any more (only roms-tools YAML sources used
+        to be correctable, and `ROMSInputDataset.validate` now rejects YAML
+        sources outright), so any mismatch is uncorrectable.
         """
         sim = stub_romssimulation
-        caplog.set_level(logging.INFO, logger=sim.log.name)
+        sim.river_forcing = roms_river_forcing(start_date="1999-01-01")
 
-        location = "http://dodgyyamls4u.ru/riv.yaml"
-        source_data = mocksourcedata_remote_text_file(location=location)
-        sim.river_forcing = roms_river_forcing(
-            location=location, start_date="1999-01-01", sourcedata=source_data
-        )
-
-        sim._check_inputdataset_dates(sim.river_forcing)
-
-        assert sim.river_forcing.start_date == sim.start_date
-        assert "does not match that of ROMSSimulation" in caplog.text
-
-    def test_check_inputdataset_dates_warns_and_sets_end_date(
-        self,
-        stub_romssimulation,
-        mocksourcedata_remote_text_file,
-        roms_river_forcing,
-        caplog,
-    ):
-        """Test that `_check_inputdataset_dates` warns and overrides mismatched
-        `end_date`.
-
-        This test ensures that when an input dataset (with `source_type='yaml'`) defines a
-        `end_date` that differs from the simulation's `end_date`, a warning is issued,
-        and the input dataset's `end_date` is overwritten.
-        """
-        sim = stub_romssimulation
-        caplog.set_level(logging.INFO, logger=sim.log.name)
-
-        location = "http://dodgyyamls4u.ru/riv.yaml"
-        source_data = mocksourcedata_remote_text_file(location=location)
-        sim.river_forcing = roms_river_forcing(
-            location=location, start_date="1999-01-01", sourcedata=source_data
-        )
-
-        sim._check_inputdataset_dates(sim.river_forcing)
-
-        assert sim.river_forcing.end_date == sim.end_date
-        assert "does not match that of ROMSSimulation" in caplog.text
+        with pytest.raises(ValueError, match="does not match that of ROMSSimulation"):
+            sim._check_inputdataset_dates(sim.river_forcing)
 
     @mock.patch(
         "cstar.roms.simulation.ROMSInputDataset.source_partitioning",
@@ -2192,12 +2153,19 @@ class TestProcessingAndExecution:
         with pytest.raises(ValueError, match="Unable to compile ROMSSimulation"):
             sim.build()
 
+    @mock.patch.object(ROMSSimulation, "_validate_reference_dates")
     @mock.patch.object(ROMSInputDataset, "partition")  # Mock partition method
-    def test_pre_run(self, mock_partition, stub_romssimulation):
+    def test_pre_run(
+        self, mock_partition, mock_validate_reference_dates, stub_romssimulation
+    ):
         """Tests that `pre_run` partitions any locally available input datasets.
 
         This test verifies that `pre_run` correctly calls `partition()` on input datasets
         that exist locally, while skipping those that do not.
+
+        `_validate_reference_dates` is mocked out: this test is only about
+        partitioning, and the mock input datasets below have no real files to
+        read a reference date from.
         """
         sim = stub_romssimulation
 
@@ -2769,6 +2737,264 @@ class TestProcessingAndExecution:
         )
 
 
+class TestValidateReferenceDates:
+    """Tests for `ROMSSimulation._validate_reference_dates`.
+
+    `_read_raw_namelist` and `_layer_namelist_overrides` are patched directly
+    (rather than the higher-level `roms_runtime_settings`): unlike that
+    property, `_validate_reference_dates` must not require datasets to be
+    partitioned, since it runs before `pre_run`'s partitioning step (and
+    before the `use_pio` branch, which never partitions at all).
+    """
+
+    @staticmethod
+    def _patch_namelist(reference_date: list[int]) -> tuple[Any, Any]:
+        """Patch the raw-namelist helpers to expose only the
+        `reference_date_settings.reference_date` path the check reads.
+        """
+        nml = mock.Mock()
+        nml.reference_date_settings.reference_date = reference_date
+        return (
+            mock.patch.object(
+                ROMSSimulation,
+                "_read_raw_namelist",
+                return_value=(nml, mock.Mock(), "x"),
+            ),
+            mock.patch.object(
+                ROMSSimulation, "_layer_namelist_overrides", return_value=nml
+            ),
+        )
+
+    @staticmethod
+    def _recorded(date: datetime, cyclic: bool = False) -> RecordedReferenceDate:
+        """Shorthand for a `read_model_reference_date`-style mock return value."""
+        return RecordedReferenceDate(date=date, cyclic=cyclic)
+
+    def test_matching_dates_pass(self, stub_romssimulation):
+        """No error is raised when every staged dataset's model reference date
+        matches the namelist reference date.
+        """
+        sim = stub_romssimulation
+
+        dataset = mock.MagicMock(
+            spec=ROMSInputDataset,
+            exists_locally=True,
+            read_model_reference_date=mock.Mock(
+                return_value=self._recorded(datetime(1995, 1, 1))
+            ),
+        )
+        patch_read, patch_layer = self._patch_namelist([1995, 1, 1])
+        with (
+            patch_read,
+            patch_layer,
+            mock.patch.object(
+                ROMSSimulation, "input_datasets", new_callable=mock.PropertyMock
+            ) as mock_input_datasets,
+        ):
+            mock_input_datasets.return_value = [dataset]
+            sim._validate_reference_dates()
+
+    def test_no_locally_staged_datasets_skips_namelist_access(
+        self, stub_romssimulation
+    ):
+        """When no input dataset is staged locally, the namelist is never
+        consulted (avoiding a spurious failure when it isn't staged either).
+        """
+        sim = stub_romssimulation
+        dataset = mock.MagicMock(spec=ROMSInputDataset, exists_locally=False)
+        with (
+            mock.patch.object(ROMSSimulation, "_read_raw_namelist") as mock_read,
+            mock.patch.object(
+                ROMSSimulation, "input_datasets", new_callable=mock.PropertyMock
+            ) as mock_input_datasets,
+        ):
+            mock_input_datasets.return_value = [dataset]
+            sim._validate_reference_dates()
+
+        mock_read.assert_not_called()
+
+    def test_mismatches_across_datasets_reported_together(self, stub_romssimulation):
+        """Every mismatching dataset is collected into a single `ValueError`,
+        rather than raising on the first one found.
+        """
+        sim = stub_romssimulation
+
+        matching = mock.MagicMock(
+            spec=ROMSInputDataset,
+            exists_locally=True,
+            read_model_reference_date=mock.Mock(
+                return_value=self._recorded(datetime(1995, 1, 1))
+            ),
+            source=mock.Mock(location="/data/matching.nc"),
+        )
+        bad_1 = mock.MagicMock(
+            spec=ROMSInputDataset,
+            exists_locally=True,
+            read_model_reference_date=mock.Mock(
+                return_value=self._recorded(datetime(1990, 3, 15))
+            ),
+            source=mock.Mock(location="/data/bad_1.nc"),
+        )
+        bad_2 = mock.MagicMock(
+            spec=ROMSInputDataset,
+            exists_locally=True,
+            read_model_reference_date=mock.Mock(
+                return_value=self._recorded(datetime(2000, 6, 1))
+            ),
+            source=mock.Mock(location="/data/bad_2.nc"),
+        )
+        no_metadata = mock.MagicMock(
+            spec=ROMSInputDataset,
+            exists_locally=True,
+            read_model_reference_date=mock.Mock(return_value=None),
+        )
+        unstaged = mock.MagicMock(spec=ROMSInputDataset, exists_locally=False)
+
+        patch_read, patch_layer = self._patch_namelist([1995, 1, 1])
+        with (
+            patch_read,
+            patch_layer,
+            mock.patch.object(
+                ROMSSimulation, "input_datasets", new_callable=mock.PropertyMock
+            ) as mock_input_datasets,
+        ):
+            mock_input_datasets.return_value = [
+                matching,
+                bad_1,
+                bad_2,
+                no_metadata,
+                unstaged,
+            ]
+            with pytest.raises(
+                ValueError, match="namelist reference_date must match"
+            ) as exc_info:
+                sim._validate_reference_dates()
+
+        message = str(exc_info.value)
+        assert "/data/bad_1.nc" in message
+        assert "/data/bad_2.nc" in message
+        assert "/data/matching.nc" not in message
+
+    def test_use_pio_path_is_also_checked(self, stub_romssimulation):
+        """`pre_run`'s early-return `use_pio` path still runs the reference-date
+        check, since it's called before the `use_pio` branch.
+        """
+        sim = stub_romssimulation
+        sim.use_pio = True
+
+        bad = mock.MagicMock(
+            spec=ROMSInputDataset,
+            exists_locally=True,
+            read_model_reference_date=mock.Mock(
+                return_value=self._recorded(datetime(1990, 3, 15))
+            ),
+            source=mock.Mock(location="/data/bad.nc"),
+        )
+        patch_read, patch_layer = self._patch_namelist([1995, 1, 1])
+        with (
+            patch_read,
+            patch_layer,
+            mock.patch.object(
+                ROMSSimulation, "input_datasets", new_callable=mock.PropertyMock
+            ) as mock_input_datasets,
+            mock.patch.object(ROMSSimulation, "_validate_pio_inputs"),
+        ):
+            mock_input_datasets.return_value = [bad]
+            with pytest.raises(ValueError, match="namelist reference_date must match"):
+                sim.pre_run()
+
+    def test_cyclic_dataset_different_year_jan1_passes(self, stub_romssimulation):
+        """A cyclic (climatological) dataset recorded against Jan 1 of a
+        different year than the namelist reference date still passes: only
+        the day-of-year offset has to match.
+        """
+        sim = stub_romssimulation
+
+        dataset = mock.MagicMock(
+            spec=ROMSInputDataset,
+            exists_locally=True,
+            read_model_reference_date=mock.Mock(
+                return_value=self._recorded(datetime(2000, 1, 1), cyclic=True)
+            ),
+        )
+        patch_read, patch_layer = self._patch_namelist([1995, 1, 1])
+        with (
+            patch_read,
+            patch_layer,
+            mock.patch.object(
+                ROMSSimulation, "input_datasets", new_callable=mock.PropertyMock
+            ) as mock_input_datasets,
+        ):
+            mock_input_datasets.return_value = [dataset]
+            sim._validate_reference_dates()
+
+    def test_cyclic_dataset_mismatched_day_of_year_reports_climatology_note(
+        self, stub_romssimulation
+    ):
+        """A cyclic dataset whose day-of-year offset does not match the
+        namelist reference date is still reported, with wording that calls
+        out the climatological nature of the mismatch.
+        """
+        sim = stub_romssimulation
+
+        dataset = mock.MagicMock(
+            spec=ROMSInputDataset,
+            exists_locally=True,
+            read_model_reference_date=mock.Mock(
+                return_value=self._recorded(datetime(2000, 7, 1), cyclic=True)
+            ),
+            source=mock.Mock(location="/data/climatology.nc"),
+        )
+        patch_read, patch_layer = self._patch_namelist([1995, 1, 1])
+        with (
+            patch_read,
+            patch_layer,
+            mock.patch.object(
+                ROMSSimulation, "input_datasets", new_callable=mock.PropertyMock
+            ) as mock_input_datasets,
+        ):
+            mock_input_datasets.return_value = [dataset]
+            with pytest.raises(ValueError, match="climatological file") as exc_info:
+                sim._validate_reference_dates()
+
+        assert "/data/climatology.nc" in str(exc_info.value)
+
+    @mock.patch("cstar.roms.simulation.namelist_schema_for_ref")
+    def test_does_not_require_partitioned_dataset_paths(
+        self,
+        mock_schema_for_ref,
+        stub_romssimulation,
+        stageddatacollection_remote_files,
+    ):
+        """Regression test: unlike `roms_runtime_settings`, reading the
+        namelist reference date must not touch `path_for_roms` (which raises
+        `FileNotFoundError` until datasets are partitioned) -- this check has
+        to run before partitioning. `model_grid`/`initial_conditions` are left
+        genuinely unpartitioned here (no `path_for_roms` mock), so a
+        regression that re-couples this to `roms_runtime_settings` would fail
+        this test the same way it fails in production.
+        """
+        sim = stub_romssimulation
+        sim.runtime_code._working_copy = stageddatacollection_remote_files()
+        mock_schema_for_ref.return_value.read.side_effect = lambda _: (
+            _REAL_NAMELIST_READ(EXAMPLE_NAMELIST)
+        )
+
+        dataset = mock.MagicMock(
+            spec=ROMSInputDataset,
+            exists_locally=True,
+            read_model_reference_date=mock.Mock(
+                return_value=self._recorded(datetime(2005, 6, 15))
+            ),
+        )
+        with mock.patch.object(
+            ROMSSimulation, "input_datasets", new_callable=mock.PropertyMock
+        ) as mock_input_datasets:
+            mock_input_datasets.return_value = [dataset]
+            # The fixture namelist's reference_date is 2005, 6, 15 -- matches.
+            sim._validate_reference_dates()
+
+
 class TestAttach:
     """Tests for `ROMSSimulation.attach()`.
 
@@ -3241,7 +3467,11 @@ class TestROMSSimulationUsePIO:
         sim = stub_romssimulation
         sim.use_pio = True
 
-        dataset = mock.MagicMock(spec=ROMSInputDataset, exists_locally=True)
+        dataset = mock.MagicMock(
+            spec=ROMSInputDataset,
+            exists_locally=True,
+            read_model_reference_date=mock.Mock(return_value=None),
+        )
         with mock.patch.object(
             ROMSSimulation, "input_datasets", new_callable=mock.PropertyMock
         ) as mock_input_datasets:

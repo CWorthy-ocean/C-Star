@@ -1,15 +1,24 @@
 import logging
 from collections.abc import Callable
+from datetime import datetime
 from pathlib import Path
 from unittest import mock
 
+import numpy as np
 import pytest
 import roms_tools  # noqa: F401, pre-load to avoid the lazy loader
+import xarray as xr
 
 from cstar.base.exceptions import CstarExpectationFailed
 from cstar.io.source_data import SourceDataCollection
 from cstar.io.staged_data import StagedDataCollection, StagedFile
-from cstar.roms.input_dataset import DatasetLinker, ROMSInputDataset, ROMSPartitioning
+from cstar.roms.input_dataset import (
+    DatasetLinker,
+    RecordedReferenceDate,
+    ROMSInputDataset,
+    ROMSPartitioning,
+    read_model_reference_date,
+)
 from cstar.tests.unit_tests.fake_abc_subclasses import FakeROMSInputDataset
 
 
@@ -820,21 +829,36 @@ class TestROMSInputDatasetAttachPartitions:
         assert dataset.partitioning is original_partitioning
 
 
-def test_correction_cannot_be_yaml(
+def test_validate_rejects_text_source(
     mocksourcedata_remote_text_file, roms_forcing_corrections
 ):
-    """Checks that the `validate()` method correctly raises a TypeError if
-    `ROMSForcingCorrections.source.source_type` is `yaml` (unsupported)
+    """`ROMSInputDataset.validate()` raises a `TypeError` when the source is
+    classified as text (e.g. a roms-tools YAML): C-Star no longer generates
+    ROMS input datasets from roms-tools YAML files.
     """
     location = "https://www.totallylegityamlfiles.pk/downloadme.yaml"
     source_data = mocksourcedata_remote_text_file(location=location)
 
     with pytest.raises(TypeError) as exception_info:
         roms_forcing_corrections(location=location, sourcedata=source_data)
-    expected_msg = (
-        "ROMSForcingCorrections cannot be initialized with a source YAML file."
-    )
-    assert expected_msg in str(exception_info.value)
+
+    message = str(exception_info.value)
+    assert "ROMSForcingCorrections requires a netCDF source" in message
+    assert location in message
+
+
+def test_validate_rejects_text_source_on_other_dataset_types(
+    mocksourcedata_remote_text_file, roms_river_forcing
+):
+    """The text-source rejection lives on the shared `ROMSInputDataset` base
+    class, so it applies to every concrete dataset type, not just
+    `ROMSForcingCorrections`.
+    """
+    location = "https://www.totallylegityamlfiles.pk/river.yaml"
+    source_data = mocksourcedata_remote_text_file(location=location)
+
+    with pytest.raises(TypeError, match="ROMSRiverForcing requires a netCDF source"):
+        roms_river_forcing(location=location, sourcedata=source_data)
 
 
 class TestDatasetLinker:
@@ -955,3 +979,277 @@ def test_suffix_collection_generation() -> None:
 
     # test edge case
     assert f".{999:02d}.nc" in suffixes
+
+
+class TestReadModelReferenceDate:
+    """Tests for the module-level `read_model_reference_date` parser."""
+
+    def test_roms_tools_global_attr(self, tmp_path: Path) -> None:
+        """A roms-tools-generated file records its reference date as the
+        `model_reference_date` global attribute.
+        """
+        path = tmp_path / "roms_tools_file.nc"
+        ds = xr.Dataset(
+            {"temp": ("time", np.zeros(1))},
+            attrs={"model_reference_date": "1995-01-01 00:00:00"},
+        )
+        ds.to_netcdf(path)
+
+        assert read_model_reference_date(path) == RecordedReferenceDate(
+            date=datetime(1995, 1, 1), cyclic=False
+        )
+
+    def test_roms_ocean_time_long_name(self, tmp_path: Path) -> None:
+        """A ROMS restart file records its reference date in `ocean_time`'s
+        `long_name`, formatted as 'Time since YYYY/MM/DD'.
+        """
+        path = tmp_path / "restart.nc"
+        ds = xr.Dataset(
+            {
+                "ocean_time": (
+                    "time",
+                    np.zeros(1),
+                    {"long_name": "Time since 1995/01/01"},
+                )
+            }
+        )
+        ds.to_netcdf(path)
+
+        assert read_model_reference_date(path) == RecordedReferenceDate(
+            date=datetime(1995, 1, 1), cyclic=False
+        )
+
+    def test_bry_time_long_name(self, tmp_path: Path) -> None:
+        """A parent-extracted boundary file records its reference date in
+        `bry_time`'s `long_name`.
+        """
+        path = tmp_path / "bry.nc"
+        ds = xr.Dataset(
+            {"bry_time": ("time", np.zeros(1), {"long_name": "Time since 1995/01/01"})}
+        )
+        ds.to_netcdf(path)
+
+        assert read_model_reference_date(path) == RecordedReferenceDate(
+            date=datetime(1995, 1, 1), cyclic=False
+        )
+
+    def test_roms_tools_time_long_name(self, tmp_path: Path) -> None:
+        """roms-tools river forcing has no global `model_reference_date`; its
+        reference date is only in the time variable's `long_name`, and its
+        climatology flag still marks it cyclic.
+        """
+        path = tmp_path / "rivers.nc"
+        ds = xr.Dataset(
+            {
+                "river_time": (
+                    "river_time",
+                    np.zeros(1),
+                    {
+                        "long_name": "relative time: days since 1995-01-01 00:00:00",
+                        "cycle_length": 365.25,
+                    },
+                )
+            },
+            attrs={"climatology": "True"},
+        )
+        ds.to_netcdf(path)
+
+        assert read_model_reference_date(path) == RecordedReferenceDate(
+            date=datetime(1995, 1, 1), cyclic=True
+        )
+
+    def test_old_bare_year_label_ignored(self, tmp_path: Path) -> None:
+        """Current ucla-roms extraction files mislabel the reference date as
+        'Time since 2000' (no month/day); that label does not identify a
+        specific date and must not be parsed.
+        """
+        path = tmp_path / "old_extraction.nc"
+        ds = xr.Dataset(
+            {"ocean_time": ("time", np.zeros(1), {"long_name": "Time since 2000"})}
+        )
+        ds.to_netcdf(path)
+
+        assert read_model_reference_date(path) is None
+
+    def test_no_metadata_returns_none(self, tmp_path: Path) -> None:
+        """A file with neither the global attribute nor a recognized
+        long_name yields None.
+        """
+        path = tmp_path / "no_metadata.nc"
+        xr.Dataset({"temp": ("time", np.zeros(1))}).to_netcdf(path)
+
+        assert read_model_reference_date(path) is None
+
+    def test_impossible_date_returns_none(self, tmp_path: Path) -> None:
+        """An impossible date (e.g. '0000/00/00') matches the pattern but
+        cannot construct a `datetime`, so it is skipped rather than raising.
+        """
+        path = tmp_path / "impossible_date.nc"
+        ds = xr.Dataset(
+            {
+                "ocean_time": (
+                    "time",
+                    np.zeros(1),
+                    {"long_name": "Time since 0000/00/00"},
+                )
+            }
+        )
+        ds.to_netcdf(path)
+
+        assert read_model_reference_date(path) is None
+
+    def test_cyclic_detected_via_climatology_attr(self, tmp_path: Path) -> None:
+        """A file is cyclic when its global `climatology` attribute is
+        (case-insensitively, modulo whitespace) `"True"`.
+        """
+        path = tmp_path / "climatology.nc"
+        ds = xr.Dataset(
+            {"temp": ("time", np.zeros(1))},
+            attrs={
+                "model_reference_date": "1995-01-01 00:00:00",
+                "climatology": " True ",
+            },
+        )
+        ds.to_netcdf(path)
+
+        recorded = read_model_reference_date(path)
+        assert recorded == RecordedReferenceDate(date=datetime(1995, 1, 1), cyclic=True)
+
+    def test_cyclic_detected_via_cycle_length(self, tmp_path: Path) -> None:
+        """A file is also cyclic when any variable carries a `cycle_length`
+        attribute, regardless of the `climatology` global attribute.
+        """
+        path = tmp_path / "cycle_length.nc"
+        ds = xr.Dataset(
+            {
+                "ocean_time": (
+                    "time",
+                    np.zeros(1),
+                    {"long_name": "Time since 1995/01/01", "cycle_length": 365.25},
+                )
+            }
+        )
+        ds.to_netcdf(path)
+
+        recorded = read_model_reference_date(path)
+        assert recorded == RecordedReferenceDate(date=datetime(1995, 1, 1), cyclic=True)
+
+    def test_non_cyclic_by_default(self, tmp_path: Path) -> None:
+        """A file with neither `climatology` nor `cycle_length` is not cyclic."""
+        path = tmp_path / "non_cyclic.nc"
+        ds = xr.Dataset(
+            {"temp": ("time", np.zeros(1))},
+            attrs={"model_reference_date": "1995-01-01 00:00:00"},
+        )
+        ds.to_netcdf(path)
+
+        recorded = read_model_reference_date(path)
+        assert recorded is not None
+        assert recorded.cyclic is False
+
+
+class TestRecordedReferenceDateAlignsWith:
+    """Tests for `RecordedReferenceDate.aligns_with`."""
+
+    def test_non_cyclic_exact_match(self) -> None:
+        """A non-cyclic date aligns only with an identical date."""
+        recorded = RecordedReferenceDate(date=datetime(1995, 1, 1), cyclic=False)
+        assert recorded.aligns_with(datetime(1995, 1, 1)) is True
+
+    def test_non_cyclic_mismatch(self) -> None:
+        """A non-cyclic date does not align with a different date."""
+        recorded = RecordedReferenceDate(date=datetime(1995, 1, 1), cyclic=False)
+        assert recorded.aligns_with(datetime(1995, 1, 2)) is False
+
+    def test_cyclic_different_year_same_day_of_year_aligns(self) -> None:
+        """A cyclic date aligns with another date sharing the same offset
+        from Jan 1 of its own year, even in a different calendar year.
+        """
+        recorded = RecordedReferenceDate(date=datetime(2000, 1, 1), cyclic=True)
+        assert recorded.aligns_with(datetime(1995, 1, 1)) is True
+
+    def test_cyclic_different_day_of_year_does_not_align(self) -> None:
+        """A cyclic date does not align with a date at a different offset
+        from Jan 1, even within the same year.
+        """
+        recorded = RecordedReferenceDate(date=datetime(2000, 7, 1), cyclic=True)
+        assert recorded.aligns_with(datetime(2000, 1, 1)) is False
+
+    def test_cyclic_leap_year_offset_mismatch_does_not_align(self) -> None:
+        """A cyclic comparison is exact-offset, not month/day: 2000-03-01 and
+        2001-03-01 differ by one day of year across the 2000 leap year, so
+        they must not align.
+        """
+        recorded = RecordedReferenceDate(date=datetime(2000, 3, 1), cyclic=True)
+        assert recorded.aligns_with(datetime(2001, 3, 1)) is False
+
+
+class TestROMSInputDatasetReadModelReferenceDate:
+    """Tests for `ROMSInputDataset.read_model_reference_date`."""
+
+    def test_no_working_copy_returns_none(
+        self, romsinputdataset_local_netcdf: ROMSInputDataset
+    ) -> None:
+        """Without a staged working copy, there is nothing to read."""
+        assert romsinputdataset_local_netcdf.read_model_reference_date() is None
+
+    def test_single_file_working_copy(
+        self, romsinputdataset_local_netcdf: ROMSInputDataset, tmp_path: Path
+    ) -> None:
+        """Reads the reference date from a single-file working copy."""
+        path = tmp_path / "single.nc"
+        xr.Dataset(
+            {
+                "ocean_time": (
+                    "time",
+                    np.zeros(1),
+                    {"long_name": "Time since 1995/01/01"},
+                )
+            }
+        ).to_netcdf(path)
+
+        dataset = romsinputdataset_local_netcdf
+        dataset._working_copy = mock.MagicMock(spec=StagedFile, path=path)
+
+        assert dataset.read_model_reference_date() == RecordedReferenceDate(
+            date=datetime(1995, 1, 1), cyclic=False
+        )
+
+    def test_collection_working_copy_reads_first_file_only(
+        self,
+        romsinputdataset_local_netcdf: ROMSInputDataset,
+        stageddatacollection_remote_files: Callable[..., StagedDataCollection],
+        tmp_path: Path,
+    ) -> None:
+        """Only the first file of a multi-file working copy is read: all files
+        of one dataset come from one generator and share a reference date.
+        """
+        first_path = tmp_path / "first.nc"
+        second_path = tmp_path / "second.nc"
+        xr.Dataset(
+            {
+                "ocean_time": (
+                    "time",
+                    np.zeros(1),
+                    {"long_name": "Time since 1995/01/01"},
+                )
+            }
+        ).to_netcdf(first_path)
+        xr.Dataset(
+            {
+                "ocean_time": (
+                    "time",
+                    np.zeros(1),
+                    {"long_name": "Time since 2010/06/15"},
+                )
+            }
+        ).to_netcdf(second_path)
+
+        dataset = romsinputdataset_local_netcdf
+        dataset._working_copy = stageddatacollection_remote_files(
+            paths=[first_path, second_path]
+        )
+
+        assert dataset.read_model_reference_date() == RecordedReferenceDate(
+            date=datetime(1995, 1, 1), cyclic=False
+        )

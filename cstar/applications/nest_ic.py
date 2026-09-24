@@ -1,4 +1,5 @@
 import typing as t
+from datetime import datetime
 from pathlib import Path
 
 import xarray as xr
@@ -14,6 +15,7 @@ from cstar.base.utils import convert_to_cdf5, lazy_import
 from cstar.entrypoint.runner import BlueprintRunner
 from cstar.execution.handler import ExecutionStatus
 from cstar.orchestration.models import Blueprint
+from cstar.roms.input_dataset import read_model_reference_date
 
 roms_tools = lazy_import("roms_tools")
 
@@ -100,6 +102,35 @@ class NestIcRunner(BlueprintRunner[NestIcBlueprint]):
             ds_vars = {str(v).lower() for v in ds.variables}
             return bool(ds_vars.intersection(bgc_vars))
 
+    @staticmethod
+    def _model_reference_date(filepath: Path) -> datetime:
+        """Read the parent simulation's model reference date from a restart file.
+
+        Parameters
+        ----------
+        filepath : Path
+            The path to a ROMS restart file.
+
+        Returns
+        -------
+        datetime
+
+        Raises
+        ------
+        ValueError
+            If the metadata is missing or does not hold a valid date; roms-tools
+            cannot read a ROMS source without it either.
+        """
+        recorded = read_model_reference_date(filepath)
+        if recorded is None:
+            msg = (
+                f"Unable to read the model reference date from {filepath}: expected "
+                "a `model_reference_date` global attribute or an `ocean_time` "
+                "long_name of the form 'Time since YYYY/MM/DD'."
+            )
+            raise ValueError(msg)
+        return recorded.date
+
     def _create_initial_conditions(
         self,
     ) -> Path:
@@ -136,6 +167,11 @@ class NestIcRunner(BlueprintRunner[NestIcBlueprint]):
                 "path": self.blueprint.parent_rst,
             }
             ic_kwargs["bgc_model"] = roms_tools.BGCMarbl
+
+        # the child's initial conditions must share the parent's time origin
+        ic_kwargs["model_reference_date"] = self._model_reference_date(
+            self.blueprint.parent_rst
+        )
 
         fname = f"ic_from_parent_rst.{rst.formatted_timestamp}.nc"
         path = Path(self.blueprint.working_dir).expanduser() / "output" / fname
