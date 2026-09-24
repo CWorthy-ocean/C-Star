@@ -119,9 +119,11 @@ The options you are most likely to want:
 What Forge writes
 -----------------
 
-Everything goes under the blueprint's ``working_dir``. On HPC systems a
-default-form working directory (``~/cstar/_forge_bp_runs/<name>``) is placed
-on the scratch file system instead; see :doc:`../hpc`.
+Everything goes under the blueprint's ``working_dir``, used exactly as
+written. The wizard fills it in for the machine it runs on
+(``~/cstar/_forge_bp_runs/<name>`` on a laptop, the scratch data home on a
+cluster), and a workplan assigns the step its own directory; see
+:doc:`../hpc`.
 
 .. code-block:: text
 

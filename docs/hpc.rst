@@ -46,45 +46,49 @@ that joins partitioned output otherwise uses every core it can find.
 Where data goes
 ---------------
 
-Workplan runs are laid out under ``CSTAR_DATA_HOME``. On a supported HPC
-system that resolves to your scratch file system unless you set it
-yourself.
+Every C-Star application writes under its blueprint's ``working_dir``, and a
+workplan assigns each step a directory under ``CSTAR_DATA_HOME/<run id>``. On
+a supported HPC system ``CSTAR_DATA_HOME`` resolves to your scratch file
+system unless you set it yourself: the first of ``$SCRATCH``,
+``$SCRATCH_DIR`` and ``$LOCAL_SCRATCH`` that is set (the ``CSTAR_SCRATCH_DIRS``
+list, see :doc:`configuration`), or, on Bouchet, which exports none of
+them, the ``scratch_pi_*/<user>`` directory linked from your home.
 
-Forge keeps two kinds of data. The **source-data cache** holds the
-downloaded and user-staged datasets (GLORYS, TPXO, and so on) and is shared
-by every domain you generate. A forge blueprint's **working directory**
-holds the generated inputs and rendered files for one domain. Both are
-placed per system:
+Forge follows the same rule. A forge blueprint's **working directory** holds
+the generated inputs and rendered files for one domain and is used exactly as
+written. Inside a workplan it is the step's directory. Saved from the wizard,
+it is ``<data home>/_forge_bp_runs/<name>`` when the machine's data home is on
+scratch and ``~/cstar/_forge_bp_runs/<name>`` otherwise, so a blueprint
+written on a laptop and copied to a cluster keeps pointing at home; Forge
+warns when that happens, and you edit ``working_dir`` to move it. The
+**source-data cache** holds the downloaded and user-staged datasets (GLORYS,
+TPXO, and so on), is shared by every domain you generate and must survive
+scratch purges, so it follows ``$PROJECT`` instead:
 
 .. list-table::
    :header-rows: 1
-   :widths: 18 42 40
+   :widths: 18 82
 
    * - System
      - Source-data cache
-     - Default working directories
    * - Laptop or workstation
      - ``~/cstar-forge-data/source-data``
-     - ``~/cstar/_forge_bp_runs/<name>``
    * - Anvil
      - ``$PROJECT/cstar-forge-data/source-data``
-     - ``$SCRATCH/cstar/_forge_bp_runs/<name>``
    * - Perlmutter
      - ``$PROJECT/cstar-forge-data/source-data`` if ``PROJECT`` is set,
        otherwise ``$SCRATCH/cstar-forge-data/source-data``
-     - ``$SCRATCH/cstar/_forge_bp_runs/<name>``
    * - Bouchet
      - ``$PROJECT/cstar-forge-data/source-data`` if ``PROJECT`` is set,
        otherwise ``<scratch_pi_*>/<user>/cstar-forge-data/source-data``
-     - ``<scratch_pi_*>/<user>/cstar/_forge_bp_runs/<name>``
 
 Some systems define ``PROJECT`` and ``SCRATCH`` for you (Anvil exports both,
 Perlmutter exports ``SCRATCH``); check with ``echo $PROJECT $SCRATCH`` and set
 them in your shell profile only if they are empty. ``PROJECT`` pointing at a
 group directory shares one source-data cache with your collaborators;
-``SCRATCH`` names the scratch root where the system does not export one. A forge blueprint whose ``working_dir`` is the
-default form (``~/cstar/_forge_bp_runs/...``) is rebased onto scratch on
-these systems; a working directory you set explicitly is used as written.
+``SCRATCH`` names the scratch root where the system does not export one, and
+setting it is the simplest way to steer both workplan runs and forge output
+onto scratch on a system C-Star does not know.
 
 .. code-block:: console
 
@@ -126,5 +130,6 @@ The wizard from a login node
 ----------------------------
 
 Serve the wizard on the login node and forward its port from your laptop, or
-build blueprints on your laptop and copy them over; see :doc:`wizard`. Forge
-blueprints do not depend on the machine they were written on.
+build blueprints on your laptop and copy them over; see :doc:`wizard`. Apart
+from ``working_dir``, which the wizard fills in for the machine it runs on,
+forge blueprints do not depend on the machine they were written on.

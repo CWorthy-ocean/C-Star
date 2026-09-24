@@ -151,10 +151,11 @@ current shape, reproducing derived names bit-for-bit. ``model_name``/
 ``grid_name`` is results-affecting -- ``SourceDatasets`` keys cache
 filenames off it.
 
-- **``working_dir``** (default ``~/cstar/_forge_bp_runs``) is the single
+- **``working_dir``** (default ``~/cstar/_forge_bp_runs``; the wizard
+  writes ``config.default_working_dir`` instead when it saves) is the single
   per-run artifact root -- everything the executor *produces* lands under
-  it. It's host/location, not results-affecting, so it's excluded from
-  ``content_hash``. Redeclared as ``str`` (the ``Blueprint`` base's is
+  it, with no run-time relocation. It's host/location, not
+  results-affecting, so it's excluded from ``content_hash``. Redeclared as ``str`` (the ``Blueprint`` base's is
   ``Path``) to preserve sentinel expansion -- see
   ``ForgeBlueprint._resolve_out_dir``, which overrides the base's eager
   ``expanduser()``/``resolve()`` for exactly this reason.

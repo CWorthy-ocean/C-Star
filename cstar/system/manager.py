@@ -1,8 +1,10 @@
 import functools
+import getpass
 import os
 import platform as platform
 from collections.abc import Sequence
 from dataclasses import dataclass
+from pathlib import Path
 from typing import ClassVar, Final, Protocol, override
 
 from pydantic import Field
@@ -140,6 +142,18 @@ class SystemContext(Protocol):
         """Return `True` if the context identifies the current system as a match."""
         return False
 
+    @classmethod
+    def scratch_root(cls) -> Path | None:
+        """Return the system's scratch file system when no environment variable names it.
+
+        Consulted by :func:`cstar.base.env.hpc_data_directory` after the
+        ``CSTAR_SCRATCH_DIRS`` search comes up empty, so ``CSTAR_DATA_HOME`` still
+        resolves onto scratch on systems that export no ``SCRATCH``-style variable.
+        Implementations must never raise; ``None`` means the system has no
+        convention C-Star can discover.
+        """
+        return None
+
 
 CTX_REGISTRY: dict[str, type[SystemContext]] = {}
 
@@ -265,6 +279,41 @@ class AnvilSystemContext(SystemContext):
         value `anvil` in `RCAC_CLUSTER` env var.
         """
         return os.getenv("RCAC_CLUSTER", "") == AnvilEnvSettings.HOST_IDENTIFIER
+
+
+def current_user() -> str:
+    """Best-effort current username; never raises (containers and CI may lack ``$USER``)."""
+    if user := os.environ.get("USER"):
+        return user
+    try:
+        return getpass.getuser()
+    except Exception:
+        return "unknown"
+
+
+def find_bouchet_scratch_root(home: Path, user: str) -> Path | None:
+    """Per-user scratch root on Yale's Bouchet cluster, or ``None`` if none is found.
+
+    Bouchet exports no ``SCRATCH`` variable. Each user's home instead carries one
+    symlink per project named ``scratch_pi_<pi-netid>``, and inside each the user
+    owns a directory named after their username. The first such directory in
+    sorted order (``is_dir()`` follows the symlinks) plus ``user`` is the root.
+    A failed scan (a stale or permission-restricted mount behind a symlink) logs a
+    warning and returns ``None`` rather than raising, because this runs while
+    resolving ``CSTAR_DATA_HOME``.
+    """
+    try:
+        candidates = sorted(p for p in home.glob("scratch_pi_*") if p.is_dir())
+    except OSError:
+        log.warning(
+            "Failed to scan %s for scratch_pi_* directories; set SCRATCH or "
+            "CSTAR_DATA_HOME to name the scratch file system explicitly.",
+            home,
+        )
+        return None
+    if not candidates:
+        return None
+    return candidates[0] / user
 
 
 class BouchetEnvSettings(SlurmSettingsBase):
@@ -397,6 +446,12 @@ class BouchetSystemContext(SystemContext):
         return (
             os.getenv("SLURM_CLUSTER_NAME", "") == BouchetEnvSettings.CLUSTER_IDENTIFIER
         )
+
+    @override
+    @classmethod
+    def scratch_root(cls) -> Path | None:
+        """Return the ``scratch_pi_*/<user>`` directory discovered under ``$HOME``."""
+        return find_bouchet_scratch_root(Path.home(), current_user())
 
 
 @register_sys_context

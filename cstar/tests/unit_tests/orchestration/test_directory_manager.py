@@ -164,3 +164,24 @@ def test_directory_mgr_datadir_hpc_override_with_cstar_var(tmp_path: Path) -> No
         actual_path = DirMgr.data_home()
 
     assert actual_path == expected_path
+
+
+def test_directory_mgr_datadir_system_scratch_hook(tmp_path: Path) -> None:
+    """With no scratch variable and no override, the system context's own scratch
+    convention (Bouchet's scratch_pi_* directory) still puts the data home on
+    scratch, with the cstar subdir appended like any automatic location.
+    """
+    system_scratch = tmp_path / "scratch_pi_abc" / "user"
+
+    class _Ctx:
+        @classmethod
+        def scratch_root(cls) -> Path | None:
+            return system_scratch
+
+    with (
+        mock.patch.dict(os.environ, {}, clear=True),
+        mock.patch("cstar.system.manager.get_system_context", return_value=_Ctx),
+    ):
+        actual_path = DirMgr.data_home()
+
+    assert actual_path == (system_scratch / "cstar").resolve()

@@ -4284,3 +4284,44 @@ def test_surface_row_name_description_starts_with_glossary_label(editor):
     w = editor._make_row("surface", {"type": "physics", "source": {"name": "ERA5"}})
     label = label_for("forcing.row.name", default="src").label
     assert w["name"].description.startswith(label)
+
+
+def test_config_for_save_fills_this_machines_default_working_dir(monkeypatch):
+    """The saved blueprint carries config.default_working_dir(name) in place of the
+    portable sentinel default; the live config is left untouched.
+    """
+    import cstar.applications.forge.config as forge_config
+
+    monkeypatch.setattr(
+        forge_config,
+        "default_working_dir",
+        lambda name: f"/scratch/user/cstar/_forge_bp_runs/{name}",
+    )
+    wiz = ForgeBlueprintWizard()
+    wiz.start.value = date(2012, 1, 1)
+    wiz.end.value = date(2012, 1, 2)
+    wiz._rebuild()
+    assert wiz.config is not None
+    name = wiz.config.name
+    assert wiz.config.working_dir == f"~/cstar/_forge_bp_runs/{name}"
+
+    saved = wiz._config_for_save()
+
+    assert saved.working_dir == f"/scratch/user/cstar/_forge_bp_runs/{name}"
+    assert wiz.config.working_dir == f"~/cstar/_forge_bp_runs/{name}"
+    assert saved.content_hash() == wiz.config.content_hash()
+
+
+def test_config_for_save_keeps_an_explicit_working_dir(monkeypatch):
+    import cstar.applications.forge.config as forge_config
+
+    monkeypatch.setattr(
+        forge_config, "default_working_dir", lambda name: "/should/not/apply"
+    )
+    wiz = ForgeBlueprintWizard()
+    wiz.start.value = date(2012, 1, 1)
+    wiz.end.value = date(2012, 1, 2)
+    wiz._rebuild()
+    wiz.config = wiz.config.model_copy(update={"working_dir": "/data/custom/run"})
+
+    assert wiz._config_for_save().working_dir == "/data/custom/run"

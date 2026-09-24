@@ -7610,6 +7610,27 @@ class ForgeBlueprintWizard:
                 f"<span style='color:#b00'>{type(exc).__name__}: {exc}</span>"
             )
 
+    def _config_for_save(self) -> ForgeBlueprint:
+        """The resolved config with this machine's default ``working_dir`` filled in.
+
+        The wizard has no working-directory control, so ``self.config`` always
+        carries the portable ``~/cstar/_forge_bp_runs/<name>`` default. On a machine
+        whose C-Star data home is on scratch the saved file gets that location
+        instead (:func:`cstar.applications.forge.config.default_working_dir`); any
+        other value is kept as is. ``working_dir`` is outside ``content_hash``, so
+        the stamp is unaffected.
+        """
+        from cstar.applications.forge.config import default_working_dir
+
+        cfg = self.config
+        if cfg is None:
+            raise RuntimeError(
+                "_config_for_save called before a blueprint was resolved"
+            )
+        if not cfg.has_default_working_dir:
+            return cfg
+        return cfg.model_copy(update={"working_dir": default_working_dir(cfg.name)})
+
     def _on_save(self, _):
         if not self._ensure_boundaries_derived():
             self.save_status.value = (
@@ -7627,7 +7648,7 @@ class ForgeBlueprintWizard:
         try:
             save_path = Path(self.save_path.value)
             save_path.parent.mkdir(parents=True, exist_ok=True)
-            p = self.config.to_yaml(save_path)
+            p = self._config_for_save().to_yaml(save_path)
             self.save_status.value = f"<span style='color:#080'>Saved {p}</span>"
         except Exception as exc:
             self.save_status.value = (
@@ -7963,7 +7984,7 @@ class ForgeBlueprintWizard:
         try:
             save_path = Path(self.save_path.value)
             save_path.parent.mkdir(parents=True, exist_ok=True)
-            path = self.config.to_yaml(save_path)
+            path = self._config_for_save().to_yaml(save_path)
             cmd = self._build_run_command(str(path))
             self.run_status.value = f"<i>running: {' '.join(cmd)}</i>"
             proc = await asyncio.create_subprocess_exec(
@@ -8114,7 +8135,7 @@ class ForgeBlueprintWizard:
         try:
             save_path = Path(self.save_path.value)
             save_path.parent.mkdir(parents=True, exist_ok=True)
-            bp_path = self.config.to_yaml(save_path)
+            bp_path = self._config_for_save().to_yaml(save_path)
             workplan = self._build_workplan(Path(bp_path))
             wp_path = self._workplan_dest(Path(bp_path))
             wp_path.parent.mkdir(parents=True, exist_ok=True)

@@ -7,8 +7,11 @@ from cstar.base.env import (
     ENV_CSTAR_CATALOG,
     ENV_CSTAR_DATA_HOME,
     ENV_CSTAR_ORCH_MAX_CONC,
+    ENV_CSTAR_SCRATCH_DIRS,
     discover_env_vars,
+    find_scratch_dir,
     get_env_item,
+    hpc_data_directory,
     max_concurrency,
 )
 
@@ -88,3 +91,118 @@ def test_catalog_explicit_value_wins(monkeypatch: pytest.MonkeyPatch) -> None:
 
 def test_catalog_is_discoverable() -> None:
     assert ENV_CSTAR_CATALOG in discover_env_vars()
+
+
+class TestFindScratchDir:
+    """Tests for find_scratch_dir, the CSTAR_SCRATCH_DIRS search shared by
+    hpc_data_directory and callers (e.g. Forge's own scratch-root resolution)
+    that need to run the same search against an explicit environment mapping.
+    """
+
+    def test_default_search_order_is_scratch_then_scratch_dir_then_local_scratch(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.delenv(ENV_CSTAR_SCRATCH_DIRS, raising=False)
+        assert (
+            find_scratch_dir(
+                {"SCRATCH": "/scr", "SCRATCH_DIR": "/sdir", "LOCAL_SCRATCH": "/lscr"}
+            )
+            == "/scr"
+        )
+        assert find_scratch_dir({"SCRATCH_DIR": "/sdir", "LOCAL_SCRATCH": "/lscr"}) == (
+            "/sdir"
+        )
+        assert find_scratch_dir({"LOCAL_SCRATCH": "/lscr"}) == "/lscr"
+
+    def test_returns_none_when_nothing_set(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.delenv(ENV_CSTAR_SCRATCH_DIRS, raising=False)
+        assert find_scratch_dir({}) is None
+        assert find_scratch_dir({"SOME_OTHER_VAR": "/x"}) is None
+
+    def test_searches_the_passed_mapping_not_the_real_environment(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A value set in the real process environment must not leak into a
+        search against an explicit mapping that doesn't carry it.
+        """
+        monkeypatch.delenv(ENV_CSTAR_SCRATCH_DIRS, raising=False)
+        monkeypatch.setenv("SCRATCH", "/real-process-scratch")
+        assert find_scratch_dir({}) is None
+        monkeypatch.delenv("SCRATCH", raising=False)
+
+    def test_respects_a_custom_cstar_scratch_dirs_list(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv(ENV_CSTAR_SCRATCH_DIRS, "MY_SCRATCH_VAR")
+        assert find_scratch_dir({"SCRATCH": "/scr", "MY_SCRATCH_VAR": "/mine"}) == (
+            "/mine"
+        )
+
+    def test_hpc_data_directory_delegates_to_find_scratch_dir_on_os_environ(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.delenv(ENV_CSTAR_SCRATCH_DIRS, raising=False)
+        monkeypatch.delenv("SCRATCH_DIR", raising=False)
+        monkeypatch.delenv("LOCAL_SCRATCH", raising=False)
+        monkeypatch.setenv("SCRATCH", "/real-scratch")
+        assert hpc_data_directory() == "/real-scratch"
+        monkeypatch.delenv("SCRATCH", raising=False)
+        assert hpc_data_directory() is None
+
+
+class TestHpcDataDirectorySystemFallback:
+    """hpc_data_directory consults the SystemContext's scratch_root() hook only
+    when none of the CSTAR_SCRATCH_DIRS variables is set.
+    """
+
+    @pytest.fixture(autouse=True)
+    def _no_scratch_vars(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        for var in ("CSTAR_SCRATCH_DIRS", "SCRATCH", "SCRATCH_DIR", "LOCAL_SCRATCH"):
+            monkeypatch.delenv(var, raising=False)
+
+    @staticmethod
+    def _context_with(root: Path | None):
+        class _Ctx:
+            @classmethod
+            def scratch_root(cls) -> Path | None:
+                return root
+
+        return lambda: _Ctx
+
+    def test_uses_system_hook_when_no_variable_is_set(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr(
+            "cstar.system.manager.get_system_context",
+            self._context_with(Path("/sys-scratch/user")),
+        )
+        assert hpc_data_directory() == "/sys-scratch/user"
+
+    def test_variable_wins_over_system_hook(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("SCRATCH", "/env-scratch")
+        monkeypatch.setattr(
+            "cstar.system.manager.get_system_context",
+            self._context_with(Path("/sys-scratch/user")),
+        )
+        assert hpc_data_directory() == "/env-scratch"
+
+    def test_none_when_hook_has_no_convention(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr(
+            "cstar.system.manager.get_system_context", self._context_with(None)
+        )
+        assert hpc_data_directory() is None
+
+    def test_none_when_system_is_unknown(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        from cstar.base.exceptions import CstarError
+
+        def _unknown():
+            raise CstarError("Unknown system requested: nowhere")
+
+        monkeypatch.setattr("cstar.system.manager.get_system_context", _unknown)
+        assert hpc_data_directory() is None

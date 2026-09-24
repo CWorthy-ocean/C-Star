@@ -279,6 +279,13 @@ def test_default_working_dir_includes_run_name():
     assert cfg.working_dir == f"{DEFAULT_WORKING_ROOT}/{cfg.name}"
 
 
+def test_has_default_working_dir_tracks_the_expanded_sentinel():
+    cfg = _build()
+    assert cfg.has_default_working_dir
+    custom = cfg.model_copy(update={"working_dir": "/data/custom/run"})
+    assert not custom.has_default_working_dir
+
+
 def test_bare_default_working_dir_expands_and_explicit_survives():
     from cstar.applications.forge.blueprint import DEFAULT_WORKING_ROOT
 

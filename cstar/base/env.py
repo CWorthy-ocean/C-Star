@@ -2,7 +2,7 @@ import os
 import sys
 import typing as t
 from collections import defaultdict
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from functools import lru_cache
@@ -129,21 +129,65 @@ def get_env_item(var_name: str) -> EnvItem:
     raise ValueError(msg)
 
 
-def hpc_data_directory() -> str | None:
-    """A path-locator function that looks for standard scratch file-systems.
+def find_scratch_dir(env: Mapping[str, str]) -> str | None:
+    """Search *env* for the first ``CSTAR_SCRATCH_DIRS``-listed variable that is set.
+
+    The search-order logic behind :func:`hpc_data_directory`, separated so it can
+    run against an explicit environment mapping (a test double) as well as the
+    real process environment.
+
+    Parameters
+    ----------
+    env : Mapping[str, str]
+        The environment to search, e.g. ``os.environ`` or a test double.
 
     Returns
     -------
-    Path | None
-        If a scratch file system is identified, return it's paty, otherwise return None.
+    str | None
+        The first configured scratch path found (as a POSIX string), or
+        ``None`` if none of the listed variables is set in *env*.
     """
     scratch_variables = get_env_item(ENV_CSTAR_SCRATCH_DIRS).value.split(",")
 
     for env_var in scratch_variables:
-        if scratch_path := os.getenv(env_var, ""):
+        if scratch_path := env.get(env_var, ""):
             return Path(scratch_path).as_posix()
 
     return None
+
+
+def _system_scratch_root() -> str | None:
+    """The current system's own scratch convention, from its ``SystemContext``.
+
+    Imported lazily: ``cstar.system.manager`` imports this module (through
+    ``cstar.base.log``), so a module-level import would be circular. An
+    unrecognised system has no context and contributes nothing.
+    """
+    from cstar.base.exceptions import CstarError
+    from cstar.system.manager import get_system_context
+
+    try:
+        context = get_system_context()
+    except CstarError:
+        return None
+    root = context.scratch_root()
+    return root.as_posix() if root is not None else None
+
+
+def hpc_data_directory() -> str | None:
+    """Locate the scratch file system, the default ``CSTAR_DATA_HOME`` on HPC systems.
+
+    Tries the ``CSTAR_SCRATCH_DIRS`` variables first (``SCRATCH``, ``SCRATCH_DIR``,
+    ``LOCAL_SCRATCH`` by default), then the system's own convention through
+    :meth:`cstar.system.manager.SystemContext.scratch_root` (Bouchet's
+    ``scratch_pi_*`` directories, for example).
+
+    Returns
+    -------
+    str | None
+        The scratch path, or ``None`` when neither source names one.
+    """
+    return find_scratch_dir(os.environ) or _system_scratch_root()
 
 
 def nprocs_factory() -> str:
@@ -287,7 +331,9 @@ ENV_CSTAR_CONFIG_HOME: t.Annotated[
 ENV_CSTAR_DATA_HOME: t.Annotated[
     t.Literal["CSTAR_DATA_HOME"],
     EnvVar(
-        "Environment variable used to override the home directory for C-Star dataset storage.",
+        "Environment variable used to override the home directory for C-Star dataset storage. "
+        "On supported HPC systems it defaults to the scratch file system (the first "
+        "CSTAR_SCRATCH_DIRS variable that is set, else the system's own convention).",
         GROUP_FS,
         "~/cstar",
         indirect_var="XDG_DATA_HOME",
