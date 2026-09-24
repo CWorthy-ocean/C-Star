@@ -57,8 +57,19 @@ class ForgeRunner(BlueprintRunner[ForgeBlueprint]):
         ``forge_blueprint_engine.process_forge_blueprint`` -> the ``ForgeExecutor``
         substitution seam (``ensure_source_data`` -> ``generate_inputs`` ->
         ``configure_build``). Synchronous and heavy (network fetches, roms-tools
-        NetCDF generation) -- runs inline on the event loop for this first cut;
-        ``asyncio.to_thread`` is a candidate refinement if that becomes a problem.
+        NetCDF generation), and deliberately run inline on the event loop rather
+        than via ``asyncio.to_thread``. ``Service`` handles SIGINT/SIGTERM with plain
+        ``signal.signal`` handlers that do their bookkeeping and *return*, so the
+        first signal restores the default handlers and the second raises
+        ``KeyboardInterrupt`` on the main thread. Inline, that interrupt lands in
+        forge's own frames and unwinds the run; on a worker thread it would land in
+        the idle event loop instead, and ``asyncio.run`` would then join the
+        un-cancellable worker on exit, leaving the process running until the current
+        NetCDF write finished. Nothing else needs the loop free while forge works:
+        the healthcheck is its own thread and ``execute`` awaits iterations
+        sequentially. (Forge's dask/BLAS/numba thread caps and the xarray lock
+        patch are process-global or scoped to the calling thread, so they were not
+        the constraint.)
 
         Returns
         -------
