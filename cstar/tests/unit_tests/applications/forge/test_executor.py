@@ -47,8 +47,10 @@ from cstar.applications.forge.executor import ForgeExecutor, _deep_merge_setting
 from cstar.applications.forge.host import HostPaths
 from cstar.applications.forge.input_data import CHILD_IC_PLACEHOLDER_LOCATION
 from cstar.applications.forge.resolve import build_forge_blueprint
+from cstar.applications.forge.templates import bundled_template_dir
 from cstar.catalog.domain_catalog import default_catalog as _CATALOG
 from cstar.entrypoint.config import get_job_config, get_service_config
+from cstar.execution.file_system import DirectoryManager
 from cstar.execution.handler import ExecutionStatus
 from cstar.orchestration.models import Resource
 
@@ -1330,6 +1332,213 @@ class TestForgeExecutorBuildAndRun:
             )
             with pytest.raises(ValueError, match="cppdefs.opt.j2"):
                 builder._stage_templates("compile_time")
+
+    @pytest.mark.real_template_staging
+    def test_stage_templates_cache_miss_then_hit(self, minimal_cstar_spec_builder_args):
+        """A commit pin with authored ``file_hashes`` fetches via
+        ``AdditionalCode`` on a cache miss and populates the staging cache; a
+        second ``_stage_templates`` call for the same pin (a fresh working
+        directory, as a second run would have) copies from the cache instead of
+        fetching again -- ``AdditionalCode`` is constructed exactly once across
+        both calls.
+        """
+        builder = _make_builder(minimal_cstar_spec_builder_args)
+        stage = "compile_time"
+        repo = builder.code_spec.templates_compile_time
+        assert repo.commit and repo.file_hashes
+        real_bundled = bundled_template_dir(repo.directory)
+        assert real_bundled is not None
+        cache_dir = builder._template_cache_dir(stage)
+        assert cache_dir is not None
+
+        def _fake_get(local_dir):
+            Path(local_dir).mkdir(parents=True, exist_ok=True)
+            for f in repo.files:
+                (Path(local_dir) / f).write_bytes((real_bundled / f).read_bytes())
+
+        with (
+            patch(
+                "cstar.applications.forge.executor.bundled_template_dir",
+                return_value=None,
+            ),
+            patch("cstar.applications.forge.executor.AdditionalCode") as mock_ac,
+        ):
+            mock_ac.return_value.get.side_effect = _fake_get
+            first = builder._stage_templates(stage)
+            assert mock_ac.call_count == 1
+            second = builder._stage_templates(stage)
+            assert mock_ac.call_count == 1  # served from cache, not re-fetched
+
+        for d in (first, second):
+            assert (d / repo.files[0]).read_bytes() == (
+                real_bundled / repo.files[0]
+            ).read_bytes()
+        assert (cache_dir / repo.files[0]).read_bytes() == (
+            real_bundled / repo.files[0]
+        ).read_bytes()
+
+    @pytest.mark.real_template_staging
+    def test_stage_templates_cache_corruption_triggers_refetch(
+        self, minimal_cstar_spec_builder_args
+    ):
+        """A cache entry whose content no longer matches the blueprint's
+        ``file_hashes`` -- corrupted, or left partial by an interrupted earlier
+        run -- is treated as a miss: re-fetched via ``AdditionalCode`` rather
+        than trusted, and the entry is overwritten with the fresh, verified
+        content instead of being left mixed with stale files.
+        """
+        builder = _make_builder(minimal_cstar_spec_builder_args)
+        stage = "compile_time"
+        repo = builder.code_spec.templates_compile_time
+        real_bundled = bundled_template_dir(repo.directory)
+        assert real_bundled is not None
+        cache_dir = builder._template_cache_dir(stage)
+        assert cache_dir is not None
+
+        cache_dir.mkdir(parents=True)
+        for f in repo.files:
+            (cache_dir / f).write_text("corrupted, not the pinned content")
+
+        def _fake_get(local_dir):
+            Path(local_dir).mkdir(parents=True, exist_ok=True)
+            for f in repo.files:
+                (Path(local_dir) / f).write_bytes((real_bundled / f).read_bytes())
+
+        with (
+            patch(
+                "cstar.applications.forge.executor.bundled_template_dir",
+                return_value=None,
+            ),
+            patch("cstar.applications.forge.executor.AdditionalCode") as mock_ac,
+        ):
+            mock_ac.return_value.get.side_effect = _fake_get
+            dest = builder._stage_templates(stage)
+
+        mock_ac.assert_called_once()
+        assert (dest / repo.files[0]).read_bytes() == (
+            real_bundled / repo.files[0]
+        ).read_bytes()
+        assert (cache_dir / repo.files[0]).read_bytes() == (
+            real_bundled / repo.files[0]
+        ).read_bytes()
+
+    @pytest.mark.real_template_staging
+    def test_stage_templates_branch_pin_never_cached(
+        self, minimal_cstar_spec_builder_args
+    ):
+        """A branch pin (``commit`` unset, ``branch`` set) is fetched every run
+        even when ``file_hashes`` is authored -- a branch's content can move
+        without the blueprint changing, so it is never content-addressed enough
+        to cache.
+        """
+        builder = _make_builder(minimal_cstar_spec_builder_args)
+        stage = "compile_time"
+        repo = builder.code_spec.templates_compile_time
+        branch_repo = repo.model_copy(update={"commit": None, "branch": "main"})
+        builder.code_spec = builder.code_spec.model_copy(
+            update={"templates_compile_time": branch_repo}
+        )
+        assert builder._template_cache_dir(stage) is None
+        real_bundled = bundled_template_dir(repo.directory)
+        assert real_bundled is not None
+
+        def _fake_get(local_dir):
+            Path(local_dir).mkdir(parents=True, exist_ok=True)
+            for f in branch_repo.files:
+                (Path(local_dir) / f).write_bytes((real_bundled / f).read_bytes())
+
+        with (
+            patch(
+                "cstar.applications.forge.executor.bundled_template_dir",
+                return_value=None,
+            ),
+            patch("cstar.applications.forge.executor.AdditionalCode") as mock_ac,
+        ):
+            mock_ac.return_value.get.side_effect = _fake_get
+            builder._stage_templates(stage)
+            builder._stage_templates(stage)
+
+        assert mock_ac.call_count == 2  # fetched every run, never cached
+        assert not (DirectoryManager.cache_home() / "forge-templates").exists()
+
+    @pytest.mark.real_template_staging
+    def test_stage_templates_hashless_pin_never_cached(
+        self, minimal_cstar_spec_builder_args
+    ):
+        """A commit pin with no authored ``file_hashes`` (old blueprints, or a
+        ModelSpec that hasn't authored hashes yet) is fetched every run -- there
+        is nothing to verify a cache entry against before trusting it.
+        """
+        builder = _make_builder(minimal_cstar_spec_builder_args)
+        stage = "compile_time"
+        builder.code_spec = builder.code_spec.model_copy(
+            update={
+                "templates_compile_time": builder.code_spec.templates_compile_time.model_copy(
+                    update={"file_hashes": {}}
+                )
+            }
+        )
+        repo = builder.code_spec.templates_compile_time
+        assert builder._template_cache_dir(stage) is None
+        real_bundled = bundled_template_dir(repo.directory)
+        assert real_bundled is not None
+
+        def _fake_get(local_dir):
+            Path(local_dir).mkdir(parents=True, exist_ok=True)
+            for f in repo.files:
+                (Path(local_dir) / f).write_bytes((real_bundled / f).read_bytes())
+
+        with patch("cstar.applications.forge.executor.AdditionalCode") as mock_ac:
+            mock_ac.return_value.get.side_effect = _fake_get
+            builder._stage_templates(stage)
+            builder._stage_templates(stage)
+
+        assert mock_ac.call_count == 2  # fetched every run, never cached
+        assert not (DirectoryManager.cache_home() / "forge-templates").exists()
+
+    @pytest.mark.real_template_staging
+    def test_stage_templates_survives_unwritable_cache_home(
+        self, minimal_cstar_spec_builder_args, tmp_path
+    ):
+        """A build must not fail just because the staging cache couldn't be
+        written (e.g. an over-quota or read-only ``CSTAR_CACHE_HOME`` on a
+        shared HPC filesystem): the fetch already verified and staged ``dest``,
+        so a failure populating the cache is logged and swallowed, not raised.
+        """
+        builder = _make_builder(minimal_cstar_spec_builder_args)
+        stage = "compile_time"
+        repo = builder.code_spec.templates_compile_time
+        real_bundled = bundled_template_dir(repo.directory)
+        assert real_bundled is not None
+
+        # A regular file where the cache directory needs to go: any attempt to
+        # mkdir/write under it raises NotADirectoryError (an OSError).
+        unwritable = tmp_path / "not-a-directory"
+        unwritable.write_text("")
+
+        def _fake_get(local_dir):
+            Path(local_dir).mkdir(parents=True, exist_ok=True)
+            for f in repo.files:
+                (Path(local_dir) / f).write_bytes((real_bundled / f).read_bytes())
+
+        with (
+            patch(
+                "cstar.applications.forge.executor.bundled_template_dir",
+                return_value=None,
+            ),
+            patch(
+                "cstar.execution.file_system.DirectoryManager.cache_home",
+                return_value=unwritable,
+            ),
+            patch("cstar.applications.forge.executor.AdditionalCode") as mock_ac,
+        ):
+            mock_ac.return_value.get.side_effect = _fake_get
+            dest = builder._stage_templates(stage)
+
+        mock_ac.assert_called_once()
+        assert (dest / repo.files[0]).read_bytes() == (
+            real_bundled / repo.files[0]
+        ).read_bytes()
 
     @requires_cstar_pio
     def test_build_with_use_pio_emits_code_pio_and_partitioning_use_pio(
@@ -2661,7 +2870,7 @@ class TestGoldenNamelist:
 
     This is the deterministic, mocked-forcing golden referenced in the Follow-ups
     section of ``docs/dev-notes/forge-blueprint-parameter-audit.md`` and in
-    ``docs/architecture-details.md`` Sec 6 — it is NOT the real-generated-data integration
+    ``docs/developers/forge_internals.rst`` Sec 6 — it is NOT the real-generated-data integration
     test those docs separately name as still deferred (this one mocks every
     roms-tools construction class; a real run against GLORYS/ERA5/TPXO/DAI data is a
     different, heavier test that doesn't exist yet).
@@ -3179,7 +3388,7 @@ class TestGoldenNamelist:
 
         Test name note: this must NOT contain ``roms050`` -- the legacy golden
         is selected with ``-k "golden_namelist_test_tiny and not roms050 and not
-        roms060"`` (see ``docs/architecture-details.md`` Sec 7), which would
+        roms060"`` (see ``docs/developers/forge_internals.rst`` Sec 7), which would
         otherwise also catch this test.
         """
         normalized = self._run_golden_namelist_case(

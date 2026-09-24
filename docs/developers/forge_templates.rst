@@ -61,6 +61,16 @@ template with:
 
    git show <commit>:<directory>/<file> | shasum -a 256
 
+Editing a bundled template without re-pinning ``templates_commit`` and
+``file_hashes`` is caught by CI, not just a manual step: a bundled
+ModelSpec's authored ``file_hashes`` are compared against the bundled copy's
+actual content in
+``test_bundled_modelspec_fast_path_eligibility_by_stage``
+(``cstar/tests/unit_tests/applications/forge/test_forge_blueprint.py``),
+which asserts every bundled spec takes the local fast path below. A template
+edit that isn't followed by re-pinning makes the bundled copy's hash diverge
+from the authored one, so that test fails.
+
 Staging: bundled copy vs. fetching the pinned commit
 --------------------------------------------------------
 
@@ -85,12 +95,12 @@ of two paths:
    what is currently bundled falls through to fetching instead of silently
    substituting newer bundled content.
 2. **Fetch via** ``AdditionalCode``: a remote repository (location + commit
-   or branch) is fetched, or a local directory is copied, exactly as before
-   the fast path existed. ``_verify_template_hashes`` then checks the fetch
-   against ``file_hashes`` -- a no-op when empty, which covers old blueprints
-   and ModelSpecs that have not authored hashes yet. A mismatch between a
-   fetched file's sha256 and its pinned hash raises ``ValueError``: the
-   blueprint pins template content that the fetched commit does not match.
+   or branch) is fetched, or a local directory is copied.
+   ``_verify_template_hashes`` then checks the fetch against ``file_hashes``
+   -- a no-op when empty, which covers old blueprints and ModelSpecs that
+   have not authored hashes yet. A mismatch between a fetched file's sha256
+   and its pinned hash raises ``ValueError``: the blueprint pins template
+   content that the fetched commit does not match.
 
 The template repository is this one (``resolve.DEFAULT_TEMPLATE_REPO``), and every
 bundled ModelSpec pins ``templates_commit`` to a C-Star release commit whose
@@ -99,3 +109,24 @@ written against the standalone cstar-forge repository carry the legacy
 ``templates/<stage>`` directory form; ``bundled_template_dir`` maps both forms
 onto the bundled copy, and such a blueprint still fetches its pinned forge
 commit when the hashes differ.
+
+Staging cache
+~~~~~~~~~~~~~~~~
+
+A commit pin (as opposed to a ``branch`` pin) with authored ``file_hashes`` is
+content-addressed, so a fetch that verifies successfully is cached under
+C-Star's cache home (``cstar.execution.file_system.DirectoryManager.cache_home``,
+i.e. ``CSTAR_CACHE_HOME`` / ``XDG_CACHE_HOME``) at a key derived from the pin's
+``location``, ``commit``, and ``directory``. A later run for the same pin copies
+from that cache instead of fetching again; a cache entry whose files no longer
+match ``file_hashes`` -- corrupted, or left partial by an interrupted earlier
+run -- is treated as a miss and re-fetched. Branch pins and blueprints without
+``file_hashes`` are never cached, since neither is content-addressed enough to
+trust a cache entry without re-fetching to check it.
+
+Each file is written into the cache via a temp-file-then-rename, so two runs
+staging the same pin at once never see a partially-written file -- worst case
+they both write the same, already-verified bytes. Failing to write the cache
+(a read-only or over-quota ``CSTAR_CACHE_HOME``, common on shared HPC
+filesystems) is logged and otherwise ignored: the run already has its verified
+templates in the working directory, and simply re-fetches next time.

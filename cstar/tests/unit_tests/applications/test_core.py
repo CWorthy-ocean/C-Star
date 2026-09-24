@@ -15,6 +15,7 @@ from cstar.applications.core import (
 )
 from cstar.applications.roms_marbl.models import RomsMarblBlueprint
 from cstar.execution.handler import ExecutionStatus
+from cstar.orchestration.transforms import DirectiveConfig
 
 
 def _external_app_module_source(app_name: str) -> str:
@@ -641,3 +642,16 @@ def test_runnerresult_state_add_errors(
 
     # confirm error results
     assert len(result.errors) == exp_num_errors
+
+
+def test_roms_marbl_directives_registered_in_directive_map() -> None:
+    """Verify every directive `roms_marbl` declares is registered in
+    `DirectiveConfig.directive_map` under its own `key()`.
+
+    The application's `directives` and the global registry are populated
+    independently (declaration vs. `DirectiveConfig.register` calls at
+    import time); this guards against the two drifting apart.
+    """
+    app = get_application("roms_marbl")
+    for directive in app.directives:
+        assert DirectiveConfig.directive_map.get(directive.key()) is directive

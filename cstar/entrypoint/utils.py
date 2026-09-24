@@ -50,11 +50,24 @@ ARG_URI_SHORT: t.Final[str] = "-b"
 
 ARG_VAR_LONG: t.Final[str] = "--var"
 ARG_VAR_SHORT: t.Final[str] = "-v"
+ARG_VAR_HELP: t.Final[str] = (
+    "Specify 0-to-many replacements as key-value pairs in the form `key=value`."
+)
 ARG_VARFILE_LONG: t.Final[str] = "--varfile"
 ARG_VARFILE_SHORT: t.Final[str] = "-f"
+ARG_VARFILE_HELP: t.Final[str] = (
+    "Specify the path to a file containing one replacement per line as key-value "
+    "pairs in the form `key=value`."
+)
 
 ARG_VERBOSE: t.Final[str] = "--verbose"
 ARG_VERBOSE_HELP: t.Final[str] = "Set this flag to print verbose CLI outputs."
 
 ARG_SIZE: t.Final[str] = "--size"
 ARG_SIZE_HELP: t.Final[str] = "Set this flag to refresh disk-usage statistics."
+
+ARG_SCHEMA_ONLY: t.Final[str] = "--schema-only"
+ARG_SCHEMA_ONLY_HELP: t.Final[str] = (
+    "Only validate the workplan file's structure; skip resolving applications, "
+    "blueprints, overrides and directives."
+)

@@ -484,6 +484,12 @@ class WorkplanTransformer(LoggingMixin):
             app_name: get_application(app_name).applicable_transforms
             for app_name in app_names
         }
+
+        if problems := collect_directive_problems(live_steps):
+            summary = f"{len(problems)} directive problem(s) found in workplan:"
+            msg = "\n".join([summary, *(f"- {problem}" for problem in problems)])
+            raise ValueError(msg)
+
         override_transform = OverrideTransform()
 
         for step in live_steps:
@@ -858,16 +864,15 @@ def package_runtime_overrides(step: LiveStep) -> LiveStep:
     overrides are merged and stored on the step's directives, to be applied
     by an `apply-overrides` directive on the compute node instead.
 
+    Directive configuration is not validated here; `collect_directive_problems`
+    validates every step's directives, once, before any step is packaged (see
+    `WorkplanTransformer.apply`).
+
     Returns
     -------
     LiveStep
         The transformed step.
     """
-    for directive_key, directive_config in step.directives.items():
-        directive_cls = DirectiveConfig.directive_map.get(directive_key)
-        if directive_cls is not None and isinstance(directive_config, Mapping):
-            directive_cls.validate_directives(directive_config, step.directives)
-
     sys_overrides = {
         key: value.as_posix() if isinstance(value, Path) else value
         for key, value in get_system_overrides(step).items()
@@ -891,6 +896,109 @@ def package_runtime_overrides(step: LiveStep) -> LiveStep:
     }
     update: dict[str, t.Any] = {"blueprint_overrides": {}, "directives": directives}
     return LiveStep.from_step(step, update=update)
+
+
+def _ancestor_map(steps: Sequence[LiveStep]) -> dict[str, set[str]]:
+    """Map each step's name to the set of its transitive `depends_on` ancestors.
+
+    Parameters
+    ----------
+    steps : Sequence[LiveStep]
+        The steps to map.
+
+    Returns
+    -------
+    dict[str, set[str]]
+        Step name to the set of every step name reachable by following
+        `depends_on` edges, direct or indirect. Terminates on a dependency
+        cycle via a visited set rather than looping forever.
+    """
+    depends_on = {step.name: step.depends_on for step in steps}
+    ancestors: dict[str, set[str]] = {}
+    for name in depends_on:
+        seen: set[str] = set()
+        stack = list(depends_on.get(name, ()))
+        while stack:
+            candidate = stack.pop()
+            if candidate in seen:
+                continue
+            seen.add(candidate)
+            stack.extend(depends_on.get(candidate, ()))
+        ancestors[name] = seen
+    return ancestors
+
+
+def collect_directive_problems(steps: Sequence[LiveStep]) -> list[str]:
+    """Validate every step's directives against its application and the DAG.
+
+    Called once by `WorkplanTransformer.apply`, before any step is
+    packaged, so every knowable directive misconfiguration is reported
+    together at schedule time instead of one at a time on the compute node.
+    For each step, a directive key must belong to `apply-overrides` or to
+    the step's application (`ApplicationDefinition.directives`); its config
+    must be a mapping; the directive's own `validate_directives` is
+    consulted for config-shape and sibling-directive problems; and every
+    step name returned by the directive's `referenced_steps` must name
+    another step in `steps` that is a transitive `depends_on` ancestor of
+    the referencing step.
+
+    Parameters
+    ----------
+    steps : Sequence[LiveStep]
+        The workplan's steps, in schedule order.
+
+    Returns
+    -------
+    list[str]
+        One message per problem found, each prefixed with the step and
+        directive it concerns; empty when every step's directives are valid.
+    """
+    ancestors = _ancestor_map(steps)
+    step_names = {step.name for step in steps}
+    problems: list[str] = []
+
+    for step in steps:
+        allowed: dict[str, type[Directive]] = {
+            ApplyOverridesDirective.key(): ApplyOverridesDirective,
+            **{d.key(): d for d in get_application(step.application).directives},
+        }
+
+        for key, config in step.directives.items():
+            directive_cls = allowed.get(key)
+            if directive_cls is None:
+                allowed_keys = ", ".join(sorted(allowed))
+                problems.append(
+                    f"step {step.name!r} directive {key!r}: not a directive of "
+                    f"application {step.application!r}; allowed: {allowed_keys}"
+                )
+                continue
+
+            if not isinstance(config, Mapping):
+                problems.append(
+                    f"step {step.name!r} directive {key!r}: configuration must "
+                    f"be a mapping, got {type(config).__name__}"
+                )
+                continue
+
+            problems.extend(
+                f"step {step.name!r} directive {key!r}: {problem}"
+                for problem in directive_cls.validate_directives(config, step)
+            )
+
+            for ref in directive_cls.referenced_steps(config):
+                if ref not in step_names:
+                    problems.append(
+                        f"step {step.name!r} directive {key!r}: references "
+                        f"unknown step {ref!r}"
+                    )
+                elif ref not in ancestors[step.name]:
+                    problems.append(
+                        f"step {step.name!r} directive {key!r}: step {ref!r} "
+                        f"is not an upstream dependency of step {step.name!r} "
+                        "(via depends_on)"
+                    )
+
+    return problems
 
 
 class Directive(Transform[LiveStep], t.Protocol):
@@ -932,30 +1040,52 @@ class Directive(Transform[LiveStep], t.Protocol):
 
     @classmethod
     def validate_directives(
-        cls, config: Mapping[str, t.Any], directives: Mapping[str, t.Any]
-    ) -> None:
-        """Validate this directive's config against the step's full directives
-        mapping at schedule time.
+        cls, config: Mapping[str, t.Any], step: LiveStep
+    ) -> Sequence[str]:
+        """Validate this directive's config at schedule time.
 
-        Called by `package_runtime_overrides` before a step is submitted, so
-        a directive can reject a configuration that conflicts with another
-        directive on the same step (e.g. two directives that would both set
-        `initial_conditions`) at `cstar workplan` time rather than on the
-        compute node. Default: no-op.
+        Called by `collect_directive_problems` before a workplan is
+        submitted, so a directive can reject a malformed configuration, or
+        one that conflicts with another directive on the same step (e.g. two
+        directives that would both set `initial_conditions`, found via
+        `step.directives`), at `cstar workplan` time rather than on the
+        compute node. Default: no problems.
 
         Parameters
         ----------
         config : Mapping[str, t.Any]
             This directive's own configuration mapping.
-        directives : Mapping[str, t.Any]
-            The step's full directives mapping (this directive's key
-            included).
+        step : LiveStep
+            The step the directive is configured on; `step.directives`
+            carries the step's full directives mapping (this directive's
+            key included) for checking conflicts with sibling directives.
 
         Returns
         -------
-        None
+        Sequence[str]
+            Problem messages describing why `config` is invalid; empty when
+            `config` is fine.
         """
-        return
+        return ()
+
+    @classmethod
+    def referenced_steps(cls, config: Mapping[str, t.Any]) -> Sequence[str]:
+        """Return the workplan step names this directive's config refers to.
+
+        Lets schedule-time validation check a directive's step references
+        against the workplan DAG without knowing each directive's config
+        layout. Default: no step references.
+
+        Parameters
+        ----------
+        config : Mapping[str, t.Any]
+            This directive's own configuration mapping.
+
+        Returns
+        -------
+        Sequence[str]
+        """
+        return ()
 
     @property
     def workplan(self) -> LiveWorkplan:

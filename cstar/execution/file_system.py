@@ -92,7 +92,10 @@ class DirectoryManager:
         Path
         """
         override_fn = env_item.default_factory
-        path = Path(env_item.default) / DirectoryManager._PKG_SUBDIR
+        # The declared default already names the final directory (``~/cstar``,
+        # ``~/.cache/cstar``, ...), so it is used as is; the ``cstar`` subdirectory is
+        # appended only to locations derived from a locator or an XDG variable.
+        path = Path(env_item.default)
 
         if os.getenv(env_item.name, ""):
             # check user-provided environment variables

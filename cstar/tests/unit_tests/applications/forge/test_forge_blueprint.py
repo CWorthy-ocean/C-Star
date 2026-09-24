@@ -342,31 +342,64 @@ def test_cpus_needed_is_grid_sized_forge_estimate():
     assert cfg.cpus_needed == estimate_forge_cpus(gk["nx"], gk["ny"], gk["N"])
 
 
-def test_forge_blueprint_is_portable_no_forge_or_heavy_cstar_imports():
-    """blueprint.py is the C-Star-relocatable blueprint model: it must depend on
-    nothing beyond stdlib + pydantic + yaml, and the only ``cstar`` dependency it's
-    allowed is the lightweight ``cstar.orchestration.models.Blueprint`` base (see
-    ``cstar.applications.forge.app.ForgeApplication`` -- this is what makes forge a
-    real C-Star application). It must NOT reach into heavier cstar submodules (e.g.
-    ``cstar.roms``, ``cstar.applications.roms_marbl``) that would drag in the
-    ROMS/MARBL build + roms-tools stack.
+def test_forge_blueprint_import_stays_light():
+    """Importing ``cstar.applications.forge.blueprint`` must stay cheap.
+
+    Validation paths that touch only the blueprint schema -- the wizard's
+    load-back of a saved ``forge_blueprint.yaml``, ``cstar blueprint schemas``,
+    and workplan deserialization -- run in-process and never touch the heavy
+    execution/authoring stack. This is an import-graph test rather than a
+    textual import scan (superseding the old regex-on-source-text check, whose
+    "must be relocatable back into a standalone cstar-forge" rationale no
+    longer applies now that this module lives in C-Star): it imports the module
+    in a fresh interpreter and asserts none of the heavy modules below ended up
+    in ``sys.modules``, regardless of *how* they'd sneak in.
     """
-    import cstar.applications.forge
+    import subprocess
+    import sys
 
-    src = Path(cstar.applications.forge.__file__).parent / "blueprint.py"
-    text = src.read_text()
-    import re
+    script = (
+        "import sys\n"
+        "import cstar.applications.forge.blueprint\n"
+        "print('\\n'.join(sorted(sys.modules)))\n"
+    )
+    result = subprocess.run(
+        [sys.executable, "-c", script],
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0, (
+        f"importing cstar.applications.forge.blueprint failed:\n{result.stderr}"
+    )
+    imported = set(result.stdout.splitlines())
 
-    allowed_cstar_import = "from cstar.orchestration.models import Blueprint"
-    bad = [
-        ln.strip()
-        for ln in text.splitlines()
-        if re.match(r"\s*(from|import)\s+(cstar|\.)", ln)
-        and ln.strip() != allowed_cstar_import
-    ]
-    assert not bad, (
-        "blueprint.py must stay forge-free and depend on nothing beyond "
-        f"{allowed_cstar_import!r} for cstar; found: {bad}"
+    forbidden_prefixes = (
+        "roms_tools",
+        "xarray",
+        "dask",
+        "numba",
+        "ipywidgets",
+        "cstar.roms",
+        "cstar.applications.roms_marbl",
+        "cstar.applications.forge.executor",
+        "cstar.applications.forge.engine",
+        "cstar.applications.forge.input_data",
+        "cstar.applications.forge.source_datasets",
+        "cstar.applications.forge.resolve",
+        "cstar.catalog",
+        "cstar.wizard",
+    )
+    hits = {
+        mod
+        for mod in imported
+        if any(
+            mod == prefix or mod.startswith(prefix + ".")
+            for prefix in forbidden_prefixes
+        )
+    }
+    assert not hits, (
+        "importing cstar.applications.forge.blueprint pulled in heavy/forbidden "
+        f"modules: {sorted(hits)}"
     )
 
 
@@ -415,7 +448,7 @@ def test_migrate_v4_cdr_output_migration_is_idempotent(tmp_path):
     """Already-current (do_cdr_output-shaped) data passes through unchanged --
     calling the migration on already-migrated data must not error or re-rename.
     """
-    from cstar.applications.forge.blueprint import migrate_forge_blueprint_data
+    from cstar.applications.forge.migration import migrate_forge_blueprint_data
 
     cfg = _build()
     p = cfg.to_yaml(tmp_path / "forge_blueprint.yaml")
@@ -431,7 +464,7 @@ def test_migrate_tolerates_missing_cdr_output_section():
     """No ``model_settings``/``cdr_output`` section at all -- the v4->v5 step must
     not KeyError.
     """
-    from cstar.applications.forge.blueprint import migrate_forge_blueprint_data
+    from cstar.applications.forge.migration import migrate_forge_blueprint_data
 
     migrated = migrate_forge_blueprint_data({"forge_blueprint_version": 4})
     assert migrated["forge_blueprint_version"] == FORGE_BLUEPRINT_VERSION
@@ -441,7 +474,7 @@ def test_migrate_v5_ic_bgc_source_becomes_bgc_sources_list():
     """v6 -> v7: a pre-v7 singular ``initial_conditions.bgc_source`` is
     rewrapped as a one-item ``bgc_sources`` list; the old key is gone.
     """
-    from cstar.applications.forge.blueprint import migrate_forge_blueprint_data
+    from cstar.applications.forge.migration import migrate_forge_blueprint_data
 
     data = {
         "forge_blueprint_version": 5,
@@ -463,7 +496,7 @@ def test_migrate_v5_ic_bgc_source_none_becomes_empty_list():
     """v6 -> v7: an absent/``None`` ``bgc_source`` becomes an empty list, not
     a list containing ``None``.
     """
-    from cstar.applications.forge.blueprint import migrate_forge_blueprint_data
+    from cstar.applications.forge.migration import migrate_forge_blueprint_data
 
     data = {
         "forge_blueprint_version": 5,
@@ -477,7 +510,7 @@ def test_migrate_v5_ic_bgc_source_none_becomes_empty_list():
 
 def test_migrate_v5_ic_bgc_source_migration_is_idempotent():
     """Already-current (bgc_sources-shaped) data passes through unchanged."""
-    from cstar.applications.forge.blueprint import migrate_forge_blueprint_data
+    from cstar.applications.forge.migration import migrate_forge_blueprint_data
 
     data = {
         "forge_blueprint_version": 7,
@@ -499,7 +532,7 @@ def test_migrate_v5_ic_bgc_source_and_bgc_sources_both_present_raises():
     inconsistent (likely hand-edited) shape -- must raise, not silently discard
     `bgc_source`.
     """
-    from cstar.applications.forge.blueprint import migrate_forge_blueprint_data
+    from cstar.applications.forge.migration import migrate_forge_blueprint_data
 
     data = {
         "forge_blueprint_version": 5,
@@ -540,7 +573,7 @@ class TestMigrateV6ToV7CdrRelocation:
     """
 
     def _v6_data(self, **forcing_overrides):
-        from cstar.applications.forge.blueprint import migrate_forge_blueprint_data
+        from cstar.applications.forge.migration import migrate_forge_blueprint_data
 
         cfg = _build()
         data = yaml.safe_load(cfg.to_yaml_str())
@@ -590,7 +623,7 @@ class TestMigrateV6ToV7CdrRelocation:
         """Running the migration twice (or on data that already declares an
         explicit ``cdr``) must not clobber the explicit value.
         """
-        from cstar.applications.forge.blueprint import migrate_forge_blueprint_data
+        from cstar.applications.forge.migration import migrate_forge_blueprint_data
 
         data, _ = self._v6_data(cdr_forcing={"releases": []})
         once = migrate_forge_blueprint_data(data)
@@ -608,7 +641,7 @@ class TestMigrateV6ToV7CdrRelocation:
         """Direct keyword construction (``version is None``) must not let the
         v6->v7 step clobber an explicitly-passed ``cdr=`` with an inferred one.
         """
-        from cstar.applications.forge.blueprint import migrate_forge_blueprint_data
+        from cstar.applications.forge.migration import migrate_forge_blueprint_data
 
         data = {"forcing": {}, "cdr": {"mode": "upscaled"}}
         migrated = migrate_forge_blueprint_data(data)
@@ -3803,7 +3836,7 @@ class TestBgcSourcesUseVarsPartitioning:
 # ---------------------------------------------------------------------------
 class TestMigrateForcingInputsHardening:
     def test_dropped_bgc_item_keys_warn_with_index_and_source_name(self):
-        from cstar.applications.forge.blueprint import migrate_forcing_inputs
+        from cstar.applications.forge.migration import migrate_forcing_inputs
 
         forcing = {
             "boundary": [
@@ -3824,7 +3857,7 @@ class TestMigrateForcingInputsHardening:
     def test_no_warning_when_no_extra_keys_dropped(self):
         import warnings
 
-        from cstar.applications.forge.blueprint import migrate_forcing_inputs
+        from cstar.applications.forge.migration import migrate_forcing_inputs
 
         forcing = {
             "boundary": [
@@ -3838,7 +3871,7 @@ class TestMigrateForcingInputsHardening:
         assert not w
 
     def test_non_dict_boundary_entry_raises(self):
-        from cstar.applications.forge.blueprint import migrate_forcing_inputs
+        from cstar.applications.forge.migration import migrate_forcing_inputs
 
         with pytest.raises(ValueError, match="non-dict entr"):
             migrate_forcing_inputs(
@@ -3850,7 +3883,7 @@ class TestMigrateForcingInputsHardening:
         """Previously an all-non-dict list silently became `None` (boundary
         forcing quietly vanishing); it must now raise instead.
         """
-        from cstar.applications.forge.blueprint import migrate_forcing_inputs
+        from cstar.applications.forge.migration import migrate_forcing_inputs
 
         with pytest.raises(ValueError, match="non-dict entr"):
             migrate_forcing_inputs(None, {"boundary": [None, "not-a-dict"]})
@@ -3862,7 +3895,7 @@ class TestMigrateForcingInputsHardening:
         accept exactly that shape, since it's the wizard's ForcingSpec loader's
         real call signature.
         """
-        from cstar.applications.forge.blueprint import migrate_forcing_inputs
+        from cstar.applications.forge.migration import migrate_forcing_inputs
 
         ic = {"bgc_source": {"name": "UNIFIED"}}
         forcing = {
@@ -3879,7 +3912,7 @@ class TestMigrateForcingInputsHardening:
     def test_already_migrated_pair_is_a_no_op(self):
         import copy
 
-        from cstar.applications.forge.blueprint import migrate_forcing_inputs
+        from cstar.applications.forge.migration import migrate_forcing_inputs
 
         ic = {"bgc_sources": [{"source": {"name": "UNIFIED"}}]}
         forcing = {"boundary": {"source": {"name": "GLORYS"}, "bgc_sources": []}}

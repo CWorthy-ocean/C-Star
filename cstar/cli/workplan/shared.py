@@ -329,6 +329,75 @@ def check_and_capture_kvps(entries: list[str]) -> Mapping[str, str] | None:
     return variables
 
 
+def preprocess_vars(
+    ctx: typer.Context,
+    user_variables: list[str],
+) -> list[str]:
+    """Perform validation and formatting on user-supplied variables.
+
+    Places the processed variables into the user data slot of the typer context object.
+
+    Parameters
+    ----------
+    ctx : typer.Context
+        A context object containing state for the typer app
+    user_variables : list[str]
+        A list of key-value pairs supplied by a user.
+
+    Returns
+    -------
+    list[str]
+        The original input with leading/trailing whitespace stripped from the keys
+        and values; empty when no variables were supplied.
+
+    Raises
+    ------
+    typer.BadParameter
+        - If the key-value pair does not meet `key=value` convention
+    """
+    if user_variables:
+        ctx.obj = check_and_capture_kvps(user_variables)
+
+    return user_variables
+
+
+def preprocess_varfile(
+    ctx: typer.Context,
+    user_varfile_path: Path | None,
+) -> Path | None:
+    """Perform validation and formatting on user-supplied variables
+    supplied through a path to a variables file.
+
+    Places the processed variables into the user data slot of the typer context object.
+
+    Parameters
+    ----------
+    ctx : typer.Context
+        A context object containing state for the typer app.
+    user_varfile_path : Path | None
+        A path to a file containing the variable configuration.
+
+    Returns
+    -------
+    Path | None
+
+    Raises
+    ------
+    typer.BadParameter
+        - If the source file does not exist
+        - If any individual key-value pair is malformed
+    """
+    if user_varfile_path is None:
+        return None
+
+    with user_varfile_path.open("r") as fp:
+        lines = [x.strip() for x in fp.readlines() if x.strip()]
+
+    ctx.obj = check_and_capture_kvps(lines)
+
+    return user_varfile_path
+
+
 def create_xrunner(
     request: RunnerRequest[Blueprint],
     service_cfg: "ServiceConfiguration | None" = None,

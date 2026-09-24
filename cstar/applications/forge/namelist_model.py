@@ -93,8 +93,13 @@ from cstar.roms.namelist import (
     ZsliceSettings,
     namelist_schema_for_ref,
 )
+from cstar.roms.precheck import NamelistConsistencyError as NamelistConsistencyError
+from cstar.roms.precheck import applies_to as _output_precheck_applies_to
 from cstar.roms.precheck import (
     check_output_streams_divide_rst as _check_output_streams_divide_rst,
+)
+from cstar.roms.precheck import (
+    check_restart_period_divisible_by_dt as _check_restart_period_divisible_by_dt,
 )
 
 
@@ -300,75 +305,19 @@ def check_rst_period_divisible(
     """Raise ``ValueError`` if ``ocean_vars.output_period_rst`` isn't an integer
     multiple of ``dt`` -- restart writes must land on a timestep.
 
-    Enforced only when restarts are written on a fixed period (``wrt_file_rst``
-    True and ``monthly_restarts`` False); otherwise ``output_period_rst`` is
-    unused and any value is accepted. ``dt`` missing/non-positive skips the
-    check (other validation owns ``dt`` sanity). Accepts either a plain dict
-    (the resolver's world) or an ``OceanVarsCfg`` (the pydantic validator's
-    world) so both enforcement points share one message.
+    Forge-vocabulary shim over
+    :func:`cstar.roms.precheck.check_restart_period_divisible_by_dt` (the
+    single home for this rule): ``ocean_vars``' fields already ARE the real
+    Fortran namelist keys (``wrt_file_rst``/``monthly_restarts``/
+    ``output_period_rst``, no aliasing -- see :data:`_PRECHECK_SECTION_MAP`),
+    so it's passed straight through as the canonical ``basic_output_settings``
+    group, whether it's a plain dict (the resolver's world) or an
+    ``OceanVarsCfg`` (the pydantic validator's world) -- both forms are
+    accepted transparently by the canonical function's own container reader.
     """
-    if isinstance(ocean_vars, dict):
-        wrt_file_rst = ocean_vars.get("wrt_file_rst")
-        monthly_restarts = ocean_vars.get("monthly_restarts")
-        output_period_rst = ocean_vars.get("output_period_rst")
-    else:
-        wrt_file_rst = ocean_vars.wrt_file_rst
-        monthly_restarts = ocean_vars.monthly_restarts
-        output_period_rst = ocean_vars.output_period_rst
-
-    if not wrt_file_rst or monthly_restarts:
-        return
-    if dt is None or output_period_rst is None or dt <= 0:
-        return
-    ratio = output_period_rst / dt
-    if abs(ratio - round(ratio)) > 1e-9:
-        raise ValueError(
-            f"ocean_vars.output_period_rst ({output_period_rst} s) is not an "
-            f"integer multiple of time_stepping.dt ({dt} s): restart writes "
-            "must land on a timestep"
-        )
-
-
-def check_extract_divides_rst(
-    ocean_vars: _OceanVarsCfgCommon | dict[str, Any],
-    extract_data: ExtractDataCfg | dict[str, Any],
-) -> None:
-    """Raise ``ValueError`` if nesting extraction files wouldn't roll on restart
-    boundaries -- mirrors ucla-roms >= 0.5.0's ``check_output_divides_rst`` for
-    the extract stream, which aborts the run when ``nrpf * extract_period``
-    doesn't evenly divide ``output_period_rst``.
-
-    Exactly mirrors the Fortran semantics: enforced only when both restarts
-    (``wrt_file_rst``) and extraction (``do_extract``) are on; a zero
-    ``output_period_rst`` (the monthly-restart convention) passes trivially
-    (``mod(0, x) == 0``); a non-positive ``nrpf * extract_period`` is an error.
-    The caller gates on the pinned ucla-roms version -- older releases don't
-    enforce this. Missing fields skip the check (partial dicts; presence is
-    owned by schema validation). Accepts a plain dict (the resolver's world) or
-    the typed sections, like :func:`check_rst_period_divisible`.
-    """
-
-    def _get(section: Any, key: str) -> Any:
-        return section.get(key) if isinstance(section, dict) else getattr(section, key)
-
-    if not _get(ocean_vars, "wrt_file_rst") or not _get(extract_data, "do_extract"):
-        return
-    output_period_rst = _get(ocean_vars, "output_period_rst")
-    nrpf = _get(extract_data, "nrpf")
-    extract_period = _get(extract_data, "extract_period")
-    if output_period_rst is None or nrpf is None or extract_period is None:
-        return
-    newfile_freq = nrpf * extract_period
-    ratio = output_period_rst / newfile_freq if newfile_freq > 0 else None
-    if ratio is None or abs(ratio - round(ratio)) > 1e-9:
-        raise ValueError(
-            f"extract_data.nrpf ({nrpf}) * extract_data.extract_period "
-            f"({extract_period} s) = {newfile_freq} s must be positive and "
-            f"evenly divide ocean_vars.output_period_rst ({output_period_rst} s): "
-            f"ucla-roms >= 0.5.0 aborts at startup otherwise "
-            f"(check_output_divides_rst, partial-file prevention). Adjust the "
-            f"child DomainSpec metadata 'period' or the extract_data overrides."
-        )
+    _check_restart_period_divisible_by_dt(
+        {"time_stepping": {"dt": dt}, "basic_output_settings": ocean_vars}
+    )
 
 
 def cppdefs_for_precheck(
@@ -909,6 +858,36 @@ _RUN_TIME_SETTINGS_BY_NAMELIST_SCHEMA: dict[
     RomsNamelistV0_7_0: RunTimeSettingsV0_7_0,
 }
 
+# The inverse of _RUN_TIME_SETTINGS_BY_NAMELIST_SCHEMA: the namelist schema a
+# given run-time settings class corresponds to. Used by
+# output_precheck_applies_to to derive the schema class from a settings_cls
+# the caller already holds (e.g. from run_time_settings_for_ref), rather than
+# re-deriving it via a second, differently-defaulting lookup -- see that
+# function's docstring.
+_NAMELIST_SCHEMA_BY_RUN_TIME_SETTINGS: dict[
+    type[_RunTimeSettingsCommon], type[RomsNamelistBase]
+] = {v: k for k, v in _RUN_TIME_SETTINGS_BY_NAMELIST_SCHEMA.items()}
+
+
+def output_precheck_applies_to(settings_cls: type[_RunTimeSettingsCommon]) -> bool:
+    """True if C-Star's >= 0.5.0 output-stream/restart-rollover precheck
+    (:func:`cstar.roms.precheck.check_output_streams_divide_rst`) applies to
+    the ucla-roms release ``settings_cls`` (a
+    :func:`run_time_settings_for_ref` result) was selected for.
+
+    Derives the namelist schema from ``settings_cls`` itself (inverting
+    :data:`_RUN_TIME_SETTINGS_BY_NAMELIST_SCHEMA`) rather than re-deriving it
+    by calling :func:`cstar.roms.namelist.namelist_schema_for_ref` a second
+    time at the call site: ``run_time_settings_for_ref(None | "")`` returns
+    the legacy :class:`RunTimeSettings`, but ``namelist_schema_for_ref(None)``
+    warns and returns the *latest* schema -- calling the latter fresh here
+    would flip the precheck on for a no-ref blueprint that ``settings_cls``
+    says is legacy.
+    """
+    return _output_precheck_applies_to(
+        _NAMELIST_SCHEMA_BY_RUN_TIME_SETTINGS[settings_cls]
+    )
+
 
 def version_gated_section_names() -> frozenset[str]:
     """Section names modeled by at least one registered run-time settings tier
@@ -1189,7 +1168,7 @@ def validate_run_time_sections(
 # rather than silently mismatching field names. Version-pinned to the >= 0.5.0
 # variants (``OceanVarsCfgV0_5_0``, ``ParticlesCfgV0_5_0``): both call sites of
 # :func:`canonical_output_sections_for_precheck` only run this check under the
-# ``settings_cls is not RunTimeSettings`` (>= 0.5.0) gate.
+# :func:`output_precheck_applies_to` (>= 0.5.0) gate.
 _PRECHECK_SECTION_MAP: dict[str, tuple[type[_SettingsSection], str]] = {
     "ocean_vars": (OceanVarsCfgV0_5_0, "basic_output_settings"),
     "frc_output": (FrcOutputCfg, "frc_output_settings"),
@@ -1207,10 +1186,18 @@ _PRECHECK_SECTION_MAP: dict[str, tuple[type[_SettingsSection], str]] = {
     "extract_data": (ExtractDataCfg, "extract_data_settings"),
 }
 
+# The inverse of _PRECHECK_SECTION_MAP: canonical RomsNamelistBase group field
+# name -> (the forge settings-dict section that maps to it, its Cfg class).
+# Used by forge_field_for to point a NamelistConsistencyError's canonical
+# section/keys back at the forge settings-dict field the wizard actually
+# edits.
+_FORGE_SECTION_BY_CANONICAL_GROUP: dict[str, tuple[str, type[_SettingsSection]]] = {
+    group_name: (section_name, cfg_cls)
+    for section_name, (cfg_cls, group_name) in _PRECHECK_SECTION_MAP.items()
+}
 
-def canonical_output_sections_for_precheck(
-    settings: dict[str, Any], *, include_extract: bool = True
-) -> dict[str, Any]:
+
+def canonical_output_sections_for_precheck(settings: dict[str, Any]) -> dict[str, Any]:
     """Translate the output-stream-relevant sections of a forge run-time
     settings dict into C-Star's canonical namelist vocabulary (RomsNamelistBase
     group field name -> its aliased field dict), for
@@ -1229,18 +1216,39 @@ def canonical_output_sections_for_precheck(
     absent from ``settings`` is simply omitted from the result -- the checker
     already treats an absent section as "skip that stream".
 
-    ``include_extract=False`` drops ``extract_data`` from the result -- the
-    resolver's own call site excludes it: :func:`check_extract_divides_rst`
-    already covers the `extract` stream with a more actionable message (it
-    names the child DomainSpec ``period`` knob), so the general checker's copy
-    of that stream would otherwise double-check (and double-raise on) it.
+    Always includes ``extract_data`` (the nesting `extract` stream) when
+    present in ``settings`` -- it's unconditionally fully populated by
+    ``_EXTRACT_DATA_DEFAULT`` before the resolver reaches this call, so
+    including it here never trips ``ExtractDataCfg.model_validate`` on a
+    missing-required-field it wouldn't otherwise hit. A caller that wants a
+    more actionable message for that stream specifically (naming the
+    authoring-time knob that produced it) can catch
+    ``NamelistConsistencyError`` and check ``exc.section ==
+    "extract_data_settings"``.
     """
     out: dict[str, Any] = {}
     for section_name, (cfg_cls, group_name) in _PRECHECK_SECTION_MAP.items():
-        if section_name == "extract_data" and not include_extract:
-            continue
         section = settings.get(section_name)
         if section is None:
             continue
         out[group_name] = cfg_cls.model_validate(section).model_dump(by_alias=True)
     return out
+
+
+def forge_field_for(section: str, key: str) -> str | None:
+    """Reverse-lookup: a ``NamelistConsistencyError``'s canonical
+    ``section``/one of its ``keys`` (a ``RomsNamelistBase`` group field name
+    and real Fortran namelist key) -> the forge settings-dict ``"section.field"``
+    the wizard actually edits, via :data:`_PRECHECK_SECTION_MAP`'s Cfg classes
+    and their ``serialization_alias``. Returns ``None`` if ``section`` isn't
+    one of the output-stream-check groups this table maps (not every namelist
+    group has a forge settings-dict counterpart via this table).
+    """
+    entry = _FORGE_SECTION_BY_CANONICAL_GROUP.get(section)
+    if entry is None:
+        return None
+    forge_section, cfg_cls = entry
+    for field_name, info in cfg_cls.model_fields.items():
+        if (info.serialization_alias or field_name) == key:
+            return f"{forge_section}.{field_name}"
+    return None

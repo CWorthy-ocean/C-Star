@@ -7,18 +7,23 @@ that bundled copy.
 
 Used by the two consumers that must never duplicate this mapping: ``models.py``
 (``ModelSpec._validate_template_files_exist``, a dev-time existence check) and
-``executor.py`` (the local fast path and fetched-copy verification in
-``ForgeExecutor._stage_templates``). The hashes a blueprint carries
-(``TemplateRepo.file_hashes``) are authored in each ModelSpec for its pinned
-``templates_commit`` and copied verbatim by ``resolve.py`` -- never computed here.
+``executor.py`` (the local fast path, the staging cache, and fetched-copy
+verification in ``ForgeExecutor._stage_templates``). The hashes a blueprint
+carries (``TemplateRepo.file_hashes``) are authored in each ModelSpec for its
+pinned ``templates_commit`` and copied verbatim by ``resolve.py`` -- never
+computed here.
 """
 
 import hashlib
+import os
+import shutil
+import tempfile
 from collections.abc import Iterable
+from importlib.resources import files
 from pathlib import Path
 
 _BUNDLED_TEMPLATES_ROOT = (
-    Path(__file__).resolve().parents[2] / "additional_files" / "templates" / "forge"
+    Path(str(files("cstar"))) / "additional_files" / "templates" / "forge"
 )
 
 
@@ -94,3 +99,69 @@ def hash_template_files(directory: Path, files: Iterable[str]) -> dict[str, str]
             f"Template files missing from {directory}: {sorted(missing)}"
         )
     return {f: hashlib.sha256((directory / f).read_bytes()).hexdigest() for f in files}
+
+
+def copy_template_files(src_dir: Path, dest_dir: Path, files: Iterable[str]) -> None:
+    """Copy each of ``files`` flat from ``src_dir`` into ``dest_dir``.
+
+    ``dest_dir`` is created (with parents) if it doesn't already exist. The one
+    place ``_stage_templates``'s three copy paths -- the bundled fast path, a
+    staging-cache hit, and populating the staging cache -- share, so a change to
+    how templates are copied only has to happen once.
+
+    Each file is written to a uniquely-named temp file in ``dest_dir`` and
+    ``os.replace``'d into place, rather than copied directly onto the final
+    name: the staging cache (``ForgeExecutor._template_cache_dir``) can be
+    populated and read concurrently by more than one run pinned at the same
+    commit, and this keeps a reader from ever seeing a partially-written file
+    instead of a clean miss-then-hit.
+
+    Parameters
+    ----------
+    src_dir : Path
+        Directory the files live in flat.
+    dest_dir : Path
+        Directory to copy the files into.
+    files : Iterable[str]
+        Filenames (no subdirectories) to copy.
+    """
+    dest_dir.mkdir(parents=True, exist_ok=True)
+    for f in files:
+        fd, tmp_name = tempfile.mkstemp(dir=dest_dir, prefix=f".{f}.", suffix=".tmp")
+        os.close(fd)
+        tmp_path = Path(tmp_name)
+        try:
+            shutil.copy2(src_dir / f, tmp_path)
+            os.replace(tmp_path, dest_dir / f)
+        except BaseException:
+            tmp_path.unlink(missing_ok=True)
+            raise
+
+
+def template_cache_key(location: str, commit: str, directory: str | None) -> str:
+    """Filesystem-safe cache key for a fetched ``(location, commit, directory)``
+    template pin.
+
+    Used by ``executor.py``'s staging cache (``ForgeExecutor._stage_templates``):
+    a commit pin's fetched, hash-verified files are cached under this key so a
+    later run pinned at the same commit can copy from the cache instead of
+    re-fetching. Only ever called for a commit pin -- a branch pin's content can
+    move without the blueprint changing, so ``_stage_templates`` never caches one.
+
+    Parameters
+    ----------
+    location : str
+        The template repository's git location.
+    commit : str
+        The pinned commit.
+    directory : str | None
+        The stage's in-repo directory (``code.templates_*.directory``).
+
+    Returns
+    -------
+    str
+        A sha256 hex digest of the triple -- content-addressed and safe as a
+        directory name regardless of how ``location``/``directory`` are spelled.
+    """
+    payload = f"{location}\n{commit}\n{directory or ''}"
+    return hashlib.sha256(payload.encode()).hexdigest()

@@ -26,10 +26,11 @@ from cstar.cli.common import (
     update_loggers,
 )
 from cstar.cli.workplan.shared import (
-    check_and_capture_kvps,
     colored,
     console,
     list_runs,
+    preprocess_varfile,
+    preprocess_vars,
 )
 from cstar.entrypoint.utils import (
     ARG_CLOBBER,
@@ -40,8 +41,10 @@ from cstar.entrypoint.utils import (
     ARG_LOGLEVEL_SHORT,
     ARG_RESUME,
     ARG_RESUME_WORKPLAN_HELP,
+    ARG_VAR_HELP,
     ARG_VAR_LONG,
     ARG_VAR_SHORT,
+    ARG_VARFILE_HELP,
     ARG_VARFILE_LONG,
     ARG_VARFILE_SHORT,
     OPT_CLOBBER_ALL,
@@ -95,77 +98,6 @@ CATEGORY_HEADER_COLOR: t.Final[str] = "white"
 SECTION_HEADER_COLOR: t.Final[str] = "yellow"
 ATTR_COLOR: t.Final[str] = "cyan"
 INDENT = " "
-
-
-def preprocess_vars(
-    ctx: typer.Context,
-    user_variables: list[str],
-) -> list[str] | None:
-    """Perform validation and formatting on user-supplied variables.
-
-    Places the processed variables into the user data slot of the typer context object.
-
-    Parameters
-    ----------
-    ctx : typer.Context
-        A context object containing state for the typer app
-    user_variables : list[str]
-        A list of key-value pairs supplied by a user.
-
-    Returns
-    -------
-    list[str] | None
-        The original input with leading/trailing whitespace stripped from the keys
-        and values.
-
-    Raises
-    ------
-    typer.BadParameter
-        - If the key-value pair does not meet `key=value` convention
-    """
-    if not user_variables:
-        return None
-
-    ctx.obj = check_and_capture_kvps(user_variables)
-
-    return user_variables
-
-
-def preprocess_varfile(
-    ctx: typer.Context,
-    user_varfile_path: Path | None,
-) -> Path | None:
-    """Perform validation and formatting on user-supplied variables
-    supplied through a path to a variables file.
-
-    Places the processed variables into the user data slot of the typer context object.
-
-    Parameters
-    ----------
-    ctx : typer.Context
-        A context object containing state for the typer app.
-    user_varfile_path : Path | None
-        A path to a file containing the variable configuration.
-
-    Returns
-    -------
-    Path | None
-
-    Raises
-    ------
-    typer.BadParameter
-        - If the source file does not exist
-        - If any individual key-value pair is malformed
-    """
-    if user_varfile_path is None:
-        return None
-
-    with user_varfile_path.open("r") as fp:
-        lines = [x.strip() for x in fp.readlines() if x.strip()]
-
-    ctx.obj = check_and_capture_kvps(lines)
-
-    return user_varfile_path
 
 
 def _ft(model_type: type[BaseModel], field_name: str) -> str:
@@ -606,26 +538,20 @@ def run(
         ),
     ] = "",
     user_variables: t.Annotated[
-        list[str] | None,
+        list[str],
         typer.Option(
             ARG_VAR_LONG,
             ARG_VAR_SHORT,
-            help=(
-                "Specify 0-to-many replacements as key-value pairs in "
-                "the form `key=value`."
-            ),
+            help=ARG_VAR_HELP,
             callback=preprocess_vars,
         ),
-    ] = None,
+    ] = [],
     user_variables_path: t.Annotated[
         Path | None,
         typer.Option(
             ARG_VARFILE_LONG,
             ARG_VARFILE_SHORT,
-            help=(
-                "Specify the path to a file containing one replacement per line "
-                "as key-value pairs in the form `key=value`."
-            ),
+            help=ARG_VARFILE_HELP,
             callback=preprocess_varfile,
             exists=True,
             file_okay=True,
@@ -678,7 +604,7 @@ def run(
 
     Specify a previously used run_id option to re-start a prior run.
     """
-    if user_variables is not None and user_variables_path is not None:
+    if user_variables and user_variables_path is not None:
         msg = "`--var` and `--varfile` must not be supplied together"
         raise typer.BadParameter(msg)
 
@@ -687,8 +613,7 @@ def run(
         for condition, msg in (
             (resume and clobber, f"{ARG_RESUME} cannot be combined with {ARG_CLOBBER}"),
             (
-                resume
-                and (user_variables is not None or user_variables_path is not None),
+                resume and (user_variables or user_variables_path is not None),
                 (
                     f"{ARG_RESUME} re-enters a prior run with its recorded variables; "
                     f"{ARG_VAR_LONG}/{ARG_VARFILE_LONG} cannot be supplied"

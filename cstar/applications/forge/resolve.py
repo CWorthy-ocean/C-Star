@@ -66,15 +66,15 @@ from cstar.applications.forge.blueprint import (
 # Canonical CDR-output diagnostics helper lives in namelist_model (forge side) so
 # the executor can share it.
 from cstar.applications.forge.namelist_model import (
-    RunTimeSettings,
+    NamelistConsistencyError,
     _RunTimeSettingsCommon,
     canonical_output_sections_for_precheck,
     check_cdr_output_sections,
-    check_extract_divides_rst,
     check_output_streams_divide_rst,
     check_rst_period_divisible,
     cppdefs_for_precheck,
     ensure_cdr_output_marbl_diagnostics,
+    output_precheck_applies_to,
     run_time_settings_for_ref,
     version_gated_section_names,
 )
@@ -971,24 +971,14 @@ def build_forge_blueprint(
     check_rst_period_divisible(
         settings.get("time_stepping", {}).get("dt"), settings.get("ocean_vars", {})
     )
-    # Nesting extraction files must roll on restart boundaries under
-    # ucla-roms >= 0.5.0 (its check_output_divides_rst aborts the run
-    # otherwise); older releases don't enforce it, so gate on the schema the
-    # pinned ref selects. The extract values are resolver-derived (child
-    # DomainSpec metadata 'period' x a seeded nrpf), so authoring time is the
-    # only place the author sees the failure with the knobs still in hand.
-    if settings_cls is not RunTimeSettings:
-        check_extract_divides_rst(
-            settings.get("ocean_vars", {}), settings.get("extract_data", {})
-        )
-        # check_output_streams_divide_rst's general table (C-Star,
-        # cstar.roms.precheck) mirrors the *complete* do_precheck call list,
-        # which includes `extract` -- but check_extract_divides_rst above
-        # already covers that stream with a more actionable message (it names
-        # the child DomainSpec 'period' knob the author actually edits).
-        # include_extract=False drops `extract_data` from the canonical dump
-        # below so `extract` isn't double-checked (and double-raised on) here.
-        #
+    # Output-stream / restart-rollover consistency (ucla-roms >= 0.5.0's
+    # check_output_divides_rst, precheck.F90): every enabled output stream's
+    # nrpf * output_period must evenly divide the restart period, including
+    # the nesting `extract` stream -- older releases don't enforce it, so gate
+    # on the schema the pinned ref selects, deriving it from settings_cls
+    # itself (see output_precheck_applies_to) rather than re-deriving via a
+    # second, differently-defaulting lookup.
+    if output_precheck_applies_to(settings_cls):
         # The checker is keyed on C-Star's canonical namelist vocabulary
         # (RomsNamelistBase group field names / real Fortran keys), not
         # forge's settings-dict vocabulary -- canonical_output_sections_for_
@@ -999,12 +989,27 @@ def build_forge_blueprint(
         # missing the processing-filled sections (title/grid/initial/forcing/
         # s_coord/reference_date_settings, populated later at generate_inputs()/
         # executor time) -- none of which affect any output-stream field.
-        check_output_streams_divide_rst(
-            canonical_output_sections_for_precheck(settings, include_extract=False),
-            cppdefs_for_precheck(
-                settings.get("cppdefs", {}), settings.get("upscale_output", {})
-            ),
-        )
+        try:
+            check_output_streams_divide_rst(
+                canonical_output_sections_for_precheck(settings),
+                cppdefs_for_precheck(
+                    settings.get("cppdefs", {}), settings.get("upscale_output", {})
+                ),
+            )
+        except NamelistConsistencyError as exc:
+            if exc.section == "extract_data_settings":
+                # The extract values are resolver-derived (child DomainSpec
+                # metadata 'period' x a seeded nrpf) -- name that knob
+                # explicitly, since it's what the author actually edits, and
+                # the general message above doesn't know it exists.
+                raise NamelistConsistencyError(
+                    f"{exc} Adjust the child DomainSpec metadata 'period' or "
+                    "the extract_data overrides.",
+                    rule=exc.rule,
+                    section=exc.section,
+                    keys=exc.keys,
+                ) from exc
+            raise
 
     # ----- forcing (initial conditions + surface/boundary/tidal/river) --------
     # A child grid (has a parent) receives its boundary values from the parent's

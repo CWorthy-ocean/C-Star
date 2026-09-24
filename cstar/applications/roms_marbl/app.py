@@ -17,6 +17,8 @@ from cstar.applications.roms_marbl.migration import (
 from cstar.applications.roms_marbl.models import APP_NAME, RomsMarblBlueprint
 from cstar.applications.roms_marbl.resume import prepare_resume_blueprint
 from cstar.applications.roms_marbl.transforms import (
+    ContinuanceDirective,
+    NestingDirective,
     RomsMarblTimeSplitter,
     warn_on_restart_start_date_mismatch,
 )
@@ -160,6 +162,7 @@ class RomsMarblApplication(ApplicationDefinition[RomsMarblBlueprint, RomsMarblRu
     runner = RomsMarblRunner
     blueprint = RomsMarblBlueprint
     applicable_transforms = (RomsMarblTimeSplitter,)
+    directives = (ContinuanceDirective, NestingDirective)
     resumable = True
     migrations = (
         RomsMarblSchemaAdapter2025v1,

@@ -41,20 +41,26 @@ from cstar.applications.forge.blueprint import (
 )
 from cstar.applications.forge.host import HostPaths
 from cstar.applications.forge.namelist_model import (
-    RunTimeSettings,
     build_namelist,
     check_cdr_output_sections,
     check_output_streams_divide_rst,
     check_rst_period_divisible,
     cppdefs_for_precheck,
     ensure_cdr_output_marbl_diagnostics,
+    output_precheck_applies_to,
     run_time_settings_for_ref,
 )
 from cstar.applications.forge.settings import render_roms_settings, write_roms_namelist
-from cstar.applications.forge.templates import bundled_template_dir, hash_template_files
+from cstar.applications.forge.templates import (
+    bundled_template_dir,
+    copy_template_files,
+    hash_template_files,
+    template_cache_key,
+)
 from cstar.applications.forge.user_files import verify_user_file
 from cstar.applications.forge.util import mem_log
 from cstar.base.additional_code import AdditionalCode
+from cstar.execution.file_system import DirectoryManager
 from cstar.orchestration.models import Resource
 from cstar.orchestration.serialization import deserialize
 
@@ -1370,7 +1376,10 @@ class ForgeExecutor(BaseModel):
            existed: a remote repo (``https://…`` + commit/branch) fetches the
            filtered files; a local directory copies them. ``_verify_template_hashes``
            then checks the fetch against ``file_hashes`` (a no-op when empty --
-           old blueprints, or a ModelSpec that hasn't authored hashes yet).
+           old blueprints, or a ModelSpec that hasn't authored hashes yet). A commit
+           pin with authored hashes checks the staging cache first
+           (``_template_cache_dir``) and, on a verified fetch, populates it for the
+           next run -- see that method's docstring.
 
         **Cross-repo contract (unguarded in CI):** we rely on C-Star staging the filtered
         files *flat* into ``local_dir`` (``dest/cppdefs.opt.j2``, NOT ``dest/<subdir>/…``),
@@ -1398,14 +1407,105 @@ class ForgeExecutor(BaseModel):
                     bundled_hashes = None
                 if bundled_hashes == repo.file_hashes:
                     log.debug("templates staged from the bundled copy")
-                    dest.mkdir(parents=True)
-                    for f in repo.files:
-                        shutil.copy2(bundled_dir / f, dest / f)
+                    copy_template_files(bundled_dir, dest, repo.files)
                     return dest
+
+        cache_dir = self._template_cache_dir(stage)
+        if cache_dir is not None and self._stage_from_template_cache(
+            cache_dir, dest, repo
+        ):
+            return dest
 
         AdditionalCode(**self._template_repo_args(stage)).get(local_dir=dest)
         self._verify_template_hashes(stage, dest)
+        if cache_dir is not None:
+            self._populate_template_cache(cache_dir, dest, repo.files)
         return dest
+
+    def _template_cache_dir(self, stage: str) -> Path | None:
+        """Where a fetched ``stage`` template pin is cached, or ``None`` if this
+        pin isn't content-addressed enough to cache safely.
+
+        Only a commit pin (``code_spec.templates_{stage}.commit``, not
+        ``branch``) with authored ``file_hashes`` is cached: a branch pin's
+        content can move without the blueprint changing, so a cache entry for it
+        could go stale silently, and a hashless pin has nothing to verify a
+        cache entry against before trusting it. Both cases keep today's
+        fetch-every-time behaviour instead.
+
+        The key (``templates.template_cache_key``) is a hash of the pin's
+        ``location``, ``commit``, and ``directory``, so different stages/commits
+        never collide and the cache is content-addressed the same way
+        ``file_hashes`` already addresses individual files.
+        """
+        repo = getattr(self.code_spec, f"templates_{stage}")
+        if not repo.commit or not repo.file_hashes:
+            return None
+        key = template_cache_key(repo.location, repo.commit, repo.directory)
+        return DirectoryManager.cache_home() / "forge-templates" / key
+
+    def _stage_from_template_cache(
+        self, cache_dir: Path, dest: Path, repo: Any
+    ) -> bool:
+        """Copy a ``stage``'s templates from the staging cache at ``cache_dir``
+        into ``dest``, if the cache entry's files still match ``repo.file_hashes``.
+
+        Returns ``False`` on a cache miss, a hash mismatch, or an I/O error
+        reading or copying the entry -- covering both a corrupted/partial entry
+        (e.g. from a run interrupted mid-populate) and one this run happens to
+        race with a concurrent populate of the same pin. Either way it's treated
+        exactly like a miss: never trusted, always re-fetched (by the
+        ``AdditionalCode`` call that follows in ``_stage_templates``). ``dest``
+        is left clean on a ``False`` return -- any partial copy is removed --
+        so the fetch that follows starts from an empty directory.
+        """
+        if not cache_dir.exists():
+            return False
+        try:
+            cached_hashes = hash_template_files(cache_dir, repo.files)
+            if cached_hashes != repo.file_hashes:
+                return False
+            log.debug("templates staged from the staging cache")
+            copy_template_files(cache_dir, dest, repo.files)
+        except OSError:
+            log.debug(
+                "Staging cache entry at %s unusable (miss, corrupt, or racing a "
+                "concurrent populate); falling back to fetch",
+                cache_dir,
+                exc_info=True,
+            )
+            if dest.exists():
+                shutil.rmtree(dest)
+            return False
+        return True
+
+    def _populate_template_cache(
+        self, cache_dir: Path, dest: Path, files: list[str]
+    ) -> None:
+        """Copy a freshly-fetched, hash-verified ``stage`` template directory from
+        ``dest`` into the staging cache at ``cache_dir``, for a later run pinned
+        at the same commit to reuse instead of re-fetching.
+
+        Never removes an existing entry first: ``copy_template_files`` writes
+        each file atomically, so a concurrent reader of ``cache_dir`` (another
+        run pinned at the same commit, staging at the same time) never sees a
+        missing or partial file, and stale extra files left by an older
+        ``file_hashes`` set are harmless -- only ``repo.files`` is ever read
+        back. Failure to write the cache (e.g. an unwritable or over-quota
+        ``CSTAR_CACHE_HOME`` on a shared HPC filesystem) is logged and
+        swallowed rather than raised: ``dest`` already holds the verified
+        templates this run needs, and re-fetching next run is a fallback, not a
+        build failure.
+        """
+        try:
+            copy_template_files(dest, cache_dir, files)
+        except OSError:
+            log.warning(
+                "Failed to populate the template staging cache at %s; templates "
+                "will be re-fetched next run",
+                cache_dir,
+                exc_info=True,
+            )
 
     def _verify_template_hashes(self, stage: str, dest: Path) -> None:
         """Verify a freshly-fetched ``stage`` template directory against
@@ -2280,9 +2380,9 @@ class ForgeExecutor(BaseModel):
         # (build_forge_blueprint): stored blueprints reach configure_build without
         # re-resolving, and the CDR-output net above and wizard accordion overrides
         # can both still change do_cdr_output/cppdefs after the resolver ran, so
-        # this is the enforcement point of record for that path. Unlike the
-        # resolver, there's no separate check_extract_divides_rst call here to
-        # de-duplicate against, so `extract` is covered by this general check too.
+        # this is the enforcement point of record for that path. `extract` is
+        # covered by this general check too, like every other stream (unlike the
+        # resolver, there's no friendlier extract-specific message to append here).
         #
         # The checker is keyed on C-Star's canonical namelist vocabulary
         # (RomsNamelistBase group field names / real Fortran keys), not forge's
@@ -2305,7 +2405,7 @@ class ForgeExecutor(BaseModel):
             settings_cls = run_time_settings_for_ref(
                 str(effective_roms_ref) if effective_roms_ref is not None else None
             )
-        if settings_cls is not RunTimeSettings:
+        if output_precheck_applies_to(settings_cls):
             rt = settings_cls.model_validate(self._settings_run_time)
             nml = build_namelist(rt, n_tracers)
             check_output_streams_divide_rst(
