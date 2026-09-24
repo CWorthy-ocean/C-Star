@@ -34,6 +34,9 @@ Bug Fixes
 - The published schemas allowed unknown fields that C-Star rejects at runtime, so editors did not flag them. (`#717 <https://github.com/CWorthy-ocean/C-Star/pull/717>`_)
 - The workplan schema predated the deferred-blueprint and override field changes. (`#717 <https://github.com/CWorthy-ocean/C-Star/pull/717>`_)
 - The nest_ic tutorial blueprint (``docs/tutorials/nest_ic_bp.yaml``) failed validation because it used the removed ``output_dir`` field; it now uses ``working_dir`` and sets ``pio``. (`#717 <https://github.com/CWorthy-ocean/C-Star/pull/717>`_)
+- The default data directory matches the documentation and the tutorials (``~/cstar``). (`#718 <https://github.com/CWorthy-ocean/C-Star/pull/718>`_)
+- With ``CSTAR_DATA_HOME``, ``SCRATCH`` and ``XDG_DATA_HOME`` all unset, workplan runs and application output now go to ``~/cstar`` instead of ``~/cstar/cstar``. Existing runs under ``~/cstar/cstar`` are not moved; ``cstar workplan ls`` will not list them until ``CSTAR_DATA_HOME`` points there or they are moved up one level. (`#718 <https://github.com/CWorthy-ocean/C-Star/pull/718>`_)
+- ``cstar env show --export`` now round-trips: the exported default values are the directories C-Star actually uses, so sourcing the output no longer silently changes the cache, config, state or data locations. (`#718 <https://github.com/CWorthy-ocean/C-Star/pull/718>`_)
 
 Improvements
 ~~~~~~~~~~~~
@@ -83,4 +86,5 @@ Miscellaneous
 - The publish workflow checks that the installed wheel carries the eight bundled model specs, the two forge templates and the wizard files, and smoke-tests ``cstar forge --help``. (`#712 <https://github.com/CWorthy-ocean/C-Star/pull/712>`_)
 - The forge templates developer page gains a "Staging cache" section. (`#713 <https://github.com/CWorthy-ocean/C-Star/pull/713>`_)
 - Machine-specific paths in the nesting tutorials are replaced with ``/path/to/...`` placeholders, and the workplan references the tutorial blueprint by relative path. (`#717 <https://github.com/CWorthy-ocean/C-Star/pull/717>`_)
+- The configuration page's Default column now shows the real directories for the four ``CSTAR_*_HOME`` variables. (`#718 <https://github.com/CWorthy-ocean/C-Star/pull/718>`_)
 
