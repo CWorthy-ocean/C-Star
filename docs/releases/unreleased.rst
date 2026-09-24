@@ -113,4 +113,5 @@ Miscellaneous
 - Release notes no longer truncate PR-description bullets that are wrapped across several lines, and no longer include ``N/A (reason)``-style placeholders. (`#724 <https://github.com/CWorthy-ocean/C-Star/pull/724>`_)
 - The release-notes branch is now deleted by the publish workflow itself, not only by the repository's auto-delete setting, and is always recreated from ``main``. (`#724 <https://github.com/CWorthy-ocean/C-Star/pull/724>`_)
 - The release-notes workflows run ``main``'s copy of their scripts, so a fix to them applies immediately rather than on the next release cycle. (`#724 <https://github.com/CWorthy-ocean/C-Star/pull/724>`_)
+- CI: the Forge roms-tools coverage test accounts for ``RiverForcing.min_discharge_m3s`` (roms-tools 5.1.0). (`#725 <https://github.com/CWorthy-ocean/C-Star/pull/725>`_)
 
