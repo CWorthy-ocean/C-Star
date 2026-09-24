@@ -190,8 +190,9 @@ class SCoordCfg(_SettingsSection):
     tcline: float | None = Field(default=None, serialization_alias="hc")
 
 
-# ``param`` keys counting ucla-roms' passive CDR tracers (>= 0.4.0 only).
-_CDR_TRACER_COUNT_KEYS = ("nt_cdr_oae", "nt_cdr_dor")
+# ``param`` keys counting ucla-roms' passive CDR tracers (>= 0.4.0 only), each
+# mapped to the tracers one unit adds (an OAE tracer is an ALK/DIC pair).
+_CDR_TRACER_WEIGHTS = {"nt_cdr_oae": 2, "nt_cdr_dor": 1}
 
 
 class _ParamCfgCommon(_SettingsSection):
@@ -214,8 +215,15 @@ class ParamCfg(_ParamCfgCommon):
         ``extra="ignore"`` drop it: the tracers would be counted into the
         per-tracer arrays (:func:`n_tracers_from_param`) but never created.
         """
+
+        def _is_set(value: Any) -> bool:
+            try:
+                return int(value) != 0
+            except (TypeError, ValueError):
+                return value is not None  # unparseable: not a "no tracers" value
+
         if isinstance(data, dict):
-            if set_keys := [k for k in _CDR_TRACER_COUNT_KEYS if data.get(k)]:
+            if set_keys := [k for k in _CDR_TRACER_WEIGHTS if _is_set(data.get(k))]:
                 raise ValueError(
                     f"param.{'/'.join(set_keys)} requires ucla-roms >= 0.4.0; the "
                     f"pinned ucla-roms release has no passive CDR tracers."
@@ -245,8 +253,7 @@ def n_tracers_from_param(param: dict[str, Any]) -> int:
         2
         + int(param.get("ntrc_bio", 0))
         + int(param.get("nt_passive", 0))
-        + 2 * int(param.get("nt_cdr_oae", 0))
-        + int(param.get("nt_cdr_dor", 0))
+        + sum(w * int(param.get(k, 0)) for k, w in _CDR_TRACER_WEIGHTS.items())
     )
 
 
@@ -1071,21 +1078,24 @@ def build_namelist(rt: _RunTimeSettingsCommon, n_tracers: int) -> RomsNamelistBa
     superclass ``RunTimeSettingsV0_6_0`` before ITS superclass
     ``RunTimeSettingsV0_5_0``) since ``isinstance`` also matches subclasses.
     """
-    param_cls: type[ParamSettings] = ParamSettingsV0_4_0
     if isinstance(rt, RunTimeSettingsV0_7_0):
         namelist_cls: type[RomsNamelistBase] = RomsNamelistV0_7_0
+        param_cls: type[ParamSettings] = ParamSettingsV0_4_0
         basic_output_cls = BasicOutputSettingsV0_5_0
         particles_cls = ParticlesSettingsV0_5_0
     elif isinstance(rt, RunTimeSettingsV0_6_0):
         namelist_cls = RomsNamelistV0_6_0
+        param_cls = ParamSettingsV0_4_0
         basic_output_cls = BasicOutputSettingsV0_5_0
         particles_cls = ParticlesSettingsV0_5_0
     elif isinstance(rt, RunTimeSettingsV0_5_0):
         namelist_cls = RomsNamelistV0_5_0
+        param_cls = ParamSettingsV0_4_0
         basic_output_cls = BasicOutputSettingsV0_5_0
         particles_cls = ParticlesSettingsV0_5_0
     elif isinstance(rt, RunTimeSettingsV0_4_0):
         namelist_cls = RomsNamelistV0_4_0
+        param_cls = ParamSettingsV0_4_0
         basic_output_cls = BasicOutputSettings
         particles_cls = ParticlesSettings
     else:

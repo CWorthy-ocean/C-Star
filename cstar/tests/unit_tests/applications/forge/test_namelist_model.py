@@ -159,7 +159,7 @@ def test_legacy_param_cfg_accepts_zero_cdr_tracer_counts():
     """An explicit `0` for either key is accepted (it changes nothing)."""
     d = _populated_rt_dict()
     d["param"]["nt_cdr_oae"] = 0
-    d["param"]["nt_cdr_dor"] = 0
+    d["param"]["nt_cdr_dor"] = "0"  # a hand-edited string zero is still zero
     rt = RunTimeSettings.model_validate(d)
     assert rt.param.ntrc_bio == 32
 
