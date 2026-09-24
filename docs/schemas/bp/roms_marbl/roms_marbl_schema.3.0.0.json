@@ -168,7 +168,7 @@
         },
         "PartitioningParameterSet": {
             "additionalProperties": false,
-            "description": "Parameters for the partitioning of the model.",
+            "description": "Parameters for the partitioning of the model.\n\nNamelist overrides of the processor grid (`np_xi`/`np_eta` in\n`param_settings`) must agree with these parameters; the partitioning is\nauthoritative for the processor grid at runtime.",
             "properties": {
                 "documentation": {
                     "default": "",
@@ -575,7 +575,7 @@
                 "additionalProperties": true,
                 "type": "object"
             },
-            "description": "Mapping of ROMS namelist group to key/value overrides.\n\nThese overrides are layered onto the runtime namelist LAST, after C-Star's\nown derived settings, so they take precedence over anything C-Star would\notherwise compute; list values replace the existing list wholesale. Keys\nare validated at runtime against the namelist\nschema for the pinned ucla-roms version. Overriding `param_settings.np_xi`/\n`param_settings.np_eta` to values that conflict with `partitioning` is an\nerror.",
+            "description": "Mapping of ROMS namelist group to key/value overrides.\n\nThese overrides are layered onto the runtime namelist LAST, after C-Star's\nown derived settings, so they take precedence over anything C-Star would\notherwise compute; list values replace the existing list wholesale.\n\nGroup and key names are checked when the blueprint is validated: unknown\nnames are an error when `code.roms` pins a release version, and a warning\n(against the best-guess schema) otherwise. Values are validated at runtime\nagainst the namelist schema for the pinned ucla-roms version. See the\n:class:`PartitioningParameterSet` documentation for potential conflicts\nwith the partitioning configuration.",
             "title": "Namelist Overrides",
             "type": "object"
         }
