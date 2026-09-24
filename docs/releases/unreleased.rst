@@ -120,4 +120,6 @@ Miscellaneous
 - The release-notes workflows run ``main``'s copy of their scripts, so a fix to them applies immediately rather than on the next release cycle. (`#724 <https://github.com/CWorthy-ocean/C-Star/pull/724>`_)
 - CI: the Forge roms-tools coverage test accounts for ``RiverForcing.min_discharge_m3s`` (roms-tools 5.1.0). (`#725 <https://github.com/CWorthy-ocean/C-Star/pull/725>`_)
 - The developer docs list the new 0.4.0 namelist schema tier. (`#723 <https://github.com/CWorthy-ocean/C-Star/pull/723>`_)
+- roms-tools 5.0.x is no longer supported; the floor is 5.1. On conda, ``roms-tools>=5.1,<6``. (`#726 <https://github.com/CWorthy-ocean/C-Star/pull/726>`_)
+- GloFAS rivers whose mean discharge is below 1 m³/s are now dropped by roms-tools by default, so existing GloFAS configurations may produce fewer rivers. Set ``min_discharge_m3s: 0`` in the river item's ``options`` to keep every river. (`#726 <https://github.com/CWorthy-ocean/C-Star/pull/726>`_)
 
