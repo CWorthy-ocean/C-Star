@@ -16,12 +16,14 @@ import pytest
 import yaml
 
 import cstar.catalog
+from cstar.applications.forge.namelist_model import n_tracers_from_param
 from cstar.applications.forge.resolve import load_model_spec_data
 from cstar.applications.forge.settings import write_roms_namelist
 from cstar.catalog.domain_catalog import default_catalog
 from cstar.roms.namelist import (
     MARBL_DIAGNOSTICS_TO_WRITE_MAX,
     MARBL_TRACERS_TO_WRITE_MAX,
+    RomsNamelistV0_4_0,
     RomsNamelistV0_7_0,
     _namelist_str_list,
 )
@@ -445,8 +447,8 @@ def test_write_roms_namelist_roms050_drops_nrpf_rst_and_renames_particles(tmp_pa
 
 
 def test_write_roms_namelist_none_ref_matches_legacy_ref(tmp_path):
-    """``roms_ref=None`` preserves forge's historical (legacy, < 0.5.0) behavior
-    -- it must write byte-identical output to an explicit pre-0.5.0 ref.
+    """``roms_ref=None`` preserves forge's historical (legacy, < 0.4.0) behavior
+    -- it must write byte-identical output to an explicit pre-0.4.0 ref.
     """
     rt = _base_settings()
     none_dir = tmp_path / "none_ref"
@@ -454,7 +456,71 @@ def test_write_roms_namelist_none_ref_matches_legacy_ref(tmp_path):
     none_dir.mkdir()
     legacy_dir.mkdir()
     write_roms_namelist(rt, none_dir, n_tracers=34, roms_ref=None)
-    write_roms_namelist(rt, legacy_dir, n_tracers=34, roms_ref="0.4.1")
+    write_roms_namelist(rt, legacy_dir, n_tracers=34, roms_ref="0.3.0")
     assert (none_dir / "namelist.nml").read_text() == (
         legacy_dir / "namelist.nml"
     ).read_text()
+
+
+# ---------------------------------------------------------------------------
+# param.nt_cdr_oae / param.nt_cdr_dor -- gated to ucla-roms >= 0.4.0
+# ---------------------------------------------------------------------------
+def test_write_roms_namelist_pre_0_4_0_has_no_cdr_tracer_text(tmp_path):
+    """Below 0.4.0, `&PARAM_SETTINGS` has no `nt_cdr_oae`/`nt_cdr_dor` keys at
+    all -- ucla-roms < 0.4.0 aborts on an unknown namelist member.
+    """
+    rt = _base_settings()
+    write_roms_namelist(rt, tmp_path, n_tracers=34, roms_ref="0.3.0")
+    text = (tmp_path / "namelist.nml").read_text()
+    assert "nt_cdr_oae" not in text
+    assert "nt_cdr_dor" not in text
+
+
+@pytest.mark.parametrize(
+    ("roms_ref", "namelist_cls"),
+    [("0.4.1", RomsNamelistV0_4_0), ("0.7.0", RomsNamelistV0_7_0)],
+)
+def test_write_roms_namelist_v0_4_0_and_later_defaults_cdr_tracer_counts(
+    tmp_path, roms_ref, namelist_cls
+):
+    """>= 0.4.0, a settings dict that omits `nt_cdr_oae`/`nt_cdr_dor` (as every
+    pre-existing ModelSpec/blueprint does) still writes both keys as `0` (the
+    Fortran initializer), and the file reads back through the matching schema.
+    """
+    rt = _base_settings()
+    write_roms_namelist(rt, tmp_path, n_tracers=34, roms_ref=roms_ref)
+    nml = f90nml.read(tmp_path / "namelist.nml")
+    assert nml["param_settings"]["nt_cdr_oae"] == 0
+    assert nml["param_settings"]["nt_cdr_dor"] == 0
+
+    read_back = namelist_cls.read(tmp_path / "namelist.nml")
+    assert read_back.param_settings.nt_cdr_oae == 0
+    assert read_back.param_settings.nt_cdr_dor == 0
+
+
+def test_write_roms_namelist_non_zero_cdr_tracer_counts_expand_tracer_arrays(
+    tmp_path,
+):
+    """Non-zero CDR tracer counts round-trip into the written namelist, and
+    when `n_tracers` is derived via `n_tracers_from_param` (mirroring what the
+    executor does), the per-tracer arrays (`tnu2`/`akt_bak`) grow to match:
+    2 (T+S) + ntrc_bio (32) + nt_passive (0) + 2*nt_cdr_oae (2*2) + nt_cdr_dor (1).
+    """
+    rt = _base_settings()
+    rt["param"]["nt_cdr_oae"] = 2
+    rt["param"]["nt_cdr_dor"] = 1
+    rt["tracer_diff2"]["tnu2_default"] = 1.5
+    rt["vertical_mixing"]["akt_default"] = 2.5
+    n_tracers = n_tracers_from_param(rt["param"])
+    assert n_tracers == 39
+
+    write_roms_namelist(rt, tmp_path, n_tracers=n_tracers, roms_ref="0.7.0")
+    nml = f90nml.read(tmp_path / "namelist.nml")
+    assert nml["param_settings"]["nt_cdr_oae"] == 2
+    assert nml["param_settings"]["nt_cdr_dor"] == 1
+    assert nml["tracer_diff2"]["tnu2"] == [1.5] * 39
+    assert nml["vertical_mixing_settings"]["akt_bak"] == [2.5] * 39
+
+    read_back = RomsNamelistV0_7_0.read(tmp_path / "namelist.nml")
+    assert read_back.param_settings.nt_cdr_oae == 2
+    assert read_back.param_settings.nt_cdr_dor == 1

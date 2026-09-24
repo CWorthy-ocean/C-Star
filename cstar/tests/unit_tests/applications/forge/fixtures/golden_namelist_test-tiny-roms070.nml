@@ -188,6 +188,8 @@
     np_eta = 1
     np_xi = 1
     nt_bgc = 32
+    nt_cdr_dor = 0
+    nt_cdr_oae = 0
     nt_passive = 0
     nz = 3
 /

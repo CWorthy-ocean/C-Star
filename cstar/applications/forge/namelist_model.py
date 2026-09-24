@@ -61,6 +61,7 @@ from cstar.roms.namelist import (
     LinRhoEosSettings,
     MarblBiogeochemistrySettings,
     ParamSettings,
+    ParamSettingsV0_4_0,
     ParticlesSettings,
     ParticlesSettingsV0_5_0,
     PioSettings,
@@ -71,6 +72,7 @@ from cstar.roms.namelist import (
     RiverFrcSettings,
     RomsNamelist,
     RomsNamelistBase,
+    RomsNamelistV0_4_0,
     RomsNamelistV0_5_0,
     RomsNamelistV0_6_0,
     RomsNamelistV0_7_0,
@@ -190,7 +192,12 @@ class SCoordCfg(_SettingsSection):
     tcline: float | None = Field(default=None, serialization_alias="hc")
 
 
-class ParamCfg(_SettingsSection):
+# ``param`` keys counting ucla-roms' passive CDR tracers (>= 0.4.0 only), each
+# mapped to the tracers one unit adds (an OAE tracer is an ALK/DIC pair).
+_CDR_TRACER_WEIGHTS = {"nt_cdr_oae": 2, "nt_cdr_dor": 1}
+
+
+class _ParamCfgCommon(_SettingsSection):
     llm: int
     mmm: int
     n: int = Field(serialization_alias="nz")
@@ -198,6 +205,58 @@ class ParamCfg(_SettingsSection):
     np_eta: int
     nt_passive: int
     ntrc_bio: int = Field(serialization_alias="nt_bgc")
+
+
+class ParamCfg(_ParamCfgCommon):
+    """``param`` settings for ucla-roms < 0.4.0, which has no CDR tracer counts."""
+
+    @model_validator(mode="before")
+    @classmethod
+    def _reject_cdr_tracer_counts(cls, data: Any) -> Any:
+        """Fail loudly on a non-zero CDR tracer count rather than letting
+        ``extra="ignore"`` drop it: the tracers would be counted into the
+        per-tracer arrays (:func:`n_tracers_from_param`) but never created.
+        """
+
+        def _is_set(value: Any) -> bool:
+            try:
+                return int(value) != 0
+            except (TypeError, ValueError):
+                return value is not None  # unparseable: not a "no tracers" value
+
+        if isinstance(data, dict):
+            if set_keys := [k for k in _CDR_TRACER_WEIGHTS if _is_set(data.get(k))]:
+                raise ValueError(
+                    f"param.{'/'.join(set_keys)} requires ucla-roms >= 0.4.0; the "
+                    f"pinned ucla-roms release has no passive CDR tracers."
+                )
+        return data
+
+
+class ParamCfgV0_4_0(_ParamCfgCommon):
+    """``param`` settings for ucla-roms >= 0.4.0.
+
+    Deliberate defaults (like :class:`PioSettingsCfg`): blueprints saved before
+    these keys existed bypass the resolver and hit ``model_validate`` directly,
+    and 0 is the Fortran initializer (no CDR tracers).
+    """
+
+    nt_cdr_oae: int = Field(default=0, ge=0)
+    nt_cdr_dor: int = Field(default=0, ge=0)
+
+
+def n_tracers_from_param(param: dict[str, Any]) -> int:
+    """Total ROMS tracer count from a ``param`` settings dict, mirroring
+    ucla-roms ``param.F90``: T + S + BGC (``ntrc_bio``) + passive
+    (``nt_passive``) + ``2*nt_cdr_oae + nt_cdr_dor`` (each OAE tracer is an
+    ALK/DIC pair). Missing keys count as 0.
+    """
+    return (
+        2
+        + int(param.get("ntrc_bio", 0))
+        + int(param.get("nt_passive", 0))
+        + sum(w * int(param.get(k, 0)) for k, w in _CDR_TRACER_WEIGHTS.items())
+    )
 
 
 class PioSettingsCfg(_SettingsSection):
@@ -736,12 +795,13 @@ class _RunTimeSettingsCommon(_SettingsSection):
     Sections are required: the (per-ModelSpec) YAML must define them all. There
     are no value defaults here — the YAML is the single source of defaults.
 
-    Not meant to be used directly: the version-varying sections (``ocean_vars``,
-    ``particles``) are typed as the loose common models here, and version-varying
+    Not meant to be used directly: the version-varying sections (``param``,
+    ``ocean_vars``, ``particles``) are typed as the loose common models here, and version-varying
     sections that some schemas lack entirely (``pio_settings``, added by
     :class:`RunTimeSettingsV0_6_0`; ``cdr_tracer_output``/``cdr_gas_exch_output``,
     added by :class:`RunTimeSettingsV0_7_0`) are simply absent here; use
-    :class:`RunTimeSettings` (ucla-roms < 0.5.0), :class:`RunTimeSettingsV0_5_0`
+    :class:`RunTimeSettings` (ucla-roms < 0.4.0), :class:`RunTimeSettingsV0_4_0`
+    (0.4.0 <= ucla-roms < 0.5.0), :class:`RunTimeSettingsV0_5_0`
     (0.5.0 <= ucla-roms < 0.6.0), :class:`RunTimeSettingsV0_6_0`
     (0.6.0 <= ucla-roms < 0.7.0), or :class:`RunTimeSettingsV0_7_0` (>= 0.7.0),
     or select one with :func:`run_time_settings_for_ref`.
@@ -762,7 +822,7 @@ class _RunTimeSettingsCommon(_SettingsSection):
     v_sponge: VSpongeCfg
     gamma2: float
     ubind: float
-    param: ParamCfg
+    param: _ParamCfgCommon
     bgc: BgcCfg
     blk_frc: BlkFrcCfg
     cdr_output: CdrOutputCfg
@@ -797,19 +857,31 @@ class _RunTimeSettingsCommon(_SettingsSection):
 
 
 class RunTimeSettings(_RunTimeSettingsCommon):
-    """Forge's run-time settings dict for ucla-roms < 0.5.0, typed + validated.
+    """Forge's run-time settings dict for ucla-roms < 0.4.0, typed + validated.
 
     Kept unversioned (no suffix) for backward compatibility: this is the name
     historically used by forge.
     """
 
+    param: ParamCfg
     ocean_vars: OceanVarsCfg
     particles: ParticlesCfg
+
+
+class RunTimeSettingsV0_4_0(RunTimeSettings):
+    """Forge's run-time settings dict for ucla-roms >= 0.4.0, < 0.5.0.
+
+    Adds the passive CDR tracer counts to ``param`` (see :class:`ParamCfgV0_4_0`);
+    mirrors C-Star's ``RomsNamelistV0_4_0(RomsNamelist)``.
+    """
+
+    param: ParamCfgV0_4_0
 
 
 class RunTimeSettingsV0_5_0(_RunTimeSettingsCommon):
     """Forge's run-time settings dict for ucla-roms >= 0.5.0, typed + validated."""
 
+    param: ParamCfgV0_4_0
     ocean_vars: OceanVarsCfgV0_5_0
     particles: ParticlesCfgV0_5_0
 
@@ -855,6 +927,7 @@ _RUN_TIME_SETTINGS_BY_NAMELIST_SCHEMA: dict[
     type[RomsNamelistBase], type[_RunTimeSettingsCommon]
 ] = {
     RomsNamelist: RunTimeSettings,
+    RomsNamelistV0_4_0: RunTimeSettingsV0_4_0,
     RomsNamelistV0_5_0: RunTimeSettingsV0_5_0,
     RomsNamelistV0_6_0: RunTimeSettingsV0_6_0,
     RomsNamelistV0_7_0: RunTimeSettingsV0_7_0,
@@ -959,8 +1032,9 @@ def run_time_settings_for_ref(roms_ref: str | None) -> type[_RunTimeSettingsComm
     Returns
     -------
     type[_RunTimeSettingsCommon]
-        :class:`RunTimeSettings` for ucla-roms < 0.5.0 or when `roms_ref` is
-        `None`; :class:`RunTimeSettingsV0_5_0` for 0.5.0 <= ucla-roms < 0.6.0;
+        :class:`RunTimeSettings` for ucla-roms < 0.4.0 or when `roms_ref` is
+        `None`; :class:`RunTimeSettingsV0_4_0` for 0.4.0 <= ucla-roms < 0.5.0;
+        :class:`RunTimeSettingsV0_5_0` for 0.5.0 <= ucla-roms < 0.6.0;
         :class:`RunTimeSettingsV0_6_0` for 0.6.0 <= ucla-roms < 0.7.0;
         :class:`RunTimeSettingsV0_7_0` for ucla-roms >= 0.7.0.
 
@@ -1023,10 +1097,11 @@ def build_namelist(rt: _RunTimeSettingsCommon, n_tracers: int) -> RomsNamelistBa
     ``lateral_visc``. ``exclude=`` drops the fields those transforms handle
     instead of the section's own dump.
 
-    ``rt``'s concrete type (:class:`RunTimeSettings`, :class:`RunTimeSettingsV0_5_0`,
-    :class:`RunTimeSettingsV0_6_0`, or :class:`RunTimeSettingsV0_7_0`) selects the
-    matching namelist schema and ``basic_output_settings``/``particles_settings``
-    group classes — the ``ocean_vars``/``particles`` sections already carry the
+    ``rt``'s concrete type (:class:`RunTimeSettings`, :class:`RunTimeSettingsV0_4_0`,
+    :class:`RunTimeSettingsV0_5_0`, :class:`RunTimeSettingsV0_6_0`, or
+    :class:`RunTimeSettingsV0_7_0`) selects the matching namelist schema and
+    ``param_settings``/``basic_output_settings``/``particles_settings`` group
+    classes — the ``param``/``ocean_vars``/``particles`` sections already carry the
     right fields and aliases for that variant, so no other branch is needed.
     ``pio_settings`` (added by ``RunTimeSettingsV0_6_0``) and
     ``cdr_tracer_output``/``cdr_gas_exch_output`` (added by
@@ -1040,18 +1115,27 @@ def build_namelist(rt: _RunTimeSettingsCommon, n_tracers: int) -> RomsNamelistBa
     """
     if isinstance(rt, RunTimeSettingsV0_7_0):
         namelist_cls: type[RomsNamelistBase] = RomsNamelistV0_7_0
+        param_cls: type[ParamSettings] = ParamSettingsV0_4_0
         basic_output_cls = BasicOutputSettingsV0_5_0
         particles_cls = ParticlesSettingsV0_5_0
     elif isinstance(rt, RunTimeSettingsV0_6_0):
         namelist_cls = RomsNamelistV0_6_0
+        param_cls = ParamSettingsV0_4_0
         basic_output_cls = BasicOutputSettingsV0_5_0
         particles_cls = ParticlesSettingsV0_5_0
     elif isinstance(rt, RunTimeSettingsV0_5_0):
         namelist_cls = RomsNamelistV0_5_0
+        param_cls = ParamSettingsV0_4_0
         basic_output_cls = BasicOutputSettingsV0_5_0
         particles_cls = ParticlesSettingsV0_5_0
+    elif isinstance(rt, RunTimeSettingsV0_4_0):
+        namelist_cls = RomsNamelistV0_4_0
+        param_cls = ParamSettingsV0_4_0
+        basic_output_cls = BasicOutputSettings
+        particles_cls = ParticlesSettings
     else:
         namelist_cls = RomsNamelist
+        param_cls = ParamSettings
         basic_output_cls = BasicOutputSettings
         particles_cls = ParticlesSettings
 
@@ -1100,7 +1184,7 @@ def build_namelist(rt: _RunTimeSettingsCommon, n_tracers: int) -> RomsNamelistBa
         ),
         grid_settings=GridSettings(**grp(rt.grid)),
         s_coord=SCoord(**grp(rt.s_coord)),
-        param_settings=ParamSettings(**grp(rt.param)),
+        param_settings=param_cls(**grp(rt.param)),
         initial_conditions=InitialConditions(**grp(rt.initial)),
         river_frc_settings=RiverFrcSettings(**grp(rt.river_frc)),
         tidal_frc_settings=TidalFrcSettings(**grp(rt.tides)),

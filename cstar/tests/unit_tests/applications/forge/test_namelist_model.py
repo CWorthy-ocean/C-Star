@@ -18,11 +18,13 @@ from cstar.applications.forge.namelist_model import (
     CdrGasExchOutputCfg,
     CdrTracerOutputCfg,
     RunTimeSettings,
+    RunTimeSettingsV0_4_0,
     RunTimeSettingsV0_5_0,
     RunTimeSettingsV0_6_0,
     RunTimeSettingsV0_7_0,
     build_namelist,
     forge_field_for,
+    n_tracers_from_param,
     output_precheck_applies_to,
     run_time_settings_for_ref,
     validate_run_time_sections,
@@ -132,6 +134,67 @@ def test_settings_dict_validates_into_model():
     assert rt.param.ntrc_bio == 32  # coerced int
     assert rt.s_coord.tcline == 250.0
     assert rt.marbl_bgc.marbl_tracers_to_write[:2] == ["PO4", "NO3"]
+
+
+# ---------------------------------------------------------------------------
+# param.nt_cdr_oae / param.nt_cdr_dor -- gated to ucla-roms >= 0.4.0
+# ---------------------------------------------------------------------------
+def test_legacy_param_cfg_rejects_non_zero_cdr_tracer_counts():
+    """`RunTimeSettings` (< 0.4.0)'s `param` rejects a non-zero CDR tracer
+    count instead of silently dropping it (`extra="ignore"` would otherwise
+    let it through uncounted by `n_tracers_from_param`).
+    """
+    d = _populated_rt_dict()
+    d["param"]["nt_cdr_oae"] = 1
+    with pytest.raises(ValidationError, match="ucla-roms >= 0.4.0"):
+        RunTimeSettings.model_validate(d)
+
+    d = _populated_rt_dict()
+    d["param"]["nt_cdr_dor"] = 1
+    with pytest.raises(ValidationError, match="ucla-roms >= 0.4.0"):
+        RunTimeSettings.model_validate(d)
+
+
+def test_legacy_param_cfg_accepts_zero_cdr_tracer_counts():
+    """An explicit `0` for either key is accepted (it changes nothing)."""
+    d = _populated_rt_dict()
+    d["param"]["nt_cdr_oae"] = 0
+    d["param"]["nt_cdr_dor"] = "0"  # a hand-edited string zero is still zero
+    rt = RunTimeSettings.model_validate(d)
+    assert rt.param.ntrc_bio == 32
+
+
+def test_run_time_settings_v0_4_0_defaults_cdr_tracer_counts_to_zero():
+    """`RunTimeSettingsV0_4_0.param` (`ParamCfgV0_4_0`) defaults both CDR
+    tracer counts to 0 when the settings dict omits them (a blueprint saved
+    before the keys existed bypasses the resolver and hits this directly).
+    """
+    rt = RunTimeSettingsV0_4_0.model_validate(_populated_rt_dict())
+    assert rt.param.nt_cdr_oae == 0
+    assert rt.param.nt_cdr_dor == 0
+
+
+def test_run_time_settings_v0_4_0_accepts_non_zero_cdr_tracer_counts():
+    d = _populated_rt_dict()
+    d["param"]["nt_cdr_oae"] = 2
+    d["param"]["nt_cdr_dor"] = 1
+    rt = RunTimeSettingsV0_4_0.model_validate(d)
+    assert rt.param.nt_cdr_oae == 2
+    assert rt.param.nt_cdr_dor == 1
+
+
+# ---------------------------------------------------------------------------
+# n_tracers_from_param
+# ---------------------------------------------------------------------------
+def test_n_tracers_from_param_counts_all_tracer_kinds():
+    # T + S (2) + ntrc_bio (32) + nt_passive (3) + 2*nt_cdr_oae (2*2) + nt_cdr_dor (1)
+    param = {"ntrc_bio": 32, "nt_passive": 3, "nt_cdr_oae": 2, "nt_cdr_dor": 1}
+    assert n_tracers_from_param(param) == 2 + 32 + 3 + 2 * 2 + 1
+
+
+def test_n_tracers_from_param_missing_keys_count_as_zero():
+    assert n_tracers_from_param({}) == 2
+    assert n_tracers_from_param({"ntrc_bio": 32}) == 34
 
 
 def test_defaults_come_from_yaml_not_the_model():
@@ -448,10 +511,15 @@ def test_validate_run_time_sections_skips_rst_period_check_when_section_missing(
 # ---------------------------------------------------------------------------
 # run_time_settings_for_ref -- schema-variant selection by ucla-roms ref
 # ---------------------------------------------------------------------------
-def test_run_time_settings_for_ref_none_and_pre_0_5_0_select_legacy():
+def test_run_time_settings_for_ref_none_and_pre_0_4_0_select_legacy():
     assert run_time_settings_for_ref(None) is RunTimeSettings
-    for ref in ("0.4.1", "v0.4.9", "0.2.0"):
+    for ref in ("0.2.0", "0.3.9"):
         assert run_time_settings_for_ref(ref) is RunTimeSettings
+
+
+def test_run_time_settings_for_ref_0_4_0_up_to_0_5_0_selects_v0_4_0():
+    for ref in ("0.4.0", "0.4.1", "v0.4.9"):
+        assert run_time_settings_for_ref(ref) is RunTimeSettingsV0_4_0
 
 
 def test_run_time_settings_for_ref_0_5_0_up_to_0_6_0_selects_v0_5_0():
@@ -625,6 +693,13 @@ def test_rst_period_not_divisible_by_dt_rejected_v0_5_0():
 # ---------------------------------------------------------------------------
 def test_output_precheck_applies_to_legacy_settings_cls_is_false():
     assert output_precheck_applies_to(RunTimeSettings) is False
+
+
+def test_output_precheck_applies_to_v0_4_0_settings_cls_is_false():
+    """`RunTimeSettingsV0_4_0` (< 0.5.0) is still below the >= 0.5.0 gate even
+    though it adds the CDR tracer counts.
+    """
+    assert output_precheck_applies_to(RunTimeSettingsV0_4_0) is False
 
 
 @pytest.mark.parametrize(

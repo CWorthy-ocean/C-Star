@@ -288,25 +288,30 @@ still being worked off) is currently empty. ``namelist_model.py`` and
 ``util.py`` are same-package siblings inside ``cstar.applications.forge`` and
 are covered by this module list like any other execution module.
 
-Versioned namelist schemas (ucla-roms 0.5.0+)
+Versioned namelist schemas (ucla-roms 0.4.0+)
 -------------------------------------------------------
 
-ucla-roms 0.5.0 made its first breaking namelist change (``nrpf_rst``
-removed from ``&BASIC_OUTPUT_SETTINGS``; ``&PARTICLES_SETTINGS``
+ucla-roms 0.4.0 added ``nt_cdr_oae``/``nt_cdr_dor`` (passive CDR tracer
+counts) to ``&PARAM_SETTINGS``, both defaulting to 0 (the Fortran
+initializer) so a namelist without them still validates; 0.5.0 made the
+first breaking namelist change (``nrpf_rst`` removed from
+``&BASIC_OUTPUT_SETTINGS``; ``&PARTICLES_SETTINGS``
 ``output_period``/``nrpf`` renamed to
 ``output_period_particles``/``nrpf_particles``); 0.6.0 added
 ``&PIO_SETTINGS`` (``pio_stride``, required under ``PARALLEL_IO``); 0.7.0
 adds ``&CDR_TRACER_OUTPUT_SETTINGS`` and ``&CDR_GAS_EXCH_OUTPUT_SETTINGS``
 (ucla-roms PR #351 -- two dedicated CDR output streams). C-Star versions the
 namelist schema by ucla-roms release (``cstar.roms.namelist``:
-``RomsNamelist`` for < 0.5.0, ``RomsNamelistV0_5_0`` for 0.5.0 <= ucla-roms
-< 0.6.0, ``RomsNamelistV0_6_0`` for 0.6.0 <= ucla-roms < 0.7.0,
-``RomsNamelistV0_7_0`` for >= 0.7.0, selected by
-``namelist_schema_for_ref(ref)`` -- semver tags select exactly; branch
+``RomsNamelist`` for < 0.4.0, ``RomsNamelistV0_4_0`` for 0.4.0 <= ucla-roms
+< 0.5.0 (adds the CDR tracer counts to ``&PARAM_SETTINGS``),
+``RomsNamelistV0_5_0`` for 0.5.0 <= ucla-roms < 0.6.0, ``RomsNamelistV0_6_0``
+for 0.6.0 <= ucla-roms < 0.7.0, ``RomsNamelistV0_7_0`` for >= 0.7.0, selected
+by ``namelist_schema_for_ref(ref)`` -- semver tags select exactly; branch
 names/hashes warn and fall back to the latest schema). Forge mirrors this in
-``namelist_model.py``: ``RunTimeSettings`` (legacy), ``RunTimeSettingsV0_5_0``,
-``RunTimeSettingsV0_6_0`` (adds ``pio_settings``), and
-``RunTimeSettingsV0_7_0`` (adds ``cdr_tracer_output``/``cdr_gas_exch_output``),
+``namelist_model.py``: ``RunTimeSettings`` (legacy, < 0.4.0),
+``RunTimeSettingsV0_4_0`` (adds ``param.nt_cdr_oae``/``param.nt_cdr_dor``),
+``RunTimeSettingsV0_5_0``, ``RunTimeSettingsV0_6_0`` (adds ``pio_settings``),
+and ``RunTimeSettingsV0_7_0`` (adds ``cdr_tracer_output``/``cdr_gas_exch_output``),
 selected by ``run_time_settings_for_ref(roms_ref)``, where ``roms_ref`` is
 the blueprint's pinned ``code.roms.commit`` (threaded resolver -> executor ->
 ``write_roms_namelist``). C-Star's registry is the single source of
@@ -315,8 +320,15 @@ settings class. The forge **settings vocabulary is version-stable**: YAML
 keys (``particles.output_period``, ``particles.nrpf``) don't change; only
 the ``serialization_alias`` to namelist names differs per version, and
 ``nrpf_rst`` (still present in the shared ``OutputSpec/standard``) is
-silently ignored for 0.5.0+ models via ``extra="ignore"``. One ModelSpec per
-tagged ucla-roms release: ``roms-marbl-0.5-default`` pins ``0.5.0``,
+silently ignored for 0.5.0+ models via ``extra="ignore"``. Total tracer
+count (``n_tracers``, threaded into ``build_namelist``/``render_roms_settings``
+to size the per-tracer mixing/diffusion arrays) is derived by
+``n_tracers_from_param``: T + S + ``ntrc_bio`` + ``nt_passive`` +
+``2*nt_cdr_oae + nt_cdr_dor`` (each OAE tracer is an ALK/DIC pair, mirroring
+ucla-roms ``param.F90``); below 0.4.0, a non-zero ``nt_cdr_oae``/
+``nt_cdr_dor`` in the settings dict is rejected outright (``ParamCfg``'s
+before-validator) rather than silently miscounted. One ModelSpec per tagged
+ucla-roms release: ``roms-marbl-0.5-default`` pins ``0.5.0``,
 ``roms-marbl-0.6-default`` pins ``0.6.4``, ``roms-marbl-0.7-default`` pins
 ``0.7.0``, ``roms-marbl-0.8-default`` pins ``0.8.0`` (adds the
 ``parabolic_splines``/``upstream_ts_land_curv`` advection cppdefs flags, PR
@@ -331,7 +343,11 @@ version-gated section absent from the *active* schema, and by
 ``prune_version_gated_sections()``, which drops such a section from the
 settings dict before the CDR output nets and the output-stream precheck read
 it -- called by both the resolver and the executor's ``configure_build``
-(the net for stored blueprints; it logs what it drops at INFO).
+(the net for stored blueprints; it logs what it drops at INFO). ``param`` is
+modeled by every tier (with a different sub-model above/below 0.4.0), so it is
+never section-gated; no bundled ModelSpec declares ``nt_cdr_oae``/``nt_cdr_dor``,
+so the editor shows no widget for them, but a loaded blueprint's values are
+carried through unchanged.
 
 ucla-roms 0.5.0 also added a run-start precheck (``check_output_divides_rst``):
 each enabled output stream's ``nrpf x output_period`` must evenly divide

@@ -1326,9 +1326,9 @@ class ForgeBlueprint(Blueprint):
     # -> stays IN the hash.
     datasets: list[str] = Field(default_factory=list)
     model_settings: dict[str, Any] = Field(default_factory=dict)  # flat sections
-    # n_tracers is NOT stored — it is derived at processing time as
-    # model_settings["param"]["ntrc_bio"] + model_settings["param"]["nt_passive"] + 2
-    # (temperature + salinity). marbl is read from model_settings["cppdefs"]["marbl"].
+    # n_tracers is NOT stored — it is derived at processing time from
+    # model_settings["param"] (T + S + ntrc_bio + nt_passive + 2*nt_cdr_oae +
+    # nt_cdr_dor; see ForgeBlueprint.n_tracers). marbl is read from model_settings["cppdefs"]["marbl"].
     code: Code
     composition: Composition = Field(default_factory=Composition)
     provenance: Provenance = Field(default_factory=Provenance)
@@ -1446,11 +1446,13 @@ class ForgeBlueprint(Blueprint):
 
     @property
     def n_tracers(self) -> int:
-        """Total ROMS tracer count = T + S + BGC (ntrc_bio) + passive (nt_passive),
-        derived from ``model_settings['param']``.
+        """Total ROMS tracer count derived from ``model_settings['param']`` (see
+        :func:`~cstar.applications.forge.namelist_model.n_tracers_from_param`).
         """
-        param = self.model_settings.get("param", {}) or {}
-        return 2 + int(param.get("ntrc_bio", 0)) + int(param.get("nt_passive", 0))
+        # Lazy: keeps importing the schema module light (see the module docstring).
+        from cstar.applications.forge.namelist_model import n_tracers_from_param
+
+        return n_tracers_from_param(self.model_settings.get("param", {}) or {})
 
     @property
     def datestr(self) -> str:

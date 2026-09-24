@@ -3244,6 +3244,21 @@ def test_cdr_output_toggle_renders_cdr_forcing_cppdef(tmp_path, do_cdr_output):
     assert expected in text
 
 
+def test_n_tracers_includes_cdr_tracer_counts():
+    """`ForgeBlueprint.n_tracers` counts `2*nt_cdr_oae + nt_cdr_dor` on top of
+    T + S + ntrc_bio + nt_passive (see `n_tracers_from_param`); the bundled
+    < 0.4.0 ModelSpec has neither key, so this exercises them via direct
+    ``model_settings["param"]`` mutation, same as a >= 0.4.0-pinned blueprint
+    loaded back from disk would carry.
+    """
+    cfg = _build()
+    base = cfg.n_tracers
+
+    cfg.model_settings["param"]["nt_cdr_oae"] = 2
+    cfg.model_settings["param"]["nt_cdr_dor"] = 1
+    assert cfg.n_tracers == base + 2 * 2 + 1
+
+
 def test_resolver_use_pio_sets_cppdefs_and_code_pio():
     cfg = _build(use_pio=True)
     assert cfg.model_settings["cppdefs"]["use_pio"] is True

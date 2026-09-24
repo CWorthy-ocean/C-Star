@@ -20,6 +20,7 @@ import pytest
 
 from cstar.roms.namelist import (
     RomsNamelist,
+    RomsNamelistV0_4_0,
     RomsNamelistV0_5_0,
     RomsNamelistV0_6_0,
     RomsNamelistV0_7_0,
@@ -532,6 +533,13 @@ def test_restart_period_live_namelist_conforming_passes():
 
 def test_applies_to_legacy_schema_is_false():
     assert applies_to(RomsNamelist) is False
+
+
+def test_applies_to_v0_4_0_schema_is_false():
+    """`RomsNamelistV0_4_0` (< 0.5.0) subclasses `RomsNamelist`, so it is still
+    below the >= 0.5.0 gate even though it adds the CDR tracer counts.
+    """
+    assert applies_to(RomsNamelistV0_4_0) is False
 
 
 @pytest.mark.parametrize(

@@ -8,9 +8,12 @@ import pytest
 from pydantic import ValidationError
 
 from cstar.roms.namelist import (
+    ParamSettings,
+    ParamSettingsV0_4_0,
     PioSettings,
     RomsNamelist,
     RomsNamelistBase,
+    RomsNamelistV0_4_0,
     RomsNamelistV0_5_0,
     RomsNamelistV0_6_0,
     RomsNamelistV0_7_0,
@@ -27,11 +30,20 @@ PIO_SETTINGS_BLOCK = "&pio_settings\n    pio_stride = 1\n/\n\n"
 
 @pytest.mark.parametrize(
     "checkout_target",
-    ["0.4.9", "v0.4.9", "0.0.1"],
+    ["0.0.1", "0.3.0", "v0.3.9"],
 )
-def test_namelist_schema_for_ref_pre_0_5_0(checkout_target):
-    """Refs below the 0.5.0 breaking release select the unversioned `RomsNamelist`."""
+def test_namelist_schema_for_ref_pre_0_4_0(checkout_target):
+    """Refs below the 0.4.0 breaking release select the unversioned `RomsNamelist`."""
     assert namelist_schema_for_ref(checkout_target) is RomsNamelist
+
+
+@pytest.mark.parametrize(
+    "checkout_target",
+    ["0.4.0", "v0.4.0", "0.4.9", "v0.4.9"],
+)
+def test_namelist_schema_for_ref_0_4_0_range(checkout_target):
+    """Refs in `[0.4.0, 0.5.0)` select `RomsNamelistV0_4_0`."""
+    assert namelist_schema_for_ref(checkout_target) is RomsNamelistV0_4_0
 
 
 @pytest.mark.parametrize(
@@ -136,7 +148,7 @@ def test_namelist_schema_for_ref_resolves_hash_at_release_tag(
     info = tagged_ucla_roms_clone
     assert (
         namelist_schema_for_ref(info["hash_0_4_2"], repo_path=info["repo"])
-        is RomsNamelist
+        is RomsNamelistV0_4_0
     )
     assert (
         namelist_schema_for_ref(info["hash_0_5_0"], repo_path=info["repo"])
@@ -159,7 +171,7 @@ def test_namelist_schema_for_ref_resolves_hash_ahead_of_release_tag(
         schema = namelist_schema_for_ref(
             info["hash_after_0_4_2"], repo_path=info["repo"]
         )
-    assert schema is RomsNamelist
+    assert schema is RomsNamelistV0_4_0
 
 
 def test_namelist_schema_for_ref_branch_ignores_repo_path(tagged_ucla_roms_clone):
@@ -411,3 +423,57 @@ class TestUnknownOverrideKeys:
         assert len(violations) == 2
         assert any("cdr_tracer_output_settings" in v for v in violations)
         assert any("cdr_gas_exch_output_settings" in v for v in violations)
+
+
+# ---------------------------------------------------------------------------
+# ParamSettings / ParamSettingsV0_4_0 -- passive CDR tracer counts
+# ---------------------------------------------------------------------------
+_PARAM_SETTINGS_KWARGS = {
+    "np_xi": 1,
+    "np_eta": 1,
+    "llm": 10,
+    "mmm": 10,
+    "nz": 3,
+    "nt_passive": 0,
+    "nt_bgc": 0,
+}
+
+
+def test_param_settings_rejects_cdr_tracer_counts():
+    """`ParamSettings` (< 0.4.0) is strict: `nt_cdr_oae`/`nt_cdr_dor` are unknown
+    (`extra="forbid"`), since ucla-roms < 0.4.0 has no passive CDR tracers.
+    """
+    with pytest.raises(ValidationError, match="nt_cdr_oae"):
+        ParamSettings(**_PARAM_SETTINGS_KWARGS, nt_cdr_oae=1)
+
+
+@pytest.mark.parametrize(
+    "cls", [ParamSettingsV0_4_0, RomsNamelistV0_5_0, RomsNamelistV0_7_0]
+)
+def test_param_settings_v0_4_0_defaults_cdr_tracer_counts_to_zero(cls):
+    """`nt_cdr_oae`/`nt_cdr_dor` default to 0 (the Fortran initializer) when
+    omitted, on `ParamSettingsV0_4_0` directly and on every namelist schema
+    whose `param_settings` group is (or subclasses) it.
+    """
+    param_settings_cls = (
+        cls
+        if cls is ParamSettingsV0_4_0
+        else cls.model_fields["param_settings"].annotation
+    )
+    settings = param_settings_cls(**_PARAM_SETTINGS_KWARGS)
+    assert settings.nt_cdr_oae == 0
+    assert settings.nt_cdr_dor == 0
+
+
+def test_param_settings_v0_4_0_accepts_non_zero_cdr_tracer_counts():
+    """Non-zero `nt_cdr_oae`/`nt_cdr_dor` are accepted."""
+    settings = ParamSettingsV0_4_0(**_PARAM_SETTINGS_KWARGS, nt_cdr_oae=2, nt_cdr_dor=1)
+    assert settings.nt_cdr_oae == 2
+    assert settings.nt_cdr_dor == 1
+
+
+@pytest.mark.parametrize("field", ["nt_cdr_oae", "nt_cdr_dor"])
+def test_param_settings_v0_4_0_rejects_negative_cdr_tracer_counts(field):
+    """`nt_cdr_oae`/`nt_cdr_dor` must be `>= 0`."""
+    with pytest.raises(ValidationError):
+        ParamSettingsV0_4_0(**_PARAM_SETTINGS_KWARGS, **{field: -1})
