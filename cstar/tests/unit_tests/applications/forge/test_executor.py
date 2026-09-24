@@ -29,6 +29,7 @@ from pathlib import Path
 from typing import ClassVar
 from unittest.mock import MagicMock, patch
 
+import f90nml
 import numpy as np
 import pytest
 import xarray as xr
@@ -2955,7 +2956,12 @@ class TestGoldenNamelist:
         return mock_sd
 
     def _run_golden_namelist_case(
-        self, mock_grid, tmp_path, model_dir, golden_filename
+        self,
+        mock_grid,
+        tmp_path,
+        model_dir,
+        golden_filename: str | None,
+        param_overrides: dict[str, int] | None = None,
     ) -> str:
         """Shared body for the golden namelist tests: drives the real
         ``generate_inputs()`` -> ``configure_build()`` chain against ``model_dir``
@@ -2969,7 +2975,9 @@ class TestGoldenNamelist:
 
         Returns the normalized rendered namelist text (workdir paths replaced by
         ``<WORKDIR>``) so callers can layer additional assertions on top of the
-        byte-for-byte golden comparison.
+        byte-for-byte golden comparison. ``param_overrides`` is merged into the
+        blueprint's ``model_settings["param"]`` before processing; pass
+        ``golden_filename=None`` to skip the golden comparison.
         """
         cfg = build_forge_blueprint(
             model_dir=model_dir,
@@ -2992,6 +3000,8 @@ class TestGoldenNamelist:
             # with the mocked (empty-file) grid.save() used here.
             use_pio=False,
         )
+        if param_overrides:
+            cfg.model_settings["param"].update(param_overrides)
 
         grid_mock = _create_grid_mock()
         grid_mock.nx = self._GRID_KWARGS["nx"]
@@ -3116,6 +3126,8 @@ class TestGoldenNamelist:
             str(run_dir), "<WORKDIR>"
         )
 
+        if golden_filename is None:
+            return normalized
         golden_path = Path(__file__).parent / "fixtures" / golden_filename
 
         if os.environ.get("UPDATE_GOLDEN"):
@@ -3345,6 +3357,27 @@ class TestGoldenNamelist:
         self._run_golden_namelist_case(
             mock_grid, tmp_path, _MODEL_DIR, "golden_namelist_test-tiny.nml"
         )
+
+    def test_cdr_tracer_counts_reach_namelist_and_tracer_arrays(
+        self, mock_grid, tmp_path
+    ):
+        """Non-zero ``param.nt_cdr_oae``/``nt_cdr_dor`` on a >= 0.4.0 pin flow
+        through the real generate_inputs -> configure_build chain into
+        ``&param_settings``, and the per-tracer ``tnu2``/``akt_bak`` arrays are
+        sized for the extra tracers (2 + 32 BGC + 2*2 OAE + 1 DOR = 39).
+        """
+        normalized = self._run_golden_namelist_case(
+            mock_grid,
+            tmp_path,
+            _MODEL_DIR_ROMS070,
+            None,
+            param_overrides={"nt_cdr_oae": 2, "nt_cdr_dor": 1},
+        )
+        nml = f90nml.reads(normalized)
+        assert nml["param_settings"]["nt_cdr_oae"] == 2
+        assert nml["param_settings"]["nt_cdr_dor"] == 1
+        assert len(nml["tracer_diff2"]["tnu2"]) == 39
+        assert len(nml["vertical_mixing_settings"]["akt_bak"]) == 39
 
     def test_golden_namelist_test_tiny_roms050(self, mock_grid, tmp_path):
         """Same test-tiny domain/forcing/output, but resolved against the
