@@ -67,4 +67,6 @@ Miscellaneous
 - Tests: the fast-path eligibility test expects every bundled spec to qualify for both stages; the fetched-content mismatch test hides the bundled copy to reach the fetch path; the offline staging fixture maps both directory forms; location assertions read ``C-Star.git``. (`#707 <https://github.com/CWorthy-ocean/C-Star/pull/707>`_)
 - Docs: the templates developer page, the internals known-gaps list and the specs page describe the C-Star pin instead of the archived repository. (`#707 <https://github.com/CWorthy-ocean/C-Star/pull/707>`_)
 - Blueprint guide describes how a resumed run adopts existing codebases. (`#704 <https://github.com/CWorthy-ocean/C-Star/pull/704>`_)
+- Developer docs: corrected the descriptions of the app-boundary test, ``content_hash()``, GLORYS layout selection and the source alias table; replaced the template re-pin "known gap" with the CI test that enforces it; trimmed ``forge_input_data`` to the registry contract; marked ``catalog_design``'s forward-looking sections as unimplemented. (`#711 <https://github.com/CWorthy-ocean/C-Star/pull/711>`_)
+- ``ForgeRunner.run``'s docstring records why forge processing stays inline on the event loop rather than on a worker thread. (`#711 <https://github.com/CWorthy-ocean/C-Star/pull/711>`_)
 
