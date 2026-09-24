@@ -30,6 +30,10 @@ Bug Fixes
 - ``--resume`` no longer refuses a codebase because its ``checkout_target`` branch has moved on the remote, or because the compute node has no network access. (`#704 <https://github.com/CWorthy-ocean/C-Star/pull/704>`_)
 - A checkout target that is an annotated git tag now resolves to its commit, so such checkouts are recognized as up to date. (`#704 <https://github.com/CWorthy-ocean/C-Star/pull/704>`_)
 - A name that is both a branch and a tag resolves to the branch, matching what ``git checkout`` did when the codebase was cloned. (`#704 <https://github.com/CWorthy-ocean/C-Star/pull/704>`_)
+- The upscaler and nest_ic blueprint schemas required an ``output_dir`` field that blueprints no longer accept, and were missing the ``pio`` option. (`#717 <https://github.com/CWorthy-ocean/C-Star/pull/717>`_)
+- The published schemas allowed unknown fields that C-Star rejects at runtime, so editors did not flag them. (`#717 <https://github.com/CWorthy-ocean/C-Star/pull/717>`_)
+- The workplan schema predated the deferred-blueprint and override field changes. (`#717 <https://github.com/CWorthy-ocean/C-Star/pull/717>`_)
+- The nest_ic tutorial blueprint (``docs/tutorials/nest_ic_bp.yaml``) failed validation because it used the removed ``output_dir`` field; it now uses ``working_dir`` and sets ``pio``. (`#717 <https://github.com/CWorthy-ocean/C-Star/pull/717>`_)
 
 Improvements
 ~~~~~~~~~~~~
@@ -46,6 +50,7 @@ Improvements
 - A cache entry whose files no longer match the blueprint's ``file_hashes`` is re-fetched; branch pins and blueprints without hashes are never cached. (`#713 <https://github.com/CWorthy-ocean/C-Star/pull/713>`_)
 - A cache directory that cannot be written (read-only or over quota on shared HPC filesystems) is logged and skipped rather than failing the build. (`#713 <https://github.com/CWorthy-ocean/C-Star/pull/713>`_)
 - Namelist-consistency violations are centralized in one place and raise ``NamelistConsistencyError``, a ``ValueError`` that names the rule, namelist section and keys involved. (`#714 <https://github.com/CWorthy-ocean/C-Star/pull/714>`_)
+- Schema field descriptions are now populated from the model docstrings, so editors show inline help. (`#717 <https://github.com/CWorthy-ocean/C-Star/pull/717>`_)
 
 Miscellaneous
 ~~~~~~~~~~~~~
@@ -77,4 +82,5 @@ Miscellaneous
 - A ``check-manifest`` pre-commit hook verifies the sdist includes every tracked file not deliberately excluded. ``check-manifest`` moves from the build requirements to the ``dev`` extra. (`#712 <https://github.com/CWorthy-ocean/C-Star/pull/712>`_)
 - The publish workflow checks that the installed wheel carries the eight bundled model specs, the two forge templates and the wizard files, and smoke-tests ``cstar forge --help``. (`#712 <https://github.com/CWorthy-ocean/C-Star/pull/712>`_)
 - The forge templates developer page gains a "Staging cache" section. (`#713 <https://github.com/CWorthy-ocean/C-Star/pull/713>`_)
+- Machine-specific paths in the nesting tutorials are replaced with ``/path/to/...`` placeholders, and the workplan references the tutorial blueprint by relative path. (`#717 <https://github.com/CWorthy-ocean/C-Star/pull/717>`_)
 
