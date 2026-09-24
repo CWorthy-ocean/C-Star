@@ -41,6 +41,7 @@ Improvements
 - When a codebase cannot be adopted on resume, the error names the failed check: target not present in the clone, HEAD at a different commit (both hashes shown), tracked files modified, build artifacts missing, or git's own error for an unreadable repository. (`#704 <https://github.com/CWorthy-ocean/C-Star/pull/704>`_)
 - Setup-time detection of local modifications is content-based as well, avoiding unnecessary recompiles caused by stale index metadata. (`#704 <https://github.com/CWorthy-ocean/C-Star/pull/704>`_)
 - The NETCDF4 → CDF-5 conversion is now a shared utility used by both the ``nest_ic`` and ``upscaler`` applications. (`#705 <https://github.com/CWorthy-ocean/C-Star/pull/705>`_)
+- Extracted ``migrate_forge_blueprint_data`` and ``migrate_forcing_inputs`` from ``cstar/applications/forge/blueprint.py`` into a new ``cstar/applications/forge/migration.py``. (`#709 <https://github.com/CWorthy-ocean/C-Star/pull/709>`_)
 
 Miscellaneous
 ~~~~~~~~~~~~~
