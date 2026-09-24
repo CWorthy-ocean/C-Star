@@ -156,7 +156,9 @@ class _SettingsSection(BaseModel):
 
 
 class TitleCfg(_SettingsSection):
-    casename: str | None = None  # set dynamically
+    casename: str | None = Field(
+        default=None, serialization_alias="title"
+    )  # set dynamically
 
 
 class OutputRootNameCfg(_SettingsSection):
@@ -703,7 +705,7 @@ class LateralViscCfg(_SettingsSection):
 
 
 class VerticalMixingCfg(_SettingsSection):
-    akv: float
+    akv: float = Field(serialization_alias="akv_bak")
     akt_default: float
 
 
@@ -982,11 +984,14 @@ def build_namelist(rt: _RunTimeSettingsCommon, n_tracers: int) -> RomsNamelistBa
 
     Most groups map 1:1 from a settings section via ``model_dump(by_alias=True)``
     — the ``serialization_alias`` on each renamed settings field supplies the
-    namelist name, and case-only keys were lowercased in both vocabularies. The
-    only explicit logic left is genuinely structural: the title/output-root
-    regroup, the frcfiles assembly, the scalar -> per-tracer-array expansion, and
-    the cross-section read of ``rho0`` from ``lateral_visc``. ``exclude=`` drops
-    the settings-only fields with no namelist counterpart.
+    namelist name (every rename, ``casename`` -> ``title`` and ``akv`` ->
+    ``akv_bak`` included), and case-only keys were lowercased in both
+    vocabularies. The only explicit logic left is genuinely structural: the
+    title/output-root regroup (two sections merged into one group), the frcfiles
+    assembly, the scalar -> per-tracer-array expansion (``tnu2_default``,
+    ``akt_default``), and the cross-section read of ``rho0`` from
+    ``lateral_visc``. ``exclude=`` drops the fields those transforms handle
+    instead of the section's own dump.
 
     ``rt``'s concrete type (:class:`RunTimeSettings`, :class:`RunTimeSettingsV0_5_0`,
     :class:`RunTimeSettingsV0_6_0`, or :class:`RunTimeSettingsV0_7_0`) selects the
@@ -1039,13 +1044,12 @@ def build_namelist(rt: _RunTimeSettingsCommon, n_tracers: int) -> RomsNamelistBa
     kwargs: dict[str, Any] = dict(
         # ---- structural transforms (regroup / computed / cross-section) ----
         simulation_name_settings=SimulationNameSettings(
-            output_root_name=rt.output_root_name.output_root_name,
-            title=rt.title.casename,
-        ),  # regroup; casename -> title
+            **grp(rt.output_root_name), **grp(rt.title)
+        ),  # regroup
         forcing_files=ForcingFiles(frcfiles=frc),  # 6 *_path -> frcfiles list
         tracer_diff2=TracerDiff2(tnu2=[rt.tracer_diff2.tnu2_default] * n_tracers),
         vertical_mixing_settings=VerticalMixingSettings(
-            akv_bak=rt.vertical_mixing.akv,  # akv -> akv_bak
+            **rt.vertical_mixing.model_dump(by_alias=True, exclude={"akt_default"}),
             akt_bak=[rt.vertical_mixing.akt_default] * n_tracers,
         ),
         rho0_settings=Rho0Settings(rho0=rt.lateral_visc.rho0),  # cross-section
