@@ -22,7 +22,8 @@ from cstar.applications.forge.namelist_model import (
     RunTimeSettingsV0_6_0,
     RunTimeSettingsV0_7_0,
     build_namelist,
-    check_extract_divides_rst,
+    forge_field_for,
+    output_precheck_applies_to,
     run_time_settings_for_ref,
     validate_run_time_sections,
 )
@@ -323,41 +324,6 @@ def test_rst_period_not_divisible_accepted_with_rst_writing_off():
     assert rt.ocean_vars.output_period_rst == 150.0
 
 
-# --- check_extract_divides_rst (mirrors ucla-roms >= 0.5.0's precheck for the
-#     nesting extract stream) ------------------------------------------------
-_EXTRACT_OK = {"do_extract": True, "nrpf": 24, "extract_period": 3600.0}
-_RST_ON = {"wrt_file_rst": True, "output_period_rst": 86400.0}
-
-
-def test_extract_divides_rst_accepted():
-    check_extract_divides_rst(_RST_ON, _EXTRACT_OK)  # 24 * 3600 == 86400
-
-
-def test_extract_not_dividing_rst_rejected():
-    bad = {**_EXTRACT_OK, "extract_period": 5000.0}  # 24 * 5000 = 120000
-    with pytest.raises(ValueError, match="evenly divide"):
-        check_extract_divides_rst(_RST_ON, bad)
-
-
-def test_extract_nonpositive_frequency_rejected():
-    with pytest.raises(ValueError, match="must be positive"):
-        check_extract_divides_rst(_RST_ON, {**_EXTRACT_OK, "nrpf": 0})
-
-
-def test_extract_check_skipped_when_extract_or_rst_off():
-    bad = {**_EXTRACT_OK, "extract_period": 5000.0}
-    check_extract_divides_rst({**_RST_ON, "wrt_file_rst": False}, bad)
-    check_extract_divides_rst(_RST_ON, {**bad, "do_extract": False})
-
-
-def test_extract_check_vacuous_for_zero_rst_period():
-    """The monthly-restart convention (output_period_rst = 0) passes trivially,
-    mirroring the Fortran ``mod(0, x) == 0``.
-    """
-    bad = {**_EXTRACT_OK, "extract_period": 5000.0}
-    check_extract_divides_rst({**_RST_ON, "output_period_rst": 0.0}, bad)
-
-
 def test_edit_assignment_is_validated(tmp_path):
     rt = RunTimeSettings.model_validate(_populated_rt_dict())
     nml = build_namelist(rt, n_tracers=34)
@@ -649,3 +615,65 @@ def test_rst_period_not_divisible_by_dt_rejected_v0_5_0():
     bad["ocean_vars"]["output_period_rst"] = 150.0
     with pytest.raises(ValidationError, match="output_period_rst"):
         RunTimeSettingsV0_5_0.model_validate(bad)
+
+
+# ---------------------------------------------------------------------------
+# output_precheck_applies_to -- the >= 0.5.0 output-stream precheck gate,
+# derived from a run-time settings class (inverts
+# _RUN_TIME_SETTINGS_BY_NAMELIST_SCHEMA rather than re-deriving the schema via
+# a second namelist_schema_for_ref lookup -- see the function's docstring).
+# ---------------------------------------------------------------------------
+def test_output_precheck_applies_to_legacy_settings_cls_is_false():
+    assert output_precheck_applies_to(RunTimeSettings) is False
+
+
+@pytest.mark.parametrize(
+    "settings_cls",
+    [RunTimeSettingsV0_5_0, RunTimeSettingsV0_6_0, RunTimeSettingsV0_7_0],
+)
+def test_output_precheck_applies_to_versioned_settings_cls_is_true(settings_cls):
+    assert output_precheck_applies_to(settings_cls) is True
+
+
+@pytest.mark.parametrize("roms_ref", [None, ""])
+def test_output_precheck_applies_to_none_and_empty_ref_stays_legacy(roms_ref):
+    """Pins the exact composition both resolve.py and executor.py use to gate
+    the output-stream precheck: ``run_time_settings_for_ref(roms_ref)`` then
+    ``output_precheck_applies_to(settings_cls)``. A blueprint with no pinned
+    ucla-roms ref (``roms_ref`` None or "") must resolve to the legacy
+    schema's gate (off), not the latest schema's -- the bug this composition
+    was written to avoid: calling ``namelist_schema_for_ref(None)`` directly
+    here instead would warn and return the *latest* schema, wrongly turning
+    the precheck on for a no-ref blueprint.
+    """
+    settings_cls = run_time_settings_for_ref(roms_ref)
+    assert settings_cls is RunTimeSettings
+    assert output_precheck_applies_to(settings_cls) is False
+
+
+# ---------------------------------------------------------------------------
+# forge_field_for -- canonical (section, key) -> forge "section.field" lookup
+# ---------------------------------------------------------------------------
+def test_forge_field_for_renamed_field():
+    # FrcOutputCfg.output_period has serialization_alias="output_period_frc".
+    assert (
+        forge_field_for("frc_output_settings", "output_period_frc")
+        == "frc_output.output_period"
+    )
+
+
+def test_forge_field_for_unaliased_field():
+    # OceanVarsCfgV0_5_0.output_period_rst has no serialization_alias -- the
+    # forge field name already IS the canonical key.
+    assert (
+        forge_field_for("basic_output_settings", "output_period_rst")
+        == "ocean_vars.output_period_rst"
+    )
+
+
+def test_forge_field_for_unknown_section_returns_none():
+    assert forge_field_for("stdout_diag_settings", "code_check_mode") is None
+
+
+def test_forge_field_for_unknown_key_returns_none():
+    assert forge_field_for("frc_output_settings", "not_a_real_key") is None

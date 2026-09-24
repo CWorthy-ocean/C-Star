@@ -1,10 +1,12 @@
-"""Tests for `cstar.roms.precheck.check_output_streams_divide_rst`.
+"""Tests for `cstar.roms.precheck` -- C-Star's ROMS namelist-consistency rules.
 
 Mirrors ucla-roms' `src/precheck.F90::do_precheck`/`check_output_divides_rst`:
 for every *enabled* output stream, `nrpf * output_period` must be positive and
 must evenly divide `basic_output_settings.output_period_rst`, when restarts
 are on (`wrt_file_rst`). Six stream groups are additionally gated on a
-compile-time cppdef.
+compile-time cppdef. Also covers `check_restart_period_divisible_by_dt` (a
+C-Star reproducibility convention, not a ucla-roms abort) and `applies_to`
+(the >= 0.5.0 schema gate for the output-streams rule).
 
 Operates on C-Star's canonical namelist vocabulary (RomsNamelistBase group
 field names + real Fortran namelist keys), NOT forge's settings-dict
@@ -12,9 +14,25 @@ vocabulary -- every settings dict built here uses e.g.
 `frc_output_settings.output_period_frc`, not forge's `frc_output.output_period`.
 """
 
+from pathlib import Path
+
 import pytest
 
-from cstar.roms.precheck import _STREAM_CHECKS, check_output_streams_divide_rst
+from cstar.roms.namelist import (
+    RomsNamelist,
+    RomsNamelistV0_5_0,
+    RomsNamelistV0_6_0,
+    RomsNamelistV0_7_0,
+)
+from cstar.roms.precheck import (
+    _STREAM_CHECKS,
+    NamelistConsistencyError,
+    applies_to,
+    check_output_streams_divide_rst,
+    check_restart_period_divisible_by_dt,
+)
+
+V0_5_0_NAMELIST = Path(__file__).parent / "fixtures" / "example_namelist_v0_5_0.nml"
 
 
 def _base_settings(**overrides):
@@ -329,9 +347,28 @@ def test_diagnostics_or_gate_fires_when_only_one_field_present():
         check_output_streams_divide_rst(settings, cppdefs={"diagnostics": True})
 
 
+def test_output_streams_error_carries_canonical_section_and_keys():
+    """`NamelistConsistencyError` carries the canonical section/keys of the
+    violating stream, not just a message -- this is what lets a consumer in a
+    different vocabulary (e.g. Forge's settings dict) point a user at the
+    field it actually exposes.
+    """
+    settings = _base_settings()
+    settings["frc_output_settings"] = {
+        "wrt_frc": True,
+        "output_period_frc": 3600,
+        "nrpf_frc": 0,
+    }
+    with pytest.raises(NamelistConsistencyError) as excinfo:
+        check_output_streams_divide_rst(settings, cppdefs={})
+    assert excinfo.value.rule == "output_streams_divide_rst"
+    assert excinfo.value.section == "frc_output_settings"
+    assert excinfo.value.keys == ("nrpf_frc", "output_period_frc")
+
+
 # --- Table-driven coverage of every `_STREAM_CHECKS` row -------------------
 #
-# `_get` silently returns None on a wrong/renamed field name, and the row
+# `_section` silently returns None on a wrong/renamed field name, and the row
 # then just `continue`s (skipped) -- so a field-name/alias drift in an
 # untested row would otherwise disable that row's check with no test
 # failure. These two parametrized tests exercise all 18 rows directly from
@@ -398,3 +435,107 @@ def test_every_guarded_row_skipped_when_cppdef_inactive(row):
         row, nrpf=_NON_DIVIDING_NRPF, period=_NON_DIVIDING_PERIOD
     )
     check_output_streams_divide_rst(settings, cppdefs={})
+
+
+def test_live_namelist_conforming_passes():
+    """`check_output_streams_divide_rst` accepts a live `RomsNamelistBase`
+    directly (not just a mapping/`model_dump()`) -- the widened top-level
+    input this module's commit added.
+    """
+    nml = RomsNamelistV0_5_0.read(V0_5_0_NAMELIST)
+    check_output_streams_divide_rst(nml, cppdefs={})
+
+
+def test_live_namelist_non_dividing_raises():
+    nml = RomsNamelistV0_5_0.read(V0_5_0_NAMELIST)
+    nml.frc_output_settings.wrt_frc = True
+    nml.frc_output_settings.nrpf_frc = 3
+    nml.frc_output_settings.output_period_frc = 1000  # 3000 s doesn't divide 86400
+    with pytest.raises(ValueError, match="frc_output_settings"):
+        check_output_streams_divide_rst(nml, cppdefs={})
+
+
+# ---------------------------------------------------------------------------
+# check_restart_period_divisible_by_dt
+# ---------------------------------------------------------------------------
+# Ported from `cstar.applications.forge.namelist_model`'s
+# `test_rst_period_*` cases (forge vocabulary, via `RunTimeSettings.
+# model_validate`) -- same four scenarios, canonical vocabulary, calling the
+# function directly.
+
+
+def _restart_settings(
+    *, dt, output_period_rst, monthly_restarts=False, wrt_file_rst=True
+):
+    return {
+        "time_stepping": {"dt": dt},
+        "basic_output_settings": {
+            "wrt_file_rst": wrt_file_rst,
+            "monthly_restarts": monthly_restarts,
+            "output_period_rst": output_period_rst,
+        },
+    }
+
+
+def test_restart_period_not_divisible_by_dt_rejected():
+    settings = _restart_settings(dt=100.0, output_period_rst=150.0)
+    with pytest.raises(ValueError, match="output_period_rst"):
+        check_restart_period_divisible_by_dt(settings)
+
+
+def test_restart_period_divisible_by_dt_accepted():
+    settings = _restart_settings(dt=100.0, output_period_rst=200.0)
+    check_restart_period_divisible_by_dt(settings)
+
+
+def test_restart_period_not_divisible_accepted_with_monthly_restarts():
+    settings = _restart_settings(
+        dt=100.0, output_period_rst=150.0, monthly_restarts=True
+    )
+    check_restart_period_divisible_by_dt(settings)
+
+
+def test_restart_period_not_divisible_accepted_with_rst_writing_off():
+    settings = _restart_settings(dt=100.0, output_period_rst=150.0, wrt_file_rst=False)
+    check_restart_period_divisible_by_dt(settings)
+
+
+def test_restart_period_error_carries_canonical_section_and_keys():
+    settings = _restart_settings(dt=100.0, output_period_rst=150.0)
+    with pytest.raises(NamelistConsistencyError) as excinfo:
+        check_restart_period_divisible_by_dt(settings)
+    assert excinfo.value.rule == "restart_period_divisible_by_dt"
+    assert excinfo.value.section == "basic_output_settings"
+    assert excinfo.value.keys == ("output_period_rst",)
+
+
+def test_restart_period_live_namelist_non_dividing_raises():
+    """Same rule, fed a live `RomsNamelistV0_5_0` (the fixture's own dt=2160.0/
+    output_period_rst=86400.0 divides evenly; mutate to a non-multiple).
+    """
+    nml = RomsNamelistV0_5_0.read(V0_5_0_NAMELIST)
+    assert nml.basic_output_settings.wrt_file_rst is True
+    nml.basic_output_settings.output_period_rst = 86500.0  # not a multiple of dt
+    with pytest.raises(ValueError, match="output_period_rst"):
+        check_restart_period_divisible_by_dt(nml)
+
+
+def test_restart_period_live_namelist_conforming_passes():
+    nml = RomsNamelistV0_5_0.read(V0_5_0_NAMELIST)
+    check_restart_period_divisible_by_dt(nml)  # fixture's dt/output_period_rst divide
+
+
+# ---------------------------------------------------------------------------
+# applies_to -- the >= 0.5.0 schema gate for check_output_streams_divide_rst
+# ---------------------------------------------------------------------------
+
+
+def test_applies_to_legacy_schema_is_false():
+    assert applies_to(RomsNamelist) is False
+
+
+@pytest.mark.parametrize(
+    "schema", [RomsNamelistV0_5_0, RomsNamelistV0_6_0, RomsNamelistV0_7_0]
+)
+def test_applies_to_versioned_schemas_is_true(schema):
+    assert applies_to(schema) is True

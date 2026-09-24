@@ -331,8 +331,24 @@ version-gated section absent from the *active* schema.
 
 ucla-roms 0.5.0 also added a run-start precheck (``check_output_divides_rst``):
 each enabled output stream's ``nrpf x output_period`` must evenly divide
-``output_period_rst`` (vacuous for monthly restarts / a 0 period). Three
-bundled OutputSpecs conform for every stream -- ``daily-restarts`` (the
+``output_period_rst`` (vacuous for monthly restarts / a 0 period). ``cstar.roms.precheck``
+is the sole home for this and the sibling restart-period rule -- both C-Star
+(``ROMSSimulation.roms_runtime_settings``) and Forge (the resolver, and the
+executor's ``configure_build`` net for stored blueprints) call straight into
+it rather than keeping their own copies:
+
+* ``check_output_streams_divide_rst`` reproduces the full ``do_precheck`` call
+  list (every stream, including the nesting ``extract`` stream) against
+  either a live ``RomsNamelistBase`` or a canonical namelist-vocabulary
+  mapping; ``applies_to(schema)`` owns the ">= 0.5.0" schema gate, and a
+  violation raises ``NamelistConsistencyError`` (a ``ValueError`` subclass)
+  carrying the canonical ``section``/``keys`` of the offending stream.
+* ``check_restart_period_divisible_by_dt`` is a separate, ungated C-Star
+  reproducibility convention (not a ucla-roms abort -- ucla-roms' restart
+  trigger is a running-clock threshold, not a step-count division): restart
+  writes must land on a timestep.
+
+Three bundled OutputSpecs conform for every stream -- ``daily-restarts`` (the
 wizard default, see ``_DEFAULT_OUTPUT_SPEC``), ``weekly-restarts``, and
 ``monthly-restarts`` (upstream's own convention: ``monthly_restarts=T``,
 ``output_period_rst=0``). ``OutputSpec/standard`` predates the precheck and
@@ -341,10 +357,14 @@ streams under a 0.5.0+ model trips the precheck. A guard test
 (``test_bundled_output_specs_satisfy_roms_divides_rst_precheck``) pins the
 conforming specs, including ``roms-marbl-0.5-default``'s ModelSpec-owned
 sponge/particles streams. The nesting extract stream is resolve-time-derived
-(child DomainSpec metadata ``period`` x a seeded ``nrpf``), so it's enforced
-at authoring time instead: ``check_extract_divides_rst``
-(``namelist_model.py``), called from the resolver and gated to >= 0.5.0
-pins.
+(child DomainSpec metadata ``period`` x a seeded ``nrpf``); the resolver runs
+the same canonical checker as everything else, but catches
+``NamelistConsistencyError`` and, when ``exc.section == "extract_data_settings"``,
+appends a hint naming the DomainSpec ``period`` knob before re-raising --
+Forge's ``forge_field_for(section, key)`` (``namelist_model.py``) is the more
+general version of that translation, a reverse lookup from a
+``NamelistConsistencyError``'s canonical section/key back to the forge
+settings-dict field the wizard edits.
 
 ``models.py`` vs ``blueprint.py``
 ------------------------------------------
