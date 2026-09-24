@@ -48,6 +48,7 @@ from cstar.applications.forge.namelist_model import (
     cppdefs_for_precheck,
     ensure_cdr_output_marbl_diagnostics,
     output_precheck_applies_to,
+    prune_version_gated_sections,
     run_time_settings_for_ref,
 )
 from cstar.applications.forge.settings import render_roms_settings, write_roms_namelist
@@ -2205,7 +2206,9 @@ class ForgeExecutor(BaseModel):
         **Process:**
 
         1. Validates blueprint is initialized and template configuration exists
-        2. Merges user-provided settings overrides with existing settings
+        2. Drops version-gated run-time sections the pinned ucla-roms release's
+           schema doesn't model, then merges user-provided settings overrides
+           with existing settings
         3. Clears compile-time and run-time code output directories
         4. Produces configuration files:
 
@@ -2283,6 +2286,42 @@ class ForgeExecutor(BaseModel):
             self._init_settings_compile_time()
         if not hasattr(self, "_settings_run_time") or self._settings_run_time is None:
             self._init_settings_run_time()
+
+        # Select the run-time settings tier for the pinned ucla-roms ref once,
+        # up front: it decides both the version-gated pruning just below and
+        # whether the output-stream precheck further down applies.
+        effective_roms_ref = (
+            self.code_spec.roms.commit or self.code_spec.roms.branch
+            if self.code_spec is not None
+            else None
+        )
+        with warnings.catch_warnings():
+            # See the matching resolver guard: an internal version probe
+            # shouldn't repeat the non-semver-pin warning surfaced elsewhere.
+            warnings.simplefilter("ignore", UserWarning)
+            settings_cls = run_time_settings_for_ref(
+                str(effective_roms_ref) if effective_roms_ref is not None else None
+            )
+
+        # Version-gated section pruning, mirroring the resolver's: a stored
+        # blueprint reaches configure_build without re-resolving, so it can
+        # still carry a section (e.g. cdr_tracer_output, ucla-roms >= 0.7.0)
+        # this pin's schema doesn't model. Prune both the base settings and the
+        # incoming overrides before merging (the merge rejects a top-level key
+        # the base lacks), and before the CDR nets and output-stream precheck
+        # below, which read the raw dict and would otherwise act on it.
+        run_time_settings = dict(run_time_settings)
+        pruned = set(
+            prune_version_gated_sections(self._settings_run_time, settings_cls)
+        ) | set(prune_version_gated_sections(run_time_settings, settings_cls))
+        if pruned:
+            log.info(
+                "configure_build: pruned run-time settings section(s) %s: the pinned "
+                "ucla-roms ref %r selects %s, whose namelist schema does not model them.",
+                sorted(pruned),
+                effective_roms_ref,
+                settings_cls.__name__,
+            )
 
         # Update settings with user-provided overrides (deep merge to preserve existing settings)
         self._update_settings_compile_time(compile_time_settings)
@@ -2393,18 +2432,6 @@ class ForgeExecutor(BaseModel):
         # duplication is intentional and cheap -- this check must run before
         # any build side effects (the mkdir/render calls just below), so it
         # can't reuse an object built later in this method.)
-        effective_roms_ref = (
-            self.code_spec.roms.commit or self.code_spec.roms.branch
-            if self.code_spec is not None
-            else None
-        )
-        with warnings.catch_warnings():
-            # See the matching resolver guard: an internal version probe
-            # shouldn't repeat the non-semver-pin warning surfaced elsewhere.
-            warnings.simplefilter("ignore", UserWarning)
-            settings_cls = run_time_settings_for_ref(
-                str(effective_roms_ref) if effective_roms_ref is not None else None
-            )
         if output_precheck_applies_to(settings_cls):
             rt = settings_cls.model_validate(self._settings_run_time)
             nml = build_namelist(rt, n_tracers)
@@ -2469,11 +2496,7 @@ class ForgeExecutor(BaseModel):
             n_tracers=n_tracers,
             # Selects the namelist schema variant; None (code_spec unset) keeps
             # the legacy (< 0.5.0) schema.
-            roms_ref=(
-                self.code_spec.roms.commit or self.code_spec.roms.branch
-                if self.code_spec is not None
-                else None
-            ),
+            roms_ref=effective_roms_ref,
         )
 
         # Build the run-time code descriptor: namelist + any copied static files.

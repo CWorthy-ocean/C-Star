@@ -2309,7 +2309,7 @@ def test_wizard_editor_cdr_output_streams_gated_by_model_spec_pin():
     """End-to-end sibling of the two tests above, driven through the wizard's
     model selector instead of ``_SettingsEditor`` directly: ``roms-marbl-0.6-
     default`` pins ucla-roms 0.6.0, so the resolver's
-    ``_prune_version_gated_sections`` drops ``cdr_tracer_output``/
+    ``prune_version_gated_sections`` drops ``cdr_tracer_output``/
     ``cdr_gas_exch_output`` from ``model_settings`` entirely (they're
     OutputSpec-owned -- the default 'daily-restarts' OutputSpec carries them --
     but this pin's schema can't model them), and the editor never sees the

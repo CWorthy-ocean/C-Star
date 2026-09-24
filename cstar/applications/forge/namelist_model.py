@@ -912,6 +912,36 @@ def version_gated_section_names() -> frozenset[str]:
     )
 
 
+def prune_version_gated_sections(
+    run_time_settings: dict[str, Any], settings_cls: type[_RunTimeSettingsCommon]
+) -> list[str]:
+    """Drop, in place, every ``run_time_settings`` section that is version-gated
+    (:func:`version_gated_section_names`) but not modeled by ``settings_cls``,
+    the tier selected for the pinned ucla-roms ref; return the dropped names,
+    sorted.
+
+    A section the pinned release's namelist schema doesn't model would be
+    silently discarded by the top-level ``extra="ignore"`` when the settings
+    are validated for ``build_namelist``, yet still steer everything that
+    reads the raw settings dict first: the CDR output nets (forcing
+    ``cppdefs.cdr_forcing`` on, or rejecting a non-MARBL build, for a stream
+    that release can't write) and the resolver's output-stream precheck.
+    Both the resolver (authoring time,
+    before settings are frozen into the blueprint) and the executor's
+    ``configure_build`` (the build-time net for stored blueprints that reach
+    the build without re-resolving) call this before those checks, so the
+    rule stays in one place; each caller decides whether to report what was
+    dropped.
+    """
+    pruned = sorted(
+        (version_gated_section_names() - set(settings_cls.model_fields))
+        & set(run_time_settings)
+    )
+    for name in pruned:
+        del run_time_settings[name]
+    return pruned
+
+
 def run_time_settings_for_ref(roms_ref: str | None) -> type[_RunTimeSettingsCommon]:
     """Select the run-time settings class matching a ucla-roms ref.
 
