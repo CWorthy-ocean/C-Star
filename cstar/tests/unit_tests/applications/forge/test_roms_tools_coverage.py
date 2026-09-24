@@ -175,6 +175,11 @@ _SKIP = {
     },
     "RiverForcing": {
         "indices",  # manual river grid placement; advanced, expose later
+        # roms-tools 5.1.0: discharge threshold below which a river is dropped
+        # (None = the source dataset's own default). Reachable today through the
+        # ``options`` passthrough; a typed ``RiverForcingItem`` field changes every
+        # stored blueprint's content_hash and needs a restamp, so it is a follow-up.
+        "min_discharge_m3s",
     },
     "Grid": {
         "verbose",  # debug/dev only

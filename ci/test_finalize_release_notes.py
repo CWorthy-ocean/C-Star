@@ -103,11 +103,39 @@ def test_nothing_dropped_when_every_category_has_notes():
 
 
 def test_placeholder_recognition():
-    for value in ("N/A", "n/a", "None", "none.", "Nothing", "No changes"):
+    for value in (
+        "N/A",
+        "n/a",
+        "None",
+        "none.",
+        "Nothing",
+        "No changes",
+        "N/A (default unchanged)",
+        "N/A (`#1 <https://github.com/o/r/pull/1>`_)",
+        "N/A (default unchanged) (`#1 <https://github.com/o/r/pull/1>`_)",
+    ):
         assert _is_placeholder(value), value
     for value in (
         "Nonetheless, we fixed it",
         "No longer crashes",
         "N/A handling added",
+        "None — but ``old_arg`` is now deprecated",
+        "N/A (x) plus a real change",
+        "Fixed a crash (see the docs) (`#1 <https://github.com/o/r/pull/1>`_)",
     ):
         assert not _is_placeholder(value), value
+
+
+def test_parenthetical_placeholder_category_dropped():
+    # The updater used to let "N/A (reason)" through, and once the PR link
+    # was appended the finalizer could not recognise it either.
+    link = "(`#7 <https://github.com/o/r/pull/7>`_)"
+    text = (
+        _HEADER
+        + _section("Breaking Changes", f"- N/A (default unchanged) {link}")
+        + _section("New Features", "- Real feature")
+    )
+    out, dropped = drop_empty_sections(text)
+    assert dropped == ["Breaking Changes"]
+    assert "N/A" not in out
+    assert "- Real feature\n" in out
