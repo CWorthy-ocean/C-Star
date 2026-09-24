@@ -150,3 +150,59 @@ class TestFindScratchDir:
         assert hpc_data_directory() == "/real-scratch"
         monkeypatch.delenv("SCRATCH", raising=False)
         assert hpc_data_directory() is None
+
+
+class TestHpcDataDirectorySystemFallback:
+    """hpc_data_directory consults the SystemContext's scratch_root() hook only
+    when none of the CSTAR_SCRATCH_DIRS variables is set.
+    """
+
+    @pytest.fixture(autouse=True)
+    def _no_scratch_vars(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        for var in ("CSTAR_SCRATCH_DIRS", "SCRATCH", "SCRATCH_DIR", "LOCAL_SCRATCH"):
+            monkeypatch.delenv(var, raising=False)
+
+    @staticmethod
+    def _context_with(root: Path | None):
+        class _Ctx:
+            @classmethod
+            def scratch_root(cls) -> Path | None:
+                return root
+
+        return lambda: _Ctx
+
+    def test_uses_system_hook_when_no_variable_is_set(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr(
+            "cstar.system.manager.get_system_context",
+            self._context_with(Path("/sys-scratch/user")),
+        )
+        assert hpc_data_directory() == "/sys-scratch/user"
+
+    def test_variable_wins_over_system_hook(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("SCRATCH", "/env-scratch")
+        monkeypatch.setattr(
+            "cstar.system.manager.get_system_context",
+            self._context_with(Path("/sys-scratch/user")),
+        )
+        assert hpc_data_directory() == "/env-scratch"
+
+    def test_none_when_hook_has_no_convention(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr(
+            "cstar.system.manager.get_system_context", self._context_with(None)
+        )
+        assert hpc_data_directory() is None
+
+    def test_none_when_system_is_unknown(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        from cstar.base.exceptions import CstarError
+
+        def _unknown():
+            raise CstarError("Unknown system requested: nowhere")
+
+        monkeypatch.setattr("cstar.system.manager.get_system_context", _unknown)
+        assert hpc_data_directory() is None
