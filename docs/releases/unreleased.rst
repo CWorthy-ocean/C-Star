@@ -110,4 +110,7 @@ Miscellaneous
 - Removed leftover date-correction code for roms-tools YAML inputs, which C-Star stopped generating datasets from in #355. (`#706 <https://github.com/CWorthy-ocean/C-Star/pull/706>`_)
 - Forge blueprint docstrings now reference the current developer guide and describe ``provenance.forge_version`` as a legacy field from the standalone cstar-forge era. (`#720 <https://github.com/CWorthy-ocean/C-Star/pull/720>`_)
 - The Forge developer notes describe the shared version-gated pruning used by the resolver and the build step. (`#722 <https://github.com/CWorthy-ocean/C-Star/pull/722>`_)
+- Release notes no longer truncate PR-description bullets that are wrapped across several lines, and no longer include ``N/A (reason)``-style placeholders. (`#724 <https://github.com/CWorthy-ocean/C-Star/pull/724>`_)
+- The release-notes branch is now deleted by the publish workflow itself, not only by the repository's auto-delete setting, and is always recreated from ``main``. (`#724 <https://github.com/CWorthy-ocean/C-Star/pull/724>`_)
+- The release-notes workflows run ``main``'s copy of their scripts, so a fix to them applies immediately rather than on the next release cycle. (`#724 <https://github.com/CWorthy-ocean/C-Star/pull/724>`_)
 
