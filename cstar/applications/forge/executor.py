@@ -43,11 +43,11 @@ from cstar.applications.forge.host import HostPaths
 from cstar.applications.forge.namelist_model import (
     RunTimeSettings,
     build_namelist,
+    check_cdr_output_sections,
     check_output_streams_divide_rst,
     check_rst_period_divisible,
     cppdefs_for_precheck,
     ensure_cdr_output_marbl_diagnostics,
-    require_marbl_for_cdr_output_sections,
     run_time_settings_for_ref,
 )
 from cstar.applications.forge.settings import render_roms_settings, write_roms_namelist
@@ -2245,10 +2245,10 @@ class ForgeExecutor(BaseModel):
         # resolver's equivalent block: stored blueprints and wizard accordion
         # edits can set do_cdr_tracer_output/do_cdr_gas_exch_output after
         # resolve time, so this is the enforcement point of record for that
-        # path too. The MARBL requirement and its message are shared with the
-        # resolver via require_marbl_for_cdr_output_sections.
+        # path too. The per-stream MARBL requirement (gas exchange only) and its
+        # message are shared with the resolver via check_cdr_output_sections.
         cppdefs = self._settings_compile_time.setdefault("cppdefs", {})
-        if require_marbl_for_cdr_output_sections(
+        if check_cdr_output_sections(
             self._settings_run_time, bgc_mode_is_marbl=cppdefs.get("marbl", False)
         ) and not cppdefs.get("cdr_forcing"):
             cppdefs["cdr_forcing"] = True

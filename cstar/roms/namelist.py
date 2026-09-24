@@ -507,7 +507,9 @@ class CdrTracerOutputSettings(_NmlGroup):
     """``&CDR_TRACER_OUTPUT_SETTINGS`` for ucla-roms >= 0.7.0 (PR #351).
 
     Dedicated output stream for the CDR tracers (``CDR_OAE_ALK``/``CDR_OAE_DIC``
-    and ``CDR_DOR_DIC``). Requires the ``MARBL`` and ``CDR_FORCING`` cppkeys.
+    and ``CDR_DOR_DIC``). Requires the ``CDR_FORCING`` cppkey; ucla-roms 0.7.0
+    and 0.8.0 also compile it only with ``MARBL``, although the tracers do not
+    depend on MARBL (guard bug reported upstream).
     Every field carries the ucla-roms reference default so the group can be
     omitted from an older namelist and still validate.
     """

@@ -3098,20 +3098,38 @@ class TestGoldenNamelist:
         )
         assert builder._settings_compile_time["cppdefs"]["cdr_forcing"] is True
 
-    def test_configure_build_rejects_cdr_tracer_output_without_marbl_end_to_end(
+    def test_configure_build_accepts_cdr_tracer_output_without_marbl_end_to_end(
         self, mock_grid, tmp_path
     ):
-        """Mirrors test_configure_build_rejects_cdr_output_without_marbl (in
-        TestForgeExecutorBuildAndRun) for the CDR tracer output stream: a
-        stored/hand-edited blueprint that turns MARBL off after the resolver
-        ran must not silently bake CDR_FORCING into cppdefs.opt for an output
-        module ucla-roms can't compile without MARBL.
+        """The tracer stream needs CDR_FORCING but not MARBL (the CDR tracers
+        exist without BGC), so a stored/hand-edited blueprint that turns MARBL
+        off and enables tracer output still builds, with CDR_FORCING forced on.
+        C-Star encodes this intended rule rather than ucla-roms 0.7.0/0.8.0's
+        MARBL-only compile guard.
         """
         cfg, builder = self._generate_inputs_no_cdr_forcing(mock_grid, tmp_path)
         cfg.model_settings["cdr_tracer_output"]["do_cdr_tracer_output"] = True
         cfg.model_settings["cppdefs"]["marbl"] = False
 
-        with pytest.raises(ValueError, match="do_cdr_tracer_output"):
+        self._configure_build_for(cfg, builder)
+
+        assert builder._settings_compile_time["cppdefs"]["marbl"] is False
+        assert builder._settings_compile_time["cppdefs"]["cdr_forcing"] is True
+
+    def test_configure_build_rejects_cdr_gas_exch_output_without_marbl_end_to_end(
+        self, mock_grid, tmp_path
+    ):
+        """Mirrors test_configure_build_rejects_cdr_output_without_marbl (in
+        TestForgeExecutorBuildAndRun) for the gas-exchange output stream, which
+        genuinely needs MARBL: a stored/hand-edited blueprint that turns MARBL
+        off after the resolver ran must not bake CDR_FORCING into cppdefs.opt
+        for a module ucla-roms cannot compile without MARBL.
+        """
+        cfg, builder = self._generate_inputs_no_cdr_forcing(mock_grid, tmp_path)
+        cfg.model_settings["cdr_gas_exch_output"]["do_cdr_gas_exch_output"] = True
+        cfg.model_settings["cppdefs"]["marbl"] = False
+
+        with pytest.raises(ValueError, match="do_cdr_gas_exch_output"):
             self._configure_build_for(cfg, builder)
 
     def test_golden_namelist_test_tiny(self, mock_grid, tmp_path):
