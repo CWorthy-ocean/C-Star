@@ -69,4 +69,7 @@ Miscellaneous
 - Blueprint guide describes how a resumed run adopts existing codebases. (`#704 <https://github.com/CWorthy-ocean/C-Star/pull/704>`_)
 - Developer docs: corrected the descriptions of the app-boundary test, ``content_hash()``, GLORYS layout selection and the source alias table; replaced the template re-pin "known gap" with the CI test that enforces it; trimmed ``forge_input_data`` to the registry contract; marked ``catalog_design``'s forward-looking sections as unimplemented. (`#711 <https://github.com/CWorthy-ocean/C-Star/pull/711>`_)
 - ``ForgeRunner.run``'s docstring records why forge processing stays inline on the event loop rather than on a worker thread. (`#711 <https://github.com/CWorthy-ocean/C-Star/pull/711>`_)
+- ``pyproject.toml`` now names its setuptools build backend explicitly; the missing key was tolerated by pip but broke check-manifest's PEP 517 detection. (`#712 <https://github.com/CWorthy-ocean/C-Star/pull/712>`_)
+- A ``check-manifest`` pre-commit hook verifies the sdist includes every tracked file not deliberately excluded. ``check-manifest`` moves from the build requirements to the ``dev`` extra. (`#712 <https://github.com/CWorthy-ocean/C-Star/pull/712>`_)
+- The publish workflow checks that the installed wheel carries the eight bundled model specs, the two forge templates and the wizard files, and smoke-tests ``cstar forge --help``. (`#712 <https://github.com/CWorthy-ocean/C-Star/pull/712>`_)
 
