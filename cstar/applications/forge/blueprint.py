@@ -66,6 +66,7 @@ from datetime import UTC, datetime
 from enum import StrEnum
 from importlib.metadata import PackageNotFoundError
 from importlib.metadata import version as _pkg_version
+from importlib.util import find_spec
 from pathlib import Path
 from typing import Any, Literal, get_args
 
@@ -906,6 +907,33 @@ class BgcSourceItem(_Section):
     initial-conditions write."""
 
 
+#: The one sanctioned ``use_vars`` overlap. roms-tools' salinity-based merge
+#: (``roms_tools.setup.salinity_merge``, on by default for an ESPER source whenever a
+#: WOA source is also configured) blends exactly these tracers across a salinity band
+#: and then drops them from WOA, so the overlap is consumed before the per-source
+#: datasets are merged and never reaches the "which source lands" ambiguity that
+#: ``_require_partitioned_bgc_use_vars`` guards against. Mirrors that module's
+#: ``DEFAULT_MERGE_VARIABLES``; ALK/DIC/O2 stay disjoint on purpose -- ESPER is within
+#: 3 % of WOA on those in brackish water and the merge deliberately leaves them alone.
+_SALINITY_MERGE_PAIR: frozenset[str] = frozenset({"ESPER", "WOA_BGC"})
+_SALINITY_MERGE_VARS: frozenset[str] = frozenset({"NO3", "PO4", "SiO3"})
+
+
+def _salinity_merge_consumes(var: str, name: str, other_name: str) -> bool:
+    """True when roms-tools will itself resolve an ESPER/WOA_BGC overlap on ``var``.
+
+    Gated on the merge module actually being importable: on a roms-tools without
+    it the overlap would reach ``process_bgc_fields`` undefined, which is exactly
+    what the disjointness rule exists to prevent.
+    """
+    if {name, other_name} != _SALINITY_MERGE_PAIR or var not in _SALINITY_MERGE_VARS:
+        return False
+    try:
+        return find_spec("roms_tools.setup.salinity_merge") is not None
+    except ImportError:
+        return False
+
+
 def _require_partitioned_bgc_use_vars(
     bgc_sources: list[BgcSourceItem], section_label: str
 ) -> None:
@@ -915,6 +943,9 @@ def _require_partitioned_bgc_use_vars(
     declared sets must be pairwise disjoint -- an overlapping tracer would
     leave it undefined which source's value actually lands in the merged/
     per-source output.
+
+    The single exception is an ESPER/WOA_BGC overlap on the salinity-merge
+    tracers (see ``_salinity_merge_consumes``), which roms-tools resolves itself.
     """
     if len(bgc_sources) <= 1:
         return
@@ -931,6 +962,8 @@ def _require_partitioned_bgc_use_vars(
             prior = seen_by_var.get(var)
             if prior is not None:
                 other_idx, other_name = prior
+                if _salinity_merge_consumes(var, name, other_name):
+                    continue  # first claimant stays on record
                 raise ValueError(
                     f"{section_label}.bgc_sources[{idx}] (source={name!r}) and "
                     f"bgc_sources[{other_idx}] (source={other_name!r}) both "

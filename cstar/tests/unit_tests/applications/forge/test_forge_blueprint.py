@@ -3829,6 +3829,94 @@ class TestBgcSourcesUseVarsPartitioning:
         )
         assert [bs.use_vars for bs in section.bgc_sources] == [["ALK", "DIC"], ["NO3"]]
 
+    # -- the one sanctioned overlap: ESPER + WOA_BGC on the salinity-merge tracers --
+
+    def _esper_woa(self, esper_vars, woa_vars, *, partner="WOA_BGC"):
+        from cstar.applications.forge.blueprint import BgcSourceItem
+
+        return [
+            BgcSourceItem(
+                source={"name": "ESPER", "esper_method": "nn", "esper_equation": 8},
+                use_vars=esper_vars,
+            ),
+            BgcSourceItem(
+                source={"name": partner, "climatology": True}, use_vars=woa_vars
+            ),
+        ]
+
+    @pytest.mark.parametrize(
+        "section_cls_name", ["InitialConditions", "BoundaryForcing"]
+    )
+    def test_esper_and_woa_bgc_may_overlap_on_merge_tracers(self, section_cls_name):
+        """roms-tools' salinity-based merge needs WOA to carry NO3/PO4/SiO3
+        alongside ESPER; it blends them and drops them from WOA itself, so the
+        validator must let that overlap through -- and keep both declarations.
+        """
+        pytest.importorskip("roms_tools.setup.salinity_merge")
+        from cstar.applications.forge import blueprint as fb
+
+        cls = getattr(fb, section_cls_name)
+        section = cls(
+            source={"name": "GLORYS"},
+            bgc_sources=self._esper_woa(
+                ["ALK", "DIC", "NO3", "PO4", "SiO3", "O2"], ["NO3", "PO4", "SiO3"]
+            ),
+        )
+        assert [bs.use_vars for bs in section.bgc_sources] == [
+            ["ALK", "DIC", "NO3", "PO4", "SiO3", "O2"],
+            ["NO3", "PO4", "SiO3"],
+        ]
+
+    @pytest.mark.parametrize(
+        "section_cls_name", ["InitialConditions", "BoundaryForcing"]
+    )
+    def test_esper_and_woa_bgc_still_reject_overlap_outside_merge_tracers(
+        self, section_cls_name
+    ):
+        """The merge leaves ALK/DIC/O2 alone, so an overlap there is still ambiguous."""
+        from cstar.applications.forge import blueprint as fb
+
+        cls = getattr(fb, section_cls_name)
+        with pytest.raises(ValueError, match="both claim 'ALK'"):
+            cls(
+                source={"name": "GLORYS"},
+                bgc_sources=self._esper_woa(["ALK", "NO3"], ["ALK", "PO4"]),
+            )
+
+    @pytest.mark.parametrize(
+        "section_cls_name", ["InitialConditions", "BoundaryForcing"]
+    )
+    def test_non_esper_pairs_still_reject_overlap_on_merge_tracers(
+        self, section_cls_name
+    ):
+        """Only ESPER has a merge; GLODAP + WOA_BGC both claiming NO3 is a plain clash."""
+        from cstar.applications.forge import blueprint as fb
+
+        cls = getattr(fb, section_cls_name)
+        items = self._esper_woa(["NO3"], ["NO3"])
+        items[0] = fb.BgcSourceItem(source={"name": "GLODAP"}, use_vars=["NO3"])
+        with pytest.raises(ValueError, match="both claim 'NO3'"):
+            cls(source={"name": "GLORYS"}, bgc_sources=items)
+
+    @pytest.mark.parametrize(
+        "section_cls_name", ["InitialConditions", "BoundaryForcing"]
+    )
+    def test_esper_woa_bgc_overlap_rejected_without_merge_module(
+        self, section_cls_name, monkeypatch
+    ):
+        """On a roms-tools that lacks the merge the overlap would reach
+        process_bgc_fields undefined, so the exception must switch itself off.
+        """
+        from cstar.applications.forge import blueprint as fb
+
+        monkeypatch.setattr(fb, "find_spec", lambda name: None)
+        cls = getattr(fb, section_cls_name)
+        with pytest.raises(ValueError, match="both claim 'NO3'"):
+            cls(
+                source={"name": "GLORYS"},
+                bgc_sources=self._esper_woa(["NO3"], ["NO3"]),
+            )
+
     def test_shipped_blueprints_have_single_bgc_source_and_still_validate(self):
         """The new validator must not break any file already in the repo -- every
         shipped blueprint has exactly one bgc source per section.
