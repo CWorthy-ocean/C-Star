@@ -109,7 +109,7 @@ class LocalBinaryFileStager(Stager):
             raise FileNotFoundError(msg)
 
         target_path = target_dir / self.source.basename
-        target_path.symlink_to(source_path)
+        target_path.symlink_to(source_path.resolve())
 
         return StagedFile(
             source=self.source, path=target_path, sha256=(self.source.file_hash or None)
