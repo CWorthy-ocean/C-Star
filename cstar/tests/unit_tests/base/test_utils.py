@@ -6,12 +6,14 @@ from unittest import mock
 import pytest
 
 from cstar.base.utils import (
+    NetCDFFormat,
     _dict_to_tree,
     _get_sha256_hash,
     _list_to_concise_str,
     _replace_text_in_file,
     convert_to_cdf5,
     deep_merge,
+    netcdf_format,
 )
 
 
@@ -450,3 +452,46 @@ class TestConvertToCdf5:
 
         assert nc4_path.exists()
         assert not final_path.exists()
+
+
+class TestNetcdfFormat:
+    """Tests for `netcdf_format` and `NetCDFFormat.is_classic`."""
+
+    @pytest.mark.parametrize(
+        ("file_format", "expected", "is_classic"),
+        [
+            ("NETCDF3_CLASSIC", NetCDFFormat.CDF1, True),
+            ("NETCDF3_64BIT_OFFSET", NetCDFFormat.CDF2, True),
+            ("NETCDF3_64BIT_DATA", NetCDFFormat.CDF5, True),
+            ("NETCDF4", NetCDFFormat.NETCDF4, False),
+            ("NETCDF4_CLASSIC", NetCDFFormat.NETCDF4, False),
+        ],
+    )
+    def test_detects_each_container_format(
+        self, tmp_path: Path, file_format: str, expected: NetCDFFormat, is_classic: bool
+    ) -> None:
+        """Each netCDF-C container format is identified from its magic number."""
+        import netCDF4
+
+        path = tmp_path / "f.nc"
+        with netCDF4.Dataset(path, "w", format=file_format) as nc:
+            nc.createDimension("x", 2)
+            nc.createVariable("v", "f4", ("x",))[:] = [0.0, 1.0]
+
+        fmt = netcdf_format(path)
+        assert fmt is expected
+        assert fmt.is_classic is is_classic
+
+    def test_unrecognized_for_non_netcdf_bytes(self, tmp_path: Path) -> None:
+        """A file whose header matches no netCDF magic number is UNRECOGNIZED."""
+        path = tmp_path / "junk.nc"
+        path.write_bytes(b"not a netcdf file")
+        fmt = netcdf_format(path)
+        assert fmt is NetCDFFormat.UNRECOGNIZED
+        assert not fmt.is_classic
+
+    def test_unrecognized_for_short_file(self, tmp_path: Path) -> None:
+        """A file shorter than the magic number is UNRECOGNIZED, not an error."""
+        path = tmp_path / "short.nc"
+        path.write_bytes(b"CD")
+        assert netcdf_format(path) is NetCDFFormat.UNRECOGNIZED

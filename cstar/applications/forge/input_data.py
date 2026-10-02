@@ -2311,10 +2311,10 @@ class RomsMarblInputData(InputData):
                     stacklevel=2,
                 )
             nriv = nriv_reused
-        elif resolved.resolve() == output_path.resolve():
-            pass  # already in place (e.g. authored directly into input_data_dir)
         else:
-            stage_user_netcdf(resolved, output_path, use_pio=self.use_pio)
+            stage_user_netcdf(
+                resolved, output_path, use_pio=self.use_pio, label="river forcing"
+            )
 
         if "river_frc" not in self._settings_run_time:
             self._settings_run_time["river_frc"] = {}
@@ -2577,10 +2577,10 @@ class RomsMarblInputData(InputData):
                 )
             ncdr_parm = ncdr_reused
             cdr_volume = cdr_volume_reused
-        elif resolved.resolve() == output_path.resolve():
-            pass  # already in place (e.g. authored directly into input_data_dir)
         else:
-            stage_user_netcdf(resolved, output_path, use_pio=self.use_pio)
+            stage_user_netcdf(
+                resolved, output_path, use_pio=self.use_pio, label="CDR forcing"
+            )
 
         if "cppdefs" not in self._settings_compile_time:
             self._settings_compile_time["cppdefs"] = {}
