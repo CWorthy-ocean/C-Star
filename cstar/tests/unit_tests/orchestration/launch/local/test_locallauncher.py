@@ -204,7 +204,7 @@ def test_locallauncher_adapt_step_with_compute_overrides(
     step_command = LocalLauncher.adapt_step(live_step, [])
 
     # confirm that compute overrides are required to modify the command
-    assert f"timeout {exp_timeout} -k {exp_fk_timeout}" in step_command
+    assert f"timeout -k {exp_fk_timeout} {exp_timeout}" in step_command
 
 
 @pytest.mark.usefixtures("read_yaml_intercept")

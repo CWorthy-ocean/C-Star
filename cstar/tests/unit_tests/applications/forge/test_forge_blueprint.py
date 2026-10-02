@@ -102,6 +102,20 @@ def test_resolver_does_not_alias_output_settings():
     assert cfg_b.model_settings["ocean_vars"]["output_period_rst"] == original
 
 
+def test_ntimes_counts_whole_seconds_of_a_sub_day_run():
+    """A run window shorter than a day used to resolve to ``ntimes == 0`` because
+    the step count was derived from ``timedelta.days``; it must come from the
+    window's total seconds.
+    """
+    cfg = _build(
+        start_date=datetime(2012, 1, 1, 12),
+        end_date=datetime(2012, 1, 1, 13),
+        dt=60,
+    )
+
+    assert cfg.model_settings["time_stepping"]["ntimes"] == 60
+
+
 def test_naming_is_derived_not_stored():
     cfg = _build()
     assert cfg.n_procs == 1

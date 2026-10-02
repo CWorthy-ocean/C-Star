@@ -1,0 +1,26 @@
+description: "North Atlantic 8x8 test grid (regenerates cstar_blueprint_test_case)"
+model_name: "roms-marbl-0.8-default"
+grid_name: "na-test-8x8"
+start_time: "2012-01-01"
+end_time: "2012-01-02"
+grid_kwargs:
+  nx: 8
+  ny: 8
+  size_x: 400
+  size_y: 400
+  center_lon: -5
+  center_lat: 60
+  rot: 10
+  N: 8
+  theta_s: 5.0
+  theta_b: 2.0
+  hc: 300.0
+  hmin: 5.0
+open_boundaries:
+  south: true
+  east: true
+  north: true
+  west: true
+partitioning:
+  n_procs_x: 2
+  n_procs_y: 2

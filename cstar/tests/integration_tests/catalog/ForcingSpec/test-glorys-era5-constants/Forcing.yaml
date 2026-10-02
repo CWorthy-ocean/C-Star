@@ -1,0 +1,32 @@
+description: "Test: GLORYS + ERA5 from pinned local files, BGC from constant values"
+# No bgc surface item: forge has no constants surface source.
+
+initial_conditions:
+  source:
+    name: GLORYS
+    glorys_layout: regional
+    path: "${TEST_DATA}/GLORYS_NA_2012.nc"
+  bgc_sources:
+    - source:
+        name: constants
+        constants: {PO4: 0.5, NO3: 5.0, SiO3: 10.0, NH4: 0.1, O2: 200.0, DIC: 2100.0, ALK: 2300.0}
+
+forcing:
+  surface:
+    - source:
+        name: ERA5
+        path: "${TEST_DATA}/ERA5_NA_2012.nc"
+      type: physics
+      correct_radiation: true
+      coarse_grid_mode: "never"
+  boundary:
+    source:
+      name: GLORYS
+      glorys_layout: regional
+      path: "${TEST_DATA}/GLORYS_NA_2012.nc"
+    bgc_sources:
+      - source:
+          name: constants
+          constants: {PO4: 0.5, NO3: 5.0, SiO3: 10.0, NH4: 0.1, O2: 200.0, DIC: 2100.0, ALK: 2300.0}
+  tidal: []
+  river: []

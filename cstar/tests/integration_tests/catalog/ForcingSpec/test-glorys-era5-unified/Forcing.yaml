@@ -1,0 +1,39 @@
+description: "Test: GLORYS + UNIFIED BGC + ERA5 from pinned local files (no tides/rivers)"
+
+initial_conditions:
+  source:
+    name: GLORYS
+    glorys_layout: regional
+    path: "${TEST_DATA}/GLORYS_NA_2012.nc"
+  bgc_sources:
+    - source:
+        name: UNIFIED
+        climatology: true
+        path: "${TEST_DATA}/coarsened_UNIFIED_bgc_dataset_v2_1.nc"
+
+forcing:
+  surface:
+    - source:
+        name: ERA5
+        path: "${TEST_DATA}/ERA5_NA_2012.nc"
+      type: physics
+      correct_radiation: true
+      coarse_grid_mode: "never"
+    - source:
+        name: UNIFIED
+        climatology: true
+        path: "${TEST_DATA}/coarsened_UNIFIED_bgc_dataset_v2_1.nc"
+      type: bgc
+      coarse_grid_mode: "never"
+  boundary:
+    source:
+      name: GLORYS
+      glorys_layout: regional
+      path: "${TEST_DATA}/GLORYS_NA_2012.nc"
+    bgc_sources:
+      - source:
+          name: UNIFIED
+          climatology: true
+          path: "${TEST_DATA}/coarsened_UNIFIED_bgc_dataset_v2_1.nc"
+  tidal: []
+  river: []
