@@ -416,7 +416,7 @@ def test_runner_directory_prep(
     # an empty output dir should be ok
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    actual_working_dir = sim_runner.blueprint.working_dir
+    actual_working_dir = sim_runner.blueprint.effective_working_dir
     # Confirm the output directory is created...
     assert actual_working_dir.exists()
     assert actual_working_dir.is_dir()

@@ -240,7 +240,7 @@ def forge_blueprint_factory(
             roms_ref=ROMS_REF,
         )
         working_dir.mkdir(parents=True, exist_ok=True)
-        cfg.working_dir = str(working_dir)
+        cfg.working_dir = working_dir
         return cfg, cfg.to_yaml(working_dir / "forge_blueprint.yaml")
 
     return _factory

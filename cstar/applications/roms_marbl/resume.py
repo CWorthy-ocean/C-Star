@@ -178,7 +178,7 @@ def prepare_resume_blueprint(blueprint_uri: str) -> str:
     with local_copy(blueprint_uri) as bp_path:
         bp = deserialize(bp_path, RomsMarblBlueprint)
 
-    fs = RomsFileSystemManager(bp.working_dir)
+    fs = RomsFileSystemManager(bp.effective_working_dir)
     use_pio = bp.partitioning.use_pio
 
     if use_pio:

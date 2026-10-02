@@ -112,7 +112,7 @@ C-Star application (see `Forge as a real C-Star application`_ below), not
 just a Pydantic model that happens to carry an ``application`` string.
 
 Top-level shape: ``forge_blueprint_version`` (int, bump only on breaking
-change; currently 8) - ``application`` (=``"forge"``, C-Star app
+change; currently 9) - ``application`` (=``"forge"``, C-Star app
 discriminator, required by the ``Blueprint`` base) - ``name``/``description``
 (required top-level fields on the ``Blueprint`` base; ``name`` is the single
 user-editable canonical name -- ``casename``/``working_dir``/
@@ -141,23 +141,26 @@ light) migrates v2/v3 layouts (removed
 ``identity`` sub-model, removed ``ensemble_id``), the v4->v5
 ``do_cdr``->``do_cdr_output`` rename, the v6->v7 CDR move
 (``forcing.cdr_forcing``/``cdr_forcing_file`` -> the top-level ``cdr``
-section, mode inferred), and the v7->v8 BGC-sources move
+section, mode inferred), the v7->v8 BGC-sources move
 (``initial_conditions.bgc_source`` rewrapped as a one-item ``bgc_sources``
 list; ``forcing.boundary``'s flat, type-discriminated
 ``BoundaryForcingItem`` list split into a single ``BoundaryForcing`` section
-with ``source`` + ``bgc_sources``, mirroring ``InitialConditions``) to the
-current shape, reproducing derived names bit-for-bit. ``model_name``/
+with ``source`` + ``bgc_sources``, mirroring ``InitialConditions``), and the
+v8->v9 ``working_dir`` strip (the old default-form
+``~/cstar/_forge_bp_runs/<name>`` is removed so the blueprint takes the base
+class's default; a deliberately set path is kept) to the current shape,
+reproducing derived names bit-for-bit. ``model_name``/
 ``grid_name`` live in ``composition.model.name``/``domain.grid_name``;
 ``grid_name`` is results-affecting -- ``SourceDatasets`` keys cache
 filenames off it.
 
-- **``working_dir``** (default ``~/cstar/_forge_bp_runs``) is the single
-  per-run artifact root -- everything the executor *produces* lands under
-  it. It's host/location, not results-affecting, so it's excluded from
-  ``content_hash``. Redeclared as ``str`` (the ``Blueprint`` base's is
-  ``Path``) to preserve sentinel expansion -- see
-  ``ForgeBlueprint._resolve_out_dir``, which overrides the base's eager
-  ``expanduser()``/``resolve()`` for exactly this reason.
+- **``working_dir``** is the single per-run artifact root -- everything the
+  executor *produces* lands under it. ``ForgeBlueprint`` does not redeclare
+  it: it inherits the ``Blueprint`` base field (``Path | None``, default
+  ``None``), and the base property ``effective_working_dir`` resolves the
+  default, ``CSTAR_DATA_HOME/blueprint_runs/forge/<name>``. It's
+  host/location, not results-affecting, so it's excluded from
+  ``content_hash``.
 - **``content_hash()``** -- sha256 over everything *except*
   ``forge_blueprint_version``, ``name``, ``description``, ``composition``,
   ``provenance``, ``working_dir``, ``state``, ``schema_version``,
@@ -263,7 +266,9 @@ The call chain end to end
 
 5. ``cstar blueprint run forge_blueprint.yaml`` (or ``cstar forge run ...``)
    -- resolves the host via ``cstar.applications.forge.config.resolve_host()``
-   (machine tag, ``source_data_cache``, ``working_dir`` override).
+   (machine tag, ``source_data_cache``, and the working directory: the
+   blueprint's ``effective_working_dir`` or the ``--working-dir`` override,
+   used as written).
 6. ``cstar.applications.forge.engine.process_forge_blueprint(cfg, host, ...)``
    builds a ``ForgeExecutor`` via ``ForgeExecutor.from_forge_blueprint(cfg,
    host)`` and drives: ``ensure_source_data()`` -> ``generate_inputs()`` ->
@@ -271,7 +276,9 @@ The call chain end to end
 7. Outputs land under ``host.working_dir``: input NetCDFs, ``namelist.nml``,
    ``cppdefs.opt``, and the emitted downstream ``roms_marbl`` blueprint YAML
    (``B_{name}.yaml``, persisted once by ``configure_build()`` -- there is
-   no per-stage blueprint file).
+   no per-stage blueprint file). The emitted blueprint leaves ``working_dir``
+   unset, so it runs under
+   ``CSTAR_DATA_HOME/blueprint_runs/roms_marbl/<name>``.
 
 ``ForgeExecutor`` never imports ``cstar.applications.forge.config``/
 ``cstar.catalog``/``cstar.applications.forge.resolve``/``cstar.wizard`` --

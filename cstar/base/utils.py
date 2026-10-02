@@ -322,11 +322,11 @@ def slugify(source: str) -> str:
     str
         The slugified version of the source string.
     """
-    value = source.strip().casefold()
+    value = re.sub(r"\W+", "-", source.strip().casefold()).strip("-")
     if not value:
         raise ValueError("Source collapses to empty string when slugified")
 
-    return re.sub(r"\W+", "-", value).strip("-")
+    return value
 
 
 def deep_merge(

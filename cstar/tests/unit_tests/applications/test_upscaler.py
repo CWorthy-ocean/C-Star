@@ -76,7 +76,7 @@ class TestUpscalerRunnerSaveRouting:
             yield mock_cls.return_value
 
     def _expected_final_path(self, blueprint: UpscalerBlueprint) -> Path:
-        return Path(blueprint.working_dir) / "output" / "upscaled_cdr.nc"
+        return blueprint.effective_working_dir / "output" / "upscaled_cdr.nc"
 
     async def test_pio_true_saves_to_mangled_path_and_converts(
         self,

@@ -1181,6 +1181,31 @@ class TestForgeExecutorBuildAndRun:
                 assert "compile_time" in roms_marbl_blueprint_data["code"]
                 assert "location" in roms_marbl_blueprint_data["code"]["compile_time"]
 
+    def test_emitted_blueprint_leaves_working_dir_unset(
+        self, minimal_cstar_spec_builder_args
+    ):
+        """The roms_marbl blueprint carries no ``working_dir``, in memory or on disk,
+        so C-Star places the run under its own default or the workplan step directory.
+        """
+        builder = _make_builder(minimal_cstar_spec_builder_args)
+
+        with (
+            patch(
+                "cstar.applications.forge.executor.render_roms_settings"
+            ) as mock_render,
+            patch("cstar.applications.forge.executor.write_roms_namelist"),
+        ):
+            mock_render.return_value = {
+                "location": str(builder.compile_time_code_dir),
+                "filter": {"files": ["test.opt"]},
+                "branch": "main",
+            }
+            builder.configure_build()
+
+        assert builder.roms_marbl_blueprint.working_dir is None
+        emitted = yaml.safe_load(builder.path_roms_marbl_blueprint().read_text())
+        assert "working_dir" not in emitted
+
     def test_configure_build_writes_exactly_one_blueprint_and_sidecar(
         self, minimal_cstar_spec_builder_args
     ):
@@ -2213,120 +2238,6 @@ class TestForgeExecutorDefaultRuntimeParams:
         # output_dir is a pre-2.0.0 field: it must not be emitted (the cstar
         # models are extra="forbid").
         assert "output_dir" not in runtime_params.model_dump()
-
-
-class TestForgeExecutorRomsBlueprintWorkingDir:
-    """Tests for roms_blueprint_working_dir property."""
-
-    def test_swaps_forge_bp_runs_segment(self, minimal_cstar_spec_builder_args):
-        """When run_output_dir has the known _forge_bp_runs root, the blueprint
-        working dir is the sibling _roms_bp_runs root, name preserved.
-        """
-        builder = _make_builder(minimal_cstar_spec_builder_args)
-        run_dir = Path("/home/user/cstar/_forge_bp_runs/my_run_name")
-        builder.host = HostPaths(
-            working_dir=run_dir,
-            source_data_cache=builder.host.source_data_cache,
-            system="test",
-        )
-
-        assert builder.roms_blueprint_working_dir == Path(
-            "/home/user/cstar/_roms_bp_runs/my_run_name"
-        )
-
-    def test_unanchored_forge_bp_runs_segment_is_not_swapped(
-        self, minimal_cstar_spec_builder_args
-    ):
-        """A ``_forge_bp_runs`` segment NOT under ``cstar/`` is a coincidence in a
-        custom path, not the default root -- it falls through to the fallback
-        instead of being rewritten (mirrors relocate_working_dir's anchored match).
-        """
-        builder = _make_builder(minimal_cstar_spec_builder_args)
-        run_dir = Path("/custom/_forge_bp_runs/my_run_name")
-        builder.host = HostPaths(
-            working_dir=run_dir,
-            source_data_cache=builder.host.source_data_cache,
-            system="test",
-        )
-
-        assert builder.roms_blueprint_working_dir == run_dir / "_roms_bp_runs"
-
-    def test_swaps_legacy_cstar_forge_run_segment(
-        self, minimal_cstar_spec_builder_args
-    ):
-        """When run_output_dir has the old (pre-rename) cstar-forge-run root, the
-        blueprint working dir is the sibling legacy cstar-roms-run root, name
-        preserved -- this keeps explicit old-form paths on non-HPC hosts working.
-        """
-        builder = _make_builder(minimal_cstar_spec_builder_args)
-        run_dir = Path("/home/user/cstar-forge-run/my_run_name")
-        builder.host = HostPaths(
-            working_dir=run_dir,
-            source_data_cache=builder.host.source_data_cache,
-            system="test",
-        )
-
-        assert builder.roms_blueprint_working_dir == Path(
-            "/home/user/cstar-roms-run/my_run_name"
-        )
-
-    def test_falls_back_to_subdir_when_unrecognized(
-        self, minimal_cstar_spec_builder_args
-    ):
-        """When run_output_dir doesn't contain the known _forge_bp_runs segment
-        (nor the legacy cstar-forge-run one), fall back to a _roms_bp_runs
-        subdirectory under it.
-        """
-        builder = _make_builder(minimal_cstar_spec_builder_args)
-        run_dir = Path("/custom/spot")
-        builder.host = HostPaths(
-            working_dir=run_dir,
-            source_data_cache=builder.host.source_data_cache,
-            system="test",
-        )
-
-        assert builder.roms_blueprint_working_dir == Path("/custom/spot/_roms_bp_runs")
-
-    def test_forge_and_roms_roots_are_siblings_with_matching_name(
-        self, minimal_cstar_spec_builder_args
-    ):
-        """The forge run root and the emitted-blueprint run root should always be
-        siblings sharing the run name, derived from DEFAULT_WORKING_ROOT and
-        ROMS_RUN_SEGMENT -- this guards against those two constants drifting apart.
-        """
-        from cstar.applications.forge import config as forge_config
-
-        merged = minimal_cstar_spec_builder_args
-        cfg = build_forge_blueprint(
-            model_dir=_MODEL_DIR,
-            grid_name=merged["grid_name"],
-            grid_kwargs=merged["grid_kwargs"],
-            open_boundaries=merged["open_boundaries"].model_dump(),
-            partitioning=merged["partitioning"].model_dump(),
-            start_date=merged["start_date"],
-            end_date=merged["end_date"],
-            name="my_sibling_run",
-            dt=7200,
-            forcing_inputs=_FORCING_INPUTS,
-            output_settings=_OUTPUT_SETTINGS,
-        )
-
-        host = forge_config.resolve_host(cfg.working_dir)
-        builder = ForgeExecutor.from_forge_blueprint(cfg, host=host)
-
-        # The two working dirs must never collapse into the same directory (the
-        # failure mode the old fragile .replace() risked).
-        assert builder.roms_blueprint_working_dir != builder.run_output_dir
-        # ...but they are siblings, sharing the grandparent (host root) and name.
-        assert (
-            builder.roms_blueprint_working_dir.parent.parent
-            == builder.run_output_dir.parent.parent
-        )
-        assert (
-            builder.roms_blueprint_working_dir.name
-            == builder.run_output_dir.name
-            == "my_sibling_run"
-        )
 
 
 class TestCaptureOutput:

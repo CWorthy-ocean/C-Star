@@ -310,9 +310,9 @@ async def test_prepare_composed_dag(
     paths: set[Path] = set()
     for step in steps:
         bp = deserialize(step.blueprint_path, RomsMarblBlueprint)
-        paths.add(bp.working_dir)
+        paths.add(bp.effective_working_dir)
 
-        assert bp.working_dir.exists()
+        assert bp.effective_working_dir.exists()
 
     # confirm that every step has a unique output path
     assert len(steps) == num_timeslices
@@ -393,6 +393,6 @@ async def test_run_composed_dag(
     paths: set[Path] = set()
     for step in steps:
         bp = deserialize(step.blueprint_path, RomsMarblBlueprint)
-        paths.add(bp.working_dir)
+        paths.add(bp.effective_working_dir)
 
-        assert bp.working_dir.exists()
+        assert bp.effective_working_dir.exists()

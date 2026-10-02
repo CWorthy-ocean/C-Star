@@ -28,6 +28,8 @@ from cstar.applications.forge.resolve import (
     build_forge_blueprint,
 )
 from cstar.applications.forge.settings import render_roms_settings
+from cstar.base.env import ENV_CSTAR_DATA_HOME
+from cstar.base.utils import slugify
 from cstar.catalog.domain_catalog import default_catalog as _CATALOG
 
 _BUNDLED_CATALOG = Path(cstar.catalog.__file__).parent / "bundled"
@@ -292,37 +294,58 @@ def test_forge_version_explicit_override_preserved():
     assert cfg.provenance.forge_version == "0.2.0"
 
 
-def test_default_working_dir_includes_run_name():
-    from cstar.applications.forge.blueprint import DEFAULT_WORKING_ROOT
-
-    cfg = _build()
-    assert cfg.working_dir == f"{DEFAULT_WORKING_ROOT}/{cfg.name}"
+def test_working_dir_defaults_to_none():
+    assert _build().working_dir is None
 
 
-def test_bare_default_working_dir_expands_and_explicit_survives():
-    from cstar.applications.forge.blueprint import DEFAULT_WORKING_ROOT
-
-    cfg = _build()
-    # an old file storing the bare default root gains the run-name layer on load
-    data = cfg.model_dump(mode="json")
-    data["working_dir"] = DEFAULT_WORKING_ROOT
-    assert ForgeBlueprint(**data).working_dir == f"{DEFAULT_WORKING_ROOT}/{cfg.name}"
-    # a deliberate non-default path passes through untouched
-    data["working_dir"] = "/custom/spot"
-    assert ForgeBlueprint(**data).working_dir == "/custom/spot"
-
-
-def test_working_dir_accepts_path_from_scheduler_override():
-    """C-Star's workplan scheduler (``get_system_overrides``) overrides working_dir
-    with ``step.fsm.root_dir`` -- a ``Path``, which pydantic won't coerce to the
-    field's ``str`` type on its own.
+def test_effective_working_dir_is_cstar_default(tmp_path, monkeypatch):
+    """Unset ``working_dir`` runs under C-Star's default for the application and
+    (slugified) name -- the one place this suite pins the layout.
     """
-    from pathlib import Path
-
+    monkeypatch.setenv(ENV_CSTAR_DATA_HOME, str(tmp_path))
     cfg = _build()
-    data = cfg.model_dump(mode="json")
-    data["working_dir"] = Path("/scratch/run-id/step-root")
-    assert ForgeBlueprint(**data).working_dir == "/scratch/run-id/step-root"
+
+    assert cfg.effective_working_dir == (
+        tmp_path.resolve() / "blueprint_runs" / "forge" / slugify(cfg.name)
+    )
+
+
+def test_explicit_working_dir_survives_as_resolved_path(tmp_path):
+    data = _build().model_dump(mode="json")
+    data["working_dir"] = str(tmp_path / "custom" / ".." / "spot")
+
+    cfg = ForgeBlueprint(**data)
+
+    assert cfg.working_dir == (tmp_path / "spot").resolve()
+    assert cfg.effective_working_dir == cfg.working_dir
+
+
+def test_working_dir_accepts_path_from_scheduler_override(tmp_path):
+    """C-Star's workplan scheduler (``get_system_overrides``) overrides working_dir
+    with ``step.fsm.root_dir`` -- a ``Path``.
+    """
+    data = _build().model_dump(mode="json")
+    data["working_dir"] = tmp_path / "run-id" / "step-root"
+
+    cfg = ForgeBlueprint(**data)
+
+    assert cfg.working_dir == tmp_path / "run-id" / "step-root"
+
+
+def test_to_yaml_str_omits_unset_working_dir():
+    saved = yaml.safe_load(_build().to_yaml_str())
+
+    assert "working_dir" not in saved
+    assert ForgeBlueprint.from_yaml_data(saved).working_dir is None
+
+
+def test_to_yaml_str_keeps_set_working_dir(tmp_path):
+    data = _build().model_dump(mode="json")
+    data["working_dir"] = str(tmp_path)
+
+    saved = yaml.safe_load(ForgeBlueprint(**data).to_yaml_str())
+
+    assert saved["working_dir"] == str(tmp_path)
 
 
 def test_estimate_forge_cpus_anchors_floor_and_no_cap():
@@ -666,6 +689,110 @@ class TestMigrateV6ToV7CdrRelocation:
         data = {"forcing": {}, "cdr": {"mode": "upscaled"}}
         migrated = migrate_forge_blueprint_data(data)
         assert migrated["cdr"] == {"mode": "upscaled"}
+
+
+class TestMigrateV8ToV9WorkingDir:
+    """v8 -> v9: Forge's old stored default ``working_dir`` is dropped (the run then
+    uses C-Star's default); any other value is kept verbatim.
+    """
+
+    LEGACY_ROOTS = (
+        "~/cstar/_forge_bp_runs",
+        "~/cstar-forge-run",
+        "~/cstar-forge-data/cstar-forge-run",
+    )
+
+    def _v8_data(self, working_dir, name=None):
+        data = yaml.safe_load(_build().to_yaml_str())
+        data["forge_blueprint_version"] = 8
+        data["working_dir"] = working_dir
+        if name is not None:
+            data["name"] = name
+        return data
+
+    @pytest.mark.parametrize("root", LEGACY_ROOTS)
+    def test_legacy_default_with_run_name_is_dropped(self, root):
+        from cstar.applications.forge.migration import migrate_forge_blueprint_data
+
+        data = self._v8_data(None)
+        data["working_dir"] = f"{root}/{data['name']}"
+
+        migrated = migrate_forge_blueprint_data(data)
+
+        assert "working_dir" not in migrated
+        assert migrated["forge_blueprint_version"] == FORGE_BLUEPRINT_VERSION
+
+    @pytest.mark.parametrize("root", LEGACY_ROOTS)
+    @pytest.mark.parametrize("suffix", ["", "/"])
+    def test_bare_legacy_root_is_dropped(self, root, suffix):
+        from cstar.applications.forge.migration import migrate_forge_blueprint_data
+
+        migrated = migrate_forge_blueprint_data(self._v8_data(root + suffix))
+
+        assert "working_dir" not in migrated
+
+    def test_name_needing_sanitization_still_matches(self):
+        """The stored default used the sanitized name, so a raw name must match it."""
+        from cstar.applications.forge.migration import migrate_forge_blueprint_data
+
+        data = self._v8_data("~/cstar/_forge_bp_runs/My_Run", name="My Run!")
+
+        assert "working_dir" not in migrate_forge_blueprint_data(data)
+
+    @pytest.mark.parametrize(
+        "working_dir",
+        [
+            "/custom/spot",
+            "~/elsewhere/run",
+            # another run's default, or something below this run's: deliberate paths
+            "~/cstar/_forge_bp_runs/some-other-run",
+            "~/cstar/_forge_bp_runs/{name}/nested",
+            # the expanded form of a default is a path the user chose to write out
+            "{home}/cstar/_forge_bp_runs/{name}",
+        ],
+    )
+    def test_other_values_are_kept_verbatim(self, working_dir):
+        from cstar.applications.forge.migration import migrate_forge_blueprint_data
+
+        data = self._v8_data(None)
+        value = working_dir.format(name=data["name"], home=Path.home())
+        data["working_dir"] = value
+
+        assert migrate_forge_blueprint_data(data)["working_dir"] == value
+
+    def test_v9_data_is_left_alone(self):
+        """At v9 an explicit ``working_dir`` is a deliberate value, even one that
+        looks like an old default; migrating twice changes nothing.
+        """
+        from cstar.applications.forge.migration import migrate_forge_blueprint_data
+
+        data = self._v8_data(None)
+        data["forge_blueprint_version"] = 9
+        data["working_dir"] = f"~/cstar/_forge_bp_runs/{data['name']}"
+
+        once = migrate_forge_blueprint_data(data)
+        twice = migrate_forge_blueprint_data(dict(once))
+
+        assert once["working_dir"] == data["working_dir"]
+        assert twice == once
+
+    def test_idempotent_after_dropping(self):
+        from cstar.applications.forge.migration import migrate_forge_blueprint_data
+
+        data = self._v8_data("~/cstar/_forge_bp_runs")
+
+        once = migrate_forge_blueprint_data(data)
+
+        assert migrate_forge_blueprint_data(dict(once)) == once
+
+    def test_loads_through_from_yaml_data(self, tmp_path):
+        """The public entry point: legacy default becomes unset, a custom path is kept."""
+        legacy = self._v8_data(None)
+        legacy["working_dir"] = f"~/cstar/_forge_bp_runs/{legacy['name']}"
+        custom = self._v8_data(str(tmp_path / "spot"))
+
+        assert ForgeBlueprint.from_yaml_data(legacy).working_dir is None
+        assert ForgeBlueprint.from_yaml_data(custom).working_dir == tmp_path / "spot"
 
 
 _USER_FILE_KWARGS = dict(location="/data/staged/grid.nc", content_hash="a" * 64)
@@ -5654,21 +5781,22 @@ class TestForgeBlueprintEngine:
             )  # raises before any call
 
     def test_resolve_host_reads_config_not_file(self):
-        # Forge's disposable host provider builds a HostPaths from auto-detected config;
+        # Forge's host provider builds a HostPaths from auto-detected config;
         # the host is NOT read from the spec file. (The app receives this HostPaths via
-        # process_forge_blueprint(host=...); C-Star supplies its own equivalent on relocation.)
+        # process_forge_blueprint(host=...).)
         from cstar.applications.forge import config
         from cstar.applications.forge.host import HostPaths
 
         cfg = self._cfg()
-        h = config.resolve_host(cfg.working_dir)
+        h = config.resolve_host(cfg.effective_working_dir)
         assert isinstance(h, HostPaths)
         assert h.system
         # working_dir is the injected per-run artifact root; source_data_cache is the
         # shared host download cache. Both resolved from config, not the spec file.
-        # The spec default carries a per-run subdirectory: <root>/<name>.
-        assert "_forge_bp_runs" in str(h.working_dir)
-        assert str(h.working_dir).endswith(cfg.name)
+        # The unset default is C-Star's per-run directory for this application and name.
+        assert h.working_dir == cfg.effective_working_dir
+        assert h.working_dir.parent.parts[-2:] == ("blueprint_runs", "forge")
+        assert h.working_dir.name == slugify(cfg.name)
         assert h.source_data_cache is not None
 
 

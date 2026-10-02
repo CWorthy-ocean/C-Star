@@ -306,6 +306,9 @@ class StateDirectoryManager:
     _USER_VIEW_NAME: t.ClassVar[t.Literal["gathered_output"]] = "gathered_output"
     """The name of the directory where an aggregated user view of outputs is created."""
 
+    _BLUEPRINT_RUNS_NAME: t.ClassVar[t.Literal["blueprint_runs"]] = "blueprint_runs"
+    """The name of the data-home directory holding blueprint runs made outside a workplan."""
+
     @classmethod
     def root_dir(cls) -> Path:
         """The root directory containing all job outputs.
@@ -356,6 +359,29 @@ class StateDirectoryManager:
         data_home = DirectoryManager.data_home()
         run_id = run_id or get_env_item(ENV_CSTAR_RUNID).value
         return data_home / run_id
+
+    @classmethod
+    def blueprint_run_dir(cls, application: str, name: str) -> Path:
+        """The default working directory of a blueprint run outside a workplan.
+
+        ``<data home>/blueprint_runs/<application>/<name>``: where a blueprint
+        that declares no ``working_dir`` is executed from. The application
+        segment keeps a producer and the blueprint it emits apart when they
+        share a name (forge and its ``roms_marbl`` blueprint).
+
+        Parameters
+        ----------
+        application : str
+            The application the blueprint runs.
+        name : str
+            The blueprint name, slugified for use as a directory name.
+
+        Returns
+        -------
+        Path
+        """
+        data_home = DirectoryManager.data_home()
+        return data_home / cls._BLUEPRINT_RUNS_NAME / application / slugify(name)
 
     @classmethod
     def user_dir(cls, run_id: str | None = None) -> Path:

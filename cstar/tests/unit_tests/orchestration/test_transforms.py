@@ -232,8 +232,8 @@ def test_override_transform(
     bp_new = deserialize(transformed.blueprint_path, RomsMarblBlueprint)
 
     # confirm nested attributes (bp.runtime_params.xxx)) is changed
-    assert Path(bp_old.working_dir) == dir_orig.expanduser().resolve()
-    assert Path(bp_new.working_dir) == exp_dir.expanduser().resolve()
+    assert bp_old.effective_working_dir == dir_orig.expanduser().resolve()
+    assert bp_new.effective_working_dir == exp_dir.expanduser().resolve()
 
     assert bp_old.runtime_params.start_date == datetime(2020, 1, 1)
     assert bp_old.runtime_params.end_date == datetime(2021, 1, 1)
@@ -292,8 +292,8 @@ def test_override_transform_system_precedence(
 
     # confirm that even though a working directory override was applied, the
     # system level override was applied last.
-    assert Path(bp_old.working_dir) == dir_orig
-    assert Path(bp_new.working_dir) == sys_od
+    assert bp_old.effective_working_dir == dir_orig
+    assert bp_new.effective_working_dir == sys_od
 
 
 def test_override_transform_system_list_replaces_wholesale(
@@ -338,7 +338,7 @@ def test_override_transform_system_list_replaces_wholesale(
 
     # the user-level scalar override still applies alongside the
     # system-level list replacement.
-    assert Path(bp_after.working_dir) == user_working_dir.expanduser().resolve()
+    assert bp_after.effective_working_dir == user_working_dir.expanduser().resolve()
 
 
 def test_override_transform_system_list_without_flag_merges_elementwise(

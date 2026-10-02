@@ -677,7 +677,7 @@ class OverrideTransform(Transform[LiveStep]):
         updated_bp = self.apply(blueprint, step.blueprint_overrides)
         update: dict[str, t.Any] = {
             "blueprint_overrides": {},
-            "working_dir": updated_bp.working_dir,
+            "working_dir": updated_bp.effective_working_dir,
         }
 
         live_step = LiveStep.from_step(step, update=update)
@@ -1350,7 +1350,7 @@ class DirectiveConfig(BaseModel):
                 name="directive-step",
                 application=app.name,
                 blueprint=local_bp,
-                working_dir=blueprint.working_dir,
+                working_dir=blueprint.effective_working_dir,
             )
 
             # apply-overrides must run before any content directive so the

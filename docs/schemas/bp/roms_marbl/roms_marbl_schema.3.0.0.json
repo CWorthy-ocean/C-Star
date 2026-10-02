@@ -500,11 +500,18 @@
             "type": "string"
         },
         "working_dir": {
-            "default": ".",
-            "description": "Path to a directory where assets are stored when executing the blueprint.",
-            "format": "path",
-            "title": "Working Dir",
-            "type": "string"
+            "anyOf": [
+                {
+                    "format": "path",
+                    "type": "string"
+                },
+                {
+                    "type": "null"
+                }
+            ],
+            "default": null,
+            "description": "Directory the application writes to; omitted, C-Star uses ``CSTAR_DATA_HOME/blueprint_runs/<application>/<name>``.",
+            "title": "Working Dir"
         },
         "valid_start_date": {
             "description": "Beginning of the time range for the available data.",

@@ -26,11 +26,12 @@ Single governing principle
 The config stores ONLY host-independent, single-source-of-truth inputs. Anything
 mechanically derivable is computed at **processing** time, never stored:
 
-* **Host/machine** — the machine tag, account, queues, ``pes_per_node``, and every
-  data path (source_data / input_data / scratch / catalog) are resolved at
-  processing time from ``cstar.applications.forge.config`` on the machine that runs the work.
-  ``run_output_dir`` and the namelist ``output_root_name`` (which embed the scratch
-  path) are therefore derived there too.
+* **Host/machine** — the machine tag, account, queues, ``pes_per_node``, the
+  source-data cache and the catalog are resolved at processing time from
+  ``cstar.applications.forge.config`` on the machine that runs the work. The per-run
+  output root is the blueprint's ``effective_working_dir`` (or a ``--working-dir``
+  override), so ``run_output_dir`` and the namelist ``output_root_name`` are derived
+  at processing time too.
 * **Naming** — the canonical ``name`` is a user-editable atomic input (required by the
   ``Blueprint`` base), defaulting to a derived value
   (``{model_name}_{grid_name}_{n_procs}procs``) computed once by the resolver.
@@ -302,7 +303,8 @@ _HASH_EXCLUDE = {
     "description",
     "composition",
     "provenance",
-    # host/location only — runtime-overridden per host; must not change the content hash.
+    # host/location only — set per run (an override or the workplan step directory);
+    # must not change the content hash.
     "working_dir",
     # Blueprint-base (cstar.orchestration.models) metadata, not blueprint content.
     "state",
@@ -354,24 +356,17 @@ _HASH_EXCLUDE = {
 # both sections now build on the same roms-tools wrapper API.
 # NOTE: this change was numbered v6, then v7, on its branch; main released a
 # different v6 (user-provided files) and v7 (CDR overhaul) first, so it is v8.
-FORGE_BLUEPRINT_VERSION = 8
+# v9 (2026-10): ``working_dir`` is optional and a saved blueprint omits it; the
+# run then goes under C-Star's default for the application and name
+# (``Blueprint.effective_working_dir``). Migration drops a ``working_dir`` that
+# is one of Forge's old home-rooted defaults and keeps any other value as written.
+FORGE_BLUEPRINT_VERSION = 9
 
 # Identifies the C-Star application that CONSUMES this blueprint — i.e. the "forge"
 # application (this processing engine), whose blueprint IS the ForgeBlueprint. Do not confuse
 # with the downstream roms_marbl application (whose blueprint this run *emits*). Stable
 # across schema/field iteration; used by C-Star to route the blueprint to its application.
 DEFAULT_APPLICATION = "forge"
-
-# Default per-run artifact root. The bare root (no run-name subdirectory) is the
-# spec-default sentinel: ForgeBlueprint expands it to ``<root>/<name>`` on validation,
-# and host providers (Forge's ``config.resolve_host``; eventually C-Star) may rebase
-# default-form paths onto host scratch at run time.
-DEFAULT_WORKING_ROOT = "~/cstar/_forge_bp_runs"
-
-# Sibling root segment under the shared ``cstar/`` root (alongside
-# DEFAULT_WORKING_ROOT's) for the emitted roms-marbl blueprint's working_dir; see
-# ForgeExecutor.roms_blueprint_working_dir in executor.py.
-ROMS_RUN_SEGMENT = "_roms_bp_runs"
 
 _NAME_UNSAFE_RE = re.compile(r"[^A-Za-z0-9._-]+")
 _NAME_RUN_RE = re.compile(r"[_.-]{2,}")
@@ -382,9 +377,9 @@ def sanitize_name(raw: str) -> str:
 
     Used for both user-supplied names (the wizard's editable Export field, a
     hand-edited YAML) and the resolver's derived default, so the two are
-    idempotent with each other. The result feeds ``working_dir``, ``casename``,
-    ``B_{name}.yaml``, and netCDF filename stems -- keep the charset conservative
-    ([A-Za-z0-9._-]); anything else collapses to a single ``_``.
+    idempotent with each other. The result feeds the default working directory,
+    ``casename``, ``B_{name}.yaml``, and netCDF filename stems -- keep the charset
+    conservative ([A-Za-z0-9._-]); anything else collapses to a single ``_``.
     """
     s = _NAME_UNSAFE_RE.sub("_", raw.strip())
     s = _NAME_RUN_RE.sub(lambda m: m.group(0)[0], s).strip("_.-")
@@ -1296,26 +1291,13 @@ class ForgeBlueprint(Blueprint):
     # The blueprint's canonical name + human description (``Blueprint`` base fields).
     # ``name`` is the single source of truth for every derived name (``casename``,
     # namelist ``title``, ``output_root_name``, ``run_output_dir``, the default
-    # ``working_dir``, ``B_{name}.yaml``) -- see the properties below. The resolver
+    # working directory, ``B_{name}.yaml``) -- see the properties below. The resolver
     # computes a sensible default (``{model_name}_{grid_name}_{n_procs}procs``) but a
     # user may override it; ``model_name``/``grid_name`` themselves live in
     # ``composition.model.name``/``domain.grid_name`` (they are provenance/functional
     # inputs, not naming inputs, once ``name`` is stored directly).
     name: str
     description: str = "Generated blueprint"
-    # Per-run artifact root: everything the executor PRODUCES (input netCDFs, namelist,
-    # cppdefs, the emitted roms_marbl blueprint, build dirs) lands under here. Stored with a
-    # sensible default but OVERRIDDEN at runtime by C-Star / the Forge executor for the host.
-    # Host/location only -> excluded from content_hash (see _HASH_EXCLUDE).
-    # The bare root is a sentinel: a validator expands it to ``<root>/<name>`` so each
-    # run gets its own subdirectory (see ``_default_working_dir_includes_name``).
-    #
-    # Redeclared (``str``, not the base's ``Path``) to keep this sentinel behavior --
-    # see ``_resolve_out_dir`` below, which overrides the base's eager
-    # expanduser()/resolve() so the sentinel stays recognizable until then. mypy sees
-    # this as narrowing the base class's ``Path`` annotation; the deliberate widening
-    # (Pydantic re-validates the field on this subclass, so it's safe at runtime).
-    working_dir: str = DEFAULT_WORKING_ROOT  # type: ignore[assignment]
     run: RunWindow
     domain: Domain
     forcing: Forcing
@@ -1362,40 +1344,6 @@ class ForgeBlueprint(Blueprint):
     @classmethod
     def _sanitize_name(cls, v: str) -> str:
         return sanitize_name(v)
-
-    @field_validator("working_dir", mode="before")
-    @classmethod
-    def _coerce_working_dir(cls, value: Any) -> Any:
-        """Accept a ``Path`` where the field is declared ``str``: C-Star's workplan
-        scheduler system-override (``get_system_overrides``) injects
-        ``step.fsm.root_dir`` as a ``Path``, which pydantic will not coerce.
-        """
-        if isinstance(value, Path):
-            return value.as_posix()
-        return value
-
-    @field_validator("working_dir", mode="after")
-    @classmethod
-    def _resolve_out_dir(cls, value: str, _info: Any) -> str:
-        """Override the ``Blueprint`` base validator of the same name, which expects
-        a ``Path`` and eagerly expands/resolves it. Forge's ``working_dir`` is a
-        ``str`` sentinel that ``_default_working_dir_includes_name`` (below) rewrites
-        relative to the blueprint name; expansion to an absolute host path happens
-        later, at processing time, once the real host's scratch root is known.
-        """
-        return value
-
-    @model_validator(mode="after")
-    def _default_working_dir_includes_name(self) -> ForgeBlueprint:
-        """Expand a bare default ``working_dir`` to include the run name.
-
-        Only the sentinel (the bare ``DEFAULT_WORKING_ROOT``, as stored by older files
-        or an unset field) is expanded to ``<root>/<name>``; any other value is a
-        deliberate choice and passes through untouched.
-        """
-        if self.working_dir.rstrip("/") == DEFAULT_WORKING_ROOT:
-            self.working_dir = f"{DEFAULT_WORKING_ROOT}/{self.name}"
-        return self
 
     # ---- derived naming (single source of truth: name + dates) ----
     @property
@@ -1564,7 +1512,13 @@ class ForgeBlueprint(Blueprint):
         stamped = self.model_copy(
             update={"provenance": prov.model_copy(update=updates)}
         )
-        data = stamped.model_dump(mode="json", exclude_none=False)
+        # ``exclude_none=False`` keeps explicit nulls, so an unset ``working_dir``
+        # (the default) is dropped by name: a saved file simply has no such line.
+        data = stamped.model_dump(
+            mode="json",
+            exclude_none=False,
+            exclude={"working_dir"} if stamped.working_dir is None else None,
+        )
         return yaml.safe_dump(data, sort_keys=False, default_flow_style=False)
 
     @classmethod

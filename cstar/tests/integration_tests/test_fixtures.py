@@ -135,7 +135,7 @@ def test_factory_unified(
     assert cfg.model_settings["time_stepping"]["dt"] == DT
     assert cfg.model_settings["ocean_vars"]["output_period_rst"] == 1800
     assert cfg.code.roms.commit == ROMS_REF
-    assert cfg.working_dir == str(tmp_path)
+    assert cfg.working_dir == tmp_path
 
 
 def test_factory_constants(

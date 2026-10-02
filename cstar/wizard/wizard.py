@@ -113,9 +113,9 @@ HELP_TEXT: dict[str | tuple[str, str], str] = {
     ): "Baroclinic time step in seconds. Leave blank to compute from the CFL criterion "
     "(click 'Compute dt (CFL)' — requires roms_tools).",
     ("run", "description"): "Human-readable description of this blueprint.",
-    ("export", "name"): "Canonical blueprint name. Drives the save filename, "
-    "working_dir, casename, and generated file stems. Defaults to a derived "
-    "name (model_grid_NprocsProcs); edit to override.",
+    ("export", "name"): "Canonical blueprint name. Drives the save filename, the "
+    "default working directory, casename, and generated file stems. Defaults to a "
+    "derived name (model_grid_NprocsProcs); edit to override.",
     # ---- grid ------------------------------------------------------------------
     ("grid", "nx"): "Number of horizontal grid points in the x-direction (longitude).",
     ("grid", "ny"): "Number of horizontal grid points in the y-direction (latitude).",

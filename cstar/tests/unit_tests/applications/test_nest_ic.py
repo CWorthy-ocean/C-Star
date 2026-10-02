@@ -182,7 +182,7 @@ class TestCreateInitialConditionsRouting:
         self, blueprint: NestIcBlueprint, formatted_timestamp: str
     ) -> Path:
         fname = f"ic_from_parent_rst.{formatted_timestamp}.nc"
-        return Path(blueprint.working_dir).expanduser() / "output" / fname
+        return blueprint.effective_working_dir / "output" / fname
 
     def test_pio_true_saves_to_mangled_path_and_converts(
         self,

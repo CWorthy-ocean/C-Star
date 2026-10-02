@@ -1029,6 +1029,8 @@ def test_river_temp_source_round_trips_through_yaml(tmp_path):
 
     saved = tmp_path / "forge_blueprint.yaml"
     wiz.config.to_yaml(saved)
+    # the wizard never sets working_dir, so a saved file simply omits it
+    assert "working_dir" not in saved.read_text()
 
     wiz2 = ForgeBlueprintWizard()
     wiz2.load_path.value = str(saved)
