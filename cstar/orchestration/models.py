@@ -61,6 +61,12 @@ KEY_RESUME: t.Final[str] = "resume"
 """The `workflow_overrides` key indicating a step's failed prior attempt should
 be resumed in place (no clobber) by an application that supports it."""
 
+KEY_PRE_RUN: t.Final[str] = "pre_run"
+"""The `workflow_overrides` key indicating a step should perform every stage
+before its model launch (stage inputs, clone and compile, generate the
+namelist) and then stop, by an application that supports it. A later run of
+the same step attaches to the prepared working directory."""
+
 COMPUTE_OVERRIDE_NAMESPACES: t.Final[frozenset[str]] = frozenset({"local", "slurm"})
 """Launcher namespaces recognized as top-level `Step.compute_overrides` keys.
 
@@ -520,11 +526,17 @@ class Step(ConfiguredBaseModel):
     @field_validator("workflow_overrides", mode="after")
     @classmethod
     def _exclusive_rerun_modes(cls, value: KeyValueStore) -> KeyValueStore:
-        """Reject a step marked both for clobber and for resume."""
+        """Reject a step marked for resume together with clobber or pre-run."""
         if value.get(KEY_CLOBBER, False) and value.get(KEY_RESUME, False):
             raise ValueError(
                 f"workflow_overrides {KEY_CLOBBER!r} and {KEY_RESUME!r} are "
                 "mutually exclusive: a step is either re-run from scratch or resumed"
+            )
+        if value.get(KEY_PRE_RUN, False) and value.get(KEY_RESUME, False):
+            raise ValueError(
+                f"workflow_overrides {KEY_PRE_RUN!r} and {KEY_RESUME!r} are "
+                "mutually exclusive: a step is either prepared without launching "
+                "or resumed"
             )
         return value
 
@@ -572,6 +584,18 @@ class Step(ConfiguredBaseModel):
         bool
         """
         return bool(self.workflow_overrides.get(KEY_RESUME, False))
+
+    @property
+    def pre_run(self) -> bool:
+        """Return `True` if this step should perform every stage before its
+        model launch and then stop, leaving the working directory for a later
+        run to attach to.
+
+        Returns
+        -------
+        bool
+        """
+        return bool(self.workflow_overrides.get(KEY_PRE_RUN, False))
 
     @property
     def is_deferred(self) -> bool:

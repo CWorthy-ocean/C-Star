@@ -164,6 +164,7 @@ class RomsMarblApplication(ApplicationDefinition[RomsMarblBlueprint, RomsMarblRu
     applicable_transforms = (RomsMarblTimeSplitter,)
     directives = (ContinuanceDirective, NestingDirective)
     resumable = True
+    pre_runnable = True
     migrations = (
         RomsMarblSchemaAdapter2025v1,
         RomsMarblSchemaAdapterV2V21,

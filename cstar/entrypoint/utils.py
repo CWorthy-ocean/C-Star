@@ -33,6 +33,23 @@ OPT_CLOBBER_ALL: t.Final[str] = "all"
 shadows any step literally named `all`, which can therefore never be targeted
 individually by name."""
 
+ARG_PRE_RUN: t.Final[str] = "--pre-run"
+ARG_PRE_RUN_HELP: t.Final[str] = (
+    "Perform every stage before the model launch -- stage inputs, clone and "
+    "compile the codebases, generate and validate the namelist -- then exit "
+    "without launching the model. The working directory is left in place so a "
+    "later --resume run attaches to it instead of redoing the work."
+)
+ARG_PRE_RUN_WORKPLAN_HELP: t.Final[str] = (
+    "Perform every stage before the model launch for each step -- stage inputs, "
+    "clone and compile, generate and validate the namelist -- without launching "
+    "any model. Steps run locally even on scheduler systems, so this is suitable "
+    "for a login node. Steps whose application does not support it, or whose "
+    "inputs are produced by another step, are skipped and reported. Re-run the "
+    "workplan without this flag (same run-id) to attach to the prepared "
+    "directories and launch."
+)
+
 ARG_DRY_RUN: t.Final[str] = "--dry-run"
 
 ARG_DIRECTIVES_URI_LONG: t.Final[str] = "--directives"

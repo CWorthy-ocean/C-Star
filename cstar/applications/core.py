@@ -62,6 +62,11 @@ class RunnerRequest(t.Generic[TBlueprint]):
     """Whether the runner should continue a failed prior attempt in the
     blueprint's working directory instead of starting fresh. Only honoured by
     applications whose `ApplicationDefinition.resumable` is `True`."""
+    pre_run: bool = False
+    """Whether the runner should perform every stage before its model launch
+    and then stop, leaving the working directory for a later attempt to attach
+    to. Only honoured by applications whose
+    `ApplicationDefinition.pre_runnable` is `True`."""
 
     def __init__(
         self,
@@ -70,6 +75,7 @@ class RunnerRequest(t.Generic[TBlueprint]):
         name: str = "",
         directive_uri: str = "",
         resume: bool = False,
+        pre_run: bool = False,
     ) -> None:
         """Initialize the request instance.
 
@@ -87,12 +93,17 @@ class RunnerRequest(t.Generic[TBlueprint]):
             Whether to continue a failed prior attempt in the blueprint's
             working directory instead of starting fresh. Only meaningful for
             applications whose `ApplicationDefinition.resumable` is `True`.
+        pre_run : bool
+            Whether to perform every stage before the model launch and then
+            stop. Only meaningful for applications whose
+            `ApplicationDefinition.pre_runnable` is `True`.
         """
         self.blueprint_uri = uri.strip()
         self.bp_type = bp_type
         self.name = name.strip() or RunnerRequest._generate_job_name()
         self.directive_uri = directive_uri.strip()
         self.resume = resume
+        self.pre_run = pre_run
 
     @property
     def application(self) -> str:
@@ -360,6 +371,10 @@ class ApplicationDefinition(t.Protocol, t.Generic[TBlueprint, TRunner]):
     """Whether the runner honours `RunnerRequest.resume`, continuing a failed
     prior attempt in the blueprint's working directory instead of starting
     fresh."""
+    pre_runnable: bool = False
+    """Whether the runner honours `RunnerRequest.pre_run`, performing every
+    stage before its model launch and then stopping so a later attempt can
+    attach to the prepared working directory."""
 
 
 _TAnyApp: t.TypeAlias = ApplicationDefinition[t.Any, t.Any]
