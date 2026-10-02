@@ -12,7 +12,6 @@ import contextlib
 import logging
 import os
 import re
-import subprocess
 import warnings
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
@@ -34,6 +33,7 @@ from cstar.applications.forge.source_registry import ROMS_TOOLS_SOURCE_NAME
 from cstar.applications.forge.user_files import stage_user_netcdf, verify_user_file
 from cstar.applications.forge.util import mem_log
 from cstar.applications.forge.xarray_lockfix import apply_combinedlock_leak_fix
+from cstar.base.utils import convert_to_cdf5
 from cstar.orchestration.models import Resource
 
 if TYPE_CHECKING:
@@ -720,11 +720,12 @@ class RomsMarblInputData(InputData):
         For each path in ``result`` (a single path, or a list/tuple of them --
         the container shape is preserved), runs ``nccopy -k cdf5`` from the
         ``_nc4``-mangled file to the corresponding de-mangled final name, then
-        deletes the ``_nc4`` source. De-mangling only touches the basename, so an
-        ``_nc4`` substring anywhere in the containing directory path is untouched.
-        Raises on a non-zero ``nccopy`` exit; the ``_nc4`` file is left in place
-        (and nothing is recorded as final) so a re-run regenerates cleanly. A no-op
-        (returns ``result`` unchanged) when PIO is off.
+        deletes the ``_nc4`` source (``cstar.base.utils.convert_to_cdf5``).
+        De-mangling only touches the basename, so an ``_nc4`` substring anywhere
+        in the containing directory path is untouched. Raises on a non-zero
+        ``nccopy`` exit; the ``_nc4`` file is left in place and any partial final
+        file is removed, so a re-run regenerates cleanly. A no-op (returns
+        ``result`` unchanged) when PIO is off.
         """
         if not self.use_pio:
             return result
@@ -740,11 +741,7 @@ class RomsMarblInputData(InputData):
             final_path = nc4_path.with_name(nc4_path.name.replace("_nc4", "", 1))
 
             with mem_log(f"pio_nccopy[{nc4_path.name}]", enabled=self.verbose):
-                subprocess.run(
-                    ["nccopy", "-k", "cdf5", str(nc4_path), str(final_path)],
-                    check=True,
-                )
-            nc4_path.unlink()
+                convert_to_cdf5(nc4_path, final_path)
 
             finalized.append(str(final_path))
 
