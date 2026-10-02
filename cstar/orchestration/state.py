@@ -1,5 +1,7 @@
 import asyncio
 import fcntl
+import os
+import tempfile
 import typing as t
 from pathlib import Path
 
@@ -164,10 +166,22 @@ class StateRepository:
         with lock_path.open("w") as lock_file:
             fcntl.flock(lock_file, fcntl.LOCK_EX)
 
-            if persist_to.exists():
-                persist_to.unlink()
-
-            num_bytes = await asyncio.to_thread(serialize, persist_to, proxy, mode=mode)
+            # write beside the sentinel and rename it into place: the local proxy
+            # script rewrites the sentinel's status line the moment it starts,
+            # and a reader that caught an in-place write mid-way would copy a
+            # truncated sentinel back over the complete one
+            fd, tmp_name = tempfile.mkstemp(
+                dir=persist_to.parent, prefix=f".{persist_to.name}.", suffix=".part"
+            )
+            os.close(fd)
+            tmp_path = Path(tmp_name)
+            try:
+                num_bytes = await asyncio.to_thread(
+                    serialize, tmp_path, proxy, mode=mode
+                )
+                os.replace(tmp_path, persist_to)
+            finally:
+                tmp_path.unlink(missing_ok=True)
         return persist_to if num_bytes > 0 else None
 
     async def list_sentinels(
