@@ -259,7 +259,7 @@ class TestSourceInspector:
         """Tests that file_encoding returns BINARY for a remote binary file"""
         inspector = _SourceInspector("http://example.com/file.bin")
 
-        fake_bytes = b"\x00\x01\x02"
+        fake_bytes = b"\x80\x81\xfe"
         with (
             mock.patch(
                 "cstar.io.source_data.get_remote_header", return_value=fake_bytes
@@ -313,7 +313,7 @@ class TestSourceInspector:
     def test_file_encoding_path_binary(self, tmp_path):
         """Tests that file_encoding returns BINARY for a local binary file."""
         file_path = tmp_path / "bin.bin"
-        file_path.write_bytes(b"\x00\x01\x02")
+        file_path.write_bytes(b"\x80\x81\xfe")
 
         inspector = _SourceInspector(str(file_path))
 
@@ -336,6 +336,178 @@ class TestSourceInspector:
             result = inspector.file_encoding
 
         assert result is FileEncoding.BINARY
+
+    def test_file_encoding_http_nul_is_binary(self):
+        """Tests that file_encoding returns BINARY for a remote header containing NUL,
+        without consulting charset_normalizer (NUL is valid UTF-8).
+        """
+        inspector = _SourceInspector("http://example.com/file.nc")
+
+        fake_bytes = b"CDF\x05\x00\x00\x00\x00\x00\x00\x00\x00"
+        with (
+            mock.patch(
+                "cstar.io.source_data.get_remote_header", return_value=fake_bytes
+            ),
+            mock.patch(
+                "cstar.io.source_data.charset_normalizer.from_bytes"
+            ) as mock_csn,
+            mock.patch.object(
+                _SourceInspector, "source_type", new_callable=mock.PropertyMock
+            ) as mock_source_type,
+            mock.patch.object(
+                _SourceInspector, "location_type", new_callable=mock.PropertyMock
+            ) as mock_loc_type,
+        ):
+            mock_source_type.return_value = SourceType.FILE
+            mock_loc_type.return_value = LocationType.HTTP
+
+            mock_csn.return_value.best.return_value = "utf-8"
+
+            result = inspector.file_encoding
+
+        assert result is FileEncoding.BINARY
+        mock_csn.assert_not_called()
+
+    def test_file_encoding_path_nul_is_binary(self, tmp_path):
+        """Tests that file_encoding returns BINARY for a local file with NUL in its
+        header, without consulting charset_normalizer (NUL is valid UTF-8).
+        """
+        file_path = tmp_path / "nul.bin"
+        file_path.write_bytes(b"CDF\x05\x00\x00\x00\x00\x00\x00\x00\x00")
+
+        inspector = _SourceInspector(str(file_path))
+
+        with (
+            mock.patch(
+                "cstar.io.source_data.charset_normalizer.from_bytes"
+            ) as mock_csn,
+            mock.patch.object(
+                _SourceInspector, "source_type", new_callable=mock.PropertyMock
+            ) as mock_source_type,
+            mock.patch.object(
+                _SourceInspector, "location_type", new_callable=mock.PropertyMock
+            ) as mock_loc_type,
+        ):
+            mock_source_type.return_value = SourceType.FILE
+            mock_loc_type.return_value = LocationType.PATH
+
+            mock_csn.return_value.best.return_value = "utf-8"
+
+            result = inspector.file_encoding
+
+        assert result is FileEncoding.BINARY
+        mock_csn.assert_not_called()
+
+    def test_file_encoding_cdf5_header_is_binary(self, tmp_path):
+        """Tests that file_encoding returns BINARY for a hand-built CDF-5 header
+        (no netCDF4, no mocking): mostly ASCII names plus big-endian ints.
+        """
+
+        def i64(n: int) -> bytes:
+            return n.to_bytes(8, "big")
+
+        header = (
+            b"CDF\x05"
+            + i64(0)  # numrecs
+            + b"\x00\x00\x00\x0a"  # NC_DIMENSION
+            + i64(2)  # number of dimensions
+            + i64(4)
+            + b"time"
+            + i64(0)  # unlimited dimension, length 0
+            + i64(8)
+            + b"bry_time"
+            + i64(12)
+            + b"\x00\x00\x00\x0c"  # NC_ATTRIBUTE (global attributes)
+            + i64(1)  # number of attributes
+            + i64(5)
+            + b"title\x00\x00\x00"
+            + b"\x00\x00\x00\x02"  # NC_CHAR
+            + i64(48)
+            + b"ROMS boundary forcing file created by ROMS-Tools"
+        )
+        file_path = tmp_path / "cdf5.nc"
+        file_path.write_bytes(header)
+
+        inspector = _SourceInspector(str(file_path))
+
+        assert inspector.file_encoding is FileEncoding.BINARY
+
+    @pytest.mark.parametrize(
+        "file_format",
+        [
+            "NETCDF3_CLASSIC",
+            "NETCDF3_64BIT_OFFSET",
+            "NETCDF3_64BIT_DATA",
+            "NETCDF4",
+        ],
+    )
+    def test_file_encoding_netcdf_is_binary(self, tmp_path, file_format):
+        """Tests that file_encoding returns BINARY for real netCDF files of every
+        format, with charset_normalizer unmocked.
+        """
+        # netCDF4 is used directly to control the on-disk format
+        import netCDF4
+
+        file_path = tmp_path / "bry.nc"
+        with netCDF4.Dataset(file_path, "w", format=file_format) as nc:
+            nc.createDimension("time", None)
+            nc.createDimension("bry_time", 12)
+
+            bry_time = nc.createVariable("bry_time", "f8", ("bry_time",))
+            bry_time.long_name = "time for boundary forcing"
+            bry_time.units = "days"
+            month = nc.createVariable("month", "i4", ("bry_time",))
+            month.long_name = "month of the year"
+            month.units = "month"
+            abs_time = nc.createVariable("abs_time", "f8", ("bry_time",))
+            abs_time.long_name = "absolute time"
+            abs_time.units = "days since 2000-01-01"
+
+            nc.title = "ROMS boundary forcing file created by ROMS-Tools"
+            nc.roms_tools_version = "5.1.0"
+            nc.start_time = "2012-01-01 00:00:00"
+            nc.end_time = "2012-12-31 23:59:59"
+            nc.source = "WOA"
+            nc.model_reference_date = "2000-01-01 00:00:00"
+            nc.adjust_depth_for_sea_surface_height = "False"
+            nc.apply_2d_horizontal_fill = "False"
+            nc.regrid_method = "bilinear"
+
+        inspector = _SourceInspector(str(file_path))
+
+        assert inspector.file_encoding is FileEncoding.BINARY
+
+    def test_file_encoding_yaml_is_text(self, tmp_path):
+        """Tests that file_encoding returns TEXT for a real YAML file (unmocked)."""
+        file_path = tmp_path / "grid.yaml"
+        file_path.write_text("grid:\n  source: roms-tools\n  nx: 100\n")
+
+        inspector = _SourceInspector(str(file_path))
+
+        assert inspector.file_encoding is FileEncoding.TEXT
+
+    @pytest.mark.parametrize("encoding", ["utf-16", "utf-32"])
+    def test_file_encoding_bom_text_with_nul_is_text(self, tmp_path, encoding):
+        """Tests that file_encoding returns TEXT for UTF-16/32 text with a BOM, which
+        contains NULs but is not binary.
+        """
+        file_path = tmp_path / "grid.yaml"
+        file_path.write_bytes(
+            "grid:\n  source: roms-tools\n  nx: 100\n".encode(encoding)
+        )
+
+        inspector = _SourceInspector(str(file_path))
+
+        assert inspector.file_encoding is FileEncoding.TEXT
+
+    def test_file_encoding_empty_file_is_text(self, tmp_path):
+        """Tests that file_encoding returns TEXT for an empty file (current behaviour)."""
+        file_path = tmp_path / "empty.txt"
+        file_path.write_bytes(b"")
+
+        inspector = _SourceInspector(str(file_path))
+
+        assert inspector.file_encoding is FileEncoding.TEXT
 
     def test_file_encoding_invalid_location_type(self):
         """Tests that file_encoding raises for an invalid location."""
