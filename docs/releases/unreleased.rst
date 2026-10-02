@@ -32,6 +32,9 @@ Bug Fixes
 - A failed or interrupted ``nccopy`` conversion no longer leaves a partial output file behind that the no-clobber reuse logic would pick up on the next run. (`#729 <https://github.com/CWorthy-ocean/C-Star/pull/729>`_)
 - A user-provided file that was already classic-format is now copied as-is under ``use_pio`` rather than being needlessly re-encoded, so ``nccopy`` is only required when a conversion is actually needed. (`#729 <https://github.com/CWorthy-ocean/C-Star/pull/729>`_)
 - A failed or interrupted CDF-5 conversion of a Forge-generated input (or a nest_ic / upscaler output) no longer leaves a truncated file at the final path that no-clobber reuse logic would treat as finished on the next run. (`#731 <https://github.com/CWorthy-ocean/C-Star/pull/731>`_)
+- Forge resolved ``ntimes`` to 0 for any run window shorter than a day because the step count was derived from whole days. (`#730 <https://github.com/CWorthy-ocean/C-Star/pull/730>`_)
+- Local-launcher steps with a walltime were wrapped as ``timeout 600s -k 2s``, which GNU ``timeout`` rejects, so every time-bounded local step failed before starting. (`#730 <https://github.com/CWorthy-ocean/C-Star/pull/730>`_)
+- A ``local`` compute override now produces a working ``timeout`` command; previously any step with ``compute_overrides.local`` failed immediately, so runs that relied on that failure path (none known) will now actually run with the configured walltime. (`#730 <https://github.com/CWorthy-ocean/C-Star/pull/730>`_)
 
 Improvements
 ~~~~~~~~~~~~
@@ -47,3 +50,6 @@ Miscellaneous
 
 - Documented inline blueprints in the workplan guide; the nesting tutorial now uses ``blueprint: inline`` for its ``nest_ic`` and ``upscaler`` steps and the tutorial's ``nest_ic_bp.yaml`` dummy blueprint is removed. (`#734 <https://github.com/CWorthy-ocean/C-Star/pull/734>`_)
 - The workplan JSON schema advertises the ``inline`` token. (`#734 <https://github.com/CWorthy-ocean/C-Star/pull/734>`_)
+- Integration tests are now tiered by directory: ``forge/`` (real roms-tools, no ROMS build; ubuntu and macOS on every PR), ``e2e/`` (forge → roms_marbl workplan with ParallelIO, a NETCDF4 negative control, and hello_world workplans covering DAG shapes and dependency-failure propagation; ubuntu on every PR), ``roms_marbl/`` (the prebuilt case on the PIO-off, partitioned path), and a weekly ``integration_extended`` matrix tracking ucla-roms ``main``. (`#730 <https://github.com/CWorthy-ocean/C-Star/pull/730>`_)
+- Upstream source data is pinned by commit SHA and sha256 in a pooch registry and cached in CI alongside roms-tools' own pooch cache. (`#730 <https://github.com/CWorthy-ocean/C-Star/pull/730>`_)
+- ``docs/contributing.rst`` documents the tiers, how to add a case, the golden protocol, the data pin, and the CI cache behaviour. (`#730 <https://github.com/CWorthy-ocean/C-Star/pull/730>`_)
