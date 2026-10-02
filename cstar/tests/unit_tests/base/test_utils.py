@@ -12,6 +12,7 @@ from cstar.base.utils import (
     _replace_text_in_file,
     convert_to_cdf5,
     deep_merge,
+    slugify,
 )
 
 
@@ -450,3 +451,23 @@ class TestConvertToCdf5:
 
         assert nc4_path.exists()
         assert not final_path.exists()
+
+
+@pytest.mark.parametrize(
+    ("source", "expected"),
+    [
+        ("My Run", "my-run"),
+        ("  NA 8x8 / Test  ", "na-8x8-test"),
+        ("cson_roms-marbl_v0.1", "cson_roms-marbl_v0-1"),
+    ],
+)
+def test_slugify(source: str, expected: str) -> None:
+    """Verify slugify casefolds, collapses non-word runs to hyphens, and trims."""
+    assert slugify(source) == expected
+
+
+@pytest.mark.parametrize("source", ["", "   ", "---", "?!/"])
+def test_slugify_rejects_empty_result(source: str) -> None:
+    """Verify a source with no word characters is rejected rather than slugged to ''."""
+    with pytest.raises(ValueError, match="empty"):
+        slugify(source)

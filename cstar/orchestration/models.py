@@ -26,6 +26,7 @@ from pydantic import (
 )
 
 from cstar.base.utils import generate_schema_ref, lazy_import, slugify
+from cstar.execution.file_system import StateDirectoryManager
 from cstar.orchestration.serialization import register_representer, strenum_representer
 
 RequiredString: t.TypeAlias = t.Annotated[
@@ -208,8 +209,8 @@ class Blueprint(ConfiguredBaseModel, ABC):
     schema_version: str = "1.0.0"
     """The schema version for the document."""
 
-    working_dir: TargetDirectoryPath = Path()
-    """Path to a directory where assets are stored when executing the blueprint."""
+    working_dir: TargetDirectoryPath | None = Field(default=None)
+    """Directory the application writes to; omitted, C-Star uses ``CSTAR_DATA_HOME/blueprint_runs/<application>/<name>``."""
 
     @property
     def cpus_needed(self) -> int:
@@ -233,14 +234,28 @@ class Blueprint(ConfiguredBaseModel, ABC):
         """
         return False
 
+    @property
+    def effective_working_dir(self) -> Path:
+        """The directory this blueprint runs in.
+
+        ``working_dir`` when the blueprint declares one, otherwise C-Star's
+        default location for its application and name
+        (:meth:`~cstar.execution.file_system.StateDirectoryManager.blueprint_run_dir`).
+        Consumers read this, not ``working_dir``, so an omitted value is
+        resolved in one place.
+        """
+        if self.working_dir is not None:
+            return self.working_dir
+        return StateDirectoryManager.blueprint_run_dir(self.application, self.name)
+
     @field_validator("working_dir", mode="after")
     @classmethod
     def _resolve_out_dir(
         cls,
-        value: Path,
+        value: Path | None,
         _info: "ValidationInfo",
-    ) -> Path:
-        return value.expanduser().resolve()
+    ) -> Path | None:
+        return None if value is None else value.expanduser().resolve()
 
     @model_serializer(mode="wrap")
     def serialize_with_schema_ref(

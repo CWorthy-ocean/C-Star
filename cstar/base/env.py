@@ -160,15 +160,17 @@ def _system_scratch_root() -> str | None:
     """The current system's own scratch convention, from its ``SystemContext``.
 
     Imported lazily: ``cstar.system.manager`` imports this module (through
-    ``cstar.base.log``), so a module-level import would be circular. An
-    unrecognised system has no context and contributes nothing.
+    ``cstar.base.log``), so a module-level import would be circular. A system
+    that cannot be identified (``CstarError`` for an unregistered name,
+    ``OSError`` when no name can be determined at all) has no context and
+    contributes nothing.
     """
     from cstar.base.exceptions import CstarError
     from cstar.system.manager import get_system_context
 
     try:
         context = get_system_context()
-    except CstarError:
+    except (CstarError, OSError):
         return None
     root = context.scratch_root()
     return root.as_posix() if root is not None else None

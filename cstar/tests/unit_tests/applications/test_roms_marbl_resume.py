@@ -197,7 +197,7 @@ class TestPrepareResumeBlueprint:
         before = bp_path.read_bytes()
 
         bp = deserialize(bp_path, RomsMarblBlueprint)
-        fs = RomsFileSystemManager(bp.working_dir)
+        fs = RomsFileSystemManager(bp.effective_working_dir)
 
         ts = "20200601000000"
         piece_paths = [
@@ -242,7 +242,7 @@ class TestPrepareResumeBlueprint:
         """
         bp_path = bp_factory(use_pio=False, n_procs_x=2, n_procs_y=3)
         bp = deserialize(bp_path, RomsMarblBlueprint)
-        fs = RomsFileSystemManager(bp.working_dir)
+        fs = RomsFileSystemManager(bp.effective_working_dir)
 
         ts = "20201201000000"  # == end_date
         for seg in ("000", "001", "002", "003", "004", "005"):
@@ -259,7 +259,7 @@ class TestPrepareResumeBlueprint:
         """
         bp_path = bp_factory(use_pio=True)
         bp = deserialize(bp_path, RomsMarblBlueprint)
-        fs = RomsFileSystemManager(bp.working_dir)
+        fs = RomsFileSystemManager(bp.effective_working_dir)
 
         ts = "20200601000000"
         whole_path = fs.output_dir / _whole_name(ts)

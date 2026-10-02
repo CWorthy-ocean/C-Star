@@ -8,6 +8,9 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
+from cstar.applications.hello_world import HelloWorldBlueprint
+from cstar.base.env import ENV_CSTAR_DATA_HOME
+from cstar.execution.file_system import StateDirectoryManager
 from cstar.orchestration.models import (
     DeferredBlueprintRef,
     KeyValueStore,
@@ -16,7 +19,7 @@ from cstar.orchestration.models import (
     WorkplanState,
 )
 from cstar.orchestration.orchestration import LiveStep, LiveWorkplan
-from cstar.orchestration.serialization import deserialize, serialize
+from cstar.orchestration.serialization import deserialize, model_to_yaml, serialize
 
 
 def test_step_defaults(fake_blueprint_path: Path) -> None:
@@ -1501,3 +1504,70 @@ def test_workplan_deferred_roundtrip(
     assert isinstance(reloaded_consumer.blueprint_path, DeferredBlueprintRef)
     assert reloaded_consumer.blueprint_path.from_step == "producer"
     assert reloaded_consumer.blueprint_path.filename == "generated.yaml"
+
+
+@pytest.fixture
+def hello_kwargs() -> dict[str, str]:
+    """Required fields for a minimal blueprint, named so slugification matters."""
+    return {"name": "My Hello Run", "description": "A test", "target": "world"}
+
+
+def test_blueprint_working_dir_default(hello_kwargs: dict[str, str]) -> None:
+    """Verify a blueprint declares no working directory unless told to."""
+    bp = HelloWorldBlueprint(**hello_kwargs)
+
+    assert bp.working_dir is None
+
+
+def test_blueprint_effective_working_dir_default(
+    hello_kwargs: dict[str, str], tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Verify an omitted working directory resolves to the blueprint run directory."""
+    data_home = tmp_path / "data-home"
+    monkeypatch.setenv(ENV_CSTAR_DATA_HOME, str(data_home))
+    bp = HelloWorldBlueprint(**hello_kwargs)
+
+    actual = bp.effective_working_dir
+
+    assert actual.is_relative_to(data_home)
+    assert actual == StateDirectoryManager.blueprint_run_dir(bp.application, bp.name)
+
+
+def test_blueprint_effective_working_dir_relative(
+    hello_kwargs: dict[str, str], tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Verify an explicit relative working directory is resolved and honored."""
+    monkeypatch.chdir(tmp_path)
+    bp = HelloWorldBlueprint(**hello_kwargs, working_dir=Path("some/dir"))
+
+    assert bp.working_dir == tmp_path / "some" / "dir"
+    assert bp.effective_working_dir == bp.working_dir
+
+
+def test_blueprint_effective_working_dir_user_home(
+    hello_kwargs: dict[str, str], tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Verify an explicit working directory beginning with ``~`` is expanded."""
+    monkeypatch.setenv("HOME", str(tmp_path))
+    bp = HelloWorldBlueprint(**hello_kwargs, working_dir=Path("~/some/dir"))
+
+    assert bp.working_dir == tmp_path / "some" / "dir"
+    assert bp.effective_working_dir == bp.working_dir
+
+
+def test_blueprint_yaml_omits_unset_working_dir(hello_kwargs: dict[str, str]) -> None:
+    """Verify a blueprint without a working directory serializes without the key."""
+    content = model_to_yaml(HelloWorldBlueprint(**hello_kwargs))
+
+    assert "working_dir" not in content
+
+
+def test_blueprint_yaml_includes_set_working_dir(
+    hello_kwargs: dict[str, str], tmp_path: Path
+) -> None:
+    """Verify a declared working directory survives serialization."""
+    bp = HelloWorldBlueprint(**hello_kwargs, working_dir=tmp_path)
+
+    content = model_to_yaml(bp)
+
+    assert f"working_dir: {tmp_path}" in content

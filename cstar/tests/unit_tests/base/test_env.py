@@ -94,9 +94,8 @@ def test_catalog_is_discoverable() -> None:
 
 
 class TestFindScratchDir:
-    """Tests for find_scratch_dir, the CSTAR_SCRATCH_DIRS search shared by
-    hpc_data_directory and callers (e.g. Forge's own scratch-root resolution)
-    that need to run the same search against an explicit environment mapping.
+    """Tests for find_scratch_dir, the CSTAR_SCRATCH_DIRS search behind
+    hpc_data_directory, run against an explicit environment mapping.
     """
 
     def test_default_search_order_is_scratch_then_scratch_dir_then_local_scratch(
@@ -205,4 +204,15 @@ class TestHpcDataDirectorySystemFallback:
             raise CstarError("Unknown system requested: nowhere")
 
         monkeypatch.setattr("cstar.system.manager.get_system_context", _unknown)
+        assert hpc_data_directory() is None
+
+    def test_none_when_system_name_cannot_be_determined(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """HostNameEvaluator raises OSError when no name can be determined at all."""
+
+        def _nameless():
+            raise OSError("C-Star cannot determine your system name")
+
+        monkeypatch.setattr("cstar.system.manager.get_system_context", _nameless)
         assert hpc_data_directory() is None

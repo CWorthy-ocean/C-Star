@@ -7,11 +7,12 @@ from unittest import mock
 import pytest
 
 from cstar.applications.roms_marbl.file_system import RomsFileSystemManager
-from cstar.base.env import ENV_CSTAR_RUNID
+from cstar.base.env import ENV_CSTAR_DATA_HOME, ENV_CSTAR_RUNID
 from cstar.execution.file_system import (
     UNKNOWN_SIZE,
     DirectoryManager,
     JobFileSystemManager,
+    StateDirectoryManager,
     get_backup_path,
     is_remote_resource,
     local_copy,
@@ -191,6 +192,25 @@ def test_live_step(tmp_path: Path) -> None:
         expected = data_home / run_id / task_dir_name / ls_5.safe_name
         assert actual == expected
         assert ls_5.name == ls_5_name  # confirm the update was honored
+
+
+def test_blueprint_run_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Verify the default blueprint working directory layout under the data home."""
+    monkeypatch.setenv(ENV_CSTAR_DATA_HOME, str(tmp_path))
+
+    actual = StateDirectoryManager.blueprint_run_dir("roms_marbl", "NA 8x8 / Test")
+
+    assert actual == tmp_path / "blueprint_runs" / "roms_marbl" / "na-8x8-test"
+
+
+def test_blueprint_run_dir_rejects_name_without_slug(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A name with no path-safe characters must not collapse onto the application directory."""
+    monkeypatch.setenv(ENV_CSTAR_DATA_HOME, str(tmp_path))
+
+    with pytest.raises(ValueError, match="empty"):
+        StateDirectoryManager.blueprint_run_dir("roms_marbl", "---")
 
 
 @pytest.mark.parametrize(

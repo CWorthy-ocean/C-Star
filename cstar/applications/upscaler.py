@@ -72,7 +72,7 @@ class UpscalerRunner(BlueprintRunner[UpscalerBlueprint]):
             msg = f"No uscl files found in {uscl_dir}"
             raise FileNotFoundError(msg)
 
-        out_path = Path(self.blueprint.working_dir / "output")
+        out_path = self.blueprint.effective_working_dir / "output"
         out_path.mkdir(parents=True, exist_ok=True)
         out_file = out_path / "upscaled_cdr.nc"
 
