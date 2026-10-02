@@ -24,7 +24,7 @@ from cstar.base.env import (
 )
 from cstar.base.exceptions import CstarExpectationFailed
 from cstar.cli.common import normalize_runid
-from cstar.cli.workplan.run import app, auto_compose
+from cstar.cli.workplan.run import app, auto_compose, migrate_steps
 from cstar.entrypoint.utils import ARG_CLOBBER, ARG_RESUME
 from cstar.orchestration.dag_runner import get_launcher, original_workplan_backup
 from cstar.orchestration.launch.local import LocalHandle
@@ -2382,3 +2382,27 @@ def test_workplan_run_reports_all_directive_problems_before_submission(
     assert "'apply-overrides'" in message
     assert "must be a mapping" in message
     mock_run_dag.assert_not_called()
+
+
+def test_migrate_steps_skips_inline_step(tmp_path: Path) -> None:
+    """Verify an inline step has no blueprint file to migrate and is left alone."""
+    wp = Workplan(
+        name="inline-workplan",
+        description="A workplan with an inline blueprint.",
+        steps=[
+            Step.model_validate(
+                {
+                    "name": "inline",
+                    "application": "hello_world",
+                    "blueprint": "inline",
+                    "blueprint_overrides": {"target": "@inline"},
+                },
+            ),
+        ],
+    )
+
+    with mock.patch("cstar.cli.workplan.run.localize_and_migrate") as mock_migrate:
+        migrate_steps(tmp_path / "workplan.yaml", wp)
+
+    mock_migrate.assert_not_called()
+    assert wp.steps[0].is_inline

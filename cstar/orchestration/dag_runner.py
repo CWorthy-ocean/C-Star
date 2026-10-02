@@ -54,6 +54,7 @@ from cstar.orchestration.tracking import (
 from cstar.orchestration.transforms import (
     TemplateFillTransform,
     WorkplanTransformer,
+    materialize_inline_blueprints,
 )
 from cstar.orchestration.utils import ENV_CSTAR_ORCH_DELAYS
 from cstar.system.manager import get_sysmgr
@@ -417,6 +418,9 @@ async def prepare_workplan(
     wp = transformer.apply()
 
     apply_clobber_overrides(wp, clobber_steps)
+
+    # inline blueprints are written to disk only for a real run, not for `check`
+    wp = wp.model_copy(update={"steps": materialize_inline_blueprints(wp.steps)})
 
     # make a copy of the original and modified blueprint in the output directory
     persist_orig = original_workplan_backup(wp_path, output_dir)

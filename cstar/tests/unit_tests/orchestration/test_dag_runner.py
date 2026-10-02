@@ -649,6 +649,56 @@ async def test_prepare_workplan_persists_original_backup(
 
 
 @pytest.mark.asyncio
+async def test_prepare_workplan_materializes_inline_blueprint(
+    tmp_path: Path,
+    hello_world_bp_path: Path,
+) -> None:
+    """Verify the transformed workplan records an inline step's blueprint as a
+    materialized file, while the original backup keeps the `inline` token.
+    """
+    wp = Workplan(
+        name="inline-workplan",
+        description="A workplan with an inline blueprint.",
+        steps=[
+            Step(
+                name="producer",
+                application="hello_world",
+                blueprint=hello_world_bp_path.as_posix(),
+            ),
+            Step.model_validate(
+                {
+                    "name": "consumer",
+                    "application": "hello_world",
+                    "blueprint": "inline",
+                    "depends_on": ["producer"],
+                    "blueprint_overrides": {"target": "@inline"},
+                },
+            ),
+        ],
+    )
+    wp_path = tmp_path / "inline-workplan.yaml"
+    assert serialize(wp_path, wp)
+    output_dir = tmp_path / "output"
+
+    _, prepared_path = await prepare_workplan(wp_path, output_dir)
+
+    persisted = deserialize(prepared_path, LiveWorkplan)
+    consumer = next(s for s in persisted.steps if s.name == "consumer")
+
+    assert not consumer.is_inline
+    assert Path(consumer.blueprint_path) == consumer.fsm.run_dir / "blueprint.yaml"
+    assert Path(consumer.blueprint_path).exists()
+    assert "apply-overrides" not in consumer.directives
+
+    backup = deserialize(
+        original_workplan_backup(wp_path, output_dir),
+        Workplan,
+        mode=PersistenceMode.yaml,
+    )
+    assert next(s for s in backup.steps if s.name == "consumer").is_inline
+
+
+@pytest.mark.asyncio
 async def test_executive_run_summary_pairs_each_step_with_its_own_sentinel(
     layered_workplan: tuple[Workplan, dict[str, LocalHandle]],
     mock_run_id: str,

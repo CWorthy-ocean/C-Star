@@ -55,6 +55,7 @@ from cstar.orchestration.transforms import (
     get_fsm_resolver,
     get_system_overrides,
     get_transforms,
+    materialize_inline_blueprints,
     mustache,
     package_runtime_overrides,
     resolve_deferred_blueprint,
@@ -4079,3 +4080,206 @@ async def test_load_workplan_malformed_yaml_raises_runtime_error(
         DirectiveConfig.load_workplan()
 
     assert exc_info.value.__cause__ is not None
+
+
+@pytest.fixture
+def inline_workplan(hello_world_bp_path: Path) -> Workplan:
+    """Generate a workplan whose second step declares an inline blueprint.
+
+    Parameters
+    ----------
+    hello_world_bp_path : Path
+        Fixture returning the path to a hello-world blueprint file.
+
+    Returns
+    -------
+    Workplan
+    """
+    producer = Step(
+        name="producer",
+        application="hello_world",
+        blueprint=hello_world_bp_path.as_posix(),
+    )
+    consumer = Step.model_validate(
+        {
+            "name": "consumer",
+            "application": "hello_world",
+            "blueprint": "inline",
+            "depends_on": ["producer"],
+            "blueprint_overrides": {"target": "@inline"},
+        },
+    )
+
+    return Workplan(
+        name="inline-workplan",
+        description="A workplan with an inline blueprint.",
+        steps=[producer, consumer],
+    )
+
+
+def test_live_step_inline_blueprint_is_synthesized() -> None:
+    """Verify an inline step's blueprint is built from its identity and overrides."""
+    step = LiveStep.from_step(
+        Step.model_validate(
+            {
+                "name": "consumer",
+                "application": "hello_world",
+                "blueprint": "inline",
+                "blueprint_overrides": {"target": "@inline"},
+            },
+        ),
+    )
+
+    bp = step.blueprint
+
+    assert isinstance(bp, HelloWorldBlueprint)
+    assert bp.name == "consumer"
+    assert bp.application == "hello_world"
+    assert bp.target == "@inline"
+    assert bp.working_dir == step.working_dir
+    assert bp.description.startswith("Inline blueprint for step")
+
+
+def test_live_step_inline_blueprint_overrides_win() -> None:
+    """Verify user-supplied values take precedence over the identity seed."""
+    step = LiveStep.from_step(
+        Step.model_validate(
+            {
+                "name": "consumer",
+                "application": "hello_world",
+                "blueprint": "inline",
+                "blueprint_overrides": {"target": "@inline", "name": "custom"},
+            },
+        ),
+    )
+
+    assert step.blueprint.name == "custom"
+
+
+def test_live_step_inline_blueprint_incomplete_raises() -> None:
+    """Verify an incomplete inline blueprint is reported with every missing field."""
+    step = LiveStep.from_step(
+        Step.model_validate(
+            {"name": "nester", "application": "nest_ic", "blueprint": "inline"},
+        ),
+    )
+
+    with pytest.raises(CstarExpectationFailed) as error:
+        _ = step.blueprint
+
+    message = str(error.value)
+    assert "'nester'" in message
+    assert "'nest_ic'" in message
+    for field in ("parent_rst", "parent_grid", "child_grid"):
+        assert field in message
+
+
+def test_workplan_transformer_inline_step(inline_workplan: Workplan) -> None:
+    """Verify the transformer packages an inline step's overrides like any other
+    step and writes nothing to disk.
+
+    Parameters
+    ----------
+    inline_workplan : Workplan
+        A workplan whose second step declares an inline blueprint.
+    """
+    transformed = WorkplanTransformer(inline_workplan).apply()
+    consumer = t.cast(
+        "LiveStep",
+        next(s for s in transformed.steps if s.name == "consumer"),
+    )
+
+    assert consumer.is_inline
+    assert not consumer.blueprint_overrides
+
+    directives = t.cast("dict[str, dict[str, t.Any]]", consumer.directives)
+    overrides = directives[ApplyOverridesDirective.key()][
+        ApplyOverridesDirective.KEY_OVERRIDES
+    ]
+    assert overrides["target"] == "@inline"
+    assert overrides["working_dir"] == consumer.fsm.root_dir.as_posix()
+
+    # preflight ran against the synthesized blueprint
+    compute_overrides = t.cast(
+        "dict[str, dict[str, t.Any]]", consumer.compute_overrides
+    )
+    assert compute_overrides["slurm"]["num_cpus"] == 1
+
+    # a schedule-time check must not write the blueprint
+    assert not (consumer.fsm.run_dir / "blueprint.yaml").exists()
+
+
+def test_workplan_transformer_inline_active_transform_raises() -> None:
+    """Verify an inline step whose application has an active transform is
+    rejected at schedule time.
+    """
+    consumer = Step.model_validate(
+        {
+            "name": "consumer",
+            "application": Application.ROMS_MARBL.value,
+            "blueprint": "inline",
+        },
+    )
+    wp = Workplan(
+        name="inline-workplan",
+        description="A workplan with an inline roms-marbl blueprint.",
+        steps=[consumer],
+    )
+
+    with mock.patch.dict(os.environ, {ENV_FF_ORCH_TRX_TIMESPLIT: "1"}):
+        with pytest.raises(CstarExpectationFailed) as error:
+            _ = WorkplanTransformer(wp).apply()
+
+    assert "inline" in str(error.value)
+    assert RomsMarblTimeSplitter.__name__ in str(error.value)
+
+
+def test_materialize_inline_blueprints(inline_workplan: Workplan) -> None:
+    """Verify an inline step's blueprint is written to its work directory and
+    its `apply-overrides` directive is dropped, leaving other steps untouched.
+
+    Parameters
+    ----------
+    inline_workplan : Workplan
+        A workplan whose second step declares an inline blueprint.
+    """
+    transformed = WorkplanTransformer(inline_workplan).apply()
+    steps = [t.cast("LiveStep", s) for s in transformed.steps]
+    # a directive other than `apply-overrides` must survive materialization
+    steps[1] = LiveStep.from_step(
+        steps[1],
+        update={"directives": {**steps[1].directives, "other": {"key": "value"}}},
+    )
+
+    result = materialize_inline_blueprints(steps)
+
+    producer, consumer = result
+    assert producer is steps[0]
+
+    path = consumer.fsm.run_dir / "blueprint.yaml"
+    assert not consumer.is_inline
+    assert consumer.blueprint_path == path
+    assert path.exists()
+
+    bp = deserialize(path, HelloWorldBlueprint)
+    assert bp.target == "@inline"
+    assert bp.working_dir == consumer.fsm.root_dir
+
+    assert consumer.directives == {"other": {"key": "value"}}
+
+
+def test_materialize_inline_blueprints_requires_transformed_step() -> None:
+    """Verify an inline step that was not transformed first is rejected."""
+    step = LiveStep.from_step(
+        Step.model_validate(
+            {
+                "name": "consumer",
+                "application": "hello_world",
+                "blueprint": "inline",
+                "blueprint_overrides": {"target": "@inline"},
+            },
+        ),
+    )
+
+    with pytest.raises(CstarExpectationFailed, match="consumer"):
+        _ = materialize_inline_blueprints([step])
