@@ -85,6 +85,7 @@ from cstar.applications.forge.source_registry import (
     resolve_dataset_key,
     resolve_source,
 )
+from cstar.base.utils import netcdf_format
 
 if TYPE_CHECKING:
     from datetime import datetime
@@ -175,6 +176,48 @@ def _normalize_user_file(
             "the blueprint."
         )
     return UserProvidedFile(location=str(path), content_hash=hash_netcdf_contents(path))
+
+
+def _warn_user_files_need_pio_conversion(bp: ForgeBlueprint, use_pio: bool) -> None:
+    """Warn once if a byte-copied user file is not classic-format netCDF under PIO.
+
+    ``use_pio=True`` ROMS reads inputs through PnetCDF, which only reads classic
+    (CDF-1/2/5) files; Forge converts a copy of any other format to CDF-5 when
+    staging. Only files readable here are checked -- a dict/instance-form
+    ``UserProvidedFile`` is trusted as-is and may exist only on the executor host.
+    """
+    if not use_pio:
+        return
+    # grid_file is excluded: the executor re-serializes grids through roms-tools'
+    # PIO-aware save, so its on-disk format never reaches ROMS.
+    files: list[tuple[str, UserProvidedFile]] = []
+    if bp.cdr.cdr_forcing_file is not None:
+        files.append(("cdr_forcing_file", bp.cdr.cdr_forcing_file))
+    files.extend(
+        (f"river[{i}] custom_file", river.custom_file)
+        for i, river in enumerate(bp.forcing.river)
+        if river.custom_file is not None
+    )
+    problems: list[str] = []
+    for label, f in files:
+        path = Path(f.location).expanduser()
+        try:
+            fmt = netcdf_format(path)
+        except OSError:
+            continue  # absent/unreadable here: advisory only, the executor verifies
+        if not fmt.is_classic:
+            problems.append(f"{label}: {path} is {fmt}")
+    if problems:
+        warnings.warn(
+            "use_pio=True requires classic-format (CDF-5) netCDF input files, but "
+            + "; ".join(problems)
+            + ". Forge will convert a copy of each to CDF-5 with `nccopy -k cdf5` "
+            "when staging (the original is left untouched) and will abort the run "
+            "if that conversion fails. To avoid the automatic conversion, rewrite "
+            "the file as CDF-5 yourself: `nccopy -k cdf5 in.nc out.nc`.",
+            UserWarning,
+            stacklevel=2,
+        )
 
 
 def _deep_merge(base: dict[str, Any], override: dict[str, Any]) -> dict[str, Any]:
@@ -1070,7 +1113,7 @@ def build_forge_blueprint(
         assert npx is not None and npy is not None
         default_n_procs = npx * npy
     default_name = sanitize_name(f"{model_name}_{grid_name}_{default_n_procs}procs")
-    return ForgeBlueprint(
+    bp = ForgeBlueprint(
         name=name or default_name,
         description=description,
         run=RunWindow(
@@ -1148,6 +1191,8 @@ def build_forge_blueprint(
             notes=notes,
         ),
     )
+    _warn_user_files_need_pio_conversion(bp, use_pio)
+    return bp
 
 
 def _build_forcing(

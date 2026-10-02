@@ -17,6 +17,7 @@ from cstar.base.utils import (
     lazy_import,
     min_padded_index,
     min_padded_indices,
+    netcdf_format,
 )
 from cstar.io.constants import FileEncoding, SourceClassification
 from cstar.io.source_data import SourceData, SourceDataCollection
@@ -766,12 +767,10 @@ class ROMSInputDataset(InputDataset, ABC):
         problems = []
 
         for path in self.path_for_roms_unpartitioned:
-            with open(path, "rb") as f:
-                header = f.read(4)
-            if header[:3] != b"CDF":
-                detected = "netCDF-4/HDF5" if header == b"\x89HDF" else "unrecognized"
+            fmt = netcdf_format(path)
+            if not fmt.is_classic:
                 problems.append(
-                    f"{path}: not a classic-format netCDF file (detected: {detected}). "
+                    f"{path}: not a classic-format netCDF file (detected: {fmt}). "
                     "Rewrite it in CDF-5 format, e.g. with "
                     "xarray's to_netcdf(format='NETCDF3_64BIT_DATA')."
                 )

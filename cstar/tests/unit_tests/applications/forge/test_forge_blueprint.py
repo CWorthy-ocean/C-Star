@@ -11,16 +11,22 @@ NOTE: imports the in-package modules, so these run once the environment's editab
 assertions were validated standalone during development.
 """
 
+import warnings
 from datetime import date, datetime
 from pathlib import Path
 
+import numpy as np
 import pytest
+import xarray as xr
 import yaml
 
 import cstar
 import cstar.catalog
 from cstar.applications.forge.blueprint import FORGE_BLUEPRINT_VERSION, ForgeBlueprint
-from cstar.applications.forge.resolve import build_forge_blueprint
+from cstar.applications.forge.resolve import (
+    _warn_user_files_need_pio_conversion,
+    build_forge_blueprint,
+)
 from cstar.applications.forge.settings import render_roms_settings
 from cstar.base.env import ENV_CSTAR_DATA_HOME
 from cstar.base.utils import slugify
@@ -6508,3 +6514,108 @@ def test_shipped_cppdefs_keys_are_referenced_by_the_bundled_template(source, cpp
     assert not unreferenced, (
         f"{source}: cppdefs keys the bundled template never references: {unreferenced}"
     )
+
+
+# ----- use_pio: warn when a user-supplied netCDF is not classic-format -----------
+
+
+def _nc_file(path: Path, fmt: str) -> Path:
+    xr.Dataset({"v": ("x", np.arange(3.0))}).to_netcdf(path, format=fmt)
+    return path
+
+
+def _bp_with_user_files(
+    cdr_file: Path | str | None = None, river_file: Path | str | None = None
+) -> ForgeBlueprint:
+    """A real blueprint with a user CDR file and/or a custom-file river attached."""
+    from cstar.applications.forge.blueprint import (
+        CdrSpec,
+        RiverForcingItem,
+        SourceSpec,
+        UserProvidedFile,
+    )
+
+    def _ref(p: Path | str) -> UserProvidedFile:
+        return UserProvidedFile(location=str(p), content_hash="0" * 64)
+
+    bp = _build()
+    if cdr_file is not None:
+        cdr = CdrSpec(mode="netcdf", cdr_forcing_file=_ref(cdr_file))
+        bp = bp.model_copy(update={"cdr": cdr})
+    if river_file is not None:
+        river = RiverForcingItem(
+            source=SourceSpec(name="CUSTOM_FILE"), custom_file=_ref(river_file)
+        )
+        forcing = bp.forcing.model_copy(update={"river": [river]})
+        bp = bp.model_copy(update={"forcing": forcing})
+    return bp
+
+
+def _pio_warnings(recwarn: pytest.WarningsRecorder) -> list[warnings.WarningMessage]:
+    return [w for w in recwarn if "CDF-5" in str(w.message)]
+
+
+def test_pio_warns_for_netcdf4_cdr_file(tmp_path):
+    p = _nc_file(tmp_path / "cdr.nc", "NETCDF4")
+    bp = _bp_with_user_files(cdr_file=p)
+    with pytest.warns(UserWarning, match="CDF-5") as record:
+        _warn_user_files_need_pio_conversion(bp, use_pio=True)
+    msg = str(record[0].message)
+    assert f"cdr_forcing_file: {p} is netCDF-4/HDF5" in msg
+    assert "nccopy -k cdf5" in msg
+
+
+def test_pio_warns_for_netcdf4_river_custom_file(tmp_path):
+    p = _nc_file(tmp_path / "river.nc", "NETCDF4")
+    bp = _bp_with_user_files(river_file=p)
+    with pytest.warns(UserWarning, match="CDF-5") as record:
+        _warn_user_files_need_pio_conversion(bp, use_pio=True)
+    assert f"river[0] custom_file: {p} is netCDF-4/HDF5" in str(record[0].message)
+
+
+def test_pio_warning_lists_every_offending_file_once(tmp_path):
+    cdr = _nc_file(tmp_path / "cdr.nc", "NETCDF4")
+    river = _nc_file(tmp_path / "river.nc", "NETCDF4")
+    bp = _bp_with_user_files(cdr_file=cdr, river_file=river)
+    with pytest.warns(UserWarning, match="CDF-5") as record:
+        _warn_user_files_need_pio_conversion(bp, use_pio=True)
+    assert len(record) == 1
+    msg = str(record[0].message)
+    assert "cdr_forcing_file" in msg and "river[0] custom_file" in msg
+
+
+def test_pio_no_warning_for_classic_file(tmp_path, recwarn):
+    p = _nc_file(tmp_path / "cdr.nc", "NETCDF3_64BIT_DATA")
+    _warn_user_files_need_pio_conversion(
+        _bp_with_user_files(cdr_file=p, river_file=p), use_pio=True
+    )
+    assert not _pio_warnings(recwarn)
+
+
+def test_pio_no_warning_when_use_pio_false(tmp_path, recwarn):
+    p = _nc_file(tmp_path / "cdr.nc", "NETCDF4")
+    _warn_user_files_need_pio_conversion(_bp_with_user_files(cdr_file=p), use_pio=False)
+    assert not _pio_warnings(recwarn)
+
+
+def test_pio_skips_user_file_not_present_at_authoring_time(recwarn):
+    bp = _bp_with_user_files(
+        cdr_file="/nonexistent/x.nc", river_file="/nonexistent/y.nc"
+    )
+    _warn_user_files_need_pio_conversion(bp, use_pio=True)
+    assert not _pio_warnings(recwarn)
+
+
+def test_pio_skips_unreadable_user_file_location(tmp_path, recwarn):
+    # A trusted dict-form location may point at something that exists but
+    # cannot be read as a file here (e.g. a directory); the advisory check
+    # must skip it rather than abort blueprint building.
+    bp = _bp_with_user_files(cdr_file=tmp_path)
+    _warn_user_files_need_pio_conversion(bp, use_pio=True)
+    assert not _pio_warnings(recwarn)
+
+
+def test_build_forge_blueprint_warns_for_netcdf4_cdr_file_under_pio(tmp_path):
+    p = _nc_file(tmp_path / "cdr.nc", "NETCDF4")
+    with pytest.warns(UserWarning, match="CDF-5"):
+        _build(cdr_forcing_file=p, use_pio=True)
