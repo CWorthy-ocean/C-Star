@@ -697,8 +697,8 @@ def build_forge_blueprint(
         dt = _compute_dt_from_cfl(
             grid_kwargs, loaded_grid if loaded_grid is not None else grid
         )
-    n_days = (end_date - start_date).days
-    ntimes = round(n_days * 24 * 3600 / dt)
+    # total_seconds, not .days: a sub-day run window must not round to ntimes == 0.
+    ntimes = round((end_date - start_date).total_seconds() / dt)
     # v_sponge default = grid spacing (m) / 10 -- a caller (e.g. the wizard, restoring
     # a user override saved into a DomainSpec) may pass an explicit value instead.
     if v_sponge is None:

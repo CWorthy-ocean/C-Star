@@ -1,13 +1,36 @@
 import logging
+import os
 import shutil
-import zipfile
 from collections.abc import Callable
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pooch
 import pytest
 
+from cstar.applications.forge.resolve import build_forge_blueprint
 from cstar.base.log import get_logger
+from cstar.tests.integration_tests.cases import (
+    DT,
+    FORGE_CASES,
+    MODEL_REFERENCE_DATE,
+    MODEL_SPEC,
+    ROMS_REF,
+    RUN_END,
+    RUN_START,
+)
+from cstar.tests.integration_tests.cli_harness import make_shim
+from cstar.tests.integration_tests.data_registry import (
+    CACHE_NAME,
+    TEST_DATA_BASE_URL,
+    fetch_all,
+)
+
+if TYPE_CHECKING:
+    from cstar.applications.forge.blueprint import ForgeBlueprint
+    from cstar.catalog.domain_catalog import LayeredCatalog
+
+CATALOG_SOURCE = Path(__file__).parent / "catalog"
 
 
 @pytest.fixture
@@ -16,64 +39,15 @@ def log() -> logging.Logger:
 
 
 @pytest.fixture(scope="session")
-def cstar_test_data_directory() -> Path:
-    """Fixture returning a durable path where downloaded data will be kept."""
-    return Path(pooch.os_cache("cstar_test_case_data"))
-
-
-@pytest.fixture
-def fetch_remote_test_case_data(cstar_test_data_directory: Path) -> Callable[[], None]:
-    """Fixture that provides a function to fetch remote test case data from a GitHub
-    repository.
+def cstar_shim(tmp_path_factory: pytest.TempPathFactory) -> Path:
+    """A ``cstar`` executable pinned to this checkout, for running the real CLI.
 
     Returns
     -------
-    Callable[[], None]
-        A factory function that fetches the remote test case data and sets it up in the local
-        test data directory.
+    Path
+        The shim's path; pair with `make_cli_env` and `run_cstar` from ``cli_harness``.
     """
-
-    def _fetch_remote_test_case_data() -> None:
-        """Downloads and sets up the remote test case data for testing.
-
-        This function downloads a zip archive of a specific commit of a repo containing test data,
-        extracts the archive into the specified test data directory, and performs cleanup of
-        intermediate files and directories.
-
-        Data are saved to the CSTAR_TEST_DATA_DIRECTORY, set in tests/config.py
-
-        Returns
-        -------
-        None
-        """
-        test_case_repo_url = (
-            "https://github.com/CWorthy-ocean/cstar_blueprint_test_case/"
-        )
-        checkout_target = "main"
-
-        # Construct the URL of this commit as a zip archive:
-        archive_url = f"{test_case_repo_url.rstrip('/')}/archive/{checkout_target}.zip"
-
-        # Download the zip with pooch
-        zip_path = pooch.retrieve(
-            url=archive_url,
-            known_hash=None,
-            fname=f"{checkout_target}.zip",  # Name of the cached file
-            path=cstar_test_data_directory,  # Set the cache directory (customize as needed)
-        )
-
-        # Unzip the files into a subdirectory `extract_dir` of `cache_dir`
-        with zipfile.ZipFile(zip_path, "r") as zip_ref:
-            extract_list = zip_ref.namelist()
-            extract_dir = cstar_test_data_directory / extract_list[0]
-            zip_ref.extractall(cstar_test_data_directory)
-
-        # Copy the contents of the subdirectory up one and remove it and the zip file
-        shutil.copytree(extract_dir, cstar_test_data_directory, dirs_exist_ok=True)
-        shutil.rmtree(extract_dir)
-        Path(zip_path).unlink()
-
-    return _fetch_remote_test_case_data
+    return make_shim(tmp_path_factory.mktemp("cstar_shim"))
 
 
 @pytest.fixture
@@ -146,7 +120,6 @@ def modify_template_blueprint(
 @pytest.fixture
 def integration_test_configuration(
     tests_path: Path,
-    cstar_test_data_directory: Path,
 ) -> dict[str, dict[str, str | dict[str, str]]]:
     """Fixture returning a dictionary containing configuration for running multiple
     test simulations.
@@ -162,8 +135,7 @@ def integration_test_configuration(
     """
     ## Configuration of different cases to test
     return {
-        # Remote cases:
-        # NetCDF
+        # Remote case, NetCDF
         "test_case_remote_with_netcdf_datasets": {
             "template_blueprint_path": f"{tests_path}/integration_tests/blueprints/blueprint_template.yaml",
             "strs_to_replace": {
@@ -171,13 +143,104 @@ def integration_test_configuration(
                 "<additional_code_location>": "https://github.com/CWorthy-ocean/cstar_blueprint_test_case.git",
             },
         },
-        # Local cases:
-        # NetCDF
-        "test_case_local_with_netcdf_datasets": {
-            "template_blueprint_path": f"{tests_path}/integration_tests/blueprints/blueprint_template.yaml",
-            "strs_to_replace": {
-                "<input_datasets_location>": f"{cstar_test_data_directory / 'input_datasets/ROMS'}",
-                "<additional_code_location>": f"{cstar_test_data_directory}",
-            },
-        },
     }
+
+
+@pytest.fixture(scope="session")
+def integration_test_data() -> dict[str, Path]:
+    """Fetch the pinned upstream source data.
+
+    A failed fetch skips the session for offline developer runs but errors under CI
+    (``CI`` set), where a skip would turn the job green.
+
+    Returns
+    -------
+    dict[str, Path]
+        Mapping of registry filename to its path in the pooch cache.
+    """
+    try:
+        data = fetch_all()
+    except OSError as exc:
+        if os.environ.get("CI"):
+            raise
+        pytest.skip(
+            f"cannot fetch integration test data from {TEST_DATA_BASE_URL}: {exc}"
+        )
+    return data
+
+
+@pytest.fixture(scope="session")
+def test_catalog_root(
+    tmp_path_factory: pytest.TempPathFactory,
+    integration_test_data: dict[str, Path],
+) -> Path:
+    """Copy the test-local catalog layer, substituting ``${TEST_DATA}`` in its YAML.
+
+    Parameters
+    ----------
+    tmp_path_factory : pytest.TempPathFactory
+        Used to create the session-scoped copy.
+    integration_test_data : dict[str, Path]
+        Requested so the data is fetched before any spec points at it.
+
+    Returns
+    -------
+    Path
+        Root of the substituted catalog layer.
+    """
+    root = tmp_path_factory.mktemp("test_catalog") / "catalog"
+    shutil.copytree(CATALOG_SOURCE, root)
+    data_dir = str(pooch.os_cache(CACHE_NAME))
+    for yaml_file in root.rglob("*.yaml"):
+        yaml_file.write_text(yaml_file.read_text().replace("${TEST_DATA}", data_dir))
+    return root
+
+
+@pytest.fixture(scope="session")
+def test_catalog(test_catalog_root: Path) -> "LayeredCatalog":
+    """The test-local catalog layer stacked on top of the bundled catalog."""
+    from cstar.catalog.domain_catalog import build_catalog_stack
+
+    return build_catalog_stack([str(test_catalog_root)])
+
+
+@pytest.fixture(scope="session")
+def forge_blueprint_factory(
+    test_catalog: "LayeredCatalog",
+) -> Callable[..., tuple["ForgeBlueprint", Path]]:
+    """Provide a factory that resolves a case from ``FORGE_CASES`` into a blueprint.
+
+    Returns
+    -------
+    Callable[..., tuple[ForgeBlueprint, Path]]
+        ``(case_name, working_dir, *, name=None)`` -> the resolved blueprint and the
+        path of the ``forge_blueprint.yaml`` written into ``working_dir``. No network
+        access is needed because ``dt`` is supplied.
+    """
+
+    def _factory(
+        case_name: str, working_dir: Path, *, name: str | None = None
+    ) -> tuple["ForgeBlueprint", Path]:
+        case = FORGE_CASES[case_name]
+        domain = test_catalog.domain_data(case.domain)
+        cfg = build_forge_blueprint(
+            model_dir=test_catalog.model_dir(MODEL_SPEC),
+            grid_name=domain["grid_name"],
+            grid_kwargs=domain["grid_kwargs"],
+            open_boundaries=domain["open_boundaries"],
+            partitioning=domain["partitioning"],
+            start_date=RUN_START,
+            end_date=RUN_END,
+            model_reference_date=MODEL_REFERENCE_DATE,
+            dt=DT,
+            forcing_inputs=test_catalog.forcing_data(case.forcing),
+            output_settings=test_catalog.output_data("test-minimal"),
+            name=name or f"it-{case_name}",
+            compile_time_overrides=case.compile_time_overrides,
+            roms_ref=ROMS_REF,
+        )
+        working_dir.mkdir(parents=True, exist_ok=True)
+        cfg.working_dir = str(working_dir)
+        return cfg, cfg.to_yaml(working_dir / "forge_blueprint.yaml")
+
+    return _factory

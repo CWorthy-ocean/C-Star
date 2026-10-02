@@ -224,11 +224,13 @@ class TimeConstrainedRunRequestEnricher(ModelEnricher[RunRequest]):
         compute : LocalComputeSpec | None
             Local compute overrides used to configure timeout behavior.
         """
+        # GNU timeout stops option parsing at the first non-option argument (the
+        # duration), so -k must precede it: `timeout -k 2s 600s cmd ...`.
         enriched_cmd = [
             self.TIMEOUT_EXE,
-            f"{self.compute.walltime_seconds}s",
             self.ARG_FORCEKILL_TIMEOUT,
             f"{self.compute.force_kill_seconds}s",
+            f"{self.compute.walltime_seconds}s",
             *model.command,
         ]
 

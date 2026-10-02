@@ -10,16 +10,20 @@ on:
 
 jobs:
 
-  test:
-    name: integration-${{ matrix.python-version }}
-    runs-on: ubuntu-latest
+  forge:
+    name: integration-forge-${{ matrix.os }}-${{ matrix.python-version }}
+    runs-on: ${{ matrix.os }}
+    # don't let a teardown hang hold a runner for the default 6 hours
+    timeout-minutes: 45
     env:
       # Stop UCX from probing RDMA verbs devices: newer Azure runner VMs expose a
       # MANA NIC whose ud_verbs transport fails in MPI_Init ("Address not valid").
-      UCX_TLS: tcp,sm,self
+      UCX_TLS: ${{ runner.os == 'Linux' && 'tcp,sm,self' || '' }}
     strategy:
+      fail-fast: false
       matrix:
-        python-version: ["3.12",]
+        os: [ubuntu-latest, macos-latest]
+        python-version: ["3.12"]
     steps:
       - uses: actions/checkout@v4
 
@@ -34,7 +38,7 @@ jobs:
             python=${{ matrix.python-version }}
 
       - name: Environment info
-        shell: micromamba-shell {0}                
+        shell: micromamba-shell {0}
         run: |
           conda info
           printenv
@@ -42,24 +46,123 @@ jobs:
       - name: Install C-Star
         shell: micromamba-shell {0}
         run: |
-           python - V
+           python -V
            python -m pip install -e ".[dev]" --force-reinstall
 
+      - name: Locate pooch caches
+        id: pooch-caches
+        shell: micromamba-shell {0}
+        run: |
+          {
+            echo "cstar_data=$(python -c "import pooch; print(pooch.os_cache('cstar_integration_test_data'))")"
+            echo "roms_tools_data=$(python -c "import pooch; print(pooch.os_cache('roms-tools'))")"
+          } >> "$GITHUB_OUTPUT"
+
+      # Caches idle for 7 days are evicted and the repo cap is 10 GB. Caches saved
+      # on main are readable by every PR, so the push-to-main run warms this one.
+      # A miss just re-downloads (~150 MB).
+      - name: Cache integration test data
+        uses: actions/cache@v4
+        with:
+          path: |
+            ${{ steps.pooch-caches.outputs.cstar_data }}
+            ${{ steps.pooch-caches.outputs.roms_tools_data }}
+          key: ${{ runner.os }}-integration-data-${{ hashFiles('cstar/tests/integration_tests/data_registry.py') }}
+          restore-keys: ${{ runner.os }}-integration-data-
+
       - name: Running Tests
-        shell: micromamba-shell {0}        
+        shell: micromamba-shell {0}
         run: |
            python -V
-           coverage run --rcfile=coverage.toml -m pytest -s --verbose cstar/tests/integration_tests/*
-           
+           coverage run --rcfile=coverage.toml -m pytest -s --verbose cstar/tests/integration_tests/test_fixtures.py cstar/tests/integration_tests/forge
+
       - name: Get coverage report
-        shell: micromamba-shell {0}                
+        shell: micromamba-shell {0}
         run: |
           coverage report -m || true ; coverage xml || true
-
 
       - name: Upload coverage reports to Codecov
         uses: codecov/codecov-action@v4.0.1
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
           files: ./coverage.xml
+          flags: integration-forge
+          fail_ci_if_error: false
+
+  e2e:
+    name: integration-e2e-${{ matrix.python-version }}
+    runs-on: ubuntu-latest
+    # real ROMS+MARBL+ParallelIO compile and an mpirun -n 4 run
+    timeout-minutes: 60
+    env:
+      # Stop UCX from probing RDMA verbs devices: newer Azure runner VMs expose a
+      # MANA NIC whose ud_verbs transport fails in MPI_Init ("Address not valid").
+      UCX_TLS: tcp,sm,self
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.12"]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Create conda environment
+        uses: mamba-org/setup-micromamba@v2
+        with:
+          cache-downloads: true
+          cache-environment: true
+          micromamba-version: 'latest'
+          environment-file: environment-laptop.yml
+          create-args: |
+            python=${{ matrix.python-version }}
+
+      - name: Environment info
+        shell: micromamba-shell {0}
+        run: |
+          conda info
+          printenv
+
+      - name: Install C-Star
+        shell: micromamba-shell {0}
+        run: |
+           python -V
+           python -m pip install -e ".[dev]" --force-reinstall
+
+      - name: Locate pooch caches
+        id: pooch-caches
+        shell: micromamba-shell {0}
+        run: |
+          {
+            echo "cstar_data=$(python -c "import pooch; print(pooch.os_cache('cstar_integration_test_data'))")"
+            echo "roms_tools_data=$(python -c "import pooch; print(pooch.os_cache('roms-tools'))")"
+          } >> "$GITHUB_OUTPUT"
+
+      # Caches idle for 7 days are evicted and the repo cap is 10 GB. Caches saved
+      # on main are readable by every PR, so the push-to-main run warms this one.
+      # A miss just re-downloads (~150 MB).
+      - name: Cache integration test data
+        uses: actions/cache@v4
+        with:
+          path: |
+            ${{ steps.pooch-caches.outputs.cstar_data }}
+            ${{ steps.pooch-caches.outputs.roms_tools_data }}
+          key: ${{ runner.os }}-integration-data-${{ hashFiles('cstar/tests/integration_tests/data_registry.py') }}
+          restore-keys: ${{ runner.os }}-integration-data-
+
+      - name: Running Tests
+        shell: micromamba-shell {0}
+        run: |
+           python -V
+           coverage run --rcfile=coverage.toml -m pytest -s --verbose cstar/tests/integration_tests/e2e cstar/tests/integration_tests/roms_marbl cstar/tests/integration_tests/workplans
+
+      - name: Get coverage report
+        shell: micromamba-shell {0}
+        run: |
+          coverage report -m || true ; coverage xml || true
+
+      - name: Upload coverage reports to Codecov
+        uses: codecov/codecov-action@v4.0.1
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: ./coverage.xml
+          flags: integration-e2e
           fail_ci_if_error: false
