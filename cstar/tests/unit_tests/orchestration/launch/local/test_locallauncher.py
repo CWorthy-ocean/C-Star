@@ -7,13 +7,15 @@ from unittest import mock
 import pytest
 from psutil import NoSuchProcess
 
-from cstar.entrypoint.utils import ARG_RESUME
+from cstar.base.exceptions import CstarExpectationFailed
+from cstar.entrypoint.utils import ARG_CLOBBER, ARG_PRE_RUN, ARG_RESUME
 from cstar.orchestration.launch.local import (
     LocalHandle,
     LocalLauncher,
     ProxiedRunRequestFormatter,
 )
-from cstar.orchestration.models import KEY_CLOBBER, KEY_RESUME
+from cstar.orchestration.launch.slurm import SlurmHandle, SlurmLauncher
+from cstar.orchestration.models import KEY_CLOBBER, KEY_PRE_RUN, KEY_RESUME
 from cstar.orchestration.orchestration import LiveStep, RunRequest, Status, Workplan
 from cstar.orchestration.serialization import deserialize
 from cstar.orchestration.state import StateRepository
@@ -309,6 +311,73 @@ async def test_locallauncher_launch_failed_prior_with_resume_no_clobber(
     assert ARG_RESUME in submitted_step.script_path.read_text()
 
 
+@pytest.mark.parametrize("pre_run", [True, False])
+@pytest.mark.usefixtures("read_yaml_intercept")
+async def test_locallauncher_submit_records_pre_run_on_handle(
+    wp_templates_dir: Path,
+    mock_run_id: str,
+    pre_run: bool,
+) -> None:
+    """Verify the submitted handle records whether the step ran in pre-run mode,
+    and that the flag survives a round-trip through the sentinel file.
+    """
+    wp_path = wp_templates_dir / "single_step.yaml"
+    workplan = deserialize(wp_path, Workplan)
+    live_step = LiveStep.from_step(
+        workplan.steps[0],
+        update={"workflow_overrides": {KEY_PRE_RUN: True} if pre_run else {}},
+    )
+
+    fake_process = mock.Mock(pid=777777)
+    with mock.patch.object(subprocess, "Popen", return_value=fake_process):
+        handle = await LocalLauncher._submit(live_step, [])
+
+    assert handle.pre_run is pre_run
+    assert handle.launcher_name == LocalLauncher.name
+    assert (ARG_PRE_RUN in live_step.script_path.read_text()) is pre_run
+
+    await StateRepository().put_sentinel(handle)
+    reloaded = await StateRepository().get_sentinel(live_step.name, LocalHandle)
+    assert reloaded is not None
+    assert reloaded.pre_run is pre_run
+    assert reloaded.launcher_name == LocalLauncher.name
+
+
+@pytest.mark.usefixtures("read_yaml_intercept")
+async def test_locallauncher_launch_attaches_to_done_pre_run(
+    wp_templates_dir: Path,
+    mock_run_id: str,
+) -> None:
+    """Verify a completed pre-run prior handle leads a real (non pre-run) launch
+    to resubmit the step for resume, without clobber, so it attaches to the
+    prepared working directory.
+    """
+    wp_path = wp_templates_dir / "single_step.yaml"
+    workplan = deserialize(wp_path, Workplan)
+    live_step = LiveStep.from_step(workplan.steps[0])
+
+    prior_handle = LocalHandle(
+        pid="12345",
+        name=live_step.name,
+        run_id=mock_run_id,
+        start_at=datetime.datetime.now(tz=datetime.UTC),
+        status=Status.Done,
+        pre_run=True,
+    )
+    await StateRepository().put_sentinel(prior_handle)
+
+    fake_process = mock.Mock(pid=999999)
+    with mock.patch.object(subprocess, "Popen", return_value=fake_process):
+        task = await LocalLauncher.launch(live_step, [])
+
+    assert task.handle.pid != prior_handle.pid
+    assert task.handle.pre_run is False
+    assert task.step.workflow_overrides.get(KEY_CLOBBER, False) is False
+    script = task.step.script_path.read_text()
+    assert ARG_RESUME in script
+    assert ARG_PRE_RUN not in script
+
+
 @pytest.mark.usefixtures("read_yaml_intercept")
 async def test_locallauncher_submit_rotates_prior_log(
     wp_templates_dir: Path,
@@ -393,3 +462,87 @@ def test_is_alive_matches_pid_and_start_time(mock_run_id: str) -> None:
         "cstar.orchestration.launch.local.PsProcess", side_effect=NoSuchProcess(12345)
     ):
         assert LocalLauncher._is_alive(handle) is False
+
+
+@pytest.mark.usefixtures("read_yaml_intercept")
+async def test_locallauncher_launch_clobbers_failed_slurm_sentinel_for_pre_run(
+    wp_templates_dir: Path,
+    mock_run_id: str,
+) -> None:
+    """Verify a pre-run reads a failed SLURM attempt's sentinel using its
+    persisted status (a SLURM job id is no local pid) and relaunches the step
+    clobbered.
+    """
+    wp_path = wp_templates_dir / "single_step.yaml"
+    workplan = deserialize(wp_path, Workplan)
+    live_step = LiveStep.from_step(
+        workplan.steps[0],
+        update={"workflow_overrides": {KEY_PRE_RUN: True}},
+    )
+
+    prior_handle = SlurmHandle(
+        pid="12345",
+        name=live_step.name,
+        run_id=mock_run_id,
+        launcher_name=SlurmLauncher.name,
+        status=Status.Failed,
+    )
+    await StateRepository().put_sentinel(prior_handle)
+
+    fake_process = mock.Mock(pid=999999)
+    with (
+        mock.patch.object(subprocess, "Popen", return_value=fake_process),
+        mock.patch.object(LocalLauncher, "_status", mock.AsyncMock()) as mock_status,
+    ):
+        task = await LocalLauncher.launch(live_step, [])
+
+    mock_status.assert_not_awaited()
+    assert task.handle.pid != prior_handle.pid
+    assert task.handle.launcher_name == LocalLauncher.name
+    script = task.step.script_path.read_text()
+    assert ARG_CLOBBER in script
+    assert ARG_PRE_RUN in script
+
+
+@pytest.mark.usefixtures("read_yaml_intercept")
+async def test_locallauncher_launch_refuses_running_slurm_sentinel(
+    wp_templates_dir: Path,
+    mock_run_id: str,
+) -> None:
+    """Verify a pre-run neither adopts nor duplicates a SLURM attempt that is
+    still in progress.
+    """
+    wp_path = wp_templates_dir / "single_step.yaml"
+    workplan = deserialize(wp_path, Workplan)
+    live_step = LiveStep.from_step(
+        workplan.steps[0],
+        update={"workflow_overrides": {KEY_PRE_RUN: True}},
+    )
+
+    prior_handle = SlurmHandle(
+        pid="12345",
+        name=live_step.name,
+        run_id=mock_run_id,
+        launcher_name=SlurmLauncher.name,
+        status=Status.Running,
+    )
+    await StateRepository().put_sentinel(prior_handle)
+
+    with (
+        mock.patch.object(LocalLauncher, "_submit", mock.AsyncMock()) as mock_submit,
+        pytest.raises(CstarExpectationFailed, match="another launcher"),
+    ):
+        await LocalLauncher.launch(live_step, [])
+
+    mock_submit.assert_not_awaited()
+
+
+def test_localhandle_start_ts_requires_start_time(mock_run_id: str) -> None:
+    """A handle deserialized from another launcher's sentinel has no start
+    time, and must not report a made-up one.
+    """
+    handle = LocalHandle(pid="12345", name="step", run_id=mock_run_id)
+
+    assert handle.start_at is None
+    with pytest.raises(CstarExpectationFailed, match="no start time"):
+        _ = handle.start_ts

@@ -37,6 +37,8 @@ from cstar.entrypoint.utils import (
     ARG_LOGLEVEL_HELP,
     ARG_LOGLEVEL_LONG,
     ARG_LOGLEVEL_SHORT,
+    ARG_PRE_RUN,
+    ARG_PRE_RUN_HELP,
     ARG_RESUME,
     ARG_RESUME_HELP,
     ARG_VERBOSE,
@@ -239,6 +241,10 @@ def run(
         bool,
         typer.Option(ARG_RESUME, help=ARG_RESUME_HELP),
     ] = False,
+    pre_run: t.Annotated[
+        bool,
+        typer.Option(ARG_PRE_RUN, help=ARG_PRE_RUN_HELP),
+    ] = False,
 ) -> None:
     """Execute a blueprint in a local worker service.
 
@@ -246,6 +252,10 @@ def run(
     the run continues in place, from the blueprint's working directory,
     without needing a workplan or run-id. Only applications that declare
     themselves resumable accept the flag.
+
+    Pass `--pre-run` to stage, build and prepare the run without launching the
+    model; a later `--resume` launches it from the prepared working directory.
+    Only applications that declare themselves pre-runnable accept the flag.
     """
     _log_startup_versions()
 
@@ -260,11 +270,18 @@ def run(
                 resume and not app_config.resumable,
                 f"application {app_config.name!r} does not support {ARG_RESUME}",
             ),
+            (pre_run and resume, f"{ARG_PRE_RUN} cannot be combined with {ARG_RESUME}"),
+            (
+                pre_run and not app_config.pre_runnable,
+                f"application {app_config.name!r} does not support {ARG_PRE_RUN}",
+            ),
         )
         if condition
     ]
     if problems:
-        raise typer.BadParameter("; ".join(problems), param_hint=ARG_RESUME)
+        raise typer.BadParameter(
+            "; ".join(problems), param_hint=ARG_PRE_RUN if pre_run else ARG_RESUME
+        )
 
     name = f"{app_config.name}_runner"
     job_cfg = get_job_config()
@@ -281,7 +298,7 @@ def run(
     if directive_uri:
         uri = DirectiveConfig.apply_directives(directive_uri, uri)
 
-    request = RunnerRequest(uri, app_config.blueprint, resume=resume)
+    request = RunnerRequest(uri, app_config.blueprint, resume=resume, pre_run=pre_run)
 
     runner = app_config.runner(request, service_cfg, job_cfg)
     asyncio.run(runner.execute())

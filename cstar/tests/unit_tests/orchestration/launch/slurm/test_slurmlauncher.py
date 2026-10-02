@@ -7,9 +7,19 @@ import pytest
 from pydantic import ValidationError
 
 from cstar.base.exceptions import BlueprintDeferredError, CstarError
-from cstar.orchestration.launch.slurm import SlurmComputeSpec, SlurmLauncher
-from cstar.orchestration.orchestration import LiveStep, Workplan
+from cstar.entrypoint.utils import ARG_CLOBBER, ARG_PRE_RUN, ARG_RESUME
+from cstar.execution.handler import ExecutionStatus
+from cstar.orchestration.adapter import StepToRunRequestAdapter
+from cstar.orchestration.launch.local import LocalLauncher
+from cstar.orchestration.launch.slurm import (
+    SlurmComputeSpec,
+    SlurmHandle,
+    SlurmLauncher,
+)
+from cstar.orchestration.models import KEY_PRE_RUN
+from cstar.orchestration.orchestration import LiveStep, Status, Workplan
 from cstar.orchestration.serialization import deserialize
+from cstar.orchestration.state import StateRepository
 from cstar.orchestration.utils import (
     ENV_CSTAR_SLURM_ACCOUNT,
     ENV_CSTAR_SLURM_MAX_WALLTIME,
@@ -414,3 +424,129 @@ def test_compute_spec_deferred_with_overrides(deferred_live_step: LiveStep) -> N
     spec = SlurmLauncher._get_compute_spec(step)  # type: ignore
 
     assert spec.num_cpus == 8
+
+
+def _capture_command_job(captured: dict[str, list[str]]) -> t.Callable[..., t.Any]:
+    """Build a stand-in for `SlurmLauncher.adapt_step` that records the command
+    the step would run and returns a job that "submits" as job id 4242.
+    """
+
+    def fake_adapt_step(step: LiveStep, dependencies: list[SlurmHandle]) -> t.Any:
+        captured["command"] = StepToRunRequestAdapter().adapt(step).command
+        return mock.Mock(id=4242, commands="cstar blueprint run")
+
+    return fake_adapt_step
+
+
+@pytest.mark.parametrize("pre_run", [True, False])
+@pytest.mark.usefixtures("read_yaml_intercept")
+async def test_slurmlauncher_submit_records_pre_run_on_handle(
+    wp_templates_dir: Path,
+    mock_run_id: str,
+    pre_run: bool,
+) -> None:
+    """Verify the submitted handle records whether the step is a pre-run step."""
+    workplan = deserialize(wp_templates_dir / "single_step.yaml", Workplan)
+    live_step = LiveStep.from_step(
+        workplan.steps[0],
+        update={"workflow_overrides": {KEY_PRE_RUN: True} if pre_run else {}},
+    )
+    captured: dict[str, list[str]] = {}
+
+    with (
+        mock.patch.object(SlurmLauncher, "POST_SUBMIT_DELAY", 0),
+        mock.patch.object(SlurmLauncher, "adapt_step", _capture_command_job(captured)),
+    ):
+        handle = await SlurmLauncher._submit(live_step, [])
+
+    assert handle.pre_run is pre_run
+    assert handle.launcher_name == SlurmLauncher.name
+    assert (ARG_PRE_RUN in captured["command"]) is pre_run
+
+    await StateRepository().put_sentinel(handle)
+    reloaded = await StateRepository().get_sentinel(live_step.name, SlurmHandle)
+    assert reloaded is not None
+    assert reloaded.launcher_name == SlurmLauncher.name
+
+
+@pytest.mark.usefixtures("read_yaml_intercept")
+async def test_slurmlauncher_launch_attaches_to_done_pre_run(
+    wp_templates_dir: Path,
+    mock_run_id: str,
+) -> None:
+    """Verify a completed pre-run prior handle leads a real launch to resubmit
+    the step with `--resume`, trusting the persisted outcome rather than asking
+    SLURM about a pid that was never a SLURM job.
+    """
+    workplan = deserialize(wp_templates_dir / "single_step.yaml", Workplan)
+    live_step = LiveStep.from_step(workplan.steps[0])
+
+    prior_handle = SlurmHandle(
+        pid="12345",
+        name=live_step.name,
+        run_id=mock_run_id,
+        launcher_name=LocalLauncher.name,
+        status=Status.Done,
+        pre_run=True,
+    )
+    await StateRepository().put_sentinel(prior_handle)
+
+    # SLURM knows nothing (or something unrelated) about the local pre-run pid
+    unrelated = mock.Mock(status=ExecutionStatus.FAILED)
+    captured: dict[str, list[str]] = {}
+
+    with (
+        mock.patch(
+            "cstar.orchestration.launch.slurm.get_slurm_batch",
+            mock.AsyncMock(return_value=unrelated),
+        ) as mock_batch,
+        mock.patch.object(SlurmLauncher, "POST_SUBMIT_DELAY", 0),
+        mock.patch.object(SlurmLauncher, "adapt_step", _capture_command_job(captured)),
+    ):
+        task = await SlurmLauncher.launch(live_step, [])
+
+    mock_batch.assert_not_awaited()
+    assert task.handle.pid == "4242"
+    assert task.handle.pre_run is False
+    assert ARG_RESUME in captured["command"]
+    assert ARG_PRE_RUN not in captured["command"]
+
+
+@pytest.mark.usefixtures("read_yaml_intercept")
+async def test_slurmlauncher_launch_queries_unnamed_pre_run_sentinel(
+    wp_templates_dir: Path,
+    mock_run_id: str,
+) -> None:
+    """Verify a sentinel written before launcher names were recorded is treated
+    as the SLURM launcher's own: SLURM is queried and its verdict (failed)
+    overrides the persisted status.
+    """
+    workplan = deserialize(wp_templates_dir / "single_step.yaml", Workplan)
+    live_step = LiveStep.from_step(workplan.steps[0])
+
+    prior_handle = SlurmHandle(
+        pid="12345",
+        name=live_step.name,
+        run_id=mock_run_id,
+        status=Status.Done,
+        pre_run=True,
+    )
+    assert prior_handle.launcher_name == ""
+    await StateRepository().put_sentinel(prior_handle)
+
+    failed = mock.Mock(status=ExecutionStatus.FAILED)
+    captured: dict[str, list[str]] = {}
+
+    with (
+        mock.patch(
+            "cstar.orchestration.launch.slurm.get_slurm_batch",
+            mock.AsyncMock(return_value=failed),
+        ) as mock_batch,
+        mock.patch.object(SlurmLauncher, "POST_SUBMIT_DELAY", 0),
+        mock.patch.object(SlurmLauncher, "adapt_step", _capture_command_job(captured)),
+    ):
+        await SlurmLauncher.launch(live_step, [])
+
+    mock_batch.assert_awaited_once_with("12345")
+    assert ARG_CLOBBER in captured["command"]
+    assert ARG_RESUME not in captured["command"]

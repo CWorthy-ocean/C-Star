@@ -5,6 +5,7 @@ import re
 import shutil
 import warnings
 from concurrent.futures import ThreadPoolExecutor
+from dataclasses import dataclass
 from datetime import datetime
 from itertools import chain
 from pathlib import Path
@@ -159,6 +160,24 @@ def _extract_data_join_wildcard(
     remove_files(input_dir, wildcard_pattern)
 
     logger.info(f"Spatial extract/join of {str(out_file)!r} is complete")
+
+
+@dataclass(frozen=True)
+class LaunchPlan:
+    """What is needed to launch ROMS once a simulation is prepared."""
+
+    command: str
+    """The shell command that launches ROMS."""
+    cpus: int
+    """The number of processes ROMS runs on."""
+    run_path: Path
+    """The directory ROMS is launched from."""
+    script_path: Path
+    """The path of the scheduler job script."""
+    output_file: Path
+    """The file ROMS stdout is written to."""
+    runtime_settings_file: Path
+    """The generated ROMS namelist."""
 
 
 class ROMSSimulation(Simulation):
@@ -2105,72 +2124,33 @@ class ROMSSimulation(Simulation):
                 "read by ROMS with ParallelIO:\n- " + "\n- ".join(problems)
             )
 
-    def run(
-        self,
-        account_key: str | None = None,
-        walltime: str | None = None,
-        queue_name: str | None = None,
-        job_name: str | None = None,
-    ) -> "ExecutionHandler":
-        """Execute the ROMS simulation.
+    def prepare_launch(self, job_name: str | None = None) -> LaunchPlan:
+        """Prepare everything needed to launch ROMS, without launching it.
 
-        This method runs the compiled ROMS executable using the configured
-        environment. If a job scheduler is available, the simulation is
-        submitted as a scheduled job; otherwise, it runs as a local process.
+        Creates the run, logs and output directories, writes the ROMS namelist
+        (which validates the runtime settings), rotates a previous attempt's
+        job script and ROMS stdout, and links the executable into the run
+        directory. Idempotent apart from rotating a previous attempt's
+        namelist, script and log files to `.1`, `.2`, ...
 
         Parameters
         ----------
-        account_key : str, optional
-            The user's account key on the system (required if using a job scheduler).
-        queue_name : str, optional
-            The name of the scheduler queue to submit the job to. Defaults to the
-            system's primary queue.
-        walltime : str, optional
-            The maximum allowed execution time for a scheduler job in HH:MM:SS format.
-            Defaults to the queue's max walltime if a scheduler is used.
         job_name : str, optional
-            The name of the job submitted to the scheduler, which also sets
-            the output file name `job_name.out`.
+            The name of the job, which also sets the job script and output file
+            names. Defaults to the simulation name.
 
         Returns
         -------
-        ExecutionHandler
-            An execution handler object tracking the simulation's execution
-            status, logs, and completion.
+        LaunchPlan
+            The command to launch ROMS and the paths it uses.
 
         Raises
         ------
         ValueError
             - If the ROMS executable path is not set (`self.exe_path` is None).
-            - If `account_key` is required but not provided for scheduled jobs.
-        RuntimeError
-            If ROMS fails to start or encounters an execution error.
-
-        Notes
-        -----
-        - If a job scheduler is available, this method generates a job script and
-          submits it using the appropriate scheduler command.
-        - If no scheduler is available, ROMS runs as a local process using
-          MPI (`mpiexec` or equivalent).
-        - The number of time steps is computed based on `start_date` and `end_date`
-          if they are set; otherwise, a default of 1 time step is used.
-
-        Examples
-        --------
-        Running locally:
-        >>> execution = simulation.run()
-        >>> execution.status
-        'RUNNING'
-
-        Running with a scheduler:
-        >>> execution = simulation.run(account_key="ABC123", job_name="roms_simulation")
-        >>> execution.status
-        'QUEUED'
-
-        See Also
-        --------
-        pre_run : Prepares the input data before running.
-        post_run : Handles output processing after execution.
+            - If `n_procs_tot` is not set.
+        FileNotFoundError
+            If the local copy of `runtime_code` does not exist.
         """
         if self.exe_path is None:
             raise ValueError(
@@ -2199,22 +2179,15 @@ class ROMSSimulation(Simulation):
         if not self.use_pio:
             self.fs_manager.temp_output_dir.mkdir(parents=True, exist_ok=True)
 
-        cstar_sysmgr = get_sysmgr()
-
-        if (queue_name is None) and (cstar_sysmgr.scheduler is not None):
-            queue_name = cstar_sysmgr.scheduler.primary_queue_name
-        if (walltime is None) and (cstar_sysmgr.scheduler is not None):
-            walltime = cstar_sysmgr.scheduler.get_queue(queue_name).max_walltime
-
         # we run ROMS from the run directory
         run_path = self.fs_manager.run_dir
         runtime_settings_fname = "cstar_generated_roms.nml"
 
         # save modified namelist in the work directory, keeping a previous
         # attempt's namelist around as `.1`, `.2`, ... rather than overwriting it
-        final_runtime_settings_file = run_path / runtime_settings_fname
-        rotate_file(final_runtime_settings_file)
-        self.roms_runtime_settings.write(final_runtime_settings_file)
+        runtime_settings_file = run_path / runtime_settings_fname
+        rotate_file(runtime_settings_file)
+        self.roms_runtime_settings.write(runtime_settings_file)
 
         script_name = job_name or self.name
         safe_name = slugify(script_name)
@@ -2231,19 +2204,103 @@ class ROMSSimulation(Simulation):
         roms_symlink_path.unlink(missing_ok=True)
         roms_symlink_path.symlink_to(self.exe_path)
 
-        ## 2: RUN ROMS
-
+        n_procs = self.discretization.n_procs_tot
         roms_exec_cmd = " ".join(
             [
-                cstar_sysmgr.environment.mpi_exec_prefix,
+                get_sysmgr().environment.mpi_exec_prefix,
                 "-n",
-                f"{self.discretization.n_procs_tot}",
+                f"{n_procs}",
                 "./roms",
                 runtime_settings_fname,
             ],
         )
+        return LaunchPlan(
+            command=roms_exec_cmd,
+            cpus=n_procs,
+            run_path=run_path,
+            script_path=script_path,
+            output_file=output_file,
+            runtime_settings_file=runtime_settings_file,
+        )
 
-        self.log.info(f"Running {roms_exec_cmd}")
+    def run(
+        self,
+        account_key: str | None = None,
+        walltime: str | None = None,
+        queue_name: str | None = None,
+        job_name: str | None = None,
+    ) -> "ExecutionHandler":
+        """Execute the ROMS simulation.
+
+        Prepares the launch (see `prepare_launch`) and runs the compiled ROMS
+        executable using the configured environment. If a job scheduler is
+        available, the simulation is submitted as a scheduled job; otherwise,
+        it runs as a local process.
+
+        Parameters
+        ----------
+        account_key : str, optional
+            The user's account key on the system (required if using a job scheduler).
+        queue_name : str, optional
+            The name of the scheduler queue to submit the job to. Defaults to the
+            system's primary queue.
+        walltime : str, optional
+            The maximum allowed execution time for a scheduler job in HH:MM:SS format.
+            Defaults to the queue's max walltime if a scheduler is used.
+        job_name : str, optional
+            The name of the job submitted to the scheduler, which also sets
+            the output file name `job_name.out`.
+
+        Returns
+        -------
+        ExecutionHandler
+            An execution handler object tracking the simulation's execution
+            status, logs, and completion.
+
+        Raises
+        ------
+        ValueError
+            - If the preconditions of `prepare_launch` are not met.
+            - If `account_key` is required but not provided for scheduled jobs.
+        RuntimeError
+            If ROMS fails to start or encounters an execution error.
+
+        Notes
+        -----
+        - If no scheduler is available, ROMS runs as a local process using
+          MPI (`mpiexec` or equivalent).
+        - The number of time steps is computed based on `start_date` and `end_date`
+          if they are set; otherwise, a default of 1 time step is used.
+
+        Examples
+        --------
+        Running locally:
+        >>> execution = simulation.run()
+        >>> execution.status
+        'RUNNING'
+
+        Running with a scheduler:
+        >>> execution = simulation.run(account_key="ABC123", job_name="roms_simulation")
+        >>> execution.status
+        'QUEUED'
+
+        See Also
+        --------
+        pre_run : Prepares the input data before running.
+        post_run : Handles output processing after execution.
+        """
+        plan = self.prepare_launch(job_name)
+
+        cstar_sysmgr = get_sysmgr()
+
+        if (queue_name is None) and (cstar_sysmgr.scheduler is not None):
+            queue_name = cstar_sysmgr.scheduler.primary_queue_name
+        if (walltime is None) and (cstar_sysmgr.scheduler is not None):
+            walltime = cstar_sysmgr.scheduler.get_queue(queue_name).max_walltime
+
+        ## 2: RUN ROMS
+
+        self.log.info(f"Running {plan.command}")
         # If this simulation is already in a scheduler job, don't create a new one, just run it locally.
         if (
             cstar_sysmgr.scheduler is not None
@@ -2255,15 +2312,15 @@ class ROMSSimulation(Simulation):
                 )
 
             job_instance = create_scheduler_job(
-                commands=roms_exec_cmd,
+                commands=plan.command,
                 job_name=job_name,
-                cpus=self.discretization.n_procs_tot,
+                cpus=plan.cpus,
                 account_key=account_key,
-                run_path=run_path,
-                script_path=script_path,
+                run_path=plan.run_path,
+                script_path=plan.script_path,
                 queue_name=queue_name,
                 walltime=walltime,
-                output_file=output_file,
+                output_file=plan.output_file,
             )
 
             job_instance.submit()
@@ -2272,9 +2329,9 @@ class ROMSSimulation(Simulation):
 
         else:  # cstar_sysmgr.scheduler is None
             romsprocess = LocalProcess(
-                commands=roms_exec_cmd,
-                run_path=run_path,
-                output_file=output_file,
+                commands=plan.command,
+                run_path=plan.run_path,
+                output_file=plan.output_file,
             )
             self._execution_handler = romsprocess
             romsprocess.start()

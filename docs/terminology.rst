@@ -136,6 +136,15 @@ Definitions
       in progress, and lets you re-enter a run to retry failed steps or
       resume them in place. A new run ID starts the workplan from scratch.
 
+    Pre-run
+      Performing every stage before the model launch -- staging inputs,
+      cloning and compiling the codebases, partitioning inputs, and
+      generating and validating the namelist -- and then exiting without
+      launching the model (``--pre-run``). It leaves the working directory
+      in place, so a later run of the same blueprint or step attaches to it
+      and launches the model. Only applications that declare themselves
+      pre-runnable support it. See :ref:`workplan_pre_run`.
+
     Worker
       The process that executes a single blueprint on a compute resource. It
       reads the blueprint and runs the application exactly as the blueprint

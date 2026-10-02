@@ -167,6 +167,31 @@ working directory, provided each is a clean checkout of the blueprint's
 the local clone, so the check needs no network access and is unaffected by a
 branch that has moved on the remote since the first attempt.
 
+Preparing a run without launching the model
+"""""""""""""""""""""""""""""""""""""""""""""""
+
+To catch start-up problems before waiting in a scheduler queue, pass ``--pre-run``.
+C-Star performs every stage before the model launch -- staging inputs, cloning and
+compiling the codebases, partitioning inputs (when ParallelIO is not in use) and
+generating and validating the namelist -- and exits successfully without launching
+ROMS. The working directory is left in place. A later ``--resume`` attaches to it,
+reusing the staged inputs, compiled executable and partitions, and launches the
+model; on a scheduler system that second command submits ROMS as a job, exactly as
+a normal ``blueprint run`` does:
+
+.. code-block:: console
+
+    cstar blueprint run my_blueprint.yaml --pre-run
+    cstar blueprint run my_blueprint.yaml --resume
+
+``--pre-run`` cannot be combined with ``--resume``; combined with ``--clobber`` it
+starts the preparation from scratch. Only applications that declare themselves
+pre-runnable accept it (today, ``roms_marbl``); the CLI rejects the flag with an
+error for any other application. Preparing writes a full working directory, so it
+is not free of side effects, and since ROMS is never started, errors that only
+surface when it opens boundary or tide files or writes its first restart are not
+caught. See :ref:`workplan_pre_run` for the workplan equivalent.
+
 .. toctree::
    :hidden:
 

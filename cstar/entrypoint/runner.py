@@ -17,6 +17,8 @@ from cstar.entrypoint.utils import (
     ARG_LOGLEVEL_HELP,
     ARG_LOGLEVEL_LONG,
     ARG_LOGLEVEL_SHORT,
+    ARG_PRE_RUN,
+    ARG_PRE_RUN_HELP,
     ARG_RESUME,
     ARG_RESUME_HELP,
     ARG_URI_LONG,
@@ -222,5 +224,10 @@ def create_parser() -> argparse.ArgumentParser:
         ARG_RESUME,
         action="store_true",
         help=ARG_RESUME_HELP,
+    )
+    parser.add_argument(
+        ARG_PRE_RUN,
+        action="store_true",
+        help=ARG_PRE_RUN_HELP,
     )
     return parser

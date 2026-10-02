@@ -219,9 +219,11 @@ class ProcessHandle(BaseModel):
     run_id: str
     """The run-id the process was run under."""
     launcher_name: str = ""
-    """The launcher used to launch the process."""
+    """The name of the launcher that created the handle; empty on sentinels written before the name was recorded."""
     status: Status = Status.Unsubmitted
     """The current status of the task."""
+    pre_run: bool = Field(default=False)
+    """Whether the attempt this handle tracks ran in pre-run mode (prepared without launching the model)."""
 
     @property
     def safe_name(self) -> str:
@@ -676,6 +678,9 @@ class Planner(LoggingMixin):
 
 class Launcher(t.Protocol, t.Generic[_THandle]):
     """Contract required to implement a task launcher."""
+
+    name: t.ClassVar[str]
+    """Value recorded as `ProcessHandle.launcher_name` on handles this launcher creates."""
 
     @classmethod
     def check_preconditions(cls) -> None:

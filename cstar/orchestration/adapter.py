@@ -6,7 +6,12 @@ from pathlib import Path
 import yaml
 
 from cstar.base.adapter import ConfiguredModelAdapter, ModelEnricher
-from cstar.entrypoint.utils import ARG_CLOBBER, ARG_DIRECTIVES_URI_LONG, ARG_RESUME
+from cstar.entrypoint.utils import (
+    ARG_CLOBBER,
+    ARG_DIRECTIVES_URI_LONG,
+    ARG_PRE_RUN,
+    ARG_RESUME,
+)
 from cstar.orchestration.orchestration import RunRequest, RunRequestCommandFormatter
 
 if t.TYPE_CHECKING:
@@ -78,6 +83,9 @@ class StepToRunRequestAdapter(ConfiguredModelAdapter["LiveStep", "RunRequest"]):
 
         if model.resume:
             cmd_array.append(ARG_RESUME)
+
+        if model.pre_run:
+            cmd_array.append(ARG_PRE_RUN)
 
         if model.directives:
             directives_path = prepare_directive_file(model)

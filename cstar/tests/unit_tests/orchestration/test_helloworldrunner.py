@@ -246,25 +246,15 @@ async def test_hello_world_workplan(
     assert workplan_copy.steps[0].blueprint_path == workplan.steps[0].blueprint_path
 
 
-@pytest.mark.parametrize(
-    "dry_run",
-    [
-        pytest.param(True, id="dry-run only"),
-        pytest.param(False, id="full execution"),
-    ],
-)
-def test_hello_world_workplan_dry_run(
+def test_hello_world_workplan_scheduling(
     hw_single_step_wp_path: Path,
-    dry_run: bool,
 ) -> None:
-    """Test the preparation of a workplan containing a non ROMS-MARBL application (--dry-run).
+    """Test the execution of a workplan containing a non ROMS-MARBL application.
 
     Parameters
     ----------
     hw_single_step_wp_path : Path
         The path to the workplan containing a single step that runs the hello_world application.
-    dry_run : bool
-        Whether to run the workplan in dry-run mode.
     """
     runner = CliRunner()
     custom_env = {
@@ -286,8 +276,6 @@ def test_hello_world_workplan_dry_run(
         ),
     ):
         args = [hw_single_step_wp_path.as_posix(), "--run-id", run_id]
-        if dry_run:
-            args.append("--dry-run")
 
         result = runner.invoke(
             app_run_workplan,
@@ -295,9 +283,7 @@ def test_hello_world_workplan_dry_run(
             color=False,
         )
 
-    action = "dry-run" if dry_run else "scheduling"
-    match = f"{action} has completed"
-    assert match in result.stdout
+    assert "scheduling has completed" in result.stdout
     assert result.exit_code == 0
 
 
@@ -333,7 +319,6 @@ def test_workplan_run_unknown_clobber_step_fails_fast(
                 hw_single_step_wp_path.as_posix(),
                 "--run-id",
                 str(uuid.uuid4()),
-                "--dry-run",
                 "--clobber",
                 "does-not-exist",
             ],
@@ -344,26 +329,16 @@ def test_workplan_run_unknown_clobber_step_fails_fast(
     assert "does-not-exist" in result.stderr
 
 
-@pytest.mark.parametrize(
-    "dry_run",
-    [
-        pytest.param(True, id="dry-run only"),
-        pytest.param(False, id="full execution"),
-    ],
-)
 def test_heterogeneous_workplan(
     heterogeneous_workplan_path: Path,
-    dry_run: bool,
 ) -> None:
-    """Test the preparation of a workplan containing multiple applications (--dry-run).
+    """Test the execution of a workplan containing multiple applications.
 
     Parameters
     ----------
     heterogeneous_workplan_path : Path
         The path to the workplan containing a step relying on the hello_world application
         and a step relying on the ROMS-MARBL application.
-    dry_run : bool
-        Whether to run the workplan in dry-run mode.
     """
     runner = CliRunner()
     custom_env = {
@@ -385,8 +360,6 @@ def test_heterogeneous_workplan(
         ),
     ):
         args = [heterogeneous_workplan_path.as_posix(), "--run-id", run_id]
-        if dry_run:
-            args.append("--dry-run")
 
         result = runner.invoke(
             app_run_workplan,

@@ -25,7 +25,12 @@ from cstar.base.env import (
 )
 from cstar.cli.blueprint.run import app
 from cstar.entrypoint.runner import BlueprintRunner
-from cstar.entrypoint.utils import ARG_CLOBBER, ARG_DIRECTIVES_URI_LONG, ARG_RESUME
+from cstar.entrypoint.utils import (
+    ARG_CLOBBER,
+    ARG_DIRECTIVES_URI_LONG,
+    ARG_PRE_RUN,
+    ARG_RESUME,
+)
 from cstar.execution.handler import ExecutionStatus
 from cstar.orchestration.adapter import prepare_directive_file
 from cstar.orchestration.models import Application, Blueprint
@@ -833,3 +838,96 @@ def test_blueprint_run_resume_reaches_runner_request(
     mock_exec_runner.assert_called_once()
     mock_request_cls.assert_called_once()
     assert mock_request_cls.call_args.kwargs["resume"] is True
+
+
+def test_blueprint_run_pre_run_reaches_runner_request(
+    complete_blueprint_path: Path,
+) -> None:
+    """Verify `--pre-run` reaches the runner via a `RunnerRequest` with
+    `pre_run=True`.
+    """
+    mock_sim_instance = mock.Mock()
+    mock_sim_instance.name = "test simulation"
+
+    async def modify_runner(
+        self: BlueprintRunner[RomsMarblBlueprint],
+    ) -> RunnerResult[RomsMarblBlueprint]:
+        self.add_state(ExecutionStatus.COMPLETED)
+        return self.result
+
+    with (
+        mock.patch.object(
+            ROMSSimulation,
+            "from_blueprint",
+            return_value=mock_sim_instance,
+        ),
+        mock.patch.object(
+            RomsMarblRunner,
+            "execute",
+            side_effect=modify_runner,
+            autospec=True,
+        ) as mock_exec_runner,
+        mock.patch(
+            "cstar.cli.blueprint.run.RunnerRequest",
+            wraps=RunnerRequest,
+        ) as mock_request_cls,
+    ):
+        runner = CliRunner()
+        result = runner.invoke(
+            app,
+            [complete_blueprint_path.as_posix(), ARG_PRE_RUN],
+            color=False,
+        )
+
+    assert result.exit_code == 0, result.output
+    mock_exec_runner.assert_called_once()
+    mock_request_cls.assert_called_once()
+    assert mock_request_cls.call_args.kwargs["pre_run"] is True
+
+
+def test_blueprint_run_pre_run_and_resume_fails_fast(
+    complete_blueprint_path: Path,
+    flatten_cli_output: Callable[[str], str],
+) -> None:
+    """Verify `--pre-run` combined with `--resume` fails fast with a usage
+    error, and the runner is never invoked.
+    """
+    with mock.patch.object(RomsMarblRunner, "execute", mock.AsyncMock()) as mock_exec:
+        runner = CliRunner()
+        result = runner.invoke(
+            app,
+            [complete_blueprint_path.as_posix(), ARG_PRE_RUN, ARG_RESUME],
+            color=False,
+        )
+
+    assert result.exit_code == 2
+    stderr_flat = flatten_cli_output(result.stderr)
+    assert ARG_PRE_RUN in stderr_flat
+    assert ARG_RESUME in stderr_flat
+    mock_exec.assert_not_called()
+
+
+def test_blueprint_run_pre_run_non_pre_runnable_app_fails_fast(
+    complete_blueprint_path: Path,
+    flatten_cli_output: Callable[[str], str],
+) -> None:
+    """Verify `--pre-run` against an application that does not declare itself
+    pre-runnable fails fast with a usage error naming the application, and the
+    runner is never invoked.
+    """
+    with (
+        mock.patch.object(RomsMarblRunner, "execute", mock.AsyncMock()) as mock_exec,
+        mock.patch.object(RomsMarblApplication, "pre_runnable", False),
+    ):
+        runner = CliRunner()
+        result = runner.invoke(
+            app,
+            [complete_blueprint_path.as_posix(), ARG_PRE_RUN],
+            color=False,
+        )
+
+    assert result.exit_code == 2
+    stderr_flat = flatten_cli_output(result.stderr)
+    assert "roms_marbl" in stderr_flat
+    assert "does not support" in stderr_flat
+    mock_exec.assert_not_called()
