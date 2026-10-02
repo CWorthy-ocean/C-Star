@@ -1,12 +1,16 @@
 name: integration_tests
 
 on:
+  # PRs test the merge with main; push runs on main catch post-merge breakage
+  # and save the env cache that PR runs can read
   push:
-    branches:
-      - '*'
+    branches: [main]
   pull_request:
-    branches:
-      - '*'
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
 
