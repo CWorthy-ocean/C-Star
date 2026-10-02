@@ -420,7 +420,8 @@ async def prepare_workplan(
     apply_clobber_overrides(wp, clobber_steps)
 
     # inline blueprints are written to disk only for a real run, not for `check`
-    wp = wp.model_copy(update={"steps": materialize_inline_blueprints(wp.steps)})
+    materialized = await asyncio.to_thread(materialize_inline_blueprints, wp.steps)
+    wp = wp.model_copy(update={"steps": materialized})
 
     # make a copy of the original and modified blueprint in the output directory
     persist_orig = original_workplan_backup(wp_path, output_dir)

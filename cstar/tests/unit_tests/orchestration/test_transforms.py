@@ -4268,6 +4268,30 @@ def test_materialize_inline_blueprints(inline_workplan: Workplan) -> None:
     assert consumer.directives == {"other": {"key": "value"}}
 
 
+def test_effective_blueprint_inline_step_uses_packaged_overrides(
+    inline_workplan: Workplan,
+) -> None:
+    """Verify `effective_blueprint` builds a transformed inline step's content
+    from its packaged `apply-overrides` payload, whose `blueprint_overrides`
+    are empty by then.
+
+    Parameters
+    ----------
+    inline_workplan : Workplan
+        A workplan whose second step declares an inline blueprint.
+    """
+    transformed = WorkplanTransformer(inline_workplan).apply()
+    consumer = t.cast("LiveStep", transformed.steps[1])
+    assert consumer.is_inline
+    assert not consumer.blueprint_overrides
+
+    blueprint = effective_blueprint(consumer)
+
+    assert isinstance(blueprint, HelloWorldBlueprint)
+    assert blueprint.target == "@inline"
+    assert blueprint.working_dir == consumer.fsm.root_dir
+
+
 def test_materialize_inline_blueprints_requires_transformed_step() -> None:
     """Verify an inline step that was not transformed first is rejected."""
     step = LiveStep.from_step(

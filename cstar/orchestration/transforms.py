@@ -850,14 +850,31 @@ def effective_blueprint(step: LiveStep) -> Blueprint:
     ------
     BlueprintDeferredError
         If the step's blueprint is deferred and does not exist yet.
+    CstarExpectationFailed
+        If the step's blueprint is inline but no overrides were packaged
+        (the step was not transformed first), or they are incomplete.
     """
-    blueprint = step.blueprint
-
     config = step.directives.get(ApplyOverridesDirective.key(), {})
-    if isinstance(config, Mapping):
-        overrides = config.get(ApplyOverridesDirective.KEY_OVERRIDES)
-        if isinstance(overrides, Mapping):
-            blueprint = OverrideTransform().apply(blueprint, dict(overrides))
+    overrides = (
+        config.get(ApplyOverridesDirective.KEY_OVERRIDES)
+        if isinstance(config, Mapping)
+        else None
+    )
+
+    # an inline step's content lives only in the packaged payload once
+    # transformed; its blueprint_overrides are empty by then
+    if step.is_inline:
+        if not isinstance(overrides, Mapping):
+            msg = (
+                f"Step {step.name!r} declares an inline blueprint but has no "
+                "packaged overrides; the step was not transformed first"
+            )
+            raise CstarExpectationFailed(msg)
+        return synthesize_blueprint(step, overrides)
+
+    blueprint = step.blueprint
+    if isinstance(overrides, Mapping):
+        blueprint = OverrideTransform().apply(blueprint, dict(overrides))
 
     return blueprint
 
@@ -915,10 +932,10 @@ def materialize_inline_blueprints(steps: Sequence[LiveStep]) -> list[LiveStep]:
     there. Launchers and `cstar blueprint run` then see an ordinary,
     complete blueprint file.
 
-    The steps must already be transformed: the blueprint is built from the
-    packaged `apply-overrides` directive, which already carries every
-    override and the `working_dir`. That directive is dropped once baked
-    into the file so the overrides are not applied a second time.
+    The steps must already be transformed: `effective_blueprint` builds the
+    content from the packaged `apply-overrides` directive, which already
+    carries every override and the `working_dir`. That directive is dropped
+    once baked into the file so the overrides are not applied a second time.
 
     Parameters
     ----------
@@ -944,21 +961,8 @@ def materialize_inline_blueprints(steps: Sequence[LiveStep]) -> list[LiveStep]:
             materialized.append(step)
             continue
 
-        config = step.directives.get(ApplyOverridesDirective.key())
-        payload = (
-            config.get(ApplyOverridesDirective.KEY_OVERRIDES)
-            if isinstance(config, Mapping)
-            else None
-        )
-        if not isinstance(payload, Mapping):
-            msg = (
-                f"Step {step.name!r} declares an inline blueprint but has no "
-                "packaged overrides; the step was not transformed first"
-            )
-            raise CstarExpectationFailed(msg)
-
         path = step.fsm.run_dir / INLINE_BLUEPRINT_FILENAME
-        serialize(path, synthesize_blueprint(step, payload))
+        serialize(path, effective_blueprint(step))
 
         directives = {
             key: value
