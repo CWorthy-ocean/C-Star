@@ -10,6 +10,7 @@ from pydantic import ValidationError
 
 from cstar.orchestration.models import (
     DeferredBlueprintRef,
+    InlineBlueprintRef,
     KeyValueStore,
     Step,
     Workplan,
@@ -1501,3 +1502,153 @@ def test_workplan_deferred_roundtrip(
     assert isinstance(reloaded_consumer.blueprint_path, DeferredBlueprintRef)
     assert reloaded_consumer.blueprint_path.from_step == "producer"
     assert reloaded_consumer.blueprint_path.filename == "generated.yaml"
+
+
+@pytest.mark.parametrize("token", ["inline", " Inline ", "INLINE"])
+def test_inline_blueprint_ref_parsing(token: str) -> None:
+    """Verify the `inline` token parses to an `InlineBlueprintRef`.
+
+    Parameters
+    ----------
+    token : str
+        A spelling of the inline token, varying in case and whitespace.
+    """
+    step = Step.model_validate(
+        {"name": "inline-step", "application": "hello_world", "blueprint": token},
+    )
+
+    assert step.is_inline
+    assert not step.is_deferred
+    assert isinstance(step.blueprint_path, InlineBlueprintRef)
+
+
+@pytest.mark.parametrize(
+    "fields",
+    [
+        {"blueprint": {}},
+        {"blueprint": None},
+        {},
+    ],
+    ids=["empty-mapping", "null", "omitted"],
+)
+def test_inline_blueprint_ref_rejects_other_forms(fields: dict[str, t.Any]) -> None:
+    """Verify only the token declares an inline blueprint and the field stays
+    required.
+
+    Parameters
+    ----------
+    fields : dict[str, Any]
+        The `blueprint` entry (if any) to include in the step.
+    """
+    with pytest.raises(ValidationError):
+        _ = Step.model_validate(
+            {"name": "inline-step", "application": "hello_world", **fields},
+        )
+
+
+def test_inline_blueprint_ref_not_inferred_from_other_blueprints(
+    fake_blueprint_path: Path,
+) -> None:
+    """Verify path and deferred steps, and a file named `./inline`, are not inline.
+
+    Parameters
+    ----------
+    fake_blueprint_path : Path
+        A path to a file that meets minimum expectations (it exists).
+    """
+    concrete = Step(
+        name="concrete",
+        application="hello_world",
+        blueprint=fake_blueprint_path,
+    )
+    deferred = Step.model_validate(
+        {
+            "name": "deferred",
+            "application": "hello_world",
+            "blueprint": {"from_step": "producer"},
+            "depends_on": ["producer"],
+        },
+    )
+    literal = Step(name="literal", application="hello_world", blueprint="./inline")
+
+    assert not concrete.is_inline
+    assert not deferred.is_inline
+    assert not literal.is_inline
+    assert literal.blueprint_path == "./inline"
+    assert isinstance(literal.blueprint_path, str)
+
+
+def test_inline_blueprint_ref_dump_roundtrip() -> None:
+    """Verify a dumped inline step reads `inline` and validates back to inline."""
+    step = Step.model_validate(
+        {"name": "inline-step", "application": "hello_world", "blueprint": "inline"},
+    )
+
+    dumped = step.model_dump(by_alias=True)
+    assert dumped["blueprint"] == "inline"
+
+    assert Step.model_validate(dumped).is_inline
+
+
+def test_inline_blueprint_ref_constructs() -> None:
+    """Verify the marker constructs directly and is accepted by a step."""
+    step = Step(
+        name="inline-step",
+        application="hello_world",
+        blueprint=InlineBlueprintRef(),
+    )
+
+    assert step.is_inline
+    assert isinstance(step.blueprint_path, InlineBlueprintRef)
+
+
+def test_inline_blueprint_ref_str() -> None:
+    """Verify the string form of the reference is the token."""
+    assert str(InlineBlueprintRef()) == "inline"
+    assert InlineBlueprintRef.matches("  Inline ")
+    assert not InlineBlueprintRef.matches("./inline")
+
+
+def test_inline_blueprint_ref_json_schema() -> None:
+    """Verify the step JSON schema advertises the token and keeps `blueprint`
+    required.
+    """
+    schema = Step.model_json_schema()
+
+    assert "blueprint" in schema["required"]
+    refs = [
+        entry["$ref"].rsplit("/", 1)[-1]
+        for entry in schema["properties"]["blueprint"]["anyOf"]
+        if "$ref" in entry
+    ]
+    assert any(
+        schema["$defs"][name].get("const") == InlineBlueprintRef.TOKEN for name in refs
+    )
+
+
+def test_workplan_inline_roundtrip(tmp_path: Path) -> None:
+    """Verify a workplan with an inline blueprint serializes as `blueprint: inline`
+    and deserializes without losing the marker.
+
+    Parameters
+    ----------
+    tmp_path : Path
+        Temporary directory to read/write test inputs and outputs
+    """
+    inline = Step.model_validate(
+        {"name": "inline-step", "application": "hello_world", "blueprint": "inline"},
+    )
+    plan = Workplan(
+        name="test-plan",
+        description="test-description",
+        steps=[inline],
+    )
+
+    wp_path = tmp_path / "inline_wp.yaml"
+    assert serialize(wp_path, plan)
+    assert "blueprint: inline" in wp_path.read_text()
+
+    reloaded = deserialize(wp_path, Workplan)
+
+    assert reloaded.steps[0].is_inline
+    assert isinstance(reloaded.steps[0].blueprint_path, InlineBlueprintRef)

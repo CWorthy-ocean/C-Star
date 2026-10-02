@@ -32,7 +32,11 @@ from cstar.orchestration.models import (
     KeyValueStore,
     Workplan,
 )
-from cstar.orchestration.orchestration import LiveStep, LiveWorkplan
+from cstar.orchestration.orchestration import (
+    LiveStep,
+    LiveWorkplan,
+    synthesize_blueprint,
+)
 from cstar.orchestration.serialization import deserialize, serialize
 from cstar.orchestration.tracking import TrackingRepository, WorkplanRun
 
@@ -73,6 +77,9 @@ def get_transforms(application: str) -> list[Transform[t.Any]]:
     """
     return TRANSFORMS.get(application, [])
 
+
+INLINE_BLUEPRINT_FILENAME: t.Final[str] = "blueprint.yaml"
+"""Name of the blueprint file materialized into an inline step's work directory."""
 
 PLACEHOLDER_RE = re.compile(r"\{\{([^}]+)\}\}")
 """Pattern matching double-brace template placeholders.
@@ -497,12 +504,13 @@ class WorkplanTransformer(LoggingMixin):
                 trx for trx in app_transforms[step.application] if trx.is_active()
             ]
 
-            if step.is_deferred and active_transforms:
+            if (step.is_deferred or step.is_inline) and active_transforms:
                 active_names = [trx.__name__ for trx in active_transforms]
                 msg = (
                     f"Application transform(s) {', '.join(active_names)} cannot be "
                     f"applied to step {step.name!r} because its blueprint is "
-                    "deferred and does not exist at schedule time"
+                    "deferred or inline and does not exist as a file at "
+                    "schedule time"
                 )
                 raise CstarExpectationFailed(msg)
 
@@ -842,14 +850,31 @@ def effective_blueprint(step: LiveStep) -> Blueprint:
     ------
     BlueprintDeferredError
         If the step's blueprint is deferred and does not exist yet.
+    CstarExpectationFailed
+        If the step's blueprint is inline but no overrides were packaged
+        (the step was not transformed first), or they are incomplete.
     """
-    blueprint = step.blueprint
-
     config = step.directives.get(ApplyOverridesDirective.key(), {})
-    if isinstance(config, Mapping):
-        overrides = config.get(ApplyOverridesDirective.KEY_OVERRIDES)
-        if isinstance(overrides, Mapping):
-            blueprint = OverrideTransform().apply(blueprint, dict(overrides))
+    overrides = (
+        config.get(ApplyOverridesDirective.KEY_OVERRIDES)
+        if isinstance(config, Mapping)
+        else None
+    )
+
+    # an inline step's content lives only in the packaged payload once
+    # transformed; its blueprint_overrides are empty by then
+    if step.is_inline:
+        if not isinstance(overrides, Mapping):
+            msg = (
+                f"Step {step.name!r} declares an inline blueprint but has no "
+                "packaged overrides; the step was not transformed first"
+            )
+            raise CstarExpectationFailed(msg)
+        return synthesize_blueprint(step, overrides)
+
+    blueprint = step.blueprint
+    if isinstance(overrides, Mapping):
+        blueprint = OverrideTransform().apply(blueprint, dict(overrides))
 
     return blueprint
 
@@ -896,6 +921,58 @@ def package_runtime_overrides(step: LiveStep) -> LiveStep:
     }
     update: dict[str, t.Any] = {"blueprint_overrides": {}, "directives": directives}
     return LiveStep.from_step(step, update=update)
+
+
+def materialize_inline_blueprints(steps: Sequence[LiveStep]) -> list[LiveStep]:
+    """Write each inline step's blueprint to its work directory.
+
+    Runs from `prepare_workplan` rather than `WorkplanTransformer.apply`: a
+    schedule-time check must write nothing to disk, and a reloaded or resumed
+    run reads the transformed workplan, so the file path must be recorded
+    there. Launchers and `cstar blueprint run` then see an ordinary,
+    complete blueprint file.
+
+    The steps must already be transformed: `effective_blueprint` builds the
+    content from the packaged `apply-overrides` directive, which already
+    carries every override and the `working_dir`. That directive is dropped
+    once baked into the file so the overrides are not applied a second time.
+
+    Parameters
+    ----------
+    steps : Sequence[LiveStep]
+        The transformed steps of the workplan.
+
+    Returns
+    -------
+    list[LiveStep]
+        The steps, with each inline step replaced by one that references its
+        materialized blueprint file.
+
+    Raises
+    ------
+    CstarExpectationFailed
+        If an inline step has no packaged overrides, or its overrides do
+        not form a complete blueprint.
+    """
+    materialized: list[LiveStep] = []
+
+    for step in steps:
+        if not step.is_inline:
+            materialized.append(step)
+            continue
+
+        path = step.fsm.run_dir / INLINE_BLUEPRINT_FILENAME
+        serialize(path, effective_blueprint(step))
+
+        directives = {
+            key: value
+            for key, value in step.directives.items()
+            if key != ApplyOverridesDirective.key()
+        }
+        update = {"blueprint": path, "directives": directives}
+        materialized.append(LiveStep.from_step(step, update=update))
+
+    return materialized
 
 
 def _ancestor_map(steps: Sequence[LiveStep]) -> dict[str, set[str]]:
