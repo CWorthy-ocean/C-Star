@@ -7,9 +7,10 @@ import pytest
 from pydantic import ValidationError
 
 from cstar.base.exceptions import BlueprintDeferredError, CstarError
-from cstar.entrypoint.utils import ARG_PRE_RUN, ARG_RESUME
+from cstar.entrypoint.utils import ARG_CLOBBER, ARG_PRE_RUN, ARG_RESUME
 from cstar.execution.handler import ExecutionStatus
 from cstar.orchestration.adapter import StepToRunRequestAdapter
+from cstar.orchestration.launch.local import LocalLauncher
 from cstar.orchestration.launch.slurm import (
     SlurmComputeSpec,
     SlurmHandle,
@@ -459,7 +460,13 @@ async def test_slurmlauncher_submit_records_pre_run_on_handle(
         handle = await SlurmLauncher._submit(live_step, [])
 
     assert handle.pre_run is pre_run
+    assert handle.launcher_name == SlurmLauncher.name
     assert (ARG_PRE_RUN in captured["command"]) is pre_run
+
+    await StateRepository().put_sentinel(handle)
+    reloaded = await StateRepository().get_sentinel(live_step.name, SlurmHandle)
+    assert reloaded is not None
+    assert reloaded.launcher_name == SlurmLauncher.name
 
 
 @pytest.mark.usefixtures("read_yaml_intercept")
@@ -478,6 +485,7 @@ async def test_slurmlauncher_launch_attaches_to_done_pre_run(
         pid="12345",
         name=live_step.name,
         run_id=mock_run_id,
+        launcher_name=LocalLauncher.name,
         status=Status.Done,
         pre_run=True,
     )
@@ -491,13 +499,54 @@ async def test_slurmlauncher_launch_attaches_to_done_pre_run(
         mock.patch(
             "cstar.orchestration.launch.slurm.get_slurm_batch",
             mock.AsyncMock(return_value=unrelated),
-        ),
+        ) as mock_batch,
         mock.patch.object(SlurmLauncher, "POST_SUBMIT_DELAY", 0),
         mock.patch.object(SlurmLauncher, "adapt_step", _capture_command_job(captured)),
     ):
         task = await SlurmLauncher.launch(live_step, [])
 
+    mock_batch.assert_not_awaited()
     assert task.handle.pid == "4242"
     assert task.handle.pre_run is False
     assert ARG_RESUME in captured["command"]
     assert ARG_PRE_RUN not in captured["command"]
+
+
+@pytest.mark.usefixtures("read_yaml_intercept")
+async def test_slurmlauncher_launch_queries_unnamed_pre_run_sentinel(
+    wp_templates_dir: Path,
+    mock_run_id: str,
+) -> None:
+    """Verify a sentinel written before launcher names were recorded is treated
+    as the SLURM launcher's own: SLURM is queried and its verdict (failed)
+    overrides the persisted status.
+    """
+    workplan = deserialize(wp_templates_dir / "single_step.yaml", Workplan)
+    live_step = LiveStep.from_step(workplan.steps[0])
+
+    prior_handle = SlurmHandle(
+        pid="12345",
+        name=live_step.name,
+        run_id=mock_run_id,
+        status=Status.Done,
+        pre_run=True,
+    )
+    assert prior_handle.launcher_name == ""
+    await StateRepository().put_sentinel(prior_handle)
+
+    failed = mock.Mock(status=ExecutionStatus.FAILED)
+    captured: dict[str, list[str]] = {}
+
+    with (
+        mock.patch(
+            "cstar.orchestration.launch.slurm.get_slurm_batch",
+            mock.AsyncMock(return_value=failed),
+        ) as mock_batch,
+        mock.patch.object(SlurmLauncher, "POST_SUBMIT_DELAY", 0),
+        mock.patch.object(SlurmLauncher, "adapt_step", _capture_command_job(captured)),
+    ):
+        await SlurmLauncher.launch(live_step, [])
+
+    mock_batch.assert_awaited_once_with("12345")
+    assert ARG_CLOBBER in captured["command"]
+    assert ARG_RESUME not in captured["command"]

@@ -64,6 +64,7 @@ from cstar.orchestration.dag_runner import (
     original_workplan_backup,
     run_dag,
 )
+from cstar.orchestration.launch.slurm import SlurmLauncher
 from cstar.orchestration.models import BlueprintCore, Step, Workplan
 from cstar.orchestration.orchestration import LiveWorkplan, ProcessHandle
 from cstar.orchestration.serialization import (
@@ -148,7 +149,7 @@ def get_step_summary_display(summary: ExecutiveStepSummary) -> str:
         pid = "N/A"
     else:
         pid = handle.pid if handle else "N/A"
-        if handle.launcher_name == "slurm":
+        if handle.launcher_name == SlurmLauncher.name:
             task_prompt = "SLURM Job ID"
 
     return textwrap.dedent(f"""\

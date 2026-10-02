@@ -24,6 +24,7 @@ from cstar.execution.scheduler_job import (
 from cstar.orchestration.adapter import StepToRunRequestAdapter
 from cstar.orchestration.launch.common import (
     build_attempt_log_header,
+    is_foreign_handle,
     resolve_prior_attempt,
 )
 from cstar.orchestration.models import KeyValueStore
@@ -162,12 +163,12 @@ class SlurmHandle(ProcessHandle):
     status: Status = Status.Unsubmitted
     """The current status of the task."""
 
-    launcher_name: str = "slurm"
-    """The launcher used to launch the process."""
-
 
 class SlurmLauncher(Launcher[SlurmHandle]):
     """A launcher that executes steps in a SLURM-enabled cluster."""
+
+    name: t.ClassVar[str] = "slurm"
+    """Value recorded as `ProcessHandle.launcher_name` on handles this launcher creates."""
 
     POST_SUBMIT_DELAY: t.Final[float] = float(
         get_env_item(ENV_CSTAR_SLURM_POST_SUBMIT_DELAY).value
@@ -314,7 +315,12 @@ class SlurmLauncher(Launcher[SlurmHandle]):
         )
 
     @staticmethod
-    async def _submit(step: "LiveStep", dependencies: list[SlurmHandle]) -> SlurmHandle:
+    async def _submit(
+        step: "LiveStep",
+        dependencies: list[SlurmHandle],
+        *,
+        after_pre_run: bool = False,
+    ) -> SlurmHandle:
         """Submit a step to SLURM as a new batch allocation.
 
         Parameters
@@ -323,6 +329,8 @@ class SlurmLauncher(Launcher[SlurmHandle]):
             The step to submit to SLURM.
         dependencies : list[SlurmHandle]
             The list of tasks that must complete prior to execution of the submitted Step.
+        after_pre_run : bool
+            Whether this submission launches a real run from a completed pre-run.
 
         Returns
         -------
@@ -335,7 +343,11 @@ class SlurmLauncher(Launcher[SlurmHandle]):
         run_id = os.getenv(ENV_CSTAR_RUNID, "")
         rotated_log = rotate_file(step.log_path)
         header = build_attempt_log_header(
-            step.name, run_id, rotated_log, resume=step.resume
+            step.name,
+            run_id,
+            rotated_log,
+            resume=step.resume,
+            after_pre_run=after_pre_run,
         )
         step.log_path.write_text(header)
 
@@ -355,6 +367,7 @@ class SlurmLauncher(Launcher[SlurmHandle]):
                 pid=str(job.id),
                 name=step.name,
                 run_id=run_id,
+                launcher_name=SlurmLauncher.name,
                 pre_run=step.pre_run,
             )
 
@@ -429,20 +442,24 @@ class SlurmLauncher(Launcher[SlurmHandle]):
         reuse_prior: bool = False
 
         if prior_handle:
-            if prior_handle.pre_run:
-                # a pre-run ran in a local process: its pid is no SLURM job id,
-                # so the persisted status is the only valid one
-                last_status = prior_handle.status
-            else:
-                # use persisted task as sentinel only; query SLURM for up-to-date status
-                last_status = await SlurmLauncher.query_status(prior_handle)
+            # use persisted task as sentinel only; query SLURM for up-to-date status
+            last_status = await SlurmLauncher.query_status(prior_handle)
             reuse_prior = resolve_prior_attempt(
-                step, last_status, prior_pre_run=prior_handle.pre_run
+                step,
+                last_status,
+                prior_pre_run=prior_handle.pre_run,
+                prior_foreign=is_foreign_handle(prior_handle, cls.name),
             )
 
         if not reuse_prior or not prior_handle:
             dependencies = await cls._prune_completed_dependencies(dependencies)
-            handle = await submit_fn(step, dependencies)
+            handle = await submit_fn(
+                step,
+                dependencies,
+                after_pre_run=bool(
+                    prior_handle and prior_handle.pre_run and not step.pre_run
+                ),
+            )
         else:
             handle = prior_handle
             handle.status = last_status
@@ -500,6 +517,14 @@ class SlurmLauncher(Launcher[SlurmHandle]):
             The current status of the item.
         """
         handle = item.handle if isinstance(item, Task) else item
+        if is_foreign_handle(handle, cls.name):
+            msg = (
+                f"Handle for {handle.name!r} was created by the "
+                f"{handle.launcher_name!r} launcher; using its persisted status"
+            )
+            log.debug(msg)
+            return handle.status
+
         batch = await get_slurm_batch(handle.pid)
         exec_status = batch.status
 

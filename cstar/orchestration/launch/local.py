@@ -24,6 +24,7 @@ from cstar.orchestration.adapter import StepToRunRequestAdapter
 from cstar.orchestration.formatting import ModelFormatter
 from cstar.orchestration.launch.common import (
     build_attempt_log_header,
+    is_foreign_handle,
     resolve_prior_attempt,
 )
 from cstar.orchestration.models import KeyValueStore
@@ -54,8 +55,10 @@ def run_as_process(step: "Step", cmd: list[str], log_file: Path) -> dict[str, in
 class LocalHandle(ProcessHandle):
     """Handle enabling reference to a task running in local processes."""
 
-    start_at: datetime.datetime | float
-    """The process creation time as a posix timestamp (in seconds)."""
+    start_at: datetime.datetime | float | None = Field(default=None)
+    """The process creation time as a posix timestamp (in seconds).
+
+    `None` only on a handle deserialized from another launcher's sentinel."""
 
     _process: subprocess.Popen[bytes] = PrivateAttr()
     """The process handle (used only for simulating local processes)."""
@@ -63,11 +66,14 @@ class LocalHandle(ProcessHandle):
     status: Status = Status.Unsubmitted
     """The current status of the task."""
 
-    launcher_name: str = "local"
-    """The launcher used to launch the process."""
-
     @property
     def start_ts(self) -> float:
+        if self.start_at is None:
+            msg = (
+                f"Local handle for {self.name} has no start time; "
+                "it was not created by the local launcher"
+            )
+            raise CstarExpectationFailed(msg)
         if isinstance(self.start_at, datetime.datetime):
             self.start_at = self.start_at.timestamp()
         return self.start_at
@@ -243,6 +249,9 @@ class TimeConstrainedRunRequestEnricher(ModelEnricher[RunRequest]):
 class LocalLauncher(Launcher[LocalHandle]):
     """A launcher that executes steps in a local process."""
 
+    name: t.ClassVar[str] = "local"
+    """Value recorded as `ProcessHandle.launcher_name` on handles this launcher creates."""
+
     tasks: t.ClassVar[dict[str, str]] = {}
     """Mapping of task name to process ID."""
 
@@ -287,7 +296,12 @@ class LocalLauncher(Launcher[LocalHandle]):
         return formatter.format(request)
 
     @staticmethod
-    async def _submit(step: "LiveStep", dependencies: list[LocalHandle]) -> LocalHandle:
+    async def _submit(
+        step: "LiveStep",
+        dependencies: list[LocalHandle],
+        *,
+        after_pre_run: bool = False,
+    ) -> LocalHandle:
         """Submit a step to a local process.
 
         Parameters
@@ -296,6 +310,8 @@ class LocalLauncher(Launcher[LocalHandle]):
             The step to execute in a local process.
         dependencies : list[LocalHandle]
             The list of tasks that must complete prior to execution of the submitted Step.
+        after_pre_run : bool
+            Whether this submission launches a real run from a completed pre-run.
 
         Returns
         -------
@@ -312,7 +328,11 @@ class LocalLauncher(Launcher[LocalHandle]):
         run_id = str(os.getenv(ENV_CSTAR_RUNID, ""))
         rotated_log = rotate_file(step.log_path)
         header = build_attempt_log_header(
-            step.name, run_id, rotated_log, resume=step.resume
+            step.name,
+            run_id,
+            rotated_log,
+            resume=step.resume,
+            after_pre_run=after_pre_run,
         )
         step.log_path.write_text(header)
 
@@ -353,6 +373,7 @@ class LocalLauncher(Launcher[LocalHandle]):
                     pid=str(pid),
                     name=step.name,
                     run_id=run_id,
+                    launcher_name=LocalLauncher.name,
                     start_at=create_time,
                     status=Status.Submitted,
                     pre_run=step.pre_run,
@@ -484,14 +505,23 @@ class LocalLauncher(Launcher[LocalHandle]):
         if prior_handle:
             last_status = await LocalLauncher.query_status(prior_handle)
             reuse_prior = resolve_prior_attempt(
-                live_step, last_status, prior_pre_run=prior_handle.pre_run
+                live_step,
+                last_status,
+                prior_pre_run=prior_handle.pre_run,
+                prior_foreign=is_foreign_handle(prior_handle, cls.name),
             )
 
         if reuse_prior and prior_handle:
             handle = prior_handle
             handle.status = last_status
         else:
-            handle = await LocalLauncher._submit(live_step, dependencies)
+            handle = await LocalLauncher._submit(
+                live_step,
+                dependencies,
+                after_pre_run=bool(
+                    prior_handle and prior_handle.pre_run and not live_step.pre_run
+                ),
+            )
 
         return Task[LocalHandle](
             step=live_step,
@@ -513,6 +543,14 @@ class LocalLauncher(Launcher[LocalHandle]):
             The current status of the item.
         """
         handle = item.handle if isinstance(item, Task) else item
+        if is_foreign_handle(handle, cls.name):
+            msg = (
+                f"Handle for {handle.name!r} was created by the "
+                f"{handle.launcher_name!r} launcher; using its persisted status"
+            )
+            log.debug(msg)
+            return handle.status
+
         raw_status = await LocalLauncher._status(handle)
 
         match raw_status:

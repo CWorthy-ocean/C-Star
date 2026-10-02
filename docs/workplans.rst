@@ -462,6 +462,11 @@ re-launches those steps, which attach to the prepared directories, reuse the
 staged inputs, compiled executable and partitions, and launch the model
 inside the scheduler job.
 
+The same :term:`run ID` also works after a failed real run. If a scheduled
+run fails, fix the cause and run the workplan again with ``--pre-run``: the
+failed steps are cleared and prepared from scratch on the login node, and the
+following plain run attaches to them as above.
+
 During the pre-run every step runs locally, even on a system with a job
 scheduler, so the command is suitable for a login node. Steps that cannot be
 prepared are skipped and reported with the reason:
