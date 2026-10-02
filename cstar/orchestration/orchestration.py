@@ -15,6 +15,7 @@ from pydantic import (
 
 from cstar.applications.core import (
     get_app_for_blueprint,
+    get_application,
 )
 from cstar.base.env import (
     ENV_CSTAR_DATA_HOME,
@@ -22,7 +23,7 @@ from cstar.base.env import (
 )
 from cstar.base.exceptions import BlueprintDeferredError, CstarExpectationFailed
 from cstar.base.log import LoggingMixin
-from cstar.base.utils import lazy_import, slugify
+from cstar.base.utils import deep_merge, lazy_import, slugify
 from cstar.execution.file_system import (
     JobFileSystemManager,
     StateDirectoryManager,
@@ -32,6 +33,7 @@ from cstar.orchestration.models import (
     Blueprint,
     ConfiguredBaseModel,
     DeferredBlueprintRef,
+    InlineBlueprintRef,
     Step,
     Workplan,
 )
@@ -263,7 +265,13 @@ class LiveStep(Step):
         BlueprintDeferredError
             If the step's blueprint is deferred to runtime and does not
             exist until its producing step has run.
+        CstarExpectationFailed
+            If the step's blueprint is inline and its `blueprint_overrides`
+            do not form a complete blueprint.
         """
+        if isinstance(self.blueprint_path, InlineBlueprintRef):
+            return synthesize_blueprint(self, self.blueprint_overrides)
+
         if isinstance(self.blueprint_path, DeferredBlueprintRef):
             raise BlueprintDeferredError(
                 f"Step {self.name!r} has a blueprint deferred to runtime, "
@@ -341,6 +349,54 @@ class LiveStep(Step):
             data["working_dir"] = fsm.root_dir
 
         return data
+
+
+def synthesize_blueprint(step: LiveStep, overrides: Mapping[str, t.Any]) -> Blueprint:
+    """Build an inline step's blueprint from its application's blueprint model.
+
+    The blueprint is seeded with the step's identity and `overrides` are
+    deep-merged on top, so user-supplied values (including `name` and
+    `description`) win over the seed.
+
+    Parameters
+    ----------
+    step : LiveStep
+        The step declaring an inline blueprint.
+    overrides : Mapping[str, Any]
+        The values that complete the blueprint.
+
+    Returns
+    -------
+    Blueprint
+
+    Raises
+    ------
+    CstarExpectationFailed
+        If the merged values do not form a valid blueprint for the
+        step's application; the message lists every invalid field.
+    """
+    app = get_application(step.application)
+    seed = {
+        "name": step.name,
+        "description": f"Inline blueprint for step {step.name!r}",
+        "application": step.application,
+        "working_dir": step.working_dir.as_posix(),
+    }
+    data = deep_merge(seed, dict(overrides))
+
+    try:
+        return app.blueprint(**data)
+    except ValidationError as ex:
+        problems = "; ".join(
+            ": ".join(filter(None, (".".join(str(p) for p in err["loc"]), err["msg"])))
+            for err in ex.errors()
+        )
+        msg = (
+            f"Step {step.name!r} declares an inline blueprint, but its "
+            f"blueprint_overrides do not form a complete {step.application!r} "
+            f"blueprint: {problems}"
+        )
+        raise CstarExpectationFailed(msg) from ex
 
 
 class LiveWorkplan(Workplan):

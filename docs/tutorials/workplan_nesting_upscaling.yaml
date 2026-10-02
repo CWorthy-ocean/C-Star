@@ -10,7 +10,7 @@ steps:
 
   - name: nest_conversion
     application: nest_ic
-    blueprint: ./nest_ic_bp.yaml
+    blueprint: inline
     depends_on:
         - outer
     blueprint_overrides:
@@ -32,7 +32,7 @@ steps:
 
   - name: nest_conversion2
     application: nest_ic
-    blueprint: ./nest_ic_bp.yaml
+    blueprint: inline
     depends_on:
         - middle
     blueprint_overrides:
@@ -53,7 +53,7 @@ steps:
 
   - name: upscale_inner_mid
     application: upscaler
-    blueprint:
+    blueprint: inline
     depends_on:
       - inner
     directives:
@@ -70,7 +70,7 @@ steps:
 
   - name: upscale_mid_outer
     application: upscaler
-    blueprint:
+    blueprint: inline
     depends_on:
       - middle_up
     directives:

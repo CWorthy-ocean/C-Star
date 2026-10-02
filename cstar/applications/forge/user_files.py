@@ -39,7 +39,7 @@ import warnings
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from cstar.base.utils import netcdf_format
+from cstar.base.utils import convert_to_cdf5, netcdf_format
 
 if TYPE_CHECKING:
     from cstar.applications.forge.blueprint import UserProvidedFile
@@ -152,10 +152,11 @@ def stage_user_netcdf(src: Path, dest: Path, *, use_pio: bool, label: str) -> Pa
     non-classic file raises ``RuntimeError`` since it cannot be converted in place.
     Otherwise creates ``dest``'s parent directories and, when ``use_pio`` and
     ``src`` is not classic-format (CDF-1/2/5), warns and converts a copy with
-    ``nccopy -k cdf5`` (mirrors ``RomsMarblInputData._pio_finalize``'s conversion);
-    classic files, and every file without ``use_pio``, are plain ``shutil.copy2``
-    copies. A failed conversion (non-zero ``nccopy`` exit, or ``nccopy`` missing)
-    removes the partial ``dest`` and raises ``RuntimeError``. Returns ``dest``.
+    ``cstar.base.utils.convert_to_cdf5`` (keeping the original); classic files,
+    and every file without ``use_pio``, are plain ``shutil.copy2`` copies. A
+    failed conversion (non-zero ``nccopy`` exit, or ``nccopy`` missing) raises
+    ``RuntimeError``; ``convert_to_cdf5`` has already removed any partial
+    ``dest``. Returns ``dest``.
     """
     fmt = netcdf_format(src)
     needs_conversion = use_pio and not fmt.is_classic
@@ -178,10 +179,8 @@ def stage_user_netcdf(src: Path, dest: Path, *, use_pio: bool, label: str) -> Pa
             f"classic-format input, so a copy is being converted to CDF-5 at {dest} "
             "(the original is left untouched)."
         )
-        converted = False
         try:
-            subprocess.run(["nccopy", "-k", "cdf5", str(src), str(dest)], check=True)
-            converted = True
+            convert_to_cdf5(src, dest, remove_source=False)
         except (subprocess.CalledProcessError, OSError) as exc:
             hint = (
                 " `nccopy` (from netcdf-c) must be on PATH."
@@ -192,11 +191,6 @@ def stage_user_netcdf(src: Path, dest: Path, *, use_pio: bool, label: str) -> Pa
                 f"{label}: converting user-provided file {src} to CDF-5 at {dest} "
                 f"failed: {exc}.{hint}"
             ) from exc
-        finally:
-            if not converted:
-                # a partial dest (failure OR interrupt) would otherwise be reused by
-                # the executor's no-clobber logic on the next run
-                dest.unlink(missing_ok=True)
     else:
         shutil.copy2(src, dest)
     return dest

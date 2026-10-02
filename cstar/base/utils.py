@@ -528,22 +528,40 @@ def netcdf_format(path: Path) -> NetCDFFormat:
     return _NETCDF_MAGIC.get(header, NetCDFFormat.UNRECOGNIZED)
 
 
-def convert_to_cdf5(nc4_path: Path, final_path: Path) -> None:
-    """Convert a NETCDF4 file to CDF-5 (``NETCDF3_64BIT_DATA``, as required by
-    ParallelIO-enabled ROMS builds) via ``nccopy -k cdf5``, then delete the source.
+def convert_to_cdf5(src: Path, dest: Path, *, remove_source: bool = True) -> None:
+    """Convert a netCDF file to CDF-5 (``NETCDF3_64BIT_DATA``, as required by
+    ParallelIO-enabled ROMS builds) via ``nccopy -k cdf5``.
 
-    Raises on a non-zero ``nccopy`` exit; the source file is left in place (and the
-    final name unclaimed) so a re-run regenerates cleanly.
+    The single owner of the ``nccopy`` command line: every CDF-5 conversion in
+    C-Star (generated inputs and user-provided files alike) goes through here.
+    If ``nccopy`` exits non-zero (``CalledProcessError``), is missing from PATH
+    (``OSError``), or the process is interrupted, any partially written ``dest``
+    is removed before the exception propagates -- a truncated file left behind
+    would otherwise be picked up as a finished output by no-clobber reuse logic
+    on the next run. ``src`` is never touched on failure, and ``src == dest`` is
+    refused up front (``ValueError``).
 
     Parameters
     ----------
-    nc4_path : Path
-        The NETCDF4 source file.
-    final_path : Path
+    src : Path
+        The source file (typically NETCDF4).
+    dest : Path
         The destination for the CDF-5 file.
+    remove_source : bool, default True
+        Delete ``src`` once the conversion succeeds (the generated-input case,
+        where ``src`` is a throwaway ``_nc4`` intermediate). Pass False to keep
+        it (a user-provided original).
     """
-    subprocess.run(
-        ["nccopy", "-k", "cdf5", str(nc4_path), str(final_path)],
-        check=True,
-    )
-    nc4_path.unlink()
+    if src.resolve() == dest.resolve():
+        # nccopy would truncate its own input, and the failure cleanup below
+        # would delete the only copy -- refuse rather than guess.
+        raise ValueError(f"convert_to_cdf5: src and dest are the same file: {src}")
+    converted = False
+    try:
+        subprocess.run(["nccopy", "-k", "cdf5", str(src), str(dest)], check=True)
+        converted = True
+    finally:
+        if not converted:
+            dest.unlink(missing_ok=True)
+    if remove_source:
+        src.unlink()
