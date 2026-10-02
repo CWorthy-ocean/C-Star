@@ -453,6 +453,88 @@ class TestConvertToCdf5:
         assert nc4_path.exists()
         assert not final_path.exists()
 
+    def test_failure_removes_partial_dest(self, tmp_path: Path) -> None:
+        """A partially written destination is removed when nccopy fails."""
+        nc4_path = tmp_path / "ic_nc4.nc"
+        final_path = tmp_path / "ic.nc"
+        nc4_path.write_bytes(b"fake netcdf4 content")
+
+        def _partial_then_fail(cmd, check):
+            Path(cmd[-1]).write_bytes(b"partial")
+            raise subprocess.CalledProcessError(1, "nccopy")
+
+        with mock.patch(
+            "cstar.base.utils.subprocess.run", side_effect=_partial_then_fail
+        ):
+            with pytest.raises(subprocess.CalledProcessError):
+                convert_to_cdf5(nc4_path, final_path)
+
+        assert nc4_path.exists()
+        assert not final_path.exists()
+
+    def test_interrupt_removes_partial_dest(self, tmp_path: Path) -> None:
+        """An interrupt mid-conversion also removes the partial destination."""
+        nc4_path = tmp_path / "ic_nc4.nc"
+        final_path = tmp_path / "ic.nc"
+        nc4_path.write_bytes(b"fake netcdf4 content")
+
+        def _partial_then_interrupt(cmd, check):
+            Path(cmd[-1]).write_bytes(b"partial")
+            raise KeyboardInterrupt
+
+        with mock.patch(
+            "cstar.base.utils.subprocess.run", side_effect=_partial_then_interrupt
+        ):
+            with pytest.raises(KeyboardInterrupt):
+                convert_to_cdf5(nc4_path, final_path)
+
+        assert nc4_path.exists()
+        assert not final_path.exists()
+
+    def test_missing_nccopy_propagates_oserror(self, tmp_path: Path) -> None:
+        """`nccopy` absent from PATH surfaces as the OSError subprocess raises."""
+        nc4_path = tmp_path / "ic_nc4.nc"
+        final_path = tmp_path / "ic.nc"
+        nc4_path.write_bytes(b"fake netcdf4 content")
+
+        with mock.patch(
+            "cstar.base.utils.subprocess.run", side_effect=FileNotFoundError("nccopy")
+        ):
+            with pytest.raises(FileNotFoundError):
+                convert_to_cdf5(nc4_path, final_path)
+
+        assert nc4_path.exists()
+        assert not final_path.exists()
+
+    def test_same_src_and_dest_is_refused_without_running_nccopy(
+        self, tmp_path: Path
+    ) -> None:
+        """`src == dest` raises before nccopy runs and leaves the file intact."""
+        path = tmp_path / "ic.nc"
+        path.write_bytes(b"fake netcdf4 content")
+
+        with mock.patch("cstar.base.utils.subprocess.run") as mock_run:
+            with pytest.raises(ValueError, match="same file"):
+                convert_to_cdf5(path, path)
+
+        mock_run.assert_not_called()
+        assert path.exists()
+
+    def test_remove_source_false_keeps_source(self, tmp_path: Path) -> None:
+        """With `remove_source=False` the source survives a successful conversion."""
+        src = tmp_path / "user.nc"
+        dest = tmp_path / "staged.nc"
+        src.write_bytes(b"fake netcdf4 content")
+
+        def _fake_nccopy(cmd, check):
+            Path(cmd[-1]).write_bytes(b"cdf5")
+
+        with mock.patch("cstar.base.utils.subprocess.run", side_effect=_fake_nccopy):
+            convert_to_cdf5(src, dest, remove_source=False)
+
+        assert src.exists()
+        assert dest.exists()
+
 
 class TestNetcdfFormat:
     """Tests for `netcdf_format` and `NetCDFFormat.is_classic`."""

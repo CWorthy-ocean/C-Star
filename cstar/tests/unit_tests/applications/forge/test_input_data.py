@@ -1120,7 +1120,7 @@ class TestRomsMarblInputDataHelperMethods:
         nc4_path.touch()
         final_path = tmp_path / "foo_grid.nc"
 
-        with patch("cstar.applications.forge.input_data.subprocess.run") as mock_run:
+        with patch("cstar.base.utils.subprocess.run") as mock_run:
 
             def _fake_nccopy(cmd, check):
                 Path(cmd[-1]).touch()
@@ -1144,7 +1144,7 @@ class TestRomsMarblInputDataHelperMethods:
         for p in nc4_paths:
             p.touch()
 
-        with patch("cstar.applications.forge.input_data.subprocess.run") as mock_run:
+        with patch("cstar.base.utils.subprocess.run") as mock_run:
 
             def _fake_nccopy(cmd, check):
                 Path(cmd[-1]).touch()
@@ -1340,7 +1340,7 @@ class TestRomsMarblInputDataGeneration:
             > 0
         )
 
-    @patch("cstar.applications.forge.input_data.subprocess.run")
+    @patch("cstar.base.utils.subprocess.run")
     @patch("cstar.applications.forge.input_data.rt.Grid")
     def test_generate_grid_with_use_pio_converts_to_cdf5(
         self, mock_grid_class, mock_run, sample_roms_marbl_input_data, tmp_path
@@ -1488,7 +1488,7 @@ class TestRomsMarblInputDataGeneration:
             > 0
         )
 
-    @patch("cstar.applications.forge.input_data.subprocess.run")
+    @patch("cstar.base.utils.subprocess.run")
     @patch("cstar.applications.forge.input_data.rt.SurfaceForcing")
     def test_generate_surface_forcing_with_use_pio_converts_to_cdf5(
         self, mock_sf_class, mock_run, sample_roms_marbl_input_data, tmp_path
@@ -2341,7 +2341,7 @@ class TestCdrCustomFileForcing:
             location=str(output_path), content_hash=hash_netcdf_contents(output_path)
         )
 
-        with patch("cstar.applications.forge.user_files.subprocess.run") as run:
+        with patch("cstar.base.utils.subprocess.run") as run:
             cdr_input_data._generate_cdr_forcing(
                 key="cdr_forcing", custom_file=custom_file
             )
@@ -2667,7 +2667,7 @@ class TestRiverCustomFileForcing:
             location=str(output_path), content_hash=hash_netcdf_contents(output_path)
         )
 
-        with patch("cstar.applications.forge.user_files.subprocess.run") as run:
+        with patch("cstar.base.utils.subprocess.run") as run:
             river_input_data._generate_river_forcing(
                 key="forcing.river",
                 source={"name": "CUSTOM_FILE"},
