@@ -14,6 +14,8 @@ Breaking Changes
 - A blueprint that omits ``working_dir`` now runs under ``CSTAR_DATA_HOME/blueprint_runs/<application>/<name>`` instead of the directory the command was run from; write ``working_dir: .`` to keep the old behaviour. (`#732 <https://github.com/CWorthy-ocean/C-Star/pull/732>`_)
 - Forge no longer moves a ``~/cstar/_forge_bp_runs/<name>`` working directory onto scratch: forge blueprints saved by earlier versions have that default removed when loaded and take the new default, and any other ``working_dir`` is used as written. (`#732 <https://github.com/CWorthy-ocean/C-Star/pull/732>`_)
 - On Bouchet, ``CSTAR_DATA_HOME`` defaults to ``<scratch_pi_*>/<user>/cstar`` instead of ``~/cstar`` when neither ``SCRATCH`` nor ``CSTAR_DATA_HOME`` is set, so new workplan and blueprint runs land on scratch. (`#732 <https://github.com/CWorthy-ocean/C-Star/pull/732>`_)
+- ``cstar workplan run --dry-run`` is removed; use ``cstar workplan check`` (deep by default) to validate a workplan without scheduling it. ``--dry-run`` keeps its "change nothing" meaning on ``cstar blueprint migrate``, ``cstar admin clean`` and ``cstar admin migrate-outputs``. (`#733 <https://github.com/CWorthy-ocean/C-Star/pull/733>`_)
+- ``cstar workplan run`` now fails with a clear error when ``CSTAR_CLI_DRY_RUN`` is exported in the environment, since the plan-only mode it used to request no longer exists. (`#733 <https://github.com/CWorthy-ocean/C-Star/pull/733>`_)
 
 New features
 ~~~~~~~~~~~~
@@ -25,6 +27,10 @@ New features
 - Inline steps are validated at ``cstar workplan check`` and at ``cstar workplan run`` preflight, reporting every missing required field in one message; the ``blueprint`` field itself stays required, so a forgotten line is still a schema error. (`#734 <https://github.com/CWorthy-ocean/C-Star/pull/734>`_)
 - The merged blueprint is written to the step's work directory (``tasks/<step>/work/blueprint.yaml``) when the workplan is scheduled, so the run artifacts record exactly what ran and reload/resume need no special handling. (`#734 <https://github.com/CWorthy-ocean/C-Star/pull/734>`_)
 - ``working_dir`` may be omitted from any blueprint; C-Star places the run under ``CSTAR_DATA_HOME/blueprint_runs`` by application and blueprint name, so blueprints stay portable between machines. (`#732 <https://github.com/CWorthy-ocean/C-Star/pull/732>`_)
+- ``cstar blueprint run --pre-run`` stages, builds and prepares a run without launching the model; a later ``cstar blueprint run --resume`` attaches to the prepared directory and launches it. (`#733 <https://github.com/CWorthy-ocean/C-Star/pull/733>`_)
+- ``cstar workplan run --pre-run`` does the same for every step, running locally even on scheduler systems; re-running the workplan without the flag (same run-id) attaches to the prepared directories and launches. (`#733 <https://github.com/CWorthy-ocean/C-Star/pull/733>`_)
+- Steps a pre-run cannot prepare are skipped and reported with the reason: an application that does not support pre-run, a blueprint produced by another step, a directive that consumes another step's output, or anything downstream of a skipped step. (`#733 <https://github.com/CWorthy-ocean/C-Star/pull/733>`_)
+- Applications declare support with ``pre_runnable = True`` on their ``ApplicationDefinition``; today only ``roms_marbl`` does. (`#733 <https://github.com/CWorthy-ocean/C-Star/pull/733>`_)
 
 Bug Fixes
 ~~~~~~~~~
@@ -40,6 +46,8 @@ Bug Fixes
 - Local-launcher steps with a walltime were wrapped as ``timeout 600s -k 2s``, which GNU ``timeout`` rejects, so every time-bounded local step failed before starting. (`#730 <https://github.com/CWorthy-ocean/C-Star/pull/730>`_)
 - A ``local`` compute override now produces a working ``timeout`` command; previously any step with ``compute_overrides.local`` failed immediately, so runs that relied on that failure path (none known) will now actually run with the configured walltime. (`#730 <https://github.com/CWorthy-ocean/C-Star/pull/730>`_)
 - A blueprint, step or run name with no letters or digits is rejected instead of silently producing an empty directory name that collapsed onto its parent directory. (`#732 <https://github.com/CWorthy-ocean/C-Star/pull/732>`_)
+- Sentinel files are written atomically; the local proxy script could previously catch an in-place rewrite mid-way and leave a step with an empty sentinel, so the step showed no status and the run never reached a terminal state. (`#733 <https://github.com/CWorthy-ocean/C-Star/pull/733>`_)
+- Step sentinels now record which launcher created them, so a local pre-run after a failed SLURM run under the same run-id no longer crashes while reading the SLURM sentinel and instead clears and re-prepares the failed steps. (`#733 <https://github.com/CWorthy-ocean/C-Star/pull/733>`_)
 
 Improvements
 ~~~~~~~~~~~~
@@ -51,6 +59,8 @@ Improvements
 - ``convert_to_cdf5`` refuses a conversion whose source and destination are the same file instead of letting ``nccopy`` truncate its own input. (`#731 <https://github.com/CWorthy-ocean/C-Star/pull/731>`_)
 - The ROMS-MARBL blueprint Forge emits no longer carries a working directory, so a workplan step or the C-Star default places it; the forge blueprint schema is now version 9. (`#732 <https://github.com/CWorthy-ocean/C-Star/pull/732>`_)
 - A system can declare its own scratch convention through ``SystemContext.scratch_root``, consulted for ``CSTAR_DATA_HOME`` after the ``CSTAR_SCRATCH_DIRS`` variables. (`#732 <https://github.com/CWorthy-ocean/C-Star/pull/732>`_)
+- A launcher that reads a sentinel written by another launcher uses its persisted status instead of querying a pid or job id that belongs to the other system, and refuses to adopt an attempt it cannot track while that attempt is still in progress. (`#733 <https://github.com/CWorthy-ocean/C-Star/pull/733>`_)
+- The first line of a step log now distinguishes a launch from a completed pre-run from a resume after a failure. (`#733 <https://github.com/CWorthy-ocean/C-Star/pull/733>`_)
 
 Miscellaneous
 ~~~~~~~~~~~~~
@@ -64,3 +74,4 @@ Miscellaneous
 - CI: test workflows can be triggered manually via ``workflow_dispatch`` for branches without a PR. (`#735 <https://github.com/CWorthy-ocean/C-Star/pull/735>`_)
 - CI: a new push to a PR cancels that PR's in-progress test runs; runs on ``main`` are never cancelled. (`#735 <https://github.com/CWorthy-ocean/C-Star/pull/735>`_)
 - The HPC page's "Where data goes" section states one working-directory rule for every application; the forge blueprint, terminology, tutorial and developer pages follow it, and the committed blueprint JSON schemas are regenerated. (`#732 <https://github.com/CWorthy-ocean/C-Star/pull/732>`_)
+- Documentation for pre-running a blueprint and a workplan (``blueprints.rst``, ``workplans.rst``, ``hpc.rst``, ``terminology.rst``) and for declaring ``pre_runnable`` in a custom application. (`#733 <https://github.com/CWorthy-ocean/C-Star/pull/733>`_)
