@@ -11,6 +11,9 @@ Breaking Changes
 
 
 - Remote netCDF sources that were previously misclassified as text are now retrieved as binary and sha256-verified against file_hash when one is given. A stale file_hash on such a source can now fail with a hash mismatch where it previously passed silently. (`#728 <https://github.com/CWorthy-ocean/C-Star/pull/728>`_)
+- A blueprint that omits ``working_dir`` now runs under ``CSTAR_DATA_HOME/blueprint_runs/<application>/<name>`` instead of the directory the command was run from; write ``working_dir: .`` to keep the old behaviour. (`#732 <https://github.com/CWorthy-ocean/C-Star/pull/732>`_)
+- Forge no longer moves a ``~/cstar/_forge_bp_runs/<name>`` working directory onto scratch: forge blueprints saved by earlier versions have that default removed when loaded and take the new default, and any other ``working_dir`` is used as written. (`#732 <https://github.com/CWorthy-ocean/C-Star/pull/732>`_)
+- On Bouchet, ``CSTAR_DATA_HOME`` defaults to ``<scratch_pi_*>/<user>/cstar`` instead of ``~/cstar`` when neither ``SCRATCH`` nor ``CSTAR_DATA_HOME`` is set, so new workplan and blueprint runs land on scratch. (`#732 <https://github.com/CWorthy-ocean/C-Star/pull/732>`_)
 
 New features
 ~~~~~~~~~~~~
@@ -21,6 +24,7 @@ New features
 - A workplan step may set ``blueprint: inline``; its blueprint is then built from the application's model plus the step's ``blueprint_overrides``, so no blueprint file is needed for fully-overridden steps. (`#734 <https://github.com/CWorthy-ocean/C-Star/pull/734>`_)
 - Inline steps are validated at ``cstar workplan check`` and at ``cstar workplan run`` preflight, reporting every missing required field in one message; the ``blueprint`` field itself stays required, so a forgotten line is still a schema error. (`#734 <https://github.com/CWorthy-ocean/C-Star/pull/734>`_)
 - The merged blueprint is written to the step's work directory (``tasks/<step>/work/blueprint.yaml``) when the workplan is scheduled, so the run artifacts record exactly what ran and reload/resume need no special handling. (`#734 <https://github.com/CWorthy-ocean/C-Star/pull/734>`_)
+- ``working_dir`` may be omitted from any blueprint; C-Star places the run under ``CSTAR_DATA_HOME/blueprint_runs`` by application and blueprint name, so blueprints stay portable between machines. (`#732 <https://github.com/CWorthy-ocean/C-Star/pull/732>`_)
 
 Bug Fixes
 ~~~~~~~~~
@@ -35,6 +39,7 @@ Bug Fixes
 - Forge resolved ``ntimes`` to 0 for any run window shorter than a day because the step count was derived from whole days. (`#730 <https://github.com/CWorthy-ocean/C-Star/pull/730>`_)
 - Local-launcher steps with a walltime were wrapped as ``timeout 600s -k 2s``, which GNU ``timeout`` rejects, so every time-bounded local step failed before starting. (`#730 <https://github.com/CWorthy-ocean/C-Star/pull/730>`_)
 - A ``local`` compute override now produces a working ``timeout`` command; previously any step with ``compute_overrides.local`` failed immediately, so runs that relied on that failure path (none known) will now actually run with the configured walltime. (`#730 <https://github.com/CWorthy-ocean/C-Star/pull/730>`_)
+- A blueprint, step or run name with no letters or digits is rejected instead of silently producing an empty directory name that collapsed onto its parent directory. (`#732 <https://github.com/CWorthy-ocean/C-Star/pull/732>`_)
 
 Improvements
 ~~~~~~~~~~~~
@@ -44,6 +49,8 @@ Improvements
 - Added ``NetCDFFormat`` and ``netcdf_format()`` to ``cstar.base.utils`` as the single owner of magic-number format detection; ``check_nc_pio_compatible`` now uses it instead of an inline header check. (`#729 <https://github.com/CWorthy-ocean/C-Star/pull/729>`_)
 - ``convert_to_cdf5`` is now the single owner of the ``nccopy -k cdf5`` call, with a ``remove_source`` option (default on) so user-provided originals can be converted without being deleted. (`#731 <https://github.com/CWorthy-ocean/C-Star/pull/731>`_)
 - ``convert_to_cdf5`` refuses a conversion whose source and destination are the same file instead of letting ``nccopy`` truncate its own input. (`#731 <https://github.com/CWorthy-ocean/C-Star/pull/731>`_)
+- The ROMS-MARBL blueprint Forge emits no longer carries a working directory, so a workplan step or the C-Star default places it; the forge blueprint schema is now version 9. (`#732 <https://github.com/CWorthy-ocean/C-Star/pull/732>`_)
+- A system can declare its own scratch convention through ``SystemContext.scratch_root``, consulted for ``CSTAR_DATA_HOME`` after the ``CSTAR_SCRATCH_DIRS`` variables. (`#732 <https://github.com/CWorthy-ocean/C-Star/pull/732>`_)
 
 Miscellaneous
 ~~~~~~~~~~~~~
@@ -56,3 +63,4 @@ Miscellaneous
 - CI: unit and integration tests run once per PR update instead of twice (push + pull_request), roughly halving CI time per push. (`#735 <https://github.com/CWorthy-ocean/C-Star/pull/735>`_)
 - CI: test workflows can be triggered manually via ``workflow_dispatch`` for branches without a PR. (`#735 <https://github.com/CWorthy-ocean/C-Star/pull/735>`_)
 - CI: a new push to a PR cancels that PR's in-progress test runs; runs on ``main`` are never cancelled. (`#735 <https://github.com/CWorthy-ocean/C-Star/pull/735>`_)
+- The HPC page's "Where data goes" section states one working-directory rule for every application; the forge blueprint, terminology, tutorial and developer pages follow it, and the committed blueprint JSON schemas are regenerated. (`#732 <https://github.com/CWorthy-ocean/C-Star/pull/732>`_)
