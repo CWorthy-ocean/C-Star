@@ -19,6 +19,7 @@ from cstar.base.env import (
 )
 from cstar.base.log import get_logger
 from cstar.base.utils import slugify
+from cstar.entrypoint.utils import ARG_PRE_RUN
 from cstar.execution.file_system import StateDirectoryManager
 from cstar.orchestration.launch.local import LocalLauncher
 from cstar.orchestration.launch.slurm import SlurmLauncher
@@ -53,6 +54,7 @@ from cstar.orchestration.tracking import (
 from cstar.orchestration.transforms import (
     TemplateFillTransform,
     WorkplanTransformer,
+    allowed_directives,
     materialize_inline_blueprints,
 )
 from cstar.orchestration.utils import ENV_CSTAR_ORCH_DELAYS
@@ -740,23 +742,37 @@ def check_pre_run_support(wp: Workplan) -> None:
     wp : Workplan
         The workplan to check.
 
+    A pre-run is a property of the whole run -- its steps are local processes
+    whose sentinels no scheduler can refresh -- so the override must be set on
+    every step or on none.
+
     Raises
     ------
     ValueError
         If any step requests pre-run on an application that does not declare
-        `ApplicationDefinition.pre_runnable`; every such step is named.
+        `ApplicationDefinition.pre_runnable`, or only some steps request it;
+        every offending step is named.
     """
+    problems: list[str] = []
     unsupported = [
         f"{step.name!r} ({step.application})"
         for step in wp.steps
         if step.pre_run and not get_application(step.application).pre_runnable
     ]
     if unsupported:
-        msg = (
-            f"Step(s) {', '.join(unsupported)} request {KEY_PRE_RUN!r} but their "
-            "application does not support it."
+        problems.append(
+            f"step(s) {', '.join(unsupported)} request {KEY_PRE_RUN!r} but their "
+            "application does not support it"
         )
-        raise ValueError(msg)
+    marked = [step.name for step in wp.steps if step.pre_run]
+    if marked and len(marked) != len(wp.steps):
+        problems.append(
+            f"{KEY_PRE_RUN!r} is set on step(s) {', '.join(map(repr, marked))} "
+            f"but not on every step; a pre-run covers the whole workplan "
+            f"(use {ARG_PRE_RUN})"
+        )
+    if problems:
+        raise ValueError("; ".join(problems))
 
 
 def apply_pre_run_overrides(wp: Workplan) -> None:
@@ -777,13 +793,12 @@ def apply_pre_run_overrides(wp: Workplan) -> None:
 
 def _unpreparable_reason(step: Step) -> str:
     """Return why a pre-run cannot prepare a step, or an empty string if it can."""
-    app = get_application(step.application)
-    if not app.pre_runnable:
-        return "application does not support --pre-run"
+    if not get_application(step.application).pre_runnable:
+        return f"application does not support {ARG_PRE_RUN}"
     if step.is_deferred:
         return "blueprint is produced by another step"
 
-    directives = {d.key(): d for d in app.directives}
+    directives = allowed_directives(step.application)
     if any(
         directives[key].referenced_steps(config)
         for key, config in step.directives.items()
@@ -799,7 +814,9 @@ def prune_unpreparable_steps(wp: Workplan) -> tuple[Workplan, dict[str, list[str
     A step is unpreparable when its application does not support pre-run, its
     blueprint is deferred to another step, or one of its directives consumes
     another step's output; none of those exist before the upstream steps run.
-    Names of dropped steps are removed from the survivors' `depends_on`.
+    Every step downstream of a dropped step is dropped too: a `depends_on`
+    edge may carry data the planner cannot see, so a kept step never runs
+    ahead of a skipped upstream.
 
     The pruned workplan is for planning only and is never persisted. It may have
     no steps, which `Workplan` would otherwise reject: callers must check.
@@ -824,13 +841,22 @@ def prune_unpreparable_steps(wp: Workplan) -> tuple[Workplan, dict[str, list[str
     if not dropped:
         return wp, reasons
 
-    kept = [
-        step.model_copy(
-            update={"depends_on": [d for d in step.depends_on if d not in dropped]}
-        )
-        for step in wp.steps
-        if step.name not in dropped
-    ]
+    # steps are not guaranteed to be in dependency order: iterate to a fixpoint
+    dependents: list[str] = []
+    while True:
+        newly = [
+            step.name
+            for step in wp.steps
+            if step.name not in dropped and any(d in dropped for d in step.depends_on)
+        ]
+        if not newly:
+            break
+        dependents.extend(newly)
+        dropped.update(newly)
+    if dependents:
+        reasons["depends on a skipped step"] = dependents
+
+    kept = [step for step in wp.steps if step.name not in dropped]
     return wp.model_copy(update={"steps": kept}), reasons
 
 

@@ -15,7 +15,7 @@ from cstar.base.env import (
     FLAG_OFF,
     FLAG_ON,
 )
-from cstar.entrypoint.utils import ARG_CLOBBER
+from cstar.entrypoint.utils import ARG_CLOBBER, ARG_PRE_RUN
 from cstar.execution.file_system import (
     DirectoryManager,
     JobFileSystemManager,
@@ -1050,10 +1050,35 @@ def test_check_pre_run_support_reports_every_unsupported_step(
         check_pre_run_support(wp)
 
     message = str(exc_info.value)
-    assert "'Hello A'" in message
-    assert "'Hello B'" in message
-    assert "Roms" not in message
-    assert "Unmarked" not in message
+    unsupported_part, partial_part = message.split("; ", maxsplit=1)
+    assert "'Hello A'" in unsupported_part
+    assert "'Hello B'" in unsupported_part
+    assert "Roms" not in unsupported_part
+    # a partially marked workplan is reported in the same error
+    assert "not on every step" in partial_part
+    assert "'Roms'" in partial_part
+    assert "Unmarked" not in partial_part
+
+
+def test_check_pre_run_support_rejects_partial_marking(tmp_path: Path) -> None:
+    """Verify `pre_run` on some but not all steps is rejected: a pre-run's
+    sentinels are local processes, so it is a property of the whole run.
+    """
+    marked = _roms_step(tmp_path, "Marked")
+    marked.workflow_overrides[KEY_PRE_RUN] = True
+    wp = _make_workplan([marked, _roms_step(tmp_path, "Unmarked")])
+
+    with pytest.raises(ValueError, match="not on every step"):
+        check_pre_run_support(wp)
+
+
+def test_check_pre_run_support_accepts_all_or_none(tmp_path: Path) -> None:
+    """Verify fully marked and fully unmarked workplans pass."""
+    steps = [_roms_step(tmp_path, "A"), _roms_step(tmp_path, "B")]
+    check_pre_run_support(_make_workplan(steps))
+    for step in steps:
+        step.workflow_overrides[KEY_PRE_RUN] = True
+    check_pre_run_support(_make_workplan(steps))
 
 
 @pytest.mark.usefixtures("read_yaml_intercept")
@@ -1109,10 +1134,11 @@ def test_prune_unpreparable_steps_keeps_preparable_workplan_intact(
     assert reasons == {}
 
 
-def test_prune_unpreparable_steps_drops_and_remaps(tmp_path: Path) -> None:
+def test_prune_unpreparable_steps_drops_transitively(tmp_path: Path) -> None:
     """Verify unsupported-application, deferred-blueprint and step-referencing
     directive steps are dropped with their reasons, directives that reference
-    nothing are kept, and survivors lose dependencies on dropped steps.
+    nothing are kept, and every step downstream of a dropped step is dropped
+    too (a `depends_on` edge may carry data the planner cannot see).
     """
     producer = _roms_step(tmp_path, "Producer")
     unsupported = _make_step(tmp_path, "Hello", depends_on=["Producer"])
@@ -1144,17 +1170,36 @@ def test_prune_unpreparable_steps_drops_and_remaps(tmp_path: Path) -> None:
     pruned, reasons = prune_unpreparable_steps(wp)
 
     assert reasons == {
-        "application does not support --pre-run": ["Hello"],
+        f"application does not support {ARG_PRE_RUN}": ["Hello"],
         "blueprint is produced by another step": ["Deferred"],
         "directive references another step's output": ["Nested"],
+        "depends on a skipped step": ["Survivor"],
     }
-    assert [s.name for s in pruned.steps] == ["Producer", "Pathed", "Survivor"]
-    by_name = {s.name: s for s in pruned.steps}
-    assert by_name["Survivor"].depends_on == ["Producer", "Pathed"]
-    assert by_name["Pathed"].depends_on == ["Producer"]
+    assert [s.name for s in pruned.steps] == ["Producer", "Pathed"]
+    assert {s.name: s.depends_on for s in pruned.steps} == {
+        "Producer": [],
+        "Pathed": ["Producer"],
+    }
     # the source workplan is untouched
     assert len(wp.steps) == 6
     assert wp.steps[-1].depends_on == ["Producer", "Hello", "Nested", "Pathed"]
+
+
+def test_prune_unpreparable_steps_reaches_fixpoint_out_of_order(
+    tmp_path: Path,
+) -> None:
+    """Verify a dependent listed before the step it depends on is still
+    dropped (steps are not guaranteed to be in dependency order).
+    """
+    grandchild = _roms_step(tmp_path, "Grandchild", depends_on=["Child"])
+    child = _roms_step(tmp_path, "Child", depends_on=["Hello"])
+    unsupported = _make_step(tmp_path, "Hello")
+    wp = _make_workplan([grandchild, child, unsupported])
+
+    pruned, reasons = prune_unpreparable_steps(wp)
+
+    assert pruned.steps == []
+    assert sorted(reasons["depends on a skipped step"]) == ["Child", "Grandchild"]
 
 
 def test_build_planner_prunes_pre_run_and_logs_one_line_per_reason(

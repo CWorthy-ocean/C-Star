@@ -102,6 +102,9 @@ class RunnerRequest(t.Generic[TBlueprint]):
         self.bp_type = bp_type
         self.name = name.strip() or RunnerRequest._generate_job_name()
         self.directive_uri = directive_uri.strip()
+        if resume and pre_run:
+            msg = "A request cannot both resume a prior attempt and stop before the launch (pre_run)"
+            raise ValueError(msg)
         self.resume = resume
         self.pre_run = pre_run
 

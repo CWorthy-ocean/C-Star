@@ -8,10 +8,12 @@ import typer
 from pydantic import BaseModel, ValidationError
 
 from cstar.base.env import (
+    ENV_CSTAR_CLI_DRY_RUN,
     ENV_CSTAR_LOG_LEVEL,
     ENV_CSTAR_RUNID,
 )
 from cstar.base.exceptions import CstarExpectationFailed
+from cstar.base.feature import is_flag_enabled
 from cstar.base.log import LogLevelChoices, get_logger
 from cstar.base.utils import slugify
 from cstar.cli.common import (
@@ -612,6 +614,20 @@ def run(
             (resume and clobber, f"{ARG_RESUME} cannot be combined with {ARG_CLOBBER}"),
             (resume and pre_run, f"{ARG_RESUME} cannot be combined with {ARG_PRE_RUN}"),
             (
+                pre_run and not path,
+                (
+                    f"{ARG_PRE_RUN} requires a workplan path: reloading a run by "
+                    "--run-id replays its recorded plan as-is"
+                ),
+            ),
+            (
+                is_flag_enabled(ENV_CSTAR_CLI_DRY_RUN),
+                (
+                    f"{ENV_CSTAR_CLI_DRY_RUN} is set, but `workplan run` no longer "
+                    "has a plan-only mode; unset it, or use `cstar workplan check`"
+                ),
+            ),
+            (
                 resume and (user_variables or user_variables_path is not None),
                 (
                     f"{ARG_RESUME} re-enters a prior run with its recorded variables; "
@@ -622,16 +638,9 @@ def run(
         if condition
     ]
     if problems:
-        raise typer.BadParameter("; ".join(problems), param_hint=ARG_RESUME)
+        raise typer.BadParameter("; ".join(problems))
 
     reload = resume or not path
-
-    if pre_run and reload:
-        msg = (
-            "A workplan path is required: reloading a run by --run-id replays "
-            "its recorded plan as-is"
-        )
-        raise typer.BadParameter(msg, param_hint=ARG_PRE_RUN)
 
     if reload:
         wp_run = asyncio.run(handle_run_reloading(run_id))

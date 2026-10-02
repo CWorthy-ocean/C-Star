@@ -15,6 +15,7 @@ from cstar.applications.plotter import (
     APP_PLOTTER_SCHEMA_2_0_0,
 )
 from cstar.base.env import (
+    ENV_CSTAR_CLI_DRY_RUN,
     ENV_CSTAR_DISABLE_MIGRATION,
     ENV_CSTAR_RUNID,
     ENV_CSTAR_STATE_HOME,
@@ -2402,9 +2403,31 @@ def test_workplan_run_pre_run_requires_workplan_path() -> None:
         result = runner.invoke(app, ["--run-id", "12345", ARG_PRE_RUN], color=False)
 
     assert result.exit_code == 2
-    assert "workplan path is required" in " ".join(
+    assert "requires a workplan path" in " ".join(
         result.output.replace("│", " ").split()
     )
+    mock_reload.assert_not_awaited()
+
+
+def test_workplan_run_rejects_ambient_dry_run_env(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Verify an exported `CSTAR_CLI_DRY_RUN` fails loudly: the plan-only mode
+    it used to request no longer exists, so silently running for real would
+    stage data and submit jobs the user did not ask for.
+    """
+    monkeypatch.setenv(ENV_CSTAR_CLI_DRY_RUN, FLAG_ON)
+
+    with mock.patch(
+        "cstar.cli.workplan.run.handle_run_reloading", mock.AsyncMock()
+    ) as mock_reload:
+        runner = CliRunner()
+        result = runner.invoke(app, ["--run-id", "12345"], color=False)
+
+    output = " ".join(result.output.replace("│", " ").split())
+    assert result.exit_code == 2
+    assert ENV_CSTAR_CLI_DRY_RUN in output
+    assert "workplan check" in output
     mock_reload.assert_not_awaited()
 
 

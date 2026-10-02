@@ -200,6 +200,15 @@ def test_create_parser_accepts_pre_run_flag() -> None:
     assert parsed_pre_run.pre_run is True
 
 
+def test_runner_request_rejects_resume_with_pre_run() -> None:
+    """Verify the request itself refuses resume together with pre-run, so the
+    argparse entrypoint (which has no CLI-level exclusion) cannot reach a
+    runner that would attach and then launch.
+    """
+    with pytest.raises(ValueError, match="pre_run"):
+        RunnerRequest("blueprint.yaml", RomsMarblBlueprint, resume=True, pre_run=True)
+
+
 @pytest.mark.parametrize(
     ("log_level", "expected_level", "args_fixture_name"),
     [

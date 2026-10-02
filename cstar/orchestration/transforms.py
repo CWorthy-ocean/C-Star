@@ -1005,6 +1005,18 @@ def _ancestor_map(steps: Sequence[LiveStep]) -> dict[str, set[str]]:
     return ancestors
 
 
+def allowed_directives(application: str) -> dict[str, type["Directive"]]:
+    """Return the directives a step of `application` may declare, by key.
+
+    `apply-overrides` is available to every application; the rest come from
+    `ApplicationDefinition.directives`.
+    """
+    return {
+        ApplyOverridesDirective.key(): ApplyOverridesDirective,
+        **{d.key(): d for d in get_application(application).directives},
+    }
+
+
 def collect_directive_problems(steps: Sequence[LiveStep]) -> list[str]:
     """Validate every step's directives against its application and the DAG.
 
@@ -1035,10 +1047,7 @@ def collect_directive_problems(steps: Sequence[LiveStep]) -> list[str]:
     problems: list[str] = []
 
     for step in steps:
-        allowed: dict[str, type[Directive]] = {
-            ApplyOverridesDirective.key(): ApplyOverridesDirective,
-            **{d.key(): d for d in get_application(step.application).directives},
-        }
+        allowed = allowed_directives(step.application)
 
         for key, config in step.directives.items():
             directive_cls = allowed.get(key)

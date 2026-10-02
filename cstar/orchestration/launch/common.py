@@ -13,6 +13,7 @@ from pathlib import Path
 
 from cstar.base.exceptions import CstarExpectationFailed
 from cstar.base.log import get_logger
+from cstar.entrypoint.utils import ARG_CLOBBER, ARG_RESUME
 from cstar.orchestration.models import KEY_CLOBBER, KEY_RESUME
 from cstar.orchestration.orchestration import Status
 
@@ -59,7 +60,7 @@ def resolve_prior_attempt(
         if not step.clobber:
             msg = (
                 f"The pre-run of step {step.name!r} is still {prior_status.name}; "
-                "wait for it to finish, or re-run with --clobber to start over."
+                f"wait for it to finish, or re-run with {ARG_CLOBBER} to start over."
             )
             raise CstarExpectationFailed(msg)
         reuse = False
@@ -72,8 +73,9 @@ def resolve_prior_attempt(
     ):
         log.debug(
             "Prior run of %r was a pre-run; attaching to its prepared working "
-            "directory (--resume).",
+            "directory (%s).",
             step.name,
+            ARG_RESUME,
         )
         step.workflow_overrides[KEY_RESUME] = True
         reuse = False

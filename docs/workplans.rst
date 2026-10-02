@@ -473,12 +473,15 @@ prepared are skipped and reported with the reason:
 - one of the step's directives (``continue-from`` or ``nest-from``) takes its
   input from another step's output.
 
-Skipped steps run from scratch on the second command, exactly as they would
-without a pre-run.
+Every step downstream of a skipped step is skipped as well, since a
+``depends_on`` edge may carry data the planner cannot see. Skipped steps run
+from scratch on the second command, exactly as they would without a pre-run.
 
 ``--pre-run`` cannot be combined with ``--resume``. Running ``--pre-run``
 again on the same :term:`run ID` leaves already-prepared steps as they are;
 to prepare from scratch, add ``--clobber all`` (or ``--clobber <step-name>``).
+A pre-run is a property of the whole run, so a hand-written ``pre_run`` key
+must appear on every step or on none; use ``--pre-run`` instead.
 The ``pre_run`` key is recorded in the transformed workplan, so re-entering the
 run with ``--run-id`` re-enters it as a pre-run.
 
