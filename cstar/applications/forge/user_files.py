@@ -19,13 +19,14 @@ blueprint at authoring time). At processing time the executor:
 The hash is computed over decoded netCDF *values* (:func:`hash_netcdf_contents`),
 not file bytes, so it survives benign re-encoding (``nccopy`` to a different
 format/chunking, NETCDF4 <-> classic) that changes the bytes on disk without
-changing the data. :func:`stage_user_netcdf` then copies (or PIO-converts) the
-verified file into the executor's working tree, mirroring how generated inputs
-land there.
+changing the data. :func:`stage_user_netcdf` then copies the verified file into
+the executor's working tree, mirroring how generated inputs land there; under
+ParallelIO a non-classic (NETCDF4) file is converted to CDF-5 on the copy.
 
-Module top stays stdlib-only (xarray/numpy are imported inside the functions
-that need them) -- this module is imported by the lightweight authoring/wizard
-layer, where import cost matters.
+Module top stays light (xarray/numpy are imported inside the functions that
+need them; only stdlib and ``cstar.base.utils`` are imported eagerly) -- this
+module is imported by the lightweight authoring/wizard layer, where import cost
+matters.
 """
 
 from __future__ import annotations
@@ -37,6 +38,8 @@ import subprocess
 import warnings
 from pathlib import Path
 from typing import TYPE_CHECKING
+
+from cstar.base.utils import netcdf_format
 
 if TYPE_CHECKING:
     from cstar.applications.forge.blueprint import UserProvidedFile
@@ -141,18 +144,59 @@ def verify_user_file(f: UserProvidedFile, label: str) -> Path:
     return resolved
 
 
-def stage_user_netcdf(src: Path, dest: Path, use_pio: bool) -> Path:
+def stage_user_netcdf(src: Path, dest: Path, *, use_pio: bool, label: str) -> Path:
     """Place a verified user file at its executor working-tree destination.
 
-    Creates ``dest``'s parent directories. When ``use_pio``, runs
-    ``nccopy -k cdf5 src dest`` (mirrors ``RomsMarblInputData._pio_finalize``'s
-    CDF-5 conversion -- ``subprocess.run(..., check=True)`` raises
-    ``CalledProcessError`` on a non-zero ``nccopy`` exit, which is the intended
-    error-reporting path); otherwise a plain ``shutil.copy2``. Returns ``dest``.
+    Detects ``src``'s format. If ``src`` is already ``dest`` (e.g. authored
+    directly into the input directory) nothing is copied, but under ``use_pio`` a
+    non-classic file raises ``RuntimeError`` since it cannot be converted in place.
+    Otherwise creates ``dest``'s parent directories and, when ``use_pio`` and
+    ``src`` is not classic-format (CDF-1/2/5), warns and converts a copy with
+    ``nccopy -k cdf5`` (mirrors ``RomsMarblInputData._pio_finalize``'s conversion);
+    classic files, and every file without ``use_pio``, are plain ``shutil.copy2``
+    copies. A failed conversion (non-zero ``nccopy`` exit, or ``nccopy`` missing)
+    removes the partial ``dest`` and raises ``RuntimeError``. Returns ``dest``.
     """
+    fmt = netcdf_format(src)
+    needs_conversion = use_pio and not fmt.is_classic
+
+    if src.resolve() == dest.resolve():
+        if needs_conversion:
+            raise RuntimeError(
+                f"{label}: user-provided file {src} is already at its destination "
+                f"but is {fmt}; ParallelIO requires classic-format (CDF-5) input and "
+                "it cannot be converted in place without overwriting the original. "
+                f"Convert it yourself (nccopy -k cdf5 in out) or point {label} at a "
+                "file outside the input directory."
+            )
+        return dest
+
     dest.parent.mkdir(parents=True, exist_ok=True)
-    if use_pio:
-        subprocess.run(["nccopy", "-k", "cdf5", str(src), str(dest)], check=True)
+    if needs_conversion:
+        logger.warning(
+            f"{label}: user-provided file {src} is {fmt}; ParallelIO requires "
+            f"classic-format input, so a copy is being converted to CDF-5 at {dest} "
+            "(the original is left untouched)."
+        )
+        converted = False
+        try:
+            subprocess.run(["nccopy", "-k", "cdf5", str(src), str(dest)], check=True)
+            converted = True
+        except (subprocess.CalledProcessError, OSError) as exc:
+            hint = (
+                " `nccopy` (from netcdf-c) must be on PATH."
+                if isinstance(exc, OSError)
+                else ""
+            )
+            raise RuntimeError(
+                f"{label}: converting user-provided file {src} to CDF-5 at {dest} "
+                f"failed: {exc}.{hint}"
+            ) from exc
+        finally:
+            if not converted:
+                # a partial dest (failure OR interrupt) would otherwise be reused by
+                # the executor's no-clobber logic on the next run
+                dest.unlink(missing_ok=True)
     else:
         shutil.copy2(src, dest)
     return dest

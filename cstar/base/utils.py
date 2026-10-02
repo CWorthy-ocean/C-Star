@@ -8,6 +8,7 @@ import subprocess
 import sys
 import typing as t
 from collections.abc import Generator
+from enum import StrEnum
 from itertools import zip_longest
 from pathlib import Path
 from types import ModuleType
@@ -481,6 +482,50 @@ def min_padded_indices(n: int) -> Generator[str]:
     pad_size = len(str(n - 1))
     for i in range(n):
         yield str(i).zfill(pad_size)
+
+
+class NetCDFFormat(StrEnum):
+    """On-disk netCDF container format, as identified by a file's magic number."""
+
+    CDF1 = "CDF-1"
+    CDF2 = "CDF-2"
+    CDF5 = "CDF-5"
+    NETCDF4 = "netCDF-4/HDF5"
+    UNRECOGNIZED = "unrecognized"
+
+    @property
+    def is_classic(self) -> bool:
+        """True for the classic formats (CDF-1/2/5) that PnetCDF, and hence a
+        ParallelIO-enabled ROMS build, can read; False for netCDF-4/HDF5 or an
+        unrecognized file.
+        """
+        return self in (NetCDFFormat.CDF1, NetCDFFormat.CDF2, NetCDFFormat.CDF5)
+
+
+_NETCDF_MAGIC: dict[bytes, NetCDFFormat] = {
+    b"CDF\x01": NetCDFFormat.CDF1,
+    b"CDF\x02": NetCDFFormat.CDF2,
+    b"CDF\x05": NetCDFFormat.CDF5,
+    b"\x89HDF": NetCDFFormat.NETCDF4,
+}
+
+
+def netcdf_format(path: Path) -> NetCDFFormat:
+    """Detect a netCDF file's container format from its first four bytes.
+
+    Parameters
+    ----------
+    path : Path
+        The file to inspect.
+
+    Returns
+    -------
+    NetCDFFormat
+        The detected format; ``UNRECOGNIZED`` when the magic number matches none.
+    """
+    with open(path, "rb") as f:
+        header = f.read(4)
+    return _NETCDF_MAGIC.get(header, NetCDFFormat.UNRECOGNIZED)
 
 
 def convert_to_cdf5(nc4_path: Path, final_path: Path) -> None:

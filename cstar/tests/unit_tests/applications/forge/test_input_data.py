@@ -2035,6 +2035,7 @@ def _write_river_netcdf(
     eta_rho=None,
     xi_rho=None,
     include_river_name=True,
+    fmt=None,
 ):
     """A minimal, real river-forcing netCDF matching roms-tools'
     ``RiverForcing.save()`` output shape: dims ``nriver``/``river_time``/
@@ -2066,7 +2067,7 @@ def _write_river_netcdf(
     ds = xr.Dataset(data_vars)
     if include_river_name:
         ds.coords["river_name"] = ("nriver", [f"river_{i}" for i in range(nriver)])
-    ds.to_netcdf(path)
+    ds.to_netcdf(path, format=fmt)
     return path
 
 
@@ -2077,6 +2078,7 @@ def _write_cdr_netcdf(
     family="volume",
     include_release_name=True,
     omit=(),
+    fmt=None,
 ):
     """A minimal, real CDR-forcing netCDF matching the variable/dim conventions
     ``_CDR_FRC_DEFAULT`` (``forge_blueprint_resolve.py``) hardcodes for ROMS to
@@ -2106,7 +2108,7 @@ def _write_cdr_netcdf(
     ds = xr.Dataset(data_vars)
     if include_release_name:
         ds.coords["release_name"] = ("ncdr", [f"release_{i}" for i in range(ncdr)])
-    ds.to_netcdf(path)
+    ds.to_netcdf(path, format=fmt)
     return path
 
 
@@ -2326,6 +2328,43 @@ class TestCdrCustomFileForcing:
         cdr_input_data._generate_cdr_forcing(key="cdr_forcing", custom_file=custom_file)
 
         mock_cdr_class.assert_not_called()
+
+    def test_in_place_classic_file_accepted_with_pio(self, cdr_input_data):
+        from cstar.applications.forge.user_files import hash_netcdf_contents
+
+        cdr_input_data.use_pio = True
+        output_path = cdr_input_data._forcing_filename(CDR_FORCING_NETCDF_STEM)
+        _write_cdr_netcdf(
+            output_path, ncdr=2, include_release_name=False, fmt="NETCDF3_64BIT_DATA"
+        )
+        custom_file = forge_models.UserProvidedFile(
+            location=str(output_path), content_hash=hash_netcdf_contents(output_path)
+        )
+
+        with patch("cstar.applications.forge.user_files.subprocess.run") as run:
+            cdr_input_data._generate_cdr_forcing(
+                key="cdr_forcing", custom_file=custom_file
+            )
+
+        run.assert_not_called()
+        assert cdr_input_data._settings_run_time["cdr_frc"]["ncdr_parm"] == 2
+
+    def test_in_place_netcdf4_file_rejected_with_pio(self, cdr_input_data):
+        from cstar.applications.forge.user_files import hash_netcdf_contents
+
+        cdr_input_data.use_pio = True
+        output_path = cdr_input_data._forcing_filename(CDR_FORCING_NETCDF_STEM)
+        _write_cdr_netcdf(
+            output_path, ncdr=2, include_release_name=False, fmt="NETCDF4"
+        )
+        custom_file = forge_models.UserProvidedFile(
+            location=str(output_path), content_hash=hash_netcdf_contents(output_path)
+        )
+
+        with pytest.raises(RuntimeError, match="CDR forcing.*already at its dest"):
+            cdr_input_data._generate_cdr_forcing(
+                key="cdr_forcing", custom_file=custom_file
+            )
 
     @pytest.mark.skipif(shutil.which("nccopy") is None, reason="nccopy not installed")
     def test_stages_via_nccopy_when_pio(self, cdr_input_data, tmp_path):
@@ -2615,6 +2654,47 @@ class TestRiverCustomFileForcing:
         )
 
         mock_rf_class.assert_not_called()
+
+    def test_in_place_classic_file_accepted_with_pio(self, river_input_data):
+        from cstar.applications.forge.user_files import hash_netcdf_contents
+
+        river_input_data.use_pio = True
+        output_path = river_input_data._forcing_filename("river")
+        _write_river_netcdf(
+            output_path, nriver=2, include_river_name=False, fmt="NETCDF3_64BIT_DATA"
+        )
+        custom_file = forge_models.UserProvidedFile(
+            location=str(output_path), content_hash=hash_netcdf_contents(output_path)
+        )
+
+        with patch("cstar.applications.forge.user_files.subprocess.run") as run:
+            river_input_data._generate_river_forcing(
+                key="forcing.river",
+                source={"name": "CUSTOM_FILE"},
+                custom_file=custom_file,
+            )
+
+        run.assert_not_called()
+        assert river_input_data._settings_run_time["river_frc"]["nriv"] == 2
+
+    def test_in_place_netcdf4_file_rejected_with_pio(self, river_input_data):
+        from cstar.applications.forge.user_files import hash_netcdf_contents
+
+        river_input_data.use_pio = True
+        output_path = river_input_data._forcing_filename("river")
+        _write_river_netcdf(
+            output_path, nriver=2, include_river_name=False, fmt="NETCDF4"
+        )
+        custom_file = forge_models.UserProvidedFile(
+            location=str(output_path), content_hash=hash_netcdf_contents(output_path)
+        )
+
+        with pytest.raises(RuntimeError, match="river forcing.*already at its dest"):
+            river_input_data._generate_river_forcing(
+                key="forcing.river",
+                source={"name": "CUSTOM_FILE"},
+                custom_file=custom_file,
+            )
 
     @pytest.mark.skipif(shutil.which("nccopy") is None, reason="nccopy not installed")
     def test_stages_via_nccopy_when_pio(self, river_input_data, tmp_path):
