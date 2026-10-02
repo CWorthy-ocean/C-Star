@@ -46,45 +46,57 @@ that joins partitioned output otherwise uses every core it can find.
 Where data goes
 ---------------
 
-Workplan runs are laid out under ``CSTAR_DATA_HOME``. On a supported HPC
-system that resolves to your scratch file system unless you set it
-yourself.
+Every C-Star application writes under its blueprint's ``working_dir``. A
+blueprint that omits it runs under
+``CSTAR_DATA_HOME/blueprint_runs/<application>/<name>``, with the blueprint
+name slugified. A workplan gives each step
+``CSTAR_DATA_HOME/<run id>/<step>``. A ``working_dir`` you set is used
+exactly as written; a relative path is resolved against the directory you
+run from.
 
-Forge keeps two kinds of data. The **source-data cache** holds the
-downloaded and user-staged datasets (GLORYS, TPXO, and so on) and is shared
-by every domain you generate. A forge blueprint's **working directory**
-holds the generated inputs and rendered files for one domain. Both are
-placed per system:
+``CSTAR_DATA_HOME`` is ``~/cstar`` on a laptop or workstation. On a
+supported HPC system it is a ``cstar`` directory on your scratch file system
+unless you set it yourself. The scratch file system is the first of
+``$SCRATCH``, ``$SCRATCH_DIR`` and ``$LOCAL_SCRATCH`` that is set (the
+``CSTAR_SCRATCH_DIRS`` list; see :doc:`configuration`). Bouchet exports none
+of these, so there C-Star uses the ``scratch_pi_*/<user>`` directory linked
+from your home. ``cstar env show`` prints the value in effect.
+
+Forge follows the same rule. A forge blueprint normally omits
+``working_dir``, so Forge writes its generated inputs under
+``CSTAR_DATA_HOME/blueprint_runs/forge/<name>``. The ROMS-MARBL blueprint it
+emits has the same name and no ``working_dir`` either, so it runs under
+``CSTAR_DATA_HOME/blueprint_runs/roms_marbl/<name>``. On a laptop those are
+``~/cstar/blueprint_runs/forge/<name>`` and
+``~/cstar/blueprint_runs/roms_marbl/<name>``; on an HPC system both are on
+scratch.
+
+Forge also keeps a **source-data cache** of the downloaded and user-staged
+datasets (GLORYS, TPXO, and so on), shared by every domain you generate. It
+is placed per system:
 
 .. list-table::
    :header-rows: 1
-   :widths: 18 42 40
+   :widths: 30 70
 
    * - System
      - Source-data cache
-     - Default working directories
    * - Laptop or workstation
      - ``~/cstar-forge-data/source-data``
-     - ``~/cstar/_forge_bp_runs/<name>``
    * - Anvil
      - ``$PROJECT/cstar-forge-data/source-data``
-     - ``$SCRATCH/cstar/_forge_bp_runs/<name>``
    * - Perlmutter
      - ``$PROJECT/cstar-forge-data/source-data`` if ``PROJECT`` is set,
        otherwise ``$SCRATCH/cstar-forge-data/source-data``
-     - ``$SCRATCH/cstar/_forge_bp_runs/<name>``
    * - Bouchet
      - ``$PROJECT/cstar-forge-data/source-data`` if ``PROJECT`` is set,
        otherwise ``<scratch_pi_*>/<user>/cstar-forge-data/source-data``
-     - ``<scratch_pi_*>/<user>/cstar/_forge_bp_runs/<name>``
 
 Some systems define ``PROJECT`` and ``SCRATCH`` for you (Anvil exports both,
 Perlmutter exports ``SCRATCH``); check with ``echo $PROJECT $SCRATCH`` and set
 them in your shell profile only if they are empty. ``PROJECT`` pointing at a
 group directory shares one source-data cache with your collaborators;
-``SCRATCH`` names the scratch root where the system does not export one. A forge blueprint whose ``working_dir`` is the
-default form (``~/cstar/_forge_bp_runs/...``) is rebased onto scratch on
-these systems; a working directory you set explicitly is used as written.
+``SCRATCH`` names the scratch root where the system does not export one.
 
 .. code-block:: console
 

@@ -19,8 +19,8 @@ What it contains
 ----------------
 
 Besides the core fields every blueprint has (``name``, ``description``,
-``application: forge``, ``working_dir``), a forge blueprint has these
-sections:
+``application: forge``, and an optional ``working_dir`` that a forge blueprint
+normally omits), a forge blueprint has these sections:
 
 ``run``
    The simulation window: ``start_date``, ``end_date`` and the model reference
@@ -55,7 +55,10 @@ sections:
 
 A ``forge_blueprint_version`` field records the schema version. Blueprints
 written by older versions are migrated when loaded; a blueprint newer than
-the installed C-Star is rejected with a message saying so.
+the installed C-Star is rejected with a message saying so. The migration
+removes an old default ``working_dir`` (``~/cstar/_forge_bp_runs/<name>``),
+so that blueprint takes the default location described below; a path you set
+deliberately is kept.
 
 Example
 -------
@@ -102,12 +105,14 @@ The options you are most likely to want:
    you want to check by hand before generating the rest.
 ``--clobber``
    Regenerate inputs that already exist. Without it, existing files are
-   reused.
+   reused. To run the emitted ROMS-MARBL blueprint again in the same
+   directory, pass ``--clobber`` to ``cstar blueprint run``, as for any
+   application.
 ``--no-data``, ``--no-generate``, ``--no-configure``
    Skip a stage.
 ``--working-dir PATH``
-   Put this run's outputs somewhere other than the blueprint's
-   ``working_dir``.
+   Put this run's outputs somewhere other than the blueprint's working
+   directory.
 ``--verbose``
    Timestamped logging and timing and memory instrumentation around the
    ROMS-Tools calls.
@@ -119,13 +124,13 @@ The options you are most likely to want:
 What Forge writes
 -----------------
 
-Everything goes under the blueprint's ``working_dir``. On HPC systems a
-default-form working directory (``~/cstar/_forge_bp_runs/<name>``) is placed
-on the scratch file system instead; see :doc:`../hpc`.
+Everything goes under the blueprint's working directory: by default
+``CSTAR_DATA_HOME/blueprint_runs/forge/<name>`` (see :doc:`../hpc`), or the
+``working_dir`` you set, used exactly as written.
 
 .. code-block:: text
 
-   <working_dir>/
+   <working directory>/
      input_data/              grid, initial conditions, forcing netCDF files
      builds/compile-time/     cppdefs.opt
      builds/run-time/         namelist.nml, marbl_in
@@ -136,9 +141,11 @@ on the scratch file system instead; see :doc:`../hpc`.
 The ROMS-MARBL blueprint points at the generated files with absolute paths,
 pins the same model code the forge blueprint did, carries the processor
 layout and run window, and lists the rendered ``cppdefs.opt``, ``namelist.nml``
-and ``marbl_in`` as its compile-time and run-time code. Run it with
-``cstar blueprint run blueprints/B_<name>.yaml``; the last lines of Forge's
-output print the exact command.
+and ``marbl_in`` as its compile-time and run-time code. It has no
+``working_dir`` of its own, so it runs under
+``CSTAR_DATA_HOME/blueprint_runs/roms_marbl/<name>`` unless a workplan places
+it. Run it with ``cstar blueprint run blueprints/B_<name>.yaml``; the last
+lines of Forge's output print the exact command.
 
 The settings sidecar is the complete resolved ``model_settings`` split into
 the single compile-time section (``cppdefs``) and the run-time namelist

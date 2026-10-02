@@ -144,9 +144,10 @@ Definitions
 
     Working directory
       Where an application writes its results. A blueprint's ``working_dir``
-      names it; a workplan lays out one directory per step under the run's
-      directory. On HPC systems default-form working directories are placed
-      on the scratch file system. See :doc:`hpc`.
+      names it; omitted, it is
+      ``CSTAR_DATA_HOME/blueprint_runs/<application>/<name>``. A workplan
+      lays out one directory per step under the run's directory. See
+      :doc:`hpc`.
 
 Example HPC deployment
 ----------------------
