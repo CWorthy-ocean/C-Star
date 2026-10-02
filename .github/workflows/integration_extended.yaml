@@ -23,10 +23,6 @@ jobs:
     runs-on: ${{ matrix.os }}
     # don't let a teardown hang hold a runner for the default 6 hours
     timeout-minutes: 120
-    env:
-      # Stop UCX from probing RDMA verbs devices: newer Azure runner VMs expose a
-      # MANA NIC whose ud_verbs transport fails in MPI_Init ("Address not valid").
-      UCX_TLS: ${{ runner.os == 'Linux' && 'tcp,sm,self' || '' }}
     strategy:
       fail-fast: false
       matrix:
@@ -82,11 +78,15 @@ jobs:
       - name: Running Tests
         shell: micromamba-shell {0}
         env:
+          # Stop UCX from probing RDMA verbs devices: newer Azure runner VMs expose a
+          # MANA NIC whose ud_verbs transport fails in MPI_Init ("Address not valid").
+          # (`runner` is a step-level context; it is not available in a job's env.)
+          UCX_TLS: ${{ runner.os == 'Linux' && 'tcp,sm,self' || '' }}
           # on manual dispatch the input replaces the "main" cell
           CSTAR_IT_ROMS_REF: ${{ matrix.roms_ref == 'main' && (github.event.inputs.roms_ref || 'main') || matrix.roms_ref }}
         run: |
            python -V
-           coverage run --rcfile=coverage.toml -m pytest -s --verbose cstar/tests/integration_tests/test_fixtures.py cstar/tests/integration_tests/forge cstar/tests/integration_tests/e2e cstar/tests/integration_tests/roms_marbl cstar/tests/integration_tests/extended cstar/tests/integration_tests/workplans
+           coverage run --rcfile=coverage.toml -m pytest -s --verbose cstar/tests/integration_tests/test_fixtures.py cstar/tests/integration_tests/forge cstar/tests/integration_tests/e2e cstar/tests/integration_tests/roms_marbl cstar/tests/integration_tests/extended
 
       - name: Get coverage report
         shell: micromamba-shell {0}

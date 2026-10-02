@@ -6,11 +6,8 @@ checkout, and the fixture then polls the step sentinels until both steps are ter
 The run compiles ROMS with MARBL and ParallelIO, so it takes minutes.
 """
 
-import os
 import re
 import shutil
-import signal
-import time
 import typing as t
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -29,7 +26,16 @@ from cstar.tests.integration_tests.cases import (
     RUN_END,
     RUN_START,
 )
-from cstar.tests.integration_tests.cli_harness import make_cli_env, run_cstar
+from cstar.tests.integration_tests.cli_harness import (
+    DONE,
+    TERMINAL,
+    kill_run,
+    make_cli_env,
+    run_cstar,
+    sentinel_path,
+    step_root,
+    wait_for_terminal,
+)
 
 if t.TYPE_CHECKING:
     from cstar.applications.forge.blueprint import ForgeBlueprint
@@ -38,8 +44,7 @@ RUN_ID = "forge-roms-e2e"
 FORGE_STEP = "make_inputs"
 ROMS_STEP = "run_roms"
 SCHEDULED_MESSAGE = "run scheduling has completed"
-DONE, CANCELLED, FAILED = 5, 6, 7
-TERMINAL = {DONE, CANCELLED, FAILED}
+STEPS = (FORGE_STEP, ROMS_STEP)
 POLL_INTERVAL = 5.0
 RUN_TIMEOUT = 40 * 60
 RESTART_PERIOD = 1800.0
@@ -102,20 +107,6 @@ class E2ERun:
         )
 
 
-def sentinel_path(state_home: Path, run_id: str, step: str) -> Path:
-    """Path of the sentinel file of ``step`` in ``run_id``."""
-    return state_home / "run_state" / run_id / f"{slugify(step)}.sentinel.yaml"
-
-
-def read_status(path: Path) -> int | None:
-    """Read the integer ``status:`` line of a sentinel, or ``None`` if unreadable."""
-    try:
-        match = re.search(r"^status:\s*(\d+)", path.read_text(), re.MULTILINE)
-    except OSError:
-        return None
-    return int(match.group(1)) if match else None
-
-
 def write_workplan(path: Path, forge_blueprint: Path) -> Path:
     """Write the two-step forge -> roms_marbl workplan.
 
@@ -150,46 +141,6 @@ def write_workplan(path: Path, forge_blueprint: Path) -> Path:
     return path
 
 
-def wait_for_terminal(
-    state_home: Path, run_id: str, timeout: float = RUN_TIMEOUT
-) -> dict[str, int | None]:
-    """Poll both sentinels until each is terminal, or ``timeout`` seconds pass.
-
-    Returns
-    -------
-    dict[str, int | None]
-        The last status read for each step, keyed by step name.
-    """
-    deadline = time.monotonic() + timeout
-    while True:
-        statuses = {
-            step: read_status(sentinel_path(state_home, run_id, step))
-            for step in (FORGE_STEP, ROMS_STEP)
-        }
-        if all(s in TERMINAL for s in statuses.values()):
-            return statuses
-        if time.monotonic() > deadline:
-            return statuses
-        time.sleep(POLL_INTERVAL)
-
-
-def kill_run(state_home: Path, run_id: str) -> None:
-    """Best-effort termination of the step proxies whose sentinels are not terminal.
-
-    Terminal steps are skipped because their recorded PIDs are stale and may have
-    been recycled.
-    """
-    for step in (FORGE_STEP, ROMS_STEP):
-        path = sentinel_path(state_home, run_id, step)
-        if read_status(path) in TERMINAL:
-            continue
-        try:
-            pid = yaml.safe_load(path.read_text())["pid"]
-            os.kill(int(pid), signal.SIGTERM)
-        except (OSError, KeyError, TypeError, ValueError, yaml.YAMLError):
-            continue
-
-
 @pytest.fixture(scope="module")
 def e2e_run(
     forge_blueprint_factory: Callable[..., tuple["ForgeBlueprint", Path]],
@@ -207,10 +158,10 @@ def e2e_run(
     try:
         run = _schedule_and_wait(forge_blueprint_factory, cstar_shim, root)
     except BaseException:
-        kill_run(root / "state", RUN_ID)
+        kill_run(root / "state", RUN_ID, STEPS)
         raise
     yield run
-    kill_run(run.state_home, run.run_id)
+    kill_run(run.state_home, run.run_id, STEPS)
 
 
 def _schedule_and_wait(
@@ -235,9 +186,11 @@ def _schedule_and_wait(
     assert SCHEDULED_MESSAGE in proc.stdout, output
 
     state_home = root / "state"
-    statuses = wait_for_terminal(state_home, RUN_ID)
+    statuses = wait_for_terminal(
+        state_home, RUN_ID, STEPS, timeout=RUN_TIMEOUT, poll_interval=POLL_INTERVAL
+    )
     data_home = root / "data"
-    step_roots = {s: data_home / RUN_ID / "tasks" / slugify(s) for s in statuses}
+    step_roots = {s: step_root(data_home, RUN_ID, s) for s in statuses}
     run = E2ERun(
         run_id=RUN_ID,
         env=env,
@@ -250,7 +203,7 @@ def _schedule_and_wait(
         stdout=proc.stdout,
     )
     if not all(s in TERMINAL for s in statuses.values()):
-        kill_run(state_home, RUN_ID)
+        kill_run(state_home, RUN_ID, STEPS)
         pytest.fail(
             f"workplan did not finish within {RUN_TIMEOUT}s: {statuses}\n"
             f"{run.log_tail(run.forge_root)}\n{run.log_tail(run.roms_root)}"
@@ -380,5 +333,11 @@ def test_resume_of_completed_run_keeps_steps_done(e2e_run: E2ERun) -> None:
     )
     assert proc.returncode == 0, f"{proc.stdout}\n{proc.stderr}"
 
-    statuses = wait_for_terminal(e2e_run.state_home, e2e_run.run_id, timeout=300)
+    statuses = wait_for_terminal(
+        e2e_run.state_home,
+        e2e_run.run_id,
+        STEPS,
+        timeout=300,
+        poll_interval=POLL_INTERVAL,
+    )
     assert statuses == {FORGE_STEP: DONE, ROMS_STEP: DONE}

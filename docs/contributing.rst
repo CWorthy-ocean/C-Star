@@ -68,7 +68,9 @@ for this; a tier is selected by path.
    NETCDF4 input to a ParallelIO build and expects it to be refused.
    ``roms_marbl/test_prebuilt_case.py`` (Tier 2b) runs the prebuilt
    ``cstar_blueprint_test_case`` through ``cstar blueprint run`` (no
-   ParallelIO, partitioned inputs) in the same CI job. This tier takes
+   ParallelIO, partitioned inputs) in the same CI job.
+   ``e2e/test_workplan_shapes.py`` covers DAG shapes and dependency-failure
+   propagation with ``hello_world`` steps (seconds, no compile). This tier takes
    around ten minutes and runs on Ubuntu for every pull request::
 
       python -m pytest cstar/tests/integration_tests/e2e
