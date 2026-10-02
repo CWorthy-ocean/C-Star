@@ -32,8 +32,6 @@ import cstar.applications.roms_marbl.models as cstar_models
 from cstar.applications.forge import input_data, source_datasets
 from cstar.applications.forge.blueprint import (
     CDR_MODES,
-    DEFAULT_WORKING_ROOT,
-    ROMS_RUN_SEGMENT,
     OpenBoundaries,
     UserProvidedFile,
     infer_cdr_mode,
@@ -862,7 +860,7 @@ class ForgeExecutor(BaseModel):
             [
                 f"  Compile-time code: {self.compile_time_code_dir.resolve()}",
                 f"  Run-time code: {self.run_time_code_dir.resolve()}",
-                f"  Simulation output (scratch): {self.run_output_dir.resolve()}",
+                f"  Simulation output: {self.run_output_dir.resolve()}",
             ]
         )
         print("\n".join(lines))
@@ -908,35 +906,6 @@ class ForgeExecutor(BaseModel):
         return self._require_host().working_dir
 
     @property
-    def roms_blueprint_working_dir(self) -> Path:
-        """Working dir for the emitted ROMS blueprint.
-
-        Mirrors ``run_output_dir`` but under a ``_roms_bp_runs`` root instead of
-        the forge run's ``_forge_bp_runs`` root, so the two stages don't share a dir.
-        """
-        forge_parent = Path(DEFAULT_WORKING_ROOT).parent.name  # "cstar"
-        forge_seg = Path(DEFAULT_WORKING_ROOT).name  # "_forge_bp_runs"
-        blueprint_seg = ROMS_RUN_SEGMENT
-        run_dir = self.run_output_dir
-        parts = run_dir.parts
-        # Anchor on the full two-segment default root ("cstar/_forge_bp_runs"),
-        # matching config.relocate_working_dir -- a lone "_forge_bp_runs" segment
-        # elsewhere in a custom path is not the default root.
-        for i in range(1, len(parts)):
-            if parts[i] == forge_seg and parts[i - 1] == forge_parent:
-                return Path(*parts[:i], blueprint_seg, *parts[i + 1 :])
-        # Legacy sibling swap for explicit old-form paths (pre-rename default) on
-        # non-HPC hosts, where relocate_working_dir leaves them untouched.
-        if "cstar-forge-run" in run_dir.parts:
-            return Path(
-                *(
-                    "cstar-roms-run" if p == "cstar-forge-run" else p
-                    for p in run_dir.parts
-                )
-            )
-        return run_dir / blueprint_seg
-
-    @property
     def default_runtime_params(self) -> cstar_models.RuntimeParameterSet:
         """
         Get default runtime parameters.
@@ -945,7 +914,7 @@ class ForgeExecutor(BaseModel):
         configuration (start_date, end_date). The run output location is NOT
         carried here: ``runtime_params.output_dir`` is a pre-2.0.0 blueprint
         field (C-Star migrates it to the blueprint ``working_dir``, which the
-        executor sets explicitly in ``configure_build``).
+        emitted blueprint leaves unset; see ``configure_build``).
         """
         return cstar_models.RuntimeParameterSet(
             start_date=self.start_date,
@@ -2537,12 +2506,13 @@ class ForgeExecutor(BaseModel):
             # whose supplied partitioning didn't already carry use_pio.
             roms_marbl_blueprint_dict["partitioning"]["use_pio"] = self._use_pio
             # No output_dir here: it is a pre-2.0.0 field superseded by the
-            # blueprint working_dir (set just below).
+            # blueprint working_dir. That one is left unset too, so C-Star places
+            # the run under its own default (blueprint_runs/roms_marbl/<name>) or
+            # the workplan step directory.
             roms_marbl_blueprint_dict["runtime_params"] = {
                 "start_date": self.start_date,
                 "end_date": self.end_date,
             }
-            roms_marbl_blueprint_dict["working_dir"] = self.roms_blueprint_working_dir
 
             self.roms_marbl_blueprint = cstar_models.RomsMarblBlueprint.model_construct(
                 **roms_marbl_blueprint_dict

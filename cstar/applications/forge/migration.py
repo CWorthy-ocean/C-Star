@@ -26,6 +26,19 @@ from cstar.applications.forge.blueprint import (
     sanitize_name,
 )
 
+LEGACY_DEFAULT_WORKING_ROOTS: tuple[str, ...] = (
+    "~/cstar/_forge_bp_runs",
+    "~/cstar-forge-run",
+    "~/cstar-forge-data/cstar-forge-run",
+)
+"""Home-rooted ``working_dir`` defaults that ``ForgeBlueprint`` stored before v9.
+
+The current one (``~/cstar/_forge_bp_runs``) plus the two from earlier renames. A file
+carries a root either bare or followed by ``/<name>``; the v8 -> v9 step drops a
+``working_dir`` equal to either form (compared as written, ``~`` unexpanded) and keeps
+every other value.
+"""
+
 
 def migrate_forge_blueprint_data(data: dict[str, Any] | None) -> dict[str, Any]:
     """Version-check + forward-migrate a parsed ``forge_blueprint.yaml`` dict.
@@ -71,6 +84,10 @@ def migrate_forge_blueprint_data(data: dict[str, Any] | None) -> dict[str, Any]:
     ``type: physics`` entry supplies ``source`` plus the section's plain fields,
     and every ``type: bgc`` entry becomes a ``bgc_sources`` item. An empty list
     becomes ``None`` (a child domain with no boundary forcing).
+    **v8 -> v9**: ``working_dir`` is popped when it is one of Forge's old stored
+    defaults (:data:`LEGACY_DEFAULT_WORKING_ROOTS`, bare or followed by the
+    sanitized run name), so the blueprint runs under C-Star's default working
+    directory; any other value is left untouched.
 
     Idempotent and a no-op on already-current data (e.g. direct keyword
     construction, ``ForgeBlueprint(name=..., ...)``) -- called automatically from a
@@ -154,6 +171,18 @@ def migrate_forge_blueprint_data(data: dict[str, Any] | None) -> dict[str, Any]:
         forcing = data.get("forcing")
         if isinstance(forcing, dict):
             migrate_forcing_inputs(forcing.get("initial_conditions"), forcing)
+
+    if version is None or version < 9:
+        working_dir = data.get("working_dir")
+        if isinstance(working_dir, str):
+            legacy_defaults = set(LEGACY_DEFAULT_WORKING_ROOTS)
+            if isinstance(run_name := data.get("name"), str):
+                legacy_defaults |= {
+                    f"{root}/{sanitize_name(run_name)}"
+                    for root in LEGACY_DEFAULT_WORKING_ROOTS
+                }
+            if working_dir.rstrip("/") in legacy_defaults:
+                del data["working_dir"]
 
     data["forge_blueprint_version"] = FORGE_BLUEPRINT_VERSION
     return data

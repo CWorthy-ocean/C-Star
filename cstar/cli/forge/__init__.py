@@ -137,8 +137,8 @@ def run(
         str | None,
         typer.Option(
             "--working-dir",
-            help="override the spec's working_dir (per-run artifact root) "
-            "for this host",
+            help="override the blueprint's working directory (the per-run "
+            "artifact root) for this run",
         ),
     ] = None,
     dask: Annotated[

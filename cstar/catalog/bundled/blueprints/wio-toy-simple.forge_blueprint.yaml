@@ -4,8 +4,7 @@ description: Generated blueprint
 application: forge
 state: notset
 schema_version: 1.0.0
-working_dir: ~/cstar/_forge_bp_runs/wio-toy-simple
-forge_blueprint_version: 8
+forge_blueprint_version: 9
 run:
   start_date: '2012-01-01T00:00:00'
   end_date: '2012-01-02T00:00:00'

@@ -375,7 +375,7 @@ fields:
     label: Save path
   name:
     label: Blueprint name
-    hint: Drives the save filename, working directory and case name; edit to override the derived default.
+    hint: Drives the save filename, the default working directory and case name; edit to override the derived default.
 
   # ===========================================================================
   # grid.<k> -- the 11 grid kwargs, shared by main/child/parent grids

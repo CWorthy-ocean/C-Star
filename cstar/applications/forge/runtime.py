@@ -1,6 +1,6 @@
 """Forge-side entry point for running the forge application on this machine.
 
-This is the **disposable host-resolution glue**: it auto-detects the host via
+This is the **host-resolution glue**: it auto-detects the host via
 ``cstar.applications.forge.config`` and injects a ``HostPaths`` into the host-independent
 ``process_forge_blueprint``. Users run this (or its CLI); paths are auto-detected, never
 typed.
@@ -185,12 +185,12 @@ def process(spec, *, working_dir=None, **kwargs):
 
     Thin Forge convenience: deduces a ``HostPaths`` via ``config.resolve_host()`` and
     injects it, so callers never supply paths by hand. ``working_dir`` defaults to the
-    spec's stored ``working_dir`` (a per-host override may be passed here). Screen
+    blueprint's effective working directory (an override may be passed here). Screen
     output (print + logging) is teed into ``<host.working_dir>/logs/`` for the
     duration of the run -- see ``_capture_output``.
     """
     cfg = spec if isinstance(spec, ForgeBlueprint) else ForgeBlueprint.from_yaml(spec)
-    wd = working_dir if working_dir is not None else cfg.working_dir
+    wd = working_dir if working_dir is not None else cfg.effective_working_dir
     config.ensure_data_dirs()
     host = config.resolve_host(wd)
     with _capture_output(
@@ -269,7 +269,7 @@ def run_blueprint(
     else:
         logging.basicConfig(level=logging.INFO, format="%(message)s", force=True)
     cfg = ForgeBlueprint.from_yaml(forge_blueprint)
-    wd = working_dir if working_dir is not None else cfg.working_dir
+    wd = working_dir if working_dir is not None else cfg.effective_working_dir
     config.ensure_data_dirs()
     host = config.resolve_host(wd)
 
