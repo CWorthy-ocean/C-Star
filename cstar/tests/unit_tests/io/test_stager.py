@@ -143,6 +143,31 @@ class TestStagerSubclasses:
         assert result.source is source
         assert result.path == target
 
+    def test_local_binary_file_stager_relative_location(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        mocksourcedata_local_file: SourceDataFactory,
+    ) -> None:
+        """A relative source location is linked by its resolved path, so the symlink
+        does not dangle from inside the staging directory.
+        """
+        monkeypatch.chdir(tmp_path)
+        source_dir = tmp_path / "src"
+        source_dir.mkdir()
+        (source_dir / "source.nc").write_bytes(b"123")
+        source = mocksourcedata_local_file(location="src/source.nc", identifier=None)
+
+        staging_dir = tmp_path / "stage"
+        staging_dir.mkdir()
+
+        s = stager.LocalBinaryFileStager(source)
+        s.stage(staging_dir)
+
+        target = staging_dir / "source.nc"
+        assert target.is_symlink()
+        assert target.read_bytes() == b"123"
+
     def test_local_binary_file_stager_missing_source_raises(
         self, tmp_path: Path, mocksourcedata_local_file: SourceDataFactory
     ) -> None:

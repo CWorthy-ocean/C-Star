@@ -15,8 +15,11 @@ from cstar.io.staged_data import StagedDataCollection, StagedFile
 from cstar.roms.input_dataset import (
     DatasetLinker,
     RecordedReferenceDate,
+    ROMSBoundaryForcing,
+    ROMSForcingCorrections,
     ROMSInputDataset,
     ROMSPartitioning,
+    ROMSRiverForcing,
     read_model_reference_date,
 )
 from cstar.tests.unit_tests.fake_abc_subclasses import FakeROMSInputDataset
@@ -859,6 +862,82 @@ def test_validate_rejects_text_source_on_other_dataset_types(
 
     with pytest.raises(TypeError, match="ROMSRiverForcing requires a netCDF source"):
         roms_river_forcing(location=location, sourcedata=source_data)
+
+
+def test_validate_accepts_cdf5_netcdf_source(tmp_path: Path) -> None:
+    """`ROMSInputDataset.validate()` accepts a real CDF-5 file, which is not
+    mistaken for a text file (e.g. a roms-tools YAML).
+
+    The classic-format header is ASCII names plus NUL-filled big-endian ints, so
+    a text-encoding detector that only sees valid UTF-8 can misclassify it (e.g.
+    forge `use_pio=True` output, written by `nccopy -k cdf5`). Unmocked: builds a
+    boundary-forcing-like file on disk and constructs the dataset from its path.
+    """
+    # netCDF4 is used directly to write the CDF-5 format (`NETCDF3_64BIT_DATA`)
+    import netCDF4
+
+    path = tmp_path / "bry.nc"
+    with netCDF4.Dataset(path, "w", format="NETCDF3_64BIT_DATA") as nc:
+        nc.createDimension("time", None)
+        nc.createDimension("bry_time", 12)
+        bry_time = nc.createVariable("bry_time", "f8", ("bry_time",))
+        bry_time.long_name = "days since 2000-01-01 00:00:00"
+        bry_time.units = "days"
+        bry_time.cycle_length = 365.25
+        month = nc.createVariable("month", "i4", ("bry_time",))
+        month.long_name = "Month of the year"
+        abs_time = nc.createVariable("abs_time", "f8", ("bry_time",))
+        abs_time.long_name = "Absolute time"
+        abs_time.units = "days"
+        abs_time.calendar = "proleptic_gregorian"
+        nc.title = "ROMS boundary forcing file created by ROMS-Tools"
+        nc.roms_tools_version = "5.1.1.dev11+gd7fd3fff1"
+        nc.roms_tools_git_commit = "4530e171"
+        nc.start_time = "2013-01-01 00:00:00"
+        nc.end_time = "2018-01-01 00:00:00"
+        nc.model_reference_date = "2000-01-01 00:00:00"
+        nc.source = "WOA"
+        nc.prefill = "None"
+        nc.regrid_method = "xesmf"
+        nc.extrap_method = "inverse_dist"
+        nc.adjust_depth_for_sea_surface_height = "False"
+        nc.climatology = "True"
+        nc.coordinates = "abs_time month"
+        nc.theta_s = np.float32(5.0)
+        nc.theta_b = np.float32(2.0)
+        nc.hc = np.float32(300.0)
+
+    # Not raising is the assertion: construction calls `validate()`
+    ROMSBoundaryForcing(location=str(path))
+
+
+@pytest.mark.parametrize("dataset_type", [ROMSForcingCorrections, ROMSRiverForcing])
+def test_validate_rejects_empty_source(
+    tmp_path: Path, dataset_type: type[ROMSInputDataset]
+) -> None:
+    """`ROMSInputDataset.validate()` raises a `ValueError` for an empty (0 byte)
+    local file, such as one left by an interrupted write, rather than the
+    misleading "text file" `TypeError`: an empty file is classified as text.
+    """
+    path = tmp_path / "empty.nc"
+    path.touch()
+
+    with pytest.raises(ValueError, match="is empty") as exception_info:
+        dataset_type(location=str(path))
+
+    message = str(exception_info.value)
+    assert f"{dataset_type.__name__} source {path} is empty (0 bytes)" in message
+
+
+def test_validate_rejects_local_yaml_source(tmp_path: Path) -> None:
+    """A real, non-empty local YAML file still gets the "text file" `TypeError`,
+    not the empty-file `ValueError`. Unmocked, unlike the remote-source tests above.
+    """
+    path = tmp_path / "bry.yaml"
+    path.write_text("boundary_forcing:\n  source: roms-tools\n")
+
+    with pytest.raises(TypeError, match="is a text file"):
+        ROMSBoundaryForcing(location=str(path))
 
 
 class TestDatasetLinker:

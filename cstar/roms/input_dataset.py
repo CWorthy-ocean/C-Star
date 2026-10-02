@@ -18,7 +18,7 @@ from cstar.base.utils import (
     min_padded_index,
     min_padded_indices,
 )
-from cstar.io.constants import FileEncoding
+from cstar.io.constants import FileEncoding, SourceClassification
 from cstar.io.source_data import SourceData, SourceDataCollection
 from cstar.io.staged_data import StagedDataCollection, StagedFile
 
@@ -309,13 +309,37 @@ class ROMSInputDataset(InputDataset, ABC):
         """Reject text sources (e.g. a roms-tools YAML): ROMS input datasets must
         point directly at netCDF files, and C-Star no longer generates them from
         YAML. Rejected up front rather than failing later with an opaque error.
+        Empty local files are also rejected, with their own message.
 
         Raises
         ------
+        ValueError
+            If the source is an empty (0 byte) local file, e.g. left by an
+            interrupted or failed write.
         TypeError
             If the source is classified as text (e.g. a roms-tools YAML).
         """
-        if self.source.classification.value.file_encoding == FileEncoding.TEXT:
+        classification = self.source.classification
+        location = Path(self.source.location)
+        # An empty file is classified as text, so check for it first to avoid
+        # the misleading "text file" message below. Remote sources aren't sized.
+        if (
+            classification
+            in (
+                SourceClassification.LOCAL_TEXT_FILE,
+                SourceClassification.LOCAL_BINARY_FILE,
+            )
+            and location.is_file()
+            and location.stat().st_size == 0
+        ):
+            msg = (
+                f"{self.__class__.__name__} source {self.source.location} is "
+                "empty (0 bytes), likely left by an interrupted or failed "
+                "write; regenerate it."
+            )
+            raise ValueError(msg)
+
+        if classification.value.file_encoding == FileEncoding.TEXT:
             msg = (
                 f"{self.__class__.__name__} requires a netCDF source, but "
                 f"{self.source.location} is a text file (e.g. a roms-tools "

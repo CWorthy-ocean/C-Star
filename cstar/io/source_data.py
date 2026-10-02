@@ -1,3 +1,4 @@
+import codecs
 from functools import lru_cache
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -172,11 +173,27 @@ class _SourceInspector:
                         f"Cannot determine file encoding for location type {self.location_type}"
                     )
 
-                best_encoding = charset_normalizer.from_bytes(header_bytes).best()
-                if best_encoding:
-                    self._file_encoding = FileEncoding.TEXT
-                else:
+                # NUL is valid UTF-8, so charset_normalizer can call binary headers
+                # text. Classic netCDF (CDF-1/2/5) headers always contain NUL within
+                # their first 16 bytes (record count, dimension tag), as do HDF5
+                # superblocks; git and grep use a similar heuristic. UTF-16/32 text
+                # with a BOM legitimately contains NULs.
+                has_bom = header_bytes.startswith(
+                    (
+                        codecs.BOM_UTF32_LE,
+                        codecs.BOM_UTF32_BE,
+                        codecs.BOM_UTF16_LE,
+                        codecs.BOM_UTF16_BE,
+                    )
+                )
+                if b"\x00" in header_bytes and not has_bom:
                     self._file_encoding = FileEncoding.BINARY
+                else:
+                    best_encoding = charset_normalizer.from_bytes(header_bytes).best()
+                    if best_encoding:
+                        self._file_encoding = FileEncoding.TEXT
+                    else:
+                        self._file_encoding = FileEncoding.BINARY
 
         return self._file_encoding
 
