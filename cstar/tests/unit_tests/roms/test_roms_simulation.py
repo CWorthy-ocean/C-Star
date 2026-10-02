@@ -2293,6 +2293,62 @@ class TestProcessingAndExecution:
             # Ensure execution handler was set correctly
             assert execution_handler == mock_process_instance
 
+    def test_prepare_launch_raises_if_no_executable(self, stub_romssimulation):
+        """`prepare_launch` guards the same preconditions as `run`."""
+        with pytest.raises(ValueError, match="unable to find ROMS executable"):
+            stub_romssimulation.prepare_launch()
+
+    @mock.patch.object(
+        ROMSSimulation, "roms_runtime_settings", new_callable=mock.PropertyMock
+    )
+    def test_prepare_launch_prepares_without_launching(
+        self,
+        mock_runtime_settings,
+        stub_romssimulation: ROMSSimulation,
+        stageddatacollection_remote_files,
+    ):
+        """`prepare_launch` writes the namelist, links the executable and
+        returns the launch command, but neither starts a local process nor
+        creates a scheduler job.
+        """
+        sim = stub_romssimulation
+
+        with (
+            mock.patch("cstar.roms.simulation.LocalProcess") as mock_local_process,
+            mock.patch("cstar.roms.simulation.create_scheduler_job") as mock_create_job,
+        ):
+            sim.exe_path = sim.fs_manager.compile_time_code_dir / "roms"
+            sim.exe_path.parent.mkdir(parents=True, exist_ok=True)
+            sim.exe_path.write_text("binary")
+            runtime_code_dir = sim.fs_manager.runtime_code_dir
+            sim.runtime_code._working_copy = stageddatacollection_remote_files(
+                paths=[runtime_code_dir / f.basename for f in sim.runtime_code.source],
+                sources=sim.runtime_code.source,
+            )
+
+            plan = sim.prepare_launch()
+
+        run_dir = sim.fs_manager.run_dir
+        namelist_path = run_dir / "cstar_generated_roms.nml"
+        mock_runtime_settings.return_value.write.assert_called_once_with(namelist_path)
+
+        symlink_path = run_dir / "roms"
+        assert symlink_path.is_symlink()
+        assert symlink_path.resolve() == sim.exe_path.resolve()
+
+        mpi_exec_prefix = get_sysmgr().environment.mpi_exec_prefix
+        assert plan.command == (
+            f"{mpi_exec_prefix} -n {sim.discretization.n_procs_tot} "
+            "./roms cstar_generated_roms.nml"
+        )
+        assert plan.run_path == run_dir
+        assert plan.runtime_settings_file == namelist_path
+        assert plan.script_path == run_dir / "romstest.sh"
+        assert plan.output_file == sim.fs_manager.logs_dir / "romstest.out"
+
+        mock_local_process.assert_not_called()
+        mock_create_job.assert_not_called()
+
     @pytest.mark.parametrize(
         ("use_pio", "expect_temp_output"),
         [

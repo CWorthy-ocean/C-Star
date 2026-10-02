@@ -43,6 +43,11 @@ you must run a ROMS-MARBL blueprint directly on a login node, set
 ``CSTAR_NPROCS_POST`` to a small number (about 2): the post-processing step
 that joins partitioned output otherwise uses every core it can find.
 
+To validate a run from a login node before queueing it, use ``--pre-run``: it
+stages inputs, clones and compiles the codebases and checks the namelist
+without launching ROMS or submitting a job, and a later run attaches to the
+prepared working directory. See :ref:`workplan_pre_run`.
+
 Where data goes
 ---------------
 

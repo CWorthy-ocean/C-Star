@@ -681,6 +681,17 @@ class Workplan(ConfiguredBaseModel):
         """
         return deepcopy(value)
 
+    @property
+    def pre_run(self) -> bool:
+        """Return `True` if every step in this workplan is a pre-run step, as
+        produced by `cstar workplan run --pre-run`.
+
+        Returns
+        -------
+        bool
+        """
+        return bool(self.steps) and all(step.pre_run for step in self.steps)
+
     @field_validator("runtime_vars", mode="after")
     @classmethod
     def _check_runtime_vars(cls, value: list[str]) -> list[str]:

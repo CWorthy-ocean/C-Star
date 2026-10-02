@@ -12,11 +12,9 @@ from typer.testing import CliRunner
 
 from cstar.applications.hello_world import HelloWorldApplication
 from cstar.applications.plotter import (
-    APP_PLOTTER_SCHEMA_1_0_0,
     APP_PLOTTER_SCHEMA_2_0_0,
 )
 from cstar.base.env import (
-    ENV_CSTAR_CLI_DRY_RUN,
     ENV_CSTAR_DISABLE_MIGRATION,
     ENV_CSTAR_RUNID,
     ENV_CSTAR_STATE_HOME,
@@ -25,11 +23,16 @@ from cstar.base.env import (
 from cstar.base.exceptions import CstarExpectationFailed
 from cstar.cli.common import normalize_runid
 from cstar.cli.workplan.run import app, auto_compose, migrate_steps
-from cstar.entrypoint.utils import ARG_CLOBBER, ARG_RESUME
-from cstar.orchestration.dag_runner import get_launcher, original_workplan_backup
+from cstar.entrypoint.utils import ARG_CLOBBER, ARG_PRE_RUN, ARG_RESUME
+from cstar.orchestration.dag_runner import (
+    NoPreparableStepsError,
+    get_launcher,
+    original_workplan_backup,
+)
 from cstar.orchestration.launch.local import LocalHandle
 from cstar.orchestration.launch.slurm import SlurmHandle, SlurmLauncher
 from cstar.orchestration.models import (
+    KEY_PRE_RUN,
     DeferredBlueprintRef,
     Step,
     UserDefinedVariables,
@@ -43,12 +46,17 @@ from cstar.orchestration.utils import ENV_CSTAR_SLURM_ACCOUNT, ENV_CSTAR_SLURM_Q
 from cstar.system.environment import EnvSettingsBase, SlurmSettingsBase
 
 
+def _slurm_launcher(force_local: bool = False) -> SlurmLauncher:
+    """Stand in for `get_launcher` with a SLURM launcher regardless of the system."""
+    return SlurmLauncher()
+
+
 async def fake_build_and_run_dag(
     wp_path: Path,
     run_id: str,
     user_variables: dict[str, str] | None = None,
-    dry_run: bool = False,
     clobber_steps: list[str] | None = None,
+    pre_run: bool = False,
 ) -> WorkplanRun:
     return WorkplanRun(
         workplan_path=wp_path,
@@ -717,7 +725,6 @@ def test_workplan_run_nonexistent_runid(
     state_dir = tmp_path / "state"
     mock_build_and_run_dag = mock.AsyncMock(
         return_value=mock.MagicMock(
-            dry_run=True,
             name="sample-workplan",
             run_id="12345",
             state_dir="/tmp/state",
@@ -774,7 +781,7 @@ def test_workplan_run_default_run_id(
     with mock.patch("cstar.cli.workplan.run.build_and_run_dag", mock_build_and_run_dag):
         result = runner.invoke(
             app,
-            ["--dry-run", wp_path.as_posix()],
+            [wp_path.as_posix()],
             color=False,
         )
 
@@ -801,7 +808,6 @@ def test_workplan_run_invalid_file_content(
 
     mock_build_and_run_dag = mock.AsyncMock(
         return_value=mock.MagicMock(
-            dry_run=True,
             name="sample-workplan",
             run_id="12345",
             state_dir="/tmp/state",
@@ -814,7 +820,7 @@ def test_workplan_run_invalid_file_content(
     ):
         result = runner.invoke(
             app,
-            ["--dry-run", wp_path.as_posix()],
+            [wp_path.as_posix()],
             color=False,
         )
 
@@ -1368,7 +1374,7 @@ def test_workplan_run_reload_prior_run(
     with (
         mock.patch(
             "cstar.orchestration.dag_runner.get_launcher",
-            SlurmLauncher,
+            _slurm_launcher,
         ),
         mock.patch(
             "cstar.orchestration.launch.slurm.SlurmLauncher.query_status",
@@ -1456,7 +1462,7 @@ def test_workplan_run_reload_prior_run_in_progress(
     with (
         mock.patch(
             "cstar.orchestration.dag_runner.get_launcher",
-            SlurmLauncher,
+            _slurm_launcher,
         ),
         mock.patch(
             "cstar.orchestration.launch.slurm.SlurmLauncher.query_status",
@@ -1568,7 +1574,7 @@ def test_workplan_run_reload_prior_run_repeat_failures(
         ) as mock_submit,
         mock.patch(
             "cstar.orchestration.dag_runner.get_launcher",
-            SlurmLauncher,
+            _slurm_launcher,
         ),
     ):
         result = runner.invoke(
@@ -2021,14 +2027,13 @@ def test_workplan_run_migration_disabled_fails_fast(
     mock_build_and_run_dag.assert_not_awaited()
 
 
-def test_workplan_run_migration_dry_run_plans_all_steps_without_persisting(
+def test_workplan_run_unsupported_schema_fails(
     tmp_path: Path,
     plotter_v1_0_0_model: dict[str, t.Any],
-    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Verify dry-run mode plans the migration for every out-of-date step
-    without persisting migrated blueprints, and the run continues instead of
-    exiting after the first planned step.
+    """Verify the run exits non-zero when a step's blueprint declares a schema
+    version with no registered migration path, instead of scheduling a
+    blueprint that cannot be executed.
 
     Parameters
     ----------
@@ -2036,79 +2041,7 @@ def test_workplan_run_migration_dry_run_plans_all_steps_without_persisting(
         Temporary directory to read/write test inputs and outputs
     plotter_v1_0_0_model : dict[str, t.Any]
         Fixture providing the raw content of a plotter blueprint at schema 1.0.0
-    monkeypatch : pytest.MonkeyPatch
-        Used to enable dry-run mode before the eager path callback runs
     """
-    monkeypatch.setenv(ENV_CSTAR_CLI_DRY_RUN, FLAG_ON)
-
-    bp_paths: list[Path] = []
-    for i in range(2):
-        bp_path = tmp_path / f"plotter_{i}.json"
-        bp_path.write_text(json.dumps(plotter_v1_0_0_model))
-        bp_paths.append(bp_path)
-
-    steps = [
-        Step(name=f"Plot {i}", application="plotter", blueprint=bp_path)
-        for i, bp_path in enumerate(bp_paths)
-    ]
-    wp_path = _write_workplan(tmp_path / "dry-run-workplan.yaml", steps)
-
-    # a comment survives only if the file is not re-serialized; re-serializing
-    # the model would otherwise reproduce byte-identical content
-    wp_path.write_text(f"# user comment\n{wp_path.read_text()}")
-    wp_content_before = wp_path.read_text()
-
-    with mock.patch(
-        "cstar.cli.workplan.run.build_and_run_dag", wraps=fake_build_and_run_dag
-    ) as mock_build_and_run_dag:
-        runner = CliRunner()
-        result = runner.invoke(
-            app,
-            ["--run-id", "12345", "--dry-run", wp_path.as_posix()],
-            color=False,
-        )
-
-    # planning the first step's migration must not exit the run prematurely
-    assert result.exit_code == 0
-    mock_build_and_run_dag.assert_awaited_once()
-
-    plan_msg = f"Migrating {APP_PLOTTER_SCHEMA_1_0_0!r}->{APP_PLOTTER_SCHEMA_2_0_0!r}"
-    assert result.stdout.count(plan_msg) == len(bp_paths)
-
-    # no migrated blueprints are persisted during a dry run
-    for bp_path in bp_paths:
-        assert not _expected_migrated_path(bp_path).exists()
-
-    # the steps continue to reference the original blueprints
-    wp = deserialize(mock_build_and_run_dag.call_args.args[0], Workplan)
-    assert [Path(str(s.blueprint_path)).resolve() for s in wp.steps] == [
-        p.resolve() for p in bp_paths
-    ]
-
-    # a dry run must not modify the user's workplan file
-    assert wp_path.read_text() == wp_content_before
-
-
-def test_workplan_run_dry_run_unsupported_schema_fails(
-    tmp_path: Path,
-    plotter_v1_0_0_model: dict[str, t.Any],
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Verify dry-run planning exits non-zero when a step's blueprint declares
-    a schema version with no registered migration path, instead of continuing
-    with a blueprint that cannot be executed.
-
-    Parameters
-    ----------
-    tmp_path : Path
-        Temporary directory to read/write test inputs and outputs
-    plotter_v1_0_0_model : dict[str, t.Any]
-        Fixture providing the raw content of a plotter blueprint at schema 1.0.0
-    monkeypatch : pytest.MonkeyPatch
-        Used to enable dry-run mode before the eager path callback runs
-    """
-    monkeypatch.setenv(ENV_CSTAR_CLI_DRY_RUN, FLAG_ON)
-
     # no adapter migrates from 0.5.0, so planning the upgrade path must fail
     model = {**plotter_v1_0_0_model, "schema_version": "0.5.0"}
     bp_path = tmp_path / "plotter_unsupported_0.5.0.json"
@@ -2123,7 +2056,7 @@ def test_workplan_run_dry_run_unsupported_schema_fails(
         runner = CliRunner()
         result = runner.invoke(
             app,
-            ["--run-id", "12345", "--dry-run", wp_path.as_posix()],
+            ["--run-id", "12345", wp_path.as_posix()],
             color=False,
         )
 
@@ -2369,7 +2302,7 @@ def test_workplan_run_reports_all_directive_problems_before_submission(
         runner = CliRunner()
         result = runner.invoke(
             app,
-            ["--run-id", "bad-directives", "--dry-run", wp_path.as_posix()],
+            ["--run-id", "bad-directives", wp_path.as_posix()],
             color=False,
         )
 
@@ -2406,3 +2339,135 @@ def test_migrate_steps_skips_inline_step(tmp_path: Path) -> None:
 
     mock_migrate.assert_not_called()
     assert wp.steps[0].is_inline
+
+
+@pytest.mark.parametrize("pre_run", [True, False])
+@pytest.mark.usefixtures("read_yaml_intercept")
+def test_workplan_run_pre_run_reaches_build_and_run_dag(pre_run: bool) -> None:
+    """Verify `--pre-run` is forwarded to `build_and_run_dag` as a parameter,
+    and only a pre-run ends with how to continue.
+    """
+    wp_uri = "https://raw.githubusercontent.com/CWorthy-ocean/C-Star/refs/heads/main/cstar/additional_files/templates/wp/workplan.yaml"
+    args = ["--run-id", "12345", wp_uri]
+
+    with mock.patch(
+        "cstar.cli.workplan.run.build_and_run_dag",
+        wraps=fake_build_and_run_dag,
+    ) as mock_build_and_run_dag:
+        runner = CliRunner()
+        result = runner.invoke(
+            app, [ARG_PRE_RUN, *args] if pre_run else args, color=False
+        )
+
+    assert result.exit_code == 0, result.output
+    mock_build_and_run_dag.assert_awaited_once()
+    assert mock_build_and_run_dag.await_args is not None
+    assert mock_build_and_run_dag.await_args.kwargs["pre_run"] is pre_run
+
+    output = " ".join(result.stdout.split())
+    assert ("Pre-run scheduled." in output) is pre_run
+    assert ("without --pre-run" in output) is pre_run
+    assert "run scheduling has completed" in output
+
+
+def test_workplan_run_pre_run_and_resume_fails_fast() -> None:
+    """Verify `--pre-run` combined with `--resume` exits with one usage error
+    before `build_and_run_dag` is invoked.
+    """
+    with mock.patch(
+        "cstar.cli.workplan.run.build_and_run_dag",
+        wraps=fake_build_and_run_dag,
+    ) as mock_build_and_run_dag:
+        runner = CliRunner()
+        result = runner.invoke(
+            app,
+            ["--run-id", "12345", ARG_RESUME, ARG_PRE_RUN],
+            color=False,
+        )
+
+    assert result.exit_code == 2
+    assert "--resume" in result.output
+    assert "--pre-run" in result.output
+    mock_build_and_run_dag.assert_not_awaited()
+
+
+def test_workplan_run_pre_run_requires_workplan_path() -> None:
+    """Verify `--pre-run` without a workplan path (a `--run-id` reload would
+    replay the recorded plan and silently ignore it) is a usage error.
+    """
+    with mock.patch(
+        "cstar.cli.workplan.run.handle_run_reloading", mock.AsyncMock()
+    ) as mock_reload:
+        runner = CliRunner()
+        result = runner.invoke(app, ["--run-id", "12345", ARG_PRE_RUN], color=False)
+
+    assert result.exit_code == 2
+    assert "workplan path is required" in " ".join(
+        result.output.replace("│", " ").split()
+    )
+    mock_reload.assert_not_awaited()
+
+
+@pytest.mark.usefixtures("read_yaml_intercept")
+def test_workplan_run_pre_run_with_nothing_to_prepare_exits_cleanly() -> None:
+    """Verify a pre-run that leaves no step to prepare reports it and exits 0."""
+    wp_uri = "https://raw.githubusercontent.com/CWorthy-ocean/C-Star/refs/heads/main/cstar/additional_files/templates/wp/workplan.yaml"
+    msg = "No step can be prepared in pre-run mode; nothing was scheduled."
+
+    with mock.patch(
+        "cstar.cli.workplan.run.build_and_run_dag",
+        mock.AsyncMock(side_effect=NoPreparableStepsError(msg)),
+    ):
+        runner = CliRunner()
+        result = runner.invoke(
+            app, ["--run-id", "12345", ARG_PRE_RUN, wp_uri], color=False
+        )
+
+    assert result.exit_code == 0, result.output
+    assert "nothing was scheduled" in " ".join(result.stdout.split())
+    assert "run scheduling has completed" not in result.stdout
+
+
+@pytest.mark.usefixtures("read_yaml_intercept")
+def test_workplan_run_resume_of_pre_run_workplan_fails_fast(
+    tmp_path: Path,
+    wp_templates_dir: Path,
+    mock_run_id: str,
+) -> None:
+    """Verify `--resume` on the reloaded workplan of a pre-run is a usage
+    error: resume would mark steps that are also marked for pre-run.
+    """
+    wp_path = wp_templates_dir / "workplan.yaml"
+    wp = deserialize(wp_path, Workplan)
+    live_steps = [
+        LiveStep.from_step(step, update={"workflow_overrides": {KEY_PRE_RUN: True}})
+        for step in wp.steps
+    ]
+    lwp = LiveWorkplan(**wp.model_dump(exclude={"steps"}), steps=live_steps)
+    trx_path = tmp_path / f"live-{wp_path.name}"
+    assert serialize(trx_path, lwp)
+
+    run = WorkplanRun(
+        workplan_path=wp_path,
+        trx_workplan_path=trx_path,
+        output_path=tmp_path,
+        run_id=mock_run_id,
+    )
+
+    with (
+        mock.patch(
+            "cstar.cli.workplan.run.handle_run_reloading",
+            mock.AsyncMock(return_value=run),
+        ),
+        mock.patch("cstar.cli.workplan.run.run_dag", mock.AsyncMock()) as mock_run_dag,
+        mock.patch(
+            "cstar.cli.workplan.run.apply_resume_overrides", mock.AsyncMock()
+        ) as mock_apply_resume,
+    ):
+        runner = CliRunner()
+        result = runner.invoke(app, ["--run-id", mock_run_id, ARG_RESUME], color=False)
+
+    assert result.exit_code == 2
+    assert "is a pre-run" in " ".join(result.output.replace("│", " ").split())
+    mock_apply_resume.assert_not_awaited()
+    mock_run_dag.assert_not_awaited()

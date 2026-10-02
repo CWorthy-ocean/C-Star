@@ -355,6 +355,7 @@ class LocalLauncher(Launcher[LocalHandle]):
                     run_id=run_id,
                     start_at=create_time,
                     status=Status.Submitted,
+                    pre_run=step.pre_run,
                 )
 
                 handle.process = local_process
@@ -482,7 +483,9 @@ class LocalLauncher(Launcher[LocalHandle]):
 
         if prior_handle:
             last_status = await LocalLauncher.query_status(prior_handle)
-            reuse_prior = resolve_prior_attempt(live_step, last_status)
+            reuse_prior = resolve_prior_attempt(
+                live_step, last_status, prior_pre_run=prior_handle.pre_run
+            )
 
         if reuse_prior and prior_handle:
             handle = prior_handle

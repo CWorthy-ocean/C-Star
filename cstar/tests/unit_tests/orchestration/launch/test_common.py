@@ -4,11 +4,17 @@ from pathlib import Path
 
 import pytest
 
+from cstar.base.exceptions import CstarExpectationFailed
 from cstar.orchestration.launch.common import (
     build_attempt_log_header,
     resolve_prior_attempt,
 )
-from cstar.orchestration.models import KEY_CLOBBER, KEY_RESUME, Application
+from cstar.orchestration.models import (
+    KEY_CLOBBER,
+    KEY_PRE_RUN,
+    KEY_RESUME,
+    Application,
+)
 from cstar.orchestration.orchestration import LiveStep, Status
 
 
@@ -17,6 +23,7 @@ def _live_step(
     *,
     clobber: bool = False,
     resume: bool = False,
+    pre_run: bool = False,
 ) -> LiveStep:
     bp_path = tmp_path / "blueprint.yaml"
     bp_path.touch()
@@ -26,6 +33,8 @@ def _live_step(
         overrides[KEY_CLOBBER] = True
     if resume:
         overrides[KEY_RESUME] = True
+    if pre_run:
+        overrides[KEY_PRE_RUN] = True
 
     return LiveStep(
         name="test step",
@@ -90,6 +99,91 @@ def test_resolve_prior_attempt(
 
     assert reuse is exp_reuse
     assert step.workflow_overrides.get(KEY_CLOBBER, False) is exp_clobber_set
+
+
+@pytest.mark.parametrize(
+    (
+        "prior_status",
+        "prior_pre_run",
+        "step_pre_run",
+        "clobber",
+        "exp_reuse",
+        "exp_resume_set",
+        "exp_clobber_set",
+    ),
+    [
+        pytest.param(
+            Status.Done, True, False, False, False, True, False, id="attach-to-pre-run"
+        ),
+        pytest.param(
+            Status.Done, True, True, False, True, False, False, id="pre-run-repeated"
+        ),
+        pytest.param(
+            Status.Done, True, False, True, False, False, True, id="pre-run-clobbered"
+        ),
+        pytest.param(
+            Status.Done, False, False, False, True, False, False, id="not-a-pre-run"
+        ),
+        pytest.param(
+            Status.Failed, True, False, False, False, False, True, id="failed-pre-run"
+        ),
+        pytest.param(
+            Status.Failed,
+            True,
+            True,
+            False,
+            False,
+            False,
+            True,
+            id="failed-pre-run-again",
+        ),
+    ],
+)
+def test_resolve_prior_attempt_pre_run(
+    tmp_path: Path,
+    prior_status: Status,
+    prior_pre_run: bool,
+    step_pre_run: bool,
+    clobber: bool,
+    exp_reuse: bool,
+    exp_resume_set: bool,
+    exp_clobber_set: bool,
+) -> None:
+    """Verify a completed pre-run is attached to (resume) by a real run, reused
+    by a repeated pre-run, and that failed or ordinary priors behave as before.
+    """
+    step = _live_step(tmp_path, clobber=clobber, pre_run=step_pre_run)
+
+    reuse = resolve_prior_attempt(step, prior_status, prior_pre_run=prior_pre_run)
+
+    assert reuse is exp_reuse
+    assert step.workflow_overrides.get(KEY_RESUME, False) is exp_resume_set
+    assert step.workflow_overrides.get(KEY_CLOBBER, False) is exp_clobber_set
+
+
+@pytest.mark.parametrize("prior_status", [Status.Submitted, Status.Running])
+def test_resolve_prior_attempt_pre_run_in_progress_fails_loudly(
+    tmp_path: Path, prior_status: Status
+) -> None:
+    """A real run must not adopt a pre-run that is still in progress: the step
+    would later read Done without the model ever launching.
+    """
+    step = _live_step(tmp_path)
+
+    with pytest.raises(CstarExpectationFailed, match="still"):
+        resolve_prior_attempt(step, prior_status, prior_pre_run=True)
+
+    assert KEY_RESUME not in step.workflow_overrides
+
+
+def test_resolve_prior_attempt_pre_run_in_progress_clobbered(tmp_path: Path) -> None:
+    """With clobber requested, an in-progress pre-run is simply resubmitted."""
+    step = _live_step(tmp_path, clobber=True)
+
+    reuse = resolve_prior_attempt(step, Status.Running, prior_pre_run=True)
+
+    assert reuse is False
+    assert KEY_RESUME not in step.workflow_overrides
 
 
 @pytest.mark.parametrize(

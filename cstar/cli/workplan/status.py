@@ -50,12 +50,13 @@ def status(
         print("An unknown run-id was supplied.")
         return
 
-    launcher = get_launcher()
     wp_path = run.trx_workplan_path
 
     try:
         workplan = deserialize(wp_path, LiveWorkplan)
 
+        # a pre-run's steps are local processes, whatever the system scheduler
+        launcher = get_launcher(force_local=workplan.pre_run)
         planner = Planner(workplan)
         status = asyncio.run(load_run_state(run_id, launcher))
         lookup = get_status_detail_map(planner, status)

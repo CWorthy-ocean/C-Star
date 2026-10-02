@@ -30,6 +30,7 @@ from cstar.entrypoint.utils import (
     ARG_DIRECTIVES_URI_LONG,
     ARG_LOGLEVEL_LONG,
     ARG_LOGLEVEL_SHORT,
+    ARG_PRE_RUN,
     ARG_RESUME,
     ARG_URI_LONG,
     ARG_URI_SHORT,
@@ -182,6 +183,21 @@ def test_create_parser_accepts_resume_flag() -> None:
 
     parsed_resume = parser.parse_args([ARG_URI_LONG, "blueprint.yaml", ARG_RESUME])
     assert parsed_resume.resume is True
+
+
+def test_create_parser_accepts_pre_run_flag() -> None:
+    """Verify the parser accepts `--pre-run` as a boolean flag, defaulting to
+    `False` when omitted.
+    """
+    parser = create_parser()
+
+    assert ARG_PRE_RUN in parser._option_string_actions
+
+    parsed_default = parser.parse_args([ARG_URI_LONG, "blueprint.yaml"])
+    assert parsed_default.pre_run is False
+
+    parsed_pre_run = parser.parse_args([ARG_URI_LONG, "blueprint.yaml", ARG_PRE_RUN])
+    assert parsed_pre_run.pre_run is True
 
 
 @pytest.mark.parametrize(
@@ -745,6 +761,60 @@ async def test_runner_on_start_resume_attaches_instead_of_setup(
     mock_simulation.build.assert_not_called()
     mock_simulation.pre_run.assert_not_called()
     mock_simulation.run.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_runner_on_start_pre_run_prepares_without_launching(
+    sim_runner: RomsMarblRunner,
+) -> None:
+    """A pre-run request stages, builds, partitions and prepares the launch,
+    then completes cleanly without launching or post-processing.
+    """
+    mock_simulation = mock.Mock(initial_conditions=None)
+    mock_simulation.prepare_launch.return_value = mock.Mock(
+        command="mpirun -n 1 ./roms cstar_generated_roms.nml", run_path=Path("run")
+    )
+    sim_runner.request.pre_run = True
+
+    with (
+        mock.patch.object(sim_runner, "_on_shutdown", mock.Mock()),
+        mock.patch.object(sim_runner, "run", mock.AsyncMock()) as mock_runner_run,
+        mock.patch.object(sim_runner, "simulation", mock_simulation),
+    ):
+        await sim_runner.execute()
+
+    assert [c[0] for c in mock_simulation.method_calls] == [
+        "setup",
+        "build",
+        "pre_run",
+        "prepare_launch",
+    ]
+    mock_simulation.run.assert_not_called()
+    mock_simulation.post_run.assert_not_called()
+    mock_runner_run.assert_not_called()
+    assert sim_runner.state.status == ExecutionStatus.COMPLETED
+    assert not sim_runner.result.errors
+
+
+@pytest.mark.asyncio
+async def test_runner_on_start_without_pre_run_launches(
+    sim_runner: RomsMarblRunner,
+) -> None:
+    """Without `pre_run` the launch is not prepared separately; `run` launches."""
+    mock_handler = mock.Mock(spec=ExecutionHandler, status=ExecutionStatus.COMPLETED)
+    mock_simulation = mock.Mock(
+        run=mock.Mock(return_value=mock_handler), initial_conditions=None
+    )
+
+    with (
+        mock.patch.object(sim_runner, "_on_shutdown", mock.Mock()),
+        mock.patch.object(sim_runner, "run", mock.AsyncMock()),
+        mock.patch.object(sim_runner, "simulation", mock_simulation),
+    ):
+        await sim_runner.execute()
+
+    mock_simulation.run.assert_called_once()
+    mock_simulation.prepare_launch.assert_not_called()
 
 
 def test_runner_init_resume_builds_simulation_from_resume_blueprint(

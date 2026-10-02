@@ -11,14 +11,12 @@ from pydantic import BaseModel, Field, computed_field
 
 from cstar.applications.core import get_application
 from cstar.base.env import (
-    ENV_CSTAR_CLI_DRY_RUN,
     ENV_CSTAR_CLOBBER_WORKING_DIR,
     FLAG_OFF,
     capture_environment,
     max_concurrency,
     unset,
 )
-from cstar.base.feature import is_flag_enabled
 from cstar.base.log import get_logger
 from cstar.base.utils import slugify
 from cstar.execution.file_system import StateDirectoryManager
@@ -26,6 +24,7 @@ from cstar.orchestration.launch.local import LocalLauncher
 from cstar.orchestration.launch.slurm import SlurmLauncher
 from cstar.orchestration.models import (
     KEY_CLOBBER,
+    KEY_PRE_RUN,
     KEY_RESUME,
     Step,
     UserDefinedVariables,
@@ -192,22 +191,32 @@ def get_status_detail_map(
     )
 
 
-def get_launcher() -> Launcher[t.Any]:
+def get_launcher(force_local: bool = False) -> Launcher[t.Any]:
     """Get the appropriate launcher for the current environment.
 
     See: `cstar.system.manager.CStarSystemManager` for more information.
+
+    Parameters
+    ----------
+    force_local : bool
+        Use the local launcher even when the system has a scheduler, as
+        required by the sentinels of a pre-run (which are local processes).
 
     Returns
     -------
     Launcher[t.Any]
     """
-    launcher = SlurmLauncher() if get_sysmgr().scheduler else LocalLauncher()
+    launcher = (
+        SlurmLauncher()
+        if get_sysmgr().scheduler and not force_local
+        else LocalLauncher()
+    )
     launcher.check_preconditions()
     return launcher
 
 
 def get_orchestrator(planner: Planner) -> Orchestrator:
-    launcher = get_launcher()
+    launcher = get_launcher(force_local=planner.workplan.pre_run)
 
     orchestrator = Orchestrator(planner, launcher)
     orchestrator.set_callback("status_changed", on_status_changed)
@@ -363,6 +372,7 @@ async def prepare_workplan(
     output_dir: Path,
     user_variables: Mapping[str, str] | None = None,
     clobber_steps: "Sequence[str] | None" = None,
+    pre_run: bool = False,
 ) -> tuple[Workplan, Path]:
     """Load the workplan and apply any applicable transforms.
 
@@ -377,6 +387,9 @@ async def prepare_workplan(
     clobber_steps : Sequence[str] | None
         Names or safe_names of steps whose prior state should be cleared and
         re-executed, or `all` to target every step.
+    pre_run : bool
+        Mark every step to perform its pre-launch stages and stop. Unlike
+        clobber, this is persisted with the prepared workplan.
 
     Returns
     -------
@@ -386,7 +399,8 @@ async def prepare_workplan(
     Raises
     ------
     ValueError
-        If the expected and provided user variables are not in agreement.
+        If the expected and provided user variables are not in agreement, or
+        a step requests pre-run on an application that does not support it.
     """
     wp_orig = await asyncio.to_thread(deserialize, wp_path, Workplan)
 
@@ -418,6 +432,9 @@ async def prepare_workplan(
     wp = transformer.apply()
 
     apply_clobber_overrides(wp, clobber_steps)
+    check_pre_run_support(wp)
+    if pre_run:
+        apply_pre_run_overrides(wp)
 
     # inline blueprints are written to disk only for a real run, not for `check`
     materialized = await asyncio.to_thread(materialize_inline_blueprints, wp.steps)
@@ -517,12 +534,6 @@ class ExecutiveRunSummary(BaseModel):
         title="Step details",
     )
     """An executive summary for each step in the run."""
-    dry_run: bool = Field(
-        default=False,
-        description="Flag indicating a planning-only run was requested.",
-        title="Dry-run only",
-    )
-    """Flag indicating a planning-only run was requested."""
 
     @computed_field(
         description="The directory where c-star state information will be stored.",
@@ -591,7 +602,6 @@ class ExecutiveRunSummary(BaseModel):
             source_workplan=str(run.workplan_path),
             final_workplan=str(run.trx_workplan_path),
             steps=step_summaries,
-            dry_run=is_flag_enabled(ENV_CSTAR_CLI_DRY_RUN),
         )
 
 
@@ -715,6 +725,148 @@ def apply_clobber_overrides(
         log.warning(msg)
 
 
+class NoPreparableStepsError(Exception):
+    """Raised when pre-run mode leaves no step in the workplan to prepare."""
+
+
+def check_pre_run_support(wp: Workplan) -> None:
+    """Fail fast when a step requests pre-run on an unsupporting application.
+
+    Only the `pre_run` override as written on the steps is checked, so run this
+    before `apply_pre_run_overrides`.
+
+    Parameters
+    ----------
+    wp : Workplan
+        The workplan to check.
+
+    Raises
+    ------
+    ValueError
+        If any step requests pre-run on an application that does not declare
+        `ApplicationDefinition.pre_runnable`; every such step is named.
+    """
+    unsupported = [
+        f"{step.name!r} ({step.application})"
+        for step in wp.steps
+        if step.pre_run and not get_application(step.application).pre_runnable
+    ]
+    if unsupported:
+        msg = (
+            f"Step(s) {', '.join(unsupported)} request {KEY_PRE_RUN!r} but their "
+            "application does not support it."
+        )
+        raise ValueError(msg)
+
+
+def apply_pre_run_overrides(wp: Workplan) -> None:
+    """Mark every step in the workplan to perform its pre-launch stages only.
+
+    Like `apply_clobber_overrides`, this mutates the steps' `workflow_overrides`
+    in place; unlike it, the caller persists the result, so the prepared
+    workplan records that the run was a pre-run.
+
+    Parameters
+    ----------
+    wp : Workplan
+        The workplan whose steps should be marked for pre-run.
+    """
+    for step in wp.steps:
+        step.workflow_overrides[KEY_PRE_RUN] = True
+
+
+def _unpreparable_reason(step: Step) -> str:
+    """Return why a pre-run cannot prepare a step, or an empty string if it can."""
+    app = get_application(step.application)
+    if not app.pre_runnable:
+        return "application does not support --pre-run"
+    if step.is_deferred:
+        return "blueprint is produced by another step"
+
+    directives = {d.key(): d for d in app.directives}
+    if any(
+        directives[key].referenced_steps(config)
+        for key, config in step.directives.items()
+        if key in directives and isinstance(config, Mapping)
+    ):
+        return "directive references another step's output"
+    return ""
+
+
+def prune_unpreparable_steps(wp: Workplan) -> tuple[Workplan, dict[str, list[str]]]:
+    """Drop the steps a pre-run cannot prepare ahead of the rest of the plan.
+
+    A step is unpreparable when its application does not support pre-run, its
+    blueprint is deferred to another step, or one of its directives consumes
+    another step's output; none of those exist before the upstream steps run.
+    Names of dropped steps are removed from the survivors' `depends_on`.
+
+    The pruned workplan is for planning only and is never persisted. It may have
+    no steps, which `Workplan` would otherwise reject: callers must check.
+
+    Parameters
+    ----------
+    wp : Workplan
+        The workplan to prune.
+
+    Returns
+    -------
+    tuple[Workplan, dict[str, list[str]]]
+        The workplan without the unpreparable steps, and the names of the
+        dropped steps keyed by the reason they were dropped.
+    """
+    reasons: dict[str, list[str]] = {}
+    for step in wp.steps:
+        if reason := _unpreparable_reason(step):
+            reasons.setdefault(reason, []).append(step.name)
+
+    dropped = {name for names in reasons.values() for name in names}
+    if not dropped:
+        return wp, reasons
+
+    kept = [
+        step.model_copy(
+            update={"depends_on": [d for d in step.depends_on if d not in dropped]}
+        )
+        for step in wp.steps
+        if step.name not in dropped
+    ]
+    return wp.model_copy(update={"steps": kept}), reasons
+
+
+def build_planner(wp: Workplan) -> Planner:
+    """Plan a workplan, dropping the steps a pre-run cannot prepare.
+
+    Parameters
+    ----------
+    wp : Workplan
+        The workplan to plan.
+
+    Returns
+    -------
+    Planner
+
+    Raises
+    ------
+    NoPreparableStepsError
+        If the workplan is a pre-run and none of its steps can be prepared.
+    """
+    if wp.pre_run:
+        wp, reasons = prune_unpreparable_steps(wp)
+        for reason, names in reasons.items():
+            msg = (
+                f"Skipping {len(names)} step(s) in pre-run mode ({reason}): "
+                f"{', '.join(names)}"
+            )
+            log.info(msg)
+
+        if not wp.steps:
+            msg = "No step can be prepared in pre-run mode; nothing was scheduled."
+            raise NoPreparableStepsError(msg)
+
+    return Planner(workplan=wp)
+
+
 async def apply_resume_overrides(
     wp: Workplan, run_id: str, launcher: Launcher[ProcessHandle]
 ) -> list[str]:
@@ -828,6 +980,7 @@ async def build_dag(
     run_id: str = "",
     user_variables: Mapping[str, str] | None = None,
     clobber_steps: "Sequence[str] | None" = None,
+    pre_run: bool = False,
 ) -> tuple[Planner, Path]:
     """Execute the steps in the workplan.
 
@@ -843,12 +996,20 @@ async def build_dag(
         Names or safe_names of steps whose prior state should be cleared and
         re-executed, or `all` to target every step, as supplied via
         `--clobber`.
+    pre_run : bool
+        Prepare every step without launching its model, as supplied via
+        `--pre-run`; steps that cannot be prepared are skipped.
 
     Returns
     -------
     tuple[Planner, Path]
         The planner built from the prepared workplan, and the path to the
         workplan after any transformations were applied.
+
+    Raises
+    ------
+    NoPreparableStepsError
+        If `pre_run` leaves no step to prepare.
     """
     if run_id:
         run_id = slugify(run_id)
@@ -859,9 +1020,9 @@ async def build_dag(
 
     check_environment()
     wp, prepared_wp_path = await prepare_workplan(
-        wp_path, output_dir, user_variables, clobber_steps
+        wp_path, output_dir, user_variables, clobber_steps, pre_run
     )
-    planner = Planner(workplan=wp)
+    planner = build_planner(wp)
 
     return planner, prepared_wp_path
 
@@ -872,7 +1033,6 @@ async def run_dag(
     run_id: str,
     planner: Planner,
     user_variables: Mapping[str, str] | None = None,
-    dry_run: bool = False,
 ) -> WorkplanRun:
     """Execute the steps in the workplan.
 
@@ -888,9 +1048,6 @@ async def run_dag(
         The planner to execute
     user_variables : NamedConfiguration | None
         User-provided key-value pairs for use during templating.
-    dry_run : bool
-        If set to `true`, the execution plan will be built and persisted to disk
-        but not executed.
 
     Returns
     -------
@@ -911,15 +1068,9 @@ async def run_dag(
         metadata={KEY_RUN_NAME: planner.workplan.name},
     )
 
-    if not dry_run:
-        _ = await TrackingRepository().put_workplan_run(wp_run)
+    _ = await TrackingRepository().put_workplan_run(wp_run)
 
     orchestrator = get_orchestrator(planner)
-
-    if dry_run:
-        msg = f"Dry run complete. Prepared workplan location: {trx_wp_path}"
-        log.debug(msg)
-        return wp_run
 
     # schedule the tasks without waiting for completion
     await process_plan(orchestrator, RunMode.Schedule)
@@ -930,8 +1081,8 @@ async def build_and_run_dag(
     wp_path: Path,
     run_id: str = "",
     user_variables: Mapping[str, str] | None = None,
-    dry_run: bool = False,
     clobber_steps: "Sequence[str] | None" = None,
+    pre_run: bool = False,
 ) -> WorkplanRun:
     """Execute the steps in the workplan.
 
@@ -945,24 +1096,30 @@ async def build_and_run_dag(
         The path to the output directory.
     user_variables : NamedConfiguration | None
         User-provided key-value pairs for use during templating.
-    dry_run : bool
-        If set to `true`, the execution plan will be built and persisted to disk
-        but not executed.
     clobber_steps : Sequence[str] | None
         Names or safe_names of steps whose prior state should be cleared and
         re-executed, or `all` to target every step, as supplied via
         `--clobber`.
+    pre_run : bool
+        Prepare every step without launching its model, as supplied via
+        `--pre-run`.
 
     Returns
     -------
     WorkplanRun
         The persisted record describing the run.
+
+    Raises
+    ------
+    NoPreparableStepsError
+        If `pre_run` leaves no step to prepare.
     """
     planner, prepared_wp_path = await build_dag(
         wp_path,
         run_id,
         user_variables=user_variables,
         clobber_steps=clobber_steps,
+        pre_run=pre_run,
     )
     return await run_dag(
         wp_path,
@@ -970,5 +1127,4 @@ async def build_and_run_dag(
         run_id,
         planner,
         user_variables=user_variables,
-        dry_run=dry_run,
     )

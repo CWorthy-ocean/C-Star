@@ -222,6 +222,8 @@ class ProcessHandle(BaseModel):
     """The launcher used to launch the process."""
     status: Status = Status.Unsubmitted
     """The current status of the task."""
+    pre_run: bool = Field(default=False)
+    """Whether the attempt this handle tracks ran in pre-run mode (prepared without launching the model)."""
 
     @property
     def safe_name(self) -> str:

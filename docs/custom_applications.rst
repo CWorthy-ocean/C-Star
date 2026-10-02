@@ -150,6 +150,14 @@ starting fresh, sets ``resumable = True`` on its `ApplicationDefinition` and hon
 ``cstar blueprint run`` (or a workplan resume) reach that application; otherwise the
 CLI rejects the flag before the runner is ever started.
 
+Likewise, an application that can perform every stage before its model launch and
+stop sets ``pre_runnable = True``. Its `BlueprintRunner` then honours
+`RunnerRequest.pre_run`: it performs every pre-launch stage, reports a completed
+state, launches nothing and skips post-run. Only then does ``--pre-run`` on
+``cstar blueprint run`` or ``cstar workplan run`` reach that application. Otherwise
+the CLI rejects the flag for a blueprint run, and a workplan pre-run skips the
+application's steps and reports why.
+
 Tying it Together
 -----------------
 

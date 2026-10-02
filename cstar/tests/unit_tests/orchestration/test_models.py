@@ -12,6 +12,8 @@ from cstar.applications.hello_world import HelloWorldBlueprint
 from cstar.base.env import ENV_CSTAR_DATA_HOME
 from cstar.execution.file_system import StateDirectoryManager
 from cstar.orchestration.models import (
+    KEY_PRE_RUN,
+    KEY_RESUME,
     DeferredBlueprintRef,
     InlineBlueprintRef,
     KeyValueStore,
@@ -1722,3 +1724,55 @@ def test_blueprint_yaml_includes_set_working_dir(
     content = model_to_yaml(bp)
 
     assert f"working_dir: {tmp_path}" in content
+
+
+def _pre_run_step(blueprint_path: Path, name: str, pre_run: bool) -> Step:
+    """Build a step whose `pre_run` override is set or unset."""
+    return Step(
+        name=name,
+        application="hello_world",
+        blueprint=blueprint_path,
+        workflow_overrides={KEY_PRE_RUN: True} if pre_run else {},
+    )
+
+
+@pytest.mark.parametrize("pre_run", [True, False])
+def test_step_pre_run_reads_workflow_override(
+    fake_blueprint_path: Path, pre_run: bool
+) -> None:
+    """Verify `Step.pre_run` reflects the override and is off by default."""
+    step = _pre_run_step(fake_blueprint_path, "step", pre_run)
+
+    assert step.pre_run is pre_run
+
+
+def test_step_rejects_pre_run_with_resume(fake_blueprint_path: Path) -> None:
+    """Verify a step cannot be both prepared without launching and resumed."""
+    with pytest.raises(ValidationError, match="mutually exclusive"):
+        Step(
+            name="step",
+            application="hello_world",
+            blueprint=fake_blueprint_path,
+            workflow_overrides={KEY_PRE_RUN: True, KEY_RESUME: True},
+        )
+
+
+@pytest.mark.parametrize(
+    ("flags", "expected"),
+    [
+        pytest.param([True, True], True, id="all"),
+        pytest.param([True, False], False, id="some"),
+        pytest.param([False, False], False, id="none"),
+    ],
+)
+def test_workplan_pre_run_requires_every_step(
+    fake_blueprint_path: Path, flags: list[bool], expected: bool
+) -> None:
+    """Verify `Workplan.pre_run` is true only when every step is a pre-run step."""
+    steps = [
+        _pre_run_step(fake_blueprint_path, f"step-{i}", flag)
+        for i, flag in enumerate(flags)
+    ]
+    plan = Workplan(name="test-plan", description="test-description", steps=steps)
+
+    assert plan.pre_run is expected

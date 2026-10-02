@@ -11,8 +11,9 @@ single owner and test surface.
 import typing as t
 from pathlib import Path
 
+from cstar.base.exceptions import CstarExpectationFailed
 from cstar.base.log import get_logger
-from cstar.orchestration.models import KEY_CLOBBER
+from cstar.orchestration.models import KEY_CLOBBER, KEY_RESUME
 from cstar.orchestration.orchestration import Status
 
 if t.TYPE_CHECKING:
@@ -21,7 +22,9 @@ if t.TYPE_CHECKING:
 log = get_logger(__name__)
 
 
-def resolve_prior_attempt(step: "LiveStep", prior_status: Status) -> bool:
+def resolve_prior_attempt(
+    step: "LiveStep", prior_status: Status, *, prior_pre_run: bool = False
+) -> bool:
     """Decide whether a step's persisted prior handle should be reused.
 
     Parameters
@@ -29,19 +32,52 @@ def resolve_prior_attempt(step: "LiveStep", prior_status: Status) -> bool:
     step : LiveStep
         The step being (re-)launched. When the prior attempt failed and the
         step is not marked for resume, this mutates `step.workflow_overrides`
-        to force a clobbered re-run.
+        to force a clobbered re-run; when the prior attempt was a completed
+        pre-run and this launch is not, it marks the step for resume so the
+        step attaches to the prepared working directory.
     prior_status : Status
         The freshly-queried status of the step's persisted prior handle.
+    prior_pre_run : bool
+        Whether the prior attempt ran in pre-run mode (`ProcessHandle.pre_run`).
 
     Returns
     -------
     bool
         `True` when the prior handle should be adopted in place of
         submitting a new one.
+
+    Raises
+    ------
+    CstarExpectationFailed
+        If the prior attempt is a pre-run that is still in progress and this
+        launch is a real run: adopting it would report the step done without
+        the model ever launching.
     """
     reuse: bool
 
-    if Status.is_failure(prior_status):
+    if prior_pre_run and not step.pre_run and Status.is_in_progress(prior_status):
+        if not step.clobber:
+            msg = (
+                f"The pre-run of step {step.name!r} is still {prior_status.name}; "
+                "wait for it to finish, or re-run with --clobber to start over."
+            )
+            raise CstarExpectationFailed(msg)
+        reuse = False
+        log.debug("Prior pre-run of %r in progress; clobbering.", step.name)
+    elif (
+        prior_status is Status.Done
+        and prior_pre_run
+        and not step.pre_run
+        and not step.clobber
+    ):
+        log.debug(
+            "Prior run of %r was a pre-run; attaching to its prepared working "
+            "directory (--resume).",
+            step.name,
+        )
+        step.workflow_overrides[KEY_RESUME] = True
+        reuse = False
+    elif Status.is_failure(prior_status):
         if step.resume:
             log.debug(
                 "Prior run of %r in %r state; resuming in place (--resume).",

@@ -355,6 +355,7 @@ class SlurmLauncher(Launcher[SlurmHandle]):
                 pid=str(job.id),
                 name=step.name,
                 run_id=run_id,
+                pre_run=step.pre_run,
             )
 
         msg = f"Unable to retrieve job ID for step `{step.name}`. Job `{job}` failed"
@@ -428,9 +429,16 @@ class SlurmLauncher(Launcher[SlurmHandle]):
         reuse_prior: bool = False
 
         if prior_handle:
-            # use persisted task as sentinel only; query SLURM for up-to-date status
-            last_status = await SlurmLauncher.query_status(prior_handle)
-            reuse_prior = resolve_prior_attempt(step, last_status)
+            if prior_handle.pre_run:
+                # a pre-run ran in a local process: its pid is no SLURM job id,
+                # so the persisted status is the only valid one
+                last_status = prior_handle.status
+            else:
+                # use persisted task as sentinel only; query SLURM for up-to-date status
+                last_status = await SlurmLauncher.query_status(prior_handle)
+            reuse_prior = resolve_prior_attempt(
+                step, last_status, prior_pre_run=prior_handle.pre_run
+            )
 
         if not reuse_prior or not prior_handle:
             dependencies = await cls._prune_completed_dependencies(dependencies)

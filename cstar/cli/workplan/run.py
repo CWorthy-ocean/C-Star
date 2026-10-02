@@ -8,7 +8,6 @@ import typer
 from pydantic import BaseModel, ValidationError
 
 from cstar.base.env import (
-    ENV_CSTAR_CLI_DRY_RUN,
     ENV_CSTAR_LOG_LEVEL,
     ENV_CSTAR_RUNID,
 )
@@ -22,7 +21,6 @@ from cstar.cli.common import (
     normalize_runid,
     present,
     set_env,
-    set_flag,
     update_loggers,
 )
 from cstar.cli.workplan.shared import (
@@ -35,10 +33,11 @@ from cstar.cli.workplan.shared import (
 from cstar.entrypoint.utils import (
     ARG_CLOBBER,
     ARG_CLOBBER_WORKPLAN_HELP,
-    ARG_DRY_RUN,
     ARG_LOGLEVEL_HELP,
     ARG_LOGLEVEL_LONG,
     ARG_LOGLEVEL_SHORT,
+    ARG_PRE_RUN,
+    ARG_PRE_RUN_WORKPLAN_HELP,
     ARG_RESUME,
     ARG_RESUME_WORKPLAN_HELP,
     ARG_VAR_HELP,
@@ -53,16 +52,18 @@ from cstar.execution.file_system import local_copy
 from cstar.orchestration.dag_runner import (
     ExecutiveRunSummary,
     ExecutiveStepSummary,
+    NoPreparableStepsError,
     apply_clobber_overrides,
     apply_resume_overrides,
     build_and_run_dag,
+    build_planner,
     check_clobber_targets,
     get_launcher,
     original_workplan_backup,
     run_dag,
 )
 from cstar.orchestration.models import BlueprintCore, Step, Workplan
-from cstar.orchestration.orchestration import LiveWorkplan, Planner, ProcessHandle
+from cstar.orchestration.orchestration import LiveWorkplan, ProcessHandle
 from cstar.orchestration.serialization import (
     PersistenceMode,
     deserialize,
@@ -92,6 +93,10 @@ Pass `--resume` to re-enter a prior run and resume its failed steps in place,
 rather than re-running them from scratch. Identify the run with `--run-id`, or
 with the workplan path it was started from (the run-id is derived from the
 workplan name exactly as on the first run; the file must be unchanged since).
+
+Pass `--pre-run` to perform every stage before the model launch for each step
+(locally, even on scheduler systems) without launching any model. Re-run the
+workplan without `--pre-run` to attach to the prepared directories and launch.
 """
 
 CATEGORY_HEADER_COLOR: t.Final[str] = "white"
@@ -166,8 +171,6 @@ def get_run_summary_display(summary: ExecutiveRunSummary) -> str:
     content_delimiter = "#" * 78
 
     header = f"{summary.workplan_name!r} Run Summary"
-    if summary.dry_run:
-        header = f"{header} - DRY-RUN ONLY"
     run_header, run_underline = _hdr(header, CATEGORY_HEADER_COLOR)
     section_header_steps, section_del_steps = _hdr(
         _runft("steps"), CATEGORY_HEADER_COLOR
@@ -568,15 +571,6 @@ def run(
             is_eager=True,
         ),
     ] = "",
-    dry_run: t.Annotated[
-        bool,
-        typer.Option(
-            ARG_DRY_RUN,
-            help="Set this flag to generate an execution plan without executing the workplan.",
-            envvar=ENV_CSTAR_CLI_DRY_RUN,
-            callback=set_flag(ENV_CSTAR_CLI_DRY_RUN),
-        ),
-    ] = False,
     log_level: t.Annotated[
         LogLevelChoices,
         typer.Option(
@@ -599,6 +593,10 @@ def run(
         bool,
         typer.Option(ARG_RESUME, help=ARG_RESUME_WORKPLAN_HELP),
     ] = False,
+    pre_run: t.Annotated[
+        bool,
+        typer.Option(ARG_PRE_RUN, help=ARG_PRE_RUN_WORKPLAN_HELP),
+    ] = False,
 ) -> None:
     """Execute a workplan.
 
@@ -612,6 +610,7 @@ def run(
         msg
         for condition, msg in (
             (resume and clobber, f"{ARG_RESUME} cannot be combined with {ARG_CLOBBER}"),
+            (resume and pre_run, f"{ARG_RESUME} cannot be combined with {ARG_PRE_RUN}"),
             (
                 resume and (user_variables or user_variables_path is not None),
                 (
@@ -627,6 +626,13 @@ def run(
 
     reload = resume or not path
 
+    if pre_run and reload:
+        msg = (
+            "A workplan path is required: reloading a run by --run-id replays "
+            "its recorded plan as-is"
+        )
+        raise typer.BadParameter(msg, param_hint=ARG_PRE_RUN)
+
     if reload:
         wp_run = asyncio.run(handle_run_reloading(run_id))
         if path:
@@ -641,10 +647,17 @@ def run(
 
             if reload:
                 wp = deserialize(wp_path, LiveWorkplan)
+                if resume and wp.pre_run:
+                    msg = (
+                        f"Run {run_id!r} is a pre-run; retry its failed steps with "
+                        f"`cstar workplan run <workplan> {ARG_PRE_RUN}` instead"
+                    )
+                    raise typer.BadParameter(msg, param_hint=ARG_RESUME)
+                pre_run = wp.pre_run
                 apply_clobber_overrides(wp, clobber)
                 if resume:
                     asyncio.run(apply_resume_overrides(wp, run_id, get_launcher()))
-                planner = Planner(wp)
+                planner = build_planner(wp)
 
                 wp_run = asyncio.run(
                     run_dag(
@@ -653,7 +666,6 @@ def run(
                         run_id,
                         planner,
                         user_variables=user_vars,
-                        dry_run=dry_run,
                     ),
                 )
             else:
@@ -662,8 +674,8 @@ def run(
                         wp_path,
                         run_id,
                         user_variables=user_vars,
-                        dry_run=dry_run,
                         clobber_steps=clobber,
+                        pre_run=pre_run,
                     ),
                 )
 
@@ -671,6 +683,9 @@ def run(
             console.print(get_run_summary_display(summary))
     except typer.BadParameter:
         raise
+    except NoPreparableStepsError as ex:
+        console.print(str(ex))
+        return
     except CstarExpectationFailed as ex:
         msg = f"An invalid request was made: {ex}"
         log.exception(msg)
@@ -686,9 +701,13 @@ def run(
         print(msg)
         raise typer.Exit(3) from ex
 
-    console.print(
-        f"{summary.workplan_name!r} {'dry-run' if dry_run else 'run scheduling'} has completed"
-    )
+    console.print(f"{summary.workplan_name!r} run scheduling has completed")
+    if pre_run:
+        console.print(
+            "Pre-run scheduled. Re-run "
+            f"`cstar workplan run {summary.source_workplan} --run-id {summary.run_id}` "
+            f"without {ARG_PRE_RUN} to attach to the prepared directories and launch."
+        )
 
 
 if __name__ == "__main__":

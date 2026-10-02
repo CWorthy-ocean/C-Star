@@ -114,6 +114,19 @@ class RomsMarblRunner(BlueprintRunner[RomsMarblBlueprint]):
             self.log.trace("Executing simulation pre-run")
             self.simulation.pre_run()
 
+            if self.request.pre_run:
+                plan = self.simulation.prepare_launch(job_name=self._job_cfg.job_name)
+                self.log.info(
+                    "Pre-run complete; the model was not launched. "
+                    "Prepared command: %s (in %s)",
+                    plan.command,
+                    plan.run_path,
+                )
+                # a terminal state stops the service before its event loop
+                # starts, so neither `run` nor post-run is reached
+                self.add_state(ExecutionStatus.COMPLETED)
+                return
+
         self.log.trace("Starting simulation.")
         self._handler = self.simulation.run(
             account_key=self._job_cfg.account_id,
@@ -197,7 +210,12 @@ def main() -> int:
     if args.directives:
         blueprint_uri = DirectiveConfig.apply_directives(args.directives, blueprint_uri)
 
-    request = RunnerRequest(blueprint_uri, RomsMarblBlueprint, resume=args.resume)
+    request = RunnerRequest(
+        blueprint_uri,
+        RomsMarblBlueprint,
+        resume=args.resume,
+        pre_run=args.pre_run,
+    )
     runner = RomsMarblRunner(request, service_cfg, job_cfg)
 
     try:

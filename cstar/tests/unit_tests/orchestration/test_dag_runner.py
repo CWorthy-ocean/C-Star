@@ -1,5 +1,6 @@
 import os
 import random
+import typing as t
 from collections.abc import AsyncGenerator
 from datetime import datetime
 from pathlib import Path
@@ -23,20 +24,29 @@ from cstar.execution.file_system import (
 from cstar.orchestration.dag_runner import (
     DagStatus,
     ExecutiveRunSummary,
+    NoPreparableStepsError,
     _ignore_ambient_clobber_env,
     apply_clobber_overrides,
+    apply_pre_run_overrides,
     apply_resume_overrides,
+    build_planner,
     check_clobber_dependents,
     check_clobber_targets,
+    check_pre_run_support,
+    get_launcher,
+    get_orchestrator,
     get_status_detail_map,
     load_run_state,
     on_status_changed,
     original_workplan_backup,
     prepare_workplan,
+    prune_unpreparable_steps,
 )
 from cstar.orchestration.launch.local import LocalHandle, LocalLauncher
+from cstar.orchestration.launch.slurm import SlurmLauncher
 from cstar.orchestration.models import (
     KEY_CLOBBER,
+    KEY_PRE_RUN,
     KEY_RESUME,
     Application,
     BlueprintState,
@@ -953,3 +963,296 @@ async def test_on_status_changed_terminal_persists_size_and_sentinel(
     assert sentinel in persisted.sentinels
     # the object handed to the hook was not the one persisted
     assert status_change_workplan_run.sentinels == set()
+
+
+def _roms_step(
+    tmp_path: Path,
+    name: str,
+    depends_on: list[str] | None = None,
+    directives: dict[str, t.Any] | None = None,
+) -> Step:
+    """Build a `Step` for an application that supports pre-run."""
+    bp_path = tmp_path / f"{name}.yaml"
+    bp_path.touch()
+    return Step(
+        name=name,
+        application=Application.ROMS_MARBL,
+        blueprint=bp_path,
+        depends_on=depends_on or [],
+        directives=directives or {},
+    )
+
+
+@pytest.mark.usefixtures("read_yaml_intercept")
+async def test_prepare_workplan_persists_pre_run_overrides(
+    tmp_path: Path,
+    wp_templates_dir: Path,
+) -> None:
+    """Verify `pre_run` marks every step and, unlike clobber, the marks are
+    persisted in the transformed workplan so the run can be recognized later.
+    """
+    wp_path = wp_templates_dir / "workplan.yaml"
+
+    wp, prepared_path = await prepare_workplan(
+        wp_path, tmp_path / "output", pre_run=True
+    )
+    persisted = deserialize(prepared_path, LiveWorkplan)
+
+    assert all(step.pre_run for step in wp.steps)
+    assert all(step.pre_run for step in persisted.steps)
+    assert persisted.pre_run
+
+
+@pytest.mark.usefixtures("read_yaml_intercept")
+async def test_prepare_workplan_without_pre_run_leaves_steps_unmarked(
+    tmp_path: Path,
+    wp_templates_dir: Path,
+) -> None:
+    """Verify a plain run does not mark any step for pre-run."""
+    wp, prepared_path = await prepare_workplan(
+        wp_templates_dir / "workplan.yaml", tmp_path / "output"
+    )
+
+    assert not any(step.pre_run for step in wp.steps)
+    assert not deserialize(prepared_path, LiveWorkplan).pre_run
+
+
+def test_apply_pre_run_overrides_marks_every_step(tmp_path: Path) -> None:
+    """Verify every step receives the pre-run override."""
+    wp = _make_workplan([_make_step(tmp_path, "A"), _make_step(tmp_path, "B")])
+
+    apply_pre_run_overrides(wp)
+
+    assert [s.workflow_overrides[KEY_PRE_RUN] for s in wp.steps] == [True, True]
+
+
+def test_check_pre_run_support_reports_every_unsupported_step(
+    tmp_path: Path,
+) -> None:
+    """Verify one error names every step that requests pre-run on an
+    application without support, and leaves supported steps out.
+    """
+    unsupported = [
+        Step(
+            name=name,
+            application=Application.HELLO_WORLD,
+            blueprint=_make_step(tmp_path, name).blueprint_path,
+            workflow_overrides={KEY_PRE_RUN: True},
+        )
+        for name in ("Hello A", "Hello B")
+    ]
+    supported = _roms_step(tmp_path, "Roms")
+    supported.workflow_overrides[KEY_PRE_RUN] = True
+    unmarked = _make_step(tmp_path, "Unmarked")
+    wp = _make_workplan([*unsupported, supported, unmarked])
+
+    with pytest.raises(ValueError, match="do(es)? not support") as exc_info:
+        check_pre_run_support(wp)
+
+    message = str(exc_info.value)
+    assert "'Hello A'" in message
+    assert "'Hello B'" in message
+    assert "Roms" not in message
+    assert "Unmarked" not in message
+
+
+@pytest.mark.usefixtures("read_yaml_intercept")
+async def test_prepare_workplan_pre_run_does_not_report_injected_overrides(
+    tmp_path: Path,
+) -> None:
+    """Verify the support guard looks at the workplan as written, so the
+    overrides injected by `pre_run=True` on unsupporting steps are not errors
+    (the steps are skipped later instead).
+    """
+    step = _make_step(tmp_path, "Hello")
+    wp_path = tmp_path / "hello.yaml"
+    serialize(wp_path, _make_workplan([step]))
+
+    wp, _ = await prepare_workplan(wp_path, tmp_path / "output", pre_run=True)
+
+    assert wp.steps[0].pre_run
+
+
+@pytest.mark.usefixtures("read_yaml_intercept")
+async def test_prepare_workplan_rejects_explicit_pre_run_on_unsupported_app(
+    tmp_path: Path,
+) -> None:
+    """Verify a pre-run override written in the workplan on an unsupporting
+    application fails fast at schedule time.
+    """
+    step = Step(
+        name="Hello",
+        application=Application.HELLO_WORLD,
+        blueprint=_make_step(tmp_path, "Hello").blueprint_path,
+        workflow_overrides={KEY_PRE_RUN: True},
+    )
+    wp_path = tmp_path / "hello.yaml"
+    serialize(wp_path, _make_workplan([step]))
+
+    with pytest.raises(ValueError, match="'Hello'"):
+        await prepare_workplan(wp_path, tmp_path / "output")
+
+
+def test_prune_unpreparable_steps_keeps_preparable_workplan_intact(
+    tmp_path: Path,
+) -> None:
+    """Verify nothing is dropped, and no copy is made, when every step can be
+    prepared.
+    """
+    wp = _make_workplan(
+        [_roms_step(tmp_path, "A"), _roms_step(tmp_path, "B", depends_on=["A"])]
+    )
+
+    pruned, reasons = prune_unpreparable_steps(wp)
+
+    assert pruned is wp
+    assert reasons == {}
+
+
+def test_prune_unpreparable_steps_drops_and_remaps(tmp_path: Path) -> None:
+    """Verify unsupported-application, deferred-blueprint and step-referencing
+    directive steps are dropped with their reasons, directives that reference
+    nothing are kept, and survivors lose dependencies on dropped steps.
+    """
+    producer = _roms_step(tmp_path, "Producer")
+    unsupported = _make_step(tmp_path, "Hello", depends_on=["Producer"])
+    deferred = Step.model_validate(
+        {
+            "name": "Deferred",
+            "application": Application.ROMS_MARBL,
+            "blueprint": {"from_step": "Producer", "filename": "generated.yaml"},
+            "depends_on": ["Producer"],
+        }
+    )
+    nested = _roms_step(
+        tmp_path,
+        "Nested",
+        depends_on=["Producer"],
+        directives={"nest-from": {"step": "Producer"}},
+    )
+    pathed = _roms_step(
+        tmp_path,
+        "Pathed",
+        depends_on=["Producer"],
+        directives={"continue-from": {"path": "prior/run"}},
+    )
+    survivor = _roms_step(
+        tmp_path, "Survivor", depends_on=["Producer", "Hello", "Nested", "Pathed"]
+    )
+    wp = _make_workplan([producer, unsupported, deferred, nested, pathed, survivor])
+
+    pruned, reasons = prune_unpreparable_steps(wp)
+
+    assert reasons == {
+        "application does not support --pre-run": ["Hello"],
+        "blueprint is produced by another step": ["Deferred"],
+        "directive references another step's output": ["Nested"],
+    }
+    assert [s.name for s in pruned.steps] == ["Producer", "Pathed", "Survivor"]
+    by_name = {s.name: s for s in pruned.steps}
+    assert by_name["Survivor"].depends_on == ["Producer", "Pathed"]
+    assert by_name["Pathed"].depends_on == ["Producer"]
+    # the source workplan is untouched
+    assert len(wp.steps) == 6
+    assert wp.steps[-1].depends_on == ["Producer", "Hello", "Nested", "Pathed"]
+
+
+def test_build_planner_prunes_pre_run_and_logs_one_line_per_reason(
+    tmp_path: Path,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Verify a pre-run workplan is planned without its unpreparable steps and
+    each reason is reported once with every affected step.
+    """
+    wp = _make_workplan(
+        [
+            _roms_step(tmp_path, "Roms"),
+            _make_step(tmp_path, "Hello A"),
+            _make_step(tmp_path, "Hello B"),
+        ]
+    )
+    apply_pre_run_overrides(wp)
+
+    with caplog.at_level("INFO"):
+        planner = build_planner(wp)
+
+    assert [s.name for s in planner.flatten()] == ["Roms"]
+    lines = [r.getMessage() for r in caplog.records if "pre-run mode" in r.getMessage()]
+    assert lines == [
+        "Skipping 2 step(s) in pre-run mode (application does not support "
+        "--pre-run): Hello A, Hello B"
+    ]
+
+
+def test_build_planner_does_not_prune_a_plain_workplan(tmp_path: Path) -> None:
+    """Verify only pre-run workplans are pruned."""
+    wp = _make_workplan([_roms_step(tmp_path, "Roms"), _make_step(tmp_path, "Hello")])
+
+    planner = build_planner(wp)
+
+    assert {s.name for s in planner.flatten()} == {"Roms", "Hello"}
+
+
+def test_build_planner_raises_when_nothing_can_be_prepared(tmp_path: Path) -> None:
+    """Verify a pre-run workplan with no preparable step is not planned."""
+    wp = _make_workplan([_make_step(tmp_path, "Hello")])
+    apply_pre_run_overrides(wp)
+
+    with pytest.raises(NoPreparableStepsError, match="nothing was scheduled"):
+        build_planner(wp)
+
+
+@pytest.mark.parametrize(
+    ("force_local", "exp_klass"),
+    [
+        pytest.param(True, LocalLauncher, id="forced-local"),
+        pytest.param(False, SlurmLauncher, id="scheduler"),
+    ],
+)
+def test_get_launcher_force_local(
+    force_local: bool, exp_klass: type[LocalLauncher | SlurmLauncher]
+) -> None:
+    """Verify `force_local` selects the local launcher even when the system has
+    a scheduler.
+    """
+    with (
+        mock.patch(
+            "cstar.system.manager.CStarSystemManager.scheduler",
+            mock.PropertyMock(return_value=mock.MagicMock()),
+        ),
+        mock.patch.object(SlurmLauncher, "check_preconditions"),
+    ):
+        launcher = get_launcher(force_local=force_local)
+
+    assert type(launcher) is exp_klass
+
+
+@pytest.mark.parametrize(
+    ("pre_run", "exp_klass"),
+    [
+        pytest.param(True, LocalLauncher, id="pre-run"),
+        pytest.param(False, SlurmLauncher, id="regular"),
+    ],
+)
+def test_get_orchestrator_uses_local_launcher_for_pre_run_workplan(
+    tmp_path: Path,
+    pre_run: bool,
+    exp_klass: type[LocalLauncher | SlurmLauncher],
+) -> None:
+    """Verify the orchestrator of a pre-run workplan runs locally on a system
+    with a scheduler, whether the workplan was just prepared or reloaded.
+    """
+    wp = _make_workplan([_roms_step(tmp_path, "Roms")])
+    if pre_run:
+        apply_pre_run_overrides(wp)
+
+    with (
+        mock.patch(
+            "cstar.system.manager.CStarSystemManager.scheduler",
+            mock.PropertyMock(return_value=mock.MagicMock()),
+        ),
+        mock.patch.object(SlurmLauncher, "check_preconditions"),
+    ):
+        orchestrator = get_orchestrator(Planner(wp))
+
+    assert type(orchestrator.launcher) is exp_klass

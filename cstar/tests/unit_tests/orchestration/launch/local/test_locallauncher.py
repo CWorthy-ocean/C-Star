@@ -7,13 +7,13 @@ from unittest import mock
 import pytest
 from psutil import NoSuchProcess
 
-from cstar.entrypoint.utils import ARG_RESUME
+from cstar.entrypoint.utils import ARG_PRE_RUN, ARG_RESUME
 from cstar.orchestration.launch.local import (
     LocalHandle,
     LocalLauncher,
     ProxiedRunRequestFormatter,
 )
-from cstar.orchestration.models import KEY_CLOBBER, KEY_RESUME
+from cstar.orchestration.models import KEY_CLOBBER, KEY_PRE_RUN, KEY_RESUME
 from cstar.orchestration.orchestration import LiveStep, RunRequest, Status, Workplan
 from cstar.orchestration.serialization import deserialize
 from cstar.orchestration.state import StateRepository
@@ -307,6 +307,71 @@ async def test_locallauncher_launch_failed_prior_with_resume_no_clobber(
     submitted_step = task.step
     assert submitted_step.workflow_overrides.get(KEY_CLOBBER, False) is False
     assert ARG_RESUME in submitted_step.script_path.read_text()
+
+
+@pytest.mark.parametrize("pre_run", [True, False])
+@pytest.mark.usefixtures("read_yaml_intercept")
+async def test_locallauncher_submit_records_pre_run_on_handle(
+    wp_templates_dir: Path,
+    mock_run_id: str,
+    pre_run: bool,
+) -> None:
+    """Verify the submitted handle records whether the step ran in pre-run mode,
+    and that the flag survives a round-trip through the sentinel file.
+    """
+    wp_path = wp_templates_dir / "single_step.yaml"
+    workplan = deserialize(wp_path, Workplan)
+    live_step = LiveStep.from_step(
+        workplan.steps[0],
+        update={"workflow_overrides": {KEY_PRE_RUN: True} if pre_run else {}},
+    )
+
+    fake_process = mock.Mock(pid=777777)
+    with mock.patch.object(subprocess, "Popen", return_value=fake_process):
+        handle = await LocalLauncher._submit(live_step, [])
+
+    assert handle.pre_run is pre_run
+    assert (ARG_PRE_RUN in live_step.script_path.read_text()) is pre_run
+
+    await StateRepository().put_sentinel(handle)
+    reloaded = await StateRepository().get_sentinel(live_step.name, LocalHandle)
+    assert reloaded is not None
+    assert reloaded.pre_run is pre_run
+
+
+@pytest.mark.usefixtures("read_yaml_intercept")
+async def test_locallauncher_launch_attaches_to_done_pre_run(
+    wp_templates_dir: Path,
+    mock_run_id: str,
+) -> None:
+    """Verify a completed pre-run prior handle leads a real (non pre-run) launch
+    to resubmit the step for resume, without clobber, so it attaches to the
+    prepared working directory.
+    """
+    wp_path = wp_templates_dir / "single_step.yaml"
+    workplan = deserialize(wp_path, Workplan)
+    live_step = LiveStep.from_step(workplan.steps[0])
+
+    prior_handle = LocalHandle(
+        pid="12345",
+        name=live_step.name,
+        run_id=mock_run_id,
+        start_at=datetime.datetime.now(tz=datetime.UTC),
+        status=Status.Done,
+        pre_run=True,
+    )
+    await StateRepository().put_sentinel(prior_handle)
+
+    fake_process = mock.Mock(pid=999999)
+    with mock.patch.object(subprocess, "Popen", return_value=fake_process):
+        task = await LocalLauncher.launch(live_step, [])
+
+    assert task.handle.pid != prior_handle.pid
+    assert task.handle.pre_run is False
+    assert task.step.workflow_overrides.get(KEY_CLOBBER, False) is False
+    script = task.step.script_path.read_text()
+    assert ARG_RESUME in script
+    assert ARG_PRE_RUN not in script
 
 
 @pytest.mark.usefixtures("read_yaml_intercept")

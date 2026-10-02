@@ -96,10 +96,11 @@ See :class:`cstar.orchestration.models.Step` for complete details on configuring
   ~cstar.orchestration.models.Step.workflow_overrides
   ~cstar.orchestration.models.Step.directives
 
-``workflow_overrides`` recognizes two keys: ``clobber`` (clear the step's prior
-state and re-execute it from scratch) and ``resume`` (continue the step's
-failed prior attempt in place instead). The two are mutually exclusive on a
-single step.
+``workflow_overrides`` recognizes three keys: ``clobber`` (clear the step's prior
+state and re-execute it from scratch), ``resume`` (continue the step's
+failed prior attempt in place instead) and ``pre_run`` (perform every stage
+before the model launch, then stop; see :ref:`workplan_pre_run`). ``resume``
+is mutually exclusive with both ``clobber`` and ``pre_run`` on a single step.
 
 Compute overrides
 ^^^^^^^^^^^^^^^^^
@@ -433,6 +434,60 @@ Execution
         path = Path("/path/to/my/workplan.yaml")
         await run_workplan(path, run_id="my-unique-id")
 
+
+.. _workplan_pre_run:
+
+Pre-running a workplan
+^^^^^^^^^^^^^^^^^^^^^^
+
+``--pre-run`` performs every stage before the model launch for each step --
+staging inputs, cloning and compiling the codebases, partitioning inputs
+(when ParallelIO is not in use) and generating and validating the namelist --
+and then exits successfully without launching ROMS. It catches start-up
+problems (missing or malformed inputs, compile failures, namelist errors)
+without waiting in a scheduler queue, and moves cloning and compilation out
+of the eventual allocation. Unlike ``cstar workplan check``, it is not free of
+side effects: it writes each step's full working directory, which can hold
+many GB of staged inputs.
+
+.. code-block:: console
+
+    cstar workplan run my_workplan.yaml --pre-run
+    cstar workplan run my_workplan.yaml
+
+The second command uses the same :term:`run ID` -- derived from the workplan
+``name`` as usual, or pass the same ``--run-id`` to both. The orchestrator
+records on each step that it was prepared; on the second command it
+re-launches those steps, which attach to the prepared directories, reuse the
+staged inputs, compiled executable and partitions, and launch the model
+inside the scheduler job.
+
+During the pre-run every step runs locally, even on a system with a job
+scheduler, so the command is suitable for a login node. Steps that cannot be
+prepared are skipped and reported with the reason:
+
+- the step's application does not support pre-run (for example ``forge`` or
+  ``hello_world``);
+- the step's blueprint is produced by another step (``blueprint: {from_step:
+  ...}``);
+- one of the step's directives (``continue-from`` or ``nest-from``) takes its
+  input from another step's output.
+
+Skipped steps run from scratch on the second command, exactly as they would
+without a pre-run.
+
+``--pre-run`` cannot be combined with ``--resume``. Running ``--pre-run``
+again on the same :term:`run ID` leaves already-prepared steps as they are;
+to prepare from scratch, add ``--clobber all`` (or ``--clobber <step-name>``).
+The ``pre_run`` key is recorded in the transformed workplan, so re-entering the
+run with ``--run-id`` re-enters it as a pre-run.
+
+When a step uses ParallelIO (``use_pio``), the pre-run only validates its
+inputs, so preparation is light. Without it, input partitioning also runs on
+the machine performing the pre-run.
+
+ROMS itself is not started, so errors that only surface when ROMS opens its
+boundary or tide files, or writes its first restart, are not caught.
 
 Checking Workplan Status
 ------------------------
