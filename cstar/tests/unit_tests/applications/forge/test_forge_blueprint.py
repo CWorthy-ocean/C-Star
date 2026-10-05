@@ -24,7 +24,7 @@ import cstar
 import cstar.catalog
 from cstar.applications.forge.app import ForgeApplication
 from cstar.applications.forge.blueprint import FORGE_BLUEPRINT_VERSION, ForgeBlueprint
-from cstar.applications.forge.input_data import netcdf_filename_component
+from cstar.applications.forge.input_data import netcdf_basename
 from cstar.applications.forge.resolve import (
     _warn_user_files_need_pio_conversion,
     build_forge_blueprint,
@@ -6651,4 +6651,4 @@ def test_forge_application_emitted_blueprint(use_pio):
     assert emitted.use_pio is use_pio
     assert emitted.use_pio == bool(cfg.model_settings["cppdefs"].get("use_pio"))
     # Mirrors InputData._forcing_filename("grid"): {domain}_{grid}.nc
-    assert emitted.grid_filename == f"{netcdf_filename_component(cfg.name)}_grid.nc"
+    assert emitted.grid_filename == netcdf_basename(cfg.name, "grid")

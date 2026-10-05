@@ -10,8 +10,8 @@ from cstar.cli.blueprint import ALIAS as ALIAS_BLUEPRINT
 from cstar.cli.blueprint import app as app_blueprint
 from cstar.cli.common import common_callback
 from cstar.cli.environment import app as app_env
+from cstar.cli.forge import DEFAULT_WIZARD_PORT, launch_wizard
 from cstar.cli.forge import app as app_forge
-from cstar.cli.forge import launch_wizard
 from cstar.cli.template import app as app_template
 from cstar.cli.workplan import ALIAS as ALIAS_WORKPLAN
 from cstar.cli.workplan import app as app_workplan
@@ -27,7 +27,7 @@ logger = logging.getLogger(__name__)
 
 def wizard(
     ctx: typer.Context,
-    port: int = typer.Option(8866, help="port for the voila web app"),
+    port: int = typer.Option(DEFAULT_WIZARD_PORT, help="port for the voila web app"),
 ) -> None:
     """Launch the C-Star wizard (blueprint and workplan pages).
 

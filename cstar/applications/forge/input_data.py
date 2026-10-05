@@ -163,6 +163,16 @@ def netcdf_filename_component(component: str) -> str:
     return str(component).replace(".", "_")
 
 
+def netcdf_basename(domain_name: str, input_name: str) -> str:
+    """Return the ``{domain}_{input}.nc`` basename forge gives a generated input.
+
+    Both segments pass through :func:`netcdf_filename_component`; this is the
+    one place that spells the rule, shared by input generation and by the
+    ``forge`` application's emitted-blueprint prediction.
+    """
+    return f"{netcdf_filename_component(domain_name)}_{netcdf_filename_component(input_name)}.nc"
+
+
 class RomsMarblBlueprintInputData(BaseModel):
     """
     Subset of RomsMarblBlueprint containing only input data fields.
@@ -235,9 +245,7 @@ class InputData:
 
     def _forcing_filename(self, input_name: str) -> Path:
         """Construct the NetCDF filename for a given input name."""
-        d = netcdf_filename_component(self.domain_name)
-        stem = netcdf_filename_component(input_name)
-        return self.input_data_dir / f"{d}_{stem}.nc"
+        return self.input_data_dir / netcdf_basename(self.domain_name, input_name)
 
     def _ensure_empty_or_clobber(self, clobber: bool) -> bool:
         """

@@ -214,6 +214,10 @@ def run(
     raise typer.Exit(code)
 
 
+DEFAULT_WIZARD_PORT = 8866
+"""Port the voila web app serves the wizard on unless ``--port`` says otherwise."""
+
+
 def launch_wizard(ctx: typer.Context, port: int) -> None:
     """Launch the C-Star wizard (voila web app) on ``port``.
 
@@ -255,7 +259,7 @@ def launch_wizard(ctx: typer.Context, port: int) -> None:
 )
 def wizard(
     ctx: typer.Context,
-    port: int = typer.Option(8866, help="port for the voila web app"),
+    port: int = typer.Option(DEFAULT_WIZARD_PORT, help="port for the voila web app"),
 ) -> None:
     """Launch the C-Star wizard (voila web app); same as ``cstar wizard``.
 

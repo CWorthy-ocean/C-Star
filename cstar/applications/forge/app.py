@@ -153,12 +153,9 @@ class ForgeApplication(ApplicationDefinition[ForgeBlueprint, ForgeRunner]):
         """
         # Deferred: this package's import (registration) must stay light, and
         # these pull in roms_tools/xarray/dask.
-        from cstar.applications.forge.input_data import netcdf_filename_component
+        from cstar.applications.forge.input_data import netcdf_basename
         from cstar.applications.roms_marbl.models import APP_NAME as ROMS_MARBL_APP
 
-        # Mirrors `InputData._forcing_filename`: {domain}_{input}.nc
-        domain = netcdf_filename_component(blueprint.name)
-        grid = netcdf_filename_component("grid")
         return EmittedBlueprint(
             filename=emitted_blueprint_filename(blueprint.name),
             application=ROMS_MARBL_APP,
@@ -167,5 +164,5 @@ class ForgeApplication(ApplicationDefinition[ForgeBlueprint, ForgeRunner]):
             start_date=blueprint.run.start_date,
             end_date=blueprint.run.end_date,
             use_pio=blueprint.use_pio,
-            grid_filename=f"{domain}_{grid}.nc",
+            grid_filename=netcdf_basename(blueprint.name, "grid"),
         )
