@@ -38,7 +38,6 @@ from cstar.orchestration.orchestration import (
     Orchestrator,
     Planner,
     ProcessHandle,
-    RunMode,
     Status,
     Task,
     check_environment,
@@ -225,7 +224,6 @@ def get_orchestrator(planner: Planner) -> Orchestrator:
     launcher = get_launcher(force_local=planner.workplan.pre_run)
 
     orchestrator = Orchestrator(planner, launcher)
-    orchestrator.set_callback("status_changed", on_status_changed)
     orchestrator.set_callback("launched", on_status_changed)
 
     return orchestrator
@@ -311,56 +309,26 @@ async def load_external_runs(wp: Workplan, launcher: Launcher[t.Any]) -> Externa
     return external
 
 
-async def reload_dag(wp_run: WorkplanRun) -> DagStatus:
-    """Determine the current status of a workplan run.
+async def process_plan(orchestrator: Orchestrator) -> DagStatus:
+    """Schedule every step of a plan without waiting for completion.
 
-    Parameters
-    ----------
-    path : Path
-        The path to the blueprint being executed.
-    run_id : str
-        The unique run id to query status for.
-
-    Returns
-    -------
-    DagStatus
-    """
-    wp = deserialize(wp_run.trx_workplan_path, LiveWorkplan)
-    msg = f"Reloading workplan run: {wp.name}"
-    log.debug(msg)
-
-    configure_environment(wp_run.output_path, wp_run.run_id, wp_run.environment)
-
-    external = await load_external_runs(wp, get_launcher(force_local=wp.pre_run))
-    planner = Planner(workplan=wp, external=external.tasks())
-    orchestrator = get_orchestrator(planner)
-
-    status = await process_plan(orchestrator, RunMode.Monitor)
-    return DagStatus({**external.statuses(), **status.details})
-
-
-async def process_plan(orchestrator: Orchestrator, mode: RunMode) -> DagStatus:
-    """Execute a plan from start to finish.
+    A step is launched once its upstream steps are scheduled, so several
+    passes may be needed before every step is scheduled.
 
     Parameters
     ----------
     orchestrator : Orchestrator
         The orchestrator to be used for processing a plan.
-    mode : RunMode
-        The execution mode during processing.
-
-        - RunMode.Schedule submits all processes in the plan in a non-blocking manner.
-        - RunMode.Monitor waits for all processes in the plan to complete.
     """
-    closed_set = orchestrator.get_closed_nodes(mode=mode)
-    open_set = orchestrator.get_open_nodes(mode=mode)
+    closed_set = orchestrator.get_closed_nodes()
+    open_set = orchestrator.get_open_nodes()
     delay_iter = iter(incremental_delays())
 
     while open_set is not None:
-        await orchestrator.run(mode=mode)
+        await orchestrator.run()
 
-        curr_closed = orchestrator.get_closed_nodes(mode=mode)
-        curr_open = orchestrator.get_open_nodes(mode=mode)
+        curr_closed = orchestrator.get_closed_nodes()
+        curr_open = orchestrator.get_open_nodes()
 
         if curr_closed != closed_set or open_set != curr_open:
             # reset to initial delay when a task is found or completed
@@ -372,8 +340,7 @@ async def process_plan(orchestrator: Orchestrator, mode: RunMode) -> DagStatus:
         sleep_duration = next(delay_iter)
         await asyncio.sleep(sleep_duration)
 
-    msg = f"Workplan {str(mode)!r} is complete."
-    log.info(msg)
+    log.info("Workplan scheduling is complete.")
 
     if open_set is None:
         open_set = {}
@@ -1140,7 +1107,7 @@ async def run_dag(
     orchestrator = get_orchestrator(planner)
 
     # schedule the tasks without waiting for completion
-    await process_plan(orchestrator, RunMode.Schedule)
+    await process_plan(orchestrator)
     return wp_run
 
 

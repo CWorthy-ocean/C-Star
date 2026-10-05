@@ -20,7 +20,6 @@ from cstar.orchestration.orchestration import (
     Orchestrator,
     Planner,
     ProcessHandle,
-    RunMode,
     Status,
     Task,
 )
@@ -153,148 +152,6 @@ def diamond_workplan(
             ),
         ],
     )
-
-
-@pytest.fixture
-def multi_entrypoint_workplan(
-    tmp_path: Path,
-    bp_templates_dir: Path,
-) -> Workplan:
-    """Generate a workplan with multiple tasks available to execute immediately.
-
-    Parameters
-    ----------
-    tmp_path : Path
-        Temporary directory for test outputs
-    bp_templates_dir : Path
-        Fixture returning the path to the directory containing blueprint template files
-
-    Returns
-    -------
-    Workplan
-    """
-    bp_tpl_path = bp_templates_dir / "blueprint.yaml"
-    default_working_dir = "working_dir: ."
-
-    bp_path = tmp_path / "blueprint.yaml"
-    bp_content = bp_tpl_path.read_text()
-    bp_content = bp_content.replace(default_working_dir, f"working_dir: {tmp_path}")
-    bp_path.write_text(bp_content)
-
-    return Workplan(
-        name="diamond",
-        description="A workplan with two nodes immediately executable, followed by.",
-        steps=[
-            Step(
-                name="d-00-a",
-                application=APP_NAME,
-                blueprint=bp_path.as_posix(),
-            ),
-            Step(
-                name="d-00-b",
-                application=APP_NAME,
-                blueprint=bp_path.as_posix(),
-            ),
-            Step(
-                name="d-01",
-                depends_on=["d-00-a"],
-                application=APP_NAME,
-                blueprint=bp_path.as_posix(),
-            ),
-            Step(
-                name="d-02",
-                depends_on=["d-00-a"],
-                application=APP_NAME,
-                blueprint=bp_path.as_posix(),
-            ),
-            Step(
-                name="d-03",
-                depends_on=["d-00-b"],
-                application=APP_NAME,
-                blueprint=bp_path.as_posix(),
-            ),
-            Step(
-                name="d-04",
-                depends_on=["d-01", "d-02", "d-00-b"],
-                application=APP_NAME,
-                blueprint=bp_path.as_posix(),
-            ),
-        ],
-    )
-
-
-@pytest.mark.skip(reason="TODO: fix underlying issue with delay")
-@pytest.mark.asyncio
-@pytest.mark.parametrize(
-    "mode",
-    [
-        RunMode.Schedule,
-        RunMode.Monitor,
-    ],
-)
-async def test_orchestrator_open_closed_lists(
-    mode: RunMode, diamond_workplan: Workplan
-) -> None:
-    """Verify the orchestrator / dag runner loop over open/closed ends as-expected.
-
-    The loop should move every item that is open into a closed state after running it.
-    """
-    orchestrator = Orchestrator(Planner(workplan=diamond_workplan), LocalLauncher())
-    closed_set = orchestrator.get_closed_nodes(mode=mode)
-    open_set = orchestrator.get_open_nodes(mode=mode)
-
-    assert open_set, "Orchestrator didn't identify any open nodes"
-    encountered = set(open_set or [])
-
-    while open_set is not None:
-        await orchestrator.run(mode=mode)
-
-        closed_set = orchestrator.get_closed_nodes(mode=mode)
-        open_set = orchestrator.get_open_nodes(mode=mode)
-
-        if open_set:
-            encountered.update(open_set)
-
-    assert closed_set, "The orchestrator failed to close tasks."
-    assert encountered == set(closed_set), "The orchestrator didn't close all tasks"
-
-
-@pytest.mark.skip(reason="TODO: fix underlying issue with delay")
-@pytest.mark.asyncio
-@pytest.mark.parametrize(
-    "mode",
-    [
-        RunMode.Schedule,
-        RunMode.Monitor,
-    ],
-)
-async def test_orchestrator_multi_entrypoint_open_closed_lists(
-    mode: RunMode, multi_entrypoint_workplan: Workplan
-) -> None:
-    """Verify the orchestrator / dag runner loop over open/closed ends as-expected.
-
-    This test uses a multi-entrypoint workplan to verify that the graph is traversed.
-    """
-    orchestrator = Orchestrator(
-        Planner(workplan=multi_entrypoint_workplan), LocalLauncher()
-    )
-    closed_set = orchestrator.get_closed_nodes(mode=mode)
-    open_set = orchestrator.get_open_nodes(mode=mode)
-
-    assert open_set, "Orchestrator didn't identify any open nodes"
-    encountered = set(open_set or [])
-
-    while open_set is not None:
-        await orchestrator.run(mode=mode)
-
-        closed_set = orchestrator.get_closed_nodes(mode=mode)
-        open_set = orchestrator.get_open_nodes(mode=mode)
-
-        if open_set:
-            encountered.update(open_set)
-
-    assert closed_set, "The orchestrator failed to close tasks."
-    assert encountered == set(closed_set), "The orchestrator didn't close all tasks"
 
 
 def test_dep_keys(tmp_path: Path) -> None:
@@ -466,29 +323,28 @@ def test_locate_dependencies_external(
 
 
 @pytest.mark.parametrize(
-    ("status", "mode", "opens"),
+    ("status", "opens"),
     [
-        pytest.param(Status.Done, RunMode.Schedule, True, id="done, schedule"),
-        pytest.param(Status.Running, RunMode.Schedule, True, id="running, schedule"),
-        pytest.param(Status.Done, RunMode.Monitor, True, id="done, monitor"),
-        pytest.param(Status.Running, RunMode.Monitor, False, id="running, monitor"),
+        pytest.param(Status.Done, True, id="done"),
+        pytest.param(Status.Running, True, id="running"),
+        pytest.param(Status.Unsubmitted, False, id="unsubmitted"),
     ],
 )
 def test_open_nodes_with_external_dependency(
     status: Status,
-    mode: RunMode,
     opens: bool,
     external_workplan: Workplan,
     external_task: ExternalTaskFactory,
 ) -> None:
-    """Verify a step becomes open when its external dependency is terminal, or
-    (when scheduling, where SLURM enforces ordering) in progress.
+    """Verify a step becomes open when its external dependency is terminal or
+    in progress (the launcher enforces the ordering), but not before it is
+    submitted.
     """
     task = external_task(status)
     planner = Planner(external_workplan, {EXTERNAL_TOKEN: task})
     orchestrator = Orchestrator(planner, LocalLauncher())
 
-    open_nodes = orchestrator.get_open_nodes(mode=mode)
+    open_nodes = orchestrator.get_open_nodes()
 
     assert open_nodes is not None
     assert ("first" in open_nodes) is opens

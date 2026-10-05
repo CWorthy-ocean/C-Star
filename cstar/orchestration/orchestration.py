@@ -2,7 +2,7 @@ import asyncio
 import os
 import typing as t
 from collections.abc import Awaitable, Callable, Iterable, Mapping, Sequence
-from enum import IntEnum, StrEnum, auto
+from enum import IntEnum, auto
 from pathlib import Path
 
 from pydantic import (
@@ -54,16 +54,6 @@ KEY_TASK: t.Literal["task"] = "task"
 
 if t.TYPE_CHECKING:
     from networkx import DiGraph
-
-
-class RunMode(StrEnum):
-    """Specify the blocking behavior during plan execution."""
-
-    Monitor = auto()
-    """Block until tasks complete."""
-
-    Schedule = auto()
-    """Block until tasks are scheduled."""
 
 
 class Status(IntEnum):
@@ -828,9 +818,6 @@ class Orchestrator(LoggingMixin):
     launcher: Launcher[t.Any]
     """The launcher used by the orchestrator to manage task execution."""
 
-    _on_status_changed: Callable[[ProcessHandle], Awaitable[None]] | None = None
-    """A callback to be executed when the orchestrator detects a status change."""
-
     _on_launched: Callable[[ProcessHandle], Awaitable[None]] | None = None
     """A callback to be executed when the orchestrator launches a task."""
 
@@ -847,9 +834,11 @@ class Orchestrator(LoggingMixin):
         self.planner = planner
         self.launcher = launcher
 
-    def get_open_nodes(self, *, mode: RunMode) -> Mapping[str, Status] | None:
-        """Retrieve the set of task nodes with a non-terminal state that are
-        executing or ready to execute.
+    def get_open_nodes(self) -> Mapping[str, Status] | None:
+        """Retrieve the set of unscheduled task nodes that are ready to launch.
+
+        A node is ready once every upstream node is in progress or terminal;
+        the launcher enforces the ordering on in-progress dependencies.
 
         Returns
         -------
@@ -860,7 +849,7 @@ class Orchestrator(LoggingMixin):
         """
         g = self.planner.graph
         open_nodes: dict[str, Status] = {}
-        closed_set = self.get_closed_nodes(mode=mode)
+        closed_set = self.get_closed_nodes()
 
         if self.planner.workplan:
             nodes = {s.name for s in self.planner.workplan.steps}
@@ -878,12 +867,8 @@ class Orchestrator(LoggingMixin):
             in_degree = g.in_degree(n)
 
             satisfied = all(
-                (
-                    Status.is_in_progress(g.nodes[u][KEY_STATUS])
-                    or Status.is_terminal(g.nodes[u][KEY_STATUS])
-                    if mode == RunMode.Schedule
-                    else Status.is_terminal(g.nodes[u][KEY_STATUS])
-                )
+                Status.is_in_progress(g.nodes[u][KEY_STATUS])
+                or Status.is_terminal(g.nodes[u][KEY_STATUS])
                 for (u, _) in in_edges
             )
 
@@ -898,20 +883,15 @@ class Orchestrator(LoggingMixin):
 
         return None
 
-    def get_closed_nodes(self, *, mode: RunMode) -> Mapping[str, Status]:
-        """Retrieve the set of task nodes with a terminal state.
+    def get_closed_nodes(self) -> Mapping[str, Status]:
+        """Retrieve the set of task nodes that are scheduled or terminal.
 
         Returns
         -------
-        set of str
-            A set of node IDs identifying nodes with a Done status.
+        Mapping[str, Status]
+            The status of each node that is in progress or terminal.
         """
-        targets = Status.terminal_states()
-
-        if mode == RunMode.Schedule:
-            # anything previously scheduled is "closed" when scheduling
-            targets.update({Status.Submitted, Status.Running, Status.Ending})
-
+        targets = Status.terminal_states() | Status.in_progress_states()
         return self.planner.retrieve_all(KEY_STATUS, filter_fn=lambda x: x in targets)
 
     def _locate_dependencies(self, step: LiveStep) -> list[ProcessHandle] | None:
@@ -951,7 +931,7 @@ class Orchestrator(LoggingMixin):
         ]
 
     async def process_node(self, node: str) -> Task[ProcessHandle] | None:
-        """Execute a task.
+        """Launch the task for a node.
 
         Parameters
         ----------
@@ -973,21 +953,12 @@ class Orchestrator(LoggingMixin):
             # prerequisite tasks weren't all started, yet.
             return None
 
-        if task := self.planner.retrieve(node, KEY_TASK):
-            old_status = task.status
-            new_status = await self.launcher.query_status(task)
-            if old_status != new_status:
-                task.status = new_status
+        task = await self.launcher.launch(step, dependencies)
+        self.planner.store(node, KEY_TASK, task)
+        self.log.info(f"Launched step: {step.name}")
 
-                if self._on_status_changed:
-                    await self._on_status_changed(task.handle)
-        else:
-            task = await self.launcher.launch(step, dependencies)
-            self.planner.store(node, KEY_TASK, task)
-            self.log.info(f"Launched step: {step.name}")
-
-            if self._on_launched:
-                await self._on_launched(task.handle)
+        if self._on_launched:
+            await self._on_launched(task.handle)
 
         self.planner.store(node, KEY_STATUS, task.status)
         return task
@@ -995,8 +966,7 @@ class Orchestrator(LoggingMixin):
     async def update_planner_state(
         self, n: str, task: Task[ProcessHandle] | None
     ) -> None:
-        """Update tracking information for the plan after starting a task or
-        fetching an update.
+        """Update tracking information for the plan after starting a task.
 
         Parameters
         ----------
@@ -1016,22 +986,15 @@ class Orchestrator(LoggingMixin):
             self.log.warning(f"Failed node: {n!r}, status: {task.status.name!r}")
             raise CstarExpectationFailed(f"Node {n} task failed.")
 
-    async def run(self, mode: RunMode) -> Mapping[str, Status]:
-        """Execute tasks that are ready and query status on running tasks.
-
-        Parameters
-        ----------
-        mode : RunMode
-            The operation mode. Passing `schedule` allows the orchestrator to
-            submit tasks without waiting for their completion. Passing `monitor`
-            causes the scheduler to track status for the tasks.
+    async def run(self) -> Mapping[str, Status]:
+        """Launch the tasks that are ready, without waiting for their completion.
 
         Returns
         -------
         Mapping[str, Status]
             Mapping of node names to their current status.
         """
-        open_set = self.get_open_nodes(mode=mode)
+        open_set = self.get_open_nodes()
 
         if open_set is None:
             # no open nodes were found, return all current statuses
@@ -1087,12 +1050,10 @@ class Orchestrator(LoggingMixin):
 
     def set_callback(
         self,
-        event: t.Literal["status_changed", "launched"],
+        event: t.Literal["launched"],
         func: Callable[[_THandle], Awaitable[None]],
     ) -> None:
         match event:
-            case "status_changed":
-                attr_name = "_on_status_changed"
             case "launched":
                 attr_name = "_on_launched"
             case _:
