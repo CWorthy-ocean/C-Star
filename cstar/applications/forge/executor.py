@@ -34,6 +34,7 @@ from cstar.applications.forge.blueprint import (
     CDR_MODES,
     OpenBoundaries,
     UserProvidedFile,
+    emitted_blueprint_filename,
     infer_cdr_mode,
     vert_kwargs_from_grid_kwargs,
 )
@@ -1172,7 +1173,7 @@ class ForgeExecutor(BaseModel):
         Path
             Path to the blueprint YAML file: `B_{name}.yaml`.
         """
-        return self.roms_marbl_blueprint_dir / f"B_{self.name}.yaml"
+        return self.roms_marbl_blueprint_dir / emitted_blueprint_filename(self.name)
 
     @property
     def datasets(self) -> DatasetsDict:

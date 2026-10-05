@@ -3,10 +3,12 @@ import textwrap
 from pathlib import Path
 
 import pytest
+from pydantic import ValidationError
 
 from cstar.applications.core import (
     APP_PLUGIN_GROUP,
     BUILTIN_APP_PACKAGE,
+    EmittedBlueprint,
     RunnerRequest,
     RunnerResult,
     RunnerState,
@@ -655,3 +657,24 @@ def test_roms_marbl_directives_registered_in_directive_map() -> None:
     app = get_application("roms_marbl")
     for directive in app.directives:
         assert DirectiveConfig.directive_map.get(directive.key()) is directive
+
+
+def test_emitted_blueprint_defaults_to_none() -> None:
+    """An application that does not override the hook emits no blueprint."""
+    app = get_application("hello_world")
+    assert app.emitted_blueprint(app.blueprint.model_construct()) is None
+
+
+def test_emitted_blueprint_forbids_unknown_fields() -> None:
+    """`EmittedBlueprint` rejects fields it does not declare."""
+    with pytest.raises(ValidationError):
+        EmittedBlueprint(  # type: ignore[call-arg]
+            filename="B_x.yaml",
+            application="roms_marbl",
+            cpus_needed=1,
+            start_date="2012-01-01",
+            end_date="2012-01-02",
+            use_pio=False,
+            grid_filename="x_grid.nc",
+            bogus=1,
+        )

@@ -22,7 +22,9 @@ import yaml
 
 import cstar
 import cstar.catalog
+from cstar.applications.forge.app import ForgeApplication
 from cstar.applications.forge.blueprint import FORGE_BLUEPRINT_VERSION, ForgeBlueprint
+from cstar.applications.forge.input_data import netcdf_filename_component
 from cstar.applications.forge.resolve import (
     _warn_user_files_need_pio_conversion,
     build_forge_blueprint,
@@ -6633,3 +6635,20 @@ def test_build_forge_blueprint_warns_for_netcdf4_cdr_file_under_pio(tmp_path):
     p = _nc_file(tmp_path / "cdr.nc", "NETCDF4")
     with pytest.warns(UserWarning, match="CDF-5"):
         _build(cdr_forcing_file=p, use_pio=True)
+
+
+@pytest.mark.parametrize("use_pio", [False, True])
+def test_forge_application_emitted_blueprint(use_pio):
+    cfg = _build(use_pio=use_pio)
+    emitted = ForgeApplication().emitted_blueprint(cfg)
+
+    assert emitted.filename == f"B_{cfg.name}.yaml"
+    assert emitted.application == "roms_marbl"
+    assert emitted.cpus_needed == cfg.n_procs
+    assert emitted.single_node is False
+    assert emitted.start_date == cfg.run.start_date
+    assert emitted.end_date == cfg.run.end_date
+    assert emitted.use_pio is use_pio
+    assert emitted.use_pio == bool(cfg.model_settings["cppdefs"].get("use_pio"))
+    # Mirrors InputData._forcing_filename("grid"): {domain}_{grid}.nc
+    assert emitted.grid_filename == f"{netcdf_filename_component(cfg.name)}_grid.nc"

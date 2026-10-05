@@ -8,12 +8,14 @@ from importlib.metadata import entry_points
 from itertools import chain
 from pathlib import Path
 
+from pydantic import Field
+
 from cstar.base.adapter import SchemaAdapter
 from cstar.base.log import get_logger
 from cstar.entrypoint.config import JOBFILE_DATE_FORMAT
 from cstar.execution.file_system import local_copy
 from cstar.execution.handler import ExecutionStatus
-from cstar.orchestration.models import BlueprintCore
+from cstar.orchestration.models import BlueprintCore, ConfiguredBaseModel
 from cstar.orchestration.serialization import SerializableModel, deserialize
 
 if t.TYPE_CHECKING:
@@ -351,6 +353,31 @@ class Transform(t.Protocol, t.Generic[TTransformable]):
 TRunner = t.TypeVar("TRunner")
 
 
+class EmittedBlueprint(ConfiguredBaseModel):
+    """Describes a blueprint an application's run publishes for a deferred
+    downstream step, so a workplan author can predict it without running the
+    producer.
+    """
+
+    filename: str
+    """The file the producing step publishes into its `output/` dir."""
+    application: str
+    """The application the emitted blueprint targets."""
+    cpus_needed: int
+    """The CPU count the emitted blueprint's run requires."""
+    single_node: bool = Field(default=False)
+    """Whether the emitted blueprint's run must fit on a single node."""
+    start_date: datetime
+    """The start of the emitted blueprint's run."""
+    end_date: datetime
+    """The end of the emitted blueprint's run."""
+    use_pio: bool
+    """Whether the emitted blueprint's build uses ParallelIO."""
+    grid_filename: str
+    """Base name of the grid netCDF the emitted blueprint references, under the
+    producing step's `input_datasets`."""
+
+
 class ApplicationDefinition(t.Protocol, t.Generic[TBlueprint, TRunner]):
     """The contract establishing the metadata needed by the system
     to orchestrate tasks using their blueprints.
@@ -378,6 +405,22 @@ class ApplicationDefinition(t.Protocol, t.Generic[TBlueprint, TRunner]):
     """Whether the runner honours `RunnerRequest.pre_run`, performing every
     stage before its model launch and then stopping so a later attempt can
     attach to the prepared working directory."""
+
+    def emitted_blueprint(self, blueprint: TBlueprint) -> "EmittedBlueprint | None":
+        """Describe the blueprint this application's run will publish for a deferred
+        downstream step.
+
+        Parameters
+        ----------
+        blueprint : TBlueprint
+            The blueprint of the producing step.
+
+        Returns
+        -------
+        EmittedBlueprint | None
+            The predicted emitted blueprint, or `None` when the application emits none.
+        """
+        return None
 
 
 _TAnyApp: t.TypeAlias = ApplicationDefinition[t.Any, t.Any]

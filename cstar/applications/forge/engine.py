@@ -250,9 +250,7 @@ def forge_blueprint_to_builder_kwargs(cfg: ForgeBlueprint) -> dict[str, Any]:
         # here from the reviewed model_settings' cppdefs section.
         partitioning={
             **cfg.domain.partitioning.model_dump(),
-            "use_pio": bool(
-                (cfg.model_settings.get("cppdefs") or {}).get("use_pio", False)
-            ),
+            "use_pio": cfg.use_pio,
         },
         start_time=cfg.run.start_date,
         end_time=cfg.run.end_date,

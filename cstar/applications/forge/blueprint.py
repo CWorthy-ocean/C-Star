@@ -368,6 +368,14 @@ FORGE_BLUEPRINT_VERSION = 9
 # across schema/field iteration; used by C-Star to route the blueprint to its application.
 DEFAULT_APPLICATION = "forge"
 
+
+def emitted_blueprint_filename(name: str) -> str:
+    """Return the file name of the ``roms_marbl`` blueprint a forge run named
+    ``name`` emits.
+    """
+    return f"B_{name}.yaml"
+
+
 _NAME_UNSAFE_RE = re.compile(r"[^A-Za-z0-9._-]+")
 _NAME_RUN_RE = re.compile(r"[_.-]{2,}")
 
@@ -1346,6 +1354,13 @@ class ForgeBlueprint(Blueprint):
         return sanitize_name(v)
 
     # ---- derived naming (single source of truth: name + dates) ----
+    @property
+    def use_pio(self) -> bool:
+        """Whether the emitted ROMS build uses ParallelIO, read from the
+        ``cppdefs`` section of ``model_settings``.
+        """
+        return bool((self.model_settings.get("cppdefs") or {}).get("use_pio", False))
+
     @property
     def n_procs(self) -> int:
         partitioning = self.domain.partitioning
