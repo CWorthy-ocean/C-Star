@@ -473,7 +473,9 @@ Execution
 
     .. tip::
         Executing the command again with the same :term:`run ID` will attach to the
-        previous execution and continue to monitor status until terminated.
+        previous execution and schedule any steps not yet scheduled. Like the first
+        run, it returns without waiting for the steps to finish; use
+        ``cstar workplan status <run-id>`` to follow their progress.
 
         Specify a different :term:`run ID` to re-run the workplan from scratch.
 
@@ -588,7 +590,7 @@ Checking Workplan Status
 
     .. code-block:: console
 
-        cstar workplan status --run-id <my-unique-id>
+        cstar workplan status <my-unique-id>
 
 
 Gathering Workplan Outputs
