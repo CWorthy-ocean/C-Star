@@ -38,6 +38,7 @@ from cstar.orchestration.transforms import (
     OverrideDirective,
     SplitFrequency,
     get_time_slices,
+    lookup_step,
 )
 from cstar.orchestration.utils import ENV_CSTAR_ORCH_TRX_FREQ
 
@@ -729,6 +730,9 @@ def _require_step_output_dir(workplan: "LiveWorkplan", name: str) -> Path:
     ------
     KeyError
         If `workplan` does not contain a step named `name`.
+    CstarError
+        If `name` is malformed or names a step of an external run that
+        cannot be resolved.
     FileNotFoundError
         If the step has no `output` directory yet (it has not run, or failed
         before producing output).
@@ -785,7 +789,8 @@ def resolve_step_output_dir(workplan: "LiveWorkplan", name: str) -> Path:
     workplan : LiveWorkplan
         The workplan containing the named step.
     name : str
-        The name of the step whose output directory is requested.
+        The name of the step whose output directory is requested; a step of
+        an external run is named `<step>@<alias>`.
 
     Returns
     -------
@@ -796,12 +801,11 @@ def resolve_step_output_dir(workplan: "LiveWorkplan", name: str) -> Path:
     ------
     KeyError
         If `workplan` does not contain a step named `name`.
+    CstarError
+        If `name` is malformed or names a step of an external run that
+        cannot be resolved.
     """
-    if name not in workplan:
-        msg = f"Unable to locate step {name!r} in workplan"
-        raise KeyError(msg)
-
-    fsm = RomsFileSystemManager(workplan[name].fsm.root_dir)
+    fsm = RomsFileSystemManager(lookup_step(workplan, name).fsm.root_dir)
     return fsm.output_dir
 
 

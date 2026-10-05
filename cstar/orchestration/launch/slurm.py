@@ -170,6 +170,9 @@ class SlurmLauncher(Launcher[SlurmHandle]):
     name: t.ClassVar[str] = "slurm"
     """Value recorded as `ProcessHandle.launcher_name` on handles this launcher creates."""
 
+    supports_foreign_dependencies: t.ClassVar[bool] = True
+    """A SLURM job can depend on a job submitted by another run."""
+
     POST_SUBMIT_DELAY: t.Final[float] = float(
         get_env_item(ENV_CSTAR_SLURM_POST_SUBMIT_DELAY).value
     )

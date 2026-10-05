@@ -297,7 +297,7 @@ async def test_prepare_composed_dag(
         configure_environment(working_dir, run_id)
         run_id = get_run_id()
         check_environment()
-        wp, wp_path = await prepare_workplan(
+        wp, wp_path, _ = await prepare_workplan(
             generated_wp_path, StateDirectoryManager.data_dir(run_id)
         )
 
