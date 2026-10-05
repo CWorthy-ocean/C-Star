@@ -7,7 +7,8 @@ The wizard is Forge's interface for building a :doc:`forge blueprint
 <blueprints/forge>` without writing YAML. It presents the choices as a series
 of sections, fills each from the catalog, shows the resolved blueprint for review,
 and saves or downloads it. The wizard only writes the blueprint; nothing is
-downloaded or generated until you run it.
+downloaded or generated until you run it. The app has two pages, Blueprint
+(described here) and Workplan, for composing blueprints into a workplan.
 
 Launching the wizard
 --------------------
@@ -15,12 +16,13 @@ Launching the wizard
 As a web app
    .. code-block:: console
 
-      cstar forge wizard
+      cstar wizard
 
-   This serves the wizard with `Voila <https://voila.readthedocs.io>`__ at
-   ``http://localhost:8866`` and opens it in your browser. ``--port`` picks
-   another port; any other options are passed through to Voila, for example
-   ``--no-browser`` on a machine without one.
+   (``cstar forge wizard`` is equivalent.) This serves the wizard with
+   `Voila <https://voila.readthedocs.io>`__ at ``http://localhost:8866`` and
+   opens it in your browser. ``--port`` picks another port; any other options
+   are passed through to Voila, for example ``--no-browser`` on a machine
+   without one.
 
 From a login node
    Login nodes have no browser. Serve the wizard there and forward the port
@@ -29,7 +31,7 @@ From a login node
    .. code-block:: console
 
       # on the login node
-      cstar forge wizard --no-browser
+      cstar wizard --no-browser
       # on your laptop
       ssh -N -L 8866:localhost:8866 <user>@<login-node>
 
@@ -118,11 +120,11 @@ Advanced settings
 Review and export
    The resolved blueprint as YAML, with validation messages. From here you
    can **Download** the file, **Save** it to your catalog, save any spec you
-   modified as a new named catalog entry, run the blueprint through the
-   C-Star command line, or save a deferred workplan that runs it later
-   (experimental). **Run** executes ``cstar blueprint run`` on the machine
-   the wizard is running on, so on a cluster's login node use it only for
-   toy domains; for real domains save the blueprint and submit it through a
+   modified as a new named catalog entry, or run the blueprint through the
+   C-Star command line. To run this blueprint as part of a workplan, build
+   one on the Workplan page. **Run** executes ``cstar blueprint run`` on the
+   machine the wizard is running on, so on a cluster's login node use it only
+   for toy domains; for real domains save the blueprint and submit it through a
    workplan or from a compute node (see :doc:`hpc`).
 
 .. figure:: images/wizard-review.png

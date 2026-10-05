@@ -72,7 +72,6 @@ _REQUIRED_SECTION_IDS = (
     "run.cdr",
     "review.save_specs",
     "review.run",
-    "review.workplan",
 )
 
 

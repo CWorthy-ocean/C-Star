@@ -5,7 +5,7 @@ Attached as a core subcommand of the root ``cstar`` app (see
 available::
 
     cstar forge run <forge_blueprint.yaml> [executor options...]
-    cstar forge wizard [--port 8866] [voila options...]
+    cstar forge wizard [--port 8866] [voila options...]   # same as ``cstar wizard``
     cstar forge copy-notebook [--dest ...] [--force]
     cstar forge show-paths [--json]
 
@@ -214,16 +214,11 @@ def run(
     raise typer.Exit(code)
 
 
-@app.command(
-    context_settings={"allow_extra_args": True, "ignore_unknown_options": True}
-)
-def wizard(
-    ctx: typer.Context,
-    port: int = typer.Option(8866, help="port for the voila web app"),
-) -> None:
-    """Launch the forge blueprint wizard (voila web app).
+def launch_wizard(ctx: typer.Context, port: int) -> None:
+    """Launch the C-Star wizard (voila web app) on ``port``.
 
-    Extra arguments are passed through to voila.
+    Shared by ``cstar wizard`` and ``cstar forge wizard``; extra arguments on
+    ``ctx`` are passed through to voila.
     """
     notebook = files("cstar.wizard") / "_voila_app.ipynb"
     # Steer MPI's libfabric away from the default "sockets" provider before
@@ -253,6 +248,20 @@ def wizard(
         *ctx.args,
     ]
     _exec_voila(argv)
+
+
+@app.command(
+    context_settings={"allow_extra_args": True, "ignore_unknown_options": True}
+)
+def wizard(
+    ctx: typer.Context,
+    port: int = typer.Option(8866, help="port for the voila web app"),
+) -> None:
+    """Launch the C-Star wizard (voila web app); same as ``cstar wizard``.
+
+    Extra arguments are passed through to voila.
+    """
+    launch_wizard(ctx, port)
 
 
 @app.command()

@@ -94,10 +94,6 @@ sections:
     title: Run
     desc: Invoke the C-Star CLI on the saved blueprint.
     required: false
-  review.workplan:
-    title: Workplan (experimental)
-    desc: Save a deferred workplan that runs this blueprint later.
-    required: false
 
   # --- example: an Advanced-settings section (namespace exercised, not exhaustive) ---
   settings.bgc:
@@ -621,8 +617,6 @@ fields:
     label: Save to disk
   buttons.save_spec:
     label: Save as new catalog entry
-  buttons.workplan:
-    label: Save workplan (experimental)
   settings.lateral_visc.visc2:
     label: Horizontal viscosity
     symbol: visc2

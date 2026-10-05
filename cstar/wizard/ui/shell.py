@@ -89,3 +89,21 @@ def blueprint_app(catalog_root: str | None = None) -> AppShell:
 
     app = ForgeBlueprintWizardApp(catalog_root)
     return AppShell([("Blueprint", app)])
+
+
+def app(catalog_root: str | None = None) -> AppShell:
+    """Build the two-page wizard :class:`AppShell`: "Blueprint" and "Workplan".
+
+    The Workplan page shares the Blueprint page's app (and so its catalog).
+    Imports are lazy (both pages, in turn, lazily import ipywidgets).
+    """
+    from cstar.wizard.wizard import ForgeBlueprintWizardApp
+    from cstar.wizard.workplan_builder import WorkplanBuilderPage
+
+    blueprint_page = ForgeBlueprintWizardApp(catalog_root)
+    return AppShell(
+        [
+            ("Blueprint", blueprint_page),
+            ("Workplan", WorkplanBuilderPage(blueprint_page)),
+        ]
+    )
