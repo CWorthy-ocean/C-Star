@@ -366,7 +366,10 @@ def test_forge_step_offers_no_override_form(page):
     assert pane._directives_section.layout.display == "none"
 
 
-def test_current_blueprint_page_config_saves_and_uses_that_file(page, bp_app):
+def test_current_blueprint_page_config_saves_and_uses_that_file(
+    page, bp_app, monkeypatch
+):
+    monkeypatch.setattr(bp_app.inner, "_ensure_boundaries_derived", lambda: True)
     pane = page.panes[0]
     assert bp_app.inner.config is not None  # the default blueprint is valid
     pane.source.value = wb.SOURCE_CURRENT
@@ -1263,3 +1266,173 @@ def test_sticky_bar_links_every_card(page):
         if f"#forge-sec-{k}'" in page.sticky_bar.value
     ]
     assert anchors == ["start", "workplan", "compute", "steps", "recipes", "review"]
+
+
+# ---------------------------------------------------------------------------
+# review follow-ups
+# ---------------------------------------------------------------------------
+def test_current_config_is_not_saved_when_boundaries_cannot_be_derived(
+    page, bp_app, monkeypatch
+):
+    saved = Path(bp_app.inner.save_path.value)
+    saved.unlink(missing_ok=True)
+    monkeypatch.setattr(bp_app.inner, "_ensure_boundaries_derived", lambda: False)
+    pane = page.panes[0]
+    pane.source.value = wb.SOURCE_CURRENT
+    assert pane._current_path == ""
+    assert "boundaries could not be derived" in pane.current_note.value
+    assert "forge-banner err" in pane.current_note.value
+    assert not saved.exists()
+    assert any("choose a blueprint" in p for p in page.problems)
+
+
+def test_upscale_use_pio_defaults_to_off_when_unknown(page, tmp_path):
+    for name in ("inner", "outer"):
+        pane = page.panes[0] if name == "inner" else page.add_step(name)
+        pane.name.value = name
+        pane.source.value = wb.SOURCE_PATH
+        pane.path.value = str(tmp_path / "unreadable.yaml")
+        pane.application.value = "roms_marbl"
+    page.upscale_levels.value = ["inner", "outer"]
+    page.upscale_btn.click()
+    upscale = {p.name.value: p for p in page.panes}["upscale_inner_outer"]
+    assert upscale._form["pio"][0].value is False
+
+
+def test_upscale_use_pio_of_a_deferred_level_comes_from_the_hook(page):
+    page._delete(page.panes[0])
+    _name_page(page)
+    page.forge_source.value = _FORGE_BP
+    page.forge_btn.click()
+    inner = page.add_step("inner")
+    inner.source.value = wb.SOURCE_DEFERRED
+    inner.producer.value = "forge"  # wio-toy-simple predicts use_pio=True
+    outer = page.add_step("outer")
+    outer.source.value = wb.SOURCE_DEFERRED
+    outer.producer.value = "forge"
+    page.upscale_levels.value = ["inner", "outer"]
+    page.upscale_btn.click()
+    upscale = {p.name.value: p for p in page.panes}["upscale_inner_outer"]
+    assert upscale._form["pio"][0].value is True
+
+
+@pytest.mark.parametrize(
+    "block",
+    [
+        {"launcher": "slurm", "system": "derecho", "slurm": {"cpus_per_node": 128}},
+        {"launcher": "local", "slurm": {"max_walltime": "01:00:00"}},
+        {
+            "launcher": "slurm",
+            "system": "anvil",
+            "slurm": {"cpus_per_node": 64, "queue_name": "shared", "num_nodes": 2},
+        },
+        {"launcher": "slurm", "slurm": {"account_name": "x"}},
+    ],
+)
+def test_compute_environment_round_trips(page, roms_bp, tmp_path, block):
+    path = tmp_path / "plan.yaml"
+    path.write_text(
+        yaml.safe_dump(
+            {
+                "name": "rt",
+                "description": "round trip",
+                "compute_environment": block,
+                "steps": [
+                    {
+                        "name": "s",
+                        "application": "roms_marbl",
+                        "blueprint": str(roms_bp),
+                    }
+                ],
+            }
+        )
+    )
+    original = deserialize(path, Workplan)
+    page.load_workplan(original, path)
+    assert page.problems == []
+    assert page.draft.compute_environment == original.compute_environment == block
+
+
+def test_loaded_unknown_system_is_kept_and_shown(page, roms_bp, tmp_path):
+    path = tmp_path / "plan.yaml"
+    path.write_text(
+        yaml.safe_dump(
+            {
+                "name": "rt",
+                "description": "d",
+                "compute_environment": {"launcher": "slurm", "system": "derecho"},
+                "steps": [
+                    {
+                        "name": "s",
+                        "application": "roms_marbl",
+                        "blueprint": str(roms_bp),
+                    }
+                ],
+            }
+        )
+    )
+    page._load_from_path(str(path))
+    assert page.machine.value == wb.MACHINE_CUSTOM
+    assert "derecho" in page.compute_note.value
+    page.machine.value = "anvil"  # choosing a real machine replaces it
+    assert page.draft.compute_environment["system"] == "anvil"
+
+
+def test_renaming_a_step_remaps_placeholders_everywhere(page):
+    _name_page(page)
+    a = page.panes[0]
+    a.name.value = "a"
+    a.source.value = wb.SOURCE_INLINE
+    a.application.value = "hello_world"
+    a._form["target"][0].value = "world"
+    b = page.add_step("user")
+    b.source.value = wb.SOURCE_INLINE
+    b.application.value = "nest_ic"
+    b._form["parent_grid"][0].value = "{{output_dir: a}}/grid.nc"
+    b._form["parent_rst"][0].value = "/x/rst.nc"
+    b._form["child_grid"][0].value = "{{ input_dir : a }}/child.nc"
+    b._passthrough_directives = {"other": {"path": "{{output_dir: a}}"}}
+    b._passthrough_compute = {"slurm": {"queue_name": "{{output_dir: a}}"}}
+    b.raw_overrides.value = "extra: '{{output_dir: a}}'"
+    assert {s.name: s for s in page.draft.steps}["user"].depends_on == ["a"]
+
+    a.name.value = "b2"
+
+    step = {s.name: s for s in page.draft.steps}["user"]
+    overrides = step.blueprint_overrides
+    assert overrides["parent_grid"] == "{{output_dir: b2}}/grid.nc"
+    assert overrides["child_grid"] == "{{input_dir: b2}}/child.nc"
+    assert overrides["extra"] == "{{output_dir: b2}}"
+    assert step.directives == {"other": {"path": "{{output_dir: b2}}"}}
+    assert step.compute_overrides == {"slurm": {"queue_name": "{{output_dir: b2}}"}}
+    assert step.depends_on == ["b2"]
+
+
+def test_renaming_a_step_remaps_cdr_and_path_references(page, roms_bp):
+    _name_page(page)
+    a = page.panes[0]
+    _path_step(a, "a", roms_bp)
+    b = page.add_step("b")
+    _path_step(b, "b", roms_bp)
+    b.cdr_location.value = "{{output_dir: a}}/cdr.nc"
+    b.cont_kind.value = "path"
+    b.cont_path.value = "{{output_dir: a}}"
+    a.name.value = "z"
+    step = {s.name: s for s in page.draft.steps}["b"]
+    assert step.blueprint_overrides["cdr_forcing"] == {
+        "data": [{"location": "{{output_dir: z}}/cdr.nc"}]
+    }
+    assert step.directives["continue-from"] == {"path": "{{output_dir: z}}"}
+    assert step.depends_on == ["z"]
+
+
+def test_chunk_window_is_prefilled_from_a_deferred_producer(page):
+    page._delete(page.panes[0])
+    _name_page(page)
+    page.forge_source.value = _FORGE_BP
+    page.forge_btn.click()
+    assert page.roms_step_names() == ["roms_marbl"]
+    page.chunk_base.value = "roms_marbl"
+    assert page.chunk_start.value == "2012-01-01 00:00:00"
+    assert page.chunk_end.value == "2012-01-02 00:00:00"
+    assert page.chunk_prefix.value == "roms_marbl"

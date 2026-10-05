@@ -337,6 +337,28 @@ def _placeholder_steps(value: object) -> list[str]:
     return found
 
 
+def _rename_in_placeholders(value: Any, old: str, new: str) -> Any:
+    """``value`` with ``{{<scope>: old}}`` placeholders renamed to ``new``.
+
+    Strings, and the strings inside mappings and lists, are rewritten; every
+    other value is returned unchanged.
+    """
+    if isinstance(value, str):
+
+        def sub(match: Any) -> str:
+            scope, sep, token = match.group(1).partition(":")
+            if sep and token.strip() == old:
+                return mustache(f"{scope.strip()}: {new}")
+            return str(match.group(0))
+
+        return PLACEHOLDER_RE.sub(sub, value)
+    if isinstance(value, dict):
+        return {k: _rename_in_placeholders(v, old, new) for k, v in value.items()}
+    if isinstance(value, list):
+        return [_rename_in_placeholders(v, old, new) for v in value]
+    return value
+
+
 def _parse_datetime(text: str) -> datetime | str:
     """A datetime for ISO ``text``; ``{{placeholder}}`` text is kept as written."""
     parsed = _as_datetime(text)
@@ -413,28 +435,40 @@ def live_system_name() -> str:
         return ""
 
 
-@functools.lru_cache(maxsize=1)
-def slurm_machines() -> dict[str, Scheduler]:
-    """The registered systems that submit through SLURM, with their schedulers."""
-    machines: dict[str, Scheduler] = {}
+def _registered_schedulers() -> dict[str, Scheduler]:
+    """Each registered system's scheduler, skipping systems without one.
+
+    A context whose scheduler cannot be built (a partial registration, e.g. a
+    test stub) is skipped rather than failing the page.
+    """
+    schedulers: dict[str, Scheduler] = {}
     for ctx in get_registered_sys_contexts():
         try:
             scheduler = ctx.create_scheduler()
         except Exception:
             continue
-        if isinstance(scheduler, SlurmScheduler):
-            machines[ctx.name] = scheduler
-    return machines
+        if scheduler is not None:
+            schedulers[ctx.name] = scheduler
+    return schedulers
+
+
+@functools.lru_cache(maxsize=1)
+def slurm_machines() -> dict[str, Scheduler]:
+    """The registered systems that submit through SLURM, with their schedulers."""
+    return {
+        name: sched
+        for name, sched in _registered_schedulers().items()
+        if isinstance(sched, SlurmScheduler)
+    }
 
 
 @functools.lru_cache(maxsize=1)
 def unsupported_machines() -> list[str]:
     """The registered systems with a scheduler but no workplan launcher."""
     return sorted(
-        ctx.name
-        for ctx in get_registered_sys_contexts()
-        if (sched := ctx.create_scheduler()) is not None
-        and not isinstance(sched, SlurmScheduler)
+        name
+        for name, sched in _registered_schedulers().items()
+        if not isinstance(sched, SlurmScheduler)
     )
 
 
@@ -858,12 +892,27 @@ class _StepPane:
     def _use_current_config(self) -> None:
         """Save the blueprint page's config and use that file as the blueprint."""
         wizard = self.page.wizard
-        config = getattr(wizard, "config", None)
+        self._current_path = ""
+        if getattr(wizard, "config", None) is None:
+            self.current_note.value = components.banner(
+                "warn", "The Blueprint page has no valid configuration to use."
+            )
+            return
+        # the Blueprint page's own Save/Run guard: never persist the provisional
+        # open-boundary defaults of a grid whose boundaries were never derived
+        if not wizard._ensure_boundaries_derived():
+            self.current_note.value = components.banner(
+                "err",
+                "Open boundaries could not be derived from the Blueprint page's "
+                "grid (see its Domain-derived properties status). Derive or set "
+                "them manually there, then choose this source again.",
+            )
+            return
+        config = wizard.config  # the derivation rebuilds the configuration
         if config is None:
             self.current_note.value = components.banner(
                 "warn", "The Blueprint page has no valid configuration to use."
             )
-            self._current_path = ""
             return
         target = Path(wizard.save_path.value)
         target.parent.mkdir(parents=True, exist_ok=True)
@@ -1078,6 +1127,22 @@ class _StepPane:
                 if row.widget.value == old:
                     _add_option(row.widget, new)
                     row.widget.value = new
+            # placeholders naming the step, wherever text is held
+            texts = [
+                self.raw_overrides,
+                self.cdr_location,
+                self.cont_path,
+                *(w for w, base, _p in self._form.values() if base is str),
+                *(r.widget for r in self.nest_rows if r.kind == _KIND_PATH),
+            ]
+            for widget in texts:
+                widget.value = _rename_in_placeholders(widget.value, old, new)
+            self._passthrough_directives = _rename_in_placeholders(
+                self._passthrough_directives, old, new
+            )
+            self._passthrough_compute = _rename_in_placeholders(
+                self._passthrough_compute, old, new
+            )
 
     def rename_alias(self, old: str, new: str) -> None:
         """Follow a rename of run alias ``old`` in every ``step@alias`` token."""
@@ -1759,6 +1824,8 @@ class WorkplanBuilderPage:
         self._saved_text = ""
         self._compute_kept: dict[str, Any] = {}
         self._compute_extra: dict[str, Any] = {}
+        self._loaded_system = ""
+        self._local_slurm: dict[str, Any] = {}
         self._confirm_timer: Any = None
         self._awaiting_confirm = False
         self._pre_run_offered = False
@@ -2248,7 +2315,7 @@ class WorkplanBuilderPage:
             _show(widget, slurm)
         _show(self.queue, slurm and not custom)
         _show(self.queue_text, slurm and custom)
-        _show(self.cpus_per_node, slurm and custom)
+        _show(self.cpus_per_node, slurm and (custom or bool(self.cpus_per_node.value)))
         _show(self.machine_note, slurm)
         _show(self.env_note, slurm)
         fallbacks = []
@@ -2266,16 +2333,23 @@ class WorkplanBuilderPage:
             "<span class='forge-hint' style='color:#888'>Blank fields fall back "
             f"to the environment: {', '.join(fallbacks)}</span>"
         )
+        notes = []
+        if self._compute_kept:
+            notes.append("Kept as written: the file's compute_environment.")
+        if slurm and custom and self._custom_system():
+            notes.append(
+                f"System kept as written: <code>{_esc(self._custom_system())}</code>."
+            )
+        if target == TARGET_LOCAL and self._local_slurm:
+            notes.append("The file's SLURM defaults are kept as written.")
         self.compute_note.value = (
-            "<span class='forge-hint'>Kept as written (the file sets workplan-wide "
-            "SLURM defaults without choosing a launcher).</span>"
-            if self._compute_kept
-            else ""
+            f"<span class='forge-hint'>{' '.join(notes)}</span>" if notes else ""
         )
 
     def _populate_compute(self, raw: Mapping[str, Any]) -> None:
         """Show a workplan's ``compute_environment`` in the compute widgets."""
         self._compute_kept, self._compute_extra = {}, {}
+        self._loaded_system, self._local_slurm = "", {}
         for widget in (self.account, self.walltime, self.queue_text):
             widget.value = ""
         self.cpus_per_node.value = 0
@@ -2284,34 +2358,41 @@ class WorkplanBuilderPage:
         except Exception:
             env = ComputeEnvironment()
             self._compute_kept = dict(raw)
+        self._loaded_system = env.system
+        spec = (
+            env.slurm.model_dump(exclude_defaults=True, exclude_none=True)
+            if env.slurm is not None
+            else {}
+        )
         if env.launcher == LocalLauncher.name:
             self.compute_target.value = TARGET_LOCAL
+            self._local_slurm = spec  # not editable here, but not dropped either
         elif env.launcher == SlurmLauncher.name:
             self.compute_target.value = TARGET_SLURM
-            machines = slurm_machines()
+            # a system no SLURM context names (PBS, or unknown) is a custom
+            # machine that keeps its name
             self.machine.value = (
-                env.system
-                if env.system in machines
-                else (
-                    MACHINE_CUSTOM if env.system or not machines else self.machine.value
-                )
+                env.system if env.system in slurm_machines() else MACHINE_CUSTOM
             )
             self._sync_compute()
-            if env.slurm is not None:
-                spec = env.slurm.model_dump(exclude_defaults=True, exclude_none=True)
-                self.account.value = spec.pop("account_name", "")
-                self.walltime.value = spec.pop("max_walltime", "")
-                queue = spec.pop("queue_name", "")
-                _add_option(self.queue, queue)
-                self.queue.value = queue
-                self.queue_text.value = queue
-                self.cpus_per_node.value = spec.pop("cpus_per_node", 0)
-                self._compute_extra = spec
+            self.account.value = spec.pop("account_name", "")
+            self.walltime.value = spec.pop("max_walltime", "")
+            queue = spec.pop("queue_name", "")
+            _add_option(self.queue, queue)
+            self.queue.value = queue
+            self.queue_text.value = queue
+            self.cpus_per_node.value = spec.pop("cpus_per_node", 0)
+            self._compute_extra = spec
         else:
             self.compute_target.value = TARGET_NONE
             if raw and not self._compute_kept:
                 self._compute_kept = dict(raw)
         self._sync_compute()
+
+    def _custom_system(self) -> str:
+        """The loaded system name when it names no machine the page offers."""
+        known = self._loaded_system in slurm_machines()
+        return "" if known else self._loaded_system
 
     def _gather_compute(self) -> dict[str, Any]:
         """The ``compute_environment`` mapping (empty for "Not specified").
@@ -2325,7 +2406,13 @@ class WorkplanBuilderPage:
         if target == TARGET_NONE:
             return copy.deepcopy(self._compute_kept)
         if target == TARGET_LOCAL:
-            env = ComputeEnvironment(launcher=LocalLauncher.name)
+            env = ComputeEnvironment(
+                launcher=LocalLauncher.name,
+                system=self._loaded_system,
+                slurm=SlurmComputeSpec.model_validate(self._local_slurm)
+                if self._local_slurm
+                else None,
+            )
         else:
             custom = self.machine.value == MACHINE_CUSTOM
             queue = (self.queue_text if custom else self.queue).value.strip()
@@ -2337,17 +2424,14 @@ class WorkplanBuilderPage:
                         ("account_name", self.account.value.strip()),
                         ("max_walltime", self.walltime.value.strip()),
                         ("queue_name", queue),
-                        (
-                            "cpus_per_node",
-                            (self.cpus_per_node.value or None) if custom else None,
-                        ),
+                        ("cpus_per_node", self.cpus_per_node.value or None),
                     )
                     if value
                 },
             }
             env = ComputeEnvironment(
                 launcher=SlurmLauncher.name,
-                system="" if custom else self.machine.value,
+                system=self._custom_system() if custom else self.machine.value,
                 slurm=SlurmComputeSpec.model_validate(spec) if spec else None,
             )
         data = env.model_dump(exclude_defaults=True, exclude_none=True)
@@ -2682,16 +2766,28 @@ class WorkplanBuilderPage:
         self._prefill_window(self.ramp_base.value, self.ramp_start, None)
 
     def _prefill_window(self, base: str, start: Any, end: Any) -> None:
-        """Prefill a recipe's window from the base step's blueprint, when readable."""
+        """Prefill a recipe's window from the base step's blueprint, or from what
+        its producer is predicted to emit when the blueprint is deferred.
+        """
         pane = self.pane_named(base) if base else None
-        facts = pane.facts() if pane else None
-        if facts is None:
+        if pane is None:
             return
-        override = pane.end_date.value.strip() if pane else ""
-        if facts.start_date:
-            start.value = str(facts.start_date)
+        first: datetime | None
+        last: datetime | None
+        if pane.source.value == SOURCE_DEFERRED:
+            emitted = self.emitted_for_token(pane.producer.value)
+            if emitted is None:
+                return
+            first, last = emitted.start_date, emitted.end_date
+        else:
+            facts = pane.facts()
+            if facts is None:
+                return
+            first, last = facts.start_date, facts.end_date
+        if first:
+            start.value = str(first)
         if end is not None:
-            end.value = override or (str(facts.end_date) if facts.end_date else "")
+            end.value = pane.end_date.value.strip() or (str(last) if last else "")
 
     def _generate(self, status: Any, build: Callable[[], Generated]) -> None:
         """Run a generator and append its steps; its ValueError becomes the status."""
@@ -2824,9 +2920,13 @@ class WorkplanBuilderPage:
         levels = [self._base_step(n) for n in names]
 
         def use_pio(step: Step) -> bool:
+            # an unreadable level takes the blueprint model's default (off)
             pane = self.pane_named(step.name)
+            if pane is not None and pane.source.value == SOURCE_DEFERRED:
+                emitted = self.emitted_for_token(pane.producer.value)
+                return emitted.use_pio if emitted is not None else False
             facts = pane.facts() if pane else None
-            return True if facts is None or facts.use_pio is None else facts.use_pio
+            return bool(facts.use_pio) if facts is not None else False
 
         return upscale_chain(levels, use_pio_of=use_pio)
 
