@@ -250,6 +250,31 @@ class RestartFile(BaseModel):
         ]
 
     @classmethod
+    def _first_piece_at(
+        cls, rst_files: Sequence["RestartFile"], timestamp: datetime
+    ) -> "RestartFile | None":
+        """Select the restart file dated exactly `timestamp`.
+
+        Parameters
+        ----------
+        rst_files : Sequence[RestartFile]
+            The restart files to choose from.
+        timestamp : datetime
+            The timestamp the file name must carry.
+
+        Returns
+        -------
+        RestartFile | None
+            The match with the lowest partition (a whole file counts as the
+            0th), or `None` if no file is dated `timestamp`.
+        """
+        return min(
+            (rst for rst in rst_files if rst.timestamp == timestamp),
+            key=lambda rst: rst.partition or 0,
+            default=None,
+        )
+
+    @classmethod
     def find(cls, search_path: Path, notfound_ok: bool = True) -> "RestartFile | None":
         """Search for a restart file in the specified location.
 
@@ -289,10 +314,8 @@ class RestartFile(BaseModel):
         for partitioned in (True, False):
             rst_files = cls.candidates(search_path, partitioned=partitioned)
             if rst_files:
-                latest_ts = max(rst.timestamp for rst in rst_files)
-                return min(
-                    (rst for rst in rst_files if rst.timestamp == latest_ts),
-                    key=lambda rst: rst.partition or 0,
+                return cls._first_piece_at(
+                    rst_files, max(rst.timestamp for rst in rst_files)
                 )
 
         if not notfound_ok:
@@ -300,6 +323,61 @@ class RestartFile(BaseModel):
             raise FileNotFoundError(msg)
 
         return None
+
+    @classmethod
+    def find_at(cls, search_path: Path, timestamp: datetime) -> "RestartFile":
+        """Search for the restart file dated exactly `timestamp`.
+
+        If `search_path` identifies a directory, the item whose name carries
+        `timestamp` and the 0th partition piece (if partitioned) is returned;
+        as in `find`, partitioned files are preferred over whole files.
+
+        If `search_path` identifies a file, that `RestartFile` will be returned
+        provided its name carries `timestamp`.
+
+        Parameters
+        ----------
+        search_path : Path
+            The path to search
+        timestamp : datetime
+            The timestamp the restart file name must carry; matched exactly.
+
+        Returns
+        -------
+        RestartFile
+
+        Raises
+        ------
+        ValueError
+            If no directory or file exists at the search path.
+        FileNotFoundError
+            If no restart file is dated `timestamp`; the message lists the
+            timestamps that are present.
+        """
+        search_path = search_path.expanduser().resolve()
+
+        if search_path.is_file():
+            groups = [[RestartFile(path=search_path)]]
+        elif search_path.exists():
+            groups = [
+                cls.candidates(search_path, partitioned=partitioned)
+                for partitioned in (True, False)
+            ]
+        else:
+            msg = f"No directory or file found at path: {search_path!r}"
+            raise ValueError(msg)
+
+        for rst_files in groups:
+            if match := cls._first_piece_at(rst_files, timestamp):
+                return match
+
+        found = sorted({rst.timestamp for rst_files in groups for rst in rst_files})
+        listing = ", ".join(str(ts) for ts in found) or "none"
+        msg = (
+            f"No restart file dated {timestamp} located in {search_path!r}; "
+            f"restart timestamps found there: {listing}"
+        )
+        raise FileNotFoundError(msg)
 
     @classmethod
     def from_parts(
@@ -859,6 +937,10 @@ class ContinuanceDirective(OverrideDirective):
     time the task was scheduled, and applies it as the step's initial
     conditions.
 
+    By default the latest restart file in the source is used; the optional
+    `timestamp` key selects the restart whose file name carries exactly that
+    timestamp instead.
+
     Warns only when the step explicitly overrode `start_date` (via the
     workplan's `blueprint_overrides.runtime_params.start_date`, packaged by
     `package_runtime_overrides` into the runtime `apply-overrides` directive)
@@ -875,10 +957,75 @@ class ContinuanceDirective(OverrideDirective):
     """Key used to specify a path as the source for continuance."""
     KEY_STEP: t.Final[str] = SOURCE_KEY_STEP
     """Key used to specify a step name as the source for continuance."""
+    KEY_TIMESTAMP: t.Final[str] = "timestamp"
+    """Optional key selecting the restart dated exactly this timestamp instead of the latest."""
 
     @classmethod
     def key(cls) -> str:
         return "continue-from"
+
+    @classmethod
+    def _parse_timestamp(cls, value: t.Any) -> datetime:
+        """Parse a `timestamp` config value into the restart time it selects.
+
+        YAML delivers the value as a `datetime`, `date`, `int` or `str`
+        depending on how it was written; all are parsed from their string form.
+        A date alone means midnight. Nothing else is completed or guessed.
+
+        Parameters
+        ----------
+        value : t.Any
+            The configured value: an ISO 8601 date or date-time, or the
+            14-digit timestamp found in restart file names.
+
+        Returns
+        -------
+        datetime
+            The naive, whole-second time the value denotes.
+
+        Raises
+        ------
+        ValueError
+            If the value is not such a date or time, or carries a timezone or
+            fractional seconds (restart file names have neither).
+        """
+        text = str(value).strip()
+        bare_digits = text.isascii() and text.isdigit()
+        msg = (
+            f"{cls.KEY_TIMESTAMP!r} must be an ISO 8601 date or date-time (e.g. "
+            "2012-02-01 00:00:00) or a 14-digit restart file timestamp (e.g. "
+            f"20120201000000), got {text!r}"
+        )
+
+        # `fromisoformat` takes any one character as the date/time separator, so
+        # it would read 13 digits as YYYYMMDD0HHMM; bare digits must be a date
+        # (8) or a restart file timestamp (14).
+        if bare_digits and len(text) not in (8, 14):
+            raise ValueError(msg)
+
+        try:
+            if bare_digits and len(text) == 14:
+                parsed = datetime.strptime(text, RestartFile.FMT_TS)
+            else:
+                parsed = datetime.fromisoformat(text)
+        except ValueError:
+            raise ValueError(msg) from None
+
+        if parsed.tzinfo is not None:
+            msg = (
+                f"{cls.KEY_TIMESTAMP!r} must not carry a timezone (restart file "
+                f"names do not), got {text!r}"
+            )
+            raise ValueError(msg)
+
+        if parsed.microsecond:
+            msg = (
+                f"{cls.KEY_TIMESTAMP!r} must be a whole number of seconds (restart "
+                f"file names have no fractions), got {text!r}"
+            )
+            raise ValueError(msg)
+
+        return parsed
 
     @classmethod
     def _config_problems(cls, config: Mapping[str, t.Any]) -> list[str]:
@@ -894,21 +1041,36 @@ class ContinuanceDirective(OverrideDirective):
         list[str]
         """
         found_keys = set(config.keys())
-        minimal_keys = {cls.KEY_PATH, cls.KEY_STEP}
+        source_keys = {cls.KEY_PATH, cls.KEY_STEP}
+        supported_keys = source_keys | {cls.KEY_TIMESTAMP}
         problems: list[str] = []
 
-        if (found_keys - minimal_keys) or not found_keys.intersection(minimal_keys):
-            problems.append(
-                "Invalid continuance transform configuration; supported configuration: "
-                f"{', '.join(minimal_keys)}, provided configuration: {', '.join(found_keys)}"
-            )
+        if (found_keys - supported_keys) or not found_keys.intersection(source_keys):
+            if found_keys == {cls.KEY_TIMESTAMP}:
+                problems.append(
+                    "Invalid continuance transform configuration: "
+                    f"{cls.KEY_TIMESTAMP!r} selects a restart from a source; also "
+                    f"supply {cls.KEY_STEP!r} or {cls.KEY_PATH!r}."
+                )
+            else:
+                problems.append(
+                    "Invalid continuance transform configuration; supported "
+                    f"configuration: {', '.join(sorted(supported_keys))}, provided "
+                    f"configuration: {', '.join(sorted(found_keys))}"
+                )
             return problems
 
-        if minimal_keys.issubset(found_keys):
+        if source_keys.issubset(found_keys):
             problems.append(
                 f"Invalid continuance transform configuration: {cls.KEY_PATH!r} and "
                 f"{cls.KEY_STEP!r} are mutually exclusive; supply only one restart source."
             )
+
+        if cls.KEY_TIMESTAMP in config:
+            try:
+                cls._parse_timestamp(config[cls.KEY_TIMESTAMP])
+            except ValueError as err:
+                problems.append(f"Invalid continuance transform configuration: {err}")
 
         return problems
 
@@ -997,6 +1159,9 @@ class ContinuanceDirective(OverrideDirective):
             If the supplied configuration is not supported.
         ValueError
             If a restart file cannot be located with the supplied configuration.
+        FileNotFoundError
+            If the source holds no restart files, or none is dated the
+            requested `timestamp`.
         """
         if problems := self._config_problems(self._config):
             raise NotImplementedError("; ".join(problems))
@@ -1016,6 +1181,12 @@ class ContinuanceDirective(OverrideDirective):
                 restart_file = RestartFile.find(search_path, notfound_ok=False)
             except FileNotFoundError as err:
                 raise FileNotFoundError(f"{err} {_LEGACY_LAYOUT_HINT}") from err
+            if self.KEY_TIMESTAMP in self._config:
+                # `find` above raised with the legacy-layout hint if the source
+                # holds no restarts; a timestamp miss instead lists what exists.
+                restart_file = RestartFile.find_at(
+                    search_path, self._parse_timestamp(self._config[self.KEY_TIMESTAMP])
+                )
             if restart_file:
                 if name:
                     _reject_partitioned_step_output(
