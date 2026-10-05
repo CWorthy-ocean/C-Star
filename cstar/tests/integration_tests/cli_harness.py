@@ -115,7 +115,7 @@ def sentinel_path(state_home: Path, run_id: str, step: str) -> Path:
 
 def step_root(data_home: Path, run_id: str, step: str) -> Path:
     """The directory ``step`` of ``run_id`` runs in, which holds its ``logs/``."""
-    return data_home / run_id / "tasks" / slugify(step)
+    return data_home / "workplan_runs" / run_id / "tasks" / slugify(step)
 
 
 def read_status(path: Path) -> int | None:

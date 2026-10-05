@@ -11,7 +11,7 @@ from cstar.base.env import ENV_CSTAR_RUNID, ENV_CSTAR_STATE_HOME, FLAG_ON
 from cstar.base.exceptions import CstarExpectationFailed
 from cstar.base.feature import ENV_FF_ORCH_TRX_TIMESPLIT
 from cstar.cli.workplan.compose import WorkplanTemplate, compose
-from cstar.execution.file_system import DirectoryManager
+from cstar.execution.file_system import StateDirectoryManager
 from cstar.orchestration.adapter import StepToPlaceholderAdapter
 from cstar.orchestration.dag_runner import (
     ExecutiveRunSummary,
@@ -296,9 +296,10 @@ async def test_prepare_composed_dag(
 
         configure_environment(working_dir, run_id)
         run_id = get_run_id()
-        working_dir = DirectoryManager.data_home()
         check_environment()
-        wp, wp_path = await prepare_workplan(generated_wp_path, working_dir / run_id)
+        wp, wp_path = await prepare_workplan(
+            generated_wp_path, StateDirectoryManager.data_dir(run_id)
+        )
 
     wp = deserialize(wp_path, LiveWorkplan)
     steps = list(wp.steps)

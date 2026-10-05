@@ -172,7 +172,7 @@ def test_live_step(tmp_path: Path) -> None:
 
         directory_mgr = DirectoryManager()
         data_home = directory_mgr.data_home()
-        expected = data_home / run_id / task_dir_name / ls_1.safe_name
+        expected = data_home / "workplan_runs" / run_id / task_dir_name / ls_1.safe_name
         assert actual == expected
 
         actual = ls_2.working_dir
@@ -190,7 +190,7 @@ def test_live_step(tmp_path: Path) -> None:
         assert actual == expected
 
         actual = ls_5.working_dir
-        expected = data_home / run_id / task_dir_name / ls_5.safe_name
+        expected = data_home / "workplan_runs" / run_id / task_dir_name / ls_5.safe_name
         assert actual == expected
         assert ls_5.name == ls_5_name  # confirm the update was honored
 
@@ -202,6 +202,43 @@ def test_blueprint_run_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> N
     actual = StateDirectoryManager.blueprint_run_dir("roms_marbl", "NA 8x8 / Test")
 
     assert actual == tmp_path / "blueprint_runs" / "roms_marbl" / "na-8x8-test"
+
+
+def test_data_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Verify a workplan run's directory layout under the data home."""
+    monkeypatch.setenv(ENV_CSTAR_DATA_HOME, str(tmp_path))
+
+    actual = StateDirectoryManager.data_dir("my-run")
+
+    assert actual == tmp_path / "workplan_runs" / "my-run"
+
+
+@pytest.mark.parametrize(
+    ("existing", "expected"),
+    [
+        pytest.param(["my-run/tasks"], "my-run", id="legacy-run-root-kept"),
+        pytest.param(["my-run"], "workplan_runs/my-run", id="legacy-dir-without-tasks"),
+        pytest.param(
+            ["my-run/tasks", "workplan_runs/my-run"],
+            "workplan_runs/my-run",
+            id="new-root-wins",
+        ),
+    ],
+)
+def test_data_dir_legacy_run_root(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    existing: list[str],
+    expected: str,
+) -> None:
+    """A run started under the old layout keeps its root directly in the data home."""
+    monkeypatch.setenv(ENV_CSTAR_DATA_HOME, str(tmp_path))
+    for rel_path in existing:
+        (tmp_path / rel_path).mkdir(parents=True)
+
+    actual = StateDirectoryManager.data_dir("my-run")
+
+    assert actual == tmp_path / expected
 
 
 def test_blueprint_run_dir_rejects_name_without_slug(
