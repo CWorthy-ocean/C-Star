@@ -34,10 +34,10 @@ def user_catalog_root() -> Path:
     """Return the root of the user-writable catalog layer.
 
     Deliberately home-anchored (``~/cstar/catalog`` by default -- see
-    ``cstar.base.env.default_catalog_root``), NOT the ``$SCRATCH``-rebased
-    layouts used elsewhere (see ``config.py``): catalog entries are durable,
-    user-registered content, not job-scoped working data, and must survive HPC
-    scratch purges.
+    ``cstar.base.env.default_catalog_root``), NOT on the scratch file system
+    ``CSTAR_DATA_HOME`` and the source-data cache may use: catalog entries are
+    durable, user-registered content, not job-scoped working data, and must
+    survive HPC scratch purges.
 
     If ``CSTAR_CATALOG`` (C-Star's registered env var, see ``cstar.base.env``)
     is set and non-empty, the first ``os.pathsep``-separated entry is used

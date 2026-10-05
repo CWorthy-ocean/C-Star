@@ -1,4 +1,5 @@
 import asyncio
+import contextlib
 import errno
 import functools
 import os
@@ -19,10 +20,13 @@ from cstar.base.env import (
     ENV_CSTAR_CACHE_HOME,
     ENV_CSTAR_CONFIG_HOME,
     ENV_CSTAR_DATA_HOME,
+    ENV_CSTAR_PROJECT_HOME,
     ENV_CSTAR_RUNID,
     ENV_CSTAR_STATE_HOME,
     get_env_item,
+    hpc_data_directory,
 )
+from cstar.base.exceptions import CstarError
 from cstar.base.log import LoggingMixin, get_logger
 from cstar.base.utils import _run_cmd, slugify
 
@@ -70,6 +74,12 @@ class DirectoryManager:
     """Manage the directories used by C-Star."""
 
     _PKG_SUBDIR: t.Literal["cstar"] = "cstar"
+    _SOURCE_DATA_SUBDIR: t.Literal["source-data"] = "source-data"
+    """The source-data cache's name under ``<root>/cstar``."""
+    _LEGACY_SOURCE_DATA_SUBDIR: t.Literal["cstar-forge-data/source-data"] = (
+        "cstar-forge-data/source-data"
+    )
+    """Where cstar-forge placed the source-data cache under the same root."""
 
     @classmethod
     def xdg_dir(cls, env_item: "EnvItem") -> Path:
@@ -140,6 +150,64 @@ class DirectoryManager:
         Used to store C-Star state files (databases, logs, etc.).
         """
         return cls.xdg_dir(load_xdg_metadata().state)
+
+    @classmethod
+    def _source_data_paths(cls) -> tuple[Path, Path]:
+        """Return the standard and legacy source-data cache paths, on the same root."""
+        root = Path(
+            get_env_item(ENV_CSTAR_PROJECT_HOME).value
+            or hpc_data_directory()
+            or Path.home()
+        )
+        root = root.expanduser().resolve()
+        return (
+            root / cls._PKG_SUBDIR / cls._SOURCE_DATA_SUBDIR,
+            root / cls._LEGACY_SOURCE_DATA_SUBDIR,
+        )
+
+    @classmethod
+    def source_data_home(cls) -> Path:
+        """Get the shared source-data cache directory.
+
+        Holds downloaded and user-staged source datasets (GLORYS, TPXO, ...) that
+        every domain reuses, at ``<root>/cstar/source-data``. The root is
+        ``CSTAR_PROJECT_HOME`` (default ``$PROJECT``), else the scratch file system
+        (:func:`cstar.base.env.hpc_data_directory`), else the home directory. The
+        cache is durable and deliberately not derived from ``CSTAR_DATA_HOME``.
+        Does not create the directory; see :meth:`ensure_source_data_home`.
+        """
+        return cls._source_data_paths()[0]
+
+    @classmethod
+    def ensure_source_data_home(cls) -> Path:
+        """Create the source-data cache directory and return it.
+
+        A cache at the legacy ``<root>/cstar-forge-data/source-data`` is adopted:
+        when it exists and the standard directory does not, the standard directory
+        is created as a relative symlink to it.
+
+        Raises
+        ------
+        CstarError
+            If the standard directory is a symlink whose target is missing (an
+            unmounted file system, say), rather than replacing it with an empty
+            directory.
+        """
+        home, legacy = cls._source_data_paths()
+        if home.is_symlink() and not home.exists():
+            msg = (
+                f"The source-data cache {home} links to {home.readlink()}, which "
+                "does not exist. Restore the target or remove the link."
+            )
+            raise CstarError(msg)
+        if not home.exists() and legacy.is_dir():
+            home.parent.mkdir(parents=True, exist_ok=True)
+            # Another process sharing the root may have linked it first.
+            with contextlib.suppress(FileExistsError):
+                home.symlink_to(os.path.relpath(legacy, home.parent))
+                log.info("Linked source-data cache %s to existing %s", home, legacy)
+        home.mkdir(parents=True, exist_ok=True)
+        return home
 
 
 class JobFileSystemManager(LoggingMixin):

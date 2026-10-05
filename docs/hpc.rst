@@ -23,7 +23,7 @@ missing. A shell profile for a cluster typically carries:
    export CSTAR_SLURM_MAX_WALLTIME="01:00:00"     # default time requested per job
 
    # Only if your system does not already define them (see "Where data goes"):
-   # export PROJECT=/path/to/your/project/directory
+   # export CSTAR_PROJECT_HOME=/path/to/your/group/directory
    # export SCRATCH=/path/to/your/scratch/directory
 
 These are the defaults for every step of a workplan; a step can override
@@ -78,30 +78,27 @@ scratch.
 
 Forge also keeps a **source-data cache** of the downloaded and user-staged
 datasets (GLORYS, TPXO, and so on), shared by every domain you generate. It
-is placed per system:
+is ``cstar/source-data`` under the first of these that is set:
 
-.. list-table::
-   :header-rows: 1
-   :widths: 30 70
+1. ``CSTAR_PROJECT_HOME``, a durable project directory. It defaults to
+   ``$PROJECT``, which Anvil exports.
+2. The scratch file system, found the same way as for ``CSTAR_DATA_HOME``
+   above.
+3. Your home directory.
 
-   * - System
-     - Source-data cache
-   * - Laptop or workstation
-     - ``~/cstar-forge-data/source-data``
-   * - Anvil
-     - ``$PROJECT/cstar-forge-data/source-data``
-   * - Perlmutter
-     - ``$PROJECT/cstar-forge-data/source-data`` if ``PROJECT`` is set,
-       otherwise ``$SCRATCH/cstar-forge-data/source-data``
-   * - Bouchet
-     - ``$PROJECT/cstar-forge-data/source-data`` if ``PROJECT`` is set,
-       otherwise ``<scratch_pi_*>/<user>/cstar-forge-data/source-data``
+So a laptop uses ``~/cstar/source-data``, Anvil ``$PROJECT/cstar/source-data``,
+and Perlmutter ``$SCRATCH/cstar/source-data`` unless you set a project
+directory. The cache is meant to last, so ``CSTAR_DATA_HOME`` does not move
+it, and ``cstar admin clean`` never deletes it. If you used an earlier
+version, an existing ``cstar-forge-data/source-data`` directory in the same
+place is linked to the new location the first time Forge runs, so nothing is
+downloaded again.
 
 Some systems define ``PROJECT`` and ``SCRATCH`` for you (Anvil exports both,
 Perlmutter exports ``SCRATCH``); check with ``echo $PROJECT $SCRATCH`` and set
-them in your shell profile only if they are empty. ``PROJECT`` pointing at a
-group directory shares one source-data cache with your collaborators;
-``SCRATCH`` names the scratch root where the system does not export one.
+them in your shell profile only if they are empty. Pointing
+``CSTAR_PROJECT_HOME`` (or ``PROJECT``) at a group directory shares one
+source-data cache with your collaborators.
 
 .. code-block:: console
 

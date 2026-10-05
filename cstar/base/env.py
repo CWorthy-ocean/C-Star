@@ -345,6 +345,20 @@ ENV_CSTAR_DATA_HOME: t.Annotated[
 ] = "CSTAR_DATA_HOME"
 """Environment variable used to override the home directory for C-Star dataset storage."""
 
+ENV_CSTAR_PROJECT_HOME: t.Annotated[
+    t.Literal["CSTAR_PROJECT_HOME"],
+    EnvVar(
+        "Durable, group-shareable project directory (the directory itself; C-Star "
+        "writes under a ``cstar`` subdirectory). Holds the shared source-data cache "
+        "of downloaded datasets. Defaults to ``$PROJECT``; when neither is set the "
+        "cache falls back to the scratch file system, then to the home directory.",
+        GROUP_FS,
+        indirect_var="PROJECT",
+        default_factory=indirect_default_factory,
+    ),
+] = "CSTAR_PROJECT_HOME"
+"""Durable, group-shareable project directory; defaults to ``$PROJECT``."""
+
 
 def default_catalog_root(env_var: EnvVar) -> str:
     """Default catalog location: ``~/cstar/catalog``.

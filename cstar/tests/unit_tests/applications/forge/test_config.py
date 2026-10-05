@@ -3,10 +3,11 @@ Tests for the config.py module.
 
 Tests cover:
 - DataPaths dataclass
-- detect_system (the seam onto C-Star's HostNameEvaluator)
-- System layout registry / source-data path resolution
-- resolve_host (working directory used as written)
-- get_data_paths / ensure_data_dirs
+- user_catalog_root (the catalog half of the data paths)
+- resolve_host (working directory used as written, system named by HostNameEvaluator)
+- get_data_paths / ensure_data_dirs (source-data location itself is tested with
+  DirectoryManager.source_data_home)
+- format_paths
 """
 
 from dataclasses import FrozenInstanceError
@@ -15,13 +16,9 @@ from pathlib import Path
 import pytest
 
 import cstar.applications.forge.config as config_module
-from cstar.applications.forge.config import (
-    SYSTEM_LAYOUT_REGISTRY,
-    DataPaths,
-    get_data_paths,
-    register_system,
-)
+from cstar.applications.forge.config import DataPaths, ensure_data_dirs, get_data_paths
 from cstar.catalog.domain_catalog import user_catalog_root
+from cstar.execution.file_system import DirectoryManager
 
 
 class TestDataPaths:
@@ -82,193 +79,14 @@ class TestUserCatalogRoot:
         assert not result.exists()
 
 
-class TestDetectSystem:
-    """detect_system() is a one-line seam onto C-Star's HostNameEvaluator.
+def _fake_evaluator(name: str) -> type:
+    """Stand in for C-Star's HostNameEvaluator, whose heuristics are tested elsewhere."""
 
-    C-Star's own hostname/LMOD/is_match matching heuristics belong to C-Star's
-    test suite, not forge's — these tests only check that the seam delegates,
-    not how HostNameEvaluator itself decides a name.
-    """
+    class _FakeEvaluator:
+        pass
 
-    def test_delegates_to_host_name_evaluator(self, monkeypatch):
-        class _FakeEvaluator:
-            name = "anvil"
-
-        monkeypatch.setattr(config_module, "HostNameEvaluator", _FakeEvaluator)
-        assert config_module.detect_system() == "anvil"
-
-    def test_real_evaluator_returns_a_nonempty_name(self):
-        # No mocking: exercises the actual import wiring end to end (the dev
-        # box this runs on is never one of the registered HPC systems, so this
-        # only asserts C-Star could name *something*, not which name).
-        assert config_module.detect_system()
-
-
-class TestSystemLayoutRegistry:
-    """Tests for the system layout registry, keyed by C-Star's system names."""
-
-    def test_system_layout_registry_has_defaults(self):
-        assert "anvil" in SYSTEM_LAYOUT_REGISTRY
-        assert "perlmutter" in SYSTEM_LAYOUT_REGISTRY
-        assert "bouchet" in SYSTEM_LAYOUT_REGISTRY
-        assert "darwin_arm64" in SYSTEM_LAYOUT_REGISTRY
-        assert "linux_x86_64" in SYSTEM_LAYOUT_REGISTRY
-        assert "linux_aarch64" in SYSTEM_LAYOUT_REGISTRY
-
-    def test_register_system_decorator(self):
-        """Test registering a custom system layout."""
-
-        @register_system("test_system")
-        def test_layout(home: Path, env: dict) -> Path:
-            return home / "test-source"
-
-        assert "test_system" in SYSTEM_LAYOUT_REGISTRY
-        assert SYSTEM_LAYOUT_REGISTRY["test_system"] == test_layout
-
-        # Clean up
-        del SYSTEM_LAYOUT_REGISTRY["test_system"]
-
-    def test_home_anchored_layout_registered_under_each_local_dev_name(self, tmp_path):
-        """darwin_arm64/linux_x86_64/linux_aarch64 all share one function."""
-        for tag in ("darwin_arm64", "linux_x86_64", "linux_aarch64"):
-            layout_fn = SYSTEM_LAYOUT_REGISTRY[tag]
-            assert layout_fn is config_module._layout_home_anchored
-            source_data = layout_fn(tmp_path, {})
-            assert source_data == tmp_path / "cstar-forge-data" / "source-data"
-
-    def test_unregistered_system_name_falls_back_to_home_anchored_layout(self):
-        """.get(name, fallback): any C-Star name with no dedicated HPC layout below
-        (e.g. "derecho", which forge doesn't special-case) gets the home-anchored
-        default -- a deliberate fallback, not a second detection heuristic.
-        """
-        fallback = SYSTEM_LAYOUT_REGISTRY.get(
-            "derecho", config_module._layout_home_anchored
-        )
-        assert fallback is config_module._layout_home_anchored
-
-    def test_anvil_layout(self, tmp_path):
-        """Test Anvil layout function."""
-        layout_fn = SYSTEM_LAYOUT_REGISTRY["anvil"]
-        env = {"PROJECT": str(tmp_path / "proj")}
-        source_data = layout_fn(tmp_path, env)
-
-        assert source_data == tmp_path / "proj" / "cstar-forge-data" / "source-data"
-
-    def test_perlmutter_layout(self, tmp_path):
-        """Test Perlmutter layout function."""
-        layout_fn = SYSTEM_LAYOUT_REGISTRY["perlmutter"]
-        env = {"SCRATCH": str(tmp_path / "scratch")}
-        source_data = layout_fn(tmp_path, env)
-
-        assert source_data == tmp_path / "scratch" / "cstar-forge-data" / "source-data"
-
-    def test_bouchet_layout(self, tmp_path, monkeypatch):
-        """Test Bouchet layout function using the discovered scratch_pi_* dir."""
-        monkeypatch.setattr(config_module, "USER", "testuser")
-        (tmp_path / "scratch_pi_abc" / "testuser").mkdir(parents=True)
-
-        layout_fn = SYSTEM_LAYOUT_REGISTRY["bouchet"]
-        source_data = layout_fn(tmp_path, {})
-
-        scratch_root = tmp_path / "scratch_pi_abc" / "testuser"
-        assert source_data == scratch_root / "cstar-forge-data" / "source-data"
-
-    def test_bouchet_layout_scratch_env_override_wins(self, tmp_path, monkeypatch):
-        """An explicit $SCRATCH override (in the layout's own env dict) wins over the
-        scratch_pi_* glob.
-        """
-        monkeypatch.setattr(config_module, "USER", "testuser")
-        (tmp_path / "scratch_pi_abc" / "testuser").mkdir(parents=True)
-
-        layout_fn = SYSTEM_LAYOUT_REGISTRY["bouchet"]
-        env = {"SCRATCH": str(tmp_path / "explicit-scratch")}
-        source_data = layout_fn(tmp_path, env)
-
-        assert (
-            source_data
-            == tmp_path / "explicit-scratch" / "cstar-forge-data" / "source-data"
-        )
-
-    def test_bouchet_layout_asks_cstar_for_the_scratch_root(
-        self, tmp_path, monkeypatch
-    ):
-        """Discovery is C-Star's ``find_bouchet_scratch_root``, called with the
-        layout's home and this module's USER.
-        """
-        calls = []
-
-        def fake_find(home, user):
-            calls.append((home, user))
-            return tmp_path / "found"
-
-        monkeypatch.setattr(config_module, "USER", "testuser")
-        monkeypatch.setattr(config_module, "find_bouchet_scratch_root", fake_find)
-
-        source_data = SYSTEM_LAYOUT_REGISTRY["bouchet"](tmp_path / "home", {})
-
-        assert calls == [(tmp_path / "home", "testuser")]
-        assert source_data == tmp_path / "found" / "cstar-forge-data" / "source-data"
-
-    def test_bouchet_layout_falls_back_to_home_anchored_without_scratch_pi(
-        self, tmp_path, monkeypatch
-    ):
-        """No scratch_pi_* dir and no $SCRATCH falls back to the home-anchored layout."""
-        monkeypatch.setattr(config_module, "USER", "testuser")
-
-        bouchet_fn = SYSTEM_LAYOUT_REGISTRY["bouchet"]
-        home_fn = config_module._layout_home_anchored
-        assert bouchet_fn(tmp_path, {}) == home_fn(tmp_path, {})
-
-    # ---- $PROJECT: standard env var for the (shared) data-base parent dir ----
-
-    def test_anvil_project_drives_source_data_work_ignored(self, tmp_path):
-        """$PROJECT drives the data base; $WORK is never consulted, so a
-        user-overridden $PROJECT moves everything with it.
-        """
-        layout_fn = SYSTEM_LAYOUT_REGISTRY["anvil"]
-        env = {"PROJECT": str(tmp_path / "proj"), "WORK": str(tmp_path / "work")}
-        source_data = layout_fn(tmp_path, env)
-
-        assert source_data == tmp_path / "proj" / "cstar-forge-data" / "source-data"
-
-    def test_anvil_without_project_uses_home_even_if_work_set(self, tmp_path):
-        """No $PROJECT falls back to home/work; a lone $WORK is ignored."""
-        layout_fn = SYSTEM_LAYOUT_REGISTRY["anvil"]
-        env = {"WORK": str(tmp_path / "elsewhere")}
-        source_data = layout_fn(tmp_path, env)
-        assert source_data == tmp_path / "work" / "cstar-forge-data" / "source-data"
-
-    def test_perlmutter_project_moves_data_base(self, tmp_path):
-        """$PROJECT relocates the data base, overriding the $SCRATCH-based default."""
-        layout_fn = SYSTEM_LAYOUT_REGISTRY["perlmutter"]
-        env = {"PROJECT": str(tmp_path / "proj"), "SCRATCH": str(tmp_path / "scratch")}
-        source_data = layout_fn(tmp_path, env)
-
-        assert source_data == tmp_path / "proj" / "cstar-forge-data" / "source-data"
-
-    def test_bouchet_project_moves_data_base(self, tmp_path, monkeypatch):
-        """$PROJECT relocates the data base; the discovered scratch_pi_* root is
-        only consulted to decide whether the home-anchored fallback applies.
-        """
-        monkeypatch.setattr(config_module, "USER", "testuser")
-        (tmp_path / "scratch_pi_abc" / "testuser").mkdir(parents=True)
-
-        layout_fn = SYSTEM_LAYOUT_REGISTRY["bouchet"]
-        env = {"PROJECT": str(tmp_path / "proj")}
-        source_data = layout_fn(tmp_path, env)
-
-        assert source_data == tmp_path / "proj" / "cstar-forge-data" / "source-data"
-
-    def test_bouchet_project_ignored_without_scratch_root(self, tmp_path, monkeypatch):
-        """Documented edge: with no discoverable scratch root, the home-anchored
-        fallback ignores $PROJECT entirely.
-        """
-        monkeypatch.setattr(config_module, "USER", "testuser")
-
-        bouchet_fn = SYSTEM_LAYOUT_REGISTRY["bouchet"]
-        home_fn = config_module._layout_home_anchored
-        env = {"PROJECT": str(tmp_path / "proj")}
-        assert bouchet_fn(tmp_path, env) == home_fn(tmp_path, {})
+    _FakeEvaluator.name = name  # type: ignore[attr-defined]
+    return _FakeEvaluator
 
 
 class TestResolveHost:
@@ -293,14 +111,16 @@ class TestResolveHost:
         home = tmp_path / "home"
         monkeypatch.setenv("HOME", str(home))
         monkeypatch.setenv("SCRATCH", str(tmp_path / "scratch"))
-        monkeypatch.setattr(config_module, "system", "anvil")
+        monkeypatch.setattr(
+            config_module, "HostNameEvaluator", _fake_evaluator("anvil")
+        )
 
         host = config_module.resolve_host(home / "runs" / "my-run")
 
         assert host.working_dir == home / "runs" / "my-run"
         assert host.system == "anvil"
 
-    def test_source_data_cache_comes_from_the_layout(self, monkeypatch, tmp_path):
+    def test_source_data_cache_comes_from_the_data_paths(self, monkeypatch, tmp_path):
         dp = DataPaths(source_data=tmp_path / "src", catalog=tmp_path / "cat")
         monkeypatch.setattr(config_module, "paths", dp)
 
@@ -308,47 +128,59 @@ class TestResolveHost:
 
         assert host.source_data_cache == dp.source_data
 
+    def test_system_is_named_by_host_name_evaluator(self, monkeypatch, tmp_path):
+        monkeypatch.setattr(
+            config_module, "HostNameEvaluator", _fake_evaluator("perlmutter")
+        )
+
+        assert config_module.resolve_host(tmp_path / "wd").system == "perlmutter"
+
+    def test_real_evaluator_returns_a_nonempty_system(self, tmp_path):
+        # No mocking: exercises the actual import wiring end to end (the dev box
+        # is never a registered HPC system, so this only asserts C-Star named
+        # *something*).
+        assert config_module.resolve_host(tmp_path / "wd").system
+
 
 class TestGetDataPaths:
-    """Tests for get_data_paths function."""
+    """Tests for get_data_paths and ensure_data_dirs."""
 
-    def test_get_data_paths(self, monkeypatch, tmp_path):
-        """Test get_data_paths returns DataPaths object without creating directories.
+    @pytest.fixture(autouse=True)
+    def _isolated_roots(self, monkeypatch, tmp_path):
+        """Point the source-data root and the catalog at not-yet-created paths.
 
-        Importing cstar.applications.forge.config must not have filesystem side effects, so the
-        default (``create=False``) only builds Path objects.
+        conftest.py forces CSTAR_CATALOG to an already-created temp dir (for global
+        test isolation), which would make the "not exists()" assertions meaningless.
         """
-        monkeypatch.setattr(config_module, "detect_system", lambda: "darwin_arm64")
-
-        # conftest.py forces CSTAR_CATALOG to an already-created temp dir
-        # (for global test isolation), which would make the "not exists()"
-        # assertion below meaningless -- point it at a not-yet-created path
-        # instead so this test still checks that get_data_paths() itself
-        # creates nothing.
+        for var in (
+            "CSTAR_PROJECT_HOME",
+            "PROJECT",
+            "SCRATCH",
+            "SCRATCH_DIR",
+            "LOCAL_SCRATCH",
+        ):
+            monkeypatch.delenv(var, raising=False)
+        monkeypatch.setenv("CSTAR_PROJECT_HOME", str(tmp_path / "project"))
         monkeypatch.setenv("CSTAR_CATALOG", str(tmp_path / "not-yet-created"))
-        # Use a real home directory that exists for the test
-        monkeypatch.setenv("HOME", str(tmp_path))
+
+    def test_get_data_paths_creates_nothing(self, tmp_path):
+        """Importing config must have no filesystem side effects, so building the
+        paths must not create directories.
+        """
         paths = get_data_paths()
 
         assert isinstance(paths, DataPaths)
-        # No directories are created by default
+        assert paths.source_data == DirectoryManager.source_data_home()
+        assert paths.catalog == user_catalog_root()
         assert not paths.source_data.exists()
         assert not paths.catalog.exists()
-        assert paths.catalog == user_catalog_root()
 
-    def test_get_data_paths_creates_directories(self, monkeypatch, tmp_path):
-        """Test that get_data_paths(create=True) creates necessary directories."""
-        monkeypatch.setattr(config_module, "detect_system", lambda: "darwin_arm64")
+    def test_ensure_data_dirs_creates_both(self):
+        paths = ensure_data_dirs()
 
-        # See test_get_data_paths above: repoint the catalog at a not-yet-created
-        # path so this test actually exercises directory creation for it too.
-        monkeypatch.setenv("CSTAR_CATALOG", str(tmp_path / "not-yet-created"))
-        monkeypatch.setenv("HOME", str(tmp_path))
-        paths = get_data_paths(create=True)
-
-        # Verify directories were created (they should exist after get_data_paths)
-        assert paths.source_data.exists()
-        assert paths.catalog.exists()
+        assert paths == get_data_paths()
+        assert paths.source_data.is_dir()
+        assert paths.catalog.is_dir()
 
 
 class TestFormatPaths:
@@ -358,7 +190,9 @@ class TestFormatPaths:
     def fake_paths(self, monkeypatch, tmp_path):
         dp = DataPaths(source_data=tmp_path / "src", catalog=tmp_path / "cat")
         monkeypatch.setattr(config_module, "paths", dp)
-        monkeypatch.setattr(config_module, "detect_system", lambda: "anvil")
+        monkeypatch.setattr(
+            config_module, "HostNameEvaluator", _fake_evaluator("anvil")
+        )
         monkeypatch.setattr(config_module, "_hostname", lambda: "node01")
         return dp
 

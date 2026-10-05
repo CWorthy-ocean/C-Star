@@ -4673,13 +4673,13 @@ class ForgeBlueprintWizard:
         )
 
         # --- run (invokes the C-Star CLI on the just-saved blueprint) ---
-        from cstar.applications.forge.config import system as _detected_system
+        from cstar.system.manager import HostNameEvaluator
 
         self.run_warning = W.HTML(
             "<b style='color:#b58900'>⚠ Processing a blueprint can use substantial "
             "memory and CPU depending on grid size.</b> Run this from a compute node "
             "(or another host) with resources appropriate for your domain — this is "
-            f"not checked automatically. Detected host: <code>{_detected_system}</code>."
+            f"not checked automatically. Detected host: <code>{HostNameEvaluator().name}</code>."
         )
         self.run_later_note = W.HTML(
             "<span style='color:#666'>ℹ To run this later, or on a different "
