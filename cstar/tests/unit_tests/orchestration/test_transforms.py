@@ -5,7 +5,7 @@ import shutil
 import typing as t
 import uuid
 from collections.abc import Awaitable, Callable, Sequence
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from pathlib import Path
 from unittest import mock
 
@@ -631,6 +631,147 @@ def test_continuance_directive_extra_unknown_key_rejected(
         )
 
 
+@pytest.fixture
+def roms_marbl_step(tmp_path: Path, hello_world_bp_path: Path) -> LiveStep:
+    """A minimal `roms_marbl` LiveStep to validate directive configs against.
+
+    Schedule-time directive validation never reads the step's blueprint, so the
+    hello-world blueprint file only has to exist.
+
+    Parameters
+    ----------
+    tmp_path : Path
+        Temporary directory for test outputs.
+    hello_world_bp_path : Path
+        Fixture returning the path to a hello-world blueprint file.
+    """
+    return LiveStep(
+        name="s1",
+        application="roms_marbl",
+        blueprint=hello_world_bp_path.as_posix(),
+        working_dir=tmp_path / "s1",
+    )
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        pytest.param("2012-01-15 00:00:00", id="iso string, space"),
+        pytest.param("2012-01-15T00:00:00", id="iso string, T"),
+        pytest.param(" 2012-01-15 00:00:00 ", id="surrounding whitespace"),
+        pytest.param(datetime(2012, 1, 15), id="yaml datetime"),
+        pytest.param(date(2012, 1, 15), id="yaml date"),
+        pytest.param("2012-01-15", id="date string"),
+        pytest.param("20120115", id="compact date string"),
+        pytest.param(20120115, id="yaml compact date int"),
+        pytest.param("20120115000000", id="restart stamp string"),
+        pytest.param(20120115000000, id="yaml restart stamp int"),
+    ],
+)
+def test_continuance_directive_timestamp_accepted_forms(
+    value: t.Any, roms_marbl_step: LiveStep
+) -> None:
+    """Verify every form YAML can deliver for a `timestamp` parses to the same
+    instant, a date alone meaning midnight, and passes schedule-time validation.
+
+    Parameters
+    ----------
+    value : t.Any
+        The `timestamp` value as it would arrive from the workplan.
+    roms_marbl_step : LiveStep
+        A minimal step to validate the directive config against.
+    """
+    assert ContinuanceDirective._parse_timestamp(value) == datetime(2012, 1, 15)
+
+    config = {
+        ContinuanceDirective.KEY_PATH: "x",
+        ContinuanceDirective.KEY_TIMESTAMP: value,
+    }
+    assert not ContinuanceDirective.validate_directives(config, roms_marbl_step)
+
+
+@pytest.mark.parametrize(
+    ("value", "reason"),
+    [
+        pytest.param("2012-02", "ISO 8601", id="partial date"),
+        pytest.param("junk", "ISO 8601", id="not a date"),
+        pytest.param(None, "ISO 8601", id="null"),
+        pytest.param("2012-01-15T00:00:00Z", "timezone", id="timezone"),
+        pytest.param("2012-01-15 00:00:00.5", "whole number", id="fractional seconds"),
+        pytest.param("2012011500000", "ISO 8601", id="13 digits"),
+        pytest.param("20121315000000", "ISO 8601", id="14 digits, month 13"),
+    ],
+)
+def test_continuance_directive_timestamp_rejected_values(
+    value: t.Any, reason: str, roms_marbl_step: LiveStep
+) -> None:
+    """Verify a malformed `timestamp` is reported once at schedule time rather
+    than completed, guessed at, or read as "latest".
+
+    Parameters
+    ----------
+    value : t.Any
+        The malformed `timestamp` value.
+    reason : str
+        A fragment of the message expected for this kind of malformation.
+    roms_marbl_step : LiveStep
+        A minimal step to validate the directive config against.
+    """
+    config = {
+        ContinuanceDirective.KEY_PATH: "x",
+        ContinuanceDirective.KEY_TIMESTAMP: value,
+    }
+
+    problems = ContinuanceDirective.validate_directives(config, roms_marbl_step)
+
+    assert len(problems) == 1
+    assert ContinuanceDirective.KEY_TIMESTAMP in problems[0]
+    assert reason in problems[0]
+
+
+def test_continuance_directive_timestamp_without_source_rejected(
+    roms_marbl_step: LiveStep,
+) -> None:
+    """Verify `timestamp` without a `step` or `path` source is rejected with a
+    message naming the missing source.
+
+    Parameters
+    ----------
+    roms_marbl_step : LiveStep
+        A minimal step to validate the directive config against.
+    """
+    config = {ContinuanceDirective.KEY_TIMESTAMP: "2012-01-15"}
+
+    problems = ContinuanceDirective.validate_directives(config, roms_marbl_step)
+
+    assert len(problems) == 1
+    assert "also supply" in problems[0]
+
+
+def test_continuance_directive_timestamp_with_unknown_key_rejected(
+    roms_marbl_step: LiveStep,
+) -> None:
+    """Verify an unrecognized key alongside `path` and `timestamp` gets the
+    generic message, listing the supported and provided keys in sorted order.
+
+    Parameters
+    ----------
+    roms_marbl_step : LiveStep
+        A minimal step to validate the directive config against.
+    """
+    config = {
+        ContinuanceDirective.KEY_PATH: "x",
+        ContinuanceDirective.KEY_TIMESTAMP: "2012-01-15",
+        "bogus": 1,
+    }
+
+    problems = ContinuanceDirective.validate_directives(config, roms_marbl_step)
+
+    assert len(problems) == 1
+    assert "supported configuration: path, step, timestamp" in problems[0]
+    assert "provided configuration: bogus, path, timestamp" in problems[0]
+
+
 def test_continuance_directive_path_dne() -> None:
     """Verify that sending a path to a directory that does not exist results in
     an exception being raised.
@@ -1131,6 +1272,218 @@ async def test_continuance_directive_step_output_rejects_partitioned(
     )
 
     config = t.cast("dict[str, str]", child_step.directives[ContinuanceDirective.key()])
+
+    with pytest.raises(FileNotFoundError, match="migrate-outputs"):
+        ContinuanceDirective(config, workplan=live_plan)
+
+
+def _plan_with_parent_restarts(
+    tmp_path: Path,
+    bp_templates_dir: Path,
+    hello_world_bp_path: Path,
+    restart_names: Sequence[str],
+    directive: dict[str, t.Any],
+) -> tuple[LiveWorkplan, LiveStep, Path]:
+    """Build a `parent` -> `child` plan whose parent `output` holds mock restarts.
+
+    Parameters
+    ----------
+    tmp_path : Path
+        Temporary directory for test outputs.
+    bp_templates_dir : Path
+        Fixture returning the path to the directory containing blueprint template files.
+    hello_world_bp_path : Path
+        Fixture returning the path to a hello-world blueprint file.
+    restart_names : Sequence[str]
+        The names of the files to create in the parent's `output` directory.
+    directive : dict[str, t.Any]
+        The `continue-from` configuration of the `child` step.
+
+    Returns
+    -------
+    tuple[LiveWorkplan, LiveStep, Path]
+        The plan, its `child` step, and the parent's `output` directory.
+    """
+    parent_step = LiveStep(
+        name="parent",
+        application="hello_world",
+        blueprint=hello_world_bp_path.as_posix(),
+        working_dir=tmp_path / "parent",
+    )
+    parent_fsm = RomsFileSystemManager(parent_step.fsm.root_dir)
+    parent_fsm.prepare()
+    for name in restart_names:
+        (parent_fsm.output_dir / name).write_text("mock restart data")
+
+    child_bp_path = tmp_path / "child_bp.yaml"
+    child_bp_path.write_text(
+        (bp_templates_dir / "blueprint.yaml")
+        .read_text()
+        .replace("working_dir: .", f"working_dir: {tmp_path}")
+    )
+    child_step = LiveStep(
+        name="child",
+        application="roms_marbl",
+        blueprint=child_bp_path.as_posix(),
+        working_dir=tmp_path / "child",
+        directives={ContinuanceDirective.key(): directive},
+    )
+    live_plan = LiveWorkplan(
+        name="parent-restarts-plan",
+        description="a child continuing from restarts held by its parent",
+        steps=[parent_step, child_step],
+    )
+    return live_plan, child_step, parent_fsm.output_dir
+
+
+@pytest.mark.parametrize(
+    ("restart_names", "directive_extra", "expected_name", "expected_start"),
+    [
+        pytest.param(
+            ["output_rst.20120115000000.nc", "output_rst.20120201000000.nc"],
+            {ContinuanceDirective.KEY_TIMESTAMP: "2012-01-15 00:00:00"},
+            "output_rst.20120115000000.nc",
+            datetime(2012, 1, 15),
+            id="timestamp selects an older restart",
+        ),
+        pytest.param(
+            ["output_rst.20120115000000.nc", "output_rst.20120201000000.nc"],
+            {},
+            "output_rst.20120201000000.nc",
+            datetime(2012, 2, 1),
+            id="no timestamp keeps the latest",
+        ),
+        pytest.param(
+            ["output_rst.20120201000000.000.nc", "output_rst.20120115000000.nc"],
+            {ContinuanceDirective.KEY_TIMESTAMP: "2012-01-15 00:00:00"},
+            "output_rst.20120115000000.nc",
+            datetime(2012, 1, 15),
+            id="partition piece at another timestamp is not selected",
+        ),
+    ],
+)
+def test_continuance_directive_step_timestamp_selects_restart(
+    tmp_path: Path,
+    bp_templates_dir: Path,
+    hello_world_bp_path: Path,
+    restart_names: list[str],
+    directive_extra: dict[str, str],
+    expected_name: str,
+    expected_start: datetime,
+) -> None:
+    """Verify `continue-from: {step: <name>, timestamp: <ts>}` continues from
+    the restart dated `<ts>` in the referenced step's `output`, starting the
+    child at that restart's date, and from the latest restart without a
+    `timestamp`.
+
+    Parameters
+    ----------
+    tmp_path : Path
+        Temporary directory for test outputs.
+    bp_templates_dir : Path
+        Fixture returning the path to the directory containing blueprint template files.
+    hello_world_bp_path : Path
+        Fixture returning the path to a hello-world blueprint file.
+    restart_names : list[str]
+        The names of the files in the parent's `output` directory.
+    directive_extra : dict[str, str]
+        The keys added to the directive's `step` source.
+    expected_name : str
+        The name of the file the child is expected to continue from.
+    expected_start : datetime
+        The `start_date` the child is expected to end up with.
+    """
+    live_plan, child_step, parent_output = _plan_with_parent_restarts(
+        tmp_path,
+        bp_templates_dir,
+        hello_world_bp_path,
+        restart_names,
+        {ContinuanceDirective.KEY_STEP: "parent", **directive_extra},
+    )
+
+    config = t.cast(
+        "dict[str, t.Any]", child_step.directives[ContinuanceDirective.key()]
+    )
+    altered = ContinuanceDirective(config, workplan=live_plan)(child_step)[0]
+
+    bp_after = deserialize(altered.blueprint_path, RomsMarblBlueprint)
+    location = Path(bp_after.initial_conditions.data[0].location)
+    assert location == (parent_output / expected_name).resolve()
+    assert bp_after.runtime_params.start_date == expected_start
+
+
+def test_continuance_directive_step_timestamp_not_found(
+    tmp_path: Path,
+    bp_templates_dir: Path,
+    hello_world_bp_path: Path,
+) -> None:
+    """Verify `continue-from: {step: <name>, timestamp: <ts>}` raises
+    `FileNotFoundError` listing the timestamps that exist, without the
+    legacy-layout hint, when the referenced step's `output` holds no restart
+    dated `<ts>`.
+
+    Parameters
+    ----------
+    tmp_path : Path
+        Temporary directory for test outputs.
+    bp_templates_dir : Path
+        Fixture returning the path to the directory containing blueprint template files.
+    hello_world_bp_path : Path
+        Fixture returning the path to a hello-world blueprint file.
+    """
+    live_plan, child_step, _ = _plan_with_parent_restarts(
+        tmp_path,
+        bp_templates_dir,
+        hello_world_bp_path,
+        ["output_rst.20120115000000.nc", "output_rst.20120301000000.nc"],
+        {
+            ContinuanceDirective.KEY_STEP: "parent",
+            ContinuanceDirective.KEY_TIMESTAMP: "2012-02-01 00:00:00",
+        },
+    )
+    config = t.cast(
+        "dict[str, t.Any]", child_step.directives[ContinuanceDirective.key()]
+    )
+
+    with pytest.raises(FileNotFoundError) as error:
+        ContinuanceDirective(config, workplan=live_plan)
+
+    assert "2012-02-01 00:00:00" in str(error.value)
+    assert "2012-01-15 00:00:00, 2012-03-01 00:00:00" in str(error.value)
+    assert "migrate-outputs" not in str(error.value)
+
+
+def test_continuance_directive_step_timestamp_no_restarts(
+    tmp_path: Path,
+    bp_templates_dir: Path,
+    hello_world_bp_path: Path,
+) -> None:
+    """Verify `continue-from: {step: <name>, timestamp: <ts>}` still points at
+    `cstar admin migrate-outputs` when the referenced step's `output` holds no
+    restarts at all, rather than only listing no timestamps.
+
+    Parameters
+    ----------
+    tmp_path : Path
+        Temporary directory for test outputs.
+    bp_templates_dir : Path
+        Fixture returning the path to the directory containing blueprint template files.
+    hello_world_bp_path : Path
+        Fixture returning the path to a hello-world blueprint file.
+    """
+    live_plan, child_step, _ = _plan_with_parent_restarts(
+        tmp_path,
+        bp_templates_dir,
+        hello_world_bp_path,
+        [],
+        {
+            ContinuanceDirective.KEY_STEP: "parent",
+            ContinuanceDirective.KEY_TIMESTAMP: "2012-02-01 00:00:00",
+        },
+    )
+    config = t.cast(
+        "dict[str, t.Any]", child_step.directives[ContinuanceDirective.key()]
+    )
 
     with pytest.raises(FileNotFoundError, match="migrate-outputs"):
         ContinuanceDirective(config, workplan=live_plan)
@@ -1878,6 +2231,42 @@ def test_collect_directive_problems_allows_boundary_only_nest_from(
     assert collect_directive_problems([step]) == []
 
 
+def test_collect_directive_problems_rejects_malformed_continue_from_timestamp(
+    tmp_path: Path,
+    hello_world_bp_path: Path,
+) -> None:
+    """Verify `collect_directive_problems` reports a malformed `continue-from`
+    `timestamp` at schedule time, naming the step and the directive, before any
+    step runs.
+
+    Parameters
+    ----------
+    tmp_path : Path
+        The pytest-provided temporary directory.
+    hello_world_bp_path : Path
+        Fixture returning the path to a blueprint file; `collect_directive_problems`
+        never reads it, so any existing file works.
+    """
+    step = LiveStep(
+        name="s1",
+        application="roms_marbl",
+        blueprint=hello_world_bp_path.as_posix(),
+        working_dir=tmp_path / "s1",
+        directives={
+            ContinuanceDirective.key(): {
+                ContinuanceDirective.KEY_PATH: "prior/run",
+                ContinuanceDirective.KEY_TIMESTAMP: "2012-02",
+            }
+        },
+    )
+
+    problems = collect_directive_problems([step])
+
+    assert len(problems) == 1
+    assert problems[0].startswith("step 's1' directive 'continue-from'")
+    assert ContinuanceDirective.KEY_TIMESTAMP in problems[0]
+
+
 def test_package_runtime_overrides_no_longer_validates_directives(
     tmp_path: Path,
     hello_world_bp_path: Path,
@@ -2260,6 +2649,68 @@ directives:
     # ...its intermediate blueprint landed there, and the raw dir was untouched
     assert Path(result).is_relative_to(override_dir.resolve())
     assert not raw_dir.exists()
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        pytest.param(datetime(2012, 1, 15), id="datetime"),
+        pytest.param(20120115000000, id="restart stamp int"),
+    ],
+)
+def test_continue_from_timestamp_survives_directive_file_round_trip(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    bp_templates_dir: Path,
+    value: t.Any,
+) -> None:
+    """Verify a YAML-typed `continue-from` `timestamp` survives the directive
+    file written for a step, and selects the same restart when the directives
+    are applied to the blueprint on the compute node.
+
+    Parameters
+    ----------
+    tmp_path : Path
+        The pytest-provided temporary directory.
+    monkeypatch : pytest.MonkeyPatch
+        Fixture used to clear the run-id environment variable.
+    bp_templates_dir : Path
+        Fixture returning the path to the directory containing blueprint template files.
+    value : t.Any
+        The `timestamp` value, as a type YAML writes and reads back natively.
+    """
+    rst_dir = tmp_path / "prior" / "output"
+    rst_dir.mkdir(parents=True)
+    for name in ("output_rst.20120115000000.nc", "output_rst.20120201000000.nc"):
+        (rst_dir / name).write_text("mock restart data")
+
+    bp_path = tmp_path / "bp.yaml"
+    bp_path.write_text(
+        (bp_templates_dir / "blueprint.yaml")
+        .read_text()
+        .replace("working_dir: .", f"working_dir: {tmp_path}")
+    )
+    step = LiveStep(
+        name="step",
+        application="roms_marbl",
+        blueprint=bp_path.as_posix(),
+        working_dir=tmp_path / "step",
+        directives={
+            ContinuanceDirective.key(): {
+                ContinuanceDirective.KEY_PATH: str(rst_dir),
+                ContinuanceDirective.KEY_TIMESTAMP: value,
+            }
+        },
+    )
+    directive_path = prepare_directive_file(step)
+
+    monkeypatch.delenv(ENV_CSTAR_RUNID, raising=False)
+    result = DirectiveConfig.apply_directives(str(directive_path), str(bp_path))
+
+    bp_after = deserialize(Path(result), RomsMarblBlueprint)
+    location = Path(bp_after.initial_conditions.data[0].location)
+    assert location == (rst_dir / "output_rst.20120115000000.nc").resolve()
+    assert bp_after.runtime_params.start_date == datetime(2012, 1, 15)
 
 
 def test_restore_directive_file_recreates_missing_file(
@@ -2971,6 +3422,153 @@ def test_restart_file_find_dne_notok(tmp_path: Path) -> None:
 
     with pytest.raises(FileNotFoundError, match="No restart files"):
         _ = RestartFile.find(search_path, notfound_ok=False)
+
+
+def test_restart_file_find_at_selects_partition_zero_of_requested_timestamp(
+    tmp_path: Path,
+) -> None:
+    """Verify that `RestartFile.find_at` continues from partition 0 of the
+    requested timestamp, not the latest, when the directory holds several
+    timestamps, each with a full set of partition files.
+
+    Parameters
+    ----------
+    tmp_path : Path
+        Temporary directory for test outputs.
+    """
+    search_path = tmp_path / "output"
+    search_path.mkdir(parents=True)
+
+    # two timestamps, each with a 3-partition set (deliberately created out of
+    # chronological / partition order to prove the selection, not the order)
+    for timestamp in ("20120201000000", "20120101000000"):
+        for segment in ("002", "000", "001"):
+            (search_path / f"foo_rst.{timestamp}.{segment}.nc").touch()
+
+    reset_file = RestartFile.find_at(search_path, datetime(2012, 1, 1))
+    assert reset_file.path.name == "foo_rst.20120101000000.000.nc"
+
+
+def test_restart_file_find_at_whole_file_beside_other_partition_pieces(
+    tmp_path: Path,
+) -> None:
+    """Verify that `RestartFile.find_at` returns a whole file dated at the
+    requested timestamp even when partition pieces exist, but only at another
+    timestamp (which `find` would prefer).
+
+    Parameters
+    ----------
+    tmp_path : Path
+        Temporary directory for test outputs.
+    """
+    search_path = tmp_path / "output"
+    search_path.mkdir(parents=True)
+
+    for segment in ("000", "001"):
+        (search_path / f"foo_rst.20120201000000.{segment}.nc").touch()
+    (search_path / "foo_rst.20120101000000.nc").touch()
+
+    reset_file = RestartFile.find_at(search_path, datetime(2012, 1, 1))
+    assert reset_file.path.name == "foo_rst.20120101000000.nc"
+    assert not reset_file.is_partitioned
+
+
+def test_restart_file_find_at_prefers_partition_pieces(tmp_path: Path) -> None:
+    """Verify that, as `RestartFile.find` does, `RestartFile.find_at` prefers
+    partition 0 over a whole file when both are dated at the requested
+    timestamp.
+
+    Parameters
+    ----------
+    tmp_path : Path
+        Temporary directory for test outputs.
+    """
+    search_path = tmp_path / "output"
+    search_path.mkdir(parents=True)
+
+    for name in ("foo_rst.20120101000000.nc", "foo_rst.20120101000000.001.nc"):
+        (search_path / name).touch()
+    (search_path / "foo_rst.20120101000000.000.nc").touch()
+
+    reset_file = RestartFile.find_at(search_path, datetime(2012, 1, 1))
+    assert reset_file.path.name == "foo_rst.20120101000000.000.nc"
+
+
+@pytest.mark.parametrize(
+    ("names", "expected_listing"),
+    [
+        pytest.param(
+            [
+                "foo_rst.20120301000000.nc",
+                "foo_rst.20120101000000.000.nc",
+                "foo_rst.20120101000000.001.nc",
+            ],
+            "2012-01-01 00:00:00, 2012-03-01 00:00:00",
+            id="sorted and de-duplicated across whole files and pieces",
+        ),
+        pytest.param([], "none", id="no restart files"),
+    ],
+)
+def test_restart_file_find_at_miss_lists_available_timestamps(
+    tmp_path: Path,
+    names: list[str],
+    expected_listing: str,
+) -> None:
+    """Verify that `RestartFile.find_at` raises an exception naming the
+    requested timestamp and every timestamp that does exist when no restart
+    file is dated as requested.
+
+    Parameters
+    ----------
+    tmp_path : Path
+        Temporary directory for test outputs.
+    names : list[str]
+        The names of the restart files to create.
+    expected_listing : str
+        The timestamp listing expected at the end of the error message.
+    """
+    search_path = tmp_path / "output"
+    search_path.mkdir(parents=True)
+    for name in names:
+        (search_path / name).touch()
+
+    with pytest.raises(FileNotFoundError) as error:
+        _ = RestartFile.find_at(search_path, datetime(2012, 2, 1))
+
+    assert "2012-02-01 00:00:00" in str(error.value)
+    assert str(error.value).endswith(expected_listing)
+
+
+def test_restart_file_find_at_file_path(tmp_path: Path) -> None:
+    """Verify that `RestartFile.find_at` returns a file path whose name carries
+    the requested timestamp, and raises for one that does not.
+
+    Parameters
+    ----------
+    tmp_path : Path
+        Temporary directory for test outputs.
+    """
+    reset_path = tmp_path / "foo_rst.20120101000000.nc"
+    reset_path.touch()
+
+    reset_file = RestartFile.find_at(reset_path, datetime(2012, 1, 1))
+    assert reset_file.path == reset_path.resolve()
+
+    with pytest.raises(FileNotFoundError, match=r"2012-02-01 00:00:00.*2012-01-01"):
+        _ = RestartFile.find_at(reset_path, datetime(2012, 2, 1))
+
+
+def test_restart_file_find_at_path_dne(tmp_path: Path) -> None:
+    """Verify that `RestartFile.find_at` raises an exception when nothing
+    exists at the search path.
+
+    Parameters
+    ----------
+    tmp_path : Path
+        Temporary directory for test outputs.
+    """
+    with pytest.raises(ValueError, match="No directory or file found"):
+        _ = RestartFile.find_at(tmp_path / "dne", datetime(2012, 1, 1))
 
 
 def test_restart_file_from_parts_unparted(tmp_path: Path) -> None:

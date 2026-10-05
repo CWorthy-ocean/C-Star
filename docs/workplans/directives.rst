@@ -17,8 +17,8 @@ on the compute node. You do not write this directive yourself.
 continue-from
 --------------
 
-Sets a step's initial conditions from the latest restart file of an earlier
-run. Configure exactly one of:
+Sets a step's initial conditions from a restart file of an earlier run.
+Configure exactly one restart source:
 
 - ``step`` -- the name of an earlier step whose output holds the restart file;
   a step of another workplan run is named ``<step>@<alias>`` (see
@@ -27,6 +27,30 @@ run. Configure exactly one of:
 
 ``step`` and ``path`` are mutually exclusive. The step named by ``step`` must
 be listed in the step's ``depends_on``, directly or through an earlier step.
+
+By default the latest restart file in the source is used. To continue from a
+different one, add:
+
+- ``timestamp`` -- the date and time of the restart to use: an ISO 8601
+  date-time (``2012-02-01 00:00:00`` or ``2012-02-01T00:00:00``), a date alone
+  (``2012-02-01``, meaning midnight), or the 14-digit stamp from the restart
+  file's name (``20120201000000``)
+
+Only the restart whose file name carries exactly that timestamp is used. The
+timestamp is matched against the file name -- the date C-Star uses as the
+step's start date -- not against the time records inside the file. If the
+source has restart files but none with that timestamp, the step fails with an
+error that lists the timestamps it does have. A ``path`` that names a single
+file must carry the same timestamp. A malformed ``timestamp`` (one with a
+timezone or fractional seconds, or a partial date such as ``2012-02``) is
+reported when the workplan is checked or submitted, before any step runs.
+
+.. code-block:: yaml
+
+    directives:
+      continue-from:
+        step: parent_run
+        timestamp: 2012-02-01 00:00:00
 
 If the step also carries an explicit ``runtime_params.start_date`` override
 (via ``blueprint_overrides``) that disagrees with the restart file this
