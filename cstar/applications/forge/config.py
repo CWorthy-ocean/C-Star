@@ -70,10 +70,6 @@ def ensure_data_dirs() -> DataPaths:
     return dp
 
 
-# Initialize canonical instance
-paths = get_data_paths()
-
-
 def resolve_host(working_dir: str | Path) -> HostPaths:
     """Build the forge application's ``HostPaths`` for this machine.
 
@@ -81,11 +77,11 @@ def resolve_host(working_dir: str | Path) -> HostPaths:
     directory or a ``--working-dir`` override. It is used as written (after ``~``
     expansion), like every other C-Star application; inside a workplan the step's
     assigned directory arrives here already applied. The source-data cache comes from
-    ``paths`` and the machine name from C-Star's ``HostNameEvaluator``.
+    :func:`get_data_paths` and the machine name from C-Star's ``HostNameEvaluator``.
     """
     return HostPaths(
         working_dir=Path(working_dir).expanduser(),
-        source_data_cache=paths.source_data,
+        source_data_cache=get_data_paths().source_data,
         system=HostNameEvaluator().name,
     )
 
@@ -111,7 +107,7 @@ def format_paths(*, as_json: bool = False) -> str:
     """
     system_tag = HostNameEvaluator().name
     hostname = _hostname()
-    dp = paths
+    dp = get_data_paths()
 
     if as_json:
         payload = {

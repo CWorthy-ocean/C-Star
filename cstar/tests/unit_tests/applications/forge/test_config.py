@@ -47,7 +47,7 @@ class TestDataPaths:
 
 class TestUserCatalogRoot:
     """Tests for domain_catalog.user_catalog_root (the writable catalog layer's
-    root), imported here because config.paths.catalog is now just
+    root), imported here because get_data_paths().catalog is just
     ``user_catalog_root()``.
     """
 
@@ -122,7 +122,7 @@ class TestResolveHost:
 
     def test_source_data_cache_comes_from_the_data_paths(self, monkeypatch, tmp_path):
         dp = DataPaths(source_data=tmp_path / "src", catalog=tmp_path / "cat")
-        monkeypatch.setattr(config_module, "paths", dp)
+        monkeypatch.setattr(config_module, "get_data_paths", lambda: dp)
 
         host = config_module.resolve_host(tmp_path / "wd")
 
@@ -189,7 +189,7 @@ class TestFormatPaths:
     @pytest.fixture
     def fake_paths(self, monkeypatch, tmp_path):
         dp = DataPaths(source_data=tmp_path / "src", catalog=tmp_path / "cat")
-        monkeypatch.setattr(config_module, "paths", dp)
+        monkeypatch.setattr(config_module, "get_data_paths", lambda: dp)
         monkeypatch.setattr(
             config_module, "HostNameEvaluator", _fake_evaluator("anvil")
         )
