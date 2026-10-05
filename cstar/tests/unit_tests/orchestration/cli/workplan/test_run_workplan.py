@@ -889,6 +889,50 @@ def test_workplan_run_reload_invokes_run_dag_not_build_and_run_dag(
     assert isinstance(call_args[3], Planner)
 
 
+def test_workplan_run_reload_refuses_unusable_external_dependency(
+    tmp_path: Path,
+    mock_run_id: str,
+    external_workplan: Workplan,
+) -> None:
+    """Verify the reload path stops before planning when an external step it
+    depends on can no longer be depended upon (e.g. it has since failed).
+    """
+    live_steps = [LiveStep.from_step(step) for step in external_workplan.steps]
+    lwp = LiveWorkplan(
+        **external_workplan.model_dump(exclude={"steps"}), steps=live_steps
+    )
+    trx_path = tmp_path / "consumer-trx.yaml"
+    assert serialize(trx_path, lwp)
+    fake_run_result = WorkplanRun(
+        workplan_path=trx_path,
+        trx_workplan_path=trx_path,
+        output_path=tmp_path,
+        run_id=mock_run_id,
+    )
+    external = mock.Mock()
+    external.problem.return_value = "step 'outer' is Failed"
+
+    with (
+        mock.patch(
+            "cstar.cli.workplan.run.handle_run_reloading",
+            mock.AsyncMock(return_value=fake_run_result),
+        ),
+        mock.patch("cstar.cli.workplan.run.get_launcher"),
+        mock.patch(
+            "cstar.cli.workplan.run.load_external_runs",
+            mock.AsyncMock(return_value=external),
+        ),
+        mock.patch("cstar.cli.workplan.run.run_dag", mock.AsyncMock()) as mock_run_dag,
+    ):
+        result = CliRunner().invoke(app, ["--run-id", mock_run_id], color=False)
+
+    assert result.exit_code == 1, result.output
+    assert "External dependency outer@spinup: step 'outer' is Failed" in " ".join(
+        result.output.split()
+    )
+    mock_run_dag.assert_not_awaited()
+
+
 @pytest.mark.usefixtures("read_yaml_intercept")
 def test_workplan_run_resume_with_path_reloads_by_derived_run_id(
     tmp_path: Path,

@@ -1,10 +1,11 @@
+import asyncio
 import typing as t
 from pathlib import Path
 
 import typer
 from pydantic import ValidationError
 
-from cstar.base.exceptions import CstarExpectationFailed
+from cstar.base.exceptions import CstarError, CstarExpectationFailed
 from cstar.cli.common import format_validation_errors
 from cstar.cli.workplan.shared import preprocess_varfile, preprocess_vars
 from cstar.entrypoint.utils import (
@@ -17,10 +18,15 @@ from cstar.entrypoint.utils import (
     ARG_VARFILE_LONG,
     ARG_VARFILE_SHORT,
 )
+from cstar.orchestration.dag_runner import get_launcher
 from cstar.orchestration.models import UserDefinedVariables, Workplan
 from cstar.orchestration.orchestration import LiveWorkplan
 from cstar.orchestration.serialization import validate_serialized_entity
-from cstar.orchestration.transforms import TemplateFillTransform, WorkplanTransformer
+from cstar.orchestration.transforms import (
+    TemplateFillTransform,
+    WorkplanTransformer,
+    resolve_external_runs,
+)
 
 if t.TYPE_CHECKING:
     from collections.abc import Mapping
@@ -60,13 +66,19 @@ def _deep_check(wp: Workplan, user_vars: "Mapping[str, str] | None") -> t.NoRetu
     else:
         fill = TemplateFillTransform(variable_resolver=lambda name: named_config[name])
         try:
-            transformed = WorkplanTransformer(wp, fill).apply()
+            external = asyncio.run(resolve_external_runs(wp, fill, get_launcher))
+            transformed = WorkplanTransformer(wp, fill, external).apply()
         except ValidationError as ex:
             problems.append(format_validation_errors(ex))
         except KeyError as ex:
             # an undeclared `{{placeholder}}`; the lookup wraps a readable message
             problems.append(str(ex.args[0]))
-        except (ValueError, FileNotFoundError, CstarExpectationFailed) as ex:
+        except (
+            ValueError,
+            FileNotFoundError,
+            CstarError,
+            CstarExpectationFailed,
+        ) as ex:
             problems.append(str(ex))
         else:
             step_count = len(transformed.steps)

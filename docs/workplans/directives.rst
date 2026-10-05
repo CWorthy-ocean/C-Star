@@ -20,10 +20,13 @@ continue-from
 Sets a step's initial conditions from the latest restart file of an earlier
 run. Configure exactly one of:
 
-- ``step`` -- the name of an earlier step whose output holds the restart file
+- ``step`` -- the name of an earlier step whose output holds the restart file;
+  a step of another workplan run is named ``<step>@<alias>`` (see
+  :ref:`workplan_external_runs`)
 - ``path`` -- a fixed directory or file path to the restart file
 
-``step`` and ``path`` are mutually exclusive.
+``step`` and ``path`` are mutually exclusive. The step named by ``step`` must
+be listed in the step's ``depends_on``, directly or through an earlier step.
 
 If the step also carries an explicit ``runtime_params.start_date`` override
 (via ``blueprint_overrides``) that disagrees with the restart file this
@@ -37,7 +40,8 @@ Supplies boundary forcing for a nested child run from a parent (or sibling)
 simulation. Configure exactly one of:
 
 - ``step`` -- the name of the step whose output holds the parent run's
-  boundary files
+  boundary files; a step of another workplan run is named ``<step>@<alias>``
+  (see :ref:`workplan_external_runs`) and must be listed in ``depends_on``
 - ``path`` -- a fixed directory or file path to the parent run's boundary
   files
 

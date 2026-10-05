@@ -27,6 +27,37 @@
             "const": "inline",
             "description": "Build the blueprint from the application's model plus this step's `blueprint_overrides`."
         },
+        "RunRef": {
+            "additionalProperties": false,
+            "description": "A reference to an external workplan run.",
+            "properties": {
+                "run_id": {
+                    "description": "The run-id of the external workplan run; may be a `{{name}}`\nruntime-variable placeholder filled when the workplan is scheduled.",
+                    "minLength": 1,
+                    "title": "Run Id",
+                    "type": "string"
+                },
+                "start_at": {
+                    "anyOf": [
+                        {
+                            "format": "date-time",
+                            "type": "string"
+                        },
+                        {
+                            "type": "null"
+                        }
+                    ],
+                    "default": null,
+                    "description": "The start time of the exact run record resolved when the workplan was\nscheduled; `None` in an authored workplan.",
+                    "title": "Start At"
+                }
+            },
+            "required": [
+                "run_id"
+            ],
+            "title": "RunRef",
+            "type": "object"
+        },
         "Step": {
             "additionalProperties": false,
             "description": "An individual unit of execution within a workplan.",
@@ -34,6 +65,7 @@
                 "name": {
                     "description": "The user-friendly name of the step.",
                     "minLength": 1,
+                    "pattern": "^[^@]+$",
                     "title": "Name",
                     "type": "string"
                 },
@@ -241,6 +273,14 @@
             "minLength": 1,
             "title": "Description",
             "type": "string"
+        },
+        "runs": {
+            "additionalProperties": {
+                "$ref": "#/$defs/RunRef"
+            },
+            "description": "External workplan runs referenced by this workplan, keyed by alias. A step\nof an external run is referenced as `<step>@<alias>`.",
+            "title": "Runs",
+            "type": "object"
         },
         "steps": {
             "description": "The steps to be executed by the workplan.",

@@ -40,6 +40,7 @@ from cstar.orchestration.orchestration import (
     ProcessHandle,
     RunMode,
     Status,
+    Task,
     check_environment,
     configure_environment,
 )
@@ -52,10 +53,13 @@ from cstar.orchestration.tracking import (
     measure_step_sizes,
 )
 from cstar.orchestration.transforms import (
+    ExternalRuns,
     TemplateFillTransform,
     WorkplanTransformer,
     allowed_directives,
+    external_dependencies,
     materialize_inline_blueprints,
+    resolve_external_runs,
 )
 from cstar.orchestration.utils import ENV_CSTAR_ORCH_DELAYS
 from cstar.system.manager import get_sysmgr
@@ -284,6 +288,29 @@ async def load_run_state(
     return DagStatus({**open_set, **closed_set})
 
 
+async def load_external_runs(wp: Workplan, launcher: Launcher[t.Any]) -> ExternalRuns:
+    """Refresh the external steps of a prepared workplan.
+
+    A prepared workplan has its `runs` pinned, so the steps are the ones the
+    run was scheduled against.
+
+    Parameters
+    ----------
+    wp : Workplan
+        The prepared (transformed) workplan.
+    launcher : Launcher[t.Any]
+        The launcher used to query the status of external steps.
+
+    Returns
+    -------
+    ExternalRuns
+        The registry, refreshed for every external step in `depends_on`.
+    """
+    external = ExternalRuns(wp.runs)
+    await external.refresh(external_dependencies(wp), launcher)
+    return external
+
+
 async def reload_dag(wp_run: WorkplanRun) -> DagStatus:
     """Determine the current status of a workplan run.
 
@@ -304,10 +331,12 @@ async def reload_dag(wp_run: WorkplanRun) -> DagStatus:
 
     configure_environment(wp_run.output_path, wp_run.run_id, wp_run.environment)
 
-    planner = Planner(workplan=wp)
+    external = await load_external_runs(wp, get_launcher(force_local=wp.pre_run))
+    planner = Planner(workplan=wp, external=external.tasks())
     orchestrator = get_orchestrator(planner)
 
-    return await process_plan(orchestrator, RunMode.Monitor)
+    status = await process_plan(orchestrator, RunMode.Monitor)
+    return DagStatus({**external.statuses(), **status.details})
 
 
 async def process_plan(orchestrator: Orchestrator, mode: RunMode) -> DagStatus:
@@ -375,7 +404,7 @@ async def prepare_workplan(
     user_variables: Mapping[str, str] | None = None,
     clobber_steps: "Sequence[str] | None" = None,
     pre_run: bool = False,
-) -> tuple[Workplan, Path]:
+) -> tuple[Workplan, Path, ExternalRuns]:
     """Load the workplan and apply any applicable transforms.
 
     Parameters
@@ -395,8 +424,10 @@ async def prepare_workplan(
 
     Returns
     -------
-    tuple[Workplan, Path]
-        Tuple containing the resulting workplan and workplan file path
+    tuple[Workplan, Path, ExternalRuns]
+        Tuple containing the resulting workplan, the workplan file path and
+        the registry of external runs the workplan depends on, as refreshed
+        while preparing it
 
     Raises
     ------
@@ -427,9 +458,14 @@ async def prepare_workplan(
     else:
         fill_transform = TemplateFillTransform(variable_resolver=None)
 
+    external = await resolve_external_runs(
+        wp_orig, fill_transform, lambda: get_launcher(force_local=pre_run)
+    )
+
     transformer = WorkplanTransformer(
         wp_orig,
         fill_transform,
+        external,
     )
     wp = transformer.apply()
 
@@ -454,7 +490,7 @@ async def prepare_workplan(
 
     _ = await asyncio.gather(*file_io)
 
-    return wp, persist_as
+    return wp, persist_as, external
 
 
 class ExecutiveStepSummary(BaseModel):
@@ -860,13 +896,18 @@ def prune_unpreparable_steps(wp: Workplan) -> tuple[Workplan, dict[str, list[str
     return wp.model_copy(update={"steps": kept}), reasons
 
 
-def build_planner(wp: Workplan) -> Planner:
+def build_planner(
+    wp: Workplan, external: Mapping[str, Task[ProcessHandle]] | None = None
+) -> Planner:
     """Plan a workplan, dropping the steps a pre-run cannot prepare.
 
     Parameters
     ----------
     wp : Workplan
         The workplan to plan.
+    external : Mapping[str, Task[ProcessHandle]] | None
+        The refreshed external steps the workplan depends on, keyed by their
+        `<step>@<alias>` token.
 
     Returns
     -------
@@ -890,7 +931,7 @@ def build_planner(wp: Workplan) -> Planner:
             msg = "No step can be prepared in pre-run mode; nothing was scheduled."
             raise NoPreparableStepsError(msg)
 
-    return Planner(workplan=wp)
+    return Planner(workplan=wp, external=external)
 
 
 async def apply_resume_overrides(
@@ -1045,10 +1086,10 @@ async def build_dag(
     configure_environment(run_id=run_id)
 
     check_environment()
-    wp, prepared_wp_path = await prepare_workplan(
+    wp, prepared_wp_path, external = await prepare_workplan(
         wp_path, output_dir, user_variables, clobber_steps, pre_run
     )
-    planner = build_planner(wp)
+    planner = build_planner(wp, external.tasks())
 
     return planner, prepared_wp_path
 

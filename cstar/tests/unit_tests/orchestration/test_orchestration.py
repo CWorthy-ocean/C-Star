@@ -16,10 +16,13 @@ from cstar.orchestration.models import Application, Step, Workplan
 from cstar.orchestration.orchestration import (
     KEY_STATUS,
     KEY_STEP,
+    KEY_TASK,
     Orchestrator,
     Planner,
+    ProcessHandle,
     RunMode,
     Status,
+    Task,
 )
 from cstar.orchestration.serialization import deserialize
 from cstar.orchestration.transforms import (
@@ -28,6 +31,10 @@ from cstar.orchestration.transforms import (
     get_time_slices,
 )
 from cstar.orchestration.utils import ENV_CSTAR_ORCH_TRX_FREQ
+from cstar.tests.unit_tests.orchestration.conftest import (
+    EXTERNAL_TOKEN,
+    ExternalTaskFactory,
+)
 
 if t.TYPE_CHECKING:
     from collections.abc import Iterable
@@ -360,3 +367,129 @@ def test_workplan_transformation(diamond_workplan: Workplan) -> None:
         step_ed = blueprint.runtime_params.end_date
 
         assert ((step_sd, step_ed)) in get_time_slices(sd, ed)
+
+
+def test_planner_creates_external_nodes(
+    external_workplan: Workplan, external_task: ExternalTaskFactory
+) -> None:
+    """Verify an external dependency becomes a step-less node carrying its task."""
+    task = external_task(Status.Running)
+
+    planner = Planner(external_workplan, {EXTERNAL_TOKEN: task})
+
+    assert set(planner.graph.nodes) == {"first", "second", EXTERNAL_TOKEN}
+    assert set(planner.graph.successors(EXTERNAL_TOKEN)) == {"first", "second"}
+    assert planner.retrieve(EXTERNAL_TOKEN, KEY_STEP) is None
+    assert planner.retrieve(EXTERNAL_TOKEN, KEY_TASK) is task
+    assert planner.retrieve(EXTERNAL_TOKEN, KEY_STATUS) == Status.Running
+
+
+def test_planner_flatten_excludes_external_nodes(
+    external_workplan: Workplan, external_task: ExternalTaskFactory
+) -> None:
+    """Verify the planned steps are those of this workplan, in dependency order."""
+    task = external_task(Status.Done)
+
+    planner = Planner(external_workplan, {EXTERNAL_TOKEN: task})
+
+    assert [s.name for s in planner.flatten()] == ["first", "second"]
+
+
+def test_planner_tolerates_unresolved_external_step(
+    external_workplan: Workplan,
+) -> None:
+    """Verify a dependency on an external step with no task becomes an
+    Unsubmitted node, so its dependents are planned but never launched.
+    """
+    planner = Planner(external_workplan)
+    orchestrator = Orchestrator(planner, LocalLauncher())
+    first = planner.retrieve("first", KEY_STEP)
+    assert first is not None
+
+    assert planner.retrieve(EXTERNAL_TOKEN, KEY_STATUS) == Status.Unsubmitted
+    assert planner.retrieve(EXTERNAL_TOKEN, KEY_TASK) is None
+    assert [s.name for s in planner.flatten()] == ["first", "second"]
+    assert orchestrator._locate_dependencies(first) is None
+
+
+def test_planner_ignores_unused_external_tasks(
+    diamond_workplan: Workplan, external_task: ExternalTaskFactory
+) -> None:
+    """Verify a task no step depends on does not become a node."""
+    task = external_task(Status.Done)
+
+    planner = Planner(diamond_workplan, {EXTERNAL_TOKEN: task})
+
+    assert EXTERNAL_TOKEN not in planner.graph
+
+
+@pytest.mark.parametrize(
+    ("status", "included"),
+    [
+        pytest.param(Status.Done, False, id="done is omitted"),
+        pytest.param(Status.Running, True, id="running is passed"),
+        pytest.param(Status.Submitted, True, id="submitted is passed"),
+    ],
+)
+def test_locate_dependencies_external(
+    status: Status,
+    included: bool,
+    external_workplan: Workplan,
+    external_task: ExternalTaskFactory,
+) -> None:
+    """Verify only a finished external dependency is withheld from the launcher,
+    while local dependency handles are passed unchanged.
+    """
+    task = external_task(status)
+    planner = Planner(external_workplan, {EXTERNAL_TOKEN: task})
+    orchestrator = Orchestrator(planner, LocalLauncher())
+    first = planner.retrieve("first", KEY_STEP)
+    second = planner.retrieve("second", KEY_STEP)
+    assert first is not None
+    assert second is not None
+
+    assert orchestrator._locate_dependencies(first) == (
+        [task.handle] if included else []
+    )
+
+    # a local dependency that has not started blocks the launch
+    assert orchestrator._locate_dependencies(second) is None
+
+    local: Task[ProcessHandle] = Task(
+        step=first,
+        handle=ProcessHandle(pid="1", name="first", run_id="r", status=Status.Running),
+    )
+    planner.store("first", KEY_TASK, local)
+    expected = [local.handle, *([task.handle] if included else [])]
+
+    assert orchestrator._locate_dependencies(second) == expected
+
+
+@pytest.mark.parametrize(
+    ("status", "mode", "opens"),
+    [
+        pytest.param(Status.Done, RunMode.Schedule, True, id="done, schedule"),
+        pytest.param(Status.Running, RunMode.Schedule, True, id="running, schedule"),
+        pytest.param(Status.Done, RunMode.Monitor, True, id="done, monitor"),
+        pytest.param(Status.Running, RunMode.Monitor, False, id="running, monitor"),
+    ],
+)
+def test_open_nodes_with_external_dependency(
+    status: Status,
+    mode: RunMode,
+    opens: bool,
+    external_workplan: Workplan,
+    external_task: ExternalTaskFactory,
+) -> None:
+    """Verify a step becomes open when its external dependency is terminal, or
+    (when scheduling, where SLURM enforces ordering) in progress.
+    """
+    task = external_task(status)
+    planner = Planner(external_workplan, {EXTERNAL_TOKEN: task})
+    orchestrator = Orchestrator(planner, LocalLauncher())
+
+    open_nodes = orchestrator.get_open_nodes(mode=mode)
+
+    assert open_nodes is not None
+    assert ("first" in open_nodes) is opens
+    assert EXTERNAL_TOKEN not in open_nodes

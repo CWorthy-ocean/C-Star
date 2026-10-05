@@ -7,7 +7,7 @@ from unittest import mock
 import pytest
 from psutil import NoSuchProcess
 
-from cstar.base.exceptions import CstarExpectationFailed
+from cstar.base.exceptions import CstarError, CstarExpectationFailed
 from cstar.entrypoint.utils import ARG_CLOBBER, ARG_PRE_RUN, ARG_RESUME
 from cstar.orchestration.launch.local import (
     LocalHandle,
@@ -535,6 +535,77 @@ async def test_locallauncher_launch_refuses_running_slurm_sentinel(
         await LocalLauncher.launch(live_step, [])
 
     mock_submit.assert_not_awaited()
+
+
+@pytest.mark.parametrize(
+    ("launcher_name", "run_id", "same_run"),
+    [
+        pytest.param("local", "spinup", False, id="local step of another run"),
+        pytest.param("slurm", "", True, id="slurm job of this run"),
+    ],
+)
+@pytest.mark.usefixtures("read_yaml_intercept")
+async def test_locallauncher_launch_refuses_dependency_it_cannot_wait_on(
+    wp_templates_dir: Path,
+    mock_run_id: str,
+    launcher_name: str,
+    run_id: str,
+    same_run: bool,
+) -> None:
+    """Verify the local launcher refuses to wait on a handle created by another
+    run or by another launcher, rather than waiting on an unrelated pid.
+    """
+    workplan = deserialize(wp_templates_dir / "single_step.yaml", Workplan)
+    live_step = LiveStep.from_step(workplan.steps[0])
+    foreign = LocalHandle(
+        pid="12345",
+        name="outer",
+        run_id=mock_run_id if same_run else run_id,
+        launcher_name=launcher_name,
+        start_at=datetime.datetime.now(tz=datetime.UTC),
+        status=Status.Running,
+    )
+
+    with (
+        mock.patch.object(LocalLauncher, "_submit", mock.AsyncMock()) as mock_submit,
+        pytest.raises(CstarError, match="another run"),
+    ):
+        await LocalLauncher.launch(live_step, [foreign])
+
+    mock_submit.assert_not_awaited()
+
+
+@pytest.mark.usefixtures("read_yaml_intercept")
+async def test_locallauncher_launch_waits_on_dependency_of_this_run(
+    wp_templates_dir: Path,
+    mock_run_id: str,
+) -> None:
+    """Verify a dependency created by this run's local launcher is still accepted."""
+    workplan = deserialize(wp_templates_dir / "single_step.yaml", Workplan)
+    live_step = LiveStep.from_step(workplan.steps[0])
+    dependency = LocalHandle(
+        pid="12345",
+        name="outer",
+        run_id=mock_run_id,
+        launcher_name=LocalLauncher.name,
+        start_at=datetime.datetime.now(tz=datetime.UTC),
+        status=Status.Running,
+    )
+    submitted = LocalHandle(pid="777", name=live_step.name, run_id=mock_run_id)
+
+    with (
+        mock.patch.object(
+            LocalLauncher, "query_status", mock.AsyncMock(return_value=Status.Running)
+        ),
+        mock.patch.object(
+            LocalLauncher, "_submit", mock.AsyncMock(return_value=submitted)
+        ) as mock_submit,
+    ):
+        task = await LocalLauncher.launch(live_step, [dependency])
+
+    assert task.handle.pid == "777"
+    assert mock_submit.await_args is not None
+    assert mock_submit.await_args.args[1] == [dependency]
 
 
 def test_localhandle_start_ts_requires_start_time(mock_run_id: str) -> None:

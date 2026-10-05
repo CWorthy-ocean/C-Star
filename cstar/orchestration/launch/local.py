@@ -16,7 +16,7 @@ from cstar.base.adapter import (
     ModelEnricher,
 )
 from cstar.base.env import ENV_CSTAR_ORCH_LOCAL_DELAY, ENV_CSTAR_RUNID, get_env_item
-from cstar.base.exceptions import CstarExpectationFailed
+from cstar.base.exceptions import CstarError, CstarExpectationFailed
 from cstar.base.log import get_logger
 from cstar.base.utils import WALLTIME_RE, additional_files_dir
 from cstar.execution.file_system import rotate_file
@@ -484,7 +484,27 @@ class LocalLauncher(Launcher[LocalHandle]):
         -------
         Task[LocalHandle]
             A Task containing information about the newly submitted job.
+
+        Raises
+        ------
+        CstarError
+            If a dependency was created by another launcher or run: a local
+            process cannot wait on it.
         """
+        run_id = os.getenv(ENV_CSTAR_RUNID, "")
+        if outsiders := [
+            h
+            for h in dependencies
+            if is_foreign_handle(h, cls.name) or h.run_id != run_id
+        ]:
+            names = ", ".join(f"{h.name!r} (run {h.run_id!r})" for h in outsiders)
+            msg = (
+                f"Step {step.name!r} cannot wait on {names}: the local launcher "
+                "cannot wait on a step of another run, so external steps must "
+                "be Done"
+            )
+            raise CstarError(msg)
+
         tasks = [asyncio.Task(cls.query_status(h)) for h in dependencies]
         statuses = await asyncio.gather(*tasks)
 

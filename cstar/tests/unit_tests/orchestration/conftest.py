@@ -16,7 +16,8 @@ from cstar.execution.file_system import (
     StateDirectoryManager,
 )
 from cstar.orchestration.launch.local import LocalHandle
-from cstar.orchestration.models import Application, Step, Workplan
+from cstar.orchestration.models import Application, RunRef, Step, Workplan
+from cstar.orchestration.orchestration import LiveStep, ProcessHandle, Status, Task
 from cstar.orchestration.serialization import deserialize
 from cstar.orchestration.state import StateRepository
 from cstar.orchestration.tracking import TrackingRepository, WorkplanRun
@@ -700,3 +701,73 @@ async def read_yaml_intercept(
         side_effect=handle_yaml_read(read_yaml_to_raw),
     ):
         yield
+
+
+EXTERNAL_TOKEN: t.Final[str] = "outer@spinup"
+"""The token naming the external step in `external_workplan`."""
+
+ExternalTaskFactory = Callable[[Status], Task[ProcessHandle]]
+"""Builds a task standing in for a step of another run, in a given status."""
+
+
+@pytest.fixture
+def external_task(tmp_path: Path, hello_world_bp_path: Path) -> ExternalTaskFactory:
+    """Create a factory fabricating the task of a step of another run.
+
+    Parameters
+    ----------
+    tmp_path : Path
+        Temporary directory for test outputs.
+    hello_world_bp_path : Path
+        Fixture returning the path to a hello-world blueprint file.
+    """
+
+    def _make(status: Status) -> Task[ProcessHandle]:
+        step = LiveStep(
+            name="outer",
+            application="hello_world",
+            blueprint=hello_world_bp_path.as_posix(),
+            working_dir=tmp_path / "spinup" / "outer",
+        )
+        handle = ProcessHandle(
+            pid="9001",
+            name="outer",
+            run_id="spinup",
+            launcher_name="slurm",
+            status=status,
+        )
+        return Task(step=step, handle=handle)
+
+    return _make
+
+
+@pytest.fixture
+def external_workplan(hello_world_bp_path: Path) -> Workplan:
+    """A workplan whose steps `first` and `second` depend on `outer@spinup`,
+    `second` also on `first`.
+
+    Parameters
+    ----------
+    hello_world_bp_path : Path
+        Fixture returning the path to a hello-world blueprint file.
+    """
+    bp = hello_world_bp_path.as_posix()
+    return Workplan(
+        name="consumer",
+        description="Depends on a step of another run.",
+        runs={"spinup": RunRef(run_id="spinup")},
+        steps=[
+            Step(
+                name="first",
+                application="hello_world",
+                blueprint=bp,
+                depends_on=[EXTERNAL_TOKEN],
+            ),
+            Step(
+                name="second",
+                application="hello_world",
+                blueprint=bp,
+                depends_on=["first", EXTERNAL_TOKEN],
+            ),
+        ],
+    )

@@ -550,3 +550,68 @@ async def test_slurmlauncher_launch_queries_unnamed_pre_run_sentinel(
     mock_batch.assert_awaited_once_with("12345")
     assert ARG_CLOBBER in captured["command"]
     assert ARG_RESUME not in captured["command"]
+
+
+@pytest.mark.usefixtures("read_yaml_intercept")
+async def test_slurmlauncher_launch_depends_on_running_foreign_job(
+    wp_templates_dir: Path,
+    mock_run_id: str,
+) -> None:
+    """Verify a step is submitted with a dependency on an in-progress job that
+    another run submitted: its id survives the completed-job prune and reaches
+    the job being created.
+    """
+    workplan = deserialize(wp_templates_dir / "single_step.yaml", Workplan)
+    live_step = LiveStep.from_step(workplan.steps[0])
+    foreign = SlurmHandle(
+        pid="9001",
+        name="outer",
+        run_id="spinup",
+        launcher_name=SlurmLauncher.name,
+        status=Status.Running,
+    )
+    seen: dict[str, list[str]] = {}
+
+    def fake_adapt_step(step: LiveStep, dependencies: list[SlurmHandle]) -> t.Any:
+        seen["ids"] = [d.pid for d in dependencies]
+        return mock.Mock(id=4242, commands="cstar blueprint run")
+
+    running = mock.Mock(status=ExecutionStatus.RUNNING)
+
+    with (
+        mock.patch(
+            "cstar.orchestration.launch.slurm.get_slurm_batches",
+            mock.AsyncMock(return_value={"9001": running}),
+        ),
+        mock.patch.object(SlurmLauncher, "POST_SUBMIT_DELAY", 0),
+        mock.patch.object(SlurmLauncher, "adapt_step", fake_adapt_step),
+    ):
+        task = await SlurmLauncher.launch(live_step, [foreign])
+
+    assert seen["ids"] == ["9001"]
+    assert task.handle.pid == "4242"
+    assert task.handle.run_id == mock_run_id
+
+
+@pytest.mark.usefixtures("read_yaml_intercept")
+def test_slurmlauncher_adapt_step_waits_on_foreign_job(
+    wp_templates_dir: Path,
+    mock_run_id: str,
+) -> None:
+    """Verify the scheduler job is created depending on the foreign job's id."""
+    workplan = deserialize(wp_templates_dir / "single_step.yaml", Workplan)
+    live_step = LiveStep.from_step(workplan.steps[0])
+    foreign = SlurmHandle(
+        pid="9001",
+        name="outer",
+        run_id="spinup",
+        launcher_name=SlurmLauncher.name,
+        status=Status.Running,
+    )
+
+    with mock.patch(
+        "cstar.orchestration.launch.slurm.create_scheduler_job"
+    ) as create_job:
+        SlurmLauncher.adapt_step(live_step, [foreign])
+
+    assert create_job.call_args.kwargs["depends_on"] == ["9001"]

@@ -35,6 +35,7 @@ from cstar.orchestration.models import (
     DeferredBlueprintRef,
     InlineBlueprintRef,
     Step,
+    StepRef,
     Workplan,
 )
 from cstar.orchestration.serialization import (
@@ -486,6 +487,7 @@ class Planner(LoggingMixin):
     def __init__(
         self,
         workplan: Workplan,
+        external: Mapping[str, Task[ProcessHandle]] | None = None,
     ) -> None:
         """Initialize the planner and build an execution graph.
 
@@ -493,31 +495,52 @@ class Planner(LoggingMixin):
         ----------
         workplan: Workplan
             The workplan to be planned.
+        external : Mapping[str, Task[ProcessHandle]] | None
+            The steps of other workplan runs that `workplan` depends on, keyed
+            by their `<step>@<alias>` token. They become nodes of the graph
+            that are never processed. An external dependency missing from
+            `external` still becomes a node, `Unsubmitted` and without a task,
+            so its dependents are planned but never launched; callers that
+            launch steps refuse an unresolved dependency before planning.
         """
         self.workplan = workplan
-        self.graph = Planner._workplan_to_graph(workplan)
+        self.graph = Planner._workplan_to_graph(workplan, external or {})
 
     @classmethod
-    def _workplan_to_graph(cls, workplan: Workplan) -> "DiGraph[str]":
+    def _workplan_to_graph(
+        cls,
+        workplan: Workplan,
+        external: Mapping[str, Task[ProcessHandle]],
+    ) -> "DiGraph[str]":
         """Convert a workplan into a graph for planning.
 
         Parameters
         ----------
         workplan: Workplan
             The workplan to be converted.
+        external : Mapping[str, Task[ProcessHandle]]
+            The external steps that can be depended upon, keyed by token.
 
         Returns
         -------
         DiGraph
             A graph of the execution plan.
         """
-        data: Mapping[str, list[str]] = {s.name: [] for s in workplan.steps}
+        data: dict[str, list[str]] = {s.name: [] for s in workplan.steps}
+        nodes: dict[str, Task[ProcessHandle] | None] = {}
         for step in workplan.steps:
-            for prereq in step.depends_on:
-                data[prereq].append(step.name)
+            for token in step.depends_on:
+                ref = StepRef.parse(token)
+                if not ref.is_external:
+                    data[ref.step].append(step.name)
+                    continue
+
+                node = str(ref)
+                nodes[node] = external.get(node)
+                data.setdefault(node, []).append(step.name)
 
         g = nx.DiGraph(data)
-        defaults: dict[str, dict[str, Status | Step | None]] = {
+        defaults: dict[str, dict[str, Status | Step | Task[ProcessHandle] | None]] = {
             str(n.name): {
                 KEY_STATUS: Status.Unsubmitted,
                 KEY_STEP: LiveStep.from_step(n),
@@ -525,6 +548,16 @@ class Planner(LoggingMixin):
             }
             for n in workplan.steps
         }
+        defaults.update(
+            {
+                node: {
+                    KEY_STATUS: task.status if task else Status.Unsubmitted,
+                    KEY_STEP: None,
+                    KEY_TASK: task,
+                }
+                for node, task in nodes.items()
+            }
+        )
         nx.set_node_attributes(g, values=defaults)
         return g
 
@@ -543,7 +576,7 @@ class Planner(LoggingMixin):
 
         keys = nx.topological_sort(self.graph)
         steps = self.retrieve_all(KEY_STEP, filter_fn=f)
-        return tuple(steps[k] for k in keys)
+        return tuple(steps[k] for k in keys if k in steps)
 
     @t.overload
     def store(self, n: str, key: t.Literal["status"], value: Status) -> None: ...
@@ -681,6 +714,9 @@ class Launcher(t.Protocol, t.Generic[_THandle]):
 
     name: t.ClassVar[str]
     """Value recorded as `ProcessHandle.launcher_name` on handles this launcher creates."""
+
+    supports_foreign_dependencies: t.ClassVar[bool] = False
+    """Whether `launch` can wait on an in-progress handle created by another run under this launcher."""
 
     @classmethod
     def check_preconditions(cls) -> None:
@@ -881,6 +917,10 @@ class Orchestrator(LoggingMixin):
     def _locate_dependencies(self, step: LiveStep) -> list[ProcessHandle] | None:
         """Look for the dependencies of the step.
 
+        An external dependency (a node without a step) that is `Done` is
+        omitted: its job has finished, and a launcher cannot be asked to wait
+        on a job it can no longer see.
+
         Returns
         -------
         list[ProcessHandle] | None
@@ -894,17 +934,21 @@ class Orchestrator(LoggingMixin):
 
         # TODO: replace this with proactively configuring the keys?
         # - e.g. reverse lookup...
-        dep_tasks = [
-            self.planner.retrieve(dnode, KEY_TASK) for dnode in step.depends_on
-        ]
+        nodes = [str(StepRef.parse(token)) for token in step.depends_on]
+        dep_tasks = [self.planner.retrieve(dnode, KEY_TASK) for dnode in nodes]
 
         running_deps = [x for x in dep_tasks if x]
 
-        if len(running_deps) != len(step.depends_on):
+        if len(running_deps) != len(nodes):
             # the dependencies have not been started. abort launch...
             return None
 
-        return [d.handle for d in running_deps]
+        return [
+            task.handle
+            for node, task in zip(nodes, running_deps, strict=True)
+            if self.planner.retrieve(node, KEY_STEP) is not None
+            or task.status != Status.Done
+        ]
 
     async def process_node(self, node: str) -> Task[ProcessHandle] | None:
         """Execute a task.
