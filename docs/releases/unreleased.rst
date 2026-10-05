@@ -19,6 +19,7 @@ Breaking Changes
 - If ``PROJECT`` is set on a laptop or an unrecognised cluster, the source-data cache now moves under it; it previously stayed under your home directory. (`#736 <https://github.com/CWorthy-ocean/C-Star/pull/736>`_)
 - On a machine that exports only ``SCRATCH_DIR`` or ``LOCAL_SCRATCH``, the source-data cache now goes to scratch instead of your home directory. (`#736 <https://github.com/CWorthy-ocean/C-Star/pull/736>`_)
 - Forge's per-system layout registry (``SYSTEM_LAYOUT_REGISTRY``, ``register_system``) and ``detect_system`` are removed; custom layouts registered against it no longer apply. (`#736 <https://github.com/CWorthy-ocean/C-Star/pull/736>`_)
+- New workplan runs are written to ``CSTAR_DATA_HOME/workplan_runs/<run-id>`` instead of ``CSTAR_DATA_HOME/<run-id>``; scripts or notebooks that build the old path will not find new runs. (`#739 <https://github.com/CWorthy-ocean/C-Star/pull/739>`_)
 
 New features
 ~~~~~~~~~~~~
@@ -41,6 +42,12 @@ New features
   - A workplan may depend on a step of another run that is still in progress when both runs use the SLURM launcher; the new step is submitted with a SLURM dependency on that job. The local launcher refuses in-progress external steps.
   - ``cstar workplan check``, ``cstar workplan run`` and ``cstar workplan status`` report external dependencies: unresolvable or unusable ones are listed up front, and ``status`` shows the external token in the Dependencies column.
 
+- ``continue-from`` accepts an optional ``timestamp`` (with ``step`` or ``path``) to continue from the restart dated exactly that time rather than the latest one. (`#740 <https://github.com/CWorthy-ocean/C-Star/pull/740>`_)
+
+  - ``timestamp`` takes an ISO 8601 date-time, a date alone (meaning midnight), or the 14-digit stamp from restart file names (e.g. ``20120201000000``).
+  - If the source has no restart at that timestamp, the step fails with an error listing the restart timestamps that are available.
+
+
 
 Bug Fixes
 ~~~~~~~~~
@@ -59,6 +66,7 @@ Bug Fixes
 - Sentinel files are written atomically; the local proxy script could previously catch an in-place rewrite mid-way and leave a step with an empty sentinel, so the step showed no status and the run never reached a terminal state. (`#733 <https://github.com/CWorthy-ocean/C-Star/pull/733>`_)
 - Step sentinels now record which launcher created them, so a local pre-run after a failed SLURM run under the same run-id no longer crashes while reading the SLURM sentinel and instead clears and re-prepares the failed steps. (`#733 <https://github.com/CWorthy-ocean/C-Star/pull/733>`_)
 - ``cstar admin clean`` no longer deletes the user catalog at ``~/cstar/catalog`` when it clears the C-Star data directory. (`#736 <https://github.com/CWorthy-ocean/C-Star/pull/736>`_)
+- Tab completion of step names found no steps for a run whose tracking record had been cleaned up. (`#739 <https://github.com/CWorthy-ocean/C-Star/pull/739>`_)
 
 Improvements
 ~~~~~~~~~~~~
@@ -74,6 +82,10 @@ Improvements
 - The first line of a step log now distinguishes a launch from a completed pre-run from a resume after a failure. (`#733 <https://github.com/CWorthy-ocean/C-Star/pull/733>`_)
 - The source-data cache now lives at ``<root>/cstar/source-data`` everywhere, and an existing cache at the old location is linked in, so nothing is downloaded again. (`#736 <https://github.com/CWorthy-ocean/C-Star/pull/736>`_)
 - ``cstar admin clean`` spares the source-data cache when it sits inside the C-Star data directory. (`#736 <https://github.com/CWorthy-ocean/C-Star/pull/736>`_)
+- Removed the orchestrator's unreachable monitor mode, leaving a single scheduling path for workplan runs. (`#738 <https://github.com/CWorthy-ocean/C-Star/pull/738>`_)
+- The orchestrator now refuses to launch a step a second time within a run, rather than silently resubmitting its job. (`#738 <https://github.com/CWorthy-ocean/C-Star/pull/738>`_)
+- Runs started before this change keep their existing directory when re-run, resumed, gathered, or cleaned, so in-flight work continues where it is. (`#739 <https://github.com/CWorthy-ocean/C-Star/pull/739>`_)
+- A malformed ``timestamp`` (partial date, timezone, fractional seconds) is reported by ``cstar workplan check`` / submission, before any step runs. (`#740 <https://github.com/CWorthy-ocean/C-Star/pull/740>`_)
 
 Miscellaneous
 ~~~~~~~~~~~~~
@@ -91,3 +103,6 @@ Miscellaneous
 - The HPC and data-access docs describe the single cache rule and ``CSTAR_PROJECT_HOME`` in place of the per-system table. (`#736 <https://github.com/CWorthy-ocean/C-Star/pull/736>`_)
 - New "Referencing other runs" section in the workplan docs and notes on the directives page; the published workplan JSON schema is regenerated for the new ``runs`` field. (`#737 <https://github.com/CWorthy-ocean/C-Star/pull/737>`_)
 - Step names and run aliases may no longer contain ``@``, which now separates a step from its run alias; a workplan with such a step name is rejected when loaded. (`#737 <https://github.com/CWorthy-ocean/C-Star/pull/737>`_)
+- Corrected the workplans guide, which said re-running a run ID keeps monitoring until the run ends; it now schedules any remaining steps and returns. (`#738 <https://github.com/CWorthy-ocean/C-Star/pull/738>`_)
+- Corrected the workplans guide's status example, which passed the run ID as ``--run-id`` although ``cstar workplan status`` takes it as an argument. (`#738 <https://github.com/CWorthy-ocean/C-Star/pull/738>`_)
+- The HPC guide, terminology page, and workplan tutorial show the new run layout; the HPC guide's step-directory path now includes ``tasks/``. (`#739 <https://github.com/CWorthy-ocean/C-Star/pull/739>`_)
