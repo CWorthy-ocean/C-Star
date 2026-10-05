@@ -43,6 +43,7 @@ from cstar.entrypoint.utils import (
     ARG_PRE_RUN_WORKPLAN_HELP,
     ARG_RESUME,
     ARG_RESUME_WORKPLAN_HELP,
+    ARG_RUN_ID,
     ARG_VAR_HELP,
     ARG_VAR_LONG,
     ARG_VAR_SHORT,
@@ -539,6 +540,7 @@ def run(
     run_id: t.Annotated[
         str,
         typer.Option(
+            ARG_RUN_ID,
             help="The unique identifier for an execution of the workplan.",
             autocompletion=list_runs,
             callback=cb_pipeline(

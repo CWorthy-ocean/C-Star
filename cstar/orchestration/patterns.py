@@ -50,7 +50,7 @@ _LEGACY_OUTPUT_PATTERN: t.Final[re.Pattern[str]] = re.compile(
 _WORD_BREAKS: t.Final[re.Pattern[str]] = re.compile(r"[\W_]+")
 """A run of characters that separates the words of a step name."""
 
-_INLINE_APPLICATIONS: t.Final[frozenset[str]] = frozenset(
+INLINE_APPLICATIONS: t.Final[frozenset[str]] = frozenset(
     {"nest_ic", "upscaler", "hello_world"}
 )
 """Applications whose blueprint is fully described by a step's overrides."""
@@ -631,7 +631,7 @@ def _is_inline_candidate(step: Step) -> bool:
 
     if (
         not isinstance(data, Mapping)
-        or data.get("application") not in _INLINE_APPLICATIONS
+        or data.get("application") not in INLINE_APPLICATIONS
     ):
         return False
     if data["application"] != step.application:
