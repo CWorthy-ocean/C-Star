@@ -3,7 +3,7 @@ import asyncio
 import shutil
 import typing as t
 from abc import ABC
-from collections.abc import Iterable, Sequence
+from collections.abc import Iterable, Iterator, Sequence
 from enum import IntEnum, auto
 from pathlib import Path
 
@@ -141,6 +141,12 @@ class FileSystemCleanupAction(CleanupAction):
 
     asset_paths: list[Path] = Field(default_factory=list[Path], min_length=1)
     """The paths containing the resources to be cleaned up."""
+    keep_paths: list[Path] = Field(default_factory=list[Path])
+    """Paths inside the assets that survive the cleanup."""
+
+    def _keeps_in(self, asset: Path) -> list[Path]:
+        """Return the keep paths strictly inside an asset."""
+        return [k for k in self.keep_paths if k != asset and k.is_relative_to(asset)]
 
     def execute(self) -> CleanupResult:
         """Perform the cleanup behavior for an associated resource.
@@ -165,7 +171,13 @@ class FileSystemCleanupAction(CleanupAction):
 
             try:
                 if not dry_run:
-                    if asset_type == "directory":
+                    if keeps := self._keeps_in(asset):
+                        for child in list(_removable(asset, keeps)):
+                            if child.is_dir() and not child.is_symlink():
+                                shutil.rmtree(child)
+                            else:
+                                child.unlink()
+                    elif asset_type == "directory":
                         shutil.rmtree(asset)
                     elif asset_type == "file":
                         asset.unlink()
@@ -181,8 +193,15 @@ class FileSystemCleanupAction(CleanupAction):
         return results
 
     def mitigated(self) -> bool:
-        """Return `True` when all underlying assets are not found."""
-        return all(not p.exists() for p in self.asset_paths)
+        """Return `True` when all underlying assets are not found or hold only keep paths."""
+        return all(
+            not p.exists()
+            or (
+                bool(keeps := self._keeps_in(p))
+                and next(_removable(p, keeps), None) is None
+            )
+            for p in self.asset_paths
+        )
 
     @property
     def state(self) -> CleanupResult:
@@ -199,14 +218,39 @@ class FileSystemCleanupAction(CleanupAction):
         else:
             header = f"{self.name}"
 
+        kept = [f"* keeps {k}" for a in self.asset_paths for k in self._keeps_in(a)]
+
         if len(self.asset_paths) > 1:
-            tasks = "\n".join(f"* {p}" for p in self.asset_paths)
+            tasks = "\n".join([f"* {p}" for p in self.asset_paths] + kept)
             return f"{header}\n{tasks}"
 
         if self.asset_paths:
-            return f"{header}\n{self.asset_paths[0]}"
+            return "\n".join([header, str(self.asset_paths[0]), *kept])
 
         return header
+
+
+def _removable(path: Path, keeps: Sequence[Path]) -> Iterator[Path]:
+    """Yield the entries under `path` to remove, sparing keep paths and their ancestors."""
+    for child in path.iterdir():
+        inside = any(k.is_relative_to(child) for k in keeps)
+        if not inside:
+            yield child
+        elif child not in keeps and not child.is_symlink():
+            yield from _removable(child, keeps)
+
+
+def _data_keep_paths() -> list[Path]:
+    """Return the durable paths that must survive a clean of the data directory."""
+    # imported lazily: the catalog package pulls in fsspec, which the CLI otherwise avoids
+    from cstar.catalog.domain_catalog import user_catalog_root
+
+    keeps = [DirectoryManager.source_data_home()]
+    try:
+        keeps.append(user_catalog_root())
+    except ValueError:  # CSTAR_CATALOG=local: no writable layer on disk
+        pass
+    return keeps
 
 
 def get_default_cleanup_actions() -> list[CleanupAction]:
@@ -238,6 +282,7 @@ def get_default_cleanup_actions() -> list[CleanupAction]:
                     name="C-Star Data",
                     description="All datasets and assets created during a run.",
                     asset_paths=[DirectoryManager.data_home()],
+                    keep_paths=_data_keep_paths(),
                 ),
                 FileSystemCleanupAction(
                     name="C-Star configuration",

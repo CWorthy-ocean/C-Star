@@ -9,8 +9,10 @@ import typer
 from typer.testing import CliRunner
 
 from cstar.base.env import ENV_CSTAR_CLI_DRY_RUN, ENV_CSTAR_RUNID, FLAG_ON
+from cstar.base.exceptions import CstarError
 from cstar.cli.admin.clean import (
     ARG_YES,
+    CleanupStatus,
     FileSystemCleanupAction,
     app,
     get_default_cleanup_actions,
@@ -255,3 +257,175 @@ def test_cli_admin_clean_default_cleanup(dry_run: bool) -> None:
     key = "will remove" if dry_run else "removed"
 
     assert key in result.stdout.lower()
+
+
+@pytest.fixture
+def data_home(tmp_path: Path) -> Path:
+    """Create a data directory holding a cache, a catalog, and removable content."""
+    home = tmp_path / "data"
+    outside = tmp_path / "outside"
+    for d in (home / "source-data", home / "catalog", home / "run1", outside):
+        d.mkdir(parents=True)
+    (home / "source-data" / "glorys.nc").touch()
+    (home / "catalog" / "domains.yaml").touch()
+    (home / "run1" / "out.nc").touch()
+    (home / "file.txt").touch()
+    (home / "dirlink").symlink_to(outside, target_is_directory=True)
+    (outside / "precious.txt").touch()
+    return home
+
+
+def _keep_action(home: Path, *keeps: Path) -> FileSystemCleanupAction:
+    return FileSystemCleanupAction(
+        name="data", asset_paths=[home], keep_paths=list(keeps)
+    )
+
+
+def test_cli_admin_clean_keep_paths_survive(data_home: Path, tmp_path: Path) -> None:
+    """Verify everything but the keep paths is removed, and symlinks are unlinked."""
+    keeps = [data_home / "source-data", data_home / "catalog"]
+    action = _keep_action(data_home, *keeps)
+
+    assert not action.mitigated()
+    results = action.execute()
+
+    assert {p.name for p in data_home.iterdir()} == {"source-data", "catalog"}
+    assert (data_home / "source-data" / "glorys.nc").exists()
+    assert (data_home / "catalog" / "domains.yaml").exists()
+    assert (tmp_path / "outside" / "precious.txt").exists()  # link target untouched
+    assert list(results.ledger) == [str(data_home)]
+    assert results.status == CleanupStatus.DONE
+    assert action.mitigated()
+
+
+def test_cli_admin_clean_keep_path_nested(tmp_path: Path) -> None:
+    """Verify ancestors of a nested keep path are kept and their siblings removed."""
+    home = tmp_path / "data"
+    keep = home / "a" / "b" / "keep"
+    for d in (keep, home / "a" / "b" / "drop", home / "a" / "sibling", home / "other"):
+        d.mkdir(parents=True)
+    (keep / "x.nc").touch()
+    (home / "a" / "b" / "f.txt").touch()
+
+    action = _keep_action(home, keep)
+    assert not action.mitigated()
+    action.execute()
+
+    assert [p for p in sorted(home.rglob("*"))] == [
+        home / "a",
+        home / "a" / "b",
+        keep,
+        keep / "x.nc",
+    ]
+    assert action.mitigated()
+
+
+def test_cli_admin_clean_keep_path_symlink(tmp_path: Path) -> None:
+    """Verify a keep path that is a symlink is neither followed nor removed."""
+    home = tmp_path / "data"
+    legacy = tmp_path / "legacy-cache"
+    home.mkdir()
+    legacy.mkdir()
+    (legacy / "glorys.nc").touch()
+    link = home / "source-data"
+    link.symlink_to(legacy, target_is_directory=True)
+    (home / "run1").mkdir()
+
+    action = _keep_action(home, link)
+    action.execute()
+
+    assert link.is_symlink()
+    assert (legacy / "glorys.nc").exists()
+    assert [p.name for p in home.iterdir()] == ["source-data"]
+    assert action.mitigated()
+
+
+def test_cli_admin_clean_keep_paths_dry_run(data_home: Path) -> None:
+    """Verify dry-run removes nothing when keep paths are configured."""
+    before = sorted(data_home.rglob("*"))
+    action = _keep_action(data_home, data_home / "source-data")
+
+    with mock.patch.dict(os.environ, {ENV_CSTAR_CLI_DRY_RUN: FLAG_ON}):
+        action.execute()
+
+    assert sorted(data_home.rglob("*")) == before
+    assert not action.mitigated()
+
+
+def test_cli_admin_clean_keep_path_equal_to_asset_or_outside(tmp_path: Path) -> None:
+    """Verify keep paths that are the asset itself, or outside it, change nothing."""
+    asset, elsewhere = tmp_path / "asset", tmp_path / "elsewhere"
+    asset.mkdir()
+    elsewhere.mkdir()
+    (asset / "f").touch()
+    action = _keep_action(asset, asset, elsewhere)
+
+    assert action.display() == f"data\n{asset}"
+    action.execute()
+
+    assert not asset.exists()
+    assert elsewhere.exists()
+
+
+def test_cli_admin_clean_display_lists_keeps(data_home: Path, tmp_path: Path) -> None:
+    """Verify display lists the kept paths that are inside an asset."""
+    keep = data_home / "source-data"
+    action = _keep_action(data_home, keep, tmp_path / "elsewhere")
+
+    lines = action.display().splitlines()
+
+    assert lines == ["data", str(data_home), f"* keeps {keep}"]
+
+
+def _isolate_env(
+    monkeypatch: pytest.MonkeyPatch, home: Path, catalog: str | None
+) -> Path:
+    """Point C-Star's data, home, and scratch resolution at `home`."""
+    data = home / "cstar"
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("CSTAR_DATA_HOME", str(data))
+    for var in (
+        "CSTAR_PROJECT_HOME",
+        "PROJECT",
+        "SCRATCH",
+        "SCRATCH_DIR",
+        "LOCAL_SCRATCH",
+        "CSTAR_CATALOG",
+    ):
+        monkeypatch.delenv(var, raising=False)
+    if catalog is not None:
+        monkeypatch.setenv("CSTAR_CATALOG", catalog)
+    monkeypatch.setattr(
+        "cstar.system.manager.get_system_context",
+        mock.Mock(side_effect=CstarError("no system")),
+    )
+    return data
+
+
+def test_cli_admin_clean_default_data_action_keeps(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Verify the data action carries the source-data cache and user catalog."""
+    home = tmp_path.resolve()
+    data = _isolate_env(monkeypatch, home, catalog=None)
+
+    actions = t.cast("list[FileSystemCleanupAction]", get_default_cleanup_actions())
+    (action,) = (a for a in actions if a.name == "C-Star Data")
+
+    assert action.keep_paths == [
+        DirectoryManager.source_data_home(),
+        home / "cstar" / "catalog",
+    ]
+    assert action.keep_paths[0].resolve() == (data / "source-data").resolve()
+
+
+def test_cli_admin_clean_default_data_action_keeps_local_catalog(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Verify only the cache is kept when the catalog has no writable layer."""
+    _isolate_env(monkeypatch, tmp_path.resolve(), catalog="local")
+
+    actions = t.cast("list[FileSystemCleanupAction]", get_default_cleanup_actions())
+    (action,) = (a for a in actions if a.name == "C-Star Data")
+
+    assert action.keep_paths == [DirectoryManager.source_data_home()]
