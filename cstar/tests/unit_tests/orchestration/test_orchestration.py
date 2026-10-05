@@ -5,7 +5,6 @@ from datetime import datetime
 from pathlib import Path
 from unittest import mock
 
-import networkx as nx
 import pytest
 
 from cstar.applications.roms_marbl.models import RomsMarblBlueprint
@@ -35,66 +34,7 @@ from cstar.tests.unit_tests.orchestration.conftest import (
     ExternalTaskFactory,
 )
 
-if t.TYPE_CHECKING:
-    from collections.abc import Iterable
-
 APP_NAME: t.Final[str] = "roms_marbl"
-
-
-@pytest.fixture
-def diamond_graph(tmp_path: Path) -> nx.DiGraph:
-    """Generate a prototype graph with a fan-out, fan-in pattern."""
-    data: dict[str, Iterable[str]] = {"0": ["1", "2"], "1": ["3"], "2": ["3"]}
-    g: nx.DiGraph = nx.DiGraph(data)
-    bp_path = tmp_path / "blueprint.yaml"
-    initial_stats = {
-        key: {
-            KEY_STEP: Step(
-                name=f"s-{i:02d}",
-                application=APP_NAME,
-                blueprint=bp_path.as_posix(),
-            ),
-            KEY_STATUS: Status.Unsubmitted,
-        }
-        for i, key in enumerate(g.nodes)
-    }
-    nx.set_node_attributes(g, initial_stats)
-    return g
-
-
-@pytest.fixture
-def tree_graph(tmp_path: Path) -> nx.DiGraph:
-    """Generate a prototype graph of a 3-layer, binary tree.
-
-    Parameters
-    ----------
-    tmp_path : Path
-        Temporary directory for test outputs
-
-    Returns
-    -------
-    nx.DiGraph
-    """
-    data: dict[str, Iterable[str]] = {
-        "0": ["1", "2"],
-        "1": ["3", "4"],
-        "2": ["5", "6"],
-    }
-    bp_path = tmp_path / "blueprint.yaml"
-    g = nx.DiGraph(data)
-    initial_stats: dict[str, dict[str, Step | Status]] = {
-        key: {
-            KEY_STEP: Step(
-                name=key,
-                application=APP_NAME,
-                blueprint=bp_path.as_posix(),
-            ),
-            KEY_STATUS: Status.Unsubmitted,
-        }
-        for key in g.nodes
-    }
-    nx.set_node_attributes(g, initial_stats)
-    return g
 
 
 @pytest.fixture
@@ -349,3 +289,28 @@ def test_open_nodes_with_external_dependency(
     assert open_nodes is not None
     assert ("first" in open_nodes) is opens
     assert EXTERNAL_TOKEN not in open_nodes
+
+
+async def test_process_node_refuses_relaunch(
+    external_workplan: Workplan,
+    external_task: ExternalTaskFactory,
+) -> None:
+    """Verify a step that already holds a task is never launched again."""
+    planner = Planner(external_workplan, {EXTERNAL_TOKEN: external_task(Status.Done)})
+    orchestrator = Orchestrator(planner, LocalLauncher())
+    first = planner.retrieve("first", KEY_STEP)
+    assert first is not None
+
+    prior: Task[ProcessHandle] = Task(
+        step=first,
+        handle=ProcessHandle(pid="1", name="first", run_id="r", status=Status.Failed),
+    )
+    planner.store("first", KEY_TASK, prior)
+
+    with (
+        mock.patch.object(LocalLauncher, "launch", mock.AsyncMock()) as launch,
+        pytest.raises(RuntimeError, match="already launched"),
+    ):
+        await orchestrator.process_node("first")
+
+    launch.assert_not_awaited()

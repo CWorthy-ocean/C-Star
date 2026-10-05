@@ -590,7 +590,7 @@ Checking Workplan Status
 
     .. code-block:: console
 
-        cstar workplan status --run-id <my-unique-id>
+        cstar workplan status <my-unique-id>
 
 
 Gathering Workplan Outputs

@@ -842,10 +842,11 @@ class Orchestrator(LoggingMixin):
 
         Returns
         -------
-        dict[str] | None
+        Mapping[str, Status] | None
             - Set of open nodes ready for some processing actions.
             - An empty set indicates no actions are currently possible.
-            - Null indicates all nodes are closed (traversal is complete).
+            - None ends the traversal: all nodes are closed, or a closed node
+              has failed.
         """
         g = self.planner.graph
         open_nodes: dict[str, Status] = {}
@@ -942,11 +943,23 @@ class Orchestrator(LoggingMixin):
         -------
         Task | None
             The created task, if successfully processed.
+
+        Raises
+        ------
+        ValueError
+            If the node does not identify a step.
+        RuntimeError
+            If the node's task was already launched.
         """
         step = self.planner.retrieve(node, KEY_STEP, None)
         if step is None:
             msg = f"Unable to process. Invalid node identifier supplied: {node}"
             raise ValueError(msg)
+
+        if self.planner.retrieve(node, KEY_TASK) is not None:
+            # a launched node must be closed before the next pass
+            msg = f"Step {step.name!r} was already launched"
+            raise RuntimeError(msg)
 
         dependencies = self._locate_dependencies(step)
         if dependencies is None:
