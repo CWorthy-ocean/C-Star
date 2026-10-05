@@ -97,3 +97,16 @@ def test_resolve_invalid_raises() -> None:
     """Verify an invalid mapping is not defaulted."""
     with pytest.raises(CstarAdaptationError):
         resolve_compute_environment({"bogus": 1})
+
+
+def test_legacy_template_keys_are_dropped_with_a_warning(caplog) -> None:
+    """The pre-0.16 template keys never did anything; they load, warn, and vanish."""
+    import logging
+
+    with caplog.at_level(logging.WARNING):
+        env = ComputeEnvironmentAdapter().adapt(
+            {"num_nodes": 4, "num_cpus_per_process": 16, "launcher": "local"}
+        )
+    assert env.launcher == "local"
+    assert "num_cpus_per_process" in caplog.text and "num_nodes" in caplog.text
+    assert "legacy" in caplog.text

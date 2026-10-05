@@ -1,13 +1,24 @@
-from pydantic import Field, ValidationError, field_validator
+import typing as t
+
+from pydantic import Field, ValidationError, field_validator, model_validator
 
 from cstar.base.adapter import ConfiguredModelAdapter, CstarAdaptationError
 from cstar.base.exceptions import CstarExpectationFailed
+from cstar.base.log import get_logger
 from cstar.orchestration.launch.slurm import SlurmComputeSpec
 from cstar.orchestration.models import (
     COMPUTE_OVERRIDE_NAMESPACES,
     ConfiguredBaseModel,
     KeyValueStore,
 )
+
+log = get_logger(__name__)
+
+LEGACY_KEYS: t.Final[frozenset[str]] = frozenset({"num_nodes", "num_cpus_per_process"})
+"""Keys the pre-0.16 workplan templates placed under `compute_environment`.
+
+Nothing ever read them. They are dropped with a warning so workplans and
+recorded runs written against those templates still load."""
 
 
 class ComputeEnvironment(ConfiguredBaseModel):
@@ -24,6 +35,18 @@ class ComputeEnvironment(ConfiguredBaseModel):
     slurm: SlurmComputeSpec | None = Field(default=None)
     """Workplan-wide SLURM defaults, overridden by a step's own
     `compute_overrides["slurm"]`."""
+
+    @model_validator(mode="before")
+    @classmethod
+    def _drop_legacy_keys(cls, data: t.Any) -> t.Any:
+        """Drop the never-read legacy template keys, warning once per load."""
+        if not isinstance(data, dict) or not (legacy := LEGACY_KEYS.intersection(data)):
+            return data
+        log.warning(
+            "compute_environment key(s) %s are legacy and ignored; remove them",
+            ", ".join(sorted(legacy)),
+        )
+        return {k: v for k, v in data.items() if k not in LEGACY_KEYS}
 
     @field_validator("launcher", mode="after")
     @classmethod

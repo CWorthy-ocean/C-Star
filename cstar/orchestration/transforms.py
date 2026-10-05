@@ -12,6 +12,7 @@ from pathlib import Path
 import yaml
 from pydantic import (
     BaseModel,
+    ValidationError,
 )
 
 from cstar.applications.core import (
@@ -31,6 +32,7 @@ from cstar.orchestration.compute_environment import (
     resolve_compute_environment,
 )
 from cstar.orchestration.launch.common import is_foreign_handle
+from cstar.orchestration.launch.slurm import SlurmComputeSpec
 from cstar.orchestration.models import (
     Blueprint,
     DeferredBlueprintRef,
@@ -1373,10 +1375,21 @@ def _inject_compute_defaults(step: LiveStep, env: ComputeEnvironment) -> LiveSte
     if env.slurm is None:
         return step
 
-    new_overrides = deep_merge(
-        {"slurm": env.slurm.model_dump(exclude_defaults=True)},
-        dict(step.compute_overrides),
-    )
+    defaults = env.slurm.model_dump(exclude_defaults=True)
+    declared = step.compute_overrides.get("slurm", {})
+    if isinstance(declared, Mapping) and declared.get("single_node"):
+        # a single-node step cannot take a workplan-wide node count
+        defaults.pop("num_nodes", None)
+
+    new_overrides = deep_merge({"slurm": defaults}, dict(step.compute_overrides))
+    try:
+        SlurmComputeSpec.model_validate(new_overrides["slurm"])
+    except ValidationError as ex:
+        msg = (
+            f"Step {step.name!r}: the workplan's compute_environment.slurm defaults "
+            f"conflict with the step's compute overrides: {ex.errors()[0]['msg']}"
+        )
+        raise ValueError(msg) from ex
     return LiveStep.from_step(step, update={"compute_overrides": new_overrides})
 
 

@@ -584,6 +584,7 @@ def upscale_chain(
                 },
             ),
             compute_overrides=copy.deepcopy(parent.compute_overrides),
+            workflow_overrides=copy.deepcopy(parent.workflow_overrides),
             directives=copy.deepcopy(parent.directives),
         )
         steps.append(parent_up)

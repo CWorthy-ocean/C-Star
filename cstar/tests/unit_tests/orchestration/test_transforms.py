@@ -5891,6 +5891,36 @@ def test_inject_compute_defaults_step_value_wins() -> None:
     }
 
 
+def _live_step_for_defaults(compute_overrides: dict[str, t.Any]) -> LiveStep:
+    """A minimal step for the compute-defaults injection tests."""
+    return LiveStep(
+        name="only",
+        application="hello_world",
+        blueprint="bp.yaml",
+        compute_overrides=compute_overrides,
+    )
+
+
+def test_inject_compute_defaults_skips_num_nodes_for_single_node_steps() -> None:
+    """A workplan-wide node count is dropped for a step pinned to one node."""
+    step = _live_step_for_defaults({"slurm": {"single_node": True, "num_cpus": 4}})
+    env = ComputeEnvironment(slurm=SlurmComputeSpec(num_nodes=2, queue_name="q"))
+    result = _inject_compute_defaults(step, env)
+    assert result.compute_overrides["slurm"] == {
+        "single_node": True,
+        "num_cpus": 4,
+        "queue_name": "q",
+    }
+
+
+def test_inject_compute_defaults_conflict_is_loud() -> None:
+    """A merge the SLURM spec rejects fails at schedule time, naming the step."""
+    step = _live_step_for_defaults({"slurm": {"max_walltime": "not-a-walltime"}})
+    env = ComputeEnvironment(slurm=SlurmComputeSpec(queue_name="q"))
+    with pytest.raises(ValueError, match=step.name):
+        _inject_compute_defaults(step, env)
+
+
 @pytest.mark.parametrize(
     "env",
     [

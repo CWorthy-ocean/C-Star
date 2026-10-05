@@ -364,7 +364,9 @@ class TestUpscaleChain:
 
     def test_three_levels(self) -> None:
         inner = self.level("inner", directives={"nest-from": {"step": "middle"}})
-        middle = self.level("middle", depends_on=["outer"])
+        middle = self.level(
+            "middle", depends_on=["outer"], workflow_overrides={"clobber": True}
+        )
         outer = self.level("outer")
         generated = upscale_chain(
             [inner, middle, outer], use_pio_of=lambda s: s.name == "outer"
@@ -392,6 +394,7 @@ class TestUpscaleChain:
             "pio": True,
         }
         assert mid_up.depends_on == ["outer", "upscale_inner_middle"]
+        assert mid_up.workflow_overrides == {"clobber": True}
         assert mid_up.blueprint_path == middle.blueprint_path
         assert dig(mid_up.blueprint_overrides, "cdr_forcing", "data", 0) == {
             "location": "{{output_dir: upscale_inner_middle}}/upscaled_cdr.nc"

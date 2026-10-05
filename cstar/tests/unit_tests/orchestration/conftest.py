@@ -672,12 +672,6 @@ async def read_yaml_intercept(
 
             # if the we're loading a workplan, create test-local blueprints.
             if set(original_dict.keys()).intersection({"steps", "runtime_vars"}):
-                # templates fetched from `main` predate the typed compute_environment;
-                # drop their legacy keys until the new templates land there
-                legacy_env = original_dict.get("compute_environment", {})
-                for legacy_key in ("num_nodes", "num_cpus_per_process"):
-                    legacy_env.pop(legacy_key, None)
-
                 steps = original_dict["steps"]
                 for step_dict in steps:
                     if str(step_dict["blueprint"]).startswith("."):
