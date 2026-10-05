@@ -8,6 +8,7 @@ import pytest
 
 from cstar.applications.roms_marbl.file_system import RomsFileSystemManager
 from cstar.base.env import ENV_CSTAR_DATA_HOME, ENV_CSTAR_RUNID
+from cstar.base.exceptions import CstarError
 from cstar.execution.file_system import (
     UNKNOWN_SIZE,
     DirectoryManager,
@@ -624,3 +625,195 @@ async def test_step_disk_usage_unreadable_dir_reports_unknown(tmp_path: Path) ->
 
     assert size == UNKNOWN_SIZE
     mock_run_cmd.assert_not_called()
+
+
+class TestSourceDataHome:
+    """The source-data cache: ``<root>/cstar/source-data``, root chosen by
+    ``CSTAR_PROJECT_HOME`` (default ``$PROJECT``), then scratch, then home.
+    """
+
+    @pytest.fixture(autouse=True)
+    def _isolated_env(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        for var in (
+            "CSTAR_PROJECT_HOME",
+            "PROJECT",
+            "SCRATCH",
+            "SCRATCH_DIR",
+            "LOCAL_SCRATCH",
+        ):
+            monkeypatch.delenv(var, raising=False)
+        (tmp_path / "home").mkdir()
+        monkeypatch.setenv("HOME", str(tmp_path / "home"))
+        self._set_system_scratch(monkeypatch, None)
+
+    @staticmethod
+    def _set_system_scratch(monkeypatch: pytest.MonkeyPatch, root: Path | None) -> None:
+        """Stub the SystemContext hook; ``None`` makes the system unknown."""
+
+        class _Ctx:
+            @classmethod
+            def scratch_root(cls) -> Path:
+                assert root is not None
+                return root
+
+        def _get() -> type:
+            if root is None:
+                raise CstarError("Unknown system requested: nowhere")
+            return _Ctx
+
+        monkeypatch.setattr("cstar.system.manager.get_system_context", _get)
+
+    @staticmethod
+    def _expected(root: Path) -> Path:
+        return root.resolve() / "cstar" / "source-data"
+
+    @staticmethod
+    def _make_legacy(root: Path) -> Path:
+        legacy = root / "cstar-forge-data" / "source-data"
+        legacy.mkdir(parents=True)
+        (legacy / "glorys.nc").write_text("data")
+        return legacy
+
+    def test_project_home_wins_over_project_and_scratch(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("CSTAR_PROJECT_HOME", str(tmp_path / "explicit"))
+        monkeypatch.setenv("PROJECT", str(tmp_path / "project"))
+        monkeypatch.setenv("SCRATCH", str(tmp_path / "scratch"))
+        assert DirectoryManager.source_data_home() == self._expected(
+            tmp_path / "explicit"
+        )
+
+    def test_project_wins_over_scratch(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("PROJECT", str(tmp_path / "project"))
+        monkeypatch.setenv("SCRATCH", str(tmp_path / "scratch"))
+        assert DirectoryManager.source_data_home() == self._expected(
+            tmp_path / "project"
+        )
+
+    def test_scratch_used_without_project(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("SCRATCH", str(tmp_path / "scratch"))
+        assert DirectoryManager.source_data_home() == self._expected(
+            tmp_path / "scratch"
+        )
+
+    def test_scratch_dir_alone_is_used(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Any CSTAR_SCRATCH_DIRS variable counts, not only SCRATCH."""
+        monkeypatch.setenv("SCRATCH_DIR", str(tmp_path / "scratch-dir"))
+        assert DirectoryManager.source_data_home() == self._expected(
+            tmp_path / "scratch-dir"
+        )
+
+    def test_system_scratch_hook_used_without_variables(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        self._set_system_scratch(monkeypatch, tmp_path / "sys-scratch" / "user")
+        assert DirectoryManager.source_data_home() == self._expected(
+            tmp_path / "sys-scratch" / "user"
+        )
+
+    def test_falls_back_to_home(self, tmp_path: Path) -> None:
+        assert DirectoryManager.source_data_home() == self._expected(tmp_path / "home")
+
+    def test_source_data_home_creates_nothing(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("SCRATCH", str(tmp_path / "scratch"))
+        home = DirectoryManager.source_data_home()
+        assert not home.exists()
+        assert not (tmp_path / "scratch").exists()
+
+    def test_ensure_adopts_legacy_cache_with_relative_symlink(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        scratch = tmp_path / "scratch"
+        self._make_legacy(scratch)
+        monkeypatch.setenv("SCRATCH", str(scratch))
+
+        home = DirectoryManager.ensure_source_data_home()
+
+        assert home == self._expected(scratch)
+        assert home.is_symlink()
+        assert home.readlink() == Path("../cstar-forge-data/source-data")
+        assert (home / "glorys.nc").read_text() == "data"
+
+    def test_ensure_adopts_legacy_cache_under_system_scratch(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Bouchet-style: the root comes from the SystemContext hook."""
+        root = tmp_path / "scratch_pi_abc" / "user"
+        self._make_legacy(root)
+        self._set_system_scratch(monkeypatch, root)
+
+        home = DirectoryManager.ensure_source_data_home()
+
+        assert home == self._expected(root)
+        assert home.is_symlink()
+        assert home.readlink() == Path("../cstar-forge-data/source-data")
+        assert (home / "glorys.nc").read_text() == "data"
+
+    def test_ensure_does_not_link_when_standard_dir_exists(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        scratch = tmp_path / "scratch"
+        self._make_legacy(scratch)
+        standard = self._expected(scratch)
+        standard.mkdir(parents=True)
+        monkeypatch.setenv("SCRATCH", str(scratch))
+
+        home = DirectoryManager.ensure_source_data_home()
+
+        assert home == standard
+        assert not home.is_symlink()
+        assert not (home / "glorys.nc").exists()
+
+    def test_ensure_creates_plain_directory_without_legacy(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("SCRATCH", str(tmp_path / "scratch"))
+
+        home = DirectoryManager.ensure_source_data_home()
+
+        assert home == self._expected(tmp_path / "scratch")
+        assert home.is_dir()
+        assert not home.is_symlink()
+
+    def test_ensure_refuses_dangling_symlink(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        scratch = tmp_path / "scratch"
+        standard = self._expected(scratch)
+        standard.parent.mkdir(parents=True)
+        standard.symlink_to(tmp_path / "unmounted")
+        monkeypatch.setenv("SCRATCH", str(scratch))
+
+        with pytest.raises(CstarError, match="does not exist"):
+            DirectoryManager.ensure_source_data_home()
+
+        assert standard.is_symlink()
+        assert not (tmp_path / "unmounted").exists()
+
+    def test_ensure_tolerates_losing_the_link_race(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Another process creating the cache first is not an error."""
+        scratch = tmp_path / "scratch"
+        self._make_legacy(scratch)
+        monkeypatch.setenv("SCRATCH", str(scratch))
+
+        def _lose_race(self: Path, target: object, *args: object, **kwargs: object):
+            self.mkdir()
+            raise FileExistsError(str(self))
+
+        monkeypatch.setattr(Path, "symlink_to", _lose_race)
+
+        home = DirectoryManager.ensure_source_data_home()
+
+        assert home == self._expected(scratch)
+        assert home.is_dir()

@@ -291,31 +291,6 @@ def current_user() -> str:
         return "unknown"
 
 
-def find_bouchet_scratch_root(home: Path, user: str) -> Path | None:
-    """Per-user scratch root on Yale's Bouchet cluster, or ``None`` if none is found.
-
-    Bouchet exports no ``SCRATCH`` variable. Each user's home instead carries one
-    symlink per project named ``scratch_pi_<pi-netid>``, and inside each the user
-    owns a directory named after their username. The first such directory in
-    sorted order (``is_dir()`` follows the symlinks) plus ``user`` is the root.
-    A failed scan (a stale or permission-restricted mount behind a symlink) logs a
-    warning and returns ``None`` rather than raising, because this runs while
-    resolving ``CSTAR_DATA_HOME``.
-    """
-    try:
-        candidates = sorted(p for p in home.glob("scratch_pi_*") if p.is_dir())
-    except OSError:
-        log.warning(
-            "Failed to scan %s for scratch_pi_* directories; set SCRATCH or "
-            "CSTAR_DATA_HOME to name the scratch file system explicitly.",
-            home,
-        )
-        return None
-    if not candidates:
-        return None
-    return candidates[0] / user
-
-
 class BouchetEnvSettings(SlurmSettingsBase):
     """Environment variables required to execute a simulation on the *Bouchet* system."""
 
@@ -450,8 +425,29 @@ class BouchetSystemContext(SystemContext):
     @override
     @classmethod
     def scratch_root(cls) -> Path | None:
-        """Return the ``scratch_pi_*/<user>`` directory discovered under ``$HOME``."""
-        return find_bouchet_scratch_root(Path.home(), current_user())
+        """Return the per-user ``scratch_pi_*/<user>`` directory linked from ``$HOME``.
+
+        Bouchet exports no ``SCRATCH`` variable. Each user's home instead carries one
+        symlink per project named ``scratch_pi_<pi-netid>``, and inside each the user
+        owns a directory named after their username. The first such directory in
+        sorted order (``is_dir()`` follows the symlinks) plus the username is the
+        root. A failed scan (a stale or permission-restricted mount behind a symlink)
+        logs a warning and returns ``None`` rather than raising, because this runs
+        while resolving ``CSTAR_DATA_HOME``.
+        """
+        home = Path.home()
+        try:
+            candidates = sorted(p for p in home.glob("scratch_pi_*") if p.is_dir())
+        except OSError:
+            log.warning(
+                "Failed to scan %s for scratch_pi_* directories; set SCRATCH or "
+                "CSTAR_DATA_HOME to name the scratch file system explicitly.",
+                home,
+            )
+            return None
+        if not candidates:
+            return None
+        return candidates[0] / current_user()
 
 
 @register_sys_context

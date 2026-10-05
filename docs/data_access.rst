@@ -21,8 +21,8 @@ with:
 
    cstar forge show-paths
 
-On a laptop it is ``~/cstar-forge-data/source-data``; on supported HPC
-systems it sits under the project or scratch file system (see :doc:`hpc`).
+On a laptop it is ``~/cstar/source-data``; on HPC systems it sits under your
+project directory or scratch file system (see :doc:`hpc`).
 
 .. _forge-data-access-glorys:
 
