@@ -64,7 +64,10 @@ def test_workplan_status_launcher_follows_pre_run(
         result = CliRunner().invoke(app, [mock_run_id], color=False)
 
     assert result.exit_code == 0, result.output
-    mock_get_launcher.assert_called_once_with(force_local=pre_run)
+    mock_get_launcher.assert_called_once()
+    (passed_wp,) = mock_get_launcher.call_args.args
+    assert passed_wp.compute_environment == lwp.compute_environment
+    assert mock_get_launcher.call_args.kwargs == {"force_local": pre_run}
 
 
 def test_workplan_status_reports_external_dependency(

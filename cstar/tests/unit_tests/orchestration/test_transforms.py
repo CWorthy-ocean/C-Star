@@ -33,8 +33,10 @@ from cstar.base.exceptions import CstarError, CstarExpectationFailed
 from cstar.base.feature import ENV_FF_ORCH_TRX_TIMESPLIT
 from cstar.execution.file_system import JobFileSystemManager, StateDirectoryManager
 from cstar.orchestration.adapter import DIRECTIVES_FILENAME, prepare_directive_file
+from cstar.orchestration.compute_environment import ComputeEnvironment
 from cstar.orchestration.dag_runner import prepare_workplan
 from cstar.orchestration.launch.local import LocalHandle, LocalLauncher
+from cstar.orchestration.launch.slurm import SlurmComputeSpec
 from cstar.orchestration.models import (
     Application,
     BlueprintState,
@@ -63,6 +65,7 @@ from cstar.orchestration.transforms import (
     OverrideTransform,
     TemplateFillTransform,
     WorkplanTransformer,
+    _inject_compute_defaults,
     apply_automatic_overrides,
     collect_directive_problems,
     effective_blueprint,
@@ -5858,6 +5861,92 @@ async def test_prepare_workplan_pins_external_run(
     assert wp.runs["spinup"].start_at == EXTERNAL_START_AT
     assert persisted.runs["spinup"] == wp.runs["spinup"]
     assert persisted.runs["spinup"].run_id == "spinup"
+
+
+def test_inject_compute_defaults_step_value_wins() -> None:
+    """Verify the workplan's SLURM defaults fill in around a step's own values."""
+    step = LiveStep(
+        name="only",
+        application="hello_world",
+        blueprint="bp.yaml",
+        compute_overrides={"slurm": {"max_walltime": "01:00:00", "num_cpus": 4}},
+    )
+    env = ComputeEnvironment(
+        slurm=SlurmComputeSpec(
+            account_name="x-acct", queue_name="wholenode", max_walltime="04:00:00"
+        )
+    )
+
+    result = _inject_compute_defaults(step, env)
+
+    assert result.compute_overrides["slurm"] == {
+        "account_name": "x-acct",
+        "queue_name": "wholenode",
+        "max_walltime": "01:00:00",
+        "num_cpus": 4,
+    }
+    assert step.compute_overrides["slurm"] == {
+        "max_walltime": "01:00:00",
+        "num_cpus": 4,
+    }
+
+
+@pytest.mark.parametrize(
+    "env",
+    [
+        pytest.param(ComputeEnvironment(), id="empty"),
+        pytest.param(ComputeEnvironment(launcher="local"), id="no-slurm-block"),
+    ],
+)
+def test_inject_compute_defaults_noop_without_slurm(env: ComputeEnvironment) -> None:
+    """Verify a step is untouched when the workplan declares no SLURM defaults."""
+    step = LiveStep(name="only", application="hello_world", blueprint="bp.yaml")
+
+    assert _inject_compute_defaults(step, env) is step
+
+
+async def test_prepare_workplan_injects_compute_defaults(
+    hello_world_bp_path: Path,
+    tmp_path: Path,
+) -> None:
+    """Verify the transformed workplan records the workplan-wide SLURM defaults,
+    with a step's own values winning.
+    """
+    wp = Workplan(
+        name="defaults",
+        description="Workplan-wide SLURM defaults.",
+        compute_environment={
+            "slurm": {"account_name": "x-acct", "max_walltime": "04:00:00"},
+        },
+        steps=[
+            Step(
+                name="plain",
+                application="hello_world",
+                blueprint=hello_world_bp_path.as_posix(),
+            ),
+            Step(
+                name="declared",
+                application="hello_world",
+                blueprint=hello_world_bp_path.as_posix(),
+                compute_overrides={"slurm": {"max_walltime": "00:30:00"}},
+            ),
+        ],
+    )
+    wp_path = tmp_path / "defaults.yaml"
+    assert serialize(wp_path, wp)
+    output_dir = tmp_path / "prepared"
+    output_dir.mkdir()
+
+    _, trx_path, _ = await prepare_workplan(wp_path, output_dir, {})
+
+    slurm = {
+        s.name: t.cast("dict[str, t.Any]", s.compute_overrides["slurm"])
+        for s in deserialize(trx_path, LiveWorkplan).steps
+    }
+    assert slurm["plain"]["account_name"] == "x-acct"
+    assert slurm["plain"]["max_walltime"] == "04:00:00"
+    assert slurm["declared"]["account_name"] == "x-acct"
+    assert slurm["declared"]["max_walltime"] == "00:30:00"
 
 
 async def test_prepare_workplan_without_external_refs_skips_launcher(

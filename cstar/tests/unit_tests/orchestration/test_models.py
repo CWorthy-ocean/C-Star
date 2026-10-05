@@ -816,9 +816,14 @@ def test_workplan_steps_uniqueness_validation(
     "compute_env",
     [
         {},
-        {"key1": "value1"},
-        {"key1": "value1", "key2": "value2"},
-        {"key1": "value1", "key2": 1},
+        {"launcher": "local"},
+        {"launcher": "slurm", "system": "anvil"},
+        {"slurm": {"account_name": "x-ees250129", "max_walltime": "04:00:00"}},
+        {
+            "launcher": "slurm",
+            "system": "anvil",
+            "slurm": {"queue_name": "wholenode", "num_nodes": 2},
+        },
     ],
 )
 def test_workplan_compute_environment(
@@ -843,6 +848,30 @@ def test_workplan_compute_environment(
     )
 
     assert plan.compute_environment == compute_env
+
+
+@pytest.mark.parametrize(
+    ("compute_env", "expected"),
+    [
+        ({"key1": "value1"}, "key1"),
+        ({"launcher": "pbs"}, "pbs"),
+        ({"slurm": {"max_walltime": "soon"}}, "max_walltime"),
+        ({"launcher": "pbs", "bogus": 1}, "bogus"),
+    ],
+)
+def test_workplan_compute_environment_invalid(
+    compute_env: KeyValueStore,
+    expected: str,
+    gen_fake_steps: Callable[[int], Generator[Step, None, None]],
+) -> None:
+    """Verify an invalid compute environment is rejected, naming the problem."""
+    with pytest.raises(ValidationError, match=expected):
+        Workplan(
+            name="test-plan",
+            description="test-description",
+            steps=list(gen_fake_steps(2)),
+            compute_environment=compute_env,
+        )
 
 
 def test_workplan_json_serialize(
@@ -1109,7 +1138,7 @@ def test_workplan_computeenv_copy(
         A generator function to produce minimally valid test steps
 
     """
-    compute_env: KeyValueStore = {"a": 1, "b": 2, "c": "xyz"}
+    compute_env: KeyValueStore = {"launcher": "slurm", "system": "xyz"}
 
     plan = Workplan(
         name="test-plan",
@@ -1144,7 +1173,7 @@ def test_workplan_computeenv_set(
         A generator function to produce minimally valid test steps
 
     """
-    compute_env: KeyValueStore = {"a": 1, "b": 2, "c": "xyz"}
+    compute_env: KeyValueStore = {"launcher": "slurm", "system": "xyz"}
 
     plan = Workplan(
         name="test-plan",

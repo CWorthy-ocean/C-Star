@@ -17,10 +17,15 @@ from cstar.base.env import (
     max_concurrency,
     unset,
 )
+from cstar.base.exceptions import CstarExpectationFailed
 from cstar.base.log import get_logger
 from cstar.base.utils import slugify
 from cstar.entrypoint.utils import ARG_PRE_RUN
 from cstar.execution.file_system import StateDirectoryManager
+from cstar.orchestration.compute_environment import (
+    ComputeEnvironment,
+    resolve_compute_environment,
+)
 from cstar.orchestration.launch.local import LocalLauncher
 from cstar.orchestration.launch.slurm import SlurmLauncher
 from cstar.orchestration.models import (
@@ -196,13 +201,20 @@ def get_status_detail_map(
     )
 
 
-def get_launcher(force_local: bool = False) -> Launcher[t.Any]:
-    """Get the appropriate launcher for the current environment.
+def get_launcher(
+    workplan: Workplan | None = None, *, force_local: bool = False
+) -> Launcher[t.Any]:
+    """Get the appropriate launcher for the workplan and current environment.
 
+    A workplan's `compute_environment.launcher` selects the launcher; when
+    unset, the launcher matching the current system is used (SLURM when the
+    system has a scheduler, otherwise local).
     See: `cstar.system.manager.CStarSystemManager` for more information.
 
     Parameters
     ----------
+    workplan : Workplan, optional
+        The workplan whose `compute_environment` is honoured.
     force_local : bool
         Use the local launcher even when the system has a scheduler, as
         required by the sentinels of a pre-run (which are local processes).
@@ -210,18 +222,53 @@ def get_launcher(force_local: bool = False) -> Launcher[t.Any]:
     Returns
     -------
     Launcher[t.Any]
+
+    Raises
+    ------
+    CstarExpectationFailed
+        If the workplan requests the SLURM launcher on a system with no scheduler.
+    CstarAdaptationError
+        If the workplan's `compute_environment` is invalid.
     """
-    launcher = (
-        SlurmLauncher()
-        if get_sysmgr().scheduler and not force_local
-        else LocalLauncher()
+    env = (
+        resolve_compute_environment(workplan.compute_environment)
+        if workplan
+        else ComputeEnvironment()
     )
+    sysmgr = get_sysmgr()
+    has_scheduler = bool(sysmgr.scheduler)
+
+    if env.system and env.system.casefold() != sysmgr.name.casefold():
+        log.warning(
+            f"Workplan was written for system {env.system!r} but is running on "
+            f"{sysmgr.name!r}"
+        )
+
+    launcher: Launcher[t.Any]
+    if force_local or env.launcher == LocalLauncher.name:
+        if has_scheduler and not force_local:
+            log.warning(
+                f"Workplan requests the local launcher on {sysmgr.name!r}, "
+                "which has a scheduler"
+            )
+        launcher = LocalLauncher()
+    elif env.launcher == SlurmLauncher.name or (not env.launcher and has_scheduler):
+        if not has_scheduler:
+            msg = (
+                "Workplan requests the slurm launcher but system "
+                f"{sysmgr.name!r} has no scheduler"
+            )
+            raise CstarExpectationFailed(msg)
+        launcher = SlurmLauncher()
+    else:
+        launcher = LocalLauncher()
+
     launcher.check_preconditions()
     return launcher
 
 
 def get_orchestrator(planner: Planner) -> Orchestrator:
-    launcher = get_launcher(force_local=planner.workplan.pre_run)
+    launcher = get_launcher(planner.workplan, force_local=planner.workplan.pre_run)
 
     orchestrator = Orchestrator(planner, launcher)
     orchestrator.set_callback("launched", on_status_changed)
@@ -426,7 +473,7 @@ async def prepare_workplan(
         fill_transform = TemplateFillTransform(variable_resolver=None)
 
     external = await resolve_external_runs(
-        wp_orig, fill_transform, lambda: get_launcher(force_local=pre_run)
+        wp_orig, fill_transform, lambda: get_launcher(wp_orig, force_local=pre_run)
     )
 
     transformer = WorkplanTransformer(

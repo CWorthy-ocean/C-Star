@@ -34,12 +34,47 @@ reproducibility; C-Star does not yet enforce that restriction, so today the fiel
 is informational.
 
 
+.. _workplan_compute_environment:
+
 Compute Environment
 ^^^^^^^^^^^^^^^^^^^
 
 The compute environment a workplan expects is described with
-:attr:`~cstar.orchestration.models.Workplan.compute_environment`. Per-step compute
-requirements are set with each step's ``compute_overrides`` (see below).
+:attr:`~cstar.orchestration.models.Workplan.compute_environment`. Every key is
+optional, and unknown keys are rejected when the workplan is loaded:
+
+.. code-block:: yaml
+
+    compute_environment:
+      launcher: slurm          # "local" | "slurm" | omitted
+      system: anvil            # optional, informational
+      slurm:                   # workplan-wide SLURM defaults
+        account_name: x-ees250129
+        queue_name: wholenode
+        max_walltime: "04:00:00"
+
+- ``launcher`` selects how steps are executed. Omitted, C-Star picks the
+  launcher for the current system: SLURM when the system has a scheduler,
+  otherwise local. ``slurm`` on a system with no scheduler stops the run
+  with an error. ``local`` on a system with a scheduler runs the steps as
+  local processes and logs a warning.
+- ``system`` names the machine the workplan was written for. A mismatch with
+  the system C-Star detects produces a single warning; it does not stop the run.
+- ``slurm`` takes the same keys as a step's ``compute_overrides.slurm`` (see
+  below) and applies to every step. SLURM settings layer, lowest to highest
+  precedence: the ``CSTAR_SLURM_*`` environment variables, then
+  ``compute_environment.slurm``, then the step's own ``compute_overrides``.
+  The merged result is recorded on each step of the transformed workplan
+  written into the run directory.
+
+.. note::
+
+   Systems whose settings require a SLURM account and queue (such as Anvil
+   and Bouchet) still need ``CSTAR_SLURM_ACCOUNT`` and ``CSTAR_SLURM_QUEUE``
+   to be set; the workplan's values then override them for each job.
+
+Per-step compute requirements are set with each step's ``compute_overrides``
+(see below).
 
 
 Runtime Variables
@@ -213,9 +248,11 @@ replaces any of them, under a key naming the launcher:
 
 The ``slurm`` keys are ``account_name``, ``queue_name``, ``max_walltime``
 (``HH:MM:SS``), ``num_cpus``, ``num_nodes``, ``cpus_per_node`` and
-``single_node``. Running on a laptop, the ``local`` launcher accepts
-``num_cpus``. ``num_cpus`` is also where a deferred-blueprint step declares
-its allocation, since C-Star cannot read the blueprint at submit time.
+``single_node``. The ``local`` launcher accepts ``max_walltime`` and
+``force_kill_timeout``. ``num_cpus`` is also where a deferred-blueprint step
+declares its allocation, since C-Star cannot read the blueprint at submit time.
+Defaults shared by every step belong in the workplan's
+:ref:`compute environment <workplan_compute_environment>`.
 
 Directives
 ^^^^^^^^^^

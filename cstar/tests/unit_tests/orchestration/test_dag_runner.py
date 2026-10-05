@@ -15,6 +15,7 @@ from cstar.base.env import (
     FLAG_OFF,
     FLAG_ON,
 )
+from cstar.base.exceptions import CstarExpectationFailed
 from cstar.entrypoint.utils import ARG_CLOBBER, ARG_PRE_RUN
 from cstar.execution.file_system import (
     DirectoryManager,
@@ -1274,6 +1275,121 @@ def test_get_launcher_force_local(
         launcher = get_launcher(force_local=force_local)
 
     assert type(launcher) is exp_klass
+
+
+def _env_workplan(tmp_path: Path, compute_environment: dict[str, t.Any]) -> Workplan:
+    """Build a workplan declaring the given compute environment."""
+    return Workplan(
+        name="env-workplan",
+        description="A workplan declaring a compute environment",
+        steps=[_make_step(tmp_path, "Hello")],
+        compute_environment=compute_environment,
+    )
+
+
+@pytest.mark.parametrize(
+    ("launcher", "has_scheduler", "exp_klass"),
+    [
+        pytest.param("", False, LocalLauncher, id="auto-no-scheduler"),
+        pytest.param("", True, SlurmLauncher, id="auto-scheduler"),
+        pytest.param("local", False, LocalLauncher, id="local-no-scheduler"),
+        pytest.param("local", True, LocalLauncher, id="local-scheduler"),
+        pytest.param("slurm", True, SlurmLauncher, id="slurm-scheduler"),
+    ],
+)
+def test_get_launcher_honours_compute_environment(
+    tmp_path: Path,
+    launcher: str,
+    has_scheduler: bool,
+    exp_klass: type[LocalLauncher | SlurmLauncher],
+) -> None:
+    """Verify the workplan's `compute_environment.launcher` selects the launcher."""
+    wp = _env_workplan(tmp_path, {"launcher": launcher} if launcher else {})
+
+    with (
+        mock.patch(
+            "cstar.system.manager.CStarSystemManager.scheduler",
+            mock.PropertyMock(return_value=mock.MagicMock() if has_scheduler else None),
+        ),
+        mock.patch.object(SlurmLauncher, "check_preconditions"),
+    ):
+        assert type(get_launcher(wp)) is exp_klass
+
+
+def test_get_launcher_slurm_without_scheduler_fails(tmp_path: Path) -> None:
+    """Verify a workplan requesting slurm on a scheduler-less system is refused."""
+    wp = _env_workplan(tmp_path, {"launcher": "slurm"})
+
+    with (
+        mock.patch(
+            "cstar.system.manager.CStarSystemManager.scheduler",
+            mock.PropertyMock(return_value=None),
+        ),
+        pytest.raises(CstarExpectationFailed, match="no scheduler"),
+    ):
+        get_launcher(wp)
+
+
+def test_get_launcher_force_local_wins_over_slurm(tmp_path: Path) -> None:
+    """Verify `force_local` beats the workplan's request for slurm."""
+    wp = _env_workplan(tmp_path, {"launcher": "slurm"})
+
+    with mock.patch(
+        "cstar.system.manager.CStarSystemManager.scheduler",
+        mock.PropertyMock(return_value=mock.MagicMock()),
+    ):
+        assert type(get_launcher(wp, force_local=True)) is LocalLauncher
+
+
+def test_get_launcher_warns_on_local_with_scheduler(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Verify asking for local on a system with a scheduler is called out."""
+    wp = _env_workplan(tmp_path, {"launcher": "local"})
+
+    with (
+        caplog.at_level("WARNING"),
+        mock.patch(
+            "cstar.system.manager.CStarSystemManager.scheduler",
+            mock.PropertyMock(return_value=mock.MagicMock()),
+        ),
+    ):
+        _ = get_launcher(wp)
+
+    assert "local launcher" in caplog.text
+
+
+@pytest.mark.parametrize(
+    ("system", "warns"),
+    [
+        pytest.param("elsewhere", True, id="mismatch"),
+        pytest.param("this-system", False, id="match"),
+        pytest.param("", False, id="unset"),
+    ],
+)
+def test_get_launcher_warns_on_system_mismatch(
+    tmp_path: Path,
+    caplog: pytest.LogCaptureFixture,
+    system: str,
+    warns: bool,
+) -> None:
+    """Verify a `compute_environment.system` mismatch warns exactly once."""
+    wp = _env_workplan(tmp_path, {"system": system} if system else {})
+
+    with (
+        caplog.at_level("WARNING"),
+        mock.patch(
+            "cstar.system.manager.CStarSystemManager.name",
+            mock.PropertyMock(return_value="this-system"),
+        ),
+        mock.patch(
+            "cstar.system.manager.CStarSystemManager.scheduler",
+            mock.PropertyMock(return_value=None),
+        ),
+    ):
+        _ = get_launcher(wp)
+
+    assert caplog.text.count("was written for system") == (1 if warns else 0)
 
 
 @pytest.mark.parametrize(
