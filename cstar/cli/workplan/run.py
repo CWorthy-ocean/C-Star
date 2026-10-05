@@ -28,7 +28,7 @@ from cstar.cli.common import (
 from cstar.cli.workplan.shared import (
     colored,
     console,
-    exit_on_unresolved_externals,
+    exit_on_external_problems,
     list_runs,
     preprocess_varfile,
     preprocess_vars,
@@ -77,6 +77,7 @@ from cstar.orchestration.serialization import (
     validate_serialized_entity,
 )
 from cstar.orchestration.tracking import TrackingRepository, WorkplanRun
+from cstar.orchestration.transforms import external_dependencies
 
 if t.TYPE_CHECKING:
     from collections.abc import Mapping
@@ -672,7 +673,7 @@ def run(
                 external = asyncio.run(
                     load_external_runs(wp, get_launcher(force_local=pre_run))
                 )
-                exit_on_unresolved_externals(external)
+                exit_on_external_problems(external, external_dependencies(wp))
                 planner = build_planner(wp, external.tasks())
 
                 wp_run = asyncio.run(

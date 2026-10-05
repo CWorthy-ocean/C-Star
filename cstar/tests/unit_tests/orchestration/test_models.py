@@ -2033,3 +2033,34 @@ def test_workplan_deferred_external_producer_not_dependency(
 
     assert "depends_on" in str(error.value)
     assert "outer@spinup" in str(error.value)
+
+
+def test_step_depends_on_is_canonical(fake_blueprint_path: Path) -> None:
+    """Verify whitespace around the `@` of an external reference is normalized,
+    so every consumer compares the same token.
+    """
+    wp = _external_workplan(
+        fake_blueprint_path,
+        runs={"spinup": "run-1"},
+        depends_on=["build @ spinup"],
+    )
+
+    assert wp.steps[0].depends_on == ["build@spinup"]
+
+
+def test_deferred_blueprint_from_step_is_canonical_and_matches_dependency(
+    fake_blueprint_path: Path,
+) -> None:
+    """Verify a deferred blueprint written with spaces around the `@` is accepted
+    against a dependency written without them.
+    """
+    wp = _external_workplan(
+        fake_blueprint_path,
+        runs={"spinup": "run-1"},
+        depends_on=["build@spinup"],
+        consumer_blueprint={"from_step": "build @ spinup"},
+    )
+
+    blueprint = wp.steps[0].blueprint_path
+    assert isinstance(blueprint, DeferredBlueprintRef)
+    assert blueprint.from_step == "build@spinup"

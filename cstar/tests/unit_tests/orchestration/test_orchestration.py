@@ -395,10 +395,21 @@ def test_planner_flatten_excludes_external_nodes(
     assert [s.name for s in planner.flatten()] == ["first", "second"]
 
 
-def test_planner_unknown_external_step_raises(external_workplan: Workplan) -> None:
-    """Verify a dependency on an external step that was never resolved is loud."""
-    with pytest.raises(ValueError, match=EXTERNAL_TOKEN):
-        _ = Planner(external_workplan)
+def test_planner_tolerates_unresolved_external_step(
+    external_workplan: Workplan,
+) -> None:
+    """Verify a dependency on an external step with no task becomes an
+    Unsubmitted node, so its dependents are planned but never launched.
+    """
+    planner = Planner(external_workplan)
+    orchestrator = Orchestrator(planner, LocalLauncher())
+    first = planner.retrieve("first", KEY_STEP)
+    assert first is not None
+
+    assert planner.retrieve(EXTERNAL_TOKEN, KEY_STATUS) == Status.Unsubmitted
+    assert planner.retrieve(EXTERNAL_TOKEN, KEY_TASK) is None
+    assert [s.name for s in planner.flatten()] == ["first", "second"]
+    assert orchestrator._locate_dependencies(first) is None
 
 
 def test_planner_ignores_unused_external_tasks(

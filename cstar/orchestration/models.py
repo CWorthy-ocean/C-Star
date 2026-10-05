@@ -345,6 +345,12 @@ class DeferredBlueprintRef(BaseModel):
     )
     """Configures the behavior of the pydantic model."""
 
+    @field_validator("from_step", mode="after")
+    @classmethod
+    def _canonical_step(cls, value: str) -> str:
+        """Store the producing step in the canonical `StepRef` form."""
+        return str(StepRef.parse(value))
+
     def __str__(self) -> str:
         """Return the reference as a ``step://`` URI.
 
@@ -630,6 +636,27 @@ class Step(ConfiguredBaseModel):
             raise ValueError(msg)
         return value
 
+    @field_validator("depends_on", mode="after")
+    @classmethod
+    def _canonical_dependencies(
+        cls, value: Sequence[str], info: ValidationInfo
+    ) -> list[str]:
+        """Store every dependency in the canonical `StepRef` form.
+
+        Every consumer (planner nodes, status maps, workplan checks) then
+        compares the same string, whatever whitespace the author used around
+        the `@` of an external reference. A malformed entry is reported with
+        the step it belongs to.
+        """
+        canonical: list[str] = []
+        for entry in value:
+            try:
+                canonical.append(str(StepRef.parse(entry)))
+            except ValueError as ex:
+                msg = f"step {info.data.get('name')!r} dependency {entry!r}: {ex}"
+                raise ValueError(msg) from ex
+        return canonical
+
     @field_validator("workflow_overrides", mode="after")
     @classmethod
     def _exclusive_rerun_modes(cls, value: KeyValueStore) -> KeyValueStore:
@@ -889,25 +916,16 @@ class Workplan(ConfiguredBaseModel):
         names = {step.name for step in self.steps}
         unknown: set[str] = set()
         undeclared: set[str] = set()
-        parse_errors: list[str] = []
 
         for step in self.steps:
             for entry in step.depends_on:
-                try:
-                    ref = StepRef.parse(entry)
-                except ValueError as ex:
-                    parse_errors.append(
-                        f"step {step.name!r} dependency {entry!r}: {ex}"
-                    )
-                    continue
+                ref = StepRef.parse(entry)
                 if not ref.is_external:
                     if ref.step not in names:
                         unknown.add(entry)
                 elif ref.run not in self.runs:
                     undeclared.add(ref.run)
 
-        if parse_errors:
-            raise ValueError("; ".join(parse_errors))
         if unknown:
             msg = f"Unknown dependency specified. No step(s) named: {unknown}"
             raise ValueError(msg)
@@ -956,11 +974,7 @@ class Workplan(ConfiguredBaseModel):
                 continue
 
             token = step.blueprint_path.from_step
-            try:
-                ref = StepRef.parse(token)
-            except ValueError as ex:
-                msg = f"Step {step.name!r} defers its blueprint to {token!r}: {ex}"
-                raise ValueError(msg) from ex
+            ref = StepRef.parse(token)
 
             if not ref.is_external and ref.step not in names:
                 msg = (

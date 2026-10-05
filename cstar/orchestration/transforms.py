@@ -522,6 +522,8 @@ _THandle = t.TypeVar("_THandle", bound=ProcessHandle)
 class _Probe(t.NamedTuple):
     """The state of an external step observed by `ExternalRuns.refresh`."""
 
+    step: LiveStep
+    """The step as defined by the transformed workplan of the external run."""
     handle: ProcessHandle
     """The handle persisted by the run that submitted the step."""
     status: Status
@@ -686,8 +688,9 @@ class ExternalRuns:
     ) -> None:
         """Query the current status of external steps.
 
-        A step that cannot be resolved is recorded as a problem rather than
-        raised, so `problem` can report every reference.
+        A step that cannot be resolved (missing or unreadable record, workplan
+        or sentinel, or a failed status query) is recorded as a problem rather
+        than raised, so `problem` can report every reference.
 
         Parameters
         ----------
@@ -700,14 +703,22 @@ class ExternalRuns:
             self._probes.pop(ref, None)
             self._errors.pop(ref, None)
             try:
+                step = self.step(ref)
                 handle = self.handle(ref, launcher.handle_klass())
                 status = await launcher.query_status(handle)
-            except CstarError as ex:
+            except (CstarError, ValueError, OSError, yaml.YAMLError) as ex:
+                # a corrupt sentinel or workplan, or a failed query, is a
+                # problem with this reference rather than a crash
+                log.debug(f"Unable to refresh external step {ref}: {ex}")
                 self._errors[ref] = str(ex)
                 continue
 
             self._probes[ref] = _Probe(
-                handle, status, launcher.name, launcher.supports_foreign_dependencies
+                step,
+                handle,
+                status,
+                launcher.name,
+                launcher.supports_foreign_dependencies,
             )
 
         statuses = ", ".join(
@@ -728,7 +739,7 @@ class ExternalRuns:
         """
         return {
             str(ref): Task(
-                step=self.step(ref),
+                step=probe.step,
                 handle=probe.handle.model_copy(update={"status": probe.status}),
             )
             for ref, probe in self._probes.items()
@@ -806,13 +817,22 @@ class ExternalRuns:
     def pinned(self) -> dict[str, RunRef]:
         """Return the runs with `start_at` set to the resolved record's start.
 
-        Raises
-        ------
-        CstarError
-            If the record of any run cannot be found.
+        Only the aliases that `refresh` resolved are pinned. An alias that no
+        step refers to (or whose last refresh failed) is passed through as
+        authored, so an unused or stale `runs` entry cannot abort scheduling;
+        a failed reference is reported by `problem` instead.
+
+        Returns
+        -------
+        dict[str, RunRef]
         """
+        resolved = {ref.run for ref in self._probes}
         return {
-            alias: run.model_copy(update={"start_at": self.record(alias).start_at})
+            alias: (
+                run.model_copy(update={"start_at": self.record(alias).start_at})
+                if alias in resolved
+                else run
+            )
             for alias, run in self._runs.items()
         }
 

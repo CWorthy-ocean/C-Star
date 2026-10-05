@@ -7,7 +7,6 @@ from rich.console import Console
 from cstar.base.log import get_logger
 from cstar.cli.workplan.shared import (
     display_summary,
-    exit_on_unresolved_externals,
     list_runs,
     refresh_disk_usage,
 )
@@ -61,7 +60,12 @@ def status(
         # a pre-run's steps are local processes, whatever the system scheduler
         launcher = get_launcher(force_local=workplan.pre_run)
         external = asyncio.run(load_external_runs(workplan, launcher))
-        exit_on_unresolved_externals(external)
+        # the upstream run's record may be gone: show this run regardless
+        for token, message in external.errors().items():
+            console.print(
+                f"Warning: external dependency {token} cannot be resolved: {message}",
+                soft_wrap=True,
+            )
         planner = Planner(workplan, external.tasks())
         status = asyncio.run(load_run_state(run_id, launcher))
         status = DagStatus({**external.statuses(), **status.details})

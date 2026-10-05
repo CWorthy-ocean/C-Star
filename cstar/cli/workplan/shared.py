@@ -50,7 +50,10 @@ log = get_logger(__name__)
 
 
 if t.TYPE_CHECKING:
+    from collections.abc import Iterable
+
     from cstar.entrypoint.config import JobConfig, ServiceConfiguration
+    from cstar.orchestration.models import StepRef
     from cstar.orchestration.transforms import ExternalRuns
 
 
@@ -173,25 +176,27 @@ def autocomplete_step_list(ctx: typer.Context, incomplete: str) -> list[str]:
     return []
 
 
-def exit_on_unresolved_externals(external: "ExternalRuns") -> None:
-    """Report external steps that could not be resolved and exit.
+def exit_on_external_problems(
+    external: "ExternalRuns", refs: "Iterable[StepRef]"
+) -> None:
+    """Report the external steps that cannot be depended upon and exit.
 
     Parameters
     ----------
     external : ExternalRuns
         The registry after a refresh.
+    refs : Iterable[StepRef]
+        The external steps the workplan depends on.
 
     Raises
     ------
     typer.Exit
-        With code 1 if any external step could not be resolved.
+        With code 1 if any external step cannot be depended upon.
     """
-    if errors := external.errors():
-        for token, message in errors.items():
-            console.print(
-                f"External dependency {token} cannot be resolved: {message}",
-                soft_wrap=True,
-            )
+    problems = {str(ref): problem for ref in refs if (problem := external.problem(ref))}
+    for token, problem in problems.items():
+        console.print(f"External dependency {token}: {problem}", soft_wrap=True)
+    if problems:
         raise typer.Exit(1)
 
 

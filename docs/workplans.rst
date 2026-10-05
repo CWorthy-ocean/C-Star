@@ -121,7 +121,8 @@ The run-id is the one shown by ``cstar workplan ls`` (the value given to
 ``--run-id``, or derived from the workplan name). The rules:
 
 - Every alias used in a token must be declared under ``runs``; an undeclared
-  alias is rejected when the workplan is loaded.
+  alias is rejected when the workplan is loaded. Because ``@`` separates the
+  step from the alias, step names and aliases may not contain it.
 - An external step a step reads from must be listed in that step's
   ``depends_on`` (directly or through an earlier step), exactly as a local
   step must be. ``cstar workplan check`` and ``cstar workplan run`` report

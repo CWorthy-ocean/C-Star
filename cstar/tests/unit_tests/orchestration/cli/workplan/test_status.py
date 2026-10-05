@@ -119,13 +119,13 @@ def test_workplan_status_reports_external_dependency(
     assert lookup["second"].satisfied == ["first", EXTERNAL_TOKEN]
 
 
-def test_workplan_status_reports_unresolvable_external_dependency(
+def test_workplan_status_warns_about_unresolvable_external_dependency(
     tmp_path: Path,
     mock_run_id: str,
     external_workplan: Workplan,
 ) -> None:
-    """Verify status names an external step that can no longer be resolved and
-    exits with an error instead of raising from the planner.
+    """Verify status still shows the run when an external step can no longer be
+    resolved, warning about it instead of failing.
     """
     live_steps = [LiveStep.from_step(step) for step in external_workplan.steps]
     lwp = LiveWorkplan(
@@ -149,13 +149,17 @@ def test_workplan_status_reports_unresolvable_external_dependency(
         mock.patch(
             "cstar.cli.workplan.status.get_launcher", return_value=LocalLauncher()
         ),
+        mock.patch(
+            "cstar.cli.workplan.status.load_run_state",
+            mock.AsyncMock(return_value=DagStatus({"first": Status.Done})),
+        ),
         mock.patch("cstar.cli.workplan.status.display_summary") as display,
     ):
         result = CliRunner().invoke(app, [mock_run_id], color=False)
 
-    assert result.exit_code == 1, result.output
-    assert f"External dependency {EXTERNAL_TOKEN} cannot be resolved" in " ".join(
-        result.output.split()
-    )
-    assert result.exception is None or isinstance(result.exception, SystemExit)
-    display.assert_not_called()
+    assert result.exit_code == 0, result.output
+    output = " ".join(result.output.split())
+    assert f"Warning: external dependency {EXTERNAL_TOKEN} cannot be resolved" in output
+    lookup = display.call_args.args[1]
+    assert lookup["first"].awaiting == [EXTERNAL_TOKEN]
+    assert lookup["second"].step.depends_on == ["first", EXTERNAL_TOKEN]

@@ -498,12 +498,10 @@ class Planner(LoggingMixin):
         external : Mapping[str, Task[ProcessHandle]] | None
             The steps of other workplan runs that `workplan` depends on, keyed
             by their `<step>@<alias>` token. They become nodes of the graph
-            that are never processed.
-
-        Raises
-        ------
-        ValueError
-            If a step depends on an external step that is not in `external`.
+            that are never processed. An external dependency missing from
+            `external` still becomes a node, `Unsubmitted` and without a task,
+            so its dependents are planned but never launched; callers that
+            launch steps refuse an unresolved dependency before planning.
         """
         self.workplan = workplan
         self.graph = Planner._workplan_to_graph(workplan, external or {})
@@ -527,14 +525,9 @@ class Planner(LoggingMixin):
         -------
         DiGraph
             A graph of the execution plan.
-
-        Raises
-        ------
-        ValueError
-            If a step depends on an external step that is not in `external`.
         """
         data: dict[str, list[str]] = {s.name: [] for s in workplan.steps}
-        tasks: dict[str, Task[ProcessHandle]] = {}
+        nodes: dict[str, Task[ProcessHandle] | None] = {}
         for step in workplan.steps:
             for token in step.depends_on:
                 ref = StepRef.parse(token)
@@ -543,13 +536,7 @@ class Planner(LoggingMixin):
                     continue
 
                 node = str(ref)
-                if node not in external:
-                    msg = (
-                        f"Step {step.name!r} depends on {node!r}, which is not a "
-                        f"known external step (known: {sorted(external)})"
-                    )
-                    raise ValueError(msg)
-                tasks[node] = external[node]
+                nodes[node] = external.get(node)
                 data.setdefault(node, []).append(step.name)
 
         g = nx.DiGraph(data)
@@ -563,8 +550,12 @@ class Planner(LoggingMixin):
         }
         defaults.update(
             {
-                node: {KEY_STATUS: task.status, KEY_STEP: None, KEY_TASK: task}
-                for node, task in tasks.items()
+                node: {
+                    KEY_STATUS: task.status if task else Status.Unsubmitted,
+                    KEY_STEP: None,
+                    KEY_TASK: task,
+                }
+                for node, task in nodes.items()
             }
         )
         nx.set_node_attributes(g, values=defaults)

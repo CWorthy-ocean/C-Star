@@ -4546,15 +4546,35 @@ def test_external_runs_step_and_handle(
     assert registry.handle(fab.ref).status == Status.Running
 
 
-def test_external_runs_pinned_carries_start_at(
+async def test_external_runs_pinned_carries_start_at(
     fabricate_external_run: Callable[..., FabricatedRun],
 ) -> None:
     """Verify `pinned` records the resolved record's start time."""
     fab = fabricate_external_run()
+    registry = ExternalRuns(fab.runs)
+    await registry.refresh([fab.ref], _FakeSlurmLauncher())
 
-    pinned = ExternalRuns(fab.runs).pinned()
+    pinned = registry.pinned()
 
     assert pinned["spinup"].run_id == fab.run_id
+    assert pinned["spinup"].start_at == EXTERNAL_START_AT
+
+
+async def test_external_runs_pinned_passes_unreferenced_alias_through(
+    fabricate_external_run: Callable[..., FabricatedRun],
+) -> None:
+    """Verify an alias no refreshed step uses is not resolved, so a stale `runs`
+    entry cannot abort pinning, and keeps its authored `start_at`.
+    """
+    fab = fabricate_external_run()
+    authored = RunRef(run_id="pruned-run")
+    registry = ExternalRuns({**fab.runs, "old": authored})
+    await registry.refresh([fab.ref], _FakeSlurmLauncher())
+
+    pinned = registry.pinned()
+
+    assert pinned["old"] == authored
+    assert pinned["old"].start_at is None
     assert pinned["spinup"].start_at == EXTERNAL_START_AT
 
 
@@ -4636,6 +4656,56 @@ async def test_external_runs_refresh_records_resolution_errors(
     assert "No run record" in registry.problem(refs[1])
     assert not registry.is_done(refs[0])
     assert not fab.sentinel.exists()
+
+
+async def test_external_runs_refresh_records_corrupt_sentinel(
+    fabricate_external_run: Callable[..., FabricatedRun],
+) -> None:
+    """Verify a truncated sentinel is a recorded problem, not a crash."""
+    fab = fabricate_external_run()
+    fab.sentinel.write_text("{ not a handle")
+    registry = ExternalRuns(fab.runs)
+
+    await registry.refresh([fab.ref], _FakeSlurmLauncher())
+
+    assert registry.problem(fab.ref)
+    assert str(fab.ref) in registry.errors()
+    assert registry.tasks() == {}
+
+
+async def test_external_runs_refresh_records_query_failure(
+    fabricate_external_run: Callable[..., FabricatedRun],
+) -> None:
+    """Verify an `OSError` while querying status is a recorded problem."""
+    fab = fabricate_external_run()
+
+    class _FailingLauncher(_FakeSlurmLauncher):
+        @classmethod
+        async def query_status(cls, item: t.Any) -> Status:
+            raise OSError("sacct unavailable")
+
+    registry = ExternalRuns(fab.runs)
+
+    await registry.refresh([fab.ref], _FailingLauncher())
+
+    assert registry.errors() == {str(fab.ref): "sacct unavailable"}
+    assert "sacct unavailable" in registry.problem(fab.ref)
+
+
+async def test_external_runs_refresh_resolves_step_up_front(
+    fabricate_external_run: Callable[..., FabricatedRun],
+) -> None:
+    """Verify an unreadable external workplan is recorded by `refresh`, so
+    `tasks` (which only reads probes) cannot fail after the gate passed.
+    """
+    fab = fabricate_external_run()
+    fab.record.trx_workplan_path.unlink()
+    registry = ExternalRuns(fab.runs)
+
+    await registry.refresh([fab.ref], _FakeSlurmLauncher())
+
+    assert "Unable to load workplan" in registry.problem(fab.ref)
+    assert registry.tasks() == {}
 
 
 async def test_external_runs_refresh_with_real_local_launcher(
