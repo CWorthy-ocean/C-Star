@@ -16,6 +16,9 @@ Breaking Changes
 - On Bouchet, ``CSTAR_DATA_HOME`` defaults to ``<scratch_pi_*>/<user>/cstar`` instead of ``~/cstar`` when neither ``SCRATCH`` nor ``CSTAR_DATA_HOME`` is set, so new workplan and blueprint runs land on scratch. (`#732 <https://github.com/CWorthy-ocean/C-Star/pull/732>`_)
 - ``cstar workplan run --dry-run`` is removed; use ``cstar workplan check`` (deep by default) to validate a workplan without scheduling it. ``--dry-run`` keeps its "change nothing" meaning on ``cstar blueprint migrate``, ``cstar admin clean`` and ``cstar admin migrate-outputs``. (`#733 <https://github.com/CWorthy-ocean/C-Star/pull/733>`_)
 - ``cstar workplan run`` now fails with a clear error when ``CSTAR_CLI_DRY_RUN`` is exported in the environment, since the plan-only mode it used to request no longer exists. (`#733 <https://github.com/CWorthy-ocean/C-Star/pull/733>`_)
+- If ``PROJECT`` is set on a laptop or an unrecognised cluster, the source-data cache now moves under it; it previously stayed under your home directory. (`#736 <https://github.com/CWorthy-ocean/C-Star/pull/736>`_)
+- On a machine that exports only ``SCRATCH_DIR`` or ``LOCAL_SCRATCH``, the source-data cache now goes to scratch instead of your home directory. (`#736 <https://github.com/CWorthy-ocean/C-Star/pull/736>`_)
+- Forge's per-system layout registry (``SYSTEM_LAYOUT_REGISTRY``, ``register_system``) and ``detect_system`` are removed; custom layouts registered against it no longer apply. (`#736 <https://github.com/CWorthy-ocean/C-Star/pull/736>`_)
 
 New features
 ~~~~~~~~~~~~
@@ -31,6 +34,7 @@ New features
 - ``cstar workplan run --pre-run`` does the same for every step, running locally even on scheduler systems; re-running the workplan without the flag (same run-id) attaches to the prepared directories and launches. (`#733 <https://github.com/CWorthy-ocean/C-Star/pull/733>`_)
 - Steps a pre-run cannot prepare are skipped and reported with the reason: an application that does not support pre-run, a blueprint produced by another step, a directive that consumes another step's output, or anything downstream of a skipped step. (`#733 <https://github.com/CWorthy-ocean/C-Star/pull/733>`_)
 - Applications declare support with ``pre_runnable = True`` on their ``ApplicationDefinition``; today only ``roms_marbl`` does. (`#733 <https://github.com/CWorthy-ocean/C-Star/pull/733>`_)
+- New ``CSTAR_PROJECT_HOME`` setting names your group's shared project directory; it defaults to ``$PROJECT`` and holds the shared source-data cache. (`#736 <https://github.com/CWorthy-ocean/C-Star/pull/736>`_)
 
 Bug Fixes
 ~~~~~~~~~
@@ -48,6 +52,7 @@ Bug Fixes
 - A blueprint, step or run name with no letters or digits is rejected instead of silently producing an empty directory name that collapsed onto its parent directory. (`#732 <https://github.com/CWorthy-ocean/C-Star/pull/732>`_)
 - Sentinel files are written atomically; the local proxy script could previously catch an in-place rewrite mid-way and leave a step with an empty sentinel, so the step showed no status and the run never reached a terminal state. (`#733 <https://github.com/CWorthy-ocean/C-Star/pull/733>`_)
 - Step sentinels now record which launcher created them, so a local pre-run after a failed SLURM run under the same run-id no longer crashes while reading the SLURM sentinel and instead clears and re-prepares the failed steps. (`#733 <https://github.com/CWorthy-ocean/C-Star/pull/733>`_)
+- ``cstar admin clean`` no longer deletes the user catalog at ``~/cstar/catalog`` when it clears the C-Star data directory. (`#736 <https://github.com/CWorthy-ocean/C-Star/pull/736>`_)
 
 Improvements
 ~~~~~~~~~~~~
@@ -61,6 +66,8 @@ Improvements
 - A system can declare its own scratch convention through ``SystemContext.scratch_root``, consulted for ``CSTAR_DATA_HOME`` after the ``CSTAR_SCRATCH_DIRS`` variables. (`#732 <https://github.com/CWorthy-ocean/C-Star/pull/732>`_)
 - A launcher that reads a sentinel written by another launcher uses its persisted status instead of querying a pid or job id that belongs to the other system, and refuses to adopt an attempt it cannot track while that attempt is still in progress. (`#733 <https://github.com/CWorthy-ocean/C-Star/pull/733>`_)
 - The first line of a step log now distinguishes a launch from a completed pre-run from a resume after a failure. (`#733 <https://github.com/CWorthy-ocean/C-Star/pull/733>`_)
+- The source-data cache now lives at ``<root>/cstar/source-data`` everywhere, and an existing cache at the old location is linked in, so nothing is downloaded again. (`#736 <https://github.com/CWorthy-ocean/C-Star/pull/736>`_)
+- ``cstar admin clean`` spares the source-data cache when it sits inside the C-Star data directory. (`#736 <https://github.com/CWorthy-ocean/C-Star/pull/736>`_)
 
 Miscellaneous
 ~~~~~~~~~~~~~
@@ -75,3 +82,4 @@ Miscellaneous
 - CI: a new push to a PR cancels that PR's in-progress test runs; runs on ``main`` are never cancelled. (`#735 <https://github.com/CWorthy-ocean/C-Star/pull/735>`_)
 - The HPC page's "Where data goes" section states one working-directory rule for every application; the forge blueprint, terminology, tutorial and developer pages follow it, and the committed blueprint JSON schemas are regenerated. (`#732 <https://github.com/CWorthy-ocean/C-Star/pull/732>`_)
 - Documentation for pre-running a blueprint and a workplan (``blueprints.rst``, ``workplans.rst``, ``hpc.rst``, ``terminology.rst``) and for declaring ``pre_runnable`` in a custom application. (`#733 <https://github.com/CWorthy-ocean/C-Star/pull/733>`_)
+- The HPC and data-access docs describe the single cache rule and ``CSTAR_PROJECT_HOME`` in place of the per-system table. (`#736 <https://github.com/CWorthy-ocean/C-Star/pull/736>`_)
