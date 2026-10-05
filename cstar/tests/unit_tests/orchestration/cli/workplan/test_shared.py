@@ -1,7 +1,6 @@
 import datetime
 import io
 import logging
-import os
 import typing as t
 from collections import OrderedDict
 from collections.abc import Mapping
@@ -13,7 +12,6 @@ import pytest
 import typer
 from rich.console import Console
 
-from cstar.base.env import ENV_CSTAR_RUNID
 from cstar.cli.workplan.shared import (
     autocomplete_step_list,
     check_and_capture_kvp,
@@ -317,13 +315,13 @@ async def test_list_steps_falls_back_to_tasks_dir_when_no_run_record(
         mock.AsyncMock(return_value=None),
     )
 
-    with mock.patch.dict(os.environ, {ENV_CSTAR_RUNID: fake_run_id}):
-        data_dir = StateDirectoryManager.data_dir()
-        tasks_dir = JobFileSystemManager(data_dir).tasks_dir
-        for step_name in ("step-a", "step-b"):
-            (tasks_dir / step_name).mkdir(parents=True, exist_ok=True)
+    tasks_dir = JobFileSystemManager(
+        StateDirectoryManager.data_dir(fake_run_id)
+    ).tasks_dir
+    for step_name in ("step-a", "step-b"):
+        (tasks_dir / step_name).mkdir(parents=True, exist_ok=True)
 
-        steps = await list_steps(fake_run_id, incomplete="")
+    steps = await list_steps(fake_run_id, incomplete="")
 
     assert set(steps) == {"step-a", "step-b"}
 
