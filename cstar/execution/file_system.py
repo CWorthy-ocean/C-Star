@@ -377,6 +377,9 @@ class StateDirectoryManager:
     _BLUEPRINT_RUNS_NAME: t.ClassVar[t.Literal["blueprint_runs"]] = "blueprint_runs"
     """The name of the data-home directory holding blueprint runs made outside a workplan."""
 
+    _WORKPLAN_RUNS_NAME: t.ClassVar[t.Literal["workplan_runs"]] = "workplan_runs"
+    """The name of the data-home directory holding workplan runs."""
+
     @classmethod
     def root_dir(cls) -> Path:
         """The root directory containing all job outputs.
@@ -418,7 +421,10 @@ class StateDirectoryManager:
     def data_dir(cls, run_id: str | None = None) -> Path:
         """The directory for data files used by a run.
 
-        The result is a _run-specific_ directory.
+        The result is a _run-specific_ directory,
+        ``<data home>/workplan_runs/<run id>``. A run started before that
+        layout keeps its ``<data home>/<run id>`` root, so re-running or
+        resuming it finds the steps where they ran.
 
         Returns
         -------
@@ -426,7 +432,18 @@ class StateDirectoryManager:
         """
         data_home = DirectoryManager.data_home()
         run_id = run_id or get_env_item(ENV_CSTAR_RUNID).value
-        return data_home / run_id
+        run_dir = data_home / cls._WORKPLAN_RUNS_NAME / run_id
+
+        legacy_dir = data_home / run_id
+        if not run_dir.exists() and JobFileSystemManager(legacy_dir).tasks_dir.is_dir():
+            log.debug(
+                "Using run directory %s, which predates the %s/ layout",
+                legacy_dir,
+                cls._WORKPLAN_RUNS_NAME,
+            )
+            return legacy_dir
+
+        return run_dir
 
     @classmethod
     def blueprint_run_dir(cls, application: str, name: str) -> Path:

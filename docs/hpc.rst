@@ -55,9 +55,10 @@ Every C-Star application writes under its blueprint's ``working_dir``. A
 blueprint that omits it runs under
 ``CSTAR_DATA_HOME/blueprint_runs/<application>/<name>``, with the blueprint
 name slugified. A workplan gives each step
-``CSTAR_DATA_HOME/<run id>/<step>``. A ``working_dir`` you set is used
-exactly as written; a relative path is resolved against the directory you
-run from.
+``CSTAR_DATA_HOME/workplan_runs/<run id>/tasks/<step>``; a run started
+before that layout keeps its ``CSTAR_DATA_HOME/<run id>`` directory when you
+re-run or resume it. A ``working_dir`` you set is used exactly as written; a
+relative path is resolved against the directory you run from.
 
 ``CSTAR_DATA_HOME`` is ``~/cstar`` on a laptop or workstation. On a
 supported HPC system it is a ``cstar`` directory on your scratch file system

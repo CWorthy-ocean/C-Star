@@ -131,8 +131,8 @@ Definitions
 
     Run ID
       A unique identifier you choose when submitting a workplan
-      (``cstar workplan run --run-id <id>``). It names the run's directory,
-      lets you check status (``cstar workplan status``) or reattach to a run
+      (``cstar workplan run --run-id <id>``). It names the run's directory
+      (``CSTAR_DATA_HOME/workplan_runs/<id>``), lets you check status (``cstar workplan status``) or reattach to a run
       in progress, and lets you re-enter a run to retry failed steps or
       resume them in place. A new run ID starts the workplan from scratch.
 
@@ -155,7 +155,8 @@ Definitions
       Where an application writes its results. A blueprint's ``working_dir``
       names it; omitted, it is
       ``CSTAR_DATA_HOME/blueprint_runs/<application>/<name>``. A workplan
-      lays out one directory per step under the run's directory. See
+      lays out one directory per step under the run's directory,
+      ``CSTAR_DATA_HOME/workplan_runs/<run id>/tasks/<step>``. See
       :doc:`hpc`.
 
 Example HPC deployment

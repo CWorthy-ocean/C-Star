@@ -129,7 +129,7 @@ async def list_steps(run_id: str, incomplete: str) -> list[str]:
         log.debug(f"No run for run-id {run_id!r} could be found.")
 
     # run state may be cleaned up. fallback to directory search
-    run_dir = StateDirectoryManager.data_dir()
+    run_dir = StateDirectoryManager.data_dir(run_id)
     tasks_dir = JobFileSystemManager(run_dir).tasks_dir
 
     if not tasks_dir.exists():
