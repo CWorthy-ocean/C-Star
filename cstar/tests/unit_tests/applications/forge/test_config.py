@@ -120,13 +120,18 @@ class TestResolveHost:
         assert host.working_dir == home / "runs" / "my-run"
         assert host.system == "anvil"
 
-    def test_source_data_cache_comes_from_the_data_paths(self, monkeypatch, tmp_path):
-        dp = DataPaths(source_data=tmp_path / "src", catalog=tmp_path / "cat")
-        monkeypatch.setattr(config_module, "get_data_paths", lambda: dp)
+    def test_source_data_cache_comes_from_directory_manager(
+        self, monkeypatch, tmp_path
+    ):
+        monkeypatch.setattr(
+            config_module.DirectoryManager,
+            "source_data_home",
+            classmethod(lambda cls: tmp_path / "src"),
+        )
 
         host = config_module.resolve_host(tmp_path / "wd")
 
-        assert host.source_data_cache == dp.source_data
+        assert host.source_data_cache == tmp_path / "src"
 
     def test_system_is_named_by_host_name_evaluator(self, monkeypatch, tmp_path):
         monkeypatch.setattr(

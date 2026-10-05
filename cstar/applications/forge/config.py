@@ -77,11 +77,12 @@ def resolve_host(working_dir: str | Path) -> HostPaths:
     directory or a ``--working-dir`` override. It is used as written (after ``~``
     expansion), like every other C-Star application; inside a workplan the step's
     assigned directory arrives here already applied. The source-data cache comes from
-    :func:`get_data_paths` and the machine name from C-Star's ``HostNameEvaluator``.
+    ``DirectoryManager.source_data_home()`` and the machine name from C-Star's
+    ``HostNameEvaluator``.
     """
     return HostPaths(
         working_dir=Path(working_dir).expanduser(),
-        source_data_cache=get_data_paths().source_data,
+        source_data_cache=DirectoryManager.source_data_home(),
         system=HostNameEvaluator().name,
     )
 
