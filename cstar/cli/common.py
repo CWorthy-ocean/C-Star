@@ -8,7 +8,6 @@ from importlib.metadata import version as _pkg_version
 from pathlib import Path
 
 import typer
-from pydantic import ValidationError
 from rich.console import Console
 
 import cstar
@@ -27,6 +26,9 @@ from cstar.execution.file_system import (
     get_backup_path,
     is_remote_resource,
     local_copy,
+)
+from cstar.orchestration.formatting import (
+    format_validation_errors as format_validation_errors,  # re-export
 )
 from cstar.orchestration.models import BlueprintCore
 from cstar.orchestration.serialization import (
@@ -616,24 +618,6 @@ def localize_and_migrate(path: str) -> tuple[Path, bool]:
             log.exception(msg)
             raise typer.BadParameter(msg) from ex
         return local_path, is_migrated
-
-
-def format_validation_errors(ex: ValidationError) -> str:
-    """Display the contents of a validation error in a user-friendly format."""
-    messages: list[str] = []
-
-    for error in ex.errors():
-        msg = f"{error['msg']!r}"
-
-        if error.get("loc"):
-            msg = "`Invalid {} value ({}): {}`".format(
-                error["loc"][0],
-                error["input"],
-                error["msg"],
-            )
-        messages.append(msg)
-
-    return ", ".join(messages)
 
 
 _TValue = t.TypeVar("_TValue")

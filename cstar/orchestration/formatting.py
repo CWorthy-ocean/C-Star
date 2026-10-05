@@ -1,5 +1,8 @@
 import typing as t
 
+if t.TYPE_CHECKING:
+    from pydantic import ValidationError
+
 TFormattable = t.TypeVar("TFormattable", contravariant=True)
 
 
@@ -43,3 +46,21 @@ class ModelFormatter(t.Protocol, t.Generic[TFormattable]):
         if updates:
             s = self._apply_replacements(s, updates)
         return s
+
+
+def format_validation_errors(ex: "ValidationError") -> str:
+    """Display the contents of a validation error in a user-friendly format."""
+    messages: list[str] = []
+
+    for error in ex.errors():
+        msg = f"{error['msg']!r}"
+
+        if error.get("loc"):
+            msg = "`Invalid {} value ({}): {}`".format(
+                error["loc"][0],
+                error["input"],
+                error["msg"],
+            )
+        messages.append(msg)
+
+    return ", ".join(messages)
