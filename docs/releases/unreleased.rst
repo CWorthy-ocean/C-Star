@@ -35,6 +35,12 @@ New features
 - Steps a pre-run cannot prepare are skipped and reported with the reason: an application that does not support pre-run, a blueprint produced by another step, a directive that consumes another step's output, or anything downstream of a skipped step. (`#733 <https://github.com/CWorthy-ocean/C-Star/pull/733>`_)
 - Applications declare support with ``pre_runnable = True`` on their ``ApplicationDefinition``; today only ``roms_marbl`` does. (`#733 <https://github.com/CWorthy-ocean/C-Star/pull/733>`_)
 - New ``CSTAR_PROJECT_HOME`` setting names your group's shared project directory; it defaults to ``$PROJECT`` and holds the shared source-data cache. (`#736 <https://github.com/CWorthy-ocean/C-Star/pull/736>`_)
+- ``runs:`` declares other workplan runs by alias (a run-id or a ``{{var}}`` runtime variable), and ``<step>@<alias>`` references one of their steps in ``depends_on``, deferred blueprints, directive ``step`` keys and ``{{output_dir: ...}}``-style placeholders. (`#737 <https://github.com/CWorthy-ocean/C-Star/pull/737>`_)
+
+  - Every external reference is checked when the workplan is scheduled: the run must exist on this machine, the step must exist in it and must have completed, and the exact run record used is pinned into the transformed workplan for provenance.
+  - A workplan may depend on a step of another run that is still in progress when both runs use the SLURM launcher; the new step is submitted with a SLURM dependency on that job. The local launcher refuses in-progress external steps.
+  - ``cstar workplan check``, ``cstar workplan run`` and ``cstar workplan status`` report external dependencies: unresolvable or unusable ones are listed up front, and ``status`` shows the external token in the Dependencies column.
+
 
 Bug Fixes
 ~~~~~~~~~
@@ -83,3 +89,5 @@ Miscellaneous
 - The HPC page's "Where data goes" section states one working-directory rule for every application; the forge blueprint, terminology, tutorial and developer pages follow it, and the committed blueprint JSON schemas are regenerated. (`#732 <https://github.com/CWorthy-ocean/C-Star/pull/732>`_)
 - Documentation for pre-running a blueprint and a workplan (``blueprints.rst``, ``workplans.rst``, ``hpc.rst``, ``terminology.rst``) and for declaring ``pre_runnable`` in a custom application. (`#733 <https://github.com/CWorthy-ocean/C-Star/pull/733>`_)
 - The HPC and data-access docs describe the single cache rule and ``CSTAR_PROJECT_HOME`` in place of the per-system table. (`#736 <https://github.com/CWorthy-ocean/C-Star/pull/736>`_)
+- New "Referencing other runs" section in the workplan docs and notes on the directives page; the published workplan JSON schema is regenerated for the new ``runs`` field. (`#737 <https://github.com/CWorthy-ocean/C-Star/pull/737>`_)
+- Step names and run aliases may no longer contain ``@``, which now separates a step from its run alias; a workplan with such a step name is rejected when loaded. (`#737 <https://github.com/CWorthy-ocean/C-Star/pull/737>`_)
