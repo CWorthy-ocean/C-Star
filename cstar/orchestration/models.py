@@ -1,9 +1,17 @@
-import itertools
+"""Orchestration models: blueprints, steps and workplans.
+
+A step is referenced by its name (`build`) or, when it belongs to another
+workplan run declared under a workplan's `runs`, by the token `<step>@<alias>`
+(`build@spinup`); see `StepRef`.
+"""
+
+import re
 import typing as t
 from abc import ABC
 from collections import Counter
 from collections.abc import Callable, Mapping, Sequence
 from copy import deepcopy
+from datetime import datetime
 from enum import StrEnum, auto
 from pathlib import Path
 from urllib.parse import quote, unquote
@@ -36,6 +44,20 @@ RequiredString: t.TypeAlias = t.Annotated[
     StringConstraints(strip_whitespace=True, min_length=1),
 ]
 """A non-empty string with no leading or trailing whitespace."""
+
+RUN_ALIAS_SEPARATOR: t.Final[str] = "@"
+"""The character separating a step name from the alias of an external workplan
+run in a step reference token, e.g. `build@spinup`."""
+
+StepName: t.TypeAlias = t.Annotated[
+    str,
+    StringConstraints(
+        strip_whitespace=True,
+        min_length=1,
+        pattern=rf"^[^{re.escape(RUN_ALIAS_SEPARATOR)}]+$",
+    ),
+]
+"""A `RequiredString` that does not contain `RUN_ALIAS_SEPARATOR`."""
 
 nx = lazy_import("networkx")
 
@@ -444,10 +466,95 @@ class InlineBlueprintRef(BaseModel):
         }
 
 
+class StepRef(BaseModel):
+    """A reference to a step of this workplan or of an external workplan run.
+
+    The wire form is `<step>` for a step of the current workplan and
+    `<step>@<alias>` for a step of the external run declared as `<alias>` under
+    the workplan's `runs`.
+    """
+
+    step: StepName
+    """The step's name."""
+
+    run: str = Field(default="")
+    """The alias of the external run declared under `runs`; empty for a step of
+    the current workplan."""
+
+    model_config: t.ClassVar[ConfigDict] = ConfigDict(
+        extra="forbid",
+        str_strip_whitespace=True,
+        use_attribute_docstrings=True,
+        frozen=True,
+    )
+    """Configures the behavior of the pydantic model."""
+
+    @classmethod
+    def parse(cls, token: str) -> "StepRef":
+        """Parse a step reference token.
+
+        Parameters
+        ----------
+        token : str
+            A step name, or `<step>@<alias>` for a step of an external run.
+
+        Returns
+        -------
+        StepRef
+
+        Raises
+        ------
+        ValueError
+            If the token has an empty step or alias, or more than one separator.
+        """
+        step, sep, run = token.strip().partition(RUN_ALIAS_SEPARATOR)
+
+        if RUN_ALIAS_SEPARATOR in run or not step.strip() or (sep and not run.strip()):
+            msg = (
+                f"Invalid step reference {token!r}; expected `<step>` or "
+                f"`<step>{RUN_ALIAS_SEPARATOR}<alias>`"
+            )
+            raise ValueError(msg)
+
+        return cls(step=step, run=run.strip())
+
+    @property
+    def is_external(self) -> bool:
+        """Whether the step belongs to an external workplan run.
+
+        Returns
+        -------
+        bool
+        """
+        return bool(self.run)
+
+    def __str__(self) -> str:
+        """Return the token form of the reference."""
+        return f"{self.step}{RUN_ALIAS_SEPARATOR}{self.run}" if self.run else self.step
+
+
+class RunRef(ConfiguredBaseModel):
+    """A reference to an external workplan run."""
+
+    run_id: RequiredString
+    """The run-id of the external workplan run; may be a `{{name}}`
+    runtime-variable placeholder filled when the workplan is scheduled."""
+
+    start_at: datetime | None = Field(default=None)
+    """The start time of the exact run record resolved when the workplan was
+    scheduled; `None` in an authored workplan."""
+
+    @model_validator(mode="before")
+    @classmethod
+    def _coerce_bare_run_id(cls, value: t.Any) -> t.Any:
+        """Accept a bare string as shorthand for `{"run_id": <string>}`."""
+        return {"run_id": value} if isinstance(value, str) else value
+
+
 class Step(ConfiguredBaseModel):
     """An individual unit of execution within a workplan."""
 
-    name: RequiredString
+    name: StepName
     """The user-friendly name of the step."""
 
     application: RequiredString
@@ -636,6 +743,10 @@ class Workplan(ConfiguredBaseModel):
     description: RequiredString
     """A user-friendly description of the workplan."""
 
+    runs: dict[str, RunRef] = Field(default_factory=dict, frozen=True)
+    """External workplan runs referenced by this workplan, keyed by alias. A step
+    of an external run is referenced as `<step>@<alias>`."""
+
     steps: Sequence[Step] = Field(
         min_length=1,
         frozen=True,
@@ -742,76 +853,135 @@ class Workplan(ConfiguredBaseModel):
 
         return value
 
-    @field_validator("steps", mode="after")
+    @field_validator("runs", mode="after")
     @classmethod
-    def _check_dependencies(cls, value: list[Step]) -> list[Step]:
-        """Verify the keys named in dependencies are valid step names.
+    def _check_run_aliases(cls, value: dict[str, RunRef]) -> dict[str, RunRef]:
+        """Verify run aliases are usable in a `<step>@<alias>` token.
 
         Parameters
         ----------
-        value : list[Step]
-            The steps in the workplan.
+        value : dict[str, RunRef]
+            The external runs keyed by alias.
         """
-        names = {step.name for step in value}
-        dependencies = set(itertools.chain.from_iterable([x.depends_on for x in value]))
-        if diff := dependencies.difference(names):
-            msg = f"Unknown dependency specified. No step(s) named: {diff}"
+        bad = [
+            alias
+            for alias in value
+            if not alias.strip()
+            or any(c.isspace() for c in alias)
+            or RUN_ALIAS_SEPARATOR in alias
+        ]
+        if bad:
+            msg = (
+                f"Invalid run alias(es): {bad}. Aliases must be non-empty and "
+                f"contain no whitespace or {RUN_ALIAS_SEPARATOR!r}"
+            )
             raise ValueError(msg)
 
         return value
 
-    @field_validator("steps", mode="after")
-    @classmethod
-    def _check_dependency_cycles(cls, value: Sequence[Step]) -> Sequence[Step]:
+    @model_validator(mode="after")
+    def _check_dependencies(self) -> "Workplan":
+        """Verify the entries named in dependencies are valid step references.
+
+        Local entries must name a step of this workplan; external entries must
+        use an alias declared in `runs`.
+        """
+        names = {step.name for step in self.steps}
+        unknown: set[str] = set()
+        undeclared: set[str] = set()
+        parse_errors: list[str] = []
+
+        for step in self.steps:
+            for entry in step.depends_on:
+                try:
+                    ref = StepRef.parse(entry)
+                except ValueError as ex:
+                    parse_errors.append(
+                        f"step {step.name!r} dependency {entry!r}: {ex}"
+                    )
+                    continue
+                if not ref.is_external:
+                    if ref.step not in names:
+                        unknown.add(entry)
+                elif ref.run not in self.runs:
+                    undeclared.add(ref.run)
+
+        if parse_errors:
+            raise ValueError("; ".join(parse_errors))
+        if unknown:
+            msg = f"Unknown dependency specified. No step(s) named: {unknown}"
+            raise ValueError(msg)
+        if undeclared:
+            msg = (
+                f"Dependencies use undeclared run alias(es): {sorted(undeclared)}. "
+                f"Declared under `runs`: {sorted(self.runs)}"
+            )
+            raise ValueError(msg)
+
+        return self
+
+    @model_validator(mode="after")
+    def _check_dependency_cycles(self) -> "Workplan":
         """Verify the step dependency graph contains no cycles.
 
-        Parameters
-        ----------
-        value : Sequence[Step]
-            The steps in the workplan.
+        External dependencies are steps of another run and never part of a
+        cycle, so only local dependencies are considered.
         """
-        graph = nx.DiGraph(
-            (dep, step.name) for step in value for dep in step.depends_on
-        )
+        edges = [
+            (entry, step.name)
+            for step in self.steps
+            for entry in step.depends_on
+            if not StepRef.parse(entry).is_external
+        ]
+        graph = nx.DiGraph(edges)
         try:
             cycle = nx.find_cycle(graph)
         except nx.NetworkXNoCycle:
-            return value
+            return self
 
         names = " -> ".join([cycle[0][0], *(dst for _, dst in cycle)])
         msg = f"Dependency cycle detected: {names}"
         raise ValueError(msg)
 
-    @field_validator("steps", mode="after")
-    @classmethod
-    def _check_deferred_blueprints(cls, value: Sequence[Step]) -> Sequence[Step]:
+    @model_validator(mode="after")
+    def _check_deferred_blueprints(self) -> "Workplan":
         """Verify deferred blueprint references point at valid producer steps.
 
-        Parameters
-        ----------
-        value : Sequence[Step]
-            The steps in the workplan.
+        A producer in an external run must use a declared alias; either kind
+        of producer must be listed in the step's `depends_on`.
         """
-        names = {step.name for step in value}
-        for step in value:
+        names = {step.name for step in self.steps}
+        for step in self.steps:
             if not isinstance(step.blueprint_path, DeferredBlueprintRef):
                 continue
 
-            producer = step.blueprint_path.from_step
-            if producer not in names:
+            token = step.blueprint_path.from_step
+            try:
+                ref = StepRef.parse(token)
+            except ValueError as ex:
+                msg = f"Step {step.name!r} defers its blueprint to {token!r}: {ex}"
+                raise ValueError(msg) from ex
+
+            if not ref.is_external and ref.step not in names:
                 msg = (
-                    f"Step {step.name!r} defers its blueprint to unknown "
-                    f"step {producer!r}"
+                    f"Step {step.name!r} defers its blueprint to unknown step {token!r}"
                 )
                 raise ValueError(msg)
-            if producer not in step.depends_on:
+            if ref.is_external and ref.run not in self.runs:
+                msg = (
+                    f"Step {step.name!r} defers its blueprint to {token!r} but "
+                    f"run alias {ref.run!r} is not declared under `runs` "
+                    f"(declared: {sorted(self.runs)})"
+                )
+                raise ValueError(msg)
+            if token not in step.depends_on:
                 msg = (
                     f"Step {step.name!r} defers its blueprint to step "
-                    f"{producer!r} but does not list it in `depends_on`"
+                    f"{token!r} but does not list it in `depends_on`"
                 )
                 raise ValueError(msg)
 
-        return value
+        return self
 
 
 class UserDefinedVariables(ConfiguredBaseModel):

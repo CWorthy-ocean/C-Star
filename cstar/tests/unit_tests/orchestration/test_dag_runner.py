@@ -58,6 +58,10 @@ from cstar.orchestration.orchestration import LiveStep, LiveWorkplan, Planner, S
 from cstar.orchestration.serialization import PersistenceMode, deserialize, serialize
 from cstar.orchestration.state import StateRepository
 from cstar.orchestration.tracking import TrackingRepository, WorkplanRun
+from cstar.tests.unit_tests.orchestration.conftest import (
+    EXTERNAL_TOKEN,
+    ExternalTaskFactory,
+)
 
 
 def draw_graph(planner: Planner) -> None:
@@ -626,7 +630,7 @@ async def test_prepare_workplan_persists_clobber_overrides(
     wp_path = wp_templates_dir / "workplan.yaml"
     output_dir = tmp_path / "output"
 
-    _, prepared_path = await prepare_workplan(
+    _, prepared_path, _ = await prepare_workplan(
         wp_path, output_dir, clobber_steps=["Prepare"]
     )
 
@@ -690,7 +694,7 @@ async def test_prepare_workplan_materializes_inline_blueprint(
     assert serialize(wp_path, wp)
     output_dir = tmp_path / "output"
 
-    _, prepared_path = await prepare_workplan(wp_path, output_dir)
+    _, prepared_path, _ = await prepare_workplan(wp_path, output_dir)
 
     persisted = deserialize(prepared_path, LiveWorkplan)
     consumer = next(s for s in persisted.steps if s.name == "consumer")
@@ -993,7 +997,7 @@ async def test_prepare_workplan_persists_pre_run_overrides(
     """
     wp_path = wp_templates_dir / "workplan.yaml"
 
-    wp, prepared_path = await prepare_workplan(
+    wp, prepared_path, _ = await prepare_workplan(
         wp_path, tmp_path / "output", pre_run=True
     )
     persisted = deserialize(prepared_path, LiveWorkplan)
@@ -1009,7 +1013,7 @@ async def test_prepare_workplan_without_pre_run_leaves_steps_unmarked(
     wp_templates_dir: Path,
 ) -> None:
     """Verify a plain run does not mark any step for pre-run."""
-    wp, prepared_path = await prepare_workplan(
+    wp, prepared_path, _ = await prepare_workplan(
         wp_templates_dir / "workplan.yaml", tmp_path / "output"
     )
 
@@ -1093,7 +1097,7 @@ async def test_prepare_workplan_pre_run_does_not_report_injected_overrides(
     wp_path = tmp_path / "hello.yaml"
     serialize(wp_path, _make_workplan([step]))
 
-    wp, _ = await prepare_workplan(wp_path, tmp_path / "output", pre_run=True)
+    wp, _, _ = await prepare_workplan(wp_path, tmp_path / "output", pre_run=True)
 
     assert wp.steps[0].pre_run
 
@@ -1301,3 +1305,42 @@ def test_get_orchestrator_uses_local_launcher_for_pre_run_workplan(
         orchestrator = get_orchestrator(Planner(wp))
 
     assert type(orchestrator.launcher) is exp_klass
+
+
+@pytest.mark.parametrize(
+    ("status", "bucket"),
+    [
+        pytest.param(Status.Done, "satisfied", id="done"),
+        pytest.param(Status.Running, "awaiting", id="running"),
+        pytest.param(Status.Failed, "blocking", id="failed"),
+    ],
+)
+def test_get_status_detail_map_external_dependency(
+    status: Status,
+    bucket: str,
+    external_workplan: Workplan,
+    external_task: ExternalTaskFactory,
+) -> None:
+    """Verify an external dependency is reported under the bucket matching its
+    status, alongside local dependencies.
+    """
+    planner = Planner(external_workplan, {EXTERNAL_TOKEN: external_task(status)})
+    dag_status = DagStatus({EXTERNAL_TOKEN: status, "first": Status.Done})
+
+    detail_map = get_status_detail_map(planner, dag_status)
+
+    assert list(detail_map) == ["first", "second"]
+    assert getattr(detail_map["first"], bucket) == [EXTERNAL_TOKEN]
+    assert EXTERNAL_TOKEN in getattr(detail_map["second"], bucket)
+    assert "first" in detail_map["second"].satisfied
+
+
+def test_build_planner_passes_external_tasks(
+    external_workplan: Workplan, external_task: ExternalTaskFactory
+) -> None:
+    """Verify `build_planner` hands the external tasks to the planner."""
+    task = external_task(Status.Done)
+
+    planner = build_planner(external_workplan, {EXTERNAL_TOKEN: task})
+
+    assert planner.retrieve(EXTERNAL_TOKEN, "task") is task

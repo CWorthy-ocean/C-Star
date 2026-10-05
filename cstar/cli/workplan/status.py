@@ -7,13 +7,16 @@ from rich.console import Console
 from cstar.base.log import get_logger
 from cstar.cli.workplan.shared import (
     display_summary,
+    exit_on_unresolved_externals,
     list_runs,
     refresh_disk_usage,
 )
 from cstar.entrypoint.utils import ARG_SIZE, ARG_SIZE_HELP
 from cstar.orchestration.dag_runner import (
+    DagStatus,
     get_launcher,
     get_status_detail_map,
+    load_external_runs,
     load_run_state,
 )
 from cstar.orchestration.orchestration import LiveWorkplan, Planner
@@ -57,8 +60,11 @@ def status(
 
         # a pre-run's steps are local processes, whatever the system scheduler
         launcher = get_launcher(force_local=workplan.pre_run)
-        planner = Planner(workplan)
+        external = asyncio.run(load_external_runs(workplan, launcher))
+        exit_on_unresolved_externals(external)
+        planner = Planner(workplan, external.tasks())
         status = asyncio.run(load_run_state(run_id, launcher))
+        status = DagStatus({**external.statuses(), **status.details})
         lookup = get_status_detail_map(planner, status)
 
         if refresh_usage:

@@ -1,3 +1,4 @@
+import dataclasses
 import logging
 import os
 import shutil
@@ -30,21 +31,34 @@ from cstar.applications.roms_marbl.transforms import (
 from cstar.base.env import ENV_CSTAR_RUNID, FLAG_OFF
 from cstar.base.exceptions import CstarError, CstarExpectationFailed
 from cstar.base.feature import ENV_FF_ORCH_TRX_TIMESPLIT
+from cstar.execution.file_system import JobFileSystemManager, StateDirectoryManager
 from cstar.orchestration.adapter import DIRECTIVES_FILENAME, prepare_directive_file
+from cstar.orchestration.dag_runner import prepare_workplan
+from cstar.orchestration.launch.local import LocalHandle, LocalLauncher
 from cstar.orchestration.models import (
     Application,
     BlueprintState,
     DeferredBlueprintRef,
+    RunRef,
     Step,
+    StepRef,
     UserDefinedVariables,
     Workplan,
 )
-from cstar.orchestration.orchestration import LiveStep, LiveWorkplan
+from cstar.orchestration.orchestration import (
+    Launcher,
+    LiveStep,
+    LiveWorkplan,
+    ProcessHandle,
+    Status,
+)
 from cstar.orchestration.serialization import deserialize, serialize
+from cstar.orchestration.state import StateRepository
 from cstar.orchestration.tracking import TrackingRepository, WorkplanRun
 from cstar.orchestration.transforms import (
     ApplyOverridesDirective,
     DirectiveConfig,
+    ExternalRuns,
     OverrideDirective,
     OverrideTransform,
     TemplateFillTransform,
@@ -52,9 +66,12 @@ from cstar.orchestration.transforms import (
     apply_automatic_overrides,
     collect_directive_problems,
     effective_blueprint,
+    external_dependencies,
+    fill_runs,
     get_fsm_resolver,
     get_system_overrides,
     get_transforms,
+    lookup_step,
     materialize_inline_blueprints,
     mustache,
     package_runtime_overrides,
@@ -2540,7 +2557,7 @@ def test_template_fill_scoped_resolver(
             },
         },
     )
-    resolver = get_fsm_resolver([step1, step2])
+    resolver = get_fsm_resolver([step1, step2], ExternalRuns({}))
 
     transform = TemplateFillTransform(scoped_resolver=resolver)
     (result,) = transform(step2)
@@ -2570,7 +2587,7 @@ def test_template_fill_scoped_resolver_invalid_lookup(
         update={"blueprint_overrides": {wd_key: "{{working_dir: step-111}}/output"}},
     )
 
-    resolver = get_fsm_resolver([step1, step2])
+    resolver = get_fsm_resolver([step1, step2], ExternalRuns({}))
     transform = TemplateFillTransform(scoped_resolver=resolver)
 
     with pytest.raises(KeyError, match="unknown step"):
@@ -2692,7 +2709,7 @@ def test_template_fill_with_path_resolver_unknown_purpose(
         live_step_with_templates,
         update={"blueprint_overrides": {"key": "{{work_dir: some_step}}"}},
     )
-    resolver = get_fsm_resolver([step])
+    resolver = get_fsm_resolver([step], ExternalRuns({}))
 
     fill = TemplateFillTransform(variable_resolver=str, scoped_resolver=resolver)
 
@@ -2718,7 +2735,7 @@ def test_template_fill_scoped_resolver_unknown_scope(
         update={"blueprint_overrides": {wd_key: "{{woorking_dir: step-1}}/output"}},
     )
 
-    resolver = get_fsm_resolver([step1, step2])
+    resolver = get_fsm_resolver([step1, step2], ExternalRuns({}))
     transform = TemplateFillTransform(scoped_resolver=resolver)
 
     with pytest.raises(KeyError, match="Unable to resolve 'woorking_dir'"):
@@ -4307,3 +4324,896 @@ def test_materialize_inline_blueprints_requires_transformed_step() -> None:
 
     with pytest.raises(CstarExpectationFailed, match="consumer"):
         _ = materialize_inline_blueprints([step])
+
+
+# ---------------------------------------------------------------------------
+# References to steps of other workplan runs (`<step>@<alias>`)
+# ---------------------------------------------------------------------------
+
+EXTERNAL_START_AT = datetime(2026, 1, 2, 3, 4, 5, tzinfo=UTC)
+"""The start time recorded for fabricated external runs."""
+
+
+class _FakeHandle(ProcessHandle):
+    """A launcher-specific handle type, distinct from the generic `ProcessHandle`."""
+
+
+class _FakeLauncher(Launcher[ProcessHandle]):
+    """A launcher that reports the status persisted on a handle."""
+
+    @classmethod
+    async def query_status(cls, item: t.Any) -> Status:
+        assert isinstance(item, cls.handle_klass())
+        return t.cast("ProcessHandle", item).status
+
+    @classmethod
+    async def launch(cls, step: LiveStep, dependencies: list[ProcessHandle]) -> t.Any:
+        raise NotImplementedError
+
+    @classmethod
+    async def update_status(cls, item: t.Any) -> t.Any:
+        raise NotImplementedError
+
+    @classmethod
+    async def cancel(cls, item: t.Any) -> t.Any:
+        raise NotImplementedError
+
+    @classmethod
+    def handle_klass(cls) -> type[ProcessHandle]:
+        return _FakeHandle
+
+
+class _FakeSlurmLauncher(_FakeLauncher):
+    """A launcher that can wait on in-progress handles of other runs."""
+
+    name = "slurm"
+    supports_foreign_dependencies = True
+
+
+class _FakeLocalLauncher(_FakeLauncher):
+    """A launcher that cannot wait on in-progress handles of other runs."""
+
+    name = "local"
+    supports_foreign_dependencies = False
+
+
+@dataclasses.dataclass(frozen=True)
+class FabricatedRun:
+    """An external workplan run laid out on disk."""
+
+    run_id: str
+    record: WorkplanRun
+    step: LiveStep
+    sentinel: Path
+
+    @property
+    def ref(self) -> StepRef:
+        """A reference to the run's step, using the alias `spinup`."""
+        return StepRef(step=self.step.name, run="spinup")
+
+    @property
+    def runs(self) -> dict[str, RunRef]:
+        """The `runs` declaration of a workplan referring to this run."""
+        return {"spinup": RunRef(run_id=self.run_id)}
+
+
+@pytest.fixture
+def fabricate_external_run(
+    tmp_path: Path,
+    hello_world_bp_path: Path,
+) -> Callable[..., FabricatedRun]:
+    """Create a factory that fabricates a completed run under the test's
+    (autouse-redirected) C-Star data and state homes.
+
+    The run has a tracking record, a transformed workplan holding a step
+    `outer`, and a sentinel holding a handle with a chosen status/launcher.
+
+    Parameters
+    ----------
+    tmp_path : Path
+        Temporary directory for test outputs.
+    hello_world_bp_path : Path
+        Fixture returning the path to a hello-world blueprint file.
+    """
+
+    def _make(
+        run_id: str = "spinup",
+        *,
+        status: Status = Status.Done,
+        launcher_name: str = "slurm",
+        sentinel: bool = True,
+    ) -> FabricatedRun:
+        root_fsm = JobFileSystemManager(StateDirectoryManager.data_dir(run_id))
+        step = LiveStep(
+            name="outer",
+            application="hello_world",
+            blueprint=hello_world_bp_path.as_posix(),
+            working_dir=root_fsm.get_subtask_manager("outer").root_dir,
+        )
+        plan = LiveWorkplan(
+            name=f"{run_id}-run",
+            description="A fabricated external run.",
+            steps=[step],
+        )
+        trx_path = tmp_path / f"{run_id}_trx.yaml"
+        assert serialize(trx_path, plan)
+
+        record = WorkplanRun(
+            workplan_path=tmp_path / f"{run_id}.yaml",
+            trx_workplan_path=trx_path,
+            output_path=tmp_path,
+            run_id=run_id,
+            start_at=EXTERNAL_START_AT,
+        )
+        TrackingRepository().put_workplan_run_sync(record)
+
+        sentinel_path = StateRepository.sentinel_path("outer", run_id=run_id)
+        if sentinel:
+            sentinel_path.parent.mkdir(parents=True, exist_ok=True)
+            handle = ProcessHandle(
+                pid="1234",
+                name="outer",
+                run_id=run_id,
+                launcher_name=launcher_name,
+                status=status,
+            )
+            assert serialize(sentinel_path, handle)
+
+        step.fsm.output_dir.mkdir(parents=True, exist_ok=True)
+        return FabricatedRun(run_id, record, step, sentinel_path)
+
+    return _make
+
+
+def test_fill_runs_fills_placeholder() -> None:
+    """Verify a placeholder in a run-id is filled and `start_at` is kept."""
+    runs = {"spinup": RunRef(run_id="{{spin_id}}", start_at=EXTERNAL_START_AT)}
+    fill = TemplateFillTransform(variable_resolver=lambda name: f"id-of-{name}")
+
+    filled = fill_runs(runs, fill)
+
+    assert filled["spinup"].run_id == "id-of-spin_id"
+    assert filled["spinup"].start_at == EXTERNAL_START_AT
+    assert runs["spinup"].run_id == "{{spin_id}}"
+
+
+def test_fill_runs_without_fill_transform() -> None:
+    """Verify a plain run-id passes through without a transform, and a
+    placeholder raises naming the alias.
+    """
+    assert fill_runs({"a": RunRef(run_id="plain")}, None)["a"].run_id == "plain"
+
+    with pytest.raises(CstarExpectationFailed, match="'spinup'"):
+        _ = fill_runs({"spinup": RunRef(run_id="{{spin_id}}")}, None)
+
+
+def test_external_runs_undeclared_alias() -> None:
+    """Verify an undeclared alias is reported with the declared ones."""
+    registry = ExternalRuns({"known": RunRef(run_id="r")})
+
+    with pytest.raises(CstarError, match=r"'nope'.*\['known'\]"):
+        _ = registry.record("nope")
+
+
+def test_external_runs_unknown_run() -> None:
+    """Verify a run without a tracking record raises, naming alias and run-id."""
+    registry = ExternalRuns({"spinup": RunRef(run_id="never-ran")})
+
+    with pytest.raises(CstarError, match="'spinup'.*'never-ran'"):
+        _ = registry.record("spinup")
+
+
+def test_external_runs_unknown_step(
+    fabricate_external_run: Callable[..., FabricatedRun],
+) -> None:
+    """Verify a step missing from the external workplan raises, naming it."""
+    fab = fabricate_external_run()
+    registry = ExternalRuns(fab.runs)
+
+    with pytest.raises(CstarError, match="'missing'.*'spinup'"):
+        _ = registry.step(StepRef.parse("missing@spinup"))
+
+
+def test_external_runs_missing_workplan_file(
+    fabricate_external_run: Callable[..., FabricatedRun],
+) -> None:
+    """Verify an unreadable recorded workplan is reported as a `CstarError`."""
+    fab = fabricate_external_run()
+    fab.record.trx_workplan_path.unlink()
+
+    with pytest.raises(CstarError, match="Unable to load workplan"):
+        _ = ExternalRuns(fab.runs).step(fab.ref)
+
+
+def test_external_runs_missing_sentinel(
+    fabricate_external_run: Callable[..., FabricatedRun],
+) -> None:
+    """Verify a step that was never submitted has no handle."""
+    fab = fabricate_external_run(sentinel=False)
+
+    with pytest.raises(CstarError, match="has not been submitted"):
+        _ = ExternalRuns(fab.runs).handle(fab.ref)
+
+
+def test_external_runs_step_and_handle(
+    fabricate_external_run: Callable[..., FabricatedRun],
+) -> None:
+    """Verify the step and handle of an external run are read from its records."""
+    fab = fabricate_external_run(status=Status.Running)
+    registry = ExternalRuns(fab.runs)
+
+    assert registry.step(fab.ref).working_dir == fab.step.working_dir
+    assert registry.handle(fab.ref).status == Status.Running
+
+
+def test_external_runs_pinned_carries_start_at(
+    fabricate_external_run: Callable[..., FabricatedRun],
+) -> None:
+    """Verify `pinned` records the resolved record's start time."""
+    fab = fabricate_external_run()
+
+    pinned = ExternalRuns(fab.runs).pinned()
+
+    assert pinned["spinup"].run_id == fab.run_id
+    assert pinned["spinup"].start_at == EXTERNAL_START_AT
+
+
+@pytest.mark.parametrize(
+    ("status", "launcher", "handle_launcher", "usable"),
+    [
+        (Status.Done, _FakeLocalLauncher, "local", True),
+        (Status.Done, _FakeLocalLauncher, "slurm", True),
+        (Status.Running, _FakeSlurmLauncher, "slurm", True),
+        (Status.Submitted, _FakeSlurmLauncher, "slurm", True),
+        (Status.Running, _FakeLocalLauncher, "local", False),
+        (Status.Running, _FakeSlurmLauncher, "local", False),
+        (Status.Failed, _FakeSlurmLauncher, "slurm", False),
+        (Status.Cancelled, _FakeSlurmLauncher, "slurm", False),
+    ],
+)
+async def test_external_runs_problem_gate(
+    fabricate_external_run: Callable[..., FabricatedRun],
+    status: Status,
+    launcher: type[_FakeLauncher],
+    handle_launcher: str,
+    usable: bool,
+) -> None:
+    """Verify an external step is usable when done, or in progress under a
+    launcher that supports foreign dependencies and created the handle.
+
+    Parameters
+    ----------
+    status : Status
+        The status persisted on the external step's handle.
+    launcher : type[_FakeLauncher]
+        The launcher of the current run.
+    handle_launcher : str
+        The launcher recorded on the handle.
+    usable : bool
+        Whether the step may be depended upon.
+    """
+    fab = fabricate_external_run(status=status, launcher_name=handle_launcher)
+    registry = ExternalRuns(fab.runs)
+
+    await registry.refresh([fab.ref], launcher())
+    problem = registry.problem(fab.ref)
+
+    assert registry.is_done(fab.ref) == (status == Status.Done)
+    if usable:
+        assert problem == ""
+        return
+
+    assert "'spinup'" in problem
+    assert f"'{fab.run_id}'" in problem
+    assert "'outer'" in problem
+    assert status.name in problem
+    assert f"launcher '{launcher.name}'" in problem
+    assert ("cstar workplan status spinup" in problem) == Status.is_in_progress(status)
+
+
+async def test_external_runs_problem_not_refreshed(
+    fabricate_external_run: Callable[..., FabricatedRun],
+) -> None:
+    """Verify a step whose status was never queried is a problem."""
+    fab = fabricate_external_run()
+
+    assert "status unknown" in ExternalRuns(fab.runs).problem(fab.ref)
+
+
+async def test_external_runs_refresh_records_resolution_errors(
+    fabricate_external_run: Callable[..., FabricatedRun],
+) -> None:
+    """Verify refresh stores a resolution failure per reference instead of
+    raising, and never writes a sentinel.
+    """
+    fab = fabricate_external_run(sentinel=False)
+    registry = ExternalRuns({**fab.runs, "ghost": RunRef(run_id="ghost-run")})
+    refs = [fab.ref, StepRef.parse("outer@ghost")]
+
+    await registry.refresh(refs, _FakeSlurmLauncher())
+
+    assert "has not been submitted" in registry.problem(refs[0])
+    assert "No run record" in registry.problem(refs[1])
+    assert not registry.is_done(refs[0])
+    assert not fab.sentinel.exists()
+
+
+async def test_external_runs_refresh_with_real_local_launcher(
+    fabricate_external_run: Callable[..., FabricatedRun],
+) -> None:
+    """Verify refresh loads the sentinel as the launcher's own handle type, so
+    the real `LocalLauncher` can report a finished run's persisted status.
+    """
+    fab = fabricate_external_run(status=Status.Done, launcher_name="local")
+    handle = LocalHandle(
+        pid="1234",
+        name="outer",
+        run_id=fab.run_id,
+        launcher_name="local",
+        status=Status.Done,
+        start_at=EXTERNAL_START_AT.timestamp(),
+    )
+    assert serialize(fab.sentinel, handle)
+    registry = ExternalRuns(fab.runs)
+
+    await registry.refresh([fab.ref], LocalLauncher())
+
+    assert registry.is_done(fab.ref)
+    assert registry.problem(fab.ref) == ""
+
+
+async def test_external_runs_tasks_carry_refreshed_status(
+    fabricate_external_run: Callable[..., FabricatedRun],
+) -> None:
+    """Verify refreshed steps are exposed as tasks keyed by their token, holding
+    a copy of the handle with the status the launcher reported, while the
+    persisted sentinel keeps its own.
+    """
+    fab = fabricate_external_run(status=Status.Submitted)
+    registry = ExternalRuns(fab.runs)
+    before = fab.sentinel.read_text()
+
+    class _RunningLauncher(_FakeSlurmLauncher):
+        @classmethod
+        async def query_status(cls, item: t.Any) -> Status:
+            return Status.Running
+
+    await registry.refresh([fab.ref], _RunningLauncher())
+    tasks = registry.tasks()
+
+    assert list(tasks) == [str(fab.ref)]
+    task = tasks[str(fab.ref)]
+    assert task.step.working_dir == fab.step.working_dir
+    assert task.handle.status == Status.Running
+    assert task.handle.pid == "1234"
+    assert registry.statuses() == {str(fab.ref): Status.Running}
+    assert fab.sentinel.read_text() == before
+
+
+def test_external_runs_tasks_empty_before_refresh() -> None:
+    """Verify nothing is reported for steps that were never refreshed."""
+    registry = ExternalRuns({"spinup": RunRef(run_id="spinup")})
+
+    assert registry.tasks() == {}
+    assert registry.statuses() == {}
+
+
+async def test_external_runs_refresh_leaves_sentinel_untouched(
+    fabricate_external_run: Callable[..., FabricatedRun],
+) -> None:
+    """Verify refreshing does not write back to the external run's sentinel."""
+    fab = fabricate_external_run(status=Status.Running)
+    before = fab.sentinel.read_text()
+
+    await ExternalRuns(fab.runs).refresh([fab.ref], _FakeSlurmLauncher())
+
+    assert fab.sentinel.read_text() == before
+
+
+def test_external_dependencies_distinct_in_first_seen_order(
+    hello_world_bp_path: Path,
+) -> None:
+    """Verify only external `depends_on` tokens are returned, once each."""
+
+    def step(name: str, deps: list[str]) -> Step:
+        return Step(
+            name=name,
+            application="hello_world",
+            blueprint=hello_world_bp_path.as_posix(),
+            depends_on=deps,
+        )
+
+    wp = Workplan(
+        name="ext",
+        description="external dependencies",
+        runs={"a": RunRef(run_id="ra"), "b": RunRef(run_id="rb")},
+        steps=[
+            step("s1", ["x@b", "y@a"]),
+            step("s2", ["s1", "y@a", "x@b"]),
+        ],
+    )
+
+    refs = external_dependencies(wp)
+
+    assert [str(r) for r in refs] == ["x@b", "y@a"]
+
+
+@pytest.fixture
+def external_consumer_workplan(hello_world_bp_path: Path) -> Workplan:
+    """A workplan whose step depends on `outer@spinup` and templates its output dir.
+
+    Parameters
+    ----------
+    hello_world_bp_path : Path
+        Fixture returning the path to a hello-world blueprint file.
+    """
+    return Workplan(
+        name="consumer-plan",
+        description="Consumes the output of another run.",
+        runtime_vars=["spin_id"],
+        runs={"spinup": RunRef(run_id="{{spin_id}}")},
+        steps=[
+            Step.model_validate(
+                {
+                    "name": "consumer",
+                    "application": "hello_world",
+                    "blueprint": hello_world_bp_path.as_posix(),
+                    "depends_on": ["outer@spinup"],
+                    "blueprint_overrides": {"target": "{{output_dir: outer@spinup}}"},
+                }
+            )
+        ],
+    )
+
+
+async def test_workplan_transformer_resolves_external_step(
+    fabricate_external_run: Callable[..., FabricatedRun],
+    external_consumer_workplan: Workplan,
+) -> None:
+    """Verify an external placeholder resolves to the external step's output
+    directory, the run-id placeholder is filled from the variables, and the
+    transformed workplan pins the run record's start time.
+
+    Parameters
+    ----------
+    external_consumer_workplan : Workplan
+        A workplan whose step depends on a step of another run.
+    """
+    fab = fabricate_external_run()
+    wp = external_consumer_workplan
+    fill = TemplateFillTransform(
+        variable_resolver=lambda name: {"spin_id": "spinup"}[name]
+    )
+    external = ExternalRuns(fill_runs(wp.runs, fill))
+    await external.refresh(external_dependencies(wp), _FakeSlurmLauncher())
+
+    transformed = WorkplanTransformer(wp, fill, external).apply()
+
+    expected = StateDirectoryManager.data_dir("spinup") / "tasks" / "outer" / "output"
+    assert fab.step.fsm.output_dir == expected
+
+    consumer = t.cast("LiveStep", transformed.steps[0])
+    config = t.cast(
+        "dict[str, t.Any]", consumer.directives[ApplyOverridesDirective.key()]
+    )
+    assert config[ApplyOverridesDirective.KEY_OVERRIDES]["target"] == str(expected)
+    assert consumer.depends_on == ["outer@spinup"]
+
+    assert transformed.runs["spinup"].run_id == "spinup"
+    assert transformed.runs["spinup"].start_at == EXTERNAL_START_AT
+    assert wp.runs["spinup"].start_at is None
+
+
+async def test_workplan_transformer_reports_every_gate_problem(
+    fabricate_external_run: Callable[..., FabricatedRun],
+    hello_world_bp_path: Path,
+) -> None:
+    """Verify an unusable external dependency is reported in the aggregated
+    schedule-time error.
+    """
+    fab = fabricate_external_run(status=Status.Running, launcher_name="local")
+    wp = Workplan(
+        name="gated",
+        description="Depends on a running local step.",
+        runs=fab.runs,
+        steps=[
+            Step(
+                name="consumer",
+                application="hello_world",
+                blueprint=hello_world_bp_path.as_posix(),
+                depends_on=["outer@spinup"],
+            )
+        ],
+    )
+    external = ExternalRuns(fab.runs)
+    await external.refresh(external_dependencies(wp), _FakeLocalLauncher())
+
+    with pytest.raises(ValueError, match="Running") as error:
+        _ = WorkplanTransformer(wp, None, external).apply()
+
+    assert "cstar workplan status spinup" in str(error.value)
+
+
+def test_workplan_transformer_without_registry_rejects_external_dependency(
+    hello_world_bp_path: Path,
+) -> None:
+    """Verify an external dependency with no registry is an undeclared-alias problem."""
+    wp = Workplan(
+        name="gated",
+        description="Depends on another run.",
+        runs={"spinup": RunRef(run_id="spinup")},
+        steps=[
+            Step(
+                name="consumer",
+                application="hello_world",
+                blueprint=hello_world_bp_path.as_posix(),
+                depends_on=["outer@spinup"],
+            )
+        ],
+    )
+
+    with pytest.raises(ValueError, match="not declared"):
+        _ = WorkplanTransformer(wp).apply()
+
+
+def test_workplan_transformer_without_runs_does_not_add_runs(
+    hello_world_bp_path: Path,
+) -> None:
+    """Verify a workplan with no `runs` transforms without touching them."""
+    wp = Workplan(
+        name="plain",
+        description="No external runs.",
+        steps=[
+            Step(
+                name="only",
+                application="hello_world",
+                blueprint=hello_world_bp_path.as_posix(),
+            )
+        ],
+    )
+
+    assert WorkplanTransformer(wp).apply().runs == {}
+
+
+@pytest.fixture
+def external_nesting_steps(
+    tmp_path: Path,
+    hello_world_bp_path: Path,
+) -> Callable[..., tuple[LiveStep, LiveStep]]:
+    """Create a factory for a `local` step and a `child` step nesting from
+    `local;outer@spinup`, depending on the given tokens.
+
+    Parameters
+    ----------
+    tmp_path : Path
+        Temporary directory for test outputs.
+    hello_world_bp_path : Path
+        Fixture returning the path to a hello-world blueprint file.
+    """
+
+    def _make(*depends_on: str) -> tuple[LiveStep, LiveStep]:
+        local = LiveStep(
+            name="local",
+            application="hello_world",
+            blueprint=hello_world_bp_path.as_posix(),
+            working_dir=tmp_path / "local",
+        )
+        child = LiveStep(
+            name="child",
+            application="roms_marbl",
+            blueprint=hello_world_bp_path.as_posix(),
+            working_dir=tmp_path / "child",
+            depends_on=list(depends_on),
+            directives={
+                NestingDirective.key(): {
+                    NestingDirective.KEY_STEP: "local;outer@spinup"
+                }
+            },
+        )
+        return local, child
+
+    return _make
+
+
+def test_collect_directive_problems_external_dependency(
+    external_nesting_steps: Callable[..., tuple[LiveStep, LiveStep]],
+) -> None:
+    """Verify a `nest-from` with a local and an external source passes when
+    both are declared dependencies.
+    """
+    local, child = external_nesting_steps("local", "outer@spinup")
+
+    assert collect_directive_problems([local, child]) == []
+
+
+def test_collect_directive_problems_external_not_a_dependency(
+    external_nesting_steps: Callable[..., tuple[LiveStep, LiveStep]],
+) -> None:
+    """Verify an external reference missing from `depends_on` breaks the
+    ancestor rule, with the same wording as for a local step.
+    """
+    local, child = external_nesting_steps("local")
+    problems = collect_directive_problems([local, child])
+
+    assert len(problems) == 1
+    assert "step 'outer@spinup' is not an upstream dependency" in problems[0]
+    assert "(via depends_on)" in problems[0]
+
+
+def test_collect_directive_problems_malformed_token(
+    external_nesting_steps: Callable[..., tuple[LiveStep, LiveStep]],
+) -> None:
+    """Verify a malformed step token is reported rather than raised."""
+    local, child = external_nesting_steps("local")
+    child.directives[NestingDirective.key()] = {NestingDirective.KEY_STEP: "a@b@c"}
+
+    problems = collect_directive_problems([local, child])
+
+    assert any("Invalid step reference" in problem for problem in problems)
+
+
+def test_lookup_step_local_and_unknown(
+    tmp_path: Path,
+    hello_world_bp_path: Path,
+) -> None:
+    """Verify local lookups return the step, or raise `KeyError`, and a
+    malformed token raises `CstarError`.
+    """
+    step = LiveStep(
+        name="here",
+        application="hello_world",
+        blueprint=hello_world_bp_path.as_posix(),
+        working_dir=tmp_path / "here",
+    )
+    plan = LiveWorkplan(name="p", description="d", steps=[step])
+
+    assert lookup_step(plan, "here").name == "here"
+    with pytest.raises(KeyError, match="Unable to locate step 'there'"):
+        _ = lookup_step(plan, "there")
+    with pytest.raises(CstarError, match="Invalid step reference"):
+        _ = lookup_step(plan, "a@b@c")
+
+
+def _live_plan_with_external(
+    fab: FabricatedRun,
+    child: LiveStep,
+    *siblings: LiveStep,
+) -> LiveWorkplan:
+    """Build the transformed workplan of a run depending on a fabricated run."""
+    return LiveWorkplan(
+        name="child-run",
+        description="Depends on an external run.",
+        runs={"spinup": RunRef(run_id=fab.run_id, start_at=fab.record.start_at)},
+        steps=[*siblings, child],
+    )
+
+
+def test_lookup_step_external(
+    fabricate_external_run: Callable[..., FabricatedRun],
+    hello_world_bp_path: Path,
+    tmp_path: Path,
+) -> None:
+    """Verify an external token resolves through the workplan's `runs`."""
+    fab = fabricate_external_run()
+    child = LiveStep(
+        name="child",
+        application="hello_world",
+        blueprint=hello_world_bp_path.as_posix(),
+        working_dir=tmp_path / "child",
+        depends_on=["outer@spinup"],
+    )
+
+    found = lookup_step(_live_plan_with_external(fab, child), "outer@spinup")
+
+    assert found.working_dir == fab.step.working_dir
+
+
+async def test_resolve_deferred_blueprint_external_step(
+    fabricate_external_run: Callable[..., FabricatedRun],
+    hello_world_bp_path: Path,
+    hello_world_bp_content: str,
+    mock_run_id: str,
+    tmp_path: Path,
+) -> None:
+    """Verify a deferred blueprint produced by a step of another run is found
+    in that step's output directory.
+
+    Parameters
+    ----------
+    hello_world_bp_content : str
+        The content of a minimal hello-world blueprint.
+    mock_run_id : str
+        A unique run-id that has already been added to os.environ.
+    """
+    fab = fabricate_external_run()
+    generated = fab.step.fsm.output_dir / "generated.yaml"
+    generated.write_text(hello_world_bp_content)
+
+    consumer = LiveStep.model_validate(
+        {
+            "name": "consumer",
+            "application": "hello_world",
+            "blueprint": {"from_step": "outer@spinup", "filename": "generated.yaml"},
+            "depends_on": ["outer@spinup"],
+            "working_dir": tmp_path / "consumer",
+        }
+    )
+    plan = _live_plan_with_external(fab, consumer)
+    trx_path = tmp_path / "consumer_trx.yaml"
+    assert serialize(trx_path, plan)
+    await TrackingRepository().put_workplan_run(
+        WorkplanRun(
+            workplan_path=tmp_path / "consumer.yaml",
+            trx_workplan_path=trx_path,
+            output_path=tmp_path,
+            run_id=mock_run_id,
+        )
+    )
+
+    ref = DeferredBlueprintRef(from_step="outer@spinup", filename="generated.yaml")
+
+    assert resolve_deferred_blueprint(ref) == generated
+
+
+def test_continuance_directive_step_from_external_run(
+    fabricate_external_run: Callable[..., FabricatedRun],
+    bp_templates_dir: Path,
+    tmp_path: Path,
+) -> None:
+    """Verify `continue-from: {step: outer@spinup}` locates the restart file
+    in the external step's output directory.
+
+    Parameters
+    ----------
+    bp_templates_dir : Path
+        Fixture returning the path to the directory containing blueprint template files.
+    """
+    fab = fabricate_external_run()
+    rst = RomsFileSystemManager(fab.step.fsm.root_dir).output_dir
+    rst.mkdir(parents=True, exist_ok=True)
+    restart = rst / "output_rst.20120201000000.nc"
+    restart.write_text("mock restart data")
+
+    child_bp_path = tmp_path / "child_bp.yaml"
+    child_bp_path.write_text(
+        (bp_templates_dir / "blueprint.yaml")
+        .read_text()
+        .replace("working_dir: .", f"working_dir: {tmp_path}")
+    )
+    child = LiveStep(
+        name="child",
+        application="roms_marbl",
+        blueprint=child_bp_path.as_posix(),
+        working_dir=tmp_path / "child",
+        depends_on=["outer@spinup"],
+        directives={
+            ContinuanceDirective.key(): {ContinuanceDirective.KEY_STEP: "outer@spinup"}
+        },
+    )
+    plan = _live_plan_with_external(fab, child)
+
+    config = t.cast("dict[str, str]", child.directives[ContinuanceDirective.key()])
+    altered = ContinuanceDirective(config, workplan=plan)(child)[0]
+
+    bp_after = deserialize(altered.blueprint_path, RomsMarblBlueprint)
+    assert Path(bp_after.initial_conditions.data[0].location) == restart.resolve()
+
+
+def test_nesting_directive_step_from_external_run(
+    fabricate_external_run: Callable[..., FabricatedRun],
+    bp_templates_dir: Path,
+    hello_world_bp_path: Path,
+    tmp_path: Path,
+) -> None:
+    """Verify `nest-from: {step: "local;outer@spinup"}` combines the boundary
+    files of a local step and of a step of another run.
+
+    Parameters
+    ----------
+    bp_templates_dir : Path
+        Fixture returning the path to the directory containing blueprint template files.
+    hello_world_bp_path : Path
+        Fixture returning the path to a hello-world blueprint file.
+    """
+    fab = fabricate_external_run()
+    external_out = RomsFileSystemManager(fab.step.fsm.root_dir).output_dir
+    external_out.mkdir(parents=True, exist_ok=True)
+    (external_out / "outer_bry.20230301003000.nc").write_text("mock boundary data")
+
+    local = LiveStep(
+        name="local",
+        application="hello_world",
+        blueprint=hello_world_bp_path.as_posix(),
+        working_dir=tmp_path / "local",
+    )
+    local_fsm = RomsFileSystemManager(local.fsm.root_dir)
+    local_fsm.prepare()
+    (local_fsm.output_dir / "local_bry.20230201003000.nc").write_text(
+        "mock boundary data"
+    )
+
+    child_bp_path = tmp_path / "child_bp.yaml"
+    child_bp_path.write_text(
+        (bp_templates_dir / "blueprint.yaml")
+        .read_text()
+        .replace("working_dir: .", f"working_dir: {tmp_path}")
+    )
+    child = LiveStep(
+        name="child",
+        application="roms_marbl",
+        blueprint=child_bp_path.as_posix(),
+        working_dir=tmp_path / "child",
+        depends_on=["local", "outer@spinup"],
+        directives={
+            NestingDirective.key(): {NestingDirective.KEY_STEP: "local;outer@spinup"}
+        },
+    )
+    plan = _live_plan_with_external(fab, child, local)
+
+    config = t.cast("dict[str, str]", child.directives[NestingDirective.key()])
+    altered = NestingDirective(config, workplan=plan)(child)[0]
+
+    data = deserialize(altered.blueprint_path, RomsMarblBlueprint).forcing.boundary.data
+    assert len(data) == 2
+    assert Path(data[0].location).is_relative_to(local_fsm.output_dir)
+    assert Path(data[1].location).is_relative_to(external_out)
+
+
+async def test_prepare_workplan_pins_external_run(
+    fabricate_external_run: Callable[..., FabricatedRun],
+    external_consumer_workplan: Workplan,
+    tmp_path: Path,
+) -> None:
+    """Verify `prepare_workplan` refreshes external steps and persists the pinned
+    run record in the transformed workplan.
+
+    Parameters
+    ----------
+    external_consumer_workplan : Workplan
+        A workplan whose step depends on a step of another run.
+    """
+    _ = fabricate_external_run()
+    wp_path = tmp_path / "consumer.yaml"
+    assert serialize(wp_path, external_consumer_workplan)
+    output_dir = tmp_path / "prepared"
+    output_dir.mkdir()
+
+    with mock.patch(
+        "cstar.orchestration.dag_runner.get_launcher",
+        return_value=_FakeSlurmLauncher(),
+    ):
+        wp, trx_path, _ = await prepare_workplan(
+            wp_path, output_dir, {"spin_id": "spinup"}
+        )
+
+    persisted = deserialize(trx_path, LiveWorkplan)
+    assert wp.runs["spinup"].start_at == EXTERNAL_START_AT
+    assert persisted.runs["spinup"] == wp.runs["spinup"]
+    assert persisted.runs["spinup"].run_id == "spinup"
+
+
+async def test_prepare_workplan_without_external_refs_skips_launcher(
+    hello_world_bp_path: Path,
+    tmp_path: Path,
+) -> None:
+    """Verify a workplan with no external dependencies never builds a launcher."""
+    wp = Workplan(
+        name="plain",
+        description="No external runs.",
+        steps=[
+            Step(
+                name="only",
+                application="hello_world",
+                blueprint=hello_world_bp_path.as_posix(),
+            )
+        ],
+    )
+    wp_path = tmp_path / "plain.yaml"
+    assert serialize(wp_path, wp)
+    output_dir = tmp_path / "prepared"
+    output_dir.mkdir()
+
+    with mock.patch("cstar.orchestration.dag_runner.get_launcher") as get_launcher:
+        _ = await prepare_workplan(wp_path, output_dir, {})
+
+    get_launcher.assert_not_called()

@@ -17,7 +17,9 @@ from cstar.orchestration.models import (
     DeferredBlueprintRef,
     InlineBlueprintRef,
     KeyValueStore,
+    RunRef,
     Step,
+    StepRef,
     Workplan,
     WorkplanState,
 )
@@ -1776,3 +1778,258 @@ def test_workplan_pre_run_requires_every_step(
     plan = Workplan(name="test-plan", description="test-description", steps=steps)
 
     assert plan.pre_run is expected
+
+
+@pytest.mark.parametrize(
+    ("token", "step", "run"),
+    [
+        ("outer", "outer", ""),
+        ("outer@spinup", "outer", "spinup"),
+        ("  outer@spinup  ", "outer", "spinup"),
+        ("my step@my-run", "my step", "my-run"),
+    ],
+)
+def test_step_ref_parse(token: str, step: str, run: str) -> None:
+    """Verify tokens parse to local or external references and round-trip."""
+    ref = StepRef.parse(token)
+
+    assert ref.step == step
+    assert ref.run == run
+    assert ref.is_external is bool(run)
+    assert str(ref) == token.strip()
+    assert StepRef.parse(str(ref)) == ref
+
+
+@pytest.mark.parametrize("token", ["", "@spinup", "outer@", "a@b@c", "@", "  @  "])
+def test_step_ref_parse_rejects_malformed(token: str) -> None:
+    """Verify malformed tokens are rejected with the token in the message."""
+    with pytest.raises(ValueError, match="Invalid step reference") as error:
+        _ = StepRef.parse(token)
+
+    assert repr(token) in str(error.value)
+
+
+def test_run_ref_bare_string_coerces() -> None:
+    """Verify a bare string is shorthand for a mapping with `run_id`."""
+    ref = RunRef.model_validate("my-run-id")
+
+    assert ref.run_id == "my-run-id"
+    assert ref.start_at is None
+
+
+def test_run_ref_mapping_and_placeholder() -> None:
+    """Verify the mapping form (and a placeholder run-id) is accepted."""
+    ref = RunRef.model_validate({"run_id": "{{spinup_run}}"})
+
+    assert ref.run_id == "{{spinup_run}}"
+    assert ref == RunRef.model_validate("{{spinup_run}}")
+
+
+def test_run_ref_rejects_extra_and_empty() -> None:
+    """Verify unknown keys and an empty run-id are rejected."""
+    with pytest.raises(ValidationError):
+        _ = RunRef.model_validate({"run_id": "x", "bogus": 1})
+    with pytest.raises(ValidationError):
+        _ = RunRef.model_validate("")
+
+
+def _external_workplan(
+    blueprint: Path,
+    *,
+    runs: dict[str, t.Any] | None = None,
+    depends_on: list[str] | None = None,
+    consumer_blueprint: t.Any = None,
+    extra_steps: list[Step] | None = None,
+) -> Workplan:
+    """Build a workplan whose `child` step may reference external steps."""
+    child = Step.model_validate(
+        {
+            "name": "child",
+            "application": "hello_world",
+            "blueprint": consumer_blueprint or str(blueprint),
+            "depends_on": depends_on or [],
+        },
+    )
+    return Workplan(
+        name="test-plan",
+        description="test-description",
+        runs=runs or {},
+        steps=[child, *(extra_steps or [])],
+    )
+
+
+def test_workplan_runs_default_empty(fake_blueprint_path: Path) -> None:
+    """Verify `runs` defaults to empty."""
+    assert _external_workplan(fake_blueprint_path).runs == {}
+
+
+def test_workplan_runs_valid_aliases(fake_blueprint_path: Path) -> None:
+    """Verify aliases are accepted and bare strings coerced."""
+    wp = _external_workplan(
+        fake_blueprint_path,
+        runs={"spinup": "run-1", "prior_2": {"run_id": "{{prior}}"}},
+    )
+
+    assert wp.runs["spinup"].run_id == "run-1"
+    assert wp.runs["prior_2"].run_id == "{{prior}}"
+
+
+def test_workplan_runs_bad_aliases_reported_together(
+    fake_blueprint_path: Path,
+) -> None:
+    """Verify every bad alias is reported in one error."""
+    with pytest.raises(ValidationError) as error:
+        _ = _external_workplan(
+            fake_blueprint_path,
+            runs={"a@b": "r1", "has space": "r2", " ": "r3", "ok": "r4"},
+        )
+
+    (detail,) = error.value.errors()
+    message = detail["msg"]
+    assert "'a@b'" in message
+    assert "'has space'" in message
+    assert "''" in message
+    assert "'ok'" not in message
+
+
+def test_step_name_rejects_separator(fake_blueprint_path: Path) -> None:
+    """Verify a step name may not contain the run-alias separator."""
+    with pytest.raises(ValidationError):
+        _ = Step(
+            name="outer@spinup",
+            application="hello_world",
+            blueprint=fake_blueprint_path,
+        )
+
+
+def test_workplan_external_dependency_accepted(fake_blueprint_path: Path) -> None:
+    """Verify an external dependency needs a declared alias but no local step."""
+    wp = _external_workplan(
+        fake_blueprint_path,
+        runs={"spinup": "run-1"},
+        depends_on=["outer@spinup"],
+    )
+
+    assert wp.steps[0].depends_on == ["outer@spinup"]
+
+
+def test_workplan_external_dependency_undeclared_alias(
+    fake_blueprint_path: Path,
+) -> None:
+    """Verify an external dependency with an undeclared alias is rejected."""
+    with pytest.raises(ValidationError) as error:
+        _ = _external_workplan(
+            fake_blueprint_path,
+            runs={"other": "run-1"},
+            depends_on=["outer@spinup", "inner@spinup"],
+        )
+
+    message = str(error.value)
+    assert "undeclared run alias" in message
+    assert "['spinup']" in message
+    assert "['other']" in message
+
+
+def test_workplan_local_unknown_dependency_wording(fake_blueprint_path: Path) -> None:
+    """Verify a local unknown dependency keeps its existing error."""
+    with pytest.raises(ValidationError, match="Unknown dependency specified"):
+        _ = _external_workplan(fake_blueprint_path, depends_on=["nope"])
+
+
+def test_workplan_malformed_dependency_reported(fake_blueprint_path: Path) -> None:
+    """Verify a malformed dependency token names the step and entry."""
+    with pytest.raises(ValidationError) as error:
+        _ = _external_workplan(
+            fake_blueprint_path,
+            runs={"spinup": "run-1"},
+            depends_on=["outer@@spinup"],
+        )
+
+    message = str(error.value)
+    assert "'child'" in message
+    assert "outer@@spinup" in message
+
+
+def test_workplan_cycle_detection_ignores_external(
+    fake_blueprint_path: Path,
+) -> None:
+    """Verify an external dependency neither hides nor creates a cycle."""
+    a = Step.model_validate(
+        {
+            "name": "a",
+            "application": "hello_world",
+            "blueprint": str(fake_blueprint_path),
+            "depends_on": ["b", "a@spinup"],
+        },
+    )
+    b = Step.model_validate(
+        {
+            "name": "b",
+            "application": "hello_world",
+            "blueprint": str(fake_blueprint_path),
+            "depends_on": ["a"],
+        },
+    )
+
+    with pytest.raises(ValidationError, match="Dependency cycle detected"):
+        _ = Workplan(
+            name="test-plan",
+            description="test-description",
+            runs={"spinup": RunRef(run_id="run-1")},
+            steps=[a, b],
+        )
+
+    # a step sharing a name with an external step is not a cycle
+    ok = _external_workplan(
+        fake_blueprint_path,
+        runs={"spinup": "run-1"},
+        depends_on=["child@spinup"],
+    )
+    assert ok.steps[0].depends_on == ["child@spinup"]
+
+
+def test_workplan_deferred_external_producer_accepted(
+    fake_blueprint_path: Path,
+) -> None:
+    """Verify a deferred blueprint may come from an external run's step."""
+    wp = _external_workplan(
+        fake_blueprint_path,
+        runs={"spinup": "run-1"},
+        depends_on=["outer@spinup"],
+        consumer_blueprint={"from_step": "outer@spinup"},
+    )
+
+    blueprint = wp.steps[0].blueprint_path
+    assert isinstance(blueprint, DeferredBlueprintRef)
+    assert blueprint.from_step == "outer@spinup"
+
+
+def test_workplan_deferred_external_producer_undeclared_alias(
+    fake_blueprint_path: Path,
+) -> None:
+    """Verify a deferred external producer needs a declared alias."""
+    with pytest.raises(ValidationError) as error:
+        _ = _external_workplan(
+            fake_blueprint_path,
+            runs={"spinup": "run-1"},
+            depends_on=["outer@spinup"],
+            consumer_blueprint={"from_step": "outer@missing"},
+        )
+
+    assert "missing" in str(error.value)
+    assert "not declared" in str(error.value)
+
+
+def test_workplan_deferred_external_producer_not_dependency(
+    fake_blueprint_path: Path,
+) -> None:
+    """Verify a deferred external producer must be listed in `depends_on`."""
+    with pytest.raises(ValidationError) as error:
+        _ = _external_workplan(
+            fake_blueprint_path,
+            runs={"spinup": "run-1"},
+            consumer_blueprint={"from_step": "outer@spinup"},
+        )
+
+    assert "depends_on" in str(error.value)
+    assert "outer@spinup" in str(error.value)

@@ -51,6 +51,7 @@ log = get_logger(__name__)
 
 if t.TYPE_CHECKING:
     from cstar.entrypoint.config import JobConfig, ServiceConfiguration
+    from cstar.orchestration.transforms import ExternalRuns
 
 
 def list_runs(incomplete: str = "") -> list[tuple[str, str]]:
@@ -172,7 +173,34 @@ def autocomplete_step_list(ctx: typer.Context, incomplete: str) -> list[str]:
     return []
 
 
+def exit_on_unresolved_externals(external: "ExternalRuns") -> None:
+    """Report external steps that could not be resolved and exit.
+
+    Parameters
+    ----------
+    external : ExternalRuns
+        The registry after a refresh.
+
+    Raises
+    ------
+    typer.Exit
+        With code 1 if any external step could not be resolved.
+    """
+    if errors := external.errors():
+        for token, message in errors.items():
+            console.print(
+                f"External dependency {token} cannot be resolved: {message}",
+                soft_wrap=True,
+            )
+        raise typer.Exit(1)
+
+
 def ref_label(record: DagDetailRecord, ref_map: dict[str, int]) -> str:
+    """Label the dependencies of a step by their row number in the summary.
+
+    A dependency without a row (a step of another run) is labelled by its
+    `<step>@<alias>` token.
+    """
     items: list[str] = []
     for d in record.step.depends_on:
         color = "white"
@@ -183,7 +211,7 @@ def ref_label(record: DagDetailRecord, ref_map: dict[str, int]) -> str:
         elif d in record.blocking:
             color = "red"
 
-        items.append(colored(str(ref_map[d]), color))
+        items.append(colored(str(ref_map.get(d, d)), color))
     if items:
         return ", ".join(str(x) for x in items)
     return ""

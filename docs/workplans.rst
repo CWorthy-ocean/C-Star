@@ -21,6 +21,7 @@ Workplans are defined in :class:`cstar.orchestration.models.Workplan`.
   ~cstar.orchestration.models.Workplan.state
   ~cstar.orchestration.models.Workplan.compute_environment
   ~cstar.orchestration.models.Workplan.runtime_vars
+  ~cstar.orchestration.models.Workplan.runs
 
 
 State
@@ -44,8 +45,9 @@ requirements are set with each step's ``compute_overrides`` (see below).
 Runtime Variables
 ^^^^^^^^^^^^^^^^^
 
-C-Star fills ``{{ }}`` placeholders inside a step's ``blueprint_overrides`` before
-applying them. Two forms are supported:
+C-Star fills ``{{ }}`` placeholders anywhere in a step -- its blueprint path,
+``blueprint_overrides`` and ``directives`` values -- when the workplan is
+scheduled. Two forms are supported:
 
 - ``{{name}}`` is replaced with a value supplied at runtime. Declare the allowed
   names in :attr:`~cstar.orchestration.models.Workplan.runtime_vars`, then supply
@@ -64,7 +66,83 @@ applying them. Two forms are supported:
   - ``output_dir`` -- the step's final outputs
 
   For example, ``{{output_dir: outer}}`` resolves to the ``output`` directory
-  of the step named ``outer``.
+  of the step named ``outer``. ``<step>`` may also name a step of another
+  workplan run; see :ref:`workplan_external_runs`.
+
+
+.. _workplan_external_runs:
+
+Referencing other runs
+^^^^^^^^^^^^^^^^^^^^^^
+
+A large workflow is often split into several workplans -- a spin-up run, then
+a production run that continues from it, or an outer-grid run and a nested
+run. A workplan can reference the steps of a run that was executed earlier
+(or is still running, see below) instead of spelling out paths into its run
+directory. Declare the other runs under
+:attr:`~cstar.orchestration.models.Workplan.runs`, keyed by an alias of your
+choosing, and reference one of their steps as ``<step>@<alias>`` wherever a
+step name is accepted: ``depends_on``, a deferred ``blueprint: {from_step:
+...}``, a directive's ``step`` key and a ``{{<scope>: <step>}}`` placeholder.
+
+.. code-block:: yaml
+
+    name: production
+    description: Continue the spin-up run on the same grid
+    runs:
+      spinup: "{{spinup_run}}"      # a run-id, or a runtime variable holding one
+    runtime_vars:
+      - spinup_run
+
+    steps:
+      - name: nest_conversion
+        application: nest_ic
+        blueprint: inline
+        depends_on:
+          - outer@spinup
+        blueprint_overrides:
+          parent_grid: "{{input_dir: outer@spinup}}/input_datasets/parent_grid.nc"
+          parent_rst: "{{output_dir: outer@spinup}}/output_rst.20100103000000.nc"
+          child_grid: /path/to/child_grid.nc
+
+      - name: child
+        application: roms_marbl
+        blueprint: ./child.yaml
+        depends_on:
+          - nest_conversion
+          - outer@spinup
+        directives:
+          continue-from:
+            step: nest_conversion
+          nest-from:
+            step: outer@spinup
+
+The run-id is the one shown by ``cstar workplan ls`` (the value given to
+``--run-id``, or derived from the workplan name). The rules:
+
+- Every alias used in a token must be declared under ``runs``; an undeclared
+  alias is rejected when the workplan is loaded.
+- An external step a step reads from must be listed in that step's
+  ``depends_on`` (directly or through an earlier step), exactly as a local
+  step must be. ``cstar workplan check`` and ``cstar workplan run`` report
+  every missing dependency.
+- When the workplan is scheduled, each external step is looked up in the
+  other run's records on this machine: the run must exist, the step must
+  exist in it, and the step must have **completed** (``Done``). A step that
+  is still running is accepted only when both runs use the SLURM launcher;
+  the new step is then submitted with a SLURM dependency on the other run's
+  job. A step that failed, was cancelled, was never submitted, or is running
+  under the local launcher is refused with a message naming the run, step
+  and status. If a status looks stale (the other run finished but its
+  orchestrator was not polled since), ``cstar workplan status <run-id>``
+  refreshes it.
+- The transformed workplan written into the run directory records, for each
+  alias, the exact run record that was resolved (its start time), so the
+  run's inputs stay traceable even if the same run-id is used again later.
+
+A run-id resolves only on the machine, and under the same ``CSTAR_STATE_HOME``
+and ``CSTAR_DATA_HOME``, where that run was executed -- the same limit an
+absolute path into its run directory has today.
 
 
 Steps

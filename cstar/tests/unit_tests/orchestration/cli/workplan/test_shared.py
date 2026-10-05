@@ -23,7 +23,9 @@ from cstar.cli.workplan.shared import (
     refresh_disk_usage,
 )
 from cstar.execution.file_system import JobFileSystemManager, StateDirectoryManager
-from cstar.orchestration.models import Workplan
+from cstar.orchestration.dag_runner import DagDetailRecord
+from cstar.orchestration.models import Step, Workplan
+from cstar.orchestration.orchestration import Status
 from cstar.orchestration.tracking import WorkplanRun
 
 SHARED_LOGGER = "cstar.cli.workplan.shared"
@@ -545,3 +547,39 @@ def test_display_summary_caption_shows_hint_when_unmeasured(
     rendered = buffer.getvalue()
     assert "Disk usage not measured" in rendered
     assert "cstar workplan status run-1 --size" in rendered
+
+
+def test_display_summary_labels_external_dependency_by_token(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Verify a dependency on a step of another run, which has no row in the
+    summary, is labelled by its `<step>@<alias>` token.
+    """
+    run = make_workplan_run("run-1", tmp_path)
+    step = Step(
+        name="follow",
+        application="hello_world",
+        blueprint=(tmp_path / "bp.yaml").as_posix(),
+        depends_on=["hello@spinup"],
+    )
+    lookup = OrderedDict(
+        {
+            "follow": DagDetailRecord(
+                step=step,
+                ref_id=1,
+                status=Status.Done,
+                awaiting=[],
+                satisfied=["hello@spinup"],
+                blocking=[],
+            )
+        }
+    )
+    buffer = io.StringIO()
+    monkeypatch.setattr(
+        "cstar.cli.workplan.shared.console", Console(file=buffer, width=200)
+    )
+
+    display_summary(run, lookup)
+
+    assert "hello@spinup" in buffer.getvalue()

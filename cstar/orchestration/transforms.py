@@ -26,22 +26,30 @@ from cstar.base.log import LoggingMixin, get_logger
 from cstar.base.utils import deep_merge
 from cstar.execution.file_system import JobFileSystemManager, local_copy
 from cstar.orchestration.adapter import DIRECTIVES_FILENAME, prepare_directive_file
+from cstar.orchestration.launch.common import is_foreign_handle
 from cstar.orchestration.models import (
     Blueprint,
     DeferredBlueprintRef,
     KeyValueStore,
+    RunRef,
+    StepRef,
     Workplan,
 )
 from cstar.orchestration.orchestration import (
     LiveStep,
     LiveWorkplan,
+    ProcessHandle,
+    Status,
+    Task,
     synthesize_blueprint,
 )
 from cstar.orchestration.serialization import deserialize, serialize
+from cstar.orchestration.state import StateRepository
 from cstar.orchestration.tracking import TrackingRepository, WorkplanRun
 
 if t.TYPE_CHECKING:
     from cstar.entrypoint.runner import BlueprintRunner
+    from cstar.orchestration.orchestration import Launcher
 
 log = get_logger(__name__)
 
@@ -192,8 +200,16 @@ def mustache(s: str) -> str:
     return f"{{{{{s}}}}}"
 
 
+def _parse_ref(token: str) -> StepRef:
+    """Parse a step reference token, reporting a malformed one as a `CstarError`."""
+    try:
+        return StepRef.parse(token)
+    except ValueError as ex:
+        raise CstarError(str(ex)) from ex
+
+
 def fsm_resolver(
-    fsm_map: Mapping[str, JobFileSystemManager],
+    lookup: Callable[[str], JobFileSystemManager],
     step_name: str,
     scope: str,
 ) -> str:
@@ -201,17 +217,19 @@ def fsm_resolver(
 
     Parameters
     ----------
-    fsm_map: Mapping[str, JobFileSystemManager]
-        Mapping from the step safe name to the related file-system manager
-    step_name: str
-        The step name to retrieve an FSM for
+    lookup : Callable[[str], JobFileSystemManager]
+        Maps a step reference token to the related file-system manager; raises
+        `KeyError` for an unknown step of the current workplan.
+    step_name : str
+        The step reference token to retrieve an FSM for.
     scope : str
         The scope to be resolved (which attribute on the FSM instance).
     """
-    fsm = fsm_map.get(step_name, None)
-    if not fsm:
+    try:
+        fsm = lookup(step_name)
+    except KeyError as ex:
         msg = f"Unable to resolve {scope!r} for unknown step {step_name!r}"
-        raise KeyError(msg)
+        raise KeyError(msg) from ex
 
     if value := getattr(fsm, scope, None):
         return str(value)
@@ -221,13 +239,18 @@ def fsm_resolver(
     raise KeyError(msg)
 
 
-def get_fsm_resolver(steps: Sequence[LiveStep]) -> Callable[[str, str], str]:
+def get_fsm_resolver(
+    steps: Sequence[LiveStep],
+    external: "ExternalRuns",
+) -> Callable[[str, str], str]:
     """Create a resolver function for file-system manager attributes.
 
     Parameters
     ----------
     steps : Sequence[LiveStep]
         The steps to be used in the creation of the resolver.
+    external : ExternalRuns
+        The registry used to resolve `<step>@<alias>` tokens.
 
     Returns
     -------
@@ -236,14 +259,19 @@ def get_fsm_resolver(steps: Sequence[LiveStep]) -> Callable[[str, str], str]:
         the resolved value.
     """
     fsm_map: dict[str, JobFileSystemManager] = {s.name: s.fsm for s in steps}
-    return functools.partial(fsm_resolver, fsm_map)
+
+    def lookup(token: str) -> JobFileSystemManager:
+        ref = _parse_ref(token)
+        return external.step(ref).fsm if ref.is_external else fsm_map[ref.step]
+
+    return functools.partial(fsm_resolver, lookup)
 
 
 class TemplateFillTransform:
-    """Fill ``{{<scope>: <placeholder>}}`` template strings in a step's blueprint_overrides.
+    """Fill ``{{<scope>: <placeholder>}}`` template strings in a step.
 
-    Recursively traverses the nested blueprint_overrides structure and
-    dispatches each placeholder to one of two resolvers:
+    Replaces placeholders anywhere in the step (blueprint path, overrides,
+    directives) and dispatches each one to one of two resolvers:
 
     - **variable resolver** — handles plain ``{{name}}`` tokens by looking up
       *name* in the caller-supplied mapping (e.g. user-defined runtime variables).
@@ -252,8 +280,8 @@ class TemplateFillTransform:
       :meth:`with_scoped_resolver` before any step that uses this syntax is
       processed.
 
-    The transform yields a single updated step; the original step's
-    ``blueprint_overrides`` is not mutated.
+    The transform yields a single updated step; the original step is not
+    mutated. :meth:`fill_text` applies the same replacement to any string.
     """
 
     _variable_resolver: Callable[[str], str] | None = None
@@ -335,11 +363,27 @@ class TemplateFillTransform:
             raise ValueError(msg)
         return self._variable_resolver(content)
 
-    def _fill(self, step: LiveStep) -> LiveStep:
-        content = step.model_dump_json(by_alias=True)
+    def fill_text(self, content: str) -> str:
+        """Replace every placeholder in a string.
+
+        Parameters
+        ----------
+        content : str
+            The text to fill.
+
+        Returns
+        -------
+        str
+            The text with every placeholder replaced.
+
+        Raises
+        ------
+        CstarExpectationFailed
+            If placeholders remain after filling or were malformed.
+        """
         matches = PLACEHOLDER_RE.findall(content)
         if not matches:
-            return step
+            return content
 
         # use set to replace all occurrences at once
         for match in set(matches):
@@ -350,15 +394,21 @@ class TemplateFillTransform:
                 "Some templated values were not filled or placeholders were malformed."
             )
 
-        return LiveStep.model_validate_json(content)
+        return content
+
+    def _fill(self, step: LiveStep) -> LiveStep:
+        content = step.model_dump_json(by_alias=True)
+        filled = self.fill_text(content)
+        return step if filled == content else LiveStep.model_validate_json(filled)
 
     def __call__(self, step: LiveStep) -> Sequence[LiveStep]:
-        """Apply template filling to a step's blueprint_overrides.
+        """Apply template filling to every string in a step.
 
         Parameters
         ----------
         step : LiveStep
-            The step whose blueprint_overrides will be traversed.
+            The step whose placeholders (blueprint path, overrides,
+            directives) will be filled.
 
         Returns
         -------
@@ -374,6 +424,428 @@ class TemplateFillTransform:
     @property
     def scoped_resolver(self) -> Callable[[str, str], str] | None:
         return self._scoped_resolver
+
+
+def fill_runs(
+    runs: Mapping[str, RunRef],
+    fill_transform: TemplateFillTransform | None,
+) -> dict[str, RunRef]:
+    """Fill the `{{name}}` placeholders in the run-ids of external runs.
+
+    Parameters
+    ----------
+    runs : Mapping[str, RunRef]
+        The external runs of a workplan, keyed by alias.
+    fill_transform : TemplateFillTransform | None
+        The transform used to fill placeholders.
+
+    Returns
+    -------
+    dict[str, RunRef]
+        Copies of `runs` with filled run-ids.
+
+    Raises
+    ------
+    CstarExpectationFailed
+        If a run-id contains a placeholder and no transform was supplied.
+    """
+    filled: dict[str, RunRef] = {}
+    for alias, run in runs.items():
+        if fill_transform is not None:
+            run_id = fill_transform.fill_text(run.run_id)
+        elif PLACEHOLDER_RE.search(run.run_id):
+            msg = (
+                f"Run alias {alias!r} uses a placeholder in its run-id "
+                f"({run.run_id!r}) but no values are available to fill it"
+            )
+            raise CstarExpectationFailed(msg)
+        else:
+            run_id = run.run_id
+        filled[alias] = RunRef.model_validate({**run.model_dump(), "run_id": run_id})
+    return filled
+
+
+def external_dependencies(workplan: Workplan) -> list[StepRef]:
+    """List the steps of external runs that a workplan depends on.
+
+    The workplan model guarantees that every external reference is also a
+    declared dependency, so this is the full set of external steps to refresh
+    and gate.
+
+    Parameters
+    ----------
+    workplan : Workplan
+        The workplan to inspect.
+
+    Returns
+    -------
+    list[StepRef]
+        The distinct external references in `depends_on`, in first-seen order.
+    """
+    refs = (
+        StepRef.parse(entry) for step in workplan.steps for entry in step.depends_on
+    )
+    return list(dict.fromkeys(ref for ref in refs if ref.is_external))
+
+
+async def resolve_external_runs(
+    workplan: Workplan,
+    fill_transform: TemplateFillTransform | None,
+    launcher: "Callable[[], Launcher[t.Any]]",
+) -> "ExternalRuns":
+    """Build the registry of a workplan's external runs and refresh their steps.
+
+    Parameters
+    ----------
+    workplan : Workplan
+        The workplan declaring `runs`.
+    fill_transform : TemplateFillTransform | None
+        The transform used to fill placeholders in run-ids.
+    launcher : Callable[[], Launcher[t.Any]]
+        Supplies the launcher used to query status; called only when the
+        workplan depends on a step of an external run, so a workplan without
+        external dependencies never builds a launcher.
+
+    Returns
+    -------
+    ExternalRuns
+    """
+    external = ExternalRuns(fill_runs(workplan.runs, fill_transform))
+    if refs := external_dependencies(workplan):
+        await external.refresh(refs, launcher())
+    return external
+
+
+_THandle = t.TypeVar("_THandle", bound=ProcessHandle)
+
+
+class _Probe(t.NamedTuple):
+    """The state of an external step observed by `ExternalRuns.refresh`."""
+
+    handle: ProcessHandle
+    """The handle persisted by the run that submitted the step."""
+    status: Status
+    """The status reported by the launcher."""
+    launcher_name: str
+    """The name of the launcher that reported the status."""
+    supports_foreign_dependencies: bool
+    """Whether that launcher can wait on an in-progress handle of another run."""
+
+
+class ExternalRuns:
+    """The registry of other workplan runs a workplan refers to.
+
+    Every lookup of an external run, step or handle goes through here. Records
+    and workplans are read lazily and cached per alias; nothing is ever written
+    (a sentinel written here would land in the current run's state directory).
+    """
+
+    def __init__(self, runs: Mapping[str, RunRef]) -> None:
+        """Initialize the registry.
+
+        Parameters
+        ----------
+        runs : Mapping[str, RunRef]
+            The external runs keyed by alias, with run-ids already filled.
+        """
+        self._runs = dict(runs)
+        self._records: dict[str, WorkplanRun] = {}
+        self._workplans: dict[str, LiveWorkplan] = {}
+        self._probes: dict[StepRef, _Probe] = {}
+        self._errors: dict[StepRef, str] = {}
+
+    def _declared(self, alias: str) -> RunRef:
+        """Return the run declared as `alias`."""
+        if alias not in self._runs:
+            msg = (
+                f"Run alias {alias!r} is not declared under `runs` "
+                f"(declared: {sorted(self._runs)})"
+            )
+            raise CstarError(msg)
+        return self._runs[alias]
+
+    def _describe(self, ref: StepRef) -> str:
+        """Name a step, its alias and its run-id for use in messages."""
+        run_id = self._runs[ref.run].run_id if ref.run in self._runs else "?"
+        return f"step {ref.step!r} of run {run_id!r} (alias {ref.run!r})"
+
+    def record(self, alias: str) -> WorkplanRun:
+        """Return the tracking record of the run declared as `alias`.
+
+        Parameters
+        ----------
+        alias : str
+            The run alias.
+
+        Returns
+        -------
+        WorkplanRun
+            The record matching the run's `start_at` when pinned, otherwise
+            the latest record of the run-id.
+
+        Raises
+        ------
+        CstarError
+            If the alias is undeclared or no record exists for the run.
+        """
+        if alias not in self._records:
+            run = self._declared(alias)
+            try:
+                found = TrackingRepository().get_workplan_run_sync(
+                    run.run_id, run_date=run.start_at
+                )
+            except ValueError as ex:
+                msg = f"Run alias {alias!r} has an invalid run-id {run.run_id!r}: {ex}"
+                raise CstarError(msg) from ex
+            if found is None:
+                msg = f"No run record found for alias {alias!r} (run-id {run.run_id!r})"
+                raise CstarError(msg)
+            self._records[alias] = found
+        return self._records[alias]
+
+    def workplan(self, alias: str) -> LiveWorkplan:
+        """Return the transformed workplan recorded for the run declared as `alias`.
+
+        Raises
+        ------
+        CstarError
+            If the run has no record or its workplan cannot be loaded.
+        """
+        if alias not in self._workplans:
+            record = self.record(alias)
+            try:
+                self._workplans[alias] = deserialize(
+                    record.trx_workplan_path, LiveWorkplan
+                )
+            except (FileNotFoundError, ValueError, yaml.YAMLError) as ex:
+                msg = (
+                    f"Unable to load workplan for run-id {record.run_id!r} from "
+                    f"{str(record.trx_workplan_path)!r}: {ex}"
+                )
+                raise CstarError(msg) from ex
+        return self._workplans[alias]
+
+    def step(self, ref: StepRef) -> LiveStep:
+        """Return a step of an external run.
+
+        Raises
+        ------
+        CstarError
+            If the run cannot be resolved or has no step of that name.
+        """
+        workplan = self.workplan(ref.run)
+        if ref.step not in workplan:
+            msg = (
+                f"Step {ref.step!r} not found in run {self._declared(ref.run).run_id!r} "
+                f"(alias {ref.run!r})"
+            )
+            raise CstarError(msg)
+        return workplan[ref.step]
+
+    @t.overload
+    def handle(self, ref: StepRef) -> ProcessHandle: ...
+
+    @t.overload
+    def handle(self, ref: StepRef, klass: type[_THandle]) -> _THandle: ...
+
+    def handle(
+        self,
+        ref: StepRef,
+        klass: type[ProcessHandle] = ProcessHandle,
+    ) -> ProcessHandle:
+        """Return the handle persisted by the run that submitted a step.
+
+        Parameters
+        ----------
+        ref : StepRef
+            The external step.
+        klass : type[ProcessHandle]
+            The handle type to load; a launcher's `handle_klass()` when the
+            handle is to be passed to that launcher.
+
+        Raises
+        ------
+        CstarError
+            If the run cannot be resolved or the step was never submitted.
+        """
+        record = self.record(ref.run)
+        path = StateRepository.sentinel_path(ref.step, run_id=record.run_id)
+        try:
+            return deserialize(path, klass)
+        except FileNotFoundError as ex:
+            msg = (
+                f"Step {ref.step!r} of run {record.run_id!r} (alias {ref.run!r}) "
+                f"has not been submitted (no sentinel at {str(path)!r})"
+            )
+            raise CstarError(msg) from ex
+
+    async def refresh(
+        self,
+        refs: Iterable[StepRef],
+        launcher: "Launcher[t.Any]",
+    ) -> None:
+        """Query the current status of external steps.
+
+        A step that cannot be resolved is recorded as a problem rather than
+        raised, so `problem` can report every reference.
+
+        Parameters
+        ----------
+        refs : Iterable[StepRef]
+            The external steps to query.
+        launcher : Launcher[t.Any]
+            The launcher used to query status.
+        """
+        for ref in refs:
+            self._probes.pop(ref, None)
+            self._errors.pop(ref, None)
+            try:
+                handle = self.handle(ref, launcher.handle_klass())
+                status = await launcher.query_status(handle)
+            except CstarError as ex:
+                self._errors[ref] = str(ex)
+                continue
+
+            self._probes[ref] = _Probe(
+                handle, status, launcher.name, launcher.supports_foreign_dependencies
+            )
+
+        statuses = ", ".join(
+            f"{ref}={p.status.name}" for ref, p in self._probes.items()
+        )
+        log.debug(f"Refreshed external step status: {statuses or 'none'}")
+
+    def tasks(self) -> dict[str, Task[ProcessHandle]]:
+        """Return the refreshed external steps as tasks keyed by their token.
+
+        The handles are copies carrying the refreshed status; the persisted
+        sentinels are never touched.
+
+        Returns
+        -------
+        dict[str, Task[ProcessHandle]]
+            A task per refreshed step, keyed by `str(ref)`.
+        """
+        return {
+            str(ref): Task(
+                step=self.step(ref),
+                handle=probe.handle.model_copy(update={"status": probe.status}),
+            )
+            for ref, probe in self._probes.items()
+        }
+
+    def statuses(self) -> dict[str, Status]:
+        """Return the status found by the last refresh, keyed by step token."""
+        return {str(ref): probe.status for ref, probe in self._probes.items()}
+
+    def errors(self) -> dict[str, str]:
+        """Return why each step whose last refresh failed could not be resolved.
+
+        Returns
+        -------
+        dict[str, str]
+            The message of each failure, keyed by `str(ref)`.
+        """
+        return {str(ref): message for ref, message in self._errors.items()}
+
+    def is_done(self, ref: StepRef) -> bool:
+        """Return `True` when the last refresh found the step `Done`."""
+        probe = self._probes.get(ref)
+        return probe is not None and probe.status == Status.Done
+
+    def problem(self, ref: StepRef) -> str:
+        """Describe why a step cannot be depended upon.
+
+        A step is usable when it is done, or when it is in progress under a
+        launcher that can wait on a handle created by another run.
+
+        Parameters
+        ----------
+        ref : StepRef
+            The external step.
+
+        Returns
+        -------
+        str
+            The problem, or an empty string when the step is usable.
+        """
+        if ref.run not in self._runs:
+            msg = (
+                f"step {ref.step!r} uses run alias {ref.run!r}, which is not "
+                f"declared under `runs` (declared: {sorted(self._runs)})"
+            )
+            return msg
+
+        what = self._describe(ref)
+        if error := self._errors.get(ref):
+            return error
+
+        if (probe := self._probes.get(ref)) is None:
+            return f"{what}: status unknown (not refreshed)"
+
+        if probe.status == Status.Done:
+            return ""
+
+        if (
+            Status.is_in_progress(probe.status)
+            and probe.supports_foreign_dependencies
+            and not is_foreign_handle(probe.handle, probe.launcher_name)
+        ):
+            return ""
+
+        msg = (
+            f"{what} is {probe.status.name} (handle launcher "
+            f"{probe.handle.launcher_name or 'unknown'!r}; this system uses "
+            f"launcher {probe.launcher_name!r}) and cannot be depended upon"
+        )
+        if not Status.is_terminal(probe.status):
+            run_id = self._runs[ref.run].run_id
+            msg += f"; run `cstar workplan status {run_id}` to refresh its status"
+        return msg
+
+    def pinned(self) -> dict[str, RunRef]:
+        """Return the runs with `start_at` set to the resolved record's start.
+
+        Raises
+        ------
+        CstarError
+            If the record of any run cannot be found.
+        """
+        return {
+            alias: run.model_copy(update={"start_at": self.record(alias).start_at})
+            for alias, run in self._runs.items()
+        }
+
+
+def lookup_step(workplan: LiveWorkplan, token: str) -> LiveStep:
+    """Find a step of the workplan, or of one of its external runs.
+
+    Parameters
+    ----------
+    workplan : LiveWorkplan
+        The workplan to search; its `runs` resolve external references.
+    token : str
+        A step name, or `<step>@<alias>` for a step of an external run.
+
+    Returns
+    -------
+    LiveStep
+
+    Raises
+    ------
+    KeyError
+        If the token names a step of `workplan` that does not exist.
+    CstarError
+        If the token is malformed or an external step cannot be resolved.
+    """
+    ref = _parse_ref(token)
+    if ref.is_external:
+        return ExternalRuns(workplan.runs).step(ref)
+
+    if ref.step not in workplan:
+        msg = f"Unable to locate step {ref.step!r} in workplan"
+        raise KeyError(msg)
+    return workplan[ref.step]
 
 
 class WorkplanTransformer(LoggingMixin):
@@ -392,10 +864,23 @@ class WorkplanTransformer(LoggingMixin):
         self,
         wp: Workplan,
         fill_transform: TemplateFillTransform | None = None,
+        external: ExternalRuns | None = None,
     ) -> None:
-        """Initialize the instance."""
+        """Initialize the instance.
+
+        Parameters
+        ----------
+        wp : Workplan
+            The workplan to transform.
+        fill_transform : TemplateFillTransform | None
+            The transform used to fill template placeholders.
+        external : ExternalRuns | None
+            The registry of external runs the workplan refers to; an empty
+            registry when omitted, so every external reference is a problem.
+        """
         self.original = Workplan(**wp.model_dump(by_alias=True))
         self.fill_transform = fill_transform
+        self.external = external if external is not None else ExternalRuns({})
 
     @property
     def is_modified(self) -> bool:
@@ -478,7 +963,7 @@ class WorkplanTransformer(LoggingMixin):
 
         # fill template placeholders before any other transform operates on overrides
         if self.fill_transform is not None:
-            resolver = get_fsm_resolver(live_steps)
+            resolver = get_fsm_resolver(live_steps, self.external)
             fill = self.fill_transform.with_scoped_resolver(resolver)
 
             live_steps = [filled for step in live_steps for filled in fill(step)]
@@ -492,7 +977,13 @@ class WorkplanTransformer(LoggingMixin):
             for app_name in app_names
         }
 
-        if problems := collect_directive_problems(live_steps):
+        problems = collect_directive_problems(live_steps)
+        problems.extend(
+            problem
+            for ref in external_dependencies(self.original)
+            if (problem := self.external.problem(ref))
+        )
+        if problems:
             summary = f"{len(problems)} directive problem(s) found in workplan:"
             msg = "\n".join([summary, *(f"- {problem}" for problem in problems)])
             raise ValueError(msg)
@@ -574,12 +1065,15 @@ class WorkplanTransformer(LoggingMixin):
                     )
                     raise CstarExpectationFailed(msg)
 
-        self._transformed = self.original.model_copy(
-            update={
-                "steps": transformed_steps,
-                "name": f"{self.original.name} (transformed)",
-            },
-        )
+        update: dict[str, t.Any] = {
+            "steps": transformed_steps,
+            "name": f"{self.original.name} (transformed)",
+        }
+        if self.original.runs:
+            # pin each external run to the record resolved now
+            update["runs"] = self.external.pinned()
+
+        self._transformed = self.original.model_copy(update=update)
 
         return self._transformed
 
@@ -975,6 +1469,14 @@ def materialize_inline_blueprints(steps: Sequence[LiveStep]) -> list[LiveStep]:
     return materialized
 
 
+def _canonical(token: str) -> str:
+    """Return a step reference token in canonical form; a malformed one unchanged."""
+    try:
+        return str(StepRef.parse(token))
+    except ValueError:
+        return token
+
+
 def _ancestor_map(steps: Sequence[LiveStep]) -> dict[str, set[str]]:
     """Map each step's name to the set of its transitive `depends_on` ancestors.
 
@@ -987,10 +1489,12 @@ def _ancestor_map(steps: Sequence[LiveStep]) -> dict[str, set[str]]:
     -------
     dict[str, set[str]]
         Step name to the set of every step name reachable by following
-        `depends_on` edges, direct or indirect. Terminates on a dependency
-        cycle via a visited set rather than looping forever.
+        `depends_on` edges, direct or indirect. External `<step>@<alias>`
+        tokens are leaves: they appear in the sets, in canonical form, but have
+        no entries of their own. Terminates on a dependency cycle via a
+        visited set rather than looping forever.
     """
-    depends_on = {step.name: step.depends_on for step in steps}
+    depends_on = {step.name: [_canonical(d) for d in step.depends_on] for step in steps}
     ancestors: dict[str, set[str]] = {}
     for name in depends_on:
         seen: set[str] = set()
@@ -1029,7 +1533,9 @@ def collect_directive_problems(steps: Sequence[LiveStep]) -> list[str]:
     consulted for config-shape and sibling-directive problems; and every
     step name returned by the directive's `referenced_steps` must name
     another step in `steps` that is a transitive `depends_on` ancestor of
-    the referencing step.
+    the referencing step. A reference to a step of an external run
+    (`<step>@<alias>`) must likewise be an ancestor; whether that step is
+    usable is gated once per dependency by `WorkplanTransformer.apply`.
 
     Parameters
     ----------
@@ -1071,15 +1577,21 @@ def collect_directive_problems(steps: Sequence[LiveStep]) -> list[str]:
                 for problem in directive_cls.validate_directives(config, step)
             )
 
-            for ref in directive_cls.referenced_steps(config):
-                if ref not in step_names:
+            for token in directive_cls.referenced_steps(config):
+                try:
+                    ref = StepRef.parse(token)
+                except ValueError as ex:
+                    problems.append(f"step {step.name!r} directive {key!r}: {ex}")
+                    continue
+
+                if not ref.is_external and ref.step not in step_names:
                     problems.append(
                         f"step {step.name!r} directive {key!r}: references "
-                        f"unknown step {ref!r}"
+                        f"unknown step {token!r}"
                     )
-                elif ref not in ancestors[step.name]:
+                elif str(ref) not in ancestors[step.name]:
                     problems.append(
-                        f"step {step.name!r} directive {key!r}: step {ref!r} "
+                        f"step {step.name!r} directive {key!r}: step {token!r} "
                         f"is not an upstream dependency of step {step.name!r} "
                         "(via depends_on)"
                     )
@@ -1503,7 +2015,8 @@ def resolve_deferred_blueprint(ref: DeferredBlueprintRef) -> Path:
     Parameters
     ----------
     ref : DeferredBlueprintRef
-        The deferred reference naming the producing step.
+        The deferred reference naming the producing step; the step may belong
+        to an external run (`<step>@<alias>`).
 
     Returns
     -------
@@ -1517,14 +2030,16 @@ def resolve_deferred_blueprint(ref: DeferredBlueprintRef) -> Path:
         blueprint file cannot be located in its output directory.
     """
     workplan = DirectiveConfig.load_workplan()
-    if ref.from_step not in workplan:
+    try:
+        producer = lookup_step(workplan, ref.from_step)
+    except KeyError as ex:
         msg = (
             f"Deferred blueprint references step {ref.from_step!r}, which "
             "does not exist in the workplan"
         )
-        raise CstarError(msg)
+        raise CstarError(msg) from ex
 
-    output_dir = workplan[ref.from_step].fsm.output_dir
+    output_dir = producer.fsm.output_dir
 
     if ref.filename:
         candidate = output_dir / ref.filename

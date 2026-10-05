@@ -28,6 +28,7 @@ from cstar.cli.common import (
 from cstar.cli.workplan.shared import (
     colored,
     console,
+    exit_on_unresolved_externals,
     list_runs,
     preprocess_varfile,
     preprocess_vars,
@@ -61,6 +62,7 @@ from cstar.orchestration.dag_runner import (
     build_planner,
     check_clobber_targets,
     get_launcher,
+    load_external_runs,
     original_workplan_backup,
     run_dag,
 )
@@ -667,7 +669,11 @@ def run(
                 apply_clobber_overrides(wp, clobber)
                 if resume:
                     asyncio.run(apply_resume_overrides(wp, run_id, get_launcher()))
-                planner = build_planner(wp)
+                external = asyncio.run(
+                    load_external_runs(wp, get_launcher(force_local=pre_run))
+                )
+                exit_on_unresolved_externals(external)
+                planner = build_planner(wp, external.tasks())
 
                 wp_run = asyncio.run(
                     run_dag(
@@ -691,7 +697,7 @@ def run(
 
             summary = asyncio.run(ExecutiveRunSummary.from_run(wp_run))
             console.print(get_run_summary_display(summary))
-    except typer.BadParameter:
+    except (typer.BadParameter, typer.Exit):
         raise
     except NoPreparableStepsError as ex:
         console.print(str(ex))

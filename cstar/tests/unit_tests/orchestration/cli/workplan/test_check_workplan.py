@@ -7,7 +7,7 @@ from typer.testing import CliRunner
 
 from cstar.cli.workplan.check import app
 from cstar.entrypoint.utils import ARG_SCHEMA_ONLY
-from cstar.orchestration.models import Step, Workplan
+from cstar.orchestration.models import RunRef, Step, Workplan
 from cstar.orchestration.serialization import (
     deserialize,
     enum_representer,
@@ -589,4 +589,38 @@ def test_deep_check_undeclared_placeholder(
 
     assert result.exit_code == 1, result.stdout
     assert "beta" in result.stdout
+    assert "Traceback" not in result.stdout
+
+
+def test_deep_check_reports_unresolvable_external_dependency(
+    tmp_path: Path,
+    hello_world_bp_path: Path,
+) -> None:
+    """Verify a dependency on a step of a run with no tracking record is
+    reported as a resolution problem, not a traceback.
+
+    Parameters
+    ----------
+    tmp_path : Path
+        Temporary directory to read/write test inputs and outputs
+    hello_world_bp_path : Path
+        Fixture providing the path to a minimal hello-world blueprint
+    """
+    step = Step(
+        name="Say Hello",
+        application="hello_world",
+        blueprint=hello_world_bp_path,
+        depends_on=["outer@spinup"],
+    )
+    wp_path = _write_workplan(
+        tmp_path / "wp.yaml",
+        [step],
+        runs={"spinup": RunRef(run_id="never-ran")},
+    )
+
+    runner = CliRunner()
+    result = runner.invoke(app, [wp_path.as_posix()], color=False)
+
+    assert result.exit_code == 1, result.stdout
+    assert "No run record found for alias 'spinup'" in result.stdout
     assert "Traceback" not in result.stdout
