@@ -24,6 +24,7 @@ from cstar.roms.namelist import (
     RomsNamelistV0_5_0,
     RomsNamelistV0_6_0,
     RomsNamelistV0_7_0,
+    RomsNamelistV0_9_0,
 )
 from cstar.roms.precheck import (
     _STREAM_CHECKS,
@@ -34,6 +35,7 @@ from cstar.roms.precheck import (
 )
 
 V0_5_0_NAMELIST = Path(__file__).parent / "fixtures" / "example_namelist_v0_5_0.nml"
+V0_9_0_NAMELIST = Path(__file__).parent / "fixtures" / "example_namelist_v0_9_0.nml"
 
 
 def _base_settings(**overrides):
@@ -193,6 +195,71 @@ def test_cdr_tracer_disabled_stream_passes():
     check_output_streams_divide_rst(
         settings, cppdefs={"marbl": True, "cdr_forcing": True}
     )
+
+
+def test_cdr_lite_enabled_non_dividing_raises_without_any_cppdefs():
+    """ucla-roms >= 0.9.0 compiles `cdr_lite_output` unconditionally, so an
+    enabled `cdrtrc` stream on `cdr_lite_output_settings` with a non-dividing
+    frequency raises even with no cppdefs active at all.
+    """
+    settings = _base_settings()
+    settings["cdr_lite_output_settings"] = {
+        "do_cdr_lite_output": True,
+        "output_period_cdr_lite": 1000,
+        "nrpf_cdr_lite": 3,
+    }
+    with pytest.raises(NamelistConsistencyError, match="cdrtrc") as excinfo:
+        check_output_streams_divide_rst(settings, cppdefs={})
+    assert excinfo.value.rule == "output_streams_divide_rst"
+    assert excinfo.value.section == "cdr_lite_output_settings"
+    assert excinfo.value.keys == ("nrpf_cdr_lite", "output_period_cdr_lite")
+
+
+def test_cdr_lite_conforming_stream_passes_without_any_cppdefs():
+    """An enabled `cdr_lite_output_settings` stream whose frequency evenly
+    divides the restart period raises nothing (3600 s * 4 = 14400 s; 6 files
+    per day).
+    """
+    settings = _base_settings()
+    settings["cdr_lite_output_settings"] = {
+        "do_cdr_lite_output": True,
+        "output_period_cdr_lite": 3600,
+        "nrpf_cdr_lite": 4,
+    }
+    check_output_streams_divide_rst(settings, cppdefs={})
+
+
+def test_cdr_lite_disabled_stream_passes():
+    """A disabled `cdr_lite_output_settings` stream (`do_cdr_lite_output`
+    false) passes even with a non-dividing frequency.
+    """
+    settings = _base_settings()
+    settings["cdr_lite_output_settings"] = {
+        "do_cdr_lite_output": False,
+        "output_period_cdr_lite": 1000,
+        "nrpf_cdr_lite": 3,
+    }
+    check_output_streams_divide_rst(settings, cppdefs={})
+
+
+def test_cdr_tracer_row_still_guarded_alongside_cdr_lite_row():
+    """The 0.7/0.8 `cdr_tracer_output_settings` row stays cppdef-guarded when
+    the unguarded 0.9.0 row exists: the same non-dividing, enabled stream is
+    skipped with no cppdefs and raises once `marbl` and `cdr_forcing` are on.
+    The two rows coexist because a namelist carries only one of the groups.
+    """
+    settings = _base_settings()
+    settings["cdr_tracer_output_settings"] = {
+        "do_cdr_tracer_output": True,
+        "output_period_cdr_trc": 1000,
+        "nrpf_cdr_trc": 3,
+    }
+    check_output_streams_divide_rst(settings, cppdefs={})
+    with pytest.raises(NamelistConsistencyError) as excinfo:
+        check_output_streams_divide_rst(
+            settings, cppdefs={"marbl": True, "cdr_forcing": True}
+        )
+    assert excinfo.value.section == "cdr_tracer_output_settings"
 
 
 def test_cdr_gas_exch_cppdef_inactive_skips_even_when_it_would_fail():
@@ -456,6 +523,22 @@ def test_live_namelist_non_dividing_raises():
         check_output_streams_divide_rst(nml, cppdefs={})
 
 
+def test_live_v0_9_0_namelist_checks_cdr_lite_stream():
+    """A live `RomsNamelistV0_9_0` has no `cdr_tracer_output_settings` attribute
+    (that row is skipped via `_section`'s `getattr(..., None)`), and its
+    `cdr_lite_output_settings` stream is checked with no cppdefs.
+    """
+    nml = RomsNamelistV0_9_0.read(V0_9_0_NAMELIST)
+    check_output_streams_divide_rst(nml, cppdefs={})
+
+    nml.cdr_lite_output_settings.do_cdr_lite_output = True
+    nml.cdr_lite_output_settings.nrpf_cdr_lite = 3
+    nml.cdr_lite_output_settings.output_period_cdr_lite = 1000.0
+    with pytest.raises(NamelistConsistencyError) as excinfo:
+        check_output_streams_divide_rst(nml, cppdefs={})
+    assert excinfo.value.section == "cdr_lite_output_settings"
+
+
 # ---------------------------------------------------------------------------
 # check_restart_period_divisible_by_dt
 # ---------------------------------------------------------------------------
@@ -543,7 +626,13 @@ def test_applies_to_v0_4_0_schema_is_false():
 
 
 @pytest.mark.parametrize(
-    "schema", [RomsNamelistV0_5_0, RomsNamelistV0_6_0, RomsNamelistV0_7_0]
+    "schema",
+    [
+        RomsNamelistV0_5_0,
+        RomsNamelistV0_6_0,
+        RomsNamelistV0_7_0,
+        RomsNamelistV0_9_0,
+    ],
 )
 def test_applies_to_versioned_schemas_is_true(schema):
     assert applies_to(schema) is True

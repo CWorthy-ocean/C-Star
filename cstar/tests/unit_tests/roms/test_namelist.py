@@ -8,6 +8,8 @@ import pytest
 from pydantic import ValidationError
 
 from cstar.roms.namelist import (
+    CdrLiteOutputSettings,
+    CdrLiteSettings,
     ParamSettings,
     ParamSettingsV0_4_0,
     PioSettings,
@@ -17,6 +19,7 @@ from cstar.roms.namelist import (
     RomsNamelistV0_5_0,
     RomsNamelistV0_6_0,
     RomsNamelistV0_7_0,
+    RomsNamelistV0_9_0,
     namelist_schema_for_ref,
 )
 
@@ -24,6 +27,7 @@ OLD_NAMELIST = Path(__file__).parent / "fixtures" / "example_namelist.nml"
 NEW_NAMELIST = Path(__file__).parent / "fixtures" / "example_namelist_v0_5_0.nml"
 V0_6_0_NAMELIST = Path(__file__).parent / "fixtures" / "example_namelist_v0_6_0.nml"
 V0_7_0_NAMELIST = Path(__file__).parent / "fixtures" / "example_namelist_v0_7_0.nml"
+V0_9_0_NAMELIST = Path(__file__).parent / "fixtures" / "example_namelist_v0_9_0.nml"
 
 PIO_SETTINGS_BLOCK = "&pio_settings\n    pio_stride = 1\n/\n\n"
 
@@ -66,11 +70,20 @@ def test_namelist_schema_for_ref_post_0_6_0(checkout_target):
 
 @pytest.mark.parametrize(
     "checkout_target",
-    ["0.7.0", "v0.7.0", "0.7.3", "12.0.0"],
+    ["0.7.0", "v0.7.0", "0.7.3", "0.8.0", "0.8.5"],
 )
 def test_namelist_schema_for_ref_post_0_7_0(checkout_target):
-    """Refs at or above 0.7.0 select `RomsNamelistV0_7_0`."""
+    """Refs in `[0.7.0, 0.9.0)` select `RomsNamelistV0_7_0`."""
     assert namelist_schema_for_ref(checkout_target) is RomsNamelistV0_7_0
+
+
+@pytest.mark.parametrize(
+    "checkout_target",
+    ["0.9.0", "v0.9.0", "0.9.3", "0.10.0", "12.0.0"],
+)
+def test_namelist_schema_for_ref_post_0_9_0(checkout_target):
+    """Refs at or above 0.9.0 select `RomsNamelistV0_9_0`."""
+    assert namelist_schema_for_ref(checkout_target) is RomsNamelistV0_9_0
 
 
 @pytest.mark.parametrize(
@@ -89,7 +102,7 @@ def test_namelist_schema_for_ref_fallback_warns(checkout_target):
     """Non-release-tag refs fall back to the latest schema and warn about it."""
     with pytest.warns(UserWarning, match="use at your own risk"):
         schema = namelist_schema_for_ref(checkout_target)
-    assert schema is RomsNamelistV0_7_0
+    assert schema is RomsNamelistV0_9_0
 
 
 @pytest.fixture
@@ -182,7 +195,7 @@ def test_namelist_schema_for_ref_branch_ignores_repo_path(tagged_ucla_roms_clone
     info = tagged_ucla_roms_clone
     with pytest.warns(UserWarning, match="use at your own risk"):
         schema = namelist_schema_for_ref("main", repo_path=info["repo"])
-    assert schema is RomsNamelistV0_7_0
+    assert schema is RomsNamelistV0_9_0
 
 
 def test_namelist_schema_for_ref_unresolvable_hash_falls_back():
@@ -194,12 +207,12 @@ def test_namelist_schema_for_ref_unresolvable_hash_falls_back():
     ):
         with pytest.warns(UserWarning, match="use at your own risk"):
             schema = namelist_schema_for_ref("a" * 40, repo_path="/some/repo")
-    assert schema is RomsNamelistV0_7_0
+    assert schema is RomsNamelistV0_9_0
 
     with mock.patch("cstar.roms.namelist._describe_nearest_tag", return_value=None):
         with pytest.warns(UserWarning, match="use at your own risk"):
             schema = namelist_schema_for_ref("a" * 40, repo_path="/some/repo")
-    assert schema is RomsNamelistV0_7_0
+    assert schema is RomsNamelistV0_9_0
 
 
 def test_roms_namelist_round_trip():
@@ -357,6 +370,95 @@ def test_cdr_output_settings_always_written_even_when_constructed_without_them()
     assert d["cdr_gas_exch_output_settings"]["nrpf_cdr_gas"] == 4
 
 
+def test_roms_namelist_v0_9_0_round_trip(tmp_path):
+    """`RomsNamelistV0_9_0.read` parses the 0.9.0 fixture, and a read -> write
+    -> read round trip reproduces the same model.
+    """
+    nml = RomsNamelistV0_9_0.read(V0_9_0_NAMELIST)
+    assert nml.cdr_lite_output_settings.do_cdr_lite_output is False
+    assert nml.cdr_lite_output_settings.wrt_gas_exchange is False
+    assert nml.cdr_lite_settings.cdr_online_carbonate_sensitivity is False
+
+    out = tmp_path / "namelist.nml"
+    nml.write(out)
+    reread = RomsNamelistV0_9_0.read(out)
+
+    assert reread == nml
+
+
+def test_roms_namelist_v0_9_0_rejects_v0_7_0_fixture():
+    """`RomsNamelistV0_9_0` is strict: ucla-roms 0.9.0 renamed
+    `&cdr_tracer_output_settings` to `&cdr_lite_output_settings`, so the 0.7.0
+    fixture is rejected for the old group.
+    """
+    with pytest.raises(ValidationError, match="cdr_tracer_output_settings"):
+        RomsNamelistV0_9_0.read(V0_7_0_NAMELIST)
+
+
+def test_roms_namelist_v0_7_0_rejects_v0_9_0_fixture():
+    """`RomsNamelistV0_7_0` is strict: the 0.9.0 fixture carries the renamed and
+    new CDR_LITE groups, which it rejects as unknown.
+    """
+    with pytest.raises(ValidationError, match="cdr_lite_output_settings"):
+        RomsNamelistV0_7_0.read(V0_9_0_NAMELIST)
+
+
+def test_roms_namelist_v0_9_0_does_not_write_cdr_tracer_group():
+    """`RomsNamelistV0_9_0` never carries the pre-0.9.0 tracer output group, so
+    it cannot be written into a 0.9.0 namelist.
+    """
+    assert "cdr_tracer_output_settings" not in RomsNamelistV0_9_0.model_fields
+    nml = RomsNamelistV0_9_0.read(V0_9_0_NAMELIST)
+    assert "cdr_tracer_output_settings" not in nml.to_f90nml_dict()
+
+
+def test_cdr_lite_groups_default_when_missing():
+    """A 0.6.0-schema namelist without any CDR output group still validates
+    under `RomsNamelistV0_9_0`, defaulting the three CDR groups to their
+    ucla-roms reference values.
+    """
+    nml = RomsNamelistV0_9_0.read(V0_6_0_NAMELIST)
+
+    assert nml.cdr_lite_settings == CdrLiteSettings()
+    assert nml.cdr_lite_settings.cdr_online_carbonate_sensitivity is False
+    assert nml.cdr_lite_output_settings == CdrLiteOutputSettings()
+    assert nml.cdr_lite_output_settings.do_cdr_lite_output is False
+    assert nml.cdr_lite_output_settings.wrt_cdr_lite_avg is True
+    assert nml.cdr_lite_output_settings.nrpf_cdr_lite == 4
+    assert nml.cdr_lite_output_settings.output_period_cdr_lite == 3600.0
+    assert nml.cdr_lite_output_settings.wrt_gas_exchange is False
+    assert nml.cdr_gas_exch_output_settings.do_cdr_gas_exch_output is False
+    assert nml.cdr_gas_exch_output_settings.nrpf_cdr_gas == 4
+
+
+def test_cdr_lite_groups_always_written_even_when_constructed_without_them():
+    """The CDR_LITE groups are present in written output even when the model was
+    constructed without explicit groups (using the defaults), in the field
+    order ucla-roms documents.
+    """
+    nml = RomsNamelistV0_9_0.read(V0_6_0_NAMELIST)
+    d = nml.to_f90nml_dict()
+
+    assert d["cdr_lite_settings"] == {"cdr_online_carbonate_sensitivity": False}
+    assert d["cdr_lite_output_settings"]["do_cdr_lite_output"] is False
+    assert d["cdr_lite_output_settings"]["wrt_gas_exchange"] is False
+    assert d["cdr_gas_exch_output_settings"]["nrpf_cdr_gas"] == 4
+    assert list(d["cdr_lite_output_settings"]) == [
+        "do_cdr_lite_output",
+        "wrt_cdr_lite_avg",
+        "cdr_lite_monthly_averages",
+        "output_period_cdr_lite",
+        "nrpf_cdr_lite",
+        "wrt_tracers",
+        "wrt_vertical_integrals",
+        "wrt_thickness_weighted",
+        "wrt_sources",
+        "wrt_alk",
+        "wrt_dic",
+        "wrt_gas_exchange",
+    ]
+
+
 class TestUnknownOverrideKeys:
     """Tests for `RomsNamelistBase.unknown_override_keys`."""
 
@@ -412,6 +514,7 @@ class TestUnknownOverrideKeys:
         """`cdr_tracer_output_settings`/`cdr_gas_exch_output_settings` keys are
         only known from 0.7.0 on: `RomsNamelistV0_7_0` accepts them, but
         `RomsNamelistV0_6_0` (which lacks the groups) reports them as unknown.
+        (`cdr_tracer_output_settings` is renamed away again in 0.9.0.)
         """
         overrides = {
             "cdr_tracer_output_settings": {"wrt_alk": False},
@@ -423,6 +526,36 @@ class TestUnknownOverrideKeys:
         assert len(violations) == 2
         assert any("cdr_tracer_output_settings" in v for v in violations)
         assert any("cdr_gas_exch_output_settings" in v for v in violations)
+
+    def test_cdr_lite_output_settings_keys(self):
+        """`cdr_lite_output_settings`/`cdr_lite_settings` keys are known from
+        0.9.0 on, where `cdr_tracer_output_settings` was renamed away:
+        `RomsNamelistV0_9_0` accepts the new groups and rejects the old one,
+        and `RomsNamelistV0_7_0` does the reverse.
+        """
+        new = {
+            "cdr_lite_output_settings": {"do_cdr_lite_output": True},
+            "cdr_lite_settings": {"cdr_online_carbonate_sensitivity": True},
+        }
+        old = {"cdr_tracer_output_settings": {"do_cdr_tracer_output": True}}
+        assert RomsNamelistV0_9_0.unknown_override_keys(new) == []
+
+        violations = RomsNamelistV0_9_0.unknown_override_keys(old)
+        assert len(violations) == 1
+        assert "cdr_tracer_output_settings" in violations[0]
+
+        assert RomsNamelistV0_7_0.unknown_override_keys(old) == []
+        violations = RomsNamelistV0_7_0.unknown_override_keys(new)
+        assert len(violations) == 2
+        assert any("cdr_lite_output_settings" in v for v in violations)
+        assert any("cdr_lite_settings" in v for v in violations)
+
+    def test_cdr_lite_output_settings_rejects_pre_rename_key(self):
+        """A pre-0.9.0 key name inside the renamed group is reported as unknown."""
+        overrides = {"cdr_lite_output_settings": {"do_cdr_tracer_output": True}}
+        violations = RomsNamelistV0_9_0.unknown_override_keys(overrides)
+        assert len(violations) == 1
+        assert "do_cdr_tracer_output" in violations[0]
 
 
 # ---------------------------------------------------------------------------
@@ -448,7 +581,8 @@ def test_param_settings_rejects_cdr_tracer_counts():
 
 
 @pytest.mark.parametrize(
-    "cls", [ParamSettingsV0_4_0, RomsNamelistV0_5_0, RomsNamelistV0_7_0]
+    "cls",
+    [ParamSettingsV0_4_0, RomsNamelistV0_5_0, RomsNamelistV0_7_0, RomsNamelistV0_9_0],
 )
 def test_param_settings_v0_4_0_defaults_cdr_tracer_counts_to_zero(cls):
     """`nt_cdr_oae`/`nt_cdr_dor` default to 0 (the Fortran initializer) when
