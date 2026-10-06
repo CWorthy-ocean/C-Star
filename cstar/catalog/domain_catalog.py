@@ -19,6 +19,8 @@ if TYPE_CHECKING:
 
     import pandas as pd
 
+    from cstar.catalog.outputs import BlueprintOutput
+
 logger = logging.getLogger(__name__)
 
 _DEFAULT_CATALOG_ROOT = Path(__file__).parent / "bundled"
@@ -1943,6 +1945,23 @@ class LayeredCatalog:
         if not frames:
             return pd.DataFrame()
         return pd.concat(frames, ignore_index=True)
+
+    # ------------------------------------------------------------------
+    # Emitted blueprints (read-only discovery)
+    # ------------------------------------------------------------------
+
+    async def blueprint_outputs(self, application: str) -> list[BlueprintOutput]:
+        """Find the blueprints emitted by runs of this catalog's ``application`` entries.
+
+        Read-only discovery: a standalone run is found through each entry's
+        working directory, a workplan run through run tracking. Never writes to
+        the catalog. See :func:`cstar.catalog.outputs.find_blueprint_outputs`.
+        """
+        # Deferred: ``import cstar.catalog`` must stay light and must not import
+        # the applications, which ``cstar.catalog.outputs`` reaches.
+        from cstar.catalog.outputs import find_blueprint_outputs
+
+        return await find_blueprint_outputs(self, application)
 
     def tree(self) -> None:
         for store in self.stores:
