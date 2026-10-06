@@ -3,6 +3,7 @@
 import logging
 import subprocess
 import sys
+import threading
 from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -11,6 +12,7 @@ from typing import Any
 import pytest
 import yaml
 
+import cstar.catalog.outputs as discovery
 from cstar.applications.forge.app import ForgeApplication
 from cstar.applications.forge.blueprint import ForgeBlueprint, producer_ref
 from cstar.catalog.domain_catalog import (
@@ -260,6 +262,35 @@ async def test_output_of_a_producer_outside_the_catalog_is_uncataloged(
 
     assert output.status is OutputStatus.UNCATALOGED
     assert output.producer == gone
+
+
+async def test_output_of_an_entry_that_cannot_be_loaded_is_unverified(
+    tmp_path: Path,
+) -> None:
+    """The producer is in the catalog, only unreadable: the output cannot be
+    verified against it, which is not the same as the producer being missing.
+    """
+    root = tmp_path / "catalog"
+    # lacks everything a forge blueprint requires beyond its name
+    broken = root / "blueprints" / FORGE / "wio.yaml"
+    broken.parent.mkdir(parents=True)
+    broken.write_text("name: wio\napplication: forge\n")
+    out = _run(tmp_path, "run-a", broken).fsm.output_dir
+    recorded = BlueprintRef(
+        kind="Blueprint", application=FORGE, name="wio", content_hash="ab" * 32
+    )
+    gone = BlueprintRef(
+        kind="Blueprint", application=FORGE, name="gone", content_hash="cd" * 32
+    )
+    _emit(out / "B_wio.yaml", derived_from=[recorded.model_dump()])
+    _emit(out / "B_gone.yaml", derived_from=[gone.model_dump()])
+
+    outputs = await _catalog(root).blueprint_outputs(FORGE)
+
+    assert {o.path.name: (o.status, o.producer) for o in outputs} == {
+        "B_wio.yaml": (OutputStatus.UNVERIFIED, recorded),
+        "B_gone.yaml": (OutputStatus.UNCATALOGED, gone),
+    }
 
 
 async def test_producer_is_the_first_blueprint_reference_of_the_application(
@@ -538,6 +569,65 @@ async def test_file_found_by_two_runs_is_listed_under_the_first_run_id(
     [output] = await _catalog(root).blueprint_outputs(FORGE)
 
     assert (output.run_id, output.step) == ("run-a", step.name)
+
+
+# ---------------------------------------------------------------------------
+# the event loop and the scans
+# ---------------------------------------------------------------------------
+async def test_the_entry_scan_and_the_run_scan_overlap(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Neither scan needs the other, so one must not wait for the other to finish."""
+    root, work = tmp_path / "catalog", tmp_path / "work"
+    _, producer = _entry(root, "wio", work)
+    _emit(work / "output" / "B_wio.yaml", derived_from=[producer.model_dump()])
+    run_scan_started = threading.Event()
+    scan_entries, scan_runs = discovery._entry_candidates, discovery._run_candidates
+
+    def entries(catalog: LayeredCatalog, application: str) -> Any:
+        # Awaited first, this scan would end before the run scan ever started.
+        assert run_scan_started.wait(timeout=5), "the run scan did not start"
+        return scan_entries(catalog, application)
+
+    async def runs(application: str) -> Any:
+        run_scan_started.set()
+        return await scan_runs(application)
+
+    monkeypatch.setattr(discovery, "_entry_candidates", entries)
+    monkeypatch.setattr(discovery, "_run_candidates", runs)
+
+    [output] = await _catalog(root).blueprint_outputs(FORGE)
+
+    assert output.status is OutputStatus.CURRENT
+
+
+async def test_run_output_directories_are_read_off_the_event_loop(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The wizard awaits discovery on the kernel's event loop, which a directory
+    listing must not block.
+    """
+    root = tmp_path / "catalog"
+    entry, producer = _entry(root, "wio", tmp_path / "work")
+    step = _run(tmp_path, "run-a", entry)
+    _emit(step.fsm.output_dir / "B_wio.yaml", derived_from=[producer.model_dump()])
+    catalog = _catalog(root)
+    loop_thread = threading.get_ident()
+    globbed_in: list[int] = []
+    glob = Path.glob
+
+    def recording_glob(self: Path, *args: Any, **kwargs: Any) -> Any:
+        if self == step.fsm.output_dir:
+            globbed_in.append(threading.get_ident())
+        return glob(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "glob", recording_glob)
+
+    [output] = await catalog.blueprint_outputs(FORGE)
+
+    assert output.run_id == "run-a"
+    assert globbed_in
+    assert loop_thread not in globbed_in
 
 
 # ---------------------------------------------------------------------------

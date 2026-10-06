@@ -4185,6 +4185,33 @@ def test_saving_a_loaded_blueprint_unchanged_keeps_its_stamp(tmp_path):
     assert second.generated_at == first.generated_at
 
 
+def test_saving_a_never_stamped_blueprint_unchanged_records_the_wizard(tmp_path):
+    """A blueprint written without a stamp (a script's plain ``to_yaml``, a catalog
+    entry) records a hash that already matches its content: saved unchanged, it
+    must still name the wizard as its producer.
+    """
+    writer = _new_wizard()
+    writer._rebuild()
+    assert writer.config is not None, writer.derived.value
+    writer.config.to_yaml(tmp_path / "unstamped.yaml")  # the hash, and nothing else
+
+    wiz = _new_wizard()
+    wiz.load_path.value = str(tmp_path / "unstamped.yaml")
+    wiz._on_load_path(None)
+    assert wiz.config is not None, wiz.derived.value
+    # no producer and a matching hash: only the missing stamp can trigger a stamp
+    assert wiz.config.provenance.generated_by is None
+    assert wiz.config.provenance.content_hash == wiz.config.content_hash()
+    wiz.save_path.value = str(tmp_path / "bp.yaml")
+    wiz._boundaries_touched = True
+
+    saved = _save(wiz)
+
+    assert saved.generated_by is not None
+    assert saved.generated_by.tool == WIZARD_TOOL
+    assert saved.content_hash == wiz.config.content_hash()
+
+
 def test_saving_after_an_edit_restamps_the_blueprint(tmp_path):
     wiz = _saving_wizard(tmp_path / "bp.yaml")
     first = _save(wiz)
@@ -4261,6 +4288,21 @@ def test_a_download_does_not_count_as_a_save(tmp_path):
     saved = _save(wiz)
 
     assert saved.generated_by.id != downloaded["id"]
+
+
+def test_download_links_hand_out_the_file_just_saved(tmp_path):
+    """Saving and then downloading with no edit between must not mint a second
+    stamp: both links carry the very file that was written.
+    """
+    wiz = _saving_wizard(tmp_path / "bp.yaml")
+
+    saved = _save(wiz)
+
+    written = yaml.safe_load((tmp_path / "bp.yaml").read_text())
+    for link in (wiz.download_link, wiz.download_link_review):
+        downloaded = _downloaded_yaml(link.value)
+        assert downloaded["provenance"]["generated_by"]["id"] == saved.generated_by.id
+        assert downloaded == written
 
 
 def test_grid_chip_shows_fields_to_check_initially():

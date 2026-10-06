@@ -76,16 +76,18 @@ directory name is the blueprint name, slugified):
    blueprints/            B_<name>.yaml and its settings sidecar
    output/                a copy of B_<name>.yaml
 
-The last lines of output tell you what to do next:
+The copy in ``output/`` is the blueprint to run next, and the log reports where
+it is, in a line like this:
 
 .. code-block:: text
 
-   Blueprint: ~/cstar/blueprint_runs/forge/.../output/B_cson_roms-marbl_v0.1_wio-toy_10procs.yaml
-   Run it with:  cstar blueprint run <path>
+   Forge blueprint published for downstream steps: ~/cstar/blueprint_runs/forge/.../output/B_cson_roms-marbl_v0.1_wio-toy_10procs.yaml
 
 ``cstar forge run <forge_blueprint.yaml>`` runs the same thing with Forge's
 full option set: regenerate only some inputs, overwrite existing files, tune
-dask, or change the working directory. See :doc:`../blueprints/forge`.
+dask, or change the working directory. It also ends by printing that path and
+the command that runs it (``Run it with:  cstar blueprint run <path>``). See
+:doc:`../blueprints/forge`.
 
 3. Run the simulation
 ---------------------

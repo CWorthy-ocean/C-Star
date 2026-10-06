@@ -54,10 +54,11 @@ normally omits), a forge blueprint has these sections:
    (``generated_by``, holding the tool, a unique id, the system and the
    versions of C-Star and roms-tools), plus a content hash. Both are
    informational; the executor never reads the catalog. ``generated_by`` is
-   re-stamped, with a new id, only when the content hash changes, so saving an
-   unchanged blueprint again keeps it. The ``forge_version``,
-   ``cstar_version`` and ``roms_tools_version`` fields come from older
-   blueprints: they still load, but nothing writes them any more.
+   re-stamped, with a new id, only when the content hash changes (or when the
+   file was never stamped), so saving an unchanged blueprint again keeps it.
+   The ``forge_version``, ``cstar_version`` and ``roms_tools_version`` fields
+   come from older blueprints: they still load, but nothing writes them any
+   more.
 
 A ``forge_blueprint_version`` field records the schema version (currently 10).
 Blueprints written by older versions are migrated when loaded; a blueprint newer

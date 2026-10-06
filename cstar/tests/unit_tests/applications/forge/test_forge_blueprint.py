@@ -44,7 +44,12 @@ from cstar.applications.forge.settings import render_roms_settings
 from cstar.base.env import ENV_CSTAR_DATA_HOME, ENV_CSTAR_RUNID
 from cstar.base.utils import slugify
 from cstar.catalog.domain_catalog import default_catalog as _CATALOG
-from cstar.orchestration.models import BlueprintRef, GeneratedBy, Provenance
+from cstar.orchestration.models import (
+    BlueprintRef,
+    CatalogSpecRef,
+    GeneratedBy,
+    Provenance,
+)
 
 _BUNDLED_CATALOG = Path(cstar.catalog.__file__).parent / "bundled"
 _MODEL_DIR = _BUNDLED_CATALOG / "ModelSpec" / "cson_roms-marbl_v0.1"
@@ -4422,11 +4427,32 @@ class TestProvenanceStamping:
         assert prov.notes == "hand-written"
         assert prov.content_hash == cfg.content_hash()
 
-    def test_legacy_versions_survive_a_resave_of_unchanged_content(
+    def test_blueprint_written_without_stamping_is_stamped_when_saved(
         self, monkeypatch, tmp_path
     ):
-        """A file whose recorded hash still matches is not re-stamped, so the
-        legacy fields it carries round-trip untouched.
+        """``to_yaml`` records the hash of every file it writes, stamped or not (a
+        script's output, a bundled catalog entry), so such a file's hash matches its
+        content while it names no producer: it is stamped, then kept.
+        """
+        self._patched_fb(monkeypatch)
+        path = _build().to_yaml(tmp_path / "bp.yaml")
+        back = ForgeBlueprint.from_yaml(path)
+        assert back.provenance.content_hash == back.content_hash()
+        assert back.provenance.generated_by is None
+
+        stamped = back.stamp_provenance("wizard")
+
+        assert stamped is not back
+        assert stamped.provenance.generated_by is not None
+        assert stamped.provenance.generated_by.tool == "wizard"
+        assert stamped.provenance.generated_at is not None
+        assert stamped.stamp_provenance("forge") is stamped
+        assert back.provenance.generated_by is None  # the original is untouched
+
+    def test_legacy_file_is_stamped_on_its_first_save_only(self, monkeypatch, tmp_path):
+        """A file written before ``generated_by`` existed has a matching hash and no
+        producer: the first save records one and clears the legacy versions, which
+        a resave of the stamped file then leaves alone.
         """
         self._patched_fb(monkeypatch)
         cfg = _build()
@@ -4440,16 +4466,23 @@ class TestProvenanceStamping:
                 )
             }
         )
-        path = cfg.stamp_provenance("wizard").to_yaml(tmp_path / "bp.yaml")
+        legacy = ForgeBlueprint.from_yaml(cfg.to_yaml(tmp_path / "legacy.yaml"))
+        assert legacy.provenance.forge_version == "0.2.0"
+        assert legacy.provenance.generated_by is None
 
-        back = ForgeBlueprint.from_yaml(path)
-        back.stamp_provenance("wizard").to_yaml(path)
+        path = legacy.stamp_provenance("wizard").to_yaml(tmp_path / "bp.yaml")
+        first = ForgeBlueprint.from_yaml(path)
+        first.stamp_provenance("wizard").to_yaml(path)
         again = ForgeBlueprint.from_yaml(path)
 
-        assert again.provenance == back.provenance
-        assert again.provenance.forge_version == "0.2.0"
-        assert again.provenance.cstar_version == "cstar-ocean==0.9.1"
-        assert again.provenance.generated_by is None
+        assert first.provenance.generated_by is not None
+        assert first.provenance.generated_by.tool == "wizard"
+        assert (
+            first.provenance.forge_version,
+            first.provenance.cstar_version,
+            first.provenance.roms_tools_version,
+        ) == (None, None, None)
+        assert again.provenance == first.provenance
 
 
 class TestMigrateV9ToV10Provenance:
@@ -7025,6 +7058,25 @@ class TestCompositionRefs:
         ]
         assert composition_refs(Composition()) == []
 
+    @pytest.mark.parametrize("name", [None, "", "   "])
+    def test_a_blank_name_has_no_ref(self, name):
+        """A hand-edited name that is only whitespace is no name: it is skipped."""
+        composition = Composition(
+            domain=SpecRef(name=name, origin="catalog"),
+            output=SpecRef(name="standard", origin="catalog"),
+        )
+
+        assert [ref.kind for ref in composition_refs(composition)] == ["OutputSpec"]
+
+    @pytest.mark.parametrize("origin", ["", "   "])
+    def test_a_blank_origin_is_kept_as_unknown(self, origin):
+        """The origin is informational: a spec that names none still has its ref."""
+        composition = Composition(domain=SpecRef(name="wio-toy", origin=origin))
+
+        assert composition_refs(composition) == [
+            CatalogSpecRef(kind="DomainSpec", name="wio-toy", origin="")
+        ]
+
     def test_every_spec_entry_of_the_composition_has_a_kind(self):
         """A ``SpecRef`` entry added to ``Composition`` must get its kind, or its
         spec would silently drop out of an emitted blueprint's provenance.
@@ -7092,3 +7144,24 @@ class TestEmittedProvenance:
         dumped = yaml.safe_load(yaml.safe_dump(provenance.model_dump(mode="json")))
 
         assert Provenance.model_validate(dumped) == provenance
+
+    def test_blank_composition_entries_of_a_hand_edited_file_do_not_abort_the_run(
+        self,
+    ):
+        """The provenance is informational, and is minted after the expensive input
+        generation: a blank name or origin in ``composition`` must not fail the run.
+        """
+        data = yaml.safe_load(_build().to_yaml_str())
+        data["composition"]["model"] = {"name": "   ", "origin": "catalog"}
+        data["composition"]["domain"] = {"name": "wio-toy", "origin": ""}
+        cfg = ForgeBlueprint.from_yaml_data(data)  # loads fine, as a hand edit does
+
+        provenance = emitted_provenance(cfg)
+
+        assert provenance.derived_from[0] == producer_ref(cfg)
+        assert [
+            ref
+            for ref in provenance.derived_from
+            if isinstance(ref, CatalogSpecRef)
+            and ref.kind in ("ModelSpec", "DomainSpec")
+        ] == [CatalogSpecRef(kind="DomainSpec", name="wio-toy", origin="")]

@@ -285,8 +285,8 @@ class CatalogSpecRef(ConfiguredBaseModel):
     name: RequiredString
     """The name of the referenced spec."""
 
-    origin: RequiredString
-    """Where the spec came from, e.g. `catalog`, `custom` or `model_default`."""
+    origin: str = Field(default="")
+    """Where the spec came from, e.g. `catalog`, `custom` or `model_default`; empty when unknown."""
 
     modified: bool = Field(default=False)
     """Whether the spec was edited after it was selected."""

@@ -381,8 +381,11 @@ def process_forge_blueprint(
         caller — this module does not resolve the host itself, so it carries no
         ``cstar.applications.forge.config`` dependency and relocates cleanly into C-Star. Forge's
         entry points (``cstar.applications.forge.runtime``) supply it via ``config.resolve_host()``;
-        C-Star will supply its own. Only used here for logging; the executor resolves
-        its own paths. When ``None``, the host line is not logged.
+        C-Star will supply its own. Used here for logging and to record
+        ``host.working_dir`` in the emitted blueprint's
+        ``provenance.generated_by.working_dir``; the executor resolves its own
+        paths. When ``None``, the host line is not logged and no working directory
+        is recorded.
     validate :
         If True (default), fail fast — validate the config's ``model_settings``
         against the run-time schema *before* any downloads/generation.

@@ -70,8 +70,8 @@
                     "type": "string"
                 },
                 "origin": {
-                    "description": "Where the spec came from, e.g. `catalog`, `custom` or `model_default`.",
-                    "minLength": 1,
+                    "default": "",
+                    "description": "Where the spec came from, e.g. `catalog`, `custom` or `model_default`; empty when unknown.",
                     "title": "Origin",
                     "type": "string"
                 },
@@ -84,8 +84,7 @@
             },
             "required": [
                 "kind",
-                "name",
-                "origin"
+                "name"
             ],
             "title": "CatalogSpecRef",
             "type": "object"

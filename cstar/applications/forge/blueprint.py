@@ -433,11 +433,11 @@ _HASH_EXCLUDE = {
 # v10 (2026-10): ``provenance`` builds on the ``Blueprint`` base's provenance block
 # (``ForgeProvenance``): the producing event is recorded in ``generated_by`` (tool,
 # id, system, package versions), re-stamped by ``ForgeBlueprint.stamp_provenance``
-# whenever the content hash changes; ``cstar_version``/``roms_tools_version`` are
-# legacy and no longer stamped. This is an explicit exception to the "additive
-# fields don't bump" rule above: newly saved files carry ``provenance.generated_by``,
-# which v9 builds reject as an unknown key, so the bump makes an older install say
-# "upgrade cstar-ocean" instead. No data migration.
+# whenever the content hash changes or none is recorded yet; ``cstar_version``/
+# ``roms_tools_version`` are legacy and no longer stamped. This is an explicit
+# exception to the "additive fields don't bump" rule above: newly saved files carry
+# ``provenance.generated_by``, which v9 builds reject as an unknown key, so the bump
+# makes an older install say "upgrade cstar-ocean" instead. No data migration.
 FORGE_BLUEPRINT_VERSION = 10
 
 # Identifies the C-Star application that CONSUMES this blueprint — i.e. the "forge"
@@ -493,14 +493,15 @@ _COMPOSITION_SPEC_KINDS: dict[str, CatalogSpecKind] = {
 def composition_refs(composition: Composition) -> list[CatalogSpecRef]:
     """Return a reference to each catalog spec ``composition`` records by name.
 
-    A spec with no name was authored from scratch, so has nothing to reference.
+    A spec with no name (``None``, empty or only whitespace, as a hand-edited file
+    may hold) was authored from scratch, so has nothing to reference.
     """
     return [
         CatalogSpecRef(
             kind=kind, name=spec.name, origin=spec.origin, modified=spec.modified
         )
         for field, kind in _COMPOSITION_SPEC_KINDS.items()
-        if (spec := getattr(composition, field)).name
+        if ((spec := getattr(composition, field)).name or "").strip()
     ]
 
 
@@ -1402,18 +1403,17 @@ class ForgeProvenance(Provenance):
     ``versions`` hold the package versions involved. It is never filled inside the
     resolver (to keep resolution deterministic/reproducible, and because
     ``roms_tools`` isn't guaranteed installed there): ``stamp_provenance`` (on
-    ``ForgeBlueprint``) records it when the content changes, and a caller carrying a
-    loaded value through a re-resolve passes it back in unchanged.
-    ``derived_from`` stays empty -- a forge blueprint's inputs are recorded in
-    ``composition``.
+    ``ForgeBlueprint``) records it when the content changes or has never been
+    stamped, and a caller carrying a loaded value through a re-resolve passes it
+    back in unchanged. ``derived_from`` stays empty -- a forge blueprint's inputs
+    are recorded in ``composition``.
 
     ``forge_version``, ``cstar_version`` and ``roms_tools_version`` are legacy
     fields, no longer stamped (``generated_by.versions`` replaces them). Files
-    written before v10 carry them, and they still load and round-trip; a re-stamp
-    clears them, since they described the previous content. ``forge_version``
-    predates that: blueprints written by the former standalone cstar-forge package
-    recorded a ``git describe`` of its checkout, and Forge now ships in
-    ``cstar-ocean`` as ``cstar.applications.forge``.
+    written before v10 carry them, and they still load and round-trip; stamping
+    clears them. ``forge_version`` predates v10: blueprints written by the former
+    standalone cstar-forge package recorded a ``git describe`` of its checkout,
+    and Forge now ships in ``cstar-ocean`` as ``cstar.applications.forge``.
     """
 
     forge_version: str | None = None
@@ -1670,16 +1670,22 @@ class ForgeBlueprint(Blueprint):
         """Return this blueprint with its provenance stamped as written by ``tool``.
 
         Provenance records the event that produced the *content*, so it is
-        re-stamped only when the content changed: while the recorded
-        ``content_hash`` still matches (a resave, an unchanged round trip), ``self``
-        comes back as is and keeps its ``generated_by.id`` and ``generated_at``.
-        Otherwise the copy takes the new hash, ``generated_at`` now (UTC) and a
+        stamped when the content changed, or when it has never been stamped. While
+        the recorded ``content_hash`` still matches and a ``generated_by`` is
+        recorded (a resave, an unchanged round trip), ``self`` comes back as is and
+        keeps its ``generated_by.id`` and ``generated_at``; a matching hash alone is
+        not enough, as :meth:`to_yaml_str` records it on every write, stamped or
+        not. Otherwise the copy takes the new hash, ``generated_at`` now (UTC) and a
         fresh ``generated_by`` (see :func:`new_generated_by`), and the legacy
-        version fields are cleared, since they described the previous content.
-        ``notes`` and ``override_files_applied`` are kept; ``self`` is never mutated.
+        version fields are cleared (``generated_by.versions`` replaces them).
+        ``notes`` and ``override_files_applied`` are kept; ``self`` is never
+        mutated.
         """
         content_hash = self.content_hash()
-        if content_hash == self.provenance.content_hash:
+        if (
+            content_hash == self.provenance.content_hash
+            and self.provenance.generated_by is not None
+        ):
             return self
         stamped = self.provenance.model_copy(
             update={

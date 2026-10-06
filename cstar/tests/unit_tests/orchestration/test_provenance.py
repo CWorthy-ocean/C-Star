@@ -92,6 +92,20 @@ def test_every_catalog_spec_kind_loads_as_a_spec_ref(kind: str) -> None:
     ]
 
 
+def test_catalog_spec_ref_origin_is_informational() -> None:
+    """Verify a spec reference needs no origin: it reads as empty, however it is
+    left blank, and survives a dump that drops defaults.
+    """
+    ref = CatalogSpecRef.model_validate({"kind": "DomainSpec", "name": "wio-toy"})
+
+    assert ref.origin == ""
+    assert CatalogSpecRef(kind="DomainSpec", name="wio-toy", origin="  ") == ref
+
+    dumped = ref.model_dump(exclude_defaults=True)
+    assert dumped == {"kind": "DomainSpec", "name": "wio-toy"}
+    assert Provenance.model_validate({"derived_from": [dumped]}).derived_from == [ref]
+
+
 @pytest.mark.parametrize(
     "ref",
     [

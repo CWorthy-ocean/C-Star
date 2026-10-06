@@ -178,12 +178,14 @@ filenames off it.
   or where it's produced. Recorded on ``to_yaml``; ``verify_content_hash``
   warns (doesn't block) on a mismatched hand-edit at load.
 - **``stamp_provenance(tool)``** -- the one place a blueprint's provenance is
-  stamped. When the recomputed ``content_hash`` equals the recorded one it returns
-  ``self``; otherwise a copy with the new hash, ``generated_at`` now (UTC) and a
-  fresh ``generated_by`` from ``new_generated_by(tool)`` (the tool, a uuid4 minted
-  once, the system, and ``generation_versions()``: the ``cstar-ocean`` and
-  ``roms-tools`` versions), with the legacy ``forge_version``/``cstar_version``/
-  ``roms_tools_version`` cleared. ``to_yaml_str`` only serializes and fingerprints
+  stamped. When the recomputed ``content_hash`` equals the recorded one and a
+  ``generated_by`` is recorded it returns ``self`` (a matching hash alone is not
+  enough: ``to_yaml_str`` records it on every write, stamped or not); otherwise a
+  copy with the new hash, ``generated_at`` now (UTC) and a fresh ``generated_by``
+  from ``new_generated_by(tool)`` (the tool, a uuid4 minted once, the system, and
+  ``generation_versions()``: the ``cstar-ocean`` and ``roms-tools`` versions),
+  with the legacy ``forge_version``/``cstar_version``/``roms_tools_version``
+  cleared. ``to_yaml_str`` only serializes and fingerprints
   (``provenance`` last, an empty ``derived_from`` dropped), so a producer stamps
   first; the wizard does so in ``ForgeBlueprintWizard._save_config``, which
   every write of its config to disk goes through, and carries the stamp through

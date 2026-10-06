@@ -12,7 +12,7 @@ there on first use so that ``import cstar.catalog`` stays light.
 import asyncio
 import logging
 import typing as t
-from collections.abc import Mapping, Sequence
+from collections.abc import Collection, Mapping, Sequence
 from datetime import UTC, datetime
 from enum import StrEnum
 from pathlib import Path
@@ -30,6 +30,8 @@ from cstar.orchestration.models import (
 
 if t.TYPE_CHECKING:
     from cstar.catalog.domain_catalog import LayeredCatalog
+    from cstar.orchestration.orchestration import LiveWorkplan
+    from cstar.orchestration.tracking import WorkplanRun
 
 logger = logging.getLogger(__name__)
 
@@ -49,7 +51,9 @@ class OutputStatus(StrEnum):
     """The recorded producer is not an entry in the catalog."""
 
     UNVERIFIED = "unverified"
-    """The output records no producer, e.g. it was emitted before provenance existed."""
+    """The output cannot be checked against the catalog: it records no producer
+    (e.g. it was emitted before provenance existed), or the catalog entry of its
+    recorded producer could not be loaded."""
 
 
 class BlueprintOutput(ConfiguredBaseModel):
@@ -110,15 +114,17 @@ def _recency(output: BlueprintOutput) -> tuple[bool, datetime]:
 
 def _entry_candidates(
     catalog: "LayeredCatalog", application: str
-) -> tuple[dict[str, BlueprintRef], list[_Candidate]]:
+) -> tuple[dict[str, BlueprintRef], list[_Candidate], frozenset[str]]:
     """Read the catalog's ``application`` entries.
 
     Returns
     -------
-    tuple[dict[str, BlueprintRef], list[_Candidate]]
+    tuple[dict[str, BlueprintRef], list[_Candidate], frozenset[str]]
         The current producer reference of each entry that emits a blueprint, keyed
-        by the name outputs record it under, and the blueprint files that exist
-        where a standalone run of such an entry publishes it.
+        by the name outputs record it under; the blueprint files that exist where a
+        standalone run of such an entry publishes it; and the names of the entries
+        that could not be loaded (as the catalog names them, since an unreadable
+        entry has no blueprint name to give).
     """
     from cstar.applications.core import get_application
     from cstar.execution.file_system import JobFileSystemManager
@@ -164,7 +170,40 @@ def _entry_candidates(
         "runs were skipped",
         unlocatable,
     )
-    return current, candidates
+    return current, candidates, frozenset(unloadable)
+
+
+def _step_candidates(
+    runs: Sequence["WorkplanRun"],
+    workplans: Sequence["LiveWorkplan | None"],
+    application: str,
+) -> tuple[list[_Candidate], list[str]]:
+    """List the blueprint files in the output directories of the ``application``
+    steps of the runs' workplans, in the order of ``runs``.
+
+    ``workplans`` are the runs' own, in the same order; ``None`` marks one that
+    could not be read.
+
+    Returns
+    -------
+    tuple[list[_Candidate], list[str]]
+        The files found, and the ids of the runs whose workplan could not be read.
+    """
+    candidates: list[_Candidate] = []
+    unreadable: list[str] = []
+    for run, workplan in zip(runs, workplans, strict=True):
+        if workplan is None:  # e.g. the run was purged
+            unreadable.append(run.run_id)
+            continue
+        for step in workplan.steps:
+            if step.application != application:
+                continue
+            output_dir = step.fsm.output_dir
+            files = sorted([*output_dir.glob("*.yaml"), *output_dir.glob("*.yml")])
+            candidates.extend(
+                _Candidate(path, run.run_id, step.name, "") for path in files
+            )
+    return candidates, unreadable
 
 
 async def _run_candidates(application: str) -> list[_Candidate]:
@@ -183,20 +222,10 @@ async def _run_candidates(application: str) -> list[_Candidate]:
         [run.trx_workplan_path for run in runs], LiveWorkplan, max_concurrency()
     )
 
-    candidates: list[_Candidate] = []
-    unreadable: list[str] = []
-    for run, workplan in zip(runs, workplans, strict=True):
-        if workplan is None:  # e.g. the run was purged
-            unreadable.append(run.run_id)
-            continue
-        for step in workplan.steps:
-            if step.application != application:
-                continue
-            output_dir = step.fsm.output_dir
-            files = sorted([*output_dir.glob("*.yaml"), *output_dir.glob("*.yml")])
-            candidates.extend(
-                _Candidate(path, run.run_id, step.name, "") for path in files
-            )
+    # Listing each step's directory blocks, so it runs off the event loop.
+    candidates, unreadable = await asyncio.to_thread(
+        _step_candidates, runs, workplans, application
+    )
 
     _log_skipped("runs have no readable workplan and were skipped", unreadable)
     return candidates
@@ -206,8 +235,14 @@ def _describe(
     candidates: Sequence[_Candidate],
     application: str,
     current: Mapping[str, BlueprintRef],
+    unloadable: Collection[str],
 ) -> list[BlueprintOutput]:
-    """Describe the candidates that are blueprints, one output per file."""
+    """Describe the candidates that are blueprints, one output per file.
+
+    A recorded producer that is not among the ``current`` ones reads as
+    uncataloged, unless it names one of the ``unloadable`` entries: that one is in
+    the catalog, so the output is unverified.
+    """
     outputs: list[BlueprintOutput] = []
     seen: set[Path] = set()
     not_blueprints: list[Path] = []
@@ -251,12 +286,13 @@ def _describe(
             status = OutputStatus.UNVERIFIED
         else:
             producer = recorded
-            if recorded.name not in current:
-                status = OutputStatus.UNCATALOGED
-            elif recorded == current[recorded.name]:
-                status = OutputStatus.CURRENT
+            if recorded.name in current:
+                same = recorded == current[recorded.name]
+                status = OutputStatus.CURRENT if same else OutputStatus.CHANGED
+            elif recorded.name in unloadable:
+                status = OutputStatus.UNVERIFIED
             else:
-                status = OutputStatus.CHANGED
+                status = OutputStatus.UNCATALOGED
 
         outputs.append(
             BlueprintOutput(
@@ -310,15 +346,22 @@ async def find_blueprint_outputs(
     Entries are matched to outputs by the producer name the application's
     ``emitted_blueprint`` reports. An entry that cannot be loaded, a run whose
     workplan cannot be read (it was purged, say) and a file that is not a
-    blueprint are skipped, each kind noted in one debug message. An output of an
-    entry that could not be loaded reads as `OutputStatus.UNCATALOGED`. An error
-    in the application's ``emitted_blueprint`` is not skipped but propagates.
+    blueprint are skipped, each kind noted in one debug message. An output whose
+    recorded producer is an entry that could not be loaded (matched by the entry's
+    name in the catalog, as its own blueprint name is unreadable) reads as
+    `OutputStatus.UNVERIFIED`, not `OutputStatus.UNCATALOGED`: the entry exists,
+    only the output cannot be checked against it. An error in the application's
+    ``emitted_blueprint`` is not skipped but propagates.
     """
     # Loading the entries (the application's first use imports its dependencies)
     # and reading the files block, so they run off the event loop: the wizard
-    # awaits this on the kernel's loop.
-    current, candidates = await asyncio.to_thread(
-        _entry_candidates, catalog, application
+    # awaits this on the kernel's loop. The two scans do not depend on each other,
+    # so they overlap.
+    (current, candidates, unloadable), run_candidates = await asyncio.gather(
+        asyncio.to_thread(_entry_candidates, catalog, application),
+        _run_candidates(application),
     )
-    candidates.extend(await _run_candidates(application))
-    return await asyncio.to_thread(_describe, candidates, application, current)
+    candidates.extend(run_candidates)
+    return await asyncio.to_thread(
+        _describe, candidates, application, current, unloadable
+    )

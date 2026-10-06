@@ -7081,13 +7081,7 @@ class ForgeBlueprintWizard:
                 self.save_path.value = str(
                     Path(self.save_path.value).parent / f"{cfg.name}.yaml"
                 )
-        # A download is a copy for the user, not a save: stamp it, once so both
-        # links agree, but leave the carried provenance to `_save_config`.
-        download_cfg = cfg.stamp_provenance(WIZARD_TOOL)
-        self.download_link.value = self._download_html(
-            download_cfg, caption="Download blueprint"
-        )
-        self.download_link_review.value = self._download_html(download_cfg)
+        self._refresh_download_links(cfg)
         # Surface (never silently ship) provisional open-boundary defaults: the
         # checkboxes currently reflect whatever's live, but that's only a real
         # mask-derived value once _boundaries_derived is True or the user has
@@ -7262,6 +7256,20 @@ class ForgeBlueprintWizard:
         if self._forcing_editor is not None:
             self._forcing_editor.retitle(self._forcing_summary)
         self._retitle_advanced_editor()
+
+    def _refresh_download_links(self, cfg: ForgeBlueprint) -> None:
+        """Point both download links at ``cfg``, stamped once so they agree.
+
+        A download is a copy for the user, not a save: a stamp minted here is not
+        carried (that is `_save_config`'s job). A ``cfg`` that is already stamped,
+        as the config just saved is, comes back from ``stamp_provenance`` as it is,
+        so its links hand out exactly the file that was written.
+        """
+        download_cfg = cfg.stamp_provenance(WIZARD_TOOL)
+        self.download_link.value = self._download_html(
+            download_cfg, caption="Download blueprint"
+        )
+        self.download_link_review.value = self._download_html(download_cfg)
 
     @staticmethod
     def _download_html(cfg: ForgeBlueprint, caption: str | None = None) -> str:
@@ -7616,8 +7624,9 @@ class ForgeBlueprintWizard:
         and return the path.
 
         The stamp becomes the carried provenance, so a later save or rebuild keeps
-        it while the content is unchanged (see ``ForgeBlueprint.stamp_provenance``).
-        Every write of the current config to disk goes through here.
+        it while the content is unchanged (see ``ForgeBlueprint.stamp_provenance``),
+        and the download links are pointed at the file written. Every write of the
+        current config to disk goes through here.
         """
         if self.config is None:
             raise RuntimeError("no valid configuration to save")
@@ -7625,6 +7634,7 @@ class ForgeBlueprintWizard:
         written = stamped.to_yaml(path)
         self._carried_provenance = stamped.provenance
         self.config = stamped
+        self._refresh_download_links(stamped)
         return written
 
     def _on_save(self, _):
