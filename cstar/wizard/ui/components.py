@@ -301,8 +301,16 @@ body[data-voila] .forge-shell {{ max-width: {SHELL_MAX_WIDTH}; margin: 0 auto; p
     overflow-y: auto;
     z-index: 4;
 }}
-.forge-app .forge-side-top.forge-pinned {{ position: sticky; top: {STICKY_BAR_HEIGHT}; }}
-.forge-app .forge-side-bottom.forge-pinned {{ position: sticky; bottom: 0; }}
+.forge-app .forge-side-top.forge-pinned {{
+    position: sticky;
+    top: {STICKY_BAR_HEIGHT};
+    box-shadow: 0 6px 12px -8px rgba(0, 0, 0, 0.35);
+}}
+.forge-app .forge-side-bottom.forge-pinned {{
+    position: sticky;
+    bottom: 0;
+    box-shadow: 0 -6px 12px -8px rgba(0, 0, 0, 0.35);
+}}
 .forge-app .forge-pane-controls {{ align-items: center; gap: 14px; flex-wrap: wrap; }}
 .forge-app .forge-side-right .forge-pane-body {{ flex-direction: column !important; }}
 .forge-app .forge-side-top .forge-pane-body,
