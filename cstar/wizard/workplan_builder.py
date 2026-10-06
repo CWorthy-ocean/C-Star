@@ -2075,11 +2075,14 @@ class WorkplanBuilderPage:
     def roms_blueprint_file(self, name: str) -> tuple[str, list[str]]:
         """The roms_marbl blueprint file of a catalog entry, and any problems.
 
-        A catalog entry is a directory; it must hold exactly one roms_marbl file.
+        A flat catalog entry is the file; a directory entry must hold exactly
+        one roms_marbl file.
         """
         if not name:
             return "", []
         directory = self.catalog.roms_marbl_blueprint_path(name)
+        if directory.suffix:
+            return str(directory), []
         found = [
             p
             for p in sorted(directory.glob("*.y*ml"))
