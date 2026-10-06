@@ -67,6 +67,7 @@ Bug Fixes
 - Step sentinels now record which launcher created them, so a local pre-run after a failed SLURM run under the same run-id no longer crashes while reading the SLURM sentinel and instead clears and re-prepares the failed steps. (`#733 <https://github.com/CWorthy-ocean/C-Star/pull/733>`_)
 - ``cstar admin clean`` no longer deletes the user catalog at ``~/cstar/catalog`` when it clears the C-Star data directory. (`#736 <https://github.com/CWorthy-ocean/C-Star/pull/736>`_)
 - Tab completion of step names found no steps for a run whose tracking record had been cleaned up. (`#739 <https://github.com/CWorthy-ocean/C-Star/pull/739>`_)
+- Forge runs with ``bgc_mode: none`` crashed in ROMS with garbage tracer names because the namelist still requested 32 BGC tracers; Forge now sets the BGC tracer count to 0 when MARBL is off. (`#741 <https://github.com/CWorthy-ocean/C-Star/pull/741>`_)
 
 Improvements
 ~~~~~~~~~~~~
@@ -86,6 +87,11 @@ Improvements
 - The orchestrator now refuses to launch a step a second time within a run, rather than silently resubmitting its job. (`#738 <https://github.com/CWorthy-ocean/C-Star/pull/738>`_)
 - Runs started before this change keep their existing directory when re-run, resumed, gathered, or cleaned, so in-flight work continues where it is. (`#739 <https://github.com/CWorthy-ocean/C-Star/pull/739>`_)
 - A malformed ``timestamp`` (partial date, timezone, fractional seconds) is reported by ``cstar workplan check`` / submission, before any step runs. (`#740 <https://github.com/CWorthy-ocean/C-Star/pull/740>`_)
+- A Forge blueprint that requests BGC tracers with MARBL turned off is now rejected with a clear message instead of failing inside ROMS. (`#741 <https://github.com/CWorthy-ocean/C-Star/pull/741>`_)
+
+  - Stored blueprints fail during ``cstar forge run`` validation, before any source data is staged or inputs are generated.
+  - The wizard's validity banner reports the same error.
+
 
 Miscellaneous
 ~~~~~~~~~~~~~
@@ -106,3 +112,4 @@ Miscellaneous
 - Corrected the workplans guide, which said re-running a run ID keeps monitoring until the run ends; it now schedules any remaining steps and returns. (`#738 <https://github.com/CWorthy-ocean/C-Star/pull/738>`_)
 - Corrected the workplans guide's status example, which passed the run ID as ``--run-id`` although ``cstar workplan status`` takes it as an argument. (`#738 <https://github.com/CWorthy-ocean/C-Star/pull/738>`_)
 - The HPC guide, terminology page, and workplan tutorial show the new run layout; the HPC guide's step-directory path now includes ``tasks/``. (`#739 <https://github.com/CWorthy-ocean/C-Star/pull/739>`_)
+- The Forge specs docs now describe how ``param.ntrc_bio`` follows ``bgc_mode``. (`#741 <https://github.com/CWorthy-ocean/C-Star/pull/741>`_)
