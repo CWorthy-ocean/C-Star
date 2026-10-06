@@ -20,6 +20,9 @@ Breaking Changes
 - On a machine that exports only ``SCRATCH_DIR`` or ``LOCAL_SCRATCH``, the source-data cache now goes to scratch instead of your home directory. (`#736 <https://github.com/CWorthy-ocean/C-Star/pull/736>`_)
 - Forge's per-system layout registry (``SYSTEM_LAYOUT_REGISTRY``, ``register_system``) and ``detect_system`` are removed; custom layouts registered against it no longer apply. (`#736 <https://github.com/CWorthy-ocean/C-Star/pull/736>`_)
 - New workplan runs are written to ``CSTAR_DATA_HOME/workplan_runs/<run-id>`` instead of ``CSTAR_DATA_HOME/<run-id>``; scripts or notebooks that build the old path will not find new runs. (`#739 <https://github.com/CWorthy-ocean/C-Star/pull/739>`_)
+- ``Workplan.compute_environment`` is validated: unknown keys are rejected at load. The two keys the old bundled templates used (``num_nodes``, ``num_cpus_per_process``) were never read and are dropped with a warning instead. (`#743 <https://github.com/CWorthy-ocean/C-Star/pull/743>`_)
+- The blueprint page's "Workplan (experimental)" export is removed; the Workplan page replaces it. (`#743 <https://github.com/CWorthy-ocean/C-Star/pull/743>`_)
+- The catalog's ``roms_marbl_blueprint_path`` now returns the blueprint file for a flat ``blueprints/B_<name>.yaml`` entry (the per-machine directory layout still returns the directory). (`#743 <https://github.com/CWorthy-ocean/C-Star/pull/743>`_)
 
 New features
 ~~~~~~~~~~~~
@@ -46,6 +49,21 @@ New features
 
   - ``timestamp`` takes an ISO 8601 date-time, a date alone (meaning midnight), or the 14-digit stamp from restart file names (e.g. ``20120201000000``).
   - If the source has no restart at that timestamp, the step fails with an error listing the restart timestamps that are available.
+
+- ``cstar wizard`` opens a two-page app, Blueprint and Workplan; ``cstar forge wizard`` still works and launches the same app. (`#743 <https://github.com/CWorthy-ocean/C-Star/pull/743>`_)
+- The Workplan page composes a workplan from catalog, path, uploaded, deferred (``from_step``) or inline blueprints, with per-step overrides, ``continue-from``/``nest-from`` directives (including the restart ``timestamp``), compute overrides, and references to steps of other runs (``step@alias``). (`#743 <https://github.com/CWorthy-ocean/C-Star/pull/743>`_)
+
+  - Recipes generate time-chunked runs (calendar months, fixed days or equal parts; each chunk writes only ``end_date``), spin-up dt ramps, forge-then-run pairs and upscaling chains, from an existing step or directly from a blueprint.
+  - Loading an older workplan rewrites deprecated forms (``rst_path``, ``bry_path``, ``joined_output``, same-run absolute paths, dummy-file blueprints) into the current ones and lists every change; the loaded file is never modified without an explicit overwrite confirmation.
+  - Deep check, pre-run readiness, and streamed Check and Run (with a Pre-run-first option on SLURM targets) run from the page.
+
+- A live preview pane shows the YAML (editable, with Apply and Discard) and a dependency graph; a Preview control places it right, bottom or top and a "Keep preview visible" pin keeps it on screen while the cards scroll. (`#743 <https://github.com/CWorthy-ocean/C-Star/pull/743>`_)
+- ``compute_environment`` can choose the launcher (``launcher: local | slurm``), name the system it was written for, and set workplan-wide SLURM defaults that every step inherits unless it overrides them. (`#743 <https://github.com/CWorthy-ocean/C-Star/pull/743>`_)
+
+  - Requesting ``slurm`` on a machine without a scheduler fails at schedule time; a ``system`` that does not match the current machine logs a warning.
+
+- Applications can describe the blueprint they emit for a deferred downstream step (``ApplicationDefinition.emitted_blueprint``); forge does, so a deferred ROMS-MARBL step is prefilled with its file name and CPU count. (`#743 <https://github.com/CWorthy-ocean/C-Star/pull/743>`_)
+- The catalog reads a flat ``blueprints/B_<name>.yaml`` as a ROMS-MARBL blueprint beside the older per-machine directories. (`#743 <https://github.com/CWorthy-ocean/C-Star/pull/743>`_)
 
 
 
@@ -92,6 +110,10 @@ Improvements
   - Stored blueprints fail during ``cstar forge run`` validation, before any source data is staged or inputs are generated.
   - The wizard's validity banner reports the same error.
 
+- ``cstar workplan check``'s deep resolution is a library function (``cstar.orchestration.check.deep_check``) the CLI wraps. (`#743 <https://github.com/CWorthy-ocean/C-Star/pull/743>`_)
+- The wizard shell is wider, and ``position: sticky`` now works for the status bar and the preview pane in voila (the ipywidgets and voila output containers no longer clip it). (`#743 <https://github.com/CWorthy-ocean/C-Star/pull/743>`_)
+- The Download button separates its caption from the file name on both pages. (`#743 <https://github.com/CWorthy-ocean/C-Star/pull/743>`_)
+
 
 Miscellaneous
 ~~~~~~~~~~~~~
@@ -113,3 +135,5 @@ Miscellaneous
 - Corrected the workplans guide's status example, which passed the run ID as ``--run-id`` although ``cstar workplan status`` takes it as an argument. (`#738 <https://github.com/CWorthy-ocean/C-Star/pull/738>`_)
 - The HPC guide, terminology page, and workplan tutorial show the new run layout; the HPC guide's step-directory path now includes ``tasks/``. (`#739 <https://github.com/CWorthy-ocean/C-Star/pull/739>`_)
 - The Forge specs docs now describe how ``param.ntrc_bio`` follows ``bgc_mode``. (`#741 <https://github.com/CWorthy-ocean/C-Star/pull/741>`_)
+- Pattern generators live in ``cstar/orchestration/patterns.py`` with golden fixtures; an e2e test runs a generated hello_world chain through ``cstar workplan run``. (`#743 <https://github.com/CWorthy-ocean/C-Star/pull/743>`_)
+- Wizard documentation gains a Workplan page section; workplan documentation describes ``compute_environment`` and drops the incorrect ``local: num_cpus`` claim. (`#743 <https://github.com/CWorthy-ocean/C-Star/pull/743>`_)
