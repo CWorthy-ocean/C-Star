@@ -77,6 +77,13 @@ New features
   - Existing destination files are never overwritten; the source stays in place and is reported.
   - Emptied per-machine directories are removed, and anything left behind, such as ``Build/`` or sidecar files, is listed.
 
+- SLURM account and queue values supplied by the workplan satisfy the launcher's environment check; only the variables the workplan leaves out must still be set. (`#744 <https://github.com/CWorthy-ocean/C-Star/pull/744>`_)
+
+  - A value counts when it is set in the workplan's ``compute_environment.slurm``, or in every step's ``compute_overrides.slurm``.
+  - Variables that are still missing are all named in one error, as before.
+  - ``cstar blueprint run`` is unchanged and still reads the environment.
+
+
 
 
 
@@ -100,6 +107,8 @@ Bug Fixes
 - Tab completion of step names found no steps for a run whose tracking record had been cleaned up. (`#739 <https://github.com/CWorthy-ocean/C-Star/pull/739>`_)
 - Forge runs with ``bgc_mode: none`` crashed in ROMS with garbage tracer names because the namelist still requested 32 BGC tracers; Forge now sets the BGC tracer count to 0 when MARBL is off. (`#741 <https://github.com/CWorthy-ocean/C-Star/pull/741>`_)
 - The Workplan page's predicted CPU count for a step followed the first catalog blueprint it saw instead of the blueprint actually chosen. (`#742 <https://github.com/CWorthy-ocean/C-Star/pull/742>`_)
+- A ``max_walltime`` in SLURM's day form (for example ``2-03:00:00``) validated but crashed job creation with ``invalid literal for int()``; it is now compared against the queue maximum correctly and submitted as written. (`#744 <https://github.com/CWorthy-ocean/C-Star/pull/744>`_)
+- The Workplan page's "walltime hours per simulated day" recipe option emitted the day form for chunks over 24 hours and so produced workplans that failed at submission; it now emits plain hours (``30:00:00``). (`#744 <https://github.com/CWorthy-ocean/C-Star/pull/744>`_)
 
 Improvements
 ~~~~~~~~~~~~
@@ -130,6 +139,8 @@ Improvements
 - Blueprints saved in the older layouts (``<name>.forge_blueprint.yaml``, ``B_<name>.yaml``, and ``blueprints/<machine>/<name>/``) are still read for one more release; loading such a catalog logs one warning that lists them and the command to run. (`#742 <https://github.com/CWorthy-ocean/C-Star/pull/742>`_)
 - The wizard's catalog status counts blueprints of every application, and the Workplan page's catalog pickers resolve entries by application. (`#742 <https://github.com/CWorthy-ocean/C-Star/pull/742>`_)
 - The catalog scan lists each directory once, skips hidden entries, and keeps reading the other directories when one fails. (`#742 <https://github.com/CWorthy-ocean/C-Star/pull/742>`_)
+- ``max_walltime`` accepts the SLURM clock grammar: one to three hour digits (``6:00:00``, ``100:00:00``) and one or two day digits (``14-00:00:00``); bare minutes and ``D-H`` are still rejected. (`#744 <https://github.com/CWorthy-ocean/C-Star/pull/744>`_)
+- A PBS job folds a day-form walltime into hours in its ``#PBS -l walltime=`` directive, since PBS has no day form. (`#744 <https://github.com/CWorthy-ocean/C-Star/pull/744>`_)
 
 
 Miscellaneous
@@ -157,3 +168,4 @@ Miscellaneous
 - The bundled forge blueprints move to ``blueprints/forge/``. (`#742 <https://github.com/CWorthy-ocean/C-Star/pull/742>`_)
 - The tutorial's wales toy blueprint is kept byte-identical to the bundled copy (guarded by a test); the unreferenced ``blueprint_pio.yaml`` tutorial file is removed and the plotter tutorial points at the default output path. (`#742 <https://github.com/CWorthy-ocean/C-Star/pull/742>`_)
 - The catalog and wizard documentation describe the layout and the migration. (`#742 <https://github.com/CWorthy-ocean/C-Star/pull/742>`_)
+- ``docs/workplans.rst``: the compute-environment note now describes which environment variables remain required, and the ``max_walltime`` key documents both forms. (`#744 <https://github.com/CWorthy-ocean/C-Star/pull/744>`_)
