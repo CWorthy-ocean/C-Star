@@ -804,7 +804,7 @@ class _StepPane:
             return self._current_path, []
         if kind == SOURCE_CATALOG_FORGE:
             catalog, name = self.page.catalog, self.catalog_forge.value
-            return (str(catalog.forge_blueprint_path(name)), []) if name else ("", [])
+            return (str(catalog.blueprint_path(FORGE, name)), []) if name else ("", [])
         if kind == SOURCE_CATALOG_ROMS:
             return self.page.roms_blueprint_file(self.catalog_roms.value)
         return "", []
@@ -1726,12 +1726,12 @@ class _BaseChooser:
         Raises
         ------
         ValueError
-            If a catalog entry is ambiguous or the file's application is unknown.
+            If the file's application is unknown.
         """
         kind = self.kind.value
         if kind == SOURCE_CATALOG_FORGE:
             name = self.catalog_forge.value
-            path = str(self.page.catalog.forge_blueprint_path(name)) if name else ""
+            path = str(self.page.catalog.blueprint_path(FORGE, name)) if name else ""
         elif kind == SOURCE_CATALOG_ROMS:
             path, problems = self.page.roms_blueprint_file(self.catalog_roms.value)
             if problems:
@@ -2064,37 +2064,24 @@ class WorkplanBuilderPage:
         """The catalog the Blueprint page currently uses (read on demand: Reload swaps it)."""
         return getattr(self.wizard, "catalog", None)
 
+    def _blueprint_names(self, application: str) -> list[str]:
+        """The catalog's blueprint names for *application* (none without a catalog)."""
+        names = getattr(self.catalog, "blueprint_names", None)
+        return list(names(application)) if names else []
+
     def roms_blueprint_names(self) -> list[str]:
         """The catalog's roms_marbl blueprint names."""
-        return list(getattr(self.catalog, "roms_marbl_blueprint_names", []))
+        return self._blueprint_names(ROMS_MARBL)
 
     def forge_blueprint_names(self) -> list[str]:
         """The catalog's forge blueprint names."""
-        return list(getattr(self.catalog, "forge_blueprint_names", []))
+        return self._blueprint_names(FORGE)
 
     def roms_blueprint_file(self, name: str) -> tuple[str, list[str]]:
-        """The roms_marbl blueprint file of a catalog entry, and any problems.
-
-        A flat catalog entry is the file; a directory entry must hold exactly
-        one roms_marbl file.
-        """
+        """The roms_marbl blueprint file of a catalog entry, and any problems."""
         if not name:
             return "", []
-        directory = self.catalog.roms_marbl_blueprint_path(name)
-        if directory.suffix:
-            return str(directory), []
-        found = [
-            p
-            for p in sorted(directory.glob("*.y*ml"))
-            if (f := blueprint_facts(p)) and f.application == ROMS_MARBL
-        ]
-        if len(found) == 1:
-            return str(found[0]), []
-        problem = (
-            f"catalog blueprint {name!r} holds {len(found)} roms_marbl blueprint "
-            f"files ({directory}); pick one with the path source"
-        )
-        return "", [problem]
+        return str(self.catalog.blueprint_path(ROMS_MARBL, name)), []
 
     def external_tokens(self) -> list[str]:
         """``step@alias`` tokens for the steps of the declared runs."""
@@ -3171,7 +3158,7 @@ class WorkplanBuilderPage:
     def _forge(self) -> Generated:
         name = self.forge_source.value
         path = (
-            str(self.catalog.forge_blueprint_path(name))
+            str(self.catalog.blueprint_path(FORGE, name))
             if name
             else self.forge_path.value.strip()
         )

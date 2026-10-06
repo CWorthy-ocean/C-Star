@@ -1090,7 +1090,11 @@ def test_load_from_catalog_resolves_path_and_delegates(monkeypatch):
     wiz._on_load_from_catalog(None)
 
     assert called == [True]
-    assert wiz.load_path.value.endswith("wio-toy-simple.forge_blueprint.yaml")
+    assert Path(wiz.load_path.value).parts[-3:] == (
+        "blueprints",
+        "forge",
+        "wio-toy-simple.yaml",
+    )
 
 
 def test_load_from_catalog_no_selection_surfaces_error(monkeypatch):
