@@ -85,26 +85,31 @@
     wrt_cdr_gas_avg = .true.
 /
 
+&cdr_lite_output_settings
+    cdr_lite_monthly_averages = .false.
+    do_cdr_lite_output = .false.
+    nrpf_cdr_lite = 24
+    output_period_cdr_lite = 3600.0
+    wrt_alk = .true.
+    wrt_cdr_lite_avg = .true.
+    wrt_dic = .true.
+    wrt_gas_exchange = .false.
+    wrt_sources = .true.
+    wrt_thickness_weighted = .true.
+    wrt_tracers = .true.
+    wrt_vertical_integrals = .true.
+/
+
+&cdr_lite_settings
+    cdr_online_carbonate_sensitivity = .false.
+/
+
 &cdr_output_settings
     cdr_monthly_averages = .false.
     do_cdr_output = .false.
     nrpf_cdr = 24
     output_period_cdr = 3600.0
     wrt_cdr_avg = .true.
-/
-
-&cdr_tracer_output_settings
-    cdr_trc_monthly_averages = .false.
-    do_cdr_tracer_output = .false.
-    nrpf_cdr_trc = 24
-    output_period_cdr_trc = 3600.0
-    wrt_alk = .true.
-    wrt_cdr_trc_avg = .true.
-    wrt_dic = .true.
-    wrt_sources = .true.
-    wrt_thickness_weighted = .true.
-    wrt_tracers = .true.
-    wrt_vertical_integrals = .true.
 /
 
 &diagnostics_settings
