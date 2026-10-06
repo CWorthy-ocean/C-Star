@@ -97,15 +97,19 @@ def migrate_catalog_layout(
 
     root = root.expanduser().resolve()
     report = CatalogMigrationReport()
-    legacy = sorted(DomainCatalog(root, suppress_validation=True).legacy_blueprints)
+    # Winners first, in the catalog's order: a legacy file that lost to another
+    # for the same destination is then reported as a collision, not moved.
+    legacy = DomainCatalog(root, suppress_validation=True).legacy_blueprints
 
     destinations: set[Path] = set()
+    planned: set[Path] = set()
     for application, name, src in legacy:
         dst = root / "blueprints" / application / f"{name}.yaml"
         destinations.add(dst.parent)
-        if dst.exists() or dst.is_symlink():
+        if dst in planned or dst.exists() or dst.is_symlink():
             report.skipped_collisions.append((src, dst))
         else:
+            planned.add(dst)
             report.moved.append((src, dst))
 
     # Directories of the form `blueprints/<machine>/<name>/` (the file sits four

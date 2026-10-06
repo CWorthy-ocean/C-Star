@@ -136,6 +136,28 @@ def test_migrate_catalog_layout_collision_is_skipped(
     assert _tree(root) == snapshot
 
 
+def test_migrate_catalog_layout_moves_winner_and_skips_duplicate_loser(
+    tmp_path: Path,
+) -> None:
+    """Two legacy files for one application+name: the flat file (the one the
+    catalog reads) moves and the per-machine duplicate is reported, not lost.
+    """
+    root = tmp_path.resolve()
+    bp = root / "blueprints"
+    flat = _write(bp / "B_dup.yaml", "flat")
+    nested = _write(bp / "anvil" / "dup" / "B_dup.yaml", "nested")
+    dst = bp / "roms_marbl" / "dup.yaml"
+
+    report = migrate_catalog_layout(root)
+
+    assert report.moved == [(flat, dst)]
+    assert report.skipped_collisions == [(nested, dst)]
+    assert dst.read_text() == "flat"
+    assert nested.read_text() == "nested"
+    # the loser's directories are untouched (the skip names the file)
+    assert report.removed_dirs == []
+
+
 def test_migrate_catalog_layout_second_run_is_noop(legacy_root: Path) -> None:
     """Migrating twice moves nothing the second time."""
     root = legacy_root.resolve()

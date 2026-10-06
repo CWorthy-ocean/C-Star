@@ -837,17 +837,137 @@ class TestBlueprintLayout:
         assert not [r for r in caplog.records if r.levelno >= logging.WARNING]
         assert "shadowed" in caplog.text
 
-    def test_legacy_first_seen_wins_within_legacy_forms(self, tmp_path):
+    def test_flat_legacy_file_wins_and_loser_is_still_recorded(self, tmp_path, caplog):
         root = tmp_path / "cat"
         nested = _write_bp(root / "blueprints" / "m" / "dup" / "B_dup.yaml")
-        _write_bp(root / "blueprints" / "B_dup.yaml")
+        flat = _write_bp(root / "blueprints" / "B_dup.yaml")
+        other = _write_bp(root / "blueprints" / "m" / "zed" / "B_zed.yaml")
+
+        with caplog.at_level(logging.WARNING, logger="cstar.catalog.domain_catalog"):
+            catalog = _catalog(root)
+
+        assert catalog.roms_marbl_blueprint_path("dup").samefile(flat)
+        legacy = catalog.legacy_blueprints
+        # winners first (flat dup, per-machine zed), then the loser
+        assert [(a, n) for a, n, _ in legacy] == [
+            ("roms_marbl", "dup"),
+            ("roms_marbl", "zed"),
+            ("roms_marbl", "dup"),
+        ]
+        assert legacy[0][2].samefile(flat)
+        assert legacy[1][2].samefile(other)
+        assert legacy[2][2].samefile(nested)
+        warnings = [r for r in caplog.records if r.levelno == logging.WARNING]
+        assert len(warnings) == 1
+        assert str(nested) in warnings[0].getMessage()
+        assert "ignored: duplicate" in warnings[0].getMessage()
+
+    def test_hidden_directories_and_files_are_skipped(self, tmp_path, caplog):
+        root = tmp_path / "cat"
+        _write_bp(root / "blueprints" / ".ipynb_checkpoints" / "x-checkpoint.yaml")
+        _write_bp(root / "blueprints" / "forge" / ".hidden.yaml", "forge")
+        _write_bp(root / "blueprints" / "forge" / "real.yaml", "forge")
+        _write_bp(root / "blueprints" / ".B_hidden.yaml")
+        _write_bp(root / "blueprints" / "m" / ".ipynb_checkpoints" / "B_c.yaml")
+        _write_bp(root / "blueprints" / "m" / "n" / ".B_h.yaml")
+
+        with caplog.at_level(logging.WARNING, logger="cstar.catalog.domain_catalog"):
+            catalog = _catalog(root)
+
+        assert catalog.blueprint_applications == ["forge"]
+        assert catalog.blueprint_names("forge") == ["real"]
+        assert catalog.legacy_blueprints == []
+        assert not caplog.records
+
+    def test_directory_classification(self, tmp_path, caplog):
+        root = tmp_path / "cat"
+        bp = root / "blueprints"
+        (bp / "empty").mkdir(parents=True)
+        # a stray sidecar beside <name>/ dirs does not make an application
+        _write_bp(bp / "machine" / "_grid.yaml")
+        nested = _write_bp(bp / "machine" / "n1" / "B_n1.yaml")
+
+        with caplog.at_level(logging.DEBUG, logger="cstar.catalog.domain_catalog"):
+            catalog = _catalog(root)
+
+        assert catalog.blueprint_applications == ["roms_marbl"]
+        assert catalog.blueprint_names("machine") == []
+        assert catalog.roms_marbl_blueprint_path("n1").samefile(nested)
+        assert "Ignoring files in legacy machine directory" in caplog.text
+        assert "_grid.yaml" in caplog.text
+        assert catalog.blueprint_names("empty") == []
+
+    def test_every_file_in_a_legacy_name_directory_is_registered(self, tmp_path):
+        root = tmp_path / "cat"
+        one = _write_bp(root / "blueprints" / "m" / "single" / "B_whatever.yaml")
+        a = _write_bp(root / "blueprints" / "m" / "multi" / "B_a.yaml")
+        b = _write_bp(root / "blueprints" / "m" / "multi" / "B_b.yml")
+        _write_bp(root / "blueprints" / "m" / "multi" / "settings_B_a.yaml")
 
         catalog = _catalog(root)
 
-        assert [(a, n) for a, n, _ in catalog.legacy_blueprints] == [
-            ("roms_marbl", "dup")
+        # one file: named after its directory; several: each by its stem minus B_
+        assert catalog.roms_marbl_blueprint_names == ["a", "b", "single"]
+        assert catalog.roms_marbl_blueprint_path("single").samefile(one)
+        assert catalog.roms_marbl_blueprint_path("a").samefile(a)
+        assert catalog.roms_marbl_blueprint_path("b").samefile(b)
+        assert len(catalog.legacy_blueprints) == 3
+
+    def test_yaml_wins_over_yml_for_the_same_stem(self, tmp_path):
+        root = tmp_path / "cat"
+        _write_bp(root / "blueprints" / "forge" / "x.yml", "forge")
+        y = _write_bp(root / "blueprints" / "forge" / "x.yaml", "forge")
+
+        catalog = _catalog(root)
+
+        assert catalog.blueprint_names("forge") == ["x"]
+        assert catalog.blueprint_path("forge", "x").samefile(y)
+
+    def test_one_failing_directory_does_not_abort_its_siblings(
+        self, tmp_path, monkeypatch, caplog
+    ):
+        root = tmp_path / "cat"
+        _write_bp(root / "blueprints" / "bad" / "x.yaml", "bad")
+        _write_bp(root / "blueprints" / "forge" / "ok.yaml", "forge")
+        _write_bp(root / "blueprints" / "m" / "n" / "B_n.yaml")
+        _write_bp(root / "blueprints" / "m" / "boom" / "B_boom.yaml")
+        _write_bp(root / "blueprints" / "B_flat.yaml")
+        real = DomainCatalog._fs_list
+
+        def flaky(self, path):
+            if path.name in ("bad", "boom"):
+                raise OSError("simulated listing failure")
+            return real(self, path)
+
+        monkeypatch.setattr(DomainCatalog, "_fs_list", flaky)
+        with caplog.at_level(logging.WARNING, logger="cstar.catalog.domain_catalog"):
+            catalog = _catalog(root)
+
+        assert catalog.blueprint_names("forge") == ["ok"]
+        assert catalog.blueprint_names("bad") == []
+        assert catalog.roms_marbl_blueprint_names == ["flat", "n"]
+        failures = [
+            r.getMessage() for r in caplog.records if "Failed to scan" in r.getMessage()
         ]
-        assert catalog.roms_marbl_blueprint_path("dup").samefile(nested)
+        assert len(failures) == 2
+
+    def test_each_directory_is_listed_once(self, tmp_path, monkeypatch):
+        root = tmp_path / "cat"
+        _write_bp(root / "blueprints" / "forge" / "a.yaml", "forge")
+        _write_bp(root / "blueprints" / "m" / "n" / "B_n.yaml")
+        _write_bp(root / "blueprints" / "B_flat.yaml")
+        calls: list[str] = []
+        real = DomainCatalog._fs_list
+
+        def counting(self, path):
+            calls.append(str(path))
+            return real(self, path)
+
+        monkeypatch.setattr(DomainCatalog, "_fs_list", counting)
+        _catalog(root)
+
+        assert len(calls) == len(set(calls))
+        assert len(calls) == 4  # blueprints/, forge/, m/, m/n/
 
 
 class TestLayeredBlueprints:
@@ -915,6 +1035,20 @@ class TestLayeredBlueprints:
             ("roms_marbl", "x"),
             ("forge", "y"),
         ]
+
+    def test_union_names_are_sorted_like_the_other_unions(self, tmp_path):
+        top_root, bottom_root = tmp_path / "top", tmp_path / "bottom"
+        for n in ("m", "b"):
+            _write_bp(top_root / "blueprints" / "forge" / f"{n}.yaml", "forge")
+        for n in ("z", "a", "m"):
+            _write_bp(bottom_root / "blueprints" / "forge" / f"{n}.yaml", "forge")
+        layered = LayeredCatalog(
+            [_catalog(top_root, label="top"), _catalog(bottom_root, read_only=True)]
+        )
+
+        # sorted and de-duplicated, not top-first-then-bottom
+        assert layered.blueprint_names("forge") == ["a", "b", "m", "z"]
+        assert layered.forge_blueprint_names == layered.blueprint_names("forge")
 
 
 class TestCatalogBarBlueprintCount:

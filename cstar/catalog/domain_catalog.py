@@ -15,7 +15,7 @@ import yaml
 from cstar.base.env import ENV_CSTAR_CATALOG, default_catalog_root, get_env_item
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping
+    from collections.abc import Iterable, Mapping
 
     import pandas as pd
 
@@ -159,6 +159,17 @@ def _parse_github_catalog_url(url: str) -> tuple[str, str, str, Path]:
 
     repo_path = Path(*rest) if rest else Path(".")
     return org_name, repo_name, branch, repo_path
+
+
+def _yaml_files(files: Iterable[Path]) -> list[Path]:
+    """Return the ``.yaml``/``.yml`` *files*, ``.yaml`` winning when a stem has both
+    (as ``DomainCatalog._fs_glob_dual`` does).
+    """
+    by_stem: dict[Path, Path] = {}
+    for f in sorted(files, key=lambda f: f.suffix != ".yaml"):
+        if f.suffix in (".yaml", ".yml"):
+            by_stem.setdefault(f.parent / f.stem, f)
+    return sorted(by_stem.values())
 
 
 class DomainCatalog:
@@ -355,6 +366,25 @@ class DomainCatalog:
         entries = self._fs.ls(str(path), detail=True)
         return [Path(e["name"]) for e in entries if e.get("type") == "directory"]
 
+    def _fs_list(self, path: Path) -> tuple[list[Path], list[Path]]:
+        """Return the (sorted) non-hidden ``(directories, files)`` of *path*.
+
+        One ``iterdir`` locally, one ``ls(detail=True)`` remotely; names
+        starting with ``.`` (``.ipynb_checkpoints``, dotfiles) are left out.
+        """
+        dirs: list[Path] = []
+        files: list[Path] = []
+        if self._is_local:
+            for p in path.iterdir():
+                if not p.name.startswith("."):
+                    (dirs if p.is_dir() else files).append(p)
+        else:
+            for e in self._fs.ls(str(path), detail=True):
+                p = Path(e["name"])
+                if not p.name.startswith("."):
+                    (dirs if e.get("type") == "directory" else files).append(p)
+        return sorted(dirs), sorted(files)
+
     def _fs_open(self, path: Path):
         if self._is_local:
             return path.open("r")
@@ -406,50 +436,57 @@ class DomainCatalog:
         for one release and are recorded in ``legacy_blueprints``: flat
         ``<name>.forge_blueprint.yaml`` (forge), flat ``B_<name>.yaml`` and
         ``<machine>/<name>/B_*.yaml`` (roms_marbl). One warning lists them all.
-        A current-layout entry shadows a legacy one of the same application and
-        name; among legacy forms the first seen wins. Uses _fs_iterdir_dirs to
-        retrieve directory type from a single ls call, avoiding a separate isdir
-        API call per entry.
+
+        A subdirectory of ``blueprints/`` holding subdirectories is a legacy
+        machine directory; any other is an application directory. Hidden names
+        are skipped. A current-layout entry shadows a legacy one of the same
+        application and name (debug log only). Among legacy forms the flat file
+        wins over a per-machine one; a legacy file that loses is still recorded
+        in ``legacy_blueprints`` (after the winners) so the migration reports
+        it. Each directory is listed once and a failure in one directory is
+        logged without abandoning its siblings.
         """
         current: dict[str, dict[str, Path]] = {}
-        legacy: dict[tuple[str, str], Path] = {}
+        legacy: list[tuple[str, str, Path]] = []
+        scanned: list[Path] = []
         for subdir_name in ("blueprints", "Blueprints"):
             bp_root = self.catalog_root / subdir_name
             if not self._fs_exists(bp_root):
                 continue
+            # `Blueprints/` aliases `blueprints/` on a case-insensitive file system
+            if self._is_local and any(bp_root.samefile(r) for r in scanned):
+                continue
+            scanned.append(bp_root)
             try:
-                for app_dir in sorted(self._fs_iterdir_dirs(bp_root)):
-                    files = self._fs_glob_dual(app_dir, "*")
-                    if files:
-                        entries = current.setdefault(app_dir.name, {})
-                        for f in files:
-                            entries.setdefault(f.name.removesuffix(f.suffix), f)
-                        continue
-                    # No files: a legacy <machine>/ directory of <name>/B_*.yaml dirs
-                    for bp_dir in sorted(self._fs_iterdir_dirs(app_dir)):
-                        found = [
-                            f
-                            for f in self._fs_glob_dual(bp_dir, "B_*")
-                            if ".ipynb_checkpoints" not in str(f)
-                        ]
-                        if found:
-                            legacy.setdefault((_ROMS_MARBL, bp_dir.name), found[0])
-                for f in self._fs_glob_dual(bp_root, "*.forge_blueprint"):
-                    name = f.name.removesuffix(f.suffix).removesuffix(
-                        ".forge_blueprint"
-                    )
-                    legacy.setdefault((_FORGE, name), f)
-                for f in self._fs_glob_dual(bp_root, "B_*"):
-                    name = f.name.removesuffix(f.suffix).removeprefix("B_")
-                    legacy.setdefault((_ROMS_MARBL, name), f)
+                dirs, files = self._fs_list(bp_root)
             except Exception as exc:
                 logger.warning(
                     "Failed to scan blueprints under %s: %s", subdir_name, exc
                 )
+                continue
+            for f in _yaml_files(files):
+                if f.stem.endswith(".forge_blueprint"):
+                    name = f.stem.removesuffix(".forge_blueprint")
+                    application = _FORGE
+                elif f.stem.startswith("B_"):
+                    name = f.stem.removeprefix("B_")
+                    application = _ROMS_MARBL
+                else:
+                    continue
+                if name:
+                    legacy.append((application, name, f))
+            for app_dir in dirs:
+                try:
+                    self._scan_blueprint_dir(app_dir, current, legacy)
+                except Exception as exc:
+                    logger.warning(
+                        "Failed to scan blueprints under %s: %s", app_dir, exc
+                    )
 
-        self._blueprints = current
-        self._legacy_blueprints = []
-        for (application, name), path in legacy.items():
+        self._blueprints = {app: dict(entries) for app, entries in current.items()}
+        winners: list[tuple[str, str, Path]] = []
+        losers: list[tuple[str, str, Path]] = []
+        for application, name, path in legacy:
             if name in current.get(application, {}):
                 logger.debug(
                     "Legacy blueprint %s/%s (%s) shadowed by blueprints/%s/%s.yaml",
@@ -459,12 +496,16 @@ class DomainCatalog:
                     application,
                     name,
                 )
-                continue
-            self._blueprints.setdefault(application, {})[name] = path
-            self._legacy_blueprints.append((application, name, path))
+            elif name in self._blueprints.get(application, {}):
+                losers.append((application, name, path))
+            else:
+                self._blueprints.setdefault(application, {})[name] = path
+                winners.append((application, name, path))
+        self._legacy_blueprints = [*winners, *losers]
         if self._legacy_blueprints:
             listing = ", ".join(
-                f"{application}/{name} ({path})"
+                f"{application}/{name} ({path}"
+                f"{', ignored: duplicate' if (application, name, path) in losers else ''})"
                 for application, name, path in self._legacy_blueprints
             )
             logger.warning(
@@ -476,6 +517,48 @@ class DomainCatalog:
                 listing,
                 self.catalog_root,
             )
+
+    def _scan_blueprint_dir(
+        self,
+        directory: Path,
+        current: dict[str, dict[str, Path]],
+        legacy: list[tuple[str, str, Path]],
+    ) -> None:
+        """Classify one ``blueprints/<dir>/`` and record its entries.
+
+        A directory with subdirectories is a legacy ``<machine>/`` of
+        ``<name>/B_*.yaml`` directories (files sitting directly in it are
+        ignored); any other is an application directory.
+        """
+        subdirs, files = self._fs_list(directory)
+        if not subdirs:
+            for f in _yaml_files(files):
+                current.setdefault(directory.name, {}).setdefault(
+                    f.name.removesuffix(f.suffix), f
+                )
+            return
+        if files:
+            logger.debug(
+                "Ignoring files in legacy machine directory %s: %s",
+                directory,
+                ", ".join(f.name for f in files),
+            )
+        for bp_dir in subdirs:
+            try:
+                found = [
+                    f
+                    for f in _yaml_files(self._fs_list(bp_dir)[1])
+                    if f.name.startswith("B_")
+                ]
+            except Exception as exc:
+                logger.warning("Failed to scan blueprints under %s: %s", bp_dir, exc)
+                continue
+            if len(found) == 1:
+                legacy.append((_ROMS_MARBL, bp_dir.name, found[0]))
+            else:
+                legacy.extend(
+                    (_ROMS_MARBL, f.stem.removeprefix("B_"), f) for f in found
+                )
 
     def _scan_domains(self) -> None:
         """Scan DomainSpec/ for domain directories containing Domain.yaml (or
