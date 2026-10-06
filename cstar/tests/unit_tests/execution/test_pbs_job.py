@@ -116,6 +116,20 @@ class TestPBSJob:
             f"Script mismatch!\nExpected:\n{expected_script}\n\nGot:\n{job.script}"
         )
 
+    def test_script_folds_a_day_form_walltime_into_hours(self):
+        """PBS has no `D-HH:MM:SS` form, so the directive carries plain hours."""
+        queue = PBSQueue(name="long", max_walltime="72:00:00")
+        scheduler = PBSScheduler(queues=[queue], primary_queue_name="long")
+        params = {
+            **self.common_job_params,
+            "scheduler": scheduler,
+            "queue_name": "long",
+        }
+        job = PBSJob(**{**params, "walltime": "1-06:30:00"})
+
+        assert "walltime=30:30:00" in job.script
+        assert job.walltime == "1-06:30:00"
+
     @patch("subprocess.run")
     def test_submit(self, mock_subprocess, tmp_path):
         """Ensures that the `submit` method properly submits a PBS job and extracts the

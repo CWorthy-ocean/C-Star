@@ -69,9 +69,11 @@ optional, and unknown keys are rejected when the workplan is loaded:
 
 .. note::
 
-   Systems whose settings require a SLURM account and queue (such as Anvil
-   and Bouchet) still need ``CSTAR_SLURM_ACCOUNT`` and ``CSTAR_SLURM_QUEUE``
-   to be set; the workplan's values then override them for each job.
+   On systems whose settings require a SLURM account and queue (such as Anvil
+   and Bouchet), values the workplan supplies here, or in every step's
+   ``compute_overrides``, stand in for ``CSTAR_SLURM_ACCOUNT`` and
+   ``CSTAR_SLURM_QUEUE``; only the ones it leaves out must be set in the
+   environment.
 
 Per-step compute requirements are set with each step's ``compute_overrides``
 (see below).
@@ -247,7 +249,8 @@ replaces any of them, under a key naming the launcher:
           num_cpus: 128
 
 The ``slurm`` keys are ``account_name``, ``queue_name``, ``max_walltime``
-(``HH:MM:SS``), ``num_cpus``, ``num_nodes``, ``cpus_per_node`` and
+(``HH:MM:SS`` or SLURM's ``D-HH:MM:SS``, so ``30:00:00`` and ``1-06:00:00``
+are the same request), ``num_cpus``, ``num_nodes``, ``cpus_per_node`` and
 ``single_node``. The ``local`` launcher accepts ``max_walltime`` and
 ``force_kill_timeout``. ``num_cpus`` is also where a deferred-blueprint step
 declares its allocation, since C-Star cannot read the blueprint at submit time.

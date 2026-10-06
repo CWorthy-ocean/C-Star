@@ -418,11 +418,17 @@ def _add_option(widget: Any, *values: str) -> None:
 
 
 def format_walltime(hours: float) -> str:
-    """``HH:MM:SS`` (or ``D-HH:MM:SS``) for ``hours``, rounded up to a whole minute."""
+    """``HH:MM:SS`` for ``hours``, rounded up to a whole minute.
+
+    Hours run past 24 (``30:00:00``) rather than switching to SLURM's day
+    form, matching how C-Star normalises a queue's maximum walltime; the day
+    form is used only past 999 hours, the most the clock form can carry.
+    """
     minutes = max(1, -(-round(hours * 3600) // 60))
+    if minutes < 1000 * 60:
+        return f"{minutes // 60:02d}:{minutes % 60:02d}:00"
     days, minutes = divmod(minutes, 24 * 60)
-    clock = f"{minutes // 60:02d}:{minutes % 60:02d}:00"
-    return f"{days}-{clock}" if days else clock
+    return f"{days}-{minutes // 60:02d}:{minutes % 60:02d}:00"
 
 
 def _is_unverifiable(problem: str) -> bool:

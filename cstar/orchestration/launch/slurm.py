@@ -43,6 +43,7 @@ from cstar.orchestration.utils import (
 )
 
 if t.TYPE_CHECKING:
+    from cstar.orchestration.models import Workplan
     from cstar.orchestration.orchestration import LiveStep
 
 log = get_logger(__name__)
@@ -71,7 +72,7 @@ class SlurmComputeSpec(BaseModel):
     than spilling onto nodes a single-process application cannot use.
     """
     max_walltime: str = Field(default="", pattern=WALLTIME_RE)
-    """The maximum walltime for the job in the format `HH:MM:SS`."""
+    """The maximum walltime for the job, `HH:MM:SS` or SLURM's `D-HH:MM:SS`."""
     queue_name: str = ""
     """The priority of the job."""
     account_name: str = ""
@@ -190,6 +191,48 @@ class SlurmLauncher(Launcher[SlurmHandle]):
             The queue to use for SLURM jobs.
         """
         return get_env_item(ENV_CSTAR_SLURM_QUEUE).value
+
+    _SPEC_ENV: t.ClassVar[dict[str, str]] = {
+        "account_name": ENV_CSTAR_SLURM_ACCOUNT,
+        "queue_name": ENV_CSTAR_SLURM_QUEUE,
+        "max_walltime": ENV_CSTAR_SLURM_MAX_WALLTIME,
+    }
+    """The `SlurmComputeSpec` field each `configured_*` environment variable backs."""
+
+    @classmethod
+    def workplan_settings(cls, workplan: "Workplan") -> frozenset[str]:
+        """Return the environment variables the workplan supplies SLURM values for.
+
+        A variable counts as supplied when the workplan's
+        `compute_environment.slurm` sets the matching field, or when every
+        step's `compute_overrides.slurm` does. Overrides that do not form a
+        valid spec supply nothing here; scheduling reports them.
+
+        Parameters
+        ----------
+        workplan : Workplan
+            The workplan about to run.
+
+        Returns
+        -------
+        frozenset[str]
+        """
+
+        def supplied(store: KeyValueStore) -> set[str]:
+            try:
+                spec = SlurmComputeAdapter().adapt(store)
+            except (CstarExpectationFailed, CstarAdaptationError):
+                return set()
+            return {var for field, var in cls._SPEC_ENV.items() if getattr(spec, field)}
+
+        per_step = (
+            set[str].intersection(
+                *(supplied(s.compute_overrides) for s in workplan.steps)
+            )
+            if workplan.steps
+            else set[str]()
+        )
+        return frozenset(supplied(workplan.compute_environment) | per_step)
 
     @staticmethod
     def configured_walltime() -> str:

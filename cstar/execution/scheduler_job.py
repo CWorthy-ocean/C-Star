@@ -25,6 +25,7 @@ from cstar.system.scheduler import (
     SlurmPartition,
     SlurmQOS,
     SlurmScheduler,
+    parse_walltime,
 )
 
 if t.TYPE_CHECKING:
@@ -619,8 +620,8 @@ class SchedulerJob(ExecutionHandler, ABC):
             self._walltime = self.queue.max_walltime
         else:
             # Check walltimes
-            wt_h, wt_m, wt_s = map(int, walltime.split(":"))
-            mw_h, mw_m, mw_s = map(int, self.queue.max_walltime.split(":"))
+            wt_h, wt_m, wt_s = parse_walltime(walltime)
+            mw_h, mw_m, mw_s = parse_walltime(self.queue.max_walltime)
 
             walltime_delta = timedelta(hours=wt_h, minutes=wt_m, seconds=wt_s)
             max_walltime_delta = timedelta(hours=mw_h, minutes=mw_m, seconds=mw_s)
@@ -678,7 +679,7 @@ class SchedulerJob(ExecutionHandler, ABC):
 
     @property
     def walltime(self) -> str | None:
-        """The maximum walltime for the job, in the format `HH:MM:SS`."""
+        """The maximum walltime for the job, as requested (`HH:MM:SS` or `D-HH:MM:SS`)."""
         return self._walltime
 
     @property
@@ -1243,7 +1244,9 @@ class PBSJob(SchedulerJob):
         scheduler_script += f"\n#PBS -N {self.job_name}"
         scheduler_script += f"\n#PBS -o {self.output_file}"
         scheduler_script += f"\n#PBS -A {self.account_key}"
-        scheduler_script += f"\n#PBS -l select={self.nodes}:ncpus={self.cpus_per_node},walltime={self.walltime}"
+        # PBS has no day form; fold a `D-HH:MM:SS` request into hours
+        walltime = "{:02d}:{:02d}:{:02d}".format(*parse_walltime(self.walltime or ""))
+        scheduler_script += f"\n#PBS -l select={self.nodes}:ncpus={self.cpus_per_node},walltime={walltime}"
         scheduler_script += f"\n#PBS -q {self.queue_name}"
         scheduler_script += "\n#PBS -j oe"
         scheduler_script += "\n#PBS -k eod"

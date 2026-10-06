@@ -246,8 +246,8 @@ class TestChunkSteps:
 
     def test_bad_walltime_is_loud(self) -> None:
         window = [(dt(2023, 1, 1), dt(2023, 1, 2))]
-        with pytest.raises(ValueError, match=r"'3:00:00'.*2023-01-01"):
-            chunk_steps(BASE, window, prefix="x", walltime=lambda a, b: "3:00:00")
+        with pytest.raises(ValueError, match=r"'3h'.*2023-01-01"):
+            chunk_steps(BASE, window, prefix="x", walltime=lambda a, b: "3h")
         with pytest.raises(ValueError, match="'soon'"):
             chunk_steps(BASE, window, prefix="x", walltime="soon")
 

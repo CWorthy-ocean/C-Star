@@ -263,7 +263,7 @@ def get_launcher(
     else:
         launcher = LocalLauncher()
 
-    launcher.check_preconditions()
+    launcher.check_preconditions(workplan)
     return launcher
 
 

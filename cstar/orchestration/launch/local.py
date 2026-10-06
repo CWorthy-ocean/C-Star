@@ -40,7 +40,7 @@ from cstar.orchestration.state import StateRepository
 from cstar.system.scheduler import parse_walltime
 
 if t.TYPE_CHECKING:
-    from cstar.orchestration.models import Step
+    from cstar.orchestration.models import Step, Workplan
 
 
 log = get_logger(__name__)
@@ -256,7 +256,7 @@ class LocalLauncher(Launcher[LocalHandle]):
     """Mapping of task name to process ID."""
 
     @classmethod
-    def check_preconditions(cls) -> None:
+    def check_preconditions(cls, workplan: "Workplan | None" = None) -> None:
         """Perform launcher-specific startup validation."""
 
     @staticmethod

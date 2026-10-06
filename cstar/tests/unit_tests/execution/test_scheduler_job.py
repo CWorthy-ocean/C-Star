@@ -287,6 +287,22 @@ class TestSchedulerJobBase:
             }
             MockSchedulerJob(**params, walltime="04:00:00")
 
+    def test_init_walltime_day_form_is_compared_against_the_queue(self):
+        """A `D-HH:MM:SS` request is measured, not rejected as unparsable, and
+        exceeds a queue maximum that is itself expressed in hours past 24.
+        """
+        params = {k: v for k, v in self.common_job_params.items() if k != "walltime"}
+        long_queue = MagicMock(max_walltime="72:00:00", max_cpus_per_node=None)
+        with patch.object(MockScheduler, "get_queue", return_value=long_queue):
+            assert (
+                MockSchedulerJob(**params, walltime="2-03:00:00").walltime
+                == "2-03:00:00"
+            )
+            with pytest.raises(
+                ValueError, match="Selected walltime 3-00:00:01 exceeds"
+            ):
+                MockSchedulerJob(**params, walltime="3-00:00:01")
+
     ## Cpu distribution tests
     def test_init_without_nodes_but_with_cpus_per_node(self):
         """Tests automatic node calculation when nodes are not specified but

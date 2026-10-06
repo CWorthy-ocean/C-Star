@@ -1330,6 +1330,22 @@ def test_get_launcher_slurm_without_scheduler_fails(tmp_path: Path) -> None:
         get_launcher(wp)
 
 
+def test_get_launcher_checks_preconditions_against_the_workplan(tmp_path: Path) -> None:
+    """The launcher's precondition check sees the workplan, so settings it supplies count."""
+    wp = _env_workplan(tmp_path, {"launcher": "slurm"})
+
+    with (
+        mock.patch(
+            "cstar.system.manager.CStarSystemManager.scheduler",
+            mock.PropertyMock(return_value=mock.MagicMock()),
+        ),
+        mock.patch.object(SlurmLauncher, "check_preconditions") as check,
+    ):
+        get_launcher(wp)
+
+    check.assert_called_once_with(wp)
+
+
 def test_get_launcher_force_local_wins_over_slurm(tmp_path: Path) -> None:
     """Verify `force_local` beats the workplan's request for slurm."""
     wp = _env_workplan(tmp_path, {"launcher": "slurm"})
