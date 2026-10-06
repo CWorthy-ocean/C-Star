@@ -13,7 +13,7 @@ from pathlib import Path
 
 import yaml
 
-from cstar.orchestration.models import Step, Workplan
+from cstar.orchestration.models import BLUEPRINT_METADATA_FIELDS, Step, Workplan
 from cstar.orchestration.serialization import deserialize, serialize
 from cstar.wizard import workplan_builder as wb
 from cstar.wizard.ui import labels
@@ -331,6 +331,14 @@ def test_inline_nest_ic_form_marks_required_fields(page):
         "parent_rst",
     ]
     assert any("parent_rst" in p for p in pane.problems())
+
+
+def test_inline_form_leaves_out_blueprint_metadata(page):
+    pane = page.panes[0]
+    pane.source.value = wb.SOURCE_INLINE
+    pane.application.value = "nest_ic"
+    assert pane._form
+    assert not set(pane._form) & BLUEPRINT_METADATA_FIELDS
 
 
 def test_inline_form_writes_touched_and_required_fields_with_step_placeholders(page):

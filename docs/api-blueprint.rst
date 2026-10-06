@@ -21,6 +21,10 @@ Blueprint Components
    cstar.orchestration.models.CodeRepository
    cstar.orchestration.models.ParameterSet
    cstar.orchestration.models.Blueprint
+   cstar.orchestration.models.Provenance
+   cstar.orchestration.models.GeneratedBy
+   cstar.orchestration.models.BlueprintRef
+   cstar.orchestration.models.CatalogSpecRef
 
 Simulation Components
 ---------------------

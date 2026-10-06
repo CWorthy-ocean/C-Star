@@ -17,6 +17,7 @@ from cstar.applications.core import (
 )
 from cstar.applications.roms_marbl.models import RomsMarblBlueprint
 from cstar.execution.handler import ExecutionStatus
+from cstar.orchestration.models import BlueprintRef
 from cstar.orchestration.transforms import DirectiveConfig
 
 
@@ -665,16 +666,36 @@ def test_emitted_blueprint_defaults_to_none() -> None:
     assert app.emitted_blueprint(app.blueprint.model_construct()) is None
 
 
+_EMITTED_BLUEPRINT_FIELDS = {
+    "filename": "B_x.yaml",
+    "application": "roms_marbl",
+    "producer": BlueprintRef(kind="Blueprint", application="forge", name="x"),
+    "cpus_needed": 1,
+    "start_date": "2012-01-01",
+    "end_date": "2012-01-02",
+    "use_pio": False,
+    "grid_filename": "x_grid.nc",
+}
+"""Every field `EmittedBlueprint` requires, with valid values."""
+
+
 def test_emitted_blueprint_forbids_unknown_fields() -> None:
     """`EmittedBlueprint` rejects fields it does not declare."""
-    with pytest.raises(ValidationError):
-        EmittedBlueprint(  # type: ignore[call-arg]
-            filename="B_x.yaml",
-            application="roms_marbl",
-            cpus_needed=1,
-            start_date="2012-01-01",
-            end_date="2012-01-02",
-            use_pio=False,
-            grid_filename="x_grid.nc",
-            bogus=1,
-        )
+    with pytest.raises(ValidationError) as exc_info:
+        EmittedBlueprint(**_EMITTED_BLUEPRINT_FIELDS, bogus=1)  # type: ignore[arg-type]
+
+    assert [(e["type"], e["loc"]) for e in exc_info.value.errors()] == [
+        ("extra_forbidden", ("bogus",))
+    ]
+
+
+def test_emitted_blueprint_requires_a_producer() -> None:
+    """`EmittedBlueprint` needs the reference its blueprint records for its producer."""
+    fields = {k: v for k, v in _EMITTED_BLUEPRINT_FIELDS.items() if k != "producer"}
+
+    with pytest.raises(ValidationError) as exc_info:
+        EmittedBlueprint(**fields)  # type: ignore[arg-type]
+
+    assert [(e["type"], e["loc"]) for e in exc_info.value.errors()] == [
+        ("missing", ("producer",))
+    ]

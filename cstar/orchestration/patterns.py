@@ -27,6 +27,7 @@ from cstar.applications.roms_marbl.transforms import (
 )
 from cstar.base.utils import WALLTIME_RE, deep_merge
 from cstar.orchestration.models import (
+    BLUEPRINT_METADATA_FIELDS,
     ConfiguredBaseModel,
     DeferredBlueprintRef,
     InlineBlueprintRef,
@@ -54,11 +55,6 @@ INLINE_APPLICATIONS: t.Final[frozenset[str]] = frozenset(
     {"nest_ic", "upscaler", "hello_world"}
 )
 """Applications whose blueprint is fully described by a step's overrides."""
-
-_BLUEPRINT_METADATA: t.Final[frozenset[str]] = frozenset(
-    {"name", "description", "application", "state", "schema_version", "working_dir"}
-)
-"""Blueprint keys that carry no run configuration."""
 
 _UPSCALER: t.Final[str] = "upscaler"
 """The application name of the upscaler."""
@@ -642,7 +638,7 @@ def _is_inline_candidate(step: Step) -> bool:
         key in step.blueprint_overrides
         and _covered(value, step.blueprint_overrides[key])
         for key, value in data.items()
-        if key not in _BLUEPRINT_METADATA
+        if key not in BLUEPRINT_METADATA_FIELDS
     )
 
 

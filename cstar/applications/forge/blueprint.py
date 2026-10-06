@@ -73,7 +73,7 @@ from typing import Any, Literal, get_args
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
-from cstar.orchestration.models import Blueprint
+from cstar.orchestration.models import Blueprint, BlueprintRef
 
 
 def _installed_version(package_name: str) -> str | None:
@@ -374,6 +374,21 @@ def emitted_blueprint_filename(name: str) -> str:
     ``name`` emits.
     """
     return f"B_{name}.yaml"
+
+
+def producer_ref(blueprint: ForgeBlueprint) -> BlueprintRef:
+    """Return the reference to ``blueprint`` that the ``roms_marbl`` blueprint
+    emitted by a forge run of it records as its producer.
+
+    Use this wherever a forge-emitted blueprint names its producer, so every
+    record of the producer agrees.
+    """
+    return BlueprintRef(
+        kind="Blueprint",
+        application=DEFAULT_APPLICATION,
+        name=blueprint.name,
+        content_hash=blueprint.content_hash(),
+    )
 
 
 _NAME_UNSAFE_RE = re.compile(r"[^A-Za-z0-9._-]+")

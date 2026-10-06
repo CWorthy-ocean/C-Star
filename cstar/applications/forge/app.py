@@ -38,6 +38,7 @@ from cstar.applications.forge.blueprint import (
     DEFAULT_APPLICATION,
     ForgeBlueprint,
     emitted_blueprint_filename,
+    producer_ref,
 )
 from cstar.entrypoint.runner import BlueprintRunner
 from cstar.execution.file_system import JobFileSystemManager
@@ -159,6 +160,7 @@ class ForgeApplication(ApplicationDefinition[ForgeBlueprint, ForgeRunner]):
         return EmittedBlueprint(
             filename=emitted_blueprint_filename(blueprint.name),
             application=ROMS_MARBL_APP,
+            producer=producer_ref(blueprint),
             cpus_needed=blueprint.n_procs,
             single_node=False,
             start_date=blueprint.run.start_date,

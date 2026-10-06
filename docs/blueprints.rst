@@ -23,9 +23,28 @@ The example on the :doc:`ROMS-MARBL blueprint <blueprints/roms_marbl>` page show
   ~cstar.orchestration.models.Blueprint.state
   ~cstar.orchestration.models.Blueprint.schema_version
   ~cstar.orchestration.models.Blueprint.working_dir
+  ~cstar.orchestration.models.Blueprint.provenance
   ~cstar.orchestration.models.Blueprint.cpus_needed
 
 The core blueprint attributes do not contain enough information to be executed alone.
+
+.. _blueprint_provenance:
+
+Provenance
+^^^^^^^^^^
+
+A blueprint can record what produced it and what it was derived from in its
+``provenance`` block. The block is optional, and an application may extend it
+with fields of its own.
+
+.. rubric:: Provenance Models
+
+.. autosummary::
+
+  ~cstar.orchestration.models.Provenance
+  ~cstar.orchestration.models.GeneratedBy
+  ~cstar.orchestration.models.BlueprintRef
+  ~cstar.orchestration.models.CatalogSpecRef
 
 Customizing Blueprints
 -----------------------

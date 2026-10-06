@@ -23,7 +23,11 @@ import yaml
 import cstar
 import cstar.catalog
 from cstar.applications.forge.app import ForgeApplication
-from cstar.applications.forge.blueprint import FORGE_BLUEPRINT_VERSION, ForgeBlueprint
+from cstar.applications.forge.blueprint import (
+    FORGE_BLUEPRINT_VERSION,
+    ForgeBlueprint,
+    producer_ref,
+)
 from cstar.applications.forge.input_data import netcdf_basename
 from cstar.applications.forge.resolve import (
     _warn_user_files_need_pio_conversion,
@@ -6708,3 +6712,13 @@ def test_forge_application_emitted_blueprint(use_pio):
     assert emitted.use_pio == bool(cfg.model_settings["cppdefs"].get("use_pio"))
     # Mirrors InputData._forcing_filename("grid"): {domain}_{grid}.nc
     assert emitted.grid_filename == netcdf_basename(cfg.name, "grid")
+    assert emitted.producer == producer_ref(cfg)
+    assert emitted.producer.content_hash == cfg.content_hash()
+
+
+def test_producer_ref_identifies_the_forge_blueprint():
+    cfg = _build()
+    ref = producer_ref(cfg)
+
+    assert (ref.kind, ref.application, ref.name) == ("Blueprint", "forge", cfg.name)
+    assert ref.content_hash == cfg.content_hash()

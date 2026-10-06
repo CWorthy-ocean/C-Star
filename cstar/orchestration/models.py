@@ -7,6 +7,7 @@ workplan run declared under a workplan's `runs`, by the token `<step>@<alias>`
 
 import re
 import typing as t
+import uuid
 from abc import ABC
 from collections import Counter
 from collections.abc import Callable, Mapping, Sequence
@@ -223,6 +224,97 @@ class BlueprintCore(ConfiguredBaseModel):
     """Configuration allowing extra field data."""
 
 
+CatalogSpecKind: t.TypeAlias = t.Literal[
+    "ModelSpec", "DomainSpec", "ForcingSpec", "OutputSpec", "CdrSpec"
+]
+"""The kinds of spec a catalog holds; each is the name of a spec directory."""
+
+
+class GeneratedBy(ConfiguredBaseModel):
+    """The event that produced a document."""
+
+    tool: RequiredString
+    """The producer: an application such as `forge`, or another C-Star tool such
+    as `wizard`. Not validated against the application registry, as not every
+    producer is an application."""
+
+    id: RequiredString = Field(default_factory=lambda: str(uuid.uuid4()))
+    """Identifies this event, so a copied or edited document still says where it
+    came from. A uuid4 minted when the model is created and never recomputed: a
+    value loaded from a file is kept."""
+
+    system: str = Field(default="")
+    """The C-Star system the producer ran on; empty if unknown."""
+
+    versions: dict[str, str] = Field(default_factory=dict)
+    """The versions of the packages involved, keyed by package name."""
+
+    run_id: str = Field(default="")
+    """The workplan run id, when a workplan step produced the document."""
+
+    working_dir: str = Field(default="")
+    """Where the producer wrote its artifacts; informational, as artifacts can
+    move."""
+
+
+class BlueprintRef(ConfiguredBaseModel):
+    """A reference to a blueprint."""
+
+    # Required rather than defaulted: C-Star rewrites blueprints with
+    # `exclude_defaults`, which would drop a defaulted tag and leave the
+    # reference unloadable.
+    kind: t.Literal["Blueprint"]
+    """The kind of document referenced; selects the model a reference loads as."""
+
+    application: RequiredString
+    """The application the referenced blueprint belongs to."""
+
+    name: RequiredString
+    """The name of the referenced blueprint."""
+
+    content_hash: str = Field(default="")
+    """A fingerprint of the referenced blueprint's configuration."""
+
+
+class CatalogSpecRef(ConfiguredBaseModel):
+    """A reference to a catalog spec."""
+
+    kind: CatalogSpecKind
+    """The kind of spec referenced."""
+
+    name: RequiredString
+    """The name of the referenced spec."""
+
+    origin: RequiredString
+    """Where the spec came from, e.g. `catalog`, `custom` or `model_default`."""
+
+    modified: bool = Field(default=False)
+    """Whether the spec was edited after it was selected."""
+
+
+ProvenanceRef: t.TypeAlias = t.Annotated[
+    BlueprintRef | CatalogSpecRef,
+    Field(discriminator="kind"),
+]
+"""A reference to something a document was derived from, told apart by `kind`."""
+
+
+class Provenance(ConfiguredBaseModel):
+    """Records what produced a document and what it was derived from.
+
+    Applications may subclass it to add application-specific fields.
+    """
+
+    generated_at: datetime | None = Field(default=None)
+    """When the document was generated."""
+
+    generated_by: GeneratedBy | None = Field(default=None)
+    """The event that produced the document."""
+
+    derived_from: list[ProvenanceRef] = Field(default_factory=list)
+    """The blueprints and catalog specs the document was derived from."""
+
+
 class Blueprint(ConfiguredBaseModel, ABC):
     """Common elements of all blueprints."""
 
@@ -243,6 +335,9 @@ class Blueprint(ConfiguredBaseModel, ABC):
 
     working_dir: TargetDirectoryPath | None = Field(default=None)
     """Directory the application writes to; omitted, C-Star uses ``CSTAR_DATA_HOME/blueprint_runs/<application>/<name>``."""
+
+    provenance: Provenance = Field(default_factory=Provenance)
+    """What produced this blueprint and what it was derived from; empty when not recorded."""
 
     @property
     def cpus_needed(self) -> int:
@@ -305,6 +400,13 @@ class Blueprint(ConfiguredBaseModel, ABC):
                 **data,
             }
         return data
+
+
+BLUEPRINT_METADATA_FIELDS: t.Final[frozenset[str]] = frozenset(Blueprint.model_fields)
+"""The blueprint keys that carry no run configuration.
+
+Every field declared on `Blueprint` is metadata; an application's configuration
+lives on its subclass."""
 
 
 class WorkplanState(StrEnum):

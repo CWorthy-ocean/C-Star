@@ -13,6 +13,7 @@ from cstar.applications.roms_marbl.models import (
     RomsMarblBlueprint,
     RuntimeParameterSet,
 )
+from cstar.orchestration.models import BlueprintRef, CatalogSpecRef, Provenance
 from cstar.pio.external_codebase import PIOExternalCodeBase
 
 
@@ -384,3 +385,44 @@ class TestCpusNeeded:
         }
         bp = RomsMarblBlueprint.model_validate(complete_blueprint_dict)
         assert bp.cpus_needed == 16
+
+
+class TestProvenance:
+    """Tests for the `provenance` block `RomsMarblBlueprint` inherits."""
+
+    def test_defaults_to_empty(self, complete_blueprint_dict):
+        """Test that a blueprint without a `provenance` block validates."""
+        assert "provenance" not in complete_blueprint_dict
+        bp = RomsMarblBlueprint.model_validate(complete_blueprint_dict)
+        assert bp.provenance == Provenance()
+
+    def test_validates_with_a_provenance_block(self, complete_blueprint_dict):
+        """Test that a blueprint carrying `provenance` validates and keeps it."""
+        complete_blueprint_dict["provenance"] = {
+            "generated_at": "2026-10-06T17:40:12Z",
+            "generated_by": {
+                "tool": "forge",
+                "id": "3f9c2a7e-5b1d-4c8e-9a0f-1d2e3f4a5b6c",
+                "system": "perlmutter",
+                "versions": {"cstar-ocean": "0.16.0", "roms-tools": "3.2.1"},
+                "run_id": "chunked-iceland",
+            },
+            "derived_from": [
+                {"kind": "Blueprint", "application": "forge", "name": "wio-toy"},
+                {"kind": "DomainSpec", "name": "wio-toy", "origin": "catalog"},
+            ],
+        }
+        bp = RomsMarblBlueprint.model_validate(complete_blueprint_dict)
+
+        assert bp.provenance.generated_by.tool == "forge"
+        assert bp.provenance.generated_by.id == "3f9c2a7e-5b1d-4c8e-9a0f-1d2e3f4a5b6c"
+        assert bp.provenance.derived_from == [
+            BlueprintRef(kind="Blueprint", application="forge", name="wio-toy"),
+            CatalogSpecRef(kind="DomainSpec", name="wio-toy", origin="catalog"),
+        ]
+
+    def test_unknown_provenance_field_is_rejected(self, complete_blueprint_dict):
+        """Test that `provenance` accepts only the fields it declares."""
+        complete_blueprint_dict["provenance"] = {"notes": "anything"}
+        with pytest.raises(ValidationError, match="notes"):
+            RomsMarblBlueprint.model_validate(complete_blueprint_dict)
