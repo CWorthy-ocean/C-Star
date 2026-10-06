@@ -13,7 +13,7 @@ from pathlib import Path
 
 import yaml
 
-from cstar.orchestration.models import Workplan
+from cstar.orchestration.models import Step, Workplan
 from cstar.orchestration.serialization import deserialize, serialize
 from cstar.wizard import workplan_builder as wb
 from cstar.wizard.ui import labels
@@ -1729,8 +1729,9 @@ def test_dag_svg_survives_odd_input():
 def test_page_root_has_both_columns(page):
     root = page.widget
     assert "forge-two-col" in page.columns._dom_classes
+    sticky = next(c for c in root.children if "forge-sticky" in c._dom_classes)
     assert page.columns in root.children  # under the sticky bar
-    assert root.children.index(page.sticky_bar) < root.children.index(page.columns)
+    assert root.children.index(sticky) < root.children.index(page.columns)
     assert list(page.columns.children) == [page.left, page.side]
     assert "forge-left" in page.left._dom_classes
     assert "forge-side" in page.side._dom_classes
@@ -1807,3 +1808,31 @@ def test_graph_shows_an_external_source_and_a_chunk_chain(page, roms_bp):
     assert nodes["ic@ini"]["layer"] == "0"
     assert nodes["base-01"]["layer"] == "1" and nodes["base-02"]["layer"] == "2"
     assert "restart" in svg
+
+
+def test_base_chooser_shows_only_the_chosen_source_row(page):
+    """Each chooser widget owns its Layout, so hiding one does not hide the rest."""
+    chooser = page.chunk_base
+    widgets = (chooser.step, chooser.catalog_roms, chooser.catalog_forge, chooser.path)
+    assert len({id(w.layout) for w in widgets}) == len(widgets)
+    chooser.kind.value = "catalog_roms"
+    shown = [w for w in widgets if w.layout.display != "none"]
+    assert shown == [chooser.catalog_roms]
+    chooser.kind.value = "path"
+    shown = [w for w in widgets if w.layout.display != "none"]
+    assert shown == [chooser.path]
+
+
+def test_sticky_bar_is_the_styled_box_with_a_download_link(page):
+    """The status bar sits in a `forge-sticky` box like the blueprint page's."""
+    sticky = next(
+        child for child in page.widget.children if "forge-sticky" in child._dom_classes
+    )
+    assert list(sticky.children) == [page.sticky_bar, page.sticky_download]
+    page.name.value = "bar test"
+    page.add_step().populate(
+        Step(name="s", application="hello_world", blueprint="/b.yaml")
+    )
+    page._rebuild()
+    assert 'class="forge-dl-btn"' in page.sticky_download.value
+    assert "<code>" not in page.sticky_download.value

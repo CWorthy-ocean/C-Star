@@ -1852,12 +1852,19 @@ class _BaseChooser:
             ],
             value=_KIND_STEP,
         )
-        wide = W.Layout(width="260px")
-        self.step = W.Dropdown(options=[], layout=wide)
-        self.catalog_roms = W.Dropdown(options=[], layout=wide)
-        self.catalog_forge = W.Dropdown(options=[], layout=wide)
+
+        # one Layout per widget: a Layout is a widget model, so sharing it would
+        # make every show/hide act on all four at once
+        def wide() -> Any:
+            return W.Layout(width="260px")
+
+        self.step = W.Dropdown(options=[], layout=wide())
+        self.catalog_roms = W.Dropdown(options=[], layout=wide())
+        self.catalog_forge = W.Dropdown(options=[], layout=wide())
         self.path = W.Text(
-            placeholder="/path/to/blueprint.yaml", continuous_update=False, layout=wide
+            placeholder="/path/to/blueprint.yaml",
+            continuous_update=False,
+            layout=wide(),
         )
         self.kind.observe(self._changed, names="value")
         for widget in (self.step, self.catalog_roms, self.catalog_forge, self.path):
@@ -3676,6 +3683,7 @@ class WorkplanBuilderPage:
     def _build_layout(self) -> None:
         W = self.W
         self.sticky_bar = W.HTML("")
+        self.sticky_download = W.HTML("")
         self.card_chips = {
             key: W.HTML("")
             for key in ("start", "workplan", "compute", "steps", "recipes", "review")
@@ -3863,10 +3871,12 @@ class WorkplanBuilderPage:
         self.side.add_class("forge-side")
         self.columns = W.HBox([self.left, self.side])
         self.columns.add_class("forge-two-col")
-        self.widget = W.VBox(
-            [components.style_widget(W), self.sticky_bar, intro, self.columns]
-        )
+        # the same sticky bar as the blueprint page: the CSS targets the
+        # `forge-sticky` box, with the status HTML first and the download last
         self.sticky_bar.add_class("forge-sticky-html")
+        sticky = W.HBox([self.sticky_bar, self.sticky_download])
+        sticky.add_class("forge-sticky")
+        self.widget = W.VBox([components.style_widget(W), sticky, intro, self.columns])
         self.widget.add_class("forge-app")
         self.widget.add_class("forge-workplan")
 
@@ -4049,10 +4059,12 @@ class WorkplanBuilderPage:
             if not self._preview_dirty:
                 self.preview.value = text
             self.download_link.value = self._download_html(draft, text)
+            self.sticky_download.value = self._download_html(draft, text, "Download")
         else:
             if not self._preview_dirty:
                 self.preview.value = "# no valid draft yet: see the problems above\n"
             self.download_link.value = ""
+            self.sticky_download.value = ""
         self._show_dirty()
         self.dag_view.value = (
             f"<div style='overflow-x:auto'>{dag_svg(*self.dag_inputs())}</div>"
@@ -4063,13 +4075,18 @@ class WorkplanBuilderPage:
         self._sync_save_path()
 
     @staticmethod
-    def _download_html(workplan: Workplan, text: str) -> str:
-        """A data-URI download link for the workplan's file text."""
+    def _download_html(workplan: Workplan, text: str, caption: str = "") -> str:
+        """A data-URI download link for the workplan's file text.
+
+        ``caption`` replaces the default "Download <file name>" (the sticky
+        bar's button has no room for the name).
+        """
         fname = f"{slugify(workplan.name)}.yaml"
         b64 = base64.b64encode(text.encode("utf-8")).decode("ascii")
+        label = caption or f"Download <code>{_esc(fname)}</code>"
         return (
             f'⬇ <a class="forge-dl-btn" download="{fname}" '
-            f'href="data:text/yaml;base64,{b64}">Download <code>{_esc(fname)}</code></a>'
+            f'href="data:text/yaml;base64,{b64}">{label}</a>'
         )
 
     def _render_changes(self) -> None:
