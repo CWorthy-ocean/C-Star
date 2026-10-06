@@ -24,8 +24,9 @@ import logging
 import os
 import sys
 import tempfile
-from datetime import datetime
+from datetime import UTC, datetime
 from pathlib import Path
+from types import SimpleNamespace
 from typing import ClassVar
 from unittest.mock import MagicMock, patch
 
@@ -42,18 +43,30 @@ from cstar.applications.core import RunnerRequest
 from cstar.applications.forge import models as forge_models
 from cstar.applications.forge import runtime as forge_run
 from cstar.applications.forge.app import ForgeRunner
-from cstar.applications.forge.blueprint import ForgeBlueprint
+from cstar.applications.forge.blueprint import (
+    ForgeBlueprint,
+    emitted_blueprint_description,
+    producer_ref,
+)
 from cstar.applications.forge.engine import process_forge_blueprint
 from cstar.applications.forge.executor import ForgeExecutor, _deep_merge_settings_dict
 from cstar.applications.forge.host import HostPaths
 from cstar.applications.forge.input_data import CHILD_IC_PLACEHOLDER_LOCATION
 from cstar.applications.forge.resolve import build_forge_blueprint
 from cstar.applications.forge.templates import bundled_template_dir
+from cstar.base.env import ENV_CSTAR_RUNID
 from cstar.catalog.domain_catalog import default_catalog as _CATALOG
 from cstar.entrypoint.config import get_job_config, get_service_config
 from cstar.execution.file_system import DirectoryManager
 from cstar.execution.handler import ExecutionStatus
-from cstar.orchestration.models import Resource
+from cstar.orchestration.models import (
+    BlueprintRef,
+    CatalogSpecRef,
+    GeneratedBy,
+    Provenance,
+    Resource,
+)
+from cstar.orchestration.serialization import deserialize
 
 requires_cstar_pio = pytest.mark.skipif(
     "pio" not in cstar_models.ROMSCompositeCodeRepository.model_fields
@@ -2154,6 +2167,155 @@ class TestForgeExecutorPersist:
             builder.persist()
         assert "blueprint is not initialized" in str(exc_info.value)
 
+    def test_persist_leaves_out_a_provenance_that_records_nothing(
+        self, minimal_cstar_spec_builder_args
+    ):
+        """A direct use of the executor (no engine to supply a provenance) must not
+        write an empty ``provenance`` block: a C-Star that predates the field
+        rejects the key.
+        """
+        builder = _make_builder(minimal_cstar_spec_builder_args)
+
+        builder.persist()
+
+        data = yaml.safe_load(builder.path_roms_marbl_blueprint().read_text())
+        assert "provenance" not in data
+
+    def test_persist_writes_a_provenance_that_records_something(
+        self, minimal_cstar_spec_builder_args
+    ):
+        builder = _make_builder(minimal_cstar_spec_builder_args)
+        derived_from = BlueprintRef(
+            kind="Blueprint", application="forge", name="demo", content_hash="abc"
+        )
+        builder.roms_marbl_blueprint = builder.roms_marbl_blueprint.model_copy(
+            update={"provenance": Provenance(derived_from=[derived_from])}
+        )
+
+        builder.persist()
+
+        data = yaml.safe_load(builder.path_roms_marbl_blueprint().read_text())
+        assert data["provenance"] == {
+            "derived_from": [
+                {
+                    "kind": "Blueprint",
+                    "application": "forge",
+                    "name": "demo",
+                    "content_hash": "abc",
+                }
+            ]
+        }
+
+
+class TestEmittedBlueprintIdentity:
+    """What the emitted ``roms_marbl`` blueprint says about itself: a description
+    of where it came from and, when the engine supplies one, its provenance.
+    """
+
+    @staticmethod
+    def _configure(builder, **kwargs):
+        """Run ``configure_build`` (templates mocked) and return the emitted YAML."""
+        with (
+            patch(
+                "cstar.applications.forge.executor.render_roms_settings"
+            ) as mock_render,
+            patch("cstar.applications.forge.executor.write_roms_namelist"),
+        ):
+            mock_render.return_value = {
+                "location": str(builder.compile_time_code_dir),
+                "filter": {"files": ["test.opt"]},
+                "branch": "main",
+            }
+            builder.configure_build(**kwargs)
+        return yaml.safe_load(builder.path_roms_marbl_blueprint().read_text())
+
+    @staticmethod
+    def _provenance(working_dir):
+        return Provenance(
+            generated_at=datetime(2026, 10, 6, 12, 30, tzinfo=UTC),
+            generated_by=GeneratedBy(
+                tool="forge",
+                system="test",
+                versions={"cstar-ocean": "1.0"},
+                run_id="run-1",
+                working_dir=str(working_dir),
+            ),
+            derived_from=[
+                BlueprintRef(
+                    kind="Blueprint",
+                    application="forge",
+                    name="demo",
+                    content_hash="abc",
+                ),
+                CatalogSpecRef(kind="ModelSpec", name="spec", origin="catalog"),
+            ],
+        )
+
+    def test_description_says_which_forge_blueprint_it_came_from(
+        self, minimal_cstar_spec_builder_args
+    ):
+        minimal_cstar_spec_builder_args["description"] = "My domain"
+        builder = _make_builder(minimal_cstar_spec_builder_args)
+
+        emitted = self._configure(builder)
+
+        assert emitted["description"] == emitted_blueprint_description(
+            builder.name, "My domain"
+        )
+        # The forge blueprint's own description is unchanged: it is what a catalog
+        # registration of the domain records.
+        assert builder.description == "My domain"
+
+    def test_the_given_provenance_is_written(self, minimal_cstar_spec_builder_args):
+        builder = _make_builder(minimal_cstar_spec_builder_args)
+        provenance = self._provenance(builder.host.working_dir)
+
+        emitted = self._configure(builder, provenance=provenance)
+
+        assert Provenance.model_validate(emitted["provenance"]) == provenance
+        assert builder.roms_marbl_blueprint.provenance is provenance
+
+    def test_a_complete_blueprint_loads_back_with_the_given_provenance(
+        self, minimal_cstar_spec_builder_args, tmp_path
+    ):
+        """With real inputs the blueprint is re-validated at emit time and loads
+        strictly, so the provenance must survive both.
+        """
+        builder = _make_builder(minimal_cstar_spec_builder_args)
+        input_file = tmp_path / "input.nc"
+        input_file.touch()
+        dataset = cstar_models.Dataset(
+            data=[Resource(location=str(input_file), partitioned=False)]
+        )
+        builder.roms_marbl_blueprint = builder.roms_marbl_blueprint.model_copy(
+            update={
+                "grid": dataset,
+                "initial_conditions": dataset,
+                "forcing": cstar_models.ForcingConfiguration(
+                    boundary=dataset, surface=dataset
+                ),
+            }
+        )
+        builder._inputs_generated = True
+        provenance = self._provenance(builder.host.working_dir)
+
+        self._configure(builder, provenance=provenance)
+
+        loaded = deserialize(
+            builder.path_roms_marbl_blueprint(), cstar_models.RomsMarblBlueprint
+        )
+        assert loaded.provenance == provenance
+        assert builder.roms_marbl_blueprint.provenance == provenance
+
+    def test_no_provenance_block_is_written_without_one(
+        self, minimal_cstar_spec_builder_args
+    ):
+        builder = _make_builder(minimal_cstar_spec_builder_args)
+
+        emitted = self._configure(builder)
+
+        assert "provenance" not in emitted
+
 
 class TestValidatedRomsMarblBlueprint:
     """Tests for the emit-time validation gate (_validated_roms_marbl_blueprint).
@@ -2407,6 +2569,126 @@ class TestProcessCapturesRunOutput:
         log_files = list((Path(host.working_dir) / "logs").glob("forge_*.log"))
         assert len(log_files) == 1
         assert "engine ran" in log_files[0].read_text()
+
+
+class TestPublishEmittedBlueprint:
+    """``forge_run.publish_emitted_blueprint``: the one place the emitted
+    ``roms_marbl`` blueprint is copied into ``<working root>/output/``.
+    """
+
+    @staticmethod
+    def _executor(working_dir):
+        """A stand-in executor whose emitted blueprint (and settings sidecar) exist."""
+        blueprint = working_dir / "blueprints" / "B_demo.yaml"
+        blueprint.parent.mkdir(parents=True)
+        blueprint.write_text("name: demo\n")
+        (blueprint.parent / "settings_B_demo.yaml").write_text("compile_time: {}\n")
+        return SimpleNamespace(path_roms_marbl_blueprint=lambda: blueprint)
+
+    def test_copies_only_the_blueprint_into_output(self, tmp_path):
+        published = forge_run.publish_emitted_blueprint(self._executor(tmp_path / "wd"))
+
+        assert published == (tmp_path / "wd" / "output" / "B_demo.yaml").resolve()
+        assert published.read_text() == "name: demo\n"
+        # not the settings sidecar, so a deferred reference resolves to one file
+        assert [p.name for p in published.parent.iterdir()] == ["B_demo.yaml"]
+
+    def test_publishing_again_replaces_the_copy(self, tmp_path):
+        executor = self._executor(tmp_path / "wd")
+        forge_run.publish_emitted_blueprint(executor)
+        executor.path_roms_marbl_blueprint().write_text("name: changed\n")
+
+        published = forge_run.publish_emitted_blueprint(executor)
+
+        assert published.read_text() == "name: changed\n"
+
+
+class TestRunBlueprintPublishes:
+    """``forge_run.run_blueprint`` (``cstar forge run``) publishes the emitted
+    blueprint to ``output/`` like ``ForgeRunner.run`` does, and prints that copy
+    as the blueprint to run. Host resolution and the engine are stubbed.
+    """
+
+    @pytest.fixture
+    def wd(self, tmp_path):
+        return tmp_path / "wd"
+
+    @pytest.fixture
+    def forge_yaml(
+        self,
+        tmp_path,
+        sample_grid_kwargs,
+        sample_open_boundaries,
+        sample_partitioning,
+    ):
+        cfg = build_forge_blueprint(
+            model_dir=_MODEL_DIR,
+            grid_name="test-grid",
+            grid_kwargs=sample_grid_kwargs,
+            open_boundaries=sample_open_boundaries.model_dump(),
+            partitioning=sample_partitioning.model_dump(),
+            start_date=datetime(2012, 1, 1),
+            end_date=datetime(2012, 1, 2),
+            description="run_blueprint test",
+            dt=7200,
+            forcing_inputs=_FORCING_INPUTS,
+            output_settings=_OUTPUT_SETTINGS,
+        )
+        return cfg.to_yaml(tmp_path / "forge_blueprint.yaml")
+
+    @pytest.fixture
+    def run(self, wd, forge_yaml):
+        """Call ``run_blueprint``; the stub engine writes the emitted blueprint only
+        when it would configure the build (as the real one does).
+        """
+        host = HostPaths(working_dir=wd, source_data_cache=wd, system="test")
+
+        def fake_process(cfg, *, host, configure, only_inputs, **_kwargs):
+            blueprint = host.working_dir / "blueprints" / f"B_{cfg.name}.yaml"
+            if configure and not only_inputs:
+                blueprint.parent.mkdir(parents=True, exist_ok=True)
+                blueprint.write_text("name: demo\n")
+            return SimpleNamespace(path_roms_marbl_blueprint=lambda: blueprint)
+
+        def _run(**kwargs):
+            with (
+                patch("cstar.applications.forge.runtime.config.ensure_data_dirs"),
+                patch(
+                    "cstar.applications.forge.runtime.config.resolve_host",
+                    return_value=host,
+                ),
+                # force=True would strip the root logger's handlers (pytest's own)
+                patch("cstar.applications.forge.runtime.logging.basicConfig"),
+                patch(
+                    "cstar.applications.forge.runtime.process_forge_blueprint",
+                    side_effect=fake_process,
+                ),
+            ):
+                return forge_run.run_blueprint(
+                    forge_blueprint=str(forge_yaml), **kwargs
+                )
+
+        return _run
+
+    def test_publishes_and_prints_the_published_blueprint(self, run, wd, capsys):
+        assert run() == 0
+
+        published = list((wd.resolve() / "output").glob("B_*.yaml"))
+        assert len(published) == 1
+        out = capsys.readouterr().out
+        assert f"\nBlueprint: {published[0]}\n" in out
+        assert f"Run it with:  cstar blueprint run {published[0]}\n" in out
+
+    @pytest.mark.parametrize(
+        "skips", [{"no_configure": True}, {"only_inputs": ["grid"]}]
+    )
+    def test_publishes_nothing_when_the_build_is_not_configured(
+        self, run, wd, capsys, skips
+    ):
+        assert run(**skips) == 0
+
+        assert not (wd / "output").exists()
+        assert "Blueprint:" not in capsys.readouterr().out
 
 
 class TestForgeExecutorGenerateInputsComprehensive:
@@ -3725,7 +4007,11 @@ class TestForgeRunnerEndToEnd:
         cfg.to_yaml(bp_path)
         return bp_path
 
-    def test_forge_runner_generates_inputs_and_completes(self, mock_grid, tmp_path):
+    def test_forge_runner_generates_inputs_and_completes(
+        self, mock_grid, tmp_path, monkeypatch
+    ):
+        # Not inside a workplan step: no inherited run id to record.
+        monkeypatch.delenv(ENV_CSTAR_RUNID, raising=False)
         grid_mock = _create_grid_mock()
         grid_mock.nx = self._GRID_KWARGS["nx"]
         grid_mock.ny = self._GRID_KWARGS["ny"]
@@ -3862,6 +4148,18 @@ class TestForgeRunnerEndToEnd:
         published = list((run_dir / "output").glob("*.yaml"))
         assert [p.name for p in published] == [blueprint_yaml_paths[0].name]
         assert published[0].read_bytes() == blueprint_yaml_paths[0].read_bytes()
+
+        # The emitted blueprint loads strictly and records what produced it: the
+        # forge run that generated it, derived from the forge blueprint it read.
+        cfg = ForgeBlueprint.from_yaml(bp_path)
+        emitted = deserialize(published[0], cstar_models.RomsMarblBlueprint)
+        assert emitted.description == emitted_blueprint_description(
+            cfg.name, cfg.description
+        )
+        generated_by = emitted.provenance.generated_by
+        assert generated_by.tool == "forge"
+        assert (generated_by.run_id, generated_by.working_dir) == ("", str(run_dir))
+        assert emitted.provenance.derived_from[0] == producer_ref(cfg)
 
 
 class TestOnlyInputsReuseIsIdempotent:

@@ -144,6 +144,8 @@ Everything goes under the blueprint's working directory: by default
      blueprints/
        B_<name>.yaml          the ROMS-MARBL blueprint
        settings_B_<name>.yaml the resolved model settings, for reference
+     output/
+       B_<name>.yaml          a copy of the ROMS-MARBL blueprint
 
 The ROMS-MARBL blueprint points at the generated files with absolute paths,
 pins the same model code the forge blueprint did, carries the processor
@@ -151,8 +153,29 @@ layout and run window, and lists the rendered ``cppdefs.opt``, ``namelist.nml``
 and ``marbl_in`` as its compile-time and run-time code. It has no
 ``working_dir`` of its own, so it runs under
 ``CSTAR_DATA_HOME/blueprint_runs/roms_marbl/<name>`` unless a workplan places
-it. Run it with ``cstar blueprint run blueprints/B_<name>.yaml``; the last
-lines of Forge's output print the exact command.
+it. Both ``cstar blueprint run`` and ``cstar forge run`` copy it into
+``output/``, where a later step of a workplan looks for it; run that copy with
+``cstar blueprint run output/B_<name>.yaml``. ``cstar forge run`` prints the
+exact command as its last lines.
+
+Its ``description`` names the forge blueprint it came from and repeats that
+blueprint's description. Its :ref:`provenance <blueprint_provenance>` records
+the Forge run that generated it, so a copy of the file still says where it came
+from:
+
+``generated_at``, ``generated_by``
+   When it was generated and by what: ``tool`` (``forge``), an ``id`` unique to
+   the run, the ``system``, the ``versions`` of C-Star and roms-tools, the
+   ``run_id`` of the workplan run when a workplan step ran Forge (empty
+   otherwise) and the ``working_dir``.
+``derived_from``
+   The forge blueprint, by name and ``content_hash``, followed by each catalog
+   spec it was composed from that has a name, as ``ModelSpec``, ``DomainSpec``,
+   ``ForcingSpec``, ``CdrSpec`` or ``OutputSpec`` entries with their ``origin``
+   and whether they were ``modified``.
+
+Every run records its own provenance, with a new ``id``, even when it reuses the
+input files of an earlier one.
 
 The settings sidecar is the complete resolved ``model_settings`` split into
 the single compile-time section (``cppdefs``) and the run-time namelist

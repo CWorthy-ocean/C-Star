@@ -68,7 +68,8 @@ Directory map
     |   |   +-- config.py                  # Host/path resolution, system detection (host glue, not execution)
     |   |   +-- models.py                  # Spec classes (ModelSpec, etc.) (authoring, not execution)
     |   |   +-- runtime.py                 # run_blueprint(...): executes a forge_blueprint.yaml given
-    |   |                                  # already-parsed option values (called by cli/forge's 'run')
+    |   |                                  # already-parsed option values (called by cli/forge's 'run');
+    |   |                                  # publish_emitted_blueprint(): copies B_{name}.yaml to output/
     |   +-- core.py                    # get_application() / register_application / ApplicationDefinition
     |   +-- roms_marbl/                # the roms_marbl application forge's output feeds into
     +-- catalog/                       # Bundled + layered spec catalog (see docs/developers/catalog_design.rst)
@@ -187,6 +188,18 @@ filenames off it.
   first; the wizard does so in ``ForgeBlueprintWizard._save_config``, which
   every write of its config to disk goes through, and carries the stamp through
   re-resolves (``build_forge_blueprint(provenance=...)``).
+- **``emitted_provenance(blueprint, run_id=..., working_dir=...)``** -- the one
+  place the *emitted* ``roms_marbl`` blueprint's provenance is assembled (and
+  ``emitted_blueprint_description(name, description)`` its description), built
+  from ``producer_ref``, ``composition_refs`` and ``new_generated_by``. Unlike a
+  forge blueprint's, it is minted afresh by every run, never carried over:
+  ``generated_by`` is a forge event happening now (tool ``forge``, a uuid4, the
+  system, ``generation_versions()``, the workplan ``run_id`` if the process
+  inherited ``CSTAR_RUNID``, and the working directory), and ``derived_from`` is
+  the forge blueprint (``producer_ref``: name and ``content_hash``, the same
+  reference ``ForgeApplication.emitted_blueprint`` predicts as the producer)
+  followed by a ``CatalogSpecRef`` for each *named* ``composition`` entry, in the
+  order model, domain, forcing, cdr, output.
 
 Render templates: ``code.templates_compile_time``/``_run_time`` pin a git
 commit (``code.templates_commit``) and, per file, the sha256 of its content
@@ -205,10 +218,10 @@ requires:
 - ``ForgeRunner(BlueprintRunner[ForgeBlueprint])`` -- ``run()`` delegates to
   ``cstar.applications.forge.runtime.process`` (host resolution) ->
   ``process_forge_blueprint`` -> ``ensure_source_data``/``generate_inputs``/
-  ``configure_build``, then reports ``ExecutionStatus.COMPLETED``. Scope:
-  generates inputs and emits the downstream ``roms_marbl`` blueprint
-  (``B_{name}.yaml``), then stops -- the existing ``roms_marbl`` application
-  consumes that blueprint separately.
+  ``configure_build``, publishes the emitted blueprint (below), then reports
+  ``ExecutionStatus.COMPLETED``. Scope: generates inputs and emits the
+  downstream ``roms_marbl`` blueprint (``B_{name}.yaml``), then stops -- the
+  existing ``roms_marbl`` application consumes that blueprint separately.
 - ``ForgeApplication`` -- ``@register_application``-decorated
   ``ApplicationDefinition`` wiring ``ForgeBlueprint`` + ``ForgeRunner``
   together under ``name = "forge"``.
@@ -230,6 +243,14 @@ Two ways to run a forge blueprint:
    calling ``cstar.applications.forge.runtime.run_blueprint``. Reach for
    this for per-run options ``cstar blueprint run`` doesn't expose (stage
    selection, ``--clobber``, dask tuning, ``--only-inputs``, verbosity).
+
+Both publish the emitted blueprint through
+``cstar.applications.forge.runtime.publish_emitted_blueprint``, which copies
+``blueprints/B_{name}.yaml`` (not the settings sidecar) to
+``<working_dir>/output/``: the location a workplan's deferred ``from_step``
+reference looks in, and the one ``ForgeApplication.emitted_blueprint``
+documents. ``cstar forge run`` prints that copy as the blueprint to run, unless
+it stopped before ``configure_build`` (``--no-configure``, ``--only-inputs``).
 
 The call chain end to end
 ---------------------------------
@@ -288,13 +309,21 @@ The call chain end to end
 6. ``cstar.applications.forge.engine.process_forge_blueprint(cfg, host, ...)``
    builds a ``ForgeExecutor`` via ``ForgeExecutor.from_forge_blueprint(cfg,
    host)`` and drives: ``ensure_source_data()`` -> ``generate_inputs()`` ->
-   ``configure_build()``.
+   ``configure_build()``, which it hands the emitted blueprint's provenance,
+   minted once for the call (``emitted_provenance``; ``run_id`` is read from the
+   ``CSTAR_RUNID`` a workplan step inherits, and is empty for a standalone run).
 7. Outputs land under ``host.working_dir``: input NetCDFs, ``namelist.nml``,
    ``cppdefs.opt``, and the emitted downstream ``roms_marbl`` blueprint YAML
    (``B_{name}.yaml``, persisted once by ``configure_build()`` -- there is
    no per-stage blueprint file). The emitted blueprint leaves ``working_dir``
    unset, so it runs under
-   ``CSTAR_DATA_HOME/blueprint_runs/roms_marbl/<name>``.
+   ``CSTAR_DATA_HOME/blueprint_runs/roms_marbl/<name>``. Its ``description``
+   says it was generated by forge from the forge blueprint of that name, and its
+   ``provenance`` is the one the engine handed ``configure_build``; ``persist()``
+   leaves the block out when none was supplied (a direct use of the executor),
+   so such a file stays loadable by a C-Star that predates the field.
+8. The entry point publishes a copy to ``<working_dir>/output/B_{name}.yaml``
+   (``publish_emitted_blueprint``).
 
 ``ForgeExecutor`` never imports ``cstar.applications.forge.config``/
 ``cstar.catalog``/``cstar.applications.forge.resolve``/``cstar.wizard`` --

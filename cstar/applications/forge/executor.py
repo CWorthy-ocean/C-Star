@@ -34,6 +34,7 @@ from cstar.applications.forge.blueprint import (
     CDR_MODES,
     OpenBoundaries,
     UserProvidedFile,
+    emitted_blueprint_description,
     emitted_blueprint_filename,
     infer_cdr_mode,
     vert_kwargs_from_grid_kwargs,
@@ -1017,6 +1018,7 @@ class ForgeExecutor(BaseModel):
         - The directory is created if it doesn't exist
         - Serialization warnings are suppressed (expected for placeholder values)
         - Path objects are converted to strings for YAML compatibility
+        - A `provenance` block that records nothing is not written
 
         Raises
         ------
@@ -1055,6 +1057,13 @@ class ForgeExecutor(BaseModel):
         # way). A "$schema" key would also be rejected as an extra field by any
         # C-Star deserializer that doesn't strip it before validating.
         schema_url = str(roms_marbl_blueprint_dict.pop("$schema", "") or "")
+
+        # A provenance that records nothing (a direct use of the executor, without
+        # the engine that supplies one) is left out: it says nothing, and a C-Star
+        # that predates the field rejects the key.
+        provenance = roms_marbl_blueprint_dict.get("provenance") or {}
+        if not any(provenance.values()):
+            roms_marbl_blueprint_dict.pop("provenance", None)
 
         with bp_path.open("w") as f:
             if schema_url:
@@ -1529,7 +1538,8 @@ class ForgeExecutor(BaseModel):
 
         1. Initializes compile-time and run-time settings from the resolved ForgeBlueprint
         2. Creates blueprint with:
-           - Basic metadata (name, description, dates, partitioning)
+           - Basic metadata (name, description (see `emitted_blueprint_description`),
+             dates, partitioning)
            - Code repository specifications from code_spec
            - Placeholder Resource objects for grid, initial_conditions, forcing
 
@@ -1559,7 +1569,7 @@ class ForgeExecutor(BaseModel):
         # Use placeholder datasets to satisfy structure requirements
         self.roms_marbl_blueprint = cstar_models.RomsMarblBlueprint.model_construct(
             name=self.name,
-            description=self.description,
+            description=emitted_blueprint_description(self.name, self.description),
             valid_start_date=self.start_date,
             valid_end_date=self.end_date,
             partitioning=self.partitioning,
@@ -2188,7 +2198,8 @@ class ForgeExecutor(BaseModel):
            - Run-time: writes namelist.nml (write_roms_namelist) and copies
              static run-time files (e.g., marbl_in)
         5. Updates blueprint with rendered code locations and file lists
-        6. Sets blueprint partitioning.use_pio and runtime_params
+        6. Sets blueprint partitioning.use_pio and runtime_params, and its
+           provenance when one is supplied
         7. Re-validates the final blueprint against the installed C-Star models
            (only when `generate_inputs()` has run -- the placeholder blueprint
            cannot validate), so an extra="forbid" mismatch fails at emit time
@@ -2224,7 +2235,10 @@ class ForgeExecutor(BaseModel):
             dropped with an INFO log, not rejected as an unknown key.
             Defaults to empty dict.
         **kwargs
-            Additional keyword arguments (currently unused, reserved for future use).
+            ``n_tracers`` (int) overrides the tracer count derived from the resolved
+            settings. ``provenance`` (`Provenance`) is the provenance the emitted
+            blueprint records, as built by ``emitted_provenance``; without it the
+            blueprint is written with none.
 
         Returns
         -------
@@ -2523,6 +2537,11 @@ class ForgeExecutor(BaseModel):
                 "start_date": self.start_date,
                 "end_date": self.end_date,
             }
+            # The engine mints the provenance of this emission (see
+            # ``emitted_provenance``). Set as the model, not a dict, so the
+            # blueprint built below holds a real ``Provenance``.
+            if (provenance := kwargs.get("provenance")) is not None:
+                roms_marbl_blueprint_dict["provenance"] = provenance
 
             self.roms_marbl_blueprint = cstar_models.RomsMarblBlueprint.model_construct(
                 **roms_marbl_blueprint_dict

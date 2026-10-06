@@ -15,6 +15,7 @@ from __future__ import annotations
 import contextlib
 import logging
 import os
+import shutil
 import sys
 import traceback
 from datetime import datetime
@@ -26,7 +27,11 @@ from cstar.applications.forge.blueprint import (
     ForgeBlueprint,
     _installed_version,
 )
-from cstar.applications.forge.engine import process_forge_blueprint
+from cstar.applications.forge.engine import (
+    ForgeBlueprintExecutor,
+    process_forge_blueprint,
+)
+from cstar.execution.file_system import JobFileSystemManager
 
 # Loggers whose level gets lowered while capturing, so the file actually receives
 # useful content on the C-Star app path (which never calls logging.basicConfig).
@@ -199,6 +204,34 @@ def process(spec, *, working_dir=None, **kwargs):
         return process_forge_blueprint(cfg, host=host, **kwargs)
 
 
+def publish_emitted_blueprint(executor: ForgeBlueprintExecutor) -> Path:
+    """Copy the emitted ``roms_marbl`` blueprint into ``<working root>/output/``.
+
+    Under a workplan, C-Star's deferred-blueprint resolution
+    (``cstar.orchestration.transforms.resolve_deferred_blueprint``) looks for the
+    producer step's artifact in its ``output/`` dir (the step's ``working_dir``
+    root, which the scheduler system-override points the forge blueprint at) --
+    not in the ``blueprints/`` dir the executor writes to. Only the blueprint is
+    copied (not the ``settings_B_{name}.yaml`` sidecar), so a deferred reference
+    that omits ``filename`` still resolves to a unique candidate.
+
+    Both ways of running forge publish through here (``ForgeRunner.run`` and
+    :func:`run_blueprint`), so a standalone run leaves the same ``output/`` a
+    workplan step does.
+
+    Returns
+    -------
+    Path
+        The published blueprint path.
+    """
+    src = Path(executor.path_roms_marbl_blueprint())
+    out_dir = JobFileSystemManager(src.parent.parent).output_dir
+    out_dir.mkdir(parents=True, exist_ok=True)
+    dest = out_dir / src.name
+    shutil.copy2(src, dest)
+    return dest
+
+
 def _dask_client_kwargs(
     *,
     dask_workers: int | None,
@@ -256,7 +289,9 @@ def run_blueprint(
     typer command (not yet wired up as of this commit; see the module docstring)
     parses ``sys.argv`` and calls this with one keyword argument per option, so the
     argument surface (names, types, defaults) lives once, in the typer command, and
-    this function only executes it.
+    this function only executes it. A run that configured the build publishes the
+    emitted blueprint (:func:`publish_emitted_blueprint`) and prints that copy as the
+    blueprint to run.
     """
     if verbose:
         logging.basicConfig(
@@ -313,7 +348,7 @@ def run_blueprint(
                 dask_client.close()
 
         if not no_configure and not only_inputs:
-            blueprint_path = executor.path_roms_marbl_blueprint()
+            blueprint_path = publish_emitted_blueprint(executor)
             print(f"\nBlueprint: {blueprint_path}")
             print(f"Run it with:  cstar blueprint run {blueprint_path}")
         return 0

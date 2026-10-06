@@ -27,6 +27,7 @@ from cstar.applications.forge.engine import process_forge_blueprint
 from cstar.applications.forge.host import HostPaths
 from cstar.applications.roms_marbl.models import RomsMarblBlueprint
 from cstar.cli.blueprint.check import app as check_app
+from cstar.orchestration.models import BlueprintRef
 from cstar.orchestration.serialization import deserialize
 from cstar.roms.namelist import namelist_schema_for_ref
 from cstar.roms.precheck import (
@@ -213,6 +214,14 @@ class TestBlueprint:
         assert bp.code.roms.commit == ROMS_REF
         assert bp.partitioning.use_pio is True
         assert (bp.partitioning.n_procs_x, bp.partitioning.n_procs_y) == (2, 2)
+        # the forge run that produced it, derived from the forge blueprint it read
+        assert bp.provenance.generated_by is not None
+        assert bp.provenance.generated_by.tool == "forge"
+        assert bp.provenance.generated_by.working_dir == str(run.working_dir)
+        producer = bp.provenance.derived_from[0]
+        assert isinstance(producer, BlueprintRef)
+        assert (producer.application, producer.name) == ("forge", run.cfg.name)
+        assert producer.content_hash == run.cfg.content_hash()
 
     def test_settings_sidecar_exists(self, run: Run) -> None:
         sidecar = run.working_dir / "blueprints" / f"settings_B_{run.cfg.name}.yaml"
@@ -309,13 +318,22 @@ def test_rerun_reuses_inputs(
     tmp_path: Path,
     forge_blueprint_factory: Callable[..., tuple["ForgeBlueprint", Path]],
 ) -> None:
-    """A second call on the same working directory leaves inputs and blueprint alone."""
+    """A second call on the same working directory leaves the inputs alone and
+    re-emits the blueprint, changed only by the provenance of the new run.
+    """
     first = _generate("unified", tmp_path, forge_blueprint_factory)
     mtimes = {p: p.stat().st_mtime_ns for p in first.input_files}
-    blueprint = first.blueprint_path.read_text()
+    blueprint = yaml.safe_load(first.blueprint_path.read_text())
     assert mtimes
 
     process_forge_blueprint(first.cfg, host=first.host, use_dask=False)
 
     assert {p: p.stat().st_mtime_ns for p in first.input_files} == mtimes
-    assert first.blueprint_path.read_text() == blueprint
+    rerun = yaml.safe_load(first.blueprint_path.read_text())
+    first_provenance = blueprint.pop("provenance")
+    rerun_provenance = rerun.pop("provenance")
+    assert rerun == blueprint
+    assert rerun_provenance["derived_from"] == first_provenance["derived_from"]
+    assert (
+        rerun_provenance["generated_by"]["id"] != first_provenance["generated_by"]["id"]
+    )

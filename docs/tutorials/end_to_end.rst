@@ -74,12 +74,13 @@ directory name is the blueprint name, slugified):
    builds/compile-time/   cppdefs.opt
    builds/run-time/       namelist.nml, marbl_in
    blueprints/            B_<name>.yaml and its settings sidecar
+   output/                a copy of B_<name>.yaml
 
 The last lines of output tell you what to do next:
 
 .. code-block:: text
 
-   Blueprint: ~/cstar/blueprint_runs/forge/.../blueprints/B_cson_roms-marbl_v0.1_wio-toy_10procs.yaml
+   Blueprint: ~/cstar/blueprint_runs/forge/.../output/B_cson_roms-marbl_v0.1_wio-toy_10procs.yaml
    Run it with:  cstar blueprint run <path>
 
 ``cstar forge run <forge_blueprint.yaml>`` runs the same thing with Forge's
@@ -91,7 +92,7 @@ dask, or change the working directory. See :doc:`../blueprints/forge`.
 
 .. code-block:: console
 
-   cstar blueprint run ~/cstar/blueprint_runs/forge/.../blueprints/B_cson_roms-marbl_v0.1_wio-toy_10procs.yaml
+   cstar blueprint run ~/cstar/blueprint_runs/forge/.../output/B_cson_roms-marbl_v0.1_wio-toy_10procs.yaml
 
 This time the ``application: roms_marbl`` line routes the blueprint to the
 ROMS-MARBL application. C-Star clones and compiles the model code pinned in
