@@ -579,6 +579,7 @@ class _StepPane:
         self._uploaded_path = ""
         self._current_path = ""
         self._cpus_touched = False
+        self._cpus_prefilled = 0
         self._app_fallback: str = ROMS_MARBL
         self._form_app = ""
         self._form: dict[str, tuple[Any, type, Any]] = {}
@@ -838,7 +839,8 @@ class _StepPane:
         self._changed()
 
     def _on_cpus(self, _change: Any) -> None:
-        if not self.page.is_suspended:
+        # a value the pane prefilled itself is not a user edit
+        if not self.page.is_suspended and self.num_cpus.value != self._cpus_prefilled:
             self._cpus_touched = True
         self._changed()
 
@@ -951,8 +953,14 @@ class _StepPane:
         self.application.disabled = bool(derived)
 
     def _prefill(self) -> None:
-        """Prefill ``num_cpus`` from the blueprint (or the predicted emitted one)."""
-        if self._cpus_touched or self.num_cpus.value:
+        """Prefill ``num_cpus`` from the blueprint (or the predicted emitted one).
+
+        A value the pane prefilled earlier is replaced when the source changes;
+        a value the user typed is kept.
+        """
+        if self._cpus_touched or (
+            self.num_cpus.value and self.num_cpus.value != self._cpus_prefilled
+        ):
             return
         cpus = 0
         if self.source.value == SOURCE_DEFERRED:
@@ -965,8 +973,12 @@ class _StepPane:
                     self.application.value = emitted.application
         elif facts := self.facts():
             cpus = facts.cpus_needed
-        if cpus:
-            self.num_cpus.value = cpus
+        # write the new prediction, or clear a stale one when the new source
+        # predicts nothing; a user-typed value never reaches this point
+        if cpus != self.num_cpus.value:
+            with self.page.suspended():
+                self.num_cpus.value = cpus
+        self._cpus_prefilled = cpus
 
     def _sync(self) -> None:
         """Show what applies to the source/application; refresh derived widgets."""
