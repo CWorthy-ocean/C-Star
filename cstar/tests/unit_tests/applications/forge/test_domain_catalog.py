@@ -722,3 +722,33 @@ class TestReviewFixes:
         assert str(d).startswith(str((tmp_path / "mine").resolve()))
         b = stack.build_dir_for("MacOS", "bp1")
         assert b.name == "Build"
+
+
+def test_flat_roms_marbl_blueprint_files_are_catalog_entries(isolated_catalog):
+    """``blueprints/B_<name>.yaml`` (the file a forge run emits) is an entry.
+
+    The entry maps to the file; the older ``blueprints/<machine>/<name>/``
+    directory layout keeps mapping to its directory, and both reach
+    ``_find_roms_marbl_blueprint_files``.
+    """
+    root = isolated_catalog.catalog_root
+    flat = root / "blueprints" / "B_wio-flat.yaml"
+    flat.write_text("name: wio-flat\napplication: roms_marbl\n")
+    nested_dir = root / "blueprints" / "some-machine" / "wio-nested"
+    nested_dir.mkdir(parents=True)
+    nested = nested_dir / "B_wio-nested.yaml"
+    nested.write_text("name: wio-nested\napplication: roms_marbl\n")
+
+    catalog = DomainCatalog(catalog_root=root)
+    assert {"wio-flat", "wio-nested"} <= set(catalog.roms_marbl_blueprint_names)
+    # samefile: the scan also tries the `Blueprints/` spelling, which on a
+    # case-insensitive file system names the same directory
+    assert catalog.roms_marbl_blueprint_path("wio-flat").samefile(flat)
+    assert catalog.roms_marbl_blueprint_path("wio-nested").samefile(nested_dir)
+    found = catalog._find_roms_marbl_blueprint_files()
+    assert any(f.samefile(flat) for f in found)
+    assert any(f.samefile(nested) for f in found)
+    # the forge blueprints beside the flat file are not mistaken for ROMS ones
+    assert not any(
+        n.endswith("forge_blueprint") for n in catalog.roms_marbl_blueprint_names
+    )

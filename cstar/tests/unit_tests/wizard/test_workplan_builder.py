@@ -780,6 +780,26 @@ def test_catalog_blueprint_directory_resolves_to_its_roms_marbl_file(tmp_path, r
     assert path == "" and "2 roms_marbl blueprint files" in problems[0]
 
 
+def test_catalog_flat_blueprint_file_resolves_to_itself(tmp_path, roms_bp):
+    """A ``blueprints/B_<name>.yaml`` entry maps to the file, not a directory."""
+    flat = tmp_path / "B_flat.yaml"
+    shutil.copy(roms_bp, flat)
+
+    class _FlatCatalog(_StubCatalog):
+        def __init__(self, root: Path) -> None:
+            super().__init__(root)
+            self.roms_marbl_blueprint_names = ["flat"]
+
+        def roms_marbl_blueprint_path(self, name: str) -> Path:
+            return flat
+
+    page = _stub_page(_FlatCatalog(tmp_path))
+    pane = page.panes[0]
+    pane.catalog_roms.value = "flat"
+    assert pane.resolve() == (str(flat), [])
+    assert page.roms_blueprint_file("flat") == (str(flat), [])
+
+
 def test_read_only_catalog_saves_next_to_the_loaded_file(tmp_path, legacy_file):
     page = _stub_page(_StubCatalog(tmp_path, read_only=True))
     page._load_from_path(str(legacy_file))
