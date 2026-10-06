@@ -36,6 +36,7 @@ import yaml
 from pydantic import BaseModel
 
 from cstar.applications.forge.blueprint import (
+    DEFAULT_APPLICATION,
     BgcBoundarySource,
     BgcInitialConditionsSource,
     BgcInterpMethod,
@@ -4928,12 +4929,12 @@ class ForgeBlueprintWizard:
     def _default_blueprint_path(self, name: str) -> str:
         """Default "Save to:" path for a blueprint named *name*.
 
-        Prefers the active catalog's ``blueprints/`` directory so a save lands
+        Prefers the active catalog's ``blueprints/forge/`` directory so a save lands
         where the wizard's other catalog-aware specs look; falls back to a
         bare filename (CWD-relative) when the catalog isn't a local filesystem
         (e.g. loaded from a GitHub/http URL) and so isn't writable.
         """
-        fname = f"{name}.forge_blueprint.yaml"
+        fname = f"{name}.yaml"
         cat = getattr(self, "catalog", None)
         try:
             # A read-only catalog (e.g. the bundled one loaded as a single
@@ -4943,7 +4944,7 @@ class ForgeBlueprintWizard:
                 and getattr(cat, "_is_local", False)
                 and not getattr(cat, "read_only", False)
             ):
-                return str(cat.roms_marbl_blueprints_dir / fname)
+                return str(cat.blueprint_dir(DEFAULT_APPLICATION) / fname)
         except Exception:
             pass
         return fname
@@ -7063,12 +7064,11 @@ class ForgeBlueprintWizard:
             self._save_path_touched
             and prev_name is not None
             and cfg.name != prev_name
-            and Path(self.save_path.value).name == f"{prev_name}.forge_blueprint.yaml"
+            and Path(self.save_path.value).name == f"{prev_name}.yaml"
         ):
             with self._suspend():
                 self.save_path.value = str(
-                    Path(self.save_path.value).parent
-                    / f"{cfg.name}.forge_blueprint.yaml"
+                    Path(self.save_path.value).parent / f"{cfg.name}.yaml"
                 )
         self.download_link.value = self._download_html(
             cfg, caption="Download blueprint"

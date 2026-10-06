@@ -4,6 +4,7 @@ from cstar.base.feature import (
     ENV_FF_DEVELOPER_MODE,
     is_feature_enabled,
 )
+from cstar.cli.admin.migrate_catalog import app as app_migrate_catalog
 from cstar.cli.admin.migrate_outputs import app as app_migrate_outputs
 
 app = typer.Typer(
@@ -11,7 +12,9 @@ app = typer.Typer(
     help="Perform administrative tasks related to your C-Star installation and runs.",
 )
 
-# migrate-outputs is a user-facing upgrade step, so it is not developer-gated.
+# migrate-catalog and migrate-outputs are user-facing upgrade steps, so they are
+# not developer-gated.
+app.add_typer(app_migrate_catalog)
 app.add_typer(app_migrate_outputs)
 
 if is_feature_enabled(ENV_FF_DEVELOPER_MODE):

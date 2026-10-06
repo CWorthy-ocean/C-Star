@@ -747,11 +747,13 @@ class _StubCatalog:
         self.root = root
         self.read_only = read_only
         self.workplans_dir = root / "workplans"
-        self.roms_marbl_blueprint_names = ["one", "many"]
-        self.forge_blueprint_names: list[str] = []
+        self.blueprint_applications = ["roms_marbl"]
 
-    def roms_marbl_blueprint_path(self, name: str) -> Path:
-        return self.root / name
+    def blueprint_names(self, application: str) -> list[str]:
+        return sorted(p.stem for p in (self.root / application).glob("*.yaml"))
+
+    def blueprint_path(self, application: str, name: str) -> Path:
+        return self.root / application / f"{name}.yaml"
 
 
 def _stub_page(catalog: _StubCatalog) -> WorkplanBuilderPage:
@@ -761,43 +763,19 @@ def _stub_page(catalog: _StubCatalog) -> WorkplanBuilderPage:
     return WorkplanBuilderPage(app)
 
 
-def test_catalog_blueprint_directory_resolves_to_its_roms_marbl_file(tmp_path, roms_bp):
-    (tmp_path / "one").mkdir()
-    shutil.copy(roms_bp, tmp_path / "one" / "bp.yaml")
-    (tmp_path / "one" / "notes.yaml").write_text("application: forge\n")
-    (tmp_path / "many").mkdir()
-    shutil.copy(roms_bp, tmp_path / "many" / "a.yaml")
-    shutil.copy(roms_bp, tmp_path / "many" / "b.yaml")
+def test_catalog_blueprint_entry_resolves_to_its_file(tmp_path, roms_bp):
+    """A ``blueprints/roms_marbl/<name>.yaml`` entry maps to that file."""
+    (tmp_path / "roms_marbl").mkdir()
+    entry = tmp_path / "roms_marbl" / "flat.yaml"
+    shutil.copy(roms_bp, entry)
 
     page = _stub_page(_StubCatalog(tmp_path))
     pane = page.panes[0]
     assert pane.source.value == wb.SOURCE_CATALOG_ROMS  # the catalog has some
-    pane.catalog_roms.value = "one"
-    assert pane.resolve() == (str(tmp_path / "one" / "bp.yaml"), [])
-    assert pane.num_cpus.value == 128
-    pane.catalog_roms.value = "many"
-    path, problems = pane.resolve()
-    assert path == "" and "2 roms_marbl blueprint files" in problems[0]
-
-
-def test_catalog_flat_blueprint_file_resolves_to_itself(tmp_path, roms_bp):
-    """A ``blueprints/B_<name>.yaml`` entry maps to the file, not a directory."""
-    flat = tmp_path / "B_flat.yaml"
-    shutil.copy(roms_bp, flat)
-
-    class _FlatCatalog(_StubCatalog):
-        def __init__(self, root: Path) -> None:
-            super().__init__(root)
-            self.roms_marbl_blueprint_names = ["flat"]
-
-        def roms_marbl_blueprint_path(self, name: str) -> Path:
-            return flat
-
-    page = _stub_page(_FlatCatalog(tmp_path))
-    pane = page.panes[0]
     pane.catalog_roms.value = "flat"
-    assert pane.resolve() == (str(flat), [])
-    assert page.roms_blueprint_file("flat") == (str(flat), [])
+    assert pane.resolve() == (str(entry), [])
+    assert page.roms_blueprint_file("flat") == (str(entry), [])
+    assert pane.num_cpus.value == 128
 
 
 def test_read_only_catalog_saves_next_to_the_loaded_file(tmp_path, legacy_file):
@@ -1492,14 +1470,14 @@ def test_runs_section_title():
 
 
 def test_chunk_recipe_from_a_catalog_roms_blueprint(tmp_path, roms_bp):
-    (tmp_path / "one").mkdir()
-    shutil.copy(roms_bp, tmp_path / "one" / "my.bp.yaml")
+    (tmp_path / "roms_marbl").mkdir()
+    shutil.copy(roms_bp, tmp_path / "roms_marbl" / "my.bp.yaml")
     page = _stub_page(_StubCatalog(tmp_path))
     page._delete(page.panes[0])
     _name_page(page)
     chooser = page.chunk_base
     chooser.kind.value = wb.SOURCE_CATALOG_ROMS
-    chooser.catalog_roms.value = "one"
+    chooser.catalog_roms.value = "my.bp"
     assert page.chunk_start.value == "2020-01-01 00:00:00"  # from the blueprint
     assert page.chunk_prefix.value == "my.bp"
     page.chunk_end.value = "2020-03-01"
@@ -1507,7 +1485,7 @@ def test_chunk_recipe_from_a_catalog_roms_blueprint(tmp_path, roms_bp):
     names = [p.name.value for p in page.panes]
     assert names == ["my.bp-01", "my.bp-02"]  # the base is synthesized, not added
     first, second = page.draft.steps
-    assert first.blueprint_path == str(tmp_path / "one" / "my.bp.yaml")
+    assert first.blueprint_path == str(tmp_path / "roms_marbl" / "my.bp.yaml")
     assert first.compute_overrides == {"slurm": {"num_cpus": 128}}
     assert second.directives["continue-from"] == {"step": "my.bp-01"}
 

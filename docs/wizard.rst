@@ -264,8 +264,9 @@ Where your work goes
 --------------------
 
 Blueprints and workplans you save, and specs you register, land in your own
-writable catalog layer, ``~/cstar/catalog`` by default, under ``blueprints/``,
-``workplans/`` and one directory per spec kind. The bundled examples stay
+writable catalog layer, ``~/cstar/catalog`` by default: blueprints under
+``blueprints/forge/``, workplans under ``workplans/``, and specs in one
+directory per spec kind. The bundled examples stay
 visible in the dropdowns, marked ``(bundled)``, and cannot be overwritten:
 saving an edited bundled spec means giving it a new name. Set
 ``CSTAR_CATALOG`` to use another location or to add a shared group catalog.
