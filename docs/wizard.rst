@@ -153,6 +153,15 @@ application. Edges that come from a restart (``continue-from``), boundary
 follows your edits even while the draft is invalid. On a narrow screen the
 columns stack.
 
+The **Preview** control at the top of that pane moves it: **Right** (the
+default) is the two columns, **Bottom** puts the pane below the cards and
+**Top** directly under the status bar, with the YAML and the graph side by
+side, and **Hidden** leaves only the control strip so the pane can be brought
+back. **Keep preview visible** (on by default) makes the pane stick to the page
+while you scroll, so the YAML and graph stay in view as the cards move
+beneath them; turn it off and the pane scrolls away with the page. The choice
+is kept for the open page only.
+
 Start
    Begin a new workplan, or load one from the catalog's ``workplans/``
    directory, from a path, or by upload. Loading rewrites deprecated and

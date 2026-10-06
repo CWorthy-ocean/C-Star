@@ -66,6 +66,7 @@ class AppShell:
             self.nav.layout.display = "none"
 
         self.stack = W.Stack(page_widgets, selected_index=0)
+        self.stack.add_class("forge-stack")
         self._link = W.jslink((self.nav, "index"), (self.stack, "selected_index"))
 
         self.root = W.VBox([*style_children, header, self.nav, self.stack])

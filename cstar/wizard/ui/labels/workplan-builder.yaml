@@ -277,6 +277,10 @@ fields:
     label: Levels, innermost first
     hint: Pick the roms_marbl steps in order, innermost grid first.
 
+  pinned:
+    label: Keep preview visible
+    hint: Sticks the preview to the page while you scroll.
+
   # --- Run ------------------------------------------------------------------
   run_id:
     label: Run id

@@ -118,7 +118,14 @@ APPLICATIONS = (ROMS_MARBL, FORGE, NEST_IC, UPSCALER, HELLO_WORLD)
 
 VIEW_YAML, VIEW_DAG, VIEW_BOTH = "YAML", "DAG", "Both"
 VIEWS = [VIEW_YAML, VIEW_DAG, VIEW_BOTH]
-"""The views of the right-hand column."""
+"""The views the preview pane can show."""
+
+PLACE_RIGHT, PLACE_BOTTOM, PLACE_TOP, PLACE_HIDDEN = "Right", "Bottom", "Top", "Hidden"
+PLACEMENTS = [PLACE_RIGHT, PLACE_BOTTOM, PLACE_TOP, PLACE_HIDDEN]
+"""Where the preview pane sits: beside the cards, or below or above them."""
+
+_SIDE_CLASSES = ("forge-side-right", "forge-side-bottom", "forge-side-top")
+"""The placement classes of the preview pane, one at a time."""
 
 CHECK, RUN = "check", "run"
 """The ``cstar workplan`` subcommands the Run subsection streams."""
@@ -3851,9 +3858,17 @@ class WorkplanBuilderPage:
             "and run it. Load an existing workplan to edit a copy; the loaded file "
             "is never changed unless you confirm an overwrite.</p>"
         )
-        # right column: a live view of the draft, kept in sight while the cards scroll
+        # the preview pane: a live view of the draft, placed beside, below or
+        # above the cards (see `_apply_placement`)
         self.view = W.ToggleButtons(options=VIEWS, value=VIEW_BOTH)
         self.view.add_class("forge-side-view")
+        self.placement = W.ToggleButtons(options=PLACEMENTS, value=PLACE_RIGHT)
+        self.pinned = W.Checkbox(
+            value=True,
+            indent=False,
+            description=label_for("pinned", "Keep preview visible", page=PAGE).label,
+            layout=W.Layout(width="auto"),
+        )
         self.dag_view = W.HTML("")
         self.dag_view.add_class("forge-dag")
         self.yaml_box = components.subsection(
@@ -3865,9 +3880,24 @@ class WorkplanBuilderPage:
         )
         self.dag_box = components.subsection(W, "side.dag", self.dag_view, page=PAGE)
         self.view.observe(self._on_view, names="value")
+        self.placement.observe(self._on_placement, names="value")
+        self.pinned.observe(self._on_placement, names="value")
+        # each widget owns its Layout: a shared instance would show/hide them all
+        self.pane_controls = W.HBox(
+            [
+                W.HTML("<b>Preview</b>"),
+                self.placement,
+                self.pinned,
+                self.view,
+            ]
+        )
+        self.pane_controls.add_class("forge-pane-controls")
+        # stacked in the right-hand pane, side by side in the bottom and top ones
+        self.pane_body = W.HBox([self.yaml_box, self.dag_box])
+        self.pane_body.add_class("forge-pane-body")
         self.left = W.VBox([start, workplan, compute, recipes, steps, review])
         self.left.add_class("forge-left")
-        self.side = W.VBox([self.view, self.yaml_box, self.dag_box])
+        self.side = W.VBox([self.pane_controls, self.pane_body])
         self.side.add_class("forge-side")
         self.columns = W.HBox([self.left, self.side])
         self.columns.add_class("forge-two-col")
@@ -3876,12 +3906,51 @@ class WorkplanBuilderPage:
         self.sticky_bar.add_class("forge-sticky-html")
         sticky = W.HBox([self.sticky_bar, self.sticky_download])
         sticky.add_class("forge-sticky")
-        self.widget = W.VBox([components.style_widget(W), sticky, intro, self.columns])
+        self._head = [components.style_widget(W), sticky]
+        self._intro = intro
+        self.widget = W.VBox([*self._head, intro, self.columns])
         self.widget.add_class("forge-app")
         self.widget.add_class("forge-workplan")
+        self._apply_placement()
+
+    def _on_placement(self, _change: Any) -> None:
+        self._apply_placement()
+
+    def _apply_placement(self) -> None:
+        """Place the preview pane: re-parent it and swap its CSS classes.
+
+        Right is two columns; Bottom and Top are one column with the pane the
+        last child or directly under the status bar. Hidden keeps only the
+        controls, docked at the bottom, so the placement can be changed back.
+        ``Keep preview visible`` makes the pane stick to the page scroll
+        (``forge-pinned``) instead of scrolling away with the cards.
+        """
+        place = self.placement.value
+        left, side, head, intro = self.left, self.side, self._head, self._intro
+        if place == PLACE_RIGHT:
+            self.columns.children = [left, side]
+            self.widget.children = [*head, intro, self.columns]
+        else:
+            self.columns.children = []
+            self.widget.children = (
+                [*head, side, intro, left]
+                if place == PLACE_TOP
+                else [*head, intro, left, side]
+            )
+        docked = {PLACE_RIGHT: "right", PLACE_TOP: "top"}.get(place, "bottom")
+        for name in _SIDE_CLASSES:
+            side.remove_class(name)
+        side.add_class(f"forge-side-{docked}")
+        for name, on in (
+            ("forge-pinned", self.pinned.value),
+            ("forge-side-hidden", place == PLACE_HIDDEN),
+        ):
+            (side.add_class if on else side.remove_class)(name)
+        _show(self.pane_body, place != PLACE_HIDDEN)
+        _show(self.view, place != PLACE_HIDDEN)
 
     def _on_view(self, _change: Any) -> None:
-        """Show the YAML, the graph, or both in the right column."""
+        """Show the YAML, the graph, or both in the preview pane."""
         _show(self.yaml_box, self.view.value in (VIEW_YAML, VIEW_BOTH))
         _show(self.dag_box, self.view.value in (VIEW_DAG, VIEW_BOTH))
 

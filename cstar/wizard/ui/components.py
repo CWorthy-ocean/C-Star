@@ -19,6 +19,11 @@ from typing import Any
 from cstar.wizard.ui import branding
 from cstar.wizard.ui.labels import label_for, section_for
 
+#: The width of the page column in Voila.
+SHELL_MAX_WIDTH = "1600px"
+#: Height of the sticky status bar: where a pinned preview pane docks beneath it.
+STICKY_BAR_HEIGHT = "56px"
+
 #: The wizard's stylesheet (no leading/trailing ``<style>`` tags -- wrap with
 #: :func:`style_widget` or ``f"<style>{WIZARD_CSS}</style>"`` yourself).
 WIZARD_CSS = f"""
@@ -26,7 +31,7 @@ WIZARD_CSS = f"""
 body[data-voila] {{ background: {branding.GREY}; }}
 /* the page column: shell root only -- the wizard root also carries .forge-app
    (so the notebook path is styled) and must not get its own max-width/padding */
-body[data-voila] .forge-shell {{ max-width: 1180px; margin: 0 auto; padding: 0 24px; }}
+body[data-voila] .forge-shell {{ max-width: {SHELL_MAX_WIDTH}; margin: 0 auto; padding: 0 24px; }}
 
 .forge-app, .forge-app .widget-label, .forge-app .widget-html-content,
 .forge-app .jupyter-button, .forge-app input, .forge-app select,
@@ -273,30 +278,64 @@ body[data-voila] .forge-shell {{ max-width: 1180px; margin: 0 auto; padding: 0 2
 }}
 .forge-app .forge-dl-btn code {{ color: #fff; margin-left: 0.5em; }}
 
-/* two-column page: the cards on the left, a live view of the draft on the right
-   that stays in sight (sticky under the status bar) while the left scrolls.
-   The columns share the row as 3 : 2 and stack below ~1100px. */
+/* the preview pane (a live view of the draft) sits beside the cards (right), or
+   below or above them, and optionally sticks to the page scroll (forge-pinned).
+   Right: the columns share the row 3 : 2 and stack below ~1100px. */
 .forge-app .forge-two-col {{ gap: 24px; align-items: flex-start; }}
 .forge-app .forge-two-col > .forge-left {{ flex: 3 1 0; min-width: 0; }}
-.forge-app .forge-two-col > .forge-side {{
-    flex: 2 1 0;
-    min-width: 0;
+.forge-app .forge-two-col > .forge-side-right {{ flex: 2 1 0; min-width: 0; }}
+.forge-app .forge-side-right.forge-pinned {{
     position: sticky;
-    top: 56px;
-    max-height: calc(100vh - 72px);
+    top: {STICKY_BAR_HEIGHT};
+    max-height: calc(100vh - {STICKY_BAR_HEIGHT} - 16px);
     overflow-y: auto;
 }}
+.forge-app .forge-side-top, .forge-app .forge-side-bottom {{
+    box-sizing: border-box;
+    background: #fff;
+    border: 1px solid {branding.LINE};
+    border-radius: 6px;
+    padding: 6px 14px 10px;
+    margin: 10px 0;
+    max-height: 40vh;
+    overflow-y: auto;
+    z-index: 4;
+}}
+.forge-app .forge-side-top.forge-pinned {{ position: sticky; top: {STICKY_BAR_HEIGHT}; }}
+.forge-app .forge-side-bottom.forge-pinned {{ position: sticky; bottom: 0; }}
+.forge-app .forge-pane-controls {{ align-items: center; gap: 14px; flex-wrap: wrap; }}
+.forge-app .forge-side-right .forge-pane-body {{ flex-direction: column !important; }}
+.forge-app .forge-side-top .forge-pane-body,
+.forge-app .forge-side-bottom .forge-pane-body {{ gap: 18px; }}
+.forge-app .forge-side-top .forge-pane-body > *,
+.forge-app .forge-side-bottom .forge-pane-body > * {{ flex: 1 1 0; min-width: 0; }}
 .forge-app .forge-dag .widget-html-content {{ display: block; }}
 @media (max-width: 1100px) {{
     .forge-app .forge-two-col {{ flex-direction: column !important; align-items: stretch; }}
     .forge-app .forge-two-col > .forge-left,
-    .forge-app .forge-two-col > .forge-side {{
+    .forge-app .forge-two-col > .forge-side-right {{
         flex: 0 0 auto !important;
-        position: static;
+        position: static !important;
         max-height: none;
         overflow-y: visible;
     }}
 }}
+
+/* Sticky needs every ancestor up to Voila's scroller to stop clipping: ipywidgets
+   boxes and Voila's output areas default to overflow:auto, which makes each the
+   sticky element's scroll container (a box as tall as its content), so nothing
+   sticks. Let them overflow visibly so the status bar and the pane stick to the
+   page scroll. Voila only; JupyterLab cells keep their own scrolling. */
+body[data-voila] .forge-shell,
+body[data-voila] .forge-shell .widget-box,
+body[data-voila] .forge-shell .forge-stack,
+body[data-voila] .forge-app,
+body[data-voila] .forge-two-col,
+body[data-voila] .forge-left,
+body[data-voila] .forge-side,
+body[data-voila] .jp-OutputArea,
+body[data-voila] .jp-OutputArea-child,
+body[data-voila] .jp-OutputArea-output {{ overflow: visible; }}
 
 /* an editable code view (a Textarea): monospace, scrolls, full width */
 .forge-app .forge-code, .forge-app .forge-code textarea {{

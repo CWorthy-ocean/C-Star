@@ -1836,3 +1836,149 @@ def test_sticky_bar_is_the_styled_box_with_a_download_link(page):
     page._rebuild()
     assert 'class="forge-dl-btn"' in page.sticky_download.value
     assert "<code>" not in page.sticky_download.value
+
+
+# ---------------------------------------------------------------------------
+# preview placement
+# ---------------------------------------------------------------------------
+def _root_order(page) -> list:
+    """The page root's children, as short labels."""
+    labels = []
+    for child in page.widget.children:
+        if child is page.columns:
+            labels.append("columns")
+        elif child is page.side:
+            labels.append("side")
+        elif child is page.left:
+            labels.append("left")
+        elif child is page._intro:
+            labels.append("intro")
+        elif "forge-sticky" in child._dom_classes:
+            labels.append("bar")
+        elif "forge-style" in child._dom_classes:
+            labels.append("style")
+        else:
+            labels.append("other")
+    return labels
+
+
+def test_placement_defaults_to_a_pinned_right_column(page):
+    assert list(page.placement.options) == ["Right", "Bottom", "Top", "Hidden"]
+    assert page.placement.value == "Right" and page.pinned.value is True
+    assert page.pinned.description == "Keep preview visible"
+    assert _root_order(page) == ["style", "bar", "intro", "columns"]
+    assert list(page.columns.children) == [page.left, page.side]
+    assert {"forge-side", "forge-side-right", "forge-pinned"} <= set(
+        page.side._dom_classes
+    )
+
+
+def test_placement_reparents_the_pane_for_each_value(page):
+    page.placement.value = "Bottom"
+    assert _root_order(page) == ["style", "bar", "intro", "left", "side"]  # last child
+    assert list(page.columns.children) == []
+    assert "forge-side-bottom" in page.side._dom_classes
+    assert "forge-side-right" not in page.side._dom_classes
+
+    page.placement.value = "Top"
+    assert _root_order(page) == [
+        "style",
+        "bar",
+        "side",
+        "intro",
+        "left",
+    ]  # under the bar
+    assert "forge-side-top" in page.side._dom_classes
+    assert "forge-side-bottom" not in page.side._dom_classes
+
+    page.placement.value = "Hidden"
+    assert _root_order(page)[-1] == "side"  # only the controls strip remains
+    assert page.pane_body.layout.display == "none"
+    assert page.view.layout.display == "none"
+    assert page.pane_controls.layout.display != "none"  # so it can be changed back
+    assert "forge-side-hidden" in page.side._dom_classes
+
+    page.placement.value = "Right"
+    assert _root_order(page) == ["style", "bar", "intro", "columns"]
+    assert list(page.columns.children) == [page.left, page.side]
+    assert page.pane_body.layout.display != "none"
+    assert "forge-side-hidden" not in page.side._dom_classes
+    assert "forge-side-top" not in page.side._dom_classes
+
+
+def test_pinned_checkbox_toggles_the_pinned_class_in_every_placement(page):
+    for place in ("Right", "Bottom", "Top", "Hidden"):
+        page.placement.value = place
+        page.pinned.value = True
+        assert "forge-pinned" in page.side._dom_classes, place
+        page.pinned.value = False
+        assert "forge-pinned" not in page.side._dom_classes, place
+    page.placement.value = "Bottom"
+    assert "forge-pinned" not in page.side._dom_classes  # the choice persists
+
+
+def test_view_toggle_keeps_working_when_the_pane_moves(page):
+    page.placement.value = "Bottom"
+    page.view.value = "DAG"
+    assert page.yaml_box.layout.display == "none"
+    assert page.dag_box.layout.display != "none"
+    page.placement.value = "Top"
+    assert page.yaml_box.layout.display == "none"
+    page.view.value = "Both"
+    assert page.yaml_box.layout.display != "none"
+
+
+def test_pane_widgets_do_not_share_layouts(page):
+    layouts = [
+        w.layout
+        for w in (
+            page.view,
+            page.placement,
+            page.pinned,
+            page.yaml_box,
+            page.dag_box,
+            page.pane_body,
+            page.pane_controls,
+        )
+    ]
+    assert len({id(layout) for layout in layouts}) == len(layouts)
+
+
+def test_css_pins_the_pane_and_frees_voilas_overflow():
+    from cstar.wizard.ui import components
+
+    css = components.WIZARD_CSS
+    for cls in (
+        ".forge-side-right",
+        ".forge-side-bottom",
+        ".forge-side-top",
+        ".forge-pinned",
+        ".forge-pane-body",
+    ):
+        assert cls in css, cls
+    assert "bottom: 0" in css and f"top: {components.STICKY_BAR_HEIGHT}" in css
+    # sticky works only if no ancestor up to Voila's scroller clips
+    overflow_rule = css[css.index("body[data-voila] .forge-shell,") :]
+    overflow_rule = overflow_rule[: overflow_rule.index("}")]
+    for selector in (
+        ".forge-shell .widget-box",
+        ".forge-shell .forge-stack",
+        ".forge-two-col",
+        ".forge-left",
+        ".forge-side",
+        ".jp-OutputArea-child",
+        ".jp-OutputArea-output",
+    ):
+        assert selector in overflow_rule, selector
+    assert "overflow: visible" in overflow_rule
+    assert f"max-width: {components.SHELL_MAX_WIDTH}" in css
+    assert components.SHELL_MAX_WIDTH == "1600px"
+
+
+def test_shell_stack_carries_the_class_the_css_targets():
+    import ipywidgets as W
+
+    from cstar.wizard.ui.shell import AppShell
+
+    shell = AppShell([("A", W.HTML("a")), ("B", W.HTML("b"))])
+    assert "forge-stack" in shell.stack._dom_classes
