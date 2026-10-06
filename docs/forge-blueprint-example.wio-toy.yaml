@@ -4,7 +4,7 @@ description: Example ForgeBlueprint for the bundled wio-toy domain
 application: forge
 state: notset
 schema_version: 1.0.0
-forge_blueprint_version: 9
+forge_blueprint_version: 10
 run:
   start_date: '2012-01-01T00:00:00'
   end_date: '2012-01-02T00:00:00'
@@ -209,6 +209,8 @@ forcing:
     domain_edge_buffer: 20
     options: {}
     custom_file: null
+    surface_forcing_source: null
+    river_temp_smoothing_window_days: 30.0
   resolved_datasets:
     GLORYS:
       dataset_key: GLORYS_REGIONAL
@@ -593,5 +595,5 @@ provenance:
   cstar_version: cstar-ocean==0.12.0
   roms_tools_version: roms-tools==4.1.1.dev2+g1a564489a
   override_files_applied: []
-  content_hash: 82e577f09cf8e0be369f0eeeccd4c4a64d56b7d718f11ba92a1f556efbe484d7
+  content_hash: fa236d6c81a2810579e75b0721853a2811b6e131dc44e8427d361acb34cc8d17
   notes: null

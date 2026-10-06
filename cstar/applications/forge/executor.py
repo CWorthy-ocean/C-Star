@@ -42,12 +42,14 @@ from cstar.applications.forge.host import HostPaths
 from cstar.applications.forge.namelist_model import (
     build_namelist,
     check_bgc_tracer_count,
+    check_cdr_lite_sections,
     check_cdr_output_sections,
     check_output_streams_divide_rst,
     check_rst_period_divisible,
     cppdefs_for_precheck,
     ensure_cdr_output_marbl_diagnostics,
     n_tracers_from_param,
+    normalize_legacy_sections,
     output_precheck_applies_to,
     prune_version_gated_sections,
     run_time_settings_for_ref,
@@ -2220,8 +2222,10 @@ class ForgeExecutor(BaseModel):
             with a "dt" key is provided, it will be used for timestep calculation;
             otherwise, the timestep is computed from CFL criterion.
             A version-gated section the pinned ucla-roms release's schema
-            doesn't model (e.g. ``cdr_tracer_output`` under a 0.6.x pin) is
-            dropped with an INFO log, not rejected as an unknown key.
+            doesn't model (e.g. ``cdr_lite_output`` under a 0.6.x pin) is
+            dropped with an INFO log, not rejected as an unknown key, unless
+            its enable switch is on (``ValueError``). A pre-0.9.0 section name
+            (``cdr_tracer_output``) is renamed to its current one.
             Defaults to empty dict.
         **kwargs
             Additional keyword arguments (currently unused, reserved for future use).
@@ -2278,14 +2282,25 @@ class ForgeExecutor(BaseModel):
                 str(effective_roms_ref) if effective_roms_ref is not None else None
             )
 
+        # Legacy section names (pre-ucla-roms 0.9.0 forge vocabulary) in the
+        # incoming overrides or in a settings snapshot that skipped blueprint
+        # migration are renamed first: the merge below rejects an unknown
+        # top-level key, and pruning/validation would otherwise never see them.
+        # The overrides are copied so the caller's nested dicts stay untouched.
+        run_time_settings = copy.deepcopy(run_time_settings)
+        if renamed := {
+            **normalize_legacy_sections(run_time_settings),
+            **normalize_legacy_sections(self._settings_run_time),
+        }:
+            log.debug("configure_build: renamed legacy settings section(s) %s", renamed)
+
         # Version-gated section pruning, mirroring the resolver's: a stored
         # blueprint reaches configure_build without re-resolving, so it can
-        # still carry a section (e.g. cdr_tracer_output, ucla-roms >= 0.7.0)
+        # still carry a section (e.g. cdr_lite_output, ucla-roms >= 0.7.0)
         # this pin's schema doesn't model. Prune both the base settings and the
         # incoming overrides before merging (the merge rejects a top-level key
         # the base lacks), and before the CDR nets and output-stream precheck
         # below, which read the raw dict and would otherwise act on it.
-        run_time_settings = dict(run_time_settings)
         pruned = set(
             prune_version_gated_sections(self._settings_run_time, settings_cls)
         ) | set(prune_version_gated_sections(run_time_settings, settings_cls))
@@ -2357,19 +2372,36 @@ class ForgeExecutor(BaseModel):
 
         # CDR tracer / gas-exchange output consistency net, mirroring the
         # resolver's equivalent block: stored blueprints and wizard accordion
-        # edits can set do_cdr_tracer_output/do_cdr_gas_exch_output after
+        # edits can set do_cdr_lite_output/do_cdr_gas_exch_output after
         # resolve time, so this is the enforcement point of record for that
         # path too. The per-stream MARBL requirement (gas exchange only) and its
         # message are shared with the resolver via check_cdr_output_sections.
         cppdefs = self._settings_compile_time.setdefault("cppdefs", {})
         if check_cdr_output_sections(
-            self._settings_run_time, bgc_mode_is_marbl=cppdefs.get("marbl", False)
+            self._settings_run_time,
+            bgc_mode_is_marbl=cppdefs.get("marbl", False),
+            settings_cls=settings_cls,
         ) and not cppdefs.get("cdr_forcing"):
             cppdefs["cdr_forcing"] = True
             log.info(
                 "configure_build: CDR tracer/gas-exchange output is enabled; forcing "
                 "cppdefs.cdr_forcing=True (CDR_FORCING gates ucla-roms' CDR tracer/"
                 "gas-exchange output modules)."
+            )
+
+        # CDR_LITE net, mirroring the resolver's: cppdefs.cdr_lite is derived from
+        # cdr_lite.cdr_online_carbonate_sensitivity, which a wizard edit can turn
+        # on or off after resolve time. A stale True here is a value an earlier
+        # resolve derived, so it is recomputed rather than rejected.
+        cdr_lite_needed = check_cdr_lite_sections(
+            self._settings_run_time, bgc_mode_is_marbl=cppdefs.get("marbl", False)
+        )
+        if cdr_lite_needed != bool(cppdefs.get("cdr_lite")):
+            cppdefs["cdr_lite"] = cdr_lite_needed
+            log.info(
+                "configure_build: setting cppdefs.cdr_lite=%s (derived from "
+                "cdr_lite.cdr_online_carbonate_sensitivity).",
+                cdr_lite_needed,
             )
 
         # BGC tracer count net, mirroring the resolver's: a stored or hand-edited

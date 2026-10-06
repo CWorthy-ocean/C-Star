@@ -11,6 +11,7 @@ NOTE: imports the in-package modules, so these run once the environment's editab
 assertions were validated standalone during development.
 """
 
+import logging
 import warnings
 from datetime import date, datetime
 from pathlib import Path
@@ -50,6 +51,7 @@ _MODEL_DIR_ROMS070 = _BUNDLED_CATALOG / "ModelSpec" / "roms-marbl-0.7-default"
 # there is no versioned-namelist golden fixture for this tier (unlike 0.5.0-0.7.0
 # above).
 _MODEL_DIR_ROMS080 = _BUNDLED_CATALOG / "ModelSpec" / "roms-marbl-0.8-default"
+_MODEL_DIR_ROMS090 = _BUNDLED_CATALOG / "ModelSpec" / "roms-marbl-0.9-default"
 _GRID_KWARGS = dict(
     nx=6,
     ny=2,
@@ -1961,7 +1963,7 @@ def test_golden_model_settings_test_tiny_roms070():
 
     Mirrors ``test_golden_model_settings_test_tiny_roms060`` exactly; the only
     resolved-settings difference from that fixture is the added
-    ``cdr_tracer_output``/``cdr_gas_exch_output`` entries (see
+    ``cdr_lite_output``/``cdr_gas_exch_output`` entries (see
     ``TestGoldenNamelist.test_golden_namelist_test_tiny_roms070`` in
     ``tests/test_core.py`` for the versioned-namelist assertion).
     """
@@ -1984,11 +1986,51 @@ def test_golden_model_settings_test_tiny_roms070():
     )
 
 
-def test_roms080_model_spec_declares_advection_cppdefs_and_renders(tmp_path):
-    """``roms-marbl-0.8-default`` (ucla-roms 0.8.0, PR #361) declares the two new
-    advection cppdefs keys both off (the 0.8.0 defaults), and pins the ucla-roms
-    ref to "0.8.0" -- no namelist-schema change, so unlike the 0.5.0-0.7.0 tiers
-    there is no versioned-namelist golden fixture to snapshot here. Instead this
+def test_golden_model_settings_test_tiny_roms090():
+    """Behavior-preservation snapshot for the ``roms-marbl-0.9-default`` ModelSpec
+    (ucla-roms >= 0.9.0, CDR_TRACER renamed CDR_LITE), resolved from the same
+    test-tiny domain/forcing/output setup as ``test_golden_model_settings_test_tiny``.
+
+    Mirrors ``test_golden_model_settings_test_tiny_roms070`` exactly; the
+    differences from that fixture are the ModelSpec's added ``cdr_lite`` section
+    (the online carbonate sensitivity knob, off) and the OutputSpec's
+    ``cdr_lite_output.wrt_gas_exchange`` (see
+    ``TestGoldenNamelist.test_golden_namelist_test_tiny_roms090`` for the
+    versioned-namelist assertion). Regenerate the fixture with
+    ``json.dumps(cfg.model_settings, indent=2, sort_keys=True, default=str)``
+    plus a trailing newline, from ``_build(model_dir=_MODEL_DIR_ROMS090)``.
+    """
+    import json
+
+    golden_path = (
+        Path(__file__).parent
+        / "fixtures"
+        / "golden_model_settings_test-tiny-roms090.json"
+    )
+    golden = json.loads(golden_path.read_text())
+    cfg = _build(model_dir=_MODEL_DIR_ROMS090)  # test-tiny, dt=7200
+    got = json.loads(json.dumps(cfg.model_settings, sort_keys=True, default=str))
+    assert got == golden, (
+        "Resolved model_settings for test-tiny (roms-marbl-0.9-default) drifted "
+        "from the golden fixture. If this is an intentional schema/default "
+        "change, regenerate tests/fixtures/golden_model_settings_test-tiny-"
+        "roms090.json; otherwise the change is a regression in the settings the "
+        "executor feeds to namelist.nml / cppdefs.opt."
+    )
+
+
+@pytest.mark.parametrize(
+    ("model_dir", "roms_commit"),
+    [(_MODEL_DIR_ROMS080, "0.8.0"), (_MODEL_DIR_ROMS090, "0.9.0")],
+)
+def test_roms08x_09x_model_specs_declare_advection_cppdefs_and_render(
+    tmp_path, model_dir, roms_commit
+):
+    """``roms-marbl-0.8-default`` (ucla-roms 0.8.0, PR #361) and
+    ``roms-marbl-0.9-default`` declare the two advection cppdefs keys both off
+    (the 0.8.0 defaults), and pin the ucla-roms ref to "0.8.0"/"0.9.0" -- 0.8.0
+    has no namelist-schema change, so unlike the 0.5.0-0.7.0 and 0.9.0 tiers
+    there is no versioned-namelist golden fixture to snapshot for it. Instead this
     end-to-end renders the *working-tree* ``cppdefs.opt.j2`` from the resolved
     settings, proving the spec's declared cppdefs keys and the current template
     agree (render_roms_settings rejects a settings key the template never
@@ -1998,10 +2040,10 @@ def test_roms080_model_spec_declares_advection_cppdefs_and_renders(tmp_path):
     cannot catch a stale pin. See TestCppdefsTemplate in tests/test_settings.py
     for the synthetic-settings coverage of the same two keys.
     """
-    cfg = _build(model_dir=_MODEL_DIR_ROMS080)  # test-tiny, dt=7200
+    cfg = _build(model_dir=model_dir)  # test-tiny, dt=7200
     assert cfg.model_settings["cppdefs"]["parabolic_splines"] is False
     assert cfg.model_settings["cppdefs"]["upstream_ts_land_curv"] is False
-    assert cfg.code.roms.commit == "0.8.0"
+    assert cfg.code.roms.commit == roms_commit
 
     output_dir = tmp_path / "output"
     output_dir.mkdir()
@@ -2025,6 +2067,34 @@ def test_roms080_model_spec_declares_advection_cppdefs_and_renders(tmp_path):
     text = (output_dir / "cppdefs.opt").read_text()
     assert "#undef PARABOLIC_SPLINES" in text
     assert "#undef UPSTREAM_TS_LAND_CURV" in text
+    assert "#undef CDR_LITE" in text  # resolver-owned, absent -> off
+
+
+def test_roms090_cdr_lite_cppdef_renders_when_the_knob_is_on(tmp_path):
+    """The resolver-derived ``cppdefs.cdr_lite`` reaches the template: on with
+    the online sensitivity, ``#define CDR_LITE``.
+    """
+    cfg = _build(model_dir=_MODEL_DIR_ROMS090, run_time_overrides=_LITE_ON)
+    template_dir = (
+        Path(cstar.__file__).parent
+        / "additional_files"
+        / "templates"
+        / "forge"
+        / "compile-time"
+    )
+    render_roms_settings(
+        template_files=["cppdefs.opt.j2"],
+        template_dir=template_dir,
+        settings_dict={
+            "cppdefs": cfg.model_settings["cppdefs"],
+            "upscale_output": cfg.model_settings.get("upscale_output", {}),
+            "cdr_frc": cfg.model_settings.get("cdr_frc", {}),
+        },
+        code_output_dir=tmp_path,
+    )
+    text = (tmp_path / "cppdefs.opt").read_text()
+    assert "#define CDR_LITE" in text
+    assert "#undef CDR_LITE" not in text
 
 
 def test_resolver_nesting_enables_extract_data():
@@ -2752,7 +2822,7 @@ _OUTPUT_SPEC_STREAMS = (
     ("diagnostics", "output_period", "nrpf"),
     ("frc_output", "output_period", "nrpf"),
     ("cdr_output", "output_period", "nrpf"),
-    ("cdr_tracer_output", "output_period", "nrpf"),
+    ("cdr_lite_output", "output_period", "nrpf"),
     ("cdr_gas_exch_output", "output_period", "nrpf"),
     ("upscale_output", "output_period_uscl", "nrpf_uscl"),
     ("zslice", "output_period", "nrpf"),
@@ -2802,7 +2872,12 @@ def test_bundled_output_specs_satisfy_roms_divides_rst_precheck(spec_name):
 @pytest.mark.parametrize("spec_name", ["daily-restarts", "weekly-restarts"])
 @pytest.mark.parametrize(
     "model_spec_name",
-    ["roms-marbl-0.5-default", "roms-marbl-0.7-default", "roms-marbl-0.8-default"],
+    [
+        "roms-marbl-0.5-default",
+        "roms-marbl-0.7-default",
+        "roms-marbl-0.8-default",
+        "roms-marbl-0.9-default",
+    ],
 )
 def test_model_spec_streams_satisfy_roms_divides_rst_precheck(
     model_spec_name, spec_name
@@ -2940,7 +3015,7 @@ def test_extract_output_settings_helper():
         extract_output_settings,
     )
 
-    # OUTPUT_SECTIONS now includes cdr_tracer_output/cdr_gas_exch_output
+    # OUTPUT_SECTIONS now includes cdr_lite_output/cdr_gas_exch_output
     # (ucla-roms >= 0.7.0, PR #351), which prune_version_gated_sections drops
     # from an older-pinned build's model_settings -- use a 0.7.0-pinned
     # ModelSpec so every OUTPUT_SECTIONS entry actually survives resolution.
@@ -3148,8 +3223,8 @@ def test_cdr_output_requires_marbl():
         )
 
 
-def test_cdr_tracer_output_does_not_require_marbl():
-    """do_cdr_tracer_output=True with bgc_mode="none" is accepted: the CDR
+def test_cdr_lite_output_does_not_require_marbl():
+    """do_cdr_lite_output=True with bgc_mode="none" is accepted: the CDR
     tracers exist without MARBL, so C-Star encodes the intended rule (only
     CDR_FORCING is needed) rather than ucla-roms 0.7.0/0.8.0's MARBL-only
     compile guard. cppdefs.cdr_forcing is still forced on.
@@ -3158,10 +3233,13 @@ def test_cdr_tracer_output_does_not_require_marbl():
         model_dir=_MODEL_DIR_ROMS070,
         bgc_mode="none",
         forcing_inputs=_PHYSICS_ONLY_FORCING,
-        run_time_overrides={"cdr_tracer_output": {"do_cdr_tracer_output": True}},
+        run_time_overrides={
+            "cdr_lite_output": {"do_cdr_lite_output": True},
+            "param": {"nt_cdr_oae": 1},
+        },
     )
     settings = cfg.model_settings
-    assert settings["cdr_tracer_output"]["do_cdr_tracer_output"] is True
+    assert settings["cdr_lite_output"]["do_cdr_lite_output"] is True
     assert settings["cppdefs"]["cdr_forcing"] is True
     assert settings["cppdefs"]["marbl"] is False
 
@@ -3182,23 +3260,26 @@ def test_cdr_gas_exch_output_requires_marbl():
         )
 
 
-def test_cdr_tracer_output_enabled_sets_cppdef():
-    """Enabling do_cdr_tracer_output alone (no CDR forcing; do_cdr_output stays
-    False) still flips cppdefs.cdr_forcing -- it gates compiling the CDR tracer
-    output module.
+def test_cdr_lite_output_enabled_sets_cppdef():
+    """Enabling do_cdr_lite_output alone (no CDR forcing; do_cdr_output stays
+    False) still flips cppdefs.cdr_forcing on ucla-roms 0.7/0.8 -- it gates
+    compiling the CDR tracer output module.
     """
     cfg = _build(
         model_dir=_MODEL_DIR_ROMS070,
-        run_time_overrides={"cdr_tracer_output": {"do_cdr_tracer_output": True}},
+        run_time_overrides={
+            "cdr_lite_output": {"do_cdr_lite_output": True},
+            "param": {"nt_cdr_oae": 1},
+        },
     )
     settings = cfg.model_settings
-    assert settings["cdr_tracer_output"]["do_cdr_tracer_output"] is True
+    assert settings["cdr_lite_output"]["do_cdr_lite_output"] is True
     assert settings["cppdefs"]["cdr_forcing"] is True
     assert settings["cdr_output"]["do_cdr_output"] is False  # not forced on
 
 
 def test_cdr_gas_exch_output_enabled_sets_cppdef():
-    """Mirrors test_cdr_tracer_output_enabled_sets_cppdef for the gas-exchange
+    """Mirrors test_cdr_lite_output_enabled_sets_cppdef for the gas-exchange
     output group.
     """
     cfg = _build(
@@ -3213,47 +3294,311 @@ def test_cdr_gas_exch_output_enabled_sets_cppdef():
 
 def test_active_cdr_forcing_does_not_enable_tracer_gas_exch_output():
     """Unlike do_cdr_output, an active CDR forcing mode must NOT force
-    do_cdr_tracer_output/do_cdr_gas_exch_output on -- they're opt-in extras a
+    do_cdr_lite_output/do_cdr_gas_exch_output on -- they're opt-in extras a
     user enables explicitly (see the resolver's CDR tracer/gas-exchange output
     consistency check).
     """
     cfg = _build(model_dir=_MODEL_DIR_ROMS070, cdr_forcing_yaml=_CDR_SAMPLE_YAML)
     settings = cfg.model_settings
     assert settings["cdr_output"]["do_cdr_output"] is True  # forced on, as before
-    assert settings["cdr_tracer_output"]["do_cdr_tracer_output"] is False
+    assert settings["cdr_lite_output"]["do_cdr_lite_output"] is False
     assert settings["cdr_gas_exch_output"]["do_cdr_gas_exch_output"] is False
 
 
-def test_cdr_tracer_gas_exch_output_sections_pruned_before_0_7_0():
+def test_cdr_lite_gas_exch_output_sections_pruned_before_0_7_0():
     """A blueprint pinned to ucla-roms 0.6.x (RunTimeSettingsV0_6_0, which has
-    no cdr_tracer_output/cdr_gas_exch_output fields) must not carry either
+    no cdr_lite_output/cdr_gas_exch_output fields) must not carry either
     section in model_settings -- see prune_version_gated_sections in
     namelist_model.py. The matching 0.7.0-pinned build keeps both.
     """
     cfg_060 = _build(model_dir=_MODEL_DIR_ROMS060)
-    assert "cdr_tracer_output" not in cfg_060.model_settings
+    assert "cdr_lite_output" not in cfg_060.model_settings
     assert "cdr_gas_exch_output" not in cfg_060.model_settings
 
     cfg_070 = _build(model_dir=_MODEL_DIR_ROMS070)
-    assert "cdr_tracer_output" in cfg_070.model_settings
+    assert "cdr_lite_output" in cfg_070.model_settings
     assert "cdr_gas_exch_output" in cfg_070.model_settings
+    assert "cdr_lite" not in cfg_070.model_settings  # 0.9.0-only section
 
 
-def test_pruned_cdr_tracer_output_override_does_not_flip_cppdef_before_0_7_0():
-    """Pruning runs BEFORE the tracer/gas-exchange consistency check: on a
-    0.6.x pin an override enabling do_cdr_tracer_output is dropped (the pin's
-    namelist schema can't emit the group), so it must not leave a stray
-    cppdefs.cdr_forcing=True behind with no section in model_settings to
-    explain it.
+def test_enabled_cdr_lite_output_override_is_rejected_before_0_7_0():
+    """Pruning runs BEFORE the tracer/gas-exchange consistency check, and an
+    override enabling the stream on a 0.6.x pin is not honored (the pin's
+    namelist schema can't emit the group): it raises instead of being silently
+    dropped (which used to leave the user believing the stream was on).
     """
-    cfg = _build(
-        model_dir=_MODEL_DIR_ROMS060,
-        run_time_overrides={"cdr_tracer_output": {"do_cdr_tracer_output": True}},
-    )
+    with pytest.raises(ValueError, match=r"cdr_lite_output\.do_cdr_lite_output"):
+        _build(
+            model_dir=_MODEL_DIR_ROMS060,
+            run_time_overrides={"cdr_lite_output": {"do_cdr_lite_output": True}},
+        )
+
+
+def test_disabled_gated_sections_are_pruned_silently_before_0_7_0():
+    """The shared OutputSpec carries switched-off ``cdr_lite_output`` /
+    ``cdr_gas_exch_output``: an older pin drops them without complaint and
+    flips no cppdef.
+    """
+    cfg = _build(model_dir=_MODEL_DIR_ROMS060)
     settings = cfg.model_settings
-    assert "cdr_tracer_output" not in settings
+    assert "cdr_lite_output" not in settings
     assert settings["cppdefs"].get("cdr_forcing", False) is False
     assert settings["cdr_output"]["do_cdr_output"] is False
+
+
+# ---------------------------------------------------------------------------
+# ucla-roms >= 0.9.0: CDR_LITE (cppdefs.cdr_lite is resolver-owned)
+# ---------------------------------------------------------------------------
+_LITE_ON = {
+    "cdr_lite": {"cdr_online_carbonate_sensitivity": True},
+    "param": {"nt_cdr_oae": 1},
+}
+
+
+def test_0_9_0_online_sensitivity_sets_cdr_lite_cppdef():
+    cfg = _build(model_dir=_MODEL_DIR_ROMS090, run_time_overrides=_LITE_ON)
+    settings = cfg.model_settings
+    assert settings["cdr_lite"]["cdr_online_carbonate_sensitivity"] is True
+    assert settings["cppdefs"]["cdr_lite"] is True
+    # CDR_LITE needs no CDR_FORCING (no forcing configured, stream off).
+    assert settings["cppdefs"]["cdr_forcing"] is False
+
+
+def test_0_9_0_cdr_lite_cppdef_absent_without_the_knob():
+    cfg = _build(model_dir=_MODEL_DIR_ROMS090)
+    assert cfg.model_settings["cdr_lite"]["cdr_online_carbonate_sensitivity"] is False
+    assert "cdr_lite" not in cfg.model_settings["cppdefs"]
+    cfg = _build(model_dir=_MODEL_DIR_ROMS080)
+    assert "cdr_lite" not in cfg.model_settings["cppdefs"]
+
+
+def test_0_9_0_cdr_lite_cppdef_without_the_knob_is_not_yet_supported():
+    """File-based carbonate sensitivities (CDR_LITE without the online knob) have
+    no Forge source yet -- a user-supplied ``cppdefs.cdr_lite`` raises.
+    """
+    with pytest.raises(ValueError, match="not yet supported"):
+        _build(
+            model_dir=_MODEL_DIR_ROMS090,
+            compile_time_overrides={"cppdefs": {"cdr_lite": True}},
+        )
+
+
+def test_0_9_0_online_sensitivity_requires_marbl():
+    with pytest.raises(ValueError, match="MARBL"):
+        _build(
+            model_dir=_MODEL_DIR_ROMS090,
+            bgc_mode="none",
+            forcing_inputs=_PHYSICS_ONLY_FORCING,
+            run_time_overrides=_LITE_ON,
+        )
+
+
+def test_0_9_0_online_sensitivity_requires_cdr_tracers():
+    with pytest.raises(ValueError, match="nt_cdr_oae"):
+        _build(
+            model_dir=_MODEL_DIR_ROMS090,
+            run_time_overrides={"cdr_lite": {"cdr_online_carbonate_sensitivity": True}},
+        )
+
+
+def test_0_9_0_gas_exchange_output_needs_the_online_sensitivity():
+    with pytest.raises(ValueError, match="needs CDR_LITE"):
+        _build(
+            model_dir=_MODEL_DIR_ROMS090,
+            run_time_overrides={
+                "cdr_lite_output": {
+                    "do_cdr_lite_output": True,
+                    "wrt_gas_exchange": True,
+                },
+                "param": {"nt_cdr_oae": 1},
+            },
+        )
+    cfg = _build(
+        model_dir=_MODEL_DIR_ROMS090,
+        run_time_overrides={
+            **_LITE_ON,
+            "cdr_lite_output": {"do_cdr_lite_output": True, "wrt_gas_exchange": True},
+        },
+    )
+    assert cfg.model_settings["cppdefs"]["cdr_lite"] is True
+
+
+def test_cdr_lite_output_forces_cdr_forcing_only_before_0_9_0():
+    """The stream compiles unconditionally from ucla-roms 0.9.0: enabling it on a
+    0.9 pin leaves cppdefs.cdr_forcing off, where 0.7/0.8 force it on.
+    """
+    over = {
+        "cdr_lite_output": {"do_cdr_lite_output": True},
+        "param": {"nt_cdr_oae": 1},
+    }
+    assert (
+        _build(model_dir=_MODEL_DIR_ROMS090, run_time_overrides=over).model_settings[
+            "cppdefs"
+        ]["cdr_forcing"]
+        is False
+    )
+    for model_dir in (_MODEL_DIR_ROMS070, _MODEL_DIR_ROMS080):
+        cfg = _build(model_dir=model_dir, run_time_overrides=over)
+        assert cfg.model_settings["cppdefs"]["cdr_forcing"] is True
+
+
+def test_0_9_0_cdr_lite_output_needs_tracers():
+    with pytest.raises(ValueError, match="aborts at init"):
+        _build(
+            model_dir=_MODEL_DIR_ROMS090,
+            run_time_overrides={"cdr_lite_output": {"do_cdr_lite_output": True}},
+        )
+
+
+def test_0_9_0_precheck_runs_on_the_renamed_output_group():
+    """The output-stream/restart-rollover precheck sees ``cdr_lite_output`` under
+    its 0.9 canonical group (``nrpf * output_period`` must divide the restart
+    period), not the 0.7/0.8 ``cdr_tracer_output_settings`` one.
+    """
+    with pytest.raises(ValueError, match="cdr_lite_output_settings.nrpf_cdr_lite"):
+        _build(
+            model_dir=_MODEL_DIR_ROMS090,
+            run_time_overrides={
+                "cdr_lite_output": {
+                    "do_cdr_lite_output": True,
+                    "nrpf": 7,
+                    "output_period": 3600.0,
+                },
+                "param": {"nt_cdr_oae": 1},
+            },
+        )
+
+
+# ---------------------------------------------------------------------------
+# Legacy section names (pre-ucla-roms 0.9.0 forge vocabulary)
+# ---------------------------------------------------------------------------
+def _resolver_warnings(caplog):
+    """WARNING messages the resolver itself logged (not other loggers')."""
+    return [
+        r.getMessage()
+        for r in caplog.records
+        if r.levelno == logging.WARNING and r.name == "cstar.applications.forge.resolve"
+    ]
+
+
+def _legacy_output_settings(enabled=False):
+    """The bundled 'standard' OutputSpec as written before the rename."""
+    import copy
+
+    out = copy.deepcopy(_CATALOG.output_data("standard"))
+    section = out.pop("cdr_lite_output")
+    section.pop("do_cdr_lite_output")
+    out["cdr_tracer_output"] = {**section, "do_cdr_tracer_output": enabled}
+    return out
+
+
+@pytest.mark.parametrize("model_dir", [_MODEL_DIR_ROMS070, _MODEL_DIR_ROMS090])
+def test_resolver_renames_a_legacy_output_spec_with_a_warning(model_dir, caplog):
+    import copy
+
+    legacy = _legacy_output_settings(enabled=True)
+    snapshot = copy.deepcopy(legacy)
+    with caplog.at_level(logging.WARNING, logger="cstar.applications.forge.resolve"):
+        cfg = _build(
+            model_dir=model_dir,
+            output_settings=legacy,
+            run_time_overrides={"param": {"nt_cdr_oae": 1}},
+        )
+    settings = cfg.model_settings
+    assert "cdr_tracer_output" not in settings
+    assert settings["cdr_lite_output"]["do_cdr_lite_output"] is True
+    warnings_ = _resolver_warnings(caplog)
+    assert len(warnings_) == 1
+    assert "output_settings" in warnings_[0]
+    assert "'cdr_tracer_output' -> 'cdr_lite_output'" in warnings_[0]
+    assert "CDR_LITE" in warnings_[0]
+    assert legacy == snapshot  # the caller's dict is not mutated
+
+
+def test_resolver_renames_legacy_run_time_overrides(caplog):
+    with caplog.at_level(logging.WARNING, logger="cstar.applications.forge.resolve"):
+        cfg = _build(
+            model_dir=_MODEL_DIR_ROMS070,
+            run_time_overrides={
+                "cdr_tracer_output": {"do_cdr_tracer_output": True},
+                "param": {"nt_cdr_oae": 1},
+            },
+        )
+    assert cfg.model_settings["cdr_lite_output"]["do_cdr_lite_output"] is True
+    assert "run_time_overrides" in caplog.text
+
+
+def test_resolver_renames_a_legacy_model_spec(tmp_path, caplog):
+    model = yaml.safe_load((_MODEL_DIR_ROMS070 / "model.yaml").read_text())
+    model["model_settings"]["cdr_tracer_output"] = {"do_cdr_tracer_output": False}
+    model_dir = tmp_path / "legacy-model"
+    model_dir.mkdir()
+    (model_dir / "model.yaml").write_text(yaml.safe_dump(model))
+    with caplog.at_level(logging.WARNING, logger="cstar.applications.forge.resolve"):
+        cfg = _build(model_dir=model_dir)
+    assert "cdr_tracer_output" not in cfg.model_settings
+    assert cfg.model_settings["cdr_lite_output"]["do_cdr_lite_output"] is False
+    assert "ModelSpec 'legacy-model'" in caplog.text
+
+
+def test_resolver_does_not_warn_for_current_names(caplog):
+    with caplog.at_level(logging.WARNING, logger="cstar.applications.forge.resolve"):
+        _build(model_dir=_MODEL_DIR_ROMS090)
+    assert not _resolver_warnings(caplog)
+
+
+def test_migration_v9_to_v10_renames_the_cdr_lite_output_section():
+    from cstar.applications.forge.migration import migrate_forge_blueprint_data
+
+    data = {
+        "forge_blueprint_version": 9,
+        "model_settings": {
+            "cdr_output": {"do_cdr_output": False},
+            "cdr_tracer_output": {"do_cdr_tracer_output": True, "nrpf": 6},
+        },
+    }
+    migrated = migrate_forge_blueprint_data(data)
+    assert migrated["forge_blueprint_version"] == 10
+    assert migrated["model_settings"] == {
+        "cdr_output": {"do_cdr_output": False},
+        "cdr_lite_output": {"do_cdr_lite_output": True, "nrpf": 6},
+    }
+    # the input is untouched, and a second pass is a no-op
+    assert "cdr_tracer_output" in data["model_settings"]
+    assert migrate_forge_blueprint_data(migrated) == migrated
+
+
+def test_migration_v9_to_v10_rejects_both_section_names():
+    from cstar.applications.forge.migration import migrate_forge_blueprint_data
+
+    data = {
+        "forge_blueprint_version": 9,
+        "model_settings": {"cdr_tracer_output": {}, "cdr_lite_output": {}},
+    }
+    with pytest.raises(ValueError, match="both"):
+        migrate_forge_blueprint_data(data)
+
+
+def test_stored_v9_blueprint_loads_with_the_renamed_section(tmp_path):
+    """A 0.7-pinned blueprint saved before the rename loads (via the validator
+    that runs the migration) with its stream settings under the new names.
+    """
+    cfg = _build(model_dir=_MODEL_DIR_ROMS070)
+    data = cfg.model_dump(mode="json")
+    data["forge_blueprint_version"] = 9
+    settings = data["model_settings"]
+    section = settings.pop("cdr_lite_output")
+    settings["cdr_tracer_output"] = {
+        ("do_cdr_tracer_output" if k == "do_cdr_lite_output" else k): v
+        for k, v in section.items()
+    }
+    loaded = ForgeBlueprint.model_validate(data)
+    assert loaded.forge_blueprint_version == 10
+    assert "cdr_tracer_output" not in loaded.model_settings
+    assert (
+        loaded.model_settings["cdr_lite_output"]["do_cdr_lite_output"]
+        == cfg.model_settings["cdr_lite_output"]["do_cdr_lite_output"]
+    )
 
 
 def test_rst_period_not_divisible_by_dt_raises():
@@ -3821,6 +4166,7 @@ def test_resolved_templates_carry_modelspec_authored_hashes():
         ("roms-marbl-0.6-default", True),
         ("roms-marbl-0.7-default", True),
         ("roms-marbl-0.8-default", True),
+        ("roms-marbl-0.9-default", True),
         ("pio-dev", True),
     ],
 )

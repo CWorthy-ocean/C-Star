@@ -648,8 +648,8 @@ def _base_type(ann, value):
 _BOOL_DROPDOWN_FIELDS: dict[tuple[str, str], tuple[str, str]] = {
     ("cdr_output", "do_avg"): ("averaged", "instantaneous"),
     ("cdr_output", "monthly_averages"): ("monthly", "periodic"),
-    ("cdr_tracer_output", "do_avg"): ("averaged", "instantaneous"),
-    ("cdr_tracer_output", "monthly_averages"): ("monthly", "periodic"),
+    ("cdr_lite_output", "do_avg"): ("averaged", "instantaneous"),
+    ("cdr_lite_output", "monthly_averages"): ("monthly", "periodic"),
     ("cdr_gas_exch_output", "do_avg"): ("averaged", "instantaneous"),
     ("cdr_gas_exch_output", "monthly_averages"): ("monthly", "periodic"),
 }
@@ -832,6 +832,7 @@ _CPPDEFS_DERIVED_LEAVES = frozenset(
         "obc_north",
         "obc_south",
         "cdr_forcing",
+        "cdr_lite",
         "use_pio",
         "marbl",
         "co2_tvarying",
@@ -976,14 +977,14 @@ _ACCORDION_EXCLUDED_FIELDS: dict[str, frozenset[str]] = {
 # clobbered or duplicated, never the value.
 #
 # ``cppdefs`` is almost entirely resolver-derived (obc_*/marbl/use_pio/cdr_forcing/
-# co2_tvarying/sal_restore/tides) and stays out of the accordion for those fields --
-# only the handful with no other UI (``sponge_tune``, ``nhy_forcing``/``nox_forcing``,
-# and the ucla-roms >= 0.8.0 advection switches ``parabolic_splines``/
+# cdr_lite/co2_tvarying/sal_restore/tides) and stays out of the accordion for those
+# fields -- only the handful with no other UI (``sponge_tune``, ``nhy_forcing``/
+# ``nox_forcing``, and the ucla-roms >= 0.8.0 advection switches ``parabolic_splines``/
 # ``upstream_ts_land_curv``, PR #361) are opted in, via ``_CPPDEFS_PANE_FIELDS``, so
 # a user override can never collide with a resolver-owned flag. The two advection
 # fields only render for ModelSpecs that declare them (``roms-marbl-0.8-default``,
-# ``pio-dev``) -- the editor type-infers a checkbox from the composed bool, so a
-# spec that omits the key shows no widget for it.
+# ``roms-marbl-0.9-default``, ``pio-dev``) -- the editor type-infers a checkbox from
+# the composed bool, so a spec that omits the key shows no widget for it.
 #
 # ``bgc``/``marbl_bgc`` are SPLIT at field granularity along the existing
 # ``PARTIAL_OUTPUT_SECTIONS`` seam (the same split the OutputSpec dropdown seeds):
@@ -1036,7 +1037,13 @@ _ADVANCED_CATEGORIES: tuple[tuple[str, tuple[str, ...]], ...] = (
     ),
     (
         "Carbon dioxide removal (CDR)",
-        ("cdr_frc", "cdr_output", "cdr_tracer_output", "cdr_gas_exch_output"),
+        (
+            "cdr_frc",
+            "cdr_output",
+            "cdr_lite",
+            "cdr_lite_output",
+            "cdr_gas_exch_output",
+        ),
     ),
     (
         _OUTPUT_CATEGORY,
@@ -1467,16 +1474,16 @@ def _split_fields(
 # Each CDR output stream's master enable flag -- section name -> the field that
 # turns the whole stream on/off. ``_apply_field_rules``/``_register_field_rule_
 # observers`` loop over this table so ``cdr_output`` (ucla-roms's original
-# stream), ``cdr_tracer_output``, and ``cdr_gas_exch_output`` (both added by
+# stream), ``cdr_lite_output``, and ``cdr_gas_exch_output`` (both added by
 # ucla-roms PR #351, >= 0.7.0) behave identically: every other field of the
 # section (do_avg/monthly_averages/output_period/nrpf, and any stream-specific
-# extras such as cdr_tracer_output's ``wrt_*`` field-group toggles) hides with
+# extras such as cdr_lite_output's ``wrt_*`` field-group toggles) hides with
 # the master switch, so a new field on a Cfg model is covered without touching
 # this file. Extend here -- not by hand in either method -- when ucla-roms adds
 # another CDR output stream.
 _CDR_STREAM_MASTER_FLAGS: dict[str, str] = {
     "cdr_output": "do_cdr_output",
-    "cdr_tracer_output": "do_cdr_tracer_output",
+    "cdr_lite_output": "do_cdr_lite_output",
     "cdr_gas_exch_output": "do_cdr_gas_exch_output",
 }
 
@@ -1671,10 +1678,10 @@ class _SettingsEditor:
         effect once a "monthly" cadence fixes the period implicitly -- hiding/
         disabling them keeps the form from offering a control with no effect.
         Applies identically to every stream in :data:`_CDR_STREAM_MASTER_FLAGS`
-        (``cdr_output``, ``cdr_tracer_output``, ``cdr_gas_exch_output``): every
+        (``cdr_output``, ``cdr_lite_output``, ``cdr_gas_exch_output``): every
         field of the section other than the master switch hides with it -- the
         shared do_avg/monthly_averages/output_period/nrpf quartet and any
-        stream-specific extras (``cdr_tracer_output``'s ``wrt_*`` field-group
+        stream-specific extras (``cdr_lite_output``'s ``wrt_*`` field-group
         toggles), which are all meaningless once that stream is off.
         """
 
@@ -3655,9 +3662,9 @@ class _ForcingEditor:
 
 # Preselected in the Model dropdown when present in the catalog (falls back to
 # the first catalog model otherwise): it's the newest tagged-release ModelSpec
-# (ucla-roms 0.8.0). 'pio-dev' (ucla-roms branch `main`) remains available in the
+# (ucla-roms 0.9.0). 'pio-dev' (ucla-roms branch `main`) remains available in the
 # catalog but is no longer the default.
-_DEFAULT_MODEL = "roms-marbl-0.8-default"
+_DEFAULT_MODEL = "roms-marbl-0.9-default"
 
 # Preselected in the Output dropdown when present in the catalog (falls back to
 # the first catalog spec otherwise). 'daily-restarts' conforms to the

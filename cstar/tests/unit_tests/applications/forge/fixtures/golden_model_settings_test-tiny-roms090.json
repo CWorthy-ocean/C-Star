@@ -59,6 +59,9 @@
     "nrpf": 24,
     "output_period": 3600
   },
+  "cdr_lite": {
+    "cdr_online_carbonate_sensitivity": false
+  },
   "cdr_lite_output": {
     "do_avg": true,
     "do_cdr_lite_output": false,
@@ -91,9 +94,11 @@
     "obc_north": true,
     "obc_south": false,
     "obc_west": false,
+    "parabolic_splines": false,
     "sal_restore": true,
     "sponge_tune": false,
     "tides": true,
+    "upstream_ts_land_curv": false,
     "use_pio": true
   },
   "diagnostics": {
