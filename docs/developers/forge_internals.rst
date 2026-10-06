@@ -77,7 +77,7 @@ Directory map
     |   |   +-- DomainSpec/{grid}/Domain.yaml   # Grid definitions
     |   |   +-- ForcingSpec/{name}/Forcing.yaml # Forcing source configurations
     |   |   +-- OutputSpec/{name}/Output.yaml   # Output configurations
-    |   |   +-- blueprints/                     # Example blueprints (bundled, read-only layer;
+    |   |   +-- blueprints/forge/{name}.yaml    # Example blueprints (bundled, read-only layer;
     |   |                                        # user saves go to the user catalog layer instead)
     |   +-- domain_catalog.py          # DomainCatalog / LayeredCatalog
     +-- wizard/                        # Wizard presentation layer (shared UI kit + Voila front-end)
