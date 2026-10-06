@@ -23,6 +23,7 @@ from cstar.applications.forge.namelist_model import (
     RunTimeSettingsV0_6_0,
     RunTimeSettingsV0_7_0,
     build_namelist,
+    check_bgc_tracer_count,
     forge_field_for,
     n_tracers_from_param,
     output_precheck_applies_to,
@@ -195,6 +196,26 @@ def test_n_tracers_from_param_counts_all_tracer_kinds():
 def test_n_tracers_from_param_missing_keys_count_as_zero():
     assert n_tracers_from_param({}) == 2
     assert n_tracers_from_param({"ntrc_bio": 32}) == 34
+
+
+# ---------------------------------------------------------------------------
+# check_bgc_tracer_count
+# ---------------------------------------------------------------------------
+def test_check_bgc_tracer_count_rejects_bgc_tracers_without_marbl():
+    with pytest.raises(ValueError, match="param.ntrc_bio=32"):
+        check_bgc_tracer_count({"ntrc_bio": 32}, bgc_mode_is_marbl=False)
+
+
+@pytest.mark.parametrize(
+    ("param", "bgc_mode_is_marbl"),
+    [
+        ({"ntrc_bio": 32}, True),
+        ({"ntrc_bio": 0}, False),
+        ({}, False),
+    ],
+)
+def test_check_bgc_tracer_count_accepts_consistent_settings(param, bgc_mode_is_marbl):
+    check_bgc_tracer_count(param, bgc_mode_is_marbl=bgc_mode_is_marbl)
 
 
 def test_defaults_come_from_yaml_not_the_model():
@@ -506,6 +527,29 @@ def test_validate_run_time_sections_skips_rst_period_check_when_section_missing(
         validate_run_time_sections({"time_stepping": sections["time_stepping"]}) == []
     )
     assert validate_run_time_sections({"ocean_vars": sections["ocean_vars"]}) == []
+
+
+_PARAM = {"llm": 20, "mmm": 20, "n": 10, "np_xi": 2, "np_eta": 5, "nt_passive": 0}
+
+
+@pytest.mark.parametrize(
+    ("ntrc_bio", "marbl", "rejected"),
+    [(32, False, True), (0, False, False), (32, True, False)],
+)
+def test_validate_run_time_sections_checks_bgc_tracers_against_marbl(
+    ntrc_bio, marbl, rejected
+):
+    """A stored blueprint with MARBL off but BGC tracers left in param is
+    reported up front (engine/wizard), not first at configure_build.
+    """
+    errs = validate_run_time_sections(
+        {"param": {**_PARAM, "ntrc_bio": ntrc_bio}, "cppdefs": {"marbl": marbl}}
+    )
+    assert any("param.ntrc_bio" in e for e in errs) is rejected
+
+
+def test_validate_run_time_sections_skips_bgc_check_without_cppdefs():
+    assert validate_run_time_sections({"param": {**_PARAM, "ntrc_bio": 32}}) == []
 
 
 # ---------------------------------------------------------------------------

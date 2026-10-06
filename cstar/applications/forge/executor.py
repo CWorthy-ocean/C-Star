@@ -40,6 +40,7 @@ from cstar.applications.forge.blueprint import (
 from cstar.applications.forge.host import HostPaths
 from cstar.applications.forge.namelist_model import (
     build_namelist,
+    check_bgc_tracer_count,
     check_cdr_output_sections,
     check_output_streams_divide_rst,
     check_rst_period_divisible,
@@ -2369,6 +2370,14 @@ class ForgeExecutor(BaseModel):
                 "cppdefs.cdr_forcing=True (CDR_FORCING gates ucla-roms' CDR tracer/"
                 "gas-exchange output modules)."
             )
+
+        # BGC tracer count net, mirroring the resolver's: a stored or hand-edited
+        # blueprint can carry ntrc_bio > 0 with MARBL off, which ROMS would run
+        # with unnamed tracers. Shared via check_bgc_tracer_count.
+        check_bgc_tracer_count(
+            self._settings_run_time.get("param") or {},
+            bgc_mode_is_marbl=cppdefs.get("marbl", False),
+        )
 
         # Derive n_tracers up front: prefer the value passed by the processing
         # engine; otherwise derive it from the resolved settings (T + S + BGC +

@@ -3254,6 +3254,7 @@ class TestGoldenNamelist:
         cfg, builder = self._generate_inputs_no_cdr_forcing(mock_grid, tmp_path)
         cfg.model_settings["cdr_tracer_output"]["do_cdr_tracer_output"] = True
         cfg.model_settings["cppdefs"]["marbl"] = False
+        cfg.model_settings["param"]["ntrc_bio"] = 0  # no BGC tracers without MARBL
 
         self._configure_build_for(cfg, builder)
 
@@ -3274,6 +3275,21 @@ class TestGoldenNamelist:
         cfg.model_settings["cppdefs"]["marbl"] = False
 
         with pytest.raises(ValueError, match="do_cdr_gas_exch_output"):
+            self._configure_build_for(cfg, builder)
+
+    def test_configure_build_rejects_bgc_tracers_without_marbl_end_to_end(
+        self, mock_grid, tmp_path
+    ):
+        """A stored blueprint with MARBL off but the ModelSpec's ntrc_bio still set
+        (what the resolver wrote for bgc_mode="none" before it zeroed ntrc_bio)
+        must fail at configure_build: ROMS would allocate the BGC tracers but
+        nothing would name them.
+        """
+        cfg, builder = self._generate_inputs_no_cdr_forcing(mock_grid, tmp_path)
+        cfg.model_settings["cppdefs"]["marbl"] = False
+        assert cfg.model_settings["param"]["ntrc_bio"] > 0
+
+        with pytest.raises(ValueError, match="param.ntrc_bio"):
             self._configure_build_for(cfg, builder)
 
     def test_configure_build_prunes_version_gated_sections_for_0_6_pin_end_to_end(

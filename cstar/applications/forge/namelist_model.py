@@ -259,6 +259,28 @@ def n_tracers_from_param(param: dict[str, Any]) -> int:
     )
 
 
+def check_bgc_tracer_count(param: dict[str, Any], *, bgc_mode_is_marbl: bool) -> None:
+    """Reject BGC tracers (``param.ntrc_bio``, the namelist's ``nt_bgc``) in a
+    build without MARBL.
+
+    ucla-roms sizes its tracer arrays from ``nt_bgc`` at runtime, but only MARBL
+    names the BGC tracer slots: without it they stay uninitialized and ROMS later
+    aborts looking up forcing variables under garbage names. Shared by the
+    resolver (authoring time), :func:`validate_run_time_sections` (stored
+    blueprints, before data staging), and the executor's ``configure_build``
+    (the build-time net), like :func:`check_cdr_output_sections`.
+
+    Raises ``ValueError`` if ``ntrc_bio > 0`` while ``bgc_mode_is_marbl`` is False.
+    """
+    ntrc_bio = int(param.get("ntrc_bio", 0))
+    if ntrc_bio > 0 and not bgc_mode_is_marbl:
+        raise ValueError(
+            f"param.ntrc_bio={ntrc_bio} but MARBL is off (cppdefs.marbl=False): "
+            "only MARBL names the BGC tracer slots, so ucla-roms would allocate "
+            f"{ntrc_bio} unnamed tracers. Set param.ntrc_bio to 0."
+        )
+
+
 class PioSettingsCfg(_SettingsSection):
     # Deliberate default (like ExtractDataCfg.extract_root_name above): blueprints
     # saved before &PIO_SETTINGS existed bypass the resolver and hit
@@ -1271,6 +1293,16 @@ def validate_run_time_sections(
         try:
             check_rst_period_divisible(
                 (settings["time_stepping"] or {}).get("dt"), settings["ocean_vars"]
+            )
+        except ValueError as exc:
+            errors.append(str(exc))
+    # Same for BGC tracers vs MARBL (param vs cppdefs): surfaced here so a stored
+    # blueprint fails before data staging/generation, not at configure_build.
+    if "param" in settings and "cppdefs" in settings:
+        try:
+            check_bgc_tracer_count(
+                settings["param"] or {},
+                bgc_mode_is_marbl=(settings["cppdefs"] or {}).get("marbl", False),
             )
         except ValueError as exc:
             errors.append(str(exc))
