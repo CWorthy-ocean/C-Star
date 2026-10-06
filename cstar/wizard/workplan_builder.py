@@ -1104,7 +1104,7 @@ class _StepPane:
             return
         target = Path(wizard.save_path.value)
         target.parent.mkdir(parents=True, exist_ok=True)
-        self._current_path = str(config.to_yaml(target))
+        self._current_path = str(wizard._save_config(target))
         self.current_note.value = (
             f"Saved the Blueprint page's configuration to "
             f"<code>{_esc(self._current_path)}</code>"

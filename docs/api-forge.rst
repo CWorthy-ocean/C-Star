@@ -27,7 +27,7 @@ Blueprint
    cstar.applications.forge.blueprint.Code
    cstar.applications.forge.blueprint.TemplateRepo
    cstar.applications.forge.blueprint.Composition
-   cstar.applications.forge.blueprint.Provenance
+   cstar.applications.forge.blueprint.ForgeProvenance
 
 Application
 -----------

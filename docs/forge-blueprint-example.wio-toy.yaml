@@ -4,7 +4,7 @@ description: Example ForgeBlueprint for the bundled wio-toy domain
 application: forge
 state: notset
 schema_version: 1.0.0
-forge_blueprint_version: 9
+forge_blueprint_version: 10
 run:
   start_date: '2012-01-01T00:00:00'
   end_date: '2012-01-02T00:00:00'

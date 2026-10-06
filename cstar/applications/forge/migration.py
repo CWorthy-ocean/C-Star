@@ -88,6 +88,12 @@ def migrate_forge_blueprint_data(data: dict[str, Any] | None) -> dict[str, Any]:
     defaults (:data:`LEGACY_DEFAULT_WORKING_ROOTS`, bare or followed by the
     sanitized run name), so the blueprint runs under C-Star's default working
     directory; any other value is left untouched.
+    **v9 -> v10**: no-op beyond the version bump -- ``provenance`` gains
+    ``generated_by`` and ``derived_from`` (both optional, defaulting to unset/empty)
+    and keeps the legacy ``forge_version``/``cstar_version``/``roms_tools_version``,
+    so a v9 file already validates against the v10 schema unchanged. The bump is
+    what makes an older install reject a newer file with the "upgrade" message
+    rather than an unknown-key error.
 
     Idempotent and a no-op on already-current data (e.g. direct keyword
     construction, ``ForgeBlueprint(name=..., ...)``) -- called automatically from a

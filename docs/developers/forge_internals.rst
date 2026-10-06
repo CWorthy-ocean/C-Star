@@ -112,7 +112,7 @@ C-Star application (see `Forge as a real C-Star application`_ below), not
 just a Pydantic model that happens to carry an ``application`` string.
 
 Top-level shape: ``forge_blueprint_version`` (int, bump only on breaking
-change; currently 9) - ``application`` (=``"forge"``, C-Star app
+change; currently 10) - ``application`` (=``"forge"``, C-Star app
 discriminator, required by the ``Blueprint`` base) - ``name``/``description``
 (required top-level fields on the ``Blueprint`` base; ``name`` is the single
 user-editable canonical name -- ``casename``/``working_dir``/
@@ -129,7 +129,9 @@ list of resolved dataset keys) - ``model_settings`` (flat dict: cppdefs + ~35
 namelist sections) - ``code`` (roms/marbl repos +
 ``templates_compile_time``/``_run_time`` repo refs) - ``composition``
 (which catalog specs produced this + overrides layer) - ``provenance``
-(generated_at, content_hash, notes). The ``Blueprint`` base also adds
+(``ForgeProvenance``: the ``Blueprint`` base's ``generated_at``/``generated_by``/
+``derived_from`` plus ``content_hash``, ``notes`` and the legacy version
+fields). The ``Blueprint`` base also adds
 ``state``/``schema_version`` (its own versioning metadata, distinct from
 ``forge_blueprint_version``) and injects a ``$schema`` key on serialization
 (stripped back out on load).
@@ -149,8 +151,10 @@ with ``source`` + ``bgc_sources``, mirroring ``InitialConditions``), and the
 v8->v9 ``working_dir`` strip (the old default-form
 ``~/cstar/_forge_bp_runs/<name>`` is removed so the blueprint takes the base
 class's default; a deliberately set path is kept) to the current shape,
-reproducing derived names bit-for-bit. ``model_name``/
-``grid_name`` live in ``composition.model.name``/``domain.grid_name``;
+reproducing derived names bit-for-bit. The v9->v10 step changes no data: the
+bump exists so an older install, which would reject the new
+``provenance.generated_by`` key as unknown, says "upgrade cstar-ocean" instead.
+``model_name``/``grid_name`` live in ``composition.model.name``/``domain.grid_name``;
 ``grid_name`` is results-affecting -- ``SourceDatasets`` keys cache
 filenames off it.
 
@@ -170,8 +174,19 @@ filenames off it.
   ``content_hash``); and, on ``initial_conditions``/``boundary``, the
   execution-environment knobs ``bypass_validation`` and each bgc source's
   ``serialize_dask`` -- none of these change what the run produces, only how
-  or where it's produced. Stamped on ``to_yaml``; ``verify_content_hash``
+  or where it's produced. Recorded on ``to_yaml``; ``verify_content_hash``
   warns (doesn't block) on a mismatched hand-edit at load.
+- **``stamp_provenance(tool)``** -- the one place a blueprint's provenance is
+  stamped. When the recomputed ``content_hash`` equals the recorded one it returns
+  ``self``; otherwise a copy with the new hash, ``generated_at`` now (UTC) and a
+  fresh ``generated_by`` from ``new_generated_by(tool)`` (the tool, a uuid4 minted
+  once, the system, and ``generation_versions()``: the ``cstar-ocean`` and
+  ``roms-tools`` versions), with the legacy ``forge_version``/``cstar_version``/
+  ``roms_tools_version`` cleared. ``to_yaml_str`` only serializes and fingerprints
+  (``provenance`` last, an empty ``derived_from`` dropped), so a producer stamps
+  first; the wizard does so in ``ForgeBlueprintWizard._save_config``, which
+  every write of its config to disk goes through, and carries the stamp through
+  re-resolves (``build_forge_blueprint(provenance=...)``).
 
 Render templates: ``code.templates_compile_time``/``_run_time`` pin a git
 commit (``code.templates_commit``) and, per file, the sha256 of its content
@@ -260,7 +275,8 @@ The call chain end to end
    -- a ForcingSpec and OutputSpec must always be supplied explicitly),
    resolves dataset keys via ``source_registry``, computes pure-derived
    settings (CFL ``dt``, ``v_sponge``, etc.), returns a ``ForgeBlueprint``.
-4. ``wiz.config.to_yaml(path)`` writes the portable ``forge_blueprint.yaml``.
+4. Save (``wiz._save_config(path)``) stamps the provenance and writes the portable
+   ``forge_blueprint.yaml`` (``stamp_provenance`` then ``to_yaml``).
 
 **Execution (blueprint -> engine -> executor), same machine or a different one:**
 

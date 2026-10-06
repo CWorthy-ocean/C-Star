@@ -50,15 +50,22 @@ normally omits), a forge blueprint has these sections:
    commit.
 ``composition`` and ``provenance``
    Which catalog specs the blueprint was built from and with what overrides,
-   the C-Star version that wrote it, and a content hash. Both are
-   informational; the executor never reads the catalog.
+   and what produced the file: when (``generated_at``) and by which tool
+   (``generated_by``, holding the tool, a unique id, the system and the
+   versions of C-Star and roms-tools), plus a content hash. Both are
+   informational; the executor never reads the catalog. ``generated_by`` is
+   re-stamped, with a new id, only when the content hash changes, so saving an
+   unchanged blueprint again keeps it. The ``forge_version``,
+   ``cstar_version`` and ``roms_tools_version`` fields come from older
+   blueprints: they still load, but nothing writes them any more.
 
-A ``forge_blueprint_version`` field records the schema version. Blueprints
-written by older versions are migrated when loaded; a blueprint newer than
-the installed C-Star is rejected with a message saying so. The migration
-removes an old default ``working_dir`` (``~/cstar/_forge_bp_runs/<name>``),
-so that blueprint takes the default location described below; a path you set
-deliberately is kept.
+A ``forge_blueprint_version`` field records the schema version (currently 10).
+Blueprints written by older versions are migrated when loaded; a blueprint newer
+than the installed C-Star is rejected with a message saying so. Version 10 is the
+first to record ``generated_by``, so an older install asks you to upgrade rather
+than choking on the new key. The migration removes an old default ``working_dir``
+(``~/cstar/_forge_bp_runs/<name>``), so that blueprint takes the default location
+described below; a path you set deliberately is kept.
 
 Example
 -------

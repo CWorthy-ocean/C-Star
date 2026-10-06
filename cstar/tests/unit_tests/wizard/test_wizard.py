@@ -13,10 +13,13 @@ from types import SimpleNamespace
 from typing import ClassVar
 
 import pytest
+import yaml
 
 from cstar.applications.forge.blueprint import (
     BgcSourceItem,
     Forcing,
+    ForgeBlueprint,
+    ForgeProvenance,
     SurfaceForcingItem,
 )
 from cstar.applications.forge.namelist_model import (
@@ -29,6 +32,7 @@ from cstar.wizard.wizard import (
     _ACCORDION_EXCLUDED_FIELDS,
     _BOUNDARY_NONE,
     _OUTPUT_TABLES,
+    WIZARD_TOOL,
     ForgeBlueprintWizard,
     _drain_stream_buffer,
     _ForcingEditor,
@@ -4120,6 +4124,143 @@ def test_download_html_custom_caption_moves_filename_to_title():
     html = ForgeBlueprintWizard._download_html(cfg, caption="x")
     assert ">x<" in html
     assert f'title="{fname}"' in html
+
+
+# ---------------------------------------------------------------------------
+# Provenance: the wizard stamps a blueprint when it writes one, and re-stamps it
+# only when the content changed (see ForgeBlueprint.stamp_provenance).
+# ---------------------------------------------------------------------------
+def _saving_wizard(path):
+    """A wizard holding the default valid config, set to save to ``path``."""
+    wiz = _new_wizard()
+    wiz._rebuild()
+    assert wiz.config is not None, wiz.derived.value
+    wiz.save_path.value = str(path)
+    wiz._boundaries_touched = True  # not exercising boundary derivation here
+    return wiz
+
+
+def _save(wiz):
+    """Press Save and return the provenance of the file it wrote."""
+    wiz._on_save(None)
+    assert "Saved" in wiz.save_status.value, wiz.save_status.value
+    return ForgeBlueprint.from_yaml(wiz.save_path.value).provenance
+
+
+def _downloaded_yaml(link_html):
+    """The parsed YAML a download link carries in its data URI."""
+    import base64
+    import re
+
+    payload = re.search(r"base64,([A-Za-z0-9+/=]+)", link_html).group(1)
+    return yaml.safe_load(base64.b64decode(payload))
+
+
+def test_save_stamps_the_blueprint_as_written_by_the_wizard(tmp_path):
+    wiz = _saving_wizard(tmp_path / "bp.yaml")
+    assert wiz._carried_provenance == ForgeProvenance()  # nothing recorded yet
+
+    saved = _save(wiz)
+
+    assert saved.generated_by.tool == WIZARD_TOOL
+    assert saved.generated_at is not None
+    assert saved.content_hash == wiz.config.content_hash()
+    # the stamp is what the wizard now carries, and what its config holds
+    assert wiz._carried_provenance == saved
+    assert wiz.config.provenance == saved
+
+
+def test_saving_a_loaded_blueprint_unchanged_keeps_its_stamp(tmp_path):
+    first = _save(_saving_wizard(tmp_path / "first.yaml"))
+
+    wiz = _new_wizard()
+    wiz.load_path.value = str(tmp_path / "first.yaml")
+    wiz._on_load_path(None)
+    assert wiz._carried_provenance == first  # the load keeps what the file recorded
+    wiz.save_path.value = str(tmp_path / "second.yaml")
+    wiz._boundaries_touched = True
+    second = _save(wiz)
+
+    assert second.generated_by == first.generated_by
+    assert second.generated_at == first.generated_at
+
+
+def test_saving_after_an_edit_restamps_the_blueprint(tmp_path):
+    wiz = _saving_wizard(tmp_path / "bp.yaml")
+    first = _save(wiz)
+
+    wiz.end.value = date(2012, 1, 3)  # a longer run: results-affecting
+    second = _save(wiz)
+
+    assert second.content_hash != first.content_hash
+    assert second.generated_by.tool == WIZARD_TOOL
+    assert second.generated_by.id != first.generated_by.id
+    assert second.generated_at >= first.generated_at
+
+
+def test_saving_twice_without_changes_keeps_the_stamp(tmp_path):
+    wiz = _saving_wizard(tmp_path / "bp.yaml")
+    first = _save(wiz)
+
+    wiz._rebuild()  # a re-resolve in between must hand the stamp back
+    assert wiz.config.provenance == first
+    second = _save(wiz)
+
+    assert second.generated_by == first.generated_by
+    assert second.generated_at == first.generated_at
+
+
+def test_editing_a_description_does_not_restamp(tmp_path):
+    """The description is excluded from the content hash, so it is not content."""
+    wiz = _saving_wizard(tmp_path / "bp.yaml")
+    first = _save(wiz)
+
+    wiz.description.value = "a different description"
+    second = _save(wiz)
+
+    assert second.generated_by == first.generated_by
+
+
+def test_run_autosave_stamps_through_the_same_path(monkeypatch, tmp_path):
+    wiz = _run_wiz_with_output(monkeypatch, tmp_path, b"ok\n")
+
+    saved = ForgeBlueprint.from_yaml(tmp_path / "bp.yaml").provenance
+    assert saved.generated_by.tool == WIZARD_TOOL
+    assert wiz._carried_provenance == saved
+
+
+def test_rebuild_preview_and_download_do_not_advance_the_carried_provenance(capsys):
+    wiz = _new_wizard()
+    wiz._rebuild()
+    carried = wiz._carried_provenance
+    assert carried == ForgeProvenance()
+
+    wiz.end.value = date(2012, 1, 3)  # content differs from anything recorded
+    capsys.readouterr()  # drop what the earlier rebuilds printed
+    wiz._rebuild()
+    preview = capsys.readouterr().out
+
+    assert wiz._carried_provenance is carried
+    # the live preview and config stay unstamped: no id is minted per keystroke
+    assert wiz.config.provenance == carried
+    assert "generated_by: null" in preview
+    assert f"tool: {WIZARD_TOOL}" not in preview
+    # ... while what a download link carries is a stamped copy, the same in both links
+    sticky = _downloaded_yaml(wiz.download_link.value)
+    review = _downloaded_yaml(wiz.download_link_review.value)
+    assert sticky["provenance"]["generated_by"]["tool"] == WIZARD_TOOL
+    assert sticky["provenance"]["content_hash"] == wiz.config.content_hash()
+    assert review == sticky
+
+
+def test_a_download_does_not_count_as_a_save(tmp_path):
+    """Saving after a rebuild stamps afresh: the download's stamp was never carried."""
+    wiz = _saving_wizard(tmp_path / "bp.yaml")
+    downloaded = _downloaded_yaml(wiz.download_link.value)["provenance"]["generated_by"]
+
+    saved = _save(wiz)
+
+    assert saved.generated_by.id != downloaded["id"]
 
 
 def test_grid_chip_shows_fields_to_check_initially():

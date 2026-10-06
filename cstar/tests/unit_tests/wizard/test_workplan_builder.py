@@ -13,11 +13,12 @@ from pathlib import Path
 
 import yaml
 
+from cstar.applications.forge.blueprint import ForgeBlueprint
 from cstar.orchestration.models import BLUEPRINT_METADATA_FIELDS, Step, Workplan
 from cstar.orchestration.serialization import deserialize, serialize
 from cstar.wizard import workplan_builder as wb
 from cstar.wizard.ui import labels
-from cstar.wizard.wizard import ForgeBlueprintWizardApp
+from cstar.wizard.wizard import WIZARD_TOOL, ForgeBlueprintWizardApp
 from cstar.wizard.workplan_builder import WorkplanBuilderPage, _StepPane
 
 _BP_TEMPLATE = (
@@ -386,6 +387,22 @@ def test_current_blueprint_page_config_saves_and_uses_that_file(
     assert path == Path(bp_app.inner.save_path.value)
     assert path.exists()
     assert pane.application.value == "forge"
+
+
+def test_current_blueprint_page_config_is_stamped_by_the_wizard(
+    page, bp_app, monkeypatch
+):
+    """The page writes the Blueprint page's config through the wizard's own save,
+    so the file carries its provenance stamp and the wizard carries it on.
+    """
+    monkeypatch.setattr(bp_app.inner, "_ensure_boundaries_derived", lambda: True)
+    pane = page.panes[0]
+    pane.source.value = wb.SOURCE_CURRENT
+
+    saved = ForgeBlueprint.from_yaml(pane._current_path).provenance
+
+    assert saved.generated_by.tool == WIZARD_TOOL
+    assert bp_app.inner._carried_provenance == saved
 
 
 def test_upload_source_stages_the_file(page, roms_bp):
