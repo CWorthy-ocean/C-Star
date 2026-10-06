@@ -78,7 +78,7 @@ for this; a tier is selected by path.
 **Tier 3: extended** (``extended/``)
    Not part of the pull request checks. The weekly
    ``integration_extended.yaml`` workflow runs the suite on both operating
-   systems, Python 3.12 and 3.13, against ucla-roms ``0.8.0`` and
+   systems, Python 3.12 and 3.13, against ucla-roms ``0.9.0`` and
    ``main``. The ``CSTAR_IT_ROMS_REF`` environment variable overrides the
    ucla-roms ref of the model spec. Failures are an early warning for
    upstream changes, not a merge blocker.

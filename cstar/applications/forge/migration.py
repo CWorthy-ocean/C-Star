@@ -94,7 +94,10 @@ def migrate_forge_blueprint_data(data: dict[str, Any] | None) -> dict[str, Any]:
     ``do_cdr_lite_output`` (ucla-roms 0.9.0 renamed CDR_TRACER to CDR_LITE; Forge's
     vocabulary follows for every release, see
     :func:`~cstar.applications.forge.namelist_model.normalize_legacy_sections`).
-    A file carrying both section names raises.
+    A file carrying both section names, or a legacy flag next to its new name,
+    raises. Unlike the earlier steps this one is not version-gated: it runs on every
+    load because legacy names can re-enter current-version data through workplan
+    blueprint overrides, which merge onto an already-v10 dump and re-validate.
 
     Idempotent and a no-op on already-current data (e.g. direct keyword
     construction, ``ForgeBlueprint(name=..., ...)``) -- called automatically from a
@@ -191,11 +194,13 @@ def migrate_forge_blueprint_data(data: dict[str, Any] | None) -> dict[str, Any]:
             if working_dir.rstrip("/") in legacy_defaults:
                 del data["working_dir"]
 
-    if version is None or version < 10:
-        model_settings = data.get("model_settings")
-        if isinstance(model_settings, dict):
-            data["model_settings"] = model_settings = dict(model_settings)
-            normalize_legacy_sections(model_settings)
+    # v9 -> v10, run on every load rather than gated on ``version < 10``: legacy
+    # section names also re-enter at-version data through workplan blueprint
+    # overrides (``OverrideTransform`` merges them onto the already-v10 dump).
+    model_settings = data.get("model_settings")
+    if isinstance(model_settings, dict):
+        data["model_settings"] = model_settings = dict(model_settings)
+        normalize_legacy_sections(model_settings)
 
     data["forge_blueprint_version"] = FORGE_BLUEPRINT_VERSION
     return data

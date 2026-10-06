@@ -2390,8 +2390,8 @@ class ForgeExecutor(BaseModel):
             )
 
         # CDR_LITE net, mirroring the resolver's: cppdefs.cdr_lite is derived from
-        # cdr_lite.cdr_online_carbonate_sensitivity, which a wizard edit can turn
-        # on or off after resolve time. A stale True here is a value an earlier
+        # cdr_lite.cdr_online_carbonate_sensitivity, which run-time overrides can
+        # turn on or off after resolve time. A stale True here is a value an earlier
         # resolve derived, so it is recomputed rather than rejected.
         cdr_lite_needed = check_cdr_lite_sections(
             self._settings_run_time, bgc_mode_is_marbl=cppdefs.get("marbl", False)

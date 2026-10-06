@@ -1992,9 +1992,9 @@ def test_golden_model_settings_test_tiny_roms090():
     test-tiny domain/forcing/output setup as ``test_golden_model_settings_test_tiny``.
 
     Mirrors ``test_golden_model_settings_test_tiny_roms070`` exactly; the
-    differences from that fixture are the ModelSpec's added ``cdr_lite`` section
-    (the online carbonate sensitivity knob, off) and the OutputSpec's
-    ``cdr_lite_output.wrt_gas_exchange`` (see
+    difference from that fixture is the OutputSpec's
+    ``cdr_lite_output.wrt_gas_exchange`` (the ModelSpec declares no ``cdr_lite``
+    section; ``&CDR_LITE_SETTINGS`` is written at its default, see
     ``TestGoldenNamelist.test_golden_namelist_test_tiny_roms090`` for the
     versioned-namelist assertion). Regenerate the fixture with
     ``json.dumps(cfg.model_settings, indent=2, sort_keys=True, default=str)``
@@ -3366,7 +3366,7 @@ def test_0_9_0_online_sensitivity_sets_cdr_lite_cppdef():
 
 def test_0_9_0_cdr_lite_cppdef_absent_without_the_knob():
     cfg = _build(model_dir=_MODEL_DIR_ROMS090)
-    assert cfg.model_settings["cdr_lite"]["cdr_online_carbonate_sensitivity"] is False
+    assert "cdr_lite" not in cfg.model_settings  # the bundled spec leaves it unset
     assert "cdr_lite" not in cfg.model_settings["cppdefs"]
     cfg = _build(model_dir=_MODEL_DIR_ROMS080)
     assert "cdr_lite" not in cfg.model_settings["cppdefs"]
@@ -3599,6 +3599,56 @@ def test_stored_v9_blueprint_loads_with_the_renamed_section(tmp_path):
         loaded.model_settings["cdr_lite_output"]["do_cdr_lite_output"]
         == cfg.model_settings["cdr_lite_output"]["do_cdr_lite_output"]
     )
+
+
+def _v10_data_with_legacy_cdr_section(**extra_settings):
+    """A current-version (v10) ``ForgeBlueprint`` dict whose ``cdr_lite_output``
+    section is swapped for the pre-rename ``cdr_tracer_output`` one, as a workplan
+    blueprint override merged onto a v10 dump would leave it.
+    """
+    data = _build(model_dir=_MODEL_DIR_ROMS070).model_dump(mode="json")
+    assert data["forge_blueprint_version"] == FORGE_BLUEPRINT_VERSION
+    settings = data["model_settings"]
+    section = settings.pop("cdr_lite_output")
+    settings["cdr_tracer_output"] = {
+        ("do_cdr_tracer_output" if k == "do_cdr_lite_output" else k): v
+        for k, v in section.items()
+    }
+    settings.update(extra_settings)
+    return data
+
+
+def test_legacy_cdr_section_is_renamed_on_current_version_data():
+    """The v9 -> v10 rename is not gated on the declared version: a legacy name
+    reaching v10 data (e.g. via a workplan blueprint override) is renamed too.
+    """
+    loaded = ForgeBlueprint.model_validate(_v10_data_with_legacy_cdr_section())
+    assert "cdr_tracer_output" not in loaded.model_settings
+    assert "do_cdr_lite_output" in loaded.model_settings["cdr_lite_output"]
+    assert "do_cdr_tracer_output" not in loaded.model_settings["cdr_lite_output"]
+
+
+def test_current_version_data_with_both_cdr_section_names_is_rejected():
+    data = _v10_data_with_legacy_cdr_section(
+        cdr_lite_output={"do_cdr_lite_output": False}
+    )
+    with pytest.raises(ValueError, match="both the legacy section 'cdr_tracer_output'"):
+        ForgeBlueprint.model_validate(data)
+
+
+def test_workplan_override_adding_a_legacy_cdr_section_fails_at_validation():
+    """``OverrideTransform`` merges overrides onto the (already-v10) dump and
+    re-validates, so a legacy section next to the existing ``cdr_lite_output`` is
+    caught there -- at schedule time -- not late in ``configure_build``.
+    """
+    from cstar.orchestration.transforms import OverrideTransform
+
+    bp = _build(model_dir=_MODEL_DIR_ROMS070)
+    overrides = {
+        "model_settings": {"cdr_tracer_output": {"do_cdr_tracer_output": True}}
+    }
+    with pytest.raises(ValueError, match="both the legacy section 'cdr_tracer_output'"):
+        OverrideTransform().apply(bp, overrides)
 
 
 def test_rst_period_not_divisible_by_dt_raises():

@@ -112,7 +112,7 @@ C-Star application (see `Forge as a real C-Star application`_ below), not
 just a Pydantic model that happens to carry an ``application`` string.
 
 Top-level shape: ``forge_blueprint_version`` (int, bump only on breaking
-change; currently 9) - ``application`` (=``"forge"``, C-Star app
+change; currently 10) - ``application`` (=``"forge"``, C-Star app
 discriminator, required by the ``Blueprint`` base) - ``name``/``description``
 (required top-level fields on the ``Blueprint`` base; ``name`` is the single
 user-editable canonical name -- ``casename``/``working_dir``/
@@ -148,9 +148,15 @@ list; ``forcing.boundary``'s flat, type-discriminated
 with ``source`` + ``bgc_sources``, mirroring ``InitialConditions``), and the
 v8->v9 ``working_dir`` strip (the old default-form
 ``~/cstar/_forge_bp_runs/<name>`` is removed so the blueprint takes the base
-class's default; a deliberately set path is kept) to the current shape,
-reproducing derived names bit-for-bit. ``model_name``/
-``grid_name`` live in ``composition.model.name``/``domain.grid_name``;
+class's default; a deliberately set path is kept) and the v9->v10 CDR_LITE
+rename (``model_settings.cdr_tracer_output`` -> ``cdr_lite_output``, its
+``do_cdr_tracer_output`` flag -> ``do_cdr_lite_output``; a section or flag
+carrying both names raises) to the current shape, reproducing derived names
+bit-for-bit. The rename is applied on every load, not only to pre-v10 files:
+workplan blueprint overrides merge onto an already-v10 dump and re-validate, so
+a legacy name can re-enter current-version data there (next to an existing
+``cdr_lite_output`` it fails at schedule time with the "both" message).
+``model_name``/``grid_name`` live in ``composition.model.name``/``domain.grid_name``;
 ``grid_name`` is results-affecting -- ``SourceDatasets`` keys cache
 filenames off it.
 
@@ -355,7 +361,8 @@ ucla-roms release: ``roms-marbl-0.5-default`` pins ``0.5.0``,
 ``parabolic_splines``/``upstream_ts_land_curv`` advection cppdefs flags, PR
 #361, with no new settings tier -- it still resolves to
 ``RunTimeSettingsV0_7_0``), ``roms-marbl-0.9-default`` pins ``0.9.0``
-(``RunTimeSettingsV0_9_0``; adds the ``cdr_lite`` section); older specs stay
+(``RunTimeSettingsV0_9_0``, which models the ``cdr_lite`` section; the spec does
+not declare it, see below); older specs stay
 fixed and keep emitting
 byte-identical legacy namelists. ``version_gated_section_names()``
 (``namelist_model.py``) collects every section modeled by at least one
@@ -390,6 +397,16 @@ the row's settings class is the pinned tier's own annotation for that section.
 ``&TRACER_DIFF2`` is read from 0.9.0 on (earlier releases skipped it through
 an ``#if define`` typo), so a nonzero ``tracer_diff2.tnu2_default`` only
 takes effect there; every bundled ModelSpec uses 0.0.
+
+The bundled ModelSpecs do not declare ``cdr_lite`` yet, so the knob is absent
+from the wizard and ``&CDR_LITE_SETTINGS`` is written at its schema default
+(off): CDR-lite tracers (``nt_cdr_oae``/``nt_cdr_dor`` > 0) also need per-tracer
+surface-flux forcing (``CDR_OAE_DIC<n>_flx``/``CDR_DOR_DIC<n>_flx`` on
+``CDR_time``) that Forge does not generate, and ROMS aborts looking it up in the
+forcing files. The CDR-lite BGC-mode follow-up wires that forcing up. The
+plumbing above (the ``cppdefs.cdr_lite`` derivation, ``check_cdr_lite_sections``,
+``RunTimeSettingsV0_9_0.cdr_lite``) stays in place, and the section can still be
+set through ``run_time_overrides``.
 
 ucla-roms 0.5.0 also added a run-start precheck (``check_output_divides_rst``):
 each enabled output stream's ``nrpf x output_period`` must evenly divide

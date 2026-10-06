@@ -662,6 +662,11 @@ class CdrLiteCfg(_SettingsSection):
     MARBL's ALT_CO2 state, so it needs MARBL. Off, ``CDR_LITE`` would read
     ``ddic_dco2``/``ddic_dalk`` from forcing files, which Forge has no source
     for yet, so it is not compiled.
+
+    The bundled ModelSpecs do not declare this section yet (``&CDR_LITE_SETTINGS``
+    is written at the default): CDR-lite tracers also need per-tracer surface-flux
+    forcing (``CDR_OAE_DIC<n>_flx``/``CDR_DOR_DIC<n>_flx``) that Forge does not
+    generate. The CDR-lite BGC-mode follow-up wires it up.
     """
 
     cdr_online_carbonate_sensitivity: bool = False
@@ -827,7 +832,8 @@ def check_cdr_lite_sections(
     if enabled := [
         flag for flag, on in ((stream_flag, stream_on), (online_flag, online)) if on
     ]:
-        if not any(int(param.get(key, 0)) for key in _CDR_TRACER_WEIGHTS):
+        # ``or 0``: a null count (YAML ``nt_cdr_oae:``) means no tracers.
+        if not any(int(param.get(key) or 0) for key in _CDR_TRACER_WEIGHTS):
             counts = " + ".join(f"param.{key}" for key in _CDR_TRACER_WEIGHTS)
             problems.append(
                 f"{' and '.join(enabled)} set but {counts} == 0: ucla-roms aborts "
@@ -1244,12 +1250,12 @@ _LEGACY_SECTION_RENAMES: dict[str, tuple[str, dict[str, str]]] = {
 def normalize_legacy_sections(settings: dict[str, Any]) -> dict[str, str]:
     """Rename, in place and keeping key order, every legacy-named section of a
     (possibly partial) run-time settings dict (:data:`_LEGACY_SECTION_RENAMES`),
-    including its renamed inner keys (only where the new key is absent); return
-    the renames applied (legacy section name -> current name). Idempotent on
-    current names.
+    including its renamed inner keys; return the renames applied (legacy section
+    name -> current name). Idempotent on current names.
 
     Raises ``ValueError`` if a dict carries both a legacy section and its
-    replacement (ambiguous: neither can be dropped silently).
+    replacement, or a legacy section carries both an inner key and its new name
+    (ambiguous: neither can be dropped silently).
     """
     renamed: dict[str, str] = {}
     for old, (new, inner_keys) in _LEGACY_SECTION_RENAMES.items():
@@ -1262,11 +1268,16 @@ def normalize_legacy_sections(settings: dict[str, Any]) -> dict[str, str]:
             )
         section = settings[old]
         if isinstance(section, dict):
-            keep = {k for k, new_k in inner_keys.items() if new_k in section}
-            section = {
-                (k if k in keep else inner_keys.get(k, k)): v
-                for k, v in section.items()
-            }
+            if both := [
+                f"{old_k!r} and {new_k!r}"
+                for old_k, new_k in inner_keys.items()
+                if old_k in section and new_k in section
+            ]:
+                raise ValueError(
+                    f"section {old!r} carries both {', '.join(both)}; remove the "
+                    "stale legacy key."
+                )
+            section = {inner_keys.get(k, k): v for k, v in section.items()}
         items = [
             (new, section) if key == old else (key, value)
             for key, value in settings.items()
@@ -1561,9 +1572,14 @@ def validate_run_time_sections(
             check_bgc_tracer_count(settings["param"] or {}, bgc_mode_is_marbl=marbl)
         except ValueError as exc:
             errors.append(str(exc))
-        # And the CDR-lite sections vs MARBL/CDR tracer counts (param vs cppdefs).
+        # And the CDR-lite sections vs MARBL/CDR tracer counts (param vs cppdefs),
+        # on the sections the selected tier models only: one it lacks is reported
+        # by prune_version_gated_sections (resolve/configure_build), not advised on
+        # here with 0.9-specific wording.
+        keep = (*fields, "param", "cppdefs")
+        modeled = {k: v for k, v in settings.items() if k in keep}
         try:
-            check_cdr_lite_sections(settings, bgc_mode_is_marbl=marbl)
+            check_cdr_lite_sections(modeled, bgc_mode_is_marbl=marbl)
         except ValueError as exc:
             errors.append(str(exc))
     return errors

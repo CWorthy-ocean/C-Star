@@ -3662,12 +3662,16 @@ class TestGoldenNamelist:
     ):
         """``cppdefs.cdr_lite`` is derived from
         ``cdr_lite.cdr_online_carbonate_sensitivity`` at build time, so a wizard
-        edit that flips the knob after resolve time wins over a stale cppdef.
+        edit that flips the knob after resolve time wins over a stale cppdef. The
+        bundled ModelSpecs do not declare ``cdr_lite``, so the blueprint stores it.
         """
         cfg, builder = self._generate_inputs_no_cdr_forcing(
             mock_grid,
             tmp_path,
             model_dir=_MODEL_DIR_ROMS090,
+            stored_model_settings={
+                "cdr_lite": {"cdr_online_carbonate_sensitivity": False}
+            },
             param_overrides={"nt_cdr_oae": 1},
         )
         cppdefs = builder._settings_compile_time["cppdefs"]
@@ -3694,9 +3698,11 @@ class TestGoldenNamelist:
             mock_grid,
             tmp_path,
             model_dir=_MODEL_DIR_ROMS090,
+            stored_model_settings={
+                "cdr_lite": {"cdr_online_carbonate_sensitivity": True}
+            },
             param_overrides={"nt_cdr_oae": 1, "ntrc_bio": 0},
         )
-        cfg.model_settings["cdr_lite"]["cdr_online_carbonate_sensitivity"] = True
         cfg.model_settings["cppdefs"]["marbl"] = False
 
         with pytest.raises(ValueError, match="MARBL"):

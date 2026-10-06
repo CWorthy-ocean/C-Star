@@ -946,12 +946,27 @@ def test_check_cdr_lite_sections_accepts_dor_tracers_alone():
     assert check_cdr_lite_sections(settings, bgc_mode_is_marbl=True) is True
 
 
+def test_check_cdr_lite_sections_treats_a_null_tracer_count_as_zero():
+    """A YAML ``nt_cdr_oae:`` (null) is "no tracers", not a TypeError."""
+    settings = _lite(stream=True, param={"nt_cdr_oae": None})
+    with pytest.raises(ValueError, match="== 0"):
+        check_cdr_lite_sections(settings, bgc_mode_is_marbl=True)
+
+
 def test_check_cdr_lite_sections_reports_every_problem_together():
     settings = _lite(online=False, stream=True, gas=True, param={})
     with pytest.raises(ValueError) as exc:
         check_cdr_lite_sections(settings, bgc_mode_is_marbl=True)
     assert "needs CDR_LITE" in str(exc.value)
     assert "== 0" in str(exc.value)
+
+
+def test_validate_run_time_sections_reports_a_null_tracer_count_without_raising():
+    errs = validate_run_time_sections(
+        {**_lite(stream=True, param={"nt_cdr_oae": None}), "cppdefs": {"marbl": True}},
+        roms_ref="0.9.0",
+    )
+    assert any("== 0" in e for e in errs)
 
 
 def test_validate_run_time_sections_runs_the_cdr_lite_check():
@@ -967,6 +982,16 @@ def test_validate_run_time_sections_runs_the_cdr_lite_check():
     )
     # Without cppdefs the MARBL input is missing: skipped, like the BGC check.
     assert validate_run_time_sections(_lite(online=True), roms_ref="0.9.0") == []
+
+
+def test_validate_run_time_sections_skips_cdr_lite_check_on_a_tier_without_it():
+    """The cross-section CDR-lite check reads only the sections the pinned tier
+    models: on 0.8 ``cdr_lite`` is reported by ``prune_version_gated_sections``
+    at resolve/configure_build, not advised on here with 0.9-only wording.
+    """
+    settings = {**_lite(online=True), "cppdefs": {"marbl": False}}
+    assert any("MARBL" in e for e in validate_run_time_sections(settings, "0.9.0"))
+    assert not any("MARBL" in e for e in validate_run_time_sections(settings, "0.8.0"))
 
 
 # ---------------------------------------------------------------------------
@@ -1147,15 +1172,12 @@ def test_normalize_legacy_sections_is_idempotent_and_leaves_new_keys_alone():
     assert settings == {"cdr_lite_output": {"do_cdr_lite_output": True}}
 
 
-def test_normalize_legacy_sections_keeps_the_old_flag_when_the_new_one_is_present():
-    settings = {
-        "cdr_tracer_output": {"do_cdr_tracer_output": True, "do_cdr_lite_output": False}
-    }
-    normalize_legacy_sections(settings)
-    assert settings["cdr_lite_output"] == {
-        "do_cdr_tracer_output": True,
-        "do_cdr_lite_output": False,
-    }
+def test_normalize_legacy_sections_rejects_a_legacy_flag_next_to_its_new_name():
+    section = {"do_cdr_tracer_output": True, "do_cdr_lite_output": False}
+    settings = {"cdr_tracer_output": section}
+    with pytest.raises(ValueError, match="do_cdr_tracer_output.*do_cdr_lite_output"):
+        normalize_legacy_sections(settings)
+    assert settings == {"cdr_tracer_output": section}  # nothing renamed
 
 
 def test_normalize_legacy_sections_rejects_both_names():

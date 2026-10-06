@@ -52,9 +52,6 @@ model_settings:
     ntrc_bio: 32
   pio_settings:
     pio_stride: 1  # PIO I/O-task rank stride; unread by ucla-roms releases predating the PIO_SETTINGS namelist group
-  # ucla-roms >= 0.9.0 &CDR_LITE_SETTINGS (see roms-marbl-0.9-default/model.yaml).
-  cdr_lite:
-    cdr_online_carbonate_sensitivity: false
   bgc:
     nbgc_flx: 2
     interp_frc: 0

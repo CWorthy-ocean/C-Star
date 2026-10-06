@@ -59,9 +59,6 @@
     "nrpf": 24,
     "output_period": 3600
   },
-  "cdr_lite": {
-    "cdr_online_carbonate_sensitivity": false
-  },
   "cdr_lite_output": {
     "do_avg": true,
     "do_cdr_lite_output": false,

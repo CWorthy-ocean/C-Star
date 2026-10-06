@@ -2354,7 +2354,10 @@ def test_wizard_editor_cdr_output_streams_gated_by_model_spec_pin():
     assert "cdr_lite_output" in wiz.config.model_settings
     assert ("cdr_lite_output", "do_cdr_lite_output") in wiz.editor._widgets
     assert ("cdr_lite_output", "wrt_gas_exchange") in wiz.editor._widgets
-    assert ("cdr_lite", "cdr_online_carbonate_sensitivity") in wiz.editor._widgets
+    # The bundled spec does not declare the ``cdr_lite`` knob yet (CDR-lite tracers
+    # need forcing Forge cannot generate), so there is no widget for it.
+    assert "cdr_lite" not in wiz.config.model_settings
+    assert ("cdr_lite", "cdr_online_carbonate_sensitivity") not in wiz.editor._widgets
 
 
 def test_cdr_tracer_counts_survive_wizard_save_and_load_round_trip(tmp_path):
@@ -2515,25 +2518,26 @@ def test_cdr_output_stream_field_rules_follow_master_switch(section, master_flag
     assert period_widget.disabled is True
 
 
-def test_cdr_lite_knob_edit_survives_save_and_load(tmp_path):
-    """The ``cdr_lite.cdr_online_carbonate_sensitivity`` accordion edit is a plain
-    model override: it lands in ``model_settings``, survives a save/load round
-    trip, and can be turned back off. ``cppdefs.cdr_lite`` is resolver-/
-    build-derived and has no widget (``configure_build`` recomputes it from the
-    knob).
+def test_cdr_lite_knob_override_survives_save_and_load(tmp_path):
+    """The bundled ModelSpecs do not declare ``cdr_lite`` (CDR-lite tracers need
+    forcing Forge cannot generate), so the accordion has no widget for the knob.
+    Set as an override (a hand-edit), it still lands in ``model_settings``,
+    survives a save/load round trip, and can be turned back off.
+    ``cppdefs.cdr_lite`` is resolver-/build-derived and has no widget
+    (``configure_build`` recomputes it from the knob).
     """
     wiz = ForgeBlueprintWizard()
     wiz.start.value = date(2012, 1, 1)
     wiz.end.value = date(2012, 1, 2)
+    knob = ("cdr_lite", "cdr_online_carbonate_sensitivity")
     wiz._overrides[("param", "nt_cdr_oae")] = 1
     wiz._rebuild()
     assert wiz.config is not None
+    assert "cdr_lite" not in wiz.config.model_settings
+    assert knob not in wiz.editor._widgets
     assert ("cppdefs", "cdr_lite") not in wiz.editor._widgets
-    assert wiz.config.composition.model.modified is True  # the nt_cdr_oae override
 
-    knob = ("cdr_lite", "cdr_online_carbonate_sensitivity")
-    assert wiz.editor._widgets[knob][0].value is False
-    wiz.editor._widgets[knob][0].value = True  # records the override
+    wiz._overrides[knob] = True
     wiz._rebuild()
     assert wiz.config.model_settings["cdr_lite"]["cdr_online_carbonate_sensitivity"]
 
@@ -2544,9 +2548,8 @@ def test_cdr_lite_knob_edit_survives_save_and_load(tmp_path):
     wiz2._on_load_path(None)
     assert wiz2.config is not None
     assert wiz2.config.model_settings["cdr_lite"]["cdr_online_carbonate_sensitivity"]
-    assert wiz2.editor._widgets[knob][0].value is True
 
-    wiz2.editor._widgets[knob][0].value = False
+    wiz2._overrides[knob] = False
     wiz2._rebuild()
     assert wiz2.config is not None
     assert not wiz2.config.model_settings["cdr_lite"][
