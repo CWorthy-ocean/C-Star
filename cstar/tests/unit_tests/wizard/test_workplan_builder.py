@@ -12,7 +12,7 @@ from pathlib import Path
 
 import yaml
 
-from cstar.orchestration.models import Workplan
+from cstar.orchestration.models import Step, Workplan
 from cstar.orchestration.serialization import deserialize, serialize
 from cstar.wizard import workplan_builder as wb
 from cstar.wizard.ui import labels
@@ -1628,3 +1628,31 @@ def test_blank_description_defaults_to_the_workplan_name(page, roms_bp):
     assert page.description.placeholder == "My plan"
     page.description.value = "explicit"
     assert page.draft.description == "explicit"
+
+
+def test_base_chooser_shows_only_the_chosen_source_row(page):
+    """Each chooser widget owns its Layout, so hiding one does not hide the rest."""
+    chooser = page.chunk_base
+    widgets = (chooser.step, chooser.catalog_roms, chooser.catalog_forge, chooser.path)
+    assert len({id(w.layout) for w in widgets}) == len(widgets)
+    chooser.kind.value = "catalog_roms"
+    shown = [w for w in widgets if w.layout.display != "none"]
+    assert shown == [chooser.catalog_roms]
+    chooser.kind.value = "path"
+    shown = [w for w in widgets if w.layout.display != "none"]
+    assert shown == [chooser.path]
+
+
+def test_sticky_bar_is_the_styled_box_with_a_download_link(page):
+    """The status bar sits in a `forge-sticky` box like the blueprint page's."""
+    sticky = next(
+        child for child in page.widget.children if "forge-sticky" in child._dom_classes
+    )
+    assert list(sticky.children) == [page.sticky_bar, page.sticky_download]
+    page.name.value = "bar test"
+    page.add_step().populate(
+        Step(name="s", application="hello_world", blueprint="/b.yaml")
+    )
+    page._rebuild()
+    assert 'class="forge-dl-btn"' in page.sticky_download.value
+    assert "<code>" not in page.sticky_download.value
