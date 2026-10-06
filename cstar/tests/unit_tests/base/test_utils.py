@@ -1,4 +1,5 @@
 import hashlib
+import re
 import subprocess
 from pathlib import Path
 from unittest import mock
@@ -6,6 +7,7 @@ from unittest import mock
 import pytest
 
 from cstar.base.utils import (
+    WALLTIME_RE,
     NetCDFFormat,
     _dict_to_tree,
     _get_sha256_hash,
@@ -598,3 +600,27 @@ def test_slugify_rejects_empty_result(source: str) -> None:
     """Verify a source with no word characters is rejected rather than slugged to ''."""
     with pytest.raises(ValueError, match="empty"):
         slugify(source)
+
+
+@pytest.mark.parametrize(
+    ("walltime", "accepted"),
+    [
+        pytest.param("30:00", True, id="MM:SS"),
+        pytest.param("02:00:00", True, id="HH:MM:SS"),
+        pytest.param("2:00:00", True, id="one-digit-hour"),
+        pytest.param("100:00:00", True, id="three-digit-hours"),
+        pytest.param("2-03:00:00", True, id="D-HH:MM:SS"),
+        pytest.param("14-0:00:00", True, id="two-digit-days-one-digit-hour"),
+        pytest.param("1-2", False, id="D-H without minutes"),
+        pytest.param("60", False, id="bare minutes"),
+        pytest.param("1000:00:00", False, id="four-digit-hours"),
+        pytest.param("100-00:00:00", False, id="three-digit-days"),
+        pytest.param("2-03:00", False, id="days without seconds"),
+        pytest.param("soon", False, id="words"),
+    ],
+)
+def test_walltime_re_accepts_the_slurm_clock_forms(
+    walltime: str, accepted: bool
+) -> None:
+    """The regex takes SLURM's clock forms (with or without days) and nothing shorter."""
+    assert bool(re.fullmatch(WALLTIME_RE, walltime)) is accepted

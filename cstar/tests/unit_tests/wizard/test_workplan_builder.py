@@ -1033,7 +1033,9 @@ def test_deep_check_flags_a_stale_deferred_cpu_count(page):
 def test_format_walltime():
     assert wb.format_walltime(0.5) == "00:30:00"
     assert wb.format_walltime(15.5) == "15:30:00"
-    assert wb.format_walltime(30) == "1-06:00:00"
+    assert wb.format_walltime(30) == "30:00:00"
+    assert wb.format_walltime(100) == "100:00:00"
+    assert wb.format_walltime(1000) == "41-16:00:00"
     assert wb.format_walltime(0.0001) == "00:01:00"
 
 

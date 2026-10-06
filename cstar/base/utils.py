@@ -27,8 +27,11 @@ DEFAULT_OUTPUT_ROOT_NAME: t.Literal["output"] = "output"
 """A fixed `output_root_name` to be used when generating outputs with ROMS."""
 
 
-WALLTIME_RE = r"^(([1-9]-\d{2}|\d{2}):)?(\d{2}):(\d{2})$"
-"""Regex for validating the basic HH:MM:SS, MM:SS, or D-HH:MM-SS format."""
+WALLTIME_RE = r"^((\d{1,2}-\d{1,2}|\d{1,3}):)?(\d{2}):(\d{2})$"
+"""Regex for the SLURM walltime forms C-Star accepts: `MM:SS`, `H:MM:SS` with one
+to three hour digits (`30:00:00` is thirty hours), or `D-H:MM:SS` with one or two
+day digits. SLURM's bare-minutes and `D-H` forms are not accepted: every reader
+expects at least minutes and seconds."""
 
 
 def coerce_datetime(datetime: str | dt.datetime) -> dt.datetime:
