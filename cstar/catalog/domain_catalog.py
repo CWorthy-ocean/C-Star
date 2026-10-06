@@ -15,6 +15,8 @@ import yaml
 from cstar.base.env import ENV_CSTAR_CATALOG, default_catalog_root, get_env_item
 
 if TYPE_CHECKING:
+    from collections.abc import Mapping
+
     import pandas as pd
 
 logger = logging.getLogger(__name__)
@@ -28,6 +30,14 @@ _LEGACY_CATALOG_ROOT = Path.home() / "cstar-forge-data" / "catalog"
 # Set once ``user_catalog_root`` has logged its legacy-location hint, so a process
 # that calls it repeatedly (it has no other caching) logs the hint only once.
 _legacy_catalog_hint_logged = False
+
+# Registered application names the *legacy* blueprint layouts implied (flat
+# ``*.forge_blueprint.yaml`` = forge; flat ``B_*.yaml`` and
+# ``<machine>/<name>/B_*.yaml`` = roms_marbl). The catalog stays import-light and
+# does not import the applications, so these name the legacy layouts only; the
+# current layout takes its application from the directory name.
+_FORGE = "forge"
+_ROMS_MARBL = "roms_marbl"
 
 
 def user_catalog_root() -> Path:
@@ -175,9 +185,7 @@ class DomainCatalog:
         │       ├── Domain.yaml
         │       └── Assets/
         ├── Blueprints/  (alias: blueprints/)
-        │   └── <machine>/<blueprint-name>/
-        │       ├── B_*.yaml
-        │       └── Build/
+        │   └── <application>/<blueprint-name>.yaml
         └── Observations/
 
     Parameters
@@ -275,16 +283,13 @@ class DomainCatalog:
         self._forcing: dict[str, Path] = {}  # forcing_name -> ForcingSpec/<name>/ dir
         self._output: dict[str, Path] = {}  # output_name -> OutputSpec/<name>/ dir
         self._cdr: dict[str, Path] = {}  # cdr_name -> CdrSpec/<name>/ dir
-        self._roms_marbl_blueprints: dict[
-            str, Path
-        ] = {}  # roms_marbl_blueprint_name -> blueprints/<machine>/<name>/ dir
-        self._forge_blueprints: dict[
-            str, Path
-        ] = {}  # forge_blueprint_name -> blueprints/<name>.forge_blueprint.yaml
+        # application -> entry name -> blueprints/<application>/<name>.yaml file
+        self._blueprints: dict[str, dict[str, Path]] = {}
+        # (application, name, file) for entries found in a legacy layout
+        self._legacy_blueprints: list[tuple[str, str, Path]] = []
 
         self._scan_models()
-        self._scan_roms_marbl_blueprints()
-        self._scan_forge_blueprints()
+        self._scan_blueprints()
         self._scan_domains()
         self._scan_forcing()
         self._scan_output()
@@ -392,62 +397,85 @@ class DomainCatalog:
         except Exception as exc:
             logger.warning("Failed to scan models: %s", exc)
 
-    def _scan_roms_marbl_blueprints(self) -> None:
-        """Scan blueprints/ (and Blueprints/) for ROMS-MARBL blueprints.
+    def _scan_blueprints(self) -> None:
+        """Scan blueprints/ (and Blueprints/) for blueprint files.
 
-        Two layouts are recognised: the flat ``blueprints/B_<name>.yaml`` file a
-        forge run emits (entry ``<name>`` maps to the file), and the older
-        ``blueprints/<machine>/<name>/B_*.yaml`` directories (entry ``<name>``
-        maps to the directory). Uses _fs_iterdir_dirs to retrieve directory
-        type from a single ls call, avoiding a separate isdir API call per
-        entry.
+        The layout is ``blueprints/<application>/<name>.yaml``: the directory
+        is the registered application name, the file (minus its final
+        ``.yaml``/``.yml``) the entry name. Three legacy forms stay readable
+        for one release and are recorded in ``legacy_blueprints``: flat
+        ``<name>.forge_blueprint.yaml`` (forge), flat ``B_<name>.yaml`` and
+        ``<machine>/<name>/B_*.yaml`` (roms_marbl). One warning lists them all.
+        A current-layout entry shadows a legacy one of the same application and
+        name; among legacy forms the first seen wins. Uses _fs_iterdir_dirs to
+        retrieve directory type from a single ls call, avoiding a separate isdir
+        API call per entry.
         """
-        self._roms_marbl_blueprints = {}
+        current: dict[str, dict[str, Path]] = {}
+        legacy: dict[tuple[str, str], Path] = {}
         for subdir_name in ("blueprints", "Blueprints"):
             bp_root = self.catalog_root / subdir_name
             if not self._fs_exists(bp_root):
                 continue
             try:
-                for machine_dir in sorted(self._fs_iterdir_dirs(bp_root)):
-                    for bp_dir in sorted(self._fs_iterdir_dirs(machine_dir)):
-                        self._roms_marbl_blueprints[bp_dir.name] = bp_dir
-                for bp_file in self._fs_glob_dual(bp_root, "B_*"):
-                    name = bp_file.name.removesuffix(bp_file.suffix).removeprefix("B_")
-                    self._roms_marbl_blueprints[name] = bp_file
-            except Exception as exc:
-                logger.warning(
-                    "Failed to scan roms_marbl_blueprints under %s: %s",
-                    subdir_name,
-                    exc,
-                )
-
-    def _scan_forge_blueprints(self) -> None:
-        """Scan blueprints/ (and Blueprints/) for flat ``*.forge_blueprint.yaml``
-        files -- a separate, newer layout from the nested
-        ``blueprints/<machine>/<name>/`` one scanned by
-        ``_scan_roms_marbl_blueprints``.
-
-        ``Path.stem`` only strips one suffix, so ``X.forge_blueprint.yaml``
-        would map to key ``X.forge_blueprint``; the full compound suffix is
-        stripped explicitly instead so the catalog key is just ``X``.
-        """
-        self._forge_blueprints = {}
-        for subdir_name in ("blueprints", "Blueprints"):
-            bp_root = self.catalog_root / subdir_name
-            if not self._fs_exists(bp_root):
-                continue
-            try:
+                for app_dir in sorted(self._fs_iterdir_dirs(bp_root)):
+                    files = self._fs_glob_dual(app_dir, "*")
+                    if files:
+                        entries = current.setdefault(app_dir.name, {})
+                        for f in files:
+                            entries.setdefault(f.name.removesuffix(f.suffix), f)
+                        continue
+                    # No files: a legacy <machine>/ directory of <name>/B_*.yaml dirs
+                    for bp_dir in sorted(self._fs_iterdir_dirs(app_dir)):
+                        found = [
+                            f
+                            for f in self._fs_glob_dual(bp_dir, "B_*")
+                            if ".ipynb_checkpoints" not in str(f)
+                        ]
+                        if found:
+                            legacy.setdefault((_ROMS_MARBL, bp_dir.name), found[0])
                 for f in self._fs_glob_dual(bp_root, "*.forge_blueprint"):
-                    name = f.name
-                    for suffix in (".forge_blueprint.yaml", ".forge_blueprint.yml"):
-                        if name.endswith(suffix):
-                            name = name[: -len(suffix)]
-                            break
-                    self._forge_blueprints[name] = f
+                    name = f.name.removesuffix(f.suffix).removesuffix(
+                        ".forge_blueprint"
+                    )
+                    legacy.setdefault((_FORGE, name), f)
+                for f in self._fs_glob_dual(bp_root, "B_*"):
+                    name = f.name.removesuffix(f.suffix).removeprefix("B_")
+                    legacy.setdefault((_ROMS_MARBL, name), f)
             except Exception as exc:
                 logger.warning(
-                    "Failed to scan forge_blueprints under %s: %s", subdir_name, exc
+                    "Failed to scan blueprints under %s: %s", subdir_name, exc
                 )
+
+        self._blueprints = current
+        self._legacy_blueprints = []
+        for (application, name), path in legacy.items():
+            if name in current.get(application, {}):
+                logger.debug(
+                    "Legacy blueprint %s/%s (%s) shadowed by blueprints/%s/%s.yaml",
+                    application,
+                    name,
+                    path,
+                    application,
+                    name,
+                )
+                continue
+            self._blueprints.setdefault(application, {})[name] = path
+            self._legacy_blueprints.append((application, name, path))
+        if self._legacy_blueprints:
+            listing = ", ".join(
+                f"{application}/{name} ({path})"
+                for application, name, path in self._legacy_blueprints
+            )
+            logger.warning(
+                "Catalog %s has %d blueprint(s) in a legacy layout, readable for "
+                "one more release: %s; run `cstar admin migrate-catalog %s` to "
+                "move them into blueprints/<application>/<name>.yaml",
+                self.catalog_root,
+                len(self._legacy_blueprints),
+                listing,
+                self.catalog_root,
+            )
 
     def _scan_domains(self) -> None:
         """Scan DomainSpec/ for domain directories containing Domain.yaml (or
@@ -613,17 +641,34 @@ class DomainCatalog:
         return sorted(self._cdr.keys())
 
     @property
+    def blueprint_applications(self) -> list[str]:
+        """Return a sorted list of applications that have blueprint entries."""
+        return sorted(self._blueprints)
+
+    def blueprint_names(self, application: str) -> list[str]:
+        """Return a sorted list of blueprint entry names for *application*.
+
+        Empty for an application with no entries.
+        """
+        return sorted(self._blueprints.get(application, {}))
+
+    @property
+    def legacy_blueprints(self) -> list[tuple[str, str, Path]]:
+        """Return ``(application, name, path)`` for each entry found in a legacy layout."""
+        return list(self._legacy_blueprints)
+
+    @property
     def roms_marbl_blueprint_names(self) -> list[str]:
-        """Return a sorted list of available blueprint names."""
-        return sorted(self._roms_marbl_blueprints.keys())
+        """Return ``blueprint_names("roms_marbl")``."""
+        return self.blueprint_names(_ROMS_MARBL)
 
     @property
     def forge_blueprint_names(self) -> list[str]:
-        """Return a sorted list of available flat forge-blueprint names."""
-        return sorted(self._forge_blueprints.keys())
+        """Return ``blueprint_names("forge")``."""
+        return self.blueprint_names(_FORGE)
 
     @property
-    def roms_marbl_blueprints_dir(self) -> Path:
+    def blueprints_dir(self) -> Path:
         """Path to the blueprints directory (catalog_root/blueprints)."""
         return self.catalog_root / "blueprints"
 
@@ -643,25 +688,6 @@ class DomainCatalog:
             # fsspec GitHub FS has no tree(); fall back to find()
             entries = self._fs.find(str(self.catalog_root))
             print("\n".join(entries))
-
-    def roms_marbl_blueprint_dir_for(
-        self, machine_id: str, roms_marbl_blueprint_name: str
-    ) -> Path:
-        """Return the blueprint directory for a given machine and blueprint name."""
-        return self.roms_marbl_blueprints_dir / machine_id / roms_marbl_blueprint_name
-
-    def build_dir_for(self, machine_id: str, roms_marbl_blueprint_name: str) -> Path:
-        """Return the Build/ directory inside the blueprint folder.
-
-        Build artifacts live at ``blueprints/<machine_id>/<roms_marbl_blueprint_name>/Build/``,
-        co-located with the blueprint YAML files.
-        """
-        return (
-            self.roms_marbl_blueprints_dir
-            / machine_id
-            / roms_marbl_blueprint_name
-            / "Build"
-        )
 
     # ------------------------------------------------------------------
     # Path accessors (raise KeyError if not found)
@@ -696,24 +722,28 @@ class DomainCatalog:
             )
         return self._domains[domain_name]
 
-    def roms_marbl_blueprint_path(self, roms_marbl_blueprint_name: str) -> Path:
-        """Return the directory path for a named blueprint."""
-        if roms_marbl_blueprint_name not in self._roms_marbl_blueprints:
+    def blueprint_path(self, application: str, name: str) -> Path:
+        """Return the blueprint file for *name* under *application*."""
+        entries = self._blueprints.get(application, {})
+        if name not in entries:
             raise KeyError(
-                f"Blueprint '{roms_marbl_blueprint_name}' not found in catalog at {self.catalog_root}. "
-                f"Available blueprints: {self.roms_marbl_blueprint_names}"
+                f"Blueprint '{name}' for application '{application}' not found in "
+                f"catalog at {self.catalog_root}. "
+                f"Available: {', '.join(sorted(entries)) or '(none)'}"
             )
-        return self._roms_marbl_blueprints[roms_marbl_blueprint_name]
+        return entries[name]
+
+    def blueprint_dir(self, application: str) -> Path:
+        """Return where *application*'s blueprint files live (not created)."""
+        return self.blueprints_dir / application
+
+    def roms_marbl_blueprint_path(self, roms_marbl_blueprint_name: str) -> Path:
+        """Return ``blueprint_path("roms_marbl", name)``."""
+        return self.blueprint_path(_ROMS_MARBL, roms_marbl_blueprint_name)
 
     def forge_blueprint_path(self, forge_blueprint_name: str) -> Path:
-        """Return the path to a named flat ``*.forge_blueprint.yaml`` file."""
-        if forge_blueprint_name not in self._forge_blueprints:
-            raise KeyError(
-                f"Forge blueprint '{forge_blueprint_name}' not found in catalog at "
-                f"{self.catalog_root}. Available forge blueprints: "
-                f"{self.forge_blueprint_names}"
-            )
-        return self._forge_blueprints[forge_blueprint_name]
+        """Return ``blueprint_path("forge", name)``."""
+        return self.blueprint_path(_FORGE, forge_blueprint_name)
 
     # ------------------------------------------------------------------
     # Data accessors (return raw dicts)
@@ -811,25 +841,19 @@ class DomainCatalog:
             raise ValueError(f"model_id must be str or int, got {type(model_id)}")
 
     def roms_marbl_blueprint(self, roms_marbl_blueprint_id: str | int) -> Path:
-        """Return a blueprint directory Path by name (str) or index (int).
+        """Return a roms_marbl blueprint file Path by name (str) or index (int).
 
         Parameters
         ----------
         roms_marbl_blueprint_id : str or int
             Blueprint name or zero-based index into roms_marbl_blueprint_names.
-
-        Returns
-        -------
-        Path
-            The blueprint file (flat ``B_<name>.yaml`` layout) or the directory
-            holding ``B_*.yaml`` (the older per-machine layout).
         """
         if isinstance(roms_marbl_blueprint_id, str):
             return self.roms_marbl_blueprint_path(roms_marbl_blueprint_id)
         elif isinstance(roms_marbl_blueprint_id, int):
-            return self._roms_marbl_blueprints[
+            return self.roms_marbl_blueprint_path(
                 self.roms_marbl_blueprint_names[roms_marbl_blueprint_id]
-            ]
+            )
         else:
             raise ValueError(
                 f"roms_marbl_blueprint_id must be str or int, got {type(roms_marbl_blueprint_id)}"
@@ -1246,20 +1270,14 @@ class DomainCatalog:
     # ------------------------------------------------------------------
 
     def _find_roms_marbl_blueprint_files(self) -> list[Path]:
-        """Find B_*.yaml (or legacy B_*.yml) files across all known blueprint
-        directories.
-        """
-        files: list[Path] = []
-        for entry in self._roms_marbl_blueprints.values():
-            if entry.suffix:  # the flat layout: the entry is the file itself
-                files.append(entry)
-                continue
-            files.extend(
+        """Return the roms_marbl blueprint files across all known entries."""
+        return sorted(
+            {
                 f
-                for f in self._fs_glob_dual(entry, "B_*")
+                for f in self._blueprints.get(_ROMS_MARBL, {}).values()
                 if ".ipynb_checkpoints" not in str(f)
-            )
-        return sorted(set(files))
+            }
+        )
 
     def _load_roms_marbl_blueprint_yaml(
         self, roms_marbl_blueprint_path: Path
@@ -1394,8 +1412,6 @@ class LayeredCatalog:
         "forcing": "_forcing",
         "output": "_output",
         "cdr": "_cdr",
-        "roms_marbl_blueprint": "_roms_marbl_blueprints",
-        "forge_blueprint": "_forge_blueprints",
     }
     _KIND_DISPLAY: ClassVar[dict[str, str]] = {
         "model": "ModelSpec",
@@ -1403,9 +1419,10 @@ class LayeredCatalog:
         "forcing": "ForcingSpec",
         "output": "OutputSpec",
         "cdr": "CdrSpec",
-        "roms_marbl_blueprint": "Blueprint",
-        "forge_blueprint": "ForgeBlueprint",
     }
+    # Blueprint kinds are derived per application (see ``_blueprint_kind``), not
+    # listed above, since the applications are open-ended.
+    _BLUEPRINT_KIND_SUFFIX: ClassVar[str] = "_blueprint"
 
     def __init__(self, stores: list[DomainCatalog]) -> None:
         if not stores:
@@ -1440,8 +1457,11 @@ class LayeredCatalog:
         return self.top._is_local
 
     @property
-    def roms_marbl_blueprints_dir(self) -> Path:
-        return self.top.roms_marbl_blueprints_dir
+    def blueprints_dir(self) -> Path:
+        return self.top.blueprints_dir
+
+    def blueprint_dir(self, application: str) -> Path:
+        return self.top.blueprint_dir(application)
 
     @property
     def workplans_dir(self) -> Path:
@@ -1481,28 +1501,71 @@ class LayeredCatalog:
         return sorted({n for store in self.stores for n in store.cdr_names})
 
     @property
-    def roms_marbl_blueprint_names(self) -> list[str]:
+    def blueprint_applications(self) -> list[str]:
         return sorted(
-            {n for store in self.stores for n in store.roms_marbl_blueprint_names}
+            {a for store in self.stores for a in store.blueprint_applications}
+        )
+
+    def blueprint_names(self, application: str) -> list[str]:
+        return sorted(
+            {n for store in self.stores for n in store.blueprint_names(application)}
         )
 
     @property
+    def legacy_blueprints(self) -> list[tuple[str, str, Path]]:
+        return [entry for store in self.stores for entry in store.legacy_blueprints]
+
+    @property
+    def roms_marbl_blueprint_names(self) -> list[str]:
+        """Return ``blueprint_names("roms_marbl")``."""
+        return self.blueprint_names(_ROMS_MARBL)
+
+    @property
     def forge_blueprint_names(self) -> list[str]:
-        return sorted({n for store in self.stores for n in store.forge_blueprint_names})
+        """Return ``blueprint_names("forge")``."""
+        return self.blueprint_names(_FORGE)
 
     # ------------------------------------------------------------------
     # Top-first resolution
     # ------------------------------------------------------------------
 
+    @classmethod
+    def _blueprint_kind(cls, application: str) -> str:
+        """Return the kind (collision / ``entry_source`` key) of *application*'s blueprints."""
+        return f"{application}{cls._BLUEPRINT_KIND_SUFFIX}"
+
+    @classmethod
+    def _blueprint_application(cls, kind: str) -> str | None:
+        """Inverse of :meth:`_blueprint_kind`; ``None`` if *kind* is not a blueprint kind."""
+        return (
+            kind.removesuffix(cls._BLUEPRINT_KIND_SUFFIX)
+            if kind.endswith(cls._BLUEPRINT_KIND_SUFFIX)
+            else None
+        )
+
+    def _registry(self, store: DomainCatalog, kind: str) -> Mapping[str, Path]:
+        """Return *store*'s ``name -> path`` registry for *kind*."""
+        application = self._blueprint_application(kind)
+        if application is not None:
+            return store._blueprints.get(application, {})
+        return getattr(store, self._KIND_ATTR[kind])  # type: ignore[no-any-return]
+
+    def _kind_display(self, kind: str) -> str:
+        application = self._blueprint_application(kind)
+        if application is not None:
+            return f"Blueprint ({application})"
+        return self._KIND_DISPLAY[kind]
+
     def _store_for(self, kind: str, name: str) -> DomainCatalog:
         """Return the topmost store whose *kind* registry contains *name*."""
-        attr = self._KIND_ATTR[kind]
         for store in self.stores:
-            if name in getattr(store, attr):
+            if name in self._registry(store, kind):
                 return store
-        available = sorted({n for store in self.stores for n in getattr(store, attr)})
+        available = sorted(
+            {n for store in self.stores for n in self._registry(store, kind)}
+        )
         raise KeyError(
-            f"{self._KIND_DISPLAY[kind]} '{name}' not found in any catalog layer. "
+            f"{self._kind_display(kind)} '{name}' not found in any catalog layer. "
             f"Available: {available}"
         )
 
@@ -1511,11 +1574,15 @@ class LayeredCatalog:
         return self._store_for(kind, name).label
 
     def _compute_collisions(self) -> dict[str, list[str]]:
+        kinds = [
+            *self._KIND_ATTR,
+            *(self._blueprint_kind(a) for a in self.blueprint_applications),
+        ]
         collisions: dict[str, list[str]] = {}
-        for kind, attr in self._KIND_ATTR.items():
+        for kind in kinds:
             labels_by_name: dict[str, list[str]] = {}
             for store in self.stores:
-                for name in getattr(store, attr):
+                for name in self._registry(store, kind):
                     labels_by_name.setdefault(name, []).append(store.label)
             for name, labels in labels_by_name.items():
                 if len(labels) > 1:
@@ -1541,15 +1608,18 @@ class LayeredCatalog:
     def domain_path(self, domain_name: str) -> Path:
         return self._store_for("domain", domain_name).domain_path(domain_name)
 
+    def blueprint_path(self, application: str, name: str) -> Path:
+        return self._store_for(self._blueprint_kind(application), name).blueprint_path(
+            application, name
+        )
+
     def roms_marbl_blueprint_path(self, roms_marbl_blueprint_name: str) -> Path:
-        return self._store_for(
-            "roms_marbl_blueprint", roms_marbl_blueprint_name
-        ).roms_marbl_blueprint_path(roms_marbl_blueprint_name)
+        """Return ``blueprint_path("roms_marbl", name)``."""
+        return self.blueprint_path(_ROMS_MARBL, roms_marbl_blueprint_name)
 
     def forge_blueprint_path(self, forge_blueprint_name: str) -> Path:
-        return self._store_for(
-            "forge_blueprint", forge_blueprint_name
-        ).forge_blueprint_path(forge_blueprint_name)
+        """Return ``blueprint_path("forge", name)``."""
+        return self.blueprint_path(_FORGE, forge_blueprint_name)
 
     def model_data(self, model_name: str) -> dict:
         return self._store_for("model", model_name).model_data(model_name)
@@ -1583,18 +1653,17 @@ class LayeredCatalog:
             if isinstance(roms_marbl_blueprint_id, int)
             else roms_marbl_blueprint_id
         )
-        return self._store_for("roms_marbl_blueprint", name).roms_marbl_blueprint(name)
+        return self.roms_marbl_blueprint_path(name)
 
     # ------------------------------------------------------------------
     # Writers: stack-wide uniqueness, then delegate to the top store
     # ------------------------------------------------------------------
 
     def _check_unique(self, kind: str, name: str) -> None:
-        attr = self._KIND_ATTR[kind]
         for store in self.stores:
-            if name in getattr(store, attr):
+            if name in self._registry(store, kind):
                 raise FileExistsError(
-                    f"{self._KIND_DISPLAY[kind]} '{name}' already exists in the "
+                    f"{self._kind_display(kind)} '{name}' already exists in the "
                     f"'{store.label}' catalog layer — pick a new name"
                 )
 
@@ -1720,16 +1789,6 @@ class LayeredCatalog:
     # ------------------------------------------------------------------
     # Copy / path helpers (top store)
     # ------------------------------------------------------------------
-
-    def roms_marbl_blueprint_dir_for(
-        self, machine_id: str, roms_marbl_blueprint_name: str
-    ) -> Path:
-        return self.top.roms_marbl_blueprint_dir_for(
-            machine_id, roms_marbl_blueprint_name
-        )
-
-    def build_dir_for(self, machine_id: str, roms_marbl_blueprint_name: str) -> Path:
-        return self.top.build_dir_for(machine_id, roms_marbl_blueprint_name)
 
     def copy_domain(
         self, domain_name: str, catalog: DomainCatalog | LayeredCatalog

@@ -4092,7 +4092,7 @@ class TestMigrateForcingInputsHardening:
 # ---------------------------------------------------------------------------
 def _shipped_blueprint_paths() -> list[Path]:
     repo_root = Path(cstar.__file__).parents[1]
-    paths = sorted((_BUNDLED_CATALOG / "blueprints").glob("*.forge_blueprint.yaml"))
+    paths = sorted((_BUNDLED_CATALOG / "blueprints" / "forge").glob("*.yaml"))
     example = repo_root / "docs" / "forge-blueprint-example.wio-toy.yaml"
     if example.exists():
         paths.append(example)
@@ -5569,7 +5569,7 @@ class TestForgeBlueprintWizardApp:
         assert not isinstance(cat, LayeredCatalog)
         assert cat.read_only is True
         assert "read-only catalog" in app._bar._cat_status.value
-        assert app.inner._default_blueprint_path("x") == "x.forge_blueprint.yaml"
+        assert app.inner._default_blueprint_path("x") == "x.yaml"
 
 
 # ---------------------------------------------------------------------------

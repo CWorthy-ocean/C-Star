@@ -89,6 +89,9 @@ class CatalogBar:
         """
         from cstar.catalog.domain_catalog import LayeredCatalog
 
+        n_blueprints = sum(
+            len(cat.blueprint_names(a)) for a in cat.blueprint_applications
+        )
         if isinstance(cat, LayeredCatalog):
             layers = " over ".join(
                 f"{store.label} {store.catalog_root} ({len(store.domain_names)} domains)"
@@ -99,7 +102,7 @@ class CatalogBar:
             self._set_status_html(
                 f"<span style='color:{branding.GREEN}'>Loaded {layers} -- "
                 f"{len(cat.model_names)} models, "
-                f"{len(cat.roms_marbl_blueprint_names)} blueprints</span>"
+                f"{n_blueprints} blueprints</span>"
             )
             return
 
@@ -112,7 +115,7 @@ class CatalogBar:
         self._set_status_html(
             f"<span style='color:{branding.GREEN}'>Loaded {cat.catalog_root} -- "
             f"{len(cat.model_names)} models, "
-            f"{len(cat.roms_marbl_blueprint_names)} blueprints</span>{ro_note}"
+            f"{n_blueprints} blueprints</span>{ro_note}"
         )
 
     def set_error(self, val: str, exc: Exception) -> None:
