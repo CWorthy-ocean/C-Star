@@ -307,27 +307,41 @@ first breaking namelist change (``nrpf_rst`` removed from
 ``output_period_particles``/``nrpf_particles``); 0.6.0 added
 ``&PIO_SETTINGS`` (``pio_stride``, required under ``PARALLEL_IO``); 0.7.0
 adds ``&CDR_TRACER_OUTPUT_SETTINGS`` and ``&CDR_GAS_EXCH_OUTPUT_SETTINGS``
-(ucla-roms PR #351 -- two dedicated CDR output streams). C-Star versions the
+(ucla-roms PR #351 -- two dedicated CDR output streams); 0.9.0 renames the
+former ``&CDR_LITE_OUTPUT_SETTINGS`` (PR #372: five keys renamed, plus PR
+#370's ``wrt_gas_exchange``; now compiled without MARBL/CDR_FORCING) and adds
+the optional ``&CDR_LITE_SETTINGS``. C-Star versions the
 namelist schema by ucla-roms release (``cstar.roms.namelist``:
 ``RomsNamelist`` for < 0.4.0, ``RomsNamelistV0_4_0`` for 0.4.0 <= ucla-roms
 < 0.5.0 (adds the CDR tracer counts to ``&PARAM_SETTINGS``),
 ``RomsNamelistV0_5_0`` for 0.5.0 <= ucla-roms < 0.6.0, ``RomsNamelistV0_6_0``
-for 0.6.0 <= ucla-roms < 0.7.0, ``RomsNamelistV0_7_0`` for >= 0.7.0, selected
+for 0.6.0 <= ucla-roms < 0.7.0, ``RomsNamelistV0_7_0`` for 0.7.0 <= ucla-roms
+< 0.9.0, ``RomsNamelistV0_9_0`` for >= 0.9.0 (a ``RomsNamelistV0_6_0``
+subclass, since a subclass can't drop V0_7_0's renamed group), selected
 by ``namelist_schema_for_ref(ref)`` -- semver tags select exactly; branch
 names/hashes warn and fall back to the latest schema). Forge mirrors this in
 ``namelist_model.py``: ``RunTimeSettings`` (legacy, < 0.4.0),
 ``RunTimeSettingsV0_4_0`` (adds ``param.nt_cdr_oae``/``param.nt_cdr_dor``),
 ``RunTimeSettingsV0_5_0``, ``RunTimeSettingsV0_6_0`` (adds ``pio_settings``),
-and ``RunTimeSettingsV0_7_0`` (adds ``cdr_tracer_output``/``cdr_gas_exch_output``),
+``RunTimeSettingsV0_7_0`` (adds ``cdr_lite_output``/``cdr_gas_exch_output``),
+and ``RunTimeSettingsV0_9_0`` (``cdr_lite_output`` with the 0.9 key names and
+``wrt_gas_exchange``, plus ``cdr_lite``; a ``RunTimeSettingsV0_6_0`` subclass
+like its C-Star counterpart),
 selected by ``run_time_settings_for_ref(roms_ref)``, where ``roms_ref`` is
 the blueprint's pinned ``code.roms.commit`` (threaded resolver -> executor ->
 ``write_roms_namelist``). C-Star's registry is the single source of
 version-boundary truth -- forge only maps its result to the matching
 settings class. The forge **settings vocabulary is version-stable**: YAML
-keys (``particles.output_period``, ``particles.nrpf``) don't change; only
+keys (``particles.output_period``, ``particles.nrpf``,
+``cdr_lite_output.do_avg``) don't change; only
 the ``serialization_alias`` to namelist names differs per version, and
 ``nrpf_rst`` (still present in the shared ``OutputSpec/standard``) is
-silently ignored for 0.5.0+ models via ``extra="ignore"``. Total tracer
+silently ignored for 0.5.0+ models via ``extra="ignore"``. The one
+exception is ``cdr_lite_output``, which was named ``cdr_tracer_output``
+(enable flag ``do_cdr_tracer_output``) before ucla-roms 0.9.0's CDR_LITE
+rename: forge blueprint v10 migrates stored blueprints, and the resolver
+renames the old section in an OutputSpec/ModelSpec/override with a warning
+(``normalize_legacy_sections``, the only place the old names live). Total tracer
 count (``n_tracers``, threaded into ``build_namelist``/``render_roms_settings``
 to size the per-tracer mixing/diffusion arrays) is derived by
 ``n_tracers_from_param``: T + S + ``ntrc_bio`` + ``nt_passive`` +
@@ -340,21 +354,42 @@ ucla-roms release: ``roms-marbl-0.5-default`` pins ``0.5.0``,
 ``0.7.0``, ``roms-marbl-0.8-default`` pins ``0.8.0`` (adds the
 ``parabolic_splines``/``upstream_ts_land_curv`` advection cppdefs flags, PR
 #361, with no new settings tier -- it still resolves to
-``RunTimeSettingsV0_7_0``); older specs stay fixed and keep emitting
+``RunTimeSettingsV0_7_0``), ``roms-marbl-0.9-default`` pins ``0.9.0``
+(``RunTimeSettingsV0_9_0``; adds the ``cdr_lite`` section); older specs stay
+fixed and keep emitting
 byte-identical legacy namelists. ``version_gated_section_names()``
 (``namelist_model.py``) collects every section modeled by at least one
-non-legacy tier (``pio_settings``, ``cdr_tracer_output``,
-``cdr_gas_exch_output``) -- used by the wizard's ``_SettingsEditor``
+non-legacy tier (``pio_settings``, ``cdr_lite_output``,
+``cdr_gas_exch_output``, ``cdr_lite``) -- used by the wizard's ``_SettingsEditor``
 (``cstar/wizard/wizard.py``) to skip rendering a widget for a
 version-gated section absent from the *active* schema, and by
 ``prune_version_gated_sections()``, which drops such a section from the
 settings dict before the CDR output nets and the output-stream precheck read
 it -- called by both the resolver and the executor's ``configure_build``
-(the net for stored blueprints; it logs what it drops at INFO). ``param`` is
+(the net for stored blueprints; it logs what it drops at INFO). Dropping a
+section whose enable switch is on (e.g. ``cdr_lite.cdr_online_carbonate_sensitivity``
+under a 0.8 pin) raises instead: the pinned release can't honor it. ``param`` is
 modeled by every tier (with a different sub-model above/below 0.4.0), so it is
 never section-gated; no bundled ModelSpec declares ``nt_cdr_oae``/``nt_cdr_dor``,
 so the editor shows no widget for them, but a loaded blueprint's values are
 carried through unchanged.
+
+``CDR_LITE`` (ucla-roms >= 0.9.0, formerly ``CDR_TRACER``) is a
+resolver-owned cppdef: ``check_cdr_lite_sections`` turns it on when
+``cdr_lite.cdr_online_carbonate_sensitivity`` is set (MARBL computes the
+carbonate sensitivities from its ALT_CO2 state), and rejects the
+combinations ucla-roms would abort on at init (online sensitivity without
+MARBL; ``wrt_gas_exchange`` without ``CDR_LITE``; CDR-lite output or gas
+exchange with no CDR-lite tracers). Compiling ``CDR_LITE`` with
+file-based sensitivities (``ddic_dco2``/``ddic_dalk`` forcing) is not yet
+supported, so a user ``cppdefs.cdr_lite`` without online sensitivity is
+rejected at resolve time. Unlike ucla-roms 0.7/0.8's stream, 0.9's
+``cdr_lite_output`` does not force ``CDR_FORCING`` on: the per-tier rows of
+``CDR_OUTPUT_SECTIONS`` and of the precheck section table apply only when
+the row's settings class is the pinned tier's own annotation for that section.
+``&TRACER_DIFF2`` is read from 0.9.0 on (earlier releases skipped it through
+an ``#if define`` typo), so a nonzero ``tracer_diff2.tnu2_default`` only
+takes effect there; every bundled ModelSpec uses 0.0.
 
 ucla-roms 0.5.0 also added a run-start precheck (``check_output_divides_rst``):
 each enabled output stream's ``nrpf x output_period`` must evenly divide
@@ -434,26 +469,29 @@ Two committed goldens pin the resolved-settings and namelist contracts
 - **Settings-level**: ``test_golden_model_settings_test_tiny`` diffs
   resolved ``model_settings`` against
   ``golden_model_settings_test-tiny.json``. No regeneration hook -- update
-  manually. Three sibling tests pin the same comparison for each
+  manually. Four sibling tests pin the same comparison for each
   versioned-namelist schema tier: ``test_golden_model_settings_test_tiny_roms050``,
-  ``_roms060``, and ``_roms070`` (``roms-marbl-0.{5,6,7}-default``, against
-  ``golden_model_settings_test-tiny-roms0{50,60,70}.json``).
+  ``_roms060``, ``_roms070``, and ``_roms090`` (``roms-marbl-0.{5,6,7,9}-default``,
+  against ``golden_model_settings_test-tiny-roms0{50,60,70,90}.json``).
 - **Byte-exact namelist**: ``TestGoldenNamelist::test_golden_namelist_test_tiny``
   drives the real ``generate_inputs()`` -> ``configure_build()`` chain (real
   ``write_roms_namelist``; only roms-tools construction classes are mocked)
   and diffs the rendered ``namelist.nml`` against
   ``golden_namelist_test-tiny.nml`` (host-rooted absolute paths normalized
-  to a ``<WORKDIR>`` token). Three sibling tests pin the versioned-namelist
+  to a ``<WORKDIR>`` token). Four sibling tests pin the versioned-namelist
   schemas against the same test-tiny domain/forcing/output setup:
   ``test_golden_namelist_test_tiny_roms050`` (``roms-marbl-0.5-default``,
   ``golden_namelist_test-tiny-roms050.nml``),
   ``test_golden_namelist_test_tiny_roms060`` (``roms-marbl-0.6-default``,
-  adds ``&PIO_SETTINGS``, ``golden_namelist_test-tiny-roms060.nml``), and
+  adds ``&PIO_SETTINGS``, ``golden_namelist_test-tiny-roms060.nml``),
   ``test_golden_namelist_test_tiny_roms070`` (``roms-marbl-0.7-default``,
   adds ``&CDR_TRACER_OUTPUT_SETTINGS``/``&CDR_GAS_EXCH_OUTPUT_SETTINGS``,
-  ``golden_namelist_test-tiny-roms070.nml``). Regenerate one at a time via
+  ``golden_namelist_test-tiny-roms070.nml``), and
+  ``test_golden_namelist_test_tiny_roms090`` (``roms-marbl-0.9-default``,
+  ``&CDR_LITE_OUTPUT_SETTINGS``/``&CDR_LITE_SETTINGS`` in place of the
+  CDR_TRACER group, ``golden_namelist_test-tiny-roms090.nml``). Regenerate one at a time via
   ``UPDATE_GOLDEN=1 pytest <path> -k <test name>`` (the run intentionally
   fails after writing; rerun without the env var to confirm). To select
   *only* the legacy test, use ``-k "golden_namelist_test_tiny and not
-  roms050 and not roms060 and not roms070"`` -- a bare ``-k
-  golden_namelist_test_tiny`` matches all four.
+  roms050 and not roms060 and not roms070 and not roms090"`` -- a bare ``-k
+  golden_namelist_test_tiny`` matches all five.

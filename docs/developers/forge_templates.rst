@@ -103,8 +103,10 @@ of two paths:
    content that the fetched commit does not match.
 
 The template repository is this one (``resolve.DEFAULT_TEMPLATE_REPO``), and every
-bundled ModelSpec pins ``templates_commit`` to a C-Star release commit whose
-templates are the bundled copy, so a release build never fetches. Blueprints
+bundled ModelSpec pins ``templates_commit`` to a C-Star commit whose
+templates are the bundled copy (normally a release commit; the commit that
+added the ``CDR_LITE`` gate, merged with its PR, until the next release), so
+a release build never fetches. Blueprints
 written against the standalone cstar-forge repository carry the legacy
 ``templates/<stage>`` directory form; ``bundled_template_dir`` maps both forms
 onto the bundled copy, and such a blueprint still fetches its pinned forge
