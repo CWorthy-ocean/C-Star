@@ -150,7 +150,8 @@ Start
    you loaded is never written unless you confirm an overwrite when saving.
 
 Workplan
-   The name, description and runtime variables, and the **runs** table. Each
+   The name, description (the name when left blank) and runtime variables, and
+   the **runs** table, "Add aliases to previous run-ids". Each
    row binds an alias to the run-id of another workplan run that this one
    refers to as ``step@alias``. Pick a run recorded on this machine with
    **Refresh runs**, type a run-id, or enter a ``{{variable}}`` for a template
@@ -169,6 +170,24 @@ Compute target
    compute overrides win. A custom machine also takes the CPUs per node.
    Blank fields fall back to the ``CSTAR_SLURM_*`` environment settings, shown
    in grey. On a supported machine the page preselects it.
+
+Recipes
+   Generators for the recurring shapes, one collapsed panel each. Each adds
+   ordinary steps to the Steps card below, which you can keep editing. The
+   chunk and ramp recipes start from an existing roms_marbl step, a catalog
+   or path blueprint (turned into a base step for you), or a forge
+   blueprint (which adds the forge step and chunks the roms_marbl step it
+   generates); an existing base step stays in the workplan, so delete it if
+   it should not run. **Chunk a run in time** splits a roms_marbl run into
+   chained steps by calendar month, fixed days or equal parts, each writing
+   only its end date and continuing from the previous restart; the first can
+   continue from a step, a step of another run or a path, and the walltime
+   can be fixed or scaled by the chunk length. **Spin-up ramp** chains short
+   segments with a growing time step. **Forge inputs, then run** adds a forge
+   step and the deferred roms_marbl step that runs what it generates.
+   **Upscale a nested run** adds, for each pair of nested levels, an upscaler
+   step and a re-run of the parent that uses its output; levels must not be
+   time chunks. A generator that cannot proceed explains why in the card.
 
 Steps
    One collapsible pane per step, with buttons to duplicate, delete and move
@@ -203,24 +222,12 @@ Steps
    Run-entry controls (``clobber``, ``resume``, ``pre_run``) and the working
    directory are not part of a step as authored and are never shown.
 
-Recipes
-   Generators for the recurring shapes. Each adds ordinary steps that you can
-   keep editing; the base step stays in the workplan, so delete it if it
-   should not run. **Chunk a run in time** splits a roms_marbl step into
-   chained steps by calendar month, fixed days or equal parts, each writing
-   only its end date and continuing from the previous restart; the first can
-   continue from a step, a step of another run or a path, and the walltime
-   can be fixed or scaled by the chunk length. **Spin-up ramp** chains short
-   segments with a growing time step. **Forge inputs, then run** adds a forge
-   step and the deferred roms_marbl step that runs what it generates.
-   **Upscale a nested run** adds, for each pair of nested levels, an upscaler
-   step and a re-run of the parent that uses its output; levels must not be
-   time chunks. A generator that cannot proceed explains why in the card.
-
 Review and run
-   The workplan as YAML with the schema header, exactly the text **Save**
-   writes (to the catalog's ``workplans/`` directory by default), with a
-   download link. Saving over the file you loaded takes a second click on
+   The workplan as YAML with the schema header, in an editable box: change
+   it and press **Apply edits** to load the text back into the page (errors are
+   listed and nothing changes; **Discard edits** restores the draft's text).
+   **Save** writes the applied draft, never unapplied text, to the catalog's
+   ``workplans/`` directory by default, and there is a download link. Saving over the file you loaded takes a second click on
    **Confirm overwrite**. **Deep check** resolves the draft as running it
    would, in this session, listing every problem; blueprints or run records
    that cannot be read on this machine are reported as not verifiable here

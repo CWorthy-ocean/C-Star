@@ -817,7 +817,7 @@ def _round_trips(page: WorkplanBuilderPage, tmp_path: Path) -> Workplan:
 
 def test_chunk_recipe_adds_chained_panes(page, roms_bp, tmp_path):
     _roms_page(page, roms_bp)
-    page.chunk_base.value = "base"
+    page.chunk_base.step.value = "base"
     assert page.chunk_start.value == "2020-01-01 00:00:00"  # from the blueprint
     assert page.chunk_prefix.value == "base"
     page.chunk_prefix.value = "run"
@@ -846,7 +846,7 @@ def test_chunk_recipe_adds_chained_panes(page, roms_bp, tmp_path):
 
 def test_chunk_recipe_walltime_scales_with_the_window(page, roms_bp):
     _roms_page(page, roms_bp)
-    page.chunk_base.value = "base"
+    page.chunk_base.step.value = "base"
     page.chunk_end.value = "2020-03-01"
     page.chunk_hours_per_day.value = 0.5
     page.chunk_btn.click()
@@ -865,7 +865,7 @@ def test_chunk_recipe_first_source_declares_the_external_run(page, roms_bp, tmp_
     page._add_run()
     row = page.run_rows[0]
     row.alias.value, row.run_id.value, row.steps.value = "ini", "ini-run", "create-ic"
-    page.chunk_base.value = "base"
+    page.chunk_base.step.value = "base"
     page.chunk_end.value = "2020-02-01"
     page.chunk_first.kind.value = "step"
     page.chunk_first.step.value = "create-ic@ini"
@@ -882,18 +882,18 @@ def test_chunk_recipe_first_source_declares_the_external_run(page, roms_bp, tmp_
     _round_trips(page, tmp_path)
 
 
-def test_time_recipes_offer_only_roms_marbl_bases(page):
+def test_time_recipes_offer_only_roms_marbl_steps_as_bases(page):
     pane = page.panes[0]
     pane.name.value = "hello"
     pane.source.value = wb.SOURCE_INLINE
     pane.application.value = "hello_world"
     assert page.roms_step_names() == []
-    assert _values(page.chunk_base) == [""]
-    assert _values(page.ramp_base) == [""]
-    assert "roms_marbl step" in page.recipe_hint.value
-    assert page.chunk_btn.disabled and page.ramp_btn.disabled
-    # a hand-forced call reports instead of generating
-    page.chunk_btn.disabled = False
+    assert _values(page.chunk_base.step) == [""]
+    assert _values(page.ramp_base.step) == [""]
+    assert "upscaling needs roms_marbl steps" in page.recipe_hint.value
+    assert page.upscale_btn.disabled
+    # chunk and ramp can still start from a blueprint, so they stay enabled
+    assert not page.chunk_btn.disabled and not page.ramp_btn.disabled
     page.chunk_btn.click()
     assert "choose the base step" in page.chunk_status.value
     assert [p.name.value for p in page.panes] == ["hello"]
@@ -901,7 +901,7 @@ def test_time_recipes_offer_only_roms_marbl_bases(page):
 
 def test_chunk_recipe_refuses_a_name_clash(page, roms_bp):
     _roms_page(page, roms_bp)
-    page.chunk_base.value = "base"
+    page.chunk_base.step.value = "base"
     page.chunk_end.value = "2020-02-01"
     page.chunk_prefix.value = "x"
     page.chunk_btn.click()
@@ -912,7 +912,7 @@ def test_chunk_recipe_refuses_a_name_clash(page, roms_bp):
 
 def test_ramp_recipe_adds_steps_with_each_dt(page, roms_bp, tmp_path):
     _roms_page(page, roms_bp)
-    page.ramp_base.value = "base"
+    page.ramp_base.step.value = "base"
     page._add_ramp_row(14.0, 200.0)
     page.ramp_rows[0][0].value, page.ramp_rows[0][1].value = 7.0, 100.0
     page.ramp_btn.click()
@@ -1260,12 +1260,16 @@ def test_pinned_start_at_is_never_authored(page, roms_bp, tmp_path):
 
 
 def test_sticky_bar_links_every_card(page):
-    anchors = [
-        k
-        for k in ("start", "workplan", "compute", "steps", "recipes", "review")
-        if f"#forge-sec-{k}'" in page.sticky_bar.value
-    ]
-    assert anchors == ["start", "workplan", "compute", "steps", "recipes", "review"]
+    import re
+
+    anchors = re.findall(r"#forge-sec-(\w+)'", page.sticky_bar.value)
+    assert anchors == ["start", "workplan", "compute", "recipes", "steps", "review"]
+    nums = {
+        c.forge_key: c.forge_header.value
+        for c in page.widget.children
+        if hasattr(c, "forge_key")
+    }
+    assert ">4</span>" in nums["recipes"] and ">5</span>" in nums["steps"]
 
 
 # ---------------------------------------------------------------------------
@@ -1432,7 +1436,195 @@ def test_chunk_window_is_prefilled_from_a_deferred_producer(page):
     page.forge_source.value = _FORGE_BP
     page.forge_btn.click()
     assert page.roms_step_names() == ["roms_marbl"]
-    page.chunk_base.value = "roms_marbl"
+    page.chunk_base.step.value = "roms_marbl"
     assert page.chunk_start.value == "2012-01-01 00:00:00"
     assert page.chunk_end.value == "2012-01-02 00:00:00"
     assert page.chunk_prefix.value == "roms_marbl"
+
+
+# ---------------------------------------------------------------------------
+# user-testing follow-ups
+# ---------------------------------------------------------------------------
+def test_download_links_get_their_gap_from_css():
+    from cstar.wizard.ui import components
+
+    assert ".forge-dl-btn code {" in components.WIZARD_CSS
+    assert "margin-left: 0.5em" in components.WIZARD_CSS
+    assert ".forge-code" in components.WIZARD_CSS
+
+
+def test_recipe_card_precedes_steps_and_is_an_accordion(page):
+    kids = [getattr(c, "forge_key", None) for c in page.widget.children]
+    assert kids.index("recipes") < kids.index("steps")
+    acc = page.recipes_accordion
+    assert "forge-open-acc" in acc._dom_classes
+    assert [acc.get_title(i) for i in range(4)] == [
+        labels.section_for(f"recipes.{k}", page=wb.PAGE).title
+        for k in ("chunk", "ramp", "forge", "upscale")
+    ]
+    assert all(inner.selected_index is None for inner in acc.panes)  # collapsed
+
+
+def test_runs_section_title():
+    assert (
+        labels.section_for("workplan.runs", page=wb.PAGE).title
+        == "Add aliases to previous run-ids"
+    )
+
+
+def test_chunk_recipe_from_a_catalog_roms_blueprint(tmp_path, roms_bp):
+    (tmp_path / "one").mkdir()
+    shutil.copy(roms_bp, tmp_path / "one" / "my.bp.yaml")
+    page = _stub_page(_StubCatalog(tmp_path))
+    page._delete(page.panes[0])
+    _name_page(page)
+    chooser = page.chunk_base
+    chooser.kind.value = wb.SOURCE_CATALOG_ROMS
+    chooser.catalog_roms.value = "one"
+    assert page.chunk_start.value == "2020-01-01 00:00:00"  # from the blueprint
+    assert page.chunk_prefix.value == "my.bp"
+    page.chunk_end.value = "2020-03-01"
+    page.chunk_btn.click()
+    names = [p.name.value for p in page.panes]
+    assert names == ["my.bp-01", "my.bp-02"]  # the base is synthesized, not added
+    first, second = page.draft.steps
+    assert first.blueprint_path == str(tmp_path / "one" / "my.bp.yaml")
+    assert first.compute_overrides == {"slurm": {"num_cpus": 128}}
+    assert second.directives["continue-from"] == {"step": "my.bp-01"}
+
+
+def test_chunk_recipe_from_a_blueprint_path_and_ramp_from_a_blueprint(
+    page, roms_bp, tmp_path
+):
+    page._delete(page.panes[0])
+    _name_page(page)
+    page.chunk_base.kind.value = wb.SOURCE_PATH
+    page.chunk_base.path.value = str(roms_bp)
+    assert page.chunk_start.value == "2020-01-01 00:00:00"
+    page.chunk_end.value = "2020-02-15"
+    page.chunk_btn.click()
+    assert [p.name.value for p in page.panes] == ["roms-01", "roms-02"]
+    page.ramp_base.kind.value = wb.SOURCE_PATH
+    page.ramp_base.path.value = str(roms_bp)
+    page.ramp_btn.click()
+    assert [p.name.value for p in page.panes][2:] == ["spinup-01"]
+    assert page.problems == []
+    _round_trips(page, tmp_path)
+
+
+def test_chunk_recipe_from_a_forge_blueprint_adds_forge_then_deferred_chunks(
+    page, tmp_path
+):
+    page._delete(page.panes[0])
+    _name_page(page)
+    chooser = page.chunk_base
+    chooser.kind.value = wb.SOURCE_CATALOG_FORGE
+    chooser.catalog_forge.value = _FORGE_BP
+    assert page.chunk_start.value == "2012-01-01 00:00:00"
+    assert page.chunk_end.value == "2012-01-02 00:00:00"
+    assert page.chunk_prefix.value == _FORGE_BP
+    page.chunk_end.value = "2012-01-04"
+    page.chunk_mode.value = "days"
+    page.chunk_btn.click()
+    assert [p.name.value for p in page.panes] == [
+        "forge",
+        f"{_FORGE_BP}-01",
+        f"{_FORGE_BP}-02",
+        f"{_FORGE_BP}-03",
+    ]
+    draft = _round_trips(page, tmp_path)
+    steps = {s.name: s for s in draft.steps}
+    for name in (f"{_FORGE_BP}-01", f"{_FORGE_BP}-02", f"{_FORGE_BP}-03"):
+        assert steps[name].is_deferred
+        assert "forge" in steps[name].depends_on  # every chunk waits for the producer
+        assert steps[name].compute_overrides == {"slurm": {"num_cpus": 10}}
+
+
+def test_chunk_recipe_rejects_a_non_roms_blueprint(page, hello_bp):
+    page.chunk_base.kind.value = wb.SOURCE_PATH
+    page.chunk_base.path.value = str(hello_bp)
+    page.chunk_btn.click()
+    assert "hello_world" in page.chunk_status.value
+
+
+def test_preview_is_an_editable_code_box(page, roms_bp):
+    _roms_page(page, roms_bp)
+    assert "forge-code" in page.preview._dom_classes
+    assert page.preview.value.startswith("# yaml-language-server")
+    assert not page._preview_dirty and page.preview_chip.value == ""
+
+
+def test_apply_edits_repopulates_the_page_and_keeps_the_save_path(
+    page, roms_bp, tmp_path
+):
+    _roms_page(page, roms_bp)
+    page.save_path.value = str(tmp_path / "chosen.yaml")
+    loaded = tmp_path / "loaded.yaml"
+    loaded.write_text("untouched")
+    page.loaded_from = loaded.resolve()
+    edited = yaml.safe_load(page.preview.value)
+    edited["name"] = "edited name"
+    edited["steps"][0]["name"] = "renamed"
+    edited["steps"].append({**edited["steps"][0], "name": "second"})
+    page.preview.value = yaml.safe_dump(edited, sort_keys=False)
+    assert page._preview_dirty and "unapplied edits" in page.preview_chip.value
+    assert page.draft.name == "demo"  # not applied yet
+
+    page.apply_btn.click()
+
+    assert page.draft.name == "edited name"
+    assert [s.name for s in page.draft.steps] == ["renamed", "second"]
+    assert [p.name.value for p in page.panes] == ["renamed", "second"]
+    assert page.name.value == "edited name"
+    assert not page._preview_dirty and page.preview_chip.value == ""
+    assert "edited name" in page.preview.value
+    assert page.save_path.value == str(tmp_path / "chosen.yaml")
+    assert page.loaded_from == loaded.resolve()
+    assert loaded.read_text() == "untouched"
+
+
+def test_invalid_edits_show_a_banner_and_leave_the_draft(page, roms_bp):
+    _roms_page(page, roms_bp)
+    before = page.draft.model_dump()
+    text = page.preview.value
+    for bad in (
+        "name: [unclosed",
+        "- just\n- a list\n",
+        "name: x\ndescription: y\nsteps: []\n",
+    ):
+        page.preview.value = bad
+        page.apply_edits()
+        assert "was not applied" in page.validation.value
+        assert page.draft.model_dump() == before
+        assert page._preview_dirty and page.preview.value == bad  # the edit is kept
+    # a rebuild does not overwrite unapplied edits...
+    page.runtime_vars.value = ""
+    page._rebuild()
+    assert page.preview.value == bad
+    # ...until they are discarded
+    page.discard_btn.click()
+    assert page.preview.value == text
+    assert not page._preview_dirty
+
+
+def test_save_and_download_use_the_applied_draft_not_the_textarea(
+    page, roms_bp, tmp_path
+):
+    _roms_page(page, roms_bp)
+    page.preview.value = "name: not applied\n"
+    page.save_path.value = str(tmp_path / "out.yaml")
+    page._on_save()
+    assert deserialize(tmp_path / "out.yaml", Workplan).name == "demo"
+    assert "not applied" not in page.download_link.value
+
+
+def test_blank_description_defaults_to_the_workplan_name(page, roms_bp):
+    pane = page.panes[0]
+    _path_step(pane, "run", roms_bp)
+    page.name.value = "My plan"
+    assert page.description.value == ""
+    assert page.problems == []
+    assert page.draft.description == "My plan"
+    assert page.description.placeholder == "My plan"
+    page.description.value = "explicit"
+    assert page.draft.description == "explicit"

@@ -86,7 +86,7 @@ from cstar.system.manager import get_registered_sys_contexts, get_sysmgr
 from cstar.system.scheduler import SlurmScheduler
 from cstar.wizard.ui import components
 from cstar.wizard.ui.catalog_bar import CONFIRM_TIMEOUT
-from cstar.wizard.ui.labels import label_for
+from cstar.wizard.ui.labels import label_for, section_for
 from cstar.wizard.wizard import (
     _STREAM_READ_SIZE,
     _base_type,
@@ -806,22 +806,7 @@ class _StepPane:
             catalog, name = self.page.catalog, self.catalog_forge.value
             return (str(catalog.forge_blueprint_path(name)), []) if name else ("", [])
         if kind == SOURCE_CATALOG_ROMS:
-            catalog, name = self.page.catalog, self.catalog_roms.value
-            if not name:
-                return "", []
-            directory = catalog.roms_marbl_blueprint_path(name)
-            found = [
-                p
-                for p in sorted(directory.glob("*.y*ml"))
-                if (f := blueprint_facts(p)) and f.application == ROMS_MARBL
-            ]
-            if len(found) == 1:
-                return str(found[0]), []
-            problem = (
-                f"catalog blueprint {name!r} holds {len(found)} roms_marbl blueprint "
-                f"files ({directory}); pick one with the path source"
-            )
-            return "", [problem]
+            return self.page.roms_blueprint_file(self.catalog_roms.value)
         return "", []
 
     @property
@@ -1644,6 +1629,205 @@ class _StepPane:
 # ---------------------------------------------------------------------------
 # the page
 # ---------------------------------------------------------------------------
+def blueprint_stem(path: str | Path) -> str:
+    """A step name for a blueprint file: its name without the yaml/forge suffixes."""
+    name = Path(path).name
+    for suffix in (".yaml", ".yml"):
+        name = name.removesuffix(suffix)
+    return name.removesuffix(".forge_blueprint") or "step"
+
+
+class _BaseChooser:
+    """Form fields choosing the base of a time recipe: a step or a blueprint.
+
+    A blueprint is turned into a base step on demand; a forge blueprint yields
+    a forge step plus the deferred roms_marbl step that runs what it emits.
+    """
+
+    def __init__(
+        self, page: WorkplanBuilderPage, on_change: Callable[[], None]
+    ) -> None:
+        """Build the fields; ``on_change`` is called after the user picks a base."""
+        W = page.W
+        self.page = page
+        self._on_change = on_change
+        self.kind = W.Dropdown(
+            options=[
+                ("an existing roms_marbl step", _KIND_STEP),
+                ("a catalog roms_marbl blueprint", SOURCE_CATALOG_ROMS),
+                ("a catalog forge blueprint (forge, then run)", SOURCE_CATALOG_FORGE),
+                ("a blueprint path", SOURCE_PATH),
+            ],
+            value=_KIND_STEP,
+        )
+        wide = W.Layout(width="260px")
+        self.step = W.Dropdown(options=[], layout=wide)
+        self.catalog_roms = W.Dropdown(options=[], layout=wide)
+        self.catalog_forge = W.Dropdown(options=[], layout=wide)
+        self.path = W.Text(
+            placeholder="/path/to/blueprint.yaml", continuous_update=False, layout=wide
+        )
+        self.kind.observe(self._changed, names="value")
+        for widget in (self.step, self.catalog_roms, self.catalog_forge, self.path):
+            widget.observe(self._changed, names="value")
+        self._sync()
+
+    def rows(self) -> list[Any]:
+        """The field rows, in display order."""
+        W = self.page.W
+        return [
+            components.field_row(W, f"base.{key}", widget, page=PAGE)
+            for key, widget in (
+                ("kind", self.kind),
+                ("step", self.step),
+                ("catalog_roms", self.catalog_roms),
+                ("catalog_forge", self.catalog_forge),
+                ("path", self.path),
+            )
+        ]
+
+    def _sync(self) -> None:
+        kind = self.kind.value
+        _show(self.step, kind == _KIND_STEP)
+        _show(self.catalog_roms, kind == SOURCE_CATALOG_ROMS)
+        _show(self.catalog_forge, kind == SOURCE_CATALOG_FORGE)
+        _show(self.path, kind == SOURCE_PATH)
+
+    def _changed(self, _change: Any) -> None:
+        if self.page.is_suspended:
+            return
+        with self.page.suspended():
+            self._sync()
+        self._on_change()
+
+    def refresh(self, step_names: list[str]) -> None:
+        """Reload the choices from the page's roms_marbl steps and the catalog."""
+        page = self.page
+        _set_options(self.step, [("(choose a step)", ""), *step_names])
+        _set_options(
+            self.catalog_roms,
+            [("(choose a blueprint)", ""), *page.roms_blueprint_names()],
+        )
+        _set_options(
+            self.catalog_forge,
+            [("(choose a blueprint)", ""), *page.forge_blueprint_names()],
+        )
+
+    def _file(self) -> tuple[str, str]:
+        """The chosen blueprint file and its application (``("", "")`` for none).
+
+        Raises
+        ------
+        ValueError
+            If a catalog entry is ambiguous or the file's application is unknown.
+        """
+        kind = self.kind.value
+        if kind == SOURCE_CATALOG_FORGE:
+            name = self.catalog_forge.value
+            path = str(self.page.catalog.forge_blueprint_path(name)) if name else ""
+        elif kind == SOURCE_CATALOG_ROMS:
+            path, problems = self.page.roms_blueprint_file(self.catalog_roms.value)
+            if problems:
+                raise ValueError(problems[0])
+        else:
+            path = self.path.value.strip()
+        if not path:
+            return "", ""
+        facts = blueprint_facts(path)
+        if facts is None or not facts.application:
+            try:
+                return path, get_application_name(Path(path).expanduser())
+            except Exception as ex:
+                raise ValueError(f"cannot read a blueprint at {path!r}: {ex}") from ex
+        return path, facts.application
+
+    def default_name(self) -> str:
+        """The name the recipe's steps default to (``""`` when nothing is chosen)."""
+        if self.kind.value == _KIND_STEP:
+            return self.step.value
+        if self.kind.value == SOURCE_CATALOG_FORGE:
+            return self.catalog_forge.value
+        try:
+            path, _app = self._file()
+        except ValueError:
+            return ""
+        return blueprint_stem(path) if path else ""
+
+    def window(self) -> tuple[datetime | None, datetime | None]:
+        """The base's run window, from its blueprint or what its producer will emit."""
+        page = self.page
+        if self.kind.value == _KIND_STEP:
+            pane = page.pane_named(self.step.value) if self.step.value else None
+            if pane is None:
+                return None, None
+            if pane.source.value == SOURCE_DEFERRED:
+                emitted = page.emitted_for_token(pane.producer.value)
+                return (
+                    (emitted.start_date, emitted.end_date) if emitted else (None, None)
+                )
+            facts = pane.facts()
+            override = _as_datetime(pane.end_date.value.strip())
+            if facts is None:
+                return None, None
+            return facts.start_date, override or facts.end_date
+        try:
+            path, app = self._file()
+        except ValueError:
+            return None, None
+        if not path:
+            return None, None
+        if app == FORGE:
+            emitted = emitted_for(path, FORGE)
+            return (emitted.start_date, emitted.end_date) if emitted else (None, None)
+        facts = blueprint_facts(path)
+        return (facts.start_date, facts.end_date) if facts else (None, None)
+
+    def resolve(self) -> tuple[Step, list[Step]]:
+        """The base step, and the steps that must precede it in the plan.
+
+        Raises
+        ------
+        ValueError
+            If nothing usable is chosen.
+        """
+        page = self.page
+        if self.kind.value == _KIND_STEP:
+            return page.base_step(self.step.value), []
+        path, app = self._file()
+        if not path:
+            raise ValueError("choose the base blueprint")
+        if app == FORGE:
+            emitted = emitted_for(path, FORGE)
+            if emitted is None:
+                raise ValueError(f"cannot read a forge blueprint at {path!r}")
+            names = page.unique_names(FORGE, ROMS_MARBL)
+            forge, run = forge_then_run(
+                Path(path), emitted, names=(names[0], names[1])
+            ).steps
+            return run, [forge]
+        if app != ROMS_MARBL:
+            raise ValueError(
+                f"the base blueprint is a {app!r} blueprint; time recipes need "
+                "roms_marbl (or forge, which generates one)"
+            )
+        facts = blueprint_facts(path)
+        compute = (
+            {"slurm": {"num_cpus": facts.cpus_needed}}
+            if facts is not None and facts.cpus_needed
+            else {}
+        )
+        name = page.unique_names(blueprint_stem(path))[0]
+        return (
+            Step(
+                name=name,
+                application=ROMS_MARBL,
+                blueprint=path,
+                compute_overrides=compute,
+            ),
+            [],
+        )
+
+
 class _FirstSource:
     """Form fields choosing where a generated chain's first step continues from."""
 
@@ -1881,6 +2065,27 @@ class WorkplanBuilderPage:
         """The catalog's forge blueprint names."""
         return list(getattr(self.catalog, "forge_blueprint_names", []))
 
+    def roms_blueprint_file(self, name: str) -> tuple[str, list[str]]:
+        """The roms_marbl blueprint file of a catalog entry, and any problems.
+
+        A catalog entry is a directory; it must hold exactly one roms_marbl file.
+        """
+        if not name:
+            return "", []
+        directory = self.catalog.roms_marbl_blueprint_path(name)
+        found = [
+            p
+            for p in sorted(directory.glob("*.y*ml"))
+            if (f := blueprint_facts(p)) and f.application == ROMS_MARBL
+        ]
+        if len(found) == 1:
+            return str(found[0]), []
+        problem = (
+            f"catalog blueprint {name!r} holds {len(found)} roms_marbl blueprint "
+            f"files ({directory}); pick one with the path source"
+        )
+        return "", [problem]
+
     def external_tokens(self) -> list[str]:
         """``step@alias`` tokens for the steps of the declared runs."""
         return [
@@ -2071,8 +2276,12 @@ class WorkplanBuilderPage:
         self._set_load_status("Started a new workplan.")
         self._rebuild()
 
-    def _populate(self, workplan: Workplan | None) -> None:
-        """Fill every widget from ``workplan`` (``None`` = a blank one step plan)."""
+    def _populate(self, workplan: Workplan | None, *, fresh: bool = True) -> None:
+        """Fill every widget from ``workplan`` (``None`` = a blank one step plan).
+
+        ``fresh`` also resets the save path and run id to their defaults; applying
+        edits to the YAML keeps the user's choices.
+        """
         self.name.value = workplan.name if workplan else ""
         self.description.value = workplan.description if workplan else ""
         self.runtime_vars.value = ", ".join(workplan.runtime_vars) if workplan else ""
@@ -2101,11 +2310,13 @@ class WorkplanBuilderPage:
         if workplan is None:
             self.add_step()
         self._refresh_steps_view()
-        self._save_touched = False
-        self._saved_text = ""
-        self._run_id_touched = False
-        self._reverted = set()
-        self._sync_save_path()
+        self._preview_dirty = False
+        if fresh:
+            self._save_touched = False
+            self._saved_text = ""
+            self._run_id_touched = False
+            self._reverted = set()
+            self._sync_save_path()
 
     def _note_token(self, token: str) -> None:
         """Record the step of a ``step@alias`` token as known for its alias."""
@@ -2527,7 +2738,24 @@ class WorkplanBuilderPage:
     def _build_review(self) -> None:
         W = self.W
         self.validation = W.HTML("")
-        self.preview = W.HTML("")
+        self.preview = W.Textarea(
+            layout=W.Layout(width="100%", height="380px"),
+            placeholder="the workplan YAML appears here",
+        )
+        self.preview.add_class("forge-code")
+        self.apply_btn = W.Button(
+            description=_caption("apply_edits", "Apply edits"),
+            icon="check",
+            button_style="primary",
+        )
+        self.discard_btn = W.Button(
+            description=_caption("discard_edits", "Discard edits"), icon="undo"
+        )
+        self.preview_chip = W.HTML("")
+        self._preview_dirty = False
+        self.preview.observe(self._on_preview_edit, names="value")
+        self.apply_btn.on_click(lambda _b: self.apply_edits())
+        self.discard_btn.on_click(lambda _b: self.discard_edits())
         self.save_path = W.Text(continuous_update=False, layout=W.Layout(width="520px"))
         self.save_btn = W.Button(
             description=_caption("save", "Save"), icon="save", button_style="primary"
@@ -2537,6 +2765,54 @@ class WorkplanBuilderPage:
         self.changes_box = W.VBox([])
         self.save_path.observe(self._on_save_path, names="value")
         self.save_btn.on_click(lambda _b: self._on_save())
+
+    def _on_preview_edit(self, _change: Any) -> None:
+        """A user edit of the YAML (the page's own writes are muted)."""
+        if not self.is_suspended:
+            self._preview_dirty = True
+            self._show_dirty()
+
+    def _show_dirty(self) -> None:
+        self.preview_chip.value = (
+            components.chip("● unapplied edits", "warn") if self._preview_dirty else ""
+        )
+
+    def apply_edits(self) -> None:
+        """Load the edited YAML into the page; errors go to the validation banner.
+
+        The draft (and so Save, Download and Run) changes only when the text
+        parses and validates; the loaded file's path is untouched.
+        """
+        try:
+            raw = yaml.safe_load(self.preview.value)
+            if not isinstance(raw, dict):
+                raise ValueError(
+                    "the YAML must be a mapping with name, description and steps"
+                )
+            raw.pop("$schema", None)
+            workplan = Workplan.model_validate(raw)
+        except ValidationError as ex:
+            lines = [
+                f"{'.'.join(str(p) for p in err['loc'])}: {err['msg']}".strip(": ")
+                for err in ex.errors()
+            ]
+        except Exception as ex:
+            lines = [f"{type(ex).__name__}: {ex}"]
+        else:
+            with self.suspended():
+                self._populate(workplan, fresh=False)
+            self._rebuild()
+            return
+        self.validation.value = components.banner(
+            "err",
+            "<b>The edited YAML was not applied:</b><br>"
+            + "<br>".join(f"&nbsp;&nbsp;{_esc(line)}" for line in lines[:12]),
+        )
+
+    def discard_edits(self) -> None:
+        """Throw away unapplied edits and show the draft's YAML again."""
+        self._preview_dirty = False
+        self._rebuild()
 
     def _on_save_path(self, _change: Any) -> None:
         if not self.is_suspended:
@@ -2636,7 +2912,7 @@ class WorkplanBuilderPage:
             return W.Text(continuous_update=False, layout=W.Layout(width="260px"), **kw)
 
         # chunk a run in time
-        self.chunk_base = W.Dropdown(options=[], layout=W.Layout(width="260px"))
+        self.chunk_base = _BaseChooser(self, self._on_chunk_base)
         self.chunk_start = text(placeholder="ISO date, from the blueprint")
         self.chunk_end = text(placeholder="ISO date, from the blueprint")
         self.chunk_mode = W.Dropdown(
@@ -2660,7 +2936,7 @@ class WorkplanBuilderPage:
         )
         self.chunk_status = W.HTML("")
         # spin-up ramp
-        self.ramp_base = W.Dropdown(options=[], layout=W.Layout(width="260px"))
+        self.ramp_base = _BaseChooser(self, self._on_ramp_base)
         self.ramp_start = text(placeholder="ISO date, from the blueprint")
         self.ramp_prefix = text(value="spinup")
         self.ramp_first = _FirstSource(self)
@@ -2688,8 +2964,6 @@ class WorkplanBuilderPage:
         )
         self.upscale_status = W.HTML("")
 
-        self.chunk_base.observe(self._on_chunk_base, names="value")
-        self.ramp_base.observe(self._on_ramp_base, names="value")
         self.chunk_btn.on_click(
             lambda _b: self._generate(self.chunk_status, self._chunk)
         )
@@ -2733,8 +3007,8 @@ class WorkplanBuilderPage:
     def _refresh_recipes(self) -> None:
         """Reload the recipe dropdowns from the current steps and catalog."""
         names = self.roms_step_names()
-        _set_options(self.chunk_base, [("(choose a step)", ""), *names])
-        _set_options(self.ramp_base, [("(choose a step)", ""), *names])
+        self.chunk_base.refresh(names)
+        self.ramp_base.refresh(names)
         _set_options(
             self.forge_source,
             [("a path…", ""), *self.forge_blueprint_names()],
@@ -2747,47 +3021,27 @@ class WorkplanBuilderPage:
         self.recipe_hint.value = (
             ""
             if names
-            else "<span class='forge-hint'>The chunk, ramp and upscale recipes "
-            "start from a roms_marbl step: add one in the Steps card first.</span>"
+            else "<span class='forge-hint'>Chunk and ramp can start from a "
+            "blueprint; upscaling needs roms_marbl steps in the Steps card.</span>"
         )
-        for widget in (self.chunk_btn, self.ramp_btn, self.upscale_btn):
-            widget.disabled = not names
+        self.upscale_btn.disabled = not names
 
-    def _on_chunk_base(self, _change: Any) -> None:
-        if self.is_suspended:
-            return
-        self._prefill_window(self.chunk_base.value, self.chunk_start, self.chunk_end)
-        if self.chunk_base.value:
-            self.chunk_prefix.value = self.chunk_base.value
+    def _on_chunk_base(self) -> None:
+        self._prefill_window(self.chunk_base, self.chunk_start, self.chunk_end)
+        if name := self.chunk_base.default_name():
+            self.chunk_prefix.value = name
 
-    def _on_ramp_base(self, _change: Any) -> None:
-        if self.is_suspended:
-            return
-        self._prefill_window(self.ramp_base.value, self.ramp_start, None)
+    def _on_ramp_base(self) -> None:
+        self._prefill_window(self.ramp_base, self.ramp_start, None)
 
-    def _prefill_window(self, base: str, start: Any, end: Any) -> None:
-        """Prefill a recipe's window from the base step's blueprint, or from what
-        its producer is predicted to emit when the blueprint is deferred.
-        """
-        pane = self.pane_named(base) if base else None
-        if pane is None:
-            return
-        first: datetime | None
-        last: datetime | None
-        if pane.source.value == SOURCE_DEFERRED:
-            emitted = self.emitted_for_token(pane.producer.value)
-            if emitted is None:
-                return
-            first, last = emitted.start_date, emitted.end_date
-        else:
-            facts = pane.facts()
-            if facts is None:
-                return
-            first, last = facts.start_date, facts.end_date
+    @staticmethod
+    def _prefill_window(base: _BaseChooser, start: Any, end: Any) -> None:
+        """Prefill a recipe's window from the base's blueprint or emitted facts."""
+        first, last = base.window()
         if first:
             start.value = str(first)
-        if end is not None:
-            end.value = pane.end_date.value.strip() or (str(last) if last else "")
+        if end is not None and last:
+            end.value = str(last)
 
     def _generate(self, status: Any, build: Callable[[], Generated]) -> None:
         """Run a generator and append its steps; its ValueError becomes the status."""
@@ -2832,7 +3086,8 @@ class WorkplanBuilderPage:
             self._refresh_steps_view()
         self._rebuild()
 
-    def _unique_names(self, *bases: str) -> tuple[str, ...]:
+    def unique_names(self, *bases: str) -> tuple[str, ...]:
+        """``bases`` made distinct from each other and from the existing step names."""
         taken = {p.name.value.strip() for p in self.panes}
         names: list[str] = []
         for base in bases:
@@ -2843,14 +3098,15 @@ class WorkplanBuilderPage:
             names.append(name)
         return tuple(names)
 
-    def _base_step(self, name: str) -> Step:
+    def base_step(self, name: str) -> Step:
+        """The step of the pane called ``name``, as a recipe base."""
         pane = self.pane_named(name) if name else None
         if pane is None:
             raise ValueError("choose the base step")
         return pane.gather()
 
     def _chunk(self) -> Generated:
-        base = self._base_step(self.chunk_base.value)
+        base, before = self.chunk_base.resolve()
         start, end = (
             self._window_date(w.value, label)
             for w, label in ((self.chunk_start, "start"), (self.chunk_end, "end"))
@@ -2878,7 +3134,7 @@ class WorkplanBuilderPage:
 
             walltime = per_day_walltime
 
-        return chunk_steps(
+        generated = chunk_steps(
             base,
             windows,
             prefix=self.chunk_prefix.value.strip(),
@@ -2886,12 +3142,13 @@ class WorkplanBuilderPage:
             walltime=walltime,
             restart_cadence=FREQUENT_RESTARTS if self.chunk_cadence.value else None,
         )
+        return Generated(steps=[*before, *generated.steps], runs=generated.runs)
 
     def _ramp(self) -> Generated:
-        base = self._base_step(self.ramp_base.value)
+        base, before = self.ramp_base.resolve()
         start = self._window_date(self.ramp_start.value, "start")
         ramp = [(timedelta(days=d.value), dt.value) for d, dt, _r in self.ramp_rows]
-        return spinup_ramp(
+        generated = spinup_ramp(
             base,
             ramp,
             start=start,
@@ -2899,6 +3156,7 @@ class WorkplanBuilderPage:
             first_source=self.ramp_first.source(),
             restart_cadence=FREQUENT_RESTARTS if self.ramp_cadence.value else None,
         )
+        return Generated(steps=[*before, *generated.steps], runs=generated.runs)
 
     def _forge(self) -> Generated:
         name = self.forge_source.value
@@ -2912,12 +3170,12 @@ class WorkplanBuilderPage:
         emitted = emitted_for(path, FORGE)
         if emitted is None:
             raise ValueError(f"cannot read a forge blueprint at {path!r}")
-        forge_name, run_name = self._unique_names(FORGE, ROMS_MARBL)
+        forge_name, run_name = self.unique_names(FORGE, ROMS_MARBL)
         return forge_then_run(Path(path), emitted, names=(forge_name, run_name))
 
     def _upscale(self) -> Generated:
         names = list(self.upscale_levels.value)
-        levels = [self._base_step(n) for n in names]
+        levels = [self.base_step(n) for n in names]
 
         def use_pio(step: Step) -> bool:
             # an unreadable level takes the blueprint model's default (off)
@@ -3280,64 +3538,75 @@ class WorkplanBuilderPage:
             chips_widget=chips["compute"],
             page=PAGE,
         )
-        steps = card(
+
+        def recipe(key: str, *children: Any) -> Any:
+            return W.VBox(
+                [
+                    W.HTML(
+                        f"<div class='forge-hint'>{section_for(f'recipes.{key}', page=PAGE).desc}</div>"
+                    ),
+                    *children,
+                ]
+            )
+
+        recipe_keys = ("chunk", "ramp", "forge", "upscale")
+        self.recipes_accordion = components.open_accordion(
             W,
-            "steps",
-            self.steps_holder,
-            self.add_step_btn,
-            num=4,
-            chips_widget=chips["steps"],
-            page=PAGE,
+            [
+                recipe(
+                    "chunk",
+                    *self.chunk_base.rows(),
+                    row("chunk_start", self.chunk_start),
+                    row("chunk_end", self.chunk_end),
+                    row("chunk_mode", self.chunk_mode, extra=(self.chunk_value,)),
+                    row("chunk_prefix", self.chunk_prefix),
+                    *self.chunk_first.rows(),
+                    row("chunk_walltime", self.chunk_walltime),
+                    row("chunk_hours_per_day", self.chunk_hours_per_day),
+                    row("chunk_cadence", self.chunk_cadence),
+                    W.HBox([self.chunk_btn, self.chunk_status]),
+                ),
+                recipe(
+                    "ramp",
+                    *self.ramp_base.rows(),
+                    row("ramp_start", self.ramp_start),
+                    row("ramp_prefix", self.ramp_prefix),
+                    self.ramp_box,
+                    self.ramp_add_btn,
+                    *self.ramp_first.rows(),
+                    row("ramp_cadence", self.ramp_cadence),
+                    W.HBox([self.ramp_btn, self.ramp_status]),
+                ),
+                recipe(
+                    "forge",
+                    row("forge_source", self.forge_source),
+                    row("forge_path", self.forge_path),
+                    W.HBox([self.forge_btn, self.forge_status]),
+                ),
+                recipe(
+                    "upscale",
+                    row("upscale_levels", self.upscale_levels),
+                    W.HBox([self.upscale_btn, self.upscale_status]),
+                ),
+            ],
+            [section_for(f"recipes.{k}", page=PAGE).title for k in recipe_keys],
         )
         recipes = card(
             W,
             "recipes",
             self.recipe_hint,
-            sub(
-                W,
-                "recipes.chunk",
-                row("chunk_base", self.chunk_base),
-                row("chunk_start", self.chunk_start),
-                row("chunk_end", self.chunk_end),
-                row("chunk_mode", self.chunk_mode, extra=(self.chunk_value,)),
-                row("chunk_prefix", self.chunk_prefix),
-                *self.chunk_first.rows(),
-                row("chunk_walltime", self.chunk_walltime),
-                row("chunk_hours_per_day", self.chunk_hours_per_day),
-                row("chunk_cadence", self.chunk_cadence),
-                W.HBox([self.chunk_btn, self.chunk_status]),
-                page=PAGE,
-            ),
-            sub(
-                W,
-                "recipes.ramp",
-                row("ramp_base", self.ramp_base),
-                row("ramp_start", self.ramp_start),
-                row("ramp_prefix", self.ramp_prefix),
-                self.ramp_box,
-                self.ramp_add_btn,
-                *self.ramp_first.rows(),
-                row("ramp_cadence", self.ramp_cadence),
-                W.HBox([self.ramp_btn, self.ramp_status]),
-                page=PAGE,
-            ),
-            sub(
-                W,
-                "recipes.forge",
-                row("forge_source", self.forge_source),
-                row("forge_path", self.forge_path),
-                W.HBox([self.forge_btn, self.forge_status]),
-                page=PAGE,
-            ),
-            sub(
-                W,
-                "recipes.upscale",
-                row("upscale_levels", self.upscale_levels),
-                W.HBox([self.upscale_btn, self.upscale_status]),
-                page=PAGE,
-            ),
-            num=5,
+            self.recipes_accordion,
+            num=4,
             chips_widget=chips["recipes"],
+            page=PAGE,
+        )
+        steps = card(
+            W,
+            "steps",
+            self.steps_holder,
+            self.add_step_btn,
+            num=5,
+            chips_widget=chips["steps"],
             page=PAGE,
         )
         review = card(
@@ -3353,7 +3622,13 @@ class WorkplanBuilderPage:
                 self.readiness,
                 page=PAGE,
             ),
-            sub(W, "review.preview", self.preview, page=PAGE),
+            sub(
+                W,
+                "review.preview",
+                W.HBox([self.apply_btn, self.discard_btn, self.preview_chip]),
+                self.preview,
+                page=PAGE,
+            ),
             sub(
                 W,
                 "review.save",
@@ -3391,8 +3666,8 @@ class WorkplanBuilderPage:
                 start,
                 workplan,
                 compute,
-                steps,
                 recipes,
+                steps,
                 review,
             ]
         )
@@ -3435,7 +3710,7 @@ class WorkplanBuilderPage:
         ]
         data = {
             "name": self.name.value.strip(),
-            "description": self.description.value.strip(),
+            "description": self.description.value.strip() or self.name.value.strip(),
             "runs": runs,
             "steps": steps,
             "compute_environment": compute,
@@ -3482,17 +3757,16 @@ class WorkplanBuilderPage:
                 if pane.error or pane.problem_lines
                 else components.chip("● ok", "ok")
             )
+        self.description.placeholder = (
+            self.name.value.strip() or "defaults to the workplan name"
+        )
         chips = self.card_chips
         chips["steps"].value = components.chip(
             f"● {len(self.panes)} step(s)", "ok" if valid else "warn"
         )
         chips["workplan"].value = components.chip(
-            "● Complete"
-            if self.name.value.strip() and self.description.value.strip()
-            else "● Name and description needed",
-            "ok"
-            if self.name.value.strip() and self.description.value.strip()
-            else "warn",
+            "● Complete" if self.name.value.strip() else "● Name needed",
+            "ok" if self.name.value.strip() else "warn",
         )
         chips["compute"].value = components.chip(
             f"● {self.compute_target.value}", "info"
@@ -3512,8 +3786,8 @@ class WorkplanBuilderPage:
                     ("start", "Start"),
                     ("workplan", "Workplan"),
                     ("compute", "Compute"),
-                    ("steps", "Steps"),
                     ("recipes", "Recipes"),
+                    ("steps", "Steps"),
                     ("review", "Review"),
                 ),
                 start=1,
@@ -3540,11 +3814,14 @@ class WorkplanBuilderPage:
         )
         if draft is not None:
             text = yaml_text(draft)
-            self.preview.value = f"<pre>{_esc(text)}</pre>"
+            if not self._preview_dirty:
+                self.preview.value = text
             self.download_link.value = self._download_html(draft, text)
         else:
-            self.preview.value = "<i>(no valid draft yet)</i>"
+            if not self._preview_dirty:
+                self.preview.value = "# no valid draft yet: see the problems above\n"
             self.download_link.value = ""
+        self._show_dirty()
         self._render_changes()
         self._update_readiness()
         self._sync_run()

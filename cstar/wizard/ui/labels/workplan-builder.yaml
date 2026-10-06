@@ -20,11 +20,11 @@ sections:
     required: false
   steps:
     title: Steps
-    desc: One pane per step - its blueprint, overrides, directives and compute settings.
+    desc: One pane per step - its blueprint, overrides, directives and compute settings. Steps from the recipes above land here.
     required: true
   recipes:
     title: Recipes
-    desc: Generate the recurring shapes - time chunks, a spin-up ramp, forge then run, upscaling - and edit the result as steps.
+    desc: Generate the recurring shapes - time chunks, a spin-up ramp, forge then run, upscaling - and edit the result as steps in the Steps card below.
     required: false
   review:
     title: Review and run
@@ -33,7 +33,7 @@ sections:
 
   # --- subsections ----------------------------------------------------------
   workplan.runs:
-    title: Other workplan runs
+    title: Add aliases to previous run-ids
     desc: Aliases for runs this workplan refers to as step@alias.
     required: false
   step.blueprint:
@@ -54,7 +54,7 @@ sections:
     required: false
   recipes.chunk:
     title: Chunk a run in time
-    desc: Split a roms_marbl step into chained steps, one per window; each writes only end_date and continues from the previous restart.
+    desc: Split a roms_marbl run (a step or a blueprint) into chained steps, one per window; each writes only end_date and continues from the previous restart.
     required: false
   recipes.ramp:
     title: Spin-up ramp
@@ -82,7 +82,7 @@ sections:
     required: false
   review.preview:
     title: YAML preview
-    desc: Exactly the text Save writes.
+    desc: The workplan as YAML. Edit it and press Apply edits to load the text into the page; Save and Download always use the applied draft.
     required: false
   review.save:
     title: Save
@@ -105,7 +105,7 @@ fields:
     required: true
   description:
     label: Description
-    required: true
+    hint: Blank uses the workplan name.
   runtime_vars:
     label: Runtime variables
     symbol: runtime_vars
@@ -218,9 +218,18 @@ fields:
     symbol: max_walltime
 
   # --- Recipes ---------------------------------------------------------------
-  chunk_base:
-    label: Base step
-    hint: Only roms_marbl steps can be chunked; the base step stays in the workplan.
+  base.kind:
+    label: Start from
+    hint: A blueprint is turned into the base step for you; a forge blueprint adds the forge step and chunks the roms_marbl step it generates.
+  base.step:
+    label: Step
+    hint: Only roms_marbl steps can be a base; an existing base step stays in the workplan.
+  base.catalog_roms:
+    label: Catalog roms_marbl blueprint
+  base.catalog_forge:
+    label: Catalog forge blueprint
+  base.path:
+    label: Blueprint path
   chunk_start:
     label: Window start
     hint: Prefilled from the base blueprint; only the end of each chunk is written.
@@ -249,8 +258,6 @@ fields:
   first.timestamp:
     label: Restart timestamp
     hint: Blank continues from the latest restart.
-  ramp_base:
-    label: Base step
   ramp_start:
     label: Start
   ramp_prefix:
@@ -292,6 +299,10 @@ fields:
     label: Add namelist override
   buttons.add_source:
     label: Add boundary source
+  buttons.apply_edits:
+    label: Apply edits
+  buttons.discard_edits:
+    label: Discard edits
   buttons.save:
     label: Save
   buttons.confirm_overwrite:

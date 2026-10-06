@@ -271,7 +271,20 @@ body[data-voila] .forge-shell {{ max-width: 1180px; margin: 0 auto; padding: 0 2
     font-weight: 600;
     text-decoration: none;
 }}
-.forge-app .forge-dl-btn code {{ color: #fff; }}
+.forge-app .forge-dl-btn code {{ color: #fff; margin-left: 0.5em; }}
+
+/* an editable code view (a Textarea): monospace, scrolls, full width */
+.forge-app .forge-code, .forge-app .forge-code textarea {{
+    width: 100%;
+    box-sizing: border-box;
+}}
+.forge-app .forge-code textarea {{
+    font-family: Menlo, Consolas, monospace;
+    font-size: 12px;
+    max-height: 380px;
+    overflow: auto;
+    white-space: pre;
+}}
 
 /* accordion restyle */
 .forge-app .jupyter-widget-Collapse-header, .forge-app .p-Collapse-header {{
