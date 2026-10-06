@@ -665,6 +665,133 @@ def test_launcher_preconditions_slurm(
         _ = get_launcher()
 
 
+def _slurm_workplan(
+    tmp_path: Path,
+    compute_environment: dict[str, t.Any],
+    *step_overrides: dict[str, t.Any],
+) -> Workplan:
+    """A hello-world workplan with the given compute environment and one step per override."""
+    bp = tmp_path / "hello.yaml"
+    bp.touch()
+    steps = [
+        Step(
+            name=f"Hello {i}",
+            application="hello_world",
+            blueprint=bp,
+            compute_overrides=o,
+        )
+        for i, o in enumerate(step_overrides or ({},))
+    ]
+    return Workplan(
+        name="slurm-workplan",
+        description="A workplan supplying SLURM settings",
+        steps=steps,
+        compute_environment=compute_environment,
+    )
+
+
+@pytest.mark.parametrize(
+    ("compute_environment", "step_overrides", "exp_missing"),
+    [
+        pytest.param(
+            {"slurm": {"account_name": "acct", "queue_name": "q"}},
+            [],
+            "",
+            id="workplan-wide account and queue",
+        ),
+        pytest.param(
+            {"slurm": {"account_name": "acct"}},
+            [],
+            f"system: {ENV_CSTAR_SLURM_QUEUE}$",
+            id="workplan-wide account only",
+        ),
+        pytest.param(
+            {},
+            [{"slurm": {"account_name": "a", "queue_name": "q"}}] * 2,
+            "",
+            id="every step supplies both",
+        ),
+        pytest.param(
+            {},
+            [
+                {"slurm": {"account_name": "a", "queue_name": "q"}},
+                {"slurm": {"queue_name": "q"}},
+            ],
+            f"system: {ENV_CSTAR_SLURM_ACCOUNT}$",
+            id="one step lacks the account",
+        ),
+        pytest.param(
+            {"slurm": {"account_name": "acct"}},
+            [{"slurm": {"queue_name": "q"}}],
+            "",
+            id="workplan account plus per-step queue",
+        ),
+        pytest.param(
+            {"launcher": "slurm"},
+            [],
+            f"{ENV_CSTAR_SLURM_ACCOUNT}, {ENV_CSTAR_SLURM_QUEUE}",
+            id="nothing supplied names both",
+        ),
+    ],
+)
+def test_launcher_preconditions_satisfied_by_workplan(
+    tmp_path: Path,
+    compute_environment: dict[str, t.Any],
+    step_overrides: list[dict[str, t.Any]],
+    exp_missing: str,
+) -> None:
+    """SLURM settings the workplan supplies are not demanded from the environment,
+    and the variables it leaves out are all named in one message.
+    """
+    wp = _slurm_workplan(tmp_path, compute_environment, *step_overrides)
+
+    with (
+        mock.patch.dict(os.environ, {}, clear=True),
+        mock.patch(
+            "cstar.system.manager.CStarSystemManager.scheduler",
+            mock.PropertyMock(return_value=mock.MagicMock()),
+        ),
+        mock.patch(
+            "cstar.system.environment.CStarEnvironment.settings_klass",
+            SlurmSettingsBase,
+        ),
+    ):
+        if exp_missing:
+            with pytest.raises(CstarExpectationFailed, match=exp_missing):
+                get_launcher(wp)
+        else:
+            assert isinstance(get_launcher(wp), SlurmLauncher)
+
+
+def test_launcher_preconditions_ignore_invalid_overrides_when_env_is_set(
+    tmp_path: Path,
+) -> None:
+    """A step whose SLURM overrides are invalid is scheduling's problem, not the env check's."""
+    wp = _slurm_workplan(tmp_path, {}, {"slurm": {"max_walltime": "1h"}})
+
+    with (
+        mock.patch.dict(
+            os.environ,
+            {ENV_CSTAR_SLURM_ACCOUNT: "a", ENV_CSTAR_SLURM_QUEUE: "q"},
+            clear=True,
+        ),
+        mock.patch(
+            "cstar.system.manager.CStarSystemManager.scheduler",
+            mock.PropertyMock(return_value=mock.MagicMock()),
+        ),
+        mock.patch(
+            "cstar.system.environment.CStarEnvironment.settings_klass",
+            SlurmSettingsBase,
+        ),
+    ):
+        assert isinstance(get_launcher(wp), SlurmLauncher)
+        with mock.patch.dict(os.environ, {}, clear=True):
+            with pytest.raises(
+                CstarExpectationFailed, match=f"{ENV_CSTAR_SLURM_QUEUE}$"
+            ):
+                get_launcher(wp)
+
+
 @pytest.mark.parametrize(
     ("mock_env", "missing_value"),
     [

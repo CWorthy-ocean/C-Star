@@ -709,13 +709,41 @@ class Launcher(t.Protocol, t.Generic[_THandle]):
     """Whether `launch` can wait on an in-progress handle created by another run under this launcher."""
 
     @classmethod
-    def check_preconditions(cls) -> None:
+    def workplan_settings(cls, workplan: Workplan) -> frozenset[str]:
+        """Return the environment variables whose values the workplan supplies.
+
+        A launcher that reads settings from the environment lists here the
+        variables the workplan's `compute_environment` (or every step's
+        `compute_overrides`) provides instead, so `check_preconditions` does
+        not demand them from the environment as well.
+
+        Parameters
+        ----------
+        workplan : Workplan
+            The workplan about to run.
+
+        Returns
+        -------
+        frozenset[str]
+            Environment variable names; empty unless a launcher overrides this.
+        """
+        return frozenset()
+
+    @classmethod
+    def check_preconditions(cls, workplan: Workplan | None = None) -> None:
         """Perform launcher-specific startup validation.
+
+        Parameters
+        ----------
+        workplan : Workplan, optional
+            The workplan about to run. Settings it supplies (see
+            `workplan_settings`) are not required from the environment.
 
         Raises
         ------
         CstarExpectationFailed
-            If an environment variable required by the launcher cannot be found.
+            If an environment variable required by the system is neither set
+            nor supplied by the workplan.
         """
         cstar_sysmgr = get_sysmgr()
 
@@ -723,11 +751,19 @@ class Launcher(t.Protocol, t.Generic[_THandle]):
             try:
                 _ = klass()
             except ValidationError as ex:
-                prefixed = ", ".join(
-                    get_envfield_alias(klass, str(x["loc"][0])) for x in ex.errors()
-                )
-                msg = f"Unable to load environment variables required by the system: {prefixed}"
-                raise CstarExpectationFailed(msg) from ex
+                supplied = cls.workplan_settings(workplan) if workplan else frozenset()
+                missing = [
+                    var
+                    for x in ex.errors()
+                    if (var := get_envfield_alias(klass, str(x["loc"][0])))
+                    not in supplied
+                ]
+                if missing:
+                    msg = (
+                        "Unable to load environment variables required by the "
+                        f"system: {', '.join(missing)}"
+                    )
+                    raise CstarExpectationFailed(msg) from ex
 
     @classmethod
     async def launch(
