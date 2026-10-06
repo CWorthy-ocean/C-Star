@@ -169,3 +169,6 @@ Miscellaneous
 - The tutorial's wales toy blueprint is kept byte-identical to the bundled copy (guarded by a test); the unreferenced ``blueprint_pio.yaml`` tutorial file is removed and the plotter tutorial points at the default output path. (`#742 <https://github.com/CWorthy-ocean/C-Star/pull/742>`_)
 - The catalog and wizard documentation describe the layout and the migration. (`#742 <https://github.com/CWorthy-ocean/C-Star/pull/742>`_)
 - ``docs/workplans.rst``: the compute-environment note now describes which environment variables remain required, and the ``max_walltime`` key documents both forms. (`#744 <https://github.com/CWorthy-ocean/C-Star/pull/744>`_)
+- README rewritten around the merged Forge workflow: project description, how-it-works, laptop install, three-command quick start, documentation links, related projects, and Issues (not Discussions) for feedback. (`#746 <https://github.com/CWorthy-ocean/C-Star/pull/746>`_)
+- README badges now also show the PyPI version, unit-test CI status, and license. (`#746 <https://github.com/CWorthy-ocean/C-Star/pull/746>`_)
+- README no longer tells users to run a bare ``pytest`` at the repository root or paste the full Apache boilerplate; the license section links to the LICENSE file instead. (`#746 <https://github.com/CWorthy-ocean/C-Star/pull/746>`_)
