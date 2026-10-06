@@ -11,6 +11,8 @@ ARG_CLOBBER_WORKPLAN_HELP: t.Final[str] = (
     "clobber control; the CSTAR_CLOBBER_WORKING_DIR environment variable is "
     "ignored (with a warning) by workplan runs."
 )
+ARG_RUN_ID: t.Final[str] = "--run-id"
+"""Option naming an execution of a workplan."""
 ARG_RESUME: t.Final[str] = "--resume"
 ARG_RESUME_HELP: t.Final[str] = (
     "Resume the prior attempt found in the blueprint's working directory instead "

@@ -47,7 +47,9 @@ from cstar.orchestration.utils import ENV_CSTAR_SLURM_ACCOUNT, ENV_CSTAR_SLURM_Q
 from cstar.system.environment import EnvSettingsBase, SlurmSettingsBase
 
 
-def _slurm_launcher(force_local: bool = False) -> SlurmLauncher:
+def _slurm_launcher(
+    workplan: Workplan | None = None, *, force_local: bool = False
+) -> SlurmLauncher:
     """Stand in for `get_launcher` with a SLURM launcher regardless of the system."""
     return SlurmLauncher()
 

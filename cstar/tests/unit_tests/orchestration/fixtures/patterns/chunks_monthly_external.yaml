@@ -1,0 +1,51 @@
+name: chunks_monthly_external
+description: golden for chunks_monthly_external
+runs:
+  spinup:
+    run_id: iceland0_ini
+steps:
+- name: run-01
+  application: roms_marbl
+  blueprint: /path/B.yaml
+  depends_on:
+  - seg8@spinup
+  blueprint_overrides:
+    runtime_params:
+      end_date: 2023-02-01 00:00:00
+  directives:
+    continue-from:
+      step: seg8@spinup
+      timestamp: '2023-01-15 00:00:00'
+- name: run-02
+  application: roms_marbl
+  blueprint: /path/B.yaml
+  depends_on:
+  - run-01
+  blueprint_overrides:
+    runtime_params:
+      end_date: 2023-03-01 00:00:00
+  directives:
+    continue-from:
+      step: run-01
+- name: run-03
+  application: roms_marbl
+  blueprint: /path/B.yaml
+  depends_on:
+  - run-02
+  blueprint_overrides:
+    runtime_params:
+      end_date: 2023-04-01 00:00:00
+  directives:
+    continue-from:
+      step: run-02
+- name: run-04
+  application: roms_marbl
+  blueprint: /path/B.yaml
+  depends_on:
+  - run-03
+  blueprint_overrides:
+    runtime_params:
+      end_date: 2023-04-20 00:00:00
+  directives:
+    continue-from:
+      step: run-03

@@ -111,10 +111,7 @@ def heterogeneous_workplan_path(
         name="heterogeneous-workplan",
         description="This is a test workplan containing steps triggering different applications",
         state=WorkplanState.Draft,
-        compute_environment={
-            "num_nodes": 4,
-            "num_cpus_per_process": 16,
-        },
+        compute_environment={"slurm": {"max_walltime": "00:10:00"}},
         runtime_vars=["var1", "var2"],
         steps=[
             hw_single_step_wp.steps[0],

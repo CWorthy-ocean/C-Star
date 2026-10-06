@@ -1,0 +1,94 @@
+name: pac_ramp_then_months
+description: golden for pac_ramp_then_months
+steps:
+- name: spin-01
+  application: roms_marbl
+  blueprint: /path/B.yaml
+  blueprint_overrides:
+    runtime_params:
+      end_date: 2012-01-08 00:00:00
+    namelist_overrides:
+      time_stepping:
+        dt: 100.0
+  directives:
+    continue-from:
+      path: /ini
+- name: spin-02
+  application: roms_marbl
+  blueprint: /path/B.yaml
+  depends_on:
+  - spin-01
+  blueprint_overrides:
+    runtime_params:
+      end_date: 2012-01-15 00:00:00
+    namelist_overrides:
+      time_stepping:
+        dt: 200.0
+  directives:
+    continue-from:
+      step: spin-01
+- name: spin-03
+  application: roms_marbl
+  blueprint: /path/B.yaml
+  depends_on:
+  - spin-02
+  blueprint_overrides:
+    runtime_params:
+      end_date: 2012-01-29 00:00:00
+    namelist_overrides:
+      time_stepping:
+        dt: 450.0
+  directives:
+    continue-from:
+      step: spin-02
+- name: main-01
+  application: roms_marbl
+  blueprint: /path/B.yaml
+  depends_on:
+  - spin-03
+  blueprint_overrides:
+    namelist_overrides:
+      time_stepping:
+        dt: 900.0
+    runtime_params:
+      end_date: 2012-02-01 00:00:00
+  compute_overrides:
+    slurm:
+      max_walltime: 03:00:00
+  directives:
+    continue-from:
+      step: spin-03
+- name: main-02
+  application: roms_marbl
+  blueprint: /path/B.yaml
+  depends_on:
+  - main-01
+  blueprint_overrides:
+    namelist_overrides:
+      time_stepping:
+        dt: 900.0
+    runtime_params:
+      end_date: 2012-03-01 00:00:00
+  compute_overrides:
+    slurm:
+      max_walltime: '29:00:00'
+  directives:
+    continue-from:
+      step: main-01
+- name: main-03
+  application: roms_marbl
+  blueprint: /path/B.yaml
+  depends_on:
+  - main-02
+  blueprint_overrides:
+    namelist_overrides:
+      time_stepping:
+        dt: 900.0
+    runtime_params:
+      end_date: 2012-04-01 00:00:00
+  compute_overrides:
+    slurm:
+      max_walltime: '31:00:00'
+  directives:
+    continue-from:
+      step: main-02

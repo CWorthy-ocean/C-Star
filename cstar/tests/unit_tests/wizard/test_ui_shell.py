@@ -8,7 +8,7 @@ pytest.importorskip("ipywidgets")
 
 import ipywidgets as W
 
-from cstar.wizard.ui.shell import AppShell, blueprint_app
+from cstar.wizard.ui.shell import AppShell, app, blueprint_app
 
 
 class _DummyPage:
@@ -95,3 +95,12 @@ def test_shell_skips_its_own_stylesheet_when_a_page_carries_one():
 
     bare = AppShell([("Only", W.HTML("body"))], W=W)
     assert sum("forge-style" in c._dom_classes for c in bare.root.children) == 1
+
+
+def test_app_builds_blueprint_and_workplan_pages():
+    shell = app()
+    assert isinstance(shell, AppShell)
+    assert shell.nav.layout.display != "none"
+    assert list(shell.nav.options) == ["Blueprint", "Workplan"]
+    assert len(shell.stack.children) == 2
+    assert shell.pages[1][1].blueprint_app is shell.pages[0][1]

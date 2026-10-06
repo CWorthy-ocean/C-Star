@@ -43,6 +43,7 @@ from cstar.entrypoint.utils import (
     ARG_PRE_RUN_WORKPLAN_HELP,
     ARG_RESUME,
     ARG_RESUME_WORKPLAN_HELP,
+    ARG_RUN_ID,
     ARG_VAR_HELP,
     ARG_VAR_LONG,
     ARG_VAR_SHORT,
@@ -539,6 +540,7 @@ def run(
     run_id: t.Annotated[
         str,
         typer.Option(
+            ARG_RUN_ID,
             help="The unique identifier for an execution of the workplan.",
             autocompletion=list_runs,
             callback=cb_pipeline(
@@ -669,9 +671,9 @@ def run(
                 pre_run = wp.pre_run
                 apply_clobber_overrides(wp, clobber)
                 if resume:
-                    asyncio.run(apply_resume_overrides(wp, run_id, get_launcher()))
+                    asyncio.run(apply_resume_overrides(wp, run_id, get_launcher(wp)))
                 external = asyncio.run(
-                    load_external_runs(wp, get_launcher(force_local=pre_run))
+                    load_external_runs(wp, get_launcher(wp, force_local=pre_run))
                 )
                 exit_on_external_problems(external, external_dependencies(wp))
                 planner = build_planner(wp, external.tasks())

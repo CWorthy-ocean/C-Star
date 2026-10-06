@@ -74,8 +74,7 @@ def complete_workplan_template_input() -> dict[str, t.Any]:
         "description": "This is the description of my test workplan",
         "state": "draft",
         "compute_environment": {
-            "num_nodes": 4,
-            "num_cpus_per_process": 16,
+            "slurm": {"max_walltime": "00:10:00"},
         },
         "runtime_vars": ["var1", "var2"],
         "steps": [],

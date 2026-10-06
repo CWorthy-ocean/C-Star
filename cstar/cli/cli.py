@@ -10,6 +10,7 @@ from cstar.cli.blueprint import ALIAS as ALIAS_BLUEPRINT
 from cstar.cli.blueprint import app as app_blueprint
 from cstar.cli.common import common_callback
 from cstar.cli.environment import app as app_env
+from cstar.cli.forge import DEFAULT_WIZARD_PORT, launch_wizard
 from cstar.cli.forge import app as app_forge
 from cstar.cli.template import app as app_template
 from cstar.cli.workplan import ALIAS as ALIAS_WORKPLAN
@@ -18,7 +19,21 @@ from cstar.cli.workplan import app as app_workplan
 CLI_PLUGIN_GROUP = "cstar.cli"
 """Entry-point group third-party packages use to add `cstar <name> ...` subcommands."""
 
+COMMAND_WIZARD = "wizard"
+"""Name of the root command that launches the wizard (reserved against plugins)."""
+
 logger = logging.getLogger(__name__)
+
+
+def wizard(
+    ctx: typer.Context,
+    port: int = typer.Option(DEFAULT_WIZARD_PORT, help="port for the voila web app"),
+) -> None:
+    """Launch the C-Star wizard (blueprint and workplan pages).
+
+    Extra arguments are passed through to voila.
+    """
+    launch_wizard(ctx, port)
 
 
 def attach_subcommands(app: typer.Typer) -> None:
@@ -53,9 +68,15 @@ def attach_subcommands(app: typer.Typer) -> None:
     except Exception as ex:
         print(f"An error occurred while handling request: {ex}")
 
+    app.command(
+        name=COMMAND_WIZARD,
+        context_settings={"allow_extra_args": True, "ignore_unknown_options": True},
+    )(wizard)
+
     attach_plugin_subcommands(
         app,
         taken={name for _, name, _ in subcommands}
+        | {COMMAND_WIZARD}
         | {alias for _, _, aliases in subcommands for alias in aliases},
     )
 

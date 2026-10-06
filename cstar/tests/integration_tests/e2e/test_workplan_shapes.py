@@ -8,12 +8,16 @@ sentinels and read the step logs to check ordering and propagation.
 
 import typing as t
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
 
 import pytest
 import yaml
 
 from cstar.base.utils import slugify
+from cstar.orchestration.models import Step, Workplan
+from cstar.orchestration.patterns import chunk_steps, equal_windows
+from cstar.orchestration.serialization import serialize
 from cstar.tests.integration_tests.cli_harness import (
     DONE,
     FAILED,
@@ -233,3 +237,70 @@ def test_dependency_failure_propagates(shape_root: Path) -> None:
         assert all(slugify(step) in proc.stdout for step in shape), proc.stdout
     finally:
         kill_run(run.state_home, run_id, run.steps)
+
+
+def test_generated_chunk_chain_runs_in_order(
+    shape_root: Path, cstar_shim: Path
+) -> None:
+    """A workplan from `chunk_steps` runs end to end and keeps its chain on disk."""
+    blueprint = shape_root / "hello.yaml"
+    blueprint.write_text(
+        yaml.safe_dump(
+            {
+                "name": "hello chunk",
+                "description": "says hello to a chunk",
+                "application": "hello_world",
+                "state": "draft",
+                "target": "chunk",
+                "schema_version": "1.0.0",
+            },
+            sort_keys=False,
+        )
+    )
+    base = Step(
+        name="hello",
+        application="hello_world",
+        blueprint=str(blueprint),
+        compute_overrides={"local": {"max_walltime": WALLTIME}},
+    )
+    windows = equal_windows(datetime(2012, 1, 1), datetime(2012, 1, 7), 3)
+    generated = chunk_steps(base, windows, prefix="chunk", chain_directive=False)
+    chain = [step.name for step in generated.steps]
+    assert chain == ["chunk-01", "chunk-02", "chunk-03"]
+
+    # `chunk_steps` always overrides `runtime_params.end_date`, which `workplan check`
+    # rejects for hello_world ("Extra inputs are not permitted"); drop it so the
+    # steps are valid for this application and only the chain is under test
+    steps = [
+        step.model_copy(update={"blueprint_overrides": {}}) for step in generated.steps
+    ]
+    workplan = shape_root / "workplan.yaml"
+    serialize(
+        workplan,
+        Workplan(name="chunks", description="generated chunk chain", steps=steps),
+    )
+
+    run_id = "shape-chunks"
+    env = make_cli_env(shape_root, cstar_shim)
+    proc = run_cstar(env, "workplan", "run", "--run-id", run_id, str(workplan))
+    output = f"stdout:\n{proc.stdout}\nstderr:\n{proc.stderr}"
+    state_home, data_home = shape_root / "state", shape_root / "data"
+    try:
+        wait_for_terminal(
+            state_home, run_id, chain, timeout=RUN_TIMEOUT, poll_interval=POLL_INTERVAL
+        )
+        assert proc.returncode == 0, output
+        statuses = {s: read_status(sentinel_path(state_home, run_id, s)) for s in chain}
+        assert statuses == dict.fromkeys(chain, DONE), output
+
+        transformed = next(
+            (data_home / "workplan_runs" / run_id).rglob("*_transformed.yaml")
+        )
+        persisted = yaml.safe_load(transformed.read_text())
+        assert {s["name"]: s.get("depends_on", []) for s in persisted["steps"]} == {
+            "chunk-01": [],
+            "chunk-02": ["chunk-01"],
+            "chunk-03": ["chunk-02"],
+        }, transformed.read_text()
+    finally:
+        kill_run(state_home, run_id, chain)

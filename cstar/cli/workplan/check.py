@@ -3,10 +3,7 @@ import typing as t
 from pathlib import Path
 
 import typer
-from pydantic import ValidationError
 
-from cstar.base.exceptions import CstarError, CstarExpectationFailed
-from cstar.cli.common import format_validation_errors
 from cstar.cli.workplan.shared import preprocess_varfile, preprocess_vars
 from cstar.entrypoint.utils import (
     ARG_SCHEMA_ONLY,
@@ -18,15 +15,11 @@ from cstar.entrypoint.utils import (
     ARG_VARFILE_LONG,
     ARG_VARFILE_SHORT,
 )
+from cstar.orchestration.check import deep_check
 from cstar.orchestration.dag_runner import get_launcher
-from cstar.orchestration.models import UserDefinedVariables, Workplan
+from cstar.orchestration.models import Workplan
 from cstar.orchestration.orchestration import LiveWorkplan
 from cstar.orchestration.serialization import validate_serialized_entity
-from cstar.orchestration.transforms import (
-    TemplateFillTransform,
-    WorkplanTransformer,
-    resolve_external_runs,
-)
 
 if t.TYPE_CHECKING:
     from collections.abc import Mapping
@@ -54,38 +47,15 @@ def _deep_check(wp: Workplan, user_vars: "Mapping[str, str] | None") -> t.NoRetu
     typer.Exit
         Code 0 if every step resolves cleanly, otherwise 1.
     """
-    named_config = UserDefinedVariables(
-        keys=set(wp.runtime_vars),
-        mapping=user_vars or {},
-        require_coverage=True,
+    transformed, problems = asyncio.run(
+        deep_check(wp, user_vars, lambda: get_launcher(wp))
     )
-
-    problems: list[str] = []
-    if named_config.error:
-        problems.append(named_config.error)
-    else:
-        fill = TemplateFillTransform(variable_resolver=lambda name: named_config[name])
-        try:
-            external = asyncio.run(resolve_external_runs(wp, fill, get_launcher))
-            transformed = WorkplanTransformer(wp, fill, external).apply()
-        except ValidationError as ex:
-            problems.append(format_validation_errors(ex))
-        except KeyError as ex:
-            # an undeclared `{{placeholder}}`; the lookup wraps a readable message
-            problems.append(str(ex.args[0]))
-        except (
-            ValueError,
-            FileNotFoundError,
-            CstarError,
-            CstarExpectationFailed,
-        ) as ex:
-            problems.append(str(ex))
-        else:
-            step_count = len(transformed.steps)
-            print(
-                "Applications, blueprints, overrides and directives resolved "
-                f"for {step_count} step(s)"
-            )
+    if transformed is not None:
+        step_count = len(transformed.steps)
+        print(
+            "Applications, blueprints, overrides and directives resolved "
+            f"for {step_count} step(s)"
+        )
 
     if problems:
         print("Resolution problems:")

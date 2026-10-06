@@ -35,6 +35,8 @@ from pydantic import (
 from pydantic.json_schema import GetJsonSchemaHandler, JsonSchemaValue
 from pydantic_core import CoreSchema
 
+from cstar.base.adapter import CstarAdaptationError
+from cstar.base.exceptions import CstarExpectationFailed
 from cstar.base.utils import generate_schema_ref, lazy_import, slugify
 from cstar.execution.file_system import StateDirectoryManager
 from cstar.orchestration.serialization import register_representer, strenum_representer
@@ -829,6 +831,32 @@ class Workplan(ConfiguredBaseModel):
         bool
         """
         return bool(self.steps) and all(step.pre_run for step in self.steps)
+
+    @field_validator("compute_environment", mode="after")
+    @classmethod
+    def _check_compute_environment(cls, value: KeyValueStore) -> KeyValueStore:
+        """Ensure a non-empty compute environment is well-formed.
+
+        Parameters
+        ----------
+        value : KeyValueStore
+            The compute environment assigned to the instance
+
+        Raises
+        ------
+        ValueError
+            If the compute environment contains unknown keys or invalid values.
+        """
+        # imported here: compute_environment depends on this module
+        from cstar.orchestration.compute_environment import ComputeEnvironmentAdapter
+
+        try:
+            ComputeEnvironmentAdapter().adapt(value)
+        except CstarExpectationFailed:
+            pass
+        except CstarAdaptationError as ex:
+            raise ValueError(str(ex)) from ex
+        return value
 
     @field_validator("runtime_vars", mode="after")
     @classmethod

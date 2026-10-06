@@ -25,7 +25,7 @@ if TYPE_CHECKING:
 _TAG_RE = re.compile(r"<[^>]+>")
 
 #: Seconds the "Confirm reload" state stays armed before resetting.
-_CONFIRM_TIMEOUT = 5.0
+CONFIRM_TIMEOUT = 5.0
 
 
 class CatalogBar:
@@ -33,7 +33,7 @@ class CatalogBar:
 
     Reload is a two-step confirm (it discards any in-progress edits): the
     first click arms a "Confirm reload (discards edits)" danger-styled
-    button for :data:`_CONFIRM_TIMEOUT` seconds; a second click within that
+    button for :data:`CONFIRM_TIMEOUT` seconds; a second click within that
     window calls ``on_reload(current_input_text)``. The arming timer resets
     automatically if it isn't confirmed in time.
     """
@@ -130,7 +130,7 @@ class CatalogBar:
         self._confirm_timer = None
 
     def _schedule_reset(self) -> Any:
-        """Arrange for `_reset_confirm` to run after ``_CONFIRM_TIMEOUT`` seconds.
+        """Arrange for `_reset_confirm` to run after ``CONFIRM_TIMEOUT`` seconds.
 
         Widget state must be mutated on the kernel's event-loop thread for the
         update to reach the frontend reliably, so when a loop is running (the
@@ -142,11 +142,11 @@ class CatalogBar:
         try:
             loop = asyncio.get_running_loop()
         except RuntimeError:
-            timer = threading.Timer(_CONFIRM_TIMEOUT, self._reset_confirm)
+            timer = threading.Timer(CONFIRM_TIMEOUT, self._reset_confirm)
             timer.daemon = True
             timer.start()
             return timer
-        return loop.call_later(_CONFIRM_TIMEOUT, self._reset_confirm)
+        return loop.call_later(CONFIRM_TIMEOUT, self._reset_confirm)
 
     def _on_reload_click(self, _btn: Any) -> None:
         """Handle a reload-button click: arm on the first click, confirm on the second."""

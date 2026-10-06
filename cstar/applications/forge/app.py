@@ -30,10 +30,15 @@ import typing as t
 
 from cstar.applications.core import (
     ApplicationDefinition,
+    EmittedBlueprint,
     RunnerResult,
     register_application,
 )
-from cstar.applications.forge.blueprint import DEFAULT_APPLICATION, ForgeBlueprint
+from cstar.applications.forge.blueprint import (
+    DEFAULT_APPLICATION,
+    ForgeBlueprint,
+    emitted_blueprint_filename,
+)
 from cstar.entrypoint.runner import BlueprintRunner
 from cstar.execution.file_system import JobFileSystemManager
 from cstar.execution.handler import ExecutionStatus
@@ -131,3 +136,33 @@ class ForgeApplication(ApplicationDefinition[ForgeBlueprint, ForgeRunner]):
     blueprint = ForgeBlueprint
     applicable_transforms = ()
     migrations = ()
+
+    @t.override
+    def emitted_blueprint(self, blueprint: ForgeBlueprint) -> EmittedBlueprint:
+        """Describe the `roms_marbl` blueprint a forge run of `blueprint` publishes.
+
+        Parameters
+        ----------
+        blueprint : ForgeBlueprint
+            The blueprint of the forge step.
+
+        Returns
+        -------
+        EmittedBlueprint
+            The predicted `roms_marbl` blueprint.
+        """
+        # Deferred: this package's import (registration) must stay light, and
+        # these pull in roms_tools/xarray/dask.
+        from cstar.applications.forge.input_data import netcdf_basename
+        from cstar.applications.roms_marbl.models import APP_NAME as ROMS_MARBL_APP
+
+        return EmittedBlueprint(
+            filename=emitted_blueprint_filename(blueprint.name),
+            application=ROMS_MARBL_APP,
+            cpus_needed=blueprint.n_procs,
+            single_node=False,
+            start_date=blueprint.run.start_date,
+            end_date=blueprint.run.end_date,
+            use_pio=blueprint.use_pio,
+            grid_filename=netcdf_basename(blueprint.name, "grid"),
+        )

@@ -247,16 +247,9 @@ def test_serialization_workplan_compute_env(
     """Verify that dynamically added compute environment attributes are parsed."""
     data = complete_workplan_template_input
 
-    nodes_var = "num_nodes"
-    nodes_val = 4
+    slurm_defaults = {"num_nodes": 4, "cpus_per_node": 16}
 
-    cpus_var = "num_cpus_per_process"
-    cpus_val = 16
-
-    data["compute_environment"] = {
-        nodes_var: nodes_val,
-        cpus_var: cpus_val,
-    }
+    data["compute_environment"] = {"slurm": slurm_defaults}
 
     for i, step in enumerate(data.get("steps", [])):
         empty_bp_path = tmp_path / f"blueprint-{i:00}.yaml"
@@ -271,8 +264,7 @@ def test_serialization_workplan_compute_env(
 
     compute_env = workplan.compute_environment
 
-    assert compute_env[nodes_var] == nodes_val
-    assert compute_env[cpus_var] == cpus_val
+    assert compute_env["slurm"] == slurm_defaults
 
 
 def test_serialization_workplan_runtime_vars(

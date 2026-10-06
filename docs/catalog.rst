@@ -20,8 +20,11 @@ Specs, one directory per entry, under a directory per kind:
 - ``OutputSpec/<name>/Output.yaml``: output streams and frequencies.
 - ``CdrSpec/<name>/...``: carbon dioxide removal forcing.
 
-Plus ``blueprints/`` for saved forge blueprints and ``workplans/`` for
-workplans saved from the wizard. The directory name is an entry's name; there
+Plus ``blueprints/`` for blueprints -- forge blueprints as
+``<name>.forge_blueprint.yaml`` and ROMS-MARBL blueprints as ``B_<name>.yaml``
+(the file a forge run emits; the older ``blueprints/<machine>/<name>/``
+directories are still read) -- and ``workplans/`` for workplans saved from
+the wizard. The directory name is an entry's name; there
 are no version numbers or identifiers beyond it. :doc:`forge/specs` describes
 what each spec kind contains.
 

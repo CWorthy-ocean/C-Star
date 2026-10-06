@@ -58,7 +58,7 @@ def status(
         workplan = deserialize(wp_path, LiveWorkplan)
 
         # a pre-run's steps are local processes, whatever the system scheduler
-        launcher = get_launcher(force_local=workplan.pre_run)
+        launcher = get_launcher(workplan, force_local=workplan.pre_run)
         external = asyncio.run(load_external_runs(workplan, launcher))
         # the upstream run's record may be gone: show this run regardless
         for token, message in external.errors().items():

@@ -12,6 +12,7 @@ from pathlib import Path
 import yaml
 from pydantic import (
     BaseModel,
+    ValidationError,
 )
 
 from cstar.applications.core import (
@@ -26,7 +27,12 @@ from cstar.base.log import LoggingMixin, get_logger
 from cstar.base.utils import deep_merge
 from cstar.execution.file_system import JobFileSystemManager, local_copy
 from cstar.orchestration.adapter import DIRECTIVES_FILENAME, prepare_directive_file
+from cstar.orchestration.compute_environment import (
+    ComputeEnvironment,
+    resolve_compute_environment,
+)
 from cstar.orchestration.launch.common import is_foreign_handle
+from cstar.orchestration.launch.slurm import SlurmComputeSpec
 from cstar.orchestration.models import (
     Blueprint,
     DeferredBlueprintRef,
@@ -1009,6 +1015,7 @@ class WorkplanTransformer(LoggingMixin):
             raise ValueError(msg)
 
         override_transform = OverrideTransform()
+        env = resolve_compute_environment(self.original.compute_environment)
 
         for step in live_steps:
             active_transforms = [
@@ -1047,10 +1054,13 @@ class WorkplanTransformer(LoggingMixin):
                     # children have materialized blueprints (overrides already
                     # baked in); record their cpu requirement directly
                     transformed_steps.extend(
-                        _inject_cpus(
-                            child,
-                            child.blueprint.cpus_needed,
-                            single_node=child.blueprint.single_node,
+                        _inject_compute_defaults(
+                            _inject_cpus(
+                                child,
+                                child.blueprint.cpus_needed,
+                                single_node=child.blueprint.single_node,
+                            ),
+                            env,
                         )
                         for child in overridden_steps
                     )
@@ -1059,7 +1069,9 @@ class WorkplanTransformer(LoggingMixin):
                 # keeps its original blueprint path and carries an
                 # apply-overrides directive to be resolved at runtime.
                 transformed_steps.append(
-                    package_runtime_overrides(preflight_overrides(step))
+                    _inject_compute_defaults(
+                        package_runtime_overrides(preflight_overrides(step)), env
+                    )
                 )
 
         # remap dependency references to point to the last child of each split parent
@@ -1339,6 +1351,45 @@ def _inject_cpus(step: LiveStep, cpus: int, single_node: bool = False) -> LiveSt
         {"slurm": injected},
         dict(step.compute_overrides),
     )
+    return LiveStep.from_step(step, update={"compute_overrides": new_overrides})
+
+
+def _inject_compute_defaults(step: LiveStep, env: ComputeEnvironment) -> LiveStep:
+    """Record the workplan-wide SLURM defaults in a step's `compute_overrides`.
+
+    Declared step values win; the workplan's defaults fill in the rest.
+
+    Parameters
+    ----------
+    step : LiveStep
+        The step to enrich.
+    env : ComputeEnvironment
+        The workplan's compute environment.
+
+    Returns
+    -------
+    LiveStep
+        The step with `compute_overrides` carrying the workplan's SLURM
+        defaults, or the step itself when the workplan declares none.
+    """
+    if env.slurm is None:
+        return step
+
+    defaults = env.slurm.model_dump(exclude_defaults=True)
+    declared = step.compute_overrides.get("slurm", {})
+    if isinstance(declared, Mapping) and declared.get("single_node"):
+        # a single-node step cannot take a workplan-wide node count
+        defaults.pop("num_nodes", None)
+
+    new_overrides = deep_merge({"slurm": defaults}, dict(step.compute_overrides))
+    try:
+        SlurmComputeSpec.model_validate(new_overrides["slurm"])
+    except ValidationError as ex:
+        msg = (
+            f"Step {step.name!r}: the workplan's compute_environment.slurm defaults "
+            f"conflict with the step's compute overrides: {ex.errors()[0]['msg']}"
+        )
+        raise ValueError(msg) from ex
     return LiveStep.from_step(step, update={"compute_overrides": new_overrides})
 
 

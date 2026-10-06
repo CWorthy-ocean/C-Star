@@ -1,0 +1,329 @@
+# Label glossary for the Workplan page of the wizard.
+#
+# See cstar/wizard/ui/labels/__init__.py for the schema. Bare field keys are
+# attributes of WorkplanBuilderPage; `step.<key>` keys are attributes of the
+# step pane; `buttons.<name>` are button captions.
+
+sections:
+  # --- top-level cards ------------------------------------------------------
+  start:
+    title: Start
+    desc: Begin a new workplan, or load a saved one to edit a copy. The loaded file is never changed unless you confirm an overwrite.
+    required: false
+  workplan:
+    title: Workplan
+    desc: Name the workplan and declare the other workplan runs its steps refer to.
+    required: true
+  compute:
+    title: Compute target
+    desc: Where the steps run. Leave unspecified to use the environment's settings when the workplan runs.
+    required: false
+  steps:
+    title: Steps
+    desc: One pane per step - its blueprint, overrides, directives and compute settings. Steps from the recipes above land here.
+    required: true
+  recipes:
+    title: Recipes
+    desc: Generate the recurring shapes - time chunks, a spin-up ramp, forge then run, upscaling - and edit the result as steps in the Steps card below.
+    required: false
+  review:
+    title: Review and run
+    desc: Check the draft, save it, then run it with the C-Star CLI.
+    required: false
+
+  # --- subsections ----------------------------------------------------------
+  workplan.runs:
+    title: Add aliases to previous run-ids
+    desc: Aliases for runs this workplan refers to as step@alias.
+    required: false
+  step.blueprint:
+    title: Blueprint
+    desc: Where the step's blueprint comes from, and which application runs it.
+    required: false
+  step.overrides:
+    title: Blueprint overrides
+    desc: Values layered over the blueprint for this step.
+    required: false
+  step.directives:
+    title: Directives
+    desc: Where the step takes its restart and boundary data from.
+    required: false
+  step.compute:
+    title: Compute overrides
+    desc: Blank values inherit the workplan's compute target.
+    required: false
+  recipes.chunk:
+    title: Chunk a run in time
+    desc: Split a roms_marbl run (a step or a blueprint) into chained steps, one per window; each writes only end_date and continues from the previous restart.
+    required: false
+  recipes.ramp:
+    title: Spin-up ramp
+    desc: Chain short segments whose time step grows, ahead of the main run.
+    required: false
+  recipes.forge:
+    title: Forge inputs, then run
+    desc: A forge step followed by a deferred roms_marbl step that runs what it generates.
+    required: false
+  recipes.upscale:
+    title: Upscale a nested run
+    desc: For each pair of nested levels, an upscaler step and a re-run of the parent that uses its output. Levels must not be time chunks.
+    required: false
+  review.diagnostics:
+    title: Checks
+    desc: A deep check resolves the draft as running it would, and the readiness list shows what a pre-run would prepare.
+    required: false
+  review.run:
+    title: Run
+    desc: Save, check and run the workplan with the C-Star CLI.
+    required: false
+  review.report:
+    title: What loading changed
+    desc: Rewrites applied to the loaded file, and keys not carried over.
+    required: false
+  side.yaml:
+    title: YAML
+    desc: The workplan as YAML. Edit it and press Apply edits to load the text into the page; Save and Download always use the applied draft.
+    required: false
+  side.dag:
+    title: Dependency graph
+    desc: Steps left to right by dependency; dashed nodes are steps of other runs.
+    required: false
+  review.save:
+    title: Save
+    desc: Write the draft to a file, or download it.
+    required: false
+
+fields:
+  # --- Start ----------------------------------------------------------------
+  load_dd:
+    label: Saved workplan
+    hint: Workplans in the catalog's workplans directory.
+  load_path:
+    label: Workplan path
+  upload:
+    label: Upload a workplan
+
+  # --- Workplan -------------------------------------------------------------
+  name:
+    label: Workplan name
+    required: true
+  description:
+    label: Description
+    hint: Blank uses the workplan name.
+  runtime_vars:
+    label: Runtime variables
+    symbol: runtime_vars
+    hint: Names filled in when the workplan runs, written {{name}}; comma-separated.
+
+  # --- Compute --------------------------------------------------------------
+  compute_target:
+    label: Run on
+    symbol: compute_environment.launcher
+  machine:
+    label: Machine
+    symbol: compute_environment.system
+  queue:
+    label: Queue
+    symbol: queue_name
+  account:
+    label: Account
+    symbol: account_name
+  walltime:
+    label: Default walltime
+    symbol: max_walltime
+  cpus_per_node:
+    label: CPUs per node
+    symbol: cpus_per_node
+    hint: Tells node pinning the node size of a machine C-Star does not know.
+
+  # --- Review ---------------------------------------------------------------
+  save_path:
+    label: Save path
+
+  # --- step pane ------------------------------------------------------------
+  step.name:
+    label: Step name
+    required: true
+  step.source:
+    label: Blueprint from
+  step.catalog_roms:
+    label: Catalog roms_marbl blueprint
+  step.catalog_forge:
+    label: Catalog forge blueprint
+  step.path:
+    label: Blueprint path
+  step.upload:
+    label: Upload blueprint
+  step.producer:
+    label: Produced by step
+    hint: The step whose output directory holds the blueprint; a step of another run is written step@alias.
+  step.filename:
+    label: Blueprint file name
+    hint: Blank means the only blueprint in the producer's output.
+  step.application:
+    label: Application
+    hint: Taken from a blueprint file; chosen here for a deferred or inline blueprint.
+  step.depends_on:
+    label: Depends on
+    symbol: depends_on
+    hint: Steps implied by directives, placeholders and a deferred blueprint are added for you.
+  step.end_date:
+    label: End date
+    symbol: runtime_params.end_date
+  step.cdr_location:
+    label: CDR forcing file
+    symbol: cdr_forcing
+  step.roms_branch:
+    label: ucla-roms branch
+    symbol: code.roms.branch
+  step.roms_commit:
+    label: ucla-roms commit
+    symbol: code.roms.commit
+    hint: Give a branch or a commit, not both; the blueprint's own choice is replaced only by the one you set.
+  step.raw_overrides:
+    label: Other overrides (YAML)
+    hint: Merged last, over everything above.
+  step.cont_kind:
+    label: Continue from
+    symbol: continue-from
+  step.cont_step:
+    label: Step
+  step.cont_path:
+    label: Restart path
+  step.cont_pick:
+    label: Restart
+    hint: The restarts found at the source.
+  step.cont_timestamp:
+    label: Restart timestamp
+    symbol: timestamp
+    hint: Blank continues from the latest restart.
+  step.nest_kind:
+    label: Boundaries from
+    symbol: nest-from
+    hint: Several sources are joined with ";".
+  step.num_cpus:
+    label: CPUs
+    symbol: num_cpus
+    hint: Required for a deferred blueprint, which the launcher cannot read.
+  step.max_walltime:
+    label: Walltime
+    symbol: max_walltime
+  step.queue_name:
+    label: Queue
+    symbol: queue_name
+  step.account_name:
+    label: Account
+    symbol: account_name
+  step.cpus_per_node:
+    label: CPUs per node
+    symbol: cpus_per_node
+  step.local_walltime:
+    label: Walltime (local)
+    symbol: max_walltime
+
+  # --- Recipes ---------------------------------------------------------------
+  base.kind:
+    label: Start from
+    hint: A blueprint is turned into the base step for you; a forge blueprint adds the forge step and chunks the roms_marbl step it generates.
+  base.step:
+    label: Step
+    hint: Only roms_marbl steps can be a base; an existing base step stays in the workplan.
+  base.catalog_roms:
+    label: Catalog roms_marbl blueprint
+  base.catalog_forge:
+    label: Catalog forge blueprint
+  base.path:
+    label: Blueprint path
+  chunk_start:
+    label: Window start
+    hint: Prefilled from the base blueprint; only the end of each chunk is written.
+  chunk_end:
+    label: Window end
+  chunk_mode:
+    label: Chunk length
+  chunk_prefix:
+    label: Step name prefix
+  chunk_walltime:
+    label: Walltime per chunk
+    symbol: max_walltime
+  chunk_hours_per_day:
+    label: Walltime hours per simulated day
+    hint: Scaled by each chunk's length; give this or a fixed walltime.
+  chunk_cadence:
+    label: Daily restarts
+    symbol: output_period_rst
+    hint: Writes a restart every simulated day instead of at month ends.
+  first.kind:
+    label: First step continues from
+  first.step:
+    label: Step
+  first.path:
+    label: Restart path
+  first.timestamp:
+    label: Restart timestamp
+    hint: Blank continues from the latest restart.
+  ramp_start:
+    label: Start
+  ramp_prefix:
+    label: Step name prefix
+  ramp_cadence:
+    label: Daily restarts
+    symbol: output_period_rst
+  forge_source:
+    label: Forge blueprint
+  forge_path:
+    label: Forge blueprint path
+  upscale_levels:
+    label: Levels, innermost first
+    hint: Pick the roms_marbl steps in order, innermost grid first.
+
+  pinned:
+    label: Keep preview visible
+    hint: Sticks the preview to the page while you scroll.
+
+  # --- Run ------------------------------------------------------------------
+  run_id:
+    label: Run id
+    hint: Names the run; the same id re-enters it.
+  run_vars:
+    label: Runtime variable values
+    hint: name=value pairs for the declared runtime variables, comma-separated.
+  pre_run_first:
+    label: Pre-run first
+    hint: Prepare every preparable step on this machine, then submit with the same run id.
+
+  # --- button captions ------------------------------------------------------
+  buttons.load:
+    label: Load
+  buttons.new:
+    label: New workplan
+  buttons.add_step:
+    label: Add step
+  buttons.add_run:
+    label: Add run
+  buttons.refresh_runs:
+    label: Refresh runs
+  buttons.add_override:
+    label: Add namelist override
+  buttons.add_source:
+    label: Add boundary source
+  buttons.apply_edits:
+    label: Apply edits
+  buttons.discard_edits:
+    label: Discard edits
+  buttons.save:
+    label: Save
+  buttons.confirm_overwrite:
+    label: Confirm overwrite
+  buttons.add_steps:
+    label: Add steps
+  buttons.add_ramp_row:
+    label: Add segment
+  buttons.deep_check:
+    label: Deep check
+  buttons.check:
+    label: Check
+  buttons.run:
+    label: Run
+  buttons.revert:
+    label: revert

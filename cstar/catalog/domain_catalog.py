@@ -393,11 +393,14 @@ class DomainCatalog:
             logger.warning("Failed to scan models: %s", exc)
 
     def _scan_roms_marbl_blueprints(self) -> None:
-        """Scan blueprints/ (and Blueprints/) for blueprint directories.
+        """Scan blueprints/ (and Blueprints/) for ROMS-MARBL blueprints.
 
-        Expected layout: blueprints/<machine>/<name>/B_*.yaml
-        Uses _fs_iterdir_dirs to retrieve directory type from a single ls call,
-        avoiding a separate isdir API call per entry.
+        Two layouts are recognised: the flat ``blueprints/B_<name>.yaml`` file a
+        forge run emits (entry ``<name>`` maps to the file), and the older
+        ``blueprints/<machine>/<name>/B_*.yaml`` directories (entry ``<name>``
+        maps to the directory). Uses _fs_iterdir_dirs to retrieve directory
+        type from a single ls call, avoiding a separate isdir API call per
+        entry.
         """
         self._roms_marbl_blueprints = {}
         for subdir_name in ("blueprints", "Blueprints"):
@@ -408,6 +411,9 @@ class DomainCatalog:
                 for machine_dir in sorted(self._fs_iterdir_dirs(bp_root)):
                     for bp_dir in sorted(self._fs_iterdir_dirs(machine_dir)):
                         self._roms_marbl_blueprints[bp_dir.name] = bp_dir
+                for bp_file in self._fs_glob_dual(bp_root, "B_*"):
+                    name = bp_file.name.removesuffix(bp_file.suffix).removeprefix("B_")
+                    self._roms_marbl_blueprints[name] = bp_file
             except Exception as exc:
                 logger.warning(
                     "Failed to scan roms_marbl_blueprints under %s: %s",
@@ -815,7 +821,8 @@ class DomainCatalog:
         Returns
         -------
         Path
-            Path to the blueprint's directory (contains B_*.yaml).
+            The blueprint file (flat ``B_<name>.yaml`` layout) or the directory
+            holding ``B_*.yaml`` (the older per-machine layout).
         """
         if isinstance(roms_marbl_blueprint_id, str):
             return self.roms_marbl_blueprint_path(roms_marbl_blueprint_id)
@@ -1243,10 +1250,13 @@ class DomainCatalog:
         directories.
         """
         files: list[Path] = []
-        for bp_dir in self._roms_marbl_blueprints.values():
+        for entry in self._roms_marbl_blueprints.values():
+            if entry.suffix:  # the flat layout: the entry is the file itself
+                files.append(entry)
+                continue
             files.extend(
                 f
-                for f in self._fs_glob_dual(bp_dir, "B_*")
+                for f in self._fs_glob_dual(entry, "B_*")
                 if ".ipynb_checkpoints" not in str(f)
             )
         return sorted(set(files))

@@ -4,7 +4,7 @@ from unittest.mock import patch
 
 import typer
 
-from cstar.cli.cli import attach_plugin_subcommands
+from cstar.cli.cli import attach_plugin_subcommands, attach_subcommands
 from cstar.tests.unit_tests.orchestration.cli.conftest import FakeEntryPoint
 
 
@@ -46,6 +46,17 @@ def test_forge_plugin_now_collides_with_the_core_command():
         attach_plugin_subcommands(app, taken={"forge"})
 
     assert registered_names(app) == set()
+
+
+def test_wizard_plugin_collides_with_the_core_command():
+    # `wizard` is a root *command* (not a sub-app); its name is still reserved.
+    app = typer.Typer()
+    eps = [FakeEntryPoint("wizard", loaded=typer.Typer())]
+    with patch("cstar.cli.cli.entry_points", return_value=eps):
+        attach_subcommands(app)
+
+    assert "wizard" not in registered_names(app)
+    assert [c.name for c in app.registered_commands] == ["wizard"]
 
 
 def test_failing_plugin_does_not_break_cli():

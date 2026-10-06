@@ -4,6 +4,7 @@ import re
 from unittest.mock import patch
 
 import pytest
+import typer
 from typer.testing import CliRunner
 
 import cstar.cli.forge as cli
@@ -149,6 +150,47 @@ class TestWizard:
     def test_missing_voila_exits_nonzero_with_hint(self):
         with patch.object(cli.shutil, "which", return_value=None):
             result = runner.invoke(cli.app, ["wizard"])
+        assert result.exit_code == 1
+        assert "voila is not installed" in result.output
+
+
+class TestRootWizard:
+    """``cstar wizard`` and ``cstar forge wizard`` share one implementation."""
+
+    @staticmethod
+    def _argv(app, args):
+        with patch.object(cli, "_exec_voila") as mock_exec:
+            result = runner.invoke(app, args)
+        assert result.exit_code == 0
+        return mock_exec.call_args.args[0]
+
+    def test_root_wizard_matches_forge_wizard(self):
+        from cstar.cli.cli import attach_subcommands
+
+        root = typer.Typer()
+        with patch("cstar.cli.cli.entry_points", return_value=[]):
+            attach_subcommands(root)
+
+        extra = ["--port", "9000", "--no-browser"]
+        assert self._argv(root, ["wizard", *extra]) == self._argv(
+            cli.app, ["wizard", *extra]
+        )
+
+    def test_root_wizard_is_listed_in_help(self):
+        from cstar.cli.cli import app as root
+
+        result = runner.invoke(root, ["--help"])
+        assert result.exit_code == 0
+        assert "wizard" in _plain(result.output)
+
+    def test_missing_voila_exits_nonzero_with_hint(self):
+        from cstar.cli.cli import attach_subcommands
+
+        root = typer.Typer()
+        with patch("cstar.cli.cli.entry_points", return_value=[]):
+            attach_subcommands(root)
+        with patch.object(cli.shutil, "which", return_value=None):
+            result = runner.invoke(root, ["wizard"])
         assert result.exit_code == 1
         assert "voila is not installed" in result.output
 
