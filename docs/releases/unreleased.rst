@@ -23,6 +23,8 @@ Breaking Changes
 - ``Workplan.compute_environment`` is validated: unknown keys are rejected at load. The two keys the old bundled templates used (``num_nodes``, ``num_cpus_per_process``) were never read and are dropped with a warning instead. (`#743 <https://github.com/CWorthy-ocean/C-Star/pull/743>`_)
 - The blueprint page's "Workplan (experimental)" export is removed; the Workplan page replaces it. (`#743 <https://github.com/CWorthy-ocean/C-Star/pull/743>`_)
 - The catalog's ``roms_marbl_blueprint_path`` now returns the blueprint file for a flat ``blueprints/B_<name>.yaml`` entry (the per-machine directory layout still returns the directory). (`#743 <https://github.com/CWorthy-ocean/C-Star/pull/743>`_)
+- The catalog's ``roms_marbl_blueprints_dir``, ``roms_marbl_blueprint_dir_for`` and ``build_dir_for`` are removed; blueprint entries are files, and build directories are not part of the catalog. (`#742 <https://github.com/CWorthy-ocean/C-Star/pull/742>`_)
+- The default save path for a forge blueprint built in the wizard is now ``blueprints/forge/<name>.yaml`` in your catalog, no longer a flat ``<name>.forge_blueprint.yaml``. (`#742 <https://github.com/CWorthy-ocean/C-Star/pull/742>`_)
 
 New features
 ~~~~~~~~~~~~
@@ -64,6 +66,17 @@ New features
 
 - Applications can describe the blueprint they emit for a deferred downstream step (``ApplicationDefinition.emitted_blueprint``); forge does, so a deferred ROMS-MARBL step is prefilled with its file name and CPU count. (`#743 <https://github.com/CWorthy-ocean/C-Star/pull/743>`_)
 - The catalog reads a flat ``blueprints/B_<name>.yaml`` as a ROMS-MARBL blueprint beside the older per-machine directories. (`#743 <https://github.com/CWorthy-ocean/C-Star/pull/743>`_)
+- Catalog blueprints live in ``blueprints/<application>/<name>.yaml``, one file per blueprint, for every application. (`#742 <https://github.com/CWorthy-ocean/C-Star/pull/742>`_)
+
+  - The catalog API gains ``blueprint_applications``, ``blueprint_names(application)``, ``blueprint_path(application, name)`` and ``blueprint_dir(application)``; the forge and ROMS-MARBL accessors remain as wrappers.
+  - A forge blueprint and the ROMS-MARBL blueprint it emits may share a name, since names are unique per application.
+
+- The wales toy ROMS-MARBL blueprint ships in the bundled catalog as ``wales-toy`` (ParallelIO on), so a workplan can start from a real catalog blueprint out of the box; it runs under the default ``blueprint_runs`` location. (`#742 <https://github.com/CWorthy-ocean/C-Star/pull/742>`_)
+- ``cstar admin migrate-catalog <root>`` moves blueprints in the older layouts into place; ``--dry-run`` reports the plan without changing anything. (`#742 <https://github.com/CWorthy-ocean/C-Star/pull/742>`_)
+
+  - Existing destination files are never overwritten; the source stays in place and is reported.
+  - Emptied per-machine directories are removed, and anything left behind, such as ``Build/`` or sidecar files, is listed.
+
 
 
 
@@ -86,6 +99,7 @@ Bug Fixes
 - ``cstar admin clean`` no longer deletes the user catalog at ``~/cstar/catalog`` when it clears the C-Star data directory. (`#736 <https://github.com/CWorthy-ocean/C-Star/pull/736>`_)
 - Tab completion of step names found no steps for a run whose tracking record had been cleaned up. (`#739 <https://github.com/CWorthy-ocean/C-Star/pull/739>`_)
 - Forge runs with ``bgc_mode: none`` crashed in ROMS with garbage tracer names because the namelist still requested 32 BGC tracers; Forge now sets the BGC tracer count to 0 when MARBL is off. (`#741 <https://github.com/CWorthy-ocean/C-Star/pull/741>`_)
+- The Workplan page's predicted CPU count for a step followed the first catalog blueprint it saw instead of the blueprint actually chosen. (`#742 <https://github.com/CWorthy-ocean/C-Star/pull/742>`_)
 
 Improvements
 ~~~~~~~~~~~~
@@ -113,6 +127,9 @@ Improvements
 - ``cstar workplan check``'s deep resolution is a library function (``cstar.orchestration.check.deep_check``) the CLI wraps. (`#743 <https://github.com/CWorthy-ocean/C-Star/pull/743>`_)
 - The wizard shell is wider, and ``position: sticky`` now works for the status bar and the preview pane in voila (the ipywidgets and voila output containers no longer clip it). (`#743 <https://github.com/CWorthy-ocean/C-Star/pull/743>`_)
 - The Download button separates its caption from the file name on both pages. (`#743 <https://github.com/CWorthy-ocean/C-Star/pull/743>`_)
+- Blueprints saved in the older layouts (``<name>.forge_blueprint.yaml``, ``B_<name>.yaml``, and ``blueprints/<machine>/<name>/``) are still read for one more release; loading such a catalog logs one warning that lists them and the command to run. (`#742 <https://github.com/CWorthy-ocean/C-Star/pull/742>`_)
+- The wizard's catalog status counts blueprints of every application, and the Workplan page's catalog pickers resolve entries by application. (`#742 <https://github.com/CWorthy-ocean/C-Star/pull/742>`_)
+- The catalog scan lists each directory once, skips hidden entries, and keeps reading the other directories when one fails. (`#742 <https://github.com/CWorthy-ocean/C-Star/pull/742>`_)
 
 
 Miscellaneous
@@ -137,3 +154,6 @@ Miscellaneous
 - The Forge specs docs now describe how ``param.ntrc_bio`` follows ``bgc_mode``. (`#741 <https://github.com/CWorthy-ocean/C-Star/pull/741>`_)
 - Pattern generators live in ``cstar/orchestration/patterns.py`` with golden fixtures; an e2e test runs a generated hello_world chain through ``cstar workplan run``. (`#743 <https://github.com/CWorthy-ocean/C-Star/pull/743>`_)
 - Wizard documentation gains a Workplan page section; workplan documentation describes ``compute_environment`` and drops the incorrect ``local: num_cpus`` claim. (`#743 <https://github.com/CWorthy-ocean/C-Star/pull/743>`_)
+- The bundled forge blueprints move to ``blueprints/forge/``. (`#742 <https://github.com/CWorthy-ocean/C-Star/pull/742>`_)
+- The tutorial's wales toy blueprint is kept byte-identical to the bundled copy (guarded by a test); the unreferenced ``blueprint_pio.yaml`` tutorial file is removed and the plotter tutorial points at the default output path. (`#742 <https://github.com/CWorthy-ocean/C-Star/pull/742>`_)
+- The catalog and wizard documentation describe the layout and the migration. (`#742 <https://github.com/CWorthy-ocean/C-Star/pull/742>`_)
