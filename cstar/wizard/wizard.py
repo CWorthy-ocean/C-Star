@@ -7709,10 +7709,22 @@ class ForgeBlueprintWizard:
             )
             return
         try:
+            base_dir = self.catalog.model_dir(self.model_dd.value)
+            owned = _model_owned_settings(self.config.model_settings)
+            if not self.config.model_settings["cppdefs"].get("marbl", False):
+                # The resolver zeroes ntrc_bio for a run without MARBL; keep the
+                # base model's MARBL tracer count so the saved spec still works
+                # when bgc_mode is switched back to "marbl".
+                base_settings = load_model_spec_data(base_dir)["model"].get(
+                    "model_settings", {}
+                )
+                base_param = base_settings.get("param") or {}
+                if "ntrc_bio" in base_param:
+                    owned.setdefault("param", {})["ntrc_bio"] = base_param["ntrc_bio"]
             self.catalog.register_model_from_settings(
                 name,
-                _model_owned_settings(self.config.model_settings),
-                self.catalog.model_dir(self.model_dd.value),
+                owned,
+                base_dir,
                 description=self.description.value,
                 # Live widget values, using _gather()'s exact conventions (use_pio/
                 # bgc_mode unconditional, roms_ref/marbl_ref only when non-blank) --

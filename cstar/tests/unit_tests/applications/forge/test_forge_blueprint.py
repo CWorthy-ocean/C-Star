@@ -3460,6 +3460,7 @@ def test_resolver_use_pio_requires_model_yml_pin():
 def test_resolver_bgc_mode_default_marbl():
     cfg = _build()
     assert cfg.model_settings["cppdefs"]["marbl"] is True
+    assert cfg.model_settings["param"]["ntrc_bio"] == 32
     assert cfg.code.marbl is not None
     assert cfg.code.marbl.location == "https://github.com/CWorthy-ocean/MARBL.git"
     assert cfg.code.marbl.commit == "marbl0.45.0-max-it-10"
@@ -3493,6 +3494,30 @@ def test_resolver_bgc_mode_none_with_physics_only_forcing():
     cfg = _build(bgc_mode="none", forcing_inputs=_PHYSICS_ONLY_FORCING)
     assert cfg.model_settings["cppdefs"]["marbl"] is False
     assert cfg.code.marbl is None
+    # Only MARBL names BGC tracer slots: the ModelSpec's ntrc_bio is dropped, so
+    # the namelist carries nt_bgc = 0 and per-tracer arrays size to T + S.
+    assert cfg.model_settings["param"]["ntrc_bio"] == 0
+    assert cfg.n_tracers == 2
+
+
+def test_resolver_bgc_mode_none_rejects_bgc_tracer_override():
+    """An explicit override that reintroduces BGC tracers without MARBL fails at
+    authoring time instead of silently winning over the bgc_mode="none" default.
+    """
+    with pytest.raises(ValueError, match="param.ntrc_bio=32"):
+        _build(
+            bgc_mode="none",
+            forcing_inputs=_PHYSICS_ONLY_FORCING,
+            run_time_overrides={"param": {"ntrc_bio": 32}},
+        )
+
+
+def test_resolver_rejects_marbl_cppdef_override_with_bgc_tracers():
+    """The check reads the merged cppdefs, so turning MARBL off by compile-time
+    override (bgc_mode still "marbl", ntrc_bio still 32) also fails at authoring.
+    """
+    with pytest.raises(ValueError, match="param.ntrc_bio=32"):
+        _build(compile_time_overrides={"marbl": False})
 
 
 def test_cppdefs_tides_tracks_tidal_forcing_presence():
@@ -5971,6 +5996,37 @@ class TestSaveModifiedSpecsToCatalog:
         assert "my-model" in isolated_catalog.model_names
         assert wiz.model_dd.value == "my-model"
         assert wiz.config.composition.model.modified is False
+
+    def test_save_model_spec_without_marbl_keeps_base_bgc_tracer_count(
+        self, isolated_catalog
+    ):
+        """A spec saved from a bgc_mode="none" session must keep the base model's
+        ntrc_bio (the resolver zeroes it per run), so switching the saved spec back
+        to MARBL still resolves 32 BGC tracers.
+        """
+        wiz = self._wizard(isolated_catalog)
+        fe = wiz._forcing_editor
+        for ws in list(fe._rows["surface"]):
+            if ws.get("type") is not None and ws["type"].value == "bgc":
+                fe._remove("surface", ws)
+        for section in ("boundary_bgc", "ic_bgc"):
+            for ws in list(fe._rows[section]):
+                fe._remove(section, ws)
+        for ws in list(fe._rows["river"]):
+            if "include_bgc" in ws:
+                ws["include_bgc"].value = False
+        wiz.bgc_dd.value = "none"
+        wiz._rebuild()
+        assert wiz.config is not None, wiz.derived.value
+        assert wiz.config.model_settings["param"]["ntrc_bio"] == 0
+
+        wiz.save_model_name.value = "my-nobgc-model"
+        wiz._on_save_model(None)
+
+        data = isolated_catalog.model_data("my-nobgc-model")
+        assert data["bgc_mode"] == "none"
+        assert data["model_settings"]["param"]["ntrc_bio"] == 32
+        assert "✓" in wiz.save_model_status.value
 
     def test_save_model_spec_marks_unmodified_with_blank_roms_ref(
         self, isolated_catalog

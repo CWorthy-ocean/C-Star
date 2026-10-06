@@ -90,7 +90,9 @@ A ``model.yaml`` has this shape:
    Build modes rather than settings. They prepopulate the wizard, and the
    resolver derives the corresponding compile-time switches from them and
    decides whether the MARBL and PIO code are pulled in. Requesting PIO from
-   a model with no ``code.pio`` pin is an error.
+   a model with no ``code.pio`` pin is an error. ``param.ntrc_bio`` is the
+   MARBL tracer count: with ``bgc_mode: none`` the resolver sets it to 0, and
+   a non-zero count without MARBL is rejected.
 
 ``code``
    The repositories to build, each a ``location`` with a ``commit`` or

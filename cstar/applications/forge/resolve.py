@@ -68,6 +68,7 @@ from cstar.applications.forge.blueprint import (
 from cstar.applications.forge.namelist_model import (
     NamelistConsistencyError,
     canonical_output_sections_for_precheck,
+    check_bgc_tracer_count,
     check_cdr_output_sections,
     check_output_streams_divide_rst,
     check_rst_period_divisible,
@@ -811,6 +812,9 @@ def build_forge_blueprint(
             "nsub_e": 1,
         }
     )
+    # Only MARBL names the BGC tracer slots, so a run without it carries none.
+    if bgc_mode != "marbl":
+        param["ntrc_bio"] = 0
     settings["param"] = param
 
     # cppdefs (compile-time) sits at the same flat level as the namelist sections
@@ -985,6 +989,15 @@ def build_forge_blueprint(
     # (configure_build) via check_cdr_output_sections -- see its docstring.
     if check_cdr_output_sections(settings, bgc_mode_is_marbl=bgc_mode == "marbl"):
         settings["cppdefs"]["cdr_forcing"] = True
+
+    # ----- BGC tracer count consistency --------------------------------------
+    # ntrc_bio was zeroed above for a non-MARBL run; this catches an override
+    # that reintroduces BGC tracers or turns cppdefs.marbl off. Keyed on the
+    # merged cppdefs (what will compile), like configure_build.
+    check_bgc_tracer_count(
+        settings.get("param") or {},
+        bgc_mode_is_marbl=settings["cppdefs"].get("marbl", False),
+    )
 
     # ----- restart period consistency ----------------------------------------
     # Fail fast at authoring time (mirrors the executor's net for hand-edited
