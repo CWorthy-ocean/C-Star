@@ -141,6 +141,18 @@ each card carries a status chip. Every edit regathers the draft and validates
 it with the same model ``cstar workplan check`` loads, so a problem listed in
 the Review card is one the command line would report.
 
+On a wide screen the page has two columns. The cards described below are on
+the left; on the right, kept in view while you scroll, is a live picture of
+what you are building, switchable between **YAML**, **DAG** and both. The YAML
+is editable: change it and press **Apply edits** to load the text back into
+the page (errors are listed and nothing changes; **Discard edits** restores the
+draft's text). The DAG draws the steps left to right by dependency, with steps
+of other runs as dashed grey source nodes and each node coloured by
+application. Edges that come from a restart (``continue-from``), boundary
+(``nest-from``) or deferred blueprint reference are labelled as such. The graph
+follows your edits even while the draft is invalid. On a narrow screen the
+columns stack.
+
 Start
    Begin a new workplan, or load one from the catalog's ``workplans/``
    directory, from a path, or by upload. Loading rewrites deprecated and
@@ -223,12 +235,11 @@ Steps
    directory are not part of a step as authored and are never shown.
 
 Review and run
-   The workplan as YAML with the schema header, in an editable box: change
-   it and press **Apply edits** to load the text back into the page (errors are
-   listed and nothing changes; **Discard edits** restores the draft's text).
-   **Save** writes the applied draft, never unapplied text, to the catalog's
-   ``workplans/`` directory by default, and there is a download link. Saving over the file you loaded takes a second click on
-   **Confirm overwrite**. **Deep check** resolves the draft as running it
+   Validation, the list of changes made on load, and the save, download and
+   run controls. **Save** writes the applied draft, never unapplied text, to
+   the catalog's ``workplans/`` directory by default, and there is a download
+   link. Saving over the file you loaded takes a second click on **Confirm
+   overwrite**. **Deep check** resolves the draft as running it
    would, in this session, listing every problem; blueprints or run records
    that cannot be read on this machine are reported as not verifiable here
    rather than as errors. A readiness list shows which steps a pre-run would

@@ -273,6 +273,31 @@ body[data-voila] .forge-shell {{ max-width: 1180px; margin: 0 auto; padding: 0 2
 }}
 .forge-app .forge-dl-btn code {{ color: #fff; margin-left: 0.5em; }}
 
+/* two-column page: the cards on the left, a live view of the draft on the right
+   that stays in sight (sticky under the status bar) while the left scrolls.
+   The columns share the row as 3 : 2 and stack below ~1100px. */
+.forge-app .forge-two-col {{ gap: 24px; align-items: flex-start; }}
+.forge-app .forge-two-col > .forge-left {{ flex: 3 1 0; min-width: 0; }}
+.forge-app .forge-two-col > .forge-side {{
+    flex: 2 1 0;
+    min-width: 0;
+    position: sticky;
+    top: 56px;
+    max-height: calc(100vh - 72px);
+    overflow-y: auto;
+}}
+.forge-app .forge-dag .widget-html-content {{ display: block; }}
+@media (max-width: 1100px) {{
+    .forge-app .forge-two-col {{ flex-direction: column !important; align-items: stretch; }}
+    .forge-app .forge-two-col > .forge-left,
+    .forge-app .forge-two-col > .forge-side {{
+        flex: 0 0 auto !important;
+        position: static;
+        max-height: none;
+        overflow-y: visible;
+    }}
+}}
+
 /* an editable code view (a Textarea): monospace, scrolls, full width */
 .forge-app .forge-code, .forge-app .forge-code textarea {{
     width: 100%;

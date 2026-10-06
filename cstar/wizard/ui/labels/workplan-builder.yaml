@@ -80,9 +80,13 @@ sections:
     title: What loading changed
     desc: Rewrites applied to the loaded file, and keys not carried over.
     required: false
-  review.preview:
-    title: YAML preview
+  side.yaml:
+    title: YAML
     desc: The workplan as YAML. Edit it and press Apply edits to load the text into the page; Save and Download always use the applied draft.
+    required: false
+  side.dag:
+    title: Dependency graph
+    desc: Steps left to right by dependency; dashed nodes are steps of other runs.
     required: false
   review.save:
     title: Save

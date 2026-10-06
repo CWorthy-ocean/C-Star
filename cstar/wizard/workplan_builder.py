@@ -97,7 +97,7 @@ from cstar.wizard.wizard import (
 )
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Iterable, Mapping
+    from collections.abc import Callable, Iterable, Mapping, Sequence
 
     from pydantic.fields import FieldInfo
 
@@ -115,6 +115,10 @@ WORKPLAN_SCHEMA_REF = (
 
 APPLICATIONS = (ROMS_MARBL, FORGE, NEST_IC, UPSCALER, HELLO_WORLD)
 """The applications a step may be authored for."""
+
+VIEW_YAML, VIEW_DAG, VIEW_BOTH = "YAML", "DAG", "Both"
+VIEWS = [VIEW_YAML, VIEW_DAG, VIEW_BOTH]
+"""The views of the right-hand column."""
 
 CHECK, RUN = "check", "run"
 """The ``cstar workplan`` subcommands the Run subsection streams."""
@@ -470,6 +474,194 @@ def unsupported_machines() -> list[str]:
         for name, sched in _registered_schedulers().items()
         if not isinstance(sched, SlurmScheduler)
     )
+
+
+# ---------------------------------------------------------------------------
+# dependency graph
+# ---------------------------------------------------------------------------
+_DAG_FILLS = {
+    ROMS_MARBL: "#cfe3f7",
+    FORGE: "#d5ecd0",
+    NEST_IC: "#f6e3c4",
+    UPSCALER: "#e6d4f2",
+    HELLO_WORLD: "#f4d6d6",
+}
+_DAG_OTHER_FILL = "#e4e7ea"
+_DAG_EXTERNAL_FILL = "#f1f1f1"
+_DAG_NODE_W, _DAG_NODE_H, _DAG_GAP_X, _DAG_GAP_Y, _DAG_PAD = 176, 46, 96, 18, 14
+_DAG_EDGE_LABELS = (
+    (ContinuanceDirective, "restart"),
+    (NestingDirective, "boundary"),
+)
+"""The directives whose step references are drawn as labelled edges."""
+
+
+def _dag_edges(step: Step) -> dict[str, list[str]]:
+    """The steps ``step`` depends on, each with the labels of why.
+
+    Plain ``depends_on`` entries have no label; a ``continue-from`` or
+    ``nest-from`` reference, and a deferred blueprint's producer, add one.
+    """
+    edges: dict[str, list[str]] = {dep: [] for dep in step.depends_on}
+    refs: list[tuple[str, str]] = []
+    if isinstance(step.blueprint_path, DeferredBlueprintRef):
+        refs.append((step.blueprint_path.from_step, "blueprint"))
+    for directive, label in _DAG_EDGE_LABELS:
+        config = step.directives.get(directive.key())
+        if isinstance(config, dict):
+            refs.extend((token, label) for token in directive.referenced_steps(config))
+    for token, label in refs:
+        try:
+            key = str(StepRef.parse(token))
+        except ValueError:
+            continue
+        labels = edges.setdefault(key, [])
+        if label not in labels:
+            labels.append(label)
+    return edges
+
+
+def _dag_layers(parents: Mapping[str, Sequence[str]]) -> dict[str, int]:
+    """Longest-path depth of every node (a cycle is cut where it is found)."""
+    depth: dict[str, int] = {}
+    visiting: set[str] = set()
+
+    def of(node: str) -> int:
+        if node in depth:
+            return depth[node]
+        if node in visiting:
+            return 0
+        visiting.add(node)
+        value = 1 + max((of(p) for p in parents.get(node, ())), default=-1)
+        visiting.discard(node)
+        depth[node] = value
+        return value
+
+    for node in parents:
+        of(node)
+    return depth
+
+
+def _dag_text(text: str, limit: int = 24) -> str:
+    """``text`` shortened to ``limit`` characters, HTML-escaped."""
+    return html.escape(text if len(text) <= limit else f"{text[: limit - 1]}…")
+
+
+def dag_svg(steps: Sequence[Step], runs: Mapping[str, RunRef]) -> str:
+    """An inline SVG of the steps' dependency graph, layered left to right.
+
+    A step sits one layer right of its deepest dependency. Steps of another
+    run (``step@alias``) are dashed grey source nodes in the first layer.
+    An edge that stands for a ``continue-from`` (restart), ``nest-from``
+    (boundary) or deferred blueprint (blueprint) reference carries that label.
+
+    Parameters
+    ----------
+    steps
+        The steps to draw, in order.
+    runs
+        The declared external runs by alias; a run's id is shown on its steps.
+
+    Returns
+    -------
+    str
+        The ``<svg>`` markup, sized to its content. Every name is escaped.
+    """
+    names = [step.name for step in steps]
+    edges = {step.name: _dag_edges(step) for step in steps}
+    parents: dict[str, list[str]] = {}
+    labels: dict[tuple[str, str], list[str]] = {}
+    externals: list[str] = []
+    for step in steps:
+        parents.setdefault(step.name, [])
+        for source, why in edges[step.name].items():
+            ref = StepRef.parse(source)
+            if ref.is_external:
+                if source not in externals:
+                    externals.append(source)
+            elif ref.step not in names or ref.step == step.name:
+                continue  # unknown (the draft is invalid) or a self reference
+            parents[step.name].append(source)
+            labels[(source, step.name)] = why
+    for source in externals:
+        parents.setdefault(source, [])
+
+    ordered = [*externals, *names]
+    if not ordered:
+        return (
+            "<svg xmlns='http://www.w3.org/2000/svg' width='260' height='40' "
+            "viewBox='0 0 260 40'><text x='8' y='24' font-size='13' fill='#777'>"
+            "No steps yet.</text></svg>"
+        )
+    layer = _dag_layers(parents)
+    rows: dict[int, int] = {}
+    where: dict[str, tuple[int, int]] = {}
+    for node in ordered:
+        row = rows.get(layer[node], 0)
+        rows[layer[node]] = row + 1
+        where[node] = (
+            _DAG_PAD + layer[node] * (_DAG_NODE_W + _DAG_GAP_X),
+            _DAG_PAD + row * (_DAG_NODE_H + _DAG_GAP_Y),
+        )
+    width = (
+        _DAG_PAD * 2
+        + (max(layer.values()) + 1) * (_DAG_NODE_W + _DAG_GAP_X)
+        - _DAG_GAP_X
+    )
+    height = _DAG_PAD * 2 + max(rows.values()) * (_DAG_NODE_H + _DAG_GAP_Y) - _DAG_GAP_Y
+
+    parts = [
+        f"<svg xmlns='http://www.w3.org/2000/svg' width='{width}' height='{height}' "
+        f"viewBox='0 0 {width} {height}' font-family='sans-serif'>",
+        "<defs><marker id='forge-arrow' viewBox='0 0 10 10' refX='9' refY='5' "
+        "markerWidth='7' markerHeight='7' orient='auto-start-reverse'>"
+        "<path d='M0,0 L10,5 L0,10 z' fill='#555'/></marker></defs>",
+    ]
+    for (source, target), why in labels.items():
+        x1 = where[source][0] + _DAG_NODE_W
+        y1 = where[source][1] + _DAG_NODE_H / 2
+        x2, y2 = where[target][0], where[target][1] + _DAG_NODE_H / 2
+        xm = x2 - _DAG_GAP_X / 2
+        parts.append(
+            f"<path class='edge' data-from='{html.escape(source, quote=True)}' "
+            f"data-to='{html.escape(target, quote=True)}' "
+            f"d='M{x1},{y1} H{xm} V{y2} H{x2}' fill='none' stroke='#555' "
+            "stroke-width='1.4' marker-end='url(#forge-arrow)'/>"
+        )
+        if why:
+            parts.append(
+                f"<text class='edge-label' x='{xm}' y='{(y1 + y2) / 2 - 4}' "
+                "text-anchor='middle' font-size='10' fill='#444' "
+                "style='paint-order:stroke;stroke:#fff;stroke-width:3px'>"
+                f"{html.escape(', '.join(why))}</text>"
+            )
+    applications = {step.name: step.application for step in steps}
+    for node in ordered:
+        x, y = where[node]
+        external = node in externals
+        if external:
+            alias = StepRef.parse(node).run
+            subtitle = f"run {runs[alias].run_id}" if alias in runs else "another run"
+            fill, dash = _DAG_EXTERNAL_FILL, " stroke-dasharray='5 3'"
+            kind = "external"
+        else:
+            subtitle = applications[node]
+            fill = _DAG_FILLS.get(subtitle, _DAG_OTHER_FILL)
+            dash, kind = "", subtitle
+        title = html.escape(f"{node} ({subtitle})")
+        parts.append(
+            f"<g class='node' data-node='{html.escape(node, quote=True)}' "
+            f"data-layer='{layer[node]}' data-kind='{html.escape(kind, quote=True)}'>"
+            f"<title>{title}</title>"
+            f"<rect x='{x}' y='{y}' width='{_DAG_NODE_W}' height='{_DAG_NODE_H}' "
+            f"rx='8' fill='{fill}' stroke='#667'{dash}/>"
+            f"<text x='{x + _DAG_NODE_W / 2}' y='{y + 20}' text-anchor='middle' "
+            f"font-size='12' font-weight='600' fill='#222'>{_dag_text(node)}</text>"
+            f"<text x='{x + _DAG_NODE_W / 2}' y='{y + 36}' text-anchor='middle' "
+            f"font-size='10' fill='#555'>{_dag_text(subtitle, 30)}</text></g>"
+        )
+    parts.append("</svg>")
+    return "".join(parts)
 
 
 # ---------------------------------------------------------------------------
@@ -3624,13 +3816,6 @@ class WorkplanBuilderPage:
             ),
             sub(
                 W,
-                "review.preview",
-                W.HBox([self.apply_btn, self.discard_btn, self.preview_chip]),
-                self.preview,
-                page=PAGE,
-            ),
-            sub(
-                W,
                 "review.save",
                 row("save_path", self.save_path, extra=(self.save_btn,)),
                 self.save_status,
@@ -3658,22 +3843,69 @@ class WorkplanBuilderPage:
             "and run it. Load an existing workplan to edit a copy; the loaded file "
             "is never changed unless you confirm an overwrite.</p>"
         )
+        # right column: a live view of the draft, kept in sight while the cards scroll
+        self.view = W.ToggleButtons(options=VIEWS, value=VIEW_BOTH)
+        self.view.add_class("forge-side-view")
+        self.dag_view = W.HTML("")
+        self.dag_view.add_class("forge-dag")
+        self.yaml_box = components.subsection(
+            W,
+            "side.yaml",
+            W.HBox([self.apply_btn, self.discard_btn, self.preview_chip]),
+            self.preview,
+            page=PAGE,
+        )
+        self.dag_box = components.subsection(W, "side.dag", self.dag_view, page=PAGE)
+        self.view.observe(self._on_view, names="value")
+        self.left = W.VBox([start, workplan, compute, recipes, steps, review])
+        self.left.add_class("forge-left")
+        self.side = W.VBox([self.view, self.yaml_box, self.dag_box])
+        self.side.add_class("forge-side")
+        self.columns = W.HBox([self.left, self.side])
+        self.columns.add_class("forge-two-col")
         self.widget = W.VBox(
-            [
-                components.style_widget(W),
-                self.sticky_bar,
-                intro,
-                start,
-                workplan,
-                compute,
-                recipes,
-                steps,
-                review,
-            ]
+            [components.style_widget(W), self.sticky_bar, intro, self.columns]
         )
         self.sticky_bar.add_class("forge-sticky-html")
         self.widget.add_class("forge-app")
         self.widget.add_class("forge-workplan")
+
+    def _on_view(self, _change: Any) -> None:
+        """Show the YAML, the graph, or both in the right column."""
+        _show(self.yaml_box, self.view.value in (VIEW_YAML, VIEW_BOTH))
+        _show(self.dag_box, self.view.value in (VIEW_DAG, VIEW_BOTH))
+
+    def dag_inputs(self) -> tuple[list[Step], dict[str, RunRef]]:
+        """What the graph draws: the draft, else the panes as far as they parse.
+
+        A pane that cannot form a step is drawn from its name, application and
+        dependencies alone, so the graph keeps up while the draft is invalid.
+        """
+        if self.draft is not None:
+            return list(self.draft.steps), dict(self.draft.runs)
+        steps: list[Step] = []
+        for pane in self.panes:
+            name = pane.name.value.strip()
+            if not name or name == "all" or any(s.name == name for s in steps):
+                continue
+            deps = [d for d in pane.depends_on.value if d and d != name]
+            try:
+                steps.append(
+                    Step(
+                        name=name,
+                        application=pane.app,
+                        blueprint=InlineBlueprintRef(),
+                        depends_on=deps,
+                    )
+                )
+            except ValidationError:
+                continue
+        runs = {
+            row.alias.value.strip(): RunRef(run_id=row.run_id.value.strip() or "?")
+            for row in self.run_rows
+            if row.alias.value.strip()
+        }
+        return steps, runs
 
     # ---- gather / rebuild ------------------------------------------------
     def _gather(self) -> Workplan | None:
@@ -3822,6 +4054,9 @@ class WorkplanBuilderPage:
                 self.preview.value = "# no valid draft yet: see the problems above\n"
             self.download_link.value = ""
         self._show_dirty()
+        self.dag_view.value = (
+            f"<div style='overflow-x:auto'>{dag_svg(*self.dag_inputs())}</div>"
+        )
         self._render_changes()
         self._update_readiness()
         self._sync_run()

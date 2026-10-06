@@ -6,6 +6,7 @@ import pytest
 
 pytest.importorskip("ipywidgets")
 
+import re
 import shutil
 from datetime import datetime
 from pathlib import Path
@@ -1260,13 +1261,11 @@ def test_pinned_start_at_is_never_authored(page, roms_bp, tmp_path):
 
 
 def test_sticky_bar_links_every_card(page):
-    import re
-
     anchors = re.findall(r"#forge-sec-(\w+)'", page.sticky_bar.value)
     assert anchors == ["start", "workplan", "compute", "recipes", "steps", "review"]
     nums = {
         c.forge_key: c.forge_header.value
-        for c in page.widget.children
+        for c in page.left.children
         if hasattr(c, "forge_key")
     }
     assert ">4</span>" in nums["recipes"] and ">5</span>" in nums["steps"]
@@ -1454,7 +1453,7 @@ def test_download_links_get_their_gap_from_css():
 
 
 def test_recipe_card_precedes_steps_and_is_an_accordion(page):
-    kids = [getattr(c, "forge_key", None) for c in page.widget.children]
+    kids = [getattr(c, "forge_key", None) for c in page.left.children]
     assert kids.index("recipes") < kids.index("steps")
     acc = page.recipes_accordion
     assert "forge-open-acc" in acc._dom_classes
@@ -1628,3 +1627,183 @@ def test_blank_description_defaults_to_the_workplan_name(page, roms_bp):
     assert page.description.placeholder == "My plan"
     page.description.value = "explicit"
     assert page.draft.description == "explicit"
+
+
+# ---------------------------------------------------------------------------
+# two-column layout and the dependency graph
+# ---------------------------------------------------------------------------
+def _nodes(svg: str) -> dict[str, dict[str, str]]:
+    """``{name: {layer, kind, x, y}}`` of every node in a ``dag_svg``."""
+    import html as htmllib
+
+    found = {}
+    for match in re.finditer(
+        r"<g class='node' data-node='([^']*)' data-layer='(\d+)' data-kind='([^']*)'>"
+        r".*?<rect x='([\d.]+)' y='([\d.]+)'",
+        svg,
+    ):
+        name, layer, kind, x, y = match.groups()
+        found[htmllib.unescape(name)] = {"layer": layer, "kind": kind, "x": x, "y": y}
+    return found
+
+
+def _edges(svg: str) -> set[tuple[str, str]]:
+    import html as htmllib
+
+    return {
+        (htmllib.unescape(a), htmllib.unescape(b))
+        for a, b in re.findall(
+            r"class='edge' data-from='([^']*)' data-to='([^']*)'", svg
+        )
+    }
+
+
+def test_dag_svg_layers_labels_and_escaping(roms_bp):
+    from cstar.orchestration.models import DeferredBlueprintRef, RunRef, Step
+
+    steps = [
+        Step(
+            name="make<ic>",
+            application="nest_ic",
+            blueprint="inline",
+            depends_on=["spin@old"],
+        ),
+        Step(name="forge", application="forge", blueprint=str(roms_bp)),
+        Step(
+            name="run",
+            application="roms_marbl",
+            blueprint=DeferredBlueprintRef(from_step="forge", filename="B.yaml"),
+            depends_on=["forge", "make<ic>"],
+            directives={
+                "continue-from": {"step": "make<ic>"},
+                "nest-from": {"step": "forge"},
+            },
+        ),
+    ]
+    svg = wb.dag_svg(steps, {"old": RunRef(run_id="the-old-run")})
+
+    nodes = _nodes(svg)
+    assert set(nodes) == {"spin@old", "make<ic>", "forge", "run"}
+    assert svg.count("class='node'") == 4
+    assert {k: v["layer"] for k, v in nodes.items()} == {
+        "spin@old": "0",
+        "forge": "0",
+        "make<ic>": "1",  # one right of its external source
+        "run": "2",  # one right of its deepest dependency
+    }
+    xs = {k: float(v["x"]) for k, v in nodes.items()}
+    assert xs["spin@old"] == xs["forge"] < xs["make<ic>"] < xs["run"]
+    assert nodes["spin@old"]["kind"] == "external"
+    assert "stroke-dasharray" in svg and "run the-old-run" in svg
+    assert _edges(svg) == {
+        ("spin@old", "make<ic>"),
+        ("forge", "run"),
+        ("make<ic>", "run"),
+    }
+    labels = sorted(re.findall(r"class='edge-label'[^>]*>([^<]*)<", svg))
+    assert labels == ["blueprint, boundary", "restart"]
+    # every name is escaped, so no markup of ours can be injected
+    assert "make<ic>" not in svg and "make&lt;ic&gt;" in svg
+
+
+def test_dag_svg_survives_odd_input():
+    from cstar.orchestration.models import Step
+
+    assert "No steps yet" in wb.dag_svg([], {})
+    cyc = [
+        Step(name="a", application="hello_world", blueprint="inline", depends_on=["b"]),
+        Step(name="b", application="hello_world", blueprint="inline", depends_on=["a"]),
+        Step(
+            name="c",
+            application="hello_world",
+            blueprint="inline",
+            depends_on=["missing"],
+        ),
+    ]
+    svg = wb.dag_svg(cyc, {})
+    assert set(_nodes(svg)) == {"a", "b", "c"}
+    assert _edges(svg) == {("b", "a"), ("a", "b")}  # the unknown dependency is skipped
+    assert svg.startswith("<svg") and svg.endswith("</svg>")
+
+
+def test_page_root_has_both_columns(page):
+    root = page.widget
+    assert "forge-two-col" in page.columns._dom_classes
+    assert page.columns in root.children  # under the sticky bar
+    assert root.children.index(page.sticky_bar) < root.children.index(page.columns)
+    assert list(page.columns.children) == [page.left, page.side]
+    assert "forge-left" in page.left._dom_classes
+    assert "forge-side" in page.side._dom_classes
+    for key in ("start", "workplan", "compute", "recipes", "steps", "review"):
+        assert _find_card(page.left, key) is not None
+        assert _find_card(page.side, key) is None
+    from cstar.wizard.ui import components
+
+    assert ".forge-two-col" in components.WIZARD_CSS
+    assert "@media (max-width: 1100px)" in components.WIZARD_CSS
+
+
+def _contains(root, target) -> bool:
+    return root is target or any(
+        _contains(c, target) for c in getattr(root, "children", ())
+    )
+
+
+def test_review_card_no_longer_holds_the_yaml_box(page):
+    review = _find_card(page.widget, "review")
+    for widget in (page.preview, page.apply_btn, page.discard_btn, page.preview_chip):
+        assert not _contains(review, widget)
+        assert _contains(page.side, widget)
+    assert _contains(review, page.validation) and _contains(review, page.save_btn)
+
+
+def test_view_toggle_shows_and_hides_each_view(page):
+    assert list(page.view.options) == ["YAML", "DAG", "Both"]
+    assert page.view.value == "Both"
+    assert page.yaml_box.layout.display != "none"
+    assert page.dag_box.layout.display != "none"
+    page.view.value = "YAML"
+    assert page.yaml_box.layout.display != "none"
+    assert page.dag_box.layout.display == "none"
+    page.view.value = "DAG"
+    assert page.yaml_box.layout.display == "none"
+    assert page.dag_box.layout.display != "none"
+    page.view.value = "Both"
+    assert page.yaml_box.layout.display != "none"
+    assert page.dag_box.layout.display != "none"
+
+
+def test_graph_follows_the_draft_and_the_panes_when_it_is_invalid(page, roms_bp):
+    _roms_page(page, roms_bp, "a")
+    b = page.add_step("b")
+    _path_step(b, "b", roms_bp)
+    b.depends_on.value = ("a",)
+    assert page.draft is not None
+    assert _edges(page.dag_view.value) == {("a", "b")}
+    assert set(_nodes(page.dag_view.value)) == {"a", "b"}
+
+    page.name.value = ""  # invalid draft: the graph still shows the panes
+    assert page.draft is None
+    assert _edges(page.dag_view.value) == {("a", "b")}
+    c = page.add_step("c")  # no blueprint chosen: the pane cannot form a step
+    c.depends_on.value = ("b",)
+    assert page.draft is None
+    assert set(_nodes(page.dag_view.value)) == {"a", "b", "c"}
+    assert _edges(page.dag_view.value) == {("a", "b"), ("b", "c")}
+
+
+def test_graph_shows_an_external_source_and_a_chunk_chain(page, roms_bp):
+    _roms_page(page, roms_bp, "base")
+    page._add_run()
+    row = page.run_rows[0]
+    row.alias.value, row.run_id.value, row.steps.value = "ini", "ini-run", "ic"
+    page.chunk_base.step.value = "base"
+    page.chunk_end.value = "2020-03-01"
+    page.chunk_first.kind.value = "step"
+    page.chunk_first.step.value = "ic@ini"
+    page.chunk_btn.click()
+    svg = page.dag_view.value
+    nodes = _nodes(svg)
+    assert nodes["ic@ini"]["layer"] == "0"
+    assert nodes["base-01"]["layer"] == "1" and nodes["base-02"]["layer"] == "2"
+    assert "restart" in svg
