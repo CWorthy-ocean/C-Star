@@ -390,6 +390,12 @@
 {% if cppdefs.co2_tvarying %}#define PCO2AIR_FORCING
 {% endif %}
 
+! Air-sea CO2 exchange for the CDR-lite passive DIC tracers (CDR_OAE_DIC, CDR_DOR_DIC)
+! Usage notes: ucla-roms >= 0.9.0 (formerly CDR_TRACER; earlier releases ignore this key). Set by the resolver from cdr_lite.cdr_online_carbonate_sensitivity, which needs MARBL.
+{% if cppdefs.cdr_lite|default(false) %}#define CDR_LITE
+{% else %}#undef CDR_LITE
+{% endif %}
+
 !----------------------------------------------------------
 
 ! Enable BEC biogeochemical model

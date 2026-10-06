@@ -556,6 +556,20 @@ class TestCppdefsTemplate:
         assert "#define PARABOLIC_SPLINES\n" not in text
         assert "#define UPSTREAM_TS_LAND_CURV\n" not in text
 
+    # ucla-roms >= 0.9.0's CDR_LITE (PR #372, formerly CDR_TRACER): resolver-derived,
+    # so a cppdefs dict without the key (every spec but a CDR-lite run) renders #undef.
+    def test_cdr_lite_true_defines_key(self, tmp_path):
+        text = self._render(tmp_path, {"cdr_lite": True})
+        assert "#define CDR_LITE\n" in text
+        assert "#undef CDR_LITE\n" not in text
+
+    def test_cdr_lite_absent_undefs_key(self, tmp_path):
+        text = self._render(tmp_path, {"use_pio": True})
+        assert "#undef CDR_LITE\n" in text
+        assert "#define CDR_LITE\n" not in text
+        # ucla-roms >= 0.9.0 #errors on the pre-rename key
+        assert "#define CDR_TRACER" not in text
+
 
 class TestROMSTemplateRenderer:
     """Tests for ROMSTemplateRenderer class."""
