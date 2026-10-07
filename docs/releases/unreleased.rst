@@ -83,6 +83,16 @@ New features
   - Variables that are still missing are all named in one error, as before.
   - ``cstar blueprint run`` is unchanged and still reads the environment.
 
+- A blueprint with the same major schema version as the installed C-Star is compatible as-is: no migration copy, no workplan rewrite, and ``CSTAR_DISABLE_MIGRATION`` no longer refuses it. (`#747 <https://github.com/CWorthy-ocean/C-Star/pull/747>`_)
+
+  - ``cstar blueprint migrate`` reports a compatible file and writes nothing, also with ``--inplace`` and ``--dry-run``.
+  - A blueprint newer than the installed C-Star is refused with a message to upgrade ``cstar-ocean``.
+  - An older major with no automatic migration is refused with guidance for migrating by hand.
+
+- Application authors can register a ``SchemaBreak`` for a major bump that has no automatic migration; its ``guidance()`` is what users see when their older blueprints are refused. (`#747 <https://github.com/CWorthy-ocean/C-Star/pull/747>`_)
+- ``cstar blueprint check`` classifies the schema version before validating content, telling the user to run ``cstar blueprint migrate`` when an older major can be migrated instead of listing validation errors. (`#747 <https://github.com/CWorthy-ocean/C-Star/pull/747>`_)
+- ``cstar workplan run`` reports every step whose blueprint cannot be migrated in one message, before creating a run directory. (`#747 <https://github.com/CWorthy-ocean/C-Star/pull/747>`_)
+
 
 
 
@@ -109,6 +119,8 @@ Bug Fixes
 - The Workplan page's predicted CPU count for a step followed the first catalog blueprint it saw instead of the blueprint actually chosen. (`#742 <https://github.com/CWorthy-ocean/C-Star/pull/742>`_)
 - A ``max_walltime`` in SLURM's day form (for example ``2-03:00:00``) validated but crashed job creation with ``invalid literal for int()``; it is now compared against the queue maximum correctly and submitted as written. (`#744 <https://github.com/CWorthy-ocean/C-Star/pull/744>`_)
 - The Workplan page's "walltime hours per simulated day" recipe option emitted the day form for chunks over 24 hours and so produced workplans that failed at submission; it now emits plain hours (``30:00:00``). (`#744 <https://github.com/CWorthy-ocean/C-Star/pull/744>`_)
+- The ``wales-toy`` tutorial and bundled blueprints carried no ``schema_version``, so they were read as 1.0.0 and pushed through three migration adapters on every run. (`#747 <https://github.com/CWorthy-ocean/C-Star/pull/747>`_)
+- ``cstar blueprint migrate --dry-run`` printed "Migrated blueprint persisted to" naming the source file although nothing was written. (`#747 <https://github.com/CWorthy-ocean/C-Star/pull/747>`_)
 
 Improvements
 ~~~~~~~~~~~~
@@ -141,6 +153,12 @@ Improvements
 - The catalog scan lists each directory once, skips hidden entries, and keeps reading the other directories when one fails. (`#742 <https://github.com/CWorthy-ocean/C-Star/pull/742>`_)
 - ``max_walltime`` accepts the SLURM clock grammar: one to three hour digits (``6:00:00``, ``100:00:00``) and one or two day digits (``14-00:00:00``); bare minutes and ``D-H`` are still rejected. (`#744 <https://github.com/CWorthy-ocean/C-Star/pull/744>`_)
 - A PBS job folds a day-form walltime into hours in its ``#PBS -l walltime=`` directive, since PBS has no day form. (`#744 <https://github.com/CWorthy-ocean/C-Star/pull/744>`_)
+- The current schema version of an application is read from its blueprint model's ``schema_version`` default (``ApplicationDefinition.schema_version``) rather than from hand-maintained bounds, so it cannot drift. (`#747 <https://github.com/CWorthy-ocean/C-Star/pull/747>`_)
+- A migrated blueprint is stamped with the installed C-Star's schema version, so the persisted ``<name>_<version>`` file name matches its content. (`#747 <https://github.com/CWorthy-ocean/C-Star/pull/747>`_)
+- A ``schema_version`` that is not dotted integers is reported as unsupported instead of raising a traceback. (`#747 <https://github.com/CWorthy-ocean/C-Star/pull/747>`_)
+- ``BlueprintMigration`` takes ``targets=`` (application → current schema version) instead of ``schema_bounds=``; ``SchemaBounds``, ``identify_bounds``, ``CStarMigrationNotRegisteredError``, ``plotter_bounds`` and the hello_world sample adapter ``HelloWorldSchemaAdapterV1V1`` are removed, and ``MigrationPlan.is_latest`` is renamed ``is_compatible``. (`#747 <https://github.com/CWorthy-ocean/C-Star/pull/747>`_)
+- ``execute_migration`` and ``localize_and_migrate`` raise ``CstarSchemaTooNewError``, ``CstarManualMigrationError`` or ``CstarUnsupportedMigrationError`` instead of returning a result carrying an "Unable to plan migration" error. (`#747 <https://github.com/CWorthy-ocean/C-Star/pull/747>`_)
+- Registering an adapter whose target does not advance its source, or two adapters for the same source version, now raises at construction. (`#747 <https://github.com/CWorthy-ocean/C-Star/pull/747>`_)
 
 
 Miscellaneous
@@ -172,3 +190,4 @@ Miscellaneous
 - README rewritten around the merged Forge workflow: project description, how-it-works, laptop install, three-command quick start, documentation links, related projects, and Issues (not Discussions) for feedback. (`#746 <https://github.com/CWorthy-ocean/C-Star/pull/746>`_)
 - README badges now also show the PyPI version, unit-test CI status, and license. (`#746 <https://github.com/CWorthy-ocean/C-Star/pull/746>`_)
 - README no longer tells users to run a bare ``pytest`` at the repository root or paste the full Apache boilerplate; the license section links to the LICENSE file instead. (`#746 <https://github.com/CWorthy-ocean/C-Star/pull/746>`_)
+- New "Versioning the Blueprint Schema" section in the custom-applications docs (convention table, adapter and ``SchemaBreak`` examples, what users see), with pointers from the blueprints and schemas pages. (`#747 <https://github.com/CWorthy-ocean/C-Star/pull/747>`_)
