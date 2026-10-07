@@ -47,6 +47,8 @@ from cstar.roms.namelist import (
     CalcPflxSettings,
     CdrFrcSettings,
     CdrGasExchOutputSettings,
+    CdrLiteOutputSettings,
+    CdrLiteSettings,
     CdrOutputSettings,
     CdrTracerOutputSettings,
     DiagnosticsSettings,
@@ -76,6 +78,7 @@ from cstar.roms.namelist import (
     RomsNamelistV0_5_0,
     RomsNamelistV0_6_0,
     RomsNamelistV0_7_0,
+    RomsNamelistV0_9_0,
     SCoord,
     SimulationNameSettings,
     SpongeTuneSettings,
@@ -584,10 +587,22 @@ class CdrOutputCfg(_SettingsSection):
     nrpf: int = Field(serialization_alias="nrpf_cdr")
 
 
-class CdrTracerOutputCfg(_SettingsSection):
-    """``cdr_tracer_output`` settings -- ucla-roms >= 0.7.0's dedicated
+class _CdrLiteOutputCfgCommon(_SettingsSection):
+    wrt_tracers: bool = True
+    wrt_vertical_integrals: bool = True
+    wrt_thickness_weighted: bool = True
+    wrt_sources: bool = True
+    wrt_alk: bool = True
+    wrt_dic: bool = True
+
+
+class CdrLiteOutputCfg(_CdrLiteOutputCfgCommon):
+    """``cdr_lite_output`` settings for ucla-roms 0.7.0-0.8.x -- the dedicated
     ``&CDR_TRACER_OUTPUT_SETTINGS`` group (PR #351), a separate output stream
-    for the CDR tracers (``CDR_OAE_ALK``/``CDR_OAE_DIC``/``CDR_DOR_DIC``).
+    for the CDR-lite tracers (``CDR_OAE_ALK``/``CDR_OAE_DIC``/``CDR_DOR_DIC``).
+    Forge's vocabulary uses the ucla-roms 0.9.0 names (CDR_TRACER was renamed
+    CDR_LITE there); the ``serialization_alias`` on each renamed field supplies
+    the 0.7/0.8 namelist key, as :class:`ParticlesCfgV0_5_0` does for 0.5.0.
     The tracers themselves exist whenever ``nt_cdr_oae``/``nt_cdr_dor`` are
     non-zero, with or without MARBL, so this stream needs ``CDR_FORCING`` but
     not MARBL. ucla-roms 0.7.0 and 0.8.0 nevertheless compile the module only
@@ -602,7 +617,9 @@ class CdrTracerOutputCfg(_SettingsSection):
     simply never enables it, must still validate.
     """
 
-    do_cdr_tracer_output: bool = False
+    do_cdr_lite_output: bool = Field(
+        default=False, serialization_alias="do_cdr_tracer_output"
+    )
     do_avg: bool = Field(default=True, serialization_alias="wrt_cdr_trc_avg")
     monthly_averages: bool = Field(
         default=False, serialization_alias="cdr_trc_monthly_averages"
@@ -611,12 +628,48 @@ class CdrTracerOutputCfg(_SettingsSection):
         default=3600.0, serialization_alias="output_period_cdr_trc"
     )
     nrpf: int = Field(default=4, serialization_alias="nrpf_cdr_trc")
-    wrt_tracers: bool = True
-    wrt_vertical_integrals: bool = True
-    wrt_thickness_weighted: bool = True
-    wrt_sources: bool = True
-    wrt_alk: bool = True
-    wrt_dic: bool = True
+
+
+class CdrLiteOutputCfgV0_9_0(_CdrLiteOutputCfgCommon):
+    """``cdr_lite_output`` settings for ucla-roms >= 0.9.0 -- the
+    ``&CDR_LITE_OUTPUT_SETTINGS`` group (PR #372), the renamed CDR output
+    stream. Compiled and read unconditionally (no ``MARBL``/``CDR_FORCING``
+    guard), so enabling it forces no cppdef; ucla-roms aborts at init if it is
+    enabled with ``nt_cdr_oae + nt_cdr_dor == 0``. ``wrt_gas_exchange`` (the
+    air-sea CO2 flux into each CDR-lite DIC tracer) needs the ``CDR_LITE``
+    cppdef (see :class:`CdrLiteCfg`). Defaults as in
+    :class:`CdrLiteOutputCfg`.
+    """
+
+    do_cdr_lite_output: bool = False
+    do_avg: bool = Field(default=True, serialization_alias="wrt_cdr_lite_avg")
+    monthly_averages: bool = Field(
+        default=False, serialization_alias="cdr_lite_monthly_averages"
+    )
+    output_period: float = Field(
+        default=3600.0, serialization_alias="output_period_cdr_lite"
+    )
+    nrpf: int = Field(default=4, serialization_alias="nrpf_cdr_lite")
+    wrt_gas_exchange: bool = False
+
+
+class CdrLiteCfg(_SettingsSection):
+    """``cdr_lite`` settings -- ucla-roms >= 0.9.0's optional
+    ``&CDR_LITE_SETTINGS`` group, read only under the ``CDR_LITE`` cppkey.
+    Turning ``cdr_online_carbonate_sensitivity`` on makes the resolver compile
+    ``CDR_LITE`` (``cppdefs.cdr_lite``, resolver-owned) and ROMS compute the
+    carbonate sensitivities of the CDR-lite air-sea CO2 flux online from
+    MARBL's ALT_CO2 state, so it needs MARBL. Off, ``CDR_LITE`` would read
+    ``ddic_dco2``/``ddic_dalk`` from forcing files, which Forge has no source
+    for yet, so it is not compiled.
+
+    The bundled ModelSpecs do not declare this section yet (``&CDR_LITE_SETTINGS``
+    is written at the default): CDR-lite tracers also need per-tracer surface-flux
+    forcing (``CDR_OAE_DIC<n>_flx``/``CDR_DOR_DIC<n>_flx``) that Forge does not
+    generate. The CDR-lite BGC-mode follow-up wires it up.
+    """
+
+    cdr_online_carbonate_sensitivity: bool = False
 
 
 class CdrGasExchOutputCfg(_SettingsSection):
@@ -625,7 +678,7 @@ class CdrGasExchOutputCfg(_SettingsSection):
     stream for the gas-exchange sensitivities (``ddic_dco2``/``ddic_dalk``),
     active only under MARBL && CDR_FORCING: it reads MARBL's alternative-CO2
     tracers and carbonate-sensitivity code, so MARBL is a genuine requirement
-    here. Defaults mirror :class:`CdrTracerOutputCfg`.
+    here. Defaults mirror :class:`CdrLiteOutputCfg`.
     """
 
     do_cdr_gas_exch_output: bool = False
@@ -639,13 +692,53 @@ class CdrGasExchOutputCfg(_SettingsSection):
     nrpf: int = Field(default=4, serialization_alias="nrpf_cdr_gas")
 
 
-# (section key, its do-flag, whether the stream needs MARBL) for the two
-# ucla-roms >= 0.7.0 CDR output streams that :func:`check_cdr_output_sections`
-# enforces. Both compile under CDR_FORCING; only the gas-exchange stream reads
-# MARBL state (see the two Cfg docstrings above).
-CDR_OUTPUT_SECTIONS: tuple[tuple[str, str, bool], ...] = (
-    ("cdr_tracer_output", "do_cdr_tracer_output", False),
-    ("cdr_gas_exch_output", "do_cdr_gas_exch_output", True),
+# Enable switch of each version-gated section a user can turn on (forge
+# vocabulary: ``cdr_lite_output.do_cdr_lite_output`` serializes to
+# ``do_cdr_tracer_output`` on ucla-roms 0.7/0.8, see :class:`CdrLiteOutputCfg`).
+# Read by :data:`CDR_OUTPUT_SECTIONS` and :func:`check_cdr_lite_sections` (what
+# the switch requires) and :func:`prune_version_gated_sections` (a section with
+# its switch on cannot be silently dropped).
+_GATED_SECTION_SWITCHES: dict[str, str] = {
+    "cdr_lite_output": "do_cdr_lite_output",
+    "cdr_gas_exch_output": "do_cdr_gas_exch_output",
+    "cdr_lite": "cdr_online_carbonate_sensitivity",
+}
+
+
+def _tier_types_section(
+    settings_cls: type[_RunTimeSettingsCommon],
+    section: str,
+    cfg_cls: type[_SettingsSection],
+) -> bool:
+    """True if the run-time settings tier ``settings_cls`` types ``section`` as
+    exactly ``cfg_cls`` -- the one rule deciding which row of a per-tier section
+    table (:data:`CDR_OUTPUT_SECTIONS`, :data:`_PRECHECK_SECTION_MAP`) applies
+    to the pinned ucla-roms release.
+    """
+    info = settings_cls.model_fields.get(section)
+    return info is not None and info.annotation is cfg_cls
+
+
+# (section key, the Cfg class the section must have, its do-flag, whether the
+# stream needs MARBL) for the ucla-roms >= 0.7.0 CDR output streams that
+# :func:`check_cdr_output_sections` enforces. The CDR-lite tracer stream's Cfg
+# class is the 0.7/0.8 one: from 0.9.0 it compiles unconditionally, so it needs
+# no cppdef (:class:`CdrLiteOutputCfgV0_9_0`). Both streams compile under
+# CDR_FORCING on the tiers listed; only the gas-exchange stream reads MARBL state
+# (see the Cfg docstrings above).
+CDR_OUTPUT_SECTIONS: tuple[tuple[str, type[_SettingsSection], str, bool], ...] = (
+    (
+        "cdr_lite_output",
+        CdrLiteOutputCfg,
+        _GATED_SECTION_SWITCHES["cdr_lite_output"],
+        False,
+    ),
+    (
+        "cdr_gas_exch_output",
+        CdrGasExchOutputCfg,
+        _GATED_SECTION_SWITCHES["cdr_gas_exch_output"],
+        True,
+    ),
 )
 
 
@@ -653,17 +746,21 @@ def check_cdr_output_sections(
     run_time_settings: dict[str, Any],
     *,
     bgc_mode_is_marbl: bool,
+    settings_cls: type[_RunTimeSettingsCommon],
 ) -> bool:
-    """Validate ``cdr_tracer_output``/``cdr_gas_exch_output`` (ucla-roms >= 0.7.0's
+    """Validate ``cdr_lite_output``/``cdr_gas_exch_output`` (ucla-roms >= 0.7.0's
     dedicated CDR output streams, PR #351) and report whether
     ``cppdefs.cdr_forcing`` must be forced on.
 
     Unlike ``cdr_output`` (see ``CdrOutputCfg``), these two sections are never
     forced on by an active CDR forcing mode -- they're opt-in extras a user
     enables explicitly, so only the flag actually present in
-    ``run_time_settings`` is read here. Either flag being True needs the
-    ``CDR_FORCING`` cppdef; the gas-exchange stream additionally needs MARBL,
-    the tracer stream does not (``CDR_OUTPUT_SECTIONS`` records which).
+    ``run_time_settings`` is read here. On the tiers where a stream is compiled
+    under ``CDR_FORCING``, its flag being True needs that cppdef; the
+    gas-exchange stream additionally needs MARBL, the tracer stream does not
+    (``CDR_OUTPUT_SECTIONS`` records which). Only the rows whose Cfg class is the
+    one ``settings_cls`` types the section as apply, so the CDR-lite tracer stream
+    forces nothing on ucla-roms >= 0.9.0.
 
     Both the resolver (authoring time) and the executor's ``configure_build``
     (the build-time net for stored blueprints and wizard accordion edits that
@@ -676,7 +773,9 @@ def check_cdr_output_sections(
     ``bgc_mode_is_marbl`` is False.
     """
     force_cdr_forcing = False
-    for section_name, do_flag, requires_marbl in CDR_OUTPUT_SECTIONS:
+    for section_name, cfg_cls, do_flag, requires_marbl in CDR_OUTPUT_SECTIONS:
+        if not _tier_types_section(settings_cls, section_name, cfg_cls):
+            continue
         section = run_time_settings.get(section_name)
         if not section or not section.get(do_flag):
             continue
@@ -688,6 +787,61 @@ def check_cdr_output_sections(
             )
         force_cdr_forcing = True
     return force_cdr_forcing
+
+
+def check_cdr_lite_sections(
+    run_time_settings: dict[str, Any], *, bgc_mode_is_marbl: bool
+) -> bool:
+    """Validate the ucla-roms >= 0.9.0 CDR-lite sections (``cdr_lite``,
+    ``cdr_lite_output``) and report whether ``cppdefs.cdr_lite`` (the
+    ``CDR_LITE`` cppkey) must be on, i.e. whether
+    ``cdr_lite.cdr_online_carbonate_sensitivity`` is set.
+
+    Forge compiles ``CDR_LITE`` only for the online carbonate sensitivities,
+    which read MARBL's ALT_CO2 state; the file-based alternative has no Forge
+    source yet. Only the sections present in ``run_time_settings`` are read, like
+    :func:`check_cdr_output_sections`. Shared the same way: by the resolver
+    (authoring time), :func:`validate_run_time_sections` (stored blueprints) and
+    the executor's ``configure_build`` (the build-time net), each of which sets
+    ``cppdefs["cdr_lite"]`` from the result.
+
+    Raises ``ValueError`` for each combination ucla-roms 0.9.0 aborts on at
+    init, all reported together: the online sensitivity without MARBL;
+    ``cdr_lite_output.wrt_gas_exchange`` without ``CDR_LITE``; and the CDR-lite
+    output stream or the online sensitivity with no CDR tracers
+    (``param.nt_cdr_oae + param.nt_cdr_dor == 0``).
+    """
+    switches = _GATED_SECTION_SWITCHES
+    online_flag = f"cdr_lite.{switches['cdr_lite']}"
+    stream_flag = f"cdr_lite_output.{switches['cdr_lite_output']}"
+    online = bool((run_time_settings.get("cdr_lite") or {}).get(switches["cdr_lite"]))
+    lite_output = run_time_settings.get("cdr_lite_output") or {}
+    stream_on = bool(lite_output.get(switches["cdr_lite_output"]))
+    problems: list[str] = []
+    if online and not bgc_mode_is_marbl:
+        problems.append(
+            f'{online_flag}=True but bgc_mode != "marbl": ucla-roms computes the '
+            "CDR-lite carbonate sensitivities from MARBL's ALT_CO2 state."
+        )
+    if stream_on and lite_output.get("wrt_gas_exchange") and not online:
+        problems.append(
+            "cdr_lite_output.wrt_gas_exchange=True needs CDR_LITE, which Forge "
+            f"enables via {online_flag} (ucla-roms >= 0.9.0, MARBL)."
+        )
+    param = run_time_settings.get("param") or {}
+    if enabled := [
+        flag for flag, on in ((stream_flag, stream_on), (online_flag, online)) if on
+    ]:
+        # ``or 0``: a null count (YAML ``nt_cdr_oae:``) means no tracers.
+        if not any(int(param.get(key) or 0) for key in _CDR_TRACER_WEIGHTS):
+            counts = " + ".join(f"param.{key}" for key in _CDR_TRACER_WEIGHTS)
+            problems.append(
+                f"{' and '.join(enabled)} set but {counts} == 0: ucla-roms aborts "
+                "at init without CDR-lite tracers."
+            )
+    if problems:
+        raise ValueError(" ".join(problems))
+    return online
 
 
 class UpscaleOutputCfg(_SettingsSection):
@@ -820,12 +974,14 @@ class _RunTimeSettingsCommon(_SettingsSection):
     Not meant to be used directly: the version-varying sections (``param``,
     ``ocean_vars``, ``particles``) are typed as the loose common models here, and version-varying
     sections that some schemas lack entirely (``pio_settings``, added by
-    :class:`RunTimeSettingsV0_6_0`; ``cdr_tracer_output``/``cdr_gas_exch_output``,
-    added by :class:`RunTimeSettingsV0_7_0`) are simply absent here; use
+    :class:`RunTimeSettingsV0_6_0`; ``cdr_lite_output``/``cdr_gas_exch_output``,
+    added by :class:`RunTimeSettingsV0_7_0`; ``cdr_lite``, added by
+    :class:`RunTimeSettingsV0_9_0`) are simply absent here; use
     :class:`RunTimeSettings` (ucla-roms < 0.4.0), :class:`RunTimeSettingsV0_4_0`
     (0.4.0 <= ucla-roms < 0.5.0), :class:`RunTimeSettingsV0_5_0`
     (0.5.0 <= ucla-roms < 0.6.0), :class:`RunTimeSettingsV0_6_0`
-    (0.6.0 <= ucla-roms < 0.7.0), or :class:`RunTimeSettingsV0_7_0` (>= 0.7.0),
+    (0.6.0 <= ucla-roms < 0.7.0), :class:`RunTimeSettingsV0_7_0`
+    (0.7.0 <= ucla-roms < 0.9.0), or :class:`RunTimeSettingsV0_9_0` (>= 0.9.0),
     or select one with :func:`run_time_settings_for_ref`.
     """
 
@@ -923,21 +1079,43 @@ class RunTimeSettingsV0_6_0(RunTimeSettingsV0_5_0):
 
 
 class RunTimeSettingsV0_7_0(RunTimeSettingsV0_6_0):
-    """Forge's run-time settings dict for ucla-roms >= 0.7.0, typed + validated.
+    """Forge's run-time settings dict for ucla-roms >= 0.7.0, < 0.9.0, typed +
+    validated.
 
     Subclasses :class:`RunTimeSettingsV0_6_0` directly (rather than
     ``_RunTimeSettingsCommon``) to inherit its ``ocean_vars``/``particles``/
     ``pio_settings`` unchanged -- mirrors C-Star's
-    ``RomsNamelistV0_7_0(RomsNamelistV0_6_0)``. Adds ``cdr_tracer_output`` and
+    ``RomsNamelistV0_7_0(RomsNamelistV0_6_0)``. Adds ``cdr_lite_output`` and
     ``cdr_gas_exch_output`` (ucla-roms PR #351, ``&CDR_TRACER_OUTPUT_SETTINGS``/
     ``&CDR_GAS_EXCH_OUTPUT_SETTINGS``); both fields carry defaults (see
-    :class:`CdrTracerOutputCfg`/:class:`CdrGasExchOutputCfg`) so a 0.7.0-pinned
+    :class:`CdrLiteOutputCfg`/:class:`CdrGasExchOutputCfg`) so a 0.7.0-pinned
     blueprint saved before these sections existed still validates. Unlike
     ``cdr_output``, neither is forced on by an active CDR forcing mode -- see
     the resolver's CDR tracer/gas-exchange output consistency check.
     """
 
-    cdr_tracer_output: CdrTracerOutputCfg = Field(default_factory=CdrTracerOutputCfg)
+    cdr_lite_output: CdrLiteOutputCfg = Field(default_factory=CdrLiteOutputCfg)
+    cdr_gas_exch_output: CdrGasExchOutputCfg = Field(
+        default_factory=CdrGasExchOutputCfg
+    )
+
+
+class RunTimeSettingsV0_9_0(RunTimeSettingsV0_6_0):
+    """Forge's run-time settings dict for ucla-roms >= 0.9.0, typed + validated.
+
+    Subclasses :class:`RunTimeSettingsV0_6_0`, not :class:`RunTimeSettingsV0_7_0`
+    -- mirrors C-Star's ``RomsNamelistV0_9_0(RomsNamelistV0_6_0)``, and a
+    subclass cannot retype V0_7_0's ``cdr_lite_output`` field. Adds ``cdr_lite``
+    (``&CDR_LITE_SETTINGS``), the renamed ``cdr_lite_output``
+    (``&CDR_LITE_OUTPUT_SETTINGS``, see :class:`CdrLiteOutputCfgV0_9_0`) and the
+    unchanged ``cdr_gas_exch_output``; all carry defaults, so a blueprint
+    saved before they existed still validates.
+    """
+
+    cdr_lite: CdrLiteCfg = Field(default_factory=CdrLiteCfg)
+    cdr_lite_output: CdrLiteOutputCfgV0_9_0 = Field(
+        default_factory=CdrLiteOutputCfgV0_9_0
+    )
     cdr_gas_exch_output: CdrGasExchOutputCfg = Field(
         default_factory=CdrGasExchOutputCfg
     )
@@ -953,6 +1131,7 @@ _RUN_TIME_SETTINGS_BY_NAMELIST_SCHEMA: dict[
     RomsNamelistV0_5_0: RunTimeSettingsV0_5_0,
     RomsNamelistV0_6_0: RunTimeSettingsV0_6_0,
     RomsNamelistV0_7_0: RunTimeSettingsV0_7_0,
+    RomsNamelistV0_9_0: RunTimeSettingsV0_9_0,
 }
 
 # The inverse of _RUN_TIME_SETTINGS_BY_NAMELIST_SCHEMA: the namelist schema a
@@ -1029,14 +1208,84 @@ def prune_version_gated_sections(
     the build without re-resolving) call this before those checks, so the
     rule stays in one place; each caller decides whether to report what was
     dropped.
+
+    A section whose enable switch (:data:`_GATED_SECTION_SWITCHES`) is on is
+    not dropped but rejected -- the pinned release cannot honor the request.
+    Switched-off sections (the normal shared-OutputSpec case) are pruned
+    silently. Raises ``ValueError`` before mutating anything.
     """
     pruned = sorted(
         (version_gated_section_names() - set(settings_cls.model_fields))
         & set(run_time_settings)
     )
+    if requested := [
+        f"{name}.{_GATED_SECTION_SWITCHES[name]}"
+        for name in pruned
+        if name in _GATED_SECTION_SWITCHES
+        and isinstance(section := run_time_settings[name], dict)
+        and section.get(_GATED_SECTION_SWITCHES[name])
+    ]:
+        raise ValueError(
+            f"{', '.join(requested)} enabled, but the pinned ucla-roms release "
+            f"(run-time settings {settings_cls.__name__}) has no such section."
+        )
     for name in pruned:
         del run_time_settings[name]
     return pruned
+
+
+# Section names forge's settings vocabulary used before ucla-roms 0.9.0 renamed
+# CDR_TRACER to CDR_LITE: old section -> (new section, {old inner key: new inner
+# key}). The only home of the old literals; :func:`normalize_legacy_sections`
+# applies it to every settings dict that can predate the rename (stored
+# blueprints, catalog specs, overrides).
+_LEGACY_SECTION_RENAMES: dict[str, tuple[str, dict[str, str]]] = {
+    "cdr_tracer_output": (
+        "cdr_lite_output",
+        {"do_cdr_tracer_output": "do_cdr_lite_output"},
+    ),
+}
+
+
+def normalize_legacy_sections(settings: dict[str, Any]) -> dict[str, str]:
+    """Rename, in place and keeping key order, every legacy-named section of a
+    (possibly partial) run-time settings dict (:data:`_LEGACY_SECTION_RENAMES`),
+    including its renamed inner keys; return the renames applied (legacy section
+    name -> current name). Idempotent on current names.
+
+    Raises ``ValueError`` if a dict carries both a legacy section and its
+    replacement, or a legacy section carries both an inner key and its new name
+    (ambiguous: neither can be dropped silently).
+    """
+    renamed: dict[str, str] = {}
+    for old, (new, inner_keys) in _LEGACY_SECTION_RENAMES.items():
+        if old not in settings:
+            continue
+        if new in settings:
+            raise ValueError(
+                f"settings carry both the legacy section {old!r} and its "
+                f"replacement {new!r}; remove the stale {old!r}."
+            )
+        section = settings[old]
+        if isinstance(section, dict):
+            if both := [
+                f"{old_k!r} and {new_k!r}"
+                for old_k, new_k in inner_keys.items()
+                if old_k in section and new_k in section
+            ]:
+                raise ValueError(
+                    f"section {old!r} carries both {', '.join(both)}; remove the "
+                    "stale legacy key."
+                )
+            section = {inner_keys.get(k, k): v for k, v in section.items()}
+        items = [
+            (new, section) if key == old else (key, value)
+            for key, value in settings.items()
+        ]
+        settings.clear()
+        settings.update(items)
+        renamed[old] = new
+    return renamed
 
 
 def run_time_settings_for_ref(roms_ref: str | None) -> type[_RunTimeSettingsCommon]:
@@ -1058,7 +1307,8 @@ def run_time_settings_for_ref(roms_ref: str | None) -> type[_RunTimeSettingsComm
         `None`; :class:`RunTimeSettingsV0_4_0` for 0.4.0 <= ucla-roms < 0.5.0;
         :class:`RunTimeSettingsV0_5_0` for 0.5.0 <= ucla-roms < 0.6.0;
         :class:`RunTimeSettingsV0_6_0` for 0.6.0 <= ucla-roms < 0.7.0;
-        :class:`RunTimeSettingsV0_7_0` for ucla-roms >= 0.7.0.
+        :class:`RunTimeSettingsV0_7_0` for 0.7.0 <= ucla-roms < 0.9.0;
+        :class:`RunTimeSettingsV0_9_0` for ucla-roms >= 0.9.0.
 
     Warns
     -----
@@ -1120,24 +1370,34 @@ def build_namelist(rt: _RunTimeSettingsCommon, n_tracers: int) -> RomsNamelistBa
     instead of the section's own dump.
 
     ``rt``'s concrete type (:class:`RunTimeSettings`, :class:`RunTimeSettingsV0_4_0`,
-    :class:`RunTimeSettingsV0_5_0`, :class:`RunTimeSettingsV0_6_0`, or
-    :class:`RunTimeSettingsV0_7_0`) selects the matching namelist schema and
+    :class:`RunTimeSettingsV0_5_0`, :class:`RunTimeSettingsV0_6_0`,
+    :class:`RunTimeSettingsV0_7_0`, or :class:`RunTimeSettingsV0_9_0`) selects the
+    matching namelist schema and
     ``param_settings``/``basic_output_settings``/``particles_settings`` group
     classes — the ``param``/``ocean_vars``/``particles`` sections already carry the
     right fields and aliases for that variant, so no other branch is needed.
-    ``pio_settings`` (added by ``RunTimeSettingsV0_6_0``) and
-    ``cdr_tracer_output``/``cdr_gas_exch_output`` (added by
-    ``RunTimeSettingsV0_7_0``) are sections a variant can lack entirely rather
-    than just carry a different subtype (an older namelist schema rejects the
-    group outright, ``extra="forbid"``), so each is added to the constructor
-    kwargs only when ``rt`` is an instance of the class that introduced it —
-    checked in most-specific-first order (``RunTimeSettingsV0_7_0`` before its
-    superclass ``RunTimeSettingsV0_6_0`` before ITS superclass
-    ``RunTimeSettingsV0_5_0``) since ``isinstance`` also matches subclasses.
+    ``pio_settings`` (added by ``RunTimeSettingsV0_6_0``),
+    ``cdr_lite_output``/``cdr_gas_exch_output`` (added by
+    ``RunTimeSettingsV0_7_0``, which writes ``cdr_lite_output`` as the 0.7/0.8
+    ``&CDR_TRACER_OUTPUT_SETTINGS`` group) and ``cdr_lite``/``cdr_lite_output``/
+    ``cdr_gas_exch_output`` (``RunTimeSettingsV0_9_0``) are sections a variant can
+    lack entirely rather than just carry a different subtype (an older namelist
+    schema rejects the group outright, ``extra="forbid"``), so each is added to
+    the constructor kwargs only when ``rt`` is an instance of the class that
+    introduced it — checked in most-specific-first order
+    (``RunTimeSettingsV0_9_0``, then ``RunTimeSettingsV0_7_0``, before
+    ``RunTimeSettingsV0_6_0`` before ITS superclass ``RunTimeSettingsV0_5_0``)
+    since ``isinstance`` also matches subclasses; ``RunTimeSettingsV0_9_0`` is a
+    ``RunTimeSettingsV0_6_0`` but not a ``RunTimeSettingsV0_7_0``.
     """
-    if isinstance(rt, RunTimeSettingsV0_7_0):
-        namelist_cls: type[RomsNamelistBase] = RomsNamelistV0_7_0
+    if isinstance(rt, RunTimeSettingsV0_9_0):
+        namelist_cls: type[RomsNamelistBase] = RomsNamelistV0_9_0
         param_cls: type[ParamSettings] = ParamSettingsV0_4_0
+        basic_output_cls = BasicOutputSettingsV0_5_0
+        particles_cls = ParticlesSettingsV0_5_0
+    elif isinstance(rt, RunTimeSettingsV0_7_0):
+        namelist_cls = RomsNamelistV0_7_0
+        param_cls = ParamSettingsV0_4_0
         basic_output_cls = BasicOutputSettingsV0_5_0
         particles_cls = ParticlesSettingsV0_5_0
     elif isinstance(rt, RunTimeSettingsV0_6_0):
@@ -1237,9 +1497,17 @@ def build_namelist(rt: _RunTimeSettingsCommon, n_tracers: int) -> RomsNamelistBa
     )
     if isinstance(rt, RunTimeSettingsV0_6_0):
         kwargs["pio_settings"] = PioSettings(**grp(rt.pio_settings))
-    if isinstance(rt, RunTimeSettingsV0_7_0):
+    if isinstance(rt, RunTimeSettingsV0_9_0):
+        kwargs["cdr_lite_settings"] = CdrLiteSettings(**grp(rt.cdr_lite))
+        kwargs["cdr_lite_output_settings"] = CdrLiteOutputSettings(
+            **grp(rt.cdr_lite_output)
+        )
+        kwargs["cdr_gas_exch_output_settings"] = CdrGasExchOutputSettings(
+            **grp(rt.cdr_gas_exch_output)
+        )
+    elif isinstance(rt, RunTimeSettingsV0_7_0):
         kwargs["cdr_tracer_output_settings"] = CdrTracerOutputSettings(
-            **grp(rt.cdr_tracer_output)
+            **grp(rt.cdr_lite_output)
         )
         kwargs["cdr_gas_exch_output_settings"] = CdrGasExchOutputSettings(
             **grp(rt.cdr_gas_exch_output)
@@ -1299,55 +1567,68 @@ def validate_run_time_sections(
     # Same for BGC tracers vs MARBL (param vs cppdefs): surfaced here so a stored
     # blueprint fails before data staging/generation, not at configure_build.
     if "param" in settings and "cppdefs" in settings:
+        marbl = (settings["cppdefs"] or {}).get("marbl", False)
         try:
-            check_bgc_tracer_count(
-                settings["param"] or {},
-                bgc_mode_is_marbl=(settings["cppdefs"] or {}).get("marbl", False),
-            )
+            check_bgc_tracer_count(settings["param"] or {}, bgc_mode_is_marbl=marbl)
+        except ValueError as exc:
+            errors.append(str(exc))
+        # And the CDR-lite sections vs MARBL/CDR tracer counts (param vs cppdefs),
+        # on the sections the selected tier models only: one it lacks is reported
+        # by prune_version_gated_sections (resolve/configure_build), not advised on
+        # here with 0.9-specific wording.
+        keep = (*fields, "param", "cppdefs")
+        modeled = {k: v for k, v in settings.items() if k in keep}
+        try:
+            check_cdr_lite_sections(modeled, bgc_mode_is_marbl=marbl)
         except ValueError as exc:
             errors.append(str(exc))
     return errors
 
 
-# Maps each forge settings-dict section that check_output_streams_divide_rst's
-# canonical table reads to (the forge Cfg class that types/aliases that raw
-# section, the C-Star RomsNamelistBase group field name the canonical table
-# expects). ``ocean_vars``/``upscale_output`` need no aliasing at all -- their
-# forge field names already ARE the real Fortran namelist keys -- but are
-# still routed through their Cfg class so a malformed section raises loudly
-# rather than silently mismatching field names. Version-pinned to the >= 0.5.0
-# variants (``OceanVarsCfgV0_5_0``, ``ParticlesCfgV0_5_0``): both call sites of
-# :func:`canonical_output_sections_for_precheck` only run this check under the
-# :func:`output_precheck_applies_to` (>= 0.5.0) gate.
-_PRECHECK_SECTION_MAP: dict[str, tuple[type[_SettingsSection], str]] = {
-    "ocean_vars": (OceanVarsCfgV0_5_0, "basic_output_settings"),
-    "frc_output": (FrcOutputCfg, "frc_output_settings"),
-    "random_output": (RandomOutputCfg, "random_output_settings"),
-    "zslice": (ZsliceCfg, "zslice_settings"),
-    "surf_flux": (SurfFluxCfg, "surf_flx_output_settings"),
-    "particles": (ParticlesCfgV0_5_0, "particles_settings"),
-    "sponge_tune": (SpongeTuneCfg, "sponge_tune_settings"),
-    "diagnostics": (DiagnosticsCfg, "diagnostics_settings"),
-    "cdr_output": (CdrOutputCfg, "cdr_output_settings"),
-    "cdr_tracer_output": (CdrTracerOutputCfg, "cdr_tracer_output_settings"),
-    "cdr_gas_exch_output": (CdrGasExchOutputCfg, "cdr_gas_exch_output_settings"),
-    "upscale_output": (UpscaleOutputCfg, "upscale_settings"),
-    "bgc": (BgcCfg, "bgc_settings"),
-    "extract_data": (ExtractDataCfg, "extract_data_settings"),
-}
+# Rows ``(forge settings-dict section, the forge Cfg class that types/aliases
+# that raw section, the C-Star RomsNamelistBase group field name the canonical
+# table expects)`` for the sections check_output_streams_divide_rst reads.
+# ``ocean_vars``/``upscale_output`` need no aliasing at all -- their forge field
+# names already ARE the real Fortran namelist keys -- but are still routed
+# through their Cfg class so a malformed section raises loudly rather than
+# silently mismatching field names. A section whose Cfg varies by ucla-roms
+# release has one row per Cfg; a row applies when the pinned release's settings
+# tier types the section as exactly that Cfg (:func:`_tier_types_section`), so
+# the ``OceanVarsCfgV0_5_0``/``ParticlesCfgV0_5_0`` rows apply only on the
+# >= 0.5.0 tiers :func:`output_precheck_applies_to` gates this check to, and
+# ``cdr_lite_output`` maps to the group its release writes.
+_PRECHECK_SECTION_MAP: tuple[tuple[str, type[_SettingsSection], str], ...] = (
+    ("ocean_vars", OceanVarsCfgV0_5_0, "basic_output_settings"),
+    ("frc_output", FrcOutputCfg, "frc_output_settings"),
+    ("random_output", RandomOutputCfg, "random_output_settings"),
+    ("zslice", ZsliceCfg, "zslice_settings"),
+    ("surf_flux", SurfFluxCfg, "surf_flx_output_settings"),
+    ("particles", ParticlesCfgV0_5_0, "particles_settings"),
+    ("sponge_tune", SpongeTuneCfg, "sponge_tune_settings"),
+    ("diagnostics", DiagnosticsCfg, "diagnostics_settings"),
+    ("cdr_output", CdrOutputCfg, "cdr_output_settings"),
+    ("cdr_lite_output", CdrLiteOutputCfg, "cdr_tracer_output_settings"),
+    ("cdr_lite_output", CdrLiteOutputCfgV0_9_0, "cdr_lite_output_settings"),
+    ("cdr_gas_exch_output", CdrGasExchOutputCfg, "cdr_gas_exch_output_settings"),
+    ("upscale_output", UpscaleOutputCfg, "upscale_settings"),
+    ("bgc", BgcCfg, "bgc_settings"),
+    ("extract_data", ExtractDataCfg, "extract_data_settings"),
+)
 
 # The inverse of _PRECHECK_SECTION_MAP: canonical RomsNamelistBase group field
-# name -> (the forge settings-dict section that maps to it, its Cfg class).
-# Used by forge_field_for to point a NamelistConsistencyError's canonical
-# section/keys back at the forge settings-dict field the wizard actually
-# edits.
+# name (unique per row) -> (the forge settings-dict section that maps to it,
+# its Cfg class). Used by forge_field_for to point a NamelistConsistencyError's
+# canonical section/keys back at the forge settings-dict field the wizard
+# actually edits.
 _FORGE_SECTION_BY_CANONICAL_GROUP: dict[str, tuple[str, type[_SettingsSection]]] = {
     group_name: (section_name, cfg_cls)
-    for section_name, (cfg_cls, group_name) in _PRECHECK_SECTION_MAP.items()
+    for section_name, cfg_cls, group_name in _PRECHECK_SECTION_MAP
 }
 
 
-def canonical_output_sections_for_precheck(settings: dict[str, Any]) -> dict[str, Any]:
+def canonical_output_sections_for_precheck(
+    settings: dict[str, Any], settings_cls: type[_RunTimeSettingsCommon]
+) -> dict[str, Any]:
     """Translate the output-stream-relevant sections of a forge run-time
     settings dict into C-Star's canonical namelist vocabulary (RomsNamelistBase
     group field name -> its aliased field dict), for
@@ -1362,9 +1643,10 @@ def canonical_output_sections_for_precheck(settings: dict[str, Any]) -> dict[str
     ``generate_inputs()``/executor time), so a full run-time-settings
     validation can't succeed yet. None of those sections affect any
     output-stream field, so this only validates+aliases the sections the
-    checker actually reads (see :data:`_PRECHECK_SECTION_MAP`). A section
-    absent from ``settings`` is simply omitted from the result -- the checker
-    already treats an absent section as "skip that stream".
+    checker actually reads (see :data:`_PRECHECK_SECTION_MAP`, whose rows are
+    filtered by ``settings_cls``, the tier of the pinned ucla-roms release). A
+    section absent from ``settings`` is simply omitted from the result -- the
+    checker already treats an absent section as "skip that stream".
 
     Always includes ``extract_data`` (the nesting `extract` stream) when
     present in ``settings`` -- it's unconditionally fully populated by
@@ -1377,7 +1659,9 @@ def canonical_output_sections_for_precheck(settings: dict[str, Any]) -> dict[str
     "extract_data_settings"``.
     """
     out: dict[str, Any] = {}
-    for section_name, (cfg_cls, group_name) in _PRECHECK_SECTION_MAP.items():
+    for section_name, cfg_cls, group_name in _PRECHECK_SECTION_MAP:
+        if not _tier_types_section(settings_cls, section_name, cfg_cls):
+            continue
         section = settings.get(section_name)
         if section is None:
             continue

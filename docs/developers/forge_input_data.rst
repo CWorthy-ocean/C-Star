@@ -394,7 +394,7 @@ Output paths are normalized to absolute strings.
 ``cdr_source=True``, ``ncdr_parm=len(cdr.releases)``,
 ``forcing_parameterized=True``, ``cdr_volume=(cdr.releases.release_type ==
 "volume")``. Run-time ``cdr_output``: ``do_cdr_output = True``. Does NOT
-touch ``cdr_tracer_output``/``cdr_gas_exch_output`` (ucla-roms >= 0.7.0) --
+touch ``cdr_lite_output``/``cdr_gas_exch_output`` (ucla-roms >= 0.7.0) --
 unlike ``cdr_output``, those two streams are never forced on by CDR forcing;
 a user enables them explicitly (see the OutputSpec).
 

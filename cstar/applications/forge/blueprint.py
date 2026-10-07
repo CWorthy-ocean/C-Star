@@ -431,14 +431,19 @@ _HASH_EXCLUDE = {
 # run then goes under C-Star's default for the application and name
 # (``Blueprint.effective_working_dir``). Migration drops a ``working_dir`` that
 # is one of Forge's old home-rooted defaults and keeps any other value as written.
-# v10 (2026-10): ``provenance`` builds on the ``Blueprint`` base's provenance block
+# v10 (2026-10): ucla-roms 0.9.0 renamed CDR_TRACER to CDR_LITE; Forge's
+# ``model_settings.cdr_tracer_output`` section is now ``cdr_lite_output`` (its
+# ``do_cdr_tracer_output`` flag ``do_cdr_lite_output``) for every ucla-roms
+# release, and ``cdr_lite`` (``cdr_online_carbonate_sensitivity``) is new.
+# Migration renames the section and flag. The same bump: ``provenance`` builds on the ``Blueprint`` base's provenance block
 # (``ForgeProvenance``): the producing event is recorded in ``generated_by`` (tool,
 # id, system, package versions), re-stamped by ``ForgeBlueprint.stamp_provenance``
 # whenever the content hash changes or none is recorded yet; ``cstar_version``/
 # ``roms_tools_version`` are legacy and no longer stamped. This is an explicit
 # exception to the "additive fields don't bump" rule above: newly saved files carry
 # ``provenance.generated_by``, which v9 builds reject as an unknown key, so the bump
-# makes an older install say "upgrade cstar-ocean" instead. No data migration.
+# makes an older install say "upgrade cstar-ocean" instead; and ``composition``
+# spec names are plain strings (``name: null`` becomes ``""``, applied on every load).
 FORGE_BLUEPRINT_VERSION = 10
 
 # Identifies the C-Star application that CONSUMES this blueprint — i.e. the "forge"

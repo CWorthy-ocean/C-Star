@@ -209,6 +209,8 @@ forcing:
     domain_edge_buffer: 20
     options: {}
     custom_file: null
+    surface_forcing_source: null
+    river_temp_smoothing_window_days: 30.0
   resolved_datasets:
     GLORYS:
       dataset_key: GLORYS_REGIONAL
@@ -549,16 +551,16 @@ code:
   pio: null
   templates_compile_time:
     location: https://github.com/CWorthy-ocean/C-Star.git
-    commit: 6a0a4ee55b944db316e33f58ba7aa2403e880b92
+    commit: d35d06265515965c7daaa54c111ee0185166bca4
     branch: null
     directory: cstar/additional_files/templates/forge/compile-time
     files:
     - cppdefs.opt.j2
     file_hashes:
-      cppdefs.opt.j2: 2942d94da83cdcad7a324f50eb4fe8728fdf7df51e522abd276f40d92ff0be73
+      cppdefs.opt.j2: 115f044081ac9c04c8803ae2d83a6e6f39a92da83c2caf7b305a7cb8b1bbfbdd
   templates_run_time:
     location: https://github.com/CWorthy-ocean/C-Star.git
-    commit: 6a0a4ee55b944db316e33f58ba7aa2403e880b92
+    commit: d35d06265515965c7daaa54c111ee0185166bca4
     branch: null
     directory: cstar/additional_files/templates/forge/run-time
     files:
@@ -593,5 +595,5 @@ provenance:
   cstar_version: cstar-ocean==0.12.0
   roms_tools_version: roms-tools==4.1.1.dev2+g1a564489a
   override_files_applied: []
-  content_hash: 82e577f09cf8e0be369f0eeeccd4c4a64d56b7d718f11ba92a1f556efbe484d7
+  content_hash: fa236d6c81a2810579e75b0721853a2811b6e131dc44e8427d361acb34cc8d17
   notes: null

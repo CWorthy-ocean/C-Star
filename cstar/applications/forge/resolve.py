@@ -28,6 +28,7 @@ It should be unified with ``source_datasets.py`` once the two-phase refactor lan
 from __future__ import annotations
 
 import copy
+import logging
 import warnings
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal
@@ -69,11 +70,13 @@ from cstar.applications.forge.namelist_model import (
     NamelistConsistencyError,
     canonical_output_sections_for_precheck,
     check_bgc_tracer_count,
+    check_cdr_lite_sections,
     check_cdr_output_sections,
     check_output_streams_divide_rst,
     check_rst_period_divisible,
     cppdefs_for_precheck,
     ensure_cdr_output_marbl_diagnostics,
+    normalize_legacy_sections,
     output_precheck_applies_to,
     prune_version_gated_sections,
     run_time_settings_for_ref,
@@ -91,9 +94,12 @@ from cstar.base.utils import netcdf_format
 if TYPE_CHECKING:
     from datetime import datetime
 
+log = logging.getLogger(__name__)
+
 # Default repo serving the render templates: this repository, whose bundled copy
 # lives at `cstar/additional_files/templates/forge/`. Every bundled ModelSpec pins
-# `templates_commit:` to a C-Star release commit and authors `file_hashes` of the
+# `templates_commit:` to a C-Star commit whose templates are the bundled copy
+# (normally a release commit) and authors `file_hashes` of the
 # files at that commit (see `ModelTemplates.file_hashes`); ``_build_code`` copies
 # those hashes into `TemplateRepo.file_hashes`, and the executor stages from the
 # bundled copy when it matches them, fetching `location`@`templates_commit` only
@@ -238,6 +244,26 @@ def _deep_merge(base: dict[str, Any], override: dict[str, Any]) -> dict[str, Any
     return base
 
 
+def _with_current_section_names(
+    settings: dict[str, Any] | None, source: str
+) -> dict[str, Any]:
+    """A deep copy of a settings dict entering the resolver (ModelSpec model
+    settings, OutputSpec, run-time overrides) with legacy section names renamed
+    (:func:`normalize_legacy_sections`); warns once per ``source`` when it
+    renamed anything, since a spec still using them predates ucla-roms 0.9.0.
+    """
+    settings = copy.deepcopy(settings or {})
+    if renamed := normalize_legacy_sections(settings):
+        log.warning(
+            "%s uses legacy settings section(s) %s; ucla-roms 0.9.0 renamed "
+            "CDR_TRACER to CDR_LITE, so they were renamed on load. Update the "
+            "OutputSpec/ModelSpec to the new names.",
+            source,
+            ", ".join(f"{old!r} -> {new!r}" for old, new in renamed.items()),
+        )
+    return settings
+
+
 def load_model_spec_data(model_dir: str | Path) -> dict[str, Any]:
     """Read a ModelSpec directory into a plain dict (no heavy deps).
 
@@ -283,7 +309,7 @@ OUTPUT_SECTIONS = (
     "ts_output",
     "frc_output",
     "cdr_output",
-    "cdr_tracer_output",
+    "cdr_lite_output",
     "cdr_gas_exch_output",
     "upscale_output",
     "zslice",
@@ -751,7 +777,9 @@ def build_forge_blueprint(
         v_sponge = _compute_v_sponge_default(grid_kwargs, loaded_grid)
 
     # ----- flat model_settings ----------------------------------------------
-    settings: dict[str, Any] = copy.deepcopy(model.get("model_settings", {}) or {})
+    settings: dict[str, Any] = _with_current_section_names(
+        model.get("model_settings"), f"ModelSpec {model_name!r}"
+    )
     for sec in _PROCESSING_FILLED_SECTIONS:
         settings.pop(sec, None)
     settings["time_stepping"] = {"ntimes": ntimes, "dt": dt, "ndtfast": 60, "ninfo": 1}
@@ -887,7 +915,9 @@ def build_forge_blueprint(
 
     # OutputSpec spec: deep-merge the output-settings selection over the model
     # defaults (before manual overrides, so a hand override still wins).
-    _deep_merge(settings, output_settings)
+    _deep_merge(
+        settings, _with_current_section_names(output_settings, "output_settings")
+    )
 
     # overrides win (mirror ForgeExecutor.configure_build precedence)
     if compile_time_overrides:
@@ -896,7 +926,10 @@ def build_forge_blueprint(
             compile_time_overrides.get("cppdefs", compile_time_overrides),
         )
     if run_time_overrides:
-        _deep_merge(settings, run_time_overrides)
+        _deep_merge(
+            settings,
+            _with_current_section_names(run_time_overrides, "run_time_overrides"),
+        )
 
     # A child grid (has a parent) gets its boundaries from the parent's nesting.nc
     # extraction: no boundary tides and no sponge ub_tune. Force both off after the
@@ -957,7 +990,7 @@ def build_forge_blueprint(
         settings_cls = run_time_settings_for_ref(
             str(effective_roms_ref) if effective_roms_ref is not None else None
         )
-    # Drop any version-gated section (e.g. cdr_tracer_output, ucla-roms >= 0.7.0)
+    # Drop any version-gated section (e.g. cdr_lite_output, ucla-roms >= 0.7.0)
     # this pin's schema doesn't model. OutputSpecs are shared across ModelSpecs
     # pinned to different ucla-roms releases (the same "daily-restarts"
     # OutputSpec is selected against both 0.6- and 0.7-pinned ModelSpecs), so
@@ -967,13 +1000,15 @@ def build_forge_blueprint(
     # precheck (which reads `settings` directly, not a validated model), and
     # before `settings` is frozen into the blueprint's `model_settings`, so a
     # blueprint never stores a section its release's namelist schema doesn't
-    # understand. Silent here: this is the expected shared-OutputSpec case.
+    # understand. Silent here for a switched-off section: this is the expected
+    # shared-OutputSpec case. A section whose enable switch is on raises
+    # instead -- the pinned release cannot honor it.
     prune_version_gated_sections(settings, settings_cls)
 
     # ----- CDR tracer / gas-exchange output consistency (ucla-roms >= 0.7.0) --
     # Unlike do_cdr_output above, these two dedicated output streams (PR #351)
     # are NEVER forced on by an active CDR forcing mode -- they're opt-in
-    # extras a user enables explicitly (see CdrTracerOutputCfg/
+    # extras a user enables explicitly (see CdrLiteOutputCfg/
     # CdrGasExchOutputCfg), so read only the flag actually present in
     # `settings`, never `cdr_spec.mode`. Both sections are version-gated
     # (added by RunTimeSettingsV0_7_0 -- older ModelSpec/OutputSpec pairings
@@ -982,8 +1017,32 @@ def build_forge_blueprint(
     # enable and is left absent. The per-stream MARBL requirement (gas exchange
     # only) and its message are shared with the executor's build-time net
     # (configure_build) via check_cdr_output_sections -- see its docstring.
-    if check_cdr_output_sections(settings, bgc_mode_is_marbl=bgc_mode == "marbl"):
+    # From ucla-roms 0.9.0 the CDR-lite tracer stream compiles unconditionally,
+    # so on that tier it forces nothing (settings_cls decides which rows apply).
+    if check_cdr_output_sections(
+        settings, bgc_mode_is_marbl=bgc_mode == "marbl", settings_cls=settings_cls
+    ):
         settings["cppdefs"]["cdr_forcing"] = True
+
+    # ----- CDR_LITE (ucla-roms >= 0.9.0) -------------------------------------
+    # cppdefs.cdr_lite is resolver-owned: derived from the user knob
+    # cdr_lite.cdr_online_carbonate_sensitivity (Forge's only CDR_LITE mode --
+    # the file-based sensitivities have no Forge source yet). Nothing has derived
+    # it yet, so a value here came from a ModelSpec/override: honoring it
+    # without the knob is the unsupported mode. The key stays absent when not
+    # needed (the template reads an absent key as off).
+    requested = settings["cppdefs"].get("cdr_lite", False)
+    needed = check_cdr_lite_sections(settings, bgc_mode_is_marbl=bgc_mode == "marbl")
+    if requested and not needed:
+        raise ValueError(
+            "cppdefs.cdr_lite is set without cdr_lite.cdr_online_carbonate_"
+            "sensitivity: CDR_LITE with file-based carbonate sensitivities "
+            "(ddic_dco2/ddic_dalk forcing) is not yet supported in Forge. Set "
+            "cdr_lite.cdr_online_carbonate_sensitivity (needs MARBL), which "
+            "enables CDR_LITE."
+        )
+    if needed:
+        settings["cppdefs"]["cdr_lite"] = True
 
     # ----- BGC tracer count consistency --------------------------------------
     # ntrc_bio was zeroed above for a non-MARBL run; this catches an override
@@ -1020,7 +1079,7 @@ def build_forge_blueprint(
         # executor time) -- none of which affect any output-stream field.
         try:
             check_output_streams_divide_rst(
-                canonical_output_sections_for_precheck(settings),
+                canonical_output_sections_for_precheck(settings, settings_cls),
                 cppdefs_for_precheck(
                     settings.get("cppdefs", {}), settings.get("upscale_output", {})
                 ),

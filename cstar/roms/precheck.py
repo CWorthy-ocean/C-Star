@@ -13,8 +13,11 @@ divide ``output_period_rst`` -- writing a restart mid-file would otherwise
 leave a partial output file. The whole check is gated on
 ``basic_output_settings.wrt_file_rst``; six of the per-stream groups are
 further gated on a ucla-roms compile-time cppdef (``DIAGNOSTICS``, and the
-five MARBL/BGC-diagnostics groups: ``cdr``, ``cdrtrc``, ``cdrgas``,
-``upscale``, and ``bgc``). :func:`applies_to` owns the ">= 0.5.0" schema gate.
+five MARBL/BGC-diagnostics groups: ``cdr``, the 0.7/0.8-only ``cdrtrc``,
+``cdrgas``, ``upscale``, and ``bgc``). ucla-roms >= 0.9.0 compiles its
+replacement for ``cdrtrc`` (``&CDR_LITE_OUTPUT_SETTINGS``) unconditionally, so
+it has a second, unguarded ``cdrtrc`` row. :func:`applies_to` owns the
+">= 0.5.0" schema gate.
 
 Rule B -- :func:`check_restart_period_divisible_by_dt` is not a ucla-roms
 abort (ucla-roms' restart trigger is a running-clock threshold, not a
@@ -81,8 +84,8 @@ def applies_to(schema: type[RomsNamelistBase]) -> bool:
     in 0.5.0: ``schema`` is checked against the legacy, unversioned
     ``RomsNamelist`` (< 0.4.0), which ``RomsNamelistV0_4_0`` (< 0.5.0)
     subclasses -- every >= 0.5.0 schema (``RomsNamelistV0_5_0``,
-    ``RomsNamelistV0_6_0``, ``RomsNamelistV0_7_0``) subclasses
-    ``RomsNamelistBase`` directly (or a later version), never
+    ``RomsNamelistV0_6_0``, ``RomsNamelistV0_7_0``, ``RomsNamelistV0_9_0``)
+    subclasses ``RomsNamelistBase`` directly (or a later version), never
     ``RomsNamelist``, so ``issubclass`` here is exactly the >= 0.5.0 gate.
     Rule B is ungated -- it is not version-specific (see the module
     docstring) -- so it has no ``applies_to`` counterpart.
@@ -134,7 +137,7 @@ class _StreamCheck:
     cppdef_guard
         Cppdef name(s) that must all be active (looked up in the ``cppdefs``
         mapping) for ucla-roms to even compile this stream's write calls.
-        ``()`` for the seven groups with no cppdef guard.
+        ``()`` for the groups with no cppdef guard.
     """
 
     label: str
@@ -145,13 +148,17 @@ class _StreamCheck:
     cppdef_guard: tuple[str, ...] = ()
 
 
-# The complete `do_precheck` call list (ucla-roms `src/precheck.F90`), keyed
-# on C-Star's canonical namelist vocabulary: `section` is the RomsNamelistBase
-# group field name (the `&<group>` header in namelist.nml), and
+# The `do_precheck` call list (ucla-roms `src/precheck.F90`), keyed on C-Star's
+# canonical namelist vocabulary: `section` is the RomsNamelistBase group field
+# name (the `&<group>` header in namelist.nml), and
 # `gate_fields`/`period_field`/`nrpf_field` are the real Fortran namelist keys
 # within that group. Verified against `cstar/roms/namelist.py` (the group
 # classes) and `cstar/tests/unit_tests/roms/fixtures/example_namelist_v0_6_0.nml`
-# / `example_namelist_v0_7_0.nml` (the `&<group>` headers).
+# / `example_namelist_v0_7_0.nml` / `example_namelist_v0_9_0.nml` (the
+# `&<group>` headers). The `cdrtrc` label appears twice, once per namelist
+# generation (see the two rows below); `check_output_streams_divide_rst` skips
+# a section absent from the settings, so only the row matching the schema in
+# use ever fires.
 _STREAM_CHECKS: tuple[_StreamCheck, ...] = (
     _StreamCheck(
         "extract",
@@ -228,6 +235,7 @@ _STREAM_CHECKS: tuple[_StreamCheck, ...] = (
         "nrpf_cdr",
         cppdef_guard=("marbl", "marbl_diags", "cdr_forcing"),
     ),
+    # ucla-roms 0.7.0 - 0.8.x (`&CDR_TRACER_OUTPUT_SETTINGS`)
     _StreamCheck(
         "cdrtrc",
         "cdr_tracer_output_settings",
@@ -235,6 +243,14 @@ _STREAM_CHECKS: tuple[_StreamCheck, ...] = (
         "output_period_cdr_trc",
         "nrpf_cdr_trc",
         cppdef_guard=("marbl", "cdr_forcing"),
+    ),
+    # ucla-roms >= 0.9.0 (`&CDR_LITE_OUTPUT_SETTINGS`, compiled unconditionally)
+    _StreamCheck(
+        "cdrtrc",
+        "cdr_lite_output_settings",
+        ("do_cdr_lite_output",),
+        "output_period_cdr_lite",
+        "nrpf_cdr_lite",
     ),
     _StreamCheck(
         "cdrgas",
@@ -331,9 +347,10 @@ def check_output_streams_divide_rst(
         Mapping of cppdef name -> whether it is active in this build (e.g.
         ``{"marbl": True, "cdr_forcing": True}``). Governs the six
         cppdef-gated groups (``diagnostics``; the five MARBL/BGC-diagnostics
-        groups: ``cdr``, ``cdrtrc``, ``cdrgas``, ``upscale``, and the four
-        ``bgc_*`` streams, gated on ``MARBL || BIOLOGY_BEC2``). ``None``/absent
-        names are treated as
+        groups: ``cdr``, the 0.7/0.8 ``cdrtrc``, ``cdrgas``, ``upscale``, and
+        the four ``bgc_*`` streams, gated on ``MARBL || BIOLOGY_BEC2``).
+        ucla-roms >= 0.9.0's ``cdrtrc`` (``cdr_lite_output_settings``) is
+        unguarded. ``None``/absent names are treated as
         inactive, so a caller that doesn't build MARBL/BIOLOGY_BEC2 at all can
         just omit them -- the cppdef-gated groups are then always skipped,
         exactly as ucla-roms itself would (it never compiles their write
@@ -345,7 +362,9 @@ def check_output_streams_divide_rst(
       this function returns immediately without checking anything (mirrors
       ``if (.not. wrt_file_rst) return`` in the Fortran).
     - Each stream is additionally skipped if: its cppdef guard (if any) is
-      not fully satisfied; its own enable gate reads as false (a missing gate
+      not fully satisfied; its section is absent from ``settings`` (a
+      namelist carries only one of the two ``cdrtrc`` groups, which is what
+      lets both rows coexist); its own enable gate reads as false (a missing gate
       field counts as false -- for a two-field ``.or.`` gate like ``sflx`` or
       ``diagnostics``, one field present-and-true still enables the stream
       even if the other is absent); or its ``nrpf``/period field is missing

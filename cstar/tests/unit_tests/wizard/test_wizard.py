@@ -27,6 +27,7 @@ from cstar.applications.forge.namelist_model import (
     RunTimeSettingsV0_5_0,
     RunTimeSettingsV0_6_0,
     RunTimeSettingsV0_7_0,
+    RunTimeSettingsV0_9_0,
 )
 from cstar.wizard.wizard import (
     _ACCORDION_EXCLUDED_FIELDS,
@@ -1343,11 +1344,11 @@ def test_bgc_dd_none_with_default_bgc_forcing_surfaces_error_legibly():
 
 def test_use_pio_chk_default_seeded_from_model_spec():
     """use_pio_chk mirrors bgc_dd: it is seeded from the selected ModelSpec's
-    top-level use_pio (True for roms-marbl-0.8-default, the wizard's default
+    top-level use_pio (True for roms-marbl-0.9-default, the wizard's default
     model; False for cson_roms-marbl_v0.1), and reseeded on a model switch.
     """
     wiz = ForgeBlueprintWizard()
-    assert wiz.model_dd.value == "roms-marbl-0.8-default"
+    assert wiz.model_dd.value == "roms-marbl-0.9-default"
     assert wiz.use_pio_chk.value is True
     assert wiz._model_default_use_pio() is True
 
@@ -1365,7 +1366,7 @@ def test_use_pio_chk_emit_is_unconditional():
     wiz = ForgeBlueprintWizard()
     wiz.start.value = date(2012, 1, 1)
     wiz.end.value = date(2012, 1, 2)
-    # roms-marbl-0.8-default (the default model) declares use_pio: true --
+    # roms-marbl-0.9-default (the default model) declares use_pio: true --
     # exactly the ModelSpec this test guards against: unchecking must emit an
     # explicit False, not fall back to the ModelSpec default.
     assert wiz.use_pio_chk.value is True
@@ -2174,12 +2175,11 @@ def test_output_spec_defaults_to_daily_restarts():
 
 
 def test_default_model_uses_latest_settings_schema():
-    """The default catalog model (``roms-marbl-0.8-default``) is pinned to
-    ucla-roms ``0.8.0`` -- a semver ref above every registered schema boundary,
-    which both the wizard and the executor (``write_roms_namelist`` ->
+    """The default catalog model (``roms-marbl-0.9-default``) is pinned to
+    ucla-roms ``0.9.0`` -- a semver ref at the newest registered schema
+    boundary, which both the wizard and the executor (``write_roms_namelist`` ->
     ``run_time_settings_for_ref``) resolve to the *latest* known schema
-    (currently ``RunTimeSettingsV0_7_0``, since 0.8.0 adds no namelist groups),
-    not the legacy one. This is an intentional behavior change from before this
+    (currently ``RunTimeSettingsV0_9_0``), not the legacy one. This is an intentional behavior change from before this
     ref-awareness was added (the editor used to hardcode legacy
     ``RunTimeSettings``) -- it pins that the wizard now agrees with what the
     executor will actually write. (The tests in tests/test_forge_blueprint.py
@@ -2190,7 +2190,7 @@ def test_default_model_uses_latest_settings_schema():
     wiz.start.value = date(2012, 1, 1)
     wiz.end.value = date(2012, 1, 2)
     wiz._rebuild()
-    assert wiz._editor_settings_cls is RunTimeSettingsV0_7_0
+    assert wiz._editor_settings_cls is RunTimeSettingsV0_9_0
     assert ("ocean_vars", "nrpf_rst") not in wiz.editor._widgets
 
 
@@ -2261,14 +2261,14 @@ def test_advection_cppdefs_editable_via_advanced_settings_accordion(tmp_path):
 @pytest.mark.parametrize(
     "section,master_flag",
     [
-        ("cdr_tracer_output", "do_cdr_tracer_output"),
+        ("cdr_lite_output", "do_cdr_lite_output"),
         ("cdr_gas_exch_output", "do_cdr_gas_exch_output"),
     ],
 )
 def test_settings_editor_skips_cdr_output_streams_not_in_active_schema(
     section, master_flag
 ):
-    """``cdr_tracer_output``/``cdr_gas_exch_output`` (ucla-roms PR #351, >=
+    """``cdr_lite_output``/``cdr_gas_exch_output`` (ucla-roms PR #351, >=
     0.7.0) are version-gated exactly like ``pio_settings`` (see
     ``test_settings_editor_skips_version_gated_section_not_in_active_schema``
     above), one schema tier later: only ``RunTimeSettingsV0_7_0`` models them.
@@ -2277,7 +2277,7 @@ def test_settings_editor_skips_cdr_output_streams_not_in_active_schema(
     ``roms_ref`` override down to "0.6.0" with the same ModelSpec selected),
     so the editor must build no widget for it under
     ``RunTimeSettingsV0_6_0`` and build one once the effective schema reaches
-    ``RunTimeSettingsV0_7_0``.
+    ``RunTimeSettingsV0_7_0`` (or ``RunTimeSettingsV0_9_0``).
     """
     import ipywidgets as W
 
@@ -2299,12 +2299,33 @@ def test_settings_editor_skips_cdr_output_streams_not_in_active_schema(
         "Carbon dioxide removal (CDR)", []
     )
 
+    v0_9_0_editor = _SettingsEditor(
+        W, model_settings, settings_cls=RunTimeSettingsV0_9_0
+    )
+    assert (section, master_flag) in v0_9_0_editor._widgets
+
+
+def test_settings_editor_skips_cdr_lite_section_before_0_9_0():
+    """The ``cdr_lite`` knob section only exists on ``RunTimeSettingsV0_9_0``:
+    older tiers build no widget for it, 0.9 builds one in the CDR pane.
+    """
+    import ipywidgets as W
+
+    model_settings = {"cdr_lite": {"cdr_online_carbonate_sensitivity": False}}
+    key = ("cdr_lite", "cdr_online_carbonate_sensitivity")
+
+    old = _SettingsEditor(W, model_settings, settings_cls=RunTimeSettingsV0_7_0)
+    assert key not in old._widgets
+    new = _SettingsEditor(W, model_settings, settings_cls=RunTimeSettingsV0_9_0)
+    assert key in new._widgets
+    assert "cdr_lite" in new._pane_sections["Carbon dioxide removal (CDR)"]
+
 
 def test_wizard_editor_cdr_output_streams_gated_by_model_spec_pin():
     """End-to-end sibling of the two tests above, driven through the wizard's
     model selector instead of ``_SettingsEditor`` directly: ``roms-marbl-0.6-
     default`` pins ucla-roms 0.6.0, so the resolver's
-    ``prune_version_gated_sections`` drops ``cdr_tracer_output``/
+    ``prune_version_gated_sections`` drops ``cdr_lite_output``/
     ``cdr_gas_exch_output`` from ``model_settings`` entirely (they're
     OutputSpec-owned -- the default 'daily-restarts' OutputSpec carries them --
     but this pin's schema can't model them), and the editor never sees the
@@ -2317,9 +2338,9 @@ def test_wizard_editor_cdr_output_streams_gated_by_model_spec_pin():
 
     wiz.model_dd.value = "roms-marbl-0.6-default"
     wiz._rebuild()
-    assert "cdr_tracer_output" not in wiz.config.model_settings
+    assert "cdr_lite_output" not in wiz.config.model_settings
     assert "cdr_gas_exch_output" not in wiz.config.model_settings
-    assert ("cdr_tracer_output", "do_cdr_tracer_output") not in wiz.editor._widgets
+    assert ("cdr_lite_output", "do_cdr_lite_output") not in wiz.editor._widgets
     assert (
         "cdr_gas_exch_output",
         "do_cdr_gas_exch_output",
@@ -2327,10 +2348,20 @@ def test_wizard_editor_cdr_output_streams_gated_by_model_spec_pin():
 
     wiz.model_dd.value = "roms-marbl-0.7-default"
     wiz._rebuild()
-    assert "cdr_tracer_output" in wiz.config.model_settings
+    assert "cdr_lite_output" in wiz.config.model_settings
     assert "cdr_gas_exch_output" in wiz.config.model_settings
-    assert ("cdr_tracer_output", "do_cdr_tracer_output") in wiz.editor._widgets
+    assert ("cdr_lite_output", "do_cdr_lite_output") in wiz.editor._widgets
     assert ("cdr_gas_exch_output", "do_cdr_gas_exch_output") in wiz.editor._widgets
+
+    wiz.model_dd.value = "roms-marbl-0.9-default"
+    wiz._rebuild()
+    assert "cdr_lite_output" in wiz.config.model_settings
+    assert ("cdr_lite_output", "do_cdr_lite_output") in wiz.editor._widgets
+    assert ("cdr_lite_output", "wrt_gas_exchange") in wiz.editor._widgets
+    # The bundled spec does not declare the ``cdr_lite`` knob yet (CDR-lite tracers
+    # need forcing Forge cannot generate), so there is no widget for it.
+    assert "cdr_lite" not in wiz.config.model_settings
+    assert ("cdr_lite", "cdr_online_carbonate_sensitivity") not in wiz.editor._widgets
 
 
 def test_cdr_tracer_counts_survive_wizard_save_and_load_round_trip(tmp_path):
@@ -2376,13 +2407,13 @@ def test_cdr_tracer_counts_survive_wizard_save_and_load_round_trip(tmp_path):
 
 @pytest.mark.parametrize(
     "section",
-    ["cdr_output", "cdr_tracer_output", "cdr_gas_exch_output"],
+    ["cdr_output", "cdr_lite_output", "cdr_gas_exch_output"],
 )
 def test_cdr_output_stream_do_avg_and_monthly_render_as_dropdowns(section):
     """Every CDR output stream's ``do_avg``/``monthly_averages`` fields render
     as a two-option mode dropdown, not a checkbox -- see
     ``_BOOL_DROPDOWN_FIELDS``. ``cdr_output`` is the pre-existing stream;
-    ``cdr_tracer_output``/``cdr_gas_exch_output`` (ucla-roms >= 0.7.0) must
+    ``cdr_lite_output``/``cdr_gas_exch_output`` (ucla-roms >= 0.7.0) must
     behave identically.
     """
     import ipywidgets as W
@@ -2405,7 +2436,7 @@ def test_cdr_output_stream_do_avg_and_monthly_render_as_dropdowns(section):
     "section,master_flag",
     [
         ("cdr_output", "do_cdr_output"),
-        ("cdr_tracer_output", "do_cdr_tracer_output"),
+        ("cdr_lite_output", "do_cdr_lite_output"),
         ("cdr_gas_exch_output", "do_cdr_gas_exch_output"),
     ],
 )
@@ -2416,7 +2447,7 @@ def test_cdr_output_stream_field_rules_follow_master_switch(section, master_flag
     ``_CDR_STREAM_MASTER_FLAGS``-driven loop in ``_apply_field_rules``/
     ``_register_field_rule_observers`` identically across all three streams
     (``cdr_output`` is the pre-existing behavior this generalization must
-    keep byte-for-byte). ``cdr_tracer_output`` additionally hides its six
+    keep byte-for-byte). ``cdr_lite_output`` additionally hides its six
     ``wrt_*`` field-group toggles (every non-master field follows) under the
     same condition, since they're meaningless while the stream itself is off.
     Also exercises the averaged/monthly cascade: ``monthly_averages`` stays
@@ -2441,7 +2472,7 @@ def test_cdr_output_stream_field_rules_follow_master_switch(section, master_flag
         "output_period": 3600.0,
         "nrpf": 4,
     }
-    if section == "cdr_tracer_output":
+    if section == "cdr_lite_output":
         section_settings.update(dict.fromkeys(wrt_fields, True))
     model_settings = {section: section_settings}
 
@@ -2457,7 +2488,7 @@ def test_cdr_output_stream_field_rules_follow_master_switch(section, master_flag
     assert not _visible("monthly_averages")
     assert not _visible("output_period")
     assert not _visible("nrpf")
-    if section == "cdr_tracer_output":
+    if section == "cdr_lite_output":
         for field in wrt_fields:
             assert not _visible(field)
 
@@ -2469,7 +2500,7 @@ def test_cdr_output_stream_field_rules_follow_master_switch(section, master_flag
     assert _visible("monthly_averages")
     assert _visible("output_period")
     assert _visible("nrpf")
-    if section == "cdr_tracer_output":
+    if section == "cdr_lite_output":
         for field in wrt_fields:
             assert _visible(field)
     period_widget, _ = editor._widgets[(section, "output_period")]
@@ -2489,6 +2520,96 @@ def test_cdr_output_stream_field_rules_follow_master_switch(section, master_flag
     editor._widgets[(section, "monthly_averages")][0].value = "monthly"
     assert _visible("monthly_averages")
     assert period_widget.disabled is True
+
+
+def test_cdr_lite_knob_override_survives_save_and_load(tmp_path):
+    """The bundled ModelSpecs do not declare ``cdr_lite`` (CDR-lite tracers need
+    forcing Forge cannot generate), so the accordion has no widget for the knob.
+    Set as an override (a hand-edit), it still lands in ``model_settings``,
+    survives a save/load round trip, and can be turned back off.
+    ``cppdefs.cdr_lite`` is resolver-/build-derived and has no widget
+    (``configure_build`` recomputes it from the knob).
+    """
+    wiz = ForgeBlueprintWizard()
+    wiz.start.value = date(2012, 1, 1)
+    wiz.end.value = date(2012, 1, 2)
+    knob = ("cdr_lite", "cdr_online_carbonate_sensitivity")
+    wiz._overrides[("param", "nt_cdr_oae")] = 1
+    wiz._rebuild()
+    assert wiz.config is not None
+    assert "cdr_lite" not in wiz.config.model_settings
+    assert knob not in wiz.editor._widgets
+    assert ("cppdefs", "cdr_lite") not in wiz.editor._widgets
+
+    wiz._overrides[knob] = True
+    wiz._rebuild()
+    assert wiz.config.model_settings["cdr_lite"]["cdr_online_carbonate_sensitivity"]
+
+    saved = tmp_path / "forge_blueprint.yaml"
+    wiz.config.to_yaml(saved)
+    wiz2 = ForgeBlueprintWizard()
+    wiz2.load_path.value = str(saved)
+    wiz2._on_load_path(None)
+    assert wiz2.config is not None
+    assert wiz2.config.model_settings["cdr_lite"]["cdr_online_carbonate_sensitivity"]
+
+    wiz2._overrides[knob] = False
+    wiz2._rebuild()
+    assert wiz2.config is not None
+    assert not wiz2.config.model_settings["cdr_lite"][
+        "cdr_online_carbonate_sensitivity"
+    ]
+
+
+def test_saving_a_model_spec_does_not_bake_in_the_derived_cdr_lite_cppdef():
+    from cstar.wizard.wizard import _model_owned_settings
+
+    effective = {
+        "cdr_lite": {"cdr_online_carbonate_sensitivity": True},
+        "cdr_lite_output": {"do_cdr_lite_output": True},
+        "cppdefs": {"cdr_lite": True, "cdr_forcing": False, "nhy_forcing": True},
+    }
+    owned = _model_owned_settings(effective)
+    assert owned["cppdefs"] == {"nhy_forcing": True}
+    assert owned["cdr_lite"] == {"cdr_online_carbonate_sensitivity": True}
+    assert "cdr_lite_output" not in owned  # an OutputSpec section
+
+
+def test_legacy_named_output_spec_shows_up_under_the_new_section_name(tmp_path, caplog):
+    """A user OutputSpec still using ``cdr_tracer_output`` (before the rename)
+    reaches the wizard through the resolver, which renames it: the composed
+    settings and the editor carry ``cdr_lite_output`` only.
+    """
+    import logging
+    import shutil
+
+    from cstar.catalog.domain_catalog import _DEFAULT_CATALOG_ROOT, DomainCatalog
+
+    root = tmp_path / "catalog"
+    shutil.copytree(_DEFAULT_CATALOG_ROOT, root)
+    legacy = root / "OutputSpec" / "legacy-out"
+    legacy.mkdir()
+    text = (root / "OutputSpec" / "daily-restarts" / "Output.yaml").read_text()
+    text = text.replace("cdr_lite_output:", "cdr_tracer_output:").replace(
+        "do_cdr_lite_output", "do_cdr_tracer_output"
+    )
+    assert "cdr_tracer_output:" in text
+    (legacy / "Output.yaml").write_text(text)
+    catalog = DomainCatalog(catalog_root=root)
+
+    wiz = ForgeBlueprintWizard(catalog=catalog)
+    wiz.start.value = date(2012, 1, 1)
+    wiz.end.value = date(2012, 1, 2)
+    with caplog.at_level(logging.WARNING, logger="cstar.applications.forge.resolve"):
+        wiz.output_dd.value = "legacy-out"
+    wiz._rebuild()
+
+    assert wiz.config is not None
+    assert "cdr_tracer_output" not in wiz.config.model_settings
+    assert wiz.config.model_settings["cdr_lite_output"]["do_cdr_lite_output"] is False
+    assert ("cdr_lite_output", "do_cdr_lite_output") in wiz.editor._widgets
+    assert "legacy settings section" in caplog.text
+    assert wiz.config.composition.output.modified is False
 
 
 def test_domain_modified_reflects_deviation_from_catalog_pick():

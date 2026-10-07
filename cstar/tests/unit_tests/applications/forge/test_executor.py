@@ -67,6 +67,7 @@ from cstar.orchestration.models import (
     Resource,
 )
 from cstar.orchestration.serialization import deserialize
+from cstar.roms.namelist import RomsNamelistV0_9_0
 
 requires_cstar_pio = pytest.mark.skipif(
     "pio" not in cstar_models.ROMSCompositeCodeRepository.model_fields
@@ -88,6 +89,10 @@ _MODEL_DIR_ROMS060 = _BUNDLED_CATALOG / "ModelSpec" / "roms-marbl-0.6-default"
 # &CDR_GAS_EXCH_OUTPUT_SETTINGS, PR #351) -- used by the versioned-namelist golden
 # test below.
 _MODEL_DIR_ROMS070 = _BUNDLED_CATALOG / "ModelSpec" / "roms-marbl-0.7-default"
+# ucla-roms >= 0.9.0 ModelSpec (CDR_TRACER renamed CDR_LITE: &CDR_LITE_SETTINGS/
+# &CDR_LITE_OUTPUT_SETTINGS, PR #372) -- used by the versioned-namelist golden
+# test below.
+_MODEL_DIR_ROMS090 = _BUNDLED_CATALOG / "ModelSpec" / "roms-marbl-0.9-default"
 # ModelSpec no longer embeds a default forcing/output selection -- these tests just
 # need a valid, representative pair from the bundled catalog.
 _FORCING_INPUTS = _CATALOG.forcing_data("glorys-era5-unified")
@@ -3349,9 +3354,10 @@ class TestGoldenNamelist:
         tmp_path,
         model_dir=_MODEL_DIR_ROMS070,
         stored_model_settings=None,
+        param_overrides=None,
     ):
         """Builds against ``model_dir`` (default: the 0.7.0-pinned
-        ``_MODEL_DIR_ROMS070``, so ``cdr_tracer_output``/``cdr_gas_exch_output``
+        ``_MODEL_DIR_ROMS070``, so ``cdr_lite_output``/``cdr_gas_exch_output``
         exist in ``model_settings``) and runs the real ``generate_inputs()``, but --
         unlike ``_run_golden_namelist_case`` -- with NO CDR forcing configured
         (no ``_CDR_FORCING`` kwarg), so ``cdr_output.do_cdr_output`` and
@@ -3370,7 +3376,9 @@ class TestGoldenNamelist:
         ``stored_model_settings`` sections are written into
         ``cfg.model_settings`` *before* the executor is constructed, i.e. as a
         stored (hand-edited or older) blueprint carries them rather than as a
-        post-resolve edit.
+        post-resolve edit. ``param_overrides`` (e.g. CDR tracer counts) are merged
+        into ``model_settings["param"]`` the same way, so the executor's tracer
+        count sees them.
         """
         cfg = build_forge_blueprint(
             model_dir=model_dir,
@@ -3388,6 +3396,7 @@ class TestGoldenNamelist:
         assert cfg.model_settings["cdr_output"]["do_cdr_output"] is False
         assert cfg.model_settings["cppdefs"]["cdr_forcing"] is False
         cfg.model_settings.update(copy.deepcopy(stored_model_settings or {}))
+        cfg.model_settings["param"].update(param_overrides or {})
 
         grid_mock = _create_grid_mock()
         grid_mock.nx = self._GRID_KWARGS["nx"]
@@ -3480,13 +3489,13 @@ class TestGoldenNamelist:
                 compile_time_settings=compile_ov, run_time_settings=run_ov
             )
 
-    def test_configure_build_cdr_tracer_output_forces_cdr_forcing_end_to_end(
+    def test_configure_build_cdr_lite_output_forces_cdr_forcing_end_to_end(
         self, mock_grid, tmp_path
     ):
         """The CDR tracer/gas-exchange output net added alongside the
         do_cdr_output net (see TestForgeExecutorBuildAndRun): a 0.7.0-pinned
         blueprint where a wizard accordion edit sets
-        ``cdr_tracer_output.do_cdr_tracer_output=True`` *after* the resolver
+        ``cdr_lite_output.do_cdr_lite_output=True`` *after* the resolver
         (and generation) ran -- ``cppdefs.cdr_forcing`` stays at its
         resolved-False value -- must still get ``cdr_forcing`` forced True at
         ``configure_build`` time. Before the fix, configure_build never
@@ -3494,22 +3503,25 @@ class TestGoldenNamelist:
         silently never compiled the tracer output module the namelist
         enables.
         """
-        cfg, builder = self._generate_inputs_no_cdr_forcing(mock_grid, tmp_path)
-        cfg.model_settings["cdr_tracer_output"]["do_cdr_tracer_output"] = True
+        cfg, builder = self._generate_inputs_no_cdr_forcing(
+            mock_grid, tmp_path, param_overrides={"nt_cdr_oae": 1}
+        )
+        cfg.model_settings["cdr_lite_output"]["do_cdr_lite_output"] = True
         assert cfg.model_settings["cppdefs"]["cdr_forcing"] is False
 
         self._configure_build_for(cfg, builder)
 
         assert (
-            builder._settings_run_time["cdr_tracer_output"]["do_cdr_tracer_output"]
-            is True
+            builder._settings_run_time["cdr_lite_output"]["do_cdr_lite_output"] is True
         )
         assert builder._settings_compile_time["cppdefs"]["cdr_forcing"] is True
+        namelist = (builder.run_time_code_dir / "namelist.nml").read_text()
+        assert "do_cdr_tracer_output = .true." in namelist
 
     def test_configure_build_cdr_gas_exch_output_forces_cdr_forcing_end_to_end(
         self, mock_grid, tmp_path
     ):
-        """Mirrors test_configure_build_cdr_tracer_output_forces_cdr_forcing_end_to_end
+        """Mirrors test_configure_build_cdr_lite_output_forces_cdr_forcing_end_to_end
         for the gas-exchange output stream.
         """
         cfg, builder = self._generate_inputs_no_cdr_forcing(mock_grid, tmp_path)
@@ -3524,7 +3536,7 @@ class TestGoldenNamelist:
         )
         assert builder._settings_compile_time["cppdefs"]["cdr_forcing"] is True
 
-    def test_configure_build_accepts_cdr_tracer_output_without_marbl_end_to_end(
+    def test_configure_build_accepts_cdr_lite_output_without_marbl_end_to_end(
         self, mock_grid, tmp_path
     ):
         """The tracer stream needs CDR_FORCING but not MARBL (the CDR tracers
@@ -3533,8 +3545,10 @@ class TestGoldenNamelist:
         C-Star encodes this intended rule rather than ucla-roms 0.7.0/0.8.0's
         MARBL-only compile guard.
         """
-        cfg, builder = self._generate_inputs_no_cdr_forcing(mock_grid, tmp_path)
-        cfg.model_settings["cdr_tracer_output"]["do_cdr_tracer_output"] = True
+        cfg, builder = self._generate_inputs_no_cdr_forcing(
+            mock_grid, tmp_path, param_overrides={"nt_cdr_oae": 1}
+        )
+        cfg.model_settings["cdr_lite_output"]["do_cdr_lite_output"] = True
         cfg.model_settings["cppdefs"]["marbl"] = False
         cfg.model_settings["param"]["ntrc_bio"] = 0  # no BGC tracers without MARBL
 
@@ -3580,21 +3594,19 @@ class TestGoldenNamelist:
         """The build-time twin of the resolver's version-gated pruning: a
         0.6.x-pinned blueprint (``RunTimeSettingsV0_6_0``, no CDR tracer/
         gas-exchange streams) whose stored settings gained the 0.7.0-only
-        ``cdr_tracer_output``/``cdr_gas_exch_output`` sections -- a hand edit,
-        or a snapshot taken before the resolver pruned them -- builds without
-        them. Before the fix, the stale enabled flags still reached the CDR
-        output net, which forced ``cppdefs.cdr_forcing`` on for streams this
-        ucla-roms release cannot write, while the namelist silently dropped
-        the sections.
+        ``cdr_lite_output``/``cdr_gas_exch_output`` sections (switched off, as
+        the shared OutputSpecs carry them) -- a hand edit, or a snapshot taken
+        before the resolver pruned them -- builds without them. Before the fix,
+        the stale sections still reached the CDR output net.
         """
         stale = {
-            "cdr_tracer_output": {
-                "do_cdr_tracer_output": True,
+            "cdr_lite_output": {
+                "do_cdr_lite_output": False,
                 "output_period": 3600.0,
                 "nrpf": 4,
             },
             "cdr_gas_exch_output": {
-                "do_cdr_gas_exch_output": True,
+                "do_cdr_gas_exch_output": False,
                 "output_period": 3600.0,
                 "nrpf": 4,
             },
@@ -3609,7 +3621,7 @@ class TestGoldenNamelist:
         with caplog.at_level(logging.INFO, logger="cstar.applications.forge.executor"):
             self._configure_build_for(cfg, builder)
 
-        assert "cdr_tracer_output" not in builder._settings_run_time
+        assert "cdr_lite_output" not in builder._settings_run_time
         assert "cdr_gas_exch_output" not in builder._settings_run_time
         assert builder._settings_compile_time["cppdefs"]["cdr_forcing"] is False
         namelist = (builder.run_time_code_dir / "namelist.nml").read_text()
@@ -3622,31 +3634,54 @@ class TestGoldenNamelist:
         ]
         assert len(prune_logs) == 1
         assert "cdr_gas_exch_output" in prune_logs[0]
-        assert "cdr_tracer_output" in prune_logs[0]
+        assert "cdr_lite_output" in prune_logs[0]
         assert "RunTimeSettingsV0_6_0" in prune_logs[0]
 
         # Re-entry: the incoming overrides still carry the stale sections, so
         # they are pruned too, not rejected by the unknown-key merge guard.
         self._configure_build_for(cfg, builder)
-        assert "cdr_tracer_output" not in builder._settings_run_time
+        assert "cdr_lite_output" not in builder._settings_run_time
+
+    def test_configure_build_rejects_enabled_version_gated_section_for_0_6_pin(
+        self, mock_grid, tmp_path
+    ):
+        """A 0.6.x pin cannot honor an enabled 0.7.0-only stream: configure_build
+        raises rather than silently dropping the request (the stale enabled
+        flag used to force ``cdr_forcing`` on for a stream the release cannot
+        write).
+        """
+        stale = {"cdr_lite_output": {"do_cdr_lite_output": True}}
+        cfg, builder = self._generate_inputs_no_cdr_forcing(
+            mock_grid,
+            tmp_path,
+            model_dir=_MODEL_DIR_ROMS060,
+            stored_model_settings=stale,
+        )
+
+        with pytest.raises(
+            ValueError,
+            match=r"cdr_lite_output\.do_cdr_lite_output.*RunTimeSettingsV0_6_0",
+        ):
+            self._configure_build_for(cfg, builder)
 
     def test_configure_build_keeps_version_gated_sections_for_0_7_pin_end_to_end(
         self, mock_grid, tmp_path, caplog
     ):
         """Counterpart of the 0.6.x pruning test: a 0.7.0-pinned blueprint's
-        schema models ``cdr_tracer_output``/``cdr_gas_exch_output``, so
+        schema models ``cdr_lite_output``/``cdr_gas_exch_output``, so
         ``configure_build`` keeps both sections (and the enabled tracer stream
         still forces ``cppdefs.cdr_forcing``) and logs no prune.
         """
-        cfg, builder = self._generate_inputs_no_cdr_forcing(mock_grid, tmp_path)
-        cfg.model_settings["cdr_tracer_output"]["do_cdr_tracer_output"] = True
+        cfg, builder = self._generate_inputs_no_cdr_forcing(
+            mock_grid, tmp_path, param_overrides={"nt_cdr_oae": 1}
+        )
+        cfg.model_settings["cdr_lite_output"]["do_cdr_lite_output"] = True
 
         with caplog.at_level(logging.INFO, logger="cstar.applications.forge.executor"):
             self._configure_build_for(cfg, builder)
 
         assert (
-            builder._settings_run_time["cdr_tracer_output"]["do_cdr_tracer_output"]
-            is True
+            builder._settings_run_time["cdr_lite_output"]["do_cdr_lite_output"] is True
         )
         assert "cdr_gas_exch_output" in builder._settings_run_time
         assert builder._settings_compile_time["cppdefs"]["cdr_forcing"] is True
@@ -3654,6 +3689,53 @@ class TestGoldenNamelist:
         assert "&cdr_tracer_output_settings" in namelist
         assert "&cdr_gas_exch_output_settings" in namelist
         assert not [r for r in caplog.records if "pruned" in r.getMessage()]
+
+    def test_configure_build_rejects_cdr_lite_output_without_tracers(
+        self, mock_grid, tmp_path
+    ):
+        """ucla-roms aborts at init when the CDR-lite output stream is on with
+        ``nt_cdr_oae + nt_cdr_dor == 0``; the build-time net says so first.
+        """
+        cfg, builder = self._generate_inputs_no_cdr_forcing(mock_grid, tmp_path)
+        cfg.model_settings["cdr_lite_output"]["do_cdr_lite_output"] = True
+
+        with pytest.raises(ValueError, match="param.nt_cdr_oae"):
+            self._configure_build_for(cfg, builder)
+
+    def test_configure_build_renames_legacy_override_sections(
+        self, mock_grid, tmp_path
+    ):
+        """A programmatic ``run_time_settings`` override still using the pre-0.9.0
+        ``cdr_tracer_output`` names is renamed (on a copy -- the caller's dict is
+        untouched) instead of rejected as an unknown key or silently dropped.
+        """
+        cfg, builder = self._generate_inputs_no_cdr_forcing(
+            mock_grid, tmp_path, param_overrides={"nt_cdr_oae": 1}
+        )
+        from cstar.applications.forge.engine import split_model_settings
+
+        run_ov, compile_ov = split_model_settings(cfg)
+        run_ov.pop("cdr_lite_output")
+        legacy = {"cdr_tracer_output": {"do_cdr_tracer_output": True}}
+        run_ov.update(legacy)
+        with patch(
+            "cstar.applications.forge.executor.render_roms_settings"
+        ) as mock_render:
+            mock_render.return_value = {
+                "location": str(builder.compile_time_code_dir),
+                "filter": {"files": ["cppdefs.opt"]},
+                "branch": "main",
+            }
+            builder.configure_build(
+                compile_time_settings=compile_ov, run_time_settings=run_ov
+            )
+
+        assert legacy == {"cdr_tracer_output": {"do_cdr_tracer_output": True}}
+        assert "cdr_tracer_output" not in builder._settings_run_time
+        assert (
+            builder._settings_run_time["cdr_lite_output"]["do_cdr_lite_output"] is True
+        )
+        assert builder._settings_compile_time["cppdefs"]["cdr_forcing"] is True
 
     def test_golden_namelist_test_tiny(self, mock_grid, tmp_path):
         self._run_golden_namelist_case(
@@ -3751,7 +3833,8 @@ class TestGoldenNamelist:
         ``RomsNamelistV0_7_0`` end to end.
 
         The two schema-visible differences from the roms060 golden are the
-        added ``&cdr_tracer_output_settings``/``&cdr_gas_exch_output_settings``
+        added ``&cdr_tracer_output_settings`` (forge's ``cdr_lite_output``, written
+        under its 0.7/0.8 names)/``&cdr_gas_exch_output_settings``
         groups; everything else (``&pio_settings``, no ``nrpf_rst``, renamed
         particles output keys) carries forward unchanged since
         ``RunTimeSettingsV0_7_0``/``RomsNamelistV0_7_0`` subclass the 0.6.0
@@ -3759,8 +3842,8 @@ class TestGoldenNamelist:
 
         Test name note: this must NOT contain ``roms050``/``roms060`` -- the
         legacy golden is selected with ``-k "golden_namelist_test_tiny and not
-        roms050 and not roms060 and not roms070"``, which would otherwise also
-        catch this test.
+        roms050 and not roms060 and not roms070 and not roms090"``, which would
+        otherwise also catch this test.
         """
         normalized = self._run_golden_namelist_case(
             mock_grid,
@@ -3791,6 +3874,135 @@ class TestGoldenNamelist:
         cdr_gas = normalized.split("&cdr_gas_exch_output_settings")[1].split("/", 1)[0]
         assert "do_cdr_gas_exch_output = .false." in cdr_gas
         assert "nrpf_cdr_gas = 24" in cdr_gas
+
+    def test_golden_namelist_test_tiny_roms090(self, mock_grid, tmp_path):
+        """Same test-tiny domain/forcing/output, but resolved against the
+        ``roms-marbl-0.9-default`` ModelSpec (ucla-roms >= 0.9.0) -- proves the
+        versioned namelist path selects ``RunTimeSettingsV0_9_0``/
+        ``RomsNamelistV0_9_0`` end to end.
+
+        The schema-visible differences from the roms070 golden: forge's
+        ``cdr_lite_output`` is written as ``&cdr_lite_output_settings`` (the
+        0.9.0 key names, plus ``wrt_gas_exchange``) instead of
+        ``&cdr_tracer_output_settings``, and the optional ``&cdr_lite_settings``
+        group is added; everything else carries forward.
+
+        Test name note: contains ``roms090`` so the legacy golden's ``-k``
+        selector (``... and not roms090``) excludes it, like the other tiers.
+        """
+        normalized = self._run_golden_namelist_case(
+            mock_grid,
+            tmp_path,
+            _MODEL_DIR_ROMS090,
+            "golden_namelist_test-tiny-roms090.nml",
+        )
+
+        assert "&cdr_tracer_output_settings" not in normalized
+        assert "&cdr_lite_output_settings" in normalized
+        cdr_lite_out = normalized.split("&cdr_lite_output_settings")[1].split("/", 1)[0]
+        assert "do_cdr_lite_output = .false." in cdr_lite_out
+        assert "nrpf_cdr_lite = 24" in cdr_lite_out
+        assert "wrt_gas_exchange = .false." in cdr_lite_out
+        assert "&cdr_lite_settings" in normalized
+        cdr_lite = normalized.split("&cdr_lite_settings")[1].split("/", 1)[0]
+        assert "cdr_online_carbonate_sensitivity = .false." in cdr_lite
+        assert "&cdr_gas_exch_output_settings" in normalized
+
+        # Read back through the 0.9 schema: every group validates (extra="forbid").
+        namelist_path = tmp_path / "golden_roms090.nml"
+        namelist_path.write_text(normalized)
+        nml = RomsNamelistV0_9_0.read(namelist_path)
+        assert nml.cdr_lite_output_settings.nrpf_cdr_lite == 24
+        assert nml.cdr_lite_settings.cdr_online_carbonate_sensitivity is False
+
+    def test_configure_build_0_9_pin_cdr_lite_output_forces_no_cdr_forcing(
+        self, mock_grid, tmp_path
+    ):
+        """From ucla-roms 0.9.0 the CDR-lite output stream compiles
+        unconditionally: enabling it (with tracers) leaves ``cppdefs.cdr_forcing``
+        and ``cppdefs.cdr_lite`` alone and writes the 0.9 group.
+        """
+        cfg, builder = self._generate_inputs_no_cdr_forcing(
+            mock_grid,
+            tmp_path,
+            model_dir=_MODEL_DIR_ROMS090,
+            param_overrides={"nt_cdr_oae": 1},
+        )
+        cfg.model_settings["cdr_lite_output"]["do_cdr_lite_output"] = True
+
+        self._configure_build_for(cfg, builder)
+
+        cppdefs = builder._settings_compile_time["cppdefs"]
+        assert cppdefs["cdr_forcing"] is False
+        assert not cppdefs.get("cdr_lite")
+        namelist = (builder.run_time_code_dir / "namelist.nml").read_text()
+        assert "do_cdr_lite_output = .true." in namelist
+        assert "&cdr_tracer_output_settings" not in namelist
+
+    def test_configure_build_derives_cdr_lite_cppdef_from_the_knob(
+        self, mock_grid, tmp_path
+    ):
+        """``cppdefs.cdr_lite`` is derived from
+        ``cdr_lite.cdr_online_carbonate_sensitivity`` at build time, so a wizard
+        edit that flips the knob after resolve time wins over a stale cppdef. The
+        bundled ModelSpecs do not declare ``cdr_lite``, so the blueprint stores it.
+        """
+        cfg, builder = self._generate_inputs_no_cdr_forcing(
+            mock_grid,
+            tmp_path,
+            model_dir=_MODEL_DIR_ROMS090,
+            stored_model_settings={
+                "cdr_lite": {"cdr_online_carbonate_sensitivity": False}
+            },
+            param_overrides={"nt_cdr_oae": 1},
+        )
+        cppdefs = builder._settings_compile_time["cppdefs"]
+        assert "cdr_lite" not in cppdefs
+
+        # Knob switched on after the resolver ran -> CDR_LITE compiles.
+        cfg.model_settings["cdr_lite"]["cdr_online_carbonate_sensitivity"] = True
+        self._configure_build_for(cfg, builder)
+        assert cppdefs["cdr_lite"] is True
+
+        # ... and off again, with the earlier-derived True still stored in the
+        # compile-time overrides: recomputed, not rejected.
+        cfg.model_settings["cdr_lite"]["cdr_online_carbonate_sensitivity"] = False
+        cfg.model_settings["cppdefs"]["cdr_lite"] = True
+        self._configure_build_for(cfg, builder)
+        assert cppdefs["cdr_lite"] is False
+        namelist = (builder.run_time_code_dir / "namelist.nml").read_text()
+        assert "cdr_online_carbonate_sensitivity = .false." in namelist
+
+    def test_configure_build_rejects_cdr_lite_knob_without_marbl(
+        self, mock_grid, tmp_path
+    ):
+        cfg, builder = self._generate_inputs_no_cdr_forcing(
+            mock_grid,
+            tmp_path,
+            model_dir=_MODEL_DIR_ROMS090,
+            stored_model_settings={
+                "cdr_lite": {"cdr_online_carbonate_sensitivity": True}
+            },
+            param_overrides={"nt_cdr_oae": 1, "ntrc_bio": 0},
+        )
+        cfg.model_settings["cppdefs"]["marbl"] = False
+
+        with pytest.raises(ValueError, match="MARBL"):
+            self._configure_build_for(cfg, builder)
+
+    def test_configure_build_rejects_cdr_lite_knob_on_an_older_pin(
+        self, mock_grid, tmp_path
+    ):
+        """The online sensitivity needs ucla-roms >= 0.9.0: on a 0.7.0 pin the
+        ``cdr_lite`` section is pruned, and since its switch is on, rejected.
+        """
+        cfg, builder = self._generate_inputs_no_cdr_forcing(
+            mock_grid, tmp_path, param_overrides={"nt_cdr_oae": 1}
+        )
+        cfg.model_settings["cdr_lite"] = {"cdr_online_carbonate_sensitivity": True}
+
+        with pytest.raises(ValueError, match="RunTimeSettingsV0_7_0"):
+            self._configure_build_for(cfg, builder)
 
 
 class TestChildDomainNoInitialConditionsValidatesAtEmit:
