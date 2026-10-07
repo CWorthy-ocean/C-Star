@@ -49,7 +49,7 @@ with fields of its own.
 
   ~cstar.orchestration.models.Provenance
   ~cstar.orchestration.models.GeneratedBy
-  ~cstar.orchestration.models.BlueprintRef
+  ~cstar.orchestration.models.BlueprintIdentity
   ~cstar.orchestration.models.CatalogSpecRef
 
 Customizing Blueprints

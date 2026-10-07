@@ -23,7 +23,7 @@ Blueprint Components
    cstar.orchestration.models.Blueprint
    cstar.orchestration.models.Provenance
    cstar.orchestration.models.GeneratedBy
-   cstar.orchestration.models.BlueprintRef
+   cstar.orchestration.models.BlueprintIdentity
    cstar.orchestration.models.CatalogSpecRef
 
 Simulation Components

@@ -10,7 +10,7 @@ import yaml
 
 from cstar.applications.core import EmittedBlueprint
 from cstar.orchestration.models import (
-    BlueprintRef,
+    BlueprintIdentity,
     DeferredBlueprintRef,
     InlineBlueprintRef,
     RunRef,
@@ -326,7 +326,7 @@ def test_forge_then_run_matches_wizard_export() -> None:
     emitted = EmittedBlueprint(
         filename="B_x.yaml",
         application="roms_marbl",
-        producer=BlueprintRef(kind="Blueprint", application="forge", name="x"),
+        producer=BlueprintIdentity(kind="Blueprint", application="forge", name="x"),
         cpus_needed=32,
         start_date=dt(2012, 1, 1),
         end_date=dt(2012, 2, 1),

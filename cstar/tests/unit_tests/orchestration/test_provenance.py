@@ -11,7 +11,7 @@ from pydantic import ValidationError
 from cstar.applications.hello_world import HelloWorldBlueprint
 from cstar.orchestration.models import (
     BLUEPRINT_METADATA_FIELDS,
-    BlueprintRef,
+    BlueprintIdentity,
     CatalogSpecKind,
     CatalogSpecRef,
     GeneratedBy,
@@ -38,7 +38,7 @@ def provenance() -> Provenance:
             working_dir="/scratch/forge",
         ),
         derived_from=[
-            BlueprintRef(
+            BlueprintIdentity(
                 kind="Blueprint",
                 application="forge",
                 name="wio-toy",
@@ -75,7 +75,7 @@ def test_provenance_round_trips(provenance: Provenance) -> None:
 
     assert reloaded == provenance
     assert [type(ref) for ref in reloaded.derived_from] == [
-        BlueprintRef,
+        BlueprintIdentity,
         CatalogSpecRef,
         CatalogSpecRef,
     ]
@@ -171,7 +171,7 @@ def test_blueprint_ref_dump_keeps_kind_when_defaults_are_excluded() -> None:
     """Verify `kind`, which selects the model on load, survives a dump that drops
     defaults.
     """
-    ref = BlueprintRef(kind="Blueprint", application="forge", name="wio-toy")
+    ref = BlueprintIdentity(kind="Blueprint", application="forge", name="wio-toy")
 
     assert ref.model_dump(exclude_defaults=True) == {
         "kind": "Blueprint",

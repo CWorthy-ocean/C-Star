@@ -27,7 +27,7 @@ from cstar.applications.forge.engine import process_forge_blueprint
 from cstar.applications.forge.host import HostPaths
 from cstar.applications.roms_marbl.models import RomsMarblBlueprint
 from cstar.cli.blueprint.check import app as check_app
-from cstar.orchestration.models import BlueprintRef
+from cstar.orchestration.models import BlueprintIdentity
 from cstar.orchestration.serialization import deserialize
 from cstar.roms.namelist import namelist_schema_for_ref
 from cstar.roms.precheck import (
@@ -219,7 +219,7 @@ class TestBlueprint:
         assert bp.provenance.generated_by.tool == "forge"
         assert bp.provenance.generated_by.working_dir == str(run.working_dir)
         producer = bp.provenance.derived_from[0]
-        assert isinstance(producer, BlueprintRef)
+        assert isinstance(producer, BlueprintIdentity)
         assert (producer.application, producer.name) == ("forge", run.cfg.name)
         assert producer.content_hash == run.cfg.content_hash()
 

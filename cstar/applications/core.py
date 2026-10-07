@@ -15,7 +15,11 @@ from cstar.base.log import get_logger
 from cstar.entrypoint.config import JOBFILE_DATE_FORMAT
 from cstar.execution.file_system import local_copy
 from cstar.execution.handler import ExecutionStatus
-from cstar.orchestration.models import BlueprintCore, BlueprintRef, ConfiguredBaseModel
+from cstar.orchestration.models import (
+    BlueprintCore,
+    BlueprintIdentity,
+    ConfiguredBaseModel,
+)
 from cstar.orchestration.serialization import SerializableModel, deserialize
 
 if t.TYPE_CHECKING:
@@ -363,7 +367,7 @@ class EmittedBlueprint(ConfiguredBaseModel):
     """The file the producing step publishes into its `output/` dir."""
     application: str
     """The application the emitted blueprint targets."""
-    producer: BlueprintRef
+    producer: BlueprintIdentity
     """The reference the emitted blueprint's `provenance.derived_from` records
     for the blueprint that produces it."""
     cpus_needed: int

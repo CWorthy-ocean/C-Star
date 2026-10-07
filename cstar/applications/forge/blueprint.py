@@ -75,7 +75,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 
 from cstar.orchestration.models import (
     Blueprint,
-    BlueprintRef,
+    BlueprintIdentity,
     CatalogSpecRef,
     GeneratedBy,
     Provenance,
@@ -464,14 +464,14 @@ def emitted_blueprint_description(name: str, description: str) -> str:
     )
 
 
-def producer_ref(blueprint: ForgeBlueprint) -> BlueprintRef:
+def producer_ref(blueprint: ForgeBlueprint) -> BlueprintIdentity:
     """Return the reference to ``blueprint`` that the ``roms_marbl`` blueprint
     emitted by a forge run of it records as its producer.
 
     Use this wherever a forge-emitted blueprint names its producer, so every
     record of the producer agrees.
     """
-    return BlueprintRef(
+    return BlueprintIdentity(
         kind="Blueprint",
         application=DEFAULT_APPLICATION,
         name=blueprint.name,

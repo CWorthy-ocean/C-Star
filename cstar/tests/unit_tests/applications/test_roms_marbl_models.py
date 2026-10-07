@@ -13,7 +13,7 @@ from cstar.applications.roms_marbl.models import (
     RomsMarblBlueprint,
     RuntimeParameterSet,
 )
-from cstar.orchestration.models import BlueprintRef, CatalogSpecRef, Provenance
+from cstar.orchestration.models import BlueprintIdentity, CatalogSpecRef, Provenance
 from cstar.pio.external_codebase import PIOExternalCodeBase
 
 
@@ -417,7 +417,7 @@ class TestProvenance:
         assert bp.provenance.generated_by.tool == "forge"
         assert bp.provenance.generated_by.id == "3f9c2a7e-5b1d-4c8e-9a0f-1d2e3f4a5b6c"
         assert bp.provenance.derived_from == [
-            BlueprintRef(kind="Blueprint", application="forge", name="wio-toy"),
+            BlueprintIdentity(kind="Blueprint", application="forge", name="wio-toy"),
             CatalogSpecRef(kind="DomainSpec", name="wio-toy", origin="catalog"),
         ]
 

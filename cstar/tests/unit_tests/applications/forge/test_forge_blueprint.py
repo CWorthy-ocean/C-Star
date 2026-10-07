@@ -45,7 +45,7 @@ from cstar.base.env import ENV_CSTAR_DATA_HOME, ENV_CSTAR_RUNID
 from cstar.base.utils import slugify
 from cstar.catalog.domain_catalog import default_catalog as _CATALOG
 from cstar.orchestration.models import (
-    BlueprintRef,
+    BlueprintIdentity,
     CatalogSpecRef,
     GeneratedBy,
     Provenance,
@@ -4313,7 +4313,7 @@ class TestProvenanceStamping:
 
     def test_derived_from_is_kept_when_populated(self, tmp_path):
         cfg = _build()
-        ref = BlueprintRef(kind="Blueprint", application="forge", name="parent")
+        ref = BlueprintIdentity(kind="Blueprint", application="forge", name="parent")
         cfg = cfg.model_copy(
             update={
                 "provenance": cfg.provenance.model_copy(update={"derived_from": [ref]})

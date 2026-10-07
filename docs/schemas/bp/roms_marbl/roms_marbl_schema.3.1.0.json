@@ -1,8 +1,8 @@
 {
     "$defs": {
-        "BlueprintRef": {
+        "BlueprintIdentity": {
             "additionalProperties": false,
-            "description": "A reference to a blueprint.",
+            "description": "Identifies a blueprint document by application, name and content hash.\n\nThis is identity, not location: compare `DeferredBlueprintRef`, which\nlocates the blueprint file an upstream step will write.",
             "properties": {
                 "kind": {
                     "const": "Blueprint",
@@ -34,7 +34,7 @@
                 "application",
                 "name"
             ],
-            "title": "BlueprintRef",
+            "title": "BlueprintIdentity",
             "type": "object"
         },
         "BlueprintState": {
@@ -445,7 +445,7 @@
                     "items": {
                         "discriminator": {
                             "mapping": {
-                                "Blueprint": "#/$defs/BlueprintRef",
+                                "Blueprint": "#/$defs/BlueprintIdentity",
                                 "CdrSpec": "#/$defs/CatalogSpecRef",
                                 "DomainSpec": "#/$defs/CatalogSpecRef",
                                 "ForcingSpec": "#/$defs/CatalogSpecRef",
@@ -456,7 +456,7 @@
                         },
                         "oneOf": [
                             {
-                                "$ref": "#/$defs/BlueprintRef"
+                                "$ref": "#/$defs/BlueprintIdentity"
                             },
                             {
                                 "$ref": "#/$defs/CatalogSpecRef"

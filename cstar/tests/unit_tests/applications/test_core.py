@@ -17,7 +17,7 @@ from cstar.applications.core import (
 )
 from cstar.applications.roms_marbl.models import RomsMarblBlueprint
 from cstar.execution.handler import ExecutionStatus
-from cstar.orchestration.models import BlueprintRef
+from cstar.orchestration.models import BlueprintIdentity
 from cstar.orchestration.transforms import DirectiveConfig
 
 
@@ -669,7 +669,7 @@ def test_emitted_blueprint_defaults_to_none() -> None:
 _EMITTED_BLUEPRINT_FIELDS = {
     "filename": "B_x.yaml",
     "application": "roms_marbl",
-    "producer": BlueprintRef(kind="Blueprint", application="forge", name="x"),
+    "producer": BlueprintIdentity(kind="Blueprint", application="forge", name="x"),
     "cpus_needed": 1,
     "start_date": "2012-01-01",
     "end_date": "2012-01-02",

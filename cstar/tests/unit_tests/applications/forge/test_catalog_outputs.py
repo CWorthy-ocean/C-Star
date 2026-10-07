@@ -26,7 +26,7 @@ from cstar.catalog.outputs import (
     find_blueprint_outputs,
 )
 from cstar.execution.file_system import JobFileSystemManager, StateDirectoryManager
-from cstar.orchestration.models import BlueprintRef
+from cstar.orchestration.models import BlueprintIdentity
 from cstar.orchestration.orchestration import LiveStep, LiveWorkplan
 from cstar.orchestration.serialization import serialize
 from cstar.orchestration.tracking import TrackingRepository, WorkplanRun
@@ -40,7 +40,7 @@ _LOGGER = "cstar.catalog.outputs"
 
 def _entry(
     root: Path, name: str, working_dir: Path | None, *, extra_days: int = 0
-) -> tuple[Path, BlueprintRef]:
+) -> tuple[Path, BlueprintIdentity]:
     """Write the forge entry ``name`` into the catalog at ``root``.
 
     ``working_dir`` is what the entry declares; ``None`` declares none.
@@ -48,7 +48,7 @@ def _entry(
 
     Returns
     -------
-    tuple[Path, BlueprintRef]
+    tuple[Path, BlueprintIdentity]
         The entry file and the producer reference a run of it records.
     """
     blueprint = ForgeBlueprint.from_yaml(_BUNDLED_ENTRY)
@@ -185,7 +185,7 @@ async def test_standalone_output_without_provenance_is_unverified(
     assert output == BlueprintOutput(
         path=emitted,
         application="roms_marbl",
-        producer=BlueprintRef(kind="Blueprint", application=FORGE, name="wio"),
+        producer=BlueprintIdentity(kind="Blueprint", application=FORGE, name="wio"),
         status=OutputStatus.UNVERIFIED,
     )
 
@@ -253,7 +253,7 @@ async def test_output_of_a_producer_outside_the_catalog_is_uncataloged(
     root = tmp_path / "catalog"
     entry, _ = _entry(root, "wio", tmp_path / "work")
     step = _run(tmp_path, "run-a", entry)
-    gone = BlueprintRef(
+    gone = BlueprintIdentity(
         kind="Blueprint", application=FORGE, name="gone", content_hash="ab" * 32
     )
     _emit(step.fsm.output_dir / "B_gone.yaml", derived_from=[gone.model_dump()])
@@ -276,10 +276,10 @@ async def test_output_of_an_entry_that_cannot_be_loaded_is_unverified(
     broken.parent.mkdir(parents=True)
     broken.write_text("name: wio\napplication: forge\n")
     out = _run(tmp_path, "run-a", broken).fsm.output_dir
-    recorded = BlueprintRef(
+    recorded = BlueprintIdentity(
         kind="Blueprint", application=FORGE, name="wio", content_hash="ab" * 32
     )
-    gone = BlueprintRef(
+    gone = BlueprintIdentity(
         kind="Blueprint", application=FORGE, name="gone", content_hash="cd" * 32
     )
     _emit(out / "B_wio.yaml", derived_from=[recorded.model_dump()])
@@ -298,7 +298,7 @@ async def test_producer_is_the_first_blueprint_reference_of_the_application(
 ) -> None:
     root, work = tmp_path / "catalog", tmp_path / "work"
     _, producer = _entry(root, "wio", work)
-    downstream = BlueprintRef(
+    downstream = BlueprintIdentity(
         kind="Blueprint", application="roms_marbl", name="wio", content_hash="x"
     )
     _emit(

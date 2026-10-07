@@ -22,7 +22,7 @@ from pydantic import Field, ValidationError
 
 from cstar.orchestration.models import (
     BlueprintCore,
-    BlueprintRef,
+    BlueprintIdentity,
     ConfiguredBaseModel,
     Provenance,
     RequiredString,
@@ -65,7 +65,7 @@ class BlueprintOutput(ConfiguredBaseModel):
     application: RequiredString
     """The emitted blueprint's own application, e.g. `roms_marbl`."""
 
-    producer: BlueprintRef
+    producer: BlueprintIdentity
     """The blueprint that produced it: the one its provenance records or, when it
     records none, the one it was found under (a guess, as `status` says)."""
 
@@ -114,12 +114,12 @@ def _recency(output: BlueprintOutput) -> tuple[bool, datetime]:
 
 def _entry_candidates(
     catalog: "LayeredCatalog", application: str
-) -> tuple[dict[str, BlueprintRef], list[_Candidate], frozenset[str]]:
+) -> tuple[dict[str, BlueprintIdentity], list[_Candidate], frozenset[str]]:
     """Read the catalog's ``application`` entries.
 
     Returns
     -------
-    tuple[dict[str, BlueprintRef], list[_Candidate], frozenset[str]]
+    tuple[dict[str, BlueprintIdentity], list[_Candidate], frozenset[str]]
         The current producer reference of each entry that emits a blueprint, keyed
         by the name outputs record it under; the blueprint files that exist where a
         standalone run of such an entry publishes it; and the names of the entries
@@ -131,7 +131,7 @@ def _entry_candidates(
     from cstar.orchestration.serialization import deserialize
 
     app = get_application(application)
-    current: dict[str, BlueprintRef] = {}
+    current: dict[str, BlueprintIdentity] = {}
     candidates: list[_Candidate] = []
     unloadable: list[str] = []
     unlocatable: list[str] = []
@@ -234,7 +234,7 @@ async def _run_candidates(application: str) -> list[_Candidate]:
 def _describe(
     candidates: Sequence[_Candidate],
     application: str,
-    current: Mapping[str, BlueprintRef],
+    current: Mapping[str, BlueprintIdentity],
     unloadable: Collection[str],
 ) -> list[BlueprintOutput]:
     """Describe the candidates that are blueprints, one output per file.
@@ -273,12 +273,12 @@ def _describe(
             (
                 ref
                 for ref in provenance.derived_from
-                if isinstance(ref, BlueprintRef) and ref.application == application
+                if isinstance(ref, BlueprintIdentity) and ref.application == application
             ),
             None,
         )
         if recorded is None:
-            producer = BlueprintRef(
+            producer = BlueprintIdentity(
                 kind="Blueprint",
                 application=application,
                 name=candidate.producer_name or core.name,

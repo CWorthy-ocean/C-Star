@@ -60,7 +60,7 @@ from cstar.entrypoint.config import get_job_config, get_service_config
 from cstar.execution.file_system import DirectoryManager
 from cstar.execution.handler import ExecutionStatus
 from cstar.orchestration.models import (
-    BlueprintRef,
+    BlueprintIdentity,
     CatalogSpecRef,
     GeneratedBy,
     Provenance,
@@ -2185,7 +2185,7 @@ class TestForgeExecutorPersist:
         self, minimal_cstar_spec_builder_args
     ):
         builder = _make_builder(minimal_cstar_spec_builder_args)
-        derived_from = BlueprintRef(
+        derived_from = BlueprintIdentity(
             kind="Blueprint", application="forge", name="demo", content_hash="abc"
         )
         builder.roms_marbl_blueprint = builder.roms_marbl_blueprint.model_copy(
@@ -2241,7 +2241,7 @@ class TestEmittedBlueprintIdentity:
                 working_dir=str(working_dir),
             ),
             derived_from=[
-                BlueprintRef(
+                BlueprintIdentity(
                     kind="Blueprint",
                     application="forge",
                     name="demo",
