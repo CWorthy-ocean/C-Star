@@ -25,6 +25,12 @@ Breaking Changes
 - The catalog's ``roms_marbl_blueprint_path`` now returns the blueprint file for a flat ``blueprints/B_<name>.yaml`` entry (the per-machine directory layout still returns the directory). (`#743 <https://github.com/CWorthy-ocean/C-Star/pull/743>`_)
 - The catalog's ``roms_marbl_blueprints_dir``, ``roms_marbl_blueprint_dir_for`` and ``build_dir_for`` are removed; blueprint entries are files, and build directories are not part of the catalog. (`#742 <https://github.com/CWorthy-ocean/C-Star/pull/742>`_)
 - The default save path for a forge blueprint built in the wizard is now ``blueprints/forge/<name>.yaml`` in your catalog, no longer a flat ``<name>.forge_blueprint.yaml``. (`#742 <https://github.com/CWorthy-ocean/C-Star/pull/742>`_)
+- Forge's ``cdr_tracer_output`` settings section is now ``cdr_lite_output``, and its ``do_cdr_tracer_output`` flag is now ``do_cdr_lite_output``, matching ucla-roms 0.9.0. (`#748 <https://github.com/CWorthy-ocean/C-Star/pull/748>`_)
+
+  - Stored Forge blueprints are migrated automatically, and old names in ModelSpecs, OutputSpecs and overrides are renamed with a warning.
+  - A section that gives both the old and the new name is rejected rather than silently keeping one.
+  - Builds for ucla-roms 0.7 and 0.8 still get ``&CDR_TRACER_OUTPUT_SETTINGS`` in their namelist, byte-for-byte unchanged.
+
 
 New features
 ~~~~~~~~~~~~
@@ -92,6 +98,11 @@ New features
 - Application authors can register a ``SchemaBreak`` for a major bump that has no automatic migration; its ``guidance()`` is what users see when their older blueprints are refused. (`#747 <https://github.com/CWorthy-ocean/C-Star/pull/747>`_)
 - ``cstar blueprint check`` classifies the schema version before validating content, telling the user to run ``cstar blueprint migrate`` when an older major can be migrated instead of listing validation errors. (`#747 <https://github.com/CWorthy-ocean/C-Star/pull/747>`_)
 - ``cstar workplan run`` reports every step whose blueprint cannot be migrated in one message, before creating a run directory. (`#747 <https://github.com/CWorthy-ocean/C-Star/pull/747>`_)
+- C-Star supports ucla-roms 0.9.0 namelists, including the renamed ``&CDR_LITE_OUTPUT_SETTINGS`` group and the new ``&CDR_LITE_SETTINGS`` group. (`#748 <https://github.com/CWorthy-ocean/C-Star/pull/748>`_)
+
+  - Blueprints pinned to a non-release ucla-roms ref such as ``main`` now validate against the 0.9.0 schema.
+
+- New bundled ModelSpec ``roms-marbl-0.9-default`` (ucla-roms 0.9.0), now the default model in the Forge wizard. (`#748 <https://github.com/CWorthy-ocean/C-Star/pull/748>`_)
 
 
 
@@ -121,6 +132,7 @@ Bug Fixes
 - The Workplan page's "walltime hours per simulated day" recipe option emitted the day form for chunks over 24 hours and so produced workplans that failed at submission; it now emits plain hours (``30:00:00``). (`#744 <https://github.com/CWorthy-ocean/C-Star/pull/744>`_)
 - The ``wales-toy`` tutorial and bundled blueprints carried no ``schema_version``, so they were read as 1.0.0 and pushed through three migration adapters on every run. (`#747 <https://github.com/CWorthy-ocean/C-Star/pull/747>`_)
 - ``cstar blueprint migrate --dry-run`` printed "Migrated blueprint persisted to" naming the source file although nothing was written. (`#747 <https://github.com/CWorthy-ocean/C-Star/pull/747>`_)
+- Forge silently dropped a CDR output section that the pinned ucla-roms release cannot write, even when that section was turned on; it now raises an error naming the section. (`#748 <https://github.com/CWorthy-ocean/C-Star/pull/748>`_)
 
 Improvements
 ~~~~~~~~~~~~
@@ -159,6 +171,7 @@ Improvements
 - ``BlueprintMigration`` takes ``targets=`` (application → current schema version) instead of ``schema_bounds=``; ``SchemaBounds``, ``identify_bounds``, ``CStarMigrationNotRegisteredError``, ``plotter_bounds`` and the hello_world sample adapter ``HelloWorldSchemaAdapterV1V1`` are removed, and ``MigrationPlan.is_latest`` is renamed ``is_compatible``. (`#747 <https://github.com/CWorthy-ocean/C-Star/pull/747>`_)
 - ``execute_migration`` and ``localize_and_migrate`` raise ``CstarSchemaTooNewError``, ``CstarManualMigrationError`` or ``CstarUnsupportedMigrationError`` instead of returning a result carrying an "Unable to plan migration" error. (`#747 <https://github.com/CWorthy-ocean/C-Star/pull/747>`_)
 - Registering an adapter whose target does not advance its source, or two adapters for the same source version, now raises at construction. (`#747 <https://github.com/CWorthy-ocean/C-Star/pull/747>`_)
+- Forge rejects CDR-lite settings that ucla-roms 0.9.0 would abort on at startup, such as CDR-lite output with no CDR-lite tracers, before generating any input data. (`#748 <https://github.com/CWorthy-ocean/C-Star/pull/748>`_)
 
 
 Miscellaneous
@@ -191,3 +204,6 @@ Miscellaneous
 - README badges now also show the PyPI version, unit-test CI status, and license. (`#746 <https://github.com/CWorthy-ocean/C-Star/pull/746>`_)
 - README no longer tells users to run a bare ``pytest`` at the repository root or paste the full Apache boilerplate; the license section links to the LICENSE file instead. (`#746 <https://github.com/CWorthy-ocean/C-Star/pull/746>`_)
 - New "Versioning the Blueprint Schema" section in the custom-applications docs (convention table, adapter and ``SchemaBreak`` examples, what users see), with pointers from the blueprints and schemas pages. (`#747 <https://github.com/CWorthy-ocean/C-Star/pull/747>`_)
+- The Forge ``cppdefs.opt`` template writes ``#undef CDR_LITE`` unless CDR-lite is requested; builds for earlier ucla-roms releases are unchanged. (`#748 <https://github.com/CWorthy-ocean/C-Star/pull/748>`_)
+- The integration tests now run against ucla-roms 0.9.0, and the weekly extended run tests 0.9.0 and ``main``. (`#748 <https://github.com/CWorthy-ocean/C-Star/pull/748>`_)
+- Developer and spec docs cover the 0.9.0 namelist tier, the ``CDR_LITE`` cppdef and the section rename. (`#748 <https://github.com/CWorthy-ocean/C-Star/pull/748>`_)
