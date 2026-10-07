@@ -409,6 +409,12 @@ class ApplicationDefinition(t.Protocol, t.Generic[TBlueprint, TRunner]):
     stage before its model launch and then stopping so a later attempt can
     attach to the prepared working directory."""
 
+    @property
+    def schema_version(self) -> str:
+        """The schema version this build of C-Star writes for the application's blueprints."""
+        model = t.cast("type[ConfiguredBaseModel]", self.blueprint)
+        return str(model.model_fields["schema_version"].default)
+
     def emitted_blueprint(self, blueprint: TBlueprint) -> "EmittedBlueprint | None":
         """Describe the blueprint this application's run will publish for a deferred
         downstream step.

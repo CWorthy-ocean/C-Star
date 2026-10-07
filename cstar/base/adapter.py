@@ -70,6 +70,12 @@ class ModelEnricher(t.Protocol, t.Generic[_Tin]):
         ...
 
 
+class CstarAdaptationError(Exception):
+    """Raise this error when an input cannot be adapted to the target type."""
+
+    ...
+
+
 class SchemaAdapter(abc.ABC, ModelAdapter[dict[str, t.Any], dict[str, t.Any]]):
     """Contract exposing a mechanism to adapt a source model to a target type."""
 
@@ -130,7 +136,21 @@ class SchemaAdapter(abc.ABC, ModelAdapter[dict[str, t.Any], dict[str, t.Any]]):
         return migrated
 
 
-class CstarAdaptationError(Exception):
-    """Raise this error when an input cannot be adapted to the target type."""
+class SchemaBreak(SchemaAdapter):
+    """A registered major bump with no automatic migration.
 
-    ...
+    Register it in an application's ``migrations`` like an adapter, with ``source``
+    the last version of the retired major and ``target`` the new major. The
+    migration planner refuses older documents with ``guidance()`` instead of
+    adapting them, so ``_migrate_schema`` is never reached.
+    """
+
+    @classmethod
+    @abc.abstractmethod
+    def guidance(cls) -> str:
+        """Return the instructions for migrating a document by hand."""
+        ...
+
+    @classmethod
+    def _migrate_schema(cls, model: dict[str, t.Any]) -> dict[str, t.Any]:
+        raise CstarAdaptationError(cls.guidance())

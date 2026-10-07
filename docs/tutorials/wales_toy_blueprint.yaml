@@ -65,3 +65,4 @@ cdr_forcing:
   data:
   - location: https://github.com/CWorthy-ocean/cstar_blueprint_roms_marbl_example/raw/refs/heads/pio/wales-toy-domain/input_datasets_netcdf/my_cdr_forcing.nc
 application: roms_marbl
+schema_version: 3.0.0
