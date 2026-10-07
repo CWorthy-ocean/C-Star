@@ -14,7 +14,6 @@ from cstar.applications.hello_world import APP_NAME as APP_HELLO_WORLD
 from cstar.applications.plotter import APP_NAME as APP_PLOTTER
 from cstar.applications.plotter import (
     APP_PLOTTER_SCHEMA_1_0_0,
-    APP_PLOTTER_SCHEMA_2_0_0,
 )
 from cstar.applications.roms_marbl.app import APP_NAME as APP_ROMS
 from cstar.base.env import (
@@ -167,7 +166,8 @@ def test_blueprint_migrate_unnecessary(hello_world_bp_path: Path) -> None:
 
     assert result.exit_code == 0
     output = " ".join(result.stdout.split())
-    assert f"is {APP_HELLO_WORLD} schema {latest}" in output
+    # the template is the first schema version; a newer build still reads it as-is
+    assert f"is {APP_HELLO_WORLD} schema 1.0.0" in output
     assert f"compatible with this build ({latest}); nothing to migrate." in output
     assert "persisted" not in output
     assert set(state_dir.glob("*")) == before
@@ -233,7 +233,7 @@ def test_blueprint_migrate_dry_run(
     to the user.
     """
     source = APP_PLOTTER_SCHEMA_1_0_0
-    target = APP_PLOTTER_SCHEMA_2_0_0
+    target = get_application(APP_PLOTTER).schema_version
 
     bp_path = plotter_v1_0_0_bp
     expected_output_path = tmp_path / "upgraded.yaml"
