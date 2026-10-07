@@ -91,9 +91,11 @@
     "obc_north": true,
     "obc_south": false,
     "obc_west": false,
+    "parabolic_splines": false,
     "sal_restore": true,
     "sponge_tune": false,
     "tides": true,
+    "upstream_ts_land_curv": false,
     "use_pio": true
   },
   "diagnostics": {

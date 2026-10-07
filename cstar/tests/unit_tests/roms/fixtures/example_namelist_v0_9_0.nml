@@ -4,7 +4,7 @@
     nrpf_his = 7
     output_period_avg = 604800.0
     output_period_his = 86400.0
-    output_period_rst = 1800.0
+    output_period_rst = 86400.0
     wrt_aks = .false.
     wrt_akt = .false.
     wrt_akv = .false.
@@ -37,7 +37,7 @@
 /
 
 &bgc_settings
-    interp_bgc_frc = .false.
+    interp_bgc_frc = .true.
     nrpf_bgc_avg = 7
     nrpf_bgc_avg_dia = 1
     nrpf_bgc_his = 7
@@ -80,7 +80,7 @@
 &cdr_gas_exch_output_settings
     cdr_gas_monthly_averages = .false.
     do_cdr_gas_exch_output = .false.
-    nrpf_cdr_gas = 24
+    nrpf_cdr_gas = 4
     output_period_cdr_gas = 3600.0
     wrt_cdr_gas_avg = .true.
 /
@@ -88,7 +88,7 @@
 &cdr_lite_output_settings
     cdr_lite_monthly_averages = .false.
     do_cdr_lite_output = .false.
-    nrpf_cdr_lite = 24
+    nrpf_cdr_lite = 4
     output_period_cdr_lite = 3600.0
     wrt_alk = .true.
     wrt_cdr_lite_avg = .true.
@@ -120,10 +120,6 @@
     output_period_diag = 86400.0
 /
 
-&dic_alk_correction
-    dcdt = 7.777
-/
-
 &extract_data_settings
     do_extract = .false.
     extract_file = 'sample_edata.nc'
@@ -137,9 +133,6 @@
 /
 
 &forcing_files
-    frcfiles = '<WORKDIR>/input_data/it-constants_surface-physics_2012.nc',
-               '<WORKDIR>/input_data/it-constants_boundary-physics_2012.nc',
-               '<WORKDIR>/input_data/it-constants_boundary-bgc-constants_201201.nc'
 /
 
 &frc_output_settings
@@ -154,11 +147,11 @@
 /
 
 &grid_settings
-    grdname = '<WORKDIR>/input_data/it-constants_grid.nc'
+    grdname = ''
 /
 
 &initial_conditions
-    inifile = '<WORKDIR>/input_data/it-constants_initial_conditions.nc'
+    inifile = ''
 /
 
 &lateral_visc_settings
@@ -182,15 +175,13 @@
 /
 
 &param_settings
-    llm = 8
-    mmm = 8
-    np_eta = 2
-    np_xi = 2
+    llm = 512
+    mmm = 512
+    np_eta = 16
+    np_xi = 16
     nt_bgc = 32
-    nt_cdr_dor = 0
-    nt_cdr_oae = 0
     nt_passive = 0
-    nz = 8
+    nz = 60
 /
 
 &particles_settings
@@ -200,7 +191,7 @@
     extra_space_fac = 1.5
     floats = .false.
     np = 50
-    nrpf_particles = 216
+    nrpf_particles = 100
     output_period_particles = 400.0
     pmin = 200
     ppm3 = 1e-06
@@ -223,7 +214,7 @@
 /
 
 &reference_date_settings
-    reference_date = 2000, 1, 1
+    reference_date = 2005, 6, 15
 /
 
 &rho0_settings
@@ -237,18 +228,18 @@
 /
 
 &s_coord
-    hc = 300.0
+    hc = 250.0
     theta_b = 2.0
     theta_s = 5.0
 /
 
 &simulation_name_settings
-    output_root_name = '<WORKDIR>/output/it-constants_20120101-20120101'
-    title = 'it-constants_20120101-20120101'
+    output_root_name = 'roms'
+    title = 'test_settings'
 /
 
 &sponge_tune_settings
-    nrpf_sponge = 1
+    nrpf_sponge = 7
     output_period_sponge = 86400.0
     sponge_avg = .true.
     sponge_timescale = 86400.0
@@ -264,6 +255,10 @@
     dsstdt = 7.777
 /
 
+&dic_alk_correction
+    dcdt = 7.777
+/
+
 &stdout_diag_settings
     code_check_mode = .false.
 /
@@ -272,9 +267,9 @@
     nrpf_sflx = 10
     output_period_sflx = 31536000.0
     sflx_avg = .false.
-    wrt_rstflx = .false.
     wrt_smflx = .false.
     wrt_stflx = .false.
+    wrt_rstflx = .false.
     wrt_swflx = .false.
 /
 
@@ -286,16 +281,16 @@
 
 &tidal_frc_settings
     ana_tides = .false.
-    bry_tides = .false.
-    ntides = 0
-    pot_tides = .false.
+    bry_tides = .true.
+    ntides = 10
+    pot_tides = .true.
 /
 
 &time_stepping
-    dt = 60.0
+    dt = 2160.0
     ndtfast = 60
     ninfo = 1
-    ntimes = 60
+    ntimes = 1200
 /
 
 &tracer_diff2
@@ -322,7 +317,7 @@
 /
 
 &v_sponge_settings
-    v_sponge = 5000.0
+    v_sponge = 0.0
 /
 
 &vertical_mixing_settings

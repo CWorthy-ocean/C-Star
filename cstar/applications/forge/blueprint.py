@@ -360,7 +360,12 @@ _HASH_EXCLUDE = {
 # run then goes under C-Star's default for the application and name
 # (``Blueprint.effective_working_dir``). Migration drops a ``working_dir`` that
 # is one of Forge's old home-rooted defaults and keeps any other value as written.
-FORGE_BLUEPRINT_VERSION = 9
+# v10 (2026-10): ucla-roms 0.9.0 renamed CDR_TRACER to CDR_LITE; Forge's
+# ``model_settings.cdr_tracer_output`` section is now ``cdr_lite_output`` (its
+# ``do_cdr_tracer_output`` flag ``do_cdr_lite_output``) for every ucla-roms
+# release, and ``cdr_lite`` (``cdr_online_carbonate_sensitivity``) is new.
+# Migration renames the section and flag.
+FORGE_BLUEPRINT_VERSION = 10
 
 # Identifies the C-Star application that CONSUMES this blueprint — i.e. the "forge"
 # application (this processing engine), whose blueprint IS the ForgeBlueprint. Do not confuse

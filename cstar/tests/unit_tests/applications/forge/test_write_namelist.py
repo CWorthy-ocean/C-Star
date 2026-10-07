@@ -25,6 +25,7 @@ from cstar.roms.namelist import (
     MARBL_TRACERS_TO_WRITE_MAX,
     RomsNamelistV0_4_0,
     RomsNamelistV0_7_0,
+    RomsNamelistV0_9_0,
     _namelist_str_list,
 )
 
@@ -263,7 +264,7 @@ def test_pio_settings_ignored_before_0_6_0(tmp_path):
     assert "pio_settings" not in nml
 
 
-def test_cdr_tracer_gas_exch_output_defaults_when_omitted(tmp_path):
+def test_cdr_lite_gas_exch_output_defaults_when_omitted(tmp_path):
     # &CDR_TRACER_OUTPUT_SETTINGS/&CDR_GAS_EXCH_OUTPUT_SETTINGS are version-gated
     # to ucla-roms >= 0.7.0 (PR #351). Unlike pio_settings (a ModelSpec physics
     # section), these two live in the shared "standard" OutputSpec that
@@ -272,7 +273,7 @@ def test_cdr_tracer_gas_exch_output_defaults_when_omitted(tmp_path):
     # Cfg defaults must still land in the written namelist, since ucla-roms
     # >= 0.7.0 requires both groups.
     rt = _base_settings()
-    del rt["cdr_tracer_output"]
+    del rt["cdr_lite_output"]
     del rt["cdr_gas_exch_output"]
     write_roms_namelist(
         settings_run_time=rt, output_dir=tmp_path, n_tracers=34, roms_ref="0.7.0"
@@ -284,10 +285,12 @@ def test_cdr_tracer_gas_exch_output_defaults_when_omitted(tmp_path):
     assert nml["cdr_gas_exch_output_settings"]["nrpf_cdr_gas"] == 4
 
 
-def test_cdr_tracer_gas_exch_output_override_is_written(tmp_path):
+def test_cdr_lite_gas_exch_output_override_is_written(tmp_path):
+    # forge's cdr_lite_output.do_cdr_lite_output serializes to the 0.7/0.8
+    # &CDR_TRACER_OUTPUT_SETTINGS names.
     rt = _base_settings()
-    rt["cdr_tracer_output"]["do_cdr_tracer_output"] = True
-    rt["cdr_tracer_output"]["nrpf"] = 8
+    rt["cdr_lite_output"]["do_cdr_lite_output"] = True
+    rt["cdr_lite_output"]["nrpf"] = 8
     rt["cdr_gas_exch_output"]["do_cdr_gas_exch_output"] = True
     rt["cdr_gas_exch_output"]["nrpf"] = 8
     write_roms_namelist(
@@ -300,27 +303,28 @@ def test_cdr_tracer_gas_exch_output_override_is_written(tmp_path):
     assert nml["cdr_gas_exch_output_settings"]["nrpf_cdr_gas"] == 8
 
 
-def test_cdr_tracer_gas_exch_output_ignored_before_0_7_0(tmp_path):
+def test_cdr_lite_gas_exch_output_ignored_before_0_7_0(tmp_path):
     # RunTimeSettingsV0_6_0 (0.6.0 <= ucla-roms < 0.7.0) has no
-    # cdr_tracer_output/cdr_gas_exch_output fields -- ``extra="ignore"`` at the
+    # cdr_lite_output/cdr_gas_exch_output fields -- ``extra="ignore"`` at the
     # top level silently drops them, same as pio_settings pre-0.6.0 (see
     # test_pio_settings_ignored_before_0_6_0 above); the 0.6.x namelist schema
     # (``extra="forbid"``) would otherwise reject the unmodeled groups.
     rt = _base_settings()
-    rt["cdr_tracer_output"]["do_cdr_tracer_output"] = True
+    rt["cdr_lite_output"]["do_cdr_lite_output"] = True
     rt["cdr_gas_exch_output"]["do_cdr_gas_exch_output"] = True
     write_roms_namelist(
         settings_run_time=rt, output_dir=tmp_path, n_tracers=34, roms_ref="0.6.1"
     )
     nml = f90nml.read(tmp_path / "namelist.nml")
     assert "cdr_tracer_output_settings" not in nml
+    assert "cdr_lite_output_settings" not in nml
     assert "cdr_gas_exch_output_settings" not in nml
 
 
-def test_cdr_tracer_gas_exch_output_round_trip(tmp_path):
+def test_cdr_lite_gas_exch_output_round_trip(tmp_path):
     rt = _base_settings()
-    rt["cdr_tracer_output"]["do_cdr_tracer_output"] = True
-    rt["cdr_tracer_output"]["nrpf"] = 6
+    rt["cdr_lite_output"]["do_cdr_lite_output"] = True
+    rt["cdr_lite_output"]["nrpf"] = 6
     rt["cdr_gas_exch_output"]["do_cdr_gas_exch_output"] = True
     rt["cdr_gas_exch_output"]["nrpf"] = 6
     write_roms_namelist(
@@ -331,6 +335,25 @@ def test_cdr_tracer_gas_exch_output_round_trip(tmp_path):
     assert nml.cdr_tracer_output_settings.nrpf_cdr_trc == 6
     assert nml.cdr_gas_exch_output_settings.do_cdr_gas_exch_output is True
     assert nml.cdr_gas_exch_output_settings.nrpf_cdr_gas == 6
+
+
+def test_cdr_lite_sections_written_with_the_0_9_0_names(tmp_path):
+    rt = _base_settings()
+    rt["cdr_lite"] = {"cdr_online_carbonate_sensitivity": True}
+    rt["cdr_lite_output"].update(do_cdr_lite_output=True, nrpf=6, wrt_gas_exchange=True)
+    write_roms_namelist(
+        settings_run_time=rt, output_dir=tmp_path, n_tracers=34, roms_ref="0.9.0"
+    )
+    nml = f90nml.read(tmp_path / "namelist.nml")
+    assert "cdr_tracer_output_settings" not in nml
+    assert nml["cdr_lite_settings"]["cdr_online_carbonate_sensitivity"] is True
+    assert nml["cdr_lite_output_settings"]["do_cdr_lite_output"] is True
+    assert nml["cdr_lite_output_settings"]["nrpf_cdr_lite"] == 6
+    assert nml["cdr_lite_output_settings"]["wrt_gas_exchange"] is True
+
+    back = RomsNamelistV0_9_0.read(tmp_path / "namelist.nml")
+    assert back.cdr_lite_output_settings.wrt_gas_exchange is True
+    assert back.cdr_lite_settings.cdr_online_carbonate_sensitivity is True
 
 
 # ---------------------------------------------------------------------------

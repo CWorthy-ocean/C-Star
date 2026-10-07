@@ -25,6 +25,7 @@ from cstar.applications.forge.blueprint import (
     infer_cdr_mode,
     sanitize_name,
 )
+from cstar.applications.forge.namelist_model import normalize_legacy_sections
 
 LEGACY_DEFAULT_WORKING_ROOTS: tuple[str, ...] = (
     "~/cstar/_forge_bp_runs",
@@ -88,6 +89,15 @@ def migrate_forge_blueprint_data(data: dict[str, Any] | None) -> dict[str, Any]:
     defaults (:data:`LEGACY_DEFAULT_WORKING_ROOTS`, bare or followed by the
     sanitized run name), so the blueprint runs under C-Star's default working
     directory; any other value is left untouched.
+    **v9 -> v10**: ``model_settings.cdr_tracer_output`` is renamed
+    ``cdr_lite_output`` and its ``do_cdr_tracer_output`` flag
+    ``do_cdr_lite_output`` (ucla-roms 0.9.0 renamed CDR_TRACER to CDR_LITE; Forge's
+    vocabulary follows for every release, see
+    :func:`~cstar.applications.forge.namelist_model.normalize_legacy_sections`).
+    A file carrying both section names, or a legacy flag next to its new name,
+    raises. Unlike the earlier steps this one is not version-gated: it runs on every
+    load because legacy names can re-enter current-version data through workplan
+    blueprint overrides, which merge onto an already-v10 dump and re-validate.
 
     Idempotent and a no-op on already-current data (e.g. direct keyword
     construction, ``ForgeBlueprint(name=..., ...)``) -- called automatically from a
@@ -183,6 +193,14 @@ def migrate_forge_blueprint_data(data: dict[str, Any] | None) -> dict[str, Any]:
                 }
             if working_dir.rstrip("/") in legacy_defaults:
                 del data["working_dir"]
+
+    # v9 -> v10, run on every load rather than gated on ``version < 10``: legacy
+    # section names also re-enter at-version data through workplan blueprint
+    # overrides (``OverrideTransform`` merges them onto the already-v10 dump).
+    model_settings = data.get("model_settings")
+    if isinstance(model_settings, dict):
+        data["model_settings"] = model_settings = dict(model_settings)
+        normalize_legacy_sections(model_settings)
 
     data["forge_blueprint_version"] = FORGE_BLUEPRINT_VERSION
     return data

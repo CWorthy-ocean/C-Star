@@ -15,25 +15,39 @@ from pydantic import ValidationError
 
 import cstar.catalog
 from cstar.applications.forge.namelist_model import (
+    _GATED_SECTION_SWITCHES,
+    _PRECHECK_SECTION_MAP,
     CdrGasExchOutputCfg,
-    CdrTracerOutputCfg,
+    CdrLiteOutputCfg,
+    CdrLiteOutputCfgV0_9_0,
     RunTimeSettings,
     RunTimeSettingsV0_4_0,
     RunTimeSettingsV0_5_0,
     RunTimeSettingsV0_6_0,
     RunTimeSettingsV0_7_0,
+    RunTimeSettingsV0_9_0,
     build_namelist,
+    canonical_output_sections_for_precheck,
     check_bgc_tracer_count,
+    check_cdr_lite_sections,
+    check_cdr_output_sections,
     forge_field_for,
     n_tracers_from_param,
+    normalize_legacy_sections,
     output_precheck_applies_to,
+    prune_version_gated_sections,
     run_time_settings_for_ref,
     validate_run_time_sections,
 )
 from cstar.applications.forge.resolve import load_model_spec_data
 from cstar.applications.forge.settings import write_roms_namelist
 from cstar.catalog.domain_catalog import default_catalog
-from cstar.roms.namelist import RomsNamelist, RomsNamelistV0_5_0, RomsNamelistV0_7_0
+from cstar.roms.namelist import (
+    RomsNamelist,
+    RomsNamelistV0_5_0,
+    RomsNamelistV0_7_0,
+    RomsNamelistV0_9_0,
+)
 
 _MODEL_DIR = (
     Path(cstar.catalog.__file__).parent
@@ -296,14 +310,14 @@ def test_pio_settings_default_stride():
     assert nml.pio_settings.pio_stride == 1
 
 
-def test_cdr_tracer_gas_exch_output_defaults_when_omitted():
+def test_cdr_lite_gas_exch_output_defaults_when_omitted():
     # &CDR_TRACER_OUTPUT_SETTINGS/&CDR_GAS_EXCH_OUTPUT_SETTINGS are version-gated
     # to ucla-roms >= 0.7.0 (PR #351). Unlike pio_settings (a ModelSpec physics
     # section), these two live in the shared "standard" OutputSpec that
     # ``_populated_rt_dict()`` merges in, so simulate a settings dict/blueprint
     # saved before OutputSpecs grew these sections by dropping them explicitly.
     d = _populated_rt_dict()
-    del d["cdr_tracer_output"]
+    del d["cdr_lite_output"]
     del d["cdr_gas_exch_output"]
     rt = RunTimeSettingsV0_7_0.model_validate(d)
     nml = build_namelist(rt, n_tracers=34)
@@ -313,8 +327,10 @@ def test_cdr_tracer_gas_exch_output_defaults_when_omitted():
     assert nml.cdr_gas_exch_output_settings.nrpf_cdr_gas == 4
 
 
-def test_cdr_tracer_output_cfg_defaults_and_aliases():
-    dumped = CdrTracerOutputCfg().model_dump(by_alias=True)
+def test_cdr_lite_output_cfg_defaults_and_aliases():
+    # ucla-roms 0.7/0.8 tier: forge's do_cdr_lite_output & co. serialize to the
+    # &CDR_TRACER_OUTPUT_SETTINGS names.
+    dumped = CdrLiteOutputCfg().model_dump(by_alias=True)
     assert dumped == {
         "do_cdr_tracer_output": False,
         "wrt_cdr_trc_avg": True,
@@ -327,6 +343,26 @@ def test_cdr_tracer_output_cfg_defaults_and_aliases():
         "wrt_sources": True,
         "wrt_alk": True,
         "wrt_dic": True,
+    }
+
+
+def test_cdr_lite_output_cfg_v0_9_0_defaults_and_aliases():
+    # ucla-roms >= 0.9.0 tier: the &CDR_LITE_OUTPUT_SETTINGS names, plus
+    # wrt_gas_exchange.
+    dumped = CdrLiteOutputCfgV0_9_0().model_dump(by_alias=True)
+    assert dumped == {
+        "do_cdr_lite_output": False,
+        "wrt_cdr_lite_avg": True,
+        "cdr_lite_monthly_averages": False,
+        "output_period_cdr_lite": 3600.0,
+        "nrpf_cdr_lite": 4,
+        "wrt_tracers": True,
+        "wrt_vertical_integrals": True,
+        "wrt_thickness_weighted": True,
+        "wrt_sources": True,
+        "wrt_alk": True,
+        "wrt_dic": True,
+        "wrt_gas_exchange": False,
     }
 
 
@@ -568,31 +604,34 @@ def test_run_time_settings_for_ref_0_4_0_up_to_0_5_0_selects_v0_4_0():
 
 def test_run_time_settings_for_ref_0_5_0_up_to_0_6_0_selects_v0_5_0():
     # 0.5.0 <= ucla-roms < 0.6.0 selects RunTimeSettingsV0_5_0; 0.6.0 <=
-    # ucla-roms < 0.7.0 selects RunTimeSettingsV0_6_0; 0.7.0 and later
-    # (including anything beyond) selects RunTimeSettingsV0_7_0 -- see
-    # test_run_time_settings_for_ref_0_6_0_up_to_0_7_0_selects_v0_6_0 and
-    # test_run_time_settings_for_ref_0_7_0_and_later_selects_v0_7_0 below.
+    # ucla-roms < 0.7.0 selects RunTimeSettingsV0_6_0; 0.7.0 <= ucla-roms < 0.9.0
+    # selects RunTimeSettingsV0_7_0 and 0.9.0 and later (including anything
+    # beyond) RunTimeSettingsV0_9_0 -- see the tests below.
     for ref in ("0.5.0", "v0.5.0"):
         assert run_time_settings_for_ref(ref) is RunTimeSettingsV0_5_0
 
 
 def test_run_time_settings_for_ref_0_6_0_up_to_0_7_0_selects_v0_6_0():
     # 0.6.0 <= ucla-roms < 0.7.0 selects RunTimeSettingsV0_6_0; 0.7.0 and later
-    # (including anything beyond) now selects RunTimeSettingsV0_7_0 -- see
-    # test_run_time_settings_for_ref_0_7_0_and_later_selects_v0_7_0 below.
+    # select RunTimeSettingsV0_7_0/V0_9_0 -- see the tests below.
     for ref in ("0.6.0", "v0.6.0"):
         assert run_time_settings_for_ref(ref) is RunTimeSettingsV0_6_0
 
 
-def test_run_time_settings_for_ref_0_7_0_and_later_selects_v0_7_0():
+def test_run_time_settings_for_ref_0_7_0_up_to_0_9_0_selects_v0_7_0():
     for ref in ("0.7.0", "v0.7.0", "0.8.3"):
         assert run_time_settings_for_ref(ref) is RunTimeSettingsV0_7_0
+
+
+def test_run_time_settings_for_ref_0_9_0_and_later_selects_v0_9_0():
+    for ref in ("0.9.0", "v0.9.0", "0.10.2", "1.0.0"):
+        assert run_time_settings_for_ref(ref) is RunTimeSettingsV0_9_0
 
 
 def test_run_time_settings_for_ref_branch_warns_and_uses_latest():
     with pytest.warns(UserWarning, match="not a release tag"):
         cls = run_time_settings_for_ref("main")
-    assert cls is RunTimeSettingsV0_7_0
+    assert cls is RunTimeSettingsV0_9_0
 
 
 def test_run_time_settings_for_ref_unresolvable_hash_warns_and_uses_latest():
@@ -601,7 +640,7 @@ def test_run_time_settings_for_ref_unresolvable_hash_warns_and_uses_latest():
     """
     with pytest.warns(UserWarning, match="not a release tag"):
         cls = run_time_settings_for_ref("a1b2c3d4")
-    assert cls is RunTimeSettingsV0_7_0
+    assert cls is RunTimeSettingsV0_9_0
 
 
 def test_run_time_settings_for_ref_empty_string_selects_legacy():
@@ -796,3 +835,357 @@ def test_forge_field_for_unknown_section_returns_none():
 
 def test_forge_field_for_unknown_key_returns_none():
     assert forge_field_for("frc_output_settings", "not_a_real_key") is None
+
+
+# ---------------------------------------------------------------------------
+# ucla-roms >= 0.9.0: RunTimeSettingsV0_9_0 (cdr_lite, renamed cdr_lite_output)
+# ---------------------------------------------------------------------------
+def test_build_namelist_v0_9_0_dispatches_to_its_own_class(tmp_path):
+    """RunTimeSettingsV0_9_0 is a RunTimeSettingsV0_6_0 but NOT a V0_7_0 --
+    ``build_namelist`` must pick ``RomsNamelistV0_9_0`` (the new CDR-lite groups,
+    no ``cdr_tracer_output_settings``) and write the 0.9 names.
+    """
+    d = _populated_rt_dict()
+    d["cdr_lite"] = {"cdr_online_carbonate_sensitivity": True}
+    d["cdr_lite_output"].update(do_cdr_lite_output=True, wrt_gas_exchange=True)
+    rt = RunTimeSettingsV0_9_0.model_validate(d)
+    assert not isinstance(rt, RunTimeSettingsV0_7_0)
+    nml = build_namelist(rt, n_tracers=34)
+    assert type(nml) is RomsNamelistV0_9_0
+    assert nml.cdr_lite_settings.cdr_online_carbonate_sensitivity is True
+    assert nml.cdr_lite_output_settings.do_cdr_lite_output is True
+    assert nml.cdr_lite_output_settings.wrt_gas_exchange is True
+    assert nml.cdr_lite_output_settings.nrpf_cdr_lite == d["cdr_lite_output"]["nrpf"]
+
+    nml.write(tmp_path / "namelist.nml")
+    text = (tmp_path / "namelist.nml").read_text()
+    assert "&cdr_lite_settings" in text
+    assert "&cdr_lite_output_settings" in text
+    assert "&cdr_gas_exch_output_settings" in text
+    assert "cdr_tracer_output" not in text
+
+
+def test_run_time_settings_v0_9_0_defaults_when_sections_omitted():
+    d = _populated_rt_dict()
+    for section in ("cdr_lite", "cdr_lite_output", "cdr_gas_exch_output"):
+        d.pop(section, None)
+    nml = build_namelist(RunTimeSettingsV0_9_0.model_validate(d), n_tracers=34)
+    assert nml.cdr_lite_settings.cdr_online_carbonate_sensitivity is False
+    assert nml.cdr_lite_output_settings.do_cdr_lite_output is False
+    assert nml.cdr_lite_output_settings.wrt_gas_exchange is False
+
+
+def test_v0_7_0_ignores_wrt_gas_exchange_and_writes_tracer_names(tmp_path):
+    """The shared OutputSpec carries ``wrt_gas_exchange``; a 0.7/0.8 tier drops it
+    (no such key in ``&CDR_TRACER_OUTPUT_SETTINGS``) and writes the old names.
+    """
+    d = _populated_rt_dict()
+    d["cdr_lite_output"].update(do_cdr_lite_output=True, wrt_gas_exchange=True)
+    nml = build_namelist(RunTimeSettingsV0_7_0.model_validate(d), n_tracers=34)
+    assert nml.cdr_tracer_output_settings.do_cdr_tracer_output is True
+    assert "wrt_gas_exchange" not in nml.cdr_tracer_output_settings.model_dump()
+
+
+# ---------------------------------------------------------------------------
+# check_cdr_lite_sections
+# ---------------------------------------------------------------------------
+_TRACERS = {"nt_cdr_oae": 1, "nt_cdr_dor": 0}
+
+
+def _lite(online=False, stream=False, gas=False, param=None):
+    return {
+        "cdr_lite": {"cdr_online_carbonate_sensitivity": online},
+        "cdr_lite_output": {"do_cdr_lite_output": stream, "wrt_gas_exchange": gas},
+        "param": {**_PARAM, "ntrc_bio": 0, **(_TRACERS if param is None else param)},
+    }
+
+
+@pytest.mark.parametrize(
+    ("settings", "marbl", "expected"),
+    [
+        (_lite(online=True), True, True),
+        (_lite(online=False), True, False),
+        (_lite(online=False), False, False),
+        (_lite(stream=True), False, False),  # tracer stream alone: no CDR_LITE
+        (_lite(online=True, stream=True, gas=True), True, True),
+        ({}, True, False),  # sections absent: nothing to read
+        ({"param": _PARAM}, False, False),
+        # A disabled section never trips the tracer-count rule.
+        (_lite(param={}), True, False),
+    ],
+)
+def test_check_cdr_lite_sections_returns_whether_cdr_lite_is_needed(
+    settings, marbl, expected
+):
+    assert check_cdr_lite_sections(settings, bgc_mode_is_marbl=marbl) is expected
+
+
+@pytest.mark.parametrize(
+    ("settings", "marbl", "match"),
+    [
+        (_lite(online=True), False, "MARBL"),
+        (_lite(stream=True, gas=True), True, "needs CDR_LITE.*cdr_online_carbonate"),
+        (_lite(online=True, param={}), True, "param.nt_cdr_oae"),
+        (_lite(stream=True, param={}), True, "cdr_lite_output.do_cdr_lite_output"),
+        (
+            _lite(online=True, param={"nt_cdr_oae": 0, "nt_cdr_dor": 0}),
+            True,
+            "== 0",
+        ),
+    ],
+)
+def test_check_cdr_lite_sections_rejects_what_roms_would_abort_on(
+    settings, marbl, match
+):
+    with pytest.raises(ValueError, match=match):
+        check_cdr_lite_sections(settings, bgc_mode_is_marbl=marbl)
+
+
+def test_check_cdr_lite_sections_accepts_dor_tracers_alone():
+    settings = _lite(online=True, param={"nt_cdr_oae": 0, "nt_cdr_dor": 2})
+    assert check_cdr_lite_sections(settings, bgc_mode_is_marbl=True) is True
+
+
+def test_check_cdr_lite_sections_treats_a_null_tracer_count_as_zero():
+    """A YAML ``nt_cdr_oae:`` (null) is "no tracers", not a TypeError."""
+    settings = _lite(stream=True, param={"nt_cdr_oae": None})
+    with pytest.raises(ValueError, match="== 0"):
+        check_cdr_lite_sections(settings, bgc_mode_is_marbl=True)
+
+
+def test_check_cdr_lite_sections_reports_every_problem_together():
+    settings = _lite(online=False, stream=True, gas=True, param={})
+    with pytest.raises(ValueError) as exc:
+        check_cdr_lite_sections(settings, bgc_mode_is_marbl=True)
+    assert "needs CDR_LITE" in str(exc.value)
+    assert "== 0" in str(exc.value)
+
+
+def test_validate_run_time_sections_reports_a_null_tracer_count_without_raising():
+    errs = validate_run_time_sections(
+        {**_lite(stream=True, param={"nt_cdr_oae": None}), "cppdefs": {"marbl": True}},
+        roms_ref="0.9.0",
+    )
+    assert any("== 0" in e for e in errs)
+
+
+def test_validate_run_time_sections_runs_the_cdr_lite_check():
+    errs = validate_run_time_sections(
+        {**_lite(online=True), "cppdefs": {"marbl": False}}, roms_ref="0.9.0"
+    )
+    assert any("MARBL" in e for e in errs)
+    assert (
+        validate_run_time_sections(
+            {**_lite(online=True), "cppdefs": {"marbl": True}}, roms_ref="0.9.0"
+        )
+        == []
+    )
+    # Without cppdefs the MARBL input is missing: skipped, like the BGC check.
+    assert validate_run_time_sections(_lite(online=True), roms_ref="0.9.0") == []
+
+
+def test_validate_run_time_sections_skips_cdr_lite_check_on_a_tier_without_it():
+    """The cross-section CDR-lite check reads only the sections the pinned tier
+    models: on 0.8 ``cdr_lite`` is reported by ``prune_version_gated_sections``
+    at resolve/configure_build, not advised on here with 0.9-only wording.
+    """
+    settings = {**_lite(online=True), "cppdefs": {"marbl": False}}
+    assert any("MARBL" in e for e in validate_run_time_sections(settings, "0.9.0"))
+    assert not any("MARBL" in e for e in validate_run_time_sections(settings, "0.8.0"))
+
+
+# ---------------------------------------------------------------------------
+# check_cdr_output_sections -- rows apply per tier
+# ---------------------------------------------------------------------------
+@pytest.mark.parametrize(
+    ("roms_ref", "forces_cdr_forcing"),
+    [("0.7.0", True), ("0.8.0", True), ("0.9.0", False)],
+)
+def test_cdr_lite_output_forces_cdr_forcing_only_before_0_9_0(
+    roms_ref, forces_cdr_forcing
+):
+    settings = {"cdr_lite_output": {"do_cdr_lite_output": True}}
+    assert (
+        check_cdr_output_sections(
+            settings,
+            bgc_mode_is_marbl=False,
+            settings_cls=run_time_settings_for_ref(roms_ref),
+        )
+        is forces_cdr_forcing
+    )
+
+
+@pytest.mark.parametrize("roms_ref", ["0.7.0", "0.8.0", "0.9.0"])
+def test_gas_exchange_output_keeps_its_marbl_rule_on_every_tier(roms_ref):
+    settings = {"cdr_gas_exch_output": {"do_cdr_gas_exch_output": True}}
+    cls = run_time_settings_for_ref(roms_ref)
+    with pytest.raises(ValueError, match="gas-exchange"):
+        check_cdr_output_sections(settings, bgc_mode_is_marbl=False, settings_cls=cls)
+    assert check_cdr_output_sections(settings, bgc_mode_is_marbl=True, settings_cls=cls)
+
+
+def test_cdr_output_sections_ignore_tiers_without_the_section():
+    settings = {"cdr_lite_output": {"do_cdr_lite_output": True}}
+    assert not check_cdr_output_sections(
+        settings,
+        bgc_mode_is_marbl=False,
+        settings_cls=run_time_settings_for_ref("0.6.0"),
+    )
+
+
+# ---------------------------------------------------------------------------
+# _PRECHECK_SECTION_MAP rows / forge_field_for
+# ---------------------------------------------------------------------------
+def test_precheck_translation_picks_the_group_by_tier():
+    section = {"do_cdr_lite_output": True, "nrpf": 3, "output_period": 60.0}
+    settings = {"cdr_lite_output": section}
+    v07 = canonical_output_sections_for_precheck(
+        settings, run_time_settings_for_ref("0.8.0")
+    )
+    assert v07 == {
+        "cdr_tracer_output_settings": CdrLiteOutputCfg.model_validate(
+            section
+        ).model_dump(by_alias=True)
+    }
+    assert v07["cdr_tracer_output_settings"]["nrpf_cdr_trc"] == 3
+    v09 = canonical_output_sections_for_precheck(
+        settings, run_time_settings_for_ref("0.9.0")
+    )
+    assert list(v09) == ["cdr_lite_output_settings"]
+    assert v09["cdr_lite_output_settings"]["nrpf_cdr_lite"] == 3
+    assert v09["cdr_lite_output_settings"]["wrt_gas_exchange"] is False
+
+
+@pytest.mark.parametrize("roms_ref", ["0.5.0", "0.6.0", "0.7.0", "0.8.0", "0.9.0"])
+def test_every_precheck_row_that_applies_matches_the_tier_annotation(roms_ref):
+    """Each section of the >= 0.5.0 tiers has exactly one applying row, so none is
+    silently skipped by the row-matching rule (e.g. ``ocean_vars`` ->
+    ``OceanVarsCfgV0_5_0``).
+    """
+    cls = run_time_settings_for_ref(roms_ref)
+    assert output_precheck_applies_to(cls)
+    sections = [section for section, _cfg, _group in _PRECHECK_SECTION_MAP]
+    for section in set(sections):
+        if section not in cls.model_fields:
+            continue
+        applying = [
+            group
+            for sec, cfg, group in _PRECHECK_SECTION_MAP
+            if sec == section and cls.model_fields[sec].annotation is cfg
+        ]
+        assert len(applying) == 1, (roms_ref, section, applying)
+    # ... and every section the tier models that the table knows is covered.
+    assert {section for section in sections if section in cls.model_fields} == {
+        sec
+        for sec, cfg, _ in _PRECHECK_SECTION_MAP
+        if sec in cls.model_fields and cls.model_fields[sec].annotation is cfg
+    }
+
+
+def test_forge_field_for_maps_both_cdr_lite_groups_to_the_forge_section():
+    assert (
+        forge_field_for("cdr_tracer_output_settings", "nrpf_cdr_trc")
+        == "cdr_lite_output.nrpf"
+    )
+    assert (
+        forge_field_for("cdr_lite_output_settings", "nrpf_cdr_lite")
+        == "cdr_lite_output.nrpf"
+    )
+    assert (
+        forge_field_for("cdr_tracer_output_settings", "do_cdr_tracer_output")
+        == "cdr_lite_output.do_cdr_lite_output"
+    )
+    assert (
+        forge_field_for("cdr_lite_output_settings", "wrt_gas_exchange")
+        == "cdr_lite_output.wrt_gas_exchange"
+    )
+
+
+# ---------------------------------------------------------------------------
+# prune_version_gated_sections -- an enabled gated section is rejected
+# ---------------------------------------------------------------------------
+@pytest.mark.parametrize(
+    ("section", "values"),
+    [
+        ("cdr_lite_output", {"do_cdr_lite_output": True}),
+        ("cdr_gas_exch_output", {"do_cdr_gas_exch_output": True}),
+    ],
+)
+def test_prune_rejects_an_enabled_section_the_tier_lacks(section, values):
+    settings = {section: dict(values), "ocean_vars": {}}
+    with pytest.raises(ValueError, match=rf"{section}\.{next(iter(values))}") as exc:
+        prune_version_gated_sections(settings, RunTimeSettingsV0_6_0)
+    assert "RunTimeSettingsV0_6_0" in str(exc.value)
+    assert section in settings  # nothing was mutated
+
+
+def test_prune_rejects_cdr_lite_knob_on_a_pre_0_9_0_tier():
+    settings = {"cdr_lite": {"cdr_online_carbonate_sensitivity": True}}
+    with pytest.raises(ValueError, match="cdr_lite.cdr_online_carbonate_sensitivity"):
+        prune_version_gated_sections(settings, RunTimeSettingsV0_7_0)
+
+
+def test_prune_stays_silent_for_switched_off_sections():
+    settings = {
+        "cdr_lite": {"cdr_online_carbonate_sensitivity": False},
+        "cdr_lite_output": {"do_cdr_lite_output": False},
+        "cdr_gas_exch_output": {"do_cdr_gas_exch_output": False},
+        "ocean_vars": {},
+    }
+    assert prune_version_gated_sections(settings, RunTimeSettingsV0_6_0) == [
+        "cdr_gas_exch_output",
+        "cdr_lite",
+        "cdr_lite_output",
+    ]
+    assert list(settings) == ["ocean_vars"]
+
+
+def test_gated_section_switches_are_fields_of_their_0_9_0_sections():
+    cls = RunTimeSettingsV0_9_0
+    for section, flag in _GATED_SECTION_SWITCHES.items():
+        assert flag in cls.model_fields[section].annotation.model_fields
+
+
+# ---------------------------------------------------------------------------
+# normalize_legacy_sections
+# ---------------------------------------------------------------------------
+def test_normalize_legacy_sections_renames_section_and_flag_keeping_order():
+    settings = {
+        "a": 1,
+        "cdr_tracer_output": {"do_cdr_tracer_output": True, "nrpf": 8},
+        "z": 2,
+    }
+    assert normalize_legacy_sections(settings) == {
+        "cdr_tracer_output": "cdr_lite_output"
+    }
+    assert settings == {
+        "a": 1,
+        "cdr_lite_output": {"do_cdr_lite_output": True, "nrpf": 8},
+        "z": 2,
+    }
+    assert list(settings) == ["a", "cdr_lite_output", "z"]
+
+
+def test_normalize_legacy_sections_is_idempotent_and_leaves_new_keys_alone():
+    settings = {"cdr_lite_output": {"do_cdr_lite_output": True}}
+    assert normalize_legacy_sections(settings) == {}
+    assert settings == {"cdr_lite_output": {"do_cdr_lite_output": True}}
+
+
+def test_normalize_legacy_sections_rejects_a_legacy_flag_next_to_its_new_name():
+    section = {"do_cdr_tracer_output": True, "do_cdr_lite_output": False}
+    settings = {"cdr_tracer_output": section}
+    with pytest.raises(ValueError, match="do_cdr_tracer_output.*do_cdr_lite_output"):
+        normalize_legacy_sections(settings)
+    assert settings == {"cdr_tracer_output": section}  # nothing renamed
+
+
+def test_normalize_legacy_sections_rejects_both_names():
+    with pytest.raises(ValueError, match="both"):
+        normalize_legacy_sections({"cdr_tracer_output": {}, "cdr_lite_output": {}})
+
+
+def test_normalize_legacy_sections_does_not_mutate_the_old_inner_dict():
+    inner = {"do_cdr_tracer_output": True}
+    normalize_legacy_sections({"cdr_tracer_output": inner})
+    assert inner == {"do_cdr_tracer_output": True}
