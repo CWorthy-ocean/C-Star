@@ -1,8 +1,12 @@
+import json
+import typing as t
 from pathlib import Path
 
 import pytest
 from typer.testing import CliRunner
 
+from cstar.applications.core import get_application
+from cstar.applications.plotter import APP_NAME as APP_PLOTTER
 from cstar.cli.blueprint.check import app
 
 
@@ -285,3 +289,57 @@ def test_blueprint_check_remote_blueprint(
     result = runner.invoke(app, args, color=False)
 
     assert "is valid" in result.stdout
+
+
+def test_blueprint_check_too_new(
+    tmp_path: Path,
+    plotter_v1_0_0_model: dict[str, t.Any],
+) -> None:
+    """Verify that a blueprint newer than this build reads is refused with the
+    upgrade message before its content is validated.
+    """
+    bp_path = tmp_path / "plotter_9.9.9.json"
+    bp_path.write_text(json.dumps({**plotter_v1_0_0_model, "schema_version": "9.9.9"}))
+
+    runner = CliRunner()
+    result = runner.invoke(app, [str(bp_path)], color=False)
+
+    latest = get_application(APP_PLOTTER).schema_version
+    output = " ".join(result.stdout.split())
+    assert result.exit_code == 1
+    assert f"Blueprint {str(bp_path)!r}: {APP_PLOTTER} schema 9.9.9 is newer" in output
+    assert f"reads ({latest}). Upgrade cstar-ocean" in output
+    assert "is valid" not in output
+
+
+def test_blueprint_check_manual_migration(
+    tmp_path: Path,
+    plotter_v1_0_0_model: dict[str, t.Any],
+) -> None:
+    """Verify that a blueprint with no automatic migration is refused."""
+    bp_path = tmp_path / "plotter_0.5.0.json"
+    bp_path.write_text(json.dumps({**plotter_v1_0_0_model, "schema_version": "0.5.0"}))
+
+    runner = CliRunner()
+    result = runner.invoke(app, [str(bp_path)], color=False)
+
+    output = " ".join(result.stdout.split())
+    assert result.exit_code == 1
+    assert f"Blueprint {str(bp_path)!r}: " in output
+    assert "has no automatic migration" in output
+
+
+def test_blueprint_check_needs_migration(plotter_v1_0_0_bp: Path) -> None:
+    """Verify that an older major version with an automatic migration is
+    reported as needing migration, naming the command to run.
+    """
+    latest = get_application(APP_PLOTTER).schema_version
+
+    runner = CliRunner()
+    result = runner.invoke(app, [str(plotter_v1_0_0_bp)], color=False)
+
+    output = " ".join(result.stdout.split())
+    assert result.exit_code == 1
+    assert f"is {APP_PLOTTER} schema 1.0.0 and needs migration to {latest}" in output
+    assert f"run: cstar blueprint migrate {plotter_v1_0_0_bp}" in output
+    assert "is valid" not in output

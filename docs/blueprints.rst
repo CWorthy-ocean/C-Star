@@ -27,6 +27,12 @@ The example on the :doc:`ROMS-MARBL blueprint <blueprints/roms_marbl>` page show
 
 The core blueprint attributes do not contain enough information to be executed alone.
 
+``schema_version`` is semver relative to the installed C-Star: a file with an older
+minor or patch version loads unchanged, a file with an older major version is migrated
+automatically when the application provides a migration (``cstar blueprint migrate``),
+and a file newer than the installed C-Star is refused. See
+:ref:`versioning_blueprint_schema`.
+
 Customizing Blueprints
 -----------------------
 

@@ -2235,6 +2235,64 @@ def test_workplan_run_unsupported_schema_fails(
         )
 
     assert result.exit_code == 1
+    output = " ".join(result.stdout.split())
+    assert (
+        f"Blueprint {bp_path.as_posix()!r}: plotter schema 0.5.0 has no automatic migration"
+        in output
+    )
+    mock_build_and_run_dag.assert_not_awaited()
+
+
+def test_workplan_run_unsupported_schemas_all_reported(
+    tmp_path: Path,
+    plotter_v1_0_0_bp: Path,
+    plotter_v1_0_0_model: dict[str, t.Any],
+) -> None:
+    """Verify every step with an unsupported schema is reported in one run, and
+    that the workplan is left untouched even though an earlier step migrated.
+
+    Parameters
+    ----------
+    tmp_path : Path
+        Temporary directory to read/write test inputs and outputs
+    plotter_v1_0_0_bp : Path
+        Fixture providing a plotter blueprint that migrates automatically
+    plotter_v1_0_0_model : dict[str, t.Any]
+        Fixture providing the raw content of a plotter blueprint at schema 1.0.0
+    """
+    manual_path = tmp_path / "plotter_0.5.0.json"
+    manual_path.write_text(
+        json.dumps({**plotter_v1_0_0_model, "schema_version": "0.5.0"})
+    )
+    too_new_path = tmp_path / "plotter_9.9.9.json"
+    too_new_path.write_text(
+        json.dumps({**plotter_v1_0_0_model, "schema_version": "9.9.9"})
+    )
+
+    steps = [
+        Step(name="Migrates", application="plotter", blueprint=plotter_v1_0_0_bp),
+        Step(name="Manual", application="plotter", blueprint=manual_path),
+        Step(name="TooNew", application="plotter", blueprint=too_new_path),
+    ]
+    wp_path = _write_workplan(tmp_path / "unsupported-schemas-workplan.yaml", steps)
+    original = wp_path.read_bytes()
+
+    with mock.patch(
+        "cstar.cli.workplan.run.build_and_run_dag", wraps=fake_build_and_run_dag
+    ) as mock_build_and_run_dag:
+        runner = CliRunner()
+        result = runner.invoke(
+            app,
+            ["--run-id", "12345", wp_path.as_posix()],
+            color=False,
+        )
+
+    assert result.exit_code == 1
+    output = " ".join(result.stdout.split())
+    assert f"Blueprint {manual_path.as_posix()!r}: plotter schema 0.5.0" in output
+    assert f"Blueprint {too_new_path.as_posix()!r}: plotter schema 9.9.9" in output
+    assert "Upgrade cstar-ocean" in output
+    assert wp_path.read_bytes() == original
     mock_build_and_run_dag.assert_not_awaited()
 
 

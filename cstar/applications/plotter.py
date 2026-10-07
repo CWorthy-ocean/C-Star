@@ -14,7 +14,6 @@ from cstar.base.utils import lazy_import
 from cstar.entrypoint.runner import BlueprintRunner
 from cstar.execution.handler import ExecutionStatus
 from cstar.orchestration.models import Blueprint
-from cstar.system.migration import SchemaBounds
 
 roms_tools = lazy_import("roms_tools")
 
@@ -115,17 +114,6 @@ class PlotterRunner(BlueprintRunner[PlotterBlueprint]):
 
 APP_PLOTTER_SCHEMA_1_0_0: t.Final[str] = "1.0.0"
 APP_PLOTTER_SCHEMA_2_0_0: t.Final[str] = "2.0.0"
-
-plotter_bounds: SchemaBounds = {
-    "min": APP_PLOTTER_SCHEMA_1_0_0,
-    "max": APP_PLOTTER_SCHEMA_2_0_0,
-}
-"""Schema bounds for the plotter blueprint schema.
-
-The schema bounds enable the migration tool to:
-- automatically set version to  minimum version for a blueprint that predated versioning
-- configure which version it will target for updates
-"""
 
 
 class PlotterSchemaAdapterV1V2(SchemaAdapter):

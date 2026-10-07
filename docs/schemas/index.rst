@@ -11,7 +11,11 @@ Schemas for the built-in `Workplan` are listed here.
 Blueprints
 ----------
 
-Schemas for the built-in blueprints are listed here.
+Schemas for the built-in blueprints are listed here. Each blueprint's
+``schema_version`` is semver read from an older file's point of view: a newer
+major means older files need migration (automatic where the application provides
+an adapter), while an older minor or patch loads unchanged. See
+:ref:`versioning_blueprint_schema`.
 
 ROMS-MARBL Blueprint
 ~~~~~~~~~~~~~~~~~~~~
