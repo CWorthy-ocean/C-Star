@@ -9,11 +9,14 @@ import pytest
 import typer
 from typer.testing import CliRunner
 
-from cstar.applications.hello_world import HelloWorldSchemaAdapterV1V1
+from cstar.applications.core import get_application
+from cstar.applications.hello_world import APP_NAME as APP_HELLO_WORLD
 from cstar.applications.plotter import APP_NAME as APP_PLOTTER
-from cstar.applications.plotter import PlotterSchemaAdapterV1V2
+from cstar.applications.plotter import (
+    APP_PLOTTER_SCHEMA_1_0_0,
+    APP_PLOTTER_SCHEMA_2_0_0,
+)
 from cstar.applications.roms_marbl.app import APP_NAME as APP_ROMS
-from cstar.applications.roms_marbl.migration import RomsMarblSchemaAdapter2025v1
 from cstar.base.env import (
     ENV_CSTAR_CLI_DRY_RUN,
     ENV_CSTAR_CLOBBER_WORKING_DIR,
@@ -28,7 +31,7 @@ from cstar.cli.blueprint.migrate import (
     target_callback,
 )
 from cstar.entrypoint.utils import ARG_CLOBBER, ARG_DRY_RUN
-from cstar.system.migration import KEY_APP, identify_bounds
+from cstar.system.migration import KEY_APP
 
 ARG_INPLACE = "--inplace"
 
@@ -104,8 +107,7 @@ def test_blueprint_migrate_persist_to_default(
     convention `<input_file_stem>_<latest_version>.<ext>` in `$CSTAR_STATE_HOME`
     """
     app_name = APP_PLOTTER
-    bounds = identify_bounds([PlotterSchemaAdapterV1V2])[app_name]
-    latest = bounds["max"]
+    latest = get_application(app_name).schema_version
 
     bp_path = plotter_v1_0_0_bp
     state_dir = Path(str(os.getenv(ENV_CSTAR_STATE_HOME, "")))
@@ -152,8 +154,7 @@ def test_blueprint_migrate_unnecessary(hello_world_bp_path: Path) -> None:
     """Verify that the user is informed that no migration is necessary
     when a blueprint has the latest schema version.
     """
-    bounds = identify_bounds([HelloWorldSchemaAdapterV1V1])
-    latest = bounds[HelloWorldSchemaAdapterV1V1.application()]["max"]
+    latest = get_application(APP_HELLO_WORLD).schema_version
 
     bp_path = hello_world_bp_path
 
@@ -199,9 +200,8 @@ def test_blueprint_migrate_dry_run(
     """Verify that dry run mode does not produce a file and displays the plan
     to the user.
     """
-    bounds = identify_bounds([RomsMarblSchemaAdapter2025v1])[APP_ROMS]
-    source = bounds["min"]
-    target = bounds["max"]
+    source = APP_PLOTTER_SCHEMA_1_0_0
+    target = APP_PLOTTER_SCHEMA_2_0_0
 
     bp_path = plotter_v1_0_0_bp
     expected_output_path = tmp_path / "upgraded.yaml"
@@ -387,8 +387,7 @@ def test_blueprint_migrate_inplace(plotter_v1_0_0_bp: Path) -> None:
     bp_path = plotter_v1_0_0_bp
     original_content = bp_path.read_text()
 
-    bounds = identify_bounds([PlotterSchemaAdapterV1V2])[APP_PLOTTER]
-    latest = bounds["max"]
+    latest = get_application(APP_PLOTTER).schema_version
 
     runner = CliRunner()
     result = runner.invoke(
@@ -424,8 +423,7 @@ def test_blueprint_migrate_inplace_ignores_output(
     bp_path = plotter_v1_0_0_bp
     output_path = tmp_path / f"{uuid.uuid4()!s}.yaml"
 
-    bounds = identify_bounds([PlotterSchemaAdapterV1V2])[APP_PLOTTER]
-    latest = bounds["max"]
+    latest = get_application(APP_PLOTTER).schema_version
 
     runner = CliRunner()
     result = runner.invoke(

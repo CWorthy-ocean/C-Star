@@ -1,7 +1,6 @@
 import abc
 import typing as t
-from collections import defaultdict
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from copy import deepcopy
 from pathlib import Path
 
@@ -12,7 +11,7 @@ from pydantic import (
     FilePath,
 )
 
-from cstar.base.adapter import SchemaAdapter
+from cstar.base.adapter import SchemaAdapter, SchemaBreak
 from cstar.base.env import ENV_CSTAR_CLI_DRY_RUN, ENV_CSTAR_CLOBBER_WORKING_DIR
 from cstar.base.feature import is_flag_enabled
 from cstar.base.log import LoggingMixin
@@ -21,27 +20,48 @@ KEY_SV: t.Final[str] = "schema_version"
 KEY_APP: t.Final[str] = "application"
 
 
-class SchemaBounds(t.TypedDict):
-    """Typed dictionary for capturing the min and max schema versions for an app."""
-
-    min: str
-    max: str
-
-
 class CstarMigrationError(Exception):
     """Base class for errors arising from a schema migration."""
 
 
 class CstarUnsupportedMigrationError(CstarMigrationError):
-    """An error that occurs due to an unknown source or target schema version."""
+    """An error that occurs when the application is unknown to the migrator."""
 
 
-class CStarMigrationNotRegisteredError(CstarMigrationError):
-    """An error that occurs due to no registered adapters."""
+class CstarSchemaTooNewError(CstarMigrationError):
+    """An error that occurs when a document's schema is newer than this build reads."""
+
+    def __init__(self, application: str, found: str, target: str) -> None:
+        self.application = application
+        self.found = found
+        self.target = target
+        super().__init__(
+            f"{application} schema {found} is newer than this build of "
+            f"cstar-ocean reads ({target}). Upgrade cstar-ocean to read this file."
+        )
 
 
-ConverterMap: t.TypeAlias = dict[tuple[str, str, str], type[SchemaAdapter]]
-"""A mapping of (application, source version, target version) keys to adapters."""
+class CstarManualMigrationError(CstarMigrationError):
+    """An error that occurs when an older major version has no automatic migration."""
+
+    def __init__(
+        self, application: str, found: str, target: str, guidance: str = ""
+    ) -> None:
+        self.application = application
+        self.found = found
+        self.target = target
+        guidance = guidance or (
+            f"Update the blueprint by hand to the {target} schema (published under "
+            "docs/schemas), then validate it with: cstar blueprint check <path>"
+        )
+        super().__init__(
+            f"{application} schema {found} has no automatic migration to {target} "
+            f"from {_major(found)}.x. {guidance}"
+        )
+
+
+ConverterMap: t.TypeAlias = dict[tuple[str, str], type[SchemaAdapter]]
+"""A mapping of (application, source version) keys to adapters."""
 
 
 class MigrationRequest(BaseModel):
@@ -89,8 +109,11 @@ class MigrationPlan(t.NamedTuple):
     """An ordered list of adapters that will complete the migration when applied."""
 
     @property
-    def is_latest(self) -> bool:
-        return self.source == self.target
+    def is_compatible(self) -> bool:
+        """True when the document needs no adapters because its major version
+        matches the build's.
+        """
+        return not self.adapters
 
 
 class MigrateResult(t.NamedTuple):
@@ -140,9 +163,9 @@ class BlueprintMigration(Migration):
     adapters: list[type[SchemaAdapter]]
     """The adapters available to migrate the blueprint."""
     adapter_lookup: t.Final[ConverterMap]
-    """A mapping of unique converter key tuples (app, source, target) to adapters."""
-    schema_bounds: dict[str, SchemaBounds]
-    """A mapping of unique app names to their minimum and maximum schema version."""
+    """A mapping of unique converter key tuples (app, source) to adapters."""
+    targets: Mapping[str, str]
+    """A mapping of application names to the schema version this build reads."""
 
     on_planned_callback: OnPlannedCallback | None = None
     """Callback executed when the migrator completes a plan."""
@@ -152,12 +175,12 @@ class BlueprintMigration(Migration):
     def __init__(
         self,
         adapters: Sequence[type[SchemaAdapter]],
-        schema_bounds: dict[str, SchemaBounds] | None = None,
+        targets: Mapping[str, str],
         on_planned: OnPlannedCallback | None = None,
         on_migrated: OnMigratedCallback | None = None,
     ) -> None:
         self.adapters = list(adapters or [])
-        self.schema_bounds = schema_bounds or identify_bounds(self.adapters)
+        self.targets = targets
         self.adapter_lookup = self._build_adapter_lookup()
         self.on_planned_callback = on_planned
         self.on_migrated_callback = on_migrated
@@ -168,64 +191,106 @@ class BlueprintMigration(Migration):
         Returns
         -------
         ConverterMap
+
+        Raises
+        ------
+        ValueError
+            If an adapter does not advance the version, or two adapters share
+            an (application, source) key.
         """
-        results: dict[tuple[str, str, str], t.Any] = {}
+        results: ConverterMap = {}
         for klass in self.adapters:
-            results[(klass.application(), klass.source(), klass.target())] = klass
+            key = (klass.application(), klass.source())
+            if _version_key(klass.target()) <= _version_key(klass.source()):
+                msg = (
+                    f"Adapter {klass.__name__} must advance the schema version, "
+                    f"not {klass.source()!r} -> {klass.target()!r}"
+                )
+                raise ValueError(msg)
+            if key in results:
+                msg = (
+                    f"Adapters {results[key].__name__} and {klass.__name__} share {key}"
+                )
+                raise ValueError(msg)
+            results[key] = klass
         return results
 
     def plan(self, dumped: dict[str, t.Any]) -> MigrationPlan:
         """Determine the available upgrade path.
 
+        A document is classified against the build's schema version for its
+        application: newer is refused, the same major version is compatible
+        as-is, and an older major version is walked forward through adapters.
         `plan` assumes only 1 mapping for any source schema version exists. It
         will not backtrack to locate an alternative upgrade path if an adapter
         cannot traverse to the goal state and becomes stuck.
 
         Returns
         -------
-        ConversionPlan
-            NamedTuple containing (source version, target version, plan)
+        MigrationPlan
+            NamedTuple containing (source version, target version, adapters)
 
         Raises
         ------
         CstarUnsupportedMigrationError
-            If unable to identify a complete migration upgrade path.
+            If the application is unknown to the migrator, or the document's
+            schema version is not dotted integers.
+        CstarSchemaTooNewError
+            If the document's schema is newer than the build's.
+        CstarManualMigrationError
+            If an older major version has no automatic upgrade path.
         """
-        adapters: list[type[SchemaAdapter]] = []
         application = str(dumped[KEY_APP])
 
-        if application not in self.schema_bounds:
-            msg = f"No schema bounds registered for application {application!r}"
+        if application not in self.targets:
+            msg = f"No schema version registered for application {application!r}"
             raise CstarUnsupportedMigrationError(msg)
 
-        found_version = str(dumped.get(KEY_SV, "")).strip()
-        initial_version = found_version or self.schema_bounds[application]["min"]
-        version = initial_version
-        goal = self.schema_bounds[application]["max"]
+        # a missing version marks a pre-versioning document; every schema began at 1.0.0
+        found = str(dumped.get(KEY_SV) or "").strip() or "1.0.0"
+        target = self.targets[application]
 
-        while version != goal:
-            # find a migrations with current version as the source
-            key = next(
-                (
-                    (app, vsource, vtarget)
-                    for (app, vsource, vtarget) in self.adapter_lookup
-                    if app == application and vsource == version
-                ),
-                None,
-            )
-            if not key:
-                msg = f"No migration adapter from {version!r} to {goal!r}"
-                raise CstarUnsupportedMigrationError(msg)
+        try:
+            _version_key(found)
+        except ValueError as ex:
+            msg = f"Unrecognized schema_version {found!r}; expected dotted integers like 1.0.0"
+            raise CstarUnsupportedMigrationError(msg) from ex
 
-            # store adapter and prepare to traverse the next edge
-            adapters.append(self.adapter_lookup[key])
-            _, _, version = key
+        if _version_key(found) > _version_key(target):
+            raise CstarSchemaTooNewError(application, found, target)
 
-        if version != goal:
-            msg = f"Incomplete migration from {initial_version!r} to {goal!r}"
-            raise CstarUnsupportedMigrationError(msg)
+        if _major(found) == _major(target):
+            return MigrationPlan(found, target, [])
 
-        migration_plan = MigrationPlan(initial_version, goal, adapters)
+        candidates = [k for k in self.adapter_lookup if k[0] == application]
+        adapters: list[type[SchemaAdapter]] = []
+        version = found
+
+        while _major(version) < _major(target):
+            # the newest adapter of this major that the document has reached
+            sources = [
+                source
+                for _, source in candidates
+                if _major(source) == _major(version)
+                and _version_key(source) <= _version_key(version)
+            ]
+            if not sources:
+                raise CstarManualMigrationError(application, found, target)
+
+            klass = self.adapter_lookup[(application, max(sources, key=_version_key))]
+            if _version_key(klass.target()) <= _version_key(version):
+                # the document is already past this adapter's target
+                raise CstarManualMigrationError(application, found, target)
+
+            if issubclass(klass, SchemaBreak):
+                raise CstarManualMigrationError(
+                    application, found, target, klass.guidance()
+                )
+
+            adapters.append(klass)
+            version = klass.target()
+
+        migration_plan = MigrationPlan(found, target, adapters)
         if self.on_planned_callback:
             self.on_planned_callback(migration_plan)
         return migration_plan
@@ -264,6 +329,9 @@ class BlueprintMigration(Migration):
             msg = f"Schema migration from {plan.source!r} to {plan.target!r} failed."
             raise CstarMigrationError(msg)
 
+        # the last adapter may stop at an older minor of the build's major
+        model[KEY_SV] = plan.target
+
         if self.on_migrated_callback:
             self.on_migrated_callback(plan)
 
@@ -283,32 +351,6 @@ def _version_key(version: str) -> tuple[int, ...]:
     return tuple(int(part) for part in version.split("."))
 
 
-def identify_bounds(
-    adapters: Sequence[type[SchemaAdapter]],
-) -> dict[str, SchemaBounds]:
-    """Given a collection of adapters, identify the migration boundaries (the
-    minimum and maximum versions).
-
-    Parameters
-    ----------
-    adapters : Sequence[type[SchemaAdapter]]
-        The adapters to process
-
-    Returns
-    -------
-    dict[str, SchemaBounds]
-        A lookup mapping the application name to the schema bounds.
-    """
-    app_adapters: dict[str, list[type[SchemaAdapter]]] = defaultdict(list)
-
-    for adapter in adapters:
-        app_adapters[adapter.application()].append(adapter)
-
-    schema_bounds: dict[str, SchemaBounds] = {}
-
-    for app_name, adapter_list in app_adapters.items():
-        vmin = min((x.source() for x in adapter_list), key=_version_key)
-        vmax = max((x.target() for x in adapter_list), key=_version_key)
-
-        schema_bounds[app_name] = SchemaBounds(min=vmin, max=vmax)
-    return schema_bounds
+def _major(version: str) -> int:
+    """Return the major component of a dotted-integer schema version."""
+    return _version_key(version)[0]

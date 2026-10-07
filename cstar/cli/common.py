@@ -39,7 +39,6 @@ from cstar.orchestration.serialization import (
 from cstar.system.migration import (
     BlueprintMigration,
     CstarMigrationError,
-    CStarMigrationNotRegisteredError,
     CstarUnsupportedMigrationError,
     MigrateResult,
     MigrationPlan,
@@ -355,7 +354,7 @@ def on_planned_callback(bp_path: Path, plan: MigrationPlan) -> None:
         Details of the planned migration.
     """
     if not is_flag_enabled(ENV_CSTAR_CLI_VERBOSE) or not plan.adapters:
-        if plan.is_latest:
+        if plan.is_compatible:
             msg = f"No migration needed for schema {plan.source!r} in {str(bp_path)!r}"
             console.print(msg)
             return
@@ -509,8 +508,6 @@ def execute_migration(request: MigrationRequest) -> PersistedMigrateResult:
     ------
     typer.BadParameter
         If the blueprint fails content validation.
-    CStarMigrationNotRegisteredError
-        If there are no registered migrations for the requested schema.
     typer.Exit
         If the planned migration fails to complete, or the blueprint requires
         migration but migration is disabled via `CSTAR_DISABLE_MIGRATION`.
@@ -522,14 +519,10 @@ def execute_migration(request: MigrationRequest) -> PersistedMigrateResult:
     dumped = validation_result.item.model_dump()
     app_name = validation_result.item.application
     app_def = get_application(app_name)
-    adapters = app_def.migrations or []
-
-    if not adapters:
-        msg = f"No schema adapters are registered for {app_def.name!r}"
-        raise CStarMigrationNotRegisteredError(msg)
 
     migrator = BlueprintMigration(
-        adapters=adapters,
+        adapters=app_def.migrations or [],
+        targets={app_name: app_def.schema_version},
         on_planned=functools.partial(on_planned_callback, request.source),
         on_migrated=on_migrated_callback,
     )
@@ -542,7 +535,7 @@ def execute_migration(request: MigrationRequest) -> PersistedMigrateResult:
         # result with target == source indicates no change occurred
         return PersistedMigrateResult(result, request.source)
 
-    if request.dry_run() or plan.is_latest:
+    if request.dry_run() or plan.is_compatible:
         log.debug("Short-circuiting migration after planning")
         result = MigrateResult(dumped, dumped, plan=plan)
         # result with target == source indicates no change occurred
@@ -607,8 +600,6 @@ def localize_and_migrate(path: str) -> tuple[Path, bool]:
             # new location; up-to-date and dry-run requests return the source
             is_migrated = Path(persist_result.target) != local_path
             local_path = Path(persist_result.target)
-        except CStarMigrationNotRegisteredError:
-            log.debug("Skipping schema migration; no registered adapters")
         except CstarUnsupportedMigrationError as ex:
             msg = f"Unable to migrate blueprint: {str(path)!r}"
             log.exception(msg)

@@ -39,7 +39,6 @@ from cstar.execution.file_system import (
 )
 from cstar.system.migration import (
     CstarMigrationError,
-    CStarMigrationNotRegisteredError,
     CstarUnsupportedMigrationError,
 )
 
@@ -254,10 +253,6 @@ def migrate(
         msg = f"Unable to migrate blueprint: {str(path)!r}"
         log.exception(msg)
         raise typer.Exit(1) from ex
-    except CStarMigrationNotRegisteredError as ex:
-        msg = f"No schema migrations available for {str(path)!r}"
-        log.exception(msg)
-        raise typer.Exit(0) from ex
     except CstarMigrationError as ex:
         msg = "Migration failed"
         raise typer.BadParameter(msg) from ex
@@ -266,5 +261,5 @@ def migrate(
         console.print("Migration failed to produce a plan.")
         raise typer.Exit(2)
 
-    if not result.migration_result.plan.is_latest:
+    if not result.migration_result.plan.is_compatible:
         console.print(f"Migrated blueprint persisted to {str(result.target)!r}")
