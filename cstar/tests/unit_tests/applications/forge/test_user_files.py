@@ -150,7 +150,8 @@ _LOGGER = "cstar.applications.forge.user_files"
 
 
 def _write(path, fmt):
-    _numeric_dataset().to_netcdf(path, format=fmt)
+    # netcdf4 is the only engine that writes CDF-5; xarray>=2026.9 refuses to pick one
+    _numeric_dataset().to_netcdf(path, format=fmt, engine="netcdf4")
     return path
 
 

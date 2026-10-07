@@ -6885,7 +6885,9 @@ def test_shipped_cppdefs_keys_are_referenced_by_the_bundled_template(source, cpp
 
 
 def _nc_file(path: Path, fmt: str) -> Path:
-    xr.Dataset({"v": ("x", np.arange(3.0))}).to_netcdf(path, format=fmt)
+    xr.Dataset({"v": ("x", np.arange(3.0))}).to_netcdf(
+        path, format=fmt, engine="netcdf4"
+    )
     return path
 
 

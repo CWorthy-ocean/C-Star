@@ -2067,7 +2067,7 @@ def _write_river_netcdf(
     ds = xr.Dataset(data_vars)
     if include_river_name:
         ds.coords["river_name"] = ("nriver", [f"river_{i}" for i in range(nriver)])
-    ds.to_netcdf(path, format=fmt)
+    ds.to_netcdf(path, format=fmt, engine="netcdf4")
     return path
 
 
@@ -2108,7 +2108,7 @@ def _write_cdr_netcdf(
     ds = xr.Dataset(data_vars)
     if include_release_name:
         ds.coords["release_name"] = ("ncdr", [f"release_{i}" for i in range(ncdr)])
-    ds.to_netcdf(path, format=fmt)
+    ds.to_netcdf(path, format=fmt, engine="netcdf4")
     return path
 
 
