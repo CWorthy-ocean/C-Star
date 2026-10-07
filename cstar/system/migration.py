@@ -262,30 +262,14 @@ class BlueprintMigration(Migration):
         if _major(found) == _major(target):
             return MigrationPlan(found, target, [])
 
-        candidates = [k for k in self.adapter_lookup if k[0] == application]
         adapters: list[type[SchemaAdapter]] = []
         version = found
 
         while _major(version) < _major(target):
-            # the newest adapter of this major that the document has reached
-            sources = [
-                source
-                for _, source in candidates
-                if _major(source) == _major(version)
-                and _version_key(source) <= _version_key(version)
-            ]
-            if not sources:
-                raise CstarManualMigrationError(application, found, target)
-
-            klass = self.adapter_lookup[(application, max(sources, key=_version_key))]
-            if _version_key(klass.target()) <= _version_key(version):
-                # the document is already past this adapter's target
-                raise CstarManualMigrationError(application, found, target)
-
-            if issubclass(klass, SchemaBreak):
-                raise CstarManualMigrationError(
-                    application, found, target, klass.guidance()
-                )
+            klass = self._next_adapter(application, version)
+            if klass is None or issubclass(klass, SchemaBreak):
+                guidance = self._break_guidance(application, version)
+                raise CstarManualMigrationError(application, found, target, guidance)
 
             adapters.append(klass)
             version = klass.target()
@@ -294,6 +278,40 @@ class BlueprintMigration(Migration):
         if self.on_planned_callback:
             self.on_planned_callback(migration_plan)
         return migration_plan
+
+    def _next_adapter(
+        self, application: str, version: str
+    ) -> type[SchemaAdapter] | None:
+        """Return the newest adapter of ``version``'s major that the document has
+        reached, or `None` when the document is past every adapter of its major.
+        """
+        sources = [
+            source
+            for app, source in self.adapter_lookup
+            if app == application
+            and _major(source) == _major(version)
+            and _version_key(source) <= _version_key(version)
+        ]
+        if not sources:
+            return None
+
+        klass = self.adapter_lookup[(application, max(sources, key=_version_key))]
+        if _version_key(klass.target()) <= _version_key(version):
+            return None
+        return klass
+
+    def _break_guidance(self, application: str, version: str) -> str:
+        """Return the guidance of a `SchemaBreak` registered for ``version``'s
+        major, so every older file of a retired major gets the same instructions.
+        """
+        for (app, source), klass in self.adapter_lookup.items():
+            if (
+                app == application
+                and _major(source) == _major(version)
+                and issubclass(klass, SchemaBreak)
+            ):
+                return klass.guidance()
+        return ""
 
     def migrate(
         self,

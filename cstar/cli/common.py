@@ -371,6 +371,20 @@ def schema_message(path: str | Path, ex: CstarMigrationError) -> str:
     return f"Blueprint {str(path)!r}: {ex}"
 
 
+def report_schema_error(path: str | Path, ex: CstarMigrationError) -> t.NoReturn:
+    """Print a schema-planning error with the blueprint path and exit the command.
+
+    Parameters
+    ----------
+    path : str | Path
+        The path to the blueprint that could not be planned.
+    ex : CstarMigrationError
+        The error raised by the migration planner.
+    """
+    console.print(schema_message(path, ex), soft_wrap=True, markup=False)
+    raise typer.Exit(1) from ex
+
+
 def get_migrator(
     application: str,
     on_planned: OnPlannedCallback | None = None,

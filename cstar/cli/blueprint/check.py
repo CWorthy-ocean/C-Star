@@ -3,7 +3,7 @@ import typing as t
 import typer
 
 from cstar.applications.core import get_application
-from cstar.cli.common import SCHEMA_ERRORS, get_migrator, schema_message
+from cstar.cli.common import SCHEMA_ERRORS, get_migrator, report_schema_error
 from cstar.orchestration.models import Blueprint, BlueprintCore
 from cstar.orchestration.serialization import validate_serialized_entity
 
@@ -38,8 +38,7 @@ def check(
     try:
         plan = get_migrator(application).plan(result.item.model_dump())
     except SCHEMA_ERRORS as ex:
-        print(schema_message(path, ex))
-        raise typer.Exit(1) from ex
+        report_schema_error(path, ex)
 
     if not plan.is_compatible:
         print(

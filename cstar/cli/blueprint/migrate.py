@@ -19,7 +19,7 @@ from cstar.cli.common import (
     console,
     execute_migration,
     format_validation_errors,
-    schema_message,
+    report_schema_error,
     set_env,
     set_flag,
     update_loggers,
@@ -249,14 +249,15 @@ def migrate(
     try:
         result = execute_migration(request)
     except SCHEMA_ERRORS as ex:
-        console.print(schema_message(path, ex), soft_wrap=True, markup=False)
-        raise typer.Exit(1) from ex
+        report_schema_error(path, ex)
     except CstarMigrationError as ex:
         msg = "Migration failed"
         raise typer.BadParameter(msg) from ex
 
     plan = result.migration_result.plan
-    assert plan is not None, "A migration that did not raise must have a plan"
+    if plan is None:
+        console.print(f"Blueprint {str(path)!r}: migration produced no plan.")
+        raise typer.Exit(1)
 
     if plan.is_compatible:
         app_name = result.migration_result.application

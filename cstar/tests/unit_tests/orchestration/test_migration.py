@@ -302,6 +302,23 @@ def test_plan_schema_break_refuses_with_guidance() -> None:
     migrate.assert_not_called()
 
 
+@pytest.mark.parametrize("found", ["2.0.0", "2.0.5", "2.1.0", "2.1.5"])
+def test_plan_schema_break_guides_every_file_of_its_major(found: str) -> None:
+    """Verify a break registered at the last version of a retired major guides
+    files older than that version too, not only files at or past it.
+    """
+    schema_break = _fake_adapter(
+        "2.1.0",
+        "3.0.0",
+        base=SchemaBreak,
+        guidance=classmethod(lambda cls: "move x to y"),
+    )
+    migrator = BlueprintMigration([schema_break], targets={APP_NAME: "3.0.0"})
+
+    with pytest.raises(CstarManualMigrationError, match="move x to y"):
+        migrator.plan({KEY_APP: APP_NAME, KEY_SV: found})
+
+
 def test_migrate_stamps_plan_target() -> None:
     """Verify the migrated document is written at the build's version even when
     the last adapter stops at an older minor of the same major.
