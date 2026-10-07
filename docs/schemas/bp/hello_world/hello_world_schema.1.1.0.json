@@ -1,0 +1,265 @@
+{
+    "$defs": {
+        "BlueprintRef": {
+            "additionalProperties": false,
+            "description": "A reference to a blueprint.",
+            "properties": {
+                "kind": {
+                    "const": "Blueprint",
+                    "description": "The kind of document referenced; selects the model a reference loads as.",
+                    "title": "Kind",
+                    "type": "string"
+                },
+                "application": {
+                    "description": "The application the referenced blueprint belongs to.",
+                    "minLength": 1,
+                    "title": "Application",
+                    "type": "string"
+                },
+                "name": {
+                    "description": "The name of the referenced blueprint.",
+                    "minLength": 1,
+                    "title": "Name",
+                    "type": "string"
+                },
+                "content_hash": {
+                    "default": "",
+                    "description": "A fingerprint of the referenced blueprint's configuration.",
+                    "title": "Content Hash",
+                    "type": "string"
+                }
+            },
+            "required": [
+                "kind",
+                "application",
+                "name"
+            ],
+            "title": "BlueprintRef",
+            "type": "object"
+        },
+        "BlueprintState": {
+            "description": "The allowed states for a work plan.",
+            "enum": [
+                "notset",
+                "draft",
+                "validated"
+            ],
+            "title": "BlueprintState",
+            "type": "string"
+        },
+        "CatalogSpecRef": {
+            "additionalProperties": false,
+            "description": "A reference to a catalog spec.",
+            "properties": {
+                "kind": {
+                    "description": "The kind of spec referenced.",
+                    "enum": [
+                        "ModelSpec",
+                        "DomainSpec",
+                        "ForcingSpec",
+                        "OutputSpec",
+                        "CdrSpec"
+                    ],
+                    "title": "Kind",
+                    "type": "string"
+                },
+                "name": {
+                    "description": "The name of the referenced spec.",
+                    "minLength": 1,
+                    "title": "Name",
+                    "type": "string"
+                },
+                "origin": {
+                    "default": "",
+                    "description": "Where the spec came from, e.g. `catalog`, `custom` or `model_default`; empty when unknown.",
+                    "title": "Origin",
+                    "type": "string"
+                },
+                "modified": {
+                    "default": false,
+                    "description": "Whether the spec was edited after it was selected.",
+                    "title": "Modified",
+                    "type": "boolean"
+                }
+            },
+            "required": [
+                "kind",
+                "name"
+            ],
+            "title": "CatalogSpecRef",
+            "type": "object"
+        },
+        "GeneratedBy": {
+            "additionalProperties": false,
+            "description": "The event that produced a document.",
+            "properties": {
+                "tool": {
+                    "description": "The producer: an application such as `forge`, or another C-Star tool such\nas `wizard`. Not validated against the application registry, as not every\nproducer is an application.",
+                    "minLength": 1,
+                    "title": "Tool",
+                    "type": "string"
+                },
+                "id": {
+                    "description": "Identifies this event, so a copied or edited document still says where it\ncame from. A uuid4 minted when the model is created and never recomputed: a\nvalue loaded from a file is kept.",
+                    "minLength": 1,
+                    "title": "Id",
+                    "type": "string"
+                },
+                "system": {
+                    "default": "",
+                    "description": "The C-Star system the producer ran on; empty if unknown.",
+                    "title": "System",
+                    "type": "string"
+                },
+                "versions": {
+                    "additionalProperties": {
+                        "type": "string"
+                    },
+                    "description": "The versions of the packages involved, keyed by package name.",
+                    "title": "Versions",
+                    "type": "object"
+                },
+                "run_id": {
+                    "default": "",
+                    "description": "The workplan run id, when a workplan step produced the document.",
+                    "title": "Run Id",
+                    "type": "string"
+                },
+                "working_dir": {
+                    "default": "",
+                    "description": "Where the producer wrote its artifacts; informational, as artifacts can\nmove.",
+                    "title": "Working Dir",
+                    "type": "string"
+                }
+            },
+            "required": [
+                "tool"
+            ],
+            "title": "GeneratedBy",
+            "type": "object"
+        },
+        "Provenance": {
+            "additionalProperties": false,
+            "description": "Records what produced a document and what it was derived from.\n\nApplications may subclass it to add application-specific fields.",
+            "properties": {
+                "generated_at": {
+                    "anyOf": [
+                        {
+                            "format": "date-time",
+                            "type": "string"
+                        },
+                        {
+                            "type": "null"
+                        }
+                    ],
+                    "default": null,
+                    "description": "When the document was generated.",
+                    "title": "Generated At"
+                },
+                "generated_by": {
+                    "anyOf": [
+                        {
+                            "$ref": "#/$defs/GeneratedBy"
+                        },
+                        {
+                            "type": "null"
+                        }
+                    ],
+                    "default": null,
+                    "description": "The event that produced the document."
+                },
+                "derived_from": {
+                    "description": "The blueprints and catalog specs the document was derived from.",
+                    "items": {
+                        "discriminator": {
+                            "mapping": {
+                                "Blueprint": "#/$defs/BlueprintRef",
+                                "CdrSpec": "#/$defs/CatalogSpecRef",
+                                "DomainSpec": "#/$defs/CatalogSpecRef",
+                                "ForcingSpec": "#/$defs/CatalogSpecRef",
+                                "ModelSpec": "#/$defs/CatalogSpecRef",
+                                "OutputSpec": "#/$defs/CatalogSpecRef"
+                            },
+                            "propertyName": "kind"
+                        },
+                        "oneOf": [
+                            {
+                                "$ref": "#/$defs/BlueprintRef"
+                            },
+                            {
+                                "$ref": "#/$defs/CatalogSpecRef"
+                            }
+                        ]
+                    },
+                    "title": "Derived From",
+                    "type": "array"
+                }
+            },
+            "title": "Provenance",
+            "type": "object"
+        }
+    },
+    "additionalProperties": false,
+    "description": "A simple blueprint demonstrating the integration of a Blueprint and it's\nrunner application.",
+    "properties": {
+        "name": {
+            "description": "A unique, user-friendly name for this blueprint.",
+            "minLength": 1,
+            "title": "Name",
+            "type": "string"
+        },
+        "description": {
+            "description": "A user-friendly description of the scenario to be executed by the blueprint.",
+            "minLength": 1,
+            "title": "Description",
+            "type": "string"
+        },
+        "application": {
+            "default": "hello_world",
+            "description": "The application identifier.",
+            "title": "Application",
+            "type": "string"
+        },
+        "state": {
+            "$ref": "#/$defs/BlueprintState",
+            "default": "notset",
+            "description": "The current validation status of the blueprint."
+        },
+        "schema_version": {
+            "default": "1.1.0",
+            "description": "The schema version for the document.",
+            "title": "Schema Version",
+            "type": "string"
+        },
+        "working_dir": {
+            "anyOf": [
+                {
+                    "format": "path",
+                    "type": "string"
+                },
+                {
+                    "type": "null"
+                }
+            ],
+            "default": null,
+            "description": "Directory the application writes to; omitted, C-Star uses ``CSTAR_DATA_HOME/blueprint_runs/<application>/<name>``.",
+            "title": "Working Dir"
+        },
+        "provenance": {
+            "$ref": "#/$defs/Provenance",
+            "description": "What produced this blueprint and what it was derived from; empty when not recorded."
+        },
+        "target": {
+            "description": "The person to say hello to.",
+            "title": "Target",
+            "type": "string"
+        }
+    },
+    "required": [
+        "name",
+        "description",
+        "target"
+    ],
+    "title": "HelloWorldBlueprint",
+    "type": "object"
+}

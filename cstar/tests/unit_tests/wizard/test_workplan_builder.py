@@ -27,7 +27,7 @@ _BP_TEMPLATE = (
     / "templates"
     / "bp"
     / "roms_marbl"
-    / "blueprint.3.0.0.yaml"
+    / "blueprint.3.1.0.yaml"
 )
 _FORGE_BP = "wio-toy-simple"
 

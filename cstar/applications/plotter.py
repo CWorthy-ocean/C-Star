@@ -43,7 +43,7 @@ class PlotterBlueprint(Blueprint):
     """The path to the grid file matching the outputs."""
     file_glob: str = "*rst*.nc"
     """The glob pattern to match the file names to open for plotting."""
-    schema_version: str = "2.0.0"
+    schema_version: str = "2.1.0"
     """The current schema version for this blueprint."""
 
     @field_validator("input_dir", "grid_file_path", mode="after")

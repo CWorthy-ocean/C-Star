@@ -330,7 +330,7 @@ class Blueprint(ConfiguredBaseModel, ABC):
     state: BlueprintState = BlueprintState.NotSet
     """The current validation status of the blueprint."""
 
-    schema_version: str = "1.0.0"
+    schema_version: str = "1.1.0"
     """The schema version for the document."""
 
     working_dir: TargetDirectoryPath | None = Field(default=None)

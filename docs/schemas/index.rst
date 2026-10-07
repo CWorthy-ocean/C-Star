@@ -27,6 +27,7 @@ executes a ROMS simulation.
 - :download:`ROMS-MARBL Blueprint Schema v2.0.0 <https://raw.githubusercontent.com/CWorthy-ocean/C-Star/refs/heads/main/docs/schemas/bp/roms_marbl/roms_marbl_schema.2.0.0.json>`
 - :download:`ROMS-MARBL Blueprint Schema v2.1.0 <https://raw.githubusercontent.com/CWorthy-ocean/C-Star/refs/heads/main/docs/schemas/bp/roms_marbl/roms_marbl_schema.2.1.0.json>`
 - :download:`ROMS-MARBL Blueprint Schema v3.0.0 <https://raw.githubusercontent.com/CWorthy-ocean/C-Star/refs/heads/main/docs/schemas/bp/roms_marbl/roms_marbl_schema.3.0.0.json>`
+- :download:`ROMS-MARBL Blueprint Schema v3.1.0 <https://raw.githubusercontent.com/CWorthy-ocean/C-Star/refs/heads/main/docs/schemas/bp/roms_marbl/roms_marbl_schema.3.1.0.json>`
 
 
 Hello World Blueprint
@@ -36,6 +37,7 @@ The `hello_world` blueprint is an example starting point for creating and
 running custom applications with user-provided blueprints.
 
 - :download:`Hello World Blueprint Schema v1.0.0 <https://raw.githubusercontent.com/CWorthy-ocean/C-Star/refs/heads/main/docs/schemas/bp/hello_world/hello_world_schema.1.0.0.json>`
+- :download:`Hello World Blueprint Schema v1.1.0 <https://raw.githubusercontent.com/CWorthy-ocean/C-Star/refs/heads/main/docs/schemas/bp/hello_world/hello_world_schema.1.1.0.json>`
 
 
 Plotter Blueprint
@@ -46,6 +48,8 @@ running a custom application with user-provided blueprints.
 
 
 - :download:`Plotter Blueprint Schema v1.0.0 <https://raw.githubusercontent.com/CWorthy-ocean/C-Star/refs/heads/main/docs/schemas/bp/plotter/plotter_schema.1.0.0.json>`
+- :download:`Plotter Blueprint Schema v2.0.0 <https://raw.githubusercontent.com/CWorthy-ocean/C-Star/refs/heads/main/docs/schemas/bp/plotter/plotter_schema.2.0.0.json>`
+- :download:`Plotter Blueprint Schema v2.1.0 <https://raw.githubusercontent.com/CWorthy-ocean/C-Star/refs/heads/main/docs/schemas/bp/plotter/plotter_schema.2.1.0.json>`
 
 
 Forge Blueprint

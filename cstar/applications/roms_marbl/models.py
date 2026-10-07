@@ -258,7 +258,7 @@ class PartitioningParameterSet(ParameterSet):
 class RomsMarblBlueprint(Blueprint):
     """Blueprint schema for running a ROMS-MARBL simulation."""
 
-    schema_version: str = "3.0.0"
+    schema_version: str = "3.1.0"
     """The blueprint schema version."""
 
     application: str = APP_NAME
