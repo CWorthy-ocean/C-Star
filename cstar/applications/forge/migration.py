@@ -19,6 +19,7 @@ import warnings
 from typing import Any
 
 from cstar.applications.forge.blueprint import (
+    _COMPOSITION_SPEC_KINDS,
     FORGE_BLUEPRINT_VERSION,
     BgcSourceItem,
     BoundaryForcing,
@@ -88,10 +89,11 @@ def migrate_forge_blueprint_data(data: dict[str, Any] | None) -> dict[str, Any]:
     defaults (:data:`LEGACY_DEFAULT_WORKING_ROOTS`, bare or followed by the
     sanitized run name), so the blueprint runs under C-Star's default working
     directory; any other value is left untouched.
-    **v9 -> v10**: no-op beyond the version bump -- ``provenance`` gains
-    ``generated_by`` and ``derived_from`` (both optional, defaulting to unset/empty)
-    and keeps the legacy ``forge_version``/``cstar_version``/``roms_tools_version``,
-    so a v9 file already validates against the v10 schema unchanged. The bump is
+    **v9 -> v10**: a composition spec authored by hand was recorded as
+    ``name: null``; it becomes ``""`` (``SpecRef.name`` is now a plain string).
+    ``provenance`` gains ``generated_by`` and ``derived_from`` (both optional,
+    defaulting to unset/empty) and keeps the legacy
+    ``forge_version``/``cstar_version``/``roms_tools_version``. The bump is also
     what makes an older install reject a newer file with the "upgrade" message
     rather than an unknown-key error.
 
@@ -189,6 +191,15 @@ def migrate_forge_blueprint_data(data: dict[str, Any] | None) -> dict[str, Any]:
                 }
             if working_dir.rstrip("/") in legacy_defaults:
                 del data["working_dir"]
+
+    if version is None or version < 10:
+        # raw data only: direct construction passes an already-built Composition
+        composition = data.get("composition")
+        if isinstance(composition, dict):
+            for field in _COMPOSITION_SPEC_KINDS:
+                spec = composition.get(field)
+                if isinstance(spec, dict) and spec.get("name") is None:
+                    spec["name"] = ""
 
     data["forge_blueprint_version"] = FORGE_BLUEPRINT_VERSION
     return data

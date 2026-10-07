@@ -36,6 +36,7 @@ from cstar.applications.forge.blueprint import (
     producer_ref,
 )
 from cstar.applications.forge.input_data import netcdf_basename
+from cstar.applications.forge.migration import migrate_forge_blueprint_data
 from cstar.applications.forge.resolve import (
     _warn_user_files_need_pio_conversion,
     build_forge_blueprint,
@@ -7046,10 +7047,28 @@ class TestCompositionRefs:
             ("OutputSpec", "standard", "model_default", False),
         ]
 
+    def test_a_null_name_from_an_older_file_migrates_to_empty(self):
+        """A v9 file recorded a hand-authored spec as ``name: null``; the v10
+        migration makes it the empty string ``SpecRef.name`` now requires.
+        """
+        data = {
+            "forge_blueprint_version": 9,
+            "composition": {
+                "cdr": {"name": None, "origin": "custom", "modified": False},
+                "overrides": {"name": None},
+            },
+        }
+
+        migrate_forge_blueprint_data(data)
+
+        assert data["composition"]["cdr"]["name"] == ""
+        # only the spec slots are touched
+        assert data["composition"]["overrides"] == {"name": None}
+
     def test_a_spec_without_a_name_has_no_ref(self):
         composition = Composition(
             model=SpecRef(name="roms-marbl-0.8-default", origin="catalog"),
-            forcing=SpecRef(name=None),
+            forcing=SpecRef(),
             cdr=SpecRef(name=""),
             output=SpecRef(name="standard", origin="catalog"),
         )
@@ -7060,7 +7079,7 @@ class TestCompositionRefs:
         ]
         assert composition_refs(Composition()) == []
 
-    @pytest.mark.parametrize("name", [None, "", "   "])
+    @pytest.mark.parametrize("name", ["", "   "])
     def test_a_blank_name_has_no_ref(self, name):
         """A hand-edited name that is only whitespace is no name: it is skipped."""
         composition = Composition(

@@ -280,20 +280,32 @@ class BlueprintIdentity(ConfiguredBaseModel):
     """A fingerprint of the referenced blueprint's configuration."""
 
 
-class CatalogSpecRef(ConfiguredBaseModel):
-    """A reference to a catalog spec."""
+class SpecSelection(ConfiguredBaseModel):
+    """Records a composable spec by name and where it came from.
 
-    kind: CatalogSpecKind
-    """The kind of spec referenced."""
+    Applications that compose a run from catalog specs extend this for their
+    own records (forge's `SpecRef`); `CatalogSpecRef` is the cross-application
+    form a derived document cites.
+    """
 
-    name: RequiredString
-    """The name of the referenced spec."""
+    name: str = Field(default="")
+    """The catalog entry name; empty for a spec authored from scratch."""
 
     origin: str = Field(default="")
     """Where the spec came from, e.g. `catalog`, `custom` or `model_default`; empty when unknown."""
 
     modified: bool = Field(default=False)
     """Whether the spec was edited after it was selected."""
+
+
+class CatalogSpecRef(SpecSelection):
+    """A reference to a catalog spec a document was derived from."""
+
+    kind: CatalogSpecKind
+    """The kind of spec referenced."""
+
+    name: RequiredString
+    """The name of the referenced spec."""
 
 
 ProvenanceRef: t.TypeAlias = t.Annotated[

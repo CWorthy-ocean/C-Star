@@ -1187,9 +1187,9 @@ def build_forge_blueprint(
             # "model_default" fallback); a caller not tracking finer-grained
             # catalog/custom provenance (e.g. direct/test callers -- the wizard
             # builds its own Composition via _composition()) gets "custom".
-            forcing=SpecRef(name=None, origin="custom"),
-            cdr=SpecRef(name=None, origin="custom"),
-            output=SpecRef(name=None, origin="custom"),
+            forcing=SpecRef(),
+            cdr=SpecRef(),
+            output=SpecRef(),
         ),
         provenance=provenance if provenance is not None else ForgeProvenance(),
     )

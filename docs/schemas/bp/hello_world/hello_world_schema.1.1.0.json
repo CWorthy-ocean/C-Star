@@ -49,20 +49,8 @@
         },
         "CatalogSpecRef": {
             "additionalProperties": false,
-            "description": "A reference to a catalog spec.",
+            "description": "A reference to a catalog spec a document was derived from.",
             "properties": {
-                "kind": {
-                    "description": "The kind of spec referenced.",
-                    "enum": [
-                        "ModelSpec",
-                        "DomainSpec",
-                        "ForcingSpec",
-                        "OutputSpec",
-                        "CdrSpec"
-                    ],
-                    "title": "Kind",
-                    "type": "string"
-                },
                 "name": {
                     "description": "The name of the referenced spec.",
                     "minLength": 1,
@@ -80,11 +68,23 @@
                     "description": "Whether the spec was edited after it was selected.",
                     "title": "Modified",
                     "type": "boolean"
+                },
+                "kind": {
+                    "description": "The kind of spec referenced.",
+                    "enum": [
+                        "ModelSpec",
+                        "DomainSpec",
+                        "ForcingSpec",
+                        "OutputSpec",
+                        "CdrSpec"
+                    ],
+                    "title": "Kind",
+                    "type": "string"
                 }
             },
             "required": [
-                "kind",
-                "name"
+                "name",
+                "kind"
             ],
             "title": "CatalogSpecRef",
             "type": "object"

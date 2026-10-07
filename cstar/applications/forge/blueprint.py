@@ -79,6 +79,7 @@ from cstar.orchestration.models import (
     CatalogSpecRef,
     GeneratedBy,
     Provenance,
+    SpecSelection,
 )
 
 if TYPE_CHECKING:
@@ -493,15 +494,12 @@ _COMPOSITION_SPEC_KINDS: dict[str, CatalogSpecKind] = {
 def composition_refs(composition: Composition) -> list[CatalogSpecRef]:
     """Return a reference to each catalog spec ``composition`` records by name.
 
-    A spec with no name (``None``, empty or only whitespace, as a hand-edited file
-    may hold) was authored from scratch, so has nothing to reference.
+    A spec with no name was authored from scratch, so has nothing to reference.
     """
     return [
-        CatalogSpecRef(
-            kind=kind, name=spec.name, origin=spec.origin, modified=spec.modified
-        )
+        CatalogSpecRef(kind=kind, **spec.model_dump())
         for field, kind in _COMPOSITION_SPEC_KINDS.items()
-        if ((spec := getattr(composition, field)).name or "").strip()
+        if (spec := getattr(composition, field)).name
     ]
 
 
@@ -1355,17 +1353,17 @@ class Code(_Section):
 # ===========================================================================
 # Composition (which catalog specs produced this config) & provenance
 # ===========================================================================
-class SpecRef(_Section):
+class SpecRef(SpecSelection):
     """Records where one composable spec (model / domain / forcing) came from.
 
     Supports the "pick from a catalog or build your own" workflow: a UI can show,
     for each spec, whether it was a catalog selection (and which one), whether the
-    user edited it, or whether it was authored from scratch.
+    user edited it, or whether it was authored from scratch. The fields are the
+    shared :class:`~cstar.orchestration.models.SpecSelection`; only the default
+    origin differs, since an unrecorded spec was authored by hand.
     """
 
-    name: str | None = None  # catalog entry name, or None if authored from scratch
-    origin: str = "custom"  # "catalog" | "custom" | "model_default"
-    modified: bool = False  # True if a catalog spec was edited after selection
+    origin: str = Field(default="custom")  # "catalog" | "custom" | "model_default"
 
 
 class Composition(_Section):

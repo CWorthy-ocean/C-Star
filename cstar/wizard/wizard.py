@@ -5470,7 +5470,7 @@ class ForgeBlueprintWizard:
         cdr = (
             SpecRef(name=self.cdr_dd.value, origin="catalog")
             if self.cdr_dd.value != "<custom>"
-            else SpecRef(name=None, origin="custom")
+            else SpecRef()
         )
         return Composition(
             model=SpecRef(name=self.model_dd.value, origin="catalog"),

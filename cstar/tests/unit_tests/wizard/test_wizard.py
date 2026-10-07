@@ -1750,7 +1750,7 @@ def test_composition_cdr_specref_provenance(tmp_path):
     from cstar.catalog.domain_catalog import _DEFAULT_CATALOG_ROOT, DomainCatalog
 
     wiz = ForgeBlueprintWizard()
-    assert wiz.config.composition.cdr.name is None
+    assert wiz.config.composition.cdr.name == ""
     assert wiz.config.composition.cdr.origin == "custom"
     assert wiz.config.composition.cdr.modified is False
 
