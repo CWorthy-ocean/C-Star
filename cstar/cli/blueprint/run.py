@@ -21,9 +21,11 @@ from cstar.base.env import (
 from cstar.base.exceptions import CstarError
 from cstar.base.log import LogLevelChoices, get_logger
 from cstar.cli.common import (
+    SCHEMA_ERRORS,
     cb_pipeline,
     format_validation_errors,
     localize_and_migrate,
+    schema_message,
     set_env,
     set_flag,
     update_loggers,
@@ -118,6 +120,9 @@ def path_callback(
     try:
         localized_path, _ = localize_and_migrate(path)
         return str(localized_path)
+    except SCHEMA_ERRORS as ex:
+        print(schema_message(path, ex))
+        raise typer.Exit(1) from ex
     except FileNotFoundError as ex:
         msg = f"Blueprint file not found: {ex.filename}"
         raise typer.BadParameter(msg) from ex

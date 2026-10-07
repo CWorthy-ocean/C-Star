@@ -38,11 +38,15 @@ from cstar.orchestration.serialization import (
 )
 from cstar.system.migration import (
     BlueprintMigration,
+    CstarManualMigrationError,
     CstarMigrationError,
+    CstarSchemaTooNewError,
     CstarUnsupportedMigrationError,
     MigrateResult,
     MigrationPlan,
     MigrationRequest,
+    OnMigratedCallback,
+    OnPlannedCallback,
 )
 
 app = typer.Typer()
@@ -54,6 +58,13 @@ HELP_SHORT = (
     "of installed companion packages, then exit."
 )
 
+
+SCHEMA_ERRORS: t.Final[tuple[type[CstarMigrationError], ...]] = (
+    CstarSchemaTooNewError,
+    CstarManualMigrationError,
+    CstarUnsupportedMigrationError,
+)
+"""Errors raised while planning a migration that no CLI command can recover from."""
 
 BoolCallback: t.TypeAlias = Callable[[typer.Context, bool], bool]
 StrCallback: t.TypeAlias = Callable[[typer.Context, str], str]
@@ -343,8 +354,56 @@ class PersistedMigrateResult(t.NamedTuple):
     target: str | Path
 
 
+def schema_message(path: str | Path, ex: CstarMigrationError) -> str:
+    """Format a schema-planning error for display, prefixed with the blueprint path.
+
+    Parameters
+    ----------
+    path : str | Path
+        The path to the blueprint that could not be planned.
+    ex : CstarMigrationError
+        The error raised by the migration planner.
+
+    Returns
+    -------
+    str
+    """
+    return f"Blueprint {str(path)!r}: {ex}"
+
+
+def get_migrator(
+    application: str,
+    on_planned: OnPlannedCallback | None = None,
+    on_migrated: OnMigratedCallback | None = None,
+) -> BlueprintMigration:
+    """Build the migrator for an application's blueprints.
+
+    Parameters
+    ----------
+    application : str
+        The name of the application the blueprint belongs to.
+    on_planned : OnPlannedCallback | None
+        Callback executed when a migration plan is complete.
+    on_migrated : OnMigratedCallback | None
+        Callback executed when a migration is complete.
+
+    Returns
+    -------
+    BlueprintMigration
+    """
+    app_def = get_application(application)
+    return BlueprintMigration(
+        adapters=app_def.migrations or [],
+        targets={application: app_def.schema_version},
+        on_planned=on_planned,
+        on_migrated=on_migrated,
+    )
+
+
 def on_planned_callback(bp_path: Path, plan: MigrationPlan) -> None:
-    """Display a summary of the migration plan.
+    """Display a summary of a migration plan.
+
+    Only called for plans that require adapters.
 
     Parameters
     ----------
@@ -353,12 +412,7 @@ def on_planned_callback(bp_path: Path, plan: MigrationPlan) -> None:
     plan : MigrationPlan
         Details of the planned migration.
     """
-    if not is_flag_enabled(ENV_CSTAR_CLI_VERBOSE) or not plan.adapters:
-        if plan.is_compatible:
-            msg = f"No migration needed for schema {plan.source!r} in {str(bp_path)!r}"
-            console.print(msg)
-            return
-
+    if not is_flag_enabled(ENV_CSTAR_CLI_VERBOSE):
         num_steps = len(plan.adapters)
         msg = f"Migrating {plan.source!r}->{plan.target!r} in {num_steps} step(s)."
         console.print(msg)
@@ -511,29 +565,25 @@ def execute_migration(request: MigrationRequest) -> PersistedMigrateResult:
     typer.Exit
         If the planned migration fails to complete, or the blueprint requires
         migration but migration is disabled via `CSTAR_DISABLE_MIGRATION`.
+    CstarSchemaTooNewError
+        If the blueprint's schema is newer than this build reads.
+    CstarManualMigrationError
+        If the blueprint's schema has no automatic migration to this build's.
+    CstarUnsupportedMigrationError
+        If the application or the schema version is not recognized.
     """
     validation_result = validate_serialized_entity(request.source, BlueprintCore)
     if validation_result.item is None:
         raise typer.BadParameter(validation_result.error_msg)
 
     dumped = validation_result.item.model_dump()
-    app_name = validation_result.item.application
-    app_def = get_application(app_name)
-
-    migrator = BlueprintMigration(
-        adapters=app_def.migrations or [],
-        targets={app_name: app_def.schema_version},
+    migrator = get_migrator(
+        validation_result.item.application,
         on_planned=functools.partial(on_planned_callback, request.source),
         on_migrated=on_migrated_callback,
     )
 
-    try:
-        plan = migrator.plan(dumped)
-    except CstarUnsupportedMigrationError as ex:
-        msg = f"Unable to plan migration: {ex}"
-        result = MigrateResult(dumped, {}, error=msg)
-        # result with target == source indicates no change occurred
-        return PersistedMigrateResult(result, request.source)
+    plan = migrator.plan(dumped)
 
     if request.dry_run() or plan.is_compatible:
         log.debug("Short-circuiting migration after planning")
@@ -582,8 +632,19 @@ def localize_and_migrate(path: str) -> tuple[Path, bool]:
         - Path to the localized blueprint (the migrated copy when one was created)
         - True if the blueprint was migrated and persisted to a new location,
           meaning references to the original path must be updated. False when
-          the blueprint was left untouched (already up-to-date, dry-run, or no
-          adapters registered for its application).
+          the blueprint was left untouched (compatible with this build, or
+          dry-run).
+
+    Raises
+    ------
+    CstarSchemaTooNewError
+        If the blueprint's schema is newer than this build reads.
+    CstarManualMigrationError
+        If the blueprint's schema has no automatic migration to this build's.
+    CstarUnsupportedMigrationError
+        If the application or the schema version is not recognized.
+    typer.BadParameter
+        If executing a planned migration fails.
     """
     with local_copy(path) as local_path:
         request = MigrationRequest(path=local_path)
@@ -600,10 +661,9 @@ def localize_and_migrate(path: str) -> tuple[Path, bool]:
             # new location; up-to-date and dry-run requests return the source
             is_migrated = Path(persist_result.target) != local_path
             local_path = Path(persist_result.target)
-        except CstarUnsupportedMigrationError as ex:
-            msg = f"Unable to migrate blueprint: {str(path)!r}"
-            log.exception(msg)
-            raise typer.Exit(1) from ex
+        except SCHEMA_ERRORS:
+            # the caller reports these with the blueprint path
+            raise
         except CstarMigrationError as ex:
             msg = f"Migration failed for {path!r}"
             log.exception(msg)

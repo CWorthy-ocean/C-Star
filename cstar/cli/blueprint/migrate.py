@@ -13,11 +13,13 @@ from cstar.base.env import (
 from cstar.base.feature import is_flag_enabled
 from cstar.base.log import LogLevelChoices, get_logger
 from cstar.cli.common import (
+    SCHEMA_ERRORS,
     MigrationRequest,
     cb_pipeline,
     console,
     execute_migration,
     format_validation_errors,
+    schema_message,
     set_env,
     set_flag,
     update_loggers,
@@ -37,10 +39,7 @@ from cstar.execution.file_system import (
     is_remote_resource,
     write_local_copy,
 )
-from cstar.system.migration import (
-    CstarMigrationError,
-    CstarUnsupportedMigrationError,
-)
+from cstar.system.migration import CstarMigrationError
 
 app = typer.Typer()
 log = get_logger(__name__)
@@ -249,17 +248,27 @@ def migrate(
 
     try:
         result = execute_migration(request)
-    except CstarUnsupportedMigrationError as ex:
-        msg = f"Unable to migrate blueprint: {str(path)!r}"
-        log.exception(msg)
+    except SCHEMA_ERRORS as ex:
+        console.print(schema_message(path, ex), soft_wrap=True, markup=False)
         raise typer.Exit(1) from ex
     except CstarMigrationError as ex:
         msg = "Migration failed"
         raise typer.BadParameter(msg) from ex
 
-    if not result.migration_result.plan:
-        console.print("Migration failed to produce a plan.")
-        raise typer.Exit(2)
+    plan = result.migration_result.plan
+    assert plan is not None, "A migration that did not raise must have a plan"
 
-    if not result.migration_result.plan.is_compatible:
-        console.print(f"Migrated blueprint persisted to {str(result.target)!r}")
+    if plan.is_compatible:
+        app_name = result.migration_result.application
+        msg = (
+            f"Blueprint {str(path)!r} is {app_name} schema {plan.source}, "
+            f"compatible with this build ({plan.target}); nothing to migrate."
+        )
+        console.print(msg, soft_wrap=True, markup=False)
+        return
+
+    # a dry run has already shown the plan and persisted nothing
+    if request.dry_run():
+        return
+
+    console.print(f"Migrated blueprint persisted to {str(result.target)!r}")

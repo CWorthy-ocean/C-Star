@@ -17,11 +17,13 @@ from cstar.base.feature import is_flag_enabled
 from cstar.base.log import LogLevelChoices, get_logger
 from cstar.base.utils import slugify
 from cstar.cli.common import (
+    SCHEMA_ERRORS,
     cb_pipeline,
     format_validation_errors,
     localize_and_migrate,
     normalize_runid,
     present,
+    schema_message,
     set_env,
     update_loggers,
 )
@@ -371,29 +373,46 @@ def auto_compose(path: str) -> str:
 def migrate_steps(path: Path, workplan: Workplan):
     """Perform automatic migration of the blueprints referenced by a workplan.
 
+    Every step is checked before the command exits, so all blueprints with an
+    unsupported schema are reported together. The workplan is only rewritten
+    when every step succeeded.
+
     Parameters
     ----------
     path : Path
         The path where the updated workplan will be persisted.
     workplan : Workplan
         The workplan to perform migrations on.
+
+    Raises
+    ------
+    typer.Exit
+        If any blueprint's schema is newer than this build reads or has no
+        automatic migration.
     """
     is_updated = False
+    failures: list[str] = []
     for step in workplan.steps:
         if not isinstance(step.blueprint_path, (Path, str)):
             continue
 
+        bp_path = str(step.blueprint_path)
         try:
-            step.blueprint_path, modified = localize_and_migrate(
-                str(step.blueprint_path),
-            )
+            step.blueprint_path, modified = localize_and_migrate(bp_path)
             if modified:
                 is_updated = True
+        except SCHEMA_ERRORS as ex:
+            failures.append(schema_message(bp_path, ex))
         except ValidationError as ex:
             errors = format_validation_errors(ex)
-            bp_path = str(step.blueprint_path)
             msg = f"Blueprint {bp_path!r} is invalid. Details: {errors}"
             raise typer.BadParameter(msg) from ex
+
+    if failures:
+        for failure in failures:
+            console.print(failure, soft_wrap=True, markup=False)
+        raise typer.Exit(1)
+
     if is_updated:
         log.info("Updating workplan with migrated blueprints")
         serialize(path, workplan)

@@ -151,21 +151,53 @@ def test_blueprint_migrate_disabled(
 
 
 def test_blueprint_migrate_unnecessary(hello_world_bp_path: Path) -> None:
-    """Verify that the user is informed that no migration is necessary
-    when a blueprint has the latest schema version.
+    """Verify that the user is informed that nothing needs to migrate when a
+    blueprint is compatible with this build, and that nothing is written.
     """
     latest = get_application(APP_HELLO_WORLD).schema_version
-
-    bp_path = hello_world_bp_path
+    state_dir = Path(str(os.getenv(ENV_CSTAR_STATE_HOME, "")))
+    before = set(state_dir.glob("*"))
 
     runner = CliRunner()
     result = runner.invoke(
         app,
-        [bp_path.as_posix()],
+        [hello_world_bp_path.as_posix()],
         color=False,
     )
-    assert "No migration needed" in result.stdout
-    assert latest in result.stdout
+
+    assert result.exit_code == 0
+    output = " ".join(result.stdout.split())
+    assert f"is {APP_HELLO_WORLD} schema {latest}" in output
+    assert f"compatible with this build ({latest}); nothing to migrate." in output
+    assert "persisted" not in output
+    assert set(state_dir.glob("*")) == before
+
+
+@pytest.mark.parametrize("flag", ["--inplace", ARG_DRY_RUN])
+def test_blueprint_migrate_compatible_untouched(
+    hello_world_bp_path: Path,
+    flag: str,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Verify that migrating a compatible blueprint in place or as a dry-run
+    leaves the file byte-identical and writes no backup.
+    """
+    # the dry-run flag sets an environment variable; restore it afterwards
+    monkeypatch.delenv(ENV_CSTAR_CLI_DRY_RUN, raising=False)
+    original = hello_world_bp_path.read_bytes()
+    siblings = set(hello_world_bp_path.parent.glob("*"))
+
+    runner = CliRunner()
+    result = runner.invoke(
+        app,
+        [hello_world_bp_path.as_posix(), flag],
+        color=False,
+    )
+
+    assert result.exit_code == 0
+    assert "nothing to migrate" in " ".join(result.stdout.split())
+    assert hello_world_bp_path.read_bytes() == original
+    assert set(hello_world_bp_path.parent.glob("*")) == siblings
 
 
 def test_blueprint_migrate_custom_output(
@@ -574,8 +606,8 @@ def test_blueprint_migrate_unplannable(
     tmp_path: Path,
     plotter_v1_0_0_bp: Path,
 ) -> None:
-    """Verify that a blueprint whose schema version has no migration path
-    reports the failure to produce a plan and exits with code 2.
+    """Verify that a blueprint newer than this build reads is refused with the
+    planner's upgrade message, prefixed with the path, and exits with code 1.
     """
     model = json.loads(plotter_v1_0_0_bp.read_text())
     model["schema_version"] = "9.9.9"
@@ -590,5 +622,30 @@ def test_blueprint_migrate_unplannable(
         color=False,
     )
 
-    assert result.exit_code == 2
-    assert "Migration failed to produce a plan." in result.stdout
+    latest = get_application(APP_PLOTTER).schema_version
+    assert result.exit_code == 1
+    assert (
+        f"Blueprint {bp_path.as_posix()!r}: {APP_PLOTTER} schema 9.9.9 is newer "
+        f"than this build of cstar-ocean reads ({latest}). "
+        "Upgrade cstar-ocean to read this file."
+    ) in " ".join(result.stdout.split())
+
+
+def test_blueprint_migrate_manual(
+    tmp_path: Path,
+    plotter_v1_0_0_bp: Path,
+) -> None:
+    """Verify that a major version with no automatic migration is refused."""
+    model = json.loads(plotter_v1_0_0_bp.read_text())
+    model["schema_version"] = "0.5.0"
+
+    bp_path = tmp_path / "plotter_0.5.0.json"
+    bp_path.write_text(json.dumps(model))
+
+    runner = CliRunner()
+    result = runner.invoke(app, [bp_path.as_posix()], color=False)
+
+    assert result.exit_code == 1
+    output = " ".join(result.stdout.split())
+    assert f"Blueprint {bp_path.as_posix()!r}: " in output
+    assert "has no automatic migration" in output
