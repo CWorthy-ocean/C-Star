@@ -151,6 +151,7 @@ Bug Fixes
 - ``cstar blueprint migrate --dry-run`` printed "Migrated blueprint persisted to" naming the source file although nothing was written. (`#747 <https://github.com/CWorthy-ocean/C-Star/pull/747>`_)
 - Forge silently dropped a CDR output section that the pinned ucla-roms release cannot write, even when that section was turned on; it now raises an error naming the section. (`#748 <https://github.com/CWorthy-ocean/C-Star/pull/748>`_)
 - Saving a loaded forge blueprint in the wizard no longer discards its provenance (its original timestamp, notes and versions were replaced on every save). (`#745 <https://github.com/CWorthy-ocean/C-Star/pull/745>`_)
+- A step with a local ``max_walltime`` (or ``force_kill_timeout``) failed within a fraction of a second with exit code 127 on a machine without GNU ``timeout``, reporting only "Dependency of step … failed"; ``gtimeout`` from Homebrew coreutils is now accepted too. (`#749 <https://github.com/CWorthy-ocean/C-Star/pull/749>`_)
 
 Improvements
 ~~~~~~~~~~~~
@@ -190,6 +191,8 @@ Improvements
 - ``execute_migration`` and ``localize_and_migrate`` raise ``CstarSchemaTooNewError``, ``CstarManualMigrationError`` or ``CstarUnsupportedMigrationError`` instead of returning a result carrying an "Unable to plan migration" error. (`#747 <https://github.com/CWorthy-ocean/C-Star/pull/747>`_)
 - Registering an adapter whose target does not advance its source, or two adapters for the same source version, now raises at construction. (`#747 <https://github.com/CWorthy-ocean/C-Star/pull/747>`_)
 - Forge rejects CDR-lite settings that ucla-roms 0.9.0 would abort on at startup, such as CDR-lite output with no CDR-lite tracers, before generating any input data. (`#748 <https://github.com/CWorthy-ocean/C-Star/pull/748>`_)
+- ``cstar workplan run`` now refuses before launching anything when steps set a local walltime and no ``timeout``/``gtimeout`` is installed, naming every such step and how to install coreutils. (`#749 <https://github.com/CWorthy-ocean/C-Star/pull/749>`_)
+- End-to-end test failures now include the tail of each step's log, so a step that dies at launch shows its actual error in CI. (`#749 <https://github.com/CWorthy-ocean/C-Star/pull/749>`_)
 
 
 Miscellaneous
@@ -227,3 +230,5 @@ Miscellaneous
 - Developer and spec docs cover the 0.9.0 namelist tier, the ``CDR_LITE`` cppdef and the section rename. (`#748 <https://github.com/CWorthy-ocean/C-Star/pull/748>`_)
 - New published JSON schemas for the bumped versions (``roms_marbl_schema.3.1.0.json``, ``plotter_schema.2.1.0.json``, ``hello_world``/``nest_ic``/``upscaler`` ``1.1.0``) and a ``blueprint.3.1.0.yaml`` template; the previously published schema files are unchanged. (`#745 <https://github.com/CWorthy-ocean/C-Star/pull/745>`_)
 - Forge, blueprint and tutorial documentation describe provenance, stamping and the ``output/`` copy. (`#745 <https://github.com/CWorthy-ocean/C-Star/pull/745>`_)
+- ``environment-laptop.yml`` installs ``coreutils`` so local walltimes work on macOS, including the macOS legs of the extended integration workflow. (`#749 <https://github.com/CWorthy-ocean/C-Star/pull/749>`_)
+- The workplan docs note that local walltimes rely on GNU ``timeout`` and how to get it on macOS. (`#749 <https://github.com/CWorthy-ocean/C-Star/pull/749>`_)
