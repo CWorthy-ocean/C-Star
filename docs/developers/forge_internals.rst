@@ -443,6 +443,12 @@ rejected at resolve time. Unlike ucla-roms 0.7/0.8's stream, 0.9's
 ``cdr_lite_output`` does not force ``CDR_FORCING`` on: the per-tier rows of
 ``CDR_OUTPUT_SECTIONS`` and of the precheck section table apply only when
 the row's settings class is the pinned tier's own annotation for that section.
+From ucla-roms 0.9.1 an active CDR mode no longer requires MARBL: the
+parameterized releases (``simple``/``yaml``/``netcdf``) run in physics-only
+builds with ``cppdefs.cdr_forcing`` on and ``cdr_output.do_cdr_output`` left
+off (that module needs MARBL). ``upscaled`` (depth profiles) and pins below
+0.9.1 are rejected without MARBL by ``check_cdr_forcing_mode``
+(``namelist_model.py``), called by both the resolver and ``configure_build``.
 ``&TRACER_DIFF2`` is read from 0.9.0 on (earlier releases skipped it through
 an ``#if define`` typo), so a nonzero ``tracer_diff2.tnu2_default`` only
 takes effect there; every bundled ModelSpec uses 0.0.

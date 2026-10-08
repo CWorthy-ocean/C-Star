@@ -121,7 +121,7 @@ spec omits them, so older specs are unaffected by additions.
 The bundled model specs
 ~~~~~~~~~~~~~~~~~~~~~~~
 
-``roms-marbl-0.9-default`` (ucla-roms 0.9.0) is the wizard's default. Older
+``roms-marbl-0.9-default`` (ucla-roms 0.9.1) is the wizard's default. Older
 ``roms-marbl-0.N-default`` entries pin earlier releases, ``pio-dev`` tracks
 ucla-roms ``main`` with PIO enabled, and ``cson_roms-marbl_v0.1`` is the
 configuration the toy domain and the example blueprint use.

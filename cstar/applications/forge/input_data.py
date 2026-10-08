@@ -2600,9 +2600,8 @@ class RomsMarblInputData(InputData):
         self._settings_run_time["cdr_frc"]["forcing_parameterized"] = True
         self._settings_run_time["cdr_frc"]["cdr_volume"] = cdr_volume
 
-        if "cdr_output" not in self._settings_run_time:
-            self._settings_run_time["cdr_output"] = {}
-        self._settings_run_time["cdr_output"]["do_cdr_output"] = True
+        # cdr_output.do_cdr_output is owned by configure_build's CDR net, which runs
+        # after generation: it implies the output only with MARBL (check_cdr_forcing_mode).
 
         resource = Resource(location=str(output_path), partitioned=False)
         _require_element(
@@ -2675,10 +2674,7 @@ class RomsMarblInputData(InputData):
         self._settings_run_time["cdr_frc"]["cdr_volume"] = (
             cdr.releases.release_type == "volume"
         )
-        # enable cdr output
-        if "cdr_output" not in self._settings_run_time:
-            self._settings_run_time["cdr_output"] = {}
-        self._settings_run_time["cdr_output"]["do_cdr_output"] = True
+        # cdr_output.do_cdr_output is owned by configure_build's CDR net (see above).
 
     @register_input(
         name="forcing.corrections", order=90, label="Generating corrections forcing"

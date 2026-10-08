@@ -1495,15 +1495,52 @@ def test_build_forge_blueprint_cdr_forcing_file_missing_raises(tmp_path):
         _build(cdr_forcing_file=str(missing))
 
 
-def test_build_forge_blueprint_cdr_forcing_file_requires_marbl(tmp_path):
-    """Mirrors test_cdr_output_requires_marbl: a user-supplied cdr_forcing_file
-    implies do_cdr_output just like a generated cdr_forcing, so it must raise
-    the same way when bgc_mode="none".
+def _assert_cdr_forcing_without_marbl(cfg):
+    """CDR forcing without MARBL: cdr_frc compiled, cdr_output (MARBL-only) off,
+    no MARBL diagnostics added.
+    """
+    settings = cfg.model_settings
+    assert settings["cppdefs"]["marbl"] is False
+    assert settings["cppdefs"]["cdr_forcing"] is True
+    assert settings["cdr_output"]["do_cdr_output"] is False
+    diags = (settings.get("marbl_bgc") or {}).get("marbl_diagnostics_to_write") or []
+    for name in _CDR_OUTPUT_REQUIRED_DIAGNOSTICS:
+        assert name not in diags
+
+
+def test_build_forge_blueprint_cdr_forcing_file_without_marbl_on_roms_0_9_1(tmp_path):
+    """From ucla-roms 0.9.1 a user-supplied cdr_forcing_file (parameterized
+    release) runs without MARBL: CDR_FORCING on, cdr_output (needs MARBL) off.
     """
     cdr_path = _write_tiny_netcdf(tmp_path, name="cdr.nc")
-    with pytest.raises(ValueError, match="do_cdr_output"):
+    cfg = _build(
+        model_dir=_MODEL_DIR_ROMS090,
+        cdr_forcing_file=str(cdr_path),
+        bgc_mode="none",
+        forcing_inputs=_PHYSICS_ONLY_FORCING,
+    )
+    _assert_cdr_forcing_without_marbl(cfg)
+
+
+def test_build_forge_blueprint_cdr_forcing_without_marbl_on_roms_0_9_1():
+    """Same for a generated cdr_forcing."""
+    cfg = _build(
+        model_dir=_MODEL_DIR_ROMS090,
+        cdr_forcing={"releases": []},
+        bgc_mode="none",
+        forcing_inputs=_PHYSICS_ONLY_FORCING,
+    )
+    _assert_cdr_forcing_without_marbl(cfg)
+
+
+def test_build_forge_blueprint_cdr_forcing_without_marbl_rejected_before_roms_0_9_1():
+    """ucla-roms < 0.9.1 ignores (0.8.0, 0.9.0) or doesn't compile cdr_frc
+    without MARBL, so the resolver rejects it instead of dropping the release.
+    """
+    with pytest.raises(ValueError, match="0.9.1"):
         _build(
-            cdr_forcing_file=str(cdr_path),
+            model_dir=_MODEL_DIR_ROMS080,
+            cdr_forcing={"releases": []},
             bgc_mode="none",
             forcing_inputs=_PHYSICS_ONLY_FORCING,
         )
@@ -1631,12 +1668,13 @@ def test_build_forge_blueprint_cdr_kwarg_upscaled_mode_sets_cdr_frc_statics():
 
 
 def test_build_forge_blueprint_cdr_kwarg_upscaled_requires_marbl():
-    """Mirrors test_cdr_output_requires_marbl / the cdr_forcing_file variant:
-    "upscaled" implies do_cdr_output just like generated/custom-file CDR, so it
-    must raise the same way when bgc_mode="none".
+    """Upscaled CDR sets cdr_forcing_depth_profiles, which ucla-roms rejects at init
+    without MARBL, so it must raise when bgc_mode="none" even on a release (0.9.1+)
+    that runs parameterized CDR forcing without MARBL.
     """
-    with pytest.raises(ValueError, match="do_cdr_output"):
+    with pytest.raises(ValueError, match="upscaled"):
         _build(
+            model_dir=_MODEL_DIR_ROMS090,
             cdr={"mode": "upscaled"},
             bgc_mode="none",
             forcing_inputs=_PHYSICS_ONLY_FORCING,
@@ -2053,7 +2091,7 @@ def test_roms08x_09x_model_specs_declare_advection_cppdefs_and_render(
 ):
     """``roms-marbl-0.8-default`` (ucla-roms 0.8.0, PR #361) and
     ``roms-marbl-0.9-default`` declare the two advection cppdefs keys both off
-    (the 0.8.0 defaults), and pin the ucla-roms ref to "0.8.0"/"0.9.0" -- 0.8.0
+    (the 0.8.0 defaults), and pin the ucla-roms ref to "0.8.0"/"0.9.1" -- 0.8.0
     has no namelist-schema change, so unlike the 0.5.0-0.7.0 and 0.9.0 tiers
     there is no versioned-namelist golden fixture to snapshot for it. Instead this
     end-to-end renders the *working-tree* ``cppdefs.opt.j2`` from the resolved

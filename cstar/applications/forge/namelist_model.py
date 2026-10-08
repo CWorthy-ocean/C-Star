@@ -97,6 +97,7 @@ from cstar.roms.namelist import (
     VSpongeSettings,
     ZsliceSettings,
     namelist_schema_for_ref,
+    roms_version_from_ref,
 )
 from cstar.roms.precheck import NamelistConsistencyError as NamelistConsistencyError
 from cstar.roms.precheck import applies_to as _output_precheck_applies_to
@@ -561,6 +562,55 @@ CDR_OUTPUT_REQUIRED_MARBL_DIAGNOSTICS = (
     "co3_sat_arag",
     "co3_sat_calc",
 )
+
+
+# ucla-roms release from which cdr_frc parameterized releases run without MARBL (PR #379).
+CDR_FORCING_WITHOUT_MARBL_MIN_ROMS: tuple[int, int, int] = (0, 9, 1)
+
+
+def check_cdr_forcing_mode(
+    cdr_mode: str, *, bgc_mode_is_marbl: bool, roms_ref: str | None
+) -> bool:
+    """Validate an active CDR forcing mode against MARBL and the pinned ucla-roms
+    release, and report whether it implies ``cdr_output.do_cdr_output``.
+
+    ``cdr_output`` (the CDR diagnostics stream) needs MARBL, so an active mode
+    implies it only with MARBL. Without MARBL, ucla-roms >= 0.9.1
+    (:data:`CDR_FORCING_WITHOUT_MARBL_MIN_ROMS`) still runs the parameterized
+    releases of ``cdr_frc`` ("simple"/"yaml"/"netcdf") under ``CDR_FORCING``,
+    with ``cdr_output`` left off. ``"upscaled"`` sets
+    ``cdr_frc.forcing_depth_profiles``, which ucla-roms rejects at init without
+    MARBL, and earlier releases either don't compile ``cdr_frc`` without MARBL
+    or silently ignore the release. A ``roms_ref`` that is not a release tag
+    (branch, commit hash, ``None``) counts as the latest release, matching
+    :func:`run_time_settings_for_ref` (which has no local clone to resolve a
+    hash against).
+
+    Both the resolver (authoring time) and the executor's ``configure_build``
+    (the build-time net) call this so the rule and its messages stay in one
+    place; each caller sets ``cppdefs["cdr_forcing"]`` itself.
+
+    Raises ``ValueError`` for an unsupported combination without MARBL.
+    """
+    if cdr_mode == "none":
+        return False
+    if bgc_mode_is_marbl:
+        return True
+    if cdr_mode == "upscaled":
+        raise ValueError(
+            f'CDR mode "{cdr_mode}" but bgc_mode != "marbl": upscaled CDR sets '
+            "cdr_forcing_depth_profiles, which ucla-roms rejects at init without "
+            'MARBL; use a parameterized CDR mode (simple/yaml/netcdf) or bgc_mode "marbl".'
+        )
+    version = roms_version_from_ref(roms_ref)
+    if version is not None and version < CDR_FORCING_WITHOUT_MARBL_MIN_ROMS:
+        minimum = ".".join(str(part) for part in CDR_FORCING_WITHOUT_MARBL_MIN_ROMS)
+        raise ValueError(
+            f'CDR mode "{cdr_mode}" but bgc_mode != "marbl" on ucla-roms '
+            f"{roms_ref}: CDR forcing without MARBL needs ucla-roms >= {minimum}; "
+            "earlier releases ignore the release or don't compile cdr_frc without MARBL."
+        )
+    return False
 
 
 def ensure_cdr_output_marbl_diagnostics(diags: list[str] | None) -> list[str]:

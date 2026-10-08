@@ -70,6 +70,7 @@ from cstar.applications.forge.namelist_model import (
     NamelistConsistencyError,
     canonical_output_sections_for_precheck,
     check_bgc_tracer_count,
+    check_cdr_forcing_mode,
     check_cdr_lite_sections,
     check_cdr_output_sections,
     check_output_streams_divide_rst,
@@ -950,18 +951,36 @@ def build_forge_blueprint(
         tides_settings["bry_tides"] = False
         tides_settings["pot_tides"] = False
 
+    # ----- schema selection inputs -------------------------------------------
+    # The pinned ucla-roms ref decides which run-time settings tier applies (it
+    # selects what gets pruned below) and whether CDR forcing is allowed without
+    # MARBL, so derive it before the CDR block.
+    roms_block = (model.get("code") or {}).get("roms") or {}
+    effective_roms_ref = (
+        roms_ref or roms_block.get("commit") or roms_block.get("branch")
+    )
+
     # ----- CDR output consistency --------------------------------------------
     # CDR output is valid without CDR forcing (cdr_frc.cdr_source stays false;
-    # ROMS opens no CDR file), and any active CDR mode (generated -- "simple"/
-    # "yaml", a user-supplied file -- "netcdf", or runtime-supplied -- "upscaled")
-    # implies CDR output. "upscaled" is included here even though Forge never
-    # generates its CDR data: real CDR tracers exist at runtime under that mode
-    # too, so the same MARBL/diagnostics requirements apply. Either way the
-    # CDR_FORCING cppdef must be on (it gates compiling ucla-roms' cdr_output.F90)
-    # and the MARBL diagnostics ucla-roms looks up by name, unchecked, must be in
-    # the write list.
+    # ROMS opens no CDR file). Any active CDR mode (generated -- "simple"/"yaml",
+    # a user-supplied file -- "netcdf", or runtime-supplied -- "upscaled") needs
+    # the CDR_FORCING cppdef, which compiles cdr_frc with or without MARBL. With
+    # MARBL it also implies CDR output (real CDR tracers exist at runtime under
+    # "upscaled" too, so the same diagnostics requirements apply); without MARBL
+    # check_cdr_forcing_mode allows only the parameterized modes on
+    # ucla-roms >= 0.9.1 and leaves CDR output off, since cdr_output.F90 needs
+    # MARBL. When CDR output is on, the MARBL diagnostics ucla-roms looks up by
+    # name, unchecked, must be in the write list.
     cdr_out = settings.setdefault("cdr_output", {})
-    do_cdr_output = bool(cdr_out.get("do_cdr_output")) or cdr_spec.mode != "none"
+    if cdr_spec.mode != "none":
+        settings["cppdefs"]["cdr_forcing"] = True
+    # Called first so an unsupported mode is rejected even if do_cdr_output is set.
+    implied_cdr_output = check_cdr_forcing_mode(
+        cdr_spec.mode,
+        bgc_mode_is_marbl=bgc_mode == "marbl",
+        roms_ref=str(effective_roms_ref) if effective_roms_ref is not None else None,
+    )
+    do_cdr_output = bool(cdr_out.get("do_cdr_output")) or implied_cdr_output
     cdr_out["do_cdr_output"] = do_cdr_output
     if do_cdr_output:
         if bgc_mode != "marbl":
@@ -978,10 +997,6 @@ def build_forge_blueprint(
     # ----- schema selection + version-gated section pruning -----------------
     # Which run-time settings tier the pinned ucla-roms ref selects decides
     # both what gets pruned here and which prechecks below apply.
-    roms_block = (model.get("code") or {}).get("roms") or {}
-    effective_roms_ref = (
-        roms_ref or roms_block.get("commit") or roms_block.get("branch")
-    )
     with warnings.catch_warnings():
         # A non-semver pin (e.g. pio-dev's 'main') warns on every schema
         # selection; this internal version probe shouldn't repeat it -- the

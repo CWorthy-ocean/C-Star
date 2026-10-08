@@ -1849,7 +1849,6 @@ class TestRomsMarblInputDataGeneration:
         sample_roms_marbl_input_data.roms_marbl_blueprint_elements.cdr_forcing = (
             cstar_models.Dataset(data=[])
         )
-
         sample_roms_marbl_input_data._generate_cdr_forcing(
             key="cdr_forcing", cdr_kwargs=cdr_kwargs
         )
@@ -1870,11 +1869,10 @@ class TestRomsMarblInputDataGeneration:
             sample_roms_marbl_input_data._settings_run_time["cdr_frc"]["cdr_file"]
             == "cdr.nc"
         )
+        # do_cdr_output is configure_build's call (needs MARBL), not generation's.
         assert (
-            sample_roms_marbl_input_data._settings_run_time["cdr_output"][
-                "do_cdr_output"
-            ]
-            is True
+            "do_cdr_output"
+            not in sample_roms_marbl_input_data._settings_run_time.get("cdr_output", {})
         )
 
     def test_generate_corrections_not_implemented(self, sample_roms_marbl_input_data):
@@ -2208,7 +2206,10 @@ class TestCdrCustomFileForcing:
         assert rt_settings["forcing_parameterized"] is True
         assert rt_settings["cdr_volume"] is True
         assert cdr_input_data._settings_compile_time["cppdefs"]["cdr_forcing"] is True
-        assert cdr_input_data._settings_run_time["cdr_output"]["do_cdr_output"] is True
+        # do_cdr_output is configure_build's call (needs MARBL), not generation's.
+        assert "do_cdr_output" not in cdr_input_data._settings_run_time.get(
+            "cdr_output", {}
+        )
 
         output_path = cdr_input_data._forcing_filename(CDR_FORCING_NETCDF_STEM)
         assert output_path.exists()
