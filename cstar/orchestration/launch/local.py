@@ -1,6 +1,8 @@
 import asyncio
 import datetime
 import os
+import shlex
+import shutil
 import subprocess
 import typing as t
 from pathlib import Path
@@ -190,6 +192,57 @@ class LocalComputeAdapter(ConfiguredModelAdapter[KeyValueStore, LocalComputeSpec
         return compute
 
 
+def local_compute_spec(step: "Step") -> LocalComputeSpec | None:
+    """Adapt a step's compute overrides into the local compute spec it requests.
+
+    Parameters
+    ----------
+    step : Step
+        The step whose compute overrides are inspected.
+
+    Returns
+    -------
+    LocalComputeSpec | None
+        The spec, or `None` if the step carries no usable local overrides; such
+        a step runs without a walltime.
+    """
+    if not step.compute_overrides:
+        return None
+
+    try:
+        return LocalComputeAdapter().adapt(step.compute_overrides)
+    except CstarExpectationFailed:
+        # overrides carry nothing for this launcher (e.g. the slurm
+        # cpu requirement the workplan transformer records)
+        msg = f"No local overrides for step {step.name!r}"
+        log.debug(msg)
+    except CstarAdaptationError:
+        msg = f"Local overrides did not result in valid compute spec: {step.compute_overrides}"
+        log.warning(msg, exc_info=True)
+    return None
+
+
+def find_timeout_exe() -> str | None:
+    """Locate a GNU `timeout` executable.
+
+    macOS has no `timeout`; Homebrew's coreutils installs it as `gtimeout`.
+
+    Returns
+    -------
+    str | None
+        The path of the first executable found, or `None`.
+    """
+    return shutil.which(TimeConstrainedRunRequestEnricher.TIMEOUT_EXE) or shutil.which(
+        f"g{TimeConstrainedRunRequestEnricher.TIMEOUT_EXE}"
+    )
+
+
+TIMEOUT_MISSING_GUIDANCE = (
+    "install coreutils (conda install coreutils, or brew install coreutils "
+    "for gtimeout) or remove the walltime."
+)
+
+
 class TimeConstrainedRunRequestEnricher(ModelEnricher[RunRequest]):
     """Format a `RunRequest` as a CLI command that honors user-supplied
     computing resource overrides.
@@ -199,7 +252,7 @@ class TimeConstrainedRunRequestEnricher(ModelEnricher[RunRequest]):
     """The compute spec to use when enriching a run request."""
 
     TIMEOUT_EXE: t.ClassVar[str] = "timeout"
-    """The executable used to timeout a process."""
+    """The preferred executable used to timeout a process; see `find_timeout_exe`."""
     ARG_FORCEKILL_TIMEOUT: t.ClassVar[str] = "-k"
     """A CLI argument used to specify a grace period before force-killing a run."""
 
@@ -229,11 +282,22 @@ class TimeConstrainedRunRequestEnricher(ModelEnricher[RunRequest]):
             The  original `RunRequest` to enrich
         compute : LocalComputeSpec | None
             Local compute overrides used to configure timeout behavior.
+
+        Raises
+        ------
+        CstarExpectationFailed
+            If no GNU timeout executable can be found.
         """
+        if not (timeout_exe := find_timeout_exe()):
+            msg = f"A local walltime needs GNU timeout; {TIMEOUT_MISSING_GUIDANCE}"
+            raise CstarExpectationFailed(msg)
+
         # GNU timeout stops option parsing at the first non-option argument (the
         # duration), so -k must precede it: `timeout -k 2s 600s cmd ...`.
+        # the proxy script joins the command with spaces, so quote the path, and make
+        # it absolute because the step runs from its own run directory
         enriched_cmd = [
-            self.TIMEOUT_EXE,
+            shlex.quote(os.path.abspath(timeout_exe)),
             self.ARG_FORCEKILL_TIMEOUT,
             f"{self.compute.force_kill_seconds}s",
             f"{self.compute.walltime_seconds}s",
@@ -257,7 +321,27 @@ class LocalLauncher(Launcher[LocalHandle]):
 
     @classmethod
     def check_preconditions(cls, workplan: "Workplan | None" = None) -> None:
-        """Perform launcher-specific startup validation."""
+        """Perform launcher-specific startup validation.
+
+        Parameters
+        ----------
+        workplan : Workplan, optional
+            The workplan about to run.
+
+        Raises
+        ------
+        CstarExpectationFailed
+            If steps request a local walltime and no GNU timeout is installed.
+        """
+        if workplan is None or find_timeout_exe():
+            return
+
+        if names := [s.name for s in workplan.steps if local_compute_spec(s)]:
+            msg = (
+                f"Steps {', '.join(map(repr, names))} set a local walltime, which "
+                f"needs GNU timeout; {TIMEOUT_MISSING_GUIDANCE}"
+            )
+            raise CstarExpectationFailed(msg)
 
     @staticmethod
     def adapt_step(
@@ -275,20 +359,10 @@ class LocalLauncher(Launcher[LocalHandle]):
             step, dependencies
         )
 
-        enricher: ModelEnricher[RunRequest] | None = None
-
-        if step.compute_overrides:
-            try:
-                compute = LocalComputeAdapter().adapt(step.compute_overrides)
-                enricher = TimeConstrainedRunRequestEnricher(compute)
-            except CstarExpectationFailed:
-                # overrides carry nothing for this launcher (e.g. the slurm
-                # cpu requirement the workplan transformer records)
-                msg = f"No local overrides for step {step.name!r}"
-                log.debug(msg)
-            except CstarAdaptationError:
-                msg = f"Local overrides did not result in valid compute spec: {step.compute_overrides}"
-                log.warning(msg, exc_info=True)
+        compute = local_compute_spec(step)
+        enricher: ModelEnricher[RunRequest] | None = (
+            TimeConstrainedRunRequestEnricher(compute) if compute else None
+        )
 
         adapter = StepToRunRequestAdapter(enricher)
         request = adapter.adapt(step)

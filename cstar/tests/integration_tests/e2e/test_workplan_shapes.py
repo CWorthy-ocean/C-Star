@@ -26,6 +26,7 @@ from cstar.tests.integration_tests.cli_harness import (
     make_shim,
     read_status,
     run_cstar,
+    run_log_tails,
     sentinel_path,
     step_root,
     wait_for_terminal,
@@ -188,7 +189,9 @@ def test_shape_runs_in_dependency_order(
     run_id = f"shape-{shape_name}"
     run, returncode, output = schedule(shape_root, cstar_shim, run_id, shape)
     try:
-        assert returncode == 0, f"workplan run exited {returncode}\n{output}"
+        if returncode != 0:
+            tails = run_log_tails(run.data_home, run_id)
+            pytest.fail(f"workplan run exited {returncode}\n{output}\n{tails}")
         assert SCHEDULED_MESSAGE in run.proc_stdout, output
 
         statuses = {s: read_status(run.sentinel(s)) for s in shape}
@@ -289,7 +292,9 @@ def test_generated_chunk_chain_runs_in_order(
         wait_for_terminal(
             state_home, run_id, chain, timeout=RUN_TIMEOUT, poll_interval=POLL_INTERVAL
         )
-        assert proc.returncode == 0, output
+        if proc.returncode != 0:
+            tails = run_log_tails(data_home, run_id)
+            pytest.fail(f"workplan run exited {proc.returncode}\n{output}\n{tails}")
         statuses = {s: read_status(sentinel_path(state_home, run_id, s)) for s in chain}
         assert statuses == dict.fromkeys(chain, DONE), output
 

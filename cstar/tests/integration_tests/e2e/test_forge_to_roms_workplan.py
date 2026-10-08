@@ -32,6 +32,7 @@ from cstar.tests.integration_tests.cli_harness import (
     kill_run,
     make_cli_env,
     run_cstar,
+    run_log_tails,
     sentinel_path,
     step_root,
     wait_for_terminal,
@@ -182,7 +183,9 @@ def _schedule_and_wait(
 
     proc = run_cstar(env, "workplan", "run", "--run-id", RUN_ID, str(workplan))
     output = f"stdout:\n{proc.stdout}\nstderr:\n{proc.stderr}"
-    assert proc.returncode == 0, f"workplan run exited {proc.returncode}\n{output}"
+    if proc.returncode != 0:
+        tails = run_log_tails(root / "data", RUN_ID)
+        pytest.fail(f"workplan run exited {proc.returncode}\n{output}\n{tails}")
     assert SCHEDULED_MESSAGE in proc.stdout, output
 
     state_home = root / "state"

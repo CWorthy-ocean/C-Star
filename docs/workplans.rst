@@ -252,7 +252,9 @@ The ``slurm`` keys are ``account_name``, ``queue_name``, ``max_walltime``
 (``HH:MM:SS`` or SLURM's ``D-HH:MM:SS``, so ``30:00:00`` and ``1-06:00:00``
 are the same request), ``num_cpus``, ``num_nodes``, ``cpus_per_node`` and
 ``single_node``. The ``local`` launcher accepts ``max_walltime`` and
-``force_kill_timeout``. ``num_cpus`` is also where a deferred-blueprint step
+``force_kill_timeout``, enforced with GNU ``timeout`` (on macOS, install
+``coreutils`` from conda-forge or Homebrew, which provides ``gtimeout``).
+``num_cpus`` is also where a deferred-blueprint step
 declares its allocation, since C-Star cannot read the blueprint at submit time.
 Defaults shared by every step belong in the workplan's
 :ref:`compute environment <workplan_compute_environment>`.

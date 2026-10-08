@@ -38,5 +38,7 @@ dependencies:
   # ucla-roms Makefiles need GNU-flavored rsync; macOS's system rsync lacks
   # the required flags (see docs/releases/v0.3.0.rst) — keep for local builds
   - rsync
+  # macOS has no GNU timeout, which local max_walltime needs
+  - coreutils
   # docs builds only
   - pandoc
