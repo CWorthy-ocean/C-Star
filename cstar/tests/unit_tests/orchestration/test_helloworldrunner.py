@@ -1,4 +1,6 @@
+import asyncio
 import os
+import textwrap
 import typing as t
 import uuid
 from collections.abc import Callable
@@ -19,7 +21,9 @@ from cstar.entrypoint.config import get_job_config, get_service_config
 from cstar.execution.handler import ExecutionStatus
 from cstar.orchestration.adapter import StepToPlaceholderAdapter
 from cstar.orchestration.models import Workplan, WorkplanState
+from cstar.orchestration.orchestration import LiveWorkplan
 from cstar.orchestration.serialization import deserialize, serialize
+from cstar.orchestration.tracking import TrackingRepository
 from cstar.orchestration.utils import (
     ENV_CSTAR_ORCH_DELAYS,
     ENV_CSTAR_SLURM_ACCOUNT,
@@ -408,3 +412,84 @@ def test_hw_runner_bp_only(
 
         assert "Hello," in result.stdout
         assert result.exit_code == 0
+
+
+@pytest.mark.parametrize("run_from_workplan_dir", [True, False])
+def test_hello_world_workplan_relative_blueprint_path(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    hello_world_bp_content: str,
+    run_from_workplan_dir: bool,
+) -> None:
+    """Verify a step whose `blueprint` is a path relative to the workplan file
+    is launched with the absolute path, whether `cstar workplan run` is
+    invoked from the workplan's directory or from elsewhere.
+
+    Parameters
+    ----------
+    tmp_path : Path
+        Temporary directory for the workplan, blueprint and run outputs
+    monkeypatch : pytest.MonkeyPatch
+        Fixture used to change the working directory
+    hello_world_bp_content : str
+        Fixture providing the content of a minimal hello-world blueprint
+    run_from_workplan_dir : bool
+        Whether the CLI is invoked from the directory holding the workplan
+    """
+    plans = tmp_path / "plans"
+    plans.mkdir()
+    (plans / "hw.yaml").write_text(hello_world_bp_content)
+    wp_path = plans / "hw-workplan.yaml"
+    wp_path.write_text(
+        textwrap.dedent("""\
+            name: hw-relative
+            description: A hello_world step whose blueprint sits beside the workplan
+            state: draft
+            steps:
+              - name: Say Hello
+                application: hello_world
+                blueprint: ./hw.yaml
+            """)
+    )
+    if run_from_workplan_dir:
+        monkeypatch.chdir(plans)
+        wp_arg = wp_path.name
+    else:
+        elsewhere = tmp_path / "elsewhere"
+        elsewhere.mkdir()
+        monkeypatch.chdir(elsewhere)
+        wp_arg = wp_path.as_posix()
+
+    runner = CliRunner()
+    custom_env = {
+        ENV_CSTAR_ORCH_DELAYS: "0.01",
+        ENV_CSTAR_SLURM_MAX_WALLTIME: "00:02:00",
+        ENV_CSTAR_SLURM_QUEUE: "debug",
+    }
+    run_id = str(uuid.uuid4())
+    with (
+        mock.patch.dict(os.environ, custom_env),
+        mock.patch(
+            "cstar.system.manager.CStarSystemManager.scheduler",
+            mock.PropertyMock(return_value=None),
+        ),
+    ):
+        result = runner.invoke(
+            app_run_workplan, [wp_arg, "--run-id", run_id], color=False
+        )
+
+    assert result.exit_code == 0, result.output
+    assert "scheduling has completed" in result.stdout
+
+    expected = (plans / "hw.yaml").resolve()
+    wp_run = asyncio.run(TrackingRepository().get_workplan_run(run_id))
+    assert wp_run is not None
+    persisted = deserialize(wp_run.trx_workplan_path, LiveWorkplan)
+    step = persisted.steps[0]
+    assert Path(step.blueprint_path) == expected
+
+    # the local launcher's proxy script carries the absolute path into the
+    # step command, which runs with the task directory as its cwd
+    script = step.script_path.read_text()
+    assert f'BLUEPRINT_PATH="{expected}"' in script
+    assert f"cstar blueprint run {expected}" in script

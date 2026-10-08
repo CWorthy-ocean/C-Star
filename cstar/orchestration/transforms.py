@@ -25,7 +25,11 @@ from cstar.base.env import ENV_CSTAR_RUNID
 from cstar.base.exceptions import CstarError, CstarExpectationFailed
 from cstar.base.log import LoggingMixin, get_logger
 from cstar.base.utils import deep_merge
-from cstar.execution.file_system import JobFileSystemManager, local_copy
+from cstar.execution.file_system import (
+    JobFileSystemManager,
+    is_remote_resource,
+    local_copy,
+)
 from cstar.orchestration.adapter import DIRECTIVES_FILENAME, prepare_directive_file
 from cstar.orchestration.compute_environment import (
     ComputeEnvironment,
@@ -38,6 +42,7 @@ from cstar.orchestration.models import (
     DeferredBlueprintRef,
     KeyValueStore,
     RunRef,
+    Step,
     StepRef,
     Workplan,
 )
@@ -430,6 +435,47 @@ class TemplateFillTransform:
     @property
     def scoped_resolver(self) -> Callable[[str, str], str] | None:
         return self._scoped_resolver
+
+
+_TStep = t.TypeVar("_TStep", bound=Step)
+
+
+def anchor_blueprint_path(step: _TStep, base_dir: Path) -> _TStep:
+    """Resolve a relative blueprint path against the workplan's directory.
+
+    A step's `cstar blueprint run` command executes with the step's task
+    directory as its working directory, so a relative path left as authored
+    would be looked up there rather than next to the workplan. Anchoring at
+    schedule time makes `check` and `run` agree and records the absolute path
+    in the transformed workplan. Deferred, inline and remote blueprints,
+    absolute paths and strings still holding a `{{placeholder}}` are returned
+    unchanged; call this after the placeholders have been filled.
+
+    Parameters
+    ----------
+    step : Step
+        The step whose blueprint path is anchored.
+    base_dir : Path
+        The directory containing the workplan file the step was read from.
+
+    Returns
+    -------
+    Step
+        The step unchanged, or a copy carrying the absolute blueprint path.
+    """
+    value = step.blueprint_path
+    if not isinstance(value, str | Path):
+        return step
+
+    text = str(value).strip()
+    if not text or PLACEHOLDER_RE.search(text) or is_remote_resource(text):
+        return step
+
+    path = Path(text).expanduser()
+    if path.is_absolute():
+        return step
+
+    return step.model_copy(update={"blueprint_path": (base_dir / path).resolve()})
 
 
 def fill_runs(
@@ -891,6 +937,7 @@ class WorkplanTransformer(LoggingMixin):
         wp: Workplan,
         fill_transform: TemplateFillTransform | None = None,
         external: ExternalRuns | None = None,
+        wp_path: Path | None = None,
     ) -> None:
         """Initialize the instance.
 
@@ -903,10 +950,15 @@ class WorkplanTransformer(LoggingMixin):
         external : ExternalRuns | None
             The registry of external runs the workplan refers to; an empty
             registry when omitted, so every external reference is a problem.
+        wp_path : Path | None
+            The file the workplan was read from. A step's relative blueprint
+            path is resolved against its directory; when omitted, relative
+            paths are left as authored.
         """
         self.original = Workplan(**wp.model_dump(by_alias=True))
         self.fill_transform = fill_transform
         self.external = external if external is not None else ExternalRuns({})
+        self.wp_path = wp_path
 
     @property
     def is_modified(self) -> bool:
@@ -993,6 +1045,12 @@ class WorkplanTransformer(LoggingMixin):
             fill = self.fill_transform.with_scoped_resolver(resolver)
 
             live_steps = [filled for step in live_steps for filled in fill(step)]
+
+        # anchor relative blueprint paths once placeholders are filled, before
+        # any transform reads a blueprint from disk
+        if self.wp_path is not None:
+            base_dir = self.wp_path.resolve().parent
+            live_steps = [anchor_blueprint_path(s, base_dir) for s in live_steps]
 
         transformed_steps: list[LiveStep] = []
         named_dep_map: dict[str, str] = {}

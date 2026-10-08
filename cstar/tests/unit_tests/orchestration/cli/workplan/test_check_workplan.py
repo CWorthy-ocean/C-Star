@@ -624,3 +624,36 @@ def test_deep_check_reports_unresolvable_external_dependency(
     assert result.exit_code == 1, result.stdout
     assert "No run record found for alias 'spinup'" in result.stdout
     assert "Traceback" not in result.stdout
+
+
+def test_deep_check_resolves_relative_blueprint_from_other_cwd(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    hello_world_bp_content: str,
+) -> None:
+    """Verify the CLI deep check resolves a relative blueprint path against
+    the workplan's directory when invoked from a different working directory.
+
+    Parameters
+    ----------
+    tmp_path : Path
+        Temporary directory for the workplan and blueprint
+    monkeypatch : pytest.MonkeyPatch
+        Fixture used to change the working directory
+    hello_world_bp_content : str
+        Fixture providing the content of a minimal hello-world blueprint
+    """
+    plans = tmp_path / "plans"
+    plans.mkdir()
+    (plans / "hw.yaml").write_text(hello_world_bp_content)
+    steps = [Step(name="Say Hello", application="hello_world", blueprint="./hw.yaml")]
+    wp_path = _write_workplan(plans / "hw-workplan.yaml", steps)
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    monkeypatch.chdir(elsewhere)
+
+    runner = CliRunner()
+    result = runner.invoke(app, [wp_path.as_posix()], color=False)
+
+    assert result.exit_code == 0, result.stdout
+    assert "resolved for 1 step(s)" in result.stdout

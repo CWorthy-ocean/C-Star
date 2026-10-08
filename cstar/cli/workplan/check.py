@@ -27,7 +27,9 @@ if t.TYPE_CHECKING:
 app = typer.Typer()
 
 
-def _deep_check(wp: Workplan, user_vars: "Mapping[str, str] | None") -> t.NoReturn:
+def _deep_check(
+    wp: Workplan, user_vars: "Mapping[str, str] | None", wp_path: Path | None
+) -> t.NoReturn:
     """Resolve a workplan the same way `run` does before submitting anything.
 
     Builds the runtime variable mapping, then runs `WorkplanTransformer` over
@@ -41,6 +43,9 @@ def _deep_check(wp: Workplan, user_vars: "Mapping[str, str] | None") -> t.NoRetu
         The schema-valid workplan to resolve.
     user_vars : Mapping[str, str] | None
         Runtime variable replacements captured from `--var`/`--varfile`.
+    wp_path : Path | None
+        The local file the workplan was read from; relative blueprint paths
+        are resolved against its directory.
 
     Raises
     ------
@@ -48,7 +53,7 @@ def _deep_check(wp: Workplan, user_vars: "Mapping[str, str] | None") -> t.NoRetu
         Code 0 if every step resolves cleanly, otherwise 1.
     """
     transformed, problems = asyncio.run(
-        deep_check(wp, user_vars, lambda: get_launcher(wp))
+        deep_check(wp, user_vars, lambda: get_launcher(wp), wp_path=wp_path)
     )
     if transformed is not None:
         step_count = len(transformed.steps)
@@ -141,7 +146,7 @@ def check(
         print(f"The workplan `{wp.name}` is valid")
         if schema_only:
             raise typer.Exit(0)
-        _deep_check(wp, t.cast("Mapping[str, str] | None", ctx.obj))
+        _deep_check(wp, t.cast("Mapping[str, str] | None", ctx.obj), schema_result.path)
 
     error = schema_result.error_msg
 
