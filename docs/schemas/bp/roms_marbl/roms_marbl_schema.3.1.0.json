@@ -1,0 +1,796 @@
+{
+    "$defs": {
+        "BlueprintIdentity": {
+            "additionalProperties": false,
+            "description": "Identifies a blueprint document by application, name and content hash.\n\nThis is identity, not location: compare `DeferredBlueprintRef`, which\nlocates the blueprint file an upstream step will write.",
+            "properties": {
+                "kind": {
+                    "const": "Blueprint",
+                    "description": "The kind of document referenced; selects the model a reference loads as.",
+                    "title": "Kind",
+                    "type": "string"
+                },
+                "application": {
+                    "description": "The application the referenced blueprint belongs to.",
+                    "minLength": 1,
+                    "title": "Application",
+                    "type": "string"
+                },
+                "name": {
+                    "description": "The name of the referenced blueprint.",
+                    "minLength": 1,
+                    "title": "Name",
+                    "type": "string"
+                },
+                "content_hash": {
+                    "default": "",
+                    "description": "A fingerprint of the referenced blueprint's configuration.",
+                    "title": "Content Hash",
+                    "type": "string"
+                }
+            },
+            "required": [
+                "kind",
+                "application",
+                "name"
+            ],
+            "title": "BlueprintIdentity",
+            "type": "object"
+        },
+        "BlueprintState": {
+            "description": "The allowed states for a work plan.",
+            "enum": [
+                "notset",
+                "draft",
+                "validated"
+            ],
+            "title": "BlueprintState",
+            "type": "string"
+        },
+        "CatalogSpecRef": {
+            "additionalProperties": false,
+            "description": "A reference to a catalog spec a document was derived from.",
+            "properties": {
+                "name": {
+                    "description": "The name of the referenced spec.",
+                    "minLength": 1,
+                    "title": "Name",
+                    "type": "string"
+                },
+                "origin": {
+                    "default": "",
+                    "description": "Where the spec came from, e.g. `catalog`, `custom` or `model_default`; empty when unknown.",
+                    "title": "Origin",
+                    "type": "string"
+                },
+                "modified": {
+                    "default": false,
+                    "description": "Whether the spec was edited after it was selected.",
+                    "title": "Modified",
+                    "type": "boolean"
+                },
+                "kind": {
+                    "description": "The kind of spec referenced.",
+                    "enum": [
+                        "ModelSpec",
+                        "DomainSpec",
+                        "ForcingSpec",
+                        "OutputSpec",
+                        "CdrSpec"
+                    ],
+                    "title": "Kind",
+                    "type": "string"
+                }
+            },
+            "required": [
+                "name",
+                "kind"
+            ],
+            "title": "CatalogSpecRef",
+            "type": "object"
+        },
+        "CodeRepository": {
+            "additionalProperties": false,
+            "description": "Reference to a remote code repository with optional path filtering\nand point-in-time specification.",
+            "properties": {
+                "documentation": {
+                    "default": "",
+                    "description": "Description of input data provenance; used in provenance roll-up.",
+                    "title": "Documentation",
+                    "type": "string"
+                },
+                "locked": {
+                    "default": false,
+                    "description": "Mutability of the parameter set.",
+                    "title": "Locked",
+                    "type": "boolean"
+                },
+                "location": {
+                    "anyOf": [
+                        {
+                            "format": "uri",
+                            "maxLength": 2083,
+                            "minLength": 1,
+                            "type": "string"
+                        },
+                        {
+                            "type": "string"
+                        }
+                    ],
+                    "description": "Location of the remote code repository.",
+                    "title": "Location"
+                },
+                "commit": {
+                    "default": "",
+                    "description": "A specific commit to be used.",
+                    "title": "Commit",
+                    "type": "string"
+                },
+                "branch": {
+                    "default": "",
+                    "description": "A specific branch to be used.",
+                    "title": "Branch",
+                    "type": "string"
+                },
+                "filter": {
+                    "anyOf": [
+                        {
+                            "$ref": "#/$defs/PathFilter"
+                        },
+                        {
+                            "type": "null"
+                        }
+                    ],
+                    "default": null,
+                    "description": "A filter specifying the files to be retrieved and persisted from the repository."
+                }
+            },
+            "required": [
+                "location"
+            ],
+            "title": "CodeRepository",
+            "type": "object"
+        },
+        "Dataset": {
+            "additionalProperties": false,
+            "description": "A dataset contains a data block alongside documentation and locking fields.",
+            "properties": {
+                "documentation": {
+                    "default": "",
+                    "description": "Description of input data provenance; used in provenance roll-up.",
+                    "title": "Documentation",
+                    "type": "string"
+                },
+                "locked": {
+                    "default": false,
+                    "description": "Mutability of the parameter set.",
+                    "title": "Locked",
+                    "type": "boolean"
+                },
+                "data": {
+                    "description": "A list of one or more data resources.",
+                    "items": {
+                        "anyOf": [
+                            {
+                                "$ref": "#/$defs/Resource"
+                            },
+                            {
+                                "$ref": "#/$defs/VersionedResource"
+                            }
+                        ]
+                    },
+                    "title": "Data",
+                    "type": "array"
+                }
+            },
+            "required": [
+                "data"
+            ],
+            "title": "Dataset",
+            "type": "object"
+        },
+        "ForcingConfiguration": {
+            "additionalProperties": false,
+            "description": "Configuration of the forcing parameters of the model.",
+            "properties": {
+                "boundary": {
+                    "$ref": "#/$defs/Dataset",
+                    "description": "Boundary forcing."
+                },
+                "surface": {
+                    "$ref": "#/$defs/Dataset",
+                    "description": "Surface forcing"
+                },
+                "tidal": {
+                    "anyOf": [
+                        {
+                            "$ref": "#/$defs/Dataset"
+                        },
+                        {
+                            "type": "null"
+                        }
+                    ],
+                    "default": null,
+                    "description": "Tidal forcing."
+                },
+                "river": {
+                    "anyOf": [
+                        {
+                            "$ref": "#/$defs/Dataset"
+                        },
+                        {
+                            "type": "null"
+                        }
+                    ],
+                    "default": null,
+                    "description": "River forcing."
+                },
+                "corrections": {
+                    "anyOf": [
+                        {
+                            "$ref": "#/$defs/Dataset"
+                        },
+                        {
+                            "type": "null"
+                        }
+                    ],
+                    "default": null,
+                    "description": "Wind or other forcing corrections."
+                }
+            },
+            "required": [
+                "boundary",
+                "surface"
+            ],
+            "title": "ForcingConfiguration",
+            "type": "object"
+        },
+        "GeneratedBy": {
+            "additionalProperties": false,
+            "description": "The event that produced a document.",
+            "properties": {
+                "tool": {
+                    "description": "The producer: an application such as `forge`, or another C-Star tool such\nas `wizard`. Not validated against the application registry, as not every\nproducer is an application.",
+                    "minLength": 1,
+                    "title": "Tool",
+                    "type": "string"
+                },
+                "id": {
+                    "description": "Identifies this event, so a copied or edited document still says where it\ncame from. A uuid4 minted when the model is created and never recomputed: a\nvalue loaded from a file is kept.",
+                    "minLength": 1,
+                    "title": "Id",
+                    "type": "string"
+                },
+                "system": {
+                    "default": "",
+                    "description": "The C-Star system the producer ran on; empty if unknown.",
+                    "title": "System",
+                    "type": "string"
+                },
+                "versions": {
+                    "additionalProperties": {
+                        "type": "string"
+                    },
+                    "description": "The versions of the packages involved, keyed by package name.",
+                    "title": "Versions",
+                    "type": "object"
+                },
+                "run_id": {
+                    "default": "",
+                    "description": "The workplan run id, when a workplan step produced the document.",
+                    "title": "Run Id",
+                    "type": "string"
+                },
+                "working_dir": {
+                    "default": "",
+                    "description": "Where the producer wrote its artifacts; informational, as artifacts can\nmove.",
+                    "title": "Working Dir",
+                    "type": "string"
+                }
+            },
+            "required": [
+                "tool"
+            ],
+            "title": "GeneratedBy",
+            "type": "object"
+        },
+        "PartitioningParameterSet": {
+            "additionalProperties": false,
+            "description": "Parameters for the partitioning of the model.\n\nNamelist overrides of the processor grid (`np_xi`/`np_eta` in\n`param_settings`) must agree with these parameters; the partitioning is\nauthoritative for the processor grid at runtime.",
+            "properties": {
+                "documentation": {
+                    "default": "",
+                    "description": "Description of input data provenance; used in provenance roll-up.",
+                    "title": "Documentation",
+                    "type": "string"
+                },
+                "locked": {
+                    "default": false,
+                    "description": "Mutability of the parameter set.",
+                    "title": "Locked",
+                    "type": "boolean"
+                },
+                "hash": {
+                    "anyOf": [
+                        {
+                            "type": "string"
+                        },
+                        {
+                            "type": "null"
+                        }
+                    ],
+                    "default": null,
+                    "description": "Hash used to verify the parameters are unchanged.",
+                    "title": "Hash"
+                },
+                "n_procs_x": {
+                    "anyOf": [
+                        {
+                            "exclusiveMinimum": 0,
+                            "type": "integer"
+                        },
+                        {
+                            "type": "null"
+                        }
+                    ],
+                    "default": null,
+                    "description": "Number of processes used to subdivide the domain on the x-axis.",
+                    "title": "N Procs X"
+                },
+                "n_procs_y": {
+                    "anyOf": [
+                        {
+                            "exclusiveMinimum": 0,
+                            "type": "integer"
+                        },
+                        {
+                            "type": "null"
+                        }
+                    ],
+                    "default": null,
+                    "description": "Number of processes used to subdivide the domain on the y-axis.",
+                    "title": "N Procs Y"
+                },
+                "use_pio": {
+                    "default": false,
+                    "description": "Use the ParallelIO library for model input/output.",
+                    "title": "Use Pio",
+                    "type": "boolean"
+                },
+                "auto_tiling": {
+                    "default": false,
+                    "description": "Automatically determine the tiling layout instead of using `n_procs_x`/`n_procs_y`.\n\nNOTE: this feature is in development.",
+                    "title": "Auto Tiling",
+                    "type": "boolean"
+                },
+                "n_cores": {
+                    "anyOf": [
+                        {
+                            "exclusiveMinimum": 0,
+                            "type": "integer"
+                        },
+                        {
+                            "type": "null"
+                        }
+                    ],
+                    "default": null,
+                    "description": "Total number of cores to use when `auto_tiling` selects the tiling layout.",
+                    "title": "N Cores"
+                }
+            },
+            "title": "PartitioningParameterSet",
+            "type": "object"
+        },
+        "PathFilter": {
+            "additionalProperties": false,
+            "description": "A filter used to specify a subset of files.",
+            "properties": {
+                "directory": {
+                    "anyOf": [
+                        {
+                            "type": "string"
+                        },
+                        {
+                            "type": "null"
+                        }
+                    ],
+                    "default": "",
+                    "description": "Subdirectory that should be searched or kept.",
+                    "title": "Directory"
+                },
+                "files": {
+                    "description": "List of specific file names that must be kept.\n\nFile name filtering is combined with the directory filter, if one\nis provided.",
+                    "items": {
+                        "type": "string"
+                    },
+                    "title": "Files",
+                    "type": "array"
+                }
+            },
+            "title": "PathFilter",
+            "type": "object"
+        },
+        "Provenance": {
+            "additionalProperties": false,
+            "description": "Records what produced a document and what it was derived from.\n\nApplications may subclass it to add application-specific fields.",
+            "properties": {
+                "generated_at": {
+                    "anyOf": [
+                        {
+                            "format": "date-time",
+                            "type": "string"
+                        },
+                        {
+                            "type": "null"
+                        }
+                    ],
+                    "default": null,
+                    "description": "When the document was generated.",
+                    "title": "Generated At"
+                },
+                "generated_by": {
+                    "anyOf": [
+                        {
+                            "$ref": "#/$defs/GeneratedBy"
+                        },
+                        {
+                            "type": "null"
+                        }
+                    ],
+                    "default": null,
+                    "description": "The event that produced the document."
+                },
+                "derived_from": {
+                    "description": "The blueprints and catalog specs the document was derived from.",
+                    "items": {
+                        "discriminator": {
+                            "mapping": {
+                                "Blueprint": "#/$defs/BlueprintIdentity",
+                                "CdrSpec": "#/$defs/CatalogSpecRef",
+                                "DomainSpec": "#/$defs/CatalogSpecRef",
+                                "ForcingSpec": "#/$defs/CatalogSpecRef",
+                                "ModelSpec": "#/$defs/CatalogSpecRef",
+                                "OutputSpec": "#/$defs/CatalogSpecRef"
+                            },
+                            "propertyName": "kind"
+                        },
+                        "oneOf": [
+                            {
+                                "$ref": "#/$defs/BlueprintIdentity"
+                            },
+                            {
+                                "$ref": "#/$defs/CatalogSpecRef"
+                            }
+                        ]
+                    },
+                    "title": "Derived From",
+                    "type": "array"
+                }
+            },
+            "title": "Provenance",
+            "type": "object"
+        },
+        "ROMSCompositeCodeRepository": {
+            "additionalProperties": false,
+            "description": "Collection of repositories used to build, configure, and execute ROMS.",
+            "properties": {
+                "roms": {
+                    "$ref": "#/$defs/CodeRepository",
+                    "description": "The baseline ROMS repository."
+                },
+                "run_time": {
+                    "$ref": "#/$defs/CodeRepository",
+                    "description": "Codebase used to modify the runtime behavior of ROMS."
+                },
+                "compile_time": {
+                    "$ref": "#/$defs/CodeRepository",
+                    "description": "Codebase used to modify base ROMS compilation."
+                },
+                "marbl": {
+                    "anyOf": [
+                        {
+                            "$ref": "#/$defs/CodeRepository"
+                        },
+                        {
+                            "type": "null"
+                        }
+                    ],
+                    "default": null,
+                    "description": "Codebase used to add MARBL to the simulation."
+                },
+                "pio": {
+                    "anyOf": [
+                        {
+                            "$ref": "#/$defs/CodeRepository"
+                        },
+                        {
+                            "type": "null"
+                        }
+                    ],
+                    "default": null,
+                    "description": "Codebase used to add the ParallelIO library to the simulation."
+                }
+            },
+            "required": [
+                "roms",
+                "run_time",
+                "compile_time"
+            ],
+            "title": "ROMSCompositeCodeRepository",
+            "type": "object"
+        },
+        "Resource": {
+            "additionalProperties": false,
+            "properties": {
+                "location": {
+                    "anyOf": [
+                        {
+                            "format": "file-path",
+                            "type": "string"
+                        },
+                        {
+                            "format": "uri",
+                            "maxLength": 2083,
+                            "minLength": 1,
+                            "type": "string"
+                        },
+                        {
+                            "type": "string"
+                        }
+                    ],
+                    "description": "Location of the file to retrieve.",
+                    "title": "Location"
+                },
+                "partitioned": {
+                    "default": false,
+                    "description": "Flag indicating whether the resource is pre-partitioned.",
+                    "title": "Partitioned",
+                    "type": "boolean"
+                }
+            },
+            "required": [
+                "location"
+            ],
+            "title": "Resource",
+            "type": "object"
+        },
+        "RuntimeParameterSet": {
+            "additionalProperties": false,
+            "description": "Parameters for the execution of the model.\n\nThese parameters can be varied (within bounds defined elsewhere in the blueprint, e.g. valid_start/end_date),\nwithout changing the validity of the model solution.",
+            "properties": {
+                "documentation": {
+                    "default": "",
+                    "description": "Description of input data provenance; used in provenance roll-up.",
+                    "title": "Documentation",
+                    "type": "string"
+                },
+                "locked": {
+                    "default": false,
+                    "description": "Mutability of the parameter set.",
+                    "title": "Locked",
+                    "type": "boolean"
+                },
+                "hash": {
+                    "anyOf": [
+                        {
+                            "type": "string"
+                        },
+                        {
+                            "type": "null"
+                        }
+                    ],
+                    "default": null,
+                    "description": "Hash used to verify the parameters are unchanged.",
+                    "title": "Hash"
+                },
+                "start_date": {
+                    "description": "Start of data time range to be used in the simulation.",
+                    "format": "date-time",
+                    "title": "Start Date",
+                    "type": "string"
+                },
+                "end_date": {
+                    "description": "End of data time range to be used in the simulation.",
+                    "format": "date-time",
+                    "title": "End Date",
+                    "type": "string"
+                },
+                "checkpoint_frequency": {
+                    "default": "1d",
+                    "description": "Time period between creation of checkpoint files.\n\nSupply a string representing the desired time period, such as:\n- every day: \"1d\"\n- every week: \"1w\"\n- every month: \"1m\" or \"4w\" or \"31d\"\n- every 2.5 days: \"2d 12h\" or \"60h\"\n\nA short time period will reduce data re-processing upon restart at the cost\nof additional disk usage and compute used for checkpointing.",
+                    "minLength": 2,
+                    "pattern": "([1-9][0-9]*)([hdwmy])",
+                    "title": "Checkpoint Frequency",
+                    "type": "string"
+                }
+            },
+            "required": [
+                "start_date",
+                "end_date"
+            ],
+            "title": "RuntimeParameterSet",
+            "type": "object"
+        },
+        "VersionedResource": {
+            "additionalProperties": false,
+            "description": "A physical asset that is used as an input or configuration and\nhas an associated hash used to identify a specific version.",
+            "properties": {
+                "location": {
+                    "anyOf": [
+                        {
+                            "format": "file-path",
+                            "type": "string"
+                        },
+                        {
+                            "format": "uri",
+                            "maxLength": 2083,
+                            "minLength": 1,
+                            "type": "string"
+                        },
+                        {
+                            "type": "string"
+                        }
+                    ],
+                    "description": "Location of the file to retrieve.",
+                    "title": "Location"
+                },
+                "partitioned": {
+                    "default": false,
+                    "description": "Flag indicating whether the resource is pre-partitioned.",
+                    "title": "Partitioned",
+                    "type": "boolean"
+                },
+                "hash": {
+                    "description": "Expected hash of the file.",
+                    "minLength": 1,
+                    "title": "Hash",
+                    "type": "string"
+                }
+            },
+            "required": [
+                "location",
+                "hash"
+            ],
+            "title": "VersionedResource",
+            "type": "object"
+        }
+    },
+    "additionalProperties": false,
+    "description": "Blueprint schema for running a ROMS-MARBL simulation.",
+    "properties": {
+        "name": {
+            "description": "A unique, user-friendly name for this blueprint.",
+            "minLength": 1,
+            "title": "Name",
+            "type": "string"
+        },
+        "description": {
+            "description": "A user-friendly description of the scenario to be executed by the blueprint.",
+            "minLength": 1,
+            "title": "Description",
+            "type": "string"
+        },
+        "application": {
+            "default": "roms_marbl",
+            "description": "The process type to be executed by the blueprint.",
+            "title": "Application",
+            "type": "string"
+        },
+        "state": {
+            "$ref": "#/$defs/BlueprintState",
+            "default": "notset",
+            "description": "The current validation status of the blueprint."
+        },
+        "schema_version": {
+            "default": "3.1.0",
+            "description": "The blueprint schema version.",
+            "title": "Schema Version",
+            "type": "string"
+        },
+        "working_dir": {
+            "anyOf": [
+                {
+                    "format": "path",
+                    "type": "string"
+                },
+                {
+                    "type": "null"
+                }
+            ],
+            "default": null,
+            "description": "Directory the application writes to; omitted, C-Star uses ``CSTAR_DATA_HOME/blueprint_runs/<application>/<name>``.",
+            "title": "Working Dir"
+        },
+        "provenance": {
+            "$ref": "#/$defs/Provenance",
+            "description": "What produced this blueprint and what it was derived from; empty when not recorded."
+        },
+        "valid_start_date": {
+            "description": "Beginning of the time range for the available data.",
+            "format": "date-time",
+            "title": "Valid Start Date",
+            "type": "string"
+        },
+        "valid_end_date": {
+            "description": "End of the time range for the available data.",
+            "format": "date-time",
+            "title": "Valid End Date",
+            "type": "string"
+        },
+        "code": {
+            "$ref": "#/$defs/ROMSCompositeCodeRepository",
+            "description": "Code repositories used to build, configure, and execute the ROMS simulation."
+        },
+        "initial_conditions": {
+            "$ref": "#/$defs/Dataset",
+            "description": "File containing the starting conditions of the simulation.",
+            "maxLength": 1,
+            "minLength": 1
+        },
+        "grid": {
+            "$ref": "#/$defs/Dataset",
+            "description": "File defining the grid geometry.",
+            "maxLength": 1,
+            "minLength": 1
+        },
+        "forcing": {
+            "$ref": "#/$defs/ForcingConfiguration",
+            "description": "Forcing configuration."
+        },
+        "partitioning": {
+            "$ref": "#/$defs/PartitioningParameterSet",
+            "description": "User-defined partitioning parameters."
+        },
+        "runtime_params": {
+            "$ref": "#/$defs/RuntimeParameterSet",
+            "description": "User-defined runtime parameters."
+        },
+        "cdr_forcing": {
+            "anyOf": [
+                {
+                    "$ref": "#/$defs/Dataset"
+                },
+                {
+                    "type": "null"
+                }
+            ],
+            "default": null,
+            "description": "Location of CDR input file for this run. Optional. User has more control over this compared to other forcing."
+        },
+        "nesting_info": {
+            "anyOf": [
+                {
+                    "$ref": "#/$defs/Dataset"
+                },
+                {
+                    "type": "null"
+                }
+            ],
+            "default": null,
+            "description": "Location of nesting info input file for this run. Optional."
+        },
+        "namelist_overrides": {
+            "additionalProperties": {
+                "additionalProperties": true,
+                "type": "object"
+            },
+            "description": "Mapping of ROMS namelist group to key/value overrides.\n\nThese overrides are layered onto the runtime namelist LAST, after C-Star's\nown derived settings, so they take precedence over anything C-Star would\notherwise compute; list values replace the existing list wholesale.\n\nGroup and key names are checked when the blueprint is validated: unknown\nnames are an error when `code.roms` pins a release version, and a warning\n(against the best-guess schema) otherwise. Values are validated at runtime\nagainst the namelist schema for the pinned ucla-roms version. See the\n:class:`PartitioningParameterSet` documentation for potential conflicts\nwith the partitioning configuration.",
+            "title": "Namelist Overrides",
+            "type": "object"
+        }
+    },
+    "required": [
+        "name",
+        "description",
+        "valid_start_date",
+        "valid_end_date",
+        "code",
+        "initial_conditions",
+        "grid",
+        "forcing",
+        "partitioning",
+        "runtime_params"
+    ],
+    "title": "RomsMarblBlueprint",
+    "type": "object"
+}

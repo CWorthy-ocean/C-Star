@@ -10,6 +10,7 @@ import yaml
 
 from cstar.applications.core import EmittedBlueprint
 from cstar.orchestration.models import (
+    BlueprintIdentity,
     DeferredBlueprintRef,
     InlineBlueprintRef,
     RunRef,
@@ -325,6 +326,7 @@ def test_forge_then_run_matches_wizard_export() -> None:
     emitted = EmittedBlueprint(
         filename="B_x.yaml",
         application="roms_marbl",
+        producer=BlueprintIdentity(kind="Blueprint", application="forge", name="x"),
         cpus_needed=32,
         start_date=dt(2012, 1, 1),
         end_date=dt(2012, 2, 1),
@@ -631,6 +633,30 @@ class TestNormalizeLegacy:
         normalized, changes = normalize_legacy(wp)
         assert changes == []
         assert not any(s.is_inline for s in normalized.steps)
+
+    def test_provenance_is_not_blueprint_configuration(self, tmp_path: Path) -> None:
+        """A recorded provenance does not keep an otherwise covered blueprint file
+        from being inlined.
+        """
+        file = tmp_path / "n.yaml"
+        file.write_text(
+            yaml.safe_dump(
+                {
+                    "application": "nest_ic",
+                    "parent_rst": "/r",
+                    "provenance": {"generated_by": {"tool": "wizard", "id": "i"}},
+                }
+            )
+        )
+        step = Step(
+            name="covered",
+            application="nest_ic",
+            blueprint=str(file),
+            blueprint_overrides={"parent_rst": "/r"},
+        )
+        wp = Workplan(name="w", description="w", steps=[step])
+        normalized, _ = normalize_legacy(wp)
+        assert normalized.steps[0].is_inline
 
 
 class TestRestarts:

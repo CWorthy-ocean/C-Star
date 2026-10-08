@@ -68,27 +68,98 @@ from enum import StrEnum
 from importlib.metadata import PackageNotFoundError
 from importlib.metadata import version as _pkg_version
 from pathlib import Path
-from typing import Any, Literal, get_args
+from typing import TYPE_CHECKING, Any, Literal, get_args
 
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
-from cstar.orchestration.models import Blueprint
+from cstar.orchestration.models import (
+    Blueprint,
+    BlueprintIdentity,
+    CatalogSpecRef,
+    GeneratedBy,
+    Provenance,
+    SpecSelection,
+)
+
+if TYPE_CHECKING:
+    from cstar.orchestration.models import CatalogSpecKind
+
+
+def _package_version(package_name: str) -> str | None:
+    """Best-effort installed version of ``package_name``, or ``None`` if it isn't
+    installed. No git-describe step is needed: both ``cstar-ocean`` and
+    ``roms-tools`` version themselves via ``setuptools_scm``, so an editable/dev
+    checkout's installed version already embeds commit info (e.g.
+    ``0.8.1.dev2+gcb931baef`` -- the same string ``cstar.__version__`` itself
+    resolves to, via this same ``importlib.metadata`` lookup on ``"cstar-ocean"``).
+    Never raises.
+    """
+    try:
+        return _pkg_version(package_name)
+    except PackageNotFoundError:
+        return None
 
 
 def _installed_version(package_name: str) -> str | None:
-    """Best-effort installed version of ``package_name``, or ``None`` if it isn't
-    installed. Backs ``provenance.cstar_version``/``roms_tools_version``. No
-    git-describe step is needed: both ``cstar-ocean`` and ``roms-tools`` version
-    themselves via ``setuptools_scm``, so an editable/dev checkout's installed
-    version already embeds commit info (e.g. ``0.8.1.dev2+gcb931baef`` -- the
-    same string ``cstar.__version__`` itself resolves to, via this same
-    ``importlib.metadata`` lookup on ``"cstar-ocean"``). Never raises.
+    """``name==version`` for ``package_name``, or ``None`` if it isn't installed.
+    Backs the run-log version banner (``cstar.applications.forge.runtime``); the
+    versions a blueprint records come from :func:`generation_versions`.
     """
+    version = _package_version(package_name)
+    return None if version is None else f"{package_name}=={version}"
+
+
+# The packages whose versions shape forge output.
+_GENERATION_PACKAGES = ("cstar-ocean", "roms-tools")
+
+
+def generation_versions() -> dict[str, str]:
+    """The installed versions of the packages that shape forge output, keyed by
+    package name (``{"cstar-ocean": "0.16.0", "roms-tools": "3.2.1"}``) -- the value
+    of ``GeneratedBy.versions``. A package that isn't installed is left out.
+    """
+    return {
+        name: version
+        for name in _GENERATION_PACKAGES
+        if (version := _package_version(name)) is not None
+    }
+
+
+def _system_name() -> str:
+    """The C-Star system this process runs on, or ``""`` when it can't be named.
+
+    Best effort: the name is informational metadata in ``generated_by``, never
+    configuration, so a host C-Star cannot identify must not stop a blueprint from
+    being stamped.
+    """
+    # Lazy: keeps importing the schema module light (see the module docstring).
+    from cstar.system.manager import HostNameEvaluator
+
     try:
-        return f"{package_name}=={_pkg_version(package_name)}"
-    except PackageNotFoundError:
-        return None
+        return HostNameEvaluator().name
+    except OSError:
+        return ""
+
+
+def new_generated_by(
+    tool: str, *, run_id: str = "", working_dir: str = ""
+) -> GeneratedBy:
+    """A `GeneratedBy` for an event of ``tool`` happening now, on this system.
+
+    Fills ``system`` and ``versions`` from the running environment (see
+    :func:`generation_versions`); ``GeneratedBy`` mints the ``id`` itself. Pass
+    ``run_id`` and ``working_dir`` when a workplan step is the producer. Call this
+    wherever a forge-side producer (the wizard, the engine) records itself, so
+    every record carries the same fields.
+    """
+    return GeneratedBy(
+        tool=tool,
+        system=_system_name(),
+        versions=generation_versions(),
+        run_id=run_id,
+        working_dir=working_dir,
+    )
 
 
 # ===========================================================================
@@ -364,7 +435,15 @@ _HASH_EXCLUDE = {
 # ``model_settings.cdr_tracer_output`` section is now ``cdr_lite_output`` (its
 # ``do_cdr_tracer_output`` flag ``do_cdr_lite_output``) for every ucla-roms
 # release, and ``cdr_lite`` (``cdr_online_carbonate_sensitivity``) is new.
-# Migration renames the section and flag.
+# Migration renames the section and flag. The same bump: ``provenance`` builds on the ``Blueprint`` base's provenance block
+# (``ForgeProvenance``): the producing event is recorded in ``generated_by`` (tool,
+# id, system, package versions), re-stamped by ``ForgeBlueprint.stamp_provenance``
+# whenever the content hash changes or none is recorded yet; ``cstar_version``/
+# ``roms_tools_version`` are legacy and no longer stamped. This is an explicit
+# exception to the "additive fields don't bump" rule above: newly saved files carry
+# ``provenance.generated_by``, which v9 builds reject as an unknown key, so the bump
+# makes an older install say "upgrade cstar-ocean" instead; and ``composition``
+# spec names are plain strings (``name: null`` becomes ``""``, applied on every load).
 FORGE_BLUEPRINT_VERSION = 10
 
 # Identifies the C-Star application that CONSUMES this blueprint — i.e. the "forge"
@@ -379,6 +458,79 @@ def emitted_blueprint_filename(name: str) -> str:
     ``name`` emits.
     """
     return f"B_{name}.yaml"
+
+
+def emitted_blueprint_description(name: str, description: str) -> str:
+    """Return the ``description`` of the ``roms_marbl`` blueprint a forge run emits
+    from the forge blueprint ``name``, whose own description is ``description``.
+    """
+    return (
+        "ROMS-MARBL blueprint generated by the forge application, based on the "
+        f'Forge blueprint "{name}", with the following description: {description}'
+    )
+
+
+def producer_ref(blueprint: ForgeBlueprint) -> BlueprintIdentity:
+    """Return the reference to ``blueprint`` that the ``roms_marbl`` blueprint
+    emitted by a forge run of it records as its producer.
+
+    Use this wherever a forge-emitted blueprint names its producer, so every
+    record of the producer agrees.
+    """
+    return BlueprintIdentity(
+        kind="Blueprint",
+        application=DEFAULT_APPLICATION,
+        name=blueprint.name,
+        content_hash=blueprint.content_hash(),
+    )
+
+
+# The catalog spec kind each ``Composition`` entry records, in the order an
+# emitted blueprint lists them.
+_COMPOSITION_SPEC_KINDS: dict[str, CatalogSpecKind] = {
+    "model": "ModelSpec",
+    "domain": "DomainSpec",
+    "forcing": "ForcingSpec",
+    "cdr": "CdrSpec",
+    "output": "OutputSpec",
+}
+
+
+def composition_refs(composition: Composition) -> list[CatalogSpecRef]:
+    """Return a reference to each catalog spec ``composition`` records by name.
+
+    A spec with no name was authored from scratch, so has nothing to reference.
+    """
+    return [
+        CatalogSpecRef(kind=kind, **spec.model_dump())
+        for field, kind in _COMPOSITION_SPEC_KINDS.items()
+        if (spec := getattr(composition, field)).name
+    ]
+
+
+def emitted_provenance(
+    blueprint: ForgeBlueprint, *, run_id: str = "", working_dir: str = ""
+) -> Provenance:
+    """Return the provenance of the ``roms_marbl`` blueprint a forge run of
+    ``blueprint`` emits.
+
+    The single place an emitted blueprint's provenance is assembled. It records a
+    forge event happening now (:func:`new_generated_by`, which takes ``run_id``
+    and ``working_dir``), derived from ``blueprint`` itself (:func:`producer_ref`)
+    and the catalog specs it was composed from (:func:`composition_refs`). The
+    base :class:`~cstar.orchestration.models.Provenance`, not
+    :class:`ForgeProvenance`: the emitted blueprint is a ``roms_marbl`` one.
+    """
+    return Provenance(
+        generated_at=datetime.now(UTC),
+        generated_by=new_generated_by(
+            DEFAULT_APPLICATION, run_id=run_id, working_dir=working_dir
+        ),
+        derived_from=[
+            producer_ref(blueprint),
+            *composition_refs(blueprint.composition),
+        ],
+    )
 
 
 _NAME_UNSAFE_RE = re.compile(r"[^A-Za-z0-9._-]+")
@@ -1206,17 +1358,17 @@ class Code(_Section):
 # ===========================================================================
 # Composition (which catalog specs produced this config) & provenance
 # ===========================================================================
-class SpecRef(_Section):
+class SpecRef(SpecSelection):
     """Records where one composable spec (model / domain / forcing) came from.
 
     Supports the "pick from a catalog or build your own" workflow: a UI can show,
     for each spec, whether it was a catalog selection (and which one), whether the
-    user edited it, or whether it was authored from scratch.
+    user edited it, or whether it was authored from scratch. The fields are the
+    shared :class:`~cstar.orchestration.models.SpecSelection`; only the default
+    origin differs, since an unrecorded spec was authored by hand.
     """
 
-    name: str | None = None  # catalog entry name, or None if authored from scratch
-    origin: str = "custom"  # "catalog" | "custom" | "model_default"
-    modified: bool = False  # True if a catalog spec was edited after selection
+    origin: str = Field(default="custom")  # "catalog" | "custom" | "model_default"
 
 
 class Composition(_Section):
@@ -1227,6 +1379,10 @@ class Composition(_Section):
     surface/boundary/tidal/river). ``cdr`` corresponds to the top-level ``cdr``
     section (:class:`CdrSpec`) -- CDR is its own independently composable spec,
     not part of ``forcing``.
+
+    The emitted ``roms_marbl`` blueprint records each named spec as a
+    ``derived_from`` reference (:func:`composition_refs`); a new entry here needs
+    its kind in ``_COMPOSITION_SPEC_KINDS``.
     """
 
     model: SpecRef = Field(default_factory=SpecRef)
@@ -1242,24 +1398,27 @@ class Composition(_Section):
     overrides: dict[str, Any] = Field(default_factory=dict)
 
 
-class Provenance(_Section):
-    """Audit trail. ``generated_at``/``cstar_version``/``roms_tools_version`` are
-    never computed inside the resolver (to keep resolution deterministic/
-    reproducible, and because ``roms_tools`` isn't guaranteed installed there) --
-    ``ForgeBlueprint.to_yaml_str`` stamps each on first save only (a later resave
-    preserves the original value, same as an explicit constructor override); a
-    caller may still pass one explicitly (e.g. carrying an original value
-    forward through a re-resolve).
+class ForgeProvenance(Provenance):
+    """Audit trail: the ``Blueprint`` base's provenance block (``generated_at``,
+    ``generated_by``, ``derived_from``) plus a content hash and notes.
 
-    ``forge_version`` is a legacy field: blueprints written by the former
-    standalone cstar-forge package recorded a ``git describe`` of its checkout.
-    Forge now ships in ``cstar-ocean`` as ``cstar.applications.forge``, so its
-    provenance is just ``cstar_version`` (below) -- ``forge_version`` is no
-    longer stamped and is kept only, as ``None`` on every newly-saved file, so
-    older blueprints that do carry a value still load and round-trip.
+    Who produced the file, where and when lives in ``generated_by``, whose
+    ``versions`` hold the package versions involved. It is never filled inside the
+    resolver (to keep resolution deterministic/reproducible, and because
+    ``roms_tools`` isn't guaranteed installed there): ``stamp_provenance`` (on
+    ``ForgeBlueprint``) records it when the content changes or has never been
+    stamped, and a caller carrying a loaded value through a re-resolve passes it
+    back in unchanged. ``derived_from`` stays empty -- a forge blueprint's inputs
+    are recorded in ``composition``.
+
+    ``forge_version``, ``cstar_version`` and ``roms_tools_version`` are legacy
+    fields, no longer stamped (``generated_by.versions`` replaces them). Files
+    written before v10 carry them, and they still load and round-trip; stamping
+    clears them. ``forge_version`` predates v10: blueprints written by the former
+    standalone cstar-forge package recorded a ``git describe`` of its checkout,
+    and Forge now ships in ``cstar-ocean`` as ``cstar.applications.forge``.
     """
 
-    generated_at: datetime | None = None
     forge_version: str | None = None
     cstar_version: str | None = None
     roms_tools_version: str | None = None
@@ -1326,7 +1485,9 @@ class ForgeBlueprint(Blueprint):
     # nt_cdr_dor; see ForgeBlueprint.n_tracers). marbl is read from model_settings["cppdefs"]["marbl"].
     code: Code
     composition: Composition = Field(default_factory=Composition)
-    provenance: Provenance = Field(default_factory=Provenance)
+    # Narrows the ``Blueprint`` base field to forge's block. Pydantic keeps a
+    # redeclared field at its base position, so ``to_yaml_str`` moves it to the end.
+    provenance: ForgeProvenance = Field(default_factory=ForgeProvenance)
 
     @model_validator(mode="before")
     @classmethod
@@ -1507,6 +1668,40 @@ class ForgeBlueprint(Blueprint):
         blob = json.dumps(data, sort_keys=True, separators=(",", ":"))
         return hashlib.sha256(blob.encode("utf-8")).hexdigest()
 
+    # ---- provenance ----
+    def stamp_provenance(self, tool: str) -> ForgeBlueprint:
+        """Return this blueprint with its provenance stamped as written by ``tool``.
+
+        Provenance records the event that produced the *content*, so it is
+        stamped when the content changed, or when it has never been stamped. While
+        the recorded ``content_hash`` still matches and a ``generated_by`` is
+        recorded (a resave, an unchanged round trip), ``self`` comes back as is and
+        keeps its ``generated_by.id`` and ``generated_at``; a matching hash alone is
+        not enough, as :meth:`to_yaml_str` records it on every write, stamped or
+        not. Otherwise the copy takes the new hash, ``generated_at`` now (UTC) and a
+        fresh ``generated_by`` (see :func:`new_generated_by`), and the legacy
+        version fields are cleared (``generated_by.versions`` replaces them).
+        ``notes`` and ``override_files_applied`` are kept; ``self`` is never
+        mutated.
+        """
+        content_hash = self.content_hash()
+        if (
+            content_hash == self.provenance.content_hash
+            and self.provenance.generated_by is not None
+        ):
+            return self
+        stamped = self.provenance.model_copy(
+            update={
+                "content_hash": content_hash,
+                "generated_at": datetime.now(UTC),
+                "generated_by": new_generated_by(tool),
+                "forge_version": None,
+                "cstar_version": None,
+                "roms_tools_version": None,
+            }
+        )
+        return self.model_copy(update={"provenance": stamped})
+
     # ---- serialization ----
     def to_yaml(self, path: str | Path) -> Path:
         """Write the authoritative config to ``path`` and return it."""
@@ -1515,22 +1710,17 @@ class ForgeBlueprint(Blueprint):
         return path
 
     def to_yaml_str(self) -> str:
-        # Stamp provenance on the way out (the hash itself excludes provenance, so
-        # this doesn't perturb it). content_hash always recomputes (it must reflect
-        # current content, for hand-edit detection); generated_at/cstar_version/
-        # roms_tools_version are stamped only if not already set -- first save
-        # wins, so a later resave preserves the original values. forge_version is
-        # a legacy field and no longer stamped (see Provenance's docstring).
-        prov = self.provenance
-        updates: dict[str, Any] = {"content_hash": self.content_hash()}
-        if prov.generated_at is None:
-            updates["generated_at"] = datetime.now(UTC)
-        if prov.cstar_version is None:
-            updates["cstar_version"] = _installed_version("cstar-ocean")
-        if prov.roms_tools_version is None:
-            updates["roms_tools_version"] = _installed_version("roms-tools")
+        # Serializing records only the fingerprint: content_hash always recomputes
+        # (the hash itself excludes provenance, so this doesn't perturb it) so it
+        # reflects current content, for hand-edit detection. Who wrote the file and
+        # when is ``stamp_provenance``'s job -- a caller that is producing the
+        # file stamps first -- so writing never mints a new identity.
         stamped = self.model_copy(
-            update={"provenance": prov.model_copy(update=updates)}
+            update={
+                "provenance": self.provenance.model_copy(
+                    update={"content_hash": self.content_hash()}
+                )
+            }
         )
         # ``exclude_none=False`` keeps explicit nulls, so an unset ``working_dir``
         # (the default) is dropped by name: a saved file simply has no such line.
@@ -1539,6 +1729,13 @@ class ForgeBlueprint(Blueprint):
             exclude_none=False,
             exclude={"working_dir"} if stamped.working_dir is None else None,
         )
+        # Pydantic keeps the narrowed ``provenance`` field at its ``Blueprint``
+        # base position; saved files have it last. Forge files never populate
+        # ``derived_from`` (``composition`` is their record): drop an empty one.
+        provenance = data.pop("provenance")
+        if not provenance["derived_from"]:
+            del provenance["derived_from"]
+        data["provenance"] = provenance
         return yaml.safe_dump(data, sort_keys=False, default_flow_style=False)
 
     @classmethod

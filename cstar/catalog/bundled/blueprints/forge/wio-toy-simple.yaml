@@ -485,7 +485,7 @@ composition:
     origin: catalog
     modified: false
   cdr:
-    name: null
+    name: ''
     origin: custom
     modified: false
   output:

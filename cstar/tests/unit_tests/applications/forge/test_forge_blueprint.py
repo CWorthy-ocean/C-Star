@@ -12,8 +12,9 @@ assertions were validated standalone during development.
 """
 
 import logging
+import typing as t
 import warnings
-from datetime import date, datetime
+from datetime import UTC, date, datetime
 from pathlib import Path
 
 import numpy as np
@@ -24,16 +25,34 @@ import yaml
 import cstar
 import cstar.catalog
 from cstar.applications.forge.app import ForgeApplication
-from cstar.applications.forge.blueprint import FORGE_BLUEPRINT_VERSION, ForgeBlueprint
+from cstar.applications.forge.blueprint import (
+    _COMPOSITION_SPEC_KINDS,
+    FORGE_BLUEPRINT_VERSION,
+    Composition,
+    ForgeBlueprint,
+    ForgeProvenance,
+    SpecRef,
+    composition_refs,
+    emitted_blueprint_description,
+    emitted_provenance,
+    producer_ref,
+)
 from cstar.applications.forge.input_data import netcdf_basename
+from cstar.applications.forge.migration import migrate_forge_blueprint_data
 from cstar.applications.forge.resolve import (
     _warn_user_files_need_pio_conversion,
     build_forge_blueprint,
 )
 from cstar.applications.forge.settings import render_roms_settings
-from cstar.base.env import ENV_CSTAR_DATA_HOME
+from cstar.base.env import ENV_CSTAR_DATA_HOME, ENV_CSTAR_RUNID
 from cstar.base.utils import slugify
 from cstar.catalog.domain_catalog import default_catalog as _CATALOG
+from cstar.orchestration.models import (
+    BlueprintIdentity,
+    CatalogSpecRef,
+    GeneratedBy,
+    Provenance,
+)
 
 _BUNDLED_CATALOG = Path(cstar.catalog.__file__).parent / "bundled"
 _MODEL_DIR = _BUNDLED_CATALOG / "ModelSpec" / "cson_roms-marbl_v0.1"
@@ -278,24 +297,30 @@ def test_build_forge_blueprint_n_cores_requires_auto_tiling():
 
 
 def test_resolved_provenance_is_unstamped():
-    """generated_at/forge_version/cstar_version/roms_tools_version are left None by
-    the resolver -- ``ForgeBlueprint.to_yaml_str`` is what stamps them (see
-    TestProvenanceStamping below), keeping resolution deterministic and
-    independent of whether ``roms_tools`` happens to be installed.
+    """The resolver leaves provenance empty -- ``ForgeBlueprint.stamp_provenance``
+    fills it in when the blueprint is written (see TestProvenanceStamping below),
+    keeping resolution deterministic and independent of whether ``roms_tools``
+    happens to be installed.
     """
     cfg = _build()
+    assert cfg.provenance == ForgeProvenance()
     assert cfg.provenance.generated_at is None
-    assert cfg.provenance.forge_version is None
-    assert cfg.provenance.cstar_version is None
-    assert cfg.provenance.roms_tools_version is None
+    assert cfg.provenance.generated_by is None
 
 
-def test_forge_version_explicit_override_preserved():
-    """An explicit ``forge_version`` (e.g. re-resolving without touching original
-    provenance) is passed straight through, unstamped by the resolver.
+def test_explicit_provenance_is_carried_through_the_resolver():
+    """A ``provenance`` passed in (e.g. a loaded blueprint's, carried through a
+    re-resolve) lands on the blueprint unchanged, legacy fields included.
     """
-    cfg = _build(forge_version="0.2.0")
-    assert cfg.provenance.forge_version == "0.2.0"
+    carried = ForgeProvenance(
+        generated_at=datetime(2026, 10, 6, 17, 40, 12, tzinfo=UTC),
+        generated_by=GeneratedBy(tool="wizard", system="anvil"),
+        forge_version="0.2.0",
+        override_files_applied=["a.yaml"],
+        notes="kept",
+    )
+    cfg = _build(provenance=carried)
+    assert cfg.provenance == carried
 
 
 def test_working_dir_defaults_to_none():
@@ -3558,7 +3583,7 @@ def test_migration_v9_to_v10_renames_the_cdr_lite_output_section():
         },
     }
     migrated = migrate_forge_blueprint_data(data)
-    assert migrated["forge_blueprint_version"] == 10
+    assert migrated["forge_blueprint_version"] == FORGE_BLUEPRINT_VERSION
     assert migrated["model_settings"] == {
         "cdr_output": {"do_cdr_output": False},
         "cdr_lite_output": {"do_cdr_lite_output": True, "nrpf": 6},
@@ -3593,7 +3618,7 @@ def test_stored_v9_blueprint_loads_with_the_renamed_section(tmp_path):
         for k, v in section.items()
     }
     loaded = ForgeBlueprint.model_validate(data)
-    assert loaded.forge_blueprint_version == 10
+    assert loaded.forge_blueprint_version == FORGE_BLUEPRINT_VERSION
     assert "cdr_tracer_output" not in loaded.model_settings
     assert (
         loaded.model_settings["cdr_lite_output"]["do_cdr_lite_output"]
@@ -4547,10 +4572,9 @@ def test_shipped_blueprint_hygiene(path):
 
 
 class TestInstalledVersion:
-    """``_installed_version`` backs ``provenance.cstar_version``/``roms_tools_version``
-    -- no git-describe fallback needed, since both packages version themselves via
-    ``setuptools_scm`` (an editable/dev checkout's installed version already embeds
-    commit info).
+    """``_installed_version`` backs the run-log version banner -- no git-describe
+    fallback needed, since both packages version themselves via ``setuptools_scm``
+    (an editable/dev checkout's installed version already embeds commit info).
     """
 
     def test_returns_formatted_version_when_installed(self, monkeypatch):
@@ -4571,14 +4595,86 @@ class TestInstalledVersion:
         assert fb._installed_version("not-a-real-package") is None
 
 
+class TestGenerationHelpers:
+    """The helpers behind ``generated_by``: bare package versions, the system
+    name, and ``new_generated_by`` which assembles them.
+    """
+
+    def test_generation_versions_are_bare_versions_of_the_installed_packages(
+        self, monkeypatch
+    ):
+        from cstar.applications.forge import blueprint as fb
+
+        monkeypatch.setattr(fb, "_pkg_version", lambda name: "4.0.0")
+        assert fb.generation_versions() == {
+            "cstar-ocean": "4.0.0",
+            "roms-tools": "4.0.0",
+        }
+
+    def test_generation_versions_skip_a_package_that_is_not_installed(
+        self, monkeypatch
+    ):
+        from importlib.metadata import PackageNotFoundError
+
+        from cstar.applications.forge import blueprint as fb
+
+        def _only_cstar(name):
+            if name != "cstar-ocean":
+                raise PackageNotFoundError(name)
+            return "1.2.3"
+
+        monkeypatch.setattr(fb, "_pkg_version", _only_cstar)
+        assert fb.generation_versions() == {"cstar-ocean": "1.2.3"}
+
+    def test_system_name_is_the_hosts_name(self, monkeypatch):
+        import cstar.system.manager as manager
+        from cstar.applications.forge import blueprint as fb
+
+        class _Host:
+            name = "anvil"
+
+        monkeypatch.setattr(manager, "HostNameEvaluator", _Host)
+        assert fb._system_name() == "anvil"
+
+    def test_system_name_is_empty_when_the_host_cannot_be_named(self, monkeypatch):
+        import cstar.system.manager as manager
+        from cstar.applications.forge import blueprint as fb
+
+        class _Unknown:
+            @property
+            def name(self):
+                raise OSError("C-Star cannot determine your system name.")
+
+        monkeypatch.setattr(manager, "HostNameEvaluator", _Unknown)
+        assert fb._system_name() == ""
+
+    def test_new_generated_by_records_the_running_environment(self, monkeypatch):
+        import uuid
+
+        from cstar.applications.forge import blueprint as fb
+
+        monkeypatch.setattr(fb, "_system_name", lambda: "anvil")
+        monkeypatch.setattr(fb, "generation_versions", lambda: {"cstar-ocean": "1.0"})
+
+        first = fb.new_generated_by("forge", run_id="r-1", working_dir="/scratch/run")
+        second = fb.new_generated_by("forge")
+
+        assert (first.tool, first.system, first.versions) == (
+            "forge",
+            "anvil",
+            {"cstar-ocean": "1.0"},
+        )
+        assert (first.run_id, first.working_dir) == ("r-1", "/scratch/run")
+        assert (second.run_id, second.working_dir) == ("", "")
+        # every event gets its own uuid4
+        assert uuid.UUID(first.id).version == 4
+        assert first.id != second.id
+
+
 class TestProvenanceStamping:
-    """``ForgeBlueprint.to_yaml_str`` stamps generated_at/cstar_version/
-    roms_tools_version on first save; a resave preserves whatever was already
-    stamped (or explicitly set), same "first save wins" semantics as
-    ``content_hash`` is exempt from (content_hash always recomputes; these don't).
-    ``forge_version`` is never stamped (Forge is in-tree now -- see
-    ``Provenance``'s docstring); it round-trips untouched if a file already has
-    one (see ``test_forge_version_survives_resave_even_when_never_stamped``).
+    """``ForgeBlueprint.stamp_provenance`` records who wrote the content, where,
+    when and with what -- and only when the content changed since the recorded
+    ``content_hash``. ``to_yaml_str`` serializes and fingerprints but never stamps.
     """
 
     def _patched_fb(self, monkeypatch):
@@ -4586,90 +4682,251 @@ class TestProvenanceStamping:
 
         monkeypatch.setattr(
             fb,
-            "_installed_version",
-            lambda name: f"{name}==9.9.9",
+            "generation_versions",
+            lambda: {"cstar-ocean": "9.9.9", "roms-tools": "9.9.9"},
         )
+        monkeypatch.setattr(fb, "_system_name", lambda: "testsys")
         return fb
 
-    def test_first_save_stamps_all_unset_fields(self, monkeypatch, tmp_path):
-        fb = self._patched_fb(monkeypatch)
+    def test_to_yaml_str_records_the_hash_but_stamps_nothing(self):
         cfg = _build()
-        assert cfg.provenance.generated_at is None  # unstamped before saving
+        prov = yaml.safe_load(cfg.to_yaml_str())["provenance"]
 
-        path = cfg.to_yaml(tmp_path / "forge_blueprint.yaml")
-        back = fb.ForgeBlueprint.from_yaml(path)
+        assert prov["content_hash"] == cfg.content_hash()
+        assert prov["generated_at"] is None
+        assert prov["generated_by"] is None
+        assert (
+            prov["forge_version"],
+            prov["cstar_version"],
+            prov["roms_tools_version"],
+        ) == (None, None, None)
+        # serializing never mutates the blueprint
+        assert cfg.provenance == ForgeProvenance()
 
-        assert back.provenance.generated_at is not None
-        # must round-trip as tz-aware (UTC), not silently go naive/local through
-        # model_dump(mode="json") -> yaml.safe_dump -> yaml.safe_load -> Pydantic
-        assert back.provenance.generated_at.tzinfo is not None
-        assert back.provenance.forge_version is None
-        assert back.provenance.cstar_version == "cstar-ocean==9.9.9"
-        assert back.provenance.roms_tools_version == "roms-tools==9.9.9"
+    def test_saved_file_keeps_provenance_last_without_derived_from(self):
+        data = yaml.safe_load(_build().to_yaml_str())
 
-    def test_resave_preserves_original_stamp(self, monkeypatch, tmp_path):
-        fb = self._patched_fb(monkeypatch)
+        assert list(data)[-1] == "provenance"
+        assert "derived_from" not in data["provenance"]
+
+    def test_derived_from_is_kept_when_populated(self, tmp_path):
         cfg = _build()
-        path = cfg.to_yaml(tmp_path / "forge_blueprint.yaml")
-        first = fb.ForgeBlueprint.from_yaml(path)
-
-        # a later save, from a different roms_tools/cstar install, must not
-        # overwrite the original values
-        monkeypatch.setattr(fb, "_installed_version", lambda name: f"{name}==1.0.0")
-        first.to_yaml(path)
-        second = fb.ForgeBlueprint.from_yaml(path)
-
-        assert second.provenance.generated_at == first.provenance.generated_at
-        assert second.provenance.forge_version is None
-        assert second.provenance.cstar_version == "cstar-ocean==9.9.9"
-        assert second.provenance.roms_tools_version == "roms-tools==9.9.9"
-
-    def test_explicit_provenance_values_are_preserved(self, monkeypatch, tmp_path):
-        """An explicitly pre-set field (e.g. a caller building a ``ForgeBlueprint``
-        directly, or a re-resolve carrying an original value forward) is never
-        overwritten by ``to_yaml_str``, even on first save.
-        """
-        fb = self._patched_fb(monkeypatch)
-        cfg = _build()
-        explicit_dt = datetime(2020, 1, 1)
+        ref = BlueprintIdentity(kind="Blueprint", application="forge", name="parent")
         cfg = cfg.model_copy(
             update={
-                "provenance": cfg.provenance.model_copy(
-                    update={"generated_at": explicit_dt, "roms_tools_version": "pinned"}
+                "provenance": cfg.provenance.model_copy(update={"derived_from": [ref]})
+            }
+        )
+
+        back = ForgeBlueprint.from_yaml(cfg.to_yaml(tmp_path / "bp.yaml"))
+
+        assert back.provenance.derived_from == [ref]
+
+    def test_stamp_records_the_producing_event(self, monkeypatch):
+        import uuid
+
+        self._patched_fb(monkeypatch)
+        cfg = _build()
+
+        stamped = cfg.stamp_provenance("wizard")
+
+        prov = stamped.provenance
+        assert prov.content_hash == cfg.content_hash()
+        # tz-aware, not silently naive/local
+        assert prov.generated_at is not None and prov.generated_at.tzinfo is not None
+        assert prov.generated_by is not None
+        assert prov.generated_by.tool == "wizard"
+        assert uuid.UUID(prov.generated_by.id).version == 4
+        assert prov.generated_by.system == "testsys"
+        assert prov.generated_by.versions == {
+            "cstar-ocean": "9.9.9",
+            "roms-tools": "9.9.9",
+        }
+        # the original is untouched, and stamping leaves the hash alone
+        assert cfg.provenance == ForgeProvenance()
+        assert stamped.content_hash() == cfg.content_hash()
+
+    def test_stamp_survives_a_yaml_round_trip(self, monkeypatch, tmp_path):
+        self._patched_fb(monkeypatch)
+        stamped = _build().stamp_provenance("wizard")
+
+        back = ForgeBlueprint.from_yaml(stamped.to_yaml(tmp_path / "bp.yaml"))
+
+        assert back.provenance == stamped.provenance
+        assert back.provenance.generated_at.tzinfo is not None
+
+    def test_unchanged_content_is_not_restamped(self, monkeypatch, tmp_path):
+        self._patched_fb(monkeypatch)
+        stamped = _build().stamp_provenance("wizard")
+
+        assert stamped.stamp_provenance("forge") is stamped
+
+        # ... also after the file has been written and read back
+        back = ForgeBlueprint.from_yaml(stamped.to_yaml(tmp_path / "bp.yaml"))
+        assert back.stamp_provenance("forge") is back
+        assert back.provenance.generated_by == stamped.provenance.generated_by
+
+    def test_changed_content_is_restamped_with_a_new_id(self, monkeypatch):
+        self._patched_fb(monkeypatch)
+        stamped = _build().stamp_provenance("wizard")
+        edited = stamped.model_copy(
+            update={
+                "model_settings": {
+                    **stamped.model_settings,
+                    "v_sponge": {"v_sponge": 999.0},
+                }
+            }
+        )
+
+        restamped = edited.stamp_provenance("forge")
+
+        assert restamped.content_hash() != stamped.content_hash()
+        assert restamped.provenance.content_hash == restamped.content_hash()
+        assert restamped.provenance.generated_by.tool == "forge"
+        assert (
+            restamped.provenance.generated_by.id != stamped.provenance.generated_by.id
+        )
+        assert restamped.provenance.generated_at >= stamped.provenance.generated_at
+
+    def test_blueprint_that_never_recorded_a_hash_is_stamped(self, monkeypatch):
+        """An old file with no ``content_hash`` has nothing to match, so it is
+        stamped on the first write.
+        """
+        self._patched_fb(monkeypatch)
+        cfg = _build()
+        assert cfg.provenance.content_hash is None
+
+        assert cfg.stamp_provenance("forge").provenance.generated_by is not None
+
+    def test_restamp_clears_legacy_versions_but_keeps_notes(self, monkeypatch):
+        self._patched_fb(monkeypatch)
+        cfg = _build()
+        cfg = cfg.model_copy(
+            update={
+                "provenance": ForgeProvenance(
+                    forge_version="0.2.0",
+                    cstar_version="cstar-ocean==0.9.1",
+                    roms_tools_version="roms-tools==4.0.1",
+                    override_files_applied=["a.yaml"],
+                    content_hash="stale",
+                    notes="hand-written",
                 )
             }
         )
-        path = cfg.to_yaml(tmp_path / "forge_blueprint.yaml")
-        back = fb.ForgeBlueprint.from_yaml(path)
 
-        assert back.provenance.generated_at == explicit_dt
-        assert back.provenance.roms_tools_version == "pinned"
-        # fields left unset are still stamped as normal
-        assert back.provenance.cstar_version == "cstar-ocean==9.9.9"
+        prov = cfg.stamp_provenance("wizard").provenance
 
-    def test_forge_version_survives_resave_even_when_never_stamped(
+        assert (prov.forge_version, prov.cstar_version, prov.roms_tools_version) == (
+            None,
+            None,
+            None,
+        )
+        assert prov.override_files_applied == ["a.yaml"]
+        assert prov.notes == "hand-written"
+        assert prov.content_hash == cfg.content_hash()
+
+    def test_blueprint_written_without_stamping_is_stamped_when_saved(
         self, monkeypatch, tmp_path
     ):
-        """An old blueprint that already has a ``forge_version`` (from before Forge
-        moved in-tree) keeps it through a save/reload/resave cycle -- the field is
-        kept for backward compatibility even though nothing stamps it anymore.
+        """``to_yaml`` records the hash of every file it writes, stamped or not (a
+        script's output, a bundled catalog entry), so such a file's hash matches its
+        content while it names no producer: it is stamped, then kept.
         """
-        fb = self._patched_fb(monkeypatch)
+        self._patched_fb(monkeypatch)
+        path = _build().to_yaml(tmp_path / "bp.yaml")
+        back = ForgeBlueprint.from_yaml(path)
+        assert back.provenance.content_hash == back.content_hash()
+        assert back.provenance.generated_by is None
+
+        stamped = back.stamp_provenance("wizard")
+
+        assert stamped is not back
+        assert stamped.provenance.generated_by is not None
+        assert stamped.provenance.generated_by.tool == "wizard"
+        assert stamped.provenance.generated_at is not None
+        assert stamped.stamp_provenance("forge") is stamped
+        assert back.provenance.generated_by is None  # the original is untouched
+
+    def test_legacy_file_is_stamped_on_its_first_save_only(self, monkeypatch, tmp_path):
+        """A file written before ``generated_by`` existed has a matching hash and no
+        producer: the first save records one and clears the legacy versions, which
+        a resave of the stamped file then leaves alone.
+        """
+        self._patched_fb(monkeypatch)
         cfg = _build()
         cfg = cfg.model_copy(
             update={
-                "provenance": cfg.provenance.model_copy(
-                    update={"forge_version": "0.2.0"}
+                "provenance": ForgeProvenance(
+                    forge_version="0.2.0",
+                    cstar_version="cstar-ocean==0.9.1",
+                    roms_tools_version="roms-tools==4.0.1",
+                    content_hash=cfg.content_hash(),
                 )
             }
         )
-        path = cfg.to_yaml(tmp_path / "forge_blueprint.yaml")
-        first = fb.ForgeBlueprint.from_yaml(path)
-        assert first.provenance.forge_version == "0.2.0"
+        legacy = ForgeBlueprint.from_yaml(cfg.to_yaml(tmp_path / "legacy.yaml"))
+        assert legacy.provenance.forge_version == "0.2.0"
+        assert legacy.provenance.generated_by is None
 
-        first.to_yaml(path)
-        second = fb.ForgeBlueprint.from_yaml(path)
-        assert second.provenance.forge_version == "0.2.0"
+        path = legacy.stamp_provenance("wizard").to_yaml(tmp_path / "bp.yaml")
+        first = ForgeBlueprint.from_yaml(path)
+        first.stamp_provenance("wizard").to_yaml(path)
+        again = ForgeBlueprint.from_yaml(path)
+
+        assert first.provenance.generated_by is not None
+        assert first.provenance.generated_by.tool == "wizard"
+        assert (
+            first.provenance.forge_version,
+            first.provenance.cstar_version,
+            first.provenance.roms_tools_version,
+        ) == (None, None, None)
+        assert again.provenance == first.provenance
+
+
+class TestMigrateV9ToV10Provenance:
+    """v9 -> v10: a v9 file validates against the v10 schema unchanged; only the
+    version stamp moves.
+    """
+
+    def _v9_data(self):
+        data = yaml.safe_load(_build().to_yaml_str())
+        data["forge_blueprint_version"] = 9
+        prov = data["provenance"]
+        # a v9 file has neither of the v10 provenance keys, but carries the legacy ones
+        del prov["generated_by"]
+        prov.update(
+            generated_at="2026-09-03T18:57:06.736571Z",
+            forge_version="56109b3f-dirty",
+            cstar_version="cstar-ocean==0.12.0",
+            roms_tools_version="roms-tools==4.1.1.dev2+g1a564489a",
+        )
+        return data
+
+    def test_migration_changes_only_the_version(self):
+        import copy
+
+        from cstar.applications.forge.migration import migrate_forge_blueprint_data
+
+        data = self._v9_data()
+
+        migrated = migrate_forge_blueprint_data(copy.deepcopy(data))
+
+        assert migrated == {**data, "forge_blueprint_version": FORGE_BLUEPRINT_VERSION}
+
+    def test_v9_file_loads_without_warnings_and_keeps_its_legacy_provenance(self):
+        data = self._v9_data()
+
+        with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter("always")
+            back = ForgeBlueprint.from_yaml_data(data)
+
+        assert not w, [str(x.message) for x in w]
+        assert back.forge_blueprint_version == FORGE_BLUEPRINT_VERSION
+        prov = back.provenance
+        assert prov.generated_by is None
+        assert prov.forge_version == "56109b3f-dirty"
+        assert prov.cstar_version == "cstar-ocean==0.12.0"
+        assert prov.generated_at == datetime(2026, 9, 3, 18, 57, 6, 736571, tzinfo=UTC)
 
 
 class _ReadOnlyValueGuard:
@@ -6131,6 +6388,44 @@ class TestForgeBlueprintEngine:
         assert "time_stepping" in cfgk["run_time_settings"]
         assert "grid" not in cfgk["run_time_settings"]
 
+    def test_configure_gets_the_emitted_provenance_minted_once(
+        self, monkeypatch, tmp_path
+    ):
+        from cstar.applications.forge.engine import process_forge_blueprint
+        from cstar.applications.forge.host import HostPaths
+
+        monkeypatch.setenv(ENV_CSTAR_RUNID, "run-42")
+        host = HostPaths(
+            working_dir=tmp_path / "wd",
+            source_data_cache=tmp_path / "cache",
+            system="test",
+        )
+        cfg = self._cfg()
+
+        b = process_forge_blueprint(
+            cfg, host=host, use_dask=False, executor_factory=_FakeBuilder
+        )
+
+        configures = [k for name, k in b.calls if name == "configure"]
+        assert len(configures) == 1
+        provenance = configures[0]["provenance"]
+        assert provenance.generated_by.tool == "forge"
+        assert provenance.generated_by.run_id == "run-42"
+        assert provenance.generated_by.working_dir == str(tmp_path / "wd")
+        assert provenance.derived_from[0] == producer_ref(cfg)
+
+    def test_provenance_records_no_run_id_or_working_dir_for_a_bare_run(
+        self, monkeypatch
+    ):
+        from cstar.applications.forge.engine import process_forge_blueprint
+
+        monkeypatch.delenv(ENV_CSTAR_RUNID, raising=False)
+
+        b = process_forge_blueprint(self._cfg(), executor_factory=_FakeBuilder)
+
+        generated_by = dict(b.calls[-1][1])["provenance"].generated_by
+        assert (generated_by.run_id, generated_by.working_dir) == ("", "")
+
     def test_process_skip_flags(self):
         from cstar.applications.forge.engine import process_forge_blueprint
 
@@ -6988,7 +7283,9 @@ def test_shipped_cppdefs_keys_are_referenced_by_the_bundled_template(source, cpp
 
 
 def _nc_file(path: Path, fmt: str) -> Path:
-    xr.Dataset({"v": ("x", np.arange(3.0))}).to_netcdf(path, format=fmt)
+    xr.Dataset({"v": ("x", np.arange(3.0))}).to_netcdf(
+        path, format=fmt, engine="netcdf4"
+    )
     return path
 
 
@@ -7104,3 +7401,187 @@ def test_forge_application_emitted_blueprint(use_pio):
     assert emitted.use_pio == bool(cfg.model_settings["cppdefs"].get("use_pio"))
     # Mirrors InputData._forcing_filename("grid"): {domain}_{grid}.nc
     assert emitted.grid_filename == netcdf_basename(cfg.name, "grid")
+    assert emitted.producer == producer_ref(cfg)
+    assert emitted.producer.content_hash == cfg.content_hash()
+
+
+def test_producer_ref_identifies_the_forge_blueprint():
+    cfg = _build()
+    ref = producer_ref(cfg)
+
+    assert (ref.kind, ref.application, ref.name) == ("Blueprint", "forge", cfg.name)
+    assert ref.content_hash == cfg.content_hash()
+
+
+def test_emitted_blueprint_description_says_where_it_came_from():
+    assert emitted_blueprint_description("wio-toy", "A small test domain") == (
+        "ROMS-MARBL blueprint generated by the forge application, based on the "
+        'Forge blueprint "wio-toy", with the following description: '
+        "A small test domain"
+    )
+
+
+class TestCompositionRefs:
+    """``composition_refs``: a ``CatalogSpecRef`` for each named composition entry."""
+
+    def test_refs_follow_the_composition_in_order_with_their_kinds(self):
+        composition = Composition(
+            model=SpecRef(name="roms-marbl-0.8-default", origin="catalog"),
+            domain=SpecRef(name="wio-toy", origin="catalog", modified=True),
+            forcing=SpecRef(name="glorys-era5-unified", origin="catalog"),
+            cdr=SpecRef(name="no-cdr", origin="catalog"),
+            output=SpecRef(name="standard", origin="model_default"),
+        )
+
+        assert [
+            (ref.kind, ref.name, ref.origin, ref.modified)
+            for ref in composition_refs(composition)
+        ] == [
+            ("ModelSpec", "roms-marbl-0.8-default", "catalog", False),
+            ("DomainSpec", "wio-toy", "catalog", True),
+            ("ForcingSpec", "glorys-era5-unified", "catalog", False),
+            ("CdrSpec", "no-cdr", "catalog", False),
+            ("OutputSpec", "standard", "model_default", False),
+        ]
+
+    @pytest.mark.parametrize("version", [9, 10])
+    def test_a_null_name_from_an_older_file_migrates_to_empty(self, version: int):
+        """A hand-authored spec used to be recorded as ``name: null``; loading
+        makes it the empty string ``SpecRef.name`` now requires. v10 matters: a
+        build between the CDR_LITE rename and this change stamped v10 and wrote it.
+        """
+        data: dict[str, t.Any] = {
+            "forge_blueprint_version": version,
+            "composition": {
+                "cdr": {"name": None, "origin": "custom", "modified": False},
+                "overrides": {"name": None},
+            },
+        }
+
+        migrate_forge_blueprint_data(data)
+
+        assert data["composition"]["cdr"]["name"] == ""
+        # only the spec slots are touched
+        assert data["composition"]["overrides"] == {"name": None}
+
+    def test_a_spec_without_a_name_has_no_ref(self):
+        composition = Composition(
+            model=SpecRef(name="roms-marbl-0.8-default", origin="catalog"),
+            forcing=SpecRef(),
+            cdr=SpecRef(name=""),
+            output=SpecRef(name="standard", origin="catalog"),
+        )
+
+        assert [ref.kind for ref in composition_refs(composition)] == [
+            "ModelSpec",
+            "OutputSpec",
+        ]
+        assert composition_refs(Composition()) == []
+
+    @pytest.mark.parametrize("name", ["", "   "])
+    def test_a_blank_name_has_no_ref(self, name):
+        """A hand-edited name that is only whitespace is no name: it is skipped."""
+        composition = Composition(
+            domain=SpecRef(name=name, origin="catalog"),
+            output=SpecRef(name="standard", origin="catalog"),
+        )
+
+        assert [ref.kind for ref in composition_refs(composition)] == ["OutputSpec"]
+
+    @pytest.mark.parametrize("origin", ["", "   "])
+    def test_a_blank_origin_is_kept_as_unknown(self, origin):
+        """The origin is informational: a spec that names none still has its ref."""
+        composition = Composition(domain=SpecRef(name="wio-toy", origin=origin))
+
+        assert composition_refs(composition) == [
+            CatalogSpecRef(kind="DomainSpec", name="wio-toy", origin="")
+        ]
+
+    def test_every_spec_entry_of_the_composition_has_a_kind(self):
+        """A ``SpecRef`` entry added to ``Composition`` must get its kind, or its
+        spec would silently drop out of an emitted blueprint's provenance.
+        """
+        spec_entries = [
+            name
+            for name, field in Composition.model_fields.items()
+            if field.annotation is SpecRef
+        ]
+
+        assert spec_entries == list(_COMPOSITION_SPEC_KINDS)
+
+
+class TestEmittedProvenance:
+    """``emitted_provenance``: what a forge run records on the blueprint it emits."""
+
+    def test_records_a_forge_event_derived_from_the_blueprint_and_its_specs(self):
+        cfg = _build()
+
+        before = datetime.now(UTC)
+        provenance = emitted_provenance(cfg)
+        after = datetime.now(UTC)
+
+        # the base Provenance: the emitted blueprint is a roms_marbl one
+        assert type(provenance) is Provenance
+        assert before <= provenance.generated_at <= after
+        assert provenance.generated_by.tool == "forge"
+        assert provenance.derived_from[0] == producer_ref(cfg)
+        assert provenance.derived_from[1:] == composition_refs(cfg.composition)
+        assert len(provenance.derived_from) > 1
+
+    def test_run_id_and_working_dir_are_recorded_when_given(self):
+        provenance = emitted_provenance(
+            _build(), run_id="run-7", working_dir="/scratch/run"
+        )
+
+        assert provenance.generated_by.run_id == "run-7"
+        assert provenance.generated_by.working_dir == "/scratch/run"
+
+    def test_run_id_and_working_dir_are_empty_by_default(self):
+        generated_by = emitted_provenance(_build()).generated_by
+
+        assert (generated_by.run_id, generated_by.working_dir) == ("", "")
+
+    def test_each_call_is_a_new_event_derived_from_the_same_things(self):
+        cfg = _build()
+
+        first = emitted_provenance(cfg)
+        second = emitted_provenance(cfg)
+
+        assert first.generated_by.id != second.generated_by.id
+        assert first.derived_from == second.derived_from
+
+    def test_the_producer_matches_what_the_application_hook_predicts(self):
+        cfg = _build()
+
+        assert (
+            emitted_provenance(cfg).derived_from[0]
+            == ForgeApplication().emitted_blueprint(cfg).producer
+        )
+
+    def test_survives_a_yaml_round_trip(self):
+        provenance = emitted_provenance(_build(), run_id="run-7")
+
+        dumped = yaml.safe_load(yaml.safe_dump(provenance.model_dump(mode="json")))
+
+        assert Provenance.model_validate(dumped) == provenance
+
+    def test_blank_composition_entries_of_a_hand_edited_file_do_not_abort_the_run(
+        self,
+    ):
+        """The provenance is informational, and is minted after the expensive input
+        generation: a blank name or origin in ``composition`` must not fail the run.
+        """
+        data = yaml.safe_load(_build().to_yaml_str())
+        data["composition"]["model"] = {"name": "   ", "origin": "catalog"}
+        data["composition"]["domain"] = {"name": "wio-toy", "origin": ""}
+        cfg = ForgeBlueprint.from_yaml_data(data)  # loads fine, as a hand edit does
+
+        provenance = emitted_provenance(cfg)
+
+        assert provenance.derived_from[0] == producer_ref(cfg)
+        assert [
+            ref
+            for ref in provenance.derived_from
+            if isinstance(ref, CatalogSpecRef)
+            and ref.kind in ("ModelSpec", "DomainSpec")
+        ] == [CatalogSpecRef(kind="DomainSpec", name="wio-toy", origin="")]

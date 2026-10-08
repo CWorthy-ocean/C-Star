@@ -244,12 +244,13 @@ def test_blueprint_run_auto_migrates_2_1_0_blueprint(
     mock_exec_runner.assert_called_once()
 
     state_home = mock_xdg_dirs[ENV_CSTAR_STATE_HOME]
-    migrated_path = next(state_home.rglob(f"{bp_path.stem}_3.0.0*"))
+    current = get_application(RomsMarblApplication.name).schema_version
+    migrated_path = next(state_home.rglob(f"{bp_path.stem}_{current}*"))
     migrated = yaml.safe_load(migrated_path.read_text())
     assert "model_params" not in migrated
     # serialize() excludes model defaults, so validate to see effective values
     bp = RomsMarblBlueprint.model_validate(migrated)
-    assert bp.schema_version == "3.0.0"
+    assert bp.schema_version == current
     assert bp.partitioning.use_pio is False
     assert bp.namelist_overrides["time_stepping"]["dt"] == time_step
 

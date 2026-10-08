@@ -9,11 +9,11 @@ working_dir: .
 schema_version: 2.0.0
 code:
   roms:
-    location: http://github.com/ankona/ucla-roms
+    location: https://github.com/CWorthy-ocean/ucla-roms.git
     branch: main
     filter: null
   run_time:
-    location: http://github.com/ankona/ucla-roms
+    location: https://github.com/CWorthy-ocean/ucla-roms.git
     branch: main
     filter:
       files:
@@ -22,7 +22,7 @@ code:
         - marbl_tracer_output_list
         - marbl_diagnostic_output_list
   compile_time:
-    location: http://github.com/ankona/ucla-roms
+    location: https://github.com/CWorthy-ocean/ucla-roms.git
     branch: main
     filter:
       files:

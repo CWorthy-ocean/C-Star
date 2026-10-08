@@ -31,6 +31,7 @@ from __future__ import annotations
 
 import copy
 import logging
+import os
 import warnings
 from collections.abc import Callable, Iterable
 from typing import (
@@ -40,9 +41,10 @@ from typing import (
     runtime_checkable,
 )
 
-from cstar.applications.forge.blueprint import ForgeBlueprint
+from cstar.applications.forge.blueprint import ForgeBlueprint, emitted_provenance
 from cstar.applications.forge.host import HostPaths
 from cstar.applications.forge.namelist_model import validate_run_time_sections
+from cstar.base.env import ENV_CSTAR_RUNID
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -366,7 +368,8 @@ def process_forge_blueprint(
 
     Drives a :class:`ForgeBlueprintExecutor` through ``ensure_source_data`` →
     ``generate_inputs`` → ``configure_build`` (the reviewed ``model_settings`` overlaid
-    via the last).
+    via the last, and the emitted blueprint's provenance handed to it: see
+    :func:`~cstar.applications.forge.blueprint.emitted_provenance`).
 
     Returns the executor (``ForgeExecutor`` by default), so callers can reach
     ``.path_roms_marbl_blueprint()``.
@@ -378,8 +381,11 @@ def process_forge_blueprint(
         caller — this module does not resolve the host itself, so it carries no
         ``cstar.applications.forge.config`` dependency and relocates cleanly into C-Star. Forge's
         entry points (``cstar.applications.forge.runtime``) supply it via ``config.resolve_host()``;
-        C-Star will supply its own. Only used here for logging; the executor resolves
-        its own paths. When ``None``, the host line is not logged.
+        C-Star will supply its own. Used here for logging and to record
+        ``host.working_dir`` in the emitted blueprint's
+        ``provenance.generated_by.working_dir``; the executor resolves its own
+        paths. When ``None``, the host line is not logged and no working directory
+        is recorded.
     validate :
         If True (default), fail fast — validate the config's ``model_settings``
         against the run-time schema *before* any downloads/generation.
@@ -485,9 +491,18 @@ def process_forge_blueprint(
         )
     if configure:
         run_overrides, compile_overrides = split_model_settings(cfg)
+        # The run id reaches a workplan step's process only through the inherited
+        # CSTAR_RUNID (as cstar/orchestration/transforms.py reads it); it is empty
+        # for a standalone run.
+        provenance = emitted_provenance(
+            cfg,
+            run_id=os.getenv(ENV_CSTAR_RUNID, ""),
+            working_dir=str(host.working_dir) if host is not None else "",
+        )
         executor.configure_build(
             compile_time_settings=compile_overrides,
             run_time_settings=run_overrides,
             n_tracers=cfg.n_tracers,
+            provenance=provenance,
         )
     return executor

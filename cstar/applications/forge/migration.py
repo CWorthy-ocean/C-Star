@@ -19,6 +19,7 @@ import warnings
 from typing import Any
 
 from cstar.applications.forge.blueprint import (
+    _COMPOSITION_SPEC_KINDS,
     FORGE_BLUEPRINT_VERSION,
     BgcSourceItem,
     BoundaryForcing,
@@ -98,6 +99,15 @@ def migrate_forge_blueprint_data(data: dict[str, Any] | None) -> dict[str, Any]:
     raises. Unlike the earlier steps this one is not version-gated: it runs on every
     load because legacy names can re-enter current-version data through workplan
     blueprint overrides, which merge onto an already-v10 dump and re-validate.
+    Also in v10: a composition spec authored by hand was recorded as
+    ``name: null``; it becomes ``""`` (``SpecRef.name`` is now a plain string).
+    Like the rename, this runs on every load, so a file stamped v10 by a build
+    that predates it is still read.
+    ``provenance`` gains ``generated_by`` and ``derived_from`` (both optional,
+    defaulting to unset/empty) and keeps the legacy
+    ``forge_version``/``cstar_version``/``roms_tools_version``. The bump is also
+    what makes an older install reject a newer file with the "upgrade" message
+    rather than an unknown-key error.
 
     Idempotent and a no-op on already-current data (e.g. direct keyword
     construction, ``ForgeBlueprint(name=..., ...)``) -- called automatically from a
@@ -193,6 +203,16 @@ def migrate_forge_blueprint_data(data: dict[str, Any] | None) -> dict[str, Any]:
                 }
             if working_dir.rstrip("/") in legacy_defaults:
                 del data["working_dir"]
+
+    # v9 -> v10, run on every load: ``SpecRef.name`` is a plain string, and a v10
+    # build that predates this change still wrote ``name: null``. Raw data only:
+    # direct construction passes an already-built Composition.
+    composition = data.get("composition")
+    if isinstance(composition, dict):
+        for field in _COMPOSITION_SPEC_KINDS:
+            spec = composition.get(field)
+            if isinstance(spec, dict) and spec.get("name") is None:
+                spec["name"] = ""
 
     # v9 -> v10, run on every load rather than gated on ``version < 10``: legacy
     # section names also re-enter at-version data through workplan blueprint

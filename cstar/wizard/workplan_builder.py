@@ -55,6 +55,7 @@ from cstar.orchestration.dag_runner import get_launcher, prune_unpreparable_step
 from cstar.orchestration.launch.local import LocalLauncher
 from cstar.orchestration.launch.slurm import SlurmComputeSpec, SlurmLauncher
 from cstar.orchestration.models import (
+    BLUEPRINT_METADATA_FIELDS,
     RUN_ALIAS_SEPARATOR,
     DeferredBlueprintRef,
     InlineBlueprintRef,
@@ -183,11 +184,6 @@ MACHINE_CUSTOM = "custom"
 _KIND_NONE = "none"
 _KIND_STEP = "step"
 _KIND_PATH = "path"
-
-_FORM_EXCLUDED = frozenset(
-    {"name", "description", "application", "state", "schema_version", "working_dir"}
-)
-"""Blueprint fields a generated inline form leaves out."""
 
 
 # ---------------------------------------------------------------------------
@@ -1108,7 +1104,7 @@ class _StepPane:
             return
         target = Path(wizard.save_path.value)
         target.parent.mkdir(parents=True, exist_ok=True)
-        self._current_path = str(config.to_yaml(target))
+        self._current_path = str(wizard._save_config(target))
         self.current_note.value = (
             f"Saved the Blueprint page's configuration to "
             f"<code>{_esc(self._current_path)}</code>"
@@ -1428,7 +1424,7 @@ class _StepPane:
         except Exception:
             fields = {}
         for name, info in fields.items():
-            if name in _FORM_EXCLUDED:
+            if name in BLUEPRINT_METADATA_FIELDS:
                 continue
             required = info.is_required()
             default = _field_default(info)

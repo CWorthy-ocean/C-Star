@@ -27,7 +27,7 @@ Blueprint
    cstar.applications.forge.blueprint.Code
    cstar.applications.forge.blueprint.TemplateRepo
    cstar.applications.forge.blueprint.Composition
-   cstar.applications.forge.blueprint.Provenance
+   cstar.applications.forge.blueprint.ForgeProvenance
 
 Application
 -----------
@@ -59,6 +59,9 @@ Catalog
    cstar.catalog.domain_catalog.LayeredCatalog
    cstar.catalog.domain_catalog.build_catalog_stack
    cstar.catalog.domain_catalog.user_catalog_root
+   cstar.catalog.outputs.BlueprintOutput
+   cstar.catalog.outputs.OutputStatus
+   cstar.catalog.outputs.find_blueprint_outputs
 
 Execution
 ---------

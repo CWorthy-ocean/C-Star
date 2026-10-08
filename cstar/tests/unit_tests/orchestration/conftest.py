@@ -320,15 +320,15 @@ def fill_blueprint_template(
             working_dir: .
             code:
               roms:
-                location: http://github.com/ankona/ucla-roms
+                location: https://github.com/CWorthy-ocean/ucla-roms.git
                 branch: main
                 filter: null
               run_time:
-                location: http://github.com/ankona/ucla-roms
+                location: https://github.com/CWorthy-ocean/ucla-roms.git
                 branch: main
                 filter: null
               compile_time:
-                location: http://github.com/ankona/ucla-roms
+                location: https://github.com/CWorthy-ocean/ucla-roms.git
                 branch: main
                 filter: null
               marbl: null

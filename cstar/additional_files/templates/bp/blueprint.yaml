@@ -1,19 +1,19 @@
-# yaml-language-server: $schema=https://raw.githubusercontent.com/CWorthy-ocean/C-Star/refs/heads/main/docs/schemas/bp/roms_marbl/roms_marbl_schema.3.0.0.json
+# yaml-language-server: $schema=https://raw.githubusercontent.com/CWorthy-ocean/C-Star/refs/heads/main/docs/schemas/bp/roms_marbl/roms_marbl_schema.3.1.0.json
 name: Test Blueprint
 description: This is the description of my test blueprint
 application: roms_marbl
-schema_version: 3.0.0
+schema_version: 3.1.0
 working_dir: .
 state: draft
 valid_start_date: 2000-01-01 00:00:00
 valid_end_date: 2025-01-01 00:00:00
 code:
   roms:
-    location: http://github.com/ankona/ucla-roms
+    location: https://github.com/CWorthy-ocean/ucla-roms.git
     branch: main
     filter: null
   run_time:
-    location: http://github.com/ankona/ucla-roms
+    location: https://github.com/CWorthy-ocean/ucla-roms.git
     branch: main
     filter:
       files:
@@ -22,7 +22,7 @@ code:
         - marbl_tracer_output_list
         - marbl_diagnostic_output_list
   compile_time:
-    location: http://github.com/ankona/ucla-roms
+    location: https://github.com/CWorthy-ocean/ucla-roms.git
     branch: main
     filter:
       files:

@@ -10,10 +10,8 @@ import pytest
 import typer
 from typer.testing import CliRunner
 
+from cstar.applications.core import get_application
 from cstar.applications.hello_world import HelloWorldApplication
-from cstar.applications.plotter import (
-    APP_PLOTTER_SCHEMA_2_0_0,
-)
 from cstar.base.env import (
     ENV_CSTAR_CLI_DRY_RUN,
     ENV_CSTAR_DISABLE_MIGRATION,
@@ -2017,7 +2015,8 @@ def _expected_migrated_path(bp_path: Path) -> Path:
     no explicit output path is supplied to the migrator.
     """
     state_dir = Path(str(os.getenv(ENV_CSTAR_STATE_HOME, "")))
-    return state_dir / f"{bp_path.stem}_{APP_PLOTTER_SCHEMA_2_0_0}{bp_path.suffix}"
+    latest = get_application("plotter").schema_version
+    return state_dir / f"{bp_path.stem}_{latest}{bp_path.suffix}"
 
 
 @pytest.fixture

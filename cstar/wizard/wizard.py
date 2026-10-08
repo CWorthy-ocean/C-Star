@@ -30,7 +30,7 @@ import typing
 import warnings
 from datetime import date, datetime
 from pathlib import Path
-from typing import Any, get_args, get_origin
+from typing import Any, Final, get_args, get_origin
 
 import yaml
 from pydantic import BaseModel
@@ -48,6 +48,7 @@ from cstar.applications.forge.blueprint import (
     Composition,
     ExtrapMethod,
     ForgeBlueprint,
+    ForgeProvenance,
     InitialConditions,
     InitialConditionsSource,
     PhysicsBoundarySource,
@@ -85,6 +86,9 @@ from cstar.applications.forge.user_files import hash_netcdf_contents
 from cstar.wizard.ui import components
 from cstar.wizard.ui.catalog_bar import CatalogBar
 from cstar.wizard.ui.labels import known_keys, label_for, section_for
+
+WIZARD_TOOL: Final[str] = "wizard"
+"""The ``provenance.generated_by.tool`` of a blueprint the wizard writes."""
 
 # ===========================================================================
 # Help text — shown as widget tooltips on hover (tooltip= kwarg, all widgets)
@@ -3834,6 +3838,10 @@ class ForgeBlueprintWizard:
         self.W = W
         self.catalog = catalog or _get_catalog()
         self.config: ForgeBlueprint | None = None
+        # The provenance of the last blueprint loaded or saved, handed to every
+        # re-resolve (see `_gather`) so its stamp survives until the content changes
+        # (see `ForgeBlueprint.stamp_provenance`).
+        self._carried_provenance = ForgeProvenance()
         # Cache for the `widget` property -- built once, see `widget`.
         self._root: Any | None = None
 
@@ -5469,7 +5477,7 @@ class ForgeBlueprintWizard:
         cdr = (
             SpecRef(name=self.cdr_dd.value, origin="catalog")
             if self.cdr_dd.value != "<custom>"
-            else SpecRef(name=None, origin="custom")
+            else SpecRef()
         )
         return Composition(
             model=SpecRef(name=self.model_dd.value, origin="catalog"),
@@ -6529,6 +6537,8 @@ class ForgeBlueprintWizard:
 
         Returns any validation problems found in the *loaded file's* model_settings.
         """
+        # Before any re-resolve below, so the first rebuilt config carries it.
+        self._carried_provenance = cfg.provenance
         # The file's own pinned ucla-roms ref selects the schema variant it was
         # authored against -- not the (possibly different) currently-selected
         # model's default. Computed once here and reused below when seeding
@@ -6865,6 +6875,7 @@ class ForgeBlueprintWizard:
         kw["output_settings"] = self._output_settings()
         kw["composition"] = self._composition()
         kw["cdr"] = self._current_cdr_dict()
+        kw["provenance"] = self._carried_provenance
         return kw
 
     def _populate_nesting(self, cfg: ForgeBlueprint):
@@ -7077,10 +7088,7 @@ class ForgeBlueprintWizard:
                 self.save_path.value = str(
                     Path(self.save_path.value).parent / f"{cfg.name}.yaml"
                 )
-        self.download_link.value = self._download_html(
-            cfg, caption="Download blueprint"
-        )
-        self.download_link_review.value = self._download_html(cfg)
+        self._refresh_download_links(cfg)
         # Surface (never silently ship) provisional open-boundary defaults: the
         # checkboxes currently reflect whatever's live, but that's only a real
         # mask-derived value once _boundaries_derived is True or the user has
@@ -7255,6 +7263,20 @@ class ForgeBlueprintWizard:
         if self._forcing_editor is not None:
             self._forcing_editor.retitle(self._forcing_summary)
         self._retitle_advanced_editor()
+
+    def _refresh_download_links(self, cfg: ForgeBlueprint) -> None:
+        """Point both download links at ``cfg``, stamped once so they agree.
+
+        A download is a copy for the user, not a save: a stamp minted here is not
+        carried (that is `_save_config`'s job). A ``cfg`` that is already stamped,
+        as the config just saved is, comes back from ``stamp_provenance`` as it is,
+        so its links hand out exactly the file that was written.
+        """
+        download_cfg = cfg.stamp_provenance(WIZARD_TOOL)
+        self.download_link.value = self._download_html(
+            download_cfg, caption="Download blueprint"
+        )
+        self.download_link_review.value = self._download_html(download_cfg)
 
     @staticmethod
     def _download_html(cfg: ForgeBlueprint, caption: str | None = None) -> str:
@@ -7604,6 +7626,24 @@ class ForgeBlueprintWizard:
                 f"<span style='color:#b00'>{type(exc).__name__}: {exc}</span>"
             )
 
+    def _save_config(self, path: Path) -> Path:
+        """Write the current config to ``path``, stamped as written by the wizard,
+        and return the path.
+
+        The stamp becomes the carried provenance, so a later save or rebuild keeps
+        it while the content is unchanged (see ``ForgeBlueprint.stamp_provenance``),
+        and the download links are pointed at the file written. Every write of the
+        current config to disk goes through here.
+        """
+        if self.config is None:
+            raise RuntimeError("no valid configuration to save")
+        stamped = self.config.stamp_provenance(WIZARD_TOOL)
+        written = stamped.to_yaml(path)
+        self._carried_provenance = stamped.provenance
+        self.config = stamped
+        self._refresh_download_links(stamped)
+        return written
+
     def _on_save(self, _):
         if not self._ensure_boundaries_derived():
             self.save_status.value = (
@@ -7621,7 +7661,7 @@ class ForgeBlueprintWizard:
         try:
             save_path = Path(self.save_path.value)
             save_path.parent.mkdir(parents=True, exist_ok=True)
-            p = self.config.to_yaml(save_path)
+            p = self._save_config(save_path)
             self.save_status.value = f"<span style='color:#080'>Saved {p}</span>"
         except Exception as exc:
             self.save_status.value = (
@@ -7969,7 +8009,7 @@ class ForgeBlueprintWizard:
         try:
             save_path = Path(self.save_path.value)
             save_path.parent.mkdir(parents=True, exist_ok=True)
-            path = self.config.to_yaml(save_path)
+            path = self._save_config(save_path)
             cmd = self._build_run_command(str(path))
             self.run_status.value = f"<i>running: {' '.join(cmd)}</i>"
             proc = await asyncio.create_subprocess_exec(

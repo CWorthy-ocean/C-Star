@@ -1,4 +1,4 @@
-# yaml-language-server: $schema=https://raw.githubusercontent.com/CWorthy-ocean/C-Star/refs/heads/main/docs/schemas/bp/roms_marbl/roms_marbl_schema.2.1.0.json
+# yaml-language-server: $schema=https://raw.githubusercontent.com/CWorthy-ocean/C-Star/refs/heads/main/docs/schemas/bp/roms_marbl/roms_marbl_schema.3.1.0.json
 name: Test Blueprint
 description: This is the description of my test blueprint
 application: roms_marbl
@@ -6,7 +6,7 @@ state: draft
 valid_start_date: 2000-01-01 00:00:00
 valid_end_date: 2025-01-01 00:00:00
 working_dir: .
-schema_version: 2.1.0
+schema_version: 3.1.0
 code:
   roms:
     location: https://github.com/CWorthy-ocean/ucla-roms.git
@@ -78,12 +78,10 @@ partitioning:
   locked: false
   n_procs_x: 16
   n_procs_y: 8
-model_params:
-  documentation: http://mockdoc.com/model-params
-  hash: null
-  locked: false
-  time_step: 1
   use_pio: true
+namelist_overrides:
+  time_stepping:
+    dt: 1
 runtime_params:
   documentation: http://mockdoc.com/runtime-params
   hash: null

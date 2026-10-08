@@ -3591,7 +3591,7 @@ class TestROMSSimulationUsePIO:
         good_path = tmp_path / "good.nc"
         bad_path = tmp_path / "bad.nc"
         xr.Dataset({"a": ("x", np.zeros(3))}).to_netcdf(
-            good_path, format="NETCDF3_64BIT_DATA"
+            good_path, format="NETCDF3_64BIT_DATA", engine="netcdf4"
         )
         xr.Dataset({"abs_time": ("x", np.arange(3, dtype="int64"))}).to_netcdf(
             bad_path, format="NETCDF4"

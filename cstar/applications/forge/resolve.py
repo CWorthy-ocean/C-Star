@@ -45,10 +45,10 @@ from cstar.applications.forge.blueprint import (
     Domain,
     Forcing,
     ForgeBlueprint,
+    ForgeProvenance,
     InitialConditions,
     OpenBoundaries,
     Partitioning,
-    Provenance,
     ResolvedDataset,
     RiverForcingItem,
     RunWindow,
@@ -488,10 +488,7 @@ def build_forge_blueprint(
     grid: Any = None,
     templates_repo: CodeRepo | None = None,
     composition: Composition | None = None,
-    generated_at: datetime | None = None,
-    forge_version: str | None = None,
-    roms_tools_version: str | None = None,
-    notes: str | None = None,
+    provenance: ForgeProvenance | None = None,
 ) -> ForgeBlueprint:
     """Resolve the composable specs into a validated, host-independent ``ForgeBlueprint``.
 
@@ -574,14 +571,12 @@ def build_forge_blueprint(
     ``model_settings["time_stepping"]["dt"]`` leaves -- each pair is always
     written together and must never diverge.
 
-    ``roms_tools_version`` is left ``None`` here by default -- ``ForgeBlueprint.
-    to_yaml_str`` stamps it with a best-effort value on first save (see
-    ``cstar.applications.forge.blueprint._installed_version``), preserving an
-    explicit value passed here instead (e.g. carrying one forward through a
-    re-resolve). ``forge_version`` is likewise never computed here -- it is no
-    longer stamped anywhere (Forge is in-tree now; see ``Provenance``'s
-    docstring) -- this parameter only lets a caller carry an old file's value
-    forward verbatim through a re-resolve.
+    ``provenance`` is carried into the blueprint unchanged; ``None`` (the
+    default) yields a fresh, unstamped :class:`ForgeProvenance`. The resolver
+    never stamps it, to stay deterministic and independent of what is installed --
+    ``ForgeBlueprint.stamp_provenance`` does, when the blueprint is written. A
+    caller re-resolving a loaded or previously saved blueprint passes its
+    provenance back in, so the original stamp survives until the content changes.
 
     ``grid_file``, if given, is a user-supplied pre-made grid netCDF used in place
     of one Forge would otherwise generate from ``grid_kwargs``. A ``str``/``Path``
@@ -1251,17 +1246,11 @@ def build_forge_blueprint(
             # "model_default" fallback); a caller not tracking finer-grained
             # catalog/custom provenance (e.g. direct/test callers -- the wizard
             # builds its own Composition via _composition()) gets "custom".
-            forcing=SpecRef(name=None, origin="custom"),
-            cdr=SpecRef(name=None, origin="custom"),
-            output=SpecRef(name=None, origin="custom"),
+            forcing=SpecRef(),
+            cdr=SpecRef(),
+            output=SpecRef(),
         ),
-        provenance=Provenance(
-            generated_at=generated_at,
-            forge_version=forge_version,
-            roms_tools_version=roms_tools_version,
-            override_files_applied=[],
-            notes=notes,
-        ),
+        provenance=provenance if provenance is not None else ForgeProvenance(),
     )
     _warn_user_files_need_pio_conversion(bp, use_pio)
     return bp

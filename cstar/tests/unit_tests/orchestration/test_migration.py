@@ -12,7 +12,6 @@ from cstar.applications.plotter import (
 )
 from cstar.applications.plotter import (
     APP_PLOTTER_SCHEMA_1_0_0,
-    APP_PLOTTER_SCHEMA_2_0_0,
     PlotterSchemaAdapterV1V2,
 )
 from cstar.applications.roms_marbl.app import APP_NAME as APP_ROMS
@@ -436,7 +435,9 @@ def test_migration_no_migration_needed(hello_world_bp_path: Path) -> None:
 
     src_version, tgt_version, adapters = migrator.plan(bp.model_dump())
 
-    assert src_version == tgt_version == target
+    # the template is the first schema version; the build reads it without adapters
+    assert src_version == "1.0.0"
+    assert tgt_version == target
     assert not adapters
 
 
@@ -497,16 +498,16 @@ def test_migrate_plotter(plotter_v1_0_0_model: dict[str, t.Any]) -> None:
     src_version, tgt_version, plan = migrator.plan(plotter_v1_0_0_model)
 
     assert src_version == APP_PLOTTER_SCHEMA_1_0_0
-    assert tgt_version == APP_PLOTTER_SCHEMA_2_0_0
+    assert tgt_version == get_application(APP_PLOTTER).schema_version
     assert list(plan) == [PlotterSchemaAdapterV1V2]
 
 
 @pytest.mark.parametrize(
     ("app_name", "exp_version"),
     [
-        (APP_ROMS, APP_ROMS_MARBL_SCHEMA_3_0_0),
-        (APP_PLOTTER, APP_PLOTTER_SCHEMA_2_0_0),
-        (APP_HW, "1.0.0"),
+        (APP_ROMS, "3.1.0"),
+        (APP_PLOTTER, "2.1.0"),
+        (APP_HW, "1.1.0"),
     ],
 )
 def test_application_schema_version(app_name: str, exp_version: str) -> None:
