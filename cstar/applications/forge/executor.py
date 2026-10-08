@@ -43,6 +43,7 @@ from cstar.applications.forge.host import HostPaths
 from cstar.applications.forge.namelist_model import (
     build_namelist,
     check_bgc_tracer_count,
+    check_cdr_forcing_mode,
     check_cdr_lite_sections,
     check_cdr_output_sections,
     check_output_streams_divide_rst,
@@ -2351,16 +2352,34 @@ class ForgeExecutor(BaseModel):
         # stored blueprints reach configure_build without re-resolving, and wizard
         # accordion overrides apply after the resolver, so this is the enforcement
         # point of record. A generated CDR forcing (or a user-supplied
-        # cdr_forcing_file) implies CDR output regardless of the stored snapshot --
-        # as does "upscaled" mode, even though neither field is populated for it:
-        # real CDR tracers exist at runtime under that mode too.
-        if self.cdr_forcing or self.cdr_forcing_file or self.cdr_mode == "upscaled":
+        # cdr_forcing_file) is active regardless of the stored snapshot -- as is
+        # "upscaled" mode, even though neither field is populated for it: real CDR
+        # tracers exist at runtime under that mode too. An active mode needs the
+        # CDR_FORCING cppdef (it compiles cdr_frc, with or without MARBL) and, with
+        # MARBL, implies CDR output; without MARBL
+        # check_cdr_forcing_mode rejects "upscaled" and ucla-roms < 0.9.1.
+        cdr_active = bool(
+            self.cdr_forcing or self.cdr_forcing_file or self.cdr_mode == "upscaled"
+        )
+        cppdefs = self._settings_compile_time.setdefault("cppdefs", {})
+        if cdr_active and not cppdefs.get("cdr_forcing"):
+            cppdefs["cdr_forcing"] = True
+            log.info(
+                "configure_build: CDR forcing is active; forcing cppdefs.cdr_forcing=True "
+                "(CDR_FORCING compiles ucla-roms' cdr_frc)."
+            )
+        if cdr_active and check_cdr_forcing_mode(
+            self.cdr_mode,
+            bgc_mode_is_marbl=bool(cppdefs.get("marbl", False)),
+            roms_ref=str(effective_roms_ref)
+            if effective_roms_ref is not None
+            else None,
+        ):
             self._settings_run_time.setdefault("cdr_output", {})["do_cdr_output"] = True
         # do_cdr_output requires MARBL plus the CDR_FORCING cppdef (both gate
         # compiling ucla-roms' cdr_output.F90), and the MARBL diagnostics ucla-roms
         # looks up by name, unchecked.
         if self._settings_run_time.get("cdr_output", {}).get("do_cdr_output"):
-            cppdefs = self._settings_compile_time.setdefault("cppdefs", {})
             if not cppdefs.get("marbl", False):
                 raise ValueError(
                     "cdr_output.do_cdr_output is True but cppdefs.marbl is False: "

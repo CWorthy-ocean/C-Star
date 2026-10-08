@@ -97,6 +97,14 @@ _MODEL_DIR_ROMS090 = _BUNDLED_CATALOG / "ModelSpec" / "roms-marbl-0.9-default"
 # need a valid, representative pair from the bundled catalog.
 _FORCING_INPUTS = _CATALOG.forcing_data("glorys-era5-unified")
 _OUTPUT_SETTINGS = _CATALOG.output_data("standard")
+# A minimal physics-only forcing selection (no bgc items), mirroring the one in
+# test_forge_blueprint.py -- no catalog ForcingSpec is physics-only today.
+_PHYSICS_ONLY_FORCING = {
+    "initial_conditions": {"source": {"name": "GLORYS", "glorys_layout": "regional"}},
+    "forcing": {
+        "surface": [{"source": {"name": "ERA5"}, "type": "physics"}],
+    },
+}
 
 
 def _make_builder(args, **overrides):
@@ -1787,7 +1795,7 @@ class TestForgeExecutorBuildAndRun:
         """Resolver cfg + executor for the CDR configure_build tests (same shape as
         the clobber test above).
         """
-        cfg = build_forge_blueprint(
+        kwargs = dict(
             model_dir=_MODEL_DIR,
             grid_name="test-grid",
             grid_kwargs=sample_grid_kwargs,
@@ -1798,8 +1806,9 @@ class TestForgeExecutorBuildAndRun:
             dt=7200,
             forcing_inputs=_FORCING_INPUTS,
             output_settings=_OUTPUT_SETTINGS,
-            **build_over,
         )
+        kwargs.update(build_over)
+        cfg = build_forge_blueprint(**kwargs)
         tmp = Path(tempfile.mkdtemp(prefix="forge-test-core-cdr-"))
         host = HostPaths(working_dir=tmp, source_data_cache=tmp, system="test")
         return cfg, host
@@ -1874,6 +1883,53 @@ class TestForgeExecutorBuildAndRun:
         cfg.model_settings["cppdefs"]["marbl"] = False
 
         with pytest.raises(ValueError, match="requires MARBL"):
+            self._run_configure_build(cfg, host)
+
+    def test_configure_build_cdr_forcing_without_marbl_on_roms_0_9_1(
+        self, sample_grid_kwargs, sample_open_boundaries, sample_partitioning
+    ):
+        """From ucla-roms 0.9.1 a parameterized CDR release runs without MARBL:
+        configure_build keeps CDR_FORCING on and leaves cdr_output (MARBL-only) off.
+        """
+        cfg, host = self._cdr_cfg_and_builder(
+            sample_grid_kwargs,
+            sample_open_boundaries,
+            sample_partitioning,
+            model_dir=_MODEL_DIR_ROMS090,
+            bgc_mode="none",
+            forcing_inputs=_PHYSICS_ONLY_FORCING,
+            cdr_forcing={"enabled": True},
+        )
+
+        # This helper skips generate_inputs(), so the 0.9 tier's generated sections
+        # (grid, s_coord, ...) are absent; the output-stream precheck would
+        # validate them and is unrelated to the CDR rule under test.
+        with patch(
+            "cstar.applications.forge.executor.output_precheck_applies_to",
+            return_value=False,
+        ):
+            builder = self._run_configure_build(cfg, host)
+
+        assert builder._settings_compile_time["cppdefs"]["cdr_forcing"] is True
+        assert builder._settings_compile_time["cppdefs"]["marbl"] is False
+        assert builder._settings_run_time["cdr_output"]["do_cdr_output"] is False
+
+    def test_configure_build_rejects_upscaled_cdr_without_marbl(
+        self, sample_grid_kwargs, sample_open_boundaries, sample_partitioning
+    ):
+        """A stored "upscaled" blueprint whose MARBL was turned off after the
+        resolver ran is rejected: depth-profile CDR forcing needs MARBL at init.
+        """
+        cfg, host = self._cdr_cfg_and_builder(
+            sample_grid_kwargs,
+            sample_open_boundaries,
+            sample_partitioning,
+            cdr={"mode": "upscaled"},
+        )
+        cfg.model_settings["cppdefs"]["marbl"] = False
+        cfg.model_settings["param"]["ntrc_bio"] = 0
+
+        with pytest.raises(ValueError, match="upscaled"):
             self._run_configure_build(cfg, host)
 
     def test_configure_build_rejects_non_divisible_rst_period(

@@ -585,7 +585,8 @@ class CdrLiteOutputSettings(_NmlGroup):
     a separate class because that one is frozen for ucla-roms 0.7/0.8. Compiled
     and read unconditionally (with or without MARBL), but ucla-roms aborts at
     init if ``do_cdr_lite_output`` is set with ``nt_cdr_oae + nt_cdr_dor == 0``
-    in ``&PARAM_SETTINGS``; the ``*_source`` fields need MARBL and CDR_FORCING.
+    in ``&PARAM_SETTINGS``; the ``*_source`` fields need CDR_FORCING (and MARBL
+    only before ucla-roms 0.9.1).
     Every field carries the ucla-roms reference default so the group can be
     omitted and still validate.
     """
@@ -1169,6 +1170,11 @@ def _parse_semver(ref: str) -> tuple[int, int, int] | None:
     if match is None:
         return None
     return (int(match.group(1)), int(match.group(2)), int(match.group(3)))
+
+
+def roms_version_from_ref(ref: str | None) -> tuple[int, int, int] | None:
+    """The ``(major, minor, patch)`` a ucla-roms git ref pins, or ``None`` when it is not a release tag (branch name, commit hash, empty)."""
+    return _parse_semver(ref) if ref else None
 
 
 _COMMIT_HASH_RE = re.compile(r"[0-9a-fA-F]{7,40}")

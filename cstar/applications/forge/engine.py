@@ -114,8 +114,9 @@ PROCESSING_FILLED_SECTIONS = (
 # regression coverage.
 #
 # ``cdr_output.do_cdr_output`` is deliberately NOT listed: it is a user setting
-# and must survive the overlay. ``ForgeExecutor.configure_build`` re-asserts it
-# True when a CDR forcing was actually generated.
+# and must survive the overlay. ``ForgeExecutor.configure_build`` asserts it True
+# for an active CDR mode under MARBL (``check_cdr_forcing_mode``); without MARBL
+# the CDR release runs with it left off, since cdr_output needs MARBL.
 GENERATION_DERIVED_LEAF_KEYS: dict[str, tuple[str, ...]] = {
     "river_frc": (
         "river_source",

@@ -409,7 +409,7 @@ ucla-roms release: ``roms-marbl-0.5-default`` pins ``0.5.0``,
 ``0.7.0``, ``roms-marbl-0.8-default`` pins ``0.8.0`` (adds the
 ``parabolic_splines``/``upstream_ts_land_curv`` advection cppdefs flags, PR
 #361, with no new settings tier -- it still resolves to
-``RunTimeSettingsV0_7_0``), ``roms-marbl-0.9-default`` pins ``0.9.0``
+``RunTimeSettingsV0_7_0``), ``roms-marbl-0.9-default`` pins ``0.9.1``
 (``RunTimeSettingsV0_9_0``, which models the ``cdr_lite`` section; the spec does
 not declare it, see below); older specs stay
 fixed and keep emitting
@@ -443,6 +443,12 @@ rejected at resolve time. Unlike ucla-roms 0.7/0.8's stream, 0.9's
 ``cdr_lite_output`` does not force ``CDR_FORCING`` on: the per-tier rows of
 ``CDR_OUTPUT_SECTIONS`` and of the precheck section table apply only when
 the row's settings class is the pinned tier's own annotation for that section.
+From ucla-roms 0.9.1 an active CDR mode no longer requires MARBL: the
+parameterized releases (``simple``/``yaml``/``netcdf``) run in physics-only
+builds with ``cppdefs.cdr_forcing`` on and ``cdr_output.do_cdr_output`` left
+off (that module needs MARBL). ``upscaled`` (depth profiles) and pins below
+0.9.1 are rejected without MARBL by ``check_cdr_forcing_mode``
+(``namelist_model.py``), called by both the resolver and ``configure_build``.
 ``&TRACER_DIFF2`` is read from 0.9.0 on (earlier releases skipped it through
 an ``#if define`` typo), so a nonzero ``tracer_diff2.tnu2_default`` only
 takes effect there; every bundled ModelSpec uses 0.0.

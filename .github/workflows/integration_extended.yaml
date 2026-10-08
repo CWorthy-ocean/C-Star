@@ -28,7 +28,7 @@ jobs:
       matrix:
         os: [ubuntu-latest, macos-latest]
         python-version: ["3.12", "3.13"]
-        roms_ref: ["0.9.0", "main"]
+        roms_ref: ["0.9.1", "main"]
     steps:
       - uses: actions/checkout@v4
 
