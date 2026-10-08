@@ -431,18 +431,22 @@ so the editor shows no widget for them, but a loaded blueprint's values are
 carried through unchanged.
 
 ``CDR_LITE`` (ucla-roms >= 0.9.0, formerly ``CDR_TRACER``) is a
-resolver-owned cppdef: ``check_cdr_lite_sections`` turns it on when
-``cdr_lite.cdr_online_carbonate_sensitivity`` is set (MARBL computes the
-carbonate sensitivities from its ALT_CO2 state), and rejects the
-combinations ucla-roms would abort on at init (online sensitivity without
-MARBL; ``wrt_gas_exchange`` without ``CDR_LITE``; CDR-lite output or gas
-exchange with no CDR-lite tracers). Compiling ``CDR_LITE`` with
-file-based sensitivities (``ddic_dco2``/``ddic_dalk`` forcing) is not yet
-supported, so a user ``cppdefs.cdr_lite`` without online sensitivity is
-rejected at resolve time. Unlike ucla-roms 0.7/0.8's stream, 0.9's
-``cdr_lite_output`` does not force ``CDR_FORCING`` on: the per-tier rows of
-``CDR_OUTPUT_SECTIONS`` and of the precheck section table apply only when
-the row's settings class is the pinned tier's own annotation for that section.
+resolver-owned cppdef with two sources. In ``bgc_mode: marbl``,
+``cdr_lite.cdr_online_carbonate_sensitivity`` turns it on (MARBL computes the
+carbonate sensitivities from its ALT_CO2 state). In ``bgc_mode: cdr_lite`` it
+is on for the mode itself, with the sensitivities read from forcing files
+(the online knob is rejected there; a separate package documents the files).
+``check_cdr_lite_sections`` derives it and rejects the combinations ucla-roms
+would abort on at init: the online sensitivity without MARBL;
+``wrt_gas_exchange`` without ``CDR_LITE``; CDR-lite output or the online
+sensitivity with no CDR-lite tracers; and, on a tier that models ``cdr_lite``
+(``settings_cls``), CDR tracers (``nt_cdr_oae + nt_cdr_dor > 0``) in a build
+without ``CDR_LITE`` ("Forcing type not supported"). A user ``cppdefs.cdr_lite``
+that neither source needs is rejected at resolve time. Unlike ucla-roms
+0.7/0.8's stream, 0.9's ``cdr_lite_output`` does not force ``CDR_FORCING`` on:
+the per-tier rows of ``CDR_OUTPUT_SECTIONS`` and of the precheck section table
+apply only when the row's settings class is the pinned tier's own annotation
+for that section.
 From ucla-roms 0.9.1 an active CDR mode no longer requires MARBL: the
 parameterized releases (``simple``/``yaml``/``netcdf``) run in physics-only
 builds with ``cppdefs.cdr_forcing`` on and ``cdr_output.do_cdr_output`` left
@@ -453,15 +457,49 @@ off (that module needs MARBL). ``upscaled`` (depth profiles) and pins below
 an ``#if define`` typo), so a nonzero ``tracer_diff2.tnu2_default`` only
 takes effect there; every bundled ModelSpec uses 0.0.
 
-The bundled ModelSpecs do not declare ``cdr_lite`` yet, so the knob is absent
-from the wizard and ``&CDR_LITE_SETTINGS`` is written at its schema default
-(off): CDR-lite tracers (``nt_cdr_oae``/``nt_cdr_dor`` > 0) also need per-tracer
-surface-flux forcing (``CDR_OAE_DIC<n>_flx``/``CDR_DOR_DIC<n>_flx`` on
-``CDR_time``) that Forge does not generate, and ROMS aborts looking it up in the
-forcing files. The CDR-lite BGC-mode follow-up wires that forcing up. The
-plumbing above (the ``cppdefs.cdr_lite`` derivation, ``check_cdr_lite_sections``,
-``RunTimeSettingsV0_9_0.cdr_lite``) stays in place, and the section can still be
-set through ``run_time_overrides``.
+``bgc_mode`` is a three-valued build mode (``BgcMode`` in ``namelist_model.py``):
+``marbl`` (MARBL tracers), ``none`` (physics only) and ``cdr_lite`` (no MARBL; the
+only extra tracers are ucla-roms' dedicated CDR-lite tracers). The resolver
+records it as ``cppdefs.marbl``/``cppdefs.cdr_lite`` only, and
+``bgc_mode_from_cppdefs`` is the one derivation of the mode back from a stored
+blueprint's cppdefs (``marbl`` wins, so MARBL with the online sensitivity is
+still ``marbl``); the executor and the generation step use it rather than
+re-reading the two flags. The resolver, for ``cdr_lite``: sets ``marbl`` off and
+``cdr_lite`` on, zeroes ``param.ntrc_bio``, turns ``nhy_forcing``/``nox_forcing``
+off, drops ``code.marbl``, rejects BGC forcing (as for ``none``), requires a CDR
+forcing with ``cdr_lite`` releases, and, in the ``simple`` CDR mode, defaults
+each release's ``tracer_set`` to ``cdr_lite`` (``yaml``/``netcdf`` carry their
+own). The mode is gated on ucla-roms >= ``CDR_LITE_MODE_MIN_ROMS`` (0.9.1: the
+``CDR_LITE`` key exists from 0.9.0, CDR forcing without MARBL from 0.9.1;
+``check_cdr_lite_mode_roms``, resolver and ``configure_build``); the constant is
+to be raised to the ucla-roms release that writes forcing-ready ``_cdrgas`` files
+and zero-fills the ``<CDR tracer>_flx`` surface fluxes a CDR-lite tracer has no
+forcing for, since Forge's CDR-lite mode generates neither yet.
+
+What the mode derives is not knowable at resolve time, so it is derived where
+it becomes known. The tracer counts come from the CDR forcing during
+generation: ``cdr_tracer_counts`` reads ``passive_tracer<i>``,
+``CDR_OAE_ALK<k>``/``CDR_OAE_DIC<k>`` and ``CDR_DOR_DIC<j>`` off the file's
+``tracer_name`` coordinate (roms-tools >= 5.1 writes it on ``ntracers``, in ROMS
+order), and ``_generate_cdr_forcing``/``_generate_cdr_forcing_from_custom_file``
+write ``param.nt_cdr_oae``/``nt_cdr_dor`` into the live settings
+(``GENERATION_DERIVED_LEAF_KEYS`` keeps ``configure_build``'s overlay of the
+stored zeros from reverting them, and ``configure_build`` sizes ``n_tracers``
+from the live ``param`` rather than the stored blueprint). ``param.nt_passive``
+is user-owned, so a file whose passive count differs from it is rejected, not
+overwritten. Under ``cdr_lite`` the handlers also reject MARBL tracer names and
+volume releases, and in every mode the file's ``ntracers`` must equal the
+build's tracer count (a file without ``tracer_name`` is an error under
+``cdr_lite`` and left alone otherwise). ``configure_build`` then forces
+``cdr_lite_output.do_cdr_lite_output`` on (the ``_cdrtrc`` stream is the only
+output the CDR tracers appear in, and ROMS aborts at init if it is on with zero
+CDR tracers) and rejects a CDR-lite build whose forcing defined no CDR-lite
+tracers. The resolver does not force the stream (the counts are unknown), so
+the output-stream precheck sees it only at build time. The bundled ModelSpecs do
+not declare ``cdr_lite``: the online knob is absent from the wizard and
+``&CDR_LITE_SETTINGS`` is written at its default (off), which is what
+``bgc_mode: cdr_lite`` runs with; the section can still be set through
+``run_time_overrides``.
 
 ucla-roms 0.5.0 also added a run-start precheck (``check_output_divides_rst``):
 each enabled output stream's ``nrpf x output_period`` must evenly divide

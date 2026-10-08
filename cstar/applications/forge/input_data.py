@@ -29,6 +29,11 @@ from threadpoolctl import threadpool_limits
 import cstar.applications.roms_marbl.models as cstar_models
 from cstar.applications.forge import source_datasets
 from cstar.applications.forge.blueprint import OpenBoundaries, UserProvidedFile
+from cstar.applications.forge.namelist_model import (
+    bgc_mode_from_cppdefs,
+    cdr_tracer_counts,
+    n_tracers_from_param,
+)
 from cstar.applications.forge.source_registry import ROMS_TOOLS_SOURCE_NAME
 from cstar.applications.forge.user_files import stage_user_netcdf, verify_user_file
 from cstar.applications.forge.util import mem_log
@@ -366,6 +371,30 @@ def register_input(name: str, order: int, label: str | None = None):
 
 
 _T = TypeVar("_T")
+
+
+@dataclass(frozen=True)
+class _CdrAxis:
+    """What a CDR forcing dataset says about its tracer axis (:func:`_cdr_axis`)."""
+
+    names: tuple[str, ...] | None
+    """The ``tracer_name`` coordinate on ``ntracers``, or ``None`` when absent."""
+    has_trcflx: bool
+    """Whether the file carries ``cdr_trcflx`` (tracer-perturbation releases)."""
+
+
+def _cdr_axis(ds: xr.Dataset) -> _CdrAxis:
+    """Read the tracer axis off a CDR forcing dataset (an ``rt.CDRForcing.ds`` or an
+    opened file). roms-tools writes ``tracer_name`` as a string coordinate on
+    ``ntracers``; one without it (hand-made, or written by an older roms-tools)
+    has ``names=None``.
+    """
+    if "tracer_name" not in ds.coords or "ntracers" not in ds.sizes:
+        return _CdrAxis(names=None, has_trcflx=False)
+    return _CdrAxis(
+        names=tuple(str(name) for name in ds["tracer_name"].values),
+        has_trcflx="cdr_trcflx" in ds.data_vars,
+    )
 
 
 def _require_element(value: _T | None, field_name: str) -> _T:
@@ -2491,6 +2520,72 @@ class RomsMarblInputData(InputData):
             paths[0] if isinstance(paths, (list, tuple)) else paths
         )
 
+    def _apply_cdr_tracer_axis(self, axis: _CdrAxis, *, label: str) -> None:
+        """Size the build's CDR tracers from a CDR forcing's tracer axis.
+
+        ROMS reads ``cdr_trcflx(time, ntracers, ncdr)`` positionally, so the
+        namelist must describe the file: ``param.nt_cdr_oae``/``nt_cdr_dor`` are
+        read off the axis here (the one place they become knowable) and written
+        to the live settings; ``param.nt_passive`` is user-owned and only checked
+        against the file. Under ``bgc_mode: cdr_lite`` (no MARBL) the axis must
+        also hold nothing but physics, passive and CDR-lite tracers and come from
+        tracer-perturbation releases. In the other modes a file without a
+        ``tracer_name`` coordinate is left alone (counts stay as set).
+
+        Raises ``ValueError`` listing every problem; nothing is written then.
+        """
+        bgc_mode = bgc_mode_from_cppdefs(
+            self._settings_compile_time.get("cppdefs") or {}
+        )
+        if axis.names is None:
+            if bgc_mode == "cdr_lite":
+                raise ValueError(
+                    f"{label} has no tracer_name coordinate on its ntracers axis, so "
+                    "the CDR-lite tracer counts cannot be derived from it; "
+                    "regenerate the CDR forcing with roms-tools >= 5.1."
+                )
+            log.debug(
+                "%s has no tracer_name coordinate; param.nt_cdr_oae/nt_cdr_dor "
+                "are left as set.",
+                label,
+            )
+            return
+        counts = cdr_tracer_counts(axis.names)
+        param = self._settings_run_time.setdefault("param", {})
+        derived = {"nt_cdr_oae": counts.n_oae_pairs, "nt_cdr_dor": counts.n_dor}
+        problems: list[str] = []
+        nt_passive = int(param.get("nt_passive") or 0)
+        if counts.n_passive != nt_passive:
+            problems.append(
+                f"{label} has {counts.n_passive} passive tracer(s) but "
+                f"param.nt_passive is {nt_passive}; set param.nt_passive to "
+                f"{counts.n_passive}."
+            )
+        if bgc_mode == "cdr_lite":
+            if counts.other:
+                problems.append(
+                    f"{label} carries MARBL tracers ({', '.join(counts.other)}) but "
+                    'bgc_mode "cdr_lite" has no MARBL; build it from tracer_set='
+                    "cdr_lite releases without include_marbl_bgc."
+                )
+            if not axis.has_trcflx:
+                problems.append(
+                    f"{label} has no cdr_trcflx variable: CDR-lite tracers are fed "
+                    "by tracer-perturbation releases, not volume releases."
+                )
+        n_axis = len(axis.names)
+        n_build = n_tracers_from_param({**param, **derived})
+        if n_axis != n_build:
+            problems.append(
+                f"{label} tracer axis ({n_axis}) does not match the build's "
+                f"tracer count ({n_build}: 2 + ntrc_bio {param.get('ntrc_bio', 0)} + "
+                f"nt_passive {nt_passive} + 2*nt_cdr_oae {derived['nt_cdr_oae']} + "
+                f"nt_cdr_dor {derived['nt_cdr_dor']})."
+            )
+        if problems:
+            raise ValueError("\n".join(problems))
+        param.update(derived)
+
     def _generate_cdr_forcing_from_custom_file(
         self,
         output_path: Path,
@@ -2555,13 +2650,15 @@ class RomsMarblInputData(InputData):
                     )
                 ncdr_parm = int(ds.sizes["ncdr"])
                 cdr_volume = has_volume
+                axis = _cdr_axis(ds)
 
-        if self._should_reuse_existing_output(output_path):
+        reuse = self._should_reuse_existing_output(output_path)
+        if reuse:
             # Reuse means ROMS reads what already sits at output_path, not the
-            # custom file -- derive ncdr_parm/cdr_volume from the reused file
-            # (mirroring the river branch's reuse semantics) so the namelist
-            # can't desync from the data actually read (e.g. a swapped custom
-            # file without clobber).
+            # custom file -- derive ncdr_parm/cdr_volume (and the tracer axis) from
+            # the reused file (mirroring the river branch's reuse semantics) so the
+            # namelist can't desync from the data actually read (e.g. a swapped
+            # custom file without clobber).
             print(f"   ↪ Reusing existing file: {output_path}")
             with warnings.catch_warnings():
                 warnings.filterwarnings(
@@ -2570,6 +2667,7 @@ class RomsMarblInputData(InputData):
                 with xr.open_dataset(output_path, decode_timedelta=False) as reused:
                     ncdr_reused = int(reused.sizes["ncdr"])
                     cdr_volume_reused = "cdr_volume" in reused.variables
+                    axis = _cdr_axis(reused)
             if ncdr_reused != ncdr_parm or cdr_volume_reused != cdr_volume:
                 warnings.warn(
                     f"reusing existing CDR forcing at {output_path} "
@@ -2582,7 +2680,9 @@ class RomsMarblInputData(InputData):
                 )
             ncdr_parm = ncdr_reused
             cdr_volume = cdr_volume_reused
-        else:
+        # Before staging, so a file the build cannot use fails without a copy.
+        self._apply_cdr_tracer_axis(axis, label=f"CDR forcing {resolved}")
+        if not reuse:
             stage_user_netcdf(
                 resolved, output_path, use_pio=self.use_pio, label="CDR forcing"
             )
@@ -2630,6 +2730,10 @@ class RomsMarblInputData(InputData):
         with mem_log("CDRForcing()", enabled=self.verbose):
             cdr = rt.CDRForcing(**input_args)
 
+        # Before anything is written: a tracer axis the build cannot use fails fast.
+        self._apply_cdr_tracer_axis(
+            _cdr_axis(cdr.ds), label="The generated CDR forcing"
+        )
         cdr.to_yaml(yaml_path)
 
         if self._should_reuse_existing_output(output_path):

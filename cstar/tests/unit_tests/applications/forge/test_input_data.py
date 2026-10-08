@@ -40,6 +40,7 @@ from cstar.applications.forge.input_data import (
     register_input,
     resolve_input_selection,
 )
+from cstar.applications.forge.namelist_model import n_tracers_from_param
 from cstar.applications.forge.source_registry import (
     STREAMABLE_SOURCES as _REAL_STREAMABLE_SOURCES,
 )
@@ -1849,6 +1850,9 @@ class TestRomsMarblInputDataGeneration:
         sample_roms_marbl_input_data.roms_marbl_blueprint_elements.cdr_forcing = (
             cstar_models.Dataset(data=[])
         )
+        # The real build always carries ntrc_bio; a MARBL CDR forcing's tracer axis
+        # (temp, salt + the 32 MARBL tracers) is checked against it.
+        sample_roms_marbl_input_data._settings_run_time["param"] = {"ntrc_bio": 32}
         sample_roms_marbl_input_data._generate_cdr_forcing(
             key="cdr_forcing", cdr_kwargs=cdr_kwargs
         )
@@ -2077,6 +2081,7 @@ def _write_cdr_netcdf(
     include_release_name=True,
     omit=(),
     fmt=None,
+    tracers=None,
 ):
     """A minimal, real CDR-forcing netCDF matching the variable/dim conventions
     ``_CDR_FRC_DEFAULT`` (``forge_blueprint_resolve.py``) hardcodes for ROMS to
@@ -2086,8 +2091,13 @@ def _write_cdr_netcdf(
     ``(cdr_time, ncdr)``) or the tracer-perturbation family (``cdr_trcflx``).
 
     ``omit`` drops named variables after construction, for missing-content tests.
-    ``family="none"`` skips both families entirely.
+    ``family="none"`` skips both families entirely. ``tracers`` (a list of ROMS
+    tracer names) gives the file roms-tools >= 5.1's tracer axis: a string
+    ``tracer_name`` coordinate on ``ntracers``, with the per-tracer variables
+    (``cdr_tracer``/``cdr_trcflx``) on ``(cdr_time, ntracers, ncdr)``.
     """
+    dims = ("cdr_time", "ncdr") if tracers is None else ("cdr_time", "ntracers", "ncdr")
+    shape = (ntime, ncdr) if tracers is None else (ntime, len(tracers), ncdr)
     data_vars = {
         "cdr_lon": ("ncdr", np.zeros(ncdr)),
         "cdr_lat": ("ncdr", np.zeros(ncdr)),
@@ -2098,16 +2108,65 @@ def _write_cdr_netcdf(
     }
     if family == "volume":
         data_vars["cdr_volume"] = (("cdr_time", "ncdr"), np.ones((ntime, ncdr)))
-        data_vars["cdr_tracer"] = (("cdr_time", "ncdr"), np.ones((ntime, ncdr)))
+        data_vars["cdr_tracer"] = (dims, np.ones(shape))
     elif family == "trcflx":
-        data_vars["cdr_trcflx"] = (("cdr_time", "ncdr"), np.ones((ntime, ncdr)))
+        data_vars["cdr_trcflx"] = (dims, np.ones(shape))
     for name in omit:
         data_vars.pop(name, None)
     ds = xr.Dataset(data_vars)
     if include_release_name:
         ds.coords["release_name"] = ("ncdr", [f"release_{i}" for i in range(ncdr)])
+    if tracers is not None:
+        ds.coords["tracer_name"] = ("ntracers", list(tracers))
     ds.to_netcdf(path, format=fmt, engine="netcdf4")
     return path
+
+
+def _hand_built_cdr_input_data(tmp_path):
+    """A hand-built ``RomsMarblInputData`` (``MagicMock`` grid, empty live settings
+    dicts) with a ``cdr_forcing`` slot, for driving ``_generate_cdr_forcing``
+    directly.
+    """
+    ic = forge_models.InitialConditionsInput(
+        source=forge_models.SourceSpec(name="GLORYS")
+    )
+    surface_item = forge_models.SurfaceForcingItem(
+        source=forge_models.SourceSpec(name="ERA5"), type="physics"
+    )
+    boundary_item = forge_models.BoundaryForcing(
+        source=forge_models.SourceSpec(name="GLORYS")
+    )
+    forcing_override = _build_forcing_override(
+        ic, surface=[surface_item], boundary=boundary_item
+    )
+
+    grid = MagicMock()
+    grid.ds.sizes = {"eta_rho": 22, "xi_rho": 24}
+
+    data_dir = tmp_path / "input_data"
+    data_dir.mkdir(parents=True, exist_ok=True)
+    bp_dir = tmp_path / "blueprints"
+    bp_dir.mkdir(parents=True, exist_ok=True)
+
+    return RomsMarblInputData(
+        domain_name="test_domain",
+        start_date=datetime(2012, 1, 1),
+        end_date=datetime(2012, 1, 2),
+        forcing_override=forcing_override,
+        grid=grid,
+        boundaries=forge_models.OpenBoundaries(
+            north=True, south=True, east=True, west=False
+        ),
+        source_data=MagicMock(spec=source_datasets.SourceDatasets),
+        roms_marbl_blueprint_dir=bp_dir,
+        partitioning=cstar_models.PartitioningParameterSet(n_procs_x=2, n_procs_y=2),
+        use_dask=False,
+        input_data_dir=data_dir,
+        # Placeholder so __post_init__'s input_list/Dataset bookkeeping creates
+        # a "cdr_forcing" slot -- the tests below call _generate_cdr_forcing
+        # directly with their own custom_file, not this placeholder's content.
+        cdr_forcing_file={"location": "placeholder.nc", "content_hash": "0" * 64},
+    )
 
 
 class TestCdrCustomFileForcing:
@@ -2122,48 +2181,7 @@ class TestCdrCustomFileForcing:
 
     @pytest.fixture
     def cdr_input_data(self, tmp_path):
-        ic = forge_models.InitialConditionsInput(
-            source=forge_models.SourceSpec(name="GLORYS")
-        )
-        surface_item = forge_models.SurfaceForcingItem(
-            source=forge_models.SourceSpec(name="ERA5"), type="physics"
-        )
-        boundary_item = forge_models.BoundaryForcing(
-            source=forge_models.SourceSpec(name="GLORYS")
-        )
-        forcing_override = _build_forcing_override(
-            ic, surface=[surface_item], boundary=boundary_item
-        )
-
-        grid = MagicMock()
-        grid.ds.sizes = {"eta_rho": 22, "xi_rho": 24}
-
-        data_dir = tmp_path / "input_data"
-        data_dir.mkdir(parents=True, exist_ok=True)
-        bp_dir = tmp_path / "blueprints"
-        bp_dir.mkdir(parents=True, exist_ok=True)
-
-        return RomsMarblInputData(
-            domain_name="test_domain",
-            start_date=datetime(2012, 1, 1),
-            end_date=datetime(2012, 1, 2),
-            forcing_override=forcing_override,
-            grid=grid,
-            boundaries=forge_models.OpenBoundaries(
-                north=True, south=True, east=True, west=False
-            ),
-            source_data=MagicMock(spec=source_datasets.SourceDatasets),
-            roms_marbl_blueprint_dir=bp_dir,
-            partitioning=cstar_models.PartitioningParameterSet(
-                n_procs_x=2, n_procs_y=2
-            ),
-            use_dask=False,
-            input_data_dir=data_dir,
-            # Placeholder so __post_init__'s input_list/Dataset bookkeeping creates
-            # a "cdr_forcing" slot -- the tests below call _generate_cdr_forcing
-            # directly with their own custom_file, not this placeholder's content.
-            cdr_forcing_file={"location": "placeholder.nc", "content_hash": "0" * 64},
-        )
+        return _hand_built_cdr_input_data(tmp_path)
 
     def test_missing_file_raises_file_not_found(self, cdr_input_data, tmp_path):
         missing = tmp_path / "missing_cdr.nc"
@@ -2386,6 +2404,246 @@ class TestCdrCustomFileForcing:
 
         output_path = cdr_input_data._forcing_filename(CDR_FORCING_NETCDF_STEM)
         assert output_path.exists()
+
+
+_LITE_TRACERS = [
+    "temp",
+    "salt",
+    "CDR_OAE_ALK1",
+    "CDR_OAE_DIC1",
+    "CDR_OAE_ALK2",
+    "CDR_OAE_DIC2",
+    "CDR_DOR_DIC1",
+]
+
+
+class TestCdrTracerAxis:
+    """The CDR generation handlers size the build's CDR tracers from the CDR
+    forcing's ``tracer_name`` axis (``param.nt_cdr_oae``/``nt_cdr_dor``), check
+    ``param.nt_passive`` against it, and under ``bgc_mode: cdr_lite`` (no MARBL)
+    reject an axis the build cannot use. Built on tiny real netCDF files.
+    """
+
+    @pytest.fixture
+    def data(self, tmp_path):
+        return _hand_built_cdr_input_data(tmp_path)
+
+    @staticmethod
+    def _custom_file(path):
+        from cstar.applications.forge.user_files import hash_netcdf_contents
+
+        return forge_models.UserProvidedFile(
+            location=str(path), content_hash=hash_netcdf_contents(path)
+        )
+
+    @staticmethod
+    def _set_mode(data, mode, **param):
+        data._settings_compile_time["cppdefs"] = {
+            "marbl": mode == "marbl",
+            "cdr_lite": mode == "cdr_lite",
+        }
+        data._settings_run_time["param"] = {"nt_passive": 0, "ntrc_bio": 0, **param}
+
+    def _run(self, data, tmp_path, tracers, family="trcflx", **kwargs):
+        nc = _write_cdr_netcdf(
+            tmp_path / "user_cdr.nc",
+            ncdr=2,
+            family=family,
+            tracers=tracers,
+            **kwargs,
+        )
+        data._generate_cdr_forcing(key="cdr_forcing", custom_file=self._custom_file(nc))
+
+    def test_counts_are_derived_from_the_axis(self, data, tmp_path):
+        self._set_mode(data, "cdr_lite")
+        self._run(data, tmp_path, _LITE_TRACERS)
+
+        param = data._settings_run_time["param"]
+        assert (param["nt_cdr_oae"], param["nt_cdr_dor"]) == (2, 1)
+        assert n_tracers_from_param(param) == len(_LITE_TRACERS)
+
+    def test_counts_overwrite_stale_values(self, data, tmp_path):
+        self._set_mode(data, "cdr_lite", nt_cdr_oae=5, nt_cdr_dor=4)
+        self._run(data, tmp_path, ["temp", "salt", "CDR_DOR_DIC1"])
+
+        param = data._settings_run_time["param"]
+        assert (param["nt_cdr_oae"], param["nt_cdr_dor"]) == (0, 1)
+
+    def test_param_section_is_created_when_missing(self, data, tmp_path):
+        data._settings_compile_time["cppdefs"] = {"cdr_lite": True}
+        self._run(data, tmp_path, ["temp", "salt", "CDR_DOR_DIC1"])
+
+        assert data._settings_run_time["param"] == {"nt_cdr_oae": 0, "nt_cdr_dor": 1}
+
+    def test_passive_count_must_match_the_users_setting(self, data, tmp_path):
+        self._set_mode(data, "cdr_lite")
+        tracers = ["temp", "salt", "passive_tracer1", "CDR_DOR_DIC1"]
+        with pytest.raises(ValueError, match=r"param.nt_passive to 1"):
+            self._run(data, tmp_path, tracers)
+        # nothing is written on failure; nt_passive stays the user's
+        assert "nt_cdr_dor" not in data._settings_run_time["param"]
+        assert data._settings_run_time["param"]["nt_passive"] == 0
+
+        self._set_mode(data, "cdr_lite", nt_passive=1)
+        self._run(data, tmp_path, tracers)
+        param = data._settings_run_time["param"]
+        assert (param["nt_passive"], param["nt_cdr_dor"]) == (1, 1)
+
+    def test_marbl_names_are_rejected_without_marbl(self, data, tmp_path):
+        self._set_mode(data, "cdr_lite")
+        tracers = [*_LITE_TRACERS, "PO4", "DIC"]
+        with pytest.raises(ValueError, match=r"MARBL tracers \(PO4, DIC\)") as exc:
+            self._run(data, tmp_path, tracers)
+        # ... and the axis no longer matches the build either: both reported.
+        assert "does not match the build's tracer count" in str(exc.value)
+
+    def test_volume_releases_are_rejected_without_marbl(self, data, tmp_path):
+        self._set_mode(data, "cdr_lite")
+        with pytest.raises(ValueError, match="no cdr_trcflx"):
+            self._run(data, tmp_path, ["temp", "salt", "CDR_DOR_DIC1"], family="volume")
+
+    def test_a_missing_axis_is_fatal_under_cdr_lite(self, data, tmp_path):
+        self._set_mode(data, "cdr_lite")
+        with pytest.raises(ValueError, match="roms-tools >= 5.1"):
+            self._run(data, tmp_path, tracers=None)
+
+    @pytest.mark.parametrize("mode", ["marbl", "none"])
+    def test_a_missing_axis_is_ignored_in_the_other_modes(
+        self, data, tmp_path, mode, caplog
+    ):
+        self._set_mode(data, mode, nt_cdr_oae=3)
+        with caplog.at_level("DEBUG", logger="cstar.applications.forge.input_data"):
+            self._run(data, tmp_path, tracers=None)
+
+        # counts stay as set; the file is simply described by ncdr_parm etc.
+        assert data._settings_run_time["param"]["nt_cdr_oae"] == 3
+        assert data._settings_run_time["cdr_frc"]["ncdr_parm"] == 2
+        assert "no tracer_name coordinate" in caplog.text
+
+    def test_axis_must_match_the_build_tracer_count(self, data, tmp_path):
+        self._set_mode(data, "cdr_lite", ntrc_bio=3)
+        with pytest.raises(
+            ValueError,
+            match=r"tracer axis \(5\) does not match the build's tracer count \(8",
+        ):
+            self._run(
+                data,
+                tmp_path,
+                ["temp", "salt", "CDR_OAE_ALK1", "CDR_OAE_DIC1", "CDR_DOR_DIC1"],
+            )
+
+    def test_marbl_mode_checks_the_marbl_axis_against_ntrc_bio(self, data, tmp_path):
+        marbl_names = [f"BGC{i}" for i in range(4)]
+        self._set_mode(data, "marbl", ntrc_bio=4)
+        self._run(data, tmp_path, ["temp", "salt", *marbl_names])
+        assert data._settings_run_time["param"]["nt_cdr_oae"] == 0
+
+        self._set_mode(data, "marbl", ntrc_bio=5)
+        with pytest.raises(ValueError, match=r"axis \(6\) does not match.*\(7"):
+            self._run(data, tmp_path, ["temp", "salt", *marbl_names])
+
+    def test_the_reused_file_is_the_one_described(self, data, tmp_path):
+        """With clobber off and the planned output already on disk, ROMS reads the
+        reused file, so its axis -- not the custom file's -- sizes the tracers.
+        """
+        self._set_mode(data, "cdr_lite")
+        output_path = data._forcing_filename(CDR_FORCING_NETCDF_STEM)
+        _write_cdr_netcdf(
+            output_path,
+            ncdr=2,
+            family="trcflx",
+            tracers=["temp", "salt", "CDR_DOR_DIC1"],
+        )
+        data._existing_planned_outputs = {output_path.resolve()}
+
+        with pytest.warns(UserWarning, match="differs from custom_file"):
+            self._run(data, tmp_path, _LITE_TRACERS, family="volume")
+
+        param = data._settings_run_time["param"]
+        assert (param["nt_cdr_oae"], param["nt_cdr_dor"]) == (0, 1)
+
+    @patch("cstar.applications.forge.input_data.rt.CDRForcing")
+    def test_generated_forcing_derives_counts_from_its_dataset(
+        self, mock_cdr_class, data, tmp_path
+    ):
+        self._set_mode(data, "cdr_lite")
+        cdr_path = tmp_path / "cdr.nc"
+        cdr_path.touch()
+        mock_cdr = MagicMock()
+        mock_cdr.save.return_value = cdr_path
+        mock_cdr.ds = xr.Dataset(
+            {"cdr_trcflx": (("ntracers",), np.zeros(len(_LITE_TRACERS)))},
+            coords={"tracer_name": ("ntracers", _LITE_TRACERS)},
+        )
+        mock_cdr_class.return_value = mock_cdr
+
+        data._generate_cdr_forcing(key="cdr_forcing", cdr_kwargs={"foo": "bar"})
+
+        param = data._settings_run_time["param"]
+        assert (param["nt_cdr_oae"], param["nt_cdr_dor"]) == (2, 1)
+
+    @patch("cstar.applications.forge.input_data.rt.CDRForcing")
+    def test_generated_forcing_rejects_a_bad_axis_before_writing(
+        self, mock_cdr_class, data, tmp_path
+    ):
+        self._set_mode(data, "cdr_lite", ntrc_bio=2)
+        mock_cdr = MagicMock()
+        mock_cdr.ds = xr.Dataset(
+            {"cdr_trcflx": (("ntracers",), np.zeros(len(_LITE_TRACERS)))},
+            coords={"tracer_name": ("ntracers", _LITE_TRACERS)},
+        )
+        mock_cdr_class.return_value = mock_cdr
+
+        with pytest.raises(ValueError, match="does not match the build's tracer"):
+            data._generate_cdr_forcing(key="cdr_forcing", cdr_kwargs={"foo": "bar"})
+
+        mock_cdr.to_yaml.assert_not_called()
+        mock_cdr.save.assert_not_called()
+
+    def test_real_roms_tools_cdr_lite_forcing_round_trips(self, data):
+        """End to end against roms-tools >= 5.1 (grid-less): its generated axis
+        (temp, salt, passive, OAE pair, DOR) is what the counts are read from.
+        """
+        self._set_mode(data, "cdr_lite", nt_passive=1)
+        data._settings_compile_time["cppdefs"]["cdr_forcing"] = True
+        data.roms_marbl_blueprint_elements.cdr_forcing = cstar_models.Dataset(data=[])
+        times = [datetime(2012, 1, 1), datetime(2012, 1, 2)]
+
+        def release(name, tracer_set, fluxes):
+            return {
+                "name": name,
+                "lat": 59.0,
+                "lon": 1.0,
+                "depth": 1.0,
+                "hsc": 10.0,
+                "vsc": 10.0,
+                "times": times,
+                "release_type": "tracer_perturbation",
+                "tracer_set": tracer_set,
+                "tracer_fluxes": fluxes,
+            }
+
+        cdr_kwargs = {
+            "start_time": times[0],
+            "end_time": times[1],
+            "releases": [
+                release("oae", "cdr_lite", {"ALK": [2.0e6, 2.0e6]}),
+                release("dor", "cdr_lite", {"DIC": [1.0e6, 1.0e6]}),
+                release("dye", "passive", {"passive_tracer": [1.0, 1.0]}),
+            ],
+        }
+
+        data._generate_cdr_forcing(key="cdr_forcing", cdr_kwargs=cdr_kwargs)
+
+        param = data._settings_run_time["param"]
+        assert (param["nt_passive"], param["nt_cdr_oae"], param["nt_cdr_dor"]) == (
+            1,
+            1,
+            1,
+        )
+        assert n_tracers_from_param(param) == 6
+        assert data._settings_run_time["cdr_frc"]["ncdr_parm"] == 3
+        assert data._settings_run_time["cdr_frc"]["cdr_volume"] is False
 
 
 class TestRiverCustomFileForcing:

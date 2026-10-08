@@ -19,6 +19,7 @@ Tests cover:
 """
 
 import asyncio
+import contextlib
 import copy
 import logging
 import os
@@ -27,7 +28,7 @@ import tempfile
 from datetime import UTC, datetime
 from pathlib import Path
 from types import SimpleNamespace
-from typing import ClassVar
+from typing import Any, ClassVar
 from unittest.mock import MagicMock, patch
 
 import f90nml
@@ -103,6 +104,27 @@ _PHYSICS_ONLY_FORCING = {
     "initial_conditions": {"source": {"name": "GLORYS", "glorys_layout": "regional"}},
     "forcing": {
         "surface": [{"source": {"name": "ERA5"}, "type": "physics"}],
+    },
+}
+
+
+# glorys-era5-unified without any BGC (IC/boundary bgc sources, bgc surface items,
+# river include_bgc), for bgc_mode "cdr_lite"; keeps the boundary/tidal/river
+# generation steps every non-child domain runs.
+_CDR_LITE_FORCING_INPUTS = {
+    "initial_conditions": {"source": {"name": "GLORYS", "glorys_layout": "regional"}},
+    "forcing": {
+        "surface": [
+            {
+                "source": {"name": "ERA5"},
+                "type": "physics",
+                "correct_radiation": True,
+                "coarse_grid_mode": "never",
+            }
+        ],
+        "boundary": {"source": {"name": "GLORYS", "glorys_layout": "regional"}},
+        "tidal": [{"source": {"name": "TPXO"}, "ntides": 15}],
+        "river": [{"source": {"name": "DAI", "climatology": False}}],
     },
 }
 
@@ -3164,6 +3186,28 @@ class TestGoldenNamelist:
     }
     _PARTITIONING: ClassVar[dict] = {"n_procs_x": 1, "n_procs_y": 1}
     _CDR_FORCING: ClassVar[dict] = {"enabled": True}
+    # Real roms-tools CDRForcing kwargs for the bgc_mode "cdr_lite" case: one OAE
+    # release (an ALK/DIC pair) and one DOR release, so the tracer axis is
+    # temp, salt, CDR_OAE_ALK1, CDR_OAE_DIC1, CDR_DOR_DIC1 (nt = 5). No
+    # ``tracer_set``: the "simple" CDR mode gets "cdr_lite" from the resolver.
+    _CDR_LITE_FORCING: ClassVar[dict] = {
+        "start_time": "2012-01-01T00:00:00",
+        "end_time": "2012-01-02T00:00:00",
+        "releases": [
+            {
+                "name": name,
+                "lat": 59.0,
+                "lon": 1.0,
+                "depth": 1.0,
+                "hsc": 10.0,
+                "vsc": 10.0,
+                "times": ["2012-01-01T00:00:00", "2012-01-02T00:00:00"],
+                "release_type": "tracer_perturbation",
+                "tracer_fluxes": {role: [2.0e6, 2.0e6]},
+            }
+            for name, role in (("oae", "ALK"), ("dor", "DIC"))
+        ],
+    }
 
     @staticmethod
     def _touch_save(path, **_kw):
@@ -3216,6 +3260,8 @@ class TestGoldenNamelist:
         model_dir,
         golden_filename: str | None,
         param_overrides: dict[str, int] | None = None,
+        *,
+        cdr_lite: bool = False,
     ) -> str:
         """Shared body for the golden namelist tests: drives the real
         ``generate_inputs()`` -> ``configure_build()`` chain against ``model_dir``
@@ -3232,7 +3278,21 @@ class TestGoldenNamelist:
         byte-for-byte golden comparison. ``param_overrides`` is merged into the
         blueprint's ``model_settings["param"]`` before processing; pass
         ``golden_filename=None`` to skip the golden comparison.
+
+        ``cdr_lite=True`` runs ``bgc_mode: cdr_lite`` instead: a physics-only
+        forcing and a "simple" CDR forcing built by the REAL
+        ``rt.CDRForcing`` (grid-less, saved to a real netCDF) rather than a mock,
+        so the tracer counts the namelist carries are read off roms-tools' own
+        generated tracer axis -- exactly what the ``CDR_LITE`` build sees.
         """
+        mode_kwargs: dict[str, Any] = (
+            {
+                "bgc_mode": "cdr_lite",
+                "cdr": {"mode": "simple", "cdr_forcing": self._CDR_LITE_FORCING},
+            }
+            if cdr_lite
+            else {"cdr_forcing": self._CDR_FORCING}
+        )
         cfg = build_forge_blueprint(
             model_dir=model_dir,
             grid_name="test-tiny",
@@ -3243,9 +3303,9 @@ class TestGoldenNamelist:
             end_date=datetime(2012, 1, 2),
             description="Golden namelist test",
             dt=7200,
-            forcing_inputs=_FORCING_INPUTS,
+            forcing_inputs=_CDR_LITE_FORCING_INPUTS if cdr_lite else _FORCING_INPUTS,
             output_settings=_OUTPUT_SETTINGS,
-            cdr_forcing=self._CDR_FORCING,
+            **mode_kwargs,
             # Explicit False (matches cson_roms-marbl_v0.1's own default) so both
             # golden cases stay decoupled from PIO: roms-marbl-0.5-default bakes in
             # use_pio: true, which would otherwise route grid generation through
@@ -3288,7 +3348,11 @@ class TestGoldenNamelist:
             ) as mock_boundary,
             patch("cstar.applications.forge.input_data.rt.TidalForcing") as mock_tidal,
             patch("cstar.applications.forge.input_data.rt.RiverForcing") as mock_river,
-            patch("cstar.applications.forge.input_data.rt.CDRForcing") as mock_cdr,
+            (
+                contextlib.nullcontext(MagicMock())
+                if cdr_lite
+                else patch("cstar.applications.forge.input_data.rt.CDRForcing")
+            ) as mock_cdr,
             patch(
                 "cstar.applications.forge.input_data.source_datasets.STREAMABLE_SOURCES",
                 {"ERA5"},
@@ -3312,7 +3376,7 @@ class TestGoldenNamelist:
             mock_boundary_instance.physics.save.side_effect = self._touch_save_list
             mock_boundary_bgc = MagicMock()
             mock_boundary_bgc.save.side_effect = self._touch_save_list
-            mock_boundary_instance.bgc = [mock_boundary_bgc]
+            mock_boundary_instance.bgc = [] if cdr_lite else [mock_boundary_bgc]
             mock_boundary.return_value = mock_boundary_instance
 
             mock_tidal_instance = MagicMock()
@@ -3348,7 +3412,14 @@ class TestGoldenNamelist:
         assert builder._settings_run_time["river_frc"]["nriv"] == 3
         assert builder._settings_run_time["tides"]["ntides"] == 15
         assert builder._settings_run_time["cdr_frc"]["ncdr_parm"] == 2
-        assert builder._settings_run_time["cdr_output"]["do_cdr_output"] is True
+        if cdr_lite:
+            # No MARBL: no cdr_output. The tracer counts are read off the CDR
+            # forcing's axis during generation and must survive the overlay below.
+            assert builder._settings_run_time["cdr_output"]["do_cdr_output"] is False
+            assert builder._settings_run_time["param"]["nt_cdr_oae"] == 1
+            assert builder._settings_run_time["param"]["nt_cdr_dor"] == 1
+        else:
+            assert builder._settings_run_time["cdr_output"]["do_cdr_output"] is True
 
         from cstar.applications.forge.engine import split_model_settings
 
@@ -3368,6 +3439,15 @@ class TestGoldenNamelist:
         assert builder._settings_run_time["river_frc"]["nriv"] == 3
         assert builder._settings_run_time["tides"]["ntides"] == 15
         assert builder._settings_run_time["cdr_frc"]["ncdr_parm"] == 2
+        if cdr_lite:
+            # configure_build sized the per-tracer arrays and the cppdefs.opt
+            # render from the generation-derived counts, not the stored zeros.
+            assert mock_render.call_args_list[0].kwargs["n_tracers"] == 5
+            assert builder._settings_compile_time["cppdefs"]["cdr_lite"] is True
+            assert (
+                builder._settings_run_time["cdr_lite_output"]["do_cdr_lite_output"]
+                is True
+            )
 
         namelist_path = builder.run_time_code_dir / "namelist.nml"
         assert namelist_path.exists()
@@ -3971,17 +4051,61 @@ class TestGoldenNamelist:
         assert nml.cdr_lite_output_settings.nrpf_cdr_lite == 24
         assert nml.cdr_lite_settings.cdr_online_carbonate_sensitivity is False
 
+    def test_golden_namelist_test_tiny_roms090_cdr_lite(self, mock_grid, tmp_path):
+        """``bgc_mode: cdr_lite`` on ``roms-marbl-0.9-default``: CDR-lite tracers
+        without MARBL, the test-tiny domain, a physics-only forcing, and a real
+        roms-tools CDR forcing with one OAE and one DOR release.
+
+        The schema-visible differences from the roms090 golden: ``nt_bgc = 0``,
+        ``nt_cdr_oae = 1``/``nt_cdr_dor = 1`` (read off the CDR forcing's tracer
+        axis during generation -- the blueprint stores zeros), the per-tracer
+        arrays sized to the five tracers (T, S, ALK1, DIC1, DOR1), and the
+        CDR-lite output stream forced on (the only output the CDR tracers appear
+        in). The counts reach the namelist because ``GENERATION_DERIVED_LEAF_KEYS``
+        keeps the overlay from reverting them and ``configure_build`` sizes
+        ``n_tracers`` from the live settings.
+
+        The generation step is real (only the other roms-tools classes are
+        mocked), so this also pins the roms-tools >= 5.1 tracer-axis contract.
+        Name contains ``roms090`` so the legacy golden's ``-k`` selector
+        excludes it.
+        """
+        normalized = self._run_golden_namelist_case(
+            mock_grid,
+            tmp_path,
+            _MODEL_DIR_ROMS090,
+            "golden_namelist_test-tiny-roms090-cdr-lite.nml",
+            cdr_lite=True,
+        )
+
+        namelist_path = tmp_path / "golden_roms090_cdr_lite.nml"
+        namelist_path.write_text(normalized)
+        nml = RomsNamelistV0_9_0.read(namelist_path)
+        assert nml.param_settings.nt_cdr_oae == 1
+        assert nml.param_settings.nt_cdr_dor == 1
+        assert nml.param_settings.nt_bgc == 0
+        assert nml.cdr_lite_output_settings.do_cdr_lite_output is True
+        assert nml.cdr_lite_settings.cdr_online_carbonate_sensitivity is False
+        assert nml.cdr_output_settings.do_cdr_output is False
+        assert len(nml.tracer_diff2.tnu2) == 5
+        assert nml.cdr_frc_settings.cdr_source is True
+        assert nml.cdr_frc_settings.cdr_ncdr_parm == 2
+
     def test_configure_build_0_9_pin_cdr_lite_output_forces_no_cdr_forcing(
         self, mock_grid, tmp_path
     ):
         """From ucla-roms 0.9.0 the CDR-lite output stream compiles
-        unconditionally: enabling it (with tracers) leaves ``cppdefs.cdr_forcing``
-        and ``cppdefs.cdr_lite`` alone and writes the 0.9 group.
+        unconditionally: enabling it (with tracers, which need CDR_LITE -- here
+        from the online sensitivity) leaves ``cppdefs.cdr_forcing`` alone and
+        writes the 0.9 group.
         """
         cfg, builder = self._generate_inputs_no_cdr_forcing(
             mock_grid,
             tmp_path,
             model_dir=_MODEL_DIR_ROMS090,
+            stored_model_settings={
+                "cdr_lite": {"cdr_online_carbonate_sensitivity": True}
+            },
             param_overrides={"nt_cdr_oae": 1},
         )
         cfg.model_settings["cdr_lite_output"]["do_cdr_lite_output"] = True
@@ -3990,7 +4114,7 @@ class TestGoldenNamelist:
 
         cppdefs = builder._settings_compile_time["cppdefs"]
         assert cppdefs["cdr_forcing"] is False
-        assert not cppdefs.get("cdr_lite")
+        assert cppdefs["cdr_lite"] is True
         namelist = (builder.run_time_code_dir / "namelist.nml").read_text()
         assert "do_cdr_lite_output = .true." in namelist
         assert "&cdr_tracer_output_settings" not in namelist
@@ -4021,9 +4145,12 @@ class TestGoldenNamelist:
         assert cppdefs["cdr_lite"] is True
 
         # ... and off again, with the earlier-derived True still stored in the
-        # compile-time overrides: recomputed, not rejected.
+        # compile-time overrides: recomputed, not rejected. (CDR tracers without
+        # CDR_LITE are rejected, so the tracers go too; the counts are
+        # generation-derived, so they are set on the live settings.)
         cfg.model_settings["cdr_lite"]["cdr_online_carbonate_sensitivity"] = False
         cfg.model_settings["cppdefs"]["cdr_lite"] = True
+        builder._settings_run_time["param"]["nt_cdr_oae"] = 0
         self._configure_build_for(cfg, builder)
         assert cppdefs["cdr_lite"] is False
         namelist = (builder.run_time_code_dir / "namelist.nml").read_text()
@@ -4059,6 +4186,123 @@ class TestGoldenNamelist:
 
         with pytest.raises(ValueError, match="RunTimeSettingsV0_7_0"):
             self._configure_build_for(cfg, builder)
+
+    # -- bgc_mode "cdr_lite" build-time net --------------------------------
+    def _cdr_lite_builder(
+        self,
+        mock_grid,
+        tmp_path,
+        *,
+        nt_cdr_oae=1,
+        nt_cdr_dor=0,
+        cdr_active=True,
+    ):
+        """A 0.9.1-pinned builder past (mocked) generation whose stored blueprint
+        says ``bgc_mode: cdr_lite`` (``marbl`` off, ``cdr_lite`` on, no BGC
+        tracers). ``nt_cdr_*`` stand in for what the CDR generation step derives
+        from the CDR forcing's tracer axis, and ``cdr_active`` for that forcing
+        having been configured (the unit-level mock has none).
+        """
+        cfg, builder = self._generate_inputs_no_cdr_forcing(
+            mock_grid, tmp_path, model_dir=_MODEL_DIR_ROMS090
+        )
+        cfg.model_settings["cppdefs"].update(marbl=False, cdr_lite=True)
+        cfg.model_settings["param"]["ntrc_bio"] = 0
+        builder._settings_run_time["param"].update(
+            nt_cdr_oae=nt_cdr_oae, nt_cdr_dor=nt_cdr_dor
+        )
+        if cdr_active:
+            builder.cdr_forcing = {"releases": []}
+            builder.cdr_mode = "simple"
+        return cfg, builder
+
+    def test_configure_build_cdr_lite_forces_the_stream_and_the_cppdefs(
+        self, mock_grid, tmp_path, caplog
+    ):
+        cfg, builder = self._cdr_lite_builder(mock_grid, tmp_path, nt_cdr_dor=1)
+        assert (
+            builder._settings_run_time["cdr_lite_output"]["do_cdr_lite_output"] is False
+        )
+        with caplog.at_level(logging.INFO, logger="cstar.applications.forge.executor"):
+            self._configure_build_for(cfg, builder)
+
+        run_time = builder._settings_run_time
+        cppdefs = builder._settings_compile_time["cppdefs"]
+        assert run_time["cdr_lite_output"]["do_cdr_lite_output"] is True
+        assert run_time["cdr_output"]["do_cdr_output"] is False  # needs MARBL
+        assert cppdefs["cdr_forcing"] is True
+        assert cppdefs["cdr_lite"] is True
+        assert cppdefs["marbl"] is False
+        assert "forcing cdr_lite_output.do_cdr_lite_output=True" in caplog.text
+        nml = RomsNamelistV0_9_0.read(builder.run_time_code_dir / "namelist.nml")
+        assert nml.cdr_lite_output_settings.do_cdr_lite_output is True
+        assert (nml.param_settings.nt_cdr_oae, nml.param_settings.nt_cdr_dor) == (1, 1)
+        # nt = T + S + 2 * OAE + DOR, from the live (generation-derived) counts
+        assert len(nml.tracer_diff2.tnu2) == 5
+
+    def test_configure_build_cdr_lite_needs_cdr_lite_tracers(self, mock_grid, tmp_path):
+        cfg, builder = self._cdr_lite_builder(
+            mock_grid, tmp_path, nt_cdr_oae=0, nt_cdr_dor=0
+        )
+        with pytest.raises(
+            ValueError, match=r"defines no CDR-lite tracers.*tracer_set=cdr_lite"
+        ):
+            self._configure_build_for(cfg, builder)
+
+    def test_configure_build_cdr_lite_needs_a_cdr_forcing(self, mock_grid, tmp_path):
+        cfg, builder = self._cdr_lite_builder(mock_grid, tmp_path, cdr_active=False)
+        with pytest.raises(ValueError, match="no CDR forcing is configured"):
+            self._configure_build_for(cfg, builder)
+
+    def test_configure_build_cdr_lite_needs_ucla_roms_0_9_1(self, mock_grid, tmp_path):
+        """The build-time net for a stored blueprint pinned below the minimum
+        (the resolver's gate does not run for a stored blueprint).
+        """
+        cfg, builder = self._cdr_lite_builder(mock_grid, tmp_path)
+        builder.code_spec.roms.commit = "0.9.0"
+        with pytest.raises(
+            ValueError, match=r'bgc_mode "cdr_lite" on ucla-roms 0\.9\.0'
+        ):
+            self._configure_build_for(cfg, builder)
+
+    def test_configure_build_cdr_lite_gate_follows_the_named_constant(
+        self, mock_grid, tmp_path, monkeypatch
+    ):
+        import cstar.applications.forge.namelist_model as namelist_model
+
+        cfg, builder = self._cdr_lite_builder(mock_grid, tmp_path)
+        monkeypatch.setattr(namelist_model, "CDR_LITE_MODE_MIN_ROMS", (0, 9, 2))
+        with pytest.raises(ValueError, match=r"ucla-roms 0\.9\.1.*>= 0\.9\.2"):
+            self._configure_build_for(cfg, builder)
+
+    def test_configure_build_cdr_lite_leaves_an_enabled_stream_as_is(
+        self, mock_grid, tmp_path, caplog
+    ):
+        cfg, builder = self._cdr_lite_builder(mock_grid, tmp_path)
+        cfg.model_settings["cdr_lite_output"]["do_cdr_lite_output"] = True
+        with caplog.at_level(logging.INFO, logger="cstar.applications.forge.executor"):
+            self._configure_build_for(cfg, builder)
+
+        assert (
+            builder._settings_run_time["cdr_lite_output"]["do_cdr_lite_output"] is True
+        )
+        assert "forcing cdr_lite_output" not in caplog.text
+
+    def test_configure_build_marbl_mode_never_forces_the_cdr_lite_stream(
+        self, mock_grid, tmp_path
+    ):
+        """The forced stream is a cdr_lite-mode rule: a MARBL build with an active
+        CDR forcing keeps ``do_cdr_lite_output`` as authored.
+        """
+        cfg, builder = self._generate_inputs_no_cdr_forcing(
+            mock_grid, tmp_path, model_dir=_MODEL_DIR_ROMS090
+        )
+        builder.cdr_forcing = {"releases": []}
+        builder.cdr_mode = "simple"
+        self._configure_build_for(cfg, builder)
+        run_time = builder._settings_run_time
+        assert run_time["cdr_lite_output"]["do_cdr_lite_output"] is False
+        assert run_time["cdr_output"]["do_cdr_output"] is True
 
 
 class TestChildDomainNoInitialConditionsValidatesAtEmit:

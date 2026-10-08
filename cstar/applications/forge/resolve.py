@@ -31,7 +31,7 @@ import copy
 import logging
 import warnings
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Literal
+from typing import TYPE_CHECKING, Any, get_args
 
 import yaml
 
@@ -67,10 +67,12 @@ from cstar.applications.forge.blueprint import (
 # Canonical CDR-output diagnostics helper lives in namelist_model (forge side) so
 # the executor can share it.
 from cstar.applications.forge.namelist_model import (
+    BgcMode,
     NamelistConsistencyError,
     canonical_output_sections_for_precheck,
     check_bgc_tracer_count,
     check_cdr_forcing_mode,
+    check_cdr_lite_mode_roms,
     check_cdr_lite_sections,
     check_cdr_output_sections,
     check_output_streams_divide_rst,
@@ -453,6 +455,29 @@ def read_cdr_forcing_yaml(source: str | Path) -> dict[str, Any]:
     return block
 
 
+def _with_cdr_lite_tracer_set(cdr_spec: CdrSpec) -> CdrSpec:
+    """``cdr_spec`` with ``tracer_set="cdr_lite"`` defaulted onto every release of
+    a ``"simple"`` CDR forcing that doesn't name its own tracer set.
+
+    A release without ``tracer_set`` is a MARBL release (roms-tools' default),
+    which a ``bgc_mode: cdr_lite`` build has no tracers for. The other modes
+    carry their own tracer sets (a roms-tools YAML dump, a pre-made file), so
+    they are left as authored and the generation step rejects a MARBL axis. The
+    caller's dict is not mutated.
+    """
+    forcing = copy.deepcopy(cdr_spec.cdr_forcing or {})
+    releases = forcing.get("releases")
+    if cdr_spec.mode != "simple" or not isinstance(releases, list):
+        return cdr_spec
+    forcing["releases"] = [
+        {**release, "tracer_set": "cdr_lite"}
+        if isinstance(release, dict) and "tracer_set" not in release
+        else release
+        for release in releases
+    ]
+    return cdr_spec.model_copy(update={"cdr_forcing": forcing})
+
+
 def build_forge_blueprint(
     *,
     model_dir: str | Path,
@@ -479,7 +504,7 @@ def build_forge_blueprint(
     topography_path: str | None = None,
     topography_source: str | TopographySource = TopographySource.ETOPO5,
     use_pio: bool | None = None,
-    bgc_mode: Literal["marbl", "none"] | None = None,
+    bgc_mode: BgcMode | None = None,
     roms_ref: str | None = None,
     marbl_ref: str | None = None,
     run_time_overrides: dict[str, Any] | None = None,
@@ -501,10 +526,17 @@ def build_forge_blueprint(
     ``bgc_mode`` is a per-run toggle mirroring ``use_pio``: it overwrites
     ``cppdefs.marbl`` and gates whether ``code.marbl`` is populated (raising if
     ``"marbl"`` is requested but the ModelSpec has no ``code.marbl`` repository).
-    ``bgc_mode="none"`` raises if the resolved forcing selection still requests BGC
-    forcing (a bgc-type surface/boundary item, an IC bgc_source, or a river with
-    ``include_bgc=True``); it also forces ``cppdefs.nhy_forcing``/``nox_forcing``
-    off regardless of the ModelSpec/advanced-settings default. If ``None`` (the
+    ``"none"`` and ``"cdr_lite"`` raise if the resolved forcing selection still
+    requests BGC forcing (a bgc-type surface/boundary item, an IC bgc_source, or a
+    river with ``include_bgc=True``); both also force ``cppdefs.nhy_forcing``/
+    ``nox_forcing`` off regardless of the ModelSpec/advanced-settings default.
+    ``"cdr_lite"`` is a build without MARBL whose only extra tracers are
+    ucla-roms' dedicated CDR-lite tracers: it compiles ``CDR_LITE``
+    (``cppdefs.cdr_lite``), needs a CDR forcing (``cdr``) with ``cdr_lite``
+    releases and ucla-roms >= ``CDR_LITE_MODE_MIN_ROMS``, and, in the ``"simple"``
+    CDR mode, defaults every release's ``tracer_set`` to ``"cdr_lite"``. The tracer
+    counts and the CDR-lite output stream are derived later, from the generated
+    CDR forcing (``ForgeExecutor.configure_build``). If ``None`` (the
     default), it falls back to the ModelSpec's own ``bgc_mode`` (itself defaulting
     to ``"marbl"``) -- the ModelSpec is the single source of the default; pass an
     explicit value to override it for one run.
@@ -675,6 +707,14 @@ def build_forge_blueprint(
     model_name = spec["model_name"]
     if bgc_mode is None:
         bgc_mode = model.get("bgc_mode", "marbl")
+    # Three modes now: an unknown value would otherwise fall through every
+    # ``== "marbl"`` test and silently build a physics-only run.
+    if bgc_mode not in get_args(BgcMode):
+        raise ValueError(
+            f"bgc_mode must be one of {list(get_args(BgcMode))}, got {bgc_mode!r}."
+        )
+    if bgc_mode == "cdr_lite":
+        cdr_spec = _with_cdr_lite_tracer_set(cdr_spec)
     if use_pio is None:
         use_pio = bool(model.get("use_pio", False))
     # ModelSpec no longer embeds a default forcing/output selection -- a ForcingSpec and
@@ -852,12 +892,12 @@ def build_forge_blueprint(
     cppdefs["auto_tiling"] = bool(auto_tiling)
     cppdefs["marbl"] = bgc_mode == "marbl"
     # nhy_forcing/nox_forcing default from the ModelSpec (advanced-settings editable)
-    # but are always forced off when BGC is disabled.
+    # but are always forced off without MARBL.
     cppdefs["nhy_forcing"] = (
-        bool(cppdefs.get("nhy_forcing", True)) and bgc_mode != "none"
+        bool(cppdefs.get("nhy_forcing", True)) and bgc_mode == "marbl"
     )
     cppdefs["nox_forcing"] = (
-        bool(cppdefs.get("nox_forcing", True)) and bgc_mode != "none"
+        bool(cppdefs.get("nox_forcing", True)) and bgc_mode == "marbl"
     )
     surface_items = (inputs.get("forcing", {}) or {}).get("surface", []) or []
     cppdefs["co2_tvarying"] = any(
@@ -972,6 +1012,15 @@ def build_forge_blueprint(
     # MARBL. When CDR output is on, the MARBL diagnostics ucla-roms looks up by
     # name, unchecked, must be in the write list.
     cdr_out = settings.setdefault("cdr_output", {})
+    if bgc_mode == "cdr_lite":
+        if cdr_spec.mode == "none":
+            raise ValueError(
+                'bgc_mode "cdr_lite" needs a CDR forcing with cdr_lite releases; '
+                "cdr.mode is 'none', so nothing would be simulated."
+            )
+        check_cdr_lite_mode_roms(
+            str(effective_roms_ref) if effective_roms_ref is not None else None
+        )
     if cdr_spec.mode != "none":
         settings["cppdefs"]["cdr_forcing"] = True
     # Called first so an unsupported mode is rejected even if do_cdr_output is set.
@@ -1040,21 +1089,23 @@ def build_forge_blueprint(
         settings["cppdefs"]["cdr_forcing"] = True
 
     # ----- CDR_LITE (ucla-roms >= 0.9.0) -------------------------------------
-    # cppdefs.cdr_lite is resolver-owned: derived from the user knob
-    # cdr_lite.cdr_online_carbonate_sensitivity (Forge's only CDR_LITE mode --
-    # the file-based sensitivities have no Forge source yet). Nothing has derived
-    # it yet, so a value here came from a ModelSpec/override: honoring it
-    # without the knob is the unsupported mode. The key stays absent when not
-    # needed (the template reads an absent key as off).
+    # cppdefs.cdr_lite is resolver-owned: derived from bgc_mode "cdr_lite"
+    # (CDR-lite tracers without MARBL, carbonate sensitivities read from forcing
+    # files) or from the user knob cdr_lite.cdr_online_carbonate_sensitivity
+    # (MARBL computes them online). Nothing has derived it yet, so a value here
+    # came from a ModelSpec/override: honoring it when neither applies is the
+    # unsupported combination. The key stays absent when not needed (the template
+    # reads an absent key as off).
     requested = settings["cppdefs"].get("cdr_lite", False)
-    needed = check_cdr_lite_sections(settings, bgc_mode_is_marbl=bgc_mode == "marbl")
+    needed = check_cdr_lite_sections(
+        settings, bgc_mode=bgc_mode, settings_cls=settings_cls
+    )
     if requested and not needed:
         raise ValueError(
-            "cppdefs.cdr_lite is set without cdr_lite.cdr_online_carbonate_"
-            "sensitivity: CDR_LITE with file-based carbonate sensitivities "
-            "(ddic_dco2/ddic_dalk forcing) is not yet supported in Forge. Set "
-            "cdr_lite.cdr_online_carbonate_sensitivity (needs MARBL), which "
-            "enables CDR_LITE."
+            "cppdefs.cdr_lite is set but nothing needs CDR_LITE (bgc_mode is not "
+            "cdr_lite and the online carbonate sensitivity is off). Set "
+            'bgc_mode "cdr_lite", or cdr_lite.cdr_online_carbonate_sensitivity '
+            "(needs MARBL), which enable CDR_LITE."
         )
     if needed:
         settings["cppdefs"]["cdr_lite"] = True
@@ -1144,9 +1195,10 @@ def build_forge_blueprint(
     )  # kept as `sources` locally for brevity
 
     # ----- bgc_mode consistency check ----------------------------------------
-    # A BGC-disabled build can't carry BGC-type forcing -- catch it here, before
-    # code/settings resolution, with a message naming every offending item.
-    if bgc_mode == "none":
+    # A build without MARBL ("none"/"cdr_lite") can't carry BGC-type forcing --
+    # catch it here, before code/settings resolution, with a message naming every
+    # offending item.
+    if bgc_mode != "marbl":
         bgc_signals: list[str] = []
         for i, it in enumerate(sources.surface):
             if it.type == "bgc":
@@ -1171,7 +1223,7 @@ def build_forge_blueprint(
                 bgc_signals.append(f"river[{i}] (include_bgc=True)")
         if bgc_signals:
             raise ValueError(
-                'bgc_mode="none" but the ForcingSpec requests BGC forcing:\n  - '
+                f'bgc_mode="{bgc_mode}" but the ForcingSpec requests BGC forcing:\n  - '
                 + "\n  - ".join(bgc_signals)
                 + '\nSet bgc_mode="marbl" or remove these BGC forcing items from '
                 "the ForcingSpec."

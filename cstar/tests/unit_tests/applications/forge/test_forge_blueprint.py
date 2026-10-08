@@ -3435,11 +3435,11 @@ def test_0_9_0_cdr_lite_cppdef_absent_without_the_knob():
     assert "cdr_lite" not in cfg.model_settings["cppdefs"]
 
 
-def test_0_9_0_cdr_lite_cppdef_without_the_knob_is_not_yet_supported():
-    """File-based carbonate sensitivities (CDR_LITE without the online knob) have
-    no Forge source yet -- a user-supplied ``cppdefs.cdr_lite`` raises.
+def test_0_9_0_cdr_lite_cppdef_without_the_knob_or_the_mode_is_rejected():
+    """``cppdefs.cdr_lite`` is resolver-owned: a user-supplied value when neither
+    ``bgc_mode: cdr_lite`` nor the online knob needs CDR_LITE raises.
     """
-    with pytest.raises(ValueError, match="not yet supported"):
+    with pytest.raises(ValueError, match="nothing needs CDR_LITE"):
         _build(
             model_dir=_MODEL_DIR_ROMS090,
             compile_time_overrides={"cppdefs": {"cdr_lite": True}},
@@ -3494,10 +3494,13 @@ def test_cdr_lite_output_forces_cdr_forcing_only_before_0_9_0():
         "cdr_lite_output": {"do_cdr_lite_output": True},
         "param": {"nt_cdr_oae": 1},
     }
+    # CDR tracers need CDR_LITE on 0.9 (here via the online sensitivity); that
+    # compiles no CDR_FORCING either.
+    over_090 = {**over, "cdr_lite": {"cdr_online_carbonate_sensitivity": True}}
     assert (
-        _build(model_dir=_MODEL_DIR_ROMS090, run_time_overrides=over).model_settings[
-            "cppdefs"
-        ]["cdr_forcing"]
+        _build(
+            model_dir=_MODEL_DIR_ROMS090, run_time_overrides=over_090
+        ).model_settings["cppdefs"]["cdr_forcing"]
         is False
     )
     for model_dir in (_MODEL_DIR_ROMS070, _MODEL_DIR_ROMS080):
@@ -3527,9 +3530,254 @@ def test_0_9_0_precheck_runs_on_the_renamed_output_group():
                     "nrpf": 7,
                     "output_period": 3600.0,
                 },
+                "cdr_lite": {"cdr_online_carbonate_sensitivity": True},
                 "param": {"nt_cdr_oae": 1},
             },
         )
+
+
+# ---------------------------------------------------------------------------
+# bgc_mode "cdr_lite": CDR-lite tracers without MARBL (ucla-roms >= 0.9.1)
+# ---------------------------------------------------------------------------
+def _cdr_lite_release(name="oae", **over):
+    """A roms-tools ``TracerPerturbation`` release dict as it appears in a CDR
+    forcing's compiled kwargs (no ``tracer_set``: the resolver supplies it).
+    """
+    return {
+        "name": name,
+        "lat": 59.0,
+        "lon": 1.0,
+        "depth": 1.0,
+        "hsc": 10.0,
+        "vsc": 10.0,
+        "times": ["2012-01-01T00:00:00", "2012-01-02T00:00:00"],
+        "release_type": "tracer_perturbation",
+        "tracer_fluxes": {"ALK": [2.0e6, 2.0e6]},
+        **over,
+    }
+
+
+def _cdr_lite_forcing(*releases):
+    return {
+        "start_time": "2012-01-01T00:00:00",
+        "end_time": "2012-01-02T00:00:00",
+        "model_reference_date": "2000-01-01T00:00:00",
+        "releases": list(releases) or [_cdr_lite_release()],
+    }
+
+
+def _build_cdr_lite(**over):
+    """A ``bgc_mode: cdr_lite`` blueprint with a "simple" CDR forcing (the one mode
+    that must be stated through ``cdr=``: a bare ``cdr_forcing=`` is "yaml").
+    """
+    kw = {
+        "model_dir": _MODEL_DIR_ROMS090,
+        "bgc_mode": "cdr_lite",
+        "forcing_inputs": _PHYSICS_ONLY_FORCING,
+        "cdr": {"mode": "simple", "cdr_forcing": _cdr_lite_forcing()},
+    }
+    kw.update(over)
+    return _build(**kw)
+
+
+def test_resolver_bgc_mode_cdr_lite_derives_cppdefs_param_and_code():
+    cfg = _build_cdr_lite()
+    cppdefs = cfg.model_settings["cppdefs"]
+    assert cppdefs["marbl"] is False
+    assert cppdefs["cdr_lite"] is True
+    assert cppdefs["cdr_forcing"] is True
+    assert cppdefs["nhy_forcing"] is False
+    assert cppdefs["nox_forcing"] is False
+    assert cfg.model_settings["param"]["ntrc_bio"] == 0
+    assert cfg.code.marbl is None
+    # cdr_output needs MARBL; the CDR-lite stream is switched on by configure_build
+    # once the tracer counts are known (the resolver cannot know them).
+    assert cfg.model_settings["cdr_output"]["do_cdr_output"] is False
+    assert cfg.model_settings["cdr_lite_output"]["do_cdr_lite_output"] is False
+    assert cfg.model_settings["param"].get("nt_cdr_oae", 0) == 0
+    assert cfg.model_settings["param"].get("nt_cdr_dor", 0) == 0
+    assert cfg.cdr.mode == "simple"
+    assert cfg.cdr.cdr_forcing["releases"][0]["tracer_set"] == "cdr_lite"
+
+
+def test_resolver_bgc_mode_cdr_lite_defaults_to_the_model_spec(tmp_path):
+    import shutil
+
+    model_dir = tmp_path / "roms-marbl-0.9-default"
+    shutil.copytree(_MODEL_DIR_ROMS090, model_dir)
+    text = (model_dir / "model.yaml").read_text()
+    assert "bgc_mode: marbl" in text
+    (model_dir / "model.yaml").write_text(
+        text.replace("bgc_mode: marbl", "bgc_mode: cdr_lite")
+    )
+    cfg = _build(
+        model_dir=model_dir,
+        forcing_inputs=_PHYSICS_ONLY_FORCING,
+        cdr_forcing=_cdr_lite_forcing(_cdr_lite_release(tracer_set="cdr_lite")),
+    )
+    assert cfg.model_settings["cppdefs"]["cdr_lite"] is True
+    assert cfg.model_settings["cppdefs"]["marbl"] is False
+    assert cfg.code.marbl is None
+
+
+def test_resolver_bgc_mode_cdr_lite_rejects_bgc_forcing():
+    with pytest.raises(ValueError) as exc_info:
+        _build_cdr_lite(forcing_inputs=_CATALOG.forcing_data("glorys-era5-unified"))
+    msg = str(exc_info.value)
+    assert 'bgc_mode="cdr_lite"' in msg
+    assert "initial_conditions.bgc_source" in msg
+    assert "river[0]" in msg
+
+
+@pytest.mark.parametrize("mode", ["cdr-lite", "CDR_LITE", "", "bgc"])
+def test_resolver_rejects_an_unknown_bgc_mode(mode):
+    with pytest.raises(ValueError, match="bgc_mode must be one of"):
+        _build(bgc_mode=mode)
+
+
+def test_resolver_bgc_mode_cdr_lite_requires_a_cdr_forcing():
+    with pytest.raises(ValueError, match="needs a CDR forcing.*nothing would be"):
+        _build_cdr_lite(cdr=None)
+
+
+def test_resolver_bgc_mode_cdr_lite_rejects_tracer_override_without_cdr_lite():
+    """CDR tracers set by hand still need the cppdef the mode derives: turning
+    the mode off while keeping the counts is the "Forcing type not supported"
+    abort, reported at authoring time.
+    """
+    with pytest.raises(ValueError, match="Forcing type not supported"):
+        _build(
+            model_dir=_MODEL_DIR_ROMS090,
+            bgc_mode="none",
+            forcing_inputs=_PHYSICS_ONLY_FORCING,
+            cdr_forcing=_cdr_lite_forcing(),
+            run_time_overrides={"param": {"nt_cdr_oae": 1}},
+        )
+
+
+def test_resolver_bgc_mode_cdr_lite_rejects_the_online_sensitivity():
+    with pytest.raises(ValueError, match="MARBL"):
+        _build_cdr_lite(run_time_overrides=_LITE_ON)
+
+
+def test_resolver_bgc_mode_cdr_lite_rejects_upscaled_cdr_mode():
+    with pytest.raises(ValueError, match="upscaled"):
+        _build_cdr_lite(cdr={"mode": "upscaled"})
+
+
+def test_resolver_bgc_mode_cdr_lite_accepts_the_stream_switch_before_generation():
+    """The tracer counts are generation-derived: an explicit
+    ``do_cdr_lite_output`` (redundant -- configure_build forces it on) must not
+    be rejected as "no CDR-lite tracers" at resolve time.
+    """
+    cfg = _build_cdr_lite(
+        run_time_overrides={"cdr_lite_output": {"do_cdr_lite_output": True}}
+    )
+    assert cfg.model_settings["cdr_lite_output"]["do_cdr_lite_output"] is True
+
+
+@pytest.mark.parametrize(
+    ("roms_ref", "ok"),
+    [("0.9.0", False), ("0.8.0", False), ("0.9.1", True), ("main", True)],
+)
+def test_resolver_bgc_mode_cdr_lite_needs_ucla_roms_0_9_1(roms_ref, ok):
+    if ok:
+        cfg = _build_cdr_lite(roms_ref=roms_ref)
+        assert cfg.model_settings["cppdefs"]["cdr_lite"] is True
+    else:
+        with pytest.raises(
+            ValueError, match=r'bgc_mode "cdr_lite" on ucla-roms .*>= 0\.9\.1'
+        ):
+            _build_cdr_lite(roms_ref=roms_ref)
+
+
+def test_resolver_bgc_mode_cdr_lite_gate_applies_to_a_pinned_older_model_spec():
+    with pytest.raises(ValueError, match=r'bgc_mode "cdr_lite" on ucla-roms 0\.8\.0'):
+        _build_cdr_lite(model_dir=_MODEL_DIR_ROMS080)
+
+
+def test_resolver_bgc_mode_cdr_lite_gate_follows_the_named_constant(monkeypatch):
+    """The gate reads ``CDR_LITE_MODE_MIN_ROMS`` -- the one constant to raise once
+    ucla-roms writes forcing-ready ``_cdrgas`` files -- not a copy of 0.9.1.
+    """
+    import cstar.applications.forge.namelist_model as namelist_model
+
+    assert _build_cdr_lite(roms_ref="0.9.1")
+    monkeypatch.setattr(namelist_model, "CDR_LITE_MODE_MIN_ROMS", (0, 9, 2))
+    with pytest.raises(ValueError, match=r"ucla-roms 0\.9\.1.*>= 0\.9\.2"):
+        _build_cdr_lite(roms_ref="0.9.1")
+
+
+def test_resolver_cdr_lite_simple_mode_defaults_every_release_tracer_set():
+    forcing = _cdr_lite_forcing(
+        _cdr_lite_release("oae"),
+        _cdr_lite_release("dor", tracer_fluxes={"DIC": [1.0e6, 1.0e6]}),
+        _cdr_lite_release("dye", tracer_set="passive", tracer_fluxes={}),
+    )
+    snapshot = yaml.safe_load(yaml.safe_dump(forcing))
+    cfg = _build_cdr_lite(cdr={"mode": "simple", "cdr_forcing": forcing})
+    releases = cfg.cdr.cdr_forcing["releases"]
+    assert [r["tracer_set"] for r in releases] == ["cdr_lite", "cdr_lite", "passive"]
+    assert forcing == snapshot  # the caller's dict is not mutated
+
+
+def test_resolver_cdr_lite_leaves_the_other_cdr_modes_as_authored():
+    # yaml mode (what a bare ``cdr_forcing=`` is): a roms-tools dump carries its
+    # own tracer sets, so a release without one stays a MARBL release (the
+    # generation step then rejects its MARBL axis).
+    cfg = _build_cdr_lite(cdr=None, cdr_forcing=_cdr_lite_forcing())
+    assert cfg.cdr.mode == "yaml"
+    assert "tracer_set" not in cfg.cdr.cdr_forcing["releases"][0]
+    # a simple dict with no release list (nothing to default) passes through.
+    cfg = _build_cdr_lite(cdr={"mode": "simple", "cdr_forcing": {"enabled": True}})
+    assert cfg.cdr.cdr_forcing == {"enabled": True}
+
+
+def test_resolver_marbl_mode_never_adds_a_tracer_set():
+    cfg = _build(
+        model_dir=_MODEL_DIR_ROMS090,
+        cdr={"mode": "simple", "cdr_forcing": _cdr_lite_forcing()},
+    )
+    assert "tracer_set" not in cfg.cdr.cdr_forcing["releases"][0]
+    assert cfg.model_settings["cppdefs"]["marbl"] is True
+    assert "cdr_lite" not in cfg.model_settings["cppdefs"]
+
+
+def test_resolver_marbl_mode_online_sensitivity_still_derives_cdr_lite():
+    """The marbl-mode path is unchanged: the online knob compiles CDR_LITE on top
+    of MARBL (a MARBL build, not the CDR-lite mode).
+    """
+    cfg = _build(model_dir=_MODEL_DIR_ROMS090, run_time_overrides=_LITE_ON)
+    cppdefs = cfg.model_settings["cppdefs"]
+    assert cppdefs["marbl"] is True
+    assert cppdefs["cdr_lite"] is True
+    assert cfg.code.marbl is not None
+    assert cfg.model_settings["param"]["ntrc_bio"] == 32
+
+
+def test_golden_model_settings_test_tiny_roms090_cdr_lite():
+    """Snapshot of the resolved ``model_settings`` for ``bgc_mode: cdr_lite`` on
+    ``roms-marbl-0.9-default`` (test-tiny domain, the physics-only forcing and one
+    OAE release): pins the cppdefs/param/code contract the executor consumes.
+    Regenerate with ``json.dumps(cfg.model_settings, indent=2, sort_keys=True,
+    default=str)`` plus a trailing newline, from ``_build_cdr_lite()``.
+    """
+    import json
+
+    golden_path = (
+        Path(__file__).parent
+        / "fixtures"
+        / "golden_model_settings_test-tiny-roms090-cdr-lite.json"
+    )
+    golden = json.loads(golden_path.read_text())
+    cfg = _build_cdr_lite()
+    got = json.loads(json.dumps(cfg.model_settings, sort_keys=True, default=str))
+    assert got == golden, (
+        "Resolved model_settings for test-tiny (roms-marbl-0.9-default, bgc_mode "
+        "cdr_lite) drifted from the golden fixture. If this is an intentional "
+        "change, regenerate tests/fixtures/golden_model_settings_test-tiny-"
+        "roms090-cdr-lite.json; otherwise the change is a regression."
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -3561,11 +3809,14 @@ def test_resolver_renames_a_legacy_output_spec_with_a_warning(model_dir, caplog)
 
     legacy = _legacy_output_settings(enabled=True)
     snapshot = copy.deepcopy(legacy)
+    overrides: dict[str, t.Any] = {"param": {"nt_cdr_oae": 1}}
+    if model_dir == _MODEL_DIR_ROMS090:  # CDR tracers need CDR_LITE on 0.9
+        overrides["cdr_lite"] = {"cdr_online_carbonate_sensitivity": True}
     with caplog.at_level(logging.WARNING, logger="cstar.applications.forge.resolve"):
         cfg = _build(
             model_dir=model_dir,
             output_settings=legacy,
-            run_time_overrides={"param": {"nt_cdr_oae": 1}},
+            run_time_overrides=overrides,
         )
     settings = cfg.model_settings
     assert "cdr_tracer_output" not in settings
@@ -6411,6 +6662,23 @@ class TestForgeBlueprintEngine:
         # still pass through untouched, so a genuine ModelSpec/hand-edit override still
         # reaches configure_build.
         assert run_ov["cdr_frc"]["relocate_to_wet_pts"] is True
+        assert run_ov["param"]["nt_passive"] == 0  # user-owned, not derived
+
+    def test_split_model_settings_keeps_the_cdr_tracer_counts_out_of_the_overlay(
+        self,
+    ):
+        """``param.nt_cdr_oae``/``nt_cdr_dor`` are read off the generated CDR
+        forcing (bgc_mode "cdr_lite"); the stored zeros must not revert them.
+        """
+        from cstar.applications.forge.engine import split_model_settings
+
+        cfg = _build_cdr_lite()
+        cfg.model_settings["param"].update(nt_cdr_oae=3, nt_cdr_dor=2)
+        run_ov, _ = split_model_settings(cfg)
+        assert "nt_cdr_oae" not in run_ov["param"]
+        assert "nt_cdr_dor" not in run_ov["param"]
+        # the stored blueprint itself is untouched (a deep copy was split)
+        assert cfg.model_settings["param"]["nt_cdr_oae"] == 3
 
     def test_process_orchestration_order_and_overlay(self):
         from cstar.applications.forge.engine import process_forge_blueprint
@@ -6425,6 +6693,9 @@ class TestForgeBlueprintEngine:
         assert "cppdefs" in cfgk["compile_time_settings"]
         assert "time_stepping" in cfgk["run_time_settings"]
         assert "grid" not in cfgk["run_time_settings"]
+        # The tracer count is derived by configure_build from the live settings:
+        # the stored blueprint's count predates the CDR counts read at generation.
+        assert "n_tracers" not in cfgk
 
     def test_configure_gets_the_emitted_provenance_minted_once(
         self, monkeypatch, tmp_path

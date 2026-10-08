@@ -393,10 +393,16 @@ Output paths are normalized to absolute strings.
 ``cdr_file="cdr.nc"`` (the executor/blueprint symlinks to the real path),
 ``cdr_source=True``, ``ncdr_parm=len(cdr.releases)``,
 ``forcing_parameterized=True``, ``cdr_volume=(cdr.releases.release_type ==
-"volume")``. Run-time ``cdr_output``: ``do_cdr_output = True``. Does NOT
-touch ``cdr_lite_output``/``cdr_gas_exch_output`` (ucla-roms >= 0.7.0) --
-unlike ``cdr_output``, those two streams are never forced on by CDR forcing;
-a user enables them explicitly (see the OutputSpec).
+"volume")``. Run-time ``param``: ``nt_cdr_oae``/``nt_cdr_dor``, read off the
+file's ``tracer_name`` axis (``cdr_tracer_counts``); ``param.nt_passive`` is
+checked against the file, not overwritten, and the axis length must equal the
+build's tracer count (under ``bgc_mode: cdr_lite``, MARBL tracer names, volume
+releases and a missing ``tracer_name`` are rejected -- see
+:doc:`forge_internals`). Does NOT touch ``cdr_output``
+(``configure_build`` implies it with MARBL) nor ``cdr_lite_output``/
+``cdr_gas_exch_output`` (ucla-roms >= 0.7.0): those streams are never forced on
+by generation; a user enables them explicitly (see the OutputSpec), except that
+``configure_build`` forces ``cdr_lite_output`` on under ``bgc_mode: cdr_lite``.
 
 Corrections forcing (``forcing.corrections``, order=90)
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~

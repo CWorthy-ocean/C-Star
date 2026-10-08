@@ -56,7 +56,7 @@ A ``model.yaml`` has this shape:
 
 .. code-block:: yaml
 
-   bgc_mode: marbl   # marbl or none; the default for the wizard's biogeochemistry choice
+   bgc_mode: marbl   # marbl, none or cdr_lite; the default for the wizard's biogeochemistry choice
    use_pio: false    # default for the wizard's ParallelIO checkbox
 
    code:
@@ -91,8 +91,15 @@ A ``model.yaml`` has this shape:
    resolver derives the corresponding compile-time switches from them and
    decides whether the MARBL and PIO code are pulled in. Requesting PIO from
    a model with no ``code.pio`` pin is an error. ``param.ntrc_bio`` is the
-   MARBL tracer count: with ``bgc_mode: none`` the resolver sets it to 0, and
-   a non-zero count without MARBL is rejected.
+   MARBL tracer count: without MARBL (``bgc_mode: none`` or ``cdr_lite``) the
+   resolver sets it to 0, and a non-zero count without MARBL is rejected.
+   ``bgc_mode: cdr_lite`` is a build without MARBL whose only extra tracers
+   are ucla-roms' dedicated CDR-lite tracers: it needs ucla-roms 0.9.1 or
+   later and a CDR forcing (a ``cdr`` selection) with ``cdr_lite`` releases,
+   and, like ``none``, rejects a forcing selection that asks for BGC
+   forcing. The tracer counts and the ``cdr_lite_output`` stream are derived
+   from the generated CDR forcing at build time; see
+   :doc:`../developers/forge_internals`.
 
 ``code``
    The repositories to build, each a ``location`` with a ``commit`` or
