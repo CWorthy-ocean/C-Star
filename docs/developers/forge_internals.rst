@@ -409,7 +409,7 @@ ucla-roms release: ``roms-marbl-0.5-default`` pins ``0.5.0``,
 ``0.7.0``, ``roms-marbl-0.8-default`` pins ``0.8.0`` (adds the
 ``parabolic_splines``/``upstream_ts_land_curv`` advection cppdefs flags, PR
 #361, with no new settings tier -- it still resolves to
-``RunTimeSettingsV0_7_0``), ``roms-marbl-0.9-default`` pins ``0.9.0``
+``RunTimeSettingsV0_7_0``), ``roms-marbl-0.9-default`` pins ``0.9.1``
 (``RunTimeSettingsV0_9_0``, which models the ``cdr_lite`` section; the spec does
 not declare it, see below); older specs stay
 fixed and keep emitting

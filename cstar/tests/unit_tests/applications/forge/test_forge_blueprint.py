@@ -2046,7 +2046,7 @@ def test_golden_model_settings_test_tiny_roms090():
 
 @pytest.mark.parametrize(
     ("model_dir", "roms_commit"),
-    [(_MODEL_DIR_ROMS080, "0.8.0"), (_MODEL_DIR_ROMS090, "0.9.0")],
+    [(_MODEL_DIR_ROMS080, "0.8.0"), (_MODEL_DIR_ROMS090, "0.9.1")],
 )
 def test_roms08x_09x_model_specs_declare_advection_cppdefs_and_render(
     tmp_path, model_dir, roms_commit
