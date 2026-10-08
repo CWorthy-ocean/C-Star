@@ -573,22 +573,25 @@ Known gaps / open items
 Golden fixtures
 -----------------------
 
-Two committed goldens pin the resolved-settings and namelist contracts
+Two committed unit goldens pin the resolved-settings and namelist contracts
 (treat any diff as a behavior change to justify, not noise):
 
 - **Settings-level**: ``test_golden_model_settings_test_tiny`` diffs
   resolved ``model_settings`` against
   ``golden_model_settings_test-tiny.json``. No regeneration hook -- update
-  manually. Four sibling tests pin the same comparison for each
+  manually. Five sibling tests pin the same comparison for each
   versioned-namelist schema tier: ``test_golden_model_settings_test_tiny_roms050``,
   ``_roms060``, ``_roms070``, and ``_roms090`` (``roms-marbl-0.{5,6,7,9}-default``,
-  against ``golden_model_settings_test-tiny-roms0{50,60,70,90}.json``).
+  against ``golden_model_settings_test-tiny-roms0{50,60,70,90}.json``), and for
+  the ``bgc_mode: cdr_lite`` build on ``roms-marbl-0.9-default``,
+  ``_roms090_cdr_lite`` (against
+  ``golden_model_settings_test-tiny-roms090-cdr-lite.json``).
 - **Byte-exact namelist**: ``TestGoldenNamelist::test_golden_namelist_test_tiny``
   drives the real ``generate_inputs()`` -> ``configure_build()`` chain (real
   ``write_roms_namelist``; only roms-tools construction classes are mocked)
   and diffs the rendered ``namelist.nml`` against
   ``golden_namelist_test-tiny.nml`` (host-rooted absolute paths normalized
-  to a ``<WORKDIR>`` token). Four sibling tests pin the versioned-namelist
+  to a ``<WORKDIR>`` token). Five sibling tests pin the versioned-namelist
   schemas against the same test-tiny domain/forcing/output setup:
   ``test_golden_namelist_test_tiny_roms050`` (``roms-marbl-0.5-default``,
   ``golden_namelist_test-tiny-roms050.nml``),
@@ -599,9 +602,22 @@ Two committed goldens pin the resolved-settings and namelist contracts
   ``golden_namelist_test-tiny-roms070.nml``), and
   ``test_golden_namelist_test_tiny_roms090`` (``roms-marbl-0.9-default``,
   ``&CDR_LITE_OUTPUT_SETTINGS``/``&CDR_LITE_SETTINGS`` in place of the
-  CDR_TRACER group, ``golden_namelist_test-tiny-roms090.nml``). Regenerate one at a time via
+  CDR_TRACER group, ``golden_namelist_test-tiny-roms090.nml``), and
+  ``test_golden_namelist_test_tiny_roms090_cdr_lite`` (``bgc_mode: cdr_lite``
+  on ``roms-marbl-0.9-default`` with a physics-only forcing and a real
+  roms-tools CDR forcing: ``nt_bgc = 0``, ``nt_cdr_oae``/``nt_cdr_dor`` read off
+  the CDR forcing, ``golden_namelist_test-tiny-roms090-cdr-lite.nml``).
+  Regenerate one at a time via
   ``UPDATE_GOLDEN=1 pytest <path> -k <test name>`` (the run intentionally
   fails after writing; rerun without the env var to confirm). To select
   *only* the legacy test, use ``-k "golden_namelist_test_tiny and not
   roms050 and not roms060 and not roms070 and not roms090"`` -- a bare ``-k
-  golden_namelist_test_tiny`` matches all five.
+  golden_namelist_test_tiny`` matches all six, and ``-k
+  golden_namelist_test_tiny_roms090`` matches the ``cdr_lite`` test too (add
+  ``and not cdr_lite`` to select only the ``roms090`` one).
+
+The integration suite pins the rendered namelist of each of its forge cases
+(``unified``, ``constants`` and ``cdr_lite``) the same way, from real
+roms-tools output, in
+``cstar/tests/integration_tests/forge/fixtures/golden_namelist_<case>.nml``;
+see :doc:`../contributing`.

@@ -97,10 +97,13 @@ Shared pieces are in ``cstar/tests/integration_tests``:
   source of upstream data for the suite. It is pinned to a commit
   (``TEST_DATA_COMMIT``) with a sha256 per file (``REGISTRY``).
 - ``cases.py``: the run window constants and ``FORGE_CASES``, the
-  domain and forcing pairings shared by the tiers.
+  domain and forcing pairings shared by the tiers (``unified`` and
+  ``constants`` are ``bgc_mode: marbl`` builds; ``cdr_lite`` is a
+  ``bgc_mode: cdr_lite`` build with a simple-mode CDR forcing).
 - ``catalog/``: a test-local catalog layer with a small domain
   (``na-test-8x8``), forcing specs that point at the pinned data
-  (``test-glorys-era5-unified`` and ``test-glorys-era5-constants``) and a
+  (``test-glorys-era5-unified``, ``test-glorys-era5-constants`` and the
+  physics-only ``test-glorys-era5-physics``) and a
   minimal output spec (``test-minimal``). ``${TEST_DATA}`` in these files
   is replaced by the data cache directory. Model specs come from the
   bundled catalog; ``roms-marbl-0.9-default`` pins ucla-roms 0.9.1.
@@ -121,7 +124,9 @@ Adding an integration case
    holding ``Domain.yaml`` or ``Forcing.yaml``), pointing at files from
    the data registry through ``${TEST_DATA}``.
 2. Add a ``ForgeCase`` entry to ``FORGE_CASES`` in ``cases.py``, with
-   ``compile_time_overrides`` if the case changes ``cppdefs``.
+   ``compile_time_overrides`` if the case changes ``cppdefs``,
+   ``run_time_overrides`` if it changes namelist settings, and ``bgc_mode``
+   (and ``cdr``, which ``cdr_lite`` requires) if it is not a MARBL build.
 3. Add a matching entry to ``EXPECTATIONS`` in
    ``forge/test_forge_inputs.py``. The ``run`` fixture is parametrized on
    its keys, so the existing tests then cover the new case.

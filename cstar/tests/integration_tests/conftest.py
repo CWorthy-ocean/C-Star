@@ -237,6 +237,9 @@ def forge_blueprint_factory(
             output_settings=test_catalog.output_data("test-minimal"),
             name=name or f"it-{case_name}",
             compile_time_overrides=case.compile_time_overrides,
+            run_time_overrides=case.run_time_overrides,
+            bgc_mode=case.bgc_mode,
+            cdr=case.cdr,
             roms_ref=ROMS_REF,
         )
         working_dir.mkdir(parents=True, exist_ok=True)
