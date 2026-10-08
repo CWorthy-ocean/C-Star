@@ -13,6 +13,7 @@ from cstar.orchestration.transforms import (
 
 if t.TYPE_CHECKING:
     from collections.abc import Callable, Mapping
+    from pathlib import Path
 
     from cstar.orchestration.orchestration import Launcher
 
@@ -21,6 +22,7 @@ async def deep_check(
     wp: Workplan,
     user_vars: "Mapping[str, str] | None",
     launcher_factory: "Callable[[], Launcher[t.Any]]",
+    wp_path: "Path | None" = None,
 ) -> tuple[Workplan | None, list[str]]:
     """Resolve a workplan the same way `run` does before submitting anything.
 
@@ -38,6 +40,9 @@ async def deep_check(
     launcher_factory : Callable[[], Launcher[Any]]
         Produces the launcher used to look up the runs a workplan references.
         Only called when the workplan declares external runs.
+    wp_path : Path | None
+        The file the workplan was read from; a step's relative blueprint path
+        is resolved against its directory, as `run` does.
 
     Returns
     -------
@@ -56,7 +61,7 @@ async def deep_check(
     fill = TemplateFillTransform(variable_resolver=lambda name: named_config[name])
     try:
         external = await resolve_external_runs(wp, fill, launcher_factory)
-        return WorkplanTransformer(wp, fill, external).apply(), []
+        return WorkplanTransformer(wp, fill, external, wp_path=wp_path).apply(), []
     except ValidationError as ex:
         return None, [format_validation_errors(ex)]
     except KeyError as ex:

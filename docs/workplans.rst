@@ -193,6 +193,12 @@ or declare the blueprint ``inline``, built entirely from the step's ``blueprint_
 *Inline Blueprints* example below).
 The step also specifies the application type to use for its execution.
 
+A relative ``blueprint`` path is resolved against the directory containing the
+workplan file, not the directory ``cstar`` is run from, so a workplan can be
+checked and run from anywhere and moved together with the blueprints beside it.
+The transformed workplan written into the run directory records the resolved
+absolute path.
+
 
 Step Schema
 -----------

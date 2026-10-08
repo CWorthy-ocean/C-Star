@@ -80,7 +80,10 @@ from cstar.orchestration.serialization import (
     validate_serialized_entity,
 )
 from cstar.orchestration.tracking import TrackingRepository, WorkplanRun
-from cstar.orchestration.transforms import external_dependencies
+from cstar.orchestration.transforms import (
+    anchor_blueprint_path,
+    external_dependencies,
+)
 
 if t.TYPE_CHECKING:
     from collections.abc import Mapping
@@ -380,7 +383,8 @@ def migrate_steps(path: Path, workplan: Workplan):
     Parameters
     ----------
     path : Path
-        The path where the updated workplan will be persisted.
+        The path where the updated workplan will be persisted; a step's
+        relative blueprint path is resolved against its directory.
     workplan : Workplan
         The workplan to perform migrations on.
 
@@ -396,7 +400,7 @@ def migrate_steps(path: Path, workplan: Workplan):
         if not isinstance(step.blueprint_path, (Path, str)):
             continue
 
-        bp_path = str(step.blueprint_path)
+        bp_path = str(anchor_blueprint_path(step, path.parent).blueprint_path)
         try:
             step.blueprint_path, modified = localize_and_migrate(bp_path)
             if modified:

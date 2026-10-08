@@ -1,5 +1,6 @@
 import os
 import random
+import textwrap
 import typing as t
 from collections.abc import AsyncGenerator
 from datetime import datetime
@@ -22,6 +23,7 @@ from cstar.execution.file_system import (
     JobFileSystemManager,
     StateDirectoryManager,
 )
+from cstar.orchestration.adapter import StepToRunRequestAdapter
 from cstar.orchestration.dag_runner import (
     DagStatus,
     ExecutiveRunSummary,
@@ -1486,3 +1488,55 @@ def test_build_planner_passes_external_tasks(
     planner = build_planner(external_workplan, {EXTERNAL_TOKEN: task})
 
     assert planner.retrieve(EXTERNAL_TOKEN, "task") is task
+
+
+@pytest.mark.asyncio
+async def test_prepare_workplan_anchors_relative_blueprint_path(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    hello_world_bp_content: str,
+) -> None:
+    """Verify a relative `blueprint` path is resolved against the workplan's
+    directory when the workplan is prepared from another working directory,
+    the absolute path is persisted in the transformed workplan, and the step
+    command carries it.
+
+    Parameters
+    ----------
+    tmp_path : Path
+        Temporary directory for the workplan, blueprint and run outputs
+    monkeypatch : pytest.MonkeyPatch
+        Fixture used to change the working directory
+    hello_world_bp_content : str
+        Fixture providing the content of a minimal hello-world blueprint
+    """
+    plans = tmp_path / "plans"
+    plans.mkdir()
+    (plans / "hw.yaml").write_text(hello_world_bp_content)
+    wp_path = plans / "wp.yaml"
+    wp_path.write_text(
+        textwrap.dedent("""\
+            name: Relative blueprint
+            description: A step whose blueprint sits beside the workplan
+            state: draft
+            steps:
+              - name: Say Hello
+                application: hello_world
+                blueprint: ./hw.yaml
+            """)
+    )
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    monkeypatch.chdir(elsewhere)
+
+    wp, prepared_path, _ = await prepare_workplan(wp_path, tmp_path / "output")
+
+    expected = (plans / "hw.yaml").resolve()
+    assert Path(wp.steps[0].blueprint_path) == expected
+
+    persisted = deserialize(prepared_path, LiveWorkplan)
+    step = persisted.steps[0]
+    assert Path(step.blueprint_path) == expected
+
+    command = StepToRunRequestAdapter().adapt(step).command
+    assert command[:4] == ["cstar", "blueprint", "run", str(expected)]
