@@ -3024,6 +3024,35 @@ def test_template_fill_scoped_resolver(
     assert Path(actual_value).is_relative_to(upstream_dir)
 
 
+def test_template_fill_blueprint_path(
+    live_step_with_templates: LiveStep,
+    tmp_path: Path,
+) -> None:
+    """Verify a `{{output_dir: step}}` token in a step's blueprint path is
+    filled from the named step's file-system manager, so a blueprint produced
+    by another step can be addressed before it exists (claude-docs#45).
+    """
+    producer = LiveStep.from_step(
+        live_step_with_templates,
+        update={"name": "make_inputs", "working_dir": tmp_path / "producer"},
+    )
+    consumer = LiveStep.from_step(
+        live_step_with_templates,
+        update={
+            "name": "consumer",
+            "blueprint": "{{output_dir: make_inputs}}/B_emitted.yaml",
+            "blueprint_overrides": {},
+        },
+    )
+    resolver = get_fsm_resolver([producer, consumer], ExternalRuns({}))
+
+    transform = TemplateFillTransform(scoped_resolver=resolver)
+    (result,) = transform(consumer)
+
+    assert str(result.blueprint_path) == f"{producer.fsm.output_dir}/B_emitted.yaml"
+    assert "{{" not in str(result.blueprint_path)
+
+
 def test_template_fill_scoped_resolver_invalid_lookup(
     live_step_with_templates: LiveStep,
 ) -> None:
