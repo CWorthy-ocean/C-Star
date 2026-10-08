@@ -80,7 +80,7 @@ from cstar.orchestration.serialization import (
     validate_serialized_entity,
 )
 from cstar.orchestration.tracking import TrackingRepository, WorkplanRun
-from cstar.orchestration.transforms import external_dependencies
+from cstar.orchestration.transforms import PLACEHOLDER_RE, external_dependencies
 
 if t.TYPE_CHECKING:
     from collections.abc import Mapping
@@ -397,6 +397,15 @@ def migrate_steps(path: Path, workplan: Workplan):
             continue
 
         bp_path = str(step.blueprint_path)
+        if PLACEHOLDER_RE.search(bp_path):
+            # The path names a file that does not exist yet: its `{{ }}`
+            # placeholders are filled by `TemplateFillTransform` when the
+            # workplan is prepared, so it cannot be opened here. Preparation
+            # then loads the filled blueprint strictly, without schema
+            # migration, so a stale blueprint behind a placeholder is reported
+            # at that point instead of by this preflight.
+            continue
+
         try:
             step.blueprint_path, modified = localize_and_migrate(bp_path)
             if modified:

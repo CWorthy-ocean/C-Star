@@ -2168,6 +2168,101 @@ def test_workplan_run_up_to_date_blueprint_not_migrated(
     assert wp_path.read_text() == wp_content_before
 
 
+@pytest.mark.parametrize(
+    ("placeholder", "runtime_vars", "runs", "depends_on", "cli_vars"),
+    [
+        pytest.param(
+            "{{bp_dir}}",
+            ["bp_dir"],
+            {},
+            [],
+            ["--var", "bp_dir=/filled/at/prepare"],
+            id="runtime-variable",
+        ),
+        pytest.param(
+            "{{output_dir: make_inputs@toy}}",
+            [],
+            {"toy": "wio-toy-smoke"},
+            ["make_inputs@toy"],
+            [],
+            id="external-step-scope",
+        ),
+    ],
+)
+def test_workplan_run_placeholder_blueprint_path_skips_preflight_migration(
+    tmp_path: Path,
+    plotter_v1_0_0_bp: Path,
+    placeholder: str,
+    runtime_vars: list[str],
+    runs: dict[str, str],
+    depends_on: list[str],
+    cli_vars: list[str],
+) -> None:
+    """Verify a blueprint path still holding a `{{ }}` placeholder is not
+    rejected by the `PATH` argument callback: the file it names only exists
+    once the placeholder is filled while preparing the workplan, so preflight
+    migration must skip it (claude-docs#45). Migration of the other steps is
+    unaffected.
+
+    Parameters
+    ----------
+    tmp_path : Path
+        Temporary directory to read/write test inputs and outputs
+    plotter_v1_0_0_bp : Path
+        Fixture providing the path to a plotter blueprint at schema 1.0.0
+    placeholder : str
+        The placeholder spelling used in the blueprint path
+    runtime_vars : list[str]
+        Runtime variables declared by the workplan
+    runs : dict[str, str]
+        External runs declared by the workplan, keyed by alias
+    depends_on : list[str]
+        Dependencies of the placeholder step
+    cli_vars : list[str]
+        `--var` arguments supplied on the command line
+    """
+    placeholder_bp = f"{placeholder}/helloworld.yaml"
+    wp = Workplan(
+        name="Placeholder Workplan",
+        description="A step whose blueprint path is filled at prepare time.",
+        runtime_vars=runtime_vars,
+        runs=runs,
+        steps=[
+            Step(name="Plot", application="plotter", blueprint=plotter_v1_0_0_bp),
+            Step(
+                name="Say Hello",
+                application="hello_world",
+                blueprint=placeholder_bp,
+                depends_on=depends_on,
+            ),
+        ],
+    )
+    wp_path = tmp_path / "placeholder-workplan.yaml"
+    assert serialize(wp_path, wp), "serializing test workplan failed"
+
+    with mock.patch(
+        "cstar.cli.workplan.run.build_and_run_dag", wraps=fake_build_and_run_dag
+    ) as mock_build_and_run_dag:
+        runner = CliRunner()
+        result = runner.invoke(
+            app,
+            ["--run-id", "12345", wp_path.as_posix(), *cli_vars],
+            color=False,
+        )
+
+    assert result.exit_code == 0, result.output
+    assert "Blueprint not found" not in result.output
+    mock_build_and_run_dag.assert_awaited_once()
+
+    # the placeholder path reaches the run untouched while the stale sibling
+    # blueprint is still migrated
+    handed_over = deserialize(mock_build_and_run_dag.call_args.args[0], Workplan)
+    assert [str(s.blueprint_path) for s in handed_over.steps] == [
+        _expected_migrated_path(plotter_v1_0_0_bp).as_posix(),
+        placeholder_bp,
+    ]
+
+
 def test_workplan_run_migration_disabled_fails_fast(
     plotter_workplan_path: Path,
     monkeypatch: pytest.MonkeyPatch,
