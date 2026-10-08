@@ -40,6 +40,7 @@ from cstar.applications.hello_world import APP_NAME as HELLO_WORLD
 from cstar.applications.nest_ic import APP_NAME as NEST_IC
 from cstar.applications.roms_marbl.models import APP_NAME as ROMS_MARBL
 from cstar.applications.roms_marbl.transforms import (
+    CarbonateSensitivityDirective,
     ContinuanceDirective,
     NestingDirective,
 )
@@ -501,6 +502,7 @@ _DAG_NODE_W, _DAG_NODE_H, _DAG_GAP_X, _DAG_GAP_Y, _DAG_PAD = 176, 46, 96, 18, 14
 _DAG_EDGE_LABELS = (
     (ContinuanceDirective, "restart"),
     (NestingDirective, "boundary"),
+    (CarbonateSensitivityDirective, "sensitivities"),
 )
 """The directives whose step references are drawn as labelled edges."""
 
@@ -508,8 +510,9 @@ _DAG_EDGE_LABELS = (
 def _dag_edges(step: Step) -> dict[str, list[str]]:
     """The steps ``step`` depends on, each with the labels of why.
 
-    Plain ``depends_on`` entries have no label; a ``continue-from`` or
-    ``nest-from`` reference, and a deferred blueprint's producer, add one.
+    Plain ``depends_on`` entries have no label; a ``continue-from``,
+    ``nest-from`` or ``carbonate-sensitivity-from`` reference, and a deferred
+    blueprint's producer, add one.
     """
     edges: dict[str, list[str]] = {dep: [] for dep in step.depends_on}
     refs: list[tuple[str, str]] = []
@@ -562,7 +565,8 @@ def dag_svg(steps: Sequence[Step], runs: Mapping[str, RunRef]) -> str:
     A step sits one layer right of its deepest dependency. Steps of another
     run (``step@alias``) are dashed grey source nodes in the first layer.
     An edge that stands for a ``continue-from`` (restart), ``nest-from``
-    (boundary) or deferred blueprint (blueprint) reference carries that label.
+    (boundary), ``carbonate-sensitivity-from`` (sensitivities) or deferred
+    blueprint (blueprint) reference carries that label.
 
     Parameters
     ----------
@@ -849,6 +853,16 @@ class _StepPane:
         self.add_nest_btn = W.Button(
             description=_caption("add_source", "Add boundary source"), icon="plus"
         )
+        self.cs_kind = W.Dropdown(
+            options=[(k, k) for k in (_KIND_NONE, _KIND_STEP, _KIND_PATH)],
+            value=_KIND_NONE,
+        )
+        self.cs_rows: list[Any] = []
+        self.cs_box = W.VBox([])
+        self.add_cs_btn = W.Button(
+            description=_caption("add_cs_source", "Add sensitivity source"),
+            icon="plus",
+        )
 
         # compute overrides
         self.num_cpus = W.IntText(value=0, layout=W.Layout(width="140px"))
@@ -868,7 +882,10 @@ class _StepPane:
         self.dup_btn.on_click(lambda _b: page._duplicate(self))
         self.del_btn.on_click(lambda _b: page._delete(self))
         self.add_row_btn.on_click(lambda _b: self._add_row())
-        self.add_nest_btn.on_click(lambda _b: self._add_nest_row(_KIND_STEP, ""))
+        self.add_nest_btn.on_click(
+            lambda _b: self._add_nest_row(self.nest_kind.value, "")
+        )
+        self.add_cs_btn.on_click(lambda _b: self._add_cs_row(self.cs_kind.value, ""))
 
         for widget in (
             self.depends_on,
@@ -882,6 +899,7 @@ class _StepPane:
             self.cont_path,
             self.cont_timestamp,
             self.nest_kind,
+            self.cs_kind,
             self.max_walltime,
             self.queue_name,
             self.account_name,
@@ -907,6 +925,7 @@ class _StepPane:
         self.cont_path.observe(self._on_directive_kind, names="value")
         self.cont_step.observe(self._on_directive_kind, names="value")
         self.nest_kind.observe(self._on_directive_kind, names="value")
+        self.cs_kind.observe(self._on_directive_kind, names="value")
 
         def row(key: str, widget: Any, **kw: Any) -> Any:
             return components.field_row(W, f"step.{key}", widget, page=PAGE, **kw)
@@ -963,6 +982,8 @@ class _StepPane:
                     row("cont_timestamp", self.cont_timestamp),
                     row("nest_kind", self.nest_kind),
                     W.VBox([self.nest_box, self.add_nest_btn]),
+                    row("cs_kind", self.cs_kind),
+                    W.VBox([self.cs_box, self.add_cs_btn]),
                     self.directive_note,
                     page=PAGE,
                 ),
@@ -1227,7 +1248,8 @@ class _StepPane:
         directives = self._app_directives(app)
         has_cont = ContinuanceDirective in directives
         has_nest = NestingDirective in directives
-        _show(self._directives_section, has_cont or has_nest)
+        has_cs = CarbonateSensitivityDirective in directives
+        _show(self._directives_section, has_cont or has_nest or has_cs)
         cont = self.cont_kind.value
         for widget in (self.cont_kind,):
             _show(widget, has_cont)
@@ -1238,6 +1260,9 @@ class _StepPane:
         _show(self.nest_kind, has_nest)
         _show(self.nest_box, has_nest and self.nest_kind.value != _KIND_NONE)
         _show(self.add_nest_btn, has_nest and self.nest_kind.value != _KIND_NONE)
+        _show(self.cs_kind, has_cs)
+        _show(self.cs_box, has_cs and self.cs_kind.value != _KIND_NONE)
+        _show(self.add_cs_btn, has_cs and self.cs_kind.value != _KIND_NONE)
 
         slurm = self.page.compute_target.value != TARGET_LOCAL
         for widget in (
@@ -1299,7 +1324,7 @@ class _StepPane:
         _set_options(self.producer, choose)
         _set_options(self.cont_step, choose)
         _set_options(self.depends_on, steps)
-        for row in self.nest_rows:
+        for row in self._source_rows:
             if row.kind == _KIND_STEP:
                 _set_options(row.widget, choose)
         for widget, _base, extra in self._form.values():
@@ -1321,7 +1346,7 @@ class _StepPane:
                 new if d == old else d for d in self.depends_on.value
             )
             self._dep_order = [new if d == old else d for d in self._dep_order]
-            for row in self.nest_rows:
+            for row in self._source_rows:
                 if row.widget.value == old:
                     _add_option(row.widget, new)
                     row.widget.value = new
@@ -1331,7 +1356,7 @@ class _StepPane:
                 self.cdr_location,
                 self.cont_path,
                 *(w for w, base, _p in self._form.values() if base is str),
-                *(r.widget for r in self.nest_rows if r.kind == _KIND_PATH),
+                *(r.widget for r in self._source_rows if r.kind == _KIND_PATH),
             ]
             for widget in texts:
                 widget.value = _rename_in_placeholders(widget.value, old, new)
@@ -1358,7 +1383,7 @@ class _StepPane:
             _add_option(self.depends_on, *tokens)
             self.depends_on.value = tokens
             self._dep_order = [retoken(d) for d in self._dep_order]
-            for row in self.nest_rows:
+            for row in self._source_rows:
                 if row.kind == _KIND_STEP and row.widget.value != retoken(
                     row.widget.value
                 ):
@@ -1378,7 +1403,25 @@ class _StepPane:
         self.rows_box.children = [r.widget for r in self._rows]
         self._changed()
 
+    @property
+    def _source_rows(self) -> list[Any]:
+        """The source rows of every multi-source directive (``nest-from``, ...)."""
+        return [*self.nest_rows, *self.cs_rows]
+
     def _add_nest_row(self, kind: str, value: str) -> None:
+        self._add_source_row(
+            self.nest_rows, self.nest_box, kind, value, "boundary directory"
+        )
+
+    def _add_cs_row(self, kind: str, value: str) -> None:
+        self._add_source_row(
+            self.cs_rows, self.cs_box, kind, value, "output directory or file"
+        )
+
+    def _add_source_row(
+        self, rows: list[Any], box: Any, kind: str, value: str, placeholder: str
+    ) -> None:
+        """Append a source row (a step dropdown or a path field) to ``rows``."""
         W = self.W
         if kind == _KIND_STEP:
             widget = W.Dropdown(options=[], layout=W.Layout(width="300px"))
@@ -1392,23 +1435,23 @@ class _StepPane:
             widget = W.Text(
                 value=value,
                 continuous_update=False,
-                placeholder="boundary directory",
+                placeholder=placeholder,
                 layout=W.Layout(width="420px"),
             )
         remove = W.Button(icon="trash", tooltip="Remove this source")
         holder = W.HBox([widget, remove])
-        item = type("_NestRow", (), {})()
+        item = type("_SourceRow", (), {})()
         item.kind, item.widget, item.holder = kind, widget, holder
         widget.observe(self._changed, names="value")
-        remove.on_click(lambda _b: self._remove_nest_row(item))
-        self.nest_rows.append(item)
-        self.nest_box.children = [r.holder for r in self.nest_rows]
+        remove.on_click(lambda _b: self._remove_source_row(rows, box, item))
+        rows.append(item)
+        box.children = [r.holder for r in rows]
         if not self.page.is_suspended:
             self._changed()
 
-    def _remove_nest_row(self, item: Any) -> None:
-        self.nest_rows.remove(item)
-        self.nest_box.children = [r.holder for r in self.nest_rows]
+    def _remove_source_row(self, rows: list[Any], box: Any, item: Any) -> None:
+        rows.remove(item)
+        box.children = [r.holder for r in rows]
         self._changed()
 
     def _build_form(self, app: str) -> None:
@@ -1606,6 +1649,18 @@ class _StepPane:
                     else NestingDirective.KEY_PATH
                 ): NestingDirective.SOURCE_DELIMITER.join(values)
             }
+        if self.cs_kind.value != _KIND_NONE:
+            values = [str(r.widget.value).strip() for r in self.cs_rows]
+            values = [v for v in values if v]
+            if not values:
+                raise ValueError("add at least one carbonate sensitivity source")
+            directives[CarbonateSensitivityDirective.key()] = {
+                (
+                    CarbonateSensitivityDirective.KEY_STEP
+                    if self.cs_kind.value == _KIND_STEP
+                    else CarbonateSensitivityDirective.KEY_PATH
+                ): CarbonateSensitivityDirective.SOURCE_DELIMITER.join(values)
+            }
         return directives
 
     def _gather_compute(self) -> dict[str, Any]:
@@ -1758,10 +1813,10 @@ class _StepPane:
         """Show the directives the widgets model; keep the rest as written."""
         directives: dict[str, Any] = copy.deepcopy(dict(step.directives))
         self._passthrough_directives = {}
-        self.cont_kind.value = self.nest_kind.value = _KIND_NONE
+        self.cont_kind.value = self.nest_kind.value = self.cs_kind.value = _KIND_NONE
         self.cont_path.value = self.cont_timestamp.value = ""
-        self.nest_rows = []
-        self.nest_box.children = []
+        self.nest_rows, self.cs_rows = [], []
+        self.nest_box.children = self.cs_box.children = []
         cont = directives.pop(ContinuanceDirective.key(), None)
         if cont is not None:
             step_key, path_key, stamp_key = (
@@ -1805,6 +1860,24 @@ class _StepPane:
                         self._add_nest_row(kind, token.strip())
             else:
                 self._passthrough_directives[NestingDirective.key()] = nest
+        cs = directives.pop(CarbonateSensitivityDirective.key(), None)
+        if cs is not None:
+            step_key = CarbonateSensitivityDirective.KEY_STEP
+            path_key = CarbonateSensitivityDirective.KEY_PATH
+            if (
+                isinstance(cs, dict)
+                and len(cs) == 1
+                and (step_key in cs or path_key in cs)
+            ):
+                kind = _KIND_STEP if step_key in cs else _KIND_PATH
+                self.cs_kind.value = kind
+                for token in str(
+                    cs[step_key if kind == _KIND_STEP else path_key]
+                ).split(CarbonateSensitivityDirective.SOURCE_DELIMITER):
+                    if token.strip():
+                        self._add_cs_row(kind, token.strip())
+            else:
+                self._passthrough_directives[CarbonateSensitivityDirective.key()] = cs
         self._passthrough_directives.update(directives)
         self.directive_note.value = (
             "<span class='forge-hint'>Kept as written: "

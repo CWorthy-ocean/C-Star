@@ -14,6 +14,11 @@ from pathlib import Path
 import yaml
 
 from cstar.applications.forge.blueprint import ForgeBlueprint
+from cstar.applications.roms_marbl.transforms import (
+    CarbonateSensitivityDirective,
+    ContinuanceDirective,
+    NestingDirective,
+)
 from cstar.orchestration.models import BLUEPRINT_METADATA_FIELDS, Step, Workplan
 from cstar.orchestration.serialization import deserialize, serialize
 from cstar.wizard import workplan_builder as wb
@@ -237,6 +242,214 @@ def test_directives_continue_from_step_path_and_nest_from(page, roms_bp, tmp_pat
     assert step.directives["nest-from"] == {"path": "/data/one;/data/two"}
     assert step.depends_on == ["a"]  # implied by the directive, added for you
     assert "a" in b.locked_deps.value
+
+
+@pytest.mark.parametrize("kind", ["step", "path"])
+def test_add_source_buttons_add_a_row_of_the_chosen_kind(page, roms_bp, kind):
+    _name_page(page)
+    pane = page.panes[0]
+    _path_step(pane, "a", roms_bp)
+    pane.nest_kind.value = pane.cs_kind.value = kind
+    pane.add_nest_btn.click()
+    pane.add_cs_btn.click()
+    assert [r.kind for r in pane.nest_rows] == [kind]
+    assert [r.kind for r in pane.cs_rows] == [kind]
+
+
+def test_carbonate_sensitivity_from_gathers_steps_joined_with_semicolons(page, roms_bp):
+    _name_page(page)
+    _path_step(page.panes[0], "a", roms_bp)
+    _path_step(page.add_step("b"), "b", roms_bp)
+    c = page.add_step("c")
+    _path_step(c, "c", roms_bp)
+    c.cs_kind.value = "step"
+    c._add_cs_row("step", "a")
+    c._add_cs_row("step", "b")
+    step = page.draft.steps[2]
+    assert step.directives == {"carbonate-sensitivity-from": {"step": "a;b"}}
+    assert step.depends_on == ["a", "b"]  # implied by the directive, added for you
+
+
+def test_carbonate_sensitivity_from_gathers_paths_and_skips_blank_rows(page, roms_bp):
+    _name_page(page)
+    pane = page.panes[0]
+    _path_step(pane, "run", roms_bp)
+    pane.cs_kind.value = "path"
+    pane._add_cs_row("path", " /data/one ")
+    pane._add_cs_row("path", "")
+    pane._add_cs_row("path", "/data/two")
+    step = page.draft.steps[0]
+    assert step.directives == {
+        "carbonate-sensitivity-from": {"path": "/data/one;/data/two"}
+    }
+    assert step.depends_on == []
+
+
+def test_carbonate_sensitivity_from_needs_a_source_once_a_kind_is_chosen(page, roms_bp):
+    _name_page(page)
+    pane = page.panes[0]
+    _path_step(pane, "run", roms_bp)
+    pane.cs_kind.value = "path"
+    pane._add_cs_row("path", "   ")
+    assert page.draft is None
+    assert any(
+        "add at least one carbonate sensitivity source" in p for p in page.problems
+    )
+    pane.cs_kind.value = "none"  # clearing the kind drops the directive
+    assert page.draft.steps[0].directives == {}
+
+
+def test_carbonate_sensitivity_from_round_trips_through_a_saved_file(
+    page, roms_bp, tmp_path
+):
+    _name_page(page)
+    _path_step(page.panes[0], "a", roms_bp)
+    _path_step(page.add_step("b"), "b", roms_bp)
+    by_step = page.add_step("by-step")
+    _path_step(by_step, "by-step", roms_bp)
+    by_step.cs_kind.value = "step"
+    by_step._add_cs_row("step", "a")
+    by_step._add_cs_row("step", "b")
+    by_path = page.add_step("by-path")
+    _path_step(by_path, "by-path", roms_bp)
+    by_path.nest_kind.value = by_path.cs_kind.value = "path"
+    by_path._add_nest_row("path", "/data/bry")
+    by_path._add_cs_row("path", "/data/one")
+    by_path._add_cs_row("path", "/data/two")
+    drafted = page.draft
+    assert drafted is not None
+    out = tmp_path / "wp.yaml"
+    serialize(out, drafted)
+
+    page._load_from_path(str(out))
+
+    panes = {p.name.value: p for p in page.panes}
+    assert panes["by-step"].cs_kind.value == "step"
+    assert [r.widget.value for r in panes["by-step"].cs_rows] == ["a", "b"]
+    assert panes["by-path"].cs_kind.value == "path"
+    assert [r.widget.value for r in panes["by-path"].cs_rows] == [
+        "/data/one",
+        "/data/two",
+    ]
+    assert [r.widget.value for r in panes["by-path"].nest_rows] == ["/data/bry"]
+    assert panes["a"].cs_kind.value == "none" and panes["a"].cs_rows == []
+    assert page.problems == []
+    assert page.draft.model_dump() == drafted.model_dump()
+
+
+@pytest.mark.parametrize(
+    "config",
+    [
+        {"step": "a", "path": "/data/one"},  # the two sources are exclusive
+        {"step": "a", "extra": 1},  # a key the directive does not take
+        {},
+        "a",
+    ],
+)
+def test_malformed_carbonate_sensitivity_from_is_kept_as_written(page, roms_bp, config):
+    pane = page.panes[0]
+    step = Step(
+        name="run",
+        application="roms_marbl",
+        blueprint=str(roms_bp),
+        directives={"carbonate-sensitivity-from": config},
+    )
+    pane._populate_directives(step)
+    assert pane.cs_kind.value == "none" and pane.cs_rows == []
+    assert pane._passthrough_directives == {"carbonate-sensitivity-from": config}
+    assert "Kept as written" in pane.directive_note.value
+    assert "carbonate-sensitivity-from" in pane.directive_note.value
+    assert pane._gather_directives() == {"carbonate-sensitivity-from": config}
+
+
+def test_carbonate_sensitivity_from_follows_step_renames(page, roms_bp):
+    _name_page(page)
+    a = page.panes[0]
+    _path_step(a, "a", roms_bp)
+    b = page.add_step("b")
+    _path_step(b, "b", roms_bp)
+    b.cs_kind.value = "step"
+    b._add_cs_row("step", "a")
+    c = page.add_step("c")
+    _path_step(c, "c", roms_bp)
+    c.cs_kind.value = "path"
+    c._add_cs_row("path", "{{output_dir: a}}")
+
+    a.name.value = "z"
+
+    steps = {s.name: s for s in page.draft.steps}
+    assert b.cs_rows[0].widget.value == "z"
+    assert steps["b"].directives == {"carbonate-sensitivity-from": {"step": "z"}}
+    assert steps["b"].depends_on == ["z"]
+    assert steps["c"].directives == {
+        "carbonate-sensitivity-from": {"path": "{{output_dir: z}}"}
+    }
+    assert steps["c"].depends_on == ["z"]
+
+
+def test_carbonate_sensitivity_from_follows_run_alias_renames(page, roms_bp):
+    _name_page(page)
+    pane = page.panes[0]
+    _path_step(pane, "run", roms_bp)
+    page._add_run()
+    row = page.run_rows[0]
+    row.alias.value = "ini"
+    row.run_id.value = "{{ini_run}}"
+    row.steps.value = "create-ic"
+    pane.cs_kind.value = "step"
+    pane._add_cs_row("step", "create-ic@ini")
+    assert page.draft.steps[0].directives == {
+        "carbonate-sensitivity-from": {"step": "create-ic@ini"}
+    }
+
+    row.alias.value = "spin"
+
+    assert page.draft.steps[0].directives == {
+        "carbonate-sensitivity-from": {"step": "create-ic@spin"}
+    }
+    assert page.draft.steps[0].depends_on == ["create-ic@spin"]
+
+
+def test_directive_blocks_show_only_for_the_directives_an_application_declares(
+    page, roms_bp, monkeypatch
+):
+    pane = page.panes[0]
+    _path_step(pane, "run", roms_bp)
+    pane.nest_kind.value = pane.cs_kind.value = "step"
+    assert pane._directives_section.layout.display != "none"
+    for widget in (
+        pane.cont_kind,
+        pane.nest_kind,
+        pane.nest_box,
+        pane.add_nest_btn,
+        pane.cs_kind,
+        pane.cs_box,
+        pane.add_cs_btn,
+    ):
+        assert widget.layout.display != "none"
+
+    # an application declaring only the older directives never offers the new one
+    monkeypatch.setattr(
+        _StepPane,
+        "_app_directives",
+        staticmethod(lambda app: (ContinuanceDirective, NestingDirective)),
+    )
+    pane._changed()
+    assert pane._directives_section.layout.display != "none"
+    assert pane.nest_kind.layout.display != "none"
+    for widget in (pane.cs_kind, pane.cs_box, pane.add_cs_btn):
+        assert widget.layout.display == "none"
+
+    monkeypatch.setattr(
+        _StepPane,
+        "_app_directives",
+        staticmethod(lambda app: (CarbonateSensitivityDirective,)),
+    )
+    pane._changed()
+    assert pane._directives_section.layout.display != "none"
+    assert pane.cs_kind.layout.display != "none"
+    for widget in (pane.cont_kind, pane.nest_kind, pane.nest_box, pane.add_nest_btn):
+        assert widget.layout.display == "none"
 
 
 def test_restart_picker_lists_the_restarts_at_a_path(page, roms_bp, tmp_path):
@@ -1729,6 +1942,32 @@ def test_dag_svg_layers_labels_and_escaping(roms_bp):
     assert labels == ["blueprint, boundary", "restart"]
     # every name is escaped, so no markup of ours can be injected
     assert "make<ic>" not in svg and "make&lt;ic&gt;" in svg
+
+
+def test_dag_svg_labels_carbonate_sensitivity_edges(roms_bp):
+    from cstar.orchestration.models import Step
+
+    steps = [
+        Step(name="a", application="roms_marbl", blueprint=str(roms_bp)),
+        Step(name="b", application="roms_marbl", blueprint=str(roms_bp)),
+        Step(
+            name="c",
+            application="roms_marbl",
+            blueprint=str(roms_bp),
+            directives={
+                "nest-from": {"step": "a"},
+                "carbonate-sensitivity-from": {"step": "a; b"},
+            },
+        ),
+    ]
+    assert wb._dag_edges(steps[2]) == {
+        "a": ["boundary", "sensitivities"],
+        "b": ["sensitivities"],
+    }
+    svg = wb.dag_svg(steps, {})
+    assert _edges(svg) == {("a", "c"), ("b", "c")}
+    labels = sorted(re.findall(r"class='edge-label'[^>]*>([^<]*)<", svg))
+    assert labels == ["boundary, sensitivities", "sensitivities"]
 
 
 def test_dag_svg_survives_odd_input():

@@ -149,9 +149,9 @@ the page (errors are listed and nothing changes; **Discard edits** restores the
 draft's text). The DAG draws the steps left to right by dependency, with steps
 of other runs as dashed grey source nodes and each node coloured by
 application. Edges that come from a restart (``continue-from``), boundary
-(``nest-from``) or deferred blueprint reference are labelled as such. The graph
-follows your edits even while the draft is invalid. On a narrow screen the
-columns stack.
+(``nest-from``), carbonate sensitivity (``carbonate-sensitivity-from``) or
+deferred blueprint reference are labelled as such. The graph follows your edits
+even while the draft is invalid. On a narrow screen the columns stack.
 
 The **Preview** control at the top of that pane moves it: **Right** (the
 default) is the two columns, **Bottom** puts the pane below the cards and
@@ -233,8 +233,11 @@ Steps
      input or output directory. A YAML box merges any other override last;
    * **directives** for roms_marbl: where the step continues from (a step, a
      step of another run, or a path, with an optional restart timestamp
-     chosen from the restarts found there when they can be read), and the
-     ordered boundary sources for a nested child;
+     chosen from the restarts found there when they can be read), the
+     ordered boundary sources for a nested child, and the ordered carbonate
+     sensitivity sources for a CDR-LiTE run (steps or paths, as for the
+     boundaries; a source step must be a ROMS-MARBL run with the gas-exchange
+     output on);
    * **compute overrides**: CPUs (prefilled from the blueprint, and required
      for a deferred blueprint, which the launcher cannot read), walltime,
      queue, account and CPUs per node. Blank values inherit the compute

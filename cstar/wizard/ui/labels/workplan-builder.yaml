@@ -201,6 +201,10 @@ fields:
     label: Boundaries from
     symbol: nest-from
     hint: Several sources are joined with ";".
+  step.cs_kind:
+    label: Carbonate sensitivities from
+    symbol: carbonate-sensitivity-from
+    hint: A source step must be a ROMS-MARBL run with the gas-exchange output on. Several sources are joined with ";".
   step.num_cpus:
     label: CPUs
     symbol: num_cpus
@@ -307,6 +311,8 @@ fields:
     label: Add namelist override
   buttons.add_source:
     label: Add boundary source
+  buttons.add_cs_source:
+    label: Add sensitivity source
   buttons.apply_edits:
     label: Apply edits
   buttons.discard_edits:
