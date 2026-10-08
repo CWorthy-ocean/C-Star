@@ -6,7 +6,7 @@ from abc import ABC
 from collections.abc import Generator
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, ClassVar
+from typing import Any, ClassVar, Final
 
 from cstar.base.exceptions import CstarExpectationFailed
 from cstar.base.input_dataset import InputDataset
@@ -828,6 +828,54 @@ class ROMSSurfaceForcing(ROMSInputDataset):
     """An implementation of the ROMSInputDataset class for model surface forcing
     files.
     """
+
+
+CARBONATE_SENSITIVITY_VARIABLES: Final[tuple[str, ...]] = (
+    "ddic_dco2",
+    "ddic_dalk",
+    "ddic_dco2_time",
+    "ddic_dalk_time",
+)
+"""Variables a CDR-LiTE build reads from its carbonate sensitivity forcing
+files: the sensitivities of the air-sea CO2 flux to DIC (beta) and ALK (eta),
+each with its time variable (days since the reference date).
+"""
+
+
+class ROMSCarbonateSensitivity(ROMSInputDataset):
+    """Carbonate sensitivity forcing for a CDR-LiTE (ucla-roms >= 0.9.0) build.
+
+    Surface fields read through the generic `frcfiles` list when the build does
+    not compute them online -- typically the `_cdrgas` output of an earlier
+    ROMS-MARBL run.
+    """
+
+    def check_forcing_variables(self) -> list[str]:
+        """Check this dataset's first staged file for `CARBONATE_SENSITIVITY_VARIABLES`.
+
+        Only the first file is read (a header read, no data): all files backing
+        a single dataset come from one writer, so reading more would only add
+        filesystem cost without a chance of a different answer.
+
+        Returns
+        -------
+        list of str
+            A description of each missing variable; empty if all are present or
+            the dataset has no working copy.
+        """
+        # Lazy import: only needed when this check runs
+        import xarray as xr
+
+        files = self._working_copy_files()
+        if not files:
+            return []
+
+        with xr.open_dataset(files[0], decode_times=False) as ds:
+            return [
+                f"{files[0]}: missing variable {name!r}"
+                for name in CARBONATE_SENSITIVITY_VARIABLES
+                if name not in ds.variables
+            ]
 
 
 class ROMSRiverForcing(ROMSInputDataset):

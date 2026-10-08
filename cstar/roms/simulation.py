@@ -17,6 +17,7 @@ from pydantic import ValidationError
 from cstar.applications.roms_marbl.adapter import (
     AddtlCodeAdapter,
     BoundaryForcingAdapter,
+    CarbonateSensitivityAdapter,
     CdrForcingAdapter,
     CodebaseAdapter,
     DiscretizationAdapter,
@@ -70,6 +71,7 @@ from cstar.roms.external_codebase import ROMSExternalCodeBase
 from cstar.roms.input_dataset import (
     RecordedReferenceDate,
     ROMSBoundaryForcing,
+    ROMSCarbonateSensitivity,
     ROMSCdrForcing,
     ROMSForcingCorrections,
     ROMSInitialConditions,
@@ -237,6 +239,8 @@ class ROMSSimulation(Simulation):
         List of boundary forcing datasets.
     forcing_corrections : list[ROMSForcingCorrections]
         List of forcing correction datasets.
+    carbonate_sensitivity : list[ROMSCarbonateSensitivity]
+        List of carbonate sensitivity datasets read by a CDR-LiTE build.
     exe_path : Path
         Path to the compiled ROMS executable.
     partitioned_files : List[Path]
@@ -295,6 +299,7 @@ class ROMSSimulation(Simulation):
         boundary_forcing: list["ROMSBoundaryForcing"] | None = None,
         surface_forcing: list["ROMSSurfaceForcing"] | None = None,
         forcing_corrections: list["ROMSForcingCorrections"] | None = None,
+        carbonate_sensitivity: list["ROMSCarbonateSensitivity"] | None = None,
         use_pio: bool = False,
         pio_codebase: Optional["PIOExternalCodeBase"] = None,
         auto_tiling: bool = False,
@@ -346,6 +351,9 @@ class ROMSSimulation(Simulation):
             List of surface forcing datasets (e.g., wind stress, heat flux).
         forcing_corrections : list[ROMSForcingCorrections], optional
             List of surface forcing correction datasets.
+        carbonate_sensitivity : list[ROMSCarbonateSensitivity], optional
+            List of carbonate sensitivity datasets (ddic_dco2/ddic_dalk) for a
+            CDR-LiTE build that does not compute them online.
         use_pio : bool, optional
             If True, ROMS uses the ParallelIO library for input/output, reading and
             writing joined files directly: input datasets are not partitioned and
@@ -371,6 +379,8 @@ class ROMSSimulation(Simulation):
             If `surface_forcing` is not a list of `ROMSSurfaceForcing` instances.
             If `boundary_forcing` is not a list of `ROMSBoundaryForcing` instances.
             If `forcing_corrections` is not a list of `ROMSForcingCorrections` instances.
+            If `carbonate_sensitivity` is not a list of `ROMSCarbonateSensitivity`
+            instances.
         ValueError
             If `pio_codebase` is provided but `use_pio` is False.
             If `auto_tiling` is True but `use_pio` is False.
@@ -434,6 +444,11 @@ class ROMSSimulation(Simulation):
         self._validate_input(forcing_corrections, typecheck=ROMSForcingCorrections)
         self.forcing_corrections = (
             [] if forcing_corrections is None else forcing_corrections
+        )
+
+        self._validate_input(carbonate_sensitivity, typecheck=ROMSCarbonateSensitivity)
+        self.carbonate_sensitivity = (
+            [] if carbonate_sensitivity is None else carbonate_sensitivity
         )
 
         self.marbl_codebase = marbl_codebase
@@ -710,6 +725,7 @@ class ROMSSimulation(Simulation):
             self.surface_forcing,
             self.boundary_forcing,
             self.forcing_corrections,
+            self.carbonate_sensitivity,
         )
 
         forcing_paths: list[Path] = []
@@ -996,6 +1012,7 @@ class ROMSSimulation(Simulation):
                 *self.boundary_forcing,
                 *self.surface_forcing,
                 *self.forcing_corrections,
+                *self.carbonate_sensitivity,
             ]
             if x is not None
         ]
@@ -1170,6 +1187,19 @@ class ROMSSimulation(Simulation):
                 ROMSForcingCorrections(**fc_kwargs)
             )
 
+        # Construct any ROMSCarbonateSensitivity instances:
+        carbonate_sensitivity_entries = simulation_dict.get("carbonate_sensitivity", [])
+        if len(carbonate_sensitivity_entries) > 0:
+            simulation_kwargs["carbonate_sensitivity"] = []
+        if isinstance(carbonate_sensitivity_entries, dict):
+            carbonate_sensitivity_entries = [
+                carbonate_sensitivity_entries,
+            ]
+        for cs_kwargs in carbonate_sensitivity_entries:
+            simulation_kwargs["carbonate_sensitivity"].append(
+                ROMSCarbonateSensitivity(**cs_kwargs)
+            )
+
         return cls(**simulation_kwargs)
 
     def to_dict(self) -> dict:
@@ -1242,6 +1272,10 @@ class ROMSSimulation(Simulation):
             simulation_dict["forcing_corrections"] = [
                 fc.to_dict() for fc in self.forcing_corrections
             ]
+        if len(self.carbonate_sensitivity) > 0:
+            simulation_dict["carbonate_sensitivity"] = [
+                cs.to_dict() for cs in self.carbonate_sensitivity
+            ]
 
         return simulation_dict
 
@@ -1302,6 +1336,7 @@ class ROMSSimulation(Simulation):
             tidal_forcing=TidalForcingAdapter(bp).adapt(),
             river_forcing=RiverForcingAdapter(bp).adapt(),
             forcing_corrections=ForcingCorrectionAdapter(bp).adapt(),
+            carbonate_sensitivity=CarbonateSensitivityAdapter(bp).adapt(),
             boundary_forcing=BoundaryForcingAdapter(bp).adapt(),
             surface_forcing=SurfaceForcingAdapter(bp).adapt(),
             cdr_forcing=CdrForcingAdapter(bp).adapt(),
@@ -1380,6 +1415,8 @@ class ROMSSimulation(Simulation):
         ------
         ValueError
             If any required component (e.g., runtime code, compile-time code) is missing.
+            If the build reads carbonate sensitivities from forcing files but they
+            are missing or incomplete (see `_validate_carbonate_sensitivity_inputs`).
         RuntimeError
             If there is an issue configuring the external codebases.
 
@@ -1447,6 +1484,9 @@ class ROMSSimulation(Simulation):
             if self._overlaps_simulation_dates(inp):
                 self.log.debug(f"Fetching {inp.source.location}")
                 inp.get(local_dir=input_datasets_dir)
+
+        # Everything the check reads is staged now: fail before `build()` compiles.
+        self._validate_carbonate_sensitivity_inputs()
 
     @property
     def is_setup(self) -> bool:
@@ -1687,6 +1727,12 @@ class ROMSSimulation(Simulation):
             except self._ATTACH_COMPONENT_ERRORS as e:
                 problems.append(str(e))
 
+        if not problems:
+            try:
+                self._validate_carbonate_sensitivity_inputs()
+            except self._ATTACH_COMPONENT_ERRORS as e:
+                problems.append(str(e))
+
         if problems:
             problem_list = "\n".join(f"  - {p}" for p in problems)
             msg = (
@@ -1860,11 +1906,13 @@ class ROMSSimulation(Simulation):
 
     # Fortran cppdef macro -> the lowercase key
     # `cstar.roms.precheck.check_output_streams_divide_rst` expects (its
-    # `_STREAM_CHECKS` cppdef_guard names).
+    # `_STREAM_CHECKS` cppdef_guard names); `cdr_lite` is read only by
+    # `_validate_carbonate_sensitivity_inputs`.
     _PRECHECK_CPPDEF_MACROS: ClassVar[dict[str, str]] = {
         "MARBL": "marbl",
         "MARBL_DIAGS": "marbl_diags",
         "CDR_FORCING": "cdr_forcing",
+        "CDR_LITE": "cdr_lite",
         "UPSCALING": "upscaling",
         "DIAGNOSTICS": "diagnostics",
         "BIOLOGY_BEC2": "biology_bec2",
@@ -1991,6 +2039,10 @@ class ROMSSimulation(Simulation):
         ValueError
             If a locally staged input dataset's model reference date does not
             match the namelist `reference_date_settings.reference_date`.
+        ValueError
+            If the build reads carbonate sensitivities from forcing files but
+            they are missing or incomplete (see
+            `_validate_carbonate_sensitivity_inputs`).
 
         Notes
         -----
@@ -2005,6 +2057,7 @@ class ROMSSimulation(Simulation):
         post_run : Performs post-processing steps after execution.
         """
         self._validate_reference_dates()
+        self._validate_carbonate_sensitivity_inputs()
 
         if self.use_pio:
             self._validate_pio_inputs()
@@ -2122,6 +2175,63 @@ class ROMSSimulation(Simulation):
             raise ValueError(
                 "use_pio is True but the following input datasets cannot be "
                 "read by ROMS with ParallelIO:\n- " + "\n- ".join(problems)
+            )
+
+    def _validate_carbonate_sensitivity_inputs(self) -> None:
+        """Ensure a CDR-LiTE build that reads its carbonate sensitivities from
+        forcing files has them, with the variables ROMS reads.
+
+        A ucla-roms >= 0.9 build with the `CDR_LITE` cppkey reads
+        `ddic_dco2`/`ddic_dalk` and their time variables as ordinary surface
+        forcing unless `cdr_lite_settings.cdr_online_carbonate_sensitivity`
+        (effective value, after `namelist_overrides`) computes them online.
+        Missing or incomplete files otherwise surface as an opaque ROMS abort
+        at run time. Does nothing when `CDR_LITE` is not defined in the staged
+        `cppdefs.opt`, or when the sensitivities are computed online.
+
+        Raises
+        ------
+        ValueError
+            If no `carbonate_sensitivity` datasets are configured, or if any
+            staged one lacks a variable in `CARBONATE_SENSITIVITY_VARIABLES`
+            (all problems are listed).
+        """
+        if not self._active_cppdefs_for_precheck().get("cdr_lite", False):
+            return
+
+        nml, schema, checkout_target = self._read_raw_namelist()
+        nml = self._layer_namelist_overrides(nml, schema, checkout_target)
+        # Only the 0.9.0+ schema has the group; a build old enough to lack it
+        # cannot compute the sensitivities online either.
+        settings = getattr(nml, "cdr_lite_settings", None)
+        if getattr(settings, "cdr_online_carbonate_sensitivity", False):
+            return
+
+        context = (
+            "The ROMS build defines CDR_LITE and "
+            "cdr_lite_settings.cdr_online_carbonate_sensitivity is off, so ROMS "
+            "reads the carbonate sensitivities from forcing files"
+        )
+        if not self.carbonate_sensitivity:
+            raise ValueError(
+                f"{context}, but none are configured. Add "
+                "forcing.carbonate_sensitivity to the blueprint or use the "
+                "carbonate-sensitivity-from workplan directive."
+            )
+
+        problems = [
+            problem
+            for dataset in self.carbonate_sensitivity
+            if dataset.exists_locally
+            for problem in dataset.check_forcing_variables()
+        ]
+        if problems:
+            raise ValueError(
+                f"{context}, but these files lack required variables:\n- "
+                + "\n- ".join(problems)
+                + "\n_cdrgas files written by ucla-roms 0.9.1 and earlier carry "
+                "only ocean_time and cannot be read as forcing; regenerate them "
+                "with a ucla-roms release that writes the forcing time variables."
             )
 
     def prepare_launch(self, job_name: str | None = None) -> LaunchPlan:

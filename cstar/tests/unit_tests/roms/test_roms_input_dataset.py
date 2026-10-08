@@ -13,9 +13,11 @@ from cstar.base.exceptions import CstarExpectationFailed
 from cstar.io.source_data import SourceDataCollection
 from cstar.io.staged_data import StagedDataCollection, StagedFile
 from cstar.roms.input_dataset import (
+    CARBONATE_SENSITIVITY_VARIABLES,
     DatasetLinker,
     RecordedReferenceDate,
     ROMSBoundaryForcing,
+    ROMSCarbonateSensitivity,
     ROMSForcingCorrections,
     ROMSInputDataset,
     ROMSPartitioning,
@@ -1332,3 +1334,96 @@ class TestROMSInputDatasetReadModelReferenceDate:
         assert dataset.read_model_reference_date() == RecordedReferenceDate(
             date=datetime(1995, 1, 1), cyclic=False
         )
+
+
+class TestROMSCarbonateSensitivity:
+    """Tests for `ROMSCarbonateSensitivity` and its variable contract."""
+
+    @staticmethod
+    def _write(path: Path, variables: tuple[str, ...]) -> Path:
+        """Write a tiny netCDF file holding only `variables`."""
+        xr.Dataset({name: ("x", np.zeros(2)) for name in variables}).to_netcdf(path)
+        return path
+
+    @staticmethod
+    def _staged(path: Path, staging_dir: Path) -> ROMSCarbonateSensitivity:
+        """Stage `path` as a `ROMSCarbonateSensitivity` working copy."""
+        dataset = ROMSCarbonateSensitivity(location=str(path))
+        dataset.get(staging_dir)
+        return dataset
+
+    def test_variable_contract(self) -> None:
+        """The variables a CDR-LiTE build reads are the sensitivities and their times."""
+        assert CARBONATE_SENSITIVITY_VARIABLES == (
+            "ddic_dco2",
+            "ddic_dalk",
+            "ddic_dco2_time",
+            "ddic_dalk_time",
+        )
+
+    def test_is_partitionable(self) -> None:
+        """Like other surface forcing, the dataset is partitioned per rank."""
+        assert ROMSCarbonateSensitivity.partitionable is True
+
+    def test_complete_file_has_no_problems(self, tmp_path: Path) -> None:
+        """A file with all four variables reports nothing."""
+        path = self._write(
+            tmp_path / "complete.nc", (*CARBONATE_SENSITIVITY_VARIABLES, "ocean_time")
+        )
+        dataset = self._staged(path, tmp_path / "staged")
+
+        assert dataset.check_forcing_variables() == []
+
+    def test_missing_time_variables_are_reported_with_the_file(
+        self, tmp_path: Path
+    ) -> None:
+        """A `_cdrgas` file from ucla-roms <= 0.9.1 (only `ocean_time`) fails once
+        per missing time variable, naming the checked file.
+        """
+        path = self._write(
+            tmp_path / "old_cdrgas.nc", ("ddic_dco2", "ddic_dalk", "ocean_time")
+        )
+        dataset = self._staged(path, tmp_path / "staged")
+
+        problems = dataset.check_forcing_variables()
+
+        staged_path = tmp_path / "staged" / path.name
+        assert problems == [
+            f"{staged_path}: missing variable 'ddic_dco2_time'",
+            f"{staged_path}: missing variable 'ddic_dalk_time'",
+        ]
+
+    def test_every_missing_variable_is_reported(self, tmp_path: Path) -> None:
+        """An unrelated file is missing all four variables."""
+        path = self._write(tmp_path / "other.nc", ("temp",))
+        dataset = self._staged(path, tmp_path / "staged")
+
+        problems = dataset.check_forcing_variables()
+
+        assert len(problems) == len(CARBONATE_SENSITIVITY_VARIABLES)
+        assert all(
+            name in "".join(problems) for name in CARBONATE_SENSITIVITY_VARIABLES
+        )
+
+    def test_no_working_copy_has_no_problems(self, tmp_path: Path) -> None:
+        """Without a staged working copy, there is nothing to read."""
+        path = self._write(tmp_path / "unstaged.nc", ("temp",))
+
+        assert (
+            ROMSCarbonateSensitivity(location=str(path)).check_forcing_variables() == []
+        )
+
+    def test_collection_working_copy_reads_first_file_only(
+        self,
+        stageddatacollection_remote_files: Callable[..., StagedDataCollection],
+        tmp_path: Path,
+    ) -> None:
+        """Only the first file of a multi-file working copy (e.g. partitioned
+        pieces) is read.
+        """
+        first = self._write(tmp_path / "first.nc", CARBONATE_SENSITIVITY_VARIABLES)
+        second = self._write(tmp_path / "second.nc", ("temp",))
+        dataset = ROMSCarbonateSensitivity(location=str(first))
+        dataset._working_copy = stageddatacollection_remote_files(paths=[first, second])
+
+        assert dataset.check_forcing_variables() == []

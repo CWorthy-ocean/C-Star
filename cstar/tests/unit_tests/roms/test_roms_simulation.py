@@ -8,7 +8,9 @@ from pathlib import Path
 from typing import Any, cast
 from unittest import mock
 
+import numpy as np
 import pytest
+import xarray as xr
 from pydantic import ValidationError
 
 from cstar.base.additional_code import AdditionalCode
@@ -23,6 +25,7 @@ from cstar.roms.external_codebase import ROMSExternalCodeBase
 from cstar.roms.input_dataset import (
     RecordedReferenceDate,
     ROMSBoundaryForcing,
+    ROMSCarbonateSensitivity,
     ROMSCdrForcing,
     ROMSForcingCorrections,
     ROMSInitialConditions,
@@ -36,6 +39,7 @@ from cstar.roms.input_dataset import (
 from cstar.roms.namelist import (
     RomsNamelist,
     RomsNamelistV0_5_0,
+    RomsNamelistV0_6_0,
     RomsNamelistV0_9_0,
     namelist_schema_for_ref,
 )
@@ -52,6 +56,12 @@ EXAMPLE_NAMELIST_V0_5_0 = (
 )
 # Captured before any test patches the namelist read machinery, so side_effects
 # can read a fixture from disk without re-entering the mock (which would recurse).
+EXAMPLE_NAMELIST_V0_6_0 = (
+    Path(__file__).parent / "fixtures" / "example_namelist_v0_6_0.nml"
+)
+EXAMPLE_NAMELIST_V0_9_0 = (
+    Path(__file__).parent / "fixtures" / "example_namelist_v0_9_0.nml"
+)
 _REAL_NAMELIST_READ = RomsNamelist.read
 _REAL_NAMELIST_READ_V0_5_0 = RomsNamelistV0_5_0.read
 
@@ -143,6 +153,15 @@ class TestROMSSimulationInitialization:
         assert [isinstance(x, ROMSSurfaceForcing) for x in sim.surface_forcing]
         assert sim.surface_forcing[0].source.location == "http://my.files/surface.nc"
         assert sim.surface_forcing[0].source.file_hash == "567"
+
+        assert isinstance(sim.carbonate_sensitivity, list)
+        assert all(
+            isinstance(x, ROMSCarbonateSensitivity) for x in sim.carbonate_sensitivity
+        )
+        assert (
+            sim.carbonate_sensitivity[0].source.location == "http://my.files/cdrgas.nc"
+        )
+        assert sim.carbonate_sensitivity[0].source.file_hash == "321"
 
         # Uninitialized at outset/private
         assert sim.exe_path is None
@@ -287,6 +306,7 @@ class TestROMSSimulationInitialization:
             ("surface_forcing", "ROMSSurfaceForcing"),
             ("boundary_forcing", "ROMSBoundaryForcing"),
             ("forcing_corrections", "ROMSForcingCorrections"),
+            ("carbonate_sensitivity", "ROMSCarbonateSensitivity"),
         ],
     )
     def test_check_inputdataset_types(
@@ -366,12 +386,14 @@ class TestROMSSimulationInitialization:
             [Path("surface.nc"), Path("surface2.nc")],
             Path("boundary.nc"),
             Path("sw_corr.nc"),
+            Path("cdrgas.nc"),
         ]
         datasets = [
             sim.tidal_forcing,
             sim.surface_forcing,
             sim.boundary_forcing,
             sim.forcing_corrections,
+            sim.carbonate_sensitivity,
         ]
 
         # Set at least one forcing type to None to check handling
@@ -1165,6 +1187,8 @@ class TestROMSSimulationInitialization:
           - `tidal_forcing`
           - All entries in `boundary_forcing`
           - All entries in `surface_forcing`
+          - All entries in `forcing_corrections`
+          - All entries in `carbonate_sensitivity`
         - The order of elements in the list matches the expected order.
 
         Mocks & Fixtures
@@ -1180,10 +1204,11 @@ class TestROMSSimulationInitialization:
         bc = sim.boundary_forcing[0]
         sf = sim.surface_forcing[0]
         fc = sim.forcing_corrections[0]
+        cs = sim.carbonate_sensitivity[0]
         cdr = sim.cdr_forcing
         ni = sim.nesting_info
 
-        assert sim.input_datasets == [mg, ic, td, rf, cdr, ni, bc, sf, fc]
+        assert sim.input_datasets == [mg, ic, td, rf, cdr, ni, bc, sf, fc, cs]
 
     @pytest.mark.parametrize(
         "start_date, valid_start_date, end_date, valid_end_date, substring",
@@ -1339,7 +1364,8 @@ class TestTree:
     │   ├── nesting.nc
     │   ├── boundary.nc
     │   ├── surface.nc
-    │   └── sw_corr.nc
+    │   ├── sw_corr.nc
+    │   └── cdrgas.nc
     ├── runtime_code
     │   ├── file1
     │   ├── namelist.nml
@@ -1385,6 +1411,9 @@ class TestToAndFromDictAndBlueprint:
             "boundary_forcing"
         )
         assert tested_dict.get("surface_forcing") == target_dict.get("surface_forcing")
+        assert tested_dict.get("carbonate_sensitivity") == target_dict.get(
+            "carbonate_sensitivity"
+        )
 
     def test_from_dict(
         self,
@@ -1441,9 +1470,11 @@ class TestToAndFromDictAndBlueprint:
         - The `boundary_forcing` attribute is a list.
         - The `surface_forcing` attribute is a list.
         - The `forcing_corrections` attribute is a list
+        - The `carbonate_sensitivity` attribute is a list
         - Each item in `boundary_forcing` is an instance of `ROMSBoundaryForcing`.
         - Each item in `surface_forcing` is an instance of `ROMSSurfaceForcing`.
         - Each item in `forcing_corrections` is an instance of `ROMSForcingCorrections`.
+        - Each item in `carbonate_sensitivity` is an instance of `ROMSCarbonateSensitivity`.
         - The properties of the reconstructed instances match the input data.
 
         Mocks & Fixtures
@@ -1476,6 +1507,15 @@ class TestToAndFromDictAndBlueprint:
             sim.forcing_corrections[0].source.location == "http://my.files/sw_corr.nc"
         )
         assert sim.forcing_corrections[0].source.file_hash == "890"
+
+        assert isinstance(sim.carbonate_sensitivity, list)
+        assert all(
+            isinstance(x, ROMSCarbonateSensitivity) for x in sim.carbonate_sensitivity
+        )
+        assert (
+            sim.carbonate_sensitivity[0].source.location == "http://my.files/cdrgas.nc"
+        )
+        assert sim.carbonate_sensitivity[0].source.file_hash == "321"
 
     def test_dict_roundtrip(
         self, stub_romssimulation, patch_romssimulation_init_sourcedata
@@ -1557,7 +1597,48 @@ class TestProcessingAndExecution:
 
         assert mock_externalcodebase_setup.call_count == 2
         assert mock_additionalcode_get.call_count == 2
+        assert mock_inputdataset_get.call_count == 10
+
+    @mock.patch.object(ROMSSimulation, "build")
+    @mock.patch.object(ROMSInputDataset, "get")
+    @mock.patch.object(AdditionalCode, "get")
+    @mock.patch.object(ExternalCodeBase, "setup")
+    def test_setup_rejects_missing_carbonate_sensitivities(
+        self,
+        mock_externalcodebase_setup,
+        mock_additionalcode_get,
+        mock_inputdataset_get,
+        mock_build,
+        stub_romssimulation,
+    ):
+        """`setup` fails once everything is staged if a CDR-LiTE build reads its
+        carbonate sensitivities from forcing files but has none -- so the run
+        stops before `build` would compile ROMS.
+        """
+        sim = stub_romssimulation
+        sim.carbonate_sensitivity = []
+        nml = RomsNamelistV0_9_0.read(EXAMPLE_NAMELIST_V0_9_0)
+        nml.cdr_lite_settings.cdr_online_carbonate_sensitivity = False
+
+        with (
+            mock.patch.object(
+                ROMSSimulation,
+                "_active_cppdefs_for_precheck",
+                return_value={"cdr_lite": True},
+            ),
+            mock.patch.object(
+                ROMSSimulation,
+                "_read_raw_namelist",
+                return_value=(nml, RomsNamelistV0_9_0, "0.9.0"),
+            ),
+            pytest.raises(ValueError, match="carbonate-sensitivity-from"),
+        ):
+            sim.setup()
+
+        # all inputs were staged first (the check needs them), and nothing built
+        assert mock_additionalcode_get.call_count == 2
         assert mock_inputdataset_get.call_count == 9
+        mock_build.assert_not_called()
 
     @pytest.mark.parametrize(
         "codebase_status, marbl_status, expected",
@@ -3051,6 +3132,227 @@ class TestValidateReferenceDates:
             sim._validate_reference_dates()
 
 
+class TestValidateCarbonateSensitivityInputs:
+    """Tests for `ROMSSimulation._validate_carbonate_sensitivity_inputs`.
+
+    The cppdef scan and the raw namelist read are patched; the namelist is a
+    real `RomsNamelistV0_9_0` so `namelist_overrides` layer on it for real.
+    """
+
+    @staticmethod
+    def _patches(cdr_lite: bool, nml: Any) -> tuple[Any, Any]:
+        """Patch the staged-cppdefs scan and the raw namelist read."""
+        return (
+            mock.patch.object(
+                ROMSSimulation,
+                "_active_cppdefs_for_precheck",
+                return_value={"cdr_lite": cdr_lite},
+            ),
+            mock.patch.object(
+                ROMSSimulation,
+                "_read_raw_namelist",
+                return_value=(nml, type(nml), "0.9.0"),
+            ),
+        )
+
+    @staticmethod
+    def _nml(online: bool = False) -> RomsNamelistV0_9_0:
+        """A 0.9.0 namelist with the given online carbonate sensitivity setting."""
+        nml = RomsNamelistV0_9_0.read(EXAMPLE_NAMELIST_V0_9_0)
+        nml.cdr_lite_settings.cdr_online_carbonate_sensitivity = online
+        return nml
+
+    @staticmethod
+    def _dataset(problems: list[str], exists_locally: bool = True) -> mock.MagicMock:
+        """A staged-dataset stand-in whose variable check reports `problems`."""
+        return mock.MagicMock(
+            spec=ROMSCarbonateSensitivity,
+            exists_locally=exists_locally,
+            check_forcing_variables=mock.Mock(return_value=problems),
+        )
+
+    def test_cdr_lite_off_checks_nothing(self, stub_romssimulation):
+        """Without `CDR_LITE` in the build, the namelist is not even read and
+        no datasets are required.
+        """
+        sim = stub_romssimulation
+        sim.carbonate_sensitivity = []
+        patch_cppdefs, patch_read = self._patches(False, self._nml())
+        with patch_cppdefs, patch_read as mock_read:
+            sim._validate_carbonate_sensitivity_inputs()
+
+        mock_read.assert_not_called()
+
+    def test_unstaged_cppdefs_checks_nothing(self, stub_romssimulation):
+        """An unstaged `cppdefs.opt` (empty scan) is treated as `CDR_LITE` off."""
+        sim = stub_romssimulation
+        sim.carbonate_sensitivity = []
+        with (
+            mock.patch.object(
+                ROMSSimulation, "_active_cppdefs_for_precheck", return_value={}
+            ),
+            mock.patch.object(ROMSSimulation, "_read_raw_namelist") as mock_read,
+        ):
+            sim._validate_carbonate_sensitivity_inputs()
+
+        mock_read.assert_not_called()
+
+    def test_online_sensitivities_need_no_datasets(self, stub_romssimulation):
+        """With `cdr_online_carbonate_sensitivity` on, ROMS computes the
+        sensitivities itself, so nothing has to be supplied.
+        """
+        sim = stub_romssimulation
+        sim.carbonate_sensitivity = []
+        patch_cppdefs, patch_read = self._patches(True, self._nml(online=True))
+        with patch_cppdefs, patch_read:
+            sim._validate_carbonate_sensitivity_inputs()
+
+    def test_override_enabling_online_mode_is_honored(self, stub_romssimulation):
+        """An online setting made through `namelist_overrides` (not in the
+        namelist file) counts: the check reads the effective value.
+        """
+        sim = stub_romssimulation
+        sim.carbonate_sensitivity = []
+        sim.namelist_overrides = {
+            "cdr_lite_settings": {"cdr_online_carbonate_sensitivity": True}
+        }
+        patch_cppdefs, patch_read = self._patches(True, self._nml(online=False))
+        with patch_cppdefs, patch_read:
+            sim._validate_carbonate_sensitivity_inputs()
+
+        sim.namelist_overrides = {}
+        with patch_cppdefs, patch_read, pytest.raises(ValueError, match="none are"):
+            sim._validate_carbonate_sensitivity_inputs()
+
+    def test_schema_without_cdr_lite_group_counts_as_online_off(
+        self, stub_romssimulation
+    ):
+        """A namelist schema that predates `&CDR_LITE_SETTINGS` cannot compute
+        the sensitivities online, so datasets are required.
+        """
+        sim = stub_romssimulation
+        sim.carbonate_sensitivity = []
+        nml = RomsNamelistV0_6_0.read(EXAMPLE_NAMELIST_V0_6_0)
+        patch_cppdefs, patch_read = self._patches(True, nml)
+        with patch_cppdefs, patch_read, pytest.raises(ValueError, match="none are"):
+            sim._validate_carbonate_sensitivity_inputs()
+
+    def test_offline_without_datasets_names_both_ways_to_supply_them(
+        self, stub_romssimulation
+    ):
+        """No configured datasets is an error naming the blueprint key and the
+        workplan directive that can supply them.
+        """
+        sim = stub_romssimulation
+        sim.carbonate_sensitivity = []
+        patch_cppdefs, patch_read = self._patches(True, self._nml())
+        with (
+            patch_cppdefs,
+            patch_read,
+            pytest.raises(ValueError, match="none are configured") as exc_info,
+        ):
+            sim._validate_carbonate_sensitivity_inputs()
+
+        message = str(exc_info.value)
+        assert "forcing.carbonate_sensitivity" in message
+        assert "carbonate-sensitivity-from" in message
+
+    def test_offline_with_complete_datasets_passes(self, stub_romssimulation):
+        """Datasets carrying every variable satisfy the check."""
+        sim = stub_romssimulation
+        sim.carbonate_sensitivity = [self._dataset([])]
+        patch_cppdefs, patch_read = self._patches(True, self._nml())
+        with patch_cppdefs, patch_read:
+            sim._validate_carbonate_sensitivity_inputs()
+
+    def test_every_problem_is_reported_together(self, stub_romssimulation):
+        """Problems across datasets are collected into one error; datasets that
+        are not staged locally are not read.
+        """
+        sim = stub_romssimulation
+        unstaged = self._dataset(["unstaged.nc: should not appear"], False)
+        sim.carbonate_sensitivity = [
+            self._dataset(["a.nc: missing variable 'ddic_dco2_time'"]),
+            self._dataset([]),
+            self._dataset(["b.nc: missing variable 'ddic_dalk'"]),
+            unstaged,
+        ]
+        patch_cppdefs, patch_read = self._patches(True, self._nml())
+        with (
+            patch_cppdefs,
+            patch_read,
+            pytest.raises(ValueError, match="lack required variables") as exc_info,
+        ):
+            sim._validate_carbonate_sensitivity_inputs()
+
+        message = str(exc_info.value)
+        assert "a.nc: missing variable 'ddic_dco2_time'" in message
+        assert "b.nc: missing variable 'ddic_dalk'" in message
+        assert "unstaged.nc" not in message
+        unstaged.check_forcing_variables.assert_not_called()
+        assert "0.9.1" in message
+
+    def test_reads_staged_file_headers(self, stub_romssimulation, tmp_path):
+        """A staged `_cdrgas` file without the forcing time variables (ucla-roms
+        0.9.1 and earlier) is rejected, naming the file and the variables.
+        """
+        source = tmp_path / "output_cdrgas.nc"
+        xr.Dataset(
+            {
+                name: ("x", np.zeros(2))
+                for name in ("ddic_dco2", "ddic_dalk", "ocean_time")
+            }
+        ).to_netcdf(source)
+        dataset = ROMSCarbonateSensitivity(location=str(source))
+        dataset.get(tmp_path / "staged")
+
+        sim = stub_romssimulation
+        sim.carbonate_sensitivity = [dataset]
+        patch_cppdefs, patch_read = self._patches(True, self._nml())
+        with (
+            patch_cppdefs,
+            patch_read,
+            pytest.raises(ValueError, match="lack required variables") as exc_info,
+        ):
+            sim._validate_carbonate_sensitivity_inputs()
+
+        message = str(exc_info.value)
+        assert str(tmp_path / "staged" / "output_cdrgas.nc") in message
+        assert "ddic_dco2_time" in message
+        assert "ddic_dalk_time" in message
+
+    @pytest.mark.parametrize("use_pio", [False, True])
+    @mock.patch.object(ROMSInputDataset, "partition")
+    @mock.patch.object(ROMSSimulation, "_validate_pio_inputs")
+    @mock.patch.object(ROMSSimulation, "_validate_reference_dates")
+    def test_pre_run_runs_the_check(
+        self,
+        mock_validate_reference_dates,
+        mock_validate_pio,
+        mock_partition,
+        use_pio,
+        stub_romssimulation,
+    ):
+        """`pre_run` runs the check with and without `use_pio`, before either
+        the PIO input check or any partitioning.
+        """
+        sim = stub_romssimulation
+        sim.use_pio = use_pio
+        with (
+            mock.patch.object(
+                ROMSSimulation,
+                "_validate_carbonate_sensitivity_inputs",
+                side_effect=ValueError("no sensitivities"),
+            ) as mock_validate,
+            pytest.raises(ValueError, match="no sensitivities"),
+        ):
+            sim.pre_run()
+
+        mock_validate.assert_called_once_with()
+        mock_validate_pio.assert_not_called()
+        mock_partition.assert_not_called()
+
+
 class TestAttach:
     """Tests for `ROMSSimulation.attach()`.
 
@@ -3365,6 +3667,47 @@ class TestAttach:
         mock_partition.assert_not_called()
         mock_get.assert_not_called()
         mock_validate_pio.assert_called_once()
+
+    @mock.patch.object(ROMSSimulation, "_validate_carbonate_sensitivity_inputs")
+    @mock.patch.object(ROMSExternalCodeBase, "attach")
+    @mock.patch.object(MARBLExternalCodeBase, "attach")
+    @mock.patch.object(ROMSInputDataset, "get")
+    @mock.patch.object(ROMSInputDataset, "partition")
+    @mock.patch("cstar.roms.simulation.verify_roms_linkage")
+    def test_attach_rejects_missing_carbonate_sensitivities(
+        self,
+        mock_verify_linkage,
+        mock_partition,
+        mock_get,
+        mock_marbl_attach,
+        mock_roms_attach,
+        mock_validate_carbonate_sensitivity,
+        stub_romssimulation: ROMSSimulation,
+    ):
+        """A resumed run whose CDR-LiTE build lacks usable carbonate
+        sensitivities fails as `setup`/`pre_run` would, without `use_pio`.
+        """
+        sim = stub_romssimulation
+        assert sim.compile_time_code
+        assert sim.discretization.n_procs_x is not None
+        assert sim.discretization.n_procs_y is not None
+        mock_validate_carbonate_sensitivity.side_effect = ValueError(
+            "no carbonate sensitivities"
+        )
+        self._stage_additional_code(
+            sim.compile_time_code, sim.fs_manager.compile_time_code_dir
+        )
+        self._stage_additional_code(sim.runtime_code, sim.fs_manager.runtime_code_dir)
+
+        np_xi, np_eta = sim.discretization.n_procs_x, sim.discretization.n_procs_y
+        for inp in sim.input_datasets:
+            self._stage_input_dataset(
+                sim.fs_manager.input_datasets_dir, inp, np_xi, np_eta
+            )
+        (sim.fs_manager.compile_time_code_dir / "roms").write_text("binary")
+
+        with pytest.raises(CstarExpectationFailed, match="no carbonate sensitivities"):
+            sim.attach()
 
     @mock.patch.object(ROMSExternalCodeBase, "attach")
     @mock.patch.object(MARBLExternalCodeBase, "attach")
@@ -3885,12 +4228,14 @@ class TestROMSSimulationUsePIO:
             [Path("surface.nc"), Path("surface2.nc")],
             Path("boundary.nc"),
             Path("sw_corr.nc"),
+            Path("cdrgas.nc"),
         ]
         datasets = [
             sim.tidal_forcing,
             sim.surface_forcing,
             sim.boundary_forcing,
             sim.forcing_corrections,
+            sim.carbonate_sensitivity,
         ]
 
         sim.river_forcing = None
