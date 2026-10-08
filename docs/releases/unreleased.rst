@@ -120,6 +120,12 @@ New features
 - Forge blueprints saved from the wizard record ``generated_by`` with tool ``wizard``, re-stamped only when the blueprint's content changes or when it has never been stamped. (`#745 <https://github.com/CWorthy-ocean/C-Star/pull/745>`_)
 - ``LayeredCatalog.blueprint_outputs(application)`` lists the blueprints emitted by standalone and workplan runs of the catalog's entries, each marked current, changed, uncataloged or unverified. (`#745 <https://github.com/CWorthy-ocean/C-Star/pull/745>`_)
 - ``cstar forge run`` now publishes the emitted blueprint to the run's ``output/`` directory, like ``cstar blueprint run``, and prints that copy as the one to run. (`#745 <https://github.com/CWorthy-ocean/C-Star/pull/745>`_)
+- CDR forcing (``simple``, ``yaml`` and ``netcdf`` modes) can be used with ``bgc_mode: none`` when the ModelSpec pins ucla-roms 0.9.1 or newer. (`#750 <https://github.com/CWorthy-ocean/C-Star/pull/750>`_)
+
+  - Forge turns ``CDR_FORCING`` on and leaves ``cdr_output.do_cdr_output`` off, since that output module still needs MARBL; ``do_cdr_output: true`` without MARBL is rejected as before.
+  - ``upscaled`` mode still requires MARBL (it uses depth-profile forcing, which ucla-roms rejects at init without MARBL) and now fails with a message saying so.
+  - A ModelSpec pinned below 0.9.1 with CDR forcing and no MARBL is rejected at resolve and build time with a message naming the required release, instead of producing a run that ignores the release.
+
 
 
 
@@ -193,6 +199,7 @@ Improvements
 - Forge rejects CDR-lite settings that ucla-roms 0.9.0 would abort on at startup, such as CDR-lite output with no CDR-lite tracers, before generating any input data. (`#748 <https://github.com/CWorthy-ocean/C-Star/pull/748>`_)
 - ``cstar workplan run`` now refuses before launching anything when steps set a local walltime and no ``timeout``/``gtimeout`` is installed, naming every such step and how to install coreutils. (`#749 <https://github.com/CWorthy-ocean/C-Star/pull/749>`_)
 - End-to-end test failures now include the tail of each step's log, so a step that dies at launch shows its actual error in CI. (`#749 <https://github.com/CWorthy-ocean/C-Star/pull/749>`_)
+- ``roms-marbl-0.9-default`` now pins ucla-roms 0.9.1. (`#750 <https://github.com/CWorthy-ocean/C-Star/pull/750>`_)
 
 
 Miscellaneous
@@ -232,3 +239,5 @@ Miscellaneous
 - Forge, blueprint and tutorial documentation describe provenance, stamping and the ``output/`` copy. (`#745 <https://github.com/CWorthy-ocean/C-Star/pull/745>`_)
 - ``environment-laptop.yml`` installs ``coreutils`` so local walltimes work on macOS, including the macOS legs of the extended integration workflow. (`#749 <https://github.com/CWorthy-ocean/C-Star/pull/749>`_)
 - The workplan docs note that local walltimes rely on GNU ``timeout`` and how to get it on macOS. (`#749 <https://github.com/CWorthy-ocean/C-Star/pull/749>`_)
+- The integration suite and the weekly extended workflow run against ucla-roms 0.9.1. (`#750 <https://github.com/CWorthy-ocean/C-Star/pull/750>`_)
+- Developer docs (``forge_internals``, ``contributing``, Forge specs) describe the 0.9.1 pin and the new CDR-without-MARBL rule. (`#750 <https://github.com/CWorthy-ocean/C-Star/pull/750>`_)
