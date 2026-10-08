@@ -1346,6 +1346,16 @@ def test_get_launcher_checks_preconditions_against_the_workplan(tmp_path: Path) 
     check.assert_called_once_with(wp)
 
 
+def test_get_launcher_local_checks_preconditions(tmp_path: Path) -> None:
+    """The local launcher's precondition check sees the workplan before any launch."""
+    wp = _env_workplan(tmp_path, {"launcher": "local"})
+
+    with mock.patch.object(LocalLauncher, "check_preconditions") as check:
+        get_launcher(wp)
+
+    check.assert_called_once_with(wp)
+
+
 def test_get_launcher_force_local_wins_over_slurm(tmp_path: Path) -> None:
     """Verify `force_local` beats the workplan's request for slurm."""
     wp = _env_workplan(tmp_path, {"launcher": "slurm"})

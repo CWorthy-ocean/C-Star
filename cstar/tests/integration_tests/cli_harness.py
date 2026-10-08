@@ -118,6 +118,23 @@ def step_root(data_home: Path, run_id: str, step: str) -> Path:
     return data_home / "workplan_runs" / run_id / "tasks" / slugify(step)
 
 
+def run_log_tails(data_home: Path, run_id: str, lines: int = 40) -> str:
+    """The last ``lines`` lines of every step log of ``run_id``, for failure messages.
+
+    An unreadable log is noted and skipped so it cannot mask the failure being reported.
+    """
+    tails = []
+    tasks = data_home / "workplan_runs" / run_id / "tasks"
+    for log in sorted(tasks.glob("*/logs/*.out")):
+        try:
+            text = log.read_text(errors="replace")
+        except OSError as ex:
+            tails.append(f"--- {log} unreadable: {ex} ---")
+            continue
+        tails.append(f"--- {log} ---\n" + "\n".join(text.splitlines()[-lines:]))
+    return "\n".join(tails)
+
+
 def read_status(path: Path) -> int | None:
     """Read the integer ``status:`` line of a sentinel, or ``None`` if unreadable."""
     try:

@@ -1,5 +1,6 @@
 import asyncio
 import datetime
+import shlex
 import subprocess
 from pathlib import Path
 from unittest import mock
@@ -10,15 +11,20 @@ from psutil import NoSuchProcess
 from cstar.base.exceptions import CstarError, CstarExpectationFailed
 from cstar.entrypoint.utils import ARG_CLOBBER, ARG_PRE_RUN, ARG_RESUME
 from cstar.orchestration.launch.local import (
+    LocalComputeSpec,
     LocalHandle,
     LocalLauncher,
     ProxiedRunRequestFormatter,
+    TimeConstrainedRunRequestEnricher,
 )
 from cstar.orchestration.launch.slurm import SlurmHandle, SlurmLauncher
-from cstar.orchestration.models import KEY_CLOBBER, KEY_PRE_RUN, KEY_RESUME
+from cstar.orchestration.models import KEY_CLOBBER, KEY_PRE_RUN, KEY_RESUME, Step
 from cstar.orchestration.orchestration import LiveStep, RunRequest, Status, Workplan
 from cstar.orchestration.serialization import deserialize
 from cstar.orchestration.state import StateRepository
+
+WHICH = "cstar.orchestration.launch.local.shutil.which"
+"""Where the timeout executable is looked up."""
 
 
 @pytest.mark.parametrize(
@@ -203,10 +209,143 @@ def test_locallauncher_adapt_step_with_compute_overrides(
         },
     )
 
-    step_command = LocalLauncher.adapt_step(live_step, [])
+    with mock.patch(
+        WHICH, side_effect=lambda exe: f"/usr/bin/{exe}" if exe == "timeout" else None
+    ):
+        step_command = LocalLauncher.adapt_step(live_step, [])
 
     # confirm that compute overrides are required to modify the command
     assert f"timeout -k {exp_fk_timeout} {exp_timeout}" in step_command
+
+
+@pytest.mark.parametrize(
+    ("available", "expected"),
+    [
+        pytest.param({"timeout": "/bin/timeout"}, "/bin/timeout", id="timeout"),
+        pytest.param({"gtimeout": "/brew/gtimeout"}, "/brew/gtimeout", id="gtimeout"),
+        pytest.param(
+            {"timeout": "/bin/timeout", "gtimeout": "/brew/gtimeout"},
+            "/bin/timeout",
+            id="timeout preferred",
+        ),
+    ],
+)
+def test_timeout_enricher_uses_resolved_executable(
+    available: dict[str, str], expected: str
+) -> None:
+    """Verify the enricher prefixes the command with whichever executable resolves."""
+    enricher = TimeConstrainedRunRequestEnricher(LocalComputeSpec())
+
+    with mock.patch(WHICH, side_effect=available.get):
+        request = enricher.enrich(RunRequest(command=["echo", "hi"]))
+
+    assert request.command[:2] == [expected, "-k"]
+    assert request.command[-2:] == ["echo", "hi"]
+
+
+def test_timeout_enricher_quotes_executable_path() -> None:
+    """Verify a path with a space survives the proxy script's space-joined command."""
+    enricher = TimeConstrainedRunRequestEnricher(LocalComputeSpec())
+    path = "/Users/First Last/envs/cstar-env/bin/timeout"
+
+    with mock.patch(WHICH, side_effect={"timeout": path}.get):
+        request = enricher.enrich(RunRequest(command=["echo", "hi"]))
+
+    assert request.command[0] == f"'{path}'"
+    assert shlex.split(" ".join(request.command))[0] == path
+
+
+def test_timeout_enricher_raises_without_executable() -> None:
+    """Verify the enricher refuses to build a command when no timeout resolves."""
+    enricher = TimeConstrainedRunRequestEnricher(LocalComputeSpec())
+
+    with (
+        mock.patch(WHICH, return_value=None),
+        pytest.raises(CstarExpectationFailed, match="coreutils"),
+    ):
+        enricher.enrich(RunRequest(command=["echo", "hi"]))
+
+
+def _workplan(overrides_by_step: dict[str, dict[str, dict[str, str]]]) -> Workplan:
+    """Build a workplan whose steps carry the given compute overrides."""
+    return Workplan(
+        name="timeout-check",
+        description="steps with and without a local walltime",
+        steps=[
+            Step(
+                name=name,
+                application="hello_world",
+                blueprint="blueprint.yaml",
+                compute_overrides=overrides,
+            )
+            for name, overrides in overrides_by_step.items()
+        ],
+    )
+
+
+WALLTIME = {"local": {"max_walltime": "00:05:00"}}
+
+
+def test_check_preconditions_names_every_walltime_step() -> None:
+    """Verify a missing timeout is reported once, naming all steps that need it."""
+    workplan = _workplan({"a": WALLTIME, "b": {}, "c": WALLTIME})
+
+    with (
+        mock.patch(WHICH, return_value=None),
+        pytest.raises(CstarExpectationFailed) as exc_info,
+    ):
+        LocalLauncher.check_preconditions(workplan)
+
+    msg = str(exc_info.value)
+    assert "'a'" in msg
+    assert "'b'" not in msg
+    assert "'c'" in msg
+    assert "coreutils" in msg
+
+
+def test_check_preconditions_names_force_kill_only_step() -> None:
+    """Verify a step overriding only the grace period is named: it gets the default walltime."""
+    workplan = _workplan(
+        {"kill-only": {"local": {"force_kill_timeout": "00:00:05"}}, "none": {}}
+    )
+
+    with (
+        mock.patch(WHICH, return_value=None),
+        pytest.raises(CstarExpectationFailed, match="'kill-only'") as exc_info,
+    ):
+        LocalLauncher.check_preconditions(workplan)
+
+    assert "'none'" not in str(exc_info.value)
+
+
+def test_check_preconditions_ignores_malformed_local_overrides() -> None:
+    """Verify a step whose local overrides are invalid is not named: it runs without timeout."""
+    workplan = _workplan({"bad": {"local": {"max_walltime": "not-a-time"}}})
+
+    with mock.patch(WHICH, return_value=None):
+        LocalLauncher.check_preconditions(workplan)
+
+
+@pytest.mark.parametrize(
+    ("overrides_by_step", "available"),
+    [
+        pytest.param({"a": WALLTIME}, {"gtimeout": "/brew/gtimeout"}, id="resolves"),
+        pytest.param({"a": {}, "b": {"slurm": {"num_cpus": 4}}}, {}, id="no walltime"),
+    ],
+)
+def test_check_preconditions_passes(
+    overrides_by_step: dict[str, dict[str, dict[str, str]]],
+    available: dict[str, str],
+) -> None:
+    """Verify no error when a timeout resolves or no step needs one."""
+    with mock.patch(WHICH, side_effect=available.get):
+        LocalLauncher.check_preconditions(_workplan(overrides_by_step))
+
+
+def test_check_preconditions_without_workplan() -> None:
+    """Verify the absence of a workplan is a no-op."""
+    with mock.patch(WHICH, return_value=None):
+        LocalLauncher.check_preconditions(None)
 
 
 @pytest.mark.usefixtures("read_yaml_intercept")

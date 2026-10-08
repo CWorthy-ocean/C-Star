@@ -1,3 +1,6 @@
+import typing as t
+from unittest import mock
+
 import pytest
 
 from cstar.orchestration.launch.local import (
@@ -5,6 +8,16 @@ from cstar.orchestration.launch.local import (
     TimeConstrainedRunRequestEnricher,
 )
 from cstar.orchestration.orchestration import RunRequest
+
+
+@pytest.fixture(autouse=True)
+def resolve_timeout() -> t.Iterator[None]:
+    """Resolve `timeout` to a fixed path, whatever the host has installed."""
+    with mock.patch(
+        "cstar.orchestration.launch.local.shutil.which",
+        side_effect=lambda exe: f"/usr/bin/{exe}" if exe == "timeout" else None,
+    ):
+        yield
 
 
 def test_timeconstrainedrunrequestenricher_default_localcomputespec() -> None:
@@ -22,7 +35,7 @@ def test_timeconstrainedrunrequestenricher_default_localcomputespec() -> None:
     # confirm the command will be time constrained via timeout
     # (GNU timeout requires options before the duration: `timeout -k 2s 600s cmd`)
     exp_prefix = (
-        f"timeout {TimeConstrainedRunRequestEnricher.ARG_FORCEKILL_TIMEOUT} "
+        f"/usr/bin/timeout {TimeConstrainedRunRequestEnricher.ARG_FORCEKILL_TIMEOUT} "
         f"{compute.force_kill_seconds}s {compute.walltime_seconds}s"
     )
     assert " ".join(enriched_request.command).startswith(exp_prefix)
