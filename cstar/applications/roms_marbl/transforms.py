@@ -17,6 +17,7 @@ from pydantic import (
 from cstar.applications.core import Transform
 from cstar.applications.roms_marbl.file_system import RomsFileSystemManager
 from cstar.applications.roms_marbl.models import RomsMarblBlueprint
+from cstar.base.exceptions import CstarError
 from cstar.base.feature import (
     ENV_FF_ORCH_TRX_TIMESPLIT,
     ENV_FF_ORCH_TRX_TIMESPLIT_LONGNAME,
@@ -582,9 +583,17 @@ class RestartFileTrxAdapter:
         }
 
 
-class BoundaryFile(BaseModel):
+class TimestampedOutputFile(BaseModel):
+    """Reference to a ROMS output file named
+    `<base><SUFFIX>.<timestamp>[.<segment>].nc`.
+
+    Subclasses set `SUFFIX` (and `LABEL`) and inherit the naming validation,
+    the timestamp and partition accessors, and the directory search. A
+    segment in the name marks one piece of a partitioned file.
+    """
+
     path: Path
-    """The path to a boundary file."""
+    """The path to an output file."""
     _base: str = PrivateAttr()
     """The base name of the file."""
     _segment: str | None = PrivateAttr(default=None)
@@ -593,39 +602,47 @@ class BoundaryFile(BaseModel):
     """The timestamp parsed from the file name."""
 
     EXT: t.ClassVar[t.Literal["nc"]] = "nc"
-    """The expected file extension for a boundary file."""
+    """The expected file extension for an output file."""
     FMT_TS: t.ClassVar[t.Literal["%Y%m%d%H%M%S"]] = "%Y%m%d%H%M%S"
-    """The expected timestamp format in the boundary file name"""
-    PATTERN_BRY: t.ClassVar[t.Literal[r"^(.*?)_bry\.(\d{14})(?:\.(\d{1,9}))?\.nc$"]] = (
-        r"^(.*?)_bry\.(\d{14})(?:\.(\d{1,9}))?\.nc$"
-    )
-    """A regex identifying full boundary or partitioned files."""
-    SUFFIX: t.ClassVar[t.Literal["_bry"]] = "_bry"
-    """A unique suffix found in the name of boundary files"""
+    """The expected timestamp format in the output file name"""
+    SUFFIX: t.ClassVar[str]
+    """A unique suffix found in the name of this kind of output file."""
+    LABEL: t.ClassVar[str]
+    """A human-readable name for this kind of output file, used in messages."""
+    PATTERN: t.ClassVar[str]
+    """A regex identifying full or partitioned files; derived from `SUFFIX`."""
+
+    @classmethod
+    def __pydantic_init_subclass__(cls, **kwargs: t.Any) -> None:
+        """Derive the file name pattern from the subclass's `SUFFIX`."""
+        super().__pydantic_init_subclass__(**kwargs)
+        cls.PATTERN = (
+            rf"^(.*?){re.escape(cls.SUFFIX)}\.(\d{{14}})(?:\.(\d{{1,9}}))?\.{cls.EXT}$"
+        )
 
     @classmethod
     def find(
         cls, search_path: Path, notfound_ok: bool = True
-    ) -> Sequence["BoundaryFile"] | None:
-        """Search for boundary files in the specified location.
+    ) -> Sequence[t.Self] | None:
+        """Search for output files of this kind in the specified location.
 
         Parameters
         ----------
         search_path : Path
             The path to search
         notfound_ok : bool
-            If False, raise an exception if no boundary files are found.
+            If False, raise an exception if no files are found.
 
         Returns
         -------
-        Sequence["BoundaryFile"] | None
+        Sequence[Self] | None
 
         Raises
         ------
         ValueError
             If the search path does not exist.
         FileNotFoundError
-            If no recognizable boundary files are found in the search path
+            If no recognizable files are found in the search path
         """
         search_path = search_path.expanduser().resolve()
 
@@ -635,10 +652,12 @@ class BoundaryFile(BaseModel):
 
         matches = sorted(search_path.rglob(f"*{cls.SUFFIX}*.{cls.EXT}"))
         if matches:
-            return tuple(BoundaryFile(path=m) for m in matches)
+            return tuple(cls(path=m) for m in matches)
 
         if not notfound_ok:
-            msg = f"No boundary files located. Unable to continue from {search_path!r}"
+            msg = (
+                f"No {cls.LABEL} files located. Unable to continue from {search_path!r}"
+            )
             raise FileNotFoundError(msg)
 
         return None
@@ -650,15 +669,15 @@ class BoundaryFile(BaseModel):
         timestamp: datetime,
         segment: str | None = None,
         directory: Path | None = None,
-    ) -> "BoundaryFile":
-        """Create a BoundaryFile from components.
+    ) -> t.Self:
+        """Create an output file reference from components.
 
         Parameters
         ----------
         base : str
-            The base name for the boundary file.
+            The base name for the file.
         timestamp : datetime
-            The timestamp for the boundary file.
+            The timestamp for the file.
         segment : str | None
             The 0-padded segment number if partitioned, otherwise `None`.
         directory : Path | None
@@ -666,24 +685,19 @@ class BoundaryFile(BaseModel):
 
         Returns
         -------
-        BoundaryFile
-
-        Raises
-        ------
-        ValueError
-            If the search path does not exist or contains no recognizable boundary files.
+        Self
         """
         ts = timestamp.strftime(cls.FMT_TS)
         parted_clause = f".{segment}" if segment is not None else ""
         filename = f"{base}{cls.SUFFIX}.{ts}{parted_clause}.{cls.EXT}"
 
         path = directory / filename if directory else Path(filename)
-        return BoundaryFile(path=path)
+        return cls(path=path)
 
     @field_validator("path")
     @classmethod
     def _validate_path(cls, value: Path, _info: "ValidationInfo") -> Path:
-        """Verify the supplied path meets the boundary file naming convention.
+        """Verify the supplied path meets this kind of file's naming convention.
 
         Parameters
         ----------
@@ -692,40 +706,38 @@ class BoundaryFile(BaseModel):
         _info : ValidationInfo
             Metadata for the current validation context
         """
-        if value.suffix != f".{BoundaryFile.EXT}":
+        if value.suffix != f".{cls.EXT}":
             msg = f"File extension does not match expected naming convention: {value.suffix}"
             raise ValueError(msg)
 
-        if re.fullmatch(BoundaryFile.PATTERN_BRY, value.name, flags=re.ASCII):
+        if re.fullmatch(cls.PATTERN, value.name, flags=re.ASCII):
             return value
 
         msg = f"File name does not match expected naming convention: {value}"
         raise ValueError(msg)
 
     @model_validator(mode="after")
-    def _model_validate(self) -> "BoundaryFile":
-        """Perform post-processing on the boundary file path.
+    def _model_validate(self) -> t.Self:
+        """Perform post-processing on the output file path.
 
         Returns
         -------
-        BoundaryFile
+        Self
         """
-        matches = re.fullmatch(
-            BoundaryFile.PATTERN_BRY, self.path.as_posix(), flags=re.ASCII
-        )
+        matches = re.fullmatch(type(self).PATTERN, self.path.as_posix(), flags=re.ASCII)
         if not matches:
             msg = f"File name does not match expected naming convention: {self.path}"
             raise ValueError(msg)
 
         self._base = matches.group(1)
-        self._ts = datetime.strptime(matches.group(2), BoundaryFile.FMT_TS)
+        self._ts = datetime.strptime(matches.group(2), self.FMT_TS)
         # look for segment for partition number, e.g. <base>.<ts>.000.nc vs. <base>.<ts>.nc
         self._segment = matches.group(3)
         return self
 
     @property
     def timestamp(self) -> datetime:
-        """Return a datetime derived from the timestamp in the boundary file name.
+        """Return a datetime derived from the timestamp in the file name.
 
         Returns
         -------
@@ -735,11 +747,11 @@ class BoundaryFile(BaseModel):
 
     @property
     def is_partitioned(self) -> bool:
-        """Return `True` if the boundary file belongs to a partitioned dataset.
+        """Return `True` if the file belongs to a partitioned dataset.
 
         Returns
         -------
-        datetime
+        bool
         """
         return self._segment is not None
 
@@ -750,36 +762,100 @@ class BoundaryFile(BaseModel):
         return None
 
 
+class BoundaryFile(TimestampedOutputFile):
+    """Reference to a path that contains boundary forcing."""
+
+    SUFFIX: t.ClassVar[str] = "_bry"
+    """A unique suffix found in the name of boundary files"""
+    LABEL: t.ClassVar[str] = "boundary"
+    PATTERN_BRY: t.ClassVar[str]
+    """A regex identifying full boundary or partitioned files (alias of `PATTERN`)."""
+
+
+BoundaryFile.PATTERN_BRY = BoundaryFile.PATTERN
+
+
+class CarbonateSensitivityFile(TimestampedOutputFile):
+    """Reference to a path that contains carbonate sensitivities
+    (`ddic_dco2`, `ddic_dalk`), as written by a ROMS-MARBL run that sets
+    `cdr_gas_exch_output.do_cdr_gas_exch_output`.
+    """
+
+    SUFFIX: t.ClassVar[str] = "_cdrgas"
+    """A unique suffix found in the name of carbonate sensitivity files"""
+    LABEL: t.ClassVar[str] = "carbonate sensitivity"
+
+
+def _forcing_data_overrides(
+    key: str, files: Sequence[TimestampedOutputFile]
+) -> dict[str, t.Any]:
+    """Create the override that lists `files` as the blueprint's `forcing.<key>` dataset.
+
+    Parameters
+    ----------
+    key : str
+        The name of the forcing dataset to set.
+    files : Sequence[TimestampedOutputFile]
+        The files making up the dataset, in order.
+
+    Returns
+    -------
+    dict[str, t.Any]
+    """
+    return {
+        "forcing": {
+            key: {
+                "data": [
+                    {
+                        "location": file.path.as_posix(),
+                        "partitioned": file.is_partitioned,
+                    }
+                    for file in files
+                ],
+            },
+        },
+    }
+
+
 class BoundaryFileTrxAdapter:
-    """Convert a boundary file into a dictionary useful for use in an OverrideTransform."""
+    """Convert boundary files into a dictionary useful for use in an OverrideTransform."""
 
     @classmethod
     def adapt(cls, bry_files: Sequence[BoundaryFile]) -> dict[str, t.Any]:
-        """Given a tuple of boundary files, create a dictionary containing the overrides necessary to
-        execute a simulation with the restart file specified in the initial conditions.
+        """Given boundary files, create a dictionary containing the overrides necessary to
+        execute a simulation with those files as its boundary forcing.
 
         Parameters
         ----------
-        restart_file : ResetFile
-            The restart file metadata used to convert into an override mapping.
+        bry_files : Sequence[BoundaryFile]
+            The boundary files used to convert into an override mapping.
 
         Returns
         -------
-        Mapping[str, t.Any]
+        dict[str, t.Any]
         """
-        return {
-            "forcing": {
-                "boundary": {
-                    "data": [
-                        {
-                            "location": bry.path.as_posix(),
-                            "partitioned": bry.is_partitioned,
-                        }
-                        for bry in bry_files
-                    ],
-                },
-            },
-        }
+        return _forcing_data_overrides("boundary", bry_files)
+
+
+class CarbonateSensitivityTrxAdapter:
+    """Convert carbonate sensitivity files into a dictionary useful for use in an OverrideTransform."""
+
+    @classmethod
+    def adapt(cls, files: Sequence[CarbonateSensitivityFile]) -> dict[str, t.Any]:
+        """Given carbonate sensitivity files, create a dictionary containing the
+        overrides necessary to execute a simulation with those files as its
+        carbonate sensitivity forcing.
+
+        Parameters
+        ----------
+        files : Sequence[CarbonateSensitivityFile]
+            The carbonate sensitivity files used to convert into an override mapping.
+
+        Returns
+        -------
+        dict[str, t.Any]
+        """
+        return _forcing_data_overrides("carbonate_sensitivity", files)
 
 
 _LEGACY_LAYOUT_HINT: t.Final[str] = (
@@ -930,6 +1006,87 @@ SOURCE_KEY_PATH: t.Final[str] = "path"
 """Directive config key naming a filesystem path as the content source."""
 SOURCE_KEY_STEP: t.Final[str] = "step"
 """Directive config key naming another workplan step as the content source."""
+SOURCE_DELIMITER: t.Final[str] = ";"
+"""Delimiter separating multiple sources in a directive's `path`/`step` value."""
+
+_OutputFileT = t.TypeVar("_OutputFileT", bound=TimestampedOutputFile)
+
+
+def collect_output_files(
+    file_cls: type[_OutputFileT],
+    path_value: t.Any,
+    step_names: Sequence[str],
+    workplan: "LiveWorkplan | None",
+) -> list[_OutputFileT]:
+    """Gather the output files of one kind from a directive's sources.
+
+    Every `SOURCE_DELIMITER`-separated token of `path_value` is searched as a
+    path, and the `output` directory of every step in `step_names` is
+    searched as a step source; every source must contain files of the kind.
+    Step outputs only ever hold whole files, so a step source holding a
+    partition piece is rejected.
+
+    Parameters
+    ----------
+    file_cls : type[TimestampedOutputFile]
+        The kind of file to collect.
+    path_value : t.Any
+        The directive's `path` value (several sources joined by
+        `SOURCE_DELIMITER`), or a falsy value if it has none.
+    step_names : Sequence[str]
+        The names of the steps whose `output` directories are searched.
+    workplan : LiveWorkplan | None
+        The workplan the steps belong to; only required when `step_names` is
+        not empty.
+
+    Returns
+    -------
+    list[TimestampedOutputFile]
+        The files of every source in the order given, without duplicates.
+
+    Raises
+    ------
+    CstarError
+        If `step_names` is not empty and no workplan was supplied.
+    FileNotFoundError
+        If a source contains no files of the kind, or a step has no `output`
+        directory or holds only partitioned files.
+    """
+    sources: list[tuple[Path, str | None]] = []
+
+    if path_value:
+        sources.extend(
+            (Path(token), None)
+            for token in _split_sources(path_value, SOURCE_DELIMITER)
+        )
+
+    if step_names:
+        if workplan is None:
+            raise CstarError("Directive did not receive workplan")
+
+        sources.extend(
+            (_require_step_output_dir(workplan, name), name) for name in step_names
+        )
+
+    found_files: list[_OutputFileT] = []
+    for search_path, step_name in sources:
+        try:
+            found = file_cls.find(search_path, notfound_ok=False) or ()
+        except FileNotFoundError as err:
+            raise FileNotFoundError(f"{err} {_LEGACY_LAYOUT_HINT}") from err
+
+        if step_name is not None:
+            partitioned = next((f for f in found if f.is_partitioned), None)
+            if partitioned is not None:
+                _reject_partitioned_step_output(step_name, True, partitioned.path)
+
+        found_files.extend(found)
+
+    deduped: dict[Path, _OutputFileT] = {}
+    for file in found_files:
+        deduped.setdefault(file.path, file)
+
+    return list(deduped.values())
 
 
 class ContinuanceDirective(OverrideDirective):
@@ -1242,7 +1399,7 @@ class NestingDirective(OverrideDirective):
     """Deprecated alias for `KEY_PATH`."""
     KEY_RST_PATH: t.Final[str] = "rst_path"
     """Deprecated key that also applies a restart-file override."""
-    SOURCE_DELIMITER: t.Final[str] = ";"
+    SOURCE_DELIMITER: t.Final[str] = SOURCE_DELIMITER
     """Delimiter separating multiple sources in a `path`/`bry_path`/`step` value."""
 
     @classmethod
@@ -1420,40 +1577,14 @@ class NestingDirective(OverrideDirective):
         if problems := self._config_problems(self._config):
             raise NotImplementedError("; ".join(problems))
 
-        sources: list[tuple[Path, str | None]] = []
-
-        if target_value := self._config.get(self.KEY_PATH) or self._config.get(
-            self.KEY_BRY_PATH
-        ):
-            sources.extend(
-                (Path(token), None)
-                for token in _split_sources(target_value, self.SOURCE_DELIMITER)
-            )
-
-        sources.extend(
-            (_require_step_output_dir(self.workplan, token), token)
-            for token in self.referenced_steps(self._config)
+        boundary_files = collect_output_files(
+            BoundaryFile,
+            self._config.get(self.KEY_PATH) or self._config.get(self.KEY_BRY_PATH),
+            self.referenced_steps(self._config),
+            self._workplan,
         )
 
-        boundary_files: list[BoundaryFile] = []
-        for search_path, step_name in sources:
-            try:
-                found = BoundaryFile.find(search_path, notfound_ok=False) or ()
-            except FileNotFoundError as err:
-                raise FileNotFoundError(f"{err} {_LEGACY_LAYOUT_HINT}") from err
-
-            if step_name is not None:
-                partitioned = next((b for b in found if b.is_partitioned), None)
-                if partitioned is not None:
-                    _reject_partitioned_step_output(step_name, True, partitioned.path)
-
-            boundary_files.extend(found)
-
-        deduped: dict[Path, BoundaryFile] = {}
-        for bry in boundary_files:
-            deduped.setdefault(bry.path, bry)
-
-        overrides = BoundaryFileTrxAdapter.adapt(list(deduped.values()))
+        overrides = BoundaryFileTrxAdapter.adapt(boundary_files)
 
         if rst_path := self._config.get(self.KEY_RST_PATH):
             msg = (
@@ -1486,5 +1617,174 @@ class NestingDirective(OverrideDirective):
         return "nfrom"
 
 
+_CDR_GAS_OUTPUT_HINT: t.Final[str] = (
+    "Carbonate sensitivities come from the `_cdrgas` files a ROMS-MARBL run "
+    "writes only when MARBL is enabled and its namelist sets "
+    "`do_cdr_gas_exch_output` to true (`cdr_gas_exch_output_settings` in a "
+    "blueprint's `namelist_overrides`, `cdr_gas_exch_output` in a forge output spec)."
+)
+"""Appended to not-found errors so users know what the producing step must enable."""
+
+
+class CarbonateSensitivityDirective(OverrideDirective):
+    """A transform that supplies the carbonate sensitivities (`ddic_dco2`,
+    `ddic_dalk`) a CDR-lite run reads as surface forcing, from the output of an
+    earlier ROMS-MARBL run.
+
+    The source is exactly one of `path` (a directory or file) or `step` (a step
+    name resolved via the workplan), the same shape used by `NestingDirective`
+    for boundary forcing; the directive sets `forcing.carbonate_sensitivity`
+    and nothing else, so it composes with the other directives in any order.
+    `path` and `step` each accept several sources in one string, separated by
+    `;` (surrounding whitespace ignored); the `_cdrgas` files from every listed
+    source are combined, in the order given, and every listed source must
+    contain such files. The producing step must be a MARBL run whose namelist
+    sets `do_cdr_gas_exch_output` for ROMS to write them.
+    """
+
+    REPLACE_LISTS = True
+
+    KEY_PATH: t.Final[str] = SOURCE_KEY_PATH
+    """Key used to specify a path as the source for the carbonate sensitivities."""
+    KEY_STEP: t.Final[str] = SOURCE_KEY_STEP
+    """Key used to specify a step name as the source for the carbonate sensitivities."""
+    SOURCE_DELIMITER: t.Final[str] = SOURCE_DELIMITER
+    """Delimiter separating multiple sources in a `path`/`step` value."""
+
+    @classmethod
+    def key(cls) -> str:
+        return "carbonate-sensitivity-from"
+
+    @classmethod
+    def _config_problems(cls, config: Mapping[str, t.Any]) -> list[str]:
+        """Return config-shape problems in a `carbonate-sensitivity-from` directive config.
+
+        Parameters
+        ----------
+        config : Mapping[str, t.Any]
+            This directive's own configuration mapping.
+
+        Returns
+        -------
+        list[str]
+        """
+        found_keys = set(config.keys())
+        source_keys = {cls.KEY_PATH, cls.KEY_STEP}
+        problems: list[str] = []
+
+        if (found_keys - source_keys) or not found_keys.intersection(source_keys):
+            problems.append(
+                "Invalid carbonate sensitivity transform configuration; supported "
+                f"configuration: {', '.join(sorted(source_keys))}, provided "
+                f"configuration: {', '.join(sorted(found_keys))}"
+            )
+            return problems
+
+        if source_keys.issubset(found_keys):
+            problems.append(
+                f"Invalid carbonate sensitivity transform configuration: {cls.KEY_PATH!r} "
+                f"and {cls.KEY_STEP!r} are mutually exclusive; supply only one "
+                "carbonate sensitivity source."
+            )
+
+        path_value = config.get(cls.KEY_PATH)
+        sources = _split_sources(path_value, cls.SOURCE_DELIMITER) if path_value else []
+        sources.extend(cls.referenced_steps(config))
+
+        if not sources:
+            key = next(k for k in (cls.KEY_PATH, cls.KEY_STEP) if k in found_keys)
+            problems.append(
+                "Invalid carbonate sensitivity transform configuration: no "
+                f"carbonate sensitivity source given in {key!r}"
+            )
+
+        return problems
+
+    @classmethod
+    def validate_directives(
+        cls, config: Mapping[str, t.Any], step: LiveStep
+    ) -> Sequence[str]:
+        """Validate a `carbonate-sensitivity-from` directive's config at schedule time.
+
+        Parameters
+        ----------
+        config : Mapping[str, t.Any]
+            This directive's own configuration mapping.
+        step : LiveStep
+            The step the directive is configured on.
+
+        Returns
+        -------
+        Sequence[str]
+        """
+        return cls._config_problems(config)
+
+    @classmethod
+    def referenced_steps(cls, config: Mapping[str, t.Any]) -> Sequence[str]:
+        """Return the steps named by this directive's `step` config, if any.
+
+        Parameters
+        ----------
+        config : Mapping[str, t.Any]
+            This directive's own configuration mapping.
+
+        Returns
+        -------
+        Sequence[str]
+        """
+        if not (value := config.get(cls.KEY_STEP)):
+            return ()
+        return _split_sources(value, cls.SOURCE_DELIMITER)
+
+    def _generate_overrides(self) -> dict[str, t.Any]:
+        """Create an overrides dictionary that will result in the modified blueprint.
+
+        CarbonateSensitivityDirective creates overrides that set the step's
+        carbonate sensitivity forcing from the `_cdrgas` files of the
+        configured sources.
+
+        Returns
+        -------
+        dict[str, t.Any]
+
+        Raises
+        ------
+        NotImplementedError
+            If the supplied configuration is not supported, or the value is
+            empty after splitting.
+        FileNotFoundError
+            If a listed source contains no carbonate sensitivity files, or a
+            listed step has no `output` directory.
+        """
+        if problems := self._config_problems(self._config):
+            raise NotImplementedError("; ".join(problems))
+
+        try:
+            files = collect_output_files(
+                CarbonateSensitivityFile,
+                self._config.get(self.KEY_PATH),
+                self.referenced_steps(self._config),
+                self._workplan,
+            )
+        except FileNotFoundError as err:
+            raise FileNotFoundError(f"{err} {_CDR_GAS_OUTPUT_HINT}") from err
+
+        return CarbonateSensitivityTrxAdapter.adapt(files)
+
+    @t.override
+    @staticmethod
+    def suffix() -> str:
+        """Return a suffix used when persisting a resource modified by this transform.
+
+        Returns
+        -------
+        str
+        """
+        return "csfrom"
+
+
 DirectiveConfig.register(ContinuanceDirective.key(), ContinuanceDirective)
 DirectiveConfig.register(NestingDirective.key(), NestingDirective)
+DirectiveConfig.register(
+    CarbonateSensitivityDirective.key(), CarbonateSensitivityDirective
+)

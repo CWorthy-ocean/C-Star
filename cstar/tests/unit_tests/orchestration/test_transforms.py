@@ -4,7 +4,7 @@ import os
 import shutil
 import typing as t
 import uuid
-from collections.abc import Awaitable, Callable, Sequence
+from collections.abc import Awaitable, Callable, Mapping, Sequence
 from datetime import UTC, date, datetime
 from pathlib import Path
 from unittest import mock
@@ -16,6 +16,11 @@ from cstar.applications.hello_world import HelloWorldBlueprint
 from cstar.applications.roms_marbl.file_system import RomsFileSystemManager
 from cstar.applications.roms_marbl.models import RomsMarblBlueprint
 from cstar.applications.roms_marbl.transforms import (
+    SOURCE_DELIMITER,
+    BoundaryFile,
+    CarbonateSensitivityDirective,
+    CarbonateSensitivityFile,
+    CarbonateSensitivityTrxAdapter,
     ContinuanceDirective,
     NestingDirective,
     RestartFile,
@@ -2064,6 +2069,673 @@ def test_nesting_directive_bry_path_multiple_paths(
     steps = transform(step)
     bp_after = deserialize(steps[0].blueprint_path, RomsMarblBlueprint)
     assert len(bp_after.forcing.boundary.data) == 2
+
+
+def test_boundary_file_pattern_alias() -> None:
+    """Verify `BoundaryFile` keeps its public pattern names, derived from `SUFFIX`."""
+    expected = r"^(.*?)_bry\.(\d{14})(?:\.(\d{1,9}))?\.nc$"
+
+    assert BoundaryFile.PATTERN == expected
+    assert BoundaryFile.PATTERN_BRY == expected
+    assert CarbonateSensitivityFile.PATTERN == expected.replace("_bry", "_cdrgas")
+
+
+@pytest.mark.parametrize(
+    ("file_cls", "name", "partition"),
+    [
+        pytest.param(BoundaryFile, "ocean_bry.20230201003000.nc", None, id="bry"),
+        pytest.param(BoundaryFile, "ocean_bry.20230201003000.007.nc", 7, id="bry-part"),
+        pytest.param(
+            CarbonateSensitivityFile,
+            "ocean_cdrgas.20230201003000.nc",
+            None,
+            id="cdrgas",
+        ),
+        pytest.param(
+            CarbonateSensitivityFile,
+            "ocean_cdrgas.20230201003000.007.nc",
+            7,
+            id="cdrgas-part",
+        ),
+    ],
+)
+def test_timestamped_output_file_happy_path(
+    tmp_path: Path,
+    file_cls: type[BoundaryFile | CarbonateSensitivityFile],
+    name: str,
+    partition: int | None,
+) -> None:
+    """Verify each kind of output file parses its timestamp and partition, and
+    `from_parts` round-trips the name into an instance of that kind.
+
+    Parameters
+    ----------
+    tmp_path : Path
+        Temporary directory the files are nominally in.
+    file_cls : type[TimestampedOutputFile]
+        The kind of output file under test.
+    name : str
+        A valid file name for that kind.
+    partition : int | None
+        The expected partition number.
+    """
+    parsed = file_cls(path=tmp_path / name)
+
+    assert parsed.timestamp == datetime(2023, 2, 1, 0, 30)
+    assert parsed.is_partitioned is (partition is not None)
+    assert parsed.partition == partition
+
+    segment = None if partition is None else f"{partition:03d}"
+    rebuilt = file_cls.from_parts("ocean", parsed.timestamp, segment, tmp_path)
+    assert type(rebuilt) is file_cls
+    assert rebuilt.path == parsed.path
+
+
+@pytest.mark.parametrize(
+    "name",
+    [
+        pytest.param("ocean_cdrgas.2023020100.nc", id="short timestamp"),
+        pytest.param("ocean_cdrgas.20230201003000.nc4", id="wrong extension"),
+        pytest.param("ocean_cdrgas.nc", id="no timestamp"),
+        pytest.param("ocean_rst.20230201003000.nc", id="restart name"),
+        pytest.param("ocean_bry.20230201003000.nc", id="boundary name"),
+    ],
+)
+def test_carbonate_sensitivity_file_bad_path(tmp_path: Path, name: str) -> None:
+    """Verify names outside the carbonate sensitivity convention are rejected,
+    including another kind of output file's name.
+
+    Parameters
+    ----------
+    tmp_path : Path
+        Temporary directory the files are nominally in.
+    name : str
+        An invalid file name.
+    """
+    with pytest.raises(ValidationError):
+        CarbonateSensitivityFile(path=tmp_path / name)
+
+
+def test_boundary_file_rejects_carbonate_sensitivity_name(tmp_path: Path) -> None:
+    """Verify the shared validators bind to the concrete file kind: a
+    `_cdrgas` name is not a boundary file.
+
+    Parameters
+    ----------
+    tmp_path : Path
+        Temporary directory the file is nominally in.
+    """
+    with pytest.raises(ValidationError):
+        BoundaryFile(path=tmp_path / "ocean_cdrgas.20230201003000.nc")
+
+
+def test_timestamped_output_file_find(tmp_path: Path) -> None:
+    """Verify `find` returns the matching files, sorted, as instances of the
+    kind searched for, and names the kind when none are found.
+
+    Parameters
+    ----------
+    tmp_path : Path
+        Temporary directory to search.
+    """
+    (tmp_path / "b_cdrgas.20230301003000.nc").write_text("mock")
+    (tmp_path / "a_cdrgas.20230201003000.nc").write_text("mock")
+
+    found = CarbonateSensitivityFile.find(tmp_path)
+
+    assert found is not None
+    assert [f.path.name for f in found] == [
+        "a_cdrgas.20230201003000.nc",
+        "b_cdrgas.20230301003000.nc",
+    ]
+    assert all(type(f) is CarbonateSensitivityFile for f in found)
+    assert BoundaryFile.find(tmp_path) is None
+
+    with pytest.raises(FileNotFoundError, match="No boundary files located"):
+        BoundaryFile.find(tmp_path, notfound_ok=False)
+    (tmp_path / "a_cdrgas.20230201003000.nc").unlink()
+    (tmp_path / "b_cdrgas.20230301003000.nc").unlink()
+    with pytest.raises(
+        FileNotFoundError, match="No carbonate sensitivity files located"
+    ):
+        CarbonateSensitivityFile.find(tmp_path, notfound_ok=False)
+
+
+def test_carbonate_sensitivity_trx_adapter(tmp_path: Path) -> None:
+    """Verify the adapter lists each file, in order, with its partitioned flag
+    under `forcing.carbonate_sensitivity`.
+
+    Parameters
+    ----------
+    tmp_path : Path
+        Temporary directory the files are nominally in.
+    """
+    files = [
+        CarbonateSensitivityFile(path=tmp_path / "a_cdrgas.20230201003000.nc"),
+        CarbonateSensitivityFile(path=tmp_path / "b_cdrgas.20230301003000.001.nc"),
+    ]
+
+    assert CarbonateSensitivityTrxAdapter.adapt(files) == {
+        "forcing": {
+            "carbonate_sensitivity": {
+                "data": [
+                    {"location": files[0].path.as_posix(), "partitioned": False},
+                    {"location": files[1].path.as_posix(), "partitioned": True},
+                ],
+            },
+        },
+    }
+
+
+def test_carbonate_sensitivity_directive_key_and_suffix() -> None:
+    """Verify the directive's identity and its shared source constants."""
+    assert CarbonateSensitivityDirective.key() == "carbonate-sensitivity-from"
+    assert CarbonateSensitivityDirective.suffix() == "csfrom"
+    assert CarbonateSensitivityDirective.REPLACE_LISTS is True
+    assert CarbonateSensitivityDirective.SOURCE_DELIMITER == SOURCE_DELIMITER
+    assert NestingDirective.SOURCE_DELIMITER == SOURCE_DELIMITER
+
+
+def test_carbonate_sensitivity_directive_path_sets_forcing_only(
+    single_step_workplan: Workplan,
+    tmp_path: Path,
+) -> None:
+    """Verify a `path` source sets `forcing.carbonate_sensitivity` from the
+    `_cdrgas` files found there -- keeping the partitioned flags -- and leaves
+    the rest of the blueprint, including the boundary forcing, untouched.
+
+    Parameters
+    ----------
+    single_step_workplan : Workplan
+        A workplan with a valid blueprint file on disk.
+    tmp_path : Path
+        Temporary directory used to hold mocked carbonate sensitivity files.
+    """
+    cs_dir = tmp_path / "cs"
+    cs_dir.mkdir()
+    (cs_dir / "parent_cdrgas.20230201003000.000.nc").write_text("mock data")
+    (cs_dir / "parent_cdrgas.20230301003000.000.nc").write_text("mock data")
+
+    step = single_step_workplan.steps[0]
+    step.blueprint_overrides.clear()
+
+    bp_before = deserialize(step.blueprint_path, RomsMarblBlueprint)
+    assert bp_before.forcing.carbonate_sensitivity is None
+
+    transform = CarbonateSensitivityDirective(
+        {CarbonateSensitivityDirective.KEY_PATH: str(cs_dir)}
+    )
+    assert set(transform._system_overrides) == {"forcing"}
+
+    steps = transform(step)
+
+    bp_after = deserialize(steps[0].blueprint_path, RomsMarblBlueprint)
+    assert bp_after.forcing.carbonate_sensitivity is not None
+    data = bp_after.forcing.carbonate_sensitivity.data
+    assert [Path(d.location).name for d in data] == [
+        "parent_cdrgas.20230201003000.000.nc",
+        "parent_cdrgas.20230301003000.000.nc",
+    ]
+    assert all(d.partitioned for d in data)
+    assert bp_after.forcing.boundary == bp_before.forcing.boundary
+    assert bp_after.initial_conditions == bp_before.initial_conditions
+    assert bp_after.runtime_params == bp_before.runtime_params
+
+
+def test_carbonate_sensitivity_directive_path_whole_file(
+    single_step_workplan: Workplan,
+    tmp_path: Path,
+) -> None:
+    """Verify a whole `_cdrgas` file is recorded as not partitioned, and that
+    unrelated files in the source are ignored.
+
+    Parameters
+    ----------
+    single_step_workplan : Workplan
+        A workplan with a valid blueprint file on disk.
+    tmp_path : Path
+        Temporary directory used to hold mocked carbonate sensitivity files.
+    """
+    cs_dir = tmp_path / "cs"
+    cs_dir.mkdir()
+    (cs_dir / "parent_cdrgas.20230201003000.nc").write_text("mock data")
+    (cs_dir / "parent_rst.20230201003000.nc").write_text("mock data")
+
+    step = single_step_workplan.steps[0]
+    step.blueprint_overrides.clear()
+
+    transform = CarbonateSensitivityDirective(
+        {CarbonateSensitivityDirective.KEY_PATH: str(cs_dir)}
+    )
+    steps = transform(step)
+
+    bp_after = deserialize(steps[0].blueprint_path, RomsMarblBlueprint)
+    assert bp_after.forcing.carbonate_sensitivity is not None
+    data = bp_after.forcing.carbonate_sensitivity.data
+    assert [Path(d.location).name for d in data] == ["parent_cdrgas.20230201003000.nc"]
+    assert not data[0].partitioned
+
+
+def test_carbonate_sensitivity_directive_multiple_paths(
+    single_step_workplan: Workplan,
+    tmp_path: Path,
+) -> None:
+    """Verify a `path` with several `;`-delimited sources combines the files
+    of each, in the order given, without duplicates.
+
+    Parameters
+    ----------
+    single_step_workplan : Workplan
+        A workplan with a valid blueprint file on disk.
+    tmp_path : Path
+        Temporary directory used to hold two mocked sources.
+    """
+    dir_a = tmp_path / "a"
+    dir_a.mkdir()
+    (dir_a / "first_cdrgas.20230201003000.nc").write_text("mock data")
+
+    dir_b = tmp_path / "b"
+    dir_b.mkdir()
+    (dir_b / "second_cdrgas.20230301003000.nc").write_text("mock data")
+
+    step = single_step_workplan.steps[0]
+    step.blueprint_overrides.clear()
+
+    transform = CarbonateSensitivityDirective(
+        {CarbonateSensitivityDirective.KEY_PATH: f"{dir_b} ; {dir_a}; {dir_b}"}
+    )
+    steps = transform(step)
+
+    bp_after = deserialize(steps[0].blueprint_path, RomsMarblBlueprint)
+    assert bp_after.forcing.carbonate_sensitivity is not None
+    assert [
+        Path(d.location).name for d in bp_after.forcing.carbonate_sensitivity.data
+    ] == ["second_cdrgas.20230301003000.nc", "first_cdrgas.20230201003000.nc"]
+
+
+def _plan_with_cdrgas_parents(
+    tmp_path: Path,
+    bp_templates_dir: Path,
+    hello_world_bp_path: Path,
+    run_id: str,
+    parents: Mapping[str, Sequence[str] | None],
+    config: Mapping[str, t.Any],
+) -> tuple[LiveWorkplan, LiveStep, dict[str, RomsFileSystemManager]]:
+    """Build parent steps holding files in their `output` directories and a
+    `roms_marbl` child step carrying a `carbonate-sensitivity-from` directive.
+
+    Parameters
+    ----------
+    tmp_path : Path
+        Temporary directory for test outputs.
+    bp_templates_dir : Path
+        The directory containing blueprint template files.
+    hello_world_bp_path : Path
+        The path to a hello-world blueprint file, used for the parents.
+    run_id : str
+        The run id the step working directories live under.
+    parents : Mapping[str, Sequence[str] | None]
+        For each parent step, the names of the files written to its `output`
+        directory, or `None` to leave the directory uncreated.
+    config : Mapping[str, t.Any]
+        The child's `carbonate-sensitivity-from` configuration.
+
+    Returns
+    -------
+    tuple[LiveWorkplan, LiveStep, dict[str, RomsFileSystemManager]]
+        The plan, its child step, and each parent's file system manager.
+    """
+    parent_steps: list[LiveStep] = []
+    fsms: dict[str, RomsFileSystemManager] = {}
+    for name, filenames in parents.items():
+        parent = LiveStep(
+            name=name,
+            application="hello_world",
+            blueprint=hello_world_bp_path.as_posix(),
+            working_dir=tmp_path / run_id / name,
+        )
+        parent_steps.append(parent)
+        fsms[name] = RomsFileSystemManager(parent.fsm.root_dir)
+        if filenames is not None:
+            fsms[name].prepare()
+            for filename in filenames:
+                (fsms[name].output_dir / filename).write_text("mock data")
+
+    child_bp_path = tmp_path / "child_bp.yaml"
+    child_bp_path.write_text(
+        (bp_templates_dir / "blueprint.yaml")
+        .read_text()
+        .replace("working_dir: .", f"working_dir: {tmp_path}")
+    )
+    child = LiveStep(
+        name="child",
+        application="roms_marbl",
+        blueprint=child_bp_path.as_posix(),
+        working_dir=tmp_path / run_id / "child",
+        directives={CarbonateSensitivityDirective.key(): dict(config)},
+    )
+    plan = LiveWorkplan(
+        name="carbonate-sensitivity-plan",
+        description="parent steps supplying carbonate sensitivity files",
+        steps=[*parent_steps, child],
+    )
+    return plan, child, fsms
+
+
+def test_carbonate_sensitivity_directive_step_source(
+    tmp_path: Path,
+    bp_templates_dir: Path,
+    hello_world_bp_path: Path,
+    mock_run_id: str,
+) -> None:
+    """Verify a `step` source reads the named step's `output` directory.
+
+    Parameters
+    ----------
+    tmp_path : Path
+        Temporary directory for test outputs.
+    bp_templates_dir : Path
+        Fixture returning the path to the directory containing blueprint template files.
+    hello_world_bp_path : Path
+        Fixture returning the path to a hello-world blueprint file.
+    mock_run_id : str
+        A unique run-id that has already been added to os.environ.
+    """
+    config = {CarbonateSensitivityDirective.KEY_STEP: "first"}
+    plan, child, fsms = _plan_with_cdrgas_parents(
+        tmp_path,
+        bp_templates_dir,
+        hello_world_bp_path,
+        mock_run_id,
+        {"first": ["first_cdrgas.20230201003000.nc"]},
+        config,
+    )
+
+    transform = CarbonateSensitivityDirective(config, workplan=plan)
+    altered = transform(child)[0]
+
+    bp_after = deserialize(altered.blueprint_path, RomsMarblBlueprint)
+    assert bp_after.forcing.carbonate_sensitivity is not None
+    data = bp_after.forcing.carbonate_sensitivity.data
+    assert len(data) == 1
+    assert Path(data[0].location) == fsms["first"].output_dir / (
+        "first_cdrgas.20230201003000.nc"
+    )
+    assert not data[0].partitioned
+
+
+def test_carbonate_sensitivity_directive_multiple_steps(
+    tmp_path: Path,
+    bp_templates_dir: Path,
+    hello_world_bp_path: Path,
+    mock_run_id: str,
+) -> None:
+    """Verify a `step` value with several `;`-delimited names combines the
+    files of each step's `output` directory, in the order given.
+
+    Parameters
+    ----------
+    tmp_path : Path
+        Temporary directory for test outputs.
+    bp_templates_dir : Path
+        Fixture returning the path to the directory containing blueprint template files.
+    hello_world_bp_path : Path
+        Fixture returning the path to a hello-world blueprint file.
+    mock_run_id : str
+        A unique run-id that has already been added to os.environ.
+    """
+    config = {CarbonateSensitivityDirective.KEY_STEP: "second; first ;"}
+    plan, child, fsms = _plan_with_cdrgas_parents(
+        tmp_path,
+        bp_templates_dir,
+        hello_world_bp_path,
+        mock_run_id,
+        {
+            "first": ["first_cdrgas.20230201003000.nc"],
+            "second": ["second_cdrgas.20230301003000.nc"],
+        },
+        config,
+    )
+
+    transform = CarbonateSensitivityDirective(config, workplan=plan)
+    altered = transform(child)[0]
+
+    bp_after = deserialize(altered.blueprint_path, RomsMarblBlueprint)
+    assert bp_after.forcing.carbonate_sensitivity is not None
+    data = bp_after.forcing.carbonate_sensitivity.data
+    assert len(data) == 2
+    assert Path(data[0].location).is_relative_to(fsms["second"].output_dir)
+    assert Path(data[1].location).is_relative_to(fsms["first"].output_dir)
+
+
+def test_carbonate_sensitivity_directive_step_output_rejects_partitioned(
+    tmp_path: Path,
+    bp_templates_dir: Path,
+    hello_world_bp_path: Path,
+    mock_run_id: str,
+) -> None:
+    """Verify a `step` source whose `output` holds only a legacy partition
+    piece is rejected, pointing at `cstar admin migrate-outputs`.
+
+    Parameters
+    ----------
+    tmp_path : Path
+        Temporary directory for test outputs.
+    bp_templates_dir : Path
+        Fixture returning the path to the directory containing blueprint template files.
+    hello_world_bp_path : Path
+        Fixture returning the path to a hello-world blueprint file.
+    mock_run_id : str
+        A unique run-id that has already been added to os.environ.
+    """
+    config = {CarbonateSensitivityDirective.KEY_STEP: "first"}
+    plan, _, _ = _plan_with_cdrgas_parents(
+        tmp_path,
+        bp_templates_dir,
+        hello_world_bp_path,
+        mock_run_id,
+        {"first": ["first_cdrgas.20230201003000.000.nc"]},
+        config,
+    )
+
+    with pytest.raises(FileNotFoundError, match="migrate-outputs"):
+        CarbonateSensitivityDirective(config, workplan=plan)
+
+
+def test_carbonate_sensitivity_directive_step_without_output_raises(
+    tmp_path: Path,
+    bp_templates_dir: Path,
+    hello_world_bp_path: Path,
+    mock_run_id: str,
+) -> None:
+    """Verify a listed step with no `output` directory raises
+    `FileNotFoundError` naming it, even when an earlier listed step resolves.
+
+    Parameters
+    ----------
+    tmp_path : Path
+        Temporary directory for test outputs.
+    bp_templates_dir : Path
+        Fixture returning the path to the directory containing blueprint template files.
+    hello_world_bp_path : Path
+        Fixture returning the path to a hello-world blueprint file.
+    mock_run_id : str
+        A unique run-id that has already been added to os.environ.
+    """
+    config = {CarbonateSensitivityDirective.KEY_STEP: "first; second"}
+    plan, _, _ = _plan_with_cdrgas_parents(
+        tmp_path,
+        bp_templates_dir,
+        hello_world_bp_path,
+        mock_run_id,
+        {"first": ["first_cdrgas.20230201003000.nc"], "second": None},
+        config,
+    )
+
+    with pytest.raises(FileNotFoundError, match="second"):
+        CarbonateSensitivityDirective(config, workplan=plan)
+
+
+def test_carbonate_sensitivity_directive_source_without_files_names_the_option(
+    tmp_path: Path,
+    bp_templates_dir: Path,
+    hello_world_bp_path: Path,
+    mock_run_id: str,
+) -> None:
+    """Verify a source holding no `_cdrgas` files raises an error telling the
+    user the producing step must set `do_cdr_gas_exch_output`, for both a
+    `step` and a `path` source.
+
+    Parameters
+    ----------
+    tmp_path : Path
+        Temporary directory for test outputs.
+    bp_templates_dir : Path
+        Fixture returning the path to the directory containing blueprint template files.
+    hello_world_bp_path : Path
+        Fixture returning the path to a hello-world blueprint file.
+    mock_run_id : str
+        A unique run-id that has already been added to os.environ.
+    """
+    config = {CarbonateSensitivityDirective.KEY_STEP: "first"}
+    plan, _, _ = _plan_with_cdrgas_parents(
+        tmp_path,
+        bp_templates_dir,
+        hello_world_bp_path,
+        mock_run_id,
+        {"first": ["first_rst.20230201003000.nc"]},
+        config,
+    )
+
+    with pytest.raises(FileNotFoundError, match="do_cdr_gas_exch_output") as step_err:
+        CarbonateSensitivityDirective(config, workplan=plan)
+    assert "No carbonate sensitivity files located" in str(step_err.value)
+    assert "migrate-outputs" in str(step_err.value)
+
+    empty_dir = tmp_path / "empty"
+    empty_dir.mkdir()
+
+    with pytest.raises(FileNotFoundError, match="do_cdr_gas_exch_output"):
+        CarbonateSensitivityDirective(
+            {CarbonateSensitivityDirective.KEY_PATH: str(empty_dir)}
+        )
+
+
+def test_carbonate_sensitivity_directive_step_requires_workplan() -> None:
+    """Verify a `step` source without a workplan fails as other directives do."""
+    with pytest.raises(CstarError, match="did not receive workplan"):
+        CarbonateSensitivityDirective({CarbonateSensitivityDirective.KEY_STEP: "a"})
+
+
+@pytest.mark.parametrize(
+    ("config", "expected"),
+    [
+        pytest.param({"unknown-key": "value"}, "supported", id="unknown key only"),
+        pytest.param(
+            {"path": "somewhere", "unknown-key": "value"},
+            "supported",
+            id="unknown key beside path",
+        ),
+        pytest.param(
+            {"bry_path": "somewhere"}, "supported", id="nest-from alias not accepted"
+        ),
+        pytest.param(
+            {"path": "somewhere", "step": "outer"},
+            "mutually exclusive",
+            id="path and step",
+        ),
+        pytest.param(
+            {"path": " ; "}, "no carbonate sensitivity source", id="empty path"
+        ),
+        pytest.param({"path": None}, "no carbonate sensitivity source", id="null path"),
+        pytest.param({"step": ";"}, "no carbonate sensitivity source", id="empty step"),
+    ],
+)
+def test_carbonate_sensitivity_directive_config_problems(
+    config: dict[str, str | None],
+    expected: str,
+    roms_marbl_step: LiveStep,
+) -> None:
+    """Verify a malformed configuration is reported at schedule time by
+    `validate_directives` and refused when the directive is constructed.
+
+    Parameters
+    ----------
+    config : dict[str, str | None]
+        The directive configuration.
+    expected : str
+        Text the (single) problem must contain.
+    roms_marbl_step : LiveStep
+        A `roms_marbl` step to validate the config against.
+    """
+    problems = CarbonateSensitivityDirective.validate_directives(
+        config, roms_marbl_step
+    )
+
+    assert len(problems) == 1
+    assert expected in problems[0]
+
+    with pytest.raises(NotImplementedError, match=expected):
+        CarbonateSensitivityDirective(config)
+
+
+def test_carbonate_sensitivity_directive_referenced_steps() -> None:
+    """Verify `referenced_steps` splits `a; b` into ordered step-name tokens
+    and reports none for a `path` source.
+    """
+    config = {CarbonateSensitivityDirective.KEY_STEP: "a; b"}
+    assert CarbonateSensitivityDirective.referenced_steps(config) == ["a", "b"]
+    assert not CarbonateSensitivityDirective.referenced_steps({"path": "a; b"})
+
+
+def test_collect_directive_problems_accepts_carbonate_sensitivity_from(
+    tmp_path: Path,
+    hello_world_bp_path: Path,
+) -> None:
+    """Verify well-formed `carbonate-sensitivity-from` configs pass schedule-time
+    validation, and a malformed or non-ancestor one is reported with the step
+    and directive it concerns.
+
+    Parameters
+    ----------
+    tmp_path : Path
+        The pytest-provided temporary directory.
+    hello_world_bp_path : Path
+        Fixture returning the path to a blueprint file; `collect_directive_problems`
+        never reads it, so any existing file works.
+    """
+
+    def roms_step(
+        name: str, directive: dict[str, str], depends_on: list[str]
+    ) -> LiveStep:
+        return LiveStep(
+            name=name,
+            application="roms_marbl",
+            blueprint=hello_world_bp_path.as_posix(),
+            working_dir=tmp_path / name,
+            depends_on=depends_on,
+            directives={CarbonateSensitivityDirective.key(): directive},
+        )
+
+    producer = LiveStep(
+        name="producer",
+        application="hello_world",
+        blueprint=hello_world_bp_path.as_posix(),
+        working_dir=tmp_path / "producer",
+    )
+    by_path = roms_step("by-path", {"path": "prior/cdrgas"}, [])
+    by_step = roms_step("by-step", {"step": "producer"}, ["producer"])
+    assert collect_directive_problems([producer, by_path, by_step]) == []
+
+    sibling = roms_step("sibling", {"step": "producer"}, [])
+    malformed = roms_step("malformed", {"path": "x", "step": "producer"}, ["producer"])
+    problems = collect_directive_problems([producer, sibling, malformed])
+
+    assert len(problems) == 2
+    assert "not an upstream dependency" in problems[0]
+    assert "'sibling'" in problems[0]
+    assert "mutually exclusive" in problems[1]
+    assert CarbonateSensitivityDirective.key() in problems[1]
 
 
 def test_workplan_transformer_applies_working_dir_overrides(
