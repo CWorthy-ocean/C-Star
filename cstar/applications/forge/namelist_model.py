@@ -976,6 +976,17 @@ def check_cdr_output_sections(
     return force_cdr_forcing
 
 
+def online_carbonate_sensitivity_requested(
+    run_time_settings: Mapping[str, Any],
+) -> bool:
+    """Whether ``cdr_lite.cdr_online_carbonate_sensitivity`` is set in
+    ``run_time_settings``: ROMS then computes the carbonate sensitivities online
+    from MARBL's ALT_CO2 state instead of reading them from forcing files.
+    """
+    section = run_time_settings.get("cdr_lite") or {}
+    return bool(section.get(_GATED_SECTION_SWITCHES["cdr_lite"]))
+
+
 def check_cdr_lite_sections(
     run_time_settings: dict[str, Any],
     *,
@@ -1009,7 +1020,7 @@ def check_cdr_lite_sections(
     switches = _GATED_SECTION_SWITCHES
     online_flag = f"cdr_lite.{switches['cdr_lite']}"
     stream_flag = f"cdr_lite_output.{switches['cdr_lite_output']}"
-    online = bool((run_time_settings.get("cdr_lite") or {}).get(switches["cdr_lite"]))
+    online = online_carbonate_sensitivity_requested(run_time_settings)
     lite_output = run_time_settings.get("cdr_lite_output") or {}
     stream_on = bool(lite_output.get(switches["cdr_lite_output"]))
     needed = online or bgc_mode == "cdr_lite"

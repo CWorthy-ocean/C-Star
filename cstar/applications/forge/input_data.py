@@ -28,7 +28,11 @@ from threadpoolctl import threadpool_limits
 
 import cstar.applications.roms_marbl.models as cstar_models
 from cstar.applications.forge import source_datasets
-from cstar.applications.forge.blueprint import OpenBoundaries, UserProvidedFile
+from cstar.applications.forge.blueprint import (
+    CarbonateSensitivitySpec,
+    OpenBoundaries,
+    UserProvidedFile,
+)
 from cstar.applications.forge.namelist_model import (
     bgc_mode_from_cppdefs,
     cdr_tracer_counts,
@@ -40,6 +44,7 @@ from cstar.applications.forge.util import mem_log
 from cstar.applications.forge.xarray_lockfix import apply_combinedlock_leak_fix
 from cstar.base.utils import convert_to_cdf5
 from cstar.orchestration.models import Resource
+from cstar.roms.input_dataset import CARBONATE_SENSITIVITY_VARIABLES
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterable
@@ -176,6 +181,19 @@ def netcdf_basename(domain_name: str, input_name: str) -> str:
     ``forge`` application's emitted-blueprint prediction.
     """
     return f"{netcdf_filename_component(domain_name)}_{netcdf_filename_component(input_name)}.nc"
+
+
+def carbonate_sensitivity_destinations(
+    input_data_dir: Path, files: Iterable[UserProvidedFile]
+) -> list[Path]:
+    """Where the staged copies of user-supplied carbonate sensitivity ``files`` land:
+    ``input_data_dir``, under each file's own basename (they are not generated, so
+    carry no ``{domain}_{input}`` name).
+
+    The one place that spells the rule, shared by the staging step, the planned
+    outputs of ``RomsMarblInputData`` and the executor's.
+    """
+    return [Path(input_data_dir) / Path(f.location).name for f in files]
 
 
 class RomsMarblBlueprintInputData(BaseModel):
@@ -315,6 +333,8 @@ _INPUT_SELECTION_ALIASES: dict[str, str] = {
     "forcing.river": "forcing.river",
     "cdr": "cdr_forcing",
     "cdr_forcing": "cdr_forcing",
+    "carbonate_sensitivity": "forcing.carbonate_sensitivity",
+    "forcing.carbonate_sensitivity": "forcing.carbonate_sensitivity",
 }
 
 
@@ -426,6 +446,7 @@ class RomsMarblInputData(InputData):
     - Tidal forcing
     - River forcing
     - CDR forcing
+    - Carbonate sensitivity forcing (user-supplied files only)
     - Corrections
     """
 
@@ -453,6 +474,11 @@ class RomsMarblInputData(InputData):
     used in place of building one via ``rt.CDRForcing`` from ``cdr_forcing``. Mutually
     exclusive with ``cdr_forcing`` (enforced upstream by the ``ForgeBlueprint`` schema).
     """
+    carbonate_sensitivity: CarbonateSensitivitySpec | None = None
+    """User-supplied carbonate sensitivity files (from ``ForgeExecutor.carbonate_sensitivity``),
+    staged by the ``forcing.carbonate_sensitivity`` step and listed in the emitted
+    blueprint. Only a ``bgc_mode: cdr_lite`` build reads them; ``None`` leaves them to the
+    ``carbonate-sensitivity-from`` workplan directive."""
     forcing_override: dict[str, Any] | None = None
     """The fully-resolved initial-conditions + forcing selection driving input generation.
     Keys mirror the inputs block structure: 'initial_conditions', 'forcing' (with sub-keys
@@ -602,6 +628,32 @@ class RomsMarblInputData(InputData):
                 )
             )
 
+        # Optional user-supplied carbonate sensitivity files. Only a CDR-LiTE build
+        # reads them (as surface forcing); the default is to leave them to the
+        # ``carbonate-sensitivity-from`` workplan directive. Keyed on the live
+        # compile-time settings, like the other build-time nets.
+        bgc_mode = bgc_mode_from_cppdefs(
+            (self.settings_compile_time or {}).get("cppdefs") or {}
+        )
+        if self.carbonate_sensitivity is not None:
+            if bgc_mode != "cdr_lite":
+                raise ValueError(
+                    "carbonate_sensitivity files are set but the build is not "
+                    f'bgc_mode "cdr_lite" (it is "{bgc_mode}"): only a CDR-LiTE '
+                    "build reads them as surface forcing."
+                )
+            input_list.append(
+                (
+                    "forcing.carbonate_sensitivity",
+                    {"files": list(self.carbonate_sensitivity.files)},
+                )
+            )
+        elif bgc_mode == "cdr_lite":
+            log.info(
+                "No carbonate sensitivity files in the blueprint: the "
+                "carbonate-sensitivity-from workplan directive must supply them."
+            )
+
         self.input_list = input_list
 
         # Sanity check: verify all function keys are registered
@@ -615,7 +667,7 @@ class RomsMarblInputData(InputData):
             )
 
         # Initialize roms_marbl_blueprint_elements with empty datasets
-        forcing_keys = {"boundary", "surface", "tidal", "river", "corrections"}
+        forcing_keys = set(cstar_models.ForcingConfiguration.model_fields)
         forcing_dict = {}
         for key in unique_keys:
             # Extract subkey for forcing categories
@@ -1110,6 +1162,15 @@ class RomsMarblInputData(InputData):
                         self._item_use_vars(bs),
                     )
                     planned.append(self._forcing_filename(f"boundary-{detail}"))
+                continue
+
+            if step.name == "forcing.carbonate_sensitivity":
+                # Staged under their own basenames, not a generated name.
+                planned.extend(
+                    carbonate_sensitivity_destinations(
+                        self.input_data_dir, kwargs["files"]
+                    )
+                )
                 continue
 
             if step.name.startswith("forcing."):
@@ -2779,6 +2840,66 @@ class RomsMarblInputData(InputData):
             cdr.releases.release_type == "volume"
         )
         # cdr_output.do_cdr_output is owned by configure_build's CDR net (see above).
+
+    @register_input(
+        name="forcing.carbonate_sensitivity",
+        order=85,
+        label="Staging carbonate sensitivity forcing",
+    )
+    def _stage_carbonate_sensitivity(
+        self,
+        key: str = "forcing.carbonate_sensitivity",
+        files: Iterable[UserProvidedFile] = (),
+        **kwargs,
+    ):
+        """Verify, check and stage the user-supplied carbonate sensitivity files.
+
+        Each file must carry every variable in ``CARBONATE_SENSITIVITY_VARIABLES``
+        (all problems across all files are reported together, before anything is
+        copied). A file that is already staged (and ``clobber`` is off) is reused:
+        the copy ROMS will read is the one checked. Each is staged as a copy under
+        its basename (converted to CDF-5 under ParallelIO) and listed, unpartitioned,
+        in ``forcing.carbonate_sensitivity`` of the emitted blueprint.
+        """
+        files = list(files)
+        sources = [verify_user_file(f, label="carbonate sensitivity") for f in files]
+        destinations = carbonate_sensitivity_destinations(self.input_data_dir, files)
+        reuse = [self._should_reuse_existing_output(dest) for dest in destinations]
+
+        problems: list[str] = []
+        for source, dest, reused in zip(sources, destinations, reuse, strict=True):
+            path = dest if reused else source
+            with xr.open_dataset(path, decode_cf=False) as ds:
+                missing = [
+                    name
+                    for name in CARBONATE_SENSITIVITY_VARIABLES
+                    if name not in ds.variables
+                ]
+            if missing:
+                problems.append(f"{path}: missing {', '.join(missing)}")
+        if problems:
+            raise ValueError(
+                "carbonate sensitivity files lack variables a CDR-LiTE build reads "
+                f"({', '.join(CARBONATE_SENSITIVITY_VARIABLES)}):\n- "
+                + "\n- ".join(problems)
+                + "\n_cdrgas files written by ucla-roms 0.9.1 and earlier carry "
+                "only ocean_time, not the per-variable time variables."
+            )
+
+        dataset = _require_element(
+            _require_element(
+                self.roms_marbl_blueprint_elements.forcing, "forcing"
+            ).carbonate_sensitivity,
+            "forcing.carbonate_sensitivity",
+        )
+        for source, dest, reused in zip(sources, destinations, reuse, strict=True):
+            if reused:
+                print(f"   ↪ Reusing existing file: {dest}")
+            else:
+                stage_user_netcdf(
+                    source, dest, use_pio=self.use_pio, label="carbonate sensitivity"
+                )
+            dataset.data.append(Resource(location=str(dest), partitioned=False))
 
     @register_input(
         name="forcing.corrections", order=90, label="Generating corrections forcing"

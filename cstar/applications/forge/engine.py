@@ -276,6 +276,7 @@ def forge_blueprint_to_builder_kwargs(cfg: ForgeBlueprint) -> dict[str, Any]:
         cdr_mode=cfg.cdr.mode,
         cdr_forcing=cfg.cdr.cdr_forcing,
         cdr_forcing_file=cfg.cdr.cdr_forcing_file,
+        carbonate_sensitivity=cfg.carbonate_sensitivity,
         forcing_override=sources_to_forcing_override(cfg),
         model_reference_date=cfg.run.model_reference_date,
         source_dataset_keys=list(cfg.datasets),

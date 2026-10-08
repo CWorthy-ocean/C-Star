@@ -32,6 +32,7 @@ import cstar.applications.roms_marbl.models as cstar_models
 from cstar.applications.forge import input_data, source_datasets
 from cstar.applications.forge.blueprint import (
     CDR_MODES,
+    CarbonateSensitivitySpec,
     OpenBoundaries,
     UserProvidedFile,
     emitted_blueprint_description,
@@ -296,6 +297,17 @@ class ForgeExecutor(BaseModel):
             "``cdr_forcing`` (the ForgeBlueprint schema already forbids the "
             "combination); verified and staged directly in "
             "``input_data._generate_cdr_forcing``'s custom-file branch."
+        ),
+    )
+    carbonate_sensitivity: CarbonateSensitivitySpec | None = Field(
+        default=None,
+        validate_default=False,
+        description=(
+            "User-supplied carbonate sensitivity files (from ForgeBlueprint "
+            "``carbonate_sensitivity``) a ``bgc_mode: cdr_lite`` build reads as "
+            "surface forcing; staged by ``input_data``'s "
+            "``forcing.carbonate_sensitivity`` step. ``None`` leaves them to the "
+            "``carbonate-sensitivity-from`` workplan directive."
         ),
     )
     forcing_override: dict[str, Any] | None = Field(
@@ -841,6 +853,13 @@ class ForgeExecutor(BaseModel):
         # is already False for it without a separate cdr_mode check.
         if self.cdr_forcing or self.cdr_forcing_file:
             _add_nc(input_data.CDR_FORCING_NETCDF_STEM)
+
+        if self.carbonate_sensitivity is not None:
+            for path in input_data.carbonate_sensitivity_destinations(
+                input_data_dir, self.carbonate_sensitivity.files
+            ):
+                if path.resolve() not in planned_paths:
+                    planned_paths.append(path.resolve())
 
         return planned_paths
 
@@ -1938,6 +1957,7 @@ class ForgeExecutor(BaseModel):
             cdr_mode=self.cdr_mode,
             cdr_forcing=self.cdr_forcing,
             cdr_forcing_file=self.cdr_forcing_file,
+            carbonate_sensitivity=self.carbonate_sensitivity,
             use_dask=use_dask,
             dask_num_workers=dask_num_workers,
             serialize_dask_write=serialize_dask_write,

@@ -38,6 +38,7 @@ import yaml
 from cstar.applications.forge.blueprint import (
     BgcSourceItem,
     BoundaryForcing,
+    CarbonateSensitivitySpec,
     CdrSpec,
     Code,
     CodeRepo,
@@ -80,6 +81,7 @@ from cstar.applications.forge.namelist_model import (
     cppdefs_for_precheck,
     ensure_cdr_output_marbl_diagnostics,
     normalize_legacy_sections,
+    online_carbonate_sensitivity_requested,
     output_precheck_applies_to,
     prune_version_gated_sections,
     run_time_settings_for_ref,
@@ -95,6 +97,7 @@ from cstar.applications.forge.source_registry import (
 from cstar.base.utils import netcdf_format
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
     from datetime import datetime
 
 log = logging.getLogger(__name__)
@@ -188,6 +191,104 @@ def _normalize_user_file(
     return UserProvidedFile(location=str(path), content_hash=hash_netcdf_contents(path))
 
 
+def _find_carbonate_sensitivity_files(directory: Path) -> list[Path]:
+    """The joined carbonate sensitivity files under ``directory``, in file-name
+    order (the time order of their timestamps).
+
+    Per-rank tiles of a partitioned file are skipped: Forge stages whole files
+    (ROMS under ParallelIO reads one joined CDF-5 file per dataset).
+    """
+    # Lazy: the file-name convention lives with the transforms, which pull in
+    # the orchestration layer.
+    from cstar.applications.roms_marbl.transforms import CarbonateSensitivityFile
+
+    found = CarbonateSensitivityFile.find(directory) or ()
+    joined = [f.path for f in found if not f.is_partitioned]
+    if not joined:
+        raise FileNotFoundError(
+            f"carbonate_sensitivity: no joined {CarbonateSensitivityFile.LABEL} "
+            f"files in {directory} ({len(found)} per-rank tile file(s) skipped). "
+            "Expected the output of a ROMS-MARBL run with cdr_gas_exch_output "
+            f"enabled, named <root>{CarbonateSensitivityFile.SUFFIX}."
+            "<14-digit timestamp>.nc."
+        )
+    return joined
+
+
+def _normalize_carbonate_sensitivity(
+    value: str
+    | Path
+    | Sequence[str | Path]
+    | CarbonateSensitivitySpec
+    | dict[str, Any],
+) -> CarbonateSensitivitySpec:
+    """Normalize a user-supplied carbonate sensitivity selection into a
+    :class:`CarbonateSensitivitySpec`.
+
+    Accepts a directory (scanned for ``_cdrgas`` files, see
+    :func:`_find_carbonate_sensitivity_files`), a single file path, a sequence of
+    file paths (kept in the given order), a ``{"files": [...]}`` dict, or a spec.
+    Paths are hashed here and must exist; a dict's entries and a spec are
+    otherwise trusted as-is, like every other user-provided file (see
+    :func:`_normalize_user_file`).
+    """
+    if isinstance(value, CarbonateSensitivitySpec):
+        return value
+    label = "carbonate_sensitivity file"
+    if isinstance(value, dict):
+        files = value.get("files")
+        if isinstance(files, (list, tuple)):
+            value = {
+                **value,
+                "files": [_normalize_user_file(f, label=label) for f in files],
+            }
+        return CarbonateSensitivitySpec(**value)
+
+    if isinstance(value, (str, Path)):
+        path = Path(value).expanduser()
+        if path.is_dir():
+            paths = _find_carbonate_sensitivity_files(path)
+        else:
+            paths = [path]
+    else:
+        paths = [Path(p).expanduser() for p in value]
+    missing = [str(p) for p in paths if not p.is_file()]
+    if missing:
+        raise FileNotFoundError(
+            "carbonate_sensitivity must be a directory or existing netCDF files; "
+            f"not found: {', '.join(missing)}"
+        )
+    return CarbonateSensitivitySpec(
+        files=[_normalize_user_file(p, label=label) for p in paths]
+    )
+
+
+def _check_carbonate_sensitivity_applies(
+    bgc_mode: BgcMode, settings: dict[str, Any]
+) -> None:
+    """Reject carbonate sensitivity files for a build that does not read them.
+
+    Only ``bgc_mode: cdr_lite`` reads them (as surface forcing); a MARBL build
+    that sets ``cdr_lite.cdr_online_carbonate_sensitivity`` computes them
+    online instead. Raises ``ValueError`` listing every problem.
+    """
+    problems: list[str] = []
+    if bgc_mode != "cdr_lite":
+        problems.append(
+            f'bgc_mode is "{bgc_mode}": only bgc_mode "cdr_lite" reads carbonate '
+            "sensitivities from files"
+        )
+    if online_carbonate_sensitivity_requested(settings):
+        problems.append(
+            "cdr_lite.cdr_online_carbonate_sensitivity is on: ROMS computes the "
+            "sensitivities online from MARBL, so there are no files to read"
+        )
+    if problems:
+        raise ValueError(
+            "carbonate_sensitivity was supplied, but:\n- " + "\n- ".join(problems)
+        )
+
+
 def _warn_user_files_need_pio_conversion(bp: ForgeBlueprint, use_pio: bool) -> None:
     """Warn once if a byte-copied user file is not classic-format netCDF under PIO.
 
@@ -203,6 +304,11 @@ def _warn_user_files_need_pio_conversion(bp: ForgeBlueprint, use_pio: bool) -> N
     files: list[tuple[str, UserProvidedFile]] = []
     if bp.cdr.cdr_forcing_file is not None:
         files.append(("cdr_forcing_file", bp.cdr.cdr_forcing_file))
+    if bp.carbonate_sensitivity is not None:
+        files.extend(
+            (f"carbonate_sensitivity[{i}]", f)
+            for i, f in enumerate(bp.carbonate_sensitivity.files)
+        )
     files.extend(
         (f"river[{i}] custom_file", river.custom_file)
         for i, river in enumerate(bp.forcing.river)
@@ -501,6 +607,12 @@ def build_forge_blueprint(
     nesting_include_pressure_fluxes: bool = False,
     grid_file: str | Path | dict[str, Any] | UserProvidedFile | None = None,
     cdr_forcing_file: str | Path | dict[str, Any] | UserProvidedFile | None = None,
+    carbonate_sensitivity: str
+    | Path
+    | Sequence[str | Path]
+    | CarbonateSensitivitySpec
+    | dict[str, Any]
+    | None = None,
     topography_path: str | None = None,
     topography_source: str | TopographySource = TopographySource.ETOPO5,
     use_pio: bool | None = None,
@@ -636,9 +748,21 @@ def build_forge_blueprint(
     hashed here (must exist at authoring time), a dict/``UserProvidedFile`` is
     trusted as-is. Mutually exclusive with ``cdr_forcing``/``cdr_forcing_yaml``
     (raised here, before ``CdrSpec``'s own validator would, so the caller gets
-    a resolver-level message); like a set ``cdr_forcing``, it forces
-    ``do_cdr_output=True``, requires ``bgc_mode == "marbl"``, sets
-    ``cppdefs.cdr_forcing = True``, and ensures the CDR-output MARBL diagnostics.
+    a resolver-level message); like a set ``cdr_forcing``, it sets
+    ``cppdefs.cdr_forcing = True``, and with MARBL it also implies
+    ``do_cdr_output=True`` and ensures the CDR-output MARBL diagnostics (without
+    MARBL the mode is rejected or accepted by ``check_cdr_forcing_mode``).
+
+    ``carbonate_sensitivity``, if given, lists the carbonate sensitivity files a
+    ``bgc_mode == "cdr_lite"`` build reads as surface forcing (the ``_cdrgas``
+    files of a ROMS-MARBL run). Normally it is left out: the
+    ``carbonate-sensitivity-from`` workplan directive supplies them at run time.
+    Accepts a directory (scanned for joined ``_cdrgas`` files; an error if it has
+    none), a single file path, a sequence of file paths (kept in order), a
+    ``{"files": [...]}`` dict or a :class:`CarbonateSensitivitySpec`. Paths are
+    hashed here and must exist; a dict's entries and a spec are trusted as-is, like
+    ``cdr_forcing_file``. Raises ``ValueError`` when the build is not
+    ``bgc_mode == "cdr_lite"`` or sets ``cdr_lite.cdr_online_carbonate_sensitivity``.
     """
     if cdr is not None and (
         cdr_forcing is not None
@@ -1088,6 +1212,17 @@ def build_forge_blueprint(
     ):
         settings["cppdefs"]["cdr_forcing"] = True
 
+    # ----- carbonate sensitivity files ---------------------------------------
+    # Only a bgc_mode "cdr_lite" build reads them; checked before the CDR_LITE
+    # block below, whose "needs MARBL" message would otherwise be the only one a
+    # MARBL build with the online knob sees.
+    carbonate_sensitivity_spec: CarbonateSensitivitySpec | None = None
+    if carbonate_sensitivity is not None:
+        _check_carbonate_sensitivity_applies(bgc_mode, settings)
+        carbonate_sensitivity_spec = _normalize_carbonate_sensitivity(
+            carbonate_sensitivity
+        )
+
     # ----- CDR_LITE (ucla-roms >= 0.9.0) -------------------------------------
     # cppdefs.cdr_lite is resolver-owned: derived from bgc_mode "cdr_lite"
     # (CDR-lite tracers without MARBL, carbonate sensitivities read from forcing
@@ -1143,9 +1278,25 @@ def build_forge_blueprint(
         # missing the processing-filled sections (title/grid/initial/forcing/
         # s_coord/reference_date_settings, populated later at generate_inputs()/
         # executor time) -- none of which affect any output-stream field.
+        precheck_settings = settings
+        if bgc_mode == "cdr_lite":
+            # The CDR-lite tracer stream is the only output the CDR tracers
+            # appear in, and configure_build forces it on once generation has
+            # derived the tracer counts (they are unknown here, so the resolver
+            # leaves the switch as authored). Check the stream it will write now,
+            # not after the expensive generation; configure_build's forcing
+            # remains the net for stored blueprints. A copy, so the stored
+            # settings stay as authored.
+            precheck_settings = {
+                **settings,
+                "cdr_lite_output": {
+                    **(settings.get("cdr_lite_output") or {}),
+                    "do_cdr_lite_output": True,
+                },
+            }
         try:
             check_output_streams_divide_rst(
-                canonical_output_sections_for_precheck(settings, settings_cls),
+                canonical_output_sections_for_precheck(precheck_settings, settings_cls),
                 cppdefs_for_precheck(
                     settings.get("cppdefs", {}), settings.get("upscale_output", {})
                 ),
@@ -1294,6 +1445,7 @@ def build_forge_blueprint(
         ),
         forcing=sources,
         cdr=cdr_spec,
+        carbonate_sensitivity=carbonate_sensitivity_spec,
         # Host-independent source-dataset keys to prepare (forcing/IC sources + topography),
         # derived from the resolved sources so the executor never reads model_spec.datasets.
         datasets=sorted(
