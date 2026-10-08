@@ -31,6 +31,11 @@ Breaking Changes
   - A section that gives both the old and the new name is rejected rather than silently keeping one.
   - Builds for ucla-roms 0.7 and 0.8 still get ``&CDR_TRACER_OUTPUT_SETTINGS`` in their namelist, byte-for-byte unchanged.
 
+- Forge blueprints are now schema version 10; files saved by this version are rejected by older C-Star installs with an "upgrade cstar-ocean" message. (`#745 <https://github.com/CWorthy-ocean/C-Star/pull/745>`_)
+- The optional ``provenance`` block is a minor schema bump for every application's blueprint (roms_marbl 3.0.0→3.1.0, plotter 2.0.0→2.1.0, hello_world/nest_ic/upscaler 1.0.0→1.1.0): existing blueprints load unchanged and need no migration, but files written at the new versions (including the ROMS-MARBL blueprints Forge emits) are rejected by older C-Star installs with an "upgrade cstar-ocean" message. (`#745 <https://github.com/CWorthy-ocean/C-Star/pull/745>`_)
+- ``build_forge_blueprint`` takes a single ``provenance=`` argument in place of ``generated_at``, ``forge_version``, ``roms_tools_version`` and ``notes``. (`#745 <https://github.com/CWorthy-ocean/C-Star/pull/745>`_)
+- The Forge provenance model is renamed from ``Provenance`` to ``ForgeProvenance``; ``Provenance`` now names the generic block every blueprint shares. (`#745 <https://github.com/CWorthy-ocean/C-Star/pull/745>`_)
+
 
 New features
 ~~~~~~~~~~~~
@@ -103,6 +108,18 @@ New features
   - Blueprints pinned to a non-release ucla-roms ref such as ``main`` now validate against the 0.9.0 schema.
 
 - New bundled ModelSpec ``roms-marbl-0.9-default`` (ucla-roms 0.9.0), now the default model in the Forge wizard. (`#748 <https://github.com/CWorthy-ocean/C-Star/pull/748>`_)
+- Every blueprint may carry an optional ``provenance`` block recording when and by what it was generated (``generated_at``, ``generated_by``) and what it was derived from (``derived_from``). (`#745 <https://github.com/CWorthy-ocean/C-Star/pull/745>`_)
+
+  - ``generated_by`` records the producing tool, a unique id minted once, the C-Star system name, package versions and, for a workplan step, the run id and working directory.
+  - ``derived_from`` lists references to the blueprints and catalog specs the blueprint was built from.
+
+- ROMS-MARBL blueprints emitted by Forge record their forge blueprint (name and content hash) and each named catalog spec (model, domain, forcing, CDR, output) it was composed from. (`#745 <https://github.com/CWorthy-ocean/C-Star/pull/745>`_)
+
+  - Their description now names the forge blueprint and repeats its description.
+
+- Forge blueprints saved from the wizard record ``generated_by`` with tool ``wizard``, re-stamped only when the blueprint's content changes or when it has never been stamped. (`#745 <https://github.com/CWorthy-ocean/C-Star/pull/745>`_)
+- ``LayeredCatalog.blueprint_outputs(application)`` lists the blueprints emitted by standalone and workplan runs of the catalog's entries, each marked current, changed, uncataloged or unverified. (`#745 <https://github.com/CWorthy-ocean/C-Star/pull/745>`_)
+- ``cstar forge run`` now publishes the emitted blueprint to the run's ``output/`` directory, like ``cstar blueprint run``, and prints that copy as the one to run. (`#745 <https://github.com/CWorthy-ocean/C-Star/pull/745>`_)
 
 
 
@@ -133,6 +150,7 @@ Bug Fixes
 - The ``wales-toy`` tutorial and bundled blueprints carried no ``schema_version``, so they were read as 1.0.0 and pushed through three migration adapters on every run. (`#747 <https://github.com/CWorthy-ocean/C-Star/pull/747>`_)
 - ``cstar blueprint migrate --dry-run`` printed "Migrated blueprint persisted to" naming the source file although nothing was written. (`#747 <https://github.com/CWorthy-ocean/C-Star/pull/747>`_)
 - Forge silently dropped a CDR output section that the pinned ucla-roms release cannot write, even when that section was turned on; it now raises an error naming the section. (`#748 <https://github.com/CWorthy-ocean/C-Star/pull/748>`_)
+- Saving a loaded forge blueprint in the wizard no longer discards its provenance (its original timestamp, notes and versions were replaced on every save). (`#745 <https://github.com/CWorthy-ocean/C-Star/pull/745>`_)
 
 Improvements
 ~~~~~~~~~~~~
@@ -207,3 +225,5 @@ Miscellaneous
 - The Forge ``cppdefs.opt`` template writes ``#undef CDR_LITE`` unless CDR-lite is requested; builds for earlier ucla-roms releases are unchanged. (`#748 <https://github.com/CWorthy-ocean/C-Star/pull/748>`_)
 - The integration tests now run against ucla-roms 0.9.0, and the weekly extended run tests 0.9.0 and ``main``. (`#748 <https://github.com/CWorthy-ocean/C-Star/pull/748>`_)
 - Developer and spec docs cover the 0.9.0 namelist tier, the ``CDR_LITE`` cppdef and the section rename. (`#748 <https://github.com/CWorthy-ocean/C-Star/pull/748>`_)
+- New published JSON schemas for the bumped versions (``roms_marbl_schema.3.1.0.json``, ``plotter_schema.2.1.0.json``, ``hello_world``/``nest_ic``/``upscaler`` ``1.1.0``) and a ``blueprint.3.1.0.yaml`` template; the previously published schema files are unchanged. (`#745 <https://github.com/CWorthy-ocean/C-Star/pull/745>`_)
+- Forge, blueprint and tutorial documentation describe provenance, stamping and the ``output/`` copy. (`#745 <https://github.com/CWorthy-ocean/C-Star/pull/745>`_)
