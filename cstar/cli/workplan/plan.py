@@ -251,7 +251,7 @@ def plan(
 
     try:
         if transform:
-            transformer = WorkplanTransformer(workplan)
+            transformer = WorkplanTransformer(workplan, wp_path=Path(path))
             workplan = transformer.apply()
 
         planner = Planner(workplan)

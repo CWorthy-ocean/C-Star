@@ -41,6 +41,7 @@ from cstar.orchestration.models import (
     Application,
     BlueprintState,
     DeferredBlueprintRef,
+    InlineBlueprintRef,
     RunRef,
     Step,
     StepRef,
@@ -66,6 +67,7 @@ from cstar.orchestration.transforms import (
     TemplateFillTransform,
     WorkplanTransformer,
     _inject_compute_defaults,
+    anchor_blueprint_path,
     apply_automatic_overrides,
     collect_directive_problems,
     effective_blueprint,
@@ -6033,3 +6035,141 @@ async def test_prepare_workplan_without_external_refs_skips_launcher(
         _ = await prepare_workplan(wp_path, output_dir, {})
 
     get_launcher.assert_not_called()
+
+
+@pytest.mark.parametrize("authored", ["./hw.yaml", "hw.yaml", "sub/../hw.yaml"])
+def test_anchor_blueprint_path_resolves_against_workplan_dir(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    authored: str,
+) -> None:
+    """Verify a relative blueprint path is anchored to the workplan's directory,
+    not the current working directory, and the source step is left untouched.
+
+    Parameters
+    ----------
+    tmp_path : Path
+        Temporary directory for the workplan and blueprint
+    monkeypatch : pytest.MonkeyPatch
+        Fixture used to change the working directory
+    authored : str
+        The relative path as written in the workplan
+    """
+    plans = tmp_path / "plans"
+    plans.mkdir()
+    (plans / "hw.yaml").touch()
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    monkeypatch.chdir(elsewhere)
+
+    step = LiveStep(
+        name="hello",
+        application="hello_world",
+        blueprint=authored,
+        working_dir=tmp_path / "work",
+    )
+
+    anchored = anchor_blueprint_path(step, plans)
+
+    assert Path(anchored.blueprint_path) == (plans / "hw.yaml").resolve()
+    assert Path(anchored.blueprint_path).is_absolute()
+    assert step.blueprint_path == authored
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        DeferredBlueprintRef(from_step="producer"),
+        InlineBlueprintRef(),
+        "https://example.com/bp.yaml",
+        "{{output_dir: producer}}/bp.yaml",
+        "{{bp_path}}",
+    ],
+)
+def test_anchor_blueprint_path_leaves_non_file_references(
+    tmp_path: Path, value: t.Any
+) -> None:
+    """Verify deferred, inline and remote blueprints and unfilled placeholders
+    are returned unchanged.
+
+    Parameters
+    ----------
+    tmp_path : Path
+        Temporary directory used as the workplan directory
+    value : Any
+        The blueprint reference under test
+    """
+    step = LiveStep(
+        name="hello",
+        application="hello_world",
+        blueprint=value,
+        working_dir=tmp_path / "work",
+    )
+
+    assert anchor_blueprint_path(step, tmp_path) is step
+
+
+def test_anchor_blueprint_path_keeps_absolute_path(tmp_path: Path) -> None:
+    """Verify an absolute blueprint path is not rewritten.
+
+    Parameters
+    ----------
+    tmp_path : Path
+        Temporary directory for the blueprint
+    """
+    bp_path = tmp_path / "hw.yaml"
+    bp_path.touch()
+    step = LiveStep(
+        name="hello",
+        application="hello_world",
+        blueprint=bp_path,
+        working_dir=tmp_path / "work",
+    )
+
+    assert anchor_blueprint_path(step, tmp_path / "other") is step
+
+
+def test_workplan_transformer_anchors_after_filling_placeholders(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    hello_world_bp_content: str,
+) -> None:
+    """Verify a relative blueprint path containing a placeholder is filled
+    first and then anchored to the workplan's directory, so the transformed
+    workplan records an absolute path even when run from elsewhere.
+
+    Parameters
+    ----------
+    tmp_path : Path
+        Temporary directory for the workplan and blueprint
+    monkeypatch : pytest.MonkeyPatch
+        Fixture used to change the working directory
+    hello_world_bp_content : str
+        Fixture providing the content of a minimal hello-world blueprint
+    """
+    plans = tmp_path / "plans"
+    plans.mkdir()
+    (plans / "hw.yaml").write_text(hello_world_bp_content)
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    monkeypatch.chdir(elsewhere)
+
+    wp = Workplan(
+        name="Relative blueprint",
+        description="A step whose blueprint name is a runtime variable",
+        runtime_vars=["bp_name"],
+        steps=[
+            Step(
+                name="Say Hello",
+                application="hello_world",
+                blueprint="./{{bp_name}}",
+            )
+        ],
+    )
+    wp_path = plans / "wp.yaml"
+    serialize(wp_path, wp)
+    fill = TemplateFillTransform(variable_resolver={"bp_name": "hw.yaml"}.__getitem__)
+
+    transformed = WorkplanTransformer(wp, fill, wp_path=wp_path).apply()
+
+    assert Path(transformed.steps[0].blueprint_path) == (plans / "hw.yaml").resolve()

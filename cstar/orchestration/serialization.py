@@ -61,6 +61,9 @@ class ValidationResult(t.Generic[_T]):
     """An error message that is populated if validation fails."""
     item: _T | None = None
     """The deserialized workplan if validation succeeds."""
+    path: Path | None = None
+    """The local file the item was read from (a temporary copy of a remote
+    URI); `None` if validation fails."""
 
     @property
     def is_valid(self) -> bool:
@@ -483,4 +486,4 @@ def validate_serialized_entity(
     except FileNotFoundError:
         return ValidationResult(f"File not found at path: {path}")
 
-    return ValidationResult(item=item)
+    return ValidationResult(item=item, path=wp_path)

@@ -480,6 +480,7 @@ async def prepare_workplan(
         wp_orig,
         fill_transform,
         external,
+        wp_path=wp_path,
     )
     wp = transformer.apply()
 
