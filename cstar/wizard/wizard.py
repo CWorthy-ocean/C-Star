@@ -24,7 +24,9 @@ from __future__ import annotations
 
 import base64
 import copy
+import html
 import json
+import os
 import re
 import typing
 import warnings
@@ -43,6 +45,7 @@ from cstar.applications.forge.blueprint import (
     BgcSourceItem,
     BgcSurfaceSource,
     BoundaryForcing,
+    CarbonateSensitivitySpec,
     ClimatologyMode,
     CoarseGridMode,
     Composition,
@@ -69,7 +72,9 @@ from cstar.applications.forge.blueprint import (
 )
 from cstar.applications.forge.migration import migrate_forcing_inputs
 from cstar.applications.forge.namelist_model import (
+    BgcMode,
     RunTimeSettings,
+    bgc_mode_from_cppdefs,
     run_time_settings_for_ref,
     validate_run_time_sections,
     version_gated_section_names,
@@ -83,6 +88,7 @@ from cstar.applications.forge.resolve import (
     read_cdr_forcing_yaml,
 )
 from cstar.applications.forge.user_files import hash_netcdf_contents
+from cstar.base.utils import NetCDFFormat, netcdf_format
 from cstar.wizard.ui import components
 from cstar.wizard.ui.catalog_bar import CatalogBar
 from cstar.wizard.ui.labels import known_keys, label_for, section_for
@@ -2133,6 +2139,28 @@ _FILE_NOT_ATTACHED_HINT = (
 )
 _RIVER_CUSTOM_FILE_HINT = _FILE_NOT_ATTACHED_HINT
 _CDR_FILE_HINT = _FILE_NOT_ATTACHED_HINT
+# The carbonate-sensitivity twin (a directory, so no upload): shown while the
+# source is "path" and nothing is attached, where the blueprint is invalid.
+_CARBONATE_DIR_HINT = (
+    "<span style='color:#b58900'>No directory attached yet -- enter a path and "
+    "press Enter (or click Attach). The blueprint is invalid until a directory "
+    "is attached.</span>"
+)
+
+
+def _carbonate_status_html(n_files: int, detail: str = "") -> str:
+    """Status HTML for ``n_files`` attached carbonate sensitivity files: the
+    count (plus ``detail``, e.g. the timestamp span) and the persistent
+    host-path warning -- the files are host/transport, like every
+    user-provided file (see ``UserProvidedFile``).
+    """
+    suffix = f", {detail}" if detail else ""
+    return (
+        f"<span style='color:#080'>✓ attached {n_files} carbonate sensitivity "
+        f"file(s){suffix}</span><br>"
+        "<span style='color:#b58900'>⚠ These files must exist at these exact "
+        "paths on the machine where the executor runs.</span>"
+    )
 
 
 def _same_attached_file(attached: dict[str, Any] | None, path_str: str) -> bool:
@@ -3893,13 +3921,17 @@ class ForgeBlueprintWizard:
             style={"description_width": "110px"},
         )
         self.bgc_dd = W.Dropdown(
-            options=["marbl", "none"],
+            options=list(get_args(BgcMode)),
             value="marbl",
             description="BGC:",
             style={"description_width": "110px"},
             tooltip=(
                 "Biogeochemistry mode. 'marbl' builds ROMS-MARBL and includes the "
-                "MARBL codebase; 'none' builds physics-only (no MARBL, no BGC forcing)."
+                "MARBL codebase; 'none' builds physics-only (no MARBL, no BGC forcing). "
+                "'cdr_lite' builds ucla-roms' CDR-lite tracers without MARBL: it needs "
+                "a CDR forcing with cdr_lite releases and carbonate sensitivity files, "
+                "by default supplied at run time by the carbonate-sensitivity-from "
+                "directive."
             ),
         )
         self.domain_dd = W.Dropdown(
@@ -4328,6 +4360,65 @@ class ForgeBlueprintWizard:
         # compared in _rebuild() to detect a deviation (composition.forcing.modified)
         self._forcing_seed: dict[str, Any] | None = None
 
+        # --- carbonate sensitivities (bgc_mode "cdr_lite" only) -------------------
+        # A cdr_lite build reads the carbonate sensitivities (ddic_dco2/ddic_dalk)
+        # as surface forcing from ROMS ``_cdrgas`` files. The default leaves them
+        # off the blueprint: the carbonate-sensitivity-from workplan directive
+        # supplies them at run time ("directive"). "path" attaches a directory of
+        # them now. What is stored is the resolved ``{"files": [{location,
+        # content_hash}]}`` (never the directory): _gather()/_rebuild() then neither
+        # rescan nor rehash on every edit, and a loaded blueprint round-trips
+        # exactly -- the trust-the-stored-hash idiom of the CDR netCDF attach flow.
+        self._carbonate_sensitivity: dict[str, Any] | None = None
+        self.cs_source_dd = W.Dropdown(
+            options=[
+                ("Supplied by a workplan directive at run time", "directive"),
+                ("Directory of ROMS _cdrgas files", "path"),
+            ],
+            value="directive",
+            description="Source:",
+            style={"description_width": "110px"},
+            layout=W.Layout(width="360px"),
+            tooltip=(
+                "Where the carbonate sensitivity files come from. By default the "
+                "carbonate-sensitivity-from workplan directive supplies them from an "
+                "earlier ROMS-MARBL step at run time; attach a directory to put them "
+                "on the blueprint now."
+            ),
+        )
+        self.cs_path = W.Text(
+            value="",
+            description="Directory:",
+            placeholder="directory of ROMS _cdrgas files",
+            style={"description_width": "110px"},
+            layout=W.Layout(width="420px"),
+            continuous_update=False,  # see grid_file_path
+        )
+        self.cs_attach_btn = W.Button(
+            description=label_for("buttons.attach", "Attach").label, icon="link"
+        )
+        self.cs_clear_btn = W.Button(
+            description=label_for("buttons.detach", "Detach").label, icon="times"
+        )
+        self.cs_status = W.HTML("")
+        self.cs_path_box = W.VBox(
+            [
+                components.field_row(
+                    W,
+                    "cs_path",
+                    self.cs_path,
+                    extra=(self.cs_attach_btn, self.cs_clear_btn),
+                ),
+                self.cs_status,
+            ]
+        )
+        self.cs_group = components.subsection(
+            W,
+            "model.carbonate",
+            components.field_row(W, "cs_source_dd", self.cs_source_dd),
+            self.cs_path_box,
+        )
+
         # --- CDR (Carbon Dioxide Removal) forcing -----------------------------
         # A top-level, independently composable spec (CdrSpec/Composition.cdr) --
         # NOT part of Forcing. ``cdr_dd`` picks a named CdrSpec from the catalog
@@ -4362,6 +4453,15 @@ class ForgeBlueprintWizard:
             description="Mode:",
             style={"description_width": "110px"},
             tooltip=_tip("cdr", "mode"),
+        )
+        # Shown only while bgc_dd is "cdr_lite" (_sync_carbonate_sensitivity_visibility):
+        # in that mode a CDR forcing is required and its releases must target the
+        # CDR-lite tracers.
+        self.cdr_lite_hint = W.HTML(
+            "<span style='color:#666'>BGC mode <code>cdr_lite</code>: releases "
+            "drive the CDR-lite tracers, and a CDR forcing is required. Simple "
+            "mode builds one ALK (OAE) release; a YAML or netCDF forcing must use "
+            "<code>tracer_set: cdr_lite</code>.</span>"
         )
         # The mode _apply_cdr_mode() last actually applied -- lets it detect a
         # real transition (for leaving-mode cleanup) whether invoked via the
@@ -4764,6 +4864,7 @@ class ForgeBlueprintWizard:
         self.bgc_dd.value = self._model_default_bgc_mode()
         self.use_pio_chk.value = self._model_default_use_pio()
         self._sync_marbl_ref_visibility()
+        self._sync_carbonate_sensitivity_visibility()
         self._sync_auto_tiling()
         self._build_forcing_editor(self.catalog.forcing_data(self.forcing_dd.value))
         if self._forcing_editor is None:
@@ -4819,6 +4920,13 @@ class ForgeBlueprintWizard:
             w.observe(self._rebuild, names="value")
         self.model_dd.observe(self._on_model_change, names="value")
         self.bgc_dd.observe(self._sync_marbl_ref_visibility, names="value")
+        self.bgc_dd.observe(self._sync_carbonate_sensitivity_visibility, names="value")
+        self.cs_source_dd.observe(
+            self._sync_carbonate_sensitivity_visibility, names="value"
+        )
+        self.cs_attach_btn.on_click(self._on_cs_attach)
+        self.cs_clear_btn.on_click(self._on_cs_clear)
+        self.cs_path.observe(self._on_cs_path_submit, names="value")
         self.auto_tiling_chk.observe(self._sync_auto_tiling, names="value")
         self.nest_domain_dd.observe(self._on_nest_domain, names="value")
         self.parent_domain_dd.observe(self._on_parent_domain, names="value")
@@ -4835,6 +4943,7 @@ class ForgeBlueprintWizard:
             self.auto_tiling_chk,
             self.n_cores,
             self.bgc_dd,
+            self.cs_source_dd,
             self.roms_ref,
             self.marbl_ref,
             self.start,
@@ -5197,6 +5306,18 @@ class ForgeBlueprintWizard:
     def _sync_marbl_ref_visibility(self, _change=None):
         # MARBL ref is inert without MARBL, so hide it (value is kept, not cleared)
         self.marbl_ref.layout.display = "" if self.bgc_dd.value == "marbl" else "none"
+
+    def _sync_carbonate_sensitivity_visibility(self, _change=None):
+        # The carbonate sensitivity group and the CDR panel's hint only matter in
+        # "cdr_lite" mode; the attach row only for the "path" source. Attached
+        # state is kept (not cleared) while hidden, like marbl_ref's value.
+        cdr_lite = self.bgc_dd.value == "cdr_lite"
+        path = self.cs_source_dd.value == "path"
+        self.cs_group.layout.display = "" if cdr_lite else "none"
+        self.cs_path_box.layout.display = "" if path else "none"
+        self.cdr_lite_hint.layout.display = "" if cdr_lite else "none"
+        if path and self._carbonate_sensitivity is None and not self.cs_status.value:
+            self.cs_status.value = _CARBONATE_DIR_HINT
 
     def _sync_auto_tiling(self, _change=None):
         # Auto tiling picks n_procs_x/y at runtime from the land mask, so those
@@ -6321,6 +6442,19 @@ class ForgeBlueprintWizard:
                         "<br><span style='color:#b58900'>⚠ no 'ncdr' dimension "
                         "found -- is this really a CDR-forcing file?</span>"
                     )
+                if (
+                    self.bgc_dd.value == "cdr_lite"
+                    and "tracer_name" in ds.coords
+                    and not any(
+                        str(name).startswith("CDR_")
+                        for name in ds["tracer_name"].values
+                    )
+                ):
+                    warning += (
+                        "<br><span style='color:#b58900'>⚠ BGC mode is cdr_lite "
+                        "but this file's tracer_name axis has no CDR_* tracers -- "
+                        "its releases need tracer_set cdr_lite.</span>"
+                    )
         except Exception:
             pass
         self._cdr_forcing_file = {"location": str(path), "content_hash": content_hash}
@@ -6383,6 +6517,130 @@ class ForgeBlueprintWizard:
         self.cdr_file_upload.value = ()
         # Still in "netcdf" mode with nothing attached -> invalid until re-attached.
         self.cdr_file_status.value = _CDR_FILE_HINT
+        self._rebuild()
+
+    # ---- carbonate sensitivities: a directory of ROMS _cdrgas files ------------
+    def _attach_carbonate_sensitivity_dir(self, path_str: str) -> None:
+        """Scan ``path_str`` for joined ``_cdrgas`` files, check each is netCDF,
+        hash them, and store the resolved list as ``_carbonate_sensitivity``.
+
+        A failure clears any earlier attach (the status says why): leaving it
+        would quietly keep building with files the path box no longer names.
+        """
+        # Lazy: the file-name convention lives with the transforms, which pull in
+        # the orchestration layer (as in resolve._find_carbonate_sensitivity_files).
+        from cstar.applications.roms_marbl.transforms import CarbonateSensitivityFile
+
+        self.cs_status.value = "<i>attaching…</i>"
+        try:
+            directory = Path(path_str).expanduser().resolve()
+            if not directory.is_dir():
+                raise NotADirectoryError(f"not a directory: {directory}")
+            found = CarbonateSensitivityFile.find(directory) or ()
+            joined = [f for f in found if not f.is_partitioned]
+            if not joined:
+                raise FileNotFoundError(
+                    f"no joined {CarbonateSensitivityFile.LABEL} files in "
+                    f"{directory} ({len(found)} per-rank tile file(s) skipped); "
+                    "expected the output of a ROMS-MARBL run with "
+                    "cdr_gas_exch_output enabled, named "
+                    f"ROOT{CarbonateSensitivityFile.SUFFIX}.YYYYMMDDHHMMSS.nc"
+                )
+            formats = {f.path: netcdf_format(f.path) for f in joined}
+            not_netcdf = [
+                p.name for p, fmt in formats.items() if fmt is NetCDFFormat.UNRECOGNIZED
+            ]
+            if not_netcdf:
+                raise ValueError(f"not netCDF files: {', '.join(not_netcdf)}")
+            files = [
+                {"location": str(f.path), "content_hash": hash_netcdf_contents(f.path)}
+                for f in joined
+            ]
+            # The blueprint's own rules (e.g. distinct basenames: the scan is
+            # recursive, so a parent of several runs' output can repeat them).
+            CarbonateSensitivitySpec.model_validate({"files": files})
+        except Exception as exc:
+            self._carbonate_sensitivity = None
+            message = html.escape(" ".join(str(exc).split()))
+            self.cs_status.value = (
+                f"<span style='color:#b00'>{type(exc).__name__}: {message}</span>"
+            )
+            self._rebuild()
+            return
+        self._carbonate_sensitivity = {"files": files}
+        first = min(f.timestamp for f in joined)
+        last = max(f.timestamp for f in joined)
+        status = _carbonate_status_html(
+            len(files), f"{first:%Y-%m-%d %H:%M} to {last:%Y-%m-%d %H:%M}"
+        )
+        if self.use_pio_chk.value and not all(
+            fmt.is_classic for fmt in formats.values()
+        ):
+            status += (
+                "<br><span style='color:#666'>ParallelIO reads classic netCDF "
+                "only: Forge converts the staged copies to CDF-5 (the originals "
+                "are untouched).</span>"
+            )
+        self.cs_status.value = status
+        self._rebuild()
+
+    def _populate_carbonate_sensitivity(self, cfg: ForgeBlueprint) -> None:
+        """Load-back half of the attach flow: a blueprint listing carbonate
+        sensitivity files selects the "path" source with the stored hashes
+        trusted (never recomputed; a missing file is a warning, not a blocker --
+        Save must still round-trip losslessly); otherwise the "directive" source.
+        """
+        spec = cfg.carbonate_sensitivity
+        if spec is None:
+            self._carbonate_sensitivity = None
+            self.cs_source_dd.value = "directive"
+            self.cs_path.value = ""
+            self.cs_status.value = ""
+            return
+        self._carbonate_sensitivity = {
+            "files": [
+                {"location": f.location, "content_hash": f.content_hash}
+                for f in spec.files
+            ]
+        }
+        parents = [str(Path(f.location).expanduser().parent) for f in spec.files]
+        try:
+            directory = os.path.commonpath(parents)
+        except ValueError:  # relative and absolute locations mixed
+            directory = parents[0]
+        self.cs_source_dd.value = "path"
+        self.cs_path.value = directory
+        missing = [f for f in spec.files if not Path(f.location).expanduser().exists()]
+        self.cs_status.value = _carbonate_status_html(len(spec.files)) + (
+            f"<br><span style='color:#b00'>⚠ {len(missing)} file(s) not found at "
+            "these paths</span>"
+            if missing
+            else ""
+        )
+
+    def _on_cs_attach(self, _btn):
+        path_str = self.cs_path.value.strip()
+        if not path_str:
+            self.cs_status.value = "<span style='color:#b00'>Enter a path first.</span>"
+            return
+        # Explicit click always re-scans and re-hashes -- no dedupe here.
+        self._attach_carbonate_sensitivity_dir(path_str)
+
+    def _on_cs_path_submit(self, _change) -> None:
+        """Attach the typed directory on Enter/focus-out (twin of
+        `_on_cdr_file_path_submit`): a typed-but-unattached path would otherwise
+        leave the blueprint invalid with no hint as to why.
+        """
+        if getattr(self, "_suspended", False):
+            return
+        path_str = self.cs_path.value.strip()
+        if path_str:
+            self._attach_carbonate_sensitivity_dir(path_str)
+
+    def _on_cs_clear(self, _btn):
+        self._carbonate_sensitivity = None
+        self.cs_path.value = ""  # fires _on_cs_path_submit, a no-op when blank
+        self.cs_status.value = _CARBONATE_DIR_HINT
         self._rebuild()
 
     # ---- CDR plotting (WP6) ----------------------------------------------------
@@ -6605,11 +6863,10 @@ class ForgeBlueprintWizard:
             # _Suspender), so the disabled/visible state is already correct;
             # call again explicitly for robustness in case that ever changes.
             self._sync_auto_tiling()
-            self.bgc_dd.value = (
-                "marbl"
-                if bool((cfg.model_settings.get("cppdefs") or {}).get("marbl", True))
-                else "none"
+            self.bgc_dd.value = bgc_mode_from_cppdefs(
+                cfg.model_settings.get("cppdefs") or {}
             )
+            self._populate_carbonate_sensitivity(cfg)
             # Show the file's actual pinned ref, falling back to the (now-selected)
             # model's default when the file matches it exactly. (stored_ref was
             # already computed above, before the suspend block, to feed the
@@ -6812,6 +7069,16 @@ class ForgeBlueprintWizard:
         kw["topography_source"] = self.topo_source.value
         kw["use_pio"] = self.use_pio_chk.value
         kw["bgc_mode"] = self.bgc_dd.value
+        # The default ("directive") leaves carbonate_sensitivity off: the workplan
+        # directive supplies the files at run time. The resolver rejects them
+        # outside bgc_mode "cdr_lite", so attached state is only passed there.
+        if self.bgc_dd.value == "cdr_lite" and self.cs_source_dd.value == "path":
+            if self._carbonate_sensitivity is None:
+                raise ValueError(
+                    "carbonate sensitivities: attach a directory of ROMS _cdrgas "
+                    "files, or switch the source to the workplan directive"
+                )
+            kw["carbonate_sensitivity"] = self._carbonate_sensitivity
         if self.roms_ref.value.strip():
             kw["roms_ref"] = self.roms_ref.value.strip()
         if self.marbl_ref.value.strip():
@@ -8073,6 +8340,7 @@ class ForgeBlueprintWizard:
         self.grid_file_detach_btn.button_style = "danger"
         self.cdr_clear_btn.button_style = "danger"
         self.cdr_file_clear_btn.button_style = "danger"
+        self.cs_clear_btn.button_style = "danger"
 
         sticky = W.HBox([self.sticky_bar, self.download_link])
         sticky.add_class("forge-sticky")
@@ -8125,6 +8393,7 @@ class ForgeBlueprintWizard:
                     components.field_row(W, "marbl_ref", self.marbl_ref),
                 ],
             ),
+            self.cs_group,
             components.field_row(W, "forcing_dd", self.forcing_dd),
             num=1,
             chips_widget=self.card_chips["model"],
@@ -8368,6 +8637,7 @@ class ForgeBlueprintWizard:
                         components.field_row(W, "cdr_mode_dd", self.cdr_mode_dd),
                     ],
                 ),
+                self.cdr_lite_hint,
                 # Per-mode panels on the left, plot column on the right --
                 # the same side-by-side arrangement as the Grid card.
                 W.HBox(

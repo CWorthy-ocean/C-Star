@@ -70,8 +70,23 @@ Start from an existing blueprint
 Model
    The model preset (a **ModelSpec** from the catalog), which pins the ROMS,
    MARBL and PIO code versions and the model-level default settings; the
-   biogeochemistry mode (MARBL or physics only); and whether to build with
-   ParallelIO.
+   biogeochemistry mode (MARBL, physics only, or CDR-lite without MARBL);
+   and whether to build with ParallelIO.
+
+   The ``cdr_lite`` mode (ucla-roms 0.9.1 or later) builds ucla-roms' CDR-lite
+   tracers without MARBL, so the blueprint carries no biogeochemical forcing.
+   It needs a CDR forcing: the CDR panel in Run setup shows a reminder, and a
+   simple-mode forcing then builds one ALK (OAE) release, while a YAML or
+   netCDF forcing must use ``tracer_set: cdr_lite``. The mode also reads the
+   carbonate sensitivities (``ddic_dco2`` and ``ddic_dalk``) from files, so a
+   **Carbonate sensitivities** group appears below the mode. By default it is
+   left to the ``carbonate-sensitivity-from`` workplan directive, which
+   supplies the ``_cdrgas`` output of an earlier ROMS-MARBL step when the
+   workplan runs. Choose *Directory of ROMS _cdrgas files* instead to attach
+   the files now: the wizard lists the joined files in the directory (the
+   per-rank tiles are skipped), checks they are netCDF, hashes them and records
+   them on the blueprint. With ParallelIO on, Forge converts any file that is
+   not classic netCDF to CDF-5 when it stages the copies.
 
 Domain and grid
    Where the model runs and how finely it is resolved. Pick a **DomainSpec**
@@ -101,7 +116,8 @@ Boundaries and forcing
 Run setup
    The run window (start, end and model reference date), the processor
    layout and PIO or automatic-tiling options, and optional carbon dioxide
-   removal forcing, imported from a netCDF file or described by hand.
+   removal forcing, imported from a netCDF file or described by hand (required
+   in ``cdr_lite`` mode).
 
 .. figure:: images/wizard-run.png
    :alt: The Run setup section: run window, partitioning and carbon dioxide removal
