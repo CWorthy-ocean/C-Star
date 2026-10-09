@@ -111,7 +111,8 @@ def run(
             metavar="INPUT",
             callback=_split_only_inputs,
             help="generate only these input categories (grid, "
-            "initial_conditions, surface, boundary, tidal, river, cdr) and "
+            "initial_conditions, surface, boundary, tidal, river, cdr, "
+            "carbonate_sensitivity) and "
             "skip configure_build/blueprint emission -- a one-off run for "
             "slow or human-checked inputs. Existing files are still reused "
             "per the normal skip-existing logic. Re-run without this flag "

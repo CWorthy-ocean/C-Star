@@ -28,10 +28,12 @@ from cstar.applications.forge.app import ForgeApplication
 from cstar.applications.forge.blueprint import (
     _COMPOSITION_SPEC_KINDS,
     FORGE_BLUEPRINT_VERSION,
+    CarbonateSensitivitySpec,
     Composition,
     ForgeBlueprint,
     ForgeProvenance,
     SpecRef,
+    UserProvidedFile,
     composition_refs,
     emitted_blueprint_description,
     emitted_provenance,
@@ -53,6 +55,7 @@ from cstar.orchestration.models import (
     GeneratedBy,
     Provenance,
 )
+from cstar.roms.precheck import NamelistConsistencyError
 
 _BUNDLED_CATALOG = Path(cstar.catalog.__file__).parent / "bundled"
 _MODEL_DIR = _BUNDLED_CATALOG / "ModelSpec" / "cson_roms-marbl_v0.1"
@@ -3778,6 +3781,416 @@ def test_golden_model_settings_test_tiny_roms090_cdr_lite():
         "change, regenerate tests/fixtures/golden_model_settings_test-tiny-"
         "roms090-cdr-lite.json; otherwise the change is a regression."
     )
+
+
+# ---------------------------------------------------------------------------
+# bgc_mode "cdr_lite": user-supplied carbonate sensitivity files
+# (build_forge_blueprint(carbonate_sensitivity=...), ForgeBlueprint.carbonate_sensitivity)
+# ---------------------------------------------------------------------------
+def _carbonate_user_file(
+    location: str | Path, content_hash: str = "a" * 64
+) -> UserProvidedFile:
+    return UserProvidedFile(location=str(location), content_hash=content_hash)
+
+
+def _cdrgas_file(
+    directory: Path, stamp: str, *, root: str = "roms", segment: int | None = None
+) -> Path:
+    """A tiny netCDF named like a ROMS ``_cdrgas`` output,
+    ``<root>_cdrgas.<14-digit stamp>[.<segment>].nc`` (a ``segment`` makes it one
+    per-rank piece). Its content is irrelevant to the resolver, which only hashes it.
+    """
+    tail = "" if segment is None else f".{segment}"
+    return _write_tiny_netcdf(directory, name=f"{root}_cdrgas.{stamp}{tail}.nc")
+
+
+def _build_carbonate(carbonate_sensitivity: t.Any, **over: t.Any) -> ForgeBlueprint:
+    """A ``bgc_mode: cdr_lite`` blueprint carrying ``carbonate_sensitivity``. PIO is
+    off (``roms-marbl-0.9-default`` turns it on), so a NETCDF4 test file does not
+    trigger the CDF-5 conversion warning; the PIO tests below switch it back on.
+    """
+    over.setdefault("use_pio", False)
+    return _build_cdr_lite(carbonate_sensitivity=carbonate_sensitivity, **over)
+
+
+def _carbonate_locations(cfg: ForgeBlueprint) -> list[Path]:
+    assert cfg.carbonate_sensitivity is not None
+    return [Path(f.location) for f in cfg.carbonate_sensitivity.files]
+
+
+class TestCarbonateSensitivitySpec:
+    """``CarbonateSensitivitySpec`` and how ``ForgeBlueprint`` stores, hashes and
+    saves it: absent unless supplied (the ``carbonate-sensitivity-from`` directive
+    normally provides the files at run time).
+    """
+
+    _FILES = (
+        "/data/roms_cdrgas.20120101130000.nc",
+        "/data/roms_cdrgas.20120102130000.nc",
+    )
+
+    def _spec(
+        self, *locations: str, content_hash: str = "a" * 64
+    ) -> CarbonateSensitivitySpec:
+        return CarbonateSensitivitySpec(
+            files=[
+                _carbonate_user_file(loc, content_hash)
+                for loc in locations or self._FILES
+            ]
+        )
+
+    def _with_spec(self, spec: CarbonateSensitivitySpec) -> ForgeBlueprint:
+        return _build_cdr_lite(use_pio=False).model_copy(
+            update={"carbonate_sensitivity": spec}
+        )
+
+    def test_requires_at_least_one_file(self):
+        with pytest.raises(ValueError, match="at least 1 item"):
+            CarbonateSensitivitySpec(files=[])
+
+    def test_rejects_repeated_basenames_and_names_them(self):
+        with pytest.raises(ValueError) as exc_info:
+            self._spec(
+                "/a/roms_cdrgas.20120101130000.nc",
+                "/b/roms_cdrgas.20120101130000.nc",
+                "/a/other_cdrgas.20120102130000.nc",
+                "/b/other_cdrgas.20120102130000.nc",
+                "/a/unique_cdrgas.20120103130000.nc",
+            )
+
+        msg = str(exc_info.value)
+        assert (
+            "each must be distinct; repeated: "
+            "other_cdrgas.20120102130000.nc, roms_cdrgas.20120101130000.nc"
+        ) in msg
+        assert "unique_cdrgas" not in msg
+
+    def test_keeps_the_given_order(self):
+        spec = self._spec(*reversed(self._FILES))
+
+        assert [f.location for f in spec.files] == list(reversed(self._FILES))
+
+    def test_forbids_unknown_keys(self):
+        with pytest.raises(ValueError, match="bogus"):
+            CarbonateSensitivitySpec(files=[_carbonate_user_file("/d/a.nc")], bogus=1)
+
+    def test_is_unset_by_default(self):
+        assert _build().carbonate_sensitivity is None
+        assert _build_cdr_lite(use_pio=False).carbonate_sensitivity is None
+
+    def test_an_unset_field_leaves_no_trace_in_the_hash(self, monkeypatch):
+        """A hash recorded before the field existed must still verify: with the field
+        unset, ``content_hash`` is what it would be if the model had no such key.
+        """
+        cfg = _build_cdr_lite(use_pio=False)
+        assert cfg.carbonate_sensitivity is None
+        recorded = cfg.content_hash()
+        dump = ForgeBlueprint.model_dump
+
+        def dump_as_before_the_field(self, **kwargs):
+            data = dump(self, **kwargs)
+            assert data.pop("carbonate_sensitivity") is None
+            return data
+
+        monkeypatch.setattr(ForgeBlueprint, "model_dump", dump_as_before_the_field)
+
+        assert cfg.content_hash() == recorded
+
+    def test_a_set_spec_changes_the_hash(self):
+        unset = _build_cdr_lite(use_pio=False)
+        early, late = (
+            _carbonate_user_file(loc, digest * 64)
+            for loc, digest in zip(self._FILES, "ab", strict=True)
+        )
+
+        in_order = self._with_spec(CarbonateSensitivitySpec(files=[early, late]))
+        reordered = self._with_spec(CarbonateSensitivitySpec(files=[late, early]))
+
+        assert in_order.content_hash() != unset.content_hash()
+        # The order is the order ROMS reads them in, so it is results-affecting.
+        assert reordered.content_hash() != in_order.content_hash()
+
+    def test_hash_ignores_file_location_but_not_content_hash(self):
+        base = self._with_spec(self._spec())
+        moved = self._with_spec(
+            self._spec(
+                "/elsewhere/a_cdrgas.20120101130000.nc",
+                "/elsewhere/b_cdrgas.20120102130000.nc",
+            )
+        )
+        edited = self._with_spec(self._spec(content_hash="b" * 64))
+
+        assert moved.content_hash() == base.content_hash()
+        assert edited.content_hash() != base.content_hash()
+
+    def test_to_yaml_str_omits_the_unset_field(self):
+        cfg = _build_cdr_lite(use_pio=False)
+
+        saved = yaml.safe_load(cfg.to_yaml_str())
+
+        assert "carbonate_sensitivity" not in saved
+        assert ForgeBlueprint.from_yaml_data(saved).carbonate_sensitivity is None
+
+    def test_to_yaml_str_emits_a_set_field_and_it_round_trips(self, tmp_path):
+        cfg = self._with_spec(self._spec())
+
+        saved = yaml.safe_load(cfg.to_yaml_str())
+        path = cfg.to_yaml(tmp_path / "forge_blueprint.yaml")
+        back = ForgeBlueprint.from_yaml(path)
+
+        assert saved["carbonate_sensitivity"] == {
+            "files": [
+                {"location": loc, "content_hash": "a" * 64} for loc in self._FILES
+            ]
+        }
+        assert back.carbonate_sensitivity == cfg.carbonate_sensitivity
+        assert back.content_hash() == back.provenance.content_hash
+
+
+def test_resolver_carbonate_sensitivity_defaults_to_none():
+    assert _build_cdr_lite(use_pio=False).carbonate_sensitivity is None
+
+
+def test_resolver_carbonate_sensitivity_scans_a_directory_in_timestamp_order(tmp_path):
+    from cstar.applications.forge.user_files import hash_netcdf_contents
+
+    # Created newest-first, with a per-rank tile and an unrelated output alongside:
+    # only the joined _cdrgas files are taken, ordered by their timestamps.
+    late = _cdrgas_file(tmp_path, "20120102130000")
+    early = _cdrgas_file(tmp_path, "20120101130000")
+    _cdrgas_file(tmp_path, "20120101130000", segment=0)
+    _write_tiny_netcdf(tmp_path, name="roms_his.20120101130000.nc")
+
+    cfg = _build_carbonate(tmp_path)
+
+    assert _carbonate_locations(cfg) == [early.resolve(), late.resolve()]
+    assert [f.content_hash for f in cfg.carbonate_sensitivity.files] == [
+        hash_netcdf_contents(early),
+        hash_netcdf_contents(late),
+    ]
+
+
+def test_resolver_carbonate_sensitivity_scans_a_str_directory(tmp_path):
+    only = _cdrgas_file(tmp_path, "20120101130000")
+
+    cfg = _build_carbonate(str(tmp_path))
+
+    assert _carbonate_locations(cfg) == [only.resolve()]
+
+
+@pytest.mark.parametrize("kind", ["empty", "only_tiles"])
+def test_resolver_carbonate_sensitivity_directory_without_joined_files_raises(
+    tmp_path, kind
+):
+    if kind == "only_tiles":
+        _cdrgas_file(tmp_path, "20120101130000", segment=0)
+        _cdrgas_file(tmp_path, "20120101130000", segment=1)
+
+    with pytest.raises(FileNotFoundError, match="_cdrgas") as exc_info:
+        _build_carbonate(tmp_path)
+
+    msg = str(exc_info.value)
+    assert f"no joined carbonate sensitivity files in {tmp_path}" in msg
+    assert "cdr_gas_exch_output" in msg
+    if kind == "only_tiles":
+        assert "2 per-rank tile file(s) skipped" in msg
+
+
+@pytest.mark.parametrize("as_type", [str, Path])
+def test_resolver_carbonate_sensitivity_takes_one_file(tmp_path, as_type):
+    from cstar.applications.forge.user_files import hash_netcdf_contents
+
+    path = _cdrgas_file(tmp_path, "20120101130000")
+
+    cfg = _build_carbonate(as_type(path))
+
+    (only,) = cfg.carbonate_sensitivity.files
+    assert only.location == str(path)
+    assert only.content_hash == hash_netcdf_contents(path)
+
+
+def test_resolver_carbonate_sensitivity_keeps_the_given_file_order(tmp_path):
+    first = _cdrgas_file(tmp_path, "20120102130000")
+    second = _cdrgas_file(tmp_path, "20120101130000")
+
+    cfg = _build_carbonate([str(first), second])
+
+    assert _carbonate_locations(cfg) == [first, second]
+
+
+def test_resolver_carbonate_sensitivity_dict_hashes_paths_and_trusts_entries(tmp_path):
+    path = _cdrgas_file(tmp_path, "20120101130000")
+    trusted = {"location": "/not/here/x_cdrgas.20120102130000.nc", "content_hash": "z"}
+
+    cfg = _build_carbonate({"files": [str(path), trusted]})
+
+    first, second = cfg.carbonate_sensitivity.files
+    assert first.location == str(path)
+    assert first.content_hash != "z"
+    assert (second.location, second.content_hash) == (
+        "/not/here/x_cdrgas.20120102130000.nc",
+        "z",
+    )
+
+
+def test_resolver_carbonate_sensitivity_takes_a_spec_as_is():
+    spec = CarbonateSensitivitySpec(
+        files=[_carbonate_user_file("/nowhere/roms_cdrgas.20120101130000.nc")]
+    )
+
+    cfg = _build_carbonate(spec)
+
+    assert cfg.carbonate_sensitivity == spec
+
+
+def test_resolver_carbonate_sensitivity_rejects_repeated_basenames(tmp_path):
+    (tmp_path / "a").mkdir()
+    (tmp_path / "b").mkdir()
+    one = _cdrgas_file(tmp_path / "a", "20120101130000")
+    two = _cdrgas_file(tmp_path / "b", "20120101130000")
+
+    with pytest.raises(ValueError, match="repeated: roms_cdrgas.20120101130000.nc"):
+        _build_carbonate([one, two])
+
+
+def test_resolver_carbonate_sensitivity_missing_file_raises(tmp_path):
+    present = _cdrgas_file(tmp_path, "20120101130000")
+    missing = tmp_path / "gone_cdrgas.20120102130000.nc"
+
+    with pytest.raises(FileNotFoundError, match="not found") as exc_info:
+        _build_carbonate([present, missing])
+
+    assert str(missing) in str(exc_info.value)
+    assert str(present) not in str(exc_info.value)
+
+
+@pytest.mark.parametrize("mode", ["marbl", "none"])
+def test_resolver_carbonate_sensitivity_requires_bgc_mode_cdr_lite(tmp_path, mode):
+    path = _cdrgas_file(tmp_path, "20120101130000")
+    over = {"model_dir": _MODEL_DIR_ROMS090}
+    if mode == "none":
+        over.update(bgc_mode="none", forcing_inputs=_PHYSICS_ONLY_FORCING)
+
+    with pytest.raises(ValueError) as exc_info:
+        _build(use_pio=False, carbonate_sensitivity=[path], **over)
+
+    msg = str(exc_info.value)
+    assert f'bgc_mode is "{mode}": only bgc_mode "cdr_lite" reads' in msg
+    assert "online" not in msg  # the knob is off: the mode is the one problem
+
+
+def test_resolver_carbonate_sensitivity_rejects_the_online_knob_under_cdr_lite(
+    tmp_path,
+):
+    """The files-vs-online message wins over the CDR_LITE "needs MARBL" one a
+    ``bgc_mode: cdr_lite`` build with the knob would otherwise see.
+    """
+    path = _cdrgas_file(tmp_path, "20120101130000")
+
+    with pytest.raises(ValueError) as exc_info:
+        _build_carbonate([path], run_time_overrides=_LITE_ON)
+
+    msg = str(exc_info.value)
+    assert "cdr_lite.cdr_online_carbonate_sensitivity is on" in msg
+    assert "bgc_mode is" not in msg
+
+
+def test_resolver_carbonate_sensitivity_lists_every_problem_at_once(tmp_path):
+    path = _cdrgas_file(tmp_path, "20120101130000")
+
+    with pytest.raises(ValueError) as exc_info:
+        _build(
+            model_dir=_MODEL_DIR_ROMS090,
+            use_pio=False,
+            carbonate_sensitivity=[path],
+            run_time_overrides=_LITE_ON,
+        )
+
+    msg = str(exc_info.value)
+    assert 'bgc_mode is "marbl"' in msg
+    assert "cdr_lite.cdr_online_carbonate_sensitivity is on" in msg
+    assert msg.count("\n- ") == 2
+
+
+def test_resolver_carbonate_sensitivity_warns_for_netcdf4_files_under_pio(tmp_path):
+    netcdf4 = _nc_file(tmp_path / "a_cdrgas.20120101130000.nc", "NETCDF4")
+    classic = _nc_file(tmp_path / "b_cdrgas.20120102130000.nc", "NETCDF3_64BIT_DATA")
+
+    with pytest.warns(UserWarning, match="CDF-5") as record:
+        _build_carbonate([netcdf4, classic], use_pio=True)
+
+    (warning,) = _pio_warnings(record)
+    msg = str(warning.message)
+    assert f"carbonate_sensitivity[0]: {netcdf4} is netCDF-4/HDF5" in msg
+    assert "carbonate_sensitivity[1]" not in msg
+
+
+def test_resolver_carbonate_sensitivity_pio_warning_lists_every_file(tmp_path):
+    files = [
+        _nc_file(tmp_path / f"{n}_cdrgas.2012010{i}130000.nc", "NETCDF4")
+        for i, n in enumerate("ab", start=1)
+    ]
+    bp = _build_cdr_lite(use_pio=False).model_copy(
+        update={
+            "carbonate_sensitivity": CarbonateSensitivitySpec(
+                files=[_carbonate_user_file(f) for f in files]
+            )
+        }
+    )
+
+    with pytest.warns(UserWarning, match="CDF-5") as record:
+        _warn_user_files_need_pio_conversion(bp, use_pio=True)
+
+    assert len(record) == 1
+    msg = str(record[0].message)
+    assert "carbonate_sensitivity[0]" in msg and "carbonate_sensitivity[1]" in msg
+
+
+def test_resolver_carbonate_sensitivity_no_pio_warning_without_pio(tmp_path, recwarn):
+    path = _nc_file(tmp_path / "a_cdrgas.20120101130000.nc", "NETCDF4")
+
+    _build_carbonate([path], use_pio=False)
+
+    assert not _pio_warnings(recwarn)
+
+
+def test_resolver_cdr_lite_precheck_covers_the_stream_configure_build_forces_on():
+    """In ``bgc_mode: cdr_lite`` the CDR-lite tracer stream is forced on once
+    generation knows the tracer counts, so the restart-rollover precheck checks it
+    now -- even though ``do_cdr_lite_output`` is still off as authored.
+    """
+    stream = {"nrpf": 7, "output_period": 3600.0}
+
+    with pytest.raises(NamelistConsistencyError) as exc_info:
+        _build_cdr_lite(run_time_overrides={"cdr_lite_output": stream})
+
+    assert "cdr_lite_output_settings.nrpf_cdr_lite" in str(exc_info.value)
+    assert "must be positive and evenly divide" in str(exc_info.value)
+
+    # The same stream is not checked while it stays off in a MARBL build.
+    marbl = _build(
+        model_dir=_MODEL_DIR_ROMS090, run_time_overrides={"cdr_lite_output": stream}
+    )
+    assert marbl.model_settings["cdr_lite_output"]["nrpf"] == 7
+    assert marbl.model_settings["cdr_lite_output"]["do_cdr_lite_output"] is False
+
+
+def test_resolver_cdr_lite_precheck_leaves_the_stored_switch_as_authored():
+    """The precheck runs on a copy with the stream on; the stored settings are the
+    authored ones (``configure_build`` is what switches the stream on).
+    """
+    stream = {"nrpf": 12, "output_period": 7200.0}  # 24 h: divides the restart period
+
+    cfg = _build_cdr_lite(run_time_overrides={"cdr_lite_output": stream})
+
+    saved = cfg.model_settings["cdr_lite_output"]
+    assert (saved["nrpf"], saved["output_period"]) == (12, 7200.0)
+    assert saved["do_cdr_lite_output"] is False
+    # ... and an authored True stays True.
+    on = _build_cdr_lite(
+        run_time_overrides={"cdr_lite_output": {**stream, "do_cdr_lite_output": True}}
+    )
+    assert on.model_settings["cdr_lite_output"]["do_cdr_lite_output"] is True
 
 
 # ---------------------------------------------------------------------------

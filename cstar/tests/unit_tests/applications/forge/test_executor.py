@@ -3262,6 +3262,8 @@ class TestGoldenNamelist:
         param_overrides: dict[str, int] | None = None,
         *,
         cdr_lite: bool = False,
+        carbonate_sensitivity: Any = None,
+        capture: dict[str, Any] | None = None,
     ) -> str:
         """Shared body for the golden namelist tests: drives the real
         ``generate_inputs()`` -> ``configure_build()`` chain against ``model_dir``
@@ -3284,6 +3286,12 @@ class TestGoldenNamelist:
         ``rt.CDRForcing`` (grid-less, saved to a real netCDF) rather than a mock,
         so the tracer counts the namelist carries are read off roms-tools' own
         generated tracer axis -- exactly what the ``CDR_LITE`` build sees.
+
+        ``carbonate_sensitivity`` is handed to ``build_forge_blueprint`` as is (a
+        ``cdr_lite`` case's user-supplied ``_cdrgas`` files). ``capture``, if given,
+        receives the run's objects -- ``cfg`` (the resolved ForgeBlueprint),
+        ``builder`` (the ForgeExecutor) and ``emitted`` (the roms_marbl blueprint
+        ``generate_inputs`` returned) -- for assertions beyond the namelist.
         """
         mode_kwargs: dict[str, Any] = (
             {
@@ -3305,6 +3313,7 @@ class TestGoldenNamelist:
             dt=7200,
             forcing_inputs=_CDR_LITE_FORCING_INPUTS if cdr_lite else _FORCING_INPUTS,
             output_settings=_OUTPUT_SETTINGS,
+            carbonate_sensitivity=carbonate_sensitivity,
             **mode_kwargs,
             # Explicit False (matches cson_roms-marbl_v0.1's own default) so both
             # golden cases stay decoupled from PIO: roms-marbl-0.5-default bakes in
@@ -3405,7 +3414,10 @@ class TestGoldenNamelist:
             mock_cdr_instance.releases = mock_releases
             mock_cdr.return_value = mock_cdr_instance
 
-            builder.generate_inputs(clobber=True, use_dask=False, test=False)
+            emitted = builder.generate_inputs(clobber=True, use_dask=False, test=False)
+
+        if capture is not None:
+            capture.update(cfg=cfg, builder=builder, emitted=emitted)
 
         # The §3a fix's whole point: these generation-derived values must survive
         # configure_build's overlay, not get reverted to resolver-time placeholders.
@@ -4090,6 +4102,89 @@ class TestGoldenNamelist:
         assert len(nml.tracer_diff2.tnu2) == 5
         assert nml.cdr_frc_settings.cdr_source is True
         assert nml.cdr_frc_settings.cdr_ncdr_parm == 2
+
+    @staticmethod
+    def _cdrgas_sources(directory: Path) -> list[Path]:
+        """Two real ``_cdrgas`` files (the variables a CDR-LiTE build reads) under
+        ``directory``, outside the run's working tree.
+        """
+        from test_input_data import _write_cdrgas_netcdf
+
+        directory.mkdir()
+        return [
+            _write_cdrgas_netcdf(directory / f"roms_cdrgas.{stamp}.nc", fill=fill)
+            for stamp, fill in (("20120101130000", 1.0), ("20120102130000", 2.0))
+        ]
+
+    def test_cdr_lite_carbonate_sensitivity_files_are_staged_and_recorded(
+        self, mock_grid, tmp_path
+    ):
+        """User-supplied ``_cdrgas`` files travel blueprint -> executor ->
+        ``forcing.carbonate_sensitivity`` step: staged under their basenames next to
+        the generated inputs, listed (unpartitioned, in order) in the emitted
+        roms_marbl blueprint and among the executor's planned outputs. The rendered
+        namelist is the golden one: C-Star adds the files to ``frcfiles`` from the
+        blueprint when the run starts, so Forge's namelist does not list them.
+        """
+        from cstar.applications.forge.engine import forge_blueprint_to_builder_kwargs
+
+        sources = self._cdrgas_sources(tmp_path / "cdrgas")
+        captured: dict[str, Any] = {}
+
+        self._run_golden_namelist_case(
+            mock_grid,
+            tmp_path,
+            _MODEL_DIR_ROMS090,
+            "golden_namelist_test-tiny-roms090-cdr-lite.nml",
+            cdr_lite=True,
+            carbonate_sensitivity=sources,
+            capture=captured,
+        )
+
+        cfg, builder, emitted = (captured[k] for k in ("cfg", "builder", "emitted"))
+        staged = [builder.input_data_dir / p.name for p in sources]
+        assert [Path(f.location) for f in cfg.carbonate_sensitivity.files] == sources
+        kwargs = forge_blueprint_to_builder_kwargs(cfg)
+        assert kwargs["carbonate_sensitivity"] == cfg.carbonate_sensitivity
+        assert builder.carbonate_sensitivity == cfg.carbonate_sensitivity
+        for source, dest in zip(sources, staged, strict=True):
+            assert dest.read_bytes() == source.read_bytes()
+        recorded = emitted.forcing["carbonate_sensitivity"]["data"]
+        assert [Path(r["location"]) for r in recorded] == staged
+        assert [r["partitioned"] for r in recorded] == [False, False]
+        written = yaml.safe_load(builder.path_roms_marbl_blueprint().read_text())
+        assert [
+            Path(r["location"])
+            for r in written["forcing"]["carbonate_sensitivity"]["data"]
+        ] == staged
+        assert builder._planned_netcdf_outputs()[-2:] == [p.resolve() for p in staged]
+
+    def test_cdr_lite_without_carbonate_sensitivity_emits_none(
+        self, mock_grid, tmp_path
+    ):
+        """The default (the ``carbonate-sensitivity-from`` directive supplies the
+        files at run time): no step runs, nothing is staged or planned, and the
+        emitted blueprint's ``forcing.carbonate_sensitivity`` is ``None``.
+        """
+        captured: dict[str, Any] = {}
+
+        self._run_golden_namelist_case(
+            mock_grid,
+            tmp_path,
+            _MODEL_DIR_ROMS090,
+            "golden_namelist_test-tiny-roms090-cdr-lite.nml",
+            cdr_lite=True,
+            capture=captured,
+        )
+
+        cfg, builder, emitted = (captured[k] for k in ("cfg", "builder", "emitted"))
+        assert cfg.carbonate_sensitivity is None
+        assert builder.carbonate_sensitivity is None
+        assert emitted.forcing["carbonate_sensitivity"] is None
+        written = yaml.safe_load(builder.path_roms_marbl_blueprint().read_text())
+        assert written["forcing"].get("carbonate_sensitivity") is None
+        assert not any("_cdrgas" in p.name for p in builder._planned_netcdf_outputs())
+        assert not list(builder.input_data_dir.glob("*_cdrgas*"))
 
     def test_configure_build_0_9_pin_cdr_lite_output_forces_no_cdr_forcing(
         self, mock_grid, tmp_path

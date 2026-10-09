@@ -37,6 +37,24 @@ normally omits), a forge blueprint has these sections:
 ``cdr``
    Optional carbon dioxide removal forcing: none, a hand-authored
    description, or an imported netCDF file.
+``carbonate_sensitivity``
+   Optional, and only valid with ``bgc_mode: cdr_lite``. The carbonate
+   sensitivity files (``ddic_dco2`` and ``ddic_dalk`` with their time
+   variables) that a CDR-lite build reads as surface forcing, as a ``files:``
+   list of ``location`` and ``content_hash`` entries, in the order ROMS reads
+   them; the basenames must be distinct. It is normally absent, and a saved
+   blueprint then has no such key: the ``carbonate-sensitivity-from``
+   :doc:`workplan directive <../workplans/directives>` supplies the files at
+   run time, from the ``_cdrgas`` output of an earlier ROMS-MARBL step. When
+   it is present, each ``location`` must exist on the machine running Forge:
+   Forge checks each file for the variables above, copies it into
+   ``input_data/`` under its own name (as classic netCDF when the build uses
+   ParallelIO), and lists the copies in the ROMS-MARBL blueprint's
+   ``forcing.carbonate_sensitivity``. The ``content_hash`` pins the file's
+   data, so a changed file only warns; the ``location`` is not part of the
+   blueprint's content hash. Files are rejected for any other biogeochemistry
+   mode, and when ``cdr_lite.cdr_online_carbonate_sensitivity`` is on, because
+   ROMS then computes the sensitivities itself.
 ``datasets``
    The list of source datasets Forge must stage before generating inputs
    (derived from ``forcing``; see :doc:`../forge/source_datasets`).
@@ -109,8 +127,9 @@ The options you are most likely to want:
 ``--only-inputs grid,tidal``
    Generate only the named input categories (``grid``,
    ``initial_conditions``, ``surface``, ``boundary``, ``tidal``, ``river``,
-   ``cdr``) and stop before the build configuration. Useful for a slow input
-   you want to check by hand before generating the rest.
+   ``cdr``, ``carbonate_sensitivity``) and stop before the build
+   configuration. Useful for a slow input you want to check by hand before
+   generating the rest.
 ``--clobber``
    Regenerate inputs that already exist. Without it, existing files are
    reused. To run the emitted ROMS-MARBL blueprint again in the same
