@@ -84,6 +84,7 @@ from cstar.applications.forge.namelist_model import (
     online_carbonate_sensitivity_requested,
     output_precheck_applies_to,
     prune_version_gated_sections,
+    river_tracer_floor,
     run_time_settings_for_ref,
 )
 
@@ -1407,6 +1408,34 @@ def build_forge_blueprint(
                 + '\nSet bgc_mode="marbl" or remove these BGC forcing items from '
                 "the ForcingSpec."
             )
+
+    # ----- generated river tracer count --------------------------------------
+    # roms-tools' RiverForcing writes T and S, plus the MARBL tracers with
+    # include_bgc, and never passive or CDR tracers. No ucla-roms release reads
+    # fewer than T + S + BGC + passive from a river file (river_tracer_floor),
+    # so a generated river cannot run with passive tracers, or under MARBL
+    # without include_bgc. Leaving the CDR tracers out is fine from ucla-roms
+    # 0.9.0 (configure_build checks the full count once the CDR counts are known).
+    # A custom_file river is checked against its own file at generation.
+    river_param = settings.get("param") or {}
+    floor = river_tracer_floor(river_param)
+    ntrc_bio = int(river_param.get("ntrc_bio") or 0)
+    river_problems = [
+        f"river[{i}] (include_bgc={it.include_bgc}) is generated with "
+        f"{2 + (ntrc_bio if it.include_bgc else 0)} tracers"
+        for i, it in enumerate(sources.river)
+        if it.custom_file is None and 2 + (ntrc_bio if it.include_bgc else 0) < floor
+    ]
+    if river_problems:
+        raise ValueError(
+            "roms-tools river forcing holds T and S (plus the MARBL tracers with "
+            f"include_bgc), but ucla-roms reads {floor} river tracers (T + S + "
+            f"ntrc_bio {ntrc_bio} + nt_passive {int(river_param.get('nt_passive') or 0)}):"
+            "\n  - "
+            + "\n  - ".join(river_problems)
+            + "\nSet include_bgc on a MARBL run, supply a custom_file river with "
+            "the passive tracers, or set param.nt_passive to 0."
+        )
 
     # ----- code + templates --------------------------------------------------
     code = _build_code(

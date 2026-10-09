@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import os
 import re
+import warnings
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Annotated, Any, Literal
 
@@ -747,6 +748,103 @@ def check_cdr_lite_mode_roms(roms_ref: str | None) -> None:
             f'bgc_mode "cdr_lite" on ucla-roms {roms_ref}: CDR-lite without MARBL '
             f"needs ucla-roms >= {minimum}."
         )
+
+
+# ucla-roms release from which a river forcing file may leave out the CDR tracer
+# block (ucla-roms PR #369): river_frc reads the file's ``ntracers`` length at
+# init and accepts every model tracer (``nt``) or every tracer but the CDR block
+# (whose river concentration is then 0), aborting on any other length. Earlier
+# releases read the first ``nt`` slots: a longer file runs with its extra
+# tracers ignored and a shorter one fails in the netCDF read.
+RIVER_TRACERS_WITHOUT_CDR_MIN_ROMS: tuple[int, int, int] = (0, 9, 0)
+
+
+def river_tracer_floor(param: Mapping[str, Any]) -> int:
+    """Fewest tracers a river forcing file can carry on any ucla-roms release:
+    every model tracer but the CDR block (T + S + ``ntrc_bio`` + ``nt_passive``).
+
+    Unlike the full count it does not depend on ``nt_cdr_oae``/``nt_cdr_dor``,
+    which only become known when the CDR forcing is generated, so it can be
+    checked before then.
+    """
+    return n_tracers_from_param(
+        {k: v for k, v in param.items() if k not in _CDR_TRACER_WEIGHTS}
+    )
+
+
+def check_river_tracer_counts(
+    river_ntracers: Mapping[str, int],
+    *,
+    n_tracers: int,
+    param: Mapping[str, Any],
+    roms_ref: str | None,
+) -> None:
+    """Check the ``ntracers`` length of each river forcing file against what
+    the pinned ucla-roms reads.
+
+    From :data:`RIVER_TRACERS_WITHOUT_CDR_MIN_ROMS` every file must have the
+    same length, either ``n_tracers`` or ``n_tracers`` minus the CDR block
+    (``2*nt_cdr_oae + nt_cdr_dor``). Older releases read the first
+    ``n_tracers`` slots, so a shorter file is rejected and a longer one only
+    warns. A ``roms_ref`` that is not a release tag counts as the latest
+    release, like :func:`check_cdr_lite_mode_roms`.
+
+    ``river_ntracers`` maps each file to its length; ``param`` supplies the CDR
+    counts, read after the CDR forcing is generated. The executor's
+    ``configure_build`` calls this once the final tracer count is known.
+
+    Raises ``ValueError`` naming the file and the accepted lengths.
+    """
+    if not river_ntracers:
+        return
+    n_cdr = sum(w * int(param.get(k) or 0) for k, w in _CDR_TRACER_WEIGHTS.items())
+    n_without_cdr = n_tracers - n_cdr
+    breakdown = (
+        f"T + S + ntrc_bio {int(param.get('ntrc_bio') or 0)} + nt_passive "
+        f"{int(param.get('nt_passive') or 0)} + 2*nt_cdr_oae "
+        f"{int(param.get('nt_cdr_oae') or 0)} + nt_cdr_dor "
+        f"{int(param.get('nt_cdr_dor') or 0)}"
+    )
+    version = roms_version_from_ref(roms_ref)
+    release = roms_ref if roms_ref else "(latest)"
+    if version is not None and version < RIVER_TRACERS_WITHOUT_CDR_MIN_ROMS:
+        for path, n in river_ntracers.items():
+            if n < n_tracers:
+                raise ValueError(
+                    f"river forcing {path} has {n} tracers, but ucla-roms "
+                    f"{release} reads {n_tracers} from it (every model tracer: "
+                    f"{breakdown})."
+                )
+            if n > n_tracers:
+                warnings.warn(
+                    f"river forcing {path} has {n} tracers, more than the build's "
+                    f"{n_tracers} ({breakdown}); ucla-roms {release} reads the first "
+                    f"{n_tracers} and ignores the rest.",
+                    UserWarning,
+                    stacklevel=2,
+                )
+        return
+
+    allowed = (
+        f"{n_tracers} (every model tracer: {breakdown})"
+        if n_cdr == 0
+        else f"{n_tracers} (every model tracer: {breakdown}) or {n_without_cdr} "
+        "(every tracer but the CDR block, whose river concentration is then 0)"
+    )
+    problems = [
+        f"river forcing {path} has {n} tracers, but ucla-roms {release} accepts "
+        f"only {allowed}."
+        for path, n in river_ntracers.items()
+        if n not in (n_tracers, n_without_cdr)
+    ]
+    if not problems and len(set(river_ntracers.values())) > 1:
+        lengths = ", ".join(f"{path}: {n}" for path, n in river_ntracers.items())
+        problems.append(
+            f"ucla-roms {release} needs the same tracer count in every river "
+            f"forcing file; got {lengths}."
+        )
+    if problems:
+        raise ValueError("\n".join(problems))
 
 
 def ensure_cdr_output_marbl_diagnostics(diags: list[str] | None) -> list[str]:

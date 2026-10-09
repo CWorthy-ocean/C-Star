@@ -37,6 +37,7 @@ from cstar.applications.forge.namelist_model import (
     bgc_mode_from_cppdefs,
     cdr_tracer_counts,
     n_tracers_from_param,
+    river_tracer_floor,
 )
 from cstar.applications.forge.source_registry import ROMS_TOOLS_SOURCE_NAME
 from cstar.applications.forge.user_files import stage_user_netcdf, verify_user_file
@@ -2287,12 +2288,32 @@ class RomsMarblInputData(InputData):
             paths[0] if isinstance(paths, (list, tuple)) else paths
         )
 
+    def _check_river_tracer_floor(self, ntracers: int, path: Path | str) -> None:
+        """Reject a river forcing file with fewer tracers than any ucla-roms
+        release reads (see :func:`river_tracer_floor`).
+
+        The full river tracer check (:func:`check_river_tracer_counts`, run by
+        the executor's ``configure_build``) needs the CDR tracer counts, which
+        the CDR forcing step derives after this one; this lower bound does not,
+        so a short file fails before the remaining inputs are generated.
+        """
+        param = self._settings_run_time.get("param") or {}
+        floor = river_tracer_floor(param)
+        if ntracers < floor:
+            raise ValueError(
+                f"river forcing {path} has {ntracers} tracers, fewer than the "
+                f"{floor} every ucla-roms release reads (T + S + ntrc_bio "
+                f"{int(param.get('ntrc_bio') or 0)} + nt_passive "
+                f"{int(param.get('nt_passive') or 0)}; from ucla-roms 0.9.0 the CDR "
+                "tracers may be left out). A river file built without include_bgc "
+                "holds only T and S."
+            )
+
     def _generate_river_forcing_from_custom_file(
         self,
         subkey: str,
         output_path: Path,
         custom_file: UserProvidedFile | dict[str, Any],
-        include_bgc: bool,
     ) -> None:
         """Verify, sanity-check, and stage a user-supplied river-forcing netCDF in
         place of building one via ``rt.RiverForcing``.
@@ -2324,9 +2345,11 @@ class RomsMarblInputData(InputData):
                     )
                 nriv = int(ds.sizes["nriver"])
 
-                # Sanity checks (warnings, not errors) -- best-effort peeks at the
-                # user's own file that must never turn into a crash or spurious
-                # noise; mirrors _interp_frc_surface_reuse's defensive try/except.
+                # Grid sanity check (a warning, not an error) -- a best-effort peek
+                # at the user's own file that must never turn into a crash or
+                # spurious noise; mirrors _interp_frc_surface_reuse's defensive
+                # try/except. The tracer count below is a hard check instead:
+                # ucla-roms aborts on a file it cannot read.
                 try:
                     grid_sizes = self.grid.ds.sizes
                     for dim in ("eta_rho", "xi_rho"):
@@ -2350,37 +2373,8 @@ class RomsMarblInputData(InputData):
                         e,
                     )
 
-                try:
-                    if "ntracers" in ds.sizes:
-                        ntracers = int(ds.sizes["ntracers"])
-                        # roms-tools' RiverForcing writes exactly 2 tracers (temp,
-                        # salt) when include_bgc=False, and more (MARBL_TRACER_NAMES)
-                        # when True -- see get_tracer_metadata_dict in
-                        # roms_tools.setup.utils. Flag a file/item mismatch.
-                        if include_bgc and ntracers <= 2:
-                            warnings.warn(
-                                f"river forcing custom_file {resolved} has only "
-                                f"{ntracers} tracer(s) (temp/salt) but "
-                                "include_bgc=True was requested for this item -- "
-                                "no BGC river tracers appear to be present.",
-                                UserWarning,
-                                stacklevel=2,
-                            )
-                        elif not include_bgc and ntracers > 2:
-                            warnings.warn(
-                                f"river forcing custom_file {resolved} carries "
-                                f"{ntracers} tracers (more than temp/salt) but "
-                                "include_bgc was not requested for this item -- "
-                                "any BGC river tracers in the file will go unused.",
-                                UserWarning,
-                                stacklevel=2,
-                            )
-                except Exception as e:
-                    log.debug(
-                        "river custom_file %s: could not check tracer count (%s)",
-                        resolved,
-                        e,
-                    )
+                if "ntracers" in ds.sizes:
+                    self._check_river_tracer_floor(int(ds.sizes["ntracers"]), resolved)
 
         if self._should_reuse_existing_output(output_path):
             # Reuse means ROMS reads what already sits at output_path, not the
@@ -2394,6 +2388,10 @@ class RomsMarblInputData(InputData):
                 )
                 with xr.open_dataset(output_path, decode_timedelta=False) as reused:
                     nriv_reused = int(reused.sizes["nriver"])
+                    if "ntracers" in reused.sizes:
+                        self._check_river_tracer_floor(
+                            int(reused.sizes["ntracers"]), output_path
+                        )
             if nriv_reused != nriv:
                 warnings.warn(
                     f"reusing existing river forcing at {output_path} "
@@ -2442,7 +2440,6 @@ class RomsMarblInputData(InputData):
                 subkey,
                 output_path,
                 custom_file,
-                include_bgc=bool(kwargs.get("include_bgc", False)),
             )
             return
 
@@ -2467,6 +2464,10 @@ class RomsMarblInputData(InputData):
                     if "river_tracer" not in ds.variables:
                         raise ValueError("river_tracer is not in the dataset")
                     nriv = int(ds.sizes["nriver"])
+                    if "ntracers" in ds.sizes:
+                        self._check_river_tracer_floor(
+                            int(ds.sizes["ntracers"]), paths[0]
+                        )
             if "river_frc" not in self._settings_run_time:
                 self._settings_run_time["river_frc"] = {}
             self._settings_run_time["river_frc"]["river_source"] = True
@@ -2519,6 +2520,10 @@ class RomsMarblInputData(InputData):
             if self.roms_marbl_blueprint_elements.forcing is not None:
                 self.roms_marbl_blueprint_elements.forcing.river = None
             return river
+        if "ntracers" in river.ds.sizes:
+            self._check_river_tracer_floor(
+                int(river.ds.sizes["ntracers"]), "generated by roms-tools"
+            )
 
         try:
             river.to_yaml(yaml_path)
