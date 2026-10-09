@@ -50,6 +50,7 @@ from cstar.applications.forge.namelist_model import (
     check_cdr_lite_sections,
     check_cdr_output_sections,
     check_output_streams_divide_rst,
+    check_river_tracer_counts,
     check_rst_period_divisible,
     cppdefs_for_precheck,
     ensure_cdr_output_marbl_diagnostics,
@@ -2198,6 +2199,46 @@ class ForgeExecutor(BaseModel):
 
         return cls(**forge_blueprint_to_builder_kwargs(cfg), host=host, verbose=verbose)
 
+    def _river_tracer_lengths(self) -> dict[str, int]:
+        """The ``ntracers`` length of each local river forcing file in the
+        in-memory blueprint, keyed by location.
+
+        A file that is not local or cannot be read (a remote location, a test
+        placeholder) is skipped: there is nothing to compare, and the check
+        must not turn an unreadable file into a different error.
+        """
+
+        def as_dict(obj: Any) -> dict[str, Any]:
+            # The in-memory blueprint holds plain dicts after generate_inputs
+            # rebuilds it, and models otherwise (see get_ds).
+            if hasattr(obj, "model_dump"):
+                obj = obj.model_dump()
+            return obj if isinstance(obj, dict) else {}
+
+        with _suppress_pydantic_warnings():
+            river = as_dict(as_dict(self.roms_marbl_blueprint).get("forcing")).get(
+                "river"
+            )
+            items = as_dict(river).get("data") or []
+        lengths: dict[str, int] = {}
+        for item in items:
+            location = str(as_dict(item).get("location") or "")
+            if not location or not Path(location).is_file():
+                continue
+            try:
+                with warnings.catch_warnings():
+                    warnings.filterwarnings(
+                        "ignore", category=FutureWarning, module="xarray"
+                    )
+                    with xr.open_dataset(location, decode_timedelta=False) as ds:
+                        sizes = dict(ds.sizes)
+            except Exception as e:
+                log.debug("river forcing %s: could not read ntracers (%s)", location, e)
+                continue
+            if "ntracers" in sizes:
+                lengths[location] = int(sizes["ntracers"])
+        return lengths
+
     def configure_build(
         self,
         compile_time_settings: dict[str, Any] | None = None,
@@ -2510,6 +2551,19 @@ class ForgeExecutor(BaseModel):
             n_tracers = int(kwargs["n_tracers"])
         else:
             n_tracers = n_tracers_from_param(self._settings_run_time.get("param") or {})
+
+        # River tracer count net: ucla-roms >= 0.9.0 aborts at init unless every
+        # river forcing file holds n_tracers or n_tracers minus the CDR block, and
+        # the CDR counts are only final here (the river step runs before the CDR
+        # forcing step derives them). Checked against the files ROMS will read.
+        check_river_tracer_counts(
+            self._river_tracer_lengths(),
+            n_tracers=n_tracers,
+            param=self._settings_run_time.get("param") or {},
+            roms_ref=str(effective_roms_ref)
+            if effective_roms_ref is not None
+            else None,
+        )
 
         # Output-stream / restart-rollover consistency net (ucla-roms >= 0.5.0's
         # check_output_divides_rst, precheck.F90), mirroring the resolver's guard
