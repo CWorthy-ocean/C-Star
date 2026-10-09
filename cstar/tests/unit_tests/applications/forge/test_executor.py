@@ -53,6 +53,7 @@ from cstar.applications.forge.engine import process_forge_blueprint
 from cstar.applications.forge.executor import ForgeExecutor, _deep_merge_settings_dict
 from cstar.applications.forge.host import HostPaths
 from cstar.applications.forge.input_data import CHILD_IC_PLACEHOLDER_LOCATION
+from cstar.applications.forge.namelist_model import n_tracers_from_param
 from cstar.applications.forge.resolve import build_forge_blueprint
 from cstar.applications.forge.templates import bundled_template_dir
 from cstar.base.env import ENV_CSTAR_RUNID
@@ -4399,6 +4400,78 @@ class TestGoldenNamelist:
         run_time = builder._settings_run_time
         assert run_time["cdr_lite_output"]["do_cdr_lite_output"] is False
         assert run_time["cdr_output"]["do_cdr_output"] is True
+
+    # ----- river tracer count net (ucla-roms PR #369) ----------------------
+    def _river_builder(
+        self, mock_grid, tmp_path, ntracers_offset, cdr_tracers=False, **kw
+    ):
+        """Generated inputs whose river file (the mocked save only touches it)
+        is rewritten with ``n_tracers + ntracers_offset`` tracers, so
+        configure_build's net reads a real length.
+        """
+        if cdr_tracers:
+            # 2*1 OAE + 1 DOR. CDR tracers on a >= 0.9.0 pin need CDR_LITE; the
+            # online carbonate sensitivity knob is the MARBL route to it.
+            kw["param_overrides"] = {"nt_cdr_oae": 1, "nt_cdr_dor": 1}
+            kw["stored_model_settings"] = {
+                "cdr_lite": {"cdr_online_carbonate_sensitivity": True}
+            }
+        cfg, builder = self._generate_inputs_no_cdr_forcing(mock_grid, tmp_path, **kw)
+        n_tracers = n_tracers_from_param(builder._settings_run_time["param"])
+        river_path = Path(builder._settings_run_time["forcing"]["river_path"])
+        ntracers = n_tracers + ntracers_offset
+        xr.Dataset(
+            {
+                "river_volume": (("river_time", "nriver"), np.ones((2, 3))),
+                "river_tracer": (
+                    ("river_time", "ntracers", "nriver"),
+                    np.ones((2, ntracers, 3)),
+                ),
+            }
+        ).to_netcdf(river_path)
+        return cfg, builder, river_path
+
+    @pytest.mark.parametrize("offset", [0, -3])
+    def test_configure_build_accepts_river_with_or_without_cdr_tracers(
+        self, mock_grid, tmp_path, offset
+    ):
+        cfg, builder, _ = self._river_builder(
+            mock_grid,
+            tmp_path,
+            offset,
+            model_dir=_MODEL_DIR_ROMS090,
+            cdr_tracers=True,
+        )
+        self._configure_build_for(cfg, builder)
+
+    @pytest.mark.parametrize("offset", [1, -1, -4])
+    def test_configure_build_rejects_other_river_tracer_counts(
+        self, mock_grid, tmp_path, offset
+    ):
+        cfg, builder, river_path = self._river_builder(
+            mock_grid,
+            tmp_path,
+            offset,
+            model_dir=_MODEL_DIR_ROMS090,
+            cdr_tracers=True,
+        )
+        n_tracers = n_tracers_from_param(builder._settings_run_time["param"])
+        with pytest.raises(ValueError) as exc:
+            self._configure_build_for(cfg, builder)
+        msg = str(exc.value)
+        assert f"river forcing {river_path} has {n_tracers + offset} tracers" in msg
+        assert f"accepts only {n_tracers} (" in msg
+        assert f"or {n_tracers - 3} (" in msg
+
+    def test_configure_build_old_pin_only_warns_on_extra_river_tracers(
+        self, mock_grid, tmp_path
+    ):
+        """Before ucla-roms 0.9.0 the extra tracers are read past, not rejected."""
+        cfg, builder, _ = self._river_builder(
+            mock_grid, tmp_path, 5, model_dir=_MODEL_DIR_ROMS070
+        )
+        with pytest.warns(UserWarning, match=r"ucla-roms 0\.7\.0 reads the first"):
+            self._configure_build_for(cfg, builder)
 
 
 class TestChildDomainNoInitialConditionsValidatesAtEmit:

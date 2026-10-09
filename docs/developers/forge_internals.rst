@@ -60,7 +60,6 @@ Directory map
     |   |   +-- namelist_model.py          # RunTimeSettings + build_namelist
     |   |   +-- user_files.py              # User-provided netCDF attachments (grid/river/CDR)
     |   |   +-- util.py                    # Shared helpers, memory/timing instrumentation
-    |   |   +-- xarray_lockfix.py          # xarray/dask locking workaround
     |   |   +-- _yaml_representers.py      # PyYAML Enum representer registration (import side effect)
     |   |   +-- templates.py               # bundled_template_dir(): ModelSpec templates/<stage> -> the
     |   |   |                              # bundled copy, plus hashing it (see forge_templates)

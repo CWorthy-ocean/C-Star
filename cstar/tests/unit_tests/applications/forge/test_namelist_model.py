@@ -18,6 +18,7 @@ from cstar.applications.forge.namelist_model import (
     _GATED_SECTION_SWITCHES,
     _PRECHECK_SECTIONS,
     CDR_LITE_MODE_MIN_ROMS,
+    RIVER_TRACERS_WITHOUT_CDR_MIN_ROMS,
     CdrGasExchOutputCfg,
     CdrLiteOutputCfg,
     CdrLiteOutputCfgV0_9_0,
@@ -36,12 +37,14 @@ from cstar.applications.forge.namelist_model import (
     check_cdr_lite_mode_roms,
     check_cdr_lite_sections,
     check_cdr_output_sections,
+    check_river_tracer_counts,
     n_tracers_from_param,
     namelist_field_for,
     namelist_schema_for,
     normalize_legacy_sections,
     output_precheck_applies_to,
     prune_version_gated_sections,
+    river_tracer_floor,
     run_time_settings_for_ref,
     validate_run_time_sections,
 )
@@ -1035,6 +1038,84 @@ def test_check_cdr_lite_mode_roms_treats_a_non_tag_ref_as_the_latest(ref):
 def test_check_cdr_lite_mode_roms_rejects_older_releases(ref):
     with pytest.raises(ValueError, match=r"ucla-roms >= 0\.10\.0"):
         check_cdr_lite_mode_roms(ref)
+
+
+# ---------------------------------------------------------------------------
+# check_river_tracer_counts / river_tracer_floor (ucla-roms PR #369)
+# ---------------------------------------------------------------------------
+# T + S + 32 MARBL + 1 passive + 2*1 OAE + 1 DOR = 38 tracers; 35 without CDR.
+_RIVER_PARAM = {"ntrc_bio": 32, "nt_passive": 1, "nt_cdr_oae": 1, "nt_cdr_dor": 1}
+_RIVER_NT = n_tracers_from_param(_RIVER_PARAM)
+
+
+def _check_river(ntracers, *, param=_RIVER_PARAM, roms_ref="0.10.0", **files):
+    river = {"river.nc": ntracers, **files}
+    check_river_tracer_counts(
+        river,
+        n_tracers=n_tracers_from_param(param),
+        param=param,
+        roms_ref=roms_ref,
+    )
+
+
+def test_river_tracer_floor_leaves_out_the_cdr_block():
+    assert _RIVER_NT == 38
+    assert river_tracer_floor(_RIVER_PARAM) == 35
+    assert river_tracer_floor({}) == 2
+
+
+def test_check_river_tracer_counts_gate_is_ucla_roms_0_9_0():
+    assert RIVER_TRACERS_WITHOUT_CDR_MIN_ROMS == (0, 9, 0)
+
+
+@pytest.mark.parametrize("ntracers", [38, 35])
+def test_check_river_tracer_counts_accepts_full_and_without_cdr(ntracers):
+    _check_river(ntracers)
+
+
+@pytest.mark.parametrize("ntracers", [39, 37, 34, 2])
+def test_check_river_tracer_counts_rejects_other_lengths(ntracers):
+    with pytest.raises(ValueError) as exc:
+        _check_river(ntracers)
+    msg = str(exc.value)
+    assert f"river forcing river.nc has {ntracers} tracers" in msg
+    assert "accepts only 38 (every model tracer" in msg
+    assert "or 35 (every tracer but the CDR block" in msg
+
+
+def test_check_river_tracer_counts_rejects_a_bgc_file_for_a_physics_only_run():
+    with pytest.raises(ValueError, match=r"has 34 tracers.*accepts only 2 \(") as exc:
+        _check_river(34, param={})
+    # No CDR block: only one length is allowed, so no "or ..." alternative.
+    assert " or " not in str(exc.value)
+
+
+def test_check_river_tracer_counts_needs_one_length_in_every_file():
+    with pytest.raises(ValueError, match="same tracer count in every river"):
+        _check_river(38, **{"river2.nc": 35})
+
+
+@pytest.mark.parametrize("ref", ["main", "pio-dev", "", None, "0.9.0"])
+def test_check_river_tracer_counts_is_strict_from_0_9_0_and_on_non_tags(ref):
+    _check_river(35, roms_ref=ref)
+    with pytest.raises(ValueError, match="accepts only"):
+        _check_river(39, roms_ref=ref)
+
+
+def test_check_river_tracer_counts_old_release_warns_on_extra_tracers():
+    with pytest.warns(UserWarning, match=r"ucla-roms 0\.8\.0 reads the first 2"):
+        _check_river(34, param={}, roms_ref="0.8.0")
+
+
+@pytest.mark.parametrize("ntracers", [37, 35])
+def test_check_river_tracer_counts_old_release_rejects_a_shorter_file(ntracers):
+    """Before 0.9.0 ucla-roms reads all nt slots, CDR block included."""
+    with pytest.raises(ValueError, match=r"ucla-roms 0\.8\.0 reads 38 from it"):
+        _check_river(ntracers, roms_ref="0.8.0")
+
+
+def test_check_river_tracer_counts_without_files_is_a_no_op():
+    check_river_tracer_counts({}, n_tracers=38, param=_RIVER_PARAM, roms_ref=None)
 
 
 # ---------------------------------------------------------------------------

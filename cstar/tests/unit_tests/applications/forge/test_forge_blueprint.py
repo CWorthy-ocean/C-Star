@@ -1455,6 +1455,51 @@ def test_build_forge_blueprint_river_custom_file_missing_raises(tmp_path):
         _build(forcing_inputs=fdata)
 
 
+def test_resolver_rejects_a_generated_river_with_passive_tracers():
+    """roms-tools never writes passive river tracers, and no ucla-roms release
+    reads fewer than T + S + BGC + passive from a river file.
+    """
+    with pytest.raises(
+        ValueError, match=r"(?s)reads 35 river tracers.*river\[0\] \(include_bgc=True\)"
+    ):
+        _build(
+            model_dir=_MODEL_DIR_ROMS0100,
+            run_time_overrides={"param": {"nt_passive": 1}},
+        )
+
+
+def test_resolver_rejects_a_generated_marbl_river_without_include_bgc():
+    import copy
+
+    fdata = copy.deepcopy(_CATALOG.forcing_data("glorys-era5-unified"))
+    river = fdata["forcing"]["river"][0]
+    river["include_bgc"] = False
+    river.pop("bgc_source", None)
+    with pytest.raises(
+        ValueError, match=r"river\[0\] \(include_bgc=False\) is generated with 2"
+    ):
+        _build(model_dir=_MODEL_DIR_ROMS0100, forcing_inputs=fdata)
+
+
+def test_resolver_accepts_a_custom_file_river_with_passive_tracers(tmp_path):
+    """A custom file is checked against its own length at generation."""
+    import copy
+
+    fdata = copy.deepcopy(_CATALOG.forcing_data("glorys-era5-unified"))
+    fdata["forcing"]["river"] = [
+        {
+            "source": {"name": "CUSTOM_FILE"},
+            "custom_file": str(_write_tiny_netcdf(tmp_path, name="river.nc")),
+        }
+    ]
+    cfg = _build(
+        model_dir=_MODEL_DIR_ROMS0100,
+        forcing_inputs=fdata,
+        run_time_overrides={"param": {"nt_passive": 1}},
+    )
+    assert cfg.model_settings["param"]["nt_passive"] == 1
+
+
 # ---------------------------------------------------------------------------
 # Resolver: CDR-forcing custom-file pathway (build_forge_blueprint(cdr_forcing_file=...))
 # ---------------------------------------------------------------------------

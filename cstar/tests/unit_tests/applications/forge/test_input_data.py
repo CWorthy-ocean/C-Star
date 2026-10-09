@@ -1753,6 +1753,32 @@ class TestRomsMarblInputDataGeneration:
         )
 
     @patch("cstar.applications.forge.input_data.rt.RiverForcing")
+    def test_generate_river_forcing_rejects_a_ts_only_river_for_marbl(
+        self, mock_rf_class, sample_roms_marbl_input_data
+    ):
+        """roms-tools writes T and S only without include_bgc; a MARBL run's
+        ucla-roms reads 2 + ntrc_bio river tracers, so this fails before saving.
+        """
+        sample_roms_marbl_input_data._settings_run_time["param"] = {"ntrc_bio": 32}
+        mock_rf = MagicMock()
+        mock_rf.ds = xr.Dataset(
+            {
+                "river_volume": (["river_time", "nriver"], np.ones((2, 3))),
+                "river_tracer": (
+                    ["river_time", "ntracers", "nriver"],
+                    np.ones((2, 2, 3)),
+                ),
+            }
+        )
+        mock_rf_class.return_value = mock_rf
+
+        with pytest.raises(ValueError, match="has 2 tracers, fewer than the 34"):
+            sample_roms_marbl_input_data._generate_river_forcing(
+                key="forcing.river", source={"name": "DAI"}
+            )
+        mock_rf.save.assert_not_called()
+
+    @patch("cstar.applications.forge.input_data.rt.RiverForcing")
     def test_generate_river_forcing_reuse_skips_roms_tools_calls(
         self, mock_rf_class, sample_roms_marbl_input_data, tmp_path
     ):
@@ -3281,40 +3307,68 @@ class TestRiverCustomFileForcing:
                 custom_file=custom_file,
             )
 
-    def test_include_bgc_true_but_only_two_tracers_warns(
-        self, river_input_data, tmp_path
-    ):
-        river_nc = _write_river_netcdf(tmp_path / "user_river.nc", nriver=2, ntracers=2)
+    def _custom_river(self, tmp_path, ntracers):
         from cstar.applications.forge.user_files import hash_netcdf_contents
 
-        custom_file = forge_models.UserProvidedFile(
+        river_nc = _write_river_netcdf(
+            tmp_path / "user_river.nc", nriver=2, ntracers=ntracers
+        )
+        return forge_models.UserProvidedFile(
             location=str(river_nc), content_hash=hash_netcdf_contents(river_nc)
         )
 
-        with pytest.warns(UserWarning, match="include_bgc=True"):
+    @pytest.mark.parametrize("ntracers", [36, 39, 40])
+    def test_accepts_at_least_every_tracer_but_the_cdr_block(
+        self, river_input_data, tmp_path, ntracers
+    ):
+        """The river step only enforces the CDR-independent floor (T + S + BGC +
+        passive); the exact length is configure_build's check, once the CDR
+        forcing step has derived the CDR counts.
+        """
+        river_input_data._settings_run_time["param"] = {
+            "ntrc_bio": 32,
+            "nt_passive": 2,
+        }
+        river_input_data._generate_river_forcing(
+            key="forcing.river",
+            source={"name": "CUSTOM_FILE"},
+            custom_file=self._custom_river(tmp_path, ntracers),
+        )
+        assert river_input_data._settings_run_time["river_frc"]["nriv"] == 2
+
+    def test_rejects_fewer_tracers_than_any_release_reads(
+        self, river_input_data, tmp_path
+    ):
+        """A T/S-only file for a MARBL run: ucla-roms aborts on it at init."""
+        river_input_data._settings_run_time["param"] = {"ntrc_bio": 32}
+        with pytest.raises(
+            ValueError,
+            match=r"user_river\.nc has 2 tracers, fewer than the 34 every ucla-roms",
+        ):
             river_input_data._generate_river_forcing(
                 key="forcing.river",
                 source={"name": "CUSTOM_FILE"},
-                custom_file=custom_file,
+                custom_file=self._custom_river(tmp_path, 2),
                 include_bgc=True,
             )
+        assert "river_frc" not in river_input_data._settings_run_time
 
-    def test_include_bgc_false_but_extra_tracers_warns(
+    def test_reused_output_is_checked_not_the_custom_file(
         self, river_input_data, tmp_path
     ):
-        river_nc = _write_river_netcdf(tmp_path / "user_river.nc", nriver=2, ntracers=5)
-        from cstar.applications.forge.user_files import hash_netcdf_contents
+        """ROMS reads the file already at output_path, so its length is the one
+        that must reach the floor.
+        """
+        river_input_data._settings_run_time["param"] = {"ntrc_bio": 32}
+        output_path = river_input_data._forcing_filename("river")
+        _write_river_netcdf(output_path, nriver=2, ntracers=2)
+        river_input_data._existing_planned_outputs = {output_path.resolve()}
 
-        custom_file = forge_models.UserProvidedFile(
-            location=str(river_nc), content_hash=hash_netcdf_contents(river_nc)
-        )
-
-        with pytest.warns(UserWarning, match="include_bgc was not requested"):
+        with pytest.raises(ValueError, match=r"_river\.nc has 2 tracers"):
             river_input_data._generate_river_forcing(
                 key="forcing.river",
                 source={"name": "CUSTOM_FILE"},
-                custom_file=custom_file,
-                include_bgc=False,
+                custom_file=self._custom_river(tmp_path, 34),
             )
 
     def test_skips_staging_when_output_already_present(

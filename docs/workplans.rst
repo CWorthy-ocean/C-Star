@@ -641,6 +641,41 @@ Checking Workplan Status
         cstar workplan status <my-unique-id>
 
 
+Finding a Run's Directory
+-------------------------
+
+Use the ``path`` command from the ``cstar`` CLI to print the directory of a run,
+or of one of its steps. The path is the only output, so it composes with other
+commands in any shell. A failed lookup prints nothing and exits non-zero, so
+guard the ``cd`` with ``&&``:
+
+.. code-block:: console
+
+    cstar workplan path <my-unique-id>
+    dir=$(cstar workplan path <my-unique-id> <step-name>) && cd "$dir"
+
+A program cannot change the directory of the shell that started it, so
+``cstar workplan cd <my-unique-id> [step-name]`` works only once your shell has
+a small ``cstar`` function. Install it once, then open a new shell:
+
+.. code-block:: console
+
+    cstar env shell-init --install
+
+The command detects whether you run zsh or bash (pass ``zsh`` or ``bash`` to
+choose), writes the function under the C-Star config directory, and adds a
+marked block to ``~/.zshrc`` or ``~/.bashrc`` that sources it. For bash, login
+shells, such as SSH sessions and the macOS Terminal, read ``~/.bash_profile``
+instead, so make sure that file sources ``~/.bashrc``. Run the command again
+after upgrading C-Star to refresh the function, and add ``--uninstall`` to
+remove the block and the function. The command stops without changing anything
+if the block's marker lines have been edited so that they no longer pair up.
+
+To manage your dotfiles yourself, omit ``--install``: the command prints the
+function instead, for example ``cstar env shell-init zsh > <file>``, ready to
+source from your own configuration.
+
+
 Gathering Workplan Outputs
 --------------------------
 
