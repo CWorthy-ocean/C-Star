@@ -160,12 +160,14 @@ def autocomplete_step_list(ctx: typer.Context, incomplete: str) -> list[str]:
     Returns
     -------
     list[str]
+        The matching step names, or an empty list when no run-id is available
+        (e.g. click stored None after the run-id callback failed during
+        resilient completion parsing). Completion functions must not raise.
     """
-    run_id: str = ctx.params.get("run_id", "")
+    run_id: str | None = ctx.params.get("run_id")
 
     if not run_id:
-        msg = "run-id is required to autocomplete steps"
-        raise typer.BadParameter(msg)
+        return []
 
     try:
         return asyncio.run(list_steps(run_id, incomplete))
