@@ -1255,6 +1255,46 @@ def test_sponge_tune_editable_via_advanced_settings_accordion():
     assert wiz.config.model_settings["cppdefs"]["sponge_tune"] is True
 
 
+def test_param_pane_shows_only_nt_passive():
+    """``param`` sits in the CDR pane for ``nt_passive`` alone: the grid/tiling
+    dims have their own widgets, ``ntrc_bio`` is set from the BGC mode and the
+    CDR tracer counts are read off the CDR forcing during generation.
+    """
+    import ipywidgets as W
+
+    param = {
+        "llm": 10,
+        "mmm": 10,
+        "n": 20,
+        "np_xi": 2,
+        "np_eta": 2,
+        "nt_passive": 0,
+        "ntrc_bio": 32,
+        "nt_cdr_oae": 0,
+        "nt_cdr_dor": 0,
+    }
+    editor = _SettingsEditor(W, {"param": param}, settings_cls=RunTimeSettingsV0_9_0)
+    assert [key for (section, key) in editor._widgets if section == "param"] == [
+        "nt_passive"
+    ]
+    assert "param" in editor._pane_sections["Carbon dioxide removal (CDR)"]
+    assert "forcing file" in editor._widgets[("param", "nt_passive")][0].tooltip
+
+
+def test_nt_passive_editable_via_advanced_settings_accordion():
+    wiz = ForgeBlueprintWizard()
+    wiz.start.value = date(2012, 1, 1)
+    wiz.end.value = date(2012, 1, 2)
+    wiz._rebuild()
+    assert wiz.config.model_settings["param"]["nt_passive"] == 0
+    assert ("param", "nt_passive") in wiz.editor._widgets
+    assert ("param", "ntrc_bio") not in wiz.editor._widgets
+
+    wiz._overrides[("param", "nt_passive")] = 2
+    wiz._rebuild()
+    assert wiz.config.model_settings["param"]["nt_passive"] == 2
+
+
 def test_nhy_nox_forcing_editable_in_bgc_advanced_settings_pane():
     """NHY_FORCING/NOX_FORCING default True from the ModelSpec and are editable as
     checkboxes in the Biogeochemistry (BGC / MARBL) advanced settings pane.

@@ -5939,20 +5939,21 @@ class TestForgeBlueprintWizard:
         } <= sections
         # Dynamic / dedicated-widget sections are dropped from the accordion (their
         # resolver-composed value still flows through -- see the exclusion test).
-        # ``cppdefs`` is the one partial exception: sponge_tune/nhy_forcing/
-        # nox_forcing are accordion-editable (see test_advanced_editor_excludes_
-        # dedicated_widget_fields for the resolver-derived fields that still aren't).
+        # ``cppdefs`` and ``param`` are the partial exceptions: sponge_tune/
+        # nhy_forcing/nox_forcing and nt_passive are accordion-editable (see
+        # test_advanced_editor_excludes_dedicated_widget_fields for the
+        # resolver-derived fields that still aren't).
         assert not (
             {
                 "time_stepping",
                 "reference_date_settings",
                 "grid",
                 "s_coord",
-                "param",
                 "forcing",
             }
             & sections
         )
+        assert w.editor._section_fields["param"] == ["nt_passive"]
         assert w.config.composition.overrides == {}
 
     def test_advanced_editor_splits_bgc_along_output_seam(self):
@@ -5973,10 +5974,15 @@ class TestForgeBlueprintWizard:
         settings accordion -- but their resolved value still flows through.
         """
         w = self._wizard()
-        # The whole param/time_stepping/grid group is dropped from the accordion
+        # The whole time_stepping/grid group is dropped from the accordion
         # (resolver-derived or edited by a dedicated widget).
-        for dropped in ("param", "time_stepping", "grid", "s_coord"):
+        for dropped in ("time_stepping", "grid", "s_coord"):
             assert dropped not in w.editor._section_fields
+        # param shows only nt_passive: the grid/tiling dims have dedicated widgets
+        # and the tracer counts are derived (BGC mode, CDR forcing).
+        for derived in ("llm", "mmm", "n", "np_xi", "np_eta", "ntrc_bio"):
+            assert ("param", derived) not in w.editor._widgets
+        assert ("param", "nt_passive") in w.editor._widgets
 
         # cppdefs is only PARTIALLY dropped: sponge_tune/nhy_forcing/nox_forcing (no
         # other UI) are accordion-editable; every resolver-derived flag still has no

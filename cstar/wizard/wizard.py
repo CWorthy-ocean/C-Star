@@ -980,11 +980,12 @@ _ACCORDION_EXCLUDED_FIELDS: dict[str, frozenset[str]] = {
 # and the output/model "modified" tracking are all unaffected by the grouping.
 #
 # Sections deliberately absent (time_stepping, reference_date_settings, grid,
-# s_coord, param, title, output_root_name, initial, forcing, river_frc) are filled
+# s_coord, title, output_root_name, initial, forcing, river_frc) are filled
 # dynamically at resolve/run time (ntimes from the run duration, grid/IC/forcing
 # paths from generated files, river_frc entirely generation-derived) or edited by a
-# dedicated widget elsewhere in the wizard (theta_s/theta_b/hc, dt, np_xi/np_eta,
-# reference date, PIO/open-boundary checkboxes). Their resolver-composed value still
+# dedicated widget elsewhere in the wizard (theta_s/theta_b/hc, dt, reference date,
+# PIO/open-boundary checkboxes). ``param`` is shown under CDR for ``nt_passive``
+# alone (see :data:`_PARAM_PANE_FIELDS`). Their resolver-composed value still
 # flows through untouched -- omitting the pane only removes an editor that would be
 # clobbered or duplicated, never the value.
 #
@@ -1050,6 +1051,7 @@ _ADVANCED_CATEGORIES: tuple[tuple[str, tuple[str, ...]], ...] = (
     (
         "Carbon dioxide removal (CDR)",
         (
+            "param",
             "cdr_frc",
             "cdr_output",
             "cdr_lite",
@@ -1461,6 +1463,16 @@ _CPPDEFS_PANE_FIELDS: dict[str, frozenset[str]] = {
 }
 
 
+# The one ``param`` field the accordion shows (in the CDR pane): the passive tracer
+# count, which generation checks against the CDR forcing's passive tracers and
+# nothing else sets. The grid/tiling dims have dedicated widgets, ``ntrc_bio`` is
+# set from the BGC mode, and ``nt_cdr_oae``/``nt_cdr_dor`` are read off the CDR
+# forcing's tracer axis when it names its tracers. Display-only (unlike
+# _ACCORDION_EXCLUDED_FIELDS): an authored CDR tracer count, needed when the
+# forcing file does not name its tracers, still round-trips as an override.
+_PARAM_PANE_FIELDS = frozenset({"nt_passive"})
+
+
 def _split_fields(
     category_title: str, section: str
 ) -> tuple[frozenset | None, frozenset]:
@@ -1471,10 +1483,13 @@ def _split_fields(
     ``marbl_bgc`` via :data:`PARTIAL_OUTPUT_SECTIONS`) keep their output write-
     controls under Output and the rest under their feature pane. ``cppdefs`` is
     split the same way via :data:`_CPPDEFS_PANE_FIELDS` -- each pane only sees the
-    handful of compile-time flags it owns.
+    handful of compile-time flags it owns -- and ``param`` shows only
+    :data:`_PARAM_PANE_FIELDS`.
     """
     if section == "cppdefs":
         return _CPPDEFS_PANE_FIELDS.get(category_title, frozenset()), frozenset()
+    if section == "param":
+        return _PARAM_PANE_FIELDS, frozenset()
     parts = PARTIAL_OUTPUT_SECTIONS.get(section)
     if parts is None:
         return None, frozenset()
