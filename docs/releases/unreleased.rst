@@ -60,6 +60,7 @@ Bug Fixes
 - Completing a step name in ``cstar workplan log``, ``path``, or ``cd`` after an unknown or mistyped run-id printed a traceback in the terminal; it now offers no completions. (`#759 <https://github.com/CWorthy-ocean/C-Star/pull/759>`_)
 - Forge input generation no longer hangs intermittently with the progress bar frozen mid-save (an xarray netCDF lock-order deadlock, fixed upstream in xarray 2026.9). (`#758 <https://github.com/CWorthy-ocean/C-Star/pull/758>`_)
 - Physics-only runs given a river file with BGC tracers no longer get a warning that the extra tracers go unused; on ucla-roms 0.9.0 and later that run aborts at startup. (`#757 <https://github.com/CWorthy-ocean/C-Star/pull/757>`_)
+- The default ``roms-marbl-0.10-default`` model now builds ucla-roms 0.10.1, which fixes PIO restart writes stalling on multi-node runs until the job hit its time limit ([CWorthy-ocean/ucla-roms#388](https://github.com/CWorthy-ocean/ucla-roms/pull/388)). (`#762 <https://github.com/CWorthy-ocean/C-Star/pull/762>`_)
 
 
 Improvements
@@ -91,3 +92,4 @@ Miscellaneous
 - ``shellingham`` is now a declared dependency; it was already installed as a requirement of ``typer``. (`#755 <https://github.com/CWorthy-ocean/C-Star/pull/755>`_)
 - Tests now use the real ``roms_marbl`` application: the test conftest no longer replaces it with a ``SleepApplication`` subclass registered under the same name. (`#756 <https://github.com/CWorthy-ocean/C-Star/pull/756>`_)
 - C-Star now requires ``xarray>=2026.9`` and ``roms-tools>=5.1.1`` (the first roms-tools release without the old ``xarray<2025.8`` cap); existing environments will upgrade both. (`#758 <https://github.com/CWorthy-ocean/C-Star/pull/758>`_)
+- The weekly extended integration workflow now tests ucla-roms 0.10.1 instead of 0.10.0. (`#762 <https://github.com/CWorthy-ocean/C-Star/pull/762>`_)
