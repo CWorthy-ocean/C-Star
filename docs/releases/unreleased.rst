@@ -57,6 +57,7 @@ Bug Fixes
 
 - ``nest-from`` (and the new directive) now accept a ``path`` that names a single boundary file, as the docs always said; a file path used to be reported as "no boundary files located". (`#754 <https://github.com/CWorthy-ocean/C-Star/pull/754>`_)
 - A generated CDR forcing that is reused without ``--clobber`` is now described from the file on disk (release count, release family, tracer axis), so the namelist can no longer disagree with the data ROMS reads. (`#754 <https://github.com/CWorthy-ocean/C-Star/pull/754>`_)
+- Completing a step name in ``cstar workplan log``, ``path``, or ``cd`` after an unknown or mistyped run-id printed a traceback in the terminal; it now offers no completions. (`#759 <https://github.com/CWorthy-ocean/C-Star/pull/759>`_)
 
 
 Improvements
