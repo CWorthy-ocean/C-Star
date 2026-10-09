@@ -93,3 +93,5 @@ Miscellaneous
 - Tests now use the real ``roms_marbl`` application: the test conftest no longer replaces it with a ``SleepApplication`` subclass registered under the same name. (`#756 <https://github.com/CWorthy-ocean/C-Star/pull/756>`_)
 - C-Star now requires ``xarray>=2026.9`` and ``roms-tools>=5.1.1`` (the first roms-tools release without the old ``xarray<2025.8`` cap); existing environments will upgrade both. (`#758 <https://github.com/CWorthy-ocean/C-Star/pull/758>`_)
 - The weekly extended integration workflow now tests ucla-roms 0.10.1 instead of 0.10.0. (`#762 <https://github.com/CWorthy-ocean/C-Star/pull/762>`_)
+- Fix an intermittent e2e integration-test failure where the workplan's two parallel forge steps raced to download and unzip the same Natural Earth land shapefiles. (`#761 <https://github.com/CWorthy-ocean/C-Star/pull/761>`_)
+- A failed CDR-LiTE branch of the e2e workplan no longer also fails the ``run_roms`` restart tests. (`#761 <https://github.com/CWorthy-ocean/C-Star/pull/761>`_)
