@@ -24,6 +24,7 @@ from cstar.applications.forge.blueprint import (
 )
 from cstar.applications.forge.namelist_model import (
     RunTimeSettings,
+    RunTimeSettingsV0_4_0,
     RunTimeSettingsV0_5_0,
     RunTimeSettingsV0_6_0,
     RunTimeSettingsV0_7_0,
@@ -37,6 +38,7 @@ from cstar.wizard.wizard import (
     ForgeBlueprintWizard,
     _drain_stream_buffer,
     _ForcingEditor,
+    _namelist_tooltip,
     _section_submodel,
     _SettingsEditor,
 )
@@ -2192,6 +2194,57 @@ def test_default_model_uses_latest_settings_schema():
     wiz._rebuild()
     assert wiz._editor_settings_cls is RunTimeSettingsV0_9_0
     assert ("ocean_vars", "nrpf_rst") not in wiz.editor._widgets
+
+
+@pytest.mark.parametrize(
+    "settings_cls",
+    [
+        RunTimeSettings,
+        RunTimeSettingsV0_4_0,
+        RunTimeSettingsV0_5_0,
+        RunTimeSettingsV0_6_0,
+        RunTimeSettingsV0_7_0,
+        RunTimeSettingsV0_9_0,
+    ],
+)
+def test_namelist_tooltip_for_every_settings_field(settings_cls):
+    """Every Advanced-settings field gets its namelist schema description, in
+    every tier. Regression: the lookup used the forge section/field names as
+    namelist group/key names, so only the few sections whose names coincide
+    (``time_stepping``, ``s_coord``) had tooltips -- ``param`` (group
+    ``param_settings``, ``n`` -> ``nz``) and nearly every other section had none.
+    """
+    for section, info in settings_cls.model_fields.items():
+        cfg_fields = getattr(info.annotation, "model_fields", None)
+        for field in cfg_fields or (section,):
+            assert _namelist_tooltip(settings_cls, section, field), (section, field)
+
+
+@pytest.mark.parametrize("field", ["np_xi", "n", "nt_cdr_oae"])
+def test_namelist_tooltip_for_param_fields(field):
+    assert _namelist_tooltip(RunTimeSettingsV0_9_0, "param", field)
+
+
+def test_namelist_tooltip_empty_for_non_namelist_sections():
+    assert _namelist_tooltip(RunTimeSettingsV0_9_0, "cppdefs", "marbl") == ""
+
+
+def test_settings_editor_tooltips_prefer_the_glossary_hint():
+    """A field with no glossary hint shows the schema description; a glossary
+    hint (curated in the wizard's vocabulary) replaces it.
+    """
+    import ipywidgets as W
+
+    model_settings = {"bottom_drag": {"rdrg2": 1e-3}, "bgc": {"xco2air_default": 280.0}}
+    editor = _SettingsEditor(W, model_settings, settings_cls=RunTimeSettingsV0_9_0)
+
+    rdrg2_tip = editor._widgets[("bottom_drag", "rdrg2")][0].tooltip
+    assert _namelist_tooltip(RunTimeSettingsV0_9_0, "bottom_drag", "rdrg2") in (
+        rdrg2_tip
+    )
+    xco2air_tip = editor._widgets[("bgc", "xco2air_default")][0].tooltip
+    assert "co2_tvarying" in xco2air_tip
+    assert "PCO2AIR_FORCING" not in xco2air_tip
 
 
 def test_advection_cppdefs_editable_only_for_models_that_declare_them():

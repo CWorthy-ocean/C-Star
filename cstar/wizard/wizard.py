@@ -75,6 +75,8 @@ from cstar.applications.forge.namelist_model import (
     BgcMode,
     RunTimeSettings,
     bgc_mode_from_cppdefs,
+    namelist_field_for,
+    namelist_schema_for,
     run_time_settings_for_ref,
     validate_run_time_sections,
     version_gated_section_names,
@@ -101,7 +103,8 @@ WIZARD_TOOL: Final[str] = "wizard"
 # Help text — shown as widget tooltips on hover (tooltip= kwarg, all widgets)
 #
 # Automated: namelist fields are looked up live from the cstar.roms.namelist
-# field descriptions (set in the RomsNamelist / group models).
+# field descriptions (set in the RomsNamelist / group models), unless the
+# label glossary carries a hint for the field.
 # Manual: forcing/grid/nesting/run-window knobs listed in HELP_TEXT below.
 # ===========================================================================
 
@@ -569,19 +572,20 @@ def _namelist_description_and_tooltip(
     """The widget ``description``/``tooltip`` pair for one namelist field.
 
     Starts from :func:`_namelist_label` and the schema-derived ``tooltip``. A
-    field with no schema description (every ``cppdefs`` flag -- compile-time,
-    never modeled by RomsNamelist -- and version-gated groups the active tier
-    lacks) falls back to the glossary ``hint``, so caveats such as "ignored by
-    ucla-roms < 0.8.0" reach the widget instead of living only in the YAML. If
-    the glossary (or :data:`LABEL_TEXT`) overrides the label away from the raw
-    ``field_name``, the raw name is kept discoverable by prefixing it onto the
-    tooltip, and a glossary ``unit``, if present, is appended to the
-    description (e.g. ``"Horizontal viscosity (m²/s)"``).
+    glossary ``hint`` replaces the schema description: it is curated for the
+    wizard (in the wizard's vocabulary, e.g. "used when co2_tvarying is False"),
+    and it is the only help for a field with no schema description (every
+    ``cppdefs`` flag -- compile-time, never modeled by RomsNamelist), so caveats
+    such as "ignored by ucla-roms < 0.8.0" reach the widget instead of living
+    only in the YAML. If the glossary (or :data:`LABEL_TEXT`) overrides the
+    label away from the raw ``field_name``, the raw name is kept discoverable
+    by prefixing it onto the tooltip, and a glossary ``unit``, if present, is
+    appended to the description (e.g. ``"Horizontal viscosity (m²/s)"``).
     """
     glossary_key = f"settings.{section}.{field_name}"
     in_glossary = glossary_key in known_keys()
-    if not tooltip and in_glossary:
-        tooltip = label_for(glossary_key).hint or ""
+    if in_glossary:
+        tooltip = label_for(glossary_key).hint or tooltip
     label = _namelist_label(section, field_name)
     if label == field_name:
         return label, tooltip
@@ -591,26 +595,23 @@ def _namelist_description_and_tooltip(
     return description, combined_tooltip
 
 
-def _namelist_tooltip(group_name: str, field_name: str) -> str:
-    """Look up the tooltip for a namelist field from the RomsNamelist schema.
+def _namelist_tooltip(
+    settings_cls: type[BaseModel], section: str, field_name: str
+) -> str:
+    """The namelist schema's description of a forge settings field.
 
-    Returns the field's ``description`` string if present, else an empty string.
-    Called when building the Advanced settings accordion so every namelist field
-    gets an automated tooltip from the ROMS namelist model docstrings.
+    Translates the forge ``section``/``field_name`` to the namelist group and key
+    it is written to (:func:`namelist_field_for`, the same table
+    :func:`build_namelist` writes through) and returns that field's
+    ``description`` from ``settings_cls``'s namelist schema. Empty for anything
+    that is not a namelist field of that tier (every ``cppdefs`` flag).
     """
-    try:
-        from cstar.roms.namelist import RomsNamelist
-
-        gf = RomsNamelist.model_fields.get(group_name)
-        if gf is None:
-            return ""
-        cls = gf.annotation
-        if not hasattr(cls, "model_fields"):
-            return ""
-        ff = cls.model_fields.get(field_name)
-        return ff.description or "" if ff is not None else ""
-    except Exception:
+    target = namelist_field_for(settings_cls, section, field_name)
+    if target is None:
         return ""
+    group, key = target
+    group_cls = namelist_schema_for(settings_cls).model_fields[group].annotation
+    return group_cls.model_fields[key].description or ""
 
 
 def _tip(context: str, field: str) -> str:
@@ -1749,7 +1750,7 @@ class _SettingsEditor:
         sub = _section_submodel(section, self._settings_cls)
         if not isinstance(value, dict):  # scalar section (e.g. gamma2, ubind)
             base = _base_type(None, value)
-            tip = _namelist_tooltip(section, section)
+            tip = _namelist_tooltip(self._settings_cls, section, section)
             label, tip = _namelist_description_and_tooltip(section, section, tip)
             w = _make_field_widget(W, label, base, value, tooltip=tip)
             self._widgets[(section, None)] = (w, base)
@@ -1773,7 +1774,7 @@ class _SettingsEditor:
                 else None
             )
             base = _base_type(ann, val)
-            tip = _namelist_tooltip(section, key)
+            tip = _namelist_tooltip(self._settings_cls, section, key)
             label, tip = _namelist_description_and_tooltip(section, key, tip)
             bool_dropdown = _BOOL_DROPDOWN_FIELDS.get((section, key))
             w = _make_field_widget(

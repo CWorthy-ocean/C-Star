@@ -38,6 +38,8 @@ from cstar.applications.forge.namelist_model import (
     check_cdr_output_sections,
     forge_field_for,
     n_tracers_from_param,
+    namelist_field_for,
+    namelist_schema_for,
     normalize_legacy_sections,
     output_precheck_applies_to,
     prune_version_gated_sections,
@@ -725,10 +727,9 @@ def test_build_namelist_v0_5_0_drops_nrpf_rst_and_renames_particles(tmp_path):
 
 def test_build_namelist_v0_7_0_dispatches_to_most_specific_class(tmp_path):
     """A RunTimeSettingsV0_7_0 instance is also a RunTimeSettingsV0_6_0/
-    RunTimeSettingsV0_5_0 instance (subclassing) -- proves ``build_namelist``'s
-    most-specific-first ``isinstance`` chain selects ``RomsNamelistV0_7_0``
-    (with ``&pio_settings`` AND the two new CDR output groups), not one of its
-    superclasses' namelist schemas.
+    RunTimeSettingsV0_5_0 instance (subclassing) -- proves ``build_namelist``
+    selects ``RomsNamelistV0_7_0`` (with ``&pio_settings`` AND the two new CDR
+    output groups), not one of its superclasses' namelist schemas.
     """
     d = _populated_rt_dict()
     rt = RunTimeSettingsV0_7_0.model_validate(d)
@@ -1384,3 +1385,129 @@ def test_normalize_legacy_sections_does_not_mutate_the_old_inner_dict():
     inner = {"do_cdr_tracer_output": True}
     normalize_legacy_sections({"cdr_tracer_output": inner})
     assert inner == {"do_cdr_tracer_output": True}
+
+
+# ---------------------------------------------------------------------------
+# namelist_field_for -- forge settings (section, field) -> namelist (group, key),
+# the vocabulary bridge build_namelist writes through (the wizard's tooltips
+# read it too).
+# ---------------------------------------------------------------------------
+_ALL_SETTINGS_TIERS = (
+    RunTimeSettings,
+    RunTimeSettingsV0_4_0,
+    RunTimeSettingsV0_5_0,
+    RunTimeSettingsV0_6_0,
+    RunTimeSettingsV0_7_0,
+    RunTimeSettingsV0_9_0,
+)
+
+
+def _settings_fields(settings_cls):
+    """Every forge settings (section, field) of ``settings_cls``; a scalar
+    section (``gamma2``) is its own field.
+    """
+    for section, info in settings_cls.model_fields.items():
+        cfg_fields = getattr(info.annotation, "model_fields", None)
+        for field in cfg_fields or (section,):
+            yield section, field
+
+
+@pytest.mark.parametrize("settings_cls", _ALL_SETTINGS_TIERS)
+def test_namelist_field_for_maps_every_settings_field(settings_cls):
+    """Every settings field of every tier lands on a (group, key) the tier's
+    namelist schema declares. A section added to RunTimeSettings without a
+    _ONE_TO_ONE_GROUPS/_STRUCTURAL_GROUPS entry fails here.
+    """
+    schema = namelist_schema_for(settings_cls)
+    for section, field in _settings_fields(settings_cls):
+        target = namelist_field_for(settings_cls, section, field)
+        assert target is not None, (section, field)
+        group, key = target
+        assert group in schema.model_fields, (section, field, group)
+        assert key in schema.model_fields[group].annotation.model_fields, (
+            section,
+            field,
+            group,
+            key,
+        )
+
+
+@pytest.mark.parametrize("settings_cls", _ALL_SETTINGS_TIERS)
+def test_namelist_field_for_agrees_with_build_namelist(settings_cls):
+    """Each settings value is found in the built namelist at the (group, key)
+    namelist_field_for names -- the structural sections' mapping is written
+    beside build_namelist, not read by it, so this pins the two together.
+    """
+    rt = settings_cls.model_validate(_populated_rt_dict())
+    n_tracers = 34
+    nml = build_namelist(rt, n_tracers=n_tracers)
+    for section, field in _settings_fields(settings_cls):
+        section_value = getattr(rt, section)
+        value = getattr(section_value, field, section_value)  # scalar: itself
+        group, key = namelist_field_for(settings_cls, section, field)
+        written = getattr(getattr(nml, group), key)
+        if section == "forcing":  # every *_path is assembled into frcfiles
+            paths = value if isinstance(value, list) else [value] * (value is not None)
+            assert set(paths) <= set(written), (section, field)
+        else:  # a per-tracer default is expanded to one entry per tracer
+            assert written in (value, [value] * n_tracers), (section, field)
+
+
+@pytest.mark.parametrize(
+    ("section", "field", "expected"),
+    [
+        ("param", "n", ("param_settings", "nz")),
+        ("param", "np_xi", ("param_settings", "np_xi")),
+        ("param", "nt_cdr_oae", ("param_settings", "nt_cdr_oae")),
+        ("title", "casename", ("simulation_name_settings", "title")),
+        ("lateral_visc", "rho0", ("rho0_settings", "rho0")),
+        ("vertical_mixing", "akt_default", ("vertical_mixing_settings", "akt_bak")),
+        ("forcing", "river_path", ("forcing_files", "frcfiles")),
+        ("gamma2", "gamma2", ("gamma2_settings", "gamma2")),
+        (
+            "extract_data",
+            "extract_period",
+            ("extract_data_settings", "output_period_extract"),
+        ),
+        ("cdr_lite_output", "nrpf", ("cdr_lite_output_settings", "nrpf_cdr_lite")),
+    ],
+)
+def test_namelist_field_for_examples(section, field, expected):
+    assert namelist_field_for(RunTimeSettingsV0_9_0, section, field) == expected
+
+
+def test_namelist_field_for_follows_the_tier_group_rename():
+    """``cdr_lite_output`` is &CDR_TRACER_OUTPUT_SETTINGS on 0.7/0.8."""
+    assert namelist_field_for(RunTimeSettingsV0_7_0, "cdr_lite_output", "nrpf") == (
+        "cdr_tracer_output_settings",
+        "nrpf_cdr_trc",
+    )
+
+
+@pytest.mark.parametrize(
+    ("settings_cls", "section", "field"),
+    [
+        (RunTimeSettingsV0_9_0, "cppdefs", "marbl"),  # not a namelist section
+        (RunTimeSettingsV0_9_0, "param", "no_such_key"),  # not a typed field
+        (RunTimeSettingsV0_5_0, "pio_settings", "pio_stride"),  # other tier's section
+    ],
+)
+def test_namelist_field_for_returns_none_off_the_namelist(settings_cls, section, field):
+    assert namelist_field_for(settings_cls, section, field) is None
+
+
+@pytest.mark.parametrize(("section", "cfg_cls", "group"), _PRECHECK_SECTION_MAP)
+def test_precheck_section_map_agrees_with_namelist_field_for(section, cfg_cls, group):
+    """_PRECHECK_SECTION_MAP's group column names the group build_namelist
+    writes the section to, on every tier that types the section as that Cfg.
+    """
+    tiers = [
+        cls
+        for cls in _ALL_SETTINGS_TIERS
+        if cls.model_fields.get(section)
+        and cls.model_fields[section].annotation is cfg_cls
+    ]
+    assert tiers
+    field = next(iter(cfg_cls.model_fields))
+    for settings_cls in tiers:
+        assert namelist_field_for(settings_cls, section, field)[0] == group
