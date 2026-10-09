@@ -16,7 +16,7 @@ from pydantic import ValidationError
 import cstar.catalog
 from cstar.applications.forge.namelist_model import (
     _GATED_SECTION_SWITCHES,
-    _PRECHECK_SECTION_MAP,
+    _PRECHECK_SECTIONS,
     CDR_LITE_MODE_MIN_ROMS,
     CdrGasExchOutputCfg,
     CdrLiteOutputCfg,
@@ -36,7 +36,6 @@ from cstar.applications.forge.namelist_model import (
     check_cdr_lite_mode_roms,
     check_cdr_lite_sections,
     check_cdr_output_sections,
-    forge_field_for,
     n_tracers_from_param,
     namelist_field_for,
     namelist_schema_for,
@@ -838,34 +837,6 @@ def test_output_precheck_applies_to_none_and_empty_ref_stays_legacy(roms_ref):
 
 
 # ---------------------------------------------------------------------------
-# forge_field_for -- canonical (section, key) -> forge "section.field" lookup
-# ---------------------------------------------------------------------------
-def test_forge_field_for_renamed_field():
-    # FrcOutputCfg.output_period has serialization_alias="output_period_frc".
-    assert (
-        forge_field_for("frc_output_settings", "output_period_frc")
-        == "frc_output.output_period"
-    )
-
-
-def test_forge_field_for_unaliased_field():
-    # OceanVarsCfgV0_5_0.output_period_rst has no serialization_alias -- the
-    # forge field name already IS the canonical key.
-    assert (
-        forge_field_for("basic_output_settings", "output_period_rst")
-        == "ocean_vars.output_period_rst"
-    )
-
-
-def test_forge_field_for_unknown_section_returns_none():
-    assert forge_field_for("stdout_diag_settings", "code_check_mode") is None
-
-
-def test_forge_field_for_unknown_key_returns_none():
-    assert forge_field_for("frc_output_settings", "not_a_real_key") is None
-
-
-# ---------------------------------------------------------------------------
 # ucla-roms >= 0.9.0: RunTimeSettingsV0_9_0 (cdr_lite, renamed cdr_lite_output)
 # ---------------------------------------------------------------------------
 def test_build_namelist_v0_9_0_dispatches_to_its_own_class(tmp_path):
@@ -1230,7 +1201,7 @@ def test_cdr_output_sections_ignore_tiers_without_the_section():
 
 
 # ---------------------------------------------------------------------------
-# _PRECHECK_SECTION_MAP rows / forge_field_for
+# canonical_output_sections_for_precheck
 # ---------------------------------------------------------------------------
 def test_precheck_translation_picks_the_group_by_tier():
     section = {"do_cdr_lite_output": True, "nrpf": 3, "output_period": 60.0}
@@ -1250,51 +1221,6 @@ def test_precheck_translation_picks_the_group_by_tier():
     assert list(v09) == ["cdr_lite_output_settings"]
     assert v09["cdr_lite_output_settings"]["nrpf_cdr_lite"] == 3
     assert v09["cdr_lite_output_settings"]["wrt_gas_exchange"] is False
-
-
-@pytest.mark.parametrize("roms_ref", ["0.5.0", "0.6.0", "0.7.0", "0.8.0", "0.9.0"])
-def test_every_precheck_row_that_applies_matches_the_tier_annotation(roms_ref):
-    """Each section of the >= 0.5.0 tiers has exactly one applying row, so none is
-    silently skipped by the row-matching rule (e.g. ``ocean_vars`` ->
-    ``OceanVarsCfgV0_5_0``).
-    """
-    cls = run_time_settings_for_ref(roms_ref)
-    assert output_precheck_applies_to(cls)
-    sections = [section for section, _cfg, _group in _PRECHECK_SECTION_MAP]
-    for section in set(sections):
-        if section not in cls.model_fields:
-            continue
-        applying = [
-            group
-            for sec, cfg, group in _PRECHECK_SECTION_MAP
-            if sec == section and cls.model_fields[sec].annotation is cfg
-        ]
-        assert len(applying) == 1, (roms_ref, section, applying)
-    # ... and every section the tier models that the table knows is covered.
-    assert {section for section in sections if section in cls.model_fields} == {
-        sec
-        for sec, cfg, _ in _PRECHECK_SECTION_MAP
-        if sec in cls.model_fields and cls.model_fields[sec].annotation is cfg
-    }
-
-
-def test_forge_field_for_maps_both_cdr_lite_groups_to_the_forge_section():
-    assert (
-        forge_field_for("cdr_tracer_output_settings", "nrpf_cdr_trc")
-        == "cdr_lite_output.nrpf"
-    )
-    assert (
-        forge_field_for("cdr_lite_output_settings", "nrpf_cdr_lite")
-        == "cdr_lite_output.nrpf"
-    )
-    assert (
-        forge_field_for("cdr_tracer_output_settings", "do_cdr_tracer_output")
-        == "cdr_lite_output.do_cdr_lite_output"
-    )
-    assert (
-        forge_field_for("cdr_lite_output_settings", "wrt_gas_exchange")
-        == "cdr_lite_output.wrt_gas_exchange"
-    )
 
 
 # ---------------------------------------------------------------------------
@@ -1496,18 +1422,17 @@ def test_namelist_field_for_returns_none_off_the_namelist(settings_cls, section,
     assert namelist_field_for(settings_cls, section, field) is None
 
 
-@pytest.mark.parametrize(("section", "cfg_cls", "group"), _PRECHECK_SECTION_MAP)
-def test_precheck_section_map_agrees_with_namelist_field_for(section, cfg_cls, group):
-    """_PRECHECK_SECTION_MAP's group column names the group build_namelist
-    writes the section to, on every tier that types the section as that Cfg.
+@pytest.mark.parametrize("roms_ref", ["0.5.0", "0.6.0", "0.7.0", "0.8.0", "0.9.0"])
+def test_precheck_sections_match_what_build_namelist_writes(roms_ref):
+    """The precheck sees every output-stream section the tier carries, under
+    the group and keys build_namelist writes it with.
     """
-    tiers = [
-        cls
-        for cls in _ALL_SETTINGS_TIERS
-        if cls.model_fields.get(section)
-        and cls.model_fields[section].annotation is cfg_cls
-    ]
-    assert tiers
-    field = next(iter(cfg_cls.model_fields))
-    for settings_cls in tiers:
-        assert namelist_field_for(settings_cls, section, field)[0] == group
+    settings_cls = run_time_settings_for_ref(roms_ref)
+    d = _populated_rt_dict()
+    canonical = canonical_output_sections_for_precheck(d, settings_cls)
+    nml = build_namelist(settings_cls.model_validate(d), n_tracers=34)
+    present = [s for s in _PRECHECK_SECTIONS if s in settings_cls.model_fields]
+    assert len(canonical) == len(present)
+    for group, keys in canonical.items():
+        written = getattr(nml, group).model_dump()
+        assert keys == {k: written[k] for k in keys}, (roms_ref, group)

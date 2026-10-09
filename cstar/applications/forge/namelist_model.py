@@ -28,7 +28,7 @@ from __future__ import annotations
 import os
 import re
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Annotated, Any, Literal
+from typing import TYPE_CHECKING, Annotated, Any, Literal, cast
 
 from pydantic import (
     AliasChoices,
@@ -464,7 +464,7 @@ def check_rst_period_divisible(
     :func:`cstar.roms.precheck.check_restart_period_divisible_by_dt` (the
     single home for this rule): ``ocean_vars``' fields already ARE the real
     Fortran namelist keys (``wrt_file_rst``/``monthly_restarts``/
-    ``output_period_rst``, no aliasing -- see :data:`_PRECHECK_SECTION_MAP`),
+    ``output_period_rst``, no aliasing -- see :data:`_PRECHECK_SECTIONS`),
     so it's passed straight through as the canonical ``basic_output_settings``
     group, whether it's a plain dict (the resolver's world) or an
     ``OceanVarsCfg`` (the pydantic validator's world) -- both forms are
@@ -858,8 +858,7 @@ def _tier_types_section(
 ) -> bool:
     """True if the run-time settings tier ``settings_cls`` types ``section`` as
     exactly ``cfg_cls`` -- the one rule deciding which row of a per-tier section
-    table (:data:`CDR_OUTPUT_SECTIONS`, :data:`_PRECHECK_SECTION_MAP`) applies
-    to the pinned ucla-roms release.
+    table (:data:`CDR_OUTPUT_SECTIONS`) applies to the pinned ucla-roms release.
     """
     info = settings_cls.model_fields.get(section)
     return info is not None and info.annotation is cfg_cls
@@ -1801,45 +1800,30 @@ def validate_run_time_sections(
     return errors
 
 
-# Rows ``(forge settings-dict section, the forge Cfg class that types/aliases
-# that raw section, the C-Star RomsNamelistBase group field name the canonical
-# table expects)`` for the sections check_output_streams_divide_rst reads.
-# ``ocean_vars``/``upscale_output`` need no aliasing at all -- their forge field
-# names already ARE the real Fortran namelist keys -- but are still routed
-# through their Cfg class so a malformed section raises loudly rather than
-# silently mismatching field names. A section whose Cfg varies by ucla-roms
-# release has one row per Cfg; a row applies when the pinned release's settings
-# tier types the section as exactly that Cfg (:func:`_tier_types_section`), so
-# the ``OceanVarsCfgV0_5_0``/``ParticlesCfgV0_5_0`` rows apply only on the
-# >= 0.5.0 tiers :func:`output_precheck_applies_to` gates this check to, and
-# ``cdr_lite_output`` maps to the group its release writes.
-_PRECHECK_SECTION_MAP: tuple[tuple[str, type[_SettingsSection], str], ...] = (
-    ("ocean_vars", OceanVarsCfgV0_5_0, "basic_output_settings"),
-    ("frc_output", FrcOutputCfg, "frc_output_settings"),
-    ("random_output", RandomOutputCfg, "random_output_settings"),
-    ("zslice", ZsliceCfg, "zslice_settings"),
-    ("surf_flux", SurfFluxCfg, "surf_flx_output_settings"),
-    ("particles", ParticlesCfgV0_5_0, "particles_settings"),
-    ("sponge_tune", SpongeTuneCfg, "sponge_tune_settings"),
-    ("diagnostics", DiagnosticsCfg, "diagnostics_settings"),
-    ("cdr_output", CdrOutputCfg, "cdr_output_settings"),
-    ("cdr_lite_output", CdrLiteOutputCfg, "cdr_tracer_output_settings"),
-    ("cdr_lite_output", CdrLiteOutputCfgV0_9_0, "cdr_lite_output_settings"),
-    ("cdr_gas_exch_output", CdrGasExchOutputCfg, "cdr_gas_exch_output_settings"),
-    ("upscale_output", UpscaleOutputCfg, "upscale_settings"),
-    ("bgc", BgcCfg, "bgc_settings"),
-    ("extract_data", ExtractDataCfg, "extract_data_settings"),
+# The forge settings sections check_output_streams_divide_rst reads (the output
+# streams). Each is translated through the pinned tier's own Cfg class (its
+# ``serialization_alias`` renames) into the group build_namelist writes it to
+# (:data:`_ONE_TO_ONE_GROUPS`), so a section whose Cfg or group varies by
+# ucla-roms release needs nothing here. ``ocean_vars``/``upscale_output`` need no
+# aliasing at all -- their forge field names already ARE the real Fortran
+# namelist keys -- but are still routed through their Cfg class so a malformed
+# section raises loudly rather than silently mismatching field names.
+_PRECHECK_SECTIONS: tuple[str, ...] = (
+    "ocean_vars",
+    "frc_output",
+    "random_output",
+    "zslice",
+    "surf_flux",
+    "particles",
+    "sponge_tune",
+    "diagnostics",
+    "cdr_output",
+    "cdr_lite_output",
+    "cdr_gas_exch_output",
+    "upscale_output",
+    "bgc",
+    "extract_data",
 )
-
-# The inverse of _PRECHECK_SECTION_MAP: canonical RomsNamelistBase group field
-# name (unique per row) -> (the forge settings-dict section that maps to it,
-# its Cfg class). Used by forge_field_for to point a NamelistConsistencyError's
-# canonical section/keys back at the forge settings-dict field the wizard
-# actually edits.
-_FORGE_SECTION_BY_CANONICAL_GROUP: dict[str, tuple[str, type[_SettingsSection]]] = {
-    group_name: (section_name, cfg_cls)
-    for section_name, cfg_cls, group_name in _PRECHECK_SECTION_MAP
-}
 
 
 def canonical_output_sections_for_precheck(
@@ -1859,10 +1843,11 @@ def canonical_output_sections_for_precheck(
     ``generate_inputs()``/executor time), so a full run-time-settings
     validation can't succeed yet. None of those sections affect any
     output-stream field, so this only validates+aliases the sections the
-    checker actually reads (see :data:`_PRECHECK_SECTION_MAP`, whose rows are
-    filtered by ``settings_cls``, the tier of the pinned ucla-roms release). A
-    section absent from ``settings`` is simply omitted from the result -- the
-    checker already treats an absent section as "skip that stream".
+    checker actually reads (:data:`_PRECHECK_SECTIONS`), each through the Cfg
+    class and into the group of ``settings_cls``, the tier of the pinned
+    ucla-roms release. A section absent from ``settings`` or from that tier is
+    simply omitted from the result -- the checker already treats an absent
+    section as "skip that stream".
 
     Always includes ``extract_data`` (the nesting `extract` stream) when
     present in ``settings`` -- it's unconditionally fully populated by
@@ -1874,31 +1859,14 @@ def canonical_output_sections_for_precheck(
     ``NamelistConsistencyError`` and check ``exc.section ==
     "extract_data_settings"``.
     """
+    namelist_cls = namelist_schema_for(settings_cls)
     out: dict[str, Any] = {}
-    for section_name, cfg_cls, group_name in _PRECHECK_SECTION_MAP:
-        if not _tier_types_section(settings_cls, section_name, cfg_cls):
-            continue
+    for section_name in _PRECHECK_SECTIONS:
+        info = settings_cls.model_fields.get(section_name)
         section = settings.get(section_name)
-        if section is None:
+        if info is None or section is None:
             continue
-        out[group_name] = cfg_cls.model_validate(section).model_dump(by_alias=True)
+        cfg_cls = cast("type[_SettingsSection]", info.annotation)
+        group = _one_to_one_group(namelist_cls, section_name)
+        out[group] = cfg_cls.model_validate(section).model_dump(by_alias=True)
     return out
-
-
-def forge_field_for(section: str, key: str) -> str | None:
-    """Reverse-lookup: a ``NamelistConsistencyError``'s canonical
-    ``section``/one of its ``keys`` (a ``RomsNamelistBase`` group field name
-    and real Fortran namelist key) -> the forge settings-dict ``"section.field"``
-    the wizard actually edits, via :data:`_PRECHECK_SECTION_MAP`'s Cfg classes
-    and their ``serialization_alias``. Returns ``None`` if ``section`` isn't
-    one of the output-stream-check groups this table maps (not every namelist
-    group has a forge settings-dict counterpart via this table).
-    """
-    entry = _FORGE_SECTION_BY_CANONICAL_GROUP.get(section)
-    if entry is None:
-        return None
-    forge_section, cfg_cls = entry
-    for field_name, info in cfg_cls.model_fields.items():
-        if (info.serialization_alias or field_name) == key:
-            return f"{forge_section}.{field_name}"
-    return None
