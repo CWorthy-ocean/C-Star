@@ -1344,11 +1344,11 @@ def test_bgc_dd_none_with_default_bgc_forcing_surfaces_error_legibly():
 
 def test_use_pio_chk_default_seeded_from_model_spec():
     """use_pio_chk mirrors bgc_dd: it is seeded from the selected ModelSpec's
-    top-level use_pio (True for roms-marbl-0.9-default, the wizard's default
+    top-level use_pio (True for roms-marbl-0.10-default, the wizard's default
     model; False for cson_roms-marbl_v0.1), and reseeded on a model switch.
     """
     wiz = ForgeBlueprintWizard()
-    assert wiz.model_dd.value == "roms-marbl-0.9-default"
+    assert wiz.model_dd.value == "roms-marbl-0.10-default"
     assert wiz.use_pio_chk.value is True
     assert wiz._model_default_use_pio() is True
 
@@ -1366,7 +1366,7 @@ def test_use_pio_chk_emit_is_unconditional():
     wiz = ForgeBlueprintWizard()
     wiz.start.value = date(2012, 1, 1)
     wiz.end.value = date(2012, 1, 2)
-    # roms-marbl-0.9-default (the default model) declares use_pio: true --
+    # roms-marbl-0.10-default (the default model) declares use_pio: true --
     # exactly the ModelSpec this test guards against: unchecking must emit an
     # explicit False, not fall back to the ModelSpec default.
     assert wiz.use_pio_chk.value is True
@@ -2175,8 +2175,8 @@ def test_output_spec_defaults_to_daily_restarts():
 
 
 def test_default_model_uses_latest_settings_schema():
-    """The default catalog model (``roms-marbl-0.9-default``) is pinned to
-    ucla-roms ``0.9.1`` -- a semver ref above the newest registered schema
+    """The default catalog model (``roms-marbl-0.10-default``) is pinned to
+    ucla-roms ``0.10.0`` -- a semver ref above the newest registered schema
     boundary, which both the wizard and the executor (``write_roms_namelist`` ->
     ``run_time_settings_for_ref``) resolve to the *latest* known schema
     (currently ``RunTimeSettingsV0_9_0``), not the legacy one. This is an intentional behavior change from before this
@@ -2353,15 +2353,19 @@ def test_wizard_editor_cdr_output_streams_gated_by_model_spec_pin():
     assert ("cdr_lite_output", "do_cdr_lite_output") in wiz.editor._widgets
     assert ("cdr_gas_exch_output", "do_cdr_gas_exch_output") in wiz.editor._widgets
 
-    wiz.model_dd.value = "roms-marbl-0.9-default"
-    wiz._rebuild()
-    assert "cdr_lite_output" in wiz.config.model_settings
-    assert ("cdr_lite_output", "do_cdr_lite_output") in wiz.editor._widgets
-    assert ("cdr_lite_output", "wrt_gas_exchange") in wiz.editor._widgets
-    # The bundled spec does not declare the ``cdr_lite`` knob yet (CDR-lite tracers
-    # need forcing Forge cannot generate), so there is no widget for it.
-    assert "cdr_lite" not in wiz.config.model_settings
-    assert ("cdr_lite", "cdr_online_carbonate_sensitivity") not in wiz.editor._widgets
+    for model in ("roms-marbl-0.9-default", "roms-marbl-0.10-default"):
+        wiz.model_dd.value = model
+        wiz._rebuild()
+        assert "cdr_lite_output" in wiz.config.model_settings
+        assert ("cdr_lite_output", "do_cdr_lite_output") in wiz.editor._widgets
+        assert ("cdr_lite_output", "wrt_gas_exchange") in wiz.editor._widgets
+        # The bundled specs do not declare the ``cdr_lite`` knob yet (CDR-lite
+        # tracers need forcing Forge cannot generate), so there is no widget for it.
+        assert "cdr_lite" not in wiz.config.model_settings
+        assert (
+            "cdr_lite",
+            "cdr_online_carbonate_sensitivity",
+        ) not in wiz.editor._widgets
 
 
 def test_cdr_tracer_counts_survive_wizard_save_and_load_round_trip(tmp_path):

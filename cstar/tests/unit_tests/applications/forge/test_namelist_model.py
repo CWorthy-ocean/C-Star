@@ -596,8 +596,8 @@ def test_validate_run_time_sections_skips_bgc_check_without_cppdefs():
 @pytest.mark.parametrize(
     ("cppdefs", "roms_ref", "rejected"),
     [
-        ({"cdr_lite": True, "marbl": False}, "0.9.0", True),
-        ({"cdr_lite": True, "marbl": False}, "0.9.1", False),
+        ({"cdr_lite": True, "marbl": False}, "0.9.1", True),
+        ({"cdr_lite": True, "marbl": False}, "0.10.0", False),
         ({"cdr_lite": True, "marbl": False}, None, False),
         # online sensitivities on a MARBL build are not the CDR-lite mode
         ({"cdr_lite": True, "marbl": True}, "0.9.0", False),
@@ -1048,9 +1048,9 @@ def test_bgc_mode_from_cppdefs(cppdefs, expected):
 # ---------------------------------------------------------------------------
 # check_cdr_lite_mode_roms
 # ---------------------------------------------------------------------------
-@pytest.mark.parametrize("ref", ["0.9.1", "v0.9.1", "0.9.2", "0.10.0", "1.0.0"])
+@pytest.mark.parametrize("ref", ["0.10.0", "v0.10.0", "0.10.2", "0.11.0", "1.0.0"])
 def test_check_cdr_lite_mode_roms_accepts_releases_from_the_minimum(ref):
-    assert CDR_LITE_MODE_MIN_ROMS == (0, 9, 1)
+    assert CDR_LITE_MODE_MIN_ROMS == (0, 10, 0)
     check_cdr_lite_mode_roms(ref)
 
 
@@ -1059,9 +1059,9 @@ def test_check_cdr_lite_mode_roms_treats_a_non_tag_ref_as_the_latest(ref):
     check_cdr_lite_mode_roms(ref)
 
 
-@pytest.mark.parametrize("ref", ["0.9.0", "0.8.0", "v0.7.1"])
+@pytest.mark.parametrize("ref", ["0.9.1", "0.9.0", "0.8.0", "v0.7.1"])
 def test_check_cdr_lite_mode_roms_rejects_older_releases(ref):
-    with pytest.raises(ValueError, match=r"ucla-roms >= 0\.9\.1"):
+    with pytest.raises(ValueError, match=r"ucla-roms >= 0\.10\.0"):
         check_cdr_lite_mode_roms(ref)
 
 
@@ -1163,17 +1163,17 @@ def test_validate_run_time_sections_reads_the_bgc_mode_from_cppdefs():
     same counts without ``CDR_LITE`` are, on a tier that has it.
     """
     stored = {**_lite(stream=True, param={}), "cppdefs": {"marbl": False}}
-    assert any("== 0" in e for e in validate_run_time_sections(stored, "0.9.1"))
+    assert any("== 0" in e for e in validate_run_time_sections(stored, "0.10.0"))
     stored["cppdefs"] = {"marbl": False, "cdr_lite": True}
-    assert validate_run_time_sections(stored, "0.9.1") == []
+    assert validate_run_time_sections(stored, "0.10.0") == []
 
     counted = {**_lite(), "cppdefs": {"marbl": False}}
     assert any(
         "Forcing type not supported" in e
-        for e in validate_run_time_sections(counted, "0.9.1")
+        for e in validate_run_time_sections(counted, "0.10.0")
     )
     counted["cppdefs"] = {"marbl": False, "cdr_lite": True}
-    assert validate_run_time_sections(counted, "0.9.1") == []
+    assert validate_run_time_sections(counted, "0.10.0") == []
     # Older tiers have no CDR_LITE: the same counts are fine there.
     counted["cppdefs"] = {"marbl": False}
     assert validate_run_time_sections(counted, "0.7.0") == []

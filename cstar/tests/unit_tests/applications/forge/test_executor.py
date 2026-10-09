@@ -94,6 +94,7 @@ _MODEL_DIR_ROMS070 = _BUNDLED_CATALOG / "ModelSpec" / "roms-marbl-0.7-default"
 # &CDR_LITE_OUTPUT_SETTINGS, PR #372) -- used by the versioned-namelist golden
 # test below.
 _MODEL_DIR_ROMS090 = _BUNDLED_CATALOG / "ModelSpec" / "roms-marbl-0.9-default"
+_MODEL_DIR_ROMS0100 = _BUNDLED_CATALOG / "ModelSpec" / "roms-marbl-0.10-default"
 # ModelSpec no longer embeds a default forcing/output selection -- these tests just
 # need a valid, representative pair from the bundled catalog.
 _FORCING_INPUTS = _CATALOG.forcing_data("glorys-era5-unified")
@@ -4064,7 +4065,7 @@ class TestGoldenNamelist:
         assert nml.cdr_lite_settings.cdr_online_carbonate_sensitivity is False
 
     def test_golden_namelist_test_tiny_roms090_cdr_lite(self, mock_grid, tmp_path):
-        """``bgc_mode: cdr_lite`` on ``roms-marbl-0.9-default``: CDR-lite tracers
+        """``bgc_mode: cdr_lite`` on ``roms-marbl-0.10-default``: CDR-lite tracers
         without MARBL, the test-tiny domain, a physics-only forcing, and a real
         roms-tools CDR forcing with one OAE and one DOR release.
 
@@ -4085,7 +4086,7 @@ class TestGoldenNamelist:
         normalized = self._run_golden_namelist_case(
             mock_grid,
             tmp_path,
-            _MODEL_DIR_ROMS090,
+            _MODEL_DIR_ROMS0100,
             "golden_namelist_test-tiny-roms090-cdr-lite.nml",
             cdr_lite=True,
         )
@@ -4134,7 +4135,7 @@ class TestGoldenNamelist:
         self._run_golden_namelist_case(
             mock_grid,
             tmp_path,
-            _MODEL_DIR_ROMS090,
+            _MODEL_DIR_ROMS0100,
             "golden_namelist_test-tiny-roms090-cdr-lite.nml",
             cdr_lite=True,
             carbonate_sensitivity=sources,
@@ -4171,7 +4172,7 @@ class TestGoldenNamelist:
         self._run_golden_namelist_case(
             mock_grid,
             tmp_path,
-            _MODEL_DIR_ROMS090,
+            _MODEL_DIR_ROMS0100,
             "golden_namelist_test-tiny-roms090-cdr-lite.nml",
             cdr_lite=True,
             capture=captured,
@@ -4292,14 +4293,14 @@ class TestGoldenNamelist:
         nt_cdr_dor=0,
         cdr_active=True,
     ):
-        """A 0.9.1-pinned builder past (mocked) generation whose stored blueprint
+        """A 0.10.0-pinned builder past (mocked) generation whose stored blueprint
         says ``bgc_mode: cdr_lite`` (``marbl`` off, ``cdr_lite`` on, no BGC
         tracers). ``nt_cdr_*`` stand in for what the CDR generation step derives
         from the CDR forcing's tracer axis, and ``cdr_active`` for that forcing
         having been configured (the unit-level mock has none).
         """
         cfg, builder = self._generate_inputs_no_cdr_forcing(
-            mock_grid, tmp_path, model_dir=_MODEL_DIR_ROMS090
+            mock_grid, tmp_path, model_dir=_MODEL_DIR_ROMS0100
         )
         cfg.model_settings["cppdefs"].update(marbl=False, cdr_lite=True)
         cfg.model_settings["param"]["ntrc_bio"] = 0
@@ -4349,14 +4350,14 @@ class TestGoldenNamelist:
         with pytest.raises(ValueError, match="no CDR forcing is configured"):
             self._configure_build_for(cfg, builder)
 
-    def test_configure_build_cdr_lite_needs_ucla_roms_0_9_1(self, mock_grid, tmp_path):
+    def test_configure_build_cdr_lite_needs_ucla_roms_0_10_0(self, mock_grid, tmp_path):
         """The build-time net for a stored blueprint pinned below the minimum
         (the resolver's gate does not run for a stored blueprint).
         """
         cfg, builder = self._cdr_lite_builder(mock_grid, tmp_path)
-        builder.code_spec.roms.commit = "0.9.0"
+        builder.code_spec.roms.commit = "0.9.1"
         with pytest.raises(
-            ValueError, match=r'bgc_mode "cdr_lite" on ucla-roms 0\.9\.0'
+            ValueError, match=r'bgc_mode "cdr_lite" on ucla-roms 0\.9\.1'
         ):
             self._configure_build_for(cfg, builder)
 
@@ -4366,8 +4367,8 @@ class TestGoldenNamelist:
         import cstar.applications.forge.namelist_model as namelist_model
 
         cfg, builder = self._cdr_lite_builder(mock_grid, tmp_path)
-        monkeypatch.setattr(namelist_model, "CDR_LITE_MODE_MIN_ROMS", (0, 9, 2))
-        with pytest.raises(ValueError, match=r"ucla-roms 0\.9\.1.*>= 0\.9\.2"):
+        monkeypatch.setattr(namelist_model, "CDR_LITE_MODE_MIN_ROMS", (0, 10, 1))
+        with pytest.raises(ValueError, match=r"ucla-roms 0\.10\.0.*>= 0\.10\.1"):
             self._configure_build_for(cfg, builder)
 
     def test_configure_build_cdr_lite_leaves_an_enabled_stream_as_is(

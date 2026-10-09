@@ -137,10 +137,10 @@
 /
 
 &forcing_files
-    frcfiles = '<WORKDIR>/input_data/roms-marbl-0_9-default_test-tiny_1procs_surface-physics.nc',
-               '<WORKDIR>/input_data/roms-marbl-0_9-default_test-tiny_1procs_boundary-physics.nc',
-               '<WORKDIR>/input_data/roms-marbl-0_9-default_test-tiny_1procs_tidal.nc',
-               '<WORKDIR>/input_data/roms-marbl-0_9-default_test-tiny_1procs_river.nc'
+    frcfiles = '<WORKDIR>/input_data/roms-marbl-0_10-default_test-tiny_1procs_surface-physics.nc',
+               '<WORKDIR>/input_data/roms-marbl-0_10-default_test-tiny_1procs_boundary-physics.nc',
+               '<WORKDIR>/input_data/roms-marbl-0_10-default_test-tiny_1procs_tidal.nc',
+               '<WORKDIR>/input_data/roms-marbl-0_10-default_test-tiny_1procs_river.nc'
 /
 
 &frc_output_settings
@@ -155,11 +155,11 @@
 /
 
 &grid_settings
-    grdname = '<WORKDIR>/input_data/roms-marbl-0_9-default_test-tiny_1procs_grid.nc'
+    grdname = '<WORKDIR>/input_data/roms-marbl-0_10-default_test-tiny_1procs_grid.nc'
 /
 
 &initial_conditions
-    inifile = '<WORKDIR>/input_data/roms-marbl-0_9-default_test-tiny_1procs_initial_conditions.nc'
+    inifile = '<WORKDIR>/input_data/roms-marbl-0_10-default_test-tiny_1procs_initial_conditions.nc'
 /
 
 &lateral_visc_settings
@@ -244,8 +244,8 @@
 /
 
 &simulation_name_settings
-    output_root_name = '<WORKDIR>/output/roms-marbl-0.9-default_test-tiny_1procs_20120101-20120102'
-    title = 'roms-marbl-0.9-default_test-tiny_1procs_20120101-20120102'
+    output_root_name = '<WORKDIR>/output/roms-marbl-0.10-default_test-tiny_1procs_20120101-20120102'
+    title = 'roms-marbl-0.10-default_test-tiny_1procs_20120101-20120102'
 /
 
 &sponge_tune_settings

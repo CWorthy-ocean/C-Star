@@ -74,6 +74,7 @@ _MODEL_DIR_ROMS070 = _BUNDLED_CATALOG / "ModelSpec" / "roms-marbl-0.7-default"
 # above).
 _MODEL_DIR_ROMS080 = _BUNDLED_CATALOG / "ModelSpec" / "roms-marbl-0.8-default"
 _MODEL_DIR_ROMS090 = _BUNDLED_CATALOG / "ModelSpec" / "roms-marbl-0.9-default"
+_MODEL_DIR_ROMS0100 = _BUNDLED_CATALOG / "ModelSpec" / "roms-marbl-0.10-default"
 _GRID_KWARGS = dict(
     nx=6,
     ny=2,
@@ -2943,6 +2944,7 @@ def test_bundled_output_specs_satisfy_roms_divides_rst_precheck(spec_name):
         "roms-marbl-0.7-default",
         "roms-marbl-0.8-default",
         "roms-marbl-0.9-default",
+        "roms-marbl-0.10-default",
     ],
 )
 def test_model_spec_streams_satisfy_roms_divides_rst_precheck(
@@ -3574,7 +3576,7 @@ def _build_cdr_lite(**over):
     that must be stated through ``cdr=``: a bare ``cdr_forcing=`` is "yaml").
     """
     kw = {
-        "model_dir": _MODEL_DIR_ROMS090,
+        "model_dir": _MODEL_DIR_ROMS0100,
         "bgc_mode": "cdr_lite",
         "forcing_inputs": _PHYSICS_ONLY_FORCING,
         "cdr": {"mode": "simple", "cdr_forcing": _cdr_lite_forcing()},
@@ -3606,8 +3608,8 @@ def test_resolver_bgc_mode_cdr_lite_derives_cppdefs_param_and_code():
 def test_resolver_bgc_mode_cdr_lite_defaults_to_the_model_spec(tmp_path):
     import shutil
 
-    model_dir = tmp_path / "roms-marbl-0.9-default"
-    shutil.copytree(_MODEL_DIR_ROMS090, model_dir)
+    model_dir = tmp_path / "roms-marbl-0.10-default"
+    shutil.copytree(_MODEL_DIR_ROMS0100, model_dir)
     text = (model_dir / "model.yaml").read_text()
     assert "bgc_mode: marbl" in text
     (model_dir / "model.yaml").write_text(
@@ -3681,15 +3683,21 @@ def test_resolver_bgc_mode_cdr_lite_accepts_the_stream_switch_before_generation(
 
 @pytest.mark.parametrize(
     ("roms_ref", "ok"),
-    [("0.9.0", False), ("0.8.0", False), ("0.9.1", True), ("main", True)],
+    [
+        ("0.9.1", False),
+        ("0.9.0", False),
+        ("0.8.0", False),
+        ("0.10.0", True),
+        ("main", True),
+    ],
 )
-def test_resolver_bgc_mode_cdr_lite_needs_ucla_roms_0_9_1(roms_ref, ok):
+def test_resolver_bgc_mode_cdr_lite_needs_ucla_roms_0_10_0(roms_ref, ok):
     if ok:
         cfg = _build_cdr_lite(roms_ref=roms_ref)
         assert cfg.model_settings["cppdefs"]["cdr_lite"] is True
     else:
         with pytest.raises(
-            ValueError, match=r'bgc_mode "cdr_lite" on ucla-roms .*>= 0\.9\.1'
+            ValueError, match=r'bgc_mode "cdr_lite" on ucla-roms .*>= 0\.10\.0'
         ):
             _build_cdr_lite(roms_ref=roms_ref)
 
@@ -3697,18 +3705,18 @@ def test_resolver_bgc_mode_cdr_lite_needs_ucla_roms_0_9_1(roms_ref, ok):
 def test_resolver_bgc_mode_cdr_lite_gate_applies_to_a_pinned_older_model_spec():
     with pytest.raises(ValueError, match=r'bgc_mode "cdr_lite" on ucla-roms 0\.8\.0'):
         _build_cdr_lite(model_dir=_MODEL_DIR_ROMS080)
+    with pytest.raises(ValueError, match=r'bgc_mode "cdr_lite" on ucla-roms 0\.9\.1'):
+        _build_cdr_lite(model_dir=_MODEL_DIR_ROMS090)
 
 
 def test_resolver_bgc_mode_cdr_lite_gate_follows_the_named_constant(monkeypatch):
-    """The gate reads ``CDR_LITE_MODE_MIN_ROMS`` -- the one constant to raise once
-    ucla-roms writes forcing-ready ``_cdrgas`` files -- not a copy of 0.9.1.
-    """
+    """The gate reads ``CDR_LITE_MODE_MIN_ROMS``, not a copy of 0.10.0."""
     import cstar.applications.forge.namelist_model as namelist_model
 
-    assert _build_cdr_lite(roms_ref="0.9.1")
-    monkeypatch.setattr(namelist_model, "CDR_LITE_MODE_MIN_ROMS", (0, 9, 2))
-    with pytest.raises(ValueError, match=r"ucla-roms 0\.9\.1.*>= 0\.9\.2"):
-        _build_cdr_lite(roms_ref="0.9.1")
+    assert _build_cdr_lite(roms_ref="0.10.0")
+    monkeypatch.setattr(namelist_model, "CDR_LITE_MODE_MIN_ROMS", (0, 10, 1))
+    with pytest.raises(ValueError, match=r"ucla-roms 0\.10\.0.*>= 0\.10\.1"):
+        _build_cdr_lite(roms_ref="0.10.0")
 
 
 def test_resolver_cdr_lite_simple_mode_defaults_every_release_tracer_set():
@@ -3796,7 +3804,7 @@ def test_resolver_marbl_mode_online_sensitivity_still_derives_cdr_lite():
 
 def test_golden_model_settings_test_tiny_roms090_cdr_lite():
     """Snapshot of the resolved ``model_settings`` for ``bgc_mode: cdr_lite`` on
-    ``roms-marbl-0.9-default`` (test-tiny domain, the physics-only forcing and one
+    ``roms-marbl-0.10-default`` (test-tiny domain, the physics-only forcing and one
     OAE release): pins the cppdefs/param/code contract the executor consumes.
     Regenerate with ``json.dumps(cfg.model_settings, indent=2, sort_keys=True,
     default=str)`` plus a trailing newline, from ``_build_cdr_lite()``.
@@ -3812,7 +3820,7 @@ def test_golden_model_settings_test_tiny_roms090_cdr_lite():
     cfg = _build_cdr_lite()
     got = json.loads(json.dumps(cfg.model_settings, sort_keys=True, default=str))
     assert got == golden, (
-        "Resolved model_settings for test-tiny (roms-marbl-0.9-default, bgc_mode "
+        "Resolved model_settings for test-tiny (roms-marbl-0.10-default, bgc_mode "
         "cdr_lite) drifted from the golden fixture. If this is an intentional "
         "change, regenerate tests/fixtures/golden_model_settings_test-tiny-"
         "roms090-cdr-lite.json; otherwise the change is a regression."
@@ -4980,6 +4988,7 @@ def test_resolved_templates_carry_modelspec_authored_hashes():
         ("roms-marbl-0.7-default", True),
         ("roms-marbl-0.8-default", True),
         ("roms-marbl-0.9-default", True),
+        ("roms-marbl-0.10-default", True),
         ("pio-dev", True),
     ],
 )

@@ -411,7 +411,9 @@ ucla-roms release: ``roms-marbl-0.5-default`` pins ``0.5.0``,
 #361, with no new settings tier -- it still resolves to
 ``RunTimeSettingsV0_7_0``), ``roms-marbl-0.9-default`` pins ``0.9.1``
 (``RunTimeSettingsV0_9_0``, which models the ``cdr_lite`` section; the spec does
-not declare it, see below); older specs stay
+not declare it, see below), and ``roms-marbl-0.10-default`` pins ``0.10.0`` (same
+tier and same templates as the 0.9 spec; the default, and the first that runs
+``bgc_mode: cdr_lite``); older specs stay
 fixed and keep emitting
 byte-identical legacy namelists. ``version_gated_section_names()``
 (``namelist_model.py``) collects every section modeled by at least one
@@ -469,12 +471,12 @@ re-reading the two flags. The resolver, for ``cdr_lite``: sets ``marbl`` off and
 off, drops ``code.marbl``, rejects BGC forcing (as for ``none``), requires a CDR
 forcing with ``cdr_lite`` releases, and, in the ``simple`` CDR mode, defaults
 each release's ``tracer_set`` to ``cdr_lite`` (``yaml``/``netcdf`` carry their
-own). The mode is gated on ucla-roms >= ``CDR_LITE_MODE_MIN_ROMS`` (0.9.1: the
+own). The mode is gated on ucla-roms >= ``CDR_LITE_MODE_MIN_ROMS`` (0.10.0: the
 ``CDR_LITE`` key exists from 0.9.0, CDR forcing without MARBL from 0.9.1;
-``check_cdr_lite_mode_roms``, resolver and ``configure_build``); the constant is
-to be raised to the ucla-roms release that writes forcing-ready ``_cdrgas`` files
-and zero-fills the ``<CDR tracer>_flx`` surface fluxes a CDR-lite tracer has no
-forcing for, since Forge's CDR-lite mode generates neither yet.
+0.10.0 writes forcing-ready ``_cdrgas`` files and zero-fills the
+``<CDR tracer>_flx`` surface fluxes a CDR-lite tracer has no forcing for, which
+Forge's CDR-lite mode relies on because it generates neither;
+``check_cdr_lite_mode_roms``, resolver and ``configure_build``).
 
 What the mode derives is not knowable at resolve time, so it is derived where
 it becomes known. The tracer counts come from the CDR forcing during
@@ -583,7 +585,7 @@ Two committed unit goldens pin the resolved-settings and namelist contracts
   versioned-namelist schema tier: ``test_golden_model_settings_test_tiny_roms050``,
   ``_roms060``, ``_roms070``, and ``_roms090`` (``roms-marbl-0.{5,6,7,9}-default``,
   against ``golden_model_settings_test-tiny-roms0{50,60,70,90}.json``), and for
-  the ``bgc_mode: cdr_lite`` build on ``roms-marbl-0.9-default``,
+  the ``bgc_mode: cdr_lite`` build on ``roms-marbl-0.10-default``,
   ``_roms090_cdr_lite`` (against
   ``golden_model_settings_test-tiny-roms090-cdr-lite.json``).
 - **Byte-exact namelist**: ``TestGoldenNamelist::test_golden_namelist_test_tiny``
@@ -604,7 +606,7 @@ Two committed unit goldens pin the resolved-settings and namelist contracts
   ``&CDR_LITE_OUTPUT_SETTINGS``/``&CDR_LITE_SETTINGS`` in place of the
   CDR_TRACER group, ``golden_namelist_test-tiny-roms090.nml``), and
   ``test_golden_namelist_test_tiny_roms090_cdr_lite`` (``bgc_mode: cdr_lite``
-  on ``roms-marbl-0.9-default`` with a physics-only forcing and a real
+  on ``roms-marbl-0.10-default`` with a physics-only forcing and a real
   roms-tools CDR forcing: ``nt_bgc = 0``, ``nt_cdr_oae``/``nt_cdr_dor`` read off
   the CDR forcing, ``golden_namelist_test-tiny-roms090-cdr-lite.nml``).
   Regenerate one at a time via

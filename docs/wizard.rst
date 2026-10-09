@@ -73,7 +73,7 @@ Model
    biogeochemistry mode (MARBL, physics only, or CDR-lite without MARBL);
    and whether to build with ParallelIO.
 
-   The ``cdr_lite`` mode (ucla-roms 0.9.1 or later) builds ucla-roms' CDR-lite
+   The ``cdr_lite`` mode (ucla-roms 0.10.0 or later) builds ucla-roms' CDR-lite
    tracers without MARBL, so the blueprint carries no biogeochemical forcing.
    It needs a CDR forcing: the CDR panel in Run setup shows a reminder, and a
    simple-mode forcing then builds one ALK (OAE) release, while a YAML or

@@ -723,11 +723,10 @@ def check_cdr_forcing_mode(
 
 # ucla-roms release from which ``bgc_mode: cdr_lite`` runs: the ``CDR_LITE`` key
 # exists from 0.9.0, and CDR forcing without MARBL (which the mode relies on) from
-# 0.9.1. To be raised to the release that writes forcing-ready ``_cdrgas`` files and
-# zero-fills the ``<CDR tracer>_flx`` surface fluxes a CDR-lite tracer has no
-# forcing for (pending ucla-roms work); Forge's CDR-lite mode doesn't generate
-# either, so until then a run has to supply them itself.
-CDR_LITE_MODE_MIN_ROMS: tuple[int, int, int] = (0, 9, 1)
+# 0.9.1. 0.10.0 writes forcing-ready ``_cdrgas`` files (start/end bracket records,
+# time variables in days) and zero-fills a missing ``<CDR tracer>_flx`` surface
+# flux, which the mode relies on: Forge's CDR-lite mode generates neither.
+CDR_LITE_MODE_MIN_ROMS: tuple[int, int, int] = (0, 10, 0)
 
 
 def check_cdr_lite_mode_roms(roms_ref: str | None) -> None:
