@@ -49,6 +49,7 @@ forcing:
       constants: null
       esper_method: null
       esper_equation: null
+      esper_salinity_conditioning: null
     bgc_sources:
     - source:
         name: UNIFIED
@@ -58,6 +59,7 @@ forcing:
         constants: null
         esper_method: null
         esper_equation: null
+        esper_salinity_conditioning: null
       use_vars: null
       bgc_interpolation_method: null
       serialize_dask: null
@@ -79,6 +81,7 @@ forcing:
       constants: null
       esper_method: null
       esper_equation: null
+      esper_salinity_conditioning: null
     type: physics
     correct_radiation: true
     coarse_grid_mode: never
@@ -98,6 +101,7 @@ forcing:
       constants: null
       esper_method: null
       esper_equation: null
+      esper_salinity_conditioning: null
     type: bgc
     correct_radiation: false
     coarse_grid_mode: never
@@ -117,6 +121,7 @@ forcing:
       constants: null
       esper_method: null
       esper_equation: null
+      esper_salinity_conditioning: null
     type: bgc
     correct_radiation: false
     coarse_grid_mode: never
@@ -136,6 +141,7 @@ forcing:
       constants: null
       esper_method: null
       esper_equation: null
+      esper_salinity_conditioning: null
     type: restoring
     correct_radiation: false
     coarse_grid_mode: never
@@ -157,6 +163,7 @@ forcing:
       constants: null
       esper_method: null
       esper_equation: null
+      esper_salinity_conditioning: null
     bgc_sources:
     - source:
         name: UNIFIED
@@ -166,6 +173,7 @@ forcing:
         constants: null
         esper_method: null
         esper_equation: null
+        esper_salinity_conditioning: null
       use_vars: null
       bgc_interpolation_method: depth
       serialize_dask: null
@@ -186,6 +194,7 @@ forcing:
       constants: null
       esper_method: null
       esper_equation: null
+      esper_salinity_conditioning: null
     ntides: 15
     prefill: null
     prefill_kwargs: null
@@ -202,6 +211,7 @@ forcing:
       constants: null
       esper_method: null
       esper_equation: null
+      esper_salinity_conditioning: null
     include_bgc: true
     convert_to_climatology: if_any_missing
     bgc_source: null
@@ -592,5 +602,5 @@ provenance:
   cstar_version: cstar-ocean==0.9.1
   roms_tools_version: roms-tools==4.0.1
   override_files_applied: []
-  content_hash: 6f27b17122bdc762de70d9d9fd78197aad54c619a339151a4f23bafa9559a007
+  content_hash: 2a4939397f2219794c642c0d736be04cd8bd27f57c2adc0ac6661fec1dda0d39
   notes: null

@@ -49,6 +49,7 @@ forcing:
       constants: null
       esper_method: null
       esper_equation: null
+      esper_salinity_conditioning: null
     bgc_sources:
     - source:
         name: UNIFIED
@@ -58,6 +59,7 @@ forcing:
         constants: null
         esper_method: null
         esper_equation: null
+        esper_salinity_conditioning: null
       use_vars: null
       bgc_interpolation_method: null
       serialize_dask: null
@@ -79,6 +81,7 @@ forcing:
       constants: null
       esper_method: null
       esper_equation: null
+      esper_salinity_conditioning: null
     type: physics
     correct_radiation: true
     coarse_grid_mode: never
@@ -98,6 +101,7 @@ forcing:
       constants: null
       esper_method: null
       esper_equation: null
+      esper_salinity_conditioning: null
     type: bgc
     correct_radiation: false
     coarse_grid_mode: never
@@ -118,6 +122,7 @@ forcing:
       constants: null
       esper_method: null
       esper_equation: null
+      esper_salinity_conditioning: null
     bgc_sources:
     - source:
         name: UNIFIED
@@ -127,6 +132,7 @@ forcing:
         constants: null
         esper_method: null
         esper_equation: null
+        esper_salinity_conditioning: null
       use_vars: null
       bgc_interpolation_method: depth
       serialize_dask: null
@@ -499,5 +505,5 @@ provenance:
   cstar_version: cstar-ocean==0.10.0
   roms_tools_version: roms-tools==4.0.2.dev5+g8b6cd6c7c
   override_files_applied: []
-  content_hash: ab0112ede724ce65dc36061a4c666eea5ec6f9064fdf7a4bb8ee463328651d4d
+  content_hash: 9ee091dd3785b3690365803f1aa1eea15567bb8f6599a4bc78f4e78ae9d6b4b2
   notes: null

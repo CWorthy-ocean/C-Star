@@ -567,6 +567,8 @@ fields:
     label: ESPER method
   forcing.row.esper_equation:
     label: ESPER equation
+  forcing.row.esper_salinity_conditioning:
+    label: ESPER salinity conditioning
   forcing.row.prefill:
     label: Prefill
   forcing.row.regrid_method:

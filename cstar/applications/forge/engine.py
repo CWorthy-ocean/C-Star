@@ -169,6 +169,10 @@ def sources_to_forcing_override(cfg: ForgeBlueprint) -> dict[str, Any]:
             d["method"] = spec.esper_method
         if spec.esper_equation:
             d["equation"] = spec.esper_equation
+        # Only the switch travels here; input_data._resolve_source_block turns it
+        # into roms-tools' mapping with the staged WOA23 file's path.
+        if spec.esper_salinity_conditioning:
+            d["salinity_conditioning"] = True
         return d
 
     def _item(item) -> dict[str, Any]:

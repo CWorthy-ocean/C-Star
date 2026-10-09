@@ -1289,6 +1289,17 @@ class RomsMarblInputData(InputData):
         if out.get("path") in (None, ""):
             out.pop("path", None)
 
+        # ESPER's salinity conditioning: the blueprint carries only the switch
+        # (SourceSpec.esper_salinity_conditioning -> engine `_src`'s
+        # ``salinity_conditioning: True``); roms-tools/PyESPER want the staged WOA23
+        # annual salinity file, which the resolver noted into ``datasets`` as
+        # WOA_SALINITY for exactly this lookup. Done before the explicit-path return
+        # below: an ESPER source's own ``path`` is its PyESPER checkout, unrelated.
+        if name.upper() == "ESPER" and out.get("salinity_conditioning"):
+            if not isinstance(out["salinity_conditioning"], dict):
+                woa_file = self.source_data.path_for_source("WOA_SALINITY")
+                out["salinity_conditioning"] = {"woa_salinity_path": str(woa_file)}
+
         # An explicit path (SourceSpec.path, or a dict's own "path" key -- e.g. river
         # bgc_source) always wins verbatim over the registry-staged path, mirroring
         # topography_path semantics: bypass path_for_source entirely rather than

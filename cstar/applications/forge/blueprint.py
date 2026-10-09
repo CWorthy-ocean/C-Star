@@ -822,6 +822,14 @@ class SourceSpec(_Section):
     esper_equation: Literal[8, 16] | None = None
     """PyESPER predictor equation: 8 (salinity + temperature) or 16 (salinity only).
     Only valid when ``name == "ESPER"``; roms-tools defaults to 8 when unset."""
+    esper_salinity_conditioning: bool | None = None
+    """Blend the salinity PyESPER feeds its nets toward the WOA23 annual-mean
+    climatology below 31-34 PSU (raised cosine; bit-identical above). ESPER was fit
+    to GLODAP data with almost none below ~31 PSU, so at river-plume salinities it
+    extrapolates unphysically (silicate > 100 mmol/m^3, negative nutrients, DIC
+    above ALK). Only valid when ``name == "ESPER"``. Forge stages the one WOA23 file
+    this needs (dataset ``WOA_SALINITY``) and hands roms-tools its path; ``None``
+    and ``False`` both mean off (roms-tools' default)."""
 
     @model_validator(mode="after")
     def _glorys_layout_only_for_glorys(self) -> SourceSpec:
@@ -847,10 +855,13 @@ class SourceSpec(_Section):
     def _esper_fields_only_for_esper_source(self) -> SourceSpec:
         is_esper = self.name.upper() == "ESPER"
         if (
-            self.esper_method is not None or self.esper_equation is not None
+            self.esper_method is not None
+            or self.esper_equation is not None
+            or self.esper_salinity_conditioning is not None
         ) and not is_esper:
             raise ValueError(
-                "esper_method/esper_equation are only valid when name is 'ESPER'"
+                "esper_method/esper_equation/esper_salinity_conditioning are only "
+                "valid when name is 'ESPER'"
             )
         # No path requirement for ESPER: without one, roms-tools imports PyESPER
         # from the environment and PyESPER resolves its own data directories

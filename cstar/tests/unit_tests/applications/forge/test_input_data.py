@@ -891,6 +891,39 @@ class TestRomsMarblInputDataHelperMethods:
         )
         assert result == {"name": "ESPER", "path": "/data/PyESPER"}
 
+    def test_resolve_source_block_esper_salinity_conditioning_gets_the_woa_file(
+        self, sample_roms_marbl_input_data, tmp_path
+    ):
+        """The blueprint only carries the switch (``salinity_conditioning: True``,
+        from engine `_src`); roms-tools/PyESPER need the staged WOA23 annual salinity
+        file, so the block is rewritten to the mapping roms-tools accepts, using the
+        path the WOA_SALINITY handler prepared. Done even when the ESPER source
+        carries its own explicit ``path`` (that is its PyESPER checkout).
+        """
+        real_sd = source_datasets.SourceDatasets(datasets=["WOA_SALINITY"])
+        woa_file = tmp_path / "WOA" / "woa23_decav_s00_01.nc"
+        real_sd.paths["WOA_SALINITY"] = woa_file
+        sample_roms_marbl_input_data.source_data = real_sd
+
+        result = sample_roms_marbl_input_data._resolve_source_block(
+            {"name": "ESPER", "path": "/data/PyESPER", "salinity_conditioning": True}
+        )
+        assert result == {
+            "name": "ESPER",
+            "path": "/data/PyESPER",
+            "salinity_conditioning": {"woa_salinity_path": str(woa_file)},
+        }
+        # Already a mapping (hand-written roms-tools form): left alone.
+        explicit = {"woa_salinity_path": "/elsewhere/s00.nc", "low": 30.0}
+        result = sample_roms_marbl_input_data._resolve_source_block(
+            {"name": "ESPER", "salinity_conditioning": dict(explicit)}
+        )
+        assert result["salinity_conditioning"] == explicit
+        # Off: no key at all, and no lookup.
+        real_sd.paths.clear()
+        result = sample_roms_marbl_input_data._resolve_source_block({"name": "ESPER"})
+        assert result == {"name": "ESPER"}
+
     def test_resolve_source_block_time_window_trims_daily_list(
         self, sample_roms_marbl_input_data
     ):
