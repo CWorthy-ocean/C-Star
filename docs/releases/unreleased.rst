@@ -59,6 +59,7 @@ Bug Fixes
 - A generated CDR forcing that is reused without ``--clobber`` is now described from the file on disk (release count, release family, tracer axis), so the namelist can no longer disagree with the data ROMS reads. (`#754 <https://github.com/CWorthy-ocean/C-Star/pull/754>`_)
 - Completing a step name in ``cstar workplan log``, ``path``, or ``cd`` after an unknown or mistyped run-id printed a traceback in the terminal; it now offers no completions. (`#759 <https://github.com/CWorthy-ocean/C-Star/pull/759>`_)
 - Forge input generation no longer hangs intermittently with the progress bar frozen mid-save (an xarray netCDF lock-order deadlock, fixed upstream in xarray 2026.9). (`#758 <https://github.com/CWorthy-ocean/C-Star/pull/758>`_)
+- Physics-only runs given a river file with BGC tracers no longer get a warning that the extra tracers go unused; on ucla-roms 0.9.0 and later that run aborts at startup. (`#757 <https://github.com/CWorthy-ocean/C-Star/pull/757>`_)
 
 
 Improvements
@@ -70,6 +71,13 @@ Improvements
 - CDR-lite tracer counts in a build without ``CDR_LITE`` (which ROMS aborts on with "Forcing type not supported") are rejected when the blueprint is resolved or validated. (`#754 <https://github.com/CWorthy-ocean/C-Star/pull/754>`_)
 - A stored ``cdr_lite`` blueprint pinned to a ucla-roms release below the mode's minimum fails at validation, before any input is generated. (`#754 <https://github.com/CWorthy-ocean/C-Star/pull/754>`_)
 - ``cstar workplan log`` and ``gather`` report an empty or invalid run-id with the run-tracking message ("A valid run-id was not provided") instead of a separate pre-check message. (`#755 <https://github.com/CWorthy-ocean/C-Star/pull/755>`_)
+- Forge rejects a river forcing file whose tracer count ucla-roms would abort on, naming the file and the accepted lengths, before ROMS is built. (`#757 <https://github.com/CWorthy-ocean/C-Star/pull/757>`_)
+
+  - From ucla-roms 0.9.0 (and on branch or commit pins), the accepted lengths are every model tracer, or every tracer except the CDR tracers, the same in every river file.
+  - On older pins a shorter file is rejected and a longer one warns that the extra tracers are ignored.
+
+- Forge rejects, at blueprint resolution, a roms-tools-generated river that ROMS cannot read: one with passive tracers, or a MARBL run without ``include_bgc``. (`#757 <https://github.com/CWorthy-ocean/C-Star/pull/757>`_)
+- A river file with too few tracers fails at the river step instead of after the remaining inputs are generated. (`#757 <https://github.com/CWorthy-ocean/C-Star/pull/757>`_)
 
 Miscellaneous
 ~~~~~~~~~~~~~
