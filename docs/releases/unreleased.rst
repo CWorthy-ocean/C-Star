@@ -31,6 +31,18 @@ New features
   - A ``CDR_LITE`` build that reads the sensitivities from files fails during setup, before the compile, when no staged forcing file provides the four variables ROMS reads, naming the directive as the usual fix.
 
 - Forge blueprints may list carbonate sensitivity files up front (``carbonate_sensitivity: files: [...]``, a directory or paths in ``build_forge_blueprint``, a directory in the wizard); Forge checks their variables, stages copies (CDF-5 under ParallelIO) and lists them in the emitted blueprint. (`#754 <https://github.com/CWorthy-ocean/C-Star/pull/754>`_)
+- ``cstar workplan path <run-id> [step]`` prints the directory of a run, or of one of its steps, and nothing else, so it composes with other shell commands. (`#755 <https://github.com/CWorthy-ocean/C-Star/pull/755>`_)
+
+  - Example: ``dir=$(cstar workplan path <run-id>) && cd "$dir"``.
+  - Unknown runs or steps, and directories that no longer exist, are reported on stderr with a non-zero exit code.
+
+- ``cstar workplan cd <run-id> [step]`` (also ``cstar wp cd``) moves your shell to that directory once the shell function is installed; without it, the command prints the ``cd`` line and the one setup command. (`#755 <https://github.com/CWorthy-ocean/C-Star/pull/755>`_)
+- ``cstar env shell-init --install`` sets up that shell function in one step: it detects zsh or bash, saves the function in the C-Star config directory, and adds a marked block that sources it to ``~/.zshrc`` or ``~/.bashrc``. (`#755 <https://github.com/CWorthy-ocean/C-Star/pull/755>`_)
+
+  - Pass ``zsh`` or ``bash`` to choose the shell; if neither can be detected, the command asks you to name it.
+  - Re-run it after upgrading C-Star to refresh the function; ``--uninstall`` removes the block and the function file.
+  - Without ``--install``, the command prints the function, for people who manage their own dotfiles.
+
 
 Bug Fixes
 ~~~~~~~~~
@@ -55,6 +67,7 @@ Improvements
 - The CDR forcing's tracer axis is checked against the build's tracer count at generation, in every mode, so a file built for a different tracer layout fails there rather than inside ROMS. (`#754 <https://github.com/CWorthy-ocean/C-Star/pull/754>`_)
 - CDR-lite tracer counts in a build without ``CDR_LITE`` (which ROMS aborts on with "Forcing type not supported") are rejected when the blueprint is resolved or validated. (`#754 <https://github.com/CWorthy-ocean/C-Star/pull/754>`_)
 - A stored ``cdr_lite`` blueprint pinned to a ucla-roms release below the mode's minimum fails at validation, before any input is generated. (`#754 <https://github.com/CWorthy-ocean/C-Star/pull/754>`_)
+- ``cstar workplan log`` and ``gather`` report an empty or invalid run-id with the run-tracking message ("A valid run-id was not provided") instead of a separate pre-check message. (`#755 <https://github.com/CWorthy-ocean/C-Star/pull/755>`_)
 
 Miscellaneous
 ~~~~~~~~~~~~~
@@ -64,3 +77,5 @@ Miscellaneous
 - The Tier 2 e2e workplan grows to four steps: the MARBL run writes gas-exchange output, a ``cdr_lite`` forge step and a CDR-LiTE run read it back through the ``carbonate-sensitivity-from`` directive. (`#754 <https://github.com/CWorthy-ocean/C-Star/pull/754>`_)
 - Tier 1 integration case ``cdr_lite`` (physics-only ForcingSpec, simple-mode CDR forcing, golden namelist), skipped on ucla-roms pins the mode's own version gate rejects. (`#754 <https://github.com/CWorthy-ocean/C-Star/pull/754>`_)
 - Docs: directive reference, forge blueprint and input-data developer docs, wizard and spec docs, terminology, API list; published schema ``roms_marbl_schema.3.2.0.json`` and blueprint template. (`#754 <https://github.com/CWorthy-ocean/C-Star/pull/754>`_)
+- The workplans guide has a new "Finding a Run's Directory" section covering ``path``, ``cd`` and the shell setup. (`#755 <https://github.com/CWorthy-ocean/C-Star/pull/755>`_)
+- ``shellingham`` is now a declared dependency; it was already installed as a requirement of ``typer``. (`#755 <https://github.com/CWorthy-ocean/C-Star/pull/755>`_)
