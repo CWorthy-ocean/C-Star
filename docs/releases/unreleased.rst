@@ -43,6 +43,8 @@ New features
   - Re-run it after upgrading C-Star to refresh the function; ``--uninstall`` removes the block and the function file.
   - Without ``--install``, the command prints the function, for people who manage their own dotfiles.
 
+- The wizard's Carbon dioxide removal settings pane has a "Passive tracers" field (``param.nt_passive``), which generation requires to match the passive tracers in the CDR forcing file. (`#760 <https://github.com/CWorthy-ocean/C-Star/pull/760>`_)
+
 
 Bug Fixes
 ~~~~~~~~~
@@ -61,6 +63,7 @@ Bug Fixes
 - Forge input generation no longer hangs intermittently with the progress bar frozen mid-save (an xarray netCDF lock-order deadlock, fixed upstream in xarray 2026.9). (`#758 <https://github.com/CWorthy-ocean/C-Star/pull/758>`_)
 - Physics-only runs given a river file with BGC tracers no longer get a warning that the extra tracers go unused; on ucla-roms 0.9.0 and later that run aborts at startup. (`#757 <https://github.com/CWorthy-ocean/C-Star/pull/757>`_)
 - The default ``roms-marbl-0.10-default`` model now builds ucla-roms 0.10.1, which fixes PIO restart writes stalling on multi-node runs until the job hit its time limit ([CWorthy-ocean/ucla-roms#388](https://github.com/CWorthy-ocean/ucla-roms/pull/388)). (`#762 <https://github.com/CWorthy-ocean/C-Star/pull/762>`_)
+- Advanced settings fields in the wizard had no tooltip unless their section name happened to match a namelist group name, which left out nearly every section. (`#760 <https://github.com/CWorthy-ocean/C-Star/pull/760>`_)
 
 
 Improvements
@@ -79,6 +82,7 @@ Improvements
 
 - Forge rejects, at blueprint resolution, a roms-tools-generated river that ROMS cannot read: one with passive tracers, or a MARBL run without ``include_bgc``. (`#757 <https://github.com/CWorthy-ocean/C-Star/pull/757>`_)
 - A river file with too few tracers fails at the river step instead of after the remaining inputs are generated. (`#757 <https://github.com/CWorthy-ocean/C-Star/pull/757>`_)
+- Where a wizard glossary hint exists for a settings field, the tooltip shows that hint instead of the namelist description. (`#760 <https://github.com/CWorthy-ocean/C-Star/pull/760>`_)
 
 Miscellaneous
 ~~~~~~~~~~~~~
