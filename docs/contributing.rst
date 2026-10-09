@@ -112,10 +112,6 @@ Shared pieces are in ``cstar/tests/integration_tests``:
 - ``cli_harness.py``: ``make_shim``, ``make_cli_env`` and ``run_cstar``,
   which run the real ``cstar`` CLI as a subprocess against this checkout.
 
-The unit-test conftest replaces the ``roms_marbl`` application with a
-``SleepApplication``. This does not affect the end-to-end tier, because
-each workplan step runs as a separate ``cstar blueprint run`` process.
-
 Adding an integration case
 ^^^^^^^^^^^^^^^^^^^^^^^^^^
 
