@@ -41,6 +41,7 @@ dependencies = [
     # core roms-tools dependency as of 4.0.1 (the [dask] extra is gone).
     "roms_tools>=5.1,<6",
     "typer<=0.25",
+    "shellingham>=1.3",
     # -- direct imports in cstar.applications.forge (arrive with the forge
     # application; psutil, pydantic, PyYAML, numpy, typer, and roms_tools above
     # are already required, so are not repeated here) --
