@@ -114,7 +114,12 @@ class E2ERun:
 
     def working_dir_of(self, step: str) -> Path:
         """The directory the roms_marbl ``step`` ran in."""
-        return {ROMS_STEP: self.roms_working_dir, CDR_STEP: self.cdr_working_dir}[step]
+        # lazy: resolving a step that never ran raises, so resolve only ``step``
+        working_dirs = {
+            ROMS_STEP: lambda: self.roms_working_dir,
+            CDR_STEP: lambda: self.cdr_working_dir,
+        }
+        return working_dirs[step]()
 
     def sentinel(self, step: str) -> Path:
         """Path of the sentinel file holding ``step``'s status."""
@@ -235,12 +240,13 @@ def _schedule_and_wait(
     E2ERun
         The finished run.
     """
-    _, blueprint_path = forge_blueprint_factory(
+    blueprint, blueprint_path = forge_blueprint_factory(
         "unified", root / "forge", run_time_overrides=GAS_EXCH_OVERRIDES
     )
     _, cdr_blueprint_path = forge_blueprint_factory(
         "cdr_lite", root / "cdr_forge", name="it-cdr_lite-e2e"
     )
+    _warm_grid_downloads(blueprint)
     workplan = write_workplan(
         root / "workplan.yaml", blueprint_path, cdr_blueprint_path
     )
@@ -279,6 +285,19 @@ def _schedule_and_wait(
             f"{run.all_log_tails()}"
         )
     return run
+
+
+def _warm_grid_downloads(blueprint: "ForgeBlueprint") -> None:
+    """Build ``blueprint``'s grid once so the data roms-tools downloads for it is cached.
+
+    Both forge steps are workplan roots, so they start together and each builds a grid.
+    On a cold cache each step's land mask has regionmask download and unzip the Natural
+    Earth shapefiles into one shared directory, and that unzip is not safe to run twice
+    at once: one step can read a shapefile the other is still rewriting.
+    """
+    import roms_tools as rt
+
+    rt.Grid(**blueprint.domain.grid_kwargs)
 
 
 def restart_files(run: E2ERun, step: str = ROMS_STEP) -> list[Path]:
