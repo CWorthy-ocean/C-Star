@@ -78,7 +78,7 @@ for this; a tier is selected by path.
 **Tier 3: extended** (``extended/``)
    Not part of the pull request checks. The weekly
    ``integration_extended.yaml`` workflow runs the suite on both operating
-   systems, Python 3.12 and 3.13, against ucla-roms ``0.10.0`` and
+   systems, Python 3.12 and 3.13, against ucla-roms ``0.10.1`` and
    ``main``. The ``CSTAR_IT_ROMS_REF`` environment variable overrides the
    ucla-roms ref of the model spec. Failures are an early warning for
    upstream changes, not a merge blocker.
@@ -106,7 +106,7 @@ Shared pieces are in ``cstar/tests/integration_tests``:
   physics-only ``test-glorys-era5-physics``) and a
   minimal output spec (``test-minimal``). ``${TEST_DATA}`` in these files
   is replaced by the data cache directory. Model specs come from the
-  bundled catalog; ``roms-marbl-0.10-default`` pins ucla-roms 0.10.0.
+  bundled catalog; ``roms-marbl-0.10-default`` pins ucla-roms 0.10.1.
 - ``conftest.py``: the ``integration_test_data``, ``test_catalog_root``,
   ``test_catalog``, ``forge_blueprint_factory`` and ``cstar_shim`` fixtures.
 - ``cli_harness.py``: ``make_shim``, ``make_cli_env`` and ``run_cstar``,

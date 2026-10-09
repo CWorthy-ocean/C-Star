@@ -3695,7 +3695,7 @@ class _ForcingEditor:
 
 # Preselected in the Model dropdown when present in the catalog (falls back to
 # the first catalog model otherwise): it's the newest tagged-release ModelSpec
-# (ucla-roms 0.10.0). 'pio-dev' (ucla-roms branch `main`) remains available in the
+# (ucla-roms 0.10.1). 'pio-dev' (ucla-roms branch `main`) remains available in the
 # catalog but is no longer the default.
 _DEFAULT_MODEL = "roms-marbl-0.10-default"
 

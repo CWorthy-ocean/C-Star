@@ -410,7 +410,7 @@ ucla-roms release: ``roms-marbl-0.5-default`` pins ``0.5.0``,
 #361, with no new settings tier -- it still resolves to
 ``RunTimeSettingsV0_7_0``), ``roms-marbl-0.9-default`` pins ``0.9.1``
 (``RunTimeSettingsV0_9_0``, which models the ``cdr_lite`` section; the spec does
-not declare it, see below), and ``roms-marbl-0.10-default`` pins ``0.10.0`` (same
+not declare it, see below), and ``roms-marbl-0.10-default`` pins ``0.10.1`` (same
 tier and same templates as the 0.9 spec; the default, and the first that runs
 ``bgc_mode: cdr_lite``); older specs stay
 fixed and keep emitting

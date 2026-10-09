@@ -4294,7 +4294,7 @@ class TestGoldenNamelist:
         nt_cdr_dor=0,
         cdr_active=True,
     ):
-        """A 0.10.0-pinned builder past (mocked) generation whose stored blueprint
+        """A 0.10.1-pinned builder past (mocked) generation whose stored blueprint
         says ``bgc_mode: cdr_lite`` (``marbl`` off, ``cdr_lite`` on, no BGC
         tracers). ``nt_cdr_*`` stand in for what the CDR generation step derives
         from the CDR forcing's tracer axis, and ``cdr_active`` for that forcing
@@ -4368,8 +4368,8 @@ class TestGoldenNamelist:
         import cstar.applications.forge.namelist_model as namelist_model
 
         cfg, builder = self._cdr_lite_builder(mock_grid, tmp_path)
-        monkeypatch.setattr(namelist_model, "CDR_LITE_MODE_MIN_ROMS", (0, 10, 1))
-        with pytest.raises(ValueError, match=r"ucla-roms 0\.10\.0.*>= 0\.10\.1"):
+        monkeypatch.setattr(namelist_model, "CDR_LITE_MODE_MIN_ROMS", (0, 10, 2))
+        with pytest.raises(ValueError, match=r"ucla-roms 0\.10\.1.*>= 0\.10\.2"):
             self._configure_build_for(cfg, builder)
 
     def test_configure_build_cdr_lite_leaves_an_enabled_stream_as_is(

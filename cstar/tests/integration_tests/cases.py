@@ -20,7 +20,7 @@ RUN_END = datetime(2012, 1, 1, 13)
 MODEL_REFERENCE_DATE = datetime(2000, 1, 1)
 DT = 60.0
 MODEL_SPEC = "roms-marbl-0.10-default"
-PINNED_ROMS_REF = "0.10.0"
+PINNED_ROMS_REF = "0.10.1"
 # the ucla-roms ref the bundled ``roms-marbl-0.10-default`` ModelSpec pins
 ROMS_REF = os.environ.get("CSTAR_IT_ROMS_REF") or PINNED_ROMS_REF
 """The ucla-roms ref under test; ``CSTAR_IT_ROMS_REF`` is the weekly extended workflow's override."""
