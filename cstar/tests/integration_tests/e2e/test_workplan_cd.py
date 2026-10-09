@@ -150,10 +150,13 @@ def finished_run(
 
 
 def run_shell(
-    shell: str, finished_run: FinishedRun, script: str
+    shell: str,
+    finished_run: FinishedRun,
+    script: str,
+    extra_env: dict[str, str] | None = None,
 ) -> subprocess.CompletedProcess[str]:
     """Run a script in a shell with the CLI on its PATH and debug logging exported."""
-    env = {**finished_run.env, ENV_CSTAR_LOG_LEVEL: "DEBUG"}
+    env = {**finished_run.env, ENV_CSTAR_LOG_LEVEL: "DEBUG", **(extra_env or {})}
     return subprocess.run(
         [shutil.which(shell) or shell, *SHELLS[shell], script],
         env=env,
@@ -250,6 +253,42 @@ def test_shell_function_stays_put_when_the_run_is_unknown(
     assert rc != "rc=0", proc.stderr
     assert cwd == os.path.realpath("/")
     assert "no-such-run" in proc.stderr
+
+
+@pytest.mark.parametrize("with_step", [False, True])
+def test_installed_shell_function_changes_directory(
+    finished_run: FinishedRun, shell: str, tmp_path: Path, with_step: bool
+) -> None:
+    """`cstar env shell-init --install` sets a shell up from nothing: a fresh shell
+    reading the rc file it wrote ends in the run (or step) directory.
+
+    Every location the install writes is under ``tmp_path``, never the real home.
+    """
+    home, zdotdir = tmp_path / "home", tmp_path / "zdotdir"
+    home.mkdir()
+    sandbox = {
+        "HOME": str(home),
+        "ZDOTDIR": str(zdotdir),
+        ENV_CSTAR_CONFIG_HOME: str(tmp_path / "config"),
+        "XDG_CONFIG_HOME": str(tmp_path / "xdg"),
+    }
+    rc = zdotdir / ".zshrc" if shell == "zsh" else home / ".bashrc"
+
+    install = run_cstar(
+        {**finished_run.env, **sandbox}, "env", "shell-init", shell, "--install"
+    )
+
+    assert install.returncode == 0, install.stderr
+    assert rc.is_file()
+    assert (tmp_path / "config" / "shell" / f"cstar.{shell}").is_file()
+
+    expected = finished_run.step_dir if with_step else finished_run.run_dir
+    target = f"{RUN_ID} {STEP}" if with_step else RUN_ID
+    script = f'cd /\n. "{rc}"\ncstar wp cd {target}\necho "rc=$?"\npwd -P\n'
+
+    proc = run_shell(shell, finished_run, script, sandbox)
+
+    assert proc.stdout.splitlines() == ["rc=0", os.path.realpath(expected)], proc.stderr
 
 
 @pytest.mark.parametrize("with_step", [False, True])

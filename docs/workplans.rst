@@ -656,27 +656,23 @@ guard the ``cd`` with ``&&``:
 
 A program cannot change the directory of the shell that started it, so
 ``cstar workplan cd <my-unique-id> [step-name]`` works only once your shell has
-a small ``cstar`` function. Save it once, load it, and add the same
-``source`` line to your ``~/.zshrc`` or ``~/.bashrc``:
+a small ``cstar`` function. Install it once, then open a new shell:
 
-.. tab-set::
+.. code-block:: console
 
-   .. tab-item:: zsh
+    cstar env shell-init --install
 
-    .. code-block:: console
+The command detects whether you run zsh or bash (pass ``zsh`` or ``bash`` to
+choose), writes the function under the C-Star config directory, and adds a
+marked block to ``~/.zshrc`` or ``~/.bashrc`` that sources it. On macOS,
+Terminal opens login shells that read ``~/.bash_profile``, so make sure that
+file sources ``~/.bashrc``. Run the command again after upgrading C-Star to
+refresh the function, and add ``--uninstall`` to remove the block and the
+function.
 
-        cstar env shell-init zsh > ~/.cstar-shell.zsh
-        source ~/.cstar-shell.zsh
-
-   .. tab-item:: bash
-
-    .. code-block:: console
-
-        cstar env shell-init bash > ~/.cstar-shell.bash
-        source ~/.cstar-shell.bash
-
-The function passes every other ``cstar`` command through unchanged. Regenerate
-the file after upgrading C-Star.
+To manage your dotfiles yourself, omit ``--install``: the command prints the
+function instead, for example ``cstar env shell-init zsh > <file>``, ready to
+source from your own configuration.
 
 
 Gathering Workplan Outputs

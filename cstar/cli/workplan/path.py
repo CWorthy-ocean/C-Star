@@ -37,18 +37,16 @@ HELP_CD_SHORT = "Change the shell directory to a workplan run or step."
 HELP_CD_LONG = f"""\
 {HELP_CD_SHORT}
 
-Requires the shell function written by `cstar env shell-init`: a process
-cannot change the directory of the shell that started it. Without the
+Requires the shell function installed by `cstar env shell-init --install`: a
+process cannot change the directory of the shell that started it. Without the
 function, this command prints how to set it up and exits with a non-zero code.
 """
 
 CD_GUIDANCE: t.Final[str] = """\
 cstar cannot change your shell's directory by itself. To go there now, run:
     cd {directory}
-To make `cstar workplan cd` work, save the shell function once and load it:
-    cstar env shell-init zsh > ~/.cstar-shell.zsh
-    source ~/.cstar-shell.zsh
-then add the `source` line to ~/.zshrc. For bash, use `shell-init bash` and ~/.bashrc."""
+To make `cstar workplan cd` work, run this once, then open a new shell:
+    cstar env shell-init --install"""
 """Message printed to stderr when `cd` runs without the shell function installed."""
 
 
