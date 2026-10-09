@@ -20,6 +20,7 @@ from cstar.cli.common import (
     checkmark,
     colored,
     console,
+    get_from_ctxmap,
     id_label,
     normalize_runid,
     set_ctxmap,
@@ -33,8 +34,8 @@ from cstar.execution.file_system import (
     StateDirectoryManager,
 )
 from cstar.orchestration.dag_runner import DagDetailRecord
-from cstar.orchestration.models import Blueprint
-from cstar.orchestration.orchestration import LiveWorkplan
+from cstar.orchestration.models import Blueprint, Workplan
+from cstar.orchestration.orchestration import LiveStep, LiveWorkplan
 from cstar.orchestration.serialization import (
     deserialize,
     deserialize_all,
@@ -464,15 +465,17 @@ def create_xrunner(
     return klass(request, service_cfg, job_cfg)
 
 
-def preload_run(context: typer.Context, run_id: str) -> str:
-    """Verify a run-id is valid then load the `WorkplanRun` record and transformed `Workplan`.
+def preload_run_record(context: typer.Context, run_id: str) -> str:
+    """Verify a run-id is valid then load the `WorkplanRun` record.
+
+    Stores the record in the context map as "run".
 
     Parameters
     ----------
     context : typer.Context
         The typer context.
     run_id : str
-        The user-suppplied run-id.
+        The user-supplied run-id.
 
     Returns
     -------
@@ -482,45 +485,129 @@ def preload_run(context: typer.Context, run_id: str) -> str:
     Raises
     ------
     typer.BadParameter
-        - Raised when the run-id is invalid and a `WorkplanRun` cannot be loaded
+        - Raised when the run-id is invalid or no `WorkplanRun` exists for it
     """
-    if not run_id.strip():
-        msg = "An invalid run-id was supplied"
-        raise typer.BadParameter(msg, param_hint="run_id")
-
     repo = TrackingRepository()
-    run = asyncio.run(repo.get_workplan_run(run_id))
+    try:
+        run = asyncio.run(repo.get_workplan_run(run_id))
+    except ValueError as ex:
+        raise typer.BadParameter(str(ex)) from ex
+
     if not run:
-        raise typer.BadParameter(
-            f"Unable to locate run with unknown run-id: {run_id}",
-            param_hint="run_id",
-        )
+        msg = f"Unable to locate run with unknown run-id: {run_id}"
+        raise typer.BadParameter(msg)
+
     set_ctxmap(context, "run", run)
 
+    return run_id
+
+
+def preload_workplan(context: typer.Context, run_id: str) -> str:
+    """Load the transformed `Workplan` of a run whose record is already loaded.
+
+    NOTE: Requires the `WorkplanRun` to be in the context map as "run"; see
+    `preload_run_record`. Stores the workplan in the context map as "workplan".
+
+    Parameters
+    ----------
+    context : typer.Context
+        The typer context.
+    run_id : str
+        The user-supplied run-id.
+
+    Returns
+    -------
+    str
+        The run-id for the loaded run
+
+    Raises
+    ------
+    typer.BadParameter
+        - Raised when the transformed workplan cannot be deserialized
+    """
+    run = get_from_ctxmap(context, "run", WorkplanRun)
     wp_path = run.trx_workplan_path
 
     wp = try_deserialize(wp_path, LiveWorkplan)
     if not wp:
         msg = f"Unable to deserialize workplan for run {run_id!r} from {str(wp_path)!r}"
-        raise typer.BadParameter(
-            msg,
-            param_hint="run_id",
-        )
+        raise typer.BadParameter(msg)
     set_ctxmap(context, "workplan", wp)
 
     return run_id
 
 
+def preload_step(context: typer.Context, step_name: str) -> str:
+    """Given a step-name, ensure is a valid name in a preloaded workplan
+
+    NOTE: Requires the workplan to be loaded into context dict as "workplan", e.g.
+    `wp = cstar.cli.common.get_from_ctxmap(context, "workplan", Workplan)`
+
+    See also: `cstar.cli.common.set_ctxmap`
+
+    Parameters
+    ----------
+    context : typer.Context
+        The typer context.
+    step_name : str
+        The user-supplied step-name.
+
+    Returns
+    -------
+    str
+
+    Raises
+    ------
+    typer.BadParameter
+        - Raised when the step-name cannot be found in the target workplan.
+    """
+    run_id = str(context.params.get("run_id", ""))
+    if not run_id:
+        msg = "A run-id is required to retrieve steps"
+        raise typer.BadParameter(msg, param_hint="run_id")
+
+    wp = get_from_ctxmap(context, "workplan", Workplan)
+    step = next((x for x in wp.steps if step_name in {x.name, x.safe_name}), None)
+
+    if step is None:
+        valid_steps = ", ".join(f"{s.name!r}" for s in wp.steps)
+        msg = (
+            f"Unable to locate unknown step: {step_name!r}. Valid values: {valid_steps}"
+        )
+        raise typer.BadParameter(msg)
+
+    set_ctxmap(context, "live_step", LiveStep.from_step(step))
+
+    return step_name
+
+
+_HELP_RUN_ID: t.Final[str] = "The unique identifier of a specific workplan execution."
+
 RunIdArgument = t.Annotated[
     str,
     typer.Argument(
-        help="The unique identifier of a specific workplan execution.",
+        help=_HELP_RUN_ID,
         autocompletion=list_runs,
-        callback=cb_pipeline(normalize_runid, set_env(ENV_CSTAR_RUNID), preload_run),
+        callback=cb_pipeline(
+            normalize_runid,
+            set_env(ENV_CSTAR_RUNID),
+            preload_run_record,
+            preload_workplan,
+        ),
     ),
 ]
 """Shared run-id argument: normalize the value, export it to the environment,
 and preload the `WorkplanRun` and transformed workplan into the context map."""
+
+RunRecordArgument = t.Annotated[
+    str,
+    typer.Argument(
+        help=_HELP_RUN_ID,
+        autocompletion=list_runs,
+        callback=preload_run_record,
+    ),
+]
+"""Run-id argument that only preloads the `WorkplanRun` record into the context map."""
 
 
 async def load_workplans(

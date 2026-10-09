@@ -641,6 +641,43 @@ Checking Workplan Status
         cstar workplan status <my-unique-id>
 
 
+Finding a Run's Directory
+-------------------------
+
+Use the ``path`` command from the ``cstar`` CLI to print the directory of a run,
+or of one of its steps. The path is the only output, so it composes with other
+commands in any shell:
+
+.. code-block:: console
+
+    cstar workplan path <my-unique-id>
+    cd "$(cstar workplan path <my-unique-id> <step-name>)"
+
+A program cannot change the directory of the shell that started it, so
+``cstar workplan cd <my-unique-id> [step-name]`` works only once your shell has
+a small ``cstar`` function. Save it once, load it, and add the same
+``source`` line to your ``~/.zshrc`` or ``~/.bashrc``:
+
+.. tab-set::
+
+   .. tab-item:: zsh
+
+    .. code-block:: console
+
+        cstar env shell-init zsh > ~/.cstar-shell.zsh
+        source ~/.cstar-shell.zsh
+
+   .. tab-item:: bash
+
+    .. code-block:: console
+
+        cstar env shell-init bash > ~/.cstar-shell.bash
+        source ~/.cstar-shell.bash
+
+The function passes every other ``cstar`` command through unchanged. Regenerate
+the file after upgrading C-Star.
+
+
 Gathering Workplan Outputs
 --------------------------
 
