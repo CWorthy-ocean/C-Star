@@ -1,9 +1,13 @@
-"""Tier 2: a forge -> roms_marbl workplan run end to end through the ``cstar`` CLI.
+"""Tier 2: a forge -> roms_marbl -> CDR-LiTE workplan run end to end through the ``cstar`` CLI.
 
 ``cstar workplan run`` only schedules: each step is a detached ``sh`` proxy script that
 calls the ``cstar`` executable on ``PATH``. A shim pins that executable to this
-checkout, and the fixture then polls the step sentinels until both steps are terminal.
-The run compiles ROMS with MARBL and ParallelIO, so it takes minutes.
+checkout, and the fixture then polls the step sentinels until all four are terminal.
+
+The first two steps are a MARBL forge and ROMS run that also writes the ``_cdrgas``
+gas-exchange sensitivities; the last two are a ``cdr_lite`` forge and a ROMS run
+(no MARBL) that reads those sensitivities through the ``carbonate-sensitivity-from``
+directive. The run compiles ROMS with ParallelIO twice, so it takes tens of minutes.
 """
 
 import re
@@ -12,6 +16,7 @@ import typing as t
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime
+from functools import partial
 from pathlib import Path
 
 import f90nml
@@ -44,11 +49,24 @@ if t.TYPE_CHECKING:
 RUN_ID = "forge-roms-e2e"
 FORGE_STEP = "make_inputs"
 ROMS_STEP = "run_roms"
+CDR_FORGE_STEP = "make_cdr_lite_inputs"
+CDR_STEP = "run_cdr_lite"
 SCHEDULED_MESSAGE = "run scheduling has completed"
-STEPS = (FORGE_STEP, ROMS_STEP)
+STEPS = (FORGE_STEP, ROMS_STEP, CDR_FORGE_STEP, CDR_STEP)
+ALL_DONE = dict.fromkeys(STEPS, DONE)
 POLL_INTERVAL = 5.0
-RUN_TIMEOUT = 40 * 60
+RUN_TIMEOUT = 100 * 60
 RESTART_PERIOD = 1800.0
+GAS_EXCH_PERIOD = 900.0
+"""The ``cdr_gas_exch_output`` window of ``make_inputs``; it and ``nrpf`` 2 divide ``RESTART_PERIOD``."""
+GAS_EXCH_OVERRIDES = {
+    "cdr_gas_exch_output": {
+        "do_cdr_gas_exch_output": True,
+        "output_period": GAS_EXCH_PERIOD,
+        "nrpf": 2,
+    }
+}
+MISSING_FLX_MESSAGE = "CDR_OAE_DIC1_flx not in forcing files"
 ERROR_PATTERN = re.compile(
     r"\bERROR\b|BLOWUP|blow.?up|MPI_ABORT|Traceback", re.IGNORECASE
 )
@@ -79,26 +97,33 @@ class E2ERun:
     state_home: Path
     forge_root: Path
     roms_root: Path
+    cdr_forge_root: Path
+    cdr_root: Path
     statuses: dict[str, int | None]
     stdout: str
 
     @property
     def roms_working_dir(self) -> Path:
-        """The directory ROMS ran in, read from the blueprint that was executed.
+        """The directory ROMS ran in, read from the blueprint that was executed."""
+        return _executed_working_dir(self.roms_root, self.forge_root)
 
-        The scheduler overrides ``working_dir`` with the step root through an
-        ``apply-overrides`` directive, which is persisted as ``work/*.ovrd.yaml``;
-        the blueprint forge published is the fallback if no override was written.
-        """
-        candidates = sorted(
-            (self.roms_root / "work").glob("*.ovrd.yaml"),
-            key=lambda p: p.stat().st_mtime,
-        ) or sorted((self.forge_root / "output").glob("B_*.yaml"))
-        return Path(yaml.safe_load(candidates[-1].read_text())["working_dir"])
+    @property
+    def cdr_working_dir(self) -> Path:
+        """The directory the CDR-LiTE ROMS step ran in."""
+        return _executed_working_dir(self.cdr_root, self.cdr_forge_root)
+
+    def working_dir_of(self, step: str) -> Path:
+        """The directory the roms_marbl ``step`` ran in."""
+        return {ROMS_STEP: self.roms_working_dir, CDR_STEP: self.cdr_working_dir}[step]
 
     def sentinel(self, step: str) -> Path:
         """Path of the sentinel file holding ``step``'s status."""
         return sentinel_path(self.state_home, self.run_id, step)
+
+    def all_log_tails(self) -> str:
+        """The log tails of every step."""
+        roots = (self.forge_root, self.roms_root, self.cdr_forge_root, self.cdr_root)
+        return "\n".join(self.log_tail(root) for root in roots)
 
     def log_tail(self, root: Path, lines: int = 60) -> str:
         """The last ``lines`` lines of each log under ``root / "logs"``."""
@@ -108,8 +133,27 @@ class E2ERun:
         )
 
 
-def write_workplan(path: Path, forge_blueprint: Path) -> Path:
-    """Write the two-step forge -> roms_marbl workplan.
+def _executed_working_dir(step_root: Path, forge_root: Path) -> Path:
+    """The ``working_dir`` of the blueprint a roms_marbl step executed.
+
+    The scheduler overrides ``working_dir`` with the step root through an
+    ``apply-overrides`` directive, which is persisted as ``work/*.ovrd.yaml``; the
+    blueprint the forge step published is the fallback if no override was written.
+    """
+    candidates = sorted(
+        (step_root / "work").glob("*.ovrd.yaml"), key=lambda p: p.stat().st_mtime
+    ) or sorted((forge_root / "output").glob("B_*.yaml"))
+    return Path(yaml.safe_load(candidates[-1].read_text())["working_dir"])
+
+
+def write_workplan(
+    path: Path, forge_blueprint: Path, cdr_forge_blueprint: Path
+) -> Path:
+    """Write the four-step workplan.
+
+    ``make_inputs`` -> ``run_roms`` is a MARBL run that writes ``_cdrgas`` files;
+    ``make_cdr_lite_inputs`` -> ``run_cdr_lite`` is a CDR-LiTE run (no MARBL) whose
+    ``carbonate-sensitivity-from`` directive reads them from ``run_roms``.
 
     Every step sets ``max_walltime`` because a ``local`` override is what wraps the
     step command in ``timeout``; without one a hung step never ends.
@@ -121,7 +165,7 @@ def write_workplan(path: Path, forge_blueprint: Path) -> Path:
     """
     workplan = {
         "name": "forge-roms-e2e",
-        "description": "forge then roms_marbl",
+        "description": "forge, roms_marbl, then a CDR-LiTE forge and roms_marbl run",
         "steps": [
             {
                 "name": FORGE_STEP,
@@ -134,7 +178,21 @@ def write_workplan(path: Path, forge_blueprint: Path) -> Path:
                 "application": "roms_marbl",
                 "blueprint": {"from_step": FORGE_STEP},
                 "depends_on": [FORGE_STEP],
-                "compute_overrides": {"local": {"max_walltime": "00:45:00"}},
+                "compute_overrides": {"local": {"max_walltime": "01:00:00"}},
+            },
+            {
+                "name": CDR_FORGE_STEP,
+                "application": "forge",
+                "blueprint": str(cdr_forge_blueprint),
+                "compute_overrides": {"local": {"max_walltime": "00:30:00"}},
+            },
+            {
+                "name": CDR_STEP,
+                "application": "roms_marbl",
+                "blueprint": {"from_step": CDR_FORGE_STEP},
+                "depends_on": [CDR_FORGE_STEP, ROMS_STEP],
+                "directives": {"carbonate-sensitivity-from": {"step": ROMS_STEP}},
+                "compute_overrides": {"local": {"max_walltime": "01:00:00"}},
             },
         ],
     }
@@ -148,7 +206,7 @@ def e2e_run(
     cstar_shim: Path,
     tmp_path_factory: pytest.TempPathFactory,
 ) -> t.Iterator[E2ERun]:
-    """Schedule the workplan once for the module and wait for both steps to finish.
+    """Schedule the workplan once for the module and wait for all steps to finish.
 
     Yields
     ------
@@ -177,8 +235,15 @@ def _schedule_and_wait(
     E2ERun
         The finished run.
     """
-    _, blueprint_path = forge_blueprint_factory("unified", root / "forge")
-    workplan = write_workplan(root / "workplan.yaml", blueprint_path)
+    _, blueprint_path = forge_blueprint_factory(
+        "unified", root / "forge", run_time_overrides=GAS_EXCH_OVERRIDES
+    )
+    _, cdr_blueprint_path = forge_blueprint_factory(
+        "cdr_lite", root / "cdr_forge", name="it-cdr_lite-e2e"
+    )
+    workplan = write_workplan(
+        root / "workplan.yaml", blueprint_path, cdr_blueprint_path
+    )
     env = make_cli_env(root, shim)
 
     proc = run_cstar(env, "workplan", "run", "--run-id", RUN_ID, str(workplan))
@@ -202,6 +267,8 @@ def _schedule_and_wait(
         state_home=state_home,
         forge_root=step_roots[FORGE_STEP],
         roms_root=step_roots[ROMS_STEP],
+        cdr_forge_root=step_roots[CDR_FORGE_STEP],
+        cdr_root=step_roots[CDR_STEP],
         statuses=statuses,
         stdout=proc.stdout,
     )
@@ -209,22 +276,22 @@ def _schedule_and_wait(
         kill_run(state_home, RUN_ID, STEPS)
         pytest.fail(
             f"workplan did not finish within {RUN_TIMEOUT}s: {statuses}\n"
-            f"{run.log_tail(run.forge_root)}\n{run.log_tail(run.roms_root)}"
+            f"{run.all_log_tails()}"
         )
     return run
 
 
-def restart_files(run: E2ERun) -> list[Path]:
-    """The ROMS restart files, ordered by their timestamp."""
-    return sorted((run.roms_working_dir / "output").glob("*_rst*.nc"))
+def restart_files(run: E2ERun, step: str = ROMS_STEP) -> list[Path]:
+    """The restart files of the roms_marbl ``step``, ordered by their timestamp."""
+    return sorted((run.working_dir_of(step) / "output").glob("*_rst*.nc"))
 
 
-def restart_times(run: E2ERun) -> list[np.ndarray]:
-    """The ``ocean_time`` values (seconds) of each restart file, in file order."""
+def restart_times(run: E2ERun, step: str = ROMS_STEP) -> list[np.ndarray]:
+    """The ``ocean_time`` values (seconds) of each restart file of ``step``, in file order."""
     import xarray as xr
 
     times = []
-    for path in restart_files(run):
+    for path in restart_files(run, step):
         with xr.open_dataset(path, decode_times=False, mask_and_scale=False) as ds:
             times.append(np.atleast_1d(ds["ocean_time"].values))
     return times
@@ -236,12 +303,9 @@ def tracers_to_write(run: E2ERun) -> list[str]:
     return list(namelist["marbl_biogeochemistry_settings"]["marbl_tracers_to_write"])
 
 
-def test_both_steps_done(e2e_run: E2ERun) -> None:
-    """Both sentinels reached ``Done``."""
-    tails = (
-        f"{e2e_run.log_tail(e2e_run.forge_root)}\n{e2e_run.log_tail(e2e_run.roms_root)}"
-    )
-    assert e2e_run.statuses == {FORGE_STEP: DONE, ROMS_STEP: DONE}, tails
+def test_all_steps_done(e2e_run: E2ERun) -> None:
+    """All four sentinels reached ``Done``."""
+    assert e2e_run.statuses == ALL_DONE, e2e_run.all_log_tails()
 
 
 def test_forge_published_blueprint_and_classic_inputs(e2e_run: E2ERun) -> None:
@@ -271,11 +335,11 @@ def test_restart_records(e2e_run: E2ERun) -> None:
     assert times[1][-1] - times[0][-1] == pytest.approx(RESTART_PERIOD)
 
 
-def test_restart_ends_at_run_end(e2e_run: E2ERun) -> None:
-    """The last restart record is at the run end, counted from the reference date."""
+def assert_restarts_span_run(run: E2ERun, step: str) -> None:
+    """Assert ``step``'s restarts are counted from the reference date and end at the run end."""
     import xarray as xr
 
-    with xr.open_dataset(restart_files(e2e_run)[0], decode_times=False) as ds:
+    with xr.open_dataset(restart_files(run, step)[0], decode_times=False) as ds:
         long_name = ds["ocean_time"].attrs.get("long_name", "")
     match = re.search(r"(\d{4})/(\d{2})/(\d{2})", long_name)
     assert match, f"no reference date in ocean_time long_name {long_name!r}"
@@ -283,10 +347,16 @@ def test_restart_ends_at_run_end(e2e_run: E2ERun) -> None:
     epoch = datetime(year, month, day)
     assert epoch == MODEL_REFERENCE_DATE
 
+    times = restart_times(run, step)
     expected = (RUN_END - MODEL_REFERENCE_DATE).total_seconds()
-    assert restart_times(e2e_run)[-1][-1] == pytest.approx(expected)
+    assert times[-1][-1] == pytest.approx(expected)
     first = (RUN_START - MODEL_REFERENCE_DATE).total_seconds()
-    assert restart_times(e2e_run)[0][-1] == pytest.approx(first + RESTART_PERIOD)
+    assert times[0][-1] == pytest.approx(first + RESTART_PERIOD)
+
+
+def test_restart_ends_at_run_end(e2e_run: E2ERun) -> None:
+    """The last restart record is at the run end, counted from the reference date."""
+    assert_restarts_span_run(e2e_run, ROMS_STEP)
 
 
 def test_restart_fields_are_finite(e2e_run: E2ERun) -> None:
@@ -317,20 +387,148 @@ def test_roms_logs_are_clean(e2e_run: E2ERun) -> None:
     assert not hits, hits[:10]
 
 
-def test_workplan_status_names_both_steps(e2e_run: E2ERun) -> None:
-    """``cstar workplan status`` succeeds and shows both steps as done."""
+def gas_exch_files(run: E2ERun) -> list[Path]:
+    """The ``_cdrgas`` gas-exchange sensitivity files ``run_roms`` wrote, by timestamp."""
+    return sorted((run.roms_working_dir / "output").glob("*_cdrgas*.nc"))
+
+
+def cdr_namelist(run: E2ERun) -> f90nml.Namelist:
+    """The namelist ROMS read in ``run_cdr_lite``, with the directive's inputs added."""
+    return f90nml.read(run.cdr_working_dir / "work" / "cstar_generated_roms.nml")
+
+
+def test_gas_exch_files_span_run(e2e_run: E2ERun) -> None:
+    """``run_roms`` wrote ``_cdrgas`` records at the run start, the 900 s window midpoints, and the run end."""
+    import xarray as xr
+
+    files = gas_exch_files(e2e_run)
+    assert files, [p.name for p in (e2e_run.roms_working_dir / "output").glob("*.nc")]
+    records = []
+    for path in files:
+        with xr.open_dataset(path, decode_times=False, mask_and_scale=False) as ds:
+            records.append(ds["ddic_dco2_time"].values)
+    days = np.sort(np.concatenate(records))
+    start = (RUN_START - MODEL_REFERENCE_DATE).total_seconds() / 86400
+    end = (RUN_END - MODEL_REFERENCE_DATE).total_seconds() / 86400
+    n_windows = round((RUN_END - RUN_START).total_seconds() / GAS_EXCH_PERIOD)
+    midpoints = start + (np.arange(n_windows) + 0.5) * GAS_EXCH_PERIOD / 86400
+    # an absolute tolerance of 1e-6 day (0.09 s): the default relative one is ~6 minutes
+    approx = partial(pytest.approx, rel=0, abs=1e-6)
+    assert days[0] == approx(start)
+    assert days[-1] == approx(end)
+    assert days[1:-1] == approx(midpoints)
+
+
+def test_gas_exch_sensitivities_are_finite(e2e_run: E2ERun) -> None:
+    """``ddic_dco2`` and ``ddic_dalk`` are finite everywhere, and non-zero over the ocean."""
+    import xarray as xr
+
+    for path in gas_exch_files(e2e_run):
+        with xr.open_dataset(path, decode_times=False, mask_and_scale=False) as ds:
+            for name in ("ddic_dco2", "ddic_dalk"):
+                values = ds[name].values
+                assert np.isfinite(values).all(), f"{path.name}: {name} not finite"
+                assert np.abs(values).max() > 0, f"{path.name}: {name} is all zero"
+
+
+def test_cdr_lite_published_blueprint_leaves_sensitivity_to_directive(
+    e2e_run: E2ERun,
+) -> None:
+    """The forge-emitted ``cdr_lite`` blueprint has no carbonate sensitivity; the directive's does."""
+    published = sorted((e2e_run.cdr_forge_root / "output").glob("B_*.yaml"))
+    assert len(published) == 1, published
+    emitted = yaml.safe_load(published[0].read_text())
+    # None is the default, so the serialized blueprint may omit the key
+    assert emitted["forcing"].get("carbonate_sensitivity") is None
+
+    applied = sorted((e2e_run.cdr_root / "work").glob("*.csfrom*.yaml"))
+    assert applied, sorted(p.name for p in (e2e_run.cdr_root / "work").iterdir())
+    locations = {
+        Path(d["location"])
+        for d in yaml.safe_load(applied[-1].read_text())["forcing"][
+            "carbonate_sensitivity"
+        ]["data"]
+    }
+    assert locations == set(gas_exch_files(e2e_run))
+
+
+def test_cdr_lite_namelist(e2e_run: E2ERun) -> None:
+    """The CDR-LiTE run has the CDR tracers and no BGC tracers, and forces from the ``_cdrgas`` files."""
+    nml = cdr_namelist(e2e_run)
+    assert nml["param_settings"]["nt_cdr_oae"] == 1
+    assert nml["param_settings"]["nt_bgc"] == 0
+    cdr_lite = nml.get("cdr_lite_settings", {})
+    assert cdr_lite.get("cdr_online_carbonate_sensitivity", False) is False
+    frcfiles = nml["forcing_files"]["frcfiles"]
+    frcfiles = [frcfiles] if isinstance(frcfiles, str) else frcfiles
+    names = [Path(f).name for f in frcfiles]
+    assert {p.name for p in gas_exch_files(e2e_run)} <= set(names), names
+
+
+def test_cdr_lite_cppdefs(e2e_run: E2ERun) -> None:
+    """The CDR-LiTE build defines ``CDR_LITE`` and leaves MARBL out."""
+    text = (
+        e2e_run.cdr_working_dir / "input" / "compile_time_code" / "cppdefs.opt"
+    ).read_text()
+    assert re.search(r"^#define CDR_LITE\b", text, re.MULTILINE)
+    assert re.search(r"^#undef MARBL\b", text, re.MULTILINE)
+
+
+def test_cdr_lite_log_is_clean(e2e_run: E2ERun) -> None:
+    """``run_cdr_lite`` stepped, read its forcing, and found only the expected missing flux."""
+    log = e2e_run.cdr_root / "logs" / f"{slugify(CDR_STEP)}.out"
+    lines = log.read_text(errors="replace").splitlines()
+    assert any("started time-stepping" in line for line in lines), "ROMS never stepped"
+    hits = [line.strip() for line in lines if ERROR_PATTERN.search(line)]
+    assert not hits, hits[:10]
+    # the _cdrgas files hold sensitivities only, so the DIC flux is expected to be absent
+    assert sum(MISSING_FLX_MESSAGE in line for line in lines) == 1
+    assert not [ln for ln in lines if "Could not find var" in ln]
+    assert not [ln for ln in lines if "Ran out of time records" in ln]
+
+
+def test_cdr_lite_restart_ends_at_run_end(e2e_run: E2ERun) -> None:
+    """``run_cdr_lite`` wrote two finite-time restarts that end at the run end."""
+    times = restart_times(e2e_run, CDR_STEP)
+    assert len(times) == 2, [p.name for p in restart_files(e2e_run, CDR_STEP)]
+    assert [np.diff(t) for t in times] == [pytest.approx([DT])] * 2
+    assert times[1][-1] - times[0][-1] == pytest.approx(RESTART_PERIOD)
+    assert_restarts_span_run(e2e_run, CDR_STEP)
+
+
+def test_cdr_lite_restart_fields_are_finite(e2e_run: E2ERun) -> None:
+    """The physical state and the CDR tracers are finite in each ``run_cdr_lite`` restart."""
+    import xarray as xr
+
+    names = ["zeta", "temp", "salt", "CDR_OAE_ALK1", "CDR_OAE_DIC1", "CDR_DOR_DIC1"]
+    bad: dict[str, list[str]] = {}
+    for path in restart_files(e2e_run, CDR_STEP):
+        with xr.open_dataset(path, decode_times=False, mask_and_scale=False) as ds:
+            missing = [n for n in names if n not in ds.variables]
+            nonfinite = [
+                n
+                for n in names
+                if n in ds.variables and not np.isfinite(ds[n].values).all()
+            ]
+        if missing or nonfinite:
+            bad[path.name] = [f"missing: {missing}", f"non-finite: {nonfinite}"]
+    assert not bad, bad
+
+
+def test_workplan_status_names_all_steps(e2e_run: E2ERun) -> None:
+    """``cstar workplan status`` succeeds and shows every step as done."""
     # a wide terminal keeps rich from truncating step names
     proc = run_cstar(
         {**e2e_run.env, "COLUMNS": "200"}, "workplan", "status", e2e_run.run_id
     )
     assert proc.returncode == 0, proc.stderr
-    assert FORGE_STEP in proc.stdout
-    assert ROMS_STEP in proc.stdout
-    assert proc.stdout.count("\u2714") == 2, proc.stdout
+    for step in STEPS:
+        assert step in proc.stdout
+    assert proc.stdout.count("\u2714") == len(STEPS), proc.stdout
 
 
 def test_resume_of_completed_run_keeps_steps_done(e2e_run: E2ERun) -> None:
-    """Resuming a finished run succeeds and leaves both steps ``Done``."""
+    """Resuming a finished run succeeds and leaves every step ``Done``."""
     proc = run_cstar(
         e2e_run.env, "workplan", "run", "--run-id", e2e_run.run_id, "--resume"
     )
@@ -343,4 +541,4 @@ def test_resume_of_completed_run_keeps_steps_done(e2e_run: E2ERun) -> None:
         timeout=300,
         poll_interval=POLL_INTERVAL,
     )
-    assert statuses == {FORGE_STEP: DONE, ROMS_STEP: DONE}
+    assert statuses == ALL_DONE
