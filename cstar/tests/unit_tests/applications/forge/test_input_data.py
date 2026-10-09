@@ -923,6 +923,11 @@ class TestRomsMarblInputDataHelperMethods:
         real_sd.paths.clear()
         result = sample_roms_marbl_input_data._resolve_source_block({"name": "ESPER"})
         assert result == {"name": "ESPER"}
+        # On, but the dataset was never staged (hand-edited blueprint): say so.
+        with pytest.raises(ValueError, match="WOA_SALINITY"):
+            sample_roms_marbl_input_data._resolve_source_block(
+                {"name": "ESPER", "salinity_conditioning": True}
+            )
 
     def test_resolve_source_block_time_window_trims_daily_list(
         self, sample_roms_marbl_input_data

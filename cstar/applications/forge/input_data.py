@@ -1297,7 +1297,18 @@ class RomsMarblInputData(InputData):
         # below: an ESPER source's own ``path`` is its PyESPER checkout, unrelated.
         if name.upper() == "ESPER" and out.get("salinity_conditioning"):
             if not isinstance(out["salinity_conditioning"], dict):
-                woa_file = self.source_data.path_for_source("WOA_SALINITY")
+                try:
+                    woa_file = self.source_data.path_for_source("WOA_SALINITY")
+                except KeyError as exc:
+                    # A hand-edited blueprint that switched the option on without
+                    # re-resolving: the resolver would have noted the dataset.
+                    raise ValueError(
+                        "The ESPER source asks for salinity conditioning, but the "
+                        "WOA_SALINITY dataset was not staged. Add 'WOA_SALINITY' to "
+                        "the blueprint's `datasets` (and `forcing.resolved_datasets`) "
+                        "or rebuild the blueprint from the wizard/resolver, which "
+                        "notes it automatically."
+                    ) from exc
                 out["salinity_conditioning"] = {"woa_salinity_path": str(woa_file)}
 
         # An explicit path (SourceSpec.path, or a dict's own "path" key -- e.g. river
