@@ -79,3 +79,4 @@ Miscellaneous
 - Docs: directive reference, forge blueprint and input-data developer docs, wizard and spec docs, terminology, API list; published schema ``roms_marbl_schema.3.2.0.json`` and blueprint template. (`#754 <https://github.com/CWorthy-ocean/C-Star/pull/754>`_)
 - The workplans guide has a new "Finding a Run's Directory" section covering ``path``, ``cd`` and the shell setup. (`#755 <https://github.com/CWorthy-ocean/C-Star/pull/755>`_)
 - ``shellingham`` is now a declared dependency; it was already installed as a requirement of ``typer``. (`#755 <https://github.com/CWorthy-ocean/C-Star/pull/755>`_)
+- Tests now use the real ``roms_marbl`` application: the test conftest no longer replaces it with a ``SleepApplication`` subclass registered under the same name. (`#756 <https://github.com/CWorthy-ocean/C-Star/pull/756>`_)
