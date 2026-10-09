@@ -2176,7 +2176,7 @@ def test_output_spec_defaults_to_daily_restarts():
 
 def test_default_model_uses_latest_settings_schema():
     """The default catalog model (``roms-marbl-0.10-default``) is pinned to
-    ucla-roms ``0.10.0`` -- a semver ref above the newest registered schema
+    ucla-roms ``0.10.1`` -- a semver ref above the newest registered schema
     boundary, which both the wizard and the executor (``write_roms_namelist`` ->
     ``run_time_settings_for_ref``) resolve to the *latest* known schema
     (currently ``RunTimeSettingsV0_9_0``), not the legacy one. This is an intentional behavior change from before this
