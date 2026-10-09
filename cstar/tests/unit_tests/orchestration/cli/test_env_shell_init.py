@@ -1,3 +1,4 @@
+import errno
 import os
 import shlex
 import shutil
@@ -16,6 +17,7 @@ from cstar.cli.environment import app
 from cstar.cli.environment.shell_init import (
     BLOCK_BEGIN,
     BLOCK_END,
+    BLOCK_NOTE,
     COMMAND_SHELL_INIT,
     Shell,
     shell_function,
@@ -369,7 +371,8 @@ def test_cd_guidance_names_a_working_setup_command(
 def source_block(function_file: Path) -> str:
     """The text `--install` adds to an rc file for `function_file`."""
     path = shlex.quote(str(function_file))
-    return f"{BLOCK_BEGIN}\nif [ -f {path} ]; then . {path}; fi\n{BLOCK_END}\n"
+    guard = f"if [ -f {path} ]; then . {path}; fi"
+    return "".join(f"{x}\n" for x in (BLOCK_BEGIN, BLOCK_NOTE, guard, BLOCK_END))
 
 
 def setup(*flags: str, shell: str | None = None) -> t.Any:
@@ -397,13 +400,19 @@ def test_detection_falls_back_to_the_login_shell(
     assert setup().stdout == shell_function(Shell.ZSH)
 
 
-def test_detection_skips_an_unsupported_running_shell(
-    monkeypatch: pytest.MonkeyPatch,
+def test_detection_does_not_fall_through_from_an_unsupported_shell(
+    monkeypatch: pytest.MonkeyPatch, flatten_cli_output: t.Callable[[str], str]
 ) -> None:
-    """Verify a running shell without support does not hide a supported login shell."""
-    set_detection(monkeypatch, "fish", "/bin/bash")
+    """Verify a detected shell without support is an error naming it, even when
+    `$SHELL` names a supported one: the login shell is not the running shell.
+    """
+    set_detection(monkeypatch, "fish", "/bin/zsh")
 
-    assert setup().stdout == shell_function(Shell.BASH)
+    result = setup()
+
+    assert result.exit_code != 0
+    assert result.stdout == ""
+    assert "'fish'" in flatten_cli_output(result.stderr)
 
 
 @pytest.mark.parametrize(
@@ -502,7 +511,7 @@ def test_install_keeps_existing_rc_content(sandbox: Sandbox, name: str) -> None:
     """Verify `--install` appends after a blank line and leaves every existing byte."""
     rc = sandbox.rc_file(name)
     rc.parent.mkdir(parents=True, exist_ok=True)
-    before = b"export A=1\r\nalias x='\xff'\n"
+    before = b"export A=1\nalias x='\xff'\n"
     rc.write_bytes(before)
 
     setup(ARG_INSTALL, shell=name)
@@ -553,8 +562,9 @@ def test_install_writes_through_a_symlinked_rc_file(
     rc.parent.mkdir(parents=True)
     rc.symlink_to(target)
 
-    setup(ARG_INSTALL, shell="zsh")
+    result = setup(ARG_INSTALL, shell="zsh")
 
+    assert f"Updated {rc} (-> {real(target)})" in result.stdout
     assert rc.is_symlink()
     assert rc.readlink() == target
     assert target.read_text() == "export A=1\n\n" + source_block(
@@ -562,20 +572,9 @@ def test_install_writes_through_a_symlinked_rc_file(
     )
 
 
-@pytest.mark.parametrize(
-    ("name", "platform", "note"),
-    [
-        ("bash", "darwin", True),
-        ("bash", "linux", False),
-        ("zsh", "darwin", False),
-    ],
-)
-def test_install_notes_the_macos_bash_login_shell(
-    monkeypatch: pytest.MonkeyPatch, name: str, platform: str, note: bool
-) -> None:
-    """Verify only bash on macOS is told about `~/.bash_profile`."""
-    monkeypatch.setattr("sys.platform", platform)
-
+@pytest.mark.parametrize(("name", "note"), [("bash", True), ("zsh", False)])
+def test_install_notes_the_bash_login_shell(name: str, note: bool) -> None:
+    """Verify bash, whose login shells skip `~/.bashrc`, is told about `~/.bash_profile`."""
     result = setup(ARG_INSTALL, shell=name)
 
     assert (".bash_profile" in result.stdout) is note
@@ -586,7 +585,7 @@ def test_uninstall_restores_the_rc_file(sandbox: Sandbox, name: str) -> None:
     """Verify `--uninstall` removes the block and function file and nothing else."""
     rc = sandbox.rc_file(name)
     rc.parent.mkdir(parents=True, exist_ok=True)
-    before = b"export A=1\r\nalias x='\xff'\n"
+    before = b"export A=1\nalias x='\xff'\n"
     rc.write_bytes(before)
     setup(ARG_INSTALL, shell=name)
 
@@ -628,6 +627,243 @@ def test_install_and_uninstall_cannot_be_combined(
     stderr = flatten_cli_output(result.stderr)
     assert result.exit_code != 0
     assert ARG_INSTALL in stderr and ARG_UNINSTALL in stderr
+    assert not sandbox.function_file("zsh").exists()
+
+
+def write_rc(sandbox: Sandbox, text: str | bytes, name: str = "zsh") -> Path:
+    """Create the rc file of `name` with `text` and return it."""
+    rc = sandbox.rc_file(name)
+    rc.parent.mkdir(parents=True, exist_ok=True)
+    rc.write_bytes(text.encode() if isinstance(text, str) else text)
+    return rc
+
+
+def assert_failed_cleanly(result: t.Any, *expected: str) -> None:
+    """Assert a one-line error on stderr and exit code 1, without a traceback."""
+    assert isinstance(result.exception, SystemExit), result.exception
+    assert result.exit_code == 1
+    assert "Traceback" not in result.stderr
+    assert result.stderr.startswith("Error: ")
+    assert len(result.stderr.strip().splitlines()) == 1
+    assert all(text in result.stderr for text in expected), result.stderr
+
+
+UNBALANCED: t.Final[dict[str, tuple[str, tuple[str, ...]]]] = {
+    "begin-without-end": (f"A\n{BLOCK_BEGIN}\nold\nB\n", ("line 2",)),
+    "end-without-begin": (f"A\nB\n{BLOCK_END}\nC\n", ("line 3",)),
+    "second-begin-before-end": (
+        f"A\n{BLOCK_BEGIN}\nold\n{BLOCK_BEGIN}\nnew\n{BLOCK_END}\nB\n",
+        ("line 4", "line 2"),
+    ),
+}
+"""Rc file texts whose markers are unbalanced, with the line numbers to report."""
+
+
+@pytest.mark.parametrize("flag", [ARG_INSTALL, ARG_UNINSTALL])
+@pytest.mark.parametrize("case", UNBALANCED)
+def test_unbalanced_markers_are_refused(sandbox: Sandbox, case: str, flag: str) -> None:
+    """Verify markers that cannot be paired are refused before anything is written:
+    the rc file and the function file are untouched, and the error names the lines.
+    """
+    text, lines = UNBALANCED[case]
+    rc = write_rc(sandbox, text)
+    function_file = sandbox.function_file("zsh")
+    if flag == ARG_UNINSTALL:
+        function_file.parent.mkdir(parents=True)
+        function_file.write_text("keep")
+
+    result = setup(flag, shell="zsh")
+
+    assert_failed_cleanly(result, str(rc), *lines)
+    assert rc.read_text() == text
+    assert function_file.exists() is (flag == ARG_UNINSTALL)
+
+
+@pytest.mark.parametrize("end", [f"{BLOCK_END} ", f"{BLOCK_END}\r"])
+def test_markers_with_trailing_whitespace_are_recognised(
+    sandbox: Sandbox, end: str
+) -> None:
+    """Verify an end marker edited with a trailing space, or a CR on its line only,
+    still closes its block: it is updated in place, never duplicated, and removed
+    by `--uninstall` without touching the lines after it.
+    """
+    rc = write_rc(sandbox, f"A\n\n{BLOCK_BEGIN}\nSTALE\n{end}\nB\n")
+
+    assert setup(ARG_INSTALL, shell="zsh").exit_code == 0
+
+    text = rc.read_text()
+    assert text.count(BLOCK_BEGIN) == 1 and "STALE" not in text
+    assert text.startswith("A\n\n") and text.endswith("\nB\n")
+
+    assert setup(ARG_UNINSTALL, shell="zsh").exit_code == 0
+    assert rc.read_text() == "A\nB\n"
+
+
+def test_lines_between_an_edited_marker_and_a_later_block_survive(
+    sandbox: Sandbox,
+) -> None:
+    """Verify user lines after a block whose end marker was edited are never
+    swallowed by a later install or uninstall.
+    """
+    user_lines = "USER_B_LINE_1\nUSER_B_LINE_2\n"
+    rc = write_rc(sandbox, f"A\n\n{BLOCK_BEGIN}\nold\n{BLOCK_END} \n{user_lines}")
+
+    for flag in (ARG_INSTALL, ARG_INSTALL):
+        assert setup(flag, shell="zsh").exit_code == 0
+        assert user_lines in rc.read_text()
+
+    assert setup(ARG_UNINSTALL, shell="zsh").exit_code == 0
+    assert rc.read_text() == f"A\n{user_lines}"
+
+
+def test_install_keeps_one_of_several_blocks_and_uninstall_removes_all(
+    sandbox: Sandbox,
+) -> None:
+    """Verify duplicate well-formed blocks are collapsed in place by `--install`,
+    and `--uninstall` removes every one with its preceding blank line.
+    """
+    text = (
+        f"A\n\n{BLOCK_BEGIN}\nold1\n{BLOCK_END}\nmiddle\n\n"
+        f"{BLOCK_BEGIN}\nold2\n{BLOCK_END}\nZ\n"
+    )
+    rc = write_rc(sandbox, text)
+
+    setup(ARG_INSTALL, shell="zsh")
+
+    assert rc.read_text() == (
+        "A\n\n" + source_block(sandbox.function_file("zsh")) + "middle\nZ\n"
+    )
+
+    rc.write_text(text)
+    setup(ARG_UNINSTALL, shell="zsh")
+
+    assert rc.read_text() == "A\nmiddle\nZ\n"
+
+
+def test_crlf_file_keeps_its_line_endings(sandbox: Sandbox) -> None:
+    """Verify a CRLF rc file gets a CRLF block and is restored byte for byte."""
+    before = b"export A=1\r\nalias x=y\r\n"
+    rc = write_rc(sandbox, before)
+
+    setup(ARG_INSTALL, shell="zsh")
+
+    installed = rc.read_bytes()
+    assert installed.startswith(before + b"\r\n" + BLOCK_BEGIN.encode())
+    assert b"\n" not in installed.replace(b"\r\n", b"")
+
+    setup(ARG_UNINSTALL, shell="zsh")
+
+    assert rc.read_bytes() == before
+
+
+def test_failed_replace_leaves_the_rc_file_and_no_litter(
+    sandbox: Sandbox, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Verify a failure while replacing the rc file, such as a full disk, leaves
+    its bytes intact, removes the temporary file and exits with a short error.
+    """
+    rc = write_rc(sandbox, "export A=1\n")
+
+    def replace(*_: object) -> None:
+        raise OSError(errno.ENOSPC, os.strerror(errno.ENOSPC))
+
+    monkeypatch.setattr(os, "replace", replace)
+
+    result = setup(ARG_INSTALL, shell="zsh")
+
+    assert_failed_cleanly(result, str(rc), os.strerror(errno.ENOSPC))
+    assert rc.read_text() == "export A=1\n"
+    assert list(rc.parent.iterdir()) == [rc]
+    assert not sandbox.function_file("zsh").exists()
+
+
+def test_install_keeps_the_rc_file_mode(sandbox: Sandbox) -> None:
+    """Verify a private rc file stays private after it is rewritten."""
+    rc = write_rc(sandbox, "export A=1\n")
+    rc.chmod(0o600)
+
+    setup(ARG_INSTALL, shell="zsh")
+
+    assert stat.S_IMODE(rc.stat().st_mode) == 0o600
+
+
+def test_new_files_are_created_with_the_umask_default(sandbox: Sandbox) -> None:
+    """Verify a new rc file and function file get 0o666 minus the umask, not the
+    owner-only mode of a temporary file.
+    """
+    previous = os.umask(0o027)
+    try:
+        setup(ARG_INSTALL, shell="zsh")
+    finally:
+        os.umask(previous)
+
+    assert stat.S_IMODE(sandbox.rc_file("zsh").stat().st_mode) == 0o640
+    assert stat.S_IMODE(sandbox.function_file("zsh").stat().st_mode) == 0o640
+
+
+@pytest.fixture
+def restore_modes() -> t.Iterator[list[tuple[Path, int]]]:
+    """Collect paths whose mode a test lowers, and restore them so tmp_path can be removed."""
+    changed: list[tuple[Path, int]] = []
+    yield changed
+    for path, mode in changed:
+        path.chmod(mode)
+
+
+needs_permissions = pytest.mark.skipif(
+    os.geteuid() == 0, reason="root ignores file permissions"
+)
+
+
+@needs_permissions
+@pytest.mark.parametrize("lock", ["directory", "file"])
+def test_unwritable_rc_file_is_reported(
+    sandbox: Sandbox, restore_modes: list[tuple[Path, int]], lock: str
+) -> None:
+    """Verify an rc file in a read-only directory, or read-only itself, is left
+    alone with a short error and no function file.
+    """
+    rc = write_rc(sandbox, "export A=1\n")
+    locked = rc.parent if lock == "directory" else rc
+    restore_modes.append((locked, stat.S_IMODE(locked.stat().st_mode)))
+    locked.chmod(0o500 if lock == "directory" else 0o400)
+
+    result = setup(ARG_INSTALL, shell="zsh")
+
+    assert_failed_cleanly(result, str(rc) if lock == "file" else "")
+    locked.chmod(restore_modes[-1][1])
+    assert rc.read_text() == "export A=1\n"
+    assert not sandbox.function_file("zsh").exists()
+
+
+def test_rc_file_that_is_a_directory_is_reported(sandbox: Sandbox) -> None:
+    """Verify an rc path that is a directory is a short error, not a traceback."""
+    rc = sandbox.rc_file("zsh")
+    rc.mkdir(parents=True)
+
+    result = setup(ARG_INSTALL, shell="zsh")
+
+    assert_failed_cleanly(result, str(rc), "directory")
+    assert not sandbox.function_file("zsh").exists()
+
+
+@needs_permissions
+def test_unwritable_config_directory_is_reported(
+    sandbox: Sandbox, restore_modes: list[tuple[Path, int]]
+) -> None:
+    """Verify a failure to write the function file is reported, and that the
+    block already added to the rc file stays inert because it guards on the file.
+    """
+    sandbox.config.mkdir()
+    restore_modes.append((sandbox.config, stat.S_IMODE(sandbox.config.stat().st_mode)))
+    sandbox.config.chmod(0o500)
+
+    result = setup(ARG_INSTALL, shell="zsh")
+
+    assert_failed_cleanly(result, str(sandbox.function_file("zsh")))
+    assert f"if [ -f {shlex.quote(str(sandbox.function_file('zsh')))} ]" in (
+        sandbox.rc_file("zsh").read_text()
+    )
     assert not sandbox.function_file("zsh").exists()
 
 

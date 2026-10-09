@@ -664,11 +664,12 @@ a small ``cstar`` function. Install it once, then open a new shell:
 
 The command detects whether you run zsh or bash (pass ``zsh`` or ``bash`` to
 choose), writes the function under the C-Star config directory, and adds a
-marked block to ``~/.zshrc`` or ``~/.bashrc`` that sources it. On macOS,
-Terminal opens login shells that read ``~/.bash_profile``, so make sure that
-file sources ``~/.bashrc``. Run the command again after upgrading C-Star to
-refresh the function, and add ``--uninstall`` to remove the block and the
-function.
+marked block to ``~/.zshrc`` or ``~/.bashrc`` that sources it. For bash, login
+shells, such as SSH sessions and the macOS Terminal, read ``~/.bash_profile``
+instead, so make sure that file sources ``~/.bashrc``. Run the command again
+after upgrading C-Star to refresh the function, and add ``--uninstall`` to
+remove the block and the function. The command stops without changing anything
+if the block's marker lines have been edited so that they no longer pair up.
 
 To manage your dotfiles yourself, omit ``--install``: the command prints the
 function instead, for example ``cstar env shell-init zsh > <file>``, ready to
