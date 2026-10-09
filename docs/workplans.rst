@@ -646,12 +646,13 @@ Finding a Run's Directory
 
 Use the ``path`` command from the ``cstar`` CLI to print the directory of a run,
 or of one of its steps. The path is the only output, so it composes with other
-commands in any shell:
+commands in any shell. A failed lookup prints nothing and exits non-zero, so
+guard the ``cd`` with ``&&``:
 
 .. code-block:: console
 
     cstar workplan path <my-unique-id>
-    cd "$(cstar workplan path <my-unique-id> <step-name>)"
+    dir=$(cstar workplan path <my-unique-id> <step-name>) && cd "$dir"
 
 A program cannot change the directory of the shell that started it, so
 ``cstar workplan cd <my-unique-id> [step-name]`` works only once your shell has

@@ -17,7 +17,7 @@ HELP_LONG = f"""\
 {HELP_SHORT}
 
 A process cannot change the directory of the shell that started it, so
-`cstar {NAME} {COMMAND_CD} <run-id> [step]` needs a shell function named `cstar`.
+`cstar {NAME} {COMMAND_CD} <run-id> \\[step]` needs a shell function named `cstar`.
 The function runs `cstar {NAME} {COMMAND_PATH}` and changes directory to the
 path it prints; every other command passes through to the cstar executable.
 
@@ -38,10 +38,11 @@ class Shell(StrEnum):
 def shell_function(shell: Shell) -> str:
     """Build the shell function that intercepts `cstar workplan cd`.
 
-    The function is plain POSIX shell and works under `set -u` in bash and
-    `setopt nounset` in zsh. It intercepts only `cstar workplan cd <run-id>
-    [step]` (or its alias), and passes everything else, including `--help` and
-    an incomplete command, through to the executable.
+    The function is portable sh syntax plus `local`, and works under `set -u`
+    in bash and `setopt nounset` in zsh. It intercepts only `cstar workplan cd
+    <run-id> [step]` (or its alias), and passes everything else, including
+    `--help` and an incomplete command, through to the executable. A `cstar`
+    alias is removed first, as it would break the function definition.
 
     The log level is pinned to WARNING for the lookup so that no INFO or DEBUG
     record can reach the stdout the function captures as the directory.
@@ -60,6 +61,7 @@ def shell_function(shell: Shell) -> str:
 
     return f"""\
 # cstar shell integration for {shell}. Regenerate after upgrading C-Star.
+unalias cstar 2>/dev/null || true
 cstar() {{
     if [ "$#" -ge 3 ] && [ "$#" -le 4 ] && [ "$2" = "{COMMAND_CD}" ] \\
         && {{ [ "$1" = "{NAME}" ] || [ "$1" = "{ALIAS}" ]; }}; then

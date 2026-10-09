@@ -1,4 +1,5 @@
 import os
+import shlex
 import shutil
 import stat
 import subprocess
@@ -9,8 +10,14 @@ import pytest
 from typer.testing import CliRunner
 
 from cstar.base.env import ENV_CSTAR_LOG_LEVEL
+from cstar.cli.cli import app as root_app
 from cstar.cli.environment import app
-from cstar.cli.environment.shell_init import COMMAND_SHELL_INIT, Shell
+from cstar.cli.environment.shell_init import (
+    COMMAND_SHELL_INIT,
+    Shell,
+    shell_function,
+)
+from cstar.cli.workplan.path import CD_GUIDANCE
 
 SHELLS: t.Final[tuple[str, ...]] = tuple(Shell)
 """Names of the shells the function is generated for; each is also its executable."""
@@ -75,7 +82,9 @@ def run_session(tmp_path: Path, shell: str, nounset: bool) -> t.Callable[..., Se
     stub `cstar` on its PATH.
     """
 
-    def _run(*commands: str, env: dict[str, str] | None = None) -> Session:
+    def _run(
+        *commands: str, env: dict[str, str] | None = None, prelude: str = ""
+    ) -> Session:
         bin_dir = tmp_path / "bin"
         bin_dir.mkdir(exist_ok=True)
         stub = bin_dir / "cstar"
@@ -91,7 +100,8 @@ def run_session(tmp_path: Path, shell: str, nounset: bool) -> t.Callable[..., Se
 
         steps = "\n".join(f'{c}; echo "rc=$?"; echo "pwd=$(pwd -P)"' for c in commands)
         script = (
-            f'{NOUNSET[shell] if nounset else ":"}\n. "{init}"\ncd "{start}"\n{steps}\n'
+            f"{NOUNSET[shell] if nounset else ':'}\n{prelude}\n"
+            f'. "{init}"\ncd "{start}"\n{steps}\n'
         )
         proc = subprocess.run(
             [shutil.which(shell) or shell, *INVOCATION[shell], script],
@@ -242,3 +252,30 @@ def test_function_passes_a_bare_invocation_through(
         "rc=0",
         f"pwd={real(session.start)}",
     ]
+
+
+def test_function_replaces_a_cstar_alias(
+    run_session: t.Callable[..., Session], shell: str
+) -> None:
+    """Verify an existing `cstar` alias does not break the function definition."""
+    expand = "shopt -s expand_aliases\n" if shell == "bash" else ""
+    session = run_session(
+        "cstar wp cd x", prelude=f"{expand}alias cstar='echo ALIASED'"
+    )
+
+    assert session.proc.stdout.splitlines() == ["rc=0", f"pwd={real(session.target)}"]
+    assert session.lookups == ["WARNING|workplan|path|x"]
+
+
+def test_cd_guidance_names_a_working_setup_command() -> None:
+    """Verify the setup command the `cd` guidance prints exists in the CLI, so a
+    renamed command cannot leave the guidance stale.
+    """
+    line = next(x for x in CD_GUIDANCE.splitlines() if COMMAND_SHELL_INIT in x)
+    args = shlex.split(line.split(">")[0])
+
+    assert args[0] == "cstar"
+    result = CliRunner().invoke(root_app, args[1:])
+
+    assert result.exit_code == 0, result.stderr
+    assert result.stdout == shell_function(Shell(args[-1]))

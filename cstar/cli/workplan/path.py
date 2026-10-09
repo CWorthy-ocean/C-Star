@@ -28,9 +28,9 @@ HELP_PATH_LONG = f"""\
 {HELP_PATH_SHORT}
 
 The path is the only output on stdout, so it composes with other commands,
-e.g. `cd "$(cstar workplan path <run-id>)"`. Without a `step_name`, the
-directory is the run's output directory. Failures are reported on stderr with
-a non-zero exit code.
+e.g. `dir=$(cstar workplan path <run-id>) && cd "$dir"`. Without a
+`step_name`, the directory is the run's output directory. Failures are
+reported on stderr with a non-zero exit code.
 """
 
 HELP_CD_SHORT = "Change the shell directory to a workplan run or step."
