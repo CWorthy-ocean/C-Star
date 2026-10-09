@@ -1783,6 +1783,14 @@ def validate_run_time_sections(
             )
         except ValueError as exc:
             errors.append(str(exc))
+    # The CDR-lite mode needs a new enough ucla-roms: surfaced here so a stored
+    # blueprint pinned below the minimum fails before data staging/generation
+    # (configure_build keeps the same check as the net).
+    if bgc_mode_from_cppdefs(settings.get("cppdefs") or {}) == "cdr_lite":
+        try:
+            check_cdr_lite_mode_roms(roms_ref)
+        except ValueError as exc:
+            errors.append(str(exc))
     # Same for BGC tracers vs MARBL (param vs cppdefs): surfaced here so a stored
     # blueprint fails before data staging/generation, not at configure_build.
     if "param" in settings and "cppdefs" in settings:

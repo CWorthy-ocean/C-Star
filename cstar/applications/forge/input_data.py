@@ -44,7 +44,11 @@ from cstar.applications.forge.util import mem_log
 from cstar.applications.forge.xarray_lockfix import apply_combinedlock_leak_fix
 from cstar.base.utils import convert_to_cdf5
 from cstar.orchestration.models import Resource
-from cstar.roms.input_dataset import CARBONATE_SENSITIVITY_VARIABLES
+from cstar.roms.input_dataset import (
+    CARBONATE_SENSITIVITY_REMEDY,
+    CARBONATE_SENSITIVITY_VARIABLES,
+    missing_carbonate_sensitivity_variables,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterable
@@ -2791,13 +2795,42 @@ class RomsMarblInputData(InputData):
         with mem_log("CDRForcing()", enabled=self.verbose):
             cdr = rt.CDRForcing(**input_args)
 
+        axis = _cdr_axis(cdr.ds)
+        label = "The generated CDR forcing"
+        ncdr_parm = len(cdr.releases)
+        cdr_volume = cdr.releases.release_type == "volume"
+        reuse = self._should_reuse_existing_output(output_path)
+        if reuse:
+            # Reuse means ROMS reads what already sits at output_path, not the
+            # forcing just built -- describe the reused file (its tracer axis,
+            # release count and release family, mirroring the custom-file
+            # branch) so the namelist can't desync from the data actually read
+            # (e.g. changed releases without clobber).
+            with warnings.catch_warnings():
+                warnings.filterwarnings(
+                    "ignore", category=FutureWarning, module="xarray"
+                )
+                with xr.open_dataset(output_path, decode_timedelta=False) as reused:
+                    reused_axis = _cdr_axis(reused)
+                    ncdr_parm = int(reused.sizes["ncdr"])
+                    cdr_volume = "cdr_volume" in reused.variables
+            if reused_axis != axis:
+                warnings.warn(
+                    f"reusing existing CDR forcing at {output_path} (tracers: "
+                    f"{reused_axis.names}), which differs from the one built from "
+                    f"the blueprint's releases (tracers: {axis.names}); the "
+                    "namelist will describe the reused file -- pass clobber to "
+                    "rebuild it.",
+                    UserWarning,
+                    stacklevel=2,
+                )
+            axis = reused_axis
+            label = f"The reused CDR forcing {output_path}"
         # Before anything is written: a tracer axis the build cannot use fails fast.
-        self._apply_cdr_tracer_axis(
-            _cdr_axis(cdr.ds), label="The generated CDR forcing"
-        )
+        self._apply_cdr_tracer_axis(axis, label=label)
         cdr.to_yaml(yaml_path)
 
-        if self._should_reuse_existing_output(output_path):
+        if reuse:
             print(f"   ↪ Reusing existing file: {output_path}")
             paths = [str(output_path)]
         else:
@@ -2834,11 +2867,9 @@ class RomsMarblInputData(InputData):
             self._settings_run_time["cdr_frc"] = {}
         self._settings_run_time["cdr_frc"]["cdr_file"] = "cdr.nc"
         self._settings_run_time["cdr_frc"]["cdr_source"] = True
-        self._settings_run_time["cdr_frc"]["ncdr_parm"] = len(cdr.releases)
+        self._settings_run_time["cdr_frc"]["ncdr_parm"] = ncdr_parm
         self._settings_run_time["cdr_frc"]["forcing_parameterized"] = True
-        self._settings_run_time["cdr_frc"]["cdr_volume"] = (
-            cdr.releases.release_type == "volume"
-        )
+        self._settings_run_time["cdr_frc"]["cdr_volume"] = cdr_volume
         # cdr_output.do_cdr_output is owned by configure_build's CDR net (see above).
 
     @register_input(
@@ -2869,21 +2900,14 @@ class RomsMarblInputData(InputData):
         problems: list[str] = []
         for source, dest, reused in zip(sources, destinations, reuse, strict=True):
             path = dest if reused else source
-            with xr.open_dataset(path, decode_cf=False) as ds:
-                missing = [
-                    name
-                    for name in CARBONATE_SENSITIVITY_VARIABLES
-                    if name not in ds.variables
-                ]
-            if missing:
+            if missing := missing_carbonate_sensitivity_variables(path):
                 problems.append(f"{path}: missing {', '.join(missing)}")
         if problems:
             raise ValueError(
                 "carbonate sensitivity files lack variables a CDR-LiTE build reads "
                 f"({', '.join(CARBONATE_SENSITIVITY_VARIABLES)}):\n- "
                 + "\n- ".join(problems)
-                + "\n_cdrgas files written by ucla-roms 0.9.1 and earlier carry "
-                "only ocean_time, not the per-variable time variables."
+                + f"\n{CARBONATE_SENSITIVITY_REMEDY}"
             )
 
         dataset = _require_element(

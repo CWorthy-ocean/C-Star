@@ -626,10 +626,12 @@ class TimestampedOutputFile(BaseModel):
     ) -> Sequence[t.Self] | None:
         """Search for output files of this kind in the specified location.
 
+        If `search_path` identifies a file, that file alone is returned.
+
         Parameters
         ----------
         search_path : Path
-            The path to search
+            The directory (searched recursively) or file to search
         notfound_ok : bool
             If False, raise an exception if no files are found.
 
@@ -640,14 +642,18 @@ class TimestampedOutputFile(BaseModel):
         Raises
         ------
         ValueError
-            If the search path does not exist.
+            If the search path does not exist, or names a file that does not
+            follow this kind of file's naming convention.
         FileNotFoundError
             If no recognizable files are found in the search path
         """
         search_path = search_path.expanduser().resolve()
 
+        if search_path.is_file():
+            return (cls(path=search_path),)
+
         if not search_path.exists():
-            msg = f"No directory found at path: {search_path!r}"
+            msg = f"No directory or file found at path: {search_path!r}"
             raise ValueError(msg)
 
         matches = sorted(search_path.rglob(f"*{cls.SUFFIX}*.{cls.EXT}"))

@@ -1520,9 +1520,12 @@ class ForgeBlueprint(Blueprint):
     # -> stays IN the hash.
     datasets: list[str] = Field(default_factory=list)
     model_settings: dict[str, Any] = Field(default_factory=dict)  # flat sections
-    # n_tracers is NOT stored — it is derived at processing time from
+    # n_tracers is NOT stored. ForgeBlueprint.n_tracers derives it from the stored
     # model_settings["param"] (T + S + ntrc_bio + nt_passive + 2*nt_cdr_oae +
-    # nt_cdr_dor; see ForgeBlueprint.n_tracers). marbl is read from model_settings["cppdefs"]["marbl"].
+    # nt_cdr_dor), a pre-generation count: the CDR-lite counts (nt_cdr_*) are read
+    # off the generated CDR forcing, so configure_build derives its own from the
+    # live run-time settings and never reads that property. marbl is read from
+    # model_settings["cppdefs"]["marbl"].
     code: Code
     composition: Composition = Field(default_factory=Composition)
     # Narrows the ``Blueprint`` base field to forge's block. Pydantic keeps a
@@ -1615,8 +1618,13 @@ class ForgeBlueprint(Blueprint):
 
     @property
     def n_tracers(self) -> int:
-        """Total ROMS tracer count derived from ``model_settings['param']`` (see
-        :func:`~cstar.applications.forge.namelist_model.n_tracers_from_param`).
+        """Total ROMS tracer count derived from the stored ``model_settings['param']``
+        (see :func:`~cstar.applications.forge.namelist_model.n_tracers_from_param`).
+
+        A pre-generation count: the CDR-lite tracer counts (``nt_cdr_oae``/
+        ``nt_cdr_dor``) are read off the CDR forcing at generation, so this can
+        undercount what the built run has. ``ForgeExecutor.configure_build`` does
+        not read it; it derives the count from the live run-time settings.
         """
         # Lazy: keeps importing the schema module light (see the module docstring).
         from cstar.applications.forge.namelist_model import n_tracers_from_param

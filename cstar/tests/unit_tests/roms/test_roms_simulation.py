@@ -23,6 +23,8 @@ from cstar.pio.external_codebase import PIOExternalCodeBase
 from cstar.roms.discretization import ROMSDiscretization
 from cstar.roms.external_codebase import ROMSExternalCodeBase
 from cstar.roms.input_dataset import (
+    CARBONATE_SENSITIVITY_REMEDY,
+    CARBONATE_SENSITIVITY_VARIABLES,
     RecordedReferenceDate,
     ROMSBoundaryForcing,
     ROMSCarbonateSensitivity,
@@ -35,6 +37,7 @@ from cstar.roms.input_dataset import (
     ROMSPartitioning,
     ROMSSurfaceForcing,
     ROMSTidalForcing,
+    missing_carbonate_sensitivity_variables,
 )
 from cstar.roms.namelist import (
     RomsNamelist,
@@ -3163,13 +3166,25 @@ class TestValidateCarbonateSensitivityInputs:
         return nml
 
     @staticmethod
-    def _dataset(problems: list[str], exists_locally: bool = True) -> mock.MagicMock:
-        """A staged-dataset stand-in whose variable check reports `problems`."""
-        return mock.MagicMock(
-            spec=ROMSCarbonateSensitivity,
-            exists_locally=exists_locally,
-            check_forcing_variables=mock.Mock(return_value=problems),
-        )
+    def _staged(
+        dataset_cls: type[ROMSInputDataset],
+        tmp_path: Path,
+        name: str,
+        variables: tuple[str, ...],
+    ) -> ROMSInputDataset:
+        """Stage a real tiny netCDF file holding `variables` as a `dataset_cls`."""
+        source = tmp_path / "source" / name
+        source.parent.mkdir(exist_ok=True)
+        xr.Dataset({v: ("x", np.zeros(2)) for v in variables}).to_netcdf(source)
+        dataset = dataset_cls(location=str(source))
+        dataset.get(tmp_path / "staged")
+        return dataset
+
+    def _validate(self, sim: ROMSSimulation) -> None:
+        """Run the check on `sim` with `CDR_LITE` defined and online mode off."""
+        patch_cppdefs, patch_read = self._patches(True, self._nml())
+        with patch_cppdefs, patch_read:
+            sim._validate_carbonate_sensitivity_inputs()
 
     def test_cdr_lite_off_checks_nothing(self, stub_romssimulation):
         """Without `CDR_LITE` in the build, the namelist is not even read and
@@ -3221,7 +3236,11 @@ class TestValidateCarbonateSensitivityInputs:
             sim._validate_carbonate_sensitivity_inputs()
 
         sim.namelist_overrides = {}
-        with patch_cppdefs, patch_read, pytest.raises(ValueError, match="none are"):
+        with (
+            patch_cppdefs,
+            patch_read,
+            pytest.raises(ValueError, match="carbonate-sensitivity-from"),
+        ):
             sim._validate_carbonate_sensitivity_inputs()
 
     def test_schema_without_cdr_lite_group_counts_as_online_off(
@@ -3234,14 +3253,19 @@ class TestValidateCarbonateSensitivityInputs:
         sim.carbonate_sensitivity = []
         nml = RomsNamelistV0_6_0.read(EXAMPLE_NAMELIST_V0_6_0)
         patch_cppdefs, patch_read = self._patches(True, nml)
-        with patch_cppdefs, patch_read, pytest.raises(ValueError, match="none are"):
+        with (
+            patch_cppdefs,
+            patch_read,
+            pytest.raises(ValueError, match="carbonate-sensitivity-from"),
+        ):
             sim._validate_carbonate_sensitivity_inputs()
 
-    def test_offline_without_datasets_names_both_ways_to_supply_them(
+    def test_offline_without_any_files_names_both_ways_to_supply_them(
         self, stub_romssimulation
     ):
-        """No configured datasets is an error naming the blueprint key and the
-        workplan directive that can supply them.
+        """With no staged forcing files at all, every variable is missing and
+        the error names the blueprint key and the workplan directive that can
+        supply them, plus the remedy for old `_cdrgas` files.
         """
         sim = stub_romssimulation
         sim.carbonate_sensitivity = []
@@ -3249,77 +3273,219 @@ class TestValidateCarbonateSensitivityInputs:
         with (
             patch_cppdefs,
             patch_read,
-            pytest.raises(ValueError, match="none are configured") as exc_info,
+            pytest.raises(ValueError, match="no forcing file provides") as exc_info,
         ):
             sim._validate_carbonate_sensitivity_inputs()
 
         message = str(exc_info.value)
+        for name in CARBONATE_SENSITIVITY_VARIABLES:
+            assert name in message
+        assert "no staged files" in message
         assert "forcing.carbonate_sensitivity" in message
         assert "carbonate-sensitivity-from" in message
+        assert CARBONATE_SENSITIVITY_REMEDY in message
 
-    def test_offline_with_complete_datasets_passes(self, stub_romssimulation):
-        """Datasets carrying every variable satisfy the check."""
-        sim = stub_romssimulation
-        sim.carbonate_sensitivity = [self._dataset([])]
-        patch_cppdefs, patch_read = self._patches(True, self._nml())
-        with patch_cppdefs, patch_read:
-            sim._validate_carbonate_sensitivity_inputs()
-
-    def test_every_problem_is_reported_together(self, stub_romssimulation):
-        """Problems across datasets are collected into one error; datasets that
-        are not staged locally are not read.
+    def test_unstaged_datasets_are_not_read(self, stub_romssimulation):
+        """Configured datasets that are not staged locally are skipped rather
+        than read, and the error does not claim to have searched them.
         """
         sim = stub_romssimulation
-        unstaged = self._dataset(["unstaged.nc: should not appear"], False)
+        assert sim.carbonate_sensitivity
+        patch_cppdefs, patch_read = self._patches(True, self._nml())
+        with (
+            patch_cppdefs,
+            patch_read,
+            mock.patch(
+                "cstar.roms.simulation.missing_carbonate_sensitivity_variables"
+            ) as mock_missing,
+            pytest.raises(ValueError, match="no forcing file provides") as exc_info,
+        ):
+            sim._validate_carbonate_sensitivity_inputs()
+
+        mock_missing.assert_not_called()
+        message = str(exc_info.value)
+        assert "no staged files" in message
+        # the sensitivities are configured, so only the remedy is offered
+        assert "carbonate-sensitivity-from" not in message
+        assert CARBONATE_SENSITIVITY_REMEDY in message
+
+    def test_carbonate_dataset_with_every_variable_passes(
+        self, stub_romssimulation, tmp_path
+    ):
+        """A `carbonate_sensitivity` file carrying all four variables satisfies
+        the check.
+        """
+        sim = stub_romssimulation
         sim.carbonate_sensitivity = [
-            self._dataset(["a.nc: missing variable 'ddic_dco2_time'"]),
-            self._dataset([]),
-            self._dataset(["b.nc: missing variable 'ddic_dalk'"]),
-            unstaged,
+            self._staged(
+                ROMSCarbonateSensitivity,
+                tmp_path,
+                "output_cdrgas.nc",
+                CARBONATE_SENSITIVITY_VARIABLES,
+            )
+        ]
+        self._validate(sim)
+
+    @pytest.mark.parametrize(
+        "attr, dataset_cls",
+        [
+            pytest.param("surface_forcing", ROMSSurfaceForcing, id="surface"),
+            pytest.param(
+                "forcing_corrections", ROMSForcingCorrections, id="corrections"
+            ),
+            pytest.param("boundary_forcing", ROMSBoundaryForcing, id="boundary"),
+        ],
+    )
+    def test_variables_may_come_from_any_forcing_file(
+        self, attr, dataset_cls, stub_romssimulation, tmp_path
+    ):
+        """ROMS reads the variables by name from every file in `frcfiles`, so
+        a schema-3.1.0-era blueprint supplying them only through another
+        forcing dataset (no `carbonate_sensitivity`) must still pass.
+        """
+        sim = stub_romssimulation
+        sim.carbonate_sensitivity = []
+        setattr(
+            sim,
+            attr,
+            [
+                self._staged(
+                    dataset_cls,
+                    tmp_path,
+                    "forcing.nc",
+                    ("sustr", *CARBONATE_SENSITIVITY_VARIABLES),
+                )
+            ],
+        )
+        self._validate(sim)
+
+    def test_variables_may_be_split_across_files(self, stub_romssimulation, tmp_path):
+        """The check takes the union over files: some variables from a surface
+        forcing file and the rest from a carbonate sensitivity file are enough.
+        """
+        sim = stub_romssimulation
+        sim.surface_forcing = [
+            self._staged(
+                ROMSSurfaceForcing,
+                tmp_path,
+                "surface.nc",
+                ("ddic_dco2", "ddic_dco2_time"),
+            )
+        ]
+        sim.carbonate_sensitivity = [
+            self._staged(
+                ROMSCarbonateSensitivity,
+                tmp_path,
+                "output_cdrgas.nc",
+                ("ddic_dalk", "ddic_dalk_time"),
+            )
+        ]
+        self._validate(sim)
+
+    def test_variables_in_no_file_are_all_reported(self, stub_romssimulation, tmp_path):
+        """When no searched file carries them, the error names every missing
+        variable and the files searched, and points at the directive since no
+        `carbonate_sensitivity` is configured.
+        """
+        sim = stub_romssimulation
+        sim.carbonate_sensitivity = []
+        sim.surface_forcing = [
+            self._staged(ROMSSurfaceForcing, tmp_path, "surface.nc", ("sustr",))
         ]
         patch_cppdefs, patch_read = self._patches(True, self._nml())
         with (
             patch_cppdefs,
             patch_read,
-            pytest.raises(ValueError, match="lack required variables") as exc_info,
+            pytest.raises(ValueError, match="no forcing file provides") as exc_info,
         ):
             sim._validate_carbonate_sensitivity_inputs()
 
         message = str(exc_info.value)
-        assert "a.nc: missing variable 'ddic_dco2_time'" in message
-        assert "b.nc: missing variable 'ddic_dalk'" in message
-        assert "unstaged.nc" not in message
-        unstaged.check_forcing_variables.assert_not_called()
-        assert "0.9.1" in message
+        assert (
+            f"provides {', '.join(CARBONATE_SENSITIVITY_VARIABLES)} (searched: "
+            "surface.nc)" in message
+        )
+        assert "forcing.carbonate_sensitivity" in message
+        assert "carbonate-sensitivity-from" in message
+        assert CARBONATE_SENSITIVITY_REMEDY in message
 
-    def test_reads_staged_file_headers(self, stub_romssimulation, tmp_path):
-        """A staged `_cdrgas` file without the forcing time variables (ucla-roms
-        0.9.1 and earlier) is rejected, naming the file and the variables.
+    def test_only_each_datasets_first_file_is_read(self, stub_romssimulation, tmp_path):
+        """Only the first file of each dataset gets a header read, however many
+        files back it.
         """
-        source = tmp_path / "output_cdrgas.nc"
-        xr.Dataset(
-            {
-                name: ("x", np.zeros(2))
-                for name in ("ddic_dco2", "ddic_dalk", "ocean_time")
-            }
-        ).to_netcdf(source)
-        dataset = ROMSCarbonateSensitivity(location=str(source))
-        dataset.get(tmp_path / "staged")
-
         sim = stub_romssimulation
-        sim.carbonate_sensitivity = [dataset]
+        sim.carbonate_sensitivity = []
+        surface = self._staged(ROMSSurfaceForcing, tmp_path, "first.nc", ("sustr",))
+        complete = tmp_path / "second.nc"
+        xr.Dataset(
+            {v: ("x", np.zeros(2)) for v in CARBONATE_SENSITIVITY_VARIABLES}
+        ).to_netcdf(complete)
+        first = surface._working_copy_files()[0]
+        sim.surface_forcing = [surface]
+
         patch_cppdefs, patch_read = self._patches(True, self._nml())
         with (
             patch_cppdefs,
             patch_read,
-            pytest.raises(ValueError, match="lack required variables") as exc_info,
+            mock.patch.object(
+                ROMSSurfaceForcing,
+                "_working_copy_files",
+                return_value=[first, complete],
+            ),
+            mock.patch(
+                "cstar.roms.simulation.missing_carbonate_sensitivity_variables",
+                wraps=missing_carbonate_sensitivity_variables,
+            ) as mock_missing,
+            pytest.raises(ValueError, match="no forcing file provides"),
+        ):
+            sim._validate_carbonate_sensitivity_inputs()
+
+        mock_missing.assert_called_once_with(first)
+
+    def test_files_missing_only_the_time_variables(self, stub_romssimulation, tmp_path):
+        """A staged `_cdrgas` file without the forcing time variables (ucla-roms
+        0.9.1 and earlier) is rejected, listing exactly those variables and
+        naming the file searched.
+        """
+        sim = stub_romssimulation
+        sim.carbonate_sensitivity = [
+            self._staged(
+                ROMSCarbonateSensitivity,
+                tmp_path,
+                "output_cdrgas.nc",
+                ("ddic_dco2", "ddic_dalk", "ocean_time"),
+            )
+        ]
+        patch_cppdefs, patch_read = self._patches(True, self._nml())
+        with (
+            patch_cppdefs,
+            patch_read,
+            pytest.raises(ValueError, match="no forcing file provides") as exc_info,
         ):
             sim._validate_carbonate_sensitivity_inputs()
 
         message = str(exc_info.value)
-        assert str(tmp_path / "staged" / "output_cdrgas.nc") in message
-        assert "ddic_dco2_time" in message
-        assert "ddic_dalk_time" in message
+        assert (
+            "provides ddic_dco2_time, ddic_dalk_time (searched: output_cdrgas.nc)"
+            in (message)
+        )
+        # the sensitivities are configured, so the directive is not suggested
+        assert "carbonate-sensitivity-from" not in message
+        assert "0.9.1" in message
+
+    def test_forcing_datasets_match_the_frcfiles_datasets(self, stub_romssimulation):
+        """`_forcing_datasets` lists exactly the datasets whose files make up
+        `frcfiles`, skipping the unset optional ones.
+        """
+        sim = stub_romssimulation
+        sim.tidal_forcing = None
+        assert sim._forcing_datasets == [
+            sim.river_forcing,
+            *sim.surface_forcing,
+            *sim.boundary_forcing,
+            *sim.forcing_corrections,
+            *sim.carbonate_sensitivity,
+        ]
 
     @pytest.mark.parametrize("use_pio", [False, True])
     @mock.patch.object(ROMSInputDataset, "partition")

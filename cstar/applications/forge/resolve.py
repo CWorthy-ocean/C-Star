@@ -100,6 +100,8 @@ if TYPE_CHECKING:
     from collections.abc import Sequence
     from datetime import datetime
 
+    from cstar.applications.roms_marbl.transforms import CarbonateSensitivityFile
+
 log = logging.getLogger(__name__)
 
 # Default repo serving the render templates: this repository, whose bundled copy
@@ -191,19 +193,27 @@ def _normalize_user_file(
     return UserProvidedFile(location=str(path), content_hash=hash_netcdf_contents(path))
 
 
-def _find_carbonate_sensitivity_files(directory: Path) -> list[Path]:
+def find_carbonate_sensitivity_files(
+    directory: Path,
+) -> list[CarbonateSensitivityFile]:
     """The joined carbonate sensitivity files under ``directory``, in file-name
     order (the time order of their timestamps).
 
     Per-rank tiles of a partitioned file are skipped: Forge stages whole files
-    (ROMS under ParallelIO reads one joined CDF-5 file per dataset).
+    (ROMS under ParallelIO reads one joined CDF-5 file per dataset). Shared by
+    the resolver and the wizard's path box.
+
+    Raises ``NotADirectoryError`` if ``directory`` is not a directory and
+    ``FileNotFoundError`` if it holds no joined file.
     """
     # Lazy: the file-name convention lives with the transforms, which pull in
     # the orchestration layer.
     from cstar.applications.roms_marbl.transforms import CarbonateSensitivityFile
 
+    if not directory.is_dir():
+        raise NotADirectoryError(f"not a directory: {directory}")
     found = CarbonateSensitivityFile.find(directory) or ()
-    joined = [f.path for f in found if not f.is_partitioned]
+    joined = [f for f in found if not f.is_partitioned]
     if not joined:
         raise FileNotFoundError(
             f"carbonate_sensitivity: no joined {CarbonateSensitivityFile.LABEL} "
@@ -226,7 +236,7 @@ def _normalize_carbonate_sensitivity(
     :class:`CarbonateSensitivitySpec`.
 
     Accepts a directory (scanned for ``_cdrgas`` files, see
-    :func:`_find_carbonate_sensitivity_files`), a single file path, a sequence of
+    :func:`find_carbonate_sensitivity_files`), a single file path, a sequence of
     file paths (kept in the given order), a ``{"files": [...]}`` dict, or a spec.
     Paths are hashed here and must exist; a dict's entries and a spec are
     otherwise trusted as-is, like every other user-provided file (see
@@ -247,7 +257,7 @@ def _normalize_carbonate_sensitivity(
     if isinstance(value, (str, Path)):
         path = Path(value).expanduser()
         if path.is_dir():
-            paths = _find_carbonate_sensitivity_files(path)
+            paths = [f.path for f in find_carbonate_sensitivity_files(path)]
         else:
             paths = [path]
     else:
@@ -562,22 +572,40 @@ def read_cdr_forcing_yaml(source: str | Path) -> dict[str, Any]:
 
 
 def _with_cdr_lite_tracer_set(cdr_spec: CdrSpec) -> CdrSpec:
-    """``cdr_spec`` with ``tracer_set="cdr_lite"`` defaulted onto every release of
-    a ``"simple"`` CDR forcing that doesn't name its own tracer set.
+    """``cdr_spec`` with ``tracer_set="cdr_lite"`` defaulted onto every
+    tracer-perturbation release of a ``"simple"`` CDR forcing that doesn't name
+    its own tracer set.
 
     A release without ``tracer_set`` is a MARBL release (roms-tools' default),
     which a ``bgc_mode: cdr_lite`` build has no tracers for. The other modes
     carry their own tracer sets (a roms-tools YAML dump, a pre-made file), so
     they are left as authored and the generation step rejects a MARBL axis. The
     caller's dict is not mutated.
+
+    Raises ``ValueError`` naming every ``"volume"`` release: CDR-lite tracers are
+    fed by tracer-perturbation releases only, and roms-tools would reject the
+    tag on a volume release with a less direct message.
     """
     forcing = copy.deepcopy(cdr_spec.cdr_forcing or {})
     releases = forcing.get("releases")
     if cdr_spec.mode != "simple" or not isinstance(releases, list):
         return cdr_spec
+    volume = [
+        repr(r.get("name", "<unnamed>"))
+        for r in releases
+        if isinstance(r, dict) and r.get("release_type") == "volume"
+    ]
+    if volume:
+        raise ValueError(
+            "CDR-lite tracers are fed by tracer-perturbation releases; volume "
+            "releases are not supported in bgc_mode cdr_lite "
+            f"(volume releases: {', '.join(volume)})."
+        )
     forcing["releases"] = [
         {**release, "tracer_set": "cdr_lite"}
-        if isinstance(release, dict) and "tracer_set" not in release
+        if isinstance(release, dict)
+        and "tracer_set" not in release
+        and release.get("release_type", "tracer_perturbation") == "tracer_perturbation"
         else release
         for release in releases
     ]

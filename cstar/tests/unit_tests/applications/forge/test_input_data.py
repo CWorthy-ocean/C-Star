@@ -2628,6 +2628,80 @@ class TestCdrTracerAxis:
         param = data._settings_run_time["param"]
         assert (param["nt_cdr_oae"], param["nt_cdr_dor"]) == (2, 1)
 
+    @staticmethod
+    def _built_cdr(mock_cdr_class, tracers, output_path):
+        """A mocked ``rt.CDRForcing`` whose freshly built dataset has ``tracers``."""
+        mock_cdr = MagicMock()
+        mock_cdr.save.return_value = output_path
+        mock_cdr.ds = xr.Dataset(
+            {"cdr_trcflx": (("ntracers",), np.zeros(len(tracers)))},
+            coords={"tracer_name": ("ntracers", tracers)},
+        )
+        mock_cdr_class.return_value = mock_cdr
+        return mock_cdr
+
+    @patch("cstar.applications.forge.input_data.rt.CDRForcing")
+    def test_generated_forcing_reuse_describes_the_file_on_disk(
+        self, mock_cdr_class, data
+    ):
+        """With clobber off and ``cdr.nc`` already on disk, ROMS reads that file
+        even though the releases changed, so its axis -- not the freshly built
+        one -- sizes the tracers (the counterpart of the custom-file reuse test).
+        """
+        self._set_mode(data, "cdr_lite")
+        output_path = data._forcing_filename(CDR_FORCING_NETCDF_STEM)
+        _write_cdr_netcdf(
+            output_path,
+            ncdr=2,
+            family="trcflx",
+            tracers=["temp", "salt", "CDR_DOR_DIC1"],
+        )
+        data._existing_planned_outputs = {output_path.resolve()}
+        mock_cdr = self._built_cdr(mock_cdr_class, _LITE_TRACERS, output_path)
+
+        with pytest.warns(UserWarning, match="differs from the one built"):
+            data._generate_cdr_forcing(key="cdr_forcing", cdr_kwargs={"foo": "bar"})
+
+        param = data._settings_run_time["param"]
+        assert (param["nt_cdr_oae"], param["nt_cdr_dor"]) == (0, 1)
+        mock_cdr.save.assert_not_called()
+
+    @patch("cstar.applications.forge.input_data.rt.CDRForcing")
+    def test_generated_forcing_reuse_of_a_matching_file_is_silent(
+        self, mock_cdr_class, data, recwarn
+    ):
+        self._set_mode(data, "cdr_lite")
+        output_path = data._forcing_filename(CDR_FORCING_NETCDF_STEM)
+        _write_cdr_netcdf(output_path, ncdr=2, family="trcflx", tracers=_LITE_TRACERS)
+        data._existing_planned_outputs = {output_path.resolve()}
+        self._built_cdr(mock_cdr_class, _LITE_TRACERS, output_path)
+
+        data._generate_cdr_forcing(key="cdr_forcing", cdr_kwargs={"foo": "bar"})
+
+        assert not [w for w in recwarn if "differs from the one" in str(w.message)]
+        param = data._settings_run_time["param"]
+        assert (param["nt_cdr_oae"], param["nt_cdr_dor"]) == (2, 1)
+
+    @patch("cstar.applications.forge.input_data.rt.CDRForcing")
+    def test_generated_forcing_reuse_rejects_a_bad_reused_axis(
+        self, mock_cdr_class, data
+    ):
+        """The reused file is held to the same rules as a built one."""
+        self._set_mode(data, "cdr_lite")
+        output_path = data._forcing_filename(CDR_FORCING_NETCDF_STEM)
+        _write_cdr_netcdf(
+            output_path, ncdr=2, family="trcflx", tracers=[*_LITE_TRACERS, "PO4"]
+        )
+        data._existing_planned_outputs = {output_path.resolve()}
+        self._built_cdr(mock_cdr_class, _LITE_TRACERS, output_path)
+
+        with (
+            pytest.warns(UserWarning, match="differs from the one built"),
+            pytest.raises(ValueError, match=r"The reused CDR forcing .*MARBL tracers"),
+        ):
+            data._generate_cdr_forcing(key="cdr_forcing", cdr_kwargs={"foo": "bar"})
+        assert "nt_cdr_oae" not in data._settings_run_time["param"]
+
     @patch("cstar.applications.forge.input_data.rt.CDRForcing")
     def test_generated_forcing_rejects_a_bad_axis_before_writing(
         self, mock_cdr_class, data, tmp_path

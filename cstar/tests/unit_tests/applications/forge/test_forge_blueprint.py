@@ -3724,6 +3724,42 @@ def test_resolver_cdr_lite_simple_mode_defaults_every_release_tracer_set():
     assert forcing == snapshot  # the caller's dict is not mutated
 
 
+def test_resolver_cdr_lite_tags_only_tracer_perturbation_releases():
+    """An absent ``release_type`` is roms-tools' tracer-perturbation default."""
+    untyped = _cdr_lite_release("untyped")
+    del untyped["release_type"]
+    forcing = _cdr_lite_forcing(untyped, _cdr_lite_release("typed"))
+
+    cfg = _build_cdr_lite(cdr={"mode": "simple", "cdr_forcing": forcing})
+
+    releases = cfg.cdr.cdr_forcing["releases"]
+    assert [r["tracer_set"] for r in releases] == ["cdr_lite", "cdr_lite"]
+
+
+def test_resolver_cdr_lite_rejects_volume_releases():
+    forcing = _cdr_lite_forcing(
+        _cdr_lite_release("ok"),
+        _cdr_lite_release("pump", release_type="volume"),
+        _cdr_lite_release("pump2", release_type="volume"),
+    )
+    snapshot = yaml.safe_load(yaml.safe_dump(forcing))
+
+    with pytest.raises(
+        ValueError,
+        match=r"volume releases are not supported in bgc_mode cdr_lite.*'pump', 'pump2'",
+    ):
+        _build_cdr_lite(cdr={"mode": "simple", "cdr_forcing": forcing})
+    assert forcing == snapshot
+
+
+def test_resolver_marbl_mode_accepts_volume_releases():
+    forcing = _cdr_lite_forcing(_cdr_lite_release("pump", release_type="volume"))
+    cfg = _build(
+        model_dir=_MODEL_DIR_ROMS090, cdr={"mode": "simple", "cdr_forcing": forcing}
+    )
+    assert cfg.cdr.cdr_forcing["releases"][0]["release_type"] == "volume"
+
+
 def test_resolver_cdr_lite_leaves_the_other_cdr_modes_as_authored():
     # yaml mode (what a bare ``cdr_forcing=`` is): a roms-tools dump carries its
     # own tracer sets, so a release without one stays a MARBL release (the

@@ -1854,6 +1854,89 @@ def test_nesting_directive_multiple_paths(
     assert all(getattr(d, "hash", None) is None for d in bp_after.forcing.boundary.data)
 
 
+def test_nesting_directive_path_names_a_single_file(
+    single_step_workplan: Workplan,
+    tmp_path: Path,
+) -> None:
+    """Verify a `path` naming one boundary file (not a directory) uses just
+    that file, leaving siblings in its directory alone.
+
+    Parameters
+    ----------
+    single_step_workplan : Workplan
+        A workplan with a valid blueprint file on disk.
+    tmp_path : Path
+        Temporary directory used to hold mocked boundary files.
+    """
+    bry_dir = tmp_path / "bry"
+    bry_dir.mkdir()
+    chosen = bry_dir / "parent_bry.20230201003000.nc"
+    chosen.write_text("mock boundary data")
+    (bry_dir / "parent_bry.20230301003000.nc").write_text("mock boundary data")
+
+    step = single_step_workplan.steps[0]
+    step.blueprint_overrides.clear()
+
+    transform = NestingDirective({NestingDirective.KEY_PATH: str(chosen)})
+    steps = transform(step)
+
+    bp_after = deserialize(steps[0].blueprint_path, RomsMarblBlueprint)
+    assert [Path(d.location) for d in bp_after.forcing.boundary.data] == [
+        chosen.resolve()
+    ]
+
+
+def test_nesting_directive_path_mixes_directory_and_file(
+    single_step_workplan: Workplan,
+    tmp_path: Path,
+) -> None:
+    """Verify `;`-delimited sources may mix a directory and a single file,
+    combining their boundary files in the order given.
+
+    Parameters
+    ----------
+    single_step_workplan : Workplan
+        A workplan with a valid blueprint file on disk.
+    tmp_path : Path
+        Temporary directory used to hold mocked boundary files.
+    """
+    dir_a = tmp_path / "a"
+    dir_a.mkdir()
+    (dir_a / "parent_bry.20230201003000.nc").write_text("mock boundary data")
+
+    file_b = tmp_path / "b" / "sibling_bry.20230301003000.nc"
+    file_b.parent.mkdir()
+    file_b.write_text("mock boundary data")
+
+    step = single_step_workplan.steps[0]
+    step.blueprint_overrides.clear()
+
+    transform = NestingDirective({NestingDirective.KEY_PATH: f"{file_b} ; {dir_a}"})
+    steps = transform(step)
+
+    bp_after = deserialize(steps[0].blueprint_path, RomsMarblBlueprint)
+    assert [Path(d.location).name for d in bp_after.forcing.boundary.data] == [
+        "sibling_bry.20230301003000.nc",
+        "parent_bry.20230201003000.nc",
+    ]
+
+
+def test_nesting_directive_path_rejects_misnamed_file(tmp_path: Path) -> None:
+    """Verify a `path` naming a file outside the boundary file naming
+    convention is rejected with a naming-convention error.
+
+    Parameters
+    ----------
+    tmp_path : Path
+        Temporary directory used to hold a mocked misnamed file.
+    """
+    misnamed = tmp_path / "boundary.nc"
+    misnamed.write_text("mock boundary data")
+
+    with pytest.raises(ValueError, match="naming convention"):
+        NestingDirective({NestingDirective.KEY_PATH: str(misnamed)})
+
+
 def test_nesting_directive_multiple_steps(
     tmp_path: Path,
     bp_templates_dir: Path,
@@ -2201,6 +2284,41 @@ def test_timestamped_output_file_find(tmp_path: Path) -> None:
         CarbonateSensitivityFile.find(tmp_path, notfound_ok=False)
 
 
+def test_timestamped_output_file_find_single_file(tmp_path: Path) -> None:
+    """Verify `find` on a path naming a file returns just that file, whether
+    or not other matching files sit beside it, and still enforces the naming
+    convention.
+
+    Parameters
+    ----------
+    tmp_path : Path
+        Temporary directory to search.
+    """
+    chosen = tmp_path / "a_cdrgas.20230201003000.nc"
+    chosen.write_text("mock")
+    (tmp_path / "b_cdrgas.20230301003000.nc").write_text("mock")
+    partition = tmp_path / "c_bry.20230201003000.003.nc"
+    partition.write_text("mock")
+    misnamed = tmp_path / "plain.nc"
+    misnamed.write_text("mock")
+
+    found = CarbonateSensitivityFile.find(chosen, notfound_ok=False)
+    assert found is not None
+    assert [f.path for f in found] == [chosen.resolve()]
+    assert type(found[0]) is CarbonateSensitivityFile
+
+    found_partition = BoundaryFile.find(partition)
+    assert found_partition is not None
+    assert [f.is_partitioned for f in found_partition] == [True]
+
+    with pytest.raises(ValueError, match="naming convention"):
+        CarbonateSensitivityFile.find(misnamed)
+    with pytest.raises(ValueError, match="naming convention"):
+        BoundaryFile.find(chosen)
+    with pytest.raises(ValueError, match="No directory or file found"):
+        BoundaryFile.find(tmp_path / "absent")
+
+
 def test_carbonate_sensitivity_trx_adapter(tmp_path: Path) -> None:
     """Verify the adapter lists each file, in order, with its partitioned flag
     under `forcing.carbonate_sensitivity`.
@@ -2351,6 +2469,99 @@ def test_carbonate_sensitivity_directive_multiple_paths(
     assert [
         Path(d.location).name for d in bp_after.forcing.carbonate_sensitivity.data
     ] == ["second_cdrgas.20230301003000.nc", "first_cdrgas.20230201003000.nc"]
+
+
+def test_carbonate_sensitivity_directive_path_names_a_single_file(
+    single_step_workplan: Workplan,
+    tmp_path: Path,
+) -> None:
+    """Verify a `path` naming one `_cdrgas` file (not a directory) uses just
+    that file, keeping its partitioned flag and leaving siblings alone.
+
+    Parameters
+    ----------
+    single_step_workplan : Workplan
+        A workplan with a valid blueprint file on disk.
+    tmp_path : Path
+        Temporary directory used to hold mocked carbonate sensitivity files.
+    """
+    cs_dir = tmp_path / "cs"
+    cs_dir.mkdir()
+    chosen = cs_dir / "parent_cdrgas.20230201003000.nc"
+    chosen.write_text("mock data")
+    (cs_dir / "parent_cdrgas.20230301003000.nc").write_text("mock data")
+
+    step = single_step_workplan.steps[0]
+    step.blueprint_overrides.clear()
+
+    transform = CarbonateSensitivityDirective(
+        {CarbonateSensitivityDirective.KEY_PATH: str(chosen)}
+    )
+    steps = transform(step)
+
+    bp_after = deserialize(steps[0].blueprint_path, RomsMarblBlueprint)
+    assert bp_after.forcing.carbonate_sensitivity is not None
+    data = bp_after.forcing.carbonate_sensitivity.data
+    assert [Path(d.location) for d in data] == [chosen.resolve()]
+    assert not data[0].partitioned
+
+
+def test_carbonate_sensitivity_directive_path_mixes_directory_and_file(
+    single_step_workplan: Workplan,
+    tmp_path: Path,
+) -> None:
+    """Verify `;`-delimited sources may mix a directory and a single file,
+    combining their files in the order given.
+
+    Parameters
+    ----------
+    single_step_workplan : Workplan
+        A workplan with a valid blueprint file on disk.
+    tmp_path : Path
+        Temporary directory used to hold mocked carbonate sensitivity files.
+    """
+    dir_a = tmp_path / "a"
+    dir_a.mkdir()
+    (dir_a / "first_cdrgas.20230201003000.nc").write_text("mock data")
+
+    file_b = tmp_path / "b" / "second_cdrgas.20230301003000.nc"
+    file_b.parent.mkdir()
+    file_b.write_text("mock data")
+
+    step = single_step_workplan.steps[0]
+    step.blueprint_overrides.clear()
+
+    transform = CarbonateSensitivityDirective(
+        {CarbonateSensitivityDirective.KEY_PATH: f"{dir_a} ; {file_b}"}
+    )
+    steps = transform(step)
+
+    bp_after = deserialize(steps[0].blueprint_path, RomsMarblBlueprint)
+    assert bp_after.forcing.carbonate_sensitivity is not None
+    assert [
+        Path(d.location).name for d in bp_after.forcing.carbonate_sensitivity.data
+    ] == ["first_cdrgas.20230201003000.nc", "second_cdrgas.20230301003000.nc"]
+
+
+def test_carbonate_sensitivity_directive_path_rejects_misnamed_file(
+    tmp_path: Path,
+) -> None:
+    """Verify a `path` naming a file outside the `_cdrgas` naming convention
+    -- including a boundary file -- is rejected with a naming-convention error.
+
+    Parameters
+    ----------
+    tmp_path : Path
+        Temporary directory used to hold mocked misnamed files.
+    """
+    for name in ("sensitivities.nc", "parent_bry.20230201003000.nc"):
+        misnamed = tmp_path / name
+        misnamed.write_text("mock data")
+
+        with pytest.raises(ValueError, match="naming convention"):
+            CarbonateSensitivityDirective(
+                {CarbonateSensitivityDirective.KEY_PATH: str(misnamed)}
+            )
 
 
 def _plan_with_cdrgas_parents(

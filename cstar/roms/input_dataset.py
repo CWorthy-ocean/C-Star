@@ -841,6 +841,29 @@ files: the sensitivities of the air-sea CO2 flux to DIC (beta) and ALK (eta),
 each with its time variable (days since the reference date).
 """
 
+CARBONATE_SENSITIVITY_REMEDY: Final[str] = (
+    "_cdrgas files written by ucla-roms 0.9.1 and earlier carry only ocean_time "
+    "and cannot be read as forcing; regenerate them with a ucla-roms release "
+    "that writes the forcing time variables."
+)
+"""Advice appended when carbonate sensitivity files lack the variables ROMS reads."""
+
+
+def missing_carbonate_sensitivity_variables(path: Path) -> list[str]:
+    """Return the names in `CARBONATE_SENSITIVITY_VARIABLES` absent from the
+    netCDF file at `path` (a header read; no data is loaded).
+
+    Shared by the ROMS-side dataset check and Forge's staging step so the
+    required-variable rule lives in one place.
+    """
+    # Lazy import: only needed when this check runs
+    import xarray as xr
+
+    with xr.open_dataset(path, decode_times=False) as ds:
+        return [
+            name for name in CARBONATE_SENSITIVITY_VARIABLES if name not in ds.variables
+        ]
+
 
 class ROMSCarbonateSensitivity(ROMSInputDataset):
     """Carbonate sensitivity forcing for a CDR-LiTE (ucla-roms >= 0.9.0) build.
@@ -849,33 +872,6 @@ class ROMSCarbonateSensitivity(ROMSInputDataset):
     not compute them online -- typically the `_cdrgas` output of an earlier
     ROMS-MARBL run.
     """
-
-    def check_forcing_variables(self) -> list[str]:
-        """Check this dataset's first staged file for `CARBONATE_SENSITIVITY_VARIABLES`.
-
-        Only the first file is read (a header read, no data): all files backing
-        a single dataset come from one writer, so reading more would only add
-        filesystem cost without a chance of a different answer.
-
-        Returns
-        -------
-        list of str
-            A description of each missing variable; empty if all are present or
-            the dataset has no working copy.
-        """
-        # Lazy import: only needed when this check runs
-        import xarray as xr
-
-        files = self._working_copy_files()
-        if not files:
-            return []
-
-        with xr.open_dataset(files[0], decode_times=False) as ds:
-            return [
-                f"{files[0]}: missing variable {name!r}"
-                for name in CARBONATE_SENSITIVITY_VARIABLES
-                if name not in ds.variables
-            ]
 
 
 class ROMSRiverForcing(ROMSInputDataset):

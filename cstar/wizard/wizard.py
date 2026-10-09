@@ -84,6 +84,7 @@ from cstar.applications.forge.resolve import (
     PARTIAL_OUTPUT_SECTIONS,
     build_forge_blueprint,
     extract_output_settings,
+    find_carbonate_sensitivity_files,
     load_model_spec_data,
     read_cdr_forcing_yaml,
 )
@@ -6527,25 +6528,11 @@ class ForgeBlueprintWizard:
         A failure clears any earlier attach (the status says why): leaving it
         would quietly keep building with files the path box no longer names.
         """
-        # Lazy: the file-name convention lives with the transforms, which pull in
-        # the orchestration layer (as in resolve._find_carbonate_sensitivity_files).
-        from cstar.applications.roms_marbl.transforms import CarbonateSensitivityFile
-
         self.cs_status.value = "<i>attaching…</i>"
         try:
-            directory = Path(path_str).expanduser().resolve()
-            if not directory.is_dir():
-                raise NotADirectoryError(f"not a directory: {directory}")
-            found = CarbonateSensitivityFile.find(directory) or ()
-            joined = [f for f in found if not f.is_partitioned]
-            if not joined:
-                raise FileNotFoundError(
-                    f"no joined {CarbonateSensitivityFile.LABEL} files in "
-                    f"{directory} ({len(found)} per-rank tile file(s) skipped); "
-                    "expected the output of a ROMS-MARBL run with "
-                    "cdr_gas_exch_output enabled, named "
-                    f"ROOT{CarbonateSensitivityFile.SUFFIX}.YYYYMMDDHHMMSS.nc"
-                )
+            joined = find_carbonate_sensitivity_files(
+                Path(path_str).expanduser().resolve()
+            )
             formats = {f.path: netcdf_format(f.path) for f in joined}
             not_netcdf = [
                 p.name for p, fmt in formats.items() if fmt is NetCDFFormat.UNRECOGNIZED

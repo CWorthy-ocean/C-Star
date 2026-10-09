@@ -22,6 +22,7 @@ from cstar.roms.input_dataset import (
     ROMSInputDataset,
     ROMSPartitioning,
     ROMSRiverForcing,
+    missing_carbonate_sensitivity_variables,
     read_model_reference_date,
 )
 from cstar.tests.unit_tests.fake_abc_subclasses import FakeROMSInputDataset
@@ -1337,20 +1338,13 @@ class TestROMSInputDatasetReadModelReferenceDate:
 
 
 class TestROMSCarbonateSensitivity:
-    """Tests for `ROMSCarbonateSensitivity` and its variable contract."""
+    """Tests for `ROMSCarbonateSensitivity` and the variable contract it rides on."""
 
     @staticmethod
     def _write(path: Path, variables: tuple[str, ...]) -> Path:
         """Write a tiny netCDF file holding only `variables`."""
         xr.Dataset({name: ("x", np.zeros(2)) for name in variables}).to_netcdf(path)
         return path
-
-    @staticmethod
-    def _staged(path: Path, staging_dir: Path) -> ROMSCarbonateSensitivity:
-        """Stage `path` as a `ROMSCarbonateSensitivity` working copy."""
-        dataset = ROMSCarbonateSensitivity(location=str(path))
-        dataset.get(staging_dir)
-        return dataset
 
     def test_variable_contract(self) -> None:
         """The variables a CDR-LiTE build reads are the sensitivities and their times."""
@@ -1365,65 +1359,17 @@ class TestROMSCarbonateSensitivity:
         """Like other surface forcing, the dataset is partitioned per rank."""
         assert ROMSCarbonateSensitivity.partitionable is True
 
-    def test_complete_file_has_no_problems(self, tmp_path: Path) -> None:
-        """A file with all four variables reports nothing."""
-        path = self._write(
-            tmp_path / "complete.nc", (*CARBONATE_SENSITIVITY_VARIABLES, "ocean_time")
-        )
-        dataset = self._staged(path, tmp_path / "staged")
+    def test_complete_file_has_no_missing_variables(self, tmp_path: Path) -> None:
+        """A file carrying every variable reports nothing missing."""
+        path = self._write(tmp_path / "ok.nc", CARBONATE_SENSITIVITY_VARIABLES)
+        assert missing_carbonate_sensitivity_variables(path) == []
 
-        assert dataset.check_forcing_variables() == []
-
-    def test_missing_time_variables_are_reported_with_the_file(
+    def test_missing_variables_are_listed_in_contract_order(
         self, tmp_path: Path
     ) -> None:
-        """A `_cdrgas` file from ucla-roms <= 0.9.1 (only `ocean_time`) fails once
-        per missing time variable, naming the checked file.
-        """
-        path = self._write(
-            tmp_path / "old_cdrgas.nc", ("ddic_dco2", "ddic_dalk", "ocean_time")
-        )
-        dataset = self._staged(path, tmp_path / "staged")
-
-        problems = dataset.check_forcing_variables()
-
-        staged_path = tmp_path / "staged" / path.name
-        assert problems == [
-            f"{staged_path}: missing variable 'ddic_dco2_time'",
-            f"{staged_path}: missing variable 'ddic_dalk_time'",
+        """Absent names come back in `CARBONATE_SENSITIVITY_VARIABLES` order."""
+        path = self._write(tmp_path / "partial.nc", ("ddic_dalk", "ddic_dco2"))
+        assert missing_carbonate_sensitivity_variables(path) == [
+            "ddic_dco2_time",
+            "ddic_dalk_time",
         ]
-
-    def test_every_missing_variable_is_reported(self, tmp_path: Path) -> None:
-        """An unrelated file is missing all four variables."""
-        path = self._write(tmp_path / "other.nc", ("temp",))
-        dataset = self._staged(path, tmp_path / "staged")
-
-        problems = dataset.check_forcing_variables()
-
-        assert len(problems) == len(CARBONATE_SENSITIVITY_VARIABLES)
-        assert all(
-            name in "".join(problems) for name in CARBONATE_SENSITIVITY_VARIABLES
-        )
-
-    def test_no_working_copy_has_no_problems(self, tmp_path: Path) -> None:
-        """Without a staged working copy, there is nothing to read."""
-        path = self._write(tmp_path / "unstaged.nc", ("temp",))
-
-        assert (
-            ROMSCarbonateSensitivity(location=str(path)).check_forcing_variables() == []
-        )
-
-    def test_collection_working_copy_reads_first_file_only(
-        self,
-        stageddatacollection_remote_files: Callable[..., StagedDataCollection],
-        tmp_path: Path,
-    ) -> None:
-        """Only the first file of a multi-file working copy (e.g. partitioned
-        pieces) is read.
-        """
-        first = self._write(tmp_path / "first.nc", CARBONATE_SENSITIVITY_VARIABLES)
-        second = self._write(tmp_path / "second.nc", ("temp",))
-        dataset = ROMSCarbonateSensitivity(location=str(first))
-        dataset._working_copy = stageddatacollection_remote_files(paths=[first, second])
-
-        assert dataset.check_forcing_variables() == []

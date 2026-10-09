@@ -69,6 +69,8 @@ from cstar.roms.build_verification import (
 from cstar.roms.discretization import ROMSDiscretization
 from cstar.roms.external_codebase import ROMSExternalCodeBase
 from cstar.roms.input_dataset import (
+    CARBONATE_SENSITIVITY_REMEDY,
+    CARBONATE_SENSITIVITY_VARIABLES,
     RecordedReferenceDate,
     ROMSBoundaryForcing,
     ROMSCarbonateSensitivity,
@@ -81,6 +83,7 @@ from cstar.roms.input_dataset import (
     ROMSRiverForcing,
     ROMSSurfaceForcing,
     ROMSTidalForcing,
+    missing_carbonate_sensitivity_variables,
 )
 from cstar.roms.namelist import RomsNamelistBase, namelist_schema_for_ref
 from cstar.roms.precheck import applies_to, check_output_streams_divide_rst
@@ -700,6 +703,26 @@ class ROMSSimulation(Simulation):
         return items
 
     @property
+    def _forcing_datasets(self) -> list[ROMSInputDataset]:
+        """Return every forcing input dataset ROMS reads through `frcfiles`.
+
+        ROMS reads forcing variables by name from any file in `frcfiles`, so
+        this is the set of datasets whose files it searches.
+        """
+        return [
+            *filter(
+                None,
+                chain(
+                    [self.tidal_forcing, self.river_forcing],
+                    self.surface_forcing,
+                    self.boundary_forcing,
+                    self.forcing_corrections,
+                    self.carbonate_sensitivity,
+                ),
+            )
+        ]
+
+    @property
     def _forcing_paths(self) -> list[Path]:
         """Collect and return all local paths to ROMS forcing input datasets in ROMS format.
 
@@ -720,17 +743,9 @@ class ROMSSimulation(Simulation):
             indicating it has not been staged for use by C-Star.
 
         """
-        input_forcings = chain(
-            [self.tidal_forcing, self.river_forcing],
-            self.surface_forcing,
-            self.boundary_forcing,
-            self.forcing_corrections,
-            self.carbonate_sensitivity,
-        )
-
         forcing_paths: list[Path] = []
 
-        for forcing in filter(None, input_forcings):
+        for forcing in self._forcing_datasets:
             paths = (
                 forcing.path_for_roms_unpartitioned
                 if self.use_pio
@@ -2179,22 +2194,26 @@ class ROMSSimulation(Simulation):
 
     def _validate_carbonate_sensitivity_inputs(self) -> None:
         """Ensure a CDR-LiTE build that reads its carbonate sensitivities from
-        forcing files has them, with the variables ROMS reads.
+        forcing files can find the variables ROMS reads.
 
         A ucla-roms >= 0.9 build with the `CDR_LITE` cppkey reads
-        `ddic_dco2`/`ddic_dalk` and their time variables as ordinary surface
-        forcing unless `cdr_lite_settings.cdr_online_carbonate_sensitivity`
-        (effective value, after `namelist_overrides`) computes them online.
-        Missing or incomplete files otherwise surface as an opaque ROMS abort
-        at run time. Does nothing when `CDR_LITE` is not defined in the staged
+        `ddic_dco2`/`ddic_dalk` and their time variables as ordinary forcing
+        unless `cdr_lite_settings.cdr_online_carbonate_sensitivity` (effective
+        value, after `namelist_overrides`) computes them online. ROMS looks the
+        variables up by name in every file of `frcfiles`, so they may come from
+        any staged forcing dataset (`carbonate_sensitivity`, but also
+        `surface_forcing` or `forcing_corrections`): the union of variables
+        over the first file of each of those datasets must cover
+        `CARBONATE_SENSITIVITY_VARIABLES`. Otherwise ROMS aborts opaquely at
+        run time. Does nothing when `CDR_LITE` is not defined in the staged
         `cppdefs.opt`, or when the sensitivities are computed online.
 
         Raises
         ------
         ValueError
-            If no `carbonate_sensitivity` datasets are configured, or if any
-            staged one lacks a variable in `CARBONATE_SENSITIVITY_VARIABLES`
-            (all problems are listed).
+            If no staged forcing file provides one or more variables in
+            `CARBONATE_SENSITIVITY_VARIABLES` (all missing variables and the
+            files searched are listed).
         """
         if not self._active_cppdefs_for_precheck().get("cdr_lite", False):
             return
@@ -2207,32 +2226,33 @@ class ROMSSimulation(Simulation):
         if getattr(settings, "cdr_online_carbonate_sensitivity", False):
             return
 
-        context = (
+        missing = list(CARBONATE_SENSITIVITY_VARIABLES)
+        searched: list[Path] = []
+        for dataset in self._forcing_datasets:
+            # Header read of each dataset's first file only: all files of one
+            # dataset come from one writer.
+            files = dataset._working_copy_files() if dataset.exists_locally else []
+            if not files:
+                continue
+            still_missing = missing_carbonate_sensitivity_variables(files[0])
+            missing = [name for name in missing if name in still_missing]
+            searched.append(files[0])
+            if not missing:
+                return
+
+        message = (
             "The ROMS build defines CDR_LITE and "
             "cdr_lite_settings.cdr_online_carbonate_sensitivity is off, so ROMS "
-            "reads the carbonate sensitivities from forcing files"
+            "reads the carbonate sensitivities from forcing files, but no "
+            f"forcing file provides {', '.join(missing)} "
+            f"(searched: {', '.join(p.name for p in searched) or 'no staged files'})."
         )
         if not self.carbonate_sensitivity:
-            raise ValueError(
-                f"{context}, but none are configured. Add "
-                "forcing.carbonate_sensitivity to the blueprint or use the "
+            message += (
+                " Add forcing.carbonate_sensitivity to the blueprint or use the "
                 "carbonate-sensitivity-from workplan directive."
             )
-
-        problems = [
-            problem
-            for dataset in self.carbonate_sensitivity
-            if dataset.exists_locally
-            for problem in dataset.check_forcing_variables()
-        ]
-        if problems:
-            raise ValueError(
-                f"{context}, but these files lack required variables:\n- "
-                + "\n- ".join(problems)
-                + "\n_cdrgas files written by ucla-roms 0.9.1 and earlier carry "
-                "only ocean_time and cannot be read as forcing; regenerate them "
-                "with a ucla-roms release that writes the forcing time variables."
-            )
+        raise ValueError(f"{message} {CARBONATE_SENSITIVITY_REMEDY}")
 
     def prepare_launch(self, job_name: str | None = None) -> LaunchPlan:
         """Prepare everything needed to launch ROMS, without launching it.

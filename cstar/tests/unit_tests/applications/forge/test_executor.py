@@ -4805,9 +4805,12 @@ class TestOnlyInputsReuseIsIdempotent:
       ``use_coarse_grid=False`` would have given a fresh construction -- so this
       exercises the "no reconstruction" code path, not the value derivation
       itself.
-    - grid/initial_conditions/cdr_forcing: unconditionally re-derive settings
-      from the live (grid/reconstructed) object on every run regardless of
-      reuse -- there is no separate "cheap" branch to distinguish for these.
+    - cdr_forcing: ``save`` writes a real minimal NetCDF, because pass 2 reads
+      the reused file's tracer axis (``xr.open_dataset``) to size the CDR tracers;
+      the rest of its settings still come from the live object.
+    - grid/initial_conditions: unconditionally re-derive settings from the live
+      (grid/reconstructed) object on every run regardless of reuse -- there is
+      no separate "cheap" branch to distinguish for these.
     """
 
     _GRID_KWARGS: ClassVar[dict] = dict(
@@ -4882,6 +4885,15 @@ class TestOnlyInputsReuseIsIdempotent:
         """
         Path(path).parent.mkdir(parents=True, exist_ok=True)
         cls._river_dataset().to_netcdf(path)
+        return path
+
+    @staticmethod
+    def _write_cdr_netcdf(path, **_kw):
+        """A real minimal CDR forcing NetCDF (no ``tracer_name`` axis) for the
+        reuse branch's axis read.
+        """
+        Path(path).parent.mkdir(parents=True, exist_ok=True)
+        xr.Dataset({"cdr_volume": (["ncdr", "time"], np.zeros((2, 2)))}).to_netcdf(path)
         return path
 
     @staticmethod
@@ -4986,7 +4998,7 @@ class TestOnlyInputsReuseIsIdempotent:
             mock_river.return_value = mock_river_instance
 
             mock_cdr_instance = MagicMock()
-            mock_cdr_instance.save.side_effect = self._touch_save
+            mock_cdr_instance.save.side_effect = self._write_cdr_netcdf
             mock_releases = MagicMock()
             mock_releases.__len__.return_value = 2
             mock_releases.release_type = "volume"

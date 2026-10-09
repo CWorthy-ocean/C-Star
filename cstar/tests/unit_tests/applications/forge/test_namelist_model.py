@@ -593,6 +593,28 @@ def test_validate_run_time_sections_skips_bgc_check_without_cppdefs():
     assert validate_run_time_sections({"param": {**_PARAM, "ntrc_bio": 32}}) == []
 
 
+@pytest.mark.parametrize(
+    ("cppdefs", "roms_ref", "rejected"),
+    [
+        ({"cdr_lite": True, "marbl": False}, "0.9.0", True),
+        ({"cdr_lite": True, "marbl": False}, "0.9.1", False),
+        ({"cdr_lite": True, "marbl": False}, None, False),
+        # online sensitivities on a MARBL build are not the CDR-lite mode
+        ({"cdr_lite": True, "marbl": True}, "0.9.0", False),
+        ({"marbl": False}, "0.9.0", False),
+    ],
+)
+def test_validate_run_time_sections_checks_cdr_lite_mode_roms_pin(
+    cppdefs, roms_ref, rejected
+):
+    """A stored cdr_lite blueprint pinned below the minimum ucla-roms is reported
+    up front (engine/wizard), not first at configure_build.
+    """
+    errs = validate_run_time_sections({"cppdefs": cppdefs}, roms_ref=roms_ref)
+    pinned_too_old = [e for e in errs if "CDR-lite without MARBL needs" in e]
+    assert bool(pinned_too_old) is rejected
+
+
 # ---------------------------------------------------------------------------
 # run_time_settings_for_ref -- schema-variant selection by ucla-roms ref
 # ---------------------------------------------------------------------------
