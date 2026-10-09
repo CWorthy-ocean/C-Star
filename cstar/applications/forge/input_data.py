@@ -923,8 +923,8 @@ class RomsMarblInputData(InputData):
 
         return self.roms_marbl_blueprint_elements
 
-    @staticmethod
     def _preflight_esper_sources(
+        self,
         step_kwargs_list: list[tuple[InputStep, dict[str, Any]]],
     ) -> None:
         """Raise before any generation step if an ESPER bgc source is configured
@@ -937,6 +937,11 @@ class RomsMarblInputData(InputData):
         Forge itself: this only asks roms-tools' own validator (which also checks
         the ESPER ``method``/``equation`` keys), so environments without PyESPER
         keep every other BGC source available and this is a no-op for them.
+
+        The block is validated in the form roms-tools will actually receive -- after
+        ``_resolve_source_block`` -- not as it sits in ``input_list``: the blueprint's
+        ``salinity_conditioning: True`` only becomes roms-tools' mapping with the
+        staged WOA23 file's path there, and validating the raw switch would fail.
         """
         for step, kwargs in step_kwargs_list:
             for bs in kwargs.get("bgc_sources") or []:
@@ -946,7 +951,7 @@ class RomsMarblInputData(InputData):
                 from roms_tools.setup.esper import validate_esper_source
 
                 try:
-                    validate_esper_source(src)
+                    validate_esper_source(self._resolve_source_block(src))
                 except ImportError as exc:
                     raise RuntimeError(
                         f"{step.name}: the ESPER BGC source needs PyESPER, which is "

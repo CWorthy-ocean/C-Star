@@ -3880,7 +3880,44 @@ class TestEsperPreflight:
                 {"source": {"name": "constants", "constants": {"NO3": 1.0}}},
             ],
         }
-        RomsMarblInputData._preflight_esper_sources([(step, kwargs)])  # no raise
+        data = MagicMock(spec=RomsMarblInputData)
+        RomsMarblInputData._preflight_esper_sources(data, [(step, kwargs)])  # no raise
+        data._resolve_source_block.assert_not_called()
+
+    def test_preflight_validates_the_resolved_block(
+        self, esper_input_data, monkeypatch
+    ):
+        """roms-tools sees the block *after* ``_resolve_source_block`` -- where the
+        blueprint's ``salinity_conditioning: True`` becomes the mapping with the staged
+        WOA23 file -- so that is what the preflight must validate. Validating the raw
+        switch failed in production ("must be a mapping ... got True").
+        """
+        import roms_tools.setup.esper as esper_module
+
+        data = esper_input_data
+        woa_file = data.input_data_dir / "woa23_decav_s00_01.nc"
+        real_sd = source_datasets.SourceDatasets(datasets=["WOA_SALINITY"])
+        real_sd.paths["WOA_SALINITY"] = woa_file
+        data.source_data = real_sd
+        seen: list[dict] = []
+        monkeypatch.setattr(esper_module, "validate_esper_source", seen.append)
+        step = MagicMock(name="forcing.boundary")
+        kwargs = {
+            "source": {"name": "GLORYS"},
+            "bgc_sources": [
+                {
+                    "source": {"name": "ESPER", "salinity_conditioning": True},
+                    "use_vars": ["ALK", "DIC"],
+                }
+            ],
+        }
+        data._preflight_esper_sources([(step, kwargs)])
+        assert seen == [
+            {
+                "name": "ESPER",
+                "salinity_conditioning": {"woa_salinity_path": str(woa_file)},
+            }
+        ]
 
 
 class TestBoundaryBgcSources:
