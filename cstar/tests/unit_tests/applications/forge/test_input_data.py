@@ -12,12 +12,13 @@ Tests cover:
 - Edge cases and error handling
 """
 
+import logging
 import shutil
 import sys
 from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path
-from typing import ClassVar
+from typing import Any, ClassVar
 from unittest.mock import MagicMock, patch
 
 import numpy as np
@@ -28,6 +29,7 @@ import xarray as xr
 import cstar.applications.roms_marbl.models as cstar_models
 from cstar.applications.forge import models as forge_models
 from cstar.applications.forge import source_datasets
+from cstar.applications.forge.blueprint import CarbonateSensitivitySpec
 from cstar.applications.forge.input_data import (
     CDR_FORCING_NETCDF_STEM,
     CHILD_IC_PLACEHOLDER_LOCATION,
@@ -40,10 +42,12 @@ from cstar.applications.forge.input_data import (
     register_input,
     resolve_input_selection,
 )
+from cstar.applications.forge.namelist_model import n_tracers_from_param
 from cstar.applications.forge.source_registry import (
     STREAMABLE_SOURCES as _REAL_STREAMABLE_SOURCES,
 )
 from cstar.orchestration.models import Resource
+from cstar.roms.input_dataset import CARBONATE_SENSITIVITY_VARIABLES
 
 
 @contextmanager
@@ -517,6 +521,11 @@ class TestResolveInputSelection:
             "initial_conditions",
             "cdr_forcing",
         }
+
+    def test_carbonate_sensitivity_has_a_short_and_a_canonical_name(self):
+        assert resolve_input_selection(
+            ["carbonate_sensitivity", "forcing.carbonate_sensitivity"]
+        ) == {"forcing.carbonate_sensitivity"}
 
     def test_case_insensitive_and_deduplicates(self):
         assert resolve_input_selection(["Boundary", "BOUNDARY", " bry "]) == {
@@ -1849,6 +1858,9 @@ class TestRomsMarblInputDataGeneration:
         sample_roms_marbl_input_data.roms_marbl_blueprint_elements.cdr_forcing = (
             cstar_models.Dataset(data=[])
         )
+        # The real build always carries ntrc_bio; a MARBL CDR forcing's tracer axis
+        # (temp, salt + the 32 MARBL tracers) is checked against it.
+        sample_roms_marbl_input_data._settings_run_time["param"] = {"ntrc_bio": 32}
         sample_roms_marbl_input_data._generate_cdr_forcing(
             key="cdr_forcing", cdr_kwargs=cdr_kwargs
         )
@@ -2077,6 +2089,7 @@ def _write_cdr_netcdf(
     include_release_name=True,
     omit=(),
     fmt=None,
+    tracers=None,
 ):
     """A minimal, real CDR-forcing netCDF matching the variable/dim conventions
     ``_CDR_FRC_DEFAULT`` (``forge_blueprint_resolve.py``) hardcodes for ROMS to
@@ -2086,8 +2099,13 @@ def _write_cdr_netcdf(
     ``(cdr_time, ncdr)``) or the tracer-perturbation family (``cdr_trcflx``).
 
     ``omit`` drops named variables after construction, for missing-content tests.
-    ``family="none"`` skips both families entirely.
+    ``family="none"`` skips both families entirely. ``tracers`` (a list of ROMS
+    tracer names) gives the file roms-tools >= 5.1's tracer axis: a string
+    ``tracer_name`` coordinate on ``ntracers``, with the per-tracer variables
+    (``cdr_tracer``/``cdr_trcflx``) on ``(cdr_time, ntracers, ncdr)``.
     """
+    dims = ("cdr_time", "ncdr") if tracers is None else ("cdr_time", "ntracers", "ncdr")
+    shape = (ntime, ncdr) if tracers is None else (ntime, len(tracers), ncdr)
     data_vars = {
         "cdr_lon": ("ncdr", np.zeros(ncdr)),
         "cdr_lat": ("ncdr", np.zeros(ncdr)),
@@ -2098,16 +2116,103 @@ def _write_cdr_netcdf(
     }
     if family == "volume":
         data_vars["cdr_volume"] = (("cdr_time", "ncdr"), np.ones((ntime, ncdr)))
-        data_vars["cdr_tracer"] = (("cdr_time", "ncdr"), np.ones((ntime, ncdr)))
+        data_vars["cdr_tracer"] = (dims, np.ones(shape))
     elif family == "trcflx":
-        data_vars["cdr_trcflx"] = (("cdr_time", "ncdr"), np.ones((ntime, ncdr)))
+        data_vars["cdr_trcflx"] = (dims, np.ones(shape))
     for name in omit:
         data_vars.pop(name, None)
     ds = xr.Dataset(data_vars)
     if include_release_name:
         ds.coords["release_name"] = ("ncdr", [f"release_{i}" for i in range(ncdr)])
+    if tracers is not None:
+        ds.coords["tracer_name"] = ("ntracers", list(tracers))
     ds.to_netcdf(path, format=fmt, engine="netcdf4")
     return path
+
+
+def _write_cdrgas_netcdf(
+    path: Path,
+    ntime: int = 2,
+    omit: tuple[str, ...] = (),
+    fmt: Any = None,
+    fill: float = 1.0,
+) -> Path:
+    """A minimal, real carbonate-sensitivity netCDF (a ``_cdrgas`` file) with the
+    variables a CDR-LiTE build reads as forcing, ``CARBONATE_SENSITIVITY_VARIABLES``:
+    ``ddic_dco2``/``ddic_dalk`` on ``(time, eta_rho, xi_rho)``, each with its own
+    time variable on ``time``.
+
+    ``omit`` drops named variables (a file from ucla-roms 0.9.1 and earlier has
+    only ``ocean_time``); ``fill`` sets the values, so two files differ in content.
+    """
+    surface = np.full((ntime, 3, 4), fill)
+    times = np.arange(ntime, dtype=float)
+    data_vars = {
+        "ddic_dco2": (("time", "eta_rho", "xi_rho"), surface),
+        "ddic_dalk": (("time", "eta_rho", "xi_rho"), 2 * surface),
+        "ddic_dco2_time": ("time", times),
+        "ddic_dalk_time": ("time", times),
+    }
+    assert set(data_vars) == set(CARBONATE_SENSITIVITY_VARIABLES)
+    for name in omit:
+        del data_vars[name]
+    xr.Dataset(data_vars).to_netcdf(path, format=fmt, engine="netcdf4")
+    return path
+
+
+def _hand_built_cdr_input_data(tmp_path, **overrides):
+    """A hand-built ``RomsMarblInputData`` (``MagicMock`` grid, empty live settings
+    dicts) with a ``cdr_forcing`` slot, for driving ``_generate_cdr_forcing``
+    directly. ``overrides`` replace any constructor argument.
+    """
+    ic = forge_models.InitialConditionsInput(
+        source=forge_models.SourceSpec(name="GLORYS")
+    )
+    surface_item = forge_models.SurfaceForcingItem(
+        source=forge_models.SourceSpec(name="ERA5"), type="physics"
+    )
+    boundary_item = forge_models.BoundaryForcing(
+        source=forge_models.SourceSpec(name="GLORYS")
+    )
+    forcing_override = _build_forcing_override(
+        ic, surface=[surface_item], boundary=boundary_item
+    )
+
+    grid = MagicMock()
+    grid.ds.sizes = {"eta_rho": 22, "xi_rho": 24}
+
+    data_dir = tmp_path / "input_data"
+    data_dir.mkdir(parents=True, exist_ok=True)
+    bp_dir = tmp_path / "blueprints"
+    bp_dir.mkdir(parents=True, exist_ok=True)
+
+    return RomsMarblInputData(
+        **{
+            "domain_name": "test_domain",
+            "start_date": datetime(2012, 1, 1),
+            "end_date": datetime(2012, 1, 2),
+            "forcing_override": forcing_override,
+            "grid": grid,
+            "boundaries": forge_models.OpenBoundaries(
+                north=True, south=True, east=True, west=False
+            ),
+            "source_data": MagicMock(spec=source_datasets.SourceDatasets),
+            "roms_marbl_blueprint_dir": bp_dir,
+            "partitioning": cstar_models.PartitioningParameterSet(
+                n_procs_x=2, n_procs_y=2
+            ),
+            "use_dask": False,
+            "input_data_dir": data_dir,
+            # Placeholder so __post_init__'s input_list/Dataset bookkeeping creates
+            # a "cdr_forcing" slot -- the tests below call _generate_cdr_forcing
+            # directly with their own custom_file, not this placeholder's content.
+            "cdr_forcing_file": {
+                "location": "placeholder.nc",
+                "content_hash": "0" * 64,
+            },
+            **overrides,
+        }
+    )
 
 
 class TestCdrCustomFileForcing:
@@ -2122,48 +2227,7 @@ class TestCdrCustomFileForcing:
 
     @pytest.fixture
     def cdr_input_data(self, tmp_path):
-        ic = forge_models.InitialConditionsInput(
-            source=forge_models.SourceSpec(name="GLORYS")
-        )
-        surface_item = forge_models.SurfaceForcingItem(
-            source=forge_models.SourceSpec(name="ERA5"), type="physics"
-        )
-        boundary_item = forge_models.BoundaryForcing(
-            source=forge_models.SourceSpec(name="GLORYS")
-        )
-        forcing_override = _build_forcing_override(
-            ic, surface=[surface_item], boundary=boundary_item
-        )
-
-        grid = MagicMock()
-        grid.ds.sizes = {"eta_rho": 22, "xi_rho": 24}
-
-        data_dir = tmp_path / "input_data"
-        data_dir.mkdir(parents=True, exist_ok=True)
-        bp_dir = tmp_path / "blueprints"
-        bp_dir.mkdir(parents=True, exist_ok=True)
-
-        return RomsMarblInputData(
-            domain_name="test_domain",
-            start_date=datetime(2012, 1, 1),
-            end_date=datetime(2012, 1, 2),
-            forcing_override=forcing_override,
-            grid=grid,
-            boundaries=forge_models.OpenBoundaries(
-                north=True, south=True, east=True, west=False
-            ),
-            source_data=MagicMock(spec=source_datasets.SourceDatasets),
-            roms_marbl_blueprint_dir=bp_dir,
-            partitioning=cstar_models.PartitioningParameterSet(
-                n_procs_x=2, n_procs_y=2
-            ),
-            use_dask=False,
-            input_data_dir=data_dir,
-            # Placeholder so __post_init__'s input_list/Dataset bookkeeping creates
-            # a "cdr_forcing" slot -- the tests below call _generate_cdr_forcing
-            # directly with their own custom_file, not this placeholder's content.
-            cdr_forcing_file={"location": "placeholder.nc", "content_hash": "0" * 64},
-        )
+        return _hand_built_cdr_input_data(tmp_path)
 
     def test_missing_file_raises_file_not_found(self, cdr_input_data, tmp_path):
         missing = tmp_path / "missing_cdr.nc"
@@ -2386,6 +2450,652 @@ class TestCdrCustomFileForcing:
 
         output_path = cdr_input_data._forcing_filename(CDR_FORCING_NETCDF_STEM)
         assert output_path.exists()
+
+
+_LITE_TRACERS = [
+    "temp",
+    "salt",
+    "CDR_OAE_ALK1",
+    "CDR_OAE_DIC1",
+    "CDR_OAE_ALK2",
+    "CDR_OAE_DIC2",
+    "CDR_DOR_DIC1",
+]
+
+
+class TestCdrTracerAxis:
+    """The CDR generation handlers size the build's CDR tracers from the CDR
+    forcing's ``tracer_name`` axis (``param.nt_cdr_oae``/``nt_cdr_dor``), check
+    ``param.nt_passive`` against it, and under ``bgc_mode: cdr_lite`` (no MARBL)
+    reject an axis the build cannot use. Built on tiny real netCDF files.
+    """
+
+    @pytest.fixture
+    def data(self, tmp_path):
+        return _hand_built_cdr_input_data(tmp_path)
+
+    @staticmethod
+    def _custom_file(path):
+        from cstar.applications.forge.user_files import hash_netcdf_contents
+
+        return forge_models.UserProvidedFile(
+            location=str(path), content_hash=hash_netcdf_contents(path)
+        )
+
+    @staticmethod
+    def _set_mode(data, mode, **param):
+        data._settings_compile_time["cppdefs"] = {
+            "marbl": mode == "marbl",
+            "cdr_lite": mode == "cdr_lite",
+        }
+        data._settings_run_time["param"] = {"nt_passive": 0, "ntrc_bio": 0, **param}
+
+    def _run(self, data, tmp_path, tracers, family="trcflx", **kwargs):
+        nc = _write_cdr_netcdf(
+            tmp_path / "user_cdr.nc",
+            ncdr=2,
+            family=family,
+            tracers=tracers,
+            **kwargs,
+        )
+        data._generate_cdr_forcing(key="cdr_forcing", custom_file=self._custom_file(nc))
+
+    def test_counts_are_derived_from_the_axis(self, data, tmp_path):
+        self._set_mode(data, "cdr_lite")
+        self._run(data, tmp_path, _LITE_TRACERS)
+
+        param = data._settings_run_time["param"]
+        assert (param["nt_cdr_oae"], param["nt_cdr_dor"]) == (2, 1)
+        assert n_tracers_from_param(param) == len(_LITE_TRACERS)
+
+    def test_counts_overwrite_stale_values(self, data, tmp_path):
+        self._set_mode(data, "cdr_lite", nt_cdr_oae=5, nt_cdr_dor=4)
+        self._run(data, tmp_path, ["temp", "salt", "CDR_DOR_DIC1"])
+
+        param = data._settings_run_time["param"]
+        assert (param["nt_cdr_oae"], param["nt_cdr_dor"]) == (0, 1)
+
+    def test_param_section_is_created_when_missing(self, data, tmp_path):
+        data._settings_compile_time["cppdefs"] = {"cdr_lite": True}
+        self._run(data, tmp_path, ["temp", "salt", "CDR_DOR_DIC1"])
+
+        assert data._settings_run_time["param"] == {"nt_cdr_oae": 0, "nt_cdr_dor": 1}
+
+    def test_passive_count_must_match_the_users_setting(self, data, tmp_path):
+        self._set_mode(data, "cdr_lite")
+        tracers = ["temp", "salt", "passive_tracer1", "CDR_DOR_DIC1"]
+        with pytest.raises(ValueError, match=r"param.nt_passive to 1"):
+            self._run(data, tmp_path, tracers)
+        # nothing is written on failure; nt_passive stays the user's
+        assert "nt_cdr_dor" not in data._settings_run_time["param"]
+        assert data._settings_run_time["param"]["nt_passive"] == 0
+
+        self._set_mode(data, "cdr_lite", nt_passive=1)
+        self._run(data, tmp_path, tracers)
+        param = data._settings_run_time["param"]
+        assert (param["nt_passive"], param["nt_cdr_dor"]) == (1, 1)
+
+    def test_marbl_names_are_rejected_without_marbl(self, data, tmp_path):
+        self._set_mode(data, "cdr_lite")
+        tracers = [*_LITE_TRACERS, "PO4", "DIC"]
+        with pytest.raises(ValueError, match=r"MARBL tracers \(PO4, DIC\)") as exc:
+            self._run(data, tmp_path, tracers)
+        # ... and the axis no longer matches the build either: both reported.
+        assert "does not match the build's tracer count" in str(exc.value)
+
+    def test_volume_releases_are_rejected_without_marbl(self, data, tmp_path):
+        self._set_mode(data, "cdr_lite")
+        with pytest.raises(ValueError, match="no cdr_trcflx"):
+            self._run(data, tmp_path, ["temp", "salt", "CDR_DOR_DIC1"], family="volume")
+
+    def test_a_missing_axis_is_fatal_under_cdr_lite(self, data, tmp_path):
+        self._set_mode(data, "cdr_lite")
+        with pytest.raises(ValueError, match="roms-tools >= 5.1"):
+            self._run(data, tmp_path, tracers=None)
+
+    @pytest.mark.parametrize("mode", ["marbl", "none"])
+    def test_a_missing_axis_is_ignored_in_the_other_modes(
+        self, data, tmp_path, mode, caplog
+    ):
+        self._set_mode(data, mode, nt_cdr_oae=3)
+        with caplog.at_level("DEBUG", logger="cstar.applications.forge.input_data"):
+            self._run(data, tmp_path, tracers=None)
+
+        # counts stay as set; the file is simply described by ncdr_parm etc.
+        assert data._settings_run_time["param"]["nt_cdr_oae"] == 3
+        assert data._settings_run_time["cdr_frc"]["ncdr_parm"] == 2
+        assert "no tracer_name coordinate" in caplog.text
+
+    def test_axis_must_match_the_build_tracer_count(self, data, tmp_path):
+        self._set_mode(data, "cdr_lite", ntrc_bio=3)
+        with pytest.raises(
+            ValueError,
+            match=r"tracer axis \(5\) does not match the build's tracer count \(8",
+        ):
+            self._run(
+                data,
+                tmp_path,
+                ["temp", "salt", "CDR_OAE_ALK1", "CDR_OAE_DIC1", "CDR_DOR_DIC1"],
+            )
+
+    def test_marbl_mode_checks_the_marbl_axis_against_ntrc_bio(self, data, tmp_path):
+        marbl_names = [f"BGC{i}" for i in range(4)]
+        self._set_mode(data, "marbl", ntrc_bio=4)
+        self._run(data, tmp_path, ["temp", "salt", *marbl_names])
+        assert data._settings_run_time["param"]["nt_cdr_oae"] == 0
+
+        self._set_mode(data, "marbl", ntrc_bio=5)
+        with pytest.raises(ValueError, match=r"axis \(6\) does not match.*\(7"):
+            self._run(data, tmp_path, ["temp", "salt", *marbl_names])
+
+    def test_the_reused_file_is_the_one_described(self, data, tmp_path):
+        """With clobber off and the planned output already on disk, ROMS reads the
+        reused file, so its axis -- not the custom file's -- sizes the tracers.
+        """
+        self._set_mode(data, "cdr_lite")
+        output_path = data._forcing_filename(CDR_FORCING_NETCDF_STEM)
+        _write_cdr_netcdf(
+            output_path,
+            ncdr=2,
+            family="trcflx",
+            tracers=["temp", "salt", "CDR_DOR_DIC1"],
+        )
+        data._existing_planned_outputs = {output_path.resolve()}
+
+        with pytest.warns(UserWarning, match="differs from custom_file"):
+            self._run(data, tmp_path, _LITE_TRACERS, family="volume")
+
+        param = data._settings_run_time["param"]
+        assert (param["nt_cdr_oae"], param["nt_cdr_dor"]) == (0, 1)
+
+    @patch("cstar.applications.forge.input_data.rt.CDRForcing")
+    def test_generated_forcing_derives_counts_from_its_dataset(
+        self, mock_cdr_class, data, tmp_path
+    ):
+        self._set_mode(data, "cdr_lite")
+        cdr_path = tmp_path / "cdr.nc"
+        cdr_path.touch()
+        mock_cdr = MagicMock()
+        mock_cdr.save.return_value = cdr_path
+        mock_cdr.ds = xr.Dataset(
+            {"cdr_trcflx": (("ntracers",), np.zeros(len(_LITE_TRACERS)))},
+            coords={"tracer_name": ("ntracers", _LITE_TRACERS)},
+        )
+        mock_cdr_class.return_value = mock_cdr
+
+        data._generate_cdr_forcing(key="cdr_forcing", cdr_kwargs={"foo": "bar"})
+
+        param = data._settings_run_time["param"]
+        assert (param["nt_cdr_oae"], param["nt_cdr_dor"]) == (2, 1)
+
+    @staticmethod
+    def _built_cdr(mock_cdr_class, tracers, output_path):
+        """A mocked ``rt.CDRForcing`` whose freshly built dataset has ``tracers``."""
+        mock_cdr = MagicMock()
+        mock_cdr.save.return_value = output_path
+        mock_cdr.ds = xr.Dataset(
+            {"cdr_trcflx": (("ntracers",), np.zeros(len(tracers)))},
+            coords={"tracer_name": ("ntracers", tracers)},
+        )
+        mock_cdr_class.return_value = mock_cdr
+        return mock_cdr
+
+    @patch("cstar.applications.forge.input_data.rt.CDRForcing")
+    def test_generated_forcing_reuse_describes_the_file_on_disk(
+        self, mock_cdr_class, data
+    ):
+        """With clobber off and ``cdr.nc`` already on disk, ROMS reads that file
+        even though the releases changed, so its axis -- not the freshly built
+        one -- sizes the tracers (the counterpart of the custom-file reuse test).
+        """
+        self._set_mode(data, "cdr_lite")
+        output_path = data._forcing_filename(CDR_FORCING_NETCDF_STEM)
+        _write_cdr_netcdf(
+            output_path,
+            ncdr=2,
+            family="trcflx",
+            tracers=["temp", "salt", "CDR_DOR_DIC1"],
+        )
+        data._existing_planned_outputs = {output_path.resolve()}
+        mock_cdr = self._built_cdr(mock_cdr_class, _LITE_TRACERS, output_path)
+
+        with pytest.warns(UserWarning, match="differs from the one built"):
+            data._generate_cdr_forcing(key="cdr_forcing", cdr_kwargs={"foo": "bar"})
+
+        param = data._settings_run_time["param"]
+        assert (param["nt_cdr_oae"], param["nt_cdr_dor"]) == (0, 1)
+        mock_cdr.save.assert_not_called()
+
+    @patch("cstar.applications.forge.input_data.rt.CDRForcing")
+    def test_generated_forcing_reuse_of_a_matching_file_is_silent(
+        self, mock_cdr_class, data, recwarn
+    ):
+        self._set_mode(data, "cdr_lite")
+        output_path = data._forcing_filename(CDR_FORCING_NETCDF_STEM)
+        _write_cdr_netcdf(output_path, ncdr=2, family="trcflx", tracers=_LITE_TRACERS)
+        data._existing_planned_outputs = {output_path.resolve()}
+        self._built_cdr(mock_cdr_class, _LITE_TRACERS, output_path)
+
+        data._generate_cdr_forcing(key="cdr_forcing", cdr_kwargs={"foo": "bar"})
+
+        assert not [w for w in recwarn if "differs from the one" in str(w.message)]
+        param = data._settings_run_time["param"]
+        assert (param["nt_cdr_oae"], param["nt_cdr_dor"]) == (2, 1)
+
+    @patch("cstar.applications.forge.input_data.rt.CDRForcing")
+    def test_generated_forcing_reuse_rejects_a_bad_reused_axis(
+        self, mock_cdr_class, data
+    ):
+        """The reused file is held to the same rules as a built one."""
+        self._set_mode(data, "cdr_lite")
+        output_path = data._forcing_filename(CDR_FORCING_NETCDF_STEM)
+        _write_cdr_netcdf(
+            output_path, ncdr=2, family="trcflx", tracers=[*_LITE_TRACERS, "PO4"]
+        )
+        data._existing_planned_outputs = {output_path.resolve()}
+        self._built_cdr(mock_cdr_class, _LITE_TRACERS, output_path)
+
+        with (
+            pytest.warns(UserWarning, match="differs from the one built"),
+            pytest.raises(ValueError, match=r"The reused CDR forcing .*MARBL tracers"),
+        ):
+            data._generate_cdr_forcing(key="cdr_forcing", cdr_kwargs={"foo": "bar"})
+        assert "nt_cdr_oae" not in data._settings_run_time["param"]
+
+    @patch("cstar.applications.forge.input_data.rt.CDRForcing")
+    def test_generated_forcing_rejects_a_bad_axis_before_writing(
+        self, mock_cdr_class, data, tmp_path
+    ):
+        self._set_mode(data, "cdr_lite", ntrc_bio=2)
+        mock_cdr = MagicMock()
+        mock_cdr.ds = xr.Dataset(
+            {"cdr_trcflx": (("ntracers",), np.zeros(len(_LITE_TRACERS)))},
+            coords={"tracer_name": ("ntracers", _LITE_TRACERS)},
+        )
+        mock_cdr_class.return_value = mock_cdr
+
+        with pytest.raises(ValueError, match="does not match the build's tracer"):
+            data._generate_cdr_forcing(key="cdr_forcing", cdr_kwargs={"foo": "bar"})
+
+        mock_cdr.to_yaml.assert_not_called()
+        mock_cdr.save.assert_not_called()
+
+    def test_real_roms_tools_cdr_lite_forcing_round_trips(self, data):
+        """End to end against roms-tools >= 5.1 (grid-less): its generated axis
+        (temp, salt, passive, OAE pair, DOR) is what the counts are read from.
+        """
+        self._set_mode(data, "cdr_lite", nt_passive=1)
+        data._settings_compile_time["cppdefs"]["cdr_forcing"] = True
+        data.roms_marbl_blueprint_elements.cdr_forcing = cstar_models.Dataset(data=[])
+        times = [datetime(2012, 1, 1), datetime(2012, 1, 2)]
+
+        def release(name, tracer_set, fluxes):
+            return {
+                "name": name,
+                "lat": 59.0,
+                "lon": 1.0,
+                "depth": 1.0,
+                "hsc": 10.0,
+                "vsc": 10.0,
+                "times": times,
+                "release_type": "tracer_perturbation",
+                "tracer_set": tracer_set,
+                "tracer_fluxes": fluxes,
+            }
+
+        cdr_kwargs = {
+            "start_time": times[0],
+            "end_time": times[1],
+            "releases": [
+                release("oae", "cdr_lite", {"ALK": [2.0e6, 2.0e6]}),
+                release("dor", "cdr_lite", {"DIC": [1.0e6, 1.0e6]}),
+                release("dye", "passive", {"passive_tracer": [1.0, 1.0]}),
+            ],
+        }
+
+        data._generate_cdr_forcing(key="cdr_forcing", cdr_kwargs=cdr_kwargs)
+
+        param = data._settings_run_time["param"]
+        assert (param["nt_passive"], param["nt_cdr_oae"], param["nt_cdr_dor"]) == (
+            1,
+            1,
+            1,
+        )
+        assert n_tracers_from_param(param) == 6
+        assert data._settings_run_time["cdr_frc"]["ncdr_parm"] == 3
+        assert data._settings_run_time["cdr_frc"]["cdr_volume"] is False
+
+
+def _carbonate_source(
+    directory: Path, stamp: str = "20120101130000", **write_kwargs: Any
+) -> Path:
+    """A real ``<root>_cdrgas.<stamp>.nc`` file under ``directory`` (see
+    ``_write_cdrgas_netcdf`` for ``write_kwargs``).
+    """
+    directory.mkdir(parents=True, exist_ok=True)
+    return _write_cdrgas_netcdf(directory / f"roms_cdrgas.{stamp}.nc", **write_kwargs)
+
+
+def _carbonate_spec(*paths: Path) -> CarbonateSensitivitySpec:
+    """A ``CarbonateSensitivitySpec`` over ``paths``, each pinned by its real hash."""
+    from cstar.applications.forge.user_files import hash_netcdf_contents
+
+    return CarbonateSensitivitySpec(
+        files=[
+            forge_models.UserProvidedFile(
+                location=str(p), content_hash=hash_netcdf_contents(p)
+            )
+            for p in paths
+        ]
+    )
+
+
+def _carbonate_input_data(
+    tmp_path: Path, *paths: Path, cppdefs: dict[str, Any] | None = None
+) -> RomsMarblInputData:
+    """A hand-built ``RomsMarblInputData`` with no CDR step and, when ``paths`` are
+    given, a carbonate sensitivity spec over them. The live compile-time settings
+    carry ``cppdefs`` (default: a ``bgc_mode: cdr_lite`` build).
+    """
+    return _hand_built_cdr_input_data(
+        tmp_path,
+        cdr_forcing_file=None,
+        carbonate_sensitivity=_carbonate_spec(*paths) if paths else None,
+        settings_compile_time={
+            "cppdefs": {"cdr_lite": True} if cppdefs is None else cppdefs
+        },
+    )
+
+
+_CARBONATE_STEP = "forcing.carbonate_sensitivity"
+
+
+def _run_carbonate_step(data: RomsMarblInputData) -> None:
+    """Run the registered carbonate sensitivity handler as ``generate_all`` does:
+    with the kwargs ``__post_init__`` queued for it.
+    """
+    step = INPUT_REGISTRY[_CARBONATE_STEP]
+    step.handler(data, key=step.name, **dict(data.input_list)[_CARBONATE_STEP])
+
+
+class TestCarbonateSensitivityForcing:
+    """``forcing.carbonate_sensitivity``: user-supplied ``_cdrgas`` files a
+    ``bgc_mode: cdr_lite`` build reads as surface forcing, checked for the variables
+    ROMS reads, staged under their own basenames and listed (unpartitioned) in the
+    emitted blueprint.
+
+    Hand-built ``RomsMarblInputData`` over tiny real netCDF files, for the reason
+    ``TestCdrCustomFileForcing`` gives.
+    """
+
+    @pytest.fixture
+    def sources(self, tmp_path):
+        return [
+            _carbonate_source(tmp_path / "src", stamp, fill=fill)
+            for stamp, fill in (("20120101130000", 1.0), ("20120102130000", 3.0))
+        ]
+
+    @pytest.fixture
+    def data(self, tmp_path, sources):
+        return _carbonate_input_data(tmp_path, *sources)
+
+    @staticmethod
+    def _destinations(data, sources):
+        return [data.input_data_dir / p.name for p in sources]
+
+    @staticmethod
+    def _staged(data):
+        return data.roms_marbl_blueprint_elements.forcing.carbonate_sensitivity.data
+
+    def test_stages_each_file_under_its_basename_in_order(self, data, sources):
+        _run_carbonate_step(data)
+
+        destinations = self._destinations(data, sources)
+        assert [Path(r.location) for r in self._staged(data)] == destinations
+        assert not any(r.partitioned for r in self._staged(data))
+        for source, dest in zip(sources, destinations, strict=True):
+            assert dest.read_bytes() == source.read_bytes()
+        # copies: the originals are left where they were
+        assert all(p.exists() for p in sources)
+
+    def test_post_init_queues_the_step_with_the_files(self, data):
+        assert dict(data.input_list)[_CARBONATE_STEP] == {
+            "files": list(data.carbonate_sensitivity.files)
+        }
+        assert INPUT_REGISTRY[_CARBONATE_STEP].order == 85
+
+    def test_planned_outputs_list_the_destinations(self, data, sources):
+        step_kwargs = [(INPUT_REGISTRY[k], kw) for k, kw in data.input_list]
+
+        planned = data._planned_netcdf_outputs(step_kwargs)
+
+        assert planned[-2:] == self._destinations(data, sources)
+        assert len(planned) == len(set(planned))
+
+    def test_planned_outputs_are_the_executors_destinations_rule(self, data, sources):
+        from cstar.applications.forge.input_data import (
+            carbonate_sensitivity_destinations,
+        )
+
+        assert carbonate_sensitivity_destinations(
+            data.input_data_dir, data.carbonate_sensitivity.files
+        ) == self._destinations(data, sources)
+
+    def test_variable_check_names_every_bad_file_before_staging(self, tmp_path):
+        no_time = _carbonate_source(
+            tmp_path / "src",
+            "20120101130000",
+            omit=("ddic_dco2_time", "ddic_dalk_time"),
+        )
+        good = _carbonate_source(tmp_path / "src", "20120102130000")
+        no_dalk = _carbonate_source(
+            tmp_path / "src", "20120103130000", omit=("ddic_dalk",)
+        )
+        data = _carbonate_input_data(tmp_path, no_time, good, no_dalk)
+
+        with pytest.raises(ValueError) as exc_info:
+            _run_carbonate_step(data)
+
+        msg = str(exc_info.value)
+        assert f"{no_time}: missing ddic_dco2_time, ddic_dalk_time" in msg
+        assert f"{no_dalk}: missing ddic_dalk\n" in msg
+        assert str(good) not in msg
+        assert "ddic_dco2, ddic_dalk, ddic_dco2_time, ddic_dalk_time" in msg
+        assert "ucla-roms 0.9.1 and earlier carry only ocean_time" in msg
+        # all problems are found before anything is copied
+        assert not list(data.input_data_dir.glob("*.nc"))
+        assert self._staged(data) == []
+
+    def test_reuses_an_existing_copy_and_checks_that_one(self, data, sources):
+        """With clobber off and the destination already on disk, ROMS reads the
+        staged copy, so that is the file checked -- not the (here broken) source.
+        """
+        staged, other = self._destinations(data, sources)
+        _write_cdrgas_netcdf(staged, fill=7.0)
+        reused_bytes = staged.read_bytes()
+        _write_cdrgas_netcdf(sources[0], omit=("ddic_dco2",))
+        data._existing_planned_outputs = {staged.resolve()}
+
+        with pytest.warns(UserWarning, match="changed since"):  # the source's pin
+            _run_carbonate_step(data)
+
+        assert staged.read_bytes() == reused_bytes
+        assert other.read_bytes() == sources[1].read_bytes()
+        assert [Path(r.location) for r in self._staged(data)] == [staged, other]
+
+    def test_a_broken_existing_copy_is_reported_under_its_own_path(self, data, sources):
+        staged, other = self._destinations(data, sources)
+        _write_cdrgas_netcdf(staged, omit=("ddic_dalk_time",))
+        data._existing_planned_outputs = {staged.resolve()}
+
+        with pytest.raises(ValueError) as exc_info:
+            _run_carbonate_step(data)
+
+        assert f"{staged}: missing ddic_dalk_time" in str(exc_info.value)
+        assert not other.exists()
+
+    def test_clobber_replaces_an_existing_copy(self, data, sources):
+        staged, _ = self._destinations(data, sources)
+        _write_cdrgas_netcdf(staged, fill=7.0)
+        data._existing_planned_outputs = {staged.resolve()}
+        data._clobber = True
+
+        _run_carbonate_step(data)
+
+        assert staged.read_bytes() == sources[0].read_bytes()
+
+    def test_a_file_already_at_its_destination_is_used_in_place(self, tmp_path):
+        in_place = _carbonate_source(tmp_path / "input_data")
+        data = _carbonate_input_data(tmp_path, in_place)
+        before = in_place.read_bytes()
+
+        _run_carbonate_step(data)
+
+        assert in_place.read_bytes() == before
+        assert [Path(r.location) for r in self._staged(data)] == [in_place]
+
+    def test_a_missing_file_is_a_hard_error(self, tmp_path, sources):
+        data = _carbonate_input_data(tmp_path, *sources)
+        sources[1].unlink()
+
+        with pytest.raises(FileNotFoundError, match="carbonate sensitivity"):
+            _run_carbonate_step(data)
+
+    def test_a_changed_file_warns_but_is_staged(self, tmp_path, sources):
+        data = _carbonate_input_data(tmp_path, *sources)
+        _write_cdrgas_netcdf(sources[0], fill=9.0)  # edited after being pinned
+
+        with pytest.warns(UserWarning, match="carbonate sensitivity.*changed since"):
+            _run_carbonate_step(data)
+
+        assert len(self._staged(data)) == 2
+
+    @pytest.mark.skipif(shutil.which("nccopy") is None, reason="nccopy not installed")
+    def test_stages_cdf5_copies_under_pio(self, data, sources):
+        from cstar.base.utils import netcdf_format
+
+        data.use_pio = True
+        assert not netcdf_format(sources[0]).is_classic
+
+        _run_carbonate_step(data)
+
+        for dest in self._destinations(data, sources):
+            assert netcdf_format(dest).is_classic
+        assert not netcdf_format(sources[0]).is_classic  # the originals are untouched
+
+    @patch("cstar.applications.forge.input_data.rt.partition_netcdf")
+    def test_partitioning_covers_the_staged_files(self, mock_partition, data, sources):
+        """Without PIO ROMS reads per-rank tiles, so ``_partition_files`` (generic
+        over ``forcing.*``) splits each staged file and lists the tiles instead.
+        """
+        _run_carbonate_step(data)
+        destinations = self._destinations(data, sources)
+        tiles = {
+            dest: [dest.with_suffix(f".{rank}.nc") for rank in range(4)]
+            for dest in destinations
+        }
+        for paths in tiles.values():
+            for tile in paths:
+                tile.touch()
+        mock_partition.side_effect = lambda location, **_: tiles[Path(location)]
+
+        data._partition_files()
+
+        assert [Path(c.args[0]) for c in mock_partition.call_args_list] == destinations
+        listed = self._staged(data)
+        assert [Path(r.location) for r in listed] == [
+            tile for dest in destinations for tile in tiles[dest]
+        ]
+        assert all(r.partitioned for r in listed)
+
+
+class TestCarbonateSensitivityPostInit:
+    """What ``RomsMarblInputData.__post_init__`` does with a carbonate sensitivity
+    spec, keyed on the live compile-time ``cppdefs`` (the build the executor made).
+    """
+
+    _LOGGER = "cstar.applications.forge.input_data"
+
+    @pytest.fixture
+    def source(self, tmp_path):
+        return _carbonate_source(tmp_path / "src")
+
+    @pytest.mark.parametrize(
+        ("cppdefs", "mode"),
+        [
+            ({}, "none"),
+            ({"marbl": True}, "marbl"),
+            ({"marbl": True, "cdr_lite": True}, "marbl"),
+        ],
+    )
+    def test_a_spec_needs_a_cdr_lite_build(self, tmp_path, source, cppdefs, mode):
+        with pytest.raises(ValueError) as exc_info:
+            _carbonate_input_data(tmp_path, source, cppdefs=cppdefs)
+
+        assert (
+            f'not bgc_mode "cdr_lite" (it is "{mode}"): only a CDR-LiTE build'
+            in str(exc_info.value)
+        )
+
+    def test_a_spec_without_live_settings_is_not_a_cdr_lite_build(
+        self, tmp_path, source
+    ):
+        with pytest.raises(ValueError, match='it is "none"'):
+            _hand_built_cdr_input_data(
+                tmp_path,
+                cdr_forcing_file=None,
+                carbonate_sensitivity=_carbonate_spec(source),
+            )
+
+    def test_a_spec_creates_the_forcing_element_and_the_step(self, tmp_path, source):
+        data = _carbonate_input_data(tmp_path, source)
+
+        elements = data.roms_marbl_blueprint_elements
+        assert elements.forcing.carbonate_sensitivity == cstar_models.Dataset(data=[])
+        assert _CARBONATE_STEP in dict(data.input_list)
+
+    def test_unset_in_a_cdr_lite_build_logs_where_the_files_come_from(
+        self, tmp_path, caplog
+    ):
+        with caplog.at_level(logging.INFO, logger=self._LOGGER):
+            data = _carbonate_input_data(tmp_path)
+
+        (record,) = [r for r in caplog.records if r.name == self._LOGGER]
+        assert record.levelno == logging.INFO
+        assert "carbonate-sensitivity-from workplan directive" in record.getMessage()
+        assert _CARBONATE_STEP not in dict(data.input_list)
+        assert data.roms_marbl_blueprint_elements.forcing.carbonate_sensitivity is None
+
+    @pytest.mark.parametrize(
+        "cppdefs", [{}, {"marbl": True}, {"marbl": True, "cdr_lite": True}]
+    )
+    def test_unset_in_any_other_build_logs_nothing(self, tmp_path, caplog, cppdefs):
+        with caplog.at_level(logging.INFO, logger=self._LOGGER):
+            data = _carbonate_input_data(tmp_path, cppdefs=cppdefs)
+
+        assert not [r for r in caplog.records if r.name == self._LOGGER]
+        assert _CARBONATE_STEP not in dict(data.input_list)
+
+    def test_a_set_spec_logs_nothing(self, tmp_path, source, caplog):
+        with caplog.at_level(logging.INFO, logger=self._LOGGER):
+            _carbonate_input_data(tmp_path, source)
+
+        assert not [r for r in caplog.records if r.name == self._LOGGER]
+
+    def test_every_forcing_step_names_a_forcing_configuration_field(self):
+        """The ``forcing.*`` elements are created from ``ForcingConfiguration``'s
+        fields, so a registered ``forcing.<name>`` step with no such field would
+        get no element to fill (this is how ``carbonate_sensitivity`` was missed
+        while the set of names was spelled out by hand).
+        """
+        steps = {
+            name.split(".", 1)[1]
+            for name in INPUT_REGISTRY
+            if name.startswith("forcing.")
+        }
+
+        assert steps <= set(cstar_models.ForcingConfiguration.model_fields)
+        assert "carbonate_sensitivity" in steps
 
 
 class TestRiverCustomFileForcing:

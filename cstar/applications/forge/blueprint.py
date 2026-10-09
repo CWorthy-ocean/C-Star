@@ -63,6 +63,7 @@ import hashlib
 import json
 import math
 import re
+from collections import Counter
 from datetime import UTC, datetime
 from enum import StrEnum
 from importlib.metadata import PackageNotFoundError
@@ -83,6 +84,8 @@ from cstar.orchestration.models import (
 )
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
+
     from cstar.orchestration.models import CatalogSpecKind
 
 
@@ -1317,6 +1320,38 @@ class CdrSpec(_Section):
         return self
 
 
+class CarbonateSensitivitySpec(_Section):
+    """The carbonate sensitivity files a ``bgc_mode: cdr_lite`` build reads as
+    surface forcing (``ddic_dco2``/``ddic_dalk`` and their time variables).
+
+    They are the ``_cdrgas`` files a ROMS-MARBL run writes, and are listed here
+    only when supplied at authoring time. The default for a ``cdr_lite``
+    blueprint is to leave them out: the ``carbonate-sensitivity-from`` workplan
+    directive supplies them at run time from an earlier ROMS-MARBL step.
+
+    Forge stages a copy of each file (as CDF-5 under ParallelIO) next to the
+    other inputs, keeping its basename, and lists it in the emitted
+    blueprint's ``forcing.carbonate_sensitivity``.
+    """
+
+    files: list[UserProvidedFile] = Field(min_length=1)
+    """The files, in the order ROMS reads them. Their basenames must be distinct."""
+
+    @field_validator("files")
+    @classmethod
+    def _distinct_basenames(
+        cls, files: Sequence[UserProvidedFile]
+    ) -> Sequence[UserProvidedFile]:
+        counts = Counter(Path(f.location).name for f in files)
+        duplicated = sorted(name for name, n in counts.items() if n > 1)
+        if duplicated:
+            raise ValueError(
+                "carbonate sensitivity files are staged under their basename, so "
+                f"each must be distinct; repeated: {', '.join(duplicated)}"
+            )
+        return files
+
+
 # ===========================================================================
 # C. Code, templates
 # ===========================================================================
@@ -1474,15 +1509,23 @@ class ForgeBlueprint(Blueprint):
     domain: Domain
     forcing: Forcing
     cdr: CdrSpec = Field(default_factory=CdrSpec)
+    carbonate_sensitivity: CarbonateSensitivitySpec | None = Field(default=None)
+    """Carbonate sensitivity files for a ``bgc_mode: cdr_lite`` build, when supplied
+    at authoring time; ``None`` leaves them to the ``carbonate-sensitivity-from``
+    workplan directive. Absent from a saved file and from the content hash while
+    unset, so adding the field changed neither."""
     # Resolved list of host-independent source-dataset keys the executor must prepare
     # (forcing/IC sources + topography), e.g. ["GLORYS_REGIONAL", "UNIFIED_BGC", "ETOPO5"].
     # Cache paths resolve at processing from the injected source_data_cache. Results-affecting
     # -> stays IN the hash.
     datasets: list[str] = Field(default_factory=list)
     model_settings: dict[str, Any] = Field(default_factory=dict)  # flat sections
-    # n_tracers is NOT stored — it is derived at processing time from
+    # n_tracers is NOT stored. ForgeBlueprint.n_tracers derives it from the stored
     # model_settings["param"] (T + S + ntrc_bio + nt_passive + 2*nt_cdr_oae +
-    # nt_cdr_dor; see ForgeBlueprint.n_tracers). marbl is read from model_settings["cppdefs"]["marbl"].
+    # nt_cdr_dor), a pre-generation count: the CDR-lite counts (nt_cdr_*) are read
+    # off the generated CDR forcing, so configure_build derives its own from the
+    # live run-time settings and never reads that property. marbl is read from
+    # model_settings["cppdefs"]["marbl"].
     code: Code
     composition: Composition = Field(default_factory=Composition)
     # Narrows the ``Blueprint`` base field to forge's block. Pydantic keeps a
@@ -1575,8 +1618,13 @@ class ForgeBlueprint(Blueprint):
 
     @property
     def n_tracers(self) -> int:
-        """Total ROMS tracer count derived from ``model_settings['param']`` (see
-        :func:`~cstar.applications.forge.namelist_model.n_tracers_from_param`).
+        """Total ROMS tracer count derived from the stored ``model_settings['param']``
+        (see :func:`~cstar.applications.forge.namelist_model.n_tracers_from_param`).
+
+        A pre-generation count: the CDR-lite tracer counts (``nt_cdr_oae``/
+        ``nt_cdr_dor``) are read off the CDR forcing at generation, so this can
+        undercount what the built run has. ``ForgeExecutor.configure_build`` does
+        not read it; it derives the count from the live run-time settings.
         """
         # Lazy: keeps importing the schema module light (see the module docstring).
         from cstar.applications.forge.namelist_model import n_tracers_from_param
@@ -1646,6 +1694,14 @@ class ForgeBlueprint(Blueprint):
             cdr_forcing_file = cdr.get("cdr_forcing_file")
             if cdr_forcing_file:
                 cdr_forcing_file.pop("location", None)
+        # An unset carbonate_sensitivity leaves no trace in the hash (a recorded
+        # hash from before the field existed must still verify); a set one is
+        # scrubbed of its host paths like the other user files.
+        carbonate = data.pop("carbonate_sensitivity", None)
+        if carbonate:
+            for f in carbonate["files"]:
+                f.pop("location", None)
+            data["carbonate_sensitivity"] = carbonate
         forcing = data.get("forcing")
         if forcing:
             for river in forcing.get("river") or []:
@@ -1722,12 +1778,18 @@ class ForgeBlueprint(Blueprint):
                 )
             }
         )
-        # ``exclude_none=False`` keeps explicit nulls, so an unset ``working_dir``
-        # (the default) is dropped by name: a saved file simply has no such line.
+        # ``exclude_none=False`` keeps explicit nulls, so a field that is unset by
+        # default is dropped by name: a saved file simply has no such line (and an
+        # earlier build, which forbids unknown keys, still reads a file that does
+        # not use the field).
         data = stamped.model_dump(
             mode="json",
             exclude_none=False,
-            exclude={"working_dir"} if stamped.working_dir is None else None,
+            exclude={
+                name
+                for name in ("working_dir", "carbonate_sensitivity")
+                if getattr(stamped, name) is None
+            },
         )
         # Pydantic keeps the narrowed ``provenance`` field at its ``Blueprint``
         # base position; saved files have it last. Forge files never populate

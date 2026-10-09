@@ -13,13 +13,16 @@ from cstar.base.exceptions import CstarExpectationFailed
 from cstar.io.source_data import SourceDataCollection
 from cstar.io.staged_data import StagedDataCollection, StagedFile
 from cstar.roms.input_dataset import (
+    CARBONATE_SENSITIVITY_VARIABLES,
     DatasetLinker,
     RecordedReferenceDate,
     ROMSBoundaryForcing,
+    ROMSCarbonateSensitivity,
     ROMSForcingCorrections,
     ROMSInputDataset,
     ROMSPartitioning,
     ROMSRiverForcing,
+    missing_carbonate_sensitivity_variables,
     read_model_reference_date,
 )
 from cstar.tests.unit_tests.fake_abc_subclasses import FakeROMSInputDataset
@@ -1332,3 +1335,41 @@ class TestROMSInputDatasetReadModelReferenceDate:
         assert dataset.read_model_reference_date() == RecordedReferenceDate(
             date=datetime(1995, 1, 1), cyclic=False
         )
+
+
+class TestROMSCarbonateSensitivity:
+    """Tests for `ROMSCarbonateSensitivity` and the variable contract it rides on."""
+
+    @staticmethod
+    def _write(path: Path, variables: tuple[str, ...]) -> Path:
+        """Write a tiny netCDF file holding only `variables`."""
+        xr.Dataset({name: ("x", np.zeros(2)) for name in variables}).to_netcdf(path)
+        return path
+
+    def test_variable_contract(self) -> None:
+        """The variables a CDR-LiTE build reads are the sensitivities and their times."""
+        assert CARBONATE_SENSITIVITY_VARIABLES == (
+            "ddic_dco2",
+            "ddic_dalk",
+            "ddic_dco2_time",
+            "ddic_dalk_time",
+        )
+
+    def test_is_partitionable(self) -> None:
+        """Like other surface forcing, the dataset is partitioned per rank."""
+        assert ROMSCarbonateSensitivity.partitionable is True
+
+    def test_complete_file_has_no_missing_variables(self, tmp_path: Path) -> None:
+        """A file carrying every variable reports nothing missing."""
+        path = self._write(tmp_path / "ok.nc", CARBONATE_SENSITIVITY_VARIABLES)
+        assert missing_carbonate_sensitivity_variables(path) == []
+
+    def test_missing_variables_are_listed_in_contract_order(
+        self, tmp_path: Path
+    ) -> None:
+        """Absent names come back in `CARBONATE_SENSITIVITY_VARIABLES` order."""
+        path = self._write(tmp_path / "partial.nc", ("ddic_dalk", "ddic_dco2"))
+        assert missing_carbonate_sensitivity_variables(path) == [
+            "ddic_dco2_time",
+            "ddic_dalk_time",
+        ]

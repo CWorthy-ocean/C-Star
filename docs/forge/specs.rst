@@ -56,7 +56,7 @@ A ``model.yaml`` has this shape:
 
 .. code-block:: yaml
 
-   bgc_mode: marbl   # marbl or none; the default for the wizard's biogeochemistry choice
+   bgc_mode: marbl   # marbl, none or cdr_lite; the default for the wizard's biogeochemistry choice
    use_pio: false    # default for the wizard's ParallelIO checkbox
 
    code:
@@ -91,8 +91,15 @@ A ``model.yaml`` has this shape:
    resolver derives the corresponding compile-time switches from them and
    decides whether the MARBL and PIO code are pulled in. Requesting PIO from
    a model with no ``code.pio`` pin is an error. ``param.ntrc_bio`` is the
-   MARBL tracer count: with ``bgc_mode: none`` the resolver sets it to 0, and
-   a non-zero count without MARBL is rejected.
+   MARBL tracer count: without MARBL (``bgc_mode: none`` or ``cdr_lite``) the
+   resolver sets it to 0, and a non-zero count without MARBL is rejected.
+   ``bgc_mode: cdr_lite`` is a build without MARBL whose only extra tracers
+   are ucla-roms' dedicated CDR-lite tracers: it needs ucla-roms 0.10.0 or
+   later and a CDR forcing (a ``cdr`` selection) with ``cdr_lite`` releases,
+   and, like ``none``, rejects a forcing selection that asks for BGC
+   forcing. The tracer counts and the ``cdr_lite_output`` stream are derived
+   from the generated CDR forcing at build time; see
+   :doc:`../developers/forge_internals`.
 
 ``code``
    The repositories to build, each a ``location`` with a ``commit`` or
@@ -121,12 +128,13 @@ spec omits them, so older specs are unaffected by additions.
 The bundled model specs
 ~~~~~~~~~~~~~~~~~~~~~~~
 
-``roms-marbl-0.9-default`` (ucla-roms 0.9.1) is the wizard's default. Older
-``roms-marbl-0.N-default`` entries pin earlier releases, ``pio-dev`` tracks
+``roms-marbl-0.10-default`` (ucla-roms 0.10.0) is the wizard's default. Older
+``roms-marbl-0.N-default`` entries pin earlier releases (``roms-marbl-0.9-default``
+stays for ucla-roms 0.9.1, which predates the ``cdr_lite`` mode's minimum), ``pio-dev`` tracks
 ucla-roms ``main`` with PIO enabled, and ``cson_roms-marbl_v0.1`` is the
 configuration the toy domain and the example blueprint use.
 
-.. literalinclude:: ../../cstar/catalog/bundled/ModelSpec/roms-marbl-0.9-default/model.yaml
+.. literalinclude:: ../../cstar/catalog/bundled/ModelSpec/roms-marbl-0.10-default/model.yaml
    :language: yaml
    :lines: 1-36
 

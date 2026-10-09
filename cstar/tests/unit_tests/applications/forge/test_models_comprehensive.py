@@ -187,6 +187,27 @@ class TestModelSpec:
         )
         assert spec.use_pio is True
 
+    def test_bgc_mode_defaults_marbl_and_accepts_the_three_modes(self):
+        settings = {"cppdefs": {"marbl": True}}
+        assert (
+            ModelSpec(name="m", code=_model_code(), model_settings=settings).bgc_mode
+            == "marbl"
+        )
+        for mode in ("marbl", "none", "cdr_lite"):
+            spec = ModelSpec(
+                name="m", code=_model_code(), bgc_mode=mode, model_settings=settings
+            )
+            assert spec.bgc_mode == mode
+
+    def test_bgc_mode_rejects_an_unknown_mode(self):
+        with pytest.raises(ValidationError, match="bgc_mode"):
+            ModelSpec(
+                name="m",
+                code=_model_code(),
+                bgc_mode="cdr-lite",
+                model_settings={"cppdefs": {"marbl": True}},
+            )
+
     def test_extra_fields_rejected(self):
         with pytest.raises(ValidationError):
             ModelSpec(

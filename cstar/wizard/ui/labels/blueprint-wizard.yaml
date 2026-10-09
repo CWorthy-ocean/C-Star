@@ -35,6 +35,12 @@ sections:
     desc: Check the resolved blueprint, then download it or save it to the catalog.
     required: false
 
+  # --- model subsections --------------------------------------------------------
+  model.carbonate:
+    title: Carbonate sensitivities
+    desc: The carbonate sensitivity files a CDR-lite build reads as surface forcing, supplied at run time by default.
+    required: false
+
   # --- grid subsections -------------------------------------------------------
   grid.geometry:
     title: Grid geometry
@@ -213,7 +219,13 @@ fields:
     required: true
   bgc_dd:
     label: Biogeochemistry
-    hint: MARBL couples biogeochemistry to the physics; “none” runs physics only.
+    hint: MARBL couples biogeochemistry to the physics; “none” runs physics only; “cdr_lite” runs only the CDR-lite tracers, without MARBL.
+  cs_source_dd:
+    label: Sensitivity source
+    hint: By default the carbonate-sensitivity-from workplan directive supplies the files from an earlier ROMS-MARBL step at run time; choose a directory to put them on the blueprint now.
+  cs_path:
+    label: Sensitivity files
+    hint: A directory of joined ROMS _cdrgas files, written by a ROMS-MARBL run with the gas-exchange output enabled.
   domain_dd:
     label: Domain preset
     required: true

@@ -19,6 +19,7 @@ if TYPE_CHECKING:
 
     import pandas as pd
 
+    from cstar.applications.forge.namelist_model import BgcMode
     from cstar.catalog.outputs import BlueprintOutput
 
 logger = logging.getLogger(__name__)
@@ -1208,7 +1209,7 @@ class DomainCatalog:
         base_model_dir: Path | str,
         description: str = "",
         *,
-        bgc_mode: str | None = None,
+        bgc_mode: BgcMode | None = None,
         use_pio: bool | None = None,
         roms_ref: str | None = None,
         marbl_ref: str | None = None,
@@ -1796,7 +1797,7 @@ class LayeredCatalog:
         base_model_dir: Path | str,
         description: str = "",
         *,
-        bgc_mode: str | None = None,
+        bgc_mode: BgcMode | None = None,
         use_pio: bool | None = None,
         roms_ref: str | None = None,
         marbl_ref: str | None = None,

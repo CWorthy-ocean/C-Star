@@ -604,8 +604,8 @@ prepared are skipped and reported with the reason:
   ``hello_world``);
 - the step's blueprint is produced by another step (``blueprint: {from_step:
   ...}``);
-- one of the step's directives (``continue-from`` or ``nest-from``) takes its
-  input from another step's output.
+- one of the step's directives (``continue-from``, ``nest-from`` or
+  ``carbonate-sensitivity-from``) takes its input from another step's output.
 
 Every step downstream of a skipped step is skipped as well, since a
 ``depends_on`` edge may carry data the planner cannot see. Skipped steps run

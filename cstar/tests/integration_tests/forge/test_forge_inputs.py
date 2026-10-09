@@ -6,7 +6,7 @@ emitted ``roms_marbl`` blueprint, the rendered namelist and cppdefs.
 
 Regenerate the namelist goldens after an intentional change with
 ``UPDATE_GOLDEN=1 pytest cstar/tests/integration_tests/forge -k golden``, review the
-diff, and commit it.
+diff, and commit it. Regenerate one case's golden with ``-k "golden and <case>"``.
 """
 
 import os
@@ -25,6 +25,7 @@ from typer.testing import CliRunner
 
 from cstar.applications.forge.engine import process_forge_blueprint
 from cstar.applications.forge.host import HostPaths
+from cstar.applications.forge.namelist_model import check_cdr_lite_mode_roms
 from cstar.applications.roms_marbl.models import RomsMarblBlueprint
 from cstar.cli.blueprint.check import app as check_app
 from cstar.orchestration.models import BlueprintIdentity
@@ -37,6 +38,7 @@ from cstar.roms.precheck import (
 )
 from cstar.tests.integration_tests.cases import (
     DT,
+    FORGE_CASES,
     PINNED_ROMS_REF,
     ROMS_REF,
     RUN_END,
@@ -61,11 +63,15 @@ RESTART_PERIOD = 1800.0
 
 @dataclass(frozen=True)
 class Expectation:
-    """What differs between the physics-only-BGC-surface cases."""
+    """What differs between the cases: BGC inputs, NHY/NOX forcing, and the build mode."""
 
     bgc_surface: bool
     bgc_input_stems: tuple[str, ...]
     nhy_nox: bool
+    marbl: bool
+    """Whether MARBL is built (``code.marbl``, ``#define MARBL``)."""
+    cdr_lite: bool
+    """Whether the ``cdr_lite`` build mode is on (``#define CDR_LITE``)."""
 
 
 EXPECTATIONS = {
@@ -73,11 +79,22 @@ EXPECTATIONS = {
         bgc_surface=True,
         bgc_input_stems=("surface-bgc", "boundary-bgc"),
         nhy_nox=True,
+        marbl=True,
+        cdr_lite=False,
     ),
     "constants": Expectation(
         bgc_surface=False,
         bgc_input_stems=("boundary-bgc",),
         nhy_nox=False,
+        marbl=True,
+        cdr_lite=False,
+    ),
+    "cdr_lite": Expectation(
+        bgc_surface=False,
+        bgc_input_stems=(),
+        nhy_nox=False,
+        marbl=False,
+        cdr_lite=True,
     ),
 }
 
@@ -113,7 +130,16 @@ def _generate(
     working_dir: Path,
     factory: Callable[..., tuple["ForgeBlueprint", Path]],
 ) -> Run:
-    """Resolve a case and run forge's generation (and configuration) into a directory."""
+    """Resolve a case and run forge's generation (and configuration) into a directory.
+
+    A ``cdr_lite`` case is skipped when ``ROMS_REF`` (the weekly matrix's
+    ``CSTAR_IT_ROMS_REF``) is older than the mode supports.
+    """
+    if FORGE_CASES[case_name].bgc_mode == "cdr_lite":
+        try:
+            check_cdr_lite_mode_roms(ROMS_REF)
+        except ValueError as exc:
+            pytest.skip(str(exc))
     cfg, forge_yaml = factory(case_name, working_dir)
     host = HostPaths(
         working_dir=working_dir,
@@ -176,6 +202,11 @@ def _cppdefs(run: Run) -> str:
     return (run.working_dir / "builds" / "compile-time" / "cppdefs.opt").read_text()
 
 
+def _raw_namelist(run: Run) -> f90nml.Namelist:
+    """The rendered namelist as written, without the typed schema's defaults."""
+    return f90nml.read(str(run.working_dir / "builds" / "run-time" / "namelist.nml"))
+
+
 class TestInputs:
     """The generated input netCDFs."""
 
@@ -223,6 +254,10 @@ class TestBlueprint:
         assert (producer.application, producer.name) == ("forge", run.cfg.name)
         assert producer.content_hash == run.cfg.content_hash()
 
+    def test_marbl_code(self, run: Run, expect: Expectation) -> None:
+        bp = _load_blueprint(run.blueprint_path)
+        assert (bp.code.marbl is not None) is expect.marbl
+
     def test_settings_sidecar_exists(self, run: Run) -> None:
         sidecar = run.working_dir / "blueprints" / f"settings_B_{run.cfg.name}.yaml"
         assert sidecar.is_file()
@@ -263,8 +298,7 @@ class TestNamelist:
         assert nml.basic_output_settings.output_period_rst == RESTART_PERIOD
         assert nml.surf_frc_settings.interp_bulk_frc is False
 
-        raw = f90nml.read(str(run.working_dir / "builds" / "run-time" / "namelist.nml"))
-        assert "pio_settings" in raw
+        assert "pio_settings" in _raw_namelist(run)
 
         frcfiles = [Path(f).name for f in nml.forcing_files.frcfiles]
         assert any("surface-physics" in f for f in frcfiles)
@@ -307,21 +341,72 @@ class TestCppdefs:
 
     def test_flags(self, run: Run, expect: Expectation) -> None:
         text = _cppdefs(run)
-        for key in ("PARALLEL_IO", "MARBL"):
-            assert re.search(rf"^#define {key}\b", text, re.MULTILINE), key
-        verb = "define" if expect.nhy_nox else "undef"
-        for key in ("NHY_FORCING", "NOX_FORCING"):
-            assert re.search(rf"^#{verb} {key}\b", text, re.MULTILINE), key
+        assert re.search(r"^#define PARALLEL_IO\b", text, re.MULTILINE)
+        for keys, enabled in (
+            (("MARBL",), expect.marbl),
+            (("CDR_LITE",), expect.cdr_lite),
+            (("NHY_FORCING", "NOX_FORCING"), expect.nhy_nox),
+        ):
+            verb = "define" if enabled else "undef"
+            for key in keys:
+                assert re.search(rf"^#{verb} {key}\b", text, re.MULTILINE), key
 
 
+@pytest.mark.parametrize("run", ["cdr_lite"], indirect=True)
+class TestCdrLite:
+    """``bgc_mode: cdr_lite``: ucla-roms' CDR-lite tracers in place of MARBL."""
+
+    TRACERS = ("temp", "salt", "CDR_OAE_ALK1", "CDR_OAE_DIC1", "CDR_DOR_DIC1")
+    """The tracer axis of ``CDR_LITE_FORCING``: one OAE release (an ALK/DIC pair)
+    and one DOR release."""
+
+    def test_tracer_counts(self, run: Run) -> None:
+        nml = _raw_namelist(run)
+        assert nml["param_settings"]["nt_bgc"] == 0
+        assert nml["param_settings"]["nt_passive"] == 0
+        assert nml["param_settings"]["nt_cdr_oae"] == 1
+        assert nml["param_settings"]["nt_cdr_dor"] == 1
+
+    def test_cdr_namelist_switches(self, run: Run) -> None:
+        nml = _raw_namelist(run)
+        assert nml["cdr_frc_settings"]["cdr_source"] is True
+        assert nml["cdr_lite_output_settings"]["do_cdr_lite_output"] is True
+        assert nml["cdr_output_settings"]["do_cdr_output"] is False
+
+    def test_cppdefs_cdr_forcing(self, run: Run) -> None:
+        assert re.search(r"^#define CDR_FORCING\b", _cppdefs(run), re.MULTILINE)
+
+    def test_carbonate_sensitivity_left_to_directive(self, run: Run) -> None:
+        bp = _load_blueprint(run.blueprint_path)
+        # supplied at run time by the carbonate-sensitivity-from directive
+        assert bp.forcing.carbonate_sensitivity is None
+
+    def test_cdr_forcing_tracer_axis_matches_namelist(self, run: Run) -> None:
+        bp = _load_blueprint(run.blueprint_path)
+        assert bp.cdr_forcing is not None
+        cdr_file = Path(str(bp.cdr_forcing.data[0].location))
+        # the suite-wide CDF-5 and PIO-dtype checks run on every ``input_files`` entry
+        assert cdr_file.resolve() in {f.resolve() for f in run.input_files}
+        param = _raw_namelist(run)["param_settings"]
+        n_tracers = (
+            2 + param["nt_passive"] + 2 * param["nt_cdr_oae"] + param["nt_cdr_dor"]
+        )
+        with xr.open_dataset(cdr_file, decode_times=False) as ds:
+            assert tuple(str(n) for n in ds["tracer_name"].values) == self.TRACERS
+            assert ds.sizes["ntracers"] == n_tracers == len(self.TRACERS)
+            assert ds["cdr_trcflx"].sizes["ntracers"] == n_tracers
+
+
+@pytest.mark.parametrize("case_name", ["unified", "cdr_lite"])
 def test_rerun_reuses_inputs(
+    case_name: str,
     tmp_path: Path,
     forge_blueprint_factory: Callable[..., tuple["ForgeBlueprint", Path]],
 ) -> None:
     """A second call on the same working directory leaves the inputs alone and
     re-emits the blueprint, changed only by the provenance of the new run.
     """
-    first = _generate("unified", tmp_path, forge_blueprint_factory)
+    first = _generate(case_name, tmp_path, forge_blueprint_factory)
     mtimes = {p: p.stat().st_mtime_ns for p in first.input_files}
     blueprint = yaml.safe_load(first.blueprint_path.read_text())
     assert mtimes

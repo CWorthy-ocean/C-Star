@@ -17,18 +17,23 @@ import cstar.catalog
 from cstar.applications.forge.namelist_model import (
     _GATED_SECTION_SWITCHES,
     _PRECHECK_SECTION_MAP,
+    CDR_LITE_MODE_MIN_ROMS,
     CdrGasExchOutputCfg,
     CdrLiteOutputCfg,
     CdrLiteOutputCfgV0_9_0,
+    CdrTracerCounts,
     RunTimeSettings,
     RunTimeSettingsV0_4_0,
     RunTimeSettingsV0_5_0,
     RunTimeSettingsV0_6_0,
     RunTimeSettingsV0_7_0,
     RunTimeSettingsV0_9_0,
+    bgc_mode_from_cppdefs,
     build_namelist,
     canonical_output_sections_for_precheck,
+    cdr_tracer_counts,
     check_bgc_tracer_count,
+    check_cdr_lite_mode_roms,
     check_cdr_lite_sections,
     check_cdr_output_sections,
     forge_field_for,
@@ -588,6 +593,28 @@ def test_validate_run_time_sections_skips_bgc_check_without_cppdefs():
     assert validate_run_time_sections({"param": {**_PARAM, "ntrc_bio": 32}}) == []
 
 
+@pytest.mark.parametrize(
+    ("cppdefs", "roms_ref", "rejected"),
+    [
+        ({"cdr_lite": True, "marbl": False}, "0.9.1", True),
+        ({"cdr_lite": True, "marbl": False}, "0.10.0", False),
+        ({"cdr_lite": True, "marbl": False}, None, False),
+        # online sensitivities on a MARBL build are not the CDR-lite mode
+        ({"cdr_lite": True, "marbl": True}, "0.9.0", False),
+        ({"marbl": False}, "0.9.0", False),
+    ],
+)
+def test_validate_run_time_sections_checks_cdr_lite_mode_roms_pin(
+    cppdefs, roms_ref, rejected
+):
+    """A stored cdr_lite blueprint pinned below the minimum ucla-roms is reported
+    up front (engine/wizard), not first at configure_build.
+    """
+    errs = validate_run_time_sections({"cppdefs": cppdefs}, roms_ref=roms_ref)
+    pinned_too_old = [e for e in errs if "CDR-lite without MARBL needs" in e]
+    assert bool(pinned_too_old) is rejected
+
+
 # ---------------------------------------------------------------------------
 # run_time_settings_for_ref -- schema-variant selection by ucla-roms ref
 # ---------------------------------------------------------------------------
@@ -900,65 +927,211 @@ def _lite(online=False, stream=False, gas=False, param=None):
     }
 
 
+_V09 = RunTimeSettingsV0_9_0
+
+
 @pytest.mark.parametrize(
-    ("settings", "marbl", "expected"),
+    ("settings", "mode", "expected"),
     [
-        (_lite(online=True), True, True),
-        (_lite(online=False), True, False),
-        (_lite(online=False), False, False),
-        (_lite(stream=True), False, False),  # tracer stream alone: no CDR_LITE
-        (_lite(online=True, stream=True, gas=True), True, True),
-        ({}, True, False),  # sections absent: nothing to read
-        ({"param": _PARAM}, False, False),
+        (_lite(online=True), "marbl", True),
+        (_lite(online=False, param={}), "marbl", False),
+        (_lite(online=False, param={}), "none", False),
+        ({}, "marbl", False),  # sections absent: nothing to read
+        ({"param": _PARAM}, "none", False),
         # A disabled section never trips the tracer-count rule.
-        (_lite(param={}), True, False),
+        (_lite(param={}), "marbl", False),
+        (_lite(online=True, stream=True, gas=True), "marbl", True),
+        # bgc_mode cdr_lite needs CDR_LITE without the online knob; the tracer
+        # counts are generation-derived, so none are required before generation
+        # (configure_build enforces them), and the stream/gas switches are fine.
+        (_lite(param={}), "cdr_lite", True),
+        (_lite(stream=True, param={}), "cdr_lite", True),
+        (_lite(stream=True, gas=True, param={}), "cdr_lite", True),
+        (_lite(stream=True), "cdr_lite", True),
     ],
 )
 def test_check_cdr_lite_sections_returns_whether_cdr_lite_is_needed(
-    settings, marbl, expected
+    settings, mode, expected
 ):
-    assert check_cdr_lite_sections(settings, bgc_mode_is_marbl=marbl) is expected
+    assert (
+        check_cdr_lite_sections(settings, bgc_mode=mode, settings_cls=_V09) is expected
+    )
 
 
 @pytest.mark.parametrize(
-    ("settings", "marbl", "match"),
+    ("settings", "mode", "match"),
     [
-        (_lite(online=True), False, "MARBL"),
-        (_lite(stream=True, gas=True), True, "needs CDR_LITE.*cdr_online_carbonate"),
-        (_lite(online=True, param={}), True, "param.nt_cdr_oae"),
-        (_lite(stream=True, param={}), True, "cdr_lite_output.do_cdr_lite_output"),
+        (_lite(online=True), "none", "MARBL"),
+        (_lite(online=True), "cdr_lite", "MARBL"),
+        (_lite(stream=True, gas=True), "marbl", "needs CDR_LITE.*cdr_online_carbonate"),
+        (_lite(stream=True, gas=True, param={}), "none", 'bgc_mode "cdr_lite"'),
+        (_lite(online=True, param={}), "marbl", "param.nt_cdr_oae"),
+        (_lite(stream=True, param={}), "marbl", "cdr_lite_output.do_cdr_lite_output"),
         (
             _lite(online=True, param={"nt_cdr_oae": 0, "nt_cdr_dor": 0}),
-            True,
+            "marbl",
             "== 0",
         ),
+        # CDR tracers need CDR_LITE (ROMS: "Forcing type not supported"): from
+        # the bgc mode or the online knob, nothing else.
+        (_lite(), "none", "Forcing type not supported"),
+        (_lite(), "marbl", "Forcing type not supported"),
+        (_lite(param={"nt_cdr_dor": 1}), "marbl", "Forcing type not supported"),
     ],
 )
 def test_check_cdr_lite_sections_rejects_what_roms_would_abort_on(
-    settings, marbl, match
+    settings, mode, match
 ):
     with pytest.raises(ValueError, match=match):
-        check_cdr_lite_sections(settings, bgc_mode_is_marbl=marbl)
+        check_cdr_lite_sections(settings, bgc_mode=mode, settings_cls=_V09)
+
+
+def test_check_cdr_lite_sections_accepts_cdr_tracers_when_cdr_lite_is_compiled():
+    assert check_cdr_lite_sections(_lite(), bgc_mode="cdr_lite", settings_cls=_V09)
+    online = _lite(online=True)
+    assert check_cdr_lite_sections(online, bgc_mode="marbl", settings_cls=_V09)
+
+
+def test_check_cdr_lite_sections_cdr_tracers_without_cdr_lite_need_a_tier_that_has_it():
+    """CDR tracers exist from ucla-roms 0.4.0, but the CDR_LITE cppkey (and the
+    abort without it) only from 0.9.0: older tiers are not held to the rule.
+    """
+    for tier in (RunTimeSettingsV0_4_0, RunTimeSettingsV0_7_0):
+        assert not check_cdr_lite_sections(_lite(), bgc_mode="none", settings_cls=tier)
 
 
 def test_check_cdr_lite_sections_accepts_dor_tracers_alone():
     settings = _lite(online=True, param={"nt_cdr_oae": 0, "nt_cdr_dor": 2})
-    assert check_cdr_lite_sections(settings, bgc_mode_is_marbl=True) is True
+    assert check_cdr_lite_sections(settings, bgc_mode="marbl", settings_cls=_V09)
 
 
 def test_check_cdr_lite_sections_treats_a_null_tracer_count_as_zero():
     """A YAML ``nt_cdr_oae:`` (null) is "no tracers", not a TypeError."""
     settings = _lite(stream=True, param={"nt_cdr_oae": None})
     with pytest.raises(ValueError, match="== 0"):
-        check_cdr_lite_sections(settings, bgc_mode_is_marbl=True)
+        check_cdr_lite_sections(settings, bgc_mode="marbl", settings_cls=_V09)
 
 
 def test_check_cdr_lite_sections_reports_every_problem_together():
     settings = _lite(online=False, stream=True, gas=True, param={})
     with pytest.raises(ValueError) as exc:
-        check_cdr_lite_sections(settings, bgc_mode_is_marbl=True)
+        check_cdr_lite_sections(settings, bgc_mode="marbl", settings_cls=_V09)
     assert "needs CDR_LITE" in str(exc.value)
     assert "== 0" in str(exc.value)
+
+    both = _lite(online=True, stream=True, param={"nt_cdr_dor": 1})
+    with pytest.raises(ValueError) as exc:
+        check_cdr_lite_sections(both, bgc_mode="none", settings_cls=_V09)
+    assert "MARBL" in str(exc.value)
+
+
+# ---------------------------------------------------------------------------
+# bgc_mode_from_cppdefs
+# ---------------------------------------------------------------------------
+@pytest.mark.parametrize(
+    ("cppdefs", "expected"),
+    [
+        ({"marbl": True}, "marbl"),
+        # MARBL with the online CDR-lite sensitivities is still a MARBL build.
+        ({"marbl": True, "cdr_lite": True}, "marbl"),
+        ({"marbl": False, "cdr_lite": True}, "cdr_lite"),
+        ({"cdr_lite": True}, "cdr_lite"),
+        ({"marbl": False}, "none"),
+        ({"marbl": False, "cdr_lite": False}, "none"),
+        ({}, "none"),
+    ],
+)
+def test_bgc_mode_from_cppdefs(cppdefs, expected):
+    assert bgc_mode_from_cppdefs(cppdefs) == expected
+
+
+# ---------------------------------------------------------------------------
+# check_cdr_lite_mode_roms
+# ---------------------------------------------------------------------------
+@pytest.mark.parametrize("ref", ["0.10.0", "v0.10.0", "0.10.2", "0.11.0", "1.0.0"])
+def test_check_cdr_lite_mode_roms_accepts_releases_from_the_minimum(ref):
+    assert CDR_LITE_MODE_MIN_ROMS == (0, 10, 0)
+    check_cdr_lite_mode_roms(ref)
+
+
+@pytest.mark.parametrize("ref", ["main", "pio-dev", "abc1234", "", None])
+def test_check_cdr_lite_mode_roms_treats_a_non_tag_ref_as_the_latest(ref):
+    check_cdr_lite_mode_roms(ref)
+
+
+@pytest.mark.parametrize("ref", ["0.9.1", "0.9.0", "0.8.0", "v0.7.1"])
+def test_check_cdr_lite_mode_roms_rejects_older_releases(ref):
+    with pytest.raises(ValueError, match=r"ucla-roms >= 0\.10\.0"):
+        check_cdr_lite_mode_roms(ref)
+
+
+# ---------------------------------------------------------------------------
+# cdr_tracer_counts
+# ---------------------------------------------------------------------------
+def test_cdr_tracer_counts_reads_every_generated_family():
+    counts = cdr_tracer_counts(
+        [
+            "temp",
+            "salt",
+            "passive_tracer1",
+            "passive_tracer2",
+            "CDR_OAE_ALK1",
+            "CDR_OAE_DIC1",
+            "CDR_OAE_ALK2",
+            "CDR_OAE_DIC2",
+            "CDR_DOR_DIC1",
+        ]
+    )
+    assert counts == CdrTracerCounts(n_passive=2, n_oae_pairs=2, n_dor=1, other=())
+
+
+def test_cdr_tracer_counts_physics_only_axis_is_all_zero():
+    assert cdr_tracer_counts(["temp", "salt"]) == CdrTracerCounts(0, 0, 0, ())
+    assert cdr_tracer_counts([]) == CdrTracerCounts(0, 0, 0, ())
+
+
+def test_cdr_tracer_counts_returns_marbl_names_in_axis_order():
+    counts = cdr_tracer_counts(
+        ["temp", "salt", "PO4", "CDR_OAE_ALK1", "CDR_OAE_DIC1", "NO3", "DIC"]
+    )
+    assert (counts.n_oae_pairs, counts.n_dor, counts.n_passive) == (1, 0, 0)
+    assert counts.other == ("PO4", "NO3", "DIC")
+
+
+def test_cdr_tracer_counts_accepts_numpy_strings():
+    import numpy as np
+
+    counts = cdr_tracer_counts(np.array(["temp", "salt", "CDR_DOR_DIC1"]))
+    assert counts.n_dor == 1
+
+
+@pytest.mark.parametrize(
+    ("names", "match"),
+    [
+        (["CDR_OAE_ALK1"], r"do not pair up \(1 ALK, 0 DIC\)"),
+        (["CDR_OAE_DIC1"], r"do not pair up \(0 ALK, 1 DIC\)"),
+        (
+            ["CDR_OAE_ALK1", "CDR_OAE_DIC1", "CDR_OAE_ALK2"],
+            r"do not pair up \(2 ALK, 1 DIC\)",
+        ),
+        (["CDR_OAE_ALK2", "CDR_OAE_DIC2"], r"CDR_OAE_ALK<k> is numbered \[2\]"),
+        (["CDR_DOR_DIC1", "CDR_DOR_DIC3"], r"CDR_DOR_DIC<k> is numbered \[1, 3\]"),
+        (["passive_tracer2"], r"passive_tracer<k> is numbered \[2\]"),
+        (["CDR_DOR_DIC1", "CDR_DOR_DIC1"], r"CDR_DOR_DIC<k> is numbered \[1, 1\]"),
+    ],
+)
+def test_cdr_tracer_counts_rejects_malformed_axes(names, match):
+    with pytest.raises(ValueError, match=match):
+        cdr_tracer_counts(names)
+
+
+def test_cdr_tracer_counts_reports_every_malformed_family_together():
+    with pytest.raises(ValueError) as exc:
+        cdr_tracer_counts(["passive_tracer2", "CDR_DOR_DIC2", "CDR_OAE_ALK1"])
+    msg = str(exc.value)
+    assert "passive_tracer<k>" in msg
+    assert "CDR_DOR_DIC<k>" in msg
+    assert "do not pair up" in msg
 
 
 def test_validate_run_time_sections_reports_a_null_tracer_count_without_raising():
@@ -982,6 +1155,28 @@ def test_validate_run_time_sections_runs_the_cdr_lite_check():
     )
     # Without cppdefs the MARBL input is missing: skipped, like the BGC check.
     assert validate_run_time_sections(_lite(online=True), roms_ref="0.9.0") == []
+
+
+def test_validate_run_time_sections_reads_the_bgc_mode_from_cppdefs():
+    """A stored cdr_lite blueprint has zero counts before generation (the CDR
+    forcing supplies them), so the stream switch alone is not an error there; the
+    same counts without ``CDR_LITE`` are, on a tier that has it.
+    """
+    stored = {**_lite(stream=True, param={}), "cppdefs": {"marbl": False}}
+    assert any("== 0" in e for e in validate_run_time_sections(stored, "0.10.0"))
+    stored["cppdefs"] = {"marbl": False, "cdr_lite": True}
+    assert validate_run_time_sections(stored, "0.10.0") == []
+
+    counted = {**_lite(), "cppdefs": {"marbl": False}}
+    assert any(
+        "Forcing type not supported" in e
+        for e in validate_run_time_sections(counted, "0.10.0")
+    )
+    counted["cppdefs"] = {"marbl": False, "cdr_lite": True}
+    assert validate_run_time_sections(counted, "0.10.0") == []
+    # Older tiers have no CDR_LITE: the same counts are fine there.
+    counted["cppdefs"] = {"marbl": False}
+    assert validate_run_time_sections(counted, "0.7.0") == []
 
 
 def test_validate_run_time_sections_skips_cdr_lite_check_on_a_tier_without_it():

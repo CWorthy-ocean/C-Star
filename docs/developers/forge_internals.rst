@@ -411,7 +411,9 @@ ucla-roms release: ``roms-marbl-0.5-default`` pins ``0.5.0``,
 #361, with no new settings tier -- it still resolves to
 ``RunTimeSettingsV0_7_0``), ``roms-marbl-0.9-default`` pins ``0.9.1``
 (``RunTimeSettingsV0_9_0``, which models the ``cdr_lite`` section; the spec does
-not declare it, see below); older specs stay
+not declare it, see below), and ``roms-marbl-0.10-default`` pins ``0.10.0`` (same
+tier and same templates as the 0.9 spec; the default, and the first that runs
+``bgc_mode: cdr_lite``); older specs stay
 fixed and keep emitting
 byte-identical legacy namelists. ``version_gated_section_names()``
 (``namelist_model.py``) collects every section modeled by at least one
@@ -431,18 +433,22 @@ so the editor shows no widget for them, but a loaded blueprint's values are
 carried through unchanged.
 
 ``CDR_LITE`` (ucla-roms >= 0.9.0, formerly ``CDR_TRACER``) is a
-resolver-owned cppdef: ``check_cdr_lite_sections`` turns it on when
-``cdr_lite.cdr_online_carbonate_sensitivity`` is set (MARBL computes the
-carbonate sensitivities from its ALT_CO2 state), and rejects the
-combinations ucla-roms would abort on at init (online sensitivity without
-MARBL; ``wrt_gas_exchange`` without ``CDR_LITE``; CDR-lite output or gas
-exchange with no CDR-lite tracers). Compiling ``CDR_LITE`` with
-file-based sensitivities (``ddic_dco2``/``ddic_dalk`` forcing) is not yet
-supported, so a user ``cppdefs.cdr_lite`` without online sensitivity is
-rejected at resolve time. Unlike ucla-roms 0.7/0.8's stream, 0.9's
-``cdr_lite_output`` does not force ``CDR_FORCING`` on: the per-tier rows of
-``CDR_OUTPUT_SECTIONS`` and of the precheck section table apply only when
-the row's settings class is the pinned tier's own annotation for that section.
+resolver-owned cppdef with two sources. In ``bgc_mode: marbl``,
+``cdr_lite.cdr_online_carbonate_sensitivity`` turns it on (MARBL computes the
+carbonate sensitivities from its ALT_CO2 state). In ``bgc_mode: cdr_lite`` it
+is on for the mode itself, with the sensitivities read from forcing files
+(the online knob is rejected there; a separate package documents the files).
+``check_cdr_lite_sections`` derives it and rejects the combinations ucla-roms
+would abort on at init: the online sensitivity without MARBL;
+``wrt_gas_exchange`` without ``CDR_LITE``; CDR-lite output or the online
+sensitivity with no CDR-lite tracers; and, on a tier that models ``cdr_lite``
+(``settings_cls``), CDR tracers (``nt_cdr_oae + nt_cdr_dor > 0``) in a build
+without ``CDR_LITE`` ("Forcing type not supported"). A user ``cppdefs.cdr_lite``
+that neither source needs is rejected at resolve time. Unlike ucla-roms
+0.7/0.8's stream, 0.9's ``cdr_lite_output`` does not force ``CDR_FORCING`` on:
+the per-tier rows of ``CDR_OUTPUT_SECTIONS`` and of the precheck section table
+apply only when the row's settings class is the pinned tier's own annotation
+for that section.
 From ucla-roms 0.9.1 an active CDR mode no longer requires MARBL: the
 parameterized releases (``simple``/``yaml``/``netcdf``) run in physics-only
 builds with ``cppdefs.cdr_forcing`` on and ``cdr_output.do_cdr_output`` left
@@ -453,15 +459,49 @@ off (that module needs MARBL). ``upscaled`` (depth profiles) and pins below
 an ``#if define`` typo), so a nonzero ``tracer_diff2.tnu2_default`` only
 takes effect there; every bundled ModelSpec uses 0.0.
 
-The bundled ModelSpecs do not declare ``cdr_lite`` yet, so the knob is absent
-from the wizard and ``&CDR_LITE_SETTINGS`` is written at its schema default
-(off): CDR-lite tracers (``nt_cdr_oae``/``nt_cdr_dor`` > 0) also need per-tracer
-surface-flux forcing (``CDR_OAE_DIC<n>_flx``/``CDR_DOR_DIC<n>_flx`` on
-``CDR_time``) that Forge does not generate, and ROMS aborts looking it up in the
-forcing files. The CDR-lite BGC-mode follow-up wires that forcing up. The
-plumbing above (the ``cppdefs.cdr_lite`` derivation, ``check_cdr_lite_sections``,
-``RunTimeSettingsV0_9_0.cdr_lite``) stays in place, and the section can still be
-set through ``run_time_overrides``.
+``bgc_mode`` is a three-valued build mode (``BgcMode`` in ``namelist_model.py``):
+``marbl`` (MARBL tracers), ``none`` (physics only) and ``cdr_lite`` (no MARBL; the
+only extra tracers are ucla-roms' dedicated CDR-lite tracers). The resolver
+records it as ``cppdefs.marbl``/``cppdefs.cdr_lite`` only, and
+``bgc_mode_from_cppdefs`` is the one derivation of the mode back from a stored
+blueprint's cppdefs (``marbl`` wins, so MARBL with the online sensitivity is
+still ``marbl``); the executor and the generation step use it rather than
+re-reading the two flags. The resolver, for ``cdr_lite``: sets ``marbl`` off and
+``cdr_lite`` on, zeroes ``param.ntrc_bio``, turns ``nhy_forcing``/``nox_forcing``
+off, drops ``code.marbl``, rejects BGC forcing (as for ``none``), requires a CDR
+forcing with ``cdr_lite`` releases, and, in the ``simple`` CDR mode, defaults
+each release's ``tracer_set`` to ``cdr_lite`` (``yaml``/``netcdf`` carry their
+own). The mode is gated on ucla-roms >= ``CDR_LITE_MODE_MIN_ROMS`` (0.10.0: the
+``CDR_LITE`` key exists from 0.9.0, CDR forcing without MARBL from 0.9.1;
+0.10.0 writes forcing-ready ``_cdrgas`` files and zero-fills the
+``<CDR tracer>_flx`` surface fluxes a CDR-lite tracer has no forcing for, which
+Forge's CDR-lite mode relies on because it generates neither;
+``check_cdr_lite_mode_roms``, resolver and ``configure_build``).
+
+What the mode derives is not knowable at resolve time, so it is derived where
+it becomes known. The tracer counts come from the CDR forcing during
+generation: ``cdr_tracer_counts`` reads ``passive_tracer<i>``,
+``CDR_OAE_ALK<k>``/``CDR_OAE_DIC<k>`` and ``CDR_DOR_DIC<j>`` off the file's
+``tracer_name`` coordinate (roms-tools >= 5.1 writes it on ``ntracers``, in ROMS
+order), and ``_generate_cdr_forcing``/``_generate_cdr_forcing_from_custom_file``
+write ``param.nt_cdr_oae``/``nt_cdr_dor`` into the live settings
+(``GENERATION_DERIVED_LEAF_KEYS`` keeps ``configure_build``'s overlay of the
+stored zeros from reverting them, and ``configure_build`` sizes ``n_tracers``
+from the live ``param`` rather than the stored blueprint). ``param.nt_passive``
+is user-owned, so a file whose passive count differs from it is rejected, not
+overwritten. Under ``cdr_lite`` the handlers also reject MARBL tracer names and
+volume releases, and in every mode the file's ``ntracers`` must equal the
+build's tracer count (a file without ``tracer_name`` is an error under
+``cdr_lite`` and left alone otherwise). ``configure_build`` then forces
+``cdr_lite_output.do_cdr_lite_output`` on (the ``_cdrtrc`` stream is the only
+output the CDR tracers appear in, and ROMS aborts at init if it is on with zero
+CDR tracers) and rejects a CDR-lite build whose forcing defined no CDR-lite
+tracers. The resolver does not force the stream (the counts are unknown), so
+the output-stream precheck sees it only at build time. The bundled ModelSpecs do
+not declare ``cdr_lite``: the online knob is absent from the wizard and
+``&CDR_LITE_SETTINGS`` is written at its default (off), which is what
+``bgc_mode: cdr_lite`` runs with; the section can still be set through
+``run_time_overrides``.
 
 ucla-roms 0.5.0 also added a run-start precheck (``check_output_divides_rst``):
 each enabled output stream's ``nrpf x output_period`` must evenly divide
@@ -535,22 +575,25 @@ Known gaps / open items
 Golden fixtures
 -----------------------
 
-Two committed goldens pin the resolved-settings and namelist contracts
+Two committed unit goldens pin the resolved-settings and namelist contracts
 (treat any diff as a behavior change to justify, not noise):
 
 - **Settings-level**: ``test_golden_model_settings_test_tiny`` diffs
   resolved ``model_settings`` against
   ``golden_model_settings_test-tiny.json``. No regeneration hook -- update
-  manually. Four sibling tests pin the same comparison for each
+  manually. Five sibling tests pin the same comparison for each
   versioned-namelist schema tier: ``test_golden_model_settings_test_tiny_roms050``,
   ``_roms060``, ``_roms070``, and ``_roms090`` (``roms-marbl-0.{5,6,7,9}-default``,
-  against ``golden_model_settings_test-tiny-roms0{50,60,70,90}.json``).
+  against ``golden_model_settings_test-tiny-roms0{50,60,70,90}.json``), and for
+  the ``bgc_mode: cdr_lite`` build on ``roms-marbl-0.10-default``,
+  ``_roms090_cdr_lite`` (against
+  ``golden_model_settings_test-tiny-roms090-cdr-lite.json``).
 - **Byte-exact namelist**: ``TestGoldenNamelist::test_golden_namelist_test_tiny``
   drives the real ``generate_inputs()`` -> ``configure_build()`` chain (real
   ``write_roms_namelist``; only roms-tools construction classes are mocked)
   and diffs the rendered ``namelist.nml`` against
   ``golden_namelist_test-tiny.nml`` (host-rooted absolute paths normalized
-  to a ``<WORKDIR>`` token). Four sibling tests pin the versioned-namelist
+  to a ``<WORKDIR>`` token). Five sibling tests pin the versioned-namelist
   schemas against the same test-tiny domain/forcing/output setup:
   ``test_golden_namelist_test_tiny_roms050`` (``roms-marbl-0.5-default``,
   ``golden_namelist_test-tiny-roms050.nml``),
@@ -561,9 +604,22 @@ Two committed goldens pin the resolved-settings and namelist contracts
   ``golden_namelist_test-tiny-roms070.nml``), and
   ``test_golden_namelist_test_tiny_roms090`` (``roms-marbl-0.9-default``,
   ``&CDR_LITE_OUTPUT_SETTINGS``/``&CDR_LITE_SETTINGS`` in place of the
-  CDR_TRACER group, ``golden_namelist_test-tiny-roms090.nml``). Regenerate one at a time via
+  CDR_TRACER group, ``golden_namelist_test-tiny-roms090.nml``), and
+  ``test_golden_namelist_test_tiny_roms090_cdr_lite`` (``bgc_mode: cdr_lite``
+  on ``roms-marbl-0.10-default`` with a physics-only forcing and a real
+  roms-tools CDR forcing: ``nt_bgc = 0``, ``nt_cdr_oae``/``nt_cdr_dor`` read off
+  the CDR forcing, ``golden_namelist_test-tiny-roms090-cdr-lite.nml``).
+  Regenerate one at a time via
   ``UPDATE_GOLDEN=1 pytest <path> -k <test name>`` (the run intentionally
   fails after writing; rerun without the env var to confirm). To select
   *only* the legacy test, use ``-k "golden_namelist_test_tiny and not
   roms050 and not roms060 and not roms070 and not roms090"`` -- a bare ``-k
-  golden_namelist_test_tiny`` matches all five.
+  golden_namelist_test_tiny`` matches all six, and ``-k
+  golden_namelist_test_tiny_roms090`` matches the ``cdr_lite`` test too (add
+  ``and not cdr_lite`` to select only the ``roms090`` one).
+
+The integration suite pins the rendered namelist of each of its forge cases
+(``unified``, ``constants`` and ``cdr_lite``) the same way, from real
+roms-tools output, in
+``cstar/tests/integration_tests/forge/fixtures/golden_namelist_<case>.nml``;
+see :doc:`../contributing`.

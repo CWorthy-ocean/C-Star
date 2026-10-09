@@ -276,6 +276,24 @@ def test_register_model_from_settings_applies_live_overrides(isolated_catalog):
     assert data["code"]["marbl"] == base_code["marbl"]
 
 
+def test_register_model_from_settings_stores_the_cdr_lite_bgc_mode(isolated_catalog):
+    from cstar.applications.forge.models import ModelSpec
+    from cstar.catalog.domain_catalog import default_catalog as _cat
+
+    base_dir = _cat.model_dir("roms-marbl-0.9-default")
+    isolated_catalog.register_model_from_settings(
+        "my-cdr-lite-model",
+        {"cppdefs": {"marbl": False}, "param": {"nt_passive": 0}},
+        base_dir,
+        description="m",
+        bgc_mode="cdr_lite",
+    )
+    data = isolated_catalog.model_data("my-cdr-lite-model")
+    assert data["bgc_mode"] == "cdr_lite"
+    # the saved spec loads as a ModelSpec (the typed ``bgc_mode`` accepts it)
+    assert ModelSpec(**{**data, "name": "my-cdr-lite-model"}).bgc_mode == "cdr_lite"
+
+
 def test_register_model_from_settings_applies_marbl_ref(isolated_catalog):
     from cstar.catalog.domain_catalog import default_catalog as _cat
 

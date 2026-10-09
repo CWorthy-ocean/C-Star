@@ -2,11 +2,11 @@
 name: Test Blueprint
 description: This is the description of my test blueprint
 application: roms_marbl
-schema_version: 3.2.0
-working_dir: .
 state: draft
 valid_start_date: 2000-01-01 00:00:00
 valid_end_date: 2025-01-01 00:00:00
+working_dir: .
+schema_version: 3.2.0
 code:
   roms:
     location: https://github.com/CWorthy-ocean/ucla-roms.git
@@ -36,6 +36,9 @@ code:
         - river_frc.opt
         - tides.opt
         - Makefile
+  pio:
+    location: https://github.com/NCAR/ParallelIO.git
+    branch: pio2_7_0
 forcing:
   boundary:
     data:
@@ -69,12 +72,22 @@ forcing:
     data:
       - location: http://mockdoc.com/partitioning.nc
         hash: abc123
+  # Optional. Carbonate sensitivities (ddic_dco2, ddic_dalk and their time
+  # variables) read by a CDR-LiTE build (ucla-roms >= 0.9.0) that does not
+  # compute them online, e.g. the _cdrgas output of an earlier ROMS-MARBL run.
+  # carbonate_sensitivity:
+  #   documentation: http://mockdoc.com/partitioning
+  #   locked: false
+  #   data:
+  #     - location: http://mockdoc.com/output_cdrgas.20200101000000.nc
+  #       hash: abc123
 partitioning:
   documentation: http://mockdoc.com/partitioning
   hash: null
   locked: false
   n_procs_x: 16
   n_procs_y: 8
+  use_pio: true
 namelist_overrides:
   time_stepping:
     dt: 1

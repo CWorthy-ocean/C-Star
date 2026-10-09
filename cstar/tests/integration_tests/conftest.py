@@ -3,7 +3,7 @@ import os
 import shutil
 from collections.abc import Callable
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import pooch
 import pytest
@@ -213,13 +213,18 @@ def forge_blueprint_factory(
     Returns
     -------
     Callable[..., tuple[ForgeBlueprint, Path]]
-        ``(case_name, working_dir, *, name=None)`` -> the resolved blueprint and the
-        path of the ``forge_blueprint.yaml`` written into ``working_dir``. No network
-        access is needed because ``dt`` is supplied.
+        ``(case_name, working_dir, *, name=None, run_time_overrides=None)`` -> the
+        resolved blueprint and the path of the ``forge_blueprint.yaml`` written into
+        ``working_dir``. ``run_time_overrides`` replaces the case's own when given. No
+        network access is needed because ``dt`` is supplied.
     """
 
     def _factory(
-        case_name: str, working_dir: Path, *, name: str | None = None
+        case_name: str,
+        working_dir: Path,
+        *,
+        name: str | None = None,
+        run_time_overrides: dict[str, Any] | None = None,
     ) -> tuple["ForgeBlueprint", Path]:
         case = FORGE_CASES[case_name]
         domain = test_catalog.domain_data(case.domain)
@@ -237,6 +242,9 @@ def forge_blueprint_factory(
             output_settings=test_catalog.output_data("test-minimal"),
             name=name or f"it-{case_name}",
             compile_time_overrides=case.compile_time_overrides,
+            run_time_overrides=run_time_overrides or case.run_time_overrides,
+            bgc_mode=case.bgc_mode,
+            cdr=case.cdr,
             roms_ref=ROMS_REF,
         )
         working_dir.mkdir(parents=True, exist_ok=True)

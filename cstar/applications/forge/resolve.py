@@ -31,13 +31,14 @@ import copy
 import logging
 import warnings
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Literal
+from typing import TYPE_CHECKING, Any, get_args
 
 import yaml
 
 from cstar.applications.forge.blueprint import (
     BgcSourceItem,
     BoundaryForcing,
+    CarbonateSensitivitySpec,
     CdrSpec,
     Code,
     CodeRepo,
@@ -67,10 +68,12 @@ from cstar.applications.forge.blueprint import (
 # Canonical CDR-output diagnostics helper lives in namelist_model (forge side) so
 # the executor can share it.
 from cstar.applications.forge.namelist_model import (
+    BgcMode,
     NamelistConsistencyError,
     canonical_output_sections_for_precheck,
     check_bgc_tracer_count,
     check_cdr_forcing_mode,
+    check_cdr_lite_mode_roms,
     check_cdr_lite_sections,
     check_cdr_output_sections,
     check_output_streams_divide_rst,
@@ -78,6 +81,7 @@ from cstar.applications.forge.namelist_model import (
     cppdefs_for_precheck,
     ensure_cdr_output_marbl_diagnostics,
     normalize_legacy_sections,
+    online_carbonate_sensitivity_requested,
     output_precheck_applies_to,
     prune_version_gated_sections,
     run_time_settings_for_ref,
@@ -93,7 +97,10 @@ from cstar.applications.forge.source_registry import (
 from cstar.base.utils import netcdf_format
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
     from datetime import datetime
+
+    from cstar.applications.roms_marbl.transforms import CarbonateSensitivityFile
 
 log = logging.getLogger(__name__)
 
@@ -186,6 +193,112 @@ def _normalize_user_file(
     return UserProvidedFile(location=str(path), content_hash=hash_netcdf_contents(path))
 
 
+def find_carbonate_sensitivity_files(
+    directory: Path,
+) -> list[CarbonateSensitivityFile]:
+    """The joined carbonate sensitivity files under ``directory``, in file-name
+    order (the time order of their timestamps).
+
+    Per-rank tiles of a partitioned file are skipped: Forge stages whole files
+    (ROMS under ParallelIO reads one joined CDF-5 file per dataset). Shared by
+    the resolver and the wizard's path box.
+
+    Raises ``NotADirectoryError`` if ``directory`` is not a directory and
+    ``FileNotFoundError`` if it holds no joined file.
+    """
+    # Lazy: the file-name convention lives with the transforms, which pull in
+    # the orchestration layer.
+    from cstar.applications.roms_marbl.transforms import CarbonateSensitivityFile
+
+    if not directory.is_dir():
+        raise NotADirectoryError(f"not a directory: {directory}")
+    found = CarbonateSensitivityFile.find(directory) or ()
+    joined = [f for f in found if not f.is_partitioned]
+    if not joined:
+        raise FileNotFoundError(
+            f"carbonate_sensitivity: no joined {CarbonateSensitivityFile.LABEL} "
+            f"files in {directory} ({len(found)} per-rank tile file(s) skipped). "
+            "Expected the output of a ROMS-MARBL run with cdr_gas_exch_output "
+            f"enabled, named <root>{CarbonateSensitivityFile.SUFFIX}."
+            "<14-digit timestamp>.nc."
+        )
+    return joined
+
+
+def _normalize_carbonate_sensitivity(
+    value: str
+    | Path
+    | Sequence[str | Path]
+    | CarbonateSensitivitySpec
+    | dict[str, Any],
+) -> CarbonateSensitivitySpec:
+    """Normalize a user-supplied carbonate sensitivity selection into a
+    :class:`CarbonateSensitivitySpec`.
+
+    Accepts a directory (scanned for ``_cdrgas`` files, see
+    :func:`find_carbonate_sensitivity_files`), a single file path, a sequence of
+    file paths (kept in the given order), a ``{"files": [...]}`` dict, or a spec.
+    Paths are hashed here and must exist; a dict's entries and a spec are
+    otherwise trusted as-is, like every other user-provided file (see
+    :func:`_normalize_user_file`).
+    """
+    if isinstance(value, CarbonateSensitivitySpec):
+        return value
+    label = "carbonate_sensitivity file"
+    if isinstance(value, dict):
+        files = value.get("files")
+        if isinstance(files, (list, tuple)):
+            value = {
+                **value,
+                "files": [_normalize_user_file(f, label=label) for f in files],
+            }
+        return CarbonateSensitivitySpec(**value)
+
+    if isinstance(value, (str, Path)):
+        path = Path(value).expanduser()
+        if path.is_dir():
+            paths = [f.path for f in find_carbonate_sensitivity_files(path)]
+        else:
+            paths = [path]
+    else:
+        paths = [Path(p).expanduser() for p in value]
+    missing = [str(p) for p in paths if not p.is_file()]
+    if missing:
+        raise FileNotFoundError(
+            "carbonate_sensitivity must be a directory or existing netCDF files; "
+            f"not found: {', '.join(missing)}"
+        )
+    return CarbonateSensitivitySpec(
+        files=[_normalize_user_file(p, label=label) for p in paths]
+    )
+
+
+def _check_carbonate_sensitivity_applies(
+    bgc_mode: BgcMode, settings: dict[str, Any]
+) -> None:
+    """Reject carbonate sensitivity files for a build that does not read them.
+
+    Only ``bgc_mode: cdr_lite`` reads them (as surface forcing); a MARBL build
+    that sets ``cdr_lite.cdr_online_carbonate_sensitivity`` computes them
+    online instead. Raises ``ValueError`` listing every problem.
+    """
+    problems: list[str] = []
+    if bgc_mode != "cdr_lite":
+        problems.append(
+            f'bgc_mode is "{bgc_mode}": only bgc_mode "cdr_lite" reads carbonate '
+            "sensitivities from files"
+        )
+    if online_carbonate_sensitivity_requested(settings):
+        problems.append(
+            "cdr_lite.cdr_online_carbonate_sensitivity is on: ROMS computes the "
+            "sensitivities online from MARBL, so there are no files to read"
+        )
+    if problems:
+        raise ValueError(
+            "carbonate_sensitivity was supplied, but:\n- " + "\n- ".join(problems)
+        )
+
+
 def _warn_user_files_need_pio_conversion(bp: ForgeBlueprint, use_pio: bool) -> None:
     """Warn once if a byte-copied user file is not classic-format netCDF under PIO.
 
@@ -201,6 +314,11 @@ def _warn_user_files_need_pio_conversion(bp: ForgeBlueprint, use_pio: bool) -> N
     files: list[tuple[str, UserProvidedFile]] = []
     if bp.cdr.cdr_forcing_file is not None:
         files.append(("cdr_forcing_file", bp.cdr.cdr_forcing_file))
+    if bp.carbonate_sensitivity is not None:
+        files.extend(
+            (f"carbonate_sensitivity[{i}]", f)
+            for i, f in enumerate(bp.carbonate_sensitivity.files)
+        )
     files.extend(
         (f"river[{i}] custom_file", river.custom_file)
         for i, river in enumerate(bp.forcing.river)
@@ -453,6 +571,47 @@ def read_cdr_forcing_yaml(source: str | Path) -> dict[str, Any]:
     return block
 
 
+def _with_cdr_lite_tracer_set(cdr_spec: CdrSpec) -> CdrSpec:
+    """``cdr_spec`` with ``tracer_set="cdr_lite"`` defaulted onto every
+    tracer-perturbation release of a ``"simple"`` CDR forcing that doesn't name
+    its own tracer set.
+
+    A release without ``tracer_set`` is a MARBL release (roms-tools' default),
+    which a ``bgc_mode: cdr_lite`` build has no tracers for. The other modes
+    carry their own tracer sets (a roms-tools YAML dump, a pre-made file), so
+    they are left as authored and the generation step rejects a MARBL axis. The
+    caller's dict is not mutated.
+
+    Raises ``ValueError`` naming every ``"volume"`` release: CDR-lite tracers are
+    fed by tracer-perturbation releases only, and roms-tools would reject the
+    tag on a volume release with a less direct message.
+    """
+    forcing = copy.deepcopy(cdr_spec.cdr_forcing or {})
+    releases = forcing.get("releases")
+    if cdr_spec.mode != "simple" or not isinstance(releases, list):
+        return cdr_spec
+    volume = [
+        repr(r.get("name", "<unnamed>"))
+        for r in releases
+        if isinstance(r, dict) and r.get("release_type") == "volume"
+    ]
+    if volume:
+        raise ValueError(
+            "CDR-lite tracers are fed by tracer-perturbation releases; volume "
+            "releases are not supported in bgc_mode cdr_lite "
+            f"(volume releases: {', '.join(volume)})."
+        )
+    forcing["releases"] = [
+        {**release, "tracer_set": "cdr_lite"}
+        if isinstance(release, dict)
+        and "tracer_set" not in release
+        and release.get("release_type", "tracer_perturbation") == "tracer_perturbation"
+        else release
+        for release in releases
+    ]
+    return cdr_spec.model_copy(update={"cdr_forcing": forcing})
+
+
 def build_forge_blueprint(
     *,
     model_dir: str | Path,
@@ -476,10 +635,16 @@ def build_forge_blueprint(
     nesting_include_pressure_fluxes: bool = False,
     grid_file: str | Path | dict[str, Any] | UserProvidedFile | None = None,
     cdr_forcing_file: str | Path | dict[str, Any] | UserProvidedFile | None = None,
+    carbonate_sensitivity: str
+    | Path
+    | Sequence[str | Path]
+    | CarbonateSensitivitySpec
+    | dict[str, Any]
+    | None = None,
     topography_path: str | None = None,
     topography_source: str | TopographySource = TopographySource.ETOPO5,
     use_pio: bool | None = None,
-    bgc_mode: Literal["marbl", "none"] | None = None,
+    bgc_mode: BgcMode | None = None,
     roms_ref: str | None = None,
     marbl_ref: str | None = None,
     run_time_overrides: dict[str, Any] | None = None,
@@ -501,10 +666,17 @@ def build_forge_blueprint(
     ``bgc_mode`` is a per-run toggle mirroring ``use_pio``: it overwrites
     ``cppdefs.marbl`` and gates whether ``code.marbl`` is populated (raising if
     ``"marbl"`` is requested but the ModelSpec has no ``code.marbl`` repository).
-    ``bgc_mode="none"`` raises if the resolved forcing selection still requests BGC
-    forcing (a bgc-type surface/boundary item, an IC bgc_source, or a river with
-    ``include_bgc=True``); it also forces ``cppdefs.nhy_forcing``/``nox_forcing``
-    off regardless of the ModelSpec/advanced-settings default. If ``None`` (the
+    ``"none"`` and ``"cdr_lite"`` raise if the resolved forcing selection still
+    requests BGC forcing (a bgc-type surface/boundary item, an IC bgc_source, or a
+    river with ``include_bgc=True``); both also force ``cppdefs.nhy_forcing``/
+    ``nox_forcing`` off regardless of the ModelSpec/advanced-settings default.
+    ``"cdr_lite"`` is a build without MARBL whose only extra tracers are
+    ucla-roms' dedicated CDR-lite tracers: it compiles ``CDR_LITE``
+    (``cppdefs.cdr_lite``), needs a CDR forcing (``cdr``) with ``cdr_lite``
+    releases and ucla-roms >= ``CDR_LITE_MODE_MIN_ROMS``, and, in the ``"simple"``
+    CDR mode, defaults every release's ``tracer_set`` to ``"cdr_lite"``. The tracer
+    counts and the CDR-lite output stream are derived later, from the generated
+    CDR forcing (``ForgeExecutor.configure_build``). If ``None`` (the
     default), it falls back to the ModelSpec's own ``bgc_mode`` (itself defaulting
     to ``"marbl"``) -- the ModelSpec is the single source of the default; pass an
     explicit value to override it for one run.
@@ -604,9 +776,21 @@ def build_forge_blueprint(
     hashed here (must exist at authoring time), a dict/``UserProvidedFile`` is
     trusted as-is. Mutually exclusive with ``cdr_forcing``/``cdr_forcing_yaml``
     (raised here, before ``CdrSpec``'s own validator would, so the caller gets
-    a resolver-level message); like a set ``cdr_forcing``, it forces
-    ``do_cdr_output=True``, requires ``bgc_mode == "marbl"``, sets
-    ``cppdefs.cdr_forcing = True``, and ensures the CDR-output MARBL diagnostics.
+    a resolver-level message); like a set ``cdr_forcing``, it sets
+    ``cppdefs.cdr_forcing = True``, and with MARBL it also implies
+    ``do_cdr_output=True`` and ensures the CDR-output MARBL diagnostics (without
+    MARBL the mode is rejected or accepted by ``check_cdr_forcing_mode``).
+
+    ``carbonate_sensitivity``, if given, lists the carbonate sensitivity files a
+    ``bgc_mode == "cdr_lite"`` build reads as surface forcing (the ``_cdrgas``
+    files of a ROMS-MARBL run). Normally it is left out: the
+    ``carbonate-sensitivity-from`` workplan directive supplies them at run time.
+    Accepts a directory (scanned for joined ``_cdrgas`` files; an error if it has
+    none), a single file path, a sequence of file paths (kept in order), a
+    ``{"files": [...]}`` dict or a :class:`CarbonateSensitivitySpec`. Paths are
+    hashed here and must exist; a dict's entries and a spec are trusted as-is, like
+    ``cdr_forcing_file``. Raises ``ValueError`` when the build is not
+    ``bgc_mode == "cdr_lite"`` or sets ``cdr_lite.cdr_online_carbonate_sensitivity``.
     """
     if cdr is not None and (
         cdr_forcing is not None
@@ -675,6 +859,14 @@ def build_forge_blueprint(
     model_name = spec["model_name"]
     if bgc_mode is None:
         bgc_mode = model.get("bgc_mode", "marbl")
+    # Three modes now: an unknown value would otherwise fall through every
+    # ``== "marbl"`` test and silently build a physics-only run.
+    if bgc_mode not in get_args(BgcMode):
+        raise ValueError(
+            f"bgc_mode must be one of {list(get_args(BgcMode))}, got {bgc_mode!r}."
+        )
+    if bgc_mode == "cdr_lite":
+        cdr_spec = _with_cdr_lite_tracer_set(cdr_spec)
     if use_pio is None:
         use_pio = bool(model.get("use_pio", False))
     # ModelSpec no longer embeds a default forcing/output selection -- a ForcingSpec and
@@ -852,12 +1044,12 @@ def build_forge_blueprint(
     cppdefs["auto_tiling"] = bool(auto_tiling)
     cppdefs["marbl"] = bgc_mode == "marbl"
     # nhy_forcing/nox_forcing default from the ModelSpec (advanced-settings editable)
-    # but are always forced off when BGC is disabled.
+    # but are always forced off without MARBL.
     cppdefs["nhy_forcing"] = (
-        bool(cppdefs.get("nhy_forcing", True)) and bgc_mode != "none"
+        bool(cppdefs.get("nhy_forcing", True)) and bgc_mode == "marbl"
     )
     cppdefs["nox_forcing"] = (
-        bool(cppdefs.get("nox_forcing", True)) and bgc_mode != "none"
+        bool(cppdefs.get("nox_forcing", True)) and bgc_mode == "marbl"
     )
     surface_items = (inputs.get("forcing", {}) or {}).get("surface", []) or []
     cppdefs["co2_tvarying"] = any(
@@ -972,6 +1164,15 @@ def build_forge_blueprint(
     # MARBL. When CDR output is on, the MARBL diagnostics ucla-roms looks up by
     # name, unchecked, must be in the write list.
     cdr_out = settings.setdefault("cdr_output", {})
+    if bgc_mode == "cdr_lite":
+        if cdr_spec.mode == "none":
+            raise ValueError(
+                'bgc_mode "cdr_lite" needs a CDR forcing with cdr_lite releases; '
+                "cdr.mode is 'none', so nothing would be simulated."
+            )
+        check_cdr_lite_mode_roms(
+            str(effective_roms_ref) if effective_roms_ref is not None else None
+        )
     if cdr_spec.mode != "none":
         settings["cppdefs"]["cdr_forcing"] = True
     # Called first so an unsupported mode is rejected even if do_cdr_output is set.
@@ -1039,22 +1240,35 @@ def build_forge_blueprint(
     ):
         settings["cppdefs"]["cdr_forcing"] = True
 
+    # ----- carbonate sensitivity files ---------------------------------------
+    # Only a bgc_mode "cdr_lite" build reads them; checked before the CDR_LITE
+    # block below, whose "needs MARBL" message would otherwise be the only one a
+    # MARBL build with the online knob sees.
+    carbonate_sensitivity_spec: CarbonateSensitivitySpec | None = None
+    if carbonate_sensitivity is not None:
+        _check_carbonate_sensitivity_applies(bgc_mode, settings)
+        carbonate_sensitivity_spec = _normalize_carbonate_sensitivity(
+            carbonate_sensitivity
+        )
+
     # ----- CDR_LITE (ucla-roms >= 0.9.0) -------------------------------------
-    # cppdefs.cdr_lite is resolver-owned: derived from the user knob
-    # cdr_lite.cdr_online_carbonate_sensitivity (Forge's only CDR_LITE mode --
-    # the file-based sensitivities have no Forge source yet). Nothing has derived
-    # it yet, so a value here came from a ModelSpec/override: honoring it
-    # without the knob is the unsupported mode. The key stays absent when not
-    # needed (the template reads an absent key as off).
+    # cppdefs.cdr_lite is resolver-owned: derived from bgc_mode "cdr_lite"
+    # (CDR-lite tracers without MARBL, carbonate sensitivities read from forcing
+    # files) or from the user knob cdr_lite.cdr_online_carbonate_sensitivity
+    # (MARBL computes them online). Nothing has derived it yet, so a value here
+    # came from a ModelSpec/override: honoring it when neither applies is the
+    # unsupported combination. The key stays absent when not needed (the template
+    # reads an absent key as off).
     requested = settings["cppdefs"].get("cdr_lite", False)
-    needed = check_cdr_lite_sections(settings, bgc_mode_is_marbl=bgc_mode == "marbl")
+    needed = check_cdr_lite_sections(
+        settings, bgc_mode=bgc_mode, settings_cls=settings_cls
+    )
     if requested and not needed:
         raise ValueError(
-            "cppdefs.cdr_lite is set without cdr_lite.cdr_online_carbonate_"
-            "sensitivity: CDR_LITE with file-based carbonate sensitivities "
-            "(ddic_dco2/ddic_dalk forcing) is not yet supported in Forge. Set "
-            "cdr_lite.cdr_online_carbonate_sensitivity (needs MARBL), which "
-            "enables CDR_LITE."
+            "cppdefs.cdr_lite is set but nothing needs CDR_LITE (bgc_mode is not "
+            "cdr_lite and the online carbonate sensitivity is off). Set "
+            'bgc_mode "cdr_lite", or cdr_lite.cdr_online_carbonate_sensitivity '
+            "(needs MARBL), which enable CDR_LITE."
         )
     if needed:
         settings["cppdefs"]["cdr_lite"] = True
@@ -1092,9 +1306,25 @@ def build_forge_blueprint(
         # missing the processing-filled sections (title/grid/initial/forcing/
         # s_coord/reference_date_settings, populated later at generate_inputs()/
         # executor time) -- none of which affect any output-stream field.
+        precheck_settings = settings
+        if bgc_mode == "cdr_lite":
+            # The CDR-lite tracer stream is the only output the CDR tracers
+            # appear in, and configure_build forces it on once generation has
+            # derived the tracer counts (they are unknown here, so the resolver
+            # leaves the switch as authored). Check the stream it will write now,
+            # not after the expensive generation; configure_build's forcing
+            # remains the net for stored blueprints. A copy, so the stored
+            # settings stay as authored.
+            precheck_settings = {
+                **settings,
+                "cdr_lite_output": {
+                    **(settings.get("cdr_lite_output") or {}),
+                    "do_cdr_lite_output": True,
+                },
+            }
         try:
             check_output_streams_divide_rst(
-                canonical_output_sections_for_precheck(settings, settings_cls),
+                canonical_output_sections_for_precheck(precheck_settings, settings_cls),
                 cppdefs_for_precheck(
                     settings.get("cppdefs", {}), settings.get("upscale_output", {})
                 ),
@@ -1144,9 +1374,10 @@ def build_forge_blueprint(
     )  # kept as `sources` locally for brevity
 
     # ----- bgc_mode consistency check ----------------------------------------
-    # A BGC-disabled build can't carry BGC-type forcing -- catch it here, before
-    # code/settings resolution, with a message naming every offending item.
-    if bgc_mode == "none":
+    # A build without MARBL ("none"/"cdr_lite") can't carry BGC-type forcing --
+    # catch it here, before code/settings resolution, with a message naming every
+    # offending item.
+    if bgc_mode != "marbl":
         bgc_signals: list[str] = []
         for i, it in enumerate(sources.surface):
             if it.type == "bgc":
@@ -1171,7 +1402,7 @@ def build_forge_blueprint(
                 bgc_signals.append(f"river[{i}] (include_bgc=True)")
         if bgc_signals:
             raise ValueError(
-                'bgc_mode="none" but the ForcingSpec requests BGC forcing:\n  - '
+                f'bgc_mode="{bgc_mode}" but the ForcingSpec requests BGC forcing:\n  - '
                 + "\n  - ".join(bgc_signals)
                 + '\nSet bgc_mode="marbl" or remove these BGC forcing items from '
                 "the ForcingSpec."
@@ -1242,6 +1473,7 @@ def build_forge_blueprint(
         ),
         forcing=sources,
         cdr=cdr_spec,
+        carbonate_sensitivity=carbonate_sensitivity_spec,
         # Host-independent source-dataset keys to prepare (forcing/IC sources + topography),
         # derived from the resolved sources so the executor never reads model_spec.datasets.
         datasets=sorted(

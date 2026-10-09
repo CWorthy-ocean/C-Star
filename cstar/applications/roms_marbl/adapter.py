@@ -10,6 +10,7 @@ from cstar.roms.discretization import ROMSDiscretization
 from cstar.roms.external_codebase import ROMSExternalCodeBase
 from cstar.roms.input_dataset import (
     ROMSBoundaryForcing,
+    ROMSCarbonateSensitivity,
     ROMSCdrForcing,
     ROMSForcingCorrections,
     ROMSInitialConditions,
@@ -310,4 +311,30 @@ class ForcingCorrectionAdapter(
                 else None,
             )
             for f in self.model.forcing.corrections.data
+        ]
+
+
+class CarbonateSensitivityAdapter(
+    ModelAdapter[RomsMarblBlueprint, list[ROMSCarbonateSensitivity]]
+):
+    """Create a ROMSCarbonateSensitivity from a blueprint model."""
+
+    @t.override
+    def adapt(self) -> list[ROMSCarbonateSensitivity] | None:
+        if self.model.forcing.carbonate_sensitivity is None:
+            return None
+        return [
+            ROMSCarbonateSensitivity(
+                location=str(f.location),
+                file_hash=(f.hash if isinstance(f, models.VersionedResource) else None),
+                start_date=None,
+                end_date=None,
+                source_np_xi=self.model.partitioning.n_procs_x
+                if f.partitioned
+                else None,
+                source_np_eta=self.model.partitioning.n_procs_y
+                if f.partitioned
+                else None,
+            )
+            for f in self.model.forcing.carbonate_sensitivity.data
         ]

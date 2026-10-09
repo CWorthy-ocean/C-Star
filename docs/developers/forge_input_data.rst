@@ -30,6 +30,8 @@ model-ready input files:
 - **Initial conditions**: Temperature, salinity, and biogeochemical fields
 - **Forcing data**: Surface, boundary, tidal, and river forcing
 - **CDR forcing**: Carbon dioxide removal forcing (optional)
+- **Carbonate sensitivity forcing**: user-supplied ``_cdrgas`` files for a
+  ``bgc_mode: cdr_lite`` build (optional; staged, never generated)
 - **Corrections**: Forcing corrections (registered but unwired: the resolver
   never emits a ``corrections`` category, and the handler raises
   ``NotImplementedError``)
@@ -62,6 +64,8 @@ Execution order (steps run in order, lowest ``order`` value first):
 - ``forcing.tidal`` (order=50)
 - ``forcing.river`` (order=60)
 - ``cdr_forcing`` (order=80)
+- ``forcing.carbonate_sensitivity`` (order=85; only when the blueprint lists
+  carbonate sensitivity files)
 - ``forcing.corrections`` (order=90; registered but unwired -- never emitted
   by the resolver)
 
@@ -78,9 +82,11 @@ injected ``grid``/``grid_parent``/``grid_child`` objects, ``boundaries``,
 ``source_data``, ``partitioning``, and ``roms_marbl_blueprint_dir``; the CDR
 selection (``cdr_mode``, plus ``cdr_forcing`` or a pre-made
 ``cdr_forcing_file`` -- mutually exclusive, enforced upstream by the
-``ForgeBlueprint`` schema); ``settings_compile_time``/``settings_run_time``
-(the executor's own live settings dicts, bound **by reference**, not copied
--- see `Settings initialization`_ below); and tuning flags (``use_dask``,
+``ForgeBlueprint`` schema); the optional ``carbonate_sensitivity`` spec
+(user-supplied ``_cdrgas`` files, see the carbonate sensitivity forcing handler
+below); ``settings_compile_time``/``settings_run_time`` (the executor's own live
+settings dicts, bound **by reference**, not copied -- see `Settings
+initialization`_ below); and tuning flags (``use_dask``,
 ``dask_num_workers``, ``use_pio``, ``subchunk``, ``verbose``, ``has_bgc``).
 See ``input_data.py`` for the full field list and docstrings; it changes
 often enough that reproducing it here would drift.
@@ -114,6 +120,14 @@ During ``__post_init__()``, the class builds ``input_list`` from
    constructor kwarg is set -> ``("cdr_forcing", {"cdr_kwargs": ...,
    "custom_file": ...})``. Neither is set for CDR mode ``"upscaled"`` -- see
    the CDR forcing handler below.
+5. **Carbonate sensitivity forcing**: If the ``carbonate_sensitivity`` spec is
+   set -> ``("forcing.carbonate_sensitivity", {"files": [...]})``, in the
+   spec's file order. Only a ``bgc_mode: cdr_lite`` build reads these files, so
+   a spec with any other build raises ``ValueError``; the build is read from
+   the live ``settings_compile_time["cppdefs"]`` (``bgc_mode_from_cppdefs``).
+   With no spec in a ``cdr_lite`` build nothing is queued and one info line
+   says the ``carbonate-sensitivity-from`` workplan directive must supply the
+   files.
 
 A missing ``forcing_override`` raises ``ValueError`` -- it is required
 whenever the blueprint path is used (the resolver always fills it, from the
@@ -160,6 +174,12 @@ each planned category so downstream steps only ever append to it:
   ``initial_conditions`` non-empty, and its orchestrator validates the
   emitted blueprint before the runtime ``nest-from`` directive gets a chance
   to replace the placeholder with the parent-derived initial state).
+- **Forcing elements follow the C-Star model.** An empty ``Dataset`` is created
+  for every ``forcing.<name>`` step in ``input_list`` whose ``<name>`` is a
+  field of C-Star's ``ForcingConfiguration`` (``surface``, ``boundary``,
+  ``tidal``, ``river``, ``corrections``, ``carbonate_sensitivity``), so a new
+  forcing step needs only that field, not an edit here. Without a carbonate
+  sensitivity spec the element stays ``None``.
 - **CDR forcing is optional.** When CDR mode is ``"upscaled"``, no
   ``cdr_forcing`` generation step is scheduled (see the CDR forcing handler
   below), but a placeholder ``Resource`` is still emitted onto
@@ -393,10 +413,51 @@ Output paths are normalized to absolute strings.
 ``cdr_file="cdr.nc"`` (the executor/blueprint symlinks to the real path),
 ``cdr_source=True``, ``ncdr_parm=len(cdr.releases)``,
 ``forcing_parameterized=True``, ``cdr_volume=(cdr.releases.release_type ==
-"volume")``. Run-time ``cdr_output``: ``do_cdr_output = True``. Does NOT
-touch ``cdr_lite_output``/``cdr_gas_exch_output`` (ucla-roms >= 0.7.0) --
-unlike ``cdr_output``, those two streams are never forced on by CDR forcing;
-a user enables them explicitly (see the OutputSpec).
+"volume")``. Run-time ``param``: ``nt_cdr_oae``/``nt_cdr_dor``, read off the
+file's ``tracer_name`` axis (``cdr_tracer_counts``); ``param.nt_passive`` is
+checked against the file, not overwritten, and the axis length must equal the
+build's tracer count (under ``bgc_mode: cdr_lite``, MARBL tracer names, volume
+releases and a missing ``tracer_name`` are rejected -- see
+:doc:`forge_internals`). Does NOT touch ``cdr_output``
+(``configure_build`` implies it with MARBL) nor ``cdr_lite_output``/
+``cdr_gas_exch_output`` (ucla-roms >= 0.7.0): those streams are never forced on
+by generation; a user enables them explicitly (see the OutputSpec), except that
+``configure_build`` forces ``cdr_lite_output`` on under ``bgc_mode: cdr_lite``.
+
+Carbonate sensitivity forcing (``forcing.carbonate_sensitivity``, order=85)
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+**Stages** (generates nothing): a copy of each user-supplied ``_cdrgas`` file
+in ``files`` under its own basename in ``input_data_dir``, converted to CDF-5
+when ``use_pio`` is on (``stage_user_netcdf``). The destination rule is
+``carbonate_sensitivity_destinations()``, the one place that spells it, shared
+by this handler, ``_planned_netcdf_outputs()`` here and the executor's own
+planned outputs. Several files make up one dataset, so each keeps its own name
+(distinct from the others, which the spec enforces) rather than the generated
+``{domain_name}_{input_name}.nc`` form.
+
+**Key features**: Optional: only appears in ``input_list`` when the
+``carbonate_sensitivity`` spec is set (see `Input list derivation`_). Each file
+is first resolved and its recorded content hash verified (``verify_user_file``:
+a missing file raises ``FileNotFoundError``, a changed one only warns). Then
+every file is checked for the variables a CDR-LiTE build reads
+(``CARBONATE_SENSITIVITY_VARIABLES``: ``ddic_dco2``, ``ddic_dalk`` and their
+``ddic_dco2_time``/``ddic_dalk_time``) **before anything is copied**; one
+``ValueError`` lists every file with its missing variables, with the hint that
+``_cdrgas`` files written by ucla-roms 0.9.1 and earlier carry only
+``ocean_time``. With ``clobber`` off, a destination already on disk when
+``generate_all()`` started is reused as is, and it is that staged copy, the one
+ROMS will read, that is checked -- not its source.
+
+**Settings**: none. The namelist Forge renders is the same with or without the
+files: they reach ROMS through the emitted blueprint's
+``forcing.carbonate_sensitivity``, which C-Star adds to the run's ``frcfiles``
+list when the simulation runs. The online alternative,
+``cdr_lite.cdr_online_carbonate_sensitivity``, is rejected alongside files at
+resolve time (there would be nothing to read).
+
+**Records**: a ``Resource(location=str(dest), partitioned=False)`` per file, in
+order, appended to ``roms_marbl_blueprint_elements.forcing.carbonate_sensitivity``.
 
 Corrections forcing (``forcing.corrections``, order=90)
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -455,7 +516,9 @@ Each handler appends a ``Resource`` (``location=str(out_path),
 partitioned=False``, from ``cstar.orchestration.models``) to the matching
 ``roms_marbl_blueprint_elements`` field: ``grid.data``,
 ``initial_conditions.data``, ``forcing.{surface,boundary,tidal,river}.data``,
-or ``cdr_forcing.data``.
+``cdr_forcing.data`` or, for user-supplied carbonate sensitivity files,
+``forcing.carbonate_sensitivity.data`` (one ``Resource`` per staged copy; the
+element stays ``None`` when no files were given).
 
 File partitioning
 --------------------
@@ -467,7 +530,8 @@ and ``include_coarse_dims`` (set during surface forcing generation). The
 original whole-field files are left unchanged; partitioned files are created
 in ``input_data_dir``; ``roms_marbl_blueprint_elements`` is updated with
 partitioned ``Resource`` objects, and each one's ``partitioned`` flag is set
-to ``True``.
+to ``True``. Every ``forcing.*`` dataset is covered, so the staged carbonate
+sensitivity files are split like any other forcing file.
 
 File outputs
 ---------------
@@ -485,6 +549,10 @@ contain a ``.`` except the final ``.nc`` suffix. For example, a domain named
 - ``cson_roms-marbl_v0_1_test-tiny_initial_conditions.nc``
 - ``cson_roms-marbl_v0_1_test-tiny_surface-physics_201201.nc``
 - ``cson_roms-marbl_v0_1_test-tiny_boundary-physics_201201.nc``
+
+The one exception is user-supplied carbonate sensitivity files, which are
+staged under their own basenames (see the carbonate sensitivity forcing handler
+above).
 
 Return value
 ---------------

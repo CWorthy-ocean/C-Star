@@ -113,10 +113,17 @@ PROCESSING_FILLED_SECTIONS = (
 # ``test_configure_build_does_not_clobber_generated_river_and_tidal_settings`` for the
 # regression coverage.
 #
+# ``param.nt_cdr_oae``/``param.nt_cdr_dor`` are read off the generated CDR
+# forcing's tracer axis (``cdr_tracer_counts``), so under ``bgc_mode: cdr_lite``
+# the resolver's stored zeros must not revert them. (``param.nt_passive`` is
+# user-owned: generation checks it against the file instead of overwriting it.)
+#
 # ``cdr_output.do_cdr_output`` is deliberately NOT listed: it is a user setting
 # and must survive the overlay. ``ForgeExecutor.configure_build`` asserts it True
 # for an active CDR mode under MARBL (``check_cdr_forcing_mode``); without MARBL
-# the CDR release runs with it left off, since cdr_output needs MARBL.
+# the CDR release runs with it left off, since cdr_output needs MARBL. Likewise
+# ``cdr_lite_output.do_cdr_lite_output``, which ``configure_build`` forces on under
+# ``bgc_mode: cdr_lite``.
 GENERATION_DERIVED_LEAF_KEYS: dict[str, tuple[str, ...]] = {
     "river_frc": (
         "river_source",
@@ -134,6 +141,7 @@ GENERATION_DERIVED_LEAF_KEYS: dict[str, tuple[str, ...]] = {
         "forcing_parameterized",
         "cdr_volume",
     ),
+    "param": ("nt_cdr_oae", "nt_cdr_dor"),
     # Only ntides is genuinely generation-derived (the real tidal-constituent count
     # is only known once TPXO data is actually extracted). bry_tides/pot_tides/
     # ana_tides are static booleans -- the resolver/model_settings is their single
@@ -268,6 +276,7 @@ def forge_blueprint_to_builder_kwargs(cfg: ForgeBlueprint) -> dict[str, Any]:
         cdr_mode=cfg.cdr.mode,
         cdr_forcing=cfg.cdr.cdr_forcing,
         cdr_forcing_file=cfg.cdr.cdr_forcing_file,
+        carbonate_sensitivity=cfg.carbonate_sensitivity,
         forcing_override=sources_to_forcing_override(cfg),
         model_reference_date=cfg.run.model_reference_date,
         source_dataset_keys=list(cfg.datasets),
@@ -503,7 +512,6 @@ def process_forge_blueprint(
         executor.configure_build(
             compile_time_settings=compile_overrides,
             run_time_settings=run_overrides,
-            n_tracers=cfg.n_tracers,
             provenance=provenance,
         )
     return executor

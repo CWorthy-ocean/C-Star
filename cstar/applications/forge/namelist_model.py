@@ -26,7 +26,9 @@ is imported here; that is the reusable read/edit/write schema.
 from __future__ import annotations
 
 import os
-from typing import Annotated, Any
+import re
+from dataclasses import dataclass
+from typing import TYPE_CHECKING, Annotated, Any, Literal
 
 from pydantic import (
     AliasChoices,
@@ -107,6 +109,9 @@ from cstar.roms.precheck import (
 from cstar.roms.precheck import (
     check_restart_period_divisible_by_dt as _check_restart_period_divisible_by_dt,
 )
+
+if TYPE_CHECKING:
+    from collections.abc import Mapping, Sequence
 
 
 def _coerce_pathlike(v):
@@ -260,6 +265,109 @@ def n_tracers_from_param(param: dict[str, Any]) -> int:
         + int(param.get("ntrc_bio", 0))
         + int(param.get("nt_passive", 0))
         + sum(w * int(param.get(k, 0)) for k, w in _CDR_TRACER_WEIGHTS.items())
+    )
+
+
+BgcMode = Literal["marbl", "none", "cdr_lite"]
+"""The build mode a ModelSpec/blueprint selects for ocean biogeochemistry.
+
+``"marbl"`` compiles MARBL (BGC tracers named by MARBL); ``"none"`` is a
+physics-only build; ``"cdr_lite"`` is a build without MARBL whose only extra
+tracers are ucla-roms' dedicated CDR-lite tracers (``CDR_LITE`` cppkey). Lives
+here, with the rules keyed on it, so the guarded execution modules and
+``models``/``resolve``/the catalog share one definition.
+"""
+
+
+def bgc_mode_from_cppdefs(cppdefs: Mapping[str, Any]) -> BgcMode:
+    """The :data:`BgcMode` a stored blueprint's ``cppdefs`` encode.
+
+    The one derivation of the three-valued mode from compile-time settings:
+    ``marbl`` wins (MARBL with the online CDR-lite sensitivities also sets
+    ``cdr_lite``, and is still a MARBL build); ``cdr_lite`` without MARBL is
+    the CDR-lite mode; anything else is physics-only. Rules that only ask
+    whether MARBL is present keep reading ``cppdefs.marbl`` directly.
+    """
+    if cppdefs.get("marbl"):
+        return "marbl"
+    return "cdr_lite" if cppdefs.get("cdr_lite") else "none"
+
+
+# Names ucla-roms (and roms-tools' CDR forcing tracer axis) gives the generated
+# tracers: ``passive_tracer<i>``, ``CDR_OAE_ALK<k>``/``CDR_OAE_DIC<k>`` (one pair
+# per OAE release) and ``CDR_DOR_DIC<j>``. ``temp``/``salt`` lead every axis.
+_PASSIVE_TRACER_RE = re.compile(r"passive_tracer(\d+)")
+_OAE_TRACER_RE = re.compile(r"CDR_OAE_(ALK|DIC)(\d+)")
+_DOR_TRACER_RE = re.compile(r"CDR_DOR_DIC(\d+)")
+_PHYSICS_TRACER_NAMES = ("temp", "salt")
+
+
+@dataclass(frozen=True)
+class CdrTracerCounts:
+    """Tracer counts read off a CDR forcing's tracer axis by :func:`cdr_tracer_counts`."""
+
+    n_passive: int
+    """Passive (dye) tracers, ``param.nt_passive``."""
+    n_oae_pairs: int
+    """OAE ALK/DIC pairs, ``param.nt_cdr_oae``."""
+    n_dor: int
+    """DOR tracers, ``param.nt_cdr_dor``."""
+    other: tuple[str, ...]
+    """Axis names that are none of the above (MARBL tracers), in axis order."""
+
+
+def cdr_tracer_counts(tracer_names: Sequence[str]) -> CdrTracerCounts:
+    """Count the generated tracers on a CDR forcing's ``tracer_name`` axis.
+
+    ``temp``/``salt`` are skipped and unrecognized names (MARBL's) are returned
+    in ``other``. Each family must be numbered ``1..n`` without gaps or repeats,
+    and ``CDR_OAE_ALK<k>``/``CDR_OAE_DIC<k>`` must come as pairs: ROMS names its
+    tracers from the counts alone, so any other axis cannot be described by
+    ``nt_passive``/``nt_cdr_oae``/``nt_cdr_dor``.
+
+    Raises ``ValueError`` listing every malformed family.
+    """
+    passive: list[int] = []
+    oae: dict[str, list[int]] = {"ALK": [], "DIC": []}
+    dor: list[int] = []
+    other: list[str] = []
+    for name in map(str, tracer_names):
+        if name in _PHYSICS_TRACER_NAMES:
+            continue
+        if match := _PASSIVE_TRACER_RE.fullmatch(name):
+            passive.append(int(match[1]))
+        elif match := _OAE_TRACER_RE.fullmatch(name):
+            oae[match[1]].append(int(match[2]))
+        elif match := _DOR_TRACER_RE.fullmatch(name):
+            dor.append(int(match[1]))
+        else:
+            other.append(name)
+    problems = [
+        f"{label}<k> is numbered {sorted(indices)}, not 1..{len(indices)}"
+        for label, indices in (
+            ("passive_tracer", passive),
+            ("CDR_OAE_ALK", oae["ALK"]),
+            ("CDR_OAE_DIC", oae["DIC"]),
+            ("CDR_DOR_DIC", dor),
+        )
+        if sorted(indices) != list(range(1, len(indices) + 1))
+    ]
+    if len(oae["ALK"]) != len(oae["DIC"]):
+        problems.append(
+            f"CDR_OAE_ALK<k>/CDR_OAE_DIC<k> do not pair up ({len(oae['ALK'])} ALK, "
+            f"{len(oae['DIC'])} DIC)"
+        )
+    if problems:
+        raise ValueError(
+            "CDR forcing tracer axis is not a valid ROMS tracer layout: "
+            + "; ".join(problems)
+            + "."
+        )
+    return CdrTracerCounts(
+        n_passive=len(passive),
+        n_oae_pairs=len(oae["ALK"]),
+        n_dor=len(dor),
+        other=tuple(other),
     )
 
 
@@ -613,6 +721,34 @@ def check_cdr_forcing_mode(
     return False
 
 
+# ucla-roms release from which ``bgc_mode: cdr_lite`` runs: the ``CDR_LITE`` key
+# exists from 0.9.0, and CDR forcing without MARBL (which the mode relies on) from
+# 0.9.1. 0.10.0 writes forcing-ready ``_cdrgas`` files (start/end bracket records,
+# time variables in days) and zero-fills a missing ``<CDR tracer>_flx`` surface
+# flux, which the mode relies on: Forge's CDR-lite mode generates neither.
+CDR_LITE_MODE_MIN_ROMS: tuple[int, int, int] = (0, 10, 0)
+
+
+def check_cdr_lite_mode_roms(roms_ref: str | None) -> None:
+    """Reject a ucla-roms pin older than :data:`CDR_LITE_MODE_MIN_ROMS` for
+    ``bgc_mode: cdr_lite``. A ``roms_ref`` that is not a release tag (branch,
+    commit hash, ``None``) counts as the latest release, like
+    :func:`check_cdr_forcing_mode`.
+
+    Both the resolver and the executor's ``configure_build`` (the net for
+    stored blueprints) call this so the rule and its message stay in one place.
+
+    Raises ``ValueError`` for a release tag below the minimum.
+    """
+    version = roms_version_from_ref(roms_ref)
+    if version is not None and version < CDR_LITE_MODE_MIN_ROMS:
+        minimum = ".".join(str(part) for part in CDR_LITE_MODE_MIN_ROMS)
+        raise ValueError(
+            f'bgc_mode "cdr_lite" on ucla-roms {roms_ref}: CDR-lite without MARBL '
+            f"needs ucla-roms >= {minimum}."
+        )
+
+
 def ensure_cdr_output_marbl_diagnostics(diags: list[str] | None) -> list[str]:
     """Return ``diags`` with every ``CDR_OUTPUT_REQUIRED_MARBL_DIAGNOSTICS`` name
     appended (order-preserving, no duplicates). ``None`` is treated as empty.
@@ -709,14 +845,14 @@ class CdrLiteCfg(_SettingsSection):
     Turning ``cdr_online_carbonate_sensitivity`` on makes the resolver compile
     ``CDR_LITE`` (``cppdefs.cdr_lite``, resolver-owned) and ROMS compute the
     carbonate sensitivities of the CDR-lite air-sea CO2 flux online from
-    MARBL's ALT_CO2 state, so it needs MARBL. Off, ``CDR_LITE`` would read
-    ``ddic_dco2``/``ddic_dalk`` from forcing files, which Forge has no source
-    for yet, so it is not compiled.
+    MARBL's ALT_CO2 state, so it needs MARBL. Off, ROMS reads
+    ``ddic_dco2``/``ddic_dalk`` from forcing files; Forge compiles ``CDR_LITE``
+    that way only for ``bgc_mode: cdr_lite`` (no MARBL), and not at all
+    otherwise.
 
-    The bundled ModelSpecs do not declare this section yet (``&CDR_LITE_SETTINGS``
-    is written at the default): CDR-lite tracers also need per-tracer surface-flux
-    forcing (``CDR_OAE_DIC<n>_flx``/``CDR_DOR_DIC<n>_flx``) that Forge does not
-    generate. The CDR-lite BGC-mode follow-up wires it up.
+    The bundled ModelSpecs do not declare this section, so
+    ``&CDR_LITE_SETTINGS`` is written at the default (off) -- what
+    ``bgc_mode: cdr_lite`` runs with.
     """
 
     cdr_online_carbonate_sensitivity: bool = False
@@ -839,59 +975,90 @@ def check_cdr_output_sections(
     return force_cdr_forcing
 
 
+def online_carbonate_sensitivity_requested(
+    run_time_settings: Mapping[str, Any],
+) -> bool:
+    """Whether ``cdr_lite.cdr_online_carbonate_sensitivity`` is set in
+    ``run_time_settings``: ROMS then computes the carbonate sensitivities online
+    from MARBL's ALT_CO2 state instead of reading them from forcing files.
+    """
+    section = run_time_settings.get("cdr_lite") or {}
+    return bool(section.get(_GATED_SECTION_SWITCHES["cdr_lite"]))
+
+
 def check_cdr_lite_sections(
-    run_time_settings: dict[str, Any], *, bgc_mode_is_marbl: bool
+    run_time_settings: dict[str, Any],
+    *,
+    bgc_mode: BgcMode,
+    settings_cls: type[_RunTimeSettingsCommon],
 ) -> bool:
     """Validate the ucla-roms >= 0.9.0 CDR-lite sections (``cdr_lite``,
     ``cdr_lite_output``) and report whether ``cppdefs.cdr_lite`` (the
-    ``CDR_LITE`` cppkey) must be on, i.e. whether
-    ``cdr_lite.cdr_online_carbonate_sensitivity`` is set.
-
-    Forge compiles ``CDR_LITE`` only for the online carbonate sensitivities,
-    which read MARBL's ALT_CO2 state; the file-based alternative has no Forge
-    source yet. Only the sections present in ``run_time_settings`` are read, like
-    :func:`check_cdr_output_sections`. Shared the same way: by the resolver
-    (authoring time), :func:`validate_run_time_sections` (stored blueprints) and
-    the executor's ``configure_build`` (the build-time net), each of which sets
-    ``cppdefs["cdr_lite"]`` from the result.
+    ``CDR_LITE`` cppkey) must be on: ``bgc_mode == "cdr_lite"`` (CDR-lite
+    tracers without MARBL, carbonate sensitivities read from forcing files) or
+    ``cdr_lite.cdr_online_carbonate_sensitivity`` set (MARBL computes them from
+    its ALT_CO2 state). Only the sections present in ``run_time_settings`` are
+    read, like :func:`check_cdr_output_sections`. Shared the same way: by the
+    resolver (authoring time), :func:`validate_run_time_sections` (stored
+    blueprints) and the executor's ``configure_build`` (the build-time net),
+    each of which sets ``cppdefs["cdr_lite"]`` from the result.
 
     Raises ``ValueError`` for each combination ucla-roms 0.9.0 aborts on at
     init, all reported together: the online sensitivity without MARBL;
-    ``cdr_lite_output.wrt_gas_exchange`` without ``CDR_LITE``; and the CDR-lite
+    ``cdr_lite_output.wrt_gas_exchange`` without ``CDR_LITE``; the CDR-lite
     output stream or the online sensitivity with no CDR tracers
-    (``param.nt_cdr_oae + param.nt_cdr_dor == 0``).
+    (``param.nt_cdr_oae + param.nt_cdr_dor == 0``); and, on a tier that models
+    ``cdr_lite`` (``settings_cls``), CDR tracers in a build without ``CDR_LITE``
+    ("Forcing type not supported").
+
+    Under ``bgc_mode == "cdr_lite"`` the tracer counts are derived from the CDR
+    forcing during generation, so this pre-generation check cannot require them:
+    the zero-count rule is skipped there and ``configure_build`` enforces it once
+    the counts exist.
     """
     switches = _GATED_SECTION_SWITCHES
     online_flag = f"cdr_lite.{switches['cdr_lite']}"
     stream_flag = f"cdr_lite_output.{switches['cdr_lite_output']}"
-    online = bool((run_time_settings.get("cdr_lite") or {}).get(switches["cdr_lite"]))
+    online = online_carbonate_sensitivity_requested(run_time_settings)
     lite_output = run_time_settings.get("cdr_lite_output") or {}
     stream_on = bool(lite_output.get(switches["cdr_lite_output"]))
+    needed = online or bgc_mode == "cdr_lite"
     problems: list[str] = []
-    if online and not bgc_mode_is_marbl:
+    if online and bgc_mode != "marbl":
         problems.append(
             f'{online_flag}=True but bgc_mode != "marbl": ucla-roms computes the '
             "CDR-lite carbonate sensitivities from MARBL's ALT_CO2 state."
         )
-    if stream_on and lite_output.get("wrt_gas_exchange") and not online:
+    if stream_on and lite_output.get("wrt_gas_exchange") and not needed:
         problems.append(
             "cdr_lite_output.wrt_gas_exchange=True needs CDR_LITE, which Forge "
-            f"enables via {online_flag} (ucla-roms >= 0.9.0, MARBL)."
+            f'enables via bgc_mode "cdr_lite" or {online_flag} (ucla-roms >= 0.9.0, '
+            "MARBL)."
         )
     param = run_time_settings.get("param") or {}
-    if enabled := [
-        flag for flag, on in ((stream_flag, stream_on), (online_flag, online)) if on
-    ]:
-        # ``or 0``: a null count (YAML ``nt_cdr_oae:``) means no tracers.
-        if not any(int(param.get(key) or 0) for key in _CDR_TRACER_WEIGHTS):
+    # ``or 0``: a null count (YAML ``nt_cdr_oae:``) means no tracers.
+    n_cdr_tracers = sum(int(param.get(key) or 0) for key in _CDR_TRACER_WEIGHTS)
+    if bgc_mode != "cdr_lite" and (
+        enabled := [
+            flag for flag, on in ((stream_flag, stream_on), (online_flag, online)) if on
+        ]
+    ):
+        if not n_cdr_tracers:
             counts = " + ".join(f"param.{key}" for key in _CDR_TRACER_WEIGHTS)
             problems.append(
                 f"{' and '.join(enabled)} set but {counts} == 0: ucla-roms aborts "
                 "at init without CDR-lite tracers."
             )
+    if n_cdr_tracers and not needed and "cdr_lite" in settings_cls.model_fields:
+        counts = " + ".join(f"param.{key}" for key in _CDR_TRACER_WEIGHTS)
+        problems.append(
+            f"{counts} > 0 but the build has no CDR_LITE: ucla-roms aborts with "
+            '"Forcing type not supported" for CDR tracers without it. Use '
+            f'bgc_mode "cdr_lite" or enable {online_flag} (MARBL).'
+        )
     if problems:
         raise ValueError(" ".join(problems))
-    return online
+    return needed
 
 
 class UpscaleOutputCfg(_SettingsSection):
@@ -1589,7 +1756,8 @@ def validate_run_time_sections(
         ``None`` (default) preserves the legacy schema.
     """
     errors: list[str] = []
-    fields = run_time_settings_for_ref(roms_ref).model_fields
+    settings_cls = run_time_settings_for_ref(roms_ref)
+    fields = settings_cls.model_fields
     for key, value in (settings or {}).items():
         if key not in fields:
             continue  # not a run-time section (e.g. cppdefs) — nothing to check here
@@ -1614,10 +1782,19 @@ def validate_run_time_sections(
             )
         except ValueError as exc:
             errors.append(str(exc))
+    # The CDR-lite mode needs a new enough ucla-roms: surfaced here so a stored
+    # blueprint pinned below the minimum fails before data staging/generation
+    # (configure_build keeps the same check as the net).
+    if bgc_mode_from_cppdefs(settings.get("cppdefs") or {}) == "cdr_lite":
+        try:
+            check_cdr_lite_mode_roms(roms_ref)
+        except ValueError as exc:
+            errors.append(str(exc))
     # Same for BGC tracers vs MARBL (param vs cppdefs): surfaced here so a stored
     # blueprint fails before data staging/generation, not at configure_build.
     if "param" in settings and "cppdefs" in settings:
-        marbl = (settings["cppdefs"] or {}).get("marbl", False)
+        cppdefs = settings["cppdefs"] or {}
+        marbl = bool(cppdefs.get("marbl", False))
         try:
             check_bgc_tracer_count(settings["param"] or {}, bgc_mode_is_marbl=marbl)
         except ValueError as exc:
@@ -1629,7 +1806,11 @@ def validate_run_time_sections(
         keep = (*fields, "param", "cppdefs")
         modeled = {k: v for k, v in settings.items() if k in keep}
         try:
-            check_cdr_lite_sections(modeled, bgc_mode_is_marbl=marbl)
+            check_cdr_lite_sections(
+                modeled,
+                bgc_mode=bgc_mode_from_cppdefs(cppdefs),
+                settings_cls=settings_cls,
+            )
         except ValueError as exc:
             errors.append(str(exc))
     return errors
