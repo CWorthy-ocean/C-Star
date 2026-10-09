@@ -29,7 +29,7 @@ import os
 import re
 import warnings
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Annotated, Any, Literal
+from typing import TYPE_CHECKING, Annotated, Any, Literal, cast
 
 from pydantic import (
     AliasChoices,
@@ -43,38 +43,10 @@ from pydantic import (
 )
 
 from cstar.roms.namelist import (
-    BasicOutputSettings,
-    BasicOutputSettingsV0_5_0,
-    BgcSettings,
-    BottomDragSettings,
-    CalcPflxSettings,
-    CdrFrcSettings,
-    CdrGasExchOutputSettings,
-    CdrLiteOutputSettings,
-    CdrLiteSettings,
-    CdrOutputSettings,
-    CdrTracerOutputSettings,
-    DiagnosticsSettings,
-    DicAlkCorrection,
-    ExtractDataSettings,
     ForcingFiles,
-    FrcOutputSettings,
     Gamma2Settings,
-    GridSettings,
-    InitialConditions,
     LateralViscSettings,
-    LinRhoEosSettings,
-    MarblBiogeochemistrySettings,
-    ParamSettings,
-    ParamSettingsV0_4_0,
-    ParticlesSettings,
-    ParticlesSettingsV0_5_0,
-    PioSettings,
-    PipeFrcSettings,
-    RandomOutputSettings,
-    ReferenceDateSettings,
     Rho0Settings,
-    RiverFrcSettings,
     RomsNamelist,
     RomsNamelistBase,
     RomsNamelistV0_4_0,
@@ -82,23 +54,11 @@ from cstar.roms.namelist import (
     RomsNamelistV0_6_0,
     RomsNamelistV0_7_0,
     RomsNamelistV0_9_0,
-    SCoord,
     SimulationNameSettings,
-    SpongeTuneSettings,
-    SssCorrection,
-    SstCorrection,
-    StdoutDiagSettings,
-    SurfFlxOutputSettings,
     SurfFrcSettings,
-    TidalFrcSettings,
-    TimeStepping,
     TracerDiff2,
-    TsOutputSettings,
     UbindSettings,
-    UpscaleSettings,
     VerticalMixingSettings,
-    VSpongeSettings,
-    ZsliceSettings,
     namelist_schema_for_ref,
     roms_version_from_ref,
 )
@@ -505,7 +465,7 @@ def check_rst_period_divisible(
     :func:`cstar.roms.precheck.check_restart_period_divisible_by_dt` (the
     single home for this rule): ``ocean_vars``' fields already ARE the real
     Fortran namelist keys (``wrt_file_rst``/``monthly_restarts``/
-    ``output_period_rst``, no aliasing -- see :data:`_PRECHECK_SECTION_MAP`),
+    ``output_period_rst``, no aliasing -- see :data:`_PRECHECK_SECTIONS`),
     so it's passed straight through as the canonical ``basic_output_settings``
     group, whether it's a plain dict (the resolver's world) or an
     ``OceanVarsCfg`` (the pydantic validator's world) -- both forms are
@@ -996,8 +956,7 @@ def _tier_types_section(
 ) -> bool:
     """True if the run-time settings tier ``settings_cls`` types ``section`` as
     exactly ``cfg_cls`` -- the one rule deciding which row of a per-tier section
-    table (:data:`CDR_OUTPUT_SECTIONS`, :data:`_PRECHECK_SECTION_MAP`) applies
-    to the pinned ucla-roms release.
+    table (:data:`CDR_OUTPUT_SECTIONS`) applies to the pinned ucla-roms release.
     """
     info = settings_cls.model_fields.get(section)
     return info is not None and info.annotation is cfg_cls
@@ -1669,6 +1628,118 @@ _FORCING_LIST_KEYS = frozenset(
     {"surface_forcing_bgc_path", "boundary_forcing_bgc_path"}
 )
 
+# Forge settings section -> the RomsNamelistBase group its section dump becomes,
+# field for field (the ``serialization_alias`` on each renamed field supplies the
+# namelist key). build_namelist builds every one of these groups from this
+# table. A section whose group was renamed between ucla-roms releases lists each
+# name; the namelist schema of the tier carries exactly one of them.
+_ONE_TO_ONE_GROUPS: dict[str, tuple[str, ...]] = {
+    "time_stepping": ("time_stepping",),
+    "reference_date_settings": ("reference_date_settings",),
+    "grid": ("grid_settings",),
+    "s_coord": ("s_coord",),
+    "param": ("param_settings",),
+    "initial": ("initial_conditions",),
+    "river_frc": ("river_frc_settings",),
+    "tides": ("tidal_frc_settings",),
+    "ocean_vars": ("basic_output_settings",),
+    "ts_output": ("ts_output_settings",),
+    "frc_output": ("frc_output_settings",),
+    "extract_data": ("extract_data_settings",),
+    "sponge_tune": ("sponge_tune_settings",),
+    "calc_pflx": ("calc_pflx_settings",),
+    "zslice": ("zslice_settings",),
+    "bgc": ("bgc_settings",),
+    "marbl_bgc": ("marbl_biogeochemistry_settings",),
+    "cdr_frc": ("cdr_frc_settings",),
+    "cdr_output": ("cdr_output_settings",),
+    "upscale_output": ("upscale_settings",),
+    "lin_rho_eos": ("lin_rho_eos_settings",),
+    "bottom_drag": ("bottom_drag_settings",),
+    "sss_correction": ("sss_correction",),
+    "sst_correction": ("sst_correction",),
+    "dic_alk_correction": ("dic_alk_correction",),
+    "diagnostics": ("diagnostics_settings",),
+    "stdout_diag": ("stdout_diag_settings",),
+    "random_output": ("random_output_settings",),
+    "surf_flux": ("surf_flx_output_settings",),
+    "pipe_frc": ("pipe_frc_settings",),
+    "particles": ("particles_settings",),
+    "v_sponge": ("v_sponge_settings",),
+    "pio_settings": ("pio_settings",),
+    "cdr_lite": ("cdr_lite_settings",),
+    # &CDR_TRACER_OUTPUT_SETTINGS on 0.7/0.8, &CDR_LITE_OUTPUT_SETTINGS on 0.9+.
+    "cdr_lite_output": ("cdr_lite_output_settings", "cdr_tracer_output_settings"),
+    "cdr_gas_exch_output": ("cdr_gas_exch_output_settings",),
+}
+
+# The sections build_namelist transforms structurally (regroup, cross-section
+# read, scalar wrap) rather than dumping 1:1, and the group each one's fields
+# land in. _STRUCTURAL_FIELDS overrides the few fields that land elsewhere or
+# under a computed key; the rest keep their aliased name.
+_STRUCTURAL_GROUPS: dict[str, str] = {
+    "title": "simulation_name_settings",
+    "output_root_name": "simulation_name_settings",
+    "forcing": "forcing_files",
+    "tracer_diff2": "tracer_diff2",
+    "vertical_mixing": "vertical_mixing_settings",
+    "lateral_visc": "lateral_visc_settings",
+    "blk_frc": "surf_frc_settings",
+    "flux_frc": "surf_frc_settings",
+    "gamma2": "gamma2_settings",
+    "ubind": "ubind_settings",
+}
+_STRUCTURAL_FIELDS: dict[tuple[str, str], tuple[str, str]] = {
+    ("lateral_visc", "rho0"): ("rho0_settings", "rho0"),
+    ("vertical_mixing", "akt_default"): ("vertical_mixing_settings", "akt_bak"),
+    ("tracer_diff2", "tnu2_default"): ("tracer_diff2", "tnu2"),
+    **{("forcing", k): ("forcing_files", "frcfiles") for k in _FORCING_ORDER},
+}
+
+
+def namelist_schema_for(
+    settings_cls: type[_RunTimeSettingsCommon],
+) -> type[RomsNamelistBase]:
+    """The namelist schema :func:`build_namelist` writes for ``settings_cls``."""
+    return _NAMELIST_SCHEMA_BY_RUN_TIME_SETTINGS[settings_cls]
+
+
+def _one_to_one_group(namelist_cls: type[RomsNamelistBase], section: str) -> str:
+    """The name ``namelist_cls`` gives the 1:1 group for ``section``."""
+    (group,) = (
+        g for g in _ONE_TO_ONE_GROUPS[section] if g in namelist_cls.model_fields
+    )
+    return group
+
+
+def namelist_field_for(
+    settings_cls: type[_RunTimeSettingsCommon], section: str, field: str
+) -> tuple[str, str] | None:
+    """Forge settings ``section``/``field`` -> the ``(group, key)`` it is
+    written to in ``settings_cls``'s namelist schema: the ``RomsNamelistBase``
+    group field name and the real Fortran namelist key. A scalar section
+    (``gamma2``) passes its own name as ``field``.
+
+    Returns ``None`` for anything that is not a namelist field of this tier:
+    sections ``settings_cls`` lacks (``cppdefs`` and the other non-namelist
+    sections of the settings dict, version-gated sections of other tiers) and
+    keys its Cfg class does not type.
+    """
+    section_info = settings_cls.model_fields.get(section)
+    if section_info is None:
+        return None
+    if (section, field) in _STRUCTURAL_FIELDS:
+        return _STRUCTURAL_FIELDS[(section, field)]
+    if section in _STRUCTURAL_GROUPS:
+        group = _STRUCTURAL_GROUPS[section]
+    else:
+        group = _one_to_one_group(namelist_schema_for(settings_cls), section)
+    cfg_fields = getattr(section_info.annotation, "model_fields", None)
+    if cfg_fields is None:  # a scalar section (gamma2, ubind)
+        return group, field
+    info = cfg_fields.get(field)
+    return None if info is None else (group, info.serialization_alias or field)
+
 
 def build_namelist(rt: _RunTimeSettingsCommon, n_tracers: int) -> RomsNamelistBase:
     """The settings -> namelist transform.
@@ -1684,57 +1755,18 @@ def build_namelist(rt: _RunTimeSettingsCommon, n_tracers: int) -> RomsNamelistBa
     ``lateral_visc``. ``exclude=`` drops the fields those transforms handle
     instead of the section's own dump.
 
-    ``rt``'s concrete type (:class:`RunTimeSettings`, :class:`RunTimeSettingsV0_4_0`,
-    :class:`RunTimeSettingsV0_5_0`, :class:`RunTimeSettingsV0_6_0`,
-    :class:`RunTimeSettingsV0_7_0`, or :class:`RunTimeSettingsV0_9_0`) selects the
-    matching namelist schema and
-    ``param_settings``/``basic_output_settings``/``particles_settings`` group
-    classes — the ``param``/``ocean_vars``/``particles`` sections already carry the
-    right fields and aliases for that variant, so no other branch is needed.
-    ``pio_settings`` (added by ``RunTimeSettingsV0_6_0``),
-    ``cdr_lite_output``/``cdr_gas_exch_output`` (added by
-    ``RunTimeSettingsV0_7_0``, which writes ``cdr_lite_output`` as the 0.7/0.8
-    ``&CDR_TRACER_OUTPUT_SETTINGS`` group) and ``cdr_lite``/``cdr_lite_output``/
-    ``cdr_gas_exch_output`` (``RunTimeSettingsV0_9_0``) are sections a variant can
-    lack entirely rather than just carry a different subtype (an older namelist
-    schema rejects the group outright, ``extra="forbid"``), so each is added to
-    the constructor kwargs only when ``rt`` is an instance of the class that
-    introduced it — checked in most-specific-first order
-    (``RunTimeSettingsV0_9_0``, then ``RunTimeSettingsV0_7_0``, before
-    ``RunTimeSettingsV0_6_0`` before ITS superclass ``RunTimeSettingsV0_5_0``)
-    since ``isinstance`` also matches subclasses; ``RunTimeSettingsV0_9_0`` is a
-    ``RunTimeSettingsV0_6_0`` but not a ``RunTimeSettingsV0_7_0``.
+    ``rt``'s concrete type (:class:`RunTimeSettings` or one of its versioned
+    variants) selects the namelist schema (:func:`namelist_schema_for`), and
+    each 1:1 group is built as the class that schema types it with -- so the
+    tier's ``param_settings``/``basic_output_settings``/``particles_settings``
+    variant is picked up without a branch. A section is dumped 1:1 per
+    :data:`_ONE_TO_ONE_GROUPS` when ``rt`` carries it, so the sections a tier
+    adds (``pio_settings``, ``cdr_lite``, ``cdr_lite_output``,
+    ``cdr_gas_exch_output``) only reach the namelist schemas that accept them;
+    ``cdr_lite_output`` is written as ``&CDR_TRACER_OUTPUT_SETTINGS`` on the
+    0.7/0.8 schema and ``&CDR_LITE_OUTPUT_SETTINGS`` on 0.9+.
     """
-    if isinstance(rt, RunTimeSettingsV0_9_0):
-        namelist_cls: type[RomsNamelistBase] = RomsNamelistV0_9_0
-        param_cls: type[ParamSettings] = ParamSettingsV0_4_0
-        basic_output_cls = BasicOutputSettingsV0_5_0
-        particles_cls = ParticlesSettingsV0_5_0
-    elif isinstance(rt, RunTimeSettingsV0_7_0):
-        namelist_cls = RomsNamelistV0_7_0
-        param_cls = ParamSettingsV0_4_0
-        basic_output_cls = BasicOutputSettingsV0_5_0
-        particles_cls = ParticlesSettingsV0_5_0
-    elif isinstance(rt, RunTimeSettingsV0_6_0):
-        namelist_cls = RomsNamelistV0_6_0
-        param_cls = ParamSettingsV0_4_0
-        basic_output_cls = BasicOutputSettingsV0_5_0
-        particles_cls = ParticlesSettingsV0_5_0
-    elif isinstance(rt, RunTimeSettingsV0_5_0):
-        namelist_cls = RomsNamelistV0_5_0
-        param_cls = ParamSettingsV0_4_0
-        basic_output_cls = BasicOutputSettingsV0_5_0
-        particles_cls = ParticlesSettingsV0_5_0
-    elif isinstance(rt, RunTimeSettingsV0_4_0):
-        namelist_cls = RomsNamelistV0_4_0
-        param_cls = ParamSettingsV0_4_0
-        basic_output_cls = BasicOutputSettings
-        particles_cls = ParticlesSettings
-    else:
-        namelist_cls = RomsNamelist
-        param_cls = ParamSettings
-        basic_output_cls = BasicOutputSettings
-        particles_cls = ParticlesSettings
+    namelist_cls = namelist_schema_for(type(rt))
 
     def grp(section) -> dict:
         return section.model_dump(by_alias=True)
@@ -1766,66 +1798,18 @@ def build_namelist(rt: _RunTimeSettingsCommon, n_tracers: int) -> RomsNamelistBa
         rho0_settings=Rho0Settings(rho0=rt.lateral_visc.rho0),  # cross-section
         gamma2_settings=Gamma2Settings(gamma2=rt.gamma2),
         ubind_settings=UbindSettings(ubind=rt.ubind),
-        diagnostics_settings=DiagnosticsSettings(**grp(rt.diagnostics)),
-        basic_output_settings=basic_output_cls(
-            **rt.ocean_vars.model_dump(by_alias=True)
-        ),
         lateral_visc_settings=LateralViscSettings(
             **rt.lateral_visc.model_dump(by_alias=True, exclude={"rho0"})
         ),
         surf_frc_settings=SurfFrcSettings(**{**grp(rt.blk_frc), **grp(rt.flux_frc)}),
-        # ---- 1:1 groups (aliases handle the renames) ----
-        time_stepping=TimeStepping(**grp(rt.time_stepping)),
-        reference_date_settings=ReferenceDateSettings(
-            **grp(rt.reference_date_settings)
-        ),
-        grid_settings=GridSettings(**grp(rt.grid)),
-        s_coord=SCoord(**grp(rt.s_coord)),
-        param_settings=param_cls(**grp(rt.param)),
-        initial_conditions=InitialConditions(**grp(rt.initial)),
-        river_frc_settings=RiverFrcSettings(**grp(rt.river_frc)),
-        tidal_frc_settings=TidalFrcSettings(**grp(rt.tides)),
-        ts_output_settings=TsOutputSettings(**grp(rt.ts_output)),
-        frc_output_settings=FrcOutputSettings(**grp(rt.frc_output)),
-        extract_data_settings=ExtractDataSettings(**grp(rt.extract_data)),
-        sponge_tune_settings=SpongeTuneSettings(**grp(rt.sponge_tune)),
-        calc_pflx_settings=CalcPflxSettings(**grp(rt.calc_pflx)),
-        zslice_settings=ZsliceSettings(**grp(rt.zslice)),
-        bgc_settings=BgcSettings(**grp(rt.bgc)),
-        marbl_biogeochemistry_settings=MarblBiogeochemistrySettings(
-            **grp(rt.marbl_bgc)
-        ),
-        cdr_frc_settings=CdrFrcSettings(**grp(rt.cdr_frc)),
-        cdr_output_settings=CdrOutputSettings(**grp(rt.cdr_output)),
-        upscale_settings=UpscaleSettings(**grp(rt.upscale_output)),
-        lin_rho_eos_settings=LinRhoEosSettings(**grp(rt.lin_rho_eos)),
-        bottom_drag_settings=BottomDragSettings(**grp(rt.bottom_drag)),
-        sss_correction=SssCorrection(**grp(rt.sss_correction)),
-        sst_correction=SstCorrection(**grp(rt.sst_correction)),
-        dic_alk_correction=DicAlkCorrection(**grp(rt.dic_alk_correction)),
-        stdout_diag_settings=StdoutDiagSettings(**grp(rt.stdout_diag)),
-        random_output_settings=RandomOutputSettings(**grp(rt.random_output)),
-        surf_flx_output_settings=SurfFlxOutputSettings(**grp(rt.surf_flux)),
-        pipe_frc_settings=PipeFrcSettings(**grp(rt.pipe_frc)),
-        particles_settings=particles_cls(**grp(rt.particles)),
-        v_sponge_settings=VSpongeSettings(**grp(rt.v_sponge)),
     )
-    if isinstance(rt, RunTimeSettingsV0_6_0):
-        kwargs["pio_settings"] = PioSettings(**grp(rt.pio_settings))
-    if isinstance(rt, RunTimeSettingsV0_9_0):
-        kwargs["cdr_lite_settings"] = CdrLiteSettings(**grp(rt.cdr_lite))
-        kwargs["cdr_lite_output_settings"] = CdrLiteOutputSettings(
-            **grp(rt.cdr_lite_output)
-        )
-        kwargs["cdr_gas_exch_output_settings"] = CdrGasExchOutputSettings(
-            **grp(rt.cdr_gas_exch_output)
-        )
-    elif isinstance(rt, RunTimeSettingsV0_7_0):
-        kwargs["cdr_tracer_output_settings"] = CdrTracerOutputSettings(
-            **grp(rt.cdr_lite_output)
-        )
-        kwargs["cdr_gas_exch_output_settings"] = CdrGasExchOutputSettings(
-            **grp(rt.cdr_gas_exch_output)
+    # ---- 1:1 groups (aliases handle the renames) ----
+    for section in _ONE_TO_ONE_GROUPS:
+        if section not in type(rt).model_fields:
+            continue
+        group = _one_to_one_group(namelist_cls, section)
+        kwargs[group] = namelist_cls.model_fields[group].annotation(
+            **grp(getattr(rt, section))
         )
     return namelist_cls(**kwargs)
 
@@ -1914,45 +1898,30 @@ def validate_run_time_sections(
     return errors
 
 
-# Rows ``(forge settings-dict section, the forge Cfg class that types/aliases
-# that raw section, the C-Star RomsNamelistBase group field name the canonical
-# table expects)`` for the sections check_output_streams_divide_rst reads.
-# ``ocean_vars``/``upscale_output`` need no aliasing at all -- their forge field
-# names already ARE the real Fortran namelist keys -- but are still routed
-# through their Cfg class so a malformed section raises loudly rather than
-# silently mismatching field names. A section whose Cfg varies by ucla-roms
-# release has one row per Cfg; a row applies when the pinned release's settings
-# tier types the section as exactly that Cfg (:func:`_tier_types_section`), so
-# the ``OceanVarsCfgV0_5_0``/``ParticlesCfgV0_5_0`` rows apply only on the
-# >= 0.5.0 tiers :func:`output_precheck_applies_to` gates this check to, and
-# ``cdr_lite_output`` maps to the group its release writes.
-_PRECHECK_SECTION_MAP: tuple[tuple[str, type[_SettingsSection], str], ...] = (
-    ("ocean_vars", OceanVarsCfgV0_5_0, "basic_output_settings"),
-    ("frc_output", FrcOutputCfg, "frc_output_settings"),
-    ("random_output", RandomOutputCfg, "random_output_settings"),
-    ("zslice", ZsliceCfg, "zslice_settings"),
-    ("surf_flux", SurfFluxCfg, "surf_flx_output_settings"),
-    ("particles", ParticlesCfgV0_5_0, "particles_settings"),
-    ("sponge_tune", SpongeTuneCfg, "sponge_tune_settings"),
-    ("diagnostics", DiagnosticsCfg, "diagnostics_settings"),
-    ("cdr_output", CdrOutputCfg, "cdr_output_settings"),
-    ("cdr_lite_output", CdrLiteOutputCfg, "cdr_tracer_output_settings"),
-    ("cdr_lite_output", CdrLiteOutputCfgV0_9_0, "cdr_lite_output_settings"),
-    ("cdr_gas_exch_output", CdrGasExchOutputCfg, "cdr_gas_exch_output_settings"),
-    ("upscale_output", UpscaleOutputCfg, "upscale_settings"),
-    ("bgc", BgcCfg, "bgc_settings"),
-    ("extract_data", ExtractDataCfg, "extract_data_settings"),
+# The forge settings sections check_output_streams_divide_rst reads (the output
+# streams). Each is translated through the pinned tier's own Cfg class (its
+# ``serialization_alias`` renames) into the group build_namelist writes it to
+# (:data:`_ONE_TO_ONE_GROUPS`), so a section whose Cfg or group varies by
+# ucla-roms release needs nothing here. ``ocean_vars``/``upscale_output`` need no
+# aliasing at all -- their forge field names already ARE the real Fortran
+# namelist keys -- but are still routed through their Cfg class so a malformed
+# section raises loudly rather than silently mismatching field names.
+_PRECHECK_SECTIONS: tuple[str, ...] = (
+    "ocean_vars",
+    "frc_output",
+    "random_output",
+    "zslice",
+    "surf_flux",
+    "particles",
+    "sponge_tune",
+    "diagnostics",
+    "cdr_output",
+    "cdr_lite_output",
+    "cdr_gas_exch_output",
+    "upscale_output",
+    "bgc",
+    "extract_data",
 )
-
-# The inverse of _PRECHECK_SECTION_MAP: canonical RomsNamelistBase group field
-# name (unique per row) -> (the forge settings-dict section that maps to it,
-# its Cfg class). Used by forge_field_for to point a NamelistConsistencyError's
-# canonical section/keys back at the forge settings-dict field the wizard
-# actually edits.
-_FORGE_SECTION_BY_CANONICAL_GROUP: dict[str, tuple[str, type[_SettingsSection]]] = {
-    group_name: (section_name, cfg_cls)
-    for section_name, cfg_cls, group_name in _PRECHECK_SECTION_MAP
-}
 
 
 def canonical_output_sections_for_precheck(
@@ -1972,10 +1941,11 @@ def canonical_output_sections_for_precheck(
     ``generate_inputs()``/executor time), so a full run-time-settings
     validation can't succeed yet. None of those sections affect any
     output-stream field, so this only validates+aliases the sections the
-    checker actually reads (see :data:`_PRECHECK_SECTION_MAP`, whose rows are
-    filtered by ``settings_cls``, the tier of the pinned ucla-roms release). A
-    section absent from ``settings`` is simply omitted from the result -- the
-    checker already treats an absent section as "skip that stream".
+    checker actually reads (:data:`_PRECHECK_SECTIONS`), each through the Cfg
+    class and into the group of ``settings_cls``, the tier of the pinned
+    ucla-roms release. A section absent from ``settings`` or from that tier is
+    simply omitted from the result -- the checker already treats an absent
+    section as "skip that stream".
 
     Always includes ``extract_data`` (the nesting `extract` stream) when
     present in ``settings`` -- it's unconditionally fully populated by
@@ -1987,31 +1957,14 @@ def canonical_output_sections_for_precheck(
     ``NamelistConsistencyError`` and check ``exc.section ==
     "extract_data_settings"``.
     """
+    namelist_cls = namelist_schema_for(settings_cls)
     out: dict[str, Any] = {}
-    for section_name, cfg_cls, group_name in _PRECHECK_SECTION_MAP:
-        if not _tier_types_section(settings_cls, section_name, cfg_cls):
-            continue
+    for section_name in _PRECHECK_SECTIONS:
+        info = settings_cls.model_fields.get(section_name)
         section = settings.get(section_name)
-        if section is None:
+        if info is None or section is None:
             continue
-        out[group_name] = cfg_cls.model_validate(section).model_dump(by_alias=True)
+        cfg_cls = cast("type[_SettingsSection]", info.annotation)
+        group = _one_to_one_group(namelist_cls, section_name)
+        out[group] = cfg_cls.model_validate(section).model_dump(by_alias=True)
     return out
-
-
-def forge_field_for(section: str, key: str) -> str | None:
-    """Reverse-lookup: a ``NamelistConsistencyError``'s canonical
-    ``section``/one of its ``keys`` (a ``RomsNamelistBase`` group field name
-    and real Fortran namelist key) -> the forge settings-dict ``"section.field"``
-    the wizard actually edits, via :data:`_PRECHECK_SECTION_MAP`'s Cfg classes
-    and their ``serialization_alias``. Returns ``None`` if ``section`` isn't
-    one of the output-stream-check groups this table maps (not every namelist
-    group has a forge settings-dict counterpart via this table).
-    """
-    entry = _FORGE_SECTION_BY_CANONICAL_GROUP.get(section)
-    if entry is None:
-        return None
-    forge_section, cfg_cls = entry
-    for field_name, info in cfg_cls.model_fields.items():
-        if (info.serialization_alias or field_name) == key:
-            return f"{forge_section}.{field_name}"
-    return None

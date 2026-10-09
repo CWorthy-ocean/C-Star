@@ -533,11 +533,10 @@ sponge/particles streams. The nesting extract stream is resolve-time-derived
 (child DomainSpec metadata ``period`` x a seeded ``nrpf``); the resolver runs
 the same canonical checker as everything else, but catches
 ``NamelistConsistencyError`` and, when ``exc.section == "extract_data_settings"``,
-appends a hint naming the DomainSpec ``period`` knob before re-raising --
-Forge's ``forge_field_for(section, key)`` (``namelist_model.py``) is the more
-general version of that translation, a reverse lookup from a
-``NamelistConsistencyError``'s canonical section/key back to the forge
-settings-dict field the wizard edits.
+appends a hint naming the DomainSpec ``period`` knob before re-raising.
+The forward translation, forge settings section/field to namelist group/key,
+is ``namelist_field_for`` (``namelist_model.py``): ``build_namelist``, the
+precheck and the wizard's Advanced-settings tooltips all read it.
 
 ``models.py`` vs ``blueprint.py``
 ------------------------------------------

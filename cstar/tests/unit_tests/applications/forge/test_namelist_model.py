@@ -16,7 +16,7 @@ from pydantic import ValidationError
 import cstar.catalog
 from cstar.applications.forge.namelist_model import (
     _GATED_SECTION_SWITCHES,
-    _PRECHECK_SECTION_MAP,
+    _PRECHECK_SECTIONS,
     CDR_LITE_MODE_MIN_ROMS,
     RIVER_TRACERS_WITHOUT_CDR_MIN_ROMS,
     CdrGasExchOutputCfg,
@@ -38,8 +38,9 @@ from cstar.applications.forge.namelist_model import (
     check_cdr_lite_sections,
     check_cdr_output_sections,
     check_river_tracer_counts,
-    forge_field_for,
     n_tracers_from_param,
+    namelist_field_for,
+    namelist_schema_for,
     normalize_legacy_sections,
     output_precheck_applies_to,
     prune_version_gated_sections,
@@ -728,10 +729,9 @@ def test_build_namelist_v0_5_0_drops_nrpf_rst_and_renames_particles(tmp_path):
 
 def test_build_namelist_v0_7_0_dispatches_to_most_specific_class(tmp_path):
     """A RunTimeSettingsV0_7_0 instance is also a RunTimeSettingsV0_6_0/
-    RunTimeSettingsV0_5_0 instance (subclassing) -- proves ``build_namelist``'s
-    most-specific-first ``isinstance`` chain selects ``RomsNamelistV0_7_0``
-    (with ``&pio_settings`` AND the two new CDR output groups), not one of its
-    superclasses' namelist schemas.
+    RunTimeSettingsV0_5_0 instance (subclassing) -- proves ``build_namelist``
+    selects ``RomsNamelistV0_7_0`` (with ``&pio_settings`` AND the two new CDR
+    output groups), not one of its superclasses' namelist schemas.
     """
     d = _populated_rt_dict()
     rt = RunTimeSettingsV0_7_0.model_validate(d)
@@ -837,34 +837,6 @@ def test_output_precheck_applies_to_none_and_empty_ref_stays_legacy(roms_ref):
     settings_cls = run_time_settings_for_ref(roms_ref)
     assert settings_cls is RunTimeSettings
     assert output_precheck_applies_to(settings_cls) is False
-
-
-# ---------------------------------------------------------------------------
-# forge_field_for -- canonical (section, key) -> forge "section.field" lookup
-# ---------------------------------------------------------------------------
-def test_forge_field_for_renamed_field():
-    # FrcOutputCfg.output_period has serialization_alias="output_period_frc".
-    assert (
-        forge_field_for("frc_output_settings", "output_period_frc")
-        == "frc_output.output_period"
-    )
-
-
-def test_forge_field_for_unaliased_field():
-    # OceanVarsCfgV0_5_0.output_period_rst has no serialization_alias -- the
-    # forge field name already IS the canonical key.
-    assert (
-        forge_field_for("basic_output_settings", "output_period_rst")
-        == "ocean_vars.output_period_rst"
-    )
-
-
-def test_forge_field_for_unknown_section_returns_none():
-    assert forge_field_for("stdout_diag_settings", "code_check_mode") is None
-
-
-def test_forge_field_for_unknown_key_returns_none():
-    assert forge_field_for("frc_output_settings", "not_a_real_key") is None
 
 
 # ---------------------------------------------------------------------------
@@ -1310,7 +1282,7 @@ def test_cdr_output_sections_ignore_tiers_without_the_section():
 
 
 # ---------------------------------------------------------------------------
-# _PRECHECK_SECTION_MAP rows / forge_field_for
+# canonical_output_sections_for_precheck
 # ---------------------------------------------------------------------------
 def test_precheck_translation_picks_the_group_by_tier():
     section = {"do_cdr_lite_output": True, "nrpf": 3, "output_period": 60.0}
@@ -1330,51 +1302,6 @@ def test_precheck_translation_picks_the_group_by_tier():
     assert list(v09) == ["cdr_lite_output_settings"]
     assert v09["cdr_lite_output_settings"]["nrpf_cdr_lite"] == 3
     assert v09["cdr_lite_output_settings"]["wrt_gas_exchange"] is False
-
-
-@pytest.mark.parametrize("roms_ref", ["0.5.0", "0.6.0", "0.7.0", "0.8.0", "0.9.0"])
-def test_every_precheck_row_that_applies_matches_the_tier_annotation(roms_ref):
-    """Each section of the >= 0.5.0 tiers has exactly one applying row, so none is
-    silently skipped by the row-matching rule (e.g. ``ocean_vars`` ->
-    ``OceanVarsCfgV0_5_0``).
-    """
-    cls = run_time_settings_for_ref(roms_ref)
-    assert output_precheck_applies_to(cls)
-    sections = [section for section, _cfg, _group in _PRECHECK_SECTION_MAP]
-    for section in set(sections):
-        if section not in cls.model_fields:
-            continue
-        applying = [
-            group
-            for sec, cfg, group in _PRECHECK_SECTION_MAP
-            if sec == section and cls.model_fields[sec].annotation is cfg
-        ]
-        assert len(applying) == 1, (roms_ref, section, applying)
-    # ... and every section the tier models that the table knows is covered.
-    assert {section for section in sections if section in cls.model_fields} == {
-        sec
-        for sec, cfg, _ in _PRECHECK_SECTION_MAP
-        if sec in cls.model_fields and cls.model_fields[sec].annotation is cfg
-    }
-
-
-def test_forge_field_for_maps_both_cdr_lite_groups_to_the_forge_section():
-    assert (
-        forge_field_for("cdr_tracer_output_settings", "nrpf_cdr_trc")
-        == "cdr_lite_output.nrpf"
-    )
-    assert (
-        forge_field_for("cdr_lite_output_settings", "nrpf_cdr_lite")
-        == "cdr_lite_output.nrpf"
-    )
-    assert (
-        forge_field_for("cdr_tracer_output_settings", "do_cdr_tracer_output")
-        == "cdr_lite_output.do_cdr_lite_output"
-    )
-    assert (
-        forge_field_for("cdr_lite_output_settings", "wrt_gas_exchange")
-        == "cdr_lite_output.wrt_gas_exchange"
-    )
 
 
 # ---------------------------------------------------------------------------
@@ -1465,3 +1392,128 @@ def test_normalize_legacy_sections_does_not_mutate_the_old_inner_dict():
     inner = {"do_cdr_tracer_output": True}
     normalize_legacy_sections({"cdr_tracer_output": inner})
     assert inner == {"do_cdr_tracer_output": True}
+
+
+# ---------------------------------------------------------------------------
+# namelist_field_for -- forge settings (section, field) -> namelist (group, key),
+# the vocabulary bridge build_namelist writes through (the wizard's tooltips
+# read it too).
+# ---------------------------------------------------------------------------
+_ALL_SETTINGS_TIERS = (
+    RunTimeSettings,
+    RunTimeSettingsV0_4_0,
+    RunTimeSettingsV0_5_0,
+    RunTimeSettingsV0_6_0,
+    RunTimeSettingsV0_7_0,
+    RunTimeSettingsV0_9_0,
+)
+
+
+def _settings_fields(settings_cls):
+    """Every forge settings (section, field) of ``settings_cls``; a scalar
+    section (``gamma2``) is its own field.
+    """
+    for section, info in settings_cls.model_fields.items():
+        cfg_fields = getattr(info.annotation, "model_fields", None)
+        for field in cfg_fields or (section,):
+            yield section, field
+
+
+@pytest.mark.parametrize("settings_cls", _ALL_SETTINGS_TIERS)
+def test_namelist_field_for_maps_every_settings_field(settings_cls):
+    """Every settings field of every tier lands on a (group, key) the tier's
+    namelist schema declares. A section added to RunTimeSettings without a
+    _ONE_TO_ONE_GROUPS/_STRUCTURAL_GROUPS entry fails here.
+    """
+    schema = namelist_schema_for(settings_cls)
+    for section, field in _settings_fields(settings_cls):
+        target = namelist_field_for(settings_cls, section, field)
+        assert target is not None, (section, field)
+        group, key = target
+        assert group in schema.model_fields, (section, field, group)
+        assert key in schema.model_fields[group].annotation.model_fields, (
+            section,
+            field,
+            group,
+            key,
+        )
+
+
+@pytest.mark.parametrize("settings_cls", _ALL_SETTINGS_TIERS)
+def test_namelist_field_for_agrees_with_build_namelist(settings_cls):
+    """Each settings value is found in the built namelist at the (group, key)
+    namelist_field_for names -- the structural sections' mapping is written
+    beside build_namelist, not read by it, so this pins the two together.
+    """
+    rt = settings_cls.model_validate(_populated_rt_dict())
+    n_tracers = 34
+    nml = build_namelist(rt, n_tracers=n_tracers)
+    for section, field in _settings_fields(settings_cls):
+        section_value = getattr(rt, section)
+        value = getattr(section_value, field, section_value)  # scalar: itself
+        group, key = namelist_field_for(settings_cls, section, field)
+        written = getattr(getattr(nml, group), key)
+        if section == "forcing":  # every *_path is assembled into frcfiles
+            paths = value if isinstance(value, list) else [value] * (value is not None)
+            assert set(paths) <= set(written), (section, field)
+        else:  # a per-tracer default is expanded to one entry per tracer
+            assert written in (value, [value] * n_tracers), (section, field)
+
+
+@pytest.mark.parametrize(
+    ("section", "field", "expected"),
+    [
+        ("param", "n", ("param_settings", "nz")),
+        ("param", "np_xi", ("param_settings", "np_xi")),
+        ("param", "nt_cdr_oae", ("param_settings", "nt_cdr_oae")),
+        ("title", "casename", ("simulation_name_settings", "title")),
+        ("lateral_visc", "rho0", ("rho0_settings", "rho0")),
+        ("vertical_mixing", "akt_default", ("vertical_mixing_settings", "akt_bak")),
+        ("forcing", "river_path", ("forcing_files", "frcfiles")),
+        ("gamma2", "gamma2", ("gamma2_settings", "gamma2")),
+        (
+            "extract_data",
+            "extract_period",
+            ("extract_data_settings", "output_period_extract"),
+        ),
+        ("cdr_lite_output", "nrpf", ("cdr_lite_output_settings", "nrpf_cdr_lite")),
+    ],
+)
+def test_namelist_field_for_examples(section, field, expected):
+    assert namelist_field_for(RunTimeSettingsV0_9_0, section, field) == expected
+
+
+def test_namelist_field_for_follows_the_tier_group_rename():
+    """``cdr_lite_output`` is &CDR_TRACER_OUTPUT_SETTINGS on 0.7/0.8."""
+    assert namelist_field_for(RunTimeSettingsV0_7_0, "cdr_lite_output", "nrpf") == (
+        "cdr_tracer_output_settings",
+        "nrpf_cdr_trc",
+    )
+
+
+@pytest.mark.parametrize(
+    ("settings_cls", "section", "field"),
+    [
+        (RunTimeSettingsV0_9_0, "cppdefs", "marbl"),  # not a namelist section
+        (RunTimeSettingsV0_9_0, "param", "no_such_key"),  # not a typed field
+        (RunTimeSettingsV0_5_0, "pio_settings", "pio_stride"),  # other tier's section
+    ],
+)
+def test_namelist_field_for_returns_none_off_the_namelist(settings_cls, section, field):
+    assert namelist_field_for(settings_cls, section, field) is None
+
+
+@pytest.mark.parametrize("roms_ref", ["0.5.0", "0.6.0", "0.7.0", "0.8.0", "0.9.0"])
+def test_precheck_sections_match_what_build_namelist_writes(roms_ref):
+    """The precheck sees every output-stream section the tier carries, under
+    the group and keys build_namelist writes it with.
+    """
+    settings_cls = run_time_settings_for_ref(roms_ref)
+    d = _populated_rt_dict()
+    canonical = canonical_output_sections_for_precheck(d, settings_cls)
+    nml = build_namelist(settings_cls.model_validate(d), n_tracers=34)
+    present = [s for s in _PRECHECK_SECTIONS if s in settings_cls.model_fields]
+    assert len(canonical) == len(present)
+    for group, keys in canonical.items():
+        written = getattr(nml, group).model_dump()
+        assert keys == {k: written[k] for k in keys}, (roms_ref, group)

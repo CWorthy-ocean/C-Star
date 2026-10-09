@@ -24,6 +24,7 @@ from cstar.applications.forge.blueprint import (
 )
 from cstar.applications.forge.namelist_model import (
     RunTimeSettings,
+    RunTimeSettingsV0_4_0,
     RunTimeSettingsV0_5_0,
     RunTimeSettingsV0_6_0,
     RunTimeSettingsV0_7_0,
@@ -37,6 +38,7 @@ from cstar.wizard.wizard import (
     ForgeBlueprintWizard,
     _drain_stream_buffer,
     _ForcingEditor,
+    _namelist_tooltip,
     _section_submodel,
     _SettingsEditor,
 )
@@ -1253,6 +1255,46 @@ def test_sponge_tune_editable_via_advanced_settings_accordion():
     assert wiz.config.model_settings["cppdefs"]["sponge_tune"] is True
 
 
+def test_param_pane_shows_only_nt_passive():
+    """``param`` sits in the CDR pane for ``nt_passive`` alone: the grid/tiling
+    dims have their own widgets, ``ntrc_bio`` is set from the BGC mode and the
+    CDR tracer counts are read off the CDR forcing during generation.
+    """
+    import ipywidgets as W
+
+    param = {
+        "llm": 10,
+        "mmm": 10,
+        "n": 20,
+        "np_xi": 2,
+        "np_eta": 2,
+        "nt_passive": 0,
+        "ntrc_bio": 32,
+        "nt_cdr_oae": 0,
+        "nt_cdr_dor": 0,
+    }
+    editor = _SettingsEditor(W, {"param": param}, settings_cls=RunTimeSettingsV0_9_0)
+    assert [key for (section, key) in editor._widgets if section == "param"] == [
+        "nt_passive"
+    ]
+    assert "param" in editor._pane_sections["Carbon dioxide removal (CDR)"]
+    assert "forcing file" in editor._widgets[("param", "nt_passive")][0].tooltip
+
+
+def test_nt_passive_editable_via_advanced_settings_accordion():
+    wiz = ForgeBlueprintWizard()
+    wiz.start.value = date(2012, 1, 1)
+    wiz.end.value = date(2012, 1, 2)
+    wiz._rebuild()
+    assert wiz.config.model_settings["param"]["nt_passive"] == 0
+    assert ("param", "nt_passive") in wiz.editor._widgets
+    assert ("param", "ntrc_bio") not in wiz.editor._widgets
+
+    wiz._overrides[("param", "nt_passive")] = 2
+    wiz._rebuild()
+    assert wiz.config.model_settings["param"]["nt_passive"] == 2
+
+
 def test_nhy_nox_forcing_editable_in_bgc_advanced_settings_pane():
     """NHY_FORCING/NOX_FORCING default True from the ModelSpec and are editable as
     checkboxes in the Biogeochemistry (BGC / MARBL) advanced settings pane.
@@ -2192,6 +2234,57 @@ def test_default_model_uses_latest_settings_schema():
     wiz._rebuild()
     assert wiz._editor_settings_cls is RunTimeSettingsV0_9_0
     assert ("ocean_vars", "nrpf_rst") not in wiz.editor._widgets
+
+
+@pytest.mark.parametrize(
+    "settings_cls",
+    [
+        RunTimeSettings,
+        RunTimeSettingsV0_4_0,
+        RunTimeSettingsV0_5_0,
+        RunTimeSettingsV0_6_0,
+        RunTimeSettingsV0_7_0,
+        RunTimeSettingsV0_9_0,
+    ],
+)
+def test_namelist_tooltip_for_every_settings_field(settings_cls):
+    """Every Advanced-settings field gets its namelist schema description, in
+    every tier. Regression: the lookup used the forge section/field names as
+    namelist group/key names, so only the few sections whose names coincide
+    (``time_stepping``, ``s_coord``) had tooltips -- ``param`` (group
+    ``param_settings``, ``n`` -> ``nz``) and nearly every other section had none.
+    """
+    for section, info in settings_cls.model_fields.items():
+        cfg_fields = getattr(info.annotation, "model_fields", None)
+        for field in cfg_fields or (section,):
+            assert _namelist_tooltip(settings_cls, section, field), (section, field)
+
+
+@pytest.mark.parametrize("field", ["np_xi", "n", "nt_cdr_oae"])
+def test_namelist_tooltip_for_param_fields(field):
+    assert _namelist_tooltip(RunTimeSettingsV0_9_0, "param", field)
+
+
+def test_namelist_tooltip_empty_for_non_namelist_sections():
+    assert _namelist_tooltip(RunTimeSettingsV0_9_0, "cppdefs", "marbl") == ""
+
+
+def test_settings_editor_tooltips_prefer_the_glossary_hint():
+    """A field with no glossary hint shows the schema description; a glossary
+    hint (curated in the wizard's vocabulary) replaces it.
+    """
+    import ipywidgets as W
+
+    model_settings = {"bottom_drag": {"rdrg2": 1e-3}, "bgc": {"xco2air_default": 280.0}}
+    editor = _SettingsEditor(W, model_settings, settings_cls=RunTimeSettingsV0_9_0)
+
+    rdrg2_tip = editor._widgets[("bottom_drag", "rdrg2")][0].tooltip
+    assert _namelist_tooltip(RunTimeSettingsV0_9_0, "bottom_drag", "rdrg2") in (
+        rdrg2_tip
+    )
+    xco2air_tip = editor._widgets[("bgc", "xco2air_default")][0].tooltip
+    assert "co2_tvarying" in xco2air_tip
+    assert "PCO2AIR_FORCING" not in xco2air_tip
 
 
 def test_advection_cppdefs_editable_only_for_models_that_declare_them():

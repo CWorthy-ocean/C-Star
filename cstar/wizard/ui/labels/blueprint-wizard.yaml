@@ -162,6 +162,9 @@ sections:
   settings.dic_alk_correction:
     title: DIC and alkalinity correction
     required: false
+  settings.param:
+    title: Passive tracers
+    required: false
   settings.cdr_frc:
     title: CDR forcing
     required: false
@@ -1022,6 +1025,10 @@ fields:
   settings.extract_data.nrpf:
     label: Records per file
     symbol: nrpf
+  settings.param.nt_passive:
+    label: Passive tracers
+    symbol: nt_passive
+    hint: Number of passive (dye) tracers. With CDR forcing, it must match the passive tracers in the forcing file.
   settings.cdr_frc.cdr_source:
     label: Enable CDR forcing
     symbol: cdr_source
