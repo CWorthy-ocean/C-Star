@@ -58,6 +58,7 @@ Bug Fixes
 - ``nest-from`` (and the new directive) now accept a ``path`` that names a single boundary file, as the docs always said; a file path used to be reported as "no boundary files located". (`#754 <https://github.com/CWorthy-ocean/C-Star/pull/754>`_)
 - A generated CDR forcing that is reused without ``--clobber`` is now described from the file on disk (release count, release family, tracer axis), so the namelist can no longer disagree with the data ROMS reads. (`#754 <https://github.com/CWorthy-ocean/C-Star/pull/754>`_)
 - Completing a step name in ``cstar workplan log``, ``path``, or ``cd`` after an unknown or mistyped run-id printed a traceback in the terminal; it now offers no completions. (`#759 <https://github.com/CWorthy-ocean/C-Star/pull/759>`_)
+- Forge input generation no longer hangs intermittently with the progress bar frozen mid-save (an xarray netCDF lock-order deadlock, fixed upstream in xarray 2026.9). (`#758 <https://github.com/CWorthy-ocean/C-Star/pull/758>`_)
 
 
 Improvements
@@ -81,3 +82,4 @@ Miscellaneous
 - The workplans guide has a new "Finding a Run's Directory" section covering ``path``, ``cd`` and the shell setup. (`#755 <https://github.com/CWorthy-ocean/C-Star/pull/755>`_)
 - ``shellingham`` is now a declared dependency; it was already installed as a requirement of ``typer``. (`#755 <https://github.com/CWorthy-ocean/C-Star/pull/755>`_)
 - Tests now use the real ``roms_marbl`` application: the test conftest no longer replaces it with a ``SleepApplication`` subclass registered under the same name. (`#756 <https://github.com/CWorthy-ocean/C-Star/pull/756>`_)
+- C-Star now requires ``xarray>=2026.9`` and ``roms-tools>=5.1.1`` (the first roms-tools release without the old ``xarray<2025.8`` cap); existing environments will upgrade both. (`#758 <https://github.com/CWorthy-ocean/C-Star/pull/758>`_)
