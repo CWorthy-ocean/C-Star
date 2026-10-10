@@ -60,7 +60,12 @@ ESPER *(experimental)*
    physical source at generation time, using the CWorthy fork of PyESPER
    (either installed in the environment or pointed to with the source's
    ``path``). Large domains may need the source's ``serialize_dask`` option
-   to bound memory.
+   to bound memory. ESPER's nets have no training data at river-plume
+   salinities and extrapolate badly there; set the source's
+   ``esper_salinity_conditioning: true`` to have PyESPER evaluate them at a
+   salinity blended toward the WOA23 annual climatology below 31-34 PSU (and
+   dilute alkalinity and DIC back to the model salinity). Forge then downloads
+   the one WOA23 file this needs (``WOA_SALINITY``, into the ``WOA`` folder).
 
 Provided by you
 ---------------
