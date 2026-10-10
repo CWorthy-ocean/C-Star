@@ -135,8 +135,9 @@ def _parse_source(block: Any) -> SourceSpec:
     Forwards every ``SourceSpec`` field a source dict may carry -- ``path`` (a
     custom dataset path, or the required PyESPER package directory for an
     ``ESPER`` source), ``constants`` (a ``name="constants"`` source's value
-    mapping), and ``esper_method``/``esper_equation`` (an ``ESPER`` source's
-    PyESPER knobs) -- not just ``name``/``climatology``/``glorys_layout``, so a
+    mapping), and ``esper_method``/``esper_equation``/``esper_salinity_conditioning``
+    (an ``ESPER`` source's PyESPER knobs) -- not just ``name``/``climatology``/
+    ``glorys_layout``, so a
     constants/ESPER/custom-path source authored via the wizard (or any
     ``forcing_inputs`` caller) actually reaches ``SourceSpec`` instead of being
     silently dropped.
@@ -161,6 +162,8 @@ def _parse_source(block: Any) -> SourceSpec:
         kw["esper_method"] = d["esper_method"]
     if d.get("esper_equation"):
         kw["esper_equation"] = d["esper_equation"]
+    if d.get("esper_salinity_conditioning"):
+        kw["esper_salinity_conditioning"] = True
     return SourceSpec(**kw)
 
 
@@ -1653,6 +1656,11 @@ def _build_forcing(
         # fetched/staged by Forge -- noting them here would land them in
         # resolved_datasets/datasets and raise "Unknown dataset" downstream in SourceDatasets.
         if str(src.name).upper() in DERIVED_BGC_SOURCES:
+            # ESPER itself is derived, but its salinity conditioning reads one staged
+            # WOA23 file -- note *that* dataset so the executor stages it and
+            # input_data._resolve_source_block can look its path up.
+            if str(src.name).upper() == "ESPER" and src.esper_salinity_conditioning:
+                resolved.setdefault("WOA_SALINITY", _resolved_dataset("WOA_SALINITY"))
             return
         # CUSTOM_FILE (river.source) has no registry entry -- the file is
         # verified/staged directly from RiverForcingItem.custom_file, not from

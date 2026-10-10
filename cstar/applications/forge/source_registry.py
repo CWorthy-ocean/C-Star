@@ -57,6 +57,16 @@ WOA23_BGC_VARIABLES: dict[str, tuple[str, str, str]] = {
 # them underneath the monthly data for its default "annual_blend" deep fill.
 WOA23_PERIODS = (*range(1, 13), 0)
 WOA23_GRID = "01"
+
+# The one WOA23 file ESPER's salinity conditioning reads
+# (``PyESPER.salinity_conditioning``; ``SourceSpec.esper_salinity_conditioning``): the
+# 1-degree annual-mean ("decav", period 00) salinity. Staged by the ``WOA_SALINITY``
+# handler into the same ``WOA`` directory as the BGC set, which contains the very same
+# file as its annual salinity member -- so the two never download it twice.
+WOA23_SALINITY_FILENAME = f"woa23_decav_s00_{WOA23_GRID}.nc"
+WOA23_SALINITY_URL = (
+    f"{WOA23_BASE_URL}/salinity/netcdf/decav/1.00/{WOA23_SALINITY_FILENAME}"
+)
 # The unified BGC climatology. From v2.1 on, the file names its dimensions
 # ``longitude``/``latitude``/``depth`` and stores ``month`` as an integer index 1-12;
 # roms-tools still reads earlier files but logs a "predates v2.1" warning, and the
@@ -93,6 +103,7 @@ SOURCE_ALIAS: dict[str, str] = {
     "TPXO": "TPXO",
     "WOA": "WOA",  # SSS-restoring salinity (0.25 deg); user-staged
     "WOA_BGC": "WOA_BGC",  # WOA23 1-deg gridded BGC source; auto-downloaded
+    "WOA_SALINITY": "WOA_SALINITY",  # WOA23 1-deg annual salinity for ESPER conditioning; auto-downloaded
     "DAI": "DAI",  # placeholder until a real DAI handler exists
     "GLOFAS": "GLOFAS",  # alternative river-discharge dataset (roms-tools rt>=4, PR #625)
     "EMOD": "EMOD",  # alternative topography source (EMODnet); user-staged, like TPXO/WOA
@@ -136,6 +147,8 @@ UNSTAGED_DATASETS: set[str] = {"ETOPO5", "DAI"}
 #   - "ESPER":     BGC fields derived from physics T/S via PyESPER at generation time
 #                  (SourceSpec.esper_method/esper_equation); see input_data.py's ESPER
 #                  handling, which already recognizes this by name, not by dataset lookup.
+#                  With SourceSpec.esper_salinity_conditioning the resolver notes the
+#                  one staged file it needs (WOA_SALINITY) instead of the source itself.
 # Consulted by forge_blueprint_resolve.py's source-collection code (_note() and the
 # river-bgc-source carve-out) to exclude these before they ever reach _resolved_dataset().
 DERIVED_BGC_SOURCES: set[str] = {"CONSTANTS", "ESPER"}
@@ -149,6 +162,7 @@ DATASET_METADATA: dict[str, dict[str, str]] = {
     "MBL_CO2": {"url": MBL_CO2_URL},
     "WOA": {"url": WOA_DOWNLOAD_URL},
     "WOA_BGC": {"url": WOA23_BASE_URL},
+    "WOA_SALINITY": {"url": WOA23_SALINITY_URL},
     "TPXO": {},
     "ETOPO5": {},
     "ERA5": {},

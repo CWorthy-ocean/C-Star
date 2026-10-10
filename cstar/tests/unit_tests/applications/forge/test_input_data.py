@@ -900,6 +900,44 @@ class TestRomsMarblInputDataHelperMethods:
         )
         assert result == {"name": "ESPER", "path": "/data/PyESPER"}
 
+    def test_resolve_source_block_esper_salinity_conditioning_gets_the_woa_file(
+        self, sample_roms_marbl_input_data, tmp_path
+    ):
+        """The blueprint only carries the switch (``salinity_conditioning: True``,
+        from engine `_src`); roms-tools/PyESPER need the staged WOA23 annual salinity
+        file, so the block is rewritten to the mapping roms-tools accepts, using the
+        path the WOA_SALINITY handler prepared. Done even when the ESPER source
+        carries its own explicit ``path`` (that is its PyESPER checkout).
+        """
+        real_sd = source_datasets.SourceDatasets(datasets=["WOA_SALINITY"])
+        woa_file = tmp_path / "WOA" / "woa23_decav_s00_01.nc"
+        real_sd.paths["WOA_SALINITY"] = woa_file
+        sample_roms_marbl_input_data.source_data = real_sd
+
+        result = sample_roms_marbl_input_data._resolve_source_block(
+            {"name": "ESPER", "path": "/data/PyESPER", "salinity_conditioning": True}
+        )
+        assert result == {
+            "name": "ESPER",
+            "path": "/data/PyESPER",
+            "salinity_conditioning": {"woa_salinity_path": str(woa_file)},
+        }
+        # Already a mapping (hand-written roms-tools form): left alone.
+        explicit = {"woa_salinity_path": "/elsewhere/s00.nc", "low": 30.0}
+        result = sample_roms_marbl_input_data._resolve_source_block(
+            {"name": "ESPER", "salinity_conditioning": dict(explicit)}
+        )
+        assert result["salinity_conditioning"] == explicit
+        # Off: no key at all, and no lookup.
+        real_sd.paths.clear()
+        result = sample_roms_marbl_input_data._resolve_source_block({"name": "ESPER"})
+        assert result == {"name": "ESPER"}
+        # On, but the dataset was never staged (hand-edited blueprint): say so.
+        with pytest.raises(ValueError, match="WOA_SALINITY"):
+            sample_roms_marbl_input_data._resolve_source_block(
+                {"name": "ESPER", "salinity_conditioning": True}
+            )
+
     def test_resolve_source_block_time_window_trims_daily_list(
         self, sample_roms_marbl_input_data
     ):
@@ -4606,7 +4644,44 @@ class TestEsperPreflight:
                 {"source": {"name": "constants", "constants": {"NO3": 1.0}}},
             ],
         }
-        RomsMarblInputData._preflight_esper_sources([(step, kwargs)])  # no raise
+        data = MagicMock(spec=RomsMarblInputData)
+        RomsMarblInputData._preflight_esper_sources(data, [(step, kwargs)])  # no raise
+        data._resolve_source_block.assert_not_called()
+
+    def test_preflight_validates_the_resolved_block(
+        self, esper_input_data, monkeypatch
+    ):
+        """roms-tools sees the block *after* ``_resolve_source_block`` -- where the
+        blueprint's ``salinity_conditioning: True`` becomes the mapping with the staged
+        WOA23 file -- so that is what the preflight must validate. Validating the raw
+        switch failed in production ("must be a mapping ... got True").
+        """
+        import roms_tools.setup.esper as esper_module
+
+        data = esper_input_data
+        woa_file = data.input_data_dir / "woa23_decav_s00_01.nc"
+        real_sd = source_datasets.SourceDatasets(datasets=["WOA_SALINITY"])
+        real_sd.paths["WOA_SALINITY"] = woa_file
+        data.source_data = real_sd
+        seen: list[dict] = []
+        monkeypatch.setattr(esper_module, "validate_esper_source", seen.append)
+        step = MagicMock(name="forcing.boundary")
+        kwargs = {
+            "source": {"name": "GLORYS"},
+            "bgc_sources": [
+                {
+                    "source": {"name": "ESPER", "salinity_conditioning": True},
+                    "use_vars": ["ALK", "DIC"],
+                }
+            ],
+        }
+        data._preflight_esper_sources([(step, kwargs)])
+        assert seen == [
+            {
+                "name": "ESPER",
+                "salinity_conditioning": {"woa_salinity_path": str(woa_file)},
+            }
+        ]
 
 
 class TestBoundaryBgcSources:

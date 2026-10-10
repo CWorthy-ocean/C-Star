@@ -2529,6 +2529,52 @@ def test_resolver_boundary_bgc_esper_source_excluded_from_datasets():
     assert "ESPER" not in cfg.forcing.resolved_datasets
 
 
+def test_resolver_esper_salinity_conditioning_notes_the_woa_salinity_file():
+    """An ESPER source stays out of ``datasets`` (it is derived), but switching on
+    ``esper_salinity_conditioning`` must note the one file PyESPER needs
+    (``WOA_SALINITY``) so the executor stages it and input_data can look it up.
+    Without the switch nothing WOA-related is staged.
+    """
+    import copy
+
+    from cstar.catalog.domain_catalog import default_catalog as cat
+
+    fdata = copy.deepcopy(cat.forcing_data("glorys-era5-unified"))
+    fdata["forcing"]["boundary"]["bgc_sources"][-1]["source"] = {
+        "name": "ESPER",
+        "esper_salinity_conditioning": True,
+    }
+    cfg = _build(forcing_inputs=fdata)
+    src = cfg.forcing.boundary.bgc_sources[-1].source
+    assert src.name == "ESPER" and src.esper_salinity_conditioning is True
+    assert "ESPER" not in cfg.datasets
+    assert "WOA_SALINITY" in cfg.datasets
+    assert cfg.forcing.resolved_datasets["WOA_SALINITY"].dataset_key == "WOA_SALINITY"
+    assert cfg.forcing.resolved_datasets["WOA_SALINITY"].url.endswith(
+        "woa23_decav_s00_01.nc"
+    )
+
+    fdata["forcing"]["boundary"]["bgc_sources"][-1]["source"] = {"name": "ESPER"}
+    cfg = _build(forcing_inputs=fdata)
+    assert (
+        cfg.forcing.boundary.bgc_sources[-1].source.esper_salinity_conditioning is None
+    )
+    assert "WOA_SALINITY" not in cfg.datasets
+
+
+def test_source_spec_esper_salinity_conditioning_only_for_esper():
+    from cstar.applications.forge.blueprint import SourceSpec
+
+    assert SourceSpec(
+        name="ESPER", esper_salinity_conditioning=True
+    ).esper_salinity_conditioning
+    with pytest.raises(ValueError, match="esper_salinity_conditioning"):
+        SourceSpec(name="UNIFIED", esper_salinity_conditioning=True)
+    # False is as invalid as True on a non-ESPER source: the field is ESPER's alone.
+    with pytest.raises(ValueError, match="only valid when name is 'ESPER'"):
+        SourceSpec(name="GLODAP", esper_salinity_conditioning=False)
+
+
 def test_resolver_ic_bgc_constants_source_excluded_from_datasets():
     """Same regression, via the generic IC-BGC path (not the river bgc_source path
     already covered by test_resolver_threads_river_bgc_source_and_climatology) --
@@ -6618,6 +6664,7 @@ class TestForgeBlueprintWizard:
         row["path"].value = "/data/PyESPER"
         row["esper_method"].value = "mixed"
         row["esper_equation"].value = "16"
+        row["esper_salinity_conditioning"].value = True
 
         p = tmp_path / "forge_blueprint.yaml"
         w1.save_path.value = str(p)
@@ -6626,6 +6673,7 @@ class TestForgeBlueprintWizard:
         esper_src = w1.config.forcing.initial_conditions.bgc_sources[0].source
         assert esper_src.esper_method == "mixed"
         assert esper_src.esper_equation == 16
+        assert esper_src.esper_salinity_conditioning is True
 
         w2 = self._wizard()
         w2.load_path.value = str(p)
@@ -6634,9 +6682,11 @@ class TestForgeBlueprintWizard:
         assert bgc_sources[0].source.name == "ESPER"
         assert bgc_sources[0].source.esper_method == "mixed"
         assert bgc_sources[0].source.esper_equation == 16
+        assert bgc_sources[0].source.esper_salinity_conditioning is True
         fe2 = w2._forcing_editor
         assert fe2._rows["ic_bgc"][0]["esper_method"].value == "mixed"
         assert fe2._rows["ic_bgc"][0]["esper_equation"].value == "16"
+        assert fe2._rows["ic_bgc"][0]["esper_salinity_conditioning"].value is True
 
     def test_nest_from_domain_dropdown_prefills_child(self):
         w = self._wizard()

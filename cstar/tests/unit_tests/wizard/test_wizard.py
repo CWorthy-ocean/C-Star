@@ -515,6 +515,7 @@ def test_surface_bgc_row_never_gets_use_vars_or_bgc_source_widgets(editor):
     assert "constants" not in w
     assert "esper_method" not in w
     assert "esper_equation" not in w
+    assert "esper_salinity_conditioning" not in w
 
 
 def test_surface_bgc_row_gathers_a_validating_surface_forcing_item(editor):
@@ -555,18 +556,37 @@ def test_stale_constants_not_emitted_after_switch_to_static_source(editor, cat):
 def test_stale_esper_fields_not_emitted_after_switch_to_static_source(editor, cat):
     w = editor._make_row(
         cat,
-        {"source": {"name": "ESPER", "esper_method": "lir", "esper_equation": 16}},
+        {
+            "source": {
+                "name": "ESPER",
+                "esper_method": "lir",
+                "esper_equation": 16,
+                "esper_salinity_conditioning": True,
+            }
+        },
     )
     item = editor._gather_item(cat, w)
     assert item["source"]["esper_method"] == "lir"
     assert item["source"]["esper_equation"] == 16
+    assert item["source"]["esper_salinity_conditioning"] is True
 
     w["name"].value = "GLODAP"
     editor._apply_row_visibility(w)
     item = editor._gather_item(cat, w)
     assert "esper_method" not in item["source"]
     assert "esper_equation" not in item["source"]
+    assert "esper_salinity_conditioning" not in item["source"]
     BgcSourceItem(**item)
+
+
+@pytest.mark.parametrize("cat", ["ic_bgc", "boundary_bgc"])
+def test_esper_salinity_conditioning_unchecked_is_not_emitted(editor, cat):
+    """Unchecked means "roms-tools default" (off) and must not emit ``False``: the
+    resolver treats the field as a switch and ``False`` would still be a value.
+    """
+    w = editor._make_row(cat, {"source": {"name": "ESPER"}})
+    assert w["esper_salinity_conditioning"].value is False
+    assert "esper_salinity_conditioning" not in editor._gather_item(cat, w)["source"]
 
 
 @pytest.mark.parametrize("cat", ["ic_bgc", "boundary_bgc"])

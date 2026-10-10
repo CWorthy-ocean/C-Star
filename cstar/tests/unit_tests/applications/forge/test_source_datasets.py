@@ -1054,3 +1054,76 @@ class TestWOABGCHandler:
         result = sd.paths["WOA"]
         assert result.name.endswith("_04.nc")
         assert "_01.nc" not in str(result)
+
+
+class TestWOASalinityHandler:
+    """The WOA23 1-degree annual salinity file ESPER's salinity conditioning reads
+    (``WOA_SALINITY``) -- one file, staged into the shared ``WOA`` directory.
+    """
+
+    def test_key_reconciles_to_handler(self):
+        sd = SourceDatasets(datasets=["WOA_SALINITY"])
+        assert "WOA_SALINITY" in sd.datasets
+        assert sd.dataset_key_for_source("WOA_SALINITY") == "WOA_SALINITY"
+        assert "WOA_SALINITY" in DATASET_REGISTRY
+
+    def test_url_is_the_ncei_annual_decav_file(self):
+        from cstar.applications.forge.source_registry import (
+            DATASET_METADATA,
+            WOA23_SALINITY_FILENAME,
+            WOA23_SALINITY_URL,
+        )
+
+        assert WOA23_SALINITY_FILENAME == "woa23_decav_s00_01.nc"
+        assert WOA23_SALINITY_URL.endswith(
+            "/WOA23/DATA/salinity/netcdf/decav/1.00/woa23_decav_s00_01.nc"
+        )
+        assert DATASET_METADATA["WOA_SALINITY"] == {"url": WOA23_SALINITY_URL}
+
+    def test_existing_file_is_reused_without_download(self, tmp_path, monkeypatch):
+        woa_dir = tmp_path / "WOA"
+        woa_dir.mkdir()
+        target = woa_dir / "woa23_decav_s00_01.nc"
+        target.write_bytes(b"already here")
+
+        def fail(*_a, **_k):  # pragma: no cover - must not be reached
+            raise AssertionError("no download expected")
+
+        monkeypatch.setattr(source_datasets, "urlopen", fail)
+        sd = SourceDatasets(datasets=["WOA_SALINITY"], source_data_dir=tmp_path)
+        sd.prepare_all()
+        assert sd.paths["WOA_SALINITY"] == target
+        assert sd.path_for_source("WOA_SALINITY") == target
+        assert target.read_bytes() == b"already here"
+
+    def test_downloads_the_one_file_into_the_shared_woa_directory(
+        self, tmp_path, monkeypatch
+    ):
+        import io
+        from contextlib import nullcontext
+
+        from cstar.applications.forge.source_registry import WOA23_SALINITY_URL
+
+        seen: list[str] = []
+
+        def fake_urlopen(url):
+            seen.append(url)
+            return nullcontext(io.BytesIO(b"netcdf bytes"))
+
+        monkeypatch.setattr(source_datasets, "urlopen", fake_urlopen)
+        sd = SourceDatasets(datasets=["WOA_SALINITY"], source_data_dir=tmp_path)
+        sd.prepare_all()
+        target = tmp_path / "WOA" / "woa23_decav_s00_01.nc"
+        assert seen == [WOA23_SALINITY_URL]
+        assert target.read_bytes() == b"netcdf bytes"
+        assert sd.paths["WOA_SALINITY"] == target
+        # Same file name the WOA_BGC handler stages as its annual salinity member,
+        # so the two sources share it rather than fetching it twice.
+        from cstar.applications.forge.source_registry import (
+            WOA23_BGC_VARIABLES,
+            WOA23_GRID,
+        )
+
+        _subdir, decade, code = WOA23_BGC_VARIABLES["salt_bgc"]
+        assert target.name == f"woa23_{decade}_{code}00_{WOA23_GRID}.nc"
+        assert not list((tmp_path / "WOA").glob("*.part"))
