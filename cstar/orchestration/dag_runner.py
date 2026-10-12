@@ -454,7 +454,9 @@ async def prepare_workplan(
 
     fill_transform: TemplateFillTransform | None = None
     file_io_extras: list[Awaitable[int]] = []
-    persist_vars: Path | None = None
+    persist_vars = WorkplanTransformer.derived_path(
+        wp_path, output_dir, suffix="", extension=".vars"
+    )
 
     if user_variables is not None:
         named_config = UserDefinedVariables(
@@ -467,9 +469,6 @@ async def prepare_workplan(
             variable_resolver=lambda name: named_config[name]
         )
 
-        persist_vars = WorkplanTransformer.derived_path(
-            wp_path, output_dir, suffix="", extension=".vars"
-        )
         file_io_extras.append(asyncio.to_thread(serialize, persist_vars, named_config))
     else:
         fill_transform = TemplateFillTransform(variable_resolver=None)
@@ -499,10 +498,11 @@ async def prepare_workplan(
     persist_orig = original_workplan_backup(wp_path, output_dir)
     persist_as = WorkplanTransformer.derived_path(wp_path, output_dir, "_transformed")
 
-    # keep the files of earlier attempts as `<name>.<i>`; nothing reads the rotated copies
+    # keep the files of earlier attempts as `<name>.<i>`; nothing reads the rotated
+    # copies. The variables rotate even when this attempt writes none, so an old
+    # attempt's variables never sit beside this attempt's originals.
     for persisted in (persist_orig, persist_as, persist_vars):
-        if persisted is not None:
-            rotate_file(persisted)
+        rotate_file(persisted)
 
     file_io: list[Awaitable[int]] = [
         asyncio.to_thread(serialize, persist_orig, wp_orig),

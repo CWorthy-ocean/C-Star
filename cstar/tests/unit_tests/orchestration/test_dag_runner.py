@@ -713,6 +713,19 @@ async def test_prepare_workplan_rotates_the_files_of_prior_attempts(
         assert path.with_name(f"{path.name}.1").read_text() == first_text[path]
         assert path.with_name(f"{path.name}.2").read_text() == second_text[path]
 
+    # an attempt without variables moves the last attempt's variables aside too,
+    # rather than leaving them beside the new originals
+    third_vars_text = persisted[2].read_text()
+    await prepare_workplan(wp_path, output_dir)
+
+    assert not persisted[2].exists()
+    assert persisted[2].with_name(f"{persisted[2].name}.3").read_text() == (
+        third_vars_text
+    )
+    for path in persisted[:2]:
+        assert path.exists()
+        assert path.with_name(f"{path.name}.3").exists()
+
 
 @pytest.mark.usefixtures("read_yaml_intercept")
 @pytest.mark.asyncio
@@ -737,9 +750,7 @@ async def test_build_dag_reports_orphans_of_a_re_entered_run(
         await build_dag(wp_templates_dir / "single_step.yaml", run_id)
 
     warnings = [r.getMessage() for r in caplog.records if r.levelname == "WARNING"]
-    assert any(
-        "renamed-step" in w and f"cstar run check {run_id}" in w for w in warnings
-    )
+    assert any(str(leftover) in w and "left in place" in w for w in warnings)
     assert leftover.is_dir()
 
 

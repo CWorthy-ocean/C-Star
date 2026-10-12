@@ -139,7 +139,7 @@ Definitions
       (``CSTAR_DATA_HOME/workplan_runs/<id>``), lets you check status (``cstar workplan status``) or reattach to a run
       in progress, and lets you re-enter a run to retry failed steps or
       resume them in place. A new run ID starts the workplan from scratch.
-      Two different workplan files with the same ``name`` share a run ID, so
+      Two different workplans with the same ``name`` share a run ID, so
       running the second one without ``--run-id`` is refused.
 
     Pre-run

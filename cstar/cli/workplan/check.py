@@ -3,6 +3,7 @@ import typing as t
 from pathlib import Path
 
 import typer
+from pydantic import ValidationError
 
 from cstar.cli.workplan.shared import preprocess_varfile, preprocess_vars
 from cstar.entrypoint.utils import (
@@ -17,7 +18,7 @@ from cstar.entrypoint.utils import (
 )
 from cstar.orchestration.check import deep_check
 from cstar.orchestration.dag_runner import get_launcher
-from cstar.orchestration.models import TRANSFORMED_NAME_SUFFIX, Workplan
+from cstar.orchestration.models import Workplan
 from cstar.orchestration.orchestration import LiveWorkplan
 from cstar.orchestration.serialization import validate_serialized_entity
 
@@ -25,6 +26,23 @@ if t.TYPE_CHECKING:
     from collections.abc import Mapping
 
 app = typer.Typer()
+
+
+def _is_name_error(error: ValueError | None) -> bool:
+    """Determine whether a validation error is located at the workplan's `name`.
+
+    Parameters
+    ----------
+    error : ValueError | None
+        The error raised while validating a workplan, if any.
+
+    Returns
+    -------
+    bool
+    """
+    return isinstance(error, ValidationError) and any(
+        detail["loc"][:1] == ("name",) for detail in error.errors()
+    )
 
 
 def _deep_check(
@@ -150,19 +168,18 @@ def check(
 
     error = schema_result.error_msg
 
-    # a `LiveWorkplan` accepts any name, so only a file a prior run persisted
-    # may pass as one; an authored workplan with a bad name keeps its error
-    live_result = validate_serialized_entity(path, LiveWorkplan)
-    if live_result.item is not None and live_result.item.name.endswith(
-        TRANSFORMED_NAME_SUFFIX
-    ):
-        print(f"The workplan `{live_result.item.name}` is valid")
-        if not schema_only:
-            print(
-                "Skipping deep resolution: this workplan was already "
-                "transformed by a prior run; re-resolving it would "
-                "double-package its overrides."
-            )
-        raise typer.Exit(0)
+    # a `LiveWorkplan` accepts any name, so a problem with the name is reported
+    # as it is, as `run` does, rather than masked by trying the live form
+    if not _is_name_error(schema_result.error):
+        live_result = validate_serialized_entity(path, LiveWorkplan)
+        if live_result.item is not None:
+            print(f"The workplan `{live_result.item.name}` is valid")
+            if not schema_only:
+                print(
+                    "Skipping deep resolution: this workplan was already "
+                    "transformed by a prior run; re-resolving it would "
+                    "double-package its overrides."
+                )
+            raise typer.Exit(0)
 
     raise typer.BadParameter(error)

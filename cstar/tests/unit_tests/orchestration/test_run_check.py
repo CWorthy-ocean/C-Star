@@ -137,8 +137,8 @@ def test_report_orphans_logs_one_warning(
     fake_blueprint_path: Path,
     caplog: pytest.LogCaptureFixture,
 ) -> None:
-    """Verify orphans are reported in a single warning that names them and the
-    command to inspect them, and that nothing is deleted.
+    """Verify orphans are reported in a single warning that lists them, says they
+    were left in place, and that nothing is deleted.
     """
     wp = make_workplan(fake_blueprint_path, run_root, "simulate")
     make_step_dirs(run_root, "simulate", "old-step", "older-step")
@@ -148,9 +148,13 @@ def test_report_orphans_logs_one_warning(
         orphans = report_orphans(run_root, RUN_ID, wp)
 
     (record,) = [r for r in caplog.records if r.levelno == logging.WARNING]
-    assert "old-step, older-step" in record.getMessage()
-    assert stale.name in record.getMessage()
-    assert f"cstar run check {RUN_ID}" in record.getMessage()
+    tasks_dir = JobFileSystemManager(run_root).tasks_dir
+    message = record.getMessage()
+    assert f"{tasks_dir / 'old-step'}, {tasks_dir / 'older-step'}" in message
+    assert str(stale) in message
+    assert "left in place" in message
+    assert "remove them by hand" in message
+    assert "cstar run check" not in message
     assert len(orphans.step_dirs) == 2
     assert all(d.is_dir() for d in orphans.step_dirs)
     assert stale.exists()

@@ -93,7 +93,7 @@ def report_orphans(run_root: Path, run_id: str, workplan: "LiveWorkplan") -> Orp
     orphans = find_orphans(run_root, run_id, workplan)
     if orphans:
         listed = [
-            f"{label}: {', '.join(p.name for p in paths)}"
+            f"{label}: {', '.join(str(p) for p in paths)}"
             for label, paths in (
                 ("step directories", orphans.step_dirs),
                 ("state files", orphans.sentinels),
@@ -101,9 +101,9 @@ def report_orphans(run_root: Path, run_id: str, workplan: "LiveWorkplan") -> Orp
             if paths
         ]
         msg = (
-            f"Run {run_id!r} holds items no step of its workplan accounts for "
-            f"({'; '.join(listed)}). Nothing was deleted; run "
-            f"`cstar run check {run_id}` to inspect them."
+            f"Run {run_id!r} holds items that no step of its workplan accounts "
+            f"for ({'; '.join(listed)}). They were left in place; remove them "
+            "by hand once you have confirmed they are not needed."
         )
         log.warning(msg)
 

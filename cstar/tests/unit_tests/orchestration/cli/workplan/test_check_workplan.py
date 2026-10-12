@@ -333,12 +333,24 @@ def test_workplan_check_rejects_non_slug_name(
     assert "'sample-workplan'" in result.stderr
 
 
-def test_workplan_check_accepts_transformed_workplan(
+def _persist_live_workplan(path: Path, name: str, blueprint: Path) -> LiveWorkplan:
+    """Persist a workplan in its live form, which a plain `Workplan` rejects."""
+    step = LiveStep.from_step(
+        Step(
+            name="say-hello", application="hello_world", blueprint=blueprint.as_posix()
+        )
+    )
+    wp = LiveWorkplan(name=name, description="d", steps=[step])
+    assert serialize(path, wp), "serializing test workplan failed"
+    return wp
+
+
+def test_workplan_check_accepts_live_workplan(
     tmp_path: Path,
     hello_world_bp_path: Path,
 ) -> None:
-    """Verify a transformed workplan, named `<name> (transformed)`, passes the
-    check without deep resolution.
+    """Verify a workplan persisted in its live form, which only a `LiveWorkplan`
+    accepts, passes the check without deep resolution when its name is sound.
 
     Parameters
     ----------
@@ -347,24 +359,40 @@ def test_workplan_check_accepts_transformed_workplan(
     hello_world_bp_path : Path
         Fixture returning the path to a hello-world blueprint
     """
-    step = LiveStep.from_step(
-        Step(
-            name="say-hello",
-            application="hello_world",
-            blueprint=hello_world_bp_path.as_posix(),
-        )
-    )
     wp_path = tmp_path / "workplan_transformed.yaml"
-    wp = LiveWorkplan(
-        name=f"my-plan{TRANSFORMED_NAME_SUFFIX}", description="d", steps=[step]
-    )
-    assert serialize(wp_path, wp), "serializing test workplan failed"
+    wp = _persist_live_workplan(wp_path, "my-plan", hello_world_bp_path)
 
     result = CliRunner().invoke(app, [wp_path.as_posix()], color=False)
 
     assert result.exit_code == 0, result.output
     assert f"The workplan `{wp.name}` is valid" in result.stdout
     assert "already transformed" in result.stdout
+
+
+def test_workplan_check_reports_the_name_error_of_a_live_workplan(
+    tmp_path: Path,
+    hello_world_bp_path: Path,
+) -> None:
+    """Verify a name that is not a slug is reported as such even when the file
+    would load as a `LiveWorkplan`, which accepts any name.
+
+    Parameters
+    ----------
+    tmp_path : Path
+        Temporary directory to read/write test inputs and outputs
+    hello_world_bp_path : Path
+        Fixture returning the path to a hello-world blueprint
+    """
+    wp_path = tmp_path / "workplan_transformed.yaml"
+    _persist_live_workplan(
+        wp_path, f"My Plan{TRANSFORMED_NAME_SUFFIX}", hello_world_bp_path
+    )
+
+    result = CliRunner().invoke(app, [wp_path.as_posix()], color=False)
+
+    assert result.exit_code != 0
+    assert "is valid" not in result.stdout
+    assert "'my-plan-transformed'" in result.stderr
 
 
 def _write_workplan(wp_path: Path, steps: list[Step], **kwargs: object) -> Path:

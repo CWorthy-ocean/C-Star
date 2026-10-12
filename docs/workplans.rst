@@ -574,9 +574,9 @@ Running a workplan under a :term:`run ID` that already exists re-enters that run
 - A step that is done is reused as it is, unless you pass ``--clobber <step-name|all>``, which clears it and runs it again from scratch.
 - A step that failed is run again from scratch, unless you pass ``--resume``, which continues it in place from its last usable restart when its application supports that.
 - A step that is still in progress is adopted when the launcher that started it matches the current launcher; otherwise the run is refused unless that step is clobbered.
-- A workplan file that has the same ``name`` as an earlier run but is a different file than the one that run started from is refused, because the two would share one run directory. Pass ``--run-id <other-id>`` to run it separately, or rename the workplan.
-- Each attempt keeps the files of the attempts before it: the original workplan, the transformed workplan and the runtime variables saved in the run directory are rotated to ``<stem>_original.bak.1``, ``<stem>_transformed.yaml.1``, ``<stem>.vars.1`` and so on, where ``<stem>`` is the workplan file's name without its extension, and nothing reads the rotated copies.
-- Step directories and state files that no step of the workplan accounts for any more (for example after a step was renamed) are reported in a warning. They are never deleted.
+- A workplan with the same ``name`` as an earlier run but different content than the workplan that run started from is refused, because the two would share one run directory; the same workplan arriving by another path (a remote file, a moved checkout) is not. Pass ``--run-id <other-id>`` to run it separately, or rename the workplan.
+- Each attempt keeps the files of the attempts before it: the original workplan, the transformed workplan and the runtime variables saved in the run directory (also when a later attempt saves none) are rotated to ``<stem>_original.bak.1``, ``<stem>_transformed.yaml.1``, ``<stem>.vars.1`` and so on, where ``<stem>`` is the workplan file's name without its extension, and nothing reads the rotated copies.
+- Step directories and state files that no step of the workplan accounts for any more (for example after a step was renamed) are listed in a warning and left in place; remove them by hand once you have confirmed they are not needed.
 
 .. _workplan_pre_run:
 

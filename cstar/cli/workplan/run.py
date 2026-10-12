@@ -5,6 +5,7 @@ import typing as t
 from pathlib import Path
 
 import typer
+import yaml
 from click.core import ParameterSource
 from pydantic import BaseModel, ValidationError
 
@@ -77,6 +78,7 @@ from cstar.orchestration.run_check import report_orphans
 from cstar.orchestration.serialization import (
     PersistenceMode,
     deserialize,
+    read_raw,
     serialize,
     try_deserialize,
     validate_serialized_entity,
@@ -490,7 +492,8 @@ def is_known_run_id(value: str) -> bool:
     """Determine whether a value is the run-id of a recorded run.
 
     Only a value that is already a run-id (its own slug) is looked up, so a
-    mistyped file name is not mistaken for one.
+    mistyped file name is not mistaken for one. The lookup only checks that
+    the run's latest record exists: it takes no lock and reads no record.
 
     Parameters
     ----------
@@ -504,10 +507,46 @@ def is_known_run_id(value: str) -> bool:
     try:
         if value != slugify(value):
             return False
-    except ValueError:
+
+        return TrackingRepository().latest_path(value).exists()
+    except (ValueError, OSError):
         return False
 
-    return TrackingRepository().get_workplan_run_sync(value) is not None
+
+def read_slugged_workplan(path: Path, mode: PersistenceMode) -> Workplan:
+    """Read a workplan with its name normalized to a slug.
+
+    A workplan recorded before names had to be slugs carries a free-form name
+    that no longer validates, but is otherwise the same workplan.
+
+    Parameters
+    ----------
+    path : Path
+        The workplan file.
+    mode : PersistenceMode
+        How the file is persisted.
+
+    Returns
+    -------
+    Workplan
+
+    Raises
+    ------
+    FileNotFoundError
+        If the file does not exist.
+    ValueError
+        If the content is not a valid workplan.
+    """
+    raw = read_raw(path, mode)
+    if not isinstance(raw, dict):
+        msg = f"The content of {str(path)!r} is not a mapping"
+        raise ValueError(msg)
+
+    raw.pop("$schema", None)
+    if isinstance(raw.get("name"), str):
+        raw["name"] = slugify(raw["name"])
+
+    return Workplan.model_validate(raw)
 
 
 def refuse_run_id_collision(wp_path: Path, run_id: str, *, explicit: bool) -> None:
@@ -517,9 +556,9 @@ def refuse_run_id_collision(wp_path: Path, run_id: str, *, explicit: bool) -> No
     share a name share a run directory and the later one would overwrite the
     earlier one's state and originals. The same workplan reaching the run by
     another path (a fresh copy of a remote file, a moved checkout) is not a
-    collision, so a different path is compared by content against the original
-    backup of the recorded run. An explicit `--run-id` is taken as the user's
-    choice to re-enter the run.
+    collision, so a different path is compared by content, names normalized,
+    against the original backup of the recorded run. An explicit `--run-id` is
+    taken as the user's choice to re-enter the run.
 
     Parameters
     ----------
@@ -534,8 +573,8 @@ def refuse_run_id_collision(wp_path: Path, run_id: str, *, explicit: bool) -> No
     ------
     typer.BadParameter
         If the run-id was derived and its latest record is of a different
-        workplan, or of one that cannot be compared because its original
-        backup is missing or unreadable.
+        workplan, the supplied file cannot be read, or the original backup of
+        the recorded run is missing or unreadable.
     """
     if explicit:
         return
@@ -550,14 +589,23 @@ def refuse_run_id_collision(wp_path: Path, run_id: str, *, explicit: bool) -> No
         f"started from {str(record.workplan_path)!r}; the workplan at "
         f"{str(wp_path)!r} would overwrite it"
     )
+    escape = f"pass {ARG_RUN_ID} <other-id> or {ARG_RUN_ID} {run_id} to re-enter"
+
     try:
-        recorded = deserialize(backup, Workplan, mode=PersistenceMode.yaml)
-        supplied = deserialize(wp_path, Workplan)
-    except Exception as ex:
-        log.debug(f"Unable to compare {str(wp_path)!r} with {str(backup)!r}: {ex}")
+        supplied = read_slugged_workplan(wp_path, PersistenceMode.auto)
+    except (OSError, RuntimeError, ValueError, yaml.YAMLError) as ex:
+        msg = f"The workplan at {str(wp_path)!r} could not be read: {ex}"
+        raise typer.BadParameter(msg) from ex
+
+    try:
+        recorded = read_slugged_workplan(backup, PersistenceMode.yaml)
+    except FileNotFoundError as ex:
+        msg = f"{claim}, and there is no original backup to compare; {escape}."
+        raise typer.BadParameter(msg) from ex
+    except (OSError, RuntimeError, ValueError, yaml.YAMLError) as ex:
         msg = (
-            f"{claim}, and there is no original backup to compare; pass "
-            f"{ARG_RUN_ID} <other-id> or {ARG_RUN_ID} {run_id} to re-enter."
+            f"{claim}, and the original backup for that run could not be read: "
+            f"{ex}; {escape}."
         )
         raise typer.BadParameter(msg) from ex
 

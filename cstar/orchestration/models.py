@@ -927,6 +927,10 @@ class Workplan(ConfiguredBaseModel):
     )
     """Configures the behavior of the pydantic model."""
 
+    _REQUIRE_SLUG_NAME: t.ClassVar[bool] = True
+    """Whether `name` must be its own slug. A subclass holding persisted output
+    clears it, since that output keeps whatever name it was given."""
+
     @field_validator("name")
     @classmethod
     def require_slug_name(cls, value: str) -> str:
@@ -945,9 +949,9 @@ class Workplan(ConfiguredBaseModel):
         Raises
         ------
         ValueError
-            If the name differs from its slug.
+            If the name differs from its slug and the model requires one.
         """
-        if value != (slug := slugify(value)):
+        if cls._REQUIRE_SLUG_NAME and value != (slug := slugify(value)):
             msg = (
                 f"workplan name {value!r} is not a valid run-id; "
                 f"use {slug!r} (the id this workplan already produced)"

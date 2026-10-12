@@ -21,7 +21,12 @@ from cstar.base.env import (
 )
 from cstar.base.exceptions import CstarExpectationFailed
 from cstar.cli.common import normalize_runid
-from cstar.cli.workplan.run import app, auto_compose, migrate_steps
+from cstar.cli.workplan.run import (
+    app,
+    auto_compose,
+    migrate_steps,
+    refuse_run_id_collision,
+)
 from cstar.entrypoint.utils import ARG_CLOBBER, ARG_PRE_RUN, ARG_RESUME, ARG_RUN_ID
 from cstar.orchestration.dag_runner import (
     NoPreparableStepsError,
@@ -2910,6 +2915,93 @@ def test_workplan_run_derived_run_id_reentered_by_the_same_workplan_elsewhere(
 
 
 @pytest.mark.usefixtures("read_yaml_intercept")
+def test_workplan_run_derived_run_id_reentered_from_a_legacy_backup(
+    tmp_path: Path,
+    wp_templates_dir: Path,
+) -> None:
+    """Verify a recorded original whose free-form name predates the slug rule
+    still compares by content: the same workplan under its slug is not a
+    collision.
+    """
+    wp_path = wp_templates_dir / "workplan.yaml"
+    record = _recorded_run(
+        "sample-workplan", tmp_path / "earlier-copy" / "workplan.yaml", tmp_path
+    )
+    _write_original_backup(record, deserialize(wp_path, Workplan))
+    backup = original_workplan_backup(record.workplan_path, record.output_path)
+    legacy = backup.read_text().replace(
+        "name: sample-workplan", "name: Sample Workplan", 1
+    )
+    assert legacy != backup.read_text()
+    backup.write_text(legacy)
+
+    with (
+        mock.patch(RUN_LOOKUP, mock.AsyncMock(return_value=record)),
+        mock.patch(
+            "cstar.cli.workplan.run.build_and_run_dag", wraps=fake_build_and_run_dag
+        ) as mock_build_and_run_dag,
+    ):
+        result = CliRunner().invoke(app, [wp_path.as_posix()], color=False)
+
+    assert result.exit_code == 0, result.output
+    mock_build_and_run_dag.assert_awaited_once()
+
+
+@pytest.mark.usefixtures("read_yaml_intercept")
+def test_workplan_run_derived_run_id_refused_with_an_unreadable_backup(
+    tmp_path: Path,
+    wp_templates_dir: Path,
+    flatten_cli_output: Callable[[str], str],
+) -> None:
+    """Verify a recorded original that exists but cannot be parsed is refused
+    with a message that says so, not that the backup is missing.
+    """
+    wp_path = wp_templates_dir / "workplan.yaml"
+    record = _recorded_run("sample-workplan", tmp_path / "gone.yaml", tmp_path)
+    backup = original_workplan_backup(record.workplan_path, record.output_path)
+    backup.write_text("name: [unclosed\n")
+
+    with (
+        mock.patch(RUN_LOOKUP, mock.AsyncMock(return_value=record)),
+        mock.patch(
+            "cstar.cli.workplan.run.build_and_run_dag", wraps=fake_build_and_run_dag
+        ) as mock_build_and_run_dag,
+    ):
+        result = CliRunner().invoke(app, [wp_path.as_posix()], color=False)
+
+    assert result.exit_code == 2
+    mock_build_and_run_dag.assert_not_awaited()
+    output = flatten_cli_output(result.output)
+    assert "the original backup for that run could not be read" in output
+    assert "no original backup to compare" not in output
+    assert f"{ARG_RUN_ID} <other-id> or {ARG_RUN_ID} sample-workplan" in output
+
+
+def test_refuse_run_id_collision_reports_an_unreadable_supplied_file(
+    tmp_path: Path,
+    wp_templates_dir: Path,
+) -> None:
+    """Verify an error in the supplied file, which is the user's, is reported as
+    that file's error rather than blamed on the recorded run.
+    """
+    record = _recorded_run("sample-workplan", tmp_path / "earlier.yaml", tmp_path)
+    _write_original_backup(
+        record, deserialize(wp_templates_dir / "workplan.yaml", Workplan)
+    )
+    supplied = tmp_path / "supplied.yaml"
+    supplied.write_text("name: sample-workplan\ndescription: 7\n")
+
+    with (
+        mock.patch(RUN_LOOKUP, mock.AsyncMock(return_value=record)),
+        pytest.raises(typer.BadParameter, match="could not be read") as error,
+    ):
+        refuse_run_id_collision(supplied, "sample-workplan", explicit=False)
+
+    assert "supplied.yaml" in error.value.message
+    assert "backup" not in error.value.message
+
+
+@pytest.mark.usefixtures("read_yaml_intercept")
 def test_workplan_run_derived_run_id_refused_without_a_backup_to_compare(
     tmp_path: Path,
     wp_templates_dir: Path,
@@ -3019,16 +3111,14 @@ def test_workplan_run_run_id_in_place_of_path_names_the_right_command(
     """Verify `--resume <run-id>`, which binds the id to the workplan path, is
     refused with the command that was meant.
     """
-    record = _recorded_run("my-run", tmp_path / "workplan.yaml", tmp_path)
+    repo = TrackingRepository()
+    repo.put_workplan_run_sync(
+        _recorded_run("my-run", tmp_path / "workplan.yaml", tmp_path)
+    )
 
-    with mock.patch(
-        "cstar.cli.workplan.run.TrackingRepository.get_workplan_run_sync",
-        return_value=record,
-    ) as mock_lookup:
-        result = CliRunner().invoke(app, [ARG_RESUME, "my-run"], color=False)
+    result = CliRunner().invoke(app, [ARG_RESUME, "my-run"], color=False)
 
     assert result.exit_code == 2
-    mock_lookup.assert_called_once_with("my-run")
     output = flatten_cli_output(result.output)
     assert "'my-run' is a run-id, not a workplan file" in output
     assert f"cstar workplan run {ARG_RUN_ID} my-run {ARG_RESUME}" in output
@@ -3040,17 +3130,37 @@ def test_workplan_run_missing_path_that_is_not_a_run_id(
     flatten_cli_output: Callable[[str], str],
 ) -> None:
     """Verify a missing path stays a "not found" error when no run has that id,
-    and that a value that is not a run-id is not looked up as one.
+    that a value that is not a run-id is not looked up as one, and that looking
+    one up takes no lock.
     """
-    with mock.patch(
-        "cstar.cli.workplan.run.TrackingRepository.get_workplan_run_sync",
-        return_value=None,
+    repo = TrackingRepository()
+    with mock.patch.object(
+        TrackingRepository,
+        "latest_path",
+        autospec=True,
+        side_effect=TrackingRepository.latest_path,
     ) as mock_lookup:
         result = CliRunner().invoke(app, [value], color=False)
 
     assert result.exit_code == 2
     assert "Workplan not found at path" in flatten_cli_output(result.output)
     assert mock_lookup.call_count == (1 if value == "no-such-run" else 0)
+    assert not list(repo.latest_dir.glob("*.lock"))
+
+
+def test_workplan_run_missing_path_when_the_run_lookup_fails(
+    flatten_cli_output: Callable[[str], str],
+) -> None:
+    """Verify an unreadable run store leaves the "not found" error as it was,
+    instead of raising out of the handler for the missing file.
+    """
+    with mock.patch.object(
+        TrackingRepository, "latest_path", side_effect=PermissionError("denied")
+    ):
+        result = CliRunner().invoke(app, ["some-run"], color=False)
+
+    assert result.exit_code == 2
+    assert "Workplan not found at path" in flatten_cli_output(result.output)
 
 
 def test_workplan_run_non_slug_name_names_the_slug(
@@ -3120,7 +3230,5 @@ def test_workplan_run_reload_reports_orphans(
     assert result.exit_code == 0, result.output
     mock_run_dag.assert_awaited_once()
     warnings = [r.getMessage() for r in caplog.records if r.levelname == "WARNING"]
-    assert any(
-        "renamed-step" in w and f"cstar run check {run_id}" in w for w in warnings
-    )
+    assert any(str(leftover) in w and "left in place" in w for w in warnings)
     assert leftover.is_dir()
