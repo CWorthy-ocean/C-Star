@@ -290,7 +290,7 @@ Workplan Examples
 
     .. code:: yaml
 
-        name: Simple Workplan
+        name: simple-workplan
         description: Run a simulation
         state: draft
 
@@ -315,7 +315,7 @@ Workplan Examples
 
     .. code:: yaml
 
-        name: Multi-step Workplan Example
+        name: multi-step-workplan
         description: Run multiple ROMS-MARBL simulations
         state: draft
 
@@ -344,7 +344,7 @@ Workplan Examples
 
     .. code:: yaml
 
-        name: Workplan Overriding a Blueprint
+        name: workplan-overriding-a-blueprint
         description: Run a blueprint ensemble varying parameters with overrides
         state: draft
 
@@ -393,7 +393,7 @@ Workplan Examples
 
     .. code:: yaml
 
-        name: Workplan with a Deferred Blueprint
+        name: deferred-blueprint-workplan
         description: Run a simulation from a generated blueprint
         state: draft
 
@@ -442,7 +442,7 @@ Workplan Examples
 
     .. code:: yaml
 
-        name: Workplan with an Inline Blueprint
+        name: inline-blueprint-workplan
         description: Convert a restart file to initial conditions for a nested grid
         state: draft
 
@@ -563,6 +563,20 @@ Execution
         path = Path("/path/to/my/workplan.yaml")
         await run_workplan(path, run_id="my-unique-id")
 
+
+.. _workplan_rerun:
+
+Re-running a workplan
+^^^^^^^^^^^^^^^^^^^^^
+
+Running a workplan under a :term:`run ID` that already exists re-enters that run. By default the run ID is the workplan ``name``, so running the same file again re-enters its previous run. Each step is handled according to its recorded state:
+
+- A step that is done is reused as it is, unless you pass ``--clobber <step-name|all>``, which clears it and runs it again from scratch.
+- A step that failed is run again from scratch, unless you pass ``--resume``, which continues it in place from its last usable restart when its application supports that.
+- A step that is still in progress is adopted when the launcher that started it matches the current launcher; otherwise the run is refused unless that step is clobbered.
+- A workplan file that has the same ``name`` as an earlier run but is a different file than the one that run started from is refused, because the two would share one run directory. Pass ``--run-id <other-id>`` to run it separately, or rename the workplan.
+- Each attempt keeps the files of the attempts before it: the original workplan, the transformed workplan and the runtime variables saved in the run directory are rotated to ``<stem>_original.bak.1``, ``<stem>_transformed.yaml.1``, ``<stem>.vars.1`` and so on, where ``<stem>`` is the workplan file's name without its extension, and nothing reads the rotated copies.
+- Step directories and state files that no step of the workplan accounts for any more (for example after a step was renamed) are reported in a warning. They are never deleted.
 
 .. _workplan_pre_run:
 

@@ -7038,7 +7038,7 @@ def test_workplan_transformer_anchors_after_filling_placeholders(
     monkeypatch.chdir(elsewhere)
 
     wp = Workplan(
-        name="Relative blueprint",
+        name="relative-blueprint",
         description="A step whose blueprint name is a runtime variable",
         runtime_vars=["bp_name"],
         steps=[

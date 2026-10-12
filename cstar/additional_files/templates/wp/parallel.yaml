@@ -1,5 +1,5 @@
 # yaml-language-server: $schema=https://raw.githubusercontent.com/CWorthy-ocean/C-Star/refs/heads/main/docs/schemas/wp/workplan_schema.1.0.0.json
-name: Parallel Workplan
+name: parallel-workplan
 description: A workplan that executes all tasks immediately in parallel
 steps:
 - name: Step A_1

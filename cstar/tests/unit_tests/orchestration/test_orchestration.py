@@ -103,7 +103,7 @@ def test_dep_keys(tmp_path: Path) -> None:
 
     with pytest.raises(ValueError, match=r".*Unknown dep.*"):
         _ = Workplan(
-            name="Invalid Dependency Key Example",
+            name="invalid-dependency-key-example",
             description="Workplan with a dependency that doesn't match a step",
             steps=[
                 Step(

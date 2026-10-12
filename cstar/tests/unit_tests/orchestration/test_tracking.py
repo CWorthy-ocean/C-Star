@@ -212,8 +212,34 @@ async def test_default_run_id(
     # generate the default run id from the source path
     run_id = WorkplanRun.get_default_run_id(wp_path.as_posix())
 
-    # verify it matches the supplied workplan
+    # verify it matches the supplied workplan; a valid name is its own slug
     assert run_id == slugify(wp.name)
+    assert run_id == wp.name
+
+
+@pytest.mark.usefixtures("read_yaml_intercept")
+def test_default_run_id_rejects_non_slug_name(
+    tmp_path: Path,
+    wp_templates_dir: Path,
+) -> None:
+    """Verify a workplan whose name is not a slug yields no default run id and
+    the error names the slug to use.
+
+    Parameters
+    ----------
+    tmp_path : Path
+        Temporary directory for test outputs
+    wp_templates_dir : Path
+        Fixture returning the path to the directory containing workplan template files
+    """
+    content = (wp_templates_dir / "workplan.yaml").read_text()
+    wp_path = tmp_path / "workplan.yaml"
+    wp_path.write_text(
+        content.replace("name: sample-workplan", "name: Sample Workplan")
+    )
+
+    with pytest.raises(ValueError, match="use 'sample-workplan'"):
+        WorkplanRun.get_default_run_id(wp_path.as_posix())
 
 
 @pytest.mark.usefixtures("read_yaml_intercept")
@@ -229,7 +255,7 @@ async def test_default_run_id_remote(
     remote_workplan_uri : str
         A fixture returning a known URI to a sample workplan
     """
-    expected_name = "Sample Workplan"
+    expected_name = "sample-workplan"
 
     # generate the default run id from the source URI
     run_id = WorkplanRun.get_default_run_id(remote_workplan_uri)

@@ -48,6 +48,9 @@ RequiredString: t.TypeAlias = t.Annotated[
 ]
 """A non-empty string with no leading or trailing whitespace."""
 
+TRANSFORMED_NAME_SUFFIX: t.Final[str] = " (transformed)"
+"""The suffix appended to a workplan's name when its transformed copy is persisted."""
+
 RUN_ALIAS_SEPARATOR: t.Final[str] = "@"
 """The character separating a step name from the alias of an external workplan
 run in a step reference token, e.g. `build@spinup`."""
@@ -888,7 +891,7 @@ class Workplan(ConfiguredBaseModel):
     """A collection of executable steps and the associated configuration to run them."""
 
     name: RequiredString
-    """The user-friendly name of the workplan."""
+    """The name of the workplan, written as a slug: it is the default run-id."""
 
     description: RequiredString
     """A user-friendly description of the workplan."""
@@ -923,6 +926,34 @@ class Workplan(ConfiguredBaseModel):
         polymorphic_serialization=True,
     )
     """Configures the behavior of the pydantic model."""
+
+    @field_validator("name")
+    @classmethod
+    def require_slug_name(cls, value: str) -> str:
+        """Ensure the name is its own slug: the name is the workplan's run-id.
+
+        Parameters
+        ----------
+        value : str
+            The name assigned to the instance
+
+        Returns
+        -------
+        str
+            The unchanged name
+
+        Raises
+        ------
+        ValueError
+            If the name differs from its slug.
+        """
+        if value != (slug := slugify(value)):
+            msg = (
+                f"workplan name {value!r} is not a valid run-id; "
+                f"use {slug!r} (the id this workplan already produced)"
+            )
+            raise ValueError(msg)
+        return value
 
     @field_validator("steps", mode="before")
     @classmethod

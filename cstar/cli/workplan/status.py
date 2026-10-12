@@ -5,9 +5,10 @@ import typer
 from rich.console import Console
 
 from cstar.base.log import get_logger
+from cstar.cli.common import get_from_ctxmap
 from cstar.cli.workplan.shared import (
+    RunRecordArgument,
     display_summary,
-    list_runs,
     refresh_disk_usage,
 )
 from cstar.entrypoint.utils import ARG_SIZE, ARG_SIZE_HELP
@@ -20,7 +21,7 @@ from cstar.orchestration.dag_runner import (
 )
 from cstar.orchestration.orchestration import LiveWorkplan, Planner
 from cstar.orchestration.serialization import deserialize
-from cstar.orchestration.tracking import TrackingRepository
+from cstar.orchestration.tracking import WorkplanRun
 
 log = get_logger(__name__)
 app = typer.Typer()
@@ -29,13 +30,8 @@ console = Console()
 
 @app.command(name="status", help="Retrieve the current status of a workplan.")
 def status(
-    run_id: t.Annotated[
-        str,
-        typer.Argument(
-            help="The unique identifier of a specific workplan execution.",
-            autocompletion=list_runs,
-        ),
-    ],
+    ctx: typer.Context,
+    run_id: RunRecordArgument,
     refresh_usage: t.Annotated[
         bool,
         typer.Option(
@@ -45,13 +41,7 @@ def status(
     ] = False,
 ) -> None:
     """Retrieve the current status of a workplan."""
-    repo = TrackingRepository()
-    run = asyncio.run(repo.get_workplan_run(run_id))
-
-    if run is None:
-        print("An unknown run-id was supplied.")
-        return
-
+    run = get_from_ctxmap(ctx, "run", WorkplanRun)
     wp_path = run.trx_workplan_path
 
     try:
@@ -67,7 +57,7 @@ def status(
                 soft_wrap=True,
             )
         planner = Planner(workplan, external.tasks())
-        status = asyncio.run(load_run_state(run_id, launcher))
+        status = asyncio.run(load_run_state(run.run_id, launcher))
         status = DagStatus({**external.statuses(), **status.details})
         lookup = get_status_detail_map(planner, status)
 

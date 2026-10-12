@@ -182,7 +182,7 @@ def test_serialization_workplan_happy_path(
 
     workplan = deserialize(yaml_path, Workplan)
 
-    assert workplan.name == "Test Workplan"
+    assert workplan.name == "test-workplan"
     assert workplan.steps[0].name == "Test Step"
     assert not workplan.steps[0].depends_on
     assert workplan.steps[0].application == Application.ROMS_MARBL

@@ -404,7 +404,7 @@ class TrackingRepository(LoggingMixin):
             if not run_path.exists():
                 rd_out = run_date or "latest"
                 msg = f"No run file for `{run_id}` on `{rd_out}` found in {run_path}`"
-                self.log.warning(msg)
+                self.log.debug(msg)
                 return None
 
             return deserialize(run_path, WorkplanRun)

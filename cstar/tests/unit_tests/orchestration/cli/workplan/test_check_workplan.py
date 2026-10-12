@@ -7,7 +7,8 @@ from typer.testing import CliRunner
 
 from cstar.cli.workplan.check import app
 from cstar.entrypoint.utils import ARG_SCHEMA_ONLY
-from cstar.orchestration.models import RunRef, Step, Workplan
+from cstar.orchestration.models import TRANSFORMED_NAME_SUFFIX, RunRef, Step, Workplan
+from cstar.orchestration.orchestration import LiveStep, LiveWorkplan
 from cstar.orchestration.serialization import (
     deserialize,
     enum_representer,
@@ -89,7 +90,7 @@ def test_cli_workplan_check_file_no_content(
 
 @pytest.mark.parametrize(
     "content",
-    [" ", "", "\n", '{"foo": "bar"}', "name: Sample Workplan\n"],
+    [" ", "", "\n", '{"foo": "bar"}', "name: sample-workplan\n"],
 )
 def test_cli_workplan_check_file_bad_content(
     tmp_path: Path,
@@ -304,6 +305,68 @@ def test_workplan_check_remote_workplan(
     assert "is valid" in result.stdout
 
 
+@pytest.mark.usefixtures("read_yaml_intercept")
+def test_workplan_check_rejects_non_slug_name(
+    tmp_path: Path,
+    wp_templates_dir: Path,
+) -> None:
+    """Verify an authored workplan whose name is not a slug fails the check with
+    the slug to use, instead of passing as an already-transformed workplan.
+
+    Parameters
+    ----------
+    tmp_path : Path
+        Temporary directory to read/write test inputs and outputs
+    wp_templates_dir : Path
+        Fixture returning the path to the directory containing workplan template files
+    """
+    content = (wp_templates_dir / "workplan.yaml").read_text()
+    wp_path = tmp_path / "workplan.yaml"
+    wp_path.write_text(
+        content.replace("name: sample-workplan", "name: Sample Workplan")
+    )
+
+    result = CliRunner().invoke(app, [wp_path.as_posix()], color=False)
+
+    assert result.exit_code != 0
+    assert "is valid" not in result.stdout
+    assert "'sample-workplan'" in result.stderr
+
+
+def test_workplan_check_accepts_transformed_workplan(
+    tmp_path: Path,
+    hello_world_bp_path: Path,
+) -> None:
+    """Verify a transformed workplan, named `<name> (transformed)`, passes the
+    check without deep resolution.
+
+    Parameters
+    ----------
+    tmp_path : Path
+        Temporary directory to read/write test inputs and outputs
+    hello_world_bp_path : Path
+        Fixture returning the path to a hello-world blueprint
+    """
+    step = LiveStep.from_step(
+        Step(
+            name="say-hello",
+            application="hello_world",
+            blueprint=hello_world_bp_path.as_posix(),
+        )
+    )
+    wp_path = tmp_path / "workplan_transformed.yaml"
+    wp = LiveWorkplan(
+        name=f"my-plan{TRANSFORMED_NAME_SUFFIX}", description="d", steps=[step]
+    )
+    assert serialize(wp_path, wp), "serializing test workplan failed"
+
+    result = CliRunner().invoke(app, [wp_path.as_posix()], color=False)
+
+    assert result.exit_code == 0, result.output
+    assert f"The workplan `{wp.name}` is valid" in result.stdout
+    assert "already transformed" in result.stdout
+
+
 def _write_workplan(wp_path: Path, steps: list[Step], **kwargs: object) -> Path:
     """Serialize a minimal workplan containing the supplied steps.
 
@@ -322,7 +385,7 @@ def _write_workplan(wp_path: Path, steps: list[Step], **kwargs: object) -> Path:
         The path to the serialized workplan.
     """
     wp = Workplan(
-        name="Deep Check Test Workplan",
+        name="deep-check-test-workplan",
         description="A workplan exercising the default deep resolution pass.",
         steps=steps,
         **kwargs,

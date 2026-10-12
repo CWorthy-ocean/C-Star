@@ -10,6 +10,7 @@ from pydantic import (
     ConfigDict,
     Field,
     ValidationError,
+    field_validator,
     model_validator,
 )
 
@@ -396,6 +397,24 @@ class LiveWorkplan(Workplan):
     steps: Sequence[LiveStep]
 
     _lookup: Mapping[str, LiveStep] | None = None
+
+    @field_validator("name")
+    @classmethod
+    def require_slug_name(cls, value: str) -> str:
+        """Accept any name: preparation renames the workplan, e.g. to
+        `<name> (transformed)`, and persisted workplans must keep loading.
+
+        Parameters
+        ----------
+        value : str
+            The name assigned to the instance
+
+        Returns
+        -------
+        str
+            The unchanged name
+        """
+        return value
 
     def _get_step_lookup(self) -> Mapping[str, LiveStep]:
         """Build a mapping from step name to step for the steps

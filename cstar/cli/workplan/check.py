@@ -17,7 +17,7 @@ from cstar.entrypoint.utils import (
 )
 from cstar.orchestration.check import deep_check
 from cstar.orchestration.dag_runner import get_launcher
-from cstar.orchestration.models import Workplan
+from cstar.orchestration.models import TRANSFORMED_NAME_SUFFIX, Workplan
 from cstar.orchestration.orchestration import LiveWorkplan
 from cstar.orchestration.serialization import validate_serialized_entity
 
@@ -150,8 +150,12 @@ def check(
 
     error = schema_result.error_msg
 
+    # a `LiveWorkplan` accepts any name, so only a file a prior run persisted
+    # may pass as one; an authored workplan with a bad name keeps its error
     live_result = validate_serialized_entity(path, LiveWorkplan)
-    if live_result.item is not None:
+    if live_result.item is not None and live_result.item.name.endswith(
+        TRANSFORMED_NAME_SUFFIX
+    ):
         print(f"The workplan `{live_result.item.name}` is valid")
         if not schema_only:
             print(

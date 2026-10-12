@@ -685,6 +685,88 @@ def test_workplan_name_validation(
 
 
 @pytest.mark.parametrize(
+    ("name", "slug"),
+    [
+        ("Sample Workplan", "sample-workplan"),
+        ("Fan-out Workplan", "fan-out-workplan"),
+        ("UPPER", "upper"),
+        ("two  spaces", "two-spaces"),
+        ("trailing-", "trailing"),
+    ],
+)
+def test_workplan_name_must_be_a_slug(
+    gen_fake_steps: Callable[[int], Generator[Step, None, None]],
+    name: str,
+    slug: str,
+) -> None:
+    """Verify a name that is not its own slug is rejected with the slug to use.
+
+    Parameters
+    ----------
+    gen_fake_steps : Callable[[int], Generator[Step, None, None]]
+        A generator function to produce minimally valid test steps
+    name : str
+        A workplan name that differs from its slug
+    slug : str
+        The slug the error should suggest
+    """
+    with pytest.raises(ValidationError) as error:
+        _ = Workplan(name=name, description="d", steps=list(gen_fake_steps(1)))
+
+    message = str(error.value)
+    assert f"workplan name {name!r} is not a valid run-id" in message
+    assert f"use {slug!r}" in message
+
+
+@pytest.mark.parametrize("name", ["sample-workplan", "my_plan", "run-2026", "a"])
+def test_workplan_name_slug_accepted(
+    gen_fake_steps: Callable[[int], Generator[Step, None, None]],
+    name: str,
+) -> None:
+    """Verify a name that is already a slug is accepted unchanged.
+
+    Parameters
+    ----------
+    gen_fake_steps : Callable[[int], Generator[Step, None, None]]
+        A generator function to produce minimally valid test steps
+    name : str
+        A workplan name that equals its slug
+    """
+    wp = Workplan(name=name, description="d", steps=list(gen_fake_steps(1)))
+
+    assert wp.name == name
+
+
+def test_live_workplan_accepts_non_slug_name(
+    tmp_path: Path,
+    fake_blueprint_path: Path,
+) -> None:
+    """Verify a transformed workplan, renamed to `<name> (transformed)` when it
+    is prepared, still loads as a `LiveWorkplan` although it is not a slug.
+
+    Parameters
+    ----------
+    tmp_path : Path
+        Temporary directory to persist the workplan in
+    fake_blueprint_path : Path
+        A path to a file that meets minimum expectations (it exists).
+    """
+    step = LiveStep.from_step(
+        Step(name="a", application="hello_world", blueprint=fake_blueprint_path)
+    )
+    name = "my-plan (transformed)"
+    path = tmp_path / "trx.yaml"
+    assert serialize(path, LiveWorkplan(name=name, description="d", steps=[step])), (
+        "Serialization of the transformed workplan failed"
+    )
+
+    assert deserialize(path, LiveWorkplan).name == name
+
+    with pytest.raises(ValidationError, match="not a valid run-id"):
+        deserialize(path, Workplan)
+
+
+@pytest.mark.parametrize(
     "invalid_value",
     [
         "",
