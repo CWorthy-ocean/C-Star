@@ -119,7 +119,9 @@ Definitions
       application starts, using information that only exists at run time.
       ``continue-from`` takes a restart file written by an earlier step as
       initial conditions; ``nest-from`` takes a parent run's output as the
-      boundary forcing of a nested child. See :doc:`workplans/directives`.
+      boundary forcing of a nested child; ``carbonate-sensitivity-from`` takes
+      the carbonate sensitivities that an earlier ROMS-MARBL run wrote as
+      surface forcing for a CDR-LiTE run. See :doc:`workplans/directives`.
 
     Orchestrator
       The process that executes a workplan. It builds a graph of the steps

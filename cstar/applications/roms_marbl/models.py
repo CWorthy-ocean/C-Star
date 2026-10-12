@@ -42,6 +42,16 @@ class ForcingConfiguration(ConfiguredBaseModel):
     corrections: Dataset | None = Field(default=None, validate_default=False)
     """Wind or other forcing corrections."""
 
+    carbonate_sensitivity: Dataset | None = Field(default=None, validate_default=False)
+    """Carbonate sensitivity forcing for CDR-lite runs (ucla-roms >= 0.9.0).
+
+    Surface fields ``ddic_dco2`` (beta) and ``ddic_dalk`` (eta) with their time
+    variables, read by a ``CDR_LITE`` build whose
+    ``cdr_lite_settings.cdr_online_carbonate_sensitivity`` is off: the
+    ``_cdrgas`` output of an earlier ROMS-MARBL run, either listed here or
+    supplied at run time by the ``carbonate-sensitivity-from`` directive.
+    """
+
 
 class CodeRepository(DocLocMixin):
     """Reference to a remote code repository with optional path filtering
@@ -258,7 +268,7 @@ class PartitioningParameterSet(ParameterSet):
 class RomsMarblBlueprint(Blueprint):
     """Blueprint schema for running a ROMS-MARBL simulation."""
 
-    schema_version: str = "3.1.0"
+    schema_version: str = "3.2.0"
     """The blueprint schema version."""
 
     application: str = APP_NAME

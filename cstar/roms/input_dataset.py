@@ -6,7 +6,7 @@ from abc import ABC
 from collections.abc import Generator
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, ClassVar
+from typing import Any, ClassVar, Final
 
 from cstar.base.exceptions import CstarExpectationFailed
 from cstar.base.input_dataset import InputDataset
@@ -827,6 +827,50 @@ class ROMSBoundaryForcing(ROMSInputDataset):
 class ROMSSurfaceForcing(ROMSInputDataset):
     """An implementation of the ROMSInputDataset class for model surface forcing
     files.
+    """
+
+
+CARBONATE_SENSITIVITY_VARIABLES: Final[tuple[str, ...]] = (
+    "ddic_dco2",
+    "ddic_dalk",
+    "ddic_dco2_time",
+    "ddic_dalk_time",
+)
+"""Variables a CDR-LiTE build reads from its carbonate sensitivity forcing
+files: the sensitivities of the air-sea CO2 flux to DIC (beta) and ALK (eta),
+each with its time variable (days since the reference date).
+"""
+
+CARBONATE_SENSITIVITY_REMEDY: Final[str] = (
+    "_cdrgas files written by ucla-roms 0.9.1 and earlier carry only ocean_time "
+    "and cannot be read as forcing; regenerate them with a ucla-roms release "
+    "that writes the forcing time variables."
+)
+"""Advice appended when carbonate sensitivity files lack the variables ROMS reads."""
+
+
+def missing_carbonate_sensitivity_variables(path: Path) -> list[str]:
+    """Return the names in `CARBONATE_SENSITIVITY_VARIABLES` absent from the
+    netCDF file at `path` (a header read; no data is loaded).
+
+    Shared by the ROMS-side dataset check and Forge's staging step so the
+    required-variable rule lives in one place.
+    """
+    # Lazy import: only needed when this check runs
+    import xarray as xr
+
+    with xr.open_dataset(path, decode_times=False) as ds:
+        return [
+            name for name in CARBONATE_SENSITIVITY_VARIABLES if name not in ds.variables
+        ]
+
+
+class ROMSCarbonateSensitivity(ROMSInputDataset):
+    """Carbonate sensitivity forcing for a CDR-LiTE (ucla-roms >= 0.9.0) build.
+
+    Surface fields read through the generic `frcfiles` list when the build does
+    not compute them online -- typically the `_cdrgas` output of an earlier
+    ROMS-MARBL run.
     """
 
 

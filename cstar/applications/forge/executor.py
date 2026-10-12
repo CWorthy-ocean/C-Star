@@ -32,6 +32,7 @@ import cstar.applications.roms_marbl.models as cstar_models
 from cstar.applications.forge import input_data, source_datasets
 from cstar.applications.forge.blueprint import (
     CDR_MODES,
+    CarbonateSensitivitySpec,
     OpenBoundaries,
     UserProvidedFile,
     emitted_blueprint_description,
@@ -41,12 +42,15 @@ from cstar.applications.forge.blueprint import (
 )
 from cstar.applications.forge.host import HostPaths
 from cstar.applications.forge.namelist_model import (
+    bgc_mode_from_cppdefs,
     build_namelist,
     check_bgc_tracer_count,
     check_cdr_forcing_mode,
+    check_cdr_lite_mode_roms,
     check_cdr_lite_sections,
     check_cdr_output_sections,
     check_output_streams_divide_rst,
+    check_river_tracer_counts,
     check_rst_period_divisible,
     cppdefs_for_precheck,
     ensure_cdr_output_marbl_diagnostics,
@@ -294,6 +298,17 @@ class ForgeExecutor(BaseModel):
             "``cdr_forcing`` (the ForgeBlueprint schema already forbids the "
             "combination); verified and staged directly in "
             "``input_data._generate_cdr_forcing``'s custom-file branch."
+        ),
+    )
+    carbonate_sensitivity: CarbonateSensitivitySpec | None = Field(
+        default=None,
+        validate_default=False,
+        description=(
+            "User-supplied carbonate sensitivity files (from ForgeBlueprint "
+            "``carbonate_sensitivity``) a ``bgc_mode: cdr_lite`` build reads as "
+            "surface forcing; staged by ``input_data``'s "
+            "``forcing.carbonate_sensitivity`` step. ``None`` leaves them to the "
+            "``carbonate-sensitivity-from`` workplan directive."
         ),
     )
     forcing_override: dict[str, Any] | None = Field(
@@ -839,6 +854,13 @@ class ForgeExecutor(BaseModel):
         # is already False for it without a separate cdr_mode check.
         if self.cdr_forcing or self.cdr_forcing_file:
             _add_nc(input_data.CDR_FORCING_NETCDF_STEM)
+
+        if self.carbonate_sensitivity is not None:
+            for path in input_data.carbonate_sensitivity_destinations(
+                input_data_dir, self.carbonate_sensitivity.files
+            ):
+                if path.resolve() not in planned_paths:
+                    planned_paths.append(path.resolve())
 
         return planned_paths
 
@@ -1936,6 +1958,7 @@ class ForgeExecutor(BaseModel):
             cdr_mode=self.cdr_mode,
             cdr_forcing=self.cdr_forcing,
             cdr_forcing_file=self.cdr_forcing_file,
+            carbonate_sensitivity=self.carbonate_sensitivity,
             use_dask=use_dask,
             dask_num_workers=dask_num_workers,
             serialize_dask_write=serialize_dask_write,
@@ -2176,6 +2199,46 @@ class ForgeExecutor(BaseModel):
 
         return cls(**forge_blueprint_to_builder_kwargs(cfg), host=host, verbose=verbose)
 
+    def _river_tracer_lengths(self) -> dict[str, int]:
+        """The ``ntracers`` length of each local river forcing file in the
+        in-memory blueprint, keyed by location.
+
+        A file that is not local or cannot be read (a remote location, a test
+        placeholder) is skipped: there is nothing to compare, and the check
+        must not turn an unreadable file into a different error.
+        """
+
+        def as_dict(obj: Any) -> dict[str, Any]:
+            # The in-memory blueprint holds plain dicts after generate_inputs
+            # rebuilds it, and models otherwise (see get_ds).
+            if hasattr(obj, "model_dump"):
+                obj = obj.model_dump()
+            return obj if isinstance(obj, dict) else {}
+
+        with _suppress_pydantic_warnings():
+            river = as_dict(as_dict(self.roms_marbl_blueprint).get("forcing")).get(
+                "river"
+            )
+            items = as_dict(river).get("data") or []
+        lengths: dict[str, int] = {}
+        for item in items:
+            location = str(as_dict(item).get("location") or "")
+            if not location or not Path(location).is_file():
+                continue
+            try:
+                with warnings.catch_warnings():
+                    warnings.filterwarnings(
+                        "ignore", category=FutureWarning, module="xarray"
+                    )
+                    with xr.open_dataset(location, decode_timedelta=False) as ds:
+                        sizes = dict(ds.sizes)
+            except Exception as e:
+                log.debug("river forcing %s: could not read ntracers (%s)", location, e)
+                continue
+            if "ntracers" in sizes:
+                lengths[location] = int(sizes["ntracers"])
+        return lengths
+
     def configure_build(
         self,
         compile_time_settings: dict[str, Any] | None = None,
@@ -2240,8 +2303,9 @@ class ForgeExecutor(BaseModel):
             (``cdr_tracer_output``) is renamed to its current one.
             Defaults to empty dict.
         **kwargs
-            ``n_tracers`` (int) overrides the tracer count derived from the resolved
-            settings. ``provenance`` (`Provenance`) is the provenance the emitted
+            ``n_tracers`` (int) overrides the tracer count derived from the live
+            run-time settings (which, after generation, carry the CDR tracer counts
+            read off the generated CDR forcing). ``provenance`` (`Provenance`) is the provenance the emitted
             blueprint records, as built by ``emitted_provenance``; without it the
             blueprint is written with none.
 
@@ -2362,6 +2426,13 @@ class ForgeExecutor(BaseModel):
             self.cdr_forcing or self.cdr_forcing_file or self.cdr_mode == "upscaled"
         )
         cppdefs = self._settings_compile_time.setdefault("cppdefs", {})
+        bgc_mode = bgc_mode_from_cppdefs(cppdefs)
+        # Before check_cdr_forcing_mode below, so a pin that is too old for the
+        # mode is reported as such rather than as a generic CDR-without-MARBL error.
+        if bgc_mode == "cdr_lite":
+            check_cdr_lite_mode_roms(
+                str(effective_roms_ref) if effective_roms_ref is not None else None
+            )
         if cdr_active and not cppdefs.get("cdr_forcing"):
             cppdefs["cdr_forcing"] = True
             log.info(
@@ -2376,6 +2447,31 @@ class ForgeExecutor(BaseModel):
             else None,
         ):
             self._settings_run_time.setdefault("cdr_output", {})["do_cdr_output"] = True
+        # bgc_mode "cdr_lite" (CDR-lite tracers, no MARBL): the generation step
+        # derived nt_cdr_oae/nt_cdr_dor from the CDR forcing's tracer axis, and
+        # the _cdrtrc stream is the only output the CDR tracers appear in, so it
+        # is forced on (ROMS aborts at init if it is on with zero CDR tracers, hence
+        # the count check first, which also names the likely authoring mistake).
+        if bgc_mode == "cdr_lite":
+            param = self._settings_run_time.get("param") or {}
+            if not cdr_active or not (
+                int(param.get("nt_cdr_oae") or 0) + int(param.get("nt_cdr_dor") or 0)
+            ):
+                raise ValueError(
+                    "bgc_mode cdr_lite but the CDR forcing defines no CDR-lite "
+                    "tracers (nt_cdr_oae + nt_cdr_dor == 0); use releases with "
+                    "tracer_set=cdr_lite"
+                    + ("" if cdr_active else " (no CDR forcing is configured)")
+                    + "."
+                )
+            lite_output = self._settings_run_time.setdefault("cdr_lite_output", {})
+            if not lite_output.get("do_cdr_lite_output"):
+                lite_output["do_cdr_lite_output"] = True
+                log.info(
+                    "configure_build: bgc_mode is cdr_lite; forcing "
+                    "cdr_lite_output.do_cdr_lite_output=True (the _cdrtrc stream is "
+                    "the only output the CDR-lite tracers appear in)."
+                )
         # do_cdr_output requires MARBL plus the CDR_FORCING cppdef (both gate
         # compiling ucla-roms' cdr_output.F90), and the MARBL diagnostics ucla-roms
         # looks up by name, unchecked.
@@ -2427,13 +2523,13 @@ class ForgeExecutor(BaseModel):
         # turn on or off after resolve time. A stale True here is a value an earlier
         # resolve derived, so it is recomputed rather than rejected.
         cdr_lite_needed = check_cdr_lite_sections(
-            self._settings_run_time, bgc_mode_is_marbl=cppdefs.get("marbl", False)
+            self._settings_run_time, bgc_mode=bgc_mode, settings_cls=settings_cls
         )
         if cdr_lite_needed != bool(cppdefs.get("cdr_lite")):
             cppdefs["cdr_lite"] = cdr_lite_needed
             log.info(
                 "configure_build: setting cppdefs.cdr_lite=%s (derived from "
-                "cdr_lite.cdr_online_carbonate_sensitivity).",
+                'bgc_mode "cdr_lite" or cdr_lite.cdr_online_carbonate_sensitivity).',
                 cdr_lite_needed,
             )
 
@@ -2445,21 +2541,29 @@ class ForgeExecutor(BaseModel):
             bgc_mode_is_marbl=cppdefs.get("marbl", False),
         )
 
-        # Derive n_tracers up front: prefer the value passed by the processing
-        # engine; otherwise derive it from the resolved settings (T + S + BGC +
-        # passive + CDR tracers). Needed below both to build the namelist for the
-        # output-stream precheck and later to render cppdefs.opt/namelist.nml.
+        # Derive n_tracers up front: prefer the value passed by the caller;
+        # otherwise derive it from the live run-time settings (T + S + BGC +
+        # passive + CDR tracers), which carry the CDR tracer counts the generation
+        # step read off the CDR forcing -- the stored blueprint snapshot predates
+        # them. Needed below both to build the namelist for the output-stream
+        # precheck and later to render cppdefs.opt/namelist.nml.
         if "n_tracers" in kwargs:
             n_tracers = int(kwargs["n_tracers"])
-        elif self.resolved_settings is not None:
-            n_tracers = n_tracers_from_param(
-                self.resolved_settings.get("param", {}) or {}
-            )
         else:
-            raise ValueError(
-                "n_tracers could not be determined: neither passed as a kwarg nor "
-                "derivable from resolved_settings."
-            )
+            n_tracers = n_tracers_from_param(self._settings_run_time.get("param") or {})
+
+        # River tracer count net: ucla-roms >= 0.9.0 aborts at init unless every
+        # river forcing file holds n_tracers or n_tracers minus the CDR block, and
+        # the CDR counts are only final here (the river step runs before the CDR
+        # forcing step derives them). Checked against the files ROMS will read.
+        check_river_tracer_counts(
+            self._river_tracer_lengths(),
+            n_tracers=n_tracers,
+            param=self._settings_run_time.get("param") or {},
+            roms_ref=str(effective_roms_ref)
+            if effective_roms_ref is not None
+            else None,
+        )
 
         # Output-stream / restart-rollover consistency net (ucla-roms >= 0.5.0's
         # check_output_divides_rst, precheck.F90), mirroring the resolver's guard

@@ -1008,6 +1008,7 @@ from cstar.roms.discretization import ROMSDiscretization  # noqa: E402
 from cstar.roms.external_codebase import ROMSExternalCodeBase  # noqa: E402
 from cstar.roms.input_dataset import (  # noqa: E402
     ROMSBoundaryForcing,
+    ROMSCarbonateSensitivity,
     ROMSCdrForcing,
     ROMSForcingCorrections,
     ROMSInitialConditions,
@@ -1568,6 +1569,43 @@ def roms_forcing_corrections(
     return _create
 
 
+@pytest.fixture
+def roms_carbonate_sensitivity(
+    mocksourcedata_remote_file: type[SourceData],
+) -> Callable[
+    [str, str, SourceData, datetime | None, datetime | None], ROMSCarbonateSensitivity
+]:
+    """Provides a ROMSCarbonateSensitivity instance with fake attrs for testing"""
+    default_location = "http://my.files/cdrgas.nc"
+    default_hash = "321"
+    default_start_date = None
+    default_end_date = None
+    default_sourcedata = mocksourcedata_remote_file(
+        location=default_location,
+        identifier=default_hash,
+    )
+
+    def _create(
+        location: str = default_location,
+        file_hash: str | None = default_hash,
+        sourcedata: SourceData = default_sourcedata,
+        start_date: datetime | None = default_start_date,
+        end_date: datetime | None = default_end_date,
+    ):
+        patch_source_data = mock.patch(
+            "cstar.roms.input_dataset.SourceData", return_value=sourcedata
+        )
+        with patch_source_data:
+            return ROMSCarbonateSensitivity(
+                location=location,
+                file_hash=file_hash,
+                start_date=start_date,
+                end_date=end_date,
+            )
+
+    return _create
+
+
 ################################################################################
 # ROMSSimulation
 ################################################################################
@@ -1588,6 +1626,7 @@ def stub_romssimulation(
     roms_cdr_forcing: Callable[[], ROMSCdrForcing],
     roms_nesting_info: Callable[[], ROMSNestingInfo],
     roms_forcing_corrections: Callable[[], ROMSForcingCorrections],
+    roms_carbonate_sensitivity: Callable[[], ROMSCarbonateSensitivity],
     tmp_path: Path,
 ) -> ROMSSimulation:
     """Fixture providing a `ROMSSimulation` instance for testing.
@@ -1630,6 +1669,9 @@ def stub_romssimulation(
         ],
         forcing_corrections=[
             roms_forcing_corrections(),
+        ],
+        carbonate_sensitivity=[
+            roms_carbonate_sensitivity(),
         ],
         cdr_forcing=roms_cdr_forcing(),
         nesting_info=roms_nesting_info(),
@@ -1707,6 +1749,12 @@ def stub_romssimulation_dict(stub_romssimulation: ROMSSimulation) -> dict[str, A
                 "file_hash": sim.forcing_corrections[0].source.file_hash,
             }
         ],
+        "carbonate_sensitivity": [
+            {
+                "location": sim.carbonate_sensitivity[0].source.location,
+                "file_hash": sim.carbonate_sensitivity[0].source.file_hash,
+            }
+        ],
         "cdr_forcing": {
             "location": sim.cdr_forcing.source.location,
             "file_hash": sim.cdr_forcing.source.file_hash,
@@ -1725,7 +1773,12 @@ def stub_romssimulation_dict_no_forcing_lists(
 ) -> dict[str, Any]:
     """As stub_romssimulation_dict, but without list values for certain forcing types."""
     sim_dict = stub_romssimulation_dict
-    for k in ["surface_forcing", "boundary_forcing", "forcing_corrections"]:
+    for k in [
+        "surface_forcing",
+        "boundary_forcing",
+        "forcing_corrections",
+        "carbonate_sensitivity",
+    ]:
         sim_dict[k] = sim_dict[k][0]
     return sim_dict
 
@@ -1792,6 +1845,10 @@ def patch_romssimulation_init_sourcedata(
     mock_forcing_corrections_sourcedata = mocksourcedata_remote_file(
         location=sim.forcing_corrections[0].source.location,
         identifier=sim.forcing_corrections[0].source.identifier,
+    )
+    mock_carbonate_sensitivity_sourcedata = mocksourcedata_remote_file(
+        location=sim.carbonate_sensitivity[0].source.location,
+        identifier=sim.carbonate_sensitivity[0].source.identifier,
     )
 
     assert sim.cdr_forcing
@@ -1874,6 +1931,7 @@ def patch_romssimulation_init_sourcedata(
                     mock_boundary_forcing_sourcedata,
                     mock_surface_forcing_sourcedata,
                     mock_forcing_corrections_sourcedata,
+                    mock_carbonate_sensitivity_sourcedata,
                 ],
             ),
             mock.patch(

@@ -251,26 +251,30 @@ async def test_list_steps_filter_all(
 
 @pytest.mark.asyncio
 async def test_autocomplete_step_list_no_run_id() -> None:
-    """Verify that a missing run-id parameter raises a typer exception."""
+    """Verify that a missing run-id parameter completes to an empty list."""
     mock_typer_ctx = mock.Mock(params={"no-run-id-param-to-locate": 0})
 
-    with (
-        mock.patch("typer.Context", mock_typer_ctx),
-        pytest.raises(typer.BadParameter, match="run-id is required"),
-    ):
-        autocomplete_step_list(mock_typer_ctx, incomplete="")
+    with mock.patch("typer.Context", mock_typer_ctx):
+        assert autocomplete_step_list(mock_typer_ctx, incomplete="") == []
 
 
 @pytest.mark.asyncio
-async def test_autocomplete_step_list_empty_run_id() -> None:
-    """Verify that a missing run-id parameter raises a typer exception."""
-    mock_typer_ctx = mock.Mock(params={"run-id": ""})
+@pytest.mark.parametrize("run_id", ["", None])
+async def test_autocomplete_step_list_empty_run_id(run_id: str | None) -> None:
+    """Verify that an empty run-id completes to an empty list.
 
-    with (
-        mock.patch("typer.Context", mock_typer_ctx),
-        pytest.raises(typer.BadParameter, match="run-id is required"),
-    ):
-        autocomplete_step_list(mock_typer_ctx, incomplete="")
+    Click stores None for the run-id when its callback fails during resilient
+    completion parsing (e.g. an unknown run-id).
+
+    Parameters
+    ----------
+    run_id : str | None
+        The run-id value present on the context.
+    """
+    mock_typer_ctx = mock.Mock(params={"run_id": run_id})
+
+    with mock.patch("typer.Context", mock_typer_ctx):
+        assert autocomplete_step_list(mock_typer_ctx, incomplete="") == []
 
 
 def test_autocomplete_step_list_happy_path(

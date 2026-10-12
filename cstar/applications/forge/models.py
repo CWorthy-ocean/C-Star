@@ -18,7 +18,7 @@ callers that import them from ``cstar.applications.forge.models``.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any, Literal
+from typing import TYPE_CHECKING, Any
 
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, model_validator
@@ -42,6 +42,7 @@ from cstar.applications.forge.blueprint import (
 from cstar.applications.forge.blueprint import (
     OpenBoundaries as OpenBoundaries,
 )
+from cstar.applications.forge.namelist_model import BgcMode
 from cstar.applications.forge.templates import bundled_template_dir
 
 if TYPE_CHECKING:
@@ -49,6 +50,7 @@ if TYPE_CHECKING:
 
 __all__ = [
     "CDR_MODES",
+    "BgcMode",
     "BgcSourceItem",
     "BoundaryForcing",
     "CdrSpec",
@@ -123,9 +125,11 @@ class ModelSpec(BaseModel):
         Human-readable one-liner for catalogs/wizard display.
     code : ModelCode
         Code repository refs (roms/marbl/pio) + template refs.
-    bgc_mode : Literal["marbl", "none"]
-        Per-run BGC toggle. Prepopulates the wizard's BGC dropdown; the resolver
-        uses it to derive ``model_settings.cppdefs.marbl`` (and gate
+    bgc_mode : BgcMode
+        Per-run BGC build mode: ``"marbl"``, ``"none"`` (physics only) or
+        ``"cdr_lite"`` (ucla-roms' dedicated CDR-lite tracers, no MARBL).
+        Prepopulates the wizard's BGC dropdown; the resolver uses it to derive
+        ``model_settings.cppdefs.marbl``/``cdr_lite`` (and gate
         ``nhy_forcing``/``nox_forcing``) and to decide whether ``code.marbl`` is
         populated. Not part of ``model_settings`` -- it's a build mode, not a
         namelist section.
@@ -146,7 +150,7 @@ class ModelSpec(BaseModel):
     name: str
     description: str | None = None
     code: ModelCode
-    bgc_mode: Literal["marbl", "none"] = "marbl"
+    bgc_mode: BgcMode = "marbl"
     use_pio: bool = False
     model_settings: dict[str, Any] = Field(default_factory=dict)
 

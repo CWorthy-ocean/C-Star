@@ -7,13 +7,17 @@ import pytest
 import yaml
 from pydantic import ValidationError
 
-from cstar.applications.roms_marbl.adapter import PIOAdapter
+from cstar.applications.roms_marbl.adapter import (
+    CarbonateSensitivityAdapter,
+    PIOAdapter,
+)
 from cstar.applications.roms_marbl.models import (
     PartitioningParameterSet,
     RomsMarblBlueprint,
     RuntimeParameterSet,
 )
 from cstar.orchestration.models import BlueprintIdentity, CatalogSpecRef, Provenance
+from cstar.orchestration.serialization import model_to_yaml
 from cstar.pio.external_codebase import PIOExternalCodeBase
 
 
@@ -474,3 +478,88 @@ class TestProvenance:
         complete_blueprint_dict["provenance"] = {"notes": "anything"}
         with pytest.raises(ValidationError, match="notes"):
             RomsMarblBlueprint.model_validate(complete_blueprint_dict)
+
+
+class TestCarbonateSensitivity:
+    """Tests for the `forcing.carbonate_sensitivity` field and its adapter."""
+
+    @pytest.fixture
+    def with_sensitivity(self, complete_blueprint_dict) -> dict[str, Any]:
+        """The complete blueprint with a two-file carbonate sensitivity forcing."""
+        complete_blueprint_dict["forcing"]["carbonate_sensitivity"] = {
+            "documentation": "cdrgas output of the control run",
+            "data": [
+                {"location": "https://example.com/ctl_cdrgas.1.nc", "hash": "abc"},
+                {
+                    "location": "https://example.com/ctl_cdrgas.2.000.nc",
+                    "partitioned": True,
+                },
+            ],
+        }
+        return complete_blueprint_dict
+
+    def test_schema_version(self):
+        """Adding the optional field is a minor bump of the schema."""
+        assert RomsMarblBlueprint.model_fields["schema_version"].default == "3.2.0"
+
+    def test_defaults_to_none(self, complete_blueprint_dict):
+        """A blueprint without the field validates, with no sensitivity forcing."""
+        assert "carbonate_sensitivity" not in complete_blueprint_dict["forcing"]
+        bp = RomsMarblBlueprint.model_validate(complete_blueprint_dict)
+        assert bp.forcing.carbonate_sensitivity is None
+
+    def test_round_trips(self, with_sensitivity):
+        """The field survives serialization to YAML and validation back."""
+        bp = RomsMarblBlueprint.model_validate(with_sensitivity)
+        assert bp.forcing.carbonate_sensitivity is not None
+        assert len(bp.forcing.carbonate_sensitivity) == 2
+
+        reloaded = RomsMarblBlueprint.model_validate(yaml.safe_load(model_to_yaml(bp)))
+
+        assert (
+            reloaded.forcing.carbonate_sensitivity == bp.forcing.carbonate_sensitivity
+        )
+
+    def test_unknown_forcing_key_is_still_rejected(self, complete_blueprint_dict):
+        """The forcing block stays strict: only declared keys are accepted."""
+        complete_blueprint_dict["forcing"]["carbonate_sensitivities"] = {"data": []}
+        with pytest.raises(ValidationError, match="carbonate_sensitivities"):
+            RomsMarblBlueprint.model_validate(complete_blueprint_dict)
+
+    def test_adapter_returns_none_when_absent(self, complete_blueprint_dict):
+        """No `forcing.carbonate_sensitivity`, no datasets (not an empty list)."""
+        bp = RomsMarblBlueprint.model_validate(complete_blueprint_dict)
+        assert CarbonateSensitivityAdapter(bp).adapt() is None
+
+    def test_adapter_builds_one_dataset_per_entry(self, with_sensitivity):
+        """Each `data` entry becomes a `ROMSCarbonateSensitivity`; a partitioned
+        entry takes the blueprint's processor grid as its source partitioning,
+        and a hash is passed through only when the entry has one.
+        """
+        bp = RomsMarblBlueprint.model_validate(with_sensitivity)
+        n_x, n_y = bp.partitioning.n_procs_x, bp.partitioning.n_procs_y
+
+        with mock.patch(
+            "cstar.applications.roms_marbl.adapter.ROMSCarbonateSensitivity"
+        ) as mock_dataset:
+            datasets = CarbonateSensitivityAdapter(bp).adapt()
+
+        assert datasets == [mock_dataset.return_value, mock_dataset.return_value]
+        assert mock_dataset.call_args_list == [
+            mock.call(
+                location="https://example.com/ctl_cdrgas.1.nc",
+                file_hash="abc",
+                start_date=None,
+                end_date=None,
+                source_np_xi=None,
+                source_np_eta=None,
+            ),
+            mock.call(
+                location="https://example.com/ctl_cdrgas.2.000.nc",
+                file_hash=None,
+                start_date=None,
+                end_date=None,
+                source_np_xi=n_x,
+                source_np_eta=n_y,
+            ),
+        ]

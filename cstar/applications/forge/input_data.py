@@ -28,23 +28,32 @@ from threadpoolctl import threadpool_limits
 
 import cstar.applications.roms_marbl.models as cstar_models
 from cstar.applications.forge import source_datasets
-from cstar.applications.forge.blueprint import OpenBoundaries, UserProvidedFile
+from cstar.applications.forge.blueprint import (
+    CarbonateSensitivitySpec,
+    OpenBoundaries,
+    UserProvidedFile,
+)
+from cstar.applications.forge.namelist_model import (
+    bgc_mode_from_cppdefs,
+    cdr_tracer_counts,
+    n_tracers_from_param,
+    river_tracer_floor,
+)
 from cstar.applications.forge.source_registry import ROMS_TOOLS_SOURCE_NAME
 from cstar.applications.forge.user_files import stage_user_netcdf, verify_user_file
 from cstar.applications.forge.util import mem_log
-from cstar.applications.forge.xarray_lockfix import apply_combinedlock_leak_fix
 from cstar.base.utils import convert_to_cdf5
 from cstar.orchestration.models import Resource
+from cstar.roms.input_dataset import (
+    CARBONATE_SENSITIVITY_REMEDY,
+    CARBONATE_SENSITIVITY_VARIABLES,
+    missing_carbonate_sensitivity_variables,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterable
 
 log = logging.getLogger(__name__)
-
-# xarray's CachingFileManager.__del__ can leak a global netCDF lock during
-# dask-threaded saves, permanently deadlocking input generation (progress bar
-# frozen mid-save). See xarray_lockfix module docstring for the mechanism.
-apply_combinedlock_leak_fix()
 
 # Basename stem for CDR NetCDF: ``{domain_name}_cdr.nc``. The full name contains the
 # substring ``cdr.nc`` by convention (a former C-Star build check enforced this).
@@ -171,6 +180,19 @@ def netcdf_basename(domain_name: str, input_name: str) -> str:
     ``forge`` application's emitted-blueprint prediction.
     """
     return f"{netcdf_filename_component(domain_name)}_{netcdf_filename_component(input_name)}.nc"
+
+
+def carbonate_sensitivity_destinations(
+    input_data_dir: Path, files: Iterable[UserProvidedFile]
+) -> list[Path]:
+    """Where the staged copies of user-supplied carbonate sensitivity ``files`` land:
+    ``input_data_dir``, under each file's own basename (they are not generated, so
+    carry no ``{domain}_{input}`` name).
+
+    The one place that spells the rule, shared by the staging step, the planned
+    outputs of ``RomsMarblInputData`` and the executor's.
+    """
+    return [Path(input_data_dir) / Path(f.location).name for f in files]
 
 
 class RomsMarblBlueprintInputData(BaseModel):
@@ -310,6 +332,8 @@ _INPUT_SELECTION_ALIASES: dict[str, str] = {
     "forcing.river": "forcing.river",
     "cdr": "cdr_forcing",
     "cdr_forcing": "cdr_forcing",
+    "carbonate_sensitivity": "forcing.carbonate_sensitivity",
+    "forcing.carbonate_sensitivity": "forcing.carbonate_sensitivity",
 }
 
 
@@ -368,6 +392,30 @@ def register_input(name: str, order: int, label: str | None = None):
 _T = TypeVar("_T")
 
 
+@dataclass(frozen=True)
+class _CdrAxis:
+    """What a CDR forcing dataset says about its tracer axis (:func:`_cdr_axis`)."""
+
+    names: tuple[str, ...] | None
+    """The ``tracer_name`` coordinate on ``ntracers``, or ``None`` when absent."""
+    has_trcflx: bool
+    """Whether the file carries ``cdr_trcflx`` (tracer-perturbation releases)."""
+
+
+def _cdr_axis(ds: xr.Dataset) -> _CdrAxis:
+    """Read the tracer axis off a CDR forcing dataset (an ``rt.CDRForcing.ds`` or an
+    opened file). roms-tools writes ``tracer_name`` as a string coordinate on
+    ``ntracers``; one without it (hand-made, or written by an older roms-tools)
+    has ``names=None``.
+    """
+    if "tracer_name" not in ds.coords or "ntracers" not in ds.sizes:
+        return _CdrAxis(names=None, has_trcflx=False)
+    return _CdrAxis(
+        names=tuple(str(name) for name in ds["tracer_name"].values),
+        has_trcflx="cdr_trcflx" in ds.data_vars,
+    )
+
+
 def _require_element(value: _T | None, field_name: str) -> _T:
     """Narrow a ``roms_marbl_blueprint_elements`` field to non-``None``.
 
@@ -397,6 +445,7 @@ class RomsMarblInputData(InputData):
     - Tidal forcing
     - River forcing
     - CDR forcing
+    - Carbonate sensitivity forcing (user-supplied files only)
     - Corrections
     """
 
@@ -424,6 +473,11 @@ class RomsMarblInputData(InputData):
     used in place of building one via ``rt.CDRForcing`` from ``cdr_forcing``. Mutually
     exclusive with ``cdr_forcing`` (enforced upstream by the ``ForgeBlueprint`` schema).
     """
+    carbonate_sensitivity: CarbonateSensitivitySpec | None = None
+    """User-supplied carbonate sensitivity files (from ``ForgeExecutor.carbonate_sensitivity``),
+    staged by the ``forcing.carbonate_sensitivity`` step and listed in the emitted
+    blueprint. Only a ``bgc_mode: cdr_lite`` build reads them; ``None`` leaves them to the
+    ``carbonate-sensitivity-from`` workplan directive."""
     forcing_override: dict[str, Any] | None = None
     """The fully-resolved initial-conditions + forcing selection driving input generation.
     Keys mirror the inputs block structure: 'initial_conditions', 'forcing' (with sub-keys
@@ -573,6 +627,32 @@ class RomsMarblInputData(InputData):
                 )
             )
 
+        # Optional user-supplied carbonate sensitivity files. Only a CDR-LiTE build
+        # reads them (as surface forcing); the default is to leave them to the
+        # ``carbonate-sensitivity-from`` workplan directive. Keyed on the live
+        # compile-time settings, like the other build-time nets.
+        bgc_mode = bgc_mode_from_cppdefs(
+            (self.settings_compile_time or {}).get("cppdefs") or {}
+        )
+        if self.carbonate_sensitivity is not None:
+            if bgc_mode != "cdr_lite":
+                raise ValueError(
+                    "carbonate_sensitivity files are set but the build is not "
+                    f'bgc_mode "cdr_lite" (it is "{bgc_mode}"): only a CDR-LiTE '
+                    "build reads them as surface forcing."
+                )
+            input_list.append(
+                (
+                    "forcing.carbonate_sensitivity",
+                    {"files": list(self.carbonate_sensitivity.files)},
+                )
+            )
+        elif bgc_mode == "cdr_lite":
+            log.info(
+                "No carbonate sensitivity files in the blueprint: the "
+                "carbonate-sensitivity-from workplan directive must supply them."
+            )
+
         self.input_list = input_list
 
         # Sanity check: verify all function keys are registered
@@ -586,7 +666,7 @@ class RomsMarblInputData(InputData):
             )
 
         # Initialize roms_marbl_blueprint_elements with empty datasets
-        forcing_keys = {"boundary", "surface", "tidal", "river", "corrections"}
+        forcing_keys = set(cstar_models.ForcingConfiguration.model_fields)
         forcing_dict = {}
         for key in unique_keys:
             # Extract subkey for forcing categories
@@ -1086,6 +1166,15 @@ class RomsMarblInputData(InputData):
                         self._item_use_vars(bs),
                     )
                     planned.append(self._forcing_filename(f"boundary-{detail}"))
+                continue
+
+            if step.name == "forcing.carbonate_sensitivity":
+                # Staged under their own basenames, not a generated name.
+                planned.extend(
+                    carbonate_sensitivity_destinations(
+                        self.input_data_dir, kwargs["files"]
+                    )
+                )
                 continue
 
             if step.name.startswith("forcing."):
@@ -2226,12 +2315,32 @@ class RomsMarblInputData(InputData):
             paths[0] if isinstance(paths, (list, tuple)) else paths
         )
 
+    def _check_river_tracer_floor(self, ntracers: int, path: Path | str) -> None:
+        """Reject a river forcing file with fewer tracers than any ucla-roms
+        release reads (see :func:`river_tracer_floor`).
+
+        The full river tracer check (:func:`check_river_tracer_counts`, run by
+        the executor's ``configure_build``) needs the CDR tracer counts, which
+        the CDR forcing step derives after this one; this lower bound does not,
+        so a short file fails before the remaining inputs are generated.
+        """
+        param = self._settings_run_time.get("param") or {}
+        floor = river_tracer_floor(param)
+        if ntracers < floor:
+            raise ValueError(
+                f"river forcing {path} has {ntracers} tracers, fewer than the "
+                f"{floor} every ucla-roms release reads (T + S + ntrc_bio "
+                f"{int(param.get('ntrc_bio') or 0)} + nt_passive "
+                f"{int(param.get('nt_passive') or 0)}; from ucla-roms 0.9.0 the CDR "
+                "tracers may be left out). A river file built without include_bgc "
+                "holds only T and S."
+            )
+
     def _generate_river_forcing_from_custom_file(
         self,
         subkey: str,
         output_path: Path,
         custom_file: UserProvidedFile | dict[str, Any],
-        include_bgc: bool,
     ) -> None:
         """Verify, sanity-check, and stage a user-supplied river-forcing netCDF in
         place of building one via ``rt.RiverForcing``.
@@ -2263,9 +2372,11 @@ class RomsMarblInputData(InputData):
                     )
                 nriv = int(ds.sizes["nriver"])
 
-                # Sanity checks (warnings, not errors) -- best-effort peeks at the
-                # user's own file that must never turn into a crash or spurious
-                # noise; mirrors _interp_frc_surface_reuse's defensive try/except.
+                # Grid sanity check (a warning, not an error) -- a best-effort peek
+                # at the user's own file that must never turn into a crash or
+                # spurious noise; mirrors _interp_frc_surface_reuse's defensive
+                # try/except. The tracer count below is a hard check instead:
+                # ucla-roms aborts on a file it cannot read.
                 try:
                     grid_sizes = self.grid.ds.sizes
                     for dim in ("eta_rho", "xi_rho"):
@@ -2289,37 +2400,8 @@ class RomsMarblInputData(InputData):
                         e,
                     )
 
-                try:
-                    if "ntracers" in ds.sizes:
-                        ntracers = int(ds.sizes["ntracers"])
-                        # roms-tools' RiverForcing writes exactly 2 tracers (temp,
-                        # salt) when include_bgc=False, and more (MARBL_TRACER_NAMES)
-                        # when True -- see get_tracer_metadata_dict in
-                        # roms_tools.setup.utils. Flag a file/item mismatch.
-                        if include_bgc and ntracers <= 2:
-                            warnings.warn(
-                                f"river forcing custom_file {resolved} has only "
-                                f"{ntracers} tracer(s) (temp/salt) but "
-                                "include_bgc=True was requested for this item -- "
-                                "no BGC river tracers appear to be present.",
-                                UserWarning,
-                                stacklevel=2,
-                            )
-                        elif not include_bgc and ntracers > 2:
-                            warnings.warn(
-                                f"river forcing custom_file {resolved} carries "
-                                f"{ntracers} tracers (more than temp/salt) but "
-                                "include_bgc was not requested for this item -- "
-                                "any BGC river tracers in the file will go unused.",
-                                UserWarning,
-                                stacklevel=2,
-                            )
-                except Exception as e:
-                    log.debug(
-                        "river custom_file %s: could not check tracer count (%s)",
-                        resolved,
-                        e,
-                    )
+                if "ntracers" in ds.sizes:
+                    self._check_river_tracer_floor(int(ds.sizes["ntracers"]), resolved)
 
         if self._should_reuse_existing_output(output_path):
             # Reuse means ROMS reads what already sits at output_path, not the
@@ -2333,6 +2415,10 @@ class RomsMarblInputData(InputData):
                 )
                 with xr.open_dataset(output_path, decode_timedelta=False) as reused:
                     nriv_reused = int(reused.sizes["nriver"])
+                    if "ntracers" in reused.sizes:
+                        self._check_river_tracer_floor(
+                            int(reused.sizes["ntracers"]), output_path
+                        )
             if nriv_reused != nriv:
                 warnings.warn(
                     f"reusing existing river forcing at {output_path} "
@@ -2381,7 +2467,6 @@ class RomsMarblInputData(InputData):
                 subkey,
                 output_path,
                 custom_file,
-                include_bgc=bool(kwargs.get("include_bgc", False)),
             )
             return
 
@@ -2406,6 +2491,10 @@ class RomsMarblInputData(InputData):
                     if "river_tracer" not in ds.variables:
                         raise ValueError("river_tracer is not in the dataset")
                     nriv = int(ds.sizes["nriver"])
+                    if "ntracers" in ds.sizes:
+                        self._check_river_tracer_floor(
+                            int(ds.sizes["ntracers"]), paths[0]
+                        )
             if "river_frc" not in self._settings_run_time:
                 self._settings_run_time["river_frc"] = {}
             self._settings_run_time["river_frc"]["river_source"] = True
@@ -2458,6 +2547,10 @@ class RomsMarblInputData(InputData):
             if self.roms_marbl_blueprint_elements.forcing is not None:
                 self.roms_marbl_blueprint_elements.forcing.river = None
             return river
+        if "ntracers" in river.ds.sizes:
+            self._check_river_tracer_floor(
+                int(river.ds.sizes["ntracers"]), "generated by roms-tools"
+            )
 
         try:
             river.to_yaml(yaml_path)
@@ -2517,6 +2610,72 @@ class RomsMarblInputData(InputData):
         self._settings_run_time["forcing"]["river_path"] = (
             paths[0] if isinstance(paths, (list, tuple)) else paths
         )
+
+    def _apply_cdr_tracer_axis(self, axis: _CdrAxis, *, label: str) -> None:
+        """Size the build's CDR tracers from a CDR forcing's tracer axis.
+
+        ROMS reads ``cdr_trcflx(time, ntracers, ncdr)`` positionally, so the
+        namelist must describe the file: ``param.nt_cdr_oae``/``nt_cdr_dor`` are
+        read off the axis here (the one place they become knowable) and written
+        to the live settings; ``param.nt_passive`` is user-owned and only checked
+        against the file. Under ``bgc_mode: cdr_lite`` (no MARBL) the axis must
+        also hold nothing but physics, passive and CDR-lite tracers and come from
+        tracer-perturbation releases. In the other modes a file without a
+        ``tracer_name`` coordinate is left alone (counts stay as set).
+
+        Raises ``ValueError`` listing every problem; nothing is written then.
+        """
+        bgc_mode = bgc_mode_from_cppdefs(
+            self._settings_compile_time.get("cppdefs") or {}
+        )
+        if axis.names is None:
+            if bgc_mode == "cdr_lite":
+                raise ValueError(
+                    f"{label} has no tracer_name coordinate on its ntracers axis, so "
+                    "the CDR-lite tracer counts cannot be derived from it; "
+                    "regenerate the CDR forcing with roms-tools >= 5.1."
+                )
+            log.debug(
+                "%s has no tracer_name coordinate; param.nt_cdr_oae/nt_cdr_dor "
+                "are left as set.",
+                label,
+            )
+            return
+        counts = cdr_tracer_counts(axis.names)
+        param = self._settings_run_time.setdefault("param", {})
+        derived = {"nt_cdr_oae": counts.n_oae_pairs, "nt_cdr_dor": counts.n_dor}
+        problems: list[str] = []
+        nt_passive = int(param.get("nt_passive") or 0)
+        if counts.n_passive != nt_passive:
+            problems.append(
+                f"{label} has {counts.n_passive} passive tracer(s) but "
+                f"param.nt_passive is {nt_passive}; set param.nt_passive to "
+                f"{counts.n_passive}."
+            )
+        if bgc_mode == "cdr_lite":
+            if counts.other:
+                problems.append(
+                    f"{label} carries MARBL tracers ({', '.join(counts.other)}) but "
+                    'bgc_mode "cdr_lite" has no MARBL; build it from tracer_set='
+                    "cdr_lite releases without include_marbl_bgc."
+                )
+            if not axis.has_trcflx:
+                problems.append(
+                    f"{label} has no cdr_trcflx variable: CDR-lite tracers are fed "
+                    "by tracer-perturbation releases, not volume releases."
+                )
+        n_axis = len(axis.names)
+        n_build = n_tracers_from_param({**param, **derived})
+        if n_axis != n_build:
+            problems.append(
+                f"{label} tracer axis ({n_axis}) does not match the build's "
+                f"tracer count ({n_build}: 2 + ntrc_bio {param.get('ntrc_bio', 0)} + "
+                f"nt_passive {nt_passive} + 2*nt_cdr_oae {derived['nt_cdr_oae']} + "
+                f"nt_cdr_dor {derived['nt_cdr_dor']})."
+            )
+        if problems:
+            raise ValueError("\n".join(problems))
+        param.update(derived)
 
     def _generate_cdr_forcing_from_custom_file(
         self,
@@ -2582,13 +2741,15 @@ class RomsMarblInputData(InputData):
                     )
                 ncdr_parm = int(ds.sizes["ncdr"])
                 cdr_volume = has_volume
+                axis = _cdr_axis(ds)
 
-        if self._should_reuse_existing_output(output_path):
+        reuse = self._should_reuse_existing_output(output_path)
+        if reuse:
             # Reuse means ROMS reads what already sits at output_path, not the
-            # custom file -- derive ncdr_parm/cdr_volume from the reused file
-            # (mirroring the river branch's reuse semantics) so the namelist
-            # can't desync from the data actually read (e.g. a swapped custom
-            # file without clobber).
+            # custom file -- derive ncdr_parm/cdr_volume (and the tracer axis) from
+            # the reused file (mirroring the river branch's reuse semantics) so the
+            # namelist can't desync from the data actually read (e.g. a swapped
+            # custom file without clobber).
             print(f"   ↪ Reusing existing file: {output_path}")
             with warnings.catch_warnings():
                 warnings.filterwarnings(
@@ -2597,6 +2758,7 @@ class RomsMarblInputData(InputData):
                 with xr.open_dataset(output_path, decode_timedelta=False) as reused:
                     ncdr_reused = int(reused.sizes["ncdr"])
                     cdr_volume_reused = "cdr_volume" in reused.variables
+                    axis = _cdr_axis(reused)
             if ncdr_reused != ncdr_parm or cdr_volume_reused != cdr_volume:
                 warnings.warn(
                     f"reusing existing CDR forcing at {output_path} "
@@ -2609,7 +2771,9 @@ class RomsMarblInputData(InputData):
                 )
             ncdr_parm = ncdr_reused
             cdr_volume = cdr_volume_reused
-        else:
+        # Before staging, so a file the build cannot use fails without a copy.
+        self._apply_cdr_tracer_axis(axis, label=f"CDR forcing {resolved}")
+        if not reuse:
             stage_user_netcdf(
                 resolved, output_path, use_pio=self.use_pio, label="CDR forcing"
             )
@@ -2657,9 +2821,42 @@ class RomsMarblInputData(InputData):
         with mem_log("CDRForcing()", enabled=self.verbose):
             cdr = rt.CDRForcing(**input_args)
 
+        axis = _cdr_axis(cdr.ds)
+        label = "The generated CDR forcing"
+        ncdr_parm = len(cdr.releases)
+        cdr_volume = cdr.releases.release_type == "volume"
+        reuse = self._should_reuse_existing_output(output_path)
+        if reuse:
+            # Reuse means ROMS reads what already sits at output_path, not the
+            # forcing just built -- describe the reused file (its tracer axis,
+            # release count and release family, mirroring the custom-file
+            # branch) so the namelist can't desync from the data actually read
+            # (e.g. changed releases without clobber).
+            with warnings.catch_warnings():
+                warnings.filterwarnings(
+                    "ignore", category=FutureWarning, module="xarray"
+                )
+                with xr.open_dataset(output_path, decode_timedelta=False) as reused:
+                    reused_axis = _cdr_axis(reused)
+                    ncdr_parm = int(reused.sizes["ncdr"])
+                    cdr_volume = "cdr_volume" in reused.variables
+            if reused_axis != axis:
+                warnings.warn(
+                    f"reusing existing CDR forcing at {output_path} (tracers: "
+                    f"{reused_axis.names}), which differs from the one built from "
+                    f"the blueprint's releases (tracers: {axis.names}); the "
+                    "namelist will describe the reused file -- pass clobber to "
+                    "rebuild it.",
+                    UserWarning,
+                    stacklevel=2,
+                )
+            axis = reused_axis
+            label = f"The reused CDR forcing {output_path}"
+        # Before anything is written: a tracer axis the build cannot use fails fast.
+        self._apply_cdr_tracer_axis(axis, label=label)
         cdr.to_yaml(yaml_path)
 
-        if self._should_reuse_existing_output(output_path):
+        if reuse:
             print(f"   ↪ Reusing existing file: {output_path}")
             paths = [str(output_path)]
         else:
@@ -2696,12 +2893,63 @@ class RomsMarblInputData(InputData):
             self._settings_run_time["cdr_frc"] = {}
         self._settings_run_time["cdr_frc"]["cdr_file"] = "cdr.nc"
         self._settings_run_time["cdr_frc"]["cdr_source"] = True
-        self._settings_run_time["cdr_frc"]["ncdr_parm"] = len(cdr.releases)
+        self._settings_run_time["cdr_frc"]["ncdr_parm"] = ncdr_parm
         self._settings_run_time["cdr_frc"]["forcing_parameterized"] = True
-        self._settings_run_time["cdr_frc"]["cdr_volume"] = (
-            cdr.releases.release_type == "volume"
-        )
+        self._settings_run_time["cdr_frc"]["cdr_volume"] = cdr_volume
         # cdr_output.do_cdr_output is owned by configure_build's CDR net (see above).
+
+    @register_input(
+        name="forcing.carbonate_sensitivity",
+        order=85,
+        label="Staging carbonate sensitivity forcing",
+    )
+    def _stage_carbonate_sensitivity(
+        self,
+        key: str = "forcing.carbonate_sensitivity",
+        files: Iterable[UserProvidedFile] = (),
+        **kwargs,
+    ):
+        """Verify, check and stage the user-supplied carbonate sensitivity files.
+
+        Each file must carry every variable in ``CARBONATE_SENSITIVITY_VARIABLES``
+        (all problems across all files are reported together, before anything is
+        copied). A file that is already staged (and ``clobber`` is off) is reused:
+        the copy ROMS will read is the one checked. Each is staged as a copy under
+        its basename (converted to CDF-5 under ParallelIO) and listed, unpartitioned,
+        in ``forcing.carbonate_sensitivity`` of the emitted blueprint.
+        """
+        files = list(files)
+        sources = [verify_user_file(f, label="carbonate sensitivity") for f in files]
+        destinations = carbonate_sensitivity_destinations(self.input_data_dir, files)
+        reuse = [self._should_reuse_existing_output(dest) for dest in destinations]
+
+        problems: list[str] = []
+        for source, dest, reused in zip(sources, destinations, reuse, strict=True):
+            path = dest if reused else source
+            if missing := missing_carbonate_sensitivity_variables(path):
+                problems.append(f"{path}: missing {', '.join(missing)}")
+        if problems:
+            raise ValueError(
+                "carbonate sensitivity files lack variables a CDR-LiTE build reads "
+                f"({', '.join(CARBONATE_SENSITIVITY_VARIABLES)}):\n- "
+                + "\n- ".join(problems)
+                + f"\n{CARBONATE_SENSITIVITY_REMEDY}"
+            )
+
+        dataset = _require_element(
+            _require_element(
+                self.roms_marbl_blueprint_elements.forcing, "forcing"
+            ).carbonate_sensitivity,
+            "forcing.carbonate_sensitivity",
+        )
+        for source, dest, reused in zip(sources, destinations, reuse, strict=True):
+            if reused:
+                print(f"   ↪ Reusing existing file: {dest}")
+            else:
+                stage_user_netcdf(
+                    source, dest, use_pio=self.use_pio, label="carbonate sensitivity"
+                )
+            dataset.data.append(Resource(location=str(dest), partitioned=False))
 
     @register_input(
         name="forcing.corrections", order=90, label="Generating corrections forcing"

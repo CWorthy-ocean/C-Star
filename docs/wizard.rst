@@ -70,8 +70,23 @@ Start from an existing blueprint
 Model
    The model preset (a **ModelSpec** from the catalog), which pins the ROMS,
    MARBL and PIO code versions and the model-level default settings; the
-   biogeochemistry mode (MARBL or physics only); and whether to build with
-   ParallelIO.
+   biogeochemistry mode (MARBL, physics only, or CDR-lite without MARBL);
+   and whether to build with ParallelIO.
+
+   The ``cdr_lite`` mode (ucla-roms 0.10.0 or later) builds ucla-roms' CDR-lite
+   tracers without MARBL, so the blueprint carries no biogeochemical forcing.
+   It needs a CDR forcing: the CDR panel in Run setup shows a reminder, and a
+   simple-mode forcing then builds one ALK (OAE) release, while a YAML or
+   netCDF forcing must use ``tracer_set: cdr_lite``. The mode also reads the
+   carbonate sensitivities (``ddic_dco2`` and ``ddic_dalk``) from files, so a
+   **Carbonate sensitivities** group appears below the mode. By default it is
+   left to the ``carbonate-sensitivity-from`` workplan directive, which
+   supplies the ``_cdrgas`` output of an earlier ROMS-MARBL step when the
+   workplan runs. Choose *Directory of ROMS _cdrgas files* instead to attach
+   the files now: the wizard lists the joined files in the directory (the
+   per-rank tiles are skipped), checks they are netCDF, hashes them and records
+   them on the blueprint. With ParallelIO on, Forge converts any file that is
+   not classic netCDF to CDF-5 when it stages the copies.
 
 Domain and grid
    Where the model runs and how finely it is resolved. Pick a **DomainSpec**
@@ -101,7 +116,8 @@ Boundaries and forcing
 Run setup
    The run window (start, end and model reference date), the processor
    layout and PIO or automatic-tiling options, and optional carbon dioxide
-   removal forcing, imported from a netCDF file or described by hand.
+   removal forcing, imported from a netCDF file or described by hand (required
+   in ``cdr_lite`` mode).
 
 .. figure:: images/wizard-run.png
    :alt: The Run setup section: run window, partitioning and carbon dioxide removal
@@ -149,9 +165,9 @@ the page (errors are listed and nothing changes; **Discard edits** restores the
 draft's text). The DAG draws the steps left to right by dependency, with steps
 of other runs as dashed grey source nodes and each node coloured by
 application. Edges that come from a restart (``continue-from``), boundary
-(``nest-from``) or deferred blueprint reference are labelled as such. The graph
-follows your edits even while the draft is invalid. On a narrow screen the
-columns stack.
+(``nest-from``), carbonate sensitivity (``carbonate-sensitivity-from``) or
+deferred blueprint reference are labelled as such. The graph follows your edits
+even while the draft is invalid. On a narrow screen the columns stack.
 
 The **Preview** control at the top of that pane moves it: **Right** (the
 default) is the two columns, **Bottom** puts the pane below the cards and
@@ -233,8 +249,11 @@ Steps
      input or output directory. A YAML box merges any other override last;
    * **directives** for roms_marbl: where the step continues from (a step, a
      step of another run, or a path, with an optional restart timestamp
-     chosen from the restarts found there when they can be read), and the
-     ordered boundary sources for a nested child;
+     chosen from the restarts found there when they can be read), the
+     ordered boundary sources for a nested child, and the ordered carbonate
+     sensitivity sources for a CDR-LiTE run (steps or paths, as for the
+     boundaries; a source step must be a ROMS-MARBL run with the gas-exchange
+     output on);
    * **compute overrides**: CPUs (prefilled from the blueprint, and required
      for a deferred blueprint, which the launcher cannot read), walltime,
      queue, account and CPUs per node. Blank values inherit the compute

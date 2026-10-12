@@ -40,6 +40,7 @@ This example YAML demonstrates a configured ``RomsMarblBlueprint``. Notice that:
 - C-Star handles both partitioned and unpartitioned data
 - Runtime and compile-time behaviors can be customized in the ``.opt`` and ``.in`` files
 - ``use_pio`` (whether to use the ParallelIO library for model input/output) is set under ``partitioning:``
+- ``forcing.carbonate_sensitivity`` (optional) lists the carbonate sensitivity files (``ddic_dco2``, ``ddic_dalk`` and their time variables) that a CDR-LiTE build (ucla-roms >= 0.9.0) reads when it does not compute them online, typically the ``_cdrgas`` output of an earlier ROMS-MARBL run
 - ``namelist_overrides`` maps a ROMS namelist group to key/value overrides. These are applied last, over C-Star's own derived runtime namelist settings, so user-supplied values win. For example, the model time step is set via ``namelist_overrides.time_stepping.dt`` (or directly in the namelist file itself).
 
 .. code-block:: yaml
@@ -47,7 +48,7 @@ This example YAML demonstrates a configured ``RomsMarblBlueprint``. Notice that:
     name: 2node_1wk_example
     description: this is mainly to test infra like containers and workplans. it should run on 256 processors (2 nodes)
     application: roms_marbl
-    schema_version: 3.1.0
+    schema_version: 3.2.0
     working_dir: /anvil/scratch/x-seilerman/2node_1wk_job1/
     state: draft
     valid_start_date: 2000-01-15 0:00:00

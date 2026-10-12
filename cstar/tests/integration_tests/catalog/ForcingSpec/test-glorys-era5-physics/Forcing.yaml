@@ -1,0 +1,24 @@
+description: "Test: GLORYS + ERA5 from pinned local files, physics only (bgc_mode cdr_lite)"
+# No BGC anywhere: bgc_mode cdr_lite and none reject any bgc source or surface item.
+
+initial_conditions:
+  source:
+    name: GLORYS
+    glorys_layout: regional
+    path: "${TEST_DATA}/GLORYS_NA_2012.nc"
+
+forcing:
+  surface:
+    - source:
+        name: ERA5
+        path: "${TEST_DATA}/ERA5_NA_2012.nc"
+      type: physics
+      correct_radiation: true
+      coarse_grid_mode: "never"
+  boundary:
+    source:
+      name: GLORYS
+      glorys_layout: regional
+      path: "${TEST_DATA}/GLORYS_NA_2012.nc"
+  tidal: []
+  river: []

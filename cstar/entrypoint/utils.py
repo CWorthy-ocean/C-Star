@@ -90,3 +90,15 @@ ARG_SCHEMA_ONLY_HELP: t.Final[str] = (
     "Only validate the workplan file's structure; skip resolving applications, "
     "blueprints, overrides and directives."
 )
+
+ARG_INSTALL: t.Final[str] = "--install"
+ARG_INSTALL_HELP: t.Final[str] = (
+    "Write the shell function to the C-Star config directory and source it from "
+    "the shell's rc file, then report what changed. Safe to re-run: it refreshes "
+    "the function after an upgrade."
+)
+ARG_UNINSTALL: t.Final[str] = "--uninstall"
+ARG_UNINSTALL_HELP: t.Final[str] = (
+    "Remove the rc file block and the function file written by "
+    f"{ARG_INSTALL}. Cannot be combined with {ARG_INSTALL}."
+)

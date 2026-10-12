@@ -17,6 +17,7 @@ from cstar.applications.roms_marbl.migration import (
 from cstar.applications.roms_marbl.models import APP_NAME, RomsMarblBlueprint
 from cstar.applications.roms_marbl.resume import prepare_resume_blueprint
 from cstar.applications.roms_marbl.transforms import (
+    CarbonateSensitivityDirective,
     ContinuanceDirective,
     NestingDirective,
     RomsMarblTimeSplitter,
@@ -175,7 +176,11 @@ class RomsMarblApplication(ApplicationDefinition[RomsMarblBlueprint, RomsMarblRu
     runner = RomsMarblRunner
     blueprint = RomsMarblBlueprint
     applicable_transforms = (RomsMarblTimeSplitter,)
-    directives = (ContinuanceDirective, NestingDirective)
+    directives = (
+        ContinuanceDirective,
+        NestingDirective,
+        CarbonateSensitivityDirective,
+    )
     resumable = True
     pre_runnable = True
     migrations = (
