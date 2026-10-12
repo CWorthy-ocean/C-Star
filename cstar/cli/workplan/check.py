@@ -28,8 +28,11 @@ if t.TYPE_CHECKING:
 app = typer.Typer()
 
 
-def _is_name_error(error: ValueError | None) -> bool:
-    """Determine whether a validation error is located at the workplan's `name`.
+def _is_live_form(error: ValueError | None) -> bool:
+    """Determine whether a validation error shows a workplan persisted in its live form.
+
+    Only the transformed workplan a run persists carries a `working_dir` on its
+    steps, which a `Step` forbids.
 
     Parameters
     ----------
@@ -41,7 +44,8 @@ def _is_name_error(error: ValueError | None) -> bool:
     bool
     """
     return isinstance(error, ValidationError) and any(
-        detail["loc"][:1] == ("name",) for detail in error.errors()
+        detail["type"] == "extra_forbidden" and "working_dir" in detail["loc"]
+        for detail in error.errors()
     )
 
 
@@ -168,9 +172,10 @@ def check(
 
     error = schema_result.error_msg
 
-    # a `LiveWorkplan` accepts any name, so a problem with the name is reported
-    # as it is, as `run` does, rather than masked by trying the live form
-    if not _is_name_error(schema_result.error):
+    # a `LiveWorkplan` accepts any name and derives each step's `working_dir`, so
+    # it is tried only for a file that carries them: an authored workplan keeps
+    # its own error, as it does for `run`
+    if _is_live_form(schema_result.error):
         live_result = validate_serialized_entity(path, LiveWorkplan)
         if live_result.item is not None:
             print(f"The workplan `{live_result.item.name}` is valid")
