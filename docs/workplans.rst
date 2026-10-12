@@ -769,7 +769,7 @@ The command reports, kind by kind, with one line per finding:
 - symlinks with an absolute target inside the run, and symlinks whose target does not exist.
 - steps of the transformed workplan with no ``tasks/<slug>`` directory. A step that has not started has none yet.
 
-Symlinks with a target outside the run (absolute, or relative and climbing out of it), task directories that no step accounts for, and sentinel files of the run that no step accounts for (found by run ID, so not for a bare path) are listed for information and do not fail the check. Nothing is ever deleted.
+Symlinks with a target outside the run (absolute, or relative and climbing out of it), step directories that no step accounts for, and sentinel files of the run that no step accounts for (found by run ID, so not for a bare path) are listed for information and do not fail the check. Nothing is ever deleted.
 
 The exit code is 0 when there is nothing to fix, 1 when findings remain and 2 for bad arguments. A workplan file is refused: validate it with ``cstar workplan check <file>``.
 

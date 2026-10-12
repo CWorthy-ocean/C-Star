@@ -34,6 +34,7 @@ from cstar.orchestration.formatting import (
 from cstar.orchestration.models import BlueprintCore
 from cstar.orchestration.serialization import (
     PersistenceMode,
+    anchor_blueprint_file,
     anchor_locations,
     serialize,
     validate_serialized_entity,
@@ -649,6 +650,10 @@ def localize_and_migrate(path: str) -> tuple[Path, bool]:
     path : str
         The path to the blueprint.
 
+    A blueprint downloaded from a URL has no directory of its own, so the
+    relative locations in its local copy are anchored to the working directory,
+    where they have always been read from, before any later step re-reads the copy.
+
     Returns
     -------
     tuple[Path, bool]
@@ -671,6 +676,9 @@ def localize_and_migrate(path: str) -> tuple[Path, bool]:
         If executing a planned migration fails.
     """
     with local_copy(path) as local_path:
+        if is_remote_resource(path):
+            anchor_blueprint_file(local_path, Path.cwd())
+
         request = MigrationRequest(path=local_path)
         is_migrated = False
 

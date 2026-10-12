@@ -1,6 +1,7 @@
 import asyncio
 import enum
 import errno
+import json
 import os
 import re
 import typing as t
@@ -568,6 +569,43 @@ def read_blueprint_raw(path: Path | str, *, strict: bool = True) -> dict[str, t.
         raise FileNotFoundError(errno.ENOENT, msg, path)
 
     return anchor_locations(read_document(path), path.parent, strict=strict)
+
+
+def anchor_blueprint_file(path: Path, base_dir: Path) -> None:
+    """Rewrite a blueprint file with its relative locations anchored to a directory.
+
+    For a blueprint downloaded to a temporary copy, which has no directory of its
+    own for its relative locations to be relative to: anchoring them to the
+    directory they were always read against, the working directory, makes them
+    absolute before file-based steps that re-read the copy anchor them again.
+    Unlike `anchor_locations` as `load_blueprint` calls it, a location that does
+    not exist is anchored too, since leaving it relative would let a later step
+    anchor it somewhere else. The document is rewritten as YAML or JSON, as the
+    file is; comments are not kept.
+
+    Parameters
+    ----------
+    path : Path
+        The local file holding the blueprint.
+    base_dir : Path
+        The directory relative locations are relative to.
+    """
+    mode = _mode_detect(path)
+    raw = (
+        read_json_to_raw(path)
+        if mode == PersistenceMode.json
+        else read_yaml_to_raw(path)
+    )
+    if not raw:
+        return
+
+    anchored = anchor_locations(raw, base_dir, strict=False)
+    text = (
+        json.dumps(anchored, indent=2)
+        if mode == PersistenceMode.json
+        else yaml.safe_dump(anchored, sort_keys=False, default_flow_style=False)
+    )
+    path.write_text(text, encoding="utf-8")
 
 
 def load_blueprint(path: Path | str, klass: type[_T], *, anchor: bool = True) -> _T:

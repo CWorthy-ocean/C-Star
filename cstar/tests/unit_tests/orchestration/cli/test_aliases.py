@@ -26,6 +26,7 @@ from cstar.cli.workplan.ls import app as app_ls
 from cstar.cli.workplan.path import app as app_path
 from cstar.cli.workplan.run import app as app_workplan_run
 from cstar.cli.workplan.status import app as app_status
+from cstar.orchestration.orchestration import LiveWorkplan
 from cstar.orchestration.tracking import WorkplanRun
 from cstar.tests.unit_tests.orchestration.cli.conftest import FakeEntryPoint
 
@@ -217,7 +218,7 @@ def invoke(build_app, tmp_path: Path) -> Generator[Callable[[list[str]], Result]
         patch("cstar.cli.workplan.ls.asyncio.run", side_effect=close_unawaited),
         patch("cstar.cli.workplan.shared.TrackingRepository"),
         patch("cstar.cli.workplan.shared.asyncio", shared_asyncio),
-        patch("cstar.cli.workplan.status.deserialize", side_effect=FileNotFoundError),
+        patch.object(LiveWorkplan, "load", side_effect=FileNotFoundError),
     ):
         yield lambda argv: CliRunner().invoke(build_app(), argv)
 

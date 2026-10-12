@@ -1,5 +1,6 @@
 import asyncio
 import errno
+import json
 import shutil
 import textwrap
 import threading
@@ -11,6 +12,7 @@ from pathlib import Path
 from unittest import mock
 
 import pytest
+import yaml
 from pydantic import BaseModel, Field, ValidationError
 
 from cstar.applications.plotter import PlotterBlueprint
@@ -21,6 +23,7 @@ from cstar.orchestration.orchestration import LiveStep, LiveWorkplan
 from cstar.orchestration.serialization import (
     PersistenceMode,
     _mode_detect,
+    anchor_blueprint_file,
     anchor_relative_path,
     deserialize,
     deserialize_all,
@@ -1150,6 +1153,46 @@ def test_load_blueprint_reports_every_stranded_location(
     message = str(exc_info.value)
     assert "'a.nc'" in message
     assert "'b.nc'" in message
+
+
+@pytest.mark.parametrize("suffix", [".yaml", ".json"])
+def test_anchor_blueprint_file_rewrites_the_file_in_place(
+    tmp_path: Path, suffix: str
+) -> None:
+    """Verify every relative location, found or not, becomes absolute in the file,
+    and nothing else about the document changes.
+    """
+    base_dir = tmp_path / "cwd"
+    base_dir.mkdir()
+    (base_dir / "here.nc").touch()
+    document = {
+        "name": "downloaded",
+        "grid": {
+            "data": [
+                {"location": "here.nc"},
+                {"location": "missing.nc"},
+                {"location": "https://example.com/grid.nc"},
+            ]
+        },
+    }
+    path = tmp_path / f"bp{suffix}"
+    path.write_text(
+        json.dumps(document) if suffix == ".json" else yaml.safe_dump(document)
+    )
+
+    anchor_blueprint_file(path, base_dir)
+
+    written = (
+        json.loads(path.read_text())
+        if suffix == ".json"
+        else yaml.safe_load(path.read_text())
+    )
+    assert [r["location"] for r in written["grid"]["data"]] == [
+        (base_dir / "here.nc").as_posix(),
+        (base_dir / "missing.nc").as_posix(),
+        "https://example.com/grid.nc",
+    ]
+    assert written["name"] == "downloaded"
 
 
 def test_read_blueprint_raw_not_strict_anchors_cwd_only_locations(

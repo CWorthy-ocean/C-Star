@@ -31,6 +31,7 @@ from cstar.cli.common import (
     set_ctxmap,
 )
 from cstar.execution.file_system import DirectoryManager
+from cstar.orchestration.serialization import read_blueprint_raw
 from cstar.system.migration import (
     BlueprintMigration,
     CstarManualMigrationError,
@@ -325,3 +326,34 @@ def test_persist_migration_rejects_cwd_only_locations(
 
     with pytest.raises(typer.BadParameter, match="directory of the blueprint file"):
         _persist_with_target(relative_location_bp, tmp_path / "state" / "migrated.yaml")
+
+
+def test_localize_and_migrate_anchors_a_remote_blueprint_to_the_working_directory(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, bp_templates_dir: Path
+) -> None:
+    """Verify the local copy of a downloaded blueprint holds its relative locations
+    as absolute paths against the working directory, so file-based steps that read
+    the copy later do not anchor them to its temporary directory.
+    """
+    text = (
+        (bp_templates_dir / "blueprint.yaml")
+        .read_text()
+        .replace("http://mockdoc.com/partitioning1.nc", "../data/boundary.nc")
+    )
+    cwd = tmp_path / "cwd"
+    cwd.mkdir()
+    monkeypatch.chdir(cwd)
+    response = mock.Mock(status_code=200, text=text)
+
+    with mock.patch("cstar.execution.file_system.request", return_value=response):
+        localized, migrated = localize_and_migrate("https://example.com/bp.yaml")
+
+    assert not migrated
+    expected = (tmp_path / "data" / "boundary.nc").resolve().as_posix()
+    written = yaml.safe_load(localized.read_text())
+    assert written["forcing"]["boundary"]["data"][0]["location"] == expected
+    # a later read of the copy, which anchors to its own directory, agrees
+    assert (
+        read_blueprint_raw(localized)["forcing"]["boundary"]["data"][0]["location"]
+        == expected
+    )

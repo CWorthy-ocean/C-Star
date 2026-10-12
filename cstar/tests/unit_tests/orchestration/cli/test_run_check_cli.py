@@ -35,7 +35,7 @@ HEADINGS: t.Final[tuple[str, ...]] = (
     "Symlinks whose target does not exist (",
     "Steps without a directory (",
     "Symlinks with a target outside the run (informational) (",
-    "Task directories no step accounts for (informational) (",
+    "Step directories no step accounts for (informational) (",
     "Sentinel files no step accounts for (informational) (",
 )
 """The sections of a report, in the order they are listed."""

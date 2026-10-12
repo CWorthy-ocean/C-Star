@@ -49,7 +49,7 @@ its transformed workplan for steps without a directory. Files that launchers
 regenerate are skipped unless {ARG_ALL} is given. Steps that have not started
 have no directory yet.
 
-Task directories and sentinel files that no step accounts for, and symlinks to
+Step directories and sentinel files that no step accounts for, and symlinks to
 a place outside the run, are listed for information and do not fail the check.
 Nothing is deleted.
 
