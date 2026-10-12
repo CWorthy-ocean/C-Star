@@ -27,8 +27,8 @@ a per-step `joined_output` directory and left ROMS's partitioned pieces in
 given path (a run root or a single step directory; subtask directories
 nested under `tasks/<slug>/` are included) and, for each one:
 
-- if it holds only symlinks, it is an old run-level `cstar workplan gather`
-  result and is removed outright -- re-run `cstar workplan gather <run-id>`
+- if it holds only symlinks, it is an old run-level `cstar run gather`
+  result and is removed outright -- re-run `cstar run gather <run-id>`
   to rebuild it under its new name (`gathered_output`);
 - otherwise, every file in it is moved into the sibling `output` directory
   (a filename that already exists there is left in place and reported, never
@@ -60,7 +60,7 @@ class MigrationReport:
     that would be removed).
     """
     gather_dirs_removed: list[Path] = field(default_factory=list[Path])
-    """Old run-level `cstar workplan gather` result directories (holding only
+    """Old run-level `cstar run gather` result directories (holding only
     symlinks) removed (or, in `dry_run` mode, that would be removed).
     """
 
@@ -124,7 +124,7 @@ def _migrate_one(jo_dir: Path, *, dry_run: bool, report: MigrationReport) -> Non
     entries = sorted(jo_dir.iterdir())
 
     if entries and all(e.is_symlink() for e in entries):
-        # An old run-level `cstar workplan gather` result: nothing here is a
+        # An old run-level `cstar run gather` result: nothing here is a
         # real file worth preserving, it must simply be rebuilt.
         report.gather_dirs_removed.append(jo_dir)
         if not dry_run:
@@ -254,7 +254,7 @@ def migrate_outputs(
     for p in report.gather_dirs_removed:
         console.print(
             f"{prefix}removed old run-level gather directory {escape(str(p))}; "
-            "re-run `cstar workplan gather <run-id>` to rebuild it"
+            "re-run `cstar run gather <run-id>` to rebuild it"
         )
 
     console.print(

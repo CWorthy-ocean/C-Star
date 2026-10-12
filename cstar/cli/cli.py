@@ -12,6 +12,8 @@ from cstar.cli.common import common_callback
 from cstar.cli.environment import app as app_env
 from cstar.cli.forge import DEFAULT_WIZARD_PORT, launch_wizard
 from cstar.cli.forge import app as app_forge
+from cstar.cli.run import NAME as NAME_RUN
+from cstar.cli.run import app as app_run
 from cstar.cli.template import app as app_template
 from cstar.cli.workplan import ALIAS as ALIAS_WORKPLAN
 from cstar.cli.workplan import NAME as NAME_WORKPLAN
@@ -54,6 +56,7 @@ def attach_subcommands(app: typer.Typer) -> None:
         (app_forge, "forge", ()),
         (app_template, "template", ()),
         (app_workplan, NAME_WORKPLAN, (ALIAS_WORKPLAN,)),
+        (app_run, NAME_RUN, ()),
         (app_admin, "admin", ()),
     ]
 

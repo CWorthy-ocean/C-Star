@@ -68,7 +68,7 @@ from cstar.orchestration.models import (
     Provenance,
     Resource,
 )
-from cstar.orchestration.serialization import deserialize
+from cstar.orchestration.serialization import deserialize, read_blueprint_raw
 from cstar.roms.namelist import RomsNamelistV0_9_0
 
 requires_cstar_pio = pytest.mark.skipif(
@@ -2243,6 +2243,89 @@ class TestForgeExecutorPersist:
         settings_path = bp_path.parent / f"settings_{bp_path.name}"
         assert settings_path.exists()
 
+    @staticmethod
+    def _builder_with_locations(args):
+        """A builder whose in-memory blueprint names files inside and outside its
+        working directory, and a URL.
+        """
+        builder = _make_builder(args)
+        work = builder.host.working_dir
+        blueprint = builder.roms_marbl_blueprint
+        builder.roms_marbl_blueprint = blueprint.model_copy(
+            update={
+                "grid": cstar_models.Dataset.model_construct(
+                    data=[Resource(location=str(work / "input_data" / "grid.nc"))]
+                ),
+                "initial_conditions": cstar_models.Dataset.model_construct(
+                    data=[Resource(location="https://example.com/ic.nc")]
+                ),
+                "forcing": blueprint.forcing.model_copy(
+                    update={
+                        "boundary": cstar_models.Dataset.model_construct(
+                            data=[Resource(location="/elsewhere/bry.nc")]
+                        )
+                    }
+                ),
+                "code": blueprint.code.model_copy(
+                    update={
+                        "run_time": cstar_models.CodeRepository(
+                            location=str(builder.run_time_code_dir), branch="main"
+                        ),
+                        "compile_time": cstar_models.CodeRepository(
+                            location=str(builder.compile_time_code_dir), branch="main"
+                        ),
+                    }
+                ),
+            }
+        )
+        return builder
+
+    def test_persist_writes_locations_in_the_working_dir_relative_to_the_blueprint(
+        self, minimal_cstar_spec_builder_args
+    ):
+        """Locations under the working directory are written relative to the
+        blueprints directory; URLs and paths elsewhere are left as they are, and
+        the in-memory blueprint keeps its absolute paths.
+        """
+        builder = self._builder_with_locations(minimal_cstar_spec_builder_args)
+
+        builder.persist()
+
+        data = yaml.safe_load(builder.path_roms_marbl_blueprint().read_text())
+        assert data["grid"]["data"][0]["location"] == "../input_data/grid.nc"
+        assert data["code"]["run_time"]["location"] == "../builds/run-time"
+        assert data["code"]["compile_time"]["location"] == "../builds/compile-time"
+        assert data["initial_conditions"]["data"][0]["location"] == (
+            "https://example.com/ic.nc"
+        )
+        assert data["forcing"]["boundary"]["data"][0]["location"] == (
+            "/elsewhere/bry.nc"
+        )
+
+        in_memory = builder.roms_marbl_blueprint
+        assert in_memory.grid.data[0].location == str(
+            builder.host.working_dir / "input_data" / "grid.nc"
+        )
+
+    def test_persisted_relative_locations_load_back_absolute(
+        self, minimal_cstar_spec_builder_args
+    ):
+        """Whichever way the persisted blueprint is read back, its locations are
+        anchored against the blueprints directory.
+        """
+        builder = self._builder_with_locations(minimal_cstar_spec_builder_args)
+        builder.persist()
+        resolved_work = builder.host.working_dir.resolve()
+
+        loaded = builder.roms_marbl_blueprint_from_file
+
+        assert loaded is not None
+        grid = loaded.grid
+        data = grid["data"] if isinstance(grid, dict) else grid.data
+        first = data[0]
+        location = first["location"] if isinstance(first, dict) else first.location
+        assert str(location) == str(resolved_work / "input_data" / "grid.nc")
+
     def test_persist_raises_when_roms_marbl_blueprint_none(
         self, minimal_cstar_spec_builder_args
     ):
@@ -2679,6 +2762,29 @@ class TestPublishEmittedBlueprint:
         assert published.read_text() == "name: demo\n"
         # not the settings sidecar, so a deferred reference resolves to one file
         assert [p.name for p in published.parent.iterdir()] == ["B_demo.yaml"]
+
+    def test_published_copy_keeps_relative_locations_valid(self, tmp_path):
+        """The copy sits at the same depth as the original, so a location written
+        relative to the blueprints directory still names the same file from it.
+        """
+        working_dir = tmp_path / "wd"
+        executor = self._executor(working_dir)
+        data_file = working_dir / "input_data" / "grid.nc"
+        data_file.parent.mkdir()
+        data_file.touch()
+        original = executor.path_roms_marbl_blueprint()
+        original.write_text(
+            "name: demo\ngrid:\n  data:\n    - location: ../input_data/grid.nc\n"
+        )
+
+        published = forge_run.publish_emitted_blueprint(executor)
+
+        assert published.read_text() == original.read_text()
+        assert (published.parent / "../input_data/grid.nc").resolve() == (
+            data_file.resolve()
+        )
+        anchored = read_blueprint_raw(published)["grid"]["data"][0]["location"]
+        assert anchored == data_file.resolve().as_posix()
 
     def test_publishing_again_replaces_the_copy(self, tmp_path):
         executor = self._executor(tmp_path / "wd")
@@ -4156,11 +4262,11 @@ class TestGoldenNamelist:
         recorded = emitted.forcing["carbonate_sensitivity"]["data"]
         assert [Path(r["location"]) for r in recorded] == staged
         assert [r["partitioned"] for r in recorded] == [False, False]
+        # the persisted blueprint names the staged files relative to itself
         written = yaml.safe_load(builder.path_roms_marbl_blueprint().read_text())
         assert [
-            Path(r["location"])
-            for r in written["forcing"]["carbonate_sensitivity"]["data"]
-        ] == staged
+            r["location"] for r in written["forcing"]["carbonate_sensitivity"]["data"]
+        ] == [f"../input_data/{p.name}" for p in sources]
         assert builder._planned_netcdf_outputs()[-2:] == [p.resolve() for p in staged]
 
     def test_cdr_lite_without_carbonate_sensitivity_emits_none(

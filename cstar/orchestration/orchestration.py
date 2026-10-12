@@ -45,6 +45,7 @@ from cstar.orchestration.serialization import (
     PersistenceMode,
     deserialize,
     intenum_representer,
+    load_blueprint,
     read_all,
     read_document,
     read_raw,
@@ -284,7 +285,7 @@ class LiveStep(Step):
         path = Path(self.blueprint_path)
         app = get_app_for_blueprint(path)
 
-        return deserialize(path, app.blueprint)
+        return load_blueprint(path, app.blueprint)
 
     @property
     def script_path(self) -> Path:

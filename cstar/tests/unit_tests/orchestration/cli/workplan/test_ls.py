@@ -129,7 +129,7 @@ def test_itemview_size_shows_hint_for_unsized_table_rows() -> None:
     """Verify an uncomputed size renders the refresh hint in table format."""
     view = make_view(run_id="run-9", raw_size=-1, format="table")
 
-    assert "cstar workplan status run-9" in view.size
+    assert "cstar run status run-9" in view.size
     assert "--size" in view.size
 
 
@@ -509,7 +509,7 @@ def test_table_formatter_renders_one_row_per_view() -> None:
     assert "r1" in rendered
     assert "alpha" in rendered
     assert "7MB" in rendered
-    assert "cstar workplan status r2" in rendered
+    assert "cstar run status r2" in rendered
     assert T0.astimezone().strftime("%Y-%m-%d %H:%M") in rendered
 
 

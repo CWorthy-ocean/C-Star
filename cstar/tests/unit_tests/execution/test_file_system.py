@@ -22,6 +22,7 @@ from cstar.execution.file_system import (
     remove_files,
     rotate_file,
     step_disk_usage,
+    symlink_relative,
     write_local_copy,
 )
 from cstar.orchestration.models import Step
@@ -898,3 +899,95 @@ class TestWriteLocalCopy:
 
         assert exc_info.value.filename == url
         assert not (tmp_path / "workplan.yaml").exists()
+
+
+def test_symlink_relative_text_is_relative(tmp_path: Path) -> None:
+    """The link text is relative, creates missing parents, and resolves to the target."""
+    target = tmp_path / "data" / "grid.nc"
+    target.parent.mkdir()
+    target.write_text("data")
+    link = tmp_path / "run" / "input" / "grid.nc"
+
+    symlink_relative(link, target)
+
+    assert link.is_symlink()
+    assert link.readlink() == Path("../../data/grid.nc")
+    assert link.resolve() == target.resolve()
+    assert link.read_text() == "data"
+
+
+def test_symlink_relative_survives_moving_the_tree(tmp_path: Path) -> None:
+    """A link and target moved together keep working, as relative links should."""
+    tree = tmp_path / "tree"
+    (tree / "a").mkdir(parents=True)
+    (tree / "b").mkdir()
+    (tree / "b" / "file").write_text("data")
+    symlink_relative(tree / "a" / "link", tree / "b" / "file")
+
+    moved = tmp_path / "moved"
+    tree.rename(moved)
+
+    assert (moved / "a" / "link").read_text() == "data"
+
+
+def test_symlink_relative_through_symlinked_parent(tmp_path: Path) -> None:
+    """A link directory reached through a symlink is measured from where it really is.
+
+    The kernel resolves `..` in link text from the physical directory, so text
+    computed from the symlinked spelling of the path would point elsewhere.
+    """
+    target = tmp_path / "a" / "file"
+    target.parent.mkdir()
+    target.write_text("data")
+    physical = tmp_path / "b" / "c" / "real"
+    physical.mkdir(parents=True)
+    (tmp_path / "a" / "alias").symlink_to(physical)
+
+    link = tmp_path / "a" / "alias" / "link"
+    symlink_relative(link, target)
+
+    assert link.read_text() == "data"
+    assert link.resolve() == target.resolve()
+
+
+def test_symlink_relative_existing_link_raises(tmp_path: Path) -> None:
+    """An existing link is left alone; callers unlink first when they mean to replace."""
+    target = tmp_path / "target"
+    target.write_text("data")
+    link = tmp_path / "link"
+    link.symlink_to(target)
+
+    with pytest.raises(FileExistsError):
+        symlink_relative(link, target)
+
+
+def test_symlink_relative_within_keeps_relative_inside(tmp_path: Path) -> None:
+    """A target inside `within` is still linked relatively."""
+    home = tmp_path / "home"
+    target = home / "source-run" / "output" / "file.nc"
+    target.parent.mkdir(parents=True)
+    target.write_text("data")
+    link = home / "this-run" / "input" / "file.nc"
+
+    symlink_relative(link, target, within=home)
+
+    assert link.readlink() == Path("../../source-run/output/file.nc")
+    assert link.read_text() == "data"
+
+
+def test_symlink_relative_within_falls_back_to_absolute_outside(
+    tmp_path: Path,
+) -> None:
+    """A target outside `within` is linked by absolute path, not a `..` chain into
+    another tree.
+    """
+    home = tmp_path / "home"
+    target = tmp_path / "elsewhere" / "file.nc"
+    target.parent.mkdir(parents=True)
+    target.write_text("data")
+    link = home / "this-run" / "input" / "file.nc"
+
+    symlink_relative(link, target, within=home)
+
+    assert link.readlink() == target.resolve()
+    assert link.read_text() == "data"

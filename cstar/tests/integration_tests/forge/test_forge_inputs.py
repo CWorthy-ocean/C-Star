@@ -29,7 +29,7 @@ from cstar.applications.forge.namelist_model import check_cdr_lite_mode_roms
 from cstar.applications.roms_marbl.models import RomsMarblBlueprint
 from cstar.cli.blueprint.check import app as check_app
 from cstar.orchestration.models import BlueprintIdentity
-from cstar.orchestration.serialization import deserialize
+from cstar.orchestration.serialization import load_blueprint
 from cstar.roms.namelist import namelist_schema_for_ref
 from cstar.roms.precheck import (
     applies_to,
@@ -182,7 +182,8 @@ def _pio_problems(path: Path) -> list[str]:
 
 
 def _load_blueprint(path: Path) -> RomsMarblBlueprint:
-    return deserialize(path, RomsMarblBlueprint)
+    """Load an emitted blueprint, anchoring its relative locations at its directory."""
+    return load_blueprint(path, RomsMarblBlueprint)
 
 
 def _normalize(text: str, working_dir: Path) -> str:
@@ -261,6 +262,20 @@ class TestBlueprint:
     def test_settings_sidecar_exists(self, run: Run) -> None:
         sidecar = run.working_dir / "blueprints" / f"settings_B_{run.cfg.name}.yaml"
         assert sidecar.is_file()
+
+    def test_emitted_locations_are_relative_to_the_blueprint(self, run: Run) -> None:
+        raw = yaml.safe_load(run.blueprint_path.read_text())
+        datasets = [
+            raw["grid"],
+            raw["initial_conditions"],
+            raw["forcing"]["boundary"],
+            raw["forcing"]["surface"],
+        ]
+        locations = [r["location"] for ds in datasets for r in ds["data"]]
+        assert locations
+        assert all(loc.startswith("../input_data/") for loc in locations), locations
+        assert raw["code"]["run_time"]["location"] == "../builds/run-time"
+        assert raw["code"]["compile_time"]["location"] == "../builds/compile-time"
 
     def test_data_locations_exist_under_input_data(self, run: Run) -> None:
         bp = _load_blueprint(run.blueprint_path)

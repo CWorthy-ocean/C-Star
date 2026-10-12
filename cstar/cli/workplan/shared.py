@@ -271,7 +271,9 @@ def display_summary(
         if run.size_measured_at:
             caption += f" as of {run.size_measured_at.astimezone():%Y-%m-%d %H:%M}"
     else:
-        caption = f"Disk usage not measured. Run: cstar workplan status {run.run_id} {ARG_SIZE}"
+        caption = (
+            f"Disk usage not measured. Run: cstar run status {run.run_id} {ARG_SIZE}"
+        )
 
     table.caption = caption
 

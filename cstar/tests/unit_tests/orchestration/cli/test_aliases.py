@@ -1,18 +1,32 @@
-"""Tests for the CLI command aliases: `wp`, `bp`, and `list`."""
+"""Tests for the CLI command aliases (`wp`, `bp`, `list`) and the `run` group."""
 
 from collections.abc import Callable, Generator
-from unittest.mock import patch
+from pathlib import Path
+from unittest.mock import MagicMock, patch
 
 import pytest
 import typer
 from typer.main import get_command
-from typer.testing import CliRunner
+from typer.testing import CliRunner, Result
 
 from cstar.cli.blueprint import ALIAS as ALIAS_BLUEPRINT
 from cstar.cli.cli import attach_subcommands
+from cstar.cli.run import NAME as NAME_RUN
+from cstar.cli.run import RUN_LEVEL_VERBS
+from cstar.cli.run import app as app_run
+from cstar.cli.run.check import COMMAND_CHECK
+from cstar.cli.run.check import app as app_run_check
 from cstar.cli.workplan import ALIAS as ALIAS_WORKPLAN
+from cstar.cli.workplan import app as app_workplan
+from cstar.cli.workplan.check import app as app_workplan_check
+from cstar.cli.workplan.gather import app as app_gather
+from cstar.cli.workplan.log import app as app_log
 from cstar.cli.workplan.ls import ALIAS as ALIAS_LS
 from cstar.cli.workplan.ls import app as app_ls
+from cstar.cli.workplan.path import app as app_path
+from cstar.cli.workplan.run import app as app_workplan_run
+from cstar.cli.workplan.status import app as app_status
+from cstar.orchestration.tracking import WorkplanRun
 from cstar.tests.unit_tests.orchestration.cli.conftest import FakeEntryPoint
 
 SUBCOMMAND_ALIASES = (("workplan", ALIAS_WORKPLAN), ("blueprint", ALIAS_BLUEPRINT))
@@ -114,3 +128,164 @@ def test_alias_names_are_reserved_against_plugins():
 
     workplan = next(g for g in app.registered_groups if g.name == "workplan")
     assert aliased[0].typer_instance is workplan.typer_instance
+
+
+RUN_LEVEL_APPS = (app_status, app_log, app_gather, app_path, app_ls)
+"""The sub-apps that implement the run-level verbs, shared by both groups."""
+
+
+def attached(group: typer.Typer) -> set[typer.Typer]:
+    """The sub-apps merged into a group."""
+    return {g.typer_instance for g in group.registered_groups if g.typer_instance}
+
+
+def test_run_and_workplan_share_the_run_level_sub_apps():
+    """`run` serves the run-level verbs with the very objects `workplan` does,
+    so the two spellings cannot drift apart.
+    """
+    assert set(RUN_LEVEL_APPS) <= attached(app_run)
+    assert set(RUN_LEVEL_APPS) <= attached(app_workplan)
+
+
+def test_run_attaches_check_but_not_the_workplan_verbs():
+    """`cstar run check` inspects a run; launching and validating a workplan file
+    stay under `workplan`.
+    """
+    assert app_run_check in attached(app_run)
+    assert app_run_check not in attached(app_workplan)
+    assert app_workplan_check not in attached(app_run)
+    assert app_workplan_run not in attached(app_run)
+
+
+def test_run_level_verbs_are_what_the_groups_attach():
+    """The constant the workplan group warns on is exactly the verbs `run` serves
+    besides `check`, and `workplan` still serves each of them.
+    """
+    run_commands = set(get_command(app_run).commands)
+    workplan_commands = set(get_command(app_workplan).commands)
+
+    assert run_commands == RUN_LEVEL_VERBS | {COMMAND_CHECK}
+    assert RUN_LEVEL_VERBS <= workplan_commands
+    assert {COMMAND_CHECK, NAME_RUN} <= workplan_commands
+
+
+def test_run_group_is_attached_to_the_root(build_app):
+    """`run` is a visible root command with no alias."""
+    root = get_command(build_app())
+
+    assert NAME_RUN in root.commands
+    assert not root.commands[NAME_RUN].hidden
+    assert set(root.commands[NAME_RUN].commands) == RUN_LEVEL_VERBS | {COMMAND_CHECK}
+
+
+def test_run_name_is_reserved_against_plugins():
+    """A plugin may not shadow `run` any more than another core command."""
+    plugin = FakeEntryPoint(NAME_RUN, loaded=typer.Typer())
+
+    app = typer.Typer()
+    with patch("cstar.cli.cli.entry_points", return_value=[plugin]):
+        attach_subcommands(app)
+
+    named = [g for g in app.registered_groups if g.name == NAME_RUN]
+    assert len(named) == 1, f"the plugin shadowed `{NAME_RUN}`"
+    assert named[0].typer_instance is app_run
+
+
+@pytest.fixture
+def invoke(build_app, tmp_path: Path) -> Generator[Callable[[list[str]], Result]]:
+    """Run an argv through the root app with the run lookups stubbed out."""
+
+    def close_unawaited(coro):
+        """Close the unawaited pipeline coroutine to keep the mock warning-free."""
+        coro.close()
+        return []
+
+    # `status x` finds a record through the shared argument callback, then stops
+    # at the missing transformed workplan, which it reports without failing.
+    # The `ls` stub replaces `asyncio.run` on the shared module object, so the
+    # record lookup gets its own loop stub.
+    record = WorkplanRun(
+        workplan_path=tmp_path / "x.yaml",
+        trx_workplan_path=tmp_path / "x_transformed.yaml",
+        output_path=tmp_path,
+        run_id="x",
+    )
+    shared_asyncio = MagicMock()
+    shared_asyncio.run.return_value = record
+
+    with (
+        patch("cstar.cli.workplan.ls.asyncio.run", side_effect=close_unawaited),
+        patch("cstar.cli.workplan.shared.TrackingRepository"),
+        patch("cstar.cli.workplan.shared.asyncio", shared_asyncio),
+        patch("cstar.cli.workplan.status.deserialize", side_effect=FileNotFoundError),
+    ):
+        yield lambda argv: CliRunner().invoke(build_app(), argv)
+
+
+@pytest.mark.parametrize(
+    "argv",
+    [
+        ["workplan", "status", "x"],
+        ["wp", "status", "x"],
+        ["workplan", "ls"],
+        ["workplan", "list"],
+        ["wp", "ls"],
+        ["wp", "list"],
+    ],
+    ids=lambda argv: " ".join(argv),
+)
+def test_workplan_run_level_verbs_print_one_deprecation_line(invoke, argv):
+    """Each run-level verb run as a `workplan` subcommand names itself and its
+    replacement, once, on stderr.
+    """
+    verb = argv[1]
+
+    result = invoke(argv)
+
+    assert result.exit_code == 0, result.output
+    assert result.stderr.splitlines() == [
+        (
+            f"`cstar workplan {verb}` is deprecated for run-level commands and will "
+            f"be removed after two releases; use `cstar run {verb}`."
+        )
+    ]
+
+
+@pytest.mark.parametrize(
+    "argv",
+    [["run", "status", "x"], ["run", "ls"], ["run", "list"]],
+    ids=lambda argv: " ".join(argv),
+)
+def test_run_verbs_print_no_deprecation_line(invoke, argv):
+    """The current spelling of a run-level verb is not deprecated."""
+    result = invoke(argv)
+
+    assert result.exit_code == 0, result.output
+    assert result.stderr == ""
+
+
+@pytest.mark.parametrize(
+    "argv",
+    [
+        ["workplan", "run", "--help"],
+        ["workplan", "check", "--help"],
+        ["wp", "check", "--help"],
+        ["workplan", "--help"],
+    ],
+    ids=lambda argv: " ".join(argv),
+)
+def test_other_workplan_commands_are_not_deprecated(invoke, argv):
+    """Launching and validating a workplan are not run-level, so nothing is printed."""
+    result = invoke(argv)
+
+    assert result.exit_code == 0, result.output
+    assert "deprecated for run-level commands" not in result.stderr
+
+
+def test_workplan_help_states_the_deprecation(build_app):
+    """The group help carries the sentence, so `--help` explains the notice."""
+    root = get_command(build_app())
+
+    assert "is deprecated for run-level commands" in (
+        root.commands["workplan"].help or ""
+    )

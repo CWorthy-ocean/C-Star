@@ -336,6 +336,31 @@ def test_runnerrequest_resume_can_be_set_true(tmp_path: Path) -> None:
     assert request.resume is True
 
 
+def test_runnerrequest_blueprint_anchors_relative_locations(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, bp_templates_dir: Path
+) -> None:
+    """Verify the blueprint a request loads resolves relative locations against the
+    blueprint file's directory rather than the working directory.
+    """
+    bp_dir = tmp_path / "blueprints"
+    bp_dir.mkdir()
+    bp_path = bp_dir / "bp.yaml"
+    bp_path.write_text(
+        (bp_templates_dir / "blueprint.yaml")
+        .read_text()
+        .replace("http://mockdoc.com/partitioning1.nc", "../data/boundary.nc")
+    )
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    monkeypatch.chdir(elsewhere)
+
+    request = RunnerRequest(bp_path.as_posix(), RomsMarblBlueprint)
+
+    assert str(request.blueprint.forcing.boundary.data[0].location) == str(
+        tmp_path / "data" / "boundary.nc"
+    )
+
+
 def test_application_definition_resumable_defaults_false() -> None:
     """Verify an `ApplicationDefinition` subclass that does not declare
     `resumable` defaults to `False` (e.g. `hello_world`, which does not

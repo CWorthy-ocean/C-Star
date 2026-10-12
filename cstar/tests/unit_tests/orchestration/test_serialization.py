@@ -14,14 +14,18 @@ import pytest
 from pydantic import BaseModel, Field, ValidationError
 
 from cstar.applications.plotter import PlotterBlueprint
+from cstar.base.exceptions import CstarExpectationFailed
 from cstar.orchestration.launch.slurm import SlurmHandle
 from cstar.orchestration.models import Application, Workplan
 from cstar.orchestration.orchestration import LiveStep, LiveWorkplan
 from cstar.orchestration.serialization import (
     PersistenceMode,
     _mode_detect,
+    anchor_relative_path,
     deserialize,
     deserialize_all,
+    load_blueprint,
+    read_blueprint_raw,
     read_document,
     read_json_to_raw,
     read_raw,
@@ -856,3 +860,277 @@ def test_read_document_drops_the_schema_key(tmp_path: Path) -> None:
     assert read_document(str(path), PersistenceMode.yaml) == {"value": 1}
     with pytest.raises(FileNotFoundError):
         read_document(tmp_path / "absent.yaml")
+
+
+@pytest.mark.parametrize(
+    ("text", "expected"),
+    [
+        ("grid.nc", "grid.nc"),
+        ("./grid.nc", "grid.nc"),
+        ("sub/../data/grid.nc", "data/grid.nc"),
+        ("  grid.nc  ", "grid.nc"),
+        ("../shared/grid.nc", "../shared/grid.nc"),
+    ],
+)
+def test_anchor_relative_path_resolves_against_base_dir(
+    tmp_path: Path, text: str, expected: str
+) -> None:
+    """Verify a relative path is made absolute next to the base directory."""
+    base_dir = tmp_path / "bp"
+
+    anchored = anchor_relative_path(text, base_dir)
+
+    assert anchored == (base_dir / expected).resolve()
+    assert anchored is not None
+    assert anchored.is_absolute()
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "",
+        "   ",
+        "/abs/path/grid.nc",
+        "https://example.com/grid.nc",
+        "s3://bucket/grid.nc",
+        "{{output_dir: producer}}/grid.nc",
+        "{{grid}}",
+        "cstar-forge:child-domain-initial-conditions-placeholder",
+        "placeholder://run_time",
+    ],
+)
+def test_anchor_relative_path_passes_non_relative_values(
+    tmp_path: Path, text: str
+) -> None:
+    """Verify empty, absolute, URI and placeholder values are not anchored."""
+    assert anchor_relative_path(text, tmp_path) is None
+
+
+class _ResourceModel(BaseModel):
+    """A stand-in for a blueprint resource."""
+
+    location: str
+    partitioned: bool = False
+
+
+class _DatasetModel(BaseModel):
+    """A stand-in for a blueprint dataset holding a list of resources."""
+
+    data: list[_ResourceModel]
+
+
+class _BlueprintModel(BaseModel):
+    """A stand-in for a blueprint with nested and listed resources."""
+
+    name: str
+    grid: _DatasetModel
+    forcing: dict[str, _DatasetModel] = Field(default_factory=dict)
+
+
+def _write_blueprint_yaml(path: Path, body: str) -> Path:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(textwrap.dedent(body))
+    return path
+
+
+def test_load_blueprint_anchors_locations_at_the_files_directory(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Verify nested and listed relative locations resolve against the blueprint's
+    directory, whatever the working directory is.
+    """
+    bp_dir = tmp_path / "blueprints"
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    monkeypatch.chdir(elsewhere)
+    path = _write_blueprint_yaml(
+        bp_dir / "bp.yaml",
+        """\
+        name: anchored
+        grid:
+          data:
+            - location: ../input_data/grid.nc
+        forcing:
+          surface:
+            data:
+              - location: surf_a.nc
+              - location: ./sub/surf_b.nc
+                partitioned: true
+        """,
+    )
+
+    bp = load_blueprint(path, _BlueprintModel)
+
+    assert [r.location for r in bp.grid.data] == [
+        (tmp_path / "input_data" / "grid.nc").as_posix()
+    ]
+    assert [r.location for r in bp.forcing["surface"].data] == [
+        (bp_dir / "surf_a.nc").as_posix(),
+        (bp_dir / "sub" / "surf_b.nc").as_posix(),
+    ]
+    assert bp.forcing["surface"].data[1].partitioned
+
+
+def test_load_blueprint_leaves_absolute_remote_and_placeholder_locations(
+    tmp_path: Path,
+) -> None:
+    """Verify absolute, URL and placeholder locations pass through untouched."""
+    values = [
+        "/abs/grid.nc",
+        "https://example.com/grid.nc",
+        "{{grid_dir}}/grid.nc",
+        "cstar-forge:upscaled-cdr-forcing-placeholder",
+    ]
+    listing = "\n".join(f"    - location: '{value}'" for value in values)
+    path = _write_blueprint_yaml(
+        tmp_path / "bp.yaml", f"name: untouched\ngrid:\n  data:\n{listing}\n"
+    )
+
+    bp = load_blueprint(path, _BlueprintModel)
+
+    assert [r.location for r in bp.grid.data] == values
+
+
+def test_load_blueprint_ignores_other_keys_and_non_string_locations(
+    tmp_path: Path,
+) -> None:
+    """Verify only string values under `location` are anchored."""
+    path = _write_blueprint_yaml(
+        tmp_path / "bp.yaml",
+        """\
+        name: grid.nc
+        grid:
+          data:
+            - location: grid.nc
+        """,
+    )
+
+    bp = load_blueprint(path, _BlueprintModel)
+
+    assert bp.name == "grid.nc"
+    assert bp.grid.data[0].location == (tmp_path / "grid.nc").as_posix()
+
+
+def test_load_blueprint_reads_json(tmp_path: Path) -> None:
+    """Verify JSON blueprints are anchored like YAML ones."""
+    path = tmp_path / "sub" / "bp.json"
+    path.parent.mkdir()
+    path.write_text(
+        '{"name": "j", "grid": {"data": [{"location": "grid.nc"}]}, "$schema": "x"}'
+    )
+
+    bp = load_blueprint(path, _BlueprintModel)
+
+    assert bp.grid.data[0].location == (path.parent / "grid.nc").as_posix()
+
+
+def test_load_blueprint_anchors_symlinked_blueprint_at_its_target(
+    tmp_path: Path,
+) -> None:
+    """Verify a symlinked blueprint anchors where the real file lives."""
+    real = _write_blueprint_yaml(
+        tmp_path / "real" / "bp.yaml",
+        "name: linked\ngrid:\n  data:\n    - location: grid.nc\n",
+    )
+    link = tmp_path / "links" / "bp.yaml"
+    link.parent.mkdir()
+    link.symlink_to(real)
+
+    bp = load_blueprint(link, _BlueprintModel)
+
+    assert bp.grid.data[0].location == (real.resolve().parent / "grid.nc").as_posix()
+
+
+def test_load_blueprint_missing_file(tmp_path: Path) -> None:
+    """Verify a missing blueprint raises `FileNotFoundError`."""
+    with pytest.raises(FileNotFoundError):
+        load_blueprint(tmp_path / "missing.yaml", _BlueprintModel)
+
+
+def test_load_blueprint_relative_location_only_in_cwd_is_rejected(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Verify a location that exists only relative to the working directory, where
+    C-Star used to look, fails with an error naming both candidate paths.
+    """
+    cwd = tmp_path / "cwd"
+    (cwd / "data").mkdir(parents=True)
+    (cwd / "data" / "grid.nc").touch()
+    monkeypatch.chdir(cwd)
+    bp_dir = tmp_path / "blueprints"
+    path = _write_blueprint_yaml(
+        bp_dir / "bp.yaml",
+        "name: stranded\ngrid:\n  data:\n    - location: data/grid.nc\n",
+    )
+
+    with pytest.raises(CstarExpectationFailed) as exc_info:
+        load_blueprint(path, _BlueprintModel)
+
+    message = str(exc_info.value)
+    assert (bp_dir / "data" / "grid.nc").as_posix() in message
+    assert (cwd / "data" / "grid.nc").as_posix() in message
+    assert "directory of the blueprint file" in message
+    assert "not the working directory" in message
+
+
+def test_load_blueprint_reports_every_stranded_location(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Verify one error lists all the locations that resolve differently."""
+    cwd = tmp_path / "cwd"
+    cwd.mkdir()
+    (cwd / "a.nc").touch()
+    (cwd / "b.nc").touch()
+    monkeypatch.chdir(cwd)
+    path = _write_blueprint_yaml(
+        tmp_path / "bp" / "bp.yaml",
+        "name: stranded\ngrid:\n  data:\n    - location: a.nc\n    - location: b.nc\n",
+    )
+
+    with pytest.raises(CstarExpectationFailed) as exc_info:
+        load_blueprint(path, _BlueprintModel)
+
+    message = str(exc_info.value)
+    assert "'a.nc'" in message
+    assert "'b.nc'" in message
+
+
+def test_load_blueprint_missing_everywhere_passes_through(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Verify a relative location found in neither place is anchored without error,
+    leaving the file's absence to be reported, by path, when it is read.
+    """
+    monkeypatch.chdir(tmp_path)
+    path = _write_blueprint_yaml(
+        tmp_path / "bp" / "bp.yaml",
+        "name: missing\ngrid:\n  data:\n    - location: nowhere.nc\n",
+    )
+
+    bp = load_blueprint(path, _BlueprintModel)
+
+    assert bp.grid.data[0].location == (tmp_path / "bp" / "nowhere.nc").as_posix()
+
+
+def test_load_blueprint_agrees_with_deserialize_on_absolute_content(
+    tmp_path: Path,
+) -> None:
+    """Verify a blueprint with only absolute locations loads identically either way."""
+    path = _write_blueprint_yaml(
+        tmp_path / "bp.yaml",
+        "name: same\ngrid:\n  data:\n    - location: /abs/grid.nc\n",
+    )
+
+    assert load_blueprint(path, _BlueprintModel) == deserialize(path, _BlueprintModel)
+
+
+def test_read_blueprint_raw_returns_the_anchored_mapping(tmp_path: Path) -> None:
+    """Verify the raw reader, used for lenient loads, anchors the same way."""
+    path = _write_blueprint_yaml(
+        tmp_path / "bp.yaml",
+        "name: raw\ngrid:\n  data:\n    - location: grid.nc\n",
+    )
+
+    raw = read_blueprint_raw(path)
+
+    assert raw["grid"]["data"][0]["location"] == (tmp_path / "grid.nc").as_posix()

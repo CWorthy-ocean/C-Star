@@ -79,7 +79,7 @@ class ItemView(BaseModel):
     def size(self) -> str:
         """The size as a string for display (includes units)."""
         if self.raw_size == UNKNOWN_SIZE and self.format == "table":
-            return f'Run "cstar workplan status {self.run_id} {ARG_SIZE}"'
+            return f'Run "cstar run status {self.run_id} {ARG_SIZE}"'
 
         return f"{self.raw_size}MB"
 

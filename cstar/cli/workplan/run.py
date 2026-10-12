@@ -232,7 +232,7 @@ def get_run_summary_display(summary: ExecutiveRunSummary) -> str:
     )
 
     prompts = [
-        ("For run status details", f"cstar workplan status {summary.run_id}"),
+        ("For run status details", f"cstar run status {summary.run_id}"),
         ("To review logs", f"cstar workplan log {summary.run_id} <step-name>"),
     ]
 

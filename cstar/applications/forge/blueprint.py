@@ -82,6 +82,7 @@ from cstar.orchestration.models import (
     Provenance,
     SpecSelection,
 )
+from cstar.orchestration.serialization import read_blueprint_raw
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -1807,9 +1808,12 @@ class ForgeBlueprint(Blueprint):
         Version-check + migration happen automatically via the
         ``_migrate_and_clean`` before-validator -- no need to call
         ``cstar.applications.forge.migration.migrate_forge_blueprint_data`` here.
+
+        A relative ``location`` (a user-supplied file, a code repository on disk)
+        resolves against the directory of the file, as it does for every other
+        blueprint C-Star loads.
         """
-        data = yaml.safe_load(Path(path).read_text())
-        return cls.model_validate(data)
+        return cls.model_validate(read_blueprint_raw(path))
 
     @classmethod
     def from_yaml_data(cls, data: dict[str, Any]) -> ForgeBlueprint:

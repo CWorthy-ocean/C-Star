@@ -529,7 +529,7 @@ def test_display_summary_caption_shows_hint_when_unmeasured(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Verify an unmeasured run's caption points at `cstar workplan status --size`.
+    """Verify an unmeasured run's caption points at `cstar run status --size`.
 
     Parameters
     ----------
@@ -549,7 +549,7 @@ def test_display_summary_caption_shows_hint_when_unmeasured(
 
     rendered = buffer.getvalue()
     assert "Disk usage not measured" in rendered
-    assert "cstar workplan status run-1 --size" in rendered
+    assert "cstar run status run-1 --size" in rendered
 
 
 def test_display_summary_labels_external_dependency_by_token(

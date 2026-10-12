@@ -72,7 +72,11 @@ from cstar.applications.forge.util import mem_log
 from cstar.base.additional_code import AdditionalCode
 from cstar.execution.file_system import DirectoryManager
 from cstar.orchestration.models import Resource
-from cstar.orchestration.serialization import deserialize
+from cstar.orchestration.serialization import (
+    load_blueprint,
+    read_blueprint_raw,
+    relativize_locations,
+)
 
 log = logging.getLogger(__name__)
 
@@ -1090,6 +1094,15 @@ class ForgeExecutor(BaseModel):
         if not any(provenance.values()):
             roms_marbl_blueprint_dict.pop("provenance", None)
 
+        # Everything this run produced lives under host.working_dir, beside the
+        # blueprints directory; the blueprint names it relative to itself so the
+        # working directory can be moved or copied as a unit.
+        roms_marbl_blueprint_dict = relativize_locations(
+            roms_marbl_blueprint_dict,
+            root=self._require_host().working_dir,
+            base_dir=bp_path.parent,
+        )
+
         with bp_path.open("w") as f:
             if schema_url:
                 f.write(f"# yaml-language-server: $schema={schema_url}\n")
@@ -1626,7 +1639,7 @@ class ForgeExecutor(BaseModel):
             # Try to deserialize with full validation first (Pydantic warns on
             # placeholder/partial values persisted via model_construct).
             with _suppress_pydantic_warnings():
-                roms_marbl_blueprint = deserialize(
+                roms_marbl_blueprint = load_blueprint(
                     bp_path, cstar_models.RomsMarblBlueprint
                 )
         except (OSError, yaml.YAMLError, ValidationError) as e:
@@ -1642,9 +1655,9 @@ class ForgeExecutor(BaseModel):
                 exc_info=True,
             )
             try:
-                # Load YAML as dict and use model_construct to bypass validation
-                with bp_path.open("r") as f:
-                    roms_marbl_blueprint_data = yaml.safe_load(f)
+                # Load YAML as dict (relative locations anchored, as in the strict
+                # load) and use model_construct to bypass validation
+                roms_marbl_blueprint_data = read_blueprint_raw(bp_path)
                 # Use model_construct to bypass validation (files may not exist)
                 roms_marbl_blueprint = cstar_models.RomsMarblBlueprint.model_construct(
                     **roms_marbl_blueprint_data

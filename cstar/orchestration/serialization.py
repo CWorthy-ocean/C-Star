@@ -2,19 +2,33 @@ import asyncio
 import enum
 import errno
 import os
+import re
 import typing as t
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from pathlib import Path, PosixPath
+from urllib.parse import urlsplit
 
 import yaml
 from pydantic_core import from_json
 from yaml.scanner import ScannerError
 
+from cstar.base.exceptions import CstarExpectationFailed
 from cstar.base.log import get_logger
 from cstar.execution.file_system import local_copy
 
 log = get_logger(__name__)
+
+PLACEHOLDER_RE = re.compile(r"\{\{([^}]+)\}\}")
+"""Pattern matching double-brace template placeholders.
+
+Captures the full content between braces so dispatch logic can distinguish
+plain variable references (``{{my_var}}``) from scope references
+(``{{<scope>: step_name}}``).
+"""
+
+LOCATION_KEY: t.Final[str] = "location"
+"""Key under which a blueprint names where a resource (dataset, code, file) lives."""
 
 
 class PersistenceMode(enum.StrEnum):
@@ -350,6 +364,229 @@ def deserialize(
     model = klass.model_validate(read_document(path, mode))  # type: ignore
 
     msg = f"Deserialized {str(path)!r} into: {model}"
+    log.trace(msg)
+
+    return model
+
+
+def anchor_relative_path(text: str, base_dir: Path) -> Path | None:
+    """Resolve a relative file path against a directory.
+
+    Parameters
+    ----------
+    text : str
+        The path as authored.
+    base_dir : Path
+        The directory a relative `text` is relative to.
+
+    Returns
+    -------
+    Path | None
+        The absolute, resolved path, or `None` when `text` is not a relative file
+        path: it is empty, still holds a `{{placeholder}}`, is a URI (a remote
+        resource, or a sentinel such as Forge's `cstar-forge:...` placeholders),
+        or is already absolute.
+    """
+    text = text.strip()
+    if not text or PLACEHOLDER_RE.search(text) or urlsplit(text).scheme:
+        return None
+
+    path = Path(text).expanduser()
+    if path.is_absolute():
+        return None
+
+    return (base_dir / path).resolve()
+
+
+def _map_locations(node: t.Any, fn: Callable[[str], str]) -> t.Any:
+    """Copy a raw mapping, replacing each string value under `LOCATION_KEY`.
+
+    Parameters
+    ----------
+    node : Any
+        The raw mapping (or any nested part of one); mappings and lists are walked.
+    fn : Callable[[str], str]
+        Produces the replacement for a location value.
+
+    Returns
+    -------
+    Any
+        The copy of `node`.
+    """
+    if isinstance(node, dict):
+        return {
+            key: fn(item)
+            if key == LOCATION_KEY and isinstance(item, str)
+            else _map_locations(item, fn)
+            for key, item in node.items()
+        }
+    if isinstance(node, list):
+        return [_map_locations(item, fn) for item in node]
+    return node
+
+
+def anchor_locations(node: t.Any, base_dir: Path) -> t.Any:
+    """Make every relative `location` in a raw blueprint mapping absolute.
+
+    Walks nested mappings and lists, replacing each string value found under the
+    key `location` that `anchor_relative_path` anchors with the resolved POSIX path
+    next to `base_dir`. Everything else, including absolute, remote and
+    placeholder locations, is passed through.
+
+    Parameters
+    ----------
+    node : Any
+        The raw mapping (or any nested part of one) to anchor.
+    base_dir : Path
+        The directory relative locations are relative to; the blueprint file's.
+
+    Returns
+    -------
+    Any
+        A copy of `node` with its relative locations anchored.
+
+    Raises
+    ------
+    CstarExpectationFailed
+        If a relative location does not exist next to `base_dir` but does exist
+        relative to the working directory, which is where C-Star resolved it
+        before locations were anchored to the blueprint; the message lists
+        every such location with both candidate paths.
+    """
+    stranded: list[tuple[str, Path, Path]] = []
+
+    def anchor(text: str) -> str:
+        anchored = anchor_relative_path(text, base_dir)
+        if anchored is None:
+            return text
+
+        in_cwd = Path.cwd() / text.strip()
+        if not anchored.exists() and in_cwd.exists():
+            stranded.append((text, anchored, in_cwd))
+        return anchored.as_posix()
+
+    anchored_node = _map_locations(node, anchor)
+    if stranded:
+        found = "\n".join(
+            f"  {text!r}: not at {anchored}, but found at {in_cwd}"
+            for text, anchored, in_cwd in stranded
+        )
+        msg = (
+            "Relative locations in a blueprint resolve against the directory of "
+            f"the blueprint file ({base_dir}), not the working directory "
+            f"({Path.cwd()}); these exist only relative to the working "
+            f"directory:\n{found}\n"
+            "Move the blueprint next to its data or use absolute locations."
+        )
+        raise CstarExpectationFailed(msg)
+
+    return anchored_node
+
+
+def relativize_locations(node: t.Any, root: Path, base_dir: Path) -> t.Any:
+    """Make every absolute `location` inside a tree relative to a directory.
+
+    The emit-side counterpart of `anchor_locations`: a blueprint written together
+    with the files it names keeps working when the tree holding both is moved or
+    copied as a unit, because its locations are then relative to the blueprint's
+    directory. Only string values under the key `location` that are absolute
+    paths lying under `root` are rewritten; everything else (URLs, sentinels,
+    paths elsewhere) is passed through. Paths are compared where they physically
+    are, with symlinked directories resolved but the final component kept.
+
+    Parameters
+    ----------
+    node : Any
+        The raw mapping (or any nested part of one) to rewrite.
+    root : Path
+        The directory containing everything that should be addressed relatively.
+    base_dir : Path
+        The directory the blueprint will be written to.
+
+    Returns
+    -------
+    Any
+        A copy of `node` with the locations under `root` relative to `base_dir`.
+    """
+    root = root.resolve()
+    base_dir = base_dir.resolve()
+
+    def relativize(text: str) -> str:
+        path = Path(text)
+        if urlsplit(text).scheme or not path.is_absolute():
+            return text
+
+        physical = path.parent.resolve() / path.name
+        if not physical.is_relative_to(root):
+            return text
+        return Path(os.path.relpath(physical, base_dir)).as_posix()
+
+    return _map_locations(node, relativize)
+
+
+def read_blueprint_raw(path: Path | str) -> dict[str, t.Any]:
+    """Read a blueprint file's raw mapping with its relative locations anchored.
+
+    This is the single place a blueprint's `location` values acquire the
+    directory of the file they were written in: everything downstream sees
+    absolute locations. Relative locations resolve against the directory the
+    file really lives in (a symlinked blueprint anchors where its target is,
+    as `local_copy` does), so a blueprint fetched from a URL, which is read from
+    a temporary copy, should use absolute or remote locations.
+
+    Parameters
+    ----------
+    path : Path | str
+        The local file holding the blueprint, as JSON or YAML.
+
+    Raises
+    ------
+    FileNotFoundError
+        If the blueprint file does not exist.
+    CstarExpectationFailed
+        If a relative location exists only relative to the working directory;
+        see `anchor_locations`.
+
+    Returns
+    -------
+    dict[str, t.Any]
+    """
+    path = Path(path).expanduser().resolve()
+    if not path.exists():
+        msg = f"No blueprint file found at path `{path}`"
+        raise FileNotFoundError(errno.ENOENT, msg, path)
+
+    return anchor_locations(read_document(path), path.parent)
+
+
+def load_blueprint(path: Path | str, klass: type[_T]) -> _T:
+    """Load a blueprint file into a model, anchoring its relative locations.
+
+    The counterpart of `deserialize` for blueprints: identical, except that
+    relative `location` values resolve against the directory of the blueprint
+    file rather than the working directory (see `read_blueprint_raw`).
+
+    Parameters
+    ----------
+    path : Path | str
+        The local file holding the blueprint.
+    klass : type[_T]
+        The blueprint type to instantiate.
+
+    Raises
+    ------
+    FileNotFoundError
+        If the blueprint file does not exist.
+    CstarExpectationFailed
+        If a relative location exists only relative to the working directory.
+
+    Returns
+    -------
+    _T
+    """
+    model = klass.model_validate(read_blueprint_raw(path))  # type: ignore
+
+    msg = f"Loaded {str(path)!r} into: {model}"
     log.trace(msg)
 
     return model
