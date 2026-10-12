@@ -2557,7 +2557,7 @@ def test_resolver_esper_salinity_conditioning_notes_the_woa_salinity_file():
     fdata["forcing"]["boundary"]["bgc_sources"][-1]["source"] = {"name": "ESPER"}
     cfg = _build(forcing_inputs=fdata)
     assert (
-        cfg.forcing.boundary.bgc_sources[-1].source.esper_salinity_conditioning is None
+        cfg.forcing.boundary.bgc_sources[-1].source.esper_salinity_conditioning is False
     )
     assert "WOA_SALINITY" not in cfg.datasets
 
@@ -2570,9 +2570,72 @@ def test_source_spec_esper_salinity_conditioning_only_for_esper():
     ).esper_salinity_conditioning
     with pytest.raises(ValueError, match="esper_salinity_conditioning"):
         SourceSpec(name="UNIFIED", esper_salinity_conditioning=True)
-    # False is as invalid as True on a non-ESPER source: the field is ESPER's alone.
-    with pytest.raises(ValueError, match="only valid when name is 'ESPER'"):
-        SourceSpec(name="GLODAP", esper_salinity_conditioning=False)
+    # False is the default and means nothing on any source; it is accepted anywhere.
+    assert (
+        SourceSpec(
+            name="GLODAP", esper_salinity_conditioning=False
+        ).esper_salinity_conditioning
+        is False
+    )
+
+
+def test_esper_salinity_conditioning_off_leaves_no_trace_in_saved_files_or_hashes():
+    """The default (off) is excluded from dumps, so a blueprint written before the
+    field existed keeps its content hash and loads with no integrity warning, and a
+    blueprint saved with it off still loads on a build that does not know the field.
+    Only a switched-on ESPER source writes the key.
+    """
+    import warnings
+
+    import yaml
+
+    from cstar.applications.forge.blueprint import SourceSpec
+
+    assert "esper_salinity_conditioning" not in SourceSpec(name="UNIFIED").model_dump(
+        mode="json"
+    )
+    assert "esper_salinity_conditioning" not in SourceSpec(name="ESPER").model_dump(
+        mode="json"
+    )
+    assert (
+        SourceSpec(name="ESPER", esper_salinity_conditioning=True).model_dump(
+            mode="json"
+        )["esper_salinity_conditioning"]
+        is True
+    )
+
+    cfg = _build()  # no ESPER source anywhere
+    text = cfg.to_yaml_str()
+    assert "esper_salinity_conditioning" not in text
+    with warnings.catch_warnings(record=True) as w:
+        warnings.simplefilter("always")
+        reloaded = ForgeBlueprint.from_yaml_data(yaml.safe_load(text))
+    assert not w
+    assert reloaded.content_hash() == cfg.content_hash()
+
+
+def test_esper_conditioning_on_requires_the_woa_salinity_dataset():
+    """A hand-edited blueprint that flips the switch without `WOA_SALINITY` in
+    `datasets` is rejected at load time, naming the one thing to add.
+    """
+    import copy
+
+    import yaml
+
+    from cstar.catalog.domain_catalog import default_catalog as cat
+
+    fdata = copy.deepcopy(cat.forcing_data("glorys-era5-unified"))
+    fdata["forcing"]["boundary"]["bgc_sources"][-1]["source"] = {
+        "name": "ESPER",
+        "esper_salinity_conditioning": True,
+    }
+    cfg = _build(forcing_inputs=fdata)
+    data = yaml.safe_load(cfg.to_yaml_str())
+    assert "WOA_SALINITY" in data["datasets"]
+    ForgeBlueprint.from_yaml_data(data)  # consistent: fine
+    data["datasets"] = [d for d in data["datasets"] if d != "WOA_SALINITY"]
+    with pytest.raises(ValueError, match="WOA_SALINITY"):
+        ForgeBlueprint.from_yaml_data(data)
 
 
 def test_resolver_ic_bgc_constants_source_excluded_from_datasets():

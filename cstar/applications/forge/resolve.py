@@ -162,8 +162,7 @@ def _parse_source(block: Any) -> SourceSpec:
         kw["esper_method"] = d["esper_method"]
     if d.get("esper_equation"):
         kw["esper_equation"] = d["esper_equation"]
-    if d.get("esper_salinity_conditioning"):
-        kw["esper_salinity_conditioning"] = True
+    kw["esper_salinity_conditioning"] = bool(d.get("esper_salinity_conditioning"))
     return SourceSpec(**kw)
 
 
