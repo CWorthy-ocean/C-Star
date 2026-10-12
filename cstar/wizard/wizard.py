@@ -272,8 +272,10 @@ HELP_TEXT: dict[str | tuple[str, str], str] = {
     "(salinity + temperature) or 16 (salinity only). Blank = roms-tools default (8).",
     "esper_salinity_conditioning": "Blend the salinity PyESPER feeds its nets toward "
     "the WOA23 annual climatology below 31-34 PSU, where ESPER has no training data "
-    "and gives unphysical values in river plumes (silicate > 100, negative nutrients, "
-    "DIC above ALK). Forge downloads the one WOA23 file this needs.",
+    "and gives unphysical values in river plumes (silicate > 100 µmol/kg, negative "
+    "nutrients, DIC above ALK), then dilute ALK and DIC back to the model salinity. "
+    "Forge downloads the one WOA23 file this needs. Requires the CWorthy PyESPER fork "
+    "1.2.0 or later and roms-tools 5.2 or later.",
     # ---- IC BGC sources (row list) ----------------------------------------------
     (
         "ic_bgc",
@@ -3416,7 +3418,7 @@ class _ForcingEditor:
             "esper_salinity_conditioning" in w
             and w["esper_salinity_conditioning"].value
             and name_val == "ESPER"
-        ):  # Checkbox: unchecked = unset (roms-tools default: off)
+        ):  # Checkbox: unchecked = the model default (off), emitted by neither side
             src["esper_salinity_conditioning"] = True
         item = {"source": src}
         if "type" in w:

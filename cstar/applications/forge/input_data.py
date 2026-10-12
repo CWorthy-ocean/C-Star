@@ -1034,9 +1034,9 @@ class RomsMarblInputData(InputData):
                     validate_esper_source(self._resolve_source_block(src))
                 except ImportError as exc:
                     raise RuntimeError(
-                        f"{step.name}: the ESPER BGC source needs PyESPER, which is "
-                        "not available in this environment. No inputs were "
-                        f"generated.\n\n{exc}"
+                        f"{step.name}: could not set up the ESPER BGC source (PyESPER "
+                        "missing, or too old for what the source asks). No inputs "
+                        f"were generated.\n\n{exc}"
                     ) from exc
 
     @staticmethod
@@ -1390,18 +1390,19 @@ class RomsMarblInputData(InputData):
         # WOA_SALINITY for exactly this lookup. Done before the explicit-path return
         # below: an ESPER source's own ``path`` is its PyESPER checkout, unrelated.
         if name.upper() == "ESPER" and out.get("salinity_conditioning"):
+            # A mapping here is already roms-tools' form. No ForgeBlueprint produces
+            # one (the engine emits the bare switch); this only matters for a
+            # hand-built forcing override.
             if not isinstance(out["salinity_conditioning"], dict):
                 try:
                     woa_file = self.source_data.path_for_source("WOA_SALINITY")
                 except KeyError as exc:
-                    # A hand-edited blueprint that switched the option on without
-                    # re-resolving: the resolver would have noted the dataset.
+                    # ForgeBlueprint._esper_conditioning_has_its_dataset catches
+                    # this at load time; this is the last line for a bare override.
                     raise ValueError(
                         "The ESPER source asks for salinity conditioning, but the "
                         "WOA_SALINITY dataset was not staged. Add 'WOA_SALINITY' to "
-                        "the blueprint's `datasets` (and `forcing.resolved_datasets`) "
-                        "or rebuild the blueprint from the wizard/resolver, which "
-                        "notes it automatically."
+                        "the blueprint's `datasets`."
                     ) from exc
                 out["salinity_conditioning"] = {"woa_salinity_path": str(woa_file)}
 
