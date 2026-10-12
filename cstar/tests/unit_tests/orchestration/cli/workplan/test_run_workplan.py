@@ -27,6 +27,7 @@ from cstar.cli.common import normalize_runid
 from cstar.cli.workplan.run import (
     app,
     auto_compose,
+    get_run_summary_display,
     handle_run_reloading,
     migrate_steps,
     refuse_run_id_collision,
@@ -34,6 +35,7 @@ from cstar.cli.workplan.run import (
 from cstar.entrypoint.utils import ARG_CLOBBER, ARG_PRE_RUN, ARG_RESUME, ARG_RUN_ID
 from cstar.execution.file_system import StateDirectoryManager
 from cstar.orchestration.dag_runner import (
+    ExecutiveRunSummary,
     NoPreparableStepsError,
     get_launcher,
     original_workplan_backup,
@@ -3488,3 +3490,19 @@ def test_reload_is_quiet_when_the_environment_matches(
         asyncio.run(handle_run_reloading(mock_run_id))
 
     assert not [r for r in caplog.records if r.levelname == "WARNING"]
+
+
+def test_run_summary_points_at_the_run_commands() -> None:
+    """Verify the follow-up actions of a run summary use the `cstar run` commands."""
+    summary = ExecutiveRunSummary(
+        run_id="my-run",
+        workplan_name="demo",
+        source_workplan="demo.yaml",
+        final_workplan="demo_transformed.yaml",
+    )
+
+    display = get_run_summary_display(summary)
+
+    assert "cstar run status my-run" in display
+    assert "cstar run log my-run <step-name>" in display
+    assert "cstar workplan" not in display

@@ -732,19 +732,24 @@ def symlink_relative(link: Path, target: Path, *, within: Path | None = None) ->
     target : Path
         The file or directory the link should point at.
     within : Path | None
-        When given, only a `target` inside this directory is linked relatively.
-        One outside it is linked by absolute path: a chain of `..` out of the
-        tree holding `link` and into another tree breaks as soon as only one of
-        the two moves, while an absolute path keeps naming the file where it
-        still is.
+        When given, the link is relative only if both `link` and `target` lie
+        inside this directory, the tree that moves as a unit. Otherwise it is
+        absolute: a chain of `..` that climbs out of one tree and into another
+        breaks as soon as only one of the two moves, while an absolute path keeps
+        naming the file where it still is.
     """
     link.parent.mkdir(parents=True, exist_ok=True)
+    physical_link = link.parent.resolve() / link.name
     physical_target = target.parent.resolve() / target.name
-    if within is not None and not physical_target.is_relative_to(within.resolve()):
-        link.symlink_to(physical_target)
-        return
+    if within is not None:
+        root = within.resolve()
+        if not (
+            physical_link.is_relative_to(root) and physical_target.is_relative_to(root)
+        ):
+            link.symlink_to(physical_target)
+            return
 
-    link.symlink_to(Path(os.path.relpath(physical_target, link.parent.resolve())))
+    link.symlink_to(Path(os.path.relpath(physical_target, physical_link.parent)))
 
 
 def rotate_file(path: Path) -> Path | None:

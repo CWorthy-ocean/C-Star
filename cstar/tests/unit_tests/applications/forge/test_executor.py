@@ -57,6 +57,7 @@ from cstar.applications.forge.namelist_model import n_tracers_from_param
 from cstar.applications.forge.resolve import build_forge_blueprint
 from cstar.applications.forge.templates import bundled_template_dir
 from cstar.base.env import ENV_CSTAR_RUNID
+from cstar.base.exceptions import CstarExpectationFailed
 from cstar.catalog.domain_catalog import default_catalog as _CATALOG
 from cstar.entrypoint.config import get_job_config, get_service_config
 from cstar.execution.file_system import DirectoryManager
@@ -68,7 +69,11 @@ from cstar.orchestration.models import (
     Provenance,
     Resource,
 )
-from cstar.orchestration.serialization import deserialize, read_blueprint_raw
+from cstar.orchestration.serialization import (
+    deserialize,
+    load_blueprint,
+    read_blueprint_raw,
+)
 from cstar.roms.namelist import RomsNamelistV0_9_0
 
 requires_cstar_pio = pytest.mark.skipif(
@@ -2325,6 +2330,34 @@ class TestForgeExecutorPersist:
         first = data[0]
         location = first["location"] if isinstance(first, dict) else first.location
         assert str(location) == str(resolved_work / "input_data" / "grid.nc")
+
+    def test_a_location_found_only_in_the_working_directory_loads_leniently(
+        self, minimal_cstar_spec_builder_args, tmp_path, monkeypatch
+    ):
+        """A relative location that exists only relative to the working directory
+        fails the strict load's check, which falls back to the lenient load rather
+        than crashing; the location is anchored next to the blueprint all the same.
+        """
+        builder = self._builder_with_locations(minimal_cstar_spec_builder_args)
+        builder.persist()
+        bp_path = builder.path_roms_marbl_blueprint()
+        data = yaml.safe_load(bp_path.read_text())
+        data["grid"]["data"][0]["location"] = "data/grid.nc"
+        bp_path.write_text(yaml.safe_dump(data))
+        cwd = tmp_path / "cwd"
+        (cwd / "data").mkdir(parents=True)
+        (cwd / "data" / "grid.nc").touch()
+        monkeypatch.chdir(cwd)
+        with pytest.raises(CstarExpectationFailed):
+            load_blueprint(bp_path, cstar_models.RomsMarblBlueprint)
+
+        loaded = builder.roms_marbl_blueprint_from_file
+
+        assert loaded is not None
+        grid = loaded.grid
+        first = (grid["data"] if isinstance(grid, dict) else grid.data)[0]
+        location = first["location"] if isinstance(first, dict) else first.location
+        assert str(location) == str(bp_path.parent.resolve() / "data" / "grid.nc")
 
     def test_persist_raises_when_roms_marbl_blueprint_none(
         self, minimal_cstar_spec_builder_args

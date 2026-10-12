@@ -129,7 +129,8 @@ class TestStagerSubclasses:
         mocksourcedata_local_file: SourceDataFactory,
     ) -> None:
         """Tests that LocalBinaryFileStager.stage() creates a symbolic link to the
-        source file, relative when the source is within the C-Star data home.
+        source file, relative when the run and the source are both within the C-Star
+        data home.
         """
         monkeypatch.setenv(ENV_CSTAR_DATA_HOME, str(tmp_path))
         source_dir = tmp_path / "src"
@@ -173,6 +174,31 @@ class TestStagerSubclasses:
         stager.LocalBinaryFileStager(source).stage(staging_dir)
 
         target = staging_dir / "source.bin"
+        assert target.readlink() == src_file.resolve()
+        assert target.read_bytes() == b"123"
+
+    def test_local_binary_file_stager_links_a_run_outside_the_data_home_absolutely(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        mocksourcedata_local_file: SourceDataFactory,
+    ) -> None:
+        """A run kept outside the C-Star data home links its inputs by absolute path,
+        even a source inside the data home, instead of a `..` chain into another tree.
+        """
+        data_home = tmp_path / "data_home"
+        data_home.mkdir()
+        monkeypatch.setenv(ENV_CSTAR_DATA_HOME, str(data_home))
+        src_file = data_home / "blueprint_runs" / "forge" / "input_data" / "grid.nc"
+        src_file.parent.mkdir(parents=True)
+        src_file.write_bytes(b"123")
+        source = mocksourcedata_local_file(location=src_file, identifier=None)
+        staging_dir = tmp_path / "scratch" / "run" / "input_datasets"
+        staging_dir.mkdir(parents=True)
+
+        stager.LocalBinaryFileStager(source).stage(staging_dir)
+
+        target = staging_dir / "grid.nc"
         assert target.readlink() == src_file.resolve()
         assert target.read_bytes() == b"123"
 

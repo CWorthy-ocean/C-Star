@@ -13,7 +13,7 @@ from pydantic import Field
 from cstar.base.adapter import SchemaAdapter
 from cstar.base.log import get_logger
 from cstar.entrypoint.config import JOBFILE_DATE_FORMAT
-from cstar.execution.file_system import local_copy
+from cstar.execution.file_system import is_remote_resource, local_copy
 from cstar.execution.handler import ExecutionStatus
 from cstar.orchestration.models import (
     BlueprintCore,
@@ -138,7 +138,11 @@ class RunnerRequest(t.Generic[TBlueprint]):
         """
         if self._bp is None:
             with local_copy(str(self.blueprint_uri)) as local_path:
-                self._bp = load_blueprint(local_path, self.bp_type)
+                self._bp = load_blueprint(
+                    local_path,
+                    self.bp_type,
+                    anchor=not is_remote_resource(str(self.blueprint_uri)),
+                )
         return self._bp
 
     @classmethod

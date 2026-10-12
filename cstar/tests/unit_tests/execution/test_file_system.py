@@ -961,8 +961,10 @@ def test_symlink_relative_existing_link_raises(tmp_path: Path) -> None:
         symlink_relative(link, target)
 
 
-def test_symlink_relative_within_keeps_relative_inside(tmp_path: Path) -> None:
-    """A target inside `within` is still linked relatively."""
+def test_symlink_relative_within_keeps_relative_when_both_are_inside(
+    tmp_path: Path,
+) -> None:
+    """A link and target both inside `within` are linked relatively."""
     home = tmp_path / "home"
     target = home / "source-run" / "output" / "file.nc"
     target.parent.mkdir(parents=True)
@@ -975,7 +977,7 @@ def test_symlink_relative_within_keeps_relative_inside(tmp_path: Path) -> None:
     assert link.read_text() == "data"
 
 
-def test_symlink_relative_within_falls_back_to_absolute_outside(
+def test_symlink_relative_within_falls_back_to_absolute_for_outside_target(
     tmp_path: Path,
 ) -> None:
     """A target outside `within` is linked by absolute path, not a `..` chain into
@@ -986,6 +988,24 @@ def test_symlink_relative_within_falls_back_to_absolute_outside(
     target.parent.mkdir(parents=True)
     target.write_text("data")
     link = home / "this-run" / "input" / "file.nc"
+
+    symlink_relative(link, target, within=home)
+
+    assert link.readlink() == target.resolve()
+    assert link.read_text() == "data"
+
+
+def test_symlink_relative_within_falls_back_to_absolute_for_outside_link(
+    tmp_path: Path,
+) -> None:
+    """A link outside `within`, such as a run kept elsewhere, is absolute even when
+    its target is inside.
+    """
+    home = tmp_path / "home"
+    target = home / "source-run" / "file.nc"
+    target.parent.mkdir(parents=True)
+    target.write_text("data")
+    link = tmp_path / "scratch" / "run" / "input" / "file.nc"
 
     symlink_relative(link, target, within=home)
 

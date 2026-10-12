@@ -65,7 +65,7 @@ class FindingKind(StrEnum):
     ABSOLUTE_LINK = auto()
     """A symlink has an absolute target inside the run; `repair_symlinks` rewrites it."""
     EXTERNAL_LINK = auto()
-    """A symlink has an absolute target outside the run; it cannot be made relative."""
+    """A symlink targets a place outside the run, by absolute or climbing relative path."""
     DANGLING_LINK = auto()
     """A symlink's target does not exist."""
     MISSING_STEP_DIR = auto()
@@ -310,8 +310,10 @@ def find_bad_symlinks(run_root: Path) -> list[Finding]:
     """Find the symlinks under the run that stop working when the run is moved.
 
     A link is reported once: as dangling when its target does not exist, else as
-    absolute when its target is an absolute path (inside the run, or outside it).
-    Links are never followed, so a link into the run cannot cause a cycle.
+    absolute when its target is an absolute path inside the run, or external when
+    its target lies outside the run, as an absolute path or as a relative one that
+    climbs out of it. Links are never followed, so a link into the run cannot cause
+    a cycle.
 
     Parameters
     ----------
@@ -338,7 +340,9 @@ def find_bad_symlinks(run_root: Path) -> list[Finding]:
                 kind = FindingKind.DANGLING_LINK
             elif _relative_to_prefix(target, prefixes) is not None:
                 kind = FindingKind.ABSOLUTE_LINK
-            elif os.path.isabs(target):
+            elif os.path.isabs(target) or not Path(
+                os.path.normpath(Path(directory, target))
+            ).is_relative_to(root):
                 kind = FindingKind.EXTERNAL_LINK
             else:
                 continue

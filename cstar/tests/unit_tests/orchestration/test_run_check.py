@@ -173,6 +173,29 @@ def test_symlinks_are_reported_once_each(run: FakeRun) -> None:
     assert len(findings) == 6
 
 
+def test_a_relative_link_that_climbs_out_of_the_run_is_external(
+    tmp_path: Path,
+) -> None:
+    """Verify a relative link whose target is outside the run is reported, as the
+    informational kind, while one that stays inside the run is not.
+    """
+    root = tmp_path / "run"
+    inputs = root / "tasks" / "a" / "input"
+    (root / "tasks" / "b").mkdir(parents=True)
+    (root / "tasks" / "b" / "x.nc").touch()
+    outside = tmp_path / "other" / "data.nc"
+    outside.parent.mkdir()
+    outside.touch()
+    link(inputs / "stays.nc", "../../b/x.nc")
+    link(inputs / "escapes.nc", "../../../../other/data.nc")
+
+    findings = find_bad_symlinks(root)
+
+    assert [(f.kind, f.file.name, f.path) for f in findings] == [
+        (FindingKind.EXTERNAL_LINK, "escapes.nc", "../../../../other/data.nc")
+    ]
+
+
 def test_symlink_findings_carry_the_link_text(run: FakeRun) -> None:
     """Verify the link text is reported as written."""
     findings = {f.file.name: f.path for f in find_bad_symlinks(run.root)}

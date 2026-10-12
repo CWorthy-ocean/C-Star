@@ -50,8 +50,8 @@ regenerate are skipped unless {ARG_ALL} is given. Steps that have not started
 have no directory yet.
 
 Task directories and sentinel files that no step accounts for, and symlinks to
-an absolute path outside the run, are listed for information and do not fail
-the check. Nothing is deleted.
+a place outside the run, are listed for information and do not fail the check.
+Nothing is deleted.
 
 {ARG_REPAIR} rewrites each absolute symlink that points inside the run as a
 relative one and rebuilds `gathered_output` if the run has one. It changes
@@ -68,7 +68,7 @@ _HEADINGS: t.Final[dict[FindingKind, str]] = {
     FindingKind.ABSOLUTE_LINK: f"Symlinks with an absolute target inside the run (fixed by {ARG_REPAIR})",
     FindingKind.DANGLING_LINK: "Symlinks whose target does not exist",
     FindingKind.MISSING_STEP_DIR: "Steps without a directory",
-    FindingKind.EXTERNAL_LINK: "Symlinks with an absolute target outside the run (informational)",
+    FindingKind.EXTERNAL_LINK: "Symlinks with a target outside the run (informational)",
 }
 """The heading of each kind of finding, in the order the kinds are listed."""
 

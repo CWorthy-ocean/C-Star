@@ -885,6 +885,27 @@ def test_anchor_relative_path_resolves_against_base_dir(
     assert anchored.is_absolute()
 
 
+def test_anchor_relative_path_keeps_a_symlink_as_the_name(tmp_path: Path) -> None:
+    """Verify a location that is a symlink is not followed: its name stays the one
+    written, while symlinked directories on the way are resolved.
+    """
+    real = tmp_path / "shared" / "v3" / "abc123.nc"
+    real.parent.mkdir(parents=True)
+    real.touch()
+    base_dir = tmp_path / "bp"
+    (base_dir / "data").mkdir(parents=True)
+    (base_dir / "data" / "grid.nc").symlink_to(real)
+    (base_dir / "linked").symlink_to(real.parent)
+
+    assert anchor_relative_path("data/grid.nc", base_dir) == (
+        base_dir.resolve() / "data" / "grid.nc"
+    )
+    assert anchor_relative_path("linked/abc123.nc", base_dir) == real.resolve()
+    assert anchor_relative_path("sub/../data", base_dir) == (
+        base_dir.resolve() / "data"
+    )
+
+
 @pytest.mark.parametrize(
     "text",
     [
@@ -1024,6 +1045,25 @@ def test_load_blueprint_reads_json(tmp_path: Path) -> None:
     assert bp.grid.data[0].location == (path.parent / "grid.nc").as_posix()
 
 
+def test_load_blueprint_keeps_a_symlinked_location_by_name(tmp_path: Path) -> None:
+    """Verify the staged name of a location that is a symlink is the link's."""
+    real = tmp_path / "shared" / "abc123.nc"
+    real.parent.mkdir()
+    real.touch()
+    (tmp_path / "bp").mkdir()
+    (tmp_path / "bp" / "grid.nc").symlink_to(real)
+    path = _write_blueprint_yaml(
+        tmp_path / "bp" / "bp.yaml",
+        "name: linked\ngrid:\n  data:\n    - location: grid.nc\n",
+    )
+
+    bp = load_blueprint(path, _BlueprintModel)
+
+    assert (
+        bp.grid.data[0].location == (tmp_path.resolve() / "bp" / "grid.nc").as_posix()
+    )
+
+
 def test_load_blueprint_anchors_symlinked_blueprint_at_its_target(
     tmp_path: Path,
 ) -> None:
@@ -1039,6 +1079,23 @@ def test_load_blueprint_anchors_symlinked_blueprint_at_its_target(
     bp = load_blueprint(link, _BlueprintModel)
 
     assert bp.grid.data[0].location == (real.resolve().parent / "grid.nc").as_posix()
+
+
+def test_load_blueprint_without_anchoring_leaves_locations_as_authored(
+    tmp_path: Path,
+) -> None:
+    """Verify `anchor=False`, for a blueprint downloaded to a temporary copy, loads
+    exactly as `deserialize` does.
+    """
+    path = _write_blueprint_yaml(
+        tmp_path / "bp.yaml",
+        "name: remote\ngrid:\n  data:\n    - location: ../data/grid.nc\n",
+    )
+
+    bp = load_blueprint(path, _BlueprintModel, anchor=False)
+
+    assert bp.grid.data[0].location == "../data/grid.nc"
+    assert bp == deserialize(path, _BlueprintModel)
 
 
 def test_load_blueprint_missing_file(tmp_path: Path) -> None:
@@ -1093,6 +1150,29 @@ def test_load_blueprint_reports_every_stranded_location(
     message = str(exc_info.value)
     assert "'a.nc'" in message
     assert "'b.nc'" in message
+
+
+def test_read_blueprint_raw_not_strict_anchors_cwd_only_locations(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Verify a knowingly partial document is anchored without the check that
+    rejects a location existing only relative to the working directory.
+    """
+    cwd = tmp_path / "cwd"
+    cwd.mkdir()
+    (cwd / "a.nc").touch()
+    monkeypatch.chdir(cwd)
+    path = _write_blueprint_yaml(
+        tmp_path / "bp" / "bp.yaml",
+        "name: partial\ngrid:\n  data:\n    - location: a.nc\n",
+    )
+
+    with pytest.raises(CstarExpectationFailed):
+        read_blueprint_raw(path)
+
+    raw = read_blueprint_raw(path, strict=False)
+
+    assert raw["grid"]["data"][0]["location"] == (tmp_path / "bp" / "a.nc").as_posix()
 
 
 def test_load_blueprint_missing_everywhere_passes_through(

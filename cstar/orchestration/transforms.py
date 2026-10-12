@@ -26,6 +26,7 @@ from cstar.base.log import LoggingMixin, get_logger
 from cstar.base.utils import deep_merge
 from cstar.execution.file_system import (
     JobFileSystemManager,
+    is_remote_resource,
     local_copy,
 )
 from cstar.orchestration.adapter import DIRECTIVES_FILENAME, prepare_directive_file
@@ -1981,7 +1982,16 @@ class DirectiveConfig(BaseModel):
                 workplan = DirectiveConfig.load_workplan()
 
             app = get_app_for_blueprint(Path(local_bp))
-            blueprint = t.cast("Blueprint", load_blueprint(local_bp, app.blueprint))
+            # only the working directory is taken from this read; a downloaded copy
+            # has no directory of its own for relative locations to anchor to
+            blueprint = t.cast(
+                "Blueprint",
+                load_blueprint(
+                    local_bp,
+                    app.blueprint,
+                    anchor=not is_remote_resource(blueprint_uri),
+                ),
+            )
 
             step = LiveStep(
                 name="directive-step",

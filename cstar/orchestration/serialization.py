@@ -382,10 +382,12 @@ def anchor_relative_path(text: str, base_dir: Path) -> Path | None:
     Returns
     -------
     Path | None
-        The absolute, resolved path, or `None` when `text` is not a relative file
-        path: it is empty, still holds a `{{placeholder}}`, is a URI (a remote
-        resource, or a sentinel such as Forge's `cstar-forge:...` placeholders),
-        or is already absolute.
+        The absolute path, or `None` when `text` is not a relative file path: it
+        is empty, still holds a `{{placeholder}}`, is a URI (a remote resource, or
+        a sentinel such as Forge's `cstar-forge:...` placeholders), or is already
+        absolute. Symlinked directories along the way are resolved, but the final
+        component is kept as written: a link at the path stays a link, so the
+        name the file is staged and referred to by is the one the author chose.
     """
     text = text.strip()
     if not text or PLACEHOLDER_RE.search(text) or urlsplit(text).scheme:
@@ -395,7 +397,10 @@ def anchor_relative_path(text: str, base_dir: Path) -> Path | None:
     if path.is_absolute():
         return None
 
-    return (base_dir / path).resolve()
+    joined = base_dir / path
+    if joined.name in {"", ".", ".."}:
+        return joined.resolve()
+    return joined.parent.resolve() / joined.name
 
 
 def _map_locations(node: t.Any, fn: Callable[[str], str]) -> t.Any:
@@ -425,7 +430,7 @@ def _map_locations(node: t.Any, fn: Callable[[str], str]) -> t.Any:
     return node
 
 
-def anchor_locations(node: t.Any, base_dir: Path) -> t.Any:
+def anchor_locations(node: t.Any, base_dir: Path, *, strict: bool = True) -> t.Any:
     """Make every relative `location` in a raw blueprint mapping absolute.
 
     Walks nested mappings and lists, replacing each string value found under the
@@ -439,6 +444,10 @@ def anchor_locations(node: t.Any, base_dir: Path) -> t.Any:
         The raw mapping (or any nested part of one) to anchor.
     base_dir : Path
         The directory relative locations are relative to; the blueprint file's.
+    strict : bool
+        Pass `False` to read a document that is knowingly partial, such as a
+        blueprint Forge has persisted before its inputs exist: a location that
+        does not exist is then anchored without the check described below.
 
     Returns
     -------
@@ -448,10 +457,10 @@ def anchor_locations(node: t.Any, base_dir: Path) -> t.Any:
     Raises
     ------
     CstarExpectationFailed
-        If a relative location does not exist next to `base_dir` but does exist
-        relative to the working directory, which is where C-Star resolved it
-        before locations were anchored to the blueprint; the message lists
-        every such location with both candidate paths.
+        If `strict` and a relative location does not exist next to `base_dir` but
+        does exist relative to the working directory, which is where C-Star
+        resolved it before locations were anchored to the blueprint; the message
+        lists every such location with both candidate paths.
     """
     stranded: list[tuple[str, Path, Path]] = []
 
@@ -461,7 +470,7 @@ def anchor_locations(node: t.Any, base_dir: Path) -> t.Any:
             return text
 
         in_cwd = Path.cwd() / text.strip()
-        if not anchored.exists() and in_cwd.exists():
+        if strict and not anchored.exists() and in_cwd.exists():
             stranded.append((text, anchored, in_cwd))
         return anchored.as_posix()
 
@@ -524,28 +533,30 @@ def relativize_locations(node: t.Any, root: Path, base_dir: Path) -> t.Any:
     return _map_locations(node, relativize)
 
 
-def read_blueprint_raw(path: Path | str) -> dict[str, t.Any]:
+def read_blueprint_raw(path: Path | str, *, strict: bool = True) -> dict[str, t.Any]:
     """Read a blueprint file's raw mapping with its relative locations anchored.
 
     This is the single place a blueprint's `location` values acquire the
     directory of the file they were written in: everything downstream sees
     absolute locations. Relative locations resolve against the directory the
     file really lives in (a symlinked blueprint anchors where its target is,
-    as `local_copy` does), so a blueprint fetched from a URL, which is read from
-    a temporary copy, should use absolute or remote locations.
+    as `local_copy` does).
 
     Parameters
     ----------
     path : Path | str
         The local file holding the blueprint, as JSON or YAML.
+    strict : bool
+        Whether a relative location that exists only relative to the working
+        directory is rejected; see `anchor_locations`.
 
     Raises
     ------
     FileNotFoundError
         If the blueprint file does not exist.
     CstarExpectationFailed
-        If a relative location exists only relative to the working directory;
-        see `anchor_locations`.
+        If `strict` and a relative location exists only relative to the working
+        directory.
 
     Returns
     -------
@@ -556,10 +567,10 @@ def read_blueprint_raw(path: Path | str) -> dict[str, t.Any]:
         msg = f"No blueprint file found at path `{path}`"
         raise FileNotFoundError(errno.ENOENT, msg, path)
 
-    return anchor_locations(read_document(path), path.parent)
+    return anchor_locations(read_document(path), path.parent, strict=strict)
 
 
-def load_blueprint(path: Path | str, klass: type[_T]) -> _T:
+def load_blueprint(path: Path | str, klass: type[_T], *, anchor: bool = True) -> _T:
     """Load a blueprint file into a model, anchoring its relative locations.
 
     The counterpart of `deserialize` for blueprints: identical, except that
@@ -572,6 +583,10 @@ def load_blueprint(path: Path | str, klass: type[_T]) -> _T:
         The local file holding the blueprint.
     klass : type[_T]
         The blueprint type to instantiate.
+    anchor : bool
+        Pass `False` for a blueprint fetched from a URL. It is read from a
+        temporary copy, so there is no directory its relative locations could be
+        relative to; they are left as authored, as `deserialize` leaves them.
 
     Raises
     ------
@@ -584,6 +599,9 @@ def load_blueprint(path: Path | str, klass: type[_T]) -> _T:
     -------
     _T
     """
+    if not anchor:
+        return deserialize(path, klass)
+
     model = klass.model_validate(read_blueprint_raw(path))  # type: ignore
 
     msg = f"Loaded {str(path)!r} into: {model}"

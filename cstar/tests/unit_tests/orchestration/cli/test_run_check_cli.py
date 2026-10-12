@@ -34,7 +34,7 @@ HEADINGS: t.Final[tuple[str, ...]] = (
     f"Symlinks with an absolute target inside the run (fixed by {ARG_REPAIR}) (",
     "Symlinks whose target does not exist (",
     "Steps without a directory (",
-    "Symlinks with an absolute target outside the run (informational) (",
+    "Symlinks with a target outside the run (informational) (",
     "Task directories no step accounts for (informational) (",
     "Sentinel files no step accounts for (informational) (",
 )

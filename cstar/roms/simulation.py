@@ -54,7 +54,6 @@ from cstar.base.utils import (
     slugify,
 )
 from cstar.execution.file_system import (
-    DirectoryManager,
     is_remote_resource,
     remove_files,
     rotate_file,
@@ -2375,7 +2374,7 @@ class ROMSSimulation(Simulation):
         roms_symlink_path = run_path / self.exe_path.name
         roms_symlink_path.unlink(missing_ok=True)
         symlink_relative(
-            roms_symlink_path, self.exe_path, within=DirectoryManager.data_home()
+            roms_symlink_path, self.exe_path, within=self.fs_manager.root_dir
         )
 
         n_procs = self.discretization.n_procs_tot

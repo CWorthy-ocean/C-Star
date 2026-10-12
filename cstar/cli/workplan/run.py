@@ -233,7 +233,7 @@ def get_run_summary_display(summary: ExecutiveRunSummary) -> str:
 
     prompts = [
         ("For run status details", f"cstar run status {summary.run_id}"),
-        ("To review logs", f"cstar workplan log {summary.run_id} <step-name>"),
+        ("To review logs", f"cstar run log {summary.run_id} <step-name>"),
     ]
 
     actions_content = [f"{prefix}{INDENT}- {present(*prompt)}" for prompt in prompts]

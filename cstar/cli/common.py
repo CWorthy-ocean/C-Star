@@ -548,7 +548,7 @@ def persist_migration(request: MigrationRequest, result: MigrateResult) -> Path:
         bp_type = get_application(result.application).blueprint
         migrated = result.migrated
         source_dir = request.source.expanduser().resolve().parent
-        if persist_to.parent != source_dir:
+        if persist_to.expanduser().resolve().parent != source_dir:
             migrated = anchor_locations(migrated, source_dir)
         updated_bp = bp_type(**migrated)
         if request.in_place:

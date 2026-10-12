@@ -14,7 +14,6 @@ import xarray as xr
 from pydantic import ValidationError
 
 from cstar.base.additional_code import AdditionalCode
-from cstar.base.env import ENV_CSTAR_DATA_HOME
 from cstar.base.exceptions import CstarExpectationFailed
 from cstar.base.external_codebase import ExternalCodeBase
 from cstar.base.input_dataset import InputDataset
@@ -2448,17 +2447,15 @@ class TestProcessingAndExecution:
     @mock.patch.object(
         ROMSSimulation, "roms_runtime_settings", new_callable=mock.PropertyMock
     )
-    def test_prepare_launch_links_an_executable_outside_the_data_home_absolutely(
+    def test_prepare_launch_links_an_executable_outside_the_run_absolutely(
         self,
         mock_runtime_settings,
         stub_romssimulation: ROMSSimulation,
         stageddatacollection_remote_files,
         tmp_path_factory: pytest.TempPathFactory,
-        monkeypatch: pytest.MonkeyPatch,
     ):
-        """An executable built outside the C-Star data home is linked by absolute path."""
+        """An executable built outside the simulation's root is linked by absolute path."""
         sim = stub_romssimulation
-        monkeypatch.setenv(ENV_CSTAR_DATA_HOME, str(sim.directory))
         sim.exe_path = tmp_path_factory.mktemp("prebuilt") / "roms"
         sim.exe_path.write_text("binary")
         runtime_code_dir = sim.fs_manager.runtime_code_dir
@@ -2489,14 +2486,12 @@ class TestProcessingAndExecution:
         mock_runtime_settings,
         stub_romssimulation: ROMSSimulation,
         stageddatacollection_remote_files,
-        monkeypatch: pytest.MonkeyPatch,
     ):
         """`prepare_launch` writes the namelist, links the executable and
         returns the launch command, but neither starts a local process nor
         creates a scheduler job.
         """
         sim = stub_romssimulation
-        monkeypatch.setenv(ENV_CSTAR_DATA_HOME, str(sim.directory))
 
         with (
             mock.patch("cstar.roms.simulation.LocalProcess") as mock_local_process,

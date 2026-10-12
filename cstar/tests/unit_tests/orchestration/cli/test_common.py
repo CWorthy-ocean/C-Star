@@ -286,6 +286,26 @@ def test_persist_migration_keeps_relative_locations_beside_the_source(
     assert location == "../data/boundary.nc"
 
 
+def test_persist_migration_keeps_relative_locations_for_a_relative_target(
+    relative_location_bp: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Verify `--output migrated.yaml`, given from the source's own directory, is
+    beside the source and so keeps the authored text.
+    """
+    monkeypatch.chdir(relative_location_bp.parent)
+    migrated = yaml.safe_load(relative_location_bp.read_text())
+    plan = MigrationPlan(migrated["schema_version"], migrated["schema_version"], ())
+    request = MigrationRequest(path=relative_location_bp, output=Path("migrated.yaml"))
+
+    persisted = persist_migration(request, MigrateResult(migrated, migrated, plan=plan))
+
+    location = yaml.safe_load(persisted.read_text())["forcing"]["boundary"]["data"][0][
+        "location"
+    ]
+    assert persisted.parent == relative_location_bp.parent.resolve()
+    assert location == "../data/boundary.nc"
+
+
 def test_persist_migration_rejects_cwd_only_locations(
     relative_location_bp: Path,
     tmp_path: Path,
