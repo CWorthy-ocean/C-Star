@@ -7,7 +7,12 @@ from typer.testing import CliRunner
 
 from cstar.cli.workplan.check import app
 from cstar.entrypoint.utils import ARG_SCHEMA_ONLY
-from cstar.orchestration.models import TRANSFORMED_NAME_SUFFIX, RunRef, Step, Workplan
+from cstar.orchestration.models import (
+    LEGACY_TRANSFORMED_NAME_SUFFIX,
+    RunRef,
+    Step,
+    Workplan,
+)
 from cstar.orchestration.orchestration import LiveStep, LiveWorkplan
 from cstar.orchestration.serialization import (
     deserialize,
@@ -345,13 +350,15 @@ def _persist_live_workplan(path: Path, name: str, blueprint: Path) -> LiveWorkpl
     return wp
 
 
+@pytest.mark.parametrize("legacy_name", [False, True])
 def test_workplan_check_accepts_a_transformed_workplan(
     tmp_path: Path,
     hello_world_bp_path: Path,
+    legacy_name: bool,
 ) -> None:
-    """Verify a transformed workplan as the transformer persists it, named
-    `<name> (transformed)` and with a `working_dir` on each step, passes the
-    check without deep resolution although its name is not a slug.
+    """Verify a transformed workplan with a `working_dir` on each step passes
+    the check without deep resolution, also when an earlier release persisted
+    it under the name `<name> (transformed)`.
 
     Parameters
     ----------
@@ -359,11 +366,15 @@ def test_workplan_check_accepts_a_transformed_workplan(
         Temporary directory to read/write test inputs and outputs
     hello_world_bp_path : Path
         Fixture returning the path to a hello-world blueprint
+    legacy_name : bool
+        Whether to persist the file under the pre-0.17 name
     """
     wp_path = tmp_path / "workplan_transformed.yaml"
-    wp = _persist_live_workplan(
-        wp_path, f"my-plan{TRANSFORMED_NAME_SUFFIX}", hello_world_bp_path
-    )
+    wp = _persist_live_workplan(wp_path, "my-plan", hello_world_bp_path)
+    if legacy_name:
+        legacy = yaml.safe_load(wp_path.read_text())
+        legacy["name"] = f"my-plan{LEGACY_TRANSFORMED_NAME_SUFFIX}"
+        wp_path.write_text(yaml.safe_dump(legacy))
     assert "working_dir" in wp_path.read_text()
 
     result = CliRunner().invoke(app, [wp_path.as_posix()], color=False)
@@ -378,8 +389,7 @@ def test_workplan_check_refuses_an_authored_non_slug_name_without_working_dirs(
     hello_world_bp_path: Path,
 ) -> None:
     """Verify an authored workplan, which carries no step `working_dir`, is not
-    taken for a persisted one because it would also load as a `LiveWorkplan`:
-    its non-slug name is reported.
+    taken for a transformed one: its non-slug name is reported.
 
     Parameters
     ----------
@@ -399,7 +409,6 @@ def test_workplan_check_refuses_an_authored_non_slug_name_without_working_dirs(
     ), "serializing test workplan failed"
     wp_path.write_text(wp_path.read_text().replace("name: my-plan", "name: My Plan"))
     assert "working_dir" not in wp_path.read_text()
-    assert deserialize(wp_path, LiveWorkplan).name == "My Plan"
 
     result = CliRunner().invoke(app, [wp_path.as_posix()], color=False)
 

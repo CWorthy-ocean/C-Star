@@ -28,6 +28,7 @@ from cstar.cli.workplan.run import (
     refuse_run_id_collision,
 )
 from cstar.entrypoint.utils import ARG_CLOBBER, ARG_PRE_RUN, ARG_RESUME, ARG_RUN_ID
+from cstar.execution.file_system import StateDirectoryManager
 from cstar.orchestration.dag_runner import (
     NoPreparableStepsError,
     get_launcher,
@@ -3233,3 +3234,167 @@ def test_workplan_run_reload_reports_orphans(
     warnings = [r.getMessage() for r in caplog.records if r.levelname == "WARNING"]
     assert any(str(leftover) in w and "left in place" in w for w in warnings)
     assert leftover.is_dir()
+
+
+def _persist_transformed_workplan(wp_path: Path, trx_path: Path) -> LiveWorkplan:
+    """Persist the live form of the authored workplan at `wp_path` to `trx_path`."""
+    wp = deserialize(wp_path, Workplan)
+    live_steps = [LiveStep.from_step(step) for step in wp.steps]
+    lwp = LiveWorkplan(**wp.model_dump(exclude={"steps"}), steps=live_steps)
+    assert serialize(trx_path, lwp), "serializing live workplan failed in test"
+    return lwp
+
+
+def test_workplan_run_reenters_the_run_of_a_transformed_workplan(
+    tmp_path: Path,
+    wp_templates_dir: Path,
+) -> None:
+    """Verify passing the transformed workplan a run persisted re-enters that
+    run as `--run-id <id>` does: the run-id is the workplan name, the record is
+    reloaded, and `run_dag` receives the recorded paths instead of the file
+    being prepared again.
+    """
+    wp_path = wp_templates_dir / "workplan.yaml"
+    trx_path = tmp_path / "workplan_transformed.yaml"
+    lwp = _persist_transformed_workplan(wp_path, trx_path)
+    record = WorkplanRun(
+        workplan_path=wp_path,
+        trx_workplan_path=trx_path,
+        output_path=tmp_path,
+        run_id=lwp.name,
+    )
+
+    with (
+        mock.patch(
+            "cstar.cli.workplan.run.handle_run_reloading",
+            mock.AsyncMock(return_value=record),
+        ) as mock_reload,
+        mock.patch(
+            "cstar.cli.workplan.run.run_dag", mock.AsyncMock(return_value=record)
+        ) as mock_run_dag,
+        mock.patch(
+            "cstar.cli.workplan.run.build_and_run_dag", wraps=fake_build_and_run_dag
+        ) as mock_build_and_run_dag,
+    ):
+        result = CliRunner().invoke(app, [trx_path.as_posix()], color=False)
+
+    assert result.exit_code == 0, result.output
+    mock_reload.assert_awaited_once_with(lwp.name)
+    mock_build_and_run_dag.assert_not_awaited()
+    mock_run_dag.assert_awaited_once()
+    assert mock_run_dag.await_args is not None
+    call_args = mock_run_dag.await_args.args
+    assert call_args[0] == wp_path
+    assert call_args[1] == trx_path
+    assert call_args[2] == lwp.name
+    assert isinstance(call_args[3], Planner)
+
+
+def test_workplan_run_refuses_a_transformed_workplan_its_run_does_not_execute(
+    tmp_path: Path,
+    wp_templates_dir: Path,
+    squash_cli_output: Callable[[str], str],
+) -> None:
+    """Verify a transformed workplan at a path other than the one the run's
+    record executes (a copy elsewhere, a rotated attempt) is refused, naming
+    both paths and the `--run-id` way in.
+    """
+    wp_path = wp_templates_dir / "workplan.yaml"
+    trx_path = tmp_path / "copy" / "workplan_transformed.yaml"
+    trx_path.parent.mkdir()
+    lwp = _persist_transformed_workplan(wp_path, trx_path)
+    recorded_trx = tmp_path / "run" / "workplan_transformed.yaml"
+    record = WorkplanRun(
+        workplan_path=wp_path,
+        trx_workplan_path=recorded_trx,
+        output_path=tmp_path / "run",
+        run_id=lwp.name,
+    )
+
+    with (
+        mock.patch(
+            "cstar.cli.workplan.run.handle_run_reloading",
+            mock.AsyncMock(return_value=record),
+        ),
+        mock.patch("cstar.cli.workplan.run.run_dag", mock.AsyncMock()) as mock_run_dag,
+        mock.patch(
+            "cstar.cli.workplan.run.build_and_run_dag", wraps=fake_build_and_run_dag
+        ) as mock_build_and_run_dag,
+    ):
+        result = CliRunner().invoke(app, [trx_path.as_posix()], color=False)
+
+    assert result.exit_code == 2, result.output
+    mock_run_dag.assert_not_awaited()
+    mock_build_and_run_dag.assert_not_awaited()
+    squashed = squash_cli_output(result.output)
+    assert str(trx_path) in squashed
+    assert str(recorded_trx) in squashed
+    assert f"{ARG_RUN_ID}{lwp.name}" in squashed
+
+
+def test_workplan_run_refuses_pre_run_of_a_transformed_workplan(
+    tmp_path: Path,
+    wp_templates_dir: Path,
+    flatten_cli_output: Callable[[str], str],
+) -> None:
+    """Verify `--pre-run` is refused with a transformed workplan, which replays
+    its recorded plan as a reload by run-id does.
+    """
+    wp_path = wp_templates_dir / "workplan.yaml"
+    trx_path = tmp_path / "workplan_transformed.yaml"
+    _persist_transformed_workplan(wp_path, trx_path)
+
+    with (
+        mock.patch(
+            "cstar.cli.workplan.run.handle_run_reloading", mock.AsyncMock()
+        ) as mock_reload,
+        mock.patch(
+            "cstar.cli.workplan.run.build_and_run_dag", wraps=fake_build_and_run_dag
+        ) as mock_build_and_run_dag,
+    ):
+        result = CliRunner().invoke(
+            app, [ARG_PRE_RUN, trx_path.as_posix()], color=False
+        )
+
+    assert result.exit_code == 2, result.output
+    mock_reload.assert_not_awaited()
+    mock_build_and_run_dag.assert_not_awaited()
+    assert "needs the authored workplan" in flatten_cli_output(result.output)
+
+
+def test_workplan_run_reenters_a_run_started_under_an_explicit_run_id(
+    wp_templates_dir: Path,
+) -> None:
+    """Verify a transformed workplan inside a run directory re-enters that run,
+    whose id was given explicitly when it started and so is not its name.
+    """
+    wp_path = wp_templates_dir / "workplan.yaml"
+    run_id = "custom-id"
+    run_dir = StateDirectoryManager.data_dir(run_id)
+    run_dir.mkdir(parents=True)
+    trx_path = run_dir / "workplan_transformed.yaml"
+    lwp = _persist_transformed_workplan(wp_path, trx_path)
+    assert lwp.name != run_id
+    record = WorkplanRun(
+        workplan_path=wp_path,
+        trx_workplan_path=trx_path,
+        output_path=run_dir,
+        run_id=run_id,
+    )
+
+    with (
+        mock.patch(
+            "cstar.cli.workplan.run.handle_run_reloading",
+            mock.AsyncMock(return_value=record),
+        ) as mock_reload,
+        mock.patch(
+            "cstar.cli.workplan.run.run_dag", mock.AsyncMock(return_value=record)
+        ) as mock_run_dag,
+    ):
+        result = CliRunner().invoke(app, [trx_path.as_posix()], color=False)
+
+    assert result.exit_code == 0, result.output
+    mock_reload.assert_awaited_once_with(run_id)
+    mock_run_dag.assert_awaited_once()
+    assert mock_run_dag.await_args is not None
+    assert mock_run_dag.await_args.args[2] == run_id

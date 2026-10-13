@@ -3,7 +3,6 @@ import typing as t
 from pathlib import Path
 
 import typer
-from pydantic import ValidationError
 
 from cstar.cli.workplan.shared import preprocess_varfile, preprocess_vars
 from cstar.entrypoint.utils import (
@@ -19,34 +18,13 @@ from cstar.entrypoint.utils import (
 from cstar.orchestration.check import deep_check
 from cstar.orchestration.dag_runner import get_launcher
 from cstar.orchestration.models import Workplan
-from cstar.orchestration.orchestration import LiveWorkplan
+from cstar.orchestration.orchestration import LiveWorkplan, is_transformed_workplan
 from cstar.orchestration.serialization import validate_serialized_entity
 
 if t.TYPE_CHECKING:
     from collections.abc import Mapping
 
 app = typer.Typer()
-
-
-def _is_live_form(error: ValueError | None) -> bool:
-    """Determine whether a validation error shows a workplan persisted in its live form.
-
-    Only the transformed workplan a run persists carries a `working_dir` on its
-    steps, which a `Step` forbids.
-
-    Parameters
-    ----------
-    error : ValueError | None
-        The error raised while validating a workplan, if any.
-
-    Returns
-    -------
-    bool
-    """
-    return isinstance(error, ValidationError) and any(
-        detail["type"] == "extra_forbidden" and "working_dir" in detail["loc"]
-        for detail in error.errors()
-    )
 
 
 def _deep_check(
@@ -172,10 +150,10 @@ def check(
 
     error = schema_result.error_msg
 
-    # a `LiveWorkplan` accepts any name and derives each step's `working_dir`, so
-    # it is tried only for a file that carries them: an authored workplan keeps
-    # its own error, as it does for `run`
-    if _is_live_form(schema_result.error):
+    # a `LiveWorkplan` normalizes its name and derives each step's `working_dir`,
+    # so it is tried only for a file whose every step carries one: an authored
+    # workplan keeps its own error, as it does for `run`
+    if is_transformed_workplan(Path(path)):
         live_result = validate_serialized_entity(path, LiveWorkplan)
         if live_result.item is not None:
             print(f"The workplan `{live_result.item.name}` is valid")

@@ -73,7 +73,11 @@ from cstar.orchestration.dag_runner import (
 )
 from cstar.orchestration.launch.slurm import SlurmLauncher
 from cstar.orchestration.models import BlueprintCore, Step, Workplan
-from cstar.orchestration.orchestration import LiveWorkplan, ProcessHandle
+from cstar.orchestration.orchestration import (
+    LiveWorkplan,
+    ProcessHandle,
+    is_transformed_workplan,
+)
 from cstar.orchestration.run_check import report_orphans
 from cstar.orchestration.serialization import (
     PersistenceMode,
@@ -462,11 +466,16 @@ def preprocess_path(workplan_path: str | None) -> str | None:
 
                 local_path = Path(auto_compose(str(local_path)))
 
-                validation_result = validate_serialized_entity(local_path, Workplan)
+                # the transformed workplan of a run is re-entered, never prepared
+                live = is_transformed_workplan(local_path)
+                klass: type[Workplan] = LiveWorkplan if live else Workplan
+                validation_result = validate_serialized_entity(local_path, klass)
                 if not validation_result.item:
                     log.error(validation_result.error_msg)
                     msg = f"The workplan file in `{workplan_path}` is improperly formatted"
                     raise typer.BadParameter(msg)
+                if live:
+                    return str(local_path)
 
                 try:
                     migrate_steps(local_path, validation_result.item)
@@ -655,6 +664,37 @@ async def handle_run_reloading(run_id: str) -> WorkplanRun:
     return wp_run
 
 
+def verify_live_source(trx_path: Path, wp_run: WorkplanRun) -> None:
+    """Ensure a transformed workplan supplied by path is the one `wp_run` executes.
+
+    A transformed workplan re-enters the run it belongs to. A copy of it
+    elsewhere, or a rotated earlier attempt, is a plan no record executes and
+    is refused until a run can be attached from disk.
+
+    Parameters
+    ----------
+    trx_path : Path
+        The transformed workplan path supplied on the command line.
+    wp_run : WorkplanRun
+        The recorded run being re-entered.
+
+    Raises
+    ------
+    typer.BadParameter
+        If the supplied path is not the transformed workplan the record executes.
+    """
+    recorded = wp_run.trx_workplan_path
+    if trx_path.resolve() == recorded.resolve():
+        return
+
+    msg = (
+        f"{str(trx_path)!r} is a transformed workplan, but run {wp_run.run_id!r} "
+        f"executes {str(recorded)!r}; pass {ARG_RUN_ID} {wp_run.run_id} without a "
+        "workplan path to re-enter the run as recorded"
+    )
+    raise typer.BadParameter(msg)
+
+
 def verify_resume_source(wp_path: Path, wp_run: WorkplanRun) -> None:
     """Ensure the workplan supplied with `--resume` is the one `wp_run` started from.
 
@@ -794,6 +834,8 @@ def run(
         msg = "`--var` and `--varfile` must not be supplied together"
         raise typer.BadParameter(msg)
 
+    live = bool(path) and Path(path).is_file() and is_transformed_workplan(Path(path))
+
     problems = [
         msg
         for condition, msg in (
@@ -804,6 +846,13 @@ def run(
                 (
                     f"{ARG_PRE_RUN} requires a workplan path: reloading a run by "
                     "--run-id replays its recorded plan as-is"
+                ),
+            ),
+            (
+                pre_run and live,
+                (
+                    f"{ARG_PRE_RUN} needs the authored workplan, not its transformed "
+                    "copy, which replays the recorded plan as-is"
                 ),
             ),
             (
@@ -826,11 +875,13 @@ def run(
     if problems:
         raise typer.BadParameter("; ".join(problems))
 
-    reload = resume or not path
+    reload = resume or not path or live
 
     if reload:
         wp_run = asyncio.run(handle_run_reloading(run_id))
-        if path:
+        if path and live:
+            verify_live_source(Path(path), wp_run)
+        elif path:
             verify_resume_source(Path(path), wp_run)
         original_path, trx_path = wp_run.workplan_path, wp_run.trx_workplan_path
         path = str(trx_path)

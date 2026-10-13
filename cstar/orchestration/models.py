@@ -48,8 +48,8 @@ RequiredString: t.TypeAlias = t.Annotated[
 ]
 """A non-empty string with no leading or trailing whitespace."""
 
-TRANSFORMED_NAME_SUFFIX: t.Final[str] = " (transformed)"
-"""The suffix appended to a workplan's name when its transformed copy is persisted."""
+LEGACY_TRANSFORMED_NAME_SUFFIX: t.Final[str] = " (transformed)"
+"""The suffix releases before 0.17 appended to a workplan's name in its transformed copy."""
 
 RUN_ALIAS_SEPARATOR: t.Final[str] = "@"
 """The character separating a step name from the alias of an external workplan
@@ -927,10 +927,6 @@ class Workplan(ConfiguredBaseModel):
     )
     """Configures the behavior of the pydantic model."""
 
-    _REQUIRE_SLUG_NAME: t.ClassVar[bool] = True
-    """Whether `name` must be its own slug. A subclass holding persisted output
-    clears it, since that output keeps whatever name it was given."""
-
     @field_validator("name")
     @classmethod
     def require_slug_name(cls, value: str) -> str:
@@ -949,9 +945,9 @@ class Workplan(ConfiguredBaseModel):
         Raises
         ------
         ValueError
-            If the name differs from its slug and the model requires one.
+            If the name differs from its slug.
         """
-        if cls._REQUIRE_SLUG_NAME and value != (slug := slugify(value)):
+        if value != (slug := slugify(value)):
             msg = (
                 f"workplan name {value!r} is not a valid run-id; "
                 f"use {slug!r} (the id this workplan already produced)"

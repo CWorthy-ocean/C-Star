@@ -59,7 +59,12 @@ from cstar.orchestration.models import (
     WorkplanState,
 )
 from cstar.orchestration.orchestration import LiveStep, LiveWorkplan, Planner, Status
-from cstar.orchestration.serialization import PersistenceMode, deserialize, serialize
+from cstar.orchestration.serialization import (
+    PersistenceMode,
+    deserialize,
+    read_raw,
+    serialize,
+)
 from cstar.orchestration.state import StateRepository
 from cstar.orchestration.tracking import TrackingRepository, WorkplanRun
 from cstar.orchestration.transforms import WorkplanTransformer
@@ -658,13 +663,17 @@ async def test_prepare_workplan_persists_original_backup(
     wp_path = wp_templates_dir / "workplan.yaml"
     output_dir = tmp_path / "output"
 
-    await prepare_workplan(wp_path, output_dir, clobber_steps=["Prepare"])
+    _, trx_path, _ = await prepare_workplan(
+        wp_path, output_dir, clobber_steps=["Prepare"]
+    )
 
     backup_path = original_workplan_backup(wp_path, output_dir)
     assert backup_path.exists()
 
     backup = deserialize(backup_path, Workplan, mode=PersistenceMode.yaml)
     assert backup == deserialize(wp_path, Workplan)
+    # the transformed copy keeps the name, which is the run-id, as written
+    assert read_raw(trx_path)["name"] == backup.name
 
 
 @pytest.mark.usefixtures("read_yaml_intercept")

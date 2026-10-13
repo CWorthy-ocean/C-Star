@@ -5,11 +5,13 @@ from collections.abc import Awaitable, Callable, Iterable, Mapping, Sequence
 from enum import IntEnum, auto
 from pathlib import Path
 
+import yaml
 from pydantic import (
     BaseModel,
     ConfigDict,
     Field,
     ValidationError,
+    field_validator,
     model_validator,
 )
 
@@ -30,6 +32,7 @@ from cstar.execution.file_system import (
 )
 from cstar.orchestration.formatting import ModelFormatter
 from cstar.orchestration.models import (
+    LEGACY_TRANSFORMED_NAME_SUFFIX,
     Blueprint,
     ConfiguredBaseModel,
     DeferredBlueprintRef,
@@ -39,8 +42,10 @@ from cstar.orchestration.models import (
     Workplan,
 )
 from cstar.orchestration.serialization import (
+    PersistenceMode,
     deserialize,
     intenum_representer,
+    read_raw,
     register_representer,
 )
 from cstar.system.environment import get_envfield_alias
@@ -395,11 +400,39 @@ def synthesize_blueprint(step: LiveStep, overrides: Mapping[str, t.Any]) -> Blue
 class LiveWorkplan(Workplan):
     steps: Sequence[LiveStep]
 
-    # persisted transformed workplans are outputs of a run (preparation renames
-    # them, e.g. to `<name> (transformed)`) and keep whatever name they were given
-    _REQUIRE_SLUG_NAME: t.ClassVar[bool] = False
-
     _lookup: Mapping[str, LiveStep] | None = None
+
+    @field_validator("name", mode="before")
+    @classmethod
+    def normalize_legacy_name(cls, value: t.Any) -> t.Any:
+        """Reduce a name an earlier release persisted to the run-id it produced.
+
+        Transformed workplans written before 0.17 were renamed to
+        `<name> (transformed)` and could carry a non-slug name, while the run
+        they belong to was always identified by the slug of the authored name.
+        A name without that suffix is left for the slug rule as it is.
+
+        Parameters
+        ----------
+        value : t.Any
+            The persisted name
+
+        Returns
+        -------
+        t.Any
+            The slug of the name without the legacy suffix; the name without
+            the suffix when nothing of it survives slugging; otherwise the
+            value unchanged.
+        """
+        if not isinstance(value, str) or not value.endswith(
+            LEGACY_TRANSFORMED_NAME_SUFFIX
+        ):
+            return value
+        authored = value.removesuffix(LEGACY_TRANSFORMED_NAME_SUFFIX)
+        try:
+            return slugify(authored)
+        except ValueError:
+            return authored
 
     def _get_step_lookup(self) -> Mapping[str, LiveStep]:
         """Build a mapping from step name to step for the steps
@@ -447,6 +480,71 @@ class LiveWorkplan(Workplan):
         """
         lookup = self._get_step_lookup()
         return step_name in lookup
+
+
+def is_transformed_workplan(
+    path: Path, mode: PersistenceMode = PersistenceMode.auto
+) -> bool:
+    """Determine whether a workplan file is the transformed form a run persists.
+
+    Only the transformed workplan a run persists carries a `working_dir` on
+    every step, which a `Step` forbids. An authored workplan with a stray
+    `working_dir` on some step is a schema error, not a transformed workplan.
+
+    Parameters
+    ----------
+    path : Path
+        The location of the workplan
+    mode : PersistenceMode
+        The serializer that wrote the file; `auto` selects by extension.
+
+    Returns
+    -------
+    bool
+        False also when the file cannot be read as a document.
+    """
+    try:
+        document = read_raw(path, mode)
+    except (OSError, RuntimeError, ValueError, yaml.YAMLError):
+        return False
+    if not isinstance(document, Mapping):
+        return False
+
+    steps = document.get("steps")
+    return (
+        isinstance(steps, list)
+        and bool(steps)
+        and all(isinstance(step, Mapping) and "working_dir" in step for step in steps)
+    )
+
+
+def read_workplan(path: Path, mode: PersistenceMode = PersistenceMode.auto) -> Workplan:
+    """Read a workplan persisted in either of its forms.
+
+    An authored workplan reads as a `Workplan`; the transformed workplan a run
+    persists, recognisable by the `working_dir` on its steps, reads as a
+    `LiveWorkplan`.
+
+    Parameters
+    ----------
+    path : Path
+        The location of the workplan
+    mode : PersistenceMode
+        The serializer that wrote the file; `auto` selects by extension.
+
+    Returns
+    -------
+    Workplan
+        The authored workplan, or the `LiveWorkplan` of a transformed one.
+
+    Raises
+    ------
+    pydantic.ValidationError
+        If the document is not valid in its form.
+    """
+    if is_transformed_workplan(path, mode):
+        return deserialize(path, LiveWorkplan, mode=mode)
+    return deserialize(path, Workplan, mode=mode)
 
 
 class Task(BaseModel, t.Generic[_THandle]):

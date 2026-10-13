@@ -38,7 +38,6 @@ from cstar.orchestration.compute_environment import (
 from cstar.orchestration.launch.common import is_foreign_handle
 from cstar.orchestration.launch.slurm import SlurmComputeSpec
 from cstar.orchestration.models import (
-    TRANSFORMED_NAME_SUFFIX,
     Blueprint,
     DeferredBlueprintRef,
     KeyValueStore,
@@ -1156,10 +1155,7 @@ class WorkplanTransformer(LoggingMixin):
                     )
                     raise CstarExpectationFailed(msg)
 
-        update: dict[str, t.Any] = {
-            "steps": transformed_steps,
-            "name": f"{self.original.name}{TRANSFORMED_NAME_SUFFIX}",
-        }
+        update: dict[str, t.Any] = {"steps": transformed_steps}
         if self.original.runs:
             # pin each external run to the record resolved now
             update["runs"] = self.external.pinned()
