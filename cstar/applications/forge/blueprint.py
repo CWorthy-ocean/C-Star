@@ -831,8 +831,9 @@ class SourceSpec(_Section):
     alkalinity and DIC estimates back to the model salinity. ESPER was fit to GLODAP
     data with almost none below ~31 PSU, so at river-plume salinities it extrapolates
     unphysically (silicate > 100 mmol/m^3, negative nutrients, DIC above ALK). ``True``
-    is only valid when ``name == "ESPER"``; it needs the CWorthy PyESPER fork >= 1.2.0
-    and a roms-tools that reads ``salinity_conditioning``. Forge stages the one WOA23
+    is only valid when ``name == "ESPER"``; it needs the CWorthy PyESPER fork at tag
+    ``v1.1.1+cworthy.1`` or later and a roms-tools that reads
+    ``salinity_conditioning``. Forge stages the one WOA23
     file this needs (dataset ``WOA_SALINITY``) and hands roms-tools its path.
 
     ``False`` (the default, roms-tools' own) is **left out of saved blueprints and

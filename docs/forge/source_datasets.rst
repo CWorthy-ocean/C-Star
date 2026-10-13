@@ -67,7 +67,9 @@ ESPER *(experimental)*
    salinity blended toward the WOA23 annual climatology below 31-34 PSU and
    dilute alkalinity and DIC back to the model salinity. Forge then downloads
    the one WOA23 file this needs (``WOA_SALINITY``, into the ``WOA`` folder).
-   This needs the CWorthy PyESPER fork 1.2.0 or later and roms-tools 5.2 or
+   This needs the CWorthy PyESPER fork at tag ``v1.1.1+cworthy.1`` or later
+   (``git clone --branch v1.1.1+cworthy.1 https://github.com/CWorthy-ocean/PyESPER``
+   then ``pip install -e .``; the fork is not on PyPI or conda) and roms-tools 5.2 or
    later (the release that reads ``salinity_conditioning``); the bundled
    ``glorys-era5-esper`` forcing spec has it on. ESPER oxygen is floored at
    2.0 mmol/m³ by roms-tools regardless of this switch.
