@@ -588,16 +588,19 @@ class TestNetcdfFormat:
         ("My Run", "my-run"),
         ("  NA 8x8 / Test  ", "na-8x8-test"),
         ("cson_roms-marbl_v0.1", "cson_roms-marbl_v0-1"),
+        ("Étude Ü", "etude-u"),
+        ("straße café", "strasse-cafe"),
+        ("run—2012", "run-2012"),
     ],
 )
 def test_slugify(source: str, expected: str) -> None:
-    """Verify slugify casefolds, collapses non-word runs to hyphens, and trims."""
+    """Verify slugify casefolds, reduces to ASCII, collapses non-word runs, and trims."""
     assert slugify(source) == expected
 
 
-@pytest.mark.parametrize("source", ["", "   ", "---", "?!/"])
+@pytest.mark.parametrize("source", ["", "   ", "---", "?!/", "北京"])
 def test_slugify_rejects_empty_result(source: str) -> None:
-    """Verify a source with no word characters is rejected rather than slugged to ''."""
+    """Verify a source with no ASCII word characters is rejected rather than slugged to ''."""
     with pytest.raises(ValueError, match="empty"):
         slugify(source)
 

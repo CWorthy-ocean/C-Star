@@ -2881,6 +2881,7 @@ def test_workplan_run_refuses_derived_run_id_owned_by_another_workplan(
     assert str(other_path) in squashed
     assert str(wp_path) in squashed
     assert f"{ARG_RUN_ID}<other-id>" in squashed
+    assert f"{ARG_RUN_ID}sample-workplan" in squashed
     assert "its content differs from the workplan recorded for that run" in (
         flatten_cli_output(result.output)
     )

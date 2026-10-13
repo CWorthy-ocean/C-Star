@@ -7,6 +7,7 @@ import re
 import subprocess
 import sys
 import typing as t
+import unicodedata
 from collections.abc import Generator
 from enum import StrEnum
 from itertools import zip_longest
@@ -313,7 +314,13 @@ def _run_cmd(
 
 
 def slugify(source: str) -> str:
-    """Convert a source string into a URL-safe slug.
+    """Convert a source string into an ASCII slug.
+
+    The source is casefolded, accented letters are reduced to their base
+    letter and other non-ASCII characters dropped, every run of characters
+    outside ``[a-z0-9_]`` becomes one hyphen, and leading or trailing hyphens
+    are trimmed. Slugs name run and step directories that travel between
+    machines, schedulers and object stores, so they stay ASCII.
 
     Parameters
     ----------
@@ -324,8 +331,16 @@ def slugify(source: str) -> str:
     -------
     str
         The slugified version of the source string.
+
+    Raises
+    ------
+    ValueError
+        If nothing of the source survives, e.g. a name with no ASCII-reducible
+        characters.
     """
-    value = re.sub(r"\W+", "-", source.strip().casefold()).strip("-")
+    hyphenated = re.sub(r"\W+", "-", source.strip().casefold())
+    decomposed = unicodedata.normalize("NFKD", hyphenated)
+    value = decomposed.encode("ascii", "ignore").decode().strip("-")
     if not value:
         raise ValueError("Source collapses to empty string when slugified")
 

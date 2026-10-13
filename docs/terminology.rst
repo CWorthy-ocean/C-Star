@@ -133,7 +133,7 @@ Definitions
 
     Run ID
       The identifier of a run. By default it is the workplan's ``name``, which
-      must already be a slug (lowercase letters, digits, ``-`` and ``_``), so
+      must already be a slug (ASCII lowercase letters, digits, ``-`` and ``_``), so
       the same file always runs under the same ID; ``cstar workplan run --run-id
       <id>`` overrides it. It names the run's directory
       (``CSTAR_DATA_HOME/workplan_runs/<id>``), lets you check status (``cstar workplan status``) or reattach to a run

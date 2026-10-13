@@ -613,7 +613,7 @@ def refuse_run_id_collision(wp_path: Path, run_id: str, *, explicit: bool) -> No
         msg = (
             f"{claim} (its content differs from the workplan recorded for that "
             f"run). Pass {ARG_RUN_ID} <other-id> to run this workplan separately, "
-            "or rename it."
+            f"{ARG_RUN_ID} {run_id} to re-enter the run with it, or rename it."
         )
         raise typer.BadParameter(msg)
 
