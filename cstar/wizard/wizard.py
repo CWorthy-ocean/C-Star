@@ -90,7 +90,7 @@ from cstar.applications.forge.resolve import (
     load_model_spec_data,
     read_cdr_forcing_yaml,
 )
-from cstar.applications.forge.user_files import hash_netcdf_contents
+from cstar.applications.forge.user_files import hash_netcdf_contents, short_digest
 from cstar.base.utils import NetCDFFormat, netcdf_format
 from cstar.wizard.ui import components
 from cstar.wizard.ui.catalog_bar import CatalogBar
@@ -2139,7 +2139,7 @@ def _user_file_status_html(file_dict: dict[str, Any] | None) -> str:
     if not file_dict:
         return ""
     name = Path(file_dict["location"]).name
-    short = file_dict["content_hash"][:12]
+    short = short_digest(file_dict["content_hash"])
     return (
         f"<span style='color:#080'>✓ attached {name} (sha256 {short}…)</span><br>"
         "<span style='color:#b58900'>⚠ This file must exist at this exact path "

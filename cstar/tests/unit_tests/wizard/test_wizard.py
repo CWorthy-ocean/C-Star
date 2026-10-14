@@ -4730,6 +4730,14 @@ class TestCarbonateSensitivityGroup:
         assert wiz.config.model_settings["cppdefs"]["marbl"] is False
         assert "carbonate_sensitivity" not in wiz._gather()
 
+    def test_user_file_status_shows_hex_not_scheme_tag(self):
+        from cstar.wizard.wizard import _user_file_status_html
+
+        status = _user_file_status_html(
+            {"location": "/x/grid.nc", "content_hash": "nc-sample-v1:" + "ab" * 32}
+        )
+        assert "grid.nc (sha256 abababababab…)" in status
+
     def test_attach_stores_the_joined_files_and_reports_the_span(self, tmp_path):
         d = _write_cdrgas_dir(tmp_path / "cdrgas")
         wiz = _cdr_lite_wizard()
@@ -4741,7 +4749,7 @@ class TestCarbonateSensitivityGroup:
             "roms_cdrgas.20120101000000.nc",
             "roms_cdrgas.20120102000000.nc",
         ]
-        assert all(len(f["content_hash"]) == 64 for f in files)
+        assert all(f["content_hash"].startswith("nc-sample-v1:") for f in files)
         status = wiz.cs_status.value
         assert "attached 2 carbonate sensitivity file(s)" in status
         assert "2012-01-01 00:00 to 2012-01-02 00:00" in status
