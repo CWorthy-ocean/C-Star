@@ -41,6 +41,7 @@ Bug Fixes
 - Re-running a workplan overwrote the previous attempt's ``_original.bak``, ``_transformed.yaml`` and ``.vars`` in place; they are now rotated per attempt (``.1``, ``.2``, ...). (`#767 <https://github.com/CWorthy-ocean/C-Star/pull/767>`_)
 - A ``.vars`` file from an earlier attempt survived a later attempt that passed no variables. (`#767 <https://github.com/CWorthy-ocean/C-Star/pull/767>`_)
 - ``cstar workplan check`` accepted an authored workplan with an invalid name by treating it as an already transformed one. (`#767 <https://github.com/CWorthy-ocean/C-Star/pull/767>`_)
+- Attaching large user-provided netCDF files in the wizard, or verifying them at forge staging, no longer reads each file whole into memory (a login-node hang or kernel kill with tens of ``_cdrgas`` files). (`#769 <https://github.com/CWorthy-ocean/C-Star/pull/769>`_)
 
 Improvements
 ~~~~~~~~~~~~
@@ -48,9 +49,15 @@ Improvements
 
 - The ``--run-id`` help text says the id defaults to the workplan name. (`#767 <https://github.com/CWorthy-ocean/C-Star/pull/767>`_)
 - Looking up whether a mistyped path is a run-id no longer creates lock files or reads run records. (`#767 <https://github.com/CWorthy-ocean/C-Star/pull/767>`_)
+- A user-provided file's ``content_hash`` is now ``nc-sample-v1:<sha256>``: the netCDF structure, variables up to 1 MiB in full, and up to 64 evenly spaced rows (always the first and last record, at most 2 MiB) of each larger variable, independent of format, chunking and compression. (`#769 <https://github.com/CWorthy-ocean/C-Star/pull/769>`_)
+
+  - A blueprint recorded with the earlier full-content digest, or with a scheme this C-Star does not know, is accepted with one warning that the file was not verified; re-saving the blueprint refreshes it.
+  - The wizard's attached-file status and the staging mismatch warning show the digest's hex rather than its scheme tag.
+
 
 Miscellaneous
 ~~~~~~~~~~~~~
 
 - Docs: a "Re-running a workplan" section with the reuse rules (done steps reused unless clobbered, failed steps re-run unless resumed, in-progress steps adopted when the launcher matches, the collision rule, rotation, orphans), and the terminology entry for run ID. (`#767 <https://github.com/CWorthy-ocean/C-Star/pull/767>`_)
 - Unit tests serve the bundled workplan templates for their GitHub URLs instead of fetching them from ``main``. (`#767 <https://github.com/CWorthy-ocean/C-Star/pull/767>`_)
+- Forge blueprint reference and the ``UserProvidedFile`` docstring describe the new digest. (`#769 <https://github.com/CWorthy-ocean/C-Star/pull/769>`_)
