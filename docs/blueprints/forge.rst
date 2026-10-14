@@ -51,8 +51,8 @@ normally omits), a forge blueprint has these sections:
    ``input_data/`` under its own name (as classic netCDF when the build uses
    ParallelIO), and lists the copies in the ROMS-MARBL blueprint's
    ``forcing.carbonate_sensitivity``. The ``content_hash`` pins the file's
-   data, so a changed file only warns; the ``location`` is not part of the
-   blueprint's content hash. Files are rejected for any other biogeochemistry
+   structure and a sample of its data, so a changed file only warns; the
+   ``location`` is not part of the blueprint's content hash. Files are rejected for any other biogeochemistry
    mode, and when ``cdr_lite.cdr_online_carbonate_sensitivity`` is on, because
    ROMS then computes the sensitivities itself.
 ``datasets``

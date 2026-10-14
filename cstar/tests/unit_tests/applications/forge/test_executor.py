@@ -686,7 +686,9 @@ class TestForgeExecutorModelPostInitGridFile:
         from cstar.applications.forge.blueprint import UserProvidedFile
 
         grid_path = self._write_tiny_netcdf(tmp_path)
-        gf = UserProvidedFile(location=str(grid_path), content_hash="not-the-real-hash")
+        gf = UserProvidedFile(
+            location=str(grid_path), content_hash="nc-sample-v1:not-the-real-hash"
+        )
         cfg = self._cfg_with_grid_file(minimal_cstar_spec_builder_args, tmp_path, gf)
 
         tmp = Path(tempfile.mkdtemp(prefix="forge-test-gridfile-mismatch-"))
