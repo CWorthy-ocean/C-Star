@@ -21,7 +21,7 @@ from cstar.base.exceptions import CstarExpectationFailed
 from cstar.base.log import get_logger
 from cstar.base.utils import slugify
 from cstar.entrypoint.utils import ARG_PRE_RUN
-from cstar.execution.file_system import StateDirectoryManager
+from cstar.execution.file_system import StateDirectoryManager, rotate_file
 from cstar.orchestration.compute_environment import (
     ComputeEnvironment,
     resolve_compute_environment,
@@ -48,6 +48,7 @@ from cstar.orchestration.orchestration import (
     check_environment,
     configure_environment,
 )
+from cstar.orchestration.run_check import report_orphans
 from cstar.orchestration.serialization import deserialize, serialize, try_deserialize
 from cstar.orchestration.state import StateRepository, load_sentinels
 from cstar.orchestration.tracking import (
@@ -453,6 +454,9 @@ async def prepare_workplan(
 
     fill_transform: TemplateFillTransform | None = None
     file_io_extras: list[Awaitable[int]] = []
+    persist_vars = WorkplanTransformer.derived_path(
+        wp_path, output_dir, suffix="", extension=".vars"
+    )
 
     if user_variables is not None:
         named_config = UserDefinedVariables(
@@ -465,9 +469,6 @@ async def prepare_workplan(
             variable_resolver=lambda name: named_config[name]
         )
 
-        persist_vars = WorkplanTransformer.derived_path(
-            wp_path, output_dir, suffix="", extension=".vars"
-        )
         file_io_extras.append(asyncio.to_thread(serialize, persist_vars, named_config))
     else:
         fill_transform = TemplateFillTransform(variable_resolver=None)
@@ -496,6 +497,12 @@ async def prepare_workplan(
     # make a copy of the original and modified blueprint in the output directory
     persist_orig = original_workplan_backup(wp_path, output_dir)
     persist_as = WorkplanTransformer.derived_path(wp_path, output_dir, "_transformed")
+
+    # keep the files of earlier attempts as `<name>.<i>`; nothing reads the rotated
+    # copies. The variables rotate even when this attempt writes none, so an old
+    # attempt's variables never sit beside this attempt's originals.
+    for persisted in (persist_orig, persist_as, persist_vars):
+        rotate_file(persisted)
 
     file_io: list[Awaitable[int]] = [
         asyncio.to_thread(serialize, persist_orig, wp_orig),
@@ -1104,6 +1111,8 @@ async def build_dag(
     wp, prepared_wp_path, external = await prepare_workplan(
         wp_path, output_dir, user_variables, clobber_steps, pre_run
     )
+    # the steps are live once prepared; report before a pre-run prunes any of them
+    report_orphans(output_dir, run_id, t.cast("LiveWorkplan", wp))
     planner = build_planner(wp, external.tasks())
 
     return planner, prepared_wp_path

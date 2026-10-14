@@ -31,6 +31,7 @@ from cstar.cli.workplan.ls import (
     sorters,
     table_formatter,
 )
+from cstar.orchestration.models import LEGACY_TRANSFORMED_NAME_SUFFIX
 from cstar.orchestration.tracking import KEY_RUN_NAME, WorkplanRun
 
 LS_LOGGER = "cstar.cli.workplan.ls"
@@ -619,6 +620,17 @@ async def test_adapt_runs_builds_views_from_run_metadata(name: str) -> None:
     assert view.raw_start == T0
     assert view.format == "json"
     assert view.name == name
+
+
+async def test_adapt_runs_strips_the_legacy_suffix_from_a_stored_name() -> None:
+    """Verify a run recorded by an earlier release, whose stored name carries
+    the `(transformed)` suffix, is listed under the plain workplan name.
+    """
+    run = make_run("r1", name=f"plan-a{LEGACY_TRANSFORMED_NAME_SUFFIX}")
+
+    views = await adapt_runs_to_views([run], {}, "json")
+
+    assert views[0].name == "plan-a"
 
 
 async def test_adapt_runs_defaults_size_when_metadata_is_missing(

@@ -10,10 +10,13 @@ from pathlib import Path
 from uuid import uuid4
 
 import pytest
+import yaml
 
 from cstar.base.env import ENV_CSTAR_STATE_HOME
 from cstar.base.utils import slugify
-from cstar.orchestration.models import Workplan
+from cstar.execution.file_system import StateDirectoryManager
+from cstar.orchestration.models import LEGACY_TRANSFORMED_NAME_SUFFIX, Step, Workplan
+from cstar.orchestration.orchestration import LiveStep, LiveWorkplan
 from cstar.orchestration.serialization import deserialize, serialize
 from cstar.orchestration.tracking import (
     UNKNOWN_SIZE,
@@ -212,8 +215,92 @@ async def test_default_run_id(
     # generate the default run id from the source path
     run_id = WorkplanRun.get_default_run_id(wp_path.as_posix())
 
-    # verify it matches the supplied workplan
+    # verify it matches the supplied workplan; a valid name is its own slug
     assert run_id == slugify(wp.name)
+    assert run_id == wp.name
+
+
+@pytest.mark.usefixtures("read_yaml_intercept")
+def test_default_run_id_rejects_non_slug_name(
+    tmp_path: Path,
+    wp_templates_dir: Path,
+) -> None:
+    """Verify a workplan whose name is not a slug yields no default run id and
+    the error names the slug to use.
+
+    Parameters
+    ----------
+    tmp_path : Path
+        Temporary directory for test outputs
+    wp_templates_dir : Path
+        Fixture returning the path to the directory containing workplan template files
+    """
+    content = (wp_templates_dir / "workplan.yaml").read_text()
+    wp_path = tmp_path / "workplan.yaml"
+    wp_path.write_text(
+        content.replace("name: sample-workplan", "name: Sample Workplan")
+    )
+
+    with pytest.raises(ValueError, match="use 'sample-workplan'"):
+        WorkplanRun.get_default_run_id(wp_path.as_posix())
+
+
+@pytest.mark.parametrize(
+    "persisted",
+    ["sample-workplan", f"Sample Workplan{LEGACY_TRANSFORMED_NAME_SUFFIX}"],
+)
+def test_default_run_id_of_a_transformed_workplan(
+    tmp_path: Path,
+    fake_blueprint_path: Path,
+    persisted: str,
+) -> None:
+    """Verify the transformed workplan a run persists, which a plain `Workplan`
+    rejects for its step `working_dir`, yields the run-id of that run, also
+    under the name an earlier release gave it.
+
+    Parameters
+    ----------
+    tmp_path : Path
+        Temporary directory for test outputs
+    fake_blueprint_path : Path
+        A path to a file that meets minimum expectations (it exists).
+    persisted : str
+        The name as written into the transformed workplan
+    """
+    step = LiveStep.from_step(
+        Step(name="a", application="hello_world", blueprint=fake_blueprint_path)
+    )
+    trx_path = tmp_path / "workplan_transformed.yaml"
+    live = LiveWorkplan(name="sample-workplan", description="d", steps=[step])
+    assert serialize(trx_path, live), "serializing live workplan failed in test"
+    document = yaml.safe_load(trx_path.read_text()) | {"name": persisted}
+    trx_path.write_text(yaml.safe_dump(document))
+
+    assert WorkplanRun.get_default_run_id(trx_path.as_posix()) == "sample-workplan"
+
+
+def test_default_run_id_of_a_transformed_workplan_in_a_run_directory(
+    fake_blueprint_path: Path,
+) -> None:
+    """Verify a transformed workplan inside a run directory yields that run's
+    id, which an explicit `--run-id` may have set to something other than the
+    workplan name.
+
+    Parameters
+    ----------
+    fake_blueprint_path : Path
+        A path to a file that meets minimum expectations (it exists).
+    """
+    step = LiveStep.from_step(
+        Step(name="a", application="hello_world", blueprint=fake_blueprint_path)
+    )
+    run_dir = StateDirectoryManager.data_dir("custom-id")
+    run_dir.mkdir(parents=True)
+    trx_path = run_dir / "workplan_transformed.yaml"
+    live = LiveWorkplan(name="sample-workplan", description="d", steps=[step])
+    assert serialize(trx_path, live), "serializing live workplan failed in test"
+
+    assert WorkplanRun.get_default_run_id(trx_path.as_posix()) == "custom-id"
 
 
 @pytest.mark.usefixtures("read_yaml_intercept")
@@ -229,7 +316,7 @@ async def test_default_run_id_remote(
     remote_workplan_uri : str
         A fixture returning a known URI to a sample workplan
     """
-    expected_name = "Sample Workplan"
+    expected_name = "sample-workplan"
 
     # generate the default run id from the source URI
     run_id = WorkplanRun.get_default_run_id(remote_workplan_uri)

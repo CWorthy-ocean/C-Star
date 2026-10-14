@@ -17,6 +17,7 @@ from cstar.base.env import max_concurrency
 from cstar.base.log import get_logger
 from cstar.cli.workplan.shared import console, load_workplans, refresh_disk_usage
 from cstar.entrypoint.utils import ARG_SIZE, ARG_SIZE_HELP
+from cstar.orchestration.models import LEGACY_TRANSFORMED_NAME_SUFFIX
 from cstar.orchestration.orchestration import LiveWorkplan
 from cstar.orchestration.tracking import (
     KEY_RUN_NAME,
@@ -129,7 +130,9 @@ async def adapt_runs_to_views(
     unresolved: list[str] = []
 
     for run in runs:
-        name = run.metadata.get(KEY_RUN_NAME)
+        name = (run.metadata.get(KEY_RUN_NAME) or "").removesuffix(
+            LEGACY_TRANSFORMED_NAME_SUFFIX
+        )
 
         if not name:
             plan = plan_cache.get(run.trx_workplan_path)

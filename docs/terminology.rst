@@ -132,11 +132,15 @@ Definitions
       stopped and restarted without loss of state.
 
     Run ID
-      A unique identifier you choose when submitting a workplan
-      (``cstar workplan run --run-id <id>``). It names the run's directory
+      The identifier of a run. By default it is the workplan's ``name``, which
+      must already be a slug (ASCII lowercase letters, digits, ``-`` and ``_``), so
+      the same file always runs under the same ID; ``cstar workplan run --run-id
+      <id>`` overrides it. It names the run's directory
       (``CSTAR_DATA_HOME/workplan_runs/<id>``), lets you check status (``cstar workplan status``) or reattach to a run
       in progress, and lets you re-enter a run to retry failed steps or
       resume them in place. A new run ID starts the workplan from scratch.
+      Two different workplans with the same ``name`` share a run ID, so
+      running the second one without ``--run-id`` is refused.
 
     Pre-run
       Performing every stage before the model launch -- staging inputs,

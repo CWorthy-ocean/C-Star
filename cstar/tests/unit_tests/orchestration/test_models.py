@@ -6,6 +6,7 @@ from collections.abc import Callable, Generator
 from pathlib import Path
 
 import pytest
+import yaml
 from pydantic import ValidationError
 
 from cstar.applications.hello_world import HelloWorldBlueprint
@@ -23,7 +24,12 @@ from cstar.orchestration.models import (
     Workplan,
     WorkplanState,
 )
-from cstar.orchestration.orchestration import LiveStep, LiveWorkplan
+from cstar.orchestration.orchestration import (
+    LiveStep,
+    LiveWorkplan,
+    is_transformed_workplan,
+    read_workplan,
+)
 from cstar.orchestration.serialization import deserialize, model_to_yaml, serialize
 
 
@@ -682,6 +688,212 @@ def test_workplan_name_validation(
         )
 
     assert "name" in str(error)
+
+
+@pytest.mark.parametrize(
+    ("name", "slug"),
+    [
+        ("Sample Workplan", "sample-workplan"),
+        ("Fan-out Workplan", "fan-out-workplan"),
+        ("UPPER", "upper"),
+        ("two  spaces", "two-spaces"),
+        ("trailing-", "trailing"),
+    ],
+)
+def test_workplan_name_must_be_a_slug(
+    gen_fake_steps: Callable[[int], Generator[Step, None, None]],
+    name: str,
+    slug: str,
+) -> None:
+    """Verify a name that is not its own slug is rejected with the slug to use.
+
+    Parameters
+    ----------
+    gen_fake_steps : Callable[[int], Generator[Step, None, None]]
+        A generator function to produce minimally valid test steps
+    name : str
+        A workplan name that differs from its slug
+    slug : str
+        The slug the error should suggest
+    """
+    with pytest.raises(ValidationError) as error:
+        _ = Workplan(name=name, description="d", steps=list(gen_fake_steps(1)))
+
+    message = str(error.value)
+    assert f"workplan name {name!r} is not a valid run-id" in message
+    assert f"use {slug!r}" in message
+
+
+@pytest.mark.parametrize("name", ["sample-workplan", "my_plan", "run-2026", "a"])
+def test_workplan_name_slug_accepted(
+    gen_fake_steps: Callable[[int], Generator[Step, None, None]],
+    name: str,
+) -> None:
+    """Verify a name that is already a slug is accepted unchanged.
+
+    Parameters
+    ----------
+    gen_fake_steps : Callable[[int], Generator[Step, None, None]]
+        A generator function to produce minimally valid test steps
+    name : str
+        A workplan name that equals its slug
+    """
+    wp = Workplan(name=name, description="d", steps=list(gen_fake_steps(1)))
+
+    assert wp.name == name
+
+
+@pytest.mark.parametrize(
+    ("persisted", "expected"),
+    [
+        ("my-plan", "my-plan"),
+        ("my-plan (transformed)", "my-plan"),
+        ("My Plan (transformed)", "my-plan"),
+    ],
+)
+def test_live_workplan_normalizes_legacy_name(
+    tmp_path: Path,
+    fake_blueprint_path: Path,
+    persisted: str,
+    expected: str,
+) -> None:
+    """Verify a transformed workplan loads as a `LiveWorkplan` under the run-id
+    its name produced, also when an earlier release renamed it to
+    `<name> (transformed)` or persisted a non-slug name.
+
+    Parameters
+    ----------
+    tmp_path : Path
+        Temporary directory to persist the workplan in
+    fake_blueprint_path : Path
+        A path to a file that meets minimum expectations (it exists).
+    persisted : str
+        The name as written into the transformed workplan
+    expected : str
+        The name the loaded workplan carries
+    """
+    step = LiveStep.from_step(
+        Step(name="a", application="hello_world", blueprint=fake_blueprint_path)
+    )
+    path = tmp_path / "trx.yaml"
+    assert serialize(path, LiveWorkplan(name="x", description="d", steps=[step])), (
+        "Serialization of the transformed workplan failed"
+    )
+    document = yaml.safe_load(path.read_text()) | {"name": persisted}
+    path.write_text(yaml.safe_dump(document))
+
+    live = read_workplan(path)
+
+    assert isinstance(live, LiveWorkplan)
+    assert live.name == expected
+
+
+@pytest.mark.parametrize(
+    ("persisted", "complaint"),
+    [
+        ("Fan-out Workplan", "not a valid run-id"),
+        ("計画 (transformed)", "empty"),
+    ],
+)
+def test_live_workplan_refuses_a_name_that_is_not_a_run_id(
+    tmp_path: Path,
+    fake_blueprint_path: Path,
+    persisted: str,
+    complaint: str,
+) -> None:
+    """Verify a transformed workplan whose name is not a run-id is refused: a
+    non-slug name without the legacy suffix is not normalized, and a legacy
+    name with nothing to slug reports that rather than a slug of the suffix.
+
+    Parameters
+    ----------
+    tmp_path : Path
+        Temporary directory to persist the workplan in
+    fake_blueprint_path : Path
+        A path to a file that meets minimum expectations (it exists).
+    persisted : str
+        The name as written into the transformed workplan
+    complaint : str
+        A fragment of the expected error
+    """
+    step = LiveStep.from_step(
+        Step(name="a", application="hello_world", blueprint=fake_blueprint_path)
+    )
+    path = tmp_path / "trx.yaml"
+    assert serialize(path, LiveWorkplan(name="x", description="d", steps=[step]))
+    document = yaml.safe_load(path.read_text()) | {"name": persisted}
+    path.write_text(yaml.safe_dump(document, allow_unicode=True))
+
+    with pytest.raises(ValidationError, match=complaint):
+        read_workplan(path)
+
+
+def test_is_transformed_workplan_requires_a_working_dir_on_every_step(
+    tmp_path: Path,
+    fake_blueprint_path: Path,
+) -> None:
+    """Verify only a file whose every step carries a `working_dir` counts as the
+    transformed form: an authored workplan does not, nor does one with a stray
+    `working_dir` on a single step, nor an unreadable file.
+
+    Parameters
+    ----------
+    tmp_path : Path
+        Temporary directory to persist the workplans in
+    fake_blueprint_path : Path
+        A path to a file that meets minimum expectations (it exists).
+    """
+    steps = [
+        Step(name=n, application="hello_world", blueprint=fake_blueprint_path)
+        for n in ("a", "b")
+    ]
+    authored = tmp_path / "wp.yaml"
+    assert serialize(authored, Workplan(name="my-plan", description="d", steps=steps))
+    assert not is_transformed_workplan(authored)
+
+    stray = tmp_path / "stray.yaml"
+    document = yaml.safe_load(authored.read_text())
+    document["steps"][0]["working_dir"] = (tmp_path / "somewhere").as_posix()
+    stray.write_text(yaml.safe_dump(document))
+    assert not is_transformed_workplan(stray)
+
+    transformed = tmp_path / "trx.yaml"
+    live = LiveWorkplan(
+        name="my-plan", description="d", steps=[LiveStep.from_step(s) for s in steps]
+    )
+    assert serialize(transformed, live)
+    assert is_transformed_workplan(transformed)
+
+    assert not is_transformed_workplan(tmp_path / "missing.yaml")
+    garbage = tmp_path / "garbage.yaml"
+    garbage.write_text("- just\n- a list\n")
+    assert not is_transformed_workplan(garbage)
+
+
+def test_read_workplan_reads_an_authored_workplan_as_a_workplan(
+    tmp_path: Path,
+    fake_blueprint_path: Path,
+) -> None:
+    """Verify an authored workplan, which carries no step `working_dir`, reads as
+    a plain `Workplan` and a non-slug name is still refused.
+
+    Parameters
+    ----------
+    tmp_path : Path
+        Temporary directory to persist the workplan in
+    fake_blueprint_path : Path
+        A path to a file that meets minimum expectations (it exists).
+    """
+    step = Step(name="a", application="hello_world", blueprint=fake_blueprint_path)
+    path = tmp_path / "wp.yaml"
+    assert serialize(path, Workplan(name="my-plan", description="d", steps=[step]))
+
+    assert type(read_workplan(path)) is Workplan
+
+    document = yaml.safe_load(path.read_text()) | {"name": "My Plan"}
+    path.write_text(yaml.safe_dump(document))
+    with pytest.raises(ValidationError, match="not a valid run-id"):
+        read_workplan(path)
 
 
 @pytest.mark.parametrize(

@@ -1800,7 +1800,7 @@ def test_apply_edits_repopulates_the_page_and_keeps_the_save_path(
     loaded.write_text("untouched")
     page.loaded_from = loaded.resolve()
     edited = yaml.safe_load(page.preview.value)
-    edited["name"] = "edited name"
+    edited["name"] = "edited-name"
     edited["steps"][0]["name"] = "renamed"
     edited["steps"].append({**edited["steps"][0], "name": "second"})
     page.preview.value = yaml.safe_dump(edited, sort_keys=False)
@@ -1809,12 +1809,12 @@ def test_apply_edits_repopulates_the_page_and_keeps_the_save_path(
 
     page.apply_btn.click()
 
-    assert page.draft.name == "edited name"
+    assert page.draft.name == "edited-name"
     assert [s.name for s in page.draft.steps] == ["renamed", "second"]
     assert [p.name.value for p in page.panes] == ["renamed", "second"]
-    assert page.name.value == "edited name"
+    assert page.name.value == "edited-name"
     assert not page._preview_dirty and page.preview_chip.value == ""
-    assert "edited name" in page.preview.value
+    assert "edited-name" in page.preview.value
     assert page.save_path.value == str(tmp_path / "chosen.yaml")
     assert page.loaded_from == loaded.resolve()
     assert loaded.read_text() == "untouched"
@@ -1858,13 +1858,21 @@ def test_save_and_download_use_the_applied_draft_not_the_textarea(
 def test_blank_description_defaults_to_the_workplan_name(page, roms_bp):
     pane = page.panes[0]
     _path_step(pane, "run", roms_bp)
-    page.name.value = "My plan"
+    page.name.value = "my-plan"
     assert page.description.value == ""
     assert page.problems == []
-    assert page.draft.description == "My plan"
-    assert page.description.placeholder == "My plan"
+    assert page.draft.description == "my-plan"
+    assert page.description.placeholder == "my-plan"
     page.description.value = "explicit"
     assert page.draft.description == "explicit"
+
+
+def test_non_slug_name_is_a_problem_that_suggests_the_slug(page, roms_bp):
+    _path_step(page.panes[0], "run", roms_bp)
+    page.name.value = "My plan"
+    assert page.draft is None
+    assert any("'my-plan'" in p for p in page.problems)
+    assert page.run_id.value == "my-plan"  # the run id offered is the slug
 
 
 # ---------------------------------------------------------------------------
@@ -2093,7 +2101,7 @@ def test_sticky_bar_is_the_styled_box_with_a_download_link(page):
         child for child in page.widget.children if "forge-sticky" in child._dom_classes
     )
     assert list(sticky.children) == [page.sticky_bar, page.sticky_download]
-    page.name.value = "bar test"
+    page.name.value = "bar-test"
     page.add_step().populate(
         Step(name="s", application="hello_world", blueprint="/b.yaml")
     )

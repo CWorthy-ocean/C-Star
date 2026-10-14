@@ -1155,10 +1155,7 @@ class WorkplanTransformer(LoggingMixin):
                     )
                     raise CstarExpectationFailed(msg)
 
-        update: dict[str, t.Any] = {
-            "steps": transformed_steps,
-            "name": f"{self.original.name} (transformed)",
-        }
+        update: dict[str, t.Any] = {"steps": transformed_steps}
         if self.original.runs:
             # pin each external run to the record resolved now
             update["runs"] = self.external.pinned()

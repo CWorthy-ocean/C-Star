@@ -16,6 +16,9 @@ from cstar.tests.unit_tests.orchestration.conftest import (
     ExternalTaskFactory,
 )
 
+LOOKUP = "cstar.cli.workplan.shared.TrackingRepository.get_workplan_run"
+"""The run-record lookup performed by the shared run-id argument."""
+
 
 @pytest.mark.parametrize("pre_run", [True, False])
 @pytest.mark.usefixtures("read_yaml_intercept")
@@ -49,7 +52,7 @@ def test_workplan_status_launcher_follows_pre_run(
 
     with (
         mock.patch(
-            "cstar.cli.workplan.status.TrackingRepository.get_workplan_run",
+            LOOKUP,
             mock.AsyncMock(return_value=run),
         ),
         mock.patch(
@@ -98,7 +101,7 @@ def test_workplan_status_reports_external_dependency(
 
     with (
         mock.patch(
-            "cstar.cli.workplan.status.TrackingRepository.get_workplan_run",
+            LOOKUP,
             mock.AsyncMock(return_value=run),
         ),
         mock.patch(
@@ -146,7 +149,7 @@ def test_workplan_status_warns_about_unresolvable_external_dependency(
     # the external run has no record: its step cannot be resolved
     with (
         mock.patch(
-            "cstar.cli.workplan.status.TrackingRepository.get_workplan_run",
+            LOOKUP,
             mock.AsyncMock(return_value=run),
         ),
         mock.patch(
@@ -166,3 +169,21 @@ def test_workplan_status_warns_about_unresolvable_external_dependency(
     lookup = display.call_args.args[1]
     assert lookup["first"].awaiting == [EXTERNAL_TOKEN]
     assert lookup["second"].step.depends_on == ["first", EXTERNAL_TOKEN]
+
+
+def test_workplan_status_unknown_run() -> None:
+    """Verify an unrecorded run-id is a usage error, not a silent success."""
+    with mock.patch(LOOKUP, mock.AsyncMock(return_value=None)):
+        result = CliRunner().invoke(app, ["no-such-run"], color=False)
+
+    assert result.exit_code == 2
+    assert "unknown run-id" in result.stderr
+
+
+@pytest.mark.parametrize("run_id", ["", "  ", "!!!"])
+def test_workplan_status_invalid_run_id(run_id: str) -> None:
+    """Verify a run-id that is empty once slugified is rejected, not looked up."""
+    result = CliRunner().invoke(app, [run_id], color=False)
+
+    assert result.exit_code == 2
+    assert "run-id" in result.stderr

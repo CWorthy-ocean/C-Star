@@ -64,6 +64,9 @@ class ValidationResult(t.Generic[_T]):
     path: Path | None = None
     """The local file the item was read from (a temporary copy of a remote
     URI); `None` if validation fails."""
+    error: ValueError | None = None
+    """The exception behind `error_msg`, when validation failed; a pydantic
+    `ValidationError` locates each problem in the document."""
 
     @property
     def is_valid(self) -> bool:
@@ -482,7 +485,7 @@ def validate_serialized_entity(
         with local_copy(str(path)) as wp_path:
             item = deserialize(wp_path, item_type)
     except ValueError as ex:
-        return ValidationResult(f"The {item_type.__name__} is invalid: {ex}")
+        return ValidationResult(f"The {item_type.__name__} is invalid: {ex}", error=ex)
     except FileNotFoundError:
         return ValidationResult(f"File not found at path: {path}")
 

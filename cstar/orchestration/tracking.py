@@ -18,7 +18,7 @@ from cstar.execution.file_system import (
     local_copy,
     step_disk_usage,
 )
-from cstar.orchestration.models import Workplan
+from cstar.orchestration.orchestration import LiveWorkplan, read_workplan
 from cstar.orchestration.serialization import (
     PersistenceMode,
     deserialize,
@@ -96,14 +96,25 @@ class WorkplanRun(BaseModel):
         Parameters
         ----------
         uri : str
-            The local or remote path to a persisted workplan.
+            The local or remote path to a persisted workplan, authored or
+            transformed.
 
         Returns
         -------
         str
         """
         with local_copy(uri) as local_path:
-            wp = deserialize(local_path, Workplan)
+            wp = read_workplan(local_path)
+            if isinstance(wp, LiveWorkplan):
+                # a transformed workplan belongs to the run whose directory holds
+                # it, which may have been started under an explicit run-id
+                run_dir = local_path.resolve().parent
+                if (
+                    run_dir.name
+                    and StateDirectoryManager.data_dir(run_dir.name).resolve()
+                    == run_dir
+                ):
+                    return run_dir.name
 
         try:
             return slugify(wp.name)
@@ -404,7 +415,7 @@ class TrackingRepository(LoggingMixin):
             if not run_path.exists():
                 rd_out = run_date or "latest"
                 msg = f"No run file for `{run_id}` on `{rd_out}` found in {run_path}`"
-                self.log.warning(msg)
+                self.log.debug(msg)
                 return None
 
             return deserialize(run_path, WorkplanRun)

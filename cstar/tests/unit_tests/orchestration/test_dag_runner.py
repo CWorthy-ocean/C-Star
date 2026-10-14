@@ -32,6 +32,7 @@ from cstar.orchestration.dag_runner import (
     apply_clobber_overrides,
     apply_pre_run_overrides,
     apply_resume_overrides,
+    build_dag,
     build_planner,
     check_clobber_dependents,
     check_clobber_targets,
@@ -58,9 +59,15 @@ from cstar.orchestration.models import (
     WorkplanState,
 )
 from cstar.orchestration.orchestration import LiveStep, LiveWorkplan, Planner, Status
-from cstar.orchestration.serialization import PersistenceMode, deserialize, serialize
+from cstar.orchestration.serialization import (
+    PersistenceMode,
+    deserialize,
+    read_raw,
+    serialize,
+)
 from cstar.orchestration.state import StateRepository
 from cstar.orchestration.tracking import TrackingRepository, WorkplanRun
+from cstar.orchestration.transforms import WorkplanTransformer
 from cstar.tests.unit_tests.orchestration.conftest import (
     EXTERNAL_TOKEN,
     ExternalTaskFactory,
@@ -656,13 +663,104 @@ async def test_prepare_workplan_persists_original_backup(
     wp_path = wp_templates_dir / "workplan.yaml"
     output_dir = tmp_path / "output"
 
-    await prepare_workplan(wp_path, output_dir, clobber_steps=["Prepare"])
+    _, trx_path, _ = await prepare_workplan(
+        wp_path, output_dir, clobber_steps=["Prepare"]
+    )
 
     backup_path = original_workplan_backup(wp_path, output_dir)
     assert backup_path.exists()
 
     backup = deserialize(backup_path, Workplan, mode=PersistenceMode.yaml)
     assert backup == deserialize(wp_path, Workplan)
+    # the transformed copy keeps the name, which is the run-id, as written
+    assert read_raw(trx_path)["name"] == backup.name
+
+
+@pytest.mark.usefixtures("read_yaml_intercept")
+@pytest.mark.asyncio
+async def test_prepare_workplan_rotates_the_files_of_prior_attempts(
+    tmp_path: Path,
+    wp_templates_dir: Path,
+) -> None:
+    """Verify each attempt moves the prior attempt's original, transformed and
+    variable files aside as `<name>.<i>` instead of overwriting them, and that
+    a failed preparation leaves the prior attempt's files where they are.
+    """
+    wp_path = wp_templates_dir / "workplan.yaml"
+    output_dir = tmp_path / "output"
+    first_vars = {"var1": "a", "var2": "b"}
+
+    _, prepared_path, _ = await prepare_workplan(wp_path, output_dir, first_vars)
+    persisted = (
+        original_workplan_backup(wp_path, output_dir),
+        prepared_path,
+        WorkplanTransformer.derived_path(
+            wp_path, output_dir, suffix="", extension=".vars"
+        ),
+    )
+    first_text = {path: path.read_text() for path in persisted}
+    assert all(path.exists() for path in persisted)
+    assert not list(output_dir.glob("*.1"))
+
+    with pytest.raises(ValueError, match="Unknown clobber"):
+        await prepare_workplan(wp_path, output_dir, clobber_steps=["no-such-step"])
+    assert not list(output_dir.glob("*.1"))
+    assert {path: path.read_text() for path in persisted} == first_text
+
+    second_vars = {"var1": "c", "var2": "d"}
+    await prepare_workplan(wp_path, output_dir, second_vars, ["Prepare"])
+
+    for path in persisted:
+        assert path.with_name(f"{path.name}.1").read_text() == first_text[path]
+    assert persisted[1].read_text() != first_text[persisted[1]]
+    assert persisted[2].read_text() != first_text[persisted[2]]
+
+    second_text = {path: path.read_text() for path in persisted}
+    await prepare_workplan(wp_path, output_dir, first_vars)
+
+    for path in persisted:
+        assert path.with_name(f"{path.name}.1").read_text() == first_text[path]
+        assert path.with_name(f"{path.name}.2").read_text() == second_text[path]
+
+    # an attempt without variables moves the last attempt's variables aside too,
+    # rather than leaving them beside the new originals
+    third_vars_text = persisted[2].read_text()
+    await prepare_workplan(wp_path, output_dir)
+
+    assert not persisted[2].exists()
+    assert persisted[2].with_name(f"{persisted[2].name}.3").read_text() == (
+        third_vars_text
+    )
+    for path in persisted[:2]:
+        assert path.exists()
+        assert path.with_name(f"{path.name}.3").exists()
+
+
+@pytest.mark.usefixtures("read_yaml_intercept")
+@pytest.mark.asyncio
+async def test_build_dag_reports_orphans_of_a_re_entered_run(
+    wp_templates_dir: Path,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Verify re-running a workplan under a run-id whose directory holds a step
+    that the workplan no longer has reports the leftover without deleting it.
+    """
+    run_id = "re-entered-run"
+    leftover = (
+        JobFileSystemManager(StateDirectoryManager.data_dir(run_id)).tasks_dir
+        / "renamed-step"
+    )
+    leftover.mkdir(parents=True)
+
+    with (
+        mock.patch("cstar.orchestration.dag_runner.check_environment"),
+        caplog.at_level("WARNING"),
+    ):
+        await build_dag(wp_templates_dir / "single_step.yaml", run_id)
+
+    warnings = [r.getMessage() for r in caplog.records if r.levelname == "WARNING"]
+    assert any(str(leftover) in w and "left in place" in w for w in warnings)
+    assert leftover.is_dir()
 
 
 @pytest.mark.asyncio
@@ -697,7 +795,10 @@ async def test_prepare_workplan_materializes_inline_blueprint(
     assert serialize(wp_path, wp)
     output_dir = tmp_path / "output"
 
-    _, prepared_path, _ = await prepare_workplan(wp_path, output_dir)
+    prepared, prepared_path, _ = await prepare_workplan(wp_path, output_dir)
+
+    # `build_dag` reports orphans from the steps' working directories
+    assert all(isinstance(s, LiveStep) for s in prepared.steps)
 
     persisted = deserialize(prepared_path, LiveWorkplan)
     consumer = next(s for s in persisted.steps if s.name == "consumer")
@@ -1103,6 +1204,7 @@ async def test_prepare_workplan_pre_run_does_not_report_injected_overrides(
     wp, _, _ = await prepare_workplan(wp_path, tmp_path / "output", pre_run=True)
 
     assert wp.steps[0].pre_run
+    assert all(isinstance(s, LiveStep) for s in wp.steps)
 
 
 @pytest.mark.usefixtures("read_yaml_intercept")
@@ -1516,7 +1618,7 @@ async def test_prepare_workplan_anchors_relative_blueprint_path(
     wp_path = plans / "wp.yaml"
     wp_path.write_text(
         textwrap.dedent("""\
-            name: Relative blueprint
+            name: relative-blueprint
             description: A step whose blueprint sits beside the workplan
             state: draft
             steps:

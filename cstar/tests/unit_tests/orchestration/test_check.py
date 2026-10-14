@@ -19,7 +19,7 @@ async def test_deep_check_valid_workplan(
         Fixture providing the path to a minimal hello-world blueprint
     """
     wp = Workplan(
-        name="Deep Check Valid",
+        name="deep-check-valid",
         description="A resolvable single-step workplan.",
         steps=[
             Step(
@@ -51,7 +51,7 @@ async def test_deep_check_reports_unknown_directive(
         Fixture providing the path to a minimal hello-world blueprint
     """
     wp = Workplan(
-        name="Deep Check Invalid",
+        name="deep-check-invalid",
         description="A workplan with a directive its application does not define.",
         steps=[
             Step(
@@ -96,7 +96,7 @@ async def test_deep_check_anchors_relative_blueprint_path(
     monkeypatch.chdir(elsewhere)
 
     wp = Workplan(
-        name="Deep Check Relative",
+        name="deep-check-relative",
         description="A step whose blueprint sits beside the workplan.",
         steps=[
             Step(name="Say Hello", application="hello_world", blueprint="./hw.yaml")

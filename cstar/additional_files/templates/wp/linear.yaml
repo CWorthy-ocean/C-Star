@@ -1,5 +1,5 @@
 # yaml-language-server: $schema=https://raw.githubusercontent.com/CWorthy-ocean/C-Star/refs/heads/main/docs/schemas/wp/workplan_schema.1.0.0.json
-name: Linear Workplan
+name: linear-workplan
 description: A workplan that usees dependencies to ensure that all tasks execute in a series.
 steps:
 - name: Step L1

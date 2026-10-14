@@ -11,6 +11,7 @@ import pytest
 
 from cstar.applications.roms_marbl.models import RomsMarblBlueprint
 from cstar.base.env import ENV_CSTAR_RUNID
+from cstar.execution import file_system
 from cstar.execution.file_system import (
     JobFileSystemManager,
     StateDirectoryManager,
@@ -70,7 +71,7 @@ def complete_workplan_template_input() -> dict[str, t.Any]:
     a valid workplan, each populated with a valid value (no steps).
     """
     return {
-        "name": "Test Workplan",
+        "name": "test-workplan",
         "description": "This is the description of my test workplan",
         "state": "draft",
         "compute_environment": {
@@ -452,6 +453,33 @@ def single_step_workplan(
 def remote_workplan_uri() -> str:
     """Fixture for returning a URL to a valid remote workplan for testing."""
     return "https://raw.githubusercontent.com/CWorthy-ocean/C-Star/refs/heads/main/cstar/additional_files/templates/wp/workplan.yaml"
+
+
+@pytest.fixture(autouse=True)
+def serve_remote_workplan_templates(
+    wp_templates_dir: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Serve the bundled workplan templates for their GitHub `main` URLs.
+
+    Tests that fetch a template over HTTP then run against this checkout's
+    template instead of whatever `main` holds, so they pass before a template
+    change merges and without network access. A template that does not exist
+    is answered with a 404; every other URL is requested as usual.
+    """
+    marker = "/c-star/refs/heads/main/cstar/additional_files/templates/wp/"
+    real_request = file_system.request
+
+    def serve(method: str, url: str, **kwargs: t.Any) -> t.Any:
+        folded = url.casefold()
+        if marker not in folded:
+            return real_request(method, url, **kwargs)
+
+        template = wp_templates_dir / folded.rsplit("/", maxsplit=1)[1]
+        if template.is_file():
+            return mock.Mock(status_code=200, text=template.read_text())
+        return mock.Mock(status_code=404, text="")
+
+    monkeypatch.setattr(file_system, "request", serve)
 
 
 @pytest.fixture
