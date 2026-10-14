@@ -2161,6 +2161,19 @@ class RomsMarblInputData(InputData):
         input_args["bgc_model"] = rt.BGCMarbl if bgc_sources_resolved else None
 
         log.info("BoundaryForcing kwargs: %r", input_args)
+        if bgc_sources_resolved:
+            # roms-tools reads the physics T/S for the whole run up front when a
+            # bgc source derives from them (ESPER, density/density_mld) and logs
+            # its progress at INFO on the root logger, which C-Star's logging
+            # keeps off the terminal -- so say here that the long silence that
+            # follows is expected (hours for a multi-year run; nothing is written
+            # until it finishes).
+            print(
+                "   ⏳ Reading the input physics for the boundary -- with ESPER or "
+                "density-interpolated BGC sources the whole run's T/S are read "
+                "first; this may take considerable time (hours for a multi-year "
+                "run) and no boundary file is written until it finishes."
+            )
         with mem_log("BoundaryForcing()", enabled=self.verbose):
             bry = rt.BoundaryForcing(grid=self.grid, **input_args)
 
