@@ -492,7 +492,9 @@ async def prepare_workplan(
 
     # inline blueprints are written to disk only for a real run, not for `check`
     materialized = await asyncio.to_thread(materialize_inline_blueprints, wp.steps)
-    wp = wp.model_copy(update={"steps": materialized})
+    wp = LiveWorkplan.model_validate(wp, from_attributes=True).model_copy(
+        update={"steps": materialized, "root": output_dir.resolve()}
+    )
 
     # make a copy of the original and modified blueprint in the output directory
     persist_orig = original_workplan_backup(wp_path, output_dir)
@@ -620,7 +622,7 @@ class ExecutiveRunSummary(BaseModel):
         ExecutiveRunSummary
             A summary of the run and the status of each of its steps.
         """
-        workplan = deserialize(run.trx_workplan_path, LiveWorkplan)
+        workplan = LiveWorkplan.load(run.trx_workplan_path)
         steps = [LiveStep.from_step(s) for s in workplan.steps]
         step_summaries: list[ExecutiveStepSummary] = []
 
@@ -1038,7 +1040,7 @@ async def on_status_changed(handle: ProcessHandle) -> None:
     sizes: dict[str, int] = {}
 
     if Status.is_terminal(handle.status):
-        wp = try_deserialize(run.trx_workplan_path, LiveWorkplan)
+        wp = LiveWorkplan.try_load(run.trx_workplan_path)
         step = (
             next((s for s in wp.steps if s.name == handle.name), None) if wp else None
         )
@@ -1104,8 +1106,8 @@ async def build_dag(
         run_id = slugify(run_id)
 
     _ignore_ambient_clobber_env()
-    output_dir = StateDirectoryManager.data_dir(run_id)
     configure_environment(run_id=run_id)
+    output_dir = StateDirectoryManager.data_dir(run_id)
 
     check_environment()
     wp, prepared_wp_path, external = await prepare_workplan(
@@ -1132,7 +1134,8 @@ async def run_dag(
     wp_path : Path
         The path to the original workplan, recorded on the run for provenance.
     trx_wp_path : Path
-        The path to the prepared (transformed) workplan that is executed.
+        The path to the prepared (transformed) workplan that is executed; the
+        directory holding it is the run's root.
     run_id : str
         The run-id to be used by the orchestrator.
     planner : Planner
@@ -1146,12 +1149,13 @@ async def run_dag(
         The persisted record describing the run.
     """
     steps = t.cast("list[LiveStep]", planner.flatten())
-    output_dir = StateDirectoryManager.data_dir(run_id)
 
     wp_run = WorkplanRun(
         workplan_path=wp_path,
         trx_workplan_path=trx_wp_path,
-        output_path=output_dir,
+        # the run root is where `prepare_workplan` wrote the transformed workplan,
+        # so a reloaded run keeps the root it is running under
+        output_path=Path(trx_wp_path).resolve().parent,
         run_id=run_id,
         environment=capture_environment(),
         user_variables=user_variables or {},

@@ -11,8 +11,10 @@ from pydantic import BaseModel, ValidationError
 
 from cstar.base.env import (
     ENV_CSTAR_CLI_DRY_RUN,
+    ENV_CSTAR_DATA_HOME,
     ENV_CSTAR_LOG_LEVEL,
     ENV_CSTAR_RUNID,
+    ENV_CSTAR_STATE_HOME,
 )
 from cstar.base.exceptions import CstarExpectationFailed
 from cstar.base.feature import is_flag_enabled
@@ -335,7 +337,7 @@ def resolve_clobber_selection(wp_path: Path, clobber_steps: list[str]) -> list[s
     if not clobber_steps:
         return clobber_steps
 
-    wp = try_deserialize(wp_path, Workplan) or try_deserialize(wp_path, LiveWorkplan)
+    wp = try_deserialize(wp_path, Workplan) or LiveWorkplan.try_load(wp_path)
     if wp is None:
         return clobber_steps
 
@@ -627,11 +629,20 @@ def refuse_run_id_collision(wp_path: Path, run_id: str, *, explicit: bool) -> No
         raise typer.BadParameter(msg)
 
 
+RELOCATABLE_HOMES: t.Final[frozenset[str]] = frozenset(
+    {ENV_CSTAR_DATA_HOME, ENV_CSTAR_STATE_HOME}
+)
+"""The captured variables a reload leaves to the current shell."""
+
+
 async def handle_run_reloading(run_id: str) -> WorkplanRun:
     """Locate the prior run for the run-id and restore its environment.
 
     The environment variables captured when the run was originally started
-    are re-exported so the reload executes under matching configuration.
+    are re-exported so the reload executes under matching configuration, with
+    one warning naming those that differ from the current shell. The data and
+    state homes are not re-exported: they say where the run is now, and a
+    relocated run must keep resolving against the current ones.
 
     Parameters
     ----------
@@ -655,7 +666,23 @@ async def handle_run_reloading(run_id: str) -> WorkplanRun:
         raise typer.BadParameter(msg)
 
     # ensure the environment matches the prior run
-    os.environ.update(wp_run.environment)
+    recorded = {
+        name: value
+        for name, value in wp_run.environment.items()
+        if name not in RELOCATABLE_HOMES
+    }
+    differing = {
+        name: value for name, value in recorded.items() if os.environ.get(name) != value
+    }
+    if differing:
+        listing = ", ".join(
+            f"{name} (now {os.environ.get(name)!r}, recorded {value!r})"
+            for name, value in differing.items()
+        )
+        log.warning(
+            f"Re-exporting recorded settings that differ from this shell: {listing}"
+        )
+    os.environ.update(recorded)
 
     source = wp_run.workplan_path
     msg = f"Re-starting run-id {run_id!r} with workplan originating in {source!r}"
@@ -892,7 +919,7 @@ def run(
             user_vars = t.cast("Mapping[str, str]", ctx.obj)
 
             if reload:
-                wp = deserialize(wp_path, LiveWorkplan)
+                wp = LiveWorkplan.load(wp_path)
                 if resume and wp.pre_run:
                     msg = (
                         f"Run {run_id!r} is a pre-run; retry its failed steps with "

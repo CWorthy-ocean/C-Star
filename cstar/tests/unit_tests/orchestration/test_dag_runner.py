@@ -1,5 +1,6 @@
 import os
 import random
+import shutil
 import textwrap
 import typing as t
 from collections.abc import AsyncGenerator
@@ -45,6 +46,7 @@ from cstar.orchestration.dag_runner import (
     original_workplan_backup,
     prepare_workplan,
     prune_unpreparable_steps,
+    run_dag,
 )
 from cstar.orchestration.launch.local import LocalHandle, LocalLauncher
 from cstar.orchestration.launch.slurm import SlurmLauncher
@@ -814,6 +816,88 @@ async def test_prepare_workplan_materializes_inline_blueprint(
         mode=PersistenceMode.yaml,
     )
     assert next(s for s in backup.steps if s.name == "consumer").is_inline
+
+
+@pytest.mark.asyncio
+async def test_prepare_workplan_records_the_run_root(
+    tmp_path: Path,
+    mock_run_id: str,
+    hello_world_bp_path: Path,
+) -> None:
+    """Verify the transformed workplan records the run root it was written under,
+    and that a copy of the run directory loads with its step directories rebased.
+
+    Parameters
+    ----------
+    tmp_path : Path
+        Temporary directory the run directory is copied into
+    mock_run_id : str
+        Fixture exporting the run-id the steps' working directories derive from
+    hello_world_bp_path : Path
+        Fixture providing the path to a minimal hello-world blueprint
+    """
+    wp = Workplan(
+        name="rooted",
+        description="A workplan whose transformed copy records its run root.",
+        steps=[
+            Step(
+                name="hello",
+                application="hello_world",
+                blueprint=hello_world_bp_path.as_posix(),
+            ),
+        ],
+    )
+    wp_path = tmp_path / "rooted.yaml"
+    assert serialize(wp_path, wp)
+    output_dir = StateDirectoryManager.data_dir(mock_run_id)
+
+    prepared, prepared_path, _ = await prepare_workplan(wp_path, output_dir)
+
+    assert isinstance(prepared, LiveWorkplan)
+    assert prepared.root == output_dir.resolve()
+    assert f"root: {output_dir.resolve()}" in prepared_path.read_text()
+    assert LiveWorkplan.load(prepared_path) == deserialize(prepared_path, LiveWorkplan)
+
+    moved = tmp_path / "moved"
+    shutil.copytree(output_dir, moved)
+    relocated = LiveWorkplan.load(moved / prepared_path.name)
+
+    assert relocated.root == moved.resolve()
+    assert relocated.steps[0].working_dir == moved.resolve() / "tasks" / "hello"
+    assert prepared.steps[0].working_dir == output_dir / "tasks" / "hello"
+
+
+@pytest.mark.asyncio
+async def test_run_dag_records_the_root_of_the_transformed_workplan(
+    tmp_path: Path, mock_run_id: str
+) -> None:
+    """Verify a run reloaded from a root other than the current data home's keeps
+    that root on its record, rather than a directory the data home never held.
+    """
+    run_root = tmp_path / "scratch" / "workplan_runs" / mock_run_id
+    run_root.mkdir(parents=True)
+    trx_path = run_root / "workplan_transformed.yaml"
+    assert not StateDirectoryManager.data_dir(mock_run_id).exists()
+
+    step = LiveStep.from_step(_make_step(tmp_path, "hello"))
+    workplan = LiveWorkplan(
+        name="reloaded", description="A reloaded run.", steps=[step], root=run_root
+    )
+
+    with (
+        mock.patch("cstar.orchestration.dag_runner.get_orchestrator"),
+        mock.patch("cstar.orchestration.dag_runner.process_plan", mock.AsyncMock()),
+    ):
+        wp_run = await run_dag(
+            tmp_path / "workplan.yaml", trx_path, mock_run_id, Planner(workplan)
+        )
+
+    persisted = await TrackingRepository().get_workplan_run(mock_run_id)
+
+    assert wp_run.output_path == run_root
+    assert persisted is not None
+    assert persisted.output_path == run_root
+    assert persisted.trx_workplan_path == trx_path
 
 
 @pytest.mark.asyncio

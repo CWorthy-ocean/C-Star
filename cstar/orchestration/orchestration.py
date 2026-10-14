@@ -24,7 +24,7 @@ from cstar.base.env import (
     ENV_CSTAR_RUNID,
 )
 from cstar.base.exceptions import BlueprintDeferredError, CstarExpectationFailed
-from cstar.base.log import LoggingMixin
+from cstar.base.log import LoggingMixin, get_logger
 from cstar.base.utils import deep_merge, lazy_import, slugify
 from cstar.execution.file_system import (
     JobFileSystemManager,
@@ -45,13 +45,17 @@ from cstar.orchestration.serialization import (
     PersistenceMode,
     deserialize,
     intenum_representer,
+    read_all,
+    read_document,
     read_raw,
+    rebase_paths,
     register_representer,
 )
 from cstar.system.environment import get_envfield_alias
 from cstar.system.manager import get_sysmgr
 
 nx = lazy_import("networkx")
+log = get_logger(__name__)
 
 KEY_STATUS: t.Literal["status"] = "status"
 KEY_STEP: t.Literal["step"] = "step"
@@ -400,6 +404,14 @@ def synthesize_blueprint(step: LiveStep, overrides: Mapping[str, t.Any]) -> Blue
 class LiveWorkplan(Workplan):
     steps: Sequence[LiveStep]
 
+    root: Path | None = Field(default=None)
+    """The run root when the transformed workplan was serialized; `None` for
+    files written before it was recorded. `load` rebases the paths under it when
+    the file has since moved."""
+
+    ROOT_FIELD: t.ClassVar[str] = "root"
+    """The name of the `root` field in a serialized workplan."""
+
     _lookup: Mapping[str, LiveStep] | None = None
 
     @field_validator("name", mode="before")
@@ -433,6 +445,87 @@ class LiveWorkplan(Workplan):
             return slugify(authored)
         except ValueError:
             return authored
+
+    @classmethod
+    def load(cls, path: Path | str) -> t.Self:
+        """Load a transformed workplan, rebasing its paths when the run has moved.
+
+        `prepare_workplan` records the run root in the file it writes. When the
+        file now sits in a different directory (its data home was copied or
+        moved), every string value under the recorded root is rebased onto the
+        directory the file sits in: step working directories, anchored and
+        inline blueprint paths, and the paths filled into overrides and
+        directives. A file written before the root was recorded loads as it is.
+
+        Parameters
+        ----------
+        path : Path | str
+            The location of the transformed workplan.
+
+        Raises
+        ------
+        FileNotFoundError
+            If the workplan file does not exist.
+
+        Returns
+        -------
+        LiveWorkplan
+        """
+        path = Path(path)
+        document = read_document(path)
+
+        if isinstance(document, dict):
+            recorded = document.get(cls.ROOT_FIELD)
+            new_root = path.parent.resolve()
+            if (
+                recorded
+                and isinstance(recorded, str)
+                and Path(recorded).resolve() != new_root
+            ):
+                log.debug(f"Rebasing {str(path)!r} from {recorded!r} to {new_root}")
+                document = rebase_paths(document, recorded, str(new_root))
+
+        return cls.model_validate(document)
+
+    @classmethod
+    def try_load(cls, path: Path | str) -> t.Self | None:
+        """Load a transformed workplan with `load`, or return `None` on any failure.
+
+        Parameters
+        ----------
+        path : Path | str
+            The location of the transformed workplan.
+
+        Returns
+        -------
+        LiveWorkplan | None
+        """
+        try:
+            return cls.load(path)
+        except Exception:
+            log.debug(f"try-load failed loading a workplan from {str(path)!r}")
+            return None
+
+    @classmethod
+    async def load_all(
+        cls, paths: Sequence[Path | str], limit: int
+    ) -> Sequence[t.Self | None]:
+        """Load a collection of transformed workplans concurrently with `try_load`.
+
+        Parameters
+        ----------
+        paths : Sequence[Path | str]
+            The locations of the transformed workplans.
+        limit : int
+            The maximum number of concurrent reads.
+
+        Returns
+        -------
+        Sequence[LiveWorkplan | None]
+            The workplans in input order; one that cannot be read or fails
+            validation is returned as `None`.
+        """
+        return await read_all(paths, cls.try_load, limit)
 
     def _get_step_lookup(self) -> Mapping[str, LiveStep]:
         """Build a mapping from step name to step for the steps
@@ -543,7 +636,7 @@ def read_workplan(path: Path, mode: PersistenceMode = PersistenceMode.auto) -> W
         If the document is not valid in its form.
     """
     if is_transformed_workplan(path, mode):
-        return deserialize(path, LiveWorkplan, mode=mode)
+        return LiveWorkplan.load(path)
     return deserialize(path, Workplan, mode=mode)
 
 

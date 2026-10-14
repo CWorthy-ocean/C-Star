@@ -178,9 +178,28 @@ The run-id is the one shown by ``cstar workplan ls`` (the value given to
   alias, the exact run record that was resolved (its start time), so the
   run's inputs stay traceable even if the same run-id is used again later.
 
-A run-id resolves only on the machine, and under the same ``CSTAR_STATE_HOME``
-and ``CSTAR_DATA_HOME``, where that run was executed -- the same limit an
-absolute path into its run directory has today.
+A run-id resolves only on the machine, and under the same ``CSTAR_STATE_HOME``,
+where that run was executed.
+
+The transformed workplan holds absolute paths into the run directory, and
+records the run directory it was written under (``root``). Every command that
+reads it rebases the paths that begin with the recorded root onto the directory
+the file now sits in, so a run directory stays valid wherever it is moved or
+copied; a value that merely contains the root, such as ``--out=<root>/x``, is
+left as written. The run record in the state home follows a moved run only into
+the current data home: when the run directory it names no longer exists, it is
+read as ``workplan_runs/<run-id>`` under ``CSTAR_DATA_HOME``. Moving one run
+from one data home to another on the same machine (move
+``<old>/workplan_runs/<id>`` to ``<new>/workplan_runs/<id>`` and point
+``CSTAR_DATA_HOME`` at ``<new>``) therefore keeps ``status``, ``gather``,
+``continue-from`` and ``--resume`` working. A run copied to any other path, or
+to another machine, has valid internal paths but is not reachable by run-id
+until it is registered there, which a later release adds.
+``cstar workplan run --resume`` re-exports the environment captured when the
+run started, except ``CSTAR_DATA_HOME`` and ``CSTAR_STATE_HOME``, and warns
+about every other captured setting that differs from your shell. A transformed
+workplan written by an earlier release records no root and is loaded as it is,
+so it stays pinned to the directory it was written in.
 
 
 Steps

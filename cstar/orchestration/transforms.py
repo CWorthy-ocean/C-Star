@@ -668,9 +668,7 @@ class ExternalRuns:
         if alias not in self._workplans:
             record = self.record(alias)
             try:
-                self._workplans[alias] = deserialize(
-                    record.trx_workplan_path, LiveWorkplan
-                )
+                self._workplans[alias] = LiveWorkplan.load(record.trx_workplan_path)
             except (FileNotFoundError, ValueError, yaml.YAMLError) as ex:
                 msg = (
                     f"Unable to load workplan for run-id {record.run_id!r} from "
@@ -2057,7 +2055,7 @@ class DirectiveConfig(BaseModel):
 
         wp_path = run.trx_workplan_path
         try:
-            return deserialize(wp_path, LiveWorkplan)
+            return LiveWorkplan.load(wp_path)
         except (FileNotFoundError, ValueError, yaml.YAMLError) as ex:
             msg = f"Unable to load workplan for run-id {run_id!r} from {str(wp_path)!r}: {ex}"
             raise RuntimeError(msg) from ex
