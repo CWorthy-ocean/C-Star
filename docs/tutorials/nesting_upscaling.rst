@@ -54,7 +54,10 @@ From the ``tiny`` directory, with the environment active:
 that holds them, which the workplan takes as the runtime variable
 ``example_data``. The first run also clones ROMS, MARBL and ParallelIO and
 compiles a ROMS executable for each of the three ROMS runs, which are
-different builds.
+different builds. The workplan pins ucla-roms to main at ``453189ed`` rather
+than 0.10.1: from that commit on, the parent rerun injects the flux in
+``upscaled_cdr.nc`` as given, where 0.10.1 scaled it by about the ratio of the
+child's and the parent's column depths.
 
 A larger case on the California Current, ``examples/nesting_upscaling/ccs/``,
 uses the same eight steps with real forcing: a 168 by 336 parent at about 16 km

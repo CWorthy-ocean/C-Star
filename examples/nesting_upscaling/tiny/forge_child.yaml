@@ -440,7 +440,7 @@ model_settings:
 code:
   roms:
     location: https://github.com/CWorthy-ocean/ucla-roms.git
-    commit: 0.10.1
+    commit: 453189ed372d02c5515c882722c9d98e0bd8ac9d
     branch: null
   marbl:
     location: https://github.com/CWorthy-ocean/MARBL.git
@@ -472,7 +472,7 @@ composition:
   model:
     name: roms-marbl-0.10-default
     origin: catalog
-    modified: false
+    modified: true
   domain:
     name: ''
     origin: custom
@@ -489,7 +489,10 @@ composition:
     name: daily-restarts
     origin: catalog
     modified: true
-  overrides: {}
+  overrides:
+    code:
+      roms:
+        commit: 453189ed372d02c5515c882722c9d98e0bd8ac9d
 provenance:
   generated_at: null
   generated_by: null
@@ -497,5 +500,5 @@ provenance:
   cstar_version: null
   roms_tools_version: null
   override_files_applied: []
-  content_hash: cf1853805fe4b1c065fc6f5afb3599d3439724e1418346c324b644e6fec1504d
+  content_hash: 726c931c4eae17a9b0cb2cbb3b47d861ba49bd29c139d5c47ef44c17dd82ceaf
   notes: null

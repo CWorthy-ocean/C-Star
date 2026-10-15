@@ -36,7 +36,10 @@ from cstar.catalog.domain_catalog import build_catalog_stack
 
 HERE = Path(__file__).parent
 
-MODEL = "roms-marbl-0.10-default"
+MODEL = "roms-marbl-0.10-default"  # pins ucla-roms 0.10.1; ROMS_COMMIT replaces that
+# ucla-roms main after #390 (CDR_LITE upscaling), which conserves the flux of the
+# upscaled CDR depth profiles parent_up reads. Switch to 0.10.2 once it is released.
+ROMS_COMMIT = "453189ed372d02c5515c882722c9d98e0bd8ac9d"
 FORCING = "glorys-era5-unified"
 OUTPUT = "daily-restarts"
 
@@ -163,9 +166,10 @@ def _forcing(*, child: bool, catalog: Any) -> dict[str, Any]:
 
 def _composition(forcing_modified: bool = True) -> Composition:
     return Composition(
-        model=SpecRef(name=MODEL, origin="catalog"),
+        model=SpecRef(name=MODEL, origin="catalog", modified=True),
         forcing=SpecRef(name=FORCING, origin="catalog", modified=forcing_modified),
         output=SpecRef(name=OUTPUT, origin="catalog", modified=True),
+        overrides={"code": {"roms": {"commit": ROMS_COMMIT}}},
     )
 
 
@@ -277,6 +281,7 @@ def main() -> None:
                 open_boundaries=OPEN_BOUNDARIES,
                 partitioning=PARTITIONING,
                 model_reference_date=MODEL_REFERENCE_DATE,
+                roms_ref=ROMS_COMMIT,
                 forcing_inputs=_forcing(child=child, catalog=catalog),
                 output_settings=catalog.output_data(OUTPUT),
                 composition=_composition(),

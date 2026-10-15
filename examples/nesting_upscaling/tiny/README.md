@@ -2,7 +2,7 @@
 
 A two-level nested ROMS-MARBL run with one alkalinity (ALK) release in the child,
 upscaled back to the parent grid, end to end through `cstar workplan run`. Eight
-steps, ucla-roms 0.10.1 with ParallelIO, about 24x24x10 cells per grid, 4 MPI ranks
+steps, ucla-roms main @453189ed with ParallelIO, about 24x24x10 cells per grid, 4 MPI ranks
 each. It needs no account and no data you must stage yourself: the three source
 files are about 40 MB of pinned test data. The wall clock goes to the three ROMS runs
 (about 8 minutes in total on a 10-core laptop; see "Run").
@@ -27,8 +27,12 @@ forge_parent  forge_child  forge_parent_up          (forge, ~5 s each; the other
 | `forge_parent_up.yaml` | The parent grid again, no child, `cdr.mode: upscaled` (CDR_FORCING compiled, forcing file supplied by the workplan), `cdr_output` on, `nz_chd: 10` to match the child's levels. |
 | `workplan.yaml` | The eight steps: `forge_parent`, `forge_child`, `forge_parent_up`, `parent`, `nest_ic`, `child`, `upscale`, `parent_up`. |
 
-All three blueprints use `roms-marbl-0.10-default` (ucla-roms 0.10.1, MARBL
-`marbl0.45.0-max-it-10`, PIO `2.7.1-fork`) and the `glorys-era5-unified` forcing
+All three blueprints use `roms-marbl-0.10-default` (MARBL `marbl0.45.0-max-it-10`, PIO
+`2.7.1-fork`) with ucla-roms pinned to main at `453189ed` (`code.roms.commit`, set by
+`make_forge_blueprints.py`) instead of the spec's 0.10.1: from #390 on, `parent_up`'s
+depth-profile CDR forcing injects the flux it is given, where 0.10.1 scaled it by about
+the ratio of the child's and the parent's column depths. Switch to 0.10.2 once it is
+released. The blueprints use the `glorys-era5-unified` forcing
 trimmed to what the test data supports: GLORYS regional initial conditions and
 boundaries, ERA5 and UNIFIED surface forcing, UNIFIED initial BGC and boundary BGC.
 No tides, rivers, MBL_co2 or salinity restoring.

@@ -54,6 +54,10 @@ logged and saved in the output.
     `nest-from: {step: parent}` for its boundaries.
   - `parent_up` uses `continue-from: {step: parent, timestamp: <child start>}` and
     a `cdr_forcing` override that points at `{{output_dir: upscale}}/upscaled_cdr.nc`.
+- **ucla-roms main @453189ed.** Both cases pin `code.roms.commit` to the main commit
+  after #390 (CDR_LITE upscaling) instead of 0.10.1: there, `parent_up`'s depth-profile
+  CDR forcing injects the flux it is given, where 0.10.1 scaled it by about the ratio of
+  the child's and the parent's column depths. Switch to 0.10.2 once it is released.
 - **Runtime variables** (`cstar workplan run … --var name=value`) supply
   machine-specific paths (tiny) and the run windows (CCS), so the committed files
   stay portable.
