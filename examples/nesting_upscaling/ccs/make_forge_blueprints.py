@@ -1,7 +1,8 @@
 """Write the three forge blueprints of the CCS nested + upscaled CDR example.
 
-All three compose the bundled catalog (ModelSpec ``roms-marbl-0.10-default``,
-ForcingSpec ``glorys-era5-glodap-woa``, OutputSpec ``daily-restarts``) over Ben's
+All three compose the bundled catalog (ModelSpec ``roms-marbl-0.10-default`` with
+ucla-roms pinned to ``ROMS_COMMIT``, ForcingSpec ``glorys-era5-glodap-woa``, OutputSpec
+``daily-restarts``) over Ben's
 California Current grid pair (a 168 x 336 x 20 parent with a 70 x 140 x 20 child,
 4:1 refinement, both rotated 33.3 degrees), so the nesting and the upscaling can be
 exercised with real forcing:
@@ -20,14 +21,23 @@ three files serve the smoke and the full run.
 
 Run from a checkout of C-Star with its environment active:
 
-    python make_forge_blueprints.py [--out-dir DIR] [--rivers {default,none}]
+    python make_forge_blueprints.py [--out-dir DIR] [--rivers {glofas,dai,none}]
                                     [--river-climatology {if_any_missing,never,always}]
                                     [--pressure-fluxes {off,on}]
 
-Two defaults depart from the bundled spec / Ben's file so the example runs (README,
-"Known issues"): DAI rivers use ``convert_to_climatology: never`` (``if_any_missing``
-makes roms-tools 5.1.1 write a river file ucla-roms cannot read), and the parent does not
-extract pressure fluxes (``--pressure-fluxes on`` crashes ucla-roms 0.10.1 with PIO).
+Three defaults depart from the bundled spec / Ben's file so the example runs (README,
+"Known issues"):
+
+* rivers are GloFAS discharge with RIVR2O biogeochemistry (``--rivers glofas``) instead
+  of the bundled spec's DAI: DAI is monthly with gaps, which makes roms-tools 5.1.1 write a
+  river file ucla-roms cannot read. GloFAS is daily; with RIVR2O roms-tools reads the
+  concentrations that are precomputed per station on the GloFAS file
+  (``discharge_accounting: total_discharge``, chosen automatically). ``--rivers dai``
+  keeps the bundled DAI source;
+* ``convert_to_climatology: never`` for the rivers (``if_any_missing`` would turn any
+  gap into the unreadable climatology file); ``--river-climatology`` changes it;
+* the parent does not extract pressure fluxes (``--pressure-fluxes on`` crashes ucla-roms
+  with PIO: seen on 0.10.1, and the faulty line is still on main at ``ROMS_COMMIT``).
 """
 
 import argparse
@@ -40,7 +50,11 @@ from cstar.applications.forge.blueprint import Composition, SpecRef
 from cstar.applications.forge.resolve import build_forge_blueprint
 from cstar.catalog.domain_catalog import default_catalog_stack
 
-MODEL = "roms-marbl-0.10-default"  # ucla-roms 0.10.1, MARBL max-it-10, PIO 2.7.1-fork
+MODEL = "roms-marbl-0.10-default"  # its pins: ucla-roms 0.10.1 (see ROMS_COMMIT), MARBL max-it-10, PIO 2.7.1-fork
+# ucla-roms is pinned to main after #390 (CDR_LITE upscaling: conserves the flux of
+# parent_up's depth-profile CDR forcing); replaces the model's 0.10.1 pin. Replace with
+# the 0.10.2 tag when it is released.
+ROMS_COMMIT = "453189ed372d02c5515c882722c9d98e0bd8ac9d"
 FORCING = "glorys-era5-glodap-woa"  # GLORYS + ERA5 + GLODAP/WOA_BGC/UNIFIED BGC + ...
 OUTPUT = "daily-restarts"
 PARENT, CHILD, PARENT_UP = "ccs-parent", "ccs-child", "ccs-parent-up"
@@ -49,8 +63,8 @@ PARENT, CHILD, PARENT_UP = "ccs-parent", "ccs-child", "ccs-parent-up"
 # restart's time axis, so the child and parent_up must count from the same origin.
 REFERENCE_DATE = datetime(2000, 1, 1)
 # Smoke windows (the workplan's runtime variables replace them for a full run). Any dates
-# work with ``convert_to_climatology: never`` rivers; with ``if_any_missing`` (the bundled
-# spec) the window would have to start on a 15th and still could not be run (README).
+# work with the default (GloFAS, ``never``) rivers; DAI with ``if_any_missing`` (the bundled
+# spec) would need a window starting on a 15th and still could not be run (README).
 PARENT_START = datetime(2010, 1, 15)
 PARENT_END = datetime(2010, 1, 19)
 CHILD_START = datetime(2010, 1, 17)
@@ -122,7 +136,7 @@ model_dir = catalog.model_dir(MODEL)
 domain_name = "ccs-nest"  # recorded in composition; the grids are Ben's, not catalog's
 
 
-RIVERS = "default"
+RIVERS = "glofas"  # "glofas" | "dai" (the bundled source) | "none"
 RIVER_CLIMATOLOGY: str | None = "never"
 PRESSURE_FLUXES = False
 
@@ -140,9 +154,14 @@ def forcing(*, child: bool) -> dict[str, Any]:
         data["forcing"].pop("boundary", None)
     if RIVERS == "none":
         data["forcing"].pop("river", None)
-    elif RIVER_CLIMATOLOGY is not None:
+    else:
         for item in data["forcing"].get("river", []):
-            item["convert_to_climatology"] = RIVER_CLIMATOLOGY
+            if RIVERS == "glofas":
+                # the bundled item pairs DAI with RIVR2O; RIVR2O then reads the per-station
+                # concentrations off the GloFAS file ("total_discharge", chosen by roms-tools)
+                item["source"] = {"name": "GLOFAS"}
+            if RIVER_CLIMATOLOGY is not None:
+                item["convert_to_climatology"] = RIVER_CLIMATOLOGY
     return data
 
 
@@ -150,9 +169,12 @@ def forcing_overrides() -> dict[str, Any]:
     """The forcing edits made in :func:`forcing`, as a sparse record for ``composition``."""
     if RIVERS == "none":
         return {"river": "removed"}
+    river: dict[str, Any] = {}
+    if RIVERS == "glofas":
+        river["source"] = "GLOFAS"
     if RIVER_CLIMATOLOGY is not None:
-        return {"river": {"convert_to_climatology": RIVER_CLIMATOLOGY}}
-    return {}
+        river["convert_to_climatology"] = RIVER_CLIMATOLOGY
+    return {"river": river} if river else {}
 
 
 def release_schedule() -> dict[str, Any]:
@@ -205,6 +227,7 @@ def build(
         start_date=start,
         end_date=end,
         model_reference_date=REFERENCE_DATE,
+        roms_ref=ROMS_COMMIT,
         dt=dt,
         v_sponge=v_sponge,
         forcing_inputs=forcing(child=child),
@@ -212,18 +235,21 @@ def build(
         cdr=cdr or {"mode": "none"},
         run_time_overrides=run_time_overrides,
         composition=Composition(
-            model=SpecRef(name=MODEL, origin="catalog"),
+            model=SpecRef(name=MODEL, origin="catalog", modified=True),
             domain=SpecRef(name=domain_name, origin="custom"),
             forcing=SpecRef(
                 name=FORCING,
                 origin="catalog",
-                modified=child or RIVERS == "none" or RIVER_CLIMATOLOGY is not None,
+                modified=child
+                or RIVERS != "dai"
+                or RIVER_CLIMATOLOGY is not None,
             ),
             cdr=SpecRef(name=cdr_note or "", origin="custom"),
             output=SpecRef(
                 name=OUTPUT, origin="catalog", modified=bool(output_overrides)
             ),
             overrides={
+                "code": {"roms": {"commit": ROMS_COMMIT}},
                 **(output_overrides or {}),
                 **(run_time_overrides or {}),
                 **forcing_overrides(),
@@ -241,7 +267,12 @@ def main() -> None:
     global out_dir, RIVERS, RIVER_CLIMATOLOGY, PRESSURE_FLUXES
     parser = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     parser.add_argument("--out-dir", type=Path, default=out_dir)
-    parser.add_argument("--rivers", choices=["default", "none"], default="default")
+    parser.add_argument(
+        "--rivers",
+        choices=["glofas", "dai", "none"],
+        default=RIVERS,
+        help="river discharge source: GloFAS (with RIVR2O BGC), the bundled DAI, or none",
+    )
     parser.add_argument(
         "--river-climatology",
         choices=["if_any_missing", "never", "always"],

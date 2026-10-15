@@ -23,6 +23,19 @@
 #   cstar workplan check workplan.yaml --varfile smoke.vars
 #   cstar workplan run   workplan.yaml --varfile smoke.vars
 #
+# Where it runs: `compute_environment` names no launcher, so C-Star picks the one for the
+# machine: SLURM where there is a scheduler (Anvil), local processes otherwise (a
+# workstation). Every step therefore carries both a `local` and a `slurm` entry in
+# `compute_overrides`. On a SLURM machine set the account and queue first, e.g. on Anvil
+#   export CSTAR_SLURM_ACCOUNT=x-ees250129 CSTAR_SLURM_QUEUE=shared
+# `cstar workplan run` then submits all eight jobs, chained with SLURM dependencies, and
+# returns; it does not have to keep running. The SLURM `num_cpus` of the roms steps (a
+# deferred blueprint cannot be read at submit time) must equal the ranks, np_x * np_y of
+# the vars file: 16 / 50 / 16 for month.vars, six_month.vars and full.vars (smoke.vars
+# needs only 16 / 8 / 16, so 50 is wasteful there). The forge steps ask for 32 CPUs
+# because the memory a job gets on Anvil scales with its CPUs (1.9 GB each; forge was
+# killed for memory at 8).
+#
 # Runtime variables (the *_stamp form is the restart file name's 14-digit timestamp):
 #   parent_start       start of the parent run and of forge_parent's forcing
 #   parent_end         end of the parent run
@@ -42,9 +55,6 @@
 name: ccs-nest-upscale
 description: CCS 16 km parent, 4 km nested child with an ALK release, upscaled back onto the parent
 state: draft
-
-compute_environment:
-  launcher: local
 
 runtime_vars:
   - parent_start
@@ -76,6 +86,9 @@ steps:
     compute_overrides:
       local:
         max_walltime: "12:00:00"  # smoke 8 min; full.vars about 3.2 h (about 30 s per window day)
+      slurm:
+        num_cpus: 32
+        max_walltime: "12:00:00"
 
   # forge_child and forge_parent_up wait for forge_parent so that any first-time
   # downloads (missing source data, the land-mask shapefiles) are done once rather than
@@ -107,6 +120,9 @@ steps:
     compute_overrides:
       local:
         max_walltime: "04:00:00"  # smoke 4 min; full.vars about 0.7 h
+      slurm:
+        num_cpus: 32
+        max_walltime: "06:00:00"
 
   - name: forge_parent_up
     application: forge
@@ -128,6 +144,9 @@ steps:
     compute_overrides:
       local:
         max_walltime: "08:00:00"  # smoke 8 min; full.vars about 1.7 h
+      slurm:
+        num_cpus: 32
+        max_walltime: "10:00:00"
 
   # ---------------------------------------------------------------- parent
   - name: parent
@@ -142,6 +161,9 @@ steps:
     compute_overrides:
       local:
         max_walltime: "24:00:00"  # build 1.5 min + full.vars about 2.3 h (23 s per day)
+      slurm:
+        num_cpus: 16
+        max_walltime: "12:00:00"
 
   # ---------------------------------------------------------------- nesting
   - name: nest_ic
@@ -158,6 +180,9 @@ steps:
       pio: true
     compute_overrides:
       local:
+        max_walltime: "01:00:00"
+      slurm:
+        num_cpus: 4
         max_walltime: "01:00:00"
 
   - name: child
@@ -179,6 +204,9 @@ steps:
     compute_overrides:
       local:
         max_walltime: "24:00:00"  # build 1.5 min + full.vars about 0.9 h (18 s per day)
+      slurm:
+        num_cpus: 50
+        max_walltime: "12:00:00"
 
   # ------------------------------------------------------------- upscaling
   - name: upscale
@@ -191,6 +219,9 @@ steps:
       pio: true
     compute_overrides:
       local:
+        max_walltime: "01:00:00"
+      slurm:
+        num_cpus: 4
         max_walltime: "01:00:00"
 
   - name: parent_up
@@ -214,3 +245,6 @@ steps:
     compute_overrides:
       local:
         max_walltime: "24:00:00"  # build 1.5 min + full.vars about 1.2 h (23 s per day)
+      slurm:
+        num_cpus: 16
+        max_walltime: "12:00:00"

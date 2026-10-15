@@ -11,18 +11,24 @@ forge_child  ----------> nest_ic -------'
 forge_parent_up -------------------------------------------------^
 ```
 
-It runs on ucla-roms 0.10.1 (`roms-marbl-0.10-default`) with real forcing: GLORYS (global
-layout), ERA5, GLODAP + WOA_BGC + UNIFIED BGC, MBL CO2, WOA sea-surface-salinity restoring,
-TPXO tides and DAI rivers with RIVR2O BGC (the bundled `glorys-era5-glodap-woa` ForcingSpec).
-Output is `daily-restarts`.
+It runs on ucla-roms main at commit `453189ed` (after #390, which makes the upscaled depth-profile
+CDR forcing conserve its flux; `ROMS_COMMIT` in `make_forge_blueprints.py`, to be replaced with
+the 0.10.2 tag once released) on top of the `roms-marbl-0.10-default` model (MARBL max-it-10,
+ParallelIO 2.7.1-fork), with real forcing: GLORYS (global layout), ERA5, GLODAP + WOA_BGC +
+UNIFIED BGC, MBL CO2, WOA sea-surface-salinity restoring, TPXO tides and GloFAS rivers with
+RIVR2O BGC (the bundled `glorys-era5-glodap-woa` ForcingSpec with its DAI rivers replaced by
+GloFAS, see "Known issues"). Output is `daily-restarts`.
 
 **Status.** The smoke run (`smoke.vars`: 4 days of parent, the last 2 of child and parent_up)
 passed end to end on tanagra on 2026-10-14 (attempts a8, a10 and a12, see "Smoke run on
-tanagra"). The full run (`full.vars`: a 365-day parent, a 184-day child and parent_up) is
-proposed and has **not been run**. The smoke runs released ALK at 1e4 meq/s (10 mol/s), 1000
+tanagra"), with the files as they were then: ucla-roms 0.10.1, DAI rivers, ALK at 1e4 meq/s. The
+committed files differ from those in three ways (GloFAS rivers, ucla-roms main, ALK at 1e4 mol/s)
+and nothing has been run with them yet. Three longer windows are prepared for Anvil (SLURM), none of
+them run: `month.vars` (31-day parent, 16-day child and parent_up), `six_month.vars` (181-day
+parent, 91-day child and parent_up) and `full.vars` (365-day parent, 184-day child and
+parent_up); see "Run on Anvil". The smoke runs released ALK at 1e4 meq/s (10 mol/s), 1000
 times less than intended, because the first version of the files gave the rate in the wrong
-unit; the committed files now release 1e4 mol/s (1.0e7 meq/s) and no run has used that yet
-(see "CDR placeholders").
+unit; the committed files now release 1e4 mol/s (1.0e7 meq/s) (see "CDR placeholders").
 
 **C-Star version.** It needs a C-Star with two fixes that came with these examples: the
 legacy source-data link behind symlinked directories, and the upscaler's time ordering of
@@ -32,13 +38,15 @@ the `_uscl` files. Releases up to and including 0.16.1 have neither.
 
 | File | What |
 |---|---|
-| `make_forge_blueprints.py` | Generates the three forge blueprints from the bundled catalog (rerun after a catalog or resolver change); flags `--out-dir`, `--rivers`, `--river-climatology`, `--pressure-fluxes` undo or vary the two workarounds below. |
+| `make_forge_blueprints.py` | Generates the three forge blueprints from the bundled catalog (rerun after a catalog or resolver change); flags `--out-dir`, `--rivers {glofas,dai,none}` (default `glofas`), `--river-climatology`, `--pressure-fluxes` undo or vary the workarounds below. `ROMS_COMMIT` pins ucla-roms. |
 | `forge_parent.yaml` | Parent: Ben's grid (open N/S/W, SRTM15, dt 900 s, 4x4 tiles), `grid_kwargs_child` = the child grid, `metadata_child.period` 3600 s, no pressure fluxes in the nesting extraction (see Known issues). `cdr.mode: none`. |
 | `forge_child.yaml` | Child: `grid_kwargs_parent` = the parent grid, the 70x140x20 child grid (dt 240 s, 2x4 tiles), no initial/boundary forcing (they come from `nest_ic` and `nest-from`), `cdr.mode: yaml` with one ALK release, `upscale_output.do_upscale` and `cdr_output.do_cdr_output` on. |
 | `forge_parent_up.yaml` | The parent grid again (4x4), no child, `cdr.mode: upscaled`, `cdr_output.do_cdr_output` on, `cdr_frc.nz_chd: 20` (the child's levels). |
-| `workplan.yaml` | The eight steps, local launcher, runtime variables for every date. |
+| `workplan.yaml` | The eight steps, runtime variables for every date; no launcher is named, so it runs locally on a workstation and under SLURM where there is a scheduler (every step has a `local` and a `slurm` entry in `compute_overrides`). |
 | `smoke.vars` | The smoke values: parent 2010-01-15 to 01-19, child and parent_up the last 2 days, 4x4 / 2x4 tiles, hourly CDR output. |
-| `full.vars` | Proposed full-run values (not yet run): 365-day parent, 184-day child and parent_up, daily CDR output. |
+| `month.vars` | Month run (not yet run): parent 2010-01-01 to 02-01, child and parent_up 01-16 to 02-01, ALK released 01-16 to 01-24, tiles 4x4 / 5x10 / 4x4, daily CDR output. |
+| `six_month.vars` | Six-month run (not yet run): parent 2010-01-01 to 07-01, child and parent_up 04-01 to 07-01, ALK released 04-01 to 05-01, same tiles and cadence. |
+| `full.vars` | Full-run values (not yet run): 365-day parent, 184-day child and parent_up, daily CDR output. |
 
 The committed blueprints carry the smoke windows too, so `cstar blueprint check` and a
 stand-alone `cstar blueprint run` see a valid, short run; the workplan's overrides replace
@@ -62,7 +70,7 @@ the same command with `full.vars` (proposed values, not yet run: see "Full run" 
 
 ### Runtime variables
 
-| Variable | Used for | `smoke.vars` | `full.vars` (proposed) |
+| Variable | Used for | `smoke.vars` | `full.vars` (`month.vars` and `six_month.vars`: see Files) |
 |---|---|---|---|
 | `parent_start` | `forge_parent` `run.start_date` | 2010-01-15T00:00:00 | 2010-01-01T00:00:00 |
 | `parent_end` | `forge_parent` `run.end_date`, `parent` `runtime_params.end_date` | 2010-01-19T00:00:00 | 2011-01-01T00:00:00 (365 days) |
@@ -93,6 +101,8 @@ the override changes (seen with 8x8 and 5x10 on tanagra).
 
 ## Smoke run on tanagra (2026-10-14)
 
+These runs used ucla-roms 0.10.1 and DAI rivers (`convert_to_climatology: never`); the committed files now use ucla-roms main at `453189ed` and GloFAS rivers.
+
 These runs used the first version of the release, `ALK: [1.0e4, 0.0]` read by roms-tools as
 **meq/s**, so 1e4 meq/s = 10 mol/s: 1000 times less than the intended 1e4 mol/s (1.0e7 meq/s) that
 `forge_child.yaml` now carries. The child's `ALK_source` maximum of 750 below is consistent with that, and every
@@ -120,7 +130,7 @@ Forge scales with the window, about 30 s per window day for `forge_parent` and `
 
 Checks on a8, a10 and a12: `child_bry.<ts>.nc` (hourly, one file a day) and daily `output_rst.<ts>.nc` in the parent's output; `ic_from_parent_rst.<child start>.nc` in nest_ic's; `output_uscl.<ts>.nc` in the child's; `upscaled_cdr.nc` is CDF-5 (`ncdump -k`) with 49 hourly `cdr_time` values, strictly increasing, 286 profiles x 20 levels x 2 tracers, all finite, about 65 k non-zero values of at most 2.8e-6 mmol/s (not the release signal: the release is about 190 km from the nearest open boundary, the west one, and has had 2 days); the child's `ALK_source` reaches 750; parent_up's `output_cdr` has a finite `ALK_source` of both signs (about 1e-5 at most); no ERROR, BLOWUP, "Ran out of time records" or "past current time" in any ROMS log; the release site is wet on the built child grid (nearest rho point 2.1 km away, h = 72 m, below).
 
-## Full run (proposed, not run)
+## Full run (not run)
 
 `full.vars`: parent 2010-01-01 to 2011-01-01 (365 days), child and parent_up 2010-07-01 to 2011-01-01 (184 days), ALK released 2010-07-01 to 07-31, tiles 4x4 / 5x10 / 4x4 (16 / 50 / 16 ranks), daily CDR output.
 
@@ -135,6 +145,39 @@ Launch the way the smoke runs were launched: in tmux, pinned to 64 CPUs (one har
 tmux new -d -s ccs-full 'taskset -c 64-127 bash -c "source ~/miniforge3/etc/profile.d/conda.sh && conda activate cstar-env && export CSTAR_NPROCS_POST=8 && cd ~/packages/C-Star/examples/nesting_upscaling/ccs && cstar workplan run workplan.yaml --varfile full.vars --run-id ccs-full-a1 2>&1 | tee ~/cstar/ccs-full-a1.log"'
 ```
 
+## Run on Anvil (SLURM)
+
+`workplan.yaml` names no launcher, so on Anvil C-Star picks the SLURM launcher by itself and the same file and the same `--varfile`s are used as on a workstation. Every step carries its SLURM resources in `compute_overrides.slurm` (`cstar workplan check` on Anvil shows the resolved values; the roms steps need an explicit `num_cpus` because a deferred blueprint cannot be read at submit time):
+
+| Step | CPUs | Walltime | Why |
+|---|---|---|---|
+| `forge_parent`, `forge_child`, `forge_parent_up` | 32 | 12 h / 6 h / 10 h | the memory of an Anvil job scales with its CPUs (1.9 GB each); forge was killed for memory at 8 CPUs on a small domain; forge steps are single-node. Raise it if a full-window forge step runs out of memory |
+| `parent`, `parent_up` | 16 | 12 h | = `parent_np_x * parent_np_y` (4x4), build included |
+| `child` | 50 | 12 h | = `child_np_x * child_np_y` (5x10); the same 16 / 50 / 16 serve `month.vars`, `six_month.vars` and `full.vars`; `smoke.vars` needs only 16 / 8 / 16 |
+| `nest_ic`, `upscale` | 4 | 1 h | small |
+
+If you change the tiling in a vars file, change the matching `num_cpus` in `workplan.yaml` (fewer CPUs than ranks makes `srun` fail; more wastes the allocation). Inside a job ROMS runs as a local `srun` process on the job's CPUs; it does not submit a second job.
+
+Setup, once per shell (the job scripts run with your environment, `--export=ALL`, and contain no `module` or `conda` lines, so the shell that runs `cstar workplan run` must have the environment active):
+
+```bash
+module load conda && conda activate cstar-nest
+export CSTAR_SLURM_ACCOUNT=x-ees250129 CSTAR_SLURM_QUEUE=shared
+export CSTAR_PROJECT_HOME=/anvil/projects/x-ees250129   # source-data cache: <that>/cstar/source-data
+export CSTAR_NPROCS_POST=8                              # default is a third of the node's cores, whatever the job asks for
+cd ~/packages/C-Star/examples/nesting_upscaling/ccs
+```
+
+Run (replace the window and the run-id for the other runs; the run lands in `$SCRATCH/cstar/workplan_runs/<run-id>`):
+
+```bash
+cstar workplan check workplan.yaml --varfile month.vars
+cstar workplan run   workplan.yaml --varfile month.vars --run-id ccs-month-a1
+cstar run status ccs-month-a1
+```
+
+`cstar workplan run` submits all eight jobs with `afterok` SLURM dependencies (and `--kill-on-invalid-dep`, so a failed step cancels what follows) and then returns, within a minute or so; it does not have to keep running, so no `tmux` or `nohup` is needed. Re-running the same command with the same run-id attaches to the run and schedules only what is not yet scheduled. Each job also mails you (`--mail-type=ALL`). Estimates from the tanagra rates (Anvil's are not measured): `month.vars` about 1 h of critical path and about 50 GB of output, `six_month.vars` about 4 h and about 300 GB, `full.vars` about 8 h and about 540 GB, plus queue waits; a few hundred core-hours at most for each.
+
 ## Prerequisites
 
 - C-Star installed from source (see `docs/installation.rst`, "Install from source") on a
@@ -143,10 +186,13 @@ tmux new -d -s ccs-full 'taskset -c 64-127 bash -c "source ~/miniforge3/etc/prof
 - Source data under `cstar forge show-paths` -> `source_data`: GLORYS in the **global** layout
   for the window padded by a day each side (`GLORYS_GLOBAL/cmems_mod_glo_phy_my_0.083deg_P1D-m_GLOBAL_YYYYMMDD.nc`;
   with GLORYS cached, no Copernicus Marine login is needed), `SRTM15`, `TPXO/TPXO10.v2a`,
-  `UNIFIED_BGC/BGCdataset_v2_1.nc`, `GLODAP`, `WOA` (woa18 salinity), `MBL_CO2` and `RIVR2O`.
-  ERA5 and DAI stream. The WOA23 BGC files (78 of them) sit in the same `WOA/` directory as
-  the salinity; forge downloads whatever is missing (about 3 GB for WOA_BGC) and fails with
-  `PermissionError` if the cache is read-shared but write-private (`test -w <source_data>`).
+  `UNIFIED_BGC/BGCdataset_v2_1.nc`, `GLODAP`, `WOA` (woa18 salinity), `MBL_CO2`, `RIVR2O` and
+  `GLOFAS/glofas_v4_rivers_daily_w_rivr2o.nc` (the GloFAS v4 discharge with the per-station
+  RIVR2O concentrations, 1979-2024 daily; user-staged, forge does not download it). ERA5
+  streams. The WOA23 BGC files (78 of them, `woa23_*_01.nc`) must sit directly in the `WOA/`
+  directory next to the salinity; forge downloads whatever is missing there (about 3 GB for
+  WOA_BGC) and fails with `PermissionError` if the cache is read-shared but write-private
+  (`test -w <source_data>`). `--rivers dai` instead streams DAI and needs no GLOFAS file.
 - Network access for ERA5 (Google Cloud), any missing download and the source clones (the
   `git pull` of the shared `~/.cache/cstar` clones can fail transiently: it is logged as an
   ERROR and the step goes on).
@@ -161,7 +207,7 @@ tmux new -d -s ccs-full 'taskset -c 64-127 bash -c "source ~/miniforge3/etc/prof
 
 ## What each step exercises
 
-- **forge_parent**: the v10 forge blueprint on `roms-marbl-0.10-default` (ucla-roms 0.10.1, templates bundled with C-Star); a composite BGC IC/boundary (GLODAP ALK/DIC, WOA_BGC NO3/PO4/SiO3/O2, UNIFIED the rest) on GLORYS global; the nesting extraction for a child grid (`child_bry`, every hour; pressure fluxes off, see Known issues) built after `align_grids` of the child onto the parent.
+- **forge_parent**: the v10 forge blueprint on `roms-marbl-0.10-default` (ucla-roms pinned to main at `453189ed`, templates bundled with C-Star); a composite BGC IC/boundary (GLODAP ALK/DIC, WOA_BGC NO3/PO4/SiO3/O2, UNIFIED the rest) on GLORYS global; the nesting extraction for a child grid (`child_bry`, every hour; pressure fluxes off, see Known issues) built after `align_grids` of the child onto the parent.
 - **forge_child**: a nested child (parent grid rebuilt from `grid_kwargs_parent` and `align_grids`-ed, no GLORYS, `bry_tides` off); `cdr.mode: yaml` with a runtime-overridden release schedule; `upscale_output` (`*_uscl` files) and CDR output.
 - **forge_parent_up**: `cdr.mode: upscaled` (placeholder `cdr_forcing` dataset, `forcing_depth_profiles`, no generation step).
 - **parent**: a deferred-blueprint ROMS-MARBL run with the forge-step window; daily restarts.
@@ -211,18 +257,19 @@ Paths below are under `$CSTAR_DATA_HOME/workplan_runs/ccs-smoke/` (`cstar env sh
 
 ## Known issues
 
-- **Rivers: roms-tools 5.1.1 writes a river file ucla-roms cannot read (workaround in the files).** With the bundled `glorys-era5-glodap-woa` rivers (DAI, `include_bgc` with RIVR2O, `convert_to_climatology: if_any_missing`) DAI has gaps, so roms-tools converts the discharge to a climatology and, because RIVR2O needs calendar times, `expand_monthly_climatology_time_axis` writes it on the 15ths that lie *inside* the run window (`roms_tools/setup/utils.py`, `calendar_midmonth_dates`; a window with no 15th gets one record clamped into it). ucla-roms needs a record at or before the current time and another strictly after it (`find_new_record`, `src/roms_read_write.F90`), so no window works: a 4-day window from 2010-01-01 died with "First available forcing record is past current time for var: river_volume" (one record at the window end, smoke attempt a2) and one from 2010-01-15 with "Ran out of time records for river_volume" (one record at the start, attempt a3). Rivers without BGC are refused by forge (`_check_river_tracer_floor`: 2 tracers < 34), so the blueprints set `convert_to_climatology: never`: the river file then holds the real monthly DAI records around the window (2009-12-15, 2010-01-15, 2010-02-15 for the smoke) and ucla-roms starts; 33 of the 102 smoke discharge values are 0 (roms-tools: "NaNs detected in 'river_volume' and set to zero"). `--river-climatology if_any_missing` restores the bundled behaviour. Whether that is acceptable for the science is for Ben.
-- **Pressure fluxes: ucla-roms 0.10.1 crashes writing them with PIO (workaround in the files).** `nesting_include_pressure_fluxes: true` (Ben's setting) makes the parent's nesting extraction write `up`/`vp`; `src/extract_data.F90:1143` sets `pio_gtype = pio_bnd // '2uc'` for the 1-D variable `up`, while `pio_ncwrite1` only has the `1xx` types, so the first step aborts with "no PIO decomposition for pio_gtype='s2uc' while writing 'up_south'" (attempts a5 and a6; `vp` at line 1229 correctly uses `'1vc'`). The parent blueprint therefore has `nesting_include_pressure_fluxes: false`; the child's `sponge_tune` (`ub_tune` false) does not use them. `--pressure-fluxes on` restores Ben's setting once ucla-roms is fixed.
+- **Rivers: the bundled DAI rivers break on roms-tools 5.1.1; GloFAS is used instead (the committed default).** With the bundled `glorys-era5-glodap-woa` rivers (DAI, `include_bgc` with RIVR2O, `convert_to_climatology: if_any_missing`) DAI has gaps, so roms-tools converts the discharge to a climatology and, because RIVR2O needs calendar times, `expand_monthly_climatology_time_axis` writes it on the 15ths that lie *inside* the run window (`roms_tools/setup/utils.py`, `calendar_midmonth_dates`; a window with no 15th gets one record clamped into it). ucla-roms needs a record at or before the current time and another strictly after it (`find_new_record`, `src/roms_read_write.F90`), so no window works: a 4-day window from 2010-01-01 died with "First available forcing record is past current time for var: river_volume" (one record at the window end, smoke attempt a2) and one from 2010-01-15 with "Ran out of time records for river_volume" (one record at the start, attempt a3). Rivers without BGC are refused by forge (`_check_river_tracer_floor`: 2 tracers < 34). The smoke runs therefore used `convert_to_climatology: never` with DAI, which writes the real monthly DAI records around the window (2009-12-15, 2010-01-15, 2010-02-15 for the smoke) and lets ucla-roms start; 33 of the 102 smoke discharge values are 0 (roms-tools: "NaNs detected in 'river_volume' and set to zero"). The committed files now use **GloFAS v4** discharge (`source.name: GLOFAS`, daily, 1979-2024, no gaps in 2010) with the RIVR2O concentrations precomputed per station on the same file (roms-tools picks `discharge_accounting: total_discharge` for a GloFAS source, so `bgc_source` stays `{name: RIVR2O}` and no RIVR2O path is read); `convert_to_climatology` stays `never`, so the file holds real daily records and does not depend on the 15ths. On Anvil the shared GLOFAS file has 4579 stations inside lon -145..-115, lat 18..58 (Columbia, Fraser, Sacramento, Klamath among the largest), no NaN in 2010; how many roms-tools keeps on the parent and child grids (50 km coastal snap, at least 1 m3/s, overlapping mouths merged) is only known once forge has run. `--rivers dai` (with the default `--river-climatology never`) restores the DAI source of the smoke runs, which needs no GLOFAS file; `--river-climatology if_any_missing` restores the bundled behaviour and does not run. Whether the river choice is acceptable for the science is for Ben.
+- **Pressure fluxes: ucla-roms crashes writing them with PIO (workaround in the files; seen on 0.10.1, still applies on main at `453189ed`).** `nesting_include_pressure_fluxes: true` (Ben's setting) makes the parent's nesting extraction write `up`/`vp`; `src/extract_data.F90:1143` sets `pio_gtype = pio_bnd // '2uc'` for the 1-D variable `up`, while `pio_ncwrite1` only has the `1xx` types, so the first step aborts with "no PIO decomposition for pio_gtype='s2uc' while writing 'up_south'" (attempts a5 and a6; `vp` at line 1229 correctly uses `'1vc'`); the same two lines are unchanged on main at `453189ed` (checked in the source, not run), so the workaround stays. The parent blueprint therefore has `nesting_include_pressure_fluxes: false`; the child's `sponge_tune` (`ub_tune` false) does not use them. `--pressure-fluxes on` restores Ben's setting once ucla-roms is fixed.
 - **Resolution.** Ben's blueprint name says 12 km, but the grid is 2688 km / 168 = 16.0 km by 5280 km / 336 = 15.7 km; the child is 4.0 km by 3.93 km (4:1). The bundled `ccs-12km` DomainSpec is a different (224x440x60, 12 km) grid and is not used.
 - **`center_lon` of the child.** Ben's file has 237.494; it is written here as -122.506 (the same point). roms-tools wraps either form to [0, 360] (`Grid._create_grid_ds`, and `align_grids` wraps both grids with `wrap_longitudes`), and the CDR release longitude is normalised on use, so neither forge nor `align_grids` would have mishandled the 0-360 form; the value only appears as the `center_lon` attribute of the grid file.
 - **Forge window vs `ntimes`.** `model_settings.time_stepping.ntimes` in a forge blueprint is computed from the window when the blueprint is built and is not re-derived when the workplan overrides `run`. It only reaches the `namelist.nml` forge writes; C-Star sets `ntimes` from `runtime_params` and `dt` when the ROMS step runs (`cstar/roms/simulation.py`), so it is harmless.
 - **Two forge dependencies.** `forge_child` and `forge_parent_up` wait for `forge_parent` so any cold-cache downloads (missing source data, the land-mask shapefiles) happen once; a cold cache with three simultaneous forge steps is the race fixed for the e2e test in #761. Drop the two `depends_on` lines on a warm cache.
 - **Legacy source-data link (fixed alongside these examples).** With `~/cstar` and `~/cstar-forge-data` symlinks into different directories (tanagra) the adoption of `cstar-forge-data/source-data` used to create a dangling relative link and the first forge run died with `FileExistsError`; from 16e4556d it links between resolved paths (`~/cstar/source-data -> ../../../cstar-forge-data/source-data` on tanagra). Older checkouts: `ln -s /mnt/cooltub/cw/cstar-forge-data/source-data ~/cstar/source-data` first.
-- **parent_up needs `cdr_frc.relocate_to_wet_pts: true` (set in the file).** The resolver's `upscaled` mode forces it to false (the original hand-made example had true), but the upscaler's 286 profiles sit at the child's boundary points, 51 of which fall on parent land cells: ucla-roms then stops with "CDR release N is on land" (attempt a7). The blueprint overrides it to true; the resolver should not force false.
+- **parent_up needs `cdr_frc.relocate_to_wet_pts: true` (set in the file).** The resolver's `upscaled` mode forces it to false (the original hand-made example had true), but the upscaler's 286 profiles sit at the child's boundary points, 51 of which fall on parent land cells: ucla-roms then stops with "CDR release N is on land" (attempt a7). The blueprint overrides it to true; the resolver should not force false. Still needed on ucla-roms main at `453189ed`: `src/cdr_frc.F90` still aborts with "CDR release N is on land" when `cdr_relocate_to_wet_pts` is false (checked in the source, not run).
+- **`cdr_frc.nz_chd` against ucla-roms main (checked in the source, not run).** From #390 (`453189ed`) a nonzero `cdr_nz_chd` that differs from the number of `s_rho` levels in the depth-profile CDR file aborts ("does not match the N layers (s_rho)"); 0 means read it from the file. That check runs only when `cdr_forcing_depth_profiles` is true, i.e. in `parent_up`: its `nz_chd: 20` equals the child's 20 levels, which is the `s_rho` length of the upscaler's `upscaled_cdr.nc`, so it passes; the value is left at 20. `forge_child` keeps the resolver's default `nz_chd: 50`, which is read only for depth-profile forcing and so is unused there (its release is parameterized). The upscaler's file has no `cdr_trc_name`, which main still accepts for exactly two tracer columns, applied to MARBL's ALK and DIC.
 - **`workplan check` with missing variables** prints "is valid" before "Resolution problems" (exit code 1); read the second line.
 
 ## Not covered
 
-The full-run windows (`full.vars` is a proposal, not run), more than 16 ranks for the parent (no gain measured), the `ucla-roms` pressure-flux extraction (crashes, see above), the climatological-river option, time splitting, a second CDR site or
+The month, six-month and full-run windows (none run yet), more than 16 ranks for the parent (no gain measured), the `ucla-roms` pressure-flux extraction (crashes, see above), the climatological-river option, time splitting, a second CDR site or
 release type, DIC or volume releases, `cdr_lite` mode, upscaling through more than one
-nest level, SLURM.
+nest level, a run with the GloFAS rivers or with ucla-roms main (the Anvil runs are the first).

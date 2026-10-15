@@ -154,7 +154,7 @@ forcing:
     options: {}
   river:
   - source:
-      name: DAI
+      name: GLOFAS
       climatology: false
       glorys_layout: null
       path: null
@@ -198,11 +198,11 @@ forcing:
       dataset_id: null
       url: null
       streamable: false
-    DAI:
-      dataset_key: DAI
+    GLOFAS:
+      dataset_key: GLOFAS
       dataset_id: null
-      url: null
-      streamable: true
+      url: https://ewds.climate.copernicus.eu/datasets/cems-glofas-historical
+      streamable: false
     RIVR2O:
       dataset_key: RIVR2O
       dataset_id: null
@@ -235,8 +235,8 @@ cdr:
       - '2010-01-19T00:00:00'
   cdr_forcing_file: null
 datasets:
-- DAI
 - ERA5
+- GLOFAS
 - MBL_CO2
 - RIVR2O
 - SRTM15
@@ -550,7 +550,7 @@ model_settings:
 code:
   roms:
     location: https://github.com/CWorthy-ocean/ucla-roms.git
-    commit: 0.10.1
+    commit: 453189ed372d02c5515c882722c9d98e0bd8ac9d
     branch: null
   marbl:
     location: https://github.com/CWorthy-ocean/MARBL.git
@@ -582,7 +582,7 @@ composition:
   model:
     name: roms-marbl-0.10-default
     origin: catalog
-    modified: false
+    modified: true
   domain:
     name: ccs-nest
     origin: custom
@@ -600,26 +600,30 @@ composition:
     origin: catalog
     modified: true
   overrides:
+    code:
+      roms:
+        commit: 453189ed372d02c5515c882722c9d98e0bd8ac9d
     upscale_output:
       do_upscale: true
     cdr_output:
       do_cdr_output: true
     river:
+      source: GLOFAS
       convert_to_climatology: never
 provenance:
-  generated_at: '2026-10-15T21:31:47.595013Z'
+  generated_at: '2026-10-15T22:06:09.524913Z'
   generated_by:
     tool: make_forge_blueprints.py
-    id: 19d8db5d-a766-4bb9-8dfd-a95ddf8ac9d3
+    id: 4c2b793e-81a0-4fc1-8909-5e502b1bbe1f
     system: darwin_arm64
     versions:
       cstar-ocean: 0.16.2.dev13+g3ec87ccae
-      roms-tools: 5.1.1
+      roms-tools: 5.1.2.dev4+g8dc852c70
     run_id: ''
     working_dir: ''
   forge_version: null
   cstar_version: null
   roms_tools_version: null
   override_files_applied: []
-  content_hash: 527586ca680760b67d4d571c470beb2d64c5515e15f245a222292f664613fbb0
+  content_hash: 5a2bac66aff1c7ccaf908b3050c14ac2639414f5f461e5a754ecc3932a537e0d
   notes: null
