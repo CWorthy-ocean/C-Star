@@ -24,7 +24,7 @@
 # the blueprint paths are relative to this file):
 #   cstar workplan check workplan.yaml --var example_data=$(python fetch_data.py)
 #   cstar workplan run   workplan.yaml --var example_data=$(python fetch_data.py) --run-id nest-tiny
-#   cstar workplan status nest-tiny
+#   cstar run status nest-tiny
 name: nest-tiny
 description: Tiny 2-level nested ROMS-MARBL run with an ALK release in the child, upscaled to a rerun of the parent (ucla-roms 0.10.1, PIO)
 state: draft
