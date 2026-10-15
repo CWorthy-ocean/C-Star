@@ -130,14 +130,17 @@ def test_blueprint_run_remote_blueprint_dne() -> None:
     assert "not found" in result.stderr
 
 
-def test_blueprint_run_remote_blueprint() -> None:
+def test_blueprint_run_remote_blueprint(
+    serve_remote_files: dict[str, Path], bp_templates_dir: Path
+) -> None:
     """Verify that a URL to a remote blueprint is handled properly and the
     blueprint is executed.
 
-    The published wales_toy blueprint is still schema 2.0.0; automatic
-    migration brings it to the current schema during `run`.
+    The URL serves a schema 2.0.0 blueprint (as the published wales_toy one
+    still is); automatic migration brings it to the current schema during `run`.
     """
     bp_path = "https://raw.githubusercontent.com/CWorthy-ocean/cstar_blueprint_roms_marbl_example/refs/heads/main/wales-toy-domain/wales_toy_blueprint.yaml"
+    serve_remote_files[bp_path] = bp_templates_dir / "roms_marbl/blueprint.2.0.0.yaml"
 
     async def modify_runner(
         self: BlueprintRunner[RomsMarblBlueprint],

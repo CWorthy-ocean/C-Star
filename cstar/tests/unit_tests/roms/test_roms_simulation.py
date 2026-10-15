@@ -1554,6 +1554,7 @@ class TestToAndFromDictAndBlueprint:
 
         assert sim_from_dict.to_dict() == sim_to_dict
 
+    @pytest.mark.usefixtures("offline_remote_files")
     def test_from_blueprint_valid_file(self, blueprint_path: Path) -> None:
         """Tests that `from_blueprint()` correctly loads a `ROMSSimulation` from a valid
         YAML file.

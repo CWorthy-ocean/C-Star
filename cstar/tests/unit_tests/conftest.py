@@ -2,6 +2,7 @@ import functools
 import logging
 import os
 import signal
+import socket
 import uuid
 from collections.abc import Awaitable, Callable, Generator, Iterable, Sequence
 from contextlib import AbstractContextManager, contextmanager
@@ -51,6 +52,52 @@ from cstar.tests.unit_tests.fake_abc_subclasses import (
     StubSimulation,
 )
 
+################################################################################
+# Network guard
+################################################################################
+
+_LOOPBACK_HOSTS = frozenset({"localhost", "127.0.0.1", "::1"})
+
+
+class NetworkAccessInUnitTestError(RuntimeError):
+    """A unit test tried to reach a host other than loopback."""
+
+
+def _refuse_remote_host(host: object) -> None:
+    if isinstance(host, bytes):
+        host = host.decode()
+    if host is not None and host not in _LOOPBACK_HOSTS:
+        msg = (
+            f"Unit tests must not use the network (tried to reach {host!r}). "
+            "Mock the fetch or use a local fixture; live fetches made CI flaky."
+        )
+        raise NetworkAccessInUnitTestError(msg)
+
+
+@pytest.fixture(autouse=True, scope="session")
+def _block_network() -> Generator[None]:
+    """Fail any unit test that resolves or connects to a non-loopback host.
+
+    Subprocesses (e.g. `git ls-remote`) are not covered.
+    """
+    real_getaddrinfo = socket.getaddrinfo
+    real_connect = socket.socket.connect
+
+    def guarded_getaddrinfo(host: object, *args: Any, **kwargs: Any) -> Any:
+        _refuse_remote_host(host)
+        return real_getaddrinfo(host, *args, **kwargs)  # type: ignore[arg-type]
+
+    def guarded_connect(self: socket.socket, address: Any) -> None:
+        if self.family != socket.AF_UNIX:
+            _refuse_remote_host(address[0])
+        real_connect(self, address)
+
+    with (
+        mock.patch("socket.getaddrinfo", guarded_getaddrinfo),
+        mock.patch("socket.socket.connect", guarded_connect),
+    ):
+        yield
+
 
 @pytest.fixture(scope="module")
 def complete_blueprint_path(tests_path: Path) -> Path:
@@ -99,6 +146,35 @@ def blueprint_path(
     bp_copy_path = copies_dir / complete_blueprint_path.name
     bp_copy_path.write_text(bp_content)
     return bp_copy_path
+
+
+@pytest.fixture
+def offline_remote_files() -> Generator[None]:
+    """Classify remote locations without the network: `.git` URLs as
+    repositories, every other URL as a binary (netCDF) file.
+
+    For tests that construct a simulation from a blueprint with remote URLs,
+    e.g. `blueprint_path`.
+    """
+    with (
+        mock.patch.object(
+            _SourceInspector,
+            "_is_repository",
+            new_callable=mock.PropertyMock,
+            return_value=False,
+        ),
+        mock.patch.object(
+            _SourceInspector,
+            "_http_is_html",
+            new_callable=mock.PropertyMock,
+            return_value=False,
+        ),
+        mock.patch(
+            "cstar.io.source_data.get_remote_header",
+            return_value=b"CDF\x02\x00\x00\x00\x00",
+        ),
+    ):
+        yield
 
 
 ################################################################################

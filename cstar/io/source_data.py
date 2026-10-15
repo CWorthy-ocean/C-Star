@@ -30,11 +30,21 @@ if TYPE_CHECKING:
 
 @lru_cache(maxsize=16)
 def get_remote_header(location: str, n_bytes: int) -> bytes:
-    """Get the header from a HTTP location, do determine the kind of data at the location."""
-    response = requests.get(location, stream=True, allow_redirects=True)
-    response.raw.decode_content = True
-    header_bytes = response.raw.read(n_bytes)
-    return header_bytes
+    """Get the header from a HTTP location, do determine the kind of data at the location.
+
+    Raises
+    ------
+    requests.HTTPError
+        If the server answers with an error status. Error bodies (e.g. GitHub's
+        "429: Too Many Requests") are plain text, so sniffing them would
+        misclassify a binary file as text, and the cache would keep that answer.
+    """
+    with requests.get(
+        location, stream=True, allow_redirects=True, timeout=30
+    ) as response:
+        response.raise_for_status()
+        response.raw.decode_content = True
+        return response.raw.read(n_bytes)
 
 
 def _location_as_path(location: str | Path) -> Path:
