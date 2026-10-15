@@ -218,6 +218,24 @@ class TestCDRUpscalerTimeOrder:
         assert upscaler.files == uscl_files
         assert shuffled == [uscl_files[i] for i in (2, 0, 3, 1)]
 
+    def test_files_without_timestamps_keep_the_given_order(
+        self, tmp_path: Path
+    ) -> None:
+        """Verify names without a 14-digit timestamp are not reordered, so numbered
+        files like ``uscl.1 ... uscl.10`` are not sorted alphabetically.
+        """
+        files: list[Path | str] = [
+            _write_uscl_file(
+                tmp_path / f"a_uscl.{i}.nc", [2 * (i - 1), 2 * (i - 1) + 1]
+            )
+            for i in range(1, 11)
+        ]
+
+        upscaler = CDRUpscaler(files)
+
+        assert upscaler.files == files
+        assert np.all(np.diff(upscaler.uscl_dataset.ocean_time.values) > 0)
+
     def test_overlapping_records_raise(self, tmp_path: Path) -> None:
         """Verify a record repeated across files is reported, not silently kept."""
         first = _write_uscl_file(tmp_path / "roms_uscl.20240101000000.nc", [0, 1, 2])
@@ -225,3 +243,18 @@ class TestCDRUpscalerTimeOrder:
 
         with pytest.raises(ValueError, match="strictly increasing"):
             CDRUpscaler([first, second])
+
+    def test_overlapping_records_close_the_dataset(self, tmp_path: Path) -> None:
+        """Verify the opened dataset is closed when the time check fails."""
+        first = _write_uscl_file(tmp_path / "roms_uscl.20240101000000.nc", [0, 1, 2])
+        second = _write_uscl_file(tmp_path / "roms_uscl.20240101020000.nc", [2, 3, 4])
+
+        with (
+            mock.patch.object(
+                xr.Dataset, "close", autospec=True, side_effect=xr.Dataset.close
+            ) as close,
+            pytest.raises(ValueError, match="strictly increasing"),
+        ):
+            CDRUpscaler([first, second])
+
+        close.assert_called_once()

@@ -103,14 +103,15 @@ class UpscalerApplication(
     applicable_transforms = ()
 
 
-def _uscl_sort_key(file: Path | str) -> tuple[str, str]:
+def _uscl_sort_key(file: Path | str) -> str:
     """Order `_uscl` files chronologically by the timestamp in their file name.
 
-    Falls back to the file name for names without a 14-digit timestamp.
+    Returns the 14-digit timestamp, or an empty string for a name without one.
+    Python's sort is stable, so files without a timestamp keep the relative order
+    they were given in.
     """
-    name = Path(file).name
-    match = _USCL_TIMESTAMP.search(name)
-    return (match.group(1) if match else "", name)
+    match = _USCL_TIMESTAMP.search(Path(file).name)
+    return match.group(1) if match else ""
 
 
 class CDRUpscaler:
@@ -122,7 +123,8 @@ class CDRUpscaler:
     1. Initialize with a list of _joined_ `_uscl` files, e.g.
       `cu = CDRUpscaler(["roms_uscl.19920211170000.nc","roms_uscl.19920211180000.nc"])`
     This will open an xarray multi-file dataset with these files, concatenated in
-    chronological order of the timestamps in their names regardless of the order given.
+    chronological order of the timestamps in their names regardless of the order given
+    (files without a timestamp keep the order given).
 
     2. A CDR forcing dataset based on the properties of these files can be initialized with
     `cu.create_cdr_dataset()`
@@ -163,6 +165,7 @@ class CDRUpscaler:
         )
         ocean_time = self.uscl_dataset.ocean_time.values
         if not np.all(np.diff(ocean_time) > 0):
+            self.uscl_dataset.close()
             msg = (
                 "`ocean_time` of the concatenated `_uscl` files is not strictly "
                 + "increasing; the files contain repeated or out-of-order records."
