@@ -795,6 +795,65 @@ class TestSourceDataHome:
         assert home.readlink() == Path("../cstar-forge-data/source-data")
         assert (home / "glorys.nc").read_text() == "data"
 
+    def _make_symlinked_home(self, tmp_path: Path) -> tuple[Path, Path]:
+        """Tanagra-style: ``cstar`` and ``cstar-forge-data`` in the home directory
+        are symlinks into different directories elsewhere.
+
+        Returns the fake home and the (real) legacy source-data directory.
+        """
+        mount = tmp_path / "mnt" / "cooltub" / "cw"
+        real_cstar = mount / "user" / "kthyng" / "cstar"
+        real_cstar.mkdir(parents=True)
+        legacy = self._make_legacy(mount)
+        home = tmp_path / "tanagra-home"
+        home.mkdir()
+        (home / "cstar").symlink_to(real_cstar)
+        (home / "cstar-forge-data").symlink_to(mount / "cstar-forge-data")
+        return home, legacy
+
+    def test_ensure_adopts_legacy_cache_behind_symlinks(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The link must resolve from the real ``cstar`` directory, not from the
+        symlink that points to it.
+        """
+        root, legacy = self._make_symlinked_home(tmp_path)
+        monkeypatch.setenv("SCRATCH", str(root))
+
+        home = DirectoryManager.ensure_source_data_home()
+
+        assert home == self._expected(root)
+        assert home.exists()
+        assert home.is_symlink()
+        assert not home.readlink().is_absolute()
+        assert home.resolve() == legacy.resolve()
+        assert (home / "glorys.nc").read_text() == "data"
+
+        link_target = home.readlink()
+        assert DirectoryManager.ensure_source_data_home() == home
+        assert home.is_symlink()
+        assert home.readlink() == link_target
+        assert home.resolve() == legacy.resolve()
+
+    def test_ensure_removes_link_that_does_not_resolve(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A link that dangles after being created is reported and removed, not
+        left to make ``mkdir`` fail with ``FileExistsError``.
+        """
+        scratch = tmp_path / "scratch"
+        self._make_legacy(scratch)
+        monkeypatch.setenv("SCRATCH", str(scratch))
+        monkeypatch.setattr(
+            "cstar.execution.file_system.os.path.relpath",
+            lambda *args, **kwargs: "../nowhere",
+        )
+
+        with pytest.raises(CstarError, match="does not resolve"):
+            DirectoryManager.ensure_source_data_home()
+
+        assert not self._expected(scratch).is_symlink()
+
     def test_ensure_does_not_link_when_standard_dir_exists(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
