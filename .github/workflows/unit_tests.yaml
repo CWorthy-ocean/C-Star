@@ -49,6 +49,28 @@ jobs:
            python -V
            python -m pip install -e ".[dev]" --force-reinstall
 
+      - name: Locate pooch caches
+        id: pooch-caches
+        shell: micromamba-shell {0}
+        run: |
+          {
+            echo "roms_tools_data=$(python -c "import pooch; print(pooch.os_cache('roms-tools'))")"
+            echo "regionmask_data=$(python -c "import pooch; print(pooch.os_cache('regionmask'))")"
+          } >> "$GITHUB_OUTPUT"
+
+      # Pooch downloads are the only network access unit tests may make (see
+      # `_block_network` in the unit conftest): building a real roms-tools Grid
+      # fetches ETOPO5 and regionmask's Natural Earth land mask. Caches saved on
+      # main are readable by every PR; a miss just re-downloads.
+      - name: Cache unit test data
+        uses: actions/cache@v4
+        with:
+          path: |
+            ${{ steps.pooch-caches.outputs.roms_tools_data }}
+            ${{ steps.pooch-caches.outputs.regionmask_data }}
+          key: ${{ runner.os }}-unit-data-${{ hashFiles('environment-laptop.yml') }}
+          restore-keys: ${{ runner.os }}-unit-data-
+
       - name: Running Tests
         shell: micromamba-shell {0}        
         run: |

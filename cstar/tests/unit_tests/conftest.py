@@ -3,6 +3,7 @@ import logging
 import os
 import signal
 import socket
+import sys
 import uuid
 from collections.abc import Awaitable, Callable, Generator, Iterable, Sequence
 from contextlib import AbstractContextManager, contextmanager
@@ -60,41 +61,54 @@ _LOOPBACK_HOSTS = frozenset({"localhost", "127.0.0.1", "::1"})
 
 
 class NetworkAccessInUnitTestError(RuntimeError):
-    """A unit test tried to reach a host other than loopback."""
+    """A unit test tried to reach a remote host outside a pooch download."""
+
+
+def _called_from_pooch() -> bool:
+    """Whether the current call stack runs through pooch.
+
+    Building a real roms-tools Grid downloads ETOPO5 (roms-tools) and the Natural
+    Earth land mask (regionmask) through pooch, which caches them (and CI caches
+    the pooch directories), so those are the one kind of download allowed.
+    """
+    frame = sys._getframe()
+    while frame is not None:
+        if frame.f_globals.get("__name__", "").split(".")[0] == "pooch":
+            return True
+        frame = frame.f_back  # type: ignore[assignment]
+    return False
 
 
 def _refuse_remote_host(host: object) -> None:
     if isinstance(host, bytes):
         host = host.decode()
-    if host is not None and host not in _LOOPBACK_HOSTS:
-        msg = (
-            f"Unit tests must not use the network (tried to reach {host!r}). "
-            "Mock the fetch or use a local fixture; live fetches made CI flaky."
-        )
-        raise NetworkAccessInUnitTestError(msg)
+    if host is None or host in _LOOPBACK_HOSTS or _called_from_pooch():
+        return
+    msg = (
+        f"Unit tests must not use the network (tried to reach {host!r}). "
+        "Mock the fetch or use a local fixture; live fetches made CI flaky."
+    )
+    raise NetworkAccessInUnitTestError(msg)
 
 
-@pytest.fixture(autouse=True, scope="session")
+@pytest.fixture(autouse=True)
 def _block_network() -> Generator[None]:
-    """Fail any unit test that resolves or connects to a non-loopback host.
+    """Fail any unit test that resolves a remote host outside a pooch download.
 
-    Subprocesses (e.g. `git ls-remote`) are not covered.
+    HTTP clients (requests/urllib3, asyncio) resolve every host, IP literals
+    included, through `socket.getaddrinfo`. Git subprocesses are limited to local
+    repositories. Function-scoped so the guard ends with each unit test and never
+    reaches other test tiers run in the same session.
     """
     real_getaddrinfo = socket.getaddrinfo
-    real_connect = socket.socket.connect
 
     def guarded_getaddrinfo(host: object, *args: Any, **kwargs: Any) -> Any:
         _refuse_remote_host(host)
         return real_getaddrinfo(host, *args, **kwargs)  # type: ignore[arg-type]
 
-    def guarded_connect(self: socket.socket, address: Any) -> None:
-        if self.family != socket.AF_UNIX:
-            _refuse_remote_host(address[0])
-        real_connect(self, address)
-
     with (
         mock.patch("socket.getaddrinfo", guarded_getaddrinfo),
-        mock.patch("socket.socket.connect", guarded_connect),
+        mock.patch.dict(os.environ, {"GIT_ALLOW_PROTOCOL": "file"}),
     ):
         yield
 
