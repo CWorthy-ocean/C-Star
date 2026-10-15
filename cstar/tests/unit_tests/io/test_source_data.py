@@ -2,6 +2,7 @@ from pathlib import Path
 from unittest import mock
 
 import pytest
+import requests
 
 from cstar.io.constants import (
     FileEncoding,
@@ -26,7 +27,8 @@ class TestHelperFunctions:
         fake_raw = mock.Mock()
         fake_raw.read.return_value = fake_bytes
 
-        fake_response = mock.Mock()
+        fake_response = mock.MagicMock()
+        fake_response.__enter__.return_value = fake_response
         fake_response.raw = fake_raw
 
         # Clear cache here so test always runs fresh
@@ -38,10 +40,34 @@ class TestHelperFunctions:
             result = get_remote_header("http://example.com/file", 10)
 
         mock_get.assert_called_once_with(
-            "http://example.com/file", stream=True, allow_redirects=True
+            "http://example.com/file", stream=True, allow_redirects=True, timeout=30
         )
+        fake_response.raise_for_status.assert_called_once_with()
         fake_raw.read.assert_called_once_with(10)
         assert result == fake_bytes
+
+    def test_get_remote_header_raises_on_http_error(self):
+        """Tests that an error response raises instead of returning its (text) body.
+
+        GitHub serves e.g. "429: Too Many Requests" as plain text; sniffing it
+        would classify a netCDF file as text, and the cache would keep that.
+        """
+        fake_response = mock.MagicMock()
+        fake_response.__enter__.return_value = fake_response
+        fake_response.raise_for_status.side_effect = requests.HTTPError(
+            "429 Client Error: Too Many Requests"
+        )
+
+        get_remote_header.cache_clear()
+
+        with (
+            mock.patch("cstar.io.source_data.requests.get", return_value=fake_response),
+            pytest.raises(requests.HTTPError, match="429"),
+        ):
+            get_remote_header("http://example.com/file.nc", 10)
+
+        fake_response.raw.read.assert_not_called()
+        assert get_remote_header.cache_info().currsize == 0
 
     @pytest.mark.parametrize(
         "location, expected",

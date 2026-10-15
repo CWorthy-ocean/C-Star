@@ -257,14 +257,6 @@ def test_blueprint_check_remote_blueprint_dne() -> None:
     assert "not found" in result.stderr
 
 
-@pytest.mark.xfail(
-    reason=(
-        "cstar_blueprint_roms_marbl_example's wales_toy_blueprint.yaml is still "
-        "schema 2.0.0 (has a bare `model_params` section) and roms_marbl schema "
-        "3.0.0 forbids it; remove once the sibling repo publishes a 3.0.0 blueprint"
-    ),
-    strict=False,
-)
 @pytest.mark.parametrize(
     "bp_uri",
     [
@@ -274,6 +266,8 @@ def test_blueprint_check_remote_blueprint_dne() -> None:
 )
 def test_blueprint_check_remote_blueprint(
     bp_uri: str,
+    serve_remote_files: dict[str, Path],
+    bp_templates_dir: Path,
 ) -> None:
     """Verify that a URL to a remote blueprint is handled properly and the
     blueprint is executed.
@@ -282,7 +276,12 @@ def test_blueprint_check_remote_blueprint(
     ----------
     bp_uri : str
         A working URL referencing a valid blueprint
+    serve_remote_files : dict[str, Path]
+        Fixture serving the URL from the bundled blueprint template
+    bp_templates_dir : Path
+        Directory containing the bundled blueprint templates
     """
+    serve_remote_files[bp_uri] = bp_templates_dir / "blueprint.yaml"
     args = [bp_uri]
 
     runner = CliRunner()

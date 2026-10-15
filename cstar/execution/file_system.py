@@ -14,7 +14,7 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from urllib.parse import urlsplit
 
-from requests import request
+from requests import RequestException, request
 
 from cstar.base.env import (
     ENV_CSTAR_CACHE_HOME,
@@ -521,7 +521,8 @@ def write_local_copy(url: str, directory: Path) -> Path:
     ValueError
         If an empty URL is received.
     FileNotFoundError
-        If the remote URL cannot be retrieved.
+        If the remote URL cannot be retrieved (error status, timeout, or
+        connection failure).
     """
     url = url.strip()
     if not url:
@@ -532,7 +533,11 @@ def write_local_copy(url: str, directory: Path) -> Path:
     resource_name = resource_path.name
     http_ok: t.Final[int] = 200
 
-    get_request = request("GET", url, timeout=1.0)
+    try:
+        get_request = request("GET", url, timeout=10.0)
+    except RequestException as ex:
+        msg = f"Unable to retrieve remote file ({type(ex).__name__})"
+        raise FileNotFoundError(errno.ENOENT, msg, url) from ex
     if get_request.status_code != http_ok:
         msg = "Unable to retrieve remote file"
         raise FileNotFoundError(errno.ENOENT, msg, url)

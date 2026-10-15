@@ -5,6 +5,7 @@ from pathlib import Path
 from unittest import mock
 
 import pytest
+import requests
 
 from cstar.applications.roms_marbl.file_system import RomsFileSystemManager
 from cstar.base.env import ENV_CSTAR_DATA_HOME, ENV_CSTAR_RUNID
@@ -21,6 +22,7 @@ from cstar.execution.file_system import (
     remove_files,
     rotate_file,
     step_disk_usage,
+    write_local_copy,
 )
 from cstar.orchestration.models import Step
 from cstar.orchestration.orchestration import LiveStep
@@ -854,3 +856,45 @@ class TestSourceDataHome:
 
         assert home == self._expected(scratch)
         assert home.is_dir()
+
+
+class TestWriteLocalCopy:
+    """Tests for `write_local_copy`."""
+
+    def test_writes_response_text(self, tmp_path: Path) -> None:
+        """A 200 response is written under the URL's file name."""
+        url = "https://example.com/plans/workplan.yaml"
+        response = mock.Mock(status_code=200, text="name: wp\n")
+
+        with mock.patch(
+            "cstar.execution.file_system.request", return_value=response
+        ) as mock_request:
+            local_path = write_local_copy(url, tmp_path)
+
+        mock_request.assert_called_once_with("GET", url, timeout=10.0)
+        assert local_path == (tmp_path / "workplan.yaml").resolve()
+        assert local_path.read_text() == "name: wp\n"
+
+    @pytest.mark.parametrize(
+        "error",
+        [
+            requests.ReadTimeout("Read timed out. (read timeout=10.0)"),
+            requests.ConnectionError("Connection aborted."),
+        ],
+    )
+    def test_request_failure_is_file_not_found(
+        self, tmp_path: Path, error: requests.RequestException
+    ) -> None:
+        """A timeout or connection failure is reported like a missing file, so
+        callers' existing FileNotFoundError handling covers it.
+        """
+        url = "https://example.com/plans/workplan.yaml"
+
+        with (
+            mock.patch("cstar.execution.file_system.request", side_effect=error),
+            pytest.raises(FileNotFoundError, match=type(error).__name__) as exc_info,
+        ):
+            write_local_copy(url, tmp_path)
+
+        assert exc_info.value.filename == url
+        assert not (tmp_path / "workplan.yaml").exists()
