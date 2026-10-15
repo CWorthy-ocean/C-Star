@@ -23,6 +23,12 @@ Breaking Changes
 
 - ``cstar workplan status <unknown-id>`` exits with status 2 instead of printing a message and exiting 0. (`#767 <https://github.com/CWorthy-ocean/C-Star/pull/767>`_)
 - ``cstar workplan run --resume`` no longer re-exports the ``CSTAR_DATA_HOME`` and ``CSTAR_STATE_HOME`` captured when the run started; a reloaded run resolves against the current ones, and one warning names any other captured ``CSTAR_*`` setting that differs from the shell. (`#768 <https://github.com/CWorthy-ocean/C-Star/pull/768>`_)
+- A relative ``location:`` in a blueprint now resolves against the directory of the blueprint file, not the current working directory. (`#766 <https://github.com/CWorthy-ocean/C-Star/pull/766>`_)
+
+  - A location that exists only relative to the working directory is refused, with both candidate paths named.
+  - A blueprint fetched from a URL keeps the old meaning: its relative locations resolve against the directory ``cstar`` is run from.
+
+- ``ROMSInputDataset`` no longer accepts a ``linker``; the unused ``DatasetLinker`` class is removed. (`#766 <https://github.com/CWorthy-ocean/C-Star/pull/766>`_)
 
 New features
 ~~~~~~~~~~~~
@@ -38,6 +44,17 @@ New features
 
   - Moving one run between data homes on the same machine works end to end: move ``workplan_runs/<id>`` from the old ``CSTAR_DATA_HOME`` to the new one and point ``CSTAR_DATA_HOME`` at it; ``status``, ``path``, ``gather``, ``continue-from`` and ``--resume`` all resolve there.
   - A run record follows a run only when its recorded directory is gone and the current data home holds ``workplan_runs/<id>``; a run copied to an arbitrary path, or to another machine, has valid internal paths but is not reachable by run-id until ``attach`` (Phase 2).
+
+- New ``cstar run`` command group for inspecting and managing existing runs: ``status``, ``log``, ``gather``, ``path``, ``cd``, ``ls`` and ``check``. (`#766 <https://github.com/CWorthy-ocean/C-Star/pull/766>`_)
+
+  - The ``cstar workplan <verb>`` spellings keep working unchanged and print no notice; which spelling becomes canonical is deliberately left open.
+  - ``cstar run cd`` needs the shell function regenerated with ``cstar env shell-init --install``; ``cstar workplan cd`` keeps working either way.
+
+- ``cstar run check <run-id|path>`` reports absolute paths inside a run's reference files, absolute or dangling symlinks, links pointing outside the run, missing step directories, and orphaned step directories or sentinels. (`#766 <https://github.com/CWorthy-ocean/C-Star/pull/766>`_)
+
+  - ``--repair`` rewrites in-run symlinks as relative links and rebuilds the gathered output; ``--all`` also scans launch artifacts that are regenerated on every launch.
+  - Exit code 0 when clean, 1 when findings remain, 2 for bad arguments.
+
 
 
 Bug Fixes
@@ -65,6 +82,10 @@ Improvements
 
 - ``LiveWorkplan.load``, ``try_load`` and ``load_all`` replace ad-hoc deserialization at every reader of a transformed workplan; ``rebase_paths``, ``read_all`` and ``read_document`` are shared helpers. (`#768 <https://github.com/CWorthy-ocean/C-Star/pull/768>`_)
 - Following a moved run tolerates directories that cannot be inspected and runs off the event loop when listing runs. (`#768 <https://github.com/CWorthy-ocean/C-Star/pull/768>`_)
+- Forge writes the emitted ROMS-MARBL blueprint with locations relative to its own directory (``../input_data/...``, ``../builds/...``), so a forge run can be moved or copied as a unit. (`#766 <https://github.com/CWorthy-ocean/C-Star/pull/766>`_)
+- The generated ROMS namelist names inputs relative to ``work/`` (``../input/input_datasets/...``), keeping names short for ROMS's 99-character filename buffers; a source outside the run keeps its absolute path. (`#766 <https://github.com/CWorthy-ocean/C-Star/pull/766>`_)
+- Symlinks C-Star creates (staged inputs, ``work/roms``, the tracking ``latest`` pointer, the legacy source-data link) are relative when both ends sit in the same tree and absolute otherwise. (`#766 <https://github.com/CWorthy-ocean/C-Star/pull/766>`_)
+- A migrated blueprint copy written to another directory keeps naming the same files. (`#766 <https://github.com/CWorthy-ocean/C-Star/pull/766>`_)
 
 
 Miscellaneous
@@ -76,3 +97,4 @@ Miscellaneous
 - Docs: the workplans page describes the recorded root, which moves work by run-id today, and which wait for ``attach``. (`#768 <https://github.com/CWorthy-ocean/C-Star/pull/768>`_)
 - New end-to-end test ``test_workplan_relocation.py`` (hello_world steps, no ROMS build) that copies a whole data home, repoints ``CSTAR_DATA_HOME`` and exercises ``status``, ``path``, ``gather``, ``continue-from`` and ``--resume`` from the copy. (`#768 <https://github.com/CWorthy-ocean/C-Star/pull/768>`_)
 - Unit tests no longer reach the network except for pooch-cached dataset downloads, and the unit CI workflow caches those downloads. (`#770 <https://github.com/CWorthy-ocean/C-Star/pull/770>`_)
+- Docs: run-level commands documented under ``cstar run``, the anchoring rule on the HPC and blueprint pages, and the run-check functions on the orchestration API page. (`#766 <https://github.com/CWorthy-ocean/C-Star/pull/766>`_)
