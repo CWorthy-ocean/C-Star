@@ -2683,7 +2683,7 @@ class WorkplanBuilderPage:
         try:
             from cstar.orchestration.orchestration import LiveWorkplan
 
-            live = deserialize(record.trx_workplan_path, LiveWorkplan)
+            live = LiveWorkplan.load(record.trx_workplan_path)
         except Exception as ex:
             row.status.value = f"<span class='forge-msg-warn'>run recorded, but its workplan could not be read: {_esc(ex)}</span>"
             return

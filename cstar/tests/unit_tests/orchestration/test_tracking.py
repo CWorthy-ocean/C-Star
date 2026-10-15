@@ -772,3 +772,113 @@ async def test_tracking_update_workplan_run_unknown_run_returns_none(
         result = await repo.update_workplan_run("never-ran", lambda r: None)
 
     assert result is None
+
+
+def _record(tmp_path: Path, run_id: str, output_path: Path) -> WorkplanRun:
+    """Build a record of a run whose transformed workplan sits in `output_path`."""
+    return WorkplanRun(
+        workplan_path=tmp_path / "workplan.yaml",
+        trx_workplan_path=output_path / "workplan_transformed.yaml",
+        output_path=output_path,
+        run_id=run_id,
+    )
+
+
+@pytest.mark.asyncio
+async def test_tracking_follows_a_run_whose_directory_moved(tmp_path: Path) -> None:
+    """Verify a record naming a run directory that is gone is followed to the
+    directory the current data home keeps for the run-id, wherever the record is read.
+    """
+    run_id = "moved-run"
+    recorded = tmp_path / "old-data" / "workplan_runs" / run_id
+    current = StateDirectoryManager.data_dir(run_id)
+    current.mkdir(parents=True)
+    repo = TrackingRepository()
+    await repo.put_workplan_run(_record(tmp_path, run_id, recorded))
+
+    found = await repo.get_workplan_run(run_id)
+    listed = await repo.list_latest_runs()
+
+    assert found is not None
+    assert found.output_path == current
+    assert found.trx_workplan_path == current / "workplan_transformed.yaml"
+    assert found.workplan_path == tmp_path / "workplan.yaml"
+    assert [r.output_path for r in listed] == [current]
+
+    # an update persists the followed paths
+    updated = await repo.update_workplan_run(run_id, lambda run: None)
+    assert updated is not None
+    assert deserialize(repo.latest_path(run_id), WorkplanRun).output_path == current
+
+
+@pytest.mark.asyncio
+async def test_tracking_keeps_a_run_whose_directory_exists(tmp_path: Path) -> None:
+    """Verify a record naming an existing run directory is left alone, even when the
+    current data home also holds a directory for the run-id.
+    """
+    run_id = "kept-run"
+    recorded = tmp_path / "other-data" / "workplan_runs" / run_id
+    recorded.mkdir(parents=True)
+    StateDirectoryManager.data_dir(run_id).mkdir(parents=True)
+    repo = TrackingRepository()
+    await repo.put_workplan_run(_record(tmp_path, run_id, recorded))
+
+    found = await repo.get_workplan_run(run_id)
+
+    assert found is not None
+    assert found.output_path == recorded
+    assert found.trx_workplan_path == recorded / "workplan_transformed.yaml"
+
+
+@pytest.mark.asyncio
+async def test_tracking_keeps_a_run_it_cannot_inspect(tmp_path: Path) -> None:
+    """Verify a record whose directories cannot be probed is returned as recorded,
+    rather than failing the read.
+    """
+    run_id = "unreadable-run"
+    recorded = tmp_path / "old-data" / "workplan_runs" / run_id
+    StateDirectoryManager.data_dir(run_id).mkdir(parents=True)
+    repo = TrackingRepository()
+    await repo.put_workplan_run(_record(tmp_path, run_id, recorded))
+
+    real_exists = Path.exists
+
+    def exists(self: Path, **kwargs: t.Any) -> bool:
+        """Deny only the recorded run directory, as a permission error would."""
+        if self == recorded:
+            raise PermissionError("denied")
+        return real_exists(self, **kwargs)
+
+    with mock.patch.object(Path, "exists", exists):
+        found = await repo.get_workplan_run(run_id)
+        listed = await repo.list_latest_runs()
+
+    assert found is not None
+    assert found.output_path == recorded
+    assert [r.output_path for r in listed] == [recorded]
+
+
+@pytest.mark.asyncio
+async def test_tracking_lists_runs_following_them_off_the_event_loop(
+    tmp_path: Path,
+) -> None:
+    """Verify listing records follows moved runs in the worker threads that read them."""
+    run_id = "listed-run"
+    StateDirectoryManager.data_dir(run_id).mkdir(parents=True)
+    repo = TrackingRepository()
+    await repo.put_workplan_run(
+        _record(tmp_path, run_id, tmp_path / "old-data" / "workplan_runs" / run_id)
+    )
+    threads: list[threading.Thread] = []
+    reanchored = WorkplanRun.reanchored
+
+    def spy(self: WorkplanRun) -> WorkplanRun:
+        threads.append(threading.current_thread())
+        return reanchored(self)
+
+    with mock.patch.object(WorkplanRun, "reanchored", spy):
+        listed = await repo.list_latest_runs()
+
+    assert [r.output_path for r in listed] == [StateDirectoryManager.data_dir(run_id)]
+    assert threads
+    assert threading.main_thread() not in threads

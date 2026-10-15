@@ -1,6 +1,7 @@
 import asyncio
 import enum
 import errno
+import os
 import typing as t
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
@@ -51,6 +52,7 @@ class SerializableModel(t.Protocol):
 
 
 _T = t.TypeVar("_T", bound=SerializableModel)
+_R = t.TypeVar("_R")
 
 
 @dataclass
@@ -154,46 +156,6 @@ def read_raw(
     )
     raise RuntimeError(msg)
     # log.warning(msg)
-
-
-def _read_json(path: Path, klass: type[_T]) -> _T:
-    """Read and process content as a JSON file.
-
-    Parameters
-    ----------
-    path : Path
-        The path to a file containing content.
-    klass : type[_T]
-        The type to instantiate from the content.
-
-    Returns
-    -------
-    _T
-    """
-    model_dict = read_json_to_raw(path)
-    if model_dict:
-        model_dict.pop("$schema", None)
-    return klass.model_validate(model_dict)  # type: ignore
-
-
-def _read_yaml(path: Path, klass: type[_T]) -> _T:
-    """Read and process content as a YAML file.
-
-    Parameters
-    ----------
-    path : Path
-        The path to a file containing content.
-    klass : type[_T]
-        The type to instantiate from the content.
-
-    Returns
-    -------
-    _T
-    """
-    model_dict = read_yaml_to_raw(path)
-    if model_dict:
-        model_dict.pop("$schema", None)
-    return klass.model_validate(model_dict)  # type: ignore
 
 
 def path_representer(
@@ -312,6 +274,41 @@ def _mode_detect(path: Path) -> PersistenceMode:
     return PersistenceMode.yaml
 
 
+def read_document(
+    path: Path | str,
+    mode: PersistenceMode = PersistenceMode.auto,
+) -> dict[str, t.Any]:
+    """Read a persisted document into a raw mapping, as `deserialize` reads it.
+
+    Parameters
+    ----------
+    path : Path | str
+        The location of the document.
+    mode : PersistenceMode
+        The type of serializer used to create the file; `auto` selects based
+        on the file extension.
+
+    Raises
+    ------
+    FileNotFoundError
+        If the file does not exist.
+
+    Returns
+    -------
+    dict[str, Any]
+        The document, without its `$schema` key.
+    """
+    path = Path(path)
+    if mode == PersistenceMode.auto:
+        mode = _mode_detect(path)
+
+    read = read_json_to_raw if mode == PersistenceMode.json else read_yaml_to_raw
+    document = read(path)
+    if document:
+        document.pop("$schema", None)
+    return document
+
+
 def deserialize(
     path: Path | str,
     klass: type[_T],
@@ -350,13 +347,7 @@ def deserialize(
         msg = f"No file found at path `{path}` to deserialize to `{klass.__name__}`"
         raise FileNotFoundError(errno.ENOENT, msg, path)
 
-    if mode == PersistenceMode.auto:
-        mode = _mode_detect(path)
-
-    if mode == PersistenceMode.json:
-        model = _read_json(path, klass)
-    else:
-        model = _read_yaml(path, klass)
+    model = klass.model_validate(read_document(path, mode))  # type: ignore
 
     msg = f"Deserialized {str(path)!r} into: {model}"
     log.trace(msg)
@@ -375,6 +366,79 @@ def try_deserialize(
         msg = f"try-deserialize failed loading {klass.__name__!r} from {str(path)!r}"
         log.debug(msg)
         return None
+
+
+def rebase_paths(value: t.Any, old_root: str, new_root: str) -> t.Any:
+    """Rebase every string under `old_root` in a parsed document onto `new_root`.
+
+    A string is under `old_root` when it equals it or starts with it followed
+    by a path separator; a string that merely contains `old_root` is left
+    alone. Mapping keys are never rebased.
+
+    Parameters
+    ----------
+    value : Any
+        The parsed document, or a fragment of one.
+    old_root : str
+        The directory the document's paths were written under.
+    new_root : str
+        The directory to rebase them onto.
+
+    Returns
+    -------
+    Any
+        A rebased copy of `value`.
+    """
+    if isinstance(value, str):
+        if value == old_root:
+            return new_root
+        prefix = old_root.rstrip(os.sep) + os.sep
+        if value.startswith(prefix):
+            return new_root.rstrip(os.sep) + os.sep + value[len(prefix) :]
+        return value
+    if isinstance(value, dict):
+        return {k: rebase_paths(v, old_root, new_root) for k, v in value.items()}
+    if isinstance(value, list):
+        return [rebase_paths(v, old_root, new_root) for v in value]
+    return value
+
+
+async def read_all(
+    paths: Sequence[Path | str],
+    read: Callable[[Path], _R | None],
+    limit: int,
+    sem: asyncio.Semaphore | None = None,
+) -> Sequence[_R | None]:
+    """Read a collection of files concurrently, in input order.
+
+    Each file is read in a worker thread, so `read` may block. Reads are
+    bounded by `sem` when supplied and otherwise by a new semaphore permitting
+    `limit` concurrent reads.
+
+    Parameters
+    ----------
+    paths : Sequence[Path | str]
+        The files to read.
+    read : Callable[[Path], _R | None]
+        Reads one file, returning `None` for one that cannot be read.
+    limit : int
+        The maximum number of concurrent reads; ignored when `sem` is supplied.
+    sem : asyncio.Semaphore | None
+        An externally owned semaphore used to bound concurrent reads.
+
+    Returns
+    -------
+    Sequence[_R | None]
+        What `read` returned for each file, in input order.
+    """
+
+    async def _bounded(p: Path, s: asyncio.Semaphore) -> _R | None:
+        """Read the item with concurrency bounded."""
+        async with s:
+            return await asyncio.to_thread(read, p)
+
+    sem = sem or asyncio.Semaphore(limit)
+    return await asyncio.gather(*(_bounded(Path(p), sem) for p in paths))
 
 
 async def deserialize_all(
@@ -408,14 +472,7 @@ async def deserialize_all(
         The deserialized items in input order; an item that cannot be read
         or fails validation is returned as `None`.
     """
-
-    async def _bounded(p: Path, s: asyncio.Semaphore) -> _T | None:
-        """Deserialize the item with concurrency bounded."""
-        async with s:
-            return await asyncio.to_thread(try_deserialize, p, klass, mode)
-
-    sem = sem or asyncio.Semaphore(limit)
-    return await asyncio.gather(*(_bounded(Path(p), sem) for p in paths))
+    return await read_all(paths, lambda p: try_deserialize(p, klass, mode), limit, sem)
 
 
 def serialize(

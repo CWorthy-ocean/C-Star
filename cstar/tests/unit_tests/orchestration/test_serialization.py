@@ -1,5 +1,6 @@
 import asyncio
 import errno
+import shutil
 import textwrap
 import threading
 import time
@@ -21,9 +22,11 @@ from cstar.orchestration.serialization import (
     _mode_detect,
     deserialize,
     deserialize_all,
+    read_document,
     read_json_to_raw,
     read_raw,
     read_yaml_to_raw,
+    rebase_paths,
     serialize,
 )
 from cstar.orchestration.state import StateRepository
@@ -232,9 +235,11 @@ def test_serialization_polymorphic_workplan(
     with pytest.raises(ValidationError, match="working_dir"):
         result = deserialize(poly_path, Workplan)
 
-    # now, deserialize and confirm the workplan contains LiveStep
-    result = deserialize(poly_path, LiveWorkplan)
+    # now, load and confirm the workplan contains LiveStep; it never recorded a
+    # run root, so none is written or invented
+    result = LiveWorkplan.load(poly_path)
 
+    assert result.root is None
     for step in result.steps:
         assert isinstance(step, LiveStep)
 
@@ -663,3 +668,191 @@ async def test_deserialize_all_honours_supplied_semaphore(tmp_path: Path) -> Non
         await deserialize_all(paths, _SimpleModel, limit=len(paths), sem=sem)
 
     assert state["peak"] <= limit
+
+
+def _write_transformed_workplan(root: Path, record_root: bool = True) -> Path:
+    """Write a one-step transformed workplan whose paths all sit under ``root``.
+
+    The step carries its working directory, a blueprint file, directive values
+    nested in a mapping and a list, a string that merely contains the root
+    mid-string, and a sibling directory whose name starts with the root's.
+
+    Parameters
+    ----------
+    root : Path
+        The run root the workplan is written into.
+    record_root : bool
+        Whether the workplan records ``root``, as `prepare_workplan` does.
+
+    Returns
+    -------
+    Path
+        The path to the transformed workplan.
+    """
+    step_dir = root / "tasks" / "a"
+    blueprint = step_dir / "work" / "blueprint.yaml"
+    blueprint.parent.mkdir(parents=True)
+    blueprint.write_text("name: a\n")
+
+    step = LiveStep(
+        name="a",
+        application="hello_world",
+        blueprint=str(blueprint),
+        working_dir=step_dir,
+        blueprint_overrides={
+            "mid_string": f"--out={root}/mid",
+            "sibling": f"{root}-other/x",
+        },
+        directives={
+            "apply-overrides": {
+                "working_dir": str(step_dir),
+                "extra": [str(step_dir / "x"), "unrelated"],
+            }
+        },
+    )
+    workplan = LiveWorkplan(
+        name="t",
+        description="d",
+        steps=[step],
+        root=root if record_root else None,
+    )
+    path = root / "t_transformed.yaml"
+    assert serialize(path, workplan)
+    return path
+
+
+def test_live_workplan_load_rebases_a_moved_run(tmp_path: Path) -> None:
+    """Verify every string under the recorded root follows the file to its new directory,
+    wherever it sits in the document, and strings that only contain it stay put.
+    """
+    old_root = tmp_path.resolve() / "old"
+    _write_transformed_workplan(old_root)
+    new_root = tmp_path.resolve() / "new"
+    shutil.copytree(old_root, new_root)
+
+    workplan = LiveWorkplan.load(new_root / "t_transformed.yaml")
+
+    (step,) = workplan.steps
+    assert workplan.root == new_root
+    assert step.working_dir == new_root / "tasks" / "a"
+    assert Path(str(step.blueprint_path)) == new_root / "tasks/a/work/blueprint.yaml"
+    assert step.directives["apply-overrides"] == {
+        "working_dir": str(new_root / "tasks" / "a"),
+        "extra": [str(new_root / "tasks" / "a" / "x"), "unrelated"],
+    }
+    # mid-string and sibling-prefix values are not paths under the root
+    assert step.blueprint_overrides == {
+        "mid_string": f"--out={old_root}/mid",
+        "sibling": f"{old_root}-other/x",
+    }
+
+
+def test_live_workplan_load_without_root_loads_as_written(tmp_path: Path) -> None:
+    """Verify a file written before the root was recorded is not rebased."""
+    old_root = tmp_path.resolve() / "old"
+    _write_transformed_workplan(old_root, record_root=False)
+    new_root = tmp_path.resolve() / "new"
+    shutil.copytree(old_root, new_root)
+
+    workplan = LiveWorkplan.load(new_root / "t_transformed.yaml")
+
+    assert workplan.root is None
+    assert workplan.steps[0].working_dir == old_root / "tasks" / "a"
+
+
+def test_live_workplan_load_in_place_loads_as_written(tmp_path: Path) -> None:
+    """Verify a file still sitting in its recorded root is not rebased."""
+    root = tmp_path.resolve() / "run"
+    path = _write_transformed_workplan(root)
+
+    assert LiveWorkplan.load(path) == deserialize(path, LiveWorkplan)
+    assert LiveWorkplan.load(str(path)).root == root
+
+
+def test_live_workplan_load_ignores_an_empty_root(tmp_path: Path) -> None:
+    """Verify an empty recorded root cannot rebase every absolute path."""
+    root = tmp_path.resolve() / "run"
+    path = _write_transformed_workplan(root)
+    emptied = path.read_text().replace(f"root: {root}", "root: ''")
+    assert "root: ''" in emptied
+    path.write_text(emptied)
+
+    workplan = LiveWorkplan.load(path)
+
+    assert workplan.steps[0].working_dir == root / "tasks" / "a"
+
+
+def test_live_workplan_load_missing_file(tmp_path: Path) -> None:
+    """Verify a missing file raises the error `deserialize` raises."""
+    with pytest.raises(FileNotFoundError):
+        LiveWorkplan.load(tmp_path / "absent.yaml")
+
+    assert LiveWorkplan.try_load(tmp_path / "absent.yaml") is None
+
+
+async def test_live_workplan_load_all_returns_none_for_unreadable(
+    tmp_path: Path,
+) -> None:
+    """Verify the batch loader rebases each file and yields `None` for an unreadable one."""
+    old_root = tmp_path.resolve() / "old"
+    _write_transformed_workplan(old_root)
+    new_root = tmp_path.resolve() / "new"
+    shutil.copytree(old_root, new_root)
+    bad = tmp_path / "bad.yaml"
+    bad.write_text("name: nope\n")
+
+    results = await LiveWorkplan.load_all(
+        [new_root / "t_transformed.yaml", bad, tmp_path / "absent.yaml"], limit=2
+    )
+
+    assert results[0] is not None
+    assert results[0].root == new_root
+    assert results[1:] == [None, None]
+
+
+def test_live_workplan_root_serialization(tmp_path: Path) -> None:
+    """Verify a recorded root is written, and an absent one is not."""
+    recorded = _write_transformed_workplan(tmp_path.resolve() / "a")
+    unrecorded = _write_transformed_workplan(tmp_path.resolve() / "b", False)
+
+    assert f"root: {tmp_path.resolve() / 'a'}" in recorded.read_text()
+    assert "root:" not in unrecorded.read_text()
+
+
+def test_live_workplan_root_field_names_the_root_field() -> None:
+    """Verify the key the loader reads is the name of the model's `root` field."""
+    assert LiveWorkplan.ROOT_FIELD in LiveWorkplan.model_fields
+    assert LiveWorkplan.model_fields[LiveWorkplan.ROOT_FIELD].annotation == Path | None
+
+
+def test_rebase_paths() -> None:
+    """Verify only strings equal to the root, or beneath it, are rebased, at any depth."""
+    document = {
+        "root": "/old/run",
+        "nested": {"dir": "/old/run/tasks/a", "list": ["/old/run/x", "plain", 3]},
+        "mid": "--out=/old/run/x",
+        "sibling": "/old/run-other/x",
+        "/old/run/key": "value",
+    }
+
+    rebased = rebase_paths(document, "/old/run", "/new/run")
+
+    assert rebased == {
+        "root": "/new/run",
+        "nested": {"dir": "/new/run/tasks/a", "list": ["/new/run/x", "plain", 3]},
+        "mid": "--out=/old/run/x",
+        "sibling": "/old/run-other/x",
+        "/old/run/key": "value",
+    }
+    assert document["root"] == "/old/run"
+
+
+def test_read_document_drops_the_schema_key(tmp_path: Path) -> None:
+    """Verify the raw reader returns the mapping `deserialize` validates."""
+    path = tmp_path / "doc.yaml"
+    path.write_text("$schema: https://example.org/s.json\nvalue: 1\n")
+
+    assert read_document(path) == {"value": 1}
+    assert read_document(str(path), PersistenceMode.yaml) == {"value": 1}
+    with pytest.raises(FileNotFoundError):
+        read_document(tmp_path / "absent.yaml")
