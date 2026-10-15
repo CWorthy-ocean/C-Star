@@ -28,7 +28,7 @@ HELP_PATH_LONG = f"""\
 {HELP_PATH_SHORT}
 
 The path is the only output on stdout, so it composes with other commands,
-e.g. `dir=$(cstar workplan path <run-id>) && cd "$dir"`. Without a
+e.g. `dir=$(cstar run path <run-id>) && cd "$dir"`. Without a
 `step_name`, the directory is the run's output directory. Failures are
 reported on stderr with a non-zero exit code.
 """
@@ -45,7 +45,7 @@ function, this command prints how to set it up and exits with a non-zero code.
 CD_GUIDANCE: t.Final[str] = """\
 cstar cannot change your shell's directory by itself. To go there now, run:
     cd {directory}
-To make `cstar workplan cd` work, run this once, then open a new shell:
+To make `cstar run cd` work, run this once, then open a new shell:
     cstar env shell-init --install"""
 """Message printed to stderr when `cd` runs without the shell function installed."""
 

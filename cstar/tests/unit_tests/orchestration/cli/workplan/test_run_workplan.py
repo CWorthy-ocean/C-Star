@@ -1,3 +1,4 @@
+import asyncio
 import json
 import os
 import typing as t
@@ -14,7 +15,9 @@ from cstar.applications.core import get_application
 from cstar.applications.hello_world import HelloWorldApplication
 from cstar.base.env import (
     ENV_CSTAR_CLI_DRY_RUN,
+    ENV_CSTAR_DATA_HOME,
     ENV_CSTAR_DISABLE_MIGRATION,
+    ENV_CSTAR_LOG_LEVEL,
     ENV_CSTAR_RUNID,
     ENV_CSTAR_STATE_HOME,
     FLAG_ON,
@@ -24,12 +27,15 @@ from cstar.cli.common import normalize_runid
 from cstar.cli.workplan.run import (
     app,
     auto_compose,
+    get_run_summary_display,
+    handle_run_reloading,
     migrate_steps,
     refuse_run_id_collision,
 )
 from cstar.entrypoint.utils import ARG_CLOBBER, ARG_PRE_RUN, ARG_RESUME, ARG_RUN_ID
 from cstar.execution.file_system import StateDirectoryManager
 from cstar.orchestration.dag_runner import (
+    ExecutiveRunSummary,
     NoPreparableStepsError,
     get_launcher,
     original_workplan_backup,
@@ -3398,3 +3404,105 @@ def test_workplan_run_reenters_a_run_started_under_an_explicit_run_id(
     mock_run_dag.assert_awaited_once()
     assert mock_run_dag.await_args is not None
     assert mock_run_dag.await_args.args[2] == run_id
+
+
+def _record_run_with_environment(
+    tmp_path: Path, run_id: str, environment: dict[str, str]
+) -> None:
+    """Persist a run record that captured `environment` when it started."""
+    record = WorkplanRun(
+        workplan_path=tmp_path / "workplan.yaml",
+        trx_workplan_path=tmp_path / "workplan_transformed.yaml",
+        output_path=tmp_path,
+        run_id=run_id,
+        environment=environment,
+    )
+    TrackingRepository().put_workplan_run_sync(record)
+
+
+def test_reload_leaves_the_data_and_state_homes_to_the_shell(
+    tmp_path: Path, mock_run_id: str
+) -> None:
+    """Verify a reload does not pin the run to the homes it was started under, so a
+    run whose data home was copied resolves against the current one.
+    """
+    current_data = os.environ[ENV_CSTAR_DATA_HOME]
+    current_state = os.environ[ENV_CSTAR_STATE_HOME]
+    _record_run_with_environment(
+        tmp_path,
+        mock_run_id,
+        {
+            ENV_CSTAR_DATA_HOME: str(tmp_path / "old-data"),
+            ENV_CSTAR_STATE_HOME: str(tmp_path / "old-state"),
+            ENV_CSTAR_LOG_LEVEL: "TRACE",
+        },
+    )
+
+    with mock.patch.dict(os.environ):
+        asyncio.run(handle_run_reloading(mock_run_id))
+
+        assert os.environ[ENV_CSTAR_DATA_HOME] == current_data
+        assert os.environ[ENV_CSTAR_STATE_HOME] == current_state
+        assert os.environ[ENV_CSTAR_LOG_LEVEL] == "TRACE"
+
+
+def test_reload_warns_once_about_settings_that_differ(
+    tmp_path: Path, mock_run_id: str, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Verify one warning names every re-exported setting that differs from the
+    shell, with both values, and never the homes.
+    """
+    with mock.patch.dict(os.environ, {ENV_CSTAR_LOG_LEVEL: "INFO"}):
+        _record_run_with_environment(
+            tmp_path,
+            mock_run_id,
+            {
+                ENV_CSTAR_DATA_HOME: str(tmp_path / "old-data"),
+                ENV_CSTAR_LOG_LEVEL: "TRACE",
+                ENV_CSTAR_RUNID: mock_run_id,
+                "CSTAR_RECORDED_ONLY": "yes",
+            },
+        )
+
+        with caplog.at_level("WARNING"):
+            asyncio.run(handle_run_reloading(mock_run_id))
+
+        warnings = [r.getMessage() for r in caplog.records if r.levelname == "WARNING"]
+
+    assert len(warnings) == 1
+    assert f"{ENV_CSTAR_LOG_LEVEL} (now 'INFO', recorded 'TRACE')" in warnings[0]
+    assert "CSTAR_RECORDED_ONLY (now None, recorded 'yes')" in warnings[0]
+    assert ENV_CSTAR_DATA_HOME not in warnings[0]
+    assert ENV_CSTAR_RUNID not in warnings[0]
+
+
+def test_reload_is_quiet_when_the_environment_matches(
+    tmp_path: Path, mock_run_id: str, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Verify a reload under the settings the run started with warns about nothing."""
+    _record_run_with_environment(
+        tmp_path,
+        mock_run_id,
+        {ENV_CSTAR_RUNID: mock_run_id, ENV_CSTAR_DATA_HOME: str(tmp_path / "other")},
+    )
+
+    with caplog.at_level("WARNING"):
+        asyncio.run(handle_run_reloading(mock_run_id))
+
+    assert not [r for r in caplog.records if r.levelname == "WARNING"]
+
+
+def test_run_summary_points_at_the_run_commands() -> None:
+    """Verify the follow-up actions of a run summary use the `cstar run` commands."""
+    summary = ExecutiveRunSummary(
+        run_id="my-run",
+        workplan_name="demo",
+        source_workplan="demo.yaml",
+        final_workplan="demo_transformed.yaml",
+    )
+
+    display = get_run_summary_display(summary)
+
+    assert "cstar run status my-run" in display
+    assert "cstar run log my-run <step-name>" in display
+    assert "cstar workplan" not in display

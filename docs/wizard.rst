@@ -276,7 +276,7 @@ Review and run
    run`` into the page. On a SLURM target with at least one preparable step,
    **Pre-run first** is on by default: it prepares those steps on this
    machine, then shows the command that submits the same run-id. After a run
-   the page names ``cstar workplan status <run-id>``. Run returns once the
+   the page names ``cstar run status <run-id>``. Run returns once the
    workplan is scheduled; on a cluster's login node that only submits jobs.
 
 Where your work goes

@@ -456,30 +456,33 @@ def remote_workplan_uri() -> str:
 
 
 @pytest.fixture(autouse=True)
-def serve_remote_workplan_templates(
+def serve_remote_files(
     wp_templates_dir: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """Serve the bundled workplan templates for their GitHub `main` URLs.
+) -> dict[str, Path]:
+    """Answer remote-file downloads from local files, without network access.
 
-    Tests that fetch a template over HTTP then run against this checkout's
-    template instead of whatever `main` holds, so they pass before a template
-    change merges and without network access. A template that does not exist
-    is answered with a 404; every other URL is requested as usual.
+    The bundled workplan templates are served for their GitHub `main` URLs, so
+    tests run against this checkout's templates instead of whatever `main`
+    holds. Tests add other `URL -> local file` entries to the returned dict
+    (URLs match case-insensitively). Every other URL is answered with a 404.
     """
     marker = "/c-star/refs/heads/main/cstar/additional_files/templates/wp/"
-    real_request = file_system.request
+    served: dict[str, Path] = {}
 
     def serve(method: str, url: str, **kwargs: t.Any) -> t.Any:
         folded = url.casefold()
-        if marker not in folded:
-            return real_request(method, url, **kwargs)
+        path: Path | None
+        if marker in folded:
+            path = wp_templates_dir / folded.rsplit("/", maxsplit=1)[1]
+        else:
+            path = {k.casefold(): v for k, v in served.items()}.get(folded)
 
-        template = wp_templates_dir / folded.rsplit("/", maxsplit=1)[1]
-        if template.is_file():
-            return mock.Mock(status_code=200, text=template.read_text())
+        if path is not None and path.is_file():
+            return mock.Mock(status_code=200, text=path.read_text())
         return mock.Mock(status_code=404, text="")
 
     monkeypatch.setattr(file_system, "request", serve)
+    return served
 
 
 @pytest.fixture

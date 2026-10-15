@@ -855,6 +855,48 @@ def test_domain_grid_file_round_trips_through_yaml(tmp_path):
     assert back.domain.grid_file == cfg.domain.grid_file
 
 
+def test_from_yaml_anchors_relative_locations_at_the_files_directory(
+    tmp_path, monkeypatch
+):
+    """A relative user-file ``location`` resolves against the blueprint's directory,
+    wherever ``from_yaml`` is called from, and an absolute one is left alone.
+    """
+    from cstar.applications.forge.blueprint import UserProvidedFile
+
+    cfg = _build()
+    vertical_only = {
+        k: v
+        for k, v in cfg.domain.grid_kwargs.items()
+        if k in {"theta_s", "theta_b", "hc", "N"}
+    }
+    cfg = cfg.model_copy(
+        update={
+            "domain": cfg.domain.model_copy(
+                update={
+                    "grid_kwargs": vertical_only,
+                    "grid_file": UserProvidedFile(
+                        location="../shared/grid.nc", content_hash="a" * 64
+                    ),
+                }
+            )
+        }
+    )
+    bp_dir = tmp_path / "blueprints"
+    bp_dir.mkdir()
+    p = cfg.to_yaml(bp_dir / "forge_blueprint.yaml")
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    monkeypatch.chdir(elsewhere)
+
+    back = ForgeBlueprint.from_yaml(p)
+
+    assert (
+        back.domain.grid_file.location == (tmp_path / "shared" / "grid.nc").as_posix()
+    )
+    # the location is host detail, not content: the hash is unaffected
+    assert back.content_hash() == cfg.content_hash()
+
+
 def test_domain_grid_file_rejects_generation_geometry_keys():
     # ``model_copy`` (used elsewhere in this file for hash-only comparisons) does
     # NOT re-run validators, so this constructs ``Domain`` directly through its

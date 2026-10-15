@@ -37,7 +37,7 @@ INVOCATION: t.Final[dict[str, tuple[str, ...]]] = {
 
 STUB = """\
 #!/bin/sh
-if [ "$1" = workplan ] && [ "$2" = path ]; then
+if { [ "$1" = run ] || [ "$1" = workplan ]; } && [ "$2" = path ]; then
     printf '%s' "${CSTAR_LOG_LEVEL-unset}" >> "$STUB_RECORD"
     for arg in "$@"; do printf '|%s' "$arg" >> "$STUB_RECORD"; done
     printf '\\n' >> "$STUB_RECORD"
@@ -50,7 +50,7 @@ if [ "$1" = workplan ] && [ "$2" = path ]; then
 fi
 echo "passthrough: $*"
 """
-"""A stand-in `cstar` executable that records `workplan path` lookups."""
+"""A stand-in `cstar` executable that records `run path` and `workplan path` lookups."""
 
 
 class Sandbox(t.NamedTuple):
@@ -142,7 +142,7 @@ class Session(t.NamedTuple):
 
     @property
     def lookups(self) -> list[str]:
-        """The recorded `workplan path` invocations as `level|arg|arg...`."""
+        """The recorded path lookups as `level|arg|arg...`."""
         return self.record.read_text().splitlines() if self.record.exists() else []
 
 
@@ -233,7 +233,9 @@ def test_shell_init_rejects_an_unsupported_shell() -> None:
     assert result.stdout == ""
 
 
-@pytest.mark.parametrize("command", ["cstar workplan cd x", "cstar wp cd x"])
+@pytest.mark.parametrize(
+    "command", ["cstar run cd x", "cstar workplan cd x", "cstar wp cd x"]
+)
 def test_function_changes_directory(
     run_session: t.Callable[..., Session], command: str
 ) -> None:
@@ -244,7 +246,22 @@ def test_function_changes_directory(
 
     assert session.proc.returncode == 0, session.proc.stderr
     assert session.proc.stdout.splitlines() == ["rc=0", f"pwd={real(session.target)}"]
-    assert session.lookups == ["WARNING|workplan|path|x"]
+    assert session.lookups == ["WARNING|run|path|x"]
+
+
+@pytest.mark.parametrize(
+    "command", ["cstar run cd x", "cstar workplan cd x", "cstar wp cd x"]
+)
+def test_function_accepts_every_cd_spelling(
+    run_session: t.Callable[..., Session], command: str
+) -> None:
+    """Verify each spelling changes directory the same way and prints nothing on
+    stderr: none of them is deprecated.
+    """
+    session = run_session(command)
+
+    assert session.proc.stdout.splitlines() == ["rc=0", f"pwd={real(session.target)}"]
+    assert session.proc.stderr == ""
 
 
 def test_function_does_not_leak_the_pinned_log_level(
@@ -252,7 +269,7 @@ def test_function_does_not_leak_the_pinned_log_level(
 ) -> None:
     """Verify the pin applies to the lookup only, not the user's shell."""
     session = run_session(
-        "cstar wp cd x",
+        "cstar run cd x",
         f'echo "level=${ENV_CSTAR_LOG_LEVEL}"',
         env={ENV_CSTAR_LOG_LEVEL: "DEBUG"},
     )
@@ -262,17 +279,17 @@ def test_function_does_not_leak_the_pinned_log_level(
 
 def test_function_forwards_the_step(run_session: t.Callable[..., Session]) -> None:
     """Verify the optional step reaches the lookup and the run-id keeps its spaces."""
-    session = run_session('cstar wp cd "my run" spin-up')
+    session = run_session('cstar run cd "my run" spin-up')
 
     assert session.proc.stdout.splitlines() == ["rc=0", f"pwd={real(session.target)}"]
-    assert session.lookups == ["WARNING|workplan|path|my run|spin-up"]
+    assert session.lookups == ["WARNING|run|path|my run|spin-up"]
 
 
 def test_function_stays_put_when_the_lookup_fails(
     run_session: t.Callable[..., Session],
 ) -> None:
     """Verify a failed lookup reports its status and does not change directory."""
-    session = run_session("cstar workplan cd missing")
+    session = run_session("cstar run cd missing")
 
     assert session.proc.stdout.splitlines() == ["rc=2", f"pwd={real(session.start)}"]
     assert "stub: no such run" in session.proc.stderr
@@ -281,6 +298,12 @@ def test_function_stays_put_when_the_lookup_fails(
 @pytest.mark.parametrize(
     "arguments",
     [
+        "run cd --help",
+        "run cd",
+        "run cd x --verbose",
+        "run cd x y z",
+        "run ls",
+        "run status cd x",
         "wp cd --help",
         "wp cd",
         "wp cd x --verbose",
@@ -294,7 +317,7 @@ def test_function_stays_put_when_the_lookup_fails(
 def test_function_passes_everything_else_through(
     run_session: t.Callable[..., Session], arguments: str
 ) -> None:
-    """Verify only `workplan cd <run-id> [step]` is intercepted: any other
+    """Verify only `run cd <run-id> [step]` and its `workplan`/`wp` spellings are intercepted: any other
     command, including an incomplete or option-bearing one, reaches the
     executable unchanged and leaves the directory alone.
     """
@@ -311,17 +334,20 @@ def test_function_passes_everything_else_through(
 def test_function_leaves_the_path_command_alone(
     run_session: t.Callable[..., Session],
 ) -> None:
-    """Verify `workplan path` reaches the executable with the user's own
-    environment, and prints its result instead of changing directory.
+    """Verify `run path` and `workplan path` reach the executable with the user's
+    own environment, and print their result instead of changing directory.
     """
-    session = run_session("cstar workplan path x")
+    session = run_session("cstar run path x", "cstar workplan path x")
 
     assert session.proc.stdout.splitlines() == [
         str(session.target),
         "rc=0",
         f"pwd={real(session.start)}",
+        str(session.target),
+        "rc=0",
+        f"pwd={real(session.start)}",
     ]
-    assert session.lookups == ["unset|workplan|path|x"]
+    assert session.lookups == ["unset|run|path|x", "unset|workplan|path|x"]
 
 
 def test_function_passes_a_bare_invocation_through(
@@ -343,11 +369,11 @@ def test_function_replaces_a_cstar_alias(
     """Verify an existing `cstar` alias does not break the function definition."""
     expand = "shopt -s expand_aliases\n" if shell == "bash" else ""
     session = run_session(
-        "cstar wp cd x", prelude=f"{expand}alias cstar='echo ALIASED'"
+        "cstar run cd x", prelude=f"{expand}alias cstar='echo ALIASED'"
     )
 
     assert session.proc.stdout.splitlines() == ["rc=0", f"pwd={real(session.target)}"]
-    assert session.lookups == ["WARNING|workplan|path|x"]
+    assert session.lookups == ["WARNING|run|path|x"]
 
 
 def test_cd_guidance_names_a_working_setup_command(

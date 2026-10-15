@@ -136,7 +136,7 @@ Definitions
       must already be a slug (ASCII lowercase letters, digits, ``-`` and ``_``), so
       the same file always runs under the same ID; ``cstar workplan run --run-id
       <id>`` overrides it. It names the run's directory
-      (``CSTAR_DATA_HOME/workplan_runs/<id>``), lets you check status (``cstar workplan status``) or reattach to a run
+      (``CSTAR_DATA_HOME/workplan_runs/<id>``), lets you check status (``cstar run status``) or reattach to a run
       in progress, and lets you re-enter a run to retry failed steps or
       resume them in place. A new run ID starts the workplan from scratch.
       Two different workplans with the same ``name`` share a run ID, so
@@ -182,5 +182,5 @@ steps to SLURM. SLURM allocates compute resources, enforces the dependencies,
 and monitors the jobs. Each step gets its own allocation, in which a worker
 reads the step's blueprint and runs the application.
 
-The user can log off and come back later. Calling ``cstar workplan status``
+The user can log off and come back later. Calling ``cstar run status``
 with the same run ID reports how far the workplan has progressed.

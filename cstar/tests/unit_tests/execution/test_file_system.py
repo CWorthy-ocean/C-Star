@@ -5,6 +5,7 @@ from pathlib import Path
 from unittest import mock
 
 import pytest
+import requests
 
 from cstar.applications.roms_marbl.file_system import RomsFileSystemManager
 from cstar.base.env import ENV_CSTAR_DATA_HOME, ENV_CSTAR_RUNID
@@ -21,6 +22,8 @@ from cstar.execution.file_system import (
     remove_files,
     rotate_file,
     step_disk_usage,
+    symlink_relative,
+    write_local_copy,
 )
 from cstar.orchestration.models import Step
 from cstar.orchestration.orchestration import LiveStep
@@ -933,3 +936,157 @@ class TestSourceDataHome:
 
         assert home == self._expected(scratch)
         assert home.is_dir()
+
+
+class TestWriteLocalCopy:
+    """Tests for `write_local_copy`."""
+
+    def test_writes_response_text(self, tmp_path: Path) -> None:
+        """A 200 response is written under the URL's file name."""
+        url = "https://example.com/plans/workplan.yaml"
+        response = mock.Mock(status_code=200, text="name: wp\n")
+
+        with mock.patch(
+            "cstar.execution.file_system.request", return_value=response
+        ) as mock_request:
+            local_path = write_local_copy(url, tmp_path)
+
+        mock_request.assert_called_once_with("GET", url, timeout=10.0)
+        assert local_path == (tmp_path / "workplan.yaml").resolve()
+        assert local_path.read_text() == "name: wp\n"
+
+    @pytest.mark.parametrize(
+        "error",
+        [
+            requests.ReadTimeout("Read timed out. (read timeout=10.0)"),
+            requests.ConnectionError("Connection aborted."),
+        ],
+    )
+    def test_request_failure_is_file_not_found(
+        self, tmp_path: Path, error: requests.RequestException
+    ) -> None:
+        """A timeout or connection failure is reported like a missing file, so
+        callers' existing FileNotFoundError handling covers it.
+        """
+        url = "https://example.com/plans/workplan.yaml"
+
+        with (
+            mock.patch("cstar.execution.file_system.request", side_effect=error),
+            pytest.raises(FileNotFoundError, match=type(error).__name__) as exc_info,
+        ):
+            write_local_copy(url, tmp_path)
+
+        assert exc_info.value.filename == url
+        assert not (tmp_path / "workplan.yaml").exists()
+
+
+def test_symlink_relative_text_is_relative(tmp_path: Path) -> None:
+    """The link text is relative, creates missing parents, and resolves to the target."""
+    target = tmp_path / "data" / "grid.nc"
+    target.parent.mkdir()
+    target.write_text("data")
+    link = tmp_path / "run" / "input" / "grid.nc"
+
+    symlink_relative(link, target)
+
+    assert link.is_symlink()
+    assert link.readlink() == Path("../../data/grid.nc")
+    assert link.resolve() == target.resolve()
+    assert link.read_text() == "data"
+
+
+def test_symlink_relative_survives_moving_the_tree(tmp_path: Path) -> None:
+    """A link and target moved together keep working, as relative links should."""
+    tree = tmp_path / "tree"
+    (tree / "a").mkdir(parents=True)
+    (tree / "b").mkdir()
+    (tree / "b" / "file").write_text("data")
+    symlink_relative(tree / "a" / "link", tree / "b" / "file")
+
+    moved = tmp_path / "moved"
+    tree.rename(moved)
+
+    assert (moved / "a" / "link").read_text() == "data"
+
+
+def test_symlink_relative_through_symlinked_parent(tmp_path: Path) -> None:
+    """A link directory reached through a symlink is measured from where it really is.
+
+    The kernel resolves `..` in link text from the physical directory, so text
+    computed from the symlinked spelling of the path would point elsewhere.
+    """
+    target = tmp_path / "a" / "file"
+    target.parent.mkdir()
+    target.write_text("data")
+    physical = tmp_path / "b" / "c" / "real"
+    physical.mkdir(parents=True)
+    (tmp_path / "a" / "alias").symlink_to(physical)
+
+    link = tmp_path / "a" / "alias" / "link"
+    symlink_relative(link, target)
+
+    assert link.read_text() == "data"
+    assert link.resolve() == target.resolve()
+
+
+def test_symlink_relative_existing_link_raises(tmp_path: Path) -> None:
+    """An existing link is left alone; callers unlink first when they mean to replace."""
+    target = tmp_path / "target"
+    target.write_text("data")
+    link = tmp_path / "link"
+    link.symlink_to(target)
+
+    with pytest.raises(FileExistsError):
+        symlink_relative(link, target)
+
+
+def test_symlink_relative_within_keeps_relative_when_both_are_inside(
+    tmp_path: Path,
+) -> None:
+    """A link and target both inside `within` are linked relatively."""
+    home = tmp_path / "home"
+    target = home / "source-run" / "output" / "file.nc"
+    target.parent.mkdir(parents=True)
+    target.write_text("data")
+    link = home / "this-run" / "input" / "file.nc"
+
+    symlink_relative(link, target, within=home)
+
+    assert link.readlink() == Path("../../source-run/output/file.nc")
+    assert link.read_text() == "data"
+
+
+def test_symlink_relative_within_falls_back_to_absolute_for_outside_target(
+    tmp_path: Path,
+) -> None:
+    """A target outside `within` is linked by absolute path, not a `..` chain into
+    another tree.
+    """
+    home = tmp_path / "home"
+    target = tmp_path / "elsewhere" / "file.nc"
+    target.parent.mkdir(parents=True)
+    target.write_text("data")
+    link = home / "this-run" / "input" / "file.nc"
+
+    symlink_relative(link, target, within=home)
+
+    assert link.readlink() == target.resolve()
+    assert link.read_text() == "data"
+
+
+def test_symlink_relative_within_falls_back_to_absolute_for_outside_link(
+    tmp_path: Path,
+) -> None:
+    """A link outside `within`, such as a run kept elsewhere, is absolute even when
+    its target is inside.
+    """
+    home = tmp_path / "home"
+    target = home / "source-run" / "file.nc"
+    target.parent.mkdir(parents=True)
+    target.write_text("data")
+    link = tmp_path / "scratch" / "run" / "input" / "file.nc"
+
+    symlink_relative(link, target, within=home)
+
+    assert link.readlink() == target.resolve()
+    assert link.read_text() == "data"

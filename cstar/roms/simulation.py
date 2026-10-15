@@ -53,12 +53,18 @@ from cstar.base.utils import (
     deep_merge,
     slugify,
 )
-from cstar.execution.file_system import remove_files, rotate_file
+from cstar.execution.file_system import (
+    is_remote_resource,
+    remove_files,
+    rotate_file,
+    symlink_relative,
+)
 from cstar.execution.handler import ExecutionStatus
 from cstar.execution.local_process import LocalProcess
 from cstar.execution.scheduler_job import create_scheduler_job
 from cstar.io.source_data import SourceData
 from cstar.marbl.external_codebase import MARBLExternalCodeBase
+from cstar.orchestration.serialization import load_blueprint
 from cstar.pio.external_codebase import PIOExternalCodeBase
 from cstar.roms.build_verification import (
     assert_single_toolchain_stack,
@@ -850,6 +856,32 @@ class ROMSSimulation(Simulation):
                 "key names against that schema."
             ) from err
 
+    def _namelist_path(self, p: Path) -> str:
+        """Express a path as the namelist should name it.
+
+        ROMS runs from `run_dir`, so a path inside this simulation's root directory
+        is written relative to it (e.g. `../input/input_datasets/grid.nc`). That
+        keeps the string short (ucla-roms builds filenames in 99-character
+        buffers) and valid when the run directory is moved or copied as a unit. A
+        path outside the root, such as an input dataset used from where it was
+        authored, keeps its absolute form rather than a chain of `..`.
+
+        Parameters
+        ----------
+        p : Path
+            The path to name, as ROMS should find it.
+
+        Returns
+        -------
+        str
+        """
+        # symlinked directories are compared where they are, but a staged file
+        # (itself a symlink to its source) is named, not followed
+        physical = p.parent.resolve() / p.name
+        if not physical.is_relative_to(self.fs_manager.root_dir):
+            return str(p)
+        return physical.relative_to(self.fs_manager.run_dir, walk_up=True).as_posix()
+
     @property
     def roms_runtime_settings(self) -> "RomsNamelistBase":
         """Generate and return a :class:`RomsNamelistBase` for the simulation.
@@ -862,7 +894,9 @@ class ROMSSimulation(Simulation):
 
         1. Derived settings, computed from the current simulation
            configuration: grid path, initial conditions, forcing datasets,
-           MARBL/CDR/nesting files, output root, and extract root.
+           MARBL/CDR/nesting files, output root, and extract root. Paths inside
+           the simulation's root directory are written relative to the run
+           directory ROMS executes in; other paths stay absolute.
         2. `namelist_overrides`, layered on top of the derived settings so
            that user overrides win. The processor grid (`np_xi`/`np_eta`) is
            then set from `discretization`, which is authoritative for it (an
@@ -898,35 +932,39 @@ class ROMSSimulation(Simulation):
         nml, schema, checkout_target = self._read_raw_namelist()
 
         if self.initial_conditions:
-            nml.initial_conditions.inifile = str(
+            nml.initial_conditions.inifile = self._namelist_path(
                 self.initial_conditions.path_for_roms_unpartitioned[0]
                 if self.use_pio
                 else self.initial_conditions.path_for_roms[0]
             )
 
         if self.model_grid:
-            nml.grid_settings.grdname = str(
+            nml.grid_settings.grdname = self._namelist_path(
                 self.model_grid.path_for_roms_unpartitioned[0]
                 if self.use_pio
                 else self.model_grid.path_for_roms[0]
             )
 
-        nml.forcing_files.frcfiles = [str(p) for p in self._forcing_paths]
+        nml.forcing_files.frcfiles = [
+            self._namelist_path(p) for p in self._forcing_paths
+        ]
 
         runtime_code_filenames = [f.basename for f in self.runtime_code.source]
         if "marbl_in" in runtime_code_filenames:
             # `_read_raw_namelist` already confirmed `working_copy` is set.
             assert self.runtime_code.working_copy is not None
             runtime_code_path = self.runtime_code.working_copy.common_parent
-            nml.marbl_biogeochemistry_settings.marbl_config_file = str(
+            nml.marbl_biogeochemistry_settings.marbl_config_file = self._namelist_path(
                 runtime_code_path / "marbl_in"
             )
 
         if self.cdr_forcing and self.cdr_forcing.working_copy:
-            nml.cdr_frc_settings.cdr_file = str(self.cdr_forcing.working_copy.path)  # type: ignore[union-attr]
+            nml.cdr_frc_settings.cdr_file = self._namelist_path(
+                self.cdr_forcing.working_copy.path  # type: ignore[union-attr]
+            )
 
         if self.nesting_info and self.nesting_info.working_copy:
-            nml.extract_data_settings.extract_file = str(
+            nml.extract_data_settings.extract_file = self._namelist_path(
                 self.nesting_info.working_copy.path  # type: ignore[union-attr]
             )
 
@@ -938,9 +976,7 @@ class ROMSSimulation(Simulation):
             else self.fs_manager.temp_output_dir
         )
 
-        # ROMS runs from `run_dir`; use a path relative to it to keep the string
-        # short (ucla-roms builds output filenames in a 99-character buffer).
-        root = str(target.relative_to(self.fs_manager.run_dir, walk_up=True))
+        root = self._namelist_path(target)
 
         nml.simulation_name_settings.output_root_name = f"{root}/output"
 
@@ -1307,7 +1343,9 @@ class ROMSSimulation(Simulation):
         Parameters
         ----------
         blueprint : str
-            The path or URL to the YAML blueprint file.
+            The path or URL to the YAML blueprint file. Relative `location`
+            values in a blueprint file resolve against the directory of that
+            file.
 
         Returns
         -------
@@ -1324,11 +1362,14 @@ class ROMSSimulation(Simulation):
         to_blueprint : Saves the simulation as a YAML blueprint.
         from_dict : Creates an instance from a dictionary representation.
         """
-        source = SourceData(location=blueprint)
-        data = source.retriever.read()
-        bp_dict = yaml.safe_load(data.decode("utf-8"))
-
-        bp = RomsMarblBlueprint.model_validate(bp_dict)
+        if is_remote_resource(str(blueprint)):
+            # a downloaded blueprint has no directory for relative locations to
+            # be relative to, so they are left as authored
+            source = SourceData(location=blueprint)
+            data = source.retriever.read()
+            bp = RomsMarblBlueprint.model_validate(yaml.safe_load(data.decode("utf-8")))
+        else:
+            bp = load_blueprint(blueprint, RomsMarblBlueprint)
 
         return cls(
             name=bp.name,
@@ -2332,7 +2373,9 @@ class ROMSSimulation(Simulation):
         # symlink roms exe into run dir to simplify running by hand for troubleshooting.
         roms_symlink_path = run_path / self.exe_path.name
         roms_symlink_path.unlink(missing_ok=True)
-        roms_symlink_path.symlink_to(self.exe_path)
+        symlink_relative(
+            roms_symlink_path, self.exe_path, within=self.fs_manager.root_dir
+        )
 
         n_procs = self.discretization.n_procs_tot
         roms_exec_cmd = " ".join(

@@ -14,7 +14,7 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from urllib.parse import urlsplit
 
-from requests import request
+from requests import RequestException, request
 
 from cstar.base.env import (
     ENV_CSTAR_CACHE_HOME,
@@ -216,13 +216,9 @@ class DirectoryManager:
                 )
                 raise CstarError(msg)
         if not home.exists() and legacy.is_dir():
-            home.parent.mkdir(parents=True, exist_ok=True)
-            # A relative link resolves from the real directory that holds it, so
-            # compute it between resolved paths, not through any symlinked parent.
-            target = os.path.relpath(legacy.resolve(), home.parent.resolve())
             # Another process sharing the root may have linked it first.
             with contextlib.suppress(FileExistsError):
-                home.symlink_to(target)
+                symlink_relative(home, legacy)
                 log.info("Linked source-data cache %s to existing %s", home, legacy)
         home.mkdir(parents=True, exist_ok=True)
         return home
@@ -497,7 +493,22 @@ class StateDirectoryManager:
         Path
         """
         run_id = run_id or get_env_item(ENV_CSTAR_RUNID).value
-        return cls.data_dir(run_id) / cls._USER_VIEW_NAME
+        return cls.user_view_dir(cls.data_dir(run_id))
+
+    @classmethod
+    def user_view_dir(cls, run_root: Path) -> Path:
+        """The user-view directory (`gathered_output`) inside a run directory.
+
+        Parameters
+        ----------
+        run_root : Path
+            The run directory.
+
+        Returns
+        -------
+        Path
+        """
+        return run_root / cls._USER_VIEW_NAME
 
 
 def is_remote_resource(uri: str) -> bool:
@@ -539,7 +550,8 @@ def write_local_copy(url: str, directory: Path) -> Path:
     ValueError
         If an empty URL is received.
     FileNotFoundError
-        If the remote URL cannot be retrieved.
+        If the remote URL cannot be retrieved (error status, timeout, or
+        connection failure).
     """
     url = url.strip()
     if not url:
@@ -550,7 +562,11 @@ def write_local_copy(url: str, directory: Path) -> Path:
     resource_name = resource_path.name
     http_ok: t.Final[int] = 200
 
-    get_request = request("GET", url, timeout=1.0)
+    try:
+        get_request = request("GET", url, timeout=10.0)
+    except RequestException as ex:
+        msg = f"Unable to retrieve remote file ({type(ex).__name__})"
+        raise FileNotFoundError(errno.ENOENT, msg, url) from ex
     if get_request.status_code != http_ok:
         msg = "Unable to retrieve remote file"
         raise FileNotFoundError(errno.ENOENT, msg, url)
@@ -712,6 +728,43 @@ async def step_disk_usage(step_root: Path) -> int:
 
     nested = await _du_mb(tasks_dir)
     return UNKNOWN_SIZE if nested < 0 else max(total - nested, 0)
+
+
+def symlink_relative(link: Path, target: Path, *, within: Path | None = None) -> None:
+    """Create `link` pointing at `target` with a relative link text.
+
+    The link text is `target` relative to the directory holding `link`, so the
+    pair keeps working after the tree containing both is copied or moved as a
+    unit. Both are measured from where they physically are (symlinked
+    directories on either path are resolved, the final component of `target` is
+    not), since the kernel resolves `..` in link text physically. Parent
+    directories of `link` are created as needed.
+
+    Parameters
+    ----------
+    link : Path
+        The symlink to create.
+    target : Path
+        The file or directory the link should point at.
+    within : Path | None
+        When given, the link is relative only if both `link` and `target` lie
+        inside this directory, the tree that moves as a unit. Otherwise it is
+        absolute: a chain of `..` that climbs out of one tree and into another
+        breaks as soon as only one of the two moves, while an absolute path keeps
+        naming the file where it still is.
+    """
+    link.parent.mkdir(parents=True, exist_ok=True)
+    physical_link = link.parent.resolve() / link.name
+    physical_target = target.parent.resolve() / target.name
+    if within is not None:
+        root = within.resolve()
+        if not (
+            physical_link.is_relative_to(root) and physical_target.is_relative_to(root)
+        ):
+            link.symlink_to(physical_target)
+            return
+
+    link.symlink_to(Path(os.path.relpath(physical_target, physical_link.parent)))
 
 
 def rotate_file(path: Path) -> Path | None:

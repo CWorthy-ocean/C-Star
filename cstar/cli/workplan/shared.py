@@ -36,11 +36,6 @@ from cstar.execution.file_system import (
 from cstar.orchestration.dag_runner import DagDetailRecord
 from cstar.orchestration.models import Blueprint, Workplan
 from cstar.orchestration.orchestration import LiveStep, LiveWorkplan
-from cstar.orchestration.serialization import (
-    deserialize,
-    deserialize_all,
-    try_deserialize,
-)
 from cstar.orchestration.tracking import (
     TrackingRepository,
     WorkplanRun,
@@ -116,7 +111,7 @@ async def list_steps(run_id: str, incomplete: str) -> list[str]:
 
     if wp_run := await repo.get_workplan_run(run_id):
         try:
-            wp = deserialize(wp_run.trx_workplan_path, LiveWorkplan)
+            wp = LiveWorkplan.load(wp_run.trx_workplan_path)
             step_names = [str(s.name) for s in wp.steps]
 
             if incomplete:
@@ -276,7 +271,9 @@ def display_summary(
         if run.size_measured_at:
             caption += f" as of {run.size_measured_at.astimezone():%Y-%m-%d %H:%M}"
     else:
-        caption = f"Disk usage not measured. Run: cstar workplan status {run.run_id} {ARG_SIZE}"
+        caption = (
+            f"Disk usage not measured. Run: cstar run status {run.run_id} {ARG_SIZE}"
+        )
 
     table.caption = caption
 
@@ -530,7 +527,7 @@ def preload_workplan(context: typer.Context, run_id: str) -> str:
     run = get_from_ctxmap(context, "run", WorkplanRun)
     wp_path = run.trx_workplan_path
 
-    wp = try_deserialize(wp_path, LiveWorkplan)
+    wp = LiveWorkplan.try_load(wp_path)
     if not wp:
         msg = f"Unable to deserialize workplan for run {run_id!r} from {str(wp_path)!r}"
         raise typer.BadParameter(msg)
@@ -626,7 +623,7 @@ async def load_workplans(
         updated in place with the successfully loaded workplans.
     """
     limit = max_concurrency()
-    workplans = await deserialize_all(list(paths), LiveWorkplan, limit=limit)
+    workplans = await LiveWorkplan.load_all(paths, limit=limit)
 
     failed: list[Path] = []
     for path, wp in zip(paths, workplans):

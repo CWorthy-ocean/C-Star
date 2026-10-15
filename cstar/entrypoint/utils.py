@@ -85,6 +85,19 @@ ARG_VERBOSE_HELP: t.Final[str] = "Set this flag to print verbose CLI outputs."
 ARG_SIZE: t.Final[str] = "--size"
 ARG_SIZE_HELP: t.Final[str] = "Set this flag to refresh disk-usage statistics."
 
+ARG_REPAIR: t.Final[str] = "--repair"
+ARG_REPAIR_HELP: t.Final[str] = (
+    "Rewrite each absolute symlink that points inside the run as a relative "
+    "link, then rebuild gathered_output if the run has one. Nothing else is "
+    "changed; the remaining findings are still reported."
+)
+
+ARG_ALL: t.Final[str] = "--all"
+ARG_ALL_HELP: t.Final[str] = (
+    "Also scan the launch artifacts (override and directive files, job scripts "
+    "and namelists). Launchers regenerate them, so they are skipped by default."
+)
+
 ARG_SCHEMA_ONLY: t.Final[str] = "--schema-only"
 ARG_SCHEMA_ONLY_HELP: t.Final[str] = (
     "Only validate the workplan file's structure; skip resolving applications, "

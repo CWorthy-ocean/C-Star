@@ -20,7 +20,6 @@ from cstar.orchestration.dag_runner import (
     load_run_state,
 )
 from cstar.orchestration.orchestration import LiveWorkplan, Planner
-from cstar.orchestration.serialization import deserialize
 from cstar.orchestration.tracking import WorkplanRun
 
 log = get_logger(__name__)
@@ -45,7 +44,7 @@ def status(
     wp_path = run.trx_workplan_path
 
     try:
-        workplan = deserialize(wp_path, LiveWorkplan)
+        workplan = LiveWorkplan.load(wp_path)
 
         # a pre-run's steps are local processes, whatever the system scheduler
         launcher = get_launcher(workplan, force_local=workplan.pre_run)

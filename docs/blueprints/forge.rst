@@ -46,7 +46,8 @@ normally omits), a forge blueprint has these sections:
    blueprint then has no such key: the ``carbonate-sensitivity-from``
    :doc:`workplan directive <../workplans/directives>` supplies the files at
    run time, from the ``_cdrgas`` output of an earlier ROMS-MARBL step. When
-   it is present, each ``location`` must exist on the machine running Forge:
+   it is present, each ``location`` must exist on the machine running Forge (a
+   relative one resolves against the directory of the forge blueprint file):
    Forge checks each file for the variables above, copies it into
    ``input_data/`` under its own name (as classic netCDF when the build uses
    ParallelIO), and lists the copies in the ROMS-MARBL blueprint's
@@ -167,10 +168,13 @@ Everything goes under the blueprint's working directory: by default
      output/
        B_<name>.yaml          a copy of the ROMS-MARBL blueprint
 
-The ROMS-MARBL blueprint points at the generated files with absolute paths,
-pins the same model code the forge blueprint did, carries the processor
-layout and run window, and lists the rendered ``cppdefs.opt``, ``namelist.nml``
-and ``marbl_in`` as its compile-time and run-time code. It has no
+The ROMS-MARBL blueprint points at the generated files with paths relative to
+its own directory (``../input_data/<file>``, ``../builds/run-time``), so the
+working directory can be moved or copied as a unit; the copy in ``output/``
+sits at the same depth and names the same files. It pins the same model code
+the forge blueprint did, carries the processor layout and run window, and
+lists the rendered ``cppdefs.opt``, ``namelist.nml`` and ``marbl_in`` as its
+compile-time and run-time code. It has no
 ``working_dir`` of its own, so it runs under
 ``CSTAR_DATA_HOME/blueprint_runs/roms_marbl/<name>`` unless a workplan places
 it. Both ``cstar blueprint run`` and ``cstar forge run`` copy it into

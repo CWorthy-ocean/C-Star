@@ -2,6 +2,8 @@ import functools
 import logging
 import os
 import signal
+import socket
+import sys
 import uuid
 from collections.abc import Awaitable, Callable, Generator, Iterable, Sequence
 from contextlib import AbstractContextManager, contextmanager
@@ -51,6 +53,65 @@ from cstar.tests.unit_tests.fake_abc_subclasses import (
     StubSimulation,
 )
 
+################################################################################
+# Network guard
+################################################################################
+
+_LOOPBACK_HOSTS = frozenset({"localhost", "127.0.0.1", "::1"})
+
+
+class NetworkAccessInUnitTestError(RuntimeError):
+    """A unit test tried to reach a remote host outside a pooch download."""
+
+
+def _called_from_pooch() -> bool:
+    """Whether the current call stack runs through pooch.
+
+    Building a real roms-tools Grid downloads ETOPO5 (roms-tools) and the Natural
+    Earth land mask (regionmask) through pooch, which caches them (and CI caches
+    the pooch directories), so those are the one kind of download allowed.
+    """
+    frame = sys._getframe()
+    while frame is not None:
+        if frame.f_globals.get("__name__", "").split(".")[0] == "pooch":
+            return True
+        frame = frame.f_back  # type: ignore[assignment]
+    return False
+
+
+def _refuse_remote_host(host: object) -> None:
+    if isinstance(host, bytes):
+        host = host.decode()
+    if host is None or host in _LOOPBACK_HOSTS or _called_from_pooch():
+        return
+    msg = (
+        f"Unit tests must not use the network (tried to reach {host!r}). "
+        "Mock the fetch or use a local fixture; live fetches made CI flaky."
+    )
+    raise NetworkAccessInUnitTestError(msg)
+
+
+@pytest.fixture(autouse=True)
+def _block_network() -> Generator[None]:
+    """Fail any unit test that resolves a remote host outside a pooch download.
+
+    HTTP clients (requests/urllib3, asyncio) resolve every host, IP literals
+    included, through `socket.getaddrinfo`. Git subprocesses are limited to local
+    repositories. Function-scoped so the guard ends with each unit test and never
+    reaches other test tiers run in the same session.
+    """
+    real_getaddrinfo = socket.getaddrinfo
+
+    def guarded_getaddrinfo(host: object, *args: Any, **kwargs: Any) -> Any:
+        _refuse_remote_host(host)
+        return real_getaddrinfo(host, *args, **kwargs)  # type: ignore[arg-type]
+
+    with (
+        mock.patch("socket.getaddrinfo", guarded_getaddrinfo),
+        mock.patch.dict(os.environ, {"GIT_ALLOW_PROTOCOL": "file"}),
+    ):
+        yield
+
 
 @pytest.fixture(scope="module")
 def complete_blueprint_path(tests_path: Path) -> Path:
@@ -99,6 +160,35 @@ def blueprint_path(
     bp_copy_path = copies_dir / complete_blueprint_path.name
     bp_copy_path.write_text(bp_content)
     return bp_copy_path
+
+
+@pytest.fixture
+def offline_remote_files() -> Generator[None]:
+    """Classify remote locations without the network: `.git` URLs as
+    repositories, every other URL as a binary (netCDF) file.
+
+    For tests that construct a simulation from a blueprint with remote URLs,
+    e.g. `blueprint_path`.
+    """
+    with (
+        mock.patch.object(
+            _SourceInspector,
+            "_is_repository",
+            new_callable=mock.PropertyMock,
+            return_value=False,
+        ),
+        mock.patch.object(
+            _SourceInspector,
+            "_http_is_html",
+            new_callable=mock.PropertyMock,
+            return_value=False,
+        ),
+        mock.patch(
+            "cstar.io.source_data.get_remote_header",
+            return_value=b"CDF\x02\x00\x00\x00\x00",
+        ),
+    ):
+        yield
 
 
 ################################################################################
@@ -1890,21 +1980,17 @@ def patch_romssimulation_init_sourcedata(
 
         Parameters
         ----------
-        from_worker: if True, the worker uses a source retriever to read the yaml file of the blueprint,
-            and therefore needs one extra mock inserted in the right place
+        from_worker: kept for callers; a local blueprint file is read directly, so no
+            extra classification is queued for it
 
         """
-        if from_worker:
-            inspector_classify_side_effect = [
-                SourceClassification.LOCAL_TEXT_FILE,
-                *mock_runtime_code_classify_side_effect,
-                *mock_compile_time_code_classify_side_effect,
-            ]
-        else:
-            inspector_classify_side_effect = [
-                *mock_runtime_code_classify_side_effect,
-                *mock_compile_time_code_classify_side_effect,
-            ]
+        # a local blueprint file is read directly (`load_blueprint`), not through a
+        # SourceData retriever, so the worker needs no extra classification
+        del from_worker
+        inspector_classify_side_effect = [
+            *mock_runtime_code_classify_side_effect,
+            *mock_compile_time_code_classify_side_effect,
+        ]
         with (
             mock.patch(
                 "cstar.base.external_codebase.SourceData",

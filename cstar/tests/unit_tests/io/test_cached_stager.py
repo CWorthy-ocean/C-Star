@@ -1,3 +1,4 @@
+import subprocess
 import typing as t
 from collections.abc import Callable, Generator
 from pathlib import Path
@@ -26,16 +27,48 @@ def mock_home_dir(tmp_path: Path) -> Generator[Callable[[], Path], None, None]:
         yield mock_state_home
 
 
+@pytest.fixture
+def remote_repo_uri(tmp_path: Path) -> str:
+    """Return a remote-style (`file://localhost/...`) URI to a local git repository.
+
+    It classifies as a remote repository, so the cached stager runs real git
+    commands against it without reaching the network.
+    """
+    repo = tmp_path / "upstream" / "c-star"
+    repo.mkdir(parents=True)
+    (repo / "README.md").write_text("upstream\n")
+    for cmd in (
+        ["init", "-q", "-b", "main"],
+        ["add", "README.md"],
+        [
+            "-c",
+            "user.name=test",
+            "-c",
+            "user.email=test@example.com",
+            "-c",
+            "commit.gpgsign=false",
+            "commit",
+            "-q",
+            "-m",
+            "init",
+        ],
+    ):
+        subprocess.run(["git", "-C", str(repo), *cmd], check=True)
+    return f"file://localhost{repo.as_posix()}"
+
+
 @pytest.mark.usefixtures("mock_home_dir")
-def test_cached_stager(tmp_path: Path) -> None:
+def test_cached_stager(tmp_path: Path, remote_repo_uri: str) -> None:
     """Verify that the cached stager retrieves and caches the remote repo.
 
     Parameters
     ----------
     tmp_path : Path
         A temporary path to store repository clones
+    remote_repo_uri : str
+        URI of the repository to stage
     """
-    source_data = SourceData("https://github.com/CWorthy-ocean/c-star")
+    source_data = SourceData(remote_repo_uri)
     stage_path = tmp_path / "my-roms"
 
     staged_data = source_data.stage(stage_path)
@@ -54,7 +87,7 @@ def test_cached_stager(tmp_path: Path) -> None:
 
 
 @pytest.mark.usefixtures("mock_home_dir")
-def test_cached_stager_reuse(tmp_path: Path) -> None:
+def test_cached_stager_reuse(tmp_path: Path, remote_repo_uri: str) -> None:
     """Verify that the cached stager performs a single clone and
     re-uses the cached copy on repeat requests for the repository.
 
@@ -62,14 +95,14 @@ def test_cached_stager_reuse(tmp_path: Path) -> None:
     ----------
     tmp_path : Path
         A temporary path to store repository clones
+    remote_repo_uri : str
+        URI of the repository to stage
     """
-    repo_uri = "https://github.com/CWorthy-ocean/c-star"
-
-    source_data_1 = SourceData(repo_uri)
+    source_data_1 = SourceData(remote_repo_uri)
     stage_path_1 = tmp_path / "my-roms-1"
     staged_data_1 = source_data_1.stage(stage_path_1)
 
-    source_data_2 = SourceData(repo_uri, identifier="main")
+    source_data_2 = SourceData(remote_repo_uri, identifier="main")
     stage_path_2 = tmp_path / "my-roms-2"
 
     fake_pull = mock.MagicMock()
@@ -104,7 +137,7 @@ def test_cached_stager_reuse(tmp_path: Path) -> None:
 
 
 @pytest.mark.usefixtures("mock_home_dir")
-def test_cached_stager_refresh_failure(tmp_path: Path) -> None:
+def test_cached_stager_refresh_failure(tmp_path: Path, remote_repo_uri: str) -> None:
     """Verify that the cached stager re-clones a repository
     if an attempt to refresh fails.
 
@@ -112,15 +145,15 @@ def test_cached_stager_refresh_failure(tmp_path: Path) -> None:
     ----------
     tmp_path : Path
         A temporary path to store repository clones
+    remote_repo_uri : str
+        URI of the repository to stage
     """
-    repo_uri = "https://github.com/CWorthy-ocean/c-star"
-
-    cache_path = tmp_path / ".cache" / "https-github-com-cworthy-ocean-cstar"
+    cache_path = tmp_path / ".cache" / "cached-c-star"
     cached_junk = cache_path / ".git"
     cached_junk.mkdir(parents=True)
     (cached_junk / "garbage").touch()
 
-    source_data_1 = SourceData(repo_uri)
+    source_data_1 = SourceData(remote_repo_uri)
     stage_path_1 = tmp_path / "my-roms-1"
 
     def fail_pull(*args, **kwargs) -> None:
