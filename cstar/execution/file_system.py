@@ -186,41 +186,43 @@ class DirectoryManager:
         when it exists and the standard directory does not, the standard directory
         is created as a relative symlink to it. The link is computed between the
         resolved paths, so it holds when ``<root>/cstar`` or the legacy directory
-        is itself behind a symlink; it is absolute only if no relative path exists.
+        is itself behind a symlink.
+
+        A dangling link left by releases 0.16.0 and 0.16.1 (which computed it from
+        the unresolved paths) is replaced when the legacy cache exists.
 
         Raises
         ------
         CstarError
             If the standard directory is a symlink whose target is missing (an
             unmounted file system, say), rather than replacing it with an empty
-            directory, or if a link created here does not resolve to a directory
-            (it is removed first).
+            directory.
         """
         home, legacy = cls._source_data_paths()
         if home.is_symlink() and not home.exists():
-            msg = (
-                f"The source-data cache {home} links to {home.readlink()}, which "
-                "does not exist. Restore the target or remove the link."
-            )
-            raise CstarError(msg)
+            # 0.16.0 and 0.16.1 linked with a lexical relpath that dangles when
+            # <root>/cstar or the legacy directory is behind a symlink.
+            if legacy.is_dir() and os.readlink(home) == os.path.relpath(
+                legacy, home.parent
+            ):
+                log.info(
+                    "Replacing dangling source-data link %s from an older release", home
+                )
+                home.unlink()
+            else:
+                msg = (
+                    f"The source-data cache {home} links to {home.readlink()}, which "
+                    "does not exist. Restore the target or remove the link."
+                )
+                raise CstarError(msg)
         if not home.exists() and legacy.is_dir():
             home.parent.mkdir(parents=True, exist_ok=True)
             # A relative link resolves from the real directory that holds it, so
             # compute it between resolved paths, not through any symlinked parent.
-            try:
-                target = os.path.relpath(legacy.resolve(), home.parent.resolve())
-            except ValueError:  # no relative path, e.g. different drives
-                target = str(legacy.resolve())
+            target = os.path.relpath(legacy.resolve(), home.parent.resolve())
             # Another process sharing the root may have linked it first.
             with contextlib.suppress(FileExistsError):
                 home.symlink_to(target)
-                if not home.is_dir():
-                    home.unlink()
-                    msg = (
-                        f"Linked the source-data cache {home} to {target}, which does "
-                        f"not resolve to a directory (expected {legacy}); link removed."
-                    )
-                    raise CstarError(msg)
                 log.info("Linked source-data cache %s to existing %s", home, legacy)
         home.mkdir(parents=True, exist_ok=True)
         return home

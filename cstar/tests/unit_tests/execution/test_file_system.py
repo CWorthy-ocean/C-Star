@@ -835,24 +835,27 @@ class TestSourceDataHome:
         assert home.readlink() == link_target
         assert home.resolve() == legacy.resolve()
 
-    def test_ensure_removes_link_that_does_not_resolve(
+    def test_ensure_repairs_dangling_link_from_old_relpath(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """A link that dangles after being created is reported and removed, not
-        left to make ``mkdir`` fail with ``FileExistsError``.
+        """Releases 0.16.0 and 0.16.1 linked with a lexical relpath, which dangles
+        behind symlinked parents; that link is replaced instead of refused.
         """
-        scratch = tmp_path / "scratch"
-        self._make_legacy(scratch)
-        monkeypatch.setenv("SCRATCH", str(scratch))
-        monkeypatch.setattr(
-            "cstar.execution.file_system.os.path.relpath",
-            lambda *args, **kwargs: "../nowhere",
-        )
+        root, legacy = self._make_symlinked_home(tmp_path)
+        monkeypatch.setenv("SCRATCH", str(root))
+        standard = self._expected(root)
+        standard.symlink_to("../cstar-forge-data/source-data")
+        assert standard.is_symlink()
+        assert not standard.exists()
 
-        with pytest.raises(CstarError, match="does not resolve"):
-            DirectoryManager.ensure_source_data_home()
+        home = DirectoryManager.ensure_source_data_home()
 
-        assert not self._expected(scratch).is_symlink()
+        assert home == standard
+        assert home.is_dir()
+        assert home.is_symlink()
+        assert not home.readlink().is_absolute()
+        assert home.resolve() == legacy.resolve()
+        assert (home / "glorys.nc").read_text() == "data"
 
     def test_ensure_does_not_link_when_standard_dir_exists(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -894,6 +897,23 @@ class TestSourceDataHome:
 
         assert standard.is_symlink()
         assert not (tmp_path / "unmounted").exists()
+
+    def test_ensure_refuses_other_dangling_link_when_legacy_exists(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Only the exact link left by the old code is repaired; any other
+        dangling link is refused even when a legacy cache could be adopted.
+        """
+        root, _ = self._make_symlinked_home(tmp_path)
+        monkeypatch.setenv("SCRATCH", str(root))
+        standard = self._expected(root)
+        standard.symlink_to("../unmounted/source-data")
+
+        with pytest.raises(CstarError, match="does not exist"):
+            DirectoryManager.ensure_source_data_home()
+
+        assert standard.is_symlink()
+        assert standard.readlink() == Path("../unmounted/source-data")
 
     def test_ensure_tolerates_losing_the_link_race(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
