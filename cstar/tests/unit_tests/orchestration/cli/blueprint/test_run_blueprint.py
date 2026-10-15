@@ -32,6 +32,7 @@ from cstar.entrypoint.utils import (
     ARG_DIRECTIVES_URI_LONG,
     ARG_PRE_RUN,
     ARG_RESUME,
+    ARG_STEP,
 )
 from cstar.execution.handler import ExecutionStatus
 from cstar.orchestration.adapter import prepare_directive_file
@@ -40,6 +41,7 @@ from cstar.orchestration.manifest import (
     STEP_RECORD_NAME,
     AttemptStatus,
     read_run_manifest,
+    read_step_record,
 )
 from cstar.orchestration.models import Application, Blueprint
 from cstar.orchestration.orchestration import LiveStep, LiveWorkplan, Status
@@ -946,7 +948,7 @@ def test_blueprint_run_pre_run_non_pre_runnable_app_fails_fast(
     mock_exec.assert_not_called()
 
 
-def _run_hello_world(bp_path: Path) -> t.Any:
+def _run_hello_world(bp_path: Path, *args: str) -> t.Any:
     """Run a hello_world blueprint through the CLI with a runner that shuts down."""
 
     async def execute(self: BlueprintRunner[Blueprint]) -> None:
@@ -954,7 +956,7 @@ def _run_hello_world(bp_path: Path) -> t.Any:
         self._on_shutdown()
 
     with mock.patch.object(HelloWorldRunner, "execute", execute):
-        return CliRunner().invoke(app, [bp_path.as_posix()], color=False)
+        return CliRunner().invoke(app, [bp_path.as_posix(), *args], color=False)
 
 
 def test_blueprint_run_writes_run_manifest(
@@ -999,3 +1001,19 @@ def test_blueprint_run_in_workplan_writes_no_run_manifest(
     root = deserialize(hello_world_bp_path, HelloWorldBlueprint).effective_working_dir
     assert (root / STEP_RECORD_NAME).exists()
     assert not (root / RUN_MANIFEST_NAME).exists()
+
+
+def test_blueprint_run_step_option_names_the_recorded_step(
+    hello_world_bp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """`--step` is what the step record names; without it, the blueprint is."""
+    monkeypatch.setenv(ENV_CSTAR_RUNID, "a-run")
+    root = deserialize(hello_world_bp_path, HelloWorldBlueprint).effective_working_dir
+
+    result = _run_hello_world(hello_world_bp_path, ARG_STEP, "A")
+
+    assert result.exit_code == 0, result.output
+    record = read_step_record(root)
+    assert record is not None
+    assert record.step == "A"

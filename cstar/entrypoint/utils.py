@@ -42,6 +42,10 @@ ARG_PRE_RUN_HELP: t.Final[str] = (
     "without launching the model. The working directory is left in place so a "
     "later --resume run attaches to it instead of redoing the work."
 )
+ARG_STEP: t.Final[str] = "--step"
+ARG_STEP_HELP: t.Final[str] = (
+    "The name of the workplan step this run executes; recorded in the step record."
+)
 ARG_PRE_RUN_WORKPLAN_HELP: t.Final[str] = (
     "Perform every stage before the model launch for each step -- stage inputs, "
     "clone and compile, generate and validate the namelist -- without launching "

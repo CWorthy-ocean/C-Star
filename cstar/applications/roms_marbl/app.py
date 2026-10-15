@@ -220,6 +220,7 @@ def main() -> int:
         RomsMarblBlueprint,
         resume=args.resume,
         pre_run=args.pre_run,
+        step=args.step,
     )
     runner = RomsMarblRunner(request, service_cfg, job_cfg)
 

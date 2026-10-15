@@ -1890,3 +1890,4 @@ async def test_prepare_workplan_anchors_relative_blueprint_path(
 
     command = StepToRunRequestAdapter().adapt(step).command
     assert command[:4] == ["cstar", "blueprint", "run", str(expected)]
+    assert command[4:6] == ["--step", step.name]

@@ -46,6 +46,8 @@ from cstar.entrypoint.utils import (
     ARG_PRE_RUN_HELP,
     ARG_RESUME,
     ARG_RESUME_HELP,
+    ARG_STEP,
+    ARG_STEP_HELP,
     ARG_VERBOSE,
     ARG_VERBOSE_HELP,
 )
@@ -253,6 +255,10 @@ def run(
         bool,
         typer.Option(ARG_PRE_RUN, help=ARG_PRE_RUN_HELP),
     ] = False,
+    step: t.Annotated[
+        str,
+        typer.Option(ARG_STEP, help=ARG_STEP_HELP),
+    ] = "",
 ) -> None:
     """Execute a blueprint in a local worker service.
 
@@ -306,7 +312,9 @@ def run(
     if directive_uri:
         uri = DirectiveConfig.apply_directives(directive_uri, uri)
 
-    request = RunnerRequest(uri, app_config.blueprint, resume=resume, pre_run=pre_run)
+    request = RunnerRequest(
+        uri, app_config.blueprint, resume=resume, pre_run=pre_run, step=step
+    )
 
     runner = app_config.runner(request, service_cfg, job_cfg)
     started_at = utc_now()

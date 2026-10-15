@@ -536,7 +536,7 @@ async def test_runner_writes_step_record(
     assert record is not None
     assert record.outcome == "completed"
     assert record.run_id == run_id
-    assert record.step == blueprint.name
+    assert record.step == blueprint.name  # a standalone run is its own step
     assert record.application == blueprint.application
     assert record.blueprint == BlueprintIdentity.of(blueprint)
     assert record.blueprint_schema_version == blueprint.schema_version
@@ -544,6 +544,24 @@ async def test_runner_writes_step_record(
     assert record.start_at <= record.finished_at
     assert "cstar-ocean" in record.versions
     assert record.errors == []
+
+
+@pytest.mark.asyncio
+async def test_runner_records_the_workplan_step_name(
+    hello_world_bp_path: Path,
+) -> None:
+    """Verify a request that names its workplan step is recorded under that name."""
+    request = RunnerRequest(str(hello_world_bp_path), HelloWorldBlueprint, step="A")
+    runner = HelloWorldRunner(
+        request, get_service_config(log_level="INFO"), get_job_config()
+    )
+
+    await runner.execute()
+
+    record = read_step_record(runner.blueprint.effective_working_dir)
+    assert record is not None
+    assert record.step == "A"
+    assert record.blueprint.name == runner.blueprint.name
 
 
 @pytest.mark.asyncio

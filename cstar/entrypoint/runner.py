@@ -24,6 +24,8 @@ from cstar.entrypoint.utils import (
     ARG_PRE_RUN_HELP,
     ARG_RESUME,
     ARG_RESUME_HELP,
+    ARG_STEP,
+    ARG_STEP_HELP,
     ARG_URI_LONG,
     ARG_URI_SHORT,
 )
@@ -133,7 +135,7 @@ class BlueprintRunner(Service, XRunner[TBlueprint]):
             bp = t.cast("Blueprint", self.blueprint)
             record = StepRecord(
                 run_id=os.getenv(ENV_CSTAR_RUNID, ""),
-                step=bp.name,
+                step=self.request.step or bp.name,
                 application=bp.application,
                 blueprint=BlueprintIdentity.of(bp),
                 blueprint_schema_version=bp.schema_version,
@@ -275,5 +277,12 @@ def create_parser() -> argparse.ArgumentParser:
         ARG_PRE_RUN,
         action="store_true",
         help=ARG_PRE_RUN_HELP,
+    )
+    parser.add_argument(
+        ARG_STEP,
+        type=str,
+        default="",
+        required=False,
+        help=ARG_STEP_HELP,
     )
     return parser

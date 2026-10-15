@@ -78,6 +78,8 @@ class RunnerRequest(t.Generic[TBlueprint]):
     and then stop, leaving the working directory for a later attempt to attach
     to. Only honoured by applications whose
     `ApplicationDefinition.pre_runnable` is `True`."""
+    step: str = ""
+    """The workplan step this run executes; empty for a standalone run."""
 
     def __init__(
         self,
@@ -87,6 +89,7 @@ class RunnerRequest(t.Generic[TBlueprint]):
         directive_uri: str = "",
         resume: bool = False,
         pre_run: bool = False,
+        step: str = "",
     ) -> None:
         """Initialize the request instance.
 
@@ -108,6 +111,8 @@ class RunnerRequest(t.Generic[TBlueprint]):
             Whether to perform every stage before the model launch and then
             stop. Only meaningful for applications whose
             `ApplicationDefinition.pre_runnable` is `True`.
+        step : str
+            The workplan step this run executes; empty for a standalone run.
         """
         self.blueprint_uri = uri.strip()
         self.bp_type = bp_type
@@ -118,6 +123,7 @@ class RunnerRequest(t.Generic[TBlueprint]):
             raise ValueError(msg)
         self.resume = resume
         self.pre_run = pre_run
+        self.step = step.strip()
 
     @property
     def application(self) -> str:
