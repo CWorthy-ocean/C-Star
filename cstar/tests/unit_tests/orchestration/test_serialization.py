@@ -34,6 +34,7 @@ from cstar.orchestration.serialization import (
     read_raw,
     read_yaml_to_raw,
     rebase_paths,
+    render_model,
     serialize,
 )
 from cstar.orchestration.state import StateRepository
@@ -1257,3 +1258,28 @@ def test_read_blueprint_raw_returns_the_anchored_mapping(tmp_path: Path) -> None
     raw = read_blueprint_raw(path)
 
     assert raw["grid"]["data"][0]["location"] == (tmp_path / "grid.nc").as_posix()
+
+
+class _Doc(BaseModel):
+    """A small model to render."""
+
+    name: str = Field(default="x")
+    count: int = Field(default=3)
+
+
+def test_render_model_yaml_and_json() -> None:
+    """Verify a model renders as YAML (defaults excluded) or JSON text."""
+    model = _Doc(name="y")
+
+    assert yaml.safe_load(render_model(model)) == {"name": "y"}
+    assert yaml.safe_load(render_model(model, PersistenceMode.yaml)) == {"name": "y"}
+    assert json.loads(render_model(model, PersistenceMode.json)) == {
+        "name": "y",
+        "count": 3,
+    }
+
+
+def test_render_model_rejects_auto() -> None:
+    """Verify `auto` is refused, since there is no path to detect a mode from."""
+    with pytest.raises(ValueError, match="mode"):
+        render_model(_Doc(), PersistenceMode.auto)

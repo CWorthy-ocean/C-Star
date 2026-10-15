@@ -1,3 +1,4 @@
+import enum
 import importlib
 import importlib.util
 import typing as t
@@ -363,6 +364,32 @@ class Transform(t.Protocol, t.Generic[TTransformable]):
 
 
 TRunner = t.TypeVar("TRunner")
+
+
+class ArtifactKind(enum.StrEnum):
+    """The closed set of kinds a step's products are classified as in its step record.
+
+    Model-specific detail, such as a ROMS output stream, goes in a product's
+    metadata, not here.
+    """
+
+    grid = "grid"
+    initial_conditions = "initial_conditions"
+    boundary_forcing = "boundary_forcing"
+    surface_forcing = "surface_forcing"
+    tidal_forcing = "tidal_forcing"
+    river_forcing = "river_forcing"
+    cdr_forcing = "cdr_forcing"
+    restart = "restart"
+    history = "history"
+    average = "average"
+    output = "output"
+    emitted_blueprint = "emitted_blueprint"
+    namelist = "namelist"
+    build = "build"
+    log = "log"
+    figure = "figure"
+    other = "other"
 
 
 class EmittedBlueprint(ConfiguredBaseModel):

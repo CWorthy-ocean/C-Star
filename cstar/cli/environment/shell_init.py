@@ -2,8 +2,6 @@ import errno
 import os
 import re
 import shlex
-import stat
-import tempfile
 import typing as t
 from contextlib import contextmanager
 from enum import StrEnum, auto
@@ -23,7 +21,7 @@ from cstar.entrypoint.utils import (
     ARG_UNINSTALL,
     ARG_UNINSTALL_HELP,
 )
-from cstar.execution.file_system import DirectoryManager
+from cstar.execution.file_system import DirectoryManager, write_bytes_atomic
 
 if t.TYPE_CHECKING:
     from collections.abc import Callable, Iterator, Sequence
@@ -189,47 +187,6 @@ def _reporting(path: Path) -> "Iterator[None]":
     raise typer.Exit(1)
 
 
-def _write_atomic(path: Path, data: bytes) -> None:
-    """Replace the file at `path` with `data`, or leave it exactly as it was.
-
-    The data is written, flushed and synced to a temporary file beside the target,
-    given the target's permissions (or the umask default for a new file), and
-    renamed over it. A failure at any point, such as a full disk, leaves the
-    original intact and removes the temporary file. A symlink at `path` keeps its
-    link: its target is replaced. The target becomes a new inode, so hard links to
-    it, its ownership and its extended attributes are not preserved.
-
-    Parameters
-    ----------
-    path : Path
-        The file to write; its parent directories are created.
-    data : bytes
-        The new content.
-    """
-    target = path.resolve()
-    target.parent.mkdir(parents=True, exist_ok=True)
-    if target.exists():
-        mode = stat.S_IMODE(target.stat().st_mode)
-    else:
-        umask = os.umask(0)
-        os.umask(umask)
-        mode = 0o666 & ~umask
-
-    temp = tempfile.NamedTemporaryFile(
-        "wb", dir=target.parent, prefix=f".{target.name}.", suffix=".tmp", delete=False
-    )
-    try:
-        with temp:
-            temp.write(data)
-            temp.flush()
-            os.fsync(temp.fileno())
-        os.chmod(temp.name, mode)
-        os.replace(temp.name, target)
-    except BaseException:
-        Path(temp.name).unlink(missing_ok=True)
-        raise
-
-
 def _rewrite(rc: Path, edit: "Callable[[str], str]") -> bool:
     """Apply `edit` to an rc file's text, writing it back only when it changed.
 
@@ -257,7 +214,7 @@ def _rewrite(rc: Path, edit: "Callable[[str], str]") -> bool:
     if target.exists() and not os.access(target, os.W_OK):
         raise PermissionError(errno.EACCES, os.strerror(errno.EACCES), str(target))
 
-    _write_atomic(target, after.encode(**_ENCODING))
+    write_bytes_atomic(target, after.encode(**_ENCODING))
     return True
 
 
@@ -422,7 +379,7 @@ def _install(shell: Shell) -> None:
     with _reporting(rc):
         changed = _upsert_block(rc, function_file)
     with _reporting(function_file):
-        _write_atomic(function_file, shell_function(shell).encode())
+        write_bytes_atomic(function_file, shell_function(shell).encode())
 
     typer.echo(f"Shell: {shell}")
     typer.echo(f"Wrote {function_file}")

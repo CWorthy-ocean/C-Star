@@ -1,6 +1,7 @@
 import os
 import pickle
 import shlex
+import stat
 from pathlib import Path
 from unittest import mock
 
@@ -23,7 +24,9 @@ from cstar.execution.file_system import (
     rotate_file,
     step_disk_usage,
     symlink_relative,
+    write_bytes_atomic,
     write_local_copy,
+    write_text_atomic,
 )
 from cstar.orchestration.models import Step
 from cstar.orchestration.orchestration import LiveStep
@@ -1011,3 +1014,65 @@ def test_symlink_relative_within_falls_back_to_absolute_for_outside_link(
 
     assert link.readlink() == target.resolve()
     assert link.read_text() == "data"
+
+
+def test_write_bytes_atomic_writes_content_and_creates_parents(tmp_path: Path) -> None:
+    """Verify the data lands in the file and missing parents are created."""
+    target = tmp_path / "a" / "b" / "file.bin"
+
+    write_bytes_atomic(target, b"payload")
+
+    assert target.read_bytes() == b"payload"
+    assert [p.name for p in target.parent.iterdir()] == ["file.bin"]
+
+
+def test_write_bytes_atomic_keeps_existing_mode(tmp_path: Path) -> None:
+    """Verify replacing a file keeps its permissions."""
+    target = tmp_path / "script.sh"
+    target.write_bytes(b"old")
+    target.chmod(0o750)
+
+    write_bytes_atomic(target, b"new")
+
+    assert target.read_bytes() == b"new"
+    assert stat.S_IMODE(target.stat().st_mode) == 0o750
+
+
+def test_write_bytes_atomic_follows_symlink(tmp_path: Path) -> None:
+    """Verify a symlink at the path keeps its link and its target is replaced."""
+    real = tmp_path / "real.txt"
+    real.write_bytes(b"old")
+    link = tmp_path / "link.txt"
+    link.symlink_to(real)
+
+    write_bytes_atomic(link, b"new")
+
+    assert link.is_symlink()
+    assert real.read_bytes() == b"new"
+
+
+def test_write_bytes_atomic_failure_leaves_original_intact(tmp_path: Path) -> None:
+    """Verify a failure before the rename keeps the original and leaves no temp file."""
+    target = tmp_path / "atomic" / "file.txt"
+    target.parent.mkdir()
+    target.write_bytes(b"original")
+
+    with (
+        mock.patch("cstar.execution.file_system.os.replace", side_effect=OSError("x")),
+        pytest.raises(OSError, match="x"),
+    ):
+        write_bytes_atomic(target, b"replacement")
+
+    assert target.read_bytes() == b"original"
+    assert [p.name for p in target.parent.iterdir()] == ["file.txt"]
+
+
+def test_write_text_atomic_encodes_text(tmp_path: Path) -> None:
+    """Verify text is encoded with the requested codec."""
+    target = tmp_path / "sub" / "file.txt"
+
+    write_text_atomic(target, "caf\u00e9")
+    assert target.read_bytes() == "caf\u00e9".encode()
+
+    write_text_atomic(target, "caf\u00e9", encoding="latin-1")
+    assert target.read_bytes() == b"caf\xe9"

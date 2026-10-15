@@ -5,6 +5,8 @@ workplan run declared under a workplan's `runs`, by the token `<step>@<alias>`
 (`build@spinup`); see `StepRef`.
 """
 
+import hashlib
+import json
 import re
 import typing as t
 import uuid
@@ -282,6 +284,26 @@ class BlueprintIdentity(ConfiguredBaseModel):
     content_hash: str = Field(default="")
     """A fingerprint of the referenced blueprint's configuration."""
 
+    @classmethod
+    def of(cls, blueprint: "Blueprint") -> "BlueprintIdentity":
+        """Identify a blueprint by its application, name and content hash.
+
+        Parameters
+        ----------
+        blueprint : Blueprint
+            The blueprint to identify.
+
+        Returns
+        -------
+        BlueprintIdentity
+        """
+        return cls(
+            kind="Blueprint",
+            application=blueprint.application,
+            name=blueprint.name,
+            content_hash=blueprint.content_hash(),
+        )
+
 
 class SpecSelection(ConfiguredBaseModel):
     """Records a composable spec by name and where it came from.
@@ -393,6 +415,23 @@ class Blueprint(ConfiguredBaseModel, ABC):
         if self.working_dir is not None:
             return self.working_dir
         return StateDirectoryManager.blueprint_run_dir(self.application, self.name)
+
+    def content_hash(self) -> str:
+        """A fingerprint of the blueprint's configuration.
+
+        The metadata fields (`BLUEPRINT_METADATA_FIELDS`) and the schema reference
+        are excluded, so renaming or moving a blueprint does not change it.
+
+        Returns
+        -------
+        str
+            The SHA-256 hex digest of the configuration.
+        """
+        data = self.model_dump(mode="json")
+        for key in (*BLUEPRINT_METADATA_FIELDS, "$schema"):
+            data.pop(key, None)
+        canonical = json.dumps(data, sort_keys=True, separators=(",", ":"))
+        return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
     @field_validator("working_dir", mode="after")
     @classmethod

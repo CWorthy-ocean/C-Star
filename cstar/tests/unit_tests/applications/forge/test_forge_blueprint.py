@@ -5413,19 +5413,21 @@ class TestInstalledVersion:
 
     def test_returns_formatted_version_when_installed(self, monkeypatch):
         from cstar.applications.forge import blueprint as fb
+        from cstar.base import provenance
 
-        monkeypatch.setattr(fb, "_pkg_version", lambda name: "4.0.0")
+        monkeypatch.setattr(provenance, "_pkg_version", lambda name: "4.0.0")
         assert fb._installed_version("roms-tools") == "roms-tools==4.0.0"
 
     def test_returns_none_when_not_installed(self, monkeypatch):
         from importlib.metadata import PackageNotFoundError
 
         from cstar.applications.forge import blueprint as fb
+        from cstar.base import provenance
 
         def _raise(name):
             raise PackageNotFoundError(name)
 
-        monkeypatch.setattr(fb, "_pkg_version", _raise)
+        monkeypatch.setattr(provenance, "_pkg_version", _raise)
         assert fb._installed_version("not-a-real-package") is None
 
 
@@ -5438,8 +5440,9 @@ class TestGenerationHelpers:
         self, monkeypatch
     ):
         from cstar.applications.forge import blueprint as fb
+        from cstar.base import provenance
 
-        monkeypatch.setattr(fb, "_pkg_version", lambda name: "4.0.0")
+        monkeypatch.setattr(provenance, "_pkg_version", lambda name: "4.0.0")
         assert fb.generation_versions() == {
             "cstar-ocean": "4.0.0",
             "roms-tools": "4.0.0",
@@ -5451,13 +5454,14 @@ class TestGenerationHelpers:
         from importlib.metadata import PackageNotFoundError
 
         from cstar.applications.forge import blueprint as fb
+        from cstar.base import provenance
 
         def _only_cstar(name):
             if name != "cstar-ocean":
                 raise PackageNotFoundError(name)
             return "1.2.3"
 
-        monkeypatch.setattr(fb, "_pkg_version", _only_cstar)
+        monkeypatch.setattr(provenance, "_pkg_version", _only_cstar)
         assert fb.generation_versions() == {"cstar-ocean": "1.2.3"}
 
     def test_system_name_is_the_hosts_name(self, monkeypatch):

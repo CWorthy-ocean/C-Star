@@ -1,17 +1,15 @@
 import asyncio
 import fcntl
-import os
-import tempfile
 import typing as t
 from pathlib import Path
 
 from cstar.base.utils import slugify
-from cstar.execution.file_system import StateDirectoryManager
+from cstar.execution.file_system import StateDirectoryManager, write_text_atomic
 from cstar.orchestration.serialization import (
     PersistenceMode,
     SerializableModel,
     deserialize,
-    serialize,
+    render_model,
 )
 
 EXT_SENTINEL: t.Final[str] = "sentinel"
@@ -170,19 +168,9 @@ class StateRepository:
             # script rewrites the sentinel's status line the moment it starts,
             # and a reader that caught an in-place write mid-way would copy a
             # truncated sentinel back over the complete one
-            fd, tmp_name = tempfile.mkstemp(
-                dir=persist_to.parent, prefix=f".{persist_to.name}.", suffix=".part"
-            )
-            os.close(fd)
-            tmp_path = Path(tmp_name)
-            try:
-                num_bytes = await asyncio.to_thread(
-                    serialize, tmp_path, proxy, mode=mode
-                )
-                os.replace(tmp_path, persist_to)
-            finally:
-                tmp_path.unlink(missing_ok=True)
-        return persist_to if num_bytes > 0 else None
+            content = render_model(proxy, mode)
+            await asyncio.to_thread(write_text_atomic, persist_to, content)
+        return persist_to if content else None
 
     async def list_sentinels(
         self,
