@@ -114,6 +114,7 @@ C-Star is built with these principles in mind:
     :hidden:
 
     End to end: a new domain to a running simulation <tutorials/end_to_end>
+    Nesting and upscaling: a tiny nested CDR run <tutorials/nesting_upscaling>
 
 .. toctree::
     :maxdepth: 2
