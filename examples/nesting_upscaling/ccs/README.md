@@ -162,7 +162,7 @@ Setup, once per shell (the job scripts run with your environment, `--export=ALL`
 
 ```bash
 module load conda && conda activate cstar-nest
-export CSTAR_SLURM_ACCOUNT=x-ees250129 CSTAR_SLURM_QUEUE=shared
+export CSTAR_SLURM_ACCOUNT=ees250129 CSTAR_SLURM_QUEUE=shared
 export CSTAR_PROJECT_HOME=/anvil/projects/x-ees250129   # source-data cache: <that>/cstar/source-data
 export CSTAR_NPROCS_POST=8                              # default is a third of the node's cores, whatever the job asks for
 cd ~/packages/C-Star/examples/nesting_upscaling/ccs
