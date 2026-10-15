@@ -50,7 +50,7 @@ From this directory, with the environment active:
 ```bash
 cstar workplan check workplan.yaml
 cstar workplan run   workplan.yaml --run-id ccs-mac-a1
-cstar workplan status ccs-mac-a1
+cstar run status ccs-mac-a1
 ```
 
 The run directory is `~/cstar/workplan_runs/ccs-mac-a1` (`CSTAR_DATA_HOME/workplan_runs/`).

@@ -48,7 +48,7 @@ From the ``tiny`` directory, with the environment active:
 
    cstar workplan check workplan.yaml --var example_data=$(python fetch_data.py)
    cstar workplan run   workplan.yaml --var example_data=$(python fetch_data.py) --run-id nest-tiny
-   cstar workplan status nest-tiny
+   cstar run status nest-tiny
 
 ``fetch_data.py`` downloads the pinned source files and prints the directory
 that holds them, which the workplan takes as the runtime variable

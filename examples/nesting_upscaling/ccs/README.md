@@ -53,7 +53,7 @@ minutes on tanagra:
 ```bash
 cstar workplan check workplan.yaml --varfile smoke.vars
 cstar workplan run   workplan.yaml --varfile smoke.vars --run-id ccs-smoke
-cstar workplan status ccs-smoke
+cstar run status ccs-smoke
 ```
 
 The run-id defaults to the workplan name (`ccs-nest-upscale`); give the smoke and the full
@@ -199,7 +199,7 @@ verify whether the specified lat/lon/depth location is within the domain or on l
 
 Paths below are under `$CSTAR_DATA_HOME/workplan_runs/ccs-smoke/` (`cstar env show` prints `CSTAR_DATA_HOME`; `~/cstar` on a workstation).
 
-- `cstar workplan status ccs-smoke`: eight steps done.
+- `cstar run status ccs-smoke`: eight steps done.
 - `tasks/forge_child/work/` (the persisted `*.ovrd.yaml` blueprint) shows the overridden window, tiling, CDR output cadence and `cdr.cdr_forcing.releases[0].times`; `tasks/forge_child/input_data/` has `ccs-child_grid.nc` and the CDR forcing, but no initial-conditions or boundary file.
 - `tasks/parent/output/`: `output_rst.<ts>.nc` (daily restarts, the first one day after the start) and `child_bry.<ts>.nc` (the nesting extraction, hourly, one file a day, the first stamped 01:00 of the start day).
 - `tasks/nest_ic/output/ic_from_parent_rst.<child start>.nc`.

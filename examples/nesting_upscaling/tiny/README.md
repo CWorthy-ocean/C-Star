@@ -41,7 +41,8 @@ No tides, rivers, MBL_co2 or salinity restoring.
   environment needs `mpirun`, gfortran, `nccopy` and git; network access for the first
   run (ROMS, MARBL and PIO are cloned and built; the data below is downloaded).
 - GNU `timeout`: the workplan sets a local `max_walltime` on every step, which C-Star
-  enforces with `timeout`. macOS has none: `conda install coreutils` (or `brew install
+  enforces with `timeout`. macOS has none; the repo's `environment-laptop.yml` installs
+  `coreutils` for it. In an older environment, `conda install coreutils` (or `brew install
   coreutils`, which provides `gtimeout`).
 - The first run downloads the pinned test data (about 40 MB, `fetch_data.py`), and roms-tools
   fetches ETOPO5 (about 19 MB) and the ERA5 radiation-correction file (about 86 MB).
@@ -53,7 +54,7 @@ From this directory, with the environment active:
 ```bash
 cstar workplan check workplan.yaml --var example_data=$(python fetch_data.py)
 cstar workplan run   workplan.yaml --var example_data=$(python fetch_data.py) --run-id nest-tiny
-cstar workplan status nest-tiny
+cstar run status nest-tiny
 ```
 
 `fetch_data.py` prints only the directory on stdout, so it is safe inside `$(...)`; its
@@ -96,7 +97,7 @@ workplan under an old run-id is refused.)
 
 ## What to look at afterwards
 
-- `cstar workplan status nest-tiny` shows eight steps done.
+- `cstar run status nest-tiny` shows eight steps done.
 - `tasks/parent/output/`: `child_bry.20120101130000.nc` ... `child_bry.20120103070000.nc` (eight files) and `output_rst.20120101180000.nc` ... `output_rst.20120103060000.nc` (seven, one record each).
 - `tasks/nest_ic/output/ic_from_parent_rst.20120102060000.nc`: the child's initial state.
 - `tasks/child/output/`: `output_uscl.*.nc` (five files, 06:00 on 2012-01-02 to 06:00 on 01-03), `output_cdr.*.nc` and four restarts. In the first `_cdr` file `ALK_source` is non-zero around the release (maximum ~9e5).

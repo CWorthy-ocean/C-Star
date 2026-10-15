@@ -730,14 +730,14 @@ composition:
     river:
       convert_to_climatology: never
 provenance:
-  generated_at: '2026-10-15T04:35:28.867019Z'
+  generated_at: '2026-10-15T21:31:47.579511Z'
   generated_by:
     tool: make_forge_blueprints.py
-    id: 51458bad-e963-405e-b758-9ee7e7e5d685
+    id: 3a35e027-6ea3-4b00-9434-945d59a8f176
     system: darwin_arm64
     versions:
-      cstar-ocean: 0.15.1
-      roms-tools: 5.1.0
+      cstar-ocean: 0.16.2.dev13+g3ec87ccae
+      roms-tools: 5.1.1
     run_id: ''
     working_dir: ''
   forge_version: null
