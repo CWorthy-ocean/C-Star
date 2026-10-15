@@ -1348,7 +1348,7 @@ def test_run_saves_streams_and_runs_pre_run_first_on_slurm(
     assert "prepared (pre-run)" in page.run_status.value
     # the follow-up is the same command without the flag, and status is named
     assert "demo.yaml --run-id demo</code>" in page.run_status.value
-    assert "cstar workplan status demo" in page.run_status.value
+    assert "cstar run status demo" in page.run_status.value
     assert page.run_btn.disabled is False
 
 
@@ -1360,7 +1360,7 @@ def test_run_without_pre_run_points_at_status(page, roms_bp, tmp_path, commands)
     assert "--pre-run" not in commands[0]
     assert commands[0].count("--var") == 2 and "a=1" in commands[0]
     assert "scheduled" in page.run_status.value
-    assert "cstar workplan status demo" in page.run_status.value
+    assert "cstar run status demo" in page.run_status.value
 
 
 def test_pre_run_first_is_hidden_unless_slurm_has_a_preparable_step(

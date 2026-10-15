@@ -81,7 +81,11 @@ from cstar.orchestration.patterns import (
     spinup_ramp,
     upscale_chain,
 )
-from cstar.orchestration.serialization import deserialize, model_to_yaml
+from cstar.orchestration.serialization import (
+    deserialize,
+    load_blueprint,
+    model_to_yaml,
+)
 from cstar.orchestration.transforms import PLACEHOLDER_RE, mustache
 from cstar.roms.namelist import namelist_schema_for_ref
 from cstar.system.manager import get_registered_sys_contexts, get_sysmgr
@@ -280,7 +284,7 @@ def _read_emitted(
     """The blueprint an application's run of ``path`` will emit, if it emits one."""
     try:
         app = get_application(application)
-        return app.emitted_blueprint(deserialize(Path(path), app.blueprint))
+        return app.emitted_blueprint(load_blueprint(Path(path), app.blueprint))
     except Exception:  # an unreadable producer is simply not predictable
         return None
 
@@ -3727,9 +3731,7 @@ class WorkplanBuilderPage:
         if action == CHECK:
             return "<span class='forge-msg-ok'>&check; check finished</span>"
         status_cmd = (
-            f"cstar workplan status {run_id}"
-            if run_id
-            else "cstar workplan status <run-id>"
+            f"cstar run status {run_id}" if run_id else "cstar run status <run-id>"
         )
         if ARG_PRE_RUN in self.run_command(action, path):
             follow = " ".join(

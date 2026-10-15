@@ -37,6 +37,7 @@ This example YAML demonstrates a configured ``RomsMarblBlueprint``. Notice that:
 
 - ROMS code can be built from a fork, branch, or even a git commit hash, by specifying :attr:`branch:` or :attr:`commit:`
 - Remote or local resources can be used to build and execute a simulation, under :attr:`compile_time:`
+- A relative ``location:`` resolves against the directory of the blueprint file, not the directory you run from, so a blueprint can sit next to its data and be moved with it. ``working_dir`` is unchanged: a relative ``working_dir`` still resolves against the directory you run from
 - C-Star handles both partitioned and unpartitioned data
 - Runtime and compile-time behaviors can be customized in the ``.opt`` and ``.in`` files
 - ``use_pio`` (whether to use the ParallelIO library for model input/output) is set under ``partitioning:``

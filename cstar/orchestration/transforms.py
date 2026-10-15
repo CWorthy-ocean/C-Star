@@ -1,7 +1,6 @@
 import functools
 import itertools
 import os
-import re
 import typing as t
 from collections import defaultdict
 from collections.abc import Callable, Iterable, Mapping, Sequence
@@ -54,7 +53,13 @@ from cstar.orchestration.orchestration import (
     Task,
     synthesize_blueprint,
 )
-from cstar.orchestration.serialization import deserialize, serialize
+from cstar.orchestration.serialization import (
+    PLACEHOLDER_RE,
+    anchor_relative_path,
+    deserialize,
+    load_blueprint,
+    serialize,
+)
 from cstar.orchestration.state import StateRepository
 from cstar.orchestration.tracking import TrackingRepository, WorkplanRun
 
@@ -99,14 +104,6 @@ def get_transforms(application: str) -> list[Transform[t.Any]]:
 
 INLINE_BLUEPRINT_FILENAME: t.Final[str] = "blueprint.yaml"
 """Name of the blueprint file materialized into an inline step's work directory."""
-
-PLACEHOLDER_RE = re.compile(r"\{\{([^}]+)\}\}")
-"""Pattern matching double-brace template placeholders.
-
-Captures the full content between braces so dispatch logic can distinguish
-plain variable references (``{{my_var}}``) from scope references
-(``{{<scope>: step_name}}``).
-"""
 
 
 class SplitFrequency(StrEnum):
@@ -467,15 +464,11 @@ def anchor_blueprint_path(step: _TStep, base_dir: Path) -> _TStep:
     if not isinstance(value, str | Path):
         return step
 
-    text = str(value).strip()
-    if not text or PLACEHOLDER_RE.search(text) or is_remote_resource(text):
+    anchored = anchor_relative_path(str(value), base_dir)
+    if anchored is None:
         return step
 
-    path = Path(text).expanduser()
-    if path.is_absolute():
-        return step
-
-    return step.model_copy(update={"blueprint_path": (base_dir / path).resolve()})
+    return step.model_copy(update={"blueprint_path": anchored})
 
 
 def fill_runs(
@@ -861,7 +854,7 @@ class ExternalRuns:
         )
         if not Status.is_terminal(probe.status):
             run_id = self._runs[ref.run].run_id
-            msg += f"; run `cstar workplan status {run_id}` to refresh its status"
+            msg += f"; run `cstar run status {run_id}` to refresh its status"
         return msg
 
     def pinned(self) -> dict[str, RunRef]:
@@ -1251,7 +1244,7 @@ class OverrideTransform(Transform[LiveStep]):
         )
         bp_type = app.blueprint
 
-        blueprint: Blueprint = deserialize(bp_path, bp_type)
+        blueprint: Blueprint = load_blueprint(bp_path, bp_type)
 
         updated_bp = self.apply(blueprint, step.blueprint_overrides)
         update: dict[str, t.Any] = {
@@ -1989,7 +1982,16 @@ class DirectiveConfig(BaseModel):
                 workplan = DirectiveConfig.load_workplan()
 
             app = get_app_for_blueprint(Path(local_bp))
-            blueprint = t.cast("Blueprint", deserialize(local_bp, app.blueprint))
+            # only the working directory is taken from this read; a downloaded copy
+            # has no directory of its own for relative locations to anchor to
+            blueprint = t.cast(
+                "Blueprint",
+                load_blueprint(
+                    local_bp,
+                    app.blueprint,
+                    anchor=not is_remote_resource(blueprint_uri),
+                ),
+            )
 
             step = LiveStep(
                 name="directive-step",

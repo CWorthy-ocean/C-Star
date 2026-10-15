@@ -52,6 +52,7 @@ async def test_tracking_create(tmp_path: Path) -> None:
     with mock.patch.dict(os.environ, {ENV_CSTAR_STATE_HOME: state_dir.as_posix()}):
         latest_dir = repo.latest_dir
         history_dir = repo.history_dir
+        latest_link = repo.latest_path(run_id)
 
         persisted_to = await repo.put_workplan_run(wp_run)
 
@@ -67,6 +68,12 @@ async def test_tracking_create(tmp_path: Path) -> None:
     # confirm the `put` operation saves to both the latest and run-tracking history
     found_files = list(latest_dir.rglob("*.yaml"))
     assert found_files
+
+    # the latest record is a link into the history, relative so the state
+    # directory can be relocated as a unit
+    assert latest_link.is_symlink()
+    assert not latest_link.readlink().is_absolute()
+    assert latest_link.resolve() == persisted_to.resolve()
 
     found_files = list(history_dir.rglob("*.yaml"))
     assert found_files

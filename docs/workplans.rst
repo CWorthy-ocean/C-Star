@@ -154,7 +154,7 @@ step name is accepted: ``depends_on``, a deferred ``blueprint: {from_step:
           nest-from:
             step: outer@spinup
 
-The run-id is the one shown by ``cstar workplan ls`` (the value given to
+The run-id is the one shown by ``cstar run ls`` (the value given to
 ``--run-id``, or derived from the workplan name). The rules:
 
 - Every alias used in a token must be declared under ``runs``; an undeclared
@@ -172,7 +172,7 @@ The run-id is the one shown by ``cstar workplan ls`` (the value given to
   job. A step that failed, was cancelled, was never submitted, or is running
   under the local launcher is refused with a message naming the run, step
   and status. If a status looks stale (the other run finished but its
-  orchestrator was not polled since), ``cstar workplan status <run-id>``
+  orchestrator was not polled since), ``cstar run status <run-id>``
   refreshes it.
 - The transformed workplan written into the run directory records, for each
   alias, the exact run record that was resolved (its start time), so the
@@ -542,7 +542,7 @@ Execution
         Executing the command again with the same :term:`run ID` will attach to the
         previous execution and schedule any steps not yet scheduled. Like the first
         run, it returns without waiting for the steps to finish; use
-        ``cstar workplan status <run-id>`` to follow their progress.
+        ``cstar run status <run-id>`` to follow their progress.
 
         Specify a different :term:`run ID` to re-run the workplan from scratch.
 
@@ -660,82 +660,121 @@ the machine performing the pre-run.
 ROMS itself is not started, so errors that only surface when ROMS opens its
 boundary or tide files, or writes its first restart, are not caught.
 
+Inspecting a Run
+----------------
+
+Once a workplan has been run, the ``cstar run`` commands operate on the run: they take the :term:`run ID` you gave to ``--run-id`` (or the one derived from the workplan name, shown by ``cstar run ls``). ``cstar workplan run`` still launches a run, and ``cstar workplan check`` still validates a workplan file.
+
+.. note::
+
+   These commands are also available as ``cstar workplan status``, ``log``, ``gather``, ``path``, ``cd``, ``ls`` and ``list`` (or ``cstar wp ...``), where they lived before ``cstar run`` existed. The two spellings run the same command.
+
 Checking Workplan Status
-------------------------
+^^^^^^^^^^^^^^^^^^^^^^^^
 
 .. tab-set::
 
    .. tab-item:: CLI Status Check
 
-    Use the ``status`` command from the ``cstar`` CLI to retrieve the current
-    status of steps in a running workplan.
+    Use the ``status`` command from the ``cstar`` CLI to retrieve the current status of steps in a running workplan.
 
     .. code-block:: console
 
-        cstar workplan status <my-unique-id>
+        cstar run status <my-unique-id>
+
+    ``cstar workplan status <my-unique-id>`` is equivalent.
 
 
-Finding a Run's Directory
--------------------------
+Listing Runs
+^^^^^^^^^^^^
 
-Use the ``path`` command from the ``cstar`` CLI to print the directory of a run,
-or of one of its steps. The path is the only output, so it composes with other
-commands in any shell. A failed lookup prints nothing and exits non-zero, so
-guard the ``cd`` with ``&&``:
+Use the ``ls`` command (also spelled ``list``) to list the runs started by a user, with their workplan, disk usage and start time.
 
 .. code-block:: console
 
-    cstar workplan path <my-unique-id>
-    dir=$(cstar workplan path <my-unique-id> <step-name>) && cd "$dir"
+    cstar run ls
 
-A program cannot change the directory of the shell that started it, so
-``cstar workplan cd <my-unique-id> [step-name]`` works only once your shell has
-a small ``cstar`` function. Install it once, then open a new shell:
+``cstar workplan ls`` is equivalent.
+
+
+Reading a Step's Log
+^^^^^^^^^^^^^^^^^^^^
+
+Use the ``log`` command to print the log of one step of a run. Add ``--monitor`` to keep streaming it, like ``tail -f``.
+
+.. code-block:: console
+
+    cstar run log <my-unique-id> <step-name>
+
+``cstar workplan log <my-unique-id> <step-name>`` is equivalent.
+
+
+Finding a Run's Directory
+^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Use the ``path`` command from the ``cstar`` CLI to print the directory of a run, or of one of its steps. The path is the only output, so it composes with other commands in any shell. A failed lookup prints nothing and exits non-zero, so guard the ``cd`` with ``&&``:
+
+.. code-block:: console
+
+    cstar run path <my-unique-id>
+    dir=$(cstar run path <my-unique-id> <step-name>) && cd "$dir"
+
+A program cannot change the directory of the shell that started it, so ``cstar run cd <my-unique-id> [step-name]`` works only once your shell has a small ``cstar`` function. Install it once, then open a new shell:
 
 .. code-block:: console
 
     cstar env shell-init --install
 
-The command detects whether you run zsh or bash (pass ``zsh`` or ``bash`` to
-choose), writes the function under the C-Star config directory, and adds a
-marked block to ``~/.zshrc`` or ``~/.bashrc`` that sources it. For bash, login
-shells, such as SSH sessions and the macOS Terminal, read ``~/.bash_profile``
-instead, so make sure that file sources ``~/.bashrc``. Run the command again
-after upgrading C-Star to refresh the function, and add ``--uninstall`` to
-remove the block and the function. The command stops without changing anything
-if the block's marker lines have been edited so that they no longer pair up.
+The command detects whether you run zsh or bash (pass ``zsh`` or ``bash`` to choose), writes the function under the C-Star config directory, and adds a marked block to ``~/.zshrc`` or ``~/.bashrc`` that sources it. For bash, login shells, such as SSH sessions and the macOS Terminal, read ``~/.bash_profile`` instead, so make sure that file sources ``~/.bashrc``. Run the command again after upgrading C-Star to refresh the function, and add ``--uninstall`` to remove the block and the function. The command stops without changing anything if the block's marker lines have been edited so that they no longer pair up.
 
-To manage your dotfiles yourself, omit ``--install``: the command prints the
-function instead, for example ``cstar env shell-init zsh > <file>``, ready to
-source from your own configuration.
+To manage your dotfiles yourself, omit ``--install``: the command prints the function instead, for example ``cstar env shell-init zsh > <file>``, ready to source from your own configuration.
+
+``cstar workplan path`` and ``cstar workplan cd`` are equivalent, and the shell function accepts both spellings. Regenerate the function after upgrading so that it knows ``cstar run cd``.
 
 
 Gathering Workplan Outputs
---------------------------
+^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-Every step writes its final outputs to its own ``output`` directory. ROMS steps
-that run without ParallelIO first write partitioned files to ``temp_output``;
-C-Star joins those into whole files in ``output`` after the run and removes the
-partition pieces.
+Every step writes its final outputs to its own ``output`` directory. ROMS steps that run without ParallelIO first write partitioned files to ``temp_output``; C-Star joins those into whole files in ``output`` after the run and removes the partition pieces.
 
-Use the ``gather`` command from the ``cstar`` CLI to consolidate every step's
-``output`` files into a single run-level ``gathered_output`` directory of
-symlinks. It is safe to re-run while a workplan is still in progress. When two
-steps produce a file with the same name, each link is prefixed with its step
-name (``<step>__<file>``) so both remain reachable.
+Use the ``gather`` command from the ``cstar`` CLI to consolidate every step's ``output`` files into a single run-level ``gathered_output`` directory of symlinks. It is safe to re-run while a workplan is still in progress. When two steps produce a file with the same name, each link is prefixed with its step name (``<step>__<file>``) so both remain reachable.
 
 .. code-block:: console
 
-    cstar workplan gather <my-unique-id>
+    cstar run gather <my-unique-id>
 
-Runs completed with an earlier C-Star release kept joined files in a
-``joined_output`` directory next to ``output``. Move such a run to the current
-layout before continuing from it or gathering it:
+``cstar workplan gather <my-unique-id>`` is equivalent.
+
+Runs completed with an earlier C-Star release kept joined files in a ``joined_output`` directory next to ``output``. Move such a run to the current layout before continuing from it or gathering it:
 
 .. code-block:: console
 
     cstar admin migrate-outputs <path-to-run-or-step-directory> --dry-run
     cstar admin migrate-outputs <path-to-run-or-step-directory>
+
+
+Checking a Run Directory
+^^^^^^^^^^^^^^^^^^^^^^^^
+
+A run directory keeps working after it is copied or moved as a unit only while the files that describe it refer to each other by relative path. Use the ``check`` command to look for what does not, in a tracked run (by run ID) or in any run directory (by path, a directory that contains ``tasks/``):
+
+.. code-block:: console
+
+    cstar run check <my-unique-id>
+    cstar run check /path/to/copy/of/the/run
+
+The command reports, kind by kind, with one line per finding:
+
+- absolute paths under the run, or under the C-Star data home, in the files each step emits (``output/*.yaml``, ``blueprints/B_*.yaml``, ``work/cstar_generated_roms.nml``) and in the run's ``*_transformed.yaml``. Pass ``--all`` to scan the launch artifacts too (override and directive files, ``script.sh`` and namelists); launchers regenerate those, so they are skipped by default.
+- symlinks with an absolute target inside the run, and symlinks whose target does not exist.
+- steps of the transformed workplan with no ``tasks/<slug>`` directory. A step that has not started has none yet.
+
+Symlinks with a target outside the run (absolute, or relative and climbing out of it), step directories that no step accounts for, and sentinel files of the run that no step accounts for (found by run ID, so not for a bare path) are listed for information and do not fail the check. Nothing is ever deleted.
+
+The exit code is 0 when there is nothing to fix, 1 when findings remain and 2 for bad arguments. A workplan file is refused: validate it with ``cstar workplan check <file>``.
+
+Pass ``--repair`` to rewrite each absolute symlink that points inside the run as a relative link, and rebuild ``gathered_output`` if the run has one and its transformed workplan describes this directory. ``--repair`` changes nothing else: a file that names absolute paths is regenerated by running the workplan again, and a dangling link is reported, never touched.
+
 
 .. toctree::
    :hidden:

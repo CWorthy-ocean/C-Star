@@ -17,6 +17,7 @@ from cstar.execution.file_system import (
     StateDirectoryManager,
     local_copy,
     step_disk_usage,
+    symlink_relative,
 )
 from cstar.orchestration.orchestration import LiveWorkplan, read_workplan
 from cstar.orchestration.serialization import (
@@ -516,7 +517,7 @@ class TrackingRepository(LoggingMixin):
             self.log.warning("Run could not be persisted")
 
         latest_path.unlink(missing_ok=True)
-        latest_path.symlink_to(run_path)
+        symlink_relative(latest_path, run_path)
 
         msg = f"Run persisted to: {run_path}"
         self.log.debug(msg)

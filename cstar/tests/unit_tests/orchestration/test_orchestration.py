@@ -16,6 +16,7 @@ from cstar.orchestration.orchestration import (
     KEY_STATUS,
     KEY_STEP,
     KEY_TASK,
+    LiveStep,
     Orchestrator,
     Planner,
     ProcessHandle,
@@ -314,3 +315,34 @@ async def test_process_node_refuses_relaunch(
         await orchestrator.process_node("first")
 
     launch.assert_not_awaited()
+
+
+def test_live_step_blueprint_anchors_relative_locations(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, bp_templates_dir: Path
+) -> None:
+    """Verify a step's blueprint resolves relative locations against the blueprint
+    file's directory, so transforms that re-write it elsewhere keep them valid.
+    """
+    bp_dir = tmp_path / "blueprints"
+    bp_dir.mkdir()
+    bp_path = bp_dir / "bp.yaml"
+    bp_path.write_text(
+        (bp_templates_dir / "blueprint.yaml")
+        .read_text()
+        .replace("http://mockdoc.com/partitioning1.nc", "../data/boundary.nc")
+    )
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    monkeypatch.chdir(elsewhere)
+    step = LiveStep(
+        name="step",
+        application=Application.ROMS_MARBL.value,
+        blueprint=bp_path,
+        working_dir=tmp_path / "work",
+    )
+
+    blueprint = t.cast("RomsMarblBlueprint", step.blueprint)
+
+    assert str(blueprint.forcing.boundary.data[0].location) == str(
+        tmp_path / "data" / "boundary.nc"
+    )
