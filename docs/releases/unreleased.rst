@@ -49,6 +49,8 @@ Bug Fixes
 - ``cstar workplan check`` accepted an authored workplan with an invalid name by treating it as an already transformed one. (`#767 <https://github.com/CWorthy-ocean/C-Star/pull/767>`_)
 - Attaching large user-provided netCDF files in the wizard, or verifying them at forge staging, no longer reads each file whole into memory (a login-node hang or kernel kill with tens of ``_cdrgas`` files). (`#769 <https://github.com/CWorthy-ocean/C-Star/pull/769>`_)
 - Resuming a run from a shell that no longer exports the original ``CSTAR_DATA_HOME`` recorded an output directory under the wrong data home; the record now takes the root from the transformed workplan it was given. (`#768 <https://github.com/CWorthy-ocean/C-Star/pull/768>`_)
+- A transient HTTP error (e.g. GitHub rate limiting) while inspecting a remote input dataset no longer gets it rejected as "a text file (e.g. a roms-tools YAML)"; C-Star now reports the HTTP error. (`#770 <https://github.com/CWorthy-ocean/C-Star/pull/770>`_)
+- Fetching a remote workplan or blueprint no longer times out after 1 second; timeouts and connection failures are reported as "Unable to retrieve remote file" like other retrieval failures. (`#770 <https://github.com/CWorthy-ocean/C-Star/pull/770>`_)
 
 Improvements
 ~~~~~~~~~~~~
@@ -73,3 +75,4 @@ Miscellaneous
 - Forge blueprint reference and the ``UserProvidedFile`` docstring describe the new digest. (`#769 <https://github.com/CWorthy-ocean/C-Star/pull/769>`_)
 - Docs: the workplans page describes the recorded root, which moves work by run-id today, and which wait for ``attach``. (`#768 <https://github.com/CWorthy-ocean/C-Star/pull/768>`_)
 - New end-to-end test ``test_workplan_relocation.py`` (hello_world steps, no ROMS build) that copies a whole data home, repoints ``CSTAR_DATA_HOME`` and exercises ``status``, ``path``, ``gather``, ``continue-from`` and ``--resume`` from the copy. (`#768 <https://github.com/CWorthy-ocean/C-Star/pull/768>`_)
+- Unit tests no longer reach the network except for pooch-cached dataset downloads, and the unit CI workflow caches those downloads. (`#770 <https://github.com/CWorthy-ocean/C-Star/pull/770>`_)
