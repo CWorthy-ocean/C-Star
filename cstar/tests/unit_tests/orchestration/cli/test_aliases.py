@@ -226,67 +226,24 @@ def invoke(build_app, tmp_path: Path) -> Generator[Callable[[list[str]], Result]
 @pytest.mark.parametrize(
     "argv",
     [
-        ["workplan", "status", "x"],
-        ["wp", "status", "x"],
-        ["workplan", "ls"],
-        ["workplan", "list"],
-        ["wp", "ls"],
-        ["wp", "list"],
+        [group, *verb]
+        for group in ("run", "workplan", "wp")
+        for verb in (["status", "x"], ["ls"], ["list"])
     ],
     ids=lambda argv: " ".join(argv),
 )
-def test_workplan_run_level_verbs_print_one_deprecation_line(invoke, argv):
-    """Each run-level verb run as a `workplan` subcommand names itself and its
-    replacement, once, on stderr.
+def test_run_level_verbs_are_silent_under_every_group(invoke, argv):
+    """Both spellings of a run-level verb run the same command with nothing on
+    stderr: neither is deprecated.
     """
-    verb = argv[1]
-
-    result = invoke(argv)
-
-    assert result.exit_code == 0, result.output
-    assert result.stderr.splitlines() == [
-        (
-            f"`cstar workplan {verb}` is deprecated for run-level commands and will "
-            f"be removed after two releases; use `cstar run {verb}`."
-        )
-    ]
-
-
-@pytest.mark.parametrize(
-    "argv",
-    [["run", "status", "x"], ["run", "ls"], ["run", "list"]],
-    ids=lambda argv: " ".join(argv),
-)
-def test_run_verbs_print_no_deprecation_line(invoke, argv):
-    """The current spelling of a run-level verb is not deprecated."""
     result = invoke(argv)
 
     assert result.exit_code == 0, result.output
     assert result.stderr == ""
 
 
-@pytest.mark.parametrize(
-    "argv",
-    [
-        ["workplan", "run", "--help"],
-        ["workplan", "check", "--help"],
-        ["wp", "check", "--help"],
-        ["workplan", "--help"],
-    ],
-    ids=lambda argv: " ".join(argv),
-)
-def test_other_workplan_commands_are_not_deprecated(invoke, argv):
-    """Launching and validating a workplan are not run-level, so nothing is printed."""
-    result = invoke(argv)
-
-    assert result.exit_code == 0, result.output
-    assert "deprecated for run-level commands" not in result.stderr
-
-
-def test_workplan_help_states_the_deprecation(build_app):
-    """The group help carries the sentence, so `--help` explains the notice."""
+def test_workplan_help_names_the_run_group(build_app):
+    """The group help says where else the run-level commands are found."""
     root = get_command(build_app())
 
-    assert "is deprecated for run-level commands" in (
-        root.commands["workplan"].help or ""
-    )
+    assert "`cstar run <command>`" in (root.commands["workplan"].help or "")

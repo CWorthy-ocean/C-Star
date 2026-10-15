@@ -667,7 +667,7 @@ Once a workplan has been run, the ``cstar run`` commands operate on the run: the
 
 .. note::
 
-   Before ``cstar run`` existed, these commands were spelled ``cstar workplan status``, ``log``, ``gather``, ``path``, ``cd``, ``ls`` and ``list``. The old spellings still work and print a deprecation line on stderr; they will be removed after two releases, so use ``cstar run <command>`` instead.
+   These commands are also available as ``cstar workplan status``, ``log``, ``gather``, ``path``, ``cd``, ``ls`` and ``list`` (or ``cstar wp ...``), where they lived before ``cstar run`` existed. The two spellings run the same command.
 
 Checking Workplan Status
 ^^^^^^^^^^^^^^^^^^^^^^^^
@@ -682,7 +682,7 @@ Checking Workplan Status
 
         cstar run status <my-unique-id>
 
-    The deprecated form is ``cstar workplan status <my-unique-id>``.
+    ``cstar workplan status <my-unique-id>`` is equivalent.
 
 
 Listing Runs
@@ -694,7 +694,7 @@ Use the ``ls`` command (also spelled ``list``) to list the runs started by a use
 
     cstar run ls
 
-The deprecated form is ``cstar workplan ls``.
+``cstar workplan ls`` is equivalent.
 
 
 Reading a Step's Log
@@ -706,7 +706,7 @@ Use the ``log`` command to print the log of one step of a run. Add ``--monitor``
 
     cstar run log <my-unique-id> <step-name>
 
-The deprecated form is ``cstar workplan log <my-unique-id> <step-name>``.
+``cstar workplan log <my-unique-id> <step-name>`` is equivalent.
 
 
 Finding a Run's Directory
@@ -729,7 +729,7 @@ The command detects whether you run zsh or bash (pass ``zsh`` or ``bash`` to cho
 
 To manage your dotfiles yourself, omit ``--install``: the command prints the function instead, for example ``cstar env shell-init zsh > <file>``, ready to source from your own configuration.
 
-The deprecated forms are ``cstar workplan path`` and ``cstar workplan cd``; the shell function still accepts the latter and prints the deprecation notice. Regenerate the function after upgrading so that it uses ``cstar run path``.
+``cstar workplan path`` and ``cstar workplan cd`` are equivalent, and the shell function accepts both spellings. Regenerate the function after upgrading so that it knows ``cstar run cd``.
 
 
 Gathering Workplan Outputs
@@ -743,7 +743,7 @@ Use the ``gather`` command from the ``cstar`` CLI to consolidate every step's ``
 
     cstar run gather <my-unique-id>
 
-The deprecated form is ``cstar workplan gather <my-unique-id>``.
+``cstar workplan gather <my-unique-id>`` is equivalent.
 
 Runs completed with an earlier C-Star release kept joined files in a ``joined_output`` directory next to ``output``. Move such a run to the current layout before continuing from it or gathering it:
 

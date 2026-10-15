@@ -250,20 +250,18 @@ def test_function_changes_directory(
 
 
 @pytest.mark.parametrize(
-    ("command", "notice"),
-    [("cstar run cd x", False), ("cstar workplan cd x", True), ("cstar wp cd x", True)],
+    "command", ["cstar run cd x", "cstar workplan cd x", "cstar wp cd x"]
 )
-def test_function_notices_the_deprecated_form(
-    run_session: t.Callable[..., Session], command: str, notice: bool
+def test_function_accepts_every_cd_spelling(
+    run_session: t.Callable[..., Session], command: str
 ) -> None:
-    """Verify only the deprecated forms print the deprecation notice, naming `cd`,
-    on stderr so the captured directory stays clean.
+    """Verify each spelling changes directory the same way and prints nothing on
+    stderr: none of them is deprecated.
     """
     session = run_session(command)
 
     assert session.proc.stdout.splitlines() == ["rc=0", f"pwd={real(session.target)}"]
-    assert ("`cstar workplan cd` is deprecated" in session.proc.stderr) is notice
-    assert ("use `cstar run cd`" in session.proc.stderr) is notice
+    assert session.proc.stderr == ""
 
 
 def test_function_does_not_leak_the_pinned_log_level(
@@ -319,7 +317,7 @@ def test_function_stays_put_when_the_lookup_fails(
 def test_function_passes_everything_else_through(
     run_session: t.Callable[..., Session], arguments: str
 ) -> None:
-    """Verify only `run cd <run-id> [step]` and its deprecated forms are intercepted: any other
+    """Verify only `run cd <run-id> [step]` and its `workplan`/`wp` spellings are intercepted: any other
     command, including an incomplete or option-bearing one, reaches the
     executable unchanged and leaves the directory alone.
     """

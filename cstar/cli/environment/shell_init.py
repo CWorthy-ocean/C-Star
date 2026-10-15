@@ -15,7 +15,7 @@ import typer
 from cstar.base.env import ENV_CSTAR_LOG_LEVEL
 from cstar.base.exceptions import CstarError
 from cstar.cli.run import NAME as NAME_RUN
-from cstar.cli.workplan import ALIAS, DEPRECATION, NAME
+from cstar.cli.workplan import ALIAS, NAME
 from cstar.cli.workplan.path import COMMAND_CD, COMMAND_PATH
 from cstar.entrypoint.utils import (
     ARG_INSTALL,
@@ -43,7 +43,7 @@ A process cannot change the directory of the shell that started it, so
 `cstar {NAME_RUN} {COMMAND_CD} <run-id> \\[step]` needs a shell function named `cstar`.
 The function runs `cstar {NAME_RUN} {COMMAND_PATH}` and changes directory to the
 path it prints; every other command passes through to the cstar executable. The
-deprecated `cstar {NAME} {COMMAND_CD}` works the same way and prints its notice.
+`cstar {NAME} {COMMAND_CD}` (or `cstar {ALIAS} {COMMAND_CD}`) works the same way.
 
 By default the function is printed, for dotfiles you manage yourself. With
 {ARG_INSTALL} it is written to the C-Star config directory and sourced from a
@@ -120,11 +120,10 @@ def shell_function(shell: Shell) -> str:
 
     The function is portable sh syntax plus `local`, and works under `set -u`
     in bash and `setopt nounset` in zsh. It intercepts only `cstar run cd
-    <run-id> [step]` and the deprecated `cstar workplan cd` (or its alias), and
-    passes everything else, including `--help` and an incomplete command,
-    through to the executable. The deprecated form prints the same notice the
-    executable would, then looks the directory up like the current one. A
-    `cstar` alias is removed first, as it would break the function definition.
+    <run-id> [step]` and its `cstar workplan cd` (or `wp`) spelling, and passes
+    everything else, including `--help` and an incomplete command, through to
+    the executable. Every spelling looks the directory up with `cstar run path`.
+    A `cstar` alias is removed first, as it would break the function definition.
 
     The log level is pinned to WARNING for the lookup so that no INFO or DEBUG
     record can reach the stdout the function captures as the directory.
@@ -142,7 +141,6 @@ def shell_function(shell: Shell) -> str:
     path_command = (
         f"{ENV_CSTAR_LOG_LEVEL}=WARNING command cstar {NAME_RUN} {COMMAND_PATH}"
     )
-    deprecation = shlex.quote(DEPRECATION.format(verb=COMMAND_CD))
 
     return f"""\
 # cstar shell integration for {shell}. Regenerate after upgrading C-Star.
@@ -152,7 +150,6 @@ cstar() {{
         && {{ [ "$1" = "{NAME_RUN}" ] || [ "$1" = "{NAME}" ] || [ "$1" = "{ALIAS}" ]; }}; then
         case "$3" in -*) command cstar "$@"; return ;; esac
         case "${{4-}}" in -*) command cstar "$@"; return ;; esac
-        [ "$1" = "{NAME_RUN}" ] || printf '%s\\n' {deprecation} >&2
         local __cstar_dir
         if [ "$#" -eq 3 ]; then
             __cstar_dir="$({path_command} "$3")" || return

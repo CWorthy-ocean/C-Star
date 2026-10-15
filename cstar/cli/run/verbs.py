@@ -8,7 +8,7 @@ RUN_LEVEL_VERBS: t.Final[frozenset[str]] = frozenset(
 )
 """The verbs that operate on an existing run.
 
-They live under `cstar run`; `cstar workplan` still accepts them as deprecated
-aliases and warns when one is used. Kept apart from the group so that the
-workplan group can import it without importing the sub-apps `cstar run` attaches.
+They are attached under `cstar run` and, as before, under `cstar workplan`; the
+two spellings share one sub-app per verb. Kept apart from the group so that
+other modules can name the set without importing the sub-apps `cstar run` attaches.
 """

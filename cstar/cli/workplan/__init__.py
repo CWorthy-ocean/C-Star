@@ -8,7 +8,6 @@ from cstar.base.feature import (
     ENV_FF_CLI_WORKPLAN_PLAN,
     is_feature_enabled,
 )
-from cstar.cli.run.verbs import RUN_LEVEL_VERBS
 from cstar.cli.workplan.check import app as app_check
 from cstar.cli.workplan.gather import app as app_gather
 from cstar.cli.workplan.log import app as app_log
@@ -22,26 +21,14 @@ NAME: t.Final[str] = "workplan"
 ALIAS = "wp"
 """Short alias under which this subcommand tree is also attached."""
 
-DEPRECATION: t.Final[str] = (
-    "`cstar workplan {verb}` is deprecated for run-level commands and will be "
-    "removed after two releases; use `cstar run {verb}`."
-)
-"""Message printed to stderr when a run-level verb is invoked through this group."""
-
 app = typer.Typer(
     name=NAME,
     help=(
         f"Perform validation and execution of workplans. (alias: {ALIAS})\n\n"
-        + DEPRECATION.format(verb="<verb>")
+        "The commands that inspect an existing run are also available as "
+        "`cstar run <command>`."
     ),
 )
-
-
-@app.callback()
-def warn_deprecated_run_verb(context: typer.Context) -> None:
-    """Warn once when a run-level verb is invoked as a `workplan` subcommand."""
-    if (verb := context.invoked_subcommand) in RUN_LEVEL_VERBS:
-        typer.echo(DEPRECATION.format(verb=verb), err=True)
 
 
 app.add_typer(app_check)
