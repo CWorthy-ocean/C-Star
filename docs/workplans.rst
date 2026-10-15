@@ -594,6 +594,7 @@ Running a workplan under a :term:`run ID` that already exists re-enters that run
 - A step that failed is run again from scratch, unless you pass ``--resume``, which continues it in place from its last usable restart when its application supports that.
 - A step that is still in progress is adopted when the launcher that started it matches the current launcher; otherwise the run is refused unless that step is clobbered.
 - A workplan with the same ``name`` as an earlier run but different content than the workplan that run started from is refused, because the two would share one run directory; the same workplan arriving by another path (a remote file, a moved checkout) is not. Pass ``--run-id <other-id>`` to run it separately, or rename the workplan.
+- Each re-entry appends an attempt to the :ref:`run manifest <workplan_run_manifest>`, which records when it started, on which system, with which package versions, and which steps it clobbered or resumed.
 - Each attempt keeps the files of the attempts before it: the original workplan, the transformed workplan and the runtime variables saved in the run directory (also when a later attempt saves none) are rotated to ``<stem>_original.bak.1``, ``<stem>_transformed.yaml.1``, ``<stem>.vars.1`` and so on, where ``<stem>`` is the workplan file's name without its extension, and nothing reads the rotated copies.
 - Step directories and state files that no step of the workplan accounts for any more (for example after a step was renamed) are listed in a warning and left in place; remove them by hand once you have confirmed they are not needed.
 - The transformed workplan saved in the run directory (``<stem>_transformed.yaml``) keeps the workplan ``name`` and is the plan the run executes. Passing it to ``cstar workplan run`` re-enters its run exactly as ``--run-id <id>`` does; a copy of it anywhere else is refused, because only the plan a run's record points at can be re-entered.
@@ -683,6 +684,55 @@ Checking Workplan Status
         cstar run status <my-unique-id>
 
     ``cstar workplan status <my-unique-id>`` is equivalent.
+
+    ``status`` also refreshes the run's :ref:`manifest <workplan_run_manifest>`: it folds the step statuses and records into it, and closes the latest attempt once every step is terminal. Pass ``--no-refresh`` to read the run as last recorded without writing.
+
+.. _workplan_show_run:
+
+Showing a Run
+^^^^^^^^^^^^^
+
+Use the ``show`` command to see what a run was and what it produced: each attempt to run the workplan, each step's status and outcome, and what the run depends on outside itself. Give it a :term:`run ID`, or the path of any directory that holds a run manifest, such as a copy of a run made on another machine:
+
+.. code-block:: console
+
+    cstar run show <my-unique-id>
+    cstar run show /path/to/run/directory
+
+For a run ID, ``show`` refreshes the manifest first, as ``status`` does; pass ``--no-refresh`` to show it as last recorded. A directory is read as it is. Step records written since the manifest was last refreshed are shown, and nothing is written, so the command is safe on a run that is not yours. It does not need the run to be tracked on the machine you run it on.
+
+Pick the output with ``--format``: ``table`` (the default), ``yaml`` or ``json``. The last two print the manifest itself, ready to pipe into another tool:
+
+.. code-block:: console
+
+    cstar run show <my-unique-id> --format json
+
+The exit code is 0 when the run is shown, 1 when it has no readable manifest and 2 for bad arguments.
+
+.. _workplan_run_manifest:
+
+The run manifest
+^^^^^^^^^^^^^^^^
+
+Every run records itself in two kinds of file.
+
+``cstar-run.yaml`` is the **run manifest**, in the run directory. It holds:
+
+- an ``id``, minted once when the run directory is first scheduled, with the :term:`run ID`, the workplan name, whether the run is a ``workplan`` or a ``blueprint``, and the system it was first scheduled on;
+- the workplan's name, content hash and path;
+- one :term:`attempt <Attempt>` for each time the run was scheduled (``cstar workplan run``, a re-entry with ``--run-id``, ``--resume`` or ``--clobber``), with its start time, system, package versions (``cstar-ocean`` and ``roms-tools``), the steps it clobbered or resumed, its status and when it finished;
+- one entry per step: its name, application, working directory relative to the run directory, a definition hash of what the step computes, its blueprint, its status as of the time the manifest was last refreshed, and its step record once it has one;
+- what the run depends on outside itself: referenced runs, source data locations, codebases with their commit or branch, and the catalog entries and producer blueprints named in the blueprints' provenance.
+
+``cstar-step.yaml`` is the :term:`step record`, in each step's working directory (``tasks/<step>/``). The step process writes it when it shuts down: the outcome (``completed``, ``failed``, ``cancelled`` or ``unsubmitted``), start and finish times, the system, package versions, the :term:`products <Product>` the step reports (none yet) and any errors.
+
+The scheduling command writes the manifest, under a lock, so concurrent commands do not overwrite each other. The steps write their own records and never touch the manifest. ``cstar run status``, ``cstar run show <run-id>`` and ``cstar workplan run --resume`` refresh the manifest: they fold the step statuses and records into it, and once every step is terminal they set ``finished_at`` on the latest attempt. That field is the completion marker. A run that finishes while nobody is watching is closed by the next ``status`` or ``show``.
+
+Because the manifest records working directories relative to the run directory, a copied or moved run stays readable with ``cstar run show <directory>``. A standalone ``cstar blueprint run`` writes the same two files in its working directory, with ``kind: blueprint`` and one step whose working directory is ``.``.
+
+Runs scheduled with an earlier C-Star release have no manifest until they are re-entered: ``cstar workplan run --run-id <my-unique-id>`` records one, and steps that are done are reused.
+
+The files are described by published schemas, listed in the :doc:`schema reference <schemas/index>`.
 
 
 Listing Runs
