@@ -16,10 +16,12 @@ from cstar.applications.core import (
     RunnerState,
     get_application,
 )
+from cstar.applications.hello_world import HelloWorldBlueprint, HelloWorldRunner
 from cstar.applications.roms_marbl.app import RomsMarblApplication, RomsMarblRunner
 from cstar.applications.roms_marbl.models import RomsMarblBlueprint
 from cstar.base.env import (
     ENV_CSTAR_DISABLE_MIGRATION,
+    ENV_CSTAR_RUNID,
     ENV_CSTAR_STATE_HOME,
     FLAG_ON,
 )
@@ -33,8 +35,15 @@ from cstar.entrypoint.utils import (
 )
 from cstar.execution.handler import ExecutionStatus
 from cstar.orchestration.adapter import prepare_directive_file
+from cstar.orchestration.manifest import (
+    RUN_MANIFEST_NAME,
+    STEP_RECORD_NAME,
+    AttemptStatus,
+    read_run_manifest,
+)
 from cstar.orchestration.models import Application, Blueprint
-from cstar.orchestration.orchestration import LiveStep, LiveWorkplan
+from cstar.orchestration.orchestration import LiveStep, LiveWorkplan, Status
+from cstar.orchestration.serialization import deserialize
 from cstar.orchestration.transforms import ApplyOverridesDirective
 from cstar.roms.simulation import ROMSSimulation
 
@@ -935,3 +944,58 @@ def test_blueprint_run_pre_run_non_pre_runnable_app_fails_fast(
     assert "roms_marbl" in stderr_flat
     assert "does not support" in stderr_flat
     mock_exec.assert_not_called()
+
+
+def _run_hello_world(bp_path: Path) -> t.Any:
+    """Run a hello_world blueprint through the CLI with a runner that shuts down."""
+
+    async def execute(self: BlueprintRunner[Blueprint]) -> None:
+        self.add_state(ExecutionStatus.COMPLETED)
+        self._on_shutdown()
+
+    with mock.patch.object(HelloWorldRunner, "execute", execute):
+        return CliRunner().invoke(app, [bp_path.as_posix()], color=False)
+
+
+def test_blueprint_run_writes_run_manifest(
+    hello_world_bp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A standalone run leaves a step record and a one-step run manifest."""
+    monkeypatch.delenv(ENV_CSTAR_RUNID, raising=False)
+
+    result = _run_hello_world(hello_world_bp_path)
+
+    assert result.exit_code == 0, result.output
+    bp = deserialize(hello_world_bp_path, HelloWorldBlueprint)
+    root = bp.effective_working_dir
+    assert (root / STEP_RECORD_NAME).exists()
+    assert (root / RUN_MANIFEST_NAME).exists()
+
+    manifest = read_run_manifest(root)
+    assert manifest is not None
+    assert manifest.kind == "blueprint"
+    assert len(manifest.attempts) == 1
+    assert manifest.attempts[0].status == AttemptStatus.done
+    assert manifest.attempts[0].finished_at is not None
+    assert len(manifest.steps) == 1
+    entry = manifest.steps[0]
+    assert entry.working_dir == "."
+    assert entry.status == Status.Done.name
+    assert entry.record is not None
+    assert entry.record.outcome == "completed"
+
+
+def test_blueprint_run_in_workplan_writes_no_run_manifest(
+    hello_world_bp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A step of a workplan run is recorded by the orchestrator, not the CLI."""
+    monkeypatch.setenv(ENV_CSTAR_RUNID, "a-run")
+
+    result = _run_hello_world(hello_world_bp_path)
+
+    assert result.exit_code == 0, result.output
+    root = deserialize(hello_world_bp_path, HelloWorldBlueprint).effective_working_dir
+    assert (root / STEP_RECORD_NAME).exists()
+    assert not (root / RUN_MANIFEST_NAME).exists()

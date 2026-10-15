@@ -9,6 +9,7 @@ import pytest
 from cstar.applications.core import ArtifactKind
 from cstar.applications.hello_world import HelloWorldBlueprint
 from cstar.base.exceptions import CstarError, CstarExpectationFailed
+from cstar.base.utils import slugify
 from cstar.orchestration.manifest import (
     MANIFEST_LOCK_NAME,
     RUN_MANIFEST_NAME,
@@ -28,6 +29,7 @@ from cstar.orchestration.manifest import (
     collect_dependencies,
     describe_steps,
     ensure_run_manifest,
+    finalize_standalone_run,
     fold_step_records,
     manifest_lock,
     new_attempt,
@@ -45,6 +47,7 @@ from cstar.orchestration.models import (
     Step,
     Workplan,
 )
+from cstar.orchestration.serialization import load_blueprint
 from cstar.system.migration import CstarSchemaTooNewError
 
 NOW = datetime(2026, 10, 15, 12, 0, tzinfo=UTC)
@@ -549,3 +552,63 @@ class TestFoldStepRecords:
         assert fold_step_records(manifest, tmp_path, statuses)
 
         assert not fold_step_records(manifest, tmp_path, statuses)
+
+
+class TestFinalizeStandaloneRun:
+    @pytest.fixture
+    def blueprint(self, hello_world_bp_path: Path) -> HelloWorldBlueprint:
+        return load_blueprint(hello_world_bp_path, HelloWorldBlueprint)
+
+    @pytest.mark.parametrize(
+        ("outcome", "status", "attempt"),
+        [
+            ("completed", "Done", AttemptStatus.done),
+            ("cancelled", "Cancelled", AttemptStatus.cancelled),
+            ("failed", "Failed", AttemptStatus.failed),
+        ],
+    )
+    def test_outcome_decides_the_attempt(
+        self,
+        blueprint: HelloWorldBlueprint,
+        outcome: str,
+        status: str,
+        attempt: AttemptStatus,
+    ) -> None:
+        root = blueprint.effective_working_dir
+        write_step_record(
+            root, _record(blueprint.name).model_copy(update={"outcome": outcome})
+        )
+
+        manifest = finalize_standalone_run(blueprint, started_at=NOW)
+
+        assert manifest.steps[0].status == status
+        assert manifest.attempts[0].status == attempt
+        assert manifest.attempts[0].start_at == NOW
+        assert read_run_manifest(root) == manifest
+
+    def test_no_record_counts_as_failed(self, blueprint: HelloWorldBlueprint) -> None:
+        manifest = finalize_standalone_run(blueprint, started_at=NOW)
+
+        assert manifest.steps[0].status == "Failed"
+        assert manifest.steps[0].record is None
+        assert manifest.attempts[0].status == AttemptStatus.failed
+
+    def test_second_run_adds_an_attempt(self, blueprint: HelloWorldBlueprint) -> None:
+        root = blueprint.effective_working_dir
+        write_step_record(
+            root, _record(blueprint.name).model_copy(update={"outcome": "failed"})
+        )
+        first = finalize_standalone_run(blueprint, started_at=NOW)
+        write_step_record(root, _record(blueprint.name))
+
+        second = finalize_standalone_run(blueprint, started_at=NOW + timedelta(hours=1))
+
+        assert second.run_id == first.run_id == slugify(blueprint.name)
+        assert second.kind == "blueprint"
+        assert [a.status for a in second.attempts] == [
+            AttemptStatus.failed,
+            AttemptStatus.done,
+        ]
+        assert len(second.steps) == 1
+        assert second.steps[0].working_dir == "."
+        assert second.steps[0].definition_hash == blueprint.content_hash()

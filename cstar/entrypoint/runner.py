@@ -1,4 +1,5 @@
 import argparse
+import os
 import typing as t
 
 from cstar.applications.core import (
@@ -8,8 +9,10 @@ from cstar.applications.core import (
     RunnerState,
     XRunner,
 )
-from cstar.base.env import ENV_CSTAR_LOG_LEVEL, get_env_item
+from cstar.base.env import ENV_CSTAR_LOG_LEVEL, ENV_CSTAR_RUNID, get_env_item
 from cstar.base.log import LogLevelChoices
+from cstar.base.provenance import package_versions, system_name
+from cstar.base.utils import utc_now
 from cstar.entrypoint.service import Service
 from cstar.entrypoint.utils import (
     ARG_DIRECTIVES_URI_LONG,
@@ -25,9 +28,15 @@ from cstar.entrypoint.utils import (
     ARG_URI_SHORT,
 )
 from cstar.execution.handler import ExecutionStatus
+from cstar.orchestration.manifest import StepRecord, write_step_record
+from cstar.orchestration.models import BlueprintIdentity
 
 if t.TYPE_CHECKING:
+    from datetime import datetime
+
     from cstar.entrypoint.config import JobConfig, ServiceConfiguration
+    from cstar.orchestration.manifest import Product
+    from cstar.orchestration.models import Blueprint
 
 
 TBlueprint = t.TypeVar("TBlueprint", bound=HasApplication)
@@ -42,6 +51,10 @@ class BlueprintRunner(Service, XRunner[TBlueprint]):
     """The result produced by the application."""
     _job_cfg: "JobConfig"
     """Configuration required to submit jobs on an HPC."""
+    _started_at: "datetime | None"
+    """When the service started, recorded as the start of the step."""
+    products: "list[Product]"
+    """The products the application reports while it runs."""
 
     def __init__(
         self,
@@ -68,6 +81,8 @@ class BlueprintRunner(Service, XRunner[TBlueprint]):
             request,
             RunnerState(ExecutionStatus.UNSUBMITTED),
         )
+        self.products = []
+        self._started_at = None
 
     @property
     def request(self) -> RunnerRequest[TBlueprint]:
@@ -107,6 +122,34 @@ class BlueprintRunner(Service, XRunner[TBlueprint]):
             msg = f"Simulation ended with status: {self.state.status}."
             self.log.warning(msg)
 
+    def _write_step_record(self) -> None:
+        """Record what this step did in its working directory.
+
+        A record that cannot be written (the blueprint did not load, the
+        directory is unwritable) is logged and skipped: it never changes the
+        outcome of the run.
+        """
+        try:
+            bp = t.cast("Blueprint", self.blueprint)
+            record = StepRecord(
+                run_id=os.getenv(ENV_CSTAR_RUNID, ""),
+                step=bp.name,
+                application=bp.application,
+                blueprint=BlueprintIdentity.of(bp),
+                blueprint_schema_version=bp.schema_version,
+                outcome=str(self.state.status),
+                start_at=self._started_at,
+                finished_at=utc_now(),
+                system=system_name(),
+                versions=package_versions(),
+                products=list(self.products),
+                errors=list(self.result.errors),
+            )
+            path = write_step_record(bp.effective_working_dir, record)
+            self.log.debug(f"Wrote the step record to {path}")
+        except Exception as ex:
+            self.log.warning(f"Unable to write the step record: {ex}")
+
     @t.override
     def _can_shutdown(self) -> bool:
         """Determine if the service can shutdown.
@@ -129,6 +172,7 @@ class BlueprintRunner(Service, XRunner[TBlueprint]):
 
         Performs validation of arguments received via CLI.
         """
+        self._started_at = utc_now()
         super()._on_start()
         if not self.blueprint_uri:
             msg = "No blueprint URI provided"
@@ -148,8 +192,10 @@ class BlueprintRunner(Service, XRunner[TBlueprint]):
     def _on_shutdown(self) -> None:
         """Perform actions required when shutting down the service.
 
-        By default, a `BlueprintRunner` logs the work disposition before shutdown.
+        By default, a `BlueprintRunner` records the step's outcome in its
+        working directory and logs the work disposition before shutdown.
         """
+        self._write_step_record()
         self._log_disposition()
 
     @t.override

@@ -30,7 +30,7 @@ from cstar.applications.core import ArtifactKind, get_application
 from cstar.base.exceptions import CstarError, CstarExpectationFailed
 from cstar.base.log import get_logger
 from cstar.base.provenance import package_versions, system_name
-from cstar.base.utils import utc_now
+from cstar.base.utils import slugify, utc_now
 from cstar.execution.file_system import (
     StateDirectoryManager,
     is_remote_resource,
@@ -972,3 +972,59 @@ def fold_step_records(
 
     manifest.observed_at = utc_now()
     return before != manifest.model_dump(mode="json", exclude={"observed_at"})
+
+
+def finalize_standalone_run(
+    blueprint: "Blueprint", *, started_at: datetime
+) -> RunManifest:
+    """Record a standalone blueprint run as a one-step run and write its manifest.
+
+    A standalone `cstar blueprint run` has no orchestrator, so the CLI that ran
+    it is the one process left to record the attempt. The step record the
+    runner wrote is the authoritative outcome; a missing record counts as
+    failed. There is no lock: a standalone run has a single writer.
+
+    Parameters
+    ----------
+    blueprint : Blueprint
+        The blueprint that ran.
+    started_at : datetime
+        When the run was started.
+
+    Returns
+    -------
+    RunManifest
+        The manifest as written.
+    """
+    root = blueprint.effective_working_dir
+    attempt = Attempt(
+        start_at=started_at,
+        system=system_name(),
+        versions=package_versions(),
+    )
+    facts = StepFacts(
+        definition_hash=blueprint.content_hash(),
+        blueprint=BlueprintIdentity.of(blueprint),
+        external=collect_dependencies(blueprint),
+    )
+    manifest = ensure_run_manifest(
+        root,
+        run_id=slugify(blueprint.name),
+        name=blueprint.name,
+        kind="blueprint",
+        workplan=None,
+        attempt=attempt,
+        steps={blueprint.name: (blueprint.application, ".", facts)},
+        runs={},
+    )
+
+    record = read_step_record(root)
+    if record and record.outcome == "completed":
+        status = Status.Done
+    elif record and record.outcome == "cancelled":
+        status = Status.Cancelled
+    else:
+        status = Status.Failed
+    fold_step_records(manifest, root, statuses={blueprint.name: status.name})
+    write_run_manifest(root, manifest)
+    return manifest

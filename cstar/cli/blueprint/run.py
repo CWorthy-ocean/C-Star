@@ -1,4 +1,5 @@
 import asyncio
+import os
 import typing as t
 from importlib.metadata import PackageNotFoundError
 from importlib.metadata import version as _pkg_version
@@ -16,10 +17,12 @@ from cstar.base.env import (
     ENV_CSTAR_CLI_VERBOSE,
     ENV_CSTAR_CLOBBER_WORKING_DIR,
     ENV_CSTAR_LOG_LEVEL,
+    ENV_CSTAR_RUNID,
     get_env_item,
 )
 from cstar.base.exceptions import CstarError
 from cstar.base.log import LogLevelChoices, get_logger
+from cstar.base.utils import utc_now
 from cstar.cli.common import (
     SCHEMA_ERRORS,
     cb_pipeline,
@@ -47,6 +50,7 @@ from cstar.entrypoint.utils import (
     ARG_VERBOSE_HELP,
 )
 from cstar.execution.file_system import local_copy
+from cstar.orchestration.manifest import finalize_standalone_run
 from cstar.orchestration.models import DeferredBlueprintRef
 from cstar.orchestration.serialization import deserialize, validate_serialized_entity
 from cstar.orchestration.transforms import DirectiveConfig, resolve_deferred_blueprint
@@ -305,7 +309,15 @@ def run(
     request = RunnerRequest(uri, app_config.blueprint, resume=resume, pre_run=pre_run)
 
     runner = app_config.runner(request, service_cfg, job_cfg)
+    started_at = utc_now()
     asyncio.run(runner.execute())
+
+    # a workplan step is recorded by the orchestrator's manifest instead
+    if not os.getenv(ENV_CSTAR_RUNID, ""):
+        try:
+            finalize_standalone_run(runner.blueprint, started_at=started_at)
+        except Exception as ex:
+            log.warning(f"Unable to write the run manifest: {ex}")
 
     if runner.result and runner.result.errors:
         print(f"Errors occurred: {', '.join(runner.result.errors)}")

@@ -1,4 +1,5 @@
 import asyncio
+import logging
 import os
 import textwrap
 import typing as t
@@ -15,12 +16,14 @@ from cstar.applications.hello_world import (
     HelloWorldBlueprint,
     HelloWorldRunner,
 )
+from cstar.base.env import ENV_CSTAR_RUNID
 from cstar.cli.blueprint.run import app as app_run_blueprint
 from cstar.cli.workplan.run import app as app_run_workplan
 from cstar.entrypoint.config import get_job_config, get_service_config
 from cstar.execution.handler import ExecutionStatus
 from cstar.orchestration.adapter import StepToPlaceholderAdapter
-from cstar.orchestration.models import Workplan, WorkplanState
+from cstar.orchestration.manifest import STEP_RECORD_NAME, read_step_record
+from cstar.orchestration.models import BlueprintIdentity, Workplan, WorkplanState
 from cstar.orchestration.orchestration import LiveWorkplan
 from cstar.orchestration.serialization import deserialize, serialize
 from cstar.orchestration.tracking import TrackingRepository
@@ -493,3 +496,99 @@ def test_hello_world_workplan_relative_blueprint_path(
     script = step.script_path.read_text()
     assert f'BLUEPRINT_PATH="{expected}"' in script
     assert f"cstar blueprint run {expected}" in script
+
+
+def _hw_runner(bp_path: Path) -> HelloWorldRunner:
+    request = RunnerRequest(str(bp_path), HelloWorldBlueprint)
+    return HelloWorldRunner(
+        request, get_service_config(log_level="INFO"), get_job_config()
+    )
+
+
+@pytest.mark.parametrize("run_id", ["", "run-1234"])
+@pytest.mark.asyncio
+async def test_runner_writes_step_record(
+    hello_world_bp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    run_id: str,
+) -> None:
+    """Verify a completed run leaves a step record in the working directory.
+
+    Parameters
+    ----------
+    hello_world_bp_path : Path
+        The path to a hello_world blueprint.
+    monkeypatch : pytest.MonkeyPatch
+        Fixture used to set or clear the run id.
+    run_id : str
+        The exported `CSTAR_RUNID`; empty means unset.
+    """
+    if run_id:
+        monkeypatch.setenv(ENV_CSTAR_RUNID, run_id)
+    else:
+        monkeypatch.delenv(ENV_CSTAR_RUNID, raising=False)
+
+    runner = _hw_runner(hello_world_bp_path)
+    await runner.execute()
+
+    blueprint = runner.blueprint
+    record = read_step_record(blueprint.effective_working_dir)
+    assert record is not None
+    assert record.outcome == "completed"
+    assert record.run_id == run_id
+    assert record.step == blueprint.name
+    assert record.application == blueprint.application
+    assert record.blueprint == BlueprintIdentity.of(blueprint)
+    assert record.blueprint_schema_version == blueprint.schema_version
+    assert record.start_at is not None
+    assert record.start_at <= record.finished_at
+    assert "cstar-ocean" in record.versions
+    assert record.errors == []
+
+
+@pytest.mark.asyncio
+async def test_runner_records_failure(hello_world_bp_path: Path) -> None:
+    """Verify a run that raises leaves a failed record carrying the error."""
+    runner = _hw_runner(hello_world_bp_path)
+
+    with mock.patch.object(
+        HelloWorldRunner, "run", mock.AsyncMock(side_effect=RuntimeError("kaboom"))
+    ):
+        await runner.execute()
+
+    record = read_step_record(runner.blueprint.effective_working_dir)
+    assert record is not None
+    assert record.outcome == "failed"
+    assert any("kaboom" in error for error in record.errors)
+
+
+@pytest.mark.asyncio
+async def test_runner_records_start_failure(hello_world_bp_path: Path) -> None:
+    """Verify a run that fails to start leaves an `unsubmitted` record."""
+    runner = _hw_runner(hello_world_bp_path)
+
+    with mock.patch.object(
+        HelloWorldRunner, "_on_start", mock.Mock(side_effect=ValueError("no start"))
+    ):
+        with pytest.raises(ValueError, match="no start"):
+            await runner.execute()
+
+    record = read_step_record(runner.blueprint.effective_working_dir)
+    assert record is not None
+    assert record.outcome == "unsubmitted"
+
+
+@pytest.mark.asyncio
+async def test_runner_start_failure_without_blueprint_warns(
+    tmp_path: Path,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Verify a blueprint that cannot load costs only a warning at shutdown."""
+    runner = _hw_runner(tmp_path / "missing.yaml")
+
+    with caplog.at_level(logging.WARNING):
+        await runner.execute()
+
+    assert "Unable to write the step record" in caplog.text
+    assert runner.state.status != ExecutionStatus.COMPLETED
+    assert not list(tmp_path.rglob(STEP_RECORD_NAME))
