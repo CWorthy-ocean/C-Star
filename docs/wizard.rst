@@ -123,11 +123,33 @@ Run setup
    :alt: The Run setup section: run window, partitioning and carbon dioxide removal
    :width: 100%
 
+Output
+   What the model writes. An **OutputSpec** from the catalog, picked at the
+   top, seeds the output streams below it, and every stream stays editable.
+   The main streams are always shown, each under its own heading: the
+   physical state (history, averages and restarts), surface fluxes, the
+   biogeochemistry output controls, and the CDR streams. The biogeochemistry
+   and CDR streams are shown only in the modes that produce them: all of them
+   with MARBL, and only the CDR-lite tracer output in ``cdr_lite`` mode. The
+   less common streams (diagnostics, temperature and salinity, forcing fields,
+   depth slices, random output, particle tracking, the pressure-flux
+   calculation and runtime diagnostics) are collected in a collapsed **More
+   output streams** group.
+
+   Two streams depend on nesting. **Child-grid boundary extraction**
+   (``extract_data``) appears only while *This grid is a parent* is on in the
+   Grid section; there only the records per file and the extraction root name
+   are edited here, while the child grid, extraction period and file come from
+   the nesting options. **Upscaled output** (``upscale_output``) is a main
+   stream while *This is a child grid* is on, because its ``_uscl`` files feed
+   the parent's upscaled-CDR run (see **Upscale a nested run** on the Workplan
+   page), and otherwise sits under **More output streams**.
+
 Advanced settings
    Individual ROMS-MARBL namelist settings beyond what the other sections
-   expose, grouped by namelist section (mixing, bottom drag, tides, MARBL,
-   each output stream, and so on), plus the compile-time switches. An
-   **OutputSpec** from the catalog fills the output sections.
+   expose, grouped by concern (physics and subgrid tuning, surface and lateral
+   forcing, biogeochemistry, and CDR forcing), plus the compile-time switches.
+   The output streams are in the Output section instead.
 
 .. figure:: images/wizard-advanced.png
    :alt: The Advanced settings section with collapsed namelist panels
