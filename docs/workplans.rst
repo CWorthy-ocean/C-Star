@@ -481,6 +481,65 @@ Workplan Examples
             child_grid: /path/to/child_grid.nc
 
 
+Computing CDR metrics from segmented runs
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+The ``cdr_metrics`` application computes carbon dioxide removal (CDR) metrics
+from the ``_cdr`` output of ROMS-MARBL runs, stitching the segments of a run that
+was split into several steps. Each source is a directory searched recursively for
+``_cdr`` output (or a single ``_cdr`` file), and the sources must cover the run
+from the release onward: the first holds the segment containing the release,
+because the cumulative sums start at the first record.
+
+.. code:: yaml
+
+    name: cdr-metrics-workplan
+    description: CDR metrics over two consecutive segments
+    state: draft
+
+    steps:
+    - name: seg-01
+      application: roms_marbl
+      blueprint: /path/to/segment_01.yaml
+
+    - name: seg-02
+      application: roms_marbl
+      blueprint: /path/to/segment_02.yaml
+      depends_on:
+      - seg-01
+      directives:
+        continue-from:
+          step: seg-01
+
+    - name: metrics
+      application: cdr_metrics
+      blueprint: inline
+      depends_on:
+      - seg-01
+      - seg-02
+      blueprint_overrides:
+        domains:
+          wio:
+            grid:
+              location: /path/to/wio_grid.nc
+            sources:
+            - location: "{{output_dir: seg-01}}"
+            - location: "{{output_dir: seg-02}}"
+
+The records are sorted by time after loading; a gap or an overlap between the
+averaging windows of consecutive records is an error, so a segment missing from
+``sources`` (or listed twice) is reported rather than silently skewing the
+cumulative sums. The step writes ``output/cdr_metrics.nc``, a time series of the
+CDR efficiencies and the uptake in tonnes of CO2, and ``output/cdr_metrics.png``,
+a plot of them.
+
+For a step that the time splitter divided into segments, use
+``{{tasks_dir: <step>}}`` as the source: its segment directories are searched
+recursively. The producing runs must be MARBL runs with a CDR forcing; forge turns
+on ``cdr_output`` for an active MARBL CDR forcing. ``domains`` maps a domain name to its
+grid and sources, and exactly one domain is supported.
+
+
 Checking validity
 -----------------
 

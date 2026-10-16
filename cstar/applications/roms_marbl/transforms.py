@@ -49,6 +49,9 @@ if t.TYPE_CHECKING:
 
 log = get_logger(__name__)
 
+TIMESTAMP_GLOB: t.Final[str] = "[0-9]" * 14
+"""Glob fragment matching the fixed-width (14-digit) timestamp in an output file name."""
+
 
 class RomsMarblTimeSplitter(Transform[LiveStep]):
     """A step tranformation that splits a ROMS-MARBL simulation into
@@ -216,8 +219,6 @@ class RestartFile(BaseModel):
     """The expected file extension for a restart file."""
     FMT_TS: t.ClassVar[t.Literal["%Y%m%d%H%M%S"]] = "%Y%m%d%H%M%S"
     """The expected timestamp format in the restart file name"""
-    TS_GLOB: t.ClassVar[str] = "[0-9]" * 14
-    """Glob fragment matching the fixed-width (14-digit) timestamp (see `FMT_TS`)."""
     PATTERN_RST: t.ClassVar[t.Literal[r"^(.*?)_rst\.(\d{14})(?:\.(\d{1,9}))?\.nc$"]] = (
         r"^(.*?)_rst\.(\d{14})(?:\.(\d{1,9}))?\.nc$"
     )
@@ -243,7 +244,7 @@ class RestartFile(BaseModel):
             Every matching file, in filesystem order.
         """
         parted_clause = ".*" if partitioned else ""
-        glob_pattern = f"*{cls.SUFFIX}.{cls.TS_GLOB}{parted_clause}.{cls.EXT}"
+        glob_pattern = f"*{cls.SUFFIX}.{TIMESTAMP_GLOB}{parted_clause}.{cls.EXT}"
         return [
             RestartFile(path=match)
             for match in search_path.rglob(glob_pattern)
@@ -621,6 +622,20 @@ class TimestampedOutputFile(BaseModel):
         )
 
     @classmethod
+    def _search_glob(cls) -> str:
+        """Return the glob a directory search uses to select candidate files.
+
+        A candidate that does not follow the naming convention makes `find`
+        raise. Subclasses whose suffix is also a prefix of other file names
+        narrow the glob so those names are not candidates.
+
+        Returns
+        -------
+        str
+        """
+        return f"*{cls.SUFFIX}*.{cls.EXT}"
+
+    @classmethod
     def find(
         cls, search_path: Path, notfound_ok: bool = True
     ) -> Sequence[t.Self] | None:
@@ -656,7 +671,7 @@ class TimestampedOutputFile(BaseModel):
             msg = f"No directory or file found at path: {search_path!r}"
             raise ValueError(msg)
 
-        matches = sorted(search_path.rglob(f"*{cls.SUFFIX}*.{cls.EXT}"))
+        matches = sorted(search_path.rglob(cls._search_glob()))
         if matches:
             return tuple(cls(path=m) for m in matches)
 
