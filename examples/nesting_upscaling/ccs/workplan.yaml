@@ -1,0 +1,258 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/CWorthy-ocean/C-Star/refs/heads/main/docs/schemas/wp/workplan_schema.1.0.0.json
+#
+# CCS nested + upscaled CDR example: a 16 km California Current parent with a 4 km
+# child, one alkalinity release in the child, and the child's tracer tendencies
+# upscaled back onto the parent grid.
+#
+#   forge_parent -> parent --------------------.--> child --> upscale --> parent_up
+#   forge_child  ---------> nest_ic ----------'        ^                    ^
+#   forge_parent_up ------------------------------------'--------------------'
+#
+#   parent     runs the parent over the whole window and writes the nesting
+#              extraction (child boundaries) and daily restarts
+#   nest_ic    interpolates the parent restart at the child's start onto the child grid
+#   child      nest-from: parent (boundaries), continue-from: nest_ic (initial state);
+#              releases ALK, writes the *_uscl upscaling files
+#   upscale    turns the child's *_uscl files into parent-grid CDR forcing
+#   parent_up  re-runs the parent grid from its own restart at the child's start, with
+#              that CDR forcing (cdr.mode: upscaled)
+#
+# The three forge blueprints and the roms steps share one set of windows, given at run
+# time (see README.md): the same files serve the smoke test and the full run.
+#
+#   cstar workplan check workplan.yaml --varfile smoke.vars
+#   cstar workplan run   workplan.yaml --varfile smoke.vars
+#
+# Where it runs: `compute_environment` names no launcher, so C-Star picks the one for the
+# machine: SLURM where there is a scheduler (Anvil), local processes otherwise (a
+# workstation). Every step therefore carries both a `local` and a `slurm` entry in
+# `compute_overrides`. On a SLURM machine set the account and queue first, e.g. on Anvil
+#   export CSTAR_SLURM_ACCOUNT=ees250129 CSTAR_SLURM_QUEUE=shared
+# `cstar workplan run` then submits all eight jobs, chained with SLURM dependencies, and
+# returns; it does not have to keep running. The SLURM `num_cpus` of the roms steps (a
+# deferred blueprint cannot be read at submit time) must equal the ranks, np_x * np_y of
+# the vars file: 16 / 50 / 16 for month.vars, six_month.vars and full.vars (smoke.vars
+# needs only 16 / 8 / 16, so 50 is wasteful there). The forge steps ask for 32 CPUs
+# because the memory a job gets on Anvil scales with its CPUs (1.9 GB each; forge was
+# killed for memory at 8).
+#
+# The SLURM time limits (`slurm.max_walltime`) are sized for month.vars, from the times
+# measured on Anvil (ccs-month-a3): about 4 times the measured time for the roms steps
+# and 10 times or more for forge. smoke.vars fits too. The longer windows (six_month.vars,
+# full.vars) need larger limits: edit the "Longer windows" values of README.md ("Resources")
+# into this file before `cstar workplan run`. SLURM lets you lower a queued job's limit with
+# `scontrol update` but not raise it, so a limit that is too small kills the job and
+# everything after it.
+#
+# Runtime variables (the *_stamp form is the restart file name's 14-digit timestamp):
+#   parent_start       start of the parent run and of forge_parent's forcing
+#   parent_end         end of the parent run
+#   child_start        start of the child and parent_up runs (a parent restart exists here)
+#   child_start_stamp  child_start as YYYYMMDDHHMMSS (must agree with child_start)
+#   child_end          end of the child and parent_up runs
+#   cdr_end            end of the ALK release: child_start + 30 days, or child_end if
+#                      the child window is shorter than that
+#   parent_np_x/_y     MPI tiles of the parent and parent_up runs (must divide 168 and 336)
+#   child_np_x/_y      MPI tiles of the child run (must divide 70 and 140)
+#   cdr_output_period  averaging period (s) of the child's and parent_up's CDR output, and
+#   cdr_output_nrpf    records per file (nrpf x period must divide the 86400 s restart
+#                      period). Hourly CDR output on the parent grid is 5.9 GB per
+#                      simulated day, so a full run wants 86400 and 1.
+# Tiling is a forge-step override of domain.partitioning (it sets the ranks of the roms step
+# and, at run time, np_xi/np_eta); the namelist forge writes keeps the committed 4x4/2x4.
+name: ccs-nest-upscale
+description: CCS 16 km parent, 4 km nested child with an ALK release, upscaled back onto the parent
+state: draft
+
+runtime_vars:
+  - parent_start
+  - parent_end
+  - child_start
+  - child_start_stamp
+  - child_end
+  - cdr_end
+  - parent_np_x
+  - parent_np_y
+  - child_np_x
+  - child_np_y
+  - cdr_output_period
+  - cdr_output_nrpf
+
+steps:
+  # ----------------------------------------------------------------- forge
+  - name: forge_parent
+    application: forge
+    blueprint: ./forge_parent.yaml
+    blueprint_overrides:
+      domain:
+        partitioning:
+          n_procs_x: "{{parent_np_x}}"
+          n_procs_y: "{{parent_np_y}}"
+      run:
+        start_date: "{{parent_start}}"
+        end_date: "{{parent_end}}"
+    compute_overrides:
+      local:
+        max_walltime: "12:00:00"  # smoke 8 min; full.vars about 3.2 h (about 30 s per window day)
+      slurm:
+        num_cpus: 32
+        max_walltime: "02:00:00"  # month 10 min 27 s
+
+  # forge_child and forge_parent_up wait for forge_parent so that any first-time
+  # downloads (missing source data, the land-mask shapefiles) are done once rather than
+  # by three forge steps at the same time. On a warm cache both lines can go and the
+  # three forge steps then run in parallel.
+  - name: forge_child
+    application: forge
+    blueprint: ./forge_child.yaml
+    depends_on:
+      - forge_parent
+    blueprint_overrides:
+      domain:
+        partitioning:
+          n_procs_x: "{{child_np_x}}"
+          n_procs_y: "{{child_np_y}}"
+      model_settings:
+        cdr_output:
+          output_period: "{{cdr_output_period}}"
+          nrpf: "{{cdr_output_nrpf}}"
+      run:
+        start_date: "{{child_start}}"
+        end_date: "{{child_end}}"
+      cdr:
+        cdr_forcing:
+          start_time: "{{child_start}}"
+          end_time: "{{child_end}}"
+          releases:
+            - times: ["{{child_start}}", "{{cdr_end}}"]
+    compute_overrides:
+      local:
+        max_walltime: "04:00:00"  # smoke 4 min; full.vars about 0.7 h
+      slurm:
+        num_cpus: 32
+        max_walltime: "01:00:00"  # month 4 min 19 s
+
+  - name: forge_parent_up
+    application: forge
+    blueprint: ./forge_parent_up.yaml
+    depends_on:
+      - forge_parent
+    blueprint_overrides:
+      domain:
+        partitioning:
+          n_procs_x: "{{parent_np_x}}"
+          n_procs_y: "{{parent_np_y}}"
+      model_settings:
+        cdr_output:
+          output_period: "{{cdr_output_period}}"
+          nrpf: "{{cdr_output_nrpf}}"
+      run:
+        start_date: "{{child_start}}"
+        end_date: "{{child_end}}"
+    compute_overrides:
+      local:
+        max_walltime: "08:00:00"  # smoke 8 min; full.vars about 1.7 h
+      slurm:
+        num_cpus: 32
+        max_walltime: "01:30:00"  # month 7 min 43 s
+
+  # ---------------------------------------------------------------- parent
+  - name: parent
+    application: roms_marbl
+    blueprint:
+      from_step: forge_parent
+    depends_on:
+      - forge_parent
+    blueprint_overrides:
+      runtime_params:
+        end_date: "{{parent_end}}"
+    compute_overrides:
+      local:
+        max_walltime: "24:00:00"  # build 1.5 min + full.vars about 2.3 h (23 s per day)
+      slurm:
+        num_cpus: 16
+        max_walltime: "01:30:00"  # month 19 min 27 s
+
+  # ---------------------------------------------------------------- nesting
+  - name: nest_ic
+    application: nest_ic
+    blueprint: inline
+    depends_on:
+      - forge_parent
+      - forge_child
+      - parent
+    blueprint_overrides:
+      parent_grid: "{{root_dir: forge_parent}}/input_data/ccs-parent_grid.nc"
+      parent_rst: "{{output_dir: parent}}/output_rst.{{child_start_stamp}}.nc"
+      child_grid: "{{root_dir: forge_child}}/input_data/ccs-child_grid.nc"
+      pio: true
+    compute_overrides:
+      local:
+        max_walltime: "01:00:00"
+      slurm:
+        num_cpus: 4
+        max_walltime: "00:30:00"  # month 23 s
+
+  - name: child
+    application: roms_marbl
+    blueprint:
+      from_step: forge_child
+    depends_on:
+      - forge_child
+      - nest_ic
+      - parent
+    blueprint_overrides:
+      runtime_params:
+        end_date: "{{child_end}}"
+    directives:
+      continue-from:
+        step: nest_ic
+      nest-from:
+        step: parent
+    compute_overrides:
+      local:
+        max_walltime: "24:00:00"  # build 1.5 min + full.vars about 0.9 h (18 s per day)
+      slurm:
+        num_cpus: 50
+        max_walltime: "01:00:00"  # month 15 min 32 s
+
+  # ------------------------------------------------------------- upscaling
+  - name: upscale
+    application: upscaler
+    blueprint: inline
+    depends_on:
+      - child
+    blueprint_overrides:
+      uscl_file_location: "{{output_dir: child}}"
+      pio: true
+    compute_overrides:
+      local:
+        max_walltime: "01:00:00"
+      slurm:
+        num_cpus: 4
+        max_walltime: "00:30:00"  # month 8 s
+
+  - name: parent_up
+    application: roms_marbl
+    blueprint:
+      from_step: forge_parent_up
+    depends_on:
+      - forge_parent_up
+      - parent
+      - upscale
+    blueprint_overrides:
+      cdr_forcing:
+        data:
+          - location: "{{output_dir: upscale}}/upscaled_cdr.nc"
+      runtime_params:
+        end_date: "{{child_end}}"
+    directives:
+      continue-from:
+        step: parent
+        timestamp: "{{child_start}}"
+    compute_overrides:
+      local:
+        max_walltime: "24:00:00"  # build 1.5 min + full.vars about 1.2 h (23 s per day)
+      slurm:
+        num_cpus: 16
+        max_walltime: "01:00:00"  # month 14 min 55 s

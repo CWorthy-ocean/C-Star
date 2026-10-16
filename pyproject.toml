@@ -115,7 +115,7 @@ build-backend = "setuptools.build_meta"
 # check-manifest builds a clean sdist from a git-free copy of the tree, so files
 # that setuptools_scm's VCS file finder would normally pick up (it needs .git)
 # are reported missing unless MANIFEST.in covers them too. These are dev-only
-# files intentionally not shipped in the sdist/wheel: docs, CI/release tooling,
+# files intentionally not shipped in the sdist/wheel: docs, examples, CI/release tooling,
 # lint/coverage config, conda env pins, and non-.py test fixtures (test .py
 # files are still picked up via normal package discovery).
 [tool.check-manifest]
@@ -129,6 +129,7 @@ ignore = [
     "docs/**",
     "environment-hpc.yml",
     "environment-laptop.yml",
+    "examples/**",
 ]
 
 [tool.setuptools_scm]

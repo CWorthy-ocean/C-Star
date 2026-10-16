@@ -1,0 +1,38 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/CWorthy-ocean/C-Star/refs/heads/main/docs/schemas/wp/workplan_schema.1.0.0.json
+#
+# CCS parent on a laptop: how long does the 168x336x20 MARBL parent take on 2x2 ranks?
+#
+#   forge_parent  forge        builds the grid and the forcing (GLORYS regional is
+#                              downloaded from Copernicus Marine, one file per day)
+#   parent        roms_marbl   deferred blueprint; 2010-01-01 -> 01-11 (960 steps of 900 s)
+#
+# Needs `copernicusmarine login` once (credentials live in ~/.copernicusmarine/), the
+# source-data cache's UNIFIED_BGC (forge stages it if absent), an activated C-Star
+# environment and GNU `timeout`.
+#
+#   cstar workplan check workplan.yaml
+#   cstar workplan run   workplan.yaml --run-id ccs-mac-a1
+name: ccs-mac-benchmark
+description: CCS 168x336x20 MARBL parent, 10 days, 2x2 ranks on a laptop (ucla-roms 0.10.1, PIO)
+state: draft
+
+compute_environment:
+  launcher: local
+
+steps:
+  - name: forge_parent
+    application: forge
+    blueprint: ./forge_parent_mac.yaml
+    compute_overrides:
+      local:
+        max_walltime: "06:00:00"   # includes the first-time GLORYS downloads (13 days)
+
+  - name: parent
+    application: roms_marbl
+    blueprint:
+      from_step: forge_parent
+    depends_on:
+      - forge_parent
+    compute_overrides:
+      local:
+        max_walltime: "12:00:00"   # clone + build, then 960 steps
