@@ -85,6 +85,12 @@ Bug Fixes
 - Resuming a run from a shell that no longer exports the original ``CSTAR_DATA_HOME`` recorded an output directory under the wrong data home; the record now takes the root from the transformed workplan it was given. (`#768 <https://github.com/CWorthy-ocean/C-Star/pull/768>`_)
 - A transient HTTP error (e.g. GitHub rate limiting) while inspecting a remote input dataset no longer gets it rejected as "a text file (e.g. a roms-tools YAML)"; C-Star now reports the HTTP error. (`#770 <https://github.com/CWorthy-ocean/C-Star/pull/770>`_)
 - Fetching a remote workplan or blueprint no longer times out after 1 second; timeouts and connection failures are reported as "Unable to retrieve remote file" like other retrieval failures. (`#770 <https://github.com/CWorthy-ocean/C-Star/pull/770>`_)
+- A Forge settings key that matched a setting only up to case, or by its ROMS namelist name, was silently ignored, so the run used the default instead of the value written. (`#775 <https://github.com/CWorthy-ocean/C-Star/pull/775>`_)
+
+  - Such a key in a ModelSpec, OutputSpec, ForcingSpec, override or stored Forge blueprint now fails validation, e.g. ``LLm (did you mean llm?)`` or ``akv_bak (did you mean akv?)``.
+  - All offending keys are reported in one error, before any input data is generated.
+  - Version-gated settings get the same check on every ucla-roms release: a case variant of ``use_constant_fe``, ``nt_cdr_oae`` or a newer section's name is rejected even where that release lacks the setting.
+
 
 Improvements
 ~~~~~~~~~~~~
@@ -117,3 +123,4 @@ Miscellaneous
 - Docs: run-level commands documented under ``cstar run``, the anchoring rule on the HPC and blueprint pages, and the run-check functions on the orchestration API page. (`#766 <https://github.com/CWorthy-ocean/C-Star/pull/766>`_)
 - The integration suite and the weekly extended matrix now pin ucla-roms 0.11.0; the integration namelist goldens gain the two iron keys. (`#774 <https://github.com/CWorthy-ocean/C-Star/pull/774>`_)
 - The developer and ModelSpec docs describe the 0.11.0 schema tier and the new default. (`#774 <https://github.com/CWorthy-ocean/C-Star/pull/774>`_)
+- The Forge spec docs now say that settings keys use Forge's lowercase names, not the ROMS namelist spelling. (`#775 <https://github.com/CWorthy-ocean/C-Star/pull/775>`_)
