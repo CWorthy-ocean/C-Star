@@ -263,6 +263,23 @@ _DOR_TRACER_RE = re.compile(r"CDR_DOR_DIC(\d+)")
 _PHYSICS_TRACER_NAMES = ("temp", "salt")
 
 
+def cdr_tracer_role(name: str) -> tuple[str, str] | None:
+    """The ``(tracer_set, role_key)`` a generated CDR tracer is fed through.
+
+    ``role_key`` is the key a roms-tools ``TracerPerturbation`` of that
+    ``tracer_set`` uses for the flux: ``ALK``/``DIC`` for ``cdr_lite`` (a DOR
+    tracer is fed by a DIC-only release) and ``passive_tracer`` for ``passive``.
+    ``None`` for any other name (``temp``/``salt``, MARBL's).
+    """
+    if _PASSIVE_TRACER_RE.fullmatch(name):
+        return "passive", "passive_tracer"
+    if match := _OAE_TRACER_RE.fullmatch(name):
+        return "cdr_lite", match[1]
+    if _DOR_TRACER_RE.fullmatch(name):
+        return "cdr_lite", "DIC"
+    return None
+
+
 @dataclass(frozen=True)
 class CdrTracerCounts:
     """Tracer counts read off a CDR forcing's tracer axis by :func:`cdr_tracer_counts`."""

@@ -572,7 +572,7 @@ def read_cdr_forcing_yaml(source: str | Path) -> dict[str, Any]:
     return block
 
 
-def _with_cdr_lite_tracer_set(cdr_spec: CdrSpec) -> CdrSpec:
+def with_cdr_lite_tracer_set(cdr_spec: CdrSpec) -> CdrSpec:
     """``cdr_spec`` with ``tracer_set="cdr_lite"`` defaulted onto every
     tracer-perturbation release of a ``"simple"`` CDR forcing that doesn't name
     its own tracer set.
@@ -867,7 +867,7 @@ def build_forge_blueprint(
             f"bgc_mode must be one of {list(get_args(BgcMode))}, got {bgc_mode!r}."
         )
     if bgc_mode == "cdr_lite":
-        cdr_spec = _with_cdr_lite_tracer_set(cdr_spec)
+        cdr_spec = with_cdr_lite_tracer_set(cdr_spec)
     if use_pio is None:
         use_pio = bool(model.get("use_pio", False))
     # ModelSpec no longer embeds a default forcing/output selection -- a ForcingSpec and
