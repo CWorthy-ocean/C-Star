@@ -37,6 +37,7 @@ from cstar.applications.forge.namelist_model import (
     check_cdr_lite_mode_roms,
     check_cdr_lite_sections,
     check_cdr_output_sections,
+    check_marbl_only_outputs,
     check_river_tracer_counts,
     n_tracers_from_param,
     namelist_field_for,
@@ -617,6 +618,74 @@ def test_validate_run_time_sections_checks_cdr_lite_mode_roms_pin(
     errs = validate_run_time_sections({"cppdefs": cppdefs}, roms_ref=roms_ref)
     pinned_too_old = [e for e in errs if "CDR-lite without MARBL needs" in e]
     assert bool(pinned_too_old) is rejected
+
+
+@pytest.mark.parametrize(
+    "flag", ["cdr_output.do_cdr_output", "upscale_output.do_upscale"]
+)
+@pytest.mark.parametrize("marbl", [True, False])
+def test_validate_run_time_sections_reports_marbl_only_outputs_without_marbl(
+    flag, marbl
+):
+    """A stored or loaded blueprint with a MARBL-only output on but MARBL off is
+    reported up front (engine/wizard), not first at configure_build.
+    """
+    section, name = flag.split(".")
+    errs = validate_run_time_sections(
+        {"param": dict(_PARAM), "cppdefs": {"marbl": marbl}, section: {name: True}}
+    )
+    assert any(f"{flag}=True" in e for e in errs) is (not marbl)
+
+
+@pytest.mark.parametrize("marbl", [True, False])
+def test_validate_run_time_sections_reports_gas_exchange_output_without_marbl(marbl):
+    errs = validate_run_time_sections(
+        {
+            "param": dict(_PARAM),
+            "cppdefs": {"marbl": marbl},
+            "cdr_gas_exch_output": {"do_cdr_gas_exch_output": True},
+        },
+        roms_ref="0.9.0",
+    )
+    assert any("gas-exchange" in e for e in errs) is (not marbl)
+
+
+# ---------------------------------------------------------------------------
+# check_marbl_only_outputs
+# ---------------------------------------------------------------------------
+def test_marbl_only_outputs_pass_with_marbl_or_with_both_switches_off():
+    on = {"cdr_output": {"do_cdr_output": True}, "upscale_output": {"do_upscale": True}}
+    off = {
+        "cdr_output": {"do_cdr_output": False},
+        "upscale_output": {"do_upscale": False},
+    }
+    check_marbl_only_outputs(on, bgc_mode_is_marbl=True)
+    check_marbl_only_outputs(off, bgc_mode_is_marbl=False)
+    check_marbl_only_outputs({}, bgc_mode_is_marbl=False)
+
+
+def test_marbl_only_outputs_name_every_switch_that_is_on():
+    settings = {
+        "cdr_output": {"do_cdr_output": True},
+        "upscale_output": {"do_upscale": True},
+    }
+    with pytest.raises(ValueError) as exc_info:
+        check_marbl_only_outputs(settings, bgc_mode_is_marbl=False)
+    message = str(exc_info.value)
+    assert "cdr_output.do_cdr_output=True" in message
+    assert "upscale_output.do_upscale=True" in message
+    assert "cdr_output.F90" in message
+    assert "upscale_output.F90" in message
+
+
+@pytest.mark.parametrize(
+    ("section", "flag"),
+    [("cdr_output", "do_cdr_output"), ("upscale_output", "do_upscale")],
+)
+def test_marbl_only_outputs_name_only_the_switch_that_is_on(section, flag):
+    with pytest.raises(ValueError, match=rf"^{section}\.{flag}=True but") as exc_info:
+        check_marbl_only_outputs({section: {flag: True}}, bgc_mode_is_marbl=False)
+    assert exc_info.value.args[0].count("=True") == 1
 
 
 # ---------------------------------------------------------------------------

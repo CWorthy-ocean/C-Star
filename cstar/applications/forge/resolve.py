@@ -76,6 +76,7 @@ from cstar.applications.forge.namelist_model import (
     check_cdr_lite_mode_roms,
     check_cdr_lite_sections,
     check_cdr_output_sections,
+    check_marbl_only_outputs,
     check_output_streams_divide_rst,
     check_rst_period_divisible,
     cppdefs_for_precheck,
@@ -739,8 +740,9 @@ def build_forge_blueprint(
     if ``None`` (the default), each is derived from the grid -- ``v_sponge`` from
     grid spacing via ``cstar.applications.forge.util.compute_v_sponge_from_grid``, ``dt``
     from the CFL criterion via :func:`cfl_dt`; pass an explicit value (e.g. one
-    restored from a saved DomainSpec) to use it verbatim instead. The resolver is the sole writer of both ``domain.v_sponge`` /
-    ``domain.dt`` and the identical ``model_settings["v_sponge"]["v_sponge"]`` /
+    restored from a saved DomainSpec) to use it verbatim instead. The resolver is
+    the sole writer of both ``domain.v_sponge`` / ``domain.dt`` and the identical
+    ``model_settings["v_sponge"]["v_sponge"]`` /
     ``model_settings["time_stepping"]["dt"]`` leaves -- each pair is always
     written together and must never diverge.
 
@@ -1175,21 +1177,12 @@ def build_forge_blueprint(
     )
     do_cdr_output = bool(cdr_out.get("do_cdr_output")) or implied_cdr_output
     cdr_out["do_cdr_output"] = do_cdr_output
+    check_marbl_only_outputs(settings, bgc_mode_is_marbl=bgc_mode == "marbl")
     if do_cdr_output:
-        if bgc_mode != "marbl":
-            raise ValueError(
-                'do_cdr_output=True (or CDR forcing was supplied) but bgc_mode != "marbl": '
-                "ucla-roms only compiles cdr_output.F90 under MARBL && CDR_FORCING."
-            )
         settings["cppdefs"]["cdr_forcing"] = True
         marbl = settings.setdefault("marbl_bgc", {})
         marbl["marbl_diagnostics_to_write"] = ensure_cdr_output_marbl_diagnostics(
             marbl.get("marbl_diagnostics_to_write")
-        )
-    if bgc_mode != "marbl" and (settings.get("upscale_output") or {}).get("do_upscale"):
-        raise ValueError(
-            'upscale_output.do_upscale is True but bgc_mode != "marbl": ucla-roms only '
-            "compiles upscale_output.F90 under MARBL (and MARBL_DIAGS)."
         )
 
     # ----- schema selection + version-gated section pruning -----------------

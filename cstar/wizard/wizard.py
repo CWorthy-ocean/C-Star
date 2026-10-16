@@ -5659,18 +5659,12 @@ class ForgeBlueprintWizard:
         self._rebuild()
 
     def _on_bgc_mode(self, change) -> None:
-        """A BGC mode change re-resolves once. Overrides of settings the new mode
-        doesn't apply to are dropped, and an untouched default ForcingSpec follows
-        the mode (the BGC-carrying default for MARBL, the physics-only one
+        """A BGC mode change re-resolves once. An untouched default ForcingSpec
+        follows the mode (the BGC-carrying default for MARBL, the physics-only one
         otherwise); a hand-edited or non-default forcing is left alone.
         """
         if getattr(self, "_suspended", False) or self._syncing:
             return
-        self._overrides = {
-            (section, field): value
-            for (section, field), value in self._overrides.items()
-            if _applies_in(section, field, change["new"])
-        }
         old_default = self._default_forcing_spec(change["old"])
         new_default = self._default_forcing_spec(change["new"])
         if (
@@ -7314,6 +7308,14 @@ class ForgeBlueprintWizard:
     def _rebuild(self, *_):
         if getattr(self, "_suspended", False):
             return
+        # The one place overrides are pruned to the BGC mode: whatever recorded one
+        # the mode doesn't apply to (a mode switch, an edit in a stale editor, a
+        # loaded blueprint's leftover) never reaches the resolve or the saved file.
+        self._overrides = {
+            (section, field): value
+            for (section, field), value in self._overrides.items()
+            if _applies_in(section, field, self.bgc_dd.value)
+        }
         # CDR plot cache: _rebuild() is the one hook that reliably fires for
         # every CDR-panel edit, every mode switch, and every grid-geometry edit
         # (see _invalidate_cdr_plot_cache's own docstring for why this spot was

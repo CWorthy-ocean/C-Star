@@ -1913,7 +1913,26 @@ class TestForgeExecutorBuildAndRun:
         cfg.model_settings["cdr_output"]["do_cdr_output"] = True
         cfg.model_settings["cppdefs"]["marbl"] = False
 
-        with pytest.raises(ValueError, match="requires MARBL"):
+        with pytest.raises(
+            ValueError, match=r"cdr_output\.do_cdr_output=True but bgc_mode"
+        ):
+            self._run_configure_build(cfg, host)
+
+    def test_configure_build_rejects_upscale_without_marbl(
+        self, sample_grid_kwargs, sample_open_boundaries, sample_partitioning
+    ):
+        """``upscale_output.do_upscale`` without MARBL, set after the resolver ran
+        (a wizard accordion edit or a stored blueprint), is rejected here too.
+        """
+        cfg, host = self._cdr_cfg_and_builder(
+            sample_grid_kwargs, sample_open_boundaries, sample_partitioning
+        )
+        cfg.model_settings["upscale_output"]["do_upscale"] = True
+        cfg.model_settings["cppdefs"]["marbl"] = False
+
+        with pytest.raises(
+            ValueError, match=r"upscale_output\.do_upscale=True but bgc_mode"
+        ):
             self._run_configure_build(cfg, host)
 
     def test_configure_build_cdr_forcing_without_marbl_on_roms_0_9_1(

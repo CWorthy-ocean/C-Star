@@ -3412,12 +3412,29 @@ def test_cdr_output_requires_marbl():
     """do_cdr_output=True with bgc_mode="none" must raise -- ucla-roms only compiles
     cdr_output.F90 under MARBL && CDR_FORCING.
     """
-    with pytest.raises(ValueError, match="do_cdr_output"):
+    with pytest.raises(
+        ValueError, match=r"cdr_output\.do_cdr_output=True but bgc_mode"
+    ):
         _build(
             bgc_mode="none",
             forcing_inputs=_PHYSICS_ONLY_FORCING,
             run_time_overrides={"cdr_output": {"do_cdr_output": True}},
         )
+
+
+def test_resolver_names_every_marbl_only_output_that_is_on():
+    with pytest.raises(ValueError) as exc_info:
+        _build(
+            bgc_mode="none",
+            forcing_inputs=_PHYSICS_ONLY_FORCING,
+            run_time_overrides={
+                "cdr_output": {"do_cdr_output": True},
+                "upscale_output": {"do_upscale": True},
+            },
+        )
+    message = str(exc_info.value)
+    assert "cdr_output.do_cdr_output=True" in message
+    assert "upscale_output.do_upscale=True" in message
 
 
 def test_cdr_lite_output_does_not_require_marbl():
@@ -3773,12 +3790,16 @@ _UPSCALE_ON = {"upscale_output": {"do_upscale": True}}
 
 
 def test_resolver_rejects_do_upscale_in_cdr_lite_mode():
-    with pytest.raises(ValueError, match=r"do_upscale is True but bgc_mode != .marbl"):
+    with pytest.raises(
+        ValueError, match=r"upscale_output\.do_upscale=True but bgc_mode"
+    ):
         _build_cdr_lite(run_time_overrides=_UPSCALE_ON)
 
 
 def test_resolver_rejects_do_upscale_in_none_mode():
-    with pytest.raises(ValueError, match=r"upscale_output.F90 under MARBL"):
+    with pytest.raises(
+        ValueError, match=r"upscale_output\.do_upscale=True but bgc_mode"
+    ):
         _build(
             model_dir=_MODEL_DIR_ROMS0100,
             bgc_mode="none",

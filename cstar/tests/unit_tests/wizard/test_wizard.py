@@ -7,6 +7,7 @@ live preview resolves via ``dt``, never building a roms_tools.Grid), so these ru
 as fast unit tests.
 """
 
+import copy
 from datetime import date
 from pathlib import Path
 from types import SimpleNamespace
@@ -1616,12 +1617,73 @@ class TestBgcModeSettings:
         wiz.bgc_dd.value = "marbl"
         assert ("cdr_lite_output", "wrt_alk") in wiz._overrides
 
-    def test_overrides_survive_a_mode_change_while_loading(self):
+    def test_overrides_are_pruned_by_rebuild_alone(self):
+        """``_rebuild`` owns the pruning: a mode change made while suspended (as a
+        load does) keeps them until the load's own rebuild.
+        """
         wiz = self._wizard()
         self._toggle(wiz, ("bgc", "wrt_his"))
         with wiz._suspend():
             wiz.bgc_dd.value = "cdr_lite"
         assert ("bgc", "wrt_his") in wiz._overrides
+        wiz._rebuild()
+        assert wiz._overrides == {}
+
+    def test_edit_in_a_stale_editor_is_pruned_on_the_next_rebuild(self):
+        """A mode switch whose resolve fails (cdr_lite with no CDR forcing yet)
+        leaves the old MARBL-mode editor live; an edit there must not stick.
+        """
+        wiz = ForgeBlueprintWizard()
+        wiz.start.value = date(2012, 1, 1)
+        wiz.end.value = date(2012, 1, 2)
+        wiz.use_pio_chk.value = False
+        wiz.bgc_dd.value = "cdr_lite"
+        assert wiz.config is None
+        assert wiz.editor._bgc_mode == "marbl"  # stale: the resolve failed
+
+        self._toggle(wiz, ("bgc", "wrt_his"))
+        assert wiz._overrides == {}
+
+        wiz.cdr_mode_dd.value = "simple"
+        assert wiz.config is not None, wiz.derived.value
+        assert wiz.editor._bgc_mode == "cdr_lite"
+        assert wiz._overrides == {}
+        assert wiz.config.composition.overrides == {}
+
+    def test_loading_a_marbl_blueprint_keeps_its_marbl_only_overrides(self):
+        wiz = self._wizard()
+        wiz.bgc_dd.value = "marbl"
+        wiz.cdr_mode_dd.value = "none"
+        self._toggle(wiz, ("bgc", "wrt_his"))
+        assert wiz.config is not None, wiz.derived.value
+
+        wiz2 = ForgeBlueprintWizard()
+        wiz2._populate_from(wiz.config)
+
+        assert ("bgc", "wrt_his") in wiz._overrides
+        assert wiz2._overrides == wiz._overrides
+        assert wiz2.config is not None, wiz2.derived.value
+
+    def test_loading_drops_marbl_only_overrides_that_the_blueprints_mode_forbids(self):
+        wiz = self._wizard()
+        wiz.bgc_dd.value = "cdr_lite"
+        assert wiz.config is not None, wiz.derived.value
+        settings = copy.deepcopy(wiz.config.model_settings)
+        settings["cdr_output"]["do_cdr_output"] = True
+        settings["upscale_output"]["do_upscale"] = True
+        settings["cppdefs"]["sponge_tune"] = True
+        edited = wiz.config.model_copy(update={"model_settings": settings})
+
+        wiz2 = ForgeBlueprintWizard()
+        problems = wiz2._populate_from(edited)
+
+        # reported, and not carried into the wizard's state or the next save
+        assert any("cdr_output.do_cdr_output=True" in p for p in problems)
+        assert any("upscale_output.do_upscale=True" in p for p in problems)
+        assert set(wiz2._overrides) == {("cppdefs", "sponge_tune")}
+        assert wiz2.config is not None, wiz2.derived.value
+        assert wiz2.config.model_settings["cdr_output"]["do_cdr_output"] is False
+        assert wiz2.config.model_settings["upscale_output"]["do_upscale"] is False
 
     def test_cdr_lite_stream_is_shown_on_without_recording_an_override(self):
         wiz = self._wizard()

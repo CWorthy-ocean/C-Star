@@ -49,6 +49,7 @@ from cstar.applications.forge.namelist_model import (
     check_cdr_lite_mode_roms,
     check_cdr_lite_sections,
     check_cdr_output_sections,
+    check_marbl_only_outputs,
     check_output_streams_divide_rst,
     check_river_tracer_counts,
     check_rst_period_divisible,
@@ -2496,16 +2497,16 @@ class ForgeExecutor(BaseModel):
                     "cdr_lite_output.do_cdr_lite_output=True (the _cdrtrc stream is "
                     "the only output the CDR-lite tracers appear in)."
                 )
-        # do_cdr_output requires MARBL plus the CDR_FORCING cppdef (both gate
-        # compiling ucla-roms' cdr_output.F90), and the MARBL diagnostics ucla-roms
-        # looks up by name, unchecked.
+        # The MARBL-only output switches (do_cdr_output, do_upscale): wizard
+        # accordion edits and stored blueprints reach here without the resolver's
+        # check, so this is the enforcement point of record.
+        check_marbl_only_outputs(
+            self._settings_run_time, bgc_mode_is_marbl=bgc_mode == "marbl"
+        )
+        # do_cdr_output requires the CDR_FORCING cppdef (it gates compiling
+        # ucla-roms' cdr_output.F90, with MARBL), and the MARBL diagnostics
+        # ucla-roms looks up by name, unchecked.
         if self._settings_run_time.get("cdr_output", {}).get("do_cdr_output"):
-            if not cppdefs.get("marbl", False):
-                raise ValueError(
-                    "cdr_output.do_cdr_output is True but cppdefs.marbl is False: "
-                    "CDR output requires MARBL (ucla-roms only compiles "
-                    "cdr_output.F90 under MARBL && CDR_FORCING)."
-                )
             if not cppdefs.get("cdr_forcing"):
                 cppdefs["cdr_forcing"] = True
                 log.info(
