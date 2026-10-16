@@ -23,12 +23,15 @@ from cstar.applications.forge.namelist_model import (
     CdrLiteOutputCfg,
     CdrLiteOutputCfgV0_9_0,
     CdrTracerCounts,
+    MarblBgcCfg,
+    MarblBgcCfgV0_11_0,
     RunTimeSettings,
     RunTimeSettingsV0_4_0,
     RunTimeSettingsV0_5_0,
     RunTimeSettingsV0_6_0,
     RunTimeSettingsV0_7_0,
     RunTimeSettingsV0_9_0,
+    RunTimeSettingsV0_11_0,
     bgc_mode_from_cppdefs,
     build_namelist,
     canonical_output_sections_for_precheck,
@@ -37,6 +40,7 @@ from cstar.applications.forge.namelist_model import (
     check_cdr_lite_mode_roms,
     check_cdr_lite_sections,
     check_cdr_output_sections,
+    check_constant_fe,
     check_river_tracer_counts,
     n_tracers_from_param,
     namelist_field_for,
@@ -56,6 +60,7 @@ from cstar.roms.namelist import (
     RomsNamelistV0_5_0,
     RomsNamelistV0_7_0,
     RomsNamelistV0_9_0,
+    RomsNamelistV0_11_0,
 )
 
 _MODEL_DIR = (
@@ -239,6 +244,29 @@ def test_check_bgc_tracer_count_rejects_bgc_tracers_without_marbl():
 )
 def test_check_bgc_tracer_count_accepts_consistent_settings(param, bgc_mode_is_marbl):
     check_bgc_tracer_count(param, bgc_mode_is_marbl=bgc_mode_is_marbl)
+
+
+# ---------------------------------------------------------------------------
+# check_constant_fe
+# ---------------------------------------------------------------------------
+def test_check_constant_fe_rejects_constant_iron_without_marbl():
+    with pytest.raises(ValueError, match=r"marbl_bgc\.use_constant_fe.*MARBL is off"):
+        check_constant_fe({"use_constant_fe": True}, bgc_mode_is_marbl=False)
+
+
+@pytest.mark.parametrize(
+    ("marbl_bgc", "bgc_mode_is_marbl"),
+    [
+        ({"use_constant_fe": True}, True),
+        ({"use_constant_fe": False}, False),
+        ({"use_constant_fe": "false"}, False),
+        ({"use_constant_fe": 0}, False),
+        ({"use_constant_fe": None}, False),
+        ({}, False),
+    ],
+)
+def test_check_constant_fe_accepts_consistent_settings(marbl_bgc, bgc_mode_is_marbl):
+    check_constant_fe(marbl_bgc, bgc_mode_is_marbl=bgc_mode_is_marbl)
 
 
 def test_defaults_come_from_yaml_not_the_model():
@@ -575,6 +603,12 @@ def test_validate_run_time_sections_skips_rst_period_check_when_section_missing(
 
 
 _PARAM = {"llm": 20, "mmm": 20, "n": 10, "np_xi": 2, "np_eta": 5, "nt_passive": 0}
+_MARBL_BGC = {
+    "marbl_config_file": "marbl_in",
+    "marbl_tracers_to_write": ["PO4"],
+    "marbl_diagnostics_to_write": ["PH"],
+    "marbl_timestep": 3600.0,
+}
 
 
 @pytest.mark.parametrize(
@@ -595,6 +629,35 @@ def test_validate_run_time_sections_checks_bgc_tracers_against_marbl(
 
 def test_validate_run_time_sections_skips_bgc_check_without_cppdefs():
     assert validate_run_time_sections({"param": {**_PARAM, "ntrc_bio": 32}}) == []
+
+
+def test_validate_run_time_sections_checks_constant_fe_against_marbl():
+    """A stored blueprint with MARBL off but constant iron requested is reported
+    up front (engine/wizard), not first at configure_build.
+    """
+    marbl_bgc = {**_MARBL_BGC, "use_constant_fe": True}
+    errs = validate_run_time_sections(
+        {"marbl_bgc": marbl_bgc, "cppdefs": {"marbl": False}}, roms_ref="0.11.0"
+    )
+    assert len(errs) == 1
+    assert "marbl_bgc.use_constant_fe" in errs[0]
+    assert "MARBL is off" in errs[0]
+
+    for settings in (
+        {"marbl_bgc": marbl_bgc, "cppdefs": {"marbl": True}},
+        {"marbl_bgc": marbl_bgc},  # no cppdefs: nothing to compare against
+        {"marbl_bgc": _MARBL_BGC, "cppdefs": {"marbl": False}},  # not requested
+    ):
+        assert validate_run_time_sections(settings, roms_ref="0.11.0") == []
+
+
+def test_validate_run_time_sections_reports_constant_fe_on_a_pre_0_11_0_pin():
+    errs = validate_run_time_sections(
+        {"marbl_bgc": {**_MARBL_BGC, "use_constant_fe": True}}, roms_ref="0.10.1"
+    )
+    assert len(errs) == 1
+    assert errs[0].startswith("marbl_bgc: ")
+    assert "marbl_bgc.use_constant_fe requires ucla-roms >= 0.11.0" in errs[0]
 
 
 @pytest.mark.parametrize(
@@ -636,15 +699,15 @@ def test_run_time_settings_for_ref_0_4_0_up_to_0_5_0_selects_v0_4_0():
 def test_run_time_settings_for_ref_0_5_0_up_to_0_6_0_selects_v0_5_0():
     # 0.5.0 <= ucla-roms < 0.6.0 selects RunTimeSettingsV0_5_0; 0.6.0 <=
     # ucla-roms < 0.7.0 selects RunTimeSettingsV0_6_0; 0.7.0 <= ucla-roms < 0.9.0
-    # selects RunTimeSettingsV0_7_0 and 0.9.0 and later (including anything
-    # beyond) RunTimeSettingsV0_9_0 -- see the tests below.
+    # selects RunTimeSettingsV0_7_0 and 0.9.0 <= ucla-roms < 0.11.0
+    # RunTimeSettingsV0_9_0 -- see the tests below.
     for ref in ("0.5.0", "v0.5.0"):
         assert run_time_settings_for_ref(ref) is RunTimeSettingsV0_5_0
 
 
 def test_run_time_settings_for_ref_0_6_0_up_to_0_7_0_selects_v0_6_0():
     # 0.6.0 <= ucla-roms < 0.7.0 selects RunTimeSettingsV0_6_0; 0.7.0 and later
-    # select RunTimeSettingsV0_7_0/V0_9_0 -- see the tests below.
+    # select RunTimeSettingsV0_7_0/V0_9_0/V0_11_0 -- see the tests below.
     for ref in ("0.6.0", "v0.6.0"):
         assert run_time_settings_for_ref(ref) is RunTimeSettingsV0_6_0
 
@@ -654,15 +717,20 @@ def test_run_time_settings_for_ref_0_7_0_up_to_0_9_0_selects_v0_7_0():
         assert run_time_settings_for_ref(ref) is RunTimeSettingsV0_7_0
 
 
-def test_run_time_settings_for_ref_0_9_0_and_later_selects_v0_9_0():
-    for ref in ("0.9.0", "v0.9.0", "0.10.2", "1.0.0"):
+def test_run_time_settings_for_ref_0_9_0_up_to_0_11_0_selects_v0_9_0():
+    for ref in ("0.9.0", "v0.9.0", "0.10.1", "0.10.2"):
         assert run_time_settings_for_ref(ref) is RunTimeSettingsV0_9_0
+
+
+def test_run_time_settings_for_ref_0_11_0_and_later_selects_v0_11_0():
+    for ref in ("0.11.0", "v0.11.0", "0.12.3", "1.0.0"):
+        assert run_time_settings_for_ref(ref) is RunTimeSettingsV0_11_0
 
 
 def test_run_time_settings_for_ref_branch_warns_and_uses_latest():
     with pytest.warns(UserWarning, match="not a release tag"):
         cls = run_time_settings_for_ref("main")
-    assert cls is RunTimeSettingsV0_9_0
+    assert cls is RunTimeSettingsV0_11_0
 
 
 def test_run_time_settings_for_ref_unresolvable_hash_warns_and_uses_latest():
@@ -671,7 +739,7 @@ def test_run_time_settings_for_ref_unresolvable_hash_warns_and_uses_latest():
     """
     with pytest.warns(UserWarning, match="not a release tag"):
         cls = run_time_settings_for_ref("a1b2c3d4")
-    assert cls is RunTimeSettingsV0_9_0
+    assert cls is RunTimeSettingsV0_11_0
 
 
 def test_run_time_settings_for_ref_empty_string_selects_legacy():
@@ -817,7 +885,13 @@ def test_output_precheck_applies_to_v0_4_0_settings_cls_is_false():
 
 @pytest.mark.parametrize(
     "settings_cls",
-    [RunTimeSettingsV0_5_0, RunTimeSettingsV0_6_0, RunTimeSettingsV0_7_0],
+    [
+        RunTimeSettingsV0_5_0,
+        RunTimeSettingsV0_6_0,
+        RunTimeSettingsV0_7_0,
+        RunTimeSettingsV0_9_0,
+        RunTimeSettingsV0_11_0,
+    ],
 )
 def test_output_precheck_applies_to_versioned_settings_cls_is_true(settings_cls):
     assert output_precheck_applies_to(settings_cls) is True
@@ -886,6 +960,112 @@ def test_v0_7_0_ignores_wrt_gas_exchange_and_writes_tracer_names(tmp_path):
     nml = build_namelist(RunTimeSettingsV0_7_0.model_validate(d), n_tracers=34)
     assert nml.cdr_tracer_output_settings.do_cdr_tracer_output is True
     assert "wrt_gas_exchange" not in nml.cdr_tracer_output_settings.model_dump()
+
+
+# ---------------------------------------------------------------------------
+# ucla-roms >= 0.11.0: RunTimeSettingsV0_11_0 (marbl_bgc constant iron)
+# ---------------------------------------------------------------------------
+def test_build_namelist_v0_11_0_writes_constant_fe(tmp_path):
+    """RunTimeSettingsV0_11_0 builds ``RomsNamelistV0_11_0`` and writes the
+    constant-iron keys (lowercased, as f90nml does) with their values.
+    """
+    d = _populated_rt_dict()
+    d["marbl_bgc"].update(use_constant_fe=True, constant_fe_value=5.0e-4)
+    rt = RunTimeSettingsV0_11_0.model_validate(d)
+    assert isinstance(rt, RunTimeSettingsV0_9_0)
+    nml = build_namelist(rt, n_tracers=34)
+    assert type(nml) is RomsNamelistV0_11_0
+    assert nml.marbl_biogeochemistry_settings.use_constant_fe is True
+    assert nml.marbl_biogeochemistry_settings.constant_fe_value == 5.0e-4
+
+    nml.write(tmp_path / "namelist.nml")
+    text = (tmp_path / "namelist.nml").read_text()
+    assert "use_constant_fe = .true." in text
+    assert "constant_fe_value = 0.0005" in text
+
+
+def test_run_time_settings_v0_11_0_defaults_constant_fe_when_omitted(tmp_path):
+    """A settings dict written before the keys existed validates to the ucla-roms
+    reference values, and both keys are written regardless.
+    """
+    d = _populated_rt_dict()
+    assert "use_constant_fe" not in d["marbl_bgc"]
+    assert "constant_fe_value" not in d["marbl_bgc"]
+    rt = RunTimeSettingsV0_11_0.model_validate(d)
+    assert rt.marbl_bgc.use_constant_fe is False
+    assert rt.marbl_bgc.constant_fe_value == 3.0e-3
+
+    nml = build_namelist(rt, n_tracers=34)
+    assert nml.marbl_biogeochemistry_settings.use_constant_fe is False
+    assert nml.marbl_biogeochemistry_settings.constant_fe_value == 3.0e-3
+    nml.write(tmp_path / "namelist.nml")
+    text = (tmp_path / "namelist.nml").read_text()
+    assert "use_constant_fe = .false." in text
+    assert "constant_fe_value = 0.003" in text
+
+
+def test_run_time_settings_v0_11_0_rejects_a_negative_constant_fe_value():
+    d = _populated_rt_dict()
+    d["marbl_bgc"]["constant_fe_value"] = -1.0e-3
+    with pytest.raises(ValidationError, match="constant_fe_value"):
+        RunTimeSettingsV0_11_0.model_validate(d)
+    d["marbl_bgc"]["constant_fe_value"] = 0.0
+    assert RunTimeSettingsV0_11_0.model_validate(d).marbl_bgc.constant_fe_value == 0.0
+
+
+@pytest.mark.parametrize("settings_cls", [RunTimeSettings, RunTimeSettingsV0_9_0])
+@pytest.mark.parametrize("requested", [True, "true", 1, "not-a-bool"])
+def test_pre_0_11_0_tiers_reject_a_requested_constant_fe(settings_cls, requested):
+    """ucla-roms < 0.11.0 has no constant-iron option: ``extra="ignore"`` would
+    drop the request and the run would compute iron prognostically, so it is
+    refused, naming the release that supports it. An unparseable value is not an
+    "off" value either.
+    """
+    d = _populated_rt_dict()
+    d["marbl_bgc"]["use_constant_fe"] = requested
+    with pytest.raises(
+        ValidationError,
+        match=r"marbl_bgc\.use_constant_fe requires ucla-roms >= 0\.11\.0",
+    ):
+        settings_cls.model_validate(d)
+
+
+@pytest.mark.parametrize("off", [False, "false", 0, None])
+def test_pre_0_11_0_tiers_drop_a_switched_off_constant_fe(off):
+    """A shared spec may carry the key switched off: it passes and is dropped,
+    so the built namelist has no iron keys.
+    """
+    d = _populated_rt_dict()
+    d["marbl_bgc"].update(use_constant_fe=off, constant_fe_value=5.0e-4)
+    rt = RunTimeSettingsV0_9_0.model_validate(d)
+    assert "use_constant_fe" not in rt.marbl_bgc.model_dump()
+    assert "constant_fe_value" not in rt.marbl_bgc.model_dump()
+
+    nml = build_namelist(rt, n_tracers=34)
+    assert type(nml) is RomsNamelistV0_9_0
+    written = nml.to_f90nml_dict()["marbl_biogeochemistry_settings"]
+    assert "use_constant_fe" not in written
+    assert "constant_fe_value" not in written
+
+
+def test_marbl_bgc_cfg_tiers_share_the_four_marbl_fields():
+    old = set(MarblBgcCfg.model_fields)
+    new = set(MarblBgcCfgV0_11_0.model_fields)
+    assert new - old == {"use_constant_fe", "constant_fe_value"}
+    assert old <= new
+
+
+def test_forge_writes_constant_fe_cstar_reads_it(tmp_path):
+    """``write_roms_namelist`` for a 0.11.0 pin writes a namelist the C-Star
+    schema for that release reads back, keys included.
+    """
+    d = _populated_rt_dict()
+    d["marbl_bgc"].update(use_constant_fe=True, constant_fe_value=5.0e-4)
+    write_roms_namelist(d, tmp_path, n_tracers=34, roms_ref="0.11.0")
+
+    back = RomsNamelistV0_11_0.read(tmp_path / "namelist.nml")
+    assert back.marbl_biogeochemistry_settings.use_constant_fe is True
+    assert back.marbl_biogeochemistry_settings.constant_fe_value == 5.0e-4
 
 
 # ---------------------------------------------------------------------------
@@ -1406,6 +1586,7 @@ _ALL_SETTINGS_TIERS = (
     RunTimeSettingsV0_6_0,
     RunTimeSettingsV0_7_0,
     RunTimeSettingsV0_9_0,
+    RunTimeSettingsV0_11_0,
 )
 
 
@@ -1483,6 +1664,15 @@ def test_namelist_field_for_examples(section, field, expected):
     assert namelist_field_for(RunTimeSettingsV0_9_0, section, field) == expected
 
 
+@pytest.mark.parametrize("field", ["use_constant_fe", "constant_fe_value"])
+def test_namelist_field_for_constant_fe_is_a_0_11_0_field(field):
+    assert namelist_field_for(RunTimeSettingsV0_11_0, "marbl_bgc", field) == (
+        "marbl_biogeochemistry_settings",
+        field,
+    )
+    assert namelist_field_for(RunTimeSettingsV0_9_0, "marbl_bgc", field) is None
+
+
 def test_namelist_field_for_follows_the_tier_group_rename():
     """``cdr_lite_output`` is &CDR_TRACER_OUTPUT_SETTINGS on 0.7/0.8."""
     assert namelist_field_for(RunTimeSettingsV0_7_0, "cdr_lite_output", "nrpf") == (
@@ -1503,7 +1693,9 @@ def test_namelist_field_for_returns_none_off_the_namelist(settings_cls, section,
     assert namelist_field_for(settings_cls, section, field) is None
 
 
-@pytest.mark.parametrize("roms_ref", ["0.5.0", "0.6.0", "0.7.0", "0.8.0", "0.9.0"])
+@pytest.mark.parametrize(
+    "roms_ref", ["0.5.0", "0.6.0", "0.7.0", "0.8.0", "0.9.0", "0.11.0"]
+)
 def test_precheck_sections_match_what_build_namelist_writes(roms_ref):
     """The precheck sees every output-stream section the tier carries, under
     the group and keys build_namelist writes it with.
