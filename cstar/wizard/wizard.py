@@ -424,7 +424,7 @@ HELP_TEXT: dict[str | tuple[str, str], str] = {
     "physics, so the output is written on the physics time axis (grouped like the "
     "physics files) instead of as one cycled climatology. 'depth' keeps a "
     "climatological source as a cycled climatology. Without a physics companion or "
-    "source T/S, density falls back to depth. Needs roms-tools 5.2 or later.",
+    "source T/S, density falls back to depth.",
     (
         "boundary",
         "prefill",
