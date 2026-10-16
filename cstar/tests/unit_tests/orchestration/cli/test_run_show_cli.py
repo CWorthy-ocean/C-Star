@@ -59,6 +59,16 @@ def run(tmp_path: Path, hello_world_bp_path: Path) -> FakeRun:
     return fake
 
 
+def _flat(text: str) -> str:
+    """Join a CLI output into one line without rich's box borders.
+
+    Rich wraps an error message at the terminal width and draws a border down
+    each side, so a phrase can land across a `│`; the width differs between
+    machines (80 columns on CI).
+    """
+    return " ".join(text.replace("│", " ").split())
+
+
 def invoke(*args: str, record: WorkplanRun | None = None) -> Result:
     """Run `cstar run show` against a repository that holds only `record`."""
     with mock.patch(LOOKUP, mock.AsyncMock(return_value=record)):
@@ -181,7 +191,7 @@ def test_a_directory_without_a_manifest(tmp_path: Path) -> None:
     result = invoke(bare.as_posix())
 
     assert result.exit_code == EXIT_BAD_ARGS
-    output = " ".join(result.output.replace("│", " ").split())
+    output = _flat(result.output)
     assert RUN_MANIFEST_NAME in output
     assert "predates the manifest" in output
     assert "cstar workplan run --run-id" in output
@@ -192,7 +202,7 @@ def test_a_directory_that_is_not_one(tmp_path: Path) -> None:
     result = invoke((tmp_path / "missing").as_posix())
 
     assert result.exit_code == EXIT_BAD_ARGS
-    assert "is not a directory" in " ".join(result.output.split())
+    assert "is not a directory" in _flat(result.output)
 
 
 def test_a_workplan_file_is_refused(tmp_path: Path) -> None:
