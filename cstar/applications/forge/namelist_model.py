@@ -1185,6 +1185,49 @@ def check_cdr_output_sections(
     return force_cdr_forcing
 
 
+# The output switches whose ucla-roms module is compiled only under MARBL, as
+# ``(section, flag, reason)``. Public so the wizard derives which sections it
+# hides without MARBL from the same table; the gas-exchange stream's own MARBL
+# rule is :data:`CDR_OUTPUT_SECTIONS`'s.
+MARBL_ONLY_OUTPUT_FLAGS: tuple[tuple[str, str, str], ...] = (
+    ("cdr_output", "do_cdr_output", "cdr_output.F90 only under MARBL && CDR_FORCING"),
+    (
+        "upscale_output",
+        "do_upscale",
+        "upscale_output.F90 only under MARBL && MARBL_DIAGS",
+    ),
+)
+
+
+def check_marbl_only_outputs(
+    run_time_settings: Mapping[str, Any], *, bgc_mode_is_marbl: bool
+) -> None:
+    """Reject the output streams ucla-roms compiles only under MARBL
+    (:data:`MARBL_ONLY_OUTPUT_FLAGS`) when MARBL is off, naming every one that
+    is set. ROMS would otherwise ignore them silently or abort at startup.
+
+    Called by the resolver (authoring time), :func:`validate_run_time_sections`
+    (stored and loaded blueprints) and the executor's ``configure_build`` (the
+    build-time net for wizard accordion edits that bypass the resolver), so the
+    rule and its message stay in one place.
+
+    Raises ``ValueError`` if a flag is set while ``bgc_mode_is_marbl`` is False.
+    """
+    if bgc_mode_is_marbl:
+        return
+    on = [
+        (f"{section}.{flag}=True", reason)
+        for section, flag, reason in MARBL_ONLY_OUTPUT_FLAGS
+        if (run_time_settings.get(section) or {}).get(flag)
+    ]
+    if on:
+        flags = ", ".join(flag for flag, _ in on)
+        reasons = " and ".join(reason for _, reason in on)
+        raise ValueError(
+            f'{flags} but bgc_mode != "marbl": ucla-roms compiles {reasons}.'
+        )
+
+
 def online_carbonate_sensitivity_requested(
     run_time_settings: Mapping[str, Any],
 ) -> bool:
@@ -2163,12 +2206,22 @@ def validate_run_time_sections(
             check_bgc_tracer_count(settings["param"] or {}, bgc_mode_is_marbl=marbl)
         except ValueError as exc:
             errors.append(str(exc))
+        try:
+            check_marbl_only_outputs(settings, bgc_mode_is_marbl=marbl)
+        except ValueError as exc:
+            errors.append(str(exc))
         # And the CDR-lite sections vs MARBL/CDR tracer counts (param vs cppdefs),
         # on the sections the selected tier models only: one it lacks is reported
         # by prune_version_gated_sections (resolve/configure_build), not advised on
         # here with 0.9-specific wording.
         keep = (*fields, "param", "cppdefs")
         modeled = {k: v for k, v in settings.items() if k in keep}
+        try:
+            check_cdr_output_sections(
+                modeled, bgc_mode_is_marbl=marbl, settings_cls=settings_cls
+            )
+        except ValueError as exc:
+            errors.append(str(exc))
         try:
             check_cdr_lite_sections(
                 modeled,

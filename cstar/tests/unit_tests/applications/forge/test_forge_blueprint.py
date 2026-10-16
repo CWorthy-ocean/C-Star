@@ -1376,6 +1376,48 @@ def test_build_forge_blueprint_grid_file_missing_raises(tmp_path):
         _build(grid_file=str(missing), grid_kwargs={}, dt=7200, v_sponge=1.0)
 
 
+def test_cfl_dt_from_grid_kwargs_matches_the_resolver_and_builds_no_grid(
+    monkeypatch,
+):
+    """With no loaded grid ``cfl_dt`` is arithmetic on the grid kwargs: no
+    ``roms_tools.Grid`` is built, and it is the same number the resolver derives
+    when ``dt`` is left unset.
+    """
+    from cstar.applications.forge.resolve import cfl_dt
+
+    def _no_grid(**_kw):
+        raise AssertionError("cfl_dt must not build a roms_tools.Grid")
+
+    monkeypatch.setattr("roms_tools.Grid", _no_grid)
+    dt = cfl_dt(_GRID_KWARGS)
+    assert dt > 0
+    assert _build(dt=None).domain.dt == dt
+
+
+def test_cfl_dt_from_a_loaded_grid_reads_its_size_and_shape():
+    from cstar.applications.forge.resolve import cfl_dt
+
+    loaded = _FakeLoadedGrid(
+        nx=_GRID_KWARGS["nx"],
+        ny=_GRID_KWARGS["ny"],
+        N=3,
+        size_x=_GRID_KWARGS["size_x"],
+        size_y=_GRID_KWARGS["size_y"],
+    )
+    # grid_kwargs are ignored once a grid is loaded (a grid file carries none)
+    assert cfl_dt({}, loaded) == cfl_dt(_GRID_KWARGS)
+    coarser = _FakeLoadedGrid(nx=2, ny=2, N=3, size_x=1000.0, size_y=1000.0)
+    assert cfl_dt({}, coarser) > cfl_dt({}, loaded)
+
+
+def test_cfl_dt_rejects_a_loaded_grid_without_size_x():
+    from cstar.applications.forge.resolve import cfl_dt
+
+    loaded = _FakeLoadedGrid(nx=5, ny=5, N=3, size_x=None, size_y=None)
+    with pytest.raises(ValueError, match="no size_x/size_y"):
+        cfl_dt({}, loaded)
+
+
 def test_build_forge_blueprint_grid_file_no_size_x_requires_explicit_dt(
     monkeypatch, tmp_path
 ):
@@ -3524,12 +3566,29 @@ def test_cdr_output_requires_marbl():
     """do_cdr_output=True with bgc_mode="none" must raise -- ucla-roms only compiles
     cdr_output.F90 under MARBL && CDR_FORCING.
     """
-    with pytest.raises(ValueError, match="do_cdr_output"):
+    with pytest.raises(
+        ValueError, match=r"cdr_output\.do_cdr_output=True but bgc_mode"
+    ):
         _build(
             bgc_mode="none",
             forcing_inputs=_PHYSICS_ONLY_FORCING,
             run_time_overrides={"cdr_output": {"do_cdr_output": True}},
         )
+
+
+def test_resolver_names_every_marbl_only_output_that_is_on():
+    with pytest.raises(ValueError) as exc_info:
+        _build(
+            bgc_mode="none",
+            forcing_inputs=_PHYSICS_ONLY_FORCING,
+            run_time_overrides={
+                "cdr_output": {"do_cdr_output": True},
+                "upscale_output": {"do_upscale": True},
+            },
+        )
+    message = str(exc_info.value)
+    assert "cdr_output.do_cdr_output=True" in message
+    assert "upscale_output.do_upscale=True" in message
 
 
 def test_cdr_lite_output_does_not_require_marbl():
@@ -3879,6 +3938,37 @@ def test_resolver_bgc_mode_cdr_lite_rejects_bgc_forcing():
 def test_resolver_rejects_an_unknown_bgc_mode(mode):
     with pytest.raises(ValueError, match="bgc_mode must be one of"):
         _build(bgc_mode=mode)
+
+
+_UPSCALE_ON = {"upscale_output": {"do_upscale": True}}
+
+
+def test_resolver_rejects_do_upscale_in_cdr_lite_mode():
+    with pytest.raises(
+        ValueError, match=r"upscale_output\.do_upscale=True but bgc_mode"
+    ):
+        _build_cdr_lite(run_time_overrides=_UPSCALE_ON)
+
+
+def test_resolver_rejects_do_upscale_in_none_mode():
+    with pytest.raises(
+        ValueError, match=r"upscale_output\.do_upscale=True but bgc_mode"
+    ):
+        _build(
+            model_dir=_MODEL_DIR_ROMS0100,
+            bgc_mode="none",
+            forcing_inputs=_PHYSICS_ONLY_FORCING,
+            run_time_overrides=_UPSCALE_ON,
+        )
+
+
+def test_resolver_accepts_do_upscale_with_marbl():
+    cfg = _build(
+        model_dir=_MODEL_DIR_ROMS0100,
+        # one upscaled file per day, so it divides the daily restart period
+        run_time_overrides={"upscale_output": {"do_upscale": True, "nrpf_uscl": 24}},
+    )
+    assert cfg.model_settings["upscale_output"]["do_upscale"] is True
 
 
 def test_resolver_bgc_mode_cdr_lite_requires_a_cdr_forcing():
@@ -4967,7 +5057,8 @@ def test_resolver_bgc_mode_none_raises_with_bgc_forcing():
 
 
 # A minimal physics-only forcing selection (no bgc_source/include_bgc/bgc-type
-# items) -- no catalog ForcingSpec is physics-only today, so this is hand-authored.
+# items), kept hand-authored so the resolver tests below don't depend on any
+# one bundled ForcingSpec (``glorys-era5-physics`` has its own tests).
 _PHYSICS_ONLY_FORCING = {
     "initial_conditions": {"source": {"name": "GLORYS", "glorys_layout": "regional"}},
     "forcing": {
@@ -4984,6 +5075,32 @@ def test_resolver_bgc_mode_none_with_physics_only_forcing():
     # the namelist carries nt_bgc = 0 and per-tracer arrays size to T + S.
     assert cfg.model_settings["param"]["ntrc_bio"] == 0
     assert cfg.n_tracers == 2
+
+
+def test_bundled_physics_forcing_spec_resolves_without_marbl():
+    """``glorys-era5-physics`` is the glorys-era5-unified forcing minus every BGC
+    item, so it is what bgc_mode "none" (and "cdr_lite") selects by default.
+    """
+    unified = _CATALOG.forcing_data("glorys-era5-unified")
+    physics = _CATALOG.forcing_data("glorys-era5-physics")
+    cfg = _build(bgc_mode="none", forcing_inputs=physics)
+    assert cfg.model_settings["cppdefs"]["marbl"] is False
+    assert [i.source.name for i in cfg.forcing.surface] == ["ERA5", "WOA"]
+    assert cfg.forcing.boundary.bgc_sources == []
+    assert cfg.forcing.initial_conditions.bgc_sources == []
+    assert [i.include_bgc for i in cfg.forcing.river] == [False]
+    # Same physics, tides and rivers as the BGC-carrying default.
+    assert (
+        physics["initial_conditions"]["source"]
+        == (unified["initial_conditions"]["source"])
+    )
+    assert physics["forcing"]["tidal"] == unified["forcing"]["tidal"]
+
+
+def test_bundled_physics_forcing_spec_resolves_under_cdr_lite():
+    cfg = _build_cdr_lite(forcing_inputs=_CATALOG.forcing_data("glorys-era5-physics"))
+    assert cfg.model_settings["cppdefs"]["cdr_lite"] is True
+    assert cfg.model_settings["cppdefs"]["marbl"] is False
 
 
 def test_resolver_bgc_mode_none_rejects_bgc_tracer_override():
@@ -7772,6 +7889,27 @@ class TestSaveModifiedSpecsToCatalog:
         assert wiz.config.composition.output.modified is False
         assert wiz._overrides == {}
         assert "✓" in wiz.save_output_status.value
+
+    def test_save_output_spec_keeps_overrides_the_bgc_mode_hides(
+        self, isolated_catalog
+    ):
+        """The saved OutputSpec carries the active output overrides only: a MARBL-
+        only one hidden by bgc_mode "none" was not saved, so it stays on the
+        record for when MARBL comes back.
+        """
+        wiz = self._wizard(isolated_catalog)
+        wiz._overrides[("ocean_vars", "wrt_file_his")] = True
+        wiz._overrides[("bgc", "wrt_his")] = False
+        wiz.bgc_dd.value = "none"
+        assert wiz.config is not None, wiz.derived.value
+        assert wiz.config.composition.output.modified is True
+
+        wiz.save_output_name.value = "my-output"
+        wiz._on_save_output(None)
+
+        assert "✓" in wiz.save_output_status.value
+        assert wiz.config.composition.output.modified is False
+        assert wiz._overrides == {("bgc", "wrt_his"): False}
 
     def test_save_model_spec_marks_unmodified(self, isolated_catalog):
         wiz = self._wizard(isolated_catalog)
