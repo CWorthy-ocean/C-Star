@@ -1033,11 +1033,16 @@ def check_cdr_output_sections(
 
 
 # The output switches whose ucla-roms module is compiled only under MARBL, as
-# ``(section, flag)``: cdr_output.F90 (under MARBL && CDR_FORCING) and
-# upscale_output.F90 (under MARBL && MARBL_DIAGS).
-_MARBL_ONLY_OUTPUT_FLAGS: tuple[tuple[str, str], ...] = (
-    ("cdr_output", "do_cdr_output"),
-    ("upscale_output", "do_upscale"),
+# ``(section, flag, reason)``. Public so the wizard derives which sections it
+# hides without MARBL from the same table; the gas-exchange stream's own MARBL
+# rule is :data:`CDR_OUTPUT_SECTIONS`'s.
+MARBL_ONLY_OUTPUT_FLAGS: tuple[tuple[str, str, str], ...] = (
+    ("cdr_output", "do_cdr_output", "cdr_output.F90 only under MARBL && CDR_FORCING"),
+    (
+        "upscale_output",
+        "do_upscale",
+        "upscale_output.F90 only under MARBL && MARBL_DIAGS",
+    ),
 )
 
 
@@ -1045,7 +1050,7 @@ def check_marbl_only_outputs(
     run_time_settings: Mapping[str, Any], *, bgc_mode_is_marbl: bool
 ) -> None:
     """Reject the output streams ucla-roms compiles only under MARBL
-    (:data:`_MARBL_ONLY_OUTPUT_FLAGS`) when MARBL is off, naming every one that
+    (:data:`MARBL_ONLY_OUTPUT_FLAGS`) when MARBL is off, naming every one that
     is set. ROMS would otherwise ignore them silently or abort at startup.
 
     Called by the resolver (authoring time), :func:`validate_run_time_sections`
@@ -1058,15 +1063,15 @@ def check_marbl_only_outputs(
     if bgc_mode_is_marbl:
         return
     on = [
-        f"{section}.{flag}=True"
-        for section, flag in _MARBL_ONLY_OUTPUT_FLAGS
+        (f"{section}.{flag}=True", reason)
+        for section, flag, reason in MARBL_ONLY_OUTPUT_FLAGS
         if (run_time_settings.get(section) or {}).get(flag)
     ]
     if on:
+        flags = ", ".join(flag for flag, _ in on)
+        reasons = " and ".join(reason for _, reason in on)
         raise ValueError(
-            f'{", ".join(on)} but bgc_mode != "marbl": ucla-roms compiles '
-            "cdr_output.F90 only under MARBL && CDR_FORCING and upscale_output.F90 "
-            "only under MARBL && MARBL_DIAGS."
+            f'{flags} but bgc_mode != "marbl": ucla-roms compiles {reasons}.'
         )
 
 

@@ -2497,15 +2497,13 @@ class ForgeExecutor(BaseModel):
                     "cdr_lite_output.do_cdr_lite_output=True (the _cdrtrc stream is "
                     "the only output the CDR-lite tracers appear in)."
                 )
-        # The MARBL-only output switches (do_cdr_output, do_upscale): wizard
-        # accordion edits and stored blueprints reach here without the resolver's
-        # check, so this is the enforcement point of record.
+        # do_cdr_output requires MARBL (rejected by the shared check, as is
+        # do_upscale), plus the CDR_FORCING cppdef (both gate compiling ucla-roms'
+        # cdr_output.F90), and the MARBL diagnostics ucla-roms looks up by name,
+        # unchecked.
         check_marbl_only_outputs(
             self._settings_run_time, bgc_mode_is_marbl=bgc_mode == "marbl"
         )
-        # do_cdr_output requires the CDR_FORCING cppdef (it gates compiling
-        # ucla-roms' cdr_output.F90, with MARBL), and the MARBL diagnostics
-        # ucla-roms looks up by name, unchecked.
         if self._settings_run_time.get("cdr_output", {}).get("do_cdr_output"):
             if not cppdefs.get("cdr_forcing"):
                 cppdefs["cdr_forcing"] = True

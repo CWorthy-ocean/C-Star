@@ -1832,11 +1832,12 @@ def _compute_v_sponge_default(grid_kwargs: dict[str, Any], grid: Any = None) -> 
 def cfl_dt(grid_kwargs: dict[str, Any], loaded_grid: Any = None) -> float:
     """Compute dt from the CFL criterion (pure arithmetic, no grid build).
 
+    Uses the baroclinic phase speed, which needs only the grid's size and shape:
     ``loaded_grid``, if given (a ``roms_tools.Grid``, e.g. a user-supplied
-    ``grid_file``'s), supplies ``size_x``/``size_y``/``nx``/``ny`` and the dataset;
-    otherwise they come from ``grid_kwargs`` directly. Raises ``ValueError`` for a
-    loaded grid with no ``size_x``/``size_y`` (a hand-made file roms-tools never
-    wrote those attrs to).
+    ``grid_file``'s), supplies ``size_x``/``size_y``/``nx``/``ny``; otherwise
+    they come from ``grid_kwargs`` directly. Raises ``ValueError`` for a loaded
+    grid with no ``size_x``/``size_y`` (a hand-made file roms-tools never wrote
+    those attrs to).
     """
     try:
         from cstar.applications.forge.util import compute_timestep_from_cfl
@@ -1850,7 +1851,6 @@ def cfl_dt(grid_kwargs: dict[str, Any], loaded_grid: Any = None) -> float:
         size_x, size_y, nx, ny = (
             grid_kwargs[k] for k in ("size_x", "size_y", "nx", "ny")
         )
-        grid_ds = None
     else:
         if loaded_grid.size_x is None:
             raise ValueError(
@@ -1859,11 +1859,11 @@ def cfl_dt(grid_kwargs: dict[str, Any], loaded_grid: Any = None) -> float:
                 "derivation is impossible; pass dt= explicitly."
             )
         size_x, size_y = loaded_grid.size_x, loaded_grid.size_y
-        nx, ny, grid_ds = loaded_grid.nx, loaded_grid.ny, loaded_grid.ds
+        nx, ny = loaded_grid.nx, loaded_grid.ny
     return compute_timestep_from_cfl(
         grid_size_x=size_x,
         grid_size_y=size_y,
         grid_nx=nx,
         grid_ny=ny,
-        grid_ds=grid_ds,
+        grid_ds=None,
     )

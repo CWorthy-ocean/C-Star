@@ -664,7 +664,7 @@ def test_marbl_only_outputs_pass_with_marbl_or_with_both_switches_off():
     check_marbl_only_outputs({}, bgc_mode_is_marbl=False)
 
 
-def test_marbl_only_outputs_name_every_switch_that_is_on():
+def test_marbl_only_outputs_name_every_switch_that_is_on_with_its_reason():
     settings = {
         "cdr_output": {"do_cdr_output": True},
         "upscale_output": {"do_upscale": True},
@@ -672,20 +672,37 @@ def test_marbl_only_outputs_name_every_switch_that_is_on():
     with pytest.raises(ValueError) as exc_info:
         check_marbl_only_outputs(settings, bgc_mode_is_marbl=False)
     message = str(exc_info.value)
-    assert "cdr_output.do_cdr_output=True" in message
-    assert "upscale_output.do_upscale=True" in message
-    assert "cdr_output.F90" in message
-    assert "upscale_output.F90" in message
+    assert "cdr_output.do_cdr_output=True, upscale_output.do_upscale=True" in message
+    assert "cdr_output.F90 only under MARBL && CDR_FORCING" in message
+    assert "upscale_output.F90 only under MARBL && MARBL_DIAGS" in message
 
 
 @pytest.mark.parametrize(
-    ("section", "flag"),
-    [("cdr_output", "do_cdr_output"), ("upscale_output", "do_upscale")],
+    ("section", "flag", "reason", "other_reason"),
+    [
+        (
+            "cdr_output",
+            "do_cdr_output",
+            "cdr_output.F90 only under MARBL && CDR_FORCING",
+            "upscale_output.F90",
+        ),
+        (
+            "upscale_output",
+            "do_upscale",
+            "upscale_output.F90 only under MARBL && MARBL_DIAGS",
+            "cdr_output.F90",
+        ),
+    ],
 )
-def test_marbl_only_outputs_name_only_the_switch_that_is_on(section, flag):
+def test_marbl_only_outputs_name_only_the_switch_that_is_on(
+    section, flag, reason, other_reason
+):
     with pytest.raises(ValueError, match=rf"^{section}\.{flag}=True but") as exc_info:
         check_marbl_only_outputs({section: {flag: True}}, bgc_mode_is_marbl=False)
-    assert exc_info.value.args[0].count("=True") == 1
+    message = exc_info.value.args[0]
+    assert reason in message
+    assert other_reason not in message
+    assert message.count("=True") == 1
 
 
 # ---------------------------------------------------------------------------

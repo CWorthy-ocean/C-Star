@@ -72,6 +72,8 @@ from cstar.applications.forge.blueprint import (
 )
 from cstar.applications.forge.migration import migrate_forcing_inputs
 from cstar.applications.forge.namelist_model import (
+    CDR_OUTPUT_SECTIONS,
+    MARBL_ONLY_OUTPUT_FLAGS,
     BgcMode,
     RunTimeSettings,
     bgc_mode_from_cppdefs,
@@ -975,19 +977,23 @@ _ACCORDION_EXCLUDED_FIELDS: dict[str, frozenset[str]] = {
 }
 
 # The BGC modes each settings key applies in; a key not listed applies in every
-# mode. A section key covers all of its fields. ucla-roms compiles cdr_output.F90 and
-# cdr_gas_exch_output.F90 only under MARBL, upscale_output.F90 only under MARBL &&
-# MARBL_DIAGS, and the bgc/marbl_bgc/dic_alk_correction groups, NHY/NOX forcing and
-# cdr_lite.cdr_online_carbonate_sensitivity read MARBL state; cdr_lite_output needs
-# CDR-lite tracers, which only MARBL and bgc_mode "cdr_lite" provide.
+# mode. A section key covers all of its fields. The output streams ucla-roms
+# compiles only under MARBL come from namelist_model, which owns that fact
+# (MARBL_ONLY_OUTPUT_FLAGS, and the requires_marbl rows of CDR_OUTPUT_SECTIONS).
+# The rest are wizard-only: the bgc/marbl_bgc/dic_alk_correction groups, NHY/NOX
+# forcing and cdr_lite.cdr_online_carbonate_sensitivity read MARBL state, and
+# cdr_lite_output needs CDR-lite tracers, which only MARBL and bgc_mode "cdr_lite"
+# provide.
 _MARBL_ONLY = frozenset({"marbl"})
 _BGC_MODE_SETTINGS: dict[str | tuple[str, str], frozenset[str]] = {
+    **dict.fromkeys(
+        [section for section, _flag, _why in MARBL_ONLY_OUTPUT_FLAGS]
+        + [row[0] for row in CDR_OUTPUT_SECTIONS if row[3]],
+        _MARBL_ONLY,
+    ),
     "bgc": _MARBL_ONLY,
     "marbl_bgc": _MARBL_ONLY,
     "dic_alk_correction": _MARBL_ONLY,
-    "cdr_output": _MARBL_ONLY,
-    "cdr_gas_exch_output": _MARBL_ONLY,
-    "upscale_output": _MARBL_ONLY,
     "cdr_lite_output": frozenset({"marbl", "cdr_lite"}),
     ("cppdefs", "nhy_forcing"): _MARBL_ONLY,
     ("cppdefs", "nox_forcing"): _MARBL_ONLY,
@@ -5618,6 +5624,19 @@ class ForgeBlueprintWizard:
             and editor.gather() != self._forcing_seed
         )
 
+    @property
+    def _active_overrides(self) -> dict[Any, Any]:
+        """The overrides that apply in the selected BGC mode -- the only ones that
+        reach the blueprint, the saved file and the counts. ``self._overrides`` is
+        the user's whole record, which keeps what a mode switch hides, so switching
+        back brings it back.
+        """
+        return {
+            (section, field): value
+            for (section, field), value in self._overrides.items()
+            if _applies_in(section, field, self.bgc_dd.value)
+        }
+
     def _build_forcing_editor(self, base_inputs: dict[str, Any]):
         self._forcing_editor = _ForcingEditor(
             self.W, base_inputs, on_change=self._on_forcing_change
@@ -5736,7 +5755,7 @@ class ForgeBlueprintWizard:
         its freshly-written catalog file (``new_name``) reproduce the exact same
         resolved blueprint currently shown (``self.config``)?
 
-        Reads ``self._gather()``/``self._overrides``/``self.catalog`` only --
+        Reads ``self._gather()``/``self._active_overrides``/``self.catalog`` only --
         mutates nothing on the wizard. Compares ``content_hash()``, which covers
         exactly the results-affecting data (excludes identity/composition/
         provenance/working_dir -- see ``ForgeBlueprint._HASH_EXCLUDE``), so a
@@ -5746,7 +5765,7 @@ class ForgeBlueprintWizard:
         if self.config is None:
             return False
         kw = self._gather()
-        overrides2 = dict(self._overrides)
+        overrides2 = self._active_overrides
         try:
             if spec == "output":
                 kw["output_settings"] = self.catalog.output_data(new_name)
@@ -7308,14 +7327,6 @@ class ForgeBlueprintWizard:
     def _rebuild(self, *_):
         if getattr(self, "_suspended", False):
             return
-        # The one place overrides are pruned to the BGC mode: whatever recorded one
-        # the mode doesn't apply to (a mode switch, an edit in a stale editor, a
-        # loaded blueprint's leftover) never reaches the resolve or the saved file.
-        self._overrides = {
-            (section, field): value
-            for (section, field), value in self._overrides.items()
-            if _applies_in(section, field, self.bgc_dd.value)
-        }
         # CDR plot cache: _rebuild() is the one hook that reliably fires for
         # every CDR-panel edit, every mode switch, and every grid-geometry edit
         # (see _invalidate_cdr_plot_cache's own docstring for why this spot was
@@ -7393,7 +7404,8 @@ class ForgeBlueprintWizard:
             self._editor_bgc_mode = self.bgc_dd.value
             self.editor_box.children = [self.editor.accordion]
 
-        effective = _apply_overrides(composed, self._overrides)
+        active_overrides = self._active_overrides
+        effective = _apply_overrides(composed, active_overrides)
         self._syncing = True
         try:
             self.editor.sync(effective)  # display effective; don't re-record as edits
@@ -7442,7 +7454,7 @@ class ForgeBlueprintWizard:
 
         comp = cfg.composition.model_copy(
             update={
-                "overrides": _overrides_nested(self._overrides),
+                "overrides": _overrides_nested(active_overrides),
                 "model": cfg.composition.model.model_copy(
                     update={"modified": model_modified}
                 ),
@@ -7579,13 +7591,14 @@ class ForgeBlueprintWizard:
         editor = self.editor
         if editor is None:
             return
+        active = self._active_overrides
         for i, (title, sections) in enumerate(editor._pane_sections.items()):
             fields_by_section = [editor._section_fields.get(s, []) for s in sections]
             n_fields = sum(len(fields) for fields in fields_by_section)
             pane_keys = {
                 (s, f) for s, fields in zip(sections, fields_by_section) for f in fields
             }
-            n_mod = sum(1 for k in self._overrides if k in pane_keys)
+            n_mod = sum(1 for k in active if k in pane_keys)
             editor.accordion.set_title(
                 i,
                 components.accordion_title(
@@ -7660,9 +7673,10 @@ class ForgeBlueprintWizard:
             if forcing_modified
             else components.chip("At preset defaults", "def")
         )
+        active = self._active_overrides
         chips["advanced"].value = (
-            components.chip(f"● {len(self._overrides)} modified", "info")
-            if self._overrides
+            components.chip(f"● {len(active)} modified", "info")
+            if active
             else components.chip("All defaults", "def")
         )
 
@@ -8105,8 +8119,13 @@ class ForgeBlueprintWizard:
             )
             self.output_dd.value = name if ok else old_value
             if ok:
+                # The saved OutputSpec carries the active output overrides; one a
+                # mode switch hides was not saved, so it stays on the record.
+                active = self._active_overrides
                 self._overrides = {
-                    k: v for k, v in self._overrides.items() if not _is_output_key(*k)
+                    k: v
+                    for k, v in self._overrides.items()
+                    if k not in active or not _is_output_key(*k)
                 }
         if ok:
             self._rebuild()
@@ -8174,8 +8193,11 @@ class ForgeBlueprintWizard:
             )
             self.model_dd.value = name if ok else old_value
             if ok:
+                active = self._active_overrides
                 self._overrides = {
-                    k: v for k, v in self._overrides.items() if _is_output_key(*k)
+                    k: v
+                    for k, v in self._overrides.items()
+                    if k not in active or _is_output_key(*k)
                 }
         if ok:
             self._rebuild()

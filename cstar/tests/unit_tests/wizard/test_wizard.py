@@ -1588,50 +1588,73 @@ class TestBgcModeSettings:
         wiz.bgc_dd.value = "marbl"
         assert ("cdr_output", "do_cdr_output") in wiz.editor._widgets
 
-    def test_marbl_only_overrides_are_dropped_on_leaving_marbl(self):
+    def test_marbl_only_overrides_are_hidden_on_leaving_marbl(self):
         wiz = self._wizard()
         before = wiz.config.model_settings["bgc"]["wrt_his"]
         self._toggle(wiz, ("bgc", "wrt_his"))
         self._toggle(wiz, ("cppdefs", "nhy_forcing"))
         self._toggle(wiz, ("cppdefs", "sponge_tune"))
-        assert set(wiz._overrides) == {
-            ("bgc", "wrt_his"),
-            ("cppdefs", "nhy_forcing"),
-            ("cppdefs", "sponge_tune"),
-        }
+        assert "3 modified" in wiz.card_chips["advanced"].value
 
         wiz.bgc_dd.value = "cdr_lite"
 
-        assert set(wiz._overrides) == {("cppdefs", "sponge_tune")}
+        # the user's record keeps all three; only the applicable one is active
+        assert len(wiz._overrides) == 3
+        assert set(wiz._active_overrides) == {("cppdefs", "sponge_tune")}
         assert wiz.config is not None, wiz.derived.value
         assert wiz.config.composition.overrides == {"cppdefs": {"sponge_tune": True}}
         settings = wiz.config.model_settings
         assert settings.get("bgc", {}).get("wrt_his", before) is before
         assert settings["cppdefs"]["nhy_forcing"] is False
         assert settings["cppdefs"]["sponge_tune"] is True
+        assert "1 modified" in wiz.card_chips["advanced"].value
+
+    def test_hidden_overrides_come_back_with_their_mode(self):
+        wiz = self._wizard()
+        before = wiz.config.model_settings["bgc"]["wrt_his"]
+        self._toggle(wiz, ("bgc", "wrt_his"))
+        self._toggle(wiz, ("cppdefs", "nhy_forcing"))
+        marbl_overrides = wiz.config.composition.overrides
+        assert marbl_overrides == {
+            "bgc": {"wrt_his": not before},
+            "cppdefs": {"nhy_forcing": False},
+        }
+
+        wiz.bgc_dd.value = "cdr_lite"
+        assert wiz.config.composition.overrides == {}
+        wiz.bgc_dd.value = "marbl"
+
+        assert wiz.config is not None, wiz.derived.value
+        assert wiz.config.composition.overrides == marbl_overrides
+        assert wiz.config.model_settings["bgc"]["wrt_his"] is (not before)
+        assert wiz.config.model_settings["cppdefs"]["nhy_forcing"] is False
+        assert wiz.editor._widgets[("bgc", "wrt_his")][0].value is (not before)
+        assert "2 modified" in wiz.card_chips["advanced"].value
 
     def test_overrides_are_kept_between_modes_that_share_them(self):
         wiz = self._wizard()
         wiz.bgc_dd.value = "cdr_lite"
         self._toggle(wiz, ("cdr_lite_output", "wrt_alk"))
         wiz.bgc_dd.value = "marbl"
-        assert ("cdr_lite_output", "wrt_alk") in wiz._overrides
+        assert ("cdr_lite_output", "wrt_alk") in wiz._active_overrides
 
-    def test_overrides_are_pruned_by_rebuild_alone(self):
-        """``_rebuild`` owns the pruning: a mode change made while suspended (as a
-        load does) keeps them until the load's own rebuild.
+    def test_a_suspended_mode_change_loses_nothing(self):
+        """A load changes the mode while suspended: the record is untouched, and the
+        load's own rebuild applies only what the new mode allows.
         """
         wiz = self._wizard()
         self._toggle(wiz, ("bgc", "wrt_his"))
         with wiz._suspend():
             wiz.bgc_dd.value = "cdr_lite"
         assert ("bgc", "wrt_his") in wiz._overrides
-        wiz._rebuild()
-        assert wiz._overrides == {}
+        wiz._rebuild()  # (resolve fails: a load would also have set the forcing)
+        assert ("bgc", "wrt_his") in wiz._overrides
+        assert wiz._active_overrides == {}
 
-    def test_edit_in_a_stale_editor_is_pruned_on_the_next_rebuild(self):
+    def test_edit_in_a_stale_editor_is_recorded_but_not_applied(self):
         """A mode switch whose resolve fails (cdr_lite with no CDR forcing yet)
-        leaves the old MARBL-mode editor live; an edit there must not stick.
+        leaves the old MARBL-mode editor live; an edit there is kept for its mode
+        but never reaches the blueprint under this one.
         """
         wiz = ForgeBlueprintWizard()
         wiz.start.value = date(2012, 1, 1)
@@ -1642,13 +1665,18 @@ class TestBgcModeSettings:
         assert wiz.editor._bgc_mode == "marbl"  # stale: the resolve failed
 
         self._toggle(wiz, ("bgc", "wrt_his"))
-        assert wiz._overrides == {}
+        assert ("bgc", "wrt_his") in wiz._overrides
+        assert wiz._active_overrides == {}
 
         wiz.cdr_mode_dd.value = "simple"
         assert wiz.config is not None, wiz.derived.value
         assert wiz.editor._bgc_mode == "cdr_lite"
-        assert wiz._overrides == {}
         assert wiz.config.composition.overrides == {}
+
+        wiz.bgc_dd.value = "marbl"
+        assert wiz.config.composition.overrides == {
+            "bgc": {"wrt_his": wiz.config.model_settings["bgc"]["wrt_his"]}
+        }
 
     def test_loading_a_marbl_blueprint_keeps_its_marbl_only_overrides(self):
         wiz = self._wizard()
@@ -1664,7 +1692,11 @@ class TestBgcModeSettings:
         assert wiz2._overrides == wiz._overrides
         assert wiz2.config is not None, wiz2.derived.value
 
-    def test_loading_drops_marbl_only_overrides_that_the_blueprints_mode_forbids(self):
+    def test_loaded_marbl_only_overrides_are_reported_and_not_applied(self):
+        """A blueprint whose mode forbids a MARBL-only output (hand-edited or
+        stale) loads with the problems reported; the wizard's blueprint and the
+        next save carry neither flag.
+        """
         wiz = self._wizard()
         wiz.bgc_dd.value = "cdr_lite"
         assert wiz.config is not None, wiz.derived.value
@@ -1677,13 +1709,13 @@ class TestBgcModeSettings:
         wiz2 = ForgeBlueprintWizard()
         problems = wiz2._populate_from(edited)
 
-        # reported, and not carried into the wizard's state or the next save
         assert any("cdr_output.do_cdr_output=True" in p for p in problems)
         assert any("upscale_output.do_upscale=True" in p for p in problems)
-        assert set(wiz2._overrides) == {("cppdefs", "sponge_tune")}
+        assert set(wiz2._active_overrides) == {("cppdefs", "sponge_tune")}
         assert wiz2.config is not None, wiz2.derived.value
         assert wiz2.config.model_settings["cdr_output"]["do_cdr_output"] is False
         assert wiz2.config.model_settings["upscale_output"]["do_upscale"] is False
+        assert wiz2.config.composition.overrides == {"cppdefs": {"sponge_tune": True}}
 
     def test_cdr_lite_stream_is_shown_on_without_recording_an_override(self):
         wiz = self._wizard()
@@ -3867,7 +3899,6 @@ class _FakeLoadedGrid:
         self.theta_s = 6.0
         self.theta_b = 3.0
         self.hc = 200.0
-        self.ds = None  # unused: CFL derivation defaults to baroclinic mode
 
 
 @pytest.fixture

@@ -7654,6 +7654,27 @@ class TestSaveModifiedSpecsToCatalog:
         assert wiz._overrides == {}
         assert "✓" in wiz.save_output_status.value
 
+    def test_save_output_spec_keeps_overrides_the_bgc_mode_hides(
+        self, isolated_catalog
+    ):
+        """The saved OutputSpec carries the active output overrides only: a MARBL-
+        only one hidden by bgc_mode "none" was not saved, so it stays on the
+        record for when MARBL comes back.
+        """
+        wiz = self._wizard(isolated_catalog)
+        wiz._overrides[("ocean_vars", "wrt_file_his")] = True
+        wiz._overrides[("bgc", "wrt_his")] = False
+        wiz.bgc_dd.value = "none"
+        assert wiz.config is not None, wiz.derived.value
+        assert wiz.config.composition.output.modified is True
+
+        wiz.save_output_name.value = "my-output"
+        wiz._on_save_output(None)
+
+        assert "✓" in wiz.save_output_status.value
+        assert wiz.config.composition.output.modified is False
+        assert wiz._overrides == {("bgc", "wrt_his"): False}
+
     def test_save_model_spec_marks_unmodified(self, isolated_catalog):
         wiz = self._wizard(isolated_catalog)
         wiz._overrides[("lateral_visc", "visc2")] = 999.0
