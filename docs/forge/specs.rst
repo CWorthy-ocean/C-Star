@@ -36,7 +36,9 @@ ForcingSpec (``ForcingSpec/<name>/Forcing.yaml``)
    tidal and river forcing, including biogeochemical sources and the
    interpolation method for each. The bundled entries pair GLORYS and ERA5
    with different biogeochemical sources (unified climatology, GLODAP and
-   WOA, or ESPER). See :doc:`source_datasets` for the sources.
+   WOA, or ESPER); ``glorys-era5-physics`` carries no biogeochemical source,
+   for ``bgc_mode`` ``none`` and ``cdr_lite``. See :doc:`source_datasets` for
+   the sources.
 
 OutputSpec (``OutputSpec/<name>/Output.yaml``)
    Which fields the model writes, how often, and how files are packed, per

@@ -1370,18 +1370,187 @@ def test_bgc_dd_marbl_gathers_into_cppdefs():
     assert wiz.config.code.marbl is not None
 
 
-def test_bgc_dd_none_with_default_bgc_forcing_surfaces_error_legibly():
-    """Flipping to 'none' while the bundled (BGC-carrying) ForcingSpec is still
-    selected must not crash the wizard -- _rebuild()'s existing exception handling
-    should catch the resolver's ValueError and surface it in the status area.
+def test_bgc_dd_none_with_non_default_bgc_forcing_surfaces_error_legibly():
+    """Flipping to 'none' while a (BGC-carrying) ForcingSpec other than the default
+    is selected must not crash the wizard -- _rebuild()'s existing exception
+    handling should catch the resolver's ValueError and surface it in the status
+    area, as one line pointing at the full message in the preview.
     """
     wiz = ForgeBlueprintWizard()
     wiz.start.value = date(2012, 1, 1)
     wiz.end.value = date(2012, 1, 2)
+    wiz.forcing_dd.value = "glorys-era5-esper"
     wiz.bgc_dd.value = "none"
     wiz._rebuild()
+    assert wiz.forcing_dd.value == "glorys-era5-esper"
     assert wiz.config is None
     assert "Invalid" in wiz.derived.value
+    assert "full message in the preview below" in wiz.derived.value
+    assert "\n" not in wiz.derived.value
+
+
+@pytest.mark.parametrize(
+    ("message", "suffixed"),
+    [
+        ("short single line", False),
+        ("x" * 250, True),
+        ("first line\nsecond line", True),
+    ],
+)
+def test_rebuild_error_status_points_at_the_preview_only_when_truncated(
+    monkeypatch, message, suffixed
+):
+    wiz = ForgeBlueprintWizard()
+    wiz.start.value = date(2012, 1, 1)
+    wiz.end.value = date(2012, 1, 2)
+
+    def _raise(**_kw):
+        raise ValueError(message)
+
+    monkeypatch.setattr("cstar.wizard.wizard.build_forge_blueprint", _raise)
+    wiz._rebuild()
+    assert wiz.config is None
+    assert ("full message in the preview below" in wiz.derived.value) is suffixed
+
+
+class TestBgcModeForcingDefault:
+    """The default ForcingSpec follows the BGC mode while it is untouched: the
+    BGC-carrying default under MARBL, the physics-only one without (the resolver
+    rejects BGC forcing there). A hand-edited, non-default or loaded forcing is
+    never swapped.
+    """
+
+    PHYSICS = "glorys-era5-physics"
+    UNIFIED = "glorys-era5-unified"
+
+    @staticmethod
+    def _wizard(catalog=None):
+        wiz = (
+            ForgeBlueprintWizard() if catalog is None else ForgeBlueprintWizard(catalog)
+        )
+        wiz.start.value = date(2012, 1, 1)
+        wiz.end.value = date(2012, 1, 2)
+        wiz.use_pio_chk.value = False  # off: no CDF-5 conversion warning per rebuild
+        return wiz
+
+    @staticmethod
+    def _count_resolves(monkeypatch) -> list[int]:
+        from cstar.wizard import wizard as wizard_module
+
+        calls: list[int] = []
+        real = wizard_module.build_forge_blueprint
+
+        def _counted(**kw):
+            calls.append(1)
+            return real(**kw)
+
+        monkeypatch.setattr(wizard_module, "build_forge_blueprint", _counted)
+        return calls
+
+    def test_marbl_default_is_the_unified_spec(self):
+        assert self._wizard().forcing_dd.value == self.UNIFIED
+
+    def test_init_default_follows_the_model_specs_bgc_mode(self, tmp_path):
+        import shutil
+
+        from cstar.catalog.domain_catalog import _DEFAULT_CATALOG_ROOT, DomainCatalog
+
+        root = tmp_path / "catalog"
+        shutil.copytree(_DEFAULT_CATALOG_ROOT, root)
+        model_yaml = root / "ModelSpec" / "roms-marbl-0.10-default" / "model.yaml"
+        text = model_yaml.read_text()
+        assert "bgc_mode: marbl" in text
+        model_yaml.write_text(text.replace("bgc_mode: marbl", "bgc_mode: cdr_lite"))
+
+        wiz = ForgeBlueprintWizard(catalog=DomainCatalog(catalog_root=root))
+        assert wiz.bgc_dd.value == "cdr_lite"
+        assert wiz.forcing_dd.value == self.PHYSICS
+
+    @pytest.mark.parametrize("mode", ["none", "cdr_lite"])
+    def test_leaving_marbl_switches_the_untouched_default_to_physics(self, mode):
+        wiz = self._wizard()
+        wiz.cdr_mode_dd.value = "simple"  # cdr_lite needs a CDR forcing to resolve
+        wiz.bgc_dd.value = mode
+        assert wiz.forcing_dd.value == self.PHYSICS
+        assert wiz.config is not None, wiz.derived.value
+        assert wiz.config.composition.forcing.name == self.PHYSICS
+        assert wiz.config.composition.forcing.modified is False
+
+    def test_entering_marbl_switches_the_untouched_physics_spec_back(self):
+        wiz = self._wizard()
+        wiz.bgc_dd.value = "none"
+        assert wiz.forcing_dd.value == self.PHYSICS
+        wiz.bgc_dd.value = "marbl"
+        assert wiz.forcing_dd.value == self.UNIFIED
+        assert wiz.config is not None, wiz.derived.value
+
+    def test_between_modes_without_marbl_nothing_switches(self, monkeypatch):
+        wiz = self._wizard()
+        wiz.bgc_dd.value = "none"
+        calls = self._count_resolves(monkeypatch)
+        wiz.bgc_dd.value = "cdr_lite"
+        assert wiz.forcing_dd.value == self.PHYSICS
+        assert len(calls) == 1
+
+    @pytest.mark.parametrize("mode", ["none", "cdr_lite"])
+    def test_one_resolve_per_mode_change(self, monkeypatch, mode):
+        wiz = self._wizard()
+        calls = self._count_resolves(monkeypatch)
+        wiz.bgc_dd.value = mode  # switches the forcing too
+        assert len(calls) == 1
+        calls.clear()
+        wiz.bgc_dd.value = "marbl"
+        assert len(calls) == 1
+
+    def test_one_resolve_when_the_forcing_stays(self, monkeypatch):
+        wiz = self._wizard()
+        wiz.forcing_dd.value = "glorys-era5-esper"
+        calls = self._count_resolves(monkeypatch)
+        wiz.bgc_dd.value = "none"
+        assert len(calls) == 1
+
+    def test_an_edited_forcing_is_left_alone(self):
+        wiz = self._wizard()
+        wiz._forcing_editor._add("surface")
+        assert wiz._forcing_modified()
+        wiz.bgc_dd.value = "none"
+        assert wiz.forcing_dd.value == self.UNIFIED
+
+    def test_a_non_default_spec_is_left_alone(self):
+        wiz = self._wizard()
+        wiz.forcing_dd.value = "glorys-era5-esper"
+        wiz.bgc_dd.value = "none"
+        assert wiz.forcing_dd.value == "glorys-era5-esper"
+        wiz.bgc_dd.value = "marbl"
+        assert wiz.forcing_dd.value == "glorys-era5-esper"
+
+    def test_nothing_switches_while_suspended(self, monkeypatch):
+        wiz = self._wizard()
+        calls = self._count_resolves(monkeypatch)
+        with wiz._suspend():
+            wiz.bgc_dd.value = "none"
+        assert wiz.forcing_dd.value == self.UNIFIED
+        assert calls == []
+
+    def test_loading_a_blueprint_keeps_its_recorded_forcing(self, tmp_path):
+        """A file recorded with the BGC-carrying default but a ``bgc_mode`` of none
+        (invalid at resolve, but the load must not rewrite what the file says)
+        loads with that forcing still selected.
+        """
+        w1 = self._wizard()
+        w1._boundaries_touched = True
+        path = tmp_path / "forge_blueprint.yaml"
+        w1.save_path.value = str(path)
+        w1._on_save(None)
+        text = path.read_text()
+        assert "marbl: true" in text
+        path.write_text(text.replace("marbl: true", "marbl: false"))
+
+        w2 = self._wizard()
+        w2.load_path.value = str(path)
+        w2._on_load_path(None)
+        assert w2.bgc_dd.value == "none"
+        assert w2.forcing_dd.value == self.UNIFIED
 
 
 def test_use_pio_chk_default_seeded_from_model_spec():

@@ -3728,6 +3728,10 @@ _DEFAULT_OUTPUT_SPEC = "daily-restarts"
 # ForcingSpec happens to sort first.
 _DEFAULT_FORCING_SPEC = "glorys-era5-unified"
 
+# The same default for a run without MARBL (bgc_mode "none"/"cdr_lite"): the
+# resolver rejects any BGC forcing there, which _DEFAULT_FORCING_SPEC carries.
+_DEFAULT_PHYSICS_FORCING_SPEC = "glorys-era5-physics"
+
 _GRID_INT = ("nx", "ny", "N")
 _GRID_FLOAT = ("size_x", "size_y", "center_lon", "center_lat", "rot")
 _SCOORD = ("theta_s", "theta_b", "hc")
@@ -4357,15 +4361,9 @@ class ForgeBlueprintWizard:
         # --- forcing spec (ForcingSpec selection + add/remove/edit editor) ---
         # A ForcingSpec must always be explicitly selected -- ModelSpec no longer
         # embeds a default forcing.
-        _forcing_names = list(self.catalog.forcing_names)
         self.forcing_dd = W.Dropdown(
-            options=self._dd_options(_forcing_names, "forcing"),
-            # Prefer the bundled default explicitly -- see _DEFAULT_FORCING_SPEC.
-            value=(
-                _DEFAULT_FORCING_SPEC
-                if _DEFAULT_FORCING_SPEC in _forcing_names
-                else (_forcing_names[0] if _forcing_names else None)
-            ),
+            options=self._dd_options(list(self.catalog.forcing_names), "forcing"),
+            value=self._default_forcing_spec(self._model_default_bgc_mode()),
             description="Forcing:",
             style={"description_width": "110px"},
             tooltip="Select a named ForcingSpec from the catalog to seed all forcing "
@@ -4938,6 +4936,7 @@ class ForgeBlueprintWizard:
         self.model_dd.observe(self._on_model_change, names="value")
         self.bgc_dd.observe(self._sync_marbl_ref_visibility, names="value")
         self.bgc_dd.observe(self._sync_carbonate_sensitivity_visibility, names="value")
+        self.bgc_dd.observe(self._on_bgc_mode, names="value")
         self.cs_source_dd.observe(
             self._sync_carbonate_sensitivity_visibility, names="value"
         )
@@ -4959,7 +4958,6 @@ class ForgeBlueprintWizard:
             self.use_pio_chk,
             self.auto_tiling_chk,
             self.n_cores,
-            self.bgc_dd,
             self.cs_source_dd,
             self.roms_ref,
             self.marbl_ref,
@@ -5358,7 +5356,9 @@ class ForgeBlueprintWizard:
     def _on_model_change(self, _change):
         # a different model has different defaults -> existing overrides no longer apply.
         # Forcing/Output are independent catalog dimensions from the model (a ForcingSpec/
-        # OutputSpec doesn't reference a model), so switching models never touches them.
+        # OutputSpec doesn't reference a model), so switching models never re-picks them
+        # -- except that an untouched default ForcingSpec follows the new model's
+        # declared bgc_mode, via the bgc_dd change below (see _on_bgc_mode).
         if getattr(self, "_suspended", False):
             return
         self._overrides = {}
@@ -5530,6 +5530,31 @@ class ForgeBlueprintWizard:
         """
         return self.roms_ref.value.strip() or self._model_default_roms_ref() or None
 
+    def _default_forcing_spec(self, bgc_mode: str) -> str | None:
+        """The ForcingSpec preselected for *bgc_mode*: the named bundled default
+        when the catalog has it (see ``_DEFAULT_FORCING_SPEC``), else the plain
+        default, else the first spec.
+        """
+        names = list(self.catalog.forcing_names)
+        preferred = (
+            _DEFAULT_FORCING_SPEC
+            if bgc_mode == "marbl"
+            else _DEFAULT_PHYSICS_FORCING_SPEC
+        )
+        for name in (preferred, _DEFAULT_FORCING_SPEC):
+            if name in names:
+                return name
+        return names[0] if names else None
+
+    def _forcing_modified(self) -> bool:
+        """Whether the forcing editor deviates from the last catalog pick."""
+        editor = self._forcing_editor
+        return (
+            editor is not None
+            and self._forcing_seed is not None
+            and editor.gather() != self._forcing_seed
+        )
+
     def _build_forcing_editor(self, base_inputs: dict[str, Any]):
         self._forcing_editor = _ForcingEditor(
             self.W, base_inputs, on_change=self._on_forcing_change
@@ -5569,6 +5594,24 @@ class ForgeBlueprintWizard:
             )
         self._forcing_seed = self._forcing_editor.gather()
         self._rebuild()
+
+    def _on_bgc_mode(self, change) -> None:
+        """A BGC mode change re-resolves once. An untouched default ForcingSpec
+        follows the mode (the BGC-carrying default for MARBL, the physics-only
+        one otherwise); a hand-edited or non-default forcing is left alone.
+        """
+        if getattr(self, "_suspended", False) or self._syncing:
+            return
+        old_default = self._default_forcing_spec(change["old"])
+        new_default = self._default_forcing_spec(change["new"])
+        if (
+            self.forcing_dd.value == old_default
+            and new_default != old_default
+            and not self._forcing_modified()
+        ):
+            self.forcing_dd.value = new_default  # _on_forcing_spec rebuilds
+        else:
+            self._rebuild()
 
     def _on_forcing_change(self):
         # composition.forcing.modified is derived in _rebuild() by comparing the
@@ -7204,7 +7247,10 @@ class ForgeBlueprintWizard:
             self.download_link_review.value = ""
             with self.preview:
                 print(f"{type(exc).__name__}: {exc}")
-            error = f"{type(exc).__name__}: {exc}".splitlines()[0][:200]
+            lines = f"{type(exc).__name__}: {exc}".splitlines()
+            error = lines[0][:200]
+            if len(lines) > 1 or len(lines[0]) > len(error):
+                error += " — full message in the preview below"
             self._update_status(None, error=error)
             return
 
@@ -7285,10 +7331,7 @@ class ForgeBlueprintWizard:
             and self._domain_seed is not None
             and self._domain_snapshot() != self._domain_seed
         )
-        forcing_modified = (
-            self._forcing_seed is not None
-            and self._forcing_editor.gather() != self._forcing_seed
-        )
+        forcing_modified = self._forcing_modified()
         cdr_modified = (
             self.cdr_dd.value != "<custom>"
             and self._cdr_seed is not None

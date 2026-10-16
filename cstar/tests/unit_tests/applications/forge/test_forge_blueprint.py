@@ -4736,7 +4736,8 @@ def test_resolver_bgc_mode_none_raises_with_bgc_forcing():
 
 
 # A minimal physics-only forcing selection (no bgc_source/include_bgc/bgc-type
-# items) -- no catalog ForcingSpec is physics-only today, so this is hand-authored.
+# items), kept hand-authored so the resolver tests below don't depend on any
+# one bundled ForcingSpec (``glorys-era5-physics`` has its own tests).
 _PHYSICS_ONLY_FORCING = {
     "initial_conditions": {"source": {"name": "GLORYS", "glorys_layout": "regional"}},
     "forcing": {
@@ -4753,6 +4754,32 @@ def test_resolver_bgc_mode_none_with_physics_only_forcing():
     # the namelist carries nt_bgc = 0 and per-tracer arrays size to T + S.
     assert cfg.model_settings["param"]["ntrc_bio"] == 0
     assert cfg.n_tracers == 2
+
+
+def test_bundled_physics_forcing_spec_resolves_without_marbl():
+    """``glorys-era5-physics`` is the glorys-era5-unified forcing minus every BGC
+    item, so it is what bgc_mode "none" (and "cdr_lite") selects by default.
+    """
+    unified = _CATALOG.forcing_data("glorys-era5-unified")
+    physics = _CATALOG.forcing_data("glorys-era5-physics")
+    cfg = _build(bgc_mode="none", forcing_inputs=physics)
+    assert cfg.model_settings["cppdefs"]["marbl"] is False
+    assert [i.source.name for i in cfg.forcing.surface] == ["ERA5", "WOA"]
+    assert cfg.forcing.boundary.bgc_sources == []
+    assert cfg.forcing.initial_conditions.bgc_sources == []
+    assert [i.include_bgc for i in cfg.forcing.river] == [False]
+    # Same physics, tides and rivers as the BGC-carrying default.
+    assert (
+        physics["initial_conditions"]["source"]
+        == (unified["initial_conditions"]["source"])
+    )
+    assert physics["forcing"]["tidal"] == unified["forcing"]["tidal"]
+
+
+def test_bundled_physics_forcing_spec_resolves_under_cdr_lite():
+    cfg = _build_cdr_lite(forcing_inputs=_CATALOG.forcing_data("glorys-era5-physics"))
+    assert cfg.model_settings["cppdefs"]["cdr_lite"] is True
+    assert cfg.model_settings["cppdefs"]["marbl"] is False
 
 
 def test_resolver_bgc_mode_none_rejects_bgc_tracer_override():
