@@ -1,7 +1,5 @@
 import logging
-import os
 import shutil
-import sys
 from collections.abc import Generator
 from pathlib import Path
 from typing import Any
@@ -247,24 +245,33 @@ class TestCDRUpscalerTracers:
                     _profiles(src, f"{name}_add"),
                 )
 
+    def test_a_tracer_missing_from_an_active_boundary_is_left_out_with_a_warning(
+        self, tmp_path: Path, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """ucla-roms writes every CDR-lite tracer on every open boundary, so a gap
+        means incomplete `_uscl` files: the tracer is dropped, and said so.
+        """
+        uscl = tmp_path / "roms_uscl.20120101000000.nc"
+        _write_uscl(
+            uscl,
+            {"CDR_OAE_ALK1": ("north", "east"), "CDR_OAE_DIC1": ("north",)},
+        )
+
+        with caplog.at_level(logging.WARNING, logger="cstar.applications.upscaler"):
+            upscaler = CDRUpscaler([uscl])
+
+        assert upscaler.tracer_names == ["ALK", "DIC", "CDR_OAE_ALK1"]
+        assert "Leaving CDR_OAE_DIC1 out of the CDR forcing" in caplog.text
+        assert "['east']" in caplog.text
+
+    @pytest.mark.skipif(shutil.which("nccopy") is None, reason="nccopy not installed")
     def test_tracer_names_are_fixed_length_characters_after_cdf5_conversion(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+        self, tmp_path: Path
     ) -> None:
         """ROMS reads `cdr_trc_name` as NC_CHAR with dimensions (tracer, nchar);
         NC_STRING would abort its init. The PIO path converts the file to CDF-5
         with `nccopy`, which must keep it that way.
         """
-        # A conda env run by absolute interpreter path has nccopy next to the
-        # interpreter but not necessarily on PATH.
-        nccopy = shutil.which("nccopy") or shutil.which(
-            "nccopy", path=str(Path(sys.executable).parent)
-        )
-        if nccopy is None:
-            pytest.skip("nccopy is not installed")
-        else:
-            monkeypatch.setenv(
-                "PATH", f"{Path(nccopy).parent}{os.pathsep}{os.environ['PATH']}"
-            )
         uscl = tmp_path / "roms_uscl.20120101000000.nc"
         _write_uscl(uscl, {"CDR_OAE_ALK1": ("north", "east")})
         _upscale(uscl, tmp_path / "cdr_nc4.nc")

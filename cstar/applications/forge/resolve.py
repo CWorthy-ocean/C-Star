@@ -992,9 +992,9 @@ def build_forge_blueprint(
     # MARBL and what the upscaled mode writes for cdr_nz_chd, so derive it before
     # the CDR settings.
     roms_block = (model.get("code") or {}).get("roms") or {}
-    effective_roms_ref = (
-        roms_ref or roms_block.get("commit") or roms_block.get("branch")
-    )
+    pinned_roms_ref = roms_ref or roms_block.get("commit") or roms_block.get("branch")
+    # str(): YAML can load a numeric-looking pin (e.g. 1.0) as a number.
+    effective_roms_ref = str(pinned_roms_ref) if pinned_roms_ref is not None else None
     # river_frc/cdr_frc are Forcing-owned, not a ModelSpec default: seed the disabled
     # baseline, then let the ForcingSpec's own top-level river_frc/cdr_frc (if any)
     # override it. Generation later overwrites the presence/count leaves for real
@@ -1037,9 +1037,7 @@ def build_forge_blueprint(
         # ucla-roms 0.11.0 cdr_nz_chd = 0 reads it from the file's s_rho, and any
         # other value that disagrees with the file aborts at init; earlier
         # releases keep the seeded value and need it to match the child.
-        if cdr_nz_chd_from_file(
-            str(effective_roms_ref) if effective_roms_ref is not None else None
-        ):
+        if cdr_nz_chd_from_file(effective_roms_ref):
             settings["cdr_frc"]["nz_chd"] = 0
     # extract_data (child-grid nesting) is Domain-owned when active (the nesting
     # block below overwrites it from grid_kwargs_child/metadata_child); seed the
@@ -1194,16 +1192,14 @@ def build_forge_blueprint(
                 'bgc_mode "cdr_lite" needs a CDR forcing with cdr_lite releases; '
                 "cdr.mode is 'none', so nothing would be simulated."
             )
-        check_cdr_lite_mode_roms(
-            str(effective_roms_ref) if effective_roms_ref is not None else None
-        )
+        check_cdr_lite_mode_roms(effective_roms_ref)
     if cdr_spec.mode != "none":
         settings["cppdefs"]["cdr_forcing"] = True
     # Called first so an unsupported mode is rejected even if do_cdr_output is set.
     implied_cdr_output = check_cdr_forcing_mode(
         cdr_spec.mode,
         bgc_mode=bgc_mode,
-        roms_ref=str(effective_roms_ref) if effective_roms_ref is not None else None,
+        roms_ref=effective_roms_ref,
     )
     # After the version gate, so a pin too old for the mode is reported as such.
     if bgc_mode == "cdr_lite" and cdr_spec.mode == "upscaled":
@@ -1230,9 +1226,7 @@ def build_forge_blueprint(
         # selection; this internal version probe shouldn't repeat it -- the
         # engine/executor selection paths already surface it once per run.
         warnings.simplefilter("ignore", UserWarning)
-        settings_cls = run_time_settings_for_ref(
-            str(effective_roms_ref) if effective_roms_ref is not None else None
-        )
+        settings_cls = run_time_settings_for_ref(effective_roms_ref)
     # Drop any version-gated section (e.g. cdr_lite_output, ucla-roms >= 0.7.0)
     # this pin's schema doesn't model. OutputSpecs are shared across ModelSpecs
     # pinned to different ucla-roms releases (the same "daily-restarts"
