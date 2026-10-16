@@ -41,6 +41,7 @@ from cstar.applications.forge.blueprint import (
 )
 from cstar.applications.forge.input_data import netcdf_basename
 from cstar.applications.forge.migration import migrate_forge_blueprint_data
+from cstar.applications.forge.namelist_model import validate_run_time_sections
 from cstar.applications.forge.resolve import (
     _warn_user_files_need_pio_conversion,
     build_forge_blueprint,
@@ -75,6 +76,10 @@ _MODEL_DIR_ROMS070 = _BUNDLED_CATALOG / "ModelSpec" / "roms-marbl-0.7-default"
 _MODEL_DIR_ROMS080 = _BUNDLED_CATALOG / "ModelSpec" / "roms-marbl-0.8-default"
 _MODEL_DIR_ROMS090 = _BUNDLED_CATALOG / "ModelSpec" / "roms-marbl-0.9-default"
 _MODEL_DIR_ROMS0100 = _BUNDLED_CATALOG / "ModelSpec" / "roms-marbl-0.10-default"
+# ucla-roms >= 0.11.0 ModelSpec (adds marbl_bgc.use_constant_fe/constant_fe_value to
+# &MARBL_BIOGEOCHEMISTRY_SETTINGS, PR #391) -- used by the versioned-namelist golden
+# test below.
+_MODEL_DIR_ROMS0110 = _BUNDLED_CATALOG / "ModelSpec" / "roms-marbl-0.11-default"
 _GRID_KWARGS = dict(
     nx=6,
     ny=2,
@@ -2173,6 +2178,119 @@ def test_golden_model_settings_test_tiny_roms090():
     )
 
 
+def test_golden_model_settings_test_tiny_roms0110():
+    """Behavior-preservation snapshot for the ``roms-marbl-0.11-default`` ModelSpec
+    (ucla-roms >= 0.11.0, constant-iron option), resolved from the same test-tiny
+    domain/forcing/output setup as ``test_golden_model_settings_test_tiny_roms090``.
+
+    The difference from that fixture is ``marbl_bgc.use_constant_fe``/
+    ``constant_fe_value``, which the ModelSpec declares (off, at the ucla-roms
+    reference value). Regenerate the fixture with
+    ``json.dumps(cfg.model_settings, indent=2, sort_keys=True, default=str)``
+    plus a trailing newline, from ``_build(model_dir=_MODEL_DIR_ROMS0110)``.
+    """
+    import json
+
+    golden_path = (
+        Path(__file__).parent
+        / "fixtures"
+        / "golden_model_settings_test-tiny-roms0110.json"
+    )
+    golden = json.loads(golden_path.read_text())
+    cfg = _build(model_dir=_MODEL_DIR_ROMS0110)  # test-tiny, dt=7200
+    got = json.loads(json.dumps(cfg.model_settings, sort_keys=True, default=str))
+    assert got == golden, (
+        "Resolved model_settings for test-tiny (roms-marbl-0.11-default) drifted "
+        "from the golden fixture. If this is an intentional schema/default "
+        "change, regenerate tests/fixtures/golden_model_settings_test-tiny-"
+        "roms0110.json; otherwise the change is a regression in the settings the "
+        "executor feeds to namelist.nml / cppdefs.opt."
+    )
+
+
+_CONSTANT_FE_ON = {"marbl_bgc": {"use_constant_fe": True}}
+
+
+def test_resolver_0_11_model_spec_carries_the_constant_fe_keys():
+    cfg = _build(model_dir=_MODEL_DIR_ROMS0110)
+    assert cfg.code.roms.commit == "0.11.0"
+    marbl_bgc = cfg.model_settings["marbl_bgc"]
+    assert marbl_bgc["use_constant_fe"] is False
+    assert marbl_bgc["constant_fe_value"] == 3.0e-3
+
+
+def test_resolver_applies_a_constant_fe_override_on_a_marbl_build():
+    cfg = _build(
+        model_dir=_MODEL_DIR_ROMS0110,
+        run_time_overrides={
+            "marbl_bgc": {"use_constant_fe": True, "constant_fe_value": 5.0e-4}
+        },
+    )
+    marbl_bgc = cfg.model_settings["marbl_bgc"]
+    assert marbl_bgc["use_constant_fe"] is True
+    assert marbl_bgc["constant_fe_value"] == 5.0e-4
+
+
+def test_resolver_keeps_the_switched_off_constant_fe_in_a_non_marbl_build():
+    """``marbl_bgc`` is not stripped for ``bgc_mode`` "none": the ModelSpec's keys
+    stay in the settings, switched off, and the MARBL guard passes them.
+    """
+    cfg = _build(
+        model_dir=_MODEL_DIR_ROMS0110,
+        bgc_mode="none",
+        forcing_inputs=_PHYSICS_ONLY_FORCING,
+    )
+    assert cfg.model_settings["cppdefs"]["marbl"] is False
+    assert cfg.model_settings["marbl_bgc"]["use_constant_fe"] is False
+
+
+def test_resolver_rejects_constant_fe_without_marbl():
+    """``marbl_bgc`` survives into a ``bgc_mode`` "none" build (the ModelSpec
+    default), so an override can request constant iron there; ucla-roms never
+    reads the group without MARBL, so the resolver refuses.
+    """
+    with pytest.raises(ValueError, match=r"marbl_bgc\.use_constant_fe.*MARBL is off"):
+        _build(
+            model_dir=_MODEL_DIR_ROMS0110,
+            bgc_mode="none",
+            forcing_inputs=_PHYSICS_ONLY_FORCING,
+            run_time_overrides=_CONSTANT_FE_ON,
+        )
+
+
+def test_resolver_rejects_constant_fe_in_cdr_lite_mode():
+    with pytest.raises(ValueError, match=r"marbl_bgc\.use_constant_fe.*MARBL is off"):
+        _build_cdr_lite(
+            model_dir=_MODEL_DIR_ROMS0110, run_time_overrides=_CONSTANT_FE_ON
+        )
+
+
+def test_resolver_constant_fe_guard_reads_the_merged_cppdefs():
+    """A compile-time override can turn MARBL off after ``bgc_mode`` set it, like
+    the BGC tracer count it sits beside: the guard follows the merged cppdefs
+    (what will compile), so the resolver agrees with ``configure_build``.
+    """
+    with pytest.raises(ValueError, match=r"marbl_bgc\.use_constant_fe.*MARBL is off"):
+        _build(
+            model_dir=_MODEL_DIR_ROMS0110,
+            compile_time_overrides={"cppdefs": {"marbl": False}},
+            run_time_overrides={"param": {"ntrc_bio": 0}, **_CONSTANT_FE_ON},
+        )
+
+
+def test_constant_fe_on_a_pre_0_11_0_pin_is_reported_by_run_time_validation():
+    """A pre-0.11.0 pin has no constant-iron option: the request is stored in the
+    blueprint's settings, and the validation ``process_forge_blueprint`` runs
+    before any data work reports it, naming the release that supports it.
+    """
+    cfg = _build(model_dir=_MODEL_DIR_ROMS0100, run_time_overrides=_CONSTANT_FE_ON)
+    problems = validate_run_time_sections(
+        cfg.model_settings, roms_ref=cfg.code.roms.commit
+    )
+    assert len(problems) == 1
+    assert "marbl_bgc.use_constant_fe requires ucla-roms >= 0.11.0" in problems[0]
+
+
 @pytest.mark.parametrize(
     ("model_dir", "roms_commit"),
     [(_MODEL_DIR_ROMS080, "0.8.0"), (_MODEL_DIR_ROMS090, "0.9.1")],
@@ -3032,6 +3150,7 @@ def test_bundled_output_specs_satisfy_roms_divides_rst_precheck(spec_name):
         "roms-marbl-0.8-default",
         "roms-marbl-0.9-default",
         "roms-marbl-0.10-default",
+        "roms-marbl-0.11-default",
     ],
 )
 def test_model_spec_streams_satisfy_roms_divides_rst_precheck(
@@ -5076,6 +5195,7 @@ def test_resolved_templates_carry_modelspec_authored_hashes():
         ("roms-marbl-0.8-default", True),
         ("roms-marbl-0.9-default", True),
         ("roms-marbl-0.10-default", True),
+        ("roms-marbl-0.11-default", True),
         ("pio-dev", True),
     ],
 )

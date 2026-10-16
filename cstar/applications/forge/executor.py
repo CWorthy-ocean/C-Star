@@ -49,6 +49,7 @@ from cstar.applications.forge.namelist_model import (
     check_cdr_lite_mode_roms,
     check_cdr_lite_sections,
     check_cdr_output_sections,
+    check_constant_fe,
     check_output_streams_divide_rst,
     check_river_tracer_counts,
     check_rst_period_divisible,
@@ -2562,6 +2563,14 @@ class ForgeExecutor(BaseModel):
         # with unnamed tracers. Shared via check_bgc_tracer_count.
         check_bgc_tracer_count(
             self._settings_run_time.get("param") or {},
+            bgc_mode_is_marbl=cppdefs.get("marbl", False),
+        )
+
+        # Constant iron net, mirroring the resolver's: a stored or hand-edited
+        # blueprint can request marbl_bgc.use_constant_fe with MARBL off, where
+        # ucla-roms never reads the group. Shared via check_constant_fe.
+        check_constant_fe(
+            self._settings_run_time.get("marbl_bgc") or {},
             bgc_mode_is_marbl=cppdefs.get("marbl", False),
         )
 

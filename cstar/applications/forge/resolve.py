@@ -76,6 +76,7 @@ from cstar.applications.forge.namelist_model import (
     check_cdr_lite_mode_roms,
     check_cdr_lite_sections,
     check_cdr_output_sections,
+    check_constant_fe,
     check_output_streams_divide_rst,
     check_rst_period_divisible,
     cppdefs_for_precheck,
@@ -1280,6 +1281,15 @@ def build_forge_blueprint(
     # merged cppdefs (what will compile), like configure_build.
     check_bgc_tracer_count(
         settings.get("param") or {},
+        bgc_mode_is_marbl=settings["cppdefs"].get("marbl", False),
+    )
+
+    # ----- constant iron needs MARBL -----------------------------------------
+    # marbl_bgc stays in a non-MARBL build's settings (the ModelSpec default), so
+    # an override can request marbl_bgc.use_constant_fe there. Keyed on the merged
+    # cppdefs, like the tracer count above, so it agrees with configure_build.
+    check_constant_fe(
+        settings.get("marbl_bgc") or {},
         bgc_mode_is_marbl=settings["cppdefs"].get("marbl", False),
     )
 

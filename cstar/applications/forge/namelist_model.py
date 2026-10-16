@@ -43,6 +43,7 @@ from pydantic import (
 )
 
 from cstar.roms.namelist import (
+    UCLA_ROMS_0_11_0,
     ForcingFiles,
     Gamma2Settings,
     LateralViscSettings,
@@ -54,6 +55,7 @@ from cstar.roms.namelist import (
     RomsNamelistV0_6_0,
     RomsNamelistV0_7_0,
     RomsNamelistV0_9_0,
+    RomsNamelistV0_11_0,
     SimulationNameSettings,
     SurfFrcSettings,
     TracerDiff2,
@@ -1232,11 +1234,91 @@ class VSpongeCfg(_SettingsSection):
     v_sponge: float
 
 
-class MarblBgcCfg(_SettingsSection):
+_BOOL_ADAPTER: TypeAdapter[bool] = TypeAdapter(bool)
+
+
+def _constant_fe_requested(value: Any) -> bool:
+    """Whether a ``marbl_bgc.use_constant_fe`` value asks for constant iron.
+
+    The one parse rule for the version gate (:class:`MarblBgcCfg`) and the MARBL
+    guard (:func:`check_constant_fe`): a value pydantic reads as a bool is that
+    bool, ``None`` means unset, and anything else unparseable is not an "off"
+    value, so it counts as requested.
+    """
+    if value is None:
+        return False
+    try:
+        return _BOOL_ADAPTER.validate_python(value)
+    except ValidationError:
+        return True
+
+
+class _MarblBgcCfgCommon(_SettingsSection):
     marbl_config_file: str
     marbl_tracers_to_write: list[str] | str
     marbl_diagnostics_to_write: list[str] | str
     marbl_timestep: float
+
+
+class MarblBgcCfg(_MarblBgcCfgCommon):
+    """``marbl_bgc`` settings for ucla-roms < 0.11.0, which has no constant-iron
+    option.
+    """
+
+    @model_validator(mode="before")
+    @classmethod
+    def _reject_constant_fe(cls, data: Any) -> Any:
+        """Fail loudly on a requested ``use_constant_fe`` rather than letting
+        ``extra="ignore"`` drop it: the run would compute iron prognostically. A
+        switched-off value passes (a shared spec may carry it) and is dropped.
+        """
+        if isinstance(data, dict) and _constant_fe_requested(
+            data.get("use_constant_fe")
+        ):
+            version = ".".join(str(part) for part in UCLA_ROMS_0_11_0)
+            raise ValueError(
+                f"marbl_bgc.use_constant_fe requires ucla-roms >= {version}; the "
+                "pinned ucla-roms release does not read it, so iron would be "
+                "computed prognostically."
+            )
+        return data
+
+
+class MarblBgcCfgV0_11_0(_MarblBgcCfgCommon):
+    """``marbl_bgc`` settings for ucla-roms >= 0.11.0: adds the constant-iron
+    option (PR #391).
+
+    Deliberate defaults (like :class:`PioSettingsCfg`): blueprints and ModelSpecs
+    written before these keys existed bypass the resolver and hit
+    ``model_validate`` directly; the values are the ucla-roms reference ones.
+    """
+
+    use_constant_fe: bool = Field(default=False)
+    constant_fe_value: float = Field(default=3.0e-3, ge=0.0)
+
+
+def check_constant_fe(marbl_bgc: Mapping[str, Any], *, bgc_mode_is_marbl: bool) -> None:
+    """Reject ``marbl_bgc.use_constant_fe`` in a build without MARBL.
+
+    ucla-roms compiles the whole MARBL driver, the only reader of
+    ``&MARBL_BIOGEOCHEMISTRY_SETTINGS``, under the MARBL cppkey, and without it
+    there is no MARBL Fe tracer to hold constant. Shared by the resolver
+    (authoring time), :func:`validate_run_time_sections` (stored blueprints,
+    before data staging), and the executor's ``configure_build`` (the
+    build-time net), like :func:`check_bgc_tracer_count`.
+
+    Raises ``ValueError`` if ``use_constant_fe`` is requested while
+    ``bgc_mode_is_marbl`` is False.
+    """
+    if not bgc_mode_is_marbl and _constant_fe_requested(
+        marbl_bgc.get("use_constant_fe")
+    ):
+        raise ValueError(
+            "marbl_bgc.use_constant_fe is set but MARBL is off (cppdefs.marbl=False): "
+            "ucla-roms never reads &MARBL_BIOGEOCHEMISTRY_SETTINGS without MARBL "
+            "and there is no MARBL Fe tracer to hold constant. Turn it off, or "
+            'use bgc_mode "marbl".'
+        )
 
 
 class _RunTimeSettingsCommon(_SettingsSection):
@@ -1246,7 +1328,9 @@ class _RunTimeSettingsCommon(_SettingsSection):
     are no value defaults here — the YAML is the single source of defaults.
 
     Not meant to be used directly: the version-varying sections (``param``,
-    ``ocean_vars``, ``particles``) are typed as the loose common models here, and version-varying
+    ``ocean_vars``, ``particles``) are typed as the loose common models here,
+    ``marbl_bgc`` as the pre-0.11.0 :class:`MarblBgcCfg` (retyped by
+    :class:`RunTimeSettingsV0_11_0`), and version-varying
     sections that some schemas lack entirely (``pio_settings``, added by
     :class:`RunTimeSettingsV0_6_0`; ``cdr_lite_output``/``cdr_gas_exch_output``,
     added by :class:`RunTimeSettingsV0_7_0`; ``cdr_lite``, added by
@@ -1255,8 +1339,9 @@ class _RunTimeSettingsCommon(_SettingsSection):
     (0.4.0 <= ucla-roms < 0.5.0), :class:`RunTimeSettingsV0_5_0`
     (0.5.0 <= ucla-roms < 0.6.0), :class:`RunTimeSettingsV0_6_0`
     (0.6.0 <= ucla-roms < 0.7.0), :class:`RunTimeSettingsV0_7_0`
-    (0.7.0 <= ucla-roms < 0.9.0), or :class:`RunTimeSettingsV0_9_0` (>= 0.9.0),
-    or select one with :func:`run_time_settings_for_ref`.
+    (0.7.0 <= ucla-roms < 0.9.0), :class:`RunTimeSettingsV0_9_0`
+    (0.9.0 <= ucla-roms < 0.11.0), or :class:`RunTimeSettingsV0_11_0`
+    (>= 0.11.0), or select one with :func:`run_time_settings_for_ref`.
     """
 
     title: TitleCfg
@@ -1375,7 +1460,8 @@ class RunTimeSettingsV0_7_0(RunTimeSettingsV0_6_0):
 
 
 class RunTimeSettingsV0_9_0(RunTimeSettingsV0_6_0):
-    """Forge's run-time settings dict for ucla-roms >= 0.9.0, typed + validated.
+    """Forge's run-time settings dict for ucla-roms >= 0.9.0, < 0.11.0, typed +
+    validated.
 
     Subclasses :class:`RunTimeSettingsV0_6_0`, not :class:`RunTimeSettingsV0_7_0`
     -- mirrors C-Star's ``RomsNamelistV0_9_0(RomsNamelistV0_6_0)``, and a
@@ -1395,6 +1481,18 @@ class RunTimeSettingsV0_9_0(RunTimeSettingsV0_6_0):
     )
 
 
+class RunTimeSettingsV0_11_0(RunTimeSettingsV0_9_0):
+    """Forge's run-time settings dict for ucla-roms >= 0.11.0, typed + validated.
+
+    Mirrors C-Star's ``RomsNamelistV0_11_0(RomsNamelistV0_9_0)``. Types
+    ``marbl_bgc`` as :class:`MarblBgcCfgV0_11_0`, which adds the constant-iron
+    option (``&MARBL_BIOGEOCHEMISTRY_SETTINGS``, ucla-roms PR #391); both keys
+    carry defaults, so a blueprint saved before they existed still validates.
+    """
+
+    marbl_bgc: MarblBgcCfgV0_11_0
+
+
 # Maps each namelist schema class (C-Star, keyed by ucla-roms version range) to
 # the matching run-time settings class (forge's settings vocabulary).
 _RUN_TIME_SETTINGS_BY_NAMELIST_SCHEMA: dict[
@@ -1406,6 +1504,7 @@ _RUN_TIME_SETTINGS_BY_NAMELIST_SCHEMA: dict[
     RomsNamelistV0_6_0: RunTimeSettingsV0_6_0,
     RomsNamelistV0_7_0: RunTimeSettingsV0_7_0,
     RomsNamelistV0_9_0: RunTimeSettingsV0_9_0,
+    RomsNamelistV0_11_0: RunTimeSettingsV0_11_0,
 }
 
 # The inverse of _RUN_TIME_SETTINGS_BY_NAMELIST_SCHEMA: the namelist schema a
@@ -1582,7 +1681,8 @@ def run_time_settings_for_ref(roms_ref: str | None) -> type[_RunTimeSettingsComm
         :class:`RunTimeSettingsV0_5_0` for 0.5.0 <= ucla-roms < 0.6.0;
         :class:`RunTimeSettingsV0_6_0` for 0.6.0 <= ucla-roms < 0.7.0;
         :class:`RunTimeSettingsV0_7_0` for 0.7.0 <= ucla-roms < 0.9.0;
-        :class:`RunTimeSettingsV0_9_0` for ucla-roms >= 0.9.0.
+        :class:`RunTimeSettingsV0_9_0` for 0.9.0 <= ucla-roms < 0.11.0;
+        :class:`RunTimeSettingsV0_11_0` for ucla-roms >= 0.11.0.
 
     Warns
     -----
@@ -1892,6 +1992,15 @@ def validate_run_time_sections(
                 modeled,
                 bgc_mode=bgc_mode_from_cppdefs(cppdefs),
                 settings_cls=settings_cls,
+            )
+        except ValueError as exc:
+            errors.append(str(exc))
+    # Same for constant iron vs MARBL (marbl_bgc vs cppdefs).
+    if "marbl_bgc" in settings and "cppdefs" in settings:
+        try:
+            check_constant_fe(
+                settings["marbl_bgc"] or {},
+                bgc_mode_is_marbl=bool((settings["cppdefs"] or {}).get("marbl", False)),
             )
         except ValueError as exc:
             errors.append(str(exc))
