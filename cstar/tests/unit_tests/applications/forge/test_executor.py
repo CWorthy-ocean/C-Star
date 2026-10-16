@@ -1967,6 +1967,94 @@ class TestForgeExecutorBuildAndRun:
         with pytest.raises(ValueError, match="upscaled"):
             self._run_configure_build(cfg, host)
 
+    def _upscaled_cdr_lite_cfg_and_builder(
+        self, sample_grid_kwargs, sample_open_boundaries, sample_partitioning
+    ):
+        """A ucla-roms 0.11 CDR-lite parent of an upscaled run. Its CDR-lite
+        tracer counts (which no generation step derives in this mode) are set
+        by hand to the child's.
+        """
+        return self._cdr_cfg_and_builder(
+            sample_grid_kwargs,
+            sample_open_boundaries,
+            sample_partitioning,
+            model_dir=_MODEL_DIR_ROMS0110,
+            bgc_mode="cdr_lite",
+            forcing_inputs=_PHYSICS_ONLY_FORCING,
+            cdr={"mode": "upscaled"},
+            run_time_overrides={"param": {"nt_cdr_oae": 1, "nt_cdr_dor": 1}},
+        )
+
+    def test_configure_build_upscaled_cdr_lite_on_roms_0_11_0(
+        self, sample_grid_kwargs, sample_open_boundaries, sample_partitioning
+    ):
+        """From ucla-roms 0.11.0 a CDR-lite build runs upscaled CDR forcing
+        (ucla-roms #390): CDR_FORCING on, the _cdrtrc stream forced on, cdr_output
+        (MARBL-only) off, cdr_nz_chd 0 and the stated tracer counts kept.
+        """
+        cfg, host = self._upscaled_cdr_lite_cfg_and_builder(
+            sample_grid_kwargs, sample_open_boundaries, sample_partitioning
+        )
+
+        # This helper skips generate_inputs(), so the tier's generated sections
+        # (grid, s_coord, ...) are absent; the output-stream precheck would
+        # validate them and is unrelated to the CDR rule under test.
+        with patch(
+            "cstar.applications.forge.executor.output_precheck_applies_to",
+            return_value=False,
+        ):
+            builder = self._run_configure_build(cfg, host)
+
+        cppdefs = builder._settings_compile_time["cppdefs"]
+        run_time = builder._settings_run_time
+        assert cppdefs["cdr_forcing"] is True
+        assert cppdefs["cdr_lite"] is True
+        assert cppdefs["marbl"] is False
+        assert run_time["cdr_output"]["do_cdr_output"] is False
+        assert run_time["cdr_lite_output"]["do_cdr_lite_output"] is True
+        assert run_time["cdr_frc"]["forcing_depth_profiles"] is True
+        assert run_time["cdr_frc"]["nz_chd"] == 0
+        assert run_time["cdr_frc"]["relocate_to_wet_pts"] is True
+        assert run_time["param"]["nt_cdr_oae"] == 1
+        assert run_time["param"]["nt_cdr_dor"] == 1
+
+    def test_configure_build_rejects_upscaled_cdr_lite_before_roms_0_11_0(
+        self, sample_grid_kwargs, sample_open_boundaries, sample_partitioning
+    ):
+        """The build-time net for a stored CDR-lite "upscaled" blueprint whose pin
+        was moved below 0.11.0 after the resolver ran.
+        """
+        cfg, host = self._upscaled_cdr_lite_cfg_and_builder(
+            sample_grid_kwargs, sample_open_boundaries, sample_partitioning
+        )
+        cfg.code.roms.commit = "0.10.1"
+
+        with pytest.raises(
+            ValueError,
+            match=r'"upscaled" with bgc_mode "cdr_lite" on ucla-roms 0\.10\.1: '
+            r".*>= 0\.11\.0",
+        ):
+            self._run_configure_build(cfg, host)
+
+    def test_configure_build_rejects_upscaled_cdr_lite_without_tracer_counts(
+        self, sample_grid_kwargs, sample_open_boundaries, sample_partitioning
+    ):
+        """The build-time net for a stored CDR-lite "upscaled" blueprint whose
+        stated tracer counts were removed after the resolver ran: the
+        upscaled-specific message, not the generic "use releases with
+        tracer_set=cdr_lite" one.
+        """
+        cfg, host = self._upscaled_cdr_lite_cfg_and_builder(
+            sample_grid_kwargs, sample_open_boundaries, sample_partitioning
+        )
+        cfg.model_settings["param"]["nt_cdr_oae"] = 0
+        cfg.model_settings["param"]["nt_cdr_dor"] = 0
+
+        with pytest.raises(
+            ValueError, match=r'cdr\.mode "upscaled" needs the CDR-lite tracer counts'
+        ):
+            self._run_configure_build(cfg, host)
+
     def test_configure_build_rejects_non_divisible_rst_period(
         self, sample_grid_kwargs, sample_open_boundaries, sample_partitioning
     ):
@@ -2046,7 +2134,7 @@ class TestForgeExecutorBuildAndRun:
         assert cdr_frc["forcing_depth_profiles"] is True
         assert cdr_frc["forcing_parameterized"] is False
         assert cdr_frc["cdr_volume"] is False
-        assert cdr_frc["relocate_to_wet_pts"] is False
+        assert cdr_frc["relocate_to_wet_pts"] is True
         assert cfg.model_settings["cdr_output"]["do_cdr_output"] is True
         assert cfg.model_settings["cppdefs"]["cdr_forcing"] is True
 
@@ -2063,7 +2151,7 @@ class TestForgeExecutorBuildAndRun:
         assert run_cdr_frc["forcing_depth_profiles"] is True
         assert run_cdr_frc["forcing_parameterized"] is False
         assert run_cdr_frc["cdr_volume"] is False
-        assert run_cdr_frc["relocate_to_wet_pts"] is False
+        assert run_cdr_frc["relocate_to_wet_pts"] is True
         # The consistency net (executor.py) fires for "upscaled" even without
         # cdr_forcing/cdr_forcing_file being set.
         assert builder._settings_run_time["cdr_output"]["do_cdr_output"] is True

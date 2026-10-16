@@ -1760,17 +1760,52 @@ def test_build_forge_blueprint_cdr_kwarg_upscaled_mode_sets_cdr_frc_statics():
     assert cdr_frc["forcing_depth_profiles"] is True
     assert cdr_frc["forcing_parameterized"] is False
     assert cdr_frc["cdr_volume"] is False
-    assert cdr_frc["relocate_to_wet_pts"] is False
+    # A child-boundary profile over parent land moves to the nearest wet point
+    # instead of aborting (ucla-roms #390's recommendation; same logic from 0.2.0).
+    assert cdr_frc["relocate_to_wet_pts"] is True
+    # Pinned to ucla-roms 0.2.0, which remaps with cdr_nz_chd as given.
+    assert cdr_frc["nz_chd"] == 50
 
 
-def test_build_forge_blueprint_cdr_kwarg_upscaled_requires_marbl():
-    """Upscaled CDR sets cdr_forcing_depth_profiles, which ucla-roms rejects at init
-    without MARBL, so it must raise when bgc_mode="none" even on a release (0.9.1+)
-    that runs parameterized CDR forcing without MARBL.
+@pytest.mark.parametrize(
+    ("model_dir", "roms_ref", "nz_chd"),
+    [
+        (_MODEL_DIR_ROMS0100, None, 50),
+        (_MODEL_DIR_ROMS0110, None, 0),
+        (_MODEL_DIR_ROMS0100, "main", 0),
+    ],
+)
+def test_build_forge_blueprint_upscaled_nz_chd_follows_the_pin(
+    model_dir, roms_ref, nz_chd
+):
+    """From ucla-roms 0.11.0 cdr_nz_chd = 0 takes the depth-profile level count
+    from the runtime file's s_rho (the child grid's, which Forge cannot see), and a
+    nonzero value that disagrees with the file aborts at init; earlier releases
+    keep the seeded value. A non-tag ref counts as the latest release.
     """
-    with pytest.raises(ValueError, match="upscaled"):
+    cfg = _build(model_dir=model_dir, roms_ref=roms_ref, cdr={"mode": "upscaled"})
+    assert cfg.model_settings["cdr_frc"]["nz_chd"] == nz_chd
+
+
+def test_build_forge_blueprint_upscaled_nz_chd_override_wins():
+    """An explicit cdr_nz_chd (matching a known child) still overrides the 0."""
+    cfg = _build(
+        model_dir=_MODEL_DIR_ROMS0110,
+        cdr={"mode": "upscaled"},
+        run_time_overrides={"cdr_frc": {"nz_chd": 42}},
+    )
+    assert cfg.model_settings["cdr_frc"]["nz_chd"] == 42
+
+
+@pytest.mark.parametrize("model_dir", [_MODEL_DIR_ROMS090, _MODEL_DIR_ROMS0110])
+def test_build_forge_blueprint_cdr_kwarg_upscaled_rejects_physics_only(model_dir):
+    """Upscaled CDR feeds its depth profiles to MARBL's ALK/DIC or (ucla-roms
+    >= 0.11.0) to CDR-lite tracers, so a physics-only build is rejected on every
+    release, including those that run parameterized CDR forcing without MARBL.
+    """
+    with pytest.raises(ValueError, match=r'"upscaled" with bgc_mode "none"'):
         _build(
-            model_dir=_MODEL_DIR_ROMS090,
+            model_dir=model_dir,
             cdr={"mode": "upscaled"},
             bgc_mode="none",
             forcing_inputs=_PHYSICS_ONLY_FORCING,
@@ -3871,9 +3906,86 @@ def test_resolver_bgc_mode_cdr_lite_rejects_the_online_sensitivity():
         _build_cdr_lite(run_time_overrides=_LITE_ON)
 
 
-def test_resolver_bgc_mode_cdr_lite_rejects_upscaled_cdr_mode():
-    with pytest.raises(ValueError, match="upscaled"):
+# The CDR-lite tracer counts an upscaled parent must state (no CDR forcing is
+# generated in that mode to derive them from): those of the child's tracers.
+_UPSCALED_COUNTS = {"param": {"nt_cdr_oae": 1, "nt_cdr_dor": 1}}
+
+
+def test_resolver_bgc_mode_cdr_lite_rejects_upscaled_before_ucla_roms_0_11_0():
+    """ucla-roms < 0.11.0 rejects depth-profile CDR forcing without MARBL at init.
+    Reported ahead of the missing tracer counts.
+    """
+    with pytest.raises(
+        ValueError,
+        match=r'"upscaled" with bgc_mode "cdr_lite" on ucla-roms 0\.10\.1: .*'
+        r">= 0\.11\.0",
+    ):
         _build_cdr_lite(cdr={"mode": "upscaled"})
+
+
+@pytest.mark.parametrize(
+    ("model_dir", "roms_ref"),
+    [(_MODEL_DIR_ROMS0110, None), (_MODEL_DIR_ROMS0100, "main")],
+)
+def test_resolver_bgc_mode_cdr_lite_accepts_upscaled_from_ucla_roms_0_11_0(
+    model_dir, roms_ref
+):
+    """From ucla-roms 0.11.0 the depth profiles feed the CDR-lite tracers their
+    file names in cdr_trc_name (ucla-roms #390): a CDR-lite parent of an
+    upscaled run resolves, with CDR_FORCING on and cdr_output (MARBL-only) off.
+    """
+    cfg = _build_cdr_lite(
+        model_dir=model_dir,
+        roms_ref=roms_ref,
+        cdr={"mode": "upscaled"},
+        run_time_overrides=_UPSCALED_COUNTS,
+    )
+    settings = cfg.model_settings
+    assert cfg.cdr.mode == "upscaled"
+    assert settings["cppdefs"]["marbl"] is False
+    assert settings["cppdefs"]["cdr_lite"] is True
+    assert settings["cppdefs"]["cdr_forcing"] is True
+    assert settings["cdr_output"]["do_cdr_output"] is False
+    assert settings["cdr_frc"]["forcing_depth_profiles"] is True
+    assert settings["cdr_frc"]["forcing_parameterized"] is False
+    assert settings["cdr_frc"]["nz_chd"] == 0
+    assert settings["cdr_frc"]["relocate_to_wet_pts"] is True
+    assert settings["param"]["nt_cdr_oae"] == 1
+    assert settings["param"]["nt_cdr_dor"] == 1
+
+
+@pytest.mark.parametrize(
+    "param",
+    [{}, {"nt_cdr_oae": 0, "nt_cdr_dor": 0}, {"nt_cdr_oae": None}],
+)
+def test_resolver_bgc_mode_cdr_lite_upscaled_needs_tracer_counts(param):
+    """No CDR forcing is generated in the upscaled mode, so nothing derives the
+    CDR-lite tracer counts: a CDR-lite parent without them is rejected up front
+    rather than at configure_build.
+    """
+    with pytest.raises(
+        ValueError,
+        match=r'cdr\.mode "upscaled" needs the CDR-lite tracer counts.*'
+        r"run_time_overrides=\{\"param\"",
+    ):
+        _build_cdr_lite(
+            model_dir=_MODEL_DIR_ROMS0110,
+            cdr={"mode": "upscaled"},
+            run_time_overrides={"param": param},
+        )
+
+
+@pytest.mark.parametrize(
+    "param", [{"nt_cdr_oae": 2}, {"nt_cdr_dor": 1}, {"nt_cdr_oae": 0, "nt_cdr_dor": 3}]
+)
+def test_resolver_bgc_mode_cdr_lite_upscaled_accepts_either_tracer_family(param):
+    cfg = _build_cdr_lite(
+        model_dir=_MODEL_DIR_ROMS0110,
+        cdr={"mode": "upscaled"},
+        run_time_overrides={"param": param},
+    )
+    for key, value in param.items():
+        assert cfg.model_settings["param"][key] == value
 
 
 def test_resolver_bgc_mode_cdr_lite_accepts_the_stream_switch_before_generation():

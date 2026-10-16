@@ -53,6 +53,7 @@ from cstar.applications.forge.namelist_model import (
     check_output_streams_divide_rst,
     check_river_tracer_counts,
     check_rst_period_divisible,
+    check_upscaled_cdr_lite_tracer_counts,
     cppdefs_for_precheck,
     ensure_cdr_output_marbl_diagnostics,
     n_tracers_from_param,
@@ -2445,8 +2446,9 @@ class ForgeExecutor(BaseModel):
         # "upscaled" mode, even though neither field is populated for it: real CDR
         # tracers exist at runtime under that mode too. An active mode needs the
         # CDR_FORCING cppdef (it compiles cdr_frc, with or without MARBL) and, with
-        # MARBL, implies CDR output; without MARBL
-        # check_cdr_forcing_mode rejects "upscaled" and ucla-roms < 0.9.1.
+        # MARBL, implies CDR output; without MARBL check_cdr_forcing_mode rejects
+        # ucla-roms < 0.9.1, and "upscaled" outside bgc_mode "cdr_lite" or before
+        # ucla-roms 0.11.0.
         cdr_active = bool(
             self.cdr_forcing or self.cdr_forcing_file or self.cdr_mode == "upscaled"
         )
@@ -2466,19 +2468,22 @@ class ForgeExecutor(BaseModel):
             )
         if cdr_active and check_cdr_forcing_mode(
             self.cdr_mode,
-            bgc_mode_is_marbl=bool(cppdefs.get("marbl", False)),
+            bgc_mode=bgc_mode,
             roms_ref=str(effective_roms_ref)
             if effective_roms_ref is not None
             else None,
         ):
             self._settings_run_time.setdefault("cdr_output", {})["do_cdr_output"] = True
         # bgc_mode "cdr_lite" (CDR-lite tracers, no MARBL): the generation step
-        # derived nt_cdr_oae/nt_cdr_dor from the CDR forcing's tracer axis, and
-        # the _cdrtrc stream is the only output the CDR tracers appear in, so it
-        # is forced on (ROMS aborts at init if it is on with zero CDR tracers, hence
+        # derived nt_cdr_oae/nt_cdr_dor from the CDR forcing's tracer axis (the
+        # "upscaled" mode generates none, so the user states them), and the
+        # _cdrtrc stream is the only output the CDR tracers appear in, so it is
+        # forced on (ROMS aborts at init if it is on with zero CDR tracers, hence
         # the count check first, which also names the likely authoring mistake).
         if bgc_mode == "cdr_lite":
             param = self._settings_run_time.get("param") or {}
+            if self.cdr_mode == "upscaled":
+                check_upscaled_cdr_lite_tracer_counts(param)
             if not cdr_active or not (
                 int(param.get("nt_cdr_oae") or 0) + int(param.get("nt_cdr_dor") or 0)
             ):

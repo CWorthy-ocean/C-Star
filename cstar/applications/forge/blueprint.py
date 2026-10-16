@@ -1278,7 +1278,9 @@ class CdrSpec(_Section):
       C-Star's orchestrator to later replace with the real runtime path. Real
       CDR tracers exist at runtime under this mode, so it participates in the
       CDR-output consistency block (do_cdr_output/MARBL diagnostics/marbl
-      requirement) exactly like ``"simple"``/``"yaml"``/``"netcdf"``.
+      requirement) exactly like ``"simple"``/``"yaml"``/``"netcdf"``. Without
+      MARBL it needs ``bgc_mode: cdr_lite`` and ucla-roms >= 0.11.0, where the
+      runtime file names its tracers (see ``check_cdr_forcing_mode``).
     """
 
     mode: CdrMode = "none"
