@@ -364,14 +364,18 @@ adds ``&CDR_TRACER_OUTPUT_SETTINGS`` and ``&CDR_GAS_EXCH_OUTPUT_SETTINGS``
 (ucla-roms PR #351 -- two dedicated CDR output streams); 0.9.0 renames the
 former ``&CDR_LITE_OUTPUT_SETTINGS`` (PR #372: five keys renamed, plus PR
 #370's ``wrt_gas_exchange``; now compiled without MARBL/CDR_FORCING) and adds
-the optional ``&CDR_LITE_SETTINGS``. C-Star versions the
+the optional ``&CDR_LITE_SETTINGS``; 0.11.0 adds ``use_constant_Fe``/
+``constant_Fe_value`` to ``&MARBL_BIOGEOCHEMISTRY_SETTINGS`` (PR #391; a
+release before it stops on the unknown keys). C-Star versions the
 namelist schema by ucla-roms release (``cstar.roms.namelist``:
 ``RomsNamelist`` for < 0.4.0, ``RomsNamelistV0_4_0`` for 0.4.0 <= ucla-roms
 < 0.5.0 (adds the CDR tracer counts to ``&PARAM_SETTINGS``),
 ``RomsNamelistV0_5_0`` for 0.5.0 <= ucla-roms < 0.6.0, ``RomsNamelistV0_6_0``
 for 0.6.0 <= ucla-roms < 0.7.0, ``RomsNamelistV0_7_0`` for 0.7.0 <= ucla-roms
-< 0.9.0, ``RomsNamelistV0_9_0`` for >= 0.9.0 (a ``RomsNamelistV0_6_0``
-subclass, since a subclass can't drop V0_7_0's renamed group), selected
+< 0.9.0, ``RomsNamelistV0_9_0`` for 0.9.0 <= ucla-roms < 0.11.0 (a
+``RomsNamelistV0_6_0`` subclass, since a subclass can't drop V0_7_0's renamed
+group), ``RomsNamelistV0_11_0`` for >= 0.11.0 (keys lowercased,
+``use_constant_fe``/``constant_fe_value``, as f90nml reads them), selected
 by ``namelist_schema_for_ref(ref)`` -- semver tags select exactly; branch
 names/hashes warn and fall back to the latest schema). Forge mirrors this in
 ``namelist_model.py``: ``RunTimeSettings`` (legacy, < 0.4.0),
@@ -380,7 +384,8 @@ names/hashes warn and fall back to the latest schema). Forge mirrors this in
 ``RunTimeSettingsV0_7_0`` (adds ``cdr_lite_output``/``cdr_gas_exch_output``),
 and ``RunTimeSettingsV0_9_0`` (``cdr_lite_output`` with the 0.9 key names and
 ``wrt_gas_exchange``, plus ``cdr_lite``; a ``RunTimeSettingsV0_6_0`` subclass
-like its C-Star counterpart),
+like its C-Star counterpart), and ``RunTimeSettingsV0_11_0`` (``marbl_bgc``
+gains ``use_constant_fe``/``constant_fe_value``),
 selected by ``run_time_settings_for_ref(roms_ref)``, where ``roms_ref`` is
 the blueprint's pinned ``code.roms.commit`` (threaded resolver -> executor ->
 ``write_roms_namelist``). C-Star's registry is the single source of

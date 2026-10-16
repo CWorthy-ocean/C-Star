@@ -23,12 +23,14 @@ from cstar.applications.forge.namelist_model import (
     CdrLiteOutputCfg,
     CdrLiteOutputCfgV0_9_0,
     CdrTracerCounts,
+    MarblBgcCfgV0_11_0,
     RunTimeSettings,
     RunTimeSettingsV0_4_0,
     RunTimeSettingsV0_5_0,
     RunTimeSettingsV0_6_0,
     RunTimeSettingsV0_7_0,
     RunTimeSettingsV0_9_0,
+    RunTimeSettingsV0_11_0,
     bgc_mode_from_cppdefs,
     build_namelist,
     canonical_output_sections_for_precheck,
@@ -56,6 +58,7 @@ from cstar.roms.namelist import (
     RomsNamelistV0_5_0,
     RomsNamelistV0_7_0,
     RomsNamelistV0_9_0,
+    RomsNamelistV0_11_0,
 )
 
 _MODEL_DIR = (
@@ -636,15 +639,16 @@ def test_run_time_settings_for_ref_0_4_0_up_to_0_5_0_selects_v0_4_0():
 def test_run_time_settings_for_ref_0_5_0_up_to_0_6_0_selects_v0_5_0():
     # 0.5.0 <= ucla-roms < 0.6.0 selects RunTimeSettingsV0_5_0; 0.6.0 <=
     # ucla-roms < 0.7.0 selects RunTimeSettingsV0_6_0; 0.7.0 <= ucla-roms < 0.9.0
-    # selects RunTimeSettingsV0_7_0 and 0.9.0 and later (including anything
-    # beyond) RunTimeSettingsV0_9_0 -- see the tests below.
+    # selects RunTimeSettingsV0_7_0, 0.9.0 <= ucla-roms < 0.11.0
+    # RunTimeSettingsV0_9_0 and 0.11.0 and later (including anything beyond)
+    # RunTimeSettingsV0_11_0 -- see the tests below.
     for ref in ("0.5.0", "v0.5.0"):
         assert run_time_settings_for_ref(ref) is RunTimeSettingsV0_5_0
 
 
 def test_run_time_settings_for_ref_0_6_0_up_to_0_7_0_selects_v0_6_0():
     # 0.6.0 <= ucla-roms < 0.7.0 selects RunTimeSettingsV0_6_0; 0.7.0 and later
-    # select RunTimeSettingsV0_7_0/V0_9_0 -- see the tests below.
+    # select RunTimeSettingsV0_7_0/V0_9_0/V0_11_0 -- see the tests below.
     for ref in ("0.6.0", "v0.6.0"):
         assert run_time_settings_for_ref(ref) is RunTimeSettingsV0_6_0
 
@@ -654,15 +658,20 @@ def test_run_time_settings_for_ref_0_7_0_up_to_0_9_0_selects_v0_7_0():
         assert run_time_settings_for_ref(ref) is RunTimeSettingsV0_7_0
 
 
-def test_run_time_settings_for_ref_0_9_0_and_later_selects_v0_9_0():
-    for ref in ("0.9.0", "v0.9.0", "0.10.2", "1.0.0"):
+def test_run_time_settings_for_ref_0_9_0_up_to_0_11_0_selects_v0_9_0():
+    for ref in ("0.9.0", "v0.9.0", "0.10.1", "0.10.2"):
         assert run_time_settings_for_ref(ref) is RunTimeSettingsV0_9_0
+
+
+def test_run_time_settings_for_ref_0_11_0_and_later_selects_v0_11_0():
+    for ref in ("0.11.0", "v0.11.0", "0.12.3", "1.0.0"):
+        assert run_time_settings_for_ref(ref) is RunTimeSettingsV0_11_0
 
 
 def test_run_time_settings_for_ref_branch_warns_and_uses_latest():
     with pytest.warns(UserWarning, match="not a release tag"):
         cls = run_time_settings_for_ref("main")
-    assert cls is RunTimeSettingsV0_9_0
+    assert cls is RunTimeSettingsV0_11_0
 
 
 def test_run_time_settings_for_ref_unresolvable_hash_warns_and_uses_latest():
@@ -671,7 +680,7 @@ def test_run_time_settings_for_ref_unresolvable_hash_warns_and_uses_latest():
     """
     with pytest.warns(UserWarning, match="not a release tag"):
         cls = run_time_settings_for_ref("a1b2c3d4")
-    assert cls is RunTimeSettingsV0_9_0
+    assert cls is RunTimeSettingsV0_11_0
 
 
 def test_run_time_settings_for_ref_empty_string_selects_legacy():
@@ -875,6 +884,76 @@ def test_run_time_settings_v0_9_0_defaults_when_sections_omitted():
     assert nml.cdr_lite_settings.cdr_online_carbonate_sensitivity is False
     assert nml.cdr_lite_output_settings.do_cdr_lite_output is False
     assert nml.cdr_lite_output_settings.wrt_gas_exchange is False
+
+
+# ---------------------------------------------------------------------------
+# ucla-roms >= 0.11.0: RunTimeSettingsV0_11_0 (constant-iron keys in marbl_bgc)
+# ---------------------------------------------------------------------------
+def test_build_namelist_v0_11_0_writes_constant_fe(tmp_path):
+    """``marbl_bgc.use_constant_fe``/``constant_fe_value`` reach
+    ``&MARBL_BIOGEOCHEMISTRY_SETTINGS`` on the 0.11.0 tier; the 0.9.0 sections
+    are written as before.
+    """
+    d = _populated_rt_dict()
+    d["marbl_bgc"].update(use_constant_fe=True, constant_fe_value=5e-4)
+    rt = RunTimeSettingsV0_11_0.model_validate(d)
+    assert isinstance(rt.marbl_bgc, MarblBgcCfgV0_11_0)
+    nml = build_namelist(rt, n_tracers=34)
+    assert type(nml) is RomsNamelistV0_11_0
+    assert nml.marbl_biogeochemistry_settings.use_constant_fe is True
+    assert nml.marbl_biogeochemistry_settings.constant_fe_value == 5e-4
+    assert (
+        nml.cdr_lite_output_settings
+        == build_namelist(
+            RunTimeSettingsV0_9_0.model_validate(_populated_rt_dict()), n_tracers=34
+        ).cdr_lite_output_settings
+    )
+
+    nml.write(tmp_path / "namelist.nml")
+    text = (tmp_path / "namelist.nml").read_text()
+    assert "use_constant_fe = .true." in text
+    assert "constant_fe_value = 0.0005" in text
+
+
+def test_run_time_settings_v0_11_0_defaults_constant_fe_when_omitted():
+    """A ModelSpec or stored blueprint without the Fe keys validates on the 0.11.0
+    tier and writes the ucla-roms defaults (option off, 3 nM).
+    """
+    d = _populated_rt_dict()
+    assert "use_constant_fe" not in d["marbl_bgc"]
+    nml = build_namelist(RunTimeSettingsV0_11_0.model_validate(d), n_tracers=34)
+    assert nml.marbl_biogeochemistry_settings.use_constant_fe is False
+    assert nml.marbl_biogeochemistry_settings.constant_fe_value == 3.0e-3
+
+
+def test_constant_fe_value_must_be_non_negative():
+    d = _populated_rt_dict()
+    d["marbl_bgc"].update(use_constant_fe=True, constant_fe_value=-1.0)
+    with pytest.raises(ValidationError, match="constant_fe_value"):
+        RunTimeSettingsV0_11_0.model_validate(d)
+
+
+@pytest.mark.parametrize("value", [True, "true", 1])
+def test_constant_fe_rejected_before_0_11_0(value):
+    """Turning the option on for a release that lacks it fails rather than being
+    dropped by ``extra="ignore"`` (the run would compute Fe prognostically).
+    """
+    d = _populated_rt_dict()
+    d["marbl_bgc"]["use_constant_fe"] = value
+    with pytest.raises(ValidationError, match="requires ucla-roms >= 0.11.0"):
+        RunTimeSettingsV0_9_0.model_validate(d)
+
+
+@pytest.mark.parametrize("value", [False, "false", 0, None])
+def test_constant_fe_off_is_dropped_before_0_11_0(value):
+    """The option left off (as a shared spec might carry it) is dropped on a
+    release that lacks it, like any other key the release does not read.
+    """
+    d = _populated_rt_dict()
+    d["marbl_bgc"].update(use_constant_fe=value, constant_fe_value=5e-4)
+    nml = build_namelist(RunTimeSettingsV0_9_0.model_validate(d), n_tracers=34)
+    assert "use_constant_fe" not in nml.marbl_biogeochemistry_settings.model_dump()
+    assert "constant_fe_value" not in nml.marbl_biogeochemistry_settings.model_dump()
 
 
 def test_v0_7_0_ignores_wrt_gas_exchange_and_writes_tracer_names(tmp_path):

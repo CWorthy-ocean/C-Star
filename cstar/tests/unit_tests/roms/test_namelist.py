@@ -10,6 +10,8 @@ from pydantic import ValidationError
 from cstar.roms.namelist import (
     CdrLiteOutputSettings,
     CdrLiteSettings,
+    MarblBiogeochemistrySettings,
+    MarblBiogeochemistrySettingsV0_11_0,
     ParamSettings,
     ParamSettingsV0_4_0,
     PioSettings,
@@ -20,6 +22,7 @@ from cstar.roms.namelist import (
     RomsNamelistV0_6_0,
     RomsNamelistV0_7_0,
     RomsNamelistV0_9_0,
+    RomsNamelistV0_11_0,
     namelist_schema_for_ref,
 )
 
@@ -28,6 +31,7 @@ NEW_NAMELIST = Path(__file__).parent / "fixtures" / "example_namelist_v0_5_0.nml
 V0_6_0_NAMELIST = Path(__file__).parent / "fixtures" / "example_namelist_v0_6_0.nml"
 V0_7_0_NAMELIST = Path(__file__).parent / "fixtures" / "example_namelist_v0_7_0.nml"
 V0_9_0_NAMELIST = Path(__file__).parent / "fixtures" / "example_namelist_v0_9_0.nml"
+V0_11_0_NAMELIST = Path(__file__).parent / "fixtures" / "example_namelist_v0_11_0.nml"
 
 PIO_SETTINGS_BLOCK = "&pio_settings\n    pio_stride = 1\n/\n\n"
 
@@ -79,11 +83,20 @@ def test_namelist_schema_for_ref_post_0_7_0(checkout_target):
 
 @pytest.mark.parametrize(
     "checkout_target",
-    ["0.9.0", "v0.9.0", "0.9.3", "0.10.0", "12.0.0"],
+    ["0.9.0", "v0.9.0", "0.9.3", "0.10.0", "0.10.1"],
 )
 def test_namelist_schema_for_ref_post_0_9_0(checkout_target):
-    """Refs at or above 0.9.0 select `RomsNamelistV0_9_0`."""
+    """Refs in `[0.9.0, 0.11.0)` select `RomsNamelistV0_9_0`."""
     assert namelist_schema_for_ref(checkout_target) is RomsNamelistV0_9_0
+
+
+@pytest.mark.parametrize(
+    "checkout_target",
+    ["0.11.0", "v0.11.0", "0.11.4", "0.12.0", "12.0.0"],
+)
+def test_namelist_schema_for_ref_post_0_11_0(checkout_target):
+    """Refs at or above 0.11.0 select `RomsNamelistV0_11_0`."""
+    assert namelist_schema_for_ref(checkout_target) is RomsNamelistV0_11_0
 
 
 @pytest.mark.parametrize(
@@ -102,7 +115,7 @@ def test_namelist_schema_for_ref_fallback_warns(checkout_target):
     """Non-release-tag refs fall back to the latest schema and warn about it."""
     with pytest.warns(UserWarning, match="use at your own risk"):
         schema = namelist_schema_for_ref(checkout_target)
-    assert schema is RomsNamelistV0_9_0
+    assert schema is RomsNamelistV0_11_0
 
 
 @pytest.fixture
@@ -195,7 +208,7 @@ def test_namelist_schema_for_ref_branch_ignores_repo_path(tagged_ucla_roms_clone
     info = tagged_ucla_roms_clone
     with pytest.warns(UserWarning, match="use at your own risk"):
         schema = namelist_schema_for_ref("main", repo_path=info["repo"])
-    assert schema is RomsNamelistV0_9_0
+    assert schema is RomsNamelistV0_11_0
 
 
 def test_namelist_schema_for_ref_unresolvable_hash_falls_back():
@@ -207,12 +220,12 @@ def test_namelist_schema_for_ref_unresolvable_hash_falls_back():
     ):
         with pytest.warns(UserWarning, match="use at your own risk"):
             schema = namelist_schema_for_ref("a" * 40, repo_path="/some/repo")
-    assert schema is RomsNamelistV0_9_0
+    assert schema is RomsNamelistV0_11_0
 
     with mock.patch("cstar.roms.namelist._describe_nearest_tag", return_value=None):
         with pytest.warns(UserWarning, match="use at your own risk"):
             schema = namelist_schema_for_ref("a" * 40, repo_path="/some/repo")
-    assert schema is RomsNamelistV0_9_0
+    assert schema is RomsNamelistV0_11_0
 
 
 def test_roms_namelist_round_trip():
@@ -459,6 +472,66 @@ def test_cdr_lite_groups_always_written_even_when_constructed_without_them():
     ]
 
 
+def test_roms_namelist_v0_11_0_round_trip(tmp_path):
+    """`RomsNamelistV0_11_0.read` parses the 0.11.0 fixture, whose Fe keys use
+    ROMS's spelling (`use_constant_Fe`), into the lowercase fields f90nml
+    produces, and a read -> write -> read round trip reproduces the same model.
+    """
+    nml = RomsNamelistV0_11_0.read(V0_11_0_NAMELIST)
+    marbl = nml.marbl_biogeochemistry_settings
+    assert isinstance(marbl, MarblBiogeochemistrySettingsV0_11_0)
+    assert marbl.use_constant_fe is True
+    assert marbl.constant_fe_value == 5e-4
+
+    out = tmp_path / "namelist.nml"
+    nml.write(out)
+    assert "use_constant_fe = .true." in out.read_text()
+    reread = RomsNamelistV0_11_0.read(out)
+
+    assert reread == nml
+
+
+def test_roms_namelist_v0_9_0_rejects_v0_11_0_fixture():
+    """`RomsNamelistV0_9_0` is strict: ucla-roms before 0.11.0 stops on the Fe
+    keys, so the 0.9.0 schema rejects them rather than passing them through.
+    """
+    with pytest.raises(ValidationError, match="use_constant_fe"):
+        RomsNamelistV0_9_0.read(V0_11_0_NAMELIST)
+    assert "use_constant_fe" not in MarblBiogeochemistrySettings.model_fields
+
+
+def test_constant_fe_defaults_when_missing():
+    """A 0.9.0 namelist without the Fe keys still validates under
+    `RomsNamelistV0_11_0`, defaulting them to the ucla-roms reference values,
+    and the written namelist carries them.
+    """
+    nml = RomsNamelistV0_11_0.read(V0_9_0_NAMELIST)
+    marbl = nml.marbl_biogeochemistry_settings
+
+    assert marbl.use_constant_fe is False
+    assert marbl.constant_fe_value == 3.0e-3
+    d = nml.to_f90nml_dict()["marbl_biogeochemistry_settings"]
+    assert list(d)[-2:] == ["use_constant_fe", "constant_fe_value"]
+    assert d["use_constant_fe"] is False
+    assert d["constant_fe_value"] == 3.0e-3
+
+
+def test_constant_fe_value_must_be_non_negative():
+    """ucla-roms stops on a negative `constant_Fe_value`; the schema rejects it
+    first, and zero is allowed.
+    """
+    with pytest.raises(ValidationError, match="constant_fe_value"):
+        MarblBiogeochemistrySettingsV0_11_0(constant_fe_value=-1.0)
+    assert (
+        MarblBiogeochemistrySettingsV0_11_0(constant_fe_value=0.0).constant_fe_value
+        == 0.0
+    )
+
+    nml = RomsNamelistV0_11_0.read(V0_11_0_NAMELIST)
+    with pytest.raises(ValidationError, match="constant_fe_value"):
+        nml.marbl_biogeochemistry_settings.constant_fe_value = -1.0
+
+
 class TestUnknownOverrideKeys:
     """Tests for `RomsNamelistBase.unknown_override_keys`."""
 
@@ -550,6 +623,23 @@ class TestUnknownOverrideKeys:
         assert any("cdr_lite_output_settings" in v for v in violations)
         assert any("cdr_lite_settings" in v for v in violations)
 
+    def test_constant_fe_keys(self):
+        """The Fe keys are known from 0.11.0 on: `RomsNamelistV0_11_0` accepts
+        them, `RomsNamelistV0_9_0` reports each as unknown.
+        """
+        overrides = {
+            "marbl_biogeochemistry_settings": {
+                "use_constant_fe": True,
+                "constant_fe_value": 5e-4,
+            }
+        }
+        assert RomsNamelistV0_11_0.unknown_override_keys(overrides) == []
+
+        violations = RomsNamelistV0_9_0.unknown_override_keys(overrides)
+        assert len(violations) == 2
+        assert any("use_constant_fe" in v for v in violations)
+        assert any("constant_fe_value" in v for v in violations)
+
     def test_cdr_lite_output_settings_rejects_pre_rename_key(self):
         """A pre-0.9.0 key name inside the renamed group is reported as unknown."""
         overrides = {"cdr_lite_output_settings": {"do_cdr_tracer_output": True}}
@@ -582,7 +672,13 @@ def test_param_settings_rejects_cdr_tracer_counts():
 
 @pytest.mark.parametrize(
     "cls",
-    [ParamSettingsV0_4_0, RomsNamelistV0_5_0, RomsNamelistV0_7_0, RomsNamelistV0_9_0],
+    [
+        ParamSettingsV0_4_0,
+        RomsNamelistV0_5_0,
+        RomsNamelistV0_7_0,
+        RomsNamelistV0_9_0,
+        RomsNamelistV0_11_0,
+    ],
 )
 def test_param_settings_v0_4_0_defaults_cdr_tracer_counts_to_zero(cls):
     """`nt_cdr_oae`/`nt_cdr_dor` default to 0 (the Fortran initializer) when

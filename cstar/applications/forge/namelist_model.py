@@ -54,6 +54,7 @@ from cstar.roms.namelist import (
     RomsNamelistV0_6_0,
     RomsNamelistV0_7_0,
     RomsNamelistV0_9_0,
+    RomsNamelistV0_11_0,
     SimulationNameSettings,
     SurfFrcSettings,
     TracerDiff2,
@@ -1233,10 +1234,49 @@ class VSpongeCfg(_SettingsSection):
 
 
 class MarblBgcCfg(_SettingsSection):
+    """``marbl_bgc`` settings for ucla-roms < 0.11.0, which has no constant-iron
+    option (see :class:`MarblBgcCfgV0_11_0`).
+    """
+
     marbl_config_file: str
     marbl_tracers_to_write: list[str] | str
     marbl_diagnostics_to_write: list[str] | str
     marbl_timestep: float
+
+    @model_validator(mode="before")
+    @classmethod
+    def _reject_constant_fe(cls, data: Any) -> Any:
+        """Fail loudly on ``use_constant_fe`` turned on for a release that lacks
+        it rather than letting ``extra="ignore"`` drop it: the run would
+        compute iron prognostically instead of holding it constant.
+        """
+        if "use_constant_fe" in cls.model_fields or not isinstance(data, dict):
+            return data
+        value = data.get("use_constant_fe")
+        try:
+            requested = TypeAdapter(bool).validate_python(value)
+        except ValidationError:
+            requested = value is not None  # unparseable: not an "off" value
+        if requested:
+            raise ValueError(
+                "marbl_bgc.use_constant_fe requires ucla-roms >= 0.11.0; the "
+                "pinned ucla-roms release computes MARBL's iron prognostically."
+            )
+        return data
+
+
+class MarblBgcCfgV0_11_0(MarblBgcCfg):
+    """``marbl_bgc`` settings for ucla-roms >= 0.11.0: adds the constant-iron
+    option (ucla-roms PR #391), which holds MARBL's dissolved iron (``Fe``) at
+    ``constant_fe_value`` (mmol/m^3) at every wet point. The keys are
+    lowercase, as C-Star's :class:`~cstar.roms.namelist.MarblBiogeochemistrySettingsV0_11_0`
+    models them (ROMS reads them case-insensitively). Both carry the ucla-roms
+    defaults, so a ModelSpec or blueprint written without them still
+    validates.
+    """
+
+    use_constant_fe: bool = False
+    constant_fe_value: float = Field(default=3.0e-3, ge=0.0)
 
 
 class _RunTimeSettingsCommon(_SettingsSection):
@@ -1255,8 +1295,9 @@ class _RunTimeSettingsCommon(_SettingsSection):
     (0.4.0 <= ucla-roms < 0.5.0), :class:`RunTimeSettingsV0_5_0`
     (0.5.0 <= ucla-roms < 0.6.0), :class:`RunTimeSettingsV0_6_0`
     (0.6.0 <= ucla-roms < 0.7.0), :class:`RunTimeSettingsV0_7_0`
-    (0.7.0 <= ucla-roms < 0.9.0), or :class:`RunTimeSettingsV0_9_0` (>= 0.9.0),
-    or select one with :func:`run_time_settings_for_ref`.
+    (0.7.0 <= ucla-roms < 0.9.0), :class:`RunTimeSettingsV0_9_0`
+    (0.9.0 <= ucla-roms < 0.11.0), or :class:`RunTimeSettingsV0_11_0`
+    (>= 0.11.0), or select one with :func:`run_time_settings_for_ref`.
     """
 
     title: TitleCfg
@@ -1375,7 +1416,8 @@ class RunTimeSettingsV0_7_0(RunTimeSettingsV0_6_0):
 
 
 class RunTimeSettingsV0_9_0(RunTimeSettingsV0_6_0):
-    """Forge's run-time settings dict for ucla-roms >= 0.9.0, typed + validated.
+    """Forge's run-time settings dict for ucla-roms >= 0.9.0, < 0.11.0, typed +
+    validated.
 
     Subclasses :class:`RunTimeSettingsV0_6_0`, not :class:`RunTimeSettingsV0_7_0`
     -- mirrors C-Star's ``RomsNamelistV0_9_0(RomsNamelistV0_6_0)``, and a
@@ -1395,6 +1437,17 @@ class RunTimeSettingsV0_9_0(RunTimeSettingsV0_6_0):
     )
 
 
+class RunTimeSettingsV0_11_0(RunTimeSettingsV0_9_0):
+    """Forge's run-time settings dict for ucla-roms >= 0.11.0, typed + validated.
+
+    Mirrors C-Star's ``RomsNamelistV0_11_0(RomsNamelistV0_9_0)``: ``marbl_bgc``
+    gains ``use_constant_fe``/``constant_fe_value`` (ucla-roms PR #391, see
+    :class:`MarblBgcCfgV0_11_0`); every other section is the 0.9.0 one.
+    """
+
+    marbl_bgc: MarblBgcCfgV0_11_0
+
+
 # Maps each namelist schema class (C-Star, keyed by ucla-roms version range) to
 # the matching run-time settings class (forge's settings vocabulary).
 _RUN_TIME_SETTINGS_BY_NAMELIST_SCHEMA: dict[
@@ -1406,6 +1459,7 @@ _RUN_TIME_SETTINGS_BY_NAMELIST_SCHEMA: dict[
     RomsNamelistV0_6_0: RunTimeSettingsV0_6_0,
     RomsNamelistV0_7_0: RunTimeSettingsV0_7_0,
     RomsNamelistV0_9_0: RunTimeSettingsV0_9_0,
+    RomsNamelistV0_11_0: RunTimeSettingsV0_11_0,
 }
 
 # The inverse of _RUN_TIME_SETTINGS_BY_NAMELIST_SCHEMA: the namelist schema a
@@ -1582,7 +1636,8 @@ def run_time_settings_for_ref(roms_ref: str | None) -> type[_RunTimeSettingsComm
         :class:`RunTimeSettingsV0_5_0` for 0.5.0 <= ucla-roms < 0.6.0;
         :class:`RunTimeSettingsV0_6_0` for 0.6.0 <= ucla-roms < 0.7.0;
         :class:`RunTimeSettingsV0_7_0` for 0.7.0 <= ucla-roms < 0.9.0;
-        :class:`RunTimeSettingsV0_9_0` for ucla-roms >= 0.9.0.
+        :class:`RunTimeSettingsV0_9_0` for 0.9.0 <= ucla-roms < 0.11.0;
+        :class:`RunTimeSettingsV0_11_0` for ucla-roms >= 0.11.0.
 
     Warns
     -----
