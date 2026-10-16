@@ -128,13 +128,15 @@ spec omits them, so older specs are unaffected by additions.
 The bundled model specs
 ~~~~~~~~~~~~~~~~~~~~~~~
 
-``roms-marbl-0.10-default`` (ucla-roms 0.10.1) is the wizard's default. Older
-``roms-marbl-0.N-default`` entries pin earlier releases (``roms-marbl-0.9-default``
-stays for ucla-roms 0.9.1, which predates the ``cdr_lite`` mode's minimum), ``pio-dev`` tracks
+``roms-marbl-0.11-default`` (ucla-roms 0.11.0) is the wizard's default. Older
+``roms-marbl-0.N-default`` entries pin earlier releases (``roms-marbl-0.10-default``
+stays for ucla-roms 0.10.1, which predates the constant-iron option;
+``roms-marbl-0.9-default`` stays for ucla-roms 0.9.1, which predates the
+``cdr_lite`` mode's minimum), ``pio-dev`` tracks
 ucla-roms ``main`` with PIO enabled, and ``cson_roms-marbl_v0.1`` is the
 configuration the toy domain and the example blueprint use.
 
-.. literalinclude:: ../../cstar/catalog/bundled/ModelSpec/roms-marbl-0.10-default/model.yaml
+.. literalinclude:: ../../cstar/catalog/bundled/ModelSpec/roms-marbl-0.11-default/model.yaml
    :language: yaml
    :lines: 1-36
 
