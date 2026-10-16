@@ -3769,6 +3769,33 @@ def test_resolver_rejects_an_unknown_bgc_mode(mode):
         _build(bgc_mode=mode)
 
 
+_UPSCALE_ON = {"upscale_output": {"do_upscale": True}}
+
+
+def test_resolver_rejects_do_upscale_in_cdr_lite_mode():
+    with pytest.raises(ValueError, match=r"do_upscale is True but bgc_mode != .marbl"):
+        _build_cdr_lite(run_time_overrides=_UPSCALE_ON)
+
+
+def test_resolver_rejects_do_upscale_in_none_mode():
+    with pytest.raises(ValueError, match=r"upscale_output.F90 under MARBL"):
+        _build(
+            model_dir=_MODEL_DIR_ROMS0100,
+            bgc_mode="none",
+            forcing_inputs=_PHYSICS_ONLY_FORCING,
+            run_time_overrides=_UPSCALE_ON,
+        )
+
+
+def test_resolver_accepts_do_upscale_with_marbl():
+    cfg = _build(
+        model_dir=_MODEL_DIR_ROMS0100,
+        # one upscaled file per day, so it divides the daily restart period
+        run_time_overrides={"upscale_output": {"do_upscale": True, "nrpf_uscl": 24}},
+    )
+    assert cfg.model_settings["upscale_output"]["do_upscale"] is True
+
+
 def test_resolver_bgc_mode_cdr_lite_requires_a_cdr_forcing():
     with pytest.raises(ValueError, match="needs a CDR forcing.*nothing would be"):
         _build_cdr_lite(cdr=None)

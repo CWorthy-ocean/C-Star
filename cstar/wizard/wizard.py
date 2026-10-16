@@ -974,6 +974,49 @@ _ACCORDION_EXCLUDED_FIELDS: dict[str, frozenset[str]] = {
     "v_sponge": frozenset({"v_sponge"}),
 }
 
+# The BGC modes each settings key applies in; a key not listed applies in every
+# mode. A section key covers all of its fields. ucla-roms compiles cdr_output.F90 and
+# cdr_gas_exch_output.F90 only under MARBL, upscale_output.F90 only under MARBL &&
+# MARBL_DIAGS, and the bgc/marbl_bgc/dic_alk_correction groups, NHY/NOX forcing and
+# cdr_lite.cdr_online_carbonate_sensitivity read MARBL state; cdr_lite_output needs
+# CDR-lite tracers, which only MARBL and bgc_mode "cdr_lite" provide.
+_MARBL_ONLY = frozenset({"marbl"})
+_BGC_MODE_SETTINGS: dict[str | tuple[str, str], frozenset[str]] = {
+    "bgc": _MARBL_ONLY,
+    "marbl_bgc": _MARBL_ONLY,
+    "dic_alk_correction": _MARBL_ONLY,
+    "cdr_output": _MARBL_ONLY,
+    "cdr_gas_exch_output": _MARBL_ONLY,
+    "upscale_output": _MARBL_ONLY,
+    "cdr_lite_output": frozenset({"marbl", "cdr_lite"}),
+    ("cppdefs", "nhy_forcing"): _MARBL_ONLY,
+    ("cppdefs", "nox_forcing"): _MARBL_ONLY,
+    ("cdr_lite", "cdr_online_carbonate_sensitivity"): _MARBL_ONLY,
+}
+
+
+def _applies_in(section: str, field: str | None, bgc_mode: str) -> bool:
+    """Whether the ``(section, field)`` setting (``field=None`` for a scalar
+    section) applies in ``bgc_mode`` -- see :data:`_BGC_MODE_SETTINGS`.
+    """
+    modes = _BGC_MODE_SETTINGS.get(section)
+    if modes is None and field is not None:
+        modes = _BGC_MODE_SETTINGS.get((section, field))
+    return modes is None or bgc_mode in modes
+
+
+# Settings ``ForgeExecutor.configure_build`` forces on in a BGC mode, whatever the
+# blueprint authored: bgc_mode -> {(section, field): why}. The editor shows them
+# checked and disabled -- display only, never an override.
+_FORCED_ON_BY_BGC_MODE: dict[str, dict[tuple[str, str], str]] = {
+    "cdr_lite": {
+        ("cdr_lite_output", "do_cdr_lite_output"): (
+            "Forced on by bgc_mode cdr_lite: this is the only output the CDR-lite "
+            "tracers appear in."
+        ),
+    },
+}
+
 
 # Modeler-facing consolidation of the raw namelist sections into a few
 # Advanced-settings panes, grouped the way an ocean modeler categorizes knobs
@@ -1545,9 +1588,13 @@ class _SettingsEditor:
         model_settings: dict[str, Any],
         on_edit=None,
         settings_cls: type[BaseModel] = RunTimeSettings,
+        *,
+        bgc_mode: str = "marbl",
     ):
         self.W = W
         self._settings_cls = settings_cls
+        self._bgc_mode = bgc_mode
+        self._forced_on = _FORCED_ON_BY_BGC_MODE.get(bgc_mode, {})
         # (section, field|None) -> (widget, base_type)
         self._widgets: dict[Any, Any] = {}
         self._section_fields: dict[str, list[str | None]] = {}
@@ -1605,6 +1652,13 @@ class _SettingsEditor:
             titles.append(title)
         # Independently collapsible panes: opening one no longer closes another.
         self.accordion = components.open_accordion(W, panes, titles)
+        # Before the on_edit observers attach, so locking one is never an edit.
+        for key, why in self._forced_on.items():
+            if key in self._widgets:
+                widget = self._widgets[key][0]
+                widget.value = True
+                widget.disabled = True
+                widget.tooltip = f"{widget.tooltip or ''} {why}".strip()
         if on_edit is not None:
             for (section, field), (widget, _base) in self._widgets.items():
                 widget.observe(
@@ -1626,6 +1680,8 @@ class _SettingsEditor:
                     if field is None
                     else (sec.get(field) if isinstance(sec, dict) else None)
                 )
+                if (section, field) in self._forced_on:
+                    value = True
                 try:
                     labels = _BOOL_DROPDOWN_FIELDS.get((section, field))
                     if labels is not None and value is not None:
@@ -1766,6 +1822,8 @@ class _SettingsEditor:
         W = self.W
         sub = _section_submodel(section, self._settings_cls)
         if not isinstance(value, dict):  # scalar section (e.g. gamma2, ubind)
+            if not _applies_in(section, None, self._bgc_mode):
+                return W.VBox([]), []
             base = _base_type(None, value)
             tip = _namelist_tooltip(self._settings_cls, section, section)
             label, tip = _namelist_description_and_tooltip(section, section, tip)
@@ -1779,6 +1837,8 @@ class _SettingsEditor:
             if key in excluded or key in exclude:
                 continue
             if include is not None and key not in include:
+                continue
+            if not _applies_in(section, key, self._bgc_mode):
                 continue
             # Skip metadata-name keys (*_vname/*_tname, cdb_min, ...): the settings
             # sub-models are extra="ignore", so anything not a typed field is dropped
@@ -4706,6 +4766,7 @@ class ForgeBlueprintWizard:
         # --- advanced settings editor (built lazily on first rebuild) ---
         self.editor: _SettingsEditor | None = None
         self._editor_model: str | None = None
+        self._editor_bgc_mode: str | None = None
         # The RunTimeSettings variant the editor was last built against -- rebuilt
         # not only on a model switch but also when the effective ucla-roms ref
         # crosses a schema boundary (e.g. editing the roms_ref override across the
@@ -5598,12 +5659,18 @@ class ForgeBlueprintWizard:
         self._rebuild()
 
     def _on_bgc_mode(self, change) -> None:
-        """A BGC mode change re-resolves once. An untouched default ForcingSpec
-        follows the mode (the BGC-carrying default for MARBL, the physics-only
-        one otherwise); a hand-edited or non-default forcing is left alone.
+        """A BGC mode change re-resolves once. Overrides of settings the new mode
+        doesn't apply to are dropped, and an untouched default ForcingSpec follows
+        the mode (the BGC-carrying default for MARBL, the physics-only one
+        otherwise); a hand-edited or non-default forcing is left alone.
         """
         if getattr(self, "_suspended", False) or self._syncing:
             return
+        self._overrides = {
+            (section, field): value
+            for (section, field), value in self._overrides.items()
+            if _applies_in(section, field, change["new"])
+        }
         old_default = self._default_forcing_spec(change["old"])
         new_default = self._default_forcing_spec(change["new"])
         if (
@@ -7310,15 +7377,18 @@ class ForgeBlueprintWizard:
             self.editor is None
             or self._editor_model != self.model_dd.value
             or self._editor_settings_cls is not settings_cls
+            or self._editor_bgc_mode != self.bgc_dd.value
         ):
             self.editor = _SettingsEditor(
                 self.W,
                 composed,
                 on_edit=self._on_editor_edit,
                 settings_cls=settings_cls,
+                bgc_mode=self.bgc_dd.value,
             )
             self._editor_model = self.model_dd.value
             self._editor_settings_cls = settings_cls
+            self._editor_bgc_mode = self.bgc_dd.value
             self.editor_box.children = [self.editor.accordion]
 
         effective = _apply_overrides(composed, self._overrides)

@@ -37,6 +37,7 @@ from cstar.wizard.wizard import (
     _OUTPUT_TABLES,
     WIZARD_TOOL,
     ForgeBlueprintWizard,
+    _applies_in,
     _drain_stream_buffer,
     _ForcingEditor,
     _namelist_tooltip,
@@ -1554,6 +1555,106 @@ class TestBgcModeForcingDefault:
         assert w2.forcing_dd.value == self.UNIFIED
 
 
+class TestBgcModeSettings:
+    """The Advanced-settings editor follows the BGC mode: settings that need MARBL
+    are neither shown nor kept as overrides without it, and the CDR-lite stream
+    that ``cdr_lite`` forces on is displayed as on.
+    """
+
+    @staticmethod
+    def _wizard():
+        wiz = ForgeBlueprintWizard()
+        wiz.start.value = date(2012, 1, 1)
+        wiz.end.value = date(2012, 1, 2)
+        wiz.use_pio_chk.value = False
+        wiz.cdr_mode_dd.value = "simple"  # cdr_lite needs a CDR forcing to resolve
+        return wiz
+
+    @staticmethod
+    def _toggle(wiz, key):
+        widget = wiz.editor._widgets[key][0]
+        widget.value = not widget.value
+
+    def test_editor_is_rebuilt_for_the_mode(self):
+        wiz = self._wizard()
+        assert wiz.editor._bgc_mode == "marbl"
+        assert ("cdr_output", "do_cdr_output") in wiz.editor._widgets
+        wiz.bgc_dd.value = "cdr_lite"
+        assert wiz.config is not None, wiz.derived.value
+        assert wiz._editor_bgc_mode == "cdr_lite"
+        assert wiz.editor._bgc_mode == "cdr_lite"
+        assert ("cdr_output", "do_cdr_output") not in wiz.editor._widgets
+        wiz.bgc_dd.value = "marbl"
+        assert ("cdr_output", "do_cdr_output") in wiz.editor._widgets
+
+    def test_marbl_only_overrides_are_dropped_on_leaving_marbl(self):
+        wiz = self._wizard()
+        before = wiz.config.model_settings["bgc"]["wrt_his"]
+        self._toggle(wiz, ("bgc", "wrt_his"))
+        self._toggle(wiz, ("cppdefs", "nhy_forcing"))
+        self._toggle(wiz, ("cppdefs", "sponge_tune"))
+        assert set(wiz._overrides) == {
+            ("bgc", "wrt_his"),
+            ("cppdefs", "nhy_forcing"),
+            ("cppdefs", "sponge_tune"),
+        }
+
+        wiz.bgc_dd.value = "cdr_lite"
+
+        assert set(wiz._overrides) == {("cppdefs", "sponge_tune")}
+        assert wiz.config is not None, wiz.derived.value
+        assert wiz.config.composition.overrides == {"cppdefs": {"sponge_tune": True}}
+        settings = wiz.config.model_settings
+        assert settings.get("bgc", {}).get("wrt_his", before) is before
+        assert settings["cppdefs"]["nhy_forcing"] is False
+        assert settings["cppdefs"]["sponge_tune"] is True
+
+    def test_overrides_are_kept_between_modes_that_share_them(self):
+        wiz = self._wizard()
+        wiz.bgc_dd.value = "cdr_lite"
+        self._toggle(wiz, ("cdr_lite_output", "wrt_alk"))
+        wiz.bgc_dd.value = "marbl"
+        assert ("cdr_lite_output", "wrt_alk") in wiz._overrides
+
+    def test_overrides_survive_a_mode_change_while_loading(self):
+        wiz = self._wizard()
+        self._toggle(wiz, ("bgc", "wrt_his"))
+        with wiz._suspend():
+            wiz.bgc_dd.value = "cdr_lite"
+        assert ("bgc", "wrt_his") in wiz._overrides
+
+    def test_cdr_lite_stream_is_shown_on_without_recording_an_override(self):
+        wiz = self._wizard()
+        wiz.bgc_dd.value = "cdr_lite"
+        assert wiz.config is not None, wiz.derived.value
+        master = wiz.editor._widgets[_LITE_STREAM][0]
+        assert master.value is True
+        assert master.disabled is True
+        assert _display(wiz.editor._widgets[("cdr_lite_output", "nrpf")][0]) == ""
+        assert wiz._overrides == {}
+        assert wiz.config.composition.overrides == {}
+        # display only: the authored value is what is saved
+        assert (
+            wiz.config.model_settings["cdr_lite_output"]["do_cdr_lite_output"] is False
+        )
+
+    def test_round_trips_a_cdr_lite_blueprint_with_overrides(self):
+        wiz = self._wizard()
+        wiz.bgc_dd.value = "cdr_lite"
+        self._toggle(wiz, ("cppdefs", "sponge_tune"))
+        self._toggle(wiz, ("cdr_lite_output", "wrt_alk"))
+        assert wiz.config is not None, wiz.derived.value
+
+        wiz2 = ForgeBlueprintWizard()
+        wiz2._populate_from(wiz.config)
+
+        assert wiz2.bgc_dd.value == "cdr_lite"
+        assert wiz2._overrides == wiz._overrides
+        assert wiz2._editor_bgc_mode == "cdr_lite"
+        assert wiz2.config is not None, wiz2.derived.value
+        assert wiz2.config.content_hash() == wiz.config.content_hash()
+
+
 def test_use_pio_chk_default_seeded_from_model_spec():
     """use_pio_chk mirrors bgc_dd: it is seeded from the selected ModelSpec's
     top-level use_pio (True for roms-marbl-0.10-default, the wizard's default
@@ -2582,6 +2683,160 @@ def test_settings_editor_skips_cdr_lite_section_before_0_9_0():
     new = _SettingsEditor(W, model_settings, settings_cls=RunTimeSettingsV0_9_0)
     assert key in new._widgets
     assert "cdr_lite" in new._pane_sections["Carbon dioxide removal (CDR)"]
+
+
+# One setting per kind of key the BGC-mode table names, plus two that apply in
+# every mode.
+_MARBL_ONLY_KEYS = [
+    ("bgc", "wrt_his"),
+    ("marbl_bgc", "marbl_config_file"),
+    ("dic_alk_correction", "dcdt"),
+    ("cdr_output", "do_cdr_output"),
+    ("cdr_gas_exch_output", "do_cdr_gas_exch_output"),
+    ("upscale_output", "do_upscale"),
+    ("cppdefs", "nhy_forcing"),
+    ("cppdefs", "nox_forcing"),
+    ("cdr_lite", "cdr_online_carbonate_sensitivity"),
+]
+_LITE_STREAM = ("cdr_lite_output", "do_cdr_lite_output")
+_EVERY_MODE_KEYS = [("ocean_vars", "wrt_file_his"), ("cppdefs", "sponge_tune")]
+_BGC_MODE_SETTINGS_SAMPLE = {
+    "bgc": {"wrt_his": True},
+    "marbl_bgc": {"marbl_config_file": "marbl_in"},
+    "dic_alk_correction": {"dcdt": 0.0},
+    "cdr_output": {"do_cdr_output": False},
+    "cdr_gas_exch_output": {"do_cdr_gas_exch_output": False},
+    "upscale_output": {"do_upscale": False},
+    "cdr_lite_output": {
+        "do_cdr_lite_output": False,
+        "output_period": 3600.0,
+        "wrt_alk": True,
+    },
+    "cdr_lite": {"cdr_online_carbonate_sensitivity": False},
+    "cppdefs": {"nhy_forcing": True, "nox_forcing": True, "sponge_tune": False},
+    "ocean_vars": {"wrt_file_his": True},
+}
+
+
+@pytest.mark.parametrize(
+    ("section", "field", "bgc_mode", "expected"),
+    [
+        ("bgc", "wrt_his", "marbl", True),
+        ("bgc", "wrt_his", "none", False),
+        ("bgc", None, "cdr_lite", False),
+        ("cdr_lite_output", "do_cdr_lite_output", "marbl", True),
+        ("cdr_lite_output", "do_cdr_lite_output", "cdr_lite", True),
+        ("cdr_lite_output", "wrt_alk", "none", False),
+        ("cppdefs", "nhy_forcing", "none", False),
+        ("cppdefs", "nhy_forcing", "marbl", True),
+        ("cppdefs", "sponge_tune", "none", True),
+        ("cppdefs", None, "none", True),
+        ("ocean_vars", "wrt_file_his", "cdr_lite", True),
+    ],
+)
+def test_applies_in(section, field, bgc_mode, expected):
+    assert _applies_in(section, field, bgc_mode) is expected
+
+
+@pytest.mark.parametrize("bgc_mode", ["marbl", "none", "cdr_lite"])
+def test_settings_editor_builds_only_the_settings_that_apply_in_the_bgc_mode(
+    bgc_mode,
+):
+    import ipywidgets as W
+
+    editor = _SettingsEditor(
+        W,
+        _BGC_MODE_SETTINGS_SAMPLE,
+        settings_cls=RunTimeSettingsV0_9_0,
+        bgc_mode=bgc_mode,
+    )
+    for key in _MARBL_ONLY_KEYS:
+        assert (key in editor._widgets) is (bgc_mode == "marbl"), key
+    assert (_LITE_STREAM in editor._widgets) is (bgc_mode != "none")
+    for key in _EVERY_MODE_KEYS:
+        assert key in editor._widgets, key
+
+
+def test_settings_editor_builds_no_pane_left_without_fields():
+    """Without MARBL the Biogeochemistry pane has nothing left (its sections and
+    its two cppdefs fields are all MARBL-only): no pane, no section header.
+    """
+    import ipywidgets as W
+
+    def _titles(mode):
+        editor = _SettingsEditor(
+            W,
+            _BGC_MODE_SETTINGS_SAMPLE,
+            settings_cls=RunTimeSettingsV0_9_0,
+            bgc_mode=mode,
+        )
+        return list(editor._pane_sections), editor._section_fields
+
+    marbl_panes, marbl_fields = _titles("marbl")
+    none_panes, none_fields = _titles("none")
+    assert "Biogeochemistry (BGC / MARBL)" in marbl_panes
+    assert "Biogeochemistry (BGC / MARBL)" not in none_panes
+    assert "bgc" in marbl_fields
+    assert not {"bgc", "marbl_bgc", "upscale_output", "cdr_output"} & set(none_fields)
+    # a section that still has a field keeps its section
+    assert none_fields["cppdefs"] == ["sponge_tune"]
+
+
+def test_settings_editor_defaults_to_marbl():
+    import ipywidgets as W
+
+    editor = _SettingsEditor(
+        W, _BGC_MODE_SETTINGS_SAMPLE, settings_cls=RunTimeSettingsV0_9_0
+    )
+    for key in _MARBL_ONLY_KEYS:
+        assert key in editor._widgets, key
+
+
+def test_settings_editor_locks_the_cdr_lite_stream_on_under_cdr_lite():
+    """``configure_build`` forces the CDR-lite stream on in ``cdr_lite`` mode, so
+    the editor shows it checked and disabled with its dependents visible -- and
+    never reports that as an edit, at construction or on a sync of the authored
+    (off) value.
+    """
+    import ipywidgets as W
+
+    edits: list[tuple] = []
+    editor = _SettingsEditor(
+        W,
+        _BGC_MODE_SETTINGS_SAMPLE,
+        on_edit=lambda s, f: edits.append((s, f)),
+        settings_cls=RunTimeSettingsV0_9_0,
+        bgc_mode="cdr_lite",
+    )
+    master = editor._widgets[_LITE_STREAM][0]
+    period = editor._widgets[("cdr_lite_output", "output_period")][0]
+    assert master.value is True
+    assert master.disabled is True
+    assert "bgc_mode cdr_lite" in master.tooltip
+    assert _display(period) == ""
+
+    editor.sync(_BGC_MODE_SETTINGS_SAMPLE)  # authored do_cdr_lite_output: False
+    assert master.value is True
+    assert _display(period) == ""
+    assert edits == []
+    assert editor.read(*_LITE_STREAM) is True
+
+
+def test_settings_editor_leaves_the_cdr_lite_stream_free_under_marbl():
+    import ipywidgets as W
+
+    editor = _SettingsEditor(
+        W,
+        _BGC_MODE_SETTINGS_SAMPLE,
+        settings_cls=RunTimeSettingsV0_9_0,
+        bgc_mode="marbl",
+    )
+    master = editor._widgets[_LITE_STREAM][0]
+    assert master.value is False
+    assert master.disabled is False
+    assert _display(editor._widgets[("cdr_lite_output", "output_period")][0]) == "none"
+    master.value = True
+    assert _display(editor._widgets[("cdr_lite_output", "output_period")][0]) == ""
 
 
 def test_wizard_editor_cdr_output_streams_gated_by_model_spec_pin():

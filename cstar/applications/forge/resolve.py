@@ -1186,6 +1186,11 @@ def build_forge_blueprint(
         marbl["marbl_diagnostics_to_write"] = ensure_cdr_output_marbl_diagnostics(
             marbl.get("marbl_diagnostics_to_write")
         )
+    if bgc_mode != "marbl" and (settings.get("upscale_output") or {}).get("do_upscale"):
+        raise ValueError(
+            'upscale_output.do_upscale is True but bgc_mode != "marbl": ucla-roms only '
+            "compiles upscale_output.F90 under MARBL (and MARBL_DIAGS)."
+        )
 
     # ----- schema selection + version-gated section pruning -----------------
     # Which run-time settings tier the pinned ucla-roms ref selects decides
