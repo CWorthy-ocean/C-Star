@@ -5,8 +5,10 @@ import functools
 import os
 import shlex
 import shutil
+import stat
 import sys
 import typing as t
+import uuid
 from collections.abc import AsyncGenerator, Generator, Iterator
 from contextlib import asynccontextmanager, contextmanager
 from dataclasses import dataclass
@@ -813,3 +815,69 @@ def get_backup_path(path: Path, backup_ext: str = ".bak") -> Path:
         backup_path = path.with_suffix(suffix)
         i += 1
     return backup_path
+
+
+def write_bytes_atomic(path: Path, data: bytes, *, sync: bool = True) -> None:
+    """Replace the file at `path` with `data`, or leave it exactly as it was.
+
+    The data is written, flushed and (unless `sync` is `False`) synced to a
+    temporary file beside the target, given the target's permissions (or the umask
+    default for a new file), and renamed over it. A failure at any point, such as a
+    full disk, leaves the original intact and removes the temporary file. A
+    symlink at `path` keeps its link: its target is replaced. The target becomes a
+    new inode, so hard links to it, its ownership and its extended attributes are
+    not preserved.
+
+    Parameters
+    ----------
+    path : Path
+        The file to write; its parent directories are created.
+    data : bytes
+        The new content.
+    sync : bool
+        Whether to fsync the temporary file before the rename. When `False` the
+        rename is still atomic, but a crash within the OS flush window can lose
+        the content: pass `False` for files rewritten on every state change.
+    """
+    target = path.resolve()
+    target.parent.mkdir(parents=True, exist_ok=True)
+    mode = stat.S_IMODE(target.stat().st_mode) if target.exists() else None
+
+    # The kernel applies the umask to the creation mode atomically, so a new file
+    # needs no process-global umask toggle.
+    temp = target.parent / f".{target.name}.{uuid.uuid4().hex}.tmp"
+    fd = os.open(temp, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o666)
+    try:
+        with os.fdopen(fd, "wb") as handle:
+            handle.write(data)
+            handle.flush()
+            if sync:
+                os.fsync(handle.fileno())
+        if mode is not None:
+            os.chmod(temp, mode)
+        os.replace(temp, target)
+    except BaseException:
+        temp.unlink(missing_ok=True)
+        raise
+
+
+def write_text_atomic(
+    path: Path, text: str, *, encoding: str = "utf-8", sync: bool = True
+) -> None:
+    """Replace the file at `path` with `text`, or leave it exactly as it was.
+
+    Encodes the text and delegates to `write_bytes_atomic`, which documents the
+    guarantees.
+
+    Parameters
+    ----------
+    path : Path
+        The file to write; its parent directories are created.
+    text : str
+        The new content.
+    encoding : str
+        The codec used to encode `text`.
+    sync : bool
+        Whether to fsync before the rename; see `write_bytes_atomic`.
+    """
+    write_bytes_atomic(path, text.encode(encoding), sync=sync)

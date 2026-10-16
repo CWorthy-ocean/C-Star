@@ -16,6 +16,7 @@ from cstar.cli.run import RUN_LEVEL_VERBS
 from cstar.cli.run import app as app_run
 from cstar.cli.run.check import COMMAND_CHECK
 from cstar.cli.run.check import app as app_run_check
+from cstar.cli.run.show import COMMAND_SHOW
 from cstar.cli.workplan import ALIAS as ALIAS_WORKPLAN
 from cstar.cli.workplan import app as app_workplan
 from cstar.cli.workplan.check import app as app_workplan_check
@@ -29,6 +30,9 @@ from cstar.cli.workplan.status import app as app_status
 from cstar.orchestration.orchestration import LiveWorkplan
 from cstar.orchestration.tracking import WorkplanRun
 from cstar.tests.unit_tests.orchestration.cli.conftest import FakeEntryPoint
+
+RUN_ONLY_COMMANDS = {COMMAND_CHECK, COMMAND_SHOW}
+"""The commands `cstar run` serves that `cstar workplan` does not."""
 
 SUBCOMMAND_ALIASES = (("workplan", ALIAS_WORKPLAN), ("blueprint", ALIAS_BLUEPRINT))
 
@@ -160,12 +164,12 @@ def test_run_attaches_check_but_not_the_workplan_verbs():
 
 def test_run_level_verbs_are_what_the_groups_attach():
     """The constant the workplan group warns on is exactly the verbs `run` serves
-    besides `check`, and `workplan` still serves each of them.
+    besides `check` and `show`, and `workplan` still serves each of them.
     """
     run_commands = set(get_command(app_run).commands)
     workplan_commands = set(get_command(app_workplan).commands)
 
-    assert run_commands == RUN_LEVEL_VERBS | {COMMAND_CHECK}
+    assert run_commands == RUN_LEVEL_VERBS | RUN_ONLY_COMMANDS
     assert RUN_LEVEL_VERBS <= workplan_commands
     assert {COMMAND_CHECK, NAME_RUN} <= workplan_commands
 
@@ -176,7 +180,7 @@ def test_run_group_is_attached_to_the_root(build_app):
 
     assert NAME_RUN in root.commands
     assert not root.commands[NAME_RUN].hidden
-    assert set(root.commands[NAME_RUN].commands) == RUN_LEVEL_VERBS | {COMMAND_CHECK}
+    assert set(root.commands[NAME_RUN].commands) == RUN_LEVEL_VERBS | RUN_ONLY_COMMANDS
 
 
 def test_run_name_is_reserved_against_plugins():
