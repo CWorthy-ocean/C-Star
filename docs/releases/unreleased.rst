@@ -81,6 +81,20 @@ New features
   - Output from children without CDR-lite tracers is unchanged, and ucla-roms releases before 0.11.0 still read the first two columns as ALK and DIC.
   - A CDR-lite tracer missing from one of the child's open boundaries is left out, with a warning.
 
+- Every workplan run keeps a run manifest, ``cstar-run.yaml``, in its run directory: a unique id minted once per run directory, one attempt per scheduling, one entry per step, and what the run depends on outside itself. (`#772 <https://github.com/CWorthy-ocean/C-Star/pull/772>`_)
+
+  - Each attempt records its start time, the system it ran on, the ``cstar-ocean`` and ``roms-tools`` versions, the steps it clobbered or resumed, whether it was a pre-run, and when it finished.
+  - Each step entry records a definition hash of what the step computes, the blueprint it ran, its status when last observed, and its step record once it has one.
+  - The dependencies cover the runs referenced under ``runs``, source-data locations, codebases with their commit or branch, and the catalog entries and producer blueprints named in the blueprints' provenance.
+
+- Every step writes a step record, ``cstar-step.yaml``, in its working directory when it finishes: outcome, start and finish times, system, package versions and errors; a standalone ``cstar blueprint run`` writes both files in its working directory. (`#772 <https://github.com/CWorthy-ocean/C-Star/pull/772>`_)
+- ``cstar run show <run-id|directory>`` prints a run's manifest; ``--format table|yaml|json`` picks the output and ``--no-refresh`` shows it as last recorded. (`#772 <https://github.com/CWorthy-ocean/C-Star/pull/772>`_)
+
+  - A directory holding a manifest is read without tracking, so a run copied from another machine can be inspected with ``cstar run show /path/to/copy``.
+  - ``cstar run status``, ``cstar run show <run-id>`` and ``cstar workplan run --resume`` refresh the manifest with the current step statuses and records, and close the latest attempt once every step is terminal; ``--no-refresh`` on ``status`` reads without writing.
+
+- ``cstar blueprint run`` accepts ``--step <name>`` to record which workplan step a run executes; workplan steps pass it automatically. (`#772 <https://github.com/CWorthy-ocean/C-Star/pull/772>`_)
+
 
 
 
@@ -102,6 +116,7 @@ Bug Fixes
   - Version-gated settings get the same check on every ucla-roms release: a case variant of ``use_constant_fe``, ``nt_cdr_oae`` or a newer section's name is rejected even where that release lacks the setting.
 
 - On ucla-roms >= 0.11.0, the upscaled CDR mode wrote ``cdr_nz_chd = 50``, which aborts at init unless the child grid has exactly 50 levels; Forge now writes 0, which tells ROMS to read the level count from the forcing file. (`#777 <https://github.com/CWorthy-ocean/C-Star/pull/777>`_)
+- Blueprint paths and step names containing spaces no longer break the launched step command: both launchers now shell-quote every token of the command they render. (`#772 <https://github.com/CWorthy-ocean/C-Star/pull/772>`_)
 
 
 Improvements
@@ -122,6 +137,9 @@ Improvements
 - Symlinks C-Star creates (staged inputs, ``work/roms``, the tracking ``latest`` pointer, the legacy source-data link) are relative when both ends sit in the same tree and absolute otherwise. (`#766 <https://github.com/CWorthy-ocean/C-Star/pull/766>`_)
 - A migrated blueprint copy written to another directory keeps naming the same files. (`#766 <https://github.com/CWorthy-ocean/C-Star/pull/766>`_)
 - Upscaled CDR runs now set ``cdr_relocate_to_wet_pts``: a child-boundary profile whose nearest parent point is land moves to the nearest wet point instead of aborting, and runs that already worked keep the same release points. (`#777 <https://github.com/CWorthy-ocean/C-Star/pull/777>`_)
+- A workplan step whose local blueprint file is missing is refused when the workplan is prepared, naming the step and the path, instead of failing when the step launches. (`#772 <https://github.com/CWorthy-ocean/C-Star/pull/772>`_)
+- Every blueprint now has a content hash (metadata such as its name or working directory excluded), which the manifest and the forge provenance use to identify blueprints. (`#772 <https://github.com/CWorthy-ocean/C-Star/pull/772>`_)
+- Sentinels, the run manifest, step records and shell rc files are written through one atomic writer that never leaves a half-written file behind and no longer toggles the process umask. (`#772 <https://github.com/CWorthy-ocean/C-Star/pull/772>`_)
 
 
 Miscellaneous
@@ -138,3 +156,6 @@ Miscellaneous
 - The developer and ModelSpec docs describe the 0.11.0 schema tier and the new default. (`#774 <https://github.com/CWorthy-ocean/C-Star/pull/774>`_)
 - The Forge spec docs now say that settings keys use Forge's lowercase names, not the ROMS namelist spelling. (`#775 <https://github.com/CWorthy-ocean/C-Star/pull/775>`_)
 - The Forge internals developer guide describes the ucla-roms 0.11.0 upscaled-CDR rules. (`#777 <https://github.com/CWorthy-ocean/C-Star/pull/777>`_)
+- Published schemas for the two new documents under ``docs/schemas/run/``, generated by the developer-mode ``cstar run schemas``. (`#772 <https://github.com/CWorthy-ocean/C-Star/pull/772>`_)
+- Documentation: "Showing a Run" and "The run manifest" in the workplans guide, glossary entries for run manifest, step record, attempt and product, a note on standalone runs in the blueprints guide, and the catalog design notes updated to the manifest that now exists. (`#772 <https://github.com/CWorthy-ocean/C-Star/pull/772>`_)
+- A hello_world end-to-end module covers the manifest after a run, the status refresh, a re-entry, a copied run and a standalone blueprint run. (`#772 <https://github.com/CWorthy-ocean/C-Star/pull/772>`_)
