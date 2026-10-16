@@ -271,3 +271,25 @@ class TestPrepareResumeBlueprint:
         ic = new_bp.initial_conditions.data[0]
         assert Path(str(ic.location)) == whole_path.resolve()
         assert ic.partitioned is False
+
+    def test_relative_locations_survive_the_move_to_the_run_directory(
+        self, bp_factory: Callable[..., Path], tmp_path: Path
+    ) -> None:
+        """Relative locations are anchored where the original blueprint lives, so the
+        derived blueprint, written into the run directory, still points at them.
+        """
+        bp_path = bp_factory(use_pio=True)
+        data = yaml.safe_load(bp_path.read_text())
+        data["grid"]["data"][0]["location"] = "../relative_grid.nc"
+        nested_bp_path = tmp_path / "bps" / "blueprint.yaml"
+        nested_bp_path.parent.mkdir()
+        nested_bp_path.write_text(yaml.safe_dump(data))
+
+        bp = deserialize(bp_path, RomsMarblBlueprint)
+        fs = RomsFileSystemManager(bp.effective_working_dir)
+        _write_netcdf(fs.output_dir / _whole_name("20200601000000"))
+
+        result = prepare_resume_blueprint(str(nested_bp_path))
+
+        new_bp = deserialize(result, RomsMarblBlueprint)
+        assert str(new_bp.grid.data[0].location) == str(tmp_path / "relative_grid.nc")

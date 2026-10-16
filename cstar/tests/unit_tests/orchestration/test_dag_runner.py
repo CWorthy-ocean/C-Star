@@ -1,9 +1,10 @@
 import os
 import random
+import shutil
 import textwrap
 import typing as t
 from collections.abc import AsyncGenerator
-from datetime import datetime
+from datetime import UTC, datetime
 from pathlib import Path
 from unittest import mock
 
@@ -32,6 +33,7 @@ from cstar.orchestration.dag_runner import (
     apply_clobber_overrides,
     apply_pre_run_overrides,
     apply_resume_overrides,
+    build_dag,
     build_planner,
     check_clobber_dependents,
     check_clobber_targets,
@@ -44,23 +46,40 @@ from cstar.orchestration.dag_runner import (
     original_workplan_backup,
     prepare_workplan,
     prune_unpreparable_steps,
+    refresh_run_manifest,
+    run_dag,
 )
 from cstar.orchestration.launch.local import LocalHandle, LocalLauncher
 from cstar.orchestration.launch.slurm import SlurmLauncher
+from cstar.orchestration.manifest import (
+    RUN_MANIFEST_NAME,
+    AttemptStatus,
+    StepRecord,
+    describe_steps,
+    read_run_manifest,
+    write_step_record,
+)
 from cstar.orchestration.models import (
     KEY_CLOBBER,
     KEY_PRE_RUN,
     KEY_RESUME,
     Application,
+    BlueprintIdentity,
     BlueprintState,
     Step,
     Workplan,
     WorkplanState,
 )
 from cstar.orchestration.orchestration import LiveStep, LiveWorkplan, Planner, Status
-from cstar.orchestration.serialization import PersistenceMode, deserialize, serialize
+from cstar.orchestration.serialization import (
+    PersistenceMode,
+    deserialize,
+    read_raw,
+    serialize,
+)
 from cstar.orchestration.state import StateRepository
 from cstar.orchestration.tracking import TrackingRepository, WorkplanRun
+from cstar.orchestration.transforms import WorkplanTransformer
 from cstar.tests.unit_tests.orchestration.conftest import (
     EXTERNAL_TOKEN,
     ExternalTaskFactory,
@@ -571,16 +590,12 @@ async def test_apply_resume_overrides_marks_resumable_failed_steps(
 
     with (
         mock.patch(
-            "cstar.orchestration.dag_runner.load_run_state",
-            mock.AsyncMock(return_value=status),
-        ),
-        mock.patch(
             "cstar.orchestration.dag_runner.get_application",
             side_effect=fake_get_application,
         ),
         caplog.at_level("WARNING"),
     ):
-        resumed = await apply_resume_overrides(wp, "some-run-id", mock.Mock())
+        resumed = await apply_resume_overrides(wp, status)
 
     by_name = {step.name: step for step in wp.steps}
 
@@ -607,14 +622,8 @@ async def test_apply_resume_overrides_no_failed_steps_logs_info(
 
     status = DagStatus({step_done.name: Status.Done})
 
-    with (
-        mock.patch(
-            "cstar.orchestration.dag_runner.load_run_state",
-            mock.AsyncMock(return_value=status),
-        ),
-        caplog.at_level("INFO"),
-    ):
-        resumed = await apply_resume_overrides(wp, "some-run-id", mock.Mock())
+    with caplog.at_level("INFO"):
+        resumed = await apply_resume_overrides(wp, status)
 
     assert resumed == []
     assert step_done.workflow_overrides == {}
@@ -633,7 +642,7 @@ async def test_prepare_workplan_persists_clobber_overrides(
     wp_path = wp_templates_dir / "workplan.yaml"
     output_dir = tmp_path / "output"
 
-    _, prepared_path, _ = await prepare_workplan(
+    _, prepared_path, _, _ = await prepare_workplan(
         wp_path, output_dir, clobber_steps=["Prepare"]
     )
 
@@ -656,13 +665,104 @@ async def test_prepare_workplan_persists_original_backup(
     wp_path = wp_templates_dir / "workplan.yaml"
     output_dir = tmp_path / "output"
 
-    await prepare_workplan(wp_path, output_dir, clobber_steps=["Prepare"])
+    _, trx_path, _, _ = await prepare_workplan(
+        wp_path, output_dir, clobber_steps=["Prepare"]
+    )
 
     backup_path = original_workplan_backup(wp_path, output_dir)
     assert backup_path.exists()
 
     backup = deserialize(backup_path, Workplan, mode=PersistenceMode.yaml)
     assert backup == deserialize(wp_path, Workplan)
+    # the transformed copy keeps the name, which is the run-id, as written
+    assert read_raw(trx_path)["name"] == backup.name
+
+
+@pytest.mark.usefixtures("read_yaml_intercept")
+@pytest.mark.asyncio
+async def test_prepare_workplan_rotates_the_files_of_prior_attempts(
+    tmp_path: Path,
+    wp_templates_dir: Path,
+) -> None:
+    """Verify each attempt moves the prior attempt's original, transformed and
+    variable files aside as `<name>.<i>` instead of overwriting them, and that
+    a failed preparation leaves the prior attempt's files where they are.
+    """
+    wp_path = wp_templates_dir / "workplan.yaml"
+    output_dir = tmp_path / "output"
+    first_vars = {"var1": "a", "var2": "b"}
+
+    _, prepared_path, _, _ = await prepare_workplan(wp_path, output_dir, first_vars)
+    persisted = (
+        original_workplan_backup(wp_path, output_dir),
+        prepared_path,
+        WorkplanTransformer.derived_path(
+            wp_path, output_dir, suffix="", extension=".vars"
+        ),
+    )
+    first_text = {path: path.read_text() for path in persisted}
+    assert all(path.exists() for path in persisted)
+    assert not list(output_dir.glob("*.1"))
+
+    with pytest.raises(ValueError, match="Unknown clobber"):
+        await prepare_workplan(wp_path, output_dir, clobber_steps=["no-such-step"])
+    assert not list(output_dir.glob("*.1"))
+    assert {path: path.read_text() for path in persisted} == first_text
+
+    second_vars = {"var1": "c", "var2": "d"}
+    await prepare_workplan(wp_path, output_dir, second_vars, ["Prepare"])
+
+    for path in persisted:
+        assert path.with_name(f"{path.name}.1").read_text() == first_text[path]
+    assert persisted[1].read_text() != first_text[persisted[1]]
+    assert persisted[2].read_text() != first_text[persisted[2]]
+
+    second_text = {path: path.read_text() for path in persisted}
+    await prepare_workplan(wp_path, output_dir, first_vars)
+
+    for path in persisted:
+        assert path.with_name(f"{path.name}.1").read_text() == first_text[path]
+        assert path.with_name(f"{path.name}.2").read_text() == second_text[path]
+
+    # an attempt without variables moves the last attempt's variables aside too,
+    # rather than leaving them beside the new originals
+    third_vars_text = persisted[2].read_text()
+    await prepare_workplan(wp_path, output_dir)
+
+    assert not persisted[2].exists()
+    assert persisted[2].with_name(f"{persisted[2].name}.3").read_text() == (
+        third_vars_text
+    )
+    for path in persisted[:2]:
+        assert path.exists()
+        assert path.with_name(f"{path.name}.3").exists()
+
+
+@pytest.mark.usefixtures("read_yaml_intercept")
+@pytest.mark.asyncio
+async def test_build_dag_reports_orphans_of_a_re_entered_run(
+    wp_templates_dir: Path,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Verify re-running a workplan under a run-id whose directory holds a step
+    that the workplan no longer has reports the leftover without deleting it.
+    """
+    run_id = "re-entered-run"
+    leftover = (
+        JobFileSystemManager(StateDirectoryManager.data_dir(run_id)).tasks_dir
+        / "renamed-step"
+    )
+    leftover.mkdir(parents=True)
+
+    with (
+        mock.patch("cstar.orchestration.dag_runner.check_environment"),
+        caplog.at_level("WARNING"),
+    ):
+        await build_dag(wp_templates_dir / "single_step.yaml", run_id)
+
+    warnings = [r.getMessage() for r in caplog.records if r.levelname == "WARNING"]
+    assert any(str(leftover) in w and "left in place" in w for w in warnings)
+    assert leftover.is_dir()
 
 
 @pytest.mark.asyncio
@@ -697,7 +797,10 @@ async def test_prepare_workplan_materializes_inline_blueprint(
     assert serialize(wp_path, wp)
     output_dir = tmp_path / "output"
 
-    _, prepared_path, _ = await prepare_workplan(wp_path, output_dir)
+    prepared, prepared_path, _, _ = await prepare_workplan(wp_path, output_dir)
+
+    # `build_dag` reports orphans from the steps' working directories
+    assert all(isinstance(s, LiveStep) for s in prepared.steps)
 
     persisted = deserialize(prepared_path, LiveWorkplan)
     consumer = next(s for s in persisted.steps if s.name == "consumer")
@@ -713,6 +816,252 @@ async def test_prepare_workplan_materializes_inline_blueprint(
         mode=PersistenceMode.yaml,
     )
     assert next(s for s in backup.steps if s.name == "consumer").is_inline
+
+
+@pytest.mark.asyncio
+async def test_prepare_workplan_records_the_run_root(
+    tmp_path: Path,
+    mock_run_id: str,
+    hello_world_bp_path: Path,
+) -> None:
+    """Verify the transformed workplan records the run root it was written under,
+    and that a copy of the run directory loads with its step directories rebased.
+
+    Parameters
+    ----------
+    tmp_path : Path
+        Temporary directory the run directory is copied into
+    mock_run_id : str
+        Fixture exporting the run-id the steps' working directories derive from
+    hello_world_bp_path : Path
+        Fixture providing the path to a minimal hello-world blueprint
+    """
+    wp = Workplan(
+        name="rooted",
+        description="A workplan whose transformed copy records its run root.",
+        steps=[
+            Step(
+                name="hello",
+                application="hello_world",
+                blueprint=hello_world_bp_path.as_posix(),
+            ),
+        ],
+    )
+    wp_path = tmp_path / "rooted.yaml"
+    assert serialize(wp_path, wp)
+    output_dir = StateDirectoryManager.data_dir(mock_run_id)
+
+    prepared, prepared_path, _, _ = await prepare_workplan(wp_path, output_dir)
+
+    assert isinstance(prepared, LiveWorkplan)
+    assert prepared.root == output_dir.resolve()
+    assert f"root: {output_dir.resolve()}" in prepared_path.read_text()
+    assert LiveWorkplan.load(prepared_path) == deserialize(prepared_path, LiveWorkplan)
+
+    moved = tmp_path / "moved"
+    shutil.copytree(output_dir, moved)
+    relocated = LiveWorkplan.load(moved / prepared_path.name)
+
+    assert relocated.root == moved.resolve()
+    assert relocated.steps[0].working_dir == moved.resolve() / "tasks" / "hello"
+    assert prepared.steps[0].working_dir == output_dir / "tasks" / "hello"
+
+
+@pytest.mark.asyncio
+async def test_run_dag_records_the_root_of_the_transformed_workplan(
+    tmp_path: Path, mock_run_id: str
+) -> None:
+    """Verify a run reloaded from a root other than the current data home's keeps
+    that root on its record, rather than a directory the data home never held.
+    """
+    run_root = tmp_path / "scratch" / "workplan_runs" / mock_run_id
+    run_root.mkdir(parents=True)
+    trx_path = run_root / "workplan_transformed.yaml"
+    assert not StateDirectoryManager.data_dir(mock_run_id).exists()
+
+    step = LiveStep.from_step(_make_step(tmp_path, "hello"))
+    workplan = LiveWorkplan(
+        name="reloaded", description="A reloaded run.", steps=[step], root=run_root
+    )
+
+    with (
+        mock.patch("cstar.orchestration.dag_runner.get_orchestrator"),
+        mock.patch("cstar.orchestration.dag_runner.process_plan", mock.AsyncMock()),
+    ):
+        wp_run = await run_dag(
+            tmp_path / "workplan.yaml", trx_path, mock_run_id, Planner(workplan)
+        )
+
+    persisted = await TrackingRepository().get_workplan_run(mock_run_id)
+
+    assert wp_run.output_path == run_root
+    assert persisted is not None
+    assert persisted.output_path == run_root
+    assert persisted.trx_workplan_path == trx_path
+
+
+async def _schedule(
+    tmp_path: Path, run_id: str, blueprint: Path, *, with_facts: bool = True
+) -> tuple[Path, WorkplanRun]:
+    """Prepare and schedule a one-step workplan; return its path and the run."""
+    wp = Workplan(
+        name="manifested",
+        description="A workplan whose run gets a manifest.",
+        steps=[
+            Step(
+                name="hello", application="hello_world", blueprint=blueprint.as_posix()
+            )
+        ],
+    )
+    wp_path = tmp_path / "manifested.yaml"
+    assert serialize(wp_path, wp)
+
+    with (
+        mock.patch("cstar.orchestration.dag_runner.check_environment"),
+        mock.patch("cstar.orchestration.dag_runner.get_orchestrator"),
+        mock.patch("cstar.orchestration.dag_runner.process_plan", mock.AsyncMock()),
+    ):
+        planner, trx_path, facts = await build_dag(wp_path, run_id)
+        wp_run = await run_dag(
+            wp_path,
+            trx_path,
+            run_id,
+            planner,
+            step_facts=facts if with_facts else None,
+        )
+    return wp_path, wp_run
+
+
+@pytest.mark.asyncio
+async def test_run_dag_writes_the_run_manifest(
+    tmp_path: Path, mock_run_id: str, hello_world_bp_path: Path
+) -> None:
+    """Verify scheduling a workplan writes the manifest to the run root: one
+    attempt, an entry per step in its task directory, with the step's definition
+    hash, and that scheduling again adds an attempt without minting a new id.
+    """
+    wp_path, wp_run = await _schedule(tmp_path, mock_run_id, hello_world_bp_path)
+
+    manifest = read_run_manifest(wp_run.output_path)
+    assert manifest is not None
+    assert (wp_run.output_path / RUN_MANIFEST_NAME).is_file()
+    assert manifest.kind == "workplan"
+    assert manifest.run_id == mock_run_id
+    assert manifest.name == "manifested"
+    assert manifest.workplan is not None
+    assert manifest.workplan.path == str(wp_path)
+    assert len(manifest.attempts) == 1
+
+    facts = describe_steps(deserialize(wp_path, Workplan), wp_path.parent)
+    entry = manifest.step("hello")
+    assert entry is not None
+    assert entry.application == "hello_world"
+    assert entry.working_dir == "tasks/hello"
+    assert entry.definition_hash == facts["hello"].definition_hash
+
+    # a re-entry brings no facts: the recorded entries stay
+    await _schedule(tmp_path, mock_run_id, hello_world_bp_path, with_facts=False)
+    again = read_run_manifest(wp_run.output_path)
+    assert again is not None
+    assert again.id == manifest.id
+    assert len(again.attempts) == 2
+    entry = again.step("hello")
+    assert entry is not None
+    assert entry.definition_hash == facts["hello"].definition_hash
+
+
+@pytest.mark.asyncio
+async def test_run_dag_survives_a_manifest_that_cannot_be_written(
+    tmp_path: Path,
+    mock_run_id: str,
+    hello_world_bp_path: Path,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Verify scheduling carries on, with a warning, when the manifest write fails."""
+    with (
+        mock.patch(
+            "cstar.orchestration.dag_runner.ensure_run_manifest",
+            side_effect=OSError("disk full"),
+        ),
+        caplog.at_level("WARNING"),
+    ):
+        _, wp_run = await _schedule(tmp_path, mock_run_id, hello_world_bp_path)
+
+    assert not (wp_run.output_path / RUN_MANIFEST_NAME).exists()
+    assert "disk full" in caplog.text
+    assert await TrackingRepository().get_workplan_run(mock_run_id) is not None
+
+
+@pytest.mark.asyncio
+async def test_refresh_run_manifest_folds_records_and_closes_the_attempt(
+    tmp_path: Path, mock_run_id: str, hello_world_bp_path: Path
+) -> None:
+    """Verify a refresh copies the observed statuses and a step's record into the
+    manifest, and closes the attempt once every step is terminal.
+    """
+    _, wp_run = await _schedule(tmp_path, mock_run_id, hello_world_bp_path)
+    root = wp_run.output_path
+    manifest = read_run_manifest(root)
+    assert manifest is not None
+    assert manifest.observed_at is None
+
+    running = refresh_run_manifest(
+        root, mock_run_id, DagStatus({"hello": Status.Running})
+    )
+    assert running is not None
+    entry = running.step("hello")
+    assert entry is not None
+    assert entry.status == Status.Running.name
+    assert entry.record is None
+    assert running.attempts[-1].finished_at is None
+    assert running.observed_at is not None
+
+    (root / "tasks" / "hello").mkdir(parents=True, exist_ok=True)
+    write_step_record(
+        root / "tasks" / "hello",
+        StepRecord(
+            step="hello",
+            application="hello_world",
+            blueprint=BlueprintIdentity(
+                kind="Blueprint", application="hello_world", name="bp"
+            ),
+            outcome="completed",
+            finished_at=datetime(2026, 1, 1, tzinfo=UTC),
+        ),
+    )
+    done = refresh_run_manifest(root, mock_run_id, DagStatus({"hello": Status.Done}))
+
+    assert done is not None
+    entry = done.step("hello")
+    assert entry is not None
+    assert entry.status == Status.Done.name
+    assert entry.record is not None
+    assert done.attempts[-1].status == AttemptStatus.done
+    assert done.attempts[-1].finished_at is not None
+    assert read_run_manifest(root) == done
+
+
+def test_refresh_run_manifest_without_a_manifest(
+    tmp_path: Path, mock_run_id: str
+) -> None:
+    """Verify a run that predates the manifest is left alone."""
+    result = refresh_run_manifest(tmp_path, mock_run_id, DagStatus({}))
+
+    assert result is None
+    assert not (tmp_path / RUN_MANIFEST_NAME).exists()
+
+
+def test_refresh_run_manifest_survives_a_corrupt_manifest(
+    tmp_path: Path, mock_run_id: str, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Verify an observer command warns about, rather than crashes on, a corrupt manifest."""
+    (tmp_path / RUN_MANIFEST_NAME).write_text("{not: [valid")
+
+    with caplog.at_level("WARNING"):
+        result = refresh_run_manifest(tmp_path, mock_run_id, DagStatus({}))
+
+    assert result is None
+    assert RUN_MANIFEST_NAME in caplog.text
 
 
 @pytest.mark.asyncio
@@ -1000,7 +1349,7 @@ async def test_prepare_workplan_persists_pre_run_overrides(
     """
     wp_path = wp_templates_dir / "workplan.yaml"
 
-    wp, prepared_path, _ = await prepare_workplan(
+    wp, prepared_path, _, _ = await prepare_workplan(
         wp_path, tmp_path / "output", pre_run=True
     )
     persisted = deserialize(prepared_path, LiveWorkplan)
@@ -1016,7 +1365,7 @@ async def test_prepare_workplan_without_pre_run_leaves_steps_unmarked(
     wp_templates_dir: Path,
 ) -> None:
     """Verify a plain run does not mark any step for pre-run."""
-    wp, prepared_path, _ = await prepare_workplan(
+    wp, prepared_path, _, _ = await prepare_workplan(
         wp_templates_dir / "workplan.yaml", tmp_path / "output"
     )
 
@@ -1100,9 +1449,10 @@ async def test_prepare_workplan_pre_run_does_not_report_injected_overrides(
     wp_path = tmp_path / "hello.yaml"
     serialize(wp_path, _make_workplan([step]))
 
-    wp, _, _ = await prepare_workplan(wp_path, tmp_path / "output", pre_run=True)
+    wp, _, _, _ = await prepare_workplan(wp_path, tmp_path / "output", pre_run=True)
 
     assert wp.steps[0].pre_run
+    assert all(isinstance(s, LiveStep) for s in wp.steps)
 
 
 @pytest.mark.usefixtures("read_yaml_intercept")
@@ -1516,7 +1866,7 @@ async def test_prepare_workplan_anchors_relative_blueprint_path(
     wp_path = plans / "wp.yaml"
     wp_path.write_text(
         textwrap.dedent("""\
-            name: Relative blueprint
+            name: relative-blueprint
             description: A step whose blueprint sits beside the workplan
             state: draft
             steps:
@@ -1529,7 +1879,7 @@ async def test_prepare_workplan_anchors_relative_blueprint_path(
     elsewhere.mkdir()
     monkeypatch.chdir(elsewhere)
 
-    wp, prepared_path, _ = await prepare_workplan(wp_path, tmp_path / "output")
+    wp, prepared_path, _, _ = await prepare_workplan(wp_path, tmp_path / "output")
 
     expected = (plans / "hw.yaml").resolve()
     assert Path(wp.steps[0].blueprint_path) == expected
@@ -1540,3 +1890,4 @@ async def test_prepare_workplan_anchors_relative_blueprint_path(
 
     command = StepToRunRequestAdapter().adapt(step).command
     assert command[:4] == ["cstar", "blueprint", "run", str(expected)]
+    assert command[4:6] == ["--step", step.name]

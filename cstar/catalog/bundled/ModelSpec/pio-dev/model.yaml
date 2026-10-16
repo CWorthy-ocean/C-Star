@@ -112,3 +112,6 @@ model_settings:
   marbl_bgc:
     marbl_config_file: marbl_in
     marbl_timestep: 3600.0
+    # Constant-iron option (ucla-roms >= 0.11.0, PR #391, on main); off by default. Fe is in mmol/m^3 (1 nM = 1e-3).
+    use_constant_fe: false
+    constant_fe_value: 3.0e-3

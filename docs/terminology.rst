@@ -132,11 +132,39 @@ Definitions
       stopped and restarted without loss of state.
 
     Run ID
-      A unique identifier you choose when submitting a workplan
-      (``cstar workplan run --run-id <id>``). It names the run's directory
-      (``CSTAR_DATA_HOME/workplan_runs/<id>``), lets you check status (``cstar workplan status``) or reattach to a run
+      The identifier of a run. By default it is the workplan's ``name``, which
+      must already be a slug (ASCII lowercase letters, digits, ``-`` and ``_``), so
+      the same file always runs under the same ID; ``cstar workplan run --run-id
+      <id>`` overrides it. It names the run's directory
+      (``CSTAR_DATA_HOME/workplan_runs/<id>``), lets you check status (``cstar run status``) or reattach to a run
       in progress, and lets you re-enter a run to retry failed steps or
       resume them in place. A new run ID starts the workplan from scratch.
+      Two different workplans with the same ``name`` share a run ID, so
+      running the second one without ``--run-id`` is refused.
+
+    Run manifest
+      ``cstar-run.yaml`` in a run's directory: the run's identity, one
+      **attempt** for each time it was scheduled, one entry per step with its
+      status and **step record**, and what the run depends on outside
+      itself. The scheduling command writes it; ``cstar run status`` and
+      ``cstar run show`` refresh it. See :doc:`workplans`.
+
+    Step record
+      ``cstar-step.yaml`` in a step's working directory, written by the step
+      process when it shuts down: its outcome, start and finish times, system,
+      package versions, **products** and errors. The run manifest folds each
+      step's record in. See :doc:`workplans`.
+
+    Attempt
+      One scheduling of a workplan into a run: ``cstar workplan run``, or a
+      re-entry with ``--run-id``, ``--resume`` or ``--clobber``. The run
+      manifest lists them oldest first; an attempt's ``finished_at`` is set
+      once every step is terminal. See :doc:`workplans`.
+
+    Product
+      A file a step reports in its step record, with a kind, size and
+      metadata. The applications record their products starting with the
+      next release; until then the list is empty. See :doc:`workplans`.
 
     Pre-run
       Performing every stage before the model launch -- staging inputs,
@@ -178,5 +206,5 @@ steps to SLURM. SLURM allocates compute resources, enforces the dependencies,
 and monitors the jobs. Each step gets its own allocation, in which a worker
 reads the step's blueprint and runs the application.
 
-The user can log off and come back later. Calling ``cstar workplan status``
+The user can log off and come back later. Calling ``cstar run status``
 with the same run ID reports how far the workplan has progressed.

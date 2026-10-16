@@ -44,6 +44,7 @@ from cstar.roms.namelist import (
     RomsNamelistV0_5_0,
     RomsNamelistV0_6_0,
     RomsNamelistV0_9_0,
+    RomsNamelistV0_11_0,
     namelist_schema_for_ref,
 )
 from cstar.roms.simulation import ROMSSimulation
@@ -442,10 +443,20 @@ class TestROMSSimulationInitialization:
         """
         sim = stub_romssimulation
 
-        sim.runtime_code._working_copy = stageddatacollection_remote_files()
-        mock_grid_path.return_value = [Path("grid.nc")]
-        mock_ini_path.return_value = [Path("fake_ini.nc")]
-        mock_forcing_paths.return_value = [Path("forcing1.nc"), Path("forcing2.nc")]
+        # Everything staged within the simulation's root is named relative to the
+        # run directory ROMS executes in.
+        fs = sim.fs_manager
+        input_datasets = fs.input_datasets_dir
+        sim.runtime_code._working_copy = stageddatacollection_remote_files(
+            paths=[fs.runtime_code_dir / f.basename for f in sim.runtime_code.source],
+            sources=sim.runtime_code.source,
+        )
+        mock_grid_path.return_value = [input_datasets / "grid.nc"]
+        mock_ini_path.return_value = [input_datasets / "fake_ini.nc"]
+        mock_forcing_paths.return_value = [
+            input_datasets / "forcing1.nc",
+            input_datasets / "forcing2.nc",
+        ]
 
         # Each property access mutates the returned model, so hand out a fresh
         # RomsNamelist read from the fixture on every call.
@@ -453,8 +464,9 @@ class TestROMSSimulationInitialization:
             _REAL_NAMELIST_READ(EXAMPLE_NAMELIST)
         )
 
-        # Set up fake staged working copies for CDR forcing and nesting info
-        fake_cdr_path = Path("/staged/input_datasets/cdr.nc")
+        # Set up fake staged working copies for CDR forcing (within the simulation)
+        # and nesting info (outside it, which keeps its absolute path)
+        fake_cdr_path = input_datasets / "cdr.nc"
         fake_nesting_path = Path("/staged/input_datasets/nesting.nc")
         sim.cdr_forcing._working_copy = mock.Mock()
         sim.cdr_forcing._working_copy.path = fake_cdr_path
@@ -471,22 +483,24 @@ class TestROMSSimulationInitialization:
         assert tested_settings.time_stepping.ntimes == run_length_seconds // 2160.0
         assert tested_settings.param_settings.np_xi == sim.discretization.n_procs_x
         assert tested_settings.param_settings.np_eta == sim.discretization.n_procs_y
-        assert tested_settings.grid_settings.grdname == str(
-            sim.model_grid.path_for_roms[0]
+        assert tested_settings.grid_settings.grdname == (
+            "../input/input_datasets/grid.nc"
         )
-        assert tested_settings.initial_conditions.inifile == str(
-            sim.initial_conditions.path_for_roms[0]
+        assert tested_settings.initial_conditions.inifile == (
+            "../input/input_datasets/fake_ini.nc"
         )
         assert tested_settings.forcing_files.frcfiles == [
-            str(p) for p in sim._forcing_paths
+            "../input/input_datasets/forcing1.nc",
+            "../input/input_datasets/forcing2.nc",
         ]
 
-        runtime_parent = Path(sim.runtime_code.working_copy[0].path).parent
-        assert tested_settings.marbl_biogeochemistry_settings.marbl_config_file == str(
-            runtime_parent / "marbl_in"
+        assert tested_settings.marbl_biogeochemistry_settings.marbl_config_file == (
+            "../input/runtime_code/marbl_in"
         )
 
-        assert tested_settings.cdr_frc_settings.cdr_file == str(fake_cdr_path)
+        assert tested_settings.cdr_frc_settings.cdr_file == (
+            "../input/input_datasets/cdr.nc"
+        )
         assert tested_settings.extract_data_settings.extract_file == str(
             fake_nesting_path
         )
@@ -526,6 +540,27 @@ class TestROMSSimulationInitialization:
             result_no_nesting.extract_data_settings.extract_root_name
             == "../temp_output/child"
         )
+
+    def test_namelist_path(
+        self,
+        stub_romssimulation: ROMSSimulation,
+        tmp_path_factory: pytest.TempPathFactory,
+    ) -> None:
+        """Paths inside the simulation's root are named relative to the run directory;
+        staged links are named rather than followed, and other paths stay absolute.
+        """
+        sim = stub_romssimulation
+        fs = sim.fs_manager
+        source = tmp_path_factory.mktemp("elsewhere") / "grid.nc"
+        source.touch()
+        fs.input_datasets_dir.mkdir(parents=True, exist_ok=True)
+        staged = fs.input_datasets_dir / "grid.nc"
+        staged.symlink_to(source)
+
+        assert sim._namelist_path(staged) == "../input/input_datasets/grid.nc"
+        assert sim._namelist_path(fs.temp_output_dir) == "../temp_output"
+        assert sim._namelist_path(fs.run_dir / "marbl_in") == "marbl_in"
+        assert sim._namelist_path(source) == str(source)
 
     def test_roms_runtime_settings_raises_if_no_runtime_code_working_copy(
         self, stub_romssimulation
@@ -593,7 +628,7 @@ class TestROMSSimulationInitialization:
         ``checkout_target`` to select a namelist schema, and that a non-release
         ``checkout_target`` (as set up by the ``stub_romssimulation`` fixture)
         surfaces the ``namelist_schema_for_ref`` fallback warning through the
-        property, actually selects the latest schema (``RomsNamelistV0_9_0``),
+        property, actually selects the latest schema (``RomsNamelistV0_11_0``),
         while still returning a valid namelist.
 
         The read is stubbed (the stub's working copy has no real files on
@@ -601,7 +636,7 @@ class TestROMSSimulationInitialization:
         the 0.5.0-style fixture — so the property's overrides are exercised
         against a real versioned schema, not the legacy one — but which class
         was actually *selected* is captured separately via the
-        ``namelist_schema_for_ref`` wrap below, since ``RomsNamelistV0_9_0``
+        ``namelist_schema_for_ref`` wrap below, since ``RomsNamelistV0_11_0``
         is a subclass of ``RomsNamelistV0_5_0`` and the stubbed read makes
         ``isinstance(result, RomsNamelistV0_5_0)`` true regardless of which
         class was selected.
@@ -637,7 +672,7 @@ class TestROMSSimulationInitialization:
         # the stub's codebase has no working copy, so no repo path is available
         # for commit-hash-to-release-tag resolution
         mock_schema_for_ref.assert_called_once_with(checkout_target, repo_path=None)
-        assert selected_schemas == [RomsNamelistV0_9_0]
+        assert selected_schemas == [RomsNamelistV0_11_0]
         assert isinstance(result, RomsNamelistV0_5_0)
         run_length_seconds = int((sim.end_date - sim.start_date).total_seconds())
         assert result.time_stepping.ntimes == run_length_seconds // 2160.0
@@ -1554,6 +1589,7 @@ class TestToAndFromDictAndBlueprint:
 
         assert sim_from_dict.to_dict() == sim_to_dict
 
+    @pytest.mark.usefixtures("offline_remote_files")
     def test_from_blueprint_valid_file(self, blueprint_path: Path) -> None:
         """Tests that `from_blueprint()` correctly loads a `ROMSSimulation` from a valid
         YAML file.
@@ -1573,6 +1609,38 @@ class TestToAndFromDictAndBlueprint:
 
         # Assertions
         assert isinstance(sim, ROMSSimulation)
+
+    @pytest.mark.usefixtures("offline_remote_files")
+    def test_from_blueprint_anchors_relative_locations(
+        self,
+        blueprint_path: Path,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Tests that a relative `location` resolves against the blueprint file's
+        directory, not the working directory.
+        """
+        grid_url = (
+            "https://github.com/CWorthy-ocean/cstar_blueprint_roms_marbl_example/"
+            "raw/refs/heads/main/wales-toy-domain/input_datasets_netcdf/roms_grd.nc"
+        )
+        data_dir = tmp_path / "relative_data"
+        data_dir.mkdir()
+        xr.Dataset({"h": ("xi_rho", [1.0])}).to_netcdf(data_dir / "roms_grd.nc")
+        bp_dir = tmp_path / "blueprints"
+        bp_dir.mkdir()
+        relative_bp = bp_dir / "bp.yaml"
+        relative_bp.write_text(
+            blueprint_path.read_text().replace(grid_url, "../relative_data/roms_grd.nc")
+        )
+        elsewhere = tmp_path / "elsewhere"
+        elsewhere.mkdir()
+        monkeypatch.chdir(elsewhere)
+
+        sim = ROMSSimulation.from_blueprint(blueprint=str(relative_bp))
+
+        assert sim.model_grid is not None
+        assert sim.model_grid.source.location == str(data_dir / "roms_grd.nc")
 
 
 class TestProcessingAndExecution:
@@ -2377,6 +2445,35 @@ class TestProcessingAndExecution:
             # Ensure execution handler was set correctly
             assert execution_handler == mock_process_instance
 
+    @mock.patch.object(
+        ROMSSimulation, "roms_runtime_settings", new_callable=mock.PropertyMock
+    )
+    def test_prepare_launch_links_an_executable_outside_the_run_absolutely(
+        self,
+        mock_runtime_settings,
+        stub_romssimulation: ROMSSimulation,
+        stageddatacollection_remote_files,
+        tmp_path_factory: pytest.TempPathFactory,
+    ):
+        """An executable built outside the simulation's root is linked by absolute path."""
+        sim = stub_romssimulation
+        sim.exe_path = tmp_path_factory.mktemp("prebuilt") / "roms"
+        sim.exe_path.write_text("binary")
+        runtime_code_dir = sim.fs_manager.runtime_code_dir
+        sim.runtime_code._working_copy = stageddatacollection_remote_files(
+            paths=[runtime_code_dir / f.basename for f in sim.runtime_code.source],
+            sources=sim.runtime_code.source,
+        )
+
+        with (
+            mock.patch("cstar.roms.simulation.LocalProcess"),
+            mock.patch("cstar.roms.simulation.create_scheduler_job"),
+        ):
+            sim.prepare_launch()
+
+        symlink_path = sim.fs_manager.run_dir / "roms"
+        assert symlink_path.readlink() == sim.exe_path.resolve()
+
     def test_prepare_launch_raises_if_no_executable(self, stub_romssimulation):
         """`prepare_launch` guards the same preconditions as `run`."""
         with pytest.raises(ValueError, match="unable to find ROMS executable"):
@@ -2418,6 +2515,7 @@ class TestProcessingAndExecution:
 
         symlink_path = run_dir / "roms"
         assert symlink_path.is_symlink()
+        assert symlink_path.readlink() == Path("../input/compile_time_code/roms")
         assert symlink_path.resolve() == sim.exe_path.resolve()
 
         mpi_exec_prefix = get_sysmgr().environment.mpi_exec_prefix

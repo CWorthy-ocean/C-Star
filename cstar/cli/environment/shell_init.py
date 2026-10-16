@@ -2,8 +2,6 @@ import errno
 import os
 import re
 import shlex
-import stat
-import tempfile
 import typing as t
 from contextlib import contextmanager
 from enum import StrEnum, auto
@@ -14,6 +12,7 @@ import typer
 
 from cstar.base.env import ENV_CSTAR_LOG_LEVEL
 from cstar.base.exceptions import CstarError
+from cstar.cli.run import NAME as NAME_RUN
 from cstar.cli.workplan import ALIAS, NAME
 from cstar.cli.workplan.path import COMMAND_CD, COMMAND_PATH
 from cstar.entrypoint.utils import (
@@ -22,7 +21,7 @@ from cstar.entrypoint.utils import (
     ARG_UNINSTALL,
     ARG_UNINSTALL_HELP,
 )
-from cstar.execution.file_system import DirectoryManager
+from cstar.execution.file_system import DirectoryManager, write_bytes_atomic
 
 if t.TYPE_CHECKING:
     from collections.abc import Callable, Iterator, Sequence
@@ -32,14 +31,17 @@ app = typer.Typer()
 COMMAND_SHELL_INIT: t.Final[str] = "shell-init"
 """Name of the command that prints, installs or removes the shell integration."""
 
-HELP_SHORT = f"Set up the shell function that makes `cstar {NAME} {COMMAND_CD}` work."
+HELP_SHORT = (
+    f"Set up the shell function that makes `cstar {NAME_RUN} {COMMAND_CD}` work."
+)
 HELP_LONG = f"""\
 {HELP_SHORT}
 
 A process cannot change the directory of the shell that started it, so
-`cstar {NAME} {COMMAND_CD} <run-id> \\[step]` needs a shell function named `cstar`.
-The function runs `cstar {NAME} {COMMAND_PATH}` and changes directory to the
-path it prints; every other command passes through to the cstar executable.
+`cstar {NAME_RUN} {COMMAND_CD} <run-id> \\[step]` needs a shell function named `cstar`.
+The function runs `cstar {NAME_RUN} {COMMAND_PATH}` and changes directory to the
+path it prints; every other command passes through to the cstar executable. The
+`cstar {NAME} {COMMAND_CD}` (or `cstar {ALIAS} {COMMAND_CD}`) works the same way.
 
 By default the function is printed, for dotfiles you manage yourself. With
 {ARG_INSTALL} it is written to the C-Star config directory and sourced from a
@@ -112,13 +114,14 @@ def detect_shell() -> Shell:
 
 
 def shell_function(shell: Shell) -> str:
-    """Build the shell function that intercepts `cstar workplan cd`.
+    """Build the shell function that intercepts `cstar run cd`.
 
     The function is portable sh syntax plus `local`, and works under `set -u`
-    in bash and `setopt nounset` in zsh. It intercepts only `cstar workplan cd
-    <run-id> [step]` (or its alias), and passes everything else, including
-    `--help` and an incomplete command, through to the executable. A `cstar`
-    alias is removed first, as it would break the function definition.
+    in bash and `setopt nounset` in zsh. It intercepts only `cstar run cd
+    <run-id> [step]` and its `cstar workplan cd` (or `wp`) spelling, and passes
+    everything else, including `--help` and an incomplete command, through to
+    the executable. Every spelling looks the directory up with `cstar run path`.
+    A `cstar` alias is removed first, as it would break the function definition.
 
     The log level is pinned to WARNING for the lookup so that no INFO or DEBUG
     record can reach the stdout the function captures as the directory.
@@ -133,14 +136,16 @@ def shell_function(shell: Shell) -> str:
     str
         The complete script, ending with a single newline.
     """
-    path_command = f"{ENV_CSTAR_LOG_LEVEL}=WARNING command cstar {NAME} {COMMAND_PATH}"
+    path_command = (
+        f"{ENV_CSTAR_LOG_LEVEL}=WARNING command cstar {NAME_RUN} {COMMAND_PATH}"
+    )
 
     return f"""\
 # cstar shell integration for {shell}. Regenerate after upgrading C-Star.
 unalias cstar 2>/dev/null || true
 cstar() {{
     if [ "$#" -ge 3 ] && [ "$#" -le 4 ] && [ "$2" = "{COMMAND_CD}" ] \\
-        && {{ [ "$1" = "{NAME}" ] || [ "$1" = "{ALIAS}" ]; }}; then
+        && {{ [ "$1" = "{NAME_RUN}" ] || [ "$1" = "{NAME}" ] || [ "$1" = "{ALIAS}" ]; }}; then
         case "$3" in -*) command cstar "$@"; return ;; esac
         case "${{4-}}" in -*) command cstar "$@"; return ;; esac
         local __cstar_dir
@@ -182,47 +187,6 @@ def _reporting(path: Path) -> "Iterator[None]":
     raise typer.Exit(1)
 
 
-def _write_atomic(path: Path, data: bytes) -> None:
-    """Replace the file at `path` with `data`, or leave it exactly as it was.
-
-    The data is written, flushed and synced to a temporary file beside the target,
-    given the target's permissions (or the umask default for a new file), and
-    renamed over it. A failure at any point, such as a full disk, leaves the
-    original intact and removes the temporary file. A symlink at `path` keeps its
-    link: its target is replaced. The target becomes a new inode, so hard links to
-    it, its ownership and its extended attributes are not preserved.
-
-    Parameters
-    ----------
-    path : Path
-        The file to write; its parent directories are created.
-    data : bytes
-        The new content.
-    """
-    target = path.resolve()
-    target.parent.mkdir(parents=True, exist_ok=True)
-    if target.exists():
-        mode = stat.S_IMODE(target.stat().st_mode)
-    else:
-        umask = os.umask(0)
-        os.umask(umask)
-        mode = 0o666 & ~umask
-
-    temp = tempfile.NamedTemporaryFile(
-        "wb", dir=target.parent, prefix=f".{target.name}.", suffix=".tmp", delete=False
-    )
-    try:
-        with temp:
-            temp.write(data)
-            temp.flush()
-            os.fsync(temp.fileno())
-        os.chmod(temp.name, mode)
-        os.replace(temp.name, target)
-    except BaseException:
-        Path(temp.name).unlink(missing_ok=True)
-        raise
-
-
 def _rewrite(rc: Path, edit: "Callable[[str], str]") -> bool:
     """Apply `edit` to an rc file's text, writing it back only when it changed.
 
@@ -250,7 +214,7 @@ def _rewrite(rc: Path, edit: "Callable[[str], str]") -> bool:
     if target.exists() and not os.access(target, os.W_OK):
         raise PermissionError(errno.EACCES, os.strerror(errno.EACCES), str(target))
 
-    _write_atomic(target, after.encode(**_ENCODING))
+    write_bytes_atomic(target, after.encode(**_ENCODING))
     return True
 
 
@@ -415,7 +379,7 @@ def _install(shell: Shell) -> None:
     with _reporting(rc):
         changed = _upsert_block(rc, function_file)
     with _reporting(function_file):
-        _write_atomic(function_file, shell_function(shell).encode())
+        write_bytes_atomic(function_file, shell_function(shell).encode())
 
     typer.echo(f"Shell: {shell}")
     typer.echo(f"Wrote {function_file}")
@@ -471,7 +435,7 @@ def shell_init(
         bool, typer.Option(ARG_UNINSTALL, help=ARG_UNINSTALL_HELP)
     ] = False,
 ) -> None:
-    """Print, install or uninstall the shell function that makes `cstar workplan cd` work."""
+    """Print, install or uninstall the shell function that makes `cstar run cd` work."""
     if install and uninstall:
         msg = f"{ARG_INSTALL} and {ARG_UNINSTALL} cannot be combined"
         raise typer.BadParameter(msg)

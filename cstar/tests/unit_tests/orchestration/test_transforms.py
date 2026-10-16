@@ -280,6 +280,43 @@ def test_override_transform(
     assert bp_new.initial_conditions.data[0].partitioned
 
 
+def test_override_transform_anchors_relative_locations(
+    step_overiding_wp: Workplan,
+    test_bp_path: Path,
+    tmp_path: Path,
+) -> None:
+    """Verify relative locations resolve against the original blueprint's directory
+    even though the transformed blueprint is written to the step's work directory.
+
+    Parameters
+    ----------
+    step_overiding_wp : Workplan
+        A workplan copied from a template with paths referencing tmp_path.
+    test_bp_path : Path
+        Fixture returning default write location for a blueprint file
+    tmp_path : Path
+        Temporary directory for test outputs
+    """
+    bp_dir = tmp_path / "blueprints"
+    bp_dir.mkdir()
+    relative_bp_path = bp_dir / "bp.yaml"
+    relative_bp_path.write_text(
+        test_bp_path.read_text().replace(
+            "http://mockdoc.com/partitioning1.nc", "../data/boundary.nc"
+        )
+    )
+    step = step_overiding_wp.steps[0]
+    step = LiveStep.from_step(step, update={"blueprint": relative_bp_path})
+
+    transformed = next(iter(OverrideTransform()(step)))
+
+    assert Path(transformed.blueprint_path).parent != bp_dir
+    bp_new = deserialize(transformed.blueprint_path, RomsMarblBlueprint)
+    assert str(bp_new.forcing.boundary.data[0].location) == str(
+        tmp_path / "data" / "boundary.nc"
+    )
+
+
 def test_override_transform_system_precedence(
     tmp_path: Path,
     step_overiding_wp: Workplan,
@@ -3601,6 +3638,54 @@ def test_continue_from_timestamp_survives_directive_file_round_trip(
     assert bp_after.runtime_params.start_date == datetime(2012, 1, 15)
 
 
+def test_apply_directives_anchors_relative_locations(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    bp_templates_dir: Path,
+) -> None:
+    """Verify relative locations in the blueprint resolve against its directory, so
+    the transformed blueprint, written under the step's working directory, still
+    points at them.
+
+    Parameters
+    ----------
+    tmp_path : Path
+        The pytest-provided temporary directory.
+    monkeypatch : pytest.MonkeyPatch
+        Fixture used to clear the run-id environment variable.
+    bp_templates_dir : Path
+        Fixture returning the path to the directory containing blueprint template files.
+    """
+    bp_dir = tmp_path / "blueprints"
+    bp_dir.mkdir()
+    bp_path = bp_dir / "bp.yaml"
+    bp_path.write_text(
+        (bp_templates_dir / "blueprint.yaml")
+        .read_text()
+        .replace("working_dir: .", f"working_dir: {tmp_path / 'run'}")
+        .replace("http://mockdoc.com/partitioning1.nc", "../data/boundary.nc")
+    )
+    directive_path = tmp_path / "directives.yaml"
+    directive_path.write_text(
+        f"""\
+directives:
+  {ApplyOverridesDirective.key()}:
+    overrides:
+      description: relocated
+    application: roms_marbl
+"""
+    )
+
+    monkeypatch.delenv(ENV_CSTAR_RUNID, raising=False)
+    result = DirectiveConfig.apply_directives(str(directive_path), str(bp_path))
+
+    assert Path(result).parent != bp_dir
+    bp_after = deserialize(Path(result), RomsMarblBlueprint)
+    assert str(bp_after.forcing.boundary.data[0].location) == str(
+        tmp_path / "data" / "boundary.nc"
+    )
+
+
 def test_restore_directive_file_recreates_missing_file(
     tmp_path: Path,
     hello_world_bp_path: Path,
@@ -6143,7 +6228,7 @@ async def test_external_runs_problem_gate(
     assert "'outer'" in problem
     assert status.name in problem
     assert f"launcher '{launcher.name}'" in problem
-    assert ("cstar workplan status spinup" in problem) == Status.is_in_progress(status)
+    assert ("cstar run status spinup" in problem) == Status.is_in_progress(status)
 
 
 async def test_external_runs_problem_not_refreshed(
@@ -6416,7 +6501,7 @@ async def test_workplan_transformer_reports_every_gate_problem(
     with pytest.raises(ValueError, match="Running") as error:
         _ = WorkplanTransformer(wp, None, external).apply()
 
-    assert "cstar workplan status spinup" in str(error.value)
+    assert "cstar run status spinup" in str(error.value)
 
 
 def test_workplan_transformer_without_registry_rejects_external_dependency(
@@ -6767,7 +6852,7 @@ async def test_prepare_workplan_pins_external_run(
         "cstar.orchestration.dag_runner.get_launcher",
         return_value=_FakeSlurmLauncher(),
     ):
-        wp, trx_path, _ = await prepare_workplan(
+        wp, trx_path, _, _ = await prepare_workplan(
             wp_path, output_dir, {"spin_id": "spinup"}
         )
 
@@ -6881,7 +6966,7 @@ async def test_prepare_workplan_injects_compute_defaults(
     output_dir = tmp_path / "prepared"
     output_dir.mkdir()
 
-    _, trx_path, _ = await prepare_workplan(wp_path, output_dir, {})
+    _, trx_path, _, _ = await prepare_workplan(wp_path, output_dir, {})
 
     slurm = {
         s.name: t.cast("dict[str, t.Any]", s.compute_overrides["slurm"])
@@ -7038,7 +7123,7 @@ def test_workplan_transformer_anchors_after_filling_placeholders(
     monkeypatch.chdir(elsewhere)
 
     wp = Workplan(
-        name="Relative blueprint",
+        name="relative-blueprint",
         description="A step whose blueprint name is a runtime variable",
         runtime_vars=["bp_name"],
         steps=[

@@ -44,14 +44,18 @@ from cstar.applications.forge.host import HostPaths
 from cstar.applications.forge.namelist_model import (
     bgc_mode_from_cppdefs,
     build_namelist,
+    cdr_nz_chd_from_file,
     check_bgc_tracer_count,
     check_cdr_forcing_mode,
     check_cdr_lite_mode_roms,
     check_cdr_lite_sections,
     check_cdr_output_sections,
+    check_constant_fe,
+    check_marbl_only_outputs,
     check_output_streams_divide_rst,
     check_river_tracer_counts,
     check_rst_period_divisible,
+    check_upscaled_cdr_lite_tracer_counts,
     cppdefs_for_precheck,
     ensure_cdr_output_marbl_diagnostics,
     n_tracers_from_param,
@@ -70,9 +74,15 @@ from cstar.applications.forge.templates import (
 from cstar.applications.forge.user_files import verify_user_file
 from cstar.applications.forge.util import mem_log
 from cstar.base.additional_code import AdditionalCode
+from cstar.base.exceptions import CstarExpectationFailed
 from cstar.execution.file_system import DirectoryManager
 from cstar.orchestration.models import Resource
-from cstar.orchestration.serialization import deserialize
+from cstar.orchestration.serialization import (
+    load_blueprint,
+    read_blueprint_raw,
+    relativize_locations,
+)
+from cstar.roms.namelist import is_commit_hash, release_ref_for_remote
 
 log = logging.getLogger(__name__)
 
@@ -1090,6 +1100,15 @@ class ForgeExecutor(BaseModel):
         if not any(provenance.values()):
             roms_marbl_blueprint_dict.pop("provenance", None)
 
+        # Everything this run produced lives under host.working_dir, beside the
+        # blueprints directory; the blueprint names it relative to itself so the
+        # working directory can be moved or copied as a unit.
+        roms_marbl_blueprint_dict = relativize_locations(
+            roms_marbl_blueprint_dict,
+            root=self._require_host().working_dir,
+            base_dir=bp_path.parent,
+        )
+
         with bp_path.open("w") as f:
             if schema_url:
                 f.write(f"# yaml-language-server: $schema={schema_url}\n")
@@ -1626,25 +1645,35 @@ class ForgeExecutor(BaseModel):
             # Try to deserialize with full validation first (Pydantic warns on
             # placeholder/partial values persisted via model_construct).
             with _suppress_pydantic_warnings():
-                roms_marbl_blueprint = deserialize(
+                roms_marbl_blueprint = load_blueprint(
                     bp_path, cstar_models.RomsMarblBlueprint
                 )
-        except (OSError, yaml.YAMLError, ValidationError) as e:
+        except (
+            OSError,
+            yaml.YAMLError,
+            ValidationError,
+            CstarExpectationFailed,
+        ) as e:
             # Strict validation routinely fails for blueprints persisted via
             # model_construct with placeholder resources (e.g. before
             # configure_build() runs); that's expected, so log at debug, not
-            # warning, and fall back to lenient loading below.
+            # warning, and fall back to lenient loading below. A location that
+            # exists only relative to the working directory (the load's own
+            # check) lands here too, as the placeholders it may stand beside are
+            # still to be replaced.
             log.debug(
-                "Strict load of blueprint from %s failed, falling back to lenient "
-                "loading: %s",
+                "Strict load of blueprint from %s failed with %s, falling back to "
+                "lenient loading: %s",
                 bp_path,
+                type(e).__name__,
                 e,
                 exc_info=True,
             )
             try:
-                # Load YAML as dict and use model_construct to bypass validation
-                with bp_path.open("r") as f:
-                    roms_marbl_blueprint_data = yaml.safe_load(f)
+                # Load YAML as dict (relative locations anchored, as in the strict
+                # load, but without its working-directory check: this document is
+                # knowingly partial) and use model_construct to bypass validation
+                roms_marbl_blueprint_data = read_blueprint_raw(bp_path, strict=False)
                 # Use model_construct to bypass validation (files may not exist)
                 roms_marbl_blueprint = cstar_models.RomsMarblBlueprint.model_construct(
                     **roms_marbl_blueprint_data
@@ -2348,10 +2377,15 @@ class ForgeExecutor(BaseModel):
         # Select the run-time settings tier for the pinned ucla-roms ref once,
         # up front: it decides both the version-gated pruning just below and
         # whether the output-stream precheck further down applies.
-        effective_roms_ref = (
+        pinned_roms_ref = (
             self.code_spec.roms.commit or self.code_spec.roms.branch
             if self.code_spec is not None
             else None
+        )
+        effective_roms_ref = (
+            release_ref_for_remote(self.code_spec.roms.location, pinned_roms_ref)
+            if self.code_spec is not None and pinned_roms_ref
+            else pinned_roms_ref
         )
         with warnings.catch_warnings():
             # See the matching resolver guard: an internal version probe
@@ -2420,8 +2454,9 @@ class ForgeExecutor(BaseModel):
         # "upscaled" mode, even though neither field is populated for it: real CDR
         # tracers exist at runtime under that mode too. An active mode needs the
         # CDR_FORCING cppdef (it compiles cdr_frc, with or without MARBL) and, with
-        # MARBL, implies CDR output; without MARBL
-        # check_cdr_forcing_mode rejects "upscaled" and ucla-roms < 0.9.1.
+        # MARBL, implies CDR output; without MARBL check_cdr_forcing_mode rejects
+        # ucla-roms < 0.9.1, and "upscaled" outside bgc_mode "cdr_lite" or before
+        # ucla-roms 0.11.0.
         cdr_active = bool(
             self.cdr_forcing or self.cdr_forcing_file or self.cdr_mode == "upscaled"
         )
@@ -2441,19 +2476,40 @@ class ForgeExecutor(BaseModel):
             )
         if cdr_active and check_cdr_forcing_mode(
             self.cdr_mode,
-            bgc_mode_is_marbl=bool(cppdefs.get("marbl", False)),
+            bgc_mode=bgc_mode,
             roms_ref=str(effective_roms_ref)
             if effective_roms_ref is not None
             else None,
         ):
             self._settings_run_time.setdefault("cdr_output", {})["do_cdr_output"] = True
+        # The resolver's upscaled cdr_nz_chd rule, for the commit-hash pin it left
+        # undecided: from the release the hash resolved to, 0 takes the level
+        # count from the CDR file (see cdr_nz_chd_from_file).
+        if (
+            self.cdr_mode == "upscaled"
+            and is_commit_hash(pinned_roms_ref)
+            and cdr_nz_chd_from_file(effective_roms_ref)
+        ):
+            cdr_frc = self._settings_run_time.setdefault("cdr_frc", {})
+            if cdr_frc.get("nz_chd") != 0:
+                log.info(
+                    "configure_build: ucla-roms commit %s (%s) reads the CDR level "
+                    "count from the file; setting cdr_frc.nz_chd=0 (was %r).",
+                    pinned_roms_ref,
+                    effective_roms_ref,
+                    cdr_frc.get("nz_chd"),
+                )
+            cdr_frc["nz_chd"] = 0
         # bgc_mode "cdr_lite" (CDR-lite tracers, no MARBL): the generation step
-        # derived nt_cdr_oae/nt_cdr_dor from the CDR forcing's tracer axis, and
-        # the _cdrtrc stream is the only output the CDR tracers appear in, so it
-        # is forced on (ROMS aborts at init if it is on with zero CDR tracers, hence
+        # derived nt_cdr_oae/nt_cdr_dor from the CDR forcing's tracer axis (the
+        # "upscaled" mode generates none, so the user states them), and the
+        # _cdrtrc stream is the only output the CDR tracers appear in, so it is
+        # forced on (ROMS aborts at init if it is on with zero CDR tracers, hence
         # the count check first, which also names the likely authoring mistake).
         if bgc_mode == "cdr_lite":
             param = self._settings_run_time.get("param") or {}
+            if self.cdr_mode == "upscaled":
+                check_upscaled_cdr_lite_tracer_counts(param)
             if not cdr_active or not (
                 int(param.get("nt_cdr_oae") or 0) + int(param.get("nt_cdr_dor") or 0)
             ):
@@ -2472,16 +2528,14 @@ class ForgeExecutor(BaseModel):
                     "cdr_lite_output.do_cdr_lite_output=True (the _cdrtrc stream is "
                     "the only output the CDR-lite tracers appear in)."
                 )
-        # do_cdr_output requires MARBL plus the CDR_FORCING cppdef (both gate
-        # compiling ucla-roms' cdr_output.F90), and the MARBL diagnostics ucla-roms
-        # looks up by name, unchecked.
+        # do_cdr_output requires MARBL (rejected by the shared check, as is
+        # do_upscale), plus the CDR_FORCING cppdef (both gate compiling ucla-roms'
+        # cdr_output.F90), and the MARBL diagnostics ucla-roms looks up by name,
+        # unchecked.
+        check_marbl_only_outputs(
+            self._settings_run_time, bgc_mode_is_marbl=bgc_mode == "marbl"
+        )
         if self._settings_run_time.get("cdr_output", {}).get("do_cdr_output"):
-            if not cppdefs.get("marbl", False):
-                raise ValueError(
-                    "cdr_output.do_cdr_output is True but cppdefs.marbl is False: "
-                    "CDR output requires MARBL (ucla-roms only compiles "
-                    "cdr_output.F90 under MARBL && CDR_FORCING)."
-                )
             if not cppdefs.get("cdr_forcing"):
                 cppdefs["cdr_forcing"] = True
                 log.info(
@@ -2538,6 +2592,14 @@ class ForgeExecutor(BaseModel):
         # with unnamed tracers. Shared via check_bgc_tracer_count.
         check_bgc_tracer_count(
             self._settings_run_time.get("param") or {},
+            bgc_mode_is_marbl=cppdefs.get("marbl", False),
+        )
+
+        # Constant iron net, mirroring the resolver's: a stored or hand-edited
+        # blueprint can request marbl_bgc.use_constant_fe with MARBL off, where
+        # ucla-roms never reads the group. Shared via check_constant_fe.
+        check_constant_fe(
+            self._settings_run_time.get("marbl_bgc") or {},
             bgc_mode_is_marbl=cppdefs.get("marbl", False),
         )
 

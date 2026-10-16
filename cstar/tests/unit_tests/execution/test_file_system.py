@@ -1,10 +1,12 @@
 import os
 import pickle
 import shlex
+import stat
 from pathlib import Path
 from unittest import mock
 
 import pytest
+import requests
 
 from cstar.applications.roms_marbl.file_system import RomsFileSystemManager
 from cstar.base.env import ENV_CSTAR_DATA_HOME, ENV_CSTAR_RUNID
@@ -21,6 +23,10 @@ from cstar.execution.file_system import (
     remove_files,
     rotate_file,
     step_disk_usage,
+    symlink_relative,
+    write_bytes_atomic,
+    write_local_copy,
+    write_text_atomic,
 )
 from cstar.orchestration.models import Step
 from cstar.orchestration.orchestration import LiveStep
@@ -854,3 +860,244 @@ class TestSourceDataHome:
 
         assert home == self._expected(scratch)
         assert home.is_dir()
+
+
+class TestWriteLocalCopy:
+    """Tests for `write_local_copy`."""
+
+    def test_writes_response_text(self, tmp_path: Path) -> None:
+        """A 200 response is written under the URL's file name."""
+        url = "https://example.com/plans/workplan.yaml"
+        response = mock.Mock(status_code=200, text="name: wp\n")
+
+        with mock.patch(
+            "cstar.execution.file_system.request", return_value=response
+        ) as mock_request:
+            local_path = write_local_copy(url, tmp_path)
+
+        mock_request.assert_called_once_with("GET", url, timeout=10.0)
+        assert local_path == (tmp_path / "workplan.yaml").resolve()
+        assert local_path.read_text() == "name: wp\n"
+
+    @pytest.mark.parametrize(
+        "error",
+        [
+            requests.ReadTimeout("Read timed out. (read timeout=10.0)"),
+            requests.ConnectionError("Connection aborted."),
+        ],
+    )
+    def test_request_failure_is_file_not_found(
+        self, tmp_path: Path, error: requests.RequestException
+    ) -> None:
+        """A timeout or connection failure is reported like a missing file, so
+        callers' existing FileNotFoundError handling covers it.
+        """
+        url = "https://example.com/plans/workplan.yaml"
+
+        with (
+            mock.patch("cstar.execution.file_system.request", side_effect=error),
+            pytest.raises(FileNotFoundError, match=type(error).__name__) as exc_info,
+        ):
+            write_local_copy(url, tmp_path)
+
+        assert exc_info.value.filename == url
+        assert not (tmp_path / "workplan.yaml").exists()
+
+
+def test_symlink_relative_text_is_relative(tmp_path: Path) -> None:
+    """The link text is relative, creates missing parents, and resolves to the target."""
+    target = tmp_path / "data" / "grid.nc"
+    target.parent.mkdir()
+    target.write_text("data")
+    link = tmp_path / "run" / "input" / "grid.nc"
+
+    symlink_relative(link, target)
+
+    assert link.is_symlink()
+    assert link.readlink() == Path("../../data/grid.nc")
+    assert link.resolve() == target.resolve()
+    assert link.read_text() == "data"
+
+
+def test_symlink_relative_survives_moving_the_tree(tmp_path: Path) -> None:
+    """A link and target moved together keep working, as relative links should."""
+    tree = tmp_path / "tree"
+    (tree / "a").mkdir(parents=True)
+    (tree / "b").mkdir()
+    (tree / "b" / "file").write_text("data")
+    symlink_relative(tree / "a" / "link", tree / "b" / "file")
+
+    moved = tmp_path / "moved"
+    tree.rename(moved)
+
+    assert (moved / "a" / "link").read_text() == "data"
+
+
+def test_symlink_relative_through_symlinked_parent(tmp_path: Path) -> None:
+    """A link directory reached through a symlink is measured from where it really is.
+
+    The kernel resolves `..` in link text from the physical directory, so text
+    computed from the symlinked spelling of the path would point elsewhere.
+    """
+    target = tmp_path / "a" / "file"
+    target.parent.mkdir()
+    target.write_text("data")
+    physical = tmp_path / "b" / "c" / "real"
+    physical.mkdir(parents=True)
+    (tmp_path / "a" / "alias").symlink_to(physical)
+
+    link = tmp_path / "a" / "alias" / "link"
+    symlink_relative(link, target)
+
+    assert link.read_text() == "data"
+    assert link.resolve() == target.resolve()
+
+
+def test_symlink_relative_existing_link_raises(tmp_path: Path) -> None:
+    """An existing link is left alone; callers unlink first when they mean to replace."""
+    target = tmp_path / "target"
+    target.write_text("data")
+    link = tmp_path / "link"
+    link.symlink_to(target)
+
+    with pytest.raises(FileExistsError):
+        symlink_relative(link, target)
+
+
+def test_symlink_relative_within_keeps_relative_when_both_are_inside(
+    tmp_path: Path,
+) -> None:
+    """A link and target both inside `within` are linked relatively."""
+    home = tmp_path / "home"
+    target = home / "source-run" / "output" / "file.nc"
+    target.parent.mkdir(parents=True)
+    target.write_text("data")
+    link = home / "this-run" / "input" / "file.nc"
+
+    symlink_relative(link, target, within=home)
+
+    assert link.readlink() == Path("../../source-run/output/file.nc")
+    assert link.read_text() == "data"
+
+
+def test_symlink_relative_within_falls_back_to_absolute_for_outside_target(
+    tmp_path: Path,
+) -> None:
+    """A target outside `within` is linked by absolute path, not a `..` chain into
+    another tree.
+    """
+    home = tmp_path / "home"
+    target = tmp_path / "elsewhere" / "file.nc"
+    target.parent.mkdir(parents=True)
+    target.write_text("data")
+    link = home / "this-run" / "input" / "file.nc"
+
+    symlink_relative(link, target, within=home)
+
+    assert link.readlink() == target.resolve()
+    assert link.read_text() == "data"
+
+
+def test_symlink_relative_within_falls_back_to_absolute_for_outside_link(
+    tmp_path: Path,
+) -> None:
+    """A link outside `within`, such as a run kept elsewhere, is absolute even when
+    its target is inside.
+    """
+    home = tmp_path / "home"
+    target = home / "source-run" / "file.nc"
+    target.parent.mkdir(parents=True)
+    target.write_text("data")
+    link = tmp_path / "scratch" / "run" / "input" / "file.nc"
+
+    symlink_relative(link, target, within=home)
+
+    assert link.readlink() == target.resolve()
+    assert link.read_text() == "data"
+
+
+def test_write_bytes_atomic_writes_content_and_creates_parents(tmp_path: Path) -> None:
+    """Verify the data lands in the file and missing parents are created."""
+    target = tmp_path / "a" / "b" / "file.bin"
+
+    write_bytes_atomic(target, b"payload")
+
+    assert target.read_bytes() == b"payload"
+    assert [p.name for p in target.parent.iterdir()] == ["file.bin"]
+
+
+def test_write_bytes_atomic_new_file_honours_the_umask(tmp_path: Path) -> None:
+    """Verify a new file gets the umask default without toggling the process umask."""
+    target = tmp_path / "fresh.txt"
+    previous = os.umask(0o027)
+    try:
+        with mock.patch.object(os, "umask", side_effect=AssertionError("toggled")):
+            write_bytes_atomic(target, b"data")
+    finally:
+        os.umask(previous)
+
+    assert stat.S_IMODE(target.stat().st_mode) == 0o666 & ~0o027
+
+
+def test_write_bytes_atomic_without_sync_still_replaces(tmp_path: Path) -> None:
+    """Verify `sync=False` skips the fsync and still renames the data into place."""
+    target = tmp_path / "state.yaml"
+    target.write_bytes(b"old")
+
+    with mock.patch.object(os, "fsync") as fsync:
+        write_bytes_atomic(target, b"new", sync=False)
+
+    fsync.assert_not_called()
+    assert target.read_bytes() == b"new"
+
+
+def test_write_bytes_atomic_keeps_existing_mode(tmp_path: Path) -> None:
+    """Verify replacing a file keeps its permissions."""
+    target = tmp_path / "script.sh"
+    target.write_bytes(b"old")
+    target.chmod(0o750)
+
+    write_bytes_atomic(target, b"new")
+
+    assert target.read_bytes() == b"new"
+    assert stat.S_IMODE(target.stat().st_mode) == 0o750
+
+
+def test_write_bytes_atomic_follows_symlink(tmp_path: Path) -> None:
+    """Verify a symlink at the path keeps its link and its target is replaced."""
+    real = tmp_path / "real.txt"
+    real.write_bytes(b"old")
+    link = tmp_path / "link.txt"
+    link.symlink_to(real)
+
+    write_bytes_atomic(link, b"new")
+
+    assert link.is_symlink()
+    assert real.read_bytes() == b"new"
+
+
+def test_write_bytes_atomic_failure_leaves_original_intact(tmp_path: Path) -> None:
+    """Verify a failure before the rename keeps the original and leaves no temp file."""
+    target = tmp_path / "atomic" / "file.txt"
+    target.parent.mkdir()
+    target.write_bytes(b"original")
+
+    with (
+        mock.patch("cstar.execution.file_system.os.replace", side_effect=OSError("x")),
+        pytest.raises(OSError, match="x"),
+    ):
+        write_bytes_atomic(target, b"replacement")
+
+    assert target.read_bytes() == b"original"
+    assert [p.name for p in target.parent.iterdir()] == ["file.txt"]
+
+
+def test_write_text_atomic_encodes_text(tmp_path: Path) -> None:
+    """Verify text is encoded with the requested codec."""
+    target = tmp_path / "sub" / "file.txt"
+
+    write_text_atomic(target, "caf\u00e9")
+    assert target.read_bytes() == "caf\u00e9".encode()
+
+    write_text_atomic(target, "caf\u00e9", encoding="latin-1")
+    assert target.read_bytes() == b"caf\xe9"

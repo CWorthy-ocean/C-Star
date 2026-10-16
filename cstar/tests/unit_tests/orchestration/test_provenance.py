@@ -12,6 +12,7 @@ from cstar.applications.hello_world import HelloWorldBlueprint
 from cstar.orchestration.models import (
     BLUEPRINT_METADATA_FIELDS,
     BlueprintIdentity,
+    BlueprintState,
     CatalogSpecKind,
     CatalogSpecRef,
     GeneratedBy,
@@ -230,3 +231,45 @@ def test_populated_provenance_survives_serialization(
         "content_hash": "9b1e",
     }
     assert deserialize(path, HelloWorldBlueprint) == blueprint
+
+
+def _hello(**overrides: t.Any) -> HelloWorldBlueprint:
+    """A hello-world blueprint with the given field overrides."""
+    fields: dict[str, t.Any] = {
+        "name": "hello",
+        "description": "a blueprint",
+        "target": "world",
+    }
+    return HelloWorldBlueprint(**{**fields, **overrides})
+
+
+def test_content_hash_ignores_metadata_fields(tmp_path: Path) -> None:
+    """Verify renaming or relocating a blueprint does not change its hash."""
+    base = _hello().content_hash()
+
+    assert len(base) == 64
+    assert _hello(name="renamed").content_hash() == base
+    assert _hello(description="another").content_hash() == base
+    assert _hello(working_dir=tmp_path).content_hash() == base
+    assert _hello(state=BlueprintState.Draft).content_hash() == base
+    stamped = Provenance(generated_at=datetime(2026, 10, 6, tzinfo=UTC))
+    assert _hello(provenance=stamped).content_hash() == base
+
+
+def test_content_hash_changes_with_configuration() -> None:
+    """Verify a configuration field changes the hash."""
+    assert _hello(target="mars").content_hash() != _hello().content_hash()
+
+
+def test_blueprint_identity_of_a_blueprint() -> None:
+    """Verify the identity records the blueprint's application, name and hash."""
+    blueprint = _hello()
+
+    identity = BlueprintIdentity.of(blueprint)
+
+    assert identity == BlueprintIdentity(
+        kind="Blueprint",
+        application=blueprint.application,
+        name="hello",
+        content_hash=blueprint.content_hash(),
+    )

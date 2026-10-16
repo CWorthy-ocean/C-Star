@@ -4,7 +4,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, ClassVar, cast
 
 from cstar.base.utils import _run_cmd, slugify
-from cstar.execution.file_system import DirectoryManager
+from cstar.execution.file_system import DirectoryManager, symlink_relative
 from cstar.io.constants import SourceClassification
 from cstar.io.staged_data import StagedFile, StagedRepository
 
@@ -109,7 +109,9 @@ class LocalBinaryFileStager(Stager):
             raise FileNotFoundError(msg)
 
         target_path = target_dir / self.source.basename
-        target_path.symlink_to(source_path.resolve())
+        symlink_relative(
+            target_path, source_path.resolve(), within=DirectoryManager.data_home()
+        )
 
         return StagedFile(
             source=self.source, path=target_path, sha256=(self.source.file_hash or None)

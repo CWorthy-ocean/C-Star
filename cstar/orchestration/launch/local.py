@@ -294,10 +294,10 @@ class TimeConstrainedRunRequestEnricher(ModelEnricher[RunRequest]):
 
         # GNU timeout stops option parsing at the first non-option argument (the
         # duration), so -k must precede it: `timeout -k 2s 600s cmd ...`.
-        # the proxy script joins the command with spaces, so quote the path, and make
-        # it absolute because the step runs from its own run directory
+        # make the path absolute because the step runs from its own run directory;
+        # the formatters quote every token when they render the command
         enriched_cmd = [
-            shlex.quote(os.path.abspath(timeout_exe)),
+            os.path.abspath(timeout_exe),
             self.ARG_FORCEKILL_TIMEOUT,
             f"{self.compute.force_kill_seconds}s",
             f"{self.compute.walltime_seconds}s",
@@ -774,7 +774,7 @@ class ProxiedRunRequestFormatter(ModelFormatter[RunRequest]):
             "{done}": str(Status.Done.value),
             "{failed}": str(Status.Failed.value),
             "{delay}": delay,
-            "{command}": " ".join(value.command),
+            "{command}": " ".join(shlex.quote(token) for token in value.command),
             "{env_vars}": env_vars,
         }
         files_dir = additional_files_dir()

@@ -23,8 +23,13 @@ ALIAS = "wp"
 
 app = typer.Typer(
     name=NAME,
-    help=f"Perform validation and execution of workplans. (alias: {ALIAS})",
+    help=(
+        f"Perform validation and execution of workplans. (alias: {ALIAS})\n\n"
+        "The commands that inspect an existing run are also available as "
+        "`cstar run <command>`."
+    ),
 )
+
 
 app.add_typer(app_check)
 app.add_typer(app_gather)

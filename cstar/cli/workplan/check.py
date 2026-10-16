@@ -18,7 +18,7 @@ from cstar.entrypoint.utils import (
 from cstar.orchestration.check import deep_check
 from cstar.orchestration.dag_runner import get_launcher
 from cstar.orchestration.models import Workplan
-from cstar.orchestration.orchestration import LiveWorkplan
+from cstar.orchestration.orchestration import LiveWorkplan, is_transformed_workplan
 from cstar.orchestration.serialization import validate_serialized_entity
 
 if t.TYPE_CHECKING:
@@ -150,15 +150,19 @@ def check(
 
     error = schema_result.error_msg
 
-    live_result = validate_serialized_entity(path, LiveWorkplan)
-    if live_result.item is not None:
-        print(f"The workplan `{live_result.item.name}` is valid")
-        if not schema_only:
-            print(
-                "Skipping deep resolution: this workplan was already "
-                "transformed by a prior run; re-resolving it would "
-                "double-package its overrides."
-            )
-        raise typer.Exit(0)
+    # a `LiveWorkplan` normalizes its name and derives each step's `working_dir`,
+    # so it is tried only for a file whose every step carries one: an authored
+    # workplan keeps its own error, as it does for `run`
+    if is_transformed_workplan(Path(path)):
+        live_result = validate_serialized_entity(path, LiveWorkplan)
+        if live_result.item is not None:
+            print(f"The workplan `{live_result.item.name}` is valid")
+            if not schema_only:
+                print(
+                    "Skipping deep resolution: this workplan was already "
+                    "transformed by a prior run; re-resolving it would "
+                    "double-package its overrides."
+                )
+            raise typer.Exit(0)
 
     raise typer.BadParameter(error)

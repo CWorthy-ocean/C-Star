@@ -106,6 +106,7 @@ fields:
   # --- Workplan -------------------------------------------------------------
   name:
     label: Workplan name
+    hint: Lowercase letters, digits, - and _. It is also the workplan's default run id.
     required: true
   description:
     label: Description

@@ -31,6 +31,19 @@ Execution
    cstar.orchestration.launch.slurm.SlurmLauncher
    cstar.orchestration.orchestration.Orchestrator
 
+Run Directory Checks
+--------------------
+
+.. autosummary::
+   :toctree: generated/
+
+   cstar.orchestration.run_check.check_run
+   cstar.orchestration.run_check.repair_symlinks
+   cstar.orchestration.run_check.RunCheckReport
+   cstar.orchestration.run_check.Finding
+   cstar.orchestration.run_check.FindingKind
+   cstar.orchestration.run_check.Orphans
+
 Custom Application Building
 ---------------------------
 

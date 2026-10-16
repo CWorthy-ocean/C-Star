@@ -43,8 +43,8 @@ def _make_two_step_workplan(tmp_path: Path) -> tuple[LiveStep, LiveStep, LiveWor
         working_dir=tmp_path / "step-b",
     )
     workplan = LiveWorkplan(
-        name="test workplan",
-        description="test workplan",
+        name="test-workplan",
+        description="test-workplan",
         steps=[step_a, step_b],
     )
     return step_a, step_b, workplan

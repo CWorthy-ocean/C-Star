@@ -1,0 +1,36 @@
+description: "GLORYS physics + ERA5 surface (WOA sss-restoring) + TPXO tides + DAI rivers; no BGC (bgc_mode none / cdr_lite)"
+# A ForcingSpec is a selectable forcing configuration (initial conditions + surface/
+# boundary/tidal/river forcing). Every domain must explicitly pick one -- there is no
+# "model default" fallback. Topography source/path are DomainSpec-owned (Domain.yaml /
+# the wizard's Grid section), not part of a ForcingSpec.
+
+initial_conditions:
+  source:
+    name: GLORYS
+    glorys_layout: regional
+
+forcing:
+  surface:
+    - source:
+        name: ERA5
+      type: physics
+      correct_radiation: true
+      coarse_grid_mode: "never"
+    - source:
+        name: WOA
+        climatology: true
+      restoring_forces: ['sss']
+      type: restoring
+      coarse_grid_mode: "never"
+  boundary:
+    source:
+      name: GLORYS
+      glorys_layout: regional
+  tidal:
+    - source:
+        name: TPXO
+      ntides: 15
+  river:
+    - source:
+        name: DAI
+        climatology: false

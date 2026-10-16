@@ -1,3 +1,4 @@
+from datetime import UTC, datetime
 from pathlib import Path
 from unittest import mock
 
@@ -5,9 +6,15 @@ import pytest
 from typer.testing import CliRunner
 
 from cstar.cli.workplan.status import app
+from cstar.entrypoint.utils import ARG_NO_REFRESH
 from cstar.orchestration.dag_runner import DagStatus
 from cstar.orchestration.launch.local import LocalLauncher
-from cstar.orchestration.models import KEY_PRE_RUN, Workplan
+from cstar.orchestration.manifest import (
+    Attempt,
+    ensure_run_manifest,
+    read_run_manifest,
+)
+from cstar.orchestration.models import KEY_PRE_RUN, Step, Workplan
 from cstar.orchestration.orchestration import LiveStep, LiveWorkplan, Status
 from cstar.orchestration.serialization import deserialize, serialize
 from cstar.orchestration.tracking import WorkplanRun
@@ -15,6 +22,9 @@ from cstar.tests.unit_tests.orchestration.conftest import (
     EXTERNAL_TOKEN,
     ExternalTaskFactory,
 )
+
+LOOKUP = "cstar.cli.workplan.shared.TrackingRepository.get_workplan_run"
+"""The run-record lookup performed by the shared run-id argument."""
 
 
 @pytest.mark.parametrize("pre_run", [True, False])
@@ -49,7 +59,7 @@ def test_workplan_status_launcher_follows_pre_run(
 
     with (
         mock.patch(
-            "cstar.cli.workplan.status.TrackingRepository.get_workplan_run",
+            LOOKUP,
             mock.AsyncMock(return_value=run),
         ),
         mock.patch(
@@ -98,7 +108,7 @@ def test_workplan_status_reports_external_dependency(
 
     with (
         mock.patch(
-            "cstar.cli.workplan.status.TrackingRepository.get_workplan_run",
+            LOOKUP,
             mock.AsyncMock(return_value=run),
         ),
         mock.patch(
@@ -146,7 +156,7 @@ def test_workplan_status_warns_about_unresolvable_external_dependency(
     # the external run has no record: its step cannot be resolved
     with (
         mock.patch(
-            "cstar.cli.workplan.status.TrackingRepository.get_workplan_run",
+            LOOKUP,
             mock.AsyncMock(return_value=run),
         ),
         mock.patch(
@@ -166,3 +176,92 @@ def test_workplan_status_warns_about_unresolvable_external_dependency(
     lookup = display.call_args.args[1]
     assert lookup["first"].awaiting == [EXTERNAL_TOKEN]
     assert lookup["second"].step.depends_on == ["first", EXTERNAL_TOKEN]
+
+
+def test_workplan_status_unknown_run() -> None:
+    """Verify an unrecorded run-id is a usage error, not a silent success."""
+    with mock.patch(LOOKUP, mock.AsyncMock(return_value=None)):
+        result = CliRunner().invoke(app, ["no-such-run"], color=False)
+
+    assert result.exit_code == 2
+    assert "unknown run-id" in result.stderr
+
+
+@pytest.mark.parametrize("run_id", ["", "  ", "!!!"])
+def test_workplan_status_invalid_run_id(run_id: str) -> None:
+    """Verify a run-id that is empty once slugified is rejected, not looked up."""
+    result = CliRunner().invoke(app, [run_id], color=False)
+
+    assert result.exit_code == 2
+    assert "run-id" in result.stderr
+
+
+@pytest.mark.parametrize("no_refresh", [True, False])
+def test_workplan_status_refreshes_the_manifest(
+    tmp_path: Path,
+    hello_world_bp_path: Path,
+    mock_run_id: str,
+    no_refresh: bool,
+) -> None:
+    """Verify status stamps the run's manifest with what it observed, and that
+    `--no-refresh` leaves the manifest as it was recorded.
+    """
+    wp = Workplan(
+        name="refreshed",
+        description="A workplan whose manifest status refreshes.",
+        steps=[
+            Step(
+                name="first",
+                application="hello_world",
+                blueprint=hello_world_bp_path.as_posix(),
+            )
+        ],
+    )
+    wp_path = tmp_path / "refreshed.yaml"
+    live_steps = [LiveStep.from_step(step) for step in wp.steps]
+    lwp = LiveWorkplan(**wp.model_dump(exclude={"steps"}), steps=live_steps)
+    trx_path = tmp_path / "live-refreshed.yaml"
+    assert serialize(trx_path, lwp)
+    run = WorkplanRun(
+        workplan_path=wp_path,
+        trx_workplan_path=trx_path,
+        output_path=tmp_path,
+        run_id=mock_run_id,
+    )
+    step = live_steps[0]
+    ensure_run_manifest(
+        tmp_path,
+        run_id=mock_run_id,
+        name=wp.name,
+        kind="workplan",
+        workplan=None,
+        attempt=Attempt(start_at=datetime(2026, 10, 15, tzinfo=UTC)),
+        steps={step.name: (step.application, "tasks/first", None)},
+        runs={},
+    )
+    args = [mock_run_id, ARG_NO_REFRESH] if no_refresh else [mock_run_id]
+
+    with (
+        mock.patch(LOOKUP, mock.AsyncMock(return_value=run)),
+        mock.patch(
+            "cstar.cli.workplan.status.get_launcher", return_value=LocalLauncher()
+        ),
+        mock.patch(
+            "cstar.cli.workplan.status.load_run_state",
+            mock.AsyncMock(return_value=DagStatus({step.name: Status.Running})),
+        ),
+        mock.patch("cstar.cli.workplan.status.display_summary"),
+    ):
+        result = CliRunner().invoke(app, args, color=False)
+
+    assert result.exit_code == 0, result.output
+    manifest = read_run_manifest(tmp_path)
+    assert manifest is not None
+    entry = manifest.step(step.name)
+    assert entry is not None
+    if no_refresh:
+        assert manifest.observed_at is None
+        assert entry.status == ""
+    else:
+        assert manifest.observed_at is not None
+        assert entry.status == Status.Running.name

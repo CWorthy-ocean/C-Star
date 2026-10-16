@@ -154,7 +154,7 @@ step name is accepted: ``depends_on``, a deferred ``blueprint: {from_step:
           nest-from:
             step: outer@spinup
 
-The run-id is the one shown by ``cstar workplan ls`` (the value given to
+The run-id is the one shown by ``cstar run ls`` (the value given to
 ``--run-id``, or derived from the workplan name). The rules:
 
 - Every alias used in a token must be declared under ``runs``; an undeclared
@@ -172,15 +172,34 @@ The run-id is the one shown by ``cstar workplan ls`` (the value given to
   job. A step that failed, was cancelled, was never submitted, or is running
   under the local launcher is refused with a message naming the run, step
   and status. If a status looks stale (the other run finished but its
-  orchestrator was not polled since), ``cstar workplan status <run-id>``
+  orchestrator was not polled since), ``cstar run status <run-id>``
   refreshes it.
 - The transformed workplan written into the run directory records, for each
   alias, the exact run record that was resolved (its start time), so the
   run's inputs stay traceable even if the same run-id is used again later.
 
-A run-id resolves only on the machine, and under the same ``CSTAR_STATE_HOME``
-and ``CSTAR_DATA_HOME``, where that run was executed -- the same limit an
-absolute path into its run directory has today.
+A run-id resolves only on the machine, and under the same ``CSTAR_STATE_HOME``,
+where that run was executed.
+
+The transformed workplan holds absolute paths into the run directory, and
+records the run directory it was written under (``root``). Every command that
+reads it rebases the paths that begin with the recorded root onto the directory
+the file now sits in, so a run directory stays valid wherever it is moved or
+copied; a value that merely contains the root, such as ``--out=<root>/x``, is
+left as written. The run record in the state home follows a moved run only into
+the current data home: when the run directory it names no longer exists, it is
+read as ``workplan_runs/<run-id>`` under ``CSTAR_DATA_HOME``. Moving one run
+from one data home to another on the same machine (move
+``<old>/workplan_runs/<id>`` to ``<new>/workplan_runs/<id>`` and point
+``CSTAR_DATA_HOME`` at ``<new>``) therefore keeps ``status``, ``gather``,
+``continue-from`` and ``--resume`` working. A run copied to any other path, or
+to another machine, has valid internal paths but is not reachable by run-id
+until it is registered there, which a later release adds.
+``cstar workplan run --resume`` re-exports the environment captured when the
+run started, except ``CSTAR_DATA_HOME`` and ``CSTAR_STATE_HOME``, and warns
+about every other captured setting that differs from your shell. A transformed
+workplan written by an earlier release records no root and is loaded as it is,
+so it stays pinned to the directory it was written in.
 
 
 Steps
@@ -290,7 +309,7 @@ Workplan Examples
 
     .. code:: yaml
 
-        name: Simple Workplan
+        name: simple-workplan
         description: Run a simulation
         state: draft
 
@@ -315,7 +334,7 @@ Workplan Examples
 
     .. code:: yaml
 
-        name: Multi-step Workplan Example
+        name: multi-step-workplan
         description: Run multiple ROMS-MARBL simulations
         state: draft
 
@@ -344,7 +363,7 @@ Workplan Examples
 
     .. code:: yaml
 
-        name: Workplan Overriding a Blueprint
+        name: workplan-overriding-a-blueprint
         description: Run a blueprint ensemble varying parameters with overrides
         state: draft
 
@@ -393,7 +412,7 @@ Workplan Examples
 
     .. code:: yaml
 
-        name: Workplan with a Deferred Blueprint
+        name: deferred-blueprint-workplan
         description: Run a simulation from a generated blueprint
         state: draft
 
@@ -442,7 +461,7 @@ Workplan Examples
 
     .. code:: yaml
 
-        name: Workplan with an Inline Blueprint
+        name: inline-blueprint-workplan
         description: Convert a restart file to initial conditions for a nested grid
         state: draft
 
@@ -523,7 +542,7 @@ Execution
         Executing the command again with the same :term:`run ID` will attach to the
         previous execution and schedule any steps not yet scheduled. Like the first
         run, it returns without waiting for the steps to finish; use
-        ``cstar workplan status <run-id>`` to follow their progress.
+        ``cstar run status <run-id>`` to follow their progress.
 
         Specify a different :term:`run ID` to re-run the workplan from scratch.
 
@@ -563,6 +582,22 @@ Execution
         path = Path("/path/to/my/workplan.yaml")
         await run_workplan(path, run_id="my-unique-id")
 
+
+.. _workplan_rerun:
+
+Re-running a workplan
+^^^^^^^^^^^^^^^^^^^^^
+
+Running a workplan under a :term:`run ID` that already exists re-enters that run. By default the run ID is the workplan ``name``, so running the same file again re-enters its previous run. Each step is handled according to its recorded state:
+
+- A step that is done is reused as it is, unless you pass ``--clobber <step-name|all>``, which clears it and runs it again from scratch.
+- A step that failed is run again from scratch, unless you pass ``--resume``, which continues it in place from its last usable restart when its application supports that.
+- A step that is still in progress is adopted when the launcher that started it matches the current launcher; otherwise the run is refused unless that step is clobbered.
+- A workplan with the same ``name`` as an earlier run but different content than the workplan that run started from is refused, because the two would share one run directory; the same workplan arriving by another path (a remote file, a moved checkout) is not. Pass ``--run-id <other-id>`` to run it separately, or rename the workplan.
+- Each re-entry appends an attempt to the :ref:`run manifest <workplan_run_manifest>`, which records when it started, on which system, with which package versions, and which steps it clobbered or resumed.
+- Each attempt keeps the files of the attempts before it: the original workplan, the transformed workplan and the runtime variables saved in the run directory (also when a later attempt saves none) are rotated to ``<stem>_original.bak.1``, ``<stem>_transformed.yaml.1``, ``<stem>.vars.1`` and so on, where ``<stem>`` is the workplan file's name without its extension, and nothing reads the rotated copies.
+- Step directories and state files that no step of the workplan accounts for any more (for example after a step was renamed) are listed in a warning and left in place; remove them by hand once you have confirmed they are not needed.
+- The transformed workplan saved in the run directory (``<stem>_transformed.yaml``) keeps the workplan ``name`` and is the plan the run executes. Passing it to ``cstar workplan run`` re-enters its run exactly as ``--run-id <id>`` does; a copy of it anywhere else is refused, because only the plan a run's record points at can be re-entered.
 
 .. _workplan_pre_run:
 
@@ -626,82 +661,170 @@ the machine performing the pre-run.
 ROMS itself is not started, so errors that only surface when ROMS opens its
 boundary or tide files, or writes its first restart, are not caught.
 
+Inspecting a Run
+----------------
+
+Once a workplan has been run, the ``cstar run`` commands operate on the run: they take the :term:`run ID` you gave to ``--run-id`` (or the one derived from the workplan name, shown by ``cstar run ls``). ``cstar workplan run`` still launches a run, and ``cstar workplan check`` still validates a workplan file.
+
+.. note::
+
+   These commands are also available as ``cstar workplan status``, ``log``, ``gather``, ``path``, ``cd``, ``ls`` and ``list`` (or ``cstar wp ...``), where they lived before ``cstar run`` existed. The two spellings run the same command.
+
 Checking Workplan Status
-------------------------
+^^^^^^^^^^^^^^^^^^^^^^^^
 
 .. tab-set::
 
    .. tab-item:: CLI Status Check
 
-    Use the ``status`` command from the ``cstar`` CLI to retrieve the current
-    status of steps in a running workplan.
+    Use the ``status`` command from the ``cstar`` CLI to retrieve the current status of steps in a running workplan.
 
     .. code-block:: console
 
-        cstar workplan status <my-unique-id>
+        cstar run status <my-unique-id>
 
+    ``cstar workplan status <my-unique-id>`` is equivalent.
 
-Finding a Run's Directory
--------------------------
+    ``status`` also refreshes the run's :ref:`manifest <workplan_run_manifest>`: it folds the step statuses and records into it, and closes the latest attempt once every step is terminal. Pass ``--no-refresh`` to read the run as last recorded without writing.
 
-Use the ``path`` command from the ``cstar`` CLI to print the directory of a run,
-or of one of its steps. The path is the only output, so it composes with other
-commands in any shell. A failed lookup prints nothing and exits non-zero, so
-guard the ``cd`` with ``&&``:
+.. _workplan_show_run:
+
+Showing a Run
+^^^^^^^^^^^^^
+
+Use the ``show`` command to see what a run was and what it produced: each attempt to run the workplan, each step's status and outcome, and what the run depends on outside itself. Give it a :term:`run ID`, or the path of any directory that holds a run manifest, such as a copy of a run made on another machine:
 
 .. code-block:: console
 
-    cstar workplan path <my-unique-id>
-    dir=$(cstar workplan path <my-unique-id> <step-name>) && cd "$dir"
+    cstar run show <my-unique-id>
+    cstar run show /path/to/run/directory
 
-A program cannot change the directory of the shell that started it, so
-``cstar workplan cd <my-unique-id> [step-name]`` works only once your shell has
-a small ``cstar`` function. Install it once, then open a new shell:
+For a run ID, ``show`` refreshes the manifest first, as ``status`` does; pass ``--no-refresh`` to show it as last recorded. A directory is read as it is. Step records written since the manifest was last refreshed are shown, and nothing is written, so the command is safe on a run that is not yours. It does not need the run to be tracked on the machine you run it on.
+
+Pick the output with ``--format``: ``table`` (the default), ``yaml`` or ``json``. The last two print the manifest itself, ready to pipe into another tool:
+
+.. code-block:: console
+
+    cstar run show <my-unique-id> --format json
+
+The exit code is 0 when the run is shown, 1 when it has no readable manifest and 2 for bad arguments.
+
+.. _workplan_run_manifest:
+
+The run manifest
+^^^^^^^^^^^^^^^^
+
+Every run records itself in two kinds of file.
+
+``cstar-run.yaml`` is the **run manifest**, in the run directory. It holds:
+
+- an ``id``, minted once when the run directory is first scheduled, with the :term:`run ID`, the workplan name, whether the run is a ``workplan`` or a ``blueprint``, and the system it was first scheduled on;
+- the workplan's name, content hash and path;
+- one :term:`attempt <Attempt>` for each time the run was scheduled (``cstar workplan run``, a re-entry with ``--run-id``, ``--resume`` or ``--clobber``), with its start time, system, package versions (``cstar-ocean`` and ``roms-tools``), the steps it clobbered or resumed, its status and when it finished;
+- one entry per step: its name, application, working directory relative to the run directory, a definition hash of what the step computes, its blueprint, its status as of the time the manifest was last refreshed, and its step record once it has one;
+- what the run depends on outside itself: referenced runs, source data locations, codebases with their commit or branch, and the catalog entries and producer blueprints named in the blueprints' provenance.
+
+``cstar-step.yaml`` is the :term:`step record`, in each step's working directory (``tasks/<step>/``). The step process writes it when it shuts down: the outcome (``completed``, ``failed``, ``cancelled`` or ``unsubmitted``), start and finish times, the system, package versions, the :term:`products <Product>` the step reports (none yet) and any errors.
+
+The scheduling command writes the manifest, under a lock, so concurrent commands do not overwrite each other. The steps write their own records and never touch the manifest. ``cstar run status``, ``cstar run show <run-id>`` and ``cstar workplan run --resume`` refresh the manifest: they fold the step statuses and records into it, and once every step is terminal they set ``finished_at`` on the latest attempt. That field is the completion marker. A run that finishes while nobody is watching is closed by the next ``status`` or ``show``.
+
+Because the manifest records working directories relative to the run directory, a copied or moved run stays readable with ``cstar run show <directory>``. A standalone ``cstar blueprint run`` writes the same two files in its working directory, with ``kind: blueprint`` and one step whose working directory is ``.``.
+
+Runs scheduled with an earlier C-Star release have no manifest until they are re-entered: ``cstar workplan run --run-id <my-unique-id>`` records one, and steps that are done are reused.
+
+The files are described by published schemas, listed in the :doc:`schema reference <schemas/index>`.
+
+
+Listing Runs
+^^^^^^^^^^^^
+
+Use the ``ls`` command (also spelled ``list``) to list the runs started by a user, with their workplan, disk usage and start time.
+
+.. code-block:: console
+
+    cstar run ls
+
+``cstar workplan ls`` is equivalent.
+
+
+Reading a Step's Log
+^^^^^^^^^^^^^^^^^^^^
+
+Use the ``log`` command to print the log of one step of a run. Add ``--monitor`` to keep streaming it, like ``tail -f``.
+
+.. code-block:: console
+
+    cstar run log <my-unique-id> <step-name>
+
+``cstar workplan log <my-unique-id> <step-name>`` is equivalent.
+
+
+Finding a Run's Directory
+^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Use the ``path`` command from the ``cstar`` CLI to print the directory of a run, or of one of its steps. The path is the only output, so it composes with other commands in any shell. A failed lookup prints nothing and exits non-zero, so guard the ``cd`` with ``&&``:
+
+.. code-block:: console
+
+    cstar run path <my-unique-id>
+    dir=$(cstar run path <my-unique-id> <step-name>) && cd "$dir"
+
+A program cannot change the directory of the shell that started it, so ``cstar run cd <my-unique-id> [step-name]`` works only once your shell has a small ``cstar`` function. Install it once, then open a new shell:
 
 .. code-block:: console
 
     cstar env shell-init --install
 
-The command detects whether you run zsh or bash (pass ``zsh`` or ``bash`` to
-choose), writes the function under the C-Star config directory, and adds a
-marked block to ``~/.zshrc`` or ``~/.bashrc`` that sources it. For bash, login
-shells, such as SSH sessions and the macOS Terminal, read ``~/.bash_profile``
-instead, so make sure that file sources ``~/.bashrc``. Run the command again
-after upgrading C-Star to refresh the function, and add ``--uninstall`` to
-remove the block and the function. The command stops without changing anything
-if the block's marker lines have been edited so that they no longer pair up.
+The command detects whether you run zsh or bash (pass ``zsh`` or ``bash`` to choose), writes the function under the C-Star config directory, and adds a marked block to ``~/.zshrc`` or ``~/.bashrc`` that sources it. For bash, login shells, such as SSH sessions and the macOS Terminal, read ``~/.bash_profile`` instead, so make sure that file sources ``~/.bashrc``. Run the command again after upgrading C-Star to refresh the function, and add ``--uninstall`` to remove the block and the function. The command stops without changing anything if the block's marker lines have been edited so that they no longer pair up.
 
-To manage your dotfiles yourself, omit ``--install``: the command prints the
-function instead, for example ``cstar env shell-init zsh > <file>``, ready to
-source from your own configuration.
+To manage your dotfiles yourself, omit ``--install``: the command prints the function instead, for example ``cstar env shell-init zsh > <file>``, ready to source from your own configuration.
+
+``cstar workplan path`` and ``cstar workplan cd`` are equivalent, and the shell function accepts both spellings. Regenerate the function after upgrading so that it knows ``cstar run cd``.
 
 
 Gathering Workplan Outputs
---------------------------
+^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-Every step writes its final outputs to its own ``output`` directory. ROMS steps
-that run without ParallelIO first write partitioned files to ``temp_output``;
-C-Star joins those into whole files in ``output`` after the run and removes the
-partition pieces.
+Every step writes its final outputs to its own ``output`` directory. ROMS steps that run without ParallelIO first write partitioned files to ``temp_output``; C-Star joins those into whole files in ``output`` after the run and removes the partition pieces.
 
-Use the ``gather`` command from the ``cstar`` CLI to consolidate every step's
-``output`` files into a single run-level ``gathered_output`` directory of
-symlinks. It is safe to re-run while a workplan is still in progress. When two
-steps produce a file with the same name, each link is prefixed with its step
-name (``<step>__<file>``) so both remain reachable.
+Use the ``gather`` command from the ``cstar`` CLI to consolidate every step's ``output`` files into a single run-level ``gathered_output`` directory of symlinks. It is safe to re-run while a workplan is still in progress. When two steps produce a file with the same name, each link is prefixed with its step name (``<step>__<file>``) so both remain reachable.
 
 .. code-block:: console
 
-    cstar workplan gather <my-unique-id>
+    cstar run gather <my-unique-id>
 
-Runs completed with an earlier C-Star release kept joined files in a
-``joined_output`` directory next to ``output``. Move such a run to the current
-layout before continuing from it or gathering it:
+``cstar workplan gather <my-unique-id>`` is equivalent.
+
+Runs completed with an earlier C-Star release kept joined files in a ``joined_output`` directory next to ``output``. Move such a run to the current layout before continuing from it or gathering it:
 
 .. code-block:: console
 
     cstar admin migrate-outputs <path-to-run-or-step-directory> --dry-run
     cstar admin migrate-outputs <path-to-run-or-step-directory>
+
+
+Checking a Run Directory
+^^^^^^^^^^^^^^^^^^^^^^^^
+
+A run directory keeps working after it is copied or moved as a unit only while the files that describe it refer to each other by relative path. Use the ``check`` command to look for what does not, in a tracked run (by run ID) or in any run directory (by path, a directory that contains ``tasks/``):
+
+.. code-block:: console
+
+    cstar run check <my-unique-id>
+    cstar run check /path/to/copy/of/the/run
+
+The command reports, kind by kind, with one line per finding:
+
+- absolute paths under the run, or under the C-Star data home, in the files each step emits (``output/*.yaml``, ``blueprints/B_*.yaml``, ``work/cstar_generated_roms.nml``) and in the run's ``*_transformed.yaml``. Pass ``--all`` to scan the launch artifacts too (override and directive files, ``script.sh`` and namelists); launchers regenerate those, so they are skipped by default.
+- symlinks with an absolute target inside the run, and symlinks whose target does not exist.
+- steps of the transformed workplan with no ``tasks/<slug>`` directory. A step that has not started has none yet.
+
+Symlinks with a target outside the run (absolute, or relative and climbing out of it), step directories that no step accounts for, and sentinel files of the run that no step accounts for (found by run ID, so not for a bare path) are listed for information and do not fail the check. Nothing is ever deleted.
+
+The exit code is 0 when there is nothing to fix, 1 when findings remain and 2 for bad arguments. A workplan file is refused: validate it with ``cstar workplan check <file>``.
+
+Pass ``--repair`` to rewrite each absolute symlink that points inside the run as a relative link, and rebuild ``gathered_output`` if the run has one and its transformed workplan describes this directory. ``--repair`` changes nothing else: a file that names absolute paths is regenerated by running the workplan again, and a dangling link is reported, never touched.
+
 
 .. toctree::
    :hidden:

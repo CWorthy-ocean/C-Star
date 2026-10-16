@@ -1,6 +1,5 @@
 """Tests for the versioned ROMS namelist schemas in `cstar.roms.namelist`."""
 
-import subprocess
 from pathlib import Path
 from unittest import mock
 
@@ -10,6 +9,7 @@ from pydantic import ValidationError
 from cstar.roms.namelist import (
     CdrLiteOutputSettings,
     CdrLiteSettings,
+    MarblBiogeochemistrySettingsV0_11_0,
     ParamSettings,
     ParamSettingsV0_4_0,
     PioSettings,
@@ -20,7 +20,10 @@ from cstar.roms.namelist import (
     RomsNamelistV0_6_0,
     RomsNamelistV0_7_0,
     RomsNamelistV0_9_0,
+    RomsNamelistV0_11_0,
+    is_commit_hash,
     namelist_schema_for_ref,
+    release_ref_for_remote,
 )
 
 OLD_NAMELIST = Path(__file__).parent / "fixtures" / "example_namelist.nml"
@@ -28,6 +31,7 @@ NEW_NAMELIST = Path(__file__).parent / "fixtures" / "example_namelist_v0_5_0.nml
 V0_6_0_NAMELIST = Path(__file__).parent / "fixtures" / "example_namelist_v0_6_0.nml"
 V0_7_0_NAMELIST = Path(__file__).parent / "fixtures" / "example_namelist_v0_7_0.nml"
 V0_9_0_NAMELIST = Path(__file__).parent / "fixtures" / "example_namelist_v0_9_0.nml"
+V0_11_0_NAMELIST = Path(__file__).parent / "fixtures" / "example_namelist_v0_11_0.nml"
 
 PIO_SETTINGS_BLOCK = "&pio_settings\n    pio_stride = 1\n/\n\n"
 
@@ -79,11 +83,20 @@ def test_namelist_schema_for_ref_post_0_7_0(checkout_target):
 
 @pytest.mark.parametrize(
     "checkout_target",
-    ["0.9.0", "v0.9.0", "0.9.3", "0.10.0", "12.0.0"],
+    ["0.9.0", "v0.9.0", "0.9.3", "0.10.0", "0.10.1"],
 )
 def test_namelist_schema_for_ref_post_0_9_0(checkout_target):
-    """Refs at or above 0.9.0 select `RomsNamelistV0_9_0`."""
+    """Refs in `[0.9.0, 0.11.0)` select `RomsNamelistV0_9_0`."""
     assert namelist_schema_for_ref(checkout_target) is RomsNamelistV0_9_0
+
+
+@pytest.mark.parametrize(
+    "checkout_target",
+    ["0.11.0", "v0.11.0", "0.12.0", "12.0.0"],
+)
+def test_namelist_schema_for_ref_post_0_11_0(checkout_target):
+    """Refs at or above 0.11.0 select `RomsNamelistV0_11_0`."""
+    assert namelist_schema_for_ref(checkout_target) is RomsNamelistV0_11_0
 
 
 @pytest.mark.parametrize(
@@ -102,53 +115,7 @@ def test_namelist_schema_for_ref_fallback_warns(checkout_target):
     """Non-release-tag refs fall back to the latest schema and warn about it."""
     with pytest.warns(UserWarning, match="use at your own risk"):
         schema = namelist_schema_for_ref(checkout_target)
-    assert schema is RomsNamelistV0_9_0
-
-
-@pytest.fixture
-def tagged_ucla_roms_clone(tmp_path: Path) -> dict[str, str | Path]:
-    """A tiny local git repo mimicking ucla-roms release-tag history.
-
-    History: commit tagged ``0.4.2`` -> commit tagged only ``exp-marker`` (a
-    non-release tag, which release resolution must ignore) -> commit tagged
-    ``0.5.0``. Returns the repo path and the three commit hashes.
-    """
-    repo = tmp_path / "ucla-roms"
-    repo.mkdir()
-
-    def _git(*args: str) -> str:
-        result = subprocess.run(
-            ["git", "-c", "user.email=t@t", "-c", "user.name=t", *args],
-            cwd=repo,
-            capture_output=True,
-            text=True,
-            check=True,
-        )
-        return result.stdout.strip()
-
-    _git("init", "-q")
-    (repo / "f").write_text("1")
-    _git("add", "f")
-    _git("commit", "-q", "-m", "release 0.4.2")
-    hash_0_4_2 = _git("rev-parse", "HEAD")
-    _git("tag", "0.4.2")
-
-    (repo / "f").write_text("2")
-    _git("commit", "-aq", "-m", "post-0.4.2 work")
-    hash_after_0_4_2 = _git("rev-parse", "HEAD")
-    _git("tag", "exp-marker")
-
-    (repo / "f").write_text("3")
-    _git("commit", "-aq", "-m", "release 0.5.0")
-    hash_0_5_0 = _git("rev-parse", "HEAD")
-    _git("tag", "0.5.0")
-
-    return {
-        "repo": repo,
-        "hash_0_4_2": hash_0_4_2,
-        "hash_after_0_4_2": hash_after_0_4_2,
-        "hash_0_5_0": hash_0_5_0,
-    }
+    assert schema is RomsNamelistV0_11_0
 
 
 def test_namelist_schema_for_ref_resolves_hash_at_release_tag(
@@ -195,7 +162,7 @@ def test_namelist_schema_for_ref_branch_ignores_repo_path(tagged_ucla_roms_clone
     info = tagged_ucla_roms_clone
     with pytest.warns(UserWarning, match="use at your own risk"):
         schema = namelist_schema_for_ref("main", repo_path=info["repo"])
-    assert schema is RomsNamelistV0_9_0
+    assert schema is RomsNamelistV0_11_0
 
 
 def test_namelist_schema_for_ref_unresolvable_hash_falls_back():
@@ -207,12 +174,109 @@ def test_namelist_schema_for_ref_unresolvable_hash_falls_back():
     ):
         with pytest.warns(UserWarning, match="use at your own risk"):
             schema = namelist_schema_for_ref("a" * 40, repo_path="/some/repo")
-    assert schema is RomsNamelistV0_9_0
+    assert schema is RomsNamelistV0_11_0
 
     with mock.patch("cstar.roms.namelist._describe_nearest_tag", return_value=None):
         with pytest.warns(UserWarning, match="use at your own risk"):
             schema = namelist_schema_for_ref("a" * 40, repo_path="/some/repo")
-    assert schema is RomsNamelistV0_9_0
+    assert schema is RomsNamelistV0_11_0
+
+
+@pytest.mark.parametrize(
+    ("ref", "expected"),
+    [
+        ("65fdf96f", True),
+        ("7b5a046c81b783979c6d9963c3800476b00f3a6f", True),
+        ("0.10.1", False),
+        ("v0.10.1", False),
+        ("main", False),
+        ("abc123", False),  # shorter than an abbreviated hash
+        ("", False),
+        (None, False),
+    ],
+)
+def test_is_commit_hash(ref, expected):
+    assert is_commit_hash(ref) is expected
+
+
+def test_release_ref_for_remote_resolves_hash_at_release_tag(
+    tagged_ucla_roms_clone, recwarn
+):
+    """A commit hash sitting exactly on a release tag resolves to that tag
+    without a warning.
+    """
+    info = tagged_ucla_roms_clone
+    assert release_ref_for_remote(str(info["repo"]), info["hash_0_4_2"]) == "0.4.2"
+    assert release_ref_for_remote(str(info["repo"]), info["hash_0_5_0"]) == "0.5.0"
+    assert len(recwarn) == 0
+
+
+def test_release_ref_for_remote_warns_when_hash_is_ahead_of_release(
+    tagged_ucla_roms_clone,
+):
+    """A commit hash between releases resolves to the nearest ancestor release
+    tag, skipping the non-release ``exp-marker`` tag it carries, and warns.
+    """
+    info = tagged_ucla_roms_clone
+    with pytest.warns(UserWarning, match="commit\\(s\\) after release 0.4.2"):
+        ref = release_ref_for_remote(str(info["repo"]), info["hash_after_0_4_2"])
+    assert ref == "0.4.2"
+
+
+@pytest.mark.parametrize("checkout_target", ["main", "0.5.0", "v0.5.0", ""])
+def test_release_ref_for_remote_leaves_non_hash_refs_alone(checkout_target, recwarn):
+    """A tag, a branch or an empty ref comes back unchanged with no clone."""
+    with mock.patch("cstar.roms.namelist._describe_remote_nearest_tag") as describe:
+        assert (
+            release_ref_for_remote("https://example.com/ucla-roms", checkout_target)
+            == checkout_target
+        )
+    describe.assert_not_called()
+    assert len(recwarn) == 0
+
+
+def test_release_ref_for_remote_unreachable_location_warns_and_keeps_hash():
+    """A hash that cannot be resolved (the unit-test network guard refuses an
+    https remote) is returned as given, with the latest-schema fallback warning.
+    """
+    with pytest.warns(
+        UserWarning,
+        match=rf"Could not resolve .*{'a' * 40}.* latest known namelist schema "
+        rf"\({RomsNamelistV0_11_0.__name__}\)",
+    ):
+        ref = release_ref_for_remote(
+            "https://github.com/CWorthy-ocean/ucla-roms", "a" * 40
+        )
+    assert ref == "a" * 40
+
+
+def test_release_ref_for_remote_unparseable_tag_warns_and_keeps_hash():
+    """A resolution that yields a tag C-Star cannot parse falls back too."""
+    with mock.patch(
+        "cstar.roms.namelist._describe_remote_nearest_tag",
+        return_value=("1.2.3-rc1", 0),
+    ):
+        with pytest.warns(UserWarning, match="Could not resolve"):
+            ref = release_ref_for_remote("/some/repo", "a" * 40)
+    assert ref == "a" * 40
+
+
+def test_release_ref_for_remote_clones_once_per_location_and_ref():
+    """Repeat calls for one ``(location, ref)`` reuse the first answer, a failed
+    resolution included, and warn once; another location is resolved afresh.
+    """
+    with mock.patch(
+        "cstar.roms.namelist._describe_remote_nearest_tag", return_value=None
+    ) as describe:
+        with pytest.warns(UserWarning, match="Could not resolve") as record:
+            release_ref_for_remote("/some/repo", "a" * 40)
+            release_ref_for_remote("/some/repo", "a" * 40)
+        assert len(record) == 1
+        assert describe.call_count == 1
+
+        with pytest.warns(UserWarning, match="Could not resolve"):
+            release_ref_for_remote("/other/repo", "a" * 40)
+        assert describe.call_count == 2
 
 
 def test_roms_namelist_round_trip():
@@ -412,6 +476,75 @@ def test_roms_namelist_v0_9_0_does_not_write_cdr_tracer_group():
     assert "cdr_tracer_output_settings" not in nml.to_f90nml_dict()
 
 
+def test_roms_namelist_v0_11_0_round_trip(tmp_path):
+    """`RomsNamelistV0_11_0.read` parses the 0.11.0 fixture (keys spelled
+    `use_constant_Fe`/`constant_Fe_value`, as ROMS does), and a read -> write ->
+    read round trip reproduces the same model with the keys lowercased.
+    """
+    nml = RomsNamelistV0_11_0.read(V0_11_0_NAMELIST)
+    assert nml.marbl_biogeochemistry_settings.use_constant_fe is True
+    assert nml.marbl_biogeochemistry_settings.constant_fe_value == 5e-4
+
+    out = tmp_path / "namelist.nml"
+    nml.write(out)
+    written = out.read_text()
+    assert "use_constant_fe = .true." in written
+    assert "constant_fe_value" in written
+    reread = RomsNamelistV0_11_0.read(out)
+
+    assert reread == nml
+
+
+def test_roms_namelist_v0_9_0_rejects_v0_11_0_fixture():
+    """`RomsNamelistV0_9_0` is strict: ucla-roms releases before 0.11.0 stop on
+    the constant-iron keys, so the schema for them rejects the 0.11.0 fixture.
+    """
+    with pytest.raises(ValidationError, match="use_constant_fe"):
+        RomsNamelistV0_9_0.read(V0_11_0_NAMELIST)
+
+
+def test_roms_namelist_v0_11_0_constant_fe_defaults_and_always_written():
+    """A 0.9.0 namelist without the keys still validates under
+    `RomsNamelistV0_11_0`, defaulting to the ucla-roms reference values, and
+    both keys are written regardless.
+    """
+    nml = RomsNamelistV0_11_0.read(V0_9_0_NAMELIST)
+    marbl = nml.marbl_biogeochemistry_settings
+    assert marbl.use_constant_fe is False
+    assert marbl.constant_fe_value == 3.0e-3
+
+    written = nml.to_f90nml_dict()["marbl_biogeochemistry_settings"]
+    assert written["use_constant_fe"] is False
+    assert written["constant_fe_value"] == 3.0e-3
+
+
+def test_roms_namelist_v0_9_0_does_not_write_constant_fe():
+    """`RomsNamelistV0_9_0` carries no constant-iron keys, so it cannot write them."""
+    nml = RomsNamelistV0_9_0.read(V0_9_0_NAMELIST)
+    written = nml.to_f90nml_dict()["marbl_biogeochemistry_settings"]
+    assert "use_constant_fe" not in written
+    assert "constant_fe_value" not in written
+
+
+def test_constant_fe_value_must_not_be_negative():
+    """ROMS stops on a negative `constant_Fe_value`: the schema rejects it on
+    construction and on assignment, and accepts zero.
+    """
+    nml = RomsNamelistV0_11_0.read(V0_11_0_NAMELIST)
+    marbl = nml.marbl_biogeochemistry_settings
+
+    with pytest.raises(ValidationError, match="constant_fe_value"):
+        MarblBiogeochemistrySettingsV0_11_0(
+            **{**marbl.model_dump(), "constant_fe_value": -1.0}
+        )
+    with pytest.raises(ValidationError, match="constant_fe_value"):
+        marbl.constant_fe_value = -1.0
+    assert marbl.constant_fe_value == 5e-4
+
+    marbl.constant_fe_value = 0.0
+    assert marbl.constant_fe_value == 0.0
+
+
 def test_cdr_lite_groups_default_when_missing():
     """A 0.6.0-schema namelist without any CDR output group still validates
     under `RomsNamelistV0_9_0`, defaulting the three CDR groups to their
@@ -557,6 +690,24 @@ class TestUnknownOverrideKeys:
         assert len(violations) == 1
         assert "do_cdr_tracer_output" in violations[0]
 
+    def test_constant_fe_keys(self):
+        """The constant-iron keys are known from 0.11.0 on: `RomsNamelistV0_11_0`
+        accepts them (lowercase, as f90nml spells them) and `RomsNamelistV0_9_0`
+        reports both as unknown.
+        """
+        overrides = {
+            "marbl_biogeochemistry_settings": {
+                "use_constant_fe": True,
+                "constant_fe_value": 1.0e-3,
+            }
+        }
+        assert RomsNamelistV0_11_0.unknown_override_keys(overrides) == []
+
+        violations = RomsNamelistV0_9_0.unknown_override_keys(overrides)
+        assert len(violations) == 2
+        assert any("use_constant_fe" in v for v in violations)
+        assert any("constant_fe_value" in v for v in violations)
+
 
 # ---------------------------------------------------------------------------
 # ParamSettings / ParamSettingsV0_4_0 -- passive CDR tracer counts
@@ -582,7 +733,13 @@ def test_param_settings_rejects_cdr_tracer_counts():
 
 @pytest.mark.parametrize(
     "cls",
-    [ParamSettingsV0_4_0, RomsNamelistV0_5_0, RomsNamelistV0_7_0, RomsNamelistV0_9_0],
+    [
+        ParamSettingsV0_4_0,
+        RomsNamelistV0_5_0,
+        RomsNamelistV0_7_0,
+        RomsNamelistV0_9_0,
+        RomsNamelistV0_11_0,
+    ],
 )
 def test_param_settings_v0_4_0_defaults_cdr_tracer_counts_to_zero(cls):
     """`nt_cdr_oae`/`nt_cdr_dor` default to 0 (the Fortran initializer) when
