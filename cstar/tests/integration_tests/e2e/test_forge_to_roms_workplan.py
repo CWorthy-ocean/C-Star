@@ -17,7 +17,7 @@ ParallelIO four times, so it takes tens of minutes.
 import re
 import shutil
 import typing as t
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from functools import partial
@@ -239,6 +239,11 @@ def write_workplan(
     ``make_cdr_lite_inputs`` -> ``run_cdr_lite`` is a CDR-LiTE run (no MARBL) whose
     ``carbonate-sensitivity-from`` directive reads the ``_cdrgas`` files from ``run_roms``.
 
+    No two ROMS steps run at once: ``run_cdr_seg1`` waits for ``run_cdr_lite``, which
+    waits for ``run_roms``. Every ROMS step stages its codebases from one shared clone
+    cache, and concurrent refreshes of it fail (``CachedRemoteRepositoryStager`` removes
+    the cache when a ``git pull`` fails, under a step still copying from it).
+
     Every step sets ``max_walltime`` because a ``local`` override is what wraps the
     step command in ``timeout``; without one a hung step never ends.
 
@@ -292,7 +297,8 @@ def write_workplan(
                 "name": CDR_SEG1_STEP,
                 "application": "roms_marbl",
                 "blueprint": {"from_step": FORGE_STEP},
-                "depends_on": [FORGE_STEP],
+                # after the last other ROMS step: see the docstring
+                "depends_on": [FORGE_STEP, CDR_STEP],
                 "blueprint_overrides": {"runtime_params": {"end_date": SEGMENT_SPLIT}},
                 "compute_overrides": {"local": {"max_walltime": "01:00:00"}},
             },
@@ -751,19 +757,17 @@ def test_cdr_metrics_written(e2e_run: E2ERun) -> None:
                 assert np.isfinite(final) and final > 0, (step, name, ds[name].values)
 
 
-def test_segmented_metrics_match_whole_run(e2e_run: E2ERun) -> None:
-    """The CDR metrics of the two continued segments equal those of the whole run."""
+def assert_segmented_metrics_match_whole_run(run: E2ERun, names: Sequence[str]) -> None:
+    """Assert the ``names`` series of the two continued segments equal the whole run's."""
     import xarray as xr
 
-    paths = [e2e_run.metrics_dir_of(s) / METRICS_FILENAME for s in METRICS_STEPS]
+    paths = [run.metrics_dir_of(s) / METRICS_FILENAME for s in METRICS_STEPS]
     with xr.open_dataset(paths[0]) as segmented, xr.open_dataset(paths[1]) as whole:
-        # ROMS restarts may not be bit-identical to an uninterrupted run. If CI shows a
-        # small difference, loosen ``rtol`` and record the observed value here.
         differences = {
             name: max_relative_difference(segmented[name].values, whole[name].values)
-            for name in METRICS_VARIABLES
+            for name in names
         }
-        for name in METRICS_VARIABLES:
+        for name in names:
             # the efficiencies are NaN where the cumulative source is zero
             np.testing.assert_allclose(
                 segmented[name].values,
@@ -772,6 +776,30 @@ def test_segmented_metrics_match_whole_run(e2e_run: E2ERun) -> None:
                 equal_nan=True,
                 err_msg=f"{name}: max relative differences {differences}",
             )
+
+
+def test_segmented_dic_metrics_match_whole_run(e2e_run: E2ERun) -> None:
+    """The DIC-inventory metrics of the two continued segments equal the whole run's.
+
+    The restarted model state is bit-identical to the uninterrupted run's.
+    """
+    names = [n for n in METRICS_VARIABLES if n.endswith("_from_DIC_difference")]
+    assert_segmented_metrics_match_whole_run(e2e_run, names)
+
+
+@pytest.mark.xfail(
+    strict=True,
+    reason=(
+        "ucla-roms 0.10.1 writes different averaged FG_CO2/FG_ALT_CO2 after a "
+        "continue-from restart than an uninterrupted run (up to 2e-6 mmol/m^2/s), "
+        "while DIC, ALK and hDIC stay bit-identical, so flux-based metrics of a "
+        "segmented run differ"
+    ),
+)
+def test_segmented_flux_metrics_match_whole_run(e2e_run: E2ERun) -> None:
+    """The air-sea flux metrics of the two continued segments equal the whole run's."""
+    names = [n for n in METRICS_VARIABLES if n.endswith("_from_flux")]
+    assert_segmented_metrics_match_whole_run(e2e_run, names)
 
 
 def test_workplan_status_names_all_steps(e2e_run: E2ERun) -> None:

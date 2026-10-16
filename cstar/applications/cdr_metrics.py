@@ -36,30 +36,14 @@ time after loading, and a gap or overlap between the averaging windows of
 consecutive records is an error. In a workplan, a source can be a
 ``{{output_dir: <step>}}`` placeholder naming the producing step.
 
-Extension path: upscaled (nested) CDR metrics
----------------------------------------------
-Not implemented; recorded here so the one-domain restriction can be lifted
-without restructuring:
-
-- Lift the one-domain guard in `CdrMetricsBlueprint`. Domain names are unique
-  by construction, as the keys of ``domains``.
-- Add ``CdrDomain.source_role: Literal["release", "transfer"] =
-  Field(default="release")`` (a minor schema bump, 1.2.0).
-- Run discovery, loading and computation per domain
-  (`find_cdr_output`, `load_cdr_output`, then
-  ``compute_cdr_metrics(..., source_role=...)``).
-- Combine the per-domain results with
-  ``roms_tools.UpscaledCDR({name: ds_cdr, ...}).ds``, the members ordered child
-  to parent, i.e. in the order of ``domains`` (C-Star's YAML I/O preserves
-  mapping order).
-- The series and write step (`metric_series`) is unchanged, since
-  ``UpscaledCDR`` keeps the variable names of ``ds_cdr``.
-- The roms-tools floor must be bumped to the release containing roms-tools
-  PR #695.
-
-The per-domain ``ds_cdr`` is kept in process and never written: it carries the
-3-D ``hDIC`` and ``hDIC_ALT_CO2`` fields. The written file can therefore be a
-``roms_tools.Ensemble`` member, but not an ``UpscaledCDR`` member.
+Upscaled (nested) metrics are not implemented yet. To add them, lift the
+one-domain guard, add ``CdrDomain.source_role`` (``"release"`` by default,
+``"transfer"`` for a parent; a minor schema bump), compute each domain's
+``ds_cdr`` with that role, and combine them with roms-tools' ``UpscaledCDR``,
+whose members are ordered child to parent like ``domains``; `metric_series` is
+unchanged. This needs a roms-tools release with ``UpscaledCDR``. Each
+``ds_cdr`` stays in process because it carries the 3-D ``hDIC`` fields, so the
+written series can be an ``Ensemble`` member but not an ``UpscaledCDR`` one.
 """
 
 import typing as t
