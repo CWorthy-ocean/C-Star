@@ -44,6 +44,7 @@ from cstar.applications.forge.host import HostPaths
 from cstar.applications.forge.namelist_model import (
     bgc_mode_from_cppdefs,
     build_namelist,
+    cdr_nz_chd_from_file,
     check_bgc_tracer_count,
     check_cdr_forcing_mode,
     check_cdr_lite_mode_roms,
@@ -80,7 +81,7 @@ from cstar.orchestration.serialization import (
     read_blueprint_raw,
     relativize_locations,
 )
-from cstar.roms.namelist import release_ref_for_remote
+from cstar.roms.namelist import is_commit_hash, release_ref_for_remote
 
 log = logging.getLogger(__name__)
 
@@ -2375,15 +2376,16 @@ class ForgeExecutor(BaseModel):
         # Select the run-time settings tier for the pinned ucla-roms ref once,
         # up front: it decides both the version-gated pruning just below and
         # whether the output-stream precheck further down applies.
-        effective_roms_ref = (
+        pinned_roms_ref = (
             self.code_spec.roms.commit or self.code_spec.roms.branch
             if self.code_spec is not None
             else None
         )
-        if self.code_spec is not None and effective_roms_ref:
-            effective_roms_ref = release_ref_for_remote(
-                self.code_spec.roms.location, effective_roms_ref
-            )
+        effective_roms_ref = (
+            release_ref_for_remote(self.code_spec.roms.location, pinned_roms_ref)
+            if self.code_spec is not None and pinned_roms_ref
+            else pinned_roms_ref
+        )
         with warnings.catch_warnings():
             # See the matching resolver guard: an internal version probe
             # shouldn't repeat the non-semver-pin warning surfaced elsewhere.
@@ -2479,6 +2481,24 @@ class ForgeExecutor(BaseModel):
             else None,
         ):
             self._settings_run_time.setdefault("cdr_output", {})["do_cdr_output"] = True
+        # The resolver's upscaled cdr_nz_chd rule, for the commit-hash pin it left
+        # undecided: from the release the hash resolved to, 0 takes the level
+        # count from the CDR file (see cdr_nz_chd_from_file).
+        if (
+            self.cdr_mode == "upscaled"
+            and is_commit_hash(pinned_roms_ref)
+            and cdr_nz_chd_from_file(effective_roms_ref)
+        ):
+            cdr_frc = self._settings_run_time.setdefault("cdr_frc", {})
+            if cdr_frc.get("nz_chd") != 0:
+                log.info(
+                    "configure_build: ucla-roms commit %s (%s) reads the CDR level "
+                    "count from the file; setting cdr_frc.nz_chd=0 (was %r).",
+                    pinned_roms_ref,
+                    effective_roms_ref,
+                    cdr_frc.get("nz_chd"),
+                )
+            cdr_frc["nz_chd"] = 0
         # bgc_mode "cdr_lite" (CDR-lite tracers, no MARBL): the generation step
         # derived nt_cdr_oae/nt_cdr_dor from the CDR forcing's tracer axis (the
         # "upscaled" mode generates none, so the user states them), and the

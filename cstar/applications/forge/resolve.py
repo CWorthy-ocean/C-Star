@@ -99,6 +99,7 @@ from cstar.applications.forge.source_registry import (
     resolve_source,
 )
 from cstar.base.utils import netcdf_format
+from cstar.roms.namelist import is_commit_hash
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -996,7 +997,8 @@ def build_forge_blueprint(
     # str(): YAML can load a numeric-looking pin (e.g. 1.0) as a number. A
     # commit-hash pin keeps the newest tier here (the wizard rebuilds on every
     # keystroke, so no clone): process_forge_blueprint and configure_build
-    # resolve it to its release (release_ref_for_remote) and re-prune.
+    # resolve it to its release (release_ref_for_remote), re-prune, and set the
+    # upscaled cdr_nz_chd below.
     effective_roms_ref = str(pinned_roms_ref) if pinned_roms_ref is not None else None
     # river_frc/cdr_frc are Forcing-owned, not a ModelSpec default: seed the disabled
     # baseline, then let the ForcingSpec's own top-level river_frc/cdr_frc (if any)
@@ -1039,8 +1041,11 @@ def build_forge_blueprint(
         # The level count is the child grid's, which Forge cannot see. From
         # ucla-roms 0.11.0 cdr_nz_chd = 0 reads it from the file's s_rho, and any
         # other value that disagrees with the file aborts at init; earlier
-        # releases keep the seeded value and need it to match the child.
-        if cdr_nz_chd_from_file(effective_roms_ref):
+        # releases keep the seeded value and need it to match the child. A
+        # commit hash's release is unknown here, so configure_build decides.
+        if not is_commit_hash(effective_roms_ref) and cdr_nz_chd_from_file(
+            effective_roms_ref
+        ):
             settings["cdr_frc"]["nz_chd"] = 0
     # extract_data (child-grid nesting) is Domain-owned when active (the nesting
     # block below overwrites it from grid_kwargs_child/metadata_child); seed the

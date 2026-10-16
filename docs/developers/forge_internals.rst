@@ -402,8 +402,10 @@ the blueprint's pinned ``code.roms.commit`` (threaded resolver -> executor ->
 hash to its release tag with ``release_ref_for_remote`` (a throwaway treeless
 clone of ``code.roms.location``, cached per process); Forge then writes the
 namelist of the tier roms_marbl reads it with. The resolver, which the wizard
-calls on every keystroke, keeps the latest tier for a hash and the executor
-re-prunes. C-Star's registry is the single source of
+calls on every keystroke, keeps the latest tier for a hash and leaves an
+upscaled run's ``cdr_nz_chd`` at its seeded value; the executor re-prunes and
+sets ``cdr_nz_chd = 0`` if the resolved release reads the level count from the
+file. C-Star's registry is the single source of
 version-boundary truth -- forge only maps its result to the matching
 settings class. The forge **settings vocabulary is version-stable**: YAML
 keys (``particles.output_period``, ``particles.nrpf``,

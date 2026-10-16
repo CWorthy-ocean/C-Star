@@ -1219,6 +1219,11 @@ _COMMIT_HASH_RE = re.compile(r"[0-9a-fA-F]{7,40}")
 an unparseable ref is worth resolving to a release tag via the local clone."""
 
 
+def is_commit_hash(ref: str | None) -> bool:
+    """Whether a ucla-roms git ref is a commit hash, the kind of ref that is resolved to its nearest release tag (:func:`release_ref_for_remote`)."""
+    return ref is not None and _COMMIT_HASH_RE.fullmatch(ref) is not None
+
+
 def _warn_commit_ahead_of_release(
     checkout_target: str, tag: str, commits_ahead: int
 ) -> None:
@@ -1272,7 +1277,7 @@ def namelist_schema_for_ref(
         version is None
         and checkout_target is not None
         and repo_path is not None
-        and _COMMIT_HASH_RE.fullmatch(checkout_target)
+        and is_commit_hash(checkout_target)
     ):
         described = _describe_nearest_tag(repo_path, checkout_target)
         if described is not None:
@@ -1339,7 +1344,7 @@ def release_ref_for_remote(location: str, checkout_target: str) -> str:
         unreachable or private `location`, or a commit on no branch or tag of
         it) and the latest known namelist schema is used for it.
     """
-    if not _COMMIT_HASH_RE.fullmatch(checkout_target):
+    if not is_commit_hash(checkout_target):
         return checkout_target
 
     described = _describe_remote_nearest_tag(location, checkout_target)

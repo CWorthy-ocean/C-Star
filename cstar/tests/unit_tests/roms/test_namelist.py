@@ -21,6 +21,7 @@ from cstar.roms.namelist import (
     RomsNamelistV0_7_0,
     RomsNamelistV0_9_0,
     RomsNamelistV0_11_0,
+    is_commit_hash,
     namelist_schema_for_ref,
     release_ref_for_remote,
 )
@@ -179,6 +180,23 @@ def test_namelist_schema_for_ref_unresolvable_hash_falls_back():
         with pytest.warns(UserWarning, match="use at your own risk"):
             schema = namelist_schema_for_ref("a" * 40, repo_path="/some/repo")
     assert schema is RomsNamelistV0_11_0
+
+
+@pytest.mark.parametrize(
+    ("ref", "expected"),
+    [
+        ("65fdf96f", True),
+        ("7b5a046c81b783979c6d9963c3800476b00f3a6f", True),
+        ("0.10.1", False),
+        ("v0.10.1", False),
+        ("main", False),
+        ("abc123", False),  # shorter than an abbreviated hash
+        ("", False),
+        (None, False),
+    ],
+)
+def test_is_commit_hash(ref, expected):
+    assert is_commit_hash(ref) is expected
 
 
 def test_release_ref_for_remote_resolves_hash_at_release_tag(

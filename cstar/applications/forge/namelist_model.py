@@ -736,6 +736,8 @@ def cdr_nz_chd_from_file(roms_ref: str | None) -> bool:
     CDR forcing file when ``cdr_nz_chd`` is 0
     (:data:`CDR_NZ_CHD_FROM_FILE_MIN_ROMS`). A ``roms_ref`` that is not a
     release tag counts as the latest release, like :func:`check_cdr_forcing_mode`.
+    The resolver leaves a commit-hash pin to ``configure_build``, which asks with
+    the release the hash resolves to.
     """
     version = roms_version_from_ref(roms_ref)
     return version is None or version >= CDR_NZ_CHD_FROM_FILE_MIN_ROMS

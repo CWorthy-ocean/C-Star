@@ -127,15 +127,10 @@ def _clear_release_ref_cache() -> Generator[None]:
     release_ref_for_remote.cache_clear()
 
 
-@pytest.fixture
-def tagged_ucla_roms_clone(tmp_path: Path) -> dict[str, str | Path]:
-    """A tiny local git repo mimicking ucla-roms release-tag history.
-
-    History: commit tagged ``0.4.2`` -> commit tagged only ``exp-marker`` (a
-    non-release tag, which release resolution must ignore) -> commit tagged
-    ``0.5.0``. Returns the repo path and the three commit hashes.
+def _tagged_git_repo(repo: Path, tags: Sequence[str | None]) -> list[str]:
+    """Create a local git repo with one commit per entry of `tags`, tagging each
+    commit with its entry unless it is `None`, and return the commit hashes.
     """
-    repo = tmp_path / "ucla-roms"
     repo.mkdir()
 
     def _git(*args: str) -> str:
@@ -149,27 +144,53 @@ def tagged_ucla_roms_clone(tmp_path: Path) -> dict[str, str | Path]:
         return result.stdout.strip()
 
     _git("init", "-q")
-    (repo / "f").write_text("1")
-    _git("add", "f")
-    _git("commit", "-q", "-m", "release 0.4.2")
-    hash_0_4_2 = _git("rev-parse", "HEAD")
-    _git("tag", "0.4.2")
+    hashes = []
+    for n, tag in enumerate(tags):
+        (repo / "f").write_text(str(n))
+        _git("add", "f")
+        _git("commit", "-q", "-m", f"commit {n}")
+        hashes.append(_git("rev-parse", "HEAD"))
+        if tag is not None:
+            _git("tag", tag)
+    return hashes
 
-    (repo / "f").write_text("2")
-    _git("commit", "-aq", "-m", "post-0.4.2 work")
-    hash_after_0_4_2 = _git("rev-parse", "HEAD")
-    _git("tag", "exp-marker")
 
-    (repo / "f").write_text("3")
-    _git("commit", "-aq", "-m", "release 0.5.0")
-    hash_0_5_0 = _git("rev-parse", "HEAD")
-    _git("tag", "0.5.0")
+@pytest.fixture
+def tagged_ucla_roms_clone(tmp_path: Path) -> dict[str, str | Path]:
+    """A tiny local git repo mimicking ucla-roms release-tag history.
 
+    History: commit tagged ``0.4.2`` -> commit tagged only ``exp-marker`` (a
+    non-release tag, which release resolution must ignore) -> commit tagged
+    ``0.5.0``. Returns the repo path and the three commit hashes.
+    """
+    repo = tmp_path / "ucla-roms"
+    hash_0_4_2, hash_after_0_4_2, hash_0_5_0 = _tagged_git_repo(
+        repo, ["0.4.2", "exp-marker", "0.5.0"]
+    )
     return {
         "repo": repo,
         "hash_0_4_2": hash_0_4_2,
         "hash_after_0_4_2": hash_after_0_4_2,
         "hash_0_5_0": hash_0_5_0,
+    }
+
+
+@pytest.fixture
+def tagged_ucla_roms_0_11_clone(tmp_path: Path) -> dict[str, str | Path]:
+    """Like `tagged_ucla_roms_clone`, around the 0.11.0 boundary.
+
+    History: commit tagged ``0.10.1`` -> an untagged commit -> commit tagged
+    ``0.11.0``. Returns the repo path and the three commit hashes.
+    """
+    repo = tmp_path / "ucla-roms-0.11"
+    hash_0_10_1, hash_after_0_10_1, hash_0_11_0 = _tagged_git_repo(
+        repo, ["0.10.1", None, "0.11.0"]
+    )
+    return {
+        "repo": repo,
+        "hash_0_10_1": hash_0_10_1,
+        "hash_after_0_10_1": hash_after_0_10_1,
+        "hash_0_11_0": hash_0_11_0,
     }
 
 

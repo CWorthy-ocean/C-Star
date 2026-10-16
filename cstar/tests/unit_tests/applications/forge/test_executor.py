@@ -25,6 +25,7 @@ import logging
 import os
 import sys
 import tempfile
+import warnings
 from datetime import UTC, datetime
 from pathlib import Path
 from types import SimpleNamespace
@@ -2077,6 +2078,99 @@ class TestForgeExecutorBuildAndRun:
 
         assert mock_write.call_args.kwargs["roms_ref"] == "0.4.2"
         assert builder.roms_marbl_blueprint.code.roms["commit"] == info["hash_0_4_2"]
+
+    @pytest.mark.parametrize(
+        ("hash_key", "nz_chd"),
+        [("hash_after_0_10_1", 50), ("hash_0_11_0", 0)],
+    )
+    def test_configure_build_upscaled_nz_chd_follows_a_hash_pins_release(
+        self,
+        sample_grid_kwargs,
+        sample_open_boundaries,
+        sample_partitioning,
+        tagged_ucla_roms_0_11_clone,
+        hash_key,
+        nz_chd,
+    ):
+        """The resolver leaves an upscaled run's cdr_nz_chd at its seeded value
+        for a commit-hash pin; configure_build sets 0 (level count from the file)
+        only if the release the hash resolves to reads it, and an earlier release
+        keeps the seeded value it remaps with.
+        """
+        info = tagged_ucla_roms_0_11_clone
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", UserWarning)
+            cfg, host = self._cdr_cfg_and_builder(
+                sample_grid_kwargs,
+                sample_open_boundaries,
+                sample_partitioning,
+                model_dir=_MODEL_DIR_ROMS0110,
+                cdr={"mode": "upscaled"},
+                roms_ref=info[hash_key],
+            )
+            assert cfg.model_settings["cdr_frc"]["nz_chd"] == 50
+            cfg.code.roms.location = str(info["repo"])
+
+            # This helper skips generate_inputs(), so the tier's generated sections
+            # are absent; the output-stream precheck is unrelated to the rule.
+            with patch(
+                "cstar.applications.forge.executor.output_precheck_applies_to",
+                return_value=False,
+            ):
+                builder = self._run_configure_build(cfg, host)
+
+        assert builder._settings_run_time["cdr_frc"]["nz_chd"] == nz_chd
+
+    def test_configure_build_keeps_an_explicit_nz_chd_on_a_tag_pin(
+        self, sample_grid_kwargs, sample_open_boundaries, sample_partitioning
+    ):
+        """configure_build's cdr_nz_chd rule is for commit-hash pins only: on a
+        0.11.0 tag pin an explicit cdr_nz_chd (matching a known child) still wins.
+        """
+        cfg, host = self._cdr_cfg_and_builder(
+            sample_grid_kwargs,
+            sample_open_boundaries,
+            sample_partitioning,
+            model_dir=_MODEL_DIR_ROMS0110,
+            cdr={"mode": "upscaled"},
+            run_time_overrides={"cdr_frc": {"nz_chd": 42}},
+        )
+        with patch(
+            "cstar.applications.forge.executor.output_precheck_applies_to",
+            return_value=False,
+        ):
+            builder = self._run_configure_build(cfg, host)
+
+        assert builder._settings_run_time["cdr_frc"]["nz_chd"] == 42
+
+    def test_configure_build_leaves_nz_chd_alone_without_upscaled_cdr(
+        self,
+        sample_grid_kwargs,
+        sample_open_boundaries,
+        sample_partitioning,
+        tagged_ucla_roms_0_11_clone,
+    ):
+        """Without upscaled CDR forcing there is no depth-profile level count to
+        take from a file, so a hash pin of 0.11.0 keeps the seeded cdr_nz_chd.
+        """
+        info = tagged_ucla_roms_0_11_clone
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", UserWarning)
+            cfg, host = self._cdr_cfg_and_builder(
+                sample_grid_kwargs,
+                sample_open_boundaries,
+                sample_partitioning,
+                model_dir=_MODEL_DIR_ROMS0110,
+                roms_ref=info["hash_0_11_0"],
+            )
+            cfg.code.roms.location = str(info["repo"])
+            with patch(
+                "cstar.applications.forge.executor.output_precheck_applies_to",
+                return_value=False,
+            ):
+                builder = self._run_configure_build(cfg, host)
+
+        assert builder._settings_run_time["cdr_frc"]["nz_chd"] == 50
 
     def test_configure_build_rejects_upscaled_cdr_lite_without_tracer_counts(
         self, sample_grid_kwargs, sample_open_boundaries, sample_partitioning
