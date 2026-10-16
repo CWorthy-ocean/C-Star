@@ -287,6 +287,7 @@ def _all_settings_section_field_names() -> dict[str, set[str]]:
         RunTimeSettingsV0_5_0,
         RunTimeSettingsV0_6_0,
         RunTimeSettingsV0_7_0,
+        RunTimeSettingsV0_9_0,
     )
     from cstar.wizard.wizard import _unwrap_type
 
@@ -295,6 +296,7 @@ def _all_settings_section_field_names() -> dict[str, set[str]]:
         RunTimeSettingsV0_5_0,
         RunTimeSettingsV0_6_0,
         RunTimeSettingsV0_7_0,
+        RunTimeSettingsV0_9_0,
     )
     sections: dict[str, set[str]] = {}
     for cls in tiers:

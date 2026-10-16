@@ -2792,6 +2792,34 @@ def test_settings_editor_defaults_to_marbl():
         assert key in editor._widgets, key
 
 
+def test_cdr_lite_sections_show_glossary_titles_and_labels():
+    import ipywidgets as W
+
+    editor = _SettingsEditor(
+        W,
+        _BGC_MODE_SETTINGS_SAMPLE,
+        settings_cls=RunTimeSettingsV0_9_0,
+        bgc_mode="marbl",
+    )
+    headers = " ".join(
+        w.value
+        for w in _descendants(editor.accordion)
+        if isinstance(getattr(w, "value", None), str)
+        and "forge-settings-sec" in w.value
+    )
+    for title in ("CDR-lite", "CDR-lite tracer output", "CDR gas-exchange output"):
+        assert f"<span class='ttl'>{title}</span>" in headers
+
+    alk = editor._widgets[("cdr_lite_output", "wrt_alk")][0]
+    assert alk.description == "Write alkalinity tracers"
+    assert alk.tooltip.startswith("wrt_alk")  # the raw name stays discoverable
+    period = editor._widgets[("cdr_lite_output", "output_period")][0]
+    assert period.description == "Output period (s)"
+    online = editor._widgets[("cdr_lite", "cdr_online_carbonate_sensitivity")][0]
+    assert online.description == "Compute carbonate sensitivities online"
+    assert "Needs MARBL" in online.tooltip
+
+
 def test_settings_editor_locks_the_cdr_lite_stream_on_under_cdr_lite():
     """``configure_build`` forces the CDR-lite stream on in ``cdr_lite`` mode, so
     the editor shows it checked and disabled with its dependents visible -- and
