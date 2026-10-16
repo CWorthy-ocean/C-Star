@@ -790,10 +790,11 @@ def test_segmented_dic_metrics_match_whole_run(e2e_run: E2ERun) -> None:
 @pytest.mark.xfail(
     strict=True,
     reason=(
-        "ucla-roms 0.10.1 writes different averaged FG_CO2/FG_ALT_CO2 after a "
-        "continue-from restart than an uninterrupted run (up to 2e-6 mmol/m^2/s), "
-        "while DIC, ALK and hDIC stay bit-identical, so flux-based metrics of a "
-        "segmented run differ"
+        "observed with ucla-roms 0.10.1: the averaged FG_CO2/FG_ALT_CO2 written after "
+        "a continue-from restart differ from an uninterrupted run's (up to 2e-6 "
+        "mmol/m^2/s) while DIC, ALK and hDIC stay bit-identical and the namelists "
+        "differ only in inifile and ntimes, so flux-based metrics of a segmented run "
+        "differ"
     ),
 )
 def test_segmented_flux_metrics_match_whole_run(e2e_run: E2ERun) -> None:

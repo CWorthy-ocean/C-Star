@@ -9,8 +9,11 @@ one or more ROMS-MARBL runs, computes the CDR metrics with roms-tools'
   uptake in tonnes CO2, averaging window length).
 - ``cdr_metrics.png``: roms-tools' "CO2 uptake and CDR efficiency" figure.
 
-A run may be split into segments (e.g. by the time splitter), each writing its
-own `_cdr` files; the application stitches them along time. The blueprint maps
+A run may be split into segments (e.g. chained with ``continue-from``), each
+writing its own `_cdr` files; the application stitches them along time. With
+ucla-roms 0.10.1 the averaged air-sea flux diagnostics written after a restart
+differ from an uninterrupted run's, so only the DIC-difference metrics of a
+segmented run reproduce the unsegmented run exactly. The blueprint maps
 a domain name to the domain's ROMS grid file and the ordered sources of its
 `_cdr` output (exactly one domain is supported)::
 

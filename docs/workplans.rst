@@ -533,11 +533,17 @@ cumulative sums. The step writes ``output/cdr_metrics.nc``, a time series of the
 CDR efficiencies and the uptake in tonnes of CO2, and ``output/cdr_metrics.png``,
 a plot of them.
 
-For a step that the time splitter divided into segments, use
-``{{tasks_dir: <step>}}`` as the source: its segment directories are searched
-recursively. The producing runs must be MARBL runs with a CDR forcing; forge turns
-on ``cdr_output`` for an active MARBL CDR forcing. ``domains`` maps a domain name to its
+The producing runs must be MARBL runs with a CDR forcing; forge turns on
+``cdr_output`` for an active MARBL CDR forcing. ``domains`` maps a domain name to its
 grid and sources, and exactly one domain is supported.
+
+.. note::
+
+   With ucla-roms 0.10.1, the averaged air-sea CO2 flux diagnostics (``FG_CO2``,
+   ``FG_ALT_CO2``) written after a ``continue-from`` restart differ from those of the
+   same run without a restart, although the model state is identical. The
+   flux-based metrics of a segmented run can therefore differ from the unsegmented
+   run's; the metrics from DIC differences match it exactly.
 
 
 Checking validity
