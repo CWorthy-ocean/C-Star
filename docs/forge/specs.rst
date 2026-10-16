@@ -119,7 +119,11 @@ A ``model.yaml`` has this shape:
    fails to load. Values that depend on the domain or forcing (open-boundary
    switches, the MARBL and tides switches, the processor grid) are set by the
    resolver and are left out of the spec; only genuinely model-level
-   defaults belong here.
+   defaults belong here. Keys are Forge's lowercase setting names (``llm``,
+   ``np_xi``, ``wrt_z``), not the ROMS namelist spelling (``LLm``, ``NP_XI``,
+   ``wrt_Z``, or a renamed key such as ``akv_bak`` for
+   ``vertical_mixing.akv``): a key that matches a setting only that way is
+   rejected, naming the setting it meant, instead of being ignored.
 
 Settings that a newer ROMS knows and an older one does not are declared only
 by the specs for that ROMS version; the template renders them off when a

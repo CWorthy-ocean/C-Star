@@ -17,11 +17,13 @@ import cstar.catalog
 from cstar.applications.forge.namelist_model import (
     _GATED_SECTION_SWITCHES,
     _PRECHECK_SECTIONS,
+    _RUN_TIME_SETTINGS_BY_NAMELIST_SCHEMA,
     CDR_LITE_MODE_MIN_ROMS,
     RIVER_TRACERS_WITHOUT_CDR_MIN_ROMS,
     CdrGasExchOutputCfg,
     CdrLiteOutputCfg,
     CdrLiteOutputCfgV0_9_0,
+    CdrOutputCfg,
     CdrTracerCounts,
     MarblBgcCfg,
     MarblBgcCfgV0_11_0,
@@ -32,6 +34,7 @@ from cstar.applications.forge.namelist_model import (
     RunTimeSettingsV0_7_0,
     RunTimeSettingsV0_9_0,
     RunTimeSettingsV0_11_0,
+    _settings_spellings,
     bgc_mode_from_cppdefs,
     build_namelist,
     canonical_output_sections_for_precheck,
@@ -62,6 +65,27 @@ from cstar.roms.namelist import (
     RomsNamelistV0_9_0,
     RomsNamelistV0_11_0,
 )
+
+# Every registered run-time settings tier, oldest first.
+_ALL_SETTINGS_TIERS = (
+    RunTimeSettings,
+    RunTimeSettingsV0_4_0,
+    RunTimeSettingsV0_5_0,
+    RunTimeSettingsV0_6_0,
+    RunTimeSettingsV0_7_0,
+    RunTimeSettingsV0_9_0,
+    RunTimeSettingsV0_11_0,
+)
+
+
+def _section_classes(settings_cls):
+    """The settings section classes ``settings_cls`` types its sections as."""
+    return {
+        info.annotation
+        for info in settings_cls.model_fields.values()
+        if hasattr(info.annotation, "model_fields")
+    }
+
 
 _MODEL_DIR = (
     Path(cstar.catalog.__file__).parent
@@ -210,6 +234,177 @@ def test_run_time_settings_v0_4_0_accepts_non_zero_cdr_tracer_counts():
     rt = RunTimeSettingsV0_4_0.model_validate(d)
     assert rt.param.nt_cdr_oae == 2
     assert rt.param.nt_cdr_dor == 1
+
+
+# ---------------------------------------------------------------------------
+# Misspelled keys -- a key naming a field only up to case, or by its namelist
+# key, is rejected instead of dropped by extra="ignore"
+# ---------------------------------------------------------------------------
+def _rename(section: dict, old: str, new: str) -> None:
+    """Respell ``old`` as ``new`` in place, keeping the key order."""
+    items = [(new if k == old else k, v) for k, v in section.items()]
+    section.clear()
+    section.update(items)
+
+
+def test_mixed_case_key_is_rejected_with_its_field():
+    """ROMS spells ``param``'s grid size ``LLm``; Forge's field is ``llm``."""
+    d = _populated_rt_dict()
+    _rename(d["param"], "llm", "LLm")
+    with pytest.raises(ValidationError, match=r"LLm \(did you mean llm\?\)") as exc:
+        RunTimeSettingsV0_9_0.model_validate(d)
+    assert [err["loc"] for err in exc.value.errors()] == [("param",)]
+
+
+def test_every_misspelled_key_is_reported_in_one_error():
+    d = _populated_rt_dict()
+    _rename(d["param"], "llm", "LLm")
+    _rename(d["param"], "np_xi", "NP_XI")
+    _rename(d["param"], "n", "nz")  # the namelist key (serialization_alias)
+    _rename(d["ocean_vars"], "wrt_z", "wrt_Z")
+    with pytest.raises(ValidationError) as exc:
+        RunTimeSettingsV0_9_0.model_validate(d)
+    by_loc = {err["loc"]: err["msg"] for err in exc.value.errors()}
+    assert set(by_loc) == {("param",), ("ocean_vars",)}
+    assert (
+        "LLm (did you mean llm?), nz (did you mean n?), NP_XI (did you mean np_xi?)"
+    ) in by_loc[("param",)]
+    assert "wrt_Z (did you mean wrt_z?)" in by_loc[("ocean_vars",)]
+
+
+@pytest.mark.parametrize("key", ["akv_bak", "Akv_bak", "AKV"])
+def test_namelist_spelling_of_an_aliased_field_is_rejected(key):
+    d = _populated_rt_dict()
+    _rename(d["vertical_mixing"], "akv", key)
+    with pytest.raises(ValidationError, match=rf"{key} \(did you mean akv\?\)"):
+        RunTimeSettingsV0_9_0.model_validate(d)
+
+
+def test_exact_and_metadata_keys_are_accepted():
+    """Field names, a validation alias (``do_cdr``) and metadata keys no field
+    names (``*_vname``) all pass; the metadata is dropped as before.
+    """
+    d = _populated_rt_dict()
+    d["river_frc"]["rvol_vname"] = "river_volume"
+    d["cdr_output"]["do_cdr"] = d["cdr_output"].pop("do_cdr_output")
+    rt = RunTimeSettingsV0_9_0.model_validate(d)
+    assert rt.param.llm == 512
+    assert rt.cdr_output.do_cdr_output is d["cdr_output"]["do_cdr"]
+    assert "rvol_vname" not in rt.river_frc.model_dump()
+
+
+def test_misspelled_validation_alias_is_rejected():
+    section = {
+        "Do_Cdr": True,
+        "do_avg": True,
+        "monthly_averages": False,
+        "output_period": 3600.0,
+        "nrpf": 1,
+    }
+    with pytest.raises(
+        ValidationError, match=r"Do_Cdr \(did you mean do_cdr_output\?\)"
+    ):
+        CdrOutputCfg.model_validate(section)
+
+
+@pytest.mark.parametrize("value", [0, 2])
+def test_legacy_param_cfg_rejects_a_misspelled_cdr_tracer_count(value):
+    """``nt_cdr_oae`` is no field below ucla-roms 0.4.0, yet a case variant is
+    still rejected, whatever its value: the version gate reads the exact key, so
+    ``NT_CDR_OAE: 2`` would otherwise be dropped like a zero.
+    """
+    d = _populated_rt_dict()
+    d["param"]["NT_CDR_OAE"] = value
+    with pytest.raises(
+        ValidationError, match=r"NT_CDR_OAE \(did you mean nt_cdr_oae\?\)"
+    ):
+        RunTimeSettings.model_validate(d)
+
+
+def test_misspelled_section_is_rejected_even_on_a_tier_without_it():
+    """A section name is checked like a key: ``CDR_LITE`` (a 0.9.0 section)
+    fails on the 0.7.0 tier too, which would otherwise drop it unseen.
+    """
+    d = _populated_rt_dict()
+    d["CDR_LITE"] = {"cdr_online_carbonate_sensitivity": True}
+    _rename(d, "marbl_bgc", "Marbl_Bgc")
+    with pytest.raises(
+        ValidationError,
+        match=r"Marbl_Bgc \(did you mean marbl_bgc\?\), CDR_LITE \(did you mean cdr_lite\?\)",
+    ):
+        RunTimeSettingsV0_7_0.model_validate(d)
+
+
+@pytest.mark.parametrize("settings_cls", _ALL_SETTINGS_TIERS)
+def test_every_settings_field_suggests_itself(settings_cls):
+    """No alias in a section shadows another field's name in the spelling table,
+    so each suggestion names the field the key would have set.
+    """
+    for cls in (settings_cls, *_section_classes(settings_cls)):
+        spellings, accepted = _settings_spellings(cls)
+        for name in cls.model_fields:
+            assert name in accepted
+            assert spellings[name.casefold()] == name, (cls.__name__, name)
+
+
+def test_each_section_class_knows_the_keys_other_tiers_model():
+    """Every key some tier models in a section is a field, or an
+    ``_other_tier_keys()`` entry, of every class a tier types that section as, so
+    its case variants fail on every tier (version gates read exact keys). A tier
+    adding a key must list it in the older classes' ``_other_tier_keys()``.
+    """
+    classes_by_section: dict[str, set] = {}
+    for settings_cls in _RUN_TIME_SETTINGS_BY_NAMELIST_SCHEMA.values():
+        for section, info in settings_cls.model_fields.items():
+            if hasattr(info.annotation, "model_fields"):
+                classes_by_section.setdefault(section, set()).add(info.annotation)
+    missing = {
+        (section, cls.__name__): sorted(unknown)
+        for section, classes in classes_by_section.items()
+        for cls in classes
+        if (
+            unknown := set().union(*(c.model_fields for c in classes))
+            - set(cls.model_fields)
+            - set(cls._other_tier_keys())
+        )
+    }
+    assert not missing
+
+
+def test_validate_run_time_sections_reports_misspelled_keys():
+    errs = validate_run_time_sections(
+        {
+            "Marbl_Bgc": {},
+            "cppdefs": {"MARBL": True},  # compile-time: not checked here
+            "vertical_mixing": {"akv": 1.0e-4, "akt_default": 1.0e-6, "AKV": 2},
+        },
+        roms_ref="0.9.0",
+    )
+    assert len(errs) == 2
+    assert "Marbl_Bgc (did you mean marbl_bgc?)" in errs[0]
+    assert errs[1].startswith("vertical_mixing: ")
+    assert "AKV (did you mean akv?)" in errs[1]
+
+
+def test_prune_rejects_a_misspelled_switch_in_a_section_it_would_drop():
+    """The switch is read by exact key, so a case variant would be pruned
+    silently even when on; every such section is reported, with any enabled one.
+    """
+    settings = {
+        "cdr_lite": {"cdr_online_carbonate_sensitivity": True},
+        "cdr_lite_output": {"Do_Cdr_Lite_Output": True},
+        "cdr_gas_exch_output": {"DO_CDR_GAS_EXCH_OUTPUT": False},
+    }
+    with pytest.raises(ValueError) as exc:
+        prune_version_gated_sections(settings, RunTimeSettingsV0_6_0)
+    message = str(exc.value)
+    assert (
+        "cdr_gas_exch_output.DO_CDR_GAS_EXCH_OUTPUT (did you mean "
+        "do_cdr_gas_exch_output?), cdr_lite_output.Do_Cdr_Lite_Output (did you "
+        "mean do_cdr_lite_output?)"
+    ) in message
+    assert "cdr_lite.cdr_online_carbonate_sensitivity enabled" in message
+    assert set(settings) == {"cdr_lite", "cdr_lite_output", "cdr_gas_exch_output"}
 
 
 # ---------------------------------------------------------------------------
@@ -1048,6 +1243,25 @@ def test_pre_0_11_0_tiers_drop_a_switched_off_constant_fe(off):
     assert "constant_fe_value" not in written
 
 
+@pytest.mark.parametrize(
+    "settings_cls", [RunTimeSettingsV0_9_0, RunTimeSettingsV0_11_0]
+)
+@pytest.mark.parametrize("value", [True, False])
+def test_misspelled_constant_fe_is_rejected_on_every_tier(settings_cls, value):
+    """ROMS spells the keys ``use_constant_Fe``/``constant_Fe_value``. Below
+    0.11.0 the version gate reads only the exact key, so ``use_constant_Fe: true``
+    would otherwise be dropped there and iron computed prognostically.
+    """
+    d = _populated_rt_dict()
+    d["marbl_bgc"].update(use_constant_Fe=value, constant_Fe_value=5.0e-4)
+    with pytest.raises(
+        ValidationError,
+        match=r"use_constant_Fe \(did you mean use_constant_fe\?\), "
+        r"constant_Fe_value \(did you mean constant_fe_value\?\)",
+    ):
+        settings_cls.model_validate(d)
+
+
 def test_marbl_bgc_cfg_tiers_share_the_four_marbl_fields():
     old = set(MarblBgcCfg.model_fields)
     new = set(MarblBgcCfgV0_11_0.model_fields)
@@ -1579,17 +1793,6 @@ def test_normalize_legacy_sections_does_not_mutate_the_old_inner_dict():
 # the vocabulary bridge build_namelist writes through (the wizard's tooltips
 # read it too).
 # ---------------------------------------------------------------------------
-_ALL_SETTINGS_TIERS = (
-    RunTimeSettings,
-    RunTimeSettingsV0_4_0,
-    RunTimeSettingsV0_5_0,
-    RunTimeSettingsV0_6_0,
-    RunTimeSettingsV0_7_0,
-    RunTimeSettingsV0_9_0,
-    RunTimeSettingsV0_11_0,
-)
-
-
 def _settings_fields(settings_cls):
     """Every forge settings (section, field) of ``settings_cls``; a scalar
     section (``gamma2``) is its own field.

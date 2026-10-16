@@ -74,7 +74,7 @@ from cstar.roms.precheck import (
 )
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping, Sequence
+    from collections.abc import Container, Iterable, Mapping, Sequence
 
 
 def _coerce_pathlike(v):
@@ -110,6 +110,28 @@ def _coerce_pathlist(v):
 PathListStr = Annotated[list[str], BeforeValidator(_coerce_pathlist)]
 
 
+def _misspelled_keys(
+    keys: Iterable[Any], spellings: Mapping[str, str], accepted: Container[str]
+) -> list[str]:
+    """``<key> (did you mean <name>?)`` for each of ``keys``, in order, that is not
+    in ``accepted`` but whose ``casefold()`` is a key of ``spellings`` (casefolded
+    spelling -> the name to suggest). Non-string keys are skipped.
+    """
+    return [
+        f"{key} (did you mean {spellings[key.casefold()]}?)"
+        for key in keys
+        if isinstance(key, str) and key not in accepted and key.casefold() in spellings
+    ]
+
+
+def _misspelled_keys_message(offenders: Sequence[str]) -> str:
+    """The one wording for keys :func:`_misspelled_keys` found."""
+    return (
+        f"Forge would ignore these settings keys: {', '.join(offenders)}. Settings "
+        "keys are Forge's lowercase field names, not ROMS namelist spellings."
+    )
+
+
 # ===========================================================================
 # Settings-vocabulary models (forge's run-time dict, validated)
 #
@@ -127,6 +149,53 @@ class _SettingsSection(BaseModel):
     # extra="ignore": settings sections carry metadata keys the namelist drops
     # (sst_vname, cdb_min/max, diag_prec, nbgc_flx, cdr_*_vname, ...).
     model_config = ConfigDict(extra="ignore")
+
+    @classmethod
+    def _other_tier_keys(cls) -> Iterable[str]:
+        """Keys another ucla-roms tier models here but this class does not.
+
+        An exact one is the class's business (a version gate rejects it when set;
+        otherwise ``extra="ignore"`` drops it); :meth:`_reject_misspelled_keys`
+        rejects their case variants like a field's, so a misspelling fails on
+        every tier.
+        """
+        return ()
+
+    @model_validator(mode="before")
+    @classmethod
+    def _reject_misspelled_keys(cls, data: Any) -> Any:
+        """Fail loudly on a key ``extra="ignore"`` would drop although it names a
+        field: one matching a field (or :meth:`_other_tier_keys`) only up to case,
+        as ROMS spells many namelist keys (``LLm``, ``NP_XI``, ``wrt_Z``), or the
+        field's namelist key (its ``serialization_alias``). Lists every offender.
+        """
+        if isinstance(data, dict) and (
+            offenders := _misspelled_keys(data, *_settings_spellings(cls))
+        ):
+            raise ValueError(_misspelled_keys_message(offenders))
+        return data
+
+
+def _settings_spellings(
+    cls: type[_SettingsSection],
+) -> tuple[dict[str, str], frozenset[str]]:
+    """``(spellings, accepted)`` for :func:`_misspelled_keys` on ``cls``.
+
+    ``accepted`` holds the keys ``cls`` reads as written -- field names,
+    validation-alias choices -- plus :meth:`~_SettingsSection._other_tier_keys`;
+    ``spellings`` maps each of those, and each field's ``serialization_alias``,
+    casefolded, to the name to suggest.
+    """
+    accepted = set(cls._other_tier_keys())
+    spellings = {key.casefold(): key for key in accepted}
+    for name, info in cls.model_fields.items():
+        aliases = getattr(info.validation_alias, "choices", [info.validation_alias])
+        inputs = {name, *(alias for alias in aliases if isinstance(alias, str))}
+        accepted |= inputs
+        for spelling in (*inputs, info.serialization_alias):
+            if spelling:
+                spellings[spelling.casefold()] = name
+    return spellings, frozenset(accepted)
 
 
 class TitleCfg(_SettingsSection):
@@ -181,6 +250,11 @@ class _ParamCfgCommon(_SettingsSection):
 
 class ParamCfg(_ParamCfgCommon):
     """``param`` settings for ucla-roms < 0.4.0, which has no CDR tracer counts."""
+
+    @classmethod
+    def _other_tier_keys(cls) -> Iterable[str]:
+        # ParamCfgV0_4_0's CDR tracer counts: _reject_cdr_tracer_counts is their gate.
+        return _CDR_TRACER_WEIGHTS
 
     @model_validator(mode="before")
     @classmethod
@@ -455,6 +529,11 @@ class OceanVarsCfgV0_5_0(_OceanVarsCfgCommon):
     ``nrpf_rst`` was removed in ucla-roms 0.5.0: the restart record count is
     now hardcoded in Fortran rather than namelist-configurable.
     """
+
+    @classmethod
+    def _other_tier_keys(cls) -> Iterable[str]:
+        # OceanVarsCfg's nrpf_rst: dropped here, as shared OutputSpecs carry it.
+        return ("nrpf_rst",)
 
 
 def check_rst_period_divisible(
@@ -875,6 +954,11 @@ class CdrLiteOutputCfg(_CdrLiteOutputCfgCommon):
     )
     nrpf: int = Field(default=4, serialization_alias="nrpf_cdr_trc")
 
+    @classmethod
+    def _other_tier_keys(cls) -> Iterable[str]:
+        # CdrLiteOutputCfgV0_9_0's wrt_gas_exchange: dropped on 0.7/0.8.
+        return ("wrt_gas_exchange",)
+
 
 class CdrLiteOutputCfgV0_9_0(_CdrLiteOutputCfgCommon):
     """``cdr_lite_output`` settings for ucla-roms >= 0.9.0 -- the
@@ -1265,6 +1349,11 @@ class MarblBgcCfg(_MarblBgcCfgCommon):
     option.
     """
 
+    @classmethod
+    def _other_tier_keys(cls) -> Iterable[str]:
+        # MarblBgcCfgV0_11_0's constant-iron keys: _reject_constant_fe is their gate.
+        return ("use_constant_fe", "constant_fe_value")
+
     @model_validator(mode="before")
     @classmethod
     def _reject_constant_fe(cls, data: Any) -> Any:
@@ -1386,6 +1475,11 @@ class _RunTimeSettingsCommon(_SettingsSection):
     sst_correction: SstCorrectionCfg
     dic_alk_correction: DicAlkCorrectionCfg
     marbl_bgc: MarblBgcCfg
+
+    @classmethod
+    def _other_tier_keys(cls) -> Iterable[str]:
+        # Sections other tiers model: prune_version_gated_sections is their gate.
+        return version_gated_section_names()
 
     @model_validator(mode="after")
     def _rst_period_divisible_by_dt(self) -> _RunTimeSettingsCommon:
@@ -1584,24 +1678,37 @@ def prune_version_gated_sections(
 
     A section whose enable switch (:data:`_GATED_SECTION_SWITCHES`) is on is
     not dropped but rejected -- the pinned release cannot honor the request.
-    Switched-off sections (the normal shared-OutputSpec case) are pruned
-    silently. Raises ``ValueError`` before mutating anything.
+    So is a section spelling its switch in another case: no tier reads that key
+    (see :meth:`_SettingsSection._reject_misspelled_keys`), and pruning would
+    drop the request unseen. Switched-off sections (the normal shared-OutputSpec
+    case) are pruned silently. Raises ``ValueError``, reporting every such
+    section, before mutating anything.
     """
     pruned = sorted(
         (version_gated_section_names() - set(settings_cls.model_fields))
         & set(run_time_settings)
     )
-    if requested := [
-        f"{name}.{_GATED_SECTION_SWITCHES[name]}"
-        for name in pruned
-        if name in _GATED_SECTION_SWITCHES
-        and isinstance(section := run_time_settings[name], dict)
-        and section.get(_GATED_SECTION_SWITCHES[name])
-    ]:
-        raise ValueError(
+    requested: list[str] = []
+    misspelled: list[str] = []
+    for name in pruned:
+        section = run_time_settings[name]
+        if name not in _GATED_SECTION_SWITCHES or not isinstance(section, dict):
+            continue
+        switch = _GATED_SECTION_SWITCHES[name]
+        if section.get(switch):
+            requested.append(f"{name}.{switch}")
+        misspelled += [
+            f"{name}.{key}"
+            for key in _misspelled_keys(section, {switch.casefold(): switch}, {switch})
+        ]
+    problems = [_misspelled_keys_message(misspelled)] if misspelled else []
+    if requested:
+        problems.append(
             f"{', '.join(requested)} enabled, but the pinned ucla-roms release "
             f"(run-time settings {settings_cls.__name__}) has no such section."
         )
+    if problems:
+        raise ValueError(" ".join(problems))
     for name in pruned:
         del run_time_settings[name]
     return pruned
@@ -1925,8 +2032,10 @@ def validate_run_time_sections(
     it checks only the sections that are present, so it works on a ``ForgeBlueprint``'s
     flat ``model_settings`` (which omits the processing-filled sections). Keys with no
     run-time-settings counterpart (e.g. ``cppdefs``, a compile-time section) are
-    skipped. Use it for fail-fast feedback on hand-edited / loaded configs, where the
-    inner values are otherwise opaque (``model_settings`` is ``Dict[str, Any]``).
+    skipped; one naming a section only up to case (``Marbl_bgc``) is reported, as a
+    misspelled key within a section is. Use it for fail-fast feedback on hand-edited /
+    loaded configs, where the inner values are otherwise opaque (``model_settings`` is
+    ``Dict[str, Any]``).
 
     Parameters
     ----------
@@ -1940,6 +2049,12 @@ def validate_run_time_sections(
     errors: list[str] = []
     settings_cls = run_time_settings_for_ref(roms_ref)
     fields = settings_cls.model_fields
+    # A misspelled section name would be skipped below, then dropped by the
+    # top-level extra="ignore" -- the same rule as within each section.
+    if misspelled := _misspelled_keys(
+        settings or {}, *_settings_spellings(settings_cls)
+    ):
+        errors.append(_misspelled_keys_message(misspelled))
     for key, value in (settings or {}).items():
         if key not in fields:
             continue  # not a run-time section (e.g. cppdefs) — nothing to check here

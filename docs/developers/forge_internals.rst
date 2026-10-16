@@ -402,7 +402,12 @@ keys (``particles.output_period``, ``particles.nrpf``,
 ``cdr_lite_output.do_avg``) don't change; only
 the ``serialization_alias`` to namelist names differs per version, and
 ``nrpf_rst`` (still present in the shared ``OutputSpec/standard``) is
-silently ignored for 0.5.0+ models via ``extra="ignore"``. The one
+silently ignored for 0.5.0+ models via ``extra="ignore"``. A key matching a
+field only up to case or by its namelist name (``LLm``, ``akv_bak``) is not
+ignored but rejected, every offender in one error
+(``_SettingsSection._reject_misspelled_keys``); a section's
+``_other_tier_keys()`` extends that to keys only another tier models, so a
+version gate never sees a case variant. The one
 exception is ``cdr_lite_output``, which was named ``cdr_tracer_output``
 (enable flag ``do_cdr_tracer_output``) before ucla-roms 0.9.0's CDR_LITE
 rename: forge blueprint v10 migrates stored blueprints, and the resolver
