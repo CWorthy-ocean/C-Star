@@ -30,6 +30,7 @@ from cstar.applications.forge.namelist_model import (
     RunTimeSettingsV0_7_0,
     RunTimeSettingsV0_9_0,
 )
+from cstar.applications.forge.resolve import build_forge_blueprint, cfl_dt
 from cstar.wizard.wizard import (
     _ACCORDION_EXCLUDED_FIELDS,
     _BOUNDARY_NONE,
@@ -3521,6 +3522,7 @@ class _FakeLoadedGrid:
         self.theta_s = 6.0
         self.theta_b = 3.0
         self.hc = 200.0
+        self.ds = None  # unused: CFL derivation defaults to baroclinic mode
 
 
 @pytest.fixture
@@ -3682,6 +3684,77 @@ class TestNestedTopographyWidgets:
         assert "topography_source" not in this_kw
         assert "SRTM15" in wiz.parent_plot_status.value  # fallback note for this grid
         assert "EMOD" not in wiz.parent_plot_status.value
+
+
+class TestComputeDt:
+    """Compute dt (CFL) is arithmetic on the grid alone: it must not depend on
+    the rest of the blueprint resolving.
+    """
+
+    @staticmethod
+    def _resolver_dt(wiz) -> float:
+        """What the resolver derives for the wizard's current grid."""
+        cfg = build_forge_blueprint(**{**wiz._gather(), "dt": None})
+        assert cfg.domain.dt is not None
+        return float(cfg.domain.dt)
+
+    def test_matches_the_resolver_for_the_same_grid(self):
+        wiz = _new_wizard()
+        expected = self._resolver_dt(wiz)
+        wiz.dt.value = 1.0
+        wiz._on_compute_dt(None)
+        assert wiz.dt.value == expected != 1.0
+        assert "(CFL)" in wiz.dt_status.value
+        assert "#b00" not in wiz.dt_status.value
+
+    def test_does_not_run_the_resolver(self, monkeypatch):
+        wiz = _new_wizard()
+
+        def _fail(**_kw):
+            raise AssertionError("Compute dt must not resolve the blueprint")
+
+        monkeypatch.setattr("cstar.wizard.wizard.build_forge_blueprint", _fail)
+        wiz._on_compute_dt(None)
+        assert "#b00" not in wiz.dt_status.value
+
+    def test_works_while_the_blueprint_does_not_resolve(self):
+        """cdr_lite demands a CDR forcing; without one the blueprint is invalid,
+        but the grid's dt is still computable.
+        """
+        wiz = _new_wizard()
+        expected = self._resolver_dt(wiz)
+        _strip_bgc_forcing(wiz)
+        wiz.bgc_dd.value = "cdr_lite"
+        assert wiz.config is None
+        wiz.dt.value = 1.0
+        wiz._on_compute_dt(None)
+        assert wiz.dt.value == expected
+        assert "(CFL)" in wiz.dt_status.value
+
+    def test_uses_the_attached_grid_files_grid(self, fake_grid, tmp_path):
+        wiz = _new_wizard()
+        wiz.grid_file_path.value = str(_write_tiny_netcdf(tmp_path / "grid.nc"))
+        wiz._on_grid_file_attach(None)
+        wiz.dt.value = 1.0
+        wiz._on_compute_dt(None)
+        assert wiz.dt.value == cfl_dt({}, wiz._grid_file_grid) != 1.0
+        assert "(CFL)" in wiz.dt_status.value
+
+    def test_refuses_a_grid_file_that_failed_to_reload(self, fake_grid, tmp_path):
+        wiz = _new_wizard()
+        p = _write_tiny_netcdf(tmp_path / "grid.nc")
+        wiz.grid_file_path.value = str(p)
+        wiz._on_grid_file_attach(None)
+        p.unlink()
+        wiz2 = ForgeBlueprintWizard()
+        wiz2._populate_from(wiz.config)
+        assert wiz2._grid_file is not None
+        assert wiz2._grid_file_grid is None
+        wiz2.dt.value = 1.0
+        wiz2._on_compute_dt(None)
+        assert wiz2.dt.value == 1.0
+        assert "failed to" in wiz2.dt_status.value
+        assert "#b00" in wiz2.dt_status.value
 
 
 class TestGridFileAttach:

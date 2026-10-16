@@ -1371,6 +1371,48 @@ def test_build_forge_blueprint_grid_file_missing_raises(tmp_path):
         _build(grid_file=str(missing), grid_kwargs={}, dt=7200, v_sponge=1.0)
 
 
+def test_cfl_dt_from_grid_kwargs_matches_the_resolver_and_builds_no_grid(
+    monkeypatch,
+):
+    """With no loaded grid ``cfl_dt`` is arithmetic on the grid kwargs: no
+    ``roms_tools.Grid`` is built, and it is the same number the resolver derives
+    when ``dt`` is left unset.
+    """
+    from cstar.applications.forge.resolve import cfl_dt
+
+    def _no_grid(**_kw):
+        raise AssertionError("cfl_dt must not build a roms_tools.Grid")
+
+    monkeypatch.setattr("roms_tools.Grid", _no_grid)
+    dt = cfl_dt(_GRID_KWARGS)
+    assert dt > 0
+    assert _build(dt=None).domain.dt == dt
+
+
+def test_cfl_dt_from_a_loaded_grid_reads_its_size_and_shape():
+    from cstar.applications.forge.resolve import cfl_dt
+
+    loaded = _FakeLoadedGrid(
+        nx=_GRID_KWARGS["nx"],
+        ny=_GRID_KWARGS["ny"],
+        N=3,
+        size_x=_GRID_KWARGS["size_x"],
+        size_y=_GRID_KWARGS["size_y"],
+    )
+    # grid_kwargs are ignored once a grid is loaded (a grid file carries none)
+    assert cfl_dt({}, loaded) == cfl_dt(_GRID_KWARGS)
+    coarser = _FakeLoadedGrid(nx=2, ny=2, N=3, size_x=1000.0, size_y=1000.0)
+    assert cfl_dt({}, coarser) > cfl_dt({}, loaded)
+
+
+def test_cfl_dt_rejects_a_loaded_grid_without_size_x():
+    from cstar.applications.forge.resolve import cfl_dt
+
+    loaded = _FakeLoadedGrid(nx=5, ny=5, N=3, size_x=None, size_y=None)
+    with pytest.raises(ValueError, match="no size_x/size_y"):
+        cfl_dt({}, loaded)
+
+
 def test_build_forge_blueprint_grid_file_no_size_x_requires_explicit_dt(
     monkeypatch, tmp_path
 ):

@@ -17,7 +17,7 @@ The wizard discovers Models from ``catalog/ModelSpec/`` and Domains from
 ``catalog/DomainSpec/``; selecting a cataloged Domain prefills the grid kwargs,
 boundaries, partitioning, and dates. The live preview re-resolves on every change
 (using the ``dt`` field, so it never builds a grid); the "Compute dt (CFL)" button
-is the only action that builds a grid (needs ``roms_tools``).
+is plain arithmetic on the grid size and builds none either.
 """
 
 from __future__ import annotations
@@ -85,6 +85,7 @@ from cstar.applications.forge.resolve import (
     OUTPUT_SECTIONS,
     PARTIAL_OUTPUT_SECTIONS,
     build_forge_blueprint,
+    cfl_dt,
     extract_output_settings,
     find_carbonate_sensitivity_files,
     load_model_spec_data,
@@ -126,7 +127,7 @@ HELP_TEXT: dict[str | tuple[str, str], str] = {
         "run",
         "dt",
     ): "Baroclinic time step in seconds. Leave blank to compute from the CFL criterion "
-    "(click 'Compute dt (CFL)' — requires roms_tools).",
+    "(click 'Compute dt (CFL)').",
     ("run", "description"): "Human-readable description of this blueprint.",
     ("export", "name"): "Canonical blueprint name. Drives the save filename, the "
     "default working directory, casename, and generated file stems. Defaults to a "
@@ -541,8 +542,9 @@ HELP_TEXT: dict[str | tuple[str, str], str] = {
     (
         "timestep",
         "dt_btn",
-    ): "Build the grid from the current grid kwargs and compute the barotropic "
-    "time step from the CFL criterion. Requires roms_tools to be installed.",
+    ): "Compute the baroclinic time step from the CFL criterion for the current grid "
+    "size and resolution. No grid is built, so it works while other settings are "
+    "still incomplete.",
 }
 
 # Label overrides for namelist-section widgets built via _build_section /
@@ -7064,30 +7066,58 @@ class ForgeBlueprintWizard:
         return loaded_problems
 
     # ---- gather + resolve ----------------------------------------------------
-    def _gather(self) -> dict[str, Any]:
+    def _base_grid_kwargs(self) -> dict[str, Any]:
+        """The main grid's generation kwargs, read from the grid widgets.
+
+        ``{}`` while a user-provided grid file is attached: it forbids the
+        generation-geometry keys alongside it
+        (``Domain._grid_file_excludes_generation_geometry``), so ``grid_file=``/
+        ``grid=`` carry the grid instead.
+        """
         gk: dict[str, Any] = {}
-        if self._grid_file is None:
-            for k in _GRID_INT:
-                gk[k] = int(self.grid_w[k].value)
-            for k in _GRID_FLOAT:
+        if self._grid_file is not None:
+            return gk
+        for k in _GRID_INT:
+            gk[k] = int(self.grid_w[k].value)
+        for k in _GRID_FLOAT:
+            gk[k] = float(self.grid_w[k].value)
+        if self.scoord_chk.value:
+            for k in _SCOORD:
                 gk[k] = float(self.grid_w[k].value)
-            if self.scoord_chk.value:
-                for k in _SCOORD:
-                    gk[k] = float(self.grid_w[k].value)
-            # hmin + close_narrow_channels + mask_shapefile injected into grid_kwargs
-            if self.hmin.value != 5.0:
-                gk["hmin"] = float(self.hmin.value)
-            if self.close_narrow_chk.value:
-                gk["close_narrow_channels"] = True
-            if self.mask_shapefile.value.strip():
-                gk["mask_shapefile"] = self.mask_shapefile.value.strip()
-        # else: a user-provided grid file forbids the generation-geometry keys
-        # above alongside it (Domain._grid_file_excludes_generation_geometry) --
-        # grid_kwargs stays {} and grid_file=/grid= (below) carry the grid instead.
+        # hmin + close_narrow_channels + mask_shapefile injected into grid_kwargs
+        if self.hmin.value != 5.0:
+            gk["hmin"] = float(self.hmin.value)
+        if self.close_narrow_chk.value:
+            gk["close_narrow_channels"] = True
+        if self.mask_shapefile.value.strip():
+            gk["mask_shapefile"] = self.mask_shapefile.value.strip()
+        return gk
+
+    def _attached_grid(self) -> Any:
+        """The attached grid file's loaded ``roms_tools.Grid``, or ``None`` when no
+        grid file is attached.
+        """
+        if self._grid_file_grid is not None:
+            return self._grid_file_grid
+        if self._grid_file is not None:
+            # Attached but not currently loaded (a reattach failed -- e.g. the
+            # file went missing since it was recorded -- see _reattach_grid_file).
+            # Must not silently fall through to building a grid from whatever
+            # stale/default values happen to be sitting in the (locked, but
+            # still holding old values) grid_w widgets -- that would plot/derive
+            # boundaries and v_sponge from a completely different, wrong grid
+            # with no indication anything is amiss.
+            raise RuntimeError(
+                "grid_file is attached but failed to (re)load -- see "
+                "grid_file_status; re-attach a valid file first."
+            )
+        return None
+
+    def _gather(self) -> dict[str, Any]:
         kw = dict(
             model_dir=self.catalog.model_dir(self.model_dd.value),
             grid_name=self.grid_name.value,
-            grid_kwargs=gk,
+            grid_kwargs=self._base_grid_kwargs(),
             open_boundaries={d: w.value for d, w in self.bnd.items()},
             partitioning=(
                 {"auto_tiling": True, "n_cores": int(self.n_cores.value)}
@@ -7618,10 +7648,9 @@ class ForgeBlueprintWizard:
     def _on_compute_dt(self, _):
         self.dt_status.value = "<i>computing…</i>"
         try:
-            kw = self._gather()
-            kw["dt"] = None  # force CFL computation (builds the grid via roms_tools)
-            cfg = build_forge_blueprint(**kw)
-            self.dt.value = float(cfg.model_settings["time_stepping"]["dt"])
+            self.dt.value = float(
+                cfl_dt(self._base_grid_kwargs(), self._attached_grid())
+            )
             self.dt_status.value = (
                 f"<span style='color:#080'>dt = {self.dt.value:g} s (CFL)</span>"
             )
@@ -7639,37 +7668,13 @@ class ForgeBlueprintWizard:
         grid build (the live preview / ``_rebuild`` never does, so typing in
         the grid fields stays instant).
         """
-        if self._grid_file_grid is not None:
-            return self._grid_file_grid
-        if self._grid_file is not None:
-            # Attached but not currently loaded (a reattach failed -- e.g. the
-            # file went missing since it was recorded -- see _reattach_grid_file).
-            # Must not silently fall through to building a grid from whatever
-            # stale/default values happen to be sitting in the (locked, but
-            # still holding old values) grid_w widgets -- that would plot/derive
-            # boundaries and v_sponge from a completely different, wrong grid
-            # with no indication anything is amiss.
-            raise RuntimeError(
-                "grid_file is attached but failed to (re)load -- see "
-                "grid_file_status; re-attach a valid file first."
-            )
+        attached = self._attached_grid()
+        if attached is not None:
+            return attached
 
         from roms_tools import Grid
 
-        gk: dict[str, Any] = {}
-        for k in _GRID_INT:
-            gk[k] = int(self.grid_w[k].value)
-        for k in _GRID_FLOAT:
-            gk[k] = float(self.grid_w[k].value)
-        if self.scoord_chk.value:
-            for k in _SCOORD:
-                gk[k] = float(self.grid_w[k].value)
-        if self.hmin.value != 5.0:
-            gk["hmin"] = float(self.hmin.value)
-        if self.close_narrow_chk.value:
-            gk["close_narrow_channels"] = True
-        if self.mask_shapefile.value.strip():
-            gk["mask_shapefile"] = self.mask_shapefile.value.strip()
+        gk = self._base_grid_kwargs()
         topo, self._grid_build_topo_note = self._this_grid_plot_topography()
         if topo is not None:
             gk["topography_source"] = topo

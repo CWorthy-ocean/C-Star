@@ -738,9 +738,8 @@ def build_forge_blueprint(
     ``v_sponge`` and ``dt`` are both domain-owned numerics with the same pattern:
     if ``None`` (the default), each is derived from the grid -- ``v_sponge`` from
     grid spacing via ``cstar.applications.forge.util.compute_v_sponge_from_grid``, ``dt``
-    from the CFL criterion via ``_compute_dt_from_cfl`` (builds a grid); pass an
-    explicit value (e.g. one restored from a saved DomainSpec) to use it verbatim
-    instead. The resolver is the sole writer of both ``domain.v_sponge`` /
+    from the CFL criterion via :func:`cfl_dt`; pass an explicit value (e.g. one
+    restored from a saved DomainSpec) to use it verbatim instead. The resolver is the sole writer of both ``domain.v_sponge`` /
     ``domain.dt`` and the identical ``model_settings["v_sponge"]["v_sponge"]`` /
     ``model_settings["time_stepping"]["dt"]`` leaves -- each pair is always
     written together and must never diverge.
@@ -947,15 +946,7 @@ def build_forge_blueprint(
 
     # ----- derived numerics --------------------------------------------------
     if dt is None:
-        if loaded_grid is not None and loaded_grid.size_x is None:
-            raise ValueError(
-                "dt was not provided and the grid_file grid has no size_x/size_y "
-                "(a hand-made file roms-tools never wrote those attrs to) -- CFL "
-                "derivation is impossible; pass dt= explicitly."
-            )
-        dt = _compute_dt_from_cfl(
-            grid_kwargs, loaded_grid if loaded_grid is not None else grid
-        )
+        dt = cfl_dt(grid_kwargs, loaded_grid if loaded_grid is not None else grid)
     # total_seconds, not .days: a sub-day run window must not round to ntimes == 0.
     ntimes = round((end_date - start_date).total_seconds() / dt)
     # v_sponge default = grid spacing (m) / 10 -- a caller (e.g. the wizard, restoring
@@ -1819,7 +1810,7 @@ def _build_code(
 
 def _compute_v_sponge_default(grid_kwargs: dict[str, Any], grid: Any = None) -> float:
     """Lazily compute the default sponge viscosity from grid spacing (no grid build
-    needed -- pure arithmetic on ``nx``/``size_x``). Mirrors ``_compute_dt_from_cfl``'s
+    needed -- pure arithmetic on ``nx``/``size_x``). Mirrors :func:`cfl_dt`'s
     lazy-import pattern to keep this module dependency-light when unused.
 
     ``grid``, if given (a user-supplied ``grid_file``'s loaded grid, whose
@@ -1840,8 +1831,15 @@ def _compute_v_sponge_default(grid_kwargs: dict[str, Any], grid: Any = None) -> 
     return compute_v_sponge_from_grid(grid_kwargs["size_x"], grid_kwargs["nx"])
 
 
-def _compute_dt_from_cfl(grid_kwargs: dict[str, Any], grid: Any) -> float:
-    """Lazily compute dt from the CFL criterion (needs roms_tools + cstar.applications.forge.util)."""
+def cfl_dt(grid_kwargs: dict[str, Any], loaded_grid: Any = None) -> float:
+    """Compute dt from the CFL criterion (pure arithmetic, no grid build).
+
+    ``loaded_grid``, if given (a ``roms_tools.Grid``, e.g. a user-supplied
+    ``grid_file``'s), supplies ``size_x``/``size_y``/``nx``/``ny`` and the dataset;
+    otherwise they come from ``grid_kwargs`` directly. Raises ``ValueError`` for a
+    loaded grid with no ``size_x``/``size_y`` (a hand-made file roms-tools never
+    wrote those attrs to).
+    """
     try:
         from cstar.applications.forge.util import compute_timestep_from_cfl
     except Exception as exc:  # pragma: no cover
@@ -1850,14 +1848,24 @@ def _compute_dt_from_cfl(grid_kwargs: dict[str, Any], grid: Any) -> float:
             "cstar.applications.forge.util failed. Pass dt= explicitly to keep resolution "
             f"dependency-light. ({exc})"
         ) from exc
-    if grid is None:
-        import roms_tools as rt
-
-        grid = rt.Grid(**grid_kwargs)
+    if loaded_grid is None:
+        size_x, size_y, nx, ny = (
+            grid_kwargs[k] for k in ("size_x", "size_y", "nx", "ny")
+        )
+        grid_ds = None
+    else:
+        if loaded_grid.size_x is None:
+            raise ValueError(
+                "dt was not provided and the grid_file grid has no size_x/size_y "
+                "(a hand-made file roms-tools never wrote those attrs to) -- CFL "
+                "derivation is impossible; pass dt= explicitly."
+            )
+        size_x, size_y = loaded_grid.size_x, loaded_grid.size_y
+        nx, ny, grid_ds = loaded_grid.nx, loaded_grid.ny, loaded_grid.ds
     return compute_timestep_from_cfl(
-        grid_size_x=grid.size_x,
-        grid_size_y=grid.size_y,
-        grid_nx=grid.nx,
-        grid_ny=grid.ny,
-        grid_ds=grid.ds,
+        grid_size_x=size_x,
+        grid_size_y=size_y,
+        grid_nx=nx,
+        grid_ny=ny,
+        grid_ds=grid_ds,
     )

@@ -30,7 +30,7 @@ def compute_timestep_from_cfl(
     grid_size_y: float,
     grid_nx: int,
     grid_ny: int,
-    grid_ds: xr.Dataset,
+    grid_ds: xr.Dataset | None,
     cfl: float = 0.7,
     default_depth: float = 4000.0,
     reduced_gravity: float = 0.04,
@@ -56,9 +56,9 @@ def compute_timestep_from_cfl(
         Number of grid points in x-direction.
     grid_ny : int
         Number of grid points in y-direction.
-    grid_ds : xr.Dataset
+    grid_ds : xr.Dataset or None
         Grid dataset; bathymetry (``h``) is read only when
-        ``mode`` is ``"barotropic"``.
+        ``mode`` is ``"barotropic"``, which requires it.
     cfl : float, optional
         CFL number (typically 0.5-0.8 for stability). Default is 0.7.
     default_depth : float, optional
@@ -122,6 +122,8 @@ def compute_timestep_from_cfl(
             )
         c = math.sqrt(reduced_gravity * equivalent_depth)
     elif mode == "barotropic":
+        if grid_ds is None:
+            raise ValueError("barotropic mode needs grid_ds to read the bathymetry")
         if "h" in grid_ds:
             H_max = float(grid_ds["h"].max().values)
         else:
