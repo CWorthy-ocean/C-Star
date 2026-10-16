@@ -30,6 +30,7 @@ import os
 import re
 import typing
 import warnings
+from dataclasses import dataclass
 from datetime import date, datetime
 from pathlib import Path
 from typing import Any, Final, get_args, get_origin
@@ -539,7 +540,9 @@ HELP_TEXT: dict[str | tuple[str, str], str] = {
         "output",
         "output_dd",
     ): "Select an OutputSpec (named output-settings configuration) to seed the output "
-    "streams. Fine-tune any value in the streams below.",
+    "streams. Fine-tune any value in the streams below. Particle tracking, "
+    "pressure-flux and child-grid extraction settings belong to the model/grid and "
+    "are kept when you pick a preset.",
     # ---- timestep --------------------------------------------------------------
     (
         "timestep",
@@ -1129,6 +1132,7 @@ _ADVANCED_CATEGORIES: tuple[tuple[str, tuple[str, ...]], ...] = (
 # are ModelSpec/Domain-owned.
 _OUTPUT_CARD = "Output"
 _OUTPUT_MORE_TITLE = "More output streams"
+_OUTPUT_GROUPS = (_OUTPUT_CARD, _OUTPUT_MORE_TITLE)
 _OUTPUT_MAIN_SECTIONS = (
     "ocean_vars",
     "surf_flux",
@@ -1156,6 +1160,12 @@ _OUTPUT_MORE_SECTIONS = (
 # under "More output streams" otherwise.
 _PARENT_ONLY_SECTIONS = frozenset({"extract_data"})
 _CHILD_MAIN_SECTIONS = frozenset({"upscale_output"})
+# Output-card titles for the sections split along the PARTIAL_OUTPUT_SECTIONS seam,
+# whose glossary titles name the whole section (the Advanced BGC pane keeps those).
+_OUTPUT_SECTION_TITLES: dict[str, str] = {
+    "bgc": "BGC output",
+    "marbl_bgc": "MARBL output (tracers & diagnostics to write)",
+}
 # Per-section note shown under the section header.
 _SECTION_NOTES: dict[str, str] = {
     "extract_data": (
@@ -1620,19 +1630,37 @@ _CDR_STREAM_MASTER_FLAGS: dict[str, str] = {
 }
 
 
-def _section_header_html(section: str, n_modified: int = 0) -> str:
-    """The header HTML over a settings section: its glossary title and namelist
-    symbol, plus an "N modified" chip once the wizard retitles it with a count.
+def _section_header_html(
+    section: str, n_modified: int = 0, title: str | None = None
+) -> str:
+    """The header HTML over a settings section: its glossary title (or ``title``)
+    and namelist symbol, plus an "N modified" chip once the wizard retitles it with
+    a count.
     """
-    meta = section_for(f"settings.{section}", default_title=section)
+    if title is None:
+        title = section_for(f"settings.{section}", default_title=section).title
     chip = (
         " " + components.chip(f"● {n_modified} modified", "info") if n_modified else ""
     )
     return (
         "<div class='forge-settings-sec'>"
-        f"<span class='ttl'>{meta.title}</span> "
+        f"<span class='ttl'>{html.escape(title)}</span> "
         f"<span class='sym'>{section}</span>{chip}</div>"
     )
+
+
+@dataclass(frozen=True)
+class _EditorKey:
+    """What a built settings editor depends on: it is rebuilt when any of these
+    changes. A failed resolve knows only the model and the BGC mode (see
+    ``ForgeBlueprintWizard._hide_stale_editor``).
+    """
+
+    model: str | None
+    settings_cls: type[BaseModel]
+    bgc_mode: str
+    is_parent: bool
+    is_child: bool
 
 
 class _SettingsEditor:
@@ -1695,7 +1723,7 @@ class _SettingsEditor:
         self._syncing_internal = False
         panes, titles = [], []
         for title, members in _ADVANCED_CATEGORIES:
-            blocks = self._build_group(title, title, members, model_settings)
+            blocks = self._build_group(title, members, model_settings)
             if not blocks:
                 continue
             panes.append(W.VBox(blocks))
@@ -1703,12 +1731,8 @@ class _SettingsEditor:
         # Independently collapsible panes: opening one no longer closes another.
         self.accordion = components.open_accordion(W, panes, titles)
         main, more = _output_placement(is_parent=is_parent, is_child=is_child)
-        main_blocks = self._build_group(
-            _OUTPUT_CARD, _OUTPUT_CARD, main, model_settings
-        )
-        more_blocks = self._build_group(
-            _OUTPUT_CARD, _OUTPUT_MORE_TITLE, more, model_settings
-        )
+        main_blocks = self._build_group(_OUTPUT_CARD, main, model_settings)
+        more_blocks = self._build_group(_OUTPUT_MORE_TITLE, more, model_settings)
         more_panes = [W.VBox(more_blocks)] if more_blocks else []
         self.more_streams = components.open_accordion(
             W, more_panes, [_OUTPUT_MORE_TITLE] * len(more_panes)
@@ -1740,29 +1764,25 @@ class _SettingsEditor:
             if title in self._group_fields
         }
 
-    @property
-    def _section_fields(self) -> dict[str, list[str | None]]:
-        """Section -> every field built for it, a split section (bgc/marbl_bgc)
-        listing its fields from both containers.
+    def header_html(self, group: str, section: str, n_modified: int = 0) -> str:
+        """The header HTML of ``section`` in ``group``: the Output card titles the
+        split sections itself, every other header uses the glossary's title.
         """
-        out: dict[str, list[str | None]] = {}
-        for fields_by_section in self._group_fields.values():
-            for section, fields in fields_by_section.items():
-                out.setdefault(section, []).extend(fields)
-        return out
+        title = _OUTPUT_SECTION_TITLES.get(section) if group in _OUTPUT_GROUPS else None
+        return _section_header_html(section, n_modified, title)
 
     def _build_group(
         self,
-        place: str,
         group: str,
         members: tuple[str, ...],
         model_settings: dict[str, Any],
     ) -> list[Any]:
         """Header + (note) + widgets blocks for each of ``members`` that has editable
-        fields, flat -- a pane's or the Output card's children. ``place`` selects the
-        field split (see :func:`_split_fields`); ``group`` keys the bookkeeping.
+        fields, flat -- an Advanced pane's (``group`` is its title) or the Output
+        card's children (``group`` is one of :data:`_OUTPUT_GROUPS`).
         """
         W = self.W
+        place = _OUTPUT_CARD if group in _OUTPUT_GROUPS else group
         blocks: list[Any] = []
         for section in members:
             if section not in model_settings:
@@ -1788,7 +1808,7 @@ class _SettingsEditor:
             if not fields:
                 continue
             self._group_fields.setdefault(group, {})[section] = fields
-            sec_header = W.HTML(_section_header_html(section))
+            sec_header = W.HTML(self.header_html(group, section))
             # Widget-level class: the CSS draws a bold divider above every
             # section header except the container's first (:first-child).
             sec_header.add_class("forge-settings-sec-w")
@@ -4898,16 +4918,11 @@ class ForgeBlueprintWizard:
 
         # --- advanced settings editor (built lazily on first rebuild) ---
         self.editor: _SettingsEditor | None = None
-        self._editor_model: str | None = None
-        self._editor_bgc_mode: str | None = None
-        # The grid's nesting role the editor was last built for (see _rebuild).
-        self._editor_is_parent: bool | None = None
-        self._editor_is_child: bool | None = None
-        # The RunTimeSettings variant the editor was last built against -- rebuilt
-        # not only on a model switch but also when the effective ucla-roms ref
-        # crosses a schema boundary (e.g. editing the roms_ref override across the
-        # 0.5.0 line while keeping the same ModelSpec selected).
-        self._editor_settings_cls: type[BaseModel] | None = None
+        # What the editor was built for (None while there is none): rebuilt not only
+        # on a model switch but also when the effective ucla-roms ref crosses a schema
+        # boundary (e.g. editing the roms_ref override across the 0.5.0 line while
+        # keeping the same ModelSpec selected), or the BGC mode or nesting role change.
+        self._editor_key: _EditorKey | None = None
         self.editor_box = W.VBox([])  # placeholder; filled with the editor's accordion
         # ... and the Output card's body, filled with the editor's output_box.
         self.output_editor_box = W.VBox([])
@@ -7470,6 +7485,32 @@ class ForgeBlueprintWizard:
                     w.value = parent[k]
             self._set_nested_topo_widgets("parent", parent)
 
+    def _hide_stale_editor(self) -> None:
+        """After a failed resolve, replace an editor built for another model or BGC
+        mode with a placeholder (the next valid resolve rebuilds it): it would keep
+        showing streams that no longer apply, e.g. the MARBL ones after a switch to
+        ``cdr_lite`` that still lacks its CDR forcing. Overrides are applied after
+        the resolve, never fed to it, so no failure comes from an editor value and
+        nothing is lost; the user's record stays. Only the model and the BGC mode are
+        known without a resolved config; an editor still matching them stays.
+        """
+        key = self._editor_key
+        if key is None or (key.model, key.bgc_mode) == (
+            self.model_dd.value,
+            self.bgc_dd.value,
+        ):
+            return
+        placeholder = components.banner_widget(
+            self.W,
+            "info",
+            "Settings for this selection appear once the blueprint is valid — see "
+            "the status above.",
+        )
+        self.editor_box.children = [placeholder]
+        self.output_editor_box.children = [placeholder]
+        self.editor = None
+        self._editor_key = None
+
     def _rebuild(self, *_):
         if getattr(self, "_suspended", False):
             return
@@ -7493,6 +7534,7 @@ class ForgeBlueprintWizard:
             self.derived.value = "<i>Set start and end dates…</i>"
             self.download_link.value = ""
             self.download_link_review.value = ""
+            self._hide_stale_editor()
             self._update_status(None)
             return
         try:
@@ -7507,6 +7549,7 @@ class ForgeBlueprintWizard:
             error = lines[0][:200]
             if len(lines) > 1 or len(lines[0]) > len(error):
                 error += " — full message in the preview below"
+            self._hide_stale_editor()
             self._update_status(None, error=error)
             return
 
@@ -7537,28 +7580,20 @@ class ForgeBlueprintWizard:
         # attached grid file disables them but leaves them as they were.
         is_parent = cfg.domain.grid_kwargs_child is not None
         is_child = cfg.domain.grid_kwargs_parent is not None
-        if (
-            self.editor is None
-            or self._editor_model != self.model_dd.value
-            or self._editor_settings_cls is not settings_cls
-            or self._editor_bgc_mode != self.bgc_dd.value
-            or self._editor_is_parent != is_parent
-            or self._editor_is_child != is_child
-        ):
+        key = _EditorKey(
+            self.model_dd.value, settings_cls, self.bgc_dd.value, is_parent, is_child
+        )
+        if self.editor is None or self._editor_key != key:
             self.editor = _SettingsEditor(
                 self.W,
                 composed,
                 on_edit=self._on_editor_edit,
                 settings_cls=settings_cls,
-                bgc_mode=self.bgc_dd.value,
+                bgc_mode=key.bgc_mode,
                 is_parent=is_parent,
                 is_child=is_child,
             )
-            self._editor_model = self.model_dd.value
-            self._editor_settings_cls = settings_cls
-            self._editor_bgc_mode = self.bgc_dd.value
-            self._editor_is_parent = is_parent
-            self._editor_is_child = is_child
+            self._editor_key = key
             self.editor_box.children = [self.editor.accordion]
             self.output_editor_box.children = [self.editor.output_box]
 
@@ -7774,8 +7809,8 @@ class ForgeBlueprintWizard:
             editor.more_streams.set_title(0, title(_OUTPUT_MORE_TITLE, more))
         for section, fields in editor._group_fields.get(_OUTPUT_CARD, {}).items():
             _n_fields, n_mod = counts({section: fields})
-            editor._headers[(_OUTPUT_CARD, section)].value = _section_header_html(
-                section, n_mod
+            editor._headers[(_OUTPUT_CARD, section)].value = editor.header_html(
+                _OUTPUT_CARD, section, n_mod
             )
 
     def _update_status(

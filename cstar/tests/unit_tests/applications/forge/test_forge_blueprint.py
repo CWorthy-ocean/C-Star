@@ -6130,7 +6130,7 @@ class TestForgeBlueprintWizard:
             "Biogeochemistry (BGC / MARBL)",
             "Carbon dioxide removal (CDR)",
         ]
-        sections = set(w.editor._section_fields)
+        sections = {s for group in w.editor._group_fields.values() for s in group}
         # A representative editable section from each category is present.
         assert {
             "lateral_visc",  # physics
@@ -6157,7 +6157,8 @@ class TestForgeBlueprintWizard:
             }
             & sections
         )
-        assert w.editor._section_fields["param"] == ["nt_passive"]
+        cdr_pane = w.editor._group_fields["Carbon dioxide removal (CDR)"]
+        assert cdr_pane["param"] == ["nt_passive"]
         assert w.config.composition.overrides == {}
 
     def test_advanced_editor_splits_bgc_along_output_seam(self):
@@ -6185,8 +6186,9 @@ class TestForgeBlueprintWizard:
         w = self._wizard()
         # The whole time_stepping/grid group is dropped from the accordion
         # (resolver-derived or edited by a dedicated widget).
+        built = {s for group in w.editor._group_fields.values() for s in group}
         for dropped in ("time_stepping", "grid", "s_coord"):
-            assert dropped not in w.editor._section_fields
+            assert dropped not in built
         # param shows only nt_passive: the grid/tiling dims have dedicated widgets
         # and the tracer counts are derived (BGC mode, CDR forcing).
         for derived in ("llm", "mmm", "n", "np_xi", "np_eta", "ntrc_bio"):

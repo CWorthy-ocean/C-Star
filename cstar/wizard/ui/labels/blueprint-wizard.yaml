@@ -394,7 +394,7 @@ fields:
     label: CDR release
   output_dd:
     label: Output preset
-    hint: Selects an output-settings spec from the catalog to seed the streams below.
+    hint: Selects an output-settings spec from the catalog to seed the streams below. Particle tracking, pressure-flux and child-grid extraction settings belong to the model/grid and are kept when you pick a preset.
   save_path:
     label: Save path
   name:

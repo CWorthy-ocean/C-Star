@@ -126,6 +126,9 @@ Run setup
 Output
    What the model writes. An **OutputSpec** from the catalog, picked at the
    top, seeds the output streams below it, and every stream stays editable.
+   Picking a preset replaces your edits to the streams it owns; particle
+   tracking, the pressure-flux calculation and child-grid extraction belong to
+   the model and the grid, so your edits to those are kept.
    The main streams are always shown, each under its own heading: the
    physical state (history, averages and restarts), surface fluxes, the
    biogeochemistry output controls, and the CDR streams. The biogeochemistry

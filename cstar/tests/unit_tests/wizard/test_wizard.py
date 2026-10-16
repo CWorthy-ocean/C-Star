@@ -98,6 +98,17 @@ def _descendants(w):
         yield from _descendants(c)
 
 
+def _built_fields(editor) -> dict[str, list]:
+    """Section -> every field the settings editor built for it, a section split
+    across containers (bgc/marbl_bgc) listing the fields of both.
+    """
+    out: dict[str, list] = {}
+    for fields_by_section in editor._group_fields.values():
+        for section, fields in fields_by_section.items():
+            out.setdefault(section, []).extend(fields)
+    return out
+
+
 def test_surface_row_visibility_by_type(editor):
     """Item 2/8: restore/corr_rad/wind_dropoff only show for their relevant type."""
     w = editor._make_row("surface", {"type": "physics", "source": {"name": "ERA5"}})
@@ -1594,7 +1605,7 @@ class TestBgcModeSettings:
         assert ("cdr_output", "do_cdr_output") in wiz.editor._widgets
         wiz.bgc_dd.value = "cdr_lite"
         assert wiz.config is not None, wiz.derived.value
-        assert wiz._editor_bgc_mode == "cdr_lite"
+        assert wiz._editor_key.bgc_mode == "cdr_lite"
         assert wiz.editor._bgc_mode == "cdr_lite"
         assert ("cdr_output", "do_cdr_output") not in wiz.editor._widgets
         wiz.bgc_dd.value = "marbl"
@@ -1667,32 +1678,70 @@ class TestBgcModeSettings:
         assert ("bgc", "wrt_his") in wiz._overrides
         assert wiz._active_overrides == {}
 
-    def test_edit_in_a_stale_editor_is_recorded_but_not_applied(self):
-        """A mode switch whose resolve fails (cdr_lite with no CDR forcing yet)
-        leaves the old MARBL-mode editor live; an edit there is kept for its mode
-        but never reaches the blueprint under this one.
+    def test_a_failed_mode_switch_swaps_the_stale_editor_for_a_placeholder(self):
+        """cdr_lite with no CDR forcing yet does not resolve; the MARBL-mode editor
+        must not stay on screen offering streams that no longer apply. The user's
+        record survives, and the next valid resolve rebuilds the editor.
         """
         wiz = ForgeBlueprintWizard()
         wiz.start.value = date(2012, 1, 1)
         wiz.end.value = date(2012, 1, 2)
         wiz.use_pio_chk.value = False
-        wiz.bgc_dd.value = "cdr_lite"
-        assert wiz.config is None
-        assert wiz.editor._bgc_mode == "marbl"  # stale: the resolve failed
-
         self._toggle(wiz, ("bgc", "wrt_his"))
+        marbl_editor = wiz.editor
+
+        wiz.bgc_dd.value = "cdr_lite"
+
+        assert wiz.config is None
+        assert wiz.editor is None and wiz._editor_key is None
+        (placeholder,) = wiz.editor_box.children
+        assert wiz.output_editor_box.children == (placeholder,)
+        assert "once the blueprint is valid" in placeholder.value
+        for box in (wiz.editor_box, wiz.output_editor_box):
+            assert not any(
+                w is marbl_editor.accordion or w is marbl_editor.output_box
+                for w in _descendants(box)
+            )
+        # nothing is lost: kept for its mode, inactive under this one
         assert ("bgc", "wrt_his") in wiz._overrides
         assert wiz._active_overrides == {}
 
-        wiz.cdr_mode_dd.value = "simple"
+        wiz.cdr_mode_dd.value = "simple"  # a CDR forcing: the config resolves again
         assert wiz.config is not None, wiz.derived.value
+        assert wiz.editor is not marbl_editor
         assert wiz.editor._bgc_mode == "cdr_lite"
+        assert ("cdr_output", "do_cdr_output") not in wiz.editor._widgets
+        assert ("cdr_gas_exch_output", "do_cdr_gas_exch_output") not in (
+            wiz.editor._widgets
+        )
+        assert wiz.editor_box.children == (wiz.editor.accordion,)
+        assert wiz.output_editor_box.children == (wiz.editor.output_box,)
         assert wiz.config.composition.overrides == {}
 
         wiz.bgc_dd.value = "marbl"
         assert wiz.config.composition.overrides == {
             "bgc": {"wrt_his": wiz.config.model_settings["bgc"]["wrt_his"]}
         }
+
+    @pytest.mark.parametrize("failure", ["no_end_date", "invalid_grid"])
+    def test_a_failure_under_the_same_model_and_mode_keeps_the_editor(self, failure):
+        wiz = self._wizard()
+        editor = wiz.editor
+
+        if failure == "no_end_date":
+            wiz.end.value = None
+        else:
+            wiz.grid_w["nx"].value = 0  # the resolver rejects a non-positive grid
+
+        assert wiz.config is None
+        assert wiz.editor is editor
+        assert wiz.editor_box.children == (editor.accordion,)
+        assert wiz.output_editor_box.children == (editor.output_box,)
+
+        wiz.end.value = date(2012, 1, 2)
+        wiz.grid_w["nx"].value = 10
+        assert wiz.config is not None, wiz.derived.value
+        assert wiz.editor is editor
 
     def test_loading_a_marbl_blueprint_keeps_its_marbl_only_overrides(self):
         wiz = self._wizard()
@@ -1760,7 +1809,7 @@ class TestBgcModeSettings:
 
         assert wiz2.bgc_dd.value == "cdr_lite"
         assert wiz2._overrides == wiz._overrides
-        assert wiz2._editor_bgc_mode == "cdr_lite"
+        assert wiz2._editor_key.bgc_mode == "cdr_lite"
         assert wiz2.config is not None, wiz2.derived.value
         assert wiz2.config.content_hash() == wiz.config.content_hash()
 
@@ -2613,7 +2662,7 @@ def test_default_model_uses_latest_settings_schema():
     wiz.start.value = date(2012, 1, 1)
     wiz.end.value = date(2012, 1, 2)
     wiz._rebuild()
-    assert wiz._editor_settings_cls is RunTimeSettingsV0_9_0
+    assert wiz._editor_key.settings_cls is RunTimeSettingsV0_9_0
     assert ("ocean_vars", "nrpf_rst") not in wiz.editor._widgets
 
 
@@ -2879,7 +2928,7 @@ def test_settings_editor_builds_no_pane_left_without_fields():
             settings_cls=RunTimeSettingsV0_9_0,
             bgc_mode=mode,
         )
-        return list(editor._pane_sections), editor._section_fields
+        return list(editor._pane_sections), _built_fields(editor)
 
     marbl_panes, marbl_fields = _titles("marbl")
     none_panes, none_fields = _titles("none")
@@ -3384,15 +3433,15 @@ def test_ocean_vars_variable_checkbox_lives_in_grid_with_glossary_description():
 
 
 def test_ocean_vars_section_fields_unchanged_by_table_grid_layout():
-    """The table/grid layout is display-only: ``_section_fields["ocean_vars"]``
-    (which drives the pane-title "N settings" count) must still list every
+    """The table/grid layout is display-only: the ocean_vars fields the editor
+    records (which drive the section-title "N settings" count) must still list every
     field ``_build_section`` would have built as a plain flat list -- i.e.
     every ``ocean_vars`` field on the active settings_cls's sub-model, minus
     ``_ACCORDION_EXCLUDED_FIELDS``, in the same order.
     """
     wiz = ForgeBlueprintWizard()
     editor = wiz.editor
-    sub = _section_submodel("ocean_vars", wiz._editor_settings_cls)
+    sub = _section_submodel("ocean_vars", wiz._editor_key.settings_cls)
     excluded = _ACCORDION_EXCLUDED_FIELDS.get("ocean_vars", frozenset())
     expected = [
         key
@@ -3400,7 +3449,7 @@ def test_ocean_vars_section_fields_unchanged_by_table_grid_layout():
         if key not in excluded and key in sub.model_fields
     ]
     assert expected  # sanity: the section isn't accidentally empty
-    assert editor._section_fields["ocean_vars"] == expected
+    assert _built_fields(editor)["ocean_vars"] == expected
 
 
 def test_ocean_vars_table_widget_read_reflects_edit():
@@ -5093,6 +5142,30 @@ def test_output_card_main_streams_are_stacked_under_glossary_headers():
     assert editor._headers[(_OUTPUT_CARD, "cdr_lite_output")] in children
 
 
+def test_output_card_titles_the_split_bgc_sections_itself():
+    editor = _output_editor()
+    card = {
+        s: editor._headers[(_OUTPUT_CARD, s)].value
+        for s in ("bgc", "marbl_bgc", "ocean_vars")
+    }
+    assert "<span class='ttl'>BGC output</span>" in card["bgc"]
+    assert (
+        "<span class='ttl'>MARBL output (tracers &amp; diagnostics to write)</span>"
+        in card["marbl_bgc"]
+    )
+    # sections the Output card does not split keep the glossary title
+    assert "Physical state output" in card["ocean_vars"]
+    # the Advanced BGC pane keeps the glossary titles, and the titles survive a
+    # retitle with a modified count
+    pane = "Biogeochemistry (BGC / MARBL)"
+    assert "Biogeochemistry settings" in editor._headers[(pane, "bgc")].value
+    assert (
+        "<span class='ttl'>MARBL</span>" in editor._headers[(pane, "marbl_bgc")].value
+    )
+    assert "BGC output" in editor.header_html(_OUTPUT_CARD, "bgc", 2)
+    assert "● 2 modified" in editor.header_html(_OUTPUT_CARD, "bgc", 2)
+
+
 def test_output_card_splits_bgc_fields_along_the_output_seam():
     editor = _output_editor()
     pane = editor._group_fields["Biogeochemistry (BGC / MARBL)"]
@@ -5101,13 +5174,13 @@ def test_output_card_splits_bgc_fields_along_the_output_seam():
     assert card["bgc"] == ["wrt_his"]
     assert pane["marbl_bgc"] == ["marbl_config_file"]
     assert card["marbl_bgc"] == ["marbl_tracers_to_write"]
-    assert editor._section_fields["bgc"] == ["xco2air_default", "wrt_his"]
+    assert _built_fields(editor)["bgc"] == ["xco2air_default", "wrt_his"]
 
 
 def test_extract_data_is_built_only_for_a_parent_with_nesting_owned_fields_hidden():
     absent = _output_editor()
     assert not any(section == "extract_data" for section, _ in absent._widgets)
-    assert "extract_data" not in absent._section_fields
+    assert "extract_data" not in _built_fields(absent)
 
     parent = _output_editor(is_parent=True)
     built = {field for section, field in parent._widgets if section == "extract_data"}
@@ -5188,7 +5261,7 @@ def test_output_editor_follows_the_nesting_toggles():
     plain = wiz.editor
     assert wiz.output_editor_box.children == (plain.output_box,)
     assert wiz.editor_box.children == (plain.accordion,)
-    assert "extract_data" not in plain._section_fields
+    assert "extract_data" not in _built_fields(plain)
     assert "upscale_output" in plain._group_fields[_OUTPUT_MORE_TITLE]
 
     wiz.nest_enable.value = True
@@ -5200,7 +5273,7 @@ def test_output_editor_follows_the_nesting_toggles():
         "extract_root_name",
     ]
     wiz.nest_enable.value = False
-    assert "extract_data" not in wiz.editor._section_fields
+    assert "extract_data" not in _built_fields(wiz.editor)
 
     wiz.parent_enable.value = True
     child = wiz.editor
@@ -5219,7 +5292,7 @@ def test_attached_grid_file_drops_the_nesting_streams(fake_grid, tmp_path):
     """
     wiz = _new_wizard()
     wiz.nest_enable.value = True
-    assert "extract_data" in wiz.editor._section_fields
+    assert "extract_data" in _built_fields(wiz.editor)
 
     wiz.grid_file_path.value = str(_write_tiny_netcdf(tmp_path / "grid.nc"))
     wiz._on_grid_file_attach(None)
@@ -5227,7 +5300,7 @@ def test_attached_grid_file_drops_the_nesting_streams(fake_grid, tmp_path):
     assert wiz.nest_enable.value is True and wiz.nest_enable.disabled
     assert wiz.config is not None, wiz.derived.value
     assert wiz.config.domain.grid_kwargs_child is None
-    assert "extract_data" not in wiz.editor._section_fields
+    assert "extract_data" not in _built_fields(wiz.editor)
 
 
 def test_output_card_edit_records_an_override_like_any_advanced_edit():
