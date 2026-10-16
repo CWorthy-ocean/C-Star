@@ -465,9 +465,18 @@ for that section.
 From ucla-roms 0.9.1 an active CDR mode no longer requires MARBL: the
 parameterized releases (``simple``/``yaml``/``netcdf``) run in physics-only
 builds with ``cppdefs.cdr_forcing`` on and ``cdr_output.do_cdr_output`` left
-off (that module needs MARBL). ``upscaled`` (depth profiles) and pins below
-0.9.1 are rejected without MARBL by ``check_cdr_forcing_mode``
-(``namelist_model.py``), called by both the resolver and ``configure_build``.
+off (that module needs MARBL). Pins below 0.9.1 are rejected without MARBL by
+``check_cdr_forcing_mode`` (``namelist_model.py``), called by both the resolver
+and ``configure_build``. ``upscaled`` (depth profiles) needs MARBL before
+ucla-roms 0.11.0 (``UPSCALED_CDR_WITHOUT_MARBL_MIN_ROMS``). From 0.11.0
+(ucla-roms #390) each column of ``cdr_trcflx_profile`` goes to the tracer named
+in the file's ``cdr_trc_name``, so a ``cdr_lite`` build runs it too, while a
+physics-only build still has no tracer to receive it and is rejected. The
+upscaled mode writes ``cdr_nz_chd = 0`` from 0.11.0 (the level count then comes
+from the file's ``s_rho``, and any other value that disagrees with the file
+aborts at init; ``cdr_nz_chd_from_file``) and always sets
+``cdr_relocate_to_wet_pts`` (a child-boundary profile whose nearest parent point
+is land moves to the nearest wet point instead of aborting).
 ``&TRACER_DIFF2`` is read from 0.9.0 on (earlier releases skipped it through
 an ``#if define`` typo), so a nonzero ``tracer_diff2.tnu2_default`` only
 takes effect there; every bundled ModelSpec uses 0.0.
@@ -509,7 +518,12 @@ build's tracer count (a file without ``tracer_name`` is an error under
 ``cdr_lite_output.do_cdr_lite_output`` on (the ``_cdrtrc`` stream is the only
 output the CDR tracers appear in, and ROMS aborts at init if it is on with zero
 CDR tracers) and rejects a CDR-lite build whose forcing defined no CDR-lite
-tracers. The resolver does not force the stream (the counts are unknown), so
+tracers. The ``upscaled`` mode generates no CDR forcing, so there the counts are
+user-stated (``run_time_overrides={"param": {"nt_cdr_oae": ..., "nt_cdr_dor":
+...}}``, matching the child's CDR-lite tracers): they reach the build through
+the stored ``resolved_settings``, which the overlay exclusion leaves alone, and
+``check_upscaled_cdr_lite_tracer_counts`` rejects a build without them at
+resolve time and in ``configure_build``. The resolver does not force the stream (the counts are unknown), so
 the output-stream precheck sees it only at build time. The bundled ModelSpecs do
 not declare ``cdr_lite``: the online knob is absent from the wizard and
 ``&CDR_LITE_SETTINGS`` is written at its default (off), which is what
