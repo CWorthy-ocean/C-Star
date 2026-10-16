@@ -677,6 +677,7 @@
         "run_id",
         "name",
         "kind",
+        "created_at",
         "attempts",
         "steps"
     ],

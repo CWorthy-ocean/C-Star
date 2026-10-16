@@ -339,7 +339,7 @@ class RunManifest(ConfiguredBaseModel):
     system: str = Field(default="")
     """The C-Star system the run was first scheduled on."""
 
-    created_at: Moment = Field(default_factory=_now)
+    created_at: Moment
     """When the manifest was first written."""
 
     workplan: WorkplanIdentity | None = Field(default=None)
@@ -876,11 +876,14 @@ def ensure_run_manifest(
     CstarError
         If the existing manifest cannot be read.
     """
+    # minted with the first attempt: a value equal to "now" would be dropped
+    # as a default when the document is written
     manifest = read_run_manifest(root) or RunManifest(
         run_id=run_id,
         name=name,
         kind=kind,
         system=attempt.system,
+        created_at=attempt.start_at,
         workplan=workplan,
         attempts=[],
         steps=[],

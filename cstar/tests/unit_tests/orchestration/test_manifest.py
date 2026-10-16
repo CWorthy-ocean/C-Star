@@ -26,6 +26,7 @@ from cstar.orchestration.manifest import (
     StepFacts,
     StepRecord,
     WorkplanIdentity,
+    _now,
     collect_dependencies,
     describe_steps,
     ensure_run_manifest,
@@ -80,6 +81,7 @@ def _manifest(*names: str) -> RunManifest:
         run_id="run",
         name="run",
         kind="workplan",
+        created_at=NOW,
         attempts=[Attempt(start_at=NOW)],
         steps=[
             StepEntry(name=n, application="hello_world", working_dir=f"tasks/{n}")
@@ -129,6 +131,16 @@ class TestRoundTrip:
 
         assert path == tmp_path / "nested" / RUN_MANIFEST_NAME
         assert read_run_manifest(tmp_path / "nested") == manifest
+
+    def test_created_at_survives_being_now(self, tmp_path: Path) -> None:
+        """A timestamp equal to "now" is written, not dropped as a default."""
+        manifest = _manifest("one")
+        manifest.created_at = _now()
+
+        write_run_manifest(tmp_path, manifest)
+
+        assert "created_at:" in (tmp_path / RUN_MANIFEST_NAME).read_text()
+        assert read_run_manifest(tmp_path) == manifest
 
     def test_step_record(self, tmp_path: Path) -> None:
         record = _record(versions={"cstar-ocean": "1.0"}, errors=["boom"])
