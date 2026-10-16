@@ -638,24 +638,52 @@ CDR_OUTPUT_REQUIRED_MARBL_DIAGNOSTICS = (
 # ucla-roms release from which cdr_frc parameterized releases run without MARBL (PR #379).
 CDR_FORCING_WITHOUT_MARBL_MIN_ROMS: tuple[int, int, int] = (0, 9, 1)
 
+# ucla-roms release from which depth-profile CDR forcing (the "upscaled" mode) runs
+# without MARBL (PR #390): each column of ``cdr_trcflx_profile`` goes to the tracer
+# named in the file's ``cdr_trc_name``, so a CDR-lite parent receives a child's
+# upscaled CDR-lite fluxes. A file without ``cdr_trc_name`` still holds MARBL's ALK
+# and DIC and still needs MARBL.
+UPSCALED_CDR_WITHOUT_MARBL_MIN_ROMS: tuple[int, int, int] = (0, 11, 0)
+
+# ucla-roms release from which ``cdr_nz_chd = 0`` makes depth-profile CDR forcing
+# take its level count from the file's ``s_rho`` (PR #390). A nonzero value that
+# disagrees with the file aborts at init there; earlier releases remap with the
+# value as given (a mismatch silently corrupts the remap).
+CDR_NZ_CHD_FROM_FILE_MIN_ROMS: tuple[int, int, int] = (0, 11, 0)
+
+
+def cdr_nz_chd_from_file(roms_ref: str | None) -> bool:
+    """Whether the pinned ucla-roms reads the depth-profile level count from the
+    CDR forcing file when ``cdr_nz_chd`` is 0
+    (:data:`CDR_NZ_CHD_FROM_FILE_MIN_ROMS`). A ``roms_ref`` that is not a
+    release tag counts as the latest release, like :func:`check_cdr_forcing_mode`.
+    """
+    version = roms_version_from_ref(roms_ref)
+    return version is None or version >= CDR_NZ_CHD_FROM_FILE_MIN_ROMS
+
 
 def check_cdr_forcing_mode(
-    cdr_mode: str, *, bgc_mode_is_marbl: bool, roms_ref: str | None
+    cdr_mode: str, *, bgc_mode: BgcMode, roms_ref: str | None
 ) -> bool:
-    """Validate an active CDR forcing mode against MARBL and the pinned ucla-roms
-    release, and report whether it implies ``cdr_output.do_cdr_output``.
+    """Validate an active CDR forcing mode against the BGC mode and the pinned
+    ucla-roms release, and report whether it implies ``cdr_output.do_cdr_output``.
 
     ``cdr_output`` (the CDR diagnostics stream) needs MARBL, so an active mode
     implies it only with MARBL. Without MARBL, ucla-roms >= 0.9.1
     (:data:`CDR_FORCING_WITHOUT_MARBL_MIN_ROMS`) still runs the parameterized
     releases of ``cdr_frc`` ("simple"/"yaml"/"netcdf") under ``CDR_FORCING``,
-    with ``cdr_output`` left off. ``"upscaled"`` sets
-    ``cdr_frc.forcing_depth_profiles``, which ucla-roms rejects at init without
-    MARBL, and earlier releases either don't compile ``cdr_frc`` without MARBL
-    or silently ignore the release. A ``roms_ref`` that is not a release tag
-    (branch, commit hash, ``None``) counts as the latest release, matching
-    :func:`run_time_settings_for_ref` (which has no local clone to resolve a
-    hash against).
+    with ``cdr_output`` left off; earlier releases either don't compile
+    ``cdr_frc`` without MARBL or silently ignore the release. ``"upscaled"``
+    sets ``cdr_frc.forcing_depth_profiles``, which needs MARBL before ucla-roms
+    0.11.0 (:data:`UPSCALED_CDR_WITHOUT_MARBL_MIN_ROMS`). From that release a
+    ``bgc_mode: cdr_lite`` build runs it too, provided the runtime file names
+    its tracers in ``cdr_trc_name`` (C-Star's upscaler writes the names when the
+    child's output holds CDR-lite tracers). The file only arrives at run time,
+    so that part cannot be checked here. A physics-only build (``"none"``) has
+    no tracer to receive the fluxes, so ucla-roms would abort. A ``roms_ref``
+    that is not a release tag (branch, commit hash, ``None``) counts as the
+    latest release, matching :func:`run_time_settings_for_ref` (which has no
+    local clone to resolve a hash against).
 
     Both the resolver (authoring time) and the executor's ``configure_build``
     (the build-time net) call this so the rule and its messages stay in one
@@ -665,15 +693,27 @@ def check_cdr_forcing_mode(
     """
     if cdr_mode == "none":
         return False
-    if bgc_mode_is_marbl:
+    if bgc_mode == "marbl":
         return True
-    if cdr_mode == "upscaled":
-        raise ValueError(
-            f'CDR mode "{cdr_mode}" but bgc_mode != "marbl": upscaled CDR sets '
-            "cdr_forcing_depth_profiles, which ucla-roms rejects at init without "
-            'MARBL; use a parameterized CDR mode (simple/yaml/netcdf) or bgc_mode "marbl".'
-        )
     version = roms_version_from_ref(roms_ref)
+    if cdr_mode == "upscaled":
+        minimum = ".".join(str(part) for part in UPSCALED_CDR_WITHOUT_MARBL_MIN_ROMS)
+        if bgc_mode != "cdr_lite":
+            raise ValueError(
+                f'CDR mode "{cdr_mode}" with bgc_mode "{bgc_mode}": upscaled CDR '
+                "applies its depth profiles to MARBL's ALK/DIC or to CDR-lite "
+                'tracers, and this build has neither; use bgc_mode "marbl", or '
+                f'"cdr_lite" on ucla-roms >= {minimum}.'
+            )
+        if version is not None and version < UPSCALED_CDR_WITHOUT_MARBL_MIN_ROMS:
+            raise ValueError(
+                f'CDR mode "{cdr_mode}" with bgc_mode "cdr_lite" on ucla-roms '
+                f"{roms_ref}: upscaled CDR without MARBL needs ucla-roms >= "
+                f"{minimum}; earlier releases reject cdr_forcing_depth_profiles "
+                'at init without MARBL. Use bgc_mode "marbl" or a newer release.'
+            )
+        return False
+
     if version is not None and version < CDR_FORCING_WITHOUT_MARBL_MIN_ROMS:
         minimum = ".".join(str(part) for part in CDR_FORCING_WITHOUT_MARBL_MIN_ROMS)
         raise ValueError(

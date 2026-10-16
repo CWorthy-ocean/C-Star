@@ -1,13 +1,24 @@
 import logging
+import os
+import shutil
+import sys
 from collections.abc import Generator
 from pathlib import Path
 from typing import Any
 from unittest import mock
 
+import netCDF4
+import numpy as np
 import pytest
+import xarray as xr
 
 from cstar.applications.core import RunnerRequest
-from cstar.applications.upscaler import UpscalerBlueprint, UpscalerRunner
+from cstar.applications.upscaler import (
+    CDRUpscaler,
+    UpscalerBlueprint,
+    UpscalerRunner,
+)
+from cstar.base.utils import convert_to_cdf5
 from cstar.entrypoint.config import JobConfig, ServiceConfiguration
 
 
@@ -117,3 +128,163 @@ class TestUpscalerRunnerSaveRouting:
 
         mock_upscaler.save.assert_called_once_with(self._expected_final_path(bp))
         mock_convert.assert_not_called()
+
+
+_N_TIME, _N_S_RHO, _N_XI, _N_ETA = 2, 4, 3, 2
+
+
+def _write_uscl(path: Path, cdr_tracers: dict[str, tuple[str, ...]]) -> xr.Dataset:
+    """Write a small joined `_uscl` file with a northern and an eastern boundary.
+
+    Each flux variable gets distinct values so a column mix-up shows.
+    `cdr_tracers` maps a CDR-lite tracer name to the boundaries its
+    `<tracer>_add_<side>` variable is written for.
+    """
+    sizes = {"north": _N_XI, "east": _N_ETA}
+    along = {"north": "xi_rho", "east": "eta_rho"}
+    ds = xr.Dataset(
+        coords={
+            "s_rho": np.arange(_N_S_RHO),
+            "xi_rho": np.arange(_N_XI),
+            "eta_rho": np.arange(_N_ETA),
+        }
+    )
+    ds["ocean_time"] = ("time", np.array([0.0, 3600.0]))
+    seed = 0
+
+    def field(bry: str) -> np.ndarray:
+        nonlocal seed
+        seed += 1
+        shape = (_N_TIME, _N_S_RHO, sizes[bry])
+        return seed * 1000 + np.arange(np.prod(shape), dtype=float).reshape(shape)
+
+    for bry in ("north", "east"):
+        dims = ("time", "s_rho", along[bry])
+        ds[f"lat_{bry}"] = (along[bry], np.linspace(10, 11, sizes[bry]))
+        ds[f"lon_{bry}"] = (along[bry], np.linspace(20, 21, sizes[bry]))
+        ds[f"h_{bry}"] = (dims, field(bry))
+        ds[f"ALK_add_{bry}"] = (dims, field(bry))
+        ds[f"DIC_add_{bry}"] = (dims, field(bry))
+    for tracer, brys in cdr_tracers.items():
+        for bry in brys:
+            ds[f"{tracer}_add_{bry}"] = (("time", "s_rho", along[bry]), field(bry))
+    ds.to_netcdf(path)
+    return ds
+
+
+def _profiles(ds: xr.Dataset, prefix: str) -> np.ndarray:
+    """`prefix` fluxes of both boundaries as CDRUpscaler orders them (north, east)."""
+    return np.concatenate(
+        [ds[f"{prefix}_north"].values, ds[f"{prefix}_east"].values], axis=-1
+    )
+
+
+def _upscale(uscl: Path, out: Path) -> CDRUpscaler:
+    upscaler = CDRUpscaler([uscl])
+    upscaler.create_cdr_dataset()
+    upscaler.populate_cdr_dataset()
+    upscaler.save(out)
+    return upscaler
+
+
+class TestCDRUpscalerTracers:
+    """The tracer columns `CDRUpscaler` writes (ucla-roms #390)."""
+
+    def test_without_cdr_lite_tracers_writes_the_two_column_file(
+        self, tmp_path: Path
+    ) -> None:
+        """Without CDR-lite tracers the file is unchanged: ALK and DIC along a
+        `two` axis and no `cdr_trc_name`, which ucla-roms < 0.11.0 and MARBL
+        parents read as before.
+        """
+        src = _write_uscl(tmp_path / "roms_uscl.20120101000000.nc", {})
+
+        _upscale(tmp_path / "roms_uscl.20120101000000.nc", tmp_path / "cdr.nc")
+
+        with xr.open_dataset(tmp_path / "cdr.nc") as out:
+            assert out["cdr_trcflx_profile"].dims == (
+                "cdr_time",
+                "s_rho",
+                "two",
+                "ncdr_prof",
+            )
+            assert "cdr_trc_name" not in out.variables
+            np.testing.assert_array_equal(
+                out["cdr_trcflx_profile"][:, :, 0, :], _profiles(src, "ALK_add")
+            )
+            np.testing.assert_array_equal(
+                out["cdr_trcflx_profile"][:, :, 1, :], _profiles(src, "DIC_add")
+            )
+
+    def test_cdr_lite_tracers_follow_alk_and_dic_with_their_names(
+        self, tmp_path: Path
+    ) -> None:
+        """CDR-lite fluxes follow ALK and DIC in ROMS tracer order, and
+        `cdr_trc_name` names every column. A tracer missing from an active
+        boundary is left out.
+        """
+        uscl = tmp_path / "roms_uscl.20120101000000.nc"
+        src = _write_uscl(
+            uscl,
+            {
+                "CDR_DOR_DIC1": ("north", "east"),
+                "CDR_OAE_DIC1": ("north", "east"),
+                "CDR_OAE_ALK2": ("north",),
+                "CDR_OAE_ALK1": ("north", "east"),
+            },
+        )
+        expected = ["ALK", "DIC", "CDR_OAE_ALK1", "CDR_OAE_DIC1", "CDR_DOR_DIC1"]
+
+        upscaler = _upscale(uscl, tmp_path / "cdr.nc")
+
+        assert upscaler.tracer_names == expected
+        with xr.open_dataset(tmp_path / "cdr.nc") as out:
+            assert out["cdr_trcflx_profile"].dims[2] == "ntrc"
+            assert list(out["cdr_trc_name"].values.astype(str)) == expected
+            for i, name in enumerate(expected):
+                np.testing.assert_array_equal(
+                    out["cdr_trcflx_profile"][:, :, i, :],
+                    _profiles(src, f"{name}_add"),
+                )
+
+    def test_tracer_names_are_fixed_length_characters_after_cdf5_conversion(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """ROMS reads `cdr_trc_name` as NC_CHAR with dimensions (tracer, nchar);
+        NC_STRING would abort its init. The PIO path converts the file to CDF-5
+        with `nccopy`, which must keep it that way.
+        """
+        # A conda env run by absolute interpreter path has nccopy next to the
+        # interpreter but not necessarily on PATH.
+        nccopy = shutil.which("nccopy") or shutil.which(
+            "nccopy", path=str(Path(sys.executable).parent)
+        )
+        if nccopy is None:
+            pytest.skip("nccopy is not installed")
+        else:
+            monkeypatch.setenv(
+                "PATH", f"{Path(nccopy).parent}{os.pathsep}{os.environ['PATH']}"
+            )
+        uscl = tmp_path / "roms_uscl.20120101000000.nc"
+        _write_uscl(uscl, {"CDR_OAE_ALK1": ("north", "east")})
+        _upscale(uscl, tmp_path / "cdr_nc4.nc")
+
+        convert_to_cdf5(tmp_path / "cdr_nc4.nc", tmp_path / "cdr.nc")
+
+        with netCDF4.Dataset(tmp_path / "cdr.nc") as nc:
+            assert nc.data_model == "NETCDF3_64BIT_DATA"
+            names = nc["cdr_trc_name"]
+            assert names.dtype == np.dtype("S1")
+            assert names.dimensions == ("ntrc", "trc_name_len")
+            assert nc["cdr_trcflx_profile"].dimensions == (
+                "cdr_time",
+                "s_rho",
+                "ntrc",
+                "ncdr_prof",
+            )
+            names.set_auto_chartostring(False)
+            assert list(netCDF4.chartostring(names[:])) == [
+                "ALK",
+                "DIC",
+                "CDR_OAE_ALK1",
+            ]

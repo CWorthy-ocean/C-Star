@@ -1,3 +1,4 @@
+import re
 import typing as t
 from pathlib import Path
 
@@ -22,6 +23,48 @@ _APP_NAME_LONG: t.Final[str] = "Nesting Data Processor"
 """The long-form application name."""
 
 log = get_logger(__name__)
+
+BASE_TRACER_NAMES: t.Final[tuple[str, ...]] = ("ALK", "DIC")
+"""Tracers always written to ``cdr_trcflx_profile``: MARBL's ALK and DIC
+additionality (versus their ``ALT_CO2`` analogues), the first two columns."""
+
+CDR_ADD_VAR_RE: t.Final[re.Pattern[str]] = re.compile(
+    r"^(?P<tracer>CDR_OAE_ALK\d+|CDR_OAE_DIC\d+|CDR_DOR_DIC\d+)"
+    r"_add_(?P<bry>north|south|east|west)$"
+)
+"""``_uscl`` variables holding the boundary fluxes of dedicated CDR-lite tracers
+(ucla-roms >= 0.11.0 writes ``<tracer>_add_<side>`` for each)."""
+
+
+def cdr_tracer_sort_key(name: str) -> tuple[int, int, int]:
+    """Sort key matching ROMS tracer order: OAE ALK/DIC pairs, then DOR DICs."""
+    for group, pattern, slot in [
+        (0, r"CDR_OAE_ALK(\d+)", 0),
+        (0, r"CDR_OAE_DIC(\d+)", 1),
+        (1, r"CDR_DOR_DIC(\d+)", 0),
+    ]:
+        m = re.fullmatch(pattern, name)
+        if m:
+            return (group, int(m.group(1)), slot)
+    return (2, 0, 0)
+
+
+def discover_cdr_tracer_names(
+    dataset: xr.Dataset, child_boundaries: dict[str, bool]
+) -> list[str]:
+    """CDR-lite tracers whose fluxes are present on every active boundary, in ROMS
+    tracer order.
+    """
+    active = {bry for bry, is_active in child_boundaries.items() if is_active}
+    present: dict[str, set[str]] = {}
+    for varname in dataset.variables:
+        m = CDR_ADD_VAR_RE.fullmatch(str(varname))
+        if m:
+            present.setdefault(m.group("tracer"), set()).add(m.group("bry"))
+    return sorted(
+        (n for n, brys in present.items() if active and active <= brys),
+        key=cdr_tracer_sort_key,
+    )
 
 
 class UpscalerBlueprint(Blueprint):
@@ -104,6 +147,15 @@ class CDRUpscaler:
     """
     Class for transforming CDR-relevant boundary tracers to CDR forcing profiles.
 
+    ALK and DIC additionality are always written to ``cdr_trcflx_profile``. If the
+    ``_uscl`` files also hold dedicated CDR-lite tracers (``CDR_OAE_ALK*``,
+    ``CDR_OAE_DIC*``, ``CDR_DOR_DIC*``, written by ucla-roms >= 0.11.0), their
+    fluxes follow along the tracer axis, and ``cdr_trc_name`` records which tracer
+    each column is. ROMS (>= 0.11.0) uses the names to apply each column to the
+    tracer of that name, skipping tracers the parent run does not have (e.g. ALK
+    and DIC without MARBL); older releases read the first two columns as ALK and
+    DIC. Without CDR-lite tracers the file is unchanged: two columns, no names.
+
     Use
     ---
     1. Initialize with a list of _joined_ `_uscl` files, e.g.
@@ -159,6 +211,15 @@ class CDRUpscaler:
             f"Found {self.n_profiles} boundary tracer profiles to convert to CDR forcing profiles"
         )
 
+        cdr_tracer_names = discover_cdr_tracer_names(
+            self.uscl_dataset, self.child_boundaries
+        )
+        self.tracer_names: list[str] = list(BASE_TRACER_NAMES) + cdr_tracer_names
+        if cdr_tracer_names:
+            log.info(
+                "Found CDR tracers in `_uscl` files: " + ", ".join(cdr_tracer_names)
+            )
+
         # Initialize CDR dataset
         self.cdr_dataset: xr.Dataset | None = None
 
@@ -208,20 +269,30 @@ class CDRUpscaler:
         Updates the CDRUpscaler.cdr_dataset attribute.
 
         Creates the following variables:
-        - cdr_trcflx_profile: Series of time-evolving tracer flux profiles flux(time,depth,profile no.)
+        - cdr_trcflx_profile: Series of time-evolving tracer flux profiles flux(time,depth,tracer,profile no.)
+          ALK and DIC are the first two tracers; CDR-lite tracers, if any, follow.
+        - cdr_trc_name: Tracer names along the tracer axis (only with CDR-lite tracers)
         - cdr_lon, cdr_lat: 1D arrays specifying where each tracer flux profile is located
         - cdr_layer_thickness: Series of time-evolving layer heights used to remap the profiles onto the parent grid
         """
         ds = xr.Dataset()
+        n_trc = len(self.tracer_names)
+        trc_dim = "two" if n_trc == 2 else "ntrc"
 
         ds["cdr_trcflx_profile"] = xr.DataArray(
-            np.zeros((len(self.time), len(self.s_rho), 2, self.n_profiles)),
-            dims=("cdr_time", "s_rho", "two", "ncdr_prof"),
+            np.zeros((len(self.time), len(self.s_rho), n_trc, self.n_profiles)),
+            dims=("cdr_time", "s_rho", trc_dim, "ncdr_prof"),
             attrs={
                 "long_name": "tracer flux [mmol/s]",
                 "units": "mmol/s",
             },
         )
+        if n_trc > 2:
+            ds["cdr_trc_name"] = xr.DataArray(
+                np.array(self.tracer_names),
+                dims=(trc_dim,),
+                attrs={"long_name": "names of tracers stored in cdr_trcflx_profile"},
+            )
 
         ds["cdr_time"] = xr.DataArray(
             self.uscl_dataset.ocean_time.values / 86400.0,
@@ -313,14 +384,11 @@ class CDRUpscaler:
         self.cdr_dataset["cdr_lat"][:] = boundaries_to_profiles("lat")
         log.info("Populating `cdr_lon`...")
         self.cdr_dataset["cdr_lon"][:] = boundaries_to_profiles("lon")
-        log.info("Populating `cdr_trcflx_profile` for tracer ALK...")
-        self.cdr_dataset["cdr_trcflx_profile"][:, :, 0, :] = boundaries_to_profiles(
-            "ALK_add"
-        )
-        log.info("Populating `cdr_trcflx_profile` for tracer DIC...")
-        self.cdr_dataset["cdr_trcflx_profile"][:, :, 1, :] = boundaries_to_profiles(
-            "DIC_add"
-        )
+        for i_trc, name in enumerate(self.tracer_names):
+            log.info(f"Populating `cdr_trcflx_profile` for tracer {name}...")
+            self.cdr_dataset["cdr_trcflx_profile"][:, :, i_trc, :] = (
+                boundaries_to_profiles(f"{name}_add")
+            )
         log.info("Populating `cdr_layer_thickness`...")
         self.cdr_dataset["cdr_layer_thickness"][:] = boundaries_to_profiles("h")
 
@@ -352,7 +420,12 @@ class CDRUpscaler:
         msg = f"Saving output to {filepath}"
         log.info(msg)
 
-        self.cdr_dataset.to_netcdf(filepath)
+        # ROMS (Fortran) reads tracer names as fixed-length characters
+        # (NC_CHAR); xarray would otherwise write variable-length NC_STRING.
+        encoding = {}
+        if "cdr_trc_name" in self.cdr_dataset:
+            encoding["cdr_trc_name"] = {"dtype": "S1", "char_dim_name": "trc_name_len"}
+        self.cdr_dataset.to_netcdf(filepath, encoding=encoding)
 
         msg = "CDRUpscaler.save is done."
         log.info(msg)

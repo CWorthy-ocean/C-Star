@@ -2445,8 +2445,9 @@ class ForgeExecutor(BaseModel):
         # "upscaled" mode, even though neither field is populated for it: real CDR
         # tracers exist at runtime under that mode too. An active mode needs the
         # CDR_FORCING cppdef (it compiles cdr_frc, with or without MARBL) and, with
-        # MARBL, implies CDR output; without MARBL
-        # check_cdr_forcing_mode rejects "upscaled" and ucla-roms < 0.9.1.
+        # MARBL, implies CDR output; without MARBL check_cdr_forcing_mode rejects
+        # ucla-roms < 0.9.1, and "upscaled" outside bgc_mode "cdr_lite" or before
+        # ucla-roms 0.11.0.
         cdr_active = bool(
             self.cdr_forcing or self.cdr_forcing_file or self.cdr_mode == "upscaled"
         )
@@ -2466,7 +2467,7 @@ class ForgeExecutor(BaseModel):
             )
         if cdr_active and check_cdr_forcing_mode(
             self.cdr_mode,
-            bgc_mode_is_marbl=bool(cppdefs.get("marbl", False)),
+            bgc_mode=bgc_mode,
             roms_ref=str(effective_roms_ref)
             if effective_roms_ref is not None
             else None,

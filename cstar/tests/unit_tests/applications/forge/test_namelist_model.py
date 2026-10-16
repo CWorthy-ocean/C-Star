@@ -18,7 +18,9 @@ from cstar.applications.forge.namelist_model import (
     _GATED_SECTION_SWITCHES,
     _PRECHECK_SECTIONS,
     CDR_LITE_MODE_MIN_ROMS,
+    CDR_NZ_CHD_FROM_FILE_MIN_ROMS,
     RIVER_TRACERS_WITHOUT_CDR_MIN_ROMS,
+    UPSCALED_CDR_WITHOUT_MARBL_MIN_ROMS,
     CdrGasExchOutputCfg,
     CdrLiteOutputCfg,
     CdrLiteOutputCfgV0_9_0,
@@ -35,8 +37,10 @@ from cstar.applications.forge.namelist_model import (
     bgc_mode_from_cppdefs,
     build_namelist,
     canonical_output_sections_for_precheck,
+    cdr_nz_chd_from_file,
     cdr_tracer_counts,
     check_bgc_tracer_count,
+    check_cdr_forcing_mode,
     check_cdr_lite_mode_roms,
     check_cdr_lite_sections,
     check_cdr_output_sections,
@@ -244,6 +248,78 @@ def test_check_bgc_tracer_count_rejects_bgc_tracers_without_marbl():
 )
 def test_check_bgc_tracer_count_accepts_consistent_settings(param, bgc_mode_is_marbl):
     check_bgc_tracer_count(param, bgc_mode_is_marbl=bgc_mode_is_marbl)
+
+
+# ---------------------------------------------------------------------------
+# check_cdr_forcing_mode / cdr_nz_chd_from_file (ucla-roms #390)
+# ---------------------------------------------------------------------------
+def test_upscaled_cdr_constants_are_the_0_11_0_release():
+    """Both rules come from ucla-roms #390, shipped in 0.11.0."""
+    assert UPSCALED_CDR_WITHOUT_MARBL_MIN_ROMS == (0, 11, 0)
+    assert CDR_NZ_CHD_FROM_FILE_MIN_ROMS == (0, 11, 0)
+
+
+@pytest.mark.parametrize("roms_ref", ["0.10.1", "0.11.0", None])
+@pytest.mark.parametrize("cdr_mode", ["simple", "netcdf", "upscaled"])
+def test_check_cdr_forcing_mode_marbl_implies_cdr_output(cdr_mode, roms_ref):
+    assert check_cdr_forcing_mode(cdr_mode, bgc_mode="marbl", roms_ref=roms_ref)
+
+
+@pytest.mark.parametrize("bgc_mode", ["marbl", "none", "cdr_lite"])
+def test_check_cdr_forcing_mode_none_is_inactive(bgc_mode):
+    assert not check_cdr_forcing_mode("none", bgc_mode=bgc_mode, roms_ref="0.8.0")
+
+
+@pytest.mark.parametrize("roms_ref", ["0.11.0", "0.11.3", "1.0.0", "main", None])
+def test_check_cdr_forcing_mode_accepts_upscaled_cdr_lite_from_0_11_0(roms_ref):
+    """From ucla-roms 0.11.0 depth-profile forcing feeds the CDR-lite tracers
+    named in cdr_trc_name, so a CDR-lite build accepts "upscaled". cdr_output
+    still needs MARBL, so it is not implied. A non-tag ref counts as latest.
+    """
+    assert not check_cdr_forcing_mode(
+        "upscaled", bgc_mode="cdr_lite", roms_ref=roms_ref
+    )
+
+
+@pytest.mark.parametrize("roms_ref", ["0.10.1", "0.10.0", "0.9.1"])
+def test_check_cdr_forcing_mode_rejects_upscaled_cdr_lite_before_0_11_0(roms_ref):
+    with pytest.raises(
+        ValueError,
+        match=rf'"upscaled" with bgc_mode "cdr_lite" on ucla-roms {roms_ref}: '
+        r".*>= 0\.11\.0",
+    ):
+        check_cdr_forcing_mode("upscaled", bgc_mode="cdr_lite", roms_ref=roms_ref)
+
+
+@pytest.mark.parametrize("roms_ref", ["0.10.1", "0.11.0", "main"])
+def test_check_cdr_forcing_mode_rejects_upscaled_physics_only(roms_ref):
+    """A physics-only build has no tracer to receive the profiles on any release
+    (ucla-roms aborts when no cdr_trc_name tracer exists in the run).
+    """
+    with pytest.raises(ValueError, match=r'"upscaled" with bgc_mode "none"'):
+        check_cdr_forcing_mode("upscaled", bgc_mode="none", roms_ref=roms_ref)
+
+
+@pytest.mark.parametrize("bgc_mode", ["none", "cdr_lite"])
+def test_check_cdr_forcing_mode_parameterized_without_marbl_gate_unchanged(bgc_mode):
+    assert not check_cdr_forcing_mode("simple", bgc_mode=bgc_mode, roms_ref="0.9.1")
+    with pytest.raises(ValueError, match=r">= 0\.9\.1"):
+        check_cdr_forcing_mode("simple", bgc_mode=bgc_mode, roms_ref="0.9.0")
+
+
+@pytest.mark.parametrize(
+    ("roms_ref", "from_file"),
+    [
+        ("0.10.1", False),
+        ("0.9.0", False),
+        ("0.11.0", True),
+        ("0.12.0", True),
+        ("main", True),
+        (None, True),
+    ],
+)
+def test_cdr_nz_chd_from_file(roms_ref, from_file):
+    assert cdr_nz_chd_from_file(roms_ref) is from_file
 
 
 # ---------------------------------------------------------------------------

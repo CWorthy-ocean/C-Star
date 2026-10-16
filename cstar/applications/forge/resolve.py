@@ -71,6 +71,7 @@ from cstar.applications.forge.namelist_model import (
     BgcMode,
     NamelistConsistencyError,
     canonical_output_sections_for_precheck,
+    cdr_nz_chd_from_file,
     check_bgc_tracer_count,
     check_cdr_forcing_mode,
     check_cdr_lite_mode_roms,
@@ -675,12 +676,13 @@ def build_forge_blueprint(
     ``"cdr_lite"`` is a build without MARBL whose only extra tracers are
     ucla-roms' dedicated CDR-lite tracers: it compiles ``CDR_LITE``
     (``cppdefs.cdr_lite``), needs a CDR forcing (``cdr``) with ``cdr_lite``
-    releases and ucla-roms >= ``CDR_LITE_MODE_MIN_ROMS``, and, in the ``"simple"``
-    CDR mode, defaults every release's ``tracer_set`` to ``"cdr_lite"``. The tracer
-    counts and the CDR-lite output stream are derived later, from the generated
-    CDR forcing (``ForgeExecutor.configure_build``). If ``None`` (the
-    default), it falls back to the ModelSpec's own ``bgc_mode`` (itself defaulting
-    to ``"marbl"``) -- the ModelSpec is the single source of the default; pass an
+    releases (or, on ucla-roms >= ``UPSCALED_CDR_WITHOUT_MARBL_MIN_ROMS``, the
+    ``"upscaled"`` mode) and ucla-roms >= ``CDR_LITE_MODE_MIN_ROMS``, and, in the
+    ``"simple"`` CDR mode, defaults every release's ``tracer_set`` to
+    ``"cdr_lite"``. The tracer counts and the CDR-lite output stream are derived
+    later, from the generated CDR forcing (``ForgeExecutor.configure_build``). If
+    ``None`` (the default), it falls back to the ModelSpec's own ``bgc_mode``
+    (itself defaulting to ``"marbl"``) -- the ModelSpec is the single source of the default; pass an
     explicit value to override it for one run.
 
     ``roms_ref``/``marbl_ref`` are per-run checkout-target overrides (commit hash,
@@ -979,6 +981,16 @@ def build_forge_blueprint(
         settings.pop(sec, None)
     settings["time_stepping"] = {"ntimes": ntimes, "dt": dt, "ndtfast": 60, "ninfo": 1}
     settings["v_sponge"] = {"v_sponge": v_sponge}
+
+    # ----- schema selection inputs -------------------------------------------
+    # The pinned ucla-roms ref decides which run-time settings tier applies (it
+    # selects what gets pruned below), whether CDR forcing is allowed without
+    # MARBL and what the upscaled mode writes for cdr_nz_chd, so derive it before
+    # the CDR settings.
+    roms_block = (model.get("code") or {}).get("roms") or {}
+    effective_roms_ref = (
+        roms_ref or roms_block.get("commit") or roms_block.get("branch")
+    )
     # river_frc/cdr_frc are Forcing-owned, not a ModelSpec default: seed the disabled
     # baseline, then let the ForcingSpec's own top-level river_frc/cdr_frc (if any)
     # override it. Generation later overwrites the presence/count leaves for real
@@ -1011,6 +1023,14 @@ def build_forge_blueprint(
                 "relocate_to_wet_pts": False,
             }
         )
+        # The level count is the child grid's, which Forge cannot see. From
+        # ucla-roms 0.11.0 cdr_nz_chd = 0 reads it from the file's s_rho, and any
+        # other value that disagrees with the file aborts at init; earlier
+        # releases keep the seeded value and need it to match the child.
+        if cdr_nz_chd_from_file(
+            str(effective_roms_ref) if effective_roms_ref is not None else None
+        ):
+            settings["cdr_frc"]["nz_chd"] = 0
     # extract_data (child-grid nesting) is Domain-owned when active (the nesting
     # block below overwrites it from grid_kwargs_child/metadata_child); seed the
     # disabled baseline here so it's always present when not nesting.
@@ -1145,15 +1165,6 @@ def build_forge_blueprint(
         tides_settings["bry_tides"] = False
         tides_settings["pot_tides"] = False
 
-    # ----- schema selection inputs -------------------------------------------
-    # The pinned ucla-roms ref decides which run-time settings tier applies (it
-    # selects what gets pruned below) and whether CDR forcing is allowed without
-    # MARBL, so derive it before the CDR block.
-    roms_block = (model.get("code") or {}).get("roms") or {}
-    effective_roms_ref = (
-        roms_ref or roms_block.get("commit") or roms_block.get("branch")
-    )
-
     # ----- CDR output consistency --------------------------------------------
     # CDR output is valid without CDR forcing (cdr_frc.cdr_source stays false;
     # ROMS opens no CDR file). Any active CDR mode (generated -- "simple"/"yaml",
@@ -1161,10 +1172,11 @@ def build_forge_blueprint(
     # the CDR_FORCING cppdef, which compiles cdr_frc with or without MARBL. With
     # MARBL it also implies CDR output (real CDR tracers exist at runtime under
     # "upscaled" too, so the same diagnostics requirements apply); without MARBL
-    # check_cdr_forcing_mode allows only the parameterized modes on
-    # ucla-roms >= 0.9.1 and leaves CDR output off, since cdr_output.F90 needs
-    # MARBL. When CDR output is on, the MARBL diagnostics ucla-roms looks up by
-    # name, unchecked, must be in the write list.
+    # check_cdr_forcing_mode allows the parameterized modes on ucla-roms >= 0.9.1
+    # and, under bgc_mode "cdr_lite", "upscaled" on ucla-roms >= 0.11.0, and leaves
+    # CDR output off, since cdr_output.F90 needs MARBL. When CDR output is on, the
+    # MARBL diagnostics ucla-roms looks up by name, unchecked, must be in the
+    # write list.
     cdr_out = settings.setdefault("cdr_output", {})
     if bgc_mode == "cdr_lite":
         if cdr_spec.mode == "none":
@@ -1180,7 +1192,7 @@ def build_forge_blueprint(
     # Called first so an unsupported mode is rejected even if do_cdr_output is set.
     implied_cdr_output = check_cdr_forcing_mode(
         cdr_spec.mode,
-        bgc_mode_is_marbl=bgc_mode == "marbl",
+        bgc_mode=bgc_mode,
         roms_ref=str(effective_roms_ref) if effective_roms_ref is not None else None,
     )
     do_cdr_output = bool(cdr_out.get("do_cdr_output")) or implied_cdr_output
