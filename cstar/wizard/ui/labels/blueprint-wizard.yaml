@@ -784,10 +784,10 @@ fields:
     symbol: marbl_diagnostics_to_write
   settings.marbl_bgc.use_constant_fe:
     label: Hold iron constant
-    symbol: use_constant_Fe
+    symbol: use_constant_fe
   settings.marbl_bgc.constant_fe_value:
     label: Constant iron concentration
-    symbol: constant_Fe_value
+    symbol: constant_fe_value
     unit: mmol/m³
   settings.cdr_output.do_cdr_output:
     label: Write CDR output
