@@ -125,6 +125,12 @@ Bug Fixes
   - Edits to hidden settings are kept and come back when MARBL is selected again.
 
 - The wizard's "Compute dt (CFL)" button works while other settings are still incomplete, e.g. before a cdr_lite run has its CDR forcing. (`#779 <https://github.com/CWorthy-ocean/C-Star/pull/779>`_)
+- Forge → roms_marbl runs pinned to a ucla-roms commit hash no longer fail when roms_marbl reads the namelist: Forge now writes the namelist for the release the commit descends from. (`#781 <https://github.com/CWorthy-ocean/C-Star/pull/781>`_)
+
+  - A hash Forge cannot resolve (offline, private remote, commit on no fetched ref) warns and keeps the newest namelist version, as before.
+  - A hash ahead of its release gets that release's namelist in both steps; to use unreleased namelist keys, pin a branch instead.
+  - Upscaled CDR forcing pinned by hash gets the ``cdr_nz_chd`` of that release: 0 (level count from the file) from 0.11.0, the seeded value before.
+
 
 
 Improvements
@@ -174,3 +180,4 @@ Miscellaneous
 - Documentation: "Showing a Run" and "The run manifest" in the workplans guide, glossary entries for run manifest, step record, attempt and product, a note on standalone runs in the blueprints guide, and the catalog design notes updated to the manifest that now exists. (`#772 <https://github.com/CWorthy-ocean/C-Star/pull/772>`_)
 - A hello_world end-to-end module covers the manifest after a run, the status refresh, a re-entry, a copied run and a standalone blueprint run. (`#772 <https://github.com/CWorthy-ocean/C-Star/pull/772>`_)
 - Documented the physics-only ForcingSpec in the Forge specs guide. (`#779 <https://github.com/CWorthy-ocean/C-Star/pull/779>`_)
+- The Forge internals developer guide describes how commit-hash pins choose a namelist version. (`#781 <https://github.com/CWorthy-ocean/C-Star/pull/781>`_)
