@@ -11,6 +11,7 @@ import pytest
 
 from cstar.applications.roms_marbl.models import RomsMarblBlueprint
 from cstar.base.env import ENV_CSTAR_RUNID
+from cstar.execution import file_system
 from cstar.execution.file_system import (
     JobFileSystemManager,
     StateDirectoryManager,
@@ -70,7 +71,7 @@ def complete_workplan_template_input() -> dict[str, t.Any]:
     a valid workplan, each populated with a valid value (no steps).
     """
     return {
-        "name": "Test Workplan",
+        "name": "test-workplan",
         "description": "This is the description of my test workplan",
         "state": "draft",
         "compute_environment": {
@@ -452,6 +453,36 @@ def single_step_workplan(
 def remote_workplan_uri() -> str:
     """Fixture for returning a URL to a valid remote workplan for testing."""
     return "https://raw.githubusercontent.com/CWorthy-ocean/C-Star/refs/heads/main/cstar/additional_files/templates/wp/workplan.yaml"
+
+
+@pytest.fixture(autouse=True)
+def serve_remote_files(
+    wp_templates_dir: Path, monkeypatch: pytest.MonkeyPatch
+) -> dict[str, Path]:
+    """Answer remote-file downloads from local files, without network access.
+
+    The bundled workplan templates are served for their GitHub `main` URLs, so
+    tests run against this checkout's templates instead of whatever `main`
+    holds. Tests add other `URL -> local file` entries to the returned dict
+    (URLs match case-insensitively). Every other URL is answered with a 404.
+    """
+    marker = "/c-star/refs/heads/main/cstar/additional_files/templates/wp/"
+    served: dict[str, Path] = {}
+
+    def serve(method: str, url: str, **kwargs: t.Any) -> t.Any:
+        folded = url.casefold()
+        path: Path | None
+        if marker in folded:
+            path = wp_templates_dir / folded.rsplit("/", maxsplit=1)[1]
+        else:
+            path = {k.casefold(): v for k, v in served.items()}.get(folded)
+
+        if path is not None and path.is_file():
+            return mock.Mock(status_code=200, text=path.read_text())
+        return mock.Mock(status_code=404, text="")
+
+    monkeypatch.setattr(file_system, "request", serve)
+    return served
 
 
 @pytest.fixture

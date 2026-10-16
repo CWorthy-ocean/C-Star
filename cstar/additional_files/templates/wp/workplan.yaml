@@ -1,5 +1,5 @@
 # yaml-language-server: $schema=https://raw.githubusercontent.com/CWorthy-ocean/C-Star/refs/heads/main/docs/schemas/wp/workplan_schema.1.0.0.json
-name: Sample Workplan
+name: sample-workplan
 description: A workplan containing the complete set of workplan & step attributes.
 state: draft
 compute_environment:

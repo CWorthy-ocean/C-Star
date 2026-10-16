@@ -7,6 +7,7 @@ live preview resolves via ``dt``, never building a roms_tools.Grid), so these ru
 as fast unit tests.
 """
 
+import copy
 from datetime import date
 from pathlib import Path
 from types import SimpleNamespace
@@ -24,19 +25,24 @@ from cstar.applications.forge.blueprint import (
 )
 from cstar.applications.forge.namelist_model import (
     RunTimeSettings,
+    RunTimeSettingsV0_4_0,
     RunTimeSettingsV0_5_0,
     RunTimeSettingsV0_6_0,
     RunTimeSettingsV0_7_0,
     RunTimeSettingsV0_9_0,
+    RunTimeSettingsV0_11_0,
 )
+from cstar.applications.forge.resolve import build_forge_blueprint, cfl_dt
 from cstar.wizard.wizard import (
     _ACCORDION_EXCLUDED_FIELDS,
     _BOUNDARY_NONE,
     _OUTPUT_TABLES,
     WIZARD_TOOL,
     ForgeBlueprintWizard,
+    _applies_in,
     _drain_stream_buffer,
     _ForcingEditor,
+    _namelist_tooltip,
     _section_submodel,
     _SettingsEditor,
 )
@@ -1253,6 +1259,46 @@ def test_sponge_tune_editable_via_advanced_settings_accordion():
     assert wiz.config.model_settings["cppdefs"]["sponge_tune"] is True
 
 
+def test_param_pane_shows_only_nt_passive():
+    """``param`` sits in the CDR pane for ``nt_passive`` alone: the grid/tiling
+    dims have their own widgets, ``ntrc_bio`` is set from the BGC mode and the
+    CDR tracer counts are read off the CDR forcing during generation.
+    """
+    import ipywidgets as W
+
+    param = {
+        "llm": 10,
+        "mmm": 10,
+        "n": 20,
+        "np_xi": 2,
+        "np_eta": 2,
+        "nt_passive": 0,
+        "ntrc_bio": 32,
+        "nt_cdr_oae": 0,
+        "nt_cdr_dor": 0,
+    }
+    editor = _SettingsEditor(W, {"param": param}, settings_cls=RunTimeSettingsV0_9_0)
+    assert [key for (section, key) in editor._widgets if section == "param"] == [
+        "nt_passive"
+    ]
+    assert "param" in editor._pane_sections["Carbon dioxide removal (CDR)"]
+    assert "forcing file" in editor._widgets[("param", "nt_passive")][0].tooltip
+
+
+def test_nt_passive_editable_via_advanced_settings_accordion():
+    wiz = ForgeBlueprintWizard()
+    wiz.start.value = date(2012, 1, 1)
+    wiz.end.value = date(2012, 1, 2)
+    wiz._rebuild()
+    assert wiz.config.model_settings["param"]["nt_passive"] == 0
+    assert ("param", "nt_passive") in wiz.editor._widgets
+    assert ("param", "ntrc_bio") not in wiz.editor._widgets
+
+    wiz._overrides[("param", "nt_passive")] = 2
+    wiz._rebuild()
+    assert wiz.config.model_settings["param"]["nt_passive"] == 2
+
+
 def test_nhy_nox_forcing_editable_in_bgc_advanced_settings_pane():
     """NHY_FORCING/NOX_FORCING default True from the ModelSpec and are editable as
     checkboxes in the Biogeochemistry (BGC / MARBL) advanced settings pane.
@@ -1306,7 +1352,7 @@ def test_bgc_dd_default_and_placement():
     """BGC mode defaults to 'marbl' and lives in the Model card."""
     wiz = ForgeBlueprintWizard()
     assert wiz.bgc_dd.value == "marbl"
-    assert set(wiz.bgc_dd.options) == {"marbl", "none"}
+    assert set(wiz.bgc_dd.options) == {"marbl", "none", "cdr_lite"}
 
     model_card = _find_card(wiz.widget, "model")
     assert model_card is not None
@@ -1328,27 +1374,390 @@ def test_bgc_dd_marbl_gathers_into_cppdefs():
     assert wiz.config.code.marbl is not None
 
 
-def test_bgc_dd_none_with_default_bgc_forcing_surfaces_error_legibly():
-    """Flipping to 'none' while the bundled (BGC-carrying) ForcingSpec is still
-    selected must not crash the wizard -- _rebuild()'s existing exception handling
-    should catch the resolver's ValueError and surface it in the status area.
+def test_bgc_dd_none_with_non_default_bgc_forcing_surfaces_error_legibly():
+    """Flipping to 'none' while a (BGC-carrying) ForcingSpec other than the default
+    is selected must not crash the wizard -- _rebuild()'s existing exception
+    handling should catch the resolver's ValueError and surface it in the status
+    area, as one line pointing at the full message in the preview.
     """
     wiz = ForgeBlueprintWizard()
     wiz.start.value = date(2012, 1, 1)
     wiz.end.value = date(2012, 1, 2)
+    wiz.forcing_dd.value = "glorys-era5-esper"
     wiz.bgc_dd.value = "none"
     wiz._rebuild()
+    assert wiz.forcing_dd.value == "glorys-era5-esper"
     assert wiz.config is None
     assert "Invalid" in wiz.derived.value
+    assert "full message in the preview below" in wiz.derived.value
+    assert "\n" not in wiz.derived.value
+
+
+@pytest.mark.parametrize(
+    ("message", "suffixed"),
+    [
+        ("short single line", False),
+        ("x" * 250, True),
+        ("first line\nsecond line", True),
+    ],
+)
+def test_rebuild_error_status_points_at_the_preview_only_when_truncated(
+    monkeypatch, message, suffixed
+):
+    wiz = ForgeBlueprintWizard()
+    wiz.start.value = date(2012, 1, 1)
+    wiz.end.value = date(2012, 1, 2)
+
+    def _raise(**_kw):
+        raise ValueError(message)
+
+    monkeypatch.setattr("cstar.wizard.wizard.build_forge_blueprint", _raise)
+    wiz._rebuild()
+    assert wiz.config is None
+    assert ("full message in the preview below" in wiz.derived.value) is suffixed
+
+
+class TestBgcModeForcingDefault:
+    """The default ForcingSpec follows the BGC mode while it is untouched: the
+    BGC-carrying default under MARBL, the physics-only one without (the resolver
+    rejects BGC forcing there). A hand-edited, non-default or loaded forcing is
+    never swapped.
+    """
+
+    PHYSICS = "glorys-era5-physics"
+    UNIFIED = "glorys-era5-unified"
+
+    @staticmethod
+    def _wizard(catalog=None):
+        wiz = (
+            ForgeBlueprintWizard() if catalog is None else ForgeBlueprintWizard(catalog)
+        )
+        wiz.start.value = date(2012, 1, 1)
+        wiz.end.value = date(2012, 1, 2)
+        wiz.use_pio_chk.value = False  # off: no CDF-5 conversion warning per rebuild
+        return wiz
+
+    @staticmethod
+    def _count_resolves(monkeypatch) -> list[int]:
+        from cstar.wizard import wizard as wizard_module
+
+        calls: list[int] = []
+        real = wizard_module.build_forge_blueprint
+
+        def _counted(**kw):
+            calls.append(1)
+            return real(**kw)
+
+        monkeypatch.setattr(wizard_module, "build_forge_blueprint", _counted)
+        return calls
+
+    def test_marbl_default_is_the_unified_spec(self):
+        assert self._wizard().forcing_dd.value == self.UNIFIED
+
+    def test_init_default_follows_the_model_specs_bgc_mode(self, tmp_path):
+        import shutil
+
+        from cstar.catalog.domain_catalog import _DEFAULT_CATALOG_ROOT, DomainCatalog
+        from cstar.wizard.wizard import _DEFAULT_MODEL
+
+        root = tmp_path / "catalog"
+        shutil.copytree(_DEFAULT_CATALOG_ROOT, root)
+        model_yaml = root / "ModelSpec" / _DEFAULT_MODEL / "model.yaml"
+        text = model_yaml.read_text()
+        assert "bgc_mode: marbl" in text
+        model_yaml.write_text(text.replace("bgc_mode: marbl", "bgc_mode: cdr_lite"))
+
+        wiz = ForgeBlueprintWizard(catalog=DomainCatalog(catalog_root=root))
+        assert wiz.bgc_dd.value == "cdr_lite"
+        assert wiz.forcing_dd.value == self.PHYSICS
+
+    @pytest.mark.parametrize("mode", ["none", "cdr_lite"])
+    def test_leaving_marbl_switches_the_untouched_default_to_physics(self, mode):
+        wiz = self._wizard()
+        wiz.cdr_mode_dd.value = "simple"  # cdr_lite needs a CDR forcing to resolve
+        wiz.bgc_dd.value = mode
+        assert wiz.forcing_dd.value == self.PHYSICS
+        assert wiz.config is not None, wiz.derived.value
+        assert wiz.config.composition.forcing.name == self.PHYSICS
+        assert wiz.config.composition.forcing.modified is False
+
+    def test_entering_marbl_switches_the_untouched_physics_spec_back(self):
+        wiz = self._wizard()
+        wiz.bgc_dd.value = "none"
+        assert wiz.forcing_dd.value == self.PHYSICS
+        wiz.bgc_dd.value = "marbl"
+        assert wiz.forcing_dd.value == self.UNIFIED
+        assert wiz.config is not None, wiz.derived.value
+
+    def test_between_modes_without_marbl_nothing_switches(self, monkeypatch):
+        wiz = self._wizard()
+        wiz.bgc_dd.value = "none"
+        calls = self._count_resolves(monkeypatch)
+        wiz.bgc_dd.value = "cdr_lite"
+        assert wiz.forcing_dd.value == self.PHYSICS
+        assert len(calls) == 1
+
+    @pytest.mark.parametrize("mode", ["none", "cdr_lite"])
+    def test_one_resolve_per_mode_change(self, monkeypatch, mode):
+        wiz = self._wizard()
+        calls = self._count_resolves(monkeypatch)
+        wiz.bgc_dd.value = mode  # switches the forcing too
+        assert len(calls) == 1
+        calls.clear()
+        wiz.bgc_dd.value = "marbl"
+        assert len(calls) == 1
+
+    def test_one_resolve_when_the_forcing_stays(self, monkeypatch):
+        wiz = self._wizard()
+        wiz.forcing_dd.value = "glorys-era5-esper"
+        calls = self._count_resolves(monkeypatch)
+        wiz.bgc_dd.value = "none"
+        assert len(calls) == 1
+
+    def test_an_edited_forcing_is_left_alone(self):
+        wiz = self._wizard()
+        wiz._forcing_editor._add("surface")
+        assert wiz._forcing_modified()
+        wiz.bgc_dd.value = "none"
+        assert wiz.forcing_dd.value == self.UNIFIED
+
+    def test_a_non_default_spec_is_left_alone(self):
+        wiz = self._wizard()
+        wiz.forcing_dd.value = "glorys-era5-esper"
+        wiz.bgc_dd.value = "none"
+        assert wiz.forcing_dd.value == "glorys-era5-esper"
+        wiz.bgc_dd.value = "marbl"
+        assert wiz.forcing_dd.value == "glorys-era5-esper"
+
+    def test_nothing_switches_while_suspended(self, monkeypatch):
+        wiz = self._wizard()
+        calls = self._count_resolves(monkeypatch)
+        with wiz._suspend():
+            wiz.bgc_dd.value = "none"
+        assert wiz.forcing_dd.value == self.UNIFIED
+        assert calls == []
+
+    def test_loading_a_blueprint_keeps_its_recorded_forcing(self, tmp_path):
+        """A file recorded with the BGC-carrying default but a ``bgc_mode`` of none
+        (invalid at resolve, but the load must not rewrite what the file says)
+        loads with that forcing still selected.
+        """
+        w1 = self._wizard()
+        w1._boundaries_touched = True
+        path = tmp_path / "forge_blueprint.yaml"
+        w1.save_path.value = str(path)
+        w1._on_save(None)
+        text = path.read_text()
+        assert "marbl: true" in text
+        path.write_text(text.replace("marbl: true", "marbl: false"))
+
+        w2 = self._wizard()
+        w2.load_path.value = str(path)
+        w2._on_load_path(None)
+        assert w2.bgc_dd.value == "none"
+        assert w2.forcing_dd.value == self.UNIFIED
+
+
+class TestBgcModeSettings:
+    """The Advanced-settings editor follows the BGC mode: settings that need MARBL
+    are neither shown nor kept as overrides without it, and the CDR-lite stream
+    that ``cdr_lite`` forces on is displayed as on.
+    """
+
+    @staticmethod
+    def _wizard():
+        wiz = ForgeBlueprintWizard()
+        wiz.start.value = date(2012, 1, 1)
+        wiz.end.value = date(2012, 1, 2)
+        wiz.use_pio_chk.value = False
+        wiz.cdr_mode_dd.value = "simple"  # cdr_lite needs a CDR forcing to resolve
+        return wiz
+
+    @staticmethod
+    def _toggle(wiz, key):
+        widget = wiz.editor._widgets[key][0]
+        widget.value = not widget.value
+
+    def test_editor_is_rebuilt_for_the_mode(self):
+        wiz = self._wizard()
+        assert wiz.editor._bgc_mode == "marbl"
+        assert ("cdr_output", "do_cdr_output") in wiz.editor._widgets
+        wiz.bgc_dd.value = "cdr_lite"
+        assert wiz.config is not None, wiz.derived.value
+        assert wiz._editor_bgc_mode == "cdr_lite"
+        assert wiz.editor._bgc_mode == "cdr_lite"
+        assert ("cdr_output", "do_cdr_output") not in wiz.editor._widgets
+        wiz.bgc_dd.value = "marbl"
+        assert ("cdr_output", "do_cdr_output") in wiz.editor._widgets
+
+    def test_marbl_only_overrides_are_hidden_on_leaving_marbl(self):
+        wiz = self._wizard()
+        before = wiz.config.model_settings["bgc"]["wrt_his"]
+        self._toggle(wiz, ("bgc", "wrt_his"))
+        self._toggle(wiz, ("cppdefs", "nhy_forcing"))
+        self._toggle(wiz, ("cppdefs", "sponge_tune"))
+        assert "3 modified" in wiz.card_chips["advanced"].value
+
+        wiz.bgc_dd.value = "cdr_lite"
+
+        # the user's record keeps all three; only the applicable one is active
+        assert len(wiz._overrides) == 3
+        assert set(wiz._active_overrides) == {("cppdefs", "sponge_tune")}
+        assert wiz.config is not None, wiz.derived.value
+        assert wiz.config.composition.overrides == {"cppdefs": {"sponge_tune": True}}
+        settings = wiz.config.model_settings
+        assert settings.get("bgc", {}).get("wrt_his", before) is before
+        assert settings["cppdefs"]["nhy_forcing"] is False
+        assert settings["cppdefs"]["sponge_tune"] is True
+        assert "1 modified" in wiz.card_chips["advanced"].value
+
+    def test_hidden_overrides_come_back_with_their_mode(self):
+        wiz = self._wizard()
+        before = wiz.config.model_settings["bgc"]["wrt_his"]
+        self._toggle(wiz, ("bgc", "wrt_his"))
+        self._toggle(wiz, ("cppdefs", "nhy_forcing"))
+        marbl_overrides = wiz.config.composition.overrides
+        assert marbl_overrides == {
+            "bgc": {"wrt_his": not before},
+            "cppdefs": {"nhy_forcing": False},
+        }
+
+        wiz.bgc_dd.value = "cdr_lite"
+        assert wiz.config.composition.overrides == {}
+        wiz.bgc_dd.value = "marbl"
+
+        assert wiz.config is not None, wiz.derived.value
+        assert wiz.config.composition.overrides == marbl_overrides
+        assert wiz.config.model_settings["bgc"]["wrt_his"] is (not before)
+        assert wiz.config.model_settings["cppdefs"]["nhy_forcing"] is False
+        assert wiz.editor._widgets[("bgc", "wrt_his")][0].value is (not before)
+        assert "2 modified" in wiz.card_chips["advanced"].value
+
+    def test_overrides_are_kept_between_modes_that_share_them(self):
+        wiz = self._wizard()
+        wiz.bgc_dd.value = "cdr_lite"
+        self._toggle(wiz, ("cdr_lite_output", "wrt_alk"))
+        wiz.bgc_dd.value = "marbl"
+        assert ("cdr_lite_output", "wrt_alk") in wiz._active_overrides
+
+    def test_a_suspended_mode_change_loses_nothing(self):
+        """A load changes the mode while suspended: the record is untouched, and the
+        load's own rebuild applies only what the new mode allows.
+        """
+        wiz = self._wizard()
+        self._toggle(wiz, ("bgc", "wrt_his"))
+        with wiz._suspend():
+            wiz.bgc_dd.value = "cdr_lite"
+        assert ("bgc", "wrt_his") in wiz._overrides
+        wiz._rebuild()  # (resolve fails: a load would also have set the forcing)
+        assert ("bgc", "wrt_his") in wiz._overrides
+        assert wiz._active_overrides == {}
+
+    def test_edit_in_a_stale_editor_is_recorded_but_not_applied(self):
+        """A mode switch whose resolve fails (cdr_lite with no CDR forcing yet)
+        leaves the old MARBL-mode editor live; an edit there is kept for its mode
+        but never reaches the blueprint under this one.
+        """
+        wiz = ForgeBlueprintWizard()
+        wiz.start.value = date(2012, 1, 1)
+        wiz.end.value = date(2012, 1, 2)
+        wiz.use_pio_chk.value = False
+        wiz.bgc_dd.value = "cdr_lite"
+        assert wiz.config is None
+        assert wiz.editor._bgc_mode == "marbl"  # stale: the resolve failed
+
+        self._toggle(wiz, ("bgc", "wrt_his"))
+        assert ("bgc", "wrt_his") in wiz._overrides
+        assert wiz._active_overrides == {}
+
+        wiz.cdr_mode_dd.value = "simple"
+        assert wiz.config is not None, wiz.derived.value
+        assert wiz.editor._bgc_mode == "cdr_lite"
+        assert wiz.config.composition.overrides == {}
+
+        wiz.bgc_dd.value = "marbl"
+        assert wiz.config.composition.overrides == {
+            "bgc": {"wrt_his": wiz.config.model_settings["bgc"]["wrt_his"]}
+        }
+
+    def test_loading_a_marbl_blueprint_keeps_its_marbl_only_overrides(self):
+        wiz = self._wizard()
+        wiz.bgc_dd.value = "marbl"
+        wiz.cdr_mode_dd.value = "none"
+        self._toggle(wiz, ("bgc", "wrt_his"))
+        assert wiz.config is not None, wiz.derived.value
+
+        wiz2 = ForgeBlueprintWizard()
+        wiz2._populate_from(wiz.config)
+
+        assert ("bgc", "wrt_his") in wiz._overrides
+        assert wiz2._overrides == wiz._overrides
+        assert wiz2.config is not None, wiz2.derived.value
+
+    def test_loaded_marbl_only_overrides_are_reported_and_not_applied(self):
+        """A blueprint whose mode forbids a MARBL-only output (hand-edited or
+        stale) loads with the problems reported; the wizard's blueprint and the
+        next save carry neither flag.
+        """
+        wiz = self._wizard()
+        wiz.bgc_dd.value = "cdr_lite"
+        assert wiz.config is not None, wiz.derived.value
+        settings = copy.deepcopy(wiz.config.model_settings)
+        settings["cdr_output"]["do_cdr_output"] = True
+        settings["upscale_output"]["do_upscale"] = True
+        settings["cppdefs"]["sponge_tune"] = True
+        edited = wiz.config.model_copy(update={"model_settings": settings})
+
+        wiz2 = ForgeBlueprintWizard()
+        problems = wiz2._populate_from(edited)
+
+        assert any("cdr_output.do_cdr_output=True" in p for p in problems)
+        assert any("upscale_output.do_upscale=True" in p for p in problems)
+        assert set(wiz2._active_overrides) == {("cppdefs", "sponge_tune")}
+        assert wiz2.config is not None, wiz2.derived.value
+        assert wiz2.config.model_settings["cdr_output"]["do_cdr_output"] is False
+        assert wiz2.config.model_settings["upscale_output"]["do_upscale"] is False
+        assert wiz2.config.composition.overrides == {"cppdefs": {"sponge_tune": True}}
+
+    def test_cdr_lite_stream_is_shown_on_without_recording_an_override(self):
+        wiz = self._wizard()
+        wiz.bgc_dd.value = "cdr_lite"
+        assert wiz.config is not None, wiz.derived.value
+        master = wiz.editor._widgets[_LITE_STREAM][0]
+        assert master.value is True
+        assert master.disabled is True
+        assert _display(wiz.editor._widgets[("cdr_lite_output", "nrpf")][0]) == ""
+        assert wiz._overrides == {}
+        assert wiz.config.composition.overrides == {}
+        # display only: the authored value is what is saved
+        assert (
+            wiz.config.model_settings["cdr_lite_output"]["do_cdr_lite_output"] is False
+        )
+
+    def test_round_trips_a_cdr_lite_blueprint_with_overrides(self):
+        wiz = self._wizard()
+        wiz.bgc_dd.value = "cdr_lite"
+        self._toggle(wiz, ("cppdefs", "sponge_tune"))
+        self._toggle(wiz, ("cdr_lite_output", "wrt_alk"))
+        assert wiz.config is not None, wiz.derived.value
+
+        wiz2 = ForgeBlueprintWizard()
+        wiz2._populate_from(wiz.config)
+
+        assert wiz2.bgc_dd.value == "cdr_lite"
+        assert wiz2._overrides == wiz._overrides
+        assert wiz2._editor_bgc_mode == "cdr_lite"
+        assert wiz2.config is not None, wiz2.derived.value
+        assert wiz2.config.content_hash() == wiz.config.content_hash()
 
 
 def test_use_pio_chk_default_seeded_from_model_spec():
     """use_pio_chk mirrors bgc_dd: it is seeded from the selected ModelSpec's
-    top-level use_pio (True for roms-marbl-0.9-default, the wizard's default
+    top-level use_pio (True for roms-marbl-0.11-default, the wizard's default
     model; False for cson_roms-marbl_v0.1), and reseeded on a model switch.
     """
     wiz = ForgeBlueprintWizard()
-    assert wiz.model_dd.value == "roms-marbl-0.9-default"
+    assert wiz.model_dd.value == "roms-marbl-0.11-default"
     assert wiz.use_pio_chk.value is True
     assert wiz._model_default_use_pio() is True
 
@@ -1366,7 +1775,7 @@ def test_use_pio_chk_emit_is_unconditional():
     wiz = ForgeBlueprintWizard()
     wiz.start.value = date(2012, 1, 1)
     wiz.end.value = date(2012, 1, 2)
-    # roms-marbl-0.9-default (the default model) declares use_pio: true --
+    # roms-marbl-0.11-default (the default model) declares use_pio: true --
     # exactly the ModelSpec this test guards against: unchecking must emit an
     # explicit False, not fall back to the ModelSpec default.
     assert wiz.use_pio_chk.value is True
@@ -2175,14 +2584,14 @@ def test_output_spec_defaults_to_daily_restarts():
 
 
 def test_default_model_uses_latest_settings_schema():
-    """The default catalog model (``roms-marbl-0.9-default``) is pinned to
-    ucla-roms ``0.9.1`` -- a semver ref above the newest registered schema
-    boundary, which both the wizard and the executor (``write_roms_namelist`` ->
+    """The default catalog model (``roms-marbl-0.11-default``) is pinned to
+    ucla-roms ``0.11.0`` -- the newest registered schema boundary, which both
+    the wizard and the executor (``write_roms_namelist`` ->
     ``run_time_settings_for_ref``) resolve to the *latest* known schema
-    (currently ``RunTimeSettingsV0_9_0``), not the legacy one. This is an intentional behavior change from before this
-    ref-awareness was added (the editor used to hardcode legacy
-    ``RunTimeSettings``) -- it pins that the wizard now agrees with what the
-    executor will actually write. (The tests in tests/test_forge_blueprint.py
+    (currently ``RunTimeSettingsV0_11_0``), not the legacy one. This is an
+    intentional behavior change from before this ref-awareness was added (the
+    editor used to hardcode legacy ``RunTimeSettings``) -- it pins that the
+    wizard now agrees with what the executor will actually write. (The tests in tests/test_forge_blueprint.py
     that exercise the ``nrpf_rst`` widget rules now pin a legacy ref
     explicitly.)
     """
@@ -2190,8 +2599,60 @@ def test_default_model_uses_latest_settings_schema():
     wiz.start.value = date(2012, 1, 1)
     wiz.end.value = date(2012, 1, 2)
     wiz._rebuild()
-    assert wiz._editor_settings_cls is RunTimeSettingsV0_9_0
+    assert wiz._editor_settings_cls is RunTimeSettingsV0_11_0
     assert ("ocean_vars", "nrpf_rst") not in wiz.editor._widgets
+
+
+@pytest.mark.parametrize(
+    "settings_cls",
+    [
+        RunTimeSettings,
+        RunTimeSettingsV0_4_0,
+        RunTimeSettingsV0_5_0,
+        RunTimeSettingsV0_6_0,
+        RunTimeSettingsV0_7_0,
+        RunTimeSettingsV0_9_0,
+        RunTimeSettingsV0_11_0,
+    ],
+)
+def test_namelist_tooltip_for_every_settings_field(settings_cls):
+    """Every Advanced-settings field gets its namelist schema description, in
+    every tier. Regression: the lookup used the forge section/field names as
+    namelist group/key names, so only the few sections whose names coincide
+    (``time_stepping``, ``s_coord``) had tooltips -- ``param`` (group
+    ``param_settings``, ``n`` -> ``nz``) and nearly every other section had none.
+    """
+    for section, info in settings_cls.model_fields.items():
+        cfg_fields = getattr(info.annotation, "model_fields", None)
+        for field in cfg_fields or (section,):
+            assert _namelist_tooltip(settings_cls, section, field), (section, field)
+
+
+@pytest.mark.parametrize("field", ["np_xi", "n", "nt_cdr_oae"])
+def test_namelist_tooltip_for_param_fields(field):
+    assert _namelist_tooltip(RunTimeSettingsV0_9_0, "param", field)
+
+
+def test_namelist_tooltip_empty_for_non_namelist_sections():
+    assert _namelist_tooltip(RunTimeSettingsV0_9_0, "cppdefs", "marbl") == ""
+
+
+def test_settings_editor_tooltips_prefer_the_glossary_hint():
+    """A field with no glossary hint shows the schema description; a glossary
+    hint (curated in the wizard's vocabulary) replaces it.
+    """
+    import ipywidgets as W
+
+    model_settings = {"bottom_drag": {"rdrg2": 1e-3}, "bgc": {"xco2air_default": 280.0}}
+    editor = _SettingsEditor(W, model_settings, settings_cls=RunTimeSettingsV0_9_0)
+
+    rdrg2_tip = editor._widgets[("bottom_drag", "rdrg2")][0].tooltip
+    assert _namelist_tooltip(RunTimeSettingsV0_9_0, "bottom_drag", "rdrg2") in (
+        rdrg2_tip
+    )
+    xco2air_tip = editor._widgets[("bgc", "xco2air_default")][0].tooltip
+    assert "co2_tvarying" in xco2air_tip
+    assert "PCO2AIR_FORCING" not in xco2air_tip
 
 
 def test_advection_cppdefs_editable_only_for_models_that_declare_them():
@@ -2321,6 +2782,188 @@ def test_settings_editor_skips_cdr_lite_section_before_0_9_0():
     assert "cdr_lite" in new._pane_sections["Carbon dioxide removal (CDR)"]
 
 
+# One setting per kind of key the BGC-mode table names, plus two that apply in
+# every mode.
+_MARBL_ONLY_KEYS = [
+    ("bgc", "wrt_his"),
+    ("marbl_bgc", "marbl_config_file"),
+    ("dic_alk_correction", "dcdt"),
+    ("cdr_output", "do_cdr_output"),
+    ("cdr_gas_exch_output", "do_cdr_gas_exch_output"),
+    ("upscale_output", "do_upscale"),
+    ("cppdefs", "nhy_forcing"),
+    ("cppdefs", "nox_forcing"),
+    ("cdr_lite", "cdr_online_carbonate_sensitivity"),
+]
+_LITE_STREAM = ("cdr_lite_output", "do_cdr_lite_output")
+_EVERY_MODE_KEYS = [("ocean_vars", "wrt_file_his"), ("cppdefs", "sponge_tune")]
+_BGC_MODE_SETTINGS_SAMPLE = {
+    "bgc": {"wrt_his": True},
+    "marbl_bgc": {"marbl_config_file": "marbl_in"},
+    "dic_alk_correction": {"dcdt": 0.0},
+    "cdr_output": {"do_cdr_output": False},
+    "cdr_gas_exch_output": {"do_cdr_gas_exch_output": False},
+    "upscale_output": {"do_upscale": False},
+    "cdr_lite_output": {
+        "do_cdr_lite_output": False,
+        "output_period": 3600.0,
+        "wrt_alk": True,
+    },
+    "cdr_lite": {"cdr_online_carbonate_sensitivity": False},
+    "cppdefs": {"nhy_forcing": True, "nox_forcing": True, "sponge_tune": False},
+    "ocean_vars": {"wrt_file_his": True},
+}
+
+
+@pytest.mark.parametrize(
+    ("section", "field", "bgc_mode", "expected"),
+    [
+        ("bgc", "wrt_his", "marbl", True),
+        ("bgc", "wrt_his", "none", False),
+        ("bgc", None, "cdr_lite", False),
+        ("cdr_lite_output", "do_cdr_lite_output", "marbl", True),
+        ("cdr_lite_output", "do_cdr_lite_output", "cdr_lite", True),
+        ("cdr_lite_output", "wrt_alk", "none", False),
+        ("cppdefs", "nhy_forcing", "none", False),
+        ("cppdefs", "nhy_forcing", "marbl", True),
+        ("cppdefs", "sponge_tune", "none", True),
+        ("cppdefs", None, "none", True),
+        ("ocean_vars", "wrt_file_his", "cdr_lite", True),
+    ],
+)
+def test_applies_in(section, field, bgc_mode, expected):
+    assert _applies_in(section, field, bgc_mode) is expected
+
+
+@pytest.mark.parametrize("bgc_mode", ["marbl", "none", "cdr_lite"])
+def test_settings_editor_builds_only_the_settings_that_apply_in_the_bgc_mode(
+    bgc_mode,
+):
+    import ipywidgets as W
+
+    editor = _SettingsEditor(
+        W,
+        _BGC_MODE_SETTINGS_SAMPLE,
+        settings_cls=RunTimeSettingsV0_9_0,
+        bgc_mode=bgc_mode,
+    )
+    for key in _MARBL_ONLY_KEYS:
+        assert (key in editor._widgets) is (bgc_mode == "marbl"), key
+    assert (_LITE_STREAM in editor._widgets) is (bgc_mode != "none")
+    for key in _EVERY_MODE_KEYS:
+        assert key in editor._widgets, key
+
+
+def test_settings_editor_builds_no_pane_left_without_fields():
+    """Without MARBL the Biogeochemistry pane has nothing left (its sections and
+    its two cppdefs fields are all MARBL-only): no pane, no section header.
+    """
+    import ipywidgets as W
+
+    def _titles(mode):
+        editor = _SettingsEditor(
+            W,
+            _BGC_MODE_SETTINGS_SAMPLE,
+            settings_cls=RunTimeSettingsV0_9_0,
+            bgc_mode=mode,
+        )
+        return list(editor._pane_sections), editor._section_fields
+
+    marbl_panes, marbl_fields = _titles("marbl")
+    none_panes, none_fields = _titles("none")
+    assert "Biogeochemistry (BGC / MARBL)" in marbl_panes
+    assert "Biogeochemistry (BGC / MARBL)" not in none_panes
+    assert "bgc" in marbl_fields
+    assert not {"bgc", "marbl_bgc", "upscale_output", "cdr_output"} & set(none_fields)
+    # a section that still has a field keeps its section
+    assert none_fields["cppdefs"] == ["sponge_tune"]
+
+
+def test_settings_editor_defaults_to_marbl():
+    import ipywidgets as W
+
+    editor = _SettingsEditor(
+        W, _BGC_MODE_SETTINGS_SAMPLE, settings_cls=RunTimeSettingsV0_9_0
+    )
+    for key in _MARBL_ONLY_KEYS:
+        assert key in editor._widgets, key
+
+
+def test_cdr_lite_sections_show_glossary_titles_and_labels():
+    import ipywidgets as W
+
+    editor = _SettingsEditor(
+        W,
+        _BGC_MODE_SETTINGS_SAMPLE,
+        settings_cls=RunTimeSettingsV0_9_0,
+        bgc_mode="marbl",
+    )
+    headers = " ".join(
+        w.value
+        for w in _descendants(editor.accordion)
+        if isinstance(getattr(w, "value", None), str)
+        and "forge-settings-sec" in w.value
+    )
+    for title in ("CDR-lite", "CDR-lite tracer output", "CDR gas-exchange output"):
+        assert f"<span class='ttl'>{title}</span>" in headers
+
+    alk = editor._widgets[("cdr_lite_output", "wrt_alk")][0]
+    assert alk.description == "Write alkalinity tracers"
+    assert alk.tooltip.startswith("wrt_alk")  # the raw name stays discoverable
+    period = editor._widgets[("cdr_lite_output", "output_period")][0]
+    assert period.description == "Output period (s)"
+    online = editor._widgets[("cdr_lite", "cdr_online_carbonate_sensitivity")][0]
+    assert online.description == "Compute carbonate sensitivities online"
+    assert "Needs MARBL" in online.tooltip
+
+
+def test_settings_editor_locks_the_cdr_lite_stream_on_under_cdr_lite():
+    """``configure_build`` forces the CDR-lite stream on in ``cdr_lite`` mode, so
+    the editor shows it checked and disabled with its dependents visible -- and
+    never reports that as an edit, at construction or on a sync of the authored
+    (off) value.
+    """
+    import ipywidgets as W
+
+    edits: list[tuple] = []
+    editor = _SettingsEditor(
+        W,
+        _BGC_MODE_SETTINGS_SAMPLE,
+        on_edit=lambda s, f: edits.append((s, f)),
+        settings_cls=RunTimeSettingsV0_9_0,
+        bgc_mode="cdr_lite",
+    )
+    master = editor._widgets[_LITE_STREAM][0]
+    period = editor._widgets[("cdr_lite_output", "output_period")][0]
+    assert master.value is True
+    assert master.disabled is True
+    assert "bgc_mode cdr_lite" in master.tooltip
+    assert _display(period) == ""
+
+    editor.sync(_BGC_MODE_SETTINGS_SAMPLE)  # authored do_cdr_lite_output: False
+    assert master.value is True
+    assert _display(period) == ""
+    assert edits == []
+    assert editor.read(*_LITE_STREAM) is True
+
+
+def test_settings_editor_leaves_the_cdr_lite_stream_free_under_marbl():
+    import ipywidgets as W
+
+    editor = _SettingsEditor(
+        W,
+        _BGC_MODE_SETTINGS_SAMPLE,
+        settings_cls=RunTimeSettingsV0_9_0,
+        bgc_mode="marbl",
+    )
+    master = editor._widgets[_LITE_STREAM][0]
+    assert master.value is False
+    assert master.disabled is False
+    assert _display(editor._widgets[("cdr_lite_output", "output_period")][0]) == "none"
+    master.value = True
+    assert _display(editor._widgets[("cdr_lite_output", "output_period")][0]) == ""
+
+
 def test_wizard_editor_cdr_output_streams_gated_by_model_spec_pin():
     """End-to-end sibling of the two tests above, driven through the wizard's
     model selector instead of ``_SettingsEditor`` directly: ``roms-marbl-0.6-
@@ -2353,15 +2996,23 @@ def test_wizard_editor_cdr_output_streams_gated_by_model_spec_pin():
     assert ("cdr_lite_output", "do_cdr_lite_output") in wiz.editor._widgets
     assert ("cdr_gas_exch_output", "do_cdr_gas_exch_output") in wiz.editor._widgets
 
-    wiz.model_dd.value = "roms-marbl-0.9-default"
-    wiz._rebuild()
-    assert "cdr_lite_output" in wiz.config.model_settings
-    assert ("cdr_lite_output", "do_cdr_lite_output") in wiz.editor._widgets
-    assert ("cdr_lite_output", "wrt_gas_exchange") in wiz.editor._widgets
-    # The bundled spec does not declare the ``cdr_lite`` knob yet (CDR-lite tracers
-    # need forcing Forge cannot generate), so there is no widget for it.
-    assert "cdr_lite" not in wiz.config.model_settings
-    assert ("cdr_lite", "cdr_online_carbonate_sensitivity") not in wiz.editor._widgets
+    for model in (
+        "roms-marbl-0.9-default",
+        "roms-marbl-0.10-default",
+        "roms-marbl-0.11-default",
+    ):
+        wiz.model_dd.value = model
+        wiz._rebuild()
+        assert "cdr_lite_output" in wiz.config.model_settings
+        assert ("cdr_lite_output", "do_cdr_lite_output") in wiz.editor._widgets
+        assert ("cdr_lite_output", "wrt_gas_exchange") in wiz.editor._widgets
+        # The bundled specs do not declare the ``cdr_lite`` knob yet (CDR-lite
+        # tracers need forcing Forge cannot generate), so there is no widget for it.
+        assert "cdr_lite" not in wiz.config.model_settings
+        assert (
+            "cdr_lite",
+            "cdr_online_carbonate_sensitivity",
+        ) not in wiz.editor._widgets
 
 
 def test_cdr_tracer_counts_survive_wizard_save_and_load_round_trip(tmp_path):
@@ -2520,6 +3171,73 @@ def test_cdr_output_stream_field_rules_follow_master_switch(section, master_flag
     editor._widgets[(section, "monthly_averages")][0].value = "monthly"
     assert _visible("monthly_averages")
     assert period_widget.disabled is True
+
+
+def test_constant_fe_widgets_built_for_the_0_11_model():
+    """``marbl_bgc.use_constant_fe``/``constant_fe_value`` (ucla-roms >= 0.11.0,
+    PR #391) get Advanced-settings widgets for ``roms-marbl-0.11-default`` (the
+    default model, which declares both keys): the label comes from the
+    labels file (symbol + unit appended), the tooltip from the C-Star field
+    docstring.
+    """
+    wiz = ForgeBlueprintWizard()
+    wiz.start.value = date(2012, 1, 1)
+    wiz.end.value = date(2012, 1, 2)
+    wiz.model_dd.value = "roms-marbl-0.11-default"
+    wiz._rebuild()
+    assert wiz.config is not None
+    assert wiz.config.model_settings["marbl_bgc"]["use_constant_fe"] is False
+
+    use_fe, _ = wiz.editor._widgets[("marbl_bgc", "use_constant_fe")]
+    fe_value, _ = wiz.editor._widgets[("marbl_bgc", "constant_fe_value")]
+    assert use_fe.value is False
+    assert fe_value.value == pytest.approx(3.0e-3)
+    assert use_fe.description == "Hold iron constant"
+    assert fe_value.description == "Constant iron concentration (mmol/m³)"
+    assert use_fe.tooltip.startswith("use_constant_fe")
+    assert "at constant_Fe_value everywhere" in use_fe.tooltip
+    assert "Fe imposed when use_constant_Fe" in fe_value.tooltip
+
+
+def test_constant_fe_widgets_absent_for_the_0_10_model():
+    """``roms-marbl-0.10-default`` pins a ucla-roms that stops on the unknown
+    keys: its ModelSpec does not declare them, so the editor builds neither
+    widget.
+    """
+    wiz = ForgeBlueprintWizard()
+    wiz.start.value = date(2012, 1, 1)
+    wiz.end.value = date(2012, 1, 2)
+    wiz.model_dd.value = "roms-marbl-0.10-default"
+    wiz._rebuild()
+    assert wiz.config is not None
+    assert "use_constant_fe" not in wiz.config.model_settings["marbl_bgc"]
+    assert ("marbl_bgc", "use_constant_fe") not in wiz.editor._widgets
+    assert ("marbl_bgc", "constant_fe_value") not in wiz.editor._widgets
+
+
+def test_constant_fe_value_hidden_until_use_constant_fe_is_on():
+    """``constant_fe_value`` is meaningless while ``use_constant_fe`` is off, so
+    ``_apply_field_rules`` hides it -- display only: toggling never changes the
+    value (neither widget's).
+    """
+    wiz = ForgeBlueprintWizard()
+    wiz.start.value = date(2012, 1, 1)
+    wiz.end.value = date(2012, 1, 2)
+    wiz._rebuild()
+    use_fe, _ = wiz.editor._widgets[("marbl_bgc", "use_constant_fe")]
+    fe_value, _ = wiz.editor._widgets[("marbl_bgc", "constant_fe_value")]
+
+    assert use_fe.value is False
+    assert fe_value.layout.display == "none"
+    assert use_fe.layout.display != "none"
+
+    use_fe.value = True
+    assert fe_value.layout.display == ""
+    assert fe_value.value == pytest.approx(3.0e-3)
+
+    use_fe.value = False
+    assert fe_value.layout.display == "none"
+    assert fe_value.value == pytest.approx(3.0e-3)
 
 
 def test_cdr_lite_knob_override_survives_save_and_load(tmp_path):
@@ -3416,6 +4134,77 @@ class TestNestedTopographyWidgets:
         assert "topography_source" not in this_kw
         assert "SRTM15" in wiz.parent_plot_status.value  # fallback note for this grid
         assert "EMOD" not in wiz.parent_plot_status.value
+
+
+class TestComputeDt:
+    """Compute dt (CFL) is arithmetic on the grid alone: it must not depend on
+    the rest of the blueprint resolving.
+    """
+
+    @staticmethod
+    def _resolver_dt(wiz) -> float:
+        """What the resolver derives for the wizard's current grid."""
+        cfg = build_forge_blueprint(**{**wiz._gather(), "dt": None})
+        assert cfg.domain.dt is not None
+        return float(cfg.domain.dt)
+
+    def test_matches_the_resolver_for_the_same_grid(self):
+        wiz = _new_wizard()
+        expected = self._resolver_dt(wiz)
+        wiz.dt.value = 1.0
+        wiz._on_compute_dt(None)
+        assert wiz.dt.value == expected != 1.0
+        assert "(CFL)" in wiz.dt_status.value
+        assert "#b00" not in wiz.dt_status.value
+
+    def test_does_not_run_the_resolver(self, monkeypatch):
+        wiz = _new_wizard()
+
+        def _fail(**_kw):
+            raise AssertionError("Compute dt must not resolve the blueprint")
+
+        monkeypatch.setattr("cstar.wizard.wizard.build_forge_blueprint", _fail)
+        wiz._on_compute_dt(None)
+        assert "#b00" not in wiz.dt_status.value
+
+    def test_works_while_the_blueprint_does_not_resolve(self):
+        """cdr_lite demands a CDR forcing; without one the blueprint is invalid,
+        but the grid's dt is still computable.
+        """
+        wiz = _new_wizard()
+        expected = self._resolver_dt(wiz)
+        _strip_bgc_forcing(wiz)
+        wiz.bgc_dd.value = "cdr_lite"
+        assert wiz.config is None
+        wiz.dt.value = 1.0
+        wiz._on_compute_dt(None)
+        assert wiz.dt.value == expected
+        assert "(CFL)" in wiz.dt_status.value
+
+    def test_uses_the_attached_grid_files_grid(self, fake_grid, tmp_path):
+        wiz = _new_wizard()
+        wiz.grid_file_path.value = str(_write_tiny_netcdf(tmp_path / "grid.nc"))
+        wiz._on_grid_file_attach(None)
+        wiz.dt.value = 1.0
+        wiz._on_compute_dt(None)
+        assert wiz.dt.value == cfl_dt({}, wiz._grid_file_grid) != 1.0
+        assert "(CFL)" in wiz.dt_status.value
+
+    def test_refuses_a_grid_file_that_failed_to_reload(self, fake_grid, tmp_path):
+        wiz = _new_wizard()
+        p = _write_tiny_netcdf(tmp_path / "grid.nc")
+        wiz.grid_file_path.value = str(p)
+        wiz._on_grid_file_attach(None)
+        p.unlink()
+        wiz2 = ForgeBlueprintWizard()
+        wiz2._populate_from(wiz.config)
+        assert wiz2._grid_file is not None
+        assert wiz2._grid_file_grid is None
+        wiz2.dt.value = 1.0
+        wiz2._on_compute_dt(None)
+        assert wiz2.dt.value == 1.0
+        assert "failed to" in wiz2.dt_status.value
+        assert "#b00" in wiz2.dt_status.value
 
 
 class TestGridFileAttach:
@@ -4512,3 +5301,479 @@ def test_surface_row_name_description_starts_with_glossary_label(editor):
     w = editor._make_row("surface", {"type": "physics", "source": {"name": "ERA5"}})
     label = label_for("forcing.row.name", default="src").label
     assert w["name"].description.startswith(label)
+
+
+# ---------------------------------------------------------------------------
+# bgc_mode "cdr_lite": the BGC dropdown option, the carbonate sensitivities
+# group (cs_*), and the CDR panel's cdr_lite hint.
+# ---------------------------------------------------------------------------
+def _strip_bgc_forcing(wiz) -> None:
+    """Remove every BGC signal from the bundled ForcingSpec's widgets, so
+    bgc_mode "none"/"cdr_lite" (which reject BGC forcing) resolves.
+    """
+    fe = wiz._forcing_editor
+    for ws in list(fe._rows["surface"]):
+        if ws.get("type") is not None and ws["type"].value == "bgc":
+            fe._remove("surface", ws)
+    for section in ("boundary_bgc", "ic_bgc"):
+        for ws in list(fe._rows[section]):
+            fe._remove(section, ws)
+    for ws in list(fe._rows["river"]):
+        if "include_bgc" in ws:
+            ws["include_bgc"].value = False
+
+
+def _cdr_lite_wizard(catalog=None):
+    """A wizard in bgc_mode "cdr_lite" with physics-only forcing and a simple CDR
+    release (the mode requires a CDR forcing; "simple" targets the CDR-lite
+    tracers by default).
+    """
+    wiz = ForgeBlueprintWizard() if catalog is None else ForgeBlueprintWizard(catalog)
+    wiz.start.value = date(2012, 1, 1)
+    wiz.end.value = date(2012, 1, 2)
+    wiz.use_pio_chk.value = False  # off: no CDF-5 conversion warning per rebuild
+    _strip_bgc_forcing(wiz)
+    wiz.bgc_dd.value = "cdr_lite"
+    wiz.cdr_mode_dd.value = "simple"
+    return wiz
+
+
+def _write_cdrgas_dir(
+    directory: Path,
+    stamps=("20120101000000", "20120102000000"),
+    fmt: str = "NETCDF4",
+) -> Path:
+    """A directory of joined ROMS ``_cdrgas`` files (real, tiny netCDF)."""
+    import numpy as np
+    import xarray as xr
+
+    directory.mkdir(parents=True, exist_ok=True)
+    for stamp in stamps:
+        ds = xr.Dataset({"ddic_dco2": (["y", "x"], np.zeros((2, 2)))})
+        ds.to_netcdf(directory / f"roms_cdrgas.{stamp}.nc", format=fmt)
+    return directory
+
+
+def _write_cdr_netcdf_with_tracers(path: Path, tracer_names) -> Path:
+    import numpy as np
+    import xarray as xr
+
+    ds = xr.Dataset(
+        {"cdr_volume": (["ncdr"], np.zeros(3))},
+        coords={"tracer_name": ("ntracers", list(tracer_names))},
+    )
+    ds.to_netcdf(path)
+    return path
+
+
+def test_bgc_dd_offers_the_three_build_modes_in_order():
+    from typing import get_args
+
+    from cstar.applications.forge.namelist_model import BgcMode
+
+    wiz = ForgeBlueprintWizard()
+    assert list(wiz.bgc_dd.options) == ["marbl", "none", "cdr_lite"]
+    assert list(wiz.bgc_dd.options) == list(get_args(BgcMode))
+    assert "cdr_lite" in wiz.bgc_dd.tooltip
+
+
+def test_marbl_ref_hidden_for_cdr_lite():
+    wiz = ForgeBlueprintWizard()
+    wiz.bgc_dd.value = "cdr_lite"
+    assert _display(wiz.marbl_ref) == "none"
+
+
+class TestCarbonateSensitivityGroup:
+    def test_group_lives_in_the_model_card_and_is_hidden_by_default(self):
+        wiz = ForgeBlueprintWizard()
+        model_card = _find_card(wiz.widget, "model")
+        assert wiz.cs_group in _descendants(model_card)
+        assert wiz.bgc_dd.value == "marbl"
+        assert _display(wiz.cs_group) == "none"
+
+    def test_group_shows_only_for_cdr_lite(self):
+        wiz = ForgeBlueprintWizard()
+        wiz.bgc_dd.value = "cdr_lite"
+        assert _display(wiz.cs_group) == ""
+        wiz.bgc_dd.value = "none"
+        assert _display(wiz.cs_group) == "none"
+        wiz.bgc_dd.value = "marbl"
+        assert _display(wiz.cs_group) == "none"
+
+    def test_source_defaults_to_the_directive_and_hides_the_attach_row(self):
+        wiz = ForgeBlueprintWizard()
+        wiz.bgc_dd.value = "cdr_lite"
+        assert wiz.cs_source_dd.value == "directive"
+        assert [v for _, v in wiz.cs_source_dd.options] == ["directive", "path"]
+        assert _display(wiz.cs_path_box) == "none"
+
+        wiz.cs_source_dd.value = "path"
+        assert _display(wiz.cs_path_box) == ""
+        assert "no directory attached yet" in wiz.cs_status.value.lower()
+
+        wiz.cs_source_dd.value = "directive"
+        assert _display(wiz.cs_path_box) == "none"
+
+    def test_default_cdr_lite_blueprint_has_no_carbonate_sensitivity(self):
+        wiz = _cdr_lite_wizard()
+        assert wiz.config is not None, wiz.derived.value
+        assert wiz.config.carbonate_sensitivity is None
+        assert wiz.config.model_settings["cppdefs"]["cdr_lite"] is True
+        assert wiz.config.model_settings["cppdefs"]["marbl"] is False
+        assert "carbonate_sensitivity" not in wiz._gather()
+
+    def test_user_file_status_shows_hex_not_scheme_tag(self):
+        from cstar.wizard.wizard import _user_file_status_html
+
+        status = _user_file_status_html(
+            {"location": "/x/grid.nc", "content_hash": "nc-sample-v1:" + "ab" * 32}
+        )
+        assert "grid.nc (sha256 abababababab…)" in status
+
+    def test_attach_stores_the_joined_files_and_reports_the_span(self, tmp_path):
+        d = _write_cdrgas_dir(tmp_path / "cdrgas")
+        wiz = _cdr_lite_wizard()
+        wiz.cs_source_dd.value = "path"
+        wiz.cs_path.value = str(d)  # submit -> auto-attach, no click needed
+
+        files = wiz._carbonate_sensitivity["files"]
+        assert [Path(f["location"]).name for f in files] == [
+            "roms_cdrgas.20120101000000.nc",
+            "roms_cdrgas.20120102000000.nc",
+        ]
+        assert all(f["content_hash"].startswith("nc-sample-v1:") for f in files)
+        status = wiz.cs_status.value
+        assert "attached 2 carbonate sensitivity file(s)" in status
+        assert "2012-01-01 00:00 to 2012-01-02 00:00" in status
+        assert "exact paths" in status
+        assert wiz.config is not None, wiz.derived.value
+        assert [f.location for f in wiz.config.carbonate_sensitivity.files] == [
+            f["location"] for f in files
+        ]
+
+    def test_button_attach_and_rehash(self, tmp_path):
+        d = _write_cdrgas_dir(tmp_path / "cdrgas")
+        wiz = _cdr_lite_wizard()
+        wiz.cs_source_dd.value = "path"
+        wiz.cs_path.value = str(d)
+        wiz._carbonate_sensitivity = None
+        wiz._on_cs_attach(None)
+        assert len(wiz._carbonate_sensitivity["files"]) == 2
+
+    def test_attach_without_a_path_asks_for_one(self):
+        wiz = _cdr_lite_wizard()
+        wiz.cs_source_dd.value = "path"
+        wiz._on_cs_attach(None)
+        assert "enter a path" in wiz.cs_status.value.lower()
+        assert wiz._carbonate_sensitivity is None
+
+    def test_per_rank_tiles_are_ignored(self, tmp_path):
+        d = _write_cdrgas_dir(tmp_path / "cdrgas")
+        _write_cdrgas_dir(d, stamps=("20120101000000.0", "20120101000000.1"))
+        assert (d / "roms_cdrgas.20120101000000.0.nc").exists()
+        wiz = _cdr_lite_wizard()
+        wiz.cs_source_dd.value = "path"
+        wiz._attach_carbonate_sensitivity_dir(str(d))
+        names = [Path(f["location"]).name for f in wiz._carbonate_sensitivity["files"]]
+        assert names == [
+            "roms_cdrgas.20120101000000.nc",
+            "roms_cdrgas.20120102000000.nc",
+        ]
+        assert "attached 2 " in wiz.cs_status.value
+
+    def test_directory_of_only_tiles_is_an_error(self, tmp_path):
+        d = _write_cdrgas_dir(tmp_path / "tiles", stamps=("20120101000000.0",))
+        wiz = _cdr_lite_wizard()
+        wiz.cs_source_dd.value = "path"
+        wiz._attach_carbonate_sensitivity_dir(str(d))
+        assert wiz._carbonate_sensitivity is None
+        assert "1 per-rank tile" in wiz.cs_status.value
+        assert "b00" in wiz.cs_status.value  # the error colour
+
+    def test_empty_directory_is_an_error(self, tmp_path):
+        d = tmp_path / "empty"
+        d.mkdir()
+        wiz = _cdr_lite_wizard()
+        wiz.cs_source_dd.value = "path"
+        wiz._attach_carbonate_sensitivity_dir(str(d))
+        assert wiz._carbonate_sensitivity is None
+        assert "no joined carbonate sensitivity files" in wiz.cs_status.value
+        assert wiz.config is None
+        assert "attach a directory" in wiz.derived.value
+
+    def test_missing_path_and_plain_file_are_errors(self, tmp_path):
+        wiz = _cdr_lite_wizard()
+        wiz.cs_source_dd.value = "path"
+        wiz._attach_carbonate_sensitivity_dir(str(tmp_path / "nope"))
+        assert wiz._carbonate_sensitivity is None
+        assert "not a directory" in wiz.cs_status.value
+
+    def test_non_netcdf_file_is_an_error_and_nothing_is_stored(self, tmp_path):
+        d = _write_cdrgas_dir(tmp_path / "cdrgas")
+        (d / "roms_cdrgas.20120103000000.nc").write_text("this is not netCDF")
+        wiz = _cdr_lite_wizard()
+        wiz.cs_source_dd.value = "path"
+        wiz._attach_carbonate_sensitivity_dir(str(d))
+        assert wiz._carbonate_sensitivity is None
+        assert "not netCDF files: roms_cdrgas.20120103000000.nc" in wiz.cs_status.value
+
+    def test_misnamed_cdrgas_file_is_an_error_with_a_legible_status(self, tmp_path):
+        d = _write_cdrgas_dir(tmp_path / "cdrgas")
+        (d / "roms_cdrgas_old.nc").write_text("x")
+        wiz = _cdr_lite_wizard()
+        wiz.cs_source_dd.value = "path"
+        wiz._attach_carbonate_sensitivity_dir(str(d))
+        assert wiz._carbonate_sensitivity is None
+        assert "naming convention" in wiz.cs_status.value
+
+    def test_repeated_basenames_under_subdirectories_are_an_error(self, tmp_path):
+        d = tmp_path / "runs"
+        _write_cdrgas_dir(d / "run1", stamps=("20120101000000",))
+        _write_cdrgas_dir(d / "run2", stamps=("20120101000000",))
+        wiz = _cdr_lite_wizard()
+        wiz.cs_source_dd.value = "path"
+        wiz._attach_carbonate_sensitivity_dir(str(d))
+        assert wiz._carbonate_sensitivity is None
+        assert "each must be distinct" in wiz.cs_status.value
+        assert "✓" not in wiz.cs_status.value
+
+    def test_failed_reattach_drops_the_earlier_attach(self, tmp_path):
+        good = _write_cdrgas_dir(tmp_path / "good")
+        wiz = _cdr_lite_wizard()
+        wiz.cs_source_dd.value = "path"
+        wiz._attach_carbonate_sensitivity_dir(str(good))
+        assert wiz._carbonate_sensitivity is not None
+
+        wiz._attach_carbonate_sensitivity_dir(str(tmp_path / "nope"))
+        assert wiz._carbonate_sensitivity is None  # not quietly kept
+        assert wiz.config is None
+
+    def test_pio_hint_for_non_classic_files(self, tmp_path):
+        d = _write_cdrgas_dir(tmp_path / "hdf5", fmt="NETCDF4")
+        wiz = _cdr_lite_wizard()
+        wiz.cs_source_dd.value = "path"
+        wiz.use_pio_chk.value = True
+        wiz._attach_carbonate_sensitivity_dir(str(d))
+        assert "CDF-5" in wiz.cs_status.value
+
+    def test_no_pio_hint_without_pio_or_for_classic_files(self, tmp_path):
+        hdf5 = _write_cdrgas_dir(tmp_path / "hdf5", fmt="NETCDF4")
+        classic = _write_cdrgas_dir(tmp_path / "classic", fmt="NETCDF3_64BIT")
+        wiz = _cdr_lite_wizard()
+        wiz.cs_source_dd.value = "path"
+        wiz.use_pio_chk.value = False
+        wiz._attach_carbonate_sensitivity_dir(str(hdf5))
+        assert "CDF-5" not in wiz.cs_status.value
+        wiz.use_pio_chk.value = True
+        wiz._attach_carbonate_sensitivity_dir(str(classic))
+        assert "CDF-5" not in wiz.cs_status.value
+
+    def test_clear_resets_state_and_brings_the_hint_back(self, tmp_path):
+        d = _write_cdrgas_dir(tmp_path / "cdrgas")
+        wiz = _cdr_lite_wizard()
+        wiz.cs_source_dd.value = "path"
+        wiz.cs_path.value = str(d)
+        assert wiz._carbonate_sensitivity is not None
+
+        wiz._on_cs_clear(None)
+
+        assert wiz._carbonate_sensitivity is None
+        assert wiz.cs_path.value == ""
+        assert "no directory attached yet" in wiz.cs_status.value.lower()
+        assert wiz.config is None
+
+    def test_gather_passes_the_attached_files_only_for_the_path_source(self, tmp_path):
+        d = _write_cdrgas_dir(tmp_path / "cdrgas")
+        wiz = _cdr_lite_wizard()
+        wiz.cs_source_dd.value = "path"
+        wiz._attach_carbonate_sensitivity_dir(str(d))
+
+        assert wiz._gather()["carbonate_sensitivity"] == wiz._carbonate_sensitivity
+
+        wiz.cs_source_dd.value = "directive"  # attached state kept, but not passed
+        assert wiz._carbonate_sensitivity is not None
+        assert "carbonate_sensitivity" not in wiz._gather()
+        assert wiz.config is not None, wiz.derived.value
+        assert wiz.config.carbonate_sensitivity is None
+
+    def test_gather_omits_attached_files_outside_cdr_lite(self, tmp_path):
+        d = _write_cdrgas_dir(tmp_path / "cdrgas")
+        wiz = _cdr_lite_wizard()
+        wiz.cs_source_dd.value = "path"
+        wiz._attach_carbonate_sensitivity_dir(str(d))
+
+        wiz.bgc_dd.value = "none"  # the resolver would reject the files here
+        assert "carbonate_sensitivity" not in wiz._gather()
+
+    def test_gather_fails_fast_for_the_path_source_with_nothing_attached(self):
+        wiz = _cdr_lite_wizard()
+        wiz.cs_source_dd.value = "path"
+        with pytest.raises(ValueError, match="attach a directory"):
+            wiz._gather()
+        assert wiz.config is None
+        assert "attach a directory" in wiz.derived.value
+
+    def test_round_trips_through_populate_from(self, tmp_path):
+        d = _write_cdrgas_dir(tmp_path / "cdrgas")
+        wiz = _cdr_lite_wizard()
+        wiz.cs_source_dd.value = "path"
+        wiz._attach_carbonate_sensitivity_dir(str(d))
+        assert wiz.config is not None, wiz.derived.value
+
+        wiz2 = ForgeBlueprintWizard()
+        wiz2._populate_from(wiz.config)
+
+        assert wiz2.bgc_dd.value == "cdr_lite"
+        assert wiz2.cs_source_dd.value == "path"
+        assert wiz2.cs_path.value == str(d.resolve())  # the files' common parent
+        assert wiz2._carbonate_sensitivity == wiz._carbonate_sensitivity
+        assert "attached 2 carbonate sensitivity file(s)" in wiz2.cs_status.value
+        assert _display(wiz2.cs_group) == ""
+        assert wiz2.config is not None, wiz2.derived.value
+        assert wiz2.config.content_hash() == wiz.config.content_hash()
+
+    def test_load_back_trusts_the_stored_hashes_and_warns_on_missing_files(
+        self, tmp_path
+    ):
+        d = _write_cdrgas_dir(tmp_path / "cdrgas")
+        wiz = _cdr_lite_wizard()
+        wiz.cs_source_dd.value = "path"
+        wiz._attach_carbonate_sensitivity_dir(str(d))
+        cfg = wiz.config
+        stored = dict(wiz._carbonate_sensitivity)
+        for f in d.glob("*.nc"):
+            f.unlink()
+
+        wiz2 = ForgeBlueprintWizard()
+        wiz2._populate_from(cfg)
+
+        assert wiz2._carbonate_sensitivity == stored  # hashes kept, not recomputed
+        assert "2 file(s) not found" in wiz2.cs_status.value
+        assert wiz2.config is not None
+
+    def test_load_back_of_a_directive_blueprint_selects_the_directive(self):
+        wiz = _cdr_lite_wizard()
+        assert wiz.config is not None, wiz.derived.value
+        assert wiz.config.carbonate_sensitivity is None
+
+        wiz2 = ForgeBlueprintWizard()
+        wiz2._populate_from(wiz.config)
+
+        assert wiz2.bgc_dd.value == "cdr_lite"
+        assert wiz2.cs_source_dd.value == "directive"
+        assert wiz2._carbonate_sensitivity is None
+        assert wiz2.cs_path.value == ""
+        assert _display(wiz2.cs_group) == ""
+        assert _display(wiz2.cs_path_box) == "none"
+        assert wiz2.config is not None, wiz2.derived.value
+        assert wiz2.config.content_hash() == wiz.config.content_hash()
+
+    def test_load_back_of_a_directive_blueprint_resets_an_earlier_attach(
+        self, tmp_path
+    ):
+        d = _write_cdrgas_dir(tmp_path / "cdrgas")
+        wiz2 = _cdr_lite_wizard()
+        wiz2.cs_source_dd.value = "path"
+        wiz2._attach_carbonate_sensitivity_dir(str(d))
+
+        wiz = _cdr_lite_wizard()
+        wiz2._populate_from(wiz.config)
+
+        assert wiz2.cs_source_dd.value == "directive"
+        assert wiz2._carbonate_sensitivity is None
+        assert wiz2.cs_status.value == ""
+
+    @pytest.mark.parametrize("mode", ["marbl", "none"])
+    def test_load_back_selects_the_other_bgc_modes_from_cppdefs(self, mode):
+        wiz = ForgeBlueprintWizard()
+        wiz.start.value = date(2012, 1, 1)
+        wiz.end.value = date(2012, 1, 2)
+        if mode == "none":
+            _strip_bgc_forcing(wiz)
+            wiz.bgc_dd.value = "none"
+        assert wiz.config is not None, wiz.derived.value
+
+        wiz2 = ForgeBlueprintWizard()
+        wiz2.bgc_dd.value = "cdr_lite"  # a stale selection must be replaced
+        wiz2._populate_from(wiz.config)
+
+        assert wiz2.bgc_dd.value == mode
+        assert _display(wiz2.cs_group) == "none"
+
+
+class TestCdrLiteSavedModel:
+    def test_saved_model_spec_round_trips_with_cdr_lite(self, tmp_path):
+        import shutil
+
+        from cstar.catalog.domain_catalog import _DEFAULT_CATALOG_ROOT, DomainCatalog
+
+        root = tmp_path / "catalog"
+        shutil.copytree(_DEFAULT_CATALOG_ROOT, root)
+        catalog = DomainCatalog(catalog_root=root)
+        wiz = _cdr_lite_wizard(catalog)
+        assert wiz.config is not None, wiz.derived.value
+        assert wiz.config.model_settings["param"]["ntrc_bio"] == 0
+
+        wiz.save_model_name.value = "my-cdr-lite-model"
+        wiz._on_save_model(None)
+
+        data = catalog.model_data("my-cdr-lite-model")
+        assert data["bgc_mode"] == "cdr_lite"
+        # The resolver zeroes ntrc_bio for a run without MARBL; the saved spec
+        # keeps the base model's count so switching back to "marbl" still works.
+        assert data["model_settings"]["param"]["ntrc_bio"] == 32
+        assert "✓" in wiz.save_model_status.value
+        assert wiz.model_dd.value == "my-cdr-lite-model"
+        assert wiz.config.composition.model.modified is False
+
+        wiz2 = ForgeBlueprintWizard(catalog)
+        wiz2.model_dd.value = "my-cdr-lite-model"
+        assert wiz2.bgc_dd.value == "cdr_lite"
+        assert _display(wiz2.cs_group) == ""
+
+
+class TestCdrLiteCdrPanel:
+    def test_hint_lives_in_the_run_card_and_shows_only_for_cdr_lite(self):
+        wiz = ForgeBlueprintWizard()
+        run_card = _find_card(wiz.widget, "run")
+        assert wiz.cdr_lite_hint in _descendants(run_card)
+
+        assert _display(wiz.cdr_lite_hint) == "none"
+        wiz.bgc_dd.value = "cdr_lite"
+        assert _display(wiz.cdr_lite_hint) == ""
+        assert "tracer_set: cdr_lite" in wiz.cdr_lite_hint.value
+        assert "required" in wiz.cdr_lite_hint.value
+        wiz.bgc_dd.value = "none"
+        assert _display(wiz.cdr_lite_hint) == "none"
+
+    def test_netcdf_without_cdr_tracers_warns_in_cdr_lite_mode(self, tmp_path):
+        p = _write_cdr_netcdf_with_tracers(tmp_path / "cdr.nc", ["temp", "salt", "ALK"])
+        wiz = _new_wizard()
+        wiz.bgc_dd.value = "cdr_lite"
+        wiz.cdr_mode_dd.value = "netcdf"
+        wiz.cdr_file_path.value = str(p)
+        wiz._on_cdr_file_attach(None)
+
+        assert wiz._cdr_forcing_file is not None  # a warning, not a block
+        assert "no CDR_* tracers" in wiz.cdr_file_status.value
+
+    def test_netcdf_with_cdr_tracers_does_not_warn(self, tmp_path):
+        p = _write_cdr_netcdf_with_tracers(
+            tmp_path / "cdr.nc", ["temp", "salt", "CDR_OAE_ALK1", "CDR_OAE_DIC1"]
+        )
+        wiz = _new_wizard()
+        wiz.bgc_dd.value = "cdr_lite"
+        wiz.cdr_mode_dd.value = "netcdf"
+        wiz.cdr_file_path.value = str(p)
+        wiz._on_cdr_file_attach(None)
+
+        assert "no CDR_* tracers" not in wiz.cdr_file_status.value
+
+    def test_netcdf_without_cdr_tracers_does_not_warn_outside_cdr_lite(self, tmp_path):
+        p = _write_cdr_netcdf_with_tracers(tmp_path / "cdr.nc", ["temp", "salt", "ALK"])
+        wiz = _new_wizard()
+        wiz.cdr_mode_dd.value = "netcdf"
+        wiz.cdr_file_path.value = str(p)
+        wiz._on_cdr_file_attach(None)
+
+        assert "no CDR_* tracers" not in wiz.cdr_file_status.value

@@ -16,6 +16,7 @@ import yaml
 
 from cstar.applications.forge.engine import process_forge_blueprint
 from cstar.applications.forge.host import HostPaths
+from cstar.orchestration.serialization import read_blueprint_raw
 from cstar.tests.integration_tests.cli_harness import make_cli_env, run_cstar
 
 if t.TYPE_CHECKING:
@@ -49,7 +50,8 @@ def with_netcdf4_grid(forge_dir: Path, edited: Path, run_dir: Path) -> Path:
     import xarray as xr
 
     (emitted,) = (forge_dir / "blueprints").glob("B_*.yaml")
-    blueprint = yaml.safe_load(emitted.read_text())
+    # the emitted locations are relative to its directory; the copy lives elsewhere
+    blueprint = read_blueprint_raw(emitted)
 
     grid_entry = blueprint["grid"]["data"][0]
     hdf_grid = edited.parent / "grid_netcdf4.nc"

@@ -212,14 +212,13 @@ async def _run_candidates(application: str) -> list[_Candidate]:
     """
     from cstar.base.env import max_concurrency
     from cstar.orchestration.orchestration import LiveWorkplan
-    from cstar.orchestration.serialization import deserialize_all
     from cstar.orchestration.tracking import TrackingRepository
 
     runs = sorted(
         await TrackingRepository().list_latest_runs(), key=lambda run: run.run_id
     )
-    workplans = await deserialize_all(
-        [run.trx_workplan_path for run in runs], LiveWorkplan, max_concurrency()
+    workplans = await LiveWorkplan.load_all(
+        [run.trx_workplan_path for run in runs], max_concurrency()
     )
 
     # Listing each step's directory blocks, so it runs off the event loop.

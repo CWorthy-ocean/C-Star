@@ -17,6 +17,7 @@ from pydantic import ValidationError
 from cstar.applications.roms_marbl.adapter import (
     AddtlCodeAdapter,
     BoundaryForcingAdapter,
+    CarbonateSensitivityAdapter,
     CdrForcingAdapter,
     CodebaseAdapter,
     DiscretizationAdapter,
@@ -52,12 +53,18 @@ from cstar.base.utils import (
     deep_merge,
     slugify,
 )
-from cstar.execution.file_system import remove_files, rotate_file
+from cstar.execution.file_system import (
+    is_remote_resource,
+    remove_files,
+    rotate_file,
+    symlink_relative,
+)
 from cstar.execution.handler import ExecutionStatus
 from cstar.execution.local_process import LocalProcess
 from cstar.execution.scheduler_job import create_scheduler_job
 from cstar.io.source_data import SourceData
 from cstar.marbl.external_codebase import MARBLExternalCodeBase
+from cstar.orchestration.serialization import load_blueprint
 from cstar.pio.external_codebase import PIOExternalCodeBase
 from cstar.roms.build_verification import (
     assert_single_toolchain_stack,
@@ -68,8 +75,11 @@ from cstar.roms.build_verification import (
 from cstar.roms.discretization import ROMSDiscretization
 from cstar.roms.external_codebase import ROMSExternalCodeBase
 from cstar.roms.input_dataset import (
+    CARBONATE_SENSITIVITY_REMEDY,
+    CARBONATE_SENSITIVITY_VARIABLES,
     RecordedReferenceDate,
     ROMSBoundaryForcing,
+    ROMSCarbonateSensitivity,
     ROMSCdrForcing,
     ROMSForcingCorrections,
     ROMSInitialConditions,
@@ -79,6 +89,7 @@ from cstar.roms.input_dataset import (
     ROMSRiverForcing,
     ROMSSurfaceForcing,
     ROMSTidalForcing,
+    missing_carbonate_sensitivity_variables,
 )
 from cstar.roms.namelist import RomsNamelistBase, namelist_schema_for_ref
 from cstar.roms.precheck import applies_to, check_output_streams_divide_rst
@@ -237,6 +248,8 @@ class ROMSSimulation(Simulation):
         List of boundary forcing datasets.
     forcing_corrections : list[ROMSForcingCorrections]
         List of forcing correction datasets.
+    carbonate_sensitivity : list[ROMSCarbonateSensitivity]
+        List of carbonate sensitivity datasets read by a CDR-LiTE build.
     exe_path : Path
         Path to the compiled ROMS executable.
     partitioned_files : List[Path]
@@ -295,6 +308,7 @@ class ROMSSimulation(Simulation):
         boundary_forcing: list["ROMSBoundaryForcing"] | None = None,
         surface_forcing: list["ROMSSurfaceForcing"] | None = None,
         forcing_corrections: list["ROMSForcingCorrections"] | None = None,
+        carbonate_sensitivity: list["ROMSCarbonateSensitivity"] | None = None,
         use_pio: bool = False,
         pio_codebase: Optional["PIOExternalCodeBase"] = None,
         auto_tiling: bool = False,
@@ -346,6 +360,9 @@ class ROMSSimulation(Simulation):
             List of surface forcing datasets (e.g., wind stress, heat flux).
         forcing_corrections : list[ROMSForcingCorrections], optional
             List of surface forcing correction datasets.
+        carbonate_sensitivity : list[ROMSCarbonateSensitivity], optional
+            List of carbonate sensitivity datasets (ddic_dco2/ddic_dalk) for a
+            CDR-LiTE build that does not compute them online.
         use_pio : bool, optional
             If True, ROMS uses the ParallelIO library for input/output, reading and
             writing joined files directly: input datasets are not partitioned and
@@ -371,6 +388,8 @@ class ROMSSimulation(Simulation):
             If `surface_forcing` is not a list of `ROMSSurfaceForcing` instances.
             If `boundary_forcing` is not a list of `ROMSBoundaryForcing` instances.
             If `forcing_corrections` is not a list of `ROMSForcingCorrections` instances.
+            If `carbonate_sensitivity` is not a list of `ROMSCarbonateSensitivity`
+            instances.
         ValueError
             If `pio_codebase` is provided but `use_pio` is False.
             If `auto_tiling` is True but `use_pio` is False.
@@ -434,6 +453,11 @@ class ROMSSimulation(Simulation):
         self._validate_input(forcing_corrections, typecheck=ROMSForcingCorrections)
         self.forcing_corrections = (
             [] if forcing_corrections is None else forcing_corrections
+        )
+
+        self._validate_input(carbonate_sensitivity, typecheck=ROMSCarbonateSensitivity)
+        self.carbonate_sensitivity = (
+            [] if carbonate_sensitivity is None else carbonate_sensitivity
         )
 
         self.marbl_codebase = marbl_codebase
@@ -685,6 +709,26 @@ class ROMSSimulation(Simulation):
         return items
 
     @property
+    def _forcing_datasets(self) -> list[ROMSInputDataset]:
+        """Return every forcing input dataset ROMS reads through `frcfiles`.
+
+        ROMS reads forcing variables by name from any file in `frcfiles`, so
+        this is the set of datasets whose files it searches.
+        """
+        return [
+            *filter(
+                None,
+                chain(
+                    [self.tidal_forcing, self.river_forcing],
+                    self.surface_forcing,
+                    self.boundary_forcing,
+                    self.forcing_corrections,
+                    self.carbonate_sensitivity,
+                ),
+            )
+        ]
+
+    @property
     def _forcing_paths(self) -> list[Path]:
         """Collect and return all local paths to ROMS forcing input datasets in ROMS format.
 
@@ -705,16 +749,9 @@ class ROMSSimulation(Simulation):
             indicating it has not been staged for use by C-Star.
 
         """
-        input_forcings = chain(
-            [self.tidal_forcing, self.river_forcing],
-            self.surface_forcing,
-            self.boundary_forcing,
-            self.forcing_corrections,
-        )
-
         forcing_paths: list[Path] = []
 
-        for forcing in filter(None, input_forcings):
+        for forcing in self._forcing_datasets:
             paths = (
                 forcing.path_for_roms_unpartitioned
                 if self.use_pio
@@ -819,6 +856,32 @@ class ROMSSimulation(Simulation):
                 "key names against that schema."
             ) from err
 
+    def _namelist_path(self, p: Path) -> str:
+        """Express a path as the namelist should name it.
+
+        ROMS runs from `run_dir`, so a path inside this simulation's root directory
+        is written relative to it (e.g. `../input/input_datasets/grid.nc`). That
+        keeps the string short (ucla-roms builds filenames in 99-character
+        buffers) and valid when the run directory is moved or copied as a unit. A
+        path outside the root, such as an input dataset used from where it was
+        authored, keeps its absolute form rather than a chain of `..`.
+
+        Parameters
+        ----------
+        p : Path
+            The path to name, as ROMS should find it.
+
+        Returns
+        -------
+        str
+        """
+        # symlinked directories are compared where they are, but a staged file
+        # (itself a symlink to its source) is named, not followed
+        physical = p.parent.resolve() / p.name
+        if not physical.is_relative_to(self.fs_manager.root_dir):
+            return str(p)
+        return physical.relative_to(self.fs_manager.run_dir, walk_up=True).as_posix()
+
     @property
     def roms_runtime_settings(self) -> "RomsNamelistBase":
         """Generate and return a :class:`RomsNamelistBase` for the simulation.
@@ -831,7 +894,9 @@ class ROMSSimulation(Simulation):
 
         1. Derived settings, computed from the current simulation
            configuration: grid path, initial conditions, forcing datasets,
-           MARBL/CDR/nesting files, output root, and extract root.
+           MARBL/CDR/nesting files, output root, and extract root. Paths inside
+           the simulation's root directory are written relative to the run
+           directory ROMS executes in; other paths stay absolute.
         2. `namelist_overrides`, layered on top of the derived settings so
            that user overrides win. The processor grid (`np_xi`/`np_eta`) is
            then set from `discretization`, which is authoritative for it (an
@@ -867,35 +932,39 @@ class ROMSSimulation(Simulation):
         nml, schema, checkout_target = self._read_raw_namelist()
 
         if self.initial_conditions:
-            nml.initial_conditions.inifile = str(
+            nml.initial_conditions.inifile = self._namelist_path(
                 self.initial_conditions.path_for_roms_unpartitioned[0]
                 if self.use_pio
                 else self.initial_conditions.path_for_roms[0]
             )
 
         if self.model_grid:
-            nml.grid_settings.grdname = str(
+            nml.grid_settings.grdname = self._namelist_path(
                 self.model_grid.path_for_roms_unpartitioned[0]
                 if self.use_pio
                 else self.model_grid.path_for_roms[0]
             )
 
-        nml.forcing_files.frcfiles = [str(p) for p in self._forcing_paths]
+        nml.forcing_files.frcfiles = [
+            self._namelist_path(p) for p in self._forcing_paths
+        ]
 
         runtime_code_filenames = [f.basename for f in self.runtime_code.source]
         if "marbl_in" in runtime_code_filenames:
             # `_read_raw_namelist` already confirmed `working_copy` is set.
             assert self.runtime_code.working_copy is not None
             runtime_code_path = self.runtime_code.working_copy.common_parent
-            nml.marbl_biogeochemistry_settings.marbl_config_file = str(
+            nml.marbl_biogeochemistry_settings.marbl_config_file = self._namelist_path(
                 runtime_code_path / "marbl_in"
             )
 
         if self.cdr_forcing and self.cdr_forcing.working_copy:
-            nml.cdr_frc_settings.cdr_file = str(self.cdr_forcing.working_copy.path)  # type: ignore[union-attr]
+            nml.cdr_frc_settings.cdr_file = self._namelist_path(
+                self.cdr_forcing.working_copy.path  # type: ignore[union-attr]
+            )
 
         if self.nesting_info and self.nesting_info.working_copy:
-            nml.extract_data_settings.extract_file = str(
+            nml.extract_data_settings.extract_file = self._namelist_path(
                 self.nesting_info.working_copy.path  # type: ignore[union-attr]
             )
 
@@ -907,9 +976,7 @@ class ROMSSimulation(Simulation):
             else self.fs_manager.temp_output_dir
         )
 
-        # ROMS runs from `run_dir`; use a path relative to it to keep the string
-        # short (ucla-roms builds output filenames in a 99-character buffer).
-        root = str(target.relative_to(self.fs_manager.run_dir, walk_up=True))
+        root = self._namelist_path(target)
 
         nml.simulation_name_settings.output_root_name = f"{root}/output"
 
@@ -996,6 +1063,7 @@ class ROMSSimulation(Simulation):
                 *self.boundary_forcing,
                 *self.surface_forcing,
                 *self.forcing_corrections,
+                *self.carbonate_sensitivity,
             ]
             if x is not None
         ]
@@ -1170,6 +1238,19 @@ class ROMSSimulation(Simulation):
                 ROMSForcingCorrections(**fc_kwargs)
             )
 
+        # Construct any ROMSCarbonateSensitivity instances:
+        carbonate_sensitivity_entries = simulation_dict.get("carbonate_sensitivity", [])
+        if len(carbonate_sensitivity_entries) > 0:
+            simulation_kwargs["carbonate_sensitivity"] = []
+        if isinstance(carbonate_sensitivity_entries, dict):
+            carbonate_sensitivity_entries = [
+                carbonate_sensitivity_entries,
+            ]
+        for cs_kwargs in carbonate_sensitivity_entries:
+            simulation_kwargs["carbonate_sensitivity"].append(
+                ROMSCarbonateSensitivity(**cs_kwargs)
+            )
+
         return cls(**simulation_kwargs)
 
     def to_dict(self) -> dict:
@@ -1242,6 +1323,10 @@ class ROMSSimulation(Simulation):
             simulation_dict["forcing_corrections"] = [
                 fc.to_dict() for fc in self.forcing_corrections
             ]
+        if len(self.carbonate_sensitivity) > 0:
+            simulation_dict["carbonate_sensitivity"] = [
+                cs.to_dict() for cs in self.carbonate_sensitivity
+            ]
 
         return simulation_dict
 
@@ -1258,7 +1343,9 @@ class ROMSSimulation(Simulation):
         Parameters
         ----------
         blueprint : str
-            The path or URL to the YAML blueprint file.
+            The path or URL to the YAML blueprint file. Relative `location`
+            values in a blueprint file resolve against the directory of that
+            file.
 
         Returns
         -------
@@ -1275,11 +1362,14 @@ class ROMSSimulation(Simulation):
         to_blueprint : Saves the simulation as a YAML blueprint.
         from_dict : Creates an instance from a dictionary representation.
         """
-        source = SourceData(location=blueprint)
-        data = source.retriever.read()
-        bp_dict = yaml.safe_load(data.decode("utf-8"))
-
-        bp = RomsMarblBlueprint.model_validate(bp_dict)
+        if is_remote_resource(str(blueprint)):
+            # a downloaded blueprint has no directory for relative locations to
+            # be relative to, so they are left as authored
+            source = SourceData(location=blueprint)
+            data = source.retriever.read()
+            bp = RomsMarblBlueprint.model_validate(yaml.safe_load(data.decode("utf-8")))
+        else:
+            bp = load_blueprint(blueprint, RomsMarblBlueprint)
 
         return cls(
             name=bp.name,
@@ -1302,6 +1392,7 @@ class ROMSSimulation(Simulation):
             tidal_forcing=TidalForcingAdapter(bp).adapt(),
             river_forcing=RiverForcingAdapter(bp).adapt(),
             forcing_corrections=ForcingCorrectionAdapter(bp).adapt(),
+            carbonate_sensitivity=CarbonateSensitivityAdapter(bp).adapt(),
             boundary_forcing=BoundaryForcingAdapter(bp).adapt(),
             surface_forcing=SurfaceForcingAdapter(bp).adapt(),
             cdr_forcing=CdrForcingAdapter(bp).adapt(),
@@ -1380,6 +1471,8 @@ class ROMSSimulation(Simulation):
         ------
         ValueError
             If any required component (e.g., runtime code, compile-time code) is missing.
+            If the build reads carbonate sensitivities from forcing files but they
+            are missing or incomplete (see `_validate_carbonate_sensitivity_inputs`).
         RuntimeError
             If there is an issue configuring the external codebases.
 
@@ -1447,6 +1540,9 @@ class ROMSSimulation(Simulation):
             if self._overlaps_simulation_dates(inp):
                 self.log.debug(f"Fetching {inp.source.location}")
                 inp.get(local_dir=input_datasets_dir)
+
+        # Everything the check reads is staged now: fail before `build()` compiles.
+        self._validate_carbonate_sensitivity_inputs()
 
     @property
     def is_setup(self) -> bool:
@@ -1687,6 +1783,12 @@ class ROMSSimulation(Simulation):
             except self._ATTACH_COMPONENT_ERRORS as e:
                 problems.append(str(e))
 
+        if not problems:
+            try:
+                self._validate_carbonate_sensitivity_inputs()
+            except self._ATTACH_COMPONENT_ERRORS as e:
+                problems.append(str(e))
+
         if problems:
             problem_list = "\n".join(f"  - {p}" for p in problems)
             msg = (
@@ -1860,11 +1962,13 @@ class ROMSSimulation(Simulation):
 
     # Fortran cppdef macro -> the lowercase key
     # `cstar.roms.precheck.check_output_streams_divide_rst` expects (its
-    # `_STREAM_CHECKS` cppdef_guard names).
+    # `_STREAM_CHECKS` cppdef_guard names); `cdr_lite` is read only by
+    # `_validate_carbonate_sensitivity_inputs`.
     _PRECHECK_CPPDEF_MACROS: ClassVar[dict[str, str]] = {
         "MARBL": "marbl",
         "MARBL_DIAGS": "marbl_diags",
         "CDR_FORCING": "cdr_forcing",
+        "CDR_LITE": "cdr_lite",
         "UPSCALING": "upscaling",
         "DIAGNOSTICS": "diagnostics",
         "BIOLOGY_BEC2": "biology_bec2",
@@ -1991,6 +2095,10 @@ class ROMSSimulation(Simulation):
         ValueError
             If a locally staged input dataset's model reference date does not
             match the namelist `reference_date_settings.reference_date`.
+        ValueError
+            If the build reads carbonate sensitivities from forcing files but
+            they are missing or incomplete (see
+            `_validate_carbonate_sensitivity_inputs`).
 
         Notes
         -----
@@ -2005,6 +2113,7 @@ class ROMSSimulation(Simulation):
         post_run : Performs post-processing steps after execution.
         """
         self._validate_reference_dates()
+        self._validate_carbonate_sensitivity_inputs()
 
         if self.use_pio:
             self._validate_pio_inputs()
@@ -2124,6 +2233,68 @@ class ROMSSimulation(Simulation):
                 "read by ROMS with ParallelIO:\n- " + "\n- ".join(problems)
             )
 
+    def _validate_carbonate_sensitivity_inputs(self) -> None:
+        """Ensure a CDR-LiTE build that reads its carbonate sensitivities from
+        forcing files can find the variables ROMS reads.
+
+        A ucla-roms >= 0.9 build with the `CDR_LITE` cppkey reads
+        `ddic_dco2`/`ddic_dalk` and their time variables as ordinary forcing
+        unless `cdr_lite_settings.cdr_online_carbonate_sensitivity` (effective
+        value, after `namelist_overrides`) computes them online. ROMS looks the
+        variables up by name in every file of `frcfiles`, so they may come from
+        any staged forcing dataset (`carbonate_sensitivity`, but also
+        `surface_forcing` or `forcing_corrections`): the union of variables
+        over the first file of each of those datasets must cover
+        `CARBONATE_SENSITIVITY_VARIABLES`. Otherwise ROMS aborts opaquely at
+        run time. Does nothing when `CDR_LITE` is not defined in the staged
+        `cppdefs.opt`, or when the sensitivities are computed online.
+
+        Raises
+        ------
+        ValueError
+            If no staged forcing file provides one or more variables in
+            `CARBONATE_SENSITIVITY_VARIABLES` (all missing variables and the
+            files searched are listed).
+        """
+        if not self._active_cppdefs_for_precheck().get("cdr_lite", False):
+            return
+
+        nml, schema, checkout_target = self._read_raw_namelist()
+        nml = self._layer_namelist_overrides(nml, schema, checkout_target)
+        # Only the 0.9.0+ schema has the group; a build old enough to lack it
+        # cannot compute the sensitivities online either.
+        settings = getattr(nml, "cdr_lite_settings", None)
+        if getattr(settings, "cdr_online_carbonate_sensitivity", False):
+            return
+
+        missing = list(CARBONATE_SENSITIVITY_VARIABLES)
+        searched: list[Path] = []
+        for dataset in self._forcing_datasets:
+            # Header read of each dataset's first file only: all files of one
+            # dataset come from one writer.
+            files = dataset._working_copy_files() if dataset.exists_locally else []
+            if not files:
+                continue
+            still_missing = missing_carbonate_sensitivity_variables(files[0])
+            missing = [name for name in missing if name in still_missing]
+            searched.append(files[0])
+            if not missing:
+                return
+
+        message = (
+            "The ROMS build defines CDR_LITE and "
+            "cdr_lite_settings.cdr_online_carbonate_sensitivity is off, so ROMS "
+            "reads the carbonate sensitivities from forcing files, but no "
+            f"forcing file provides {', '.join(missing)} "
+            f"(searched: {', '.join(p.name for p in searched) or 'no staged files'})."
+        )
+        if not self.carbonate_sensitivity:
+            message += (
+                " Add forcing.carbonate_sensitivity to the blueprint or use the "
+                "carbonate-sensitivity-from workplan directive."
+            )
+        raise ValueError(f"{message} {CARBONATE_SENSITIVITY_REMEDY}")
+
     def prepare_launch(self, job_name: str | None = None) -> LaunchPlan:
         """Prepare everything needed to launch ROMS, without launching it.
 
@@ -2202,7 +2373,9 @@ class ROMSSimulation(Simulation):
         # symlink roms exe into run dir to simplify running by hand for troubleshooting.
         roms_symlink_path = run_path / self.exe_path.name
         roms_symlink_path.unlink(missing_ok=True)
-        roms_symlink_path.symlink_to(self.exe_path)
+        symlink_relative(
+            roms_symlink_path, self.exe_path, within=self.fs_manager.root_dir
+        )
 
         n_procs = self.discretization.n_procs_tot
         roms_exec_cmd = " ".join(

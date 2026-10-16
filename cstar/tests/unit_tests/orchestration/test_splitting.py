@@ -68,10 +68,10 @@ def test_roms_marbl_transform_registry(
 
 @pytest.mark.parametrize(
     "application",
-    ["sleep", "unknown-app-id"],
+    ["hello_world", "unknown-app-id"],
 )
-def test_sleep_transform_registry(application: str) -> None:
-    """Verify that the transform registry returns no transforms for sleep or unknown applications.
+def test_no_transforms_registered(application: str) -> None:
+    """Verify that the transform registry returns no transforms for applications without any.
 
     Confirm that querying the registry does not raise an exception.
     """

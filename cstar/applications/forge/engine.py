@@ -45,6 +45,7 @@ from cstar.applications.forge.blueprint import ForgeBlueprint, emitted_provenanc
 from cstar.applications.forge.host import HostPaths
 from cstar.applications.forge.namelist_model import validate_run_time_sections
 from cstar.base.env import ENV_CSTAR_RUNID
+from cstar.roms.namelist import release_ref_for_remote
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -113,10 +114,20 @@ PROCESSING_FILLED_SECTIONS = (
 # ``test_configure_build_does_not_clobber_generated_river_and_tidal_settings`` for the
 # regression coverage.
 #
+# ``param.nt_cdr_oae``/``param.nt_cdr_dor`` are read off the generated CDR
+# forcing's tracer axis (``cdr_tracer_counts``), so under ``bgc_mode: cdr_lite``
+# the resolver's stored zeros must not revert them. (``param.nt_passive`` is
+# user-owned: generation checks it against the file instead of overwriting it.)
+# The "upscaled" CDR mode generates no CDR forcing, so its counts are user-stated
+# instead; they reach the build through ``resolved_settings`` (the base this
+# overlay applies to), which the exclusion leaves alone.
+#
 # ``cdr_output.do_cdr_output`` is deliberately NOT listed: it is a user setting
 # and must survive the overlay. ``ForgeExecutor.configure_build`` asserts it True
 # for an active CDR mode under MARBL (``check_cdr_forcing_mode``); without MARBL
-# the CDR release runs with it left off, since cdr_output needs MARBL.
+# the CDR release runs with it left off, since cdr_output needs MARBL. Likewise
+# ``cdr_lite_output.do_cdr_lite_output``, which ``configure_build`` forces on under
+# ``bgc_mode: cdr_lite``.
 GENERATION_DERIVED_LEAF_KEYS: dict[str, tuple[str, ...]] = {
     "river_frc": (
         "river_source",
@@ -134,6 +145,7 @@ GENERATION_DERIVED_LEAF_KEYS: dict[str, tuple[str, ...]] = {
         "forcing_parameterized",
         "cdr_volume",
     ),
+    "param": ("nt_cdr_oae", "nt_cdr_dor"),
     # Only ntides is genuinely generation-derived (the real tidal-constituent count
     # is only known once TPXO data is actually extracted). bry_tides/pot_tides/
     # ana_tides are static booleans -- the resolver/model_settings is their single
@@ -268,6 +280,7 @@ def forge_blueprint_to_builder_kwargs(cfg: ForgeBlueprint) -> dict[str, Any]:
         cdr_mode=cfg.cdr.mode,
         cdr_forcing=cfg.cdr.cdr_forcing,
         cdr_forcing_file=cfg.cdr.cdr_forcing_file,
+        carbonate_sensitivity=cfg.carbonate_sensitivity,
         forcing_override=sources_to_forcing_override(cfg),
         model_reference_date=cfg.run.model_reference_date,
         source_dataset_keys=list(cfg.datasets),
@@ -389,7 +402,10 @@ def process_forge_blueprint(
         is recorded.
     validate :
         If True (default), fail fast — validate the config's ``model_settings``
-        against the run-time schema *before* any downloads/generation.
+        against the run-time schema *before* any downloads/generation. A
+        commit-hash ``code.roms`` pin is first resolved to its release tag
+        (:func:`~cstar.roms.namelist.release_ref_for_remote`, a treeless clone
+        of ``code.roms.location``), as the roms_marbl step resolves it.
     executor_factory :
         Maps the ``ForgeBlueprint`` to an executor; defaults to the forge
         ``ForgeExecutor``. Injectable for tests and for the eventual C-Star app
@@ -443,9 +459,10 @@ def process_forge_blueprint(
         warnings.warn(integrity, UserWarning, stacklevel=2)
 
     if validate:
-        problems = validate_run_time_sections(
-            cfg.model_settings, roms_ref=cfg.code.roms.commit or cfg.code.roms.branch
-        )
+        roms_ref = cfg.code.roms.commit or cfg.code.roms.branch
+        if roms_ref:
+            roms_ref = release_ref_for_remote(cfg.code.roms.location, roms_ref)
+        problems = validate_run_time_sections(cfg.model_settings, roms_ref=roms_ref)
         if problems:
             raise ValueError(
                 "forge_blueprint.model_settings has invalid values (fix before "
@@ -503,7 +520,6 @@ def process_forge_blueprint(
         executor.configure_build(
             compile_time_settings=compile_overrides,
             run_time_settings=run_overrides,
-            n_tracers=cfg.n_tracers,
             provenance=provenance,
         )
     return executor

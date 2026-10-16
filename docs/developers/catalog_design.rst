@@ -24,9 +24,10 @@ Longer-term architecture
 
 .. note::
 
-   Nothing in this section is implemented. It records the plan of record for
-   the catalog's evolution, for design discussion -- not the current
-   behavior of ``cstar.catalog``.
+   Apart from the run manifest described under "Downstream outputs
+   reporting back", nothing in this section is implemented. It records the
+   plan of record for the catalog's evolution, for design discussion -- not
+   the current behavior of ``cstar.catalog``.
 
 The plan rests on one core principle and a few concrete follow-on pieces.
 
@@ -69,14 +70,22 @@ query in either direction.
 Downstream outputs reporting back
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-The longer-term design has the executor/run machinery drop a small **run
-manifest** (blueprint id + content_hash, roms_marbl blueprint path, output
-URIs, machine, timestamps, status) in the run's working directory and/or a
-``runs/`` area of the user's catalog store. An indexer would ingest manifests
-exactly like catalog entries, so "given a domain spec, show all outputs"
-becomes a chain of edges: domain spec -> blueprints -> run manifests -> output
-paths. The executor still never *reads* the catalog under this design; it
-only emits one more self-describing artifact.
+The run machinery now drops a **run manifest** (``cstar-run.yaml``) in each
+run's directory, and each step process drops a **step record**
+(``cstar-step.yaml``) in its working directory; the schemas are published
+under ``docs/schemas/run/``. The manifest records the run's identity, one
+attempt per scheduling (start time, system, package versions, status), each
+step's definition hash, blueprint identity, status and record, and the run's
+external dependencies, including the catalog entries and producer blueprints
+found in the blueprints' provenance. The step record carries the outcome,
+timestamps and, from the next release, the products with their kinds, sizes
+and metadata. See :ref:`workplan_run_manifest`.
+
+The executor still never *reads* the catalog; it only emits these
+self-describing artifacts. An indexer that ingests manifests exactly like
+catalog entries is still future work, and would turn "given a domain spec,
+show all outputs" into a chain of edges: domain spec -> blueprints -> run
+manifests -> output paths.
 
 Assets: making blueprints-with-files portable
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -102,5 +111,5 @@ Unresolved design questions for the (also unimplemented) architecture above.
 - Shared-layer ergonomics: is a plain git clone enough, or is a dedicated
   ``cstar forge catalog`` subcommand group (init/where/list/contribute)
   worth building first?
-- Run-manifest schema, and where the indexer lives -- must respect the
+- Where the indexer that ingests run manifests lives -- it must respect the
   executor/catalog boundary either way.

@@ -17,13 +17,15 @@ from cstar.execution.file_system import (
     StateDirectoryManager,
     local_copy,
     step_disk_usage,
+    symlink_relative,
 )
-from cstar.orchestration.models import Workplan
+from cstar.orchestration.orchestration import LiveWorkplan, read_workplan
 from cstar.orchestration.serialization import (
     PersistenceMode,
     deserialize,
-    deserialize_all,
+    read_all,
     serialize,
+    try_deserialize,
 )
 
 log = get_logger(__name__)
@@ -89,6 +91,49 @@ class WorkplanRun(BaseModel):
         self.step_sizes.update(sizes)
         self.size_measured_at = utc_now()
 
+    def reanchored(self) -> "WorkplanRun":
+        """Follow the run to where the current data home keeps it, if it has moved.
+
+        The record lives in the state home but names directories in the data
+        home. When the recorded run directory is gone and the data home holds
+        a directory for the run-id, the run was copied or moved and
+        `CSTAR_DATA_HOME` repointed: the run directory and the recorded paths
+        under it (the transformed workplan) follow. A record whose run
+        directory exists is left alone, wherever it is, and so is one whose
+        directories cannot be inspected.
+
+        Returns
+        -------
+        WorkplanRun
+            This record, or a copy with the relocated paths.
+        """
+        try:
+            if self.output_path.exists():
+                return self
+
+            current = StateDirectoryManager.data_dir(self.run_id)
+            if current == self.output_path or not current.is_dir():
+                return self
+        except OSError as ex:
+            # e.g. an unreadable directory: it cannot be told whether the run moved
+            log.debug(f"Unable to tell whether run {self.run_id!r} has moved: {ex}")
+            return self
+
+        def _moved(path: Path) -> Path:
+            """Return `path` under the current run directory when it was under the recorded one."""
+            if path.is_relative_to(self.output_path):
+                return current / path.relative_to(self.output_path)
+            return path
+
+        log.debug(f"Run {self.run_id!r} moved from {self.output_path} to {current}")
+        return self.model_copy(
+            update={
+                "output_path": current,
+                "trx_workplan_path": _moved(self.trx_workplan_path),
+                "workplan_path": _moved(self.workplan_path),
+            }
+        )
+
     @staticmethod
     def get_default_run_id(uri: str) -> str:
         """Generate a run-id based on the name of a `Workplan`
@@ -96,14 +141,25 @@ class WorkplanRun(BaseModel):
         Parameters
         ----------
         uri : str
-            The local or remote path to a persisted workplan.
+            The local or remote path to a persisted workplan, authored or
+            transformed.
 
         Returns
         -------
         str
         """
         with local_copy(uri) as local_path:
-            wp = deserialize(local_path, Workplan)
+            wp = read_workplan(local_path)
+            if isinstance(wp, LiveWorkplan):
+                # a transformed workplan belongs to the run whose directory holds
+                # it, which may have been started under an explicit run-id
+                run_dir = local_path.resolve().parent
+                if (
+                    run_dir.name
+                    and StateDirectoryManager.data_dir(run_dir.name).resolve()
+                    == run_dir
+                ):
+                    return run_dir.name
 
         try:
             return slugify(wp.name)
@@ -120,6 +176,12 @@ class WorkplanRun(BaseModel):
         Path
         """
         return StateDirectoryManager.run_state_dir(run_id=self.run_id)
+
+
+def _try_read_run(path: Path) -> WorkplanRun | None:
+    """Read a run record, following the run if it has moved; `None` if unreadable."""
+    run = try_deserialize(path, WorkplanRun)
+    return run.reanchored() if run is not None else None
 
 
 async def measure_step_sizes(
@@ -404,10 +466,10 @@ class TrackingRepository(LoggingMixin):
             if not run_path.exists():
                 rd_out = run_date or "latest"
                 msg = f"No run file for `{run_id}` on `{rd_out}` found in {run_path}`"
-                self.log.warning(msg)
+                self.log.debug(msg)
                 return None
 
-            return deserialize(run_path, WorkplanRun)
+            return deserialize(run_path, WorkplanRun).reanchored()
 
     async def get_workplan_run(
         self,
@@ -455,7 +517,7 @@ class TrackingRepository(LoggingMixin):
             self.log.warning("Run could not be persisted")
 
         latest_path.unlink(missing_ok=True)
-        latest_path.symlink_to(run_path)
+        symlink_relative(latest_path, run_path)
 
         msg = f"Run persisted to: {run_path}"
         self.log.debug(msg)
@@ -498,7 +560,7 @@ class TrackingRepository(LoggingMixin):
                 self.log.warning(f"No run file for `{run_id}` found in {run_path}`")
                 return None
 
-            run = deserialize(run_path, WorkplanRun)
+            run = deserialize(run_path, WorkplanRun).reanchored()
             mutate(run)
             self._write_run_locked(run)
             return run
@@ -611,9 +673,7 @@ class TrackingRepository(LoggingMixin):
             The successfully deserialized run records.
         """
         limit = max_concurrency()
-        results = await deserialize_all(
-            list(run_paths), WorkplanRun, limit, sem=self._sem
-        )
+        results = await read_all(run_paths, _try_read_run, limit, sem=self._sem)
 
         runs: list[WorkplanRun] = []
         unreadable: list[Path] = []

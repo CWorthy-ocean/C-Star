@@ -5,12 +5,16 @@ import typing as t
 from pathlib import Path
 
 import typer
+import yaml
+from click.core import ParameterSource
 from pydantic import BaseModel, ValidationError
 
 from cstar.base.env import (
     ENV_CSTAR_CLI_DRY_RUN,
+    ENV_CSTAR_DATA_HOME,
     ENV_CSTAR_LOG_LEVEL,
     ENV_CSTAR_RUNID,
+    ENV_CSTAR_STATE_HOME,
 )
 from cstar.base.exceptions import CstarExpectationFailed
 from cstar.base.feature import is_flag_enabled
@@ -66,15 +70,23 @@ from cstar.orchestration.dag_runner import (
     check_clobber_targets,
     get_launcher,
     load_external_runs,
+    load_run_state,
     original_workplan_backup,
+    refresh_run_manifest,
     run_dag,
 )
 from cstar.orchestration.launch.slurm import SlurmLauncher
 from cstar.orchestration.models import BlueprintCore, Step, Workplan
-from cstar.orchestration.orchestration import LiveWorkplan, ProcessHandle
+from cstar.orchestration.orchestration import (
+    LiveWorkplan,
+    ProcessHandle,
+    is_transformed_workplan,
+)
+from cstar.orchestration.run_check import report_orphans
 from cstar.orchestration.serialization import (
     PersistenceMode,
     deserialize,
+    read_raw,
     serialize,
     try_deserialize,
     validate_serialized_entity,
@@ -222,8 +234,8 @@ def get_run_summary_display(summary: ExecutiveRunSummary) -> str:
     )
 
     prompts = [
-        ("For run status details", f"cstar workplan status {summary.run_id}"),
-        ("To review logs", f"cstar workplan log {summary.run_id} <step-name>"),
+        ("For run status details", f"cstar run status {summary.run_id}"),
+        ("To review logs", f"cstar run log {summary.run_id} <step-name>"),
     ]
 
     actions_content = [f"{prefix}{INDENT}- {present(*prompt)}" for prompt in prompts]
@@ -327,7 +339,7 @@ def resolve_clobber_selection(wp_path: Path, clobber_steps: list[str]) -> list[s
     if not clobber_steps:
         return clobber_steps
 
-    wp = try_deserialize(wp_path, Workplan) or try_deserialize(wp_path, LiveWorkplan)
+    wp = try_deserialize(wp_path, Workplan) or LiveWorkplan.try_load(wp_path)
     if wp is None:
         return clobber_steps
 
@@ -359,7 +371,7 @@ def auto_compose(path: str) -> str:
         wp_path = bp_path.with_name(wp_name)
 
         wp = Workplan(
-            name=f"{bp.name} Host",
+            name=f"{slugify(bp.name)}-host",
             description="Automated Workplan wrapping the execution of a single blueprint.",
             steps=[
                 Step(
@@ -458,11 +470,16 @@ def preprocess_path(workplan_path: str | None) -> str | None:
 
                 local_path = Path(auto_compose(str(local_path)))
 
-                validation_result = validate_serialized_entity(local_path, Workplan)
+                # the transformed workplan of a run is re-entered, never prepared
+                live = is_transformed_workplan(local_path)
+                klass: type[Workplan] = LiveWorkplan if live else Workplan
+                validation_result = validate_serialized_entity(local_path, klass)
                 if not validation_result.item:
                     log.error(validation_result.error_msg)
                     msg = f"The workplan file in `{workplan_path}` is improperly formatted"
                     raise typer.BadParameter(msg)
+                if live:
+                    return str(local_path)
 
                 try:
                     migrate_steps(local_path, validation_result.item)
@@ -471,17 +488,163 @@ def preprocess_path(workplan_path: str | None) -> str | None:
                     raise typer.BadParameter(msg) from ex
                 return str(local_path)
         except FileNotFoundError as ex:
+            if is_known_run_id(workplan_path):
+                msg = (
+                    f"{workplan_path!r} is a run-id, not a workplan file; use "
+                    f"`cstar workplan run {ARG_RUN_ID} {workplan_path} {ARG_RESUME}`"
+                )
+                raise typer.BadParameter(msg) from ex
+
             msg = f"Workplan not found at path: {workplan_path}"
             raise typer.BadParameter(msg) from ex
 
     return workplan_path
 
 
+def is_known_run_id(value: str) -> bool:
+    """Determine whether a value is the run-id of a recorded run.
+
+    Only a value that is already a run-id (its own slug) is looked up, so a
+    mistyped file name is not mistaken for one. The lookup only checks that
+    the run's latest record exists: it takes no lock and reads no record.
+
+    Parameters
+    ----------
+    value : str
+        The value supplied where a workplan path was expected.
+
+    Returns
+    -------
+    bool
+    """
+    try:
+        if value != slugify(value):
+            return False
+
+        return TrackingRepository().latest_path(value).exists()
+    except (ValueError, OSError):
+        return False
+
+
+def read_slugged_workplan(path: Path, mode: PersistenceMode) -> Workplan:
+    """Read a workplan with its name normalized to a slug.
+
+    A workplan recorded before names had to be slugs carries a free-form name
+    that no longer validates, but is otherwise the same workplan.
+
+    Parameters
+    ----------
+    path : Path
+        The workplan file.
+    mode : PersistenceMode
+        How the file is persisted.
+
+    Returns
+    -------
+    Workplan
+
+    Raises
+    ------
+    FileNotFoundError
+        If the file does not exist.
+    ValueError
+        If the content is not a valid workplan.
+    """
+    raw = read_raw(path, mode)
+    if not isinstance(raw, dict):
+        msg = f"The content of {str(path)!r} is not a mapping"
+        raise ValueError(msg)
+
+    raw.pop("$schema", None)
+    if isinstance(raw.get("name"), str):
+        raw["name"] = slugify(raw["name"])
+
+    return Workplan.model_validate(raw)
+
+
+def refuse_run_id_collision(wp_path: Path, run_id: str, *, explicit: bool) -> None:
+    """Refuse to re-enter a run that a different workplan started.
+
+    A derived run-id is the workplan's name, so two different workplans that
+    share a name share a run directory and the later one would overwrite the
+    earlier one's state and originals. The same workplan reaching the run by
+    another path (a fresh copy of a remote file, a moved checkout) is not a
+    collision, so a different path is compared by content, names normalized,
+    against the original backup of the recorded run. An explicit `--run-id` is
+    taken as the user's choice to re-enter the run.
+
+    Parameters
+    ----------
+    wp_path : Path
+        The local path of the workplan about to run.
+    run_id : str
+        The run-id the workplan will run under.
+    explicit : bool
+        Whether the run-id was supplied with `--run-id` rather than derived.
+
+    Raises
+    ------
+    typer.BadParameter
+        If the run-id was derived and its latest record is of a different
+        workplan, the supplied file cannot be read, or the original backup of
+        the recorded run is missing or unreadable.
+    """
+    if explicit:
+        return
+
+    record = asyncio.run(TrackingRepository().get_workplan_run(run_id))
+    if record is None or record.workplan_path.resolve() == wp_path.resolve():
+        return
+
+    backup = original_workplan_backup(record.workplan_path, record.output_path)
+    claim = (
+        f"Run-id {run_id!r}, derived from the workplan name, belongs to a run "
+        f"started from {str(record.workplan_path)!r}; the workplan at "
+        f"{str(wp_path)!r} would overwrite it"
+    )
+    escape = f"pass {ARG_RUN_ID} <other-id> or {ARG_RUN_ID} {run_id} to re-enter"
+
+    try:
+        supplied = read_slugged_workplan(wp_path, PersistenceMode.auto)
+    except (OSError, RuntimeError, ValueError, yaml.YAMLError) as ex:
+        msg = f"The workplan at {str(wp_path)!r} could not be read: {ex}"
+        raise typer.BadParameter(msg) from ex
+
+    try:
+        recorded = read_slugged_workplan(backup, PersistenceMode.yaml)
+    except FileNotFoundError as ex:
+        msg = f"{claim}, and there is no original backup to compare; {escape}."
+        raise typer.BadParameter(msg) from ex
+    except (OSError, RuntimeError, ValueError, yaml.YAMLError) as ex:
+        msg = (
+            f"{claim}, and the original backup for that run could not be read: "
+            f"{ex}; {escape}."
+        )
+        raise typer.BadParameter(msg) from ex
+
+    if supplied != recorded:
+        msg = (
+            f"{claim} (its content differs from the workplan recorded for that "
+            f"run). Pass {ARG_RUN_ID} <other-id> to run this workplan separately, "
+            f"{ARG_RUN_ID} {run_id} to re-enter the run with it, or rename it."
+        )
+        raise typer.BadParameter(msg)
+
+
+RELOCATABLE_HOMES: t.Final[frozenset[str]] = frozenset(
+    {ENV_CSTAR_DATA_HOME, ENV_CSTAR_STATE_HOME}
+)
+"""The captured variables a reload leaves to the current shell."""
+
+
 async def handle_run_reloading(run_id: str) -> WorkplanRun:
     """Locate the prior run for the run-id and restore its environment.
 
     The environment variables captured when the run was originally started
-    are re-exported so the reload executes under matching configuration.
+    are re-exported so the reload executes under matching configuration, with
+    one warning naming those that differ from the current shell. The data and
+    state homes are not re-exported: they say where the run is now, and a
+    relocated run must keep resolving against the current ones.
 
     Parameters
     ----------
@@ -505,13 +668,60 @@ async def handle_run_reloading(run_id: str) -> WorkplanRun:
         raise typer.BadParameter(msg)
 
     # ensure the environment matches the prior run
-    os.environ.update(wp_run.environment)
+    recorded = {
+        name: value
+        for name, value in wp_run.environment.items()
+        if name not in RELOCATABLE_HOMES
+    }
+    differing = {
+        name: value for name, value in recorded.items() if os.environ.get(name) != value
+    }
+    if differing:
+        listing = ", ".join(
+            f"{name} (now {os.environ.get(name)!r}, recorded {value!r})"
+            for name, value in differing.items()
+        )
+        log.warning(
+            f"Re-exporting recorded settings that differ from this shell: {listing}"
+        )
+    os.environ.update(recorded)
 
     source = wp_run.workplan_path
     msg = f"Re-starting run-id {run_id!r} with workplan originating in {source!r}"
     log.info(msg)
 
     return wp_run
+
+
+def verify_live_source(trx_path: Path, wp_run: WorkplanRun) -> None:
+    """Ensure a transformed workplan supplied by path is the one `wp_run` executes.
+
+    A transformed workplan re-enters the run it belongs to. A copy of it
+    elsewhere, or a rotated earlier attempt, is a plan no record executes and
+    is refused until a run can be attached from disk.
+
+    Parameters
+    ----------
+    trx_path : Path
+        The transformed workplan path supplied on the command line.
+    wp_run : WorkplanRun
+        The recorded run being re-entered.
+
+    Raises
+    ------
+    typer.BadParameter
+        If the supplied path is not the transformed workplan the record executes.
+    """
+    recorded = wp_run.trx_workplan_path
+    if trx_path.resolve() == recorded.resolve():
+        return
+
+    msg = (
+        f"{str(trx_path)!r} is a transformed workplan, but run {wp_run.run_id!r} "
+        f"executes {str(recorded)!r}; pass {ARG_RUN_ID} {wp_run.run_id} without a "
+        "workplan path to re-enter the run as recorded"
+    )
+    raise typer.BadParameter(msg)
 
 
 def verify_resume_source(wp_path: Path, wp_run: WorkplanRun) -> None:
@@ -577,7 +787,10 @@ def run(
         str,
         typer.Option(
             ARG_RUN_ID,
-            help="The unique identifier for an execution of the workplan.",
+            help=(
+                "The unique identifier for an execution of the workplan; "
+                "defaults to the workplan's name."
+            ),
             autocompletion=list_runs,
             callback=cb_pipeline(
                 normalize_runid, preprocess_runid, set_env(ENV_CSTAR_RUNID)
@@ -650,6 +863,8 @@ def run(
         msg = "`--var` and `--varfile` must not be supplied together"
         raise typer.BadParameter(msg)
 
+    live = bool(path) and Path(path).is_file() and is_transformed_workplan(Path(path))
+
     problems = [
         msg
         for condition, msg in (
@@ -660,6 +875,13 @@ def run(
                 (
                     f"{ARG_PRE_RUN} requires a workplan path: reloading a run by "
                     "--run-id replays its recorded plan as-is"
+                ),
+            ),
+            (
+                pre_run and live,
+                (
+                    f"{ARG_PRE_RUN} needs the authored workplan, not its transformed "
+                    "copy, which replays the recorded plan as-is"
                 ),
             ),
             (
@@ -682,11 +904,13 @@ def run(
     if problems:
         raise typer.BadParameter("; ".join(problems))
 
-    reload = resume or not path
+    reload = resume or not path or live
 
     if reload:
         wp_run = asyncio.run(handle_run_reloading(run_id))
-        if path:
+        if path and live:
+            verify_live_source(Path(path), wp_run)
+        elif path:
             verify_resume_source(Path(path), wp_run)
         original_path, trx_path = wp_run.workplan_path, wp_run.trx_workplan_path
         path = str(trx_path)
@@ -697,7 +921,7 @@ def run(
             user_vars = t.cast("Mapping[str, str]", ctx.obj)
 
             if reload:
-                wp = deserialize(wp_path, LiveWorkplan)
+                wp = LiveWorkplan.load(wp_path)
                 if resume and wp.pre_run:
                     msg = (
                         f"Run {run_id!r} is a pre-run; retry its failed steps with "
@@ -707,12 +931,17 @@ def run(
                 pre_run = wp.pre_run
                 apply_clobber_overrides(wp, clobber)
                 if resume:
-                    asyncio.run(apply_resume_overrides(wp, run_id, get_launcher(wp)))
+                    # load the state once: refresh the manifest, then apply it
+                    launcher = get_launcher(wp)
+                    status = asyncio.run(load_run_state(run_id, launcher))
+                    refresh_run_manifest(wp_run.output_path, run_id, status)
+                    asyncio.run(apply_resume_overrides(wp, status))
                 external = asyncio.run(
                     load_external_runs(wp, get_launcher(wp, force_local=pre_run))
                 )
                 exit_on_external_problems(external, external_dependencies(wp))
                 planner = build_planner(wp, external.tasks())
+                report_orphans(wp_run.output_path, run_id, wp)
 
                 wp_run = asyncio.run(
                     run_dag(
@@ -724,6 +953,12 @@ def run(
                     ),
                 )
             else:
+                refuse_run_id_collision(
+                    wp_path,
+                    run_id,
+                    explicit=ctx.get_parameter_source("run_id")
+                    is not ParameterSource.DEFAULT,
+                )
                 wp_run = asyncio.run(
                     build_and_run_dag(
                         wp_path,

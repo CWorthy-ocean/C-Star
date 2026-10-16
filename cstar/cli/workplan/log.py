@@ -8,9 +8,8 @@ from cstar.cli.common import get_from_ctxmap
 from cstar.cli.workplan.shared import (
     RunIdArgument,
     autocomplete_step_list,
-    set_ctxmap,
+    preload_step,
 )
-from cstar.orchestration.models import Workplan
 from cstar.orchestration.orchestration import LiveStep
 
 log = get_logger(__name__)
@@ -27,50 +26,6 @@ The `run_id` may be from an in-progress or completed run.
 """
 
 ARG_MONITOR: t.Final[str] = "--monitor"
-
-
-def preload_step(context: typer.Context, step_name: str) -> str:
-    """Given a step-name, ensure is a valid name in a preloaded workplan
-
-    NOTE: Requires the workplan to be loaded into context dict as "workplan", e.g.
-    `wp = cstar.cli.common.get_from_ctxmap(context, "workplan", Workplan)`
-
-    See also: `cstar.cli.common.set_ctxmap`
-
-    Parameters
-    ----------
-    context : typer.Context
-        The typer context.
-    step_name : str
-        The user-suppplied step-name.
-
-    Returns
-    -------
-    str
-
-    Raises
-    ------
-    typer.BadParameter
-        - Raised when the step-name cannot be found in the target workplan.
-    """
-    run_id = str(context.params.get("run_id", ""))
-    if not run_id:
-        msg = "A run-id is required to retrieve steps"
-        raise typer.BadParameter(msg, param_hint="run_id")
-
-    wp = get_from_ctxmap(context, "workplan", Workplan)
-    step = next((x for x in wp.steps if step_name in {x.name, x.safe_name}), None)
-
-    if step is None:
-        valid_steps = ", ".join(f"{s.name!r}" for s in wp.steps)
-        raise typer.BadParameter(
-            f"Unable to monitor logs for unknown step: {step_name!r}. Valid values: {valid_steps}",
-            param_hint="step_name",
-        )
-
-    set_ctxmap(context, "live_step", LiveStep.from_step(step))
-
-    return step_name
 
 
 @app.command(name="log", help=HELP_LONG, short_help=HELP_SHORT)

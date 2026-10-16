@@ -31,6 +31,7 @@ from cstar.cli.workplan.ls import (
     sorters,
     table_formatter,
 )
+from cstar.orchestration.models import LEGACY_TRANSFORMED_NAME_SUFFIX
 from cstar.orchestration.tracking import KEY_RUN_NAME, WorkplanRun
 
 LS_LOGGER = "cstar.cli.workplan.ls"
@@ -128,7 +129,7 @@ def test_itemview_size_shows_hint_for_unsized_table_rows() -> None:
     """Verify an uncomputed size renders the refresh hint in table format."""
     view = make_view(run_id="run-9", raw_size=-1, format="table")
 
-    assert "cstar workplan status run-9" in view.size
+    assert "cstar run status run-9" in view.size
     assert "--size" in view.size
 
 
@@ -508,7 +509,7 @@ def test_table_formatter_renders_one_row_per_view() -> None:
     assert "r1" in rendered
     assert "alpha" in rendered
     assert "7MB" in rendered
-    assert "cstar workplan status r2" in rendered
+    assert "cstar run status r2" in rendered
     assert T0.astimezone().strftime("%Y-%m-%d %H:%M") in rendered
 
 
@@ -619,6 +620,17 @@ async def test_adapt_runs_builds_views_from_run_metadata(name: str) -> None:
     assert view.raw_start == T0
     assert view.format == "json"
     assert view.name == name
+
+
+async def test_adapt_runs_strips_the_legacy_suffix_from_a_stored_name() -> None:
+    """Verify a run recorded by an earlier release, whose stored name carries
+    the `(transformed)` suffix, is listed under the plain workplan name.
+    """
+    run = make_run("r1", name=f"plan-a{LEGACY_TRANSFORMED_NAME_SUFFIX}")
+
+    views = await adapt_runs_to_views([run], {}, "json")
+
+    assert views[0].name == "plan-a"
 
 
 async def test_adapt_runs_defaults_size_when_metadata_is_missing(

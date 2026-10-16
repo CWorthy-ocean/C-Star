@@ -81,6 +81,46 @@ Two keys are deprecated:
   ``rst_path`` cannot be combined with a ``continue-from`` directive on the
   same step, since both would set ``initial_conditions``.
 
+carbonate-sensitivity-from
+--------------------------
+
+Supplies the carbonate sensitivities that a CDR-LiTE run reads as surface
+forcing -- the variables ``ddic_dco2`` and ``ddic_dalk`` -- from an earlier
+ROMS-MARBL run, by setting the blueprint's ``forcing.carbonate_sensitivity``
+dataset. Configure exactly one of:
+
+- ``step`` -- the name of the step whose output holds the carbonate
+  sensitivity files; a step of another workplan run is named
+  ``<step>@<alias>`` (see :ref:`workplan_external_runs`). The step must be
+  listed in the step's ``depends_on``, directly or through an earlier step.
+- ``path`` -- a fixed directory or file path to the carbonate sensitivity files
+
+``step`` and ``path`` are mutually exclusive. Several sources can be joined by
+separating them with ``;`` in a single ``step`` or ``path`` value; the files
+from every listed source are combined, in the order given, and every listed
+source must contain carbonate sensitivity files.
+
+ROMS writes the sensitivities to ``<output_root_name>_cdrgas.<timestamp>.nc``
+files only when the producing run has MARBL enabled and its namelist sets
+``do_cdr_gas_exch_output`` to true (``cdr_gas_exch_output_settings`` in the
+blueprint's ``namelist_overrides``; ``cdr_gas_exch_output`` in a forge output
+spec), so the step the directive reads from must be a ROMS-MARBL run with that
+option on. The files found there replace any ``forcing.carbonate_sensitivity``
+entries already in the blueprint.
+
+.. code-block:: yaml
+
+    directives:
+      carbonate-sensitivity-from:
+        step: marbl_run
+
+.. note::
+
+    ucla-roms releases up to 0.9.1 write the ``_cdrgas`` files without the
+    forcing time variables a CDR-LiTE build expects. A CDR-LiTE step fed from
+    such a run fails during setup with a message naming the missing
+    variables.
+
 Ordering
 --------
 

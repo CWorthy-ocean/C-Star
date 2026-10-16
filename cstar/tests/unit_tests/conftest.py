@@ -2,6 +2,9 @@ import functools
 import logging
 import os
 import signal
+import socket
+import subprocess
+import sys
 import uuid
 from collections.abc import Awaitable, Callable, Generator, Iterable, Sequence
 from contextlib import AbstractContextManager, contextmanager
@@ -45,11 +48,150 @@ from cstar.orchestration.orchestration import LiveStep, LiveWorkplan
 from cstar.orchestration.serialization import deserialize, serialize
 from cstar.orchestration.tracking import TrackingRepository, WorkplanRun
 from cstar.pio.external_codebase import PIOExternalCodeBase
+from cstar.roms.namelist import release_ref_for_remote
 from cstar.tests.unit_tests.fake_abc_subclasses import (
     FakeExternalCodeBase,
     FakeInputDataset,
     StubSimulation,
 )
+
+################################################################################
+# Network guard
+################################################################################
+
+_LOOPBACK_HOSTS = frozenset({"localhost", "127.0.0.1", "::1"})
+
+
+class NetworkAccessInUnitTestError(RuntimeError):
+    """A unit test tried to reach a remote host outside a pooch download."""
+
+
+def _called_from_pooch() -> bool:
+    """Whether the current call stack runs through pooch.
+
+    Building a real roms-tools Grid downloads ETOPO5 (roms-tools) and the Natural
+    Earth land mask (regionmask) through pooch, which caches them (and CI caches
+    the pooch directories), so those are the one kind of download allowed.
+    """
+    frame = sys._getframe()
+    while frame is not None:
+        if frame.f_globals.get("__name__", "").split(".")[0] == "pooch":
+            return True
+        frame = frame.f_back  # type: ignore[assignment]
+    return False
+
+
+def _refuse_remote_host(host: object) -> None:
+    if isinstance(host, bytes):
+        host = host.decode()
+    if host is None or host in _LOOPBACK_HOSTS or _called_from_pooch():
+        return
+    msg = (
+        f"Unit tests must not use the network (tried to reach {host!r}). "
+        "Mock the fetch or use a local fixture; live fetches made CI flaky."
+    )
+    raise NetworkAccessInUnitTestError(msg)
+
+
+@pytest.fixture(autouse=True)
+def _block_network() -> Generator[None]:
+    """Fail any unit test that resolves a remote host outside a pooch download.
+
+    HTTP clients (requests/urllib3, asyncio) resolve every host, IP literals
+    included, through `socket.getaddrinfo`. Git subprocesses are limited to local
+    repositories. Function-scoped so the guard ends with each unit test and never
+    reaches other test tiers run in the same session.
+    """
+    real_getaddrinfo = socket.getaddrinfo
+
+    def guarded_getaddrinfo(host: object, *args: Any, **kwargs: Any) -> Any:
+        _refuse_remote_host(host)
+        return real_getaddrinfo(host, *args, **kwargs)  # type: ignore[arg-type]
+
+    with (
+        mock.patch("socket.getaddrinfo", guarded_getaddrinfo),
+        mock.patch.dict(os.environ, {"GIT_ALLOW_PROTOCOL": "file"}),
+    ):
+        yield
+
+
+@pytest.fixture(autouse=True)
+def _clear_release_ref_cache() -> Generator[None]:
+    """Forget cached ucla-roms commit-hash resolutions around each unit test.
+
+    `release_ref_for_remote` caches per process, so a warning or a failed
+    resolution from one test would otherwise decide what the next one sees.
+    """
+    release_ref_for_remote.cache_clear()
+    yield
+    release_ref_for_remote.cache_clear()
+
+
+def _tagged_git_repo(repo: Path, tags: Sequence[str | None]) -> list[str]:
+    """Create a local git repo with one commit per entry of `tags`, tagging each
+    commit with its entry unless it is `None`, and return the commit hashes.
+    """
+    repo.mkdir()
+
+    def _git(*args: str) -> str:
+        result = subprocess.run(
+            ["git", "-c", "user.email=t@t", "-c", "user.name=t", *args],
+            cwd=repo,
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        return result.stdout.strip()
+
+    _git("init", "-q")
+    hashes = []
+    for n, tag in enumerate(tags):
+        (repo / "f").write_text(str(n))
+        _git("add", "f")
+        _git("commit", "-q", "-m", f"commit {n}")
+        hashes.append(_git("rev-parse", "HEAD"))
+        if tag is not None:
+            _git("tag", tag)
+    return hashes
+
+
+@pytest.fixture
+def tagged_ucla_roms_clone(tmp_path: Path) -> dict[str, str | Path]:
+    """A tiny local git repo mimicking ucla-roms release-tag history.
+
+    History: commit tagged ``0.4.2`` -> commit tagged only ``exp-marker`` (a
+    non-release tag, which release resolution must ignore) -> commit tagged
+    ``0.5.0``. Returns the repo path and the three commit hashes.
+    """
+    repo = tmp_path / "ucla-roms"
+    hash_0_4_2, hash_after_0_4_2, hash_0_5_0 = _tagged_git_repo(
+        repo, ["0.4.2", "exp-marker", "0.5.0"]
+    )
+    return {
+        "repo": repo,
+        "hash_0_4_2": hash_0_4_2,
+        "hash_after_0_4_2": hash_after_0_4_2,
+        "hash_0_5_0": hash_0_5_0,
+    }
+
+
+@pytest.fixture
+def tagged_ucla_roms_0_11_clone(tmp_path: Path) -> dict[str, str | Path]:
+    """Like `tagged_ucla_roms_clone`, around the 0.11.0 boundary.
+
+    History: commit tagged ``0.10.1`` -> an untagged commit -> commit tagged
+    ``0.11.0``. Returns the repo path and the three commit hashes.
+    """
+    repo = tmp_path / "ucla-roms-0.11"
+    hash_0_10_1, hash_after_0_10_1, hash_0_11_0 = _tagged_git_repo(
+        repo, ["0.10.1", None, "0.11.0"]
+    )
+    return {
+        "repo": repo,
+        "hash_0_10_1": hash_0_10_1,
+        "hash_after_0_10_1": hash_after_0_10_1,
+        "hash_0_11_0": hash_0_11_0,
+    }
 
 
 @pytest.fixture(scope="module")
@@ -99,6 +241,35 @@ def blueprint_path(
     bp_copy_path = copies_dir / complete_blueprint_path.name
     bp_copy_path.write_text(bp_content)
     return bp_copy_path
+
+
+@pytest.fixture
+def offline_remote_files() -> Generator[None]:
+    """Classify remote locations without the network: `.git` URLs as
+    repositories, every other URL as a binary (netCDF) file.
+
+    For tests that construct a simulation from a blueprint with remote URLs,
+    e.g. `blueprint_path`.
+    """
+    with (
+        mock.patch.object(
+            _SourceInspector,
+            "_is_repository",
+            new_callable=mock.PropertyMock,
+            return_value=False,
+        ),
+        mock.patch.object(
+            _SourceInspector,
+            "_http_is_html",
+            new_callable=mock.PropertyMock,
+            return_value=False,
+        ),
+        mock.patch(
+            "cstar.io.source_data.get_remote_header",
+            return_value=b"CDF\x02\x00\x00\x00\x00",
+        ),
+    ):
+        yield
 
 
 ################################################################################
@@ -1008,6 +1179,7 @@ from cstar.roms.discretization import ROMSDiscretization  # noqa: E402
 from cstar.roms.external_codebase import ROMSExternalCodeBase  # noqa: E402
 from cstar.roms.input_dataset import (  # noqa: E402
     ROMSBoundaryForcing,
+    ROMSCarbonateSensitivity,
     ROMSCdrForcing,
     ROMSForcingCorrections,
     ROMSInitialConditions,
@@ -1568,6 +1740,43 @@ def roms_forcing_corrections(
     return _create
 
 
+@pytest.fixture
+def roms_carbonate_sensitivity(
+    mocksourcedata_remote_file: type[SourceData],
+) -> Callable[
+    [str, str, SourceData, datetime | None, datetime | None], ROMSCarbonateSensitivity
+]:
+    """Provides a ROMSCarbonateSensitivity instance with fake attrs for testing"""
+    default_location = "http://my.files/cdrgas.nc"
+    default_hash = "321"
+    default_start_date = None
+    default_end_date = None
+    default_sourcedata = mocksourcedata_remote_file(
+        location=default_location,
+        identifier=default_hash,
+    )
+
+    def _create(
+        location: str = default_location,
+        file_hash: str | None = default_hash,
+        sourcedata: SourceData = default_sourcedata,
+        start_date: datetime | None = default_start_date,
+        end_date: datetime | None = default_end_date,
+    ):
+        patch_source_data = mock.patch(
+            "cstar.roms.input_dataset.SourceData", return_value=sourcedata
+        )
+        with patch_source_data:
+            return ROMSCarbonateSensitivity(
+                location=location,
+                file_hash=file_hash,
+                start_date=start_date,
+                end_date=end_date,
+            )
+
+    return _create
+
+
 ################################################################################
 # ROMSSimulation
 ################################################################################
@@ -1588,6 +1797,7 @@ def stub_romssimulation(
     roms_cdr_forcing: Callable[[], ROMSCdrForcing],
     roms_nesting_info: Callable[[], ROMSNestingInfo],
     roms_forcing_corrections: Callable[[], ROMSForcingCorrections],
+    roms_carbonate_sensitivity: Callable[[], ROMSCarbonateSensitivity],
     tmp_path: Path,
 ) -> ROMSSimulation:
     """Fixture providing a `ROMSSimulation` instance for testing.
@@ -1630,6 +1840,9 @@ def stub_romssimulation(
         ],
         forcing_corrections=[
             roms_forcing_corrections(),
+        ],
+        carbonate_sensitivity=[
+            roms_carbonate_sensitivity(),
         ],
         cdr_forcing=roms_cdr_forcing(),
         nesting_info=roms_nesting_info(),
@@ -1707,6 +1920,12 @@ def stub_romssimulation_dict(stub_romssimulation: ROMSSimulation) -> dict[str, A
                 "file_hash": sim.forcing_corrections[0].source.file_hash,
             }
         ],
+        "carbonate_sensitivity": [
+            {
+                "location": sim.carbonate_sensitivity[0].source.location,
+                "file_hash": sim.carbonate_sensitivity[0].source.file_hash,
+            }
+        ],
         "cdr_forcing": {
             "location": sim.cdr_forcing.source.location,
             "file_hash": sim.cdr_forcing.source.file_hash,
@@ -1725,7 +1944,12 @@ def stub_romssimulation_dict_no_forcing_lists(
 ) -> dict[str, Any]:
     """As stub_romssimulation_dict, but without list values for certain forcing types."""
     sim_dict = stub_romssimulation_dict
-    for k in ["surface_forcing", "boundary_forcing", "forcing_corrections"]:
+    for k in [
+        "surface_forcing",
+        "boundary_forcing",
+        "forcing_corrections",
+        "carbonate_sensitivity",
+    ]:
         sim_dict[k] = sim_dict[k][0]
     return sim_dict
 
@@ -1793,6 +2017,10 @@ def patch_romssimulation_init_sourcedata(
         location=sim.forcing_corrections[0].source.location,
         identifier=sim.forcing_corrections[0].source.identifier,
     )
+    mock_carbonate_sensitivity_sourcedata = mocksourcedata_remote_file(
+        location=sim.carbonate_sensitivity[0].source.location,
+        identifier=sim.carbonate_sensitivity[0].source.identifier,
+    )
 
     assert sim.cdr_forcing
     mock_cdr_forcing_sourcedata = mocksourcedata_remote_file(
@@ -1833,21 +2061,17 @@ def patch_romssimulation_init_sourcedata(
 
         Parameters
         ----------
-        from_worker: if True, the worker uses a source retriever to read the yaml file of the blueprint,
-            and therefore needs one extra mock inserted in the right place
+        from_worker: kept for callers; a local blueprint file is read directly, so no
+            extra classification is queued for it
 
         """
-        if from_worker:
-            inspector_classify_side_effect = [
-                SourceClassification.LOCAL_TEXT_FILE,
-                *mock_runtime_code_classify_side_effect,
-                *mock_compile_time_code_classify_side_effect,
-            ]
-        else:
-            inspector_classify_side_effect = [
-                *mock_runtime_code_classify_side_effect,
-                *mock_compile_time_code_classify_side_effect,
-            ]
+        # a local blueprint file is read directly (`load_blueprint`), not through a
+        # SourceData retriever, so the worker needs no extra classification
+        del from_worker
+        inspector_classify_side_effect = [
+            *mock_runtime_code_classify_side_effect,
+            *mock_compile_time_code_classify_side_effect,
+        ]
         with (
             mock.patch(
                 "cstar.base.external_codebase.SourceData",
@@ -1874,6 +2098,7 @@ def patch_romssimulation_init_sourcedata(
                     mock_boundary_forcing_sourcedata,
                     mock_surface_forcing_sourcedata,
                     mock_forcing_corrections_sourcedata,
+                    mock_carbonate_sensitivity_sourcedata,
                 ],
             ),
             mock.patch(

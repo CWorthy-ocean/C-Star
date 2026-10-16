@@ -29,8 +29,8 @@ from cstar.applications.roms_marbl.models import RomsMarblBlueprint
 from cstar.applications.roms_marbl.transforms import RestartFile, RestartFileTrxAdapter
 from cstar.base.exceptions import CstarExpectationFailed
 from cstar.base.log import get_logger
-from cstar.execution.file_system import local_copy
-from cstar.orchestration.serialization import deserialize, serialize
+from cstar.execution.file_system import is_remote_resource, local_copy
+from cstar.orchestration.serialization import load_blueprint, serialize
 from cstar.orchestration.transforms import OverrideTransform
 
 if t.TYPE_CHECKING:
@@ -176,7 +176,9 @@ def prepare_resume_blueprint(blueprint_uri: str) -> str:
         already finished).
     """
     with local_copy(blueprint_uri) as bp_path:
-        bp = deserialize(bp_path, RomsMarblBlueprint)
+        bp = load_blueprint(
+            bp_path, RomsMarblBlueprint, anchor=not is_remote_resource(blueprint_uri)
+        )
 
     fs = RomsFileSystemManager(bp.effective_working_dir)
     use_pio = bp.partitioning.use_pio

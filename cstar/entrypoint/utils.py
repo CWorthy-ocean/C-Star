@@ -42,6 +42,10 @@ ARG_PRE_RUN_HELP: t.Final[str] = (
     "without launching the model. The working directory is left in place so a "
     "later --resume run attaches to it instead of redoing the work."
 )
+ARG_STEP: t.Final[str] = "--step"
+ARG_STEP_HELP: t.Final[str] = (
+    "The name of the workplan step this run executes; recorded in the step record."
+)
 ARG_PRE_RUN_WORKPLAN_HELP: t.Final[str] = (
     "Perform every stage before the model launch for each step -- stage inputs, "
     "clone and compile, generate and validate the namelist -- without launching "
@@ -85,8 +89,41 @@ ARG_VERBOSE_HELP: t.Final[str] = "Set this flag to print verbose CLI outputs."
 ARG_SIZE: t.Final[str] = "--size"
 ARG_SIZE_HELP: t.Final[str] = "Set this flag to refresh disk-usage statistics."
 
+ARG_FORMAT: t.Final[str] = "--format"
+ARG_FORMAT_HELP: t.Final[str] = "Pass the desired output format."
+
+ARG_NO_REFRESH: t.Final[str] = "--no-refresh"
+ARG_NO_REFRESH_HELP: t.Final[str] = (
+    "Read the run as last recorded without refreshing its manifest."
+)
+
+ARG_REPAIR: t.Final[str] = "--repair"
+ARG_REPAIR_HELP: t.Final[str] = (
+    "Rewrite each absolute symlink that points inside the run as a relative "
+    "link, then rebuild gathered_output if the run has one. Nothing else is "
+    "changed; the remaining findings are still reported."
+)
+
+ARG_ALL: t.Final[str] = "--all"
+ARG_ALL_HELP: t.Final[str] = (
+    "Also scan the launch artifacts (override and directive files, job scripts "
+    "and namelists). Launchers regenerate them, so they are skipped by default."
+)
+
 ARG_SCHEMA_ONLY: t.Final[str] = "--schema-only"
 ARG_SCHEMA_ONLY_HELP: t.Final[str] = (
     "Only validate the workplan file's structure; skip resolving applications, "
     "blueprints, overrides and directives."
+)
+
+ARG_INSTALL: t.Final[str] = "--install"
+ARG_INSTALL_HELP: t.Final[str] = (
+    "Write the shell function to the C-Star config directory and source it from "
+    "the shell's rc file, then report what changed. Safe to re-run: it refreshes "
+    "the function after an upgrade."
+)
+ARG_UNINSTALL: t.Final[str] = "--uninstall"
+ARG_UNINSTALL_HELP: t.Final[str] = (
+    "Remove the rc file block and the function file written by "
+    f"{ARG_INSTALL}. Cannot be combined with {ARG_INSTALL}."
 )

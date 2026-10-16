@@ -6,11 +6,9 @@ from abc import ABC
 from collections.abc import Generator
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, ClassVar
+from typing import Any, ClassVar, Final
 
-from cstar.base.exceptions import CstarExpectationFailed
 from cstar.base.input_dataset import InputDataset
-from cstar.base.log import LoggingMixin
 from cstar.base.utils import (
     _list_to_concise_str,
     coerce_datetime,
@@ -80,48 +78,6 @@ class ROMSPartitioning:
         """
         for padded_idx in min_padded_indices(num_partitions):
             yield cls.SUFFIX_FMT.format(padded_idx)
-
-
-@dataclass
-class DatasetLinker(LoggingMixin):
-    """DatasetLinker manages sym-linking a needed file from the work directory to the real dataset location."""
-
-    opt_file_name: str
-    """Name of the opt file specifying that must align with the conventional symlink name"""
-    symlink_name: str
-    """Name of the symlink to create in workdir. Must align with the name in the opt file"""
-    opt_file_dir: Path
-    """Location to look for the required optfile"""
-    workdir: Path
-    """Location to create the symlink"""
-
-    def validate_opt(
-        self,
-    ) -> None:
-        """Validate that the opt file exists in the work directory and that it contains the conventional symlink name."""
-        opt_file = self.opt_file_dir / self.opt_file_name
-
-        if not opt_file.exists():
-            msg = f"Opt file {opt_file} does not exist"
-            raise FileNotFoundError(msg)
-
-        opt_content = opt_file.read_text()
-        if self.symlink_name not in opt_content:
-            msg = f"{self.opt_file_name} must contain the string {self.symlink_name}."
-            raise CstarExpectationFailed(msg)
-
-    def link(self, dataset_path: Path) -> None:
-        """Create symlink to dataset_path in the work directory.
-        Parameters
-        ----------
-        dataset_path : Path
-            Location of the dataset to symlink to.
-        """
-        symlink_path = self.workdir / self.symlink_name
-        symlink_path.unlink(missing_ok=True)
-        symlink_path.symlink_to(dataset_path)
-        msg = f"🔗 Created symlink: {symlink_path} → {dataset_path}"
-        self.log.info(msg)
 
 
 _ROMS_TIME_LONG_NAME_RE = re.compile(r"Time since (\d{4})/(\d{2})/(\d{2})")
@@ -267,7 +223,6 @@ class ROMSInputDataset(InputDataset, ABC):
         end_date: str | dt.datetime | None = None,
         source_np_xi: int | None = None,
         source_np_eta: int | None = None,
-        linker: DatasetLinker | None = None,
     ) -> None:
         self.start_date = coerce_datetime(start_date) if start_date else None
         self.end_date = coerce_datetime(end_date) if end_date else None
@@ -276,7 +231,6 @@ class ROMSInputDataset(InputDataset, ABC):
         self.source_np_eta = source_np_eta
         self.partitioning: ROMSPartitioning | None = None
         self.source = SourceData(location=location, identifier=file_hash)
-        self.linker = linker
 
         if self.source_partitioning:
             if file_hash:
@@ -537,16 +491,12 @@ class ROMSInputDataset(InputDataset, ABC):
         else:
             super().get(local_dir=local_dir)
 
-        self._apply_linker()
-
     def attach(self, local_dir: str | Path) -> None:
         """Adopt an existing, already-staged copy of this ROMSInputDataset.
 
         Counterpart of `get()`: instead of (re-)staging the file(s), this
         verifies that they are already present at `local_dir` (e.g. staged by
         a previous, interrupted attempt) and builds `working_copy` from them.
-        If a `linker` is set, its symlink is (re-)created against the adopted
-        working copy, exactly as `get()` does.
 
         Parameters:
         -----------
@@ -574,19 +524,6 @@ class ROMSInputDataset(InputDataset, ABC):
             )
         else:
             super().attach(local_dir)
-
-        self._apply_linker()
-
-    def _apply_linker(self) -> None:
-        """(Re-)create the `linker` symlink against the current working copy, if set."""
-        if not self.linker:
-            return
-        self.linker.validate_opt()
-        working_copy = self.working_copy
-        if not isinstance(working_copy, StagedFile):
-            msg = "Cannot use a linker for non-file datasets"
-            raise CstarExpectationFailed(msg)
-        self.linker.link(working_copy.path)
 
     def _working_copy_files(self) -> list[Path]:
         """Return the file(s) that make up this dataset's current working copy.
@@ -827,6 +764,50 @@ class ROMSBoundaryForcing(ROMSInputDataset):
 class ROMSSurfaceForcing(ROMSInputDataset):
     """An implementation of the ROMSInputDataset class for model surface forcing
     files.
+    """
+
+
+CARBONATE_SENSITIVITY_VARIABLES: Final[tuple[str, ...]] = (
+    "ddic_dco2",
+    "ddic_dalk",
+    "ddic_dco2_time",
+    "ddic_dalk_time",
+)
+"""Variables a CDR-LiTE build reads from its carbonate sensitivity forcing
+files: the sensitivities of the air-sea CO2 flux to DIC (beta) and ALK (eta),
+each with its time variable (days since the reference date).
+"""
+
+CARBONATE_SENSITIVITY_REMEDY: Final[str] = (
+    "_cdrgas files written by ucla-roms 0.9.1 and earlier carry only ocean_time "
+    "and cannot be read as forcing; regenerate them with a ucla-roms release "
+    "that writes the forcing time variables."
+)
+"""Advice appended when carbonate sensitivity files lack the variables ROMS reads."""
+
+
+def missing_carbonate_sensitivity_variables(path: Path) -> list[str]:
+    """Return the names in `CARBONATE_SENSITIVITY_VARIABLES` absent from the
+    netCDF file at `path` (a header read; no data is loaded).
+
+    Shared by the ROMS-side dataset check and Forge's staging step so the
+    required-variable rule lives in one place.
+    """
+    # Lazy import: only needed when this check runs
+    import xarray as xr
+
+    with xr.open_dataset(path, decode_times=False) as ds:
+        return [
+            name for name in CARBONATE_SENSITIVITY_VARIABLES if name not in ds.variables
+        ]
+
+
+class ROMSCarbonateSensitivity(ROMSInputDataset):
+    """Carbonate sensitivity forcing for a CDR-LiTE (ucla-roms >= 0.9.0) build.
+
+    Surface fields read through the generic `frcfiles` list when the build does
+    not compute them online -- typically the `_cdrgas` output of an earlier
+    ROMS-MARBL run.
     """
 
 

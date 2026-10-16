@@ -5,22 +5,28 @@ import typer
 from rich.console import Console
 
 from cstar.base.log import get_logger
+from cstar.cli.common import get_from_ctxmap
 from cstar.cli.workplan.shared import (
+    RunRecordArgument,
     display_summary,
-    list_runs,
     refresh_disk_usage,
 )
-from cstar.entrypoint.utils import ARG_SIZE, ARG_SIZE_HELP
+from cstar.entrypoint.utils import (
+    ARG_NO_REFRESH,
+    ARG_NO_REFRESH_HELP,
+    ARG_SIZE,
+    ARG_SIZE_HELP,
+)
 from cstar.orchestration.dag_runner import (
     DagStatus,
     get_launcher,
     get_status_detail_map,
     load_external_runs,
     load_run_state,
+    refresh_run_manifest,
 )
 from cstar.orchestration.orchestration import LiveWorkplan, Planner
-from cstar.orchestration.serialization import deserialize
-from cstar.orchestration.tracking import TrackingRepository
+from cstar.orchestration.tracking import WorkplanRun
 
 log = get_logger(__name__)
 app = typer.Typer()
@@ -29,13 +35,8 @@ console = Console()
 
 @app.command(name="status", help="Retrieve the current status of a workplan.")
 def status(
-    run_id: t.Annotated[
-        str,
-        typer.Argument(
-            help="The unique identifier of a specific workplan execution.",
-            autocompletion=list_runs,
-        ),
-    ],
+    ctx: typer.Context,
+    run_id: RunRecordArgument,
     refresh_usage: t.Annotated[
         bool,
         typer.Option(
@@ -43,19 +44,20 @@ def status(
             help=ARG_SIZE_HELP,
         ),
     ] = False,
+    no_refresh: t.Annotated[
+        bool,
+        typer.Option(
+            ARG_NO_REFRESH,
+            help=ARG_NO_REFRESH_HELP,
+        ),
+    ] = False,
 ) -> None:
     """Retrieve the current status of a workplan."""
-    repo = TrackingRepository()
-    run = asyncio.run(repo.get_workplan_run(run_id))
-
-    if run is None:
-        print("An unknown run-id was supplied.")
-        return
-
+    run = get_from_ctxmap(ctx, "run", WorkplanRun)
     wp_path = run.trx_workplan_path
 
     try:
-        workplan = deserialize(wp_path, LiveWorkplan)
+        workplan = LiveWorkplan.load(wp_path)
 
         # a pre-run's steps are local processes, whatever the system scheduler
         launcher = get_launcher(workplan, force_local=workplan.pre_run)
@@ -67,7 +69,9 @@ def status(
                 soft_wrap=True,
             )
         planner = Planner(workplan, external.tasks())
-        status = asyncio.run(load_run_state(run_id, launcher))
+        status = asyncio.run(load_run_state(run.run_id, launcher))
+        if not no_refresh:
+            refresh_run_manifest(run.output_path, run.run_id, status)
         status = DagStatus({**external.statuses(), **status.details})
         lookup = get_status_detail_map(planner, status)
 

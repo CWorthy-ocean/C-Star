@@ -36,7 +36,9 @@ ForcingSpec (``ForcingSpec/<name>/Forcing.yaml``)
    tidal and river forcing, including biogeochemical sources and the
    interpolation method for each. The bundled entries pair GLORYS and ERA5
    with different biogeochemical sources (unified climatology, GLODAP and
-   WOA, or ESPER). See :doc:`source_datasets` for the sources.
+   WOA, or ESPER); ``glorys-era5-physics`` carries no biogeochemical source,
+   for ``bgc_mode`` ``none`` and ``cdr_lite``. See :doc:`source_datasets` for
+   the sources.
 
 OutputSpec (``OutputSpec/<name>/Output.yaml``)
    Which fields the model writes, how often, and how files are packed, per
@@ -56,7 +58,7 @@ A ``model.yaml`` has this shape:
 
 .. code-block:: yaml
 
-   bgc_mode: marbl   # marbl or none; the default for the wizard's biogeochemistry choice
+   bgc_mode: marbl   # marbl, none or cdr_lite; the default for the wizard's biogeochemistry choice
    use_pio: false    # default for the wizard's ParallelIO checkbox
 
    code:
@@ -91,8 +93,15 @@ A ``model.yaml`` has this shape:
    resolver derives the corresponding compile-time switches from them and
    decides whether the MARBL and PIO code are pulled in. Requesting PIO from
    a model with no ``code.pio`` pin is an error. ``param.ntrc_bio`` is the
-   MARBL tracer count: with ``bgc_mode: none`` the resolver sets it to 0, and
-   a non-zero count without MARBL is rejected.
+   MARBL tracer count: without MARBL (``bgc_mode: none`` or ``cdr_lite``) the
+   resolver sets it to 0, and a non-zero count without MARBL is rejected.
+   ``bgc_mode: cdr_lite`` is a build without MARBL whose only extra tracers
+   are ucla-roms' dedicated CDR-lite tracers: it needs ucla-roms 0.10.0 or
+   later and a CDR forcing (a ``cdr`` selection) with ``cdr_lite`` releases,
+   and, like ``none``, rejects a forcing selection that asks for BGC
+   forcing. The tracer counts and the ``cdr_lite_output`` stream are derived
+   from the generated CDR forcing at build time; see
+   :doc:`../developers/forge_internals`.
 
 ``code``
    The repositories to build, each a ``location`` with a ``commit`` or
@@ -112,7 +121,11 @@ A ``model.yaml`` has this shape:
    fails to load. Values that depend on the domain or forcing (open-boundary
    switches, the MARBL and tides switches, the processor grid) are set by the
    resolver and are left out of the spec; only genuinely model-level
-   defaults belong here.
+   defaults belong here. Keys are Forge's lowercase setting names (``llm``,
+   ``np_xi``, ``wrt_z``), not the ROMS namelist spelling (``LLm``, ``NP_XI``,
+   ``wrt_Z``, or a renamed key such as ``akv_bak`` for
+   ``vertical_mixing.akv``): a key that matches a setting only that way is
+   rejected, naming the setting it meant, instead of being ignored.
 
 Settings that a newer ROMS knows and an older one does not are declared only
 by the specs for that ROMS version; the template renders them off when a
@@ -121,12 +134,15 @@ spec omits them, so older specs are unaffected by additions.
 The bundled model specs
 ~~~~~~~~~~~~~~~~~~~~~~~
 
-``roms-marbl-0.9-default`` (ucla-roms 0.9.1) is the wizard's default. Older
-``roms-marbl-0.N-default`` entries pin earlier releases, ``pio-dev`` tracks
+``roms-marbl-0.11-default`` (ucla-roms 0.11.0) is the wizard's default. Older
+``roms-marbl-0.N-default`` entries pin earlier releases (``roms-marbl-0.10-default``
+stays for ucla-roms 0.10.1, which predates the constant-iron option;
+``roms-marbl-0.9-default`` stays for ucla-roms 0.9.1, which predates the
+``cdr_lite`` mode's minimum), ``pio-dev`` tracks
 ucla-roms ``main`` with PIO enabled, and ``cson_roms-marbl_v0.1`` is the
 configuration the toy domain and the example blueprint use.
 
-.. literalinclude:: ../../cstar/catalog/bundled/ModelSpec/roms-marbl-0.9-default/model.yaml
+.. literalinclude:: ../../cstar/catalog/bundled/ModelSpec/roms-marbl-0.11-default/model.yaml
    :language: yaml
    :lines: 1-36
 

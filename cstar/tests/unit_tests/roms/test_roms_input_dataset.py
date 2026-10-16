@@ -9,17 +9,18 @@ import pytest
 import roms_tools  # noqa: F401, pre-load to avoid the lazy loader
 import xarray as xr
 
-from cstar.base.exceptions import CstarExpectationFailed
 from cstar.io.source_data import SourceDataCollection
 from cstar.io.staged_data import StagedDataCollection, StagedFile
 from cstar.roms.input_dataset import (
-    DatasetLinker,
+    CARBONATE_SENSITIVITY_VARIABLES,
     RecordedReferenceDate,
     ROMSBoundaryForcing,
+    ROMSCarbonateSensitivity,
     ROMSForcingCorrections,
     ROMSInputDataset,
     ROMSPartitioning,
     ROMSRiverForcing,
+    missing_carbonate_sensitivity_variables,
     read_model_reference_date,
 )
 from cstar.tests.unit_tests.fake_abc_subclasses import FakeROMSInputDataset
@@ -186,61 +187,6 @@ class TestROMSInputDatasetGet:
         ]
         assert dataset.working_copy.paths == expected_paths
 
-    def test_get_calls_linker_when_set(
-        self,
-        romsinputdataset_local_netcdf: ROMSInputDataset,
-        stagedfile_remote_source: Callable[..., StagedFile],
-        mock_path_resolve: mock.MagicMock,
-    ) -> None:
-        """get() calls linker.validate_opt() and linker.link() when linker is set."""
-        dataset = romsinputdataset_local_netcdf
-        mock_linker = mock.Mock(spec=DatasetLinker)
-        dataset.linker = mock_linker
-
-        staged = stagedfile_remote_source()
-        with mock.patch.object(
-            type(dataset),
-            "working_copy",
-            new_callable=mock.PropertyMock,
-            return_value=staged,
-        ):
-            dataset.get(local_dir=Path("some/local/dir"))
-
-        mock_linker.validate_opt.assert_called_once()
-        mock_linker.link.assert_called_once_with(staged.path)
-
-    def test_get_skips_linker_when_not_set(
-        self,
-        romsinputdataset_local_netcdf: ROMSInputDataset,
-        mock_path_resolve: mock.MagicMock,
-    ) -> None:
-        """get() does not call any linker methods when linker is None."""
-        dataset = romsinputdataset_local_netcdf
-        assert dataset.linker is None
-        # No linker calls should happen; just verify get() completes without error
-        dataset.get(local_dir=Path("some/local/dir"))
-
-    def test_get_raises_if_linker_set_but_working_copy_is_not_staged_file(
-        self,
-        romsinputdataset_local_netcdf: ROMSInputDataset,
-        stageddatacollection_remote_files: Callable[..., StagedDataCollection],
-        mock_path_resolve: mock.MagicMock,
-    ) -> None:
-        """get() raises CstarExpectationFailed when linker is set but working_copy is a collection."""
-        dataset = romsinputdataset_local_netcdf
-        mock_linker = mock.Mock(spec=DatasetLinker)
-        dataset.linker = mock_linker
-
-        collection = stageddatacollection_remote_files()
-        with mock.patch.object(
-            type(dataset),
-            "working_copy",
-            new_callable=mock.PropertyMock,
-            return_value=collection,
-        ):
-            with pytest.raises(CstarExpectationFailed, match="non-file datasets"):
-                dataset.get(local_dir=Path("some/local/dir"))
-
 
 class TestROMSInputDatasetAttach:
     """Test class for the `ROMSInputDataset.attach` method."""
@@ -309,27 +255,6 @@ class TestROMSInputDatasetAttach:
         message = str(exc_info.value)
         assert str(tmp_path / sources[-1].basename) in message
         assert str(tmp_path / sources[-2].basename) in message
-
-    def test_attach_relinks_when_linker_set(
-        self,
-        romsinputdataset_local_netcdf: ROMSInputDataset,
-        tmp_path: Path,
-        mock_path_resolve: mock.MagicMock,
-    ) -> None:
-        """attach() calls linker.validate_opt() and linker.link() against the
-        adopted working copy, exactly as get() does.
-        """
-        dataset = romsinputdataset_local_netcdf
-        target = tmp_path / dataset.source.basename
-        target.write_text("data")
-
-        mock_linker = mock.Mock(spec=DatasetLinker)
-        dataset.linker = mock_linker
-
-        dataset.attach(tmp_path)
-
-        mock_linker.validate_opt.assert_called_once()
-        mock_linker.link.assert_called_once_with(target)
 
 
 class TestROMSInputDatasetPartition:
@@ -940,76 +865,6 @@ def test_validate_rejects_local_yaml_source(tmp_path: Path) -> None:
         ROMSBoundaryForcing(location=str(path))
 
 
-class TestDatasetLinker:
-    """Tests for DatasetLinker.validate_opt() and DatasetLinker.link()."""
-
-    def _make_linker(self, opt_file_dir: Path, workdir: Path) -> DatasetLinker:
-        return DatasetLinker(
-            opt_file_name="cdr_frc.opt",
-            symlink_name="cdr.nc",
-            opt_file_dir=opt_file_dir,
-            workdir=workdir,
-        )
-
-    def test_validate_opt_raises_if_opt_file_missing(self, tmp_path: Path) -> None:
-        """validate_opt raises FileNotFoundError when the opt file does not exist."""
-        linker = self._make_linker(opt_file_dir=tmp_path, workdir=tmp_path)
-        with pytest.raises(FileNotFoundError, match="cdr_frc.opt"):
-            linker.validate_opt()
-
-    def test_validate_opt_raises_if_symlink_name_not_in_content(
-        self, tmp_path: Path
-    ) -> None:
-        """validate_opt raises CstarExpectationFailed when symlink_name is absent from opt content."""
-        opt_file = tmp_path / "cdr_frc.opt"
-        opt_file.write_text("no match here")
-        linker = self._make_linker(opt_file_dir=tmp_path, workdir=tmp_path)
-        with pytest.raises(CstarExpectationFailed, match="cdr_frc.opt.*cdr.nc"):
-            linker.validate_opt()
-
-    def test_validate_opt_passes_when_valid(self, tmp_path: Path) -> None:
-        """validate_opt succeeds when the opt file exists and contains symlink_name."""
-        opt_file = tmp_path / "cdr_frc.opt"
-        opt_file.write_text("uses cdr.nc for input")
-        linker = self._make_linker(opt_file_dir=tmp_path, workdir=tmp_path)
-        linker.validate_opt()  # should not raise
-
-    def test_link_creates_symlink(self, tmp_path: Path) -> None:
-        """link() creates a symlink in workdir pointing to the dataset path."""
-        target = tmp_path / "input_datasets" / "cdr.nc"
-        target.parent.mkdir()
-        target.write_text("fake data")
-
-        workdir = tmp_path / "work"
-        workdir.mkdir()
-        linker = self._make_linker(opt_file_dir=tmp_path, workdir=workdir)
-        linker.link(target)
-
-        symlink = workdir / "cdr.nc"
-        assert symlink.is_symlink()
-        assert symlink.resolve() == target.resolve()
-
-    def test_link_replaces_existing_symlink(self, tmp_path: Path) -> None:
-        """link() replaces a stale symlink without raising an error."""
-        target = tmp_path / "input_datasets" / "cdr.nc"
-        target.parent.mkdir()
-        target.write_text("new data")
-
-        workdir = tmp_path / "work"
-        workdir.mkdir()
-
-        stale_target = tmp_path / "old.nc"
-        stale_target.write_text("old data")
-        (workdir / "cdr.nc").symlink_to(stale_target)
-
-        linker = self._make_linker(opt_file_dir=tmp_path, workdir=workdir)
-        linker.link(target)
-
-        symlink = workdir / "cdr.nc"
-        assert symlink.is_symlink()
-        assert symlink.resolve() == target.resolve()
-
-
 @pytest.mark.parametrize(
     ("num_partitions", "exp_length", "exp_max_suffix"),
     [(2, 1, "1"), (10, 1, "9"), (100, 2, "99"), (101, 3, "100"), (1000, 3, "999")],
@@ -1332,3 +1187,41 @@ class TestROMSInputDatasetReadModelReferenceDate:
         assert dataset.read_model_reference_date() == RecordedReferenceDate(
             date=datetime(1995, 1, 1), cyclic=False
         )
+
+
+class TestROMSCarbonateSensitivity:
+    """Tests for `ROMSCarbonateSensitivity` and the variable contract it rides on."""
+
+    @staticmethod
+    def _write(path: Path, variables: tuple[str, ...]) -> Path:
+        """Write a tiny netCDF file holding only `variables`."""
+        xr.Dataset({name: ("x", np.zeros(2)) for name in variables}).to_netcdf(path)
+        return path
+
+    def test_variable_contract(self) -> None:
+        """The variables a CDR-LiTE build reads are the sensitivities and their times."""
+        assert CARBONATE_SENSITIVITY_VARIABLES == (
+            "ddic_dco2",
+            "ddic_dalk",
+            "ddic_dco2_time",
+            "ddic_dalk_time",
+        )
+
+    def test_is_partitionable(self) -> None:
+        """Like other surface forcing, the dataset is partitioned per rank."""
+        assert ROMSCarbonateSensitivity.partitionable is True
+
+    def test_complete_file_has_no_missing_variables(self, tmp_path: Path) -> None:
+        """A file carrying every variable reports nothing missing."""
+        path = self._write(tmp_path / "ok.nc", CARBONATE_SENSITIVITY_VARIABLES)
+        assert missing_carbonate_sensitivity_variables(path) == []
+
+    def test_missing_variables_are_listed_in_contract_order(
+        self, tmp_path: Path
+    ) -> None:
+        """Absent names come back in `CARBONATE_SENSITIVITY_VARIABLES` order."""
+        path = self._write(tmp_path / "partial.nc", ("ddic_dalk", "ddic_dco2"))
+        assert missing_carbonate_sensitivity_variables(path) == [
+            "ddic_dco2_time",
+            "ddic_dalk_time",
+        ]

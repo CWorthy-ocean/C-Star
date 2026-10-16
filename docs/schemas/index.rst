@@ -8,6 +8,17 @@ Schemas for the built-in `Workplan` are listed here.
 
 - :download:`Workplan Schema v1.0.0 <https://raw.githubusercontent.com/CWorthy-ocean/C-Star/refs/heads/main/docs/schemas/wp/workplan_schema.1.0.0.json>`
 
+Runs
+----
+
+Schemas for the files a run leaves behind are listed here. See
+:ref:`workplan_run_manifest`.
+
+- :download:`Run Manifest Schema v1.0.0 <https://raw.githubusercontent.com/CWorthy-ocean/C-Star/refs/heads/main/docs/schemas/run/run_manifest_schema.1.0.0.json>`:
+  ``cstar-run.yaml``, the description of a run: its attempts, its steps and what it depends on.
+- :download:`Step Record Schema v1.0.0 <https://raw.githubusercontent.com/CWorthy-ocean/C-Star/refs/heads/main/docs/schemas/run/step_record_schema.1.0.0.json>`:
+  ``cstar-step.yaml``, what one step did, written by the step itself.
+
 Blueprints
 ----------
 
@@ -28,6 +39,7 @@ executes a ROMS simulation.
 - :download:`ROMS-MARBL Blueprint Schema v2.1.0 <https://raw.githubusercontent.com/CWorthy-ocean/C-Star/refs/heads/main/docs/schemas/bp/roms_marbl/roms_marbl_schema.2.1.0.json>`
 - :download:`ROMS-MARBL Blueprint Schema v3.0.0 <https://raw.githubusercontent.com/CWorthy-ocean/C-Star/refs/heads/main/docs/schemas/bp/roms_marbl/roms_marbl_schema.3.0.0.json>`
 - :download:`ROMS-MARBL Blueprint Schema v3.1.0 <https://raw.githubusercontent.com/CWorthy-ocean/C-Star/refs/heads/main/docs/schemas/bp/roms_marbl/roms_marbl_schema.3.1.0.json>`
+- :download:`ROMS-MARBL Blueprint Schema v3.2.0 <https://raw.githubusercontent.com/CWorthy-ocean/C-Star/refs/heads/main/docs/schemas/bp/roms_marbl/roms_marbl_schema.3.2.0.json>`
 
 
 Hello World Blueprint

@@ -17,14 +17,16 @@ The wizard discovers Models from ``catalog/ModelSpec/`` and Domains from
 ``catalog/DomainSpec/``; selecting a cataloged Domain prefills the grid kwargs,
 boundaries, partitioning, and dates. The live preview re-resolves on every change
 (using the ``dt`` field, so it never builds a grid); the "Compute dt (CFL)" button
-is the only action that builds a grid (needs ``roms_tools``).
+is plain arithmetic on the grid size and builds none either.
 """
 
 from __future__ import annotations
 
 import base64
 import copy
+import html
 import json
+import os
 import re
 import typing
 import warnings
@@ -43,6 +45,7 @@ from cstar.applications.forge.blueprint import (
     BgcSourceItem,
     BgcSurfaceSource,
     BoundaryForcing,
+    CarbonateSensitivitySpec,
     ClimatologyMode,
     CoarseGridMode,
     Composition,
@@ -69,7 +72,13 @@ from cstar.applications.forge.blueprint import (
 )
 from cstar.applications.forge.migration import migrate_forcing_inputs
 from cstar.applications.forge.namelist_model import (
+    CDR_OUTPUT_SECTIONS,
+    MARBL_ONLY_OUTPUT_FLAGS,
+    BgcMode,
     RunTimeSettings,
+    bgc_mode_from_cppdefs,
+    namelist_field_for,
+    namelist_schema_for,
     run_time_settings_for_ref,
     validate_run_time_sections,
     version_gated_section_names,
@@ -78,11 +87,14 @@ from cstar.applications.forge.resolve import (
     OUTPUT_SECTIONS,
     PARTIAL_OUTPUT_SECTIONS,
     build_forge_blueprint,
+    cfl_dt,
     extract_output_settings,
+    find_carbonate_sensitivity_files,
     load_model_spec_data,
     read_cdr_forcing_yaml,
 )
-from cstar.applications.forge.user_files import hash_netcdf_contents
+from cstar.applications.forge.user_files import hash_netcdf_contents, short_digest
+from cstar.base.utils import NetCDFFormat, netcdf_format
 from cstar.wizard.ui import components
 from cstar.wizard.ui.catalog_bar import CatalogBar
 from cstar.wizard.ui.labels import known_keys, label_for, section_for
@@ -94,7 +106,8 @@ WIZARD_TOOL: Final[str] = "wizard"
 # Help text — shown as widget tooltips on hover (tooltip= kwarg, all widgets)
 #
 # Automated: namelist fields are looked up live from the cstar.roms.namelist
-# field descriptions (set in the RomsNamelist / group models).
+# field descriptions (set in the RomsNamelist / group models), unless the
+# label glossary carries a hint for the field.
 # Manual: forcing/grid/nesting/run-window knobs listed in HELP_TEXT below.
 # ===========================================================================
 
@@ -116,7 +129,7 @@ HELP_TEXT: dict[str | tuple[str, str], str] = {
         "run",
         "dt",
     ): "Baroclinic time step in seconds. Leave blank to compute from the CFL criterion "
-    "(click 'Compute dt (CFL)' — requires roms_tools).",
+    "(click 'Compute dt (CFL)').",
     ("run", "description"): "Human-readable description of this blueprint.",
     ("export", "name"): "Canonical blueprint name. Drives the save filename, the "
     "default working directory, casename, and generated file stems. Defaults to a "
@@ -537,8 +550,9 @@ HELP_TEXT: dict[str | tuple[str, str], str] = {
     (
         "timestep",
         "dt_btn",
-    ): "Build the grid from the current grid kwargs and compute the barotropic "
-    "time step from the CFL criterion. Requires roms_tools to be installed.",
+    ): "Compute the baroclinic time step from the CFL criterion for the current grid "
+    "size and resolution. No grid is built, so it works while other settings are "
+    "still incomplete.",
 }
 
 # Label overrides for namelist-section widgets built via _build_section /
@@ -568,19 +582,20 @@ def _namelist_description_and_tooltip(
     """The widget ``description``/``tooltip`` pair for one namelist field.
 
     Starts from :func:`_namelist_label` and the schema-derived ``tooltip``. A
-    field with no schema description (every ``cppdefs`` flag -- compile-time,
-    never modeled by RomsNamelist -- and version-gated groups the active tier
-    lacks) falls back to the glossary ``hint``, so caveats such as "ignored by
-    ucla-roms < 0.8.0" reach the widget instead of living only in the YAML. If
-    the glossary (or :data:`LABEL_TEXT`) overrides the label away from the raw
-    ``field_name``, the raw name is kept discoverable by prefixing it onto the
-    tooltip, and a glossary ``unit``, if present, is appended to the
-    description (e.g. ``"Horizontal viscosity (m²/s)"``).
+    glossary ``hint`` replaces the schema description: it is curated for the
+    wizard (in the wizard's vocabulary, e.g. "used when co2_tvarying is False"),
+    and it is the only help for a field with no schema description (every
+    ``cppdefs`` flag -- compile-time, never modeled by RomsNamelist), so caveats
+    such as "ignored by ucla-roms < 0.8.0" reach the widget instead of living
+    only in the YAML. If the glossary (or :data:`LABEL_TEXT`) overrides the
+    label away from the raw ``field_name``, the raw name is kept discoverable
+    by prefixing it onto the tooltip, and a glossary ``unit``, if present, is
+    appended to the description (e.g. ``"Horizontal viscosity (m²/s)"``).
     """
     glossary_key = f"settings.{section}.{field_name}"
     in_glossary = glossary_key in known_keys()
-    if not tooltip and in_glossary:
-        tooltip = label_for(glossary_key).hint or ""
+    if in_glossary:
+        tooltip = label_for(glossary_key).hint or tooltip
     label = _namelist_label(section, field_name)
     if label == field_name:
         return label, tooltip
@@ -590,26 +605,23 @@ def _namelist_description_and_tooltip(
     return description, combined_tooltip
 
 
-def _namelist_tooltip(group_name: str, field_name: str) -> str:
-    """Look up the tooltip for a namelist field from the RomsNamelist schema.
+def _namelist_tooltip(
+    settings_cls: type[BaseModel], section: str, field_name: str
+) -> str:
+    """The namelist schema's description of a forge settings field.
 
-    Returns the field's ``description`` string if present, else an empty string.
-    Called when building the Advanced settings accordion so every namelist field
-    gets an automated tooltip from the ROMS namelist model docstrings.
+    Translates the forge ``section``/``field_name`` to the namelist group and key
+    it is written to (:func:`namelist_field_for`, the same table
+    :func:`build_namelist` writes through) and returns that field's
+    ``description`` from ``settings_cls``'s namelist schema. Empty for anything
+    that is not a namelist field of that tier (every ``cppdefs`` flag).
     """
-    try:
-        from cstar.roms.namelist import RomsNamelist
-
-        gf = RomsNamelist.model_fields.get(group_name)
-        if gf is None:
-            return ""
-        cls = gf.annotation
-        if not hasattr(cls, "model_fields"):
-            return ""
-        ff = cls.model_fields.get(field_name)
-        return ff.description or "" if ff is not None else ""
-    except Exception:
+    target = namelist_field_for(settings_cls, section, field_name)
+    if target is None:
         return ""
+    group, key = target
+    group_cls = namelist_schema_for(settings_cls).model_fields[group].annotation
+    return group_cls.model_fields[key].description or ""
 
 
 def _tip(context: str, field: str) -> str:
@@ -970,6 +982,53 @@ _ACCORDION_EXCLUDED_FIELDS: dict[str, frozenset[str]] = {
     "v_sponge": frozenset({"v_sponge"}),
 }
 
+# The BGC modes each settings key applies in; a key not listed applies in every
+# mode. A section key covers all of its fields. The output streams ucla-roms
+# compiles only under MARBL come from namelist_model, which owns that fact
+# (MARBL_ONLY_OUTPUT_FLAGS, and the requires_marbl rows of CDR_OUTPUT_SECTIONS).
+# The rest are wizard-only: the bgc/marbl_bgc/dic_alk_correction groups, NHY/NOX
+# forcing and cdr_lite.cdr_online_carbonate_sensitivity read MARBL state, and
+# cdr_lite_output needs CDR-lite tracers, which only MARBL and bgc_mode "cdr_lite"
+# provide.
+_MARBL_ONLY = frozenset({"marbl"})
+_BGC_MODE_SETTINGS: dict[str | tuple[str, str], frozenset[str]] = {
+    **dict.fromkeys(
+        [section for section, _flag, _why in MARBL_ONLY_OUTPUT_FLAGS]
+        + [row[0] for row in CDR_OUTPUT_SECTIONS if row[3]],
+        _MARBL_ONLY,
+    ),
+    "bgc": _MARBL_ONLY,
+    "marbl_bgc": _MARBL_ONLY,
+    "dic_alk_correction": _MARBL_ONLY,
+    "cdr_lite_output": frozenset({"marbl", "cdr_lite"}),
+    ("cppdefs", "nhy_forcing"): _MARBL_ONLY,
+    ("cppdefs", "nox_forcing"): _MARBL_ONLY,
+    ("cdr_lite", "cdr_online_carbonate_sensitivity"): _MARBL_ONLY,
+}
+
+
+def _applies_in(section: str, field: str | None, bgc_mode: str) -> bool:
+    """Whether the ``(section, field)`` setting (``field=None`` for a scalar
+    section) applies in ``bgc_mode`` -- see :data:`_BGC_MODE_SETTINGS`.
+    """
+    modes = _BGC_MODE_SETTINGS.get(section)
+    if modes is None and field is not None:
+        modes = _BGC_MODE_SETTINGS.get((section, field))
+    return modes is None or bgc_mode in modes
+
+
+# Settings ``ForgeExecutor.configure_build`` forces on in a BGC mode, whatever the
+# blueprint authored: bgc_mode -> {(section, field): why}. The editor shows them
+# checked and disabled -- display only, never an override.
+_FORCED_ON_BY_BGC_MODE: dict[str, dict[tuple[str, str], str]] = {
+    "cdr_lite": {
+        ("cdr_lite_output", "do_cdr_lite_output"): (
+            "Forced on by bgc_mode cdr_lite: this is the only output the CDR-lite "
+            "tracers appear in."
+        ),
+    },
+}
+
 
 # Modeler-facing consolidation of the raw namelist sections into a few
 # Advanced-settings panes, grouped the way an ocean modeler categorizes knobs
@@ -978,11 +1037,12 @@ _ACCORDION_EXCLUDED_FIELDS: dict[str, frozenset[str]] = {
 # and the output/model "modified" tracking are all unaffected by the grouping.
 #
 # Sections deliberately absent (time_stepping, reference_date_settings, grid,
-# s_coord, param, title, output_root_name, initial, forcing, river_frc) are filled
+# s_coord, title, output_root_name, initial, forcing, river_frc) are filled
 # dynamically at resolve/run time (ntimes from the run duration, grid/IC/forcing
 # paths from generated files, river_frc entirely generation-derived) or edited by a
-# dedicated widget elsewhere in the wizard (theta_s/theta_b/hc, dt, np_xi/np_eta,
-# reference date, PIO/open-boundary checkboxes). Their resolver-composed value still
+# dedicated widget elsewhere in the wizard (theta_s/theta_b/hc, dt, reference date,
+# PIO/open-boundary checkboxes). ``param`` is shown under CDR for ``nt_passive``
+# alone (see :data:`_PARAM_PANE_FIELDS`). Their resolver-composed value still
 # flows through untouched -- omitting the pane only removes an editor that would be
 # clobbered or duplicated, never the value.
 #
@@ -993,8 +1053,9 @@ _ACCORDION_EXCLUDED_FIELDS: dict[str, frozenset[str]] = {
 # ``upstream_ts_land_curv``, PR #361) are opted in, via ``_CPPDEFS_PANE_FIELDS``, so
 # a user override can never collide with a resolver-owned flag. The two advection
 # fields only render for ModelSpecs that declare them (``roms-marbl-0.8-default``,
-# ``roms-marbl-0.9-default``, ``pio-dev``) -- the editor type-infers a checkbox from
-# the composed bool, so a spec that omits the key shows no widget for it.
+# ``roms-marbl-0.9-default``, ``roms-marbl-0.10-default``, ``roms-marbl-0.11-default``,
+# ``pio-dev``) -- the editor type-infers a checkbox from the composed bool, so a spec
+# that omits the key shows no widget for it.
 #
 # ``bgc``/``marbl_bgc`` are SPLIT at field granularity along the existing
 # ``PARTIAL_OUTPUT_SECTIONS`` seam (the same split the OutputSpec dropdown seeds):
@@ -1048,6 +1109,7 @@ _ADVANCED_CATEGORIES: tuple[tuple[str, tuple[str, ...]], ...] = (
     (
         "Carbon dioxide removal (CDR)",
         (
+            "param",
             "cdr_frc",
             "cdr_output",
             "cdr_lite",
@@ -1459,6 +1521,16 @@ _CPPDEFS_PANE_FIELDS: dict[str, frozenset[str]] = {
 }
 
 
+# The one ``param`` field the accordion shows (in the CDR pane): the passive tracer
+# count, which generation checks against the CDR forcing's passive tracers and
+# nothing else sets. The grid/tiling dims have dedicated widgets, ``ntrc_bio`` is
+# set from the BGC mode, and ``nt_cdr_oae``/``nt_cdr_dor`` are read off the CDR
+# forcing's tracer axis when it names its tracers. Display-only (unlike
+# _ACCORDION_EXCLUDED_FIELDS): an authored CDR tracer count, needed when the
+# forcing file does not name its tracers, still round-trips as an override.
+_PARAM_PANE_FIELDS = frozenset({"nt_passive"})
+
+
 def _split_fields(
     category_title: str, section: str
 ) -> tuple[frozenset | None, frozenset]:
@@ -1469,10 +1541,13 @@ def _split_fields(
     ``marbl_bgc`` via :data:`PARTIAL_OUTPUT_SECTIONS`) keep their output write-
     controls under Output and the rest under their feature pane. ``cppdefs`` is
     split the same way via :data:`_CPPDEFS_PANE_FIELDS` -- each pane only sees the
-    handful of compile-time flags it owns.
+    handful of compile-time flags it owns -- and ``param`` shows only
+    :data:`_PARAM_PANE_FIELDS`.
     """
     if section == "cppdefs":
         return _CPPDEFS_PANE_FIELDS.get(category_title, frozenset()), frozenset()
+    if section == "param":
+        return _PARAM_PANE_FIELDS, frozenset()
     parts = PARTIAL_OUTPUT_SECTIONS.get(section)
     if parts is None:
         return None, frozenset()
@@ -1526,9 +1601,13 @@ class _SettingsEditor:
         model_settings: dict[str, Any],
         on_edit=None,
         settings_cls: type[BaseModel] = RunTimeSettings,
+        *,
+        bgc_mode: str = "marbl",
     ):
         self.W = W
         self._settings_cls = settings_cls
+        self._bgc_mode = bgc_mode
+        self._forced_on = _FORCED_ON_BY_BGC_MODE.get(bgc_mode, {})
         # (section, field|None) -> (widget, base_type)
         self._widgets: dict[Any, Any] = {}
         self._section_fields: dict[str, list[str | None]] = {}
@@ -1586,6 +1665,13 @@ class _SettingsEditor:
             titles.append(title)
         # Independently collapsible panes: opening one no longer closes another.
         self.accordion = components.open_accordion(W, panes, titles)
+        # Before the on_edit observers attach, so locking one is never an edit.
+        for key, why in self._forced_on.items():
+            if key in self._widgets:
+                widget = self._widgets[key][0]
+                widget.value = True
+                widget.disabled = True
+                widget.tooltip = f"{widget.tooltip or ''} {why}".strip()
         if on_edit is not None:
             for (section, field), (widget, _base) in self._widgets.items():
                 widget.observe(
@@ -1607,6 +1693,8 @@ class _SettingsEditor:
                     if field is None
                     else (sec.get(field) if isinstance(sec, dict) else None)
                 )
+                if (section, field) in self._forced_on:
+                    value = True
                 try:
                     labels = _BOOL_DROPDOWN_FIELDS.get((section, field))
                     if labels is not None and value is not None:
@@ -1651,6 +1739,7 @@ class _SettingsEditor:
         keys = [
             ("ocean_vars", "wrt_file_rst"),
             ("ocean_vars", "monthly_restarts"),
+            ("marbl_bgc", "use_constant_fe"),
         ]
         for section, master_flag in _CDR_STREAM_MASTER_FLAGS.items():
             keys.append((section, master_flag))
@@ -1680,8 +1769,9 @@ class _SettingsEditor:
             monthly_entry[0].observe(_force_wrt_on_monthly, names="value")
 
     def _apply_field_rules(self) -> None:
-        """Show/hide and enable/disable ocean_vars/CDR-output-stream widgets from
-        their CURRENT values -- never mutates a value, only visibility/``disabled``.
+        """Show/hide and enable/disable ocean_vars/CDR-output-stream widgets (and
+        ``marbl_bgc.constant_fe_value``) from their CURRENT values -- never mutates
+        a value, only visibility/``disabled``.
 
         Rationale: the dependent fields are meaningless (and ignored by the
         namelist) once their master switch is off, and `output_period_*` has no
@@ -1710,6 +1800,13 @@ class _SettingsEditor:
             _show(period_r, wrt_on)
             if monthly_r is not None and period_r is not None:
                 period_r[0].disabled = bool(monthly_r[0].value)
+
+        use_fe = self._widgets.get(("marbl_bgc", "use_constant_fe"))
+        if use_fe is not None:
+            _show(
+                self._widgets.get(("marbl_bgc", "constant_fe_value")),
+                bool(use_fe[0].value),
+            )
 
         for section, master_flag in _CDR_STREAM_MASTER_FLAGS.items():
             master = self._widgets.get((section, master_flag))
@@ -1747,8 +1844,10 @@ class _SettingsEditor:
         W = self.W
         sub = _section_submodel(section, self._settings_cls)
         if not isinstance(value, dict):  # scalar section (e.g. gamma2, ubind)
+            if not _applies_in(section, None, self._bgc_mode):
+                return W.VBox([]), []
             base = _base_type(None, value)
-            tip = _namelist_tooltip(section, section)
+            tip = _namelist_tooltip(self._settings_cls, section, section)
             label, tip = _namelist_description_and_tooltip(section, section, tip)
             w = _make_field_widget(W, label, base, value, tooltip=tip)
             self._widgets[(section, None)] = (w, base)
@@ -1761,6 +1860,8 @@ class _SettingsEditor:
                 continue
             if include is not None and key not in include:
                 continue
+            if not _applies_in(section, key, self._bgc_mode):
+                continue
             # Skip metadata-name keys (*_vname/*_tname, cdb_min, ...): the settings
             # sub-models are extra="ignore", so anything not a typed field is dropped
             # by the namelist transform and has no business in the editor.
@@ -1772,7 +1873,7 @@ class _SettingsEditor:
                 else None
             )
             base = _base_type(ann, val)
-            tip = _namelist_tooltip(section, key)
+            tip = _namelist_tooltip(self._settings_cls, section, key)
             label, tip = _namelist_description_and_tooltip(section, key, tip)
             bool_dropdown = _BOOL_DROPDOWN_FIELDS.get((section, key))
             w = _make_field_widget(
@@ -2122,7 +2223,7 @@ def _user_file_status_html(file_dict: dict[str, Any] | None) -> str:
     if not file_dict:
         return ""
     name = Path(file_dict["location"]).name
-    short = file_dict["content_hash"][:12]
+    short = short_digest(file_dict["content_hash"])
     return (
         f"<span style='color:#080'>✓ attached {name} (sha256 {short}…)</span><br>"
         "<span style='color:#b58900'>⚠ This file must exist at this exact path "
@@ -2139,6 +2240,28 @@ _FILE_NOT_ATTACHED_HINT = (
 )
 _RIVER_CUSTOM_FILE_HINT = _FILE_NOT_ATTACHED_HINT
 _CDR_FILE_HINT = _FILE_NOT_ATTACHED_HINT
+# The carbonate-sensitivity twin (a directory, so no upload): shown while the
+# source is "path" and nothing is attached, where the blueprint is invalid.
+_CARBONATE_DIR_HINT = (
+    "<span style='color:#b58900'>No directory attached yet -- enter a path and "
+    "press Enter (or click Attach). The blueprint is invalid until a directory "
+    "is attached.</span>"
+)
+
+
+def _carbonate_status_html(n_files: int, detail: str = "") -> str:
+    """Status HTML for ``n_files`` attached carbonate sensitivity files: the
+    count (plus ``detail``, e.g. the timestamp span) and the persistent
+    host-path warning -- the files are host/transport, like every
+    user-provided file (see ``UserProvidedFile``).
+    """
+    suffix = f", {detail}" if detail else ""
+    return (
+        f"<span style='color:#080'>✓ attached {n_files} carbonate sensitivity "
+        f"file(s){suffix}</span><br>"
+        "<span style='color:#b58900'>⚠ These files must exist at these exact "
+        "paths on the machine where the executor runs.</span>"
+    )
 
 
 def _same_attached_file(attached: dict[str, Any] | None, path_str: str) -> bool:
@@ -3672,9 +3795,9 @@ class _ForcingEditor:
 
 # Preselected in the Model dropdown when present in the catalog (falls back to
 # the first catalog model otherwise): it's the newest tagged-release ModelSpec
-# (ucla-roms 0.9.1). 'pio-dev' (ucla-roms branch `main`) remains available in the
+# (ucla-roms 0.11.0). 'pio-dev' (ucla-roms branch `main`) remains available in the
 # catalog but is no longer the default.
-_DEFAULT_MODEL = "roms-marbl-0.9-default"
+_DEFAULT_MODEL = "roms-marbl-0.11-default"
 
 # Preselected in the Output dropdown when present in the catalog (falls back to
 # the first catalog spec otherwise). 'daily-restarts' conforms to the
@@ -3688,6 +3811,10 @@ _DEFAULT_OUTPUT_SPEC = "daily-restarts"
 # position would silently change every user's default whenever a newly bundled
 # ForcingSpec happens to sort first.
 _DEFAULT_FORCING_SPEC = "glorys-era5-unified"
+
+# The same default for a run without MARBL (bgc_mode "none"/"cdr_lite"): the
+# resolver rejects any BGC forcing there, which _DEFAULT_FORCING_SPEC carries.
+_DEFAULT_PHYSICS_FORCING_SPEC = "glorys-era5-physics"
 
 _GRID_INT = ("nx", "ny", "N")
 _GRID_FLOAT = ("size_x", "size_y", "center_lon", "center_lat", "rot")
@@ -3899,13 +4026,17 @@ class ForgeBlueprintWizard:
             style={"description_width": "110px"},
         )
         self.bgc_dd = W.Dropdown(
-            options=["marbl", "none"],
+            options=list(get_args(BgcMode)),
             value="marbl",
             description="BGC:",
             style={"description_width": "110px"},
             tooltip=(
                 "Biogeochemistry mode. 'marbl' builds ROMS-MARBL and includes the "
-                "MARBL codebase; 'none' builds physics-only (no MARBL, no BGC forcing)."
+                "MARBL codebase; 'none' builds physics-only (no MARBL, no BGC forcing). "
+                "'cdr_lite' builds ucla-roms' CDR-lite tracers without MARBL: it needs "
+                "a CDR forcing with cdr_lite releases and carbonate sensitivity files, "
+                "by default supplied at run time by the carbonate-sensitivity-from "
+                "directive."
             ),
         )
         self.domain_dd = W.Dropdown(
@@ -4314,15 +4445,9 @@ class ForgeBlueprintWizard:
         # --- forcing spec (ForcingSpec selection + add/remove/edit editor) ---
         # A ForcingSpec must always be explicitly selected -- ModelSpec no longer
         # embeds a default forcing.
-        _forcing_names = list(self.catalog.forcing_names)
         self.forcing_dd = W.Dropdown(
-            options=self._dd_options(_forcing_names, "forcing"),
-            # Prefer the bundled default explicitly -- see _DEFAULT_FORCING_SPEC.
-            value=(
-                _DEFAULT_FORCING_SPEC
-                if _DEFAULT_FORCING_SPEC in _forcing_names
-                else (_forcing_names[0] if _forcing_names else None)
-            ),
+            options=self._dd_options(list(self.catalog.forcing_names), "forcing"),
+            value=self._default_forcing_spec(self._model_default_bgc_mode()),
             description="Forcing:",
             style={"description_width": "110px"},
             tooltip="Select a named ForcingSpec from the catalog to seed all forcing "
@@ -4333,6 +4458,65 @@ class ForgeBlueprintWizard:
         # snapshot of the forcing editor's gather() at the last catalog pick;
         # compared in _rebuild() to detect a deviation (composition.forcing.modified)
         self._forcing_seed: dict[str, Any] | None = None
+
+        # --- carbonate sensitivities (bgc_mode "cdr_lite" only) -------------------
+        # A cdr_lite build reads the carbonate sensitivities (ddic_dco2/ddic_dalk)
+        # as surface forcing from ROMS ``_cdrgas`` files. The default leaves them
+        # off the blueprint: the carbonate-sensitivity-from workplan directive
+        # supplies them at run time ("directive"). "path" attaches a directory of
+        # them now. What is stored is the resolved ``{"files": [{location,
+        # content_hash}]}`` (never the directory): _gather()/_rebuild() then neither
+        # rescan nor rehash on every edit, and a loaded blueprint round-trips
+        # exactly -- the trust-the-stored-hash idiom of the CDR netCDF attach flow.
+        self._carbonate_sensitivity: dict[str, Any] | None = None
+        self.cs_source_dd = W.Dropdown(
+            options=[
+                ("Supplied by a workplan directive at run time", "directive"),
+                ("Directory of ROMS _cdrgas files", "path"),
+            ],
+            value="directive",
+            description="Source:",
+            style={"description_width": "110px"},
+            layout=W.Layout(width="360px"),
+            tooltip=(
+                "Where the carbonate sensitivity files come from. By default the "
+                "carbonate-sensitivity-from workplan directive supplies them from an "
+                "earlier ROMS-MARBL step at run time; attach a directory to put them "
+                "on the blueprint now."
+            ),
+        )
+        self.cs_path = W.Text(
+            value="",
+            description="Directory:",
+            placeholder="directory of ROMS _cdrgas files",
+            style={"description_width": "110px"},
+            layout=W.Layout(width="420px"),
+            continuous_update=False,  # see grid_file_path
+        )
+        self.cs_attach_btn = W.Button(
+            description=label_for("buttons.attach", "Attach").label, icon="link"
+        )
+        self.cs_clear_btn = W.Button(
+            description=label_for("buttons.detach", "Detach").label, icon="times"
+        )
+        self.cs_status = W.HTML("")
+        self.cs_path_box = W.VBox(
+            [
+                components.field_row(
+                    W,
+                    "cs_path",
+                    self.cs_path,
+                    extra=(self.cs_attach_btn, self.cs_clear_btn),
+                ),
+                self.cs_status,
+            ]
+        )
+        self.cs_group = components.subsection(
+            W,
+            "model.carbonate",
+            components.field_row(W, "cs_source_dd", self.cs_source_dd),
+            self.cs_path_box,
+        )
 
         # --- CDR (Carbon Dioxide Removal) forcing -----------------------------
         # A top-level, independently composable spec (CdrSpec/Composition.cdr) --
@@ -4368,6 +4552,15 @@ class ForgeBlueprintWizard:
             description="Mode:",
             style={"description_width": "110px"},
             tooltip=_tip("cdr", "mode"),
+        )
+        # Shown only while bgc_dd is "cdr_lite" (_sync_carbonate_sensitivity_visibility):
+        # in that mode a CDR forcing is required and its releases must target the
+        # CDR-lite tracers.
+        self.cdr_lite_hint = W.HTML(
+            "<span style='color:#666'>BGC mode <code>cdr_lite</code>: releases "
+            "drive the CDR-lite tracers, and a CDR forcing is required. Simple "
+            "mode builds one ALK (OAE) release; a YAML or netCDF forcing must use "
+            "<code>tracer_set: cdr_lite</code>.</span>"
         )
         # The mode _apply_cdr_mode() last actually applied -- lets it detect a
         # real transition (for leaving-mode cleanup) whether invoked via the
@@ -4595,6 +4788,7 @@ class ForgeBlueprintWizard:
         # --- advanced settings editor (built lazily on first rebuild) ---
         self.editor: _SettingsEditor | None = None
         self._editor_model: str | None = None
+        self._editor_bgc_mode: str | None = None
         # The RunTimeSettings variant the editor was last built against -- rebuilt
         # not only on a model switch but also when the effective ucla-roms ref
         # crosses a schema boundary (e.g. editing the roms_ref override across the
@@ -4770,6 +4964,7 @@ class ForgeBlueprintWizard:
         self.bgc_dd.value = self._model_default_bgc_mode()
         self.use_pio_chk.value = self._model_default_use_pio()
         self._sync_marbl_ref_visibility()
+        self._sync_carbonate_sensitivity_visibility()
         self._sync_auto_tiling()
         self._build_forcing_editor(self.catalog.forcing_data(self.forcing_dd.value))
         if self._forcing_editor is None:
@@ -4825,6 +5020,14 @@ class ForgeBlueprintWizard:
             w.observe(self._rebuild, names="value")
         self.model_dd.observe(self._on_model_change, names="value")
         self.bgc_dd.observe(self._sync_marbl_ref_visibility, names="value")
+        self.bgc_dd.observe(self._sync_carbonate_sensitivity_visibility, names="value")
+        self.bgc_dd.observe(self._on_bgc_mode, names="value")
+        self.cs_source_dd.observe(
+            self._sync_carbonate_sensitivity_visibility, names="value"
+        )
+        self.cs_attach_btn.on_click(self._on_cs_attach)
+        self.cs_clear_btn.on_click(self._on_cs_clear)
+        self.cs_path.observe(self._on_cs_path_submit, names="value")
         self.auto_tiling_chk.observe(self._sync_auto_tiling, names="value")
         self.nest_domain_dd.observe(self._on_nest_domain, names="value")
         self.parent_domain_dd.observe(self._on_parent_domain, names="value")
@@ -4840,7 +5043,7 @@ class ForgeBlueprintWizard:
             self.use_pio_chk,
             self.auto_tiling_chk,
             self.n_cores,
-            self.bgc_dd,
+            self.cs_source_dd,
             self.roms_ref,
             self.marbl_ref,
             self.start,
@@ -5204,6 +5407,18 @@ class ForgeBlueprintWizard:
         # MARBL ref is inert without MARBL, so hide it (value is kept, not cleared)
         self.marbl_ref.layout.display = "" if self.bgc_dd.value == "marbl" else "none"
 
+    def _sync_carbonate_sensitivity_visibility(self, _change=None):
+        # The carbonate sensitivity group and the CDR panel's hint only matter in
+        # "cdr_lite" mode; the attach row only for the "path" source. Attached
+        # state is kept (not cleared) while hidden, like marbl_ref's value.
+        cdr_lite = self.bgc_dd.value == "cdr_lite"
+        path = self.cs_source_dd.value == "path"
+        self.cs_group.layout.display = "" if cdr_lite else "none"
+        self.cs_path_box.layout.display = "" if path else "none"
+        self.cdr_lite_hint.layout.display = "" if cdr_lite else "none"
+        if path and self._carbonate_sensitivity is None and not self.cs_status.value:
+            self.cs_status.value = _CARBONATE_DIR_HINT
+
     def _sync_auto_tiling(self, _change=None):
         # Auto tiling picks n_procs_x/y at runtime from the land mask, so those
         # boxes become meaningless (disabled) and n_cores takes over; it also
@@ -5226,7 +5441,9 @@ class ForgeBlueprintWizard:
     def _on_model_change(self, _change):
         # a different model has different defaults -> existing overrides no longer apply.
         # Forcing/Output are independent catalog dimensions from the model (a ForcingSpec/
-        # OutputSpec doesn't reference a model), so switching models never touches them.
+        # OutputSpec doesn't reference a model), so switching models never re-picks them
+        # -- except that an untouched default ForcingSpec follows the new model's
+        # declared bgc_mode, via the bgc_dd change below (see _on_bgc_mode).
         if getattr(self, "_suspended", False):
             return
         self._overrides = {}
@@ -5398,6 +5615,44 @@ class ForgeBlueprintWizard:
         """
         return self.roms_ref.value.strip() or self._model_default_roms_ref() or None
 
+    def _default_forcing_spec(self, bgc_mode: str) -> str | None:
+        """The ForcingSpec preselected for *bgc_mode*: the named bundled default
+        when the catalog has it (see ``_DEFAULT_FORCING_SPEC``), else the plain
+        default, else the first spec.
+        """
+        names = list(self.catalog.forcing_names)
+        preferred = (
+            _DEFAULT_FORCING_SPEC
+            if bgc_mode == "marbl"
+            else _DEFAULT_PHYSICS_FORCING_SPEC
+        )
+        for name in (preferred, _DEFAULT_FORCING_SPEC):
+            if name in names:
+                return name
+        return names[0] if names else None
+
+    def _forcing_modified(self) -> bool:
+        """Whether the forcing editor deviates from the last catalog pick."""
+        editor = self._forcing_editor
+        return (
+            editor is not None
+            and self._forcing_seed is not None
+            and editor.gather() != self._forcing_seed
+        )
+
+    @property
+    def _active_overrides(self) -> dict[Any, Any]:
+        """The overrides that apply in the selected BGC mode -- the only ones that
+        reach the blueprint, the saved file and the counts. ``self._overrides`` is
+        the user's whole record, which keeps what a mode switch hides, so switching
+        back brings it back.
+        """
+        return {
+            (section, field): value
+            for (section, field), value in self._overrides.items()
+            if _applies_in(section, field, self.bgc_dd.value)
+        }
+
     def _build_forcing_editor(self, base_inputs: dict[str, Any]):
         self._forcing_editor = _ForcingEditor(
             self.W, base_inputs, on_change=self._on_forcing_change
@@ -5437,6 +5692,24 @@ class ForgeBlueprintWizard:
             )
         self._forcing_seed = self._forcing_editor.gather()
         self._rebuild()
+
+    def _on_bgc_mode(self, change) -> None:
+        """A BGC mode change re-resolves once. An untouched default ForcingSpec
+        follows the mode (the BGC-carrying default for MARBL, the physics-only one
+        otherwise); a hand-edited or non-default forcing is left alone.
+        """
+        if getattr(self, "_suspended", False) or self._syncing:
+            return
+        old_default = self._default_forcing_spec(change["old"])
+        new_default = self._default_forcing_spec(change["new"])
+        if (
+            self.forcing_dd.value == old_default
+            and new_default != old_default
+            and not self._forcing_modified()
+        ):
+            self.forcing_dd.value = new_default  # _on_forcing_spec rebuilds
+        else:
+            self._rebuild()
 
     def _on_forcing_change(self):
         # composition.forcing.modified is derived in _rebuild() by comparing the
@@ -5498,7 +5771,7 @@ class ForgeBlueprintWizard:
         its freshly-written catalog file (``new_name``) reproduce the exact same
         resolved blueprint currently shown (``self.config``)?
 
-        Reads ``self._gather()``/``self._overrides``/``self.catalog`` only --
+        Reads ``self._gather()``/``self._active_overrides``/``self.catalog`` only --
         mutates nothing on the wizard. Compares ``content_hash()``, which covers
         exactly the results-affecting data (excludes identity/composition/
         provenance/working_dir -- see ``ForgeBlueprint._HASH_EXCLUDE``), so a
@@ -5508,7 +5781,7 @@ class ForgeBlueprintWizard:
         if self.config is None:
             return False
         kw = self._gather()
-        overrides2 = dict(self._overrides)
+        overrides2 = self._active_overrides
         try:
             if spec == "output":
                 kw["output_settings"] = self.catalog.output_data(new_name)
@@ -6327,6 +6600,19 @@ class ForgeBlueprintWizard:
                         "<br><span style='color:#b58900'>⚠ no 'ncdr' dimension "
                         "found -- is this really a CDR-forcing file?</span>"
                     )
+                if (
+                    self.bgc_dd.value == "cdr_lite"
+                    and "tracer_name" in ds.coords
+                    and not any(
+                        str(name).startswith("CDR_")
+                        for name in ds["tracer_name"].values
+                    )
+                ):
+                    warning += (
+                        "<br><span style='color:#b58900'>⚠ BGC mode is cdr_lite "
+                        "but this file's tracer_name axis has no CDR_* tracers -- "
+                        "its releases need tracer_set cdr_lite.</span>"
+                    )
         except Exception:
             pass
         self._cdr_forcing_file = {"location": str(path), "content_hash": content_hash}
@@ -6389,6 +6675,116 @@ class ForgeBlueprintWizard:
         self.cdr_file_upload.value = ()
         # Still in "netcdf" mode with nothing attached -> invalid until re-attached.
         self.cdr_file_status.value = _CDR_FILE_HINT
+        self._rebuild()
+
+    # ---- carbonate sensitivities: a directory of ROMS _cdrgas files ------------
+    def _attach_carbonate_sensitivity_dir(self, path_str: str) -> None:
+        """Scan ``path_str`` for joined ``_cdrgas`` files, check each is netCDF,
+        hash them, and store the resolved list as ``_carbonate_sensitivity``.
+
+        A failure clears any earlier attach (the status says why): leaving it
+        would quietly keep building with files the path box no longer names.
+        """
+        self.cs_status.value = "<i>attaching…</i>"
+        try:
+            joined = find_carbonate_sensitivity_files(
+                Path(path_str).expanduser().resolve()
+            )
+            formats = {f.path: netcdf_format(f.path) for f in joined}
+            not_netcdf = [
+                p.name for p, fmt in formats.items() if fmt is NetCDFFormat.UNRECOGNIZED
+            ]
+            if not_netcdf:
+                raise ValueError(f"not netCDF files: {', '.join(not_netcdf)}")
+            files = [
+                {"location": str(f.path), "content_hash": hash_netcdf_contents(f.path)}
+                for f in joined
+            ]
+            # The blueprint's own rules (e.g. distinct basenames: the scan is
+            # recursive, so a parent of several runs' output can repeat them).
+            CarbonateSensitivitySpec.model_validate({"files": files})
+        except Exception as exc:
+            self._carbonate_sensitivity = None
+            message = html.escape(" ".join(str(exc).split()))
+            self.cs_status.value = (
+                f"<span style='color:#b00'>{type(exc).__name__}: {message}</span>"
+            )
+            self._rebuild()
+            return
+        self._carbonate_sensitivity = {"files": files}
+        first = min(f.timestamp for f in joined)
+        last = max(f.timestamp for f in joined)
+        status = _carbonate_status_html(
+            len(files), f"{first:%Y-%m-%d %H:%M} to {last:%Y-%m-%d %H:%M}"
+        )
+        if self.use_pio_chk.value and not all(
+            fmt.is_classic for fmt in formats.values()
+        ):
+            status += (
+                "<br><span style='color:#666'>ParallelIO reads classic netCDF "
+                "only: Forge converts the staged copies to CDF-5 (the originals "
+                "are untouched).</span>"
+            )
+        self.cs_status.value = status
+        self._rebuild()
+
+    def _populate_carbonate_sensitivity(self, cfg: ForgeBlueprint) -> None:
+        """Load-back half of the attach flow: a blueprint listing carbonate
+        sensitivity files selects the "path" source with the stored hashes
+        trusted (never recomputed; a missing file is a warning, not a blocker --
+        Save must still round-trip losslessly); otherwise the "directive" source.
+        """
+        spec = cfg.carbonate_sensitivity
+        if spec is None:
+            self._carbonate_sensitivity = None
+            self.cs_source_dd.value = "directive"
+            self.cs_path.value = ""
+            self.cs_status.value = ""
+            return
+        self._carbonate_sensitivity = {
+            "files": [
+                {"location": f.location, "content_hash": f.content_hash}
+                for f in spec.files
+            ]
+        }
+        parents = [str(Path(f.location).expanduser().parent) for f in spec.files]
+        try:
+            directory = os.path.commonpath(parents)
+        except ValueError:  # relative and absolute locations mixed
+            directory = parents[0]
+        self.cs_source_dd.value = "path"
+        self.cs_path.value = directory
+        missing = [f for f in spec.files if not Path(f.location).expanduser().exists()]
+        self.cs_status.value = _carbonate_status_html(len(spec.files)) + (
+            f"<br><span style='color:#b00'>⚠ {len(missing)} file(s) not found at "
+            "these paths</span>"
+            if missing
+            else ""
+        )
+
+    def _on_cs_attach(self, _btn):
+        path_str = self.cs_path.value.strip()
+        if not path_str:
+            self.cs_status.value = "<span style='color:#b00'>Enter a path first.</span>"
+            return
+        # Explicit click always re-scans and re-hashes -- no dedupe here.
+        self._attach_carbonate_sensitivity_dir(path_str)
+
+    def _on_cs_path_submit(self, _change) -> None:
+        """Attach the typed directory on Enter/focus-out (twin of
+        `_on_cdr_file_path_submit`): a typed-but-unattached path would otherwise
+        leave the blueprint invalid with no hint as to why.
+        """
+        if getattr(self, "_suspended", False):
+            return
+        path_str = self.cs_path.value.strip()
+        if path_str:
+            self._attach_carbonate_sensitivity_dir(path_str)
+
+    def _on_cs_clear(self, _btn):
+        self._carbonate_sensitivity = None
+        self.cs_path.value = ""  # fires _on_cs_path_submit, a no-op when blank
+        self.cs_status.value = _CARBONATE_DIR_HINT
         self._rebuild()
 
     # ---- CDR plotting (WP6) ----------------------------------------------------
@@ -6611,11 +7007,10 @@ class ForgeBlueprintWizard:
             # _Suspender), so the disabled/visible state is already correct;
             # call again explicitly for robustness in case that ever changes.
             self._sync_auto_tiling()
-            self.bgc_dd.value = (
-                "marbl"
-                if bool((cfg.model_settings.get("cppdefs") or {}).get("marbl", True))
-                else "none"
+            self.bgc_dd.value = bgc_mode_from_cppdefs(
+                cfg.model_settings.get("cppdefs") or {}
             )
+            self._populate_carbonate_sensitivity(cfg)
             # Show the file's actual pinned ref, falling back to the (now-selected)
             # model's default when the file matches it exactly. (stored_ref was
             # already computed above, before the suspend block, to feed the
@@ -6767,30 +7162,58 @@ class ForgeBlueprintWizard:
         return loaded_problems
 
     # ---- gather + resolve ----------------------------------------------------
-    def _gather(self) -> dict[str, Any]:
+    def _base_grid_kwargs(self) -> dict[str, Any]:
+        """The main grid's generation kwargs, read from the grid widgets.
+
+        ``{}`` while a user-provided grid file is attached: it forbids the
+        generation-geometry keys alongside it
+        (``Domain._grid_file_excludes_generation_geometry``), so ``grid_file=``/
+        ``grid=`` carry the grid instead.
+        """
         gk: dict[str, Any] = {}
-        if self._grid_file is None:
-            for k in _GRID_INT:
-                gk[k] = int(self.grid_w[k].value)
-            for k in _GRID_FLOAT:
+        if self._grid_file is not None:
+            return gk
+        for k in _GRID_INT:
+            gk[k] = int(self.grid_w[k].value)
+        for k in _GRID_FLOAT:
+            gk[k] = float(self.grid_w[k].value)
+        if self.scoord_chk.value:
+            for k in _SCOORD:
                 gk[k] = float(self.grid_w[k].value)
-            if self.scoord_chk.value:
-                for k in _SCOORD:
-                    gk[k] = float(self.grid_w[k].value)
-            # hmin + close_narrow_channels + mask_shapefile injected into grid_kwargs
-            if self.hmin.value != 5.0:
-                gk["hmin"] = float(self.hmin.value)
-            if self.close_narrow_chk.value:
-                gk["close_narrow_channels"] = True
-            if self.mask_shapefile.value.strip():
-                gk["mask_shapefile"] = self.mask_shapefile.value.strip()
-        # else: a user-provided grid file forbids the generation-geometry keys
-        # above alongside it (Domain._grid_file_excludes_generation_geometry) --
-        # grid_kwargs stays {} and grid_file=/grid= (below) carry the grid instead.
+        # hmin + close_narrow_channels + mask_shapefile injected into grid_kwargs
+        if self.hmin.value != 5.0:
+            gk["hmin"] = float(self.hmin.value)
+        if self.close_narrow_chk.value:
+            gk["close_narrow_channels"] = True
+        if self.mask_shapefile.value.strip():
+            gk["mask_shapefile"] = self.mask_shapefile.value.strip()
+        return gk
+
+    def _attached_grid(self) -> Any:
+        """The attached grid file's loaded ``roms_tools.Grid``, or ``None`` when no
+        grid file is attached.
+        """
+        if self._grid_file_grid is not None:
+            return self._grid_file_grid
+        if self._grid_file is not None:
+            # Attached but not currently loaded (a reattach failed -- e.g. the
+            # file went missing since it was recorded -- see _reattach_grid_file).
+            # Must not silently fall through to building a grid from whatever
+            # stale/default values happen to be sitting in the (locked, but
+            # still holding old values) grid_w widgets -- that would plot/derive
+            # boundaries and v_sponge from a completely different, wrong grid
+            # with no indication anything is amiss.
+            raise RuntimeError(
+                "grid_file is attached but failed to (re)load -- see "
+                "grid_file_status; re-attach a valid file first."
+            )
+        return None
+
+    def _gather(self) -> dict[str, Any]:
         kw = dict(
             model_dir=self.catalog.model_dir(self.model_dd.value),
             grid_name=self.grid_name.value,
-            grid_kwargs=gk,
+            grid_kwargs=self._base_grid_kwargs(),
             open_boundaries={d: w.value for d, w in self.bnd.items()},
             partitioning=(
                 {"auto_tiling": True, "n_cores": int(self.n_cores.value)}
@@ -6818,6 +7241,16 @@ class ForgeBlueprintWizard:
         kw["topography_source"] = self.topo_source.value
         kw["use_pio"] = self.use_pio_chk.value
         kw["bgc_mode"] = self.bgc_dd.value
+        # The default ("directive") leaves carbonate_sensitivity off: the workplan
+        # directive supplies the files at run time. The resolver rejects them
+        # outside bgc_mode "cdr_lite", so attached state is only passed there.
+        if self.bgc_dd.value == "cdr_lite" and self.cs_source_dd.value == "path":
+            if self._carbonate_sensitivity is None:
+                raise ValueError(
+                    "carbonate sensitivities: attach a directory of ROMS _cdrgas "
+                    "files, or switch the source to the workplan directive"
+                )
+            kw["carbonate_sensitivity"] = self._carbonate_sensitivity
         if self.roms_ref.value.strip():
             kw["roms_ref"] = self.roms_ref.value.strip()
         if self.marbl_ref.value.strip():
@@ -6940,7 +7373,10 @@ class ForgeBlueprintWizard:
             self.download_link_review.value = ""
             with self.preview:
                 print(f"{type(exc).__name__}: {exc}")
-            error = f"{type(exc).__name__}: {exc}".splitlines()[0][:200]
+            lines = f"{type(exc).__name__}: {exc}".splitlines()
+            error = lines[0][:200]
+            if len(lines) > 1 or len(lines[0]) > len(error):
+                error += " — full message in the preview below"
             self._update_status(None, error=error)
             return
 
@@ -6970,18 +7406,22 @@ class ForgeBlueprintWizard:
             self.editor is None
             or self._editor_model != self.model_dd.value
             or self._editor_settings_cls is not settings_cls
+            or self._editor_bgc_mode != self.bgc_dd.value
         ):
             self.editor = _SettingsEditor(
                 self.W,
                 composed,
                 on_edit=self._on_editor_edit,
                 settings_cls=settings_cls,
+                bgc_mode=self.bgc_dd.value,
             )
             self._editor_model = self.model_dd.value
             self._editor_settings_cls = settings_cls
+            self._editor_bgc_mode = self.bgc_dd.value
             self.editor_box.children = [self.editor.accordion]
 
-        effective = _apply_overrides(composed, self._overrides)
+        active_overrides = self._active_overrides
+        effective = _apply_overrides(composed, active_overrides)
         self._syncing = True
         try:
             self.editor.sync(effective)  # display effective; don't re-record as edits
@@ -7021,10 +7461,7 @@ class ForgeBlueprintWizard:
             and self._domain_seed is not None
             and self._domain_snapshot() != self._domain_seed
         )
-        forcing_modified = (
-            self._forcing_seed is not None
-            and self._forcing_editor.gather() != self._forcing_seed
-        )
+        forcing_modified = self._forcing_modified()
         cdr_modified = (
             self.cdr_dd.value != "<custom>"
             and self._cdr_seed is not None
@@ -7033,7 +7470,7 @@ class ForgeBlueprintWizard:
 
         comp = cfg.composition.model_copy(
             update={
-                "overrides": _overrides_nested(self._overrides),
+                "overrides": _overrides_nested(active_overrides),
                 "model": cfg.composition.model.model_copy(
                     update={"modified": model_modified}
                 ),
@@ -7170,13 +7607,14 @@ class ForgeBlueprintWizard:
         editor = self.editor
         if editor is None:
             return
+        active = self._active_overrides
         for i, (title, sections) in enumerate(editor._pane_sections.items()):
             fields_by_section = [editor._section_fields.get(s, []) for s in sections]
             n_fields = sum(len(fields) for fields in fields_by_section)
             pane_keys = {
                 (s, f) for s, fields in zip(sections, fields_by_section) for f in fields
             }
-            n_mod = sum(1 for k in self._overrides if k in pane_keys)
+            n_mod = sum(1 for k in active if k in pane_keys)
             editor.accordion.set_title(
                 i,
                 components.accordion_title(
@@ -7251,9 +7689,10 @@ class ForgeBlueprintWizard:
             if forcing_modified
             else components.chip("At preset defaults", "def")
         )
+        active = self._active_overrides
         chips["advanced"].value = (
-            components.chip(f"● {len(self._overrides)} modified", "info")
-            if self._overrides
+            components.chip(f"● {len(active)} modified", "info")
+            if active
             else components.chip("All defaults", "def")
         )
 
@@ -7311,10 +7750,9 @@ class ForgeBlueprintWizard:
     def _on_compute_dt(self, _):
         self.dt_status.value = "<i>computing…</i>"
         try:
-            kw = self._gather()
-            kw["dt"] = None  # force CFL computation (builds the grid via roms_tools)
-            cfg = build_forge_blueprint(**kw)
-            self.dt.value = float(cfg.model_settings["time_stepping"]["dt"])
+            self.dt.value = float(
+                cfl_dt(self._base_grid_kwargs(), self._attached_grid())
+            )
             self.dt_status.value = (
                 f"<span style='color:#080'>dt = {self.dt.value:g} s (CFL)</span>"
             )
@@ -7332,37 +7770,13 @@ class ForgeBlueprintWizard:
         grid build (the live preview / ``_rebuild`` never does, so typing in
         the grid fields stays instant).
         """
-        if self._grid_file_grid is not None:
-            return self._grid_file_grid
-        if self._grid_file is not None:
-            # Attached but not currently loaded (a reattach failed -- e.g. the
-            # file went missing since it was recorded -- see _reattach_grid_file).
-            # Must not silently fall through to building a grid from whatever
-            # stale/default values happen to be sitting in the (locked, but
-            # still holding old values) grid_w widgets -- that would plot/derive
-            # boundaries and v_sponge from a completely different, wrong grid
-            # with no indication anything is amiss.
-            raise RuntimeError(
-                "grid_file is attached but failed to (re)load -- see "
-                "grid_file_status; re-attach a valid file first."
-            )
+        attached = self._attached_grid()
+        if attached is not None:
+            return attached
 
         from roms_tools import Grid
 
-        gk: dict[str, Any] = {}
-        for k in _GRID_INT:
-            gk[k] = int(self.grid_w[k].value)
-        for k in _GRID_FLOAT:
-            gk[k] = float(self.grid_w[k].value)
-        if self.scoord_chk.value:
-            for k in _SCOORD:
-                gk[k] = float(self.grid_w[k].value)
-        if self.hmin.value != 5.0:
-            gk["hmin"] = float(self.hmin.value)
-        if self.close_narrow_chk.value:
-            gk["close_narrow_channels"] = True
-        if self.mask_shapefile.value.strip():
-            gk["mask_shapefile"] = self.mask_shapefile.value.strip()
+        gk = self._base_grid_kwargs()
         topo, self._grid_build_topo_note = self._this_grid_plot_topography()
         if topo is not None:
             gk["topography_source"] = topo
@@ -7721,8 +8135,13 @@ class ForgeBlueprintWizard:
             )
             self.output_dd.value = name if ok else old_value
             if ok:
+                # The saved OutputSpec carries the active output overrides; one a
+                # mode switch hides was not saved, so it stays on the record.
+                active = self._active_overrides
                 self._overrides = {
-                    k: v for k, v in self._overrides.items() if not _is_output_key(*k)
+                    k: v
+                    for k, v in self._overrides.items()
+                    if k not in active or not _is_output_key(*k)
                 }
         if ok:
             self._rebuild()
@@ -7790,8 +8209,11 @@ class ForgeBlueprintWizard:
             )
             self.model_dd.value = name if ok else old_value
             if ok:
+                active = self._active_overrides
                 self._overrides = {
-                    k: v for k, v in self._overrides.items() if _is_output_key(*k)
+                    k: v
+                    for k, v in self._overrides.items()
+                    if k not in active or _is_output_key(*k)
                 }
         if ok:
             self._rebuild()
@@ -8079,6 +8501,7 @@ class ForgeBlueprintWizard:
         self.grid_file_detach_btn.button_style = "danger"
         self.cdr_clear_btn.button_style = "danger"
         self.cdr_file_clear_btn.button_style = "danger"
+        self.cs_clear_btn.button_style = "danger"
 
         sticky = W.HBox([self.sticky_bar, self.download_link])
         sticky.add_class("forge-sticky")
@@ -8131,6 +8554,7 @@ class ForgeBlueprintWizard:
                     components.field_row(W, "marbl_ref", self.marbl_ref),
                 ],
             ),
+            self.cs_group,
             components.field_row(W, "forcing_dd", self.forcing_dd),
             num=1,
             chips_widget=self.card_chips["model"],
@@ -8374,6 +8798,7 @@ class ForgeBlueprintWizard:
                         components.field_row(W, "cdr_mode_dd", self.cdr_mode_dd),
                     ],
                 ),
+                self.cdr_lite_hint,
                 # Per-mode panels on the left, plot column on the right --
                 # the same side-by-side arrangement as the Grid card.
                 W.HBox(

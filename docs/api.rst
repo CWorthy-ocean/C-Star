@@ -43,6 +43,7 @@ Input Datasets
    cstar.roms.input_dataset.ROMSBoundaryForcing
    cstar.roms.input_dataset.ROMSSurfaceForcing
    cstar.roms.input_dataset.ROMSForcingCorrections
+   cstar.roms.input_dataset.ROMSCarbonateSensitivity
 
 Discretization
 ----------------

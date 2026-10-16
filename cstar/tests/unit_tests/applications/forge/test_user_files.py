@@ -4,6 +4,7 @@ contract for user-supplied pre-made netCDF files (grid / river / CDR forcing).
 """
 
 import logging
+import re
 import shutil
 import subprocess
 from pathlib import Path
@@ -15,7 +16,11 @@ import xarray as xr
 
 from cstar.applications.forge.blueprint import UserProvidedFile
 from cstar.applications.forge.user_files import (
+    HASH_SCHEME,
+    SAMPLE_BUDGET,
+    SAMPLE_ROWS,
     hash_netcdf_contents,
+    short_digest,
     stage_user_netcdf,
     verify_user_file,
 )
@@ -53,7 +58,37 @@ def _string_coord_dataset() -> xr.Dataset:
     )
 
 
+_BIG_SHAPE = (8, 400, 500)
+
+
+def _big_dataset(seed: int = 0) -> xr.Dataset:
+    """A float32 variable of ~6.4 MB (above ``FULL_HASH_LIMIT``, so it is hashed by
+    sampling rows) plus a small coordinate that is hashed in full.
+    """
+    rng = np.random.default_rng(seed)
+    data = rng.random(_BIG_SHAPE, dtype=np.float64).astype(np.float32)
+    return xr.Dataset(
+        {"tracer": (["t", "y", "x"], data), "t": ("t", np.arange(8.0))},
+    )
+
+
+def _sampled_row_indices(n_rows: int, row_len: int, itemsize: int) -> list[int]:
+    """The flat row indices the digest samples (the documented row rule)."""
+    k = max(min(n_rows, 2), min(SAMPLE_ROWS, SAMPLE_BUDGET // (row_len * itemsize)))
+    return np.unique(np.round(np.linspace(0, n_rows - 1, k)).astype(int)).tolist()
+
+
+def _write_big(path: Path, ds: xr.Dataset, fmt: str = "NETCDF4") -> Path:
+    ds.to_netcdf(path, format=fmt, engine="netcdf4")
+    return path
+
+
 class TestHashNetcdfContents:
+    def test_digest_carries_scheme_prefix(self, tmp_path):
+        p = tmp_path / "a.nc"
+        _numeric_dataset().to_netcdf(p)
+        assert re.fullmatch(rf"{HASH_SCHEME}:[0-9a-f]{{64}}", hash_netcdf_contents(p))
+
     def test_deterministic_same_dataset_two_files(self, tmp_path):
         ds = _numeric_dataset()
         p1 = tmp_path / "a.nc"
@@ -117,6 +152,146 @@ class TestHashNetcdfContents:
         assert hash_netcdf_contents(p1) == hash_netcdf_contents(p2)
 
 
+class TestHashLargeVariables:
+    def test_deterministic_across_two_writes(self, tmp_path):
+        ds = _big_dataset()
+        p1 = _write_big(tmp_path / "a.nc", ds)
+        p2 = _write_big(tmp_path / "b.nc", ds)
+        assert hash_netcdf_contents(p1) == hash_netcdf_contents(p2)
+
+    @pytest.mark.parametrize(
+        "index",
+        [(0, 0, 0), (-1, -1, -1)],
+        ids=["first-element", "last-element"],
+    )
+    def test_changing_edge_element_changes_digest(self, tmp_path, index):
+        ds = _big_dataset()
+        h1 = hash_netcdf_contents(_write_big(tmp_path / "a.nc", ds))
+
+        ds2 = ds.copy(deep=True)
+        ds2["tracer"].values[index] += 1.0
+        assert hash_netcdf_contents(_write_big(tmp_path / "b.nc", ds2)) != h1
+
+    def test_changing_sampled_middle_row_changes_digest(self, tmp_path):
+        ds = _big_dataset()
+        h1 = hash_netcdf_contents(_write_big(tmp_path / "a.nc", ds))
+
+        n_rows = _BIG_SHAPE[0] * _BIG_SHAPE[1]
+        rows = _sampled_row_indices(n_rows, _BIG_SHAPE[2], 4)
+        assert len(rows) == SAMPLE_ROWS
+        t, y = np.unravel_index(rows[len(rows) // 2], _BIG_SHAPE[:2])
+
+        ds2 = ds.copy(deep=True)
+        ds2["tracer"].values[t, y, _BIG_SHAPE[2] // 2] += 1.0
+        assert hash_netcdf_contents(_write_big(tmp_path / "b.nc", ds2)) != h1
+
+    def test_survives_netcdf3_reencoding(self, tmp_path):
+        ds = _big_dataset()
+        p_nc4 = _write_big(tmp_path / "a_nc4.nc", ds, "NETCDF4")
+        p_nc3 = _write_big(tmp_path / "a_nc3.nc", ds, "NETCDF3_64BIT")
+        assert hash_netcdf_contents(p_nc4) == hash_netcdf_contents(p_nc3)
+
+    def test_survives_nccopy_cdf5(self, tmp_path):
+        if shutil.which("nccopy") is None:
+            pytest.skip("nccopy not on PATH")
+        p_nc4 = _write_big(tmp_path / "a_nc4.nc", _big_dataset())
+        p_cdf5 = tmp_path / "a_cdf5.nc"
+        h_before = hash_netcdf_contents(p_nc4)
+
+        subprocess.run(["nccopy", "-k", "cdf5", str(p_nc4), str(p_cdf5)], check=True)
+        assert hash_netcdf_contents(p_cdf5) == h_before
+
+    def test_large_variable_is_read_bounded(self, tmp_path, monkeypatch):
+        import netCDF4
+
+        p = _write_big(tmp_path / "a.nc", _big_dataset())
+        read: dict[str, int] = {}
+        original = netCDF4.Variable.__getitem__
+
+        def spy(self, key):
+            result = original(self, key)
+            read[self.name] = read.get(self.name, 0) + np.asarray(result).size
+            return result
+
+        monkeypatch.setattr(netCDF4.Variable, "__getitem__", spy)
+        hash_netcdf_contents(p)
+
+        assert 0 < read["tracer"] <= SAMPLE_BUDGET // 4
+        assert read["t"] == _BIG_SHAPE[0]
+
+    def test_long_rows_keep_first_and_last_record(self, tmp_path, monkeypatch):
+        """Rows longer than the budget still sample the last record, within budget."""
+        import netCDF4
+
+        shape = (3, 300_000)  # 2.4 MB float64 rows: two rows would exceed the budget
+        data = np.random.default_rng(0).random(shape)
+        ds = xr.Dataset({"field": (["t", "x"], data)})
+        assert _sampled_row_indices(shape[0], shape[1], 8) == [0, 2]
+        h1 = hash_netcdf_contents(_write_big(tmp_path / "a.nc", ds))
+
+        ds2 = ds.copy(deep=True)
+        ds2["field"].values[-1, -1] += 1.0
+        assert hash_netcdf_contents(_write_big(tmp_path / "b.nc", ds2)) != h1
+
+        read = 0
+        original = netCDF4.Variable.__getitem__
+
+        def spy(self, key):
+            nonlocal read
+            result = original(self, key)
+            read += np.asarray(result).size
+            return result
+
+        monkeypatch.setattr(netCDF4.Variable, "__getitem__", spy)
+        hash_netcdf_contents(tmp_path / "a.nc")
+        assert 0 < read <= SAMPLE_BUDGET // 8
+
+    def test_every_variable_is_read_bounded(self, tmp_path, monkeypatch):
+        """A large dimension coordinate and a single-record 3-D variable are sampled,
+        not read whole at open (xarray would index the coordinate by default).
+        """
+        import netCDF4
+
+        ds = xr.Dataset(
+            {
+                "field": (["t", "y", "x"], np.zeros((1, 1000, 1000), dtype=np.float32)),
+                "x": ("x", np.arange(1000.0)),
+                "big_coord": ("n", np.arange(2_000_000.0)),
+            }
+        )
+        p = _write_big(tmp_path / "a.nc", ds)
+        read: dict[str, int] = {}
+        original = netCDF4.Variable.__getitem__
+
+        def spy(self, key):
+            result = original(self, key)
+            read[self.name] = read.get(self.name, 0) + np.asarray(result).size
+            return result
+
+        monkeypatch.setattr(netCDF4.Variable, "__getitem__", spy)
+        hash_netcdf_contents(p)
+
+        assert 0 < read["big_coord"] <= SAMPLE_BUDGET // 8
+        assert 0 < read["field"] <= SAMPLE_BUDGET // 4
+        assert read["x"] == 1000
+
+    def test_long_row_is_sampled_at_both_ends(self, tmp_path):
+        data = np.random.default_rng(0).random(1_000_000)
+        ds = xr.Dataset({"series": ("n", data)})
+        h1 = hash_netcdf_contents(_write_big(tmp_path / "a.nc", ds))
+        assert h1 == hash_netcdf_contents(_write_big(tmp_path / "b.nc", ds))
+
+        for index in (0, -1):
+            ds2 = ds.copy(deep=True)
+            ds2["series"].values[index] += 1.0
+            assert hash_netcdf_contents(_write_big(tmp_path / "c.nc", ds2)) != h1
+
+
+def test_short_digest_strips_scheme_tag():
+    assert short_digest(f"{HASH_SCHEME}:" + "0123456789abcdef" * 4) == "0123456789ab"
+    assert short_digest("deadbeef" * 8) == "deadbeefdead"
+
+
 class TestVerifyUserFile:
     def test_missing_file_raises_with_label(self, tmp_path):
         f = UserProvidedFile(location=str(tmp_path / "missing.nc"), content_hash="x")
@@ -138,11 +313,44 @@ class TestVerifyUserFile:
         ds = _numeric_dataset()
         p = tmp_path / "grid.nc"
         ds.to_netcdf(p)
-        f = UserProvidedFile(location=str(p), content_hash="deadbeef" * 8)
+        f = UserProvidedFile(
+            location=str(p), content_hash=f"{HASH_SCHEME}:" + "deadbeef" * 8
+        )
 
-        with pytest.warns(UserWarning, match="my-grid"):
+        with pytest.warns(UserWarning, match="my-grid") as record:
             result = verify_user_file(f, label="my-grid")
         assert result == p.resolve()
+        # the short digests name the hex, not the scheme tag
+        assert "recorded deadbeefdead…" in str(record[0].message)
+        assert "nc-sample-v1…" not in str(record[0].message)
+
+    def test_unknown_scheme_is_not_verified(self, tmp_path, recwarn, caplog):
+        p = tmp_path / "grid.nc"
+        _numeric_dataset().to_netcdf(p)
+        f = UserProvidedFile(location=str(p), content_hash="nc-sample-v9:" + "a" * 64)
+
+        with caplog.at_level(logging.WARNING, logger=_LOGGER):
+            assert verify_user_file(f, label="my-grid") == p.resolve()
+
+        assert not [w for w in recwarn if issubclass(w.category, UserWarning)]
+        messages = [r.getMessage() for r in caplog.records if r.name == _LOGGER]
+        assert len(messages) == 1
+        assert "'nc-sample-v9'" in messages[0] and "not verified" in messages[0]
+
+    def test_legacy_untagged_hash_is_not_verified(self, tmp_path, recwarn, caplog):
+        p = tmp_path / "grid.nc"
+        _numeric_dataset().to_netcdf(p)
+        f = UserProvidedFile(location=str(p), content_hash="deadbeef" * 8)
+
+        with caplog.at_level(logging.WARNING, logger=_LOGGER):
+            result = verify_user_file(f, label="my-grid")
+
+        assert result == p.resolve()
+        assert not [w for w in recwarn if issubclass(w.category, UserWarning)]
+        records = [r for r in caplog.records if r.name == _LOGGER]
+        assert len(records) == 1
+        assert records[0].levelno == logging.WARNING
+        assert "not verified" in records[0].getMessage()
 
 
 _RUN = "cstar.base.utils.subprocess.run"

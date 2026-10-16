@@ -1,4 +1,5 @@
 import functools
+import json
 import os
 import sys
 import typing as t
@@ -18,6 +19,7 @@ from cstar.base.env import (
     ENV_CSTAR_LOG_LEVEL,
     FLAG_ON,
 )
+from cstar.base.exceptions import CstarExpectationFailed
 from cstar.base.feature import is_flag_enabled
 from cstar.base.log import LogLevelChoices, get_logger, reset_log_level
 from cstar.base.utils import slugify
@@ -33,6 +35,8 @@ from cstar.orchestration.formatting import (
 from cstar.orchestration.models import BlueprintCore
 from cstar.orchestration.serialization import (
     PersistenceMode,
+    anchor_blueprint_file,
+    anchor_locations,
     serialize,
     validate_serialized_entity,
 )
@@ -48,6 +52,9 @@ from cstar.system.migration import (
     OnMigratedCallback,
     OnPlannedCallback,
 )
+
+if t.TYPE_CHECKING:
+    from pydantic import BaseModel
 
 app = typer.Typer()
 console = Console()
@@ -511,7 +518,10 @@ def persist_migration(request: MigrationRequest, result: MigrateResult) -> Path:
     """Serialize the migrated entity to disk.
 
     For an in-place migration, the original source file is preserved in a
-    backup file before it is overwritten.
+    backup file before it is overwritten. A migrated copy written to a different
+    directory than the source (`CSTAR_STATE_HOME` by default) has its relative
+    `location` values anchored to the source's directory first, so they keep
+    naming the same files.
 
     Parameters
     ----------
@@ -530,7 +540,8 @@ def persist_migration(request: MigrationRequest, result: MigrateResult) -> Path:
     ValueError
         If the result does not contain a migration plan.
     typer.BadParameter
-        If the migrated content cannot be serialized.
+        If the migrated content cannot be serialized, or a relative location
+        would resolve differently once the copy is written.
     """
     if result.plan is None:
         msg = "Unable to persist an unplanned migration"
@@ -540,7 +551,11 @@ def persist_migration(request: MigrationRequest, result: MigrateResult) -> Path:
 
     try:
         bp_type = get_application(result.application).blueprint
-        updated_bp = bp_type(**result.migrated)
+        migrated = result.migrated
+        source_dir = request.source.expanduser().resolve().parent
+        if persist_to.expanduser().resolve().parent != source_dir:
+            migrated = anchor_locations(migrated, source_dir)
+        updated_bp = bp_type(**migrated)
         if request.in_place:
             backup_path = get_backup_path(request.source)
             backup_path.write_bytes(request.source.read_bytes())
@@ -551,7 +566,7 @@ def persist_migration(request: MigrationRequest, result: MigrateResult) -> Path:
             mode=PersistenceMode.auto,
         )
         assert nbytes, "The migrated blueprint failed to write content"
-    except SyntaxError as ex:
+    except (SyntaxError, CstarExpectationFailed) as ex:
         msg = f"Unable to complete migration: {ex}"
         raise typer.BadParameter(msg) from ex
 
@@ -639,6 +654,10 @@ def localize_and_migrate(path: str) -> tuple[Path, bool]:
     path : str
         The path to the blueprint.
 
+    A blueprint downloaded from a URL has no directory of its own, so the
+    relative locations in its local copy are anchored to the working directory,
+    where they have always been read from, before any later step re-reads the copy.
+
     Returns
     -------
     tuple[Path, bool]
@@ -661,6 +680,9 @@ def localize_and_migrate(path: str) -> tuple[Path, bool]:
         If executing a planned migration fails.
     """
     with local_copy(path) as local_path:
+        if is_remote_resource(path):
+            anchor_blueprint_file(local_path, Path.cwd())
+
         request = MigrationRequest(path=local_path)
         is_migrated = False
 
@@ -739,3 +761,33 @@ def set_ctxmap(context: typer.Context, key: str, value: object) -> None:
         console.print(f"Value in context map using key {key!r} will be overwritten")
 
     context_map[key] = value
+
+
+def write_model_schema(model: "type[BaseModel]", path: Path) -> Path:
+    """Write the JSON schema of a model to a file, creating its directory.
+
+    Parameters
+    ----------
+    model : type[BaseModel]
+        The model to generate the schema of.
+    path : Path
+        The file to write.
+
+    Returns
+    -------
+    Path
+        The file written.
+
+    Raises
+    ------
+    typer.Exit
+        Raised when nothing was written.
+    """
+    content = json.dumps(model.model_json_schema(), indent=4)
+    path.parent.mkdir(parents=True, exist_ok=True)
+
+    if not path.write_text(f"{content}\n"):
+        print("Empty schema write occurred")
+        raise typer.Exit(1)
+
+    return path

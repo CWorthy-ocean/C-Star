@@ -60,6 +60,14 @@ before that layout keeps its ``CSTAR_DATA_HOME/<run id>`` directory when you
 re-run or resume it. A ``working_dir`` you set is used exactly as written; a
 relative path is resolved against the directory you run from.
 
+A relative ``location:`` inside a blueprint, such as an input dataset or local
+code, is different: it resolves against the directory of the blueprint file,
+wherever you run from. A location that exists only relative to the directory
+you run from, where earlier releases looked, is rejected with both paths
+named, rather than read from the wrong place. A blueprint fetched from a URL has
+no directory of its own, so its relative locations resolve against the
+directory you run ``cstar`` from.
+
 ``CSTAR_DATA_HOME`` is ``~/cstar`` on a laptop or workstation. On a
 supported HPC system it is a ``cstar`` directory on your scratch file system
 unless you set it yourself. The scratch file system is the first of

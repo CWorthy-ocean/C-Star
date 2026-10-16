@@ -35,6 +35,12 @@ sections:
     desc: Check the resolved blueprint, then download it or save it to the catalog.
     required: false
 
+  # --- model subsections --------------------------------------------------------
+  model.carbonate:
+    title: Carbonate sensitivities
+    desc: The carbonate sensitivity files a CDR-lite build reads as surface forcing, supplied at run time by default.
+    required: false
+
   # --- grid subsections -------------------------------------------------------
   grid.geometry:
     title: Grid geometry
@@ -156,11 +162,23 @@ sections:
   settings.dic_alk_correction:
     title: DIC and alkalinity correction
     required: false
+  settings.param:
+    title: Passive tracers
+    required: false
   settings.cdr_frc:
     title: CDR forcing
     required: false
   settings.cdr_output:
     title: CDR output
+    required: false
+  settings.cdr_lite:
+    title: CDR-lite
+    required: false
+  settings.cdr_lite_output:
+    title: CDR-lite tracer output
+    required: false
+  settings.cdr_gas_exch_output:
+    title: CDR gas-exchange output
     required: false
   settings.ocean_vars:
     title: Physical state output
@@ -213,7 +231,13 @@ fields:
     required: true
   bgc_dd:
     label: Biogeochemistry
-    hint: MARBL couples biogeochemistry to the physics; “none” runs physics only.
+    hint: MARBL couples biogeochemistry to the physics; “none” runs physics only; “cdr_lite” runs only the CDR-lite tracers, without MARBL.
+  cs_source_dd:
+    label: Sensitivity source
+    hint: By default the carbonate-sensitivity-from workplan directive supplies the files from an earlier ROMS-MARBL step at run time; choose a directory to put them on the blueprint now.
+  cs_path:
+    label: Sensitivity files
+    hint: A directory of joined ROMS _cdrgas files, written by a ROMS-MARBL run with the gas-exchange output enabled.
   domain_dd:
     label: Domain preset
     required: true
@@ -767,6 +791,13 @@ fields:
   settings.marbl_bgc.marbl_diagnostics_to_write:
     label: MARBL diagnostics to write
     symbol: marbl_diagnostics_to_write
+  settings.marbl_bgc.use_constant_fe:
+    label: Hold iron constant
+    symbol: use_constant_fe
+  settings.marbl_bgc.constant_fe_value:
+    label: Constant iron concentration
+    symbol: constant_fe_value
+    unit: mmol/m³
   settings.cdr_output.do_cdr_output:
     label: Write CDR output
     symbol: do_cdr_output
@@ -781,6 +812,72 @@ fields:
     symbol: output_period
     unit: s
   settings.cdr_output.nrpf:
+    label: Records per file
+    symbol: nrpf
+  settings.cdr_lite.cdr_online_carbonate_sensitivity:
+    label: Compute carbonate sensitivities online
+    symbol: cdr_online_carbonate_sensitivity
+    hint: Compute the carbonate sensitivities of the CDR-lite air-sea CO2 flux online from MARBL’s alternative-CO2 state, instead of reading them from forcing files. Needs MARBL.
+  settings.cdr_lite_output.do_cdr_lite_output:
+    label: Write CDR-lite tracer output
+    symbol: do_cdr_lite_output
+    hint: Write the CDR-lite tracers (CDR_OAE_ALK, CDR_OAE_DIC, CDR_DOR_DIC) to their own output files, the only output they appear in. Always on with the cdr_lite BGC mode; not available without MARBL or that mode.
+  settings.cdr_lite_output.do_avg:
+    label: Averaging
+    symbol: do_avg
+  settings.cdr_lite_output.monthly_averages:
+    label: Averaging cadence
+    symbol: monthly_averages
+  settings.cdr_lite_output.output_period:
+    label: Output period
+    symbol: output_period
+    unit: s
+  settings.cdr_lite_output.nrpf:
+    label: Records per file
+    symbol: nrpf
+  settings.cdr_lite_output.wrt_tracers:
+    label: Write tracer concentrations
+    symbol: wrt_tracers
+    hint: Write the CDR-lite tracer concentrations.
+  settings.cdr_lite_output.wrt_vertical_integrals:
+    label: Write vertical integrals
+    symbol: wrt_vertical_integrals
+    hint: Write the depth-integrated tracer fields (int_z_*).
+  settings.cdr_lite_output.wrt_thickness_weighted:
+    label: Write thickness-weighted fields
+    symbol: wrt_thickness_weighted
+    hint: Write the layer-thickness-weighted fields (h* and h*_avg).
+  settings.cdr_lite_output.wrt_sources:
+    label: Write release sources
+    symbol: wrt_sources
+    hint: Write the release source fields (*_source). Only has an effect with CDR forcing enabled.
+  settings.cdr_lite_output.wrt_alk:
+    label: Write alkalinity tracers
+    symbol: wrt_alk
+    hint: Write the CDR_OAE_ALK tracer and its variants.
+  settings.cdr_lite_output.wrt_dic:
+    label: Write DIC tracers
+    symbol: wrt_dic
+    hint: Write the CDR_OAE_DIC and CDR_DOR_DIC tracers and their variants.
+  settings.cdr_lite_output.wrt_gas_exchange:
+    label: Write air-sea CO2 flux
+    symbol: wrt_gas_exchange
+    hint: Write the air-sea CO2 flux into each CDR-lite DIC tracer (mmol/m²/s, positive into the ocean). Needs the CDR_LITE build option, which the cdr_lite BGC mode sets (under MARBL, turn on the online carbonate sensitivity). ucla-roms 0.9.0 and later.
+  settings.cdr_gas_exch_output.do_cdr_gas_exch_output:
+    label: Write CDR gas-exchange output
+    symbol: do_cdr_gas_exch_output
+    hint: Write the carbonate sensitivities of the air-sea CO2 flux (ddic_dco2, ddic_dalk) to their own output files. Needs MARBL, since it reads MARBL’s alternative-CO2 tracers.
+  settings.cdr_gas_exch_output.do_avg:
+    label: Averaging
+    symbol: do_avg
+  settings.cdr_gas_exch_output.monthly_averages:
+    label: Averaging cadence
+    symbol: monthly_averages
+  settings.cdr_gas_exch_output.output_period:
+    label: Output period
+    symbol: output_period
+    unit: s
+  settings.cdr_gas_exch_output.nrpf:
     label: Records per file
     symbol: nrpf
   settings.ocean_vars.wrt_file_his:
@@ -1010,6 +1107,10 @@ fields:
   settings.extract_data.nrpf:
     label: Records per file
     symbol: nrpf
+  settings.param.nt_passive:
+    label: Passive tracers
+    symbol: nt_passive
+    hint: Number of passive (dye) tracers. With CDR forcing, it must match the passive tracers in the forcing file.
   settings.cdr_frc.cdr_source:
     label: Enable CDR forcing
     symbol: cdr_source

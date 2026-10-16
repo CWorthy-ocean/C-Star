@@ -8,6 +8,7 @@ from unittest import mock
 
 import pytest
 import typer
+import yaml
 from pydantic import Field
 
 from cstar.applications import core
@@ -24,16 +25,20 @@ from cstar.cli.common import (
     italic,
     label,
     localize_and_migrate,
+    persist_migration,
     present,
     schema_message,
     set_ctxmap,
 )
 from cstar.execution.file_system import DirectoryManager
+from cstar.orchestration.serialization import read_blueprint_raw
 from cstar.system.migration import (
     BlueprintMigration,
     CstarManualMigrationError,
     CstarMigrationError,
     CstarSchemaTooNewError,
+    MigrateResult,
+    MigrationPlan,
     MigrationRequest,
 )
 
@@ -228,3 +233,127 @@ def test_set_ctxmap_overwrite(capsys: pytest.CaptureFixture) -> None:
 
     assert ctx.obj["key"] == "updated"
     assert "will be overwritten" in capsys.readouterr().out
+
+
+@pytest.fixture
+def relative_location_bp(tmp_path: Path, bp_templates_dir: Path) -> Path:
+    """A ROMS-MARBL blueprint, in its own directory, with a relative location."""
+    bp_dir = tmp_path / "blueprints"
+    bp_dir.mkdir()
+    bp_path = bp_dir / "bp.yaml"
+    bp_path.write_text(
+        (bp_templates_dir / "blueprint.yaml")
+        .read_text()
+        .replace("http://mockdoc.com/partitioning1.nc", "../data/boundary.nc")
+    )
+    return bp_path
+
+
+def _persist_with_target(bp_path: Path, target: Path) -> dict[str, t.Any]:
+    """Persist a (no-op) migration of `bp_path` to `target` and read the result back."""
+    migrated = yaml.safe_load(bp_path.read_text())
+    plan = MigrationPlan(migrated["schema_version"], migrated["schema_version"], ())
+    request = MigrationRequest(path=bp_path, output=target)
+
+    persisted = persist_migration(request, MigrateResult(migrated, migrated, plan=plan))
+
+    assert persisted == target.resolve()
+    return yaml.safe_load(persisted.read_text())
+
+
+def test_persist_migration_anchors_relative_locations_when_moving(
+    relative_location_bp: Path, tmp_path: Path
+) -> None:
+    """Verify a migrated copy written to another directory still names the files the
+    original named, rather than resolving them against its new directory.
+    """
+    persisted = _persist_with_target(
+        relative_location_bp, tmp_path / "state" / "migrated.yaml"
+    )
+
+    location = persisted["forcing"]["boundary"]["data"][0]["location"]
+    assert location == (tmp_path / "data" / "boundary.nc").as_posix()
+
+
+def test_persist_migration_keeps_relative_locations_beside_the_source(
+    relative_location_bp: Path,
+) -> None:
+    """Verify a migrated copy written next to its source keeps the authored text."""
+    persisted = _persist_with_target(
+        relative_location_bp, relative_location_bp.with_name("migrated.yaml")
+    )
+
+    location = persisted["forcing"]["boundary"]["data"][0]["location"]
+    assert location == "../data/boundary.nc"
+
+
+def test_persist_migration_keeps_relative_locations_for_a_relative_target(
+    relative_location_bp: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Verify `--output migrated.yaml`, given from the source's own directory, is
+    beside the source and so keeps the authored text.
+    """
+    monkeypatch.chdir(relative_location_bp.parent)
+    migrated = yaml.safe_load(relative_location_bp.read_text())
+    plan = MigrationPlan(migrated["schema_version"], migrated["schema_version"], ())
+    request = MigrationRequest(path=relative_location_bp, output=Path("migrated.yaml"))
+
+    persisted = persist_migration(request, MigrateResult(migrated, migrated, plan=plan))
+
+    location = yaml.safe_load(persisted.read_text())["forcing"]["boundary"]["data"][0][
+        "location"
+    ]
+    assert persisted.parent == relative_location_bp.parent.resolve()
+    assert location == "../data/boundary.nc"
+
+
+def test_persist_migration_rejects_cwd_only_locations(
+    relative_location_bp: Path,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Verify a location that exists only relative to the working directory is
+    reported, not silently carried to a directory it would not resolve in.
+    """
+    (tmp_path / "cwd" / "data").mkdir(parents=True)
+    (tmp_path / "cwd" / "data" / "boundary.nc").touch()
+    relative_location_bp.write_text(
+        relative_location_bp.read_text().replace(
+            "../data/boundary.nc", "data/boundary.nc"
+        )
+    )
+    monkeypatch.chdir(tmp_path / "cwd")
+
+    with pytest.raises(typer.BadParameter, match="directory of the blueprint file"):
+        _persist_with_target(relative_location_bp, tmp_path / "state" / "migrated.yaml")
+
+
+def test_localize_and_migrate_anchors_a_remote_blueprint_to_the_working_directory(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, bp_templates_dir: Path
+) -> None:
+    """Verify the local copy of a downloaded blueprint holds its relative locations
+    as absolute paths against the working directory, so file-based steps that read
+    the copy later do not anchor them to its temporary directory.
+    """
+    text = (
+        (bp_templates_dir / "blueprint.yaml")
+        .read_text()
+        .replace("http://mockdoc.com/partitioning1.nc", "../data/boundary.nc")
+    )
+    cwd = tmp_path / "cwd"
+    cwd.mkdir()
+    monkeypatch.chdir(cwd)
+    response = mock.Mock(status_code=200, text=text)
+
+    with mock.patch("cstar.execution.file_system.request", return_value=response):
+        localized, migrated = localize_and_migrate("https://example.com/bp.yaml")
+
+    assert not migrated
+    expected = (tmp_path / "data" / "boundary.nc").resolve().as_posix()
+    written = yaml.safe_load(localized.read_text())
+    assert written["forcing"]["boundary"]["data"][0]["location"] == expected
+    # a later read of the copy, which anchors to its own directory, agrees
+    assert (
+        read_blueprint_raw(localized)["forcing"]["boundary"]["data"][0]["location"]
+        == expected
+    )

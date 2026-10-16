@@ -107,7 +107,19 @@ def _populate_workplan(
         for p, bp in blueprints
     ]
     if not non_interactive:
-        wp_name = input("Enter the name for your workplan: ")
+        typed = input(
+            "Enter the name for your workplan "
+            "(it is the default run-id, so it is converted to a slug, "
+            "e.g. 'My Plan' becomes 'my-plan'): "
+        )
+        try:
+            wp_name = slugify(typed)
+        except ValueError as ex:
+            msg = "A workplan name must contain at least one letter or digit"
+            raise typer.BadParameter(msg) from ex
+
+        if wp_name != typed:
+            print(f"Using {wp_name!r} as the workplan name")
     else:
         path0, _ = blueprints[0]
         wp_name = "generated"
@@ -227,8 +239,7 @@ def generate(
             _display_order(results)
 
         wp = _populate_workplan(search_dir, results, non_interactive)
-        plan_stem = slugify(wp.name)
-        wp_path = search_dir / "generated" / f"{plan_stem}{extension}"
+        wp_path = search_dir / "generated" / f"{wp.name}{extension}"
 
         serialize(wp_path, wp)
         print(f"Your workplan has been saved to: {wp_path}")

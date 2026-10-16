@@ -5,8 +5,10 @@ import functools
 import os
 import shlex
 import shutil
+import stat
 import sys
 import typing as t
+import uuid
 from collections.abc import AsyncGenerator, Generator, Iterator
 from contextlib import asynccontextmanager, contextmanager
 from dataclasses import dataclass
@@ -14,7 +16,7 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from urllib.parse import urlsplit
 
-from requests import request
+from requests import RequestException, request
 
 from cstar.base.env import (
     ENV_CSTAR_CACHE_HOME,
@@ -201,10 +203,9 @@ class DirectoryManager:
             )
             raise CstarError(msg)
         if not home.exists() and legacy.is_dir():
-            home.parent.mkdir(parents=True, exist_ok=True)
             # Another process sharing the root may have linked it first.
             with contextlib.suppress(FileExistsError):
-                home.symlink_to(os.path.relpath(legacy, home.parent))
+                symlink_relative(home, legacy)
                 log.info("Linked source-data cache %s to existing %s", home, legacy)
         home.mkdir(parents=True, exist_ok=True)
         return home
@@ -479,7 +480,22 @@ class StateDirectoryManager:
         Path
         """
         run_id = run_id or get_env_item(ENV_CSTAR_RUNID).value
-        return cls.data_dir(run_id) / cls._USER_VIEW_NAME
+        return cls.user_view_dir(cls.data_dir(run_id))
+
+    @classmethod
+    def user_view_dir(cls, run_root: Path) -> Path:
+        """The user-view directory (`gathered_output`) inside a run directory.
+
+        Parameters
+        ----------
+        run_root : Path
+            The run directory.
+
+        Returns
+        -------
+        Path
+        """
+        return run_root / cls._USER_VIEW_NAME
 
 
 def is_remote_resource(uri: str) -> bool:
@@ -521,7 +537,8 @@ def write_local_copy(url: str, directory: Path) -> Path:
     ValueError
         If an empty URL is received.
     FileNotFoundError
-        If the remote URL cannot be retrieved.
+        If the remote URL cannot be retrieved (error status, timeout, or
+        connection failure).
     """
     url = url.strip()
     if not url:
@@ -532,7 +549,11 @@ def write_local_copy(url: str, directory: Path) -> Path:
     resource_name = resource_path.name
     http_ok: t.Final[int] = 200
 
-    get_request = request("GET", url, timeout=1.0)
+    try:
+        get_request = request("GET", url, timeout=10.0)
+    except RequestException as ex:
+        msg = f"Unable to retrieve remote file ({type(ex).__name__})"
+        raise FileNotFoundError(errno.ENOENT, msg, url) from ex
     if get_request.status_code != http_ok:
         msg = "Unable to retrieve remote file"
         raise FileNotFoundError(errno.ENOENT, msg, url)
@@ -696,6 +717,43 @@ async def step_disk_usage(step_root: Path) -> int:
     return UNKNOWN_SIZE if nested < 0 else max(total - nested, 0)
 
 
+def symlink_relative(link: Path, target: Path, *, within: Path | None = None) -> None:
+    """Create `link` pointing at `target` with a relative link text.
+
+    The link text is `target` relative to the directory holding `link`, so the
+    pair keeps working after the tree containing both is copied or moved as a
+    unit. Both are measured from where they physically are (symlinked
+    directories on either path are resolved, the final component of `target` is
+    not), since the kernel resolves `..` in link text physically. Parent
+    directories of `link` are created as needed.
+
+    Parameters
+    ----------
+    link : Path
+        The symlink to create.
+    target : Path
+        The file or directory the link should point at.
+    within : Path | None
+        When given, the link is relative only if both `link` and `target` lie
+        inside this directory, the tree that moves as a unit. Otherwise it is
+        absolute: a chain of `..` that climbs out of one tree and into another
+        breaks as soon as only one of the two moves, while an absolute path keeps
+        naming the file where it still is.
+    """
+    link.parent.mkdir(parents=True, exist_ok=True)
+    physical_link = link.parent.resolve() / link.name
+    physical_target = target.parent.resolve() / target.name
+    if within is not None:
+        root = within.resolve()
+        if not (
+            physical_link.is_relative_to(root) and physical_target.is_relative_to(root)
+        ):
+            link.symlink_to(physical_target)
+            return
+
+    link.symlink_to(Path(os.path.relpath(physical_target, physical_link.parent)))
+
+
 def rotate_file(path: Path) -> Path | None:
     """Rotate an existing file out of the way, logrotate-style.
 
@@ -757,3 +815,69 @@ def get_backup_path(path: Path, backup_ext: str = ".bak") -> Path:
         backup_path = path.with_suffix(suffix)
         i += 1
     return backup_path
+
+
+def write_bytes_atomic(path: Path, data: bytes, *, sync: bool = True) -> None:
+    """Replace the file at `path` with `data`, or leave it exactly as it was.
+
+    The data is written, flushed and (unless `sync` is `False`) synced to a
+    temporary file beside the target, given the target's permissions (or the umask
+    default for a new file), and renamed over it. A failure at any point, such as a
+    full disk, leaves the original intact and removes the temporary file. A
+    symlink at `path` keeps its link: its target is replaced. The target becomes a
+    new inode, so hard links to it, its ownership and its extended attributes are
+    not preserved.
+
+    Parameters
+    ----------
+    path : Path
+        The file to write; its parent directories are created.
+    data : bytes
+        The new content.
+    sync : bool
+        Whether to fsync the temporary file before the rename. When `False` the
+        rename is still atomic, but a crash within the OS flush window can lose
+        the content: pass `False` for files rewritten on every state change.
+    """
+    target = path.resolve()
+    target.parent.mkdir(parents=True, exist_ok=True)
+    mode = stat.S_IMODE(target.stat().st_mode) if target.exists() else None
+
+    # The kernel applies the umask to the creation mode atomically, so a new file
+    # needs no process-global umask toggle.
+    temp = target.parent / f".{target.name}.{uuid.uuid4().hex}.tmp"
+    fd = os.open(temp, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o666)
+    try:
+        with os.fdopen(fd, "wb") as handle:
+            handle.write(data)
+            handle.flush()
+            if sync:
+                os.fsync(handle.fileno())
+        if mode is not None:
+            os.chmod(temp, mode)
+        os.replace(temp, target)
+    except BaseException:
+        temp.unlink(missing_ok=True)
+        raise
+
+
+def write_text_atomic(
+    path: Path, text: str, *, encoding: str = "utf-8", sync: bool = True
+) -> None:
+    """Replace the file at `path` with `text`, or leave it exactly as it was.
+
+    Encodes the text and delegates to `write_bytes_atomic`, which documents the
+    guarantees.
+
+    Parameters
+    ----------
+    path : Path
+        The file to write; its parent directories are created.
+    text : str
+        The new content.
+    encoding : str
+        The codec used to encode `text`.
+    sync : bool
+        Whether to fsync before the rename; see `write_bytes_atomic`.
+    """
+    write_bytes_atomic(path, text.encode(encoding), sync=sync)

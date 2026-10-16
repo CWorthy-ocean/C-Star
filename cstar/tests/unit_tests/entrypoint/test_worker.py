@@ -1022,6 +1022,7 @@ def test_worker_main(tmp_path: Path, sim_runner: RomsMarblRunner) -> None:
     assert mock_execute.call_count == 0
 
 
+@pytest.mark.usefixtures("offline_remote_files")
 def test_worker_main_exec(
     blueprint_path: Path,
 ) -> None:
@@ -1063,6 +1064,7 @@ def test_worker_main_exec(
     assert mock_execute.call_count == 1
 
 
+@pytest.mark.usefixtures("offline_remote_files")
 def test_worker_main_exec_passes_resume_flag(
     blueprint_path: Path,
 ) -> None:
@@ -1171,6 +1173,7 @@ def test_worker_main_exec_continue_from(
     mock_exec_runner.assert_called_once()
 
 
+@pytest.mark.usefixtures("offline_remote_files")
 @pytest.mark.parametrize("exception_type", [CstarError, BlueprintError, Exception])
 def test_worker_main_cstar_error(
     blueprint_path: Path,
@@ -1358,6 +1361,7 @@ async def test_run_records_error_on_failed_handler_status(
     assert bool(result.errors) == expect_errors
 
 
+@pytest.mark.usefixtures("offline_remote_files")
 def test_worker_main_returns_nonzero_on_failed_status(
     blueprint_path: Path,
 ) -> None:

@@ -38,6 +38,7 @@ from pydantic_core import CoreSchema
 
 from cstar.base.adapter import CstarAdaptationError
 from cstar.base.exceptions import CstarExpectationFailed
+from cstar.base.provenance import canonical_hash
 from cstar.base.utils import generate_schema_ref, lazy_import, slugify
 from cstar.execution.file_system import StateDirectoryManager
 from cstar.orchestration.serialization import register_representer, strenum_representer
@@ -47,6 +48,9 @@ RequiredString: t.TypeAlias = t.Annotated[
     StringConstraints(strip_whitespace=True, min_length=1),
 ]
 """A non-empty string with no leading or trailing whitespace."""
+
+LEGACY_TRANSFORMED_NAME_SUFFIX: t.Final[str] = " (transformed)"
+"""The suffix releases before 0.17 appended to a workplan's name in its transformed copy."""
 
 RUN_ALIAS_SEPARATOR: t.Final[str] = "@"
 """The character separating a step name from the alias of an external workplan
@@ -279,6 +283,26 @@ class BlueprintIdentity(ConfiguredBaseModel):
     content_hash: str = Field(default="")
     """A fingerprint of the referenced blueprint's configuration."""
 
+    @classmethod
+    def of(cls, blueprint: "Blueprint") -> "BlueprintIdentity":
+        """Identify a blueprint by its application, name and content hash.
+
+        Parameters
+        ----------
+        blueprint : Blueprint
+            The blueprint to identify.
+
+        Returns
+        -------
+        BlueprintIdentity
+        """
+        return cls(
+            kind="Blueprint",
+            application=blueprint.application,
+            name=blueprint.name,
+            content_hash=blueprint.content_hash(),
+        )
+
 
 class SpecSelection(ConfiguredBaseModel):
     """Records a composable spec by name and where it came from.
@@ -390,6 +414,22 @@ class Blueprint(ConfiguredBaseModel, ABC):
         if self.working_dir is not None:
             return self.working_dir
         return StateDirectoryManager.blueprint_run_dir(self.application, self.name)
+
+    def content_hash(self) -> str:
+        """A fingerprint of the blueprint's configuration.
+
+        The metadata fields (`BLUEPRINT_METADATA_FIELDS`) and the schema reference
+        are excluded, so renaming or moving a blueprint does not change it.
+
+        Returns
+        -------
+        str
+            The SHA-256 hex digest of the configuration.
+        """
+        data = self.model_dump(mode="json")
+        for key in (*BLUEPRINT_METADATA_FIELDS, "$schema"):
+            data.pop(key, None)
+        return canonical_hash(data)
 
     @field_validator("working_dir", mode="after")
     @classmethod
@@ -888,7 +928,7 @@ class Workplan(ConfiguredBaseModel):
     """A collection of executable steps and the associated configuration to run them."""
 
     name: RequiredString
-    """The user-friendly name of the workplan."""
+    """The name of the workplan, written as a slug: it is the default run-id."""
 
     description: RequiredString
     """A user-friendly description of the workplan."""
@@ -923,6 +963,34 @@ class Workplan(ConfiguredBaseModel):
         polymorphic_serialization=True,
     )
     """Configures the behavior of the pydantic model."""
+
+    @field_validator("name")
+    @classmethod
+    def require_slug_name(cls, value: str) -> str:
+        """Ensure the name is its own slug: the name is the workplan's run-id.
+
+        Parameters
+        ----------
+        value : str
+            The name assigned to the instance
+
+        Returns
+        -------
+        str
+            The unchanged name
+
+        Raises
+        ------
+        ValueError
+            If the name differs from its slug.
+        """
+        if value != (slug := slugify(value)):
+            msg = (
+                f"workplan name {value!r} is not a valid run-id; "
+                f"use {slug!r} (the id this workplan already produced)"
+            )
+            raise ValueError(msg)
+        return value
 
     @field_validator("steps", mode="before")
     @classmethod

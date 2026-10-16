@@ -19,15 +19,17 @@ Tests cover:
 """
 
 import asyncio
+import contextlib
 import copy
 import logging
 import os
 import sys
 import tempfile
+import warnings
 from datetime import UTC, datetime
 from pathlib import Path
 from types import SimpleNamespace
-from typing import ClassVar
+from typing import Any, ClassVar
 from unittest.mock import MagicMock, patch
 
 import f90nml
@@ -52,9 +54,11 @@ from cstar.applications.forge.engine import process_forge_blueprint
 from cstar.applications.forge.executor import ForgeExecutor, _deep_merge_settings_dict
 from cstar.applications.forge.host import HostPaths
 from cstar.applications.forge.input_data import CHILD_IC_PLACEHOLDER_LOCATION
+from cstar.applications.forge.namelist_model import n_tracers_from_param
 from cstar.applications.forge.resolve import build_forge_blueprint
 from cstar.applications.forge.templates import bundled_template_dir
 from cstar.base.env import ENV_CSTAR_RUNID
+from cstar.base.exceptions import CstarExpectationFailed
 from cstar.catalog.domain_catalog import default_catalog as _CATALOG
 from cstar.entrypoint.config import get_job_config, get_service_config
 from cstar.execution.file_system import DirectoryManager
@@ -66,8 +70,12 @@ from cstar.orchestration.models import (
     Provenance,
     Resource,
 )
-from cstar.orchestration.serialization import deserialize
-from cstar.roms.namelist import RomsNamelistV0_9_0
+from cstar.orchestration.serialization import (
+    deserialize,
+    load_blueprint,
+    read_blueprint_raw,
+)
+from cstar.roms.namelist import RomsNamelistV0_9_0, RomsNamelistV0_11_0
 
 requires_cstar_pio = pytest.mark.skipif(
     "pio" not in cstar_models.ROMSCompositeCodeRepository.model_fields
@@ -93,6 +101,11 @@ _MODEL_DIR_ROMS070 = _BUNDLED_CATALOG / "ModelSpec" / "roms-marbl-0.7-default"
 # &CDR_LITE_OUTPUT_SETTINGS, PR #372) -- used by the versioned-namelist golden
 # test below.
 _MODEL_DIR_ROMS090 = _BUNDLED_CATALOG / "ModelSpec" / "roms-marbl-0.9-default"
+_MODEL_DIR_ROMS0100 = _BUNDLED_CATALOG / "ModelSpec" / "roms-marbl-0.10-default"
+# ucla-roms >= 0.11.0 ModelSpec (adds marbl_bgc.use_constant_fe/constant_fe_value to
+# &MARBL_BIOGEOCHEMISTRY_SETTINGS, PR #391) -- used by the versioned-namelist golden
+# test below.
+_MODEL_DIR_ROMS0110 = _BUNDLED_CATALOG / "ModelSpec" / "roms-marbl-0.11-default"
 # ModelSpec no longer embeds a default forcing/output selection -- these tests just
 # need a valid, representative pair from the bundled catalog.
 _FORCING_INPUTS = _CATALOG.forcing_data("glorys-era5-unified")
@@ -103,6 +116,27 @@ _PHYSICS_ONLY_FORCING = {
     "initial_conditions": {"source": {"name": "GLORYS", "glorys_layout": "regional"}},
     "forcing": {
         "surface": [{"source": {"name": "ERA5"}, "type": "physics"}],
+    },
+}
+
+
+# glorys-era5-unified without any BGC (IC/boundary bgc sources, bgc surface items,
+# river include_bgc), for bgc_mode "cdr_lite"; keeps the boundary/tidal/river
+# generation steps every non-child domain runs.
+_CDR_LITE_FORCING_INPUTS = {
+    "initial_conditions": {"source": {"name": "GLORYS", "glorys_layout": "regional"}},
+    "forcing": {
+        "surface": [
+            {
+                "source": {"name": "ERA5"},
+                "type": "physics",
+                "correct_radiation": True,
+                "coarse_grid_mode": "never",
+            }
+        ],
+        "boundary": {"source": {"name": "GLORYS", "glorys_layout": "regional"}},
+        "tidal": [{"source": {"name": "TPXO"}, "ntides": 15}],
+        "river": [{"source": {"name": "DAI", "climatology": False}}],
     },
 }
 
@@ -662,7 +696,9 @@ class TestForgeExecutorModelPostInitGridFile:
         from cstar.applications.forge.blueprint import UserProvidedFile
 
         grid_path = self._write_tiny_netcdf(tmp_path)
-        gf = UserProvidedFile(location=str(grid_path), content_hash="not-the-real-hash")
+        gf = UserProvidedFile(
+            location=str(grid_path), content_hash="nc-sample-v1:not-the-real-hash"
+        )
         cfg = self._cfg_with_grid_file(minimal_cstar_spec_builder_args, tmp_path, gf)
 
         tmp = Path(tempfile.mkdtemp(prefix="forge-test-gridfile-mismatch-"))
@@ -1882,7 +1918,26 @@ class TestForgeExecutorBuildAndRun:
         cfg.model_settings["cdr_output"]["do_cdr_output"] = True
         cfg.model_settings["cppdefs"]["marbl"] = False
 
-        with pytest.raises(ValueError, match="requires MARBL"):
+        with pytest.raises(
+            ValueError, match=r"cdr_output\.do_cdr_output=True but bgc_mode"
+        ):
+            self._run_configure_build(cfg, host)
+
+    def test_configure_build_rejects_upscale_without_marbl(
+        self, sample_grid_kwargs, sample_open_boundaries, sample_partitioning
+    ):
+        """``upscale_output.do_upscale`` without MARBL, set after the resolver ran
+        (a wizard accordion edit or a stored blueprint), is rejected here too.
+        """
+        cfg, host = self._cdr_cfg_and_builder(
+            sample_grid_kwargs, sample_open_boundaries, sample_partitioning
+        )
+        cfg.model_settings["upscale_output"]["do_upscale"] = True
+        cfg.model_settings["cppdefs"]["marbl"] = False
+
+        with pytest.raises(
+            ValueError, match=r"upscale_output\.do_upscale=True but bgc_mode"
+        ):
             self._run_configure_build(cfg, host)
 
     def test_configure_build_cdr_forcing_without_marbl_on_roms_0_9_1(
@@ -1930,6 +1985,229 @@ class TestForgeExecutorBuildAndRun:
         cfg.model_settings["param"]["ntrc_bio"] = 0
 
         with pytest.raises(ValueError, match="upscaled"):
+            self._run_configure_build(cfg, host)
+
+    def _upscaled_cdr_lite_cfg_and_builder(
+        self, sample_grid_kwargs, sample_open_boundaries, sample_partitioning
+    ):
+        """A ucla-roms 0.11 CDR-lite parent of an upscaled run. Its CDR-lite
+        tracer counts (which no generation step derives in this mode) are set
+        by hand to the child's.
+        """
+        return self._cdr_cfg_and_builder(
+            sample_grid_kwargs,
+            sample_open_boundaries,
+            sample_partitioning,
+            model_dir=_MODEL_DIR_ROMS0110,
+            bgc_mode="cdr_lite",
+            forcing_inputs=_PHYSICS_ONLY_FORCING,
+            cdr={"mode": "upscaled"},
+            run_time_overrides={"param": {"nt_cdr_oae": 1, "nt_cdr_dor": 1}},
+        )
+
+    def test_configure_build_upscaled_cdr_lite_on_roms_0_11_0(
+        self, sample_grid_kwargs, sample_open_boundaries, sample_partitioning
+    ):
+        """From ucla-roms 0.11.0 a CDR-lite build runs upscaled CDR forcing
+        (ucla-roms #390): CDR_FORCING on, the _cdrtrc stream forced on, cdr_output
+        (MARBL-only) off, cdr_nz_chd 0 and the stated tracer counts kept.
+        """
+        cfg, host = self._upscaled_cdr_lite_cfg_and_builder(
+            sample_grid_kwargs, sample_open_boundaries, sample_partitioning
+        )
+
+        # This helper skips generate_inputs(), so the tier's generated sections
+        # (grid, s_coord, ...) are absent; the output-stream precheck would
+        # validate them and is unrelated to the CDR rule under test.
+        with patch(
+            "cstar.applications.forge.executor.output_precheck_applies_to",
+            return_value=False,
+        ):
+            builder = self._run_configure_build(cfg, host)
+
+        cppdefs = builder._settings_compile_time["cppdefs"]
+        run_time = builder._settings_run_time
+        assert cppdefs["cdr_forcing"] is True
+        assert cppdefs["cdr_lite"] is True
+        assert cppdefs["marbl"] is False
+        assert run_time["cdr_output"]["do_cdr_output"] is False
+        assert run_time["cdr_lite_output"]["do_cdr_lite_output"] is True
+        assert run_time["cdr_frc"]["forcing_depth_profiles"] is True
+        assert run_time["cdr_frc"]["nz_chd"] == 0
+        assert run_time["cdr_frc"]["relocate_to_wet_pts"] is True
+        assert run_time["param"]["nt_cdr_oae"] == 1
+        assert run_time["param"]["nt_cdr_dor"] == 1
+
+    def test_configure_build_rejects_upscaled_cdr_lite_before_roms_0_11_0(
+        self, sample_grid_kwargs, sample_open_boundaries, sample_partitioning
+    ):
+        """The build-time net for a stored CDR-lite "upscaled" blueprint whose pin
+        was moved below 0.11.0 after the resolver ran.
+        """
+        cfg, host = self._upscaled_cdr_lite_cfg_and_builder(
+            sample_grid_kwargs, sample_open_boundaries, sample_partitioning
+        )
+        cfg.code.roms.commit = "0.10.1"
+
+        with pytest.raises(
+            ValueError,
+            match=r'"upscaled" with bgc_mode "cdr_lite" on ucla-roms 0\.10\.1: '
+            r".*>= 0\.11\.0",
+        ):
+            self._run_configure_build(cfg, host)
+
+    def test_configure_build_resolves_a_hash_pin_to_its_release(
+        self,
+        sample_grid_kwargs,
+        sample_open_boundaries,
+        sample_partitioning,
+        tagged_ucla_roms_clone,
+    ):
+        """A commit-hash pin selects the namelist tier of the release it descends
+        from (the one roms_marbl reads it with), while the emitted blueprint
+        keeps pinning the hash itself.
+        """
+        from cstar.applications.forge.engine import split_model_settings
+
+        info = tagged_ucla_roms_clone
+        cfg, host = self._cdr_cfg_and_builder(
+            sample_grid_kwargs, sample_open_boundaries, sample_partitioning
+        )
+        cfg.code.roms.commit = info["hash_0_4_2"]
+        cfg.code.roms.location = str(info["repo"])
+
+        builder = ForgeExecutor.from_forge_blueprint(cfg, host=host)
+        run_ov, compile_ov = split_model_settings(cfg)
+        with (
+            patch(
+                "cstar.applications.forge.executor.render_roms_settings"
+            ) as mock_render,
+            patch(
+                "cstar.applications.forge.executor.write_roms_namelist"
+            ) as mock_write,
+        ):
+            mock_render.return_value = {
+                "location": str(builder.compile_time_code_dir),
+                "filter": {"files": ["test.opt"]},
+                "branch": "main",
+            }
+            builder.configure_build(
+                compile_time_settings=compile_ov, run_time_settings=run_ov
+            )
+
+        assert mock_write.call_args.kwargs["roms_ref"] == "0.4.2"
+        assert builder.roms_marbl_blueprint.code.roms["commit"] == info["hash_0_4_2"]
+
+    @pytest.mark.parametrize(
+        ("hash_key", "nz_chd"),
+        [("hash_after_0_10_1", 50), ("hash_0_11_0", 0)],
+    )
+    def test_configure_build_upscaled_nz_chd_follows_a_hash_pins_release(
+        self,
+        sample_grid_kwargs,
+        sample_open_boundaries,
+        sample_partitioning,
+        tagged_ucla_roms_0_11_clone,
+        hash_key,
+        nz_chd,
+    ):
+        """The resolver leaves an upscaled run's cdr_nz_chd at its seeded value
+        for a commit-hash pin; configure_build sets 0 (level count from the file)
+        only if the release the hash resolves to reads it, and an earlier release
+        keeps the seeded value it remaps with.
+        """
+        info = tagged_ucla_roms_0_11_clone
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", UserWarning)
+            cfg, host = self._cdr_cfg_and_builder(
+                sample_grid_kwargs,
+                sample_open_boundaries,
+                sample_partitioning,
+                model_dir=_MODEL_DIR_ROMS0110,
+                cdr={"mode": "upscaled"},
+                roms_ref=info[hash_key],
+            )
+            assert cfg.model_settings["cdr_frc"]["nz_chd"] == 50
+            cfg.code.roms.location = str(info["repo"])
+
+            # This helper skips generate_inputs(), so the tier's generated sections
+            # are absent; the output-stream precheck is unrelated to the rule.
+            with patch(
+                "cstar.applications.forge.executor.output_precheck_applies_to",
+                return_value=False,
+            ):
+                builder = self._run_configure_build(cfg, host)
+
+        assert builder._settings_run_time["cdr_frc"]["nz_chd"] == nz_chd
+
+    def test_configure_build_keeps_an_explicit_nz_chd_on_a_tag_pin(
+        self, sample_grid_kwargs, sample_open_boundaries, sample_partitioning
+    ):
+        """configure_build's cdr_nz_chd rule is for commit-hash pins only: on a
+        0.11.0 tag pin an explicit cdr_nz_chd (matching a known child) still wins.
+        """
+        cfg, host = self._cdr_cfg_and_builder(
+            sample_grid_kwargs,
+            sample_open_boundaries,
+            sample_partitioning,
+            model_dir=_MODEL_DIR_ROMS0110,
+            cdr={"mode": "upscaled"},
+            run_time_overrides={"cdr_frc": {"nz_chd": 42}},
+        )
+        with patch(
+            "cstar.applications.forge.executor.output_precheck_applies_to",
+            return_value=False,
+        ):
+            builder = self._run_configure_build(cfg, host)
+
+        assert builder._settings_run_time["cdr_frc"]["nz_chd"] == 42
+
+    def test_configure_build_leaves_nz_chd_alone_without_upscaled_cdr(
+        self,
+        sample_grid_kwargs,
+        sample_open_boundaries,
+        sample_partitioning,
+        tagged_ucla_roms_0_11_clone,
+    ):
+        """Without upscaled CDR forcing there is no depth-profile level count to
+        take from a file, so a hash pin of 0.11.0 keeps the seeded cdr_nz_chd.
+        """
+        info = tagged_ucla_roms_0_11_clone
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", UserWarning)
+            cfg, host = self._cdr_cfg_and_builder(
+                sample_grid_kwargs,
+                sample_open_boundaries,
+                sample_partitioning,
+                model_dir=_MODEL_DIR_ROMS0110,
+                roms_ref=info["hash_0_11_0"],
+            )
+            cfg.code.roms.location = str(info["repo"])
+            with patch(
+                "cstar.applications.forge.executor.output_precheck_applies_to",
+                return_value=False,
+            ):
+                builder = self._run_configure_build(cfg, host)
+
+        assert builder._settings_run_time["cdr_frc"]["nz_chd"] == 50
+
+    def test_configure_build_rejects_upscaled_cdr_lite_without_tracer_counts(
+        self, sample_grid_kwargs, sample_open_boundaries, sample_partitioning
+    ):
+        """The build-time net for a stored CDR-lite "upscaled" blueprint whose
+        stated tracer counts were removed after the resolver ran: the
+        upscaled-specific message, not the generic "use releases with
+        tracer_set=cdr_lite" one.
+        """
+        cfg, host = self._upscaled_cdr_lite_cfg_and_builder(
+            sample_grid_kwargs, sample_open_boundaries, sample_partitioning
+        )
+        cfg.model_settings["param"]["nt_cdr_oae"] = 0
+        cfg.model_settings["param"]["nt_cdr_dor"] = 0
+
+        with pytest.raises(
+            ValueError, match=r'cdr\.mode "upscaled" needs the CDR-lite tracer counts'
+        ):
             self._run_configure_build(cfg, host)
 
     def test_configure_build_rejects_non_divisible_rst_period(
@@ -2011,7 +2289,7 @@ class TestForgeExecutorBuildAndRun:
         assert cdr_frc["forcing_depth_profiles"] is True
         assert cdr_frc["forcing_parameterized"] is False
         assert cdr_frc["cdr_volume"] is False
-        assert cdr_frc["relocate_to_wet_pts"] is False
+        assert cdr_frc["relocate_to_wet_pts"] is True
         assert cfg.model_settings["cdr_output"]["do_cdr_output"] is True
         assert cfg.model_settings["cppdefs"]["cdr_forcing"] is True
 
@@ -2028,7 +2306,7 @@ class TestForgeExecutorBuildAndRun:
         assert run_cdr_frc["forcing_depth_profiles"] is True
         assert run_cdr_frc["forcing_parameterized"] is False
         assert run_cdr_frc["cdr_volume"] is False
-        assert run_cdr_frc["relocate_to_wet_pts"] is False
+        assert run_cdr_frc["relocate_to_wet_pts"] is True
         # The consistency net (executor.py) fires for "upscaled" even without
         # cdr_forcing/cdr_forcing_file being set.
         assert builder._settings_run_time["cdr_output"]["do_cdr_output"] is True
@@ -2216,6 +2494,117 @@ class TestForgeExecutorPersist:
 
         settings_path = bp_path.parent / f"settings_{bp_path.name}"
         assert settings_path.exists()
+
+    @staticmethod
+    def _builder_with_locations(args):
+        """A builder whose in-memory blueprint names files inside and outside its
+        working directory, and a URL.
+        """
+        builder = _make_builder(args)
+        work = builder.host.working_dir
+        blueprint = builder.roms_marbl_blueprint
+        builder.roms_marbl_blueprint = blueprint.model_copy(
+            update={
+                "grid": cstar_models.Dataset.model_construct(
+                    data=[Resource(location=str(work / "input_data" / "grid.nc"))]
+                ),
+                "initial_conditions": cstar_models.Dataset.model_construct(
+                    data=[Resource(location="https://example.com/ic.nc")]
+                ),
+                "forcing": blueprint.forcing.model_copy(
+                    update={
+                        "boundary": cstar_models.Dataset.model_construct(
+                            data=[Resource(location="/elsewhere/bry.nc")]
+                        )
+                    }
+                ),
+                "code": blueprint.code.model_copy(
+                    update={
+                        "run_time": cstar_models.CodeRepository(
+                            location=str(builder.run_time_code_dir), branch="main"
+                        ),
+                        "compile_time": cstar_models.CodeRepository(
+                            location=str(builder.compile_time_code_dir), branch="main"
+                        ),
+                    }
+                ),
+            }
+        )
+        return builder
+
+    def test_persist_writes_locations_in_the_working_dir_relative_to_the_blueprint(
+        self, minimal_cstar_spec_builder_args
+    ):
+        """Locations under the working directory are written relative to the
+        blueprints directory; URLs and paths elsewhere are left as they are, and
+        the in-memory blueprint keeps its absolute paths.
+        """
+        builder = self._builder_with_locations(minimal_cstar_spec_builder_args)
+
+        builder.persist()
+
+        data = yaml.safe_load(builder.path_roms_marbl_blueprint().read_text())
+        assert data["grid"]["data"][0]["location"] == "../input_data/grid.nc"
+        assert data["code"]["run_time"]["location"] == "../builds/run-time"
+        assert data["code"]["compile_time"]["location"] == "../builds/compile-time"
+        assert data["initial_conditions"]["data"][0]["location"] == (
+            "https://example.com/ic.nc"
+        )
+        assert data["forcing"]["boundary"]["data"][0]["location"] == (
+            "/elsewhere/bry.nc"
+        )
+
+        in_memory = builder.roms_marbl_blueprint
+        assert in_memory.grid.data[0].location == str(
+            builder.host.working_dir / "input_data" / "grid.nc"
+        )
+
+    def test_persisted_relative_locations_load_back_absolute(
+        self, minimal_cstar_spec_builder_args
+    ):
+        """Whichever way the persisted blueprint is read back, its locations are
+        anchored against the blueprints directory.
+        """
+        builder = self._builder_with_locations(minimal_cstar_spec_builder_args)
+        builder.persist()
+        resolved_work = builder.host.working_dir.resolve()
+
+        loaded = builder.roms_marbl_blueprint_from_file
+
+        assert loaded is not None
+        grid = loaded.grid
+        data = grid["data"] if isinstance(grid, dict) else grid.data
+        first = data[0]
+        location = first["location"] if isinstance(first, dict) else first.location
+        assert str(location) == str(resolved_work / "input_data" / "grid.nc")
+
+    def test_a_location_found_only_in_the_working_directory_loads_leniently(
+        self, minimal_cstar_spec_builder_args, tmp_path, monkeypatch
+    ):
+        """A relative location that exists only relative to the working directory
+        fails the strict load's check, which falls back to the lenient load rather
+        than crashing; the location is anchored next to the blueprint all the same.
+        """
+        builder = self._builder_with_locations(minimal_cstar_spec_builder_args)
+        builder.persist()
+        bp_path = builder.path_roms_marbl_blueprint()
+        data = yaml.safe_load(bp_path.read_text())
+        data["grid"]["data"][0]["location"] = "data/grid.nc"
+        bp_path.write_text(yaml.safe_dump(data))
+        cwd = tmp_path / "cwd"
+        (cwd / "data").mkdir(parents=True)
+        (cwd / "data" / "grid.nc").touch()
+        monkeypatch.chdir(cwd)
+        with pytest.raises(CstarExpectationFailed):
+            load_blueprint(bp_path, cstar_models.RomsMarblBlueprint)
+
+        loaded = builder.roms_marbl_blueprint_from_file
+
+        assert loaded is not None
+        grid = loaded.grid
+        first = (grid["data"] if isinstance(grid, dict) else grid.data)[0]
+        location = first["location"] if isinstance(first, dict) else first.location
+        assert str(location) == str(bp_path.parent.resolve() / "data" / "grid.nc")
 
     def test_persist_raises_when_roms_marbl_blueprint_none(
         self, minimal_cstar_spec_builder_args
@@ -2653,6 +3042,29 @@ class TestPublishEmittedBlueprint:
         assert published.read_text() == "name: demo\n"
         # not the settings sidecar, so a deferred reference resolves to one file
         assert [p.name for p in published.parent.iterdir()] == ["B_demo.yaml"]
+
+    def test_published_copy_keeps_relative_locations_valid(self, tmp_path):
+        """The copy sits at the same depth as the original, so a location written
+        relative to the blueprints directory still names the same file from it.
+        """
+        working_dir = tmp_path / "wd"
+        executor = self._executor(working_dir)
+        data_file = working_dir / "input_data" / "grid.nc"
+        data_file.parent.mkdir()
+        data_file.touch()
+        original = executor.path_roms_marbl_blueprint()
+        original.write_text(
+            "name: demo\ngrid:\n  data:\n    - location: ../input_data/grid.nc\n"
+        )
+
+        published = forge_run.publish_emitted_blueprint(executor)
+
+        assert published.read_text() == original.read_text()
+        assert (published.parent / "../input_data/grid.nc").resolve() == (
+            data_file.resolve()
+        )
+        anchored = read_blueprint_raw(published)["grid"]["data"][0]["location"]
+        assert anchored == data_file.resolve().as_posix()
 
     def test_publishing_again_replaces_the_copy(self, tmp_path):
         executor = self._executor(tmp_path / "wd")
@@ -3164,6 +3576,28 @@ class TestGoldenNamelist:
     }
     _PARTITIONING: ClassVar[dict] = {"n_procs_x": 1, "n_procs_y": 1}
     _CDR_FORCING: ClassVar[dict] = {"enabled": True}
+    # Real roms-tools CDRForcing kwargs for the bgc_mode "cdr_lite" case: one OAE
+    # release (an ALK/DIC pair) and one DOR release, so the tracer axis is
+    # temp, salt, CDR_OAE_ALK1, CDR_OAE_DIC1, CDR_DOR_DIC1 (nt = 5). No
+    # ``tracer_set``: the "simple" CDR mode gets "cdr_lite" from the resolver.
+    _CDR_LITE_FORCING: ClassVar[dict] = {
+        "start_time": "2012-01-01T00:00:00",
+        "end_time": "2012-01-02T00:00:00",
+        "releases": [
+            {
+                "name": name,
+                "lat": 59.0,
+                "lon": 1.0,
+                "depth": 1.0,
+                "hsc": 10.0,
+                "vsc": 10.0,
+                "times": ["2012-01-01T00:00:00", "2012-01-02T00:00:00"],
+                "release_type": "tracer_perturbation",
+                "tracer_fluxes": {role: [2.0e6, 2.0e6]},
+            }
+            for name, role in (("oae", "ALK"), ("dor", "DIC"))
+        ],
+    }
 
     @staticmethod
     def _touch_save(path, **_kw):
@@ -3216,6 +3650,10 @@ class TestGoldenNamelist:
         model_dir,
         golden_filename: str | None,
         param_overrides: dict[str, int] | None = None,
+        *,
+        cdr_lite: bool = False,
+        carbonate_sensitivity: Any = None,
+        capture: dict[str, Any] | None = None,
     ) -> str:
         """Shared body for the golden namelist tests: drives the real
         ``generate_inputs()`` -> ``configure_build()`` chain against ``model_dir``
@@ -3232,7 +3670,27 @@ class TestGoldenNamelist:
         byte-for-byte golden comparison. ``param_overrides`` is merged into the
         blueprint's ``model_settings["param"]`` before processing; pass
         ``golden_filename=None`` to skip the golden comparison.
+
+        ``cdr_lite=True`` runs ``bgc_mode: cdr_lite`` instead: a physics-only
+        forcing and a "simple" CDR forcing built by the REAL
+        ``rt.CDRForcing`` (grid-less, saved to a real netCDF) rather than a mock,
+        so the tracer counts the namelist carries are read off roms-tools' own
+        generated tracer axis -- exactly what the ``CDR_LITE`` build sees.
+
+        ``carbonate_sensitivity`` is handed to ``build_forge_blueprint`` as is (a
+        ``cdr_lite`` case's user-supplied ``_cdrgas`` files). ``capture``, if given,
+        receives the run's objects -- ``cfg`` (the resolved ForgeBlueprint),
+        ``builder`` (the ForgeExecutor) and ``emitted`` (the roms_marbl blueprint
+        ``generate_inputs`` returned) -- for assertions beyond the namelist.
         """
+        mode_kwargs: dict[str, Any] = (
+            {
+                "bgc_mode": "cdr_lite",
+                "cdr": {"mode": "simple", "cdr_forcing": self._CDR_LITE_FORCING},
+            }
+            if cdr_lite
+            else {"cdr_forcing": self._CDR_FORCING}
+        )
         cfg = build_forge_blueprint(
             model_dir=model_dir,
             grid_name="test-tiny",
@@ -3243,9 +3701,10 @@ class TestGoldenNamelist:
             end_date=datetime(2012, 1, 2),
             description="Golden namelist test",
             dt=7200,
-            forcing_inputs=_FORCING_INPUTS,
+            forcing_inputs=_CDR_LITE_FORCING_INPUTS if cdr_lite else _FORCING_INPUTS,
             output_settings=_OUTPUT_SETTINGS,
-            cdr_forcing=self._CDR_FORCING,
+            carbonate_sensitivity=carbonate_sensitivity,
+            **mode_kwargs,
             # Explicit False (matches cson_roms-marbl_v0.1's own default) so both
             # golden cases stay decoupled from PIO: roms-marbl-0.5-default bakes in
             # use_pio: true, which would otherwise route grid generation through
@@ -3288,7 +3747,11 @@ class TestGoldenNamelist:
             ) as mock_boundary,
             patch("cstar.applications.forge.input_data.rt.TidalForcing") as mock_tidal,
             patch("cstar.applications.forge.input_data.rt.RiverForcing") as mock_river,
-            patch("cstar.applications.forge.input_data.rt.CDRForcing") as mock_cdr,
+            (
+                contextlib.nullcontext(MagicMock())
+                if cdr_lite
+                else patch("cstar.applications.forge.input_data.rt.CDRForcing")
+            ) as mock_cdr,
             patch(
                 "cstar.applications.forge.input_data.source_datasets.STREAMABLE_SOURCES",
                 {"ERA5"},
@@ -3312,7 +3775,7 @@ class TestGoldenNamelist:
             mock_boundary_instance.physics.save.side_effect = self._touch_save_list
             mock_boundary_bgc = MagicMock()
             mock_boundary_bgc.save.side_effect = self._touch_save_list
-            mock_boundary_instance.bgc = [mock_boundary_bgc]
+            mock_boundary_instance.bgc = [] if cdr_lite else [mock_boundary_bgc]
             mock_boundary.return_value = mock_boundary_instance
 
             mock_tidal_instance = MagicMock()
@@ -3341,14 +3804,24 @@ class TestGoldenNamelist:
             mock_cdr_instance.releases = mock_releases
             mock_cdr.return_value = mock_cdr_instance
 
-            builder.generate_inputs(clobber=True, use_dask=False, test=False)
+            emitted = builder.generate_inputs(clobber=True, use_dask=False, test=False)
+
+        if capture is not None:
+            capture.update(cfg=cfg, builder=builder, emitted=emitted)
 
         # The §3a fix's whole point: these generation-derived values must survive
         # configure_build's overlay, not get reverted to resolver-time placeholders.
         assert builder._settings_run_time["river_frc"]["nriv"] == 3
         assert builder._settings_run_time["tides"]["ntides"] == 15
         assert builder._settings_run_time["cdr_frc"]["ncdr_parm"] == 2
-        assert builder._settings_run_time["cdr_output"]["do_cdr_output"] is True
+        if cdr_lite:
+            # No MARBL: no cdr_output. The tracer counts are read off the CDR
+            # forcing's axis during generation and must survive the overlay below.
+            assert builder._settings_run_time["cdr_output"]["do_cdr_output"] is False
+            assert builder._settings_run_time["param"]["nt_cdr_oae"] == 1
+            assert builder._settings_run_time["param"]["nt_cdr_dor"] == 1
+        else:
+            assert builder._settings_run_time["cdr_output"]["do_cdr_output"] is True
 
         from cstar.applications.forge.engine import split_model_settings
 
@@ -3368,6 +3841,15 @@ class TestGoldenNamelist:
         assert builder._settings_run_time["river_frc"]["nriv"] == 3
         assert builder._settings_run_time["tides"]["ntides"] == 15
         assert builder._settings_run_time["cdr_frc"]["ncdr_parm"] == 2
+        if cdr_lite:
+            # configure_build sized the per-tracer arrays and the cppdefs.opt
+            # render from the generation-derived counts, not the stored zeros.
+            assert mock_render.call_args_list[0].kwargs["n_tracers"] == 5
+            assert builder._settings_compile_time["cppdefs"]["cdr_lite"] is True
+            assert (
+                builder._settings_run_time["cdr_lite_output"]["do_cdr_lite_output"]
+                is True
+            )
 
         namelist_path = builder.run_time_code_dir / "namelist.nml"
         assert namelist_path.exists()
@@ -3644,6 +4126,59 @@ class TestGoldenNamelist:
         with pytest.raises(ValueError, match="param.ntrc_bio"):
             self._configure_build_for(cfg, builder)
 
+    def test_configure_build_rejects_constant_fe_without_marbl_end_to_end(
+        self, mock_grid, tmp_path
+    ):
+        """A stored blueprint with MARBL off but constant iron requested must
+        fail at configure_build: ucla-roms never reads
+        ``&MARBL_BIOGEOCHEMISTRY_SETTINGS`` without MARBL, so the request would
+        be silently ignored. ``ntrc_bio`` is zeroed so the tracer-count net, which
+        runs first, does not fire instead.
+        """
+        cfg, builder = self._generate_inputs_no_cdr_forcing(
+            mock_grid, tmp_path, model_dir=_MODEL_DIR_ROMS0110
+        )
+        cfg.model_settings["cppdefs"]["marbl"] = False
+        cfg.model_settings["param"]["ntrc_bio"] = 0
+        cfg.model_settings["marbl_bgc"]["use_constant_fe"] = True
+
+        with pytest.raises(
+            ValueError, match=r"marbl_bgc\.use_constant_fe.*MARBL is off"
+        ):
+            self._configure_build_for(cfg, builder)
+
+    def test_configure_build_accepts_constant_fe_with_marbl_end_to_end(
+        self, mock_grid, tmp_path
+    ):
+        cfg, builder = self._generate_inputs_no_cdr_forcing(
+            mock_grid, tmp_path, model_dir=_MODEL_DIR_ROMS0110
+        )
+        cfg.model_settings["marbl_bgc"].update(
+            use_constant_fe=True, constant_fe_value=5.0e-4
+        )
+
+        self._configure_build_for(cfg, builder)
+
+        nml = f90nml.read(builder.run_time_code_dir / "namelist.nml")
+        assert nml["marbl_biogeochemistry_settings"]["use_constant_fe"] is True
+        assert nml["marbl_biogeochemistry_settings"]["constant_fe_value"] == 5.0e-4
+
+    def test_configure_build_rejects_constant_fe_on_a_pre_0_11_0_pin_end_to_end(
+        self, mock_grid, tmp_path
+    ):
+        """The tier gate's net: a blueprint pinned to ucla-roms 0.10.1 that asks
+        for constant iron (a hand edit, or an override the resolver does not
+        validate against the tier) must not build a namelist that silently
+        drops the request.
+        """
+        cfg, builder = self._generate_inputs_no_cdr_forcing(
+            mock_grid, tmp_path, model_dir=_MODEL_DIR_ROMS0100
+        )
+        cfg.model_settings["marbl_bgc"]["use_constant_fe"] = True
+
+        with pytest.raises(ValueError, match=r"requires ucla-roms >= 0\.11\.0"):
+            self._configure_build_for(cfg, builder)
+
     def test_configure_build_prunes_version_gated_sections_for_0_6_pin_end_to_end(
         self, mock_grid, tmp_path, caplog
     ):
@@ -3898,8 +4433,8 @@ class TestGoldenNamelist:
 
         Test name note: this must NOT contain ``roms050``/``roms060`` -- the
         legacy golden is selected with ``-k "golden_namelist_test_tiny and not
-        roms050 and not roms060 and not roms070 and not roms090"``, which would
-        otherwise also catch this test.
+        roms050 and not roms060 and not roms070 and not roms090 and not
+        roms0110"``, which would otherwise also catch this test.
         """
         normalized = self._run_golden_namelist_case(
             mock_grid,
@@ -3971,17 +4506,177 @@ class TestGoldenNamelist:
         assert nml.cdr_lite_output_settings.nrpf_cdr_lite == 24
         assert nml.cdr_lite_settings.cdr_online_carbonate_sensitivity is False
 
+    def test_golden_namelist_test_tiny_roms090_cdr_lite(self, mock_grid, tmp_path):
+        """``bgc_mode: cdr_lite`` on ``roms-marbl-0.10-default``: CDR-lite tracers
+        without MARBL, the test-tiny domain, a physics-only forcing, and a real
+        roms-tools CDR forcing with one OAE and one DOR release.
+
+        The schema-visible differences from the roms090 golden: ``nt_bgc = 0``,
+        ``nt_cdr_oae = 1``/``nt_cdr_dor = 1`` (read off the CDR forcing's tracer
+        axis during generation -- the blueprint stores zeros), the per-tracer
+        arrays sized to the five tracers (T, S, ALK1, DIC1, DOR1), and the
+        CDR-lite output stream forced on (the only output the CDR tracers appear
+        in). The counts reach the namelist because ``GENERATION_DERIVED_LEAF_KEYS``
+        keeps the overlay from reverting them and ``configure_build`` sizes
+        ``n_tracers`` from the live settings.
+
+        The generation step is real (only the other roms-tools classes are
+        mocked), so this also pins the roms-tools >= 5.1 tracer-axis contract.
+        Name contains ``roms090`` so the legacy golden's ``-k`` selector
+        excludes it.
+        """
+        normalized = self._run_golden_namelist_case(
+            mock_grid,
+            tmp_path,
+            _MODEL_DIR_ROMS0100,
+            "golden_namelist_test-tiny-roms090-cdr-lite.nml",
+            cdr_lite=True,
+        )
+
+        namelist_path = tmp_path / "golden_roms090_cdr_lite.nml"
+        namelist_path.write_text(normalized)
+        nml = RomsNamelistV0_9_0.read(namelist_path)
+        assert nml.param_settings.nt_cdr_oae == 1
+        assert nml.param_settings.nt_cdr_dor == 1
+        assert nml.param_settings.nt_bgc == 0
+        assert nml.cdr_lite_output_settings.do_cdr_lite_output is True
+        assert nml.cdr_lite_settings.cdr_online_carbonate_sensitivity is False
+        assert nml.cdr_output_settings.do_cdr_output is False
+        assert len(nml.tracer_diff2.tnu2) == 5
+        assert nml.cdr_frc_settings.cdr_source is True
+        assert nml.cdr_frc_settings.cdr_ncdr_parm == 2
+
+    def test_golden_namelist_test_tiny_roms0110(self, mock_grid, tmp_path):
+        """Same test-tiny domain/forcing/output, but resolved against the
+        ``roms-marbl-0.11-default`` ModelSpec (ucla-roms >= 0.11.0) -- proves the
+        versioned namelist path selects ``RunTimeSettingsV0_11_0``/
+        ``RomsNamelistV0_11_0`` end to end.
+
+        The one schema-visible difference from the roms090 golden is the pair of
+        constant-iron keys in ``&marbl_biogeochemistry_settings``, always written
+        (here at their off/default values) -- the ModelSpec declares both.
+
+        Test name note: contains ``roms0110`` so the legacy golden's ``-k``
+        selector (``... and not roms0110``) excludes it, like the other tiers.
+        """
+        normalized = self._run_golden_namelist_case(
+            mock_grid,
+            tmp_path,
+            _MODEL_DIR_ROMS0110,
+            "golden_namelist_test-tiny-roms0110.nml",
+        )
+
+        assert "&marbl_biogeochemistry_settings" in normalized
+        marbl = normalized.split("&marbl_biogeochemistry_settings")[1].split("/", 1)[0]
+        assert "use_constant_fe = .false." in marbl
+        assert "constant_fe_value = 0.003" in marbl
+
+        # Read back through the 0.11 schema: every group validates (extra="forbid").
+        namelist_path = tmp_path / "golden_roms0110.nml"
+        namelist_path.write_text(normalized)
+        nml = RomsNamelistV0_11_0.read(namelist_path)
+        assert nml.marbl_biogeochemistry_settings.use_constant_fe is False
+        assert nml.marbl_biogeochemistry_settings.constant_fe_value == 3.0e-3
+        assert nml.cdr_lite_settings.cdr_online_carbonate_sensitivity is False
+
+    @staticmethod
+    def _cdrgas_sources(directory: Path) -> list[Path]:
+        """Two real ``_cdrgas`` files (the variables a CDR-LiTE build reads) under
+        ``directory``, outside the run's working tree.
+        """
+        from test_input_data import _write_cdrgas_netcdf
+
+        directory.mkdir()
+        return [
+            _write_cdrgas_netcdf(directory / f"roms_cdrgas.{stamp}.nc", fill=fill)
+            for stamp, fill in (("20120101130000", 1.0), ("20120102130000", 2.0))
+        ]
+
+    def test_cdr_lite_carbonate_sensitivity_files_are_staged_and_recorded(
+        self, mock_grid, tmp_path
+    ):
+        """User-supplied ``_cdrgas`` files travel blueprint -> executor ->
+        ``forcing.carbonate_sensitivity`` step: staged under their basenames next to
+        the generated inputs, listed (unpartitioned, in order) in the emitted
+        roms_marbl blueprint and among the executor's planned outputs. The rendered
+        namelist is the golden one: C-Star adds the files to ``frcfiles`` from the
+        blueprint when the run starts, so Forge's namelist does not list them.
+        """
+        from cstar.applications.forge.engine import forge_blueprint_to_builder_kwargs
+
+        sources = self._cdrgas_sources(tmp_path / "cdrgas")
+        captured: dict[str, Any] = {}
+
+        self._run_golden_namelist_case(
+            mock_grid,
+            tmp_path,
+            _MODEL_DIR_ROMS0100,
+            "golden_namelist_test-tiny-roms090-cdr-lite.nml",
+            cdr_lite=True,
+            carbonate_sensitivity=sources,
+            capture=captured,
+        )
+
+        cfg, builder, emitted = (captured[k] for k in ("cfg", "builder", "emitted"))
+        staged = [builder.input_data_dir / p.name for p in sources]
+        assert [Path(f.location) for f in cfg.carbonate_sensitivity.files] == sources
+        kwargs = forge_blueprint_to_builder_kwargs(cfg)
+        assert kwargs["carbonate_sensitivity"] == cfg.carbonate_sensitivity
+        assert builder.carbonate_sensitivity == cfg.carbonate_sensitivity
+        for source, dest in zip(sources, staged, strict=True):
+            assert dest.read_bytes() == source.read_bytes()
+        recorded = emitted.forcing["carbonate_sensitivity"]["data"]
+        assert [Path(r["location"]) for r in recorded] == staged
+        assert [r["partitioned"] for r in recorded] == [False, False]
+        # the persisted blueprint names the staged files relative to itself
+        written = yaml.safe_load(builder.path_roms_marbl_blueprint().read_text())
+        assert [
+            r["location"] for r in written["forcing"]["carbonate_sensitivity"]["data"]
+        ] == [f"../input_data/{p.name}" for p in sources]
+        assert builder._planned_netcdf_outputs()[-2:] == [p.resolve() for p in staged]
+
+    def test_cdr_lite_without_carbonate_sensitivity_emits_none(
+        self, mock_grid, tmp_path
+    ):
+        """The default (the ``carbonate-sensitivity-from`` directive supplies the
+        files at run time): no step runs, nothing is staged or planned, and the
+        emitted blueprint's ``forcing.carbonate_sensitivity`` is ``None``.
+        """
+        captured: dict[str, Any] = {}
+
+        self._run_golden_namelist_case(
+            mock_grid,
+            tmp_path,
+            _MODEL_DIR_ROMS0100,
+            "golden_namelist_test-tiny-roms090-cdr-lite.nml",
+            cdr_lite=True,
+            capture=captured,
+        )
+
+        cfg, builder, emitted = (captured[k] for k in ("cfg", "builder", "emitted"))
+        assert cfg.carbonate_sensitivity is None
+        assert builder.carbonate_sensitivity is None
+        assert emitted.forcing["carbonate_sensitivity"] is None
+        written = yaml.safe_load(builder.path_roms_marbl_blueprint().read_text())
+        assert written["forcing"].get("carbonate_sensitivity") is None
+        assert not any("_cdrgas" in p.name for p in builder._planned_netcdf_outputs())
+        assert not list(builder.input_data_dir.glob("*_cdrgas*"))
+
     def test_configure_build_0_9_pin_cdr_lite_output_forces_no_cdr_forcing(
         self, mock_grid, tmp_path
     ):
         """From ucla-roms 0.9.0 the CDR-lite output stream compiles
-        unconditionally: enabling it (with tracers) leaves ``cppdefs.cdr_forcing``
-        and ``cppdefs.cdr_lite`` alone and writes the 0.9 group.
+        unconditionally: enabling it (with tracers, which need CDR_LITE -- here
+        from the online sensitivity) leaves ``cppdefs.cdr_forcing`` alone and
+        writes the 0.9 group.
         """
         cfg, builder = self._generate_inputs_no_cdr_forcing(
             mock_grid,
             tmp_path,
             model_dir=_MODEL_DIR_ROMS090,
+            stored_model_settings={
+                "cdr_lite": {"cdr_online_carbonate_sensitivity": True}
+            },
             param_overrides={"nt_cdr_oae": 1},
         )
         cfg.model_settings["cdr_lite_output"]["do_cdr_lite_output"] = True
@@ -3990,7 +4685,7 @@ class TestGoldenNamelist:
 
         cppdefs = builder._settings_compile_time["cppdefs"]
         assert cppdefs["cdr_forcing"] is False
-        assert not cppdefs.get("cdr_lite")
+        assert cppdefs["cdr_lite"] is True
         namelist = (builder.run_time_code_dir / "namelist.nml").read_text()
         assert "do_cdr_lite_output = .true." in namelist
         assert "&cdr_tracer_output_settings" not in namelist
@@ -4021,9 +4716,12 @@ class TestGoldenNamelist:
         assert cppdefs["cdr_lite"] is True
 
         # ... and off again, with the earlier-derived True still stored in the
-        # compile-time overrides: recomputed, not rejected.
+        # compile-time overrides: recomputed, not rejected. (CDR tracers without
+        # CDR_LITE are rejected, so the tracers go too; the counts are
+        # generation-derived, so they are set on the live settings.)
         cfg.model_settings["cdr_lite"]["cdr_online_carbonate_sensitivity"] = False
         cfg.model_settings["cppdefs"]["cdr_lite"] = True
+        builder._settings_run_time["param"]["nt_cdr_oae"] = 0
         self._configure_build_for(cfg, builder)
         assert cppdefs["cdr_lite"] is False
         namelist = (builder.run_time_code_dir / "namelist.nml").read_text()
@@ -4058,6 +4756,195 @@ class TestGoldenNamelist:
         cfg.model_settings["cdr_lite"] = {"cdr_online_carbonate_sensitivity": True}
 
         with pytest.raises(ValueError, match="RunTimeSettingsV0_7_0"):
+            self._configure_build_for(cfg, builder)
+
+    # -- bgc_mode "cdr_lite" build-time net --------------------------------
+    def _cdr_lite_builder(
+        self,
+        mock_grid,
+        tmp_path,
+        *,
+        nt_cdr_oae=1,
+        nt_cdr_dor=0,
+        cdr_active=True,
+    ):
+        """A 0.10.1-pinned builder past (mocked) generation whose stored blueprint
+        says ``bgc_mode: cdr_lite`` (``marbl`` off, ``cdr_lite`` on, no BGC
+        tracers). ``nt_cdr_*`` stand in for what the CDR generation step derives
+        from the CDR forcing's tracer axis, and ``cdr_active`` for that forcing
+        having been configured (the unit-level mock has none).
+        """
+        cfg, builder = self._generate_inputs_no_cdr_forcing(
+            mock_grid, tmp_path, model_dir=_MODEL_DIR_ROMS0100
+        )
+        cfg.model_settings["cppdefs"].update(marbl=False, cdr_lite=True)
+        cfg.model_settings["param"]["ntrc_bio"] = 0
+        builder._settings_run_time["param"].update(
+            nt_cdr_oae=nt_cdr_oae, nt_cdr_dor=nt_cdr_dor
+        )
+        if cdr_active:
+            builder.cdr_forcing = {"releases": []}
+            builder.cdr_mode = "simple"
+        return cfg, builder
+
+    def test_configure_build_cdr_lite_forces_the_stream_and_the_cppdefs(
+        self, mock_grid, tmp_path, caplog
+    ):
+        cfg, builder = self._cdr_lite_builder(mock_grid, tmp_path, nt_cdr_dor=1)
+        assert (
+            builder._settings_run_time["cdr_lite_output"]["do_cdr_lite_output"] is False
+        )
+        with caplog.at_level(logging.INFO, logger="cstar.applications.forge.executor"):
+            self._configure_build_for(cfg, builder)
+
+        run_time = builder._settings_run_time
+        cppdefs = builder._settings_compile_time["cppdefs"]
+        assert run_time["cdr_lite_output"]["do_cdr_lite_output"] is True
+        assert run_time["cdr_output"]["do_cdr_output"] is False  # needs MARBL
+        assert cppdefs["cdr_forcing"] is True
+        assert cppdefs["cdr_lite"] is True
+        assert cppdefs["marbl"] is False
+        assert "forcing cdr_lite_output.do_cdr_lite_output=True" in caplog.text
+        nml = RomsNamelistV0_9_0.read(builder.run_time_code_dir / "namelist.nml")
+        assert nml.cdr_lite_output_settings.do_cdr_lite_output is True
+        assert (nml.param_settings.nt_cdr_oae, nml.param_settings.nt_cdr_dor) == (1, 1)
+        # nt = T + S + 2 * OAE + DOR, from the live (generation-derived) counts
+        assert len(nml.tracer_diff2.tnu2) == 5
+
+    def test_configure_build_cdr_lite_needs_cdr_lite_tracers(self, mock_grid, tmp_path):
+        cfg, builder = self._cdr_lite_builder(
+            mock_grid, tmp_path, nt_cdr_oae=0, nt_cdr_dor=0
+        )
+        with pytest.raises(
+            ValueError, match=r"defines no CDR-lite tracers.*tracer_set=cdr_lite"
+        ):
+            self._configure_build_for(cfg, builder)
+
+    def test_configure_build_cdr_lite_needs_a_cdr_forcing(self, mock_grid, tmp_path):
+        cfg, builder = self._cdr_lite_builder(mock_grid, tmp_path, cdr_active=False)
+        with pytest.raises(ValueError, match="no CDR forcing is configured"):
+            self._configure_build_for(cfg, builder)
+
+    def test_configure_build_cdr_lite_needs_ucla_roms_0_10_0(self, mock_grid, tmp_path):
+        """The build-time net for a stored blueprint pinned below the minimum
+        (the resolver's gate does not run for a stored blueprint).
+        """
+        cfg, builder = self._cdr_lite_builder(mock_grid, tmp_path)
+        builder.code_spec.roms.commit = "0.9.1"
+        with pytest.raises(
+            ValueError, match=r'bgc_mode "cdr_lite" on ucla-roms 0\.9\.1'
+        ):
+            self._configure_build_for(cfg, builder)
+
+    def test_configure_build_cdr_lite_gate_follows_the_named_constant(
+        self, mock_grid, tmp_path, monkeypatch
+    ):
+        import cstar.applications.forge.namelist_model as namelist_model
+
+        cfg, builder = self._cdr_lite_builder(mock_grid, tmp_path)
+        monkeypatch.setattr(namelist_model, "CDR_LITE_MODE_MIN_ROMS", (0, 10, 2))
+        with pytest.raises(ValueError, match=r"ucla-roms 0\.10\.1.*>= 0\.10\.2"):
+            self._configure_build_for(cfg, builder)
+
+    def test_configure_build_cdr_lite_leaves_an_enabled_stream_as_is(
+        self, mock_grid, tmp_path, caplog
+    ):
+        cfg, builder = self._cdr_lite_builder(mock_grid, tmp_path)
+        cfg.model_settings["cdr_lite_output"]["do_cdr_lite_output"] = True
+        with caplog.at_level(logging.INFO, logger="cstar.applications.forge.executor"):
+            self._configure_build_for(cfg, builder)
+
+        assert (
+            builder._settings_run_time["cdr_lite_output"]["do_cdr_lite_output"] is True
+        )
+        assert "forcing cdr_lite_output" not in caplog.text
+
+    def test_configure_build_marbl_mode_never_forces_the_cdr_lite_stream(
+        self, mock_grid, tmp_path
+    ):
+        """The forced stream is a cdr_lite-mode rule: a MARBL build with an active
+        CDR forcing keeps ``do_cdr_lite_output`` as authored.
+        """
+        cfg, builder = self._generate_inputs_no_cdr_forcing(
+            mock_grid, tmp_path, model_dir=_MODEL_DIR_ROMS090
+        )
+        builder.cdr_forcing = {"releases": []}
+        builder.cdr_mode = "simple"
+        self._configure_build_for(cfg, builder)
+        run_time = builder._settings_run_time
+        assert run_time["cdr_lite_output"]["do_cdr_lite_output"] is False
+        assert run_time["cdr_output"]["do_cdr_output"] is True
+
+    # ----- river tracer count net (ucla-roms PR #369) ----------------------
+    def _river_builder(
+        self, mock_grid, tmp_path, ntracers_offset, cdr_tracers=False, **kw
+    ):
+        """Generated inputs whose river file (the mocked save only touches it)
+        is rewritten with ``n_tracers + ntracers_offset`` tracers, so
+        configure_build's net reads a real length.
+        """
+        if cdr_tracers:
+            # 2*1 OAE + 1 DOR. CDR tracers on a >= 0.9.0 pin need CDR_LITE; the
+            # online carbonate sensitivity knob is the MARBL route to it.
+            kw["param_overrides"] = {"nt_cdr_oae": 1, "nt_cdr_dor": 1}
+            kw["stored_model_settings"] = {
+                "cdr_lite": {"cdr_online_carbonate_sensitivity": True}
+            }
+        cfg, builder = self._generate_inputs_no_cdr_forcing(mock_grid, tmp_path, **kw)
+        n_tracers = n_tracers_from_param(builder._settings_run_time["param"])
+        river_path = Path(builder._settings_run_time["forcing"]["river_path"])
+        ntracers = n_tracers + ntracers_offset
+        xr.Dataset(
+            {
+                "river_volume": (("river_time", "nriver"), np.ones((2, 3))),
+                "river_tracer": (
+                    ("river_time", "ntracers", "nriver"),
+                    np.ones((2, ntracers, 3)),
+                ),
+            }
+        ).to_netcdf(river_path)
+        return cfg, builder, river_path
+
+    @pytest.mark.parametrize("offset", [0, -3])
+    def test_configure_build_accepts_river_with_or_without_cdr_tracers(
+        self, mock_grid, tmp_path, offset
+    ):
+        cfg, builder, _ = self._river_builder(
+            mock_grid,
+            tmp_path,
+            offset,
+            model_dir=_MODEL_DIR_ROMS090,
+            cdr_tracers=True,
+        )
+        self._configure_build_for(cfg, builder)
+
+    @pytest.mark.parametrize("offset", [1, -1, -4])
+    def test_configure_build_rejects_other_river_tracer_counts(
+        self, mock_grid, tmp_path, offset
+    ):
+        cfg, builder, river_path = self._river_builder(
+            mock_grid,
+            tmp_path,
+            offset,
+            model_dir=_MODEL_DIR_ROMS090,
+            cdr_tracers=True,
+        )
+        n_tracers = n_tracers_from_param(builder._settings_run_time["param"])
+        with pytest.raises(ValueError) as exc:
+            self._configure_build_for(cfg, builder)
+        msg = str(exc.value)
+        assert f"river forcing {river_path} has {n_tracers + offset} tracers" in msg
+        assert f"accepts only {n_tracers} (" in msg
+        assert f"or {n_tracers - 3} (" in msg
+
+    def test_configure_build_old_pin_only_warns_on_extra_river_tracers(
+        self, mock_grid, tmp_path
+    ):
+        """Before ucla-roms 0.9.0 the extra tracers are read past, not rejected."""
+        cfg, builder, _ = self._river_builder(
+            mock_grid, tmp_path, 5, model_dir=_MODEL_DIR_ROMS070
+        )
+        with pytest.warns(UserWarning, match=r"ucla-roms 0\.7\.0 reads the first"):
             self._configure_build_for(cfg, builder)
 
 
@@ -4466,9 +5353,12 @@ class TestOnlyInputsReuseIsIdempotent:
       ``use_coarse_grid=False`` would have given a fresh construction -- so this
       exercises the "no reconstruction" code path, not the value derivation
       itself.
-    - grid/initial_conditions/cdr_forcing: unconditionally re-derive settings
-      from the live (grid/reconstructed) object on every run regardless of
-      reuse -- there is no separate "cheap" branch to distinguish for these.
+    - cdr_forcing: ``save`` writes a real minimal NetCDF, because pass 2 reads
+      the reused file's tracer axis (``xr.open_dataset``) to size the CDR tracers;
+      the rest of its settings still come from the live object.
+    - grid/initial_conditions: unconditionally re-derive settings from the live
+      (grid/reconstructed) object on every run regardless of reuse -- there is
+      no separate "cheap" branch to distinguish for these.
     """
 
     _GRID_KWARGS: ClassVar[dict] = dict(
@@ -4543,6 +5433,15 @@ class TestOnlyInputsReuseIsIdempotent:
         """
         Path(path).parent.mkdir(parents=True, exist_ok=True)
         cls._river_dataset().to_netcdf(path)
+        return path
+
+    @staticmethod
+    def _write_cdr_netcdf(path, **_kw):
+        """A real minimal CDR forcing NetCDF (no ``tracer_name`` axis) for the
+        reuse branch's axis read.
+        """
+        Path(path).parent.mkdir(parents=True, exist_ok=True)
+        xr.Dataset({"cdr_volume": (["ncdr", "time"], np.zeros((2, 2)))}).to_netcdf(path)
         return path
 
     @staticmethod
@@ -4647,7 +5546,7 @@ class TestOnlyInputsReuseIsIdempotent:
             mock_river.return_value = mock_river_instance
 
             mock_cdr_instance = MagicMock()
-            mock_cdr_instance.save.side_effect = self._touch_save
+            mock_cdr_instance.save.side_effect = self._write_cdr_netcdf
             mock_releases = MagicMock()
             mock_releases.__len__.return_value = 2
             mock_releases.release_type = "volume"
