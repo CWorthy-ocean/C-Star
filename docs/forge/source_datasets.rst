@@ -69,8 +69,7 @@ ESPER *(experimental)*
    the one WOA23 file this needs (``WOA_SALINITY``, into the ``WOA`` folder).
    This needs the CWorthy PyESPER fork at tag ``v1.1.1+cworthy.1`` or later
    (``git clone --branch v1.1.1+cworthy.1 https://github.com/CWorthy-ocean/PyESPER``
-   then ``pip install -e .``; the fork is not on PyPI or conda) and roms-tools 5.2 or
-   later (the release that reads ``salinity_conditioning``); the bundled
+   then ``pip install -e .``; the fork is not on PyPI or conda); the bundled
    ``glorys-era5-esper`` forcing spec has it on. ESPER oxygen is floored at
    2.0 mmol/m³ by roms-tools regardless of this switch.
 

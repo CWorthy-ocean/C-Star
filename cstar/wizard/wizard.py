@@ -278,7 +278,7 @@ HELP_TEXT: dict[str | tuple[str, str], str] = {
     "and gives unphysical values in river plumes (silicate > 100 µmol/kg, negative "
     "nutrients, DIC above ALK), then dilute ALK and DIC back to the model salinity. "
     "Forge downloads the one WOA23 file this needs. Requires the CWorthy PyESPER fork "
-    "(tag v1.1.1+cworthy.1 or later) and roms-tools 5.2 or later.",
+    "(tag v1.1.1+cworthy.1 or later).",
     # ---- IC BGC sources (row list) ----------------------------------------------
     (
         "ic_bgc",
