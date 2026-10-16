@@ -280,26 +280,16 @@ _UNMODELED_SETTINGS_SECTIONS = frozenset({"cppdefs"})
 def _all_settings_section_field_names() -> dict[str, set[str]]:
     """``{section: {field_name, ...}}`` unioned across every registered
     ``RunTimeSettings`` tier (a version-gated section like ``pio_settings``
-    only exists on some tiers, e.g. ``RunTimeSettingsV0_6_0``).
+    only exists on some tiers, e.g. ``RunTimeSettingsV0_6_0``; a field like
+    ``marbl_bgc.use_constant_fe`` only on the newest).
     """
     from cstar.applications.forge.namelist_model import (
-        RunTimeSettings,
-        RunTimeSettingsV0_5_0,
-        RunTimeSettingsV0_6_0,
-        RunTimeSettingsV0_7_0,
-        RunTimeSettingsV0_9_0,
+        _RUN_TIME_SETTINGS_BY_NAMELIST_SCHEMA,
     )
     from cstar.wizard.wizard import _unwrap_type
 
-    tiers = (
-        RunTimeSettings,
-        RunTimeSettingsV0_5_0,
-        RunTimeSettingsV0_6_0,
-        RunTimeSettingsV0_7_0,
-        RunTimeSettingsV0_9_0,
-    )
     sections: dict[str, set[str]] = {}
-    for cls in tiers:
+    for cls in _RUN_TIME_SETTINGS_BY_NAMELIST_SCHEMA.values():
         for section, info in cls.model_fields.items():
             sub = _unwrap_type(info.annotation)
             sections.setdefault(section, set()).update(getattr(sub, "model_fields", {}))

@@ -41,6 +41,7 @@ from cstar.applications.forge.blueprint import (
 )
 from cstar.applications.forge.input_data import netcdf_basename
 from cstar.applications.forge.migration import migrate_forge_blueprint_data
+from cstar.applications.forge.namelist_model import validate_run_time_sections
 from cstar.applications.forge.resolve import (
     _warn_user_files_need_pio_conversion,
     build_forge_blueprint,
@@ -75,6 +76,10 @@ _MODEL_DIR_ROMS070 = _BUNDLED_CATALOG / "ModelSpec" / "roms-marbl-0.7-default"
 _MODEL_DIR_ROMS080 = _BUNDLED_CATALOG / "ModelSpec" / "roms-marbl-0.8-default"
 _MODEL_DIR_ROMS090 = _BUNDLED_CATALOG / "ModelSpec" / "roms-marbl-0.9-default"
 _MODEL_DIR_ROMS0100 = _BUNDLED_CATALOG / "ModelSpec" / "roms-marbl-0.10-default"
+# ucla-roms >= 0.11.0 ModelSpec (adds marbl_bgc.use_constant_fe/constant_fe_value to
+# &MARBL_BIOGEOCHEMISTRY_SETTINGS, PR #391) -- used by the versioned-namelist golden
+# test below.
+_MODEL_DIR_ROMS0110 = _BUNDLED_CATALOG / "ModelSpec" / "roms-marbl-0.11-default"
 _GRID_KWARGS = dict(
     nx=6,
     ny=2,
@@ -1797,17 +1802,52 @@ def test_build_forge_blueprint_cdr_kwarg_upscaled_mode_sets_cdr_frc_statics():
     assert cdr_frc["forcing_depth_profiles"] is True
     assert cdr_frc["forcing_parameterized"] is False
     assert cdr_frc["cdr_volume"] is False
-    assert cdr_frc["relocate_to_wet_pts"] is False
+    # A child-boundary profile over parent land moves to the nearest wet point
+    # instead of aborting (ucla-roms #390's recommendation; same logic from 0.2.0).
+    assert cdr_frc["relocate_to_wet_pts"] is True
+    # Pinned to ucla-roms 0.2.0, which remaps with cdr_nz_chd as given.
+    assert cdr_frc["nz_chd"] == 50
 
 
-def test_build_forge_blueprint_cdr_kwarg_upscaled_requires_marbl():
-    """Upscaled CDR sets cdr_forcing_depth_profiles, which ucla-roms rejects at init
-    without MARBL, so it must raise when bgc_mode="none" even on a release (0.9.1+)
-    that runs parameterized CDR forcing without MARBL.
+@pytest.mark.parametrize(
+    ("model_dir", "roms_ref", "nz_chd"),
+    [
+        (_MODEL_DIR_ROMS0100, None, 50),
+        (_MODEL_DIR_ROMS0110, None, 0),
+        (_MODEL_DIR_ROMS0100, "main", 0),
+    ],
+)
+def test_build_forge_blueprint_upscaled_nz_chd_follows_the_pin(
+    model_dir, roms_ref, nz_chd
+):
+    """From ucla-roms 0.11.0 cdr_nz_chd = 0 takes the depth-profile level count
+    from the runtime file's s_rho (the child grid's, which Forge cannot see), and a
+    nonzero value that disagrees with the file aborts at init; earlier releases
+    keep the seeded value. A non-tag ref counts as the latest release.
     """
-    with pytest.raises(ValueError, match="upscaled"):
+    cfg = _build(model_dir=model_dir, roms_ref=roms_ref, cdr={"mode": "upscaled"})
+    assert cfg.model_settings["cdr_frc"]["nz_chd"] == nz_chd
+
+
+def test_build_forge_blueprint_upscaled_nz_chd_override_wins():
+    """An explicit cdr_nz_chd (matching a known child) still overrides the 0."""
+    cfg = _build(
+        model_dir=_MODEL_DIR_ROMS0110,
+        cdr={"mode": "upscaled"},
+        run_time_overrides={"cdr_frc": {"nz_chd": 42}},
+    )
+    assert cfg.model_settings["cdr_frc"]["nz_chd"] == 42
+
+
+@pytest.mark.parametrize("model_dir", [_MODEL_DIR_ROMS090, _MODEL_DIR_ROMS0110])
+def test_build_forge_blueprint_cdr_kwarg_upscaled_rejects_physics_only(model_dir):
+    """Upscaled CDR feeds its depth profiles to MARBL's ALK/DIC or (ucla-roms
+    >= 0.11.0) to CDR-lite tracers, so a physics-only build is rejected on every
+    release, including those that run parameterized CDR forcing without MARBL.
+    """
+    with pytest.raises(ValueError, match=r'"upscaled" with bgc_mode "none"'):
         _build(
-            model_dir=_MODEL_DIR_ROMS090,
+            model_dir=model_dir,
             cdr={"mode": "upscaled"},
             bgc_mode="none",
             forcing_inputs=_PHYSICS_ONLY_FORCING,
@@ -2213,6 +2253,119 @@ def test_golden_model_settings_test_tiny_roms090():
         "roms090.json; otherwise the change is a regression in the settings the "
         "executor feeds to namelist.nml / cppdefs.opt."
     )
+
+
+def test_golden_model_settings_test_tiny_roms0110():
+    """Behavior-preservation snapshot for the ``roms-marbl-0.11-default`` ModelSpec
+    (ucla-roms >= 0.11.0, constant-iron option), resolved from the same test-tiny
+    domain/forcing/output setup as ``test_golden_model_settings_test_tiny_roms090``.
+
+    The difference from that fixture is ``marbl_bgc.use_constant_fe``/
+    ``constant_fe_value``, which the ModelSpec declares (off, at the ucla-roms
+    reference value). Regenerate the fixture with
+    ``json.dumps(cfg.model_settings, indent=2, sort_keys=True, default=str)``
+    plus a trailing newline, from ``_build(model_dir=_MODEL_DIR_ROMS0110)``.
+    """
+    import json
+
+    golden_path = (
+        Path(__file__).parent
+        / "fixtures"
+        / "golden_model_settings_test-tiny-roms0110.json"
+    )
+    golden = json.loads(golden_path.read_text())
+    cfg = _build(model_dir=_MODEL_DIR_ROMS0110)  # test-tiny, dt=7200
+    got = json.loads(json.dumps(cfg.model_settings, sort_keys=True, default=str))
+    assert got == golden, (
+        "Resolved model_settings for test-tiny (roms-marbl-0.11-default) drifted "
+        "from the golden fixture. If this is an intentional schema/default "
+        "change, regenerate tests/fixtures/golden_model_settings_test-tiny-"
+        "roms0110.json; otherwise the change is a regression in the settings the "
+        "executor feeds to namelist.nml / cppdefs.opt."
+    )
+
+
+_CONSTANT_FE_ON = {"marbl_bgc": {"use_constant_fe": True}}
+
+
+def test_resolver_0_11_model_spec_carries_the_constant_fe_keys():
+    cfg = _build(model_dir=_MODEL_DIR_ROMS0110)
+    assert cfg.code.roms.commit == "0.11.0"
+    marbl_bgc = cfg.model_settings["marbl_bgc"]
+    assert marbl_bgc["use_constant_fe"] is False
+    assert marbl_bgc["constant_fe_value"] == 3.0e-3
+
+
+def test_resolver_applies_a_constant_fe_override_on_a_marbl_build():
+    cfg = _build(
+        model_dir=_MODEL_DIR_ROMS0110,
+        run_time_overrides={
+            "marbl_bgc": {"use_constant_fe": True, "constant_fe_value": 5.0e-4}
+        },
+    )
+    marbl_bgc = cfg.model_settings["marbl_bgc"]
+    assert marbl_bgc["use_constant_fe"] is True
+    assert marbl_bgc["constant_fe_value"] == 5.0e-4
+
+
+def test_resolver_keeps_the_switched_off_constant_fe_in_a_non_marbl_build():
+    """``marbl_bgc`` is not stripped for ``bgc_mode`` "none": the ModelSpec's keys
+    stay in the settings, switched off, and the MARBL guard passes them.
+    """
+    cfg = _build(
+        model_dir=_MODEL_DIR_ROMS0110,
+        bgc_mode="none",
+        forcing_inputs=_PHYSICS_ONLY_FORCING,
+    )
+    assert cfg.model_settings["cppdefs"]["marbl"] is False
+    assert cfg.model_settings["marbl_bgc"]["use_constant_fe"] is False
+
+
+def test_resolver_rejects_constant_fe_without_marbl():
+    """``marbl_bgc`` survives into a ``bgc_mode`` "none" build (the ModelSpec
+    default), so an override can request constant iron there; ucla-roms never
+    reads the group without MARBL, so the resolver refuses.
+    """
+    with pytest.raises(ValueError, match=r"marbl_bgc\.use_constant_fe.*MARBL is off"):
+        _build(
+            model_dir=_MODEL_DIR_ROMS0110,
+            bgc_mode="none",
+            forcing_inputs=_PHYSICS_ONLY_FORCING,
+            run_time_overrides=_CONSTANT_FE_ON,
+        )
+
+
+def test_resolver_rejects_constant_fe_in_cdr_lite_mode():
+    with pytest.raises(ValueError, match=r"marbl_bgc\.use_constant_fe.*MARBL is off"):
+        _build_cdr_lite(
+            model_dir=_MODEL_DIR_ROMS0110, run_time_overrides=_CONSTANT_FE_ON
+        )
+
+
+def test_resolver_constant_fe_guard_reads_the_merged_cppdefs():
+    """A compile-time override can turn MARBL off after ``bgc_mode`` set it, like
+    the BGC tracer count it sits beside: the guard follows the merged cppdefs
+    (what will compile), so the resolver agrees with ``configure_build``.
+    """
+    with pytest.raises(ValueError, match=r"marbl_bgc\.use_constant_fe.*MARBL is off"):
+        _build(
+            model_dir=_MODEL_DIR_ROMS0110,
+            compile_time_overrides={"cppdefs": {"marbl": False}},
+            run_time_overrides={"param": {"ntrc_bio": 0}, **_CONSTANT_FE_ON},
+        )
+
+
+def test_constant_fe_on_a_pre_0_11_0_pin_is_reported_by_run_time_validation():
+    """A pre-0.11.0 pin has no constant-iron option: the request is stored in the
+    blueprint's settings, and the validation ``process_forge_blueprint`` runs
+    before any data work reports it, naming the release that supports it.
+    """
+    cfg = _build(model_dir=_MODEL_DIR_ROMS0100, run_time_overrides=_CONSTANT_FE_ON)
+    problems = validate_run_time_sections(
+        cfg.model_settings, roms_ref=cfg.code.roms.commit
+    )
+    assert len(problems) == 1
+    assert "marbl_bgc.use_constant_fe requires ucla-roms >= 0.11.0" in problems[0]
 
 
 @pytest.mark.parametrize(
@@ -3074,6 +3227,7 @@ def test_bundled_output_specs_satisfy_roms_divides_rst_precheck(spec_name):
         "roms-marbl-0.8-default",
         "roms-marbl-0.9-default",
         "roms-marbl-0.10-default",
+        "roms-marbl-0.11-default",
     ],
 )
 def test_model_spec_streams_satisfy_roms_divides_rst_precheck(
@@ -3842,9 +3996,86 @@ def test_resolver_bgc_mode_cdr_lite_rejects_the_online_sensitivity():
         _build_cdr_lite(run_time_overrides=_LITE_ON)
 
 
-def test_resolver_bgc_mode_cdr_lite_rejects_upscaled_cdr_mode():
-    with pytest.raises(ValueError, match="upscaled"):
+# The CDR-lite tracer counts an upscaled parent must state (no CDR forcing is
+# generated in that mode to derive them from): those of the child's tracers.
+_UPSCALED_COUNTS = {"param": {"nt_cdr_oae": 1, "nt_cdr_dor": 1}}
+
+
+def test_resolver_bgc_mode_cdr_lite_rejects_upscaled_before_ucla_roms_0_11_0():
+    """ucla-roms < 0.11.0 rejects depth-profile CDR forcing without MARBL at init.
+    Reported ahead of the missing tracer counts.
+    """
+    with pytest.raises(
+        ValueError,
+        match=r'"upscaled" with bgc_mode "cdr_lite" on ucla-roms 0\.10\.1: .*'
+        r">= 0\.11\.0",
+    ):
         _build_cdr_lite(cdr={"mode": "upscaled"})
+
+
+@pytest.mark.parametrize(
+    ("model_dir", "roms_ref"),
+    [(_MODEL_DIR_ROMS0110, None), (_MODEL_DIR_ROMS0100, "main")],
+)
+def test_resolver_bgc_mode_cdr_lite_accepts_upscaled_from_ucla_roms_0_11_0(
+    model_dir, roms_ref
+):
+    """From ucla-roms 0.11.0 the depth profiles feed the CDR-lite tracers their
+    file names in cdr_trc_name (ucla-roms #390): a CDR-lite parent of an
+    upscaled run resolves, with CDR_FORCING on and cdr_output (MARBL-only) off.
+    """
+    cfg = _build_cdr_lite(
+        model_dir=model_dir,
+        roms_ref=roms_ref,
+        cdr={"mode": "upscaled"},
+        run_time_overrides=_UPSCALED_COUNTS,
+    )
+    settings = cfg.model_settings
+    assert cfg.cdr.mode == "upscaled"
+    assert settings["cppdefs"]["marbl"] is False
+    assert settings["cppdefs"]["cdr_lite"] is True
+    assert settings["cppdefs"]["cdr_forcing"] is True
+    assert settings["cdr_output"]["do_cdr_output"] is False
+    assert settings["cdr_frc"]["forcing_depth_profiles"] is True
+    assert settings["cdr_frc"]["forcing_parameterized"] is False
+    assert settings["cdr_frc"]["nz_chd"] == 0
+    assert settings["cdr_frc"]["relocate_to_wet_pts"] is True
+    assert settings["param"]["nt_cdr_oae"] == 1
+    assert settings["param"]["nt_cdr_dor"] == 1
+
+
+@pytest.mark.parametrize(
+    "param",
+    [{}, {"nt_cdr_oae": 0, "nt_cdr_dor": 0}, {"nt_cdr_oae": None}],
+)
+def test_resolver_bgc_mode_cdr_lite_upscaled_needs_tracer_counts(param):
+    """No CDR forcing is generated in the upscaled mode, so nothing derives the
+    CDR-lite tracer counts: a CDR-lite parent without them is rejected up front
+    rather than at configure_build.
+    """
+    with pytest.raises(
+        ValueError,
+        match=r'cdr\.mode "upscaled" needs the CDR-lite tracer counts.*'
+        r"run_time_overrides=\{\"param\"",
+    ):
+        _build_cdr_lite(
+            model_dir=_MODEL_DIR_ROMS0110,
+            cdr={"mode": "upscaled"},
+            run_time_overrides={"param": param},
+        )
+
+
+@pytest.mark.parametrize(
+    "param", [{"nt_cdr_oae": 2}, {"nt_cdr_dor": 1}, {"nt_cdr_oae": 0, "nt_cdr_dor": 3}]
+)
+def test_resolver_bgc_mode_cdr_lite_upscaled_accepts_either_tracer_family(param):
+    cfg = _build_cdr_lite(
+        model_dir=_MODEL_DIR_ROMS0110,
+        cdr={"mode": "upscaled"},
+        run_time_overrides={"param": param},
+    )
+    for key, value in param.items():
+        assert cfg.model_settings["param"][key] == value
 
 
 def test_resolver_bgc_mode_cdr_lite_accepts_the_stream_switch_before_generation():
@@ -5193,6 +5424,7 @@ def test_resolved_templates_carry_modelspec_authored_hashes():
         ("roms-marbl-0.8-default", True),
         ("roms-marbl-0.9-default", True),
         ("roms-marbl-0.10-default", True),
+        ("roms-marbl-0.11-default", True),
         ("pio-dev", True),
     ],
 )
@@ -5530,19 +5762,21 @@ class TestInstalledVersion:
 
     def test_returns_formatted_version_when_installed(self, monkeypatch):
         from cstar.applications.forge import blueprint as fb
+        from cstar.base import provenance
 
-        monkeypatch.setattr(fb, "_pkg_version", lambda name: "4.0.0")
+        monkeypatch.setattr(provenance, "_pkg_version", lambda name: "4.0.0")
         assert fb._installed_version("roms-tools") == "roms-tools==4.0.0"
 
     def test_returns_none_when_not_installed(self, monkeypatch):
         from importlib.metadata import PackageNotFoundError
 
         from cstar.applications.forge import blueprint as fb
+        from cstar.base import provenance
 
         def _raise(name):
             raise PackageNotFoundError(name)
 
-        monkeypatch.setattr(fb, "_pkg_version", _raise)
+        monkeypatch.setattr(provenance, "_pkg_version", _raise)
         assert fb._installed_version("not-a-real-package") is None
 
 
@@ -5555,8 +5789,9 @@ class TestGenerationHelpers:
         self, monkeypatch
     ):
         from cstar.applications.forge import blueprint as fb
+        from cstar.base import provenance
 
-        monkeypatch.setattr(fb, "_pkg_version", lambda name: "4.0.0")
+        monkeypatch.setattr(provenance, "_pkg_version", lambda name: "4.0.0")
         assert fb.generation_versions() == {
             "cstar-ocean": "4.0.0",
             "roms-tools": "4.0.0",
@@ -5568,13 +5803,14 @@ class TestGenerationHelpers:
         from importlib.metadata import PackageNotFoundError
 
         from cstar.applications.forge import blueprint as fb
+        from cstar.base import provenance
 
         def _only_cstar(name):
             if name != "cstar-ocean":
                 raise PackageNotFoundError(name)
             return "1.2.3"
 
-        monkeypatch.setattr(fb, "_pkg_version", _only_cstar)
+        monkeypatch.setattr(provenance, "_pkg_version", _only_cstar)
         assert fb.generation_versions() == {"cstar-ocean": "1.2.3"}
 
     def test_system_name_is_the_hosts_name(self, monkeypatch):

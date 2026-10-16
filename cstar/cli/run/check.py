@@ -7,6 +7,7 @@ import typer
 
 from cstar.base.log import get_logger
 from cstar.cli.common import cb_pipeline, get_from_ctxmap, set_ctxmap
+from cstar.cli.run.shared import is_path_like, refuse_workplan_file
 from cstar.cli.workplan.gather import collect_links, relink, report_conflicts
 from cstar.cli.workplan.shared import list_runs, preload_run_record
 from cstar.entrypoint.utils import ARG_ALL, ARG_ALL_HELP, ARG_REPAIR, ARG_REPAIR_HELP
@@ -34,9 +35,6 @@ COMMAND_CHECK: t.Final[str] = "check"
 
 KEY_TARGET: t.Final[str] = "check_target"
 """Context-map key under which the resolved target is stored."""
-
-WORKPLAN_FILE_SUFFIXES: t.Final[frozenset[str]] = frozenset({".yaml", ".yml"})
-"""Suffixes that identify a workplan file, which `cstar workplan check` validates."""
 
 HELP_SHORT = "Check that a run directory still works when it is moved."
 HELP_LONG = f"""\
@@ -83,53 +81,6 @@ class CheckTarget:
     """The run-id, when the target was found through tracking."""
     workplan_path: Path | None
     """The transformed workplan, when one is known."""
-
-
-def refuse_workplan_file(_context: typer.Context, target: str) -> str:
-    """Refuse a workplan file: this command checks a run, not a workplan.
-
-    Parameters
-    ----------
-    _context : typer.Context
-        The typer context (unused).
-    target : str
-        The user-supplied target.
-
-    Returns
-    -------
-    str
-
-    Raises
-    ------
-    typer.BadParameter
-        Raised when the target names a YAML file.
-    """
-    if Path(target).suffix.casefold() in WORKPLAN_FILE_SUFFIXES:
-        msg = (
-            f"{target!r} is a workplan file, not a run. "
-            f"To validate it, use `cstar workplan check {target}`."
-        )
-        raise typer.BadParameter(msg)
-
-    return target
-
-
-def _is_path(target: str) -> bool:
-    """Whether a target is spelled as a path rather than as a run-id.
-
-    A run-id is a slug, so it never holds a path separator or starts with a dot
-    or a tilde.
-
-    Parameters
-    ----------
-    target : str
-        The user-supplied target.
-
-    Returns
-    -------
-    bool
-    """
-    return os.sep in target or target.startswith((".", "~"))
 
 
 def _directory_target(target: str) -> CheckTarget:
@@ -229,7 +180,9 @@ def resolve_target(context: typer.Context, target: str) -> str:
         Raised when the target does not identify a run directory.
     """
     resolved = (
-        _directory_target(target) if _is_path(target) else _run_target(context, target)
+        _directory_target(target)
+        if is_path_like(target)
+        else _run_target(context, target)
     )
     set_ctxmap(context, KEY_TARGET, resolved)
     return target

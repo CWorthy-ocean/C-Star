@@ -1,3 +1,4 @@
+import enum
 import importlib
 import importlib.util
 import typing as t
@@ -77,6 +78,9 @@ class RunnerRequest(t.Generic[TBlueprint]):
     and then stop, leaving the working directory for a later attempt to attach
     to. Only honoured by applications whose
     `ApplicationDefinition.pre_runnable` is `True`."""
+    step: str = ""
+    """The workplan step this run executes; empty for a standalone run, which
+    writes its own run manifest."""
 
     def __init__(
         self,
@@ -86,6 +90,7 @@ class RunnerRequest(t.Generic[TBlueprint]):
         directive_uri: str = "",
         resume: bool = False,
         pre_run: bool = False,
+        step: str = "",
     ) -> None:
         """Initialize the request instance.
 
@@ -107,6 +112,8 @@ class RunnerRequest(t.Generic[TBlueprint]):
             Whether to perform every stage before the model launch and then
             stop. Only meaningful for applications whose
             `ApplicationDefinition.pre_runnable` is `True`.
+        step : str
+            The workplan step this run executes; empty for a standalone run.
         """
         self.blueprint_uri = uri.strip()
         self.bp_type = bp_type
@@ -117,6 +124,7 @@ class RunnerRequest(t.Generic[TBlueprint]):
             raise ValueError(msg)
         self.resume = resume
         self.pre_run = pre_run
+        self.step = step.strip()
 
     @property
     def application(self) -> str:
@@ -363,6 +371,32 @@ class Transform(t.Protocol, t.Generic[TTransformable]):
 
 
 TRunner = t.TypeVar("TRunner")
+
+
+class ArtifactKind(enum.StrEnum):
+    """The closed set of kinds a step's products are classified as in its step record.
+
+    Model-specific detail, such as a ROMS output stream, goes in a product's
+    metadata, not here.
+    """
+
+    grid = "grid"
+    initial_conditions = "initial_conditions"
+    boundary_forcing = "boundary_forcing"
+    surface_forcing = "surface_forcing"
+    tidal_forcing = "tidal_forcing"
+    river_forcing = "river_forcing"
+    cdr_forcing = "cdr_forcing"
+    restart = "restart"
+    history = "history"
+    average = "average"
+    output = "output"
+    emitted_blueprint = "emitted_blueprint"
+    namelist = "namelist"
+    build = "build"
+    log = "log"
+    figure = "figure"
+    other = "other"
 
 
 class EmittedBlueprint(ConfiguredBaseModel):

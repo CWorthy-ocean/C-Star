@@ -1047,8 +1047,9 @@ _FORCED_ON_BY_BGC_MODE: dict[str, dict[tuple[str, str], str]] = {
 # ``upstream_ts_land_curv``, PR #361) are opted in, via ``_CPPDEFS_PANE_FIELDS``, so
 # a user override can never collide with a resolver-owned flag. The two advection
 # fields only render for ModelSpecs that declare them (``roms-marbl-0.8-default``,
-# ``roms-marbl-0.9-default``, ``roms-marbl-0.10-default``, ``pio-dev``) -- the editor type-infers a checkbox from
-# the composed bool, so a spec that omits the key shows no widget for it.
+# ``roms-marbl-0.9-default``, ``roms-marbl-0.10-default``, ``roms-marbl-0.11-default``,
+# ``pio-dev``) -- the editor type-infers a checkbox from the composed bool, so a spec
+# that omits the key shows no widget for it.
 #
 # ``bgc``/``marbl_bgc`` are SPLIT at field granularity along the existing
 # ``PARTIAL_OUTPUT_SECTIONS`` seam (the same split the OutputSpec dropdown seeds):
@@ -1732,6 +1733,7 @@ class _SettingsEditor:
         keys = [
             ("ocean_vars", "wrt_file_rst"),
             ("ocean_vars", "monthly_restarts"),
+            ("marbl_bgc", "use_constant_fe"),
         ]
         for section, master_flag in _CDR_STREAM_MASTER_FLAGS.items():
             keys.append((section, master_flag))
@@ -1761,8 +1763,9 @@ class _SettingsEditor:
             monthly_entry[0].observe(_force_wrt_on_monthly, names="value")
 
     def _apply_field_rules(self) -> None:
-        """Show/hide and enable/disable ocean_vars/CDR-output-stream widgets from
-        their CURRENT values -- never mutates a value, only visibility/``disabled``.
+        """Show/hide and enable/disable ocean_vars/CDR-output-stream widgets (and
+        ``marbl_bgc.constant_fe_value``) from their CURRENT values -- never mutates
+        a value, only visibility/``disabled``.
 
         Rationale: the dependent fields are meaningless (and ignored by the
         namelist) once their master switch is off, and `output_period_*` has no
@@ -1791,6 +1794,13 @@ class _SettingsEditor:
             _show(period_r, wrt_on)
             if monthly_r is not None and period_r is not None:
                 period_r[0].disabled = bool(monthly_r[0].value)
+
+        use_fe = self._widgets.get(("marbl_bgc", "use_constant_fe"))
+        if use_fe is not None:
+            _show(
+                self._widgets.get(("marbl_bgc", "constant_fe_value")),
+                bool(use_fe[0].value),
+            )
 
         for section, master_flag in _CDR_STREAM_MASTER_FLAGS.items():
             master = self._widgets.get((section, master_flag))
@@ -3779,9 +3789,9 @@ class _ForcingEditor:
 
 # Preselected in the Model dropdown when present in the catalog (falls back to
 # the first catalog model otherwise): it's the newest tagged-release ModelSpec
-# (ucla-roms 0.10.1). 'pio-dev' (ucla-roms branch `main`) remains available in the
+# (ucla-roms 0.11.0). 'pio-dev' (ucla-roms branch `main`) remains available in the
 # catalog but is no longer the default.
-_DEFAULT_MODEL = "roms-marbl-0.10-default"
+_DEFAULT_MODEL = "roms-marbl-0.11-default"
 
 # Preselected in the Output dropdown when present in the catalog (falls back to
 # the first catalog spec otherwise). 'daily-restarts' conforms to the

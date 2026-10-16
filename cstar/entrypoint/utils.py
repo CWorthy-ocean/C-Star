@@ -42,6 +42,10 @@ ARG_PRE_RUN_HELP: t.Final[str] = (
     "without launching the model. The working directory is left in place so a "
     "later --resume run attaches to it instead of redoing the work."
 )
+ARG_STEP: t.Final[str] = "--step"
+ARG_STEP_HELP: t.Final[str] = (
+    "The name of the workplan step this run executes; recorded in the step record."
+)
 ARG_PRE_RUN_WORKPLAN_HELP: t.Final[str] = (
     "Perform every stage before the model launch for each step -- stage inputs, "
     "clone and compile, generate and validate the namelist -- without launching "
@@ -84,6 +88,14 @@ ARG_VERBOSE_HELP: t.Final[str] = "Set this flag to print verbose CLI outputs."
 
 ARG_SIZE: t.Final[str] = "--size"
 ARG_SIZE_HELP: t.Final[str] = "Set this flag to refresh disk-usage statistics."
+
+ARG_FORMAT: t.Final[str] = "--format"
+ARG_FORMAT_HELP: t.Final[str] = "Pass the desired output format."
+
+ARG_NO_REFRESH: t.Final[str] = "--no-refresh"
+ARG_NO_REFRESH_HELP: t.Final[str] = (
+    "Read the run as last recorded without refreshing its manifest."
+)
 
 ARG_REPAIR: t.Final[str] = "--repair"
 ARG_REPAIR_HELP: t.Final[str] = (

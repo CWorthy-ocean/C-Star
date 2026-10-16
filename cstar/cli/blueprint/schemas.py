@@ -1,4 +1,3 @@
-import json
 import typing as t
 from pathlib import Path
 
@@ -6,6 +5,7 @@ import typer
 
 from cstar.applications.core import get_application
 from cstar.base.log import get_logger
+from cstar.cli.common import write_model_schema
 from cstar.orchestration.models import Blueprint
 
 app = typer.Typer()
@@ -58,21 +58,12 @@ def generate_schema(
         The path to the generated schema file.
     """
     schema = bp_type.model_json_schema()
-    content = json.dumps(schema, indent=4)
 
     app_name = schema["properties"]["application"]["default"]
     version = schema["properties"]["schema_version"]["default"] or "1.0.0"
     file_name = f"{app_name}_schema.{version}.json"
-    schema_dir = output_dir / app_name
-    schema_dir.mkdir(parents=True, exist_ok=True)
-    schema_path = schema_dir / file_name
 
-    nbytes = schema_path.write_text(f"{content}\n")
-    if not nbytes:
-        print("Empty schema write occurred")
-        raise typer.Exit(1)
-
-    return schema_path
+    return write_model_schema(bp_type, output_dir / app_name / file_name)
 
 
 def all_applications() -> list[str]:

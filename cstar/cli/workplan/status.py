@@ -11,13 +11,19 @@ from cstar.cli.workplan.shared import (
     display_summary,
     refresh_disk_usage,
 )
-from cstar.entrypoint.utils import ARG_SIZE, ARG_SIZE_HELP
+from cstar.entrypoint.utils import (
+    ARG_NO_REFRESH,
+    ARG_NO_REFRESH_HELP,
+    ARG_SIZE,
+    ARG_SIZE_HELP,
+)
 from cstar.orchestration.dag_runner import (
     DagStatus,
     get_launcher,
     get_status_detail_map,
     load_external_runs,
     load_run_state,
+    refresh_run_manifest,
 )
 from cstar.orchestration.orchestration import LiveWorkplan, Planner
 from cstar.orchestration.tracking import WorkplanRun
@@ -36,6 +42,13 @@ def status(
         typer.Option(
             ARG_SIZE,
             help=ARG_SIZE_HELP,
+        ),
+    ] = False,
+    no_refresh: t.Annotated[
+        bool,
+        typer.Option(
+            ARG_NO_REFRESH,
+            help=ARG_NO_REFRESH_HELP,
         ),
     ] = False,
 ) -> None:
@@ -57,6 +70,8 @@ def status(
             )
         planner = Planner(workplan, external.tasks())
         status = asyncio.run(load_run_state(run.run_id, launcher))
+        if not no_refresh:
+            refresh_run_manifest(run.output_path, run.run_id, status)
         status = DagStatus({**external.statuses(), **status.details})
         lookup = get_status_detail_map(planner, status)
 

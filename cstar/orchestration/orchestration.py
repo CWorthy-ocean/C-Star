@@ -1,5 +1,6 @@
 import asyncio
 import os
+import shlex
 import typing as t
 from collections.abc import Awaitable, Callable, Iterable, Mapping, Sequence
 from enum import IntEnum, auto
@@ -1318,7 +1319,7 @@ class RunRequestCommandFormatter(ModelFormatter[RunRequest]):
 
     def _to_string(self, value: RunRequest) -> str:
         variables = " ".join(f"{k}='{v}'" for k, v in value.environment.items())
-        cmd = " ".join(value.command)
+        cmd = " ".join(shlex.quote(token) for token in value.command)
 
         return f"{variables} {cmd}".strip()
 
