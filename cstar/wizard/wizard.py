@@ -1653,7 +1653,7 @@ def _section_header_html(
 @dataclass(frozen=True)
 class _EditorKey:
     """What a built settings editor depends on: it is rebuilt when any of these
-    changes. A failed resolve knows only the model and the BGC mode (see
+    changes. A failed resolve knows all but ``settings_cls`` (see
     ``ForgeBlueprintWizard._hide_stale_editor``).
     """
 
@@ -7418,10 +7418,8 @@ class ForgeBlueprintWizard:
             # "file not found", surfacing loudly via _rebuild()'s Invalid status.
             if self._grid_file_grid is not None:
                 kw["grid"] = self._grid_file_grid
-        # Nesting is unsupported alongside a user-provided grid file (see
-        # Domain._grid_file_excludes_generation_geometry) -- omit both blocks
-        # while attached even if the (now-disabled) checkboxes are still checked.
-        if self.nest_enable.value and self._grid_file is None:
+        is_parent, is_child = self._nesting_role()
+        if is_parent:
             ck: dict[str, Any] = {}
             for k in _GRID_INT:
                 ck[k] = int(self.child_w[k].value)
@@ -7436,7 +7434,7 @@ class ForgeBlueprintWizard:
             kw["metadata_child"] = {"period": float(self.nest_period.value)}
             if self.nest_pressure_fluxes.value:
                 kw["nesting_include_pressure_fluxes"] = True
-        if self.parent_enable.value and self._grid_file is None:
+        if is_child:
             pk: dict[str, Any] = {}
             for k in _GRID_INT:
                 pk[k] = int(self.parent_w[k].value)
@@ -7452,7 +7450,7 @@ class ForgeBlueprintWizard:
         if self._forcing_editor is None:
             raise RuntimeError("_gather called before the forcing editor was built")
         kw["forcing_inputs"] = self._forcing_editor.gather()
-        if self.parent_enable.value and self._grid_file is None:
+        if is_child:
             # Durable guarantee (authoritative, independent of forcing-editor UI
             # state): a child grid (has a parent) receives its boundary values
             # from the parent's nesting.nc extraction, not reanalysis boundary
@@ -7495,19 +7493,34 @@ class ForgeBlueprintWizard:
                     w.value = parent[k]
             self._set_nested_topo_widgets("parent", parent)
 
+    def _nesting_role(self) -> tuple[bool, bool]:
+        """``(is_parent, is_child)`` for the grid being edited, as the nesting
+        checkboxes request it. Nesting is unsupported alongside a user-provided grid
+        file (see ``Domain._grid_file_excludes_generation_geometry``), so an attached
+        file ignores both even if the (now-disabled) checkboxes are still checked.
+        Read by ``_gather`` (what is resolved) and by the settings editor's key, so
+        the Output card follows a nesting toggle even before the blueprint is valid.
+        """
+        if self._grid_file is not None:
+            return False, False
+        return bool(self.nest_enable.value), bool(self.parent_enable.value)
+
     def _hide_stale_editor(self) -> None:
         """After a failed resolve, replace an editor built for another model or BGC
-        mode with a placeholder (the next valid resolve rebuilds it): it would keep
-        showing streams that no longer apply, e.g. the MARBL ones after a switch to
-        ``cdr_lite`` that still lacks its CDR forcing. Overrides are applied after
-        the resolve, never fed to it, so no failure comes from an editor value and
-        nothing is lost; the user's record stays. Only the model and the BGC mode are
-        known without a resolved config; an editor still matching them stays.
+        mode, or for another nesting role, with a placeholder (the next valid resolve
+        rebuilds it): it would keep showing streams that no longer apply, e.g. the
+        MARBL ones after a switch to ``cdr_lite`` that still lacks its CDR forcing, or
+        no child-grid extraction after "This grid is a parent" is ticked on an invalid
+        blueprint. Overrides are applied after the resolve, never fed to it, so no
+        failure comes from an editor value and nothing is lost; the user's record
+        stays. Everything in the key but ``settings_cls`` is known without a resolved
+        config; an editor still matching it stays.
         """
         key = self._editor_key
-        if key is None or (key.model, key.bgc_mode) == (
+        if key is None or (key.model, key.bgc_mode, key.is_parent, key.is_child) == (
             self.model_dd.value,
             self.bgc_dd.value,
+            *self._nesting_role(),
         ):
             return
         placeholder = components.banner_widget(
@@ -7586,10 +7599,7 @@ class ForgeBlueprintWizard:
         # reused for the validation call below.
         effective_roms_ref = self._effective_roms_ref()
         settings_cls = _wizard_settings_cls_for_ref(effective_roms_ref)
-        # The nesting role comes from what the resolver just did (not the toggles): an
-        # attached grid file disables them but leaves them as they were.
-        is_parent = cfg.domain.grid_kwargs_child is not None
-        is_child = cfg.domain.grid_kwargs_parent is not None
+        is_parent, is_child = self._nesting_role()
         key = _EditorKey(
             self.model_dd.value, settings_cls, self.bgc_dd.value, is_parent, is_child
         )

@@ -1725,6 +1725,28 @@ class TestBgcModeSettings:
             "bgc": {"wrt_his": wiz.config.model_settings["bgc"]["wrt_his"]}
         }
 
+    def test_a_nesting_toggle_on_an_invalid_blueprint_swaps_the_stale_editor(self):
+        """Ticking "This grid is a parent" while the blueprint does not resolve must
+        not leave an editor without child-grid extraction on screen; the next valid
+        resolve builds it with extract_data.
+        """
+        wiz = self._wizard()
+        wiz.cdr_mode_dd.value = "netcdf"  # no file attached: the config is invalid
+        assert wiz.config is None
+        stale = wiz.editor
+        assert stale is not None  # same model, mode and role: kept
+
+        wiz.nest_enable.value = True
+
+        assert wiz.editor is None
+        (placeholder,) = wiz.output_editor_box.children
+        assert "once the blueprint is valid" in placeholder.value
+
+        wiz.cdr_mode_dd.value = "none"
+        assert wiz.config is not None, wiz.derived.value
+        assert wiz._editor_key.is_parent
+        assert "extract_data" in wiz.editor._group_fields[_OUTPUT_CARD]
+
     @pytest.mark.parametrize("failure", ["no_end_date", "invalid_grid"])
     def test_a_failure_under_the_same_model_and_mode_keeps_the_editor(self, failure):
         wiz = self._wizard()
