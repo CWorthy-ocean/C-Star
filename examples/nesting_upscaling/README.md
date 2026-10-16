@@ -37,11 +37,11 @@ boundary, so parent_up has some negative `ALK_source` values that roms-tools
 rejects. Pass `--clip-negative-sources` to clip them; the clipped amounts are
 logged and saved in the output. In the CCS month run the clipping removed 6.9 %
 of parent_up's positive `ALK_source`, so its efficiency is approximate (about 7 %
-low). parent_up's DIC-difference numbers are also distorted near the open
-boundaries (forge writes different BGC boundary forcing for the parent and
-parent_up runs), so quote its flux-method numbers. The script is not yet a
-C-Star application; it only reads the `_cdr` output, so it runs on an Anvil
-login node. The exact command, the outputs and the run-1 numbers are in
+low). parent_up's DIC-difference numbers also count the DIC that the upscaled
+forcing injects (carbon the child already took up and carried across its
+boundary) as uptake in the parent, so quote its flux-method numbers. The script
+is not yet a C-Star application; it only reads the `_cdr` output, so it runs on
+an Anvil login node. The exact command, the outputs and the run-1 numbers are in
 [`ccs/README.md`](ccs/README.md#cdr-metrics).
 
 ## What these examples rely on
