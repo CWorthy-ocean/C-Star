@@ -43,6 +43,7 @@ from pydantic import (
 )
 
 from cstar.roms.namelist import (
+    UCLA_ROMS_0_11_0,
     ForcingFiles,
     Gamma2Settings,
     LateralViscSettings,
@@ -54,6 +55,7 @@ from cstar.roms.namelist import (
     RomsNamelistV0_6_0,
     RomsNamelistV0_7_0,
     RomsNamelistV0_9_0,
+    RomsNamelistV0_11_0,
     SimulationNameSettings,
     SurfFrcSettings,
     TracerDiff2,
@@ -72,7 +74,7 @@ from cstar.roms.precheck import (
 )
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping, Sequence
+    from collections.abc import Container, Iterable, Mapping, Sequence
 
 
 def _coerce_pathlike(v):
@@ -108,6 +110,28 @@ def _coerce_pathlist(v):
 PathListStr = Annotated[list[str], BeforeValidator(_coerce_pathlist)]
 
 
+def _misspelled_keys(
+    keys: Iterable[Any], spellings: Mapping[str, str], accepted: Container[str]
+) -> list[str]:
+    """``<key> (did you mean <name>?)`` for each of ``keys``, in order, that is not
+    in ``accepted`` but whose ``casefold()`` is a key of ``spellings`` (casefolded
+    spelling -> the name to suggest). Non-string keys are skipped.
+    """
+    return [
+        f"{key} (did you mean {spellings[key.casefold()]}?)"
+        for key in keys
+        if isinstance(key, str) and key not in accepted and key.casefold() in spellings
+    ]
+
+
+def _misspelled_keys_message(offenders: Sequence[str]) -> str:
+    """The one wording for keys :func:`_misspelled_keys` found."""
+    return (
+        f"Forge would ignore these settings keys: {', '.join(offenders)}. Settings "
+        "keys are Forge's lowercase field names, not ROMS namelist spellings."
+    )
+
+
 # ===========================================================================
 # Settings-vocabulary models (forge's run-time dict, validated)
 #
@@ -125,6 +149,53 @@ class _SettingsSection(BaseModel):
     # extra="ignore": settings sections carry metadata keys the namelist drops
     # (sst_vname, cdb_min/max, diag_prec, nbgc_flx, cdr_*_vname, ...).
     model_config = ConfigDict(extra="ignore")
+
+    @classmethod
+    def _other_tier_keys(cls) -> Iterable[str]:
+        """Keys another ucla-roms tier models here but this class does not.
+
+        An exact one is the class's business (a version gate rejects it when set;
+        otherwise ``extra="ignore"`` drops it); :meth:`_reject_misspelled_keys`
+        rejects their case variants like a field's, so a misspelling fails on
+        every tier.
+        """
+        return ()
+
+    @model_validator(mode="before")
+    @classmethod
+    def _reject_misspelled_keys(cls, data: Any) -> Any:
+        """Fail loudly on a key ``extra="ignore"`` would drop although it names a
+        field: one matching a field (or :meth:`_other_tier_keys`) only up to case,
+        as ROMS spells many namelist keys (``LLm``, ``NP_XI``, ``wrt_Z``), or the
+        field's namelist key (its ``serialization_alias``). Lists every offender.
+        """
+        if isinstance(data, dict) and (
+            offenders := _misspelled_keys(data, *_settings_spellings(cls))
+        ):
+            raise ValueError(_misspelled_keys_message(offenders))
+        return data
+
+
+def _settings_spellings(
+    cls: type[_SettingsSection],
+) -> tuple[dict[str, str], frozenset[str]]:
+    """``(spellings, accepted)`` for :func:`_misspelled_keys` on ``cls``.
+
+    ``accepted`` holds the keys ``cls`` reads as written -- field names,
+    validation-alias choices -- plus :meth:`~_SettingsSection._other_tier_keys`;
+    ``spellings`` maps each of those, and each field's ``serialization_alias``,
+    casefolded, to the name to suggest.
+    """
+    accepted = set(cls._other_tier_keys())
+    spellings = {key.casefold(): key for key in accepted}
+    for name, info in cls.model_fields.items():
+        aliases = getattr(info.validation_alias, "choices", [info.validation_alias])
+        inputs = {name, *(alias for alias in aliases if isinstance(alias, str))}
+        accepted |= inputs
+        for spelling in (*inputs, info.serialization_alias):
+            if spelling:
+                spellings[spelling.casefold()] = name
+    return spellings, frozenset(accepted)
 
 
 class TitleCfg(_SettingsSection):
@@ -179,6 +250,11 @@ class _ParamCfgCommon(_SettingsSection):
 
 class ParamCfg(_ParamCfgCommon):
     """``param`` settings for ucla-roms < 0.4.0, which has no CDR tracer counts."""
+
+    @classmethod
+    def _other_tier_keys(cls) -> Iterable[str]:
+        # ParamCfgV0_4_0's CDR tracer counts: _reject_cdr_tracer_counts is their gate.
+        return _CDR_TRACER_WEIGHTS
 
     @model_validator(mode="before")
     @classmethod
@@ -471,6 +547,11 @@ class OceanVarsCfgV0_5_0(_OceanVarsCfgCommon):
     now hardcoded in Fortran rather than namelist-configurable.
     """
 
+    @classmethod
+    def _other_tier_keys(cls) -> Iterable[str]:
+        # OceanVarsCfg's nrpf_rst: dropped here, as shared OutputSpecs carry it.
+        return ("nrpf_rst",)
+
 
 def check_rst_period_divisible(
     dt: float | None, ocean_vars: _OceanVarsCfgCommon | dict[str, Any]
@@ -653,24 +734,52 @@ CDR_OUTPUT_REQUIRED_MARBL_DIAGNOSTICS = (
 # ucla-roms release from which cdr_frc parameterized releases run without MARBL (PR #379).
 CDR_FORCING_WITHOUT_MARBL_MIN_ROMS: tuple[int, int, int] = (0, 9, 1)
 
+# ucla-roms release from which depth-profile CDR forcing (the "upscaled" mode) runs
+# without MARBL (PR #390): each column of ``cdr_trcflx_profile`` goes to the tracer
+# named in the file's ``cdr_trc_name``, so a CDR-lite parent receives a child's
+# upscaled CDR-lite fluxes. A file without ``cdr_trc_name`` still holds MARBL's ALK
+# and DIC and still needs MARBL.
+UPSCALED_CDR_WITHOUT_MARBL_MIN_ROMS: tuple[int, int, int] = (0, 11, 0)
+
+# ucla-roms release from which ``cdr_nz_chd = 0`` makes depth-profile CDR forcing
+# take its level count from the file's ``s_rho`` (PR #390). A nonzero value that
+# disagrees with the file aborts at init there; earlier releases remap with the
+# value as given (a mismatch silently corrupts the remap).
+CDR_NZ_CHD_FROM_FILE_MIN_ROMS: tuple[int, int, int] = (0, 11, 0)
+
+
+def cdr_nz_chd_from_file(roms_ref: str | None) -> bool:
+    """Whether the pinned ucla-roms reads the depth-profile level count from the
+    CDR forcing file when ``cdr_nz_chd`` is 0
+    (:data:`CDR_NZ_CHD_FROM_FILE_MIN_ROMS`). A ``roms_ref`` that is not a
+    release tag counts as the latest release, like :func:`check_cdr_forcing_mode`.
+    """
+    version = roms_version_from_ref(roms_ref)
+    return version is None or version >= CDR_NZ_CHD_FROM_FILE_MIN_ROMS
+
 
 def check_cdr_forcing_mode(
-    cdr_mode: str, *, bgc_mode_is_marbl: bool, roms_ref: str | None
+    cdr_mode: str, *, bgc_mode: BgcMode, roms_ref: str | None
 ) -> bool:
-    """Validate an active CDR forcing mode against MARBL and the pinned ucla-roms
-    release, and report whether it implies ``cdr_output.do_cdr_output``.
+    """Validate an active CDR forcing mode against the BGC mode and the pinned
+    ucla-roms release, and report whether it implies ``cdr_output.do_cdr_output``.
 
     ``cdr_output`` (the CDR diagnostics stream) needs MARBL, so an active mode
     implies it only with MARBL. Without MARBL, ucla-roms >= 0.9.1
     (:data:`CDR_FORCING_WITHOUT_MARBL_MIN_ROMS`) still runs the parameterized
     releases of ``cdr_frc`` ("simple"/"yaml"/"netcdf") under ``CDR_FORCING``,
-    with ``cdr_output`` left off. ``"upscaled"`` sets
-    ``cdr_frc.forcing_depth_profiles``, which ucla-roms rejects at init without
-    MARBL, and earlier releases either don't compile ``cdr_frc`` without MARBL
-    or silently ignore the release. A ``roms_ref`` that is not a release tag
-    (branch, commit hash, ``None``) counts as the latest release, matching
-    :func:`run_time_settings_for_ref` (which has no local clone to resolve a
-    hash against).
+    with ``cdr_output`` left off; earlier releases either don't compile
+    ``cdr_frc`` without MARBL or silently ignore the release. ``"upscaled"``
+    sets ``cdr_frc.forcing_depth_profiles``, which needs MARBL before ucla-roms
+    0.11.0 (:data:`UPSCALED_CDR_WITHOUT_MARBL_MIN_ROMS`). From that release a
+    ``bgc_mode: cdr_lite`` build runs it too, provided the runtime file names
+    its tracers in ``cdr_trc_name`` (C-Star's upscaler writes the names when the
+    child's output holds CDR-lite tracers). The file only arrives at run time,
+    so that part cannot be checked here. A physics-only build (``"none"``) has
+    no tracer to receive the fluxes, so ucla-roms would abort. A ``roms_ref``
+    that is not a release tag (branch, commit hash, ``None``) counts as the
+    latest release, matching :func:`run_time_settings_for_ref` (which has no
+    local clone to resolve a hash against).
 
     Both the resolver (authoring time) and the executor's ``configure_build``
     (the build-time net) call this so the rule and its messages stay in one
@@ -680,15 +789,27 @@ def check_cdr_forcing_mode(
     """
     if cdr_mode == "none":
         return False
-    if bgc_mode_is_marbl:
+    if bgc_mode == "marbl":
         return True
-    if cdr_mode == "upscaled":
-        raise ValueError(
-            f'CDR mode "{cdr_mode}" but bgc_mode != "marbl": upscaled CDR sets '
-            "cdr_forcing_depth_profiles, which ucla-roms rejects at init without "
-            'MARBL; use a parameterized CDR mode (simple/yaml/netcdf) or bgc_mode "marbl".'
-        )
     version = roms_version_from_ref(roms_ref)
+    if cdr_mode == "upscaled":
+        minimum = ".".join(str(part) for part in UPSCALED_CDR_WITHOUT_MARBL_MIN_ROMS)
+        if bgc_mode != "cdr_lite":
+            raise ValueError(
+                f'CDR mode "{cdr_mode}" with bgc_mode "{bgc_mode}": upscaled CDR '
+                "applies its depth profiles to MARBL's ALK/DIC or to CDR-lite "
+                'tracers, and this build has neither; use bgc_mode "marbl", or '
+                f'"cdr_lite" on ucla-roms >= {minimum}.'
+            )
+        if version is not None and version < UPSCALED_CDR_WITHOUT_MARBL_MIN_ROMS:
+            raise ValueError(
+                f'CDR mode "{cdr_mode}" with bgc_mode "cdr_lite" on ucla-roms '
+                f"{roms_ref}: upscaled CDR without MARBL needs ucla-roms >= "
+                f"{minimum}; earlier releases reject cdr_forcing_depth_profiles "
+                'at init without MARBL. Use bgc_mode "marbl" or a newer release.'
+            )
+        return False
+
     if version is not None and version < CDR_FORCING_WITHOUT_MARBL_MIN_ROMS:
         minimum = ".".join(str(part) for part in CDR_FORCING_WITHOUT_MARBL_MIN_ROMS)
         raise ValueError(
@@ -725,6 +846,33 @@ def check_cdr_lite_mode_roms(roms_ref: str | None) -> None:
             f'bgc_mode "cdr_lite" on ucla-roms {roms_ref}: CDR-lite without MARBL '
             f"needs ucla-roms >= {minimum}."
         )
+
+
+def check_upscaled_cdr_lite_tracer_counts(param: Mapping[str, Any]) -> None:
+    """Reject an upscaled ``bgc_mode: cdr_lite`` build that declares no CDR-lite
+    tracers.
+
+    The other CDR modes read ``param.nt_cdr_oae``/``nt_cdr_dor`` off the
+    generated CDR forcing; the "upscaled" mode generates none, so the user states
+    them to match the child whose upscaled output feeds the run (ucla-roms
+    applies each column to the tracer its ``cdr_trc_name`` names, skips names
+    the run lacks and aborts when none exist). Stated counts reach the build
+    through the stored settings, which ``configure_build``'s overlay leaves alone.
+
+    Both the resolver and the executor's ``configure_build`` (the net for stored
+    blueprints) call this so the rule and its message stay in one place.
+
+    Raises ``ValueError`` when both counts are 0 or unset.
+    """
+    if any(int(param.get(key) or 0) for key in _CDR_TRACER_WEIGHTS):
+        return
+    raise ValueError(
+        'bgc_mode "cdr_lite" with cdr.mode "upscaled" needs the CDR-lite tracer '
+        "counts, which no generated CDR forcing supplies in this mode: pass "
+        'run_time_overrides={"param": {"nt_cdr_oae": ..., "nt_cdr_dor": ...}} '
+        "matching the child's CDR-lite tracers (one nt_cdr_oae per "
+        "CDR_OAE_ALK<n>/CDR_OAE_DIC<n> pair, one nt_cdr_dor per CDR_DOR_DIC<n>)."
+    )
 
 
 # ucla-roms release from which a river forcing file may leave out the CDR tracer
@@ -890,6 +1038,11 @@ class CdrLiteOutputCfg(_CdrLiteOutputCfgCommon):
     )
     nrpf: int = Field(default=4, serialization_alias="nrpf_cdr_trc")
 
+    @classmethod
+    def _other_tier_keys(cls) -> Iterable[str]:
+        # CdrLiteOutputCfgV0_9_0's wrt_gas_exchange: dropped on 0.7/0.8.
+        return ("wrt_gas_exchange",)
+
 
 class CdrLiteOutputCfgV0_9_0(_CdrLiteOutputCfgCommon):
     """``cdr_lite_output`` settings for ucla-roms >= 0.9.0 -- the
@@ -1047,6 +1200,49 @@ def check_cdr_output_sections(
             )
         force_cdr_forcing = True
     return force_cdr_forcing
+
+
+# The output switches whose ucla-roms module is compiled only under MARBL, as
+# ``(section, flag, reason)``. Public so the wizard derives which sections it
+# hides without MARBL from the same table; the gas-exchange stream's own MARBL
+# rule is :data:`CDR_OUTPUT_SECTIONS`'s.
+MARBL_ONLY_OUTPUT_FLAGS: tuple[tuple[str, str, str], ...] = (
+    ("cdr_output", "do_cdr_output", "cdr_output.F90 only under MARBL && CDR_FORCING"),
+    (
+        "upscale_output",
+        "do_upscale",
+        "upscale_output.F90 only under MARBL && MARBL_DIAGS",
+    ),
+)
+
+
+def check_marbl_only_outputs(
+    run_time_settings: Mapping[str, Any], *, bgc_mode_is_marbl: bool
+) -> None:
+    """Reject the output streams ucla-roms compiles only under MARBL
+    (:data:`MARBL_ONLY_OUTPUT_FLAGS`) when MARBL is off, naming every one that
+    is set. ROMS would otherwise ignore them silently or abort at startup.
+
+    Called by the resolver (authoring time), :func:`validate_run_time_sections`
+    (stored and loaded blueprints) and the executor's ``configure_build`` (the
+    build-time net for wizard accordion edits that bypass the resolver), so the
+    rule and its message stay in one place.
+
+    Raises ``ValueError`` if a flag is set while ``bgc_mode_is_marbl`` is False.
+    """
+    if bgc_mode_is_marbl:
+        return
+    on = [
+        (f"{section}.{flag}=True", reason)
+        for section, flag, reason in MARBL_ONLY_OUTPUT_FLAGS
+        if (run_time_settings.get(section) or {}).get(flag)
+    ]
+    if on:
+        flags = ", ".join(flag for flag, _ in on)
+        reasons = " and ".join(reason for _, reason in on)
+        raise ValueError(
+            f'{flags} but bgc_mode != "marbl": ucla-roms compiles {reasons}.'
+        )
 
 
 def online_carbonate_sensitivity_requested(
@@ -1249,11 +1445,96 @@ class VSpongeCfg(_SettingsSection):
     v_sponge: float
 
 
-class MarblBgcCfg(_SettingsSection):
+_BOOL_ADAPTER: TypeAdapter[bool] = TypeAdapter(bool)
+
+
+def _constant_fe_requested(value: Any) -> bool:
+    """Whether a ``marbl_bgc.use_constant_fe`` value asks for constant iron.
+
+    The one parse rule for the version gate (:class:`MarblBgcCfg`) and the MARBL
+    guard (:func:`check_constant_fe`): a value pydantic reads as a bool is that
+    bool, ``None`` means unset, and anything else unparseable is not an "off"
+    value, so it counts as requested.
+    """
+    if value is None:
+        return False
+    try:
+        return _BOOL_ADAPTER.validate_python(value)
+    except ValidationError:
+        return True
+
+
+class _MarblBgcCfgCommon(_SettingsSection):
     marbl_config_file: str
     marbl_tracers_to_write: list[str] | str
     marbl_diagnostics_to_write: list[str] | str
     marbl_timestep: float
+
+
+class MarblBgcCfg(_MarblBgcCfgCommon):
+    """``marbl_bgc`` settings for ucla-roms < 0.11.0, which has no constant-iron
+    option.
+    """
+
+    @classmethod
+    def _other_tier_keys(cls) -> Iterable[str]:
+        # MarblBgcCfgV0_11_0's constant-iron keys: _reject_constant_fe is their gate.
+        return ("use_constant_fe", "constant_fe_value")
+
+    @model_validator(mode="before")
+    @classmethod
+    def _reject_constant_fe(cls, data: Any) -> Any:
+        """Fail loudly on a requested ``use_constant_fe`` rather than letting
+        ``extra="ignore"`` drop it: the run would compute iron prognostically. A
+        switched-off value passes (a shared spec may carry it) and is dropped.
+        """
+        if isinstance(data, dict) and _constant_fe_requested(
+            data.get("use_constant_fe")
+        ):
+            version = ".".join(str(part) for part in UCLA_ROMS_0_11_0)
+            raise ValueError(
+                f"marbl_bgc.use_constant_fe requires ucla-roms >= {version}; the "
+                "pinned ucla-roms release does not read it, so iron would be "
+                "computed prognostically."
+            )
+        return data
+
+
+class MarblBgcCfgV0_11_0(_MarblBgcCfgCommon):
+    """``marbl_bgc`` settings for ucla-roms >= 0.11.0: adds the constant-iron
+    option (PR #391).
+
+    Deliberate defaults (like :class:`PioSettingsCfg`): blueprints and ModelSpecs
+    written before these keys existed bypass the resolver and hit
+    ``model_validate`` directly; the values are the ucla-roms reference ones.
+    """
+
+    use_constant_fe: bool = Field(default=False)
+    constant_fe_value: float = Field(default=3.0e-3, ge=0.0)
+
+
+def check_constant_fe(marbl_bgc: Mapping[str, Any], *, bgc_mode_is_marbl: bool) -> None:
+    """Reject ``marbl_bgc.use_constant_fe`` in a build without MARBL.
+
+    ucla-roms compiles the whole MARBL driver, the only reader of
+    ``&MARBL_BIOGEOCHEMISTRY_SETTINGS``, under the MARBL cppkey, and without it
+    there is no MARBL Fe tracer to hold constant. Shared by the resolver
+    (authoring time), :func:`validate_run_time_sections` (stored blueprints,
+    before data staging), and the executor's ``configure_build`` (the
+    build-time net), like :func:`check_bgc_tracer_count`.
+
+    Raises ``ValueError`` if ``use_constant_fe`` is requested while
+    ``bgc_mode_is_marbl`` is False.
+    """
+    if not bgc_mode_is_marbl and _constant_fe_requested(
+        marbl_bgc.get("use_constant_fe")
+    ):
+        raise ValueError(
+            "marbl_bgc.use_constant_fe is set but MARBL is off (cppdefs.marbl=False): "
+            "ucla-roms never reads &MARBL_BIOGEOCHEMISTRY_SETTINGS without MARBL "
+            "and there is no MARBL Fe tracer to hold constant. Turn it off, or "
+            'use bgc_mode "marbl".'
+        )
 
 
 class _RunTimeSettingsCommon(_SettingsSection):
@@ -1263,7 +1544,9 @@ class _RunTimeSettingsCommon(_SettingsSection):
     are no value defaults here — the YAML is the single source of defaults.
 
     Not meant to be used directly: the version-varying sections (``param``,
-    ``ocean_vars``, ``particles``) are typed as the loose common models here, and version-varying
+    ``ocean_vars``, ``particles``) are typed as the loose common models here,
+    ``marbl_bgc`` as the pre-0.11.0 :class:`MarblBgcCfg` (retyped by
+    :class:`RunTimeSettingsV0_11_0`), and version-varying
     sections that some schemas lack entirely (``pio_settings``, added by
     :class:`RunTimeSettingsV0_6_0`; ``cdr_lite_output``/``cdr_gas_exch_output``,
     added by :class:`RunTimeSettingsV0_7_0`; ``cdr_lite``, added by
@@ -1272,8 +1555,9 @@ class _RunTimeSettingsCommon(_SettingsSection):
     (0.4.0 <= ucla-roms < 0.5.0), :class:`RunTimeSettingsV0_5_0`
     (0.5.0 <= ucla-roms < 0.6.0), :class:`RunTimeSettingsV0_6_0`
     (0.6.0 <= ucla-roms < 0.7.0), :class:`RunTimeSettingsV0_7_0`
-    (0.7.0 <= ucla-roms < 0.9.0), or :class:`RunTimeSettingsV0_9_0` (>= 0.9.0),
-    or select one with :func:`run_time_settings_for_ref`.
+    (0.7.0 <= ucla-roms < 0.9.0), :class:`RunTimeSettingsV0_9_0`
+    (0.9.0 <= ucla-roms < 0.11.0), or :class:`RunTimeSettingsV0_11_0`
+    (>= 0.11.0), or select one with :func:`run_time_settings_for_ref`.
     """
 
     title: TitleCfg
@@ -1318,6 +1602,11 @@ class _RunTimeSettingsCommon(_SettingsSection):
     sst_correction: SstCorrectionCfg
     dic_alk_correction: DicAlkCorrectionCfg
     marbl_bgc: MarblBgcCfg
+
+    @classmethod
+    def _other_tier_keys(cls) -> Iterable[str]:
+        # Sections other tiers model: prune_version_gated_sections is their gate.
+        return version_gated_section_names()
 
     @model_validator(mode="after")
     def _rst_period_divisible_by_dt(self) -> _RunTimeSettingsCommon:
@@ -1392,7 +1681,8 @@ class RunTimeSettingsV0_7_0(RunTimeSettingsV0_6_0):
 
 
 class RunTimeSettingsV0_9_0(RunTimeSettingsV0_6_0):
-    """Forge's run-time settings dict for ucla-roms >= 0.9.0, typed + validated.
+    """Forge's run-time settings dict for ucla-roms >= 0.9.0, < 0.11.0, typed +
+    validated.
 
     Subclasses :class:`RunTimeSettingsV0_6_0`, not :class:`RunTimeSettingsV0_7_0`
     -- mirrors C-Star's ``RomsNamelistV0_9_0(RomsNamelistV0_6_0)``, and a
@@ -1412,6 +1702,18 @@ class RunTimeSettingsV0_9_0(RunTimeSettingsV0_6_0):
     )
 
 
+class RunTimeSettingsV0_11_0(RunTimeSettingsV0_9_0):
+    """Forge's run-time settings dict for ucla-roms >= 0.11.0, typed + validated.
+
+    Mirrors C-Star's ``RomsNamelistV0_11_0(RomsNamelistV0_9_0)``. Types
+    ``marbl_bgc`` as :class:`MarblBgcCfgV0_11_0`, which adds the constant-iron
+    option (``&MARBL_BIOGEOCHEMISTRY_SETTINGS``, ucla-roms PR #391); both keys
+    carry defaults, so a blueprint saved before they existed still validates.
+    """
+
+    marbl_bgc: MarblBgcCfgV0_11_0
+
+
 # Maps each namelist schema class (C-Star, keyed by ucla-roms version range) to
 # the matching run-time settings class (forge's settings vocabulary).
 _RUN_TIME_SETTINGS_BY_NAMELIST_SCHEMA: dict[
@@ -1423,6 +1725,7 @@ _RUN_TIME_SETTINGS_BY_NAMELIST_SCHEMA: dict[
     RomsNamelistV0_6_0: RunTimeSettingsV0_6_0,
     RomsNamelistV0_7_0: RunTimeSettingsV0_7_0,
     RomsNamelistV0_9_0: RunTimeSettingsV0_9_0,
+    RomsNamelistV0_11_0: RunTimeSettingsV0_11_0,
 }
 
 # The inverse of _RUN_TIME_SETTINGS_BY_NAMELIST_SCHEMA: the namelist schema a
@@ -1502,24 +1805,37 @@ def prune_version_gated_sections(
 
     A section whose enable switch (:data:`_GATED_SECTION_SWITCHES`) is on is
     not dropped but rejected -- the pinned release cannot honor the request.
-    Switched-off sections (the normal shared-OutputSpec case) are pruned
-    silently. Raises ``ValueError`` before mutating anything.
+    So is a section spelling its switch in another case: no tier reads that key
+    (see :meth:`_SettingsSection._reject_misspelled_keys`), and pruning would
+    drop the request unseen. Switched-off sections (the normal shared-OutputSpec
+    case) are pruned silently. Raises ``ValueError``, reporting every such
+    section, before mutating anything.
     """
     pruned = sorted(
         (version_gated_section_names() - set(settings_cls.model_fields))
         & set(run_time_settings)
     )
-    if requested := [
-        f"{name}.{_GATED_SECTION_SWITCHES[name]}"
-        for name in pruned
-        if name in _GATED_SECTION_SWITCHES
-        and isinstance(section := run_time_settings[name], dict)
-        and section.get(_GATED_SECTION_SWITCHES[name])
-    ]:
-        raise ValueError(
+    requested: list[str] = []
+    misspelled: list[str] = []
+    for name in pruned:
+        section = run_time_settings[name]
+        if name not in _GATED_SECTION_SWITCHES or not isinstance(section, dict):
+            continue
+        switch = _GATED_SECTION_SWITCHES[name]
+        if section.get(switch):
+            requested.append(f"{name}.{switch}")
+        misspelled += [
+            f"{name}.{key}"
+            for key in _misspelled_keys(section, {switch.casefold(): switch}, {switch})
+        ]
+    problems = [_misspelled_keys_message(misspelled)] if misspelled else []
+    if requested:
+        problems.append(
             f"{', '.join(requested)} enabled, but the pinned ucla-roms release "
             f"(run-time settings {settings_cls.__name__}) has no such section."
         )
+    if problems:
+        raise ValueError(" ".join(problems))
     for name in pruned:
         del run_time_settings[name]
     return pruned
@@ -1599,7 +1915,8 @@ def run_time_settings_for_ref(roms_ref: str | None) -> type[_RunTimeSettingsComm
         :class:`RunTimeSettingsV0_5_0` for 0.5.0 <= ucla-roms < 0.6.0;
         :class:`RunTimeSettingsV0_6_0` for 0.6.0 <= ucla-roms < 0.7.0;
         :class:`RunTimeSettingsV0_7_0` for 0.7.0 <= ucla-roms < 0.9.0;
-        :class:`RunTimeSettingsV0_9_0` for ucla-roms >= 0.9.0.
+        :class:`RunTimeSettingsV0_9_0` for 0.9.0 <= ucla-roms < 0.11.0;
+        :class:`RunTimeSettingsV0_11_0` for ucla-roms >= 0.11.0.
 
     Warns
     -----
@@ -1842,8 +2159,10 @@ def validate_run_time_sections(
     it checks only the sections that are present, so it works on a ``ForgeBlueprint``'s
     flat ``model_settings`` (which omits the processing-filled sections). Keys with no
     run-time-settings counterpart (e.g. ``cppdefs``, a compile-time section) are
-    skipped. Use it for fail-fast feedback on hand-edited / loaded configs, where the
-    inner values are otherwise opaque (``model_settings`` is ``Dict[str, Any]``).
+    skipped; one naming a section only up to case (``Marbl_bgc``) is reported, as a
+    misspelled key within a section is. Use it for fail-fast feedback on hand-edited /
+    loaded configs, where the inner values are otherwise opaque (``model_settings`` is
+    ``Dict[str, Any]``).
 
     Parameters
     ----------
@@ -1857,6 +2176,12 @@ def validate_run_time_sections(
     errors: list[str] = []
     settings_cls = run_time_settings_for_ref(roms_ref)
     fields = settings_cls.model_fields
+    # A misspelled section name would be skipped below, then dropped by the
+    # top-level extra="ignore" -- the same rule as within each section.
+    if misspelled := _misspelled_keys(
+        settings or {}, *_settings_spellings(settings_cls)
+    ):
+        errors.append(_misspelled_keys_message(misspelled))
     for key, value in (settings or {}).items():
         if key not in fields:
             continue  # not a run-time section (e.g. cppdefs) — nothing to check here
@@ -1898,6 +2223,10 @@ def validate_run_time_sections(
             check_bgc_tracer_count(settings["param"] or {}, bgc_mode_is_marbl=marbl)
         except ValueError as exc:
             errors.append(str(exc))
+        try:
+            check_marbl_only_outputs(settings, bgc_mode_is_marbl=marbl)
+        except ValueError as exc:
+            errors.append(str(exc))
         # And the CDR-lite sections vs MARBL/CDR tracer counts (param vs cppdefs),
         # on the sections the selected tier models only: one it lacks is reported
         # by prune_version_gated_sections (resolve/configure_build), not advised on
@@ -1905,10 +2234,25 @@ def validate_run_time_sections(
         keep = (*fields, "param", "cppdefs")
         modeled = {k: v for k, v in settings.items() if k in keep}
         try:
+            check_cdr_output_sections(
+                modeled, bgc_mode_is_marbl=marbl, settings_cls=settings_cls
+            )
+        except ValueError as exc:
+            errors.append(str(exc))
+        try:
             check_cdr_lite_sections(
                 modeled,
                 bgc_mode=bgc_mode_from_cppdefs(cppdefs),
                 settings_cls=settings_cls,
+            )
+        except ValueError as exc:
+            errors.append(str(exc))
+    # Same for constant iron vs MARBL (marbl_bgc vs cppdefs).
+    if "marbl_bgc" in settings and "cppdefs" in settings:
+        try:
+            check_constant_fe(
+                settings["marbl_bgc"] or {},
+                bgc_mode_is_marbl=bool((settings["cppdefs"] or {}).get("marbl", False)),
             )
         except ValueError as exc:
             errors.append(str(exc))

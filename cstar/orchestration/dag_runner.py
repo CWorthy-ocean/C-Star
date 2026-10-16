@@ -17,7 +17,7 @@ from cstar.base.env import (
     max_concurrency,
     unset,
 )
-from cstar.base.exceptions import CstarExpectationFailed
+from cstar.base.exceptions import CstarError, CstarExpectationFailed
 from cstar.base.log import get_logger
 from cstar.base.utils import slugify
 from cstar.entrypoint.utils import ARG_PRE_RUN
@@ -28,6 +28,19 @@ from cstar.orchestration.compute_environment import (
 )
 from cstar.orchestration.launch.local import LocalLauncher
 from cstar.orchestration.launch.slurm import SlurmLauncher
+from cstar.orchestration.manifest import (
+    RunManifest,
+    StepFacts,
+    WorkplanIdentity,
+    describe_steps,
+    ensure_run_manifest,
+    fold_step_records,
+    manifest_lock,
+    new_attempt,
+    read_run_manifest,
+    workplan_content_hash,
+    write_run_manifest,
+)
 from cstar.orchestration.models import (
     KEY_CLOBBER,
     KEY_PRE_RUN,
@@ -68,6 +81,7 @@ from cstar.orchestration.transforms import (
 )
 from cstar.orchestration.utils import ENV_CSTAR_ORCH_DELAYS
 from cstar.system.manager import get_sysmgr
+from cstar.system.migration import CstarSchemaTooNewError
 
 log = get_logger(__name__)
 
@@ -334,6 +348,45 @@ async def load_run_state(
     return DagStatus({**open_set, **closed_set})
 
 
+def refresh_run_manifest(
+    root: Path, run_id: str, status: DagStatus
+) -> RunManifest | None:
+    """Fold the observed step statuses and the step records into the run's manifest.
+
+    The manifest holds a snapshot: the sentinels stay the live truth, and this
+    is the one place that copies their statuses into it. The manifest is written
+    only when something besides `observed_at` changed.
+
+    Parameters
+    ----------
+    root : Path
+        The run root.
+    run_id : str
+        The run-id, which names the lock serializing the manifest's writers.
+    status : DagStatus
+        The state just loaded for the run.
+
+    Returns
+    -------
+    RunManifest | None
+        The refreshed manifest, or `None` when the run has no readable manifest
+        (a run that predates it, or a corrupt or too new file).
+    """
+    statuses = {name: state.name for name, state in status.details.items()}
+    try:
+        with manifest_lock(run_id):
+            manifest = read_run_manifest(root)
+            if manifest is None:
+                log.debug(f"Run {run_id!r} has no manifest to refresh.")
+                return None
+            if fold_step_records(manifest, root, statuses):
+                write_run_manifest(root, manifest)
+    except (CstarError, CstarSchemaTooNewError) as ex:
+        log.warning(f"Could not refresh the manifest of run {run_id!r}: {ex}")
+        return None
+    return manifest
+
+
 async def load_external_runs(wp: Workplan, launcher: Launcher[t.Any]) -> ExternalRuns:
     """Refresh the external steps of a prepared workplan.
 
@@ -419,7 +472,7 @@ async def prepare_workplan(
     user_variables: Mapping[str, str] | None = None,
     clobber_steps: "Sequence[str] | None" = None,
     pre_run: bool = False,
-) -> tuple[Workplan, Path, ExternalRuns]:
+) -> tuple[Workplan, Path, ExternalRuns, dict[str, StepFacts]]:
     """Load the workplan and apply any applicable transforms.
 
     Parameters
@@ -439,10 +492,11 @@ async def prepare_workplan(
 
     Returns
     -------
-    tuple[Workplan, Path, ExternalRuns]
-        Tuple containing the resulting workplan, the workplan file path and
-        the registry of external runs the workplan depends on, as refreshed
-        while preparing it
+    tuple[Workplan, Path, ExternalRuns, dict[str, StepFacts]]
+        Tuple containing the resulting workplan, the workplan file path, the
+        registry of external runs the workplan depends on, as refreshed while
+        preparing it, and the facts known about each authored step (see
+        `describe_steps`)
 
     Raises
     ------
@@ -451,6 +505,7 @@ async def prepare_workplan(
         a step requests pre-run on an application that does not support it.
     """
     wp_orig = await asyncio.to_thread(deserialize, wp_path, Workplan)
+    facts = await asyncio.to_thread(describe_steps, wp_orig, wp_path.parent)
 
     fill_transform: TemplateFillTransform | None = None
     file_io_extras: list[Awaitable[int]] = []
@@ -514,7 +569,7 @@ async def prepare_workplan(
 
     _ = await asyncio.gather(*file_io)
 
-    return wp, persist_as, external
+    return wp, persist_as, external, facts
 
 
 class ExecutiveStepSummary(BaseModel):
@@ -958,13 +1013,10 @@ def build_planner(
     return Planner(workplan=wp, external=external)
 
 
-async def apply_resume_overrides(
-    wp: Workplan, run_id: str, launcher: Launcher[ProcessHandle]
-) -> list[str]:
+async def apply_resume_overrides(wp: Workplan, status: DagStatus) -> list[str]:
     """Mark every resumable, failed step of a prior run for resume.
 
-    Loads the current status of `run_id` (refreshing sentinel statuses along
-    the way) and, for each step whose status is a failure, marks it in
+    For each step whose status in `status` is a failure, marks it in
     `wp.steps` for resume when its application declares itself resumable
     (`ApplicationDefinition.resumable`); a failed step whose application does
     not support resume is left untouched and reported instead, so it re-runs
@@ -978,18 +1030,14 @@ async def apply_resume_overrides(
     ----------
     wp : Workplan
         The workplan whose failed steps should be marked for resume.
-    run_id : str
-        The run-id of the prior run being re-entered.
-    launcher : Launcher[ProcessHandle]
-        The launcher used to refresh sentinel statuses before failures are
-        determined.
+    status : DagStatus
+        The state of the prior run being re-entered, as loaded by the caller.
 
     Returns
     -------
     list[str]
         The names of the steps marked for resume.
     """
-    status = await load_run_state(run_id, launcher)
     by_name = {step.name: step for step in wp.steps}
 
     resumed: list[str] = []
@@ -1072,7 +1120,7 @@ async def build_dag(
     user_variables: Mapping[str, str] | None = None,
     clobber_steps: "Sequence[str] | None" = None,
     pre_run: bool = False,
-) -> tuple[Planner, Path]:
+) -> tuple[Planner, Path, dict[str, StepFacts]]:
     """Execute the steps in the workplan.
 
     Parameters
@@ -1093,9 +1141,10 @@ async def build_dag(
 
     Returns
     -------
-    tuple[Planner, Path]
-        The planner built from the prepared workplan, and the path to the
-        workplan after any transformations were applied.
+    tuple[Planner, Path, dict[str, StepFacts]]
+        The planner built from the prepared workplan, the path to the
+        workplan after any transformations were applied, and the facts known
+        about each authored step.
 
     Raises
     ------
@@ -1110,14 +1159,83 @@ async def build_dag(
     output_dir = StateDirectoryManager.data_dir(run_id)
 
     check_environment()
-    wp, prepared_wp_path, external = await prepare_workplan(
+    wp, prepared_wp_path, external, facts = await prepare_workplan(
         wp_path, output_dir, user_variables, clobber_steps, pre_run
     )
     # the steps are live once prepared; report before a pre-run prunes any of them
     report_orphans(output_dir, run_id, t.cast("LiveWorkplan", wp))
     planner = build_planner(wp, external.tasks())
 
-    return planner, prepared_wp_path
+    return planner, prepared_wp_path, facts
+
+
+def _record_attempt(
+    root: Path,
+    run_id: str,
+    wp_path: Path,
+    workplan: Workplan,
+    steps: "Sequence[LiveStep]",
+    step_facts: Mapping[str, StepFacts],
+) -> None:
+    """Record the scheduling of the workplan in the run's manifest.
+
+    A failure to write the manifest does not stop scheduling: the tracking
+    record and the sentinels do not depend on it.
+
+    Parameters
+    ----------
+    root : Path
+        The run root.
+    run_id : str
+        The run-id.
+    wp_path : Path
+        The path to the original workplan.
+    workplan : Workplan
+        The workplan being scheduled, after any pre-run pruning.
+    steps : Sequence[LiveStep]
+        The steps being scheduled.
+    step_facts : Mapping[str, StepFacts]
+        The facts known about each authored step; empty when re-entering a run.
+    """
+    outside: list[str] = []
+
+    def _relative_dir(step: LiveStep) -> str:
+        if step.working_dir.is_relative_to(root):
+            return step.working_dir.relative_to(root).as_posix()
+        resolved = step.working_dir.resolve()  # the root is resolved
+        if resolved.is_relative_to(root):
+            return resolved.relative_to(root).as_posix()
+        outside.append(step.name)
+        return step.working_dir.as_posix()
+
+    entries = {
+        step.name: (
+            step.application,
+            _relative_dir(step),
+            step_facts.get(step.name),
+        )
+        for step in steps
+    }
+    if outside:
+        log.debug(f"Steps with a working directory outside the run root: {outside}")
+
+    content_hash = workplan_content_hash(workplan)
+    try:
+        with manifest_lock(run_id):
+            ensure_run_manifest(
+                root,
+                run_id=run_id,
+                name=workplan.name,
+                kind="workplan",
+                workplan=WorkplanIdentity(
+                    name=workplan.name, content_hash=content_hash, path=str(wp_path)
+                ),
+                attempt=new_attempt(workplan, workplan_hash=content_hash),
+                steps=entries,
+                runs=workplan.runs,
+            )
+    except Exception as ex:
+        log.warning(f"Could not write the manifest of run {run_id!r}: {ex}")
 
 
 async def run_dag(
@@ -1126,6 +1244,7 @@ async def run_dag(
     run_id: str,
     planner: Planner,
     user_variables: Mapping[str, str] | None = None,
+    step_facts: Mapping[str, StepFacts] | None = None,
 ) -> WorkplanRun:
     """Execute the steps in the workplan.
 
@@ -1142,6 +1261,9 @@ async def run_dag(
         The planner to execute
     user_variables : NamedConfiguration | None
         User-provided key-value pairs for use during templating.
+    step_facts : Mapping[str, StepFacts] | None
+        The facts known about each authored step, from `build_dag`. `None`
+        when re-entering a run, whose manifest already holds them.
 
     Returns
     -------
@@ -1149,13 +1271,24 @@ async def run_dag(
         The persisted record describing the run.
     """
     steps = t.cast("list[LiveStep]", planner.flatten())
+    # the run root is where `prepare_workplan` wrote the transformed workplan,
+    # so a reloaded run keeps the root it is running under
+    root = Path(trx_wp_path).resolve().parent
+
+    await asyncio.to_thread(
+        _record_attempt,
+        root,
+        run_id,
+        wp_path,
+        planner.workplan,
+        steps,
+        step_facts or {},  # the one place a reload's absent facts are read
+    )
 
     wp_run = WorkplanRun(
         workplan_path=wp_path,
         trx_workplan_path=trx_wp_path,
-        # the run root is where `prepare_workplan` wrote the transformed workplan,
-        # so a reloaded run keeps the root it is running under
-        output_path=Path(trx_wp_path).resolve().parent,
+        output_path=root,
         run_id=run_id,
         environment=capture_environment(),
         user_variables=user_variables or {},
@@ -1209,7 +1342,7 @@ async def build_and_run_dag(
     NoPreparableStepsError
         If `pre_run` leaves no step to prepare.
     """
-    planner, prepared_wp_path = await build_dag(
+    planner, prepared_wp_path, facts = await build_dag(
         wp_path,
         run_id,
         user_variables=user_variables,
@@ -1222,4 +1355,5 @@ async def build_and_run_dag(
         run_id,
         planner,
         user_variables=user_variables,
+        step_facts=facts,
     )

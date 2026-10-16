@@ -71,13 +71,17 @@ from cstar.applications.forge.namelist_model import (
     BgcMode,
     NamelistConsistencyError,
     canonical_output_sections_for_precheck,
+    cdr_nz_chd_from_file,
     check_bgc_tracer_count,
     check_cdr_forcing_mode,
     check_cdr_lite_mode_roms,
     check_cdr_lite_sections,
     check_cdr_output_sections,
+    check_constant_fe,
+    check_marbl_only_outputs,
     check_output_streams_divide_rst,
     check_rst_period_divisible,
+    check_upscaled_cdr_lite_tracer_counts,
     cppdefs_for_precheck,
     ensure_cdr_output_marbl_diagnostics,
     normalize_legacy_sections,
@@ -674,13 +678,17 @@ def build_forge_blueprint(
     ``"cdr_lite"`` is a build without MARBL whose only extra tracers are
     ucla-roms' dedicated CDR-lite tracers: it compiles ``CDR_LITE``
     (``cppdefs.cdr_lite``), needs a CDR forcing (``cdr``) with ``cdr_lite``
-    releases and ucla-roms >= ``CDR_LITE_MODE_MIN_ROMS``, and, in the ``"simple"``
-    CDR mode, defaults every release's ``tracer_set`` to ``"cdr_lite"``. The tracer
-    counts and the CDR-lite output stream are derived later, from the generated
-    CDR forcing (``ForgeExecutor.configure_build``). If ``None`` (the
-    default), it falls back to the ModelSpec's own ``bgc_mode`` (itself defaulting
-    to ``"marbl"``) -- the ModelSpec is the single source of the default; pass an
-    explicit value to override it for one run.
+    releases (or, on ucla-roms >= ``UPSCALED_CDR_WITHOUT_MARBL_MIN_ROMS``, the
+    ``"upscaled"`` mode) and ucla-roms >= ``CDR_LITE_MODE_MIN_ROMS``, and, in the
+    ``"simple"`` CDR mode, defaults every release's ``tracer_set`` to
+    ``"cdr_lite"``. The tracer counts and the CDR-lite output stream are derived
+    later, from the generated CDR forcing (``ForgeExecutor.configure_build``); in
+    the ``"upscaled"`` mode nothing is generated, so the counts must be passed
+    (``run_time_overrides={"param": {"nt_cdr_oae": ..., "nt_cdr_dor": ...}}``,
+    matching the child's CDR-lite tracers) and a build without them is rejected
+    here. If ``None`` (the default), it falls back to the ModelSpec's own
+    ``bgc_mode`` (itself defaulting to ``"marbl"``) -- the ModelSpec is the single
+    source of the default; pass an explicit value to override it for one run.
 
     ``roms_ref``/``marbl_ref`` are per-run checkout-target overrides (commit hash,
     tag, or branch) for ``code.roms``/``code.marbl``. If ``None`` (the default),
@@ -738,10 +746,10 @@ def build_forge_blueprint(
     ``v_sponge`` and ``dt`` are both domain-owned numerics with the same pattern:
     if ``None`` (the default), each is derived from the grid -- ``v_sponge`` from
     grid spacing via ``cstar.applications.forge.util.compute_v_sponge_from_grid``, ``dt``
-    from the CFL criterion via ``_compute_dt_from_cfl`` (builds a grid); pass an
-    explicit value (e.g. one restored from a saved DomainSpec) to use it verbatim
-    instead. The resolver is the sole writer of both ``domain.v_sponge`` /
-    ``domain.dt`` and the identical ``model_settings["v_sponge"]["v_sponge"]`` /
+    from the CFL criterion via :func:`cfl_dt`; pass an explicit value (e.g. one
+    restored from a saved DomainSpec) to use it verbatim instead. The resolver is
+    the sole writer of both ``domain.v_sponge`` / ``domain.dt`` and the identical
+    ``model_settings["v_sponge"]["v_sponge"]`` /
     ``model_settings["time_stepping"]["dt"]`` leaves -- each pair is always
     written together and must never diverge.
 
@@ -947,15 +955,7 @@ def build_forge_blueprint(
 
     # ----- derived numerics --------------------------------------------------
     if dt is None:
-        if loaded_grid is not None and loaded_grid.size_x is None:
-            raise ValueError(
-                "dt was not provided and the grid_file grid has no size_x/size_y "
-                "(a hand-made file roms-tools never wrote those attrs to) -- CFL "
-                "derivation is impossible; pass dt= explicitly."
-            )
-        dt = _compute_dt_from_cfl(
-            grid_kwargs, loaded_grid if loaded_grid is not None else grid
-        )
+        dt = cfl_dt(grid_kwargs, loaded_grid if loaded_grid is not None else grid)
     # total_seconds, not .days: a sub-day run window must not round to ntimes == 0.
     ntimes = round((end_date - start_date).total_seconds() / dt)
     # v_sponge default = grid spacing (m) / 10 -- a caller (e.g. the wizard, restoring
@@ -978,6 +978,16 @@ def build_forge_blueprint(
         settings.pop(sec, None)
     settings["time_stepping"] = {"ntimes": ntimes, "dt": dt, "ndtfast": 60, "ninfo": 1}
     settings["v_sponge"] = {"v_sponge": v_sponge}
+
+    # ----- schema selection inputs -------------------------------------------
+    # The pinned ucla-roms ref decides which run-time settings tier applies (it
+    # selects what gets pruned below), whether CDR forcing is allowed without
+    # MARBL and what the upscaled mode writes for cdr_nz_chd, so derive it before
+    # the CDR settings.
+    roms_block = (model.get("code") or {}).get("roms") or {}
+    pinned_roms_ref = roms_ref or roms_block.get("commit") or roms_block.get("branch")
+    # str(): YAML can load a numeric-looking pin (e.g. 1.0) as a number.
+    effective_roms_ref = str(pinned_roms_ref) if pinned_roms_ref is not None else None
     # river_frc/cdr_frc are Forcing-owned, not a ModelSpec default: seed the disabled
     # baseline, then let the ForcingSpec's own top-level river_frc/cdr_frc (if any)
     # override it. Generation later overwrites the presence/count leaves for real
@@ -1007,9 +1017,21 @@ def build_forge_blueprint(
                 "forcing_depth_profiles": True,
                 "forcing_parameterized": False,
                 "cdr_volume": False,
-                "relocate_to_wet_pts": False,
+                # Each profile is a single-point release at the nearest parent
+                # point, and a child-boundary column can sit over parent land:
+                # relocation moves such a release to the nearest wet point
+                # instead of aborting ("CDR release on land"), as ucla-roms #390
+                # recommends. A release whose nearest point is wet stays where
+                # it is (ucla-roms 0.2.0 onwards).
+                "relocate_to_wet_pts": True,
             }
         )
+        # The level count is the child grid's, which Forge cannot see. From
+        # ucla-roms 0.11.0 cdr_nz_chd = 0 reads it from the file's s_rho, and any
+        # other value that disagrees with the file aborts at init; earlier
+        # releases keep the seeded value and need it to match the child.
+        if cdr_nz_chd_from_file(effective_roms_ref):
+            settings["cdr_frc"]["nz_chd"] = 0
     # extract_data (child-grid nesting) is Domain-owned when active (the nesting
     # block below overwrites it from grid_kwargs_child/metadata_child); seed the
     # disabled baseline here so it's always present when not nesting.
@@ -1144,15 +1166,6 @@ def build_forge_blueprint(
         tides_settings["bry_tides"] = False
         tides_settings["pot_tides"] = False
 
-    # ----- schema selection inputs -------------------------------------------
-    # The pinned ucla-roms ref decides which run-time settings tier applies (it
-    # selects what gets pruned below) and whether CDR forcing is allowed without
-    # MARBL, so derive it before the CDR block.
-    roms_block = (model.get("code") or {}).get("roms") or {}
-    effective_roms_ref = (
-        roms_ref or roms_block.get("commit") or roms_block.get("branch")
-    )
-
     # ----- CDR output consistency --------------------------------------------
     # CDR output is valid without CDR forcing (cdr_frc.cdr_source stays false;
     # ROMS opens no CDR file). Any active CDR mode (generated -- "simple"/"yaml",
@@ -1160,10 +1173,11 @@ def build_forge_blueprint(
     # the CDR_FORCING cppdef, which compiles cdr_frc with or without MARBL. With
     # MARBL it also implies CDR output (real CDR tracers exist at runtime under
     # "upscaled" too, so the same diagnostics requirements apply); without MARBL
-    # check_cdr_forcing_mode allows only the parameterized modes on
-    # ucla-roms >= 0.9.1 and leaves CDR output off, since cdr_output.F90 needs
-    # MARBL. When CDR output is on, the MARBL diagnostics ucla-roms looks up by
-    # name, unchecked, must be in the write list.
+    # check_cdr_forcing_mode allows the parameterized modes on ucla-roms >= 0.9.1
+    # and, under bgc_mode "cdr_lite", "upscaled" on ucla-roms >= 0.11.0, and leaves
+    # CDR output off, since cdr_output.F90 needs MARBL. When CDR output is on, the
+    # MARBL diagnostics ucla-roms looks up by name, unchecked, must be in the
+    # write list.
     cdr_out = settings.setdefault("cdr_output", {})
     if bgc_mode == "cdr_lite":
         if cdr_spec.mode == "none":
@@ -1171,25 +1185,22 @@ def build_forge_blueprint(
                 'bgc_mode "cdr_lite" needs a CDR forcing with cdr_lite releases; '
                 "cdr.mode is 'none', so nothing would be simulated."
             )
-        check_cdr_lite_mode_roms(
-            str(effective_roms_ref) if effective_roms_ref is not None else None
-        )
+        check_cdr_lite_mode_roms(effective_roms_ref)
     if cdr_spec.mode != "none":
         settings["cppdefs"]["cdr_forcing"] = True
     # Called first so an unsupported mode is rejected even if do_cdr_output is set.
     implied_cdr_output = check_cdr_forcing_mode(
         cdr_spec.mode,
-        bgc_mode_is_marbl=bgc_mode == "marbl",
-        roms_ref=str(effective_roms_ref) if effective_roms_ref is not None else None,
+        bgc_mode=bgc_mode,
+        roms_ref=effective_roms_ref,
     )
+    # After the version gate, so a pin too old for the mode is reported as such.
+    if bgc_mode == "cdr_lite" and cdr_spec.mode == "upscaled":
+        check_upscaled_cdr_lite_tracer_counts(settings.get("param") or {})
     do_cdr_output = bool(cdr_out.get("do_cdr_output")) or implied_cdr_output
     cdr_out["do_cdr_output"] = do_cdr_output
+    check_marbl_only_outputs(settings, bgc_mode_is_marbl=bgc_mode == "marbl")
     if do_cdr_output:
-        if bgc_mode != "marbl":
-            raise ValueError(
-                'do_cdr_output=True (or CDR forcing was supplied) but bgc_mode != "marbl": '
-                "ucla-roms only compiles cdr_output.F90 under MARBL && CDR_FORCING."
-            )
         settings["cppdefs"]["cdr_forcing"] = True
         marbl = settings.setdefault("marbl_bgc", {})
         marbl["marbl_diagnostics_to_write"] = ensure_cdr_output_marbl_diagnostics(
@@ -1204,9 +1215,7 @@ def build_forge_blueprint(
         # selection; this internal version probe shouldn't repeat it -- the
         # engine/executor selection paths already surface it once per run.
         warnings.simplefilter("ignore", UserWarning)
-        settings_cls = run_time_settings_for_ref(
-            str(effective_roms_ref) if effective_roms_ref is not None else None
-        )
+        settings_cls = run_time_settings_for_ref(effective_roms_ref)
     # Drop any version-gated section (e.g. cdr_lite_output, ucla-roms >= 0.7.0)
     # this pin's schema doesn't model. OutputSpecs are shared across ModelSpecs
     # pinned to different ucla-roms releases (the same "daily-restarts"
@@ -1280,6 +1289,15 @@ def build_forge_blueprint(
     # merged cppdefs (what will compile), like configure_build.
     check_bgc_tracer_count(
         settings.get("param") or {},
+        bgc_mode_is_marbl=settings["cppdefs"].get("marbl", False),
+    )
+
+    # ----- constant iron needs MARBL -----------------------------------------
+    # marbl_bgc stays in a non-MARBL build's settings (the ModelSpec default), so
+    # an override can request marbl_bgc.use_constant_fe there. Keyed on the merged
+    # cppdefs, like the tracer count above, so it agrees with configure_build.
+    check_constant_fe(
+        settings.get("marbl_bgc") or {},
         bgc_mode_is_marbl=settings["cppdefs"].get("marbl", False),
     )
 
@@ -1819,7 +1837,7 @@ def _build_code(
 
 def _compute_v_sponge_default(grid_kwargs: dict[str, Any], grid: Any = None) -> float:
     """Lazily compute the default sponge viscosity from grid spacing (no grid build
-    needed -- pure arithmetic on ``nx``/``size_x``). Mirrors ``_compute_dt_from_cfl``'s
+    needed -- pure arithmetic on ``nx``/``size_x``). Mirrors :func:`cfl_dt`'s
     lazy-import pattern to keep this module dependency-light when unused.
 
     ``grid``, if given (a user-supplied ``grid_file``'s loaded grid, whose
@@ -1840,8 +1858,16 @@ def _compute_v_sponge_default(grid_kwargs: dict[str, Any], grid: Any = None) -> 
     return compute_v_sponge_from_grid(grid_kwargs["size_x"], grid_kwargs["nx"])
 
 
-def _compute_dt_from_cfl(grid_kwargs: dict[str, Any], grid: Any) -> float:
-    """Lazily compute dt from the CFL criterion (needs roms_tools + cstar.applications.forge.util)."""
+def cfl_dt(grid_kwargs: dict[str, Any], loaded_grid: Any = None) -> float:
+    """Compute dt from the CFL criterion (pure arithmetic, no grid build).
+
+    Uses the baroclinic phase speed, which needs only the grid's size and shape:
+    ``loaded_grid``, if given (a ``roms_tools.Grid``, e.g. a user-supplied
+    ``grid_file``'s), supplies ``size_x``/``size_y``/``nx``/``ny``; otherwise
+    they come from ``grid_kwargs`` directly. Raises ``ValueError`` for a loaded
+    grid with no ``size_x``/``size_y`` (a hand-made file roms-tools never wrote
+    those attrs to).
+    """
     try:
         from cstar.applications.forge.util import compute_timestep_from_cfl
     except Exception as exc:  # pragma: no cover
@@ -1850,14 +1876,23 @@ def _compute_dt_from_cfl(grid_kwargs: dict[str, Any], grid: Any) -> float:
             "cstar.applications.forge.util failed. Pass dt= explicitly to keep resolution "
             f"dependency-light. ({exc})"
         ) from exc
-    if grid is None:
-        import roms_tools as rt
-
-        grid = rt.Grid(**grid_kwargs)
+    if loaded_grid is None:
+        size_x, size_y, nx, ny = (
+            grid_kwargs[k] for k in ("size_x", "size_y", "nx", "ny")
+        )
+    else:
+        if loaded_grid.size_x is None:
+            raise ValueError(
+                "dt was not provided and the grid_file grid has no size_x/size_y "
+                "(a hand-made file roms-tools never wrote those attrs to) -- CFL "
+                "derivation is impossible; pass dt= explicitly."
+            )
+        size_x, size_y = loaded_grid.size_x, loaded_grid.size_y
+        nx, ny = loaded_grid.nx, loaded_grid.ny
     return compute_timestep_from_cfl(
-        grid_size_x=grid.size_x,
-        grid_size_y=grid.size_y,
-        grid_nx=grid.nx,
-        grid_ny=grid.ny,
-        grid_ds=grid.ds,
+        grid_size_x=size_x,
+        grid_size_y=size_y,
+        grid_nx=nx,
+        grid_ny=ny,
+        grid_ds=None,
     )

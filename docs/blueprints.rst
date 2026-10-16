@@ -171,6 +171,11 @@ Use the ``run`` command from the ``cstar`` CLI to execute a blueprint.
         runner = RomsMarblRunner(request, service_cfg, job_cfg)
         await runner.execute()
 
+A standalone run records itself in its working directory: ``cstar-step.yaml``
+holds what the step did and ``cstar-run.yaml`` is the :term:`run manifest`, with
+``kind: blueprint`` and a single step. Read them with ``cstar run show <working
+directory>``. See :ref:`workplan_run_manifest`.
+
 Resuming an interrupted run
 """"""""""""""""""""""""""""
 

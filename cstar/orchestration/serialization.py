@@ -768,6 +768,41 @@ async def deserialize_all(
     return await read_all(paths, lambda p: try_deserialize(p, klass, mode), limit, sem)
 
 
+def render_model(
+    model: SerializableModel,
+    mode: PersistenceMode = PersistenceMode.yaml,
+) -> str:
+    """Render a model as the text of a document.
+
+    Parameters
+    ----------
+    model : SerializableModel
+        The model to render.
+    mode : PersistenceMode
+        The type of document to produce (yaml or json); `auto` is rejected, as
+        there is no path to detect it from.
+
+    Returns
+    -------
+    str
+        The rendered document.
+
+    Raises
+    ------
+    ValueError
+        If `mode` is `auto`.
+    """
+    if mode == PersistenceMode.auto:
+        msg = "A persistence mode must be chosen to render a model without a path"
+        raise ValueError(msg)
+
+    if mode == PersistenceMode.json:
+        return model.model_dump_json(  # type: ignore[reportUnknownMemberType]
+            by_alias=True
+        )
+    return model_to_yaml(model)
+
+
 def serialize(
     path: Path,
     model: SerializableModel,
@@ -796,12 +831,7 @@ def serialize(
     if mode == PersistenceMode.auto:
         mode = _mode_detect(path)
 
-    if mode == PersistenceMode.json:
-        content = model.model_dump_json(  # type: ignore[reportUnknownMemberType]
-            by_alias=True
-        )
-    else:
-        content = model_to_yaml(model)
+    content = render_model(model, mode)
 
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open(mode="w") as fp:

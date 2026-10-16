@@ -23,9 +23,12 @@ subclasses:
 - :class:`RomsNamelistV0_7_0` — the schema for ucla-roms **>= 0.7.0, < 0.9.0**.
   Adds the ``&CDR_TRACER_OUTPUT_SETTINGS`` and ``&CDR_GAS_EXCH_OUTPUT_SETTINGS``
   groups (ucla-roms PR #351) on top of 0.6.0.
-- :class:`RomsNamelistV0_9_0` — the schema for ucla-roms **>= 0.9.0**. Replaces
-  ``&CDR_TRACER_OUTPUT_SETTINGS`` with ``&CDR_LITE_OUTPUT_SETTINGS`` (ucla-roms
-  PR #372) and adds ``&CDR_LITE_SETTINGS``.
+- :class:`RomsNamelistV0_9_0` — the schema for ucla-roms **>= 0.9.0, < 0.11.0**.
+  Replaces ``&CDR_TRACER_OUTPUT_SETTINGS`` with ``&CDR_LITE_OUTPUT_SETTINGS``
+  (ucla-roms PR #372) and adds ``&CDR_LITE_SETTINGS``.
+- :class:`RomsNamelistV0_11_0` — the schema for ucla-roms **>= 0.11.0**. Adds
+  ``use_constant_Fe``/``constant_Fe_value`` to ``&MARBL_BIOGEOCHEMISTRY_SETTINGS``
+  (ucla-roms PR #391) on top of 0.9.0.
 
 Later breaking releases add a further ``RomsNamelistV<major>_<minor>_<patch>``
 subclass following the same ``V<major>_<minor>_<patch>`` suffix convention.
@@ -487,6 +490,23 @@ class MarblBiogeochemistrySettings(_NmlGroup):
         )
 
 
+class MarblBiogeochemistrySettingsV0_11_0(MarblBiogeochemistrySettings):
+    """``&MARBL_BIOGEOCHEMISTRY_SETTINGS`` for ucla-roms >= 0.11.0: adds the
+    constant-iron option (ucla-roms PR #391).
+
+    ROMS spells the keys ``use_constant_Fe``/``constant_Fe_value``; the fields
+    are lowercase because f90nml lowercases namelist keys on read and write
+    (Fortran is case-insensitive). Both default to the ucla-roms reference
+    values, so a namelist without them still validates. ROMS stops on a negative
+    ``constant_Fe_value`` when the option is on.
+    """
+
+    use_constant_fe: bool = Field(default=False)
+    """Hold MARBL's dissolved iron (Fe) at constant_Fe_value everywhere, overriding MARBL, transport and inputs"""
+    constant_fe_value: float = Field(default=3.0e-3, ge=0.0)
+    """Fe imposed when use_constant_Fe (mmol/m^3, Fe's units; 1 nM = 1e-3)"""
+
+
 class CdrFrcSettings(_NmlGroup):
     cdr_source: bool
     """Apply CDR perturbation (T) or not (F)"""
@@ -855,9 +875,11 @@ class RomsNamelistBase(BaseModel):
     for ucla-roms >= 0.5.0, < 0.6.0, :class:`RomsNamelistV0_6_0` for
     ucla-roms >= 0.6.0, < 0.7.0, which adds ``&PIO_SETTINGS``,
     :class:`RomsNamelistV0_7_0` for ucla-roms >= 0.7.0, < 0.9.0, which adds the
-    two CDR tracer / gas-exchange output groups, or :class:`RomsNamelistV0_9_0`
-    for ucla-roms >= 0.9.0, which renames the CDR tracer output group to
-    ``&CDR_LITE_OUTPUT_SETTINGS``) or select one automatically with
+    two CDR tracer / gas-exchange output groups, :class:`RomsNamelistV0_9_0`
+    for ucla-roms >= 0.9.0, < 0.11.0, which renames the CDR tracer output group
+    to ``&CDR_LITE_OUTPUT_SETTINGS``, or :class:`RomsNamelistV0_11_0` for
+    ucla-roms >= 0.11.0, which adds the constant-iron keys to
+    ``&MARBL_BIOGEOCHEMISTRY_SETTINGS``) or select one automatically with
     :func:`namelist_schema_for_ref`.
     """
 
@@ -1092,7 +1114,7 @@ class RomsNamelistV0_7_0(RomsNamelistV0_6_0):
 
 
 class RomsNamelistV0_9_0(RomsNamelistV0_6_0):
-    """The ROMS namelist schema for ucla-roms >= 0.9.0.
+    """The ROMS namelist schema for ucla-roms >= 0.9.0, < 0.11.0.
 
     Replaces `&CDR_TRACER_OUTPUT_SETTINGS` with `&CDR_LITE_OUTPUT_SETTINGS`
     (ucla-roms PR #372) and adds the optional `&CDR_LITE_SETTINGS` on top of the
@@ -1113,6 +1135,18 @@ class RomsNamelistV0_9_0(RomsNamelistV0_6_0):
     )
 
 
+class RomsNamelistV0_11_0(RomsNamelistV0_9_0):
+    """The ROMS namelist schema for ucla-roms >= 0.11.0.
+
+    Adds `use_constant_Fe`/`constant_Fe_value` to `&MARBL_BIOGEOCHEMISTRY_SETTINGS`
+    (ucla-roms PR #391) on top of the 0.9.0 schema; otherwise unchanged. Both
+    keys are always written, which is why earlier releases (which stop on
+    unknown namelist keys) keep the 0.9.0 schema.
+    """
+
+    marbl_biogeochemistry_settings: MarblBiogeochemistrySettingsV0_11_0
+
+
 # ---- Schema version selection ----
 
 # ucla-roms releases with breaking namelist changes, as comparable version
@@ -1122,19 +1156,20 @@ UCLA_ROMS_0_5_0: Final[tuple[int, int, int]] = (0, 5, 0)
 UCLA_ROMS_0_6_0: Final[tuple[int, int, int]] = (0, 6, 0)
 UCLA_ROMS_0_7_0: Final[tuple[int, int, int]] = (0, 7, 0)
 UCLA_ROMS_0_9_0: Final[tuple[int, int, int]] = (0, 9, 0)
+UCLA_ROMS_0_11_0: Final[tuple[int, int, int]] = (0, 11, 0)
 
 # Half-open ucla-roms version ranges ``[lower, upper)`` mapped to the schema
 # class that applies; `None` bounds are unbounded. Ranges must be contiguous
 # and non-overlapping, ordered oldest-first; the last entry's upper bound
 # must be `None` (it covers "latest known release and beyond").
 #
-# Recipe for the next breaking namelist release (e.g. 0.10.0):
+# Recipe for the next breaking namelist release (e.g. 0.12.0):
 #   1. Add the release constant:
-#        UCLA_ROMS_0_10_0: Final[tuple[int, int, int]] = (0, 10, 0)
+#        UCLA_ROMS_0_12_0: Final[tuple[int, int, int]] = (0, 12, 0)
 #   2. Cap the current last entry's upper bound at the new version:
-#        (UCLA_ROMS_0_9_0, UCLA_ROMS_0_10_0, RomsNamelistV0_9_0),
+#        (UCLA_ROMS_0_11_0, UCLA_ROMS_0_12_0, RomsNamelistV0_11_0),
 #   3. Append a new open-ended entry for the new schema:
-#        (UCLA_ROMS_0_10_0, None, RomsNamelistV0_10_0),
+#        (UCLA_ROMS_0_12_0, None, RomsNamelistV0_12_0),
 NAMELIST_SCHEMA_REGISTRY: tuple[
     tuple[
         tuple[int, int, int] | None, tuple[int, int, int] | None, type[RomsNamelistBase]
@@ -1146,7 +1181,8 @@ NAMELIST_SCHEMA_REGISTRY: tuple[
     (UCLA_ROMS_0_5_0, UCLA_ROMS_0_6_0, RomsNamelistV0_5_0),
     (UCLA_ROMS_0_6_0, UCLA_ROMS_0_7_0, RomsNamelistV0_6_0),
     (UCLA_ROMS_0_7_0, UCLA_ROMS_0_9_0, RomsNamelistV0_7_0),
-    (UCLA_ROMS_0_9_0, None, RomsNamelistV0_9_0),
+    (UCLA_ROMS_0_9_0, UCLA_ROMS_0_11_0, RomsNamelistV0_9_0),
+    (UCLA_ROMS_0_11_0, None, RomsNamelistV0_11_0),
 )
 
 

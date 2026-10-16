@@ -20,6 +20,7 @@ from cstar.base.env import (
 )
 from cstar.base.exceptions import CstarError
 from cstar.base.log import LogLevelChoices, get_logger
+from cstar.base.utils import utc_now
 from cstar.cli.common import (
     SCHEMA_ERRORS,
     cb_pipeline,
@@ -43,10 +44,13 @@ from cstar.entrypoint.utils import (
     ARG_PRE_RUN_HELP,
     ARG_RESUME,
     ARG_RESUME_HELP,
+    ARG_STEP,
+    ARG_STEP_HELP,
     ARG_VERBOSE,
     ARG_VERBOSE_HELP,
 )
 from cstar.execution.file_system import local_copy
+from cstar.orchestration.manifest import finalize_standalone_run
 from cstar.orchestration.models import DeferredBlueprintRef
 from cstar.orchestration.serialization import deserialize, validate_serialized_entity
 from cstar.orchestration.transforms import DirectiveConfig, resolve_deferred_blueprint
@@ -249,6 +253,10 @@ def run(
         bool,
         typer.Option(ARG_PRE_RUN, help=ARG_PRE_RUN_HELP),
     ] = False,
+    step: t.Annotated[
+        str,
+        typer.Option(ARG_STEP, help=ARG_STEP_HELP),
+    ] = "",
 ) -> None:
     """Execute a blueprint in a local worker service.
 
@@ -302,10 +310,21 @@ def run(
     if directive_uri:
         uri = DirectiveConfig.apply_directives(directive_uri, uri)
 
-    request = RunnerRequest(uri, app_config.blueprint, resume=resume, pre_run=pre_run)
+    request = RunnerRequest(
+        uri, app_config.blueprint, resume=resume, pre_run=pre_run, step=step
+    )
 
     runner = app_config.runner(request, service_cfg, job_cfg)
+    started_at = utc_now()
     asyncio.run(runner.execute())
+
+    # a workplan step (always passed `--step`) is recorded by the orchestrator's
+    # manifest instead
+    if not step:
+        try:
+            finalize_standalone_run(runner.blueprint, started_at=started_at)
+        except Exception as ex:
+            log.warning(f"Unable to write the run manifest: {ex}")
 
     if runner.result and runner.result.errors:
         print(f"Errors occurred: {', '.join(runner.result.errors)}")

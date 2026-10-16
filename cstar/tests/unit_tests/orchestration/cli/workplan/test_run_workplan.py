@@ -35,6 +35,7 @@ from cstar.cli.workplan.run import (
 from cstar.entrypoint.utils import ARG_CLOBBER, ARG_PRE_RUN, ARG_RESUME, ARG_RUN_ID
 from cstar.execution.file_system import StateDirectoryManager
 from cstar.orchestration.dag_runner import (
+    DagStatus,
     ExecutiveRunSummary,
     NoPreparableStepsError,
     get_launcher,
@@ -1109,6 +1110,11 @@ def test_workplan_run_resume_with_path_reloads_by_derived_run_id(
             mock.AsyncMock(return_value=fake_run_result),
         ) as mock_run_dag,
         mock.patch(
+            "cstar.cli.workplan.run.load_run_state",
+            mock.AsyncMock(return_value=DagStatus({})),
+        ),
+        mock.patch("cstar.cli.workplan.run.refresh_run_manifest"),
+        mock.patch(
             "cstar.cli.workplan.run.apply_resume_overrides",
             mock.AsyncMock(return_value=[]),
         ),
@@ -1172,6 +1178,11 @@ def test_workplan_run_resume_with_explicit_run_id_and_path(
             "cstar.cli.workplan.run.run_dag",
             mock.AsyncMock(return_value=fake_run_result),
         ) as mock_run_dag,
+        mock.patch(
+            "cstar.cli.workplan.run.load_run_state",
+            mock.AsyncMock(return_value=DagStatus({})),
+        ),
+        mock.patch("cstar.cli.workplan.run.refresh_run_manifest"),
         mock.patch(
             "cstar.cli.workplan.run.apply_resume_overrides",
             mock.AsyncMock(return_value=[]),
@@ -1458,6 +1469,7 @@ def test_workplan_run_resume_reload_invokes_apply_resume_overrides(
     trx_path = tmp_path / f"live-{wp_path.name}"
     assert serialize(trx_path, lwp), "serializing live workplan failed in test"
 
+    loaded = DagStatus({"first": Status.Failed})
     fake_run_result = WorkplanRun(
         workplan_path=wp_path,
         trx_workplan_path=trx_path,
@@ -1479,6 +1491,11 @@ def test_workplan_run_resume_reload_invokes_apply_resume_overrides(
             wraps=fake_build_and_run_dag,
         ) as mock_build_and_run_dag,
         mock.patch(
+            "cstar.cli.workplan.run.load_run_state",
+            mock.AsyncMock(return_value=loaded),
+        ) as mock_load_state,
+        mock.patch("cstar.cli.workplan.run.refresh_run_manifest") as mock_refresh,
+        mock.patch(
             "cstar.cli.workplan.run.apply_resume_overrides",
             mock.AsyncMock(return_value=[]),
         ) as mock_apply_resume,
@@ -1492,9 +1509,14 @@ def test_workplan_run_resume_reload_invokes_apply_resume_overrides(
 
     assert result.exit_code == 0, result.output
     mock_build_and_run_dag.assert_not_awaited()
+    # the state is loaded once, recorded in the manifest, then applied
+    mock_load_state.assert_awaited_once()
+    assert mock_load_state.await_args is not None
+    assert mock_load_state.await_args.args[0] == run_id
+    mock_refresh.assert_called_once_with(tmp_path, run_id, loaded)
     mock_apply_resume.assert_awaited_once()
     assert mock_apply_resume.await_args is not None
-    assert mock_apply_resume.await_args.args[1] == run_id
+    assert mock_apply_resume.await_args.args[1] is loaded
 
 
 @pytest.mark.parametrize("status", [Status.Unsubmitted, Status.Submitted, Status.Done])

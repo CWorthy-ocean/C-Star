@@ -1,4 +1,5 @@
 import os
+import shlex
 import shutil
 from pathlib import Path
 from unittest import mock
@@ -15,6 +16,7 @@ from cstar.entrypoint.utils import (
     ARG_DIRECTIVES_URI_LONG,
     ARG_PRE_RUN,
     ARG_RESUME,
+    ARG_STEP,
 )
 from cstar.orchestration.adapter import (
     StepToPlaceholderAdapter,
@@ -370,3 +372,32 @@ def test_adapt_appends_pre_run_iff_step_is_pre_run(
     request = StepToRunRequestAdapter().adapt(step)
 
     assert (ARG_PRE_RUN in request.command) is pre_run
+
+
+@pytest.mark.parametrize("step_name", ["A", "Spin Up", "it's here"])
+def test_convert_step_passes_its_name(tmp_path: Path, step_name: str) -> None:
+    """Verify the step's name follows the blueprint path and survives rendering.
+
+    Parameters
+    ----------
+    tmp_path : Path
+        Temporary path fixture for writing per-test outputs.
+    step_name : str
+        The name of the step; may hold spaces or quotes.
+    """
+    bp_dir = tmp_path / "with space"
+    bp_dir.mkdir()
+    bp_path = bp_dir / "blueprint.yaml"
+    bp_path.touch()
+    step = LiveStep(
+        name=step_name,
+        application=Application.HELLO_WORLD,
+        blueprint=bp_path,
+        working_dir=tmp_path / "unit-test-work-dir",
+    )
+
+    request = StepToRunRequestAdapter().adapt(step)
+
+    assert request.command[3:6] == [str(bp_path), ARG_STEP, step_name]
+    rendered = RunRequestCommandFormatter().format(request)
+    assert shlex.split(rendered) == request.command
