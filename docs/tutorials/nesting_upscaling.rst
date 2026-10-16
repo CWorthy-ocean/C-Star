@@ -62,12 +62,14 @@ child's and the parent's column depths.
 A larger case on the California Current, ``examples/nesting_upscaling/ccs/``,
 uses the same eight steps with real forcing: a 168 by 336 parent at about 16 km
 with a 70 by 140 child at about 4 km and one alkalinity release near Monterey
-Bay, on a workstation or HPC node with up to 64 cores. Its run windows are
-runtime variables: ``smoke.vars`` (4 days of parent, 2 of child) has passed
-end to end, and ``full.vars`` (a year of parent, 184 days of child, about 12
-hours with margin) is proposed and has not been run. See
-``examples/nesting_upscaling/ccs/README.md`` for its prerequisites, timings and
-known issues.
+Bay. It runs on a workstation or under SLURM on an HPC cluster, with up to 50
+MPI ranks per step. Its run windows are runtime variables: ``month.vars`` (a
+month of parent, half a month of child) has passed end to end on Anvil (34 SU,
+about an hour of compute on the critical path), and ``six_month.vars`` and
+``full.vars`` (a year of parent, 184 days of child, estimated at about 11 hours
+of compute) are prepared but not run. See
+``examples/nesting_upscaling/ccs/README.md`` for its prerequisites, resources
+and known issues.
 
 Workplan features it uses
 -------------------------

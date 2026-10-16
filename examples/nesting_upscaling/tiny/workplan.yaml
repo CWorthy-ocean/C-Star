@@ -164,8 +164,8 @@ steps:
         data:
           - location: "{{output_dir: upscale}}/upscaled_cdr.nc"
       runtime_params:
-        # one record short of the child's end (2012-01-03 06:00), as the last upscaled
-        # record is the child's last hourly output
+        # one record short of the child's end (2012-01-03 06:00): a precaution, not
+        # tested without it (the CCS runs end parent_up at the child's end)
         end_date: "2012-01-03 05:00:00"
     directives:
       continue-from:

@@ -50,8 +50,9 @@
 #   child_start        start of the child and parent_up runs (a parent restart exists here)
 #   child_start_stamp  child_start as YYYYMMDDHHMMSS (must agree with child_start)
 #   child_end          end of the child and parent_up runs
-#   cdr_end            end of the ALK release: child_start + 30 days, or child_end if
-#                      the child window is shorter than that
+#   cdr_end            end of the ALK release (committed files: 8 days in month.vars,
+#                      30 days in six_month.vars and full.vars, the whole child
+#                      window in smoke.vars)
 #   parent_np_x/_y     MPI tiles of the parent and parent_up runs (must divide 168 and 336)
 #   child_np_x/_y      MPI tiles of the child run (must divide 70 and 140)
 #   cdr_output_period  averaging period (s) of the child's and parent_up's CDR output, and

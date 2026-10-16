@@ -32,9 +32,9 @@ NAME = "ccs-mac-parent"
 # 10 simulated days. The window is also the one the workplan runs; to benchmark a different
 # length edit both ``run`` dates here and rerun this script (forge downloads one GLORYS
 # file per day, padded by a day each side).
-START = datetime(2010, 1, 1)  # noqa: DTZ001 (blueprint times are naive)
-END = datetime(2010, 1, 11)  # noqa: DTZ001
-REFERENCE_DATE = datetime(2000, 1, 1)  # noqa: DTZ001
+START = datetime(2010, 1, 1)  # blueprint times are naive
+END = datetime(2010, 1, 11)
+REFERENCE_DATE = datetime(2000, 1, 1)
 
 # Ben's California Current parent (ccs-12km-esper-woa-5yr-nest4km), the same kwargs as
 # ../make_forge_blueprints.py.

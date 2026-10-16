@@ -53,11 +53,11 @@ ERA5 = f"{DATA}/ERA5_NA_2012.nc"
 UNIFIED = f"{DATA}/coarsened_UNIFIED_bgc_dataset_v2_1.nc"
 
 # ---- windows -----------------------------------------------------------------------
-MODEL_REFERENCE_DATE = datetime(2000, 1, 1)  # noqa: DTZ001 (blueprint times are naive)
-PARENT_START = datetime(2012, 1, 1, 12)  # noqa: DTZ001  # the first GLORYS record of the test data
+MODEL_REFERENCE_DATE = datetime(2000, 1, 1)  # blueprint times are naive
+PARENT_START = datetime(2012, 1, 1, 12)  # the first GLORYS record of the test data
 CHILD_START = PARENT_START + timedelta(hours=18)  # a parent restart time
 CHILD_END = CHILD_START + timedelta(hours=24)
-PARENT_END = CHILD_END + timedelta(hours=1)  # the child needs boundary data to its end
+PARENT_END = CHILD_END + timedelta(hours=1)  # margin; CCS uses parent_end == child_end
 
 RESTART_PERIOD = 6 * 3600.0  # s; CHILD_START falls exactly on a restart
 EXTRACT_PERIOD = 3600.0  # s; the parent's boundary extraction for the child

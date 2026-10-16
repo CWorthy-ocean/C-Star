@@ -200,18 +200,17 @@ class DirectoryManager:
         """
         home, legacy = cls._source_data_paths()
         if home.is_symlink() and not home.exists():
+            target = os.readlink(home)
             # 0.16.0 and 0.16.1 linked with a lexical relpath that dangles when
             # <root>/cstar or the legacy directory is behind a symlink.
-            if legacy.is_dir() and os.readlink(home) == os.path.relpath(
-                legacy, home.parent
-            ):
+            if legacy.is_dir() and target == os.path.relpath(legacy, home.parent):
                 log.info(
                     "Replacing dangling source-data link %s from an older release", home
                 )
                 home.unlink()
             else:
                 msg = (
-                    f"The source-data cache {home} links to {home.readlink()}, which "
+                    f"The source-data cache {home} links to {target}, which "
                     "does not exist. Restore the target or remove the link."
                 )
                 raise CstarError(msg)

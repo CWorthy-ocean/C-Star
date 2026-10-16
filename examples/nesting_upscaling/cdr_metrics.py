@@ -563,7 +563,10 @@ def process_step(
         png_path=png_path,
         summary=summarize(roms_output.ds, ds_cdr)
         | info
-        | {"dic_source_net_tco2eq": _dic_net_tco2eq(report)},
+        | {
+            "dic_source_net_tco2eq": _dic_net_tco2eq(report),
+            "clipped": bool(violated and args.clip_negative_sources),
+        },
     )
 
 
@@ -708,8 +711,9 @@ def print_summary(results: list[StepResult]) -> None:
         s = r.summary
         print(f"\n[{r.step}] {r.role}")
         print(f"  last record            : {_fmt_time(s['last_time'])}")
+        clipped = " (clipped)" if s.get("clipped") else ""
         print(
-            f"  ALK source, summed     : {s['alk_injected_meq']:.4g} {s['alk_units']}"
+            f"  ALK source, summed     : {s['alk_injected_meq']:.4g} {s['alk_units']}{clipped}"
         )
         print(f"  efficiency (CO2 flux)  : {s['cdr_efficiency_from_flux']:.5f}")
         print(

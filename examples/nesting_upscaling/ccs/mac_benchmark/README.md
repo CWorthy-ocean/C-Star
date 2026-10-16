@@ -8,13 +8,13 @@ The table at the end extrapolates that to 6 months and a year.
 
 It is a **cost benchmark**, not the CCS science case. It has no nesting and no CDR
 (`cdr.mode: none`, no `grid_kwargs_child`), and its forcing is whatever a laptop user can
-get without staging files by hand, so it differs from the tanagra CCS example in `../`:
+get without staging files by hand, so it differs from the CCS example in `../`:
 
-| | `../` (tanagra) | this benchmark |
+| | `../` (CCS example) | this benchmark |
 |---|---|---|
 | Ocean state | GLORYS, GLODAP/WOA BGC, UNIFIED BGC | GLORYS regional (downloaded by forge), UNIFIED BGC |
 | Surface | ERA5 + UNIFIED BGC + MBL_co2 + WOA restoring | ERA5 (streamed) + UNIFIED BGC |
-| Tides, rivers | TPXO, DAI + RIVR2O | none |
+| Tides, rivers | TPXO, GloFAS (with RIVR2O) | none |
 | Topography | SRTM15 | ETOPO5 (built into roms-tools; SRTM15 is a 6 GB download) |
 | Ranks | 4 x 4 | 2 x 2 |
 
@@ -93,7 +93,7 @@ run used ~9 of the 10 cores: expect it to be slower on fewer cores.
 - The real CCS case also has tides, rivers and the 4 km child (70 x 140 x 20, `dt` 240 s).
   By cells x steps the child costs ~0.65 of the parent per simulated day (0.17 x 3.75), so
   the nested pair is ~1.65x the parent alone, and `parent_up` is a second parent run on top.
-  Those are estimates, not measurements; tanagra's 4 x 4 ranks scale differently.
+  Those are estimates, not measurements; the CCS example's 4 x 4 ranks scale differently.
 
 ## Known issues
 

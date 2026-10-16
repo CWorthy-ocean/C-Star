@@ -119,6 +119,11 @@ def write_workplan(path: Path) -> Path:
     blueprints, and with them the ROMS the next steps build, are for that ref. The copy
     names its forge blueprints by absolute path because it does not sit next to them.
 
+    This replaces the example's own pin (ucla-roms main after #390), so with
+    ``CSTAR_IT_ROMS_REF`` unset a run tests ``PINNED_ROMS_REF`` (0.10.1), where
+    ``parent_up`` injects about 1 % less flux than the upscaled file holds. The
+    assertions check that the chain runs cleanly, not conservation, so they hold on both.
+
     Returns
     -------
     Path

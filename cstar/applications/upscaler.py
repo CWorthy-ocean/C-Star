@@ -21,8 +21,10 @@ APP_NAME: t.Final[str] = "upscaler"
 """The unique identifier for the upscaler application type."""
 _APP_NAME_LONG: t.Final[str] = "Nesting Data Processor"
 """The long-form application name."""
+_USCL_GLOB: t.Final[str] = "*_uscl.??????????????.nc"
+"""Matches the joined `*_uscl.<YYYYMMDDHHMMSS>.nc` files that ROMS writes."""
 _USCL_TIMESTAMP: t.Final[re.Pattern[str]] = re.compile(r"_uscl\.(\d{14})\.nc$")
-"""Matches the `YYYYMMDDHHMMSS` stamp in a `*_uscl.<YYYYMMDDHHMMSS>.nc` file name."""
+"""Matches the `YYYYMMDDHHMMSS` stamp in a file name matched by `_USCL_GLOB`."""
 
 log = get_logger(__name__)
 
@@ -70,7 +72,7 @@ class UpscalerRunner(BlueprintRunner[UpscalerBlueprint]):
             msg = f"Specified path of upscale files doesn't exist or isn't a directory: {uscl_dir}"
             raise FileNotFoundError(msg)
 
-        files: list[Path | str] = list(uscl_dir.glob("*_uscl.??????????????.nc"))
+        files: list[Path | str] = list(uscl_dir.glob(_USCL_GLOB))
         if len(files) == 0:
             msg = f"No uscl files found in {uscl_dir}"
             raise FileNotFoundError(msg)
@@ -107,8 +109,8 @@ def _uscl_sort_key(file: Path | str) -> str:
     """Order `_uscl` files chronologically by the timestamp in their file name.
 
     Returns the 14-digit timestamp, or an empty string for a name without one.
-    Python's sort is stable, so files without a timestamp keep the relative order
-    they were given in.
+    Files without a timestamp therefore sort before every timestamped file, and
+    since Python's sort is stable they keep the relative order they were given in.
     """
     match = _USCL_TIMESTAMP.search(Path(file).name)
     return match.group(1) if match else ""
@@ -124,7 +126,7 @@ class CDRUpscaler:
       `cu = CDRUpscaler(["roms_uscl.19920211170000.nc","roms_uscl.19920211180000.nc"])`
     This will open an xarray multi-file dataset with these files, concatenated in
     chronological order of the timestamps in their names regardless of the order given
-    (files without a timestamp keep the order given).
+    (files without a timestamp come first, in the order given).
 
     2. A CDR forcing dataset based on the properties of these files can be initialized with
     `cu.create_cdr_dataset()`
