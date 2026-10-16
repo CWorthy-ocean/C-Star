@@ -1,4 +1,5 @@
 import functools
+import json
 import os
 import sys
 import typing as t
@@ -51,6 +52,9 @@ from cstar.system.migration import (
     OnMigratedCallback,
     OnPlannedCallback,
 )
+
+if t.TYPE_CHECKING:
+    from pydantic import BaseModel
 
 app = typer.Typer()
 console = Console()
@@ -757,3 +761,33 @@ def set_ctxmap(context: typer.Context, key: str, value: object) -> None:
         console.print(f"Value in context map using key {key!r} will be overwritten")
 
     context_map[key] = value
+
+
+def write_model_schema(model: "type[BaseModel]", path: Path) -> Path:
+    """Write the JSON schema of a model to a file, creating its directory.
+
+    Parameters
+    ----------
+    model : type[BaseModel]
+        The model to generate the schema of.
+    path : Path
+        The file to write.
+
+    Returns
+    -------
+    Path
+        The file written.
+
+    Raises
+    ------
+    typer.Exit
+        Raised when nothing was written.
+    """
+    content = json.dumps(model.model_json_schema(), indent=4)
+    path.parent.mkdir(parents=True, exist_ok=True)
+
+    if not path.write_text(f"{content}\n"):
+        print("Empty schema write occurred")
+        raise typer.Exit(1)
+
+    return path

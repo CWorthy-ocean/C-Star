@@ -121,7 +121,11 @@ A ``model.yaml`` has this shape:
    fails to load. Values that depend on the domain or forcing (open-boundary
    switches, the MARBL and tides switches, the processor grid) are set by the
    resolver and are left out of the spec; only genuinely model-level
-   defaults belong here.
+   defaults belong here. Keys are Forge's lowercase setting names (``llm``,
+   ``np_xi``, ``wrt_z``), not the ROMS namelist spelling (``LLm``, ``NP_XI``,
+   ``wrt_Z``, or a renamed key such as ``akv_bak`` for
+   ``vertical_mixing.akv``): a key that matches a setting only that way is
+   rejected, naming the setting it meant, instead of being ignored.
 
 Settings that a newer ROMS knows and an older one does not are declared only
 by the specs for that ROMS version; the template renders them off when a
@@ -130,13 +134,15 @@ spec omits them, so older specs are unaffected by additions.
 The bundled model specs
 ~~~~~~~~~~~~~~~~~~~~~~~
 
-``roms-marbl-0.10-default`` (ucla-roms 0.10.1) is the wizard's default. Older
-``roms-marbl-0.N-default`` entries pin earlier releases (``roms-marbl-0.9-default``
-stays for ucla-roms 0.9.1, which predates the ``cdr_lite`` mode's minimum), ``pio-dev`` tracks
+``roms-marbl-0.11-default`` (ucla-roms 0.11.0) is the wizard's default. Older
+``roms-marbl-0.N-default`` entries pin earlier releases (``roms-marbl-0.10-default``
+stays for ucla-roms 0.10.1, which predates the constant-iron option;
+``roms-marbl-0.9-default`` stays for ucla-roms 0.9.1, which predates the
+``cdr_lite`` mode's minimum), ``pio-dev`` tracks
 ucla-roms ``main`` with PIO enabled, and ``cson_roms-marbl_v0.1`` is the
 configuration the toy domain and the example blueprint use.
 
-.. literalinclude:: ../../cstar/catalog/bundled/ModelSpec/roms-marbl-0.10-default/model.yaml
+.. literalinclude:: ../../cstar/catalog/bundled/ModelSpec/roms-marbl-0.11-default/model.yaml
    :language: yaml
    :lines: 1-36
 

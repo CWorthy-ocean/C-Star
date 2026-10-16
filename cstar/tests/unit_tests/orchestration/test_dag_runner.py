@@ -4,7 +4,7 @@ import shutil
 import textwrap
 import typing as t
 from collections.abc import AsyncGenerator
-from datetime import datetime
+from datetime import UTC, datetime
 from pathlib import Path
 from unittest import mock
 
@@ -46,15 +46,25 @@ from cstar.orchestration.dag_runner import (
     original_workplan_backup,
     prepare_workplan,
     prune_unpreparable_steps,
+    refresh_run_manifest,
     run_dag,
 )
 from cstar.orchestration.launch.local import LocalHandle, LocalLauncher
 from cstar.orchestration.launch.slurm import SlurmLauncher
+from cstar.orchestration.manifest import (
+    RUN_MANIFEST_NAME,
+    AttemptStatus,
+    StepRecord,
+    describe_steps,
+    read_run_manifest,
+    write_step_record,
+)
 from cstar.orchestration.models import (
     KEY_CLOBBER,
     KEY_PRE_RUN,
     KEY_RESUME,
     Application,
+    BlueprintIdentity,
     BlueprintState,
     Step,
     Workplan,
@@ -580,16 +590,12 @@ async def test_apply_resume_overrides_marks_resumable_failed_steps(
 
     with (
         mock.patch(
-            "cstar.orchestration.dag_runner.load_run_state",
-            mock.AsyncMock(return_value=status),
-        ),
-        mock.patch(
             "cstar.orchestration.dag_runner.get_application",
             side_effect=fake_get_application,
         ),
         caplog.at_level("WARNING"),
     ):
-        resumed = await apply_resume_overrides(wp, "some-run-id", mock.Mock())
+        resumed = await apply_resume_overrides(wp, status)
 
     by_name = {step.name: step for step in wp.steps}
 
@@ -616,14 +622,8 @@ async def test_apply_resume_overrides_no_failed_steps_logs_info(
 
     status = DagStatus({step_done.name: Status.Done})
 
-    with (
-        mock.patch(
-            "cstar.orchestration.dag_runner.load_run_state",
-            mock.AsyncMock(return_value=status),
-        ),
-        caplog.at_level("INFO"),
-    ):
-        resumed = await apply_resume_overrides(wp, "some-run-id", mock.Mock())
+    with caplog.at_level("INFO"):
+        resumed = await apply_resume_overrides(wp, status)
 
     assert resumed == []
     assert step_done.workflow_overrides == {}
@@ -642,7 +642,7 @@ async def test_prepare_workplan_persists_clobber_overrides(
     wp_path = wp_templates_dir / "workplan.yaml"
     output_dir = tmp_path / "output"
 
-    _, prepared_path, _ = await prepare_workplan(
+    _, prepared_path, _, _ = await prepare_workplan(
         wp_path, output_dir, clobber_steps=["Prepare"]
     )
 
@@ -665,7 +665,7 @@ async def test_prepare_workplan_persists_original_backup(
     wp_path = wp_templates_dir / "workplan.yaml"
     output_dir = tmp_path / "output"
 
-    _, trx_path, _ = await prepare_workplan(
+    _, trx_path, _, _ = await prepare_workplan(
         wp_path, output_dir, clobber_steps=["Prepare"]
     )
 
@@ -692,7 +692,7 @@ async def test_prepare_workplan_rotates_the_files_of_prior_attempts(
     output_dir = tmp_path / "output"
     first_vars = {"var1": "a", "var2": "b"}
 
-    _, prepared_path, _ = await prepare_workplan(wp_path, output_dir, first_vars)
+    _, prepared_path, _, _ = await prepare_workplan(wp_path, output_dir, first_vars)
     persisted = (
         original_workplan_backup(wp_path, output_dir),
         prepared_path,
@@ -797,7 +797,7 @@ async def test_prepare_workplan_materializes_inline_blueprint(
     assert serialize(wp_path, wp)
     output_dir = tmp_path / "output"
 
-    prepared, prepared_path, _ = await prepare_workplan(wp_path, output_dir)
+    prepared, prepared_path, _, _ = await prepare_workplan(wp_path, output_dir)
 
     # `build_dag` reports orphans from the steps' working directories
     assert all(isinstance(s, LiveStep) for s in prepared.steps)
@@ -851,7 +851,7 @@ async def test_prepare_workplan_records_the_run_root(
     assert serialize(wp_path, wp)
     output_dir = StateDirectoryManager.data_dir(mock_run_id)
 
-    prepared, prepared_path, _ = await prepare_workplan(wp_path, output_dir)
+    prepared, prepared_path, _, _ = await prepare_workplan(wp_path, output_dir)
 
     assert isinstance(prepared, LiveWorkplan)
     assert prepared.root == output_dir.resolve()
@@ -898,6 +898,170 @@ async def test_run_dag_records_the_root_of_the_transformed_workplan(
     assert persisted is not None
     assert persisted.output_path == run_root
     assert persisted.trx_workplan_path == trx_path
+
+
+async def _schedule(
+    tmp_path: Path, run_id: str, blueprint: Path, *, with_facts: bool = True
+) -> tuple[Path, WorkplanRun]:
+    """Prepare and schedule a one-step workplan; return its path and the run."""
+    wp = Workplan(
+        name="manifested",
+        description="A workplan whose run gets a manifest.",
+        steps=[
+            Step(
+                name="hello", application="hello_world", blueprint=blueprint.as_posix()
+            )
+        ],
+    )
+    wp_path = tmp_path / "manifested.yaml"
+    assert serialize(wp_path, wp)
+
+    with (
+        mock.patch("cstar.orchestration.dag_runner.check_environment"),
+        mock.patch("cstar.orchestration.dag_runner.get_orchestrator"),
+        mock.patch("cstar.orchestration.dag_runner.process_plan", mock.AsyncMock()),
+    ):
+        planner, trx_path, facts = await build_dag(wp_path, run_id)
+        wp_run = await run_dag(
+            wp_path,
+            trx_path,
+            run_id,
+            planner,
+            step_facts=facts if with_facts else None,
+        )
+    return wp_path, wp_run
+
+
+@pytest.mark.asyncio
+async def test_run_dag_writes_the_run_manifest(
+    tmp_path: Path, mock_run_id: str, hello_world_bp_path: Path
+) -> None:
+    """Verify scheduling a workplan writes the manifest to the run root: one
+    attempt, an entry per step in its task directory, with the step's definition
+    hash, and that scheduling again adds an attempt without minting a new id.
+    """
+    wp_path, wp_run = await _schedule(tmp_path, mock_run_id, hello_world_bp_path)
+
+    manifest = read_run_manifest(wp_run.output_path)
+    assert manifest is not None
+    assert (wp_run.output_path / RUN_MANIFEST_NAME).is_file()
+    assert manifest.kind == "workplan"
+    assert manifest.run_id == mock_run_id
+    assert manifest.name == "manifested"
+    assert manifest.workplan is not None
+    assert manifest.workplan.path == str(wp_path)
+    assert len(manifest.attempts) == 1
+
+    facts = describe_steps(deserialize(wp_path, Workplan), wp_path.parent)
+    entry = manifest.step("hello")
+    assert entry is not None
+    assert entry.application == "hello_world"
+    assert entry.working_dir == "tasks/hello"
+    assert entry.definition_hash == facts["hello"].definition_hash
+
+    # a re-entry brings no facts: the recorded entries stay
+    await _schedule(tmp_path, mock_run_id, hello_world_bp_path, with_facts=False)
+    again = read_run_manifest(wp_run.output_path)
+    assert again is not None
+    assert again.id == manifest.id
+    assert len(again.attempts) == 2
+    entry = again.step("hello")
+    assert entry is not None
+    assert entry.definition_hash == facts["hello"].definition_hash
+
+
+@pytest.mark.asyncio
+async def test_run_dag_survives_a_manifest_that_cannot_be_written(
+    tmp_path: Path,
+    mock_run_id: str,
+    hello_world_bp_path: Path,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Verify scheduling carries on, with a warning, when the manifest write fails."""
+    with (
+        mock.patch(
+            "cstar.orchestration.dag_runner.ensure_run_manifest",
+            side_effect=OSError("disk full"),
+        ),
+        caplog.at_level("WARNING"),
+    ):
+        _, wp_run = await _schedule(tmp_path, mock_run_id, hello_world_bp_path)
+
+    assert not (wp_run.output_path / RUN_MANIFEST_NAME).exists()
+    assert "disk full" in caplog.text
+    assert await TrackingRepository().get_workplan_run(mock_run_id) is not None
+
+
+@pytest.mark.asyncio
+async def test_refresh_run_manifest_folds_records_and_closes_the_attempt(
+    tmp_path: Path, mock_run_id: str, hello_world_bp_path: Path
+) -> None:
+    """Verify a refresh copies the observed statuses and a step's record into the
+    manifest, and closes the attempt once every step is terminal.
+    """
+    _, wp_run = await _schedule(tmp_path, mock_run_id, hello_world_bp_path)
+    root = wp_run.output_path
+    manifest = read_run_manifest(root)
+    assert manifest is not None
+    assert manifest.observed_at is None
+
+    running = refresh_run_manifest(
+        root, mock_run_id, DagStatus({"hello": Status.Running})
+    )
+    assert running is not None
+    entry = running.step("hello")
+    assert entry is not None
+    assert entry.status == Status.Running.name
+    assert entry.record is None
+    assert running.attempts[-1].finished_at is None
+    assert running.observed_at is not None
+
+    (root / "tasks" / "hello").mkdir(parents=True, exist_ok=True)
+    write_step_record(
+        root / "tasks" / "hello",
+        StepRecord(
+            step="hello",
+            application="hello_world",
+            blueprint=BlueprintIdentity(
+                kind="Blueprint", application="hello_world", name="bp"
+            ),
+            outcome="completed",
+            finished_at=datetime(2026, 1, 1, tzinfo=UTC),
+        ),
+    )
+    done = refresh_run_manifest(root, mock_run_id, DagStatus({"hello": Status.Done}))
+
+    assert done is not None
+    entry = done.step("hello")
+    assert entry is not None
+    assert entry.status == Status.Done.name
+    assert entry.record is not None
+    assert done.attempts[-1].status == AttemptStatus.done
+    assert done.attempts[-1].finished_at is not None
+    assert read_run_manifest(root) == done
+
+
+def test_refresh_run_manifest_without_a_manifest(
+    tmp_path: Path, mock_run_id: str
+) -> None:
+    """Verify a run that predates the manifest is left alone."""
+    result = refresh_run_manifest(tmp_path, mock_run_id, DagStatus({}))
+
+    assert result is None
+    assert not (tmp_path / RUN_MANIFEST_NAME).exists()
+
+
+def test_refresh_run_manifest_survives_a_corrupt_manifest(
+    tmp_path: Path, mock_run_id: str, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Verify an observer command warns about, rather than crashes on, a corrupt manifest."""
+    (tmp_path / RUN_MANIFEST_NAME).write_text("{not: [valid")
+
+    with caplog.at_level("WARNING"):
+        result = refresh_run_manifest(tmp_path, mock_run_id, DagStatus({}))
+
+    assert result is None
+    assert RUN_MANIFEST_NAME in caplog.text
 
 
 @pytest.mark.asyncio
@@ -1185,7 +1349,7 @@ async def test_prepare_workplan_persists_pre_run_overrides(
     """
     wp_path = wp_templates_dir / "workplan.yaml"
 
-    wp, prepared_path, _ = await prepare_workplan(
+    wp, prepared_path, _, _ = await prepare_workplan(
         wp_path, tmp_path / "output", pre_run=True
     )
     persisted = deserialize(prepared_path, LiveWorkplan)
@@ -1201,7 +1365,7 @@ async def test_prepare_workplan_without_pre_run_leaves_steps_unmarked(
     wp_templates_dir: Path,
 ) -> None:
     """Verify a plain run does not mark any step for pre-run."""
-    wp, prepared_path, _ = await prepare_workplan(
+    wp, prepared_path, _, _ = await prepare_workplan(
         wp_templates_dir / "workplan.yaml", tmp_path / "output"
     )
 
@@ -1285,7 +1449,7 @@ async def test_prepare_workplan_pre_run_does_not_report_injected_overrides(
     wp_path = tmp_path / "hello.yaml"
     serialize(wp_path, _make_workplan([step]))
 
-    wp, _, _ = await prepare_workplan(wp_path, tmp_path / "output", pre_run=True)
+    wp, _, _, _ = await prepare_workplan(wp_path, tmp_path / "output", pre_run=True)
 
     assert wp.steps[0].pre_run
     assert all(isinstance(s, LiveStep) for s in wp.steps)
@@ -1715,7 +1879,7 @@ async def test_prepare_workplan_anchors_relative_blueprint_path(
     elsewhere.mkdir()
     monkeypatch.chdir(elsewhere)
 
-    wp, prepared_path, _ = await prepare_workplan(wp_path, tmp_path / "output")
+    wp, prepared_path, _, _ = await prepare_workplan(wp_path, tmp_path / "output")
 
     expected = (plans / "hw.yaml").resolve()
     assert Path(wp.steps[0].blueprint_path) == expected
@@ -1726,3 +1890,4 @@ async def test_prepare_workplan_anchors_relative_blueprint_path(
 
     command = StepToRunRequestAdapter().adapt(step).command
     assert command[:4] == ["cstar", "blueprint", "run", str(expected)]
+    assert command[4:6] == ["--step", step.name]

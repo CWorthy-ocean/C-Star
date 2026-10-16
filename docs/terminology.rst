@@ -142,6 +142,30 @@ Definitions
       Two different workplans with the same ``name`` share a run ID, so
       running the second one without ``--run-id`` is refused.
 
+    Run manifest
+      ``cstar-run.yaml`` in a run's directory: the run's identity, one
+      **attempt** for each time it was scheduled, one entry per step with its
+      status and **step record**, and what the run depends on outside
+      itself. The scheduling command writes it; ``cstar run status`` and
+      ``cstar run show`` refresh it. See :doc:`workplans`.
+
+    Step record
+      ``cstar-step.yaml`` in a step's working directory, written by the step
+      process when it shuts down: its outcome, start and finish times, system,
+      package versions, **products** and errors. The run manifest folds each
+      step's record in. See :doc:`workplans`.
+
+    Attempt
+      One scheduling of a workplan into a run: ``cstar workplan run``, or a
+      re-entry with ``--run-id``, ``--resume`` or ``--clobber``. The run
+      manifest lists them oldest first; an attempt's ``finished_at`` is set
+      once every step is terminal. See :doc:`workplans`.
+
+    Product
+      A file a step reports in its step record, with a kind, size and
+      metadata. The applications record their products starting with the
+      next release; until then the list is empty. See :doc:`workplans`.
+
     Pre-run
       Performing every stage before the model launch -- staging inputs,
       cloning and compiling the codebases, partitioning inputs, and

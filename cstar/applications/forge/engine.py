@@ -117,6 +117,9 @@ PROCESSING_FILLED_SECTIONS = (
 # forcing's tracer axis (``cdr_tracer_counts``), so under ``bgc_mode: cdr_lite``
 # the resolver's stored zeros must not revert them. (``param.nt_passive`` is
 # user-owned: generation checks it against the file instead of overwriting it.)
+# The "upscaled" CDR mode generates no CDR forcing, so its counts are user-stated
+# instead; they reach the build through ``resolved_settings`` (the base this
+# overlay applies to), which the exclusion leaves alone.
 #
 # ``cdr_output.do_cdr_output`` is deliberately NOT listed: it is a user setting
 # and must survive the overlay. ``ForgeExecutor.configure_build`` asserts it True

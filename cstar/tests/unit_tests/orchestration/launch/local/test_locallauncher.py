@@ -19,7 +19,13 @@ from cstar.orchestration.launch.local import (
 )
 from cstar.orchestration.launch.slurm import SlurmHandle, SlurmLauncher
 from cstar.orchestration.models import KEY_CLOBBER, KEY_PRE_RUN, KEY_RESUME, Step
-from cstar.orchestration.orchestration import LiveStep, RunRequest, Status, Workplan
+from cstar.orchestration.orchestration import (
+    LiveStep,
+    RunRequest,
+    RunRequestCommandFormatter,
+    Status,
+    Workplan,
+)
 from cstar.orchestration.serialization import deserialize
 from cstar.orchestration.state import StateRepository
 
@@ -243,16 +249,17 @@ def test_timeout_enricher_uses_resolved_executable(
     assert request.command[-2:] == ["echo", "hi"]
 
 
-def test_timeout_enricher_quotes_executable_path() -> None:
-    """Verify a path with a space survives the proxy script's space-joined command."""
+def test_timeout_enricher_executable_path_survives_rendering() -> None:
+    """Verify a path with a space survives the quoting of the rendered command."""
     enricher = TimeConstrainedRunRequestEnricher(LocalComputeSpec())
     path = "/Users/First Last/envs/cstar-env/bin/timeout"
 
     with mock.patch(WHICH, side_effect={"timeout": path}.get):
         request = enricher.enrich(RunRequest(command=["echo", "hi"]))
 
-    assert request.command[0] == f"'{path}'"
-    assert shlex.split(" ".join(request.command))[0] == path
+    assert request.command[0] == path
+    rendered = RunRequestCommandFormatter().format(request)
+    assert shlex.split(rendered)[0] == path
 
 
 def test_timeout_enricher_raises_without_executable() -> None:
