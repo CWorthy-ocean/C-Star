@@ -22,7 +22,7 @@ from datetime import datetime
 from pathlib import Path
 from urllib.parse import urlsplit
 
-from pydantic import Field
+from pydantic import AfterValidator, Field
 
 from cstar.applications.core import ArtifactKind, get_application
 from cstar.base.exceptions import CstarError, CstarExpectationFailed
@@ -68,6 +68,20 @@ MANIFEST_LOCK_NAME: t.Final[str] = "manifest.lock"
 """The name of the lock file serializing run-manifest writers, in the run's state directory."""
 
 _M = t.TypeVar("_M", bound=ConfiguredBaseModel)
+
+
+def _whole_second(moment: datetime) -> datetime:
+    """Drop the microseconds of a moment: the documents record whole seconds."""
+    return moment.replace(microsecond=0)
+
+
+def _now() -> datetime:
+    """The current UTC time, to the second."""
+    return _whole_second(utc_now())
+
+
+Moment = t.Annotated[datetime, AfterValidator(_whole_second)]
+"""A timestamp recorded in the documents, kept to whole seconds."""
 
 
 class AttemptStatus(enum.StrEnum):
@@ -138,10 +152,10 @@ class StepRecord(ConfiguredBaseModel):
     outcome: str
     """The runner's execution status as its lowercase name, e.g. `completed`."""
 
-    start_at: datetime | None = Field(default=None)
+    start_at: Moment | None = Field(default=None)
     """The start of the simulated period, when the step has one."""
 
-    finished_at: datetime
+    finished_at: Moment
     """When the step process recorded its outcome."""
 
     system: str = Field(default="")
@@ -173,7 +187,7 @@ class WorkplanIdentity(ConfiguredBaseModel):
 class Attempt(ConfiguredBaseModel):
     """One scheduling of a workplan into a run; a resumed run has several."""
 
-    start_at: datetime
+    start_at: Moment
     """When the attempt was scheduled."""
 
     system: str = Field(default="")
@@ -197,7 +211,7 @@ class Attempt(ConfiguredBaseModel):
     status: AttemptStatus = Field(default=AttemptStatus.scheduled)
     """Where the attempt stands."""
 
-    finished_at: datetime | None = Field(default=None)
+    finished_at: Moment | None = Field(default=None)
     """Set once every step reached a terminal status: the completion marker."""
 
 
@@ -325,7 +339,7 @@ class RunManifest(ConfiguredBaseModel):
     system: str = Field(default="")
     """The C-Star system the run was first scheduled on."""
 
-    created_at: datetime = Field(default_factory=utc_now)
+    created_at: Moment = Field(default_factory=_now)
     """When the manifest was first written."""
 
     workplan: WorkplanIdentity | None = Field(default=None)
@@ -340,7 +354,7 @@ class RunManifest(ConfiguredBaseModel):
     external: ExternalDependencies = Field(default_factory=ExternalDependencies)
     """What the run depends on outside itself."""
 
-    observed_at: datetime | None = Field(default=None)
+    observed_at: Moment | None = Field(default=None)
     """When the statuses and records were last folded in."""
 
     def step(self, name: str) -> StepEntry | None:
@@ -805,7 +819,7 @@ def new_attempt(workplan: "Workplan", *, workplan_hash: str) -> Attempt:
     Attempt
     """
     return Attempt(
-        start_at=utc_now(),
+        start_at=_now(),
         system=system_name(),
         versions=package_versions(),
         workplan_content_hash=workplan_hash,
@@ -984,7 +998,7 @@ def fold_step_records(
             recorded = [e.record.finished_at for e in manifest.steps if e.record]
             attempt.finished_at = max([*recorded, attempt.start_at])
 
-    manifest.observed_at = utc_now()
+    manifest.observed_at = _now()
     return before != manifest.model_dump(mode="json", exclude={"observed_at"})
 
 
@@ -1011,6 +1025,7 @@ def finalize_standalone_run(
         The manifest as written.
     """
     root = blueprint.effective_working_dir
+    started_at = _whole_second(started_at)
     attempt = Attempt(
         start_at=started_at,
         system=system_name(),
