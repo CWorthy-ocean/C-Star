@@ -3,6 +3,7 @@ import logging
 import os
 import signal
 import socket
+import subprocess
 import sys
 import uuid
 from collections.abc import Awaitable, Callable, Generator, Iterable, Sequence
@@ -47,6 +48,7 @@ from cstar.orchestration.orchestration import LiveStep, LiveWorkplan
 from cstar.orchestration.serialization import deserialize, serialize
 from cstar.orchestration.tracking import TrackingRepository, WorkplanRun
 from cstar.pio.external_codebase import PIOExternalCodeBase
+from cstar.roms.namelist import release_ref_for_remote
 from cstar.tests.unit_tests.fake_abc_subclasses import (
     FakeExternalCodeBase,
     FakeInputDataset,
@@ -111,6 +113,64 @@ def _block_network() -> Generator[None]:
         mock.patch.dict(os.environ, {"GIT_ALLOW_PROTOCOL": "file"}),
     ):
         yield
+
+
+@pytest.fixture(autouse=True)
+def _clear_release_ref_cache() -> Generator[None]:
+    """Forget cached ucla-roms commit-hash resolutions around each unit test.
+
+    `release_ref_for_remote` caches per process, so a warning or a failed
+    resolution from one test would otherwise decide what the next one sees.
+    """
+    release_ref_for_remote.cache_clear()
+    yield
+    release_ref_for_remote.cache_clear()
+
+
+@pytest.fixture
+def tagged_ucla_roms_clone(tmp_path: Path) -> dict[str, str | Path]:
+    """A tiny local git repo mimicking ucla-roms release-tag history.
+
+    History: commit tagged ``0.4.2`` -> commit tagged only ``exp-marker`` (a
+    non-release tag, which release resolution must ignore) -> commit tagged
+    ``0.5.0``. Returns the repo path and the three commit hashes.
+    """
+    repo = tmp_path / "ucla-roms"
+    repo.mkdir()
+
+    def _git(*args: str) -> str:
+        result = subprocess.run(
+            ["git", "-c", "user.email=t@t", "-c", "user.name=t", *args],
+            cwd=repo,
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        return result.stdout.strip()
+
+    _git("init", "-q")
+    (repo / "f").write_text("1")
+    _git("add", "f")
+    _git("commit", "-q", "-m", "release 0.4.2")
+    hash_0_4_2 = _git("rev-parse", "HEAD")
+    _git("tag", "0.4.2")
+
+    (repo / "f").write_text("2")
+    _git("commit", "-aq", "-m", "post-0.4.2 work")
+    hash_after_0_4_2 = _git("rev-parse", "HEAD")
+    _git("tag", "exp-marker")
+
+    (repo / "f").write_text("3")
+    _git("commit", "-aq", "-m", "release 0.5.0")
+    hash_0_5_0 = _git("rev-parse", "HEAD")
+    _git("tag", "0.5.0")
+
+    return {
+        "repo": repo,
+        "hash_0_4_2": hash_0_4_2,
+        "hash_after_0_4_2": hash_after_0_4_2,
+        "hash_0_5_0": hash_0_5_0,
+    }
 
 
 @pytest.fixture(scope="module")

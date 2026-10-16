@@ -993,7 +993,10 @@ def build_forge_blueprint(
     # the CDR settings.
     roms_block = (model.get("code") or {}).get("roms") or {}
     pinned_roms_ref = roms_ref or roms_block.get("commit") or roms_block.get("branch")
-    # str(): YAML can load a numeric-looking pin (e.g. 1.0) as a number.
+    # str(): YAML can load a numeric-looking pin (e.g. 1.0) as a number. A
+    # commit-hash pin keeps the newest tier here (the wizard rebuilds on every
+    # keystroke, so no clone): process_forge_blueprint and configure_build
+    # resolve it to its release (release_ref_for_remote) and re-prune.
     effective_roms_ref = str(pinned_roms_ref) if pinned_roms_ref is not None else None
     # river_frc/cdr_frc are Forcing-owned, not a ModelSpec default: seed the disabled
     # baseline, then let the ForcingSpec's own top-level river_frc/cdr_frc (if any)

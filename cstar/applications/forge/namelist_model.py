@@ -760,9 +760,10 @@ def check_cdr_forcing_mode(
     child's output holds CDR-lite tracers). The file only arrives at run time,
     so that part cannot be checked here. A physics-only build (``"none"``) has
     no tracer to receive the fluxes, so ucla-roms would abort. A ``roms_ref``
-    that is not a release tag (branch, commit hash, ``None``) counts as the
-    latest release, matching :func:`run_time_settings_for_ref` (which has no
-    local clone to resolve a hash against).
+    that is not a release tag (branch, ``None``, an unresolved commit hash)
+    counts as the latest release, matching :func:`run_time_settings_for_ref`.
+    Forge's run path resolves a commit hash to its release tag first
+    (:func:`cstar.roms.namelist.release_ref_for_remote`).
 
     Both the resolver (authoring time) and the executor's ``configure_build``
     (the build-time net) call this so the rule and its messages stay in one
@@ -1843,9 +1844,12 @@ def run_time_settings_for_ref(roms_ref: str | None) -> type[_RunTimeSettingsComm
     roms_ref : str or None
         The ucla-roms git ref (tag, branch, or commit hash) the blueprint's
         code is pinned to, e.g. ``code.roms.commit or code.roms.branch``.
-        ``None`` preserves forge's historical behavior (the legacy schema),
-        so existing callers that don't yet thread a ref through keep working
-        unchanged.
+        A commit hash is not resolved here (there is no local clone): it
+        selects the latest schema, so callers that can reach the repository
+        resolve it to its release tag first with
+        :func:`cstar.roms.namelist.release_ref_for_remote`. ``None`` preserves
+        forge's historical behavior (the legacy schema), so existing callers
+        that don't yet thread a ref through keep working unchanged.
 
     Returns
     -------

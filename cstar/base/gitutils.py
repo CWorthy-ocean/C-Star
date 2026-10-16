@@ -1,5 +1,7 @@
+import os
 import re
 import shlex
+import tempfile
 import warnings
 from pathlib import Path
 
@@ -293,7 +295,7 @@ def _describe_nearest_tag(local_path: str | Path, ref: str) -> tuple[str, int] |
     """
     match_glob = "[0-9]*.[0-9]*.[0-9]*"
     described = _run_cmd(
-        f"git -C {local_path} describe --tags "
+        f"git -C {shlex.quote(str(local_path))} describe --tags "
         f"--match '{match_glob}' --match 'v{match_glob}' {ref}",
         msg_pre=f"Resolving `{ref}` to its nearest release tag in `{local_path}`.",
         msg_err=f"Could not resolve {ref} to a release tag in repository {local_path}.",
@@ -304,6 +306,46 @@ def _describe_nearest_tag(local_path: str | Path, ref: str) -> tuple[str, int] |
     if match is None:
         return None
     return match.group("tag"), int(match.group("ahead") or 0)
+
+
+def _describe_remote_nearest_tag(location: str, ref: str) -> tuple[str, int] | None:
+    """Resolve `ref` to its nearest ancestor release tag in a remote repository.
+
+    Fetches only the commits and tags of `location` into a throwaway treeless
+    bare clone (``git clone --bare --filter=tree:0``) and describes `ref`
+    there with :func:`_describe_nearest_tag`, so callers without a local clone
+    get the answer a full clone would give.
+
+    Parameters
+    ----------
+    location : str
+        The URI or path of the source git repository.
+    ref : str
+        Any commit-ish accepted by ``git describe`` (typically a commit hash)
+        reachable from a branch or tag of `location`.
+
+    Returns
+    -------
+    tuple[str, int] or None
+        The ``(tag, commits_ahead)`` pair, or `None` if the clone fails (no
+        network, unreachable or private remote) or `ref` has no release-tagged
+        ancestor in it.
+    """
+    with tempfile.TemporaryDirectory() as tmp:
+        clone = Path(tmp) / "repo"
+        try:
+            _run_cmd(
+                f"git clone --bare --filter=tree:0 --quiet "
+                f"{shlex.quote(location)} {shlex.quote(str(clone))}",
+                env={**os.environ, "GIT_TERMINAL_PROMPT": "0"},
+                msg_pre=f"Cloning the history of `{location}`.",
+                msg_err=f"Could not clone {location} to resolve {ref}.",
+                raise_on_error=True,
+            )
+        except RuntimeError as ex:
+            log.debug("Could not resolve %r in %s: %s", ref, location, ex)
+            return None
+        return _describe_nearest_tag(clone, ref)
 
 
 def _get_hash_from_checkout_target(repo_url: str, checkout_target: str) -> str:

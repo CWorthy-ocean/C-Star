@@ -45,6 +45,7 @@ from cstar.applications.forge.blueprint import ForgeBlueprint, emitted_provenanc
 from cstar.applications.forge.host import HostPaths
 from cstar.applications.forge.namelist_model import validate_run_time_sections
 from cstar.base.env import ENV_CSTAR_RUNID
+from cstar.roms.namelist import release_ref_for_remote
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -401,7 +402,10 @@ def process_forge_blueprint(
         is recorded.
     validate :
         If True (default), fail fast — validate the config's ``model_settings``
-        against the run-time schema *before* any downloads/generation.
+        against the run-time schema *before* any downloads/generation. A
+        commit-hash ``code.roms`` pin is first resolved to its release tag
+        (:func:`~cstar.roms.namelist.release_ref_for_remote`, a treeless clone
+        of ``code.roms.location``), as the roms_marbl step resolves it.
     executor_factory :
         Maps the ``ForgeBlueprint`` to an executor; defaults to the forge
         ``ForgeExecutor``. Injectable for tests and for the eventual C-Star app
@@ -455,9 +459,10 @@ def process_forge_blueprint(
         warnings.warn(integrity, UserWarning, stacklevel=2)
 
     if validate:
-        problems = validate_run_time_sections(
-            cfg.model_settings, roms_ref=cfg.code.roms.commit or cfg.code.roms.branch
-        )
+        roms_ref = cfg.code.roms.commit or cfg.code.roms.branch
+        if roms_ref:
+            roms_ref = release_ref_for_remote(cfg.code.roms.location, roms_ref)
+        problems = validate_run_time_sections(cfg.model_settings, roms_ref=roms_ref)
         if problems:
             raise ValueError(
                 "forge_blueprint.model_settings has invalid values (fix before "

@@ -2036,6 +2036,48 @@ class TestForgeExecutorBuildAndRun:
         ):
             self._run_configure_build(cfg, host)
 
+    def test_configure_build_resolves_a_hash_pin_to_its_release(
+        self,
+        sample_grid_kwargs,
+        sample_open_boundaries,
+        sample_partitioning,
+        tagged_ucla_roms_clone,
+    ):
+        """A commit-hash pin selects the namelist tier of the release it descends
+        from (the one roms_marbl reads it with), while the emitted blueprint
+        keeps pinning the hash itself.
+        """
+        from cstar.applications.forge.engine import split_model_settings
+
+        info = tagged_ucla_roms_clone
+        cfg, host = self._cdr_cfg_and_builder(
+            sample_grid_kwargs, sample_open_boundaries, sample_partitioning
+        )
+        cfg.code.roms.commit = info["hash_0_4_2"]
+        cfg.code.roms.location = str(info["repo"])
+
+        builder = ForgeExecutor.from_forge_blueprint(cfg, host=host)
+        run_ov, compile_ov = split_model_settings(cfg)
+        with (
+            patch(
+                "cstar.applications.forge.executor.render_roms_settings"
+            ) as mock_render,
+            patch(
+                "cstar.applications.forge.executor.write_roms_namelist"
+            ) as mock_write,
+        ):
+            mock_render.return_value = {
+                "location": str(builder.compile_time_code_dir),
+                "filter": {"files": ["test.opt"]},
+                "branch": "main",
+            }
+            builder.configure_build(
+                compile_time_settings=compile_ov, run_time_settings=run_ov
+            )
+
+        assert mock_write.call_args.kwargs["roms_ref"] == "0.4.2"
+        assert builder.roms_marbl_blueprint.code.roms["commit"] == info["hash_0_4_2"]
+
     def test_configure_build_rejects_upscaled_cdr_lite_without_tracer_counts(
         self, sample_grid_kwargs, sample_open_boundaries, sample_partitioning
     ):

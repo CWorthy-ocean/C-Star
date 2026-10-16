@@ -55,6 +55,7 @@ that this model reads back.)
 
 from __future__ import annotations
 
+import functools
 import re
 import warnings
 from typing import TYPE_CHECKING, Any, ClassVar, Final, Self, cast
@@ -62,7 +63,7 @@ from typing import TYPE_CHECKING, Any, ClassVar, Final, Self, cast
 import f90nml
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
-from cstar.base.gitutils import _describe_nearest_tag
+from cstar.base.gitutils import _describe_nearest_tag, _describe_remote_nearest_tag
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -1218,6 +1219,23 @@ _COMMIT_HASH_RE = re.compile(r"[0-9a-fA-F]{7,40}")
 an unparseable ref is worth resolving to a release tag via the local clone."""
 
 
+def _warn_commit_ahead_of_release(
+    checkout_target: str, tag: str, commits_ahead: int
+) -> None:
+    """Warn that a commit pin may hold namelist changes its release's schema lacks.
+
+    Reported at the caller of the public function that calls this helper.
+    """
+    warnings.warn(
+        f"ucla-roms commit {checkout_target!r} is {commits_ahead} "
+        f"commit(s) after release {tag}; using that release's "
+        f"namelist schema. If the commit contains unreleased "
+        f"breaking namelist changes, C-Star may not match them.",
+        UserWarning,
+        stacklevel=3,
+    )
+
+
 def namelist_schema_for_ref(
     checkout_target: str | None, repo_path: str | Path | None = None
 ) -> type[RomsNamelistBase]:
@@ -1261,14 +1279,7 @@ def namelist_schema_for_ref(
             tag, commits_ahead = described
             version = _parse_semver(tag)
             if version is not None and commits_ahead:
-                warnings.warn(
-                    f"ucla-roms commit {checkout_target!r} is {commits_ahead} "
-                    f"commit(s) after release {tag}; using that release's "
-                    f"namelist schema. If the commit contains unreleased "
-                    f"breaking namelist changes, C-Star may not match them.",
-                    UserWarning,
-                    stacklevel=2,
-                )
+                _warn_commit_ahead_of_release(checkout_target, tag, commits_ahead)
 
     last_cls = NAMELIST_SCHEMA_REGISTRY[-1][2]
     if version is None:
@@ -1288,3 +1299,62 @@ def namelist_schema_for_ref(
     # Unreachable given a well-formed, contiguous registry with an
     # open-ended last entry, but keeps mypy happy about the return type.
     return last_cls
+
+
+@functools.cache
+def release_ref_for_remote(location: str, checkout_target: str) -> str:
+    """Resolve a ucla-roms commit hash to its release tag without a local clone.
+
+    Gives callers that have no clone of ucla-roms (Forge) the answer
+    :func:`namelist_schema_for_ref` gives callers that do (``repo_path=``):
+    the nearest ancestor release tag of a commit hash, found in a throwaway
+    treeless clone of `location`. Passing the result to
+    :func:`namelist_schema_for_ref` then selects the same schema as passing the
+    hash with a local clone.
+
+    The result is cached per ``(location, checkout_target)`` for the lifetime of
+    the process: at most one clone and one warning per pair, and a failed
+    resolution stays cached until the process exits.
+
+    Parameters
+    ----------
+    location : str
+        The URI or path of the ucla-roms repository the pin refers to.
+    checkout_target : str
+        The ucla-roms git ref (tag, branch, or commit hash) C-Star is pinned to.
+
+    Returns
+    -------
+    str
+        The release tag `checkout_target` resolves to if it is a commit hash
+        with a release-tagged ancestor in `location`. Any other `checkout_target`
+        (a release tag, a branch name, ``""``) is returned unchanged without
+        touching `location`, and so is a commit hash that cannot be resolved.
+
+    Warns
+    -----
+    UserWarning
+        If the commit is ahead of the release tag (it could contain unreleased
+        namelist changes), or if a commit hash cannot be resolved (no network,
+        unreachable or private `location`, or a commit on no branch or tag of
+        it) and the latest known namelist schema is used for it.
+    """
+    if not _COMMIT_HASH_RE.fullmatch(checkout_target):
+        return checkout_target
+
+    described = _describe_remote_nearest_tag(location, checkout_target)
+    if described is not None and _parse_semver(described[0]) is not None:
+        tag, commits_ahead = described
+        if commits_ahead:
+            _warn_commit_ahead_of_release(checkout_target, tag, commits_ahead)
+        return tag
+
+    warnings.warn(
+        f"Could not resolve ucla-roms commit {checkout_target!r} in {location} to "
+        f"a release tag; using the latest known namelist schema "
+        f"({NAMELIST_SCHEMA_REGISTRY[-1][2].__name__}). If the roms_marbl step "
+        f"refuses the namelist, pin a release tag (or use a branch pin).",
+        UserWarning,
+        stacklevel=2,
+    )
+    return checkout_target

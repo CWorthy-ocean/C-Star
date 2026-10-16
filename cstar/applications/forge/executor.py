@@ -80,6 +80,7 @@ from cstar.orchestration.serialization import (
     read_blueprint_raw,
     relativize_locations,
 )
+from cstar.roms.namelist import release_ref_for_remote
 
 log = logging.getLogger(__name__)
 
@@ -2379,6 +2380,10 @@ class ForgeExecutor(BaseModel):
             if self.code_spec is not None
             else None
         )
+        if self.code_spec is not None and effective_roms_ref:
+            effective_roms_ref = release_ref_for_remote(
+                self.code_spec.roms.location, effective_roms_ref
+            )
         with warnings.catch_warnings():
             # See the matching resolver guard: an internal version probe
             # shouldn't repeat the non-semver-pin warning surfaced elsewhere.

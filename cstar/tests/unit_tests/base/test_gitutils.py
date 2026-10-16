@@ -10,6 +10,8 @@ import pytest
 from cstar.base.gitutils import (
     _check_local_repo_changed_from_remote,
     _clone_and_checkout,
+    _describe_nearest_tag,
+    _describe_remote_nearest_tag,
     _get_hash_from_checkout_target,
     _get_repo_head_hash,
     _get_repo_remote,
@@ -703,3 +705,49 @@ class TestGetHashFromCheckoutTarget:
                 ) in str(warning.message)
             else:
                 assert len(warning_list) == 0
+
+
+@pytest.mark.parametrize(
+    ("hash_key", "expected"),
+    [
+        ("hash_0_4_2", ("0.4.2", 0)),
+        ("hash_after_0_4_2", ("0.4.2", 1)),
+        ("hash_0_5_0", ("0.5.0", 0)),
+    ],
+)
+def test_describe_remote_nearest_tag(tagged_ucla_roms_clone, hash_key, expected):
+    """A remote is described through a throwaway clone: the nearest release tag
+    and the commits ahead of it, skipping the non-release tag the middle commit
+    carries.
+    """
+    info = tagged_ucla_roms_clone
+    assert _describe_remote_nearest_tag(str(info["repo"]), info[hash_key]) == expected
+
+
+def test_describe_remote_nearest_tag_unknown_ref(tagged_ucla_roms_clone):
+    """A ref the remote does not hold is not described."""
+    info = tagged_ucla_roms_clone
+    assert _describe_remote_nearest_tag(str(info["repo"]), "a" * 40) is None
+
+
+def test_describe_remote_nearest_tag_unreachable_remote_returns_none():
+    """A remote that cannot be cloned (here refused by the unit-test git protocol
+    guard) is not an error: the caller gets `None`.
+    """
+    assert (
+        _describe_remote_nearest_tag(
+            "https://github.com/CWorthy-ocean/ucla-roms", "a" * 40
+        )
+        is None
+    )
+
+
+def test_describe_remote_nearest_tag_path_with_spaces(tmp_path, tagged_ucla_roms_clone):
+    """A path with spaces and glob characters reaches git as one argument, both
+    as a clone source and as the repository to describe in.
+    """
+    info = tagged_ucla_roms_clone
+    odd = tmp_path / "my [ucla] roms"
+    shutil.copytree(info["repo"], odd)
+    assert _describe_remote_nearest_tag(str(odd), info["hash_0_4_2"]) == ("0.4.2", 0)
+    assert _describe_nearest_tag(odd, info["hash_after_0_4_2"]) == ("0.4.2", 1)

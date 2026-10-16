@@ -1,6 +1,5 @@
 """Tests for the versioned ROMS namelist schemas in `cstar.roms.namelist`."""
 
-import subprocess
 from pathlib import Path
 from unittest import mock
 
@@ -23,6 +22,7 @@ from cstar.roms.namelist import (
     RomsNamelistV0_9_0,
     RomsNamelistV0_11_0,
     namelist_schema_for_ref,
+    release_ref_for_remote,
 )
 
 OLD_NAMELIST = Path(__file__).parent / "fixtures" / "example_namelist.nml"
@@ -117,52 +117,6 @@ def test_namelist_schema_for_ref_fallback_warns(checkout_target):
     assert schema is RomsNamelistV0_11_0
 
 
-@pytest.fixture
-def tagged_ucla_roms_clone(tmp_path: Path) -> dict[str, str | Path]:
-    """A tiny local git repo mimicking ucla-roms release-tag history.
-
-    History: commit tagged ``0.4.2`` -> commit tagged only ``exp-marker`` (a
-    non-release tag, which release resolution must ignore) -> commit tagged
-    ``0.5.0``. Returns the repo path and the three commit hashes.
-    """
-    repo = tmp_path / "ucla-roms"
-    repo.mkdir()
-
-    def _git(*args: str) -> str:
-        result = subprocess.run(
-            ["git", "-c", "user.email=t@t", "-c", "user.name=t", *args],
-            cwd=repo,
-            capture_output=True,
-            text=True,
-            check=True,
-        )
-        return result.stdout.strip()
-
-    _git("init", "-q")
-    (repo / "f").write_text("1")
-    _git("add", "f")
-    _git("commit", "-q", "-m", "release 0.4.2")
-    hash_0_4_2 = _git("rev-parse", "HEAD")
-    _git("tag", "0.4.2")
-
-    (repo / "f").write_text("2")
-    _git("commit", "-aq", "-m", "post-0.4.2 work")
-    hash_after_0_4_2 = _git("rev-parse", "HEAD")
-    _git("tag", "exp-marker")
-
-    (repo / "f").write_text("3")
-    _git("commit", "-aq", "-m", "release 0.5.0")
-    hash_0_5_0 = _git("rev-parse", "HEAD")
-    _git("tag", "0.5.0")
-
-    return {
-        "repo": repo,
-        "hash_0_4_2": hash_0_4_2,
-        "hash_after_0_4_2": hash_after_0_4_2,
-        "hash_0_5_0": hash_0_5_0,
-    }
-
-
 def test_namelist_schema_for_ref_resolves_hash_at_release_tag(
     tagged_ucla_roms_clone,
     recwarn,
@@ -225,6 +179,86 @@ def test_namelist_schema_for_ref_unresolvable_hash_falls_back():
         with pytest.warns(UserWarning, match="use at your own risk"):
             schema = namelist_schema_for_ref("a" * 40, repo_path="/some/repo")
     assert schema is RomsNamelistV0_11_0
+
+
+def test_release_ref_for_remote_resolves_hash_at_release_tag(
+    tagged_ucla_roms_clone, recwarn
+):
+    """A commit hash sitting exactly on a release tag resolves to that tag
+    without a warning.
+    """
+    info = tagged_ucla_roms_clone
+    assert release_ref_for_remote(str(info["repo"]), info["hash_0_4_2"]) == "0.4.2"
+    assert release_ref_for_remote(str(info["repo"]), info["hash_0_5_0"]) == "0.5.0"
+    assert len(recwarn) == 0
+
+
+def test_release_ref_for_remote_warns_when_hash_is_ahead_of_release(
+    tagged_ucla_roms_clone,
+):
+    """A commit hash between releases resolves to the nearest ancestor release
+    tag, skipping the non-release ``exp-marker`` tag it carries, and warns.
+    """
+    info = tagged_ucla_roms_clone
+    with pytest.warns(UserWarning, match="commit\\(s\\) after release 0.4.2"):
+        ref = release_ref_for_remote(str(info["repo"]), info["hash_after_0_4_2"])
+    assert ref == "0.4.2"
+
+
+@pytest.mark.parametrize("checkout_target", ["main", "0.5.0", "v0.5.0", ""])
+def test_release_ref_for_remote_leaves_non_hash_refs_alone(checkout_target, recwarn):
+    """A tag, a branch or an empty ref comes back unchanged with no clone."""
+    with mock.patch("cstar.roms.namelist._describe_remote_nearest_tag") as describe:
+        assert (
+            release_ref_for_remote("https://example.com/ucla-roms", checkout_target)
+            == checkout_target
+        )
+    describe.assert_not_called()
+    assert len(recwarn) == 0
+
+
+def test_release_ref_for_remote_unreachable_location_warns_and_keeps_hash():
+    """A hash that cannot be resolved (the unit-test network guard refuses an
+    https remote) is returned as given, with the latest-schema fallback warning.
+    """
+    with pytest.warns(
+        UserWarning,
+        match=rf"Could not resolve .*{'a' * 40}.* latest known namelist schema "
+        rf"\({RomsNamelistV0_11_0.__name__}\)",
+    ):
+        ref = release_ref_for_remote(
+            "https://github.com/CWorthy-ocean/ucla-roms", "a" * 40
+        )
+    assert ref == "a" * 40
+
+
+def test_release_ref_for_remote_unparseable_tag_warns_and_keeps_hash():
+    """A resolution that yields a tag C-Star cannot parse falls back too."""
+    with mock.patch(
+        "cstar.roms.namelist._describe_remote_nearest_tag",
+        return_value=("1.2.3-rc1", 0),
+    ):
+        with pytest.warns(UserWarning, match="Could not resolve"):
+            ref = release_ref_for_remote("/some/repo", "a" * 40)
+    assert ref == "a" * 40
+
+
+def test_release_ref_for_remote_clones_once_per_location_and_ref():
+    """Repeat calls for one ``(location, ref)`` reuse the first answer, a failed
+    resolution included, and warn once; another location is resolved afresh.
+    """
+    with mock.patch(
+        "cstar.roms.namelist._describe_remote_nearest_tag", return_value=None
+    ) as describe:
+        with pytest.warns(UserWarning, match="Could not resolve") as record:
+            release_ref_for_remote("/some/repo", "a" * 40)
+            release_ref_for_remote("/some/repo", "a" * 40)
+        assert len(record) == 1
+        assert describe.call_count == 1
+
+        with pytest.warns(UserWarning, match="Could not resolve"):
+            release_ref_for_remote("/other/repo", "a" * 40)
+        assert describe.call_count == 2
 
 
 def test_roms_namelist_round_trip():

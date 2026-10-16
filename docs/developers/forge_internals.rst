@@ -379,8 +379,10 @@ subclass; adds ``use_constant_Fe``/``constant_Fe_value`` to
 ``&MARBL_BIOGEOCHEMISTRY_SETTINGS``, written lowercased as f90nml writes
 them -- both keys are always written, so a release before 0.11.0 stops on the
 unknown keys and keeps the 0.9.0 schema), selected
-by ``namelist_schema_for_ref(ref)`` -- semver tags select exactly; branch
-names/hashes warn and fall back to the latest schema). Forge mirrors this in
+by ``namelist_schema_for_ref(ref)`` -- semver tags select exactly; a commit
+hash selects the release it descends from, via ``git describe`` in a clone;
+branch names and unresolved hashes warn and fall back to the latest schema).
+Forge mirrors this in
 ``namelist_model.py``: ``RunTimeSettings`` (legacy, < 0.4.0),
 ``RunTimeSettingsV0_4_0`` (adds ``param.nt_cdr_oae``/``param.nt_cdr_dor``),
 ``RunTimeSettingsV0_5_0``, ``RunTimeSettingsV0_6_0`` (adds ``pio_settings``),
@@ -395,7 +397,13 @@ it in a build without MARBL -- resolver, ``validate_run_time_sections`` and
 ``configure_build``),
 selected by ``run_time_settings_for_ref(roms_ref)``, where ``roms_ref`` is
 the blueprint's pinned ``code.roms.commit`` (threaded resolver -> executor ->
-``write_roms_namelist``). C-Star's registry is the single source of
+``write_roms_namelist``). Forge has no ucla-roms clone, so
+``process_forge_blueprint`` and ``configure_build`` first resolve a commit
+hash to its release tag with ``release_ref_for_remote`` (a throwaway treeless
+clone of ``code.roms.location``, cached per process); Forge then writes the
+namelist of the tier roms_marbl reads it with. The resolver, which the wizard
+calls on every keystroke, keeps the latest tier for a hash and the executor
+re-prunes. C-Star's registry is the single source of
 version-boundary truth -- forge only maps its result to the matching
 settings class. The forge **settings vocabulary is version-stable**: YAML
 keys (``particles.output_period``, ``particles.nrpf``,
