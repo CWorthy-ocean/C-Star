@@ -148,6 +148,10 @@ Output
    the parent's upscaled-CDR run (see **Upscale a nested run** on the Workplan
    page), and otherwise sits under **More output streams**.
 
+.. figure:: images/wizard-output.png
+   :alt: The Output section: output preset, main output streams and the collapsed More output streams group
+   :width: 100%
+
 Advanced settings
    Individual ROMS-MARBL namelist settings beyond what the other sections
    expose, grouped by concern (physics and subgrid tuning, surface and lateral
