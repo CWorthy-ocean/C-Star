@@ -80,6 +80,7 @@ from cstar.applications.forge.namelist_model import (
     check_constant_fe,
     check_output_streams_divide_rst,
     check_rst_period_divisible,
+    check_upscaled_cdr_lite_tracer_counts,
     cppdefs_for_precheck,
     ensure_cdr_output_marbl_diagnostics,
     normalize_legacy_sections,
@@ -680,10 +681,13 @@ def build_forge_blueprint(
     ``"upscaled"`` mode) and ucla-roms >= ``CDR_LITE_MODE_MIN_ROMS``, and, in the
     ``"simple"`` CDR mode, defaults every release's ``tracer_set`` to
     ``"cdr_lite"``. The tracer counts and the CDR-lite output stream are derived
-    later, from the generated CDR forcing (``ForgeExecutor.configure_build``). If
-    ``None`` (the default), it falls back to the ModelSpec's own ``bgc_mode``
-    (itself defaulting to ``"marbl"``) -- the ModelSpec is the single source of the default; pass an
-    explicit value to override it for one run.
+    later, from the generated CDR forcing (``ForgeExecutor.configure_build``); in
+    the ``"upscaled"`` mode nothing is generated, so the counts must be passed
+    (``run_time_overrides={"param": {"nt_cdr_oae": ..., "nt_cdr_dor": ...}}``,
+    matching the child's CDR-lite tracers) and a build without them is rejected
+    here. If ``None`` (the default), it falls back to the ModelSpec's own
+    ``bgc_mode`` (itself defaulting to ``"marbl"``) -- the ModelSpec is the single
+    source of the default; pass an explicit value to override it for one run.
 
     ``roms_ref``/``marbl_ref`` are per-run checkout-target overrides (commit hash,
     tag, or branch) for ``code.roms``/``code.marbl``. If ``None`` (the default),
@@ -1020,7 +1024,13 @@ def build_forge_blueprint(
                 "forcing_depth_profiles": True,
                 "forcing_parameterized": False,
                 "cdr_volume": False,
-                "relocate_to_wet_pts": False,
+                # Each profile is a single-point release at the nearest parent
+                # point, and a child-boundary column can sit over parent land:
+                # relocation moves such a release to the nearest wet point
+                # instead of aborting ("CDR release on land"), as ucla-roms #390
+                # recommends. A release whose nearest point is wet stays where
+                # it is (ucla-roms 0.2.0 onwards).
+                "relocate_to_wet_pts": True,
             }
         )
         # The level count is the child grid's, which Forge cannot see. From
@@ -1195,6 +1205,9 @@ def build_forge_blueprint(
         bgc_mode=bgc_mode,
         roms_ref=str(effective_roms_ref) if effective_roms_ref is not None else None,
     )
+    # After the version gate, so a pin too old for the mode is reported as such.
+    if bgc_mode == "cdr_lite" and cdr_spec.mode == "upscaled":
+        check_upscaled_cdr_lite_tracer_counts(settings.get("param") or {})
     do_cdr_output = bool(cdr_out.get("do_cdr_output")) or implied_cdr_output
     cdr_out["do_cdr_output"] = do_cdr_output
     if do_cdr_output:

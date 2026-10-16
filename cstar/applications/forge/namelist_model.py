@@ -752,6 +752,33 @@ def check_cdr_lite_mode_roms(roms_ref: str | None) -> None:
         )
 
 
+def check_upscaled_cdr_lite_tracer_counts(param: Mapping[str, Any]) -> None:
+    """Reject an upscaled ``bgc_mode: cdr_lite`` build that declares no CDR-lite
+    tracers.
+
+    The other CDR modes read ``param.nt_cdr_oae``/``nt_cdr_dor`` off the
+    generated CDR forcing; the "upscaled" mode generates none, so the user states
+    them to match the child whose upscaled output feeds the run (ucla-roms
+    applies each column to the tracer its ``cdr_trc_name`` names, skips names
+    the run lacks and aborts when none exist). Stated counts reach the build
+    through the stored settings, which ``configure_build``'s overlay leaves alone.
+
+    Both the resolver and the executor's ``configure_build`` (the net for stored
+    blueprints) call this so the rule and its message stay in one place.
+
+    Raises ``ValueError`` when both counts are 0 or unset.
+    """
+    if any(int(param.get(key) or 0) for key in _CDR_TRACER_WEIGHTS):
+        return
+    raise ValueError(
+        'bgc_mode "cdr_lite" with cdr.mode "upscaled" needs the CDR-lite tracer '
+        "counts, which no generated CDR forcing supplies in this mode: pass "
+        'run_time_overrides={"param": {"nt_cdr_oae": ..., "nt_cdr_dor": ...}} '
+        "matching the child's CDR-lite tracers (one nt_cdr_oae per "
+        "CDR_OAE_ALK<n>/CDR_OAE_DIC<n> pair, one nt_cdr_dor per CDR_DOR_DIC<n>)."
+    )
+
+
 # ucla-roms release from which a river forcing file may leave out the CDR tracer
 # block (ucla-roms PR #369): river_frc reads the file's ``ntracers`` length at
 # init and accepts every model tracer (``nt``) or every tracer but the CDR block

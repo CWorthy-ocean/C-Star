@@ -53,6 +53,7 @@ from cstar.applications.forge.namelist_model import (
     check_output_streams_divide_rst,
     check_river_tracer_counts,
     check_rst_period_divisible,
+    check_upscaled_cdr_lite_tracer_counts,
     cppdefs_for_precheck,
     ensure_cdr_output_marbl_diagnostics,
     n_tracers_from_param,
@@ -2474,12 +2475,15 @@ class ForgeExecutor(BaseModel):
         ):
             self._settings_run_time.setdefault("cdr_output", {})["do_cdr_output"] = True
         # bgc_mode "cdr_lite" (CDR-lite tracers, no MARBL): the generation step
-        # derived nt_cdr_oae/nt_cdr_dor from the CDR forcing's tracer axis, and
-        # the _cdrtrc stream is the only output the CDR tracers appear in, so it
-        # is forced on (ROMS aborts at init if it is on with zero CDR tracers, hence
+        # derived nt_cdr_oae/nt_cdr_dor from the CDR forcing's tracer axis (the
+        # "upscaled" mode generates none, so the user states them), and the
+        # _cdrtrc stream is the only output the CDR tracers appear in, so it is
+        # forced on (ROMS aborts at init if it is on with zero CDR tracers, hence
         # the count check first, which also names the likely authoring mistake).
         if bgc_mode == "cdr_lite":
             param = self._settings_run_time.get("param") or {}
+            if self.cdr_mode == "upscaled":
+                check_upscaled_cdr_lite_tracer_counts(param)
             if not cdr_active or not (
                 int(param.get("nt_cdr_oae") or 0) + int(param.get("nt_cdr_dor") or 0)
             ):

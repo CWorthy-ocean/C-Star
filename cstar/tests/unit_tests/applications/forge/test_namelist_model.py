@@ -46,6 +46,7 @@ from cstar.applications.forge.namelist_model import (
     check_cdr_output_sections,
     check_constant_fe,
     check_river_tracer_counts,
+    check_upscaled_cdr_lite_tracer_counts,
     n_tracers_from_param,
     namelist_field_for,
     namelist_schema_for,
@@ -305,6 +306,25 @@ def test_check_cdr_forcing_mode_parameterized_without_marbl_gate_unchanged(bgc_m
     assert not check_cdr_forcing_mode("simple", bgc_mode=bgc_mode, roms_ref="0.9.1")
     with pytest.raises(ValueError, match=r">= 0\.9\.1"):
         check_cdr_forcing_mode("simple", bgc_mode=bgc_mode, roms_ref="0.9.0")
+
+
+@pytest.mark.parametrize(
+    "param",
+    [{}, {"nt_cdr_oae": 0, "nt_cdr_dor": 0}, {"nt_cdr_oae": None, "nt_cdr_dor": "0"}],
+)
+def test_check_upscaled_cdr_lite_tracer_counts_rejects_no_tracers(param):
+    with pytest.raises(
+        ValueError,
+        match=r"needs the CDR-lite tracer counts.*CDR_OAE_ALK<n>/CDR_OAE_DIC<n> pair",
+    ):
+        check_upscaled_cdr_lite_tracer_counts(param)
+
+
+@pytest.mark.parametrize(
+    "param", [{"nt_cdr_oae": 1}, {"nt_cdr_dor": 2}, {"nt_cdr_oae": "1"}]
+)
+def test_check_upscaled_cdr_lite_tracer_counts_accepts_either_family(param):
+    check_upscaled_cdr_lite_tracer_counts(param)
 
 
 @pytest.mark.parametrize(

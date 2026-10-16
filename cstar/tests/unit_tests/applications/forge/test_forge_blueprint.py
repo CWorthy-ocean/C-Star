@@ -1760,7 +1760,9 @@ def test_build_forge_blueprint_cdr_kwarg_upscaled_mode_sets_cdr_frc_statics():
     assert cdr_frc["forcing_depth_profiles"] is True
     assert cdr_frc["forcing_parameterized"] is False
     assert cdr_frc["cdr_volume"] is False
-    assert cdr_frc["relocate_to_wet_pts"] is False
+    # A child-boundary profile over parent land moves to the nearest wet point
+    # instead of aborting (ucla-roms #390's recommendation; same logic from 0.2.0).
+    assert cdr_frc["relocate_to_wet_pts"] is True
     # Pinned to ucla-roms 0.2.0, which remaps with cdr_nz_chd as given.
     assert cdr_frc["nz_chd"] == 50
 
@@ -3904,8 +3906,15 @@ def test_resolver_bgc_mode_cdr_lite_rejects_the_online_sensitivity():
         _build_cdr_lite(run_time_overrides=_LITE_ON)
 
 
+# The CDR-lite tracer counts an upscaled parent must state (no CDR forcing is
+# generated in that mode to derive them from): those of the child's tracers.
+_UPSCALED_COUNTS = {"param": {"nt_cdr_oae": 1, "nt_cdr_dor": 1}}
+
+
 def test_resolver_bgc_mode_cdr_lite_rejects_upscaled_before_ucla_roms_0_11_0():
-    """ucla-roms < 0.11.0 rejects depth-profile CDR forcing without MARBL at init."""
+    """ucla-roms < 0.11.0 rejects depth-profile CDR forcing without MARBL at init.
+    Reported ahead of the missing tracer counts.
+    """
     with pytest.raises(
         ValueError,
         match=r'"upscaled" with bgc_mode "cdr_lite" on ucla-roms 0\.10\.1: .*'
@@ -3926,7 +3935,10 @@ def test_resolver_bgc_mode_cdr_lite_accepts_upscaled_from_ucla_roms_0_11_0(
     upscaled run resolves, with CDR_FORCING on and cdr_output (MARBL-only) off.
     """
     cfg = _build_cdr_lite(
-        model_dir=model_dir, roms_ref=roms_ref, cdr={"mode": "upscaled"}
+        model_dir=model_dir,
+        roms_ref=roms_ref,
+        cdr={"mode": "upscaled"},
+        run_time_overrides=_UPSCALED_COUNTS,
     )
     settings = cfg.model_settings
     assert cfg.cdr.mode == "upscaled"
@@ -3937,6 +3949,43 @@ def test_resolver_bgc_mode_cdr_lite_accepts_upscaled_from_ucla_roms_0_11_0(
     assert settings["cdr_frc"]["forcing_depth_profiles"] is True
     assert settings["cdr_frc"]["forcing_parameterized"] is False
     assert settings["cdr_frc"]["nz_chd"] == 0
+    assert settings["cdr_frc"]["relocate_to_wet_pts"] is True
+    assert settings["param"]["nt_cdr_oae"] == 1
+    assert settings["param"]["nt_cdr_dor"] == 1
+
+
+@pytest.mark.parametrize(
+    "param",
+    [{}, {"nt_cdr_oae": 0, "nt_cdr_dor": 0}, {"nt_cdr_oae": None}],
+)
+def test_resolver_bgc_mode_cdr_lite_upscaled_needs_tracer_counts(param):
+    """No CDR forcing is generated in the upscaled mode, so nothing derives the
+    CDR-lite tracer counts: a CDR-lite parent without them is rejected up front
+    rather than at configure_build.
+    """
+    with pytest.raises(
+        ValueError,
+        match=r'cdr\.mode "upscaled" needs the CDR-lite tracer counts.*'
+        r"run_time_overrides=\{\"param\"",
+    ):
+        _build_cdr_lite(
+            model_dir=_MODEL_DIR_ROMS0110,
+            cdr={"mode": "upscaled"},
+            run_time_overrides={"param": param},
+        )
+
+
+@pytest.mark.parametrize(
+    "param", [{"nt_cdr_oae": 2}, {"nt_cdr_dor": 1}, {"nt_cdr_oae": 0, "nt_cdr_dor": 3}]
+)
+def test_resolver_bgc_mode_cdr_lite_upscaled_accepts_either_tracer_family(param):
+    cfg = _build_cdr_lite(
+        model_dir=_MODEL_DIR_ROMS0110,
+        cdr={"mode": "upscaled"},
+        run_time_overrides={"param": param},
+    )
+    for key, value in param.items():
+        assert cfg.model_settings["param"][key] == value
 
 
 def test_resolver_bgc_mode_cdr_lite_accepts_the_stream_switch_before_generation():

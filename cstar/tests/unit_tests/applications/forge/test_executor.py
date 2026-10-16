@@ -2014,6 +2014,7 @@ class TestForgeExecutorBuildAndRun:
         assert run_time["cdr_lite_output"]["do_cdr_lite_output"] is True
         assert run_time["cdr_frc"]["forcing_depth_profiles"] is True
         assert run_time["cdr_frc"]["nz_chd"] == 0
+        assert run_time["cdr_frc"]["relocate_to_wet_pts"] is True
         assert run_time["param"]["nt_cdr_oae"] == 1
         assert run_time["param"]["nt_cdr_dor"] == 1
 
@@ -2032,6 +2033,25 @@ class TestForgeExecutorBuildAndRun:
             ValueError,
             match=r'"upscaled" with bgc_mode "cdr_lite" on ucla-roms 0\.10\.1: '
             r".*>= 0\.11\.0",
+        ):
+            self._run_configure_build(cfg, host)
+
+    def test_configure_build_rejects_upscaled_cdr_lite_without_tracer_counts(
+        self, sample_grid_kwargs, sample_open_boundaries, sample_partitioning
+    ):
+        """The build-time net for a stored CDR-lite "upscaled" blueprint whose
+        stated tracer counts were removed after the resolver ran: the
+        upscaled-specific message, not the generic "use releases with
+        tracer_set=cdr_lite" one.
+        """
+        cfg, host = self._upscaled_cdr_lite_cfg_and_builder(
+            sample_grid_kwargs, sample_open_boundaries, sample_partitioning
+        )
+        cfg.model_settings["param"]["nt_cdr_oae"] = 0
+        cfg.model_settings["param"]["nt_cdr_dor"] = 0
+
+        with pytest.raises(
+            ValueError, match=r'cdr\.mode "upscaled" needs the CDR-lite tracer counts'
         ):
             self._run_configure_build(cfg, host)
 
@@ -2114,7 +2134,7 @@ class TestForgeExecutorBuildAndRun:
         assert cdr_frc["forcing_depth_profiles"] is True
         assert cdr_frc["forcing_parameterized"] is False
         assert cdr_frc["cdr_volume"] is False
-        assert cdr_frc["relocate_to_wet_pts"] is False
+        assert cdr_frc["relocate_to_wet_pts"] is True
         assert cfg.model_settings["cdr_output"]["do_cdr_output"] is True
         assert cfg.model_settings["cppdefs"]["cdr_forcing"] is True
 
@@ -2131,7 +2151,7 @@ class TestForgeExecutorBuildAndRun:
         assert run_cdr_frc["forcing_depth_profiles"] is True
         assert run_cdr_frc["forcing_parameterized"] is False
         assert run_cdr_frc["cdr_volume"] is False
-        assert run_cdr_frc["relocate_to_wet_pts"] is False
+        assert run_cdr_frc["relocate_to_wet_pts"] is True
         # The consistency net (executor.py) fires for "upscaled" even without
         # cdr_forcing/cdr_forcing_file being set.
         assert builder._settings_run_time["cdr_output"]["do_cdr_output"] is True
