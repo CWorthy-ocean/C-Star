@@ -26,6 +26,10 @@ sections:
     title: Run setup
     desc: The simulation time window, time step, processor layout, and optional carbon dioxide removal forcing.
     required: true
+  output:
+    title: Output
+    desc: Which output streams ROMS-MARBL writes, how often, and how many records per file.
+    required: false
   advanced:
     title: Advanced settings
     desc: Fine-tune individual ROMS-MARBL namelist settings beyond what the other sections expose.
@@ -390,7 +394,7 @@ fields:
     label: CDR release
   output_dd:
     label: Output preset
-    hint: Selects an output-settings spec from the catalog to seed the output sections.
+    hint: Selects an output-settings spec from the catalog to seed the streams below.
   save_path:
     label: Save path
   name:
