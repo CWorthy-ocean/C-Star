@@ -1815,6 +1815,7 @@ def test_build_forge_blueprint_cdr_kwarg_upscaled_mode_sets_cdr_frc_statics():
         (_MODEL_DIR_ROMS0100, None, 50),
         (_MODEL_DIR_ROMS0110, None, 0),
         (_MODEL_DIR_ROMS0100, "main", 0),
+        (_MODEL_DIR_ROMS0110, "65fdf96f", 50),
     ],
 )
 def test_build_forge_blueprint_upscaled_nz_chd_follows_the_pin(
@@ -1823,7 +1824,8 @@ def test_build_forge_blueprint_upscaled_nz_chd_follows_the_pin(
     """From ucla-roms 0.11.0 cdr_nz_chd = 0 takes the depth-profile level count
     from the runtime file's s_rho (the child grid's, which Forge cannot see), and a
     nonzero value that disagrees with the file aborts at init; earlier releases
-    keep the seeded value. A non-tag ref counts as the latest release.
+    keep the seeded value. A branch counts as the latest release; a commit hash
+    keeps the seeded value for configure_build to decide with its release.
     """
     cfg = _build(model_dir=model_dir, roms_ref=roms_ref, cdr={"mode": "upscaled"})
     assert cfg.model_settings["cdr_frc"]["nz_chd"] == nz_chd
