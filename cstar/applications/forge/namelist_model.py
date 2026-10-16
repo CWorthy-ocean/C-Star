@@ -154,9 +154,10 @@ class _SettingsSection(BaseModel):
     def _other_tier_keys(cls) -> Iterable[str]:
         """Keys another ucla-roms tier models here but this class does not.
 
-        The class's version gate decides what an exact one means (rejected when
-        set, dropped when off); :meth:`_reject_misspelled_keys` rejects their
-        case variants like a field's, on every tier.
+        An exact one is the class's business (a version gate rejects it when set;
+        otherwise ``extra="ignore"`` drops it); :meth:`_reject_misspelled_keys`
+        rejects their case variants like a field's, so a misspelling fails on
+        every tier.
         """
         return ()
 
@@ -528,6 +529,11 @@ class OceanVarsCfgV0_5_0(_OceanVarsCfgCommon):
     ``nrpf_rst`` was removed in ucla-roms 0.5.0: the restart record count is
     now hardcoded in Fortran rather than namelist-configurable.
     """
+
+    @classmethod
+    def _other_tier_keys(cls) -> Iterable[str]:
+        # OceanVarsCfg's nrpf_rst: dropped here, as shared OutputSpecs carry it.
+        return ("nrpf_rst",)
 
 
 def check_rst_period_divisible(
@@ -948,6 +954,11 @@ class CdrLiteOutputCfg(_CdrLiteOutputCfgCommon):
     )
     nrpf: int = Field(default=4, serialization_alias="nrpf_cdr_trc")
 
+    @classmethod
+    def _other_tier_keys(cls) -> Iterable[str]:
+        # CdrLiteOutputCfgV0_9_0's wrt_gas_exchange: dropped on 0.7/0.8.
+        return ("wrt_gas_exchange",)
+
 
 class CdrLiteOutputCfgV0_9_0(_CdrLiteOutputCfgCommon):
     """``cdr_lite_output`` settings for ucla-roms >= 0.9.0 -- the
@@ -1337,6 +1348,11 @@ class MarblBgcCfg(_MarblBgcCfgCommon):
     """``marbl_bgc`` settings for ucla-roms < 0.11.0, which has no constant-iron
     option.
     """
+
+    @classmethod
+    def _other_tier_keys(cls) -> Iterable[str]:
+        # MarblBgcCfgV0_11_0's constant-iron keys: _reject_constant_fe is their gate.
+        return ("use_constant_fe", "constant_fe_value")
 
     @model_validator(mode="before")
     @classmethod

@@ -17,6 +17,7 @@ import cstar.catalog
 from cstar.applications.forge.namelist_model import (
     _GATED_SECTION_SWITCHES,
     _PRECHECK_SECTIONS,
+    _RUN_TIME_SETTINGS_BY_NAMELIST_SCHEMA,
     CDR_LITE_MODE_MIN_ROMS,
     RIVER_TRACERS_WITHOUT_CDR_MIN_ROMS,
     CdrGasExchOutputCfg,
@@ -344,6 +345,30 @@ def test_every_settings_field_suggests_itself(settings_cls):
         for name in cls.model_fields:
             assert name in accepted
             assert spellings[name.casefold()] == name, (cls.__name__, name)
+
+
+def test_each_section_class_knows_the_keys_other_tiers_model():
+    """Every key some tier models in a section is a field, or an
+    ``_other_tier_keys()`` entry, of every class a tier types that section as, so
+    its case variants fail on every tier (version gates read exact keys). A tier
+    adding a key must list it in the older classes' ``_other_tier_keys()``.
+    """
+    classes_by_section: dict[str, set] = {}
+    for settings_cls in _RUN_TIME_SETTINGS_BY_NAMELIST_SCHEMA.values():
+        for section, info in settings_cls.model_fields.items():
+            if hasattr(info.annotation, "model_fields"):
+                classes_by_section.setdefault(section, set()).add(info.annotation)
+    missing = {
+        (section, cls.__name__): sorted(unknown)
+        for section, classes in classes_by_section.items()
+        for cls in classes
+        if (
+            unknown := set().union(*(c.model_fields for c in classes))
+            - set(cls.model_fields)
+            - set(cls._other_tier_keys())
+        )
+    }
+    assert not missing
 
 
 def test_validate_run_time_sections_reports_misspelled_keys():
@@ -1216,6 +1241,25 @@ def test_pre_0_11_0_tiers_drop_a_switched_off_constant_fe(off):
     written = nml.to_f90nml_dict()["marbl_biogeochemistry_settings"]
     assert "use_constant_fe" not in written
     assert "constant_fe_value" not in written
+
+
+@pytest.mark.parametrize(
+    "settings_cls", [RunTimeSettingsV0_9_0, RunTimeSettingsV0_11_0]
+)
+@pytest.mark.parametrize("value", [True, False])
+def test_misspelled_constant_fe_is_rejected_on_every_tier(settings_cls, value):
+    """ROMS spells the keys ``use_constant_Fe``/``constant_Fe_value``. Below
+    0.11.0 the version gate reads only the exact key, so ``use_constant_Fe: true``
+    would otherwise be dropped there and iron computed prognostically.
+    """
+    d = _populated_rt_dict()
+    d["marbl_bgc"].update(use_constant_Fe=value, constant_Fe_value=5.0e-4)
+    with pytest.raises(
+        ValidationError,
+        match=r"use_constant_Fe \(did you mean use_constant_fe\?\), "
+        r"constant_Fe_value \(did you mean constant_fe_value\?\)",
+    ):
+        settings_cls.model_validate(d)
 
 
 def test_marbl_bgc_cfg_tiers_share_the_four_marbl_fields():
