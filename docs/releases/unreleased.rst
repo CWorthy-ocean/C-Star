@@ -29,6 +29,14 @@ Breaking Changes
   - A blueprint fetched from a URL keeps the old meaning: its relative locations resolve against the directory ``cstar`` is run from.
 
 - ``ROMSInputDataset`` no longer accepts a ``linker``; the unused ``DatasetLinker`` class is removed. (`#766 <https://github.com/CWorthy-ocean/C-Star/pull/766>`_)
+- ucla-roms refs that aren't release tags (e.g. ``main``, other branches) now select the 0.11.0 namelist schema, which always writes ``use_constant_fe`` and ``constant_fe_value``; a ucla-roms build without #391 stops on them. (`#774 <https://github.com/CWorthy-ocean/C-Star/pull/774>`_)
+
+  - Pin a release tag (e.g. ``0.10.1``) to keep the 0.9.0 schema.
+
+- Forge→roms_marbl workplans that pin ucla-roms by a commit hash at or after 0.9.0 now fail when the roms_marbl step reads Forge's namelist. (`#774 <https://github.com/CWorthy-ocean/C-Star/pull/774>`_)
+
+  - Forge cannot resolve a hash to a release and uses the newest schema, while the roms_marbl step resolves it to the nearest tag; pin a release tag instead until this is fixed.
+
 
 New features
 ~~~~~~~~~~~~
@@ -54,6 +62,15 @@ New features
 
   - ``--repair`` rewrites in-run symlinks as relative links and rebuilds the gathered output; ``--all`` also scans launch artifacts that are regenerated on every launch.
   - Exit code 0 when clean, 1 when findings remain, 2 for bad arguments.
+
+- Forge and roms_marbl blueprints can hold MARBL's dissolved iron constant on ucla-roms >= 0.11.0 with ``use_constant_fe`` and ``constant_fe_value`` (mmol/m³, default 3.0e-3). (`#774 <https://github.com/CWorthy-ocean/C-Star/pull/774>`_)
+
+  - In Forge settings they live under ``marbl_bgc``, and in roms_marbl ``namelist_overrides`` under ``marbl_biogeochemistry_settings``, spelled in lowercase.
+  - Forge rejects ``use_constant_fe: true`` on a ucla-roms release older than 0.11.0, or in a build without MARBL, before generating any inputs.
+  - Namelists and stored blueprints without the keys still validate, using the ucla-roms defaults (option off).
+
+- New bundled ModelSpec ``roms-marbl-0.11-default`` (ucla-roms 0.11.0) is now the wizard's default model. (`#774 <https://github.com/CWorthy-ocean/C-Star/pull/774>`_)
+- The wizard's Advanced settings show "Hold iron constant" and "Constant iron concentration"; the concentration field appears only while the option is on. (`#774 <https://github.com/CWorthy-ocean/C-Star/pull/774>`_)
 
 
 
@@ -98,3 +115,5 @@ Miscellaneous
 - New end-to-end test ``test_workplan_relocation.py`` (hello_world steps, no ROMS build) that copies a whole data home, repoints ``CSTAR_DATA_HOME`` and exercises ``status``, ``path``, ``gather``, ``continue-from`` and ``--resume`` from the copy. (`#768 <https://github.com/CWorthy-ocean/C-Star/pull/768>`_)
 - Unit tests no longer reach the network except for pooch-cached dataset downloads, and the unit CI workflow caches those downloads. (`#770 <https://github.com/CWorthy-ocean/C-Star/pull/770>`_)
 - Docs: run-level commands documented under ``cstar run``, the anchoring rule on the HPC and blueprint pages, and the run-check functions on the orchestration API page. (`#766 <https://github.com/CWorthy-ocean/C-Star/pull/766>`_)
+- The integration suite and the weekly extended matrix now pin ucla-roms 0.11.0; the integration namelist goldens gain the two iron keys. (`#774 <https://github.com/CWorthy-ocean/C-Star/pull/774>`_)
+- The developer and ModelSpec docs describe the 0.11.0 schema tier and the new default. (`#774 <https://github.com/CWorthy-ocean/C-Star/pull/774>`_)
