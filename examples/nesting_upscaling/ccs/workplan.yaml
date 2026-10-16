@@ -36,6 +36,14 @@
 # because the memory a job gets on Anvil scales with its CPUs (1.9 GB each; forge was
 # killed for memory at 8).
 #
+# The SLURM time limits (`slurm.max_walltime`) are sized for month.vars, from the times
+# measured on Anvil (ccs-month-a3): about 4 times the measured time for the roms steps
+# and 10 times or more for forge. smoke.vars fits too. The longer windows (six_month.vars,
+# full.vars) need larger limits: edit the "Longer windows" values of README.md ("Resources")
+# into this file before `cstar workplan run`. SLURM lets you lower a queued job's limit with
+# `scontrol update` but not raise it, so a limit that is too small kills the job and
+# everything after it.
+#
 # Runtime variables (the *_stamp form is the restart file name's 14-digit timestamp):
 #   parent_start       start of the parent run and of forge_parent's forcing
 #   parent_end         end of the parent run
@@ -88,7 +96,7 @@ steps:
         max_walltime: "12:00:00"  # smoke 8 min; full.vars about 3.2 h (about 30 s per window day)
       slurm:
         num_cpus: 32
-        max_walltime: "12:00:00"
+        max_walltime: "02:00:00"  # month 10 min 27 s
 
   # forge_child and forge_parent_up wait for forge_parent so that any first-time
   # downloads (missing source data, the land-mask shapefiles) are done once rather than
@@ -122,7 +130,7 @@ steps:
         max_walltime: "04:00:00"  # smoke 4 min; full.vars about 0.7 h
       slurm:
         num_cpus: 32
-        max_walltime: "06:00:00"
+        max_walltime: "01:00:00"  # month 4 min 19 s
 
   - name: forge_parent_up
     application: forge
@@ -146,7 +154,7 @@ steps:
         max_walltime: "08:00:00"  # smoke 8 min; full.vars about 1.7 h
       slurm:
         num_cpus: 32
-        max_walltime: "10:00:00"
+        max_walltime: "01:30:00"  # month 7 min 43 s
 
   # ---------------------------------------------------------------- parent
   - name: parent
@@ -163,7 +171,7 @@ steps:
         max_walltime: "24:00:00"  # build 1.5 min + full.vars about 2.3 h (23 s per day)
       slurm:
         num_cpus: 16
-        max_walltime: "12:00:00"
+        max_walltime: "01:30:00"  # month 19 min 27 s
 
   # ---------------------------------------------------------------- nesting
   - name: nest_ic
@@ -183,7 +191,7 @@ steps:
         max_walltime: "01:00:00"
       slurm:
         num_cpus: 4
-        max_walltime: "01:00:00"
+        max_walltime: "00:30:00"  # month 23 s
 
   - name: child
     application: roms_marbl
@@ -206,7 +214,7 @@ steps:
         max_walltime: "24:00:00"  # build 1.5 min + full.vars about 0.9 h (18 s per day)
       slurm:
         num_cpus: 50
-        max_walltime: "12:00:00"
+        max_walltime: "01:00:00"  # month 15 min 32 s
 
   # ------------------------------------------------------------- upscaling
   - name: upscale
@@ -222,7 +230,7 @@ steps:
         max_walltime: "01:00:00"
       slurm:
         num_cpus: 4
-        max_walltime: "01:00:00"
+        max_walltime: "00:30:00"  # month 8 s
 
   - name: parent_up
     application: roms_marbl
@@ -247,4 +255,4 @@ steps:
         max_walltime: "24:00:00"  # build 1.5 min + full.vars about 1.2 h (23 s per day)
       slurm:
         num_cpus: 16
-        max_walltime: "12:00:00"
+        max_walltime: "01:00:00"  # month 14 min 55 s

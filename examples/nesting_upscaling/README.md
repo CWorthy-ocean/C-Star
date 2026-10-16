@@ -19,7 +19,7 @@ forge_parent   forge_child   forge_parent_up        forge: generate each domain'
 | Case | Directory | Runs on | Data | Wall clock | Use it for |
 |---|---|---|---|---|---|
 | Tiny toy | [`tiny/`](tiny/README.md) | a laptop (4 MPI ranks per ROMS step) | about 40 MB of pinned test data; no accounts, nothing to stage | about 8 min on a 10-core Mac | a first end-to-end run; the weekly Tier 3 integration test (`cstar/tests/integration_tests/extended/test_nesting_upscaling_workplan.py`) |
-| California Current | [`ccs/`](ccs/README.md) | a workstation or HPC node (up to 64 ranks per step) | real forcing (GLORYS, ERA5, GLODAP + WOA + UNIFIED BGC, TPXO, DAI rivers) staged in the source-data cache | about 8 h on the critical path, about 12 h with margin, at most 20 h, on up to 64 cores | release-scale integration testing and figures (the smoke run passes; the full run is proposed, not yet run); [`ccs/mac_benchmark/`](ccs/mac_benchmark/README.md) times the parent grid at 2x2 on a laptop |
+| California Current | [`ccs/`](ccs/README.md) | a workstation or an HPC cluster (up to 50 ranks per step; SLURM on Anvil) | real forcing (GLORYS, ERA5, GLODAP + WOA + UNIFIED BGC, TPXO, GloFAS rivers) staged in the source-data cache | the 1-month run on Anvil: 34 SU, about 1 h of compute on the critical path, 3.6 h including the queue; longer runs are estimates (6 months about 5.5 h, a year about 11 h of compute), not run | release-scale integration testing and figures (the 1-month run passes on Anvil; the longer runs are not run; open issues are listed in its README); [`ccs/mac_benchmark/`](ccs/mac_benchmark/README.md) times the parent grid at 2x2 on a laptop |
 
 [`cdr_metrics.py`](cdr_metrics.py) computes the roms-tools CDR metrics (uptake
 efficiency and CO2 uptake, from the CO2 flux and from the DIC difference) for the
@@ -35,7 +35,14 @@ of ALK entering through the child boundary. The script does not add them. The
 upscaled forcing carries the anomaly in both directions across the child
 boundary, so parent_up has some negative `ALK_source` values that roms-tools
 rejects. Pass `--clip-negative-sources` to clip them; the clipped amounts are
-logged and saved in the output.
+logged and saved in the output. In the CCS month run the clipping removed 6.9 %
+of parent_up's positive `ALK_source`, so its efficiency is approximate (about 7 %
+low). parent_up's DIC-difference numbers are also distorted near the open
+boundaries (forge writes different BGC boundary forcing for the parent and
+parent_up runs), so quote its flux-method numbers. The script is not yet a
+C-Star application; it only reads the `_cdr` output, so it runs on an Anvil
+login node. The exact command, the outputs and the run-1 numbers are in
+[`ccs/README.md`](ccs/README.md#cdr-metrics).
 
 ## What these examples rely on
 
