@@ -74,7 +74,7 @@ from cstar.orchestration.serialization import (
     load_blueprint,
     read_blueprint_raw,
 )
-from cstar.roms.namelist import RomsNamelistV0_9_0
+from cstar.roms.namelist import RomsNamelistV0_9_0, RomsNamelistV0_11_0
 
 requires_cstar_pio = pytest.mark.skipif(
     "pio" not in cstar_models.ROMSCompositeCodeRepository.model_fields
@@ -101,6 +101,10 @@ _MODEL_DIR_ROMS070 = _BUNDLED_CATALOG / "ModelSpec" / "roms-marbl-0.7-default"
 # test below.
 _MODEL_DIR_ROMS090 = _BUNDLED_CATALOG / "ModelSpec" / "roms-marbl-0.9-default"
 _MODEL_DIR_ROMS0100 = _BUNDLED_CATALOG / "ModelSpec" / "roms-marbl-0.10-default"
+# ucla-roms >= 0.11.0 ModelSpec (adds marbl_bgc.use_constant_fe/constant_fe_value to
+# &MARBL_BIOGEOCHEMISTRY_SETTINGS, PR #391) -- used by the versioned-namelist golden
+# test below.
+_MODEL_DIR_ROMS0110 = _BUNDLED_CATALOG / "ModelSpec" / "roms-marbl-0.11-default"
 # ModelSpec no longer embeds a default forcing/output selection -- these tests just
 # need a valid, representative pair from the bundled catalog.
 _FORCING_INPUTS = _CATALOG.forcing_data("glorys-era5-unified")
@@ -3879,6 +3883,59 @@ class TestGoldenNamelist:
         with pytest.raises(ValueError, match="param.ntrc_bio"):
             self._configure_build_for(cfg, builder)
 
+    def test_configure_build_rejects_constant_fe_without_marbl_end_to_end(
+        self, mock_grid, tmp_path
+    ):
+        """A stored blueprint with MARBL off but constant iron requested must
+        fail at configure_build: ucla-roms never reads
+        ``&MARBL_BIOGEOCHEMISTRY_SETTINGS`` without MARBL, so the request would
+        be silently ignored. ``ntrc_bio`` is zeroed so the tracer-count net, which
+        runs first, does not fire instead.
+        """
+        cfg, builder = self._generate_inputs_no_cdr_forcing(
+            mock_grid, tmp_path, model_dir=_MODEL_DIR_ROMS0110
+        )
+        cfg.model_settings["cppdefs"]["marbl"] = False
+        cfg.model_settings["param"]["ntrc_bio"] = 0
+        cfg.model_settings["marbl_bgc"]["use_constant_fe"] = True
+
+        with pytest.raises(
+            ValueError, match=r"marbl_bgc\.use_constant_fe.*MARBL is off"
+        ):
+            self._configure_build_for(cfg, builder)
+
+    def test_configure_build_accepts_constant_fe_with_marbl_end_to_end(
+        self, mock_grid, tmp_path
+    ):
+        cfg, builder = self._generate_inputs_no_cdr_forcing(
+            mock_grid, tmp_path, model_dir=_MODEL_DIR_ROMS0110
+        )
+        cfg.model_settings["marbl_bgc"].update(
+            use_constant_fe=True, constant_fe_value=5.0e-4
+        )
+
+        self._configure_build_for(cfg, builder)
+
+        nml = f90nml.read(builder.run_time_code_dir / "namelist.nml")
+        assert nml["marbl_biogeochemistry_settings"]["use_constant_fe"] is True
+        assert nml["marbl_biogeochemistry_settings"]["constant_fe_value"] == 5.0e-4
+
+    def test_configure_build_rejects_constant_fe_on_a_pre_0_11_0_pin_end_to_end(
+        self, mock_grid, tmp_path
+    ):
+        """The tier gate's net: a blueprint pinned to ucla-roms 0.10.1 that asks
+        for constant iron (a hand edit, or an override the resolver does not
+        validate against the tier) must not build a namelist that silently
+        drops the request.
+        """
+        cfg, builder = self._generate_inputs_no_cdr_forcing(
+            mock_grid, tmp_path, model_dir=_MODEL_DIR_ROMS0100
+        )
+        cfg.model_settings["marbl_bgc"]["use_constant_fe"] = True
+
+        with pytest.raises(ValueError, match=r"requires ucla-roms >= 0\.11\.0"):
+            self._configure_build_for(cfg, builder)
+
     def test_configure_build_prunes_version_gated_sections_for_0_6_pin_end_to_end(
         self, mock_grid, tmp_path, caplog
     ):
@@ -4133,8 +4190,8 @@ class TestGoldenNamelist:
 
         Test name note: this must NOT contain ``roms050``/``roms060`` -- the
         legacy golden is selected with ``-k "golden_namelist_test_tiny and not
-        roms050 and not roms060 and not roms070 and not roms090"``, which would
-        otherwise also catch this test.
+        roms050 and not roms060 and not roms070 and not roms090 and not
+        roms0110"``, which would otherwise also catch this test.
         """
         normalized = self._run_golden_namelist_case(
             mock_grid,
@@ -4245,6 +4302,39 @@ class TestGoldenNamelist:
         assert len(nml.tracer_diff2.tnu2) == 5
         assert nml.cdr_frc_settings.cdr_source is True
         assert nml.cdr_frc_settings.cdr_ncdr_parm == 2
+
+    def test_golden_namelist_test_tiny_roms0110(self, mock_grid, tmp_path):
+        """Same test-tiny domain/forcing/output, but resolved against the
+        ``roms-marbl-0.11-default`` ModelSpec (ucla-roms >= 0.11.0) -- proves the
+        versioned namelist path selects ``RunTimeSettingsV0_11_0``/
+        ``RomsNamelistV0_11_0`` end to end.
+
+        The one schema-visible difference from the roms090 golden is the pair of
+        constant-iron keys in ``&marbl_biogeochemistry_settings``, always written
+        (here at their off/default values) -- the ModelSpec declares both.
+
+        Test name note: contains ``roms0110`` so the legacy golden's ``-k``
+        selector (``... and not roms0110``) excludes it, like the other tiers.
+        """
+        normalized = self._run_golden_namelist_case(
+            mock_grid,
+            tmp_path,
+            _MODEL_DIR_ROMS0110,
+            "golden_namelist_test-tiny-roms0110.nml",
+        )
+
+        assert "&marbl_biogeochemistry_settings" in normalized
+        marbl = normalized.split("&marbl_biogeochemistry_settings")[1].split("/", 1)[0]
+        assert "use_constant_fe = .false." in marbl
+        assert "constant_fe_value = 0.003" in marbl
+
+        # Read back through the 0.11 schema: every group validates (extra="forbid").
+        namelist_path = tmp_path / "golden_roms0110.nml"
+        namelist_path.write_text(normalized)
+        nml = RomsNamelistV0_11_0.read(namelist_path)
+        assert nml.marbl_biogeochemistry_settings.use_constant_fe is False
+        assert nml.marbl_biogeochemistry_settings.constant_fe_value == 3.0e-3
+        assert nml.cdr_lite_settings.cdr_online_carbonate_sensitivity is False
 
     @staticmethod
     def _cdrgas_sources(directory: Path) -> list[Path]:

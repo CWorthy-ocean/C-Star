@@ -29,6 +29,7 @@ from cstar.applications.forge.namelist_model import (
     RunTimeSettingsV0_6_0,
     RunTimeSettingsV0_7_0,
     RunTimeSettingsV0_9_0,
+    RunTimeSettingsV0_11_0,
 )
 from cstar.wizard.wizard import (
     _ACCORDION_EXCLUDED_FIELDS,
@@ -1386,11 +1387,11 @@ def test_bgc_dd_none_with_default_bgc_forcing_surfaces_error_legibly():
 
 def test_use_pio_chk_default_seeded_from_model_spec():
     """use_pio_chk mirrors bgc_dd: it is seeded from the selected ModelSpec's
-    top-level use_pio (True for roms-marbl-0.10-default, the wizard's default
+    top-level use_pio (True for roms-marbl-0.11-default, the wizard's default
     model; False for cson_roms-marbl_v0.1), and reseeded on a model switch.
     """
     wiz = ForgeBlueprintWizard()
-    assert wiz.model_dd.value == "roms-marbl-0.10-default"
+    assert wiz.model_dd.value == "roms-marbl-0.11-default"
     assert wiz.use_pio_chk.value is True
     assert wiz._model_default_use_pio() is True
 
@@ -1408,7 +1409,7 @@ def test_use_pio_chk_emit_is_unconditional():
     wiz = ForgeBlueprintWizard()
     wiz.start.value = date(2012, 1, 1)
     wiz.end.value = date(2012, 1, 2)
-    # roms-marbl-0.10-default (the default model) declares use_pio: true --
+    # roms-marbl-0.11-default (the default model) declares use_pio: true --
     # exactly the ModelSpec this test guards against: unchecking must emit an
     # explicit False, not fall back to the ModelSpec default.
     assert wiz.use_pio_chk.value is True
@@ -2217,14 +2218,14 @@ def test_output_spec_defaults_to_daily_restarts():
 
 
 def test_default_model_uses_latest_settings_schema():
-    """The default catalog model (``roms-marbl-0.10-default``) is pinned to
-    ucla-roms ``0.10.1`` -- a semver ref above the newest registered schema
-    boundary, which both the wizard and the executor (``write_roms_namelist`` ->
+    """The default catalog model (``roms-marbl-0.11-default``) is pinned to
+    ucla-roms ``0.11.0`` -- the newest registered schema boundary, which both
+    the wizard and the executor (``write_roms_namelist`` ->
     ``run_time_settings_for_ref``) resolve to the *latest* known schema
-    (currently ``RunTimeSettingsV0_9_0``), not the legacy one. This is an intentional behavior change from before this
-    ref-awareness was added (the editor used to hardcode legacy
-    ``RunTimeSettings``) -- it pins that the wizard now agrees with what the
-    executor will actually write. (The tests in tests/test_forge_blueprint.py
+    (currently ``RunTimeSettingsV0_11_0``), not the legacy one. This is an
+    intentional behavior change from before this ref-awareness was added (the
+    editor used to hardcode legacy ``RunTimeSettings``) -- it pins that the
+    wizard now agrees with what the executor will actually write. (The tests in tests/test_forge_blueprint.py
     that exercise the ``nrpf_rst`` widget rules now pin a legacy ref
     explicitly.)
     """
@@ -2232,7 +2233,7 @@ def test_default_model_uses_latest_settings_schema():
     wiz.start.value = date(2012, 1, 1)
     wiz.end.value = date(2012, 1, 2)
     wiz._rebuild()
-    assert wiz._editor_settings_cls is RunTimeSettingsV0_9_0
+    assert wiz._editor_settings_cls is RunTimeSettingsV0_11_0
     assert ("ocean_vars", "nrpf_rst") not in wiz.editor._widgets
 
 
@@ -2245,6 +2246,7 @@ def test_default_model_uses_latest_settings_schema():
         RunTimeSettingsV0_6_0,
         RunTimeSettingsV0_7_0,
         RunTimeSettingsV0_9_0,
+        RunTimeSettingsV0_11_0,
     ],
 )
 def test_namelist_tooltip_for_every_settings_field(settings_cls):
@@ -2446,7 +2448,11 @@ def test_wizard_editor_cdr_output_streams_gated_by_model_spec_pin():
     assert ("cdr_lite_output", "do_cdr_lite_output") in wiz.editor._widgets
     assert ("cdr_gas_exch_output", "do_cdr_gas_exch_output") in wiz.editor._widgets
 
-    for model in ("roms-marbl-0.9-default", "roms-marbl-0.10-default"):
+    for model in (
+        "roms-marbl-0.9-default",
+        "roms-marbl-0.10-default",
+        "roms-marbl-0.11-default",
+    ):
         wiz.model_dd.value = model
         wiz._rebuild()
         assert "cdr_lite_output" in wiz.config.model_settings
@@ -2617,6 +2623,73 @@ def test_cdr_output_stream_field_rules_follow_master_switch(section, master_flag
     editor._widgets[(section, "monthly_averages")][0].value = "monthly"
     assert _visible("monthly_averages")
     assert period_widget.disabled is True
+
+
+def test_constant_fe_widgets_built_for_the_0_11_model():
+    """``marbl_bgc.use_constant_fe``/``constant_fe_value`` (ucla-roms >= 0.11.0,
+    PR #391) get Advanced-settings widgets for ``roms-marbl-0.11-default`` (the
+    default model, which declares both keys): the label comes from the
+    labels file (symbol + unit appended), the tooltip from the C-Star field
+    docstring.
+    """
+    wiz = ForgeBlueprintWizard()
+    wiz.start.value = date(2012, 1, 1)
+    wiz.end.value = date(2012, 1, 2)
+    wiz.model_dd.value = "roms-marbl-0.11-default"
+    wiz._rebuild()
+    assert wiz.config is not None
+    assert wiz.config.model_settings["marbl_bgc"]["use_constant_fe"] is False
+
+    use_fe, _ = wiz.editor._widgets[("marbl_bgc", "use_constant_fe")]
+    fe_value, _ = wiz.editor._widgets[("marbl_bgc", "constant_fe_value")]
+    assert use_fe.value is False
+    assert fe_value.value == pytest.approx(3.0e-3)
+    assert use_fe.description == "Hold iron constant"
+    assert fe_value.description == "Constant iron concentration (mmol/m³)"
+    assert use_fe.tooltip.startswith("use_constant_fe")
+    assert "at constant_Fe_value everywhere" in use_fe.tooltip
+    assert "Fe imposed when use_constant_Fe" in fe_value.tooltip
+
+
+def test_constant_fe_widgets_absent_for_the_0_10_model():
+    """``roms-marbl-0.10-default`` pins a ucla-roms that stops on the unknown
+    keys: its ModelSpec does not declare them, so the editor builds neither
+    widget.
+    """
+    wiz = ForgeBlueprintWizard()
+    wiz.start.value = date(2012, 1, 1)
+    wiz.end.value = date(2012, 1, 2)
+    wiz.model_dd.value = "roms-marbl-0.10-default"
+    wiz._rebuild()
+    assert wiz.config is not None
+    assert "use_constant_fe" not in wiz.config.model_settings["marbl_bgc"]
+    assert ("marbl_bgc", "use_constant_fe") not in wiz.editor._widgets
+    assert ("marbl_bgc", "constant_fe_value") not in wiz.editor._widgets
+
+
+def test_constant_fe_value_hidden_until_use_constant_fe_is_on():
+    """``constant_fe_value`` is meaningless while ``use_constant_fe`` is off, so
+    ``_apply_field_rules`` hides it -- display only: toggling never changes the
+    value (neither widget's).
+    """
+    wiz = ForgeBlueprintWizard()
+    wiz.start.value = date(2012, 1, 1)
+    wiz.end.value = date(2012, 1, 2)
+    wiz._rebuild()
+    use_fe, _ = wiz.editor._widgets[("marbl_bgc", "use_constant_fe")]
+    fe_value, _ = wiz.editor._widgets[("marbl_bgc", "constant_fe_value")]
+
+    assert use_fe.value is False
+    assert fe_value.layout.display == "none"
+    assert use_fe.layout.display != "none"
+
+    use_fe.value = True
+    assert fe_value.layout.display == ""
+    assert fe_value.value == pytest.approx(3.0e-3)
+
+    use_fe.value = False
+    assert fe_value.layout.display == "none"
+    assert fe_value.value == pytest.approx(3.0e-3)
 
 
 def test_cdr_lite_knob_override_survives_save_and_load(tmp_path):

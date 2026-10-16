@@ -364,23 +364,35 @@ adds ``&CDR_TRACER_OUTPUT_SETTINGS`` and ``&CDR_GAS_EXCH_OUTPUT_SETTINGS``
 (ucla-roms PR #351 -- two dedicated CDR output streams); 0.9.0 renames the
 former ``&CDR_LITE_OUTPUT_SETTINGS`` (PR #372: five keys renamed, plus PR
 #370's ``wrt_gas_exchange``; now compiled without MARBL/CDR_FORCING) and adds
-the optional ``&CDR_LITE_SETTINGS``. C-Star versions the
+the optional ``&CDR_LITE_SETTINGS``; 0.11.0 adds the constant-iron option
+(``use_constant_Fe``/``constant_Fe_value``, PR #391) to
+``&MARBL_BIOGEOCHEMISTRY_SETTINGS``. C-Star versions the
 namelist schema by ucla-roms release (``cstar.roms.namelist``:
 ``RomsNamelist`` for < 0.4.0, ``RomsNamelistV0_4_0`` for 0.4.0 <= ucla-roms
 < 0.5.0 (adds the CDR tracer counts to ``&PARAM_SETTINGS``),
 ``RomsNamelistV0_5_0`` for 0.5.0 <= ucla-roms < 0.6.0, ``RomsNamelistV0_6_0``
 for 0.6.0 <= ucla-roms < 0.7.0, ``RomsNamelistV0_7_0`` for 0.7.0 <= ucla-roms
-< 0.9.0, ``RomsNamelistV0_9_0`` for >= 0.9.0 (a ``RomsNamelistV0_6_0``
-subclass, since a subclass can't drop V0_7_0's renamed group), selected
+< 0.9.0, ``RomsNamelistV0_9_0`` for 0.9.0 <= ucla-roms < 0.11.0 (a
+``RomsNamelistV0_6_0`` subclass, since a subclass can't drop V0_7_0's renamed
+group), ``RomsNamelistV0_11_0`` for >= 0.11.0 (a ``RomsNamelistV0_9_0``
+subclass; adds ``use_constant_Fe``/``constant_Fe_value`` to
+``&MARBL_BIOGEOCHEMISTRY_SETTINGS``, written lowercased as f90nml writes
+them -- both keys are always written, so a release before 0.11.0 stops on the
+unknown keys and keeps the 0.9.0 schema), selected
 by ``namelist_schema_for_ref(ref)`` -- semver tags select exactly; branch
 names/hashes warn and fall back to the latest schema). Forge mirrors this in
 ``namelist_model.py``: ``RunTimeSettings`` (legacy, < 0.4.0),
 ``RunTimeSettingsV0_4_0`` (adds ``param.nt_cdr_oae``/``param.nt_cdr_dor``),
 ``RunTimeSettingsV0_5_0``, ``RunTimeSettingsV0_6_0`` (adds ``pio_settings``),
 ``RunTimeSettingsV0_7_0`` (adds ``cdr_lite_output``/``cdr_gas_exch_output``),
-and ``RunTimeSettingsV0_9_0`` (``cdr_lite_output`` with the 0.9 key names and
+``RunTimeSettingsV0_9_0`` (``cdr_lite_output`` with the 0.9 key names and
 ``wrt_gas_exchange``, plus ``cdr_lite``; a ``RunTimeSettingsV0_6_0`` subclass
-like its C-Star counterpart),
+like its C-Star counterpart), and ``RunTimeSettingsV0_11_0`` (``marbl_bgc`` is
+typed ``MarblBgcCfgV0_11_0``, which gains ``use_constant_fe``/
+``constant_fe_value``; the earlier tiers' ``MarblBgcCfg`` rejects a requested
+``use_constant_fe`` rather than dropping it, and ``check_constant_fe`` rejects
+it in a build without MARBL -- resolver, ``validate_run_time_sections`` and
+``configure_build``),
 selected by ``run_time_settings_for_ref(roms_ref)``, where ``roms_ref`` is
 the blueprint's pinned ``code.roms.commit`` (threaded resolver -> executor ->
 ``write_roms_namelist``). C-Star's registry is the single source of
@@ -415,9 +427,11 @@ ucla-roms release: ``roms-marbl-0.5-default`` pins ``0.5.0``,
 #361, with no new settings tier -- it still resolves to
 ``RunTimeSettingsV0_7_0``), ``roms-marbl-0.9-default`` pins ``0.9.1``
 (``RunTimeSettingsV0_9_0``, which models the ``cdr_lite`` section; the spec does
-not declare it, see below), and ``roms-marbl-0.10-default`` pins ``0.10.1`` (same
-tier and same templates as the 0.9 spec; the default, and the first that runs
-``bgc_mode: cdr_lite``); older specs stay
+not declare it, see below), ``roms-marbl-0.10-default`` pins ``0.10.1`` (same
+tier and same templates as the 0.9 spec; the first that runs
+``bgc_mode: cdr_lite``), and ``roms-marbl-0.11-default`` pins ``0.11.0``
+(``RunTimeSettingsV0_11_0``; same templates as the 0.9/0.10 specs; the
+default); older specs stay
 fixed and keep emitting
 byte-identical legacy namelists. ``version_gated_section_names()``
 (``namelist_model.py``) collects every section modeled by at least one
@@ -584,10 +598,11 @@ Two committed unit goldens pin the resolved-settings and namelist contracts
 - **Settings-level**: ``test_golden_model_settings_test_tiny`` diffs
   resolved ``model_settings`` against
   ``golden_model_settings_test-tiny.json``. No regeneration hook -- update
-  manually. Five sibling tests pin the same comparison for each
+  manually. Six sibling tests pin the same comparison for each
   versioned-namelist schema tier: ``test_golden_model_settings_test_tiny_roms050``,
-  ``_roms060``, ``_roms070``, and ``_roms090`` (``roms-marbl-0.{5,6,7,9}-default``,
-  against ``golden_model_settings_test-tiny-roms0{50,60,70,90}.json``), and for
+  ``_roms060``, ``_roms070``, ``_roms090``, and ``_roms0110``
+  (``roms-marbl-0.{5,6,7,9,11}-default``, against
+  ``golden_model_settings_test-tiny-roms0{50,60,70,90,110}.json``), and for
   the ``bgc_mode: cdr_lite`` build on ``roms-marbl-0.10-default``,
   ``_roms090_cdr_lite`` (against
   ``golden_model_settings_test-tiny-roms090-cdr-lite.json``).
@@ -596,7 +611,7 @@ Two committed unit goldens pin the resolved-settings and namelist contracts
   ``write_roms_namelist``; only roms-tools construction classes are mocked)
   and diffs the rendered ``namelist.nml`` against
   ``golden_namelist_test-tiny.nml`` (host-rooted absolute paths normalized
-  to a ``<WORKDIR>`` token). Five sibling tests pin the versioned-namelist
+  to a ``<WORKDIR>`` token). Six sibling tests pin the versioned-namelist
   schemas against the same test-tiny domain/forcing/output setup:
   ``test_golden_namelist_test_tiny_roms050`` (``roms-marbl-0.5-default``,
   ``golden_namelist_test-tiny-roms050.nml``),
@@ -604,20 +619,23 @@ Two committed unit goldens pin the resolved-settings and namelist contracts
   adds ``&PIO_SETTINGS``, ``golden_namelist_test-tiny-roms060.nml``),
   ``test_golden_namelist_test_tiny_roms070`` (``roms-marbl-0.7-default``,
   adds ``&CDR_TRACER_OUTPUT_SETTINGS``/``&CDR_GAS_EXCH_OUTPUT_SETTINGS``,
-  ``golden_namelist_test-tiny-roms070.nml``), and
+  ``golden_namelist_test-tiny-roms070.nml``),
   ``test_golden_namelist_test_tiny_roms090`` (``roms-marbl-0.9-default``,
   ``&CDR_LITE_OUTPUT_SETTINGS``/``&CDR_LITE_SETTINGS`` in place of the
-  CDR_TRACER group, ``golden_namelist_test-tiny-roms090.nml``), and
+  CDR_TRACER group, ``golden_namelist_test-tiny-roms090.nml``),
   ``test_golden_namelist_test_tiny_roms090_cdr_lite`` (``bgc_mode: cdr_lite``
   on ``roms-marbl-0.10-default`` with a physics-only forcing and a real
   roms-tools CDR forcing: ``nt_bgc = 0``, ``nt_cdr_oae``/``nt_cdr_dor`` read off
-  the CDR forcing, ``golden_namelist_test-tiny-roms090-cdr-lite.nml``).
+  the CDR forcing, ``golden_namelist_test-tiny-roms090-cdr-lite.nml``), and
+  ``test_golden_namelist_test_tiny_roms0110`` (``roms-marbl-0.11-default``, the
+  0.9 golden plus ``use_constant_fe``/``constant_fe_value`` in
+  ``&MARBL_BIOGEOCHEMISTRY_SETTINGS``, ``golden_namelist_test-tiny-roms0110.nml``).
   Regenerate one at a time via
   ``UPDATE_GOLDEN=1 pytest <path> -k <test name>`` (the run intentionally
   fails after writing; rerun without the env var to confirm). To select
   *only* the legacy test, use ``-k "golden_namelist_test_tiny and not
-  roms050 and not roms060 and not roms070 and not roms090"`` -- a bare ``-k
-  golden_namelist_test_tiny`` matches all six, and ``-k
+  roms050 and not roms060 and not roms070 and not roms090 and not roms0110"``
+  -- a bare ``-k golden_namelist_test_tiny`` matches all seven, and ``-k
   golden_namelist_test_tiny_roms090`` matches the ``cdr_lite`` test too (add
   ``and not cdr_lite`` to select only the ``roms090`` one).
 
