@@ -83,8 +83,10 @@ class AttemptStatus(enum.StrEnum):
 class Product(ConfiguredBaseModel):
     """A file or directory a step produced."""
 
-    kind: ArtifactKind
-    """The classification of the product."""
+    kind: str = Field(json_schema_extra={"examples": [k.value for k in ArtifactKind]})
+    """The classification of the product: one of `ArtifactKind` when written by
+    this release. Kept as text on disk so a record written with a kind this
+    build no longer knows still loads; `known_kind` maps it for consumers."""
 
     path: str
     """The location of the product, relative to the step root."""
@@ -97,6 +99,19 @@ class Product(ConfiguredBaseModel):
 
     metadata: dict[str, str | int | float | list[str]] = Field(default_factory=dict)
     """Model-specific detail, such as an output stream."""
+
+    @property
+    def known_kind(self) -> ArtifactKind:
+        """The product's kind in this build's vocabulary, `other` when unknown.
+
+        Returns
+        -------
+        ArtifactKind
+        """
+        try:
+            return ArtifactKind(self.kind)
+        except ValueError:
+            return ArtifactKind.other
 
 
 class StepRecord(ConfiguredBaseModel):

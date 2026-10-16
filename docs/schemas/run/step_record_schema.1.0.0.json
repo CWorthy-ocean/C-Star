@@ -1,29 +1,5 @@
 {
     "$defs": {
-        "ArtifactKind": {
-            "description": "The closed set of kinds a step's products are classified as in its step record.\n\nModel-specific detail, such as a ROMS output stream, goes in a product's\nmetadata, not here.",
-            "enum": [
-                "grid",
-                "initial_conditions",
-                "boundary_forcing",
-                "surface_forcing",
-                "tidal_forcing",
-                "river_forcing",
-                "cdr_forcing",
-                "restart",
-                "history",
-                "average",
-                "output",
-                "emitted_blueprint",
-                "namelist",
-                "build",
-                "log",
-                "figure",
-                "other"
-            ],
-            "title": "ArtifactKind",
-            "type": "string"
-        },
         "BlueprintIdentity": {
             "additionalProperties": false,
             "description": "Identifies a blueprint document by application, name and content hash.\n\nThis is identity, not location: compare `DeferredBlueprintRef`, which\nlocates the blueprint file an upstream step will write.",
@@ -66,8 +42,28 @@
             "description": "A file or directory a step produced.",
             "properties": {
                 "kind": {
-                    "$ref": "#/$defs/ArtifactKind",
-                    "description": "The classification of the product."
+                    "description": "The classification of the product: one of `ArtifactKind` when written by\nthis release. Kept as text on disk so a record written with a kind this\nbuild no longer knows still loads; `known_kind` maps it for consumers.",
+                    "examples": [
+                        "grid",
+                        "initial_conditions",
+                        "boundary_forcing",
+                        "surface_forcing",
+                        "tidal_forcing",
+                        "river_forcing",
+                        "cdr_forcing",
+                        "restart",
+                        "history",
+                        "average",
+                        "output",
+                        "emitted_blueprint",
+                        "namelist",
+                        "build",
+                        "log",
+                        "figure",
+                        "other"
+                    ],
+                    "title": "Kind",
+                    "type": "string"
                 },
                 "path": {
                     "description": "The location of the product, relative to the step root.",

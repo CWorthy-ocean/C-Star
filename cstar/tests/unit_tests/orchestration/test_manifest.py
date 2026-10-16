@@ -138,6 +138,20 @@ class TestRoundTrip:
         assert path == tmp_path / "step" / STEP_RECORD_NAME
         assert read_step_record(tmp_path / "step") == record
 
+    def test_unknown_product_kind_still_loads(self, tmp_path: Path) -> None:
+        """A kind this build does not know is kept as text and read as `other`."""
+        record = _record(products=[Product(kind="holo_grid", path="x.nc")])
+        write_step_record(tmp_path, record)
+
+        loaded = read_step_record(tmp_path)
+
+        assert loaded is not None
+        assert loaded.products[0].kind == "holo_grid"
+        assert loaded.products[0].known_kind is ArtifactKind.other
+        assert (
+            Product(kind=ArtifactKind.grid, path="g.nc").known_kind is ArtifactKind.grid
+        )
+
     def test_missing_is_none(self, tmp_path: Path) -> None:
         assert read_run_manifest(tmp_path) is None
         assert read_step_record(tmp_path) is None
