@@ -417,6 +417,29 @@ class TestEnsureRunManifest:
         assert again.step("one").blueprint == _identity("known")  # type: ignore[union-attr]
         assert again.step("one").definition_hash == "h2"  # type: ignore[union-attr]
 
+    def test_rerun_steps_forget_their_earlier_observation(self, tmp_path: Path) -> None:
+        """A clobbered or resumed step certainly runs again: its status and record go."""
+        steps: dict[str, tuple[str, str, StepFacts | None]] = {
+            n: ("hello_world", f"tasks/{n}", None) for n in ("one", "two", "three")
+        }
+        manifest = self._ensure(tmp_path, steps)
+        for entry in manifest.steps:
+            entry.status = "Done"
+            entry.record = _record(entry.name)
+        write_run_manifest(tmp_path, manifest)
+
+        updated = self._ensure(
+            tmp_path,
+            steps,
+            attempt=Attempt(start_at=NOW, clobbered=["one"], resumed=["two"]),
+        )
+
+        assert [(s.status, s.record is None) for s in updated.steps] == [
+            ("", True),
+            ("", True),
+            ("Done", False),
+        ]
+
     def test_merges_external_without_duplicates(self, tmp_path: Path) -> None:
         facts = StepFacts(
             "h",
@@ -546,6 +569,47 @@ class TestFoldStepRecords:
 
         assert manifest.attempts[-1] == closed
 
+    def test_record_disagreeing_with_the_status_is_dropped(
+        self, tmp_path: Path
+    ) -> None:
+        """A `completed` record beside a step observed `Failed` is an earlier run's."""
+        manifest = _manifest("one")
+        write_step_record(tmp_path / "tasks/one", _record("one"))
+
+        fold_step_records(manifest, tmp_path, {"one": "Failed"})
+
+        assert manifest.step("one").record is None  # type: ignore[union-attr]
+        assert manifest.attempts[-1].status == AttemptStatus.failed
+
+    def test_record_of_a_step_running_again_is_dropped(self, tmp_path: Path) -> None:
+        manifest = _manifest("one")
+        manifest.steps[0].record = _record("one")
+        write_step_record(tmp_path / "tasks/one", _record("one"))
+
+        fold_step_records(manifest, tmp_path, {"one": "Running"})
+
+        assert manifest.step("one").record is None  # type: ignore[union-attr]
+        assert manifest.attempts[-1].finished_at is None
+
+    def test_record_is_folded_as_found_without_statuses(self, tmp_path: Path) -> None:
+        manifest = _manifest("one")
+        write_step_record(tmp_path / "tasks/one", _record("one"))
+
+        fold_step_records(manifest, tmp_path)
+
+        assert manifest.step("one").record == _record("one")  # type: ignore[union-attr]
+
+    def test_finish_time_never_precedes_the_attempt(self, tmp_path: Path) -> None:
+        """A re-entry that only reused Done steps closes at its own start."""
+        manifest = _manifest("one")
+        later = NOW + timedelta(hours=3)
+        manifest.attempts = [Attempt(start_at=later)]
+        write_step_record(tmp_path / "tasks/one", _record("one", NOW))
+
+        fold_step_records(manifest, tmp_path, {"one": "Done"})
+
+        assert manifest.attempts[-1].finished_at == later
+
     def test_unchanged_returns_false(self, tmp_path: Path) -> None:
         manifest = _manifest("one")
         statuses = {"one": "Done"}
@@ -593,13 +657,27 @@ class TestFinalizeStandaloneRun:
         assert manifest.steps[0].record is None
         assert manifest.attempts[0].status == AttemptStatus.failed
 
+    def test_a_record_older_than_the_run_counts_as_failed(
+        self, blueprint: HelloWorldBlueprint
+    ) -> None:
+        """A re-run that died before shutdown leaves the earlier run's record behind."""
+        root = blueprint.effective_working_dir
+        write_step_record(root, _record(blueprint.name, NOW))
+
+        manifest = finalize_standalone_run(
+            blueprint, started_at=NOW + timedelta(hours=1)
+        )
+
+        assert manifest.attempts[-1].status == AttemptStatus.failed
+        assert manifest.steps[0].record is None
+
     def test_second_run_adds_an_attempt(self, blueprint: HelloWorldBlueprint) -> None:
         root = blueprint.effective_working_dir
         write_step_record(
             root, _record(blueprint.name).model_copy(update={"outcome": "failed"})
         )
         first = finalize_standalone_run(blueprint, started_at=NOW)
-        write_step_record(root, _record(blueprint.name))
+        write_step_record(root, _record(blueprint.name, NOW + timedelta(hours=2)))
 
         second = finalize_standalone_run(blueprint, started_at=NOW + timedelta(hours=1))
 

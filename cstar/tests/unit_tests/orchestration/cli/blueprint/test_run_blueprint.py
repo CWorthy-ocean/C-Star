@@ -50,6 +50,17 @@ from cstar.orchestration.transforms import ApplyOverridesDirective
 from cstar.roms.simulation import ROMSSimulation
 
 
+@pytest.fixture(autouse=True)
+def _run_from_tmp(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Run every test from its own directory.
+
+    The fixture blueprints name working directories relative to the current
+    directory (`.` and `temp_out_dir`), and a standalone run now records itself
+    there; without this the checkout would collect their manifests.
+    """
+    monkeypatch.chdir(tmp_path)
+
+
 def test_blueprint_run_file_dne(
     tmp_path: Path,
     flatten_cli_output: Callable[[str], str],
@@ -988,14 +999,14 @@ def test_blueprint_run_writes_run_manifest(
     assert entry.record.outcome == "completed"
 
 
-def test_blueprint_run_in_workplan_writes_no_run_manifest(
+def test_blueprint_run_with_step_writes_no_run_manifest(
     hello_world_bp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A step of a workplan run is recorded by the orchestrator, not the CLI."""
     monkeypatch.setenv(ENV_CSTAR_RUNID, "a-run")
 
-    result = _run_hello_world(hello_world_bp_path)
+    result = _run_hello_world(hello_world_bp_path, ARG_STEP, "A")
 
     assert result.exit_code == 0, result.output
     root = deserialize(hello_world_bp_path, HelloWorldBlueprint).effective_working_dir

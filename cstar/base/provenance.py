@@ -1,5 +1,7 @@
 """Facts about the environment a run was produced in: package versions and host."""
 
+import hashlib
+import json
 import typing as t
 from importlib.metadata import PackageNotFoundError
 from importlib.metadata import version as _pkg_version
@@ -75,3 +77,20 @@ def system_name() -> str:
         return HostNameEvaluator().name
     except OSError:
         return ""
+
+
+def canonical_hash(data: t.Any) -> str:
+    """Fingerprint JSON-able data independent of key order.
+
+    Parameters
+    ----------
+    data : Any
+        The data to hash; values JSON cannot encode are hashed by their string form.
+
+    Returns
+    -------
+    str
+        The SHA-256 hex digest of the data's sorted-keys, compact JSON.
+    """
+    canonical = json.dumps(data, sort_keys=True, separators=(",", ":"), default=str)
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()

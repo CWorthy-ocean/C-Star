@@ -1026,6 +1026,31 @@ def test_write_bytes_atomic_writes_content_and_creates_parents(tmp_path: Path) -
     assert [p.name for p in target.parent.iterdir()] == ["file.bin"]
 
 
+def test_write_bytes_atomic_new_file_honours_the_umask(tmp_path: Path) -> None:
+    """Verify a new file gets the umask default without toggling the process umask."""
+    target = tmp_path / "fresh.txt"
+    previous = os.umask(0o027)
+    try:
+        with mock.patch.object(os, "umask", side_effect=AssertionError("toggled")):
+            write_bytes_atomic(target, b"data")
+    finally:
+        os.umask(previous)
+
+    assert stat.S_IMODE(target.stat().st_mode) == 0o666 & ~0o027
+
+
+def test_write_bytes_atomic_without_sync_still_replaces(tmp_path: Path) -> None:
+    """Verify `sync=False` skips the fsync and still renames the data into place."""
+    target = tmp_path / "state.yaml"
+    target.write_bytes(b"old")
+
+    with mock.patch.object(os, "fsync") as fsync:
+        write_bytes_atomic(target, b"new", sync=False)
+
+    fsync.assert_not_called()
+    assert target.read_bytes() == b"new"
+
+
 def test_write_bytes_atomic_keeps_existing_mode(tmp_path: Path) -> None:
     """Verify replacing a file keeps its permissions."""
     target = tmp_path / "script.sh"

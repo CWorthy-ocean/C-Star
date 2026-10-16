@@ -1,3 +1,4 @@
+from datetime import UTC, datetime
 from importlib.metadata import PackageNotFoundError
 from unittest import mock
 
@@ -6,6 +7,7 @@ import pytest
 from cstar.base import provenance
 from cstar.base.provenance import (
     DEFAULT_PACKAGES,
+    canonical_hash,
     package_version,
     package_versions,
     system_name,
@@ -47,3 +49,13 @@ def test_system_name_is_empty_when_the_host_cannot_be_named() -> None:
     with mock.patch("cstar.system.manager.HostNameEvaluator") as evaluator:
         type(evaluator.return_value).name = mock.PropertyMock(side_effect=OSError)
         assert system_name() == ""
+
+
+def test_canonical_hash_ignores_key_order_and_stringifies_odd_values() -> None:
+    """Verify the digest depends on content, not key order or JSON-unfriendly types."""
+    when = datetime(2026, 10, 16, tzinfo=UTC)
+    first = canonical_hash({"b": [1, 2], "a": when})
+    second = canonical_hash({"a": str(when), "b": [1, 2]})
+
+    assert first == second
+    assert first != canonical_hash({"a": str(when), "b": [2, 1]})

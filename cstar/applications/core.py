@@ -79,7 +79,8 @@ class RunnerRequest(t.Generic[TBlueprint]):
     to. Only honoured by applications whose
     `ApplicationDefinition.pre_runnable` is `True`."""
     step: str = ""
-    """The workplan step this run executes; empty for a standalone run."""
+    """The workplan step this run executes; empty for a standalone run, which
+    writes its own run manifest."""
 
     def __init__(
         self,

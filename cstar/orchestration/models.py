@@ -5,8 +5,6 @@ workplan run declared under a workplan's `runs`, by the token `<step>@<alias>`
 (`build@spinup`); see `StepRef`.
 """
 
-import hashlib
-import json
 import re
 import typing as t
 import uuid
@@ -40,6 +38,7 @@ from pydantic_core import CoreSchema
 
 from cstar.base.adapter import CstarAdaptationError
 from cstar.base.exceptions import CstarExpectationFailed
+from cstar.base.provenance import canonical_hash
 from cstar.base.utils import generate_schema_ref, lazy_import, slugify
 from cstar.execution.file_system import StateDirectoryManager
 from cstar.orchestration.serialization import register_representer, strenum_representer
@@ -430,8 +429,7 @@ class Blueprint(ConfiguredBaseModel, ABC):
         data = self.model_dump(mode="json")
         for key in (*BLUEPRINT_METADATA_FIELDS, "$schema"):
             data.pop(key, None)
-        canonical = json.dumps(data, sort_keys=True, separators=(",", ":"))
-        return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+        return canonical_hash(data)
 
     @field_validator("working_dir", mode="after")
     @classmethod

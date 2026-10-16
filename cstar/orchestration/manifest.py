@@ -13,8 +13,6 @@ without invalidating them.
 
 import enum
 import fcntl
-import hashlib
-import json
 import typing as t
 import uuid
 from collections.abc import Iterator
@@ -29,7 +27,7 @@ from pydantic import Field
 from cstar.applications.core import ArtifactKind, get_application
 from cstar.base.exceptions import CstarError, CstarExpectationFailed
 from cstar.base.log import get_logger
-from cstar.base.provenance import package_versions, system_name
+from cstar.base.provenance import canonical_hash, package_versions, system_name
 from cstar.base.utils import slugify, utc_now
 from cstar.execution.file_system import (
     StateDirectoryManager,
@@ -51,7 +49,7 @@ from cstar.orchestration.serialization import (
     read_document,
     render_model,
 )
-from cstar.system.migration import CstarSchemaTooNewError
+from cstar.system.migration import CstarSchemaTooNewError, version_key
 
 if t.TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
@@ -364,21 +362,6 @@ def _unique(items: "Sequence[_M]") -> list[_M]:
     return unique
 
 
-def _version_key(version: str) -> tuple[int, ...]:
-    """Order a semantic version string.
-
-    Parameters
-    ----------
-    version : str
-        A dotted version of integers.
-
-    Returns
-    -------
-    tuple[int, ...]
-    """
-    return tuple(int(part) for part in version.split("."))
-
-
 def _read(path: Path, klass: type[_M], label: str) -> _M | None:
     """Read a persisted document into its model.
 
@@ -407,7 +390,7 @@ def _read(path: Path, klass: type[_M], label: str) -> _M | None:
     try:
         raw = read_document(path)
         found = str(raw.get("schema_version", "1.0.0"))
-        newer = _version_key(found) > _version_key(target)
+        newer = version_key(found) > version_key(target)
         if not newer:
             return klass.model_validate(raw)
     except FileNotFoundError:
@@ -532,23 +515,6 @@ def manifest_lock(run_id: str) -> Iterator[None]:
             fcntl.flock(lock_file, fcntl.LOCK_UN)
 
 
-def _canonical_hash(data: t.Any) -> str:
-    """Fingerprint JSON-able data independent of key order.
-
-    Parameters
-    ----------
-    data : Any
-        The data to hash; values JSON cannot encode are hashed by their string form.
-
-    Returns
-    -------
-    str
-        The SHA-256 hex digest.
-    """
-    canonical = json.dumps(data, sort_keys=True, separators=(",", ":"), default=str)
-    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
-
-
 def workplan_content_hash(workplan: "Workplan") -> str:
     """Fingerprint a workplan.
 
@@ -562,7 +528,7 @@ def workplan_content_hash(workplan: "Workplan") -> str:
     str
         The SHA-256 hex digest of the workplan's serialized form.
     """
-    return _canonical_hash(workplan.model_dump(mode="json", by_alias=True))
+    return canonical_hash(workplan.model_dump(mode="json", by_alias=True))
 
 
 @dataclass(frozen=True)
@@ -784,7 +750,7 @@ def describe_steps(workplan: "Workplan", base_dir: Path) -> dict[str, StepFacts]
             blueprint = _load_step_blueprint(step, base_dir)
             content_hash = blueprint.content_hash() if blueprint else ""
 
-        definition_hash = _canonical_hash(
+        definition_hash = canonical_hash(
             {
                 "name": step.name,
                 "application": step.application,
@@ -913,8 +879,24 @@ def ensure_run_manifest(
     manifest.external = external.merged(ExternalDependencies(runs=aliases))
     manifest.attempts.append(attempt)
 
+    # a step the attempt clobbers or resumes certainly runs again: what was
+    # observed of its earlier run no longer stands
+    rerun = {*attempt.clobbered, *attempt.resumed}
+    for entry in manifest.steps:
+        if entry.name in rerun:
+            entry.status = ""
+            entry.record = None
+
     write_run_manifest(root, manifest)
     return manifest
+
+
+_OUTCOME_OF_STATUS: t.Final[dict[str, str]] = {
+    Status.Done.name: "completed",
+    Status.Failed.name: "failed",
+    Status.Cancelled.name: "cancelled",
+}
+"""The step record outcome each terminal orchestration status agrees with."""
 
 
 def fold_step_records(
@@ -923,6 +905,12 @@ def fold_step_records(
     statuses: "Mapping[str, str] | None" = None,
 ) -> bool:
     """Fold what the steps have recorded, and their statuses, into a manifest.
+
+    A record is folded only when it agrees with the observed status: `Done` with
+    `completed`, `Failed` with `failed`, `Cancelled` with `cancelled`. A record
+    that disagrees, or that a step still running or waiting has on disk, is left
+    over from an earlier run of the step, and is not reported. When `statuses`
+    does not name a step, its record is folded as found.
 
     When every step is terminal, the latest attempt is closed. The manifest is
     changed in memory only; the caller holds the lock and decides whether to
@@ -952,12 +940,23 @@ def fold_step_records(
             record = None
         if record is not None:
             entry.record = record
-            entry.blueprint = entry.blueprint or record.blueprint
         if statuses is not None and entry.name in statuses:
             entry.status = statuses[entry.name]
+            outcome = entry.record.outcome if entry.record else None
+            if entry.record and _OUTCOME_OF_STATUS.get(entry.status) != outcome:
+                log.debug(
+                    f"Step {entry.name!r} is {entry.status} but its record says "
+                    f"{outcome!r}; the record is from an earlier run"
+                )
+                entry.record = None
+        if entry.record:
+            entry.blueprint = entry.blueprint or entry.record.blueprint
 
     terminal = {state.name for state in Status.terminal_states()}
     if manifest.attempts and all(entry.status in terminal for entry in manifest.steps):
+        # A step re-run from scratch is relaunched by the process that is still
+        # running its workplan, before it can observe the stale terminal status
+        # of the step's earlier run, so a re-entry is not closed early by it.
         attempt = manifest.attempts[-1]
         if attempt.finished_at is None:
             names = {entry.status for entry in manifest.steps}
@@ -968,7 +967,7 @@ def fold_step_records(
             else:
                 attempt.status = AttemptStatus.done
             recorded = [e.record.finished_at for e in manifest.steps if e.record]
-            attempt.finished_at = max(recorded, default=utc_now())
+            attempt.finished_at = max([*recorded, attempt.start_at])
 
     manifest.observed_at = utc_now()
     return before != manifest.model_dump(mode="json", exclude={"observed_at"})
@@ -981,8 +980,8 @@ def finalize_standalone_run(
 
     A standalone `cstar blueprint run` has no orchestrator, so the CLI that ran
     it is the one process left to record the attempt. The step record the
-    runner wrote is the authoritative outcome; a missing record counts as
-    failed. There is no lock: a standalone run has a single writer.
+    runner wrote is the authoritative outcome; a missing record, or one older
+    than `started_at`, counts as failed. There is no lock: a standalone run has a single writer.
 
     Parameters
     ----------
@@ -1018,7 +1017,11 @@ def finalize_standalone_run(
         runs={},
     )
 
+    # a record older than this run is an earlier run's: this one died without
+    # reaching shutdown
     record = read_step_record(root)
+    if record and record.finished_at < started_at:
+        record = None
     if record and record.outcome == "completed":
         status = Status.Done
     elif record and record.outcome == "cancelled":

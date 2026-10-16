@@ -169,7 +169,8 @@ class StateRepository:
             # and a reader that caught an in-place write mid-way would copy a
             # truncated sentinel back over the complete one
             content = render_model(proxy, mode)
-            await asyncio.to_thread(write_text_atomic, persist_to, content)
+            # no fsync: the sentinel is rewritten on every status change
+            await asyncio.to_thread(write_text_atomic, persist_to, content, sync=False)
         return persist_to if content else None
 
     async def list_sentinels(

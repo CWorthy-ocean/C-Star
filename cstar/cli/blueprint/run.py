@@ -1,5 +1,4 @@
 import asyncio
-import os
 import typing as t
 from importlib.metadata import PackageNotFoundError
 from importlib.metadata import version as _pkg_version
@@ -17,7 +16,6 @@ from cstar.base.env import (
     ENV_CSTAR_CLI_VERBOSE,
     ENV_CSTAR_CLOBBER_WORKING_DIR,
     ENV_CSTAR_LOG_LEVEL,
-    ENV_CSTAR_RUNID,
     get_env_item,
 )
 from cstar.base.exceptions import CstarError
@@ -320,8 +318,9 @@ def run(
     started_at = utc_now()
     asyncio.run(runner.execute())
 
-    # a workplan step is recorded by the orchestrator's manifest instead
-    if not os.getenv(ENV_CSTAR_RUNID, ""):
+    # a workplan step (always passed `--step`) is recorded by the orchestrator's
+    # manifest instead
+    if not step:
         try:
             finalize_standalone_run(runner.blueprint, started_at=started_at)
         except Exception as ex:

@@ -120,19 +120,19 @@ def test_a_run_id_refreshes_the_manifest(run: FakeRun) -> None:
         mock.patch("cstar.cli.run.show.get_launcher"),
         mock.patch(
             "cstar.cli.run.show.load_run_state",
-            mock.AsyncMock(return_value=DagStatus({STEP: Status.Running})),
+            mock.AsyncMock(return_value=DagStatus({STEP: Status.Done})),
         ),
     ):
         result = invoke(RUN_ID, record=run.record)
 
     assert result.exit_code == 0, result.output
-    assert Status.Running.name in result.stdout
+    assert Status.Done.name in result.stdout
     manifest = read_run_manifest(run.root)
     assert manifest is not None
     assert manifest.observed_at is not None
     entry = manifest.step(STEP)
     assert entry is not None
-    assert entry.status == Status.Running.name
+    assert entry.status == Status.Done.name
     assert entry.record is not None
 
 
