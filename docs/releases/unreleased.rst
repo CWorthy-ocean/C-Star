@@ -71,6 +71,16 @@ New features
 
 - New bundled ModelSpec ``roms-marbl-0.11-default`` (ucla-roms 0.11.0) is now the wizard's default model. (`#774 <https://github.com/CWorthy-ocean/C-Star/pull/774>`_)
 - The wizard's Advanced settings show "Hold iron constant" and "Constant iron concentration"; the concentration field appears only while the option is on. (`#774 <https://github.com/CWorthy-ocean/C-Star/pull/774>`_)
+- Forge accepts the ``upscaled`` CDR mode with ``bgc_mode: cdr_lite`` on ucla-roms >= 0.11.0, so a parent without MARBL can receive a child's upscaled CDR-lite fluxes. (`#777 <https://github.com/CWorthy-ocean/C-Star/pull/777>`_)
+
+  - State the parent's CDR-lite tracer counts with ``run_time_overrides={"param": {"nt_cdr_oae": ..., "nt_cdr_dor": ...}}``, matching the child's tracers; Forge rejects the blueprint without them.
+  - Forge rejects the combination on ucla-roms releases before 0.11.0, and in physics-only builds on every release.
+
+- The upscaler writes the child's CDR-lite tracer boundary fluxes into the parent's CDR forcing after ALK and DIC, with a ``cdr_trc_name`` variable naming each column. (`#777 <https://github.com/CWorthy-ocean/C-Star/pull/777>`_)
+
+  - Output from children without CDR-lite tracers is unchanged, and ucla-roms releases before 0.11.0 still read the first two columns as ALK and DIC.
+  - A CDR-lite tracer missing from one of the child's open boundaries is left out, with a warning.
+
 
 
 
@@ -91,6 +101,8 @@ Bug Fixes
   - All offending keys are reported in one error, before any input data is generated.
   - Version-gated settings get the same check on every ucla-roms release: a case variant of ``use_constant_fe``, ``nt_cdr_oae`` or a newer section's name is rejected even where that release lacks the setting.
 
+- On ucla-roms >= 0.11.0, the upscaled CDR mode wrote ``cdr_nz_chd = 50``, which aborts at init unless the child grid has exactly 50 levels; Forge now writes 0, which tells ROMS to read the level count from the forcing file. (`#777 <https://github.com/CWorthy-ocean/C-Star/pull/777>`_)
+
 
 Improvements
 ~~~~~~~~~~~~
@@ -109,6 +121,7 @@ Improvements
 - The generated ROMS namelist names inputs relative to ``work/`` (``../input/input_datasets/...``), keeping names short for ROMS's 99-character filename buffers; a source outside the run keeps its absolute path. (`#766 <https://github.com/CWorthy-ocean/C-Star/pull/766>`_)
 - Symlinks C-Star creates (staged inputs, ``work/roms``, the tracking ``latest`` pointer, the legacy source-data link) are relative when both ends sit in the same tree and absolute otherwise. (`#766 <https://github.com/CWorthy-ocean/C-Star/pull/766>`_)
 - A migrated blueprint copy written to another directory keeps naming the same files. (`#766 <https://github.com/CWorthy-ocean/C-Star/pull/766>`_)
+- Upscaled CDR runs now set ``cdr_relocate_to_wet_pts``: a child-boundary profile whose nearest parent point is land moves to the nearest wet point instead of aborting, and runs that already worked keep the same release points. (`#777 <https://github.com/CWorthy-ocean/C-Star/pull/777>`_)
 
 
 Miscellaneous
@@ -124,3 +137,4 @@ Miscellaneous
 - The integration suite and the weekly extended matrix now pin ucla-roms 0.11.0; the integration namelist goldens gain the two iron keys. (`#774 <https://github.com/CWorthy-ocean/C-Star/pull/774>`_)
 - The developer and ModelSpec docs describe the 0.11.0 schema tier and the new default. (`#774 <https://github.com/CWorthy-ocean/C-Star/pull/774>`_)
 - The Forge spec docs now say that settings keys use Forge's lowercase names, not the ROMS namelist spelling. (`#775 <https://github.com/CWorthy-ocean/C-Star/pull/775>`_)
+- The Forge internals developer guide describes the ucla-roms 0.11.0 upscaled-CDR rules. (`#777 <https://github.com/CWorthy-ocean/C-Star/pull/777>`_)
