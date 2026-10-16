@@ -18,9 +18,9 @@ Definitions
         files and settings for a simulation and writes the ROMS-MARBL
         blueprint that runs it.
 
-      Smaller applications (``nest_ic``, ``upscaler``, ``plotter``,
-      ``hello_world``) support nesting workflows and serve as examples for
-      :doc:`writing your own <custom_applications>`.
+      Smaller applications (``nest_ic``, ``upscaler``, ``cdr_metrics``,
+      ``plotter``, ``hello_world``) support nesting and CDR workflows and
+      serve as examples for :doc:`writing your own <custom_applications>`.
 
     Blueprint
       A YAML file holding everything an application needs to produce its

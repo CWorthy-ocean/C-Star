@@ -66,6 +66,29 @@ one OAE release (an ALK/DIC tracer pair) and one DOR release (one DIC tracer), s
 ``cdr_lite`` build has ``nt_cdr_oae == nt_cdr_dor == 1`` and five tracers. The resolver
 defaults each release's ``tracer_set`` to ``cdr_lite``."""
 
+MARBL_CDR_FORCING: dict[str, Any] = {
+    "start_time": RUN_START.isoformat(),
+    "end_time": RUN_END.isoformat(),
+    "releases": [
+        {
+            "name": "oae",
+            "lat": 60.0,
+            "lon": -5.0,
+            "depth": 10.0,
+            "hsc": 10.0,
+            "vsc": 10.0,
+            "times": [RUN_START.isoformat(), RUN_END.isoformat()],
+            "release_type": "tracer_perturbation",
+            "tracer_fluxes": {"ALK": [2.0e6, 2.0e6]},
+        }
+    ],
+}
+"""A ``simple``-mode CDR forcing over the run window, at the ``na-test-8x8`` grid centre,
+for a MARBL build: one OAE release that adds alkalinity only, so ``ALK_source >= 0`` and
+``DIC_source == 0``, which the CDR metrics' release sign check requires. The release has
+no ``tracer_set``, so it is a MARBL release (roms-tools' default) and every tracer flux
+left out is zero. With the forcing active, ucla-roms writes the ``_cdr`` output stream."""
+
 
 FORGE_CASES = {
     "unified": ForgeCase("na-test-8x8", "test-glorys-era5-unified"),

@@ -53,6 +53,15 @@ running a custom application with user-provided blueprints.
 - :download:`Plotter Blueprint Schema v2.1.0 <https://raw.githubusercontent.com/CWorthy-ocean/C-Star/refs/heads/main/docs/schemas/bp/plotter/plotter_schema.2.1.0.json>`
 
 
+CDR Metrics Blueprint
+~~~~~~~~~~~~~~~~~~~~~
+
+The `cdr_metrics` blueprint computes CDR metrics from the `_cdr` output of
+ROMS-MARBL runs.
+
+- :download:`CDR Metrics Blueprint Schema v1.1.0 <https://raw.githubusercontent.com/CWorthy-ocean/C-Star/refs/heads/main/docs/schemas/bp/cdr_metrics/cdr_metrics_schema.1.1.0.json>`
+
+
 Forge Blueprint
 ~~~~~~~~~~~~~~~
 
