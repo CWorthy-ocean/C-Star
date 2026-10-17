@@ -8,6 +8,7 @@ initial_conditions:
       name: ESPER
       esper_method: nn
       esper_equation: 8
+      esper_salinity_conditioning: true
     use_vars:
     - ALK
     - DIC
@@ -75,6 +76,7 @@ forcing:
         name: ESPER
         esper_method: nn
         esper_equation: 8
+        esper_salinity_conditioning: true
       use_vars:
       - ALK
       - DIC

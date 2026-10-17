@@ -277,6 +277,12 @@ HELP_TEXT: dict[str | tuple[str, str], str] = {
     "or 'mixed'.",
     "esper_equation": "PyESPER predictor equation for an 'ESPER' source: 8 "
     "(salinity + temperature) or 16 (salinity only). Blank = roms-tools default (8).",
+    "esper_salinity_conditioning": "Blend the salinity PyESPER feeds its nets toward "
+    "the WOA23 annual climatology below 31-34 PSU, where ESPER has no training data "
+    "and gives unphysical values in river plumes (silicate > 100 µmol/kg, negative "
+    "nutrients, DIC above ALK), then dilute ALK and DIC back to the model salinity. "
+    "Forge downloads the one WOA23 file this needs. Requires the CWorthy PyESPER fork "
+    "(tag v1.1.1+cworthy.1 or later).",
     # ---- IC BGC sources (row list) ----------------------------------------------
     (
         "ic_bgc",
@@ -2165,7 +2171,8 @@ _IC_SOURCE_OPTS = [e.value for e in InitialConditionsSource] + [_IC_NONE]
 _BOUNDARY_NONE = "(none)"
 _RIVER_BGC_SOURCE_OPTS = [""] + [e.value for e in RiverBgcSource]
 _RIVER_TEMP_SOURCE_OPTS = [""] + [e.value for e in RiverTemperatureSource]
-# ESPER source fields (SourceSpec.esper_method/esper_equation); "" = unset (roms-tools
+# ESPER source fields (SourceSpec.esper_method/esper_equation; the
+# esper_salinity_conditioning checkbox beside them); "" = unset (roms-tools
 # default: method="nn", equation=8).
 _ESPER_METHOD_OPTS = ["", "lir", "nn", "mixed"]
 _ESPER_EQUATION_OPTS = ["", "8", "16"]
@@ -2299,6 +2306,15 @@ def _add_bgc_source_widgets(W, w: dict[str, Any], cat: str, src: dict[str, Any],
         style=small,
         layout=W.Layout(width="170px"),
         tooltip=_tip(cat, "esper_equation"),
+    )
+    w["esper_salinity_conditioning"] = W.Checkbox(
+        value=bool(src.get("esper_salinity_conditioning", False)),
+        description=_row_desc(
+            "esper_salinity_conditioning", "condition salinity", colon=False
+        ),
+        indent=False,
+        layout=W.Layout(width="200px"),
+        tooltip=_tip(cat, "esper_salinity_conditioning"),
     )
 
 
@@ -2985,6 +3001,8 @@ class _ForcingEditor:
             show(w["esper_method"], name == "ESPER")
         if "esper_equation" in w:
             show(w["esper_equation"], name == "ESPER")
+        if "esper_salinity_conditioning" in w:
+            show(w["esper_salinity_conditioning"], name == "ESPER")
         # A 'constants' source takes no path (SourceSpec._constants_only_for_
         # constants_source forbids pairing them) -- gated on the "constants" key's
         # presence, which only ic_bgc/boundary_bgc rows carry, so this never
@@ -3660,6 +3678,12 @@ class _ForcingEditor:
             src["esper_method"] = w["esper_method"].value
         if "esper_equation" in w and w["esper_equation"].value and name_val == "ESPER":
             src["esper_equation"] = int(w["esper_equation"].value)
+        if (
+            "esper_salinity_conditioning" in w
+            and w["esper_salinity_conditioning"].value
+            and name_val == "ESPER"
+        ):  # Checkbox: unchecked = the model default (off), emitted by neither side
+            src["esper_salinity_conditioning"] = True
         item = {"source": src}
         if "type" in w:
             item["type"] = w["type"].value

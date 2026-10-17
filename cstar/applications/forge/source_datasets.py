@@ -118,6 +118,8 @@ from cstar.applications.forge.source_registry import (  # noqa: E402,F401  (re-e
     WOA23_BGC_VARIABLES,
     WOA23_GRID,
     WOA23_PERIODS,
+    WOA23_SALINITY_FILENAME,
+    WOA23_SALINITY_URL,
     WOA_DOWNLOAD_URL,
     map_source_to_dataset_key,
 )
@@ -933,20 +935,72 @@ def _prepare_woa_bgc(self: SourceDatasets) -> Path:
             path.unlink()
 
         print(f"    [{index}/{len(pending)}] {filename}")
-        # Stream to a temporary file in the destination directory and move it into
-        # place, so an interrupted download never leaves a truncated file that a later
-        # run would mistake for a complete one.
-        with tempfile.NamedTemporaryFile(
-            delete=False, dir=str(woa_path), suffix=".part"
-        ) as tmpfile:
-            with urlopen(url) as r:
-                shutil.copyfileobj(r, tmpfile)
-            tmp_path = Path(tmpfile.name)
-        tmp_path.replace(path)
+        _download_into_place(url, path)
 
     print(f"✔️  WOA23 BGC download complete: {woa_path}")
     self.paths["WOA_BGC"] = woa_path
     return woa_path
+
+
+def _download_into_place(url: str, path: Path) -> None:
+    """Stream ``url`` to a temporary file beside ``path`` and move it into place, so an
+    interrupted download never leaves a truncated file that a later run would mistake
+    for a complete one.
+    """
+    with tempfile.NamedTemporaryFile(
+        delete=False, dir=str(path.parent), suffix=".part"
+    ) as tmpfile:
+        with urlopen(url) as r:
+            shutil.copyfileobj(r, tmpfile)
+        tmp_path = Path(tmpfile.name)
+    tmp_path.replace(path)
+
+
+# ---------------------------
+# WOA_SALINITY handler (the WOA23 1-degree annual salinity ESPER conditioning reads)
+# ---------------------------
+
+
+@register_dataset("WOA_SALINITY")
+def _prepare_woa_salinity(self: SourceDatasets) -> Path:
+    """
+    Ensure the WOA23 1-degree annual-mean salinity file exists locally.
+
+    This is the single file PyESPER's salinity conditioning reads
+    (``SourceSpec.esper_salinity_conditioning``): below 31-34 PSU the salinity fed
+    to ESPER's nets is blended toward this climatology, because the nets have no
+    training data at river-plume salinities and extrapolate unphysically there.
+    PyESPER deliberately does not download it, so Forge does, and hands roms-tools
+    the path as ``source["salinity_conditioning"]["woa_salinity_path"]`` (see
+    ``input_data._resolve_source_block``).
+
+    Stored in ``self.source_data_dir / "WOA"`` under its NCEI name. The ``WOA_BGC``
+    handler stages the same file as its annual salinity member, so whichever runs
+    first downloads it and the other finds it. Skipped when present unless
+    ``self.clobber`` is set.
+
+    Returns
+    -------
+    Path
+        The file itself (not its directory).
+    """
+    woa_path = self.cache_root / "WOA"
+    woa_path.mkdir(parents=True, exist_ok=True)
+    path = woa_path / WOA23_SALINITY_FILENAME
+
+    if path.exists() and not self.clobber:
+        print(f"✔️  Using existing WOA23 annual salinity file: {path}")
+        self.paths["WOA_SALINITY"] = path
+        return path
+    if path.exists():
+        print(f"⚠️  Clobber=True: removing existing WOA23 file {path.name}")
+        path.unlink()
+
+    print(f"⬇️  Downloading WOA23 1° annual salinity → {path} (~25 MB)")
+    _download_into_place(WOA23_SALINITY_URL, path)
+    print(f"✔️  WOA23 annual salinity download complete: {path}")
+    self.paths["WOA_SALINITY"] = path
+    return path
 
 
 # ---------------------------

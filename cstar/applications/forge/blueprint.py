@@ -798,6 +798,20 @@ class SourceSpec(_Section):
     esper_equation: Literal[8, 16] | None = None
     """PyESPER predictor equation: 8 (salinity + temperature) or 16 (salinity only).
     Only valid when ``name == "ESPER"``; roms-tools defaults to 8 when unset."""
+    esper_salinity_conditioning: bool = Field(default=False, exclude_if=lambda v: not v)
+    """Blend the salinity PyESPER feeds its nets toward the WOA23 annual-mean
+    climatology below 31-34 PSU (raised cosine; bit-identical above) and dilute the
+    alkalinity and DIC estimates back to the model salinity. ESPER was fit to GLODAP
+    data with almost none below ~31 PSU, so at river-plume salinities it extrapolates
+    unphysically (silicate > 100 mmol/m^3, negative nutrients, DIC above ALK). ``True``
+    is only valid when ``name == "ESPER"``; it needs the CWorthy PyESPER fork at tag
+    ``v1.1.1+cworthy.1`` or later. Forge stages the one WOA23 file this needs
+    (dataset ``WOA_SALINITY``) and hands roms-tools its path.
+
+    ``False`` (the default, roms-tools' own) is **left out of saved blueprints and
+    the content hash** (``exclude_if``), so blueprints written before the field
+    existed keep their hash, and blueprints saved with it off still load on builds
+    that do not know it -- the same arrangement as an unset ``carbonate_sensitivity``."""
 
     @model_validator(mode="after")
     def _glorys_layout_only_for_glorys(self) -> SourceSpec:
@@ -823,10 +837,13 @@ class SourceSpec(_Section):
     def _esper_fields_only_for_esper_source(self) -> SourceSpec:
         is_esper = self.name.upper() == "ESPER"
         if (
-            self.esper_method is not None or self.esper_equation is not None
+            self.esper_method is not None
+            or self.esper_equation is not None
+            or self.esper_salinity_conditioning
         ) and not is_esper:
             raise ValueError(
-                "esper_method/esper_equation are only valid when name is 'ESPER'"
+                "esper_method/esper_equation/esper_salinity_conditioning are only "
+                "valid when name is 'ESPER'"
             )
         # No path requirement for ESPER: without one, roms-tools imports PyESPER
         # from the environment and PyESPER resolves its own data directories
@@ -1531,6 +1548,29 @@ class ForgeBlueprint(Blueprint):
         from cstar.applications.forge.migration import migrate_forge_blueprint_data
 
         return migrate_forge_blueprint_data(data)
+
+    @model_validator(mode="after")
+    def _esper_conditioning_has_its_dataset(self) -> ForgeBlueprint:
+        """An ESPER source with ``esper_salinity_conditioning`` on needs the
+        ``WOA_SALINITY`` dataset staged. The resolver notes it automatically; a
+        hand-edited blueprint that only flipped the switch would otherwise fail deep
+        inside input generation, after every other dataset was staged.
+        """
+        sections = [self.forcing.initial_conditions, self.forcing.boundary]
+        wants = any(
+            item.source.name.upper() == "ESPER"
+            and item.source.esper_salinity_conditioning
+            for section in sections
+            if section is not None
+            for item in section.bgc_sources
+        )
+        if wants and "WOA_SALINITY" not in self.datasets:
+            raise ValueError(
+                "an ESPER source has esper_salinity_conditioning on but 'WOA_SALINITY' "
+                "is not in `datasets`; add it there (the resolver does this when the "
+                "blueprint is built from specs)."
+            )
+        return self
 
     @field_validator("name")
     @classmethod

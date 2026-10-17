@@ -60,7 +60,18 @@ ESPER *(experimental)*
    physical source at generation time, using the CWorthy fork of PyESPER
    (either installed in the environment or pointed to with the source's
    ``path``). Large domains may need the source's ``serialize_dask`` option
-   to bound memory.
+   to bound memory. ESPER's nets have no training data at river-plume
+   salinities and extrapolate badly there (silicate above 100 µmol/kg, negative
+   nutrients, DIC above alkalinity); set the source's
+   ``esper_salinity_conditioning: true`` to have PyESPER evaluate them at a
+   salinity blended toward the WOA23 annual climatology below 31-34 PSU and
+   dilute alkalinity and DIC back to the model salinity. Forge then downloads
+   the one WOA23 file this needs (``WOA_SALINITY``, into the ``WOA`` folder).
+   This needs the CWorthy PyESPER fork at tag ``v1.1.1+cworthy.1`` or later
+   (``git clone --branch v1.1.1+cworthy.1 https://github.com/CWorthy-ocean/PyESPER``
+   then ``pip install -e .``; the fork is not on PyPI or conda); the bundled
+   ``glorys-era5-esper`` forcing spec has it on. ESPER oxygen is floored at
+   2.0 mmol/m³ by roms-tools regardless of this switch.
 
 Provided by you
 ---------------

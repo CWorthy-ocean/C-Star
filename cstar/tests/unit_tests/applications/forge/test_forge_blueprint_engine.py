@@ -11,7 +11,11 @@ forcing.boundary) rather than duplicating it here.
 
 from test_forge_blueprint import _build
 
-from cstar.applications.forge.blueprint import BgcInterpMethod, BgcSourceItem
+from cstar.applications.forge.blueprint import (
+    BgcInterpMethod,
+    BgcSourceItem,
+    SourceSpec,
+)
 from cstar.applications.forge.engine import sources_to_forcing_override
 
 
@@ -133,3 +137,45 @@ def test_content_hash_ignores_bgc_serialize_dask_and_section_bypass_validation()
         }
     )
     assert changed_use_vars.content_hash() != base_hash
+
+
+def test_esper_salinity_conditioning_reaches_forcing_override_as_a_switch():
+    """``SourceSpec.esper_salinity_conditioning`` travels to roms-tools' source dict
+    as ``salinity_conditioning: True`` (input_data later swaps in the staged WOA23
+    file's path); off/unset emits nothing, matching esper_method/esper_equation.
+    """
+    cfg = _build()
+    boundary = cfg.forcing.boundary
+
+    def _with(source):
+        return cfg.model_copy(
+            update={
+                "forcing": cfg.forcing.model_copy(
+                    update={
+                        "boundary": boundary.model_copy(
+                            update={
+                                "bgc_sources": [
+                                    boundary.bgc_sources[0].model_copy(
+                                        update={"source": source}
+                                    )
+                                ]
+                            }
+                        )
+                    }
+                )
+            }
+        )
+
+    on = sources_to_forcing_override(
+        _with(SourceSpec(name="ESPER", esper_salinity_conditioning=True))
+    )
+    src = on["forcing"]["boundary"]["bgc_sources"][0]["source"]
+    assert src["name"] == "ESPER"
+    assert src["salinity_conditioning"] is True
+    assert "esper_salinity_conditioning" not in src
+
+    off = sources_to_forcing_override(_with(SourceSpec(name="ESPER")))
+    assert (
+        "salinity_conditioning"
+        not in off["forcing"]["boundary"]["bgc_sources"][0]["source"]
+    )
