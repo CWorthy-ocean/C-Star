@@ -428,7 +428,13 @@ HELP_TEXT: dict[str | tuple[str, str], str] = {
         "bgc_interpolation_method",
     ): "Vertical interpolation for BGC boundary tracers (type='bgc'). 'depth' (default), "
     "'density' (isopycnal space), or 'density_mld' (mixed-layer-depth anchored). "
-    "Density methods build a physics BoundaryForcing companion to supply the target T/S.",
+    "Density methods build a physics BoundaryForcing companion to supply the target T/S "
+    "and place the BGC source on every physics record: the source data is still a "
+    "climatology cycled by day of year, but its vertical placement follows the "
+    "physics, so the output is written on the physics time axis (grouped like the "
+    "physics files) instead of as one cycled climatology. 'depth' keeps a "
+    "climatological source as a cycled climatology. Without a physics companion or "
+    "source T/S, density falls back to depth.",
     (
         "boundary",
         "prefill",
