@@ -213,3 +213,4 @@ Miscellaneous
 - Documented the physics-only ForcingSpec in the Forge specs guide. (`#779 <https://github.com/CWorthy-ocean/C-Star/pull/779>`_)
 - The Forge internals developer guide describes how commit-hash pins choose a namelist version. (`#781 <https://github.com/CWorthy-ocean/C-Star/pull/781>`_)
 - Documented the Output card in the wizard guide, with a new Output-card screenshot and refreshed overview and Advanced screenshots. (`#780 <https://github.com/CWorthy-ocean/C-Star/pull/780>`_)
+- Wizard tooltip text only. Forge's output planner needs no change: planned names already match either a ``_YYYYMM`` or a ``_clim`` tail. (`#765 <https://github.com/CWorthy-ocean/C-Star/pull/765>`_)
