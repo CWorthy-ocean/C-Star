@@ -43,6 +43,8 @@ Breaking Changes
   - A ``_clim`` boundary file left over from an earlier run still counts as already present on a rerun without clobber; remove it or rerun with clobber.
   - ESPER-derived O2 is floored at 2.0 mmol/m³ instead of 0, with or without salinity conditioning.
 
+- The bundled ``glorys-era5-esper`` forcing spec turns salinity conditioning on. Re-resolving it changes IC and boundary ALK, DIC, NO3, PO4, SiO3 and O2 wherever the model salinity is below 34 PSU (measured on the 12 km Pacific 2010 IC and January/July boundaries: silicate blow-ups and DIC-above-alkalinity removed, nitrate zeros down to the in-range rate; above 34 PSU unchanged), requires the CWorthy PyESPER fork at tag ``v1.1.1+cworthy.1`` or later (installed from a clone; not on PyPI or conda), and downloads a ~25 MB WOA23 file. (`#764 <https://github.com/CWorthy-ocean/C-Star/pull/764>`_)
+
 
 
 New features
@@ -108,6 +110,9 @@ New features
   - Main streams: physical state, surface flux, BGC and MARBL output, CDR, CDR-lite and CDR gas-exchange output. Child-grid extraction appears on parent grids and upscaled output on child grids.
   - Under a collapsed "More output streams": diagnostics, temperature/salinity, forcing, depth-slice, random, particle, pressure-flux and runtime-diagnostics output.
 
+- ``SourceSpec.esper_salinity_conditioning`` (default off, ESPER-only), threaded through the resolver, engine, input data, the wizard (checkbox beside the ESPER method/equation) and the forge source docs. (`#764 <https://github.com/CWorthy-ocean/C-Star/pull/764>`_)
+- ``WOA_SALINITY`` dataset handler: stages ``woa23_decav_s00_01.nc`` into the shared ``WOA`` folder (the same file the ``WOA_BGC`` handler stages as its annual salinity member). The resolver notes it whenever an ESPER source has the switch on. (`#764 <https://github.com/CWorthy-ocean/C-Star/pull/764>`_)
+
 
 
 
@@ -150,6 +155,7 @@ Bug Fixes
 
 - Simple-mode CDR plots under ``bgc_mode: cdr_lite`` now show the cdr_lite release that will actually be generated. (`#778 <https://github.com/CWorthy-ocean/C-Star/pull/778>`_)
 - Forge boundary and initial-condition steps with ESPER or density-interpolated BGC no longer grow memory without bound while saving, and density boundaries follow each year's physics instead of one sampled day (roms-tools 5.2.0). (`#782 <https://github.com/CWorthy-ocean/C-Star/pull/782>`_)
+- The ESPER preflight validates the source block as roms-tools will receive it (after the staged path is substituted), not the raw blueprint switch. (`#764 <https://github.com/CWorthy-ocean/C-Star/pull/764>`_)
 
 
 
@@ -183,6 +189,8 @@ Improvements
 - The CDR output streams moved from the Advanced card's CDR pane to the Output card, and the Advanced card no longer has an output pane. (`#780 <https://github.com/CWorthy-ocean/C-Star/pull/780>`_)
 - The nesting options in the Grid card now set the child-grid extraction period and the extraction settings that come from the child grid; they are no longer edited separately under Advanced. (`#780 <https://github.com/CWorthy-ocean/C-Star/pull/780>`_)
 - If a BGC-mode, model or nesting change leaves the blueprint invalid, the wizard hides the old settings until the blueprint is valid again. One example is switching to cdr_lite before adding CDR forcing. (`#780 <https://github.com/CWorthy-ocean/C-Star/pull/780>`_)
+- A blueprint whose ESPER source has the switch on but no ``WOA_SALINITY`` in ``datasets`` is rejected at load time, naming the one key to add. (`#764 <https://github.com/CWorthy-ocean/C-Star/pull/764>`_)
+- The boundary forcing step prints, before constructing ``BoundaryForcing`` with BGC sources, that the whole run's physics T/S are read first and that no boundary file appears until that finishes (hours for a multi-year high-resolution run); roms-tools logs the same at INFO on the root logger, which C-Star's logging keeps off the terminal. (`#764 <https://github.com/CWorthy-ocean/C-Star/pull/764>`_)
 
 
 Miscellaneous
