@@ -136,6 +136,13 @@ Bug Fixes
   - A hash ahead of its release gets that release's namelist in both steps; to use unreleased namelist keys, pin a branch instead.
   - Upscaled CDR forcing pinned by hash gets the ``cdr_nz_chd`` of that release: 0 (level count from the file) from 0.11.0, the seeded value before.
 
+- Plotting an attached cdr_lite or passive-tracer CDR-forcing netCDF in the wizard no longer fails with "Unknown tracer name(s) … for tracer_set='marbl'". (`#778 <https://github.com/CWorthy-ocean/C-Star/pull/778>`_)
+- The wizard's tracer flux plot now shows each cdr_lite or passive release's own tracer instead of failing on a missing ALK tracer. (`#778 <https://github.com/CWorthy-ocean/C-Star/pull/778>`_)
+
+  - In a forcing that mixes MARBL and cdr_lite or passive releases, a MARBL release's ALK flux plot now shows only that release.
+
+- Simple-mode CDR plots under ``bgc_mode: cdr_lite`` now show the cdr_lite release that will actually be generated. (`#778 <https://github.com/CWorthy-ocean/C-Star/pull/778>`_)
+
 
 
 Improvements
