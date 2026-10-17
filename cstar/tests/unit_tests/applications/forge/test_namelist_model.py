@@ -42,6 +42,7 @@ from cstar.applications.forge.namelist_model import (
     canonical_output_sections_for_precheck,
     cdr_nz_chd_from_file,
     cdr_tracer_counts,
+    cdr_tracer_role,
     check_bgc_tracer_count,
     check_cdr_forcing_mode,
     check_cdr_lite_mode_roms,
@@ -1761,6 +1762,29 @@ def test_cdr_tracer_counts_reports_every_malformed_family_together():
     assert "passive_tracer<k>" in msg
     assert "CDR_DOR_DIC<k>" in msg
     assert "do not pair up" in msg
+
+
+# ---------------------------------------------------------------------------
+# cdr_tracer_role
+# ---------------------------------------------------------------------------
+@pytest.mark.parametrize(
+    ("name", "role"),
+    [
+        ("CDR_OAE_ALK1", ("cdr_lite", "ALK")),
+        ("CDR_OAE_DIC12", ("cdr_lite", "DIC")),
+        ("CDR_DOR_DIC2", ("cdr_lite", "DIC")),
+        ("passive_tracer3", ("passive", "passive_tracer")),
+        ("temp", None),
+        ("salt", None),
+        ("ALK", None),
+        ("DIC", None),
+        ("CDR_OAE_ALK", None),
+        ("CDR_DOR_ALK1", None),
+        ("passive_tracer", None),
+    ],
+)
+def test_cdr_tracer_role_maps_generated_names_to_set_and_flux_key(name, role):
+    assert cdr_tracer_role(name) == role
 
 
 def test_validate_run_time_sections_reports_a_null_tracer_count_without_raising():

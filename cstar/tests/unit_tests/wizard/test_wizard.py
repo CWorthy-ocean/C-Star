@@ -8,7 +8,7 @@ as fast unit tests.
 """
 
 import copy
-from datetime import date
+from datetime import date, datetime
 from pathlib import Path
 from types import SimpleNamespace
 from typing import ClassVar
@@ -2306,6 +2306,7 @@ def _fake_cdr_forcing_class(*, release_type="tracer_perturbation", names=("r1",)
             build_calls.append(kwargs)
             self.release_type = release_type
             self.releases = [_FakeRelease(n) for n in names]
+            self.release_tracers: dict[str, tuple[str, ...]] = {}  # all marbl
 
         def __getitem__(self, name):
             return next(r for r in self.releases if r.name == name)
@@ -2350,6 +2351,7 @@ def test_cdr_plot_generate_builds_once_and_switches_without_rebuild(monkeypatch)
     assert "building" not in wiz.cdr_plot_status.value
     assert "✓" in wiz.cdr_plot_status.value
     assert list(wiz.cdr_plot_release_dd.options) == ["r1", "r2"]
+    assert ("Tracer flux (ALK)", "tracer_flux") in wiz.cdr_plot_type_dd.options
     assert _display(wiz.cdr_plot_release_dd) == ""  # >1 release -- shown
     assert wiz.cdr_plot_img.value
 
@@ -2481,6 +2483,438 @@ def test_cdr_forcing_from_netcdf_reconstructs_tracer_perturbation(tmp_path):
     assert release.hsc == 15.0
     assert release.vsc == 25.0
     assert [v for v in release.tracer_fluxes["ALK"].values] == [1.0, 1.5, 2.0]
+
+
+_CDR_TIMES = [datetime(2012, 1, 1), datetime(2012, 1, 2), datetime(2012, 1, 3)]
+
+
+def _small_cdr_grid():
+    import roms_tools as rt
+
+    return rt.Grid(
+        nx=6, ny=2, size_x=500.0, size_y=1000.0, center_lon=0.0, center_lat=55.0, N=3
+    )
+
+
+def _tracer_perturbation(name, lon, fluxes, tracer_set):
+    import roms_tools as rt
+
+    return rt.TracerPerturbation(
+        name=name,
+        lat=55.0,
+        lon=lon,
+        depth=5.0,
+        hsc=15.0,
+        vsc=25.0,
+        times=_CDR_TIMES,
+        tracer_set=tracer_set,
+        tracer_fluxes=fluxes,
+    )
+
+
+def _save_cdr_forcing(tmp_path, releases, grid=None):
+    """A real roms-tools ``CDRForcing`` of ``releases`` saved with roms-tools' own
+    writer; returns it with the file's path.
+    """
+    import roms_tools as rt
+
+    cdr = rt.CDRForcing(
+        grid=grid if grid is not None else _small_cdr_grid(),
+        start_time=_CDR_TIMES[0],
+        end_time=_CDR_TIMES[-1],
+        releases=releases,
+    )
+    [path] = cdr.save(tmp_path / "cdr.nc")
+    return cdr, path
+
+
+def _cdr_lite_releases():
+    return [
+        _tracer_perturbation(
+            "oae",
+            0.5,
+            {"ALK": [1.0, 1.5, 2.0], "DIC": [10.0, 11.0, 12.0]},
+            "cdr_lite",
+        ),
+        _tracer_perturbation("dor", 0.6, {"DIC": [-3.0, -4.0, -5.0]}, "cdr_lite"),
+    ]
+
+
+def _marbl_and_cdr_lite_releases():
+    return [
+        _tracer_perturbation("m", 0.4, {"ALK": [7.0, 8.0, 9.0]}, "marbl"),
+        _tracer_perturbation("dor", 0.6, {"DIC": [-3.0, -4.0, -5.0]}, "cdr_lite"),
+    ]
+
+
+def _volume_release(name, lon, concentrations, tracer_set):
+    import roms_tools as rt
+
+    return rt.VolumeRelease(
+        name=name,
+        lat=55.0,
+        lon=lon,
+        depth=5.0,
+        hsc=15.0,
+        vsc=25.0,
+        times=_CDR_TIMES,
+        tracer_set=tracer_set,
+        volume_fluxes=[1.0, 2.0, 3.0],
+        tracer_concentrations=concentrations,
+    )
+
+
+def _fluxes(release):
+    return {key: list(flux.values) for key, flux in release.tracer_fluxes.items()}
+
+
+def _concentrations(release, *keys):
+    return {key: list(release.tracer_concentrations[key].values) for key in keys}
+
+
+def test_cdr_forcing_from_netcdf_reconstructs_cdr_lite_releases(tmp_path):
+    """Regression: the tracer axis of a ``cdr_lite`` file (``CDR_OAE_ALK<k>``, ...)
+    is not a MARBL tracer set, which roms-tools' ``TracerPerturbation`` defaults
+    to -- the reconstruction named every column as a MARBL tracer and was rejected.
+    """
+    from cstar.wizard.wizard import _cdr_forcing_from_netcdf
+
+    grid = _small_cdr_grid()
+    original, path = _save_cdr_forcing(tmp_path, _cdr_lite_releases(), grid)
+
+    cdr = _cdr_forcing_from_netcdf(path, grid)
+
+    assert [r.name for r in cdr.releases] == ["oae", "dor"]
+    assert cdr.tracer_set == "cdr_lite"
+    oae, dor = cdr.releases["oae"], cdr.releases["dor"]
+    assert (oae.is_oae, dor.is_dor) == (True, True)
+    assert _fluxes(oae) == {"ALK": [1.0, 1.5, 2.0], "DIC": [10.0, 11.0, 12.0]}
+    assert _fluxes(dor) == {"DIC": [-3.0, -4.0, -5.0]}
+    assert (oae.lon, dor.lon, oae.depth, oae.hsc, oae.vsc) == (
+        0.5,
+        0.6,
+        5.0,
+        15.0,
+        25.0,
+    )
+    assert cdr.release_tracers == original.release_tracers
+
+
+@pytest.fixture
+def agg_backend():
+    """Headless matplotlib for the tests that draw real roms-tools plots."""
+    import matplotlib.pyplot as plt
+
+    previous = plt.get_backend()
+    plt.switch_backend("Agg")
+    yield
+    plt.switch_backend(previous)
+
+
+def test_cdr_forcing_from_netcdf_cdr_lite_forcing_plots_without_network(
+    tmp_path, monkeypatch, agg_backend
+):
+    """The reconstructed forcing's plots draw, with no download (cartopy's own
+    data directory is empty; the unit-test network guard is on).
+    """
+    import cartopy
+
+    from cstar.wizard.wizard import _cdr_forcing_from_netcdf
+
+    grid = _small_cdr_grid()
+    _, path = _save_cdr_forcing(tmp_path, _cdr_lite_releases(), grid)
+    cdr = _cdr_forcing_from_netcdf(path, grid)
+    monkeypatch.setitem(cartopy.config, "data_dir", str(tmp_path / "cartopy"))
+
+    cdr.plot_locations()
+    for release, tracers in cdr.release_tracers.items():
+        cdr.plot_tracer_flux(tracers[0], release_names=[release])
+
+
+def test_cdr_forcing_from_netcdf_reconstructs_passive_releases(tmp_path):
+    from cstar.wizard.wizard import _cdr_forcing_from_netcdf
+
+    grid = _small_cdr_grid()
+    original, path = _save_cdr_forcing(
+        tmp_path,
+        [
+            _tracer_perturbation(
+                "dye1", 0.5, {"passive_tracer": [1.0, 2.0, 3.0]}, "passive"
+            ),
+            _tracer_perturbation(
+                "dye2", 0.6, {"passive_tracer": [4.0, 5.0, 6.0]}, "passive"
+            ),
+        ],
+        grid,
+    )
+
+    cdr = _cdr_forcing_from_netcdf(path, grid)
+
+    assert cdr.tracer_set == "passive"
+    assert _fluxes(cdr.releases["dye1"]) == {"passive_tracer": [1.0, 2.0, 3.0]}
+    assert _fluxes(cdr.releases["dye2"]) == {"passive_tracer": [4.0, 5.0, 6.0]}
+    assert cdr.release_tracers == original.release_tracers
+
+
+def test_cdr_forcing_from_netcdf_keeps_marbl_releases_beside_generated_tracers(
+    tmp_path,
+):
+    """A MARBL release mixed in with a ``cdr_lite`` one owns no generated tracer
+    (the file's ``tracer_release`` is empty for its rows): it is rebuilt as before,
+    ALK-only, and the ``cdr_lite`` one from its own columns.
+    """
+    from cstar.wizard.wizard import _cdr_forcing_from_netcdf
+
+    grid = _small_cdr_grid()
+    original, path = _save_cdr_forcing(tmp_path, _marbl_and_cdr_lite_releases(), grid)
+
+    cdr = _cdr_forcing_from_netcdf(path, grid)
+
+    assert cdr.releases["m"].tracer_set == "marbl"
+    assert _fluxes(cdr.releases["m"])["ALK"] == [7.0, 8.0, 9.0]
+    assert cdr.releases["dor"].tracer_set == "cdr_lite"
+    assert _fluxes(cdr.releases["dor"]) == {"DIC": [-3.0, -4.0, -5.0]}
+    assert cdr.release_tracers == original.release_tracers
+
+
+def test_cdr_forcing_from_netcdf_reconstructs_passive_volume_releases(tmp_path):
+    """A passive volume release keeps its dye concentration under its own tracer
+    set (``temp``/``salt`` are left to roms-tools' defaults).
+    """
+    from cstar.wizard.wizard import _cdr_forcing_from_netcdf
+
+    grid = _small_cdr_grid()
+    original, path = _save_cdr_forcing(
+        tmp_path,
+        [
+            _volume_release(
+                "dye1", 0.5, {"passive_tracer": [1.0, 2.0, 3.0]}, "passive"
+            ),
+            _volume_release(
+                "dye2", 0.6, {"passive_tracer": [4.0, 5.0, 6.0]}, "passive"
+            ),
+        ],
+        grid,
+    )
+
+    cdr = _cdr_forcing_from_netcdf(path, grid)
+
+    assert cdr.release_type == "volume"
+    assert cdr.tracer_set == "passive"
+    assert _concentrations(cdr.releases["dye1"], "passive_tracer") == {
+        "passive_tracer": [1.0, 2.0, 3.0]
+    }
+    assert _concentrations(cdr.releases["dye2"], "passive_tracer") == {
+        "passive_tracer": [4.0, 5.0, 6.0]
+    }
+    assert list(cdr.releases["dye2"].volume_fluxes.values) == [1.0, 2.0, 3.0]
+    assert cdr.release_tracers == original.release_tracers
+
+
+def test_cdr_forcing_from_netcdf_keeps_a_marbl_volume_release_off_the_dye_columns(
+    tmp_path,
+):
+    from cstar.wizard.wizard import _cdr_forcing_from_netcdf
+
+    grid = _small_cdr_grid()
+    original, path = _save_cdr_forcing(
+        tmp_path,
+        [
+            _volume_release("m", 0.4, {"ALK": [7.0, 8.0, 9.0]}, "marbl"),
+            _volume_release("dye", 0.5, {"passive_tracer": [1.0, 2.0, 3.0]}, "passive"),
+        ],
+        grid,
+    )
+
+    cdr = _cdr_forcing_from_netcdf(path, grid)
+
+    marbl, dye = cdr.releases["m"], cdr.releases["dye"]
+    assert (marbl.tracer_set, dye.tracer_set) == ("marbl", "passive")
+    assert "passive_tracer1" not in marbl.tracer_concentrations
+    assert _concentrations(marbl, "ALK") == {"ALK": [7.0, 8.0, 9.0]}
+    assert _concentrations(dye, "passive_tracer") == {"passive_tracer": [1.0, 2.0, 3.0]}
+    assert cdr.release_tracers == original.release_tracers
+
+
+def test_cdr_forcing_from_netcdf_requires_tracer_release_for_generated_tracers(
+    tmp_path,
+):
+    import xarray as xr
+
+    from cstar.wizard.wizard import _cdr_forcing_from_netcdf
+
+    grid = _small_cdr_grid()
+    _, path = _save_cdr_forcing(tmp_path, _cdr_lite_releases(), grid)
+    stripped = tmp_path / "stripped.nc"
+    with xr.open_dataset(path) as ds:
+        ds.drop_vars("tracer_release").to_netcdf(stripped)
+
+    with pytest.raises(
+        ValueError, match=r"could not reconstruct releases from .*tracer_release"
+    ):
+        _cdr_forcing_from_netcdf(stripped, grid)
+
+
+def _spy_on_plot_tracer_flux(monkeypatch):
+    """Record every ``(tracer_name, release_names)`` ``CDRForcing.plot_tracer_flux``
+    is asked to plot, still drawing it.
+    """
+    import roms_tools as rt
+
+    calls: list[tuple[str, list[str] | None]] = []
+    real = rt.CDRForcing.plot_tracer_flux
+
+    def spy(self, tracer_name, *args, release_names=None, **kwargs):
+        calls.append((tracer_name, release_names))
+        extra = {} if release_names is None else {"release_names": release_names}
+        return real(self, tracer_name, *args, **extra, **kwargs)
+
+    monkeypatch.setattr(rt.CDRForcing, "plot_tracer_flux", spy)
+    return calls
+
+
+def test_cdr_plot_of_an_attached_cdr_lite_file_draws_each_releases_own_tracer(
+    tmp_path, monkeypatch, agg_backend
+):
+    """The reported failure end to end: attach a ``cdr_lite`` file in "netcdf"
+    mode, Generate, and plot release locations and each release's tracer flux.
+    """
+    import cartopy
+
+    grid = _small_cdr_grid()
+    _, path = _save_cdr_forcing(tmp_path, _cdr_lite_releases(), grid)
+    monkeypatch.setitem(cartopy.config, "data_dir", str(tmp_path / "cartopy"))
+    flux_calls = _spy_on_plot_tracer_flux(monkeypatch)
+    wiz = _cdr_lite_wizard()
+    monkeypatch.setattr(wiz, "_build_grid_from_widgets", lambda: grid)
+    wiz.cdr_mode_dd.value = "netcdf"
+    wiz._attach_cdr_file_from_path(str(path))
+    assert "no CDR_* tracers" not in wiz.cdr_file_status.value
+
+    wiz._on_cdr_plot_generate(None)
+
+    assert "✓" in wiz.cdr_plot_status.value, wiz.cdr_plot_status.value
+    assert wiz.cdr_plot_img.value  # "Release locations" drew
+    assert list(wiz.cdr_plot_release_dd.options) == ["oae", "dor"]
+    assert ("Tracer flux", "tracer_flux") in wiz.cdr_plot_type_dd.options
+    assert "Tracer flux (ALK)" not in dict(wiz.cdr_plot_type_dd.options)
+
+    wiz.cdr_plot_type_dd.value = "tracer_flux"
+    wiz.cdr_plot_release_dd.value = "dor"
+
+    assert flux_calls == [
+        ("CDR_OAE_ALK1", ["oae"]),
+        ("CDR_DOR_DIC1", ["dor"]),
+    ]
+    assert {("tracer_flux", "oae"), ("tracer_flux", "dor")} <= set(wiz._cdr_plot_cache)
+
+
+def test_cdr_plot_of_the_simple_release_follows_the_bgc_mode(
+    tmp_path, monkeypatch, agg_backend
+):
+    """Under ``bgc_mode: cdr_lite`` the resolver gives a simple release the
+    ``cdr_lite`` tracer set; the plot shows that forcing, not the MARBL default.
+    """
+    import cartopy
+
+    monkeypatch.setitem(cartopy.config, "data_dir", str(tmp_path / "cartopy"))
+    flux_calls = _spy_on_plot_tracer_flux(monkeypatch)
+    grid = _small_cdr_grid()
+    wiz = _cdr_lite_wizard()
+    monkeypatch.setattr(wiz, "_build_grid_from_widgets", lambda: grid)
+    wiz.cdr_simple_name.value = "pulse"
+    wiz.cdr_simple_lat.value = 55.0
+    wiz.cdr_simple_lon.value = 0.5  # off the coarse grid's coastal cells
+    wiz.cdr_simple_depth.value = 5.0
+
+    wiz._on_cdr_plot_generate(None)
+
+    assert "✓" in wiz.cdr_plot_status.value, wiz.cdr_plot_status.value
+    cdr = wiz._cdr_plot_object
+    assert cdr.tracer_set == "cdr_lite"
+    assert cdr.release_tracers == {"pulse": ("CDR_OAE_ALK1", "CDR_OAE_DIC1")}
+    assert ("Tracer flux", "tracer_flux") in wiz.cdr_plot_type_dd.options
+
+    wiz.cdr_plot_type_dd.value = "tracer_flux"
+
+    assert flux_calls == [("CDR_OAE_ALK1", ["pulse"])]
+    assert wiz.cdr_plot_img.value
+
+    # A BGC-mode switch changes what the resolver would generate: drop the plot.
+    wiz.bgc_dd.value = "marbl"
+    assert wiz._cdr_plot_object is None
+    wiz._on_cdr_plot_generate(None)
+    assert wiz._cdr_plot_object.tracer_set == "marbl"
+    assert ("Tracer flux (ALK)", "tracer_flux") in wiz.cdr_plot_type_dd.options
+
+
+def test_cdr_plot_of_a_mixed_forcing_draws_only_the_selected_marbl_release(
+    tmp_path, monkeypatch, agg_backend
+):
+    """A MARBL release beside a ``cdr_lite`` one plots its own ``ALK`` -- for that
+    release only, not every release's MARBL ALK row (flat zeros for the others).
+    """
+    import cartopy
+
+    grid = _small_cdr_grid()
+    _, path = _save_cdr_forcing(tmp_path, _marbl_and_cdr_lite_releases(), grid)
+    monkeypatch.setitem(cartopy.config, "data_dir", str(tmp_path / "cartopy"))
+    flux_calls = _spy_on_plot_tracer_flux(monkeypatch)
+    wiz = _cdr_lite_wizard()
+    monkeypatch.setattr(wiz, "_build_grid_from_widgets", lambda: grid)
+    wiz.cdr_mode_dd.value = "netcdf"
+    wiz._attach_cdr_file_from_path(str(path))
+
+    wiz._on_cdr_plot_generate(None)
+    assert "✓" in wiz.cdr_plot_status.value, wiz.cdr_plot_status.value
+    assert ("Tracer flux", "tracer_flux") in wiz.cdr_plot_type_dd.options
+
+    wiz.cdr_plot_type_dd.value = "tracer_flux"  # the first release, "m"
+    wiz.cdr_plot_release_dd.value = "dor"
+
+    assert flux_calls == [("ALK", ["m"]), ("CDR_DOR_DIC1", ["dor"])]
+
+
+def test_cdr_plot_of_an_attached_file_survives_a_bgc_mode_change(
+    tmp_path, monkeypatch, agg_backend
+):
+    """Only a simple release's tracer set follows the BGC mode; a plot built from
+    an attached file does not depend on it and is kept.
+    """
+    import cartopy
+
+    grid = _small_cdr_grid()
+    _, path = _save_cdr_forcing(tmp_path, _cdr_lite_releases(), grid)
+    monkeypatch.setitem(cartopy.config, "data_dir", str(tmp_path / "cartopy"))
+    wiz = _cdr_lite_wizard()
+    monkeypatch.setattr(wiz, "_build_grid_from_widgets", lambda: grid)
+    wiz.cdr_mode_dd.value = "netcdf"
+    wiz._attach_cdr_file_from_path(str(path))
+    wiz._on_cdr_plot_generate(None)
+    built = wiz._cdr_plot_object
+    assert built is not None
+
+    wiz.bgc_dd.value = "marbl"
+
+    assert wiz._cdr_plot_object is built
+    assert wiz.cdr_plot_img.value
+
+
+def test_cdr_plot_fingerprint_tolerates_a_selection_the_build_rejects(monkeypatch):
+    """A simple-mode volume release is rejected for ``bgc_mode: cdr_lite``: the
+    plot's cache check must not raise, and building the plot reports the error.
+    """
+    wiz = _cdr_lite_wizard()
+    forcing = wiz._simple_cdr_forcing_dict()
+    volume = {**forcing["releases"][0], "release_type": "volume"}
+    monkeypatch.setattr(
+        wiz, "_simple_cdr_forcing_dict", lambda: {**forcing, "releases": [volume]}
+    )
+
+    wiz._cdr_plot_inputs_fingerprint()
+    wiz._on_cdr_plot_generate(None)
+
+    assert "volume releases are not supported" in wiz.cdr_plot_status.value
 
 
 def test_cdr_forcing_from_netcdf_wraps_errors_with_path(tmp_path):

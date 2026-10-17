@@ -47,6 +47,7 @@ from cstar.applications.forge.blueprint import (
     BgcSurfaceSource,
     BoundaryForcing,
     CarbonateSensitivitySpec,
+    CdrSpec,
     ClimatologyMode,
     CoarseGridMode,
     Composition,
@@ -78,6 +79,7 @@ from cstar.applications.forge.namelist_model import (
     BgcMode,
     RunTimeSettings,
     bgc_mode_from_cppdefs,
+    cdr_tracer_role,
     namelist_field_for,
     namelist_schema_for,
     run_time_settings_for_ref,
@@ -93,6 +95,7 @@ from cstar.applications.forge.resolve import (
     find_carbonate_sensitivity_files,
     load_model_spec_data,
     read_cdr_forcing_yaml,
+    with_cdr_lite_tracer_set,
 )
 from cstar.applications.forge.user_files import hash_netcdf_contents, short_digest
 from cstar.base.utils import NetCDFFormat, netcdf_format
@@ -2444,8 +2447,15 @@ def _cdr_forcing_from_netcdf(path: str | Path, grid: Any) -> Any:
 
     Every variable is selected by dimension name (``ncdr``/``ntracers``/
     ``time``), never by positional axis order, since the builder doesn't
-    guarantee one. Two things this can't recover exactly, both acceptable for
-    a plot-only reconstruction:
+    guarantee one. A file with generated tracers (``CDR_*``/``passive_tracer*``,
+    ``tracer_set`` ``cdr_lite``/``passive``) names the release feeding each in
+    its ``tracer_release`` coordinate (roms-tools >= 5.1): such a release is
+    rebuilt from its own columns, keyed by role (``ALK``/``DIC``/
+    ``passive_tracer``) with its ``tracer_set``. Any other release is a MARBL
+    one: its tracer-perturbation fluxes are the ``ALK`` column alone when ``ALK``
+    is on the axis (otherwise every non-generated column), and its volume
+    concentrations every non-generated column. Three things this can't recover
+    exactly, all acceptable for a plot-only reconstruction:
 
     * The builder interpolates every release onto the *union* of all releases'
       original times before writing the file, so the file carries one shared
@@ -2454,6 +2464,8 @@ def _cdr_forcing_from_netcdf(path: str | Path, grid: Any) -> Any:
     * A tracer-perturbation file with no ``tracer_name`` coordinate at all
       (unusual -- normal output always carries one) has no way to know which
       tracer a flux series belongs to; it's arbitrarily labeled "ALK".
+    * A passive volume release's ``temp``/``salt`` (the file's rows for them
+      hold the discharged water's physics) are left to roms-tools' defaults.
 
     Raises a ``ValueError`` prefixed ``"could not reconstruct releases from
     <path>: ..."`` for any failure, including the ones ``rt.CDRForcing``'s own
@@ -2485,6 +2497,22 @@ def _cdr_forcing_from_netcdf(path: str | Path, grid: Any) -> Any:
                 if "tracer_name" in ds.coords
                 else None
             )
+            roles = [cdr_tracer_role(t) for t in tracer_names or ()]
+            feeding: dict[str, list[tuple[int, str, str]]] = {}
+            if any(roles):
+                if "tracer_release" not in ds.coords:
+                    raise ValueError(
+                        "generated CDR tracers but no 'tracer_release' "
+                        "coordinate -- the file predates roms-tools 5.1"
+                    )
+                for j, release in enumerate(ds["tracer_release"].values):
+                    if (role := roles[j]) is not None:
+                        feeding.setdefault(str(release), []).append((j, *role))
+            marbl_columns = [
+                (tn, j)
+                for j, (tn, role) in enumerate(zip(tracer_names or (), roles))
+                if role is None
+            ]
             is_tracer_perturbation = "cdr_trcflx" in ds.data_vars
             is_volume = "cdr_volume" in ds.data_vars
             if not (is_tracer_perturbation or is_volume):
@@ -2503,10 +2531,16 @@ def _cdr_forcing_from_netcdf(path: str | Path, grid: Any) -> Any:
                     "hsc": float(ds["cdr_hsc"].isel(ncdr=i).item()),
                     "vsc": float(ds["cdr_vsc"].isel(ncdr=i).item()),
                     "times": times,
+                    "tracer_set": feeding[name][0][1] if name in feeding else "marbl",
                 }
                 if is_tracer_perturbation:
                     var = ds["cdr_trcflx"].isel(ncdr=i)
-                    if tracer_names is not None and "ALK" in tracer_names:
+                    if name in feeding:
+                        tracer_fluxes = {
+                            key: var.isel(ntracers=j).values.tolist()
+                            for j, _, key in feeding[name]
+                        }
+                    elif tracer_names is not None and "ALK" in tracer_names:
                         # ALK-only: this reconstruction only feeds the plot
                         # widget's "Tracer flux (ALK)" option.
                         idx = tracer_names.index("ALK")
@@ -2514,7 +2548,7 @@ def _cdr_forcing_from_netcdf(path: str | Path, grid: Any) -> Any:
                     elif tracer_names is not None:
                         tracer_fluxes = {
                             tn: var.isel(ntracers=j).values.tolist()
-                            for j, tn in enumerate(tracer_names)
+                            for tn, j in marbl_columns
                         }
                     elif "ntracers" in var.dims:
                         # No tracer_name coordinate at all -- can't identify the
@@ -2533,9 +2567,14 @@ def _cdr_forcing_from_netcdf(path: str | Path, grid: Any) -> Any:
                     volume_fluxes = ds["cdr_volume"].isel(ncdr=i).values.tolist()
                     tracer_var = ds.get("cdr_tracer")
                     if tracer_var is not None and tracer_names:
+                        columns = (
+                            [(key, j) for j, _, key in feeding[name]]
+                            if name in feeding
+                            else marbl_columns
+                        )
                         tracer_concentrations = {
                             tn: tracer_var.isel(ncdr=i, ntracers=j).values.tolist()
-                            for j, tn in enumerate(tracer_names)
+                            for tn, j in columns
                         }
                     else:
                         tracer_concentrations = {}
@@ -6533,13 +6572,31 @@ class ForgeBlueprintWizard:
         self._invalidate_cdr_plot_cache()
         self._rebuild()
 
+    def _resolved_cdr_dict(self, current: dict[str, Any]) -> dict[str, Any]:
+        """``current`` (a :meth:`_current_cdr_dict`) with ``cdr_forcing`` as the
+        resolver will hand it to roms-tools: under ``bgc_mode: cdr_lite``, with
+        the tracer set it defaults (``with_cdr_lite_tracer_set`` decides which
+        modes that is). The plot builds from this, so what it shows is what
+        will be generated.
+        """
+        if self.bgc_dd.value != "cdr_lite":
+            return current
+        spec = with_cdr_lite_tracer_set(CdrSpec(**current))
+        return {**current, "cdr_forcing": spec.cdr_forcing}
+
     def _cdr_plot_inputs_fingerprint(self) -> tuple[str, tuple]:
         """A cheap, comparable snapshot of everything the CDR plot depends on:
-        the current CDR selection (mode + compiled/attached config) and the grid
-        geometry the ``rt.CDRForcing`` would be built against.
+        the CDR selection it builds from (mode + compiled/attached config, as
+        resolved for the BGC mode) and the grid geometry the ``rt.CDRForcing``
+        would be built against.
         """
+        selection = self._current_cdr_dict()
+        try:
+            selection = self._resolved_cdr_dict(selection)
+        except ValueError:
+            pass  # incomplete or invalid selection: building the plot reports it
         return (
-            repr(self._current_cdr_dict()),
+            repr(selection),
             tuple(sorted((k, repr(w.value)) for k, w in self.grid_w.items())),
         )
 
@@ -6753,8 +6810,10 @@ class ForgeBlueprintWizard:
                     self.bgc_dd.value == "cdr_lite"
                     and "tracer_name" in ds.coords
                     and not any(
-                        str(name).startswith("CDR_")
-                        for name in ds["tracer_name"].values
+                        role is not None and role[0] == "cdr_lite"
+                        for role in map(
+                            cdr_tracer_role, map(str, ds["tracer_name"].values)
+                        )
                     )
                 ):
                     warning += (
@@ -6957,12 +7016,11 @@ class ForgeBlueprintWizard:
         mode = self.cdr_mode_dd.value
         current = self._current_cdr_dict()
         grid = self._build_grid_from_widgets()
-        if mode == "simple":
-            cdr = rt.CDRForcing(grid=grid, **current["cdr_forcing"])
-        elif mode == "yaml":
+        if mode in ("simple", "yaml"):
             if not current["cdr_forcing"]:
                 raise ValueError("No CDR forcing uploaded yet.")
-            cdr = rt.CDRForcing(grid=grid, **current["cdr_forcing"])
+            forcing = self._resolved_cdr_dict(current)["cdr_forcing"]
+            cdr = rt.CDRForcing(grid=grid, **forcing)
         elif mode == "netcdf":
             cff = current["cdr_forcing_file"]
             if not cff:
@@ -6976,17 +7034,20 @@ class ForgeBlueprintWizard:
 
     def _sync_cdr_plot_release_options(self) -> None:
         """After a (re)build, refresh the release dropdown (shown only when the
-        forcing has more than one release) and hide "Tracer flux (ALK)" for a
+        forcing has more than one release) and hide the tracer flux option for a
         volume-type forcing (``plot_tracer_flux`` raises for those -- ALK-only
-        per the CDR Overhaul design brief).
+        per the CDR Overhaul design brief). A forcing with generated tracers
+        (cdr_lite/passive) has no ``ALK`` tracer, so its option plots the
+        selected release's own tracer instead.
         """
         cdr = self._cdr_plot_object
         names = [r.name for r in cdr.releases]
         is_volume = cdr.release_type == "volume"
+        flux_label = "Tracer flux" if cdr.release_tracers else "Tracer flux (ALK)"
         options = [
             ("Release locations", "locations"),
             ("Distribution", "distribution"),
-            *([] if is_volume else [("Tracer flux (ALK)", "tracer_flux")]),
+            *([] if is_volume else [(flux_label, "tracer_flux")]),
         ]
         with self._suspend():
             self.cdr_plot_release_dd.options = names
@@ -7016,7 +7077,10 @@ class ForgeBlueprintWizard:
         release_name = (
             self.cdr_plot_release_dd.value if self.cdr_plot_release_dd.options else None
         )
-        key = (plot_type, release_name if plot_type == "distribution" else None)
+        key = (
+            plot_type,
+            release_name if plot_type in ("distribution", "tracer_flux") else None,
+        )
         cached = self._cdr_plot_cache.get(key)
         if cached is None:
             import io
@@ -7037,7 +7101,15 @@ class ForgeBlueprintWizard:
                         raise ValueError("No release to plot a distribution for.")
                     cdr.plot_distribution(release_name)
                 elif plot_type == "tracer_flux":
-                    cdr.plot_tracer_flux("ALK")
+                    # A generated-tracer release plots its own tracer; a MARBL
+                    # one (alone or beside generated ones) plots ALK.
+                    tracer = (cdr.release_tracers.get(release_name) or ("ALK",))[0]
+                    only = (
+                        {}
+                        if release_name is None
+                        else {"release_names": [release_name]}
+                    )
+                    cdr.plot_tracer_flux(tracer, **only)
                 else:
                     raise ValueError(f"Unknown CDR plot type {plot_type!r}.")
                 fig = plt.gcf()
