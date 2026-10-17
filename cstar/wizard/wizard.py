@@ -30,6 +30,7 @@ import os
 import re
 import typing
 import warnings
+from dataclasses import dataclass
 from datetime import date, datetime
 from pathlib import Path
 from typing import Any, Final, get_args, get_origin
@@ -539,7 +540,9 @@ HELP_TEXT: dict[str | tuple[str, str], str] = {
         "output",
         "output_dd",
     ): "Select an OutputSpec (named output-settings configuration) to seed the output "
-    "sections. Fine-tune any value under Advanced settings → the relevant section.",
+    "streams. Fine-tune any value in the streams below. Particle tracking, "
+    "pressure-flux and child-grid extraction settings belong to the model/grid and "
+    "are kept when you pick a preset.",
     # ---- timestep --------------------------------------------------------------
     (
         "timestep",
@@ -974,6 +977,21 @@ _ACCORDION_EXCLUDED_FIELDS: dict[str, frozenset[str]] = {
     # the generic overrides layer -- excluding it here keeps a loaded blueprint's
     # domain.v_sponge from being reconstructed as a phantom accordion override.
     "v_sponge": frozenset({"v_sponge"}),
+    # extract_data is the parent side of nesting: the child grid, extraction period
+    # and file come from the Grid card's nesting widgets (nest_period, the child
+    # grid), resolved by build_forge_blueprint. Only nrpf/extract_root_name stay
+    # editable in the Output card.
+    "extract_data": frozenset(
+        {
+            "do_extract",
+            "extract_file",
+            "n_chd",
+            "theta_s_chd",
+            "theta_b_chd",
+            "hc_chd",
+            "extract_period",
+        }
+    ),
 }
 
 # The BGC modes each settings key applies in; a key not listed applies in every
@@ -1053,8 +1071,8 @@ _FORCED_ON_BY_BGC_MODE: dict[str, dict[tuple[str, str], str]] = {
 #
 # ``bgc``/``marbl_bgc`` are SPLIT at field granularity along the existing
 # ``PARTIAL_OUTPUT_SECTIONS`` seam (the same split the OutputSpec dropdown seeds):
-# their output write-controls live under Output, the rest under Biogeochemistry.
-_OUTPUT_CATEGORY = "Output & diagnostics"
+# their output write-controls live in the Output card (see ``_OUTPUT_MAIN_SECTIONS``),
+# the rest under Biogeochemistry.
 _ADVANCED_CATEGORIES: tuple[tuple[str, tuple[str, ...]], ...] = (
     (
         "Physics & subgrid tuning",
@@ -1073,7 +1091,7 @@ _ADVANCED_CATEGORIES: tuple[tuple[str, tuple[str, ...]], ...] = (
             "lin_rho_eos",
             # pio_settings is ModelSpec-owned (like the rest of this pane), NOT an
             # output section: edits here must land in composition.model / "Save
-            # Model spec", so keep it out of _OUTPUT_CATEGORY.
+            # Model spec", so keep it out of the Output card.
             "pio_settings",
             "cppdefs",
         ),
@@ -1102,38 +1120,63 @@ _ADVANCED_CATEGORIES: tuple[tuple[str, tuple[str, ...]], ...] = (
     ),
     (
         "Carbon dioxide removal (CDR)",
-        (
-            "param",
-            "cdr_frc",
-            "cdr_output",
-            "cdr_lite",
-            "cdr_lite_output",
-            "cdr_gas_exch_output",
-        ),
-    ),
-    (
-        _OUTPUT_CATEGORY,
-        (
-            "ocean_vars",
-            "surf_flux",
-            "diagnostics",
-            "stdout_diag",
-            "ts_output",
-            "frc_output",
-            "upscale_output",
-            "zslice",
-            "random_output",
-            "calc_pflx",
-            "particles",
-            "extract_data",
-            "bgc",
-            "marbl_bgc",
-        ),
+        ("param", "cdr_frc", "cdr_lite"),
     ),
 )
 
+# The Output card's placement of the output streams -- the one table the editor build,
+# the card's modified-count chip and the section retitling all read. ``_OUTPUT_CARD``
+# names the card as a "place" for ``_split_fields``; the main streams are always
+# visible in this display order, the rest sit in the collapsed "More output streams"
+# accordion. Placement is display-only and independent of OutputSpec ownership
+# (``_is_output_key``): ``extract_data``, ``particles`` and ``calc_pflx`` sit here yet
+# are ModelSpec/Domain-owned.
+_OUTPUT_CARD = "Output"
+_OUTPUT_MORE_TITLE = "More output streams"
+_OUTPUT_GROUPS = (_OUTPUT_CARD, _OUTPUT_MORE_TITLE)
+_OUTPUT_MAIN_SECTIONS = (
+    "ocean_vars",
+    "surf_flux",
+    "bgc",
+    "marbl_bgc",
+    "cdr_output",
+    "cdr_lite_output",
+    "cdr_gas_exch_output",
+    "extract_data",
+    "upscale_output",
+)
+_OUTPUT_MORE_SECTIONS = (
+    "diagnostics",
+    "ts_output",
+    "frc_output",
+    "zslice",
+    "random_output",
+    "particles",
+    "calc_pflx",
+    "stdout_diag",
+)
+# Nesting role of the grid being edited. ``extract_data`` feeds a child from this
+# (parent) grid, so it exists only on a parent; ``upscale_output``'s ``_uscl`` files
+# feed the parent's upscaled-CDR run, so it is a main stream only on a child and sits
+# under "More output streams" otherwise.
+_PARENT_ONLY_SECTIONS = frozenset({"extract_data"})
+_CHILD_MAIN_SECTIONS = frozenset({"upscale_output"})
+# Output-card titles for the sections split along the PARTIAL_OUTPUT_SECTIONS seam,
+# whose glossary titles name the whole section (the Advanced BGC pane keeps those).
+_OUTPUT_SECTION_TITLES: dict[str, str] = {
+    "bgc": "BGC output",
+    "marbl_bgc": "MARBL output (tracers & diagnostics to write)",
+}
+# Per-section note shown under the section header.
+_SECTION_NOTES: dict[str, str] = {
+    "extract_data": (
+        "Child grid, extraction period and file come from the nesting options in "
+        "the Grid card."
+    ),
+}
 
-# Output-stream tables for the Advanced-settings panes: each namelist section
+
+# Output-stream tables for the settings editor: each namelist section
 # that models one-or-more "write this stream / how often / how many records
 # per file" triples renders those fields as a small table (see
 # _SettingsEditor._build_section) instead of 3-6 flat rows apiece. Row order
@@ -1281,18 +1324,9 @@ _OUTPUT_TABLES: dict[str, list[dict[str, Any]]] = {
             "extra": [],
         },
     ],
-    "extract_data": [
-        {
-            "label": "Child-grid extraction",
-            "write": "do_extract",
-            "period": "extract_period",
-            "records": "nrpf",
-            "extra": [],
-        },
-    ],
 }
 
-# Per-variable write-flag checkbox grids for the Advanced-settings panes: a
+# Per-variable write-flag checkbox grids for the settings editor: a
 # (title, field_names) pair renders as a small header plus a 4-column grid of
 # checkboxes instead of one flat row per variable. As with _OUTPUT_TABLES, a
 # grid only consumes the fields that were actually built; any missing field is
@@ -1528,12 +1562,13 @@ _PARAM_PANE_FIELDS = frozenset({"nt_passive"})
 def _split_fields(
     category_title: str, section: str
 ) -> tuple[frozenset | None, frozenset]:
-    """Field filter ``(include, exclude)`` for a section shown in ``category_title``.
+    """Field filter ``(include, exclude)`` for a section shown in ``category_title``
+    (an Advanced pane title, or :data:`_OUTPUT_CARD`).
 
     ``include=None`` means "all fields"; otherwise only those in ``include`` are
-    shown. ``exclude`` is always dropped. Sections split across panes (``bgc`` /
+    shown. ``exclude`` is always dropped. Sections split across containers (``bgc`` /
     ``marbl_bgc`` via :data:`PARTIAL_OUTPUT_SECTIONS`) keep their output write-
-    controls under Output and the rest under their feature pane. ``cppdefs`` is
+    controls in the Output card and the rest under their feature pane. ``cppdefs`` is
     split the same way via :data:`_CPPDEFS_PANE_FIELDS` -- each pane only sees the
     handful of compile-time flags it owns -- and ``param`` shows only
     :data:`_PARAM_PANE_FIELDS`.
@@ -1545,9 +1580,38 @@ def _split_fields(
     parts = PARTIAL_OUTPUT_SECTIONS.get(section)
     if parts is None:
         return None, frozenset()
-    if category_title == _OUTPUT_CATEGORY:
+    if category_title == _OUTPUT_CARD:
         return frozenset(parts), frozenset()
     return None, frozenset(parts)
+
+
+def _in_output_card(section: str, field: str | None) -> bool:
+    """Whether the ``(section, field)`` setting is placed in the Output card (main or
+    "More output streams"), nesting role aside -- the one placement predicate behind
+    the Output chip's count, so the Output and Advanced chips partition the overrides.
+    Distinct from ``_is_output_key``, which is OutputSpec ownership.
+    """
+    if section not in _OUTPUT_MAIN_SECTIONS and section not in _OUTPUT_MORE_SECTIONS:
+        return False
+    include, exclude = _split_fields(_OUTPUT_CARD, section)
+    return (include is None or field in include) and field not in exclude
+
+
+def _output_placement(
+    *, is_parent: bool, is_child: bool
+) -> tuple[tuple[str, ...], tuple[str, ...]]:
+    """The Output card's ``(main, more)`` sections for a grid's nesting role -- the
+    only place the nesting role shapes the editor (see ``_PARENT_ONLY_SECTIONS`` /
+    ``_CHILD_MAIN_SECTIONS``).
+    """
+    main = tuple(
+        section
+        for section in _OUTPUT_MAIN_SECTIONS
+        if (is_parent or section not in _PARENT_ONLY_SECTIONS)
+        and (is_child or section not in _CHILD_MAIN_SECTIONS)
+    )
+    demoted = tuple(s for s in _OUTPUT_MAIN_SECTIONS if s in _CHILD_MAIN_SECTIONS)
+    return main, (*_OUTPUT_MORE_SECTIONS, *(() if is_child else demoted))
 
 
 # Each CDR output stream's master enable flag -- section name -> the field that
@@ -1567,13 +1631,50 @@ _CDR_STREAM_MASTER_FLAGS: dict[str, str] = {
 }
 
 
+def _section_header_html(
+    section: str, n_modified: int = 0, title: str | None = None
+) -> str:
+    """The header HTML over a settings section: its glossary title (or ``title``)
+    and namelist symbol, plus an "N modified" chip once the wizard retitles it with
+    a count.
+    """
+    if title is None:
+        title = section_for(f"settings.{section}", default_title=section).title
+    chip = (
+        " " + components.chip(f"● {n_modified} modified", "info") if n_modified else ""
+    )
+    return (
+        "<div class='forge-settings-sec'>"
+        f"<span class='ttl'>{html.escape(title)}</span> "
+        f"<span class='sym'>{section}</span>{chip}</div>"
+    )
+
+
+@dataclass(frozen=True)
+class _EditorKey:
+    """What a built settings editor depends on: it is rebuilt when any of these
+    changes. A failed resolve knows all but ``settings_cls`` (see
+    ``ForgeBlueprintWizard._hide_stale_editor``).
+    """
+
+    model: str | None
+    settings_cls: type[BaseModel]
+    bgc_mode: str
+    is_parent: bool
+    is_child: bool
+
+
 class _SettingsEditor:
     """A collapsible (Accordion) editor over the *editable* model_settings sections,
-    consolidated into modeler-facing category panes (see :data:`_ADVANCED_CATEGORIES`).
+    consolidated into modeler-facing category panes (see :data:`_ADVANCED_CATEGORIES`)
+    plus the output streams the Output card shows (``output_box``, see
+    :data:`_OUTPUT_MAIN_SECTIONS`).
 
     Each pane groups several namelist sections under a sub-header per section, so the
-    grouping reads by ocean-modeling concern (physics, forcing, BGC, CDR, output)
-    while every widget is still keyed by its real ``(section, field)``. Auto-generates
+    grouping reads by ocean-modeling concern (physics, forcing, BGC, CDR)
+    while every widget is still keyed by its real ``(section, field)`` -- one
+    ``_widgets`` registry and one read/sync/on_edit path serve both containers.
+    Auto-generates
     typed widgets per field using the ``settings_cls`` sub-model schema (falling
     back to value-type inference). ``settings_cls`` defaults to the legacy
     :class:`RunTimeSettings` for back-compat; pass the class matching the
@@ -1586,7 +1687,9 @@ class _SettingsEditor:
     in ``_ACCORDION_EXCLUDED_FIELDS`` (and sections not named in a category) are
     skipped -- their value still flows through from the resolver-composed settings
     dict (this editor never authors that dict, only a sparse overrides layer), so
-    hiding the widget cannot drop or reset the value.
+    hiding the widget cannot drop or reset the value. ``is_parent`` / ``is_child``
+    give the grid's nesting role, which only decides which output streams the
+    Output card places where (see :func:`_output_placement`).
     """
 
     def __init__(
@@ -1597,6 +1700,8 @@ class _SettingsEditor:
         settings_cls: type[BaseModel] = RunTimeSettings,
         *,
         bgc_mode: str = "marbl",
+        is_parent: bool = False,
+        is_child: bool = False,
     ):
         self.W = W
         self._settings_cls = settings_cls
@@ -1604,61 +1709,36 @@ class _SettingsEditor:
         self._forced_on = _FORCED_ON_BY_BGC_MODE.get(bgc_mode, {})
         # (section, field|None) -> (widget, base_type)
         self._widgets: dict[Any, Any] = {}
-        self._section_fields: dict[str, list[str | None]] = {}
+        # group -> {section: fields built there}. A group is an Advanced pane (by
+        # title) or one of the Output card's two (_OUTPUT_CARD, _OUTPUT_MORE_TITLE); a
+        # section split along PARTIAL_OUTPUT_SECTIONS (bgc/marbl_bgc) sits in a pane
+        # and in the Output card, each holding only its own fields.
+        self._group_fields: dict[str, dict[str, list[str | None]]] = {}
+        # (group, section) -> the section's header widget, retitled by the wizard.
+        self._headers: dict[tuple[str, str], Any] = {}
         # True while sync() is pushing composed values into widgets -- distinct from
         # the wizard's own _syncing flag, which guards the *wizard-level* on_edit
         # override recording. This one guards the editor-internal forcing rule (see
         # _register_field_rule_observers) so a sync-driven value push never mutates
         # a sibling widget the way a real user edit is allowed to.
         self._syncing_internal = False
-        # category title -> sections shown under it (a section may appear under two
-        # panes when split along PARTIAL_OUTPUT_SECTIONS, e.g. bgc/marbl_bgc).
-        self._pane_sections: dict[str, list[str]] = {}
         panes, titles = [], []
         for title, members in _ADVANCED_CATEGORIES:
-            blocks = []
-            for section in members:
-                if section not in model_settings:
-                    continue
-                if (
-                    section not in self._settings_cls.model_fields
-                    and section in _VERSION_GATED_SECTIONS
-                ):
-                    # section is modeled by some registered settings tier (e.g.
-                    # pio_settings on RunTimeSettingsV0_6_0) but not by the
-                    # active settings_cls -- e.g. a pre-0.6.0 roms_ref override
-                    # with a ModelSpec whose model_settings still carries the
-                    # key. Rendering a type-inferred widget here would let the
-                    # user edit a value the active (extra="ignore") schema
-                    # silently discards downstream. cppdefs is NOT in
-                    # _VERSION_GATED_SECTIONS (no tier ever models it) and so
-                    # is unaffected -- it keeps rendering via type-inference.
-                    continue
-                include, exclude = _split_fields(title, section)
-                box, fields = self._build_section(
-                    section, model_settings[section], include, exclude
-                )
-                if not fields:
-                    continue
-                self._pane_sections.setdefault(title, []).append(section)
-                sec_meta = section_for(f"settings.{section}", default_title=section)
-                sec_header = W.HTML(
-                    "<div class='forge-settings-sec'>"
-                    f"<span class='ttl'>{sec_meta.title}</span> "
-                    f"<span class='sym'>{section}</span></div>"
-                )
-                # Widget-level class: the CSS draws a bold divider above every
-                # section header except the pane's first (:first-child).
-                sec_header.add_class("forge-settings-sec-w")
-                blocks.append(sec_header)
-                blocks.append(box)
-                self._section_fields[section] = fields
+            blocks = self._build_group(title, members, model_settings)
             if not blocks:
                 continue
             panes.append(W.VBox(blocks))
             titles.append(title)
         # Independently collapsible panes: opening one no longer closes another.
         self.accordion = components.open_accordion(W, panes, titles)
+        main, more = _output_placement(is_parent=is_parent, is_child=is_child)
+        main_blocks = self._build_group(_OUTPUT_CARD, main, model_settings)
+        more_blocks = self._build_group(_OUTPUT_MORE_TITLE, more, model_settings)
+        more_panes = [W.VBox(more_blocks)] if more_blocks else []
+        self.more_streams = components.open_accordion(
+            W, more_panes, [_OUTPUT_MORE_TITLE] * len(more_panes)
+        )
+        self.output_box = W.VBox([*main_blocks, self.more_streams])
         # Before the on_edit observers attach, so locking one is never an edit.
         for key, why in self._forced_on.items():
             if key in self._widgets:
@@ -1673,6 +1753,72 @@ class _SettingsEditor:
                 )
         self._register_field_rule_observers()
         self._apply_field_rules()
+
+    @property
+    def _pane_sections(self) -> dict[str, list[str]]:
+        """Advanced pane title -> the sections shown in it, in the order of (and
+        index-aligned with) ``accordion``'s panes.
+        """
+        return {
+            title: list(self._group_fields[title])
+            for title, _members in _ADVANCED_CATEGORIES
+            if title in self._group_fields
+        }
+
+    def header_html(self, group: str, section: str, n_modified: int = 0) -> str:
+        """The header HTML of ``section`` in ``group``: the Output card titles the
+        split sections itself, every other header uses the glossary's title.
+        """
+        title = _OUTPUT_SECTION_TITLES.get(section) if group in _OUTPUT_GROUPS else None
+        return _section_header_html(section, n_modified, title)
+
+    def _build_group(
+        self,
+        group: str,
+        members: tuple[str, ...],
+        model_settings: dict[str, Any],
+    ) -> list[Any]:
+        """Header + (note) + widgets blocks for each of ``members`` that has editable
+        fields, flat -- an Advanced pane's (``group`` is its title) or the Output
+        card's children (``group`` is one of :data:`_OUTPUT_GROUPS`).
+        """
+        W = self.W
+        place = _OUTPUT_CARD if group in _OUTPUT_GROUPS else group
+        blocks: list[Any] = []
+        for section in members:
+            if section not in model_settings:
+                continue
+            if (
+                section not in self._settings_cls.model_fields
+                and section in _VERSION_GATED_SECTIONS
+            ):
+                # section is modeled by some registered settings tier (e.g.
+                # pio_settings on RunTimeSettingsV0_6_0) but not by the
+                # active settings_cls -- e.g. a pre-0.6.0 roms_ref override
+                # with a ModelSpec whose model_settings still carries the
+                # key. Rendering a type-inferred widget here would let the
+                # user edit a value the active (extra="ignore") schema
+                # silently discards downstream. cppdefs is NOT in
+                # _VERSION_GATED_SECTIONS (no tier ever models it) and so
+                # is unaffected -- it keeps rendering via type-inference.
+                continue
+            include, exclude = _split_fields(place, section)
+            box, fields = self._build_section(
+                section, model_settings[section], include, exclude
+            )
+            if not fields:
+                continue
+            self._group_fields.setdefault(group, {})[section] = fields
+            sec_header = W.HTML(self.header_html(group, section))
+            # Widget-level class: the CSS draws a bold divider above every
+            # section header except the container's first (:first-child).
+            sec_header.add_class("forge-settings-sec-w")
+            self._headers[(group, section)] = sec_header
+            blocks.append(sec_header)
+            if note := _SECTION_NOTES.get(section):
+                blocks.append(W.HTML(f"<div class='forge-hint'>{note}</div>"))
+            blocks.append(box)
+        return blocks
 
     def sync(self, model_settings: dict[str, Any]):
         """Set every widget to the effective values (caller suspends edit tracking)."""
@@ -1950,6 +2096,7 @@ _STICKY_STEPS = (
     ("grid", "Grid"),
     ("forcing", "Forcing"),
     ("run", "Run"),
+    ("output", "Output"),
     ("advanced", "Advanced"),
     ("review", "Review"),
 )
@@ -4759,8 +4906,8 @@ class ForgeBlueprintWizard:
         self.cdr_plot_box.layout.display = "none"  # only for simple/yaml/netcdf
 
         # --- output settings spec (OutputSpec selection) ---
-        # The output sections themselves are edited in the Advanced settings accordion;
-        # this dropdown selects a named OutputSpec that seeds those sections. An
+        # The output streams themselves are edited in the Output card below this
+        # dropdown; it selects a named OutputSpec that seeds those streams. An
         # OutputSpec must always be explicitly selected -- ModelSpec no longer embeds
         # default output settings.
         _output_names = list(self.catalog.output_names)
@@ -4781,14 +4928,14 @@ class ForgeBlueprintWizard:
 
         # --- advanced settings editor (built lazily on first rebuild) ---
         self.editor: _SettingsEditor | None = None
-        self._editor_model: str | None = None
-        self._editor_bgc_mode: str | None = None
-        # The RunTimeSettings variant the editor was last built against -- rebuilt
-        # not only on a model switch but also when the effective ucla-roms ref
-        # crosses a schema boundary (e.g. editing the roms_ref override across the
-        # 0.5.0 line while keeping the same ModelSpec selected).
-        self._editor_settings_cls: type[BaseModel] | None = None
+        # What the editor was built for (None while there is none): rebuilt not only
+        # on a model switch but also when the effective ucla-roms ref crosses a schema
+        # boundary (e.g. editing the roms_ref override across the 0.5.0 line while
+        # keeping the same ModelSpec selected), or the BGC mode or nesting role change.
+        self._editor_key: _EditorKey | None = None
         self.editor_box = W.VBox([])  # placeholder; filled with the editor's accordion
+        # ... and the Output card's body, filled with the editor's output_box.
+        self.output_editor_box = W.VBox([])
         # sparse manual overrides layer: (section, field|None) -> value
         self._overrides: dict[Any, Any] = {}
         self._syncing = False  # True while pushing composed values into editor widgets
@@ -4939,7 +5086,15 @@ class ForgeBlueprintWizard:
         self.sticky_bar.add_class("forge-sticky-html")
         self.card_chips: dict[str, Any] = {
             key: W.HTML("")
-            for key in ("model", "grid", "forcing", "run", "advanced", "review")
+            for key in (
+                "model",
+                "grid",
+                "forcing",
+                "run",
+                "output",
+                "advanced",
+                "review",
+            )
         }
         self.grid_lock_banner = components.banner_widget(
             W,
@@ -7263,10 +7418,8 @@ class ForgeBlueprintWizard:
             # "file not found", surfacing loudly via _rebuild()'s Invalid status.
             if self._grid_file_grid is not None:
                 kw["grid"] = self._grid_file_grid
-        # Nesting is unsupported alongside a user-provided grid file (see
-        # Domain._grid_file_excludes_generation_geometry) -- omit both blocks
-        # while attached even if the (now-disabled) checkboxes are still checked.
-        if self.nest_enable.value and self._grid_file is None:
+        is_parent, is_child = self._nesting_role()
+        if is_parent:
             ck: dict[str, Any] = {}
             for k in _GRID_INT:
                 ck[k] = int(self.child_w[k].value)
@@ -7281,7 +7434,7 @@ class ForgeBlueprintWizard:
             kw["metadata_child"] = {"period": float(self.nest_period.value)}
             if self.nest_pressure_fluxes.value:
                 kw["nesting_include_pressure_fluxes"] = True
-        if self.parent_enable.value and self._grid_file is None:
+        if is_child:
             pk: dict[str, Any] = {}
             for k in _GRID_INT:
                 pk[k] = int(self.parent_w[k].value)
@@ -7297,7 +7450,7 @@ class ForgeBlueprintWizard:
         if self._forcing_editor is None:
             raise RuntimeError("_gather called before the forcing editor was built")
         kw["forcing_inputs"] = self._forcing_editor.gather()
-        if self.parent_enable.value and self._grid_file is None:
+        if is_child:
             # Durable guarantee (authoritative, independent of forcing-editor UI
             # state): a child grid (has a parent) receives its boundary values
             # from the parent's nesting.nc extraction, not reanalysis boundary
@@ -7320,7 +7473,13 @@ class ForgeBlueprintWizard:
                 if k in child:
                     w.value = child[k]
             self._set_nested_topo_widgets("child", child)
-            period = (cfg.domain.metadata_child or {}).get("period")
+            # The effective extraction period: an older file may carry an Advanced
+            # extract_period override that differs from metadata_child.period.
+            period = (cfg.model_settings.get("extract_data") or {}).get(
+                "extract_period"
+            )
+            if period is None:
+                period = (cfg.domain.metadata_child or {}).get("period")
             if period is not None:
                 self.nest_period.value = float(period)
         self.nest_pressure_fluxes.value = bool(
@@ -7333,6 +7492,47 @@ class ForgeBlueprintWizard:
                 if k in parent:
                     w.value = parent[k]
             self._set_nested_topo_widgets("parent", parent)
+
+    def _nesting_role(self) -> tuple[bool, bool]:
+        """``(is_parent, is_child)`` for the grid being edited, as the nesting
+        checkboxes request it. Nesting is unsupported alongside a user-provided grid
+        file (see ``Domain._grid_file_excludes_generation_geometry``), so an attached
+        file ignores both even if the (now-disabled) checkboxes are still checked.
+        Read by ``_gather`` (what is resolved) and by the settings editor's key, so
+        the Output card follows a nesting toggle even before the blueprint is valid.
+        """
+        if self._grid_file is not None:
+            return False, False
+        return bool(self.nest_enable.value), bool(self.parent_enable.value)
+
+    def _hide_stale_editor(self) -> None:
+        """After a failed resolve, replace an editor built for another model or BGC
+        mode, or for another nesting role, with a placeholder (the next valid resolve
+        rebuilds it): it would keep showing streams that no longer apply, e.g. the
+        MARBL ones after a switch to ``cdr_lite`` that still lacks its CDR forcing, or
+        no child-grid extraction after "This grid is a parent" is ticked on an invalid
+        blueprint. Overrides are applied after the resolve, never fed to it, so no
+        failure comes from an editor value and nothing is lost; the user's record
+        stays. Everything in the key but ``settings_cls`` is known without a resolved
+        config; an editor still matching it stays.
+        """
+        key = self._editor_key
+        if key is None or (key.model, key.bgc_mode, key.is_parent, key.is_child) == (
+            self.model_dd.value,
+            self.bgc_dd.value,
+            *self._nesting_role(),
+        ):
+            return
+        placeholder = components.banner_widget(
+            self.W,
+            "info",
+            "Settings for this selection appear once the blueprint is valid — see "
+            "the status above.",
+        )
+        self.editor_box.children = [placeholder]
+        self.output_editor_box.children = [placeholder]
+        self.editor = None
+        self._editor_key = None
 
     def _rebuild(self, *_):
         if getattr(self, "_suspended", False):
@@ -7357,6 +7557,7 @@ class ForgeBlueprintWizard:
             self.derived.value = "<i>Set start and end dates…</i>"
             self.download_link.value = ""
             self.download_link_review.value = ""
+            self._hide_stale_editor()
             self._update_status(None)
             return
         try:
@@ -7371,6 +7572,7 @@ class ForgeBlueprintWizard:
             error = lines[0][:200]
             if len(lines) > 1 or len(lines[0]) > len(error):
                 error += " — full message in the preview below"
+            self._hide_stale_editor()
             self._update_status(None, error=error)
             return
 
@@ -7382,37 +7584,38 @@ class ForgeBlueprintWizard:
             with self._suspend():
                 self.v_sponge.value = float(cfg.domain.v_sponge)
 
-        # Advanced settings editor: every section is editable. The resolver composes
-        # a baseline from the specs; the user's manual edits are a sparse overrides
-        # layer applied on top (effective = composed ⊕ overrides). The editor is
-        # rebuilt when the *model* changes (its field set depends on the model) or
-        # when the effective ucla-roms ref crosses a schema boundary (e.g. editing
-        # the roms_ref override across the 0.4.0, 0.5.0, 0.6.0, or 0.7.0 line with
-        # the same model selected) -- see run_time_settings_for_ref /
-        # RunTimeSettingsV0_4_0 / RunTimeSettingsV0_5_0 / RunTimeSettingsV0_6_0 /
-        # RunTimeSettingsV0_7_0.
+        # Advanced/Output settings editor: every section is editable. The resolver
+        # composes a baseline from the specs; the user's manual edits are a sparse
+        # overrides layer applied on top (effective = composed ⊕ overrides). The
+        # editor is rebuilt when the *model* changes (its field set depends on the
+        # model), when the BGC mode or the grid's nesting role changes (which output
+        # streams apply), or when the effective ucla-roms ref crosses a schema
+        # boundary (e.g. editing the roms_ref override across the 0.4.0, 0.5.0, 0.6.0,
+        # or 0.7.0 line with the same model selected) -- see
+        # run_time_settings_for_ref / RunTimeSettingsV0_4_0 / RunTimeSettingsV0_5_0 /
+        # RunTimeSettingsV0_6_0 / RunTimeSettingsV0_7_0.
         composed = cfg.model_settings
         # Computed once per rebuild (each call re-reads the ModelSpec YAML) and
         # reused for the validation call below.
         effective_roms_ref = self._effective_roms_ref()
         settings_cls = _wizard_settings_cls_for_ref(effective_roms_ref)
-        if (
-            self.editor is None
-            or self._editor_model != self.model_dd.value
-            or self._editor_settings_cls is not settings_cls
-            or self._editor_bgc_mode != self.bgc_dd.value
-        ):
+        is_parent, is_child = self._nesting_role()
+        key = _EditorKey(
+            self.model_dd.value, settings_cls, self.bgc_dd.value, is_parent, is_child
+        )
+        if self.editor is None or self._editor_key != key:
             self.editor = _SettingsEditor(
                 self.W,
                 composed,
                 on_edit=self._on_editor_edit,
                 settings_cls=settings_cls,
-                bgc_mode=self.bgc_dd.value,
+                bgc_mode=key.bgc_mode,
+                is_parent=is_parent,
+                is_child=is_child,
             )
-            self._editor_model = self.model_dd.value
-            self._editor_settings_cls = settings_cls
-            self._editor_bgc_mode = self.bgc_dd.value
+            self._editor_key = key
             self.editor_box.children = [self.editor.accordion]
+            self.output_editor_box.children = [self.editor.output_box]
 
         active_overrides = self._active_overrides
         effective = _apply_overrides(composed, active_overrides)
@@ -7593,36 +7796,48 @@ class ForgeBlueprintWizard:
             summary = " · ".join(names) if names else "none"
         return summary[:60]
 
-    def _retitle_advanced_editor(self) -> None:
-        """Refresh each Advanced-settings pane's accordion title with its field
-        count and how many of its fields carry a manual override (see
-        `_SettingsEditor._pane_sections`/`_section_fields`).
+    def _retitle_settings_editor(self) -> None:
+        """Refresh each settings container's titles with its field count and how many
+        of its fields carry a manual override: the Advanced panes' and "More output
+        streams" accordion titles, and the Output card's section headers (see
+        `_SettingsEditor._group_fields`).
         """
         editor = self.editor
         if editor is None:
             return
+
         active = self._active_overrides
-        for i, (title, sections) in enumerate(editor._pane_sections.items()):
-            fields_by_section = [editor._section_fields.get(s, []) for s in sections]
-            n_fields = sum(len(fields) for fields in fields_by_section)
-            pane_keys = {
-                (s, f) for s, fields in zip(sections, fields_by_section) for f in fields
-            }
-            n_mod = sum(1 for k in active if k in pane_keys)
-            editor.accordion.set_title(
-                i,
-                components.accordion_title(
-                    title,
-                    f"{n_fields} settings",
-                    f"{n_mod} modified" if n_mod else "all defaults",
-                ),
+
+        def counts(fields_by_section: dict[str, list[str | None]]) -> tuple[int, int]:
+            keys = {(s, f) for s, fields in fields_by_section.items() for f in fields}
+            return (
+                sum(len(fields) for fields in fields_by_section.values()),
+                sum(1 for k in active if k in keys),
+            )
+
+        def title(name: str, fields_by_section: dict[str, list[str | None]]) -> str:
+            n_fields, n_mod = counts(fields_by_section)
+            return components.accordion_title(
+                name,
+                f"{n_fields} settings",
+                f"{n_mod} modified" if n_mod else "all defaults",
+            )
+
+        for i, name in enumerate(editor._pane_sections):
+            editor.accordion.set_title(i, title(name, editor._group_fields[name]))
+        if more := editor._group_fields.get(_OUTPUT_MORE_TITLE):
+            editor.more_streams.set_title(0, title(_OUTPUT_MORE_TITLE, more))
+        for section, fields in editor._group_fields.get(_OUTPUT_CARD, {}).items():
+            _n_fields, n_mod = counts({section: fields})
+            editor._headers[(_OUTPUT_CARD, section)].value = editor.header_html(
+                _OUTPUT_CARD, section, n_mod
             )
 
     def _update_status(
         self, cfg: ForgeBlueprint | None, error: str | None = None
     ) -> None:
-        """Refresh the sticky bar, per-card status chips, and the forcing/advanced
-        accordion titles from the outcome of a `_rebuild` call.
+        """Refresh the sticky bar, per-card status chips, and the forcing/advanced/
+        output titles from the outcome of a `_rebuild` call.
 
         Called at the end of every `_rebuild` path: on success with the
         resolved ``cfg``; on a missing-dates or build/validation failure with
@@ -7683,10 +7898,18 @@ class ForgeBlueprintWizard:
             if forcing_modified
             else components.chip("At preset defaults", "def")
         )
+        # Placement, not OutputSpec ownership: the two chips partition the overrides.
         active = self._active_overrides
+        n_output = sum(1 for key in active if _in_output_card(*key))
+        n_advanced = len(active) - n_output
+        chips["output"].value = (
+            components.chip(f"● {n_output} modified", "info")
+            if n_output
+            else components.chip("At preset defaults", "def")
+        )
         chips["advanced"].value = (
-            components.chip(f"● {len(active)} modified", "info")
-            if active
+            components.chip(f"● {n_advanced} modified", "info")
+            if n_advanced
             else components.chip("All defaults", "def")
         )
 
@@ -7701,7 +7924,7 @@ class ForgeBlueprintWizard:
         )
         if self._forcing_editor is not None:
             self._forcing_editor.retitle(self._forcing_summary)
-        self._retitle_advanced_editor()
+        self._retitle_settings_editor()
 
     def _refresh_download_links(self, cfg: ForgeBlueprint) -> None:
         """Point both download links at ``cfg``, stamped once so they agree.
@@ -8482,8 +8705,8 @@ class ForgeBlueprintWizard:
     @property
     def widget(self):
         """The wizard's root widget: a ``forge-app``/``forge-wizard`` ``W.VBox``
-        of a sticky status bar, an intro line, and the seven cards (Start,
-        Model, Grid, Forcing, Run, Advanced, Review). Built once and cached in
+        of a sticky status bar, an intro line, and the eight cards (Start,
+        Model, Grid, Forcing, Run, Output, Advanced, Review). Built once and cached in
         ``self._root`` -- repeated access returns the same tree, so widgets
         placed in it keep their identity across a rebuild.
         """
@@ -8532,15 +8755,9 @@ class ForgeBlueprintWizard:
             W,
             "model",
             components.field_row(W, "model_dd", self.model_dd),
-            # bgc_dd's grid is placed before roms_ref/marbl_ref's so marbl_ref
+            # bgc_dd is placed before roms_ref/marbl_ref's grid so marbl_ref
             # (only relevant once bgc mode is "marbl") reads after bgc_dd.
-            components.field_grid(
-                W,
-                [
-                    components.field_row(W, "bgc_dd", self.bgc_dd),
-                    components.field_row(W, "output_dd", self.output_dd),
-                ],
-            ),
+            components.field_row(W, "bgc_dd", self.bgc_dd),
             components.field_grid(
                 W,
                 [
@@ -8813,11 +9030,20 @@ class ForgeBlueprintWizard:
             chips_widget=self.card_chips["run"],
         )
 
+        output_card = components.card(
+            W,
+            "output",
+            components.field_row(W, "output_dd", self.output_dd),
+            self.output_editor_box,
+            num=5,
+            chips_widget=self.card_chips["output"],
+        )
+
         advanced_card = components.card(
             W,
             "advanced",
             self.editor_box,
-            num=5,
+            num=6,
             chips_widget=self.card_chips["advanced"],
         )
 
@@ -8898,7 +9124,7 @@ class ForgeBlueprintWizard:
                 "<span style='color:#666'>ℹ To run this blueprint as part of a "
                 "workplan, build one on the Workplan page.</span>"
             ),
-            num=6,
+            num=7,
             chips_widget=self.card_chips["review"],
             required_chip=False,
         )
@@ -8913,6 +9139,7 @@ class ForgeBlueprintWizard:
                 grid_card,
                 forcing_card,
                 run_card,
+                output_card,
                 advanced_card,
                 review_card,
             ]

@@ -59,6 +59,7 @@ _REQUIRED_SECTION_IDS = (
     "grid",
     "forcing",
     "run",
+    "output",
     "advanced",
     "review",
     "grid.geometry",

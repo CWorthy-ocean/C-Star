@@ -6367,18 +6367,18 @@ class TestForgeBlueprintWizard:
             "Surface & lateral forcing",
             "Biogeochemistry (BGC / MARBL)",
             "Carbon dioxide removal (CDR)",
-            "Output & diagnostics",
         ]
-        sections = set(w.editor._section_fields)
+        sections = {s for group in w.editor._group_fields.values() for s in group}
         # A representative editable section from each category is present.
         assert {
             "lateral_visc",  # physics
             "tides",  # forcing
             "marbl_bgc",  # bgc
             "cdr_frc",  # cdr
-            "ocean_vars",  # output
-            "extract_data",  # output
+            "ocean_vars",  # output card
         } <= sections
+        # extract_data is the parent side of nesting: absent until the grid nests.
+        assert "extract_data" not in sections
         # Dynamic / dedicated-widget sections are dropped from the accordion (their
         # resolver-composed value still flows through -- see the exclusion test).
         # ``cppdefs`` and ``param`` are the partial exceptions: sponge_tune/
@@ -6395,16 +6395,22 @@ class TestForgeBlueprintWizard:
             }
             & sections
         )
-        assert w.editor._section_fields["param"] == ["nt_passive"]
+        cdr_pane = w.editor._group_fields["Carbon dioxide removal (CDR)"]
+        assert cdr_pane["param"] == ["nt_passive"]
         assert w.config.composition.overrides == {}
 
     def test_advanced_editor_splits_bgc_along_output_seam(self):
-        """bgc/marbl_bgc straddle physics and output: the write-controls appear under
-        Output, the rest under Biogeochemistry (the PARTIAL_OUTPUT_SECTIONS seam).
+        """bgc/marbl_bgc straddle physics and output: the write-controls appear in the
+        Output card, the rest under Biogeochemistry (the PARTIAL_OUTPUT_SECTIONS seam).
         """
+        from cstar.wizard.wizard import _OUTPUT_CARD
+
         w = self._wizard()
-        assert "bgc" in w.editor._pane_sections["Biogeochemistry (BGC / MARBL)"]
-        assert "bgc" in w.editor._pane_sections["Output & diagnostics"]
+        group_fields = w.editor._group_fields
+        bgc_pane = group_fields["Biogeochemistry (BGC / MARBL)"]["bgc"]
+        bgc_output = group_fields[_OUTPUT_CARD]["bgc"]
+        assert "wrt_his" in bgc_output and "wrt_his" not in bgc_pane
+        assert "xco2air_default" in bgc_pane and "xco2air_default" not in bgc_output
         # A bgc physics field and a bgc output field each got a widget (neither half
         # was dropped by the split).
         assert ("bgc", "xco2air_default") in w.editor._widgets  # physics
@@ -6418,8 +6424,9 @@ class TestForgeBlueprintWizard:
         w = self._wizard()
         # The whole time_stepping/grid group is dropped from the accordion
         # (resolver-derived or edited by a dedicated widget).
+        built = {s for group in w.editor._group_fields.values() for s in group}
         for dropped in ("time_stepping", "grid", "s_coord"):
-            assert dropped not in w.editor._section_fields
+            assert dropped not in built
         # param shows only nt_passive: the grid/tiling dims have dedicated widgets
         # and the tracer counts are derived (BGC mode, CDR forcing).
         for derived in ("llm", "mmm", "n", "np_xi", "np_eta", "ntrc_bio"):
