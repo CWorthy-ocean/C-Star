@@ -37,6 +37,13 @@ Breaking Changes
 
   - Forge cannot resolve a hash to a release and uses the newest schema, while the roms_marbl step resolves it to the nearest tag; pin a release tag instead until this is fixed.
 
+- C-Star now requires roms-tools 5.2.1 or later; update existing environments before installing this version. (`#782 <https://github.com/CWorthy-ocean/C-Star/pull/782>`_)
+
+  - Boundary BGC with ``density`` or ``density_mld`` interpolation (e.g. the bundled ``glorys-era5-glodap-woa`` forcing) is now written on the physics time axis in grouped files instead of one ``_clim`` file per source, about 36 BGC boundary files per simulated year.
+  - A ``_clim`` boundary file left over from an earlier run still counts as already present on a rerun without clobber; remove it or rerun with clobber.
+  - ESPER-derived O2 is floored at 2.0 mmol/m³ instead of 0, with or without salinity conditioning.
+
+
 
 New features
 ~~~~~~~~~~~~
@@ -142,6 +149,7 @@ Bug Fixes
   - In a forcing that mixes MARBL and cdr_lite or passive releases, a MARBL release's ALK flux plot now shows only that release.
 
 - Simple-mode CDR plots under ``bgc_mode: cdr_lite`` now show the cdr_lite release that will actually be generated. (`#778 <https://github.com/CWorthy-ocean/C-Star/pull/778>`_)
+- Forge boundary and initial-condition steps with ESPER or density-interpolated BGC no longer grow memory without bound while saving, and density boundaries follow each year's physics instead of one sampled day (roms-tools 5.2.0). (`#782 <https://github.com/CWorthy-ocean/C-Star/pull/782>`_)
 
 
 
