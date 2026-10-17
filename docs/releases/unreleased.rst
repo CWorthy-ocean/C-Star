@@ -96,6 +96,11 @@ New features
 - ``cstar blueprint run`` accepts ``--step <name>`` to record which workplan step a run executes; workplan steps pass it automatically. (`#772 <https://github.com/CWorthy-ocean/C-Star/pull/772>`_)
 - New bundled ForcingSpec ``glorys-era5-physics`` for ``bgc_mode`` none or cdr_lite. It combines GLORYS, ERA5, WOA SSS restoring, TPXO tides and DAI rivers, with no BGC. (`#779 <https://github.com/CWorthy-ocean/C-Star/pull/779>`_)
 - When the BGC mode changes, the wizard swaps an untouched default ForcingSpec for the matching one: ``glorys-era5-physics`` without MARBL, ``glorys-era5-unified`` with it. (`#779 <https://github.com/CWorthy-ocean/C-Star/pull/779>`_)
+- The wizard has a new Output card between Run and Advanced, holding the OutputSpec picker and every output stream. (`#780 <https://github.com/CWorthy-ocean/C-Star/pull/780>`_)
+
+  - Main streams: physical state, surface flux, BGC and MARBL output, CDR, CDR-lite and CDR gas-exchange output. Child-grid extraction appears on parent grids and upscaled output on child grids.
+  - Under a collapsed "More output streams": diagnostics, temperature/salinity, forcing, depth-slice, random, particle, pressure-flux and runtime-diagnostics output.
+
 
 
 
@@ -160,6 +165,9 @@ Improvements
 
 - Under ``bgc_mode: cdr_lite`` the wizard shows the CDR-lite tracer output as always on, so its output period and records per file are visible and editable. (`#779 <https://github.com/CWorthy-ocean/C-Star/pull/779>`_)
 - The wizard's CDR-lite settings now have readable labels and hints instead of raw namelist names. (`#779 <https://github.com/CWorthy-ocean/C-Star/pull/779>`_)
+- The CDR output streams moved from the Advanced card's CDR pane to the Output card, and the Advanced card no longer has an output pane. (`#780 <https://github.com/CWorthy-ocean/C-Star/pull/780>`_)
+- The nesting options in the Grid card now set the child-grid extraction period and the extraction settings that come from the child grid; they are no longer edited separately under Advanced. (`#780 <https://github.com/CWorthy-ocean/C-Star/pull/780>`_)
+- If a BGC-mode, model or nesting change leaves the blueprint invalid, the wizard hides the old settings until the blueprint is valid again. One example is switching to cdr_lite before adding CDR forcing. (`#780 <https://github.com/CWorthy-ocean/C-Star/pull/780>`_)
 
 
 Miscellaneous
@@ -181,3 +189,4 @@ Miscellaneous
 - A hello_world end-to-end module covers the manifest after a run, the status refresh, a re-entry, a copied run and a standalone blueprint run. (`#772 <https://github.com/CWorthy-ocean/C-Star/pull/772>`_)
 - Documented the physics-only ForcingSpec in the Forge specs guide. (`#779 <https://github.com/CWorthy-ocean/C-Star/pull/779>`_)
 - The Forge internals developer guide describes how commit-hash pins choose a namelist version. (`#781 <https://github.com/CWorthy-ocean/C-Star/pull/781>`_)
+- Documented the Output card in the wizard guide, with a new Output-card screenshot and refreshed overview and Advanced screenshots. (`#780 <https://github.com/CWorthy-ocean/C-Star/pull/780>`_)
