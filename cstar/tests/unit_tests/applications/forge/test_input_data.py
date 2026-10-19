@@ -2305,9 +2305,11 @@ class TestCdrCustomFileForcing:
             )
 
     def test_hash_mismatch_warns_but_proceeds(self, cdr_input_data, tmp_path):
+        from cstar.applications.forge.user_files import HASH_SCHEME
+
         cdr_nc = _write_cdr_netcdf(tmp_path / "user_cdr.nc", ncdr=3, family="volume")
         custom_file = forge_models.UserProvidedFile(
-            location=str(cdr_nc), content_hash="nc-sample-v1:not-the-real-hash"
+            location=str(cdr_nc), content_hash=f"{HASH_SCHEME}:not-the-real-hash"
         )
 
         with pytest.warns(UserWarning, match="changed since"):
@@ -3239,9 +3241,11 @@ class TestRiverCustomFileForcing:
             )
 
     def test_hash_mismatch_warns_but_proceeds(self, river_input_data, tmp_path):
+        from cstar.applications.forge.user_files import HASH_SCHEME
+
         river_nc = _write_river_netcdf(tmp_path / "user_river.nc", nriver=3)
         custom_file = forge_models.UserProvidedFile(
-            location=str(river_nc), content_hash="nc-sample-v1:not-the-real-hash"
+            location=str(river_nc), content_hash=f"{HASH_SCHEME}:not-the-real-hash"
         )
 
         with pytest.warns(UserWarning, match="changed since"):

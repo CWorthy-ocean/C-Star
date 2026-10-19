@@ -17,14 +17,15 @@ blueprint at authoring time). At processing time the executor:
    with whatever is on disk).
 
 The hash is computed over the file's structure (dims, variables, dtypes,
-attributes), every small variable in full and a bounded sample of rows of each
-larger one (:func:`hash_netcdf_contents`), not file bytes, so it survives benign
-re-encoding (``nccopy`` to a different format/chunking, NETCDF4 <-> classic)
-that changes the bytes on disk without changing the data, and costs a few MB of
-I/O per variable however large the file. A digest carries a scheme prefix so the verifier
-recomputes the same scheme. :func:`stage_user_netcdf` then copies the verified file into
-the executor's working tree, mirroring how generated inputs land there; under
-ParallelIO a non-classic (NETCDF4) file is converted to CDF-5 on the copy.
+attributes), every small variable in full and the first and last megabyte of each
+larger one in two contiguous reads (:func:`hash_netcdf_contents`), not file bytes,
+so it survives benign re-encoding (``nccopy`` to a different format/chunking,
+NETCDF4 <-> classic) that changes the bytes on disk without changing the data,
+and costs two reads per variable however large the file. A digest carries a
+scheme prefix so the verifier recomputes the same scheme.
+:func:`stage_user_netcdf` then copies the verified file into the executor's
+working tree, mirroring how generated inputs land there; under ParallelIO a
+non-classic (NETCDF4) file is converted to CDF-5 on the copy.
 
 Module top stays light (xarray/numpy are imported inside the functions that
 need them; only stdlib and ``cstar.base.utils`` are imported eagerly) -- this
@@ -53,7 +54,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-HASH_SCHEME = "nc-sample-v1"
+HASH_SCHEME = "nc-sample-v2"
 """Prefix of every digest :func:`hash_netcdf_contents` returns."""
 
 FULL_HASH_LIMIT = 1 << 20
@@ -61,9 +62,6 @@ FULL_HASH_LIMIT = 1 << 20
 
 SAMPLE_BUDGET = 2 << 20
 """Most bytes read from any one larger variable."""
-
-SAMPLE_ROWS = 64
-"""Most rows sampled from any one larger variable."""
 
 
 def short_digest(content_hash: str) -> str:
@@ -90,37 +88,41 @@ def _array_bytes(values: np.ndarray) -> bytes:
 
 
 def _sampled_bytes(var: xr.Variable) -> bytes:
-    """Bytes of an evenly spaced sample of ``var``'s rows (full innermost-axis
-    vectors), read lazily so at most about ``SAMPLE_BUDGET`` bytes come off disk.
+    """Bytes of ``var``'s leading and trailing slabs, two contiguous reads.
 
-    The sampled row indices are folded in ahead of the data. The first row (record
-    0) is always sampled, and the last whenever more than one row is. When the
-    sampled rows would not fit the budget, each contributes only its first and
-    last ``SAMPLE_BUDGET // (2 * k * itemsize)`` elements (``k`` rows sampled).
+    Each slab is one hyperslab contiguous in C order holding at most
+    ``SAMPLE_BUDGET // (2 * itemsize)`` elements: whole slices of the first axis
+    ``j`` whose trailing axes fit that count, taken from the start (index 0 of the
+    axes before ``j``) and from the end (their last index). A variable no larger
+    than ``SAMPLE_BUDGET`` is read whole instead. The slab indices are folded in
+    ahead of the data, so the first and last elements are always covered.
     """
     import numpy as np
 
-    *lead, row_len = var.shape
-    n_rows = int(np.prod(lead))
+    shape = var.shape
     itemsize = var.dtype.itemsize
-    row_bytes = max(1, row_len * itemsize)
-    k = max(min(n_rows, 2), min(SAMPLE_ROWS, SAMPLE_BUDGET // row_bytes))
-    rows = np.unique(np.round(np.linspace(0, n_rows - 1, k)).astype(int))
+    if var.size * itemsize <= SAMPLE_BUDGET:
+        return _array_bytes(var.values)
 
-    parts = [repr(tuple(rows.tolist())).encode()]
-    for i in rows.tolist():
-        prefix = np.unravel_index(i, lead) if lead else ()
-        if k * row_len * itemsize > SAMPLE_BUDGET:
-            half = SAMPLE_BUDGET // (2 * k * itemsize)
-            spans = [slice(0, half), slice(row_len - half, row_len)]
-        else:
-            spans = [slice(None)]
-        parts.extend(_array_bytes(var[(*prefix, span)].values) for span in spans)
-    return b"".join(parts)
+    m = max(1, SAMPLE_BUDGET // (2 * itemsize))  # an element may exceed the budget
+    j = next(j for j in range(len(shape)) if int(np.prod(shape[j + 1 :])) <= m)
+    r = max(1, min(shape[j], m // int(np.prod(shape[j + 1 :]))))
+    rest = (slice(None),) * (len(shape) - j - 1)
+    leading = (0,) * j + (slice(0, r),) + rest
+    tail = slice(shape[j] - r, shape[j])
+    trailing = (*(n - 1 for n in shape[:j]), tail, *rest)
+
+    spans = [
+        tuple((i.start, i.stop) if isinstance(i, slice) else i for i in idx)
+        for idx in (leading, trailing)
+    ]
+    parts = [repr(spans).encode()]
+    parts.extend(_array_bytes(var[idx].values) for idx in (leading, trailing))
+    return b"|".join(parts)
 
 
 def hash_netcdf_contents(path: str | Path) -> str:
-    r"""Scheme-prefixed sha256 digest (``nc-sample-v1:<hex>``) of a netCDF file's
+    r"""Scheme-prefixed sha256 digest (``nc-sample-v2:<hex>``) of a netCDF file's
     structure and data, independent of its on-disk encoding (format, chunking,
     compression) and costing a bounded read however large the file.
 
@@ -137,10 +139,13 @@ def hash_netcdf_contents(path: str | Path) -> str:
        variable attributes.
 
     Value bytes: a variable of at most ``FULL_HASH_LIMIT`` bytes is hashed in full;
-    a larger one contributes a sample of up to ``SAMPLE_ROWS`` evenly spaced rows
-    (a row is one innermost-axis vector, always including the first and last
-    record) totalling at most ``SAMPLE_BUDGET`` bytes, preceded by the row indices
-    (see :func:`_sampled_bytes`). Either way ndarray -> bytes is
+    a larger one contributes its first and last contiguous slab of at most
+    ``SAMPLE_BUDGET // 2`` bytes each, two reads that always cover the first and
+    last element, preceded by the slab indices (one whole read when it fits
+    ``SAMPLE_BUDGET``; see :func:`_sampled_bytes`). An edit confined to the
+    interior of a large variable therefore leaves the digest unchanged: the
+    digest identifies the file cheaply, it does not certify every value (a
+    mismatch is only a warning at staging). Either way ndarray -> bytes is
     :func:`_array_bytes`: numeric dtypes as raw C-order bytes, object/string/bytes
     dtypes UTF-8-encoded and joined with ``b"\\x00"``.
 

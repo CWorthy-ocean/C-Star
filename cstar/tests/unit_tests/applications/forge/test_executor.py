@@ -694,10 +694,11 @@ class TestForgeExecutorModelPostInitGridFile:
         self, minimal_cstar_spec_builder_args, mock_grid, tmp_path
     ):
         from cstar.applications.forge.blueprint import UserProvidedFile
+        from cstar.applications.forge.user_files import HASH_SCHEME
 
         grid_path = self._write_tiny_netcdf(tmp_path)
         gf = UserProvidedFile(
-            location=str(grid_path), content_hash="nc-sample-v1:not-the-real-hash"
+            location=str(grid_path), content_hash=f"{HASH_SCHEME}:not-the-real-hash"
         )
         cfg = self._cfg_with_grid_file(minimal_cstar_spec_builder_args, tmp_path, gf)
 
