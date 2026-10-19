@@ -4,6 +4,7 @@ import os
 import re
 import shutil
 import typing as t
+from datetime import UTC, datetime
 from pathlib import Path
 from unittest import mock
 
@@ -11,9 +12,22 @@ import pytest
 from click.testing import Result
 from typer.testing import CliRunner
 
+from cstar.base.exceptions import CstarExpectationFailed
 from cstar.cli.run import app as app_run
 from cstar.cli.run.check import COMMAND_CHECK
-from cstar.entrypoint.utils import ARG_ALL, ARG_REPAIR
+from cstar.entrypoint.utils import ARG_ALL, ARG_NO_REFRESH, ARG_REPAIR, ARG_VERIFY
+from cstar.orchestration.dag_runner import DagStatus
+from cstar.orchestration.manifest import (
+    RUN_MANIFEST_NAME,
+    Attempt,
+    Product,
+    RunManifest,
+    StepEntry,
+    StepRecord,
+    write_run_manifest,
+    write_step_record,
+)
+from cstar.orchestration.models import BlueprintIdentity
 from cstar.orchestration.tracking import WorkplanRun
 from cstar.tests.unit_tests.orchestration.run_tree import (
     FakeRun,
@@ -34,17 +48,90 @@ HEADINGS: t.Final[tuple[str, ...]] = (
     f"Symlinks with an absolute target inside the run (fixed by {ARG_REPAIR}) (",
     "Symlinks whose target does not exist (",
     "Steps without a directory (",
+    "Products missing from the run (",
+    "Products whose size differs from the record (",
+    f"Products whose content differs from the record ({ARG_VERIFY}) (",
     "Symlinks with a target outside the run (informational) (",
+    "Steps that are done without a step record (informational) (",
+    "Latest attempt not finished (informational) (",
     "Step directories no step accounts for (informational) (",
     "Sentinel files no step accounts for (informational) (",
 )
 """The sections of a report, in the order they are listed."""
 
 
+NOW = datetime(2026, 10, 19, 12, 0, tzinfo=UTC)
+
+
 @pytest.fixture
 def run(tmp_path: Path, hello_world_bp_path: Path) -> FakeRun:
     """The fake run tree with one of everything."""
     return build_fake_run(hello_world_bp_path, tmp_path)
+
+
+class Refresh(t.NamedTuple):
+    """The calls a run-id target makes to bring the manifest up to date."""
+
+    status: mock.AsyncMock
+    refresh: mock.Mock
+
+
+@pytest.fixture(autouse=True)
+def refresh() -> t.Iterator[Refresh]:
+    """Replace what refreshing the manifest of a tracked run reaches for."""
+    status = mock.AsyncMock(return_value=DagStatus({}))
+    with (
+        mock.patch("cstar.cli.run.check.get_launcher"),
+        mock.patch("cstar.cli.run.check.load_run_state", status),
+        mock.patch("cstar.cli.run.check.refresh_run_manifest") as refresh_manifest,
+    ):
+        yield Refresh(status, refresh_manifest)
+
+
+def entry(
+    name: str,
+    working_dir: str,
+    *products: Product,
+    status: str = "",
+    record: bool = True,
+) -> StepEntry:
+    """A step entry whose record, when it has one, lists `products`."""
+    step_record = StepRecord(
+        step=name,
+        application="hello_world",
+        blueprint=BlueprintIdentity(
+            kind="Blueprint", application="hello_world", name="bp", content_hash="x"
+        ),
+        outcome="completed",
+        finished_at=NOW,
+        products=list(products),
+    )
+    return StepEntry(
+        name=name,
+        application="hello_world",
+        working_dir=working_dir,
+        status=status,
+        record=step_record if record else None,
+    )
+
+
+def write_manifest(root: Path, *steps: StepEntry, finished: bool = True) -> RunManifest:
+    """Write the manifest of a run of `steps`, whose attempt is `finished` or not."""
+    manifest = RunManifest(
+        run_id="small",
+        name="small",
+        kind="workplan",
+        created_at=NOW,
+        attempts=[Attempt(start_at=NOW, finished_at=NOW if finished else None)],
+        steps=list(steps),
+    )
+    write_run_manifest(root, manifest)
+    return manifest
+
+
+def product(path: str, size: int = 0, sha256: str = "") -> Product:
+    """A product of unclassified kind."""
+    return Product(kind="other", path=path, size_bytes=size, sha256=sha256)
 
 
 def invoke(*args: str, record: WorkplanRun | None = None) -> Result:
@@ -65,7 +152,20 @@ def test_a_run_id_reports_every_kind_of_finding(run: FakeRun) -> None:
     """Verify a tracked run is checked through its record, every section is
     listed in order with one line per finding, and the exit code says it failed.
     """
-    result = invoke(run.record.run_id, record=run.record)
+    write_manifest(
+        run.root,
+        entry(
+            "Spin Up",
+            "tasks/spin-up",
+            product("output/gone.nc", 4),
+            product("output/a.nc", 9),
+            product("output/result.yaml", sha256="0" * 64),
+        ),
+        entry("run", "tasks/run", status="Done", record=False),
+        finished=False,
+    )
+
+    result = invoke(run.record.run_id, ARG_VERIFY, record=run.record)
 
     assert result.exit_code == EXIT_FINDINGS, result.output
     positions = [result.stdout.index(heading) for heading in HEADINGS]
@@ -80,8 +180,16 @@ def test_a_run_id_reports_every_kind_of_finding(run: FakeRun) -> None:
     assert f"  {run.spin_up}/input/rel_dangling -> ../nothing" in result.stdout
     assert f"  {run.root}/tasks/run\n" in result.stdout
     assert f"  {run.root}/tasks/stale\n" in result.stdout
+    assert f"  {run.spin_up}/output/gone.nc\n" in result.stdout
+    assert f"  {run.spin_up}/output/a.nc: 4 bytes, recorded 9\n" in result.stdout
     assert re.search(
-        rf"\d+ problem\(s\) found in {re.escape(str(run.root))}, 3 informational",
+        rf"  {re.escape(str(run.spin_up))}/output/result.yaml: [0-9a-f]{{64}}\n",
+        result.stdout,
+    )
+    assert f"  {run.root}/tasks/run/cstar-step.yaml\n" in result.stdout
+    assert f"  {run.root}/{RUN_MANIFEST_NAME}\n" in result.stdout
+    assert re.search(
+        rf"\d+ problem\(s\) found in {re.escape(str(run.root))}, 5 informational",
         result.stdout,
     )
     assert "Skipped" not in result.stdout
@@ -337,11 +445,16 @@ def test_a_missing_directory_is_a_bad_argument(
 def test_a_directory_without_tasks_is_not_a_run(
     tmp_path: Path, flatten_cli_output: t.Callable[[str], str]
 ) -> None:
-    """Verify a directory that holds no `tasks` directory is refused."""
+    """Verify a directory with neither `tasks` nor a manifest is refused, and
+    the message names both.
+    """
     result = invoke(str(tmp_path))
 
     assert result.exit_code == EXIT_BAD_ARGS
-    assert "has no `tasks` directory" in flatten_cli_output(result.stderr)
+    assert (
+        "has neither a `tasks` directory nor a `cstar-run.yaml`"
+        in flatten_cli_output(result.stderr)
+    )
 
 
 def test_a_directory_with_two_transformed_workplans_is_ambiguous(
@@ -380,4 +493,221 @@ def test_the_help_names_the_options_and_the_workplan_command(
     assert result.exit_code == 0
     assert ARG_REPAIR in text
     assert ARG_ALL in text
+    assert ARG_VERIFY in text
+    assert ARG_NO_REFRESH in text
     assert "cstar workplan check <file>" in text
+
+
+def test_a_missing_product_fails_the_check(tmp_path: Path) -> None:
+    """Verify a product the record lists that the run lacks is named and exits 1,
+    while one that is there passes.
+    """
+    root = small_run(tmp_path / "small")
+    write(root / "tasks" / "run" / "output" / "here.nc", "data")
+    write_manifest(
+        root,
+        entry(
+            "run", "tasks/run", product("output/here.nc", 4), product("output/gone.nc")
+        ),
+    )
+
+    result = invoke(str(root))
+
+    assert result.exit_code == EXIT_FINDINGS, result.output
+    assert "Products missing from the run (1):" in result.stdout
+    assert f"  {root.resolve()}/tasks/run/output/gone.nc\n" in result.stdout
+    assert "here.nc" not in result.stdout
+    assert "Skipped products" not in result.stdout
+
+
+def test_a_changed_size_fails_the_check(tmp_path: Path) -> None:
+    """Verify a product of another size than recorded exits 1 with both sizes."""
+    root = small_run(tmp_path / "small")
+    write(root / "tasks" / "run" / "output" / "x.nc", "data")
+    write_manifest(root, entry("run", "tasks/run", product("output/x.nc", 10)))
+
+    result = invoke(str(root))
+
+    assert result.exit_code == EXIT_FINDINGS, result.output
+    assert "Products whose size differs from the record (1):" in result.stdout
+    assert "/tasks/run/output/x.nc: 4 bytes, recorded 10\n" in result.stdout
+
+
+def test_verify_compares_content_only_where_a_hash_is_recorded(tmp_path: Path) -> None:
+    """Verify `--verify` flags a differing hash, and without it nothing is hashed."""
+    root = small_run(tmp_path / "small")
+    write(root / "tasks" / "run" / "output" / "x.nc", "data")
+    write_manifest(root, entry("run", "tasks/run", product("output/x.nc", 4, "f" * 64)))
+
+    plain = invoke(str(root))
+    verified = invoke(str(root), ARG_VERIFY)
+
+    assert plain.exit_code == EXIT_CLEAN, plain.output
+    assert verified.exit_code == EXIT_FINDINGS, verified.output
+    assert f"Products whose content differs from the record ({ARG_VERIFY}) (1):" in (
+        verified.stdout
+    )
+
+
+def test_verify_says_when_no_product_records_a_hash(tmp_path: Path) -> None:
+    """Verify `--verify` over records without hashes passes and names the skip."""
+    root = small_run(tmp_path / "small")
+    write(root / "tasks" / "run" / "output" / "x.nc", "data")
+    write_manifest(root, entry("run", "tasks/run", product("output/x.nc", 4)))
+
+    result = invoke(str(root), ARG_VERIFY)
+
+    assert result.exit_code == EXIT_CLEAN, result.output
+    assert "Skipped hash verification: no product records a hash" in result.stdout
+
+
+def test_informational_manifest_findings_alone_exit_zero(tmp_path: Path) -> None:
+    """Verify a done step without a record and an unfinished attempt are listed,
+    counted as informational, and do not fail the check.
+    """
+    root = small_run(tmp_path / "small")
+    write_manifest(
+        root,
+        entry("run", "tasks/run"),
+        entry("later", "tasks/later", status="Done", record=False),
+        finished=False,
+    )
+
+    result = invoke(str(root))
+
+    assert result.exit_code == EXIT_CLEAN, result.output
+    assert "Steps that are done without a step record (informational) (1):" in (
+        result.stdout
+    )
+    assert f"  {root.resolve()}/tasks/later/cstar-step.yaml\n" in result.stdout
+    assert "Latest attempt not finished (informational) (1):" in result.stdout
+    assert f"  {root.resolve()}/{RUN_MANIFEST_NAME}\n" in result.stdout
+    assert f"No problems found in {root.resolve()}, 2 informational." in result.stdout
+
+
+def test_a_standalone_run_directory_is_accepted(tmp_path: Path) -> None:
+    """Verify a directory holding `cstar-run.yaml` and no `tasks/` is checked:
+    its symlinks and the products of the step record beside it, which is folded
+    in memory, and the step-directory checks are skipped.
+    """
+    root = tmp_path / "standalone"
+    write(root / "output" / "kept.nc", "data")
+    link(root / "output" / "broken", "../nothing")
+    write_manifest(root, entry("run", ".", record=False))
+    recorded = entry(
+        "run", ".", product("output/kept.nc", 4), product("output/lost.nc")
+    )
+    assert recorded.record is not None
+    write_step_record(root, recorded.record)
+
+    result = invoke(str(root))
+
+    assert result.exit_code == EXIT_FINDINGS, result.output
+    assert "Symlinks whose target does not exist (1):" in result.stdout
+    assert "Products missing from the run (1):" in result.stdout
+    assert f"  {root.resolve()}/output/lost.nc\n" in result.stdout
+    assert "kept.nc" not in result.stdout
+    assert "Skipped step directories and orphans" in result.stdout
+    assert not (root / "tasks").exists()
+    assert result.stderr == ""
+
+
+def test_an_unreadable_manifest_is_a_warning_and_the_other_checks_run(
+    tmp_path: Path,
+) -> None:
+    """Verify a corrupt manifest is named on stderr, the product checks are
+    skipped, and the checks that need no manifest still decide the exit code.
+    """
+    root = small_run(tmp_path / "small")
+    link(root / "tasks" / "run" / "input" / "broken", "../nothing")
+    (root / RUN_MANIFEST_NAME).write_text("{not: [valid")
+
+    result = invoke(str(root))
+
+    assert result.exit_code == EXIT_FINDINGS, result.output
+    assert result.stderr.startswith("Warning:")
+    assert RUN_MANIFEST_NAME in result.stderr
+    assert "Symlinks whose target does not exist (1):" in result.stdout
+    assert "Skipped products: no run manifest" in result.stdout
+
+
+def test_a_run_id_refreshes_the_manifest_before_checking_it(
+    run: FakeRun, refresh: Refresh
+) -> None:
+    """Verify a tracked run's scheduler state is loaded and folded into the
+    manifest, as `cstar run show` does, before the products are compared.
+    """
+    write_manifest(
+        run.root, entry("Spin Up", "tasks/spin-up", product("output/a.nc", 4))
+    )
+
+    result = invoke(run.record.run_id, record=run.record)
+
+    assert result.exit_code == EXIT_FINDINGS, result.output
+    refresh.status.assert_awaited_once()
+    assert refresh.status.await_args is not None
+    assert refresh.status.await_args.args[0] == run.record.run_id
+    refresh.refresh.assert_called_once_with(
+        run.root, run.record.run_id, refresh.status.return_value
+    )
+    assert "Skipped products" not in result.stdout
+
+
+def test_no_refresh_reads_the_manifest_as_recorded(
+    run: FakeRun, refresh: Refresh
+) -> None:
+    """Verify `--no-refresh` neither polls the scheduler nor rewrites the manifest."""
+    write_manifest(
+        run.root, entry("Spin Up", "tasks/spin-up", product("output/gone.nc"))
+    )
+
+    result = invoke(run.record.run_id, ARG_NO_REFRESH, record=run.record)
+
+    refresh.status.assert_not_called()
+    refresh.refresh.assert_not_called()
+    assert "Products missing from the run (1):" in result.stdout
+
+
+def test_a_directory_is_never_refreshed(run: FakeRun, refresh: Refresh) -> None:
+    """Verify a directory has no run-id to poll the scheduler for."""
+    write_manifest(run.root, entry("Spin Up", "tasks/spin-up"))
+
+    invoke(str(run.root))
+
+    refresh.status.assert_not_called()
+    refresh.refresh.assert_not_called()
+
+
+def test_a_run_id_without_a_loadable_workplan_is_not_refreshed(
+    run: FakeRun, refresh: Refresh
+) -> None:
+    """Verify a tracked run whose workplan cannot be read is checked against the
+    manifest as recorded.
+    """
+    run.trx_path.write_text("not: [a, workplan")
+    write_manifest(
+        run.root, entry("Spin Up", "tasks/spin-up", product("output/gone.nc"))
+    )
+
+    result = invoke(run.record.run_id, record=run.record)
+
+    refresh.status.assert_not_called()
+    assert "Products missing from the run (1):" in result.stdout
+
+
+def test_a_refresh_that_cannot_run_is_a_warning(run: FakeRun, refresh: Refresh) -> None:
+    """Verify a run whose workplan names a scheduler this machine lacks is still
+    checked, with the manifest as last recorded.
+    """
+    write_manifest(
+        run.root, entry("Spin Up", "tasks/spin-up", product("output/gone.nc"))
+    )
+    failure = CstarExpectationFailed("no scheduler on this system")
+
+    with mock.patch("cstar.cli.run.check.get_launcher", side_effect=failure):
+        result = invoke(run.record.run_id, record=run.record)
+
+    assert result.exit_code == EXIT_FINDINGS, result.output
+    assert "Warning: the manifest was not refreshed: no scheduler" in result.output
+    assert "Products missing from the run (1):" in result.stdout
+    refresh.refresh.assert_not_called()
