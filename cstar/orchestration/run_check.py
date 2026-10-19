@@ -20,6 +20,7 @@ from dataclasses import dataclass, field
 from enum import StrEnum, auto
 from pathlib import Path
 
+from cstar.applications.core import ArtifactKind
 from cstar.base.log import get_logger
 from cstar.base.utils import _get_sha256_hash
 from cstar.execution.file_system import (
@@ -406,7 +407,9 @@ def find_product_findings(
     """Compare the products the step records list with the run directory.
 
     Only the recorded products are looked at: the file system is not walked. A
-    size of zero means the product was not measured, and is never compared.
+    size of zero means the product was not measured, and is never compared. A log
+    may still be written when the record is taken (the step's own output is), so
+    only a log that shrank is reported.
 
     Parameters
     ----------
@@ -444,7 +447,11 @@ def find_product_findings(
                 findings.append(Finding(FindingKind.PRODUCT_MISSING, file))
                 continue
             regular = stat.S_ISREG(found.st_mode)
-            if product.size_bytes and regular and found.st_size != product.size_bytes:
+            if product.known_kind is ArtifactKind.log:
+                differs = found.st_size < product.size_bytes
+            else:
+                differs = found.st_size != product.size_bytes
+            if product.size_bytes and regular and differs:
                 text = f"{found.st_size} bytes, recorded {product.size_bytes}"
                 findings.append(Finding(FindingKind.PRODUCT_SIZE, file, path=text))
             elif (

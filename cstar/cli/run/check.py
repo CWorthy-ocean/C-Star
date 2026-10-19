@@ -73,7 +73,9 @@ regenerate are skipped unless {ARG_ALL} is given. Steps that have not started
 have no directory yet.
 
 When the run has a manifest, the products each step record lists are compared
-with the directory: missing, or a size that changed. {ARG_VERIFY} also compares
+with the directory: missing, or a size that changed (a log is reported only when
+it shrank: the step's own log is still written after the record is taken).
+{ARG_VERIFY} also compares
 the content where a sha256 is recorded, and nothing records one yet. For a
 run-id the manifest is refreshed first, as `cstar run show` does;
 {ARG_NO_REFRESH} reads it as last recorded.

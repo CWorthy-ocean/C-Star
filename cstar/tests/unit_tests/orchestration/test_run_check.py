@@ -708,6 +708,26 @@ def test_a_deleted_and_a_truncated_product_are_found(recorded: Path) -> None:
     assert size.file == recorded / "tasks/one/output/b.nc"
 
 
+def test_a_log_that_grew_is_not_a_finding_but_one_that_shrank_is(
+    recorded: Path,
+) -> None:
+    """Verify a log is compared for loss only: the step's own output is still
+    being written when the record is taken.
+    """
+    for name in ("grew.out", "shrank.out"):
+        write(recorded / "tasks" / "one" / "logs" / name, "data")
+    (recorded / "tasks/one/logs/grew.out").write_text("data and more")
+    (recorded / "tasks/one/logs/shrank.out").write_text("da")
+    manifest = manifest_of(
+        Product(kind="log", path="logs/grew.out", size_bytes=4),
+        Product(kind="log", path="logs/shrank.out", size_bytes=4),
+    )
+
+    findings = find_product_findings(recorded, manifest, verify=False)
+
+    assert located_products(findings) == {(FindingKind.PRODUCT_SIZE, "shrank.out")}
+
+
 def test_a_product_not_measured_is_never_a_size_finding(recorded: Path) -> None:
     """Verify a recorded size of zero means not measured, whatever the file holds."""
     manifest = manifest_of(product("output/a.nc", 0))

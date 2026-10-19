@@ -819,7 +819,7 @@ The command reports, kind by kind, with one line per finding:
 - absolute paths under the run, or under the C-Star data home, in the files each step emits (``output/*.yaml``, ``blueprints/B_*.yaml``, ``work/cstar_generated_roms.nml``) and in the run's ``*_transformed.yaml``. Pass ``--all`` to scan the launch artifacts too (override and directive files, ``script.sh`` and namelists); launchers regenerate those, so they are skipped by default.
 - symlinks with an absolute target inside the run, and symlinks whose target does not exist.
 - steps of the transformed workplan with no ``tasks/<slug>`` directory. A step that has not started has none yet.
-- products that are missing from the run, or whose size changed, compared with the step records folded into the manifest. Pass ``--verify`` to compare the content too, where a sha256 is recorded (none is yet).
+- products that are missing from the run, or whose size changed, compared with the step records folded into the manifest. A log is reported only when it shrank, since a step's own log is still written after its record is taken. Pass ``--verify`` to compare the content too, where a sha256 is recorded (none is yet).
 
 Symlinks with a target outside the run (absolute, or relative and climbing out of it), step directories that no step accounts for, sentinel files of the run that no step accounts for (found by run ID, so not for a bare path), steps that are done without a step record, and a latest attempt that has not finished are listed for information and do not fail the check. Nothing is ever deleted.
 
