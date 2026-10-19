@@ -300,7 +300,7 @@
                         "average",
                         "output",
                         "emitted_blueprint",
-                        "namelist",
+                        "config",
                         "build",
                         "log",
                         "figure",
