@@ -8,6 +8,7 @@ from cstar.applications.core import (
     RunnerResult,
     RunnerState,
     XRunner,
+    get_application,
 )
 from cstar.base.env import ENV_CSTAR_LOG_LEVEL, ENV_CSTAR_RUNID, get_env_item
 from cstar.base.log import LogLevelChoices
@@ -30,7 +31,12 @@ from cstar.entrypoint.utils import (
     ARG_URI_SHORT,
 )
 from cstar.execution.handler import ExecutionStatus
-from cstar.orchestration.manifest import StepRecord, write_step_record
+from cstar.orchestration.manifest import (
+    StepRecord,
+    expand_artifacts,
+    merge_products,
+    write_step_record,
+)
 from cstar.orchestration.models import BlueprintIdentity
 
 if t.TYPE_CHECKING:
@@ -125,7 +131,8 @@ class BlueprintRunner(Service, XRunner[TBlueprint]):
             self.log.warning(msg)
 
     def _write_step_record(self) -> None:
-        """Record what this step did in its working directory.
+        """Record what this step did in its working directory, with the products its
+        application declares merged with those reported while it ran.
 
         A record that cannot be written (the blueprint did not load, the
         directory is unwritable) is logged and skipped: it never changes the
@@ -133,6 +140,15 @@ class BlueprintRunner(Service, XRunner[TBlueprint]):
         """
         try:
             bp = t.cast("Blueprint", self.blueprint)
+            root = bp.effective_working_dir
+            try:
+                declared = expand_artifacts(
+                    root, get_application(bp.application).artifacts(bp)
+                )
+                products = merge_products(declared, self.products)
+            except Exception as ex:
+                self.log.warning(f"Unable to expand the declared products: {ex}")
+                products = list(self.products)
             record = StepRecord(
                 run_id=os.getenv(ENV_CSTAR_RUNID, ""),
                 step=self.request.step or bp.name,
@@ -144,10 +160,10 @@ class BlueprintRunner(Service, XRunner[TBlueprint]):
                 finished_at=utc_now(),
                 system=system_name(),
                 versions=package_versions(),
-                products=list(self.products),
+                products=products,
                 errors=list(self.result.errors),
             )
-            path = write_step_record(bp.effective_working_dir, record)
+            path = write_step_record(root, record)
             self.log.debug(f"Wrote the step record to {path}")
         except Exception as ex:
             self.log.warning(f"Unable to write the step record: {ex}")
