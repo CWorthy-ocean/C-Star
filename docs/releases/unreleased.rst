@@ -191,6 +191,12 @@ Improvements
 - If a BGC-mode, model or nesting change leaves the blueprint invalid, the wizard hides the old settings until the blueprint is valid again. One example is switching to cdr_lite before adding CDR forcing. (`#780 <https://github.com/CWorthy-ocean/C-Star/pull/780>`_)
 - A blueprint whose ESPER source has the switch on but no ``WOA_SALINITY`` in ``datasets`` is rejected at load time, naming the one key to add. (`#764 <https://github.com/CWorthy-ocean/C-Star/pull/764>`_)
 - The boundary forcing step prints, before constructing ``BoundaryForcing`` with BGC sources, that the whole run's physics T/S are read first and that no boundary file appears until that finishes (hours for a multi-year high-resolution run); roms-tools logs the same at INFO on the root logger, which C-Star's logging keeps off the terminal. (`#764 <https://github.com/CWorthy-ocean/C-Star/pull/764>`_)
+- A user-provided file's ``content_hash`` (``nc-sample-v2:<sha256>``) samples each large variable with two contiguous reads, its first and last megabyte, instead of 64 scattered rows, so attaching tens of multi-GB files on a shared file system takes seconds rather than minutes. (`#784 <https://github.com/CWorthy-ocean/C-Star/pull/784>`_)
+
+  - The first and last element of every variable are still covered, the digest is still independent of format, chunking and compression, and small variables are still hashed in full.
+  - A blueprint recorded with ``nc-sample-v1`` (unreleased, on ``main`` since #769) is accepted with one "not verified" warning; re-saving it refreshes the digest.
+  - An edit confined to the interior of a large variable does not change the digest: it identifies the file cheaply and does not certify every value, which the staging warning never did either.
+
 
 
 Miscellaneous
