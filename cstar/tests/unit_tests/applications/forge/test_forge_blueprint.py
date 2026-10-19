@@ -24,6 +24,7 @@ import yaml
 
 import cstar
 import cstar.catalog
+from cstar.applications.core import ArtifactKind
 from cstar.applications.forge.app import ForgeApplication
 from cstar.applications.forge.blueprint import (
     _COMPOSITION_SPEC_KINDS,
@@ -8759,6 +8760,19 @@ def test_forge_application_emitted_blueprint(use_pio):
     assert emitted.grid_filename == netcdf_basename(cfg.name, "grid")
     assert emitted.producer == producer_ref(cfg)
     assert emitted.producer.content_hash == cfg.content_hash()
+
+
+def test_forge_application_declares_the_emitted_blueprint_it_describes():
+    cfg = _build()
+    app = ForgeApplication()
+
+    declared = {
+        spec.pattern
+        for spec in app.artifacts(cfg)
+        if spec.kind == ArtifactKind.emitted_blueprint
+    }
+
+    assert declared == {f"output/{app.emitted_blueprint(cfg).filename}"}
 
 
 def test_producer_ref_identifies_the_forge_blueprint():

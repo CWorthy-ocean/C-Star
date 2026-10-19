@@ -1,10 +1,13 @@
 import typing as t
+from collections.abc import Sequence
 from pathlib import Path
 
 from pydantic import ValidationInfo, field_validator
 
 from cstar.applications.core import (
     ApplicationDefinition,
+    ArtifactKind,
+    ArtifactSpec,
     RunnerResult,
     register_application,
 )
@@ -154,3 +157,19 @@ class PlotterApplication(
     blueprint = PlotterBlueprint
     applicable_transforms = ()
     migrations = (PlotterSchemaAdapterV1V2,)
+
+    @t.override
+    def artifacts(self, blueprint: PlotterBlueprint) -> Sequence[ArtifactSpec]:
+        """Declare the plots a plotter run leaves in its working directory.
+
+        Parameters
+        ----------
+        blueprint : PlotterBlueprint
+            The blueprint of the plotter step.
+
+        Returns
+        -------
+        Sequence[ArtifactSpec]
+            The figure pattern.
+        """
+        return [ArtifactSpec(kind=ArtifactKind.figure, pattern="*.png")]

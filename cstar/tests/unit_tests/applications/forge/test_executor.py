@@ -44,7 +44,7 @@ import cstar.catalog
 from cstar.applications.core import RunnerRequest
 from cstar.applications.forge import models as forge_models
 from cstar.applications.forge import runtime as forge_run
-from cstar.applications.forge.app import ForgeRunner
+from cstar.applications.forge.app import ForgeApplication, ForgeRunner
 from cstar.applications.forge.blueprint import (
     ForgeBlueprint,
     emitted_blueprint_description,
@@ -63,6 +63,7 @@ from cstar.catalog.domain_catalog import default_catalog as _CATALOG
 from cstar.entrypoint.config import get_job_config, get_service_config
 from cstar.execution.file_system import DirectoryManager
 from cstar.execution.handler import ExecutionStatus
+from cstar.orchestration.manifest import expand_artifacts
 from cstar.orchestration.models import (
     BlueprintIdentity,
     CatalogSpecRef,
@@ -5316,6 +5317,17 @@ class TestForgeRunnerEndToEnd:
         assert generated_by.tool == "forge"
         assert (generated_by.run_id, generated_by.working_dir) == ("", str(run_dir))
         assert emitted.provenance.derived_from[0] == producer_ref(cfg)
+
+        # The run reported its generated inputs, and the application declares every
+        # one of them (and the published blueprint), so the step record keeps them.
+        assert runner.products, "expected the generated inputs to be reported"
+        declared = {
+            p.path: p.kind
+            for p in expand_artifacts(run_dir, ForgeApplication().artifacts(cfg))
+        }
+        assert {p.path: p.kind for p in runner.products}.items() <= declared.items()
+        assert declared[f"output/{published[0].name}"] == "emitted_blueprint"
+        assert {p.kind for p in runner.products} >= {"grid", "initial_conditions"}
 
 
 class TestOnlyInputsReuseIsIdempotent:

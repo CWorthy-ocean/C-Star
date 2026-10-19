@@ -4,6 +4,12 @@ from pathlib import Path
 
 from cstar.execution.file_system import JobFileSystemManager
 
+ROMS_EXECUTABLE_NAME: t.Final[str] = "roms"
+"""The name of the compiled ROMS executable in the compile-time code directory."""
+
+GENERATED_NAMELIST_NAME: t.Final[str] = "cstar_generated_roms.nml"
+"""The name of the namelist C-Star generates for a run, in the run directory."""
+
 
 class RomsFileSystemManager(JobFileSystemManager):
     _COMPILE_TIME_NAME: t.ClassVar[t.Literal["compile_time_code"]] = "compile_time_code"

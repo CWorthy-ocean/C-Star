@@ -1,13 +1,22 @@
 import asyncio
+import re
 import sys
 import typing as t
+from pathlib import Path
 from typing import TYPE_CHECKING, Final, override
 
 from cstar.applications.core import (
     ApplicationDefinition,
+    ArtifactKind,
+    ArtifactSpec,
     RunnerRequest,
     RunnerResult,
     register_application,
+)
+from cstar.applications.roms_marbl.file_system import (
+    GENERATED_NAMELIST_NAME,
+    ROMS_EXECUTABLE_NAME,
+    RomsFileSystemManager,
 )
 from cstar.applications.roms_marbl.migration import (
     RomsMarblSchemaAdapter2025v1,
@@ -24,6 +33,7 @@ from cstar.applications.roms_marbl.transforms import (
     warn_on_restart_start_date_mismatch,
 )
 from cstar.base.exceptions import CstarError
+from cstar.base.log import get_logger
 from cstar.base.utils import slugify
 from cstar.entrypoint.config import (
     get_job_config,
@@ -31,6 +41,7 @@ from cstar.entrypoint.config import (
 )
 from cstar.entrypoint.runner import BlueprintRunner, create_parser
 from cstar.execution.handler import ExecutionHandler, ExecutionStatus
+from cstar.orchestration.manifest import Product
 from cstar.orchestration.models import (
     Application,
 )
@@ -40,6 +51,8 @@ from cstar.orchestration.transforms import (
 )
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
+
     from cstar.entrypoint.config import JobConfig, ServiceConfiguration
     from cstar.roms.simulation import ROMSSimulation
 
@@ -47,6 +60,65 @@ if TYPE_CHECKING:
 _APP_NAME_LONG: t.Literal["ROMS-MARBL simulation runner"] = (
     "ROMS-MARBL simulation runner"
 )
+log = get_logger(__name__)
+
+OUTPUT_STREAM_KINDS: t.Final[dict[str, ArtifactKind]] = {
+    "rst": ArtifactKind.restart,
+    "his": ArtifactKind.history,
+    "avg": ArtifactKind.average,
+}
+"""The ROMS output streams that have a kind of their own; every other stream is
+`output`."""
+
+OUTPUT_FILE_PATTERN: t.Final[re.Pattern[str]] = re.compile(
+    r"^output_(?P<stream>.+)\.(?P<timestamp>\d{14})\.nc$"
+)
+"""The name ROMS gives a joined output file, `output_<stream>.<14-digit timestamp>.nc`."""
+
+
+def output_products(output_dir: Path, root: Path, *, use_pio: bool) -> list[Product]:
+    """Describe the ROMS output files in a directory by stream, timestamp and format.
+
+    Only classifies by file name: the declared patterns own each file's size, and
+    any file this skips is still declared by the catch-all output pattern.
+
+    Parameters
+    ----------
+    output_dir : Path
+        The directory holding the joined output files.
+    root : Path
+        The step root that product paths are relative to.
+    use_pio : bool
+        Whether the run wrote its output through ParallelIO.
+
+    Returns
+    -------
+    list[Product]
+        One product per file named like a ROMS output, sorted by name.
+    """
+    # both sides resolved, so a symlinked step root still contains its output
+    root = root.resolve()
+    products: list[Product] = []
+    for path in sorted(output_dir.resolve().glob("*.nc")):
+        match = OUTPUT_FILE_PATTERN.match(path.name)
+        if match is None:
+            continue
+        if not path.is_relative_to(root):
+            log.debug(f"Skipping {path}: it is not under the step root {root}")
+            continue
+        stream = match["stream"]
+        products.append(
+            Product(
+                kind=OUTPUT_STREAM_KINDS.get(stream, ArtifactKind.output).value,
+                path=path.relative_to(root).as_posix(),
+                metadata={
+                    "stream": stream,
+                    "timestamp": match["timestamp"],
+                    "format": "pio" if use_pio else "joined",
+                },
+            )
+        )
+    return products
 
 
 class RomsMarblRunner(BlueprintRunner[RomsMarblBlueprint]):
@@ -164,6 +236,18 @@ class RomsMarblRunner(BlueprintRunner[RomsMarblBlueprint]):
         super()._on_iteration_complete()
         if self.state.status == ExecutionStatus.COMPLETED:
             self.simulation.post_run()
+            # reporting never changes the outcome: the declared patterns still
+            # list the files at shutdown, without this metadata
+            try:
+                self.products.extend(
+                    output_products(
+                        self.simulation.fs_manager.output_dir,
+                        self.blueprint.effective_working_dir,
+                        use_pio=self.simulation.use_pio,
+                    )
+                )
+            except Exception as ex:
+                self.log.warning(f"Unable to describe the output files: {ex}")
         elif ExecutionStatus.is_terminal(self.state.status):
             msg = "Skipping simulation post-run; simulation did not complete."
             self.log.debug(msg)
@@ -188,6 +272,56 @@ class RomsMarblApplication(ApplicationDefinition[RomsMarblBlueprint, RomsMarblRu
         RomsMarblSchemaAdapterV2V21,
         RomsMarblSchemaAdapterV21V3,
     )
+
+    @override
+    def artifacts(self, blueprint: RomsMarblBlueprint) -> "Sequence[ArtifactSpec]":
+        """Declare the files a ROMS-MARBL run leaves in its step root.
+
+        Parameters
+        ----------
+        blueprint : RomsMarblBlueprint
+            The blueprint of the ROMS-MARBL step.
+
+        Returns
+        -------
+        Sequence[ArtifactSpec]
+            The joined output files by stream, the namelist, cppdefs and MARBL
+            configuration the model read, the executable and the run log.
+        """
+        # a manager on a placeholder root only spells the layout; it touches no disk
+        fs = RomsFileSystemManager(Path("/"))
+
+        def rel(directory: Path, name: str) -> str:
+            return (directory / name).relative_to(fs.root_dir).as_posix()
+
+        streams = [
+            ArtifactSpec(kind=kind, pattern=rel(fs.output_dir, f"output_{stream}.*.nc"))
+            for stream, kind in OUTPUT_STREAM_KINDS.items()
+        ]
+        return [
+            *streams,
+            ArtifactSpec(kind=ArtifactKind.output, pattern=rel(fs.output_dir, "*.nc")),
+            ArtifactSpec(
+                kind=ArtifactKind.config,
+                pattern=rel(fs.run_dir, GENERATED_NAMELIST_NAME),
+                metadata={"role": "namelist"},
+            ),
+            ArtifactSpec(
+                kind=ArtifactKind.config,
+                pattern=rel(fs.compile_time_code_dir, "cppdefs.opt"),
+                metadata={"role": "cppdefs"},
+            ),
+            ArtifactSpec(
+                kind=ArtifactKind.config,
+                pattern=rel(fs.runtime_code_dir, "marbl_in"),
+                metadata={"role": "marbl_in"},
+            ),
+            ArtifactSpec(
+                kind=ArtifactKind.build,
+                pattern=rel(fs.compile_time_code_dir, ROMS_EXECUTABLE_NAME),
+            ),
+            ArtifactSpec(kind=ArtifactKind.log, pattern=rel(fs.logs_dir, "*.out")),
+        ]
 
 
 def main() -> int:

@@ -31,7 +31,11 @@ from cstar.applications.roms_marbl.adapter import (
     SurfaceForcingAdapter,
     TidalForcingAdapter,
 )
-from cstar.applications.roms_marbl.file_system import RomsFileSystemManager
+from cstar.applications.roms_marbl.file_system import (
+    GENERATED_NAMELIST_NAME,
+    ROMS_EXECUTABLE_NAME,
+    RomsFileSystemManager,
+)
 from cstar.applications.roms_marbl.models import RomsMarblBlueprint
 from cstar.base.additional_code import AdditionalCode
 from cstar.base.env import (
@@ -1764,7 +1768,7 @@ class ROMSSimulation(Simulation):
 
         if self.compile_time_code is not None and self.compile_time_code.working_copy:
             build_dir = self.compile_time_code.working_copy.common_parent
-            exe_path = build_dir / "roms"
+            exe_path = build_dir / ROMS_EXECUTABLE_NAME
             if not exe_path.exists():
                 problems.append(f"compiled ROMS executable {exe_path}")
             else:
@@ -1858,7 +1862,7 @@ class ROMSSimulation(Simulation):
         build_dir = self.compile_time_code.working_copy.common_parent
         self._validate_build_flags(build_dir)
 
-        exe_path = build_dir / "roms"
+        exe_path = build_dir / ROMS_EXECUTABLE_NAME
         if (
             (exe_path.exists())
             and (self.compile_time_code.exists_locally)
@@ -2352,7 +2356,7 @@ class ROMSSimulation(Simulation):
 
         # we run ROMS from the run directory
         run_path = self.fs_manager.run_dir
-        runtime_settings_fname = "cstar_generated_roms.nml"
+        runtime_settings_fname = GENERATED_NAMELIST_NAME
 
         # save modified namelist in the work directory, keeping a previous
         # attempt's namelist around as `.1`, `.2`, ... rather than overwriting it
