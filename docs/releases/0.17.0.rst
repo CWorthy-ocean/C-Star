@@ -19,21 +19,14 @@ Breaking Changes
 
   - Editing the recorded file in place (adding steps as a run grows) never trips the guard, and one ``--run-id <id>`` re-entry re-records the new file and original, so later runs need no flag.
 
-- ``cstar workplan status <unknown-id>`` exits with status 2 instead of printing a message and exiting 0. (`#767 <https://github.com/CWorthy-ocean/C-Star/pull/767>`_)
-- ``cstar workplan run --resume`` no longer re-exports the ``CSTAR_DATA_HOME`` and ``CSTAR_STATE_HOME`` captured when the run started; a reloaded run resolves against the current ones, and one warning names any other captured ``CSTAR_*`` setting that differs from the shell. (`#768 <https://github.com/CWorthy-ocean/C-Star/pull/768>`_)
 - A relative ``location:`` in a blueprint now resolves against the directory of the blueprint file, not the current working directory. (`#766 <https://github.com/CWorthy-ocean/C-Star/pull/766>`_)
 
   - A location that exists only relative to the working directory is refused, with both candidate paths named.
   - A blueprint fetched from a URL keeps the old meaning: its relative locations resolve against the directory ``cstar`` is run from.
 
-- ``ROMSInputDataset`` no longer accepts a ``linker``; the unused ``DatasetLinker`` class is removed. (`#766 <https://github.com/CWorthy-ocean/C-Star/pull/766>`_)
 - ucla-roms refs that aren't release tags (e.g. ``main``, other branches) now select the 0.11.0 namelist schema, which always writes ``use_constant_fe`` and ``constant_fe_value``; a ucla-roms build without #391 stops on them. (`#774 <https://github.com/CWorthy-ocean/C-Star/pull/774>`_)
 
   - Pin a release tag (e.g. ``0.10.1``) to keep the 0.9.0 schema.
-
-- Forge→roms_marbl workplans that pin ucla-roms by a commit hash at or after 0.9.0 now fail when the roms_marbl step reads Forge's namelist. (`#774 <https://github.com/CWorthy-ocean/C-Star/pull/774>`_)
-
-  - Forge cannot resolve a hash to a release and uses the newest schema, while the roms_marbl step resolves it to the nearest tag; pin a release tag instead until this is fixed.
 
 - C-Star now requires roms-tools 5.2.1 or later; update existing environments before installing this version. (`#782 <https://github.com/CWorthy-ocean/C-Star/pull/782>`_)
 
@@ -195,6 +188,7 @@ Improvements
   - A blueprint recorded with ``nc-sample-v1`` (unreleased, on ``main`` since #769) is accepted with one "not verified" warning; re-saving it refreshes the digest.
   - An edit confined to the interior of a large variable does not change the digest: it identifies the file cheaply and does not certify every value, which the staging warning never did either.
 
+- ``cstar workplan run --resume`` no longer re-exports the ``CSTAR_DATA_HOME`` and ``CSTAR_STATE_HOME`` captured when the run started; a reloaded run resolves against the current ones, and one warning names any other captured ``CSTAR_*`` setting that differs from the shell. (`#768 <https://github.com/CWorthy-ocean/C-Star/pull/768>`_)
 
 
 Miscellaneous
