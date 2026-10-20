@@ -105,6 +105,16 @@
                     "minItems": 1,
                     "title": "Sources",
                     "type": "array"
+                },
+                "source_role": {
+                    "default": "release",
+                    "description": "``\"release\"`` for the domain holding the CDR release; ``\"transfer\"`` for a\nparent that receives the child's upscaled boundary perturbation as its\nsource (roms-tools skips the release sign checks and leaves that domain's\nefficiencies undefined; its uptake counts in the total).",
+                    "enum": [
+                        "release",
+                        "transfer"
+                    ],
+                    "title": "Source Role",
+                    "type": "string"
                 }
             },
             "required": [
@@ -295,7 +305,7 @@
             "additionalProperties": {
                 "$ref": "#/$defs/CdrDomain"
             },
-            "description": "The domains to compute metrics for, by domain name; exactly one is\nsupported. The order matters for upscaled (nested) metrics, which list a\nchild domain before its parent; C-Star's YAML I/O preserves mapping order.",
+            "description": "The domains to compute metrics for, by domain name, ordered child to parent:\nfirst the domain holding the release, then its parent, and so on (C-Star's\nYAML I/O preserves mapping order). One domain gives single-domain metrics;\nseveral are combined with roms-tools' `UpscaledCDR`, which sums the uptake\nand normalises the efficiency by the release domains' cumulative source.",
             "minProperties": 1,
             "propertyNames": {
                 "minLength": 1
