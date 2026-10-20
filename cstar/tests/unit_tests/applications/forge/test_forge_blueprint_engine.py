@@ -179,3 +179,37 @@ def test_esper_salinity_conditioning_reaches_forcing_override_as_a_switch():
         "salinity_conditioning"
         not in off["forcing"]["boundary"]["bgc_sources"][0]["source"]
     )
+
+
+def test_esper_groom_reaches_roms_tools_only_when_set():
+    """``SourceSpec.esper_groom`` travels as roms-tools' ``groom`` key; unset emits
+    nothing, so roms-tools' own default applies.
+    """
+    cfg = _build()
+    boundary = cfg.forcing.boundary
+
+    def _src(source):
+        changed = cfg.model_copy(
+            update={
+                "forcing": cfg.forcing.model_copy(
+                    update={
+                        "boundary": boundary.model_copy(
+                            update={
+                                "bgc_sources": [
+                                    boundary.bgc_sources[0].model_copy(
+                                        update={"source": source}
+                                    )
+                                ]
+                            }
+                        )
+                    }
+                )
+            }
+        )
+        out = sources_to_forcing_override(changed)
+        return out["forcing"]["boundary"]["bgc_sources"][0]["source"]
+
+    assert _src(SourceSpec(name="ESPER", esper_groom=False))["groom"] is False
+    assert _src(SourceSpec(name="ESPER", esper_groom=True))["groom"] is True
+    unset = _src(SourceSpec(name="ESPER"))
+    assert "groom" not in unset and "esper_groom" not in unset

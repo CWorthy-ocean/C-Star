@@ -283,6 +283,10 @@ HELP_TEXT: dict[str | tuple[str, str], str] = {
     "nutrients, DIC above ALK), then dilute ALK and DIC back to the model salinity. "
     "Forge downloads the one WOA23 file this needs. Requires the CWorthy PyESPER fork "
     "(tag v1.1.1+cworthy.1 or later).",
+    "esper_groom": "Groom the ESPER-derived tracers: roms-tools detects implausible "
+    "values (spikes, zeros beside ordinary water, DIC inconsistent with ALK) and refills "
+    "them from the surrounding water. Checked = roms-tools default (on); uncheck to turn "
+    "it off.",
     # ---- IC BGC sources (row list) ----------------------------------------------
     (
         "ic_bgc",
@@ -2322,6 +2326,13 @@ def _add_bgc_source_widgets(W, w: dict[str, Any], cat: str, src: dict[str, Any],
         layout=W.Layout(width="200px"),
         tooltip=_tip(cat, "esper_salinity_conditioning"),
     )
+    w["esper_groom"] = W.Checkbox(
+        value=src.get("esper_groom") is not False,  # unset = roms-tools default (on)
+        description=_row_desc("esper_groom", "groom", colon=False),
+        indent=False,
+        layout=W.Layout(width="120px"),
+        tooltip=_tip(cat, "esper_groom"),
+    )
 
 
 # The `options` passthrough (see forge_blueprint.py `_OPTIONS_HELP`) is a free-form dict of
@@ -3009,6 +3020,8 @@ class _ForcingEditor:
             show(w["esper_equation"], name == "ESPER")
         if "esper_salinity_conditioning" in w:
             show(w["esper_salinity_conditioning"], name == "ESPER")
+        if "esper_groom" in w:
+            show(w["esper_groom"], name == "ESPER")
         # A 'constants' source takes no path (SourceSpec._constants_only_for_
         # constants_source forbids pairing them) -- gated on the "constants" key's
         # presence, which only ic_bgc/boundary_bgc rows carry, so this never
@@ -3690,6 +3703,10 @@ class _ForcingEditor:
             and name_val == "ESPER"
         ):  # Checkbox: unchecked = the model default (off), emitted by neither side
             src["esper_salinity_conditioning"] = True
+        if (
+            "esper_groom" in w and not w["esper_groom"].value and name_val == "ESPER"
+        ):  # Checkbox: checked = unset (roms-tools default, on); only "off" is written
+            src["esper_groom"] = False
         item = {"source": src}
         if "type" in w:
             item["type"] = w["type"].value

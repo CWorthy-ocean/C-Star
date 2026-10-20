@@ -812,6 +812,13 @@ class SourceSpec(_Section):
     the content hash** (``exclude_if``), so blueprints written before the field
     existed keep their hash, and blueprints saved with it off still load on builds
     that do not know it -- the same arrangement as an unset ``carbonate_sensitivity``."""
+    esper_groom: bool | None = Field(default=None, exclude_if=lambda v: v is None)
+    """Groom the ESPER-derived tracers: roms-tools detects implausible values (spikes,
+    zeros beside ordinary water, DIC inconsistent with ALK, ...) and refills them from
+    the surrounding water (``roms_tools.scripts.bgc_groom``). Unset (``None``) leaves the
+    choice to roms-tools' own default (``ESPER_GROOM_DEFAULT``, on); ``False`` turns it
+    off. Only valid when ``name == "ESPER"``. Unset is **left out of saved blueprints and
+    the content hash** (``exclude_if``), so existing blueprints keep their hash."""
 
     @model_validator(mode="after")
     def _glorys_layout_only_for_glorys(self) -> SourceSpec:
@@ -840,10 +847,11 @@ class SourceSpec(_Section):
             self.esper_method is not None
             or self.esper_equation is not None
             or self.esper_salinity_conditioning
+            or self.esper_groom is not None
         ) and not is_esper:
             raise ValueError(
-                "esper_method/esper_equation/esper_salinity_conditioning are only "
-                "valid when name is 'ESPER'"
+                "esper_method/esper_equation/esper_salinity_conditioning/esper_groom "
+                "are only valid when name is 'ESPER'"
             )
         # No path requirement for ESPER: without one, roms-tools imports PyESPER
         # from the environment and PyESPER resolves its own data directories

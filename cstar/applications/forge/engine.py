@@ -185,6 +185,9 @@ def sources_to_forcing_override(cfg: ForgeBlueprint) -> dict[str, Any]:
         # into roms-tools' mapping with the staged WOA23 file's path.
         if spec.esper_salinity_conditioning:
             d["salinity_conditioning"] = True
+        # Unset leaves roms-tools' own default in charge (the source dict omits it).
+        if spec.esper_groom is not None:
+            d["groom"] = spec.esper_groom
         return d
 
     def _item(item) -> dict[str, Any]:

@@ -8955,3 +8955,15 @@ class TestEmittedProvenance:
             if isinstance(ref, CatalogSpecRef)
             and ref.kind in ("ModelSpec", "DomainSpec")
         ] == [CatalogSpecRef(kind="DomainSpec", name="wio-toy", origin="")]
+
+
+def test_source_spec_esper_groom_only_for_esper_and_unset_by_default():
+    from cstar.applications.forge.blueprint import SourceSpec
+
+    assert SourceSpec(name="ESPER").esper_groom is None
+    assert SourceSpec(name="ESPER", esper_groom=False).esper_groom is False
+    with pytest.raises(ValueError, match="esper_groom"):
+        SourceSpec(name="UNIFIED", esper_groom=False)
+    # Unset is excluded from dumps (and so from the content hash).
+    assert "esper_groom" not in SourceSpec(name="ESPER").model_dump()
+    assert SourceSpec(name="ESPER", esper_groom=False).model_dump()["esper_groom"] is False

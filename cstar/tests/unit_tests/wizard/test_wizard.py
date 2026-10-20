@@ -537,6 +537,7 @@ def test_surface_bgc_row_never_gets_use_vars_or_bgc_source_widgets(editor):
     assert "esper_method" not in w
     assert "esper_equation" not in w
     assert "esper_salinity_conditioning" not in w
+    assert "esper_groom" not in w
 
 
 def test_surface_bgc_row_gathers_a_validating_surface_forcing_item(editor):
@@ -608,6 +609,27 @@ def test_esper_salinity_conditioning_unchecked_is_not_emitted(editor, cat):
     w = editor._make_row(cat, {"source": {"name": "ESPER"}})
     assert w["esper_salinity_conditioning"].value is False
     assert "esper_salinity_conditioning" not in editor._gather_item(cat, w)["source"]
+
+
+@pytest.mark.parametrize("cat", ["ic_bgc", "boundary_bgc"])
+def test_esper_groom_round_trips_off_and_leaves_default_unset(editor, cat):
+    """Checked = unset (roms-tools default, on) and emits nothing; an explicit
+    ``esper_groom: False`` loads unchecked and gathers back as ``False``; a non-ESPER
+    source never emits it.
+    """
+    w = editor._make_row(cat, {"source": {"name": "ESPER"}})
+    assert w["esper_groom"].value is True
+    assert "esper_groom" not in editor._gather_item(cat, w)["source"]
+
+    w = editor._make_row(cat, {"source": {"name": "ESPER", "esper_groom": False}})
+    assert w["esper_groom"].value is False
+    item = editor._gather_item(cat, w)
+    assert item["source"]["esper_groom"] is False
+    BgcSourceItem(**item)
+
+    w["name"].value = "GLODAP"
+    editor._apply_row_visibility(w)
+    assert "esper_groom" not in editor._gather_item(cat, w)["source"]
 
 
 @pytest.mark.parametrize("cat", ["ic_bgc", "boundary_bgc"])
