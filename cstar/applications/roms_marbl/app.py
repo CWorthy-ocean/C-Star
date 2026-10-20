@@ -1,5 +1,4 @@
 import asyncio
-import re
 import sys
 import typing as t
 from pathlib import Path
@@ -14,12 +13,8 @@ from cstar.applications.core import (
     register_application,
 )
 from cstar.applications.roms_marbl.file_system import (
-    CDR_OUTPUT_SUFFIX,
-    EXTRACT_ROOT_NAME,
     GENERATED_NAMELIST_NAME,
-    OUTPUT_ROOT_NAME,
     ROMS_EXECUTABLE_NAME,
-    UPSCALING_SUFFIX,
     RomsFileSystemManager,
 )
 from cstar.applications.roms_marbl.migration import (
@@ -28,16 +23,17 @@ from cstar.applications.roms_marbl.migration import (
     RomsMarblSchemaAdapterV21V3,
 )
 from cstar.applications.roms_marbl.models import APP_NAME, RomsMarblBlueprint
+from cstar.applications.roms_marbl.outputs import (
+    OUTPUT_FILE_PATTERN,
+    OUTPUT_STREAMS,
+    warn_on_restart_start_date_mismatch,
+)
 from cstar.applications.roms_marbl.resume import prepare_resume_blueprint
 from cstar.applications.roms_marbl.transforms import (
-    BoundaryFile,
     CarbonateSensitivityDirective,
-    CarbonateSensitivityFile,
     ContinuanceDirective,
     NestingDirective,
-    RestartFile,
     RomsMarblTimeSplitter,
-    warn_on_restart_start_date_mismatch,
 )
 from cstar.base.exceptions import CstarError
 from cstar.base.log import get_logger
@@ -68,35 +64,6 @@ _APP_NAME_LONG: t.Literal["ROMS-MARBL simulation runner"] = (
     "ROMS-MARBL simulation runner"
 )
 log = get_logger(__name__)
-
-OUTPUT_STREAMS: t.Final[tuple[tuple[str, ArtifactKind, dict[str, str]], ...]] = (
-    (f"{OUTPUT_ROOT_NAME}{RestartFile.SUFFIX}", ArtifactKind.restart, {}),
-    (f"{OUTPUT_ROOT_NAME}_his", ArtifactKind.history, {}),
-    (f"{OUTPUT_ROOT_NAME}_avg", ArtifactKind.average, {}),
-    (
-        f"{EXTRACT_ROOT_NAME}{BoundaryFile.SUFFIX}",
-        ArtifactKind.boundary_forcing,
-        {"role": "child"},
-    ),
-    (
-        f"{OUTPUT_ROOT_NAME}{CarbonateSensitivityFile.SUFFIX}",
-        ArtifactKind.gas_exchange,
-        {},
-    ),
-    (f"{OUTPUT_ROOT_NAME}{UPSCALING_SUFFIX}", ArtifactKind.upscaling, {}),
-    (f"{OUTPUT_ROOT_NAME}{CDR_OUTPUT_SUFFIX}", ArtifactKind.cdr_output, {}),
-)
-"""The ROMS output files that have a kind of their own, by name stem
-(`<root>_<stream>`), with the metadata they start with. A stream another step or
-directive consumes is a kind, so the consumer can find it by kind; every other
-stream is `output`. The stems are spelled from the consumers' own suffixes."""
-
-OUTPUT_FILE_PATTERN: t.Final[re.Pattern[str]] = re.compile(
-    rf"^(?P<stem>(?:{OUTPUT_ROOT_NAME}|{EXTRACT_ROOT_NAME})_(?P<stream>.+))"
-    r"\.(?P<timestamp>\d{14})\.nc$"
-)
-"""The name ROMS gives a joined output file, `<root>_<stream>.<14-digit timestamp>.nc`:
-the root is `output`, or `child` for a boundary extraction."""
 
 
 def output_products(output_dir: Path, root: Path, *, use_pio: bool) -> list[Product]:

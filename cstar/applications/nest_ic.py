@@ -12,7 +12,7 @@ from cstar.applications.core import (
     RunnerResult,
     register_application,
 )
-from cstar.applications.roms_marbl.transforms import RestartFile
+from cstar.applications.roms_marbl.outputs import RestartFile
 from cstar.base.log import get_logger
 from cstar.base.utils import convert_to_cdf5, lazy_import
 from cstar.entrypoint.runner import BlueprintRunner

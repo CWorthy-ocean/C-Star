@@ -7,11 +7,8 @@ import pytest
 
 from cstar.applications.core import ArtifactKind, get_application
 from cstar.applications.forge.app import INPUT_ARTIFACTS, input_products
-from cstar.applications.roms_marbl.app import (
-    OUTPUT_FILE_PATTERN,
-    OUTPUT_STREAMS,
-    output_products,
-)
+from cstar.applications.roms_marbl.app import output_products
+from cstar.applications.roms_marbl.outputs import OUTPUT_FILE_PATTERN, OUTPUT_STREAMS
 from cstar.orchestration.manifest import Product, expand_artifacts
 
 _STAMP = "20120101000000"
