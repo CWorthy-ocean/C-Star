@@ -1,6 +1,7 @@
 import asyncio
 import contextlib
 import errno
+import fcntl
 import functools
 import os
 import shlex
@@ -881,3 +882,30 @@ def write_text_atomic(
         Whether to fsync before the rename; see `write_bytes_atomic`.
     """
     write_bytes_atomic(path, text.encode(encoding), sync=sync)
+
+
+@contextmanager
+def locked(path: Path) -> Iterator[None]:
+    """Hold an exclusive `flock` on the file at `path`.
+
+    The lock file and its parent directories are created as needed and left in
+    place afterwards. The lock belongs to the open file, so it serializes threads
+    as well as processes, and the kernel releases it if the holder dies.
+
+    Parameters
+    ----------
+    path : Path
+        The lock file.
+
+    Yields
+    ------
+    None
+        While the lock is held.
+    """
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("a") as lock_file:
+        fcntl.flock(lock_file, fcntl.LOCK_EX)
+        try:
+            yield
+        finally:
+            fcntl.flock(lock_file, fcntl.LOCK_UN)

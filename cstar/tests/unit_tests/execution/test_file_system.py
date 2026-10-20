@@ -1,3 +1,4 @@
+import fcntl
 import os
 import pickle
 import shlex
@@ -20,6 +21,7 @@ from cstar.execution.file_system import (
     is_remote_resource,
     local_copy,
     local_copy_async,
+    locked,
     remove_files,
     rotate_file,
     step_disk_usage,
@@ -1101,3 +1103,26 @@ def test_write_text_atomic_encodes_text(tmp_path: Path) -> None:
 
     write_text_atomic(target, "caf\u00e9", encoding="latin-1")
     assert target.read_bytes() == b"caf\xe9"
+
+
+def _is_locked(path: Path) -> bool:
+    """Whether another holder has an exclusive `flock` on `path`."""
+    with path.open("a") as probe:
+        try:
+            fcntl.flock(probe, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            return True
+        fcntl.flock(probe, fcntl.LOCK_UN)
+        return False
+
+
+def test_locked_holds_an_exclusive_lock_until_exit(tmp_path: Path) -> None:
+    """Verify the lock file is created with its parents and held only inside the block."""
+    lock_path = tmp_path / "missing" / "parent" / "entry.lock"
+
+    with locked(lock_path):
+        assert lock_path.is_file()
+        assert _is_locked(lock_path)
+
+    assert lock_path.is_file()
+    assert not _is_locked(lock_path)

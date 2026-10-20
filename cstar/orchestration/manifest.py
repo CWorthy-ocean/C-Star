@@ -12,7 +12,6 @@ without invalidating them.
 """
 
 import enum
-import fcntl
 import typing as t
 import uuid
 from collections.abc import Iterator
@@ -33,6 +32,7 @@ from cstar.execution.file_system import (
     StateDirectoryManager,
     is_remote_resource,
     local_copy,
+    locked,
     write_text_atomic,
 )
 from cstar.orchestration.models import (
@@ -535,13 +535,8 @@ def manifest_lock(run_id: str) -> Iterator[None]:
         While the lock is held.
     """
     lock_path = StateDirectoryManager.run_state_dir(run_id=run_id) / MANIFEST_LOCK_NAME
-    lock_path.parent.mkdir(parents=True, exist_ok=True)
-    with lock_path.open("a") as lock_file:
-        fcntl.flock(lock_file, fcntl.LOCK_EX)
-        try:
-            yield
-        finally:
-            fcntl.flock(lock_file, fcntl.LOCK_UN)
+    with locked(lock_path):
+        yield
 
 
 def workplan_content_hash(workplan: "Workplan") -> str:

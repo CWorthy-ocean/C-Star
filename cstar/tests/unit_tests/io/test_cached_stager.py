@@ -1,11 +1,16 @@
+import fcntl
 import subprocess
+import threading
+import time
 import typing as t
 from collections.abc import Callable, Generator
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from unittest import mock
 
 import pytest
 
+from cstar.io import retriever
 from cstar.io.source_data import SourceData
 
 if t.TYPE_CHECKING:
@@ -25,6 +30,17 @@ def mock_home_dir(tmp_path: Path) -> Generator[Callable[[], Path], None, None]:
         return_value=state_dir,
     ) as mock_state_home:
         yield mock_state_home
+
+
+@pytest.fixture
+def cache_home(tmp_path: Path) -> Generator[Path, None, None]:
+    """Point the repository cache at an empty temporary directory."""
+    cache_dir = tmp_path / "cache-home"
+    with mock.patch(
+        "cstar.execution.file_system.DirectoryManager.cache_home",
+        return_value=cache_dir,
+    ):
+        yield cache_dir
 
 
 @pytest.fixture
@@ -189,3 +205,89 @@ def test_cached_stager_refresh_failure(tmp_path: Path, remote_repo_uri: str) -> 
 
     # confirm that checkout was called after the cache was copied
     mock_checkout.assert_called_once()
+
+
+def test_cached_stager_concurrent_stages_clone_once(
+    tmp_path: Path, remote_repo_uri: str, cache_home: Path
+) -> None:
+    """Verify that two steps staging one repository at once take turns on the cache.
+
+    The clone is slowed down so that, without the cache lock, the second stage would
+    find the half-cloned cache and pull or remove it under the first.
+
+    Parameters
+    ----------
+    tmp_path : Path
+        A temporary path to stage the repository into
+    remote_repo_uri : str
+        URI of the repository to stage
+    cache_home : Path
+        The temporary cache directory
+    """
+    real_clone = retriever._clone
+
+    def slow_clone(*args: t.Any, **kwargs: t.Any) -> None:
+        time.sleep(0.3)
+        real_clone(*args, **kwargs)
+
+    sources = [SourceData(remote_repo_uri), SourceData(remote_repo_uri)]
+    targets = [tmp_path / "step-1", tmp_path / "step-2"]
+    barrier = threading.Barrier(len(sources))
+
+    def stage(source: SourceData, target: Path) -> Path:
+        barrier.wait()
+        return source.stage(target).path
+
+    with (
+        mock.patch("cstar.io.retriever._clone", side_effect=slow_clone) as spy_clone,
+        ThreadPoolExecutor(max_workers=len(sources)) as pool,
+    ):
+        futures = [pool.submit(stage, s, d) for s, d in zip(sources, targets)]
+        staged_paths = [f.result() for f in futures]
+
+    spy_clone.assert_called_once()
+    assert staged_paths == targets
+    for target in targets:
+        assert (target / "README.md").read_text() == "upstream\n"
+
+
+def test_cached_stager_locks_beside_the_cache(
+    tmp_path: Path, remote_repo_uri: str, cache_home: Path
+) -> None:
+    """Verify that the cache lock file sits beside the cache and is held for the copy.
+
+    Parameters
+    ----------
+    tmp_path : Path
+        A temporary path to stage the repository into
+    remote_repo_uri : str
+        URI of the repository to stage
+    cache_home : Path
+        The temporary cache directory
+    """
+    source_data = SourceData(remote_repo_uri)
+    stager: CRRS = t.cast("CRRS", source_data.stager)
+    cache_path = stager._get_cache_path()
+    lock_path = cache_path.parent / f"{cache_path.name}.lock"
+    held_during_copy: list[bool] = []
+
+    def probe_then_copy(cmd: str) -> str:
+        with lock_path.open("a") as probe:
+            try:
+                fcntl.flock(probe, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except BlockingIOError:
+                held_during_copy.append(True)
+            else:
+                fcntl.flock(probe, fcntl.LOCK_UN)
+                held_during_copy.append(False)
+        subprocess.run(cmd, shell=True, check=True)
+        return ""
+
+    with mock.patch("cstar.io.stager._run_cmd", side_effect=probe_then_copy):
+        source_data.stage(tmp_path / "my-roms")
+
+    assert held_during_copy == [True]
+    assert lock_path.is_file()
+    assert lock_path.parent == cache_home
+    assert not (cache_path / lock_path.name).exists()
+    assert (tmp_path / "my-roms" / "README.md").is_file()

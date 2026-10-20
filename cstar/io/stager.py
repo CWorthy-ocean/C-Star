@@ -4,7 +4,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, ClassVar, cast
 
 from cstar.base.utils import _run_cmd, slugify
-from cstar.execution.file_system import DirectoryManager, symlink_relative
+from cstar.execution.file_system import DirectoryManager, locked, symlink_relative
 from cstar.io.constants import SourceClassification
 from cstar.io.staged_data import StagedFile, StagedRepository
 
@@ -149,7 +149,9 @@ class CachedRemoteRepositoryStager(Stager):
     def stage(self, target_dir: "Path") -> "StagedRepository":
         """Clone and checkout a git repository at a given target.
 
-        Store the result in a local repository cache for re-use.
+        Store the result in a local repository cache for re-use. Refreshing the
+        cache and copying it to `target_dir` hold an exclusive lock on a file
+        beside the cache, so steps staging the same repository at once take turns.
 
         Parameters
         ----------
@@ -161,17 +163,19 @@ class CachedRemoteRepositoryStager(Stager):
         StagedRepository
         """
         cache_path = self._get_cache_path()
-        if not cache_path.exists():
-            cache_path = self.source.retriever.save(target_dir=cache_path)
-        elif not self.source.retriever.refresh(target_dir=cache_path):
-            # if cache cannot be refreshed, it may be incomplete or altered
-            shutil.rmtree(cache_path)
-            cache_path = self.source.retriever.save(target_dir=cache_path)
+        with locked(cache_path.parent / f"{cache_path.name}.lock"):
+            if not cache_path.exists():
+                cache_path = self.source.retriever.save(target_dir=cache_path)
+            elif not self.source.retriever.refresh(target_dir=cache_path):
+                # if cache cannot be refreshed, it may be incomplete or altered
+                shutil.rmtree(cache_path)
+                cache_path = self.source.retriever.save(target_dir=cache_path)
 
-        if target_dir.exists():
-            target_dir.rmdir()
+            if target_dir.exists():
+                target_dir.rmdir()
 
-        _run_cmd(f"cp -av {cache_path}/ {target_dir}")
+            _run_cmd(f"cp -av {cache_path}/ {target_dir}")
+
         remote = cast("RemoteRepositoryRetriever", self.source.retriever)
         remote.checkout(target_dir=target_dir)
 
