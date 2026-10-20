@@ -13,18 +13,24 @@ from pydantic import ValidationError
 
 from cstar.applications import cdr_metrics
 from cstar.applications.cdr_metrics import (
+    _REQUIRED_VARIABLES,
     APP_NAME,
+    DOMAINS_FIGURE_FILENAME,
     FIGURE_FILENAME,
     METRICS_FILENAME,
+    CdrDomain,
     CdrMetricsApplication,
     CdrMetricsBlueprint,
     CdrMetricsRunner,
     CdrOutputFile,
     PathLocation,
     check_contiguous,
+    check_required_variables,
+    compute_domain_metrics,
     find_cdr_output,
     load_cdr_output,
     metric_series,
+    source_sign_report,
 )
 from cstar.applications.core import RunnerRequest, get_application
 from cstar.applications.roms_marbl.transforms import CarbonateSensitivityFile
@@ -43,12 +49,30 @@ def _touch(path: Path) -> Path:
     return path
 
 
-def _domain(grid: Path, *sources: Path) -> dict[str, Any]:
+def _write_cdr_file(path: Path, *, omit: Sequence[str] = ()) -> Path:
+    """Write a minimal NetCDF `_cdr` file, holding the variables the metrics need.
+
+    Only the variable names matter: the application reads the names from disk,
+    and the data comes from the patched `ROMSOutput`. Variables in *omit* are
+    left out.
+    """
+    path.parent.mkdir(parents=True, exist_ok=True)
+    names = [name for name in _REQUIRED_VARIABLES if name not in omit]
+    xr.Dataset({name: ("time", np.zeros(2)) for name in names}).to_netcdf(path)
+    return path
+
+
+def _domain(
+    grid: Path, *sources: Path, source_role: str | None = None
+) -> dict[str, Any]:
     """Build the raw mapping of one domain."""
-    return {
+    domain: dict[str, Any] = {
         "grid": {"location": str(grid)},
         "sources": [{"location": str(source)} for source in sources],
     }
+    if source_role is not None:
+        domain["source_role"] = source_role
+    return domain
 
 
 def _locations(*paths: Path) -> list[PathLocation]:
@@ -67,20 +91,33 @@ def _window_ds(begin: Sequence[float], end: Sequence[float]) -> xr.Dataset:
     )
 
 
-def _cdr_output_ds(n: int = 4) -> xr.Dataset:
+def _cdr_output_ds(
+    n: int = 4,
+    *,
+    lon_range: tuple[float, float] = (0.0, 0.0),
+    lat_range: tuple[float, float] = (0.0, 0.0),
+    transfer: bool = False,
+) -> xr.Dataset:
     """Build a dask-backed CDR output with `n` contiguous records, as `ROMSOutput` yields.
 
     One cell releases alkalinity (and removes DIC), and the air-sea flux and DIC
     inventory differ from the control (`*_ALT_CO2`) by an amount growing in time.
+    With `transfer`, that cell's sources have the opposite signs, as a parent's
+    signed perturbation can. The cells span the given longitude and latitude
+    ranges.
     """
     nz, ny, nx = 2, 3, 4
     begin = WINDOW * np.arange(n)
     growth = np.arange(1, n + 1, dtype=float)
 
+    sign = -1.0 if transfer else 1.0
     alk = np.zeros((n, nz, ny, nx))
-    alk[:, 0, 0, 0] = 1.0
+    alk[:, 0, 0, 0] = sign
     dic = np.zeros((n, nz, ny, nx))
-    dic[:, 0, 0, 0] = -1.0
+    dic[:, 0, 0, 0] = -sign
+    lat, lon = np.meshgrid(
+        np.linspace(*lat_range, ny), np.linspace(*lon_range, nx), indexing="ij"
+    )
     flux = np.broadcast_to(growth[:, None, None], (n, ny, nx))
     inventory = np.broadcast_to(growth[:, None, None, None], (n, nz, ny, nx))
 
@@ -99,8 +136,8 @@ def _cdr_output_ds(n: int = 4) -> xr.Dataset:
         },
         coords={
             "time": pd.date_range("2012-01-01 00:30", periods=n, freq="h"),
-            "lat_rho": (("eta_rho", "xi_rho"), np.zeros((ny, nx))),
-            "lon_rho": (("eta_rho", "xi_rho"), np.zeros((ny, nx))),
+            "lat_rho": (("eta_rho", "xi_rho"), lat),
+            "lon_rho": (("eta_rho", "xi_rho"), lon),
         },
     )
     return ds.chunk({"time": 1})
@@ -121,13 +158,14 @@ def _grid_ds() -> xr.Dataset:
 def cdr_dirs(tmp_path: Path) -> dict[str, Path]:
     """Two segment directories each holding `_cdr` output, among other files.
 
+    The `_cdr` files are real NetCDF files holding the variables the metrics need.
     `seg-01` also holds the other kinds of file whose names share the `_cdr`
     prefix, or are otherwise not CDR output, which discovery must skip.
     """
     seg1, seg2 = tmp_path / "seg-01", tmp_path / "seg-02"
-    _touch(seg1 / "output" / "x_cdr.20120101000000.nc")
-    _touch(seg1 / "output" / "x_cdr.20120101020000.nc")
-    _touch(seg2 / "output" / "x_cdr.20120101040000.nc")
+    _write_cdr_file(seg1 / "output" / "x_cdr.20120101000000.nc")
+    _write_cdr_file(seg1 / "output" / "x_cdr.20120101020000.nc")
+    _write_cdr_file(seg2 / "output" / "x_cdr.20120101040000.nc")
     for decoy in (
         "x_cdrgas.20120101000000.nc",
         "x_cdrtrc.20120101000000.nc",
@@ -181,24 +219,27 @@ def _make_runner(blueprint: CdrMetricsBlueprint) -> CdrMetricsRunner:
 class _FakeRomsTools:
     """Stands in for `roms_tools.Grid` and `roms_tools.ROMSOutput`.
 
-    Records what they were called with and serves the datasets set on it.
+    Records what they were called with and serves the datasets set on it: `ds`
+    for every grid, except those of `ds_by_grid` (a domain's output, by the path
+    of its grid file).
     """
 
     def __init__(self) -> None:
         self.ds: xr.Dataset = _cdr_output_ds()
+        self.ds_by_grid: dict[Path, xr.Dataset] = {}
         self.grid_ds: xr.Dataset = _grid_ds()
         self.grid_paths: list[Path] = []
         self.output_paths: list[list[Path]] = []
 
     def grid(self, filename: Path) -> mock.Mock:
         self.grid_paths.append(filename)
-        return mock.Mock(ds=self.grid_ds)
+        return mock.Mock(ds=self.grid_ds, path=filename)
 
     def roms_output(self, *, grid: mock.Mock, path: list[Path], use_dask: bool) -> Any:
         assert use_dask is True
         assert grid.ds is self.grid_ds
         self.output_paths.append(list(path))
-        return mock.Mock(ds=self.ds)
+        return mock.Mock(ds=self.ds_by_grid.get(grid.path, self.ds))
 
 
 @pytest.fixture
@@ -237,14 +278,65 @@ class TestCdrMetricsBlueprint:
         assert [s.location.name for s in domain.sources] == ["seg-01", "seg-02"]
         assert domain.grid.location.name == "grid.nc"
 
-    def test_two_domains_are_refused(
+    def test_source_role_defaults_to_release(
+        self, blueprint_kwargs: dict[str, Any]
+    ) -> None:
+        """Verify a domain holds the release unless it says otherwise."""
+        bp = CdrMetricsBlueprint(**blueprint_kwargs)
+
+        assert bp.domains["wio"].source_role == "release"
+
+    def test_nested_domains_validate(
         self, tmp_path: Path, blueprint_kwargs: dict[str, Any]
     ) -> None:
-        """Verify more than one domain is refused as not yet supported."""
-        domain = _domain(tmp_path / "grid.nc", tmp_path)
-        blueprint_kwargs["domains"] = {"child": domain, "parent": domain}
+        """Verify a release child and a transfer parent validate, child first."""
+        blueprint_kwargs["domains"] = {
+            "child": _domain(tmp_path / "child.nc", tmp_path),
+            "parent": _domain(tmp_path / "parent.nc", tmp_path, source_role="transfer"),
+        }
 
-        with pytest.raises(ValidationError, match="not yet supported"):
+        bp = CdrMetricsBlueprint(**blueprint_kwargs)
+
+        assert list(bp.domains) == ["child", "parent"]
+        assert [d.source_role for d in bp.domains.values()] == ["release", "transfer"]
+
+    def test_nested_domains_need_a_release(
+        self, tmp_path: Path, blueprint_kwargs: dict[str, Any]
+    ) -> None:
+        """Verify several domains that all receive a transfer are refused, naming them."""
+        blueprint_kwargs["domains"] = {
+            name: _domain(tmp_path / f"{name}.nc", tmp_path, source_role="transfer")
+            for name in ("child", "parent")
+        }
+
+        with pytest.raises(
+            ValueError, match="need the domain holding the release"
+        ) as exc:
+            CdrMetricsBlueprint(**blueprint_kwargs)
+
+        assert "'child', 'parent'" in str(exc.value)
+
+    def test_a_lone_transfer_domain_is_allowed(
+        self, tmp_path: Path, blueprint_kwargs: dict[str, Any]
+    ) -> None:
+        """Verify the release is only required of nested domains."""
+        blueprint_kwargs["domains"] = {
+            "wio": _domain(tmp_path / "grid.nc", tmp_path, source_role="transfer")
+        }
+
+        bp = CdrMetricsBlueprint(**blueprint_kwargs)
+
+        assert bp.domains["wio"].source_role == "transfer"
+
+    def test_invalid_source_role_is_refused(
+        self, tmp_path: Path, blueprint_kwargs: dict[str, Any]
+    ) -> None:
+        """Verify a source role other than `release` and `transfer` is refused."""
+        blueprint_kwargs["domains"] = {
+            "wio": _domain(tmp_path / "grid.nc", tmp_path, source_role="parent")
+        }
+
+        with pytest.raises(ValidationError, match="source_role"):
             CdrMetricsBlueprint(**blueprint_kwargs)
 
     def test_empty_domains_are_refused(self, blueprint_kwargs: dict[str, Any]) -> None:
@@ -523,6 +615,264 @@ class TestCheckContiguous:
 
         assert missing in str(exc.value)
 
+    def test_windows_of_different_lengths_warn(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """Verify contiguous windows of unequal length are accepted with a warning
+        naming the lengths.
+        """
+        caplog.set_level(logging.WARNING, logger=cdr_metrics.log.name)
+
+        check_contiguous(_window_ds([0, 900], [900, 2700]))
+
+        warnings = [r for r in caplog.records if r.levelno >= logging.WARNING]
+        assert len(warnings) == 1
+        assert "900 s" in warnings[0].getMessage()
+        assert "1800 s" in warnings[0].getMessage()
+
+    def test_equal_windows_do_not_warn(self, caplog: pytest.LogCaptureFixture) -> None:
+        """Verify windows of one length log nothing at warning level."""
+        caplog.set_level(logging.WARNING, logger=cdr_metrics.log.name)
+
+        check_contiguous(_window_ds([0, 900, 1800], [900, 1800, 2700]))
+
+        assert [r for r in caplog.records if r.levelno >= logging.WARNING] == []
+
+
+class TestCheckRequiredVariables:
+    """Tests for `check_required_variables`."""
+
+    def test_complete_files_pass(self, tmp_path: Path) -> None:
+        """Verify files holding every variable are accepted."""
+        files = [
+            CdrOutputFile(path=_write_cdr_file(tmp_path / f"x_cdr.2012010100000{i}.nc"))
+            for i in range(2)
+        ]
+
+        check_required_variables(files)
+
+    def test_missing_variables_are_reported_together(self, tmp_path: Path) -> None:
+        """Verify every missing variable is reported once, with the count of files
+        lacking it, the first file affected and the ROMS settings that write it.
+        """
+        complete = _write_cdr_file(tmp_path / "x_cdr.20120101000000.nc")
+        lacking = _write_cdr_file(
+            tmp_path / "x_cdr.20120101020000.nc", omit=["ALK_source", "avg_end_time"]
+        )
+        files = [CdrOutputFile(path=complete), CdrOutputFile(path=lacking)]
+
+        with pytest.raises(ValueError, match="lacks variables") as exc:
+            check_required_variables(files)
+
+        message = str(exc.value)
+        assert "`ALK_source` (1 of 2 files)" in message
+        assert "`avg_end_time` (1 of 2 files)" in message
+        assert str(lacking) in message
+        assert str(complete) not in message
+        assert "cdr_frc.cdr_source" in message
+        assert "cdr_output.do_avg" in message
+        # variables that are present are not reported
+        assert "DIC_source" not in message
+        assert "FG_CO2" not in message
+
+    def test_the_first_file_affected_is_named(self, tmp_path: Path) -> None:
+        """Verify the file named is the first (by path) of those lacking a variable."""
+        paths = [
+            _write_cdr_file(tmp_path / f"x_cdr.2012010100000{i}.nc", omit=["hDIC"])
+            for i in range(2)
+        ]
+
+        with pytest.raises(ValueError, match="2 of 2 files") as exc:
+            check_required_variables([CdrOutputFile(path=path) for path in paths])
+
+        assert f"first file affected: {paths[0]}" in str(exc.value)
+
+
+class TestSourceSignReport:
+    """Tests for `source_sign_report`."""
+
+    def test_wrong_sign_cells_are_described(self) -> None:
+        """Verify wrong-sign alkalinity cells are counted by cell and by record,
+        with the worst value and the share of the integrated source.
+        """
+        ds = _cdr_output_ds(n=4).compute()
+        ds["ALK_source"].values[1, 1, 1, 1] = -2.0
+        ds["ALK_source"].values[2, 1, 2, 3] = -0.5
+
+        report = source_sign_report(ds.chunk({"time": 1}))
+
+        lines = report.splitlines()
+        assert len(lines) == 2
+        alk = next(line for line in lines if line.startswith("ALK_source"))
+        assert "2 cells in 2 of 4 records" in alk
+        assert "2012-01-01T01:30:00 .. 2012-01-01T02:30:00" in alk
+        assert "worst cell -2 " in alk
+        # (2 + 0.5) wrong over 4 records of the 1 right, in windows of 3600 s
+        assert "62.500% of the integrated ALK source" in alk
+        assert "DIC_source: no sign violations" in lines
+
+    def test_clean_sources_report_no_violations(self) -> None:
+        """Verify sources of the right signs give a line of no violations each."""
+        report = source_sign_report(_cdr_output_ds())
+
+        assert report.splitlines() == [
+            "ALK_source: no sign violations",
+            "DIC_source: no sign violations",
+        ]
+
+    def test_wrong_sign_dic_is_described(self) -> None:
+        """Verify positive DIC cells are reported too."""
+        ds = _cdr_output_ds().compute()
+        ds["DIC_source"].values[3, 0, 1, 1] = 0.25
+
+        report = source_sign_report(ds.chunk({"time": 1}))
+
+        lines = report.splitlines()
+        dic = next(line for line in lines if line.startswith("DIC_source"))
+        assert "positive values" in dic
+        assert "1 cells in 1 of 4 records" in dic
+        assert "ALK_source: no sign violations" in lines
+
+
+class TestComputeDomainMetrics:
+    """Tests for `compute_domain_metrics`, with the sign checks of roms-tools."""
+
+    _SIGN_ERROR = (
+        "'ALK_source' contains negative values, which violates release constraints."
+    )
+
+    @pytest.fixture
+    def wrong_sign_ds(self, fake_roms_tools: _FakeRomsTools) -> xr.Dataset:
+        """Serve CDR output with negative alkalinity cells, as a forcing error or a
+        parent receiving a perturbation gives.
+        """
+        ds = _cdr_output_ds().compute()
+        ds["ALK_source"].values[1, 1, 1, 1] = -2.0
+        ds["ALK_source"].values[2, 1, 2, 3] = -0.5
+        fake_roms_tools.ds = ds.chunk({"time": 1})
+        return fake_roms_tools.ds
+
+    @staticmethod
+    def _make_domain(
+        tmp_path: Path, cdr_dirs: dict[str, Path], source_role: str
+    ) -> CdrDomain:
+        return CdrDomain.model_validate(
+            _domain(tmp_path / "grid.nc", cdr_dirs["seg-01"], source_role=source_role)
+        )
+
+    @staticmethod
+    def _raising_metrics(
+        monkeypatch: pytest.MonkeyPatch, error: ValueError
+    ) -> mock.Mock:
+        """Patch roms-tools' metrics to raise *error*, returning the mock."""
+        metrics = mock.Mock(side_effect=error)
+        monkeypatch.setattr(
+            cdr_metrics.roms_tools.analysis.cdr_analysis, "compute_cdr_metrics", metrics
+        )
+        return metrics
+
+    @pytest.mark.usefixtures("wrong_sign_ds")
+    def test_release_sign_failure_is_explained(
+        self,
+        tmp_path: Path,
+        cdr_dirs: dict[str, Path],
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Verify a wrong-sign release source adds where the violations are and the
+        hint to use a `transfer` domain to the error of roms-tools.
+        """
+        metrics = self._raising_metrics(monkeypatch, ValueError(self._SIGN_ERROR))
+        domain = self._make_domain(tmp_path, cdr_dirs, "release")
+
+        with pytest.raises(ValueError, match="violates release constraints") as exc:
+            compute_domain_metrics("wio", domain)
+
+        message = str(exc.value)
+        assert message.startswith("Domain 'wio': ")
+        assert self._SIGN_ERROR in message
+        assert "ALK_source has negative values" in message
+        assert "2 cells in 2 of 4 records" in message
+        assert "DIC_source: no sign violations" in message
+        assert "'transfer' domain" in message
+        assert metrics.call_args.kwargs["source_role"] == "release"
+
+    @pytest.mark.usefixtures("wrong_sign_ds")
+    def test_transfer_failure_propagates_unchanged(
+        self,
+        tmp_path: Path,
+        cdr_dirs: dict[str, Path],
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Verify an error of roms-tools for a transfer domain is not explained, and
+        the sources are not scanned for it.
+        """
+        metrics = self._raising_metrics(monkeypatch, ValueError(self._SIGN_ERROR))
+        report = mock.Mock()
+        monkeypatch.setattr(cdr_metrics, "source_sign_report", report)
+        domain = self._make_domain(tmp_path, cdr_dirs, "transfer")
+
+        with pytest.raises(ValueError, match="violates release constraints") as exc:
+            compute_domain_metrics("wio", domain)
+
+        assert str(exc.value) == self._SIGN_ERROR
+        report.assert_not_called()
+        assert metrics.call_args.kwargs["source_role"] == "transfer"
+
+    @pytest.mark.usefixtures("wrong_sign_ds")
+    def test_unrelated_error_propagates_unchanged(
+        self,
+        tmp_path: Path,
+        cdr_dirs: dict[str, Path],
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Verify other errors of roms-tools for a release domain are not rewritten."""
+        self._raising_metrics(monkeypatch, ValueError("something else"))
+        report = mock.Mock()
+        monkeypatch.setattr(cdr_metrics, "source_sign_report", report)
+        domain = self._make_domain(tmp_path, cdr_dirs, "release")
+
+        with pytest.raises(ValueError, match="something else") as exc:
+            compute_domain_metrics("wio", domain)
+
+        assert str(exc.value) == "something else"
+        report.assert_not_called()
+
+    @pytest.mark.usefixtures("wrong_sign_ds")
+    def test_real_sign_check_is_still_recognised(
+        self, tmp_path: Path, cdr_dirs: dict[str, Path]
+    ) -> None:
+        """Verify the installed roms-tools' own sign check gets the explanation,
+        and a transfer domain computes from the same output.
+        """
+        release = self._make_domain(tmp_path, cdr_dirs, "release")
+        with pytest.raises(ValueError, match="'transfer' domain"):
+            compute_domain_metrics("wio", release)
+
+        transfer = self._make_domain(tmp_path, cdr_dirs, "transfer")
+        ds_cdr, n_files = compute_domain_metrics("wio", transfer)
+
+        assert n_files == 2
+        assert ds_cdr.attrs["cdr_source_role"] == "transfer"
+
+    def test_errors_name_the_domain(
+        self,
+        tmp_path: Path,
+        cdr_dirs: dict[str, Path],
+        fake_roms_tools: _FakeRomsTools,
+    ) -> None:
+        """Verify failures to find or load the output are prefixed with the domain."""
+        fake_roms_tools.ds = _cdr_output_ds(n=4).isel(time=[0, 1, 3])
+        domain = self._make_domain(tmp_path, cdr_dirs, "release")
+
+        with pytest.raises(ValueError, match=r"Domain 'wio': CDR output is not contig"):
+            compute_domain_metrics("wio", domain)
+
+        empty = tmp_path / "empty"
+        empty.mkdir()
+        absent = CdrDomain.model_validate(_domain(tmp_path / "grid.nc", empty))
+        with pytest.raises(FileNotFoundError, match=r"Domain 'wio': .*do_cdr_output"):
+            compute_domain_metrics("wio", absent)
+
 
 class TestLoadCdrOutput:
     """Tests for `load_cdr_output`."""
@@ -693,12 +1043,49 @@ class TestCdrMetricsRunner:
             assert expected <= set(series.data_vars)
             assert series.attrs["cdr_domain"] == "wio"
             assert series.sizes["time"] == 4
+            assert all(var.dims == ("time",) for var in series.data_vars.values())
             assert {"hDIC", "area", "lat_rho"}.isdisjoint(series.variables)
             assert np.isfinite(series["cdr_efficiency_from_flux"]).all()
             assert (series["cdr_carbon_uptake_from_flux"] > 0).all()
 
         figure = out_dir / FIGURE_FILENAME
         assert figure.read_bytes().startswith(b"\x89PNG")
+
+    async def test_a_single_domain_writes_no_domains_figure(
+        self,
+        blueprint_kwargs: dict[str, Any],
+        fake_roms_tools: _FakeRomsTools,
+    ) -> None:
+        """Verify the map of domain outlines is only written for nested domains."""
+        bp = CdrMetricsBlueprint(**blueprint_kwargs)
+
+        await _make_runner(bp).run()
+
+        out_dir = bp.effective_working_dir / "output"
+        assert (out_dir / FIGURE_FILENAME).exists()
+        assert not (out_dir / DOMAINS_FIGURE_FILENAME).exists()
+
+    async def test_provenance_is_recorded(
+        self,
+        blueprint_kwargs: dict[str, Any],
+        tmp_path: Path,
+        fake_roms_tools: _FakeRomsTools,
+    ) -> None:
+        """Verify the metrics file records the domains, the number of source files,
+        the grids and the roms-tools version.
+        """
+        bp = CdrMetricsBlueprint(**blueprint_kwargs)
+
+        await _make_runner(bp).run()
+
+        with xr.open_dataset(
+            bp.effective_working_dir / "output" / METRICS_FILENAME
+        ) as series:
+            assert series.attrs["cdr_domains"] == "wio:release"
+            assert series.attrs["cdr_source_files"] == 3
+            assert series.attrs["cdr_grid_files"] == (tmp_path / "grid.nc").as_posix()
+            assert isinstance(series.attrs["roms_tools_version"], str)
+            assert series.attrs["roms_tools_version"]
 
     async def test_the_domain_name_is_recorded(
         self,
@@ -753,3 +1140,110 @@ class TestCdrMetricsRunner:
             await runner.run()
 
         assert fake_roms_tools.grid_paths == []
+
+
+class TestNestedCdrMetricsRunner:
+    """Tests for `CdrMetricsRunner.run` on nested domains, with the real
+    `UpscaledCDR`, metrics and plotting.
+    """
+
+    @pytest.fixture
+    def nested_bp(
+        self,
+        tmp_path: Path,
+        cdr_dirs: dict[str, Path],
+        fake_roms_tools: _FakeRomsTools,
+    ) -> CdrMetricsBlueprint:
+        """Nested domains: a child holding the release, inside a parent receiving a
+        transfer, each with its own grid and `_cdr` files.
+        """
+        parent_dir = tmp_path / "parent" / "output"
+        for name in ("x_cdr.20120101000000.nc", "x_cdr.20120101020000.nc"):
+            _write_cdr_file(parent_dir / name)
+        child_grid, parent_grid = tmp_path / "child.nc", tmp_path / "parent.nc"
+        fake_roms_tools.ds_by_grid = {
+            # the parent's cells 10 and 11 degrees east, 20.5 north, are in the child
+            child_grid: _cdr_output_ds(lon_range=(10.0, 11.0), lat_range=(20.0, 21.0)),
+            parent_grid: _cdr_output_ds(
+                lon_range=(9.0, 12.0), lat_range=(19.0, 22.0), transfer=True
+            ),
+        }
+        return CdrMetricsBlueprint(
+            name="nested",
+            description="A test nested CDR metrics blueprint.",
+            working_dir=tmp_path / "work",
+            domains={
+                "child": _domain(child_grid, cdr_dirs["seg-01"]),
+                "parent": _domain(parent_grid, parent_dir, source_role="transfer"),
+            },
+        )
+
+    async def test_writes_the_combined_series_and_figures(
+        self, nested_bp: CdrMetricsBlueprint
+    ) -> None:
+        """Verify nested domains are combined into one series with both figures."""
+        runner = _make_runner(nested_bp)
+
+        await runner.run()
+
+        assert runner.state.status == ExecutionStatus.COMPLETED
+        out_dir = nested_bp.effective_working_dir / "output"
+        with xr.open_dataset(out_dir / METRICS_FILENAME) as series:
+            expected = {
+                "cdr_efficiency_from_flux",
+                "cdr_efficiency_from_DIC_difference",
+                "cdr_carbon_uptake_from_flux",
+                "cdr_carbon_uptake_from_DIC_difference",
+                "cdr_cumulative_source",
+                "child_carbon_uptake_from_flux",
+                "parent_carbon_uptake_from_flux",
+                "closure_residual",
+                "parent_DIC_difference_inside_child",
+            }
+            assert expected <= set(series.data_vars)
+            assert all(var.dims == ("time",) for var in series.data_vars.values())
+            assert series.sizes["time"] == 4
+            # only the release counts towards the source and the efficiency
+            assert np.isfinite(series["cdr_efficiency_from_flux"]).all()
+            assert (series["cdr_cumulative_source"] > 0).all()
+            # the parent's cells inside the child's footprint carry a DIC perturbation
+            assert (series["parent_DIC_difference_inside_child"] > 0).all()
+
+        for name in (FIGURE_FILENAME, DOMAINS_FIGURE_FILENAME):
+            assert (out_dir / name).read_bytes().startswith(b"\x89PNG"), name
+
+    async def test_provenance_is_recorded(
+        self, nested_bp: CdrMetricsBlueprint, tmp_path: Path
+    ) -> None:
+        """Verify the metrics file records the domains with their roles, the number of
+        source files of all domains, both grids and the roms-tools version.
+        """
+        await _make_runner(nested_bp).run()
+
+        with xr.open_dataset(
+            nested_bp.effective_working_dir / "output" / METRICS_FILENAME
+        ) as series:
+            assert series.attrs["cdr_domains"] == "child:release, parent:transfer"
+            assert series.attrs["cdr_source_files"] == 4
+            assert series.attrs["cdr_grid_files"] == ", ".join(
+                (tmp_path / name).as_posix() for name in ("child.nc", "parent.nc")
+            )
+            assert isinstance(series.attrs["roms_tools_version"], str)
+
+    async def test_a_domain_error_names_the_domain(
+        self, nested_bp: CdrMetricsBlueprint, fake_roms_tools: _FakeRomsTools
+    ) -> None:
+        """Verify a problem in one domain's output is reported with its name, and
+        stops the run before anything is written.
+        """
+        parent_grid = nested_bp.domains["parent"].grid.location
+        fake_roms_tools.ds_by_grid[parent_grid] = _cdr_output_ds(n=4).isel(
+            time=[0, 1, 3]
+        )
+        runner = _make_runner(nested_bp)
+
+        with pytest.raises(ValueError, match="Domain 'parent': .*missing from"):
+            await runner.run()
+
+        assert runner.state.status != ExecutionStatus.COMPLETED
+        assert not (nested_bp.effective_working_dir / "output").exists()
