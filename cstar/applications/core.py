@@ -379,7 +379,12 @@ class ArtifactKind(enum.StrEnum):
     Model-specific detail, such as a ROMS output stream, goes in a product's
     metadata, not here. `config` is a file the model read as configuration, which
     one is `metadata["role"]` (e.g. `cppdefs`, `namelist`, `marbl_in`); `build` is
-    a compiled executable.
+    a compiled executable. A ROMS stream another step or directive consumes is a
+    kind of its own, so the consumer can find it by kind: `gas_exchange` (the
+    carbonate sensitivities `carbonate-sensitivity-from` reads), `upscaling` (the
+    boundary tracer fluxes the upscaler reads) and `cdr_output` (CDR diagnostics);
+    the boundary extraction a nested run reads is `boundary_forcing` with
+    `metadata["role"]` `child`. Every other stream is `output`.
     """
 
     grid = "grid"
@@ -393,6 +398,9 @@ class ArtifactKind(enum.StrEnum):
     history = "history"
     average = "average"
     output = "output"
+    gas_exchange = "gas_exchange"
+    upscaling = "upscaling"
+    cdr_output = "cdr_output"
     emitted_blueprint = "emitted_blueprint"
     config = "config"
     build = "build"

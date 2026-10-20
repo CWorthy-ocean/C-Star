@@ -32,7 +32,9 @@ from cstar.applications.roms_marbl.adapter import (
     TidalForcingAdapter,
 )
 from cstar.applications.roms_marbl.file_system import (
+    EXTRACT_ROOT_NAME,
     GENERATED_NAMELIST_NAME,
+    OUTPUT_ROOT_NAME,
     ROMS_EXECUTABLE_NAME,
     RomsFileSystemManager,
 )
@@ -164,7 +166,7 @@ def _extract_data_join_wildcard(
     out_file_name = wildcard_pattern.replace(".*.nc", ".nc")
     _, out_file_timestamp_dot_nc = out_file_name.split(".", maxsplit=1)
 
-    out_file_name = f"child_bry.{out_file_timestamp_dot_nc}"
+    out_file_name = f"{EXTRACT_ROOT_NAME}_bry.{out_file_timestamp_dot_nc}"
     joined_file = input_dir / out_file_name
     out_file = joined_file.rename(output_dir / out_file_name)
 
@@ -982,12 +984,12 @@ class ROMSSimulation(Simulation):
 
         root = self._namelist_path(target)
 
-        nml.simulation_name_settings.output_root_name = f"{root}/output"
+        nml.simulation_name_settings.output_root_name = f"{root}/{OUTPUT_ROOT_NAME}"
 
         # Note: only PARALLEL_IO builds honor extract_root_name;
         # non-PIO builds name extraction files from output_root_name (already
         # pointing at the same directory).
-        nml.extract_data_settings.extract_root_name = f"{root}/child"
+        nml.extract_data_settings.extract_root_name = f"{root}/{EXTRACT_ROOT_NAME}"
 
         # User overrides are layered on last, so they take precedence over
         # any of the derived settings above.

@@ -14,8 +14,12 @@ from cstar.applications.core import (
     register_application,
 )
 from cstar.applications.roms_marbl.file_system import (
+    CDR_OUTPUT_SUFFIX,
+    EXTRACT_ROOT_NAME,
     GENERATED_NAMELIST_NAME,
+    OUTPUT_ROOT_NAME,
     ROMS_EXECUTABLE_NAME,
+    UPSCALING_SUFFIX,
     RomsFileSystemManager,
 )
 from cstar.applications.roms_marbl.migration import (
@@ -26,9 +30,12 @@ from cstar.applications.roms_marbl.migration import (
 from cstar.applications.roms_marbl.models import APP_NAME, RomsMarblBlueprint
 from cstar.applications.roms_marbl.resume import prepare_resume_blueprint
 from cstar.applications.roms_marbl.transforms import (
+    BoundaryFile,
     CarbonateSensitivityDirective,
+    CarbonateSensitivityFile,
     ContinuanceDirective,
     NestingDirective,
+    RestartFile,
     RomsMarblTimeSplitter,
     warn_on_restart_start_date_mismatch,
 )
@@ -62,18 +69,34 @@ _APP_NAME_LONG: t.Literal["ROMS-MARBL simulation runner"] = (
 )
 log = get_logger(__name__)
 
-OUTPUT_STREAM_KINDS: t.Final[dict[str, ArtifactKind]] = {
-    "rst": ArtifactKind.restart,
-    "his": ArtifactKind.history,
-    "avg": ArtifactKind.average,
-}
-"""The ROMS output streams that have a kind of their own; every other stream is
-`output`."""
+OUTPUT_STREAMS: t.Final[tuple[tuple[str, ArtifactKind, dict[str, str]], ...]] = (
+    (f"{OUTPUT_ROOT_NAME}{RestartFile.SUFFIX}", ArtifactKind.restart, {}),
+    (f"{OUTPUT_ROOT_NAME}_his", ArtifactKind.history, {}),
+    (f"{OUTPUT_ROOT_NAME}_avg", ArtifactKind.average, {}),
+    (
+        f"{EXTRACT_ROOT_NAME}{BoundaryFile.SUFFIX}",
+        ArtifactKind.boundary_forcing,
+        {"role": "child"},
+    ),
+    (
+        f"{OUTPUT_ROOT_NAME}{CarbonateSensitivityFile.SUFFIX}",
+        ArtifactKind.gas_exchange,
+        {},
+    ),
+    (f"{OUTPUT_ROOT_NAME}{UPSCALING_SUFFIX}", ArtifactKind.upscaling, {}),
+    (f"{OUTPUT_ROOT_NAME}{CDR_OUTPUT_SUFFIX}", ArtifactKind.cdr_output, {}),
+)
+"""The ROMS output files that have a kind of their own, by name stem
+(`<root>_<stream>`), with the metadata they start with. A stream another step or
+directive consumes is a kind, so the consumer can find it by kind; every other
+stream is `output`. The stems are spelled from the consumers' own suffixes."""
 
 OUTPUT_FILE_PATTERN: t.Final[re.Pattern[str]] = re.compile(
-    r"^output_(?P<stream>.+)\.(?P<timestamp>\d{14})\.nc$"
+    rf"^(?P<stem>(?:{OUTPUT_ROOT_NAME}|{EXTRACT_ROOT_NAME})_(?P<stream>.+))"
+    r"\.(?P<timestamp>\d{14})\.nc$"
 )
-"""The name ROMS gives a joined output file, `output_<stream>.<14-digit timestamp>.nc`."""
+"""The name ROMS gives a joined output file, `<root>_<stream>.<14-digit timestamp>.nc`:
+the root is `output`, or `child` for a boundary extraction."""
 
 
 def output_products(output_dir: Path, root: Path, *, use_pio: bool) -> list[Product]:
@@ -106,13 +129,15 @@ def output_products(output_dir: Path, root: Path, *, use_pio: bool) -> list[Prod
         if not path.is_relative_to(root):
             log.debug(f"Skipping {path}: it is not under the step root {root}")
             continue
-        stream = match["stream"]
+        row = next((r for r in OUTPUT_STREAMS if r[0] == match["stem"]), None)
+        kind, base = (row[1], row[2]) if row else (ArtifactKind.output, {})
         products.append(
             Product(
-                kind=OUTPUT_STREAM_KINDS.get(stream, ArtifactKind.output).value,
+                kind=kind.value,
                 path=path.relative_to(root).as_posix(),
                 metadata={
-                    "stream": stream,
+                    **base,
+                    "stream": match["stream"],
                     "timestamp": match["timestamp"],
                     "format": "pio" if use_pio else "joined",
                 },
@@ -285,8 +310,9 @@ class RomsMarblApplication(ApplicationDefinition[RomsMarblBlueprint, RomsMarblRu
         Returns
         -------
         Sequence[ArtifactSpec]
-            The joined output files by stream, the namelist, cppdefs and MARBL
-            configuration the model read, the executable and the run log.
+            The joined output files by stream (the streams other steps consume
+            under their own kinds), the namelist, cppdefs and MARBL configuration
+            the model read, the executable and the run log.
         """
         # a manager on a placeholder root only spells the layout; it touches no disk
         fs = RomsFileSystemManager(Path("/"))
@@ -295,8 +321,12 @@ class RomsMarblApplication(ApplicationDefinition[RomsMarblBlueprint, RomsMarblRu
             return (directory / name).relative_to(fs.root_dir).as_posix()
 
         streams = [
-            ArtifactSpec(kind=kind, pattern=rel(fs.output_dir, f"output_{stream}.*.nc"))
-            for stream, kind in OUTPUT_STREAM_KINDS.items()
+            ArtifactSpec(
+                kind=kind,
+                pattern=rel(fs.output_dir, f"{stem}.*.nc"),
+                metadata=dict(metadata),
+            )
+            for stem, kind, metadata in OUTPUT_STREAMS
         ]
         return [
             *streams,

@@ -205,12 +205,18 @@ The kind of a product is one of `ArtifactKind`:
      - Meaning
    * - ``grid``, ``initial_conditions``, ``boundary_forcing``, ``surface_forcing``,
        ``tidal_forcing``, ``river_forcing``, ``cdr_forcing``
-     - An input dataset of the model, by the role it plays.
+     - An input dataset of the model, by the role it plays. The boundary extraction a
+       ROMS run writes for a nested run is ``boundary_forcing`` with
+       ``metadata["role"]`` ``child``.
    * - ``restart``, ``history``, ``average``
      - A model output of the ROMS ``rst``, ``his`` or ``avg`` stream.
+   * - ``gas_exchange``, ``upscaling``, ``cdr_output``
+     - A ROMS output stream another step consumes: the carbonate sensitivities
+       (``_cdrgas``) ``carbonate-sensitivity-from`` reads, the boundary tracer fluxes
+       (``_uscl``) the upscaler reads, and the CDR diagnostics (``_cdr``).
    * - ``output``
-     - A model output that is none of restart, history or average; the ROMS stream is
-       in ``metadata["stream"]``.
+     - A model output no other kind names; the ROMS stream is in
+       ``metadata["stream"]``.
    * - ``emitted_blueprint``
      - A blueprint the step publishes for the steps that follow it.
    * - ``config``

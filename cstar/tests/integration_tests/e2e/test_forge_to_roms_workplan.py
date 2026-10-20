@@ -388,7 +388,7 @@ def test_roms_record_lists_its_products(e2e_run: E2ERun) -> None:
         assert product.metadata["format"] == "pio", product
 
     kinds = {p.kind for p in record.products}
-    assert {"build", "log"} <= kinds, sorted(kinds)
+    assert {"build", "log", "gas_exchange"} <= kinds, sorted(kinds)
     roles = {p.metadata["role"] for p in record.products if p.kind == "config"}
     assert {"namelist", "cppdefs", "marbl_in"} <= roles, roles
 

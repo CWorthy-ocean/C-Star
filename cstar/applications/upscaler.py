@@ -14,6 +14,7 @@ from cstar.applications.core import (
     RunnerResult,
     register_application,
 )
+from cstar.applications.roms_marbl.file_system import UPSCALING_SUFFIX
 from cstar.base.log import get_logger
 from cstar.base.utils import convert_to_cdf5
 from cstar.entrypoint.runner import BlueprintRunner
@@ -126,7 +127,9 @@ class UpscalerRunner(BlueprintRunner[UpscalerBlueprint]):
             msg = f"Specified path of upscale files doesn't exist or isn't a directory: {uscl_dir}"
             raise FileNotFoundError(msg)
 
-        files: list[Path | str] = list(uscl_dir.glob("*_uscl.??????????????.nc"))
+        files: list[Path | str] = list(
+            uscl_dir.glob(f"*{UPSCALING_SUFFIX}.??????????????.nc")
+        )
         if len(files) == 0:
             msg = f"No uscl files found in {uscl_dir}"
             raise FileNotFoundError(msg)

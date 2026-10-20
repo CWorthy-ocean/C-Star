@@ -9,7 +9,7 @@ from cstar.applications.core import ArtifactKind, get_application
 from cstar.applications.forge.app import INPUT_ARTIFACTS, input_products
 from cstar.applications.roms_marbl.app import (
     OUTPUT_FILE_PATTERN,
-    OUTPUT_STREAM_KINDS,
+    OUTPUT_STREAMS,
     output_products,
 )
 from cstar.orchestration.manifest import Product, expand_artifacts
@@ -39,6 +39,9 @@ class TestRomsMarblArtifacts:
             f"output/output_avg.{_STAMP}.nc",
             f"output/output_bgc_his.{_STAMP}.nc",
             f"output/child_bry.{_STAMP}.nc",
+            f"output/output_cdrgas.{_STAMP}.nc",
+            f"output/output_uscl.{_STAMP}.nc",
+            f"output/output_cdr.{_STAMP}.nc",
             "work/cstar_generated_roms.nml",
             "input/compile_time_code/cppdefs.opt",
             "input/compile_time_code/roms",
@@ -56,7 +59,10 @@ class TestRomsMarblArtifacts:
             f"output/output_his.{_STAMP}.nc": ("history", {}),
             f"output/output_avg.{_STAMP}.nc": ("average", {}),
             f"output/output_bgc_his.{_STAMP}.nc": ("output", {}),
-            f"output/child_bry.{_STAMP}.nc": ("output", {}),
+            f"output/child_bry.{_STAMP}.nc": ("boundary_forcing", {"role": "child"}),
+            f"output/output_cdrgas.{_STAMP}.nc": ("gas_exchange", {}),
+            f"output/output_uscl.{_STAMP}.nc": ("upscaling", {}),
+            f"output/output_cdr.{_STAMP}.nc": ("cdr_output", {}),
             "work/cstar_generated_roms.nml": ("config", {"role": "namelist"}),
             "input/compile_time_code/cppdefs.opt": ("config", {"role": "cppdefs"}),
             "input/runtime_code/marbl_in": ("config", {"role": "marbl_in"}),
@@ -71,11 +77,13 @@ class TestRomsMarblArtifacts:
         specs = app.artifacts(app.blueprint.model_construct())
 
         declared = {
-            s.pattern: s.kind for s in specs if s.pattern.startswith("output/output_")
+            s.pattern: (s.kind, s.metadata)
+            for s in specs
+            if s.kind is not ArtifactKind.output and s.pattern.endswith(".nc")
         }
         assert declared == {
-            f"output/output_{stream}.*.nc": kind
-            for stream, kind in OUTPUT_STREAM_KINDS.items()
+            f"output/{stem}.*.nc": (kind, metadata)
+            for stem, kind, metadata in OUTPUT_STREAMS
         }
 
 
@@ -85,11 +93,17 @@ class TestOutputProducts:
         out = tmp_path / "output"
         _touch(tmp_path, f"output/output_rst.{_STAMP}.nc")
         _touch(tmp_path, f"output/output_bgc_his.{_STAMP}.nc")
+        _touch(tmp_path, f"output/child_bry.{_STAMP}.nc")
 
         products = output_products(out, tmp_path, use_pio=use_pio)
 
         fmt = "pio" if use_pio else "joined"
         assert [(p.kind, p.path, p.metadata) for p in products] == [
+            (
+                "boundary_forcing",
+                f"output/child_bry.{_STAMP}.nc",
+                {"role": "child", "stream": "bry", "timestamp": _STAMP, "format": fmt},
+            ),
             (
                 "output",
                 f"output/output_bgc_his.{_STAMP}.nc",
@@ -106,7 +120,7 @@ class TestOutputProducts:
     def test_names_that_do_not_match_are_skipped(self, tmp_path: Path) -> None:
         _touch(
             tmp_path,
-            f"output/child_bry.{_STAMP}.nc",
+            f"output/other_rst.{_STAMP}.nc",
             f"output/output_rst.{_STAMP}.000.nc",
             "output/output_rst.nc",
         )
