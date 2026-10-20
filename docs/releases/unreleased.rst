@@ -43,7 +43,11 @@ New features
 Bug Fixes
 ~~~~~~~~~
 
-- N/A
+
+- Two steps staging the same codebase at once could fail or log errors (a failed ``git pull``, a removed cache, "Directory not empty", or a ``cp -av`` exiting 1) because the shared clone cache had no lock. (`#787 <https://github.com/CWorthy-ocean/C-Star/pull/787>`_)
+
+  - A step waits up to 30 minutes for another step to finish with the cache, logging that it is waiting, then clones the repository into its own directory instead.
+  - On a file system without file-locking support, staging logs a warning and uses the cache without the lock, as before.
 
 Improvements
 ~~~~~~~~~~~~
