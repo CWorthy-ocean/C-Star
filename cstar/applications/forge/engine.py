@@ -45,6 +45,7 @@ from cstar.applications.forge.blueprint import ForgeBlueprint, emitted_provenanc
 from cstar.applications.forge.host import HostPaths
 from cstar.applications.forge.namelist_model import validate_run_time_sections
 from cstar.base.env import ENV_CSTAR_RUNID
+from cstar.roms.namelist import release_ref_for_remote
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -117,6 +118,9 @@ PROCESSING_FILLED_SECTIONS = (
 # forcing's tracer axis (``cdr_tracer_counts``), so under ``bgc_mode: cdr_lite``
 # the resolver's stored zeros must not revert them. (``param.nt_passive`` is
 # user-owned: generation checks it against the file instead of overwriting it.)
+# The "upscaled" CDR mode generates no CDR forcing, so its counts are user-stated
+# instead; they reach the build through ``resolved_settings`` (the base this
+# overlay applies to), which the exclusion leaves alone.
 #
 # ``cdr_output.do_cdr_output`` is deliberately NOT listed: it is a user setting
 # and must survive the overlay. ``ForgeExecutor.configure_build`` asserts it True
@@ -177,6 +181,10 @@ def sources_to_forcing_override(cfg: ForgeBlueprint) -> dict[str, Any]:
             d["method"] = spec.esper_method
         if spec.esper_equation:
             d["equation"] = spec.esper_equation
+        # Only the switch travels here; input_data._resolve_source_block turns it
+        # into roms-tools' mapping with the staged WOA23 file's path.
+        if spec.esper_salinity_conditioning:
+            d["salinity_conditioning"] = True
         return d
 
     def _item(item) -> dict[str, Any]:
@@ -398,7 +406,10 @@ def process_forge_blueprint(
         is recorded.
     validate :
         If True (default), fail fast — validate the config's ``model_settings``
-        against the run-time schema *before* any downloads/generation.
+        against the run-time schema *before* any downloads/generation. A
+        commit-hash ``code.roms`` pin is first resolved to its release tag
+        (:func:`~cstar.roms.namelist.release_ref_for_remote`, a treeless clone
+        of ``code.roms.location``), as the roms_marbl step resolves it.
     executor_factory :
         Maps the ``ForgeBlueprint`` to an executor; defaults to the forge
         ``ForgeExecutor``. Injectable for tests and for the eventual C-Star app
@@ -452,9 +463,10 @@ def process_forge_blueprint(
         warnings.warn(integrity, UserWarning, stacklevel=2)
 
     if validate:
-        problems = validate_run_time_sections(
-            cfg.model_settings, roms_ref=cfg.code.roms.commit or cfg.code.roms.branch
-        )
+        roms_ref = cfg.code.roms.commit or cfg.code.roms.branch
+        if roms_ref:
+            roms_ref = release_ref_for_remote(cfg.code.roms.location, roms_ref)
+        problems = validate_run_time_sections(cfg.model_settings, roms_ref=roms_ref)
         if problems:
             raise ValueError(
                 "forge_blueprint.model_settings has invalid values (fix before "

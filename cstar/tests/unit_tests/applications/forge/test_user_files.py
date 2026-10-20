@@ -18,7 +18,6 @@ from cstar.applications.forge.blueprint import UserProvidedFile
 from cstar.applications.forge.user_files import (
     HASH_SCHEME,
     SAMPLE_BUDGET,
-    SAMPLE_ROWS,
     hash_netcdf_contents,
     short_digest,
     stage_user_netcdf,
@@ -63,7 +62,7 @@ _BIG_SHAPE = (8, 400, 500)
 
 def _big_dataset(seed: int = 0) -> xr.Dataset:
     """A float32 variable of ~6.4 MB (above ``FULL_HASH_LIMIT``, so it is hashed by
-    sampling rows) plus a small coordinate that is hashed in full.
+    sampling its two end slabs) plus a small coordinate that is hashed in full.
     """
     rng = np.random.default_rng(seed)
     data = rng.random(_BIG_SHAPE, dtype=np.float64).astype(np.float32)
@@ -72,10 +71,45 @@ def _big_dataset(seed: int = 0) -> xr.Dataset:
     )
 
 
-def _sampled_row_indices(n_rows: int, row_len: int, itemsize: int) -> list[int]:
-    """The flat row indices the digest samples (the documented row rule)."""
-    k = max(min(n_rows, 2), min(SAMPLE_ROWS, SAMPLE_BUDGET // (row_len * itemsize)))
-    return np.unique(np.round(np.linspace(0, n_rows - 1, k)).astype(int)).tolist()
+class _ReadSpy:
+    """Counts ``netCDF4.Variable.__getitem__`` calls and elements read, per variable."""
+
+    def __init__(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        import netCDF4
+
+        self.calls: dict[str, int] = {}
+        self.elements: dict[str, int] = {}
+        self.sizes: dict[str, list[int]] = {}
+        self.keys: dict[str, list[tuple]] = {}
+        original = netCDF4.Variable.__getitem__
+
+        def spy(var, key):
+            result = original(var, key)
+            size = int(np.asarray(result).size)
+            self.calls[var.name] = self.calls.get(var.name, 0) + 1
+            self.elements[var.name] = self.elements.get(var.name, 0) + size
+            self.sizes.setdefault(var.name, []).append(size)
+            self.keys.setdefault(var.name, []).append(
+                key if isinstance(key, tuple) else (key,)
+            )
+            return result
+
+        monkeypatch.setattr(netCDF4.Variable, "__getitem__", spy)
+
+
+def _assert_contiguous_slab(key: tuple, shape: tuple[int, ...]) -> None:
+    """``key`` is ints, then one unit-step slice, then full slices: one C-contiguous
+    block, which the netCDF4 backend reads with a single unstrided request.
+    """
+    kinds = ["int" if isinstance(k, int) else "slice" for k in key]
+    first = kinds.index("slice")
+    assert kinds[:first] == ["int"] * first and kinds[first:] == ["slice"] * (
+        len(key) - first
+    )
+    assert key[first].step in (None, 1)
+    for axis, k in enumerate(key[first + 1 :], start=first + 1):
+        assert (k.start in (None, 0)) and (k.stop in (None, shape[axis]))
+        assert k.step in (None, 1)
 
 
 def _write_big(path: Path, ds: xr.Dataset, fmt: str = "NETCDF4") -> Path:
@@ -172,18 +206,82 @@ class TestHashLargeVariables:
         ds2["tracer"].values[index] += 1.0
         assert hash_netcdf_contents(_write_big(tmp_path / "b.nc", ds2)) != h1
 
-    def test_changing_sampled_middle_row_changes_digest(self, tmp_path):
+    def test_interior_change_is_not_sampled(self, tmp_path):
+        """Only the two end slabs are read, so a middle-record change is invisible."""
         ds = _big_dataset()
         h1 = hash_netcdf_contents(_write_big(tmp_path / "a.nc", ds))
 
-        n_rows = _BIG_SHAPE[0] * _BIG_SHAPE[1]
-        rows = _sampled_row_indices(n_rows, _BIG_SHAPE[2], 4)
-        assert len(rows) == SAMPLE_ROWS
-        t, y = np.unravel_index(rows[len(rows) // 2], _BIG_SHAPE[:2])
-
         ds2 = ds.copy(deep=True)
-        ds2["tracer"].values[t, y, _BIG_SHAPE[2] // 2] += 1.0
-        assert hash_netcdf_contents(_write_big(tmp_path / "b.nc", ds2)) != h1
+        ds2["tracer"].values[4, 200, 250] += 1.0
+        assert hash_netcdf_contents(_write_big(tmp_path / "b.nc", ds2)) == h1
+
+    def test_slab_is_contiguous_within_first_record(self, tmp_path, monkeypatch):
+        """With ``(8, 400, 500)`` float32, ``m = 262144`` elements fit per end, so
+        ``j = 1`` and ``r = 400``: the whole first and whole last record are read.
+        """
+        ds = _big_dataset()
+        p = _write_big(tmp_path / "a.nc", ds)
+        spy = _ReadSpy(monkeypatch)
+        h1 = hash_netcdf_contents(p)
+        monkeypatch.undo()
+
+        assert spy.calls["tracer"] == 2
+        assert spy.sizes["tracer"] == [400 * 500, 400 * 500]
+        for key in spy.keys["tracer"]:
+            _assert_contiguous_slab(key, _BIG_SHAPE)
+
+        for index in [(0, 399, 499), (7, 0, 0)]:
+            ds2 = ds.copy(deep=True)
+            ds2["tracer"].values[index] += 1.0
+            assert hash_netcdf_contents(_write_big(tmp_path / "b.nc", ds2)) != h1
+
+    def test_single_record_reads_partial_slabs(self, tmp_path, monkeypatch):
+        """``(1, 1500, 1500)`` float32: a record exceeds the budget, so each slab is
+        ``r = 174`` whole rows at one end of the one record, read contiguously.
+        """
+        shape = (1, 1500, 1500)
+        ds = xr.Dataset(
+            {
+                "field": (
+                    ["t", "y", "x"],
+                    np.random.default_rng(1).random(shape, dtype=np.float32),
+                )
+            }
+        )
+        p = _write_big(tmp_path / "a.nc", ds)
+        spy = _ReadSpy(monkeypatch)
+        h1 = hash_netcdf_contents(p)
+        monkeypatch.undo()
+
+        rows = SAMPLE_BUDGET // (2 * 4) // shape[2]
+        assert spy.sizes["field"] == [rows * shape[2]] * 2
+        assert spy.keys["field"] == [
+            (0, slice(0, rows, 1), slice(None)),
+            (0, slice(shape[1] - rows, shape[1], 1), slice(None)),
+        ]
+        for index in [
+            (0, 0, 0),
+            (0, rows - 1, 1499),
+            (0, 1500 - rows, 0),
+            (0, 1499, 1499),
+        ]:
+            ds2 = ds.copy(deep=True)
+            ds2["field"].values[index] += 1.0
+            assert hash_netcdf_contents(_write_big(tmp_path / "b.nc", ds2)) != h1
+
+    def test_element_larger_than_budget_still_hashes(self, tmp_path):
+        """A fixed-width string element wider than the budget (itemsize > 1 MiB)
+        reads one element per end instead of failing to pick a slab.
+        """
+        ds = xr.Dataset({"s": ("n", np.array(["x" * 600_000, "y" * 600_000]))})
+        p = _write_big(tmp_path / "a.nc", ds, "NETCDF3_64BIT")
+        h1 = hash_netcdf_contents(p)
+        assert h1.startswith(f"{HASH_SCHEME}:")
+        ds2 = xr.Dataset({"s": ("n", np.array(["x" * 600_000, "z" * 600_000]))})
+        assert (
+            hash_netcdf_contents(_write_big(tmp_path / "b.nc", ds2, "NETCDF3_64BIT"))
+            != h1
+        )
 
     def test_survives_netcdf3_reencoding(self, tmp_path):
         ds = _big_dataset()
@@ -202,56 +300,35 @@ class TestHashLargeVariables:
         assert hash_netcdf_contents(p_cdf5) == h_before
 
     def test_large_variable_is_read_bounded(self, tmp_path, monkeypatch):
-        import netCDF4
-
         p = _write_big(tmp_path / "a.nc", _big_dataset())
-        read: dict[str, int] = {}
-        original = netCDF4.Variable.__getitem__
-
-        def spy(self, key):
-            result = original(self, key)
-            read[self.name] = read.get(self.name, 0) + np.asarray(result).size
-            return result
-
-        monkeypatch.setattr(netCDF4.Variable, "__getitem__", spy)
+        spy = _ReadSpy(monkeypatch)
         hash_netcdf_contents(p)
 
-        assert 0 < read["tracer"] <= SAMPLE_BUDGET // 4
-        assert read["t"] == _BIG_SHAPE[0]
+        assert 0 < spy.elements["tracer"] <= SAMPLE_BUDGET // 4
+        assert spy.calls["tracer"] == 2
+        assert spy.elements["t"] == _BIG_SHAPE[0]
+        assert spy.calls["t"] == 1
 
     def test_long_rows_keep_first_and_last_record(self, tmp_path, monkeypatch):
         """Rows longer than the budget still sample the last record, within budget."""
-        import netCDF4
-
         shape = (3, 300_000)  # 2.4 MB float64 rows: two rows would exceed the budget
         data = np.random.default_rng(0).random(shape)
         ds = xr.Dataset({"field": (["t", "x"], data)})
-        assert _sampled_row_indices(shape[0], shape[1], 8) == [0, 2]
         h1 = hash_netcdf_contents(_write_big(tmp_path / "a.nc", ds))
 
         ds2 = ds.copy(deep=True)
         ds2["field"].values[-1, -1] += 1.0
         assert hash_netcdf_contents(_write_big(tmp_path / "b.nc", ds2)) != h1
 
-        read = 0
-        original = netCDF4.Variable.__getitem__
-
-        def spy(self, key):
-            nonlocal read
-            result = original(self, key)
-            read += np.asarray(result).size
-            return result
-
-        monkeypatch.setattr(netCDF4.Variable, "__getitem__", spy)
+        spy = _ReadSpy(monkeypatch)
         hash_netcdf_contents(tmp_path / "a.nc")
-        assert 0 < read <= SAMPLE_BUDGET // 8
+        assert spy.calls["field"] == 2
+        assert 0 < spy.elements["field"] <= SAMPLE_BUDGET // 8
 
     def test_every_variable_is_read_bounded(self, tmp_path, monkeypatch):
         """A large dimension coordinate and a single-record 3-D variable are sampled,
         not read whole at open (xarray would index the coordinate by default).
         """
-        import netCDF4
-
         ds = xr.Dataset(
             {
                 "field": (["t", "y", "x"], np.zeros((1, 1000, 1000), dtype=np.float32)),
@@ -260,20 +337,14 @@ class TestHashLargeVariables:
             }
         )
         p = _write_big(tmp_path / "a.nc", ds)
-        read: dict[str, int] = {}
-        original = netCDF4.Variable.__getitem__
-
-        def spy(self, key):
-            result = original(self, key)
-            read[self.name] = read.get(self.name, 0) + np.asarray(result).size
-            return result
-
-        monkeypatch.setattr(netCDF4.Variable, "__getitem__", spy)
+        spy = _ReadSpy(monkeypatch)
         hash_netcdf_contents(p)
 
-        assert 0 < read["big_coord"] <= SAMPLE_BUDGET // 8
-        assert 0 < read["field"] <= SAMPLE_BUDGET // 4
-        assert read["x"] == 1000
+        assert 0 < spy.elements["big_coord"] <= SAMPLE_BUDGET // 8
+        assert 0 < spy.elements["field"] <= SAMPLE_BUDGET // 4
+        assert spy.elements["x"] == 1000
+        assert spy.calls["big_coord"] == spy.calls["field"] == 2
+        assert spy.calls["x"] == 1
 
     def test_long_row_is_sampled_at_both_ends(self, tmp_path):
         data = np.random.default_rng(0).random(1_000_000)
@@ -322,7 +393,7 @@ class TestVerifyUserFile:
         assert result == p.resolve()
         # the short digests name the hex, not the scheme tag
         assert "recorded deadbeefdead…" in str(record[0].message)
-        assert "nc-sample-v1…" not in str(record[0].message)
+        assert f"{HASH_SCHEME}…" not in str(record[0].message)
 
     def test_unknown_scheme_is_not_verified(self, tmp_path, recwarn, caplog):
         p = tmp_path / "grid.nc"

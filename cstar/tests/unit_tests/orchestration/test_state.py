@@ -1,13 +1,12 @@
 """Tests for the sentinel repository."""
 
+import os
 from pathlib import Path
 from unittest import mock
 
 import pytest
 
-from cstar.orchestration import state as state_module
 from cstar.orchestration.orchestration import ProcessHandle, Status
-from cstar.orchestration.serialization import PersistenceMode
 from cstar.orchestration.state import StateRepository
 
 
@@ -38,17 +37,15 @@ async def test_put_sentinel_never_exposes_a_partial_file(state_home: Path) -> No
     assert "status:" in previous
 
     observed: list[str] = []
-    real_serialize = state_module.serialize
+    real_replace = os.replace
 
-    def spying_serialize(
-        path: Path, model: ProcessHandle, mode: PersistenceMode = PersistenceMode.yaml
-    ) -> int:
-        # the destination is untouched while the new sentinel is being written
+    def spying_replace(src: str | Path, dst: str | Path) -> None:
+        # the destination is untouched until the new sentinel is complete
         observed.append(first.read_text())
-        return real_serialize(path, model, mode=mode)
+        real_replace(src, dst)
 
     handle.status = Status.Running
-    with mock.patch.object(state_module, "serialize", spying_serialize):
+    with mock.patch.object(os, "replace", spying_replace):
         second = await repo.put_sentinel(handle)
 
     assert second == first

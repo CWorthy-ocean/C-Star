@@ -11,6 +11,7 @@ from cstar.entrypoint.utils import (
     ARG_DIRECTIVES_URI_LONG,
     ARG_PRE_RUN,
     ARG_RESUME,
+    ARG_STEP,
 )
 from cstar.orchestration.orchestration import RunRequest, RunRequestCommandFormatter
 
@@ -76,6 +77,8 @@ class StepToRunRequestAdapter(ConfiguredModelAdapter["LiveStep", "RunRequest"]):
             "blueprint",
             "run",
             str(model.blueprint_path),
+            ARG_STEP,
+            model.name,
         ]
 
         if model.clobber:

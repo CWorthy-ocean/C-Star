@@ -201,7 +201,7 @@ class BlueprintMigration(Migration):
         results: ConverterMap = {}
         for klass in self.adapters:
             key = (klass.application(), klass.source())
-            if _version_key(klass.target()) <= _version_key(klass.source()):
+            if version_key(klass.target()) <= version_key(klass.source()):
                 msg = (
                     f"Adapter {klass.__name__} must advance the schema version, "
                     f"not {klass.source()!r} -> {klass.target()!r}"
@@ -251,12 +251,12 @@ class BlueprintMigration(Migration):
         target = self.targets[application]
 
         try:
-            _version_key(found)
+            version_key(found)
         except ValueError as ex:
             msg = f"Unrecognized schema_version {found!r}; expected dotted integers like 1.0.0"
             raise CstarUnsupportedMigrationError(msg) from ex
 
-        if _version_key(found) > _version_key(target):
+        if version_key(found) > version_key(target):
             raise CstarSchemaTooNewError(application, found, target)
 
         if _major(found) == _major(target):
@@ -290,13 +290,13 @@ class BlueprintMigration(Migration):
             for app, source in self.adapter_lookup
             if app == application
             and _major(source) == _major(version)
-            and _version_key(source) <= _version_key(version)
+            and version_key(source) <= version_key(version)
         ]
         if not sources:
             return None
 
-        klass = self.adapter_lookup[(application, max(sources, key=_version_key))]
-        if _version_key(klass.target()) <= _version_key(version):
+        klass = self.adapter_lookup[(application, max(sources, key=version_key))]
+        if version_key(klass.target()) <= version_key(version):
             return None
         return klass
 
@@ -360,15 +360,24 @@ class BlueprintMigration(Migration):
         )
 
 
-def _version_key(version: str) -> tuple[int, ...]:
+def version_key(version: str) -> tuple[int, ...]:
     """Return a numeric sort key for a dotted-integer schema version.
 
     Schema versions must compare numerically per component: lexicographic
     string comparison would order ``"10.0.0"`` before ``"2.0.0"``.
+
+    Parameters
+    ----------
+    version : str
+        A dotted version of integers.
+
+    Returns
+    -------
+    tuple[int, ...]
     """
     return tuple(int(part) for part in version.split("."))
 
 
 def _major(version: str) -> int:
     """Return the major component of a dotted-integer schema version."""
-    return _version_key(version)[0]
+    return version_key(version)[0]

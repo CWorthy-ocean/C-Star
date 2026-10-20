@@ -70,7 +70,9 @@ from cstar.orchestration.dag_runner import (
     check_clobber_targets,
     get_launcher,
     load_external_runs,
+    load_run_state,
     original_workplan_backup,
+    refresh_run_manifest,
     run_dag,
 )
 from cstar.orchestration.launch.slurm import SlurmLauncher
@@ -929,7 +931,11 @@ def run(
                 pre_run = wp.pre_run
                 apply_clobber_overrides(wp, clobber)
                 if resume:
-                    asyncio.run(apply_resume_overrides(wp, run_id, get_launcher(wp)))
+                    # load the state once: refresh the manifest, then apply it
+                    launcher = get_launcher(wp)
+                    status = asyncio.run(load_run_state(run_id, launcher))
+                    refresh_run_manifest(wp_run.output_path, run_id, status)
+                    asyncio.run(apply_resume_overrides(wp, status))
                 external = asyncio.run(
                     load_external_runs(wp, get_launcher(wp, force_local=pre_run))
                 )

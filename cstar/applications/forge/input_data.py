@@ -1003,8 +1003,8 @@ class RomsMarblInputData(InputData):
 
         return self.roms_marbl_blueprint_elements
 
-    @staticmethod
     def _preflight_esper_sources(
+        self,
         step_kwargs_list: list[tuple[InputStep, dict[str, Any]]],
     ) -> None:
         """Raise before any generation step if an ESPER bgc source is configured
@@ -1017,6 +1017,11 @@ class RomsMarblInputData(InputData):
         Forge itself: this only asks roms-tools' own validator (which also checks
         the ESPER ``method``/``equation`` keys), so environments without PyESPER
         keep every other BGC source available and this is a no-op for them.
+
+        The block is validated in the form roms-tools will actually receive -- after
+        ``_resolve_source_block`` -- not as it sits in ``input_list``: the blueprint's
+        ``salinity_conditioning: True`` only becomes roms-tools' mapping with the
+        staged WOA23 file's path there, and validating the raw switch would fail.
         """
         for step, kwargs in step_kwargs_list:
             for bs in kwargs.get("bgc_sources") or []:
@@ -1026,12 +1031,12 @@ class RomsMarblInputData(InputData):
                 from roms_tools.setup.esper import validate_esper_source
 
                 try:
-                    validate_esper_source(src)
+                    validate_esper_source(self._resolve_source_block(src))
                 except ImportError as exc:
                     raise RuntimeError(
-                        f"{step.name}: the ESPER BGC source needs PyESPER, which is "
-                        "not available in this environment. No inputs were "
-                        f"generated.\n\n{exc}"
+                        f"{step.name}: could not set up the ESPER BGC source (PyESPER "
+                        "missing, or too old for what the source asks). No inputs "
+                        f"were generated.\n\n{exc}"
                     ) from exc
 
     @staticmethod
@@ -1377,6 +1382,29 @@ class RomsMarblInputData(InputData):
         # below either inject the derived path or omit it (streamable) correctly.
         if out.get("path") in (None, ""):
             out.pop("path", None)
+
+        # ESPER's salinity conditioning: the blueprint carries only the switch
+        # (SourceSpec.esper_salinity_conditioning -> engine `_src`'s
+        # ``salinity_conditioning: True``); roms-tools/PyESPER want the staged WOA23
+        # annual salinity file, which the resolver noted into ``datasets`` as
+        # WOA_SALINITY for exactly this lookup. Done before the explicit-path return
+        # below: an ESPER source's own ``path`` is its PyESPER checkout, unrelated.
+        if name.upper() == "ESPER" and out.get("salinity_conditioning"):
+            # A mapping here is already roms-tools' form. No ForgeBlueprint produces
+            # one (the engine emits the bare switch); this only matters for a
+            # hand-built forcing override.
+            if not isinstance(out["salinity_conditioning"], dict):
+                try:
+                    woa_file = self.source_data.path_for_source("WOA_SALINITY")
+                except KeyError as exc:
+                    # ForgeBlueprint._esper_conditioning_has_its_dataset catches
+                    # this at load time; this is the last line for a bare override.
+                    raise ValueError(
+                        "The ESPER source asks for salinity conditioning, but the "
+                        "WOA_SALINITY dataset was not staged. Add 'WOA_SALINITY' to "
+                        "the blueprint's `datasets`."
+                    ) from exc
+                out["salinity_conditioning"] = {"woa_salinity_path": str(woa_file)}
 
         # An explicit path (SourceSpec.path, or a dict's own "path" key -- e.g. river
         # bgc_source) always wins verbatim over the registry-staged path, mirroring
@@ -2133,6 +2161,19 @@ class RomsMarblInputData(InputData):
         input_args["bgc_model"] = rt.BGCMarbl if bgc_sources_resolved else None
 
         log.info("BoundaryForcing kwargs: %r", input_args)
+        if bgc_sources_resolved:
+            # roms-tools reads the physics T/S for the whole run up front when a
+            # bgc source derives from them (ESPER, density/density_mld) and logs
+            # its progress at INFO on the root logger, which C-Star's logging
+            # keeps off the terminal -- so say here that the long silence that
+            # follows is expected (hours for a multi-year run; nothing is written
+            # until it finishes).
+            print(
+                "   ⏳ Reading the input physics for the boundary -- with ESPER or "
+                "density-interpolated BGC sources the whole run's T/S are read "
+                "first; this may take considerable time (hours for a multi-year "
+                "run) and no boundary file is written until it finishes."
+            )
         with mem_log("BoundaryForcing()", enabled=self.verbose):
             bry = rt.BoundaryForcing(grid=self.grid, **input_args)
 

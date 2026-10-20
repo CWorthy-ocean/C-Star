@@ -17,7 +17,7 @@ The wizard discovers Models from ``catalog/ModelSpec/`` and Domains from
 ``catalog/DomainSpec/``; selecting a cataloged Domain prefills the grid kwargs,
 boundaries, partitioning, and dates. The live preview re-resolves on every change
 (using the ``dt`` field, so it never builds a grid); the "Compute dt (CFL)" button
-is the only action that builds a grid (needs ``roms_tools``).
+is plain arithmetic on the grid size and builds none either.
 """
 
 from __future__ import annotations
@@ -30,6 +30,7 @@ import os
 import re
 import typing
 import warnings
+from dataclasses import dataclass
 from datetime import date, datetime
 from pathlib import Path
 from typing import Any, Final, get_args, get_origin
@@ -46,6 +47,7 @@ from cstar.applications.forge.blueprint import (
     BgcSurfaceSource,
     BoundaryForcing,
     CarbonateSensitivitySpec,
+    CdrSpec,
     ClimatologyMode,
     CoarseGridMode,
     Composition,
@@ -72,9 +74,12 @@ from cstar.applications.forge.blueprint import (
 )
 from cstar.applications.forge.migration import migrate_forcing_inputs
 from cstar.applications.forge.namelist_model import (
+    CDR_OUTPUT_SECTIONS,
+    MARBL_ONLY_OUTPUT_FLAGS,
     BgcMode,
     RunTimeSettings,
     bgc_mode_from_cppdefs,
+    cdr_tracer_role,
     namelist_field_for,
     namelist_schema_for,
     run_time_settings_for_ref,
@@ -85,10 +90,12 @@ from cstar.applications.forge.resolve import (
     OUTPUT_SECTIONS,
     PARTIAL_OUTPUT_SECTIONS,
     build_forge_blueprint,
+    cfl_dt,
     extract_output_settings,
     find_carbonate_sensitivity_files,
     load_model_spec_data,
     read_cdr_forcing_yaml,
+    with_cdr_lite_tracer_set,
 )
 from cstar.applications.forge.user_files import hash_netcdf_contents, short_digest
 from cstar.base.utils import NetCDFFormat, netcdf_format
@@ -126,7 +133,7 @@ HELP_TEXT: dict[str | tuple[str, str], str] = {
         "run",
         "dt",
     ): "Baroclinic time step in seconds. Leave blank to compute from the CFL criterion "
-    "(click 'Compute dt (CFL)' — requires roms_tools).",
+    "(click 'Compute dt (CFL)').",
     ("run", "description"): "Human-readable description of this blueprint.",
     ("export", "name"): "Canonical blueprint name. Drives the save filename, the "
     "default working directory, casename, and generated file stems. Defaults to a "
@@ -270,6 +277,12 @@ HELP_TEXT: dict[str | tuple[str, str], str] = {
     "or 'mixed'.",
     "esper_equation": "PyESPER predictor equation for an 'ESPER' source: 8 "
     "(salinity + temperature) or 16 (salinity only). Blank = roms-tools default (8).",
+    "esper_salinity_conditioning": "Blend the salinity PyESPER feeds its nets toward "
+    "the WOA23 annual climatology below 31-34 PSU, where ESPER has no training data "
+    "and gives unphysical values in river plumes (silicate > 100 µmol/kg, negative "
+    "nutrients, DIC above ALK), then dilute ALK and DIC back to the model salinity. "
+    "Forge downloads the one WOA23 file this needs. Requires the CWorthy PyESPER fork "
+    "(tag v1.1.1+cworthy.1 or later).",
     # ---- IC BGC sources (row list) ----------------------------------------------
     (
         "ic_bgc",
@@ -415,7 +428,13 @@ HELP_TEXT: dict[str | tuple[str, str], str] = {
         "bgc_interpolation_method",
     ): "Vertical interpolation for BGC boundary tracers (type='bgc'). 'depth' (default), "
     "'density' (isopycnal space), or 'density_mld' (mixed-layer-depth anchored). "
-    "Density methods build a physics BoundaryForcing companion to supply the target T/S.",
+    "Density methods build a physics BoundaryForcing companion to supply the target T/S "
+    "and place the BGC source on every physics record: the source data is still a "
+    "climatology cycled by day of year, but its vertical placement follows the "
+    "physics, so the output is written on the physics time axis (grouped like the "
+    "physics files) instead of as one cycled climatology. 'depth' keeps a "
+    "climatological source as a cycled climatology. Without a physics companion or "
+    "source T/S, density falls back to depth.",
     (
         "boundary",
         "prefill",
@@ -536,13 +555,16 @@ HELP_TEXT: dict[str | tuple[str, str], str] = {
         "output",
         "output_dd",
     ): "Select an OutputSpec (named output-settings configuration) to seed the output "
-    "sections. Fine-tune any value under Advanced settings → the relevant section.",
+    "streams. Fine-tune any value in the streams below. Particle tracking, "
+    "pressure-flux and child-grid extraction settings belong to the model/grid and "
+    "are kept when you pick a preset.",
     # ---- timestep --------------------------------------------------------------
     (
         "timestep",
         "dt_btn",
-    ): "Build the grid from the current grid kwargs and compute the barotropic "
-    "time step from the CFL criterion. Requires roms_tools to be installed.",
+    ): "Compute the baroclinic time step from the CFL criterion for the current grid "
+    "size and resolution. No grid is built, so it works while other settings are "
+    "still incomplete.",
 }
 
 # Label overrides for namelist-section widgets built via _build_section /
@@ -970,6 +992,68 @@ _ACCORDION_EXCLUDED_FIELDS: dict[str, frozenset[str]] = {
     # the generic overrides layer -- excluding it here keeps a loaded blueprint's
     # domain.v_sponge from being reconstructed as a phantom accordion override.
     "v_sponge": frozenset({"v_sponge"}),
+    # extract_data is the parent side of nesting: the child grid, extraction period
+    # and file come from the Grid card's nesting widgets (nest_period, the child
+    # grid), resolved by build_forge_blueprint. Only nrpf/extract_root_name stay
+    # editable in the Output card.
+    "extract_data": frozenset(
+        {
+            "do_extract",
+            "extract_file",
+            "n_chd",
+            "theta_s_chd",
+            "theta_b_chd",
+            "hc_chd",
+            "extract_period",
+        }
+    ),
+}
+
+# The BGC modes each settings key applies in; a key not listed applies in every
+# mode. A section key covers all of its fields. The output streams ucla-roms
+# compiles only under MARBL come from namelist_model, which owns that fact
+# (MARBL_ONLY_OUTPUT_FLAGS, and the requires_marbl rows of CDR_OUTPUT_SECTIONS).
+# The rest are wizard-only: the bgc/marbl_bgc/dic_alk_correction groups, NHY/NOX
+# forcing and cdr_lite.cdr_online_carbonate_sensitivity read MARBL state, and
+# cdr_lite_output needs CDR-lite tracers, which only MARBL and bgc_mode "cdr_lite"
+# provide.
+_MARBL_ONLY = frozenset({"marbl"})
+_BGC_MODE_SETTINGS: dict[str | tuple[str, str], frozenset[str]] = {
+    **dict.fromkeys(
+        [section for section, _flag, _why in MARBL_ONLY_OUTPUT_FLAGS]
+        + [row[0] for row in CDR_OUTPUT_SECTIONS if row[3]],
+        _MARBL_ONLY,
+    ),
+    "bgc": _MARBL_ONLY,
+    "marbl_bgc": _MARBL_ONLY,
+    "dic_alk_correction": _MARBL_ONLY,
+    "cdr_lite_output": frozenset({"marbl", "cdr_lite"}),
+    ("cppdefs", "nhy_forcing"): _MARBL_ONLY,
+    ("cppdefs", "nox_forcing"): _MARBL_ONLY,
+    ("cdr_lite", "cdr_online_carbonate_sensitivity"): _MARBL_ONLY,
+}
+
+
+def _applies_in(section: str, field: str | None, bgc_mode: str) -> bool:
+    """Whether the ``(section, field)`` setting (``field=None`` for a scalar
+    section) applies in ``bgc_mode`` -- see :data:`_BGC_MODE_SETTINGS`.
+    """
+    modes = _BGC_MODE_SETTINGS.get(section)
+    if modes is None and field is not None:
+        modes = _BGC_MODE_SETTINGS.get((section, field))
+    return modes is None or bgc_mode in modes
+
+
+# Settings ``ForgeExecutor.configure_build`` forces on in a BGC mode, whatever the
+# blueprint authored: bgc_mode -> {(section, field): why}. The editor shows them
+# checked and disabled -- display only, never an override.
+_FORCED_ON_BY_BGC_MODE: dict[str, dict[tuple[str, str], str]] = {
+    "cdr_lite": {
+        ("cdr_lite_output", "do_cdr_lite_output"): (
+            "Forced on by bgc_mode cdr_lite: this is the only output the CDR-lite "
+            "tracers appear in."
+        ),
+    },
 }
 
 
@@ -996,13 +1080,14 @@ _ACCORDION_EXCLUDED_FIELDS: dict[str, frozenset[str]] = {
 # ``upstream_ts_land_curv``, PR #361) are opted in, via ``_CPPDEFS_PANE_FIELDS``, so
 # a user override can never collide with a resolver-owned flag. The two advection
 # fields only render for ModelSpecs that declare them (``roms-marbl-0.8-default``,
-# ``roms-marbl-0.9-default``, ``roms-marbl-0.10-default``, ``pio-dev``) -- the editor type-infers a checkbox from
-# the composed bool, so a spec that omits the key shows no widget for it.
+# ``roms-marbl-0.9-default``, ``roms-marbl-0.10-default``, ``roms-marbl-0.11-default``,
+# ``pio-dev``) -- the editor type-infers a checkbox from the composed bool, so a spec
+# that omits the key shows no widget for it.
 #
 # ``bgc``/``marbl_bgc`` are SPLIT at field granularity along the existing
 # ``PARTIAL_OUTPUT_SECTIONS`` seam (the same split the OutputSpec dropdown seeds):
-# their output write-controls live under Output, the rest under Biogeochemistry.
-_OUTPUT_CATEGORY = "Output & diagnostics"
+# their output write-controls live in the Output card (see ``_OUTPUT_MAIN_SECTIONS``),
+# the rest under Biogeochemistry.
 _ADVANCED_CATEGORIES: tuple[tuple[str, tuple[str, ...]], ...] = (
     (
         "Physics & subgrid tuning",
@@ -1021,7 +1106,7 @@ _ADVANCED_CATEGORIES: tuple[tuple[str, tuple[str, ...]], ...] = (
             "lin_rho_eos",
             # pio_settings is ModelSpec-owned (like the rest of this pane), NOT an
             # output section: edits here must land in composition.model / "Save
-            # Model spec", so keep it out of _OUTPUT_CATEGORY.
+            # Model spec", so keep it out of the Output card.
             "pio_settings",
             "cppdefs",
         ),
@@ -1050,38 +1135,63 @@ _ADVANCED_CATEGORIES: tuple[tuple[str, tuple[str, ...]], ...] = (
     ),
     (
         "Carbon dioxide removal (CDR)",
-        (
-            "param",
-            "cdr_frc",
-            "cdr_output",
-            "cdr_lite",
-            "cdr_lite_output",
-            "cdr_gas_exch_output",
-        ),
-    ),
-    (
-        _OUTPUT_CATEGORY,
-        (
-            "ocean_vars",
-            "surf_flux",
-            "diagnostics",
-            "stdout_diag",
-            "ts_output",
-            "frc_output",
-            "upscale_output",
-            "zslice",
-            "random_output",
-            "calc_pflx",
-            "particles",
-            "extract_data",
-            "bgc",
-            "marbl_bgc",
-        ),
+        ("param", "cdr_frc", "cdr_lite"),
     ),
 )
 
+# The Output card's placement of the output streams -- the one table the editor build,
+# the card's modified-count chip and the section retitling all read. ``_OUTPUT_CARD``
+# names the card as a "place" for ``_split_fields``; the main streams are always
+# visible in this display order, the rest sit in the collapsed "More output streams"
+# accordion. Placement is display-only and independent of OutputSpec ownership
+# (``_is_output_key``): ``extract_data``, ``particles`` and ``calc_pflx`` sit here yet
+# are ModelSpec/Domain-owned.
+_OUTPUT_CARD = "Output"
+_OUTPUT_MORE_TITLE = "More output streams"
+_OUTPUT_GROUPS = (_OUTPUT_CARD, _OUTPUT_MORE_TITLE)
+_OUTPUT_MAIN_SECTIONS = (
+    "ocean_vars",
+    "surf_flux",
+    "bgc",
+    "marbl_bgc",
+    "cdr_output",
+    "cdr_lite_output",
+    "cdr_gas_exch_output",
+    "extract_data",
+    "upscale_output",
+)
+_OUTPUT_MORE_SECTIONS = (
+    "diagnostics",
+    "ts_output",
+    "frc_output",
+    "zslice",
+    "random_output",
+    "particles",
+    "calc_pflx",
+    "stdout_diag",
+)
+# Nesting role of the grid being edited. ``extract_data`` feeds a child from this
+# (parent) grid, so it exists only on a parent; ``upscale_output``'s ``_uscl`` files
+# feed the parent's upscaled-CDR run, so it is a main stream only on a child and sits
+# under "More output streams" otherwise.
+_PARENT_ONLY_SECTIONS = frozenset({"extract_data"})
+_CHILD_MAIN_SECTIONS = frozenset({"upscale_output"})
+# Output-card titles for the sections split along the PARTIAL_OUTPUT_SECTIONS seam,
+# whose glossary titles name the whole section (the Advanced BGC pane keeps those).
+_OUTPUT_SECTION_TITLES: dict[str, str] = {
+    "bgc": "BGC output",
+    "marbl_bgc": "MARBL output (tracers & diagnostics to write)",
+}
+# Per-section note shown under the section header.
+_SECTION_NOTES: dict[str, str] = {
+    "extract_data": (
+        "Child grid, extraction period and file come from the nesting options in "
+        "the Grid card."
+    ),
+}
 
-# Output-stream tables for the Advanced-settings panes: each namelist section
+
+# Output-stream tables for the settings editor: each namelist section
 # that models one-or-more "write this stream / how often / how many records
 # per file" triples renders those fields as a small table (see
 # _SettingsEditor._build_section) instead of 3-6 flat rows apiece. Row order
@@ -1229,18 +1339,9 @@ _OUTPUT_TABLES: dict[str, list[dict[str, Any]]] = {
             "extra": [],
         },
     ],
-    "extract_data": [
-        {
-            "label": "Child-grid extraction",
-            "write": "do_extract",
-            "period": "extract_period",
-            "records": "nrpf",
-            "extra": [],
-        },
-    ],
 }
 
-# Per-variable write-flag checkbox grids for the Advanced-settings panes: a
+# Per-variable write-flag checkbox grids for the settings editor: a
 # (title, field_names) pair renders as a small header plus a 4-column grid of
 # checkboxes instead of one flat row per variable. As with _OUTPUT_TABLES, a
 # grid only consumes the fields that were actually built; any missing field is
@@ -1476,12 +1577,13 @@ _PARAM_PANE_FIELDS = frozenset({"nt_passive"})
 def _split_fields(
     category_title: str, section: str
 ) -> tuple[frozenset | None, frozenset]:
-    """Field filter ``(include, exclude)`` for a section shown in ``category_title``.
+    """Field filter ``(include, exclude)`` for a section shown in ``category_title``
+    (an Advanced pane title, or :data:`_OUTPUT_CARD`).
 
     ``include=None`` means "all fields"; otherwise only those in ``include`` are
-    shown. ``exclude`` is always dropped. Sections split across panes (``bgc`` /
+    shown. ``exclude`` is always dropped. Sections split across containers (``bgc`` /
     ``marbl_bgc`` via :data:`PARTIAL_OUTPUT_SECTIONS`) keep their output write-
-    controls under Output and the rest under their feature pane. ``cppdefs`` is
+    controls in the Output card and the rest under their feature pane. ``cppdefs`` is
     split the same way via :data:`_CPPDEFS_PANE_FIELDS` -- each pane only sees the
     handful of compile-time flags it owns -- and ``param`` shows only
     :data:`_PARAM_PANE_FIELDS`.
@@ -1493,9 +1595,38 @@ def _split_fields(
     parts = PARTIAL_OUTPUT_SECTIONS.get(section)
     if parts is None:
         return None, frozenset()
-    if category_title == _OUTPUT_CATEGORY:
+    if category_title == _OUTPUT_CARD:
         return frozenset(parts), frozenset()
     return None, frozenset(parts)
+
+
+def _in_output_card(section: str, field: str | None) -> bool:
+    """Whether the ``(section, field)`` setting is placed in the Output card (main or
+    "More output streams"), nesting role aside -- the one placement predicate behind
+    the Output chip's count, so the Output and Advanced chips partition the overrides.
+    Distinct from ``_is_output_key``, which is OutputSpec ownership.
+    """
+    if section not in _OUTPUT_MAIN_SECTIONS and section not in _OUTPUT_MORE_SECTIONS:
+        return False
+    include, exclude = _split_fields(_OUTPUT_CARD, section)
+    return (include is None or field in include) and field not in exclude
+
+
+def _output_placement(
+    *, is_parent: bool, is_child: bool
+) -> tuple[tuple[str, ...], tuple[str, ...]]:
+    """The Output card's ``(main, more)`` sections for a grid's nesting role -- the
+    only place the nesting role shapes the editor (see ``_PARENT_ONLY_SECTIONS`` /
+    ``_CHILD_MAIN_SECTIONS``).
+    """
+    main = tuple(
+        section
+        for section in _OUTPUT_MAIN_SECTIONS
+        if (is_parent or section not in _PARENT_ONLY_SECTIONS)
+        and (is_child or section not in _CHILD_MAIN_SECTIONS)
+    )
+    demoted = tuple(s for s in _OUTPUT_MAIN_SECTIONS if s in _CHILD_MAIN_SECTIONS)
+    return main, (*_OUTPUT_MORE_SECTIONS, *(() if is_child else demoted))
 
 
 # Each CDR output stream's master enable flag -- section name -> the field that
@@ -1515,13 +1646,50 @@ _CDR_STREAM_MASTER_FLAGS: dict[str, str] = {
 }
 
 
+def _section_header_html(
+    section: str, n_modified: int = 0, title: str | None = None
+) -> str:
+    """The header HTML over a settings section: its glossary title (or ``title``)
+    and namelist symbol, plus an "N modified" chip once the wizard retitles it with
+    a count.
+    """
+    if title is None:
+        title = section_for(f"settings.{section}", default_title=section).title
+    chip = (
+        " " + components.chip(f"● {n_modified} modified", "info") if n_modified else ""
+    )
+    return (
+        "<div class='forge-settings-sec'>"
+        f"<span class='ttl'>{html.escape(title)}</span> "
+        f"<span class='sym'>{section}</span>{chip}</div>"
+    )
+
+
+@dataclass(frozen=True)
+class _EditorKey:
+    """What a built settings editor depends on: it is rebuilt when any of these
+    changes. A failed resolve knows all but ``settings_cls`` (see
+    ``ForgeBlueprintWizard._hide_stale_editor``).
+    """
+
+    model: str | None
+    settings_cls: type[BaseModel]
+    bgc_mode: str
+    is_parent: bool
+    is_child: bool
+
+
 class _SettingsEditor:
     """A collapsible (Accordion) editor over the *editable* model_settings sections,
-    consolidated into modeler-facing category panes (see :data:`_ADVANCED_CATEGORIES`).
+    consolidated into modeler-facing category panes (see :data:`_ADVANCED_CATEGORIES`)
+    plus the output streams the Output card shows (``output_box``, see
+    :data:`_OUTPUT_MAIN_SECTIONS`).
 
     Each pane groups several namelist sections under a sub-header per section, so the
-    grouping reads by ocean-modeling concern (physics, forcing, BGC, CDR, output)
-    while every widget is still keyed by its real ``(section, field)``. Auto-generates
+    grouping reads by ocean-modeling concern (physics, forcing, BGC, CDR)
+    while every widget is still keyed by its real ``(section, field)`` -- one
+    ``_widgets`` registry and one read/sync/on_edit path serve both containers.
+    Auto-generates
     typed widgets per field using the ``settings_cls`` sub-model schema (falling
     back to value-type inference). ``settings_cls`` defaults to the legacy
     :class:`RunTimeSettings` for back-compat; pass the class matching the
@@ -1534,7 +1702,9 @@ class _SettingsEditor:
     in ``_ACCORDION_EXCLUDED_FIELDS`` (and sections not named in a category) are
     skipped -- their value still flows through from the resolver-composed settings
     dict (this editor never authors that dict, only a sparse overrides layer), so
-    hiding the widget cannot drop or reset the value.
+    hiding the widget cannot drop or reset the value. ``is_parent`` / ``is_child``
+    give the grid's nesting role, which only decides which output streams the
+    Output card places where (see :func:`_output_placement`).
     """
 
     def __init__(
@@ -1543,66 +1713,54 @@ class _SettingsEditor:
         model_settings: dict[str, Any],
         on_edit=None,
         settings_cls: type[BaseModel] = RunTimeSettings,
+        *,
+        bgc_mode: str = "marbl",
+        is_parent: bool = False,
+        is_child: bool = False,
     ):
         self.W = W
         self._settings_cls = settings_cls
+        self._bgc_mode = bgc_mode
+        self._forced_on = _FORCED_ON_BY_BGC_MODE.get(bgc_mode, {})
         # (section, field|None) -> (widget, base_type)
         self._widgets: dict[Any, Any] = {}
-        self._section_fields: dict[str, list[str | None]] = {}
+        # group -> {section: fields built there}. A group is an Advanced pane (by
+        # title) or one of the Output card's two (_OUTPUT_CARD, _OUTPUT_MORE_TITLE); a
+        # section split along PARTIAL_OUTPUT_SECTIONS (bgc/marbl_bgc) sits in a pane
+        # and in the Output card, each holding only its own fields.
+        self._group_fields: dict[str, dict[str, list[str | None]]] = {}
+        # (group, section) -> the section's header widget, retitled by the wizard.
+        self._headers: dict[tuple[str, str], Any] = {}
         # True while sync() is pushing composed values into widgets -- distinct from
         # the wizard's own _syncing flag, which guards the *wizard-level* on_edit
         # override recording. This one guards the editor-internal forcing rule (see
         # _register_field_rule_observers) so a sync-driven value push never mutates
         # a sibling widget the way a real user edit is allowed to.
         self._syncing_internal = False
-        # category title -> sections shown under it (a section may appear under two
-        # panes when split along PARTIAL_OUTPUT_SECTIONS, e.g. bgc/marbl_bgc).
-        self._pane_sections: dict[str, list[str]] = {}
         panes, titles = [], []
         for title, members in _ADVANCED_CATEGORIES:
-            blocks = []
-            for section in members:
-                if section not in model_settings:
-                    continue
-                if (
-                    section not in self._settings_cls.model_fields
-                    and section in _VERSION_GATED_SECTIONS
-                ):
-                    # section is modeled by some registered settings tier (e.g.
-                    # pio_settings on RunTimeSettingsV0_6_0) but not by the
-                    # active settings_cls -- e.g. a pre-0.6.0 roms_ref override
-                    # with a ModelSpec whose model_settings still carries the
-                    # key. Rendering a type-inferred widget here would let the
-                    # user edit a value the active (extra="ignore") schema
-                    # silently discards downstream. cppdefs is NOT in
-                    # _VERSION_GATED_SECTIONS (no tier ever models it) and so
-                    # is unaffected -- it keeps rendering via type-inference.
-                    continue
-                include, exclude = _split_fields(title, section)
-                box, fields = self._build_section(
-                    section, model_settings[section], include, exclude
-                )
-                if not fields:
-                    continue
-                self._pane_sections.setdefault(title, []).append(section)
-                sec_meta = section_for(f"settings.{section}", default_title=section)
-                sec_header = W.HTML(
-                    "<div class='forge-settings-sec'>"
-                    f"<span class='ttl'>{sec_meta.title}</span> "
-                    f"<span class='sym'>{section}</span></div>"
-                )
-                # Widget-level class: the CSS draws a bold divider above every
-                # section header except the pane's first (:first-child).
-                sec_header.add_class("forge-settings-sec-w")
-                blocks.append(sec_header)
-                blocks.append(box)
-                self._section_fields[section] = fields
+            blocks = self._build_group(title, members, model_settings)
             if not blocks:
                 continue
             panes.append(W.VBox(blocks))
             titles.append(title)
         # Independently collapsible panes: opening one no longer closes another.
         self.accordion = components.open_accordion(W, panes, titles)
+        main, more = _output_placement(is_parent=is_parent, is_child=is_child)
+        main_blocks = self._build_group(_OUTPUT_CARD, main, model_settings)
+        more_blocks = self._build_group(_OUTPUT_MORE_TITLE, more, model_settings)
+        more_panes = [W.VBox(more_blocks)] if more_blocks else []
+        self.more_streams = components.open_accordion(
+            W, more_panes, [_OUTPUT_MORE_TITLE] * len(more_panes)
+        )
+        self.output_box = W.VBox([*main_blocks, self.more_streams])
+        # Before the on_edit observers attach, so locking one is never an edit.
+        for key, why in self._forced_on.items():
+            if key in self._widgets:
+                widget = self._widgets[key][0]
+                widget.value = True
+                widget.disabled = True
+                widget.tooltip = f"{widget.tooltip or ''} {why}".strip()
         if on_edit is not None:
             for (section, field), (widget, _base) in self._widgets.items():
                 widget.observe(
@@ -1610,6 +1768,72 @@ class _SettingsEditor:
                 )
         self._register_field_rule_observers()
         self._apply_field_rules()
+
+    @property
+    def _pane_sections(self) -> dict[str, list[str]]:
+        """Advanced pane title -> the sections shown in it, in the order of (and
+        index-aligned with) ``accordion``'s panes.
+        """
+        return {
+            title: list(self._group_fields[title])
+            for title, _members in _ADVANCED_CATEGORIES
+            if title in self._group_fields
+        }
+
+    def header_html(self, group: str, section: str, n_modified: int = 0) -> str:
+        """The header HTML of ``section`` in ``group``: the Output card titles the
+        split sections itself, every other header uses the glossary's title.
+        """
+        title = _OUTPUT_SECTION_TITLES.get(section) if group in _OUTPUT_GROUPS else None
+        return _section_header_html(section, n_modified, title)
+
+    def _build_group(
+        self,
+        group: str,
+        members: tuple[str, ...],
+        model_settings: dict[str, Any],
+    ) -> list[Any]:
+        """Header + (note) + widgets blocks for each of ``members`` that has editable
+        fields, flat -- an Advanced pane's (``group`` is its title) or the Output
+        card's children (``group`` is one of :data:`_OUTPUT_GROUPS`).
+        """
+        W = self.W
+        place = _OUTPUT_CARD if group in _OUTPUT_GROUPS else group
+        blocks: list[Any] = []
+        for section in members:
+            if section not in model_settings:
+                continue
+            if (
+                section not in self._settings_cls.model_fields
+                and section in _VERSION_GATED_SECTIONS
+            ):
+                # section is modeled by some registered settings tier (e.g.
+                # pio_settings on RunTimeSettingsV0_6_0) but not by the
+                # active settings_cls -- e.g. a pre-0.6.0 roms_ref override
+                # with a ModelSpec whose model_settings still carries the
+                # key. Rendering a type-inferred widget here would let the
+                # user edit a value the active (extra="ignore") schema
+                # silently discards downstream. cppdefs is NOT in
+                # _VERSION_GATED_SECTIONS (no tier ever models it) and so
+                # is unaffected -- it keeps rendering via type-inference.
+                continue
+            include, exclude = _split_fields(place, section)
+            box, fields = self._build_section(
+                section, model_settings[section], include, exclude
+            )
+            if not fields:
+                continue
+            self._group_fields.setdefault(group, {})[section] = fields
+            sec_header = W.HTML(self.header_html(group, section))
+            # Widget-level class: the CSS draws a bold divider above every
+            # section header except the container's first (:first-child).
+            sec_header.add_class("forge-settings-sec-w")
+            self._headers[(group, section)] = sec_header
+            blocks.append(sec_header)
+            if note := _SECTION_NOTES.get(section):
+                blocks.append(W.HTML(f"<div class='forge-hint'>{note}</div>"))
+            blocks.append(box)
+        return blocks
 
     def sync(self, model_settings: dict[str, Any]):
         """Set every widget to the effective values (caller suspends edit tracking)."""
@@ -1624,6 +1848,8 @@ class _SettingsEditor:
                     if field is None
                     else (sec.get(field) if isinstance(sec, dict) else None)
                 )
+                if (section, field) in self._forced_on:
+                    value = True
                 try:
                     labels = _BOOL_DROPDOWN_FIELDS.get((section, field))
                     if labels is not None and value is not None:
@@ -1668,6 +1894,7 @@ class _SettingsEditor:
         keys = [
             ("ocean_vars", "wrt_file_rst"),
             ("ocean_vars", "monthly_restarts"),
+            ("marbl_bgc", "use_constant_fe"),
         ]
         for section, master_flag in _CDR_STREAM_MASTER_FLAGS.items():
             keys.append((section, master_flag))
@@ -1697,8 +1924,9 @@ class _SettingsEditor:
             monthly_entry[0].observe(_force_wrt_on_monthly, names="value")
 
     def _apply_field_rules(self) -> None:
-        """Show/hide and enable/disable ocean_vars/CDR-output-stream widgets from
-        their CURRENT values -- never mutates a value, only visibility/``disabled``.
+        """Show/hide and enable/disable ocean_vars/CDR-output-stream widgets (and
+        ``marbl_bgc.constant_fe_value``) from their CURRENT values -- never mutates
+        a value, only visibility/``disabled``.
 
         Rationale: the dependent fields are meaningless (and ignored by the
         namelist) once their master switch is off, and `output_period_*` has no
@@ -1727,6 +1955,13 @@ class _SettingsEditor:
             _show(period_r, wrt_on)
             if monthly_r is not None and period_r is not None:
                 period_r[0].disabled = bool(monthly_r[0].value)
+
+        use_fe = self._widgets.get(("marbl_bgc", "use_constant_fe"))
+        if use_fe is not None:
+            _show(
+                self._widgets.get(("marbl_bgc", "constant_fe_value")),
+                bool(use_fe[0].value),
+            )
 
         for section, master_flag in _CDR_STREAM_MASTER_FLAGS.items():
             master = self._widgets.get((section, master_flag))
@@ -1764,6 +1999,8 @@ class _SettingsEditor:
         W = self.W
         sub = _section_submodel(section, self._settings_cls)
         if not isinstance(value, dict):  # scalar section (e.g. gamma2, ubind)
+            if not _applies_in(section, None, self._bgc_mode):
+                return W.VBox([]), []
             base = _base_type(None, value)
             tip = _namelist_tooltip(self._settings_cls, section, section)
             label, tip = _namelist_description_and_tooltip(section, section, tip)
@@ -1777,6 +2014,8 @@ class _SettingsEditor:
             if key in excluded or key in exclude:
                 continue
             if include is not None and key not in include:
+                continue
+            if not _applies_in(section, key, self._bgc_mode):
                 continue
             # Skip metadata-name keys (*_vname/*_tname, cdb_min, ...): the settings
             # sub-models are extra="ignore", so anything not a typed field is dropped
@@ -1872,6 +2111,7 @@ _STICKY_STEPS = (
     ("grid", "Grid"),
     ("forcing", "Forcing"),
     ("run", "Run"),
+    ("output", "Output"),
     ("advanced", "Advanced"),
     ("review", "Review"),
 )
@@ -1937,7 +2177,8 @@ _IC_SOURCE_OPTS = [e.value for e in InitialConditionsSource] + [_IC_NONE]
 _BOUNDARY_NONE = "(none)"
 _RIVER_BGC_SOURCE_OPTS = [""] + [e.value for e in RiverBgcSource]
 _RIVER_TEMP_SOURCE_OPTS = [""] + [e.value for e in RiverTemperatureSource]
-# ESPER source fields (SourceSpec.esper_method/esper_equation); "" = unset (roms-tools
+# ESPER source fields (SourceSpec.esper_method/esper_equation; the
+# esper_salinity_conditioning checkbox beside them); "" = unset (roms-tools
 # default: method="nn", equation=8).
 _ESPER_METHOD_OPTS = ["", "lir", "nn", "mixed"]
 _ESPER_EQUATION_OPTS = ["", "8", "16"]
@@ -2071,6 +2312,15 @@ def _add_bgc_source_widgets(W, w: dict[str, Any], cat: str, src: dict[str, Any],
         style=small,
         layout=W.Layout(width="170px"),
         tooltip=_tip(cat, "esper_equation"),
+    )
+    w["esper_salinity_conditioning"] = W.Checkbox(
+        value=bool(src.get("esper_salinity_conditioning", False)),
+        description=_row_desc(
+            "esper_salinity_conditioning", "condition salinity", colon=False
+        ),
+        indent=False,
+        layout=W.Layout(width="200px"),
+        tooltip=_tip(cat, "esper_salinity_conditioning"),
     )
 
 
@@ -2219,8 +2469,15 @@ def _cdr_forcing_from_netcdf(path: str | Path, grid: Any) -> Any:
 
     Every variable is selected by dimension name (``ncdr``/``ntracers``/
     ``time``), never by positional axis order, since the builder doesn't
-    guarantee one. Two things this can't recover exactly, both acceptable for
-    a plot-only reconstruction:
+    guarantee one. A file with generated tracers (``CDR_*``/``passive_tracer*``,
+    ``tracer_set`` ``cdr_lite``/``passive``) names the release feeding each in
+    its ``tracer_release`` coordinate (roms-tools >= 5.1): such a release is
+    rebuilt from its own columns, keyed by role (``ALK``/``DIC``/
+    ``passive_tracer``) with its ``tracer_set``. Any other release is a MARBL
+    one: its tracer-perturbation fluxes are the ``ALK`` column alone when ``ALK``
+    is on the axis (otherwise every non-generated column), and its volume
+    concentrations every non-generated column. Three things this can't recover
+    exactly, all acceptable for a plot-only reconstruction:
 
     * The builder interpolates every release onto the *union* of all releases'
       original times before writing the file, so the file carries one shared
@@ -2229,6 +2486,8 @@ def _cdr_forcing_from_netcdf(path: str | Path, grid: Any) -> Any:
     * A tracer-perturbation file with no ``tracer_name`` coordinate at all
       (unusual -- normal output always carries one) has no way to know which
       tracer a flux series belongs to; it's arbitrarily labeled "ALK".
+    * A passive volume release's ``temp``/``salt`` (the file's rows for them
+      hold the discharged water's physics) are left to roms-tools' defaults.
 
     Raises a ``ValueError`` prefixed ``"could not reconstruct releases from
     <path>: ..."`` for any failure, including the ones ``rt.CDRForcing``'s own
@@ -2260,6 +2519,22 @@ def _cdr_forcing_from_netcdf(path: str | Path, grid: Any) -> Any:
                 if "tracer_name" in ds.coords
                 else None
             )
+            roles = [cdr_tracer_role(t) for t in tracer_names or ()]
+            feeding: dict[str, list[tuple[int, str, str]]] = {}
+            if any(roles):
+                if "tracer_release" not in ds.coords:
+                    raise ValueError(
+                        "generated CDR tracers but no 'tracer_release' "
+                        "coordinate -- the file predates roms-tools 5.1"
+                    )
+                for j, release in enumerate(ds["tracer_release"].values):
+                    if (role := roles[j]) is not None:
+                        feeding.setdefault(str(release), []).append((j, *role))
+            marbl_columns = [
+                (tn, j)
+                for j, (tn, role) in enumerate(zip(tracer_names or (), roles))
+                if role is None
+            ]
             is_tracer_perturbation = "cdr_trcflx" in ds.data_vars
             is_volume = "cdr_volume" in ds.data_vars
             if not (is_tracer_perturbation or is_volume):
@@ -2278,10 +2553,16 @@ def _cdr_forcing_from_netcdf(path: str | Path, grid: Any) -> Any:
                     "hsc": float(ds["cdr_hsc"].isel(ncdr=i).item()),
                     "vsc": float(ds["cdr_vsc"].isel(ncdr=i).item()),
                     "times": times,
+                    "tracer_set": feeding[name][0][1] if name in feeding else "marbl",
                 }
                 if is_tracer_perturbation:
                     var = ds["cdr_trcflx"].isel(ncdr=i)
-                    if tracer_names is not None and "ALK" in tracer_names:
+                    if name in feeding:
+                        tracer_fluxes = {
+                            key: var.isel(ntracers=j).values.tolist()
+                            for j, _, key in feeding[name]
+                        }
+                    elif tracer_names is not None and "ALK" in tracer_names:
                         # ALK-only: this reconstruction only feeds the plot
                         # widget's "Tracer flux (ALK)" option.
                         idx = tracer_names.index("ALK")
@@ -2289,7 +2570,7 @@ def _cdr_forcing_from_netcdf(path: str | Path, grid: Any) -> Any:
                     elif tracer_names is not None:
                         tracer_fluxes = {
                             tn: var.isel(ntracers=j).values.tolist()
-                            for j, tn in enumerate(tracer_names)
+                            for tn, j in marbl_columns
                         }
                     elif "ntracers" in var.dims:
                         # No tracer_name coordinate at all -- can't identify the
@@ -2308,9 +2589,14 @@ def _cdr_forcing_from_netcdf(path: str | Path, grid: Any) -> Any:
                     volume_fluxes = ds["cdr_volume"].isel(ncdr=i).values.tolist()
                     tracer_var = ds.get("cdr_tracer")
                     if tracer_var is not None and tracer_names:
+                        columns = (
+                            [(key, j) for j, _, key in feeding[name]]
+                            if name in feeding
+                            else marbl_columns
+                        )
                         tracer_concentrations = {
                             tn: tracer_var.isel(ncdr=i, ntracers=j).values.tolist()
-                            for j, tn in enumerate(tracer_names)
+                            for tn, j in columns
                         }
                     else:
                         tracer_concentrations = {}
@@ -2721,6 +3007,8 @@ class _ForcingEditor:
             show(w["esper_method"], name == "ESPER")
         if "esper_equation" in w:
             show(w["esper_equation"], name == "ESPER")
+        if "esper_salinity_conditioning" in w:
+            show(w["esper_salinity_conditioning"], name == "ESPER")
         # A 'constants' source takes no path (SourceSpec._constants_only_for_
         # constants_source forbids pairing them) -- gated on the "constants" key's
         # presence, which only ic_bgc/boundary_bgc rows carry, so this never
@@ -3396,6 +3684,12 @@ class _ForcingEditor:
             src["esper_method"] = w["esper_method"].value
         if "esper_equation" in w and w["esper_equation"].value and name_val == "ESPER":
             src["esper_equation"] = int(w["esper_equation"].value)
+        if (
+            "esper_salinity_conditioning" in w
+            and w["esper_salinity_conditioning"].value
+            and name_val == "ESPER"
+        ):  # Checkbox: unchecked = the model default (off), emitted by neither side
+            src["esper_salinity_conditioning"] = True
         item = {"source": src}
         if "type" in w:
             item["type"] = w["type"].value
@@ -3711,9 +4005,9 @@ class _ForcingEditor:
 
 # Preselected in the Model dropdown when present in the catalog (falls back to
 # the first catalog model otherwise): it's the newest tagged-release ModelSpec
-# (ucla-roms 0.10.1). 'pio-dev' (ucla-roms branch `main`) remains available in the
+# (ucla-roms 0.11.0). 'pio-dev' (ucla-roms branch `main`) remains available in the
 # catalog but is no longer the default.
-_DEFAULT_MODEL = "roms-marbl-0.10-default"
+_DEFAULT_MODEL = "roms-marbl-0.11-default"
 
 # Preselected in the Output dropdown when present in the catalog (falls back to
 # the first catalog spec otherwise). 'daily-restarts' conforms to the
@@ -3727,6 +4021,10 @@ _DEFAULT_OUTPUT_SPEC = "daily-restarts"
 # position would silently change every user's default whenever a newly bundled
 # ForcingSpec happens to sort first.
 _DEFAULT_FORCING_SPEC = "glorys-era5-unified"
+
+# The same default for a run without MARBL (bgc_mode "none"/"cdr_lite"): the
+# resolver rejects any BGC forcing there, which _DEFAULT_FORCING_SPEC carries.
+_DEFAULT_PHYSICS_FORCING_SPEC = "glorys-era5-physics"
 
 _GRID_INT = ("nx", "ny", "N")
 _GRID_FLOAT = ("size_x", "size_y", "center_lon", "center_lat", "rot")
@@ -4357,15 +4655,9 @@ class ForgeBlueprintWizard:
         # --- forcing spec (ForcingSpec selection + add/remove/edit editor) ---
         # A ForcingSpec must always be explicitly selected -- ModelSpec no longer
         # embeds a default forcing.
-        _forcing_names = list(self.catalog.forcing_names)
         self.forcing_dd = W.Dropdown(
-            options=self._dd_options(_forcing_names, "forcing"),
-            # Prefer the bundled default explicitly -- see _DEFAULT_FORCING_SPEC.
-            value=(
-                _DEFAULT_FORCING_SPEC
-                if _DEFAULT_FORCING_SPEC in _forcing_names
-                else (_forcing_names[0] if _forcing_names else None)
-            ),
+            options=self._dd_options(list(self.catalog.forcing_names), "forcing"),
+            value=self._default_forcing_spec(self._model_default_bgc_mode()),
             description="Forcing:",
             style={"description_width": "110px"},
             tooltip="Select a named ForcingSpec from the catalog to seed all forcing "
@@ -4683,8 +4975,8 @@ class ForgeBlueprintWizard:
         self.cdr_plot_box.layout.display = "none"  # only for simple/yaml/netcdf
 
         # --- output settings spec (OutputSpec selection) ---
-        # The output sections themselves are edited in the Advanced settings accordion;
-        # this dropdown selects a named OutputSpec that seeds those sections. An
+        # The output streams themselves are edited in the Output card below this
+        # dropdown; it selects a named OutputSpec that seeds those streams. An
         # OutputSpec must always be explicitly selected -- ModelSpec no longer embeds
         # default output settings.
         _output_names = list(self.catalog.output_names)
@@ -4705,13 +4997,14 @@ class ForgeBlueprintWizard:
 
         # --- advanced settings editor (built lazily on first rebuild) ---
         self.editor: _SettingsEditor | None = None
-        self._editor_model: str | None = None
-        # The RunTimeSettings variant the editor was last built against -- rebuilt
-        # not only on a model switch but also when the effective ucla-roms ref
-        # crosses a schema boundary (e.g. editing the roms_ref override across the
-        # 0.5.0 line while keeping the same ModelSpec selected).
-        self._editor_settings_cls: type[BaseModel] | None = None
+        # What the editor was built for (None while there is none): rebuilt not only
+        # on a model switch but also when the effective ucla-roms ref crosses a schema
+        # boundary (e.g. editing the roms_ref override across the 0.5.0 line while
+        # keeping the same ModelSpec selected), or the BGC mode or nesting role change.
+        self._editor_key: _EditorKey | None = None
         self.editor_box = W.VBox([])  # placeholder; filled with the editor's accordion
+        # ... and the Output card's body, filled with the editor's output_box.
+        self.output_editor_box = W.VBox([])
         # sparse manual overrides layer: (section, field|None) -> value
         self._overrides: dict[Any, Any] = {}
         self._syncing = False  # True while pushing composed values into editor widgets
@@ -4862,7 +5155,15 @@ class ForgeBlueprintWizard:
         self.sticky_bar.add_class("forge-sticky-html")
         self.card_chips: dict[str, Any] = {
             key: W.HTML("")
-            for key in ("model", "grid", "forcing", "run", "advanced", "review")
+            for key in (
+                "model",
+                "grid",
+                "forcing",
+                "run",
+                "output",
+                "advanced",
+                "review",
+            )
         }
         self.grid_lock_banner = components.banner_widget(
             W,
@@ -4938,6 +5239,7 @@ class ForgeBlueprintWizard:
         self.model_dd.observe(self._on_model_change, names="value")
         self.bgc_dd.observe(self._sync_marbl_ref_visibility, names="value")
         self.bgc_dd.observe(self._sync_carbonate_sensitivity_visibility, names="value")
+        self.bgc_dd.observe(self._on_bgc_mode, names="value")
         self.cs_source_dd.observe(
             self._sync_carbonate_sensitivity_visibility, names="value"
         )
@@ -4959,7 +5261,6 @@ class ForgeBlueprintWizard:
             self.use_pio_chk,
             self.auto_tiling_chk,
             self.n_cores,
-            self.bgc_dd,
             self.cs_source_dd,
             self.roms_ref,
             self.marbl_ref,
@@ -5358,7 +5659,9 @@ class ForgeBlueprintWizard:
     def _on_model_change(self, _change):
         # a different model has different defaults -> existing overrides no longer apply.
         # Forcing/Output are independent catalog dimensions from the model (a ForcingSpec/
-        # OutputSpec doesn't reference a model), so switching models never touches them.
+        # OutputSpec doesn't reference a model), so switching models never re-picks them
+        # -- except that an untouched default ForcingSpec follows the new model's
+        # declared bgc_mode, via the bgc_dd change below (see _on_bgc_mode).
         if getattr(self, "_suspended", False):
             return
         self._overrides = {}
@@ -5530,6 +5833,44 @@ class ForgeBlueprintWizard:
         """
         return self.roms_ref.value.strip() or self._model_default_roms_ref() or None
 
+    def _default_forcing_spec(self, bgc_mode: str) -> str | None:
+        """The ForcingSpec preselected for *bgc_mode*: the named bundled default
+        when the catalog has it (see ``_DEFAULT_FORCING_SPEC``), else the plain
+        default, else the first spec.
+        """
+        names = list(self.catalog.forcing_names)
+        preferred = (
+            _DEFAULT_FORCING_SPEC
+            if bgc_mode == "marbl"
+            else _DEFAULT_PHYSICS_FORCING_SPEC
+        )
+        for name in (preferred, _DEFAULT_FORCING_SPEC):
+            if name in names:
+                return name
+        return names[0] if names else None
+
+    def _forcing_modified(self) -> bool:
+        """Whether the forcing editor deviates from the last catalog pick."""
+        editor = self._forcing_editor
+        return (
+            editor is not None
+            and self._forcing_seed is not None
+            and editor.gather() != self._forcing_seed
+        )
+
+    @property
+    def _active_overrides(self) -> dict[Any, Any]:
+        """The overrides that apply in the selected BGC mode -- the only ones that
+        reach the blueprint, the saved file and the counts. ``self._overrides`` is
+        the user's whole record, which keeps what a mode switch hides, so switching
+        back brings it back.
+        """
+        return {
+            (section, field): value
+            for (section, field), value in self._overrides.items()
+            if _applies_in(section, field, self.bgc_dd.value)
+        }
+
     def _build_forcing_editor(self, base_inputs: dict[str, Any]):
         self._forcing_editor = _ForcingEditor(
             self.W, base_inputs, on_change=self._on_forcing_change
@@ -5569,6 +5910,24 @@ class ForgeBlueprintWizard:
             )
         self._forcing_seed = self._forcing_editor.gather()
         self._rebuild()
+
+    def _on_bgc_mode(self, change) -> None:
+        """A BGC mode change re-resolves once. An untouched default ForcingSpec
+        follows the mode (the BGC-carrying default for MARBL, the physics-only one
+        otherwise); a hand-edited or non-default forcing is left alone.
+        """
+        if getattr(self, "_suspended", False) or self._syncing:
+            return
+        old_default = self._default_forcing_spec(change["old"])
+        new_default = self._default_forcing_spec(change["new"])
+        if (
+            self.forcing_dd.value == old_default
+            and new_default != old_default
+            and not self._forcing_modified()
+        ):
+            self.forcing_dd.value = new_default  # _on_forcing_spec rebuilds
+        else:
+            self._rebuild()
 
     def _on_forcing_change(self):
         # composition.forcing.modified is derived in _rebuild() by comparing the
@@ -5630,7 +5989,7 @@ class ForgeBlueprintWizard:
         its freshly-written catalog file (``new_name``) reproduce the exact same
         resolved blueprint currently shown (``self.config``)?
 
-        Reads ``self._gather()``/``self._overrides``/``self.catalog`` only --
+        Reads ``self._gather()``/``self._active_overrides``/``self.catalog`` only --
         mutates nothing on the wizard. Compares ``content_hash()``, which covers
         exactly the results-affecting data (excludes identity/composition/
         provenance/working_dir -- see ``ForgeBlueprint._HASH_EXCLUDE``), so a
@@ -5640,7 +5999,7 @@ class ForgeBlueprintWizard:
         if self.config is None:
             return False
         kw = self._gather()
-        overrides2 = dict(self._overrides)
+        overrides2 = self._active_overrides
         try:
             if spec == "output":
                 kw["output_settings"] = self.catalog.output_data(new_name)
@@ -6243,13 +6602,31 @@ class ForgeBlueprintWizard:
         self._invalidate_cdr_plot_cache()
         self._rebuild()
 
+    def _resolved_cdr_dict(self, current: dict[str, Any]) -> dict[str, Any]:
+        """``current`` (a :meth:`_current_cdr_dict`) with ``cdr_forcing`` as the
+        resolver will hand it to roms-tools: under ``bgc_mode: cdr_lite``, with
+        the tracer set it defaults (``with_cdr_lite_tracer_set`` decides which
+        modes that is). The plot builds from this, so what it shows is what
+        will be generated.
+        """
+        if self.bgc_dd.value != "cdr_lite":
+            return current
+        spec = with_cdr_lite_tracer_set(CdrSpec(**current))
+        return {**current, "cdr_forcing": spec.cdr_forcing}
+
     def _cdr_plot_inputs_fingerprint(self) -> tuple[str, tuple]:
         """A cheap, comparable snapshot of everything the CDR plot depends on:
-        the current CDR selection (mode + compiled/attached config) and the grid
-        geometry the ``rt.CDRForcing`` would be built against.
+        the CDR selection it builds from (mode + compiled/attached config, as
+        resolved for the BGC mode) and the grid geometry the ``rt.CDRForcing``
+        would be built against.
         """
+        selection = self._current_cdr_dict()
+        try:
+            selection = self._resolved_cdr_dict(selection)
+        except ValueError:
+            pass  # incomplete or invalid selection: building the plot reports it
         return (
-            repr(self._current_cdr_dict()),
+            repr(selection),
             tuple(sorted((k, repr(w.value)) for k, w in self.grid_w.items())),
         )
 
@@ -6463,8 +6840,10 @@ class ForgeBlueprintWizard:
                     self.bgc_dd.value == "cdr_lite"
                     and "tracer_name" in ds.coords
                     and not any(
-                        str(name).startswith("CDR_")
-                        for name in ds["tracer_name"].values
+                        role is not None and role[0] == "cdr_lite"
+                        for role in map(
+                            cdr_tracer_role, map(str, ds["tracer_name"].values)
+                        )
                     )
                 ):
                     warning += (
@@ -6667,12 +7046,11 @@ class ForgeBlueprintWizard:
         mode = self.cdr_mode_dd.value
         current = self._current_cdr_dict()
         grid = self._build_grid_from_widgets()
-        if mode == "simple":
-            cdr = rt.CDRForcing(grid=grid, **current["cdr_forcing"])
-        elif mode == "yaml":
+        if mode in ("simple", "yaml"):
             if not current["cdr_forcing"]:
                 raise ValueError("No CDR forcing uploaded yet.")
-            cdr = rt.CDRForcing(grid=grid, **current["cdr_forcing"])
+            forcing = self._resolved_cdr_dict(current)["cdr_forcing"]
+            cdr = rt.CDRForcing(grid=grid, **forcing)
         elif mode == "netcdf":
             cff = current["cdr_forcing_file"]
             if not cff:
@@ -6686,17 +7064,20 @@ class ForgeBlueprintWizard:
 
     def _sync_cdr_plot_release_options(self) -> None:
         """After a (re)build, refresh the release dropdown (shown only when the
-        forcing has more than one release) and hide "Tracer flux (ALK)" for a
+        forcing has more than one release) and hide the tracer flux option for a
         volume-type forcing (``plot_tracer_flux`` raises for those -- ALK-only
-        per the CDR Overhaul design brief).
+        per the CDR Overhaul design brief). A forcing with generated tracers
+        (cdr_lite/passive) has no ``ALK`` tracer, so its option plots the
+        selected release's own tracer instead.
         """
         cdr = self._cdr_plot_object
         names = [r.name for r in cdr.releases]
         is_volume = cdr.release_type == "volume"
+        flux_label = "Tracer flux" if cdr.release_tracers else "Tracer flux (ALK)"
         options = [
             ("Release locations", "locations"),
             ("Distribution", "distribution"),
-            *([] if is_volume else [("Tracer flux (ALK)", "tracer_flux")]),
+            *([] if is_volume else [(flux_label, "tracer_flux")]),
         ]
         with self._suspend():
             self.cdr_plot_release_dd.options = names
@@ -6726,7 +7107,10 @@ class ForgeBlueprintWizard:
         release_name = (
             self.cdr_plot_release_dd.value if self.cdr_plot_release_dd.options else None
         )
-        key = (plot_type, release_name if plot_type == "distribution" else None)
+        key = (
+            plot_type,
+            release_name if plot_type in ("distribution", "tracer_flux") else None,
+        )
         cached = self._cdr_plot_cache.get(key)
         if cached is None:
             import io
@@ -6747,7 +7131,15 @@ class ForgeBlueprintWizard:
                         raise ValueError("No release to plot a distribution for.")
                     cdr.plot_distribution(release_name)
                 elif plot_type == "tracer_flux":
-                    cdr.plot_tracer_flux("ALK")
+                    # A generated-tracer release plots its own tracer; a MARBL
+                    # one (alone or beside generated ones) plots ALK.
+                    tracer = (cdr.release_tracers.get(release_name) or ("ALK",))[0]
+                    only = (
+                        {}
+                        if release_name is None
+                        else {"release_names": [release_name]}
+                    )
+                    cdr.plot_tracer_flux(tracer, **only)
                 else:
                     raise ValueError(f"Unknown CDR plot type {plot_type!r}.")
                 fig = plt.gcf()
@@ -7021,30 +7413,58 @@ class ForgeBlueprintWizard:
         return loaded_problems
 
     # ---- gather + resolve ----------------------------------------------------
-    def _gather(self) -> dict[str, Any]:
+    def _base_grid_kwargs(self) -> dict[str, Any]:
+        """The main grid's generation kwargs, read from the grid widgets.
+
+        ``{}`` while a user-provided grid file is attached: it forbids the
+        generation-geometry keys alongside it
+        (``Domain._grid_file_excludes_generation_geometry``), so ``grid_file=``/
+        ``grid=`` carry the grid instead.
+        """
         gk: dict[str, Any] = {}
-        if self._grid_file is None:
-            for k in _GRID_INT:
-                gk[k] = int(self.grid_w[k].value)
-            for k in _GRID_FLOAT:
+        if self._grid_file is not None:
+            return gk
+        for k in _GRID_INT:
+            gk[k] = int(self.grid_w[k].value)
+        for k in _GRID_FLOAT:
+            gk[k] = float(self.grid_w[k].value)
+        if self.scoord_chk.value:
+            for k in _SCOORD:
                 gk[k] = float(self.grid_w[k].value)
-            if self.scoord_chk.value:
-                for k in _SCOORD:
-                    gk[k] = float(self.grid_w[k].value)
-            # hmin + close_narrow_channels + mask_shapefile injected into grid_kwargs
-            if self.hmin.value != 5.0:
-                gk["hmin"] = float(self.hmin.value)
-            if self.close_narrow_chk.value:
-                gk["close_narrow_channels"] = True
-            if self.mask_shapefile.value.strip():
-                gk["mask_shapefile"] = self.mask_shapefile.value.strip()
-        # else: a user-provided grid file forbids the generation-geometry keys
-        # above alongside it (Domain._grid_file_excludes_generation_geometry) --
-        # grid_kwargs stays {} and grid_file=/grid= (below) carry the grid instead.
+        # hmin + close_narrow_channels + mask_shapefile injected into grid_kwargs
+        if self.hmin.value != 5.0:
+            gk["hmin"] = float(self.hmin.value)
+        if self.close_narrow_chk.value:
+            gk["close_narrow_channels"] = True
+        if self.mask_shapefile.value.strip():
+            gk["mask_shapefile"] = self.mask_shapefile.value.strip()
+        return gk
+
+    def _attached_grid(self) -> Any:
+        """The attached grid file's loaded ``roms_tools.Grid``, or ``None`` when no
+        grid file is attached.
+        """
+        if self._grid_file_grid is not None:
+            return self._grid_file_grid
+        if self._grid_file is not None:
+            # Attached but not currently loaded (a reattach failed -- e.g. the
+            # file went missing since it was recorded -- see _reattach_grid_file).
+            # Must not silently fall through to building a grid from whatever
+            # stale/default values happen to be sitting in the (locked, but
+            # still holding old values) grid_w widgets -- that would plot/derive
+            # boundaries and v_sponge from a completely different, wrong grid
+            # with no indication anything is amiss.
+            raise RuntimeError(
+                "grid_file is attached but failed to (re)load -- see "
+                "grid_file_status; re-attach a valid file first."
+            )
+        return None
+
+    def _gather(self) -> dict[str, Any]:
         kw = dict(
             model_dir=self.catalog.model_dir(self.model_dd.value),
             grid_name=self.grid_name.value,
-            grid_kwargs=gk,
+            grid_kwargs=self._base_grid_kwargs(),
             open_boundaries={d: w.value for d, w in self.bnd.items()},
             partitioning=(
                 {"auto_tiling": True, "n_cores": int(self.n_cores.value)}
@@ -7100,10 +7520,8 @@ class ForgeBlueprintWizard:
             # "file not found", surfacing loudly via _rebuild()'s Invalid status.
             if self._grid_file_grid is not None:
                 kw["grid"] = self._grid_file_grid
-        # Nesting is unsupported alongside a user-provided grid file (see
-        # Domain._grid_file_excludes_generation_geometry) -- omit both blocks
-        # while attached even if the (now-disabled) checkboxes are still checked.
-        if self.nest_enable.value and self._grid_file is None:
+        is_parent, is_child = self._nesting_role()
+        if is_parent:
             ck: dict[str, Any] = {}
             for k in _GRID_INT:
                 ck[k] = int(self.child_w[k].value)
@@ -7118,7 +7536,7 @@ class ForgeBlueprintWizard:
             kw["metadata_child"] = {"period": float(self.nest_period.value)}
             if self.nest_pressure_fluxes.value:
                 kw["nesting_include_pressure_fluxes"] = True
-        if self.parent_enable.value and self._grid_file is None:
+        if is_child:
             pk: dict[str, Any] = {}
             for k in _GRID_INT:
                 pk[k] = int(self.parent_w[k].value)
@@ -7134,7 +7552,7 @@ class ForgeBlueprintWizard:
         if self._forcing_editor is None:
             raise RuntimeError("_gather called before the forcing editor was built")
         kw["forcing_inputs"] = self._forcing_editor.gather()
-        if self.parent_enable.value and self._grid_file is None:
+        if is_child:
             # Durable guarantee (authoritative, independent of forcing-editor UI
             # state): a child grid (has a parent) receives its boundary values
             # from the parent's nesting.nc extraction, not reanalysis boundary
@@ -7157,7 +7575,13 @@ class ForgeBlueprintWizard:
                 if k in child:
                     w.value = child[k]
             self._set_nested_topo_widgets("child", child)
-            period = (cfg.domain.metadata_child or {}).get("period")
+            # The effective extraction period: an older file may carry an Advanced
+            # extract_period override that differs from metadata_child.period.
+            period = (cfg.model_settings.get("extract_data") or {}).get(
+                "extract_period"
+            )
+            if period is None:
+                period = (cfg.domain.metadata_child or {}).get("period")
             if period is not None:
                 self.nest_period.value = float(period)
         self.nest_pressure_fluxes.value = bool(
@@ -7170,6 +7594,47 @@ class ForgeBlueprintWizard:
                 if k in parent:
                     w.value = parent[k]
             self._set_nested_topo_widgets("parent", parent)
+
+    def _nesting_role(self) -> tuple[bool, bool]:
+        """``(is_parent, is_child)`` for the grid being edited, as the nesting
+        checkboxes request it. Nesting is unsupported alongside a user-provided grid
+        file (see ``Domain._grid_file_excludes_generation_geometry``), so an attached
+        file ignores both even if the (now-disabled) checkboxes are still checked.
+        Read by ``_gather`` (what is resolved) and by the settings editor's key, so
+        the Output card follows a nesting toggle even before the blueprint is valid.
+        """
+        if self._grid_file is not None:
+            return False, False
+        return bool(self.nest_enable.value), bool(self.parent_enable.value)
+
+    def _hide_stale_editor(self) -> None:
+        """After a failed resolve, replace an editor built for another model or BGC
+        mode, or for another nesting role, with a placeholder (the next valid resolve
+        rebuilds it): it would keep showing streams that no longer apply, e.g. the
+        MARBL ones after a switch to ``cdr_lite`` that still lacks its CDR forcing, or
+        no child-grid extraction after "This grid is a parent" is ticked on an invalid
+        blueprint. Overrides are applied after the resolve, never fed to it, so no
+        failure comes from an editor value and nothing is lost; the user's record
+        stays. Everything in the key but ``settings_cls`` is known without a resolved
+        config; an editor still matching it stays.
+        """
+        key = self._editor_key
+        if key is None or (key.model, key.bgc_mode, key.is_parent, key.is_child) == (
+            self.model_dd.value,
+            self.bgc_dd.value,
+            *self._nesting_role(),
+        ):
+            return
+        placeholder = components.banner_widget(
+            self.W,
+            "info",
+            "Settings for this selection appear once the blueprint is valid — see "
+            "the status above.",
+        )
+        self.editor_box.children = [placeholder]
+        self.output_editor_box.children = [placeholder]
+        self.editor = None
+        self._editor_key = None
 
     def _rebuild(self, *_):
         if getattr(self, "_suspended", False):
@@ -7194,6 +7659,7 @@ class ForgeBlueprintWizard:
             self.derived.value = "<i>Set start and end dates…</i>"
             self.download_link.value = ""
             self.download_link_review.value = ""
+            self._hide_stale_editor()
             self._update_status(None)
             return
         try:
@@ -7204,7 +7670,11 @@ class ForgeBlueprintWizard:
             self.download_link_review.value = ""
             with self.preview:
                 print(f"{type(exc).__name__}: {exc}")
-            error = f"{type(exc).__name__}: {exc}".splitlines()[0][:200]
+            lines = f"{type(exc).__name__}: {exc}".splitlines()
+            error = lines[0][:200]
+            if len(lines) > 1 or len(lines[0]) > len(error):
+                error += " — full message in the preview below"
+            self._hide_stale_editor()
             self._update_status(None, error=error)
             return
 
@@ -7216,36 +7686,41 @@ class ForgeBlueprintWizard:
             with self._suspend():
                 self.v_sponge.value = float(cfg.domain.v_sponge)
 
-        # Advanced settings editor: every section is editable. The resolver composes
-        # a baseline from the specs; the user's manual edits are a sparse overrides
-        # layer applied on top (effective = composed ⊕ overrides). The editor is
-        # rebuilt when the *model* changes (its field set depends on the model) or
-        # when the effective ucla-roms ref crosses a schema boundary (e.g. editing
-        # the roms_ref override across the 0.4.0, 0.5.0, 0.6.0, or 0.7.0 line with
-        # the same model selected) -- see run_time_settings_for_ref /
-        # RunTimeSettingsV0_4_0 / RunTimeSettingsV0_5_0 / RunTimeSettingsV0_6_0 /
-        # RunTimeSettingsV0_7_0.
+        # Advanced/Output settings editor: every section is editable. The resolver
+        # composes a baseline from the specs; the user's manual edits are a sparse
+        # overrides layer applied on top (effective = composed ⊕ overrides). The
+        # editor is rebuilt when the *model* changes (its field set depends on the
+        # model), when the BGC mode or the grid's nesting role changes (which output
+        # streams apply), or when the effective ucla-roms ref crosses a schema
+        # boundary (e.g. editing the roms_ref override across the 0.4.0, 0.5.0, 0.6.0,
+        # or 0.7.0 line with the same model selected) -- see
+        # run_time_settings_for_ref / RunTimeSettingsV0_4_0 / RunTimeSettingsV0_5_0 /
+        # RunTimeSettingsV0_6_0 / RunTimeSettingsV0_7_0.
         composed = cfg.model_settings
         # Computed once per rebuild (each call re-reads the ModelSpec YAML) and
         # reused for the validation call below.
         effective_roms_ref = self._effective_roms_ref()
         settings_cls = _wizard_settings_cls_for_ref(effective_roms_ref)
-        if (
-            self.editor is None
-            or self._editor_model != self.model_dd.value
-            or self._editor_settings_cls is not settings_cls
-        ):
+        is_parent, is_child = self._nesting_role()
+        key = _EditorKey(
+            self.model_dd.value, settings_cls, self.bgc_dd.value, is_parent, is_child
+        )
+        if self.editor is None or self._editor_key != key:
             self.editor = _SettingsEditor(
                 self.W,
                 composed,
                 on_edit=self._on_editor_edit,
                 settings_cls=settings_cls,
+                bgc_mode=key.bgc_mode,
+                is_parent=is_parent,
+                is_child=is_child,
             )
-            self._editor_model = self.model_dd.value
-            self._editor_settings_cls = settings_cls
+            self._editor_key = key
             self.editor_box.children = [self.editor.accordion]
+            self.output_editor_box.children = [self.editor.output_box]
 
-        effective = _apply_overrides(composed, self._overrides)
+        active_overrides = self._active_overrides
+        effective = _apply_overrides(composed, active_overrides)
         self._syncing = True
         try:
             self.editor.sync(effective)  # display effective; don't re-record as edits
@@ -7285,10 +7760,7 @@ class ForgeBlueprintWizard:
             and self._domain_seed is not None
             and self._domain_snapshot() != self._domain_seed
         )
-        forcing_modified = (
-            self._forcing_seed is not None
-            and self._forcing_editor.gather() != self._forcing_seed
-        )
+        forcing_modified = self._forcing_modified()
         cdr_modified = (
             self.cdr_dd.value != "<custom>"
             and self._cdr_seed is not None
@@ -7297,7 +7769,7 @@ class ForgeBlueprintWizard:
 
         comp = cfg.composition.model_copy(
             update={
-                "overrides": _overrides_nested(self._overrides),
+                "overrides": _overrides_nested(active_overrides),
                 "model": cfg.composition.model.model_copy(
                     update={"modified": model_modified}
                 ),
@@ -7426,35 +7898,48 @@ class ForgeBlueprintWizard:
             summary = " · ".join(names) if names else "none"
         return summary[:60]
 
-    def _retitle_advanced_editor(self) -> None:
-        """Refresh each Advanced-settings pane's accordion title with its field
-        count and how many of its fields carry a manual override (see
-        `_SettingsEditor._pane_sections`/`_section_fields`).
+    def _retitle_settings_editor(self) -> None:
+        """Refresh each settings container's titles with its field count and how many
+        of its fields carry a manual override: the Advanced panes' and "More output
+        streams" accordion titles, and the Output card's section headers (see
+        `_SettingsEditor._group_fields`).
         """
         editor = self.editor
         if editor is None:
             return
-        for i, (title, sections) in enumerate(editor._pane_sections.items()):
-            fields_by_section = [editor._section_fields.get(s, []) for s in sections]
-            n_fields = sum(len(fields) for fields in fields_by_section)
-            pane_keys = {
-                (s, f) for s, fields in zip(sections, fields_by_section) for f in fields
-            }
-            n_mod = sum(1 for k in self._overrides if k in pane_keys)
-            editor.accordion.set_title(
-                i,
-                components.accordion_title(
-                    title,
-                    f"{n_fields} settings",
-                    f"{n_mod} modified" if n_mod else "all defaults",
-                ),
+
+        active = self._active_overrides
+
+        def counts(fields_by_section: dict[str, list[str | None]]) -> tuple[int, int]:
+            keys = {(s, f) for s, fields in fields_by_section.items() for f in fields}
+            return (
+                sum(len(fields) for fields in fields_by_section.values()),
+                sum(1 for k in active if k in keys),
+            )
+
+        def title(name: str, fields_by_section: dict[str, list[str | None]]) -> str:
+            n_fields, n_mod = counts(fields_by_section)
+            return components.accordion_title(
+                name,
+                f"{n_fields} settings",
+                f"{n_mod} modified" if n_mod else "all defaults",
+            )
+
+        for i, name in enumerate(editor._pane_sections):
+            editor.accordion.set_title(i, title(name, editor._group_fields[name]))
+        if more := editor._group_fields.get(_OUTPUT_MORE_TITLE):
+            editor.more_streams.set_title(0, title(_OUTPUT_MORE_TITLE, more))
+        for section, fields in editor._group_fields.get(_OUTPUT_CARD, {}).items():
+            _n_fields, n_mod = counts({section: fields})
+            editor._headers[(_OUTPUT_CARD, section)].value = editor.header_html(
+                _OUTPUT_CARD, section, n_mod
             )
 
     def _update_status(
         self, cfg: ForgeBlueprint | None, error: str | None = None
     ) -> None:
-        """Refresh the sticky bar, per-card status chips, and the forcing/advanced
-        accordion titles from the outcome of a `_rebuild` call.
+        """Refresh the sticky bar, per-card status chips, and the forcing/advanced/
+        output titles from the outcome of a `_rebuild` call.
 
         Called at the end of every `_rebuild` path: on success with the
         resolved ``cfg``; on a missing-dates or build/validation failure with
@@ -7515,9 +8000,18 @@ class ForgeBlueprintWizard:
             if forcing_modified
             else components.chip("At preset defaults", "def")
         )
+        # Placement, not OutputSpec ownership: the two chips partition the overrides.
+        active = self._active_overrides
+        n_output = sum(1 for key in active if _in_output_card(*key))
+        n_advanced = len(active) - n_output
+        chips["output"].value = (
+            components.chip(f"● {n_output} modified", "info")
+            if n_output
+            else components.chip("At preset defaults", "def")
+        )
         chips["advanced"].value = (
-            components.chip(f"● {len(self._overrides)} modified", "info")
-            if self._overrides
+            components.chip(f"● {n_advanced} modified", "info")
+            if n_advanced
             else components.chip("All defaults", "def")
         )
 
@@ -7532,7 +8026,7 @@ class ForgeBlueprintWizard:
         )
         if self._forcing_editor is not None:
             self._forcing_editor.retitle(self._forcing_summary)
-        self._retitle_advanced_editor()
+        self._retitle_settings_editor()
 
     def _refresh_download_links(self, cfg: ForgeBlueprint) -> None:
         """Point both download links at ``cfg``, stamped once so they agree.
@@ -7575,10 +8069,9 @@ class ForgeBlueprintWizard:
     def _on_compute_dt(self, _):
         self.dt_status.value = "<i>computing…</i>"
         try:
-            kw = self._gather()
-            kw["dt"] = None  # force CFL computation (builds the grid via roms_tools)
-            cfg = build_forge_blueprint(**kw)
-            self.dt.value = float(cfg.model_settings["time_stepping"]["dt"])
+            self.dt.value = float(
+                cfl_dt(self._base_grid_kwargs(), self._attached_grid())
+            )
             self.dt_status.value = (
                 f"<span style='color:#080'>dt = {self.dt.value:g} s (CFL)</span>"
             )
@@ -7596,37 +8089,13 @@ class ForgeBlueprintWizard:
         grid build (the live preview / ``_rebuild`` never does, so typing in
         the grid fields stays instant).
         """
-        if self._grid_file_grid is not None:
-            return self._grid_file_grid
-        if self._grid_file is not None:
-            # Attached but not currently loaded (a reattach failed -- e.g. the
-            # file went missing since it was recorded -- see _reattach_grid_file).
-            # Must not silently fall through to building a grid from whatever
-            # stale/default values happen to be sitting in the (locked, but
-            # still holding old values) grid_w widgets -- that would plot/derive
-            # boundaries and v_sponge from a completely different, wrong grid
-            # with no indication anything is amiss.
-            raise RuntimeError(
-                "grid_file is attached but failed to (re)load -- see "
-                "grid_file_status; re-attach a valid file first."
-            )
+        attached = self._attached_grid()
+        if attached is not None:
+            return attached
 
         from roms_tools import Grid
 
-        gk: dict[str, Any] = {}
-        for k in _GRID_INT:
-            gk[k] = int(self.grid_w[k].value)
-        for k in _GRID_FLOAT:
-            gk[k] = float(self.grid_w[k].value)
-        if self.scoord_chk.value:
-            for k in _SCOORD:
-                gk[k] = float(self.grid_w[k].value)
-        if self.hmin.value != 5.0:
-            gk["hmin"] = float(self.hmin.value)
-        if self.close_narrow_chk.value:
-            gk["close_narrow_channels"] = True
-        if self.mask_shapefile.value.strip():
-            gk["mask_shapefile"] = self.mask_shapefile.value.strip()
+        gk = self._base_grid_kwargs()
         topo, self._grid_build_topo_note = self._this_grid_plot_topography()
         if topo is not None:
             gk["topography_source"] = topo
@@ -7985,8 +8454,13 @@ class ForgeBlueprintWizard:
             )
             self.output_dd.value = name if ok else old_value
             if ok:
+                # The saved OutputSpec carries the active output overrides; one a
+                # mode switch hides was not saved, so it stays on the record.
+                active = self._active_overrides
                 self._overrides = {
-                    k: v for k, v in self._overrides.items() if not _is_output_key(*k)
+                    k: v
+                    for k, v in self._overrides.items()
+                    if k not in active or not _is_output_key(*k)
                 }
         if ok:
             self._rebuild()
@@ -8054,8 +8528,11 @@ class ForgeBlueprintWizard:
             )
             self.model_dd.value = name if ok else old_value
             if ok:
+                active = self._active_overrides
                 self._overrides = {
-                    k: v for k, v in self._overrides.items() if _is_output_key(*k)
+                    k: v
+                    for k, v in self._overrides.items()
+                    if k not in active or _is_output_key(*k)
                 }
         if ok:
             self._rebuild()
@@ -8330,8 +8807,8 @@ class ForgeBlueprintWizard:
     @property
     def widget(self):
         """The wizard's root widget: a ``forge-app``/``forge-wizard`` ``W.VBox``
-        of a sticky status bar, an intro line, and the seven cards (Start,
-        Model, Grid, Forcing, Run, Advanced, Review). Built once and cached in
+        of a sticky status bar, an intro line, and the eight cards (Start,
+        Model, Grid, Forcing, Run, Output, Advanced, Review). Built once and cached in
         ``self._root`` -- repeated access returns the same tree, so widgets
         placed in it keep their identity across a rebuild.
         """
@@ -8380,15 +8857,9 @@ class ForgeBlueprintWizard:
             W,
             "model",
             components.field_row(W, "model_dd", self.model_dd),
-            # bgc_dd's grid is placed before roms_ref/marbl_ref's so marbl_ref
+            # bgc_dd is placed before roms_ref/marbl_ref's grid so marbl_ref
             # (only relevant once bgc mode is "marbl") reads after bgc_dd.
-            components.field_grid(
-                W,
-                [
-                    components.field_row(W, "bgc_dd", self.bgc_dd),
-                    components.field_row(W, "output_dd", self.output_dd),
-                ],
-            ),
+            components.field_row(W, "bgc_dd", self.bgc_dd),
             components.field_grid(
                 W,
                 [
@@ -8661,11 +9132,20 @@ class ForgeBlueprintWizard:
             chips_widget=self.card_chips["run"],
         )
 
+        output_card = components.card(
+            W,
+            "output",
+            components.field_row(W, "output_dd", self.output_dd),
+            self.output_editor_box,
+            num=5,
+            chips_widget=self.card_chips["output"],
+        )
+
         advanced_card = components.card(
             W,
             "advanced",
             self.editor_box,
-            num=5,
+            num=6,
             chips_widget=self.card_chips["advanced"],
         )
 
@@ -8746,7 +9226,7 @@ class ForgeBlueprintWizard:
                 "<span style='color:#666'>ℹ To run this blueprint as part of a "
                 "workplan, build one on the Workplan page.</span>"
             ),
-            num=6,
+            num=7,
             chips_widget=self.card_chips["review"],
             required_chip=False,
         )
@@ -8761,6 +9241,7 @@ class ForgeBlueprintWizard:
                 grid_card,
                 forcing_card,
                 run_card,
+                output_card,
                 advanced_card,
                 review_card,
             ]

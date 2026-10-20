@@ -66,14 +66,13 @@ import re
 from collections import Counter
 from datetime import UTC, datetime
 from enum import StrEnum
-from importlib.metadata import PackageNotFoundError
-from importlib.metadata import version as _pkg_version
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal, get_args
 
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
+from cstar.base.provenance import package_version, package_versions, system_name
 from cstar.orchestration.models import (
     Blueprint,
     BlueprintIdentity,
@@ -92,17 +91,9 @@ if TYPE_CHECKING:
 
 def _package_version(package_name: str) -> str | None:
     """Best-effort installed version of ``package_name``, or ``None`` if it isn't
-    installed. No git-describe step is needed: both ``cstar-ocean`` and
-    ``roms-tools`` version themselves via ``setuptools_scm``, so an editable/dev
-    checkout's installed version already embeds commit info (e.g.
-    ``0.8.1.dev2+gcb931baef`` -- the same string ``cstar.__version__`` itself
-    resolves to, via this same ``importlib.metadata`` lookup on ``"cstar-ocean"``).
-    Never raises.
+    installed (see :func:`cstar.base.provenance.package_version`). Never raises.
     """
-    try:
-        return _pkg_version(package_name)
-    except PackageNotFoundError:
-        return None
+    return package_version(package_name)
 
 
 def _installed_version(package_name: str) -> str | None:
@@ -114,20 +105,12 @@ def _installed_version(package_name: str) -> str | None:
     return None if version is None else f"{package_name}=={version}"
 
 
-# The packages whose versions shape forge output.
-_GENERATION_PACKAGES = ("cstar-ocean", "roms-tools")
-
-
 def generation_versions() -> dict[str, str]:
     """The installed versions of the packages that shape forge output, keyed by
     package name (``{"cstar-ocean": "0.16.0", "roms-tools": "3.2.1"}``) -- the value
     of ``GeneratedBy.versions``. A package that isn't installed is left out.
     """
-    return {
-        name: version
-        for name in _GENERATION_PACKAGES
-        if (version := _package_version(name)) is not None
-    }
+    return package_versions()
 
 
 def _system_name() -> str:
@@ -137,13 +120,7 @@ def _system_name() -> str:
     configuration, so a host C-Star cannot identify must not stop a blueprint from
     being stamped.
     """
-    # Lazy: keeps importing the schema module light (see the module docstring).
-    from cstar.system.manager import HostNameEvaluator
-
-    try:
-        return HostNameEvaluator().name
-    except OSError:
-        return ""
+    return system_name()
 
 
 def new_generated_by(
@@ -481,12 +458,7 @@ def producer_ref(blueprint: ForgeBlueprint) -> BlueprintIdentity:
     Use this wherever a forge-emitted blueprint names its producer, so every
     record of the producer agrees.
     """
-    return BlueprintIdentity(
-        kind="Blueprint",
-        application=DEFAULT_APPLICATION,
-        name=blueprint.name,
-        content_hash=blueprint.content_hash(),
-    )
+    return BlueprintIdentity.of(blueprint)
 
 
 # The catalog spec kind each ``Composition`` entry records, in the order an
@@ -826,6 +798,20 @@ class SourceSpec(_Section):
     esper_equation: Literal[8, 16] | None = None
     """PyESPER predictor equation: 8 (salinity + temperature) or 16 (salinity only).
     Only valid when ``name == "ESPER"``; roms-tools defaults to 8 when unset."""
+    esper_salinity_conditioning: bool = Field(default=False, exclude_if=lambda v: not v)
+    """Blend the salinity PyESPER feeds its nets toward the WOA23 annual-mean
+    climatology below 31-34 PSU (raised cosine; bit-identical above) and dilute the
+    alkalinity and DIC estimates back to the model salinity. ESPER was fit to GLODAP
+    data with almost none below ~31 PSU, so at river-plume salinities it extrapolates
+    unphysically (silicate > 100 mmol/m^3, negative nutrients, DIC above ALK). ``True``
+    is only valid when ``name == "ESPER"``; it needs the CWorthy PyESPER fork at tag
+    ``v1.1.1+cworthy.1`` or later. Forge stages the one WOA23 file this needs
+    (dataset ``WOA_SALINITY``) and hands roms-tools its path.
+
+    ``False`` (the default, roms-tools' own) is **left out of saved blueprints and
+    the content hash** (``exclude_if``), so blueprints written before the field
+    existed keep their hash, and blueprints saved with it off still load on builds
+    that do not know it -- the same arrangement as an unset ``carbonate_sensitivity``."""
 
     @model_validator(mode="after")
     def _glorys_layout_only_for_glorys(self) -> SourceSpec:
@@ -851,10 +837,13 @@ class SourceSpec(_Section):
     def _esper_fields_only_for_esper_source(self) -> SourceSpec:
         is_esper = self.name.upper() == "ESPER"
         if (
-            self.esper_method is not None or self.esper_equation is not None
+            self.esper_method is not None
+            or self.esper_equation is not None
+            or self.esper_salinity_conditioning
         ) and not is_esper:
             raise ValueError(
-                "esper_method/esper_equation are only valid when name is 'ESPER'"
+                "esper_method/esper_equation/esper_salinity_conditioning are only "
+                "valid when name is 'ESPER'"
             )
         # No path requirement for ESPER: without one, roms-tools imports PyESPER
         # from the environment and PyESPER resolves its own data directories
@@ -1278,7 +1267,9 @@ class CdrSpec(_Section):
       C-Star's orchestrator to later replace with the real runtime path. Real
       CDR tracers exist at runtime under this mode, so it participates in the
       CDR-output consistency block (do_cdr_output/MARBL diagnostics/marbl
-      requirement) exactly like ``"simple"``/``"yaml"``/``"netcdf"``.
+      requirement) exactly like ``"simple"``/``"yaml"``/``"netcdf"``. Without
+      MARBL it needs ``bgc_mode: cdr_lite`` and ucla-roms >= 0.11.0, where the
+      runtime file names its tracers (see ``check_cdr_forcing_mode``).
     """
 
     mode: CdrMode = "none"
@@ -1557,6 +1548,29 @@ class ForgeBlueprint(Blueprint):
         from cstar.applications.forge.migration import migrate_forge_blueprint_data
 
         return migrate_forge_blueprint_data(data)
+
+    @model_validator(mode="after")
+    def _esper_conditioning_has_its_dataset(self) -> ForgeBlueprint:
+        """An ESPER source with ``esper_salinity_conditioning`` on needs the
+        ``WOA_SALINITY`` dataset staged. The resolver notes it automatically; a
+        hand-edited blueprint that only flipped the switch would otherwise fail deep
+        inside input generation, after every other dataset was staged.
+        """
+        sections = [self.forcing.initial_conditions, self.forcing.boundary]
+        wants = any(
+            item.source.name.upper() == "ESPER"
+            and item.source.esper_salinity_conditioning
+            for section in sections
+            if section is not None
+            for item in section.bgc_sources
+        )
+        if wants and "WOA_SALINITY" not in self.datasets:
+            raise ValueError(
+                "an ESPER source has esper_salinity_conditioning on but 'WOA_SALINITY' "
+                "is not in `datasets`; add it there (the resolver does this when the "
+                "blueprint is built from specs)."
+            )
+        return self
 
     @field_validator("name")
     @classmethod

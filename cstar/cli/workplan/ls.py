@@ -16,7 +16,7 @@ from rich.text import Text
 from cstar.base.env import max_concurrency
 from cstar.base.log import get_logger
 from cstar.cli.workplan.shared import console, load_workplans, refresh_disk_usage
-from cstar.entrypoint.utils import ARG_SIZE, ARG_SIZE_HELP
+from cstar.entrypoint.utils import ARG_FORMAT, ARG_FORMAT_HELP, ARG_SIZE, ARG_SIZE_HELP
 from cstar.orchestration.models import LEGACY_TRANSFORMED_NAME_SUFFIX
 from cstar.orchestration.orchestration import LiveWorkplan
 from cstar.orchestration.tracking import (
@@ -382,7 +382,7 @@ def ls_runs(
     ] = False,
     format: t.Annotated[
         FORMATS,
-        typer.Option("--format", help="Pass the desired output format."),
+        typer.Option(ARG_FORMAT, help=ARG_FORMAT_HELP),
     ] = "table",
     runid_filter: t.Annotated[
         str,
