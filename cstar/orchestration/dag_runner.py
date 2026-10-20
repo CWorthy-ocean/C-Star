@@ -20,7 +20,7 @@ from cstar.base.env import (
 from cstar.base.exceptions import CstarError, CstarExpectationFailed
 from cstar.base.log import get_logger
 from cstar.base.utils import slugify
-from cstar.entrypoint.utils import ARG_PRE_RUN
+from cstar.entrypoint.utils import ARG_CLOBBER, ARG_PRE_RUN, ARG_RUN_ID
 from cstar.execution.file_system import StateDirectoryManager, rotate_file
 from cstar.orchestration.compute_environment import (
     ComputeEnvironment,
@@ -472,7 +472,7 @@ async def prepare_workplan(
     user_variables: Mapping[str, str] | None = None,
     clobber_steps: "Sequence[str] | None" = None,
     pre_run: bool = False,
-) -> tuple[Workplan, Path, ExternalRuns, dict[str, StepFacts]]:
+) -> tuple[Workplan, Path, ExternalRuns]:
     """Load the workplan and apply any applicable transforms.
 
     Parameters
@@ -492,11 +492,10 @@ async def prepare_workplan(
 
     Returns
     -------
-    tuple[Workplan, Path, ExternalRuns, dict[str, StepFacts]]
-        Tuple containing the resulting workplan, the workplan file path, the
+    tuple[Workplan, Path, ExternalRuns]
+        Tuple containing the resulting workplan, the workplan file path, and the
         registry of external runs the workplan depends on, as refreshed while
-        preparing it, and the facts known about each authored step (see
-        `describe_steps`)
+        preparing it
 
     Raises
     ------
@@ -505,7 +504,6 @@ async def prepare_workplan(
         a step requests pre-run on an application that does not support it.
     """
     wp_orig = await asyncio.to_thread(deserialize, wp_path, Workplan)
-    facts = await asyncio.to_thread(describe_steps, wp_orig, wp_path.parent)
 
     fill_transform: TemplateFillTransform | None = None
     file_io_extras: list[Awaitable[int]] = []
@@ -569,7 +567,7 @@ async def prepare_workplan(
 
     _ = await asyncio.gather(*file_io)
 
-    return wp, persist_as, external, facts
+    return wp, persist_as, external
 
 
 class ExecutiveStepSummary(BaseModel):
@@ -1114,6 +1112,62 @@ async def on_status_changed(handle: ProcessHandle) -> None:
     await run_repo.update_workplan_run(handle.run_id, _apply)
 
 
+def refuse_edited_done_steps(
+    wp: Workplan,
+    manifest: RunManifest,
+    status: DagStatus,
+    facts: Mapping[str, StepFacts],
+    clobber_steps: "Sequence[str]",
+) -> None:
+    """Refuse to re-enter a run in which a `Done` step was edited and not clobbered.
+
+    Parameters
+    ----------
+    wp : Workplan
+        The authored workplan being re-entered.
+    manifest : RunManifest
+        The run's manifest, holding each step's recorded definition.
+    status : DagStatus
+        The run's step statuses, as loaded from its state.
+    facts : Mapping[str, StepFacts]
+        The facts known about each authored step (see `describe_steps`).
+    clobber_steps : Sequence[str]
+        Names or safe_names of the steps the user chose to re-run.
+
+    Raises
+    ------
+    CstarExpectationFailed
+        If a step that reached `Done` in this run now has a different definition
+        than the one recorded in the manifest and is not selected for clobber.
+    """
+    tokens = {x for token in clobber_steps if (x := token.strip())}
+    edited: list[str] = []
+    for step in wp.steps:
+        entry = manifest.step(step.name)
+        if entry is None:
+            continue
+        if not entry.definition_hash:
+            log.debug(f"Step {step.name!r} has no recorded definition; not checked")
+            continue
+        if status[step.name] is not Status.Done:
+            continue
+        current = facts.get(step.name)
+        if current is None or current.definition_hash == entry.definition_hash:
+            continue
+        if step.name in tokens or step.safe_name in tokens:
+            continue
+        edited.append(step.name)
+
+    if edited:
+        names = ", ".join(repr(name) for name in edited)
+        rerun = " ".join(f"{ARG_CLOBBER} {name}" for name in edited)
+        raise CstarExpectationFailed(
+            f"Steps {names} reached Done in run {manifest.run_id!r} under a "
+            f"different definition; pass {rerun} to re-run them, or "
+            f"{ARG_RUN_ID} <other-id> to start a new run"
+        )
+
+
 async def build_dag(
     wp_path: Path,
     run_id: str = "",
@@ -1150,6 +1204,9 @@ async def build_dag(
     ------
     NoPreparableStepsError
         If `pre_run` leaves no step to prepare.
+    CstarExpectationFailed
+        If the run's manifest cannot be read, or a step that reached Done was
+        edited and not clobbered.
     """
     if run_id:
         run_id = slugify(run_id)
@@ -1159,7 +1216,29 @@ async def build_dag(
     output_dir = StateDirectoryManager.data_dir(run_id)
 
     check_environment()
-    wp, prepared_wp_path, external, facts = await prepare_workplan(
+    wp_orig = await asyncio.to_thread(deserialize, wp_path, Workplan)
+    facts = await asyncio.to_thread(describe_steps, wp_orig, wp_path.parent)
+
+    # the guard runs before `prepare_workplan` rotates or writes anything
+    escape = f"pass {ARG_RUN_ID} <other-id> to start a new run"
+    try:
+        manifest = read_run_manifest(output_dir)
+    except CstarSchemaTooNewError as ex:
+        msg = f"Run {run_id!r} cannot be re-entered: {ex} Or {escape}"
+        raise CstarExpectationFailed(msg) from ex
+    except CstarError as ex:
+        msg = f"Run {run_id!r} cannot be re-entered: {ex}; fix or remove the file, or {escape}"
+        raise CstarExpectationFailed(msg) from ex
+
+    if manifest is None:
+        log.debug(f"Run {run_id!r} has no manifest; no step definition is checked")
+    else:
+        status = await load_run_state(
+            run_id, get_launcher(wp_orig, force_local=pre_run)
+        )
+        refuse_edited_done_steps(wp_orig, manifest, status, facts, clobber_steps or [])
+
+    wp, prepared_wp_path, external = await prepare_workplan(
         wp_path, output_dir, user_variables, clobber_steps, pre_run
     )
     # the steps are live once prepared; report before a pre-run prunes any of them
@@ -1341,6 +1420,9 @@ async def build_and_run_dag(
     ------
     NoPreparableStepsError
         If `pre_run` leaves no step to prepare.
+    CstarExpectationFailed
+        If the run's manifest cannot be read, or a step that reached Done was
+        edited and not clobbered.
     """
     planner, prepared_wp_path, facts = await build_dag(
         wp_path,
