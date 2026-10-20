@@ -14,7 +14,7 @@ from cstar.applications.core import (
     RunnerResult,
     register_application,
 )
-from cstar.applications.roms_marbl.file_system import UPSCALING_SUFFIX
+from cstar.applications.roms_marbl.outputs import UPSCALING_SUFFIX
 from cstar.base.log import get_logger
 from cstar.base.utils import convert_to_cdf5
 from cstar.entrypoint.runner import BlueprintRunner
