@@ -1,3 +1,4 @@
+import asyncio
 import os
 import typing as t
 from dataclasses import dataclass
@@ -5,12 +6,33 @@ from pathlib import Path
 
 import typer
 
+from cstar.base.exceptions import CstarError, CstarExpectationFailed
 from cstar.base.log import get_logger
 from cstar.cli.common import cb_pipeline, get_from_ctxmap, set_ctxmap
 from cstar.cli.run.shared import is_path_like, refuse_workplan_file
 from cstar.cli.workplan.gather import collect_links, relink, report_conflicts
 from cstar.cli.workplan.shared import list_runs, preload_run_record
-from cstar.entrypoint.utils import ARG_ALL, ARG_ALL_HELP, ARG_REPAIR, ARG_REPAIR_HELP
+from cstar.entrypoint.utils import (
+    ARG_ALL,
+    ARG_ALL_HELP,
+    ARG_NO_REFRESH,
+    ARG_NO_REFRESH_HELP,
+    ARG_REPAIR,
+    ARG_REPAIR_HELP,
+    ARG_VERIFY,
+    ARG_VERIFY_HELP,
+)
+from cstar.orchestration.dag_runner import (
+    get_launcher,
+    load_run_state,
+    refresh_run_manifest,
+)
+from cstar.orchestration.manifest import (
+    RUN_MANIFEST_NAME,
+    RunManifest,
+    fold_step_records,
+    read_run_manifest,
+)
 from cstar.orchestration.orchestration import LiveWorkplan
 from cstar.orchestration.run_check import (
     TRANSFORMED_WORKPLAN_GLOB,
@@ -23,6 +45,7 @@ from cstar.orchestration.run_check import (
 )
 from cstar.orchestration.serialization import try_deserialize
 from cstar.orchestration.tracking import WorkplanRun
+from cstar.system.migration import CstarSchemaTooNewError
 
 if t.TYPE_CHECKING:
     from collections.abc import Iterator
@@ -41,14 +64,25 @@ HELP_LONG = f"""\
 {HELP_SHORT}
 
 The target is a run-id, or the path of a run directory (one that contains
-`tasks/`). The run's emitted files are searched for absolute paths under the
-run or the C-Star data home, its symlinks for absolute or missing targets, and
-its transformed workplan for steps without a directory. Files that launchers
+`tasks/`, or `cstar-run.yaml` alone for a standalone blueprint run, whose
+symlinks and products are checked; the step-directory checks need `tasks/`).
+The run's emitted files are searched for absolute paths under the run or the
+C-Star data home, its symlinks for absolute or missing targets, and its
+transformed workplan for steps without a directory. Files that launchers
 regenerate are skipped unless {ARG_ALL} is given. Steps that have not started
 have no directory yet.
 
-Step directories and sentinel files that no step accounts for, and symlinks to
-a place outside the run, are listed for information and do not fail the check.
+When the run has a manifest, the products each step record lists are compared
+with the directory: missing, or a size that changed (a log is reported only when
+it shrank: the step's own log is still written after the record is taken).
+{ARG_VERIFY} also compares
+the content where a sha256 is recorded, and nothing records one yet. For a
+run-id the manifest is refreshed first, as `cstar run show` does;
+{ARG_NO_REFRESH} reads it as last recorded.
+
+Step directories and sentinel files that no step accounts for, symlinks to a
+place outside the run, steps that are done without a record, and an attempt
+that has not finished are listed for information and do not fail the check.
 Nothing is deleted.
 
 {ARG_REPAIR} rewrites each absolute symlink that points inside the run as a
@@ -66,7 +100,12 @@ _HEADINGS: t.Final[dict[FindingKind, str]] = {
     FindingKind.ABSOLUTE_LINK: f"Symlinks with an absolute target inside the run (fixed by {ARG_REPAIR})",
     FindingKind.DANGLING_LINK: "Symlinks whose target does not exist",
     FindingKind.MISSING_STEP_DIR: "Steps without a directory",
+    FindingKind.PRODUCT_MISSING: "Products missing from the run",
+    FindingKind.PRODUCT_SIZE: "Products whose size differs from the record",
+    FindingKind.HASH_MISMATCH: f"Products whose content differs from the record ({ARG_VERIFY})",
     FindingKind.EXTERNAL_LINK: "Symlinks with a target outside the run (informational)",
+    FindingKind.RECORD_MISSING: "Steps that are done without a step record (informational)",
+    FindingKind.ATTEMPT_OPEN: "Latest attempt not finished (informational)",
 }
 """The heading of each kind of finding, in the order the kinds are listed."""
 
@@ -98,14 +137,17 @@ def _directory_target(target: str) -> CheckTarget:
     Raises
     ------
     typer.BadParameter
-        - Raised when the path is not a directory containing `tasks/`.
+        - Raised when the path is not a directory containing `tasks/` or `cstar-run.yaml`.
         - Raised when the directory holds more than one transformed workplan.
     """
     run_root = Path(os.path.abspath(Path(target).expanduser()))
     if not run_root.is_dir():
         raise typer.BadParameter(f"{str(run_root)!r} is not a directory.")
-    if not (run_root / "tasks").is_dir():
-        msg = f"{str(run_root)!r} is not a run directory: it has no `tasks` directory."
+    if not ((run_root / "tasks").is_dir() or (run_root / RUN_MANIFEST_NAME).is_file()):
+        msg = (
+            f"{str(run_root)!r} is not a run directory: it has neither a `tasks` "
+            f"directory nor a `{RUN_MANIFEST_NAME}`."
+        )
         raise typer.BadParameter(msg)
 
     workplans = sorted(run_root.glob(TRANSFORMED_WORKPLAN_GLOB))
@@ -206,8 +248,15 @@ def _format_findings(report: RunCheckReport) -> "Iterator[str]":
             for f in found:
                 if kind is FindingKind.ABSOLUTE_PATH:
                     yield f"  {f.file}:{f.line}: {f.path}"
-                elif kind is FindingKind.MISSING_STEP_DIR:
+                elif kind in {
+                    FindingKind.MISSING_STEP_DIR,
+                    FindingKind.PRODUCT_MISSING,
+                    FindingKind.RECORD_MISSING,
+                    FindingKind.ATTEMPT_OPEN,
+                }:
                     yield f"  {f.file}"
+                elif kind in {FindingKind.PRODUCT_SIZE, FindingKind.HASH_MISMATCH}:
+                    yield f"  {f.file}: {f.path}"
                 else:
                     yield f"  {f.file} -> {f.path}"
 
@@ -240,6 +289,52 @@ def _summary(report: RunCheckReport) -> str:
     if report.clean:
         return f"No problems found in {report.run_root}{extra}."
     return f"{len(report.problems)} problem(s) found in {report.run_root}{extra}."
+
+
+def _load_manifest(
+    resolved: CheckTarget, workplan: LiveWorkplan | None, no_refresh: bool
+) -> RunManifest | None:
+    """Read the manifest of the run, refreshed first when the run is tracked.
+
+    A tracked run's manifest is refreshed as `cstar run show` does, which needs
+    its transformed workplan; a refresh that cannot run (the workplan names a
+    scheduler this machine lacks) is a warning, and the manifest is read as last
+    recorded. A directory's manifest is read as found, with the step records
+    folded in in memory only: a copied run may never have been refreshed.
+
+    Parameters
+    ----------
+    resolved : CheckTarget
+        The run to read.
+    workplan : LiveWorkplan | None
+        The run's transformed workplan, when it could be loaded.
+    no_refresh : bool
+        Whether to read a tracked run's manifest without refreshing it.
+
+    Returns
+    -------
+    RunManifest | None
+        `None` when the run has no manifest, or its manifest cannot be read.
+    """
+    run_root = resolved.run_root
+    if resolved.run_id is not None and not no_refresh and workplan is not None:
+        try:
+            launcher = get_launcher(workplan, force_local=workplan.pre_run)
+            status = asyncio.run(load_run_state(resolved.run_id, launcher))
+            refresh_run_manifest(run_root, resolved.run_id, status)
+        except (CstarError, CstarExpectationFailed) as ex:
+            typer.echo(f"Warning: the manifest was not refreshed: {ex}", err=True)
+
+    try:
+        manifest = read_run_manifest(run_root)
+    except (CstarError, CstarSchemaTooNewError) as ex:
+        typer.echo(f"Warning: {ex}", err=True)
+        return None
+
+    if manifest is not None and resolved.run_id is None:
+        fold_step_records(manifest, run_root)
+
+    return manifest
 
 
 def _regather(run_root: Path, workplan: LiveWorkplan | None) -> None:
@@ -300,6 +395,10 @@ def check(
     ],
     repair: t.Annotated[bool, typer.Option(ARG_REPAIR, help=ARG_REPAIR_HELP)] = False,
     all_files: t.Annotated[bool, typer.Option(ARG_ALL, help=ARG_ALL_HELP)] = False,
+    no_refresh: t.Annotated[
+        bool, typer.Option(ARG_NO_REFRESH, help=ARG_NO_REFRESH_HELP)
+    ] = False,
+    verify: t.Annotated[bool, typer.Option(ARG_VERIFY, help=ARG_VERIFY_HELP)] = False,
 ) -> None:
     """Check that a run directory still works when it is moved."""
     resolved = get_from_ctxmap(context, KEY_TARGET, CheckTarget)
@@ -312,9 +411,16 @@ def check(
             msg = f"Warning: unable to load the transformed workplan {resolved.workplan_path}"
             typer.echo(msg, err=True)
 
+    manifest = _load_manifest(resolved, workplan, no_refresh)
+
     def run_checks() -> RunCheckReport:
         return check_run(
-            run_root, workplan=workplan, run_id=resolved.run_id, all_files=all_files
+            run_root,
+            workplan=workplan,
+            run_id=resolved.run_id,
+            all_files=all_files,
+            manifest=manifest,
+            verify=verify,
         )
 
     report = run_checks()

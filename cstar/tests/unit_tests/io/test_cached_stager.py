@@ -1,11 +1,19 @@
+import errno
+import fcntl
+import logging
+import os
 import subprocess
+import threading
+import time
 import typing as t
 from collections.abc import Callable, Generator
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from unittest import mock
 
 import pytest
 
+from cstar.io import retriever
 from cstar.io.source_data import SourceData
 
 if t.TYPE_CHECKING:
@@ -25,6 +33,35 @@ def mock_home_dir(tmp_path: Path) -> Generator[Callable[[], Path], None, None]:
         return_value=state_dir,
     ) as mock_state_home:
         yield mock_state_home
+
+
+@pytest.fixture
+def cache_home(tmp_path: Path) -> Generator[Path, None, None]:
+    """Point the repository cache at an empty temporary directory."""
+    cache_dir = tmp_path / "cache-home"
+    with mock.patch(
+        "cstar.execution.file_system.DirectoryManager.cache_home",
+        return_value=cache_dir,
+    ):
+        yield cache_dir
+
+
+@pytest.fixture
+def held_cache_lock(
+    remote_repo_uri: str, cache_home: Path
+) -> Generator[t.IO[str], None, None]:
+    """Hold the repository cache lock for `remote_repo_uri`, as another step would.
+
+    Lock attempts are retried every 0.05 s while it is held.
+    """
+    cache_path = t.cast("CRRS", SourceData(remote_repo_uri).stager)._get_cache_path()
+    cache_home.mkdir(parents=True)
+    with (
+        (cache_home / f"{cache_path.name}.lock").open("a") as holder,
+        mock.patch("cstar.execution.file_system.LOCK_POLL_INTERVAL", 0.05),
+    ):
+        fcntl.flock(holder, fcntl.LOCK_EX)
+        yield holder
 
 
 @pytest.fixture
@@ -189,3 +226,208 @@ def test_cached_stager_refresh_failure(tmp_path: Path, remote_repo_uri: str) -> 
 
     # confirm that checkout was called after the cache was copied
     mock_checkout.assert_called_once()
+
+
+def test_cached_stager_concurrent_stages_clone_once(
+    tmp_path: Path, remote_repo_uri: str, cache_home: Path
+) -> None:
+    """Verify that two steps staging one repository at once take turns on the cache.
+
+    The clone is slowed down so that, without the cache lock, the second stage would
+    find the half-cloned cache and pull or remove it under the first.
+
+    Parameters
+    ----------
+    tmp_path : Path
+        A temporary path to stage the repository into
+    remote_repo_uri : str
+        URI of the repository to stage
+    cache_home : Path
+        The temporary cache directory
+    """
+    real_clone = retriever._clone
+
+    def slow_clone(*args: t.Any, **kwargs: t.Any) -> None:
+        time.sleep(0.3)
+        real_clone(*args, **kwargs)
+
+    sources = [SourceData(remote_repo_uri), SourceData(remote_repo_uri)]
+    targets = [tmp_path / "step-1", tmp_path / "step-2"]
+    barrier = threading.Barrier(len(sources))
+
+    def stage(source: SourceData, target: Path) -> Path:
+        barrier.wait()
+        return source.stage(target).path
+
+    with (
+        mock.patch("cstar.io.retriever._clone", side_effect=slow_clone) as spy_clone,
+        mock.patch("cstar.execution.file_system.LOCK_POLL_INTERVAL", 0.05),
+        ThreadPoolExecutor(max_workers=len(sources)) as pool,
+    ):
+        futures = [pool.submit(stage, s, d) for s, d in zip(sources, targets)]
+        staged_paths = [f.result() for f in futures]
+
+    spy_clone.assert_called_once()
+    assert staged_paths == targets
+    for target in targets:
+        assert (target / "README.md").read_text() == "upstream\n"
+
+
+def test_cached_stager_locks_beside_the_cache(
+    tmp_path: Path, remote_repo_uri: str, cache_home: Path
+) -> None:
+    """Verify that the cache lock file sits beside the cache and is held for the copy.
+
+    Parameters
+    ----------
+    tmp_path : Path
+        A temporary path to stage the repository into
+    remote_repo_uri : str
+        URI of the repository to stage
+    cache_home : Path
+        The temporary cache directory
+    """
+    source_data = SourceData(remote_repo_uri)
+    stager: CRRS = t.cast("CRRS", source_data.stager)
+    cache_path = stager._get_cache_path()
+    lock_path = cache_path.parent / f"{cache_path.name}.lock"
+    held_during_copy: list[bool] = []
+
+    def probe_then_copy(cmd: str) -> str:
+        with lock_path.open("a") as probe:
+            try:
+                fcntl.flock(probe, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except BlockingIOError:
+                held_during_copy.append(True)
+            else:
+                fcntl.flock(probe, fcntl.LOCK_UN)
+                held_during_copy.append(False)
+        subprocess.run(cmd, shell=True, check=True)
+        return ""
+
+    with mock.patch("cstar.io.stager._run_cmd", side_effect=probe_then_copy):
+        source_data.stage(tmp_path / "my-roms")
+
+    assert held_during_copy == [True]
+    assert lock_path.is_file()
+    assert lock_path.parent == cache_home
+    assert not (cache_path / lock_path.name).exists()
+    assert (tmp_path / "my-roms" / "README.md").is_file()
+
+
+def test_cached_stager_without_flock_support_stages_unlocked(
+    tmp_path: Path,
+    remote_repo_uri: str,
+    cache_home: Path,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Verify that a file system without `flock` still stages, through the cache.
+
+    Parameters
+    ----------
+    tmp_path : Path
+        A temporary path to stage the repository into
+    remote_repo_uri : str
+        URI of the repository to stage
+    cache_home : Path
+        The temporary cache directory
+    caplog : pytest.LogCaptureFixture
+        Captures the warning
+    """
+    source_data = SourceData(remote_repo_uri)
+    cache_path = t.cast("CRRS", source_data.stager)._get_cache_path()
+    target = tmp_path / "my-roms"
+
+    with mock.patch(
+        "cstar.execution.file_system.fcntl.flock",
+        side_effect=OSError(errno.ENOLCK, os.strerror(errno.ENOLCK)),
+    ):
+        source_data.stage(target)
+
+    assert (target / "README.md").is_file()
+    assert (cache_path / "README.md").is_file()
+    assert f"File locking is not supported at {cache_path}.lock" in caplog.text
+
+
+def test_cached_stager_waits_for_a_held_lock(
+    tmp_path: Path,
+    remote_repo_uri: str,
+    cache_home: Path,
+    held_cache_lock: t.IO[str],
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Verify that a step logs while it waits, then stages through the cache.
+
+    Parameters
+    ----------
+    tmp_path : Path
+        A temporary path to stage the repository into
+    remote_repo_uri : str
+        URI of the repository to stage
+    cache_home : Path
+        The temporary cache directory
+    held_cache_lock : IO[str]
+        The cache lock, held by "another step" until released below
+    caplog : pytest.LogCaptureFixture
+        Captures the wait message
+    """
+    caplog.set_level(logging.INFO, logger="cstar.execution.file_system")
+    source_data = SourceData(remote_repo_uri)
+    cache_path = t.cast("CRRS", source_data.stager)._get_cache_path()
+    target = tmp_path / "my-roms"
+    waiting = f"Waiting for the lock at {cache_path}.lock"
+
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        staged = pool.submit(source_data.stage, target)
+        deadline = time.monotonic() + 10
+        while waiting not in caplog.text and time.monotonic() < deadline:
+            time.sleep(0.01)
+        fcntl.flock(held_cache_lock, fcntl.LOCK_UN)
+        staged.result()
+
+    assert waiting in caplog.text
+    assert (cache_path / "README.md").is_file()
+    assert (target / "README.md").is_file()
+
+
+def test_cached_stager_clones_privately_after_timeout(
+    tmp_path: Path,
+    remote_repo_uri: str,
+    cache_home: Path,
+    held_cache_lock: t.IO[str],
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Verify that a step refused the lock past the timeout clones into its target.
+
+    The cache is never created: only the lock holder may touch it.
+
+    Parameters
+    ----------
+    tmp_path : Path
+        A temporary path to stage the repository into
+    remote_repo_uri : str
+        URI of the repository to stage
+    cache_home : Path
+        The temporary cache directory
+    held_cache_lock : IO[str]
+        The cache lock, held by "another step" for the whole test
+    caplog : pytest.LogCaptureFixture
+        Captures the warning
+    """
+    source_data = SourceData(remote_repo_uri)
+    cache_path = t.cast("CRRS", source_data.stager)._get_cache_path()
+    target = tmp_path / "my-roms"
+
+    with (
+        mock.patch("cstar.io.stager.CACHE_LOCK_TIMEOUT", 0.2),
+        mock.patch(
+            "cstar.io.retriever._clone", side_effect=retriever._clone
+        ) as spy_clone,
+    ):
+        source_data.stage(target)
+
+    spy_clone.assert_called_once()
+    assert spy_clone.call_args.kwargs["local_path"] == target
+    assert (target / "README.md").is_file()
+    assert not cache_path.exists()
+    assert f"The repository cache {cache_path} stayed locked" in caplog.text

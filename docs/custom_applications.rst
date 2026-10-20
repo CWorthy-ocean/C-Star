@@ -159,6 +159,88 @@ state, launches nothing and skips post-run. Only then does ``--pre-run`` on
 the CLI rejects the flag for a blueprint run, and a workplan pre-run skips the
 application's steps and reports why.
 
+Declaring Products
+------------------
+
+A *product* is a file a step leaves that a user keeps: an output, a restart file, the
+namelist the model read, a log. Each step records its products in its step record,
+``cstar-step.yaml`` (see :doc:`workplans`), with a kind, a path relative to the step
+root, a size in bytes and metadata. An application declares where its products land by
+overriding ``artifacts`` on its `ApplicationDefinition`, which returns a list of
+`ArtifactSpec` (see :class:`cstar.applications.core.ArtifactSpec`). The default returns
+none, so an application that declares nothing, like ``hello_world``, records no products.
+
+.. code-block:: python
+   :caption: Declaring the products of an application
+
+   from collections.abc import Sequence
+
+   from cstar.applications.core import ArtifactKind, ArtifactSpec
+
+
+   @register_application
+   class HelloWorldApplication(
+      ApplicationDefinition[HelloWorldBlueprint, HelloWorldRunner],
+   ):
+      name = "hello_world"
+      runner = HelloWorldRunner
+      blueprint = HelloWorldBlueprint
+
+      @t.override
+      def artifacts(self, blueprint: HelloWorldBlueprint) -> Sequence[ArtifactSpec]:
+         return [ArtifactSpec(kind=ArtifactKind.log, pattern="logs/*.out")]
+
+A pattern is a glob relative to the step's working directory, and ``**`` is allowed. Only
+files match, never directories. When a file matches more than one spec, the first spec
+wins, so list specific patterns before a catch-all. The runner expands the patterns when
+the step shuts down and takes each file's size from the file system.
+
+The kind of a product is one of `ArtifactKind`:
+
+.. list-table::
+   :header-rows: 1
+   :widths: 30 70
+
+   * - Kind
+     - Meaning
+   * - ``grid``, ``initial_conditions``, ``boundary_forcing``, ``surface_forcing``,
+       ``tidal_forcing``, ``river_forcing``, ``cdr_forcing``
+     - An input dataset of the model, by the role it plays. The boundary extraction a
+       ROMS run writes for a nested run is ``boundary_forcing`` with
+       ``metadata["role"]`` ``child``.
+   * - ``restart``, ``history``, ``average``
+     - A model output of the ROMS ``rst``, ``his`` or ``avg`` stream.
+   * - ``gas_exchange``, ``upscaling``, ``cdr_output``
+     - A ROMS output stream another step consumes: the carbonate sensitivities
+       (``_cdrgas``) ``carbonate-sensitivity-from`` reads, the boundary tracer fluxes
+       (``_uscl``) the upscaler reads, and the CDR diagnostics (``_cdr``).
+   * - ``output``
+     - A model output no other kind names; the ROMS stream is in
+       ``metadata["stream"]``.
+   * - ``emitted_blueprint``
+     - A blueprint the step publishes for the steps that follow it.
+   * - ``config``
+     - What the model read as configuration; ``metadata["role"]`` says which one
+       (``cppdefs``, ``namelist`` or ``marbl_in``).
+   * - ``build``
+     - A compiled executable.
+   * - ``log``
+     - A log of the run.
+   * - ``figure``
+     - A plot or an image.
+   * - ``other``
+     - A product no kind fits.
+
+A runner may also append `Product` instances to ``self.products`` while it runs, for
+detail only the run knows, such as the stream and timestamp of a ROMS output file. When a
+path is both declared and reported, the declaration owns the kind and the size, and the
+metadata the runner reported is merged in. A path the runner reports that no declaration
+matches is kept as reported.
+
+Kinds are strict in declarations, and text in the step record. A record written by another
+release still loads, and `Product.known_kind` maps a kind this release does not know to
+``other``.
+
 .. _versioning_blueprint_schema:
 
 Versioning the Blueprint Schema

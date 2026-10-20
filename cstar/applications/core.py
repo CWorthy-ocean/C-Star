@@ -377,7 +377,14 @@ class ArtifactKind(enum.StrEnum):
     """The closed set of kinds a step's products are classified as in its step record.
 
     Model-specific detail, such as a ROMS output stream, goes in a product's
-    metadata, not here.
+    metadata, not here. `config` is a file the model read as configuration, which
+    one is `metadata["role"]` (e.g. `cppdefs`, `namelist`, `marbl_in`); `build` is
+    a compiled executable. A ROMS stream another step or directive consumes is a
+    kind of its own, so the consumer can find it by kind: `gas_exchange` (the
+    carbonate sensitivities `carbonate-sensitivity-from` reads), `upscaling` (the
+    boundary tracer fluxes the upscaler reads) and `cdr_output` (CDR diagnostics);
+    the boundary extraction a nested run reads is `boundary_forcing` with
+    `metadata["role"]` `child`. Every other stream is `output`.
     """
 
     grid = "grid"
@@ -391,8 +398,11 @@ class ArtifactKind(enum.StrEnum):
     history = "history"
     average = "average"
     output = "output"
+    gas_exchange = "gas_exchange"
+    upscaling = "upscaling"
+    cdr_output = "cdr_output"
     emitted_blueprint = "emitted_blueprint"
-    namelist = "namelist"
+    config = "config"
     build = "build"
     log = "log"
     figure = "figure"
@@ -425,6 +435,19 @@ class EmittedBlueprint(ConfiguredBaseModel):
     grid_filename: str
     """Base name of the grid netCDF the emitted blueprint references, under the
     producing step's `input_datasets`."""
+
+
+class ArtifactSpec(ConfiguredBaseModel):
+    """Declares a pattern an application's run leaves products at, so the step
+    record can list them without the application walking its working directory.
+    """
+
+    kind: ArtifactKind
+    """The kind of product the pattern matches."""
+    pattern: str
+    """A glob relative to the step root; `**` is allowed. Only files match, never directories."""
+    metadata: dict[str, str | int | float | list[str]] = Field(default_factory=dict)
+    """Metadata every matching product starts with; a runtime hook may add to it."""
 
 
 class ApplicationDefinition(t.Protocol, t.Generic[TBlueprint, TRunner]):
@@ -476,6 +499,25 @@ class ApplicationDefinition(t.Protocol, t.Generic[TBlueprint, TRunner]):
             The predicted emitted blueprint, or `None` when the application emits none.
         """
         return None
+
+    def artifacts(self, blueprint: TBlueprint) -> Sequence[ArtifactSpec]:
+        """Declare the products a run of the blueprint leaves in its working directory.
+
+        The runner expands the patterns at shutdown. When patterns overlap, the
+        first spec wins. Kinds are strict here and read leniently from records
+        (`Product.known_kind`).
+
+        Parameters
+        ----------
+        blueprint : TBlueprint
+            The blueprint of the producing step.
+
+        Returns
+        -------
+        Sequence[ArtifactSpec]
+            The patterns, in priority order; empty when the application declares none.
+        """
+        return ()
 
 
 _TAnyApp: t.TypeAlias = ApplicationDefinition[t.Any, t.Any]

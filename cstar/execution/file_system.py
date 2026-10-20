@@ -1,12 +1,14 @@
 import asyncio
 import contextlib
 import errno
+import fcntl
 import functools
 import os
 import shlex
 import shutil
 import stat
 import sys
+import time
 import typing as t
 import uuid
 from collections.abc import AsyncGenerator, Generator, Iterator
@@ -881,3 +883,139 @@ def write_text_atomic(
         Whether to fsync before the rename; see `write_bytes_atomic`.
     """
     write_bytes_atomic(path, text.encode(encoding), sync=sync)
+
+
+LOCK_POLL_INTERVAL: t.Final[float] = 5.0
+"""Seconds between attempts to take a lock that has a timeout."""
+
+LOCK_LOG_INTERVAL: t.Final[float] = 60.0
+"""Seconds between the messages logged while waiting for a lock that has a timeout."""
+
+_FLOCK_UNSUPPORTED_ERRNOS: t.Final[frozenset[int]] = frozenset(
+    {errno.ENOLCK, errno.EOPNOTSUPP, errno.ENOTSUP, errno.ENOSYS, errno.EINVAL}
+)
+"""`flock` errors meaning the file system cannot lock, rather than that the call failed."""
+
+
+class LockTimeoutError(TimeoutError):
+    """Another holder still had a lock when the caller's timeout ran out."""
+
+
+class LockUnsupportedError(OSError):
+    """The file system holding a lock file does not support `flock`."""
+
+
+def _flock(lock_file: t.IO[str], path: Path, operation: int) -> None:
+    """Apply a `flock` operation, naming a file system that cannot lock.
+
+    Parameters
+    ----------
+    lock_file : IO[str]
+        The open lock file.
+    path : Path
+        The lock file's path, for the error message.
+    operation : int
+        The `fcntl.LOCK_*` flags.
+
+    Raises
+    ------
+    LockUnsupportedError
+        If the file system does not support `flock`.
+    """
+    try:
+        fcntl.flock(lock_file, operation)
+    except OSError as ex:
+        if ex.errno in _FLOCK_UNSUPPORTED_ERRNOS:
+            msg = f"Cannot lock {path}: {ex.strerror}"
+            raise LockUnsupportedError(ex.errno, msg) from ex
+        raise
+
+
+def _acquire(lock_file: t.IO[str], path: Path, timeout: float | None) -> None:
+    """Take an exclusive `flock` on `lock_file`, waiting up to `timeout` seconds.
+
+    Parameters
+    ----------
+    lock_file : IO[str]
+        The open lock file.
+    path : Path
+        The lock file's path, for messages.
+    timeout : float | None
+        Seconds to wait for another holder to release the lock; `None` waits as
+        long as it takes.
+
+    Raises
+    ------
+    LockTimeoutError
+        If another holder still has the lock after `timeout` seconds.
+    LockUnsupportedError
+        If the file system does not support `flock`.
+    """
+    if timeout is None:
+        _flock(lock_file, path, fcntl.LOCK_EX)
+        return
+
+    start = time.monotonic()
+    next_log = start
+    while True:
+        try:
+            _flock(lock_file, path, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            return
+        except BlockingIOError:
+            pass
+
+        now = time.monotonic()
+        waited = now - start
+        if waited >= timeout:
+            msg = f"Another holder kept the lock at {path} for {waited:.0f} s"
+            raise LockTimeoutError(msg)
+        if now >= next_log:
+            log.info(
+                "Waiting for the lock at %s (%.0f s so far, giving up after %.0f s)",
+                path,
+                waited,
+                timeout,
+            )
+            next_log = now + LOCK_LOG_INTERVAL
+        time.sleep(min(LOCK_POLL_INTERVAL, timeout - waited))
+
+
+@contextmanager
+def locked(path: Path, *, timeout: float | None = None) -> Iterator[None]:
+    """Hold an exclusive `flock` on the file at `path`.
+
+    The lock file and its parent directories are created as needed and left in
+    place afterwards. The lock belongs to the open file, so it serializes threads
+    as well as processes, and the kernel releases it if the holder dies.
+
+    Without a `timeout` the call blocks until the lock is free. With one, it tries
+    every `LOCK_POLL_INTERVAL` seconds and logs that it is waiting when first
+    refused and every `LOCK_LOG_INTERVAL` seconds after that.
+
+    Parameters
+    ----------
+    path : Path
+        The lock file.
+    timeout : float | None
+        Seconds to wait for another holder to release the lock; `None` waits as
+        long as it takes.
+
+    Yields
+    ------
+    None
+        While the lock is held.
+
+    Raises
+    ------
+    LockTimeoutError
+        If another holder still has the lock after `timeout` seconds.
+    LockUnsupportedError
+        If the file system holding `path` does not support `flock`.
+    """
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("a") as lock_file:
+        _acquire(lock_file, path, timeout)
+        try:
+            yield
+        finally:
+            fcntl.flock(lock_file, fcntl.LOCK_UN)

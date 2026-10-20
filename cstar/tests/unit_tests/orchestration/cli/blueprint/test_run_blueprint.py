@@ -11,12 +11,18 @@ from typer.testing import CliRunner
 
 from cstar.applications.core import (
     ApplicationDefinition,
+    ArtifactKind,
+    ArtifactSpec,
     RunnerRequest,
     RunnerResult,
     RunnerState,
     get_application,
 )
-from cstar.applications.hello_world import HelloWorldBlueprint, HelloWorldRunner
+from cstar.applications.hello_world import (
+    HelloWorldApplication,
+    HelloWorldBlueprint,
+    HelloWorldRunner,
+)
 from cstar.applications.roms_marbl.app import RomsMarblApplication, RomsMarblRunner
 from cstar.applications.roms_marbl.models import RomsMarblBlueprint
 from cstar.base.env import (
@@ -997,6 +1003,47 @@ def test_blueprint_run_writes_run_manifest(
     assert entry.status == Status.Done.name
     assert entry.record is not None
     assert entry.record.outcome == "completed"
+
+
+def test_blueprint_run_records_declared_products(
+    hello_world_bp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The step record lists the files the application's declarations match."""
+    monkeypatch.delenv(ENV_CSTAR_RUNID, raising=False)
+    root = deserialize(hello_world_bp_path, HelloWorldBlueprint).effective_working_dir
+    (root / "logs").mkdir(parents=True, exist_ok=True)
+    (root / "logs" / "a.out").write_bytes(b"hello")
+    spec = ArtifactSpec(kind=ArtifactKind.log, pattern="logs/*.out")
+
+    with mock.patch.object(HelloWorldApplication, "artifacts", return_value=[spec]):
+        result = _run_hello_world(hello_world_bp_path)
+
+    assert result.exit_code == 0, result.output
+    record = read_step_record(root)
+    assert record is not None
+    assert [(p.kind, p.path, p.size_bytes) for p in record.products] == [
+        ("log", "logs/a.out", 5)
+    ]
+
+
+def test_blueprint_run_keeps_the_record_when_declarations_fail(
+    hello_world_bp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A declaration that raises costs the products, never the record."""
+    monkeypatch.delenv(ENV_CSTAR_RUNID, raising=False)
+    root = deserialize(hello_world_bp_path, HelloWorldBlueprint).effective_working_dir
+
+    with mock.patch.object(
+        HelloWorldApplication, "artifacts", side_effect=RuntimeError("bad")
+    ):
+        result = _run_hello_world(hello_world_bp_path)
+
+    assert result.exit_code == 0, result.output
+    record = read_step_record(root)
+    assert record is not None
+    assert record.products == []
 
 
 def test_blueprint_run_with_step_writes_no_run_manifest(

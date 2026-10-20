@@ -14,8 +14,10 @@ through the ``carbonate-sensitivity-from`` directive. The run compiles ROMS with
 ParallelIO four times, so it takes tens of minutes.
 """
 
+import json
 import re
 import shutil
+import subprocess
 import typing as t
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
@@ -30,6 +32,7 @@ import yaml
 
 from cstar.applications.cdr_metrics import FIGURE_FILENAME, METRICS_FILENAME
 from cstar.base.utils import slugify
+from cstar.orchestration.manifest import read_step_record
 from cstar.orchestration.models import InlineBlueprintRef
 from cstar.tests.integration_tests.cases import (
     DT,
@@ -112,6 +115,8 @@ ERROR_PATTERN = re.compile(
     r"\bERROR\b|BLOWUP|blow.?up|MPI_ABORT|Traceback", re.IGNORECASE
 )
 PARTITIONED_NC = re.compile(r"\.\d+\.nc$")
+TIMESTAMP = re.compile(r"^\d{14}$")
+PRODUCT_HEADINGS = ("Products missing", "Products whose size", "Products whose content")
 MISSING_TOOLS = [
     tool
     for tool, found in {
@@ -476,6 +481,77 @@ def test_forge_published_blueprint_and_classic_inputs(e2e_run: E2ERun) -> None:
     assert inputs, "forge wrote no input files"
     headers = {p.name: p.read_bytes()[:4] for p in inputs}
     assert all(h == b"CDF\x05" for h in headers.values()), headers
+
+
+def _output(proc: subprocess.CompletedProcess[str]) -> str:
+    """The captured streams of a finished ``cstar`` process, for assertion messages."""
+    return f"stdout:\n{proc.stdout}\nstderr:\n{proc.stderr}"
+
+
+def test_forge_record_lists_its_products(e2e_run: E2ERun) -> None:
+    """The forge step record lists its inputs, blueprint, configuration and log."""
+    record = read_step_record(e2e_run.forge_root)
+    assert record is not None, "forge wrote no step record"
+
+    kinds = {p.kind for p in record.products}
+    expected = {
+        "emitted_blueprint",
+        "grid",
+        "initial_conditions",
+        "boundary_forcing",
+        "surface_forcing",
+        "config",
+        "log",
+    }
+    assert expected <= kinds, sorted(kinds)
+
+    roles = {p.metadata["role"] for p in record.products if p.kind == "config"}
+    assert roles == {"cppdefs", "namelist", "marbl_in"}
+
+    (grid,) = (p for p in record.products if p.kind == "grid")
+    assert "sidecar" in grid.metadata, grid
+    empty = [p.path for p in record.products if p.size_bytes <= 0]
+    assert not empty, empty
+
+
+def test_roms_record_lists_its_products(e2e_run: E2ERun) -> None:
+    """The roms_marbl step record lists its restarts by stream, its build, configuration and log."""
+    record = read_step_record(e2e_run.roms_working_dir)
+    assert record is not None, "roms_marbl wrote no step record"
+
+    restarts = [p for p in record.products if p.kind == "restart"]
+    assert restarts, [p.kind for p in record.products]
+    for product in restarts:
+        assert product.metadata["stream"] == "rst", product
+        assert TIMESTAMP.match(str(product.metadata["timestamp"])), product
+        # the e2e forge blueprints set `use_pio`, so ROMS wrote ParallelIO output
+        assert product.metadata["format"] == "pio", product
+
+    kinds = {p.kind for p in record.products}
+    assert {"build", "log", "gas_exchange"} <= kinds, sorted(kinds)
+    roles = {p.metadata["role"] for p in record.products if p.kind == "config"}
+    assert {"namelist", "cppdefs", "marbl_in"} <= roles, roles
+
+
+def test_show_totals_and_check_finds_no_product_problem(e2e_run: E2ERun) -> None:
+    """``cstar run show`` lists the products of both steps, and ``cstar run check``
+    finds every recorded product as recorded.
+
+    The exit code is not asserted: the emitted blueprints and the transformed
+    workplan name absolute paths, which the absolute-path check reports.
+    """
+    proc = run_cstar(e2e_run.env, "run", "show", e2e_run.run_id, "--format", "json")
+    assert proc.returncode == 0, _output(proc)
+    entries = {entry["name"]: entry for entry in json.loads(proc.stdout)["steps"]}
+    for step in (FORGE_STEP, ROMS_STEP):
+        record = entries[step]["record"]
+        assert record is not None, f"no step record for {step}"
+        total = sum(product["size_bytes"] for product in record["products"])
+        assert total > 0, (step, record["products"])
+
+    proc = run_cstar(e2e_run.env, "run", "check", e2e_run.run_id)
+    assert "Skipped products" not in proc.stdout, _output(proc)
+    assert not any(h in proc.stdout for h in PRODUCT_HEADINGS), _output(proc)
 
 
 def test_roms_staged_unpartitioned_inputs(e2e_run: E2ERun) -> None:

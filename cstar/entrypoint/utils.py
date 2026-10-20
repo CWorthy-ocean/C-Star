@@ -110,6 +110,12 @@ ARG_ALL_HELP: t.Final[str] = (
     "and namelists). Launchers regenerate them, so they are skipped by default."
 )
 
+ARG_VERIFY: t.Final[str] = "--verify"
+ARG_VERIFY_HELP: t.Final[str] = (
+    "Also compare each product's recorded sha256 with the file, reading every "
+    "such product in full; products recorded without one are skipped."
+)
+
 ARG_SCHEMA_ONLY: t.Final[str] = "--schema-only"
 ARG_SCHEMA_ONLY_HELP: t.Final[str] = (
     "Only validate the workplan file's structure; skip resolving applications, "

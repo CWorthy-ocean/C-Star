@@ -80,7 +80,7 @@ from cstar.applications.core import (
     RunnerResult,
     register_application,
 )
-from cstar.applications.roms_marbl.transforms import (
+from cstar.applications.roms_marbl.outputs import (
     TIMESTAMP_GLOB,
     TimestampedOutputFile,
 )

@@ -957,6 +957,7 @@ async def test_runner_on_start_user_unhandled_pre_run(
 @pytest.mark.asyncio
 async def test_runner_on_iteration(
     sim_runner: RomsMarblRunner,
+    tmp_path: Path,
 ) -> None:
     """Test the main iteration behavior of the RomsMarblRunner.
 
@@ -967,11 +968,22 @@ async def test_runner_on_iteration(
     ----------
     sim_runner: RomsMarblRunner
         An instance of RomsMarblRunner to be used for the test.
+    tmp_path : Path
+        The step root, holding one joined output file.
     """
     mock_handler = mock.Mock(spec=ExecutionHandler, status=ExecutionStatus.COMPLETED)
     mock_sim_run = mock.Mock(return_value=mock_handler)
 
-    mock_simulation = mock.Mock(run=mock_sim_run, initial_conditions=None)
+    output_dir = tmp_path / "output"
+    output_dir.mkdir()
+    (output_dir / "output_rst.20120101000000.nc").touch()
+    sim_runner.blueprint.working_dir = tmp_path
+    mock_simulation = mock.Mock(
+        run=mock_sim_run,
+        initial_conditions=None,
+        use_pio=True,
+        fs_manager=mock.Mock(output_dir=output_dir),
+    )
     mock_shutdown = mock.Mock()
 
     # don't let it perform any real work
@@ -991,6 +1003,15 @@ async def test_runner_on_iteration(
         assert mock_shutdown.call_count == 1
 
         assert sim_runner.result.state.status == ExecutionStatus.COMPLETED
+
+        # post-run reported the joined output files, classified by stream
+        assert [(p.kind, p.path, p.metadata) for p in sim_runner.products] == [
+            (
+                "restart",
+                "output/output_rst.20120101000000.nc",
+                {"stream": "rst", "timestamp": "20120101000000", "format": "pio"},
+            )
+        ]
 
 
 def test_worker_main(tmp_path: Path, sim_runner: RomsMarblRunner) -> None:

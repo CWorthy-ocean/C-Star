@@ -1,3 +1,6 @@
+import errno
+import fcntl
+import logging
 import os
 import pickle
 import shlex
@@ -15,11 +18,14 @@ from cstar.execution.file_system import (
     UNKNOWN_SIZE,
     DirectoryManager,
     JobFileSystemManager,
+    LockTimeoutError,
+    LockUnsupportedError,
     StateDirectoryManager,
     get_backup_path,
     is_remote_resource,
     local_copy,
     local_copy_async,
+    locked,
     remove_files,
     rotate_file,
     step_disk_usage,
@@ -1101,3 +1107,78 @@ def test_write_text_atomic_encodes_text(tmp_path: Path) -> None:
 
     write_text_atomic(target, "caf\u00e9", encoding="latin-1")
     assert target.read_bytes() == b"caf\xe9"
+
+
+def _is_locked(path: Path) -> bool:
+    """Whether another holder has an exclusive `flock` on `path`."""
+    with path.open("a") as probe:
+        try:
+            fcntl.flock(probe, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            return True
+        fcntl.flock(probe, fcntl.LOCK_UN)
+        return False
+
+
+def test_locked_holds_an_exclusive_lock_until_exit(tmp_path: Path) -> None:
+    """Verify the lock file is created with its parents and held only inside the block."""
+    lock_path = tmp_path / "missing" / "parent" / "entry.lock"
+
+    with locked(lock_path):
+        assert lock_path.is_file()
+        assert _is_locked(lock_path)
+
+    assert lock_path.is_file()
+    assert not _is_locked(lock_path)
+
+
+def test_locked_with_timeout_logs_the_wait_and_gives_up(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Verify a held lock is polled, the wait is logged, and the timeout raises."""
+    lock_path = tmp_path / "entry.lock"
+    caplog.set_level(logging.INFO, logger="cstar.execution.file_system")
+
+    with (
+        mock.patch("cstar.execution.file_system.LOCK_POLL_INTERVAL", 0.05),
+        locked(lock_path),
+        pytest.raises(LockTimeoutError, match="entry.lock"),
+        locked(lock_path, timeout=0.2),
+    ):
+        pytest.fail("the lock was taken twice")
+
+    assert f"Waiting for the lock at {lock_path}" in caplog.text
+
+
+@pytest.mark.parametrize("code", [errno.ENOLCK, errno.EOPNOTSUPP, errno.ENOSYS])
+def test_locked_names_an_unsupported_file_system(tmp_path: Path, code: int) -> None:
+    """Verify `flock` errors meaning "cannot lock here" raise `LockUnsupportedError`."""
+    lock_path = tmp_path / "entry.lock"
+
+    with (
+        mock.patch(
+            "cstar.execution.file_system.fcntl.flock",
+            side_effect=OSError(code, os.strerror(code)),
+        ),
+        pytest.raises(LockUnsupportedError) as raised,
+        locked(lock_path, timeout=1.0),
+    ):
+        pytest.fail("the lock was taken")
+
+    assert raised.value.errno == code
+
+
+def test_locked_reraises_other_flock_errors(tmp_path: Path) -> None:
+    """Verify an I/O error from `flock` is not mistaken for missing lock support."""
+    with (
+        mock.patch(
+            "cstar.execution.file_system.fcntl.flock",
+            side_effect=OSError(errno.EIO, os.strerror(errno.EIO)),
+        ),
+        pytest.raises(OSError) as raised,
+        locked(tmp_path / "entry.lock"),
+    ):
+        pytest.fail("the lock was taken")
+
+    assert not isinstance(raised.value, LockUnsupportedError)
+    assert raised.value.errno == errno.EIO

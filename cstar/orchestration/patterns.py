@@ -19,11 +19,10 @@ from pathlib import Path
 import yaml
 from pydantic import Field, model_validator
 
+from cstar.applications.roms_marbl.outputs import RestartFile, restart_timestamp
 from cstar.applications.roms_marbl.transforms import (
     ContinuanceDirective,
     NestingDirective,
-    RestartFile,
-    restart_timestamp,
 )
 from cstar.base.utils import WALLTIME_RE, deep_merge
 from cstar.orchestration.models import (

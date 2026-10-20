@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from cstar.applications.core import ArtifactKind
+from cstar.applications.core import ArtifactKind, ArtifactSpec
 from cstar.applications.hello_world import HelloWorldBlueprint
 from cstar.base.exceptions import CstarError, CstarExpectationFailed
 from cstar.base.utils import slugify
@@ -30,9 +30,11 @@ from cstar.orchestration.manifest import (
     collect_dependencies,
     describe_steps,
     ensure_run_manifest,
+    expand_artifacts,
     finalize_standalone_run,
     fold_step_records,
     manifest_lock,
+    merge_products,
     new_attempt,
     read_run_manifest,
     read_step_record,
@@ -716,3 +718,150 @@ class TestFinalizeStandaloneRun:
         assert len(second.steps) == 1
         assert second.steps[0].working_dir == "."
         assert second.steps[0].definition_hash == blueprint.content_hash()
+
+
+class TestExpandArtifacts:
+    def test_first_spec_wins_on_overlap(self, tmp_path: Path) -> None:
+        """A file matched by several patterns is claimed by the earliest."""
+        (tmp_path / "output").mkdir()
+        (tmp_path / "output" / "output_rst.1.nc").write_bytes(b"r")
+        (tmp_path / "output" / "output_his.1.nc").write_bytes(b"h")
+
+        products = expand_artifacts(
+            tmp_path,
+            [
+                ArtifactSpec(
+                    kind=ArtifactKind.restart, pattern="output/output_rst.*.nc"
+                ),
+                ArtifactSpec(kind=ArtifactKind.output, pattern="output/*.nc"),
+            ],
+        )
+
+        assert [(p.path, p.kind) for p in products] == [
+            ("output/output_his.1.nc", "output"),
+            ("output/output_rst.1.nc", "restart"),
+        ]
+
+    def test_directories_are_not_products(self, tmp_path: Path) -> None:
+        (tmp_path / "output" / "sub").mkdir(parents=True)
+        (tmp_path / "output" / "a.nc").write_bytes(b"a")
+
+        products = expand_artifacts(
+            tmp_path, [ArtifactSpec(kind=ArtifactKind.output, pattern="output/*")]
+        )
+
+        assert [p.path for p in products] == ["output/a.nc"]
+
+    def test_sorted_by_path_with_file_sizes(self, tmp_path: Path) -> None:
+        (tmp_path / "b.log").write_bytes(b"12345")
+        (tmp_path / "a.log").write_bytes(b"123")
+
+        products = expand_artifacts(
+            tmp_path, [ArtifactSpec(kind=ArtifactKind.log, pattern="*.log")]
+        )
+
+        assert [(p.path, p.size_bytes) for p in products] == [
+            ("a.log", 3),
+            ("b.log", 5),
+        ]
+
+    def test_sorted_across_specs(self, tmp_path: Path) -> None:
+        (tmp_path / "a.log").write_bytes(b"")
+        (tmp_path / "z.nc").write_bytes(b"")
+
+        products = expand_artifacts(
+            tmp_path,
+            [
+                ArtifactSpec(kind=ArtifactKind.output, pattern="*.nc"),
+                ArtifactSpec(kind=ArtifactKind.log, pattern="*.log"),
+            ],
+        )
+
+        assert [p.path for p in products] == ["a.log", "z.nc"]
+
+    def test_each_product_owns_its_metadata(self, tmp_path: Path) -> None:
+        (tmp_path / "a.nc").write_bytes(b"")
+        (tmp_path / "b.nc").write_bytes(b"")
+        spec = ArtifactSpec(
+            kind=ArtifactKind.output, pattern="*.nc", metadata={"stream": "his"}
+        )
+
+        first, second = expand_artifacts(tmp_path, [spec])
+        first.metadata["stream"] = "avg"
+
+        assert second.metadata == {"stream": "his"}
+        assert spec.metadata == {"stream": "his"}
+
+    def test_missing_directory_yields_nothing(self, tmp_path: Path) -> None:
+        products = expand_artifacts(
+            tmp_path, [ArtifactSpec(kind=ArtifactKind.output, pattern="nope/*.nc")]
+        )
+
+        assert products == []
+
+    def test_recursive_glob(self, tmp_path: Path) -> None:
+        (tmp_path / "a" / "b").mkdir(parents=True)
+        (tmp_path / "top.nc").write_bytes(b"")
+        (tmp_path / "a" / "b" / "deep.nc").write_bytes(b"")
+
+        products = expand_artifacts(
+            tmp_path, [ArtifactSpec(kind=ArtifactKind.output, pattern="**/*.nc")]
+        )
+
+        assert [p.path for p in products] == ["a/b/deep.nc", "top.nc"]
+
+    def test_no_specs(self, tmp_path: Path) -> None:
+        assert expand_artifacts(tmp_path, []) == []
+
+
+class TestMergeProducts:
+    def test_reported_metadata_wins_per_key(self) -> None:
+        declared = Product(
+            kind="output",
+            path="o.nc",
+            size_bytes=7,
+            metadata={"stream": "his", "keep": 1},
+        )
+        reported = Product(
+            kind="other", path="o.nc", metadata={"stream": "avg", "new": "x"}
+        )
+
+        (merged,) = merge_products([declared], [reported])
+
+        assert merged.metadata == {"stream": "avg", "keep": 1, "new": "x"}
+
+    def test_declarations_own_kind_and_size(self) -> None:
+        declared = Product(kind="restart", path="r.nc", size_bytes=7)
+        reported = Product(kind="other", path="r.nc", size_bytes=99)
+
+        (merged,) = merge_products([declared], [reported])
+
+        assert (merged.kind, merged.size_bytes) == ("restart", 7)
+
+    def test_undeclared_reported_product_follows_declared(self) -> None:
+        declared = [
+            Product(kind="log", path="z.log"),
+            Product(kind="log", path="y.log"),
+        ]
+        extra = Product(kind="build", path="a.exe", size_bytes=3, metadata={"k": "v"})
+
+        merged = merge_products(declared, [extra])
+
+        assert [p.path for p in merged] == ["z.log", "y.log", "a.exe"]
+        assert merged[-1] == extra
+
+    def test_empty_inputs(self) -> None:
+        product = Product(kind="log", path="a.log")
+
+        assert merge_products([], []) == []
+        assert merge_products([product], []) == [product]
+        assert merge_products([], [product]) == [product]
+
+    def test_inputs_are_not_mutated(self) -> None:
+        declared = Product(kind="log", path="a.log", metadata={"a": 1})
+        reported = Product(kind="log", path="a.log", metadata={"b": 2})
+
+        merge_products([declared], [reported])
+
+        assert declared.metadata == {"a": 1}
+        assert reported.metadata == {"b": 2}

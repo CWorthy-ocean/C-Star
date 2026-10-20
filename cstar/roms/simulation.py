@@ -31,8 +31,13 @@ from cstar.applications.roms_marbl.adapter import (
     SurfaceForcingAdapter,
     TidalForcingAdapter,
 )
-from cstar.applications.roms_marbl.file_system import RomsFileSystemManager
+from cstar.applications.roms_marbl.file_system import (
+    GENERATED_NAMELIST_NAME,
+    ROMS_EXECUTABLE_NAME,
+    RomsFileSystemManager,
+)
 from cstar.applications.roms_marbl.models import RomsMarblBlueprint
+from cstar.applications.roms_marbl.outputs import EXTRACT_ROOT_NAME, OUTPUT_ROOT_NAME
 from cstar.base.additional_code import AdditionalCode
 from cstar.base.env import (
     ENV_CSTAR_CLOBBER_WORKING_DIR,
@@ -160,7 +165,7 @@ def _extract_data_join_wildcard(
     out_file_name = wildcard_pattern.replace(".*.nc", ".nc")
     _, out_file_timestamp_dot_nc = out_file_name.split(".", maxsplit=1)
 
-    out_file_name = f"child_bry.{out_file_timestamp_dot_nc}"
+    out_file_name = f"{EXTRACT_ROOT_NAME}_bry.{out_file_timestamp_dot_nc}"
     joined_file = input_dir / out_file_name
     out_file = joined_file.rename(output_dir / out_file_name)
 
@@ -978,12 +983,12 @@ class ROMSSimulation(Simulation):
 
         root = self._namelist_path(target)
 
-        nml.simulation_name_settings.output_root_name = f"{root}/output"
+        nml.simulation_name_settings.output_root_name = f"{root}/{OUTPUT_ROOT_NAME}"
 
         # Note: only PARALLEL_IO builds honor extract_root_name;
         # non-PIO builds name extraction files from output_root_name (already
         # pointing at the same directory).
-        nml.extract_data_settings.extract_root_name = f"{root}/child"
+        nml.extract_data_settings.extract_root_name = f"{root}/{EXTRACT_ROOT_NAME}"
 
         # User overrides are layered on last, so they take precedence over
         # any of the derived settings above.
@@ -1764,7 +1769,7 @@ class ROMSSimulation(Simulation):
 
         if self.compile_time_code is not None and self.compile_time_code.working_copy:
             build_dir = self.compile_time_code.working_copy.common_parent
-            exe_path = build_dir / "roms"
+            exe_path = build_dir / ROMS_EXECUTABLE_NAME
             if not exe_path.exists():
                 problems.append(f"compiled ROMS executable {exe_path}")
             else:
@@ -1858,7 +1863,7 @@ class ROMSSimulation(Simulation):
         build_dir = self.compile_time_code.working_copy.common_parent
         self._validate_build_flags(build_dir)
 
-        exe_path = build_dir / "roms"
+        exe_path = build_dir / ROMS_EXECUTABLE_NAME
         if (
             (exe_path.exists())
             and (self.compile_time_code.exists_locally)
@@ -2352,7 +2357,7 @@ class ROMSSimulation(Simulation):
 
         # we run ROMS from the run directory
         run_path = self.fs_manager.run_dir
-        runtime_settings_fname = "cstar_generated_roms.nml"
+        runtime_settings_fname = GENERATED_NAMELIST_NAME
 
         # save modified namelist in the work directory, keeping a previous
         # attempt's namelist around as `.1`, `.2`, ... rather than overwriting it

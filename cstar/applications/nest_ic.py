@@ -1,4 +1,5 @@
 import typing as t
+from collections.abc import Sequence
 from datetime import datetime
 from pathlib import Path
 
@@ -6,13 +7,16 @@ import xarray as xr
 
 from cstar.applications.core import (
     ApplicationDefinition,
+    ArtifactKind,
+    ArtifactSpec,
     RunnerResult,
     register_application,
 )
-from cstar.applications.roms_marbl.transforms import RestartFile
+from cstar.applications.roms_marbl.outputs import RestartFile
 from cstar.base.log import get_logger
 from cstar.base.utils import convert_to_cdf5, lazy_import
 from cstar.entrypoint.runner import BlueprintRunner
+from cstar.execution.file_system import JobFileSystemManager
 from cstar.execution.handler import ExecutionStatus
 from cstar.orchestration.models import Blueprint
 from cstar.roms.input_dataset import read_model_reference_date
@@ -25,6 +29,9 @@ _APP_NAME_LONG: t.Final[str] = "Nesting Data Processor"
 """The long-form application name."""
 
 log = get_logger(__name__)
+
+INITIAL_CONDITIONS_STEM: t.Final[str] = "ic_from_parent_rst"
+"""The stem of the initial conditions file, `<stem>.<timestamp>.nc`."""
 
 
 class NestIcBlueprint(Blueprint):
@@ -173,8 +180,11 @@ class NestIcRunner(BlueprintRunner[NestIcBlueprint]):
             self.blueprint.parent_rst
         )
 
-        fname = f"ic_from_parent_rst.{rst.formatted_timestamp}.nc"
-        path = self.blueprint.effective_working_dir / "output" / fname
+        fname = f"{INITIAL_CONDITIONS_STEM}.{rst.formatted_timestamp}.nc"
+        output_dir = JobFileSystemManager(
+            self.blueprint.effective_working_dir
+        ).output_dir
+        path = output_dir / fname
         path.parent.mkdir(parents=True, exist_ok=True)
 
         ic = roms_tools.InitialConditions(**ic_kwargs)
@@ -202,3 +212,27 @@ class NestIcApplication(
     runner = NestIcRunner
     blueprint = NestIcBlueprint
     applicable_transforms = ()
+
+    @t.override
+    def artifacts(self, blueprint: NestIcBlueprint) -> Sequence[ArtifactSpec]:
+        """Declare the initial conditions file a nest_ic run leaves.
+
+        Parameters
+        ----------
+        blueprint : NestIcBlueprint
+            The blueprint of the nest_ic step.
+
+        Returns
+        -------
+        Sequence[ArtifactSpec]
+            The initial conditions pattern.
+        """
+        # a manager on a placeholder root only spells the layout; it touches no disk
+        fs = JobFileSystemManager(Path("/"))
+        output = fs.output_dir.relative_to(fs.root_dir)
+        return [
+            ArtifactSpec(
+                kind=ArtifactKind.initial_conditions,
+                pattern=(output / f"{INITIAL_CONDITIONS_STEM}.*.nc").as_posix(),
+            )
+        ]

@@ -1,5 +1,6 @@
 import os
 import random
+import re
 import shutil
 import textwrap
 import typing as t
@@ -18,7 +19,8 @@ from cstar.base.env import (
     FLAG_ON,
 )
 from cstar.base.exceptions import CstarExpectationFailed
-from cstar.entrypoint.utils import ARG_CLOBBER, ARG_PRE_RUN
+from cstar.base.utils import slugify
+from cstar.entrypoint.utils import ARG_CLOBBER, ARG_PRE_RUN, ARG_RUN_ID
 from cstar.execution.file_system import (
     DirectoryManager,
     JobFileSystemManager,
@@ -47,16 +49,22 @@ from cstar.orchestration.dag_runner import (
     prepare_workplan,
     prune_unpreparable_steps,
     refresh_run_manifest,
+    refuse_edited_done_steps,
     run_dag,
 )
 from cstar.orchestration.launch.local import LocalHandle, LocalLauncher
 from cstar.orchestration.launch.slurm import SlurmLauncher
 from cstar.orchestration.manifest import (
     RUN_MANIFEST_NAME,
+    Attempt,
     AttemptStatus,
+    RunManifest,
+    StepEntry,
+    StepFacts,
     StepRecord,
     describe_steps,
     read_run_manifest,
+    write_run_manifest,
     write_step_record,
 )
 from cstar.orchestration.models import (
@@ -642,7 +650,7 @@ async def test_prepare_workplan_persists_clobber_overrides(
     wp_path = wp_templates_dir / "workplan.yaml"
     output_dir = tmp_path / "output"
 
-    _, prepared_path, _, _ = await prepare_workplan(
+    _, prepared_path, _ = await prepare_workplan(
         wp_path, output_dir, clobber_steps=["Prepare"]
     )
 
@@ -665,7 +673,7 @@ async def test_prepare_workplan_persists_original_backup(
     wp_path = wp_templates_dir / "workplan.yaml"
     output_dir = tmp_path / "output"
 
-    _, trx_path, _, _ = await prepare_workplan(
+    _, trx_path, _ = await prepare_workplan(
         wp_path, output_dir, clobber_steps=["Prepare"]
     )
 
@@ -692,7 +700,7 @@ async def test_prepare_workplan_rotates_the_files_of_prior_attempts(
     output_dir = tmp_path / "output"
     first_vars = {"var1": "a", "var2": "b"}
 
-    _, prepared_path, _, _ = await prepare_workplan(wp_path, output_dir, first_vars)
+    _, prepared_path, _ = await prepare_workplan(wp_path, output_dir, first_vars)
     persisted = (
         original_workplan_backup(wp_path, output_dir),
         prepared_path,
@@ -797,7 +805,7 @@ async def test_prepare_workplan_materializes_inline_blueprint(
     assert serialize(wp_path, wp)
     output_dir = tmp_path / "output"
 
-    prepared, prepared_path, _, _ = await prepare_workplan(wp_path, output_dir)
+    prepared, prepared_path, _ = await prepare_workplan(wp_path, output_dir)
 
     # `build_dag` reports orphans from the steps' working directories
     assert all(isinstance(s, LiveStep) for s in prepared.steps)
@@ -851,7 +859,7 @@ async def test_prepare_workplan_records_the_run_root(
     assert serialize(wp_path, wp)
     output_dir = StateDirectoryManager.data_dir(mock_run_id)
 
-    prepared, prepared_path, _, _ = await prepare_workplan(wp_path, output_dir)
+    prepared, prepared_path, _ = await prepare_workplan(wp_path, output_dir)
 
     assert isinstance(prepared, LiveWorkplan)
     assert prepared.root == output_dir.resolve()
@@ -990,6 +998,296 @@ async def test_run_dag_survives_a_manifest_that_cannot_be_written(
     assert not (wp_run.output_path / RUN_MANIFEST_NAME).exists()
     assert "disk full" in caplog.text
     assert await TrackingRepository().get_workplan_run(mock_run_id) is not None
+
+
+def _hello_blueprint(path: Path, target: str = "world") -> Path:
+    """Write a hello_world blueprint file whose content varies with `target`."""
+    path.write_text(
+        "name: hello\ndescription: says hello\napplication: hello_world\n"
+        f"schema_version: '1.0.0'\ntarget: {target}\n"
+    )
+    return path
+
+
+def _guard_workplan(*steps: Step) -> Workplan:
+    """Build a `Workplan` of the given steps for the edited-step guard tests."""
+    return Workplan(name="guarded", description="a guarded plan", steps=list(steps))
+
+
+def _hello_step(blueprint: t.Any, name: str, **kwargs: t.Any) -> Step:
+    """Build a hello_world `Step` over the given blueprint reference."""
+    return Step(name=name, application="hello_world", blueprint=blueprint, **kwargs)
+
+
+def _recorded(
+    run_id: str, hashes: t.Mapping[str, str], *, now: datetime | None = None
+) -> RunManifest:
+    """Build a `RunManifest` recording the given definition hash for each step."""
+    now = now or datetime(2026, 10, 15, 12, 0, tzinfo=UTC)
+    return RunManifest(
+        run_id=run_id,
+        name=run_id,
+        kind="workplan",
+        created_at=now,
+        attempts=[Attempt(start_at=now)],
+        steps=[
+            StepEntry(
+                name=name,
+                application="hello_world",
+                working_dir=f"tasks/{slugify(name)}",
+                definition_hash=definition_hash,
+            )
+            for name, definition_hash in hashes.items()
+        ],
+    )
+
+
+def _stale(facts: t.Mapping[str, StepFacts]) -> dict[str, str]:
+    """Return a recorded hash for each step that differs from its current one."""
+    return {name: f"stale-{f.definition_hash}" for name, f in facts.items()}
+
+
+def test_refuse_edited_done_steps_refuses_an_edited_done_step(
+    tmp_path: Path, hello_world_bp_path: Path
+) -> None:
+    """Verify a Done step whose definition changed is refused, naming the
+    step, the clobber to pass and the run-id alternative.
+    """
+    wp = _guard_workplan(
+        _hello_step(hello_world_bp_path.as_posix(), "A"),
+        _hello_step(hello_world_bp_path.as_posix(), "B"),
+    )
+    facts = describe_steps(wp, tmp_path)
+    recorded = {n: f.definition_hash for n, f in facts.items()} | {"B": "old"}
+    status = DagStatus({"A": Status.Done, "B": Status.Done})
+
+    with pytest.raises(CstarExpectationFailed) as exc_info:
+        refuse_edited_done_steps(wp, _recorded("run", recorded), status, facts, [])
+
+    message = str(exc_info.value)
+    assert "'B'" in message
+    assert "'A'" not in message
+    assert f"{ARG_CLOBBER} B" in message
+    assert f"{ARG_CLOBBER} A" not in message
+    assert ARG_RUN_ID in message
+
+
+def test_refuse_edited_done_steps_names_every_edited_step(
+    tmp_path: Path, hello_world_bp_path: Path
+) -> None:
+    """Verify each edited Done step is named, with one clobber per step."""
+    wp = _guard_workplan(
+        _hello_step(hello_world_bp_path.as_posix(), "A"),
+        _hello_step(hello_world_bp_path.as_posix(), "B"),
+    )
+    facts = describe_steps(wp, tmp_path)
+    status = DagStatus({"A": Status.Done, "B": Status.Done})
+
+    with pytest.raises(CstarExpectationFailed) as exc_info:
+        refuse_edited_done_steps(wp, _recorded("run", _stale(facts)), status, facts, [])
+
+    message = str(exc_info.value)
+    assert "'A'" in message
+    assert "'B'" in message
+    assert message.count(ARG_CLOBBER) == 2
+    assert f"{ARG_CLOBBER} A" in message
+    assert f"{ARG_CLOBBER} B" in message
+
+
+@pytest.mark.parametrize("status", [{"A": Status.Failed}, {}])
+def test_refuse_edited_done_steps_ignores_edited_steps_that_are_not_done(
+    tmp_path: Path, hello_world_bp_path: Path, status: dict[str, Status]
+) -> None:
+    """Verify an edited step that failed or was never submitted is not refused."""
+    wp = _guard_workplan(_hello_step(hello_world_bp_path.as_posix(), "A"))
+    facts = describe_steps(wp, tmp_path)
+
+    refuse_edited_done_steps(
+        wp, _recorded("run", _stale(facts)), DagStatus(status), facts, []
+    )
+
+
+def test_refuse_edited_done_steps_accepts_an_unchanged_done_step(
+    tmp_path: Path, hello_world_bp_path: Path
+) -> None:
+    """Verify a Done step whose definition is unchanged is not refused."""
+    wp = _guard_workplan(_hello_step(hello_world_bp_path.as_posix(), "A"))
+    facts = describe_steps(wp, tmp_path)
+    recorded = {n: f.definition_hash for n, f in facts.items()}
+
+    refuse_edited_done_steps(
+        wp, _recorded("run", recorded), DagStatus({"A": Status.Done}), facts, []
+    )
+
+
+@pytest.mark.parametrize("by", ["name", "safe_name"])
+def test_refuse_edited_done_steps_honors_clobber(
+    tmp_path: Path, hello_world_bp_path: Path, by: str
+) -> None:
+    """Verify clobbering an edited Done step, by name or safe name, clears it."""
+    step = _hello_step(hello_world_bp_path.as_posix(), "Step B")
+    assert step.name != step.safe_name
+    wp = _guard_workplan(step)
+    facts = describe_steps(wp, tmp_path)
+    manifest = _recorded("run", _stale(facts))
+    status = DagStatus({"Step B": Status.Done})
+
+    with pytest.raises(CstarExpectationFailed):
+        refuse_edited_done_steps(wp, manifest, status, facts, ["other"])
+
+    refuse_edited_done_steps(wp, manifest, status, facts, [f" {getattr(step, by)} "])
+
+
+def test_refuse_edited_done_steps_names_the_consumer_of_an_edited_producer(
+    tmp_path: Path,
+) -> None:
+    """Verify editing a producer's blueprint also refuses its deferred consumer."""
+    blueprint = _hello_blueprint(tmp_path / "bp.yaml")
+    wp = _guard_workplan(
+        _hello_step(blueprint.as_posix(), "A"),
+        _hello_step({"from_step": "A"}, "B", depends_on=["A"]),
+    )
+    recorded = {n: f.definition_hash for n, f in describe_steps(wp, tmp_path).items()}
+    status = DagStatus({"A": Status.Done, "B": Status.Done})
+
+    _hello_blueprint(blueprint, target="moon")
+    facts = describe_steps(wp, tmp_path)
+
+    with pytest.raises(CstarExpectationFailed) as exc_info:
+        refuse_edited_done_steps(wp, _recorded("run", recorded), status, facts, [])
+
+    message = str(exc_info.value)
+    assert "'A'" in message
+    assert "'B'" in message
+
+
+def test_refuse_edited_done_steps_skips_an_unrecorded_definition(
+    tmp_path: Path, hello_world_bp_path: Path
+) -> None:
+    """Verify a step recorded without a definition hash is not checked."""
+    wp = _guard_workplan(_hello_step(hello_world_bp_path.as_posix(), "A"))
+    facts = describe_steps(wp, tmp_path)
+
+    refuse_edited_done_steps(
+        wp, _recorded("run", {"A": ""}), DagStatus({"A": Status.Done}), facts, []
+    )
+
+
+def test_refuse_edited_done_steps_skips_a_step_new_to_the_run(
+    tmp_path: Path, hello_world_bp_path: Path
+) -> None:
+    """Verify a step the manifest does not list is not refused."""
+    wp = _guard_workplan(
+        _hello_step(hello_world_bp_path.as_posix(), "A"),
+        _hello_step(hello_world_bp_path.as_posix(), "New"),
+    )
+    facts = describe_steps(wp, tmp_path)
+    recorded = {"A": facts["A"].definition_hash}
+    status = DagStatus({"A": Status.Done, "New": Status.Done})
+
+    refuse_edited_done_steps(wp, _recorded("run", recorded), status, facts, [])
+
+
+def _build_guarded(tmp_path: Path, run_id: str, blueprint: Path) -> tuple[Path, Path]:
+    """Author a one-step workplan and return its path and its run directory."""
+    wp_path = tmp_path / "guarded.yaml"
+    wp = _guard_workplan(_hello_step(blueprint.as_posix(), "hello"))
+    assert serialize(wp_path, wp)
+    output_dir = StateDirectoryManager.data_dir(run_id)
+    output_dir.mkdir(parents=True, exist_ok=True)
+    return wp_path, output_dir
+
+
+@pytest.mark.asyncio
+async def test_build_dag_without_a_manifest_loads_no_run_state(
+    tmp_path: Path, mock_run_id: str, hello_world_bp_path: Path
+) -> None:
+    """Verify a run directory without a manifest is entered without reading
+    the run's state.
+    """
+    wp_path, _ = _build_guarded(tmp_path, mock_run_id, hello_world_bp_path)
+
+    with (
+        mock.patch("cstar.orchestration.dag_runner.check_environment"),
+        mock.patch(
+            "cstar.orchestration.dag_runner.load_run_state", mock.AsyncMock()
+        ) as load_state,
+    ):
+        await build_dag(wp_path, mock_run_id)
+
+    load_state.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_build_dag_refuses_a_corrupt_manifest_before_writing_anything(
+    tmp_path: Path, mock_run_id: str, hello_world_bp_path: Path
+) -> None:
+    """Verify an unreadable manifest refuses the re-entry before the transformed
+    workplan is written.
+    """
+    wp_path, output_dir = _build_guarded(tmp_path, mock_run_id, hello_world_bp_path)
+    (output_dir / RUN_MANIFEST_NAME).write_text("[]")
+
+    with (
+        mock.patch("cstar.orchestration.dag_runner.check_environment"),
+        pytest.raises(CstarExpectationFailed, match="cannot be re-entered"),
+    ):
+        await build_dag(wp_path, mock_run_id)
+
+    assert not list(output_dir.glob("*_transformed.yaml*"))
+
+
+@pytest.mark.asyncio
+async def test_build_dag_refuses_a_too_new_manifest_with_upgrade_guidance(
+    tmp_path: Path, mock_run_id: str, hello_world_bp_path: Path
+) -> None:
+    """Verify a manifest written by a newer release refuses the re-entry with the
+    upgrade guidance, not with advice to remove the file.
+    """
+    wp_path, output_dir = _build_guarded(tmp_path, mock_run_id, hello_world_bp_path)
+    manifest = _recorded(mock_run_id, {"hello": "stale"})
+    manifest.schema_version = "999.0.0"
+    write_run_manifest(output_dir, manifest)
+
+    with (
+        mock.patch("cstar.orchestration.dag_runner.check_environment"),
+        pytest.raises(CstarExpectationFailed, match="Upgrade cstar-ocean") as exc_info,
+    ):
+        await build_dag(wp_path, mock_run_id)
+
+    assert "remove the file" not in str(exc_info.value)
+    assert ARG_RUN_ID in str(exc_info.value)
+    assert not list(output_dir.glob("*_transformed.yaml*"))
+
+
+@pytest.mark.asyncio
+async def test_build_dag_refuses_an_edited_done_step_before_writing_anything(
+    tmp_path: Path, mock_run_id: str, hello_world_bp_path: Path
+) -> None:
+    """Verify an edited Done step refuses the re-entry before the transformed
+    workplan is written, and that clobbering the step lets it through.
+    """
+    wp_path, output_dir = _build_guarded(tmp_path, mock_run_id, hello_world_bp_path)
+    write_run_manifest(output_dir, _recorded(mock_run_id, {"hello": "stale"}))
+    done = DagStatus({"hello": Status.Done})
+
+    with (
+        mock.patch("cstar.orchestration.dag_runner.check_environment"),
+        mock.patch(
+            "cstar.orchestration.dag_runner.load_run_state",
+            mock.AsyncMock(return_value=done),
+        ),
+    ):
+        with pytest.raises(
+            CstarExpectationFailed, match=re.escape(f"{ARG_CLOBBER} hello")
+        ):
+            await build_dag(wp_path, mock_run_id)
+
+        assert not list(output_dir.glob("*_transformed.yaml*"))
+
+        await build_dag(wp_path, mock_run_id, clobber_steps=["hello"])
+
+    assert list(output_dir.glob("*_transformed.yaml*"))
 
 
 @pytest.mark.asyncio
@@ -1349,7 +1647,7 @@ async def test_prepare_workplan_persists_pre_run_overrides(
     """
     wp_path = wp_templates_dir / "workplan.yaml"
 
-    wp, prepared_path, _, _ = await prepare_workplan(
+    wp, prepared_path, _ = await prepare_workplan(
         wp_path, tmp_path / "output", pre_run=True
     )
     persisted = deserialize(prepared_path, LiveWorkplan)
@@ -1365,7 +1663,7 @@ async def test_prepare_workplan_without_pre_run_leaves_steps_unmarked(
     wp_templates_dir: Path,
 ) -> None:
     """Verify a plain run does not mark any step for pre-run."""
-    wp, prepared_path, _, _ = await prepare_workplan(
+    wp, prepared_path, _ = await prepare_workplan(
         wp_templates_dir / "workplan.yaml", tmp_path / "output"
     )
 
@@ -1449,7 +1747,7 @@ async def test_prepare_workplan_pre_run_does_not_report_injected_overrides(
     wp_path = tmp_path / "hello.yaml"
     serialize(wp_path, _make_workplan([step]))
 
-    wp, _, _, _ = await prepare_workplan(wp_path, tmp_path / "output", pre_run=True)
+    wp, _, _ = await prepare_workplan(wp_path, tmp_path / "output", pre_run=True)
 
     assert wp.steps[0].pre_run
     assert all(isinstance(s, LiveStep) for s in wp.steps)
@@ -1879,7 +2177,7 @@ async def test_prepare_workplan_anchors_relative_blueprint_path(
     elsewhere.mkdir()
     monkeypatch.chdir(elsewhere)
 
-    wp, prepared_path, _, _ = await prepare_workplan(wp_path, tmp_path / "output")
+    wp, prepared_path, _ = await prepare_workplan(wp_path, tmp_path / "output")
 
     expected = (plans / "hw.yaml").resolve()
     assert Path(wp.steps[0].blueprint_path) == expected

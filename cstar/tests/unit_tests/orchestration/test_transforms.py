@@ -15,20 +15,22 @@ from pydantic import ValidationError
 from cstar.applications.hello_world import HelloWorldBlueprint
 from cstar.applications.roms_marbl.file_system import RomsFileSystemManager
 from cstar.applications.roms_marbl.models import RomsMarblBlueprint
+from cstar.applications.roms_marbl.outputs import (
+    BoundaryFile,
+    CarbonateSensitivityFile,
+    RestartFile,
+    restart_timestamp,
+    warn_on_restart_start_date_mismatch,
+)
 from cstar.applications.roms_marbl.transforms import (
     SOURCE_DELIMITER,
-    BoundaryFile,
     CarbonateSensitivityDirective,
-    CarbonateSensitivityFile,
     CarbonateSensitivityTrxAdapter,
     ContinuanceDirective,
     NestingDirective,
-    RestartFile,
     RestartFileTrxAdapter,
     RomsMarblTimeSplitter,
     _split_sources,
-    restart_timestamp,
-    warn_on_restart_start_date_mismatch,
 )
 from cstar.applications.roms_marbl.transforms import (
     log as transforms_log,
@@ -6852,7 +6854,7 @@ async def test_prepare_workplan_pins_external_run(
         "cstar.orchestration.dag_runner.get_launcher",
         return_value=_FakeSlurmLauncher(),
     ):
-        wp, trx_path, _, _ = await prepare_workplan(
+        wp, trx_path, _ = await prepare_workplan(
             wp_path, output_dir, {"spin_id": "spinup"}
         )
 
@@ -6966,7 +6968,7 @@ async def test_prepare_workplan_injects_compute_defaults(
     output_dir = tmp_path / "prepared"
     output_dir.mkdir()
 
-    _, trx_path, _, _ = await prepare_workplan(wp_path, output_dir, {})
+    _, trx_path, _ = await prepare_workplan(wp_path, output_dir, {})
 
     slurm = {
         s.name: t.cast("dict[str, t.Any]", s.compute_overrides["slurm"])

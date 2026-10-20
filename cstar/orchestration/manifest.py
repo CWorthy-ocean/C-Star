@@ -12,7 +12,6 @@ without invalidating them.
 """
 
 import enum
-import fcntl
 import typing as t
 import uuid
 from collections.abc import Iterator
@@ -24,7 +23,7 @@ from urllib.parse import urlsplit
 
 from pydantic import AfterValidator, Field
 
-from cstar.applications.core import ArtifactKind, get_application
+from cstar.applications.core import ArtifactKind, ArtifactSpec, get_application
 from cstar.base.exceptions import CstarError, CstarExpectationFailed
 from cstar.base.log import get_logger
 from cstar.base.provenance import canonical_hash, package_versions, system_name
@@ -33,6 +32,7 @@ from cstar.execution.file_system import (
     StateDirectoryManager,
     is_remote_resource,
     local_copy,
+    locked,
     write_text_atomic,
 )
 from cstar.orchestration.models import (
@@ -391,6 +391,84 @@ def _unique(items: "Sequence[_M]") -> list[_M]:
     return unique
 
 
+def expand_artifacts(root: Path, specs: "Sequence[ArtifactSpec]") -> list[Product]:
+    """Expand declared artifact patterns into the products found under a step root.
+
+    Walks nothing but the patterns given, and never raises: a pattern or a file
+    that cannot be read is logged at debug and skipped.
+
+    Parameters
+    ----------
+    root : Path
+        The step root the patterns are relative to.
+    specs : Sequence[ArtifactSpec]
+        The declarations, in priority order: a file matched by several is
+        claimed by the first.
+
+    Returns
+    -------
+    list[Product]
+        One product per matching regular file, sorted by path.
+    """
+    found: dict[str, Product] = {}
+    for spec in specs:
+        try:
+            matches = sorted(root.glob(spec.pattern))
+        except OSError as ex:
+            log.debug(f"Unable to expand the pattern {spec.pattern!r}: {ex}")
+            continue
+        for match in matches:
+            path = match.relative_to(root).as_posix()
+            if path in found:
+                continue
+            try:
+                if not match.is_file():
+                    continue
+                size = match.stat().st_size
+            except OSError as ex:
+                log.debug(f"Unable to inspect {str(match)!r}: {ex}")
+                continue
+            found[path] = Product(
+                kind=spec.kind.value,
+                path=path,
+                size_bytes=size,
+                metadata=dict(spec.metadata),
+            )
+    return sorted(found.values(), key=lambda product: product.path)
+
+
+def merge_products(
+    declared: "Sequence[Product]", reported: "Sequence[Product]"
+) -> list[Product]:
+    """Merge the products found by declared patterns with those a runtime hook reported.
+
+    Declarations own kind and size, hooks own metadata.
+
+    Parameters
+    ----------
+    declared : Sequence[Product]
+        The products expanded from the application's declarations.
+    reported : Sequence[Product]
+        The products reported while the run executed.
+
+    Returns
+    -------
+    list[Product]
+        The declared products, then the reported products at undeclared paths.
+    """
+    merged = {product.path: product for product in declared}
+    undeclared: list[Product] = []
+    for product in reported:
+        known = merged.get(product.path)
+        if known is None:
+            undeclared.append(product)
+        else:
+            merged[product.path] = known.model_copy(
+                update={"metadata": {**known.metadata, **product.metadata}}
+            )
+    return [*merged.values(), *undeclared]
+
+
 def _read(path: Path, klass: type[_M], label: str) -> _M | None:
     """Read a persisted document into its model.
 
@@ -535,13 +613,8 @@ def manifest_lock(run_id: str) -> Iterator[None]:
         While the lock is held.
     """
     lock_path = StateDirectoryManager.run_state_dir(run_id=run_id) / MANIFEST_LOCK_NAME
-    lock_path.parent.mkdir(parents=True, exist_ok=True)
-    with lock_path.open("a") as lock_file:
-        fcntl.flock(lock_file, fcntl.LOCK_EX)
-        try:
-            yield
-        finally:
-            fcntl.flock(lock_file, fcntl.LOCK_UN)
+    with locked(lock_path):
+        yield
 
 
 def workplan_content_hash(workplan: "Workplan") -> str:

@@ -33,7 +33,7 @@ from cstar.applications.cdr_metrics import (
     source_sign_report,
 )
 from cstar.applications.core import RunnerRequest, get_application
-from cstar.applications.roms_marbl.transforms import CarbonateSensitivityFile
+from cstar.applications.roms_marbl.outputs import CarbonateSensitivityFile
 from cstar.entrypoint.config import JobConfig, ServiceConfiguration
 from cstar.execution.handler import ExecutionStatus
 from cstar.orchestration.serialization import load_blueprint
@@ -1142,6 +1142,20 @@ class TestCdrMetricsRunner:
         assert fake_roms_tools.grid_paths == []
 
 
+def _save_blank_figure(
+    self: Any, margin: float = 10.0, save_path: str | None = None
+) -> None:
+    """Stand in for `UpscaledCDR.plot_domains`, saving an empty figure."""
+    import matplotlib
+
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+
+    plt.figure()
+    plt.savefig(save_path)
+    plt.close("all")
+
+
 class TestNestedCdrMetricsRunner:
     """Tests for `CdrMetricsRunner.run` on nested domains, with the real
     `UpscaledCDR`, metrics and plotting.
@@ -1153,10 +1167,18 @@ class TestNestedCdrMetricsRunner:
         tmp_path: Path,
         cdr_dirs: dict[str, Path],
         fake_roms_tools: _FakeRomsTools,
+        monkeypatch: pytest.MonkeyPatch,
     ) -> CdrMetricsBlueprint:
         """Nested domains: a child holding the release, inside a parent receiving a
         transfer, each with its own grid and `_cdr` files.
+
+        The domain map is replaced by a blank figure: roms-tools draws its
+        coastlines with cartopy, which downloads Natural Earth data, and unit
+        tests must not use the network.
         """
+        monkeypatch.setattr(
+            cdr_metrics.roms_tools.UpscaledCDR, "plot_domains", _save_blank_figure
+        )
         parent_dir = tmp_path / "parent" / "output"
         for name in ("x_cdr.20120101000000.nc", "x_cdr.20120101020000.nc"):
             _write_cdr_file(parent_dir / name)

@@ -1,5 +1,6 @@
 import re
 import typing as t
+from collections.abc import Sequence
 from pathlib import Path
 
 import numpy as np
@@ -8,12 +9,16 @@ from pydantic import Field
 
 from cstar.applications.core import (
     ApplicationDefinition,
+    ArtifactKind,
+    ArtifactSpec,
     RunnerResult,
     register_application,
 )
+from cstar.applications.roms_marbl.outputs import UPSCALING_SUFFIX
 from cstar.base.log import get_logger
 from cstar.base.utils import convert_to_cdf5
 from cstar.entrypoint.runner import BlueprintRunner
+from cstar.execution.file_system import JobFileSystemManager
 from cstar.execution.handler import ExecutionStatus
 from cstar.orchestration.models import Blueprint
 
@@ -23,6 +28,9 @@ _APP_NAME_LONG: t.Final[str] = "Nesting Data Processor"
 """The long-form application name."""
 
 log = get_logger(__name__)
+
+UPSCALED_CDR_NAME: t.Final[str] = "upscaled_cdr.nc"
+"""The name of the upscaled CDR forcing file."""
 
 BASE_TRACER_NAMES: t.Final[tuple[str, ...]] = ("ALK", "DIC")
 """Tracers always written to ``cdr_trcflx_profile``: MARBL's ALK and DIC
@@ -119,14 +127,16 @@ class UpscalerRunner(BlueprintRunner[UpscalerBlueprint]):
             msg = f"Specified path of upscale files doesn't exist or isn't a directory: {uscl_dir}"
             raise FileNotFoundError(msg)
 
-        files: list[Path | str] = list(uscl_dir.glob("*_uscl.??????????????.nc"))
+        files: list[Path | str] = list(
+            uscl_dir.glob(f"*{UPSCALING_SUFFIX}.??????????????.nc")
+        )
         if len(files) == 0:
             msg = f"No uscl files found in {uscl_dir}"
             raise FileNotFoundError(msg)
 
-        out_path = self.blueprint.effective_working_dir / "output"
+        out_path = JobFileSystemManager(self.blueprint.effective_working_dir).output_dir
         out_path.mkdir(parents=True, exist_ok=True)
-        out_file = out_path / "upscaled_cdr.nc"
+        out_file = out_path / UPSCALED_CDR_NAME
 
         cdr_upscaler = CDRUpscaler(files)
         cdr_upscaler.create_cdr_dataset()
@@ -150,6 +160,30 @@ class UpscalerApplication(
     runner = UpscalerRunner
     blueprint = UpscalerBlueprint
     applicable_transforms = ()
+
+    @t.override
+    def artifacts(self, blueprint: UpscalerBlueprint) -> Sequence[ArtifactSpec]:
+        """Declare the upscaled CDR forcing file an upscaler run leaves.
+
+        Parameters
+        ----------
+        blueprint : UpscalerBlueprint
+            The blueprint of the upscaler step.
+
+        Returns
+        -------
+        Sequence[ArtifactSpec]
+            The CDR forcing pattern.
+        """
+        # a manager on a placeholder root only spells the layout; it touches no disk
+        fs = JobFileSystemManager(Path("/"))
+        output = fs.output_dir.relative_to(fs.root_dir)
+        return [
+            ArtifactSpec(
+                kind=ArtifactKind.cdr_forcing,
+                pattern=(output / UPSCALED_CDR_NAME).as_posix(),
+            )
+        ]
 
 
 class CDRUpscaler:

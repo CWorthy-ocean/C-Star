@@ -86,6 +86,21 @@ from cstar.roms.namelist import is_commit_hash, release_ref_for_remote
 
 log = logging.getLogger(__name__)
 
+INPUT_DATA_DIR_NAME = "input_data"
+"""The directory under the working directory that holds the generated input NetCDF files."""
+
+BLUEPRINTS_DIR_NAME = "blueprints"
+"""The directory under the working directory that holds the emitted blueprint and its sidecars."""
+
+BUILDS_DIR_NAME = "builds"
+"""The directory under the working directory that holds the rendered build templates."""
+
+COMPILE_TIME_DIR_NAME = "compile-time"
+"""The directory under the builds directory that holds the rendered compile-time templates."""
+
+RUN_TIME_DIR_NAME = "run-time"
+"""The directory under the builds directory that holds the rendered run-time templates."""
+
 
 def _schedule_coroutine(coro):
     """
@@ -472,7 +487,7 @@ class ForgeExecutor(BaseModel):
     @property
     def input_data_dir(self) -> Path:
         """Directory for generated input NetCDF files (grid, forcing, etc.)."""
-        return self._require_host().working_dir / "input_data"
+        return self._require_host().working_dir / INPUT_DATA_DIR_NAME
 
     def _build_grid(self, label: str, grid_kwargs: dict[str, Any]) -> Any:
         """``rt.Grid(**grid_kwargs)`` for one of the (up to three) grids the
@@ -962,17 +977,19 @@ class ForgeExecutor(BaseModel):
     @property
     def roms_marbl_blueprint_dir(self) -> Path:
         """Return the blueprint directory path (under host.working_dir)."""
-        return self._require_host().working_dir / "blueprints"
+        return self._require_host().working_dir / BLUEPRINTS_DIR_NAME
 
     @property
     def compile_time_code_dir(self) -> Path:
         """Compile-time rendered templates under host.working_dir/builds."""
-        return self._require_host().working_dir / "builds" / "compile-time"
+        return (
+            self._require_host().working_dir / BUILDS_DIR_NAME / COMPILE_TIME_DIR_NAME
+        )
 
     @property
     def run_time_code_dir(self) -> Path:
         """Run-time rendered templates under host.working_dir/builds."""
-        return self._require_host().working_dir / "builds" / "run-time"
+        return self._require_host().working_dir / BUILDS_DIR_NAME / RUN_TIME_DIR_NAME
 
     @property
     def _use_pio(self) -> bool:

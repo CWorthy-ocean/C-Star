@@ -45,6 +45,8 @@ SHAPE = {"A": [], "B": ["A"]}
 RUN_TIMEOUT = 180.0
 POLL_INTERVAL = 0.5
 STANDALONE_NAME = "standalone hello"
+PRODUCT_HEADINGS = ("Products missing", "Products whose size")
+TRANSFORMED_WORKPLAN_NAME = "workplan_transformed.yaml"
 
 
 @dataclass(frozen=True)
@@ -174,6 +176,29 @@ def test_status_closes_the_attempt(manifest_run: ManifestRun) -> None:
         assert entry.record.outcome == "completed"
 
 
+def test_check_is_clean_and_hello_world_records_no_products(
+    manifest_run: ManifestRun,
+) -> None:
+    """``hello_world`` declares no products, and ``cstar run check`` finds none to fault.
+
+    The exit code is not asserted: the workplan the harness writes names its
+    blueprints by absolute path, so ``workplan_transformed.yaml`` is reported under
+    the absolute-path check, which is not a product finding.
+    """
+    proc = run_cstar(manifest_run.env, "run", "check", RUN_ID)
+    assert "Skipped products" not in proc.stdout, _output(proc)
+    assert not any(heading in proc.stdout for heading in PRODUCT_HEADINGS), _output(
+        proc
+    )
+    findings = [line for line in proc.stdout.splitlines() if line.startswith("  ")]
+    assert all(TRANSFORMED_WORKPLAN_NAME in line for line in findings), _output(proc)
+
+    for step in SHAPE:
+        record = read_step_record(manifest_run.step_root(step))
+        assert record is not None
+        assert record.products == []
+
+
 def test_reentry_appends_an_attempt(manifest_run: ManifestRun) -> None:
     """Re-entering the run keeps the manifest's identity and adds an attempt.
 
@@ -218,6 +243,13 @@ def test_show_reads_a_copied_run(manifest_run: ManifestRun, tmp_path: Path) -> N
 
     proc = run_cstar(manifest_run.env, "run", "show", str(copy))
     assert proc.returncode == 0, _output(proc)
+
+    # the exit code is not asserted: the copy's transformed workplan may name
+    # absolute paths, which is a different check
+    proc = run_cstar(manifest_run.env, "run", "check", str(copy), "--no-refresh")
+    assert not any(heading in proc.stdout for heading in PRODUCT_HEADINGS), _output(
+        proc
+    )
 
 
 def test_standalone_blueprint_run_leaves_both_files(

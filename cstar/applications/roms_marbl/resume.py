@@ -26,7 +26,8 @@ import xarray as xr
 
 from cstar.applications.roms_marbl.file_system import RomsFileSystemManager
 from cstar.applications.roms_marbl.models import RomsMarblBlueprint
-from cstar.applications.roms_marbl.transforms import RestartFile, RestartFileTrxAdapter
+from cstar.applications.roms_marbl.outputs import RestartFile
+from cstar.applications.roms_marbl.transforms import RestartFileTrxAdapter
 from cstar.base.exceptions import CstarExpectationFailed
 from cstar.base.log import get_logger
 from cstar.execution.file_system import is_remote_resource, local_copy

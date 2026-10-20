@@ -697,6 +697,7 @@ Re-running a workplan
 Running a workplan under a :term:`run ID` that already exists re-enters that run. By default the run ID is the workplan ``name``, so running the same file again re-enters its previous run. Each step is handled according to its recorded state:
 
 - A step that is done is reused as it is, unless you pass ``--clobber <step-name|all>``, which clears it and runs it again from scratch.
+- A step that is done is not re-run under a changed definition: if its blueprint file, its ``blueprint_overrides``, its ``directives``, its dependencies or its application changed since the step ran, the re-entry is refused, and the message names the steps and the ``--clobber <step-name>`` to pass. Pass ``--run-id <other-id>`` to run the changed workplan separately instead. A step whose producer changed through ``from_step`` is named too. Runtime ``--var`` values and ``compute_overrides`` / ``workflow_overrides`` (resources, clobber, resume) are not part of a step's definition, so changing them re-enters the run without a refusal. A run recorded by an earlier release has no definition hashes in its :ref:`run manifest <workplan_run_manifest>` and is not checked.
 - A step that failed is run again from scratch, unless you pass ``--resume``, which continues it in place from its last usable restart when its application supports that.
 - A step that is still in progress is adopted when the launcher that started it matches the current launcher; otherwise the run is refused unless that step is clobbered.
 - A workplan with the same ``name`` as an earlier run but different content than the workplan that run started from is refused, because the two would share one run directory; the same workplan arriving by another path (a remote file, a moved checkout) is not. Pass ``--run-id <other-id>`` to run it separately, or rename the workplan.
@@ -830,7 +831,7 @@ Every run records itself in two kinds of file.
 - one entry per step: its name, application, working directory relative to the run directory, a definition hash of what the step computes, its blueprint, its status as of the time the manifest was last refreshed, and its step record once it has one;
 - what the run depends on outside itself: referenced runs, source data locations, codebases with their commit or branch, and the catalog entries and producer blueprints named in the blueprints' provenance.
 
-``cstar-step.yaml`` is the :term:`step record`, in each step's working directory (``tasks/<step>/``). The step process writes it when it shuts down: the outcome (``completed``, ``failed``, ``cancelled`` or ``unsubmitted``), start and finish times, the system, package versions, the :term:`products <Product>` the step reports (none yet) and any errors.
+``cstar-step.yaml`` is the :term:`step record`, in each step's working directory (``tasks/<step>/``). The step process writes it when it shuts down: the outcome (``completed``, ``failed``, ``cancelled`` or ``unsubmitted``), start and finish times, the system, package versions, the :term:`products <Product>` the step left and any errors. The products are the files a user keeps, each with its size in bytes: for a ROMS step, its joined outputs by stream, its namelist, cppdefs and MARBL configuration, its executable and its log; for a forge step, its generated inputs, published blueprint, rendered configuration and log. The size ``cstar run ls`` shows for each step (``step_sizes``) is a separate measurement of the whole directory, not derived from the products.
 
 The scheduling command writes the manifest, under a lock, so concurrent commands do not overwrite each other. The steps write their own records and never touch the manifest. ``cstar run status``, ``cstar run show <run-id>`` and ``cstar workplan run --resume`` refresh the manifest: they fold the step statuses and records into it, and once every step is terminal they set ``finished_at`` on the latest attempt. That field is the completion marker. A run that finishes while nobody is watching is closed by the next ``status`` or ``show``.
 
@@ -912,7 +913,7 @@ Runs completed with an earlier C-Star release kept joined files in a ``joined_ou
 Checking a Run Directory
 ^^^^^^^^^^^^^^^^^^^^^^^^
 
-A run directory keeps working after it is copied or moved as a unit only while the files that describe it refer to each other by relative path. Use the ``check`` command to look for what does not, in a tracked run (by run ID) or in any run directory (by path, a directory that contains ``tasks/``):
+A run directory keeps working after it is copied or moved as a unit only while the files that describe it refer to each other by relative path. Use the ``check`` command to look for what does not, in a tracked run (by run ID) or in any run directory (by path, a directory that contains ``tasks/``, or one that holds ``cstar-run.yaml`` and no ``tasks/``, a standalone blueprint run):
 
 .. code-block:: console
 
@@ -924,8 +925,11 @@ The command reports, kind by kind, with one line per finding:
 - absolute paths under the run, or under the C-Star data home, in the files each step emits (``output/*.yaml``, ``blueprints/B_*.yaml``, ``work/cstar_generated_roms.nml``) and in the run's ``*_transformed.yaml``. Pass ``--all`` to scan the launch artifacts too (override and directive files, ``script.sh`` and namelists); launchers regenerate those, so they are skipped by default.
 - symlinks with an absolute target inside the run, and symlinks whose target does not exist.
 - steps of the transformed workplan with no ``tasks/<slug>`` directory. A step that has not started has none yet.
+- products that are missing from the run, or whose size changed, compared with the step records folded into the manifest. A log is reported only when it shrank, since a step's own log is still written after its record is taken. Pass ``--verify`` to compare the content too, where a sha256 is recorded (none is yet).
 
-Symlinks with a target outside the run (absolute, or relative and climbing out of it), step directories that no step accounts for, and sentinel files of the run that no step accounts for (found by run ID, so not for a bare path) are listed for information and do not fail the check. Nothing is ever deleted.
+Symlinks with a target outside the run (absolute, or relative and climbing out of it), step directories that no step accounts for, sentinel files of the run that no step accounts for (found by run ID, so not for a bare path), steps that are done without a step record, and a latest attempt that has not finished are listed for information and do not fail the check. Nothing is ever deleted.
+
+For a run ID the manifest is refreshed first, as ``cstar run show`` does; pass ``--no-refresh`` to read it as last recorded.
 
 The exit code is 0 when there is nothing to fix, 1 when findings remain and 2 for bad arguments. A workplan file is refused: validate it with ``cstar workplan check <file>``.
 
