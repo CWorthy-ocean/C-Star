@@ -162,9 +162,9 @@ Definitions
       once every step is terminal. See :doc:`workplans`.
 
     Product
-      A file a step reports in its step record, with a kind, size and
-      metadata. The applications record their products starting with the
-      next release; until then the list is empty. See :doc:`workplans`.
+      A file a step left, listed in its step record with a kind (see the
+      kinds table in :doc:`custom_applications`), its path, its size in bytes
+      and metadata. See :doc:`workplans`.
 
     Pre-run
       Performing every stage before the model launch -- staging inputs,

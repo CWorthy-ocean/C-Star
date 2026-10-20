@@ -712,6 +712,12 @@ def test_emitted_blueprint_defaults_to_none() -> None:
     assert app.emitted_blueprint(app.blueprint.model_construct()) is None
 
 
+def test_artifacts_defaults_to_empty() -> None:
+    """An application that does not override the hook declares no products."""
+    app = get_application("hello_world")
+    assert not app.artifacts(app.blueprint.model_construct())
+
+
 _EMITTED_BLUEPRINT_FIELDS = {
     "filename": "B_x.yaml",
     "application": "roms_marbl",

@@ -1,7 +1,9 @@
 """Tests for the run-directory checks in `cstar.orchestration.run_check`."""
 
+import hashlib
 import logging
 import os
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
@@ -13,17 +15,26 @@ from cstar.execution.file_system import (
     JobFileSystemManager,
     StateDirectoryManager,
 )
-from cstar.orchestration.models import Step
+from cstar.orchestration.manifest import (
+    Attempt,
+    Product,
+    RunManifest,
+    StepEntry,
+    StepRecord,
+)
+from cstar.orchestration.models import BlueprintIdentity, Step
 from cstar.orchestration.orchestration import LiveStep, LiveWorkplan
 from cstar.orchestration.run_check import (
     Finding,
     FindingKind,
     Orphans,
+    RunCheckReport,
     check_run,
     find_absolute_paths,
     find_bad_symlinks,
     find_missing_step_dirs,
     find_orphans,
+    find_product_findings,
     gathered_output_dir,
     repair_symlinks,
     report_orphans,
@@ -39,6 +50,17 @@ from cstar.tests.unit_tests.orchestration.run_tree import (
 )
 
 ABSOLUTE = FindingKind.ABSOLUTE_PATH
+
+PRODUCT_KINDS = {
+    FindingKind.PRODUCT_MISSING,
+    FindingKind.PRODUCT_SIZE,
+    FindingKind.HASH_MISMATCH,
+    FindingKind.RECORD_MISSING,
+    FindingKind.ATTEMPT_OPEN,
+}
+"""The kinds that come from the run manifest, which `run` has none of."""
+
+NOW = datetime(2026, 10, 19, 12, 0, tzinfo=UTC)
 
 
 @pytest.fixture
@@ -205,9 +227,15 @@ def test_symlink_findings_carry_the_link_text(run: FakeRun) -> None:
     assert findings["abs_outside"] == str(run.elsewhere)
 
 
-def test_only_an_external_link_is_informational() -> None:
-    """Verify a link that leaves the run is the one kind that cannot fail the check."""
-    assert {k for k in FindingKind if k.informational} == {FindingKind.EXTERNAL_LINK}
+def test_only_a_link_out_or_a_gap_in_the_record_is_informational() -> None:
+    """Verify the kinds that cannot fail the check are the link that leaves the
+    run, a done step without a record and an attempt that has not finished.
+    """
+    assert {k for k in FindingKind if k.informational} == {
+        FindingKind.EXTERNAL_LINK,
+        FindingKind.RECORD_MISSING,
+        FindingKind.ATTEMPT_OPEN,
+    }
 
 
 def test_a_link_back_into_the_run_is_not_followed(run: FakeRun) -> None:
@@ -362,11 +390,11 @@ def test_a_run_report_orders_findings_by_kind(run: FakeRun) -> None:
     assert [f.kind for f in report.findings] == sorted(
         (f.kind for f in report.findings), key=list(FindingKind).index
     )
-    assert {f.kind for f in report.findings} == set(FindingKind)
+    assert {f.kind for f in report.findings} == set(FindingKind) - PRODUCT_KINDS
     assert all(f.kind is not FindingKind.EXTERNAL_LINK for f in report.problems)
     assert not report.clean
     assert report.orphans
-    assert report.skipped == ()
+    assert report.skipped == ("products: no run manifest",)
 
 
 def test_a_run_report_counts_all_files_on_request(run: FakeRun) -> None:
@@ -385,7 +413,10 @@ def test_checks_that_need_the_workplan_are_skipped_without_one(run: FakeRun) -> 
 
     assert FindingKind.MISSING_STEP_DIR not in {f.kind for f in report.findings}
     assert not report.orphans
-    assert [s.split(":")[0] for s in report.skipped] == ["step directories and orphans"]
+    assert [s.split(":")[0] for s in report.skipped] == [
+        "step directories and orphans",
+        "products",
+    ]
 
 
 def test_sentinels_are_only_checked_for_a_tracked_run(run: FakeRun) -> None:
@@ -395,7 +426,10 @@ def test_sentinels_are_only_checked_for_a_tracked_run(run: FakeRun) -> None:
     report = check_run(run.root, workplan=run.workplan, run_id=None, all_files=False)
 
     assert report.orphans == Orphans(step_dirs=(run.root / "tasks" / "stale",))
-    assert [s.split(":")[0] for s in report.skipped] == ["orphaned sentinels"]
+    assert [s.split(":")[0] for s in report.skipped] == [
+        "orphaned sentinels",
+        "products",
+    ]
 
 
 def test_a_clean_run_passes(run: FakeRun, tmp_path: Path) -> None:
@@ -601,3 +635,260 @@ def test_report_orphans_is_quiet_without_orphans(
         report_orphans(run_root, ORPHAN_RUN_ID, wp)
 
     assert not [r for r in caplog.records if r.levelno >= logging.WARNING]
+
+
+def product(path: str, size: int = 0, sha256: str = "") -> Product:
+    """A product record of the given kind-less file."""
+    return Product(kind="other", path=path, size_bytes=size, sha256=sha256)
+
+
+def manifest_of(
+    *products: Product, status: str = "Done", finished: bool = True
+) -> RunManifest:
+    """A manifest of one step, `tasks/one`, whose record lists `products`."""
+    record = StepRecord(
+        step="one",
+        application="hello_world",
+        blueprint=BlueprintIdentity(
+            kind="Blueprint", application="hello_world", name="bp", content_hash="abc"
+        ),
+        outcome="completed",
+        finished_at=NOW,
+        products=list(products),
+    )
+    return RunManifest(
+        run_id="run",
+        name="run",
+        kind="workplan",
+        created_at=NOW,
+        attempts=[Attempt(start_at=NOW, finished_at=NOW if finished else None)],
+        steps=[
+            StepEntry(
+                name="one",
+                application="hello_world",
+                working_dir="tasks/one",
+                status=status,
+                record=record,
+            )
+        ],
+    )
+
+
+@pytest.fixture
+def recorded(tmp_path: Path) -> Path:
+    """A run root whose step `one` holds three files, 4 bytes each."""
+    for name in ("a.nc", "b.nc", "c.nc"):
+        write(tmp_path / "tasks" / "one" / "output" / name, "data")
+    return tmp_path
+
+
+def located_products(findings: list[Finding]) -> set[tuple[FindingKind, str]]:
+    """The kind and file name of each finding."""
+    return {(f.kind, f.file.name) for f in findings}
+
+
+def test_a_deleted_and_a_truncated_product_are_found(recorded: Path) -> None:
+    """Verify a missing file and a file of another size are named, the intact
+    one is silent, and the size finding carries both sizes.
+    """
+    manifest = manifest_of(
+        product("output/a.nc", 4), product("output/b.nc", 4), product("output/c.nc", 4)
+    )
+    (recorded / "tasks/one/output/a.nc").unlink()
+    (recorded / "tasks/one/output/b.nc").write_text("da")
+
+    findings = find_product_findings(recorded, manifest, verify=False)
+
+    assert located_products(findings) == {
+        (FindingKind.PRODUCT_MISSING, "a.nc"),
+        (FindingKind.PRODUCT_SIZE, "b.nc"),
+    }
+    size = next(f for f in findings if f.kind is FindingKind.PRODUCT_SIZE)
+    assert size.path == "2 bytes, recorded 4"
+    assert size.file == recorded / "tasks/one/output/b.nc"
+
+
+def test_a_log_that_grew_is_not_a_finding_but_one_that_shrank_is(
+    recorded: Path,
+) -> None:
+    """Verify a log is compared for loss only: the step's own output is still
+    being written when the record is taken.
+    """
+    for name in ("grew.out", "shrank.out"):
+        write(recorded / "tasks" / "one" / "logs" / name, "data")
+    (recorded / "tasks/one/logs/grew.out").write_text("data and more")
+    (recorded / "tasks/one/logs/shrank.out").write_text("da")
+    manifest = manifest_of(
+        Product(kind="log", path="logs/grew.out", size_bytes=4),
+        Product(kind="log", path="logs/shrank.out", size_bytes=4),
+    )
+
+    findings = find_product_findings(recorded, manifest, verify=False)
+
+    assert located_products(findings) == {(FindingKind.PRODUCT_SIZE, "shrank.out")}
+
+
+def test_a_product_not_measured_is_never_a_size_finding(recorded: Path) -> None:
+    """Verify a recorded size of zero means not measured, whatever the file holds."""
+    manifest = manifest_of(product("output/a.nc", 0))
+
+    assert find_product_findings(recorded, manifest, verify=False) == []
+
+
+def test_a_step_without_products_has_no_finding(recorded: Path) -> None:
+    """Verify an empty product list yields nothing."""
+    assert find_product_findings(recorded, manifest_of(), verify=True) == []
+
+
+def test_a_done_step_without_a_record_is_informational(recorded: Path) -> None:
+    """Verify a step the manifest says is done, with no record, is reported
+    against the record's expected file, and does not fail the check.
+    """
+    manifest = manifest_of()
+    manifest.steps[0].record = None
+
+    findings = find_product_findings(recorded, manifest, verify=False)
+
+    assert findings == [
+        Finding(FindingKind.RECORD_MISSING, recorded / "tasks/one/cstar-step.yaml")
+    ]
+    assert RunCheckReport(recorded, tuple(findings)).clean
+
+
+def test_a_step_still_running_needs_no_record(recorded: Path) -> None:
+    """Verify only a done step is expected to have a record."""
+    manifest = manifest_of(status="Running")
+    manifest.steps[0].record = None
+
+    assert find_product_findings(recorded, manifest, verify=False) == []
+
+
+def test_an_unfinished_attempt_is_informational(recorded: Path) -> None:
+    """Verify the latest attempt not having finished is reported against the
+    manifest, and does not fail the check.
+    """
+    findings = find_product_findings(
+        recorded, manifest_of(finished=False), verify=False
+    )
+
+    assert findings == [Finding(FindingKind.ATTEMPT_OPEN, recorded / "cstar-run.yaml")]
+    assert RunCheckReport(recorded, tuple(findings)).clean
+
+
+def test_only_the_latest_attempt_is_considered(recorded: Path) -> None:
+    """Verify an earlier attempt that never finished does not count once a
+    later one did.
+    """
+    manifest = manifest_of()
+    manifest.attempts.insert(0, Attempt(start_at=NOW))
+
+    assert find_product_findings(recorded, manifest, verify=False) == []
+
+
+def test_verify_compares_the_recorded_hash(recorded: Path) -> None:
+    """Verify a differing hash is a mismatch carrying the digest found, a
+    matching one is silent, and nothing is hashed without `verify`.
+    """
+    good = hashlib.sha256(b"data").hexdigest()
+    manifest = manifest_of(
+        product("output/a.nc", 4, "0" * 64), product("output/b.nc", 4, good)
+    )
+
+    verified = find_product_findings(recorded, manifest, verify=True)
+    unverified = find_product_findings(recorded, manifest, verify=False)
+
+    assert verified == [
+        Finding(
+            FindingKind.HASH_MISMATCH, recorded / "tasks/one/output/a.nc", path=good
+        )
+    ]
+    assert unverified == []
+    assert not RunCheckReport(recorded, tuple(verified)).clean
+
+
+def test_verify_skips_a_product_recorded_without_a_hash(recorded: Path) -> None:
+    """Verify a product with no sha256 is not compared, and a directory is not hashed."""
+    (recorded / "tasks/one/output/dir").mkdir()
+    manifest = manifest_of(
+        product("output/a.nc", 4), product("output/dir", 0, "0" * 64)
+    )
+
+    assert find_product_findings(recorded, manifest, verify=True) == []
+
+
+def test_a_size_finding_is_not_also_a_hash_finding(recorded: Path) -> None:
+    """Verify a product that failed the cheaper check is reported once."""
+    manifest = manifest_of(product("output/a.nc", 9, "0" * 64))
+
+    findings = find_product_findings(recorded, manifest, verify=True)
+
+    assert [f.kind for f in findings] == [FindingKind.PRODUCT_SIZE]
+
+
+def test_a_run_without_a_manifest_skips_the_product_checks(recorded: Path) -> None:
+    """Verify no manifest is named as a skipped check, not reported as a finding."""
+    report = check_run(
+        recorded, workplan=None, run_id=None, all_files=False, manifest=None
+    )
+
+    assert "products: no run manifest" in report.skipped
+    assert not PRODUCT_KINDS & {f.kind for f in report.findings}
+
+
+def test_a_run_report_holds_the_product_findings(recorded: Path) -> None:
+    """Verify `check_run` folds the product findings in, ordered by kind, and
+    that the failing ones fail the run.
+    """
+    manifest = manifest_of(product("output/a.nc", 4), product("output/gone.nc", 4))
+    manifest.attempts[-1].finished_at = None
+
+    report = check_run(
+        recorded, workplan=None, run_id=None, all_files=False, manifest=manifest
+    )
+
+    assert [f.kind for f in report.findings] == [
+        FindingKind.PRODUCT_MISSING,
+        FindingKind.ATTEMPT_OPEN,
+    ]
+    assert [f.kind for f in report.problems] == [FindingKind.PRODUCT_MISSING]
+    assert not any("products" in s for s in report.skipped)
+
+
+def test_verify_without_any_recorded_hash_says_so(recorded: Path) -> None:
+    """Verify `verify` against records that hold no sha256 names the skipped check."""
+    manifest = manifest_of(product("output/a.nc", 4))
+
+    def check(*, verify: bool) -> RunCheckReport:
+        return check_run(
+            recorded,
+            workplan=None,
+            run_id=None,
+            all_files=False,
+            manifest=manifest,
+            verify=verify,
+        )
+
+    verified = check(verify=True)
+    plain = check(verify=False)
+
+    assert "hash verification: no product records a hash" in verified.skipped
+    assert not any("hash" in s for s in plain.skipped)
+
+
+def test_verify_with_a_recorded_hash_has_nothing_to_skip(recorded: Path) -> None:
+    """Verify the hash skip is said only when no product records a hash."""
+    manifest = manifest_of(
+        product("output/a.nc", 4, hashlib.sha256(b"data").hexdigest())
+    )
+
+    report = check_run(
+        recorded,
+        workplan=None,
+        run_id=None,
+        all_files=False,
+        manifest=manifest,
+        verify=True,
+    )
+
+    assert not any("hash" in s for s in report.skipped)
+    assert report.clean
