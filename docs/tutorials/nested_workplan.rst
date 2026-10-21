@@ -77,7 +77,9 @@ namelist group and setting (see :doc:`../blueprints/roms_marbl`). The
 blueprint itself is not edited; the overrides are applied to a copy when the
 step starts, and that copy is kept in the step's ``work`` directory. The
 spin-up leaves behind a restart file at the end of 2012-01-01 and, because
-the extraction is on, a day of hourly boundary values for the child.
+the boundary extraction is turned on (in the namelist, as specified by the
+forge blueprint, since we know this is a "parent" domain), a day of hourly
+boundary values for the child is also generated.
 
 **outer** runs day two of the outer grid, and shows the **continue-from**
 directive. A directive is an instruction that runs just before the model
@@ -85,18 +87,17 @@ starts, using something that only exists by then. ``continue-from: step:
 spinup`` looks in the spin-up's output for its latest restart file, makes it
 this step's initial conditions, and sets the start date to the restart's time.
 The end date stays as the blueprint has it, so this run covers 2012-01-02 to
-2012-01-03, this time with the history output on. The step lists both
-``make_outer`` (it reads that step's blueprint) and ``spinup`` (it reads that
-step's restart) under ``depends_on``; a directive that names a step you did
-not depend on is refused when you submit.
+2012-01-03. The step lists both ``make_outer`` (it reads that step's blueprint)
+and ``spinup`` (it reads that step's restart) under ``depends_on``.
 
 **inner_ic** is the one step here that is not ROMS or Forge. The inner grid
-cannot start from the GLORYS initial conditions Forge made for it, because they
+cannot start from a GLORYS initial conditions file from Forge, because it
 would not match the outer run it is nested in. The small ``nest_ic``
 application interpolates a parent restart file onto the child grid. Its
-blueprint is three paths, so instead of a file the step says ``blueprint:
-inline`` and gives the paths as overrides. Each path uses a placeholder for
-another step's directory: ``{{root_dir: make_outer}}`` is the outer Forge
+blueprint is three paths, all of which get generated within this workplan, so
+instead of writing a blueprint file that will immediately need to be overridden with
+new paths, the step says ``blueprint: inline`` and gives the paths as dynamic overrides.
+Each path uses a placeholder for another step's directory: ``{{root_dir: make_outer}}`` is the outer Forge
 step's directory (its ``input_data/`` holds the grid it wrote),
 ``{{output_dir: spinup}}`` is the spin-up's output, where ROMS put the restart
 file for the end of day one. Placeholders are filled in when the workplan is
@@ -110,22 +111,8 @@ in their outputs) and makes them this step's boundary forcing. Two sources,
 separated by ``;``, because ROMS needs boundary values on both sides of every
 time it steps through, including the first one: the spin-up's last record is
 at 2012-01-02 00:00, exactly where the inner run starts, and the outer run's
-first is an hour later. That is the whole hand-off: the outer grid never knows
-the inner one exists beyond the extraction it was asked for, and the inner run
-is an ordinary ROMS-MARBL run with unusual sources for two of its inputs.
+first is an hour later.
 
-Read the ``depends_on`` lists again with this in mind. Every entry is a file
-the step reads:
-
-- ``spinup`` reads the blueprint ``make_outer`` wrote;
-- ``outer`` reads that blueprint and the spin-up's restart;
-- ``inner_ic`` reads the outer grid from ``make_outer``, the inner grid from
-  ``make_inner`` and the spin-up's restart;
-- ``inner`` reads the blueprint ``make_inner`` wrote, the initial conditions
-  from ``inner_ic``, and boundary values from ``spinup`` and ``outer``.
-
-The two Forge steps overlap, and so would ``outer`` and ``inner_ic`` if the
-machine had the cores, since neither needs the other.
 
 Run it
 ------

@@ -10,9 +10,9 @@ small YAML file that lists the things to run as *steps*, says which steps wait
 for which, and lets a step pick up a blueprint that an earlier step produced.
 You submit the whole thing once and check on it while it runs.
 
-This page runs the same two steps as a workplan. It takes about the same time
-as the previous page, less the downloads if you have already run that page,
-since the source data is cached.
+This page runs the same two steps as a simple workplan to show you the key elements.
+The next tutorial will show how workplans can be extended with a number of features
+that help you manage more complex ocean modeling workflows.
 
 Before you start
 ----------------
@@ -30,8 +30,7 @@ Before you start
    :language: yaml
 
 The top of the file describes the workplan itself. The ``name`` doubles as the
-:term:`run ID`, the handle you use to check on the run later, so it has to be a
-plain slug (lowercase letters, digits, ``-`` and ``_``). ``state: draft`` means
+:term:`run ID`, the handle you use to check on the run later. ``state: draft`` means
 the file may still change; see :doc:`../workplans` for the ``validated`` state.
 
 Everything else is the list of ``steps``. A step is one thing to run: it has a
@@ -39,7 +38,7 @@ Everything else is the list of ``steps``. A step is one thing to run: it has a
 gets. The two steps here are exactly the two commands from the previous page:
 
 ``make_inputs``
-   Runs Forge on your forge blueprint. The ``blueprint`` path is relative to
+   Runs the Forge *application* against your Forge *blueprint*. The ``blueprint`` path is relative to
    the workplan file, not to where you run ``cstar`` from, so the two files
    can be moved around together.
 
@@ -47,9 +46,8 @@ gets. The two steps here are exactly the two commands from the previous page:
    Runs the ROMS-MARBL application. Its blueprint does not exist yet when you
    submit the workplan, because Forge has not written it. Instead of a path,
    ``blueprint`` names the step that will produce it: ``from_step:
-   make_inputs``. When the step starts, C-Star looks in the ``output``
-   directory of ``make_inputs`` and uses the blueprint it finds there. This
-   is called a *deferred* blueprint.
+   make_inputs``. When the step starts, C-Star knows where Forge will output
+   the ROMS-MARBL blueprint, and looks there for its instructions.
 
 ``depends_on`` is the ordering. A step does not start until every step it
 lists has finished successfully, and a step that depends on nothing starts at
@@ -61,8 +59,8 @@ That is the whole vocabulary for now. Steps can also override values in their
 blueprint and pass run-time information to each other; the :doc:`next page
 <nested_workplan>` uses both.
 
-2. Check it
------------
+2. Check it (optional)
+----------------------
 
 .. code-block:: console
 
@@ -70,9 +68,11 @@ blueprint and pass run-time information to each other; the :doc:`next page
 
 This reads the workplan and every blueprint it names, and reports problems
 such as a misspelled step name, a missing dependency, or a blueprint that does
-not validate. Nothing is written to disk. A deferred blueprint does not exist
-yet, so for that step the check covers everything except the blueprint's
-contents.
+not validate. Nothing is written to disk.
+
+Submitting the blueprint in the next step will also perform the check before proceeding,
+but doing it manually may help you catch errors after drafting or modifying a workplan you're
+not yet ready to submit.
 
 3. Submit it
 ------------
@@ -128,10 +128,9 @@ dependency.
    cstar run log wio-toy-forge-then-run make_inputs
 
 prints the log of one step, the same text you saw scroll past when you ran
-the blueprint directly. Add ``--monitor`` to keep following it like
-``tail -f``, and press ``Ctrl-C`` to stop. The Forge step's log is the more
-interesting one while the inputs are generated; switch to ``simulate`` once
-the model is compiling and running.
+the blueprint directly. If you want to keep track of an actively running job,
+add ``--monitor`` to stream the log output as it's generated (and press ``Ctrl-C``
+to stop).
 
 .. code-block:: console
 
@@ -139,10 +138,7 @@ the model is compiling and running.
 
 shows what the run was and what it produced: each time it was submitted, on
 which machine and with which package versions, and each step's status and
-outcome. Add ``--format yaml`` to print the whole run manifest, which also
-lists what the run depended on outside itself: the source datasets, and the
-model code with its commit. This is the one to look at when the run is over,
-and the one to send to a colleague who asks what you ran.
+outcome.
 
 ``cstar run ls`` lists every run you have started on this machine, in case
 you forget a run ID.
@@ -151,12 +147,18 @@ you forget a run ID.
 ----------------------
 
 When ``status`` shows both steps as *Done*, the simulation's output is in the
-``simulate`` step's ``output`` directory. ``cstar run path`` prints a run's or a
-step's directory, so you need not remember the layout:
+``simulate`` step's ``output`` directory. ``cstar run path <step>`` prints a run's or a
+step's directory, so you don't have to remember the layout. You can also use
 
 .. code-block:: console
 
-   ls $(cstar run path wio-toy-forge-then-run simulate)/output
+   cstar cd wio-toy-forge-then-run simulate
+
+to go straight to a given run or step.
+
+.. note:: The first time you run this command, you'll be prompted to register a shell function
+that allows it to work. If you don't want to do this, you can use the output from ``cstar run path``
+however you like, e.g. ``cd $(cstar run path wio-toy-forge-then-run simulate)``
 
 The files are the same ones the previous page produced, and you can open them
 with `roms-tools <https://roms-tools.readthedocs.io/en/latest/plotting_roms_output.html>`_
