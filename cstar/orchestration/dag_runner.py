@@ -656,6 +656,11 @@ def _carry_inputs(
                 carried_blueprints[step.name] = copied.relative_to(
                     output_dir
                 ).as_posix()
+
+        digests = {
+            file.relative_to(attempt_dir).as_posix(): carried_digest(file)
+            for file in files
+        }
     except BaseException:
         shutil.rmtree(attempt_dir, ignore_errors=True)
         raise
@@ -663,10 +668,7 @@ def _carry_inputs(
     return CarriedInputs(
         start_at=started_at,
         directory=attempt_dir.relative_to(output_dir).as_posix(),
-        carried={
-            file.relative_to(attempt_dir).as_posix(): carried_digest(file)
-            for file in files
-        },
+        carried=digests,
         carried_blueprints=carried_blueprints,
     )
 
@@ -710,7 +712,7 @@ async def prepare_workplan(
         a step requests pre-run on an application that does not support it.
     """
     started_at = utc_now()
-    # read once, beside the parse: a later edit of the file is not carried
+    # read beside the parse, so an edit made while the attempt prepares is not carried
     authored = await asyncio.to_thread(wp_path.read_bytes)
     wp_orig = await asyncio.to_thread(deserialize, wp_path, Workplan)
 

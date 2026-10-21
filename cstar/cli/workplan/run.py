@@ -613,8 +613,10 @@ def refuse_run_id_collision(wp_path: Path, run_id: str, *, explicit: bool) -> No
     try:
         recorded_path = recorded_workplan(record)
     except (CstarError, CstarSchemaTooNewError) as ex:
+        # the run cannot be re-entered either: scheduling reads the same manifest
         msg = (
-            f"{claim}, and the manifest of that run could not be read: {ex}; {escape}."
+            f"{claim}, and the manifest of that run could not be read: {ex}; pass "
+            f"{ARG_RUN_ID} <other-id> to start a new run."
         )
         raise typer.BadParameter(msg) from ex
 
