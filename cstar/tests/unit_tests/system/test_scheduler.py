@@ -14,6 +14,7 @@ from cstar.system.scheduler import (
     query_max_cpus_per_node_via_sinfo,
     query_max_walltime_via_sacctmgr,
     query_max_walltime_via_sinfo,
+    slurm_job_id,
 )
 
 ################################################################################
@@ -676,3 +677,21 @@ def test_query_max_walltime_via_sacctmgr_partition_not_valid() -> None:
 
         assert result is None
         mock_sinfo.assert_called_once()
+
+
+@pytest.mark.parametrize(
+    ("environ", "expected"),
+    [
+        ({"SLURM_JOB_ID": "123"}, "123"),
+        ({"SLURM_JOBID": "456"}, "456"),
+        ({"SLURM_JOB_ID": "123", "SLURM_JOBID": "456"}, "123"),
+        ({"SLURM_JOB_ID": "", "SLURM_JOBID": "456"}, "456"),
+        ({"SLURM_JOBID": ""}, ""),
+        ({"SLURM_NTASKS": "4"}, ""),
+        ({}, ""),
+    ],
+    ids=["job-id", "older-alias", "both", "empty-job-id", "empty", "no-job", "none"],
+)
+def test_slurm_job_id(environ: dict[str, str], expected: str) -> None:
+    """Verify the job id is read from either spelling, and is empty outside a job."""
+    assert slurm_job_id(environ) == expected

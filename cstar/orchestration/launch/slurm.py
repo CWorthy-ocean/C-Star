@@ -12,7 +12,7 @@ from cstar.base.env import (
 )
 from cstar.base.exceptions import CstarError, CstarExpectationFailed
 from cstar.base.log import get_logger
-from cstar.base.utils import WALLTIME_RE, _run_cmd
+from cstar.base.utils import WALLTIME_RE, _run_cmd, utc_now
 from cstar.execution.file_system import rotate_file
 from cstar.execution.handler import ExecutionStatus
 from cstar.execution.scheduler_job import (
@@ -403,6 +403,8 @@ class SlurmLauncher(Launcher[SlurmHandle]):
         msg = f"Submitting command `{short_command}...` for step `{step.name}`."
         log.debug(msg)
         job.submit()
+        # stamped before the delay below, which can run to seconds
+        submitted_at = utc_now()
 
         if job.id:
             # introduce slight delay so `sacct` queries can locate this job
@@ -415,6 +417,7 @@ class SlurmLauncher(Launcher[SlurmHandle]):
                 run_id=run_id,
                 launcher_name=SlurmLauncher.name,
                 pre_run=step.pre_run,
+                submitted_at=submitted_at,
             )
 
         msg = f"Unable to retrieve job ID for step `{step.name}`. Job `{job}` failed"

@@ -3,6 +3,7 @@ import os
 import shlex
 import typing as t
 from collections.abc import Awaitable, Callable, Iterable, Mapping, Sequence
+from datetime import datetime
 from enum import IntEnum, auto
 from pathlib import Path
 
@@ -226,6 +227,8 @@ class ProcessHandle(BaseModel):
     """The current status of the task."""
     pre_run: bool = Field(default=False)
     """Whether the attempt this handle tracks ran in pre-run mode (prepared without launching the model)."""
+    submitted_at: datetime | None = Field(default=None)
+    """When the launcher submitted the process; `None` on a sentinel written before submission times were recorded."""
 
     @property
     def safe_name(self) -> str:

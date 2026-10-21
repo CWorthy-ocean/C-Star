@@ -1,3 +1,4 @@
+import asyncio
 import hashlib
 import json
 import os
@@ -7,7 +8,7 @@ import shutil
 import textwrap
 import typing as t
 from collections.abc import AsyncGenerator
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from unittest import mock
 
@@ -26,6 +27,8 @@ from cstar.entrypoint.utils import ARG_CLOBBER, ARG_PRE_RUN, ARG_RUN_ID
 from cstar.execution.file_system import (
     DirectoryManager,
     JobFileSystemManager,
+    LockTimeoutError,
+    LockUnsupportedError,
     StateDirectoryManager,
 )
 from cstar.orchestration.adapter import StepToRunRequestAdapter
@@ -47,6 +50,7 @@ from cstar.orchestration.dag_runner import (
     get_orchestrator,
     get_status_detail_map,
     load_run_state,
+    on_launched,
     on_status_changed,
     original_workplan_backup,
     prepare_workplan,
@@ -92,7 +96,15 @@ from cstar.orchestration.models import (
     Workplan,
     WorkplanState,
 )
-from cstar.orchestration.orchestration import LiveStep, LiveWorkplan, Planner, Status
+from cstar.orchestration.orchestration import (
+    Launcher,
+    LiveStep,
+    LiveWorkplan,
+    Planner,
+    ProcessHandle,
+    Status,
+    Task,
+)
 from cstar.orchestration.serialization import (
     PersistenceMode,
     deserialize,
@@ -101,6 +113,7 @@ from cstar.orchestration.serialization import (
 )
 from cstar.orchestration.state import StateRepository
 from cstar.orchestration.tracking import TrackingRepository, WorkplanRun
+from cstar.orchestration.utils import ENV_CSTAR_ORCH_DELAYS
 from cstar.tests.unit_tests.orchestration.conftest import (
     EXTERNAL_TOKEN,
     ExternalTaskFactory,
@@ -2008,6 +2021,34 @@ def test_refresh_run_manifest_survives_a_corrupt_manifest(
     assert RUN_MANIFEST_NAME in caplog.text
 
 
+@pytest.mark.parametrize(
+    "error",
+    [
+        LockTimeoutError("another holder kept the lock"),
+        LockUnsupportedError("flock is not supported"),
+        PermissionError("read-only file system"),
+    ],
+    ids=["lock-busy", "no-flock", "unwritable"],
+)
+def test_refresh_run_manifest_warns_when_the_manifest_cannot_be_updated(
+    tmp_path: Path,
+    mock_run_id: str,
+    caplog: pytest.LogCaptureFixture,
+    error: Exception,
+) -> None:
+    """Verify `--resume`, which refreshes the manifest before scheduling, is not
+    stopped by a manifest it cannot update: the refresh warns and returns nothing.
+    """
+    with (
+        mock.patch("cstar.orchestration.dag_runner.manifest_lock", side_effect=error),
+        caplog.at_level("WARNING"),
+    ):
+        result = refresh_run_manifest(tmp_path, mock_run_id, DagStatus({}))
+
+    assert result is None
+    assert str(error) in caplog.text
+
+
 @pytest.mark.asyncio
 async def test_executive_run_summary_pairs_each_step_with_its_own_sentinel(
     layered_workplan: tuple[Workplan, dict[str, LocalHandle]],
@@ -2740,9 +2781,218 @@ def test_get_orchestrator_uses_local_launcher_for_pre_run_workplan(
         ),
         mock.patch.object(SlurmLauncher, "check_preconditions"),
     ):
-        orchestrator = get_orchestrator(Planner(wp))
+        orchestrator = get_orchestrator(Planner(wp), root=tmp_path)
 
     assert type(orchestrator.launcher) is exp_klass
+
+
+SUBMITTED = datetime(2026, 10, 21, 9, 30, 15, 500000, tzinfo=UTC)
+"""When the launched handles of the tests below were submitted."""
+
+
+def _launched(
+    run_id: str, *, submitted_at: datetime | None = SUBMITTED
+) -> ProcessHandle:
+    """Build the handle of a step a launcher has just submitted."""
+    return ProcessHandle(
+        pid="4242",
+        name="step-a",
+        run_id=run_id,
+        launcher_name="slurm",
+        status=Status.Submitted,
+        submitted_at=submitted_at,
+    )
+
+
+@pytest.mark.asyncio
+async def test_on_launched_persists_the_handle_then_records_the_submission(
+    tmp_path: Path, mock_run_id: str
+) -> None:
+    """Verify a launch persists the sentinel as ever and records the launcher, the
+    job id and the submission time the handle carries.
+    """
+    handle = _launched(mock_run_id)
+    events: list[str] = []
+
+    async def persisted(_: ProcessHandle) -> None:
+        events.append("persisted")
+
+    def recorded(*_: t.Any, **__: t.Any) -> bool:
+        events.append("recorded")
+        return True
+
+    with (
+        mock.patch("cstar.orchestration.dag_runner.on_status_changed", persisted),
+        mock.patch(
+            "cstar.orchestration.dag_runner.record_submission", side_effect=recorded
+        ) as record,
+    ):
+        await on_launched(handle, root=tmp_path)
+
+    assert events == ["persisted", "recorded"]
+    record.assert_called_once_with(
+        tmp_path,
+        mock_run_id,
+        "step-a",
+        launcher="slurm",
+        job_id="4242",
+        submitted_at=SUBMITTED,
+    )
+
+
+@pytest.mark.asyncio
+async def test_on_launched_records_nothing_without_a_submission_time(
+    tmp_path: Path, mock_run_id: str
+) -> None:
+    """Verify a handle adopted from a sentinel written before submission times
+    were recorded is persisted, and leaves the manifest alone.
+    """
+    handle = _launched(mock_run_id, submitted_at=None)
+
+    with (
+        mock.patch(
+            "cstar.orchestration.dag_runner.on_status_changed", mock.AsyncMock()
+        ) as persisted,
+        mock.patch("cstar.orchestration.dag_runner.record_submission") as record,
+    ):
+        await on_launched(handle, root=tmp_path)
+
+    persisted.assert_awaited_once_with(handle)
+    record.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_on_launched_warns_and_goes_on_when_the_manifest_cannot_be_written(
+    tmp_path: Path, mock_run_id: str, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Verify scheduling is not stopped by a manifest that cannot be updated: the
+    warning names the step and the manifest.
+    """
+    handle = _launched(mock_run_id)
+
+    with (
+        mock.patch(
+            "cstar.orchestration.dag_runner.on_status_changed", mock.AsyncMock()
+        ) as persisted,
+        mock.patch(
+            "cstar.orchestration.dag_runner.record_submission",
+            side_effect=CstarError("manifest is corrupt"),
+        ),
+        caplog.at_level("WARNING"),
+    ):
+        await on_launched(handle, root=tmp_path)
+
+    persisted.assert_awaited_once_with(handle)
+    assert "step-a" in caplog.text
+    assert str(tmp_path / RUN_MANIFEST_NAME) in caplog.text
+    assert "manifest is corrupt" in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_on_launched_of_an_adopted_sentinel_writes_nothing(
+    tmp_path: Path, mock_run_id: str
+) -> None:
+    """Verify the handle a later launch adopts from its sentinel, whose submission
+    survived the sentinel's YAML, leaves the manifest it was recorded in as it was.
+    """
+    write_run_manifest(tmp_path, _recorded(mock_run_id, {"step-a": "h"}))
+    handle = _launched(mock_run_id)
+
+    await on_launched(handle, root=tmp_path)
+
+    entry = (read_run_manifest(tmp_path) or pytest.fail("no manifest")).step("step-a")
+    assert entry is not None
+    assert (entry.launcher, entry.job_id) == ("slurm", "4242")
+    assert entry.submitted_at == SUBMITTED.replace(microsecond=0)
+
+    adopted = await StateRepository().get_sentinel("step-a", ProcessHandle)
+    assert adopted is not None
+    assert adopted.submitted_at == SUBMITTED
+    path = tmp_path / RUN_MANIFEST_NAME
+    before = (path.read_bytes(), path.stat().st_mtime_ns)
+
+    await on_launched(adopted, root=tmp_path)
+
+    assert (path.read_bytes(), path.stat().st_mtime_ns) == before
+
+
+class _SubmittingLauncher(Launcher[ProcessHandle]):
+    """A launcher that submits every step at once, as a job named after it."""
+
+    name = "queue"
+
+    @classmethod
+    async def launch(cls, step: LiveStep, dependencies: list[ProcessHandle]) -> t.Any:
+        await asyncio.sleep(0)  # let the steps of one pass interleave
+        handle = ProcessHandle(
+            pid=f"job-{step.name}",
+            name=step.name,
+            run_id=os.environ[ENV_CSTAR_RUNID],
+            launcher_name=cls.name,
+            status=Status.Running,
+            submitted_at=SUBMITTED + timedelta(seconds=len(step.name)),
+        )
+        return Task(step=step, handle=handle)
+
+    @classmethod
+    def handle_klass(cls) -> type[ProcessHandle]:
+        return ProcessHandle
+
+
+@pytest.mark.asyncio
+async def test_run_dag_records_every_submission_in_the_manifest(
+    tmp_path: Path,
+    mock_run_id: str,
+    hello_world_bp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Verify scheduling a workplan records the launcher, the job id and the
+    submission time of every step: the steps launched in one pass, writing the
+    manifest together, each keep their own, and so does a step launched later.
+    """
+    monkeypatch.setenv(ENV_CSTAR_ORCH_DELAYS, "0")
+    bp = hello_world_bp_path.as_posix()
+    wp = Workplan(
+        name="submitted",
+        description="A workplan whose steps are submitted.",
+        steps=[
+            _hello_step(bp, "a"),
+            _hello_step(bp, "bb"),
+            _hello_step(bp, "ccc", depends_on=["a"]),
+        ],
+    )
+    wp_path = tmp_path / "submitted.yaml"
+    assert serialize(wp_path, wp)
+
+    with (
+        mock.patch("cstar.orchestration.dag_runner.check_environment"),
+        mock.patch(
+            "cstar.orchestration.dag_runner.get_launcher",
+            return_value=_SubmittingLauncher,  # launchers work as classes
+        ),
+    ):
+        planner, trx_path, facts, carried = await build_dag(wp_path, mock_run_id)
+        wp_run = await run_dag(
+            wp_path, trx_path, mock_run_id, planner, step_facts=facts, carried=carried
+        )
+
+    manifest = read_run_manifest(wp_run.output_path)
+    assert manifest is not None
+    submissions = {
+        entry.name: (entry.launcher, entry.job_id, entry.submitted_at)
+        for entry in manifest.steps
+    }
+    assert submissions == {
+        name: (
+            "queue",
+            f"job-{name}",
+            (SUBMITTED + timedelta(seconds=len(name))).replace(microsecond=0),
+        )
+        for name in ("a", "bb", "ccc")
+    }
+    sentinel = await StateRepository().get_sentinel("a", ProcessHandle)
+    assert sentinel is not None
+    assert sentinel.submitted_at == SUBMITTED + timedelta(seconds=1)
 
 
 @pytest.mark.parametrize(

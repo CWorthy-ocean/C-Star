@@ -125,7 +125,11 @@ def _output(proc: subprocess.CompletedProcess[str]) -> str:
 
 
 def test_scheduling_writes_the_manifest(manifest_run: ManifestRun) -> None:
-    """The manifest exists as soon as the run is scheduled and names every step."""
+    """The manifest exists as soon as the run is scheduled and names every step.
+
+    ``workplan run`` returns once every step is launched, dependents included, so
+    each entry already holds its submission.
+    """
     manifest = manifest_run.scheduled
 
     assert manifest.kind == "workplan"
@@ -141,6 +145,9 @@ def test_scheduling_writes_the_manifest(manifest_run: ManifestRun) -> None:
         assert entry.working_dir == f"tasks/{slugify(name)}"
         assert entry.definition_hash
         assert entry.application == "hello_world"
+        assert entry.launcher == "local"
+        assert entry.job_id
+        assert entry.submitted_at is not None
 
 
 def _assert_carried(run_root: Path, workplan: Path, attempt: Attempt) -> None:
@@ -179,7 +186,7 @@ def test_scheduling_carries_the_inputs(manifest_run: ManifestRun) -> None:
 
 def test_each_step_writes_its_record(manifest_run: ManifestRun) -> None:
     """Every step process leaves a ``cstar-step.yaml`` in its working directory,
-    naming the blueprint file it ran there.
+    naming the blueprint file it ran there and what ran it.
     """
     for step in SHAPE:
         root = manifest_run.step_root(step)
@@ -193,6 +200,10 @@ def test_each_step_writes_its_record(manifest_run: ManifestRun) -> None:
         assert record.application == "hello_world"
         assert record.blueprint_file
         assert (root / record.blueprint_file).is_file()
+        # the hello_world tier runs where no scheduler is configured
+        assert record.execution.scheduler == "local"
+        assert record.execution.pid > 0
+        assert record.execution.host
 
 
 def test_each_record_names_its_step(manifest_run: ManifestRun) -> None:
@@ -204,7 +215,11 @@ def test_each_record_names_its_step(manifest_run: ManifestRun) -> None:
 
 
 def test_status_closes_the_attempt(manifest_run: ManifestRun) -> None:
-    """``cstar run status`` folds the records in and marks the attempt done."""
+    """``cstar run status`` folds the records in and marks the attempt done.
+
+    A step never starts before it was submitted. Both moments are whole seconds,
+    so they may be equal.
+    """
     proc = run_cstar(manifest_run.env, "run", "status", RUN_ID)
     assert proc.returncode == 0, _output(proc)
 
@@ -219,6 +234,9 @@ def test_status_closes_the_attempt(manifest_run: ManifestRun) -> None:
         assert entry.status == "Done"
         assert entry.record is not None
         assert entry.record.outcome == "completed"
+        assert entry.submitted_at is not None
+        assert entry.record.start_at is not None
+        assert entry.record.start_at >= entry.submitted_at
 
 
 def test_check_is_clean_and_hello_world_records_no_products(
@@ -293,8 +311,18 @@ def test_show_reads_a_copied_run(manifest_run: ManifestRun, tmp_path: Path) -> N
     proc = run_cstar(manifest_run.env, "run", "show", str(copy), "--format", "json")
     assert proc.returncode == 0, _output(proc)
     shown = json.loads(proc.stdout)
-    assert shown["id"] == manifest_run.manifest().id
+    manifest = manifest_run.manifest()
+    assert shown["id"] == manifest.id
     assert {entry["name"] for entry in shown["steps"]} == set(SHAPE)
+
+    # each step's submission and what ran it travel with the copy
+    for entry in shown["steps"]:
+        original = manifest.step(entry["name"])
+        assert original is not None
+        assert entry["launcher"] == original.launcher == "local"
+        assert entry["job_id"] == original.job_id != ""
+        assert entry["submitted_at"]
+        assert entry["record"]["execution"]["scheduler"] == "local"
 
     # the copy carries every attempt's inputs with it
     directories = [attempt["directory"] for attempt in shown["attempts"]]

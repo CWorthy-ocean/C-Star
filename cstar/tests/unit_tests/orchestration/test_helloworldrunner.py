@@ -1,6 +1,7 @@
 import asyncio
 import logging
 import os
+import socket
 import textwrap
 import typing as t
 import uuid
@@ -20,9 +21,14 @@ from cstar.base.env import ENV_CSTAR_RUNID
 from cstar.cli.blueprint.run import app as app_run_blueprint
 from cstar.cli.workplan.run import app as app_run_workplan
 from cstar.entrypoint.config import get_job_config, get_service_config
+from cstar.entrypoint.runner import execution_facts
 from cstar.execution.handler import ExecutionStatus
 from cstar.orchestration.adapter import StepToPlaceholderAdapter
-from cstar.orchestration.manifest import STEP_RECORD_NAME, read_step_record
+from cstar.orchestration.manifest import (
+    STEP_RECORD_NAME,
+    ExecutionFacts,
+    read_step_record,
+)
 from cstar.orchestration.models import BlueprintIdentity, Workplan, WorkplanState
 from cstar.orchestration.orchestration import LiveWorkplan
 from cstar.orchestration.serialization import deserialize, serialize
@@ -544,6 +550,108 @@ async def test_runner_writes_step_record(
     assert record.start_at <= record.finished_at
     assert "cstar-ocean" in record.versions
     assert record.errors == []
+
+
+def _leave_slurm(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Remove SLURM's variables, so a test also passes inside an allocation."""
+    for name in [k for k in os.environ if k.startswith("SLURM_")]:
+        monkeypatch.delenv(name)
+
+
+@pytest.mark.asyncio
+async def test_runner_records_a_local_execution(
+    hello_world_bp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Verify a step run outside SLURM records that it ran locally, with no allocation."""
+    _leave_slurm(monkeypatch)
+    runner = _hw_runner(hello_world_bp_path)
+
+    await runner.execute()
+
+    record = read_step_record(runner.blueprint.effective_working_dir)
+    assert record is not None
+    assert record.execution == ExecutionFacts(
+        scheduler="local", host=socket.gethostname(), pid=os.getpid()
+    )
+
+
+@pytest.mark.asyncio
+async def test_runner_records_its_slurm_allocation(
+    hello_world_bp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Verify a step run in a SLURM job records the allocation the job was granted."""
+    _leave_slurm(monkeypatch)
+    for name, value in {
+        "SLURM_JOB_ID": "4242",
+        "SLURM_JOB_NUM_NODES": "2",
+        "SLURM_NTASKS": "16",
+        "SLURM_CPUS_ON_NODE": "8",
+        "SLURM_JOB_PARTITION": "debug",
+        "SLURM_JOB_ACCOUNT": "m1234",
+    }.items():
+        monkeypatch.setenv(name, value)
+    runner = _hw_runner(hello_world_bp_path)
+
+    await runner.execute()
+
+    record = read_step_record(runner.blueprint.effective_working_dir)
+    assert record is not None
+    assert record.execution == ExecutionFacts(
+        scheduler="slurm",
+        job_id="4242",
+        host=socket.gethostname(),
+        pid=os.getpid(),
+        nodes=2,
+        tasks=16,
+        cpus=8,
+        partition="debug",
+        account="m1234",
+    )
+
+
+def test_execution_facts_outside_slurm() -> None:
+    """Verify variables of an allocation do not count without a job id."""
+    facts = execution_facts({"SLURM_NTASKS": "4", "SLURM_JOB_PARTITION": "debug"})
+
+    assert facts == ExecutionFacts(
+        scheduler="local", host=socket.gethostname(), pid=os.getpid()
+    )
+
+
+def test_execution_facts_accept_the_older_job_id_spelling() -> None:
+    facts = execution_facts({"SLURM_JOBID": "77"})
+
+    assert (facts.scheduler, facts.job_id) == ("slurm", "77")
+
+
+def test_execution_facts_leave_unreported_values_empty() -> None:
+    """Verify a job that reports no partition or counts records none."""
+    facts = execution_facts({"SLURM_JOB_ID": "77"})
+
+    assert facts == ExecutionFacts(
+        scheduler="slurm", job_id="77", host=socket.gethostname(), pid=os.getpid()
+    )
+
+
+@pytest.mark.parametrize("value", ["abc", "2(x3)", "1.5"])
+def test_execution_facts_count_an_unparseable_value_as_zero(
+    value: str, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Verify the record of what ran a step never fails the step: a count SLURM
+    reports in a form this build cannot read is logged at debug and left at zero.
+    """
+    environ = {"SLURM_JOB_ID": "77", "SLURM_NTASKS": value, "SLURM_CPUS_ON_NODE": "4"}
+
+    with caplog.at_level(logging.DEBUG, logger="cstar.entrypoint.runner"):
+        facts = execution_facts(environ)
+
+    assert (facts.tasks, facts.cpus) == (0, 4)
+    assert [r.getMessage() for r in caplog.records if "SLURM_NTASKS" in r.message] == [
+        f"Ignoring SLURM_NTASKS={value!r}: it is not a count"
+    ]
+    assert {r.levelno for r in caplog.records if "SLURM_NTASKS" in r.message} == {
+        logging.DEBUG
+    }
 
 
 @pytest.mark.asyncio

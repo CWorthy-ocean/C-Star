@@ -1,17 +1,27 @@
 """Tests for the run manifest and step record."""
 
+import fcntl
 import hashlib
 import logging
+import threading
+import time
 import typing as t
+from contextlib import contextmanager
 from datetime import UTC, datetime, timedelta, timezone
 from pathlib import Path
 
 import pytest
 
+import cstar.orchestration.manifest as manifest_module
 from cstar.applications.core import ArtifactKind, ArtifactSpec
 from cstar.applications.hello_world import HelloWorldBlueprint
 from cstar.base.exceptions import CstarError, CstarExpectationFailed
 from cstar.base.utils import slugify
+from cstar.execution.file_system import (
+    LOCK_POLL_INTERVAL,
+    LockTimeoutError,
+    StateDirectoryManager,
+)
 from cstar.orchestration.manifest import (
     ATTEMPT_DIR_FORMAT,
     ATTEMPTS_DIR_NAME,
@@ -22,6 +32,7 @@ from cstar.orchestration.manifest import (
     AttemptStatus,
     CarriedInputs,
     CodebaseRef,
+    ExecutionFacts,
     ExternalDependencies,
     ExternalRun,
     Product,
@@ -47,6 +58,7 @@ from cstar.orchestration.manifest import (
     product_paths,
     read_run_manifest,
     read_step_record,
+    record_submission,
     recorded_files_in,
     require_recorded_files,
     workplan_content_hash,
@@ -65,6 +77,16 @@ from cstar.orchestration.serialization import load_blueprint
 from cstar.system.migration import CstarSchemaTooNewError
 
 NOW = datetime(2026, 10, 15, 12, 0, tzinfo=UTC)
+
+CURRENT = RunManifest.model_fields["schema_version"].default
+"""The schema version this build writes, which both documents carry."""
+
+_MAJOR, _MINOR, _ = CURRENT.split(".")
+NEWER_MINOR = f"{_MAJOR}.{int(_MINOR) + 10}.0"
+"""A newer minor with an extra digit, which a text comparison would misorder."""
+
+NEWER_MAJOR = f"{int(_MAJOR) + 1}.0.0"
+"""A newer major."""
 
 
 def _identity(name: str = "bp", content_hash: str = "abc") -> BlueprintIdentity:
@@ -163,6 +185,50 @@ class TestRoundTrip:
         assert path == tmp_path / "step" / STEP_RECORD_NAME
         assert read_step_record(tmp_path / "step") == record
 
+    def test_default_execution_facts_are_not_written(self, tmp_path: Path) -> None:
+        """A record that says nothing of what ran it writes no `execution` key, and
+        reads back with the defaults.
+        """
+        write_step_record(tmp_path, _record())
+
+        assert "execution" not in (tmp_path / STEP_RECORD_NAME).read_text()
+        record = read_step_record(tmp_path)
+        assert record is not None
+        assert record.execution == ExecutionFacts()
+
+    def test_execution_facts_round_trip(self, tmp_path: Path) -> None:
+        facts = ExecutionFacts(
+            scheduler="slurm",
+            job_id="4242",
+            host="node-1",
+            pid=777,
+            nodes=2,
+            tasks=8,
+            cpus=4,
+            partition="debug",
+            account="m1234",
+        )
+        write_step_record(tmp_path, _record(execution=facts))
+
+        record = read_step_record(tmp_path)
+
+        assert record is not None
+        assert record.execution == facts
+        assert "execution:" in (tmp_path / STEP_RECORD_NAME).read_text()
+
+    def test_a_submission_round_trips_in_whole_seconds(self, tmp_path: Path) -> None:
+        manifest = _manifest("one")
+        manifest.steps[0].launcher = "slurm"
+        manifest.steps[0].job_id = "4242"
+        manifest.steps[0].submitted_at = NOW + timedelta(milliseconds=1500)
+
+        write_run_manifest(tmp_path, manifest)
+
+        loaded = read_run_manifest(tmp_path)
+        assert loaded is not None
+        assert loaded.steps[0].submitted_at == NOW + timedelta(seconds=1)
+        assert (loaded.steps[0].launcher, loaded.steps[0].job_id) == ("slurm", "4242")
+
     def test_unknown_product_kind_still_loads(self, tmp_path: Path) -> None:
         """A kind this build does not know is kept as text and read as `other`."""
         record = _record(products=[Product(kind="holo_grid", path="x.nc")])
@@ -181,20 +247,24 @@ class TestRoundTrip:
         assert read_run_manifest(tmp_path) is None
         assert read_step_record(tmp_path) is None
 
-    def test_documents_carry_schema_1_1_0(self, tmp_path: Path) -> None:
+    def test_documents_carry_the_current_schema(self, tmp_path: Path) -> None:
         write_run_manifest(tmp_path, _manifest("one"))
         write_step_record(tmp_path, _record())
 
-        assert "schema_version: 1.1.0" in (tmp_path / RUN_MANIFEST_NAME).read_text()
-        assert "schema_version: 1.1.0" in (tmp_path / STEP_RECORD_NAME).read_text()
+        assert StepRecord.model_fields["schema_version"].default == CURRENT
+        text = f"schema_version: {CURRENT}"
+        assert text in (tmp_path / RUN_MANIFEST_NAME).read_text()
+        assert text in (tmp_path / STEP_RECORD_NAME).read_text()
 
     def test_a_1_0_0_manifest_and_record_still_load(self, tmp_path: Path) -> None:
-        """The carried-input fields are additive: older files read with defaults."""
+        """The carried-input, execution and submission fields are additive: older
+        files read with defaults.
+        """
         write_run_manifest(tmp_path, _manifest("one"))
         write_step_record(tmp_path, _record())
         for name in (RUN_MANIFEST_NAME, STEP_RECORD_NAME):
             path = tmp_path / name
-            path.write_text(path.read_text().replace("1.1.0", "1.0.0", 1))
+            path.write_text(path.read_text().replace(CURRENT, "1.0.0", 1))
 
         manifest = read_run_manifest(tmp_path)
         record = read_step_record(tmp_path)
@@ -207,7 +277,13 @@ class TestRoundTrip:
             {},
         )
         assert manifest.steps[0].carried_blueprint == ""
+        assert (
+            manifest.steps[0].launcher,
+            manifest.steps[0].job_id,
+            manifest.steps[0].submitted_at,
+        ) == ("", "", None)
         assert record.blueprint_file == ""
+        assert record.execution == ExecutionFacts()
 
     def test_an_older_document_is_restamped_when_written(self, tmp_path: Path) -> None:
         """A document read from an older file may gain this build's fields, so it is
@@ -218,7 +294,7 @@ class TestRoundTrip:
         write_step_record(tmp_path, _record())
         for name in (RUN_MANIFEST_NAME, STEP_RECORD_NAME):
             path = tmp_path / name
-            path.write_text(path.read_text().replace("1.1.0", "1.0.0", 1))
+            path.write_text(path.read_text().replace(CURRENT, "1.0.0", 1))
         manifest = read_run_manifest(tmp_path)
         record = read_step_record(tmp_path)
         assert manifest is not None
@@ -228,9 +304,10 @@ class TestRoundTrip:
         write_run_manifest(tmp_path, manifest)
         write_step_record(tmp_path, record)
 
-        assert manifest.schema_version == record.schema_version == "1.1.0"
-        assert "schema_version: 1.1.0" in (tmp_path / RUN_MANIFEST_NAME).read_text()
-        assert "schema_version: 1.1.0" in (tmp_path / STEP_RECORD_NAME).read_text()
+        assert manifest.schema_version == record.schema_version == CURRENT
+        text = f"schema_version: {CURRENT}"
+        assert text in (tmp_path / RUN_MANIFEST_NAME).read_text()
+        assert text in (tmp_path / STEP_RECORD_NAME).read_text()
 
     def test_carried_inputs_round_trip(self, tmp_path: Path) -> None:
         manifest = _manifest("one")
@@ -250,15 +327,17 @@ class TestRoundTrip:
     def test_newer_schema_refused(self, tmp_path: Path) -> None:
         write_run_manifest(tmp_path, _manifest("one"))
         path = tmp_path / RUN_MANIFEST_NAME
-        path.write_text(path.read_text().replace("1.1.0", "1.10.0", 1))
+        path.write_text(path.read_text().replace(CURRENT, NEWER_MINOR, 1))
 
-        with pytest.raises(CstarSchemaTooNewError, match="run manifest schema 1.10.0"):
+        with pytest.raises(
+            CstarSchemaTooNewError, match=f"run manifest schema {NEWER_MINOR}"
+        ):
             read_run_manifest(tmp_path)
 
     def test_newer_step_record_refused(self, tmp_path: Path) -> None:
         write_step_record(tmp_path, _record())
         path = tmp_path / STEP_RECORD_NAME
-        path.write_text(path.read_text().replace("1.1.0", "2.0.0", 1))
+        path.write_text(path.read_text().replace(CURRENT, NEWER_MAJOR, 1))
 
         with pytest.raises(CstarSchemaTooNewError, match="step record"):
             read_step_record(tmp_path)
@@ -282,6 +361,32 @@ def test_manifest_lock_creates_the_lock_file(
 
     with manifest_lock("my-run"):  # released, so it can be taken again
         pass
+
+
+@contextmanager
+def held_manifest_lock(run_id: str) -> t.Iterator[None]:
+    """Hold a run's manifest lock as another process would: through a file of its own."""
+    path = StateDirectoryManager.run_state_dir(run_id=run_id) / MANIFEST_LOCK_NAME
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("a") as lock_file:
+        fcntl.flock(lock_file, fcntl.LOCK_EX)
+        try:
+            yield
+        finally:
+            fcntl.flock(lock_file, fcntl.LOCK_UN)
+
+
+def test_manifest_lock_gives_up_on_a_writer_that_keeps_it(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Verify a writer stalled while holding the lock makes the next one fail
+    after its timeout, rather than wait as long as the stall lasts.
+    """
+    monkeypatch.setenv("CSTAR_STATE_HOME", str(tmp_path / "state"))
+
+    with held_manifest_lock("my-run"), pytest.raises(LockTimeoutError):
+        with manifest_lock("my-run", timeout=0.1):
+            pytest.fail("the lock was taken while another writer held it")
 
 
 def test_workplan_content_hash_is_stable(hello_world_bp_path: Path) -> None:
@@ -546,6 +651,55 @@ class TestEnsureRunManifest:
             ("Done", False),
         ]
 
+    def test_rerun_steps_forget_their_submission(self, tmp_path: Path) -> None:
+        """A clobbered or resumed step is submitted again: the earlier job goes, and
+        a step the attempt leaves alone keeps its own.
+        """
+        steps: dict[str, tuple[str, str, StepFacts | None]] = {
+            n: ("hello_world", f"tasks/{n}", None) for n in ("one", "two", "three")
+        }
+        manifest = self._ensure(tmp_path, steps)
+        for entry in manifest.steps:
+            entry.launcher = "slurm"
+            entry.job_id = f"job-{entry.name}"
+            entry.submitted_at = NOW
+        write_run_manifest(tmp_path, manifest)
+
+        updated = self._ensure(
+            tmp_path,
+            steps,
+            attempt=Attempt(start_at=NOW, clobbered=["one"], resumed=["two"]),
+        )
+
+        assert [(s.launcher, s.job_id, s.submitted_at) for s in updated.steps] == [
+            ("", "", None),
+            ("", "", None),
+            ("slurm", "job-three", NOW),
+        ]
+
+    def test_upsert_keeps_the_submission(self, tmp_path: Path) -> None:
+        steps: dict[str, tuple[str, str, StepFacts | None]] = {
+            "one": (
+                "hello_world",
+                "tasks/one",
+                StepFacts("h", None, ExternalDependencies()),
+            )
+        }
+        manifest = self._ensure(tmp_path, steps)
+        manifest.steps[0].launcher = "local"
+        manifest.steps[0].job_id = "99"
+        manifest.steps[0].submitted_at = NOW
+        write_run_manifest(tmp_path, manifest)
+
+        updated = self._ensure(tmp_path, steps)
+
+        entry = updated.steps[0]
+        assert (entry.launcher, entry.job_id, entry.submitted_at) == (
+            "local",
+            "99",
+            NOW,
+        )
+
     def test_blueprint_files_repoint_every_listed_step(self, tmp_path: Path) -> None:
         """Each preparing attempt points the steps at its own copies, and a step
         it carried nothing for is cleared.
@@ -759,6 +913,246 @@ class TestLatestAttemptDir:
         assert not directory.exists()
 
 
+class TestRecordSubmission:
+    SUBMITTED = NOW + timedelta(seconds=5, milliseconds=250)
+
+    def _submit(self, root: Path, step: str = "one", **kwargs: t.Any) -> bool:
+        arguments: dict[str, t.Any] = {
+            "launcher": "slurm",
+            "job_id": "123",
+            "submitted_at": self.SUBMITTED,
+        } | kwargs
+        return record_submission(root, "run", step, **arguments)
+
+    def test_writes_the_submission_of_the_step(self, tmp_path: Path) -> None:
+        write_run_manifest(tmp_path, _manifest("one", "two"))
+
+        assert self._submit(tmp_path)
+
+        manifest = read_run_manifest(tmp_path)
+        assert manifest is not None
+        one, two = manifest.step("one"), manifest.step("two")
+        assert one is not None
+        assert two is not None
+        assert (one.launcher, one.job_id) == ("slurm", "123")
+        assert one.submitted_at == NOW + timedelta(seconds=5)
+        assert (two.launcher, two.job_id, two.submitted_at) == ("", "", None)
+
+    def test_holds_the_lock_while_it_reads_and_writes(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        write_run_manifest(tmp_path, _manifest("one"))
+        events: list[str] = []
+        read = manifest_module.read_run_manifest
+        write = manifest_module.write_run_manifest
+
+        @contextmanager
+        def lock(run_id: str, **_: t.Any) -> t.Iterator[None]:
+            events.append(f"lock {run_id}")
+            yield
+            events.append("unlock")
+
+        def read_recorded(root: Path) -> RunManifest | None:
+            events.append("read")
+            return read(root)
+
+        def write_recorded(root: Path, manifest: RunManifest) -> Path:
+            events.append("write")
+            return write(root, manifest)
+
+        monkeypatch.setattr(manifest_module, "manifest_lock", lock)
+        monkeypatch.setattr(manifest_module, "read_run_manifest", read_recorded)
+        monkeypatch.setattr(manifest_module, "write_run_manifest", write_recorded)
+
+        assert self._submit(tmp_path)
+
+        assert events == ["lock run", "read", "write", "unlock"]
+
+    def test_submissions_of_one_run_are_serialized(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Verify a second submission cannot read the manifest while the first holds
+        it: the orchestrator records the steps of one pass on separate threads, and
+        a read-modify-write that overlapped would lose one of them.
+        """
+        write_run_manifest(tmp_path, _manifest("one", "two"))
+        read = manifest_module.read_run_manifest
+        reads: list[str] = []
+        first_read, release = threading.Event(), threading.Event()
+
+        def read_and_hold(root: Path) -> RunManifest | None:
+            manifest = read(root)
+            reads.append(threading.current_thread().name)
+            first_read.set()
+            assert release.wait(timeout=5)
+            return manifest
+
+        monkeypatch.setattr(manifest_module, "read_run_manifest", read_and_hold)
+        threads = [
+            threading.Thread(
+                target=self._submit,
+                args=(tmp_path, step),
+                kwargs={"job_id": step},
+                name=step,
+            )
+            for step in ("one", "two")
+        ]
+
+        threads[0].start()
+        assert first_read.wait(timeout=5)
+        threads[1].start()
+        time.sleep(0.2)  # an unserialized second submission would have read by now
+        assert reads == ["one"]
+        release.set()
+        for thread in threads:
+            thread.join(timeout=5)
+
+        manifest = read(tmp_path)
+        assert manifest is not None
+        assert [(s.name, s.job_id) for s in manifest.steps] == [
+            ("one", "one"),
+            ("two", "two"),
+        ]
+
+    def test_a_stalled_writer_makes_the_submission_give_up(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Verify a submission gives up once the deadline passes while another writer
+        keeps the manifest lock, and leaves the manifest as it was.
+        """
+        write_run_manifest(tmp_path, _manifest("one"))
+        before = (tmp_path / RUN_MANIFEST_NAME).read_bytes()
+        monkeypatch.setattr(manifest_module, "MANIFEST_LOCK_TIMEOUT", 0.2)
+
+        with held_manifest_lock("run"), pytest.raises(LockTimeoutError):
+            self._submit(tmp_path)
+
+        assert (tmp_path / RUN_MANIFEST_NAME).read_bytes() == before
+
+    def test_submissions_launched_together_share_one_deadline(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Verify submissions recorded at once behind a stalled writer all give up
+        at the one deadline, not one deadline after another.
+        """
+        write_run_manifest(tmp_path, _manifest("one", "two", "three"))
+        timeout = 1.0
+        monkeypatch.setattr(manifest_module, "MANIFEST_LOCK_TIMEOUT", timeout)
+        failures: list[BaseException] = []
+
+        def submit(step: str) -> None:
+            try:
+                self._submit(tmp_path, step)
+            except LockTimeoutError as ex:
+                failures.append(ex)
+
+        threads = [
+            threading.Thread(target=submit, args=(s,)) for s in ("one", "two", "three")
+        ]
+        with held_manifest_lock("run"):
+            start = time.monotonic()
+            for thread in threads:
+                thread.start()
+            for thread in threads:
+                thread.join(timeout=10)
+            elapsed = time.monotonic() - start
+
+        assert len(failures) == 3
+        assert elapsed < 2 * timeout
+
+    def test_submissions_launched_together_do_not_poll_each_other(
+        self, tmp_path: Path
+    ) -> None:
+        """Verify submissions recorded at once queue for each other instead of
+        polling the manifest lock, so all of them land without delay.
+        """
+        steps = [f"step-{n}" for n in range(12)]
+        write_run_manifest(tmp_path, _manifest(*steps))
+        threads = [
+            threading.Thread(
+                target=self._submit, args=(tmp_path, s), kwargs={"job_id": s}
+            )
+            for s in steps
+        ]
+
+        start = time.monotonic()
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join(timeout=30)
+        elapsed = time.monotonic() - start
+
+        manifest = read_run_manifest(tmp_path)
+        assert manifest is not None
+        assert [entry.job_id for entry in manifest.steps] == steps
+        assert elapsed < LOCK_POLL_INTERVAL
+
+    def test_a_later_submission_replaces_the_earlier(self, tmp_path: Path) -> None:
+        write_run_manifest(tmp_path, _manifest("one"))
+        self._submit(tmp_path)
+
+        later = NOW + timedelta(hours=1)
+        assert self._submit(tmp_path, launcher="local", job_id="55", submitted_at=later)
+
+        manifest = read_run_manifest(tmp_path)
+        assert manifest is not None
+        entry = manifest.steps[0]
+        assert (entry.launcher, entry.job_id, entry.submitted_at) == (
+            "local",
+            "55",
+            later,
+        )
+
+    @pytest.mark.parametrize(
+        "kwargs",
+        [
+            {},
+            {"submitted_at": SUBMITTED + timedelta(milliseconds=500)},  # same second
+        ],
+        ids=["identical", "same-whole-second"],
+    )
+    def test_an_unchanged_submission_is_not_rewritten(
+        self, tmp_path: Path, kwargs: dict[str, t.Any]
+    ) -> None:
+        """An adopted sentinel carries the submission recorded when it was made."""
+        write_run_manifest(tmp_path, _manifest("one"))
+        assert self._submit(tmp_path)
+        path = tmp_path / RUN_MANIFEST_NAME
+        before = (path.read_bytes(), path.stat().st_mtime_ns)
+
+        assert not self._submit(tmp_path, **kwargs)
+
+        assert (path.read_bytes(), path.stat().st_mtime_ns) == before
+
+    def test_no_manifest_writes_nothing(self, tmp_path: Path) -> None:
+        assert not self._submit(tmp_path)
+
+        assert not (tmp_path / RUN_MANIFEST_NAME).exists()
+
+    def test_an_unknown_step_writes_nothing(self, tmp_path: Path) -> None:
+        write_run_manifest(tmp_path, _manifest("one"))
+        path = tmp_path / RUN_MANIFEST_NAME
+        before = (path.read_bytes(), path.stat().st_mtime_ns)
+
+        assert not self._submit(tmp_path, step="elsewhere")
+
+        assert (path.read_bytes(), path.stat().st_mtime_ns) == before
+
+    def test_a_manifest_that_cannot_be_read_propagates(self, tmp_path: Path) -> None:
+        (tmp_path / RUN_MANIFEST_NAME).write_text("- not\n- a mapping\n")
+
+        with pytest.raises(CstarError, match=str(tmp_path / RUN_MANIFEST_NAME)):
+            self._submit(tmp_path)
+
+    def test_a_manifest_from_a_newer_build_propagates(self, tmp_path: Path) -> None:
+        write_run_manifest(tmp_path, _manifest("one"))
+        path = tmp_path / RUN_MANIFEST_NAME
+        path.write_text(path.read_text().replace(CURRENT, NEWER_MAJOR, 1))
+
+        with pytest.raises(CstarSchemaTooNewError):
+            self._submit(tmp_path)
+
+
 class TestFoldStepRecords:
     def test_open_while_a_step_is_not_terminal(self, tmp_path: Path) -> None:
         manifest = _manifest("one", "two")
@@ -879,6 +1273,17 @@ class TestFoldStepRecords:
         fold_step_records(manifest, tmp_path, {"one": "Done"})
 
         assert manifest.attempts[-1].finished_at == later
+
+    def test_the_submission_is_not_touched(self, tmp_path: Path) -> None:
+        """Folding observes statuses and records: what was submitted stays."""
+        manifest = _manifest("one")
+        entry = manifest.steps[0]
+        entry.launcher, entry.job_id, entry.submitted_at = "slurm", "7", NOW
+        write_step_record(tmp_path / "tasks/one", _record("one"))
+
+        fold_step_records(manifest, tmp_path, {"one": "Done"})
+
+        assert (entry.launcher, entry.job_id, entry.submitted_at) == ("slurm", "7", NOW)
 
     def test_unchanged_returns_false(self, tmp_path: Path) -> None:
         manifest = _manifest("one")

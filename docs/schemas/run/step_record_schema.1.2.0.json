@@ -1,0 +1,294 @@
+{
+    "$defs": {
+        "BlueprintIdentity": {
+            "additionalProperties": false,
+            "description": "Identifies a blueprint document by application, name and content hash.\n\nThis is identity, not location: compare `DeferredBlueprintRef`, which\nlocates the blueprint file an upstream step will write.",
+            "properties": {
+                "kind": {
+                    "const": "Blueprint",
+                    "description": "The kind of document referenced; selects the model a reference loads as.",
+                    "title": "Kind",
+                    "type": "string"
+                },
+                "application": {
+                    "description": "The application the referenced blueprint belongs to.",
+                    "minLength": 1,
+                    "title": "Application",
+                    "type": "string"
+                },
+                "name": {
+                    "description": "The name of the referenced blueprint.",
+                    "minLength": 1,
+                    "title": "Name",
+                    "type": "string"
+                },
+                "content_hash": {
+                    "default": "",
+                    "description": "A fingerprint of the referenced blueprint's configuration.",
+                    "title": "Content Hash",
+                    "type": "string"
+                }
+            },
+            "required": [
+                "kind",
+                "application",
+                "name"
+            ],
+            "title": "BlueprintIdentity",
+            "type": "object"
+        },
+        "ExecutionFacts": {
+            "additionalProperties": false,
+            "description": "What ran a step: the scheduler and the allocation it was granted, read from\nthe step's own environment.\n\nThese are the granted resources, never the request: the request is in the\ntransformed workplan and the batch script. They describe the step's own\nprocess; a model run the step submits as a job of its own is not described.",
+            "properties": {
+                "scheduler": {
+                    "default": "",
+                    "description": "`slurm` when the step ran inside a SLURM job, else `local`; empty in a\nrecord written before schema 1.2.0.",
+                    "title": "Scheduler",
+                    "type": "string"
+                },
+                "job_id": {
+                    "default": "",
+                    "description": "The id of the SLURM job the step ran in; empty outside SLURM.",
+                    "title": "Job Id",
+                    "type": "string"
+                },
+                "host": {
+                    "default": "",
+                    "description": "The host the step process ran on; under SLURM, the batch node.",
+                    "title": "Host",
+                    "type": "string"
+                },
+                "pid": {
+                    "default": 0,
+                    "description": "The id of the step process.",
+                    "title": "Pid",
+                    "type": "integer"
+                },
+                "nodes": {
+                    "default": 0,
+                    "description": "The nodes granted to the job; zero outside SLURM or when not reported.",
+                    "title": "Nodes",
+                    "type": "integer"
+                },
+                "tasks": {
+                    "default": 0,
+                    "description": "The tasks granted to the job; zero outside SLURM or when not reported.",
+                    "title": "Tasks",
+                    "type": "integer"
+                },
+                "cpus": {
+                    "default": 0,
+                    "description": "The CPUs granted per node, on the node the step process ran on; zero outside\nSLURM or when not reported.",
+                    "title": "Cpus",
+                    "type": "integer"
+                },
+                "partition": {
+                    "default": "",
+                    "description": "The partition the job ran in; empty outside SLURM or when not reported.",
+                    "title": "Partition",
+                    "type": "string"
+                },
+                "account": {
+                    "default": "",
+                    "description": "The account the job was charged to; empty outside SLURM or when not reported.",
+                    "title": "Account",
+                    "type": "string"
+                }
+            },
+            "title": "ExecutionFacts",
+            "type": "object"
+        },
+        "Product": {
+            "additionalProperties": false,
+            "description": "A file or directory a step produced.",
+            "properties": {
+                "kind": {
+                    "description": "The classification of the product: one of `ArtifactKind` when written by\nthis release. Kept as text on disk so a record written with a kind this\nbuild no longer knows still loads; `known_kind` maps it for consumers.",
+                    "examples": [
+                        "grid",
+                        "initial_conditions",
+                        "boundary_forcing",
+                        "surface_forcing",
+                        "tidal_forcing",
+                        "river_forcing",
+                        "cdr_forcing",
+                        "restart",
+                        "history",
+                        "average",
+                        "output",
+                        "gas_exchange",
+                        "upscaling",
+                        "cdr_output",
+                        "analysis",
+                        "emitted_blueprint",
+                        "config",
+                        "build",
+                        "log",
+                        "figure",
+                        "other"
+                    ],
+                    "title": "Kind",
+                    "type": "string"
+                },
+                "path": {
+                    "description": "The location of the product, relative to the step root.",
+                    "title": "Path",
+                    "type": "string"
+                },
+                "size_bytes": {
+                    "default": 0,
+                    "description": "The size of the product in bytes; zero when not measured.",
+                    "title": "Size Bytes",
+                    "type": "integer"
+                },
+                "sha256": {
+                    "default": "",
+                    "description": "The content digest of the product; empty when not computed.",
+                    "title": "Sha256",
+                    "type": "string"
+                },
+                "metadata": {
+                    "additionalProperties": {
+                        "anyOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "integer"
+                            },
+                            {
+                                "type": "number"
+                            },
+                            {
+                                "items": {
+                                    "type": "string"
+                                },
+                                "type": "array"
+                            }
+                        ]
+                    },
+                    "description": "Model-specific detail, such as an output stream.",
+                    "title": "Metadata",
+                    "type": "object"
+                }
+            },
+            "required": [
+                "kind",
+                "path"
+            ],
+            "title": "Product",
+            "type": "object"
+        }
+    },
+    "additionalProperties": false,
+    "description": "What a step did: written by the step process, in its working directory.",
+    "properties": {
+        "schema_version": {
+            "default": "1.2.0",
+            "description": "The schema version for the document.",
+            "title": "Schema Version",
+            "type": "string"
+        },
+        "run_id": {
+            "default": "",
+            "description": "The run the step belongs to; empty for a standalone `cstar blueprint run`.",
+            "title": "Run Id",
+            "type": "string"
+        },
+        "step": {
+            "description": "The name of the step.",
+            "title": "Step",
+            "type": "string"
+        },
+        "application": {
+            "description": "The application the step ran.",
+            "title": "Application",
+            "type": "string"
+        },
+        "blueprint": {
+            "$ref": "#/$defs/BlueprintIdentity",
+            "description": "The blueprint the step ran."
+        },
+        "blueprint_schema_version": {
+            "default": "",
+            "description": "The schema version of the blueprint the step ran.",
+            "title": "Blueprint Schema Version",
+            "type": "string"
+        },
+        "blueprint_file": {
+            "default": "",
+            "description": "The blueprint file the step ran, such as `work/<stem>.ovrd.yaml`, relative to\nthe step root; empty when it lies outside the step root.",
+            "title": "Blueprint File",
+            "type": "string"
+        },
+        "outcome": {
+            "description": "The runner's execution status as its lowercase name, e.g. `completed`.",
+            "title": "Outcome",
+            "type": "string"
+        },
+        "start_at": {
+            "anyOf": [
+                {
+                    "format": "date-time",
+                    "type": "string"
+                },
+                {
+                    "type": "null"
+                }
+            ],
+            "default": null,
+            "description": "When the step process started; `None` when it never started.",
+            "title": "Start At"
+        },
+        "finished_at": {
+            "description": "When the step process recorded its outcome.",
+            "format": "date-time",
+            "title": "Finished At",
+            "type": "string"
+        },
+        "system": {
+            "default": "",
+            "description": "The C-Star system the step ran on.",
+            "title": "System",
+            "type": "string"
+        },
+        "versions": {
+            "additionalProperties": {
+                "type": "string"
+            },
+            "description": "The versions of the packages the step ran with.",
+            "title": "Versions",
+            "type": "object"
+        },
+        "execution": {
+            "$ref": "#/$defs/ExecutionFacts",
+            "description": "What ran the step."
+        },
+        "products": {
+            "description": "What the step produced.",
+            "items": {
+                "$ref": "#/$defs/Product"
+            },
+            "title": "Products",
+            "type": "array"
+        },
+        "errors": {
+            "description": "The errors the step reported.",
+            "items": {
+                "type": "string"
+            },
+            "title": "Errors",
+            "type": "array"
+        }
+    },
+    "required": [
+        "step",
+        "application",
+        "blueprint",
+        "outcome",
+        "finished_at"
+    ],
+    "title": "StepRecord",
+    "type": "object"
+}

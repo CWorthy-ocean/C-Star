@@ -1,5 +1,6 @@
 import argparse
 import os
+import socket
 import typing as t
 from pathlib import Path
 from urllib.parse import urlsplit
@@ -13,7 +14,7 @@ from cstar.applications.core import (
     get_application,
 )
 from cstar.base.env import ENV_CSTAR_LOG_LEVEL, ENV_CSTAR_RUNID, get_env_item
-from cstar.base.log import LogLevelChoices
+from cstar.base.log import LogLevelChoices, get_logger
 from cstar.base.provenance import package_versions, system_name
 from cstar.base.utils import utc_now
 from cstar.entrypoint.service import Service
@@ -34,14 +35,17 @@ from cstar.entrypoint.utils import (
 )
 from cstar.execution.handler import ExecutionStatus
 from cstar.orchestration.manifest import (
+    ExecutionFacts,
     StepRecord,
     expand_artifacts,
     merge_products,
     write_step_record,
 )
 from cstar.orchestration.models import BlueprintIdentity
+from cstar.system.scheduler import slurm_job_id
 
 if t.TYPE_CHECKING:
+    from collections.abc import Mapping
     from datetime import datetime
 
     from cstar.entrypoint.config import JobConfig, ServiceConfiguration
@@ -49,7 +53,74 @@ if t.TYPE_CHECKING:
     from cstar.orchestration.models import Blueprint
 
 
+log = get_logger(__name__)
+
 TBlueprint = t.TypeVar("TBlueprint", bound=HasApplication)
+
+
+def _count(environ: "Mapping[str, str]", name: str) -> int:
+    """Read a count from an environment variable.
+
+    A record that says what ran a step must never change the outcome of the
+    run, so a value that is not an integer, such as `2(x3)`, is logged and
+    counts as not reported.
+
+    Parameters
+    ----------
+    environ : Mapping[str, str]
+        The process's environment variables.
+    name : str
+        The variable to read.
+
+    Returns
+    -------
+    int
+        The count; zero when the variable is unset, empty or not an integer.
+    """
+    value = environ.get(name, "").strip()
+    if not value:
+        return 0
+    try:
+        return int(value)
+    except ValueError:
+        log.debug(f"Ignoring {name}={value!r}: it is not a count")
+        return 0
+
+
+def execution_facts(environ: "Mapping[str, str]") -> ExecutionFacts:
+    """Describe what is running this process, from its environment.
+
+    Inside a SLURM job, including a standalone run in an `salloc`, the facts are
+    the allocation the job was granted. Outside one, the step runs as a local
+    process: its record says so and leaves the counts at zero, since the step
+    does not know the compute it was asked for.
+
+    Parameters
+    ----------
+    environ : Mapping[str, str]
+        The process's environment variables.
+
+    Returns
+    -------
+    ExecutionFacts
+    """
+    host = socket.gethostname()
+    pid = os.getpid()
+
+    if not (job_id := slurm_job_id(environ)):
+        return ExecutionFacts(scheduler="local", host=host, pid=pid)
+
+    return ExecutionFacts(
+        scheduler="slurm",
+        job_id=job_id,
+        host=host,
+        pid=pid,
+        nodes=_count(environ, "SLURM_JOB_NUM_NODES"),
+        tasks=_count(environ, "SLURM_NTASKS"),
+        cpus=_count(environ, "SLURM_CPUS_ON_NODE"),
+        partition=environ.get("SLURM_JOB_PARTITION", ""),
+        account=environ.get("SLURM_JOB_ACCOUNT", ""),
+    )
 
 
 class BlueprintRunner(Service, XRunner[TBlueprint]):
@@ -185,6 +256,7 @@ class BlueprintRunner(Service, XRunner[TBlueprint]):
                 finished_at=utc_now(),
                 system=system_name(),
                 versions=package_versions(),
+                execution=execution_facts(os.environ),
                 products=products,
                 errors=list(self.result.errors),
             )

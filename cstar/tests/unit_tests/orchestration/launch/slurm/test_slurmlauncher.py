@@ -1,5 +1,7 @@
+import asyncio
 import os
 import typing as t
+from datetime import UTC, datetime
 from pathlib import Path
 from unittest import mock
 
@@ -7,6 +9,7 @@ import pytest
 from pydantic import ValidationError
 
 from cstar.base.exceptions import BlueprintDeferredError, CstarError
+from cstar.base.utils import utc_now
 from cstar.entrypoint.utils import ARG_CLOBBER, ARG_PRE_RUN, ARG_RESUME
 from cstar.execution.handler import ExecutionStatus
 from cstar.orchestration.adapter import StepToRunRequestAdapter
@@ -467,6 +470,88 @@ async def test_slurmlauncher_submit_records_pre_run_on_handle(
     reloaded = await StateRepository().get_sentinel(live_step.name, SlurmHandle)
     assert reloaded is not None
     assert reloaded.launcher_name == SlurmLauncher.name
+
+
+@pytest.mark.usefixtures("read_yaml_intercept")
+async def test_slurmlauncher_submit_stamps_the_submission_before_the_delay(
+    wp_templates_dir: Path,
+    mock_run_id: str,
+) -> None:
+    """Verify the submission time is taken as `sbatch` returns, not after the
+    delay that lets `sacct` find the job: that wait is not queue time.
+    """
+    live_step = LiveStep.from_step(
+        deserialize(wp_templates_dir / "single_step.yaml", Workplan).steps[0]
+    )
+    real_sleep = asyncio.sleep
+    entered: list[datetime] = []
+
+    async def sleep(delay: float) -> None:
+        entered.append(utc_now())
+        await real_sleep(0.02)
+
+    before = utc_now()
+    with (
+        mock.patch.object(SlurmLauncher, "POST_SUBMIT_DELAY", 0.5),
+        mock.patch.object(SlurmLauncher, "adapt_step", _capture_command_job({})),
+        mock.patch("cstar.orchestration.launch.slurm.asyncio.sleep", sleep),
+    ):
+        handle = await SlurmLauncher._submit(live_step, [])
+
+    assert len(entered) == 1
+    assert handle.submitted_at is not None
+    assert handle.submitted_at.utcoffset() is not None
+    assert before <= handle.submitted_at <= entered[0]
+
+    await StateRepository().put_sentinel(handle)
+    reloaded = await StateRepository().get_sentinel(live_step.name, SlurmHandle)
+    assert reloaded is not None
+    assert reloaded.submitted_at == handle.submitted_at
+
+
+@pytest.mark.parametrize(
+    "recorded",
+    [datetime(2026, 10, 15, 12, 0, 3, 123456, tzinfo=UTC), None],
+    ids=["recorded", "sentinel-before-submission-times"],
+)
+@pytest.mark.usefixtures("read_yaml_intercept")
+async def test_slurmlauncher_launch_adopts_the_submission_of_a_prior_handle(
+    wp_templates_dir: Path,
+    mock_run_id: str,
+    recorded: datetime | None,
+) -> None:
+    """Verify an adopted handle keeps the submission time it was persisted with,
+    or none, and the launcher stamps no new one.
+    """
+    live_step = LiveStep.from_step(
+        deserialize(wp_templates_dir / "single_step.yaml", Workplan).steps[0]
+    )
+    await StateRepository().put_sentinel(
+        SlurmHandle(
+            pid="12345",
+            name=live_step.name,
+            run_id=mock_run_id,
+            launcher_name=SlurmLauncher.name,
+            status=Status.Running,
+            submitted_at=recorded,
+        )
+    )
+    running = mock.Mock(status=ExecutionStatus.RUNNING)
+
+    with (
+        mock.patch(
+            "cstar.orchestration.launch.slurm.get_slurm_batch",
+            mock.AsyncMock(return_value=running),
+        ),
+        mock.patch.object(SlurmLauncher, "adapt_step") as adapt_step,
+        mock.patch("cstar.orchestration.launch.slurm.utc_now") as now,
+    ):
+        task = await SlurmLauncher.launch(live_step, [])
+
+    adapt_step.assert_not_called()
+    now.assert_not_called()
+    assert task.handle.pid == "12345"
+    assert task.handle.submitted_at == recorded
 
 
 @pytest.mark.usefixtures("read_yaml_intercept")

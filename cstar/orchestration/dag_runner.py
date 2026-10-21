@@ -1,4 +1,5 @@
 import asyncio
+import functools
 import os
 import shutil
 import typing as t
@@ -41,6 +42,7 @@ from cstar.orchestration.manifest import (
     ATTEMPT_TRANSFORMED_NAME,
     ATTEMPT_VARIABLES_NAME,
     ATTEMPT_WORKPLAN_NAME,
+    RUN_MANIFEST_NAME,
     CarriedInputs,
     RunManifest,
     StepFacts,
@@ -54,6 +56,7 @@ from cstar.orchestration.manifest import (
     manifest_lock,
     new_attempt,
     read_run_manifest,
+    record_submission,
     workplan_content_hash,
     write_run_manifest,
 )
@@ -306,11 +309,27 @@ def get_launcher(
     return launcher
 
 
-def get_orchestrator(planner: Planner) -> Orchestrator:
+def get_orchestrator(planner: Planner, *, root: Path) -> Orchestrator:
+    """Create the orchestrator that launches the steps of a plan.
+
+    Each launch persists the step's handle and records the submission in the
+    run's manifest (see `on_launched`).
+
+    Parameters
+    ----------
+    planner : Planner
+        The planner holding the plan to execute.
+    root : Path
+        The run root, which holds the manifest the submissions are recorded in.
+
+    Returns
+    -------
+    Orchestrator
+    """
     launcher = get_launcher(planner.workplan, force_local=planner.workplan.pre_run)
 
     orchestrator = Orchestrator(planner, launcher)
-    orchestrator.set_callback("launched", on_status_changed)
+    orchestrator.set_callback("launched", functools.partial(on_launched, root=root))
 
     return orchestrator
 
@@ -379,7 +398,9 @@ def refresh_run_manifest(
 
     The manifest holds a snapshot: the sentinels stay the live truth, and this
     is the one place that copies their statuses into it. The manifest is written
-    only when something besides `observed_at` changed.
+    only when something besides `observed_at` changed. A failure to refresh it
+    is a warning: `--resume` refreshes it before scheduling, and keeping the
+    record of a run never stops the run.
 
     Parameters
     ----------
@@ -394,7 +415,8 @@ def refresh_run_manifest(
     -------
     RunManifest | None
         The refreshed manifest, or `None` when the run has no readable manifest
-        (a run that predates it, or a corrupt or too new file).
+        (a run that predates it, or a corrupt or too new file) or it could not be
+        refreshed (its lock stayed busy, its file could not be written).
     """
     statuses = {name: state.name for name, state in status.details.items()}
     try:
@@ -405,7 +427,7 @@ def refresh_run_manifest(
                 return None
             if fold_step_records(manifest, root, statuses):
                 write_run_manifest(root, manifest)
-    except (CstarError, CstarSchemaTooNewError) as ex:
+    except Exception as ex:
         log.warning(f"Could not refresh the manifest of run {run_id!r}: {ex}")
         return None
     return manifest
@@ -1322,6 +1344,42 @@ async def on_status_changed(handle: ProcessHandle) -> None:
     await run_repo.update_workplan_run(handle.run_id, _apply)
 
 
+async def on_launched(handle: ProcessHandle, *, root: Path) -> None:
+    """Persist a launched process's handle and record its submission in the manifest.
+
+    A handle adopted from a prior attempt carries the submission it was created
+    with, which `record_submission` finds already recorded. A failure to write
+    the manifest does not stop scheduling: the sentinel does not depend on it.
+
+    Parameters
+    ----------
+    handle : ProcessHandle
+        The handle of the launched process.
+    root : Path
+        The run root, which holds the manifest.
+    """
+    await on_status_changed(handle)
+
+    if handle.submitted_at is None:
+        return
+
+    try:
+        await asyncio.to_thread(
+            record_submission,
+            root,
+            handle.run_id,
+            handle.name,
+            launcher=handle.launcher_name,
+            job_id=handle.pid,
+            submitted_at=handle.submitted_at,
+        )
+    except Exception as ex:
+        log.warning(
+            f"Could not record the submission of step {handle.name!r} in "
+            f"{root / RUN_MANIFEST_NAME}: {ex}"
+        )
+
+
 def refuse_edited_done_steps(
     wp: Workplan,
     manifest: RunManifest,
@@ -1601,7 +1659,7 @@ async def run_dag(
 
     _ = await TrackingRepository().put_workplan_run(wp_run)
 
-    orchestrator = get_orchestrator(planner)
+    orchestrator = get_orchestrator(planner, root=root)
 
     # schedule the tasks without waiting for completion
     await process_plan(orchestrator)
