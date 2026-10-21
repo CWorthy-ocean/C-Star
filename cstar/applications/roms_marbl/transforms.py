@@ -30,7 +30,11 @@ from cstar.base.utils import (
     min_padded_index,
     slugify,
 )
-from cstar.orchestration.manifest import product_paths
+from cstar.orchestration.manifest import (
+    STEP_RECORD_NAME,
+    product_paths,
+    require_recorded_files,
+)
 from cstar.orchestration.orchestration import LiveStep
 from cstar.orchestration.serialization import serialize
 from cstar.orchestration.transforms import (
@@ -317,6 +321,11 @@ _LEGACY_LAYOUT_HINT: t.Final[str] = (
 def _require_step_output_dir(root: Path, name: str) -> Path:
     """Locate a step's `output` directory and require it to exist.
 
+    Every step type writes its final, whole files to `output` (ROMS-MARBL
+    steps write partitioned pieces to `temp_output` first and join them
+    into `output`; other apps, e.g. nest_ic, write straight to `output`), so a
+    step's outputs are always found there regardless of how the step ran.
+
     Parameters
     ----------
     root : Path
@@ -400,38 +409,6 @@ def resolve_step_root(workplan: "LiveWorkplan", name: str) -> Path:
     return lookup_step(workplan, name).fsm.root_dir
 
 
-def resolve_step_output_dir(workplan: "LiveWorkplan", name: str) -> Path:
-    """Resolve the `output` directory of a named, completed workplan step.
-
-    Every step type writes its final, whole files to `output` (ROMS-MARBL
-    steps write partitioned pieces to `temp_output` first and join them
-    into `output`; other apps, e.g. nest_ic, write straight to `output`), so a
-    step's outputs are always found there regardless of how the step ran.
-
-    Parameters
-    ----------
-    workplan : LiveWorkplan
-        The workplan containing the named step.
-    name : str
-        The name of the step whose output directory is requested; a step of
-        an external run is named `<step>@<alias>`.
-
-    Returns
-    -------
-    Path
-        The step's `output` directory.
-
-    Raises
-    ------
-    KeyError
-        If `workplan` does not contain a step named `name`.
-    CstarError
-        If `name` is malformed or names a step of an external run that
-        cannot be resolved.
-    """
-    return RomsFileSystemManager(resolve_step_root(workplan, name)).output_dir
-
-
 def _rst_path_continue_from_conflict_message(step_name: str) -> str:
     """Build the error message for a conflicting `rst_path` + `continue-from`.
 
@@ -490,15 +467,16 @@ def step_output_files(
     kinds: Sequence[ArtifactKind],
     *,
     role: str = "",
-) -> list[_StepFileT]:
+) -> tuple[list[_StepFileT], Path]:
     """Locate the files of one type that a workplan step produced.
 
     The step's record is read first: the products of the first of `kinds` that
     lists any file `file_cls` can name are returned. Without such a product
     (the step wrote no record, a 0.17.0 record lists no products, or its
     application records the file under another kind) the step's `output`
-    directory is searched instead. Neither route selects among the files or
-    rejects partition pieces; that is up to the caller.
+    directory is searched instead. Neither route selects among the files,
+    rejects partition pieces or confirms recorded files exist; the caller
+    does, for the files it reads (`require_recorded_files`).
 
     Parameters
     ----------
@@ -516,16 +494,17 @@ def step_output_files(
 
     Returns
     -------
-    list[RestartFile | TimestampedOutputFile]
-        The files of the first route that finds any.
+    tuple[list[RestartFile | TimestampedOutputFile], Path]
+        The files of the first route that finds any, and where they were
+        found (the step record or the `output` directory), for messages.
 
     Raises
     ------
     CstarError
         If the step's record cannot be read.
     FileNotFoundError
-        If a product the record lists is missing, or the record lists none
-        and the step has no `output` directory or no files of the type there.
+        If the record lists no such files and the step has no `output`
+        directory or no files of the type there.
     """
     for kind in kinds:
         files: list[_StepFileT] = []
@@ -541,7 +520,7 @@ def step_output_files(
                     file_cls.LABEL,
                 )
         if files:
-            return files
+            return files, root / STEP_RECORD_NAME
 
     log.debug(
         "The record of step %r lists no %s files; searching its output directory",
@@ -555,7 +534,7 @@ def step_output_files(
             f"{output_dir!r} {_LEGACY_LAYOUT_HINT}"
         )
         raise FileNotFoundError(msg)
-    return found
+    return found, output_dir
 
 
 def collect_output_files(
@@ -601,7 +580,8 @@ def collect_output_files(
     Raises
     ------
     CstarError
-        If `step_names` is not empty and no workplan was supplied.
+        If `step_names` is not empty and no workplan was supplied, or a file
+        a step's record lists is missing.
     FileNotFoundError
         If a source contains no files of the kind, or a step has no `output`
         directory or holds only partitioned files.
@@ -621,10 +601,11 @@ def collect_output_files(
 
         for step_name in step_names:
             root = resolve_step_root(workplan, step_name)
-            files = step_output_files(file_cls, root, step_name, (kind,), role=role)
+            files, _ = step_output_files(file_cls, root, step_name, (kind,), role=role)
             partitioned = next((f for f in files if f.is_partitioned), None)
             if partitioned is not None:
                 _reject_partitioned_step_output(step_name, True, partitioned.path)
+            require_recorded_files(root, [file.path for file in files])
             found_files.extend(files)
 
     deduped: dict[Path, _OutputFileT] = {}
@@ -866,6 +847,9 @@ class ContinuanceDirective(OverrideDirective):
         FileNotFoundError
             If the source holds no restart files, or none is dated the
             requested `timestamp`.
+        CstarError
+            If the restart a step's record lists and the directive selects is
+            missing.
         """
         if problems := self._config_problems(self._config):
             raise NotImplementedError("; ".join(problems))
@@ -883,18 +867,17 @@ class ContinuanceDirective(OverrideDirective):
             # a nested run's `nest_ic` writes the restart-named file it records
             # as its initial conditions; a forge `<domain>_initial_conditions.nc`
             # does not parse and is skipped
-            candidates = step_output_files(
+            candidates, source = step_output_files(
                 RestartFile,
                 root,
                 name,
                 (ArtifactKind.restart, ArtifactKind.initial_conditions),
             )
-            selected = RestartFile.select(
-                candidates, timestamp, source=RomsFileSystemManager(root).output_dir
-            )
+            selected = RestartFile.select(candidates, timestamp, source=source)
             _reject_partitioned_step_output(
                 name, selected.is_partitioned, selected.path
             )
+            require_recorded_files(root, [selected.path])
             return RestartFileTrxAdapter.adapt(selected)
 
         search_path: Path | None = None
@@ -1125,6 +1108,8 @@ class NestingDirective(OverrideDirective):
         FileNotFoundError
             If a listed source contains no boundary files, or a listed step
             has no `output` directory.
+        CstarError
+            If a file a listed step's record lists is missing.
         """
         if self.KEY_BRY_PATH in self._config:
             msg = (
@@ -1318,6 +1303,8 @@ class CarbonateSensitivityDirective(OverrideDirective):
         FileNotFoundError
             If a listed source contains no carbonate sensitivity files, or a
             listed step has no `output` directory.
+        CstarError
+            If a file a listed step's record lists is missing.
         """
         if problems := self._config_problems(self._config):
             raise NotImplementedError("; ".join(problems))

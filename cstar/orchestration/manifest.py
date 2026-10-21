@@ -561,7 +561,9 @@ def product_paths(step_root: Path, kind: ArtifactKind, *, role: str = "") -> lis
     An empty list means the record has nothing of the kind to offer, so the
     caller searches the step's files itself: a step that has not written a
     record has no products, a record written by C-Star 0.17.0 lists none, and
-    an application may not classify its files under the kind.
+    an application may not classify its files under the kind. The files are
+    not looked at: a caller confirms the ones it reads with
+    `require_recorded_files`, so pruning files it does not read is harmless.
 
     Parameters
     ----------
@@ -584,8 +586,6 @@ def product_paths(step_root: Path, kind: ArtifactKind, *, role: str = "") -> lis
         If the record's schema is newer than this build reads.
     CstarError
         If the record cannot be read or is invalid.
-    FileNotFoundError
-        If a listed product is missing on disk.
     """
     record = read_step_record(step_root)
     if record is None:
@@ -599,15 +599,31 @@ def product_paths(step_root: Path, kind: ArtifactKind, *, role: str = "") -> lis
         ),
         key=lambda product: product.path,
     )
-    paths = [step_root / product.path for product in listed]
+    return [step_root / product.path for product in listed]
+
+
+def require_recorded_files(step_root: Path, paths: "Sequence[Path]") -> None:
+    """Refuse to read recorded products that are missing on disk.
+
+    Parameters
+    ----------
+    step_root : Path
+        The working directory of the step whose record listed `paths`.
+    paths : Sequence[Path]
+        The products about to be read.
+
+    Raises
+    ------
+    CstarError
+        If one of `paths` does not exist; the message names the first.
+    """
     if missing := next((path for path in paths if not path.exists()), None):
         msg = (
             f"The record of the step at {step_root} lists {missing.name}, which is "
-            f"missing from {missing.parent}; run `cstar run check` to verify the "
-            "step's products."
+            f"missing from {missing.parent}; restore it, or run `cstar run check` "
+            "to see which of the step's products are missing."
         )
-        raise FileNotFoundError(msg)
-    return paths
+        raise CstarError(msg)
 
 
 def write_run_manifest(root: Path, manifest: RunManifest) -> Path:

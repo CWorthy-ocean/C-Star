@@ -131,10 +131,14 @@ class RestartFile(BaseModel):
         list[RestartFile]
             The partition pieces, then the whole files; empty if there are none.
         """
-        return [
-            *cls.candidates(search_path, partitioned=True),
-            *cls.candidates(search_path, partitioned=False),
+        # one walk matches both `*_rst.<ts>.nc` and `*_rst.<ts>.<part>.nc`
+        glob_pattern = f"*{cls.SUFFIX}.{cls.TS_GLOB}*.{cls.EXT}"
+        found = [
+            RestartFile(path=match)
+            for match in search_path.rglob(glob_pattern)
+            if re.fullmatch(cls.PATTERN_RST, match.name, flags=re.ASCII)
         ]
+        return sorted(found, key=lambda rst: not rst.is_partitioned)
 
     @classmethod
     def select(

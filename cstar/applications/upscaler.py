@@ -20,7 +20,7 @@ from cstar.base.utils import convert_to_cdf5
 from cstar.entrypoint.runner import BlueprintRunner
 from cstar.execution.file_system import JobFileSystemManager
 from cstar.execution.handler import ExecutionStatus
-from cstar.orchestration.manifest import product_paths
+from cstar.orchestration.manifest import product_paths, require_recorded_files
 from cstar.orchestration.models import Blueprint
 
 APP_NAME: t.Final[str] = "upscaler"
@@ -119,6 +119,11 @@ def _find_uscl_files(uscl_dir: Path) -> list[Path]:
     -------
     list[Path]
         The `_uscl` files, empty if there are none.
+
+    Raises
+    ------
+    CstarError
+        If a `_uscl` file the record lists is missing.
     """
     recorded = sorted(
         path
@@ -126,6 +131,8 @@ def _find_uscl_files(uscl_dir: Path) -> list[Path]:
         if path.resolve().parent == uscl_dir.resolve() and path.match(_USCL_GLOB)
     )
     if recorded:
+        # the glob would skip a missing file and upscale fluxes with a gap
+        require_recorded_files(uscl_dir.parent, recorded)
         return recorded
 
     log.debug("No recorded upscaling files in %s; searching the directory", uscl_dir)

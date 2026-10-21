@@ -39,6 +39,7 @@ from cstar.orchestration.manifest import (
     product_paths,
     read_run_manifest,
     read_step_record,
+    require_recorded_files,
     workplan_content_hash,
     write_run_manifest,
     write_step_record,
@@ -932,30 +933,17 @@ class TestProductPaths:
 
         assert product_paths(tmp_path, ArtifactKind.restart) == []
 
-    def test_missing_product_is_refused(self, tmp_path: Path) -> None:
-        self._record_with(
-            tmp_path, Product(kind=ArtifactKind.restart, path="output/output_rst.1.nc")
-        )
-        (tmp_path / "output" / "output_rst.1.nc").unlink()
-
-        with pytest.raises(FileNotFoundError, match="output_rst.1.nc") as error:
-            product_paths(tmp_path, ArtifactKind.restart)
-
-        assert str(tmp_path) in str(error.value)
-        assert "cstar run check" in str(error.value)
-
-    def test_missing_product_of_another_kind_is_not_checked(
-        self, tmp_path: Path
-    ) -> None:
+    def test_missing_products_are_still_listed(self, tmp_path: Path) -> None:
         self._record_with(
             tmp_path,
             Product(kind=ArtifactKind.restart, path="output/output_rst.1.nc"),
-            Product(kind=ArtifactKind.history, path="output/output_his.1.nc"),
+            Product(kind=ArtifactKind.restart, path="output/output_rst.2.nc"),
         )
-        (tmp_path / "output" / "output_his.1.nc").unlink()
+        (tmp_path / "output" / "output_rst.1.nc").unlink()
 
         assert product_paths(tmp_path, ArtifactKind.restart) == [
-            tmp_path / "output" / "output_rst.1.nc"
+            tmp_path / "output" / "output_rst.1.nc",
+            tmp_path / "output" / "output_rst.2.nc",
         ]
 
     def test_corrupt_record_is_refused(self, tmp_path: Path) -> None:
@@ -963,3 +951,22 @@ class TestProductPaths:
 
         with pytest.raises(CstarError, match=STEP_RECORD_NAME):
             product_paths(tmp_path, ArtifactKind.restart)
+
+
+class TestRequireRecordedFiles:
+    def test_present_files_pass(self, tmp_path: Path) -> None:
+        present = tmp_path / "output_rst.1.nc"
+        present.write_bytes(b"x")
+
+        require_recorded_files(tmp_path, [present])
+
+    def test_missing_file_is_refused(self, tmp_path: Path) -> None:
+        present = tmp_path / "output_rst.1.nc"
+        present.write_bytes(b"x")
+        missing = tmp_path / "output" / "output_rst.2.nc"
+
+        with pytest.raises(CstarError, match="output_rst.2.nc") as error:
+            require_recorded_files(tmp_path, [present, missing])
+
+        assert str(tmp_path) in str(error.value)
+        assert "cstar run check" in str(error.value)

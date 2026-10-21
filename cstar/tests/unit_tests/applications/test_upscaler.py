@@ -17,6 +17,7 @@ from cstar.applications.upscaler import (
     UpscalerBlueprint,
     UpscalerRunner,
 )
+from cstar.base.exceptions import CstarError
 from cstar.base.utils import convert_to_cdf5
 from cstar.entrypoint.config import JobConfig, ServiceConfiguration
 from cstar.orchestration.manifest import Product, StepRecord, write_step_record
@@ -236,7 +237,7 @@ class TestUpscalerRunnerUsclFiles:
         gone = uscl_dir / "roms_uscl.20240201000000.nc"
         self._write_record(uscl_dir.parent, gone)
 
-        with pytest.raises(FileNotFoundError, match="roms_uscl.20240201000000.nc"):
+        with pytest.raises(CstarError, match="roms_uscl.20240201000000.nc"):
             await self._uscl_files_read(blueprint_kwargs, mock_upscaler_cls)
 
 

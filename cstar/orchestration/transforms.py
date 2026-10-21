@@ -37,7 +37,7 @@ from cstar.orchestration.compute_environment import (
 )
 from cstar.orchestration.launch.common import is_foreign_handle
 from cstar.orchestration.launch.slurm import SlurmComputeSpec
-from cstar.orchestration.manifest import product_paths
+from cstar.orchestration.manifest import product_paths, require_recorded_files
 from cstar.orchestration.models import (
     Blueprint,
     DeferredBlueprintRef,
@@ -2154,9 +2154,9 @@ def resolve_deferred_blueprint(ref: DeferredBlueprintRef) -> Path:
     Raises
     ------
     CstarError
-        If the producing step cannot be found in the workplan, or a unique
+        If the producing step cannot be found in the workplan, a unique
         blueprint file can be located neither in its record nor in its output
-        directory.
+        directory, or the blueprint its record lists is missing.
     """
     workplan = DirectiveConfig.load_workplan()
     try:
@@ -2204,6 +2204,7 @@ def resolve_deferred_blueprint(ref: DeferredBlueprintRef) -> Path:
         )
         raise CstarError(msg)
 
+    require_recorded_files(producer.fsm.root_dir, candidates)
     return candidates[0]
 
 

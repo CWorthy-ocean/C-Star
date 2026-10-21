@@ -47,7 +47,12 @@ from cstar.orchestration.compute_environment import ComputeEnvironment
 from cstar.orchestration.dag_runner import prepare_workplan
 from cstar.orchestration.launch.local import LocalHandle, LocalLauncher
 from cstar.orchestration.launch.slurm import SlurmComputeSpec
-from cstar.orchestration.manifest import Product, StepRecord, write_step_record
+from cstar.orchestration.manifest import (
+    STEP_RECORD_NAME,
+    Product,
+    StepRecord,
+    write_step_record,
+)
 from cstar.orchestration.models import (
     Application,
     BlueprintIdentity,
@@ -1711,6 +1716,7 @@ def test_continuance_directive_step_timestamp_not_recorded(
 
     message = str(error.value)
     assert message.endswith("found there: 2012-01-15 00:00:00, 2012-02-01 00:00:00")
+    assert STEP_RECORD_NAME in message
     assert "migrate-outputs" not in message
 
 
@@ -1877,8 +1883,9 @@ def test_continuance_directive_step_missing_recorded_restart(
     bp_templates_dir: Path,
     hello_world_bp_path: Path,
 ) -> None:
-    """Verify a restart the record lists but that is gone fails the directive,
-    rather than continuing from another restart found in `output`.
+    """Verify the restart the record lists and the directive selects, but that
+    is gone, fails the directive rather than continuing from another restart
+    found in `output`.
 
     Parameters
     ----------
@@ -1904,8 +1911,55 @@ def test_continuance_directive_step_missing_recorded_restart(
         "dict[str, t.Any]", child_step.directives[ContinuanceDirective.key()]
     )
 
-    with pytest.raises(FileNotFoundError, match=gone):
+    with pytest.raises(CstarError, match=gone):
         ContinuanceDirective(config, workplan=live_plan)
+
+
+def test_continuance_directive_step_pruned_older_restarts_are_not_needed(
+    tmp_path: Path,
+    bp_templates_dir: Path,
+    hello_world_bp_path: Path,
+) -> None:
+    """Verify deleting recorded restarts the directive does not select (older
+    ones, pruned to save space) leaves `continue-from` working.
+
+    Parameters
+    ----------
+    tmp_path : Path
+        Temporary directory for test outputs.
+    bp_templates_dir : Path
+        Fixture returning the path to the directory containing blueprint template files.
+    hello_world_bp_path : Path
+        Fixture returning the path to a hello-world blueprint file.
+    """
+    older = ["output_rst.20120101000000.nc", "output_rst.20120115000000.nc"]
+    latest = "output_rst.20120201000000.nc"
+    live_plan, child_step, parent_output = _plan_with_parent_restarts(
+        tmp_path,
+        bp_templates_dir,
+        hello_world_bp_path,
+        [*older, latest],
+        {ContinuanceDirective.KEY_STEP: "parent"},
+    )
+    parent = live_plan["parent"]
+    _write_record(
+        parent,
+        *(
+            _listed(parent, ArtifactKind.restart, parent_output / name)
+            for name in [*older, latest]
+        ),
+    )
+    for name in older:
+        (parent_output / name).unlink()
+    config = t.cast(
+        "dict[str, t.Any]", child_step.directives[ContinuanceDirective.key()]
+    )
+
+    altered = ContinuanceDirective(config, workplan=live_plan)(child_step)[0]
+
+    bp_after = deserialize(altered.blueprint_path, RomsMarblBlueprint)
+    location = Path(bp_after.initial_conditions.data[0].location)
+    assert location == (parent_output / latest).resolve()
 
 
 def test_step_output_files_skips_recorded_names_that_are_not_restarts(
@@ -1942,11 +1996,12 @@ def test_step_output_files_skips_recorded_names_that_are_not_restarts(
         ),
     )
 
-    files = step_output_files(
+    files, source = step_output_files(
         RestartFile, parent.fsm.root_dir, "parent", (ArtifactKind.initial_conditions,)
     )
 
     assert [file.path.name for file in files] == names[1:]
+    assert source == parent.fsm.root_dir / STEP_RECORD_NAME
 
 
 def test_step_output_files_searches_output_without_a_record(
@@ -1972,9 +2027,12 @@ def test_step_output_files_searches_output_without_a_record(
     )
 
     root = live_plan["parent"].fsm.root_dir
-    files = step_output_files(RestartFile, root, "parent", (ArtifactKind.restart,))
+    files, source = step_output_files(
+        RestartFile, root, "parent", (ArtifactKind.restart,)
+    )
 
     assert sorted(file.path.name for file in files) == names
+    assert source == RomsFileSystemManager(root).output_dir
 
 
 def test_step_output_files_without_any_files_points_at_the_legacy_layout(
@@ -3374,6 +3432,53 @@ def test_carbonate_sensitivity_directive_step_reads_recorded_gas_exchange(
     assert [Path(d.location) for d in data] == [
         fsms["first"].output_dir / "first_cdrgas.20230201003000.nc"
     ]
+
+
+def test_carbonate_sensitivity_directive_step_missing_recorded_file(
+    tmp_path: Path,
+    bp_templates_dir: Path,
+    hello_world_bp_path: Path,
+    mock_run_id: str,
+) -> None:
+    """Verify a `_cdrgas` file the producer's record lists but that is gone
+    fails the directive without the hint to enable the gas-exchange output,
+    which the producer evidently had enabled.
+
+    Parameters
+    ----------
+    tmp_path : Path
+        Temporary directory for test outputs.
+    bp_templates_dir : Path
+        Fixture returning the path to the directory containing blueprint template files.
+    hello_world_bp_path : Path
+        Fixture returning the path to a hello-world blueprint file.
+    mock_run_id : str
+        A unique run-id that has already been added to os.environ.
+    """
+    gone = "first_cdrgas.20230301003000.nc"
+    config = {CarbonateSensitivityDirective.KEY_STEP: "first"}
+    plan, _, fsms = _plan_with_cdrgas_parents(
+        tmp_path,
+        bp_templates_dir,
+        hello_world_bp_path,
+        mock_run_id,
+        {"first": ["first_cdrgas.20230201003000.nc", gone]},
+        config,
+    )
+    first = plan["first"]
+    _write_record(
+        first,
+        *(
+            _listed(first, ArtifactKind.gas_exchange, fsms["first"].output_dir / name)
+            for name in ["first_cdrgas.20230201003000.nc", gone]
+        ),
+    )
+    (fsms["first"].output_dir / gone).unlink()
+
+    with pytest.raises(CstarError, match=gone) as error:
+        CarbonateSensitivityDirective(config, workplan=plan)
+
+    assert "do_cdr_gas_exch_output" not in str(error.value)
 
 
 def test_carbonate_sensitivity_directive_multiple_steps(
@@ -6273,7 +6378,7 @@ async def test_resolve_deferred_blueprint_recorded_blueprint_is_missing(
 
     ref = DeferredBlueprintRef(from_step="producer")
 
-    with pytest.raises(FileNotFoundError, match="generated.yaml"):
+    with pytest.raises(CstarError, match="generated.yaml"):
         _ = resolve_deferred_blueprint(ref)
 
 
