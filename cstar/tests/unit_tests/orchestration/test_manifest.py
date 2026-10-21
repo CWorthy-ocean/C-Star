@@ -909,6 +909,7 @@ class TestRecordSubmission:
     ) -> None:
         write_run_manifest(tmp_path, _manifest("one"))
         events: list[str] = []
+        read = manifest_module.read_run_manifest
         write = manifest_module.write_run_manifest
 
         @contextmanager
@@ -917,16 +918,21 @@ class TestRecordSubmission:
             yield
             events.append("unlock")
 
+        def read_recorded(root: Path) -> RunManifest | None:
+            events.append("read")
+            return read(root)
+
         def write_recorded(root: Path, manifest: RunManifest) -> Path:
             events.append("write")
             return write(root, manifest)
 
         monkeypatch.setattr(manifest_module, "manifest_lock", lock)
+        monkeypatch.setattr(manifest_module, "read_run_manifest", read_recorded)
         monkeypatch.setattr(manifest_module, "write_run_manifest", write_recorded)
 
         assert self._submit(tmp_path)
 
-        assert events == ["lock run", "write", "unlock"]
+        assert events == ["lock run", "read", "write", "unlock"]
 
     def test_submissions_of_one_run_are_serialized(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch

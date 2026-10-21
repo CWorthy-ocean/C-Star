@@ -11,7 +11,6 @@ left in the run directory.
 """
 
 import json
-import os
 import shutil
 import subprocess
 from collections.abc import Iterator
@@ -37,7 +36,6 @@ from cstar.orchestration.manifest import (
 )
 from cstar.orchestration.models import Workplan
 from cstar.orchestration.serialization import deserialize
-from cstar.system.scheduler import slurm_job_id
 from cstar.tests.integration_tests.cli_harness import (
     DONE,
     kill_run,
@@ -121,13 +119,6 @@ def manifest_run(
         kill_run(state_home, RUN_ID, steps)
 
 
-def _expected_scheduler() -> str:
-    """The scheduler a step's record names: the CLI runs with this process's
-    environment, so inside an allocation its steps do too.
-    """
-    return "slurm" if slurm_job_id(os.environ) else "local"
-
-
 def _output(proc: subprocess.CompletedProcess[str]) -> str:
     """The captured streams of a finished ``cstar`` process, for assertion messages."""
     return f"stdout:\n{proc.stdout}\nstderr:\n{proc.stderr}"
@@ -209,7 +200,8 @@ def test_each_step_writes_its_record(manifest_run: ManifestRun) -> None:
         assert record.application == "hello_world"
         assert record.blueprint_file
         assert (root / record.blueprint_file).is_file()
-        assert record.execution.scheduler == _expected_scheduler()
+        # the hello_world tier runs where no scheduler is configured
+        assert record.execution.scheduler == "local"
         assert record.execution.pid > 0
         assert record.execution.host
 
@@ -330,7 +322,7 @@ def test_show_reads_a_copied_run(manifest_run: ManifestRun, tmp_path: Path) -> N
         assert entry["launcher"] == original.launcher == "local"
         assert entry["job_id"] == original.job_id != ""
         assert entry["submitted_at"]
-        assert entry["record"]["execution"]["scheduler"] == _expected_scheduler()
+        assert entry["record"]["execution"]["scheduler"] == "local"
 
     # the copy carries every attempt's inputs with it
     directories = [attempt["directory"] for attempt in shown["attempts"]]

@@ -28,6 +28,8 @@ from cstar.orchestration.dag_runner import (
 from cstar.orchestration.manifest import (
     RUN_MANIFEST_NAME,
     RunManifest,
+    StepEntry,
+    StepRecord,
     fold_step_records,
     read_run_manifest,
 )
@@ -54,7 +56,8 @@ HELP_LONG = f"""\
 
 The target is a run-id, or the path of a directory holding a run manifest
 (`{RUN_MANIFEST_NAME}`). The manifest lists each attempt to run the workplan, each
-step's status and outcome, and the products the steps recorded.
+step's status and outcome, the products the steps recorded, and each step's job
+with how long it waited and ran.
 
 For a run-id the step statuses are refreshed from the run first, as
 `cstar run status` does, and the manifest is updated; {ARG_NO_REFRESH} shows
@@ -148,8 +151,7 @@ def _duration(start: datetime | None, end: datetime | None) -> str:
     """Format the time from `start` to `end` as `H:MM:SS`, or a dash.
 
     The hours are not wrapped into days. A dash stands for a missing moment, or
-    for a negative span: the record on an entry is from an earlier run of the
-    step, as when a directory is shown without statuses or with `--no-refresh`.
+    for a negative span, which clocks that disagree can produce.
     """
     if start is None or end is None:
         return "-"
@@ -158,6 +160,25 @@ def _duration(start: datetime | None, end: datetime | None) -> str:
         return "-"
     hours, remainder = divmod(seconds, 3600)
     return f"{hours}:{remainder // 60:02d}:{remainder % 60:02d}"
+
+
+def _submitted_record(entry: StepEntry) -> StepRecord | None:
+    """The record of the step's latest submission, when the entry holds it.
+
+    An entry can pair a new submission with the record of an earlier run of the
+    step: when a directory is shown without statuses, under `--no-refresh`, or
+    when the new run died before writing its own. A record that started before
+    the submission, or that names another SLURM job, is such an earlier one.
+    """
+    record = entry.record
+    if record is None or entry.submitted_at is None:
+        return record
+    if record.start_at is not None and record.start_at < entry.submitted_at:
+        return None
+    job_id = record.execution.job_id
+    if entry.launcher == "slurm" and job_id and job_id != entry.job_id:
+        return None
+    return record
 
 
 def _size(nbytes: int) -> str:
@@ -236,7 +257,7 @@ def _tables(manifest: RunManifest) -> list[Table]:
     jobs = Table(
         "Step",
         Column("Job", no_wrap=True),
-        Column("Queued", no_wrap=True),
+        Column("Waited", no_wrap=True),
         Column("Wall", no_wrap=True),
         title="Jobs",
     )
@@ -251,11 +272,12 @@ def _tables(manifest: RunManifest) -> list[Table]:
             _size(sum(p.size_bytes for p in record.products)) if record else "-",
             "yes" if record else "no",
         )
+        ran = _submitted_record(entry)
         jobs.add_row(
             entry.name,
             f"{entry.launcher} {entry.job_id}".strip() if entry.job_id else "-",
-            _duration(entry.submitted_at, record.start_at) if record else "-",
-            _duration(record.start_at, record.finished_at) if record else "-",
+            _duration(entry.submitted_at, ran.start_at) if ran else "-",
+            _duration(ran.start_at, ran.finished_at) if ran else "-",
         )
 
     tables = [identity, attempts, steps, jobs]

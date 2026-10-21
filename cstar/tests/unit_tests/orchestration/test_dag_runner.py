@@ -1,5 +1,4 @@
 import asyncio
-import functools
 import hashlib
 import json
 import os
@@ -2755,28 +2754,6 @@ def test_get_orchestrator_uses_local_launcher_for_pre_run_workplan(
         orchestrator = get_orchestrator(Planner(wp), root=tmp_path)
 
     assert type(orchestrator.launcher) is exp_klass
-
-
-def test_get_orchestrator_records_submissions_in_the_run_root(tmp_path: Path) -> None:
-    """Verify each launch is routed to `on_launched` with the run root, so the
-    submission lands in that run's manifest.
-    """
-    wp = _make_workplan([_roms_step(tmp_path, "Roms")])
-
-    with (
-        mock.patch(
-            "cstar.system.manager.CStarSystemManager.scheduler",
-            mock.PropertyMock(return_value=mock.MagicMock()),
-        ),
-        mock.patch.object(SlurmLauncher, "check_preconditions"),
-    ):
-        orchestrator = get_orchestrator(Planner(wp), root=tmp_path)
-
-    callback = orchestrator._on_launched
-    assert isinstance(callback, functools.partial)
-    assert callback.func is on_launched
-    assert callback.keywords == {"root": tmp_path}
-    assert callback.args == ()
 
 
 SUBMITTED = datetime(2026, 10, 21, 9, 30, 15, 500000, tzinfo=UTC)

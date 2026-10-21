@@ -18,6 +18,7 @@ from cstar.orchestration.dag_runner import DagStatus
 from cstar.orchestration.manifest import (
     RUN_MANIFEST_NAME,
     Attempt,
+    ExecutionFacts,
     StepRecord,
     ensure_run_manifest,
     read_run_manifest,
@@ -82,6 +83,7 @@ def write_record(
     *,
     start_at: datetime | None = None,
     finished_at: datetime = datetime(2026, 10, 15, 13, 0, tzinfo=UTC),
+    job_id: str = "",
 ) -> None:
     """Record a finished `Spin Up` step in its directory."""
     write_step_record(
@@ -95,6 +97,9 @@ def write_record(
             outcome="completed",
             start_at=start_at,
             finished_at=finished_at,
+            execution=ExecutionFacts(
+                scheduler="slurm" if job_id else "local", job_id=job_id
+            ),
         ),
     )
 
@@ -317,7 +322,7 @@ def test_an_unreadable_manifest_is_reported(run: FakeRun, text: str) -> None:
 SUBMITTED = datetime(2026, 10, 15, 12, 0, tzinfo=UTC)
 
 
-def test_the_jobs_table_shows_the_job_and_how_long_it_queued_and_ran(
+def test_the_jobs_table_shows_the_job_and_how_long_it_waited_and_ran(
     run: FakeRun,
 ) -> None:
     """Verify a step with a submission and a record shows its job, the time from
@@ -333,7 +338,7 @@ def test_the_jobs_table_shows_the_job_and_how_long_it_queued_and_ran(
     row = jobs_row(run)
 
     assert row["Job"] == "slurm 4242"
-    assert row["Queued"] == "0:05:07"
+    assert row["Waited"] == "0:05:07"
     assert row["Wall"] == "1:00:00"
 
 
@@ -345,7 +350,7 @@ def test_a_step_that_ran_over_a_day_shows_its_hours(run: FakeRun) -> None:
 
     row = jobs_row(run)
 
-    assert row["Queued"] == "30:00:00"
+    assert row["Waited"] == "30:00:00"
     assert row["Wall"] == "30:00:00"
 
 
@@ -357,9 +362,9 @@ def test_a_step_without_a_submission_or_a_record_shows_dashes(run: FakeRun) -> N
 
     row = jobs_row(run)
 
-    assert (row["Job"], row["Queued"], row["Wall"]) == ("-", "-", "1:00:00")
+    assert (row["Job"], row["Waited"], row["Wall"]) == ("-", "-", "1:00:00")
     unrecorded = jobs_row(run, step="run")
-    assert (unrecorded["Job"], unrecorded["Queued"], unrecorded["Wall"]) == ("-",) * 3
+    assert (unrecorded["Job"], unrecorded["Waited"], unrecorded["Wall"]) == ("-",) * 3
 
 
 def test_a_step_that_never_started_shows_no_durations(run: FakeRun) -> None:
@@ -370,14 +375,14 @@ def test_a_step_that_never_started_shows_no_durations(run: FakeRun) -> None:
     row = jobs_row(run)
 
     assert row["Job"] == "slurm 4242"
-    assert (row["Queued"], row["Wall"]) == ("-", "-")
+    assert (row["Waited"], row["Wall"]) == ("-", "-")
 
 
-def test_a_record_that_started_before_the_submission_shows_no_queue_time(
+def test_a_record_that_started_before_the_submission_shows_no_times(
     run: FakeRun,
 ) -> None:
     """Verify a record from an earlier run of the step, which started before the
-    submission on the entry, has no queue time; its wall time still shows.
+    submission on the entry, shows neither time beside the new job.
     """
     submit(run, SUBMITTED)
     start = SUBMITTED - timedelta(hours=2)
@@ -385,7 +390,40 @@ def test_a_record_that_started_before_the_submission_shows_no_queue_time(
 
     row = jobs_row(run)
 
-    assert (row["Queued"], row["Wall"]) == ("-", "0:30:00")
+    assert (row["Job"], row["Waited"], row["Wall"]) == ("slurm 4242", "-", "-")
+
+
+def test_a_record_of_another_slurm_job_shows_no_times(run: FakeRun) -> None:
+    """Verify a record that names another SLURM job than the latest submission, as
+    one left by an earlier run when the new job died before writing its own,
+    shows neither time.
+    """
+    submit(run, SUBMITTED)
+    write_record(
+        run,
+        start_at=SUBMITTED + timedelta(minutes=5),
+        finished_at=SUBMITTED + timedelta(hours=1),
+        job_id="4100",
+    )
+
+    row = jobs_row(run)
+
+    assert (row["Waited"], row["Wall"]) == ("-", "-")
+
+
+def test_a_record_of_the_submitted_slurm_job_shows_its_times(run: FakeRun) -> None:
+    """Verify a record that names the submitted SLURM job shows both times."""
+    submit(run, SUBMITTED)
+    write_record(
+        run,
+        start_at=SUBMITTED + timedelta(minutes=5),
+        finished_at=SUBMITTED + timedelta(hours=1),
+        job_id="4242",
+    )
+
+    row = jobs_row(run)
+
+    assert (row["Waited"], row["Wall"]) == ("0:05:00", "0:55:00")
 
 
 def test_a_submission_without_a_launcher_shows_the_bare_job_id(run: FakeRun) -> None:

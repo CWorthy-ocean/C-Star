@@ -209,7 +209,8 @@ class ExecutionFacts(ConfiguredBaseModel):
     the step's own environment.
 
     These are the granted resources, never the request: the request is in the
-    transformed workplan and the batch script.
+    transformed workplan and the batch script. They describe the step's own
+    process; a model run the step submits as a job of its own is not described.
     """
 
     scheduler: str = Field(default="")

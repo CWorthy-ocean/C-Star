@@ -145,14 +145,15 @@ Definitions
     Run manifest
       ``cstar-run.yaml`` in a run's directory: the run's identity, one
       **attempt** for each time it was scheduled, one entry per step with its
-      status and **step record**, and what the run depends on outside
-      itself. The scheduling command writes it; ``cstar run status`` and
+      latest submission, status and **step record**, and what the run depends
+      on outside itself. The scheduling command writes it; ``cstar run status`` and
       ``cstar run show`` refresh it. See :doc:`workplans`.
 
     Step record
       ``cstar-step.yaml`` in a step's working directory, written by the step
       process when it shuts down: its outcome, start and finish times, system,
-      package versions, **products** and errors. The run manifest folds each
+      package versions, what ran it (the scheduler, host and granted
+      allocation), **products** and errors. The run manifest folds each
       step's record in. See :doc:`workplans`.
 
     Attempt
