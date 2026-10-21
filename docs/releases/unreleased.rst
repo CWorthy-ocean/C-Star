@@ -64,6 +64,11 @@ New features
 
 - ``cstar run check`` compares carried inputs with their recorded digests: a changed file fails the check, and a missing file or deleted older attempt is listed for information. (`#789 <https://github.com/CWorthy-ocean/C-Star/pull/789>`_)
 - ``cstar run show`` lists the inputs directory of each attempt. (`#789 <https://github.com/CWorthy-ocean/C-Star/pull/789>`_)
+- ``cdr_metrics`` steps list their metrics series and figures in their step record, so ``cstar run show`` lists them and ``cstar run check`` reports either file if it goes missing. (`#793 <https://github.com/CWorthy-ocean/C-Star/pull/793>`_)
+
+  - The series is an ``analysis`` product with role ``cdr_metrics``; the figure has role ``metrics``, and the map of nested domains has role ``domains``.
+  - ``analysis`` is a new product kind for a dataset a step computes from other steps' output; the role says which analysis.
+
 
 Bug Fixes
 ~~~~~~~~~
@@ -92,6 +97,11 @@ Improvements
   - ``nest-from`` reads the child boundary extraction, ``carbonate-sensitivity-from`` the gas-exchange sensitivities, the upscaler the ``_uscl`` files, and a deferred blueprint the emitted blueprint.
   - A recorded file that a step reads but that is missing on disk now fails the step with a pointer to ``cstar run check``, instead of the step silently using the files that remain.
 
+- ``cdr_metrics`` reads the ``_cdr`` files a producing step recorded, instead of searching its ``output`` directory, falling back to the search for older runs and plain directories. (`#793 <https://github.com/CWorthy-ocean/C-Star/pull/793>`_)
+
+  - A recorded ``_cdr`` file missing from disk now fails the step, naming the domain and pointing at ``cstar run check``, instead of the step silently using the files that remain.
+
+
 
 Miscellaneous
 ~~~~~~~~~~~~~
@@ -105,3 +115,4 @@ Miscellaneous
 - Published the run manifest and step record schemas v1.1.0, and documented carried inputs in the workplan guide and terminology. (`#789 <https://github.com/CWorthy-ocean/C-Star/pull/789>`_)
 - The directives guide gains a "Finding a step's files" section, and the deferred-blueprint note describes how the blueprint is found without ``filename``. (`#790 <https://github.com/CWorthy-ocean/C-Star/pull/790>`_)
 - The wizard notebook (``cstar forge copy-notebook``) now links to the C-Star wizard documentation instead of the archived cstar-forge docs site. (`#792 <https://github.com/CWorthy-ocean/C-Star/pull/792>`_)
+- The workplans guide describes how ``cdr_metrics`` finds its sources and records its products, and the custom-applications guide lists the ``analysis`` kind. (`#793 <https://github.com/CWorthy-ocean/C-Star/pull/793>`_)
