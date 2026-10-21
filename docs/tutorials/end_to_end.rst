@@ -1,7 +1,7 @@
 .. _tutorial-end-to-end:
 
-End to end: a new domain to a running simulation
-================================================
+Using blueprints to set up and run an ocean model
+=================================================
 
 This walkthrough takes you from an installed environment to a running toy
 simulation on a laptop or workstation, using all three C-Star steps: build a
@@ -104,8 +104,9 @@ output. The blueprint has no ``working_dir``, so results land under
 
 Both steps use the same command; the blueprint's ``application`` field
 decides which application handles it. The :doc:`ROMS-MARBL blueprint example
-<tutorial_bp>` walks through what is in the blueprint Forge just wrote, and the
-:doc:`workplan example <tutorial_wp>` shows how to chain simulations.
+<tutorial_bp>` walks through what is in the blueprint Forge just wrote. The
+:doc:`next page <workplan>` runs these same two steps as a workplan, so you
+submit once and let C-Star carry the blueprint from one step to the next.
 
 On a cluster
 ------------
