@@ -1,0 +1,206 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/CWorthy-ocean/C-Star/refs/heads/main/docs/schemas/wp/workplan_schema.1.0.0.json
+#
+# Tiny 2-level nesting (downscaling) + upscaling CDR example, small enough for a laptop.
+#
+#   forge_parent     forge        parent grid, 24x24 cells over 400 km west of Scotland;
+#                                 the parent also extracts hourly boundary data for the child
+#   forge_child      forge        child grid, 24x24 cells over 100 km, nested in the parent;
+#                                 one ALK release near its east boundary
+#   forge_parent_up  forge        the parent grid again, CDR mode "upscaled"
+#   parent           roms_marbl   2012-01-01T12 -> 01-03T07, restarts every 6 h; writes
+#                                 child_bry.*.nc for the child
+#   nest_ic          nest_ic      the parent restart at 2012-01-02T06 -> the child's initial
+#                                 conditions (ic_from_parent_rst.<ts>.nc)
+#   child            roms_marbl   2012-01-02T06 -> 01-03T06; continue-from nest_ic, nest-from
+#                                 parent; writes *_uscl.*.nc (boundary flux of the CDR tracers)
+#   upscale          upscaler     *_uscl.*.nc -> upscaled_cdr.nc, CDF-5, the CDR forcing for
+#                                 the parent grid
+#   parent_up        roms_marbl   the parent grid rerun from the parent's restart at the
+#                                 child's start, with upscaled_cdr.nc as its CDR forcing,
+#                                 to the child's end
+#   cdr_metrics      cdr_metrics  the CO2 uptake and CDR efficiency of the release: the
+#                                 child's and parent_up's _cdr output, each on its own grid,
+#                                 combined into cdr_metrics.nc and two figures
+#
+# The three forge blueprints are built from the bundled roms-marbl-0.11-default ModelSpec
+# (ucla-roms 0.11.0, MARBL, ParallelIO) and carry placeholder source paths, so forge does
+# not try to download anything; each forge step swaps in the real files through
+# blueprint_overrides.
+# Run (the data directory comes from fetch_data.py; run from the repository root, or
+# anywhere: the blueprint paths are relative to this file):
+#   cstar workplan check docs/tutorials/nesting_upscaling_tiny/workplan.yaml --var example_data=$(python docs/tutorials/nesting_upscaling_tiny/fetch_data.py)
+#   cstar workplan run   docs/tutorials/nesting_upscaling_tiny/workplan.yaml --var example_data=$(python docs/tutorials/nesting_upscaling_tiny/fetch_data.py) --run-id nest-tiny
+#   cstar run status nest-tiny
+name: nest-tiny
+description: Tiny 2-level nested ROMS-MARBL run with an ALK release in the child, upscaled to a rerun of the parent, with CDR metrics (ucla-roms 0.11.0, PIO)
+state: draft
+
+runtime_vars:
+  - example_data
+
+compute_environment:
+  launcher: local
+
+steps:
+  # The forge steps only write inputs and share no output files, but each builds a grid, and
+  # on a cold cache the first grid downloads and unzips the Natural Earth shapefiles of its
+  # land mask into one shared directory, which is not safe to do twice at once. So
+  # forge_child and forge_parent_up wait for forge_parent (as in the CCS workplan); on a
+  # warm cache both depends_on lines can go and the three then run side by side.
+  - name: forge_parent
+    application: forge
+    blueprint: ./forge_parent.yaml
+    # The sources' paths, in the order they appear in the blueprint: initial conditions
+    # (GLORYS + UNIFIED), surface forcing (ERA5, UNIFIED) and boundary (GLORYS + UNIFIED).
+    # Lists in overrides merge element by element, so only the paths are given.
+    blueprint_overrides: &parent_sources
+      forcing:
+        initial_conditions:
+          source:
+            path: "{{example_data}}/GLORYS_NA_2012.nc"
+          bgc_sources:
+            - source:
+                path: "{{example_data}}/coarsened_UNIFIED_bgc_dataset_v2_1.nc"
+        surface:
+          - source:
+              path: "{{example_data}}/ERA5_NA_2012.nc"
+          - source:
+              path: "{{example_data}}/coarsened_UNIFIED_bgc_dataset_v2_1.nc"
+        boundary:
+          source:
+            path: "{{example_data}}/GLORYS_NA_2012.nc"
+          bgc_sources:
+            - source:
+                path: "{{example_data}}/coarsened_UNIFIED_bgc_dataset_v2_1.nc"
+    compute_overrides:
+      local:
+        max_walltime: "00:30:00"
+
+  - name: forge_child
+    application: forge
+    blueprint: ./forge_child.yaml
+    depends_on:
+      - forge_parent
+    # A nested child takes its initial state and boundaries from the parent run, so its
+    # blueprint has surface forcing only.
+    blueprint_overrides:
+      forcing:
+        surface:
+          - source:
+              path: "{{example_data}}/ERA5_NA_2012.nc"
+          - source:
+              path: "{{example_data}}/coarsened_UNIFIED_bgc_dataset_v2_1.nc"
+    compute_overrides:
+      local:
+        max_walltime: "00:30:00"
+
+  - name: forge_parent_up
+    application: forge
+    blueprint: ./forge_parent_up.yaml
+    depends_on:
+      - forge_parent
+    blueprint_overrides: *parent_sources
+    compute_overrides:
+      local:
+        max_walltime: "00:30:00"
+
+  - name: parent
+    application: roms_marbl
+    blueprint:
+      from_step: forge_parent
+    depends_on:
+      - forge_parent
+    compute_overrides:
+      local:
+        max_walltime: "01:00:00"   # clone + compile ROMS, MARBL and PIO dominates
+
+  - name: nest_ic
+    application: nest_ic
+    blueprint: inline
+    depends_on:
+      - parent
+      - forge_child
+    blueprint_overrides:
+      parent_grid: "{{root_dir: forge_parent}}/input_data/nest-tiny-parent_grid.nc"
+      # the parent restart that falls on the child's start (restarts are 6-hourly)
+      parent_rst: "{{output_dir: parent}}/output_rst.20120102060000.nc"
+      child_grid: "{{root_dir: forge_child}}/input_data/nest-tiny-child_grid.nc"
+    compute_overrides:
+      local:
+        max_walltime: "00:30:00"
+
+  - name: child
+    application: roms_marbl
+    blueprint:
+      from_step: forge_child
+    depends_on:
+      - forge_child
+      - nest_ic
+      - parent
+    directives:
+      continue-from:
+        step: nest_ic              # ic_from_parent_rst.20120102060000.nc: the initial state
+      nest-from:
+        step: parent               # child_bry.*.nc: the open-boundary forcing
+    compute_overrides:
+      local:
+        max_walltime: "01:00:00"   # a second ROMS build (nesting off, CDR on, UPSCALING)
+
+  - name: upscale
+    application: upscaler
+    blueprint: inline
+    depends_on:
+      - child
+    blueprint_overrides:
+      uscl_file_location: "{{output_dir: child}}"
+    compute_overrides:
+      local:
+        max_walltime: "00:30:00"
+
+  - name: parent_up
+    application: roms_marbl
+    blueprint:
+      from_step: forge_parent_up
+    depends_on:
+      - forge_parent_up
+      - upscale
+      - parent
+    blueprint_overrides:
+      cdr_forcing:
+        data:
+          - location: "{{output_dir: upscale}}/upscaled_cdr.nc"
+    directives:
+      continue-from:
+        step: parent
+        timestamp: "2012-01-02 06:00:00"   # the child's start
+    compute_overrides:
+      local:
+        max_walltime: "01:00:00"   # a third ROMS build (CDR forcing from a file)
+
+  # The release's CO2 uptake and CDR efficiency. Each domain is analysed on its own grid
+  # and the results are combined: the child holds the release, parent_up received the
+  # same alkalinity through the upscaled boundary flux (source_role: transfer), so its
+  # source is not counted a second time. parent_up ends at the child's end, so both
+  # domains have a record at the last time and the combined final record is complete.
+  - name: cdr_metrics
+    application: cdr_metrics
+    blueprint: inline
+    depends_on:
+      - child
+      - parent_up
+    blueprint_overrides:
+      domains:
+        child:
+          grid:
+            location: "{{root_dir: forge_child}}/input_data/nest-tiny-child_grid.nc"
+          sources:
+            - location: "{{output_dir: child}}"
+        parent_up:
+          source_role: transfer
+          grid:
+            location: "{{root_dir: forge_parent_up}}/input_data/nest-tiny-parent-up_grid.nc"
+          sources:
+            - location: "{{output_dir: parent_up}}"
+    compute_overrides:
+      local:
+        max_walltime: "00:10:00"
