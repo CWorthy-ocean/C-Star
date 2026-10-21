@@ -86,6 +86,12 @@ Improvements
   - An unreadable run manifest is reported as such instead of being treated as nothing recorded.
 
 - An attempt refused while it prepares leaves the run as the previous attempt left it: the plan in the run directory is replaced only once the inputs are carried. (`#789 <https://github.com/CWorthy-ocean/C-Star/pull/789>`_)
+- A step reads the files of the step it depends on from that step's record by product kind, falling back to searching its ``output`` directory by name when the record lists none of that kind. (`#790 <https://github.com/CWorthy-ocean/C-Star/pull/790>`_)
+
+  - ``continue-from`` reads the producer's restarts, or, from a step that recorded none, initial-conditions files named like restarts (what ``nest_ic`` writes).
+  - ``nest-from`` reads the child boundary extraction, ``carbonate-sensitivity-from`` the gas-exchange sensitivities, the upscaler the ``_uscl`` files, and a deferred blueprint the emitted blueprint.
+  - A recorded file that a step reads but that is missing on disk now fails the step with a pointer to ``cstar run check``, instead of the step silently using the files that remain.
+
 
 Miscellaneous
 ~~~~~~~~~~~~~
@@ -97,3 +103,4 @@ Miscellaneous
 - Published blueprint schema ``cdr_metrics`` 1.1.0. (`#773 <https://github.com/CWorthy-ocean/C-Star/pull/773>`_)
 - Tier 2 e2e: the MARBL forge step gains an ALK release; two new ROMS steps form a ``continue-from`` chain; two ``cdr_metrics`` steps compute metrics from the whole run and from the segments. (`#773 <https://github.com/CWorthy-ocean/C-Star/pull/773>`_)
 - Published the run manifest and step record schemas v1.1.0, and documented carried inputs in the workplan guide and terminology. (`#789 <https://github.com/CWorthy-ocean/C-Star/pull/789>`_)
+- The directives guide gains a "Finding a step's files" section, and the deferred-blueprint note describes how the blueprint is found without ``filename``. (`#790 <https://github.com/CWorthy-ocean/C-Star/pull/790>`_)
