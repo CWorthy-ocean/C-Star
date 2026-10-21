@@ -189,6 +189,7 @@ def _tables(manifest: RunManifest) -> list[Table]:
         "Resumed",
         "Pre-run",
         Column("cstar-ocean", no_wrap=True),
+        "Inputs",
         title="Attempts",
     )
     for attempt in manifest.attempts:
@@ -200,6 +201,8 @@ def _tables(manifest: RunManifest) -> list[Table]:
             ", ".join(attempt.resumed) or "-",
             "yes" if attempt.pre_run else "no",
             attempt.versions.get("cstar-ocean", "-"),
+            # every attempt directory is under `attempts/`; its name is the column
+            Path(attempt.directory).name if attempt.directory else "-",
         )
 
     steps = Table(

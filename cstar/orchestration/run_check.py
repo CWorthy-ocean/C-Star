@@ -4,8 +4,9 @@ A run directory should keep working after it is copied or moved as a unit, which
 holds only while the files that describe it refer to each other by relative
 path. These functions find what does not: absolute paths written into emitted
 files, symlinks with an absolute or missing target, steps without a directory,
-products a step record lists that the run no longer holds as recorded, and
-leftovers no step of the workplan accounts for.
+products a step record lists that the run no longer holds as recorded, inputs an
+attempt carried that differ from the manifest or are gone, and leftovers no step
+of the workplan accounts for.
 
 Every function is pure apart from reading the file system, except
 `repair_symlinks`, which rewrites links and nothing else. Launch artifacts are
@@ -29,7 +30,11 @@ from cstar.execution.file_system import (
     StateDirectoryManager,
     symlink_relative,
 )
-from cstar.orchestration.manifest import RUN_MANIFEST_NAME, STEP_RECORD_NAME
+from cstar.orchestration.manifest import (
+    RUN_MANIFEST_NAME,
+    STEP_RECORD_NAME,
+    carried_digest,
+)
 from cstar.orchestration.orchestration import Status
 from cstar.orchestration.state import StateRepository
 
@@ -83,10 +88,14 @@ class FindingKind(StrEnum):
     """A product's size differs from the one its step record lists."""
     HASH_MISMATCH = auto()
     """A product's content differs from the sha256 its step record lists (`--verify`)."""
+    INPUT_MISMATCH = auto()
+    """A file an attempt carried differs from the digest the manifest records for it."""
     RECORD_MISSING = auto()
     """A step the manifest says is done has no step record."""
     ATTEMPT_OPEN = auto()
     """The latest attempt has not finished: the run is unfinished, or was copied before it was."""
+    INPUT_MISSING = auto()
+    """An attempt's directory, or a file it carried, is not in the run; older attempts may be deleted by hand."""
 
     @property
     def informational(self) -> bool:
@@ -95,6 +104,7 @@ class FindingKind(StrEnum):
             FindingKind.EXTERNAL_LINK,
             FindingKind.RECORD_MISSING,
             FindingKind.ATTEMPT_OPEN,
+            FindingKind.INPUT_MISSING,
         }
 
 
@@ -468,6 +478,50 @@ def find_product_findings(
     return findings
 
 
+def find_input_findings(run_root: Path, manifest: "RunManifest") -> list[Finding]:
+    """Compare the inputs each attempt carried with the run directory.
+
+    Only the files the manifest lists are read, and `attempts/` is not walked: a
+    carried file is a workplan, variables or a blueprint, small by construction.
+    An attempt directory that is gone is one finding, not one per file, since an
+    older attempt may be deleted by hand. An attempt that carried nothing has no
+    directory and nothing to compare.
+
+    Parameters
+    ----------
+    run_root : Path
+        The run directory.
+    manifest : RunManifest
+        The run's manifest.
+
+    Returns
+    -------
+    list[Finding]
+        `INPUT_MISSING` for each attempt directory, or carried file, that is not
+        in the run, and `INPUT_MISMATCH` for each carried file whose content
+        differs from the manifest, in attempt and file order.
+    """
+    findings: list[Finding] = []
+
+    for attempt in manifest.attempts:
+        if not attempt.directory:
+            continue
+
+        directory = run_root / attempt.directory
+        if not directory.is_dir():
+            findings.append(Finding(FindingKind.INPUT_MISSING, directory))
+            continue
+
+        for relative, digest in attempt.carried.items():
+            file = directory / relative
+            if not file.is_file():
+                findings.append(Finding(FindingKind.INPUT_MISSING, file))
+            elif (found := carried_digest(file)) != digest:
+                findings.append(Finding(FindingKind.INPUT_MISMATCH, file, path=found))
+
+    return findings
+
+
 def orphan_task_dirs(run_root: Path, workplan: "LiveWorkplan") -> tuple[Path, ...]:
     """Find the entries of the run's `tasks` directory that no step accounts for.
 
@@ -654,7 +708,9 @@ def check_run(
     The step and orphan checks need the transformed workplan, and the sentinel
     check needs the run-id too: one is only trustworthy when the run was found
     through tracking. The product checks need the run's manifest, with the step
-    records folded in. A check that cannot run is named in `skipped`.
+    records folded in, and so do the carried-input checks, which are not gated by
+    `verify`: the files they read are small. A check that cannot run is named in
+    `skipped`.
 
     Parameters
     ----------
@@ -695,9 +751,10 @@ def check_run(
             orphans = find_orphans(run_root, run_id, workplan)
 
     if manifest is None:
-        skipped.append("products: no run manifest")
+        skipped.append("products and carried inputs: no run manifest")
     else:
         findings.extend(find_product_findings(run_root, manifest, verify=verify))
+        findings.extend(find_input_findings(run_root, manifest))
         if verify and not any(
             p.sha256 for e in manifest.steps if e.record for p in e.record.products
         ):
