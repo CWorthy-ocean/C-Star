@@ -316,6 +316,7 @@
                         "gas_exchange",
                         "upscaling",
                         "cdr_output",
+                        "analysis",
                         "emitted_blueprint",
                         "config",
                         "build",

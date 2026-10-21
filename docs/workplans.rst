@@ -489,10 +489,15 @@ Computing CDR metrics from segmented runs
 
 The ``cdr_metrics`` application computes carbon dioxide removal (CDR) metrics
 from the ``_cdr`` output of ROMS-MARBL runs, stitching the segments of a run that
-was split into several steps. Each source is a directory searched recursively for
-``_cdr`` output (or a single ``_cdr`` file), and the sources must cover the run
-from the release onward: the first holds the segment containing the release,
-because the cumulative sums start at the first record.
+was split into several steps. Each source is a directory holding ``_cdr`` output
+(or a single ``_cdr`` file), and the sources must cover the run from the release
+onward: the first holds the segment containing the release, because the cumulative
+sums start at the first record. A step's ``output`` directory yields the ``_cdr``
+files the step's :term:`step record` lists as ``cdr_output`` :term:`products <Product>`,
+and a file the record lists that is missing from disk fails the step, with an error
+pointing at ``cstar run check``. A directory without such a record (a step run under
+C-Star 0.17.0 or earlier, or a directory of files from elsewhere) is searched
+recursively.
 
 .. code:: yaml
 
@@ -534,7 +539,10 @@ averaging windows of consecutive records is an error, so a segment missing from
 ``sources`` (or listed twice) is reported rather than silently skewing the
 cumulative sums. The step writes ``output/cdr_metrics.nc``, a time series of the
 CDR efficiencies and the uptake in tonnes of CO2, and ``output/cdr_metrics.png``,
-a plot of them.
+a plot of them. Its step record lists the series as an ``analysis`` product with
+``metadata["role"]`` ``cdr_metrics`` and the plot as a ``figure``, so a later step
+can find the series by kind and ``cstar run check`` reports either file if it goes
+missing.
 
 The producing runs must be MARBL runs with a CDR forcing; forge turns on
 ``cdr_output`` for an active MARBL CDR forcing. ``domains`` maps a domain name to its
@@ -590,8 +598,9 @@ consistently. ``<parent>_DIC_difference_inside_<child>`` is the DIC perturbation
 carries in its cells inside the child's footprint. It is normally nonzero: the upscaler
 re-injects what leaves the child along the child's boundary, which lies inside that
 footprint, and the child's own inventory no longer holds it. ``output/cdr_domains.png``
-maps the domains. A parent must be a MARBL run writing ``_cdr`` output; a CDR-lite parent
-writes ``_cdrtrc`` output, which the metrics cannot use.
+maps the domains (a ``figure`` with ``metadata["role"]`` ``domains``). A parent must be
+a MARBL run writing ``_cdr`` output; a CDR-lite parent writes ``_cdrtrc`` output, which
+the metrics cannot use.
 
 
 Checking validity
@@ -840,7 +849,7 @@ Every run records itself in two kinds of file.
 - one entry per step: its name, application, working directory relative to the run directory, a definition hash of what the step computes, its blueprint, the copy of its blueprint file the latest attempt carried (``carried_blueprint``), its status as of the time the manifest was last refreshed, and its step record once it has one;
 - what the run depends on outside itself: referenced runs, source data locations, codebases with their commit or branch, and the catalog entries and producer blueprints named in the blueprints' provenance.
 
-``cstar-step.yaml`` is the :term:`step record`, in each step's working directory (``tasks/<step>/``). The step process writes it when it shuts down: the outcome (``completed``, ``failed``, ``cancelled`` or ``unsubmitted``), start and finish times, the system, package versions, the blueprint file the step ran relative to its working directory (``blueprint_file``, for example ``work/<name>.ovrd.yaml`` once its directives were applied), the :term:`products <Product>` the step left and any errors. The products are the files a user keeps, each with its size in bytes: for a ROMS step, its joined outputs by stream, its namelist, cppdefs and MARBL configuration, its executable and its log; for a forge step, its generated inputs, published blueprint, rendered configuration and log. The size ``cstar run ls`` shows for each step (``step_sizes``) is a separate measurement of the whole directory, not derived from the products.
+``cstar-step.yaml`` is the :term:`step record`, in each step's working directory (``tasks/<step>/``). The step process writes it when it shuts down: the outcome (``completed``, ``failed``, ``cancelled`` or ``unsubmitted``), start and finish times, the system, package versions, the blueprint file the step ran relative to its working directory (``blueprint_file``, for example ``work/<name>.ovrd.yaml`` once its directives were applied), the :term:`products <Product>` the step left and any errors. The products are the files a user keeps, each with its size in bytes: for a ROMS step, its joined outputs by stream, its namelist, cppdefs and MARBL configuration, its executable and its log; for a forge step, its generated inputs, published blueprint, rendered configuration and log; for a ``cdr_metrics`` step, its metrics series and figures. The size ``cstar run ls`` shows for each step (``step_sizes``) is a separate measurement of the whole directory, not derived from the products.
 
 The scheduling command writes the manifest, under a lock, so concurrent commands do not overwrite each other. The steps write their own records and never touch the manifest. ``cstar run status``, ``cstar run show <run-id>`` and ``cstar workplan run --resume`` refresh the manifest: they fold the step statuses and records into it, and once every step is terminal they set ``finished_at`` on the latest attempt. That field is the completion marker. A run that finishes while nobody is watching is closed by the next ``status`` or ``show``.
 
