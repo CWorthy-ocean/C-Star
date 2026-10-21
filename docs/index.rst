@@ -113,8 +113,8 @@ C-Star is built with these principles in mind:
     :caption: Guided tutorials
     :hidden:
 
-    Using Blueprints to Set Up and Run an Ocean Model <tutorials/end_to_end>
-    Automating your simple model with workplans <tutorials/workplan>
+    Using blueprints to set up and run an ocean model <tutorials/end_to_end>
+    Automating the previous model with a workplan <tutorials/workplan>
     Spin-up, continuation and a nested grid <tutorials/nested_workplan>
 
 .. toctree::
