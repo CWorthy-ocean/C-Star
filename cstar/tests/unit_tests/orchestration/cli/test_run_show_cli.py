@@ -8,6 +8,7 @@ from unittest import mock
 
 import pytest
 from click.testing import Result
+from rich.console import Console
 from typer.testing import CliRunner
 
 from cstar.cli.run import app as app_run
@@ -20,6 +21,7 @@ from cstar.orchestration.manifest import (
     StepRecord,
     ensure_run_manifest,
     read_run_manifest,
+    write_run_manifest,
     write_step_record,
 )
 from cstar.orchestration.models import BlueprintIdentity
@@ -99,6 +101,34 @@ def test_a_run_id_shows_the_manifest(run: FakeRun) -> None:
     assert STEP in result.stdout
     assert "Attempts" in result.stdout
     assert "Steps" in result.stdout
+
+
+def test_the_attempts_show_the_directory_each_carried_its_inputs_in(
+    run: FakeRun,
+) -> None:
+    """Verify the last column of the attempts table names the attempt's directory
+    under `attempts/`, and is a dash for an attempt that carried none.
+    """
+    manifest = read_run_manifest(run.root)
+    assert manifest is not None
+    started = datetime(2026, 10, 19, 12, 0, tzinfo=UTC)
+    manifest.attempts = [
+        Attempt(start_at=started, directory="attempts/20261019T120000"),
+        Attempt(start_at=started),
+    ]
+    write_run_manifest(run.root, manifest)
+
+    with mock.patch("cstar.cli.run.show.console", Console(width=200)):
+        result = invoke(run.root.as_posix())
+
+    assert result.exit_code == 0, result.output
+    rows = [line for line in result.stdout.splitlines() if "scheduled" in line]
+    assert [row.strip("│ ").split("│")[-1].strip() for row in rows] == [
+        "20261019T120000",
+        "-",
+    ]
+    header = next(line for line in result.stdout.splitlines() if "Started" in line)
+    assert header.strip("┃ ").split("┃")[-1].strip() == "Inputs"
 
 
 def test_a_directory_shows_the_manifest_and_folds_records_in_memory(

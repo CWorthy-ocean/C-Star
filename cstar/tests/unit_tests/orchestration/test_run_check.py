@@ -3,6 +3,7 @@
 import hashlib
 import logging
 import os
+import shutil
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -16,11 +17,13 @@ from cstar.execution.file_system import (
     StateDirectoryManager,
 )
 from cstar.orchestration.manifest import (
+    ATTEMPTS_DIR_NAME,
     Attempt,
     Product,
     RunManifest,
     StepEntry,
     StepRecord,
+    carried_digest,
 )
 from cstar.orchestration.models import BlueprintIdentity, Step
 from cstar.orchestration.orchestration import LiveStep, LiveWorkplan
@@ -32,6 +35,7 @@ from cstar.orchestration.run_check import (
     check_run,
     find_absolute_paths,
     find_bad_symlinks,
+    find_input_findings,
     find_missing_step_dirs,
     find_orphans,
     find_product_findings,
@@ -55,8 +59,10 @@ PRODUCT_KINDS = {
     FindingKind.PRODUCT_MISSING,
     FindingKind.PRODUCT_SIZE,
     FindingKind.HASH_MISMATCH,
+    FindingKind.INPUT_MISMATCH,
     FindingKind.RECORD_MISSING,
     FindingKind.ATTEMPT_OPEN,
+    FindingKind.INPUT_MISSING,
 }
 """The kinds that come from the run manifest, which `run` has none of."""
 
@@ -229,12 +235,14 @@ def test_symlink_findings_carry_the_link_text(run: FakeRun) -> None:
 
 def test_only_a_link_out_or_a_gap_in_the_record_is_informational() -> None:
     """Verify the kinds that cannot fail the check are the link that leaves the
-    run, a done step without a record and an attempt that has not finished.
+    run, a done step without a record, an attempt that has not finished and
+    carried inputs that are gone.
     """
     assert {k for k in FindingKind if k.informational} == {
         FindingKind.EXTERNAL_LINK,
         FindingKind.RECORD_MISSING,
         FindingKind.ATTEMPT_OPEN,
+        FindingKind.INPUT_MISSING,
     }
 
 
@@ -394,7 +402,7 @@ def test_a_run_report_orders_findings_by_kind(run: FakeRun) -> None:
     assert all(f.kind is not FindingKind.EXTERNAL_LINK for f in report.problems)
     assert not report.clean
     assert report.orphans
-    assert report.skipped == ("products: no run manifest",)
+    assert report.skipped == ("products and carried inputs: no run manifest",)
 
 
 def test_a_run_report_counts_all_files_on_request(run: FakeRun) -> None:
@@ -415,7 +423,7 @@ def test_checks_that_need_the_workplan_are_skipped_without_one(run: FakeRun) -> 
     assert not report.orphans
     assert [s.split(":")[0] for s in report.skipped] == [
         "step directories and orphans",
-        "products",
+        "products and carried inputs",
     ]
 
 
@@ -428,7 +436,7 @@ def test_sentinels_are_only_checked_for_a_tracked_run(run: FakeRun) -> None:
     assert report.orphans == Orphans(step_dirs=(run.root / "tasks" / "stale",))
     assert [s.split(":")[0] for s in report.skipped] == [
         "orphaned sentinels",
-        "products",
+        "products and carried inputs",
     ]
 
 
@@ -831,7 +839,7 @@ def test_a_run_without_a_manifest_skips_the_product_checks(recorded: Path) -> No
         recorded, workplan=None, run_id=None, all_files=False, manifest=None
     )
 
-    assert "products: no run manifest" in report.skipped
+    assert "products and carried inputs: no run manifest" in report.skipped
     assert not PRODUCT_KINDS & {f.kind for f in report.findings}
 
 
@@ -891,4 +899,166 @@ def test_verify_with_a_recorded_hash_has_nothing_to_skip(recorded: Path) -> None
     )
 
     assert not any("hash" in s for s in report.skipped)
+    assert report.clean
+
+
+ATTEMPT_DIR = f"{ATTEMPTS_DIR_NAME}/20261019T120000"
+"""The directory, in the run root, of the attempt that carried inputs."""
+OLDER_ATTEMPT_DIR = f"{ATTEMPTS_DIR_NAME}/20261018T090000"
+"""The directory of an attempt before it."""
+
+
+def carry(root: Path, directory: str, files: dict[str, str]) -> Attempt:
+    """An attempt that carried `files`, by relative path, into `directory`."""
+    carried = {
+        relative: carried_digest(write(root / directory / relative, text))
+        for relative, text in files.items()
+    }
+    return Attempt(start_at=NOW, finished_at=NOW, directory=directory, carried=carried)
+
+
+def manifest_with(*attempts: Attempt) -> RunManifest:
+    """A manifest of the given attempts and no steps."""
+    return RunManifest(
+        run_id="run",
+        name="run",
+        kind="workplan",
+        created_at=NOW,
+        attempts=list(attempts),
+        steps=[],
+    )
+
+
+@pytest.fixture
+def carried(tmp_path: Path) -> RunManifest:
+    """The manifest of a run whose one attempt carried a workplan and a blueprint."""
+    return manifest_with(
+        carry(
+            tmp_path,
+            ATTEMPT_DIR,
+            {"workplan.yaml": "name: wp\n", "blueprints/step-a/bp.yaml": "a: 1\n"},
+        )
+    )
+
+
+def test_carried_inputs_that_are_as_recorded_have_no_finding(
+    tmp_path: Path, carried: RunManifest
+) -> None:
+    """Verify an attempt whose carried files match the manifest is silent, and
+    a file in its directory that the manifest does not list is never looked at.
+    """
+    write(tmp_path / ATTEMPT_DIR / "unlisted.txt", "not carried")
+
+    assert find_input_findings(tmp_path, carried) == []
+
+
+def test_an_edited_carried_blueprint_is_a_mismatch_carrying_the_digest(
+    tmp_path: Path, carried: RunManifest
+) -> None:
+    """Verify a carried file whose content changed is named with the digest now
+    found, the untouched one is silent, and the finding fails the check.
+    """
+    edited = write(tmp_path / ATTEMPT_DIR / "blueprints/step-a/bp.yaml", "a: 2\n")
+
+    findings = find_input_findings(tmp_path, carried)
+
+    assert findings == [
+        Finding(FindingKind.INPUT_MISMATCH, edited, path=carried_digest(edited))
+    ]
+    assert findings[0].path != carried.attempts[0].carried["blueprints/step-a/bp.yaml"]
+    assert not RunCheckReport(tmp_path, tuple(findings)).clean
+
+
+def test_a_deleted_attempt_directory_is_one_informational_finding(
+    tmp_path: Path,
+) -> None:
+    """Verify an older attempt deleted by hand is reported once, however many
+    files it carried, never fails the check, and leaves a newer attempt's
+    inputs checked.
+    """
+    manifest = manifest_with(
+        carry(
+            tmp_path,
+            OLDER_ATTEMPT_DIR,
+            {"workplan.yaml": "name: wp\n", "blueprints/step-a/bp.yaml": "a: 1\n"},
+        ),
+        carry(tmp_path, ATTEMPT_DIR, {"workplan.yaml": "name: wp\n"}),
+    )
+    shutil.rmtree(tmp_path / OLDER_ATTEMPT_DIR)
+
+    findings = find_input_findings(tmp_path, manifest)
+
+    assert findings == [
+        Finding(FindingKind.INPUT_MISSING, tmp_path / OLDER_ATTEMPT_DIR)
+    ]
+    assert RunCheckReport(tmp_path, tuple(findings)).clean
+
+    (tmp_path / ATTEMPT_DIR / "workplan.yaml").write_text("name: edited\n")
+
+    assert [f.kind for f in find_input_findings(tmp_path, manifest)] == [
+        FindingKind.INPUT_MISSING,
+        FindingKind.INPUT_MISMATCH,
+    ]
+
+
+def test_a_deleted_carried_file_is_informational(
+    tmp_path: Path, carried: RunManifest
+) -> None:
+    """Verify one carried file gone from an attempt that is still there is named
+    on its own, and does not fail the check.
+    """
+    gone = tmp_path / ATTEMPT_DIR / "blueprints/step-a/bp.yaml"
+    gone.unlink()
+
+    findings = find_input_findings(tmp_path, carried)
+
+    assert findings == [Finding(FindingKind.INPUT_MISSING, gone)]
+    assert RunCheckReport(tmp_path, tuple(findings)).clean
+
+
+def test_an_attempt_that_carried_nothing_has_nothing_to_check(tmp_path: Path) -> None:
+    """Verify an attempt without a directory, as a re-entry replaying the recorded
+    plan has, produces no finding, and the run's `attempts` need not exist.
+    """
+    manifest = manifest_with(Attempt(start_at=NOW, finished_at=NOW))
+
+    assert not (tmp_path / ATTEMPTS_DIR_NAME).exists()
+    assert find_input_findings(tmp_path, manifest) == []
+
+
+def test_a_run_report_holds_the_carried_input_findings(
+    tmp_path: Path, carried: RunManifest
+) -> None:
+    """Verify `check_run` folds the carried-input findings in without `verify`,
+    ordered by kind around the other manifest findings, and that only the
+    mismatch fails the run.
+    """
+    older = carry(tmp_path, OLDER_ATTEMPT_DIR, {"workplan.yaml": "name: wp\n"})
+    shutil.rmtree(tmp_path / OLDER_ATTEMPT_DIR)
+    carried.attempts.insert(0, older)
+    carried.attempts[-1].finished_at = None
+    (tmp_path / ATTEMPT_DIR / "workplan.yaml").write_text("name: edited\n")
+
+    report = check_run(
+        tmp_path, workplan=None, run_id=None, all_files=False, manifest=carried
+    )
+
+    assert [f.kind for f in report.findings] == [
+        FindingKind.INPUT_MISMATCH,
+        FindingKind.ATTEMPT_OPEN,
+        FindingKind.INPUT_MISSING,
+    ]
+    assert [f.kind for f in report.problems] == [FindingKind.INPUT_MISMATCH]
+    assert not report.clean
+
+
+def test_a_run_report_with_intact_carried_inputs_is_clean(
+    tmp_path: Path, carried: RunManifest
+) -> None:
+    """Verify a manifest whose carried inputs are all as recorded adds nothing."""
+    report = check_run(
+        tmp_path, workplan=None, run_id=None, all_files=False, manifest=carried
+    )
+
+    assert report.findings == ()
     assert report.clean

@@ -18,12 +18,14 @@ from cstar.cli.run.check import COMMAND_CHECK
 from cstar.entrypoint.utils import ARG_ALL, ARG_NO_REFRESH, ARG_REPAIR, ARG_VERIFY
 from cstar.orchestration.dag_runner import DagStatus
 from cstar.orchestration.manifest import (
+    ATTEMPTS_DIR_NAME,
     RUN_MANIFEST_NAME,
     Attempt,
     Product,
     RunManifest,
     StepEntry,
     StepRecord,
+    carried_digest,
     write_run_manifest,
     write_step_record,
 )
@@ -51,9 +53,11 @@ HEADINGS: t.Final[tuple[str, ...]] = (
     "Products missing from the run (",
     "Products whose size differs from the record (",
     f"Products whose content differs from the record ({ARG_VERIFY}) (",
+    "Carried inputs whose content differs from the manifest (",
     "Symlinks with a target outside the run (informational) (",
     "Steps that are done without a step record (informational) (",
     "Latest attempt not finished (informational) (",
+    "Carried inputs missing from the run (informational) (",
     "Step directories no step accounts for (informational) (",
     "Sentinel files no step accounts for (informational) (",
 )
@@ -115,18 +119,44 @@ def entry(
     )
 
 
-def write_manifest(root: Path, *steps: StepEntry, finished: bool = True) -> RunManifest:
-    """Write the manifest of a run of `steps`, whose attempt is `finished` or not."""
+def write_manifest(
+    root: Path,
+    *steps: StepEntry,
+    finished: bool = True,
+    attempts: t.Sequence[Attempt] = (),
+) -> RunManifest:
+    """Write the manifest of a run of `steps`.
+
+    Its one attempt is `finished` or not, unless `attempts` replaces it.
+    """
     manifest = RunManifest(
         run_id="small",
         name="small",
         kind="workplan",
         created_at=NOW,
-        attempts=[Attempt(start_at=NOW, finished_at=NOW if finished else None)],
+        attempts=list(attempts)
+        or [Attempt(start_at=NOW, finished_at=NOW if finished else None)],
         steps=list(steps),
     )
     write_run_manifest(root, manifest)
     return manifest
+
+
+def carry(
+    root: Path, name: str, files: dict[str, str], *, finished: bool = True
+) -> Attempt:
+    """An attempt that carried `files`, by relative path, into `attempts/<name>`."""
+    directory = f"{ATTEMPTS_DIR_NAME}/{name}"
+    carried = {
+        relative: carried_digest(write(root / directory / relative, text))
+        for relative, text in files.items()
+    }
+    return Attempt(
+        start_at=NOW,
+        finished_at=NOW if finished else None,
+        directory=directory,
+        carried=carried,
+    )
 
 
 def product(path: str, size: int = 0, sha256: str = "") -> Product:
@@ -152,6 +182,15 @@ def test_a_run_id_reports_every_kind_of_finding(run: FakeRun) -> None:
     """Verify a tracked run is checked through its record, every section is
     listed in order with one line per finding, and the exit code says it failed.
     """
+    older = carry(run.root, "20261018T090000", {"workplan.yaml": "name: wp\n"})
+    shutil.rmtree(run.root / older.directory)
+    latest = carry(
+        run.root,
+        "20261019T120000",
+        {"blueprints/run/bp.yaml": "a: 1\n"},
+        finished=False,
+    )
+    edited = write(run.root / latest.directory / "blueprints/run/bp.yaml", "a: 2\n")
     write_manifest(
         run.root,
         entry(
@@ -162,7 +201,7 @@ def test_a_run_id_reports_every_kind_of_finding(run: FakeRun) -> None:
             product("output/result.yaml", sha256="0" * 64),
         ),
         entry("run", "tasks/run", status="Done", record=False),
-        finished=False,
+        attempts=[older, latest],
     )
 
     result = invoke(run.record.run_id, ARG_VERIFY, record=run.record)
@@ -188,8 +227,10 @@ def test_a_run_id_reports_every_kind_of_finding(run: FakeRun) -> None:
     )
     assert f"  {run.root}/tasks/run/cstar-step.yaml\n" in result.stdout
     assert f"  {run.root}/{RUN_MANIFEST_NAME}\n" in result.stdout
+    assert f"  {edited}: {carried_digest(edited)}\n" in result.stdout
+    assert f"  {run.root}/{older.directory}\n" in result.stdout
     assert re.search(
-        rf"\d+ problem\(s\) found in {re.escape(str(run.root))}, 5 informational",
+        rf"\d+ problem\(s\) found in {re.escape(str(run.root))}, 6 informational",
         result.stdout,
     )
     assert "Skipped" not in result.stdout
@@ -585,6 +626,83 @@ def test_informational_manifest_findings_alone_exit_zero(tmp_path: Path) -> None
     assert f"No problems found in {root.resolve()}, 2 informational." in result.stdout
 
 
+def test_an_edited_carried_input_fails_the_check(tmp_path: Path) -> None:
+    """Verify a carried blueprint that changed since the attempt is named with
+    the digest now found and exits 1, while an untouched carried file is not.
+    """
+    root = small_run(tmp_path / "small")
+    attempt = carry(
+        root,
+        "20261019T120000",
+        {"workplan.yaml": "name: wp\n", "blueprints/run/bp.yaml": "a: 1\n"},
+    )
+    write_manifest(root, entry("run", "tasks/run"), attempts=[attempt])
+    edited = write(root / attempt.directory / "blueprints/run/bp.yaml", "a: 2\n")
+
+    result = invoke(str(root))
+
+    assert result.exit_code == EXIT_FINDINGS, result.output
+    assert "Carried inputs whose content differs from the manifest (1):" in (
+        result.stdout
+    )
+    assert f"  {edited.resolve()}: {carried_digest(edited)}\n" in result.stdout
+    assert "workplan.yaml" not in result.stdout
+    assert "Carried inputs missing" not in result.stdout
+
+
+def test_deleted_carried_inputs_are_informational(tmp_path: Path) -> None:
+    """Verify an older attempt deleted by hand is listed once, by its directory,
+    a carried file gone from the newer attempt is listed too, and the run still
+    exits 0.
+    """
+    root = small_run(tmp_path / "small")
+    older = carry(
+        root,
+        "20261018T090000",
+        {"workplan.yaml": "name: wp\n", "blueprints/run/bp.yaml": "a: 1\n"},
+    )
+    latest = carry(
+        root,
+        "20261019T120000",
+        {"workplan.yaml": "name: wp\n", "workplan.vars": "x=1\n"},
+    )
+    write_manifest(root, entry("run", "tasks/run"), attempts=[older, latest])
+    shutil.rmtree(root / older.directory)
+    (root / latest.directory / "workplan.vars").unlink()
+
+    result = invoke(str(root))
+
+    assert result.exit_code == EXIT_CLEAN, result.output
+    assert "Carried inputs missing from the run (informational) (2):" in result.stdout
+    assert f"  {root.resolve()}/{older.directory}\n" in result.stdout
+    assert f"  {root.resolve()}/{latest.directory}/workplan.vars\n" in result.stdout
+    assert "bp.yaml" not in result.stdout
+    assert f"No problems found in {root.resolve()}, 2 informational." in result.stdout
+
+
+def test_intact_carried_inputs_are_not_reported(tmp_path: Path) -> None:
+    """Verify a run whose attempt carried inputs that are all as recorded is clean."""
+    root = small_run(tmp_path / "small")
+    attempt = carry(root, "20261019T120000", {"workplan.yaml": "name: wp\n"})
+    write_manifest(root, entry("run", "tasks/run"), attempts=[attempt])
+
+    result = invoke(str(root))
+
+    assert result.exit_code == EXIT_CLEAN, result.output
+    assert "Carried inputs" not in result.stdout
+    assert f"No problems found in {root.resolve()}." in result.stdout
+
+
+def test_the_help_names_the_carried_inputs(
+    flatten_cli_output: t.Callable[[str], str],
+) -> None:
+    """Verify the help says the carried inputs are compared with the manifest."""
+    result = CliRunner().invoke(app_run, [COMMAND_CHECK, "--help"], color=False)
+
+    assert result.exit_code == 0
+    assert "carried" in flatten_cli_output(result.stdout)
+
+
 def test_a_standalone_run_directory_is_accepted(tmp_path: Path) -> None:
     """Verify a directory holding `cstar-run.yaml` and no `tasks/` is checked:
     its symlinks and the products of the step record beside it, which is folded
@@ -628,7 +746,7 @@ def test_an_unreadable_manifest_is_a_warning_and_the_other_checks_run(
     assert result.stderr.startswith("Warning:")
     assert RUN_MANIFEST_NAME in result.stderr
     assert "Symlinks whose target does not exist (1):" in result.stdout
-    assert "Skipped products: no run manifest" in result.stdout
+    assert "Skipped products and carried inputs: no run manifest" in result.stdout
 
 
 def test_a_run_id_refreshes_the_manifest_before_checking_it(

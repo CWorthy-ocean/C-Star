@@ -16,7 +16,7 @@ from cstar.base.env import (
     ENV_CSTAR_RUNID,
     ENV_CSTAR_STATE_HOME,
 )
-from cstar.base.exceptions import CstarExpectationFailed
+from cstar.base.exceptions import CstarError, CstarExpectationFailed
 from cstar.base.feature import is_flag_enabled
 from cstar.base.log import LogLevelChoices, get_logger
 from cstar.base.utils import slugify
@@ -71,7 +71,7 @@ from cstar.orchestration.dag_runner import (
     get_launcher,
     load_external_runs,
     load_run_state,
-    original_workplan_backup,
+    recorded_workplan,
     refresh_run_manifest,
     run_dag,
 )
@@ -97,6 +97,7 @@ from cstar.orchestration.transforms import (
     anchor_blueprint_path,
     external_dependencies,
 )
+from cstar.system.migration import CstarSchemaTooNewError
 
 if t.TYPE_CHECKING:
     from collections.abc import Mapping
@@ -570,8 +571,8 @@ def refuse_run_id_collision(wp_path: Path, run_id: str, *, explicit: bool) -> No
     earlier one's state and originals. The same workplan reaching the run by
     another path (a fresh copy of a remote file, a moved checkout) is not a
     collision, so a different path is compared by content, names normalized,
-    against the original backup of the recorded run. An explicit `--run-id` is
-    taken as the user's choice to re-enter the run.
+    against the workplan recorded for the run. An explicit `--run-id` is taken as
+    the user's choice to re-enter the run.
 
     Parameters
     ----------
@@ -586,8 +587,8 @@ def refuse_run_id_collision(wp_path: Path, run_id: str, *, explicit: bool) -> No
     ------
     typer.BadParameter
         If the run-id was derived and its latest record is of a different
-        workplan, the supplied file cannot be read, or the original backup of
-        the recorded run is missing or unreadable.
+        workplan, the supplied file cannot be read, or the recorded workplan of
+        the run is missing or unreadable.
     """
     if explicit:
         return
@@ -596,7 +597,6 @@ def refuse_run_id_collision(wp_path: Path, run_id: str, *, explicit: bool) -> No
     if record is None or record.workplan_path.resolve() == wp_path.resolve():
         return
 
-    backup = original_workplan_backup(record.workplan_path, record.output_path)
     claim = (
         f"Run-id {run_id!r}, derived from the workplan name, belongs to a run "
         f"started from {str(record.workplan_path)!r}; the workplan at "
@@ -611,13 +611,25 @@ def refuse_run_id_collision(wp_path: Path, run_id: str, *, explicit: bool) -> No
         raise typer.BadParameter(msg) from ex
 
     try:
-        recorded = read_slugged_workplan(backup, PersistenceMode.yaml)
-    except FileNotFoundError as ex:
-        msg = f"{claim}, and there is no original backup to compare; {escape}."
+        recorded_path = recorded_workplan(record)
+    except (CstarError, CstarSchemaTooNewError) as ex:
+        # the run cannot be re-entered either: scheduling reads the same manifest
+        msg = (
+            f"{claim}, and the manifest of that run could not be read: {ex}; pass "
+            f"{ARG_RUN_ID} <other-id> to start a new run."
+        )
         raise typer.BadParameter(msg) from ex
+
+    # a deleted history must not let a different workplan overwrite the run
+    if recorded_path is None:
+        msg = f"{claim}, and there is no recorded workplan to compare; {escape}."
+        raise typer.BadParameter(msg)
+
+    try:
+        recorded = read_slugged_workplan(recorded_path, PersistenceMode.auto)
     except (OSError, RuntimeError, ValueError, yaml.YAMLError) as ex:
         msg = (
-            f"{claim}, and the original backup for that run could not be read: "
+            f"{claim}, and the recorded workplan for that run could not be read: "
             f"{ex}; {escape}."
         )
         raise typer.BadParameter(msg) from ex
@@ -697,8 +709,8 @@ def verify_live_source(trx_path: Path, wp_run: WorkplanRun) -> None:
     """Ensure a transformed workplan supplied by path is the one `wp_run` executes.
 
     A transformed workplan re-enters the run it belongs to. A copy of it
-    elsewhere, or a rotated earlier attempt, is a plan no record executes and
-    is refused until a run can be attached from disk.
+    elsewhere, such as the one an attempt carried, is a plan no record executes
+    and is refused until a run can be attached from disk.
 
     Parameters
     ----------
@@ -729,7 +741,8 @@ def verify_resume_source(wp_path: Path, wp_run: WorkplanRun) -> None:
 
     The path only identifies the run; its content is never re-transformed, so a
     file that changed since the run started is rejected rather than silently
-    resumed under the recorded plan.
+    resumed under the recorded plan. When no recorded copy of the workplan is on
+    disk (older attempts may have been deleted), the run is resumed as recorded.
 
     Parameters
     ----------
@@ -741,24 +754,35 @@ def verify_resume_source(wp_path: Path, wp_run: WorkplanRun) -> None:
     Raises
     ------
     typer.BadParameter
-        If the recorded backup of the original workplan is missing or unreadable,
-        or the supplied workplan no longer matches it.
+        If the run's manifest or recorded workplan is unreadable, or the
+        supplied workplan no longer matches it.
     """
     escape = (
         f"Pass --run-id {wp_run.run_id} without a workplan path to resume the run "
         "as recorded"
     )
-    backup = original_workplan_backup(wp_run.workplan_path, wp_run.output_path)
-    if not backup.exists():
+    try:
+        recorded_path = recorded_workplan(wp_run)
+    except (CstarError, CstarSchemaTooNewError) as ex:
         msg = (
             f"Unable to verify {str(wp_path)!r} against run {wp_run.run_id!r}: "
-            f"its original workplan backup {str(backup)!r} is missing. {escape}."
+            f"{ex}. {escape}."
         )
-        raise typer.BadParameter(msg)
+        raise typer.BadParameter(msg) from ex
 
-    # the backup is a re-serialization of the parsed workplan, so compare models
+    if recorded_path is None:
+        log.warning(
+            f"No recorded workplan of run {wp_run.run_id!r} was found to verify "
+            f"{str(wp_path)!r} against, as older attempts may have been deleted; "
+            "resuming the run's recorded plan, so an edit of that file is not "
+            "applied."
+        )
+        return
+
+    # a carried copy is verbatim and a legacy backup a re-serialization of the
+    # parsed workplan, so compare models either way; the suffix names the format
     try:
-        recorded = deserialize(backup, Workplan, mode=PersistenceMode.yaml)
+        recorded = deserialize(recorded_path, Workplan)
         supplied = deserialize(wp_path, Workplan)
     except Exception as ex:
         msg = (
@@ -770,13 +794,13 @@ def verify_resume_source(wp_path: Path, wp_run: WorkplanRun) -> None:
     if supplied != recorded:
         msg = (
             f"The workplan at {str(wp_path)!r} differs from the one run {wp_run.run_id!r} "
-            f"was started from ({str(backup)!r}), e.g. it was edited or its blueprints "
+            f"was started from ({str(recorded_path)!r}), e.g. it was edited or its blueprints "
             f"were auto-migrated since; {ARG_RESUME} re-enters the recorded run. "
             f"{escape}, or supply a new --run-id to start a fresh run."
         )
         raise typer.BadParameter(msg)
 
-    msg = f"Workplan {str(wp_path)!r} matches the recorded original for run {wp_run.run_id!r}"
+    msg = f"Workplan {str(wp_path)!r} matches the recorded workplan for run {wp_run.run_id!r}"
     log.debug(msg)
 
 

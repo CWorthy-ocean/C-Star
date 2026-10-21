@@ -1,11 +1,13 @@
 import asyncio
 import os
+import shutil
 import typing as t
 from collections import OrderedDict
-from collections.abc import Awaitable, Generator, Iterable, Mapping, Sequence
+from collections.abc import Generator, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from itertools import cycle
 from pathlib import Path
+from urllib.parse import urlsplit
 
 from pydantic import BaseModel, Field, computed_field
 
@@ -19,9 +21,14 @@ from cstar.base.env import (
 )
 from cstar.base.exceptions import CstarError, CstarExpectationFailed
 from cstar.base.log import get_logger
-from cstar.base.utils import slugify
+from cstar.base.utils import slugify, utc_now
 from cstar.entrypoint.utils import ARG_CLOBBER, ARG_PRE_RUN, ARG_RUN_ID
-from cstar.execution.file_system import StateDirectoryManager, rotate_file
+from cstar.execution.file_system import (
+    StateDirectoryManager,
+    is_remote_resource,
+    local_copy,
+    write_text_atomic,
+)
 from cstar.orchestration.compute_environment import (
     ComputeEnvironment,
     resolve_compute_environment,
@@ -29,12 +36,21 @@ from cstar.orchestration.compute_environment import (
 from cstar.orchestration.launch.local import LocalLauncher
 from cstar.orchestration.launch.slurm import SlurmLauncher
 from cstar.orchestration.manifest import (
+    ATTEMPT_BLUEPRINTS_DIR_NAME,
+    ATTEMPT_JSON_WORKPLAN_NAME,
+    ATTEMPT_TRANSFORMED_NAME,
+    ATTEMPT_VARIABLES_NAME,
+    ATTEMPT_WORKPLAN_NAME,
+    CarriedInputs,
     RunManifest,
     StepFacts,
     WorkplanIdentity,
+    carried_digest,
+    create_attempt_dir,
     describe_steps,
     ensure_run_manifest,
     fold_step_records,
+    latest_attempt_dir,
     manifest_lock,
     new_attempt,
     read_run_manifest,
@@ -62,7 +78,12 @@ from cstar.orchestration.orchestration import (
     configure_environment,
 )
 from cstar.orchestration.run_check import report_orphans
-from cstar.orchestration.serialization import deserialize, serialize, try_deserialize
+from cstar.orchestration.serialization import (
+    deserialize,
+    render_model,
+    serialize,
+    try_deserialize,
+)
 from cstar.orchestration.state import StateRepository, load_sentinels
 from cstar.orchestration.tracking import (
     KEY_RUN_NAME,
@@ -82,6 +103,9 @@ from cstar.orchestration.transforms import (
 from cstar.orchestration.utils import ENV_CSTAR_ORCH_DELAYS
 from cstar.system.manager import get_sysmgr
 from cstar.system.migration import CstarSchemaTooNewError
+
+if t.TYPE_CHECKING:
+    from datetime import datetime
 
 log = get_logger(__name__)
 
@@ -450,7 +474,12 @@ async def process_plan(orchestrator: Orchestrator) -> DagStatus:
 
 
 def original_workplan_backup(wp_path: Path, output_dir: Path) -> Path:
-    """The path where `prepare_workplan` keeps an untouched copy of the source workplan.
+    """The legacy location of the untouched copy of a run's source workplan.
+
+    A run scheduled before carried inputs kept the copy here, in the run root;
+    now an attempt carries the authored workplan in its own directory (see
+    `recorded_workplan`). Readers fall back to this path only for a run that has
+    no such attempt.
 
     Parameters
     ----------
@@ -466,13 +495,191 @@ def original_workplan_backup(wp_path: Path, output_dir: Path) -> Path:
     return WorkplanTransformer.derived_path(wp_path, output_dir, "_original", ".bak")
 
 
+def recorded_workplan(wp_run: WorkplanRun) -> Path | None:
+    """Locate the workplan file a recorded run was started from.
+
+    The latest attempt that carried inputs holds the authored workplan; when its
+    copy was deleted there is no record, and the legacy backup is not consulted
+    because it would be older than that attempt. A run with no such attempt (it
+    was scheduled before carried inputs, or has no manifest) has the legacy
+    backup, when that exists.
+
+    Parameters
+    ----------
+    wp_run : WorkplanRun
+        The recorded run.
+
+    Returns
+    -------
+    Path | None
+        The recorded workplan, or `None` when none is on disk.
+
+    Raises
+    ------
+    CstarSchemaTooNewError
+        If the run's manifest is newer than this build reads.
+    CstarError
+        If the run's manifest cannot be read.
+    """
+    root = wp_run.output_path
+    manifest = read_run_manifest(root)
+
+    attempt_dir = latest_attempt_dir(manifest, root) if manifest else None
+    if attempt_dir is not None:
+        names = (ATTEMPT_WORKPLAN_NAME, ATTEMPT_JSON_WORKPLAN_NAME)
+        return next(
+            (attempt_dir / name for name in names if (attempt_dir / name).exists()),
+            None,
+        )
+
+    backup = original_workplan_backup(wp_run.workplan_path, root)
+    return backup if backup.exists() else None
+
+
+def _carry_blueprint(step: Step, directory: Path) -> Path | None:
+    """Copy the blueprint file a step names into a directory.
+
+    Parameters
+    ----------
+    step : Step
+        A step of the transformed workplan, whose blueprint path has had its
+        placeholders filled and relative path anchored.
+    directory : Path
+        Where to copy the blueprint to.
+
+    Returns
+    -------
+    Path | None
+        The copy, or `None` for a sentinel URI, which names no file yet.
+    """
+    text = str(step.blueprint_path).strip()
+
+    if is_remote_resource(text):
+        with local_copy(text) as source:
+            name = Path(urlsplit(text).path).name or source.name
+            return _copy_into(source, directory, name)
+
+    if urlsplit(text).scheme:
+        return None
+
+    source = Path(text).expanduser()
+    return _copy_into(source, directory, source.name)
+
+
+def _copy_into(source: Path, directory: Path, name: str) -> Path:
+    """Copy a file's content to `directory / name`, creating the directory.
+
+    Parameters
+    ----------
+    source : Path
+        The file to copy; a symlink is followed.
+    directory : Path
+        The destination directory.
+    name : str
+        The name of the copy.
+
+    Returns
+    -------
+    Path
+        The copy.
+    """
+    directory.mkdir(parents=True, exist_ok=True)
+    return Path(shutil.copyfile(source, directory / name))
+
+
+def _carry_inputs(
+    output_dir: Path,
+    started_at: "datetime",
+    authored: bytes,
+    authored_name: str,
+    transformed: str,
+    steps: Sequence[Step],
+    variables: UserDefinedVariables | None,
+) -> CarriedInputs:
+    """Copy what an attempt was asked into its own directory in the run root.
+
+    The directory holds the authored workplan as it was read, the runtime
+    variables when any were given, a copy of the transformed workplan and each
+    step's blueprint file. A deferred step has no blueprint file yet and an
+    inline step's blueprint is built from the workplan, so neither is copied.
+    When anything cannot be carried the directory is removed, so a refused
+    attempt leaves nothing for `check` or a reader to find.
+
+    Parameters
+    ----------
+    output_dir : Path
+        The run root.
+    started_at : datetime
+        When the attempt was scheduled; it names the attempt's directory.
+    authored : bytes
+        The content of the authored workplan file.
+    authored_name : str
+        The name its copy is given.
+    transformed : str
+        The rendered transformed workplan.
+    steps : Sequence[Step]
+        The steps of the transformed workplan, before inline blueprints are
+        materialized.
+    variables : UserDefinedVariables | None
+        The runtime variables given for the attempt.
+
+    Returns
+    -------
+    CarriedInputs
+        Where the inputs were carried to and the digest of each file.
+
+    Raises
+    ------
+    FileNotFoundError
+        If a blueprint file cannot be read.
+    """
+    attempt_dir = create_attempt_dir(output_dir, started_at)
+    try:
+        workplan_copy = attempt_dir / authored_name
+        workplan_copy.write_bytes(authored)
+        transformed_copy = attempt_dir / ATTEMPT_TRANSFORMED_NAME
+        transformed_copy.write_text(transformed, encoding="utf-8")
+        files = [workplan_copy, transformed_copy]
+        if variables is not None:
+            variables_copy = attempt_dir / ATTEMPT_VARIABLES_NAME
+            serialize(variables_copy, variables)
+            files.append(variables_copy)
+
+        carried_blueprints: dict[str, str] = {}
+        for step in steps:
+            if step.is_deferred or step.is_inline:
+                continue
+
+            directory = attempt_dir / ATTEMPT_BLUEPRINTS_DIR_NAME / step.safe_name
+            if copied := _carry_blueprint(step, directory):
+                files.append(copied)
+                carried_blueprints[step.name] = copied.relative_to(
+                    output_dir
+                ).as_posix()
+
+        digests = {
+            file.relative_to(attempt_dir).as_posix(): carried_digest(file)
+            for file in files
+        }
+    except BaseException:
+        shutil.rmtree(attempt_dir, ignore_errors=True)
+        raise
+
+    return CarriedInputs(
+        start_at=started_at,
+        directory=attempt_dir.relative_to(output_dir).as_posix(),
+        carried=digests,
+        carried_blueprints=carried_blueprints,
+    )
+
+
 async def prepare_workplan(
     wp_path: Path,
     output_dir: Path,
     user_variables: Mapping[str, str] | None = None,
     clobber_steps: "Sequence[str] | None" = None,
     pre_run: bool = False,
-) -> tuple[Workplan, Path, ExternalRuns]:
+) -> tuple[Workplan, Path, ExternalRuns, CarriedInputs]:
     """Load the workplan and apply any applicable transforms.
 
     Parameters
@@ -492,10 +699,11 @@ async def prepare_workplan(
 
     Returns
     -------
-    tuple[Workplan, Path, ExternalRuns]
-        Tuple containing the resulting workplan, the workplan file path, and the
+    tuple[Workplan, Path, ExternalRuns, CarriedInputs]
+        Tuple containing the resulting workplan, the workplan file path, the
         registry of external runs the workplan depends on, as refreshed while
-        preparing it
+        preparing it, and what the attempt carried into its directory under
+        the run root
 
     Raises
     ------
@@ -503,13 +711,13 @@ async def prepare_workplan(
         If the expected and provided user variables are not in agreement, or
         a step requests pre-run on an application that does not support it.
     """
+    started_at = utc_now()
+    # read beside the parse, so an edit made while the attempt prepares is not carried
+    authored = await asyncio.to_thread(wp_path.read_bytes)
     wp_orig = await asyncio.to_thread(deserialize, wp_path, Workplan)
 
     fill_transform: TemplateFillTransform | None = None
-    file_io_extras: list[Awaitable[int]] = []
-    persist_vars = WorkplanTransformer.derived_path(
-        wp_path, output_dir, suffix="", extension=".vars"
-    )
+    variables: UserDefinedVariables | None = None
 
     if user_variables is not None:
         named_config = UserDefinedVariables(
@@ -518,11 +726,10 @@ async def prepare_workplan(
         if named_config.error:
             raise ValueError(named_config.error)
 
+        variables = named_config
         fill_transform = TemplateFillTransform(
             variable_resolver=lambda name: named_config[name]
         )
-
-        file_io_extras.append(asyncio.to_thread(serialize, persist_vars, named_config))
     else:
         fill_transform = TemplateFillTransform(variable_resolver=None)
 
@@ -543,31 +750,34 @@ async def prepare_workplan(
     if pre_run:
         apply_pre_run_overrides(wp)
 
+    # an inline step's blueprint is carried by the workplan, not as a file
+    transformed_steps = wp.steps
+
     # inline blueprints are written to disk only for a real run, not for `check`
     materialized = await asyncio.to_thread(materialize_inline_blueprints, wp.steps)
     wp = LiveWorkplan.model_validate(wp, from_attributes=True).model_copy(
         update={"steps": materialized, "root": output_dir.resolve()}
     )
 
-    # make a copy of the original and modified blueprint in the output directory
-    persist_orig = original_workplan_backup(wp_path, output_dir)
+    transformed = render_model(wp)
+    is_json = wp_path.suffix == ".json"
+    carried = await asyncio.to_thread(
+        _carry_inputs,
+        output_dir,
+        started_at,
+        authored,
+        ATTEMPT_JSON_WORKPLAN_NAME if is_json else ATTEMPT_WORKPLAN_NAME,
+        transformed,
+        transformed_steps,
+        variables,
+    )
+
+    # replaced only once the inputs are carried: a refused attempt leaves the
+    # plan the run executes as the last attempt left it
     persist_as = WorkplanTransformer.derived_path(wp_path, output_dir, "_transformed")
+    await asyncio.to_thread(write_text_atomic, persist_as, transformed)
 
-    # keep the files of earlier attempts as `<name>.<i>`; nothing reads the rotated
-    # copies. The variables rotate even when this attempt writes none, so an old
-    # attempt's variables never sit beside this attempt's originals.
-    for persisted in (persist_orig, persist_as, persist_vars):
-        rotate_file(persisted)
-
-    file_io: list[Awaitable[int]] = [
-        asyncio.to_thread(serialize, persist_orig, wp_orig),
-        asyncio.to_thread(serialize, persist_as, wp),
-        *file_io_extras,
-    ]
-
-    _ = await asyncio.gather(*file_io)
-
-    return wp, persist_as, external
+    return wp, persist_as, external, carried
 
 
 class ExecutiveStepSummary(BaseModel):
@@ -1174,7 +1384,7 @@ async def build_dag(
     user_variables: Mapping[str, str] | None = None,
     clobber_steps: "Sequence[str] | None" = None,
     pre_run: bool = False,
-) -> tuple[Planner, Path, dict[str, StepFacts]]:
+) -> tuple[Planner, Path, dict[str, StepFacts], CarriedInputs]:
     """Execute the steps in the workplan.
 
     Parameters
@@ -1195,10 +1405,11 @@ async def build_dag(
 
     Returns
     -------
-    tuple[Planner, Path, dict[str, StepFacts]]
+    tuple[Planner, Path, dict[str, StepFacts], CarriedInputs]
         The planner built from the prepared workplan, the path to the
-        workplan after any transformations were applied, and the facts known
-        about each authored step.
+        workplan after any transformations were applied, the facts known
+        about each authored step, and what the attempt carried into its
+        directory under the run root.
 
     Raises
     ------
@@ -1219,7 +1430,7 @@ async def build_dag(
     wp_orig = await asyncio.to_thread(deserialize, wp_path, Workplan)
     facts = await asyncio.to_thread(describe_steps, wp_orig, wp_path.parent)
 
-    # the guard runs before `prepare_workplan` rotates or writes anything
+    # the guard runs before `prepare_workplan` writes anything
     escape = f"pass {ARG_RUN_ID} <other-id> to start a new run"
     try:
         manifest = read_run_manifest(output_dir)
@@ -1238,14 +1449,14 @@ async def build_dag(
         )
         refuse_edited_done_steps(wp_orig, manifest, status, facts, clobber_steps or [])
 
-    wp, prepared_wp_path, external = await prepare_workplan(
+    wp, prepared_wp_path, external, carried = await prepare_workplan(
         wp_path, output_dir, user_variables, clobber_steps, pre_run
     )
     # the steps are live once prepared; report before a pre-run prunes any of them
     report_orphans(output_dir, run_id, t.cast("LiveWorkplan", wp))
     planner = build_planner(wp, external.tasks())
 
-    return planner, prepared_wp_path, facts
+    return planner, prepared_wp_path, facts, carried
 
 
 def _record_attempt(
@@ -1255,6 +1466,7 @@ def _record_attempt(
     workplan: Workplan,
     steps: "Sequence[LiveStep]",
     step_facts: Mapping[str, StepFacts],
+    carried: CarriedInputs | None,
 ) -> None:
     """Record the scheduling of the workplan in the run's manifest.
 
@@ -1275,6 +1487,9 @@ def _record_attempt(
         The steps being scheduled.
     step_facts : Mapping[str, StepFacts]
         The facts known about each authored step; empty when re-entering a run.
+    carried : CarriedInputs | None
+        What the attempt carried into the run directory; `None` when
+        re-entering a run.
     """
     outside: list[str] = []
 
@@ -1309,9 +1524,12 @@ def _record_attempt(
                 workplan=WorkplanIdentity(
                     name=workplan.name, content_hash=content_hash, path=str(wp_path)
                 ),
-                attempt=new_attempt(workplan, workplan_hash=content_hash),
+                attempt=new_attempt(
+                    workplan, workplan_hash=content_hash, carried=carried
+                ),
                 steps=entries,
                 runs=workplan.runs,
+                carried_blueprints=carried.carried_blueprints if carried else None,
             )
     except Exception as ex:
         log.warning(f"Could not write the manifest of run {run_id!r}: {ex}")
@@ -1324,6 +1542,7 @@ async def run_dag(
     planner: Planner,
     user_variables: Mapping[str, str] | None = None,
     step_facts: Mapping[str, StepFacts] | None = None,
+    carried: CarriedInputs | None = None,
 ) -> WorkplanRun:
     """Execute the steps in the workplan.
 
@@ -1343,6 +1562,10 @@ async def run_dag(
     step_facts : Mapping[str, StepFacts] | None
         The facts known about each authored step, from `build_dag`. `None`
         when re-entering a run, whose manifest already holds them.
+    carried : CarriedInputs | None
+        What the attempt carried into its directory, from `build_dag`. `None`
+        when re-entering a run, which replays the recorded plan and carries
+        nothing.
 
     Returns
     -------
@@ -1362,6 +1585,7 @@ async def run_dag(
         planner.workplan,
         steps,
         step_facts or {},  # the one place a reload's absent facts are read
+        carried,
     )
 
     wp_run = WorkplanRun(
@@ -1424,7 +1648,7 @@ async def build_and_run_dag(
         If the run's manifest cannot be read, or a step that reached Done was
         edited and not clobbered.
     """
-    planner, prepared_wp_path, facts = await build_dag(
+    planner, prepared_wp_path, facts, carried = await build_dag(
         wp_path,
         run_id,
         user_variables=user_variables,
@@ -1438,4 +1662,5 @@ async def build_and_run_dag(
         planner,
         user_variables=user_variables,
         step_facts=facts,
+        carried=carried,
     )
