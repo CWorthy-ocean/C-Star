@@ -121,6 +121,22 @@ entries already in the blueprint.
     such a run fails during setup with a message naming the missing
     variables.
 
+Finding a step's files
+----------------------
+
+A ``step`` source reads the files it needs from the :term:`step record` that
+step wrote, by :term:`product <Product>` kind: ``continue-from`` takes the
+``restart`` files (from a step that recorded none, the ``initial_conditions``
+files named like restarts, which is what ``nest_ic`` writes), ``nest-from``
+the ``boundary_forcing`` files with role ``child``, and
+``carbonate-sensitivity-from`` the ``gas_exchange`` files. When the record
+lists no product of that kind -- the step ran under C-Star 0.17.0 or earlier,
+whose records list no products, or its application does not classify its files
+that way -- the step's ``output`` directory is searched by file name instead.
+A product the record lists that is missing from disk fails the step that reads
+it, with an error pointing at ``cstar run check``. A ``path`` source is always
+searched by name.
+
 Ordering
 --------
 

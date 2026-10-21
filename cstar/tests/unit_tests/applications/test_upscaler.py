@@ -1,6 +1,7 @@
 import logging
 import shutil
 from collections.abc import Generator
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 from unittest import mock
@@ -10,14 +11,17 @@ import numpy as np
 import pytest
 import xarray as xr
 
-from cstar.applications.core import RunnerRequest
+from cstar.applications.core import ArtifactKind, RunnerRequest
 from cstar.applications.upscaler import (
     CDRUpscaler,
     UpscalerBlueprint,
     UpscalerRunner,
 )
+from cstar.base.exceptions import CstarError
 from cstar.base.utils import convert_to_cdf5
 from cstar.entrypoint.config import JobConfig, ServiceConfiguration
+from cstar.orchestration.manifest import Product, StepRecord, write_step_record
+from cstar.orchestration.models import BlueprintIdentity
 
 
 @pytest.fixture
@@ -126,6 +130,115 @@ class TestUpscalerRunnerSaveRouting:
 
         mock_upscaler.save.assert_called_once_with(self._expected_final_path(bp))
         mock_convert.assert_not_called()
+
+
+class TestUpscalerRunnerUsclFiles:
+    """Tests for which `_uscl` files `UpscalerRunner.run` reads."""
+
+    @pytest.fixture
+    def mock_upscaler_cls(self) -> Generator[mock.Mock, None, None]:
+        """Replace `CDRUpscaler` so no `uscl` data is opened, exposing its class mock."""
+        with mock.patch("cstar.applications.upscaler.CDRUpscaler") as mock_cls:
+            yield mock_cls
+
+    @staticmethod
+    def _write_record(step_root: Path, *paths: Path) -> None:
+        """Write the record of a step that listed `paths` as `upscaling` products."""
+        record = StepRecord(
+            step="producer",
+            application="roms_marbl",
+            blueprint=BlueprintIdentity(
+                kind="Blueprint", application="roms_marbl", name="bp"
+            ),
+            outcome="completed",
+            finished_at=datetime(2026, 10, 15, 12, tzinfo=UTC),
+            products=[
+                Product(
+                    kind=ArtifactKind.upscaling,
+                    path=path.relative_to(step_root).as_posix(),
+                )
+                for path in paths
+            ],
+        )
+        write_step_record(step_root, record)
+
+    async def _uscl_files_read(
+        self, blueprint_kwargs: dict[str, Any], mock_upscaler_cls: mock.Mock
+    ) -> list[Path]:
+        """Run the upscaler and return the files it handed to `CDRUpscaler`."""
+        runner = _make_runner(UpscalerBlueprint(**blueprint_kwargs, pio=False))
+        await runner.run()
+        return sorted(mock_upscaler_cls.call_args.args[0])
+
+    async def test_recorded_files_are_read(
+        self, blueprint_kwargs: dict[str, Any], mock_upscaler_cls: mock.Mock
+    ) -> None:
+        """Verify the files the record beside the directory lists are read,
+        not every `_uscl` file in the directory.
+        """
+        uscl_dir = Path(blueprint_kwargs["uscl_file_location"])
+        recorded = uscl_dir / "roms_uscl.20240101000000.nc"
+        (uscl_dir / "roms_uscl.20240201000000.nc").touch()
+        self._write_record(uscl_dir.parent, recorded)
+
+        files = await self._uscl_files_read(blueprint_kwargs, mock_upscaler_cls)
+
+        assert files == [recorded]
+
+    @pytest.mark.parametrize(
+        "listed",
+        [
+            pytest.param(
+                "elsewhere/roms_uscl.20240301000000.nc", id="outside the directory"
+            ),
+            pytest.param("uscl/notes_uscl.nc", id="not named like a uscl file"),
+        ],
+    )
+    async def test_unrelated_recorded_files_are_not_read(
+        self,
+        blueprint_kwargs: dict[str, Any],
+        mock_upscaler_cls: mock.Mock,
+        listed: str,
+    ) -> None:
+        """Verify a record listing no `_uscl` file of the directory leaves the
+        directory to be searched.
+        """
+        uscl_dir = Path(blueprint_kwargs["uscl_file_location"])
+        unrelated = uscl_dir.parent / listed
+        unrelated.parent.mkdir(exist_ok=True)
+        unrelated.touch()
+        self._write_record(uscl_dir.parent, unrelated)
+
+        files = await self._uscl_files_read(blueprint_kwargs, mock_upscaler_cls)
+
+        assert files == [uscl_dir / "roms_uscl.20240101000000.nc"]
+
+    async def test_directory_is_searched_without_a_record(
+        self, blueprint_kwargs: dict[str, Any], mock_upscaler_cls: mock.Mock
+    ) -> None:
+        """Verify a directory with no record beside it is searched."""
+        uscl_dir = Path(blueprint_kwargs["uscl_file_location"])
+        (uscl_dir / "roms_uscl.20240201000000.nc").touch()
+
+        files = await self._uscl_files_read(blueprint_kwargs, mock_upscaler_cls)
+
+        assert files == [
+            uscl_dir / "roms_uscl.20240101000000.nc",
+            uscl_dir / "roms_uscl.20240201000000.nc",
+        ]
+
+    async def test_missing_recorded_file_is_refused(
+        self, blueprint_kwargs: dict[str, Any], mock_upscaler_cls: mock.Mock
+    ) -> None:
+        """Verify a `_uscl` file the record lists but that is gone fails the run,
+        rather than upscaling the files that remain.
+        """
+        uscl_dir = Path(blueprint_kwargs["uscl_file_location"])
+        gone = uscl_dir / "roms_uscl.20240201000000.nc"
+        self._write_record(uscl_dir.parent, gone)
+
+        with pytest.raises(CstarError, match="roms_uscl.20240201000000.nc"):
+            await self._uscl_files_read(blueprint_kwargs, mock_upscaler_cls)
 
 
 _N_TIME, _N_S_RHO, _N_XI, _N_ETA = 2, 4, 3, 2

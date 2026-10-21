@@ -12,10 +12,12 @@ from unittest import mock
 import pytest
 from pydantic import ValidationError
 
+from cstar.applications.core import ArtifactKind
 from cstar.applications.hello_world import HelloWorldBlueprint
 from cstar.applications.roms_marbl.file_system import RomsFileSystemManager
 from cstar.applications.roms_marbl.models import RomsMarblBlueprint
 from cstar.applications.roms_marbl.outputs import (
+    EXTRACT_ROLE,
     BoundaryFile,
     CarbonateSensitivityFile,
     CdrOutputFile,
@@ -32,6 +34,7 @@ from cstar.applications.roms_marbl.transforms import (
     RestartFileTrxAdapter,
     RomsMarblTimeSplitter,
     _split_sources,
+    step_output_files,
 )
 from cstar.applications.roms_marbl.transforms import (
     log as transforms_log,
@@ -45,8 +48,15 @@ from cstar.orchestration.compute_environment import ComputeEnvironment
 from cstar.orchestration.dag_runner import prepare_workplan
 from cstar.orchestration.launch.local import LocalHandle, LocalLauncher
 from cstar.orchestration.launch.slurm import SlurmComputeSpec
+from cstar.orchestration.manifest import (
+    STEP_RECORD_NAME,
+    Product,
+    StepRecord,
+    write_step_record,
+)
 from cstar.orchestration.models import (
     Application,
+    BlueprintIdentity,
     BlueprintState,
     DeferredBlueprintRef,
     InlineBlueprintRef,
@@ -1327,6 +1337,54 @@ async def test_continuance_directive_step_output_rejects_partitioned(
         ContinuanceDirective(config, workplan=live_plan)
 
 
+def _listed(step: LiveStep, kind: ArtifactKind, path: Path, **metadata: str) -> Product:
+    """Describe a file of `step` as a product of `kind`.
+
+    Parameters
+    ----------
+    step : LiveStep
+        The step that produced the file.
+    kind : ArtifactKind
+        The kind the product is recorded under.
+    path : Path
+        The file, under the step's working directory.
+    **metadata : str
+        The product's metadata, e.g. `role`.
+
+    Returns
+    -------
+    Product
+    """
+    return Product(
+        kind=kind,
+        path=path.relative_to(step.fsm.root_dir).as_posix(),
+        metadata={**metadata},
+    )
+
+
+def _write_record(step: LiveStep, *products: Product) -> None:
+    """Write the step record of a completed `step` that listed `products`.
+
+    Parameters
+    ----------
+    step : LiveStep
+        The step the record belongs to.
+    *products : Product
+        The products the record lists; none for a record written by 0.17.0.
+    """
+    record = StepRecord(
+        step=step.name,
+        application=step.application,
+        blueprint=BlueprintIdentity(
+            kind="Blueprint", application=step.application, name="bp"
+        ),
+        outcome="completed",
+        finished_at=datetime(2026, 10, 15, 12, tzinfo=UTC),
+        products=list(products),
+    )
+    write_step_record(step.fsm.root_dir, record)
+
+
 def _plan_with_parent_restarts(
     tmp_path: Path,
     bp_templates_dir: Path,
@@ -1537,6 +1595,478 @@ def test_continuance_directive_step_timestamp_no_restarts(
 
     with pytest.raises(FileNotFoundError, match="migrate-outputs"):
         ContinuanceDirective(config, workplan=live_plan)
+
+
+@pytest.mark.parametrize(
+    ("recorded", "unrecorded", "directive_extra", "expected_name"),
+    [
+        pytest.param(
+            ["output_rst.20120115000000.nc"],
+            ["output_rst.20120201000000.nc"],
+            {},
+            "output_rst.20120115000000.nc",
+            id="the latest restart on disk is not recorded",
+        ),
+        pytest.param(
+            ["output_rst.20120115000000.nc", "output_rst.20120201000000.nc"],
+            ["output_rst.20120301000000.nc"],
+            {},
+            "output_rst.20120201000000.nc",
+            id="latest recorded restart",
+        ),
+        pytest.param(
+            ["output_rst.20120115000000.nc", "output_rst.20120201000000.nc"],
+            ["output_rst.20120301000000.nc"],
+            {ContinuanceDirective.KEY_TIMESTAMP: "2012-01-15 00:00:00"},
+            "output_rst.20120115000000.nc",
+            id="timestamp selects a recorded restart",
+        ),
+    ],
+)
+def test_continuance_directive_step_reads_the_producers_record(
+    tmp_path: Path,
+    bp_templates_dir: Path,
+    hello_world_bp_path: Path,
+    recorded: list[str],
+    unrecorded: list[str],
+    directive_extra: dict[str, str],
+    expected_name: str,
+) -> None:
+    """Verify `continue-from: {step: <name>}` continues from the restarts the
+    producer's record lists, not from every restart in its `output`.
+
+    Parameters
+    ----------
+    tmp_path : Path
+        Temporary directory for test outputs.
+    bp_templates_dir : Path
+        Fixture returning the path to the directory containing blueprint template files.
+    hello_world_bp_path : Path
+        Fixture returning the path to a hello-world blueprint file.
+    recorded : list[str]
+        The restarts in the parent's `output` that its record lists.
+    unrecorded : list[str]
+        The restarts in the parent's `output` that its record does not list.
+    directive_extra : dict[str, str]
+        The keys added to the directive's `step` source.
+    expected_name : str
+        The name of the file the child is expected to continue from.
+    """
+    live_plan, child_step, parent_output = _plan_with_parent_restarts(
+        tmp_path,
+        bp_templates_dir,
+        hello_world_bp_path,
+        [*recorded, *unrecorded],
+        {ContinuanceDirective.KEY_STEP: "parent", **directive_extra},
+    )
+    parent = live_plan["parent"]
+    _write_record(
+        parent,
+        *(_listed(parent, ArtifactKind.restart, parent_output / n) for n in recorded),
+    )
+
+    config = t.cast(
+        "dict[str, t.Any]", child_step.directives[ContinuanceDirective.key()]
+    )
+    altered = ContinuanceDirective(config, workplan=live_plan)(child_step)[0]
+
+    bp_after = deserialize(altered.blueprint_path, RomsMarblBlueprint)
+    location = Path(bp_after.initial_conditions.data[0].location)
+    assert location == (parent_output / expected_name).resolve()
+
+
+def test_continuance_directive_step_timestamp_not_recorded(
+    tmp_path: Path,
+    bp_templates_dir: Path,
+    hello_world_bp_path: Path,
+) -> None:
+    """Verify a `timestamp` that only an unrecorded restart carries lists the
+    recorded timestamps, without the legacy-layout hint.
+
+    Parameters
+    ----------
+    tmp_path : Path
+        Temporary directory for test outputs.
+    bp_templates_dir : Path
+        Fixture returning the path to the directory containing blueprint template files.
+    hello_world_bp_path : Path
+        Fixture returning the path to a hello-world blueprint file.
+    """
+    recorded = ["output_rst.20120115000000.nc", "output_rst.20120201000000.nc"]
+    live_plan, child_step, parent_output = _plan_with_parent_restarts(
+        tmp_path,
+        bp_templates_dir,
+        hello_world_bp_path,
+        [*recorded, "output_rst.20120301000000.nc"],
+        {
+            ContinuanceDirective.KEY_STEP: "parent",
+            ContinuanceDirective.KEY_TIMESTAMP: "2012-03-01 00:00:00",
+        },
+    )
+    parent = live_plan["parent"]
+    _write_record(
+        parent,
+        *(_listed(parent, ArtifactKind.restart, parent_output / n) for n in recorded),
+    )
+    config = t.cast(
+        "dict[str, t.Any]", child_step.directives[ContinuanceDirective.key()]
+    )
+
+    with pytest.raises(FileNotFoundError) as error:
+        ContinuanceDirective(config, workplan=live_plan)
+
+    message = str(error.value)
+    assert message.endswith("found there: 2012-01-15 00:00:00, 2012-02-01 00:00:00")
+    assert STEP_RECORD_NAME in message
+    assert "migrate-outputs" not in message
+
+
+def test_continuance_directive_step_recorded_partition_piece_is_rejected(
+    tmp_path: Path,
+    bp_templates_dir: Path,
+    hello_world_bp_path: Path,
+) -> None:
+    """Verify a partition piece the producer's record lists is refused as one
+    found by searching `output` is, pointing at `cstar admin migrate-outputs`.
+
+    Parameters
+    ----------
+    tmp_path : Path
+        Temporary directory for test outputs.
+    bp_templates_dir : Path
+        Fixture returning the path to the directory containing blueprint template files.
+    hello_world_bp_path : Path
+        Fixture returning the path to a hello-world blueprint file.
+    """
+    piece = "output_rst.20120201000000.000.nc"
+    live_plan, child_step, parent_output = _plan_with_parent_restarts(
+        tmp_path,
+        bp_templates_dir,
+        hello_world_bp_path,
+        [piece],
+        {ContinuanceDirective.KEY_STEP: "parent"},
+    )
+    parent = live_plan["parent"]
+    _write_record(parent, _listed(parent, ArtifactKind.restart, parent_output / piece))
+    config = t.cast(
+        "dict[str, t.Any]", child_step.directives[ContinuanceDirective.key()]
+    )
+
+    with pytest.raises(FileNotFoundError, match="migrate-outputs"):
+        ContinuanceDirective(config, workplan=live_plan)
+
+
+@pytest.mark.parametrize(
+    ("recorded", "unrecorded", "expected_name"),
+    [
+        pytest.param(
+            [(ArtifactKind.initial_conditions, "ic_from_parent_rst.20120115000000.nc")],
+            ["output_rst.20120201000000.nc"],
+            "ic_from_parent_rst.20120115000000.nc",
+            id="restart-named initial conditions, as nest_ic writes them",
+        ),
+        pytest.param(
+            [(ArtifactKind.initial_conditions, "grid_initial_conditions.nc")],
+            ["output_rst.20120201000000.nc"],
+            "output_rst.20120201000000.nc",
+            id="initial conditions not named like a restart fall back to output",
+        ),
+        pytest.param(
+            [
+                (ArtifactKind.restart, "output_rst.20120115000000.nc"),
+                (
+                    ArtifactKind.initial_conditions,
+                    "ic_from_parent_rst.20120201000000.nc",
+                ),
+            ],
+            [],
+            "output_rst.20120115000000.nc",
+            id="restart products are preferred over initial conditions",
+        ),
+    ],
+)
+def test_continuance_directive_step_reads_recorded_initial_conditions(
+    tmp_path: Path,
+    bp_templates_dir: Path,
+    hello_world_bp_path: Path,
+    recorded: list[tuple[ArtifactKind, str]],
+    unrecorded: list[str],
+    expected_name: str,
+) -> None:
+    """Verify `continue-from: {step: <name>}` reads the initial conditions a
+    producer such as `nest_ic` records, when their names are restart names.
+
+    Parameters
+    ----------
+    tmp_path : Path
+        Temporary directory for test outputs.
+    bp_templates_dir : Path
+        Fixture returning the path to the directory containing blueprint template files.
+    hello_world_bp_path : Path
+        Fixture returning the path to a hello-world blueprint file.
+    recorded : list[tuple[ArtifactKind, str]]
+        The kind and name of each file in the parent's `output` its record lists.
+    unrecorded : list[str]
+        The names of the files in the parent's `output` its record does not list.
+    expected_name : str
+        The name of the file the child is expected to continue from.
+    """
+    live_plan, child_step, parent_output = _plan_with_parent_restarts(
+        tmp_path,
+        bp_templates_dir,
+        hello_world_bp_path,
+        [*(name for _, name in recorded), *unrecorded],
+        {ContinuanceDirective.KEY_STEP: "parent"},
+    )
+    parent = live_plan["parent"]
+    _write_record(
+        parent,
+        *(_listed(parent, kind, parent_output / name) for kind, name in recorded),
+    )
+
+    config = t.cast(
+        "dict[str, t.Any]", child_step.directives[ContinuanceDirective.key()]
+    )
+    altered = ContinuanceDirective(config, workplan=live_plan)(child_step)[0]
+
+    bp_after = deserialize(altered.blueprint_path, RomsMarblBlueprint)
+    location = Path(bp_after.initial_conditions.data[0].location)
+    assert location == (parent_output / expected_name).resolve()
+
+
+def test_continuance_directive_step_without_recorded_products_searches_output(
+    tmp_path: Path,
+    bp_templates_dir: Path,
+    hello_world_bp_path: Path,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Verify a record that lists no products, as 0.17.0 wrote, leaves the
+    restart to be found in `output`, with a debug message naming the step.
+
+    Parameters
+    ----------
+    tmp_path : Path
+        Temporary directory for test outputs.
+    bp_templates_dir : Path
+        Fixture returning the path to the directory containing blueprint template files.
+    hello_world_bp_path : Path
+        Fixture returning the path to a hello-world blueprint file.
+    caplog : pytest.LogCaptureFixture
+        Captures log records emitted during the test.
+    """
+    live_plan, child_step, parent_output = _plan_with_parent_restarts(
+        tmp_path,
+        bp_templates_dir,
+        hello_world_bp_path,
+        ["output_rst.20120115000000.nc", "output_rst.20120201000000.nc"],
+        {ContinuanceDirective.KEY_STEP: "parent"},
+    )
+    _write_record(live_plan["parent"])
+    config = t.cast(
+        "dict[str, t.Any]", child_step.directives[ContinuanceDirective.key()]
+    )
+
+    with caplog.at_level(logging.DEBUG, logger=TRANSFORMS_LOGGER_NAME):
+        altered = ContinuanceDirective(config, workplan=live_plan)(child_step)[0]
+
+    bp_after = deserialize(altered.blueprint_path, RomsMarblBlueprint)
+    location = Path(bp_after.initial_conditions.data[0].location)
+    assert location == (parent_output / "output_rst.20120201000000.nc").resolve()
+    assert any(
+        record.levelno == logging.DEBUG and "'parent'" in record.getMessage()
+        for record in caplog.records
+        if record.name == TRANSFORMS_LOGGER_NAME
+    )
+
+
+def test_continuance_directive_step_missing_recorded_restart(
+    tmp_path: Path,
+    bp_templates_dir: Path,
+    hello_world_bp_path: Path,
+) -> None:
+    """Verify the restart the record lists and the directive selects, but that
+    is gone, fails the directive rather than continuing from another restart
+    found in `output`.
+
+    Parameters
+    ----------
+    tmp_path : Path
+        Temporary directory for test outputs.
+    bp_templates_dir : Path
+        Fixture returning the path to the directory containing blueprint template files.
+    hello_world_bp_path : Path
+        Fixture returning the path to a hello-world blueprint file.
+    """
+    gone = "output_rst.20120201000000.nc"
+    live_plan, child_step, parent_output = _plan_with_parent_restarts(
+        tmp_path,
+        bp_templates_dir,
+        hello_world_bp_path,
+        [gone, "output_rst.20120115000000.nc"],
+        {ContinuanceDirective.KEY_STEP: "parent"},
+    )
+    parent = live_plan["parent"]
+    _write_record(parent, _listed(parent, ArtifactKind.restart, parent_output / gone))
+    (parent_output / gone).unlink()
+    config = t.cast(
+        "dict[str, t.Any]", child_step.directives[ContinuanceDirective.key()]
+    )
+
+    with pytest.raises(CstarError, match=gone):
+        ContinuanceDirective(config, workplan=live_plan)
+
+
+def test_continuance_directive_step_pruned_older_restarts_are_not_needed(
+    tmp_path: Path,
+    bp_templates_dir: Path,
+    hello_world_bp_path: Path,
+) -> None:
+    """Verify deleting recorded restarts the directive does not select (older
+    ones, pruned to save space) leaves `continue-from` working.
+
+    Parameters
+    ----------
+    tmp_path : Path
+        Temporary directory for test outputs.
+    bp_templates_dir : Path
+        Fixture returning the path to the directory containing blueprint template files.
+    hello_world_bp_path : Path
+        Fixture returning the path to a hello-world blueprint file.
+    """
+    older = ["output_rst.20120101000000.nc", "output_rst.20120115000000.nc"]
+    latest = "output_rst.20120201000000.nc"
+    live_plan, child_step, parent_output = _plan_with_parent_restarts(
+        tmp_path,
+        bp_templates_dir,
+        hello_world_bp_path,
+        [*older, latest],
+        {ContinuanceDirective.KEY_STEP: "parent"},
+    )
+    parent = live_plan["parent"]
+    _write_record(
+        parent,
+        *(
+            _listed(parent, ArtifactKind.restart, parent_output / name)
+            for name in [*older, latest]
+        ),
+    )
+    for name in older:
+        (parent_output / name).unlink()
+    config = t.cast(
+        "dict[str, t.Any]", child_step.directives[ContinuanceDirective.key()]
+    )
+
+    altered = ContinuanceDirective(config, workplan=live_plan)(child_step)[0]
+
+    bp_after = deserialize(altered.blueprint_path, RomsMarblBlueprint)
+    location = Path(bp_after.initial_conditions.data[0].location)
+    assert location == (parent_output / latest).resolve()
+
+
+def test_step_output_files_skips_recorded_names_that_are_not_restarts(
+    tmp_path: Path,
+    bp_templates_dir: Path,
+    hello_world_bp_path: Path,
+) -> None:
+    """Verify products whose names do not parse as the wanted file type are
+    skipped, and the files that do parse are returned unselected.
+
+    Parameters
+    ----------
+    tmp_path : Path
+        Temporary directory for test outputs.
+    bp_templates_dir : Path
+        Fixture returning the path to the directory containing blueprint template files.
+    hello_world_bp_path : Path
+        Fixture returning the path to a hello-world blueprint file.
+    """
+    names = [
+        "grid_initial_conditions.nc",
+        "ic_from_parent_rst.20120115000000.nc",
+        "ic_from_parent_rst.20120201000000.000.nc",
+    ]
+    live_plan, _, parent_output = _plan_with_parent_restarts(
+        tmp_path, bp_templates_dir, hello_world_bp_path, names, {}
+    )
+    parent = live_plan["parent"]
+    _write_record(
+        parent,
+        *(
+            _listed(parent, ArtifactKind.initial_conditions, parent_output / name)
+            for name in names
+        ),
+    )
+
+    files, source = step_output_files(
+        RestartFile, parent.fsm.root_dir, "parent", (ArtifactKind.initial_conditions,)
+    )
+
+    assert [file.path.name for file in files] == names[1:]
+    assert source == parent.fsm.root_dir / STEP_RECORD_NAME
+
+
+def test_step_output_files_searches_output_without_a_record(
+    tmp_path: Path,
+    bp_templates_dir: Path,
+    hello_world_bp_path: Path,
+) -> None:
+    """Verify a step that wrote no record has every restart in `output`
+    returned, partition pieces included, and none selected.
+
+    Parameters
+    ----------
+    tmp_path : Path
+        Temporary directory for test outputs.
+    bp_templates_dir : Path
+        Fixture returning the path to the directory containing blueprint template files.
+    hello_world_bp_path : Path
+        Fixture returning the path to a hello-world blueprint file.
+    """
+    names = ["output_rst.20120115000000.nc", "output_rst.20120201000000.000.nc"]
+    live_plan, _, _ = _plan_with_parent_restarts(
+        tmp_path, bp_templates_dir, hello_world_bp_path, names, {}
+    )
+
+    root = live_plan["parent"].fsm.root_dir
+    files, source = step_output_files(
+        RestartFile, root, "parent", (ArtifactKind.restart,)
+    )
+
+    assert sorted(file.path.name for file in files) == names
+    assert source == RomsFileSystemManager(root).output_dir
+
+
+def test_step_output_files_without_any_files_points_at_the_legacy_layout(
+    tmp_path: Path,
+    bp_templates_dir: Path,
+    hello_world_bp_path: Path,
+) -> None:
+    """Verify a step with neither recorded nor searchable files fails with the
+    legacy-layout hint.
+
+    Parameters
+    ----------
+    tmp_path : Path
+        Temporary directory for test outputs.
+    bp_templates_dir : Path
+        Fixture returning the path to the directory containing blueprint template files.
+    hello_world_bp_path : Path
+        Fixture returning the path to a hello-world blueprint file.
+    """
+    live_plan, _, _ = _plan_with_parent_restarts(
+        tmp_path, bp_templates_dir, hello_world_bp_path, [], {}
+    )
+    _write_record(live_plan["parent"])
+
+    with pytest.raises(FileNotFoundError, match="No restart files located") as error:
+        step_output_files(
+            RestartFile,
+            live_plan["parent"].fsm.root_dir,
+            "parent",
+            (ArtifactKind.restart,),
+        )
+
+    assert "migrate-outputs" in str(error.value)
 
 
 def test_nesting_directive_step_output_rejects_partitioned(
@@ -2056,6 +2586,145 @@ def test_nesting_directive_multiple_steps(
     assert len(data) == 2
     assert Path(data[0].location).is_relative_to(first_fsm.output_dir)
     assert Path(data[1].location).is_relative_to(second_fsm.output_dir)
+
+
+def _plan_with_parent_outputs(
+    tmp_path: Path,
+    bp_templates_dir: Path,
+    hello_world_bp_path: Path,
+    parents: Mapping[str, Sequence[str]],
+    directive: str,
+    config: Mapping[str, t.Any],
+) -> tuple[LiveWorkplan, LiveStep, dict[str, RomsFileSystemManager]]:
+    """Build parent steps holding files in their `output` directories and a
+    `roms_marbl` child step carrying a `directive`.
+
+    Parameters
+    ----------
+    tmp_path : Path
+        Temporary directory for test outputs.
+    bp_templates_dir : Path
+        The directory containing blueprint template files.
+    hello_world_bp_path : Path
+        The path to a hello-world blueprint file, used for the parents.
+    parents : Mapping[str, Sequence[str]]
+        For each parent step, the names of the files written to its `output`
+        directory.
+    directive : str
+        The key of the child's directive.
+    config : Mapping[str, t.Any]
+        The child's configuration of the directive.
+
+    Returns
+    -------
+    tuple[LiveWorkplan, LiveStep, dict[str, RomsFileSystemManager]]
+        The plan, its child step, and each parent's file system manager.
+    """
+    parent_steps: list[LiveStep] = []
+    fsms: dict[str, RomsFileSystemManager] = {}
+    for name, filenames in parents.items():
+        parent = LiveStep(
+            name=name,
+            application="hello_world",
+            blueprint=hello_world_bp_path.as_posix(),
+            working_dir=tmp_path / name,
+        )
+        parent_steps.append(parent)
+        fsms[name] = RomsFileSystemManager(parent.fsm.root_dir)
+        fsms[name].prepare()
+        for filename in filenames:
+            (fsms[name].output_dir / filename).write_text("mock data")
+
+    child_bp_path = tmp_path / "child_bp.yaml"
+    child_bp_path.write_text(
+        (bp_templates_dir / "blueprint.yaml")
+        .read_text()
+        .replace("working_dir: .", f"working_dir: {tmp_path}")
+    )
+    child = LiveStep(
+        name="child",
+        application="roms_marbl",
+        blueprint=child_bp_path.as_posix(),
+        working_dir=tmp_path / "child",
+        directives={directive: dict(config)},
+    )
+    plan = LiveWorkplan(
+        name="parent-outputs-plan",
+        description="parent steps supplying files to a child",
+        steps=[*parent_steps, child],
+    )
+    return plan, child, fsms
+
+
+@pytest.mark.parametrize(
+    ("recorded", "unrecorded", "expected_names"),
+    [
+        pytest.param(
+            [("child_bry.20230201003000.nc", {"role": EXTRACT_ROLE})],
+            ["child_bry.20230301003000.nc", "parent_bry.20230201003000.nc"],
+            ["child_bry.20230201003000.nc"],
+            id="only the recorded child extraction",
+        ),
+        pytest.param(
+            [("other_bry.20230201003000.nc", {})],
+            ["child_bry.20230301003000.nc"],
+            ["child_bry.20230301003000.nc", "other_bry.20230201003000.nc"],
+            id="boundary products without the child role fall back to output",
+        ),
+    ],
+)
+def test_nesting_directive_step_reads_recorded_child_boundaries(
+    tmp_path: Path,
+    bp_templates_dir: Path,
+    hello_world_bp_path: Path,
+    recorded: list[tuple[str, dict[str, str]]],
+    unrecorded: list[str],
+    expected_names: list[str],
+) -> None:
+    """Verify `nest-from: {step: <name>}` reads the boundary forcing a producer
+    records under the child role, and searches `output` when it records none.
+
+    Parameters
+    ----------
+    tmp_path : Path
+        Temporary directory for test outputs.
+    bp_templates_dir : Path
+        Fixture returning the path to the directory containing blueprint template files.
+    hello_world_bp_path : Path
+        Fixture returning the path to a hello-world blueprint file.
+    recorded : list[tuple[str, dict[str, str]]]
+        The name and metadata of each boundary file in the parent's `output`
+        that its record lists as boundary forcing.
+    unrecorded : list[str]
+        The names of the files in the parent's `output` its record does not list.
+    expected_names : list[str]
+        The names of the boundary files the child is expected to be forced by.
+    """
+    config = {NestingDirective.KEY_STEP: "parent"}
+    plan, child, fsms = _plan_with_parent_outputs(
+        tmp_path,
+        bp_templates_dir,
+        hello_world_bp_path,
+        {"parent": [*(name for name, _ in recorded), *unrecorded]},
+        NestingDirective.key(),
+        config,
+    )
+    parent = plan["parent"]
+    output = fsms["parent"].output_dir
+    _write_record(
+        parent,
+        *(
+            _listed(parent, ArtifactKind.boundary_forcing, output / name, **metadata)
+            for name, metadata in recorded
+        ),
+    )
+
+    altered = NestingDirective(config, workplan=plan)(child)[0]
+
+    bp_after = deserialize(altered.blueprint_path, RomsMarblBlueprint)
+    assert [Path(d.location) for d in bp_after.forcing.boundary.data] == [
+        output / name for name in expected_names
+    ]
 
 
 def test_nesting_directive_multiple_steps_missing_output_raises(
@@ -2769,6 +3438,102 @@ def test_carbonate_sensitivity_directive_step_source(
         "first_cdrgas.20230201003000.nc"
     )
     assert not data[0].partitioned
+
+
+def test_carbonate_sensitivity_directive_step_reads_recorded_gas_exchange(
+    tmp_path: Path,
+    bp_templates_dir: Path,
+    hello_world_bp_path: Path,
+    mock_run_id: str,
+) -> None:
+    """Verify a `step` source reads the `gas_exchange` files the producer's
+    record lists, leaving out a `_cdrgas` file in `output` it does not list.
+
+    Parameters
+    ----------
+    tmp_path : Path
+        Temporary directory for test outputs.
+    bp_templates_dir : Path
+        Fixture returning the path to the directory containing blueprint template files.
+    hello_world_bp_path : Path
+        Fixture returning the path to a hello-world blueprint file.
+    mock_run_id : str
+        A unique run-id that has already been added to os.environ.
+    """
+    config = {CarbonateSensitivityDirective.KEY_STEP: "first"}
+    plan, child, fsms = _plan_with_cdrgas_parents(
+        tmp_path,
+        bp_templates_dir,
+        hello_world_bp_path,
+        mock_run_id,
+        {"first": ["first_cdrgas.20230201003000.nc", "stray_cdrgas.20230301003000.nc"]},
+        config,
+    )
+    first = plan["first"]
+    _write_record(
+        first,
+        _listed(
+            first,
+            ArtifactKind.gas_exchange,
+            fsms["first"].output_dir / "first_cdrgas.20230201003000.nc",
+        ),
+    )
+
+    altered = CarbonateSensitivityDirective(config, workplan=plan)(child)[0]
+
+    bp_after = deserialize(altered.blueprint_path, RomsMarblBlueprint)
+    assert bp_after.forcing.carbonate_sensitivity is not None
+    data = bp_after.forcing.carbonate_sensitivity.data
+    assert [Path(d.location) for d in data] == [
+        fsms["first"].output_dir / "first_cdrgas.20230201003000.nc"
+    ]
+
+
+def test_carbonate_sensitivity_directive_step_missing_recorded_file(
+    tmp_path: Path,
+    bp_templates_dir: Path,
+    hello_world_bp_path: Path,
+    mock_run_id: str,
+) -> None:
+    """Verify a `_cdrgas` file the producer's record lists but that is gone
+    fails the directive without the hint to enable the gas-exchange output,
+    which the producer evidently had enabled.
+
+    Parameters
+    ----------
+    tmp_path : Path
+        Temporary directory for test outputs.
+    bp_templates_dir : Path
+        Fixture returning the path to the directory containing blueprint template files.
+    hello_world_bp_path : Path
+        Fixture returning the path to a hello-world blueprint file.
+    mock_run_id : str
+        A unique run-id that has already been added to os.environ.
+    """
+    gone = "first_cdrgas.20230301003000.nc"
+    config = {CarbonateSensitivityDirective.KEY_STEP: "first"}
+    plan, _, fsms = _plan_with_cdrgas_parents(
+        tmp_path,
+        bp_templates_dir,
+        hello_world_bp_path,
+        mock_run_id,
+        {"first": ["first_cdrgas.20230201003000.nc", gone]},
+        config,
+    )
+    first = plan["first"]
+    _write_record(
+        first,
+        *(
+            _listed(first, ArtifactKind.gas_exchange, fsms["first"].output_dir / name)
+            for name in ["first_cdrgas.20230201003000.nc", gone]
+        ),
+    )
+    (fsms["first"].output_dir / gone).unlink()
+
+    with pytest.raises(CstarError, match=gone) as error:
+        CarbonateSensitivityDirective(config, workplan=plan)
+
+    assert "do_cdr_gas_exch_output" not in str(error.value)
 
 
 def test_carbonate_sensitivity_directive_multiple_steps(
@@ -5560,6 +6325,115 @@ async def test_resolve_deferred_blueprint_ambiguous(
     ref = DeferredBlueprintRef(from_step="producer")
 
     with pytest.raises(CstarError, match="Multiple candidate blueprints"):
+        _ = resolve_deferred_blueprint(ref)
+
+
+async def test_resolve_deferred_blueprint_uses_the_recorded_blueprint(
+    deferred_run_context: LiveWorkplan,
+    hello_world_bp_content: str,
+) -> None:
+    """Verify resolution takes the blueprint the producer's record lists, even
+    when another blueprint-like file in its output would make a search ambiguous.
+
+    Parameters
+    ----------
+    deferred_run_context : LiveWorkplan
+        The persisted, transformed workplan containing the producer step.
+    hello_world_bp_content : str
+        The content of a minimal hello-world blueprint.
+    """
+    producer = deferred_run_context["producer"]
+    generated = producer.fsm.output_dir / "generated.yaml"
+    generated.write_text(hello_world_bp_content)
+    (producer.fsm.output_dir / "other.yaml").write_text(hello_world_bp_content)
+    _write_record(
+        producer, _listed(producer, ArtifactKind.emitted_blueprint, generated)
+    )
+
+    ref = DeferredBlueprintRef(from_step="producer")
+    assert resolve_deferred_blueprint(ref) == generated
+
+
+async def test_resolve_deferred_blueprint_searches_output_without_a_recorded_blueprint(
+    deferred_run_context: LiveWorkplan,
+    hello_world_bp_content: str,
+) -> None:
+    """Verify a record that lists no blueprint, as 0.17.0 wrote, leaves the
+    blueprint to be found in the producer's output.
+
+    Parameters
+    ----------
+    deferred_run_context : LiveWorkplan
+        The persisted, transformed workplan containing the producer step.
+    hello_world_bp_content : str
+        The content of a minimal hello-world blueprint.
+    """
+    producer = deferred_run_context["producer"]
+    generated = producer.fsm.output_dir / "anything.yaml"
+    generated.write_text(hello_world_bp_content)
+    _write_record(producer)
+
+    ref = DeferredBlueprintRef(from_step="producer")
+    assert resolve_deferred_blueprint(ref) == generated
+
+
+async def test_resolve_deferred_blueprint_recorded_blueprints_are_ambiguous(
+    deferred_run_context: LiveWorkplan,
+    hello_world_bp_content: str,
+) -> None:
+    """Verify several recorded blueprints and no filename fail as several files
+    in the output do.
+
+    Parameters
+    ----------
+    deferred_run_context : LiveWorkplan
+        The persisted, transformed workplan containing the producer step.
+    hello_world_bp_content : str
+        The content of a minimal hello-world blueprint.
+    """
+    producer = deferred_run_context["producer"]
+    paths = [producer.fsm.output_dir / name for name in ("one.yaml", "two.yaml")]
+    for path in paths:
+        path.write_text(hello_world_bp_content)
+    _write_record(
+        producer,
+        *(_listed(producer, ArtifactKind.emitted_blueprint, path) for path in paths),
+    )
+
+    ref = DeferredBlueprintRef(from_step="producer")
+
+    with pytest.raises(CstarError, match="Multiple candidate blueprints"):
+        _ = resolve_deferred_blueprint(ref)
+
+
+async def test_resolve_deferred_blueprint_recorded_blueprint_is_missing(
+    deferred_run_context: LiveWorkplan,
+    hello_world_bp_content: str,
+) -> None:
+    """Verify a blueprint the record lists but that is gone fails resolution,
+    rather than resolving to another file in the output.
+
+    Parameters
+    ----------
+    deferred_run_context : LiveWorkplan
+        The persisted, transformed workplan containing the producer step.
+    hello_world_bp_content : str
+        The content of a minimal hello-world blueprint.
+    """
+    producer = deferred_run_context["producer"]
+    (producer.fsm.output_dir / "other.yaml").write_text(hello_world_bp_content)
+    _write_record(
+        producer,
+        _listed(
+            producer,
+            ArtifactKind.emitted_blueprint,
+            producer.fsm.output_dir / "generated.yaml",
+        ),
+    )
+
+    ref = DeferredBlueprintRef(from_step="producer")
+
+    with pytest.raises(CstarError, match="generated.yaml"):
         _ = resolve_deferred_blueprint(ref)
 
 

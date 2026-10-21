@@ -399,8 +399,11 @@ Workplan Examples
     .. note::
         - The producing step named in ``from_step`` must also be listed in
           ``depends_on``.
-        - ``filename`` is optional. When omitted, exactly one blueprint file
-          must be present in the producing step's output directory.
+        - ``filename`` is optional. When omitted, the blueprint the producing
+          step recorded (its ``emitted_blueprint`` product) is used; for a run
+          recorded by C-Star 0.17.0 or earlier, whose step record lists no
+          products, exactly one blueprint file must be present in the producing
+          step's output directory.
         - ``blueprint_overrides`` are still supported; they are applied at
           runtime, once the generated blueprint exists.
         - The generated blueprint must declare the same application as the

@@ -16,6 +16,7 @@ from pydantic import (
 
 from cstar.applications.core import (
     ApplicationDefinition,
+    ArtifactKind,
     Transform,
     get_app_for_blueprint,
     get_application,
@@ -36,6 +37,7 @@ from cstar.orchestration.compute_environment import (
 )
 from cstar.orchestration.launch.common import is_foreign_handle
 from cstar.orchestration.launch.slurm import SlurmComputeSpec
+from cstar.orchestration.manifest import product_paths, require_recorded_files
 from cstar.orchestration.models import (
     Blueprint,
     DeferredBlueprintRef,
@@ -2152,8 +2154,9 @@ def resolve_deferred_blueprint(ref: DeferredBlueprintRef) -> Path:
     Raises
     ------
     CstarError
-        If the producing step cannot be found in the workplan, or a unique
-        blueprint file cannot be located in its output directory.
+        If the producing step cannot be found in the workplan, a unique
+        blueprint file can be located neither in its record nor in its output
+        directory, or the blueprint its record lists is missing.
     """
     workplan = DirectiveConfig.load_workplan()
     try:
@@ -2177,11 +2180,18 @@ def resolve_deferred_blueprint(ref: DeferredBlueprintRef) -> Path:
             raise CstarError(msg)
         return candidate
 
-    candidates = sorted(
-        path
-        for pattern in ("*.yml", "*.yaml", "*.json")
-        for path in output_dir.glob(pattern)
-    )
+    candidates = product_paths(producer.fsm.root_dir, ArtifactKind.emitted_blueprint)
+    if not candidates:
+        log.debug(
+            "The record of step %r lists no emitted blueprint; searching %s",
+            ref.from_step,
+            output_dir,
+        )
+        candidates = sorted(
+            path
+            for pattern in ("*.yml", "*.yaml", "*.json")
+            for path in output_dir.glob(pattern)
+        )
     if not candidates:
         msg = f"Step {ref.from_step!r} did not produce a blueprint in: {output_dir}"
         raise CstarError(msg)
@@ -2194,6 +2204,7 @@ def resolve_deferred_blueprint(ref: DeferredBlueprintRef) -> Path:
         )
         raise CstarError(msg)
 
+    require_recorded_files(producer.fsm.root_dir, candidates)
     return candidates[0]
 
 

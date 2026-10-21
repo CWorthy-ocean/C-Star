@@ -20,6 +20,7 @@ from cstar.base.utils import convert_to_cdf5
 from cstar.entrypoint.runner import BlueprintRunner
 from cstar.execution.file_system import JobFileSystemManager
 from cstar.execution.handler import ExecutionStatus
+from cstar.orchestration.manifest import product_paths, require_recorded_files
 from cstar.orchestration.models import Blueprint
 
 APP_NAME: t.Final[str] = "upscaler"
@@ -31,6 +32,9 @@ log = get_logger(__name__)
 
 UPSCALED_CDR_NAME: t.Final[str] = "upscaled_cdr.nc"
 """The name of the upscaled CDR forcing file."""
+
+_USCL_GLOB: t.Final[str] = f"*{UPSCALING_SUFFIX}.??????????????.nc"
+"""The name of a joined `_uscl` file: the stream's suffix and a 14-digit timestamp."""
 
 BASE_TRACER_NAMES: t.Final[tuple[str, ...]] = ("ALK", "DIC")
 """Tracers always written to ``cdr_trcflx_profile``: MARBL's ALK and DIC
@@ -99,6 +103,42 @@ class UpscalerBlueprint(Blueprint):
     ``nccopy -k cdf5`` subprocess. When False, the NETCDF4 file is written directly."""
 
 
+def _find_uscl_files(uscl_dir: Path) -> list[Path]:
+    """Find the upscaling files of a directory.
+
+    The files the record beside `uscl_dir` lists as `upscaling` products are
+    used when any of them is a `_uscl` file in `uscl_dir` itself; the record of
+    an unrelated step, or none, leaves the directory to be searched.
+
+    Parameters
+    ----------
+    uscl_dir : Path
+        The directory holding the `_uscl` files, a step's `output` directory.
+
+    Returns
+    -------
+    list[Path]
+        The `_uscl` files, empty if there are none.
+
+    Raises
+    ------
+    CstarError
+        If a `_uscl` file the record lists is missing.
+    """
+    recorded = sorted(
+        path
+        for path in product_paths(uscl_dir.parent, ArtifactKind.upscaling)
+        if path.resolve().parent == uscl_dir.resolve() and path.match(_USCL_GLOB)
+    )
+    if recorded:
+        # the glob would skip a missing file and upscale fluxes with a gap
+        require_recorded_files(uscl_dir.parent, recorded)
+        return recorded
+
+    log.debug("No recorded upscaling files in %s; searching the directory", uscl_dir)
+    return list(uscl_dir.glob(_USCL_GLOB))
+
+
 class UpscalerRunner(BlueprintRunner[UpscalerBlueprint]):
     """Worker class to execute a simple plotting application.
 
@@ -127,9 +167,7 @@ class UpscalerRunner(BlueprintRunner[UpscalerBlueprint]):
             msg = f"Specified path of upscale files doesn't exist or isn't a directory: {uscl_dir}"
             raise FileNotFoundError(msg)
 
-        files: list[Path | str] = list(
-            uscl_dir.glob(f"*{UPSCALING_SUFFIX}.??????????????.nc")
-        )
+        files: list[Path | str] = list(_find_uscl_files(uscl_dir))
         if len(files) == 0:
             msg = f"No uscl files found in {uscl_dir}"
             raise FileNotFoundError(msg)

@@ -649,6 +649,77 @@ def read_step_record(step_root: Path) -> StepRecord | None:
     return _read(step_root / STEP_RECORD_NAME, StepRecord, "step record")
 
 
+def product_paths(step_root: Path, kind: ArtifactKind, *, role: str = "") -> list[Path]:
+    """List the files a step's record says it produced, of one kind.
+
+    An empty list means the record has nothing of the kind to offer, so the
+    caller searches the step's files itself: a step that has not written a
+    record has no products, a record written by C-Star 0.17.0 lists none, and
+    an application may not classify its files under the kind. The files are
+    not looked at: a caller confirms the ones it reads with
+    `require_recorded_files`, so pruning files it does not read is harmless.
+
+    Parameters
+    ----------
+    step_root : Path
+        The step's working directory.
+    kind : ArtifactKind
+        The kind of product to list.
+    role : str
+        The `role` recorded in the products' metadata; products recorded
+        without a role match the empty default.
+
+    Returns
+    -------
+    list[Path]
+        The products' locations, ordered by their recorded path.
+
+    Raises
+    ------
+    CstarSchemaTooNewError
+        If the record's schema is newer than this build reads.
+    CstarError
+        If the record cannot be read or is invalid.
+    """
+    record = read_step_record(step_root)
+    if record is None:
+        return []
+
+    listed = sorted(
+        (
+            product
+            for product in record.products
+            if product.known_kind is kind and product.metadata.get("role", "") == role
+        ),
+        key=lambda product: product.path,
+    )
+    return [step_root / product.path for product in listed]
+
+
+def require_recorded_files(step_root: Path, paths: "Sequence[Path]") -> None:
+    """Refuse to read recorded products that are missing on disk.
+
+    Parameters
+    ----------
+    step_root : Path
+        The working directory of the step whose record listed `paths`.
+    paths : Sequence[Path]
+        The products about to be read.
+
+    Raises
+    ------
+    CstarError
+        If one of `paths` does not exist; the message names the first.
+    """
+    if missing := next((path for path in paths if not path.exists()), None):
+        msg = (
+            f"The record of the step at {step_root} lists {missing.name}, which is "
+            f"missing from {missing.parent}; restore it, or run `cstar run check` "
+            "to see which of the step's products are missing."
+        )
+        raise CstarError(msg)
+
+
 def _write(path: Path, document: "RunManifest | StepRecord") -> Path:
     """Write a document atomically, stamped with the schema version this build writes.
 
