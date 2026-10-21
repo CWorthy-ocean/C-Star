@@ -30,6 +30,9 @@ OUTPUT_ROOT_NAME: t.Final[str] = "output"
 EXTRACT_ROOT_NAME: t.Final[str] = "child"
 """The root ROMS prefixes a boundary extraction with: `child_bry.<timestamp>.nc`."""
 
+EXTRACT_ROLE: t.Final[str] = "child"
+"""The role a boundary extraction's products are recorded under: they force the child grid."""
+
 UPSCALING_SUFFIX: t.Final[str] = "_uscl"
 """The suffix of the ROMS stream holding boundary tracer fluxes, read by the upscaler."""
 
@@ -61,6 +64,8 @@ class RestartFile(BaseModel):
     """A regex identifying full restart or partitioned files."""
     SUFFIX: t.ClassVar[t.Literal["_rst"]] = "_rst"
     """A unique suffix found in the name of restart files"""
+    LABEL: t.ClassVar[str] = "restart"
+    """A human-readable name for restart files, used in messages."""
 
     @classmethod
     def candidates(cls, search_path: Path, *, partitioned: bool) -> list["RestartFile"]:
@@ -113,6 +118,82 @@ class RestartFile(BaseModel):
         )
 
     @classmethod
+    def in_directory(cls, search_path: Path) -> list["RestartFile"]:
+        """Enumerate every restart file under a directory, partition pieces first.
+
+        Parameters
+        ----------
+        search_path : Path
+            The directory to search recursively.
+
+        Returns
+        -------
+        list[RestartFile]
+            The partition pieces, then the whole files; empty if there are none.
+        """
+        return [
+            *cls.candidates(search_path, partitioned=True),
+            *cls.candidates(search_path, partitioned=False),
+        ]
+
+    @classmethod
+    def select(
+        cls,
+        rst_files: Sequence["RestartFile"],
+        timestamp: datetime | None = None,
+        *,
+        source: Path,
+    ) -> "RestartFile":
+        """Select the restart file to continue from.
+
+        Partition pieces are preferred over whole files, as in `find`.
+
+        Parameters
+        ----------
+        rst_files : Sequence[RestartFile]
+            The restart files to choose from.
+        timestamp : datetime | None
+            The timestamp the file name must carry; matched exactly. The
+            latest timestamp is selected if `None`.
+        source : Path
+            Where `rst_files` came from, for the error message.
+
+        Returns
+        -------
+        RestartFile
+            The file with the lowest partition (a whole file counts as the
+            0th) among those with the selected timestamp.
+
+        Raises
+        ------
+        FileNotFoundError
+            If `rst_files` is empty and no `timestamp` was given, or no file is
+            dated `timestamp`; the message lists the timestamps that are present.
+        """
+        groups = [
+            [rst for rst in rst_files if rst.is_partitioned],
+            [rst for rst in rst_files if not rst.is_partitioned],
+        ]
+        for group in groups:
+            if not group:
+                continue
+            at = max(rst.timestamp for rst in group) if timestamp is None else timestamp
+            if match := cls._first_piece_at(group, at):
+                return match
+
+        if timestamp is None:
+            msg = f"No restart files located. Unable to continue from {source!r}"
+            raise FileNotFoundError(msg)
+
+        found = sorted({rst.timestamp for rst in rst_files})
+        listing = ", ".join(str(ts) for ts in found) or "none"
+        msg = (
+            f"No restart file dated {timestamp} located in {source!r}; "
+            f"restart timestamps found there: {listing}"
+        )
+        raise FileNotFoundError(msg)
+
+    @classmethod
     def find(cls, search_path: Path, notfound_ok: bool = True) -> "RestartFile | None":
         """Search for a restart file in the specified location.
 
@@ -149,18 +230,11 @@ class RestartFile(BaseModel):
             msg = f"No directory or file found at path: {search_path!r}"
             raise ValueError(msg)
 
-        for partitioned in (True, False):
-            rst_files = cls.candidates(search_path, partitioned=partitioned)
-            if rst_files:
-                return cls._first_piece_at(
-                    rst_files, max(rst.timestamp for rst in rst_files)
-                )
+        rst_files = cls.in_directory(search_path)
+        if not rst_files and notfound_ok:
+            return None
 
-        if not notfound_ok:
-            msg = f"No restart files located. Unable to continue from {search_path!r}"
-            raise FileNotFoundError(msg)
-
-        return None
+        return cls.select(rst_files, source=search_path)
 
     @classmethod
     def find_at(cls, search_path: Path, timestamp: datetime) -> "RestartFile":
@@ -195,27 +269,14 @@ class RestartFile(BaseModel):
         search_path = search_path.expanduser().resolve()
 
         if search_path.is_file():
-            groups = [[RestartFile(path=search_path)]]
+            rst_files = [RestartFile(path=search_path)]
         elif search_path.exists():
-            groups = [
-                cls.candidates(search_path, partitioned=partitioned)
-                for partitioned in (True, False)
-            ]
+            rst_files = cls.in_directory(search_path)
         else:
             msg = f"No directory or file found at path: {search_path!r}"
             raise ValueError(msg)
 
-        for rst_files in groups:
-            if match := cls._first_piece_at(rst_files, timestamp):
-                return match
-
-        found = sorted({rst.timestamp for rst_files in groups for rst in rst_files})
-        listing = ", ".join(str(ts) for ts in found) or "none"
-        msg = (
-            f"No restart file dated {timestamp} located in {search_path!r}; "
-            f"restart timestamps found there: {listing}"
-        )
-        raise FileNotFoundError(msg)
+        return cls.select(rst_files, timestamp, source=search_path)
 
     @classmethod
     def from_parts(
@@ -423,6 +484,31 @@ class TimestampedOutputFile(BaseModel):
         )
 
     @classmethod
+    def in_directory(cls, search_path: Path) -> list[t.Self]:
+        """Enumerate every output file of this kind under a directory.
+
+        Parameters
+        ----------
+        search_path : Path
+            The directory to search recursively.
+
+        Returns
+        -------
+        list[Self]
+            The files, sorted by path; empty if there are none.
+
+        Raises
+        ------
+        ValueError
+            If a file's name matches the kind's suffix but does not follow its
+            naming convention.
+        """
+        return [
+            cls(path=match)
+            for match in sorted(search_path.rglob(f"*{cls.SUFFIX}*.{cls.EXT}"))
+        ]
+
+    @classmethod
     def find(
         cls, search_path: Path, notfound_ok: bool = True
     ) -> Sequence[t.Self] | None:
@@ -458,9 +544,8 @@ class TimestampedOutputFile(BaseModel):
             msg = f"No directory or file found at path: {search_path!r}"
             raise ValueError(msg)
 
-        matches = sorted(search_path.rglob(f"*{cls.SUFFIX}*.{cls.EXT}"))
-        if matches:
-            return tuple(cls(path=m) for m in matches)
+        if matches := cls.in_directory(search_path):
+            return tuple(matches)
 
         if not notfound_ok:
             msg = (
@@ -601,7 +686,7 @@ OUTPUT_STREAMS: t.Final[tuple[tuple[str, ArtifactKind, dict[str, str]], ...]] = 
     (
         f"{EXTRACT_ROOT_NAME}{BoundaryFile.SUFFIX}",
         ArtifactKind.boundary_forcing,
-        {"role": "child"},
+        {"role": EXTRACT_ROLE},
     ),
     (
         f"{OUTPUT_ROOT_NAME}{CarbonateSensitivityFile.SUFFIX}",

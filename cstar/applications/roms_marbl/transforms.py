@@ -5,10 +5,11 @@ from collections.abc import Mapping, Sequence
 from datetime import datetime
 from pathlib import Path
 
-from cstar.applications.core import Transform
+from cstar.applications.core import ArtifactKind, Transform
 from cstar.applications.roms_marbl.file_system import RomsFileSystemManager
 from cstar.applications.roms_marbl.models import RomsMarblBlueprint
 from cstar.applications.roms_marbl.outputs import (
+    EXTRACT_ROLE,
     BoundaryFile,
     CarbonateSensitivityFile,
     RestartFile,
@@ -29,6 +30,7 @@ from cstar.base.utils import (
     min_padded_index,
     slugify,
 )
+from cstar.orchestration.manifest import product_paths
 from cstar.orchestration.orchestration import LiveStep
 from cstar.orchestration.serialization import serialize
 from cstar.orchestration.transforms import (
@@ -312,15 +314,15 @@ _LEGACY_LAYOUT_HINT: t.Final[str] = (
 """Appended to not-found errors so users of old run directories know what to do."""
 
 
-def _require_step_output_dir(workplan: "LiveWorkplan", name: str) -> Path:
-    """Resolve a step's `output` directory and require it to exist.
+def _require_step_output_dir(root: Path, name: str) -> Path:
+    """Locate a step's `output` directory and require it to exist.
 
     Parameters
     ----------
-    workplan : LiveWorkplan
-        The workplan containing the named step.
+    root : Path
+        The working directory of the step.
     name : str
-        The name of the step whose output directory is requested.
+        The name of the step, for the error message.
 
     Returns
     -------
@@ -328,16 +330,11 @@ def _require_step_output_dir(workplan: "LiveWorkplan", name: str) -> Path:
 
     Raises
     ------
-    KeyError
-        If `workplan` does not contain a step named `name`.
-    CstarError
-        If `name` is malformed or names a step of an external run that
-        cannot be resolved.
     FileNotFoundError
         If the step has no `output` directory yet (it has not run, or failed
         before producing output).
     """
-    search_path = resolve_step_output_dir(workplan, name)
+    search_path = RomsFileSystemManager(root).output_dir
     if not search_path.is_dir():
         msg = (
             f"Step {name!r} has no output directory at {search_path}; "
@@ -376,6 +373,33 @@ def _reject_partitioned_step_output(name: str, partitioned: bool, found: Path) -
         raise FileNotFoundError(msg)
 
 
+def resolve_step_root(workplan: "LiveWorkplan", name: str) -> Path:
+    """Resolve the working directory of a named workplan step.
+
+    Parameters
+    ----------
+    workplan : LiveWorkplan
+        The workplan containing the named step.
+    name : str
+        The name of the step whose working directory is requested; a step of
+        an external run is named `<step>@<alias>`.
+
+    Returns
+    -------
+    Path
+        The step's working directory, where its step record is written.
+
+    Raises
+    ------
+    KeyError
+        If `workplan` does not contain a step named `name`.
+    CstarError
+        If `name` is malformed or names a step of an external run that
+        cannot be resolved.
+    """
+    return lookup_step(workplan, name).fsm.root_dir
+
+
 def resolve_step_output_dir(workplan: "LiveWorkplan", name: str) -> Path:
     """Resolve the `output` directory of a named, completed workplan step.
 
@@ -405,8 +429,7 @@ def resolve_step_output_dir(workplan: "LiveWorkplan", name: str) -> Path:
         If `name` is malformed or names a step of an external run that
         cannot be resolved.
     """
-    fsm = RomsFileSystemManager(lookup_step(workplan, name).fsm.root_dir)
-    return fsm.output_dir
+    return RomsFileSystemManager(resolve_step_root(workplan, name)).output_dir
 
 
 def _rst_path_continue_from_conflict_message(step_name: str) -> str:
@@ -457,33 +480,118 @@ SOURCE_DELIMITER: t.Final[str] = ";"
 
 _OutputFileT = t.TypeVar("_OutputFileT", bound=TimestampedOutputFile)
 
+_StepFileT = t.TypeVar("_StepFileT", bound=RestartFile | TimestampedOutputFile)
+
+
+def step_output_files(
+    file_cls: type[_StepFileT],
+    root: Path,
+    name: str,
+    kinds: Sequence[ArtifactKind],
+    *,
+    role: str = "",
+) -> list[_StepFileT]:
+    """Locate the files of one type that a workplan step produced.
+
+    The step's record is read first: the products of the first of `kinds` that
+    lists any file `file_cls` can name are returned. Without such a product
+    (the step wrote no record, a 0.17.0 record lists no products, or its
+    application records the file under another kind) the step's `output`
+    directory is searched instead. Neither route selects among the files or
+    rejects partition pieces; that is up to the caller.
+
+    Parameters
+    ----------
+    file_cls : type[RestartFile | TimestampedOutputFile]
+        The type of file to locate.
+    root : Path
+        The working directory of the step (`resolve_step_root`).
+    name : str
+        The name of the step, for messages.
+    kinds : Sequence[ArtifactKind]
+        The kinds of product the record may list the files under, in order of
+        preference.
+    role : str
+        The role the products are recorded under.
+
+    Returns
+    -------
+    list[RestartFile | TimestampedOutputFile]
+        The files of the first route that finds any.
+
+    Raises
+    ------
+    CstarError
+        If the step's record cannot be read.
+    FileNotFoundError
+        If a product the record lists is missing, or the record lists none
+        and the step has no `output` directory or no files of the type there.
+    """
+    for kind in kinds:
+        files: list[_StepFileT] = []
+        for path in product_paths(root, kind, role=role):
+            try:
+                files.append(file_cls(path=path))
+            except ValueError:
+                log.debug(
+                    "Step %r records %s as %s, which is not a %s file name; skipping",
+                    name,
+                    path.name,
+                    kind.value,
+                    file_cls.LABEL,
+                )
+        if files:
+            return files
+
+    log.debug(
+        "The record of step %r lists no %s files; searching its output directory",
+        name,
+        file_cls.LABEL,
+    )
+    output_dir = _require_step_output_dir(root, name)
+    if not (found := file_cls.in_directory(output_dir)):
+        msg = (
+            f"No {file_cls.LABEL} files located. Unable to continue from "
+            f"{output_dir!r} {_LEGACY_LAYOUT_HINT}"
+        )
+        raise FileNotFoundError(msg)
+    return found
+
 
 def collect_output_files(
     file_cls: type[_OutputFileT],
+    kind: ArtifactKind,
     path_value: t.Any,
     step_names: Sequence[str],
     workplan: "LiveWorkplan | None",
+    *,
+    role: str = "",
 ) -> list[_OutputFileT]:
     """Gather the output files of one kind from a directive's sources.
 
     Every `SOURCE_DELIMITER`-separated token of `path_value` is searched as a
-    path, and the `output` directory of every step in `step_names` is
-    searched as a step source; every source must contain files of the kind.
+    path, and every step in `step_names` is read as a step source (see
+    `step_output_files`: the files its record lists as `kind`, else those in
+    its `output` directory); every source must contain files of the kind.
     Step outputs only ever hold whole files, so a step source holding a
     partition piece is rejected.
 
     Parameters
     ----------
     file_cls : type[TimestampedOutputFile]
-        The kind of file to collect.
+        The type of file to collect.
+    kind : ArtifactKind
+        The kind a step's record lists the files under.
     path_value : t.Any
         The directive's `path` value (several sources joined by
         `SOURCE_DELIMITER`), or a falsy value if it has none.
     step_names : Sequence[str]
-        The names of the steps whose `output` directories are searched.
+        The names of the steps to collect the files of.
     workplan : LiveWorkplan | None
         The workplan the steps belong to; only required when `step_names` is
         not empty.
+    role : str
+        The role a step's record lists the files under.
 
     Returns
     -------
@@ -498,35 +606,26 @@ def collect_output_files(
         If a source contains no files of the kind, or a step has no `output`
         directory or holds only partitioned files.
     """
-    sources: list[tuple[Path, str | None]] = []
+    found_files: list[_OutputFileT] = []
 
-    if path_value:
-        sources.extend(
-            (Path(token), None)
-            for token in _split_sources(path_value, SOURCE_DELIMITER)
-        )
+    for token in _split_sources(path_value, SOURCE_DELIMITER) if path_value else ():
+        try:
+            found = file_cls.find(Path(token), notfound_ok=False) or ()
+        except FileNotFoundError as err:
+            raise FileNotFoundError(f"{err} {_LEGACY_LAYOUT_HINT}") from err
+        found_files.extend(found)
 
     if step_names:
         if workplan is None:
             raise CstarError("Directive did not receive workplan")
 
-        sources.extend(
-            (_require_step_output_dir(workplan, name), name) for name in step_names
-        )
-
-    found_files: list[_OutputFileT] = []
-    for search_path, step_name in sources:
-        try:
-            found = file_cls.find(search_path, notfound_ok=False) or ()
-        except FileNotFoundError as err:
-            raise FileNotFoundError(f"{err} {_LEGACY_LAYOUT_HINT}") from err
-
-        if step_name is not None:
-            partitioned = next((f for f in found if f.is_partitioned), None)
+        for step_name in step_names:
+            root = resolve_step_root(workplan, step_name)
+            files = step_output_files(file_cls, root, step_name, (kind,), role=role)
+            partitioned = next((f for f in files if f.is_partitioned), None)
             if partitioned is not None:
                 _reject_partitioned_step_output(step_name, True, partitioned.path)
-
-        found_files.extend(found)
+            found_files.extend(files)
 
     deduped: dict[Path, _OutputFileT] = {}
     for file in found_files:
@@ -542,7 +641,9 @@ class ContinuanceDirective(OverrideDirective):
 
     By default the latest restart file in the source is used; the optional
     `timestamp` key selects the restart whose file name carries exactly that
-    timestamp instead.
+    timestamp instead. A step source is read from the producer's record (its
+    `restart` products, else those `initial_conditions` that are named like
+    restarts) before its `output` directory is searched.
 
     Warns only when the step explicitly overrode `start_date` (via the
     workplan's `blueprint_overrides.runtime_params.start_date`, packaged by
@@ -769,32 +870,46 @@ class ContinuanceDirective(OverrideDirective):
         if problems := self._config_problems(self._config):
             raise NotImplementedError("; ".join(problems))
 
-        search_path: Path | None = None
-
-        if target_path := self._config.get(self.KEY_PATH, None):
-            search_path = Path(target_path)
+        timestamp = (
+            self._parse_timestamp(self._config[self.KEY_TIMESTAMP])
+            if self.KEY_TIMESTAMP in self._config
+            else None
+        )
 
         step_refs = self.referenced_steps(self._config)
         name = step_refs[0] if step_refs else None
         if name:
-            search_path = _require_step_output_dir(self.workplan, name)
+            root = resolve_step_root(self.workplan, name)
+            # a nested run's `nest_ic` writes the restart-named file it records
+            # as its initial conditions; a forge `<domain>_initial_conditions.nc`
+            # does not parse and is skipped
+            candidates = step_output_files(
+                RestartFile,
+                root,
+                name,
+                (ArtifactKind.restart, ArtifactKind.initial_conditions),
+            )
+            selected = RestartFile.select(
+                candidates, timestamp, source=RomsFileSystemManager(root).output_dir
+            )
+            _reject_partitioned_step_output(
+                name, selected.is_partitioned, selected.path
+            )
+            return RestartFileTrxAdapter.adapt(selected)
 
-        if search_path:
+        search_path: Path | None = None
+
+        if target_path := self._config.get(self.KEY_PATH, None):
+            search_path = Path(target_path)
             try:
                 restart_file = RestartFile.find(search_path, notfound_ok=False)
             except FileNotFoundError as err:
                 raise FileNotFoundError(f"{err} {_LEGACY_LAYOUT_HINT}") from err
-            if self.KEY_TIMESTAMP in self._config:
+            if timestamp is not None:
                 # `find` above raised with the legacy-layout hint if the source
                 # holds no restarts; a timestamp miss instead lists what exists.
-                restart_file = RestartFile.find_at(
-                    search_path, self._parse_timestamp(self._config[self.KEY_TIMESTAMP])
-                )
+                restart_file = RestartFile.find_at(search_path, timestamp)
             if restart_file:
-                if name:
-                    _reject_partitioned_step_output(
-                        name, restart_file.is_partitioned, restart_file.path
-                    )
                 return RestartFileTrxAdapter.adapt(restart_file)
 
         msg = f"No restart file located in search path: {search_path!r}"
@@ -1025,9 +1140,11 @@ class NestingDirective(OverrideDirective):
 
         boundary_files = collect_output_files(
             BoundaryFile,
+            ArtifactKind.boundary_forcing,
             self._config.get(self.KEY_PATH) or self._config.get(self.KEY_BRY_PATH),
             self.referenced_steps(self._config),
             self._workplan,
+            role=EXTRACT_ROLE,
         )
 
         overrides = BoundaryFileTrxAdapter.adapt(boundary_files)
@@ -1208,6 +1325,7 @@ class CarbonateSensitivityDirective(OverrideDirective):
         try:
             files = collect_output_files(
                 CarbonateSensitivityFile,
+                ArtifactKind.gas_exchange,
                 self._config.get(self.KEY_PATH),
                 self.referenced_steps(self._config),
                 self._workplan,

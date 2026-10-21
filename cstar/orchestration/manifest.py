@@ -555,6 +555,61 @@ def read_step_record(step_root: Path) -> StepRecord | None:
     return _read(step_root / STEP_RECORD_NAME, StepRecord, "step record")
 
 
+def product_paths(step_root: Path, kind: ArtifactKind, *, role: str = "") -> list[Path]:
+    """List the files a step's record says it produced, of one kind.
+
+    An empty list means the record has nothing of the kind to offer, so the
+    caller searches the step's files itself: a step that has not written a
+    record has no products, a record written by C-Star 0.17.0 lists none, and
+    an application may not classify its files under the kind.
+
+    Parameters
+    ----------
+    step_root : Path
+        The step's working directory.
+    kind : ArtifactKind
+        The kind of product to list.
+    role : str
+        The `role` recorded in the products' metadata; products recorded
+        without a role match the empty default.
+
+    Returns
+    -------
+    list[Path]
+        The products' locations, ordered by their recorded path.
+
+    Raises
+    ------
+    CstarSchemaTooNewError
+        If the record's schema is newer than this build reads.
+    CstarError
+        If the record cannot be read or is invalid.
+    FileNotFoundError
+        If a listed product is missing on disk.
+    """
+    record = read_step_record(step_root)
+    if record is None:
+        return []
+
+    listed = sorted(
+        (
+            product
+            for product in record.products
+            if product.known_kind is kind and product.metadata.get("role", "") == role
+        ),
+        key=lambda product: product.path,
+    )
+    paths = [step_root / product.path for product in listed]
+    if missing := next((path for path in paths if not path.exists()), None):
+        msg = (
+            f"The record of the step at {step_root} lists {missing.name}, which is "
+            f"missing from {missing.parent}; run `cstar run check` to verify the "
+            "step's products."
+        )
+        raise FileNotFoundError(msg)
+    return paths
+
+
 def write_run_manifest(root: Path, manifest: RunManifest) -> Path:
     """Write a run's manifest, replacing any previous one atomically.
 

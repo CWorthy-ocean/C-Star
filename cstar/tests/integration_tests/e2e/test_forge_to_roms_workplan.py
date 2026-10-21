@@ -492,6 +492,16 @@ def cdr_namelist(run: E2ERun) -> f90nml.Namelist:
     return f90nml.read(run.cdr_working_dir / "work" / "cstar_generated_roms.nml")
 
 
+def directive_sensitivity_files(run: E2ERun) -> list[Path]:
+    """The ``forcing.carbonate_sensitivity`` locations the directive set for ``run_cdr_lite``, in order."""
+    work = run.cdr_root / "work"
+    applied = sorted(work.glob("*.csfrom*.yaml"))
+    assert applied, sorted(p.name for p in work.iterdir())
+    blueprint = yaml.safe_load(applied[-1].read_text())
+    data = blueprint["forcing"]["carbonate_sensitivity"]["data"]
+    return [Path(d["location"]) for d in data]
+
+
 def test_gas_exch_files_span_run(e2e_run: E2ERun) -> None:
     """``run_roms`` wrote ``_cdrgas`` records at the run start, the 900 s window midpoints, and the run end."""
     import xarray as xr
@@ -536,15 +546,26 @@ def test_cdr_lite_published_blueprint_leaves_sensitivity_to_directive(
     # None is the default, so the serialized blueprint may omit the key
     assert emitted["forcing"].get("carbonate_sensitivity") is None
 
-    applied = sorted((e2e_run.cdr_root / "work").glob("*.csfrom*.yaml"))
-    assert applied, sorted(p.name for p in (e2e_run.cdr_root / "work").iterdir())
-    locations = {
-        Path(d["location"])
-        for d in yaml.safe_load(applied[-1].read_text())["forcing"][
-            "carbonate_sensitivity"
-        ]["data"]
-    }
-    assert locations == set(gas_exch_files(e2e_run))
+    assert set(directive_sensitivity_files(e2e_run)) == set(gas_exch_files(e2e_run))
+
+
+def test_cdr_lite_sensitivity_is_the_recorded_gas_exchange(e2e_run: E2ERun) -> None:
+    """The directive's files are, in order, the ``gas_exchange`` products ``run_roms`` recorded.
+
+    The record and the ``output`` directory list the same files here, so this checks
+    that the directive and the producer's record agree on real ROMS output.
+    """
+    record = read_step_record(e2e_run.roms_working_dir)
+    assert record is not None, "roms_marbl wrote no step record"
+    recorded = [
+        (e2e_run.roms_working_dir / p.path).resolve()
+        for p in record.products
+        if p.kind == "gas_exchange"
+    ]
+    assert recorded, [p.kind for p in record.products]
+
+    used = [p.resolve() for p in directive_sensitivity_files(e2e_run)]
+    assert used == sorted(recorded)
 
 
 def test_cdr_lite_namelist(e2e_run: E2ERun) -> None:

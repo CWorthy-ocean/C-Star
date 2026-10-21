@@ -36,6 +36,7 @@ from cstar.orchestration.manifest import (
     manifest_lock,
     merge_products,
     new_attempt,
+    product_paths,
     read_run_manifest,
     read_step_record,
     workplan_content_hash,
@@ -865,3 +866,100 @@ class TestMergeProducts:
 
         assert declared.metadata == {"a": 1}
         assert reported.metadata == {"b": 2}
+
+
+class TestProductPaths:
+    @staticmethod
+    def _record_with(root: Path, *products: Product) -> None:
+        """Write a record of `products` into `root`, creating the files they name."""
+        for product in products:
+            target = root / product.path
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_bytes(b"x")
+        write_step_record(root, _record(products=list(products)))
+
+    def test_filters_by_kind_and_orders_by_path(self, tmp_path: Path) -> None:
+        self._record_with(
+            tmp_path,
+            Product(kind=ArtifactKind.restart, path="output/output_rst.2.nc"),
+            Product(kind=ArtifactKind.history, path="output/output_his.1.nc"),
+            Product(kind=ArtifactKind.restart, path="output/output_rst.1.nc"),
+        )
+
+        assert product_paths(tmp_path, ArtifactKind.restart) == [
+            tmp_path / "output" / "output_rst.1.nc",
+            tmp_path / "output" / "output_rst.2.nc",
+        ]
+
+    @pytest.mark.parametrize(
+        ("role", "expected"),
+        [
+            pytest.param("child", ["output/child_bry.1.nc"], id="child role"),
+            pytest.param("", ["output/other_bry.1.nc"], id="no role"),
+            pytest.param("parent", [], id="role nothing is recorded under"),
+        ],
+    )
+    def test_filters_by_role(
+        self, tmp_path: Path, role: str, expected: list[str]
+    ) -> None:
+        self._record_with(
+            tmp_path,
+            Product(
+                kind=ArtifactKind.boundary_forcing,
+                path="output/child_bry.1.nc",
+                metadata={"role": "child"},
+            ),
+            Product(kind=ArtifactKind.boundary_forcing, path="output/other_bry.1.nc"),
+        )
+
+        found = product_paths(tmp_path, ArtifactKind.boundary_forcing, role=role)
+
+        assert found == [tmp_path / path for path in expected]
+
+    def test_no_record_lists_nothing(self, tmp_path: Path) -> None:
+        assert product_paths(tmp_path, ArtifactKind.restart) == []
+
+    def test_record_without_products_lists_nothing(self, tmp_path: Path) -> None:
+        """A record written by 0.17.0 lists no products."""
+        write_step_record(tmp_path, _record())
+
+        assert product_paths(tmp_path, ArtifactKind.restart) == []
+
+    def test_unlisted_kind_lists_nothing(self, tmp_path: Path) -> None:
+        self._record_with(
+            tmp_path, Product(kind=ArtifactKind.history, path="output/output_his.1.nc")
+        )
+
+        assert product_paths(tmp_path, ArtifactKind.restart) == []
+
+    def test_missing_product_is_refused(self, tmp_path: Path) -> None:
+        self._record_with(
+            tmp_path, Product(kind=ArtifactKind.restart, path="output/output_rst.1.nc")
+        )
+        (tmp_path / "output" / "output_rst.1.nc").unlink()
+
+        with pytest.raises(FileNotFoundError, match="output_rst.1.nc") as error:
+            product_paths(tmp_path, ArtifactKind.restart)
+
+        assert str(tmp_path) in str(error.value)
+        assert "cstar run check" in str(error.value)
+
+    def test_missing_product_of_another_kind_is_not_checked(
+        self, tmp_path: Path
+    ) -> None:
+        self._record_with(
+            tmp_path,
+            Product(kind=ArtifactKind.restart, path="output/output_rst.1.nc"),
+            Product(kind=ArtifactKind.history, path="output/output_his.1.nc"),
+        )
+        (tmp_path / "output" / "output_his.1.nc").unlink()
+
+        assert product_paths(tmp_path, ArtifactKind.restart) == [
+            tmp_path / "output" / "output_rst.1.nc"
+        ]
+
+    def test_corrupt_record_is_refused(self, tmp_path: Path) -> None:
+        (tmp_path / STEP_RECORD_NAME).write_text("{{{")
+
+        with pytest.raises(CstarError, match=STEP_RECORD_NAME):
+            product_paths(tmp_path, ArtifactKind.restart)
