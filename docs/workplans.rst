@@ -540,7 +540,7 @@ reported with the ROMS setting that writes it.
 
 .. note::
 
-   With ucla-roms 0.10.1, the averaged air-sea CO2 flux diagnostics (``FG_CO2``,
+   With ucla-roms 0.10.1 and 0.11.0, the averaged air-sea CO2 flux diagnostics (``FG_CO2``,
    ``FG_ALT_CO2``) written after a ``continue-from`` restart differ from those of the
    same run without a restart, although the model state is identical. The
    flux-based metrics of a segmented run can therefore differ from the unsegmented
@@ -580,10 +580,14 @@ Each domain is analysed on its own grid, and the results are combined with roms-
 ``UpscaledCDR``: the CO2 uptake of all domains is summed, and the efficiency is the total
 uptake divided by the cumulative source of the release domain only, so the transferred
 alkalinity is not counted twice. ``output/cdr_metrics.nc`` then also holds each domain's
-uptake series and two diagnostics, ``closure_residual`` and
-``<parent>_DIC_difference_inside_<child>`` (the perturbation a parent carries inside its
-child's footprint, which the child already accounts for). ``output/cdr_domains.png`` maps
-the domains. A parent must be a MARBL run writing ``_cdr`` output; a CDR-lite parent
+uptake series and two diagnostics. ``closure_residual`` is the combined flux-based minus
+DIC-difference-based uptake; the two are independent views of the same perturbation, so a
+residual small against the uptake is the sign that the domains were combined
+consistently. ``<parent>_DIC_difference_inside_<child>`` is the DIC perturbation a parent
+carries in its cells inside the child's footprint. It is normally nonzero: the upscaler
+re-injects what leaves the child along the child's boundary, which lies inside that
+footprint, and the child's own inventory no longer holds it. ``output/cdr_domains.png``
+maps the domains. A parent must be a MARBL run writing ``_cdr`` output; a CDR-lite parent
 writes ``_cdrtrc`` output, which the metrics cannot use.
 
 

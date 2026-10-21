@@ -13,11 +13,11 @@ one or more ROMS-MARBL runs, computes the CDR metrics with roms-tools'
 
 A run may be split into segments (e.g. chained with ``continue-from``), each
 writing its own `_cdr` files; the application stitches them along time. With
-ucla-roms 0.10.1 the averaged air-sea flux diagnostics written after a restart
-differ from an uninterrupted run's, so only the DIC-difference metrics of a
-segmented run reproduce the unsegmented run exactly. The blueprint maps
-a domain name to the domain's ROMS grid file and the ordered sources of its
-`_cdr` output::
+ucla-roms (observed on 0.10.1 and 0.11.0) the averaged air-sea flux diagnostics
+written after a restart differ from an uninterrupted run's, so only the
+DIC-difference metrics of a segmented run reproduce the unsegmented run exactly.
+The blueprint maps a domain name to the domain's ROMS grid file and the ordered
+sources of its `_cdr` output::
 
     application: cdr_metrics
     name: wio-cdr-metrics
