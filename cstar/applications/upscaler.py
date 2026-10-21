@@ -35,6 +35,10 @@ UPSCALED_CDR_NAME: t.Final[str] = "upscaled_cdr.nc"
 
 _USCL_GLOB: t.Final[str] = f"*{UPSCALING_SUFFIX}.??????????????.nc"
 """The name of a joined `_uscl` file: the stream's suffix and a 14-digit timestamp."""
+_USCL_TIMESTAMP: t.Final[re.Pattern[str]] = re.compile(
+    rf"{re.escape(UPSCALING_SUFFIX)}\.(\d{{14}})\.nc$"
+)
+"""The `YYYYMMDDHHMMSS` stamp at the end of a name matched by `_USCL_GLOB`."""
 
 BASE_TRACER_NAMES: t.Final[tuple[str, ...]] = ("ALK", "DIC")
 """Tracers always written to ``cdr_trcflx_profile``: MARBL's ALK and DIC
@@ -246,6 +250,17 @@ class UpscalerApplication(
         ]
 
 
+def _uscl_sort_key(file: Path | str) -> str:
+    """Order `_uscl` files chronologically by the timestamp in their file name.
+
+    Returns the 14-digit timestamp, or an empty string for a name without one.
+    Files without a timestamp therefore sort before every timestamped file, and
+    since Python's sort is stable they keep the relative order they were given in.
+    """
+    match = _USCL_TIMESTAMP.search(Path(file).name)
+    return match.group(1) if match else ""
+
+
 class CDRUpscaler:
     """
     Class for transforming CDR-relevant boundary tracers to CDR forcing profiles.
@@ -263,7 +278,9 @@ class CDRUpscaler:
     ---
     1. Initialize with a list of _joined_ `_uscl` files, e.g.
       `cu = CDRUpscaler(["roms_uscl.19920211170000.nc","roms_uscl.19920211180000.nc"])`
-    This will open an xarray multi-file dataset with these files.
+    This will open an xarray multi-file dataset with these files, concatenated in
+    chronological order of the timestamps in their names regardless of the order given
+    (files without a timestamp come first, in the order given).
 
     2. A CDR forcing dataset based on the properties of these files can be initialized with
     `cu.create_cdr_dataset()`
@@ -284,8 +301,14 @@ class CDRUpscaler:
 
         Sets simulation- and domain-related attributes eta_rho, xi_rho, s_rho and time.
         Determines how many boundary columns are present to be transformed into CDR profiles.
+
+        Raises
+        ------
+        ValueError
+            If the dimensions of the files do not match, or if the concatenated
+            `ocean_time` is not strictly increasing.
         """
-        self.files = files
+        self.files = sorted(files, key=_uscl_sort_key)
         self.validate()
 
         log.debug(f"Opening {len(self.files)} `_uscl` files...")
@@ -296,6 +319,13 @@ class CDRUpscaler:
             data_vars="minimal",
             coords="minimal",
         )
+        if not np.all(np.diff(self.uscl_dataset.ocean_time.values) > 0):
+            self.uscl_dataset.close()
+            msg = (
+                "`ocean_time` of the concatenated `_uscl` files is not strictly "
+                + "increasing; the files contain repeated or out-of-order records."
+            )
+            raise ValueError(msg)
         self.eta_rho: xr.DataArray = self.uscl_dataset.eta_rho
         self.xi_rho: xr.DataArray = self.uscl_dataset.xi_rho
         self.s_rho: xr.DataArray = self.uscl_dataset.s_rho
