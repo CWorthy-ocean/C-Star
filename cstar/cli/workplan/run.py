@@ -16,7 +16,7 @@ from cstar.base.env import (
     ENV_CSTAR_RUNID,
     ENV_CSTAR_STATE_HOME,
 )
-from cstar.base.exceptions import CstarExpectationFailed
+from cstar.base.exceptions import CstarError, CstarExpectationFailed
 from cstar.base.feature import is_flag_enabled
 from cstar.base.log import LogLevelChoices, get_logger
 from cstar.base.utils import slugify
@@ -97,6 +97,7 @@ from cstar.orchestration.transforms import (
     anchor_blueprint_path,
     external_dependencies,
 )
+from cstar.system.migration import CstarSchemaTooNewError
 
 if t.TYPE_CHECKING:
     from collections.abc import Mapping
@@ -596,7 +597,6 @@ def refuse_run_id_collision(wp_path: Path, run_id: str, *, explicit: bool) -> No
     if record is None or record.workplan_path.resolve() == wp_path.resolve():
         return
 
-    recorded_path = recorded_workplan(record)
     claim = (
         f"Run-id {run_id!r}, derived from the workplan name, belongs to a run "
         f"started from {str(record.workplan_path)!r}; the workplan at "
@@ -610,13 +610,21 @@ def refuse_run_id_collision(wp_path: Path, run_id: str, *, explicit: bool) -> No
         msg = f"The workplan at {str(wp_path)!r} could not be read: {ex}"
         raise typer.BadParameter(msg) from ex
 
+    try:
+        recorded_path = recorded_workplan(record)
+    except (CstarError, CstarSchemaTooNewError) as ex:
+        msg = (
+            f"{claim}, and the manifest of that run could not be read: {ex}; {escape}."
+        )
+        raise typer.BadParameter(msg) from ex
+
     # a deleted history must not let a different workplan overwrite the run
     if recorded_path is None:
         msg = f"{claim}, and there is no recorded workplan to compare; {escape}."
         raise typer.BadParameter(msg)
 
     try:
-        recorded = read_slugged_workplan(recorded_path, PersistenceMode.yaml)
+        recorded = read_slugged_workplan(recorded_path, PersistenceMode.auto)
     except (OSError, RuntimeError, ValueError, yaml.YAMLError) as ex:
         msg = (
             f"{claim}, and the recorded workplan for that run could not be read: "
@@ -744,27 +752,35 @@ def verify_resume_source(wp_path: Path, wp_run: WorkplanRun) -> None:
     Raises
     ------
     typer.BadParameter
-        If the recorded workplan is unreadable, or the supplied workplan no
-        longer matches it.
+        If the run's manifest or recorded workplan is unreadable, or the
+        supplied workplan no longer matches it.
     """
     escape = (
         f"Pass --run-id {wp_run.run_id} without a workplan path to resume the run "
         "as recorded"
     )
-    recorded_path = recorded_workplan(wp_run)
+    try:
+        recorded_path = recorded_workplan(wp_run)
+    except (CstarError, CstarSchemaTooNewError) as ex:
+        msg = (
+            f"Unable to verify {str(wp_path)!r} against run {wp_run.run_id!r}: "
+            f"{ex}. {escape}."
+        )
+        raise typer.BadParameter(msg) from ex
+
     if recorded_path is None:
         log.warning(
             f"No recorded workplan of run {wp_run.run_id!r} was found to verify "
             f"{str(wp_path)!r} against, as older attempts may have been deleted; "
-            "resuming the run as recorded. A step that reached Done under a "
-            "different definition is still refused by comparing definition hashes."
+            "resuming the run's recorded plan, so an edit of that file is not "
+            "applied."
         )
         return
 
     # a carried copy is verbatim and a legacy backup a re-serialization of the
-    # parsed workplan, so compare models either way
+    # parsed workplan, so compare models either way; the suffix names the format
     try:
-        recorded = deserialize(recorded_path, Workplan, mode=PersistenceMode.yaml)
+        recorded = deserialize(recorded_path, Workplan)
         supplied = deserialize(wp_path, Workplan)
     except Exception as ex:
         msg = (

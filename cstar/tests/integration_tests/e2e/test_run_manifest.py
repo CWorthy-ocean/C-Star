@@ -172,8 +172,8 @@ def test_scheduling_carries_the_inputs(manifest_run: ManifestRun) -> None:
     for step in authored.steps:
         entry = manifest.step(step.name)
         assert entry is not None
-        assert entry.blueprint_file.startswith(f"{attempt.directory}/blueprints/")
-        copy = manifest_run.run_root / entry.blueprint_file
+        assert entry.carried_blueprint.startswith(f"{attempt.directory}/blueprints/")
+        copy = manifest_run.run_root / entry.carried_blueprint
         assert copy.read_bytes() == Path(str(step.blueprint_path)).read_bytes()
 
 
@@ -274,7 +274,7 @@ def test_reentry_appends_an_attempt(manifest_run: ManifestRun) -> None:
     for step in SHAPE:
         entry = reentered.step(step)
         assert entry is not None
-        assert entry.blueprint_file.startswith(f"{second.directory}/")
+        assert entry.carried_blueprint.startswith(f"{second.directory}/")
 
     proc = run_cstar(manifest_run.env, "run", "status", RUN_ID)
     assert proc.returncode == 0, _output(proc)

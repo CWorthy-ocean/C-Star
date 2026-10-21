@@ -44,7 +44,9 @@ from cstar.orchestration.dag_runner import (
 from cstar.orchestration.launch.local import LocalHandle
 from cstar.orchestration.launch.slurm import SlurmHandle, SlurmLauncher
 from cstar.orchestration.manifest import (
+    ATTEMPT_JSON_WORKPLAN_NAME,
     ATTEMPT_WORKPLAN_NAME,
+    RUN_MANIFEST_NAME,
     Attempt,
     RunManifest,
     create_attempt_dir,
@@ -1305,7 +1307,7 @@ def _resume_with_path(
     wp = deserialize(wp_path, Workplan)
     live_steps = [LiveStep.from_step(step) for step in wp.steps]
     lwp = LiveWorkplan(**wp.model_dump(exclude={"steps"}), steps=live_steps)
-    trx_path = tmp_path / f"live-{wp_path.name}"
+    trx_path = tmp_path / f"live-{wp_path.stem}.yaml"
     assert serialize(trx_path, lwp), "serializing live workplan failed in test"
 
     fake_run_result = WorkplanRun(
@@ -1357,7 +1359,47 @@ def test_workplan_run_resume_without_a_recorded_workplan_warns_and_resumes(
     assert result.exit_code == 0, result.output
     mock_run_dag.assert_awaited_once()
     assert "No recorded workplan of run 'sample-workplan'" in caplog.text
-    assert "resuming the run as recorded" in caplog.text
+    assert "resuming the run's recorded plan" in caplog.text
+
+
+@pytest.mark.usefixtures("read_yaml_intercept")
+def test_workplan_run_resume_refuses_a_run_whose_manifest_cannot_be_read(
+    tmp_path: Path,
+    wp_templates_dir: Path,
+) -> None:
+    """Verify `--resume` combined with a path is refused with a usage error when
+    the run's manifest cannot be read, rather than resumed unverified.
+    """
+    wp_path = wp_templates_dir / "workplan.yaml"
+    (tmp_path / RUN_MANIFEST_NAME).write_text("name: [unclosed\n")
+
+    result, mock_run_dag, _ = _resume_with_path(tmp_path, wp_path)
+
+    assert result.exit_code == 2
+    assert "Unable to verify" in result.output
+    mock_run_dag.assert_not_awaited()
+
+
+@pytest.mark.usefixtures("read_yaml_intercept")
+def test_workplan_run_resume_reads_a_json_workplan_in_its_own_format(
+    tmp_path: Path,
+    wp_templates_dir: Path,
+) -> None:
+    """Verify a carried JSON workplan, which is not YAML when indented with tabs,
+    is read as JSON to verify the path against.
+    """
+    wp = deserialize(wp_templates_dir / "workplan.yaml", Workplan)
+    authored = json.dumps(wp.model_dump(mode="json", by_alias=True), indent="\t")
+    wp_path = tmp_path / "workplan.json"
+    wp_path.write_text(authored)
+    carried = _write_carried_workplan(tmp_path, wp)
+    carried.unlink()
+    carried.with_name(ATTEMPT_JSON_WORKPLAN_NAME).write_text(authored)
+
+    result, mock_run_dag, _ = _resume_with_path(tmp_path, wp_path)
+
+    assert result.exit_code == 0, result.output
+    mock_run_dag.assert_awaited_once()
 
 
 @pytest.mark.usefixtures("read_yaml_intercept")
@@ -3198,6 +3240,35 @@ def test_workplan_run_derived_run_id_refused_when_the_carried_workplan_is_gone(
     assert result.exit_code == 2
     mock_build_and_run_dag.assert_not_awaited()
     assert "no recorded workplan to compare" in flatten_cli_output(result.output)
+
+
+@pytest.mark.usefixtures("read_yaml_intercept")
+def test_workplan_run_derived_run_id_refused_when_the_manifest_cannot_be_read(
+    tmp_path: Path,
+    wp_templates_dir: Path,
+    flatten_cli_output: Callable[[str], str],
+) -> None:
+    """Verify a derived run-id whose run has an unreadable manifest is refused
+    with a message naming the manifest, not one saying nothing is recorded.
+    """
+    wp_path = wp_templates_dir / "workplan.yaml"
+    record = _recorded_run("sample-workplan", tmp_path / "gone.yaml", tmp_path)
+    (tmp_path / RUN_MANIFEST_NAME).write_text("name: [unclosed\n")
+    _write_original_backup(record, deserialize(wp_path, Workplan))
+
+    with (
+        mock.patch(RUN_LOOKUP, mock.AsyncMock(return_value=record)),
+        mock.patch(
+            "cstar.cli.workplan.run.build_and_run_dag", wraps=fake_build_and_run_dag
+        ) as mock_build_and_run_dag,
+    ):
+        result = CliRunner().invoke(app, [wp_path.as_posix()], color=False)
+
+    assert result.exit_code == 2
+    mock_build_and_run_dag.assert_not_awaited()
+    output = flatten_cli_output(result.output)
+    assert "the manifest of that run could not be read" in output
+    assert "no recorded workplan to compare" not in output
 
 
 @pytest.mark.usefixtures("read_yaml_intercept")

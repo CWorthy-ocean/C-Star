@@ -202,8 +202,31 @@ class TestRoundTrip:
             "",
             {},
         )
-        assert manifest.steps[0].blueprint_file == ""
+        assert manifest.steps[0].carried_blueprint == ""
         assert record.blueprint_file == ""
+
+    def test_an_older_document_is_restamped_when_written(self, tmp_path: Path) -> None:
+        """A document read from an older file may gain this build's fields, so it is
+        written under this build's schema version, which an older build refuses as
+        too new rather than failing on fields it does not know.
+        """
+        write_run_manifest(tmp_path, _manifest("one"))
+        write_step_record(tmp_path, _record())
+        for name in (RUN_MANIFEST_NAME, STEP_RECORD_NAME):
+            path = tmp_path / name
+            path.write_text(path.read_text().replace("1.1.0", "1.0.0", 1))
+        manifest = read_run_manifest(tmp_path)
+        record = read_step_record(tmp_path)
+        assert manifest is not None
+        assert record is not None
+        manifest.attempts[0].directory = "attempts/20261015T120000"
+
+        write_run_manifest(tmp_path, manifest)
+        write_step_record(tmp_path, record)
+
+        assert manifest.schema_version == record.schema_version == "1.1.0"
+        assert "schema_version: 1.1.0" in (tmp_path / RUN_MANIFEST_NAME).read_text()
+        assert "schema_version: 1.1.0" in (tmp_path / STEP_RECORD_NAME).read_text()
 
     def test_carried_inputs_round_trip(self, tmp_path: Path) -> None:
         manifest = _manifest("one")
@@ -211,7 +234,7 @@ class TestRoundTrip:
         manifest.attempts[0].carried = {"workplan.yaml": "sha256:ab"}
         manifest.steps[
             0
-        ].blueprint_file = "attempts/20261015T120000/blueprints/one/b.yaml"
+        ].carried_blueprint = "attempts/20261015T120000/blueprints/one/b.yaml"
         write_run_manifest(tmp_path, manifest)
         write_step_record(tmp_path, _record(blueprint_file="work/b.ovrd.yaml"))
 
@@ -441,7 +464,7 @@ class TestEnsureRunManifest:
             attempt=kwargs.pop("attempt", Attempt(start_at=NOW, system="anvil")),
             steps=steps,
             runs=kwargs.pop("runs", {}),
-            blueprint_files=kwargs.pop("blueprint_files", None),
+            carried_blueprints=kwargs.pop("carried_blueprints", None),
         )
 
     def test_mints_once_and_appends_attempts(self, tmp_path: Path) -> None:
@@ -529,9 +552,9 @@ class TestEnsureRunManifest:
         first = self._ensure(
             tmp_path,
             steps,
-            blueprint_files={"one": "attempts/a/blueprints/one/b.yaml", "two": "x"},
+            carried_blueprints={"one": "attempts/a/blueprints/one/b.yaml", "two": "x"},
         )
-        assert [s.blueprint_file for s in first.steps] == [
+        assert [s.carried_blueprint for s in first.steps] == [
             "attempts/a/blueprints/one/b.yaml",
             "x",
         ]
@@ -539,10 +562,10 @@ class TestEnsureRunManifest:
         second = self._ensure(
             tmp_path,
             steps,
-            blueprint_files={"one": "attempts/b/blueprints/one/b.yaml"},
+            carried_blueprints={"one": "attempts/b/blueprints/one/b.yaml"},
         )
 
-        assert [s.blueprint_file for s in second.steps] == [
+        assert [s.carried_blueprint for s in second.steps] == [
             "attempts/b/blueprints/one/b.yaml",
             "",
         ]
@@ -556,10 +579,10 @@ class TestEnsureRunManifest:
         }
 
         manifest = self._ensure(
-            tmp_path, steps, blueprint_files={"one": "p", "pruned": "q"}
+            tmp_path, steps, carried_blueprints={"one": "p", "pruned": "q"}
         )
 
-        assert [(s.name, s.blueprint_file) for s in manifest.steps] == [("one", "p")]
+        assert [(s.name, s.carried_blueprint) for s in manifest.steps] == [("one", "p")]
 
     def test_no_blueprint_files_leave_the_pointers_as_recorded(
         self, tmp_path: Path
@@ -568,11 +591,11 @@ class TestEnsureRunManifest:
         steps: dict[str, tuple[str, str, StepFacts | None]] = {
             "one": ("hello_world", "tasks/one", None)
         }
-        self._ensure(tmp_path, steps, blueprint_files={"one": "attempts/a/b.yaml"})
+        self._ensure(tmp_path, steps, carried_blueprints={"one": "attempts/a/b.yaml"})
 
         reentered = self._ensure(tmp_path, steps)
 
-        assert reentered.steps[0].blueprint_file == "attempts/a/b.yaml"
+        assert reentered.steps[0].carried_blueprint == "attempts/a/b.yaml"
         assert len(reentered.attempts) == 2
 
     def test_a_pointer_survives_facts_and_a_clobber(self, tmp_path: Path) -> None:
@@ -583,13 +606,13 @@ class TestEnsureRunManifest:
                 StepFacts("h", None, ExternalDependencies()),
             )
         }
-        self._ensure(tmp_path, steps, blueprint_files={"one": "attempts/a/b.yaml"})
+        self._ensure(tmp_path, steps, carried_blueprints={"one": "attempts/a/b.yaml"})
 
         updated = self._ensure(
             tmp_path, steps, attempt=Attempt(start_at=NOW, clobbered=["one"])
         )
 
-        assert updated.steps[0].blueprint_file == "attempts/a/b.yaml"
+        assert updated.steps[0].carried_blueprint == "attempts/a/b.yaml"
 
     def test_merges_external_without_duplicates(self, tmp_path: Path) -> None:
         facts = StepFacts(
@@ -647,7 +670,7 @@ def test_new_attempt_with_carried_inputs(hello_world_bp_path: Path) -> None:
         start_at=NOW - timedelta(days=1),
         directory="attempts/20261014T120000",
         carried={"workplan.yaml": "sha256:ab"},
-        blueprint_files={"one": "attempts/20261014T120000/blueprints/one/b.yaml"},
+        carried_blueprints={"one": "attempts/20261014T120000/blueprints/one/b.yaml"},
     )
 
     attempt = new_attempt(plan, workplan_hash="wh", carried=carried)

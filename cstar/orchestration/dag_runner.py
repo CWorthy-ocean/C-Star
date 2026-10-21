@@ -27,6 +27,7 @@ from cstar.execution.file_system import (
     StateDirectoryManager,
     is_remote_resource,
     local_copy,
+    write_text_atomic,
 )
 from cstar.orchestration.compute_environment import (
     ComputeEnvironment,
@@ -36,6 +37,7 @@ from cstar.orchestration.launch.local import LocalLauncher
 from cstar.orchestration.launch.slurm import SlurmLauncher
 from cstar.orchestration.manifest import (
     ATTEMPT_BLUEPRINTS_DIR_NAME,
+    ATTEMPT_JSON_WORKPLAN_NAME,
     ATTEMPT_TRANSFORMED_NAME,
     ATTEMPT_VARIABLES_NAME,
     ATTEMPT_WORKPLAN_NAME,
@@ -76,7 +78,12 @@ from cstar.orchestration.orchestration import (
     configure_environment,
 )
 from cstar.orchestration.run_check import report_orphans
-from cstar.orchestration.serialization import deserialize, serialize, try_deserialize
+from cstar.orchestration.serialization import (
+    deserialize,
+    render_model,
+    serialize,
+    try_deserialize,
+)
 from cstar.orchestration.state import StateRepository, load_sentinels
 from cstar.orchestration.tracking import (
     KEY_RUN_NAME,
@@ -494,8 +501,8 @@ def recorded_workplan(wp_run: WorkplanRun) -> Path | None:
     The latest attempt that carried inputs holds the authored workplan; when its
     copy was deleted there is no record, and the legacy backup is not consulted
     because it would be older than that attempt. A run with no such attempt (it
-    was scheduled before carried inputs, or has no readable manifest) has the
-    legacy backup, when that exists.
+    was scheduled before carried inputs, or has no manifest) has the legacy
+    backup, when that exists.
 
     Parameters
     ----------
@@ -506,18 +513,24 @@ def recorded_workplan(wp_run: WorkplanRun) -> Path | None:
     -------
     Path | None
         The recorded workplan, or `None` when none is on disk.
+
+    Raises
+    ------
+    CstarSchemaTooNewError
+        If the run's manifest is newer than this build reads.
+    CstarError
+        If the run's manifest cannot be read.
     """
     root = wp_run.output_path
-    try:
-        manifest = read_run_manifest(root)
-    except (CstarError, CstarSchemaTooNewError) as ex:
-        log.debug(f"Run {wp_run.run_id!r} has no readable manifest: {ex}")
-        manifest = None
+    manifest = read_run_manifest(root)
 
     attempt_dir = latest_attempt_dir(manifest, root) if manifest else None
     if attempt_dir is not None:
-        carried = attempt_dir / ATTEMPT_WORKPLAN_NAME
-        return carried if carried.exists() else None
+        names = (ATTEMPT_WORKPLAN_NAME, ATTEMPT_JSON_WORKPLAN_NAME)
+        return next(
+            (attempt_dir / name for name in names if (attempt_dir / name).exists()),
+            None,
+        )
 
     backup = original_workplan_backup(wp_run.workplan_path, root)
     return backup if backup.exists() else None
@@ -575,10 +588,11 @@ def _copy_into(source: Path, directory: Path, name: str) -> Path:
 
 
 def _carry_inputs(
-    wp_path: Path,
     output_dir: Path,
     started_at: "datetime",
-    transformed_path: Path,
+    authored: bytes,
+    authored_name: str,
+    transformed: str,
     steps: Sequence[Step],
     variables: UserDefinedVariables | None,
 ) -> CarriedInputs:
@@ -588,17 +602,21 @@ def _carry_inputs(
     variables when any were given, a copy of the transformed workplan and each
     step's blueprint file. A deferred step has no blueprint file yet and an
     inline step's blueprint is built from the workplan, so neither is copied.
+    When anything cannot be carried the directory is removed, so a refused
+    attempt leaves nothing for `check` or a reader to find.
 
     Parameters
     ----------
-    wp_path : Path
-        The authored workplan, a local file.
     output_dir : Path
         The run root.
     started_at : datetime
         When the attempt was scheduled; it names the attempt's directory.
-    transformed_path : Path
-        The transformed workplan written in the run root.
+    authored : bytes
+        The content of the authored workplan file.
+    authored_name : str
+        The name its copy is given.
+    transformed : str
+        The rendered transformed workplan.
     steps : Sequence[Step]
         The steps of the transformed workplan, before inline blueprints are
         materialized.
@@ -616,26 +634,31 @@ def _carry_inputs(
         If a blueprint file cannot be read.
     """
     attempt_dir = create_attempt_dir(output_dir, started_at)
-    files = [
-        attempt_dir / ATTEMPT_WORKPLAN_NAME,
-        attempt_dir / ATTEMPT_TRANSFORMED_NAME,
-    ]
+    try:
+        workplan_copy = attempt_dir / authored_name
+        workplan_copy.write_bytes(authored)
+        transformed_copy = attempt_dir / ATTEMPT_TRANSFORMED_NAME
+        transformed_copy.write_text(transformed, encoding="utf-8")
+        files = [workplan_copy, transformed_copy]
+        if variables is not None:
+            variables_copy = attempt_dir / ATTEMPT_VARIABLES_NAME
+            serialize(variables_copy, variables)
+            files.append(variables_copy)
 
-    shutil.copyfile(wp_path, files[0])
-    shutil.copyfile(transformed_path, files[1])
-    if variables is not None:
-        files.append(attempt_dir / ATTEMPT_VARIABLES_NAME)
-        serialize(files[-1], variables)
+        carried_blueprints: dict[str, str] = {}
+        for step in steps:
+            if step.is_deferred or step.is_inline:
+                continue
 
-    blueprint_files: dict[str, str] = {}
-    for step in steps:
-        if step.is_deferred or step.is_inline:
-            continue
-
-        directory = attempt_dir / ATTEMPT_BLUEPRINTS_DIR_NAME / step.safe_name
-        if copied := _carry_blueprint(step, directory):
-            files.append(copied)
-            blueprint_files[step.name] = copied.relative_to(output_dir).as_posix()
+            directory = attempt_dir / ATTEMPT_BLUEPRINTS_DIR_NAME / step.safe_name
+            if copied := _carry_blueprint(step, directory):
+                files.append(copied)
+                carried_blueprints[step.name] = copied.relative_to(
+                    output_dir
+                ).as_posix()
+    except BaseException:
+        shutil.rmtree(attempt_dir, ignore_errors=True)
+        raise
 
     return CarriedInputs(
         start_at=started_at,
@@ -644,7 +667,7 @@ def _carry_inputs(
             file.relative_to(attempt_dir).as_posix(): carried_digest(file)
             for file in files
         },
-        blueprint_files=blueprint_files,
+        carried_blueprints=carried_blueprints,
     )
 
 
@@ -687,6 +710,8 @@ async def prepare_workplan(
         a step requests pre-run on an application that does not support it.
     """
     started_at = utc_now()
+    # read once, beside the parse: a later edit of the file is not carried
+    authored = await asyncio.to_thread(wp_path.read_bytes)
     wp_orig = await asyncio.to_thread(deserialize, wp_path, Workplan)
 
     fill_transform: TemplateFillTransform | None = None
@@ -732,18 +757,23 @@ async def prepare_workplan(
         update={"steps": materialized, "root": output_dir.resolve()}
     )
 
-    persist_as = WorkplanTransformer.derived_path(wp_path, output_dir, "_transformed")
-    await asyncio.to_thread(serialize, persist_as, wp)
-
+    transformed = render_model(wp)
+    is_json = wp_path.suffix == ".json"
     carried = await asyncio.to_thread(
         _carry_inputs,
-        wp_path,
         output_dir,
         started_at,
-        persist_as,
+        authored,
+        ATTEMPT_JSON_WORKPLAN_NAME if is_json else ATTEMPT_WORKPLAN_NAME,
+        transformed,
         transformed_steps,
         variables,
     )
+
+    # replaced only once the inputs are carried: a refused attempt leaves the
+    # plan the run executes as the last attempt left it
+    persist_as = WorkplanTransformer.derived_path(wp_path, output_dir, "_transformed")
+    await asyncio.to_thread(write_text_atomic, persist_as, transformed)
 
     return wp, persist_as, external, carried
 
@@ -1497,7 +1527,7 @@ def _record_attempt(
                 ),
                 steps=entries,
                 runs=workplan.runs,
-                blueprint_files=carried.blueprint_files if carried else None,
+                carried_blueprints=carried.carried_blueprints if carried else None,
             )
     except Exception as ex:
         log.warning(f"Could not write the manifest of run {run_id!r}: {ex}")

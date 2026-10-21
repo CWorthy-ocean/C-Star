@@ -76,6 +76,9 @@ ATTEMPT_DIR_FORMAT: t.Final[str] = "%Y%m%dT%H%M%S"
 ATTEMPT_WORKPLAN_NAME: t.Final[str] = "workplan.yaml"
 """The authored workplan, carried verbatim in an attempt's directory."""
 
+ATTEMPT_JSON_WORKPLAN_NAME: t.Final[str] = "workplan.json"
+"""The authored workplan when it was written as JSON, carried verbatim instead."""
+
 ATTEMPT_VARIABLES_NAME: t.Final[str] = "workplan.vars"
 """The runtime variables of the attempt, in its directory, when any were given."""
 
@@ -397,9 +400,10 @@ class StepEntry(ConfiguredBaseModel):
     blueprint: BlueprintIdentity | None = Field(default=None)
     """The blueprint the step runs; `None` until a deferred step's record names it."""
 
-    blueprint_file: str = Field(default="")
-    """The step's blueprint as the latest attempt with a directory carried it,
-    relative to the run root; empty when that attempt carried none for the step."""
+    carried_blueprint: str = Field(default="")
+    """The copy of the step's blueprint file the latest attempt with a directory
+    carried, relative to the run root; empty when that attempt carried none for
+    the step. Not the file the step ran: that is its record's `blueprint_file`."""
 
     status: str = Field(default="")
     """The orchestration status name as of `observed_at`; empty when never observed."""
@@ -645,6 +649,30 @@ def read_step_record(step_root: Path) -> StepRecord | None:
     return _read(step_root / STEP_RECORD_NAME, StepRecord, "step record")
 
 
+def _write(path: Path, document: "RunManifest | StepRecord") -> Path:
+    """Write a document atomically, stamped with the schema version this build writes.
+
+    A document read from an older file may now hold fields of the newer schema,
+    so it is restamped: an older build then refuses it as too new, rather than
+    failing on fields it does not know.
+
+    Parameters
+    ----------
+    path : Path
+        The file to write.
+    document : RunManifest | StepRecord
+        The manifest or record; its `schema_version` is updated in place.
+
+    Returns
+    -------
+    Path
+        The file written.
+    """
+    document.schema_version = type(document).model_fields["schema_version"].default
+    write_text_atomic(path, render_model(document))
+    return path
+
+
 def write_run_manifest(root: Path, manifest: RunManifest) -> Path:
     """Write a run's manifest, replacing any previous one atomically.
 
@@ -660,9 +688,7 @@ def write_run_manifest(root: Path, manifest: RunManifest) -> Path:
     Path
         The file written.
     """
-    path = root / RUN_MANIFEST_NAME
-    write_text_atomic(path, render_model(manifest))
-    return path
+    return _write(root / RUN_MANIFEST_NAME, manifest)
 
 
 def write_step_record(step_root: Path, record: StepRecord) -> Path:
@@ -680,9 +706,7 @@ def write_step_record(step_root: Path, record: StepRecord) -> Path:
     Path
         The file written.
     """
-    path = step_root / STEP_RECORD_NAME
-    write_text_atomic(path, render_model(record))
-    return path
+    return _write(step_root / STEP_RECORD_NAME, record)
 
 
 @contextmanager
@@ -750,7 +774,7 @@ class CarriedInputs:
     carried: "Mapping[str, str]"
     """The digest of each carried file, by its path relative to `directory`."""
 
-    blueprint_files: "Mapping[str, str]"
+    carried_blueprints: "Mapping[str, str]"
     """The carried blueprint of each step, by step name, as a POSIX path
     relative to the run root."""
 
@@ -1032,7 +1056,7 @@ def ensure_run_manifest(
     attempt: Attempt,
     steps: "Mapping[str, tuple[str, str, StepFacts | None]]",
     runs: "Mapping[str, RunRef]",
-    blueprint_files: "Mapping[str, str] | None" = None,
+    carried_blueprints: "Mapping[str, str] | None" = None,
 ) -> RunManifest:
     """Create a run's manifest, or add an attempt to the one it has, and write it.
 
@@ -1059,7 +1083,7 @@ def ensure_run_manifest(
         definition hash, working directory and (when they carry one) blueprint.
     runs : Mapping[str, RunRef]
         The external runs the workplan refers to, by alias.
-    blueprint_files : Mapping[str, str] | None
+    carried_blueprints : Mapping[str, str] | None
         The blueprint each step's attempt carried, by step name, relative to the
         run root. When given, every step in `steps` is pointed at its entry, or
         at none when it has no entry: each attempt that prepares the workplan
@@ -1104,8 +1128,8 @@ def ensure_run_manifest(
             entry.definition_hash = facts.definition_hash
             entry.blueprint = facts.blueprint or entry.blueprint
             external = external.merged(facts.external)
-        if blueprint_files is not None:
-            entry.blueprint_file = blueprint_files.get(step_name, "")
+        if carried_blueprints is not None:
+            entry.carried_blueprint = carried_blueprints.get(step_name, "")
 
     aliases = [
         ExternalRun(alias=alias, run_id=ref.run_id, start_at=ref.start_at)

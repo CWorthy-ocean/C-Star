@@ -1,4 +1,5 @@
 import hashlib
+import json
 import os
 import random
 import re
@@ -19,7 +20,7 @@ from cstar.base.env import (
     FLAG_OFF,
     FLAG_ON,
 )
-from cstar.base.exceptions import CstarExpectationFailed
+from cstar.base.exceptions import CstarError, CstarExpectationFailed
 from cstar.base.utils import slugify
 from cstar.entrypoint.utils import ARG_CLOBBER, ARG_PRE_RUN, ARG_RUN_ID
 from cstar.execution.file_system import (
@@ -60,6 +61,7 @@ from cstar.orchestration.launch.slurm import SlurmLauncher
 from cstar.orchestration.manifest import (
     ATTEMPT_BLUEPRINTS_DIR_NAME,
     ATTEMPT_DIR_FORMAT,
+    ATTEMPT_JSON_WORKPLAN_NAME,
     ATTEMPT_TRANSFORMED_NAME,
     ATTEMPT_VARIABLES_NAME,
     ATTEMPT_WORKPLAN_NAME,
@@ -785,7 +787,7 @@ async def test_prepare_workplan_carries_the_workplan_and_blueprints(
 
     carried_blueprints = {
         step: output_dir / relative
-        for step, relative in carried.blueprint_files.items()
+        for step, relative in carried.carried_blueprints.items()
     }
     assert carried_blueprints == {
         "Relative": attempt_dir / "blueprints/relative/relative.yaml",
@@ -810,7 +812,7 @@ async def test_prepare_workplan_carries_a_symlinked_blueprint_as_content(
 
     _, _, _, carried = await prepare_workplan(wp_path, output_dir, variables)
 
-    copy = output_dir / carried.blueprint_files["Linked"]
+    copy = output_dir / carried.carried_blueprints["Linked"]
     assert not copy.is_symlink()
     assert copy.read_bytes() == blueprints["Linked"].read_bytes()
 
@@ -827,7 +829,7 @@ async def test_prepare_workplan_carries_no_deferred_or_inline_blueprint(
 
     _, _, _, carried = await prepare_workplan(wp_path, output_dir, variables)
 
-    assert {"Deferred", "Inline"}.isdisjoint(carried.blueprint_files)
+    assert {"Deferred", "Inline"}.isdisjoint(carried.carried_blueprints)
     attempt_dir = output_dir / carried.directory
     assert not (attempt_dir / ATTEMPT_BLUEPRINTS_DIR_NAME / "deferred").exists()
     assert not (attempt_dir / ATTEMPT_BLUEPRINTS_DIR_NAME / "inline").exists()
@@ -849,7 +851,7 @@ async def test_prepare_workplan_carries_a_blueprint_named_by_a_variable(
 
     _, _, _, carried = await prepare_workplan(wp_path, output_dir, variables)
 
-    copy = output_dir / carried.blueprint_files["Filled"]
+    copy = output_dir / carried.carried_blueprints["Filled"]
     assert copy.read_bytes() == blueprints["Filled"].read_bytes()
     assert (
         "{{bpdir}}/filled.yaml"
@@ -873,7 +875,7 @@ async def test_prepare_workplan_anchors_a_relative_blueprint_to_the_workplan(
 
     _, _, _, carried = await prepare_workplan(wp_path, tmp_path / "run", variables)
 
-    copy = tmp_path / "run" / carried.blueprint_files["Relative"]
+    copy = tmp_path / "run" / carried.carried_blueprints["Relative"]
     assert copy.read_bytes() == blueprints["Relative"].read_bytes()
 
 
@@ -925,7 +927,7 @@ async def test_prepare_workplan_digests_every_carried_file(
         ATTEMPT_TRANSFORMED_NAME,
         *(
             Path(path).relative_to(carried.directory).as_posix()
-            for path in carried.blueprint_files.values()
+            for path in carried.carried_blueprints.values()
         ),
     }
     for relative, digest in carried.carried.items():
@@ -1046,13 +1048,52 @@ async def test_prepare_workplan_fails_when_a_blueprint_cannot_be_carried(
     tmp_path: Path, carried_workplan: CarriedFixture
 ) -> None:
     """Verify a blueprint that cannot be read fails the preparation rather than
-    being left out of what the attempt carried.
+    being left out of what the attempt carried, and leaves the run as the earlier
+    attempt left it: the plan in the run root and no new attempt directory.
     """
     wp_path, blueprints, variables = carried_workplan
+    output_dir = tmp_path / "run"
+    _, trx_path, _, first = await prepare_workplan(
+        wp_path, output_dir, variables, clobber_steps=["Relative"]
+    )
+    before = _digests(output_dir)
     blueprints["Absolute"].unlink()
 
     with pytest.raises(FileNotFoundError):
-        await prepare_workplan(wp_path, tmp_path / "run", variables)
+        await prepare_workplan(wp_path, output_dir, variables)
+
+    # the earlier attempt clobbered a step, so a replaced root plan would differ
+    assert _digests(output_dir) == before
+    assert trx_path.is_file()
+    assert [p.name for p in (output_dir / ATTEMPTS_DIR_NAME).iterdir()] == [
+        Path(first.directory).name
+    ]
+
+
+@pytest.mark.asyncio
+async def test_prepare_workplan_carries_a_json_workplan_under_its_format(
+    tmp_path: Path, hello_world_bp_path: Path
+) -> None:
+    """Verify a workplan written as JSON is carried verbatim under a JSON name,
+    so it reads back in its own format: tab-indented JSON is not YAML.
+    """
+    wp = Workplan(
+        name="json",
+        description="A workplan written as JSON.",
+        steps=[_hello_step(hello_world_bp_path.as_posix(), "hello")],
+    )
+    wp_path = tmp_path / "plan.json"
+    wp_path.write_text(
+        json.dumps(wp.model_dump(mode="json", by_alias=True), indent="\t")
+    )
+
+    _, _, _, carried = await prepare_workplan(wp_path, tmp_path / "run")
+
+    carried_copy = tmp_path / "run" / carried.directory / ATTEMPT_JSON_WORKPLAN_NAME
+    assert carried_copy.read_bytes() == wp_path.read_bytes()
+    assert ATTEMPT_JSON_WORKPLAN_NAME in carried.carried
+    assert ATTEMPT_WORKPLAN_NAME not in carried.carried
+    assert deserialize(carried_copy, Workplan) == deserialize(wp_path, Workplan)
 
 
 def test_carry_inputs_copies_a_remote_blueprint_under_its_url_name(
@@ -1064,23 +1105,26 @@ def test_carry_inputs_copies_a_remote_blueprint_under_its_url_name(
     """
     served = _hello_blueprint(tmp_path / "served.yaml", "remote")
     serve_remote_files[REMOTE_BLUEPRINT] = served
-    wp_path = tmp_path / "plans" / "plan.yaml"
-    wp_path.parent.mkdir()
-    wp_path.write_text("name: plan\n")
     run_root = tmp_path / "run"
     run_root.mkdir()
-    transformed = run_root / "plan_transformed.yaml"
-    transformed.write_text("name: plan\n")
     steps = [
         _hello_step(REMOTE_BLUEPRINT, "Remote"),
         _hello_step("cstar-forge:domain", "Sentinel"),
     ]
     start = datetime(2026, 10, 15, 12, 0, tzinfo=UTC)
 
-    carried = _carry_inputs(wp_path, run_root, start, transformed, steps, None)
+    carried = _carry_inputs(
+        run_root,
+        start,
+        b"name: plan\n",
+        ATTEMPT_WORKPLAN_NAME,
+        "name: plan\n",
+        steps,
+        None,
+    )
 
     copy = "attempts/20261015T120000/blueprints/remote/remote-blueprint.yaml"
-    assert dict(carried.blueprint_files) == {"Remote": copy}
+    assert dict(carried.carried_blueprints) == {"Remote": copy}
     assert (run_root / copy).read_bytes() == served.read_bytes()
     assert carried.carried["blueprints/remote/remote-blueprint.yaml"] == carried_digest(
         served
@@ -1191,7 +1235,7 @@ async def test_prepare_workplan_materializes_inline_blueprint(
         mode=PersistenceMode.yaml,
     )
     assert next(s for s in authored.steps if s.name == "consumer").is_inline
-    assert set(carried.blueprint_files) == {"producer"}
+    assert set(carried.carried_blueprints) == {"producer"}
 
 
 @pytest.mark.asyncio
@@ -1383,7 +1427,7 @@ async def test_build_dag_returns_what_the_attempt_carried(
     assert run_root == StateDirectoryManager.data_dir(mock_run_id)
     assert carried.directory.startswith(f"{ATTEMPTS_DIR_NAME}/")
     assert (run_root / carried.directory / ATTEMPT_WORKPLAN_NAME).is_file()
-    assert carried.blueprint_files == {
+    assert carried.carried_blueprints == {
         "hello": f"{carried.directory}/blueprints/hello/helloworld.yaml"
     }
 
@@ -1411,9 +1455,10 @@ async def test_run_dag_records_the_carried_inputs(
     entry = manifest.step("hello")
     assert entry is not None
     assert (
-        entry.blueprint_file == f"{attempt.directory}/blueprints/hello/helloworld.yaml"
+        entry.carried_blueprint
+        == f"{attempt.directory}/blueprints/hello/helloworld.yaml"
     )
-    assert (wp_run.output_path / entry.blueprint_file).read_bytes() == (
+    assert (wp_run.output_path / entry.carried_blueprint).read_bytes() == (
         hello_world_bp_path.read_bytes()
     )
 
@@ -1429,7 +1474,7 @@ async def test_run_dag_re_entry_carries_nothing_and_keeps_the_pointers(
     _, wp_run = await _schedule(tmp_path, mock_run_id, hello_world_bp_path)
     before = read_run_manifest(wp_run.output_path)
     assert before is not None
-    pointer = before.step("hello").blueprint_file  # type: ignore[union-attr]
+    pointer = before.step("hello").carried_blueprint  # type: ignore[union-attr]
 
     await _reenter(wp_run)
 
@@ -1438,7 +1483,7 @@ async def test_run_dag_re_entry_carries_nothing_and_keeps_the_pointers(
     prepared, reentry = manifest.attempts
     assert prepared.directory
     assert (reentry.directory, reentry.carried) == ("", {})
-    assert manifest.step("hello").blueprint_file == pointer  # type: ignore[union-attr]
+    assert manifest.step("hello").carried_blueprint == pointer  # type: ignore[union-attr]
     assert latest_attempt_dir(manifest, wp_run.output_path) == (
         wp_run.output_path / prepared.directory
     )
@@ -1465,9 +1510,11 @@ async def test_run_dag_points_the_steps_at_each_preparing_attempt(
     assert first.directory != second.directory
     entry = manifest.step("hello")
     assert entry is not None
-    assert entry.blueprint_file.startswith(f"{second.directory}/")
+    assert entry.carried_blueprint.startswith(f"{second.directory}/")
     assert (
-        (wp_run.output_path / entry.blueprint_file).read_text().endswith("# edited\n")
+        (wp_run.output_path / entry.carried_blueprint)
+        .read_text()
+        .endswith("# edited\n")
     )
     first_copy = (
         wp_run.output_path / first.directory / "blueprints/hello/helloworld.yaml"
@@ -1541,13 +1588,8 @@ async def test_recorded_workplan_deleted_with_its_attempt_is_not_replaced(
     assert recorded_workplan(wp_run) is None
 
 
-@pytest.mark.parametrize("manifest_text", [None, "name: [unclosed\n"])
-def test_recorded_workplan_falls_back_to_the_legacy_backup(
-    tmp_path: Path, manifest_text: str | None
-) -> None:
-    """Verify a run with no attempt that carried inputs, or no readable manifest,
-    is recorded by its legacy backup, and by nothing when that is gone too.
-    """
+def _legacy_run(tmp_path: Path) -> WorkplanRun:
+    """A recorded run whose run directory exists and holds nothing yet."""
     wp_run = WorkplanRun(
         workplan_path=tmp_path / "plan.yaml",
         trx_workplan_path=tmp_path / "run" / "plan_transformed.yaml",
@@ -1555,7 +1597,18 @@ def test_recorded_workplan_falls_back_to_the_legacy_backup(
         run_id="legacy",
     )
     wp_run.output_path.mkdir()
-    if manifest_text is None:
+    return wp_run
+
+
+@pytest.mark.parametrize("has_manifest", [False, True])
+def test_recorded_workplan_falls_back_to_the_legacy_backup(
+    tmp_path: Path, has_manifest: bool
+) -> None:
+    """Verify a run with no manifest, or no attempt that carried inputs, is
+    recorded by its legacy backup, and by nothing when that is gone too.
+    """
+    wp_run = _legacy_run(tmp_path)
+    if has_manifest:
         start = datetime(2026, 10, 1, tzinfo=UTC)
         manifest = RunManifest(
             run_id="legacy",
@@ -1566,14 +1619,26 @@ def test_recorded_workplan_falls_back_to_the_legacy_backup(
             steps=[],
         )
         write_run_manifest(wp_run.output_path, manifest)
-    else:
-        (wp_run.output_path / RUN_MANIFEST_NAME).write_text(manifest_text)
 
     assert recorded_workplan(wp_run) is None
 
     backup = original_workplan_backup(wp_run.workplan_path, wp_run.output_path)
     backup.write_text("name: legacy\n")
     assert recorded_workplan(wp_run) == backup
+
+
+def test_recorded_workplan_raises_for_an_unreadable_manifest(tmp_path: Path) -> None:
+    """Verify a manifest that cannot be read is reported, not taken for a run
+    with nothing recorded, even when a legacy backup exists.
+    """
+    wp_run = _legacy_run(tmp_path)
+    (wp_run.output_path / RUN_MANIFEST_NAME).write_text("name: [unclosed\n")
+    original_workplan_backup(wp_run.workplan_path, wp_run.output_path).write_text(
+        "name: legacy\n"
+    )
+
+    with pytest.raises(CstarError, match="Unable to read the run manifest"):
+        recorded_workplan(wp_run)
 
 
 def _hello_blueprint(path: Path, target: str = "world") -> Path:
@@ -1824,7 +1889,8 @@ async def test_build_dag_refuses_a_too_new_manifest_with_upgrade_guidance(
     wp_path, output_dir = _build_guarded(tmp_path, mock_run_id, hello_world_bp_path)
     manifest = _recorded(mock_run_id, {"hello": "stale"})
     manifest.schema_version = "999.0.0"
-    write_run_manifest(output_dir, manifest)
+    # as a newer build wrote it: `write_run_manifest` stamps this build's version
+    assert serialize(output_dir / RUN_MANIFEST_NAME, manifest)
 
     with (
         mock.patch("cstar.orchestration.dag_runner.check_environment"),

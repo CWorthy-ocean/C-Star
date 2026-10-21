@@ -440,10 +440,10 @@
                     "default": null,
                     "description": "The blueprint the step runs; `None` until a deferred step's record names it."
                 },
-                "blueprint_file": {
+                "carried_blueprint": {
                     "default": "",
-                    "description": "The step's blueprint as the latest attempt with a directory carried it,\nrelative to the run root; empty when that attempt carried none for the step.",
-                    "title": "Blueprint File",
+                    "description": "The copy of the step's blueprint file the latest attempt with a directory\ncarried, relative to the run root; empty when that attempt carried none for\nthe step. Not the file the step ran: that is its record's `blueprint_file`.",
+                    "title": "Carried Blueprint",
                     "type": "string"
                 },
                 "status": {
