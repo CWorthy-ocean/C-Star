@@ -1,13 +1,17 @@
-"""Tier 2: a forge -> roms_marbl -> CDR-LiTE workplan run end to end through the ``cstar`` CLI.
+"""Tier 2: a forge -> roms_marbl -> CDR metrics and CDR-LiTE workplan run end to end through the ``cstar`` CLI.
 
 ``cstar workplan run`` only schedules: each step is a detached ``sh`` proxy script that
 calls the ``cstar`` executable on ``PATH``. A shim pins that executable to this
-checkout, and the fixture then polls the step sentinels until all four are terminal.
+checkout, and the fixture then polls the step sentinels until all eight are terminal.
 
-The first two steps are a MARBL forge and ROMS run that also writes the ``_cdrgas``
-gas-exchange sensitivities; the last two are a ``cdr_lite`` forge and a ROMS run
-(no MARBL) that reads those sensitivities through the ``carbonate-sensitivity-from``
-directive. The run compiles ROMS with ParallelIO twice, so it takes tens of minutes.
+A MARBL forge with an ALK release feeds three ROMS runs: ``run_roms`` covers the whole
+hour and also writes the ``_cdrgas`` gas-exchange sensitivities, and ``run_cdr_seg1`` and
+``run_cdr_seg2`` cover it as two half-hour segments chained with ``continue-from``. All
+three write the ``_cdr`` output, and two ``cdr_metrics`` steps compute the CDR metrics
+from the segments and from the whole run, which must agree. The remaining two steps are a
+``cdr_lite`` forge and a ROMS run (no MARBL) that reads the ``_cdrgas`` sensitivities
+through the ``carbonate-sensitivity-from`` directive. The run compiles ROMS with
+ParallelIO four times, so it takes tens of minutes.
 """
 
 import json
@@ -15,9 +19,9 @@ import re
 import shutil
 import subprocess
 import typing as t
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta
 from functools import partial
 from pathlib import Path
 
@@ -26,10 +30,13 @@ import numpy as np
 import pytest
 import yaml
 
+from cstar.applications.cdr_metrics import FIGURE_FILENAME, METRICS_FILENAME
 from cstar.base.utils import slugify
 from cstar.orchestration.manifest import read_step_record
+from cstar.orchestration.models import InlineBlueprintRef
 from cstar.tests.integration_tests.cases import (
     DT,
+    MARBL_CDR_FORCING,
     MODEL_REFERENCE_DATE,
     RUN_END,
     RUN_START,
@@ -54,8 +61,21 @@ FORGE_STEP = "make_inputs"
 ROMS_STEP = "run_roms"
 CDR_FORGE_STEP = "make_cdr_lite_inputs"
 CDR_STEP = "run_cdr_lite"
+CDR_SEG1_STEP = "run_cdr_seg1"
+CDR_SEG2_STEP = "run_cdr_seg2"
+METRICS_SEGMENTED_STEP = "cdr_metrics_segmented"
+METRICS_WHOLE_STEP = "cdr_metrics_whole"
 SCHEDULED_MESSAGE = "run scheduling has completed"
-STEPS = (FORGE_STEP, ROMS_STEP, CDR_FORGE_STEP, CDR_STEP)
+STEPS = (
+    FORGE_STEP,
+    ROMS_STEP,
+    CDR_FORGE_STEP,
+    CDR_STEP,
+    CDR_SEG1_STEP,
+    CDR_SEG2_STEP,
+    METRICS_SEGMENTED_STEP,
+    METRICS_WHOLE_STEP,
+)
 ALL_DONE = dict.fromkeys(STEPS, DONE)
 POLL_INTERVAL = 5.0
 RUN_TIMEOUT = 100 * 60
@@ -69,6 +89,27 @@ GAS_EXCH_OVERRIDES = {
         "nrpf": 2,
     }
 }
+CDR_OUTPUT_PERIOD = 900.0
+"""The ``cdr_output`` window of ``make_inputs``; it and ``nrpf`` 2 divide ``RESTART_PERIOD``."""
+MAKE_INPUTS_OVERRIDES = {
+    **GAS_EXCH_OVERRIDES,
+    "cdr_output": {"output_period": CDR_OUTPUT_PERIOD, "nrpf": 2},
+}
+"""Run-time overrides of ``make_inputs``: the ``_cdrgas`` and ``_cdr`` streams (forge turns
+the latter on itself for a MARBL run with an active CDR forcing)."""
+SEGMENT_SPLIT = RUN_START + timedelta(seconds=RESTART_PERIOD)
+"""Where ``run_cdr_seg1`` ends and ``run_cdr_seg2`` continues: the first restart record."""
+METRICS_RECORDS = round((RUN_END - RUN_START).total_seconds() / CDR_OUTPUT_PERIOD)
+"""The ``_cdr`` records, hence the ``cdr_metrics`` time steps, of a run of the whole window."""
+METRICS_STEPS = (METRICS_SEGMENTED_STEP, METRICS_WHOLE_STEP)
+CDR_OUTPUT_STEPS = (ROMS_STEP, CDR_SEG1_STEP, CDR_SEG2_STEP)
+METRICS_VARIABLES = (
+    "cdr_efficiency_from_flux",
+    "cdr_efficiency_from_DIC_difference",
+    "cdr_carbon_uptake_from_flux",
+    "cdr_carbon_uptake_from_DIC_difference",
+)
+UPTAKE_VARIABLES = tuple(v for v in METRICS_VARIABLES if "uptake" in v)
 MISSING_FLX_MESSAGE = "CDR_OAE_DIC1_flx not in forcing files"
 ERROR_PATTERN = re.compile(
     r"\bERROR\b|BLOWUP|blow.?up|MPI_ABORT|Traceback", re.IGNORECASE
@@ -104,6 +145,10 @@ class E2ERun:
     roms_root: Path
     cdr_forge_root: Path
     cdr_root: Path
+    cdr_seg1_root: Path
+    cdr_seg2_root: Path
+    metrics_segmented_root: Path
+    metrics_whole_root: Path
     statuses: dict[str, int | None]
     stdout: str
 
@@ -123,8 +168,25 @@ class E2ERun:
         working_dirs = {
             ROMS_STEP: lambda: self.roms_working_dir,
             CDR_STEP: lambda: self.cdr_working_dir,
+            CDR_SEG1_STEP: lambda: _executed_working_dir(
+                self.cdr_seg1_root, self.forge_root
+            ),
+            CDR_SEG2_STEP: lambda: _executed_working_dir(
+                self.cdr_seg2_root, self.forge_root
+            ),
         }
         return working_dirs[step]()
+
+    def metrics_dir_of(self, step: str) -> Path:
+        """The ``output`` directory of the ``cdr_metrics`` ``step``.
+
+        An inline blueprint's ``working_dir`` is the step root.
+        """
+        roots = {
+            METRICS_SEGMENTED_STEP: self.metrics_segmented_root,
+            METRICS_WHOLE_STEP: self.metrics_whole_root,
+        }
+        return roots[step] / "output"
 
     def sentinel(self, step: str) -> Path:
         """Path of the sentinel file holding ``step``'s status."""
@@ -132,7 +194,16 @@ class E2ERun:
 
     def all_log_tails(self) -> str:
         """The log tails of every step."""
-        roots = (self.forge_root, self.roms_root, self.cdr_forge_root, self.cdr_root)
+        roots = (
+            self.forge_root,
+            self.roms_root,
+            self.cdr_forge_root,
+            self.cdr_root,
+            self.cdr_seg1_root,
+            self.cdr_seg2_root,
+            self.metrics_segmented_root,
+            self.metrics_whole_root,
+        )
         return "\n".join(self.log_tail(root) for root in roots)
 
     def log_tail(self, root: Path, lines: int = 60) -> str:
@@ -157,13 +228,26 @@ def _executed_working_dir(step_root: Path, forge_root: Path) -> Path:
 
 
 def write_workplan(
-    path: Path, forge_blueprint: Path, cdr_forge_blueprint: Path
+    path: Path, forge_blueprint: Path, cdr_forge_blueprint: Path, grid_filename: str
 ) -> Path:
-    """Write the four-step workplan.
+    """Write the eight-step workplan.
 
-    ``make_inputs`` -> ``run_roms`` is a MARBL run that writes ``_cdrgas`` files;
+    ``make_inputs`` is a MARBL forge with an ALK release and feeds ROMS runs of one hour:
+    ``run_roms`` is the whole run, and also writes ``_cdrgas`` files, while
+    ``run_cdr_seg1`` and ``run_cdr_seg2`` are two half-hour segments, the second
+    continuing from the first's restart. All three write ``_cdr`` output.
+    ``cdr_metrics_whole`` and ``cdr_metrics_segmented`` compute the CDR metrics from the
+    whole run and from the segments; their blueprints are synthesized from overrides
+    that point at the producing steps' output through placeholders, and at the grid
+    ``make_inputs`` wrote (``grid_filename`` in its ``input_data`` directory).
+
     ``make_cdr_lite_inputs`` -> ``run_cdr_lite`` is a CDR-LiTE run (no MARBL) whose
-    ``carbonate-sensitivity-from`` directive reads them from ``run_roms``.
+    ``carbonate-sensitivity-from`` directive reads the ``_cdrgas`` files from ``run_roms``.
+
+    No two ROMS steps run at once: ``run_cdr_seg1`` waits for ``run_cdr_lite``, which
+    waits for ``run_roms``. Every ROMS step stages its codebases from one shared clone
+    cache, and concurrent refreshes of it fail (``CachedRemoteRepositoryStager`` removes
+    the cache when a ``git pull`` fails, under a step still copying from it).
 
     Every step sets ``max_walltime`` because a ``local`` override is what wraps the
     step command in ``timeout``; without one a hung step never ends.
@@ -173,9 +257,19 @@ def write_workplan(
     Path
         ``path``.
     """
+
+    def metrics_overrides(*producers: str) -> dict[str, t.Any]:
+        """The ``cdr_metrics`` blueprint's ``domains``, with ``producers``' output as sources."""
+        grid = f"{{{{root_dir: {FORGE_STEP}}}}}/input_data/{grid_filename}"
+        sources = [{"location": f"{{{{output_dir: {s}}}}}"} for s in producers]
+        return {"domains": {"oae": {"grid": {"location": grid}, "sources": sources}}}
+
     workplan = {
         "name": "forge-roms-e2e",
-        "description": "forge, roms_marbl, then a CDR-LiTE forge and roms_marbl run",
+        "description": (
+            "forge, whole and segmented roms_marbl runs with CDR metrics, "
+            "then a CDR-LiTE forge and roms_marbl run"
+        ),
         "steps": [
             {
                 "name": FORGE_STEP,
@@ -203,6 +297,39 @@ def write_workplan(
                 "depends_on": [CDR_FORGE_STEP, ROMS_STEP],
                 "directives": {"carbonate-sensitivity-from": {"step": ROMS_STEP}},
                 "compute_overrides": {"local": {"max_walltime": "01:00:00"}},
+            },
+            {
+                "name": CDR_SEG1_STEP,
+                "application": "roms_marbl",
+                "blueprint": {"from_step": FORGE_STEP},
+                # after the last other ROMS step: see the docstring
+                "depends_on": [FORGE_STEP, CDR_STEP],
+                "blueprint_overrides": {"runtime_params": {"end_date": SEGMENT_SPLIT}},
+                "compute_overrides": {"local": {"max_walltime": "01:00:00"}},
+            },
+            {
+                "name": CDR_SEG2_STEP,
+                "application": "roms_marbl",
+                "blueprint": {"from_step": FORGE_STEP},
+                "depends_on": [FORGE_STEP, CDR_SEG1_STEP],
+                "directives": {"continue-from": {"step": CDR_SEG1_STEP}},
+                "compute_overrides": {"local": {"max_walltime": "01:00:00"}},
+            },
+            {
+                "name": METRICS_SEGMENTED_STEP,
+                "application": "cdr_metrics",
+                "blueprint": InlineBlueprintRef.TOKEN,
+                "depends_on": [CDR_SEG1_STEP, CDR_SEG2_STEP],
+                "blueprint_overrides": metrics_overrides(CDR_SEG1_STEP, CDR_SEG2_STEP),
+                "compute_overrides": {"local": {"max_walltime": "00:10:00"}},
+            },
+            {
+                "name": METRICS_WHOLE_STEP,
+                "application": "cdr_metrics",
+                "blueprint": InlineBlueprintRef.TOKEN,
+                "depends_on": [ROMS_STEP],
+                "blueprint_overrides": metrics_overrides(ROMS_STEP),
+                "compute_overrides": {"local": {"max_walltime": "00:10:00"}},
             },
         ],
     }
@@ -238,7 +365,7 @@ def _schedule_and_wait(
     shim: Path,
     root: Path,
 ) -> E2ERun:
-    """Build the blueprint and workplan, run ``cstar workplan run``, and poll to the end.
+    """Build the blueprints and workplan, run ``cstar workplan run``, and poll to the end.
 
     Returns
     -------
@@ -246,14 +373,23 @@ def _schedule_and_wait(
         The finished run.
     """
     blueprint, blueprint_path = forge_blueprint_factory(
-        "unified", root / "forge", run_time_overrides=GAS_EXCH_OVERRIDES
+        "unified",
+        root / "forge",
+        run_time_overrides=MAKE_INPUTS_OVERRIDES,
+        cdr={"mode": "simple", "cdr_forcing": MARBL_CDR_FORCING},
     )
     _, cdr_blueprint_path = forge_blueprint_factory(
         "cdr_lite", root / "cdr_forge", name="it-cdr_lite-e2e"
     )
     _warm_grid_downloads(blueprint)
+    # lazy: pulls in roms_tools, like the grid warm-up
+    from cstar.applications.forge.input_data import netcdf_basename
+
     workplan = write_workplan(
-        root / "workplan.yaml", blueprint_path, cdr_blueprint_path
+        root / "workplan.yaml",
+        blueprint_path,
+        cdr_blueprint_path,
+        netcdf_basename(blueprint.name, "grid"),
     )
     env = make_cli_env(root, shim)
 
@@ -280,6 +416,10 @@ def _schedule_and_wait(
         roms_root=step_roots[ROMS_STEP],
         cdr_forge_root=step_roots[CDR_FORGE_STEP],
         cdr_root=step_roots[CDR_STEP],
+        cdr_seg1_root=step_roots[CDR_SEG1_STEP],
+        cdr_seg2_root=step_roots[CDR_SEG2_STEP],
+        metrics_segmented_root=step_roots[METRICS_SEGMENTED_STEP],
+        metrics_whole_root=step_roots[METRICS_WHOLE_STEP],
         statuses=statuses,
         stdout=proc.stdout,
     )
@@ -328,7 +468,7 @@ def tracers_to_write(run: E2ERun) -> list[str]:
 
 
 def test_all_steps_done(e2e_run: E2ERun) -> None:
-    """All four sentinels reached ``Done``."""
+    """All eight sentinels reached ``Done``."""
     assert e2e_run.statuses == ALL_DONE, e2e_run.all_log_tails()
 
 
@@ -629,6 +769,135 @@ def test_cdr_lite_restart_fields_are_finite(e2e_run: E2ERun) -> None:
         if missing or nonfinite:
             bad[path.name] = [f"missing: {missing}", f"non-finite: {nonfinite}"]
     assert not bad, bad
+
+
+def seconds_since_reference(when: datetime) -> float:
+    """``when`` as ROMS time: seconds since ``MODEL_REFERENCE_DATE``."""
+    return (when - MODEL_REFERENCE_DATE).total_seconds()
+
+
+def cdr_output_files(run: E2ERun, step: str) -> list[Path]:
+    """The ``_cdr`` output files of the roms_marbl ``step``, ordered by their timestamp."""
+    return sorted((run.working_dir_of(step) / "output").glob("*_cdr.[0-9]*.nc"))
+
+
+def averaging_windows(run: E2ERun, step: str) -> tuple[np.ndarray, np.ndarray]:
+    """The ``avg_begin_time`` and ``avg_end_time`` (seconds) of every ``_cdr`` record of ``step``."""
+    import xarray as xr
+
+    begins, ends = [], []
+    for path in cdr_output_files(run, step):
+        with xr.open_dataset(
+            path, decode_times=False, decode_timedelta=False, mask_and_scale=False
+        ) as ds:
+            begins.append(np.atleast_1d(ds["avg_begin_time"].values))
+            ends.append(np.atleast_1d(ds["avg_end_time"].values))
+    return np.concatenate(begins), np.concatenate(ends)
+
+
+def max_relative_difference(a: np.ndarray, b: np.ndarray) -> float:
+    """The largest ``|a - b| / |b|``, ignoring the records where it is undefined (``0 / 0``, NaN)."""
+    with np.errstate(divide="ignore", invalid="ignore"):
+        relative = np.abs(a - b) / np.abs(b)
+    relative = relative[~np.isnan(relative)]
+    return float(relative.max()) if relative.size else 0.0
+
+
+def test_cdr_output_written(e2e_run: E2ERun) -> None:
+    """The whole run and both segments wrote ``_cdr`` output, one record per window."""
+    records = {}
+    for step in CDR_OUTPUT_STEPS:
+        output = e2e_run.working_dir_of(step) / "output"
+        assert cdr_output_files(e2e_run, step), sorted(p.name for p in output.glob("*"))
+        records[step] = len(averaging_windows(e2e_run, step)[0])
+    assert records == {
+        ROMS_STEP: METRICS_RECORDS,
+        CDR_SEG1_STEP: METRICS_RECORDS // 2,
+        CDR_SEG2_STEP: METRICS_RECORDS // 2,
+    }
+
+
+def test_segments_meet_at_restart(e2e_run: E2ERun) -> None:
+    """``run_cdr_seg2`` continues where ``run_cdr_seg1`` ended: the chain covers the run without gap or overlap."""
+    begin1, end1 = averaging_windows(e2e_run, CDR_SEG1_STEP)
+    begin2, end2 = averaging_windows(e2e_run, CDR_SEG2_STEP)
+    # an absolute tolerance of 1 ms: the default relative one is minutes at these times
+    approx = partial(pytest.approx, rel=0, abs=1e-3)
+    assert begin1[0] == approx(seconds_since_reference(RUN_START))
+    assert end1[-1] == approx(seconds_since_reference(SEGMENT_SPLIT))
+    assert begin2[0] == approx(end1[-1])
+    assert end2[-1] == approx(seconds_since_reference(RUN_END))
+    # every window starts where the previous one ended
+    assert np.concatenate([begin1, begin2])[1:] == approx(
+        np.concatenate([end1, end2])[:-1]
+    )
+
+
+def test_cdr_metrics_written(e2e_run: E2ERun) -> None:
+    """Both ``cdr_metrics`` steps wrote the figure and a series of positive CO2 uptake, one value per window."""
+    import xarray as xr
+
+    for step in METRICS_STEPS:
+        output = e2e_run.metrics_dir_of(step)
+        assert (output / FIGURE_FILENAME).is_file(), sorted(
+            p.name for p in output.glob("*")
+        )
+        with xr.open_dataset(output / METRICS_FILENAME) as ds:
+            assert set(METRICS_VARIABLES) <= set(ds.data_vars), list(ds.data_vars)
+            not_series = {
+                n: v.dims for n, v in ds.data_vars.items() if v.dims != ("time",)
+            }
+            assert not not_series, (step, not_series)
+            assert ds.sizes["time"] == METRICS_RECORDS, (step, dict(ds.sizes))
+            for name in UPTAKE_VARIABLES:
+                final = float(ds[name].values[-1])
+                assert np.isfinite(final) and final > 0, (step, name, ds[name].values)
+
+
+def assert_segmented_metrics_match_whole_run(run: E2ERun, names: Sequence[str]) -> None:
+    """Assert the ``names`` series of the two continued segments equal the whole run's."""
+    import xarray as xr
+
+    paths = [run.metrics_dir_of(s) / METRICS_FILENAME for s in METRICS_STEPS]
+    with xr.open_dataset(paths[0]) as segmented, xr.open_dataset(paths[1]) as whole:
+        differences = {
+            name: max_relative_difference(segmented[name].values, whole[name].values)
+            for name in names
+        }
+        for name in names:
+            # the efficiencies are NaN where the cumulative source is zero
+            np.testing.assert_allclose(
+                segmented[name].values,
+                whole[name].values,
+                rtol=1e-6,
+                equal_nan=True,
+                err_msg=f"{name}: max relative differences {differences}",
+            )
+
+
+def test_segmented_dic_metrics_match_whole_run(e2e_run: E2ERun) -> None:
+    """The DIC-inventory metrics of the two continued segments equal the whole run's.
+
+    The restarted model state is bit-identical to the uninterrupted run's.
+    """
+    names = [n for n in METRICS_VARIABLES if n.endswith("_from_DIC_difference")]
+    assert_segmented_metrics_match_whole_run(e2e_run, names)
+
+
+@pytest.mark.xfail(
+    strict=True,
+    reason=(
+        "observed with ucla-roms 0.10.1 (macOS, ubuntu) and 0.11.0 (ubuntu): the "
+        "averaged FG_CO2/FG_ALT_CO2 written after a continue-from restart differ from "
+        "an uninterrupted run's (up to 2e-6 mmol/m^2/s) while DIC, ALK and hDIC stay "
+        "bit-identical and the namelists differ only in inifile and ntimes, so "
+        "flux-based metrics of a segmented run differ"
+    ),
+)
+def test_segmented_flux_metrics_match_whole_run(e2e_run: E2ERun) -> None:
+    """The air-sea flux metrics of the two continued segments equal the whole run's."""
+    names = [n for n in METRICS_VARIABLES if n.endswith("_from_flux")]
+    assert_segmented_metrics_match_whole_run(e2e_run, names)
 
 
 def test_workplan_status_names_all_steps(e2e_run: E2ERun) -> None:

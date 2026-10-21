@@ -4,6 +4,7 @@ from unittest import mock
 
 import pytest
 
+from cstar.applications.cdr_metrics import APP_NAME as APP_CDR_METRICS
 from cstar.applications.core import get_application
 from cstar.applications.hello_world import APP_NAME as APP_HW
 from cstar.applications.hello_world import HelloWorldBlueprint
@@ -508,6 +509,7 @@ def test_migrate_plotter(plotter_v1_0_0_model: dict[str, t.Any]) -> None:
         (APP_ROMS, "3.2.0"),
         (APP_PLOTTER, "2.1.0"),
         (APP_HW, "1.1.0"),
+        (APP_CDR_METRICS, "1.1.0"),
     ],
 )
 def test_application_schema_version(app_name: str, exp_version: str) -> None:
