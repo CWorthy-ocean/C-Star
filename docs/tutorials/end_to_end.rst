@@ -1,6 +1,6 @@
 .. _tutorial-end-to-end:
 
-Using Blueprints to Set Up and Run an Ocean Model
+Using blueprints to set up and run an ocean model
 =================================================
 
 This walkthrough takes you from an installed environment to a running toy

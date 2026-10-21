@@ -1,7 +1,7 @@
 .. _tutorial-workplan:
 
-Automating your simple model with workplans
-===========================================
+Automating the previous model with a workplan
+=============================================
 
 The :doc:`previous page <end_to_end>` ran Forge and then the simulation as two
 separate commands, and you carried the path of the blueprint Forge wrote from
