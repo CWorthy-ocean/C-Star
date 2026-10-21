@@ -213,10 +213,10 @@ def forge_blueprint_factory(
     Returns
     -------
     Callable[..., tuple[ForgeBlueprint, Path]]
-        ``(case_name, working_dir, *, name=None, run_time_overrides=None)`` -> the
-        resolved blueprint and the path of the ``forge_blueprint.yaml`` written into
-        ``working_dir``. ``run_time_overrides`` replaces the case's own when given. No
-        network access is needed because ``dt`` is supplied.
+        ``(case_name, working_dir, *, name=None, run_time_overrides=None, cdr=None)``
+        -> the resolved blueprint and the path of the ``forge_blueprint.yaml`` written
+        into ``working_dir``. ``run_time_overrides`` and ``cdr`` replace the case's own
+        when given. No network access is needed because ``dt`` is supplied.
     """
 
     def _factory(
@@ -225,6 +225,7 @@ def forge_blueprint_factory(
         *,
         name: str | None = None,
         run_time_overrides: dict[str, Any] | None = None,
+        cdr: dict[str, Any] | None = None,
     ) -> tuple["ForgeBlueprint", Path]:
         case = FORGE_CASES[case_name]
         domain = test_catalog.domain_data(case.domain)
@@ -244,7 +245,7 @@ def forge_blueprint_factory(
             compile_time_overrides=case.compile_time_overrides,
             run_time_overrides=run_time_overrides or case.run_time_overrides,
             bgc_mode=case.bgc_mode,
-            cdr=case.cdr,
+            cdr=cdr or case.cdr,
             roms_ref=ROMS_REF,
         )
         working_dir.mkdir(parents=True, exist_ok=True)

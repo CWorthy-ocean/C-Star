@@ -125,6 +125,28 @@ class ConfiguredBaseModel(BaseModel):
     """Configures the behavior of the pydantic model."""
 
 
+class PathLocation(ConfiguredBaseModel):
+    """A file or directory path in a blueprint, under a `location` key.
+
+    The key is named `location` so that a relative value in a blueprint file is
+    anchored to the blueprint file's directory by
+    `cstar.orchestration.serialization.anchor_locations` when the file is
+    loaded, the same rule as for dataset locations. In a workplan, placeholders
+    such as ``{{output_dir: <step>}}`` are filled before validation. The path
+    is not checked for existence: a placeholder's path does not exist until
+    its step has run. Compare `Resource`, a data resource that may also be
+    remote or pre-partitioned.
+    """
+
+    location: Path
+    """The path; relative values are anchored to the blueprint file's directory."""
+
+    @field_validator("location", mode="after")
+    @classmethod
+    def _expand_user(cls, value: Path) -> Path:
+        return value.expanduser()
+
+
 class Resource(ConfiguredBaseModel):
     location: FilePath | HttpUrl | str
     """Location of the file to retrieve."""

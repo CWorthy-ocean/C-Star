@@ -1,8 +1,8 @@
 """The names and models of the files a ROMS-MARBL step writes.
 
 How ROMS names its output streams, which streams have an artifact kind of
-their own, and the models that parse restart, boundary and carbonate
-sensitivity file names.
+their own, and the models that parse restart, boundary, carbonate sensitivity and CDR
+output file names.
 """
 
 import re
@@ -37,6 +37,10 @@ CDR_OUTPUT_SUFFIX: t.Final[str] = "_cdr"
 """The suffix of the ROMS stream holding CDR diagnostics."""
 
 
+TIMESTAMP_GLOB: t.Final[str] = "[0-9]" * 14
+"""Glob fragment matching the fixed-width (14-digit) timestamp in an output file name."""
+
+
 class RestartFile(BaseModel):
     """Reference to a path that contains restart checkpoints."""
 
@@ -53,8 +57,6 @@ class RestartFile(BaseModel):
     """The expected file extension for a restart file."""
     FMT_TS: t.ClassVar[t.Literal["%Y%m%d%H%M%S"]] = "%Y%m%d%H%M%S"
     """The expected timestamp format in the restart file name"""
-    TS_GLOB: t.ClassVar[str] = "[0-9]" * 14
-    """Glob fragment matching the fixed-width (14-digit) timestamp (see `FMT_TS`)."""
     PATTERN_RST: t.ClassVar[t.Literal[r"^(.*?)_rst\.(\d{14})(?:\.(\d{1,9}))?\.nc$"]] = (
         r"^(.*?)_rst\.(\d{14})(?:\.(\d{1,9}))?\.nc$"
     )
@@ -80,7 +82,7 @@ class RestartFile(BaseModel):
             Every matching file, in filesystem order.
         """
         parted_clause = ".*" if partitioned else ""
-        glob_pattern = f"*{cls.SUFFIX}.{cls.TS_GLOB}{parted_clause}.{cls.EXT}"
+        glob_pattern = f"*{cls.SUFFIX}.{TIMESTAMP_GLOB}{parted_clause}.{cls.EXT}"
         return [
             RestartFile(path=match)
             for match in search_path.rglob(glob_pattern)
@@ -423,6 +425,20 @@ class TimestampedOutputFile(BaseModel):
         )
 
     @classmethod
+    def _search_glob(cls) -> str:
+        """Return the glob a directory search uses to select candidate files.
+
+        A candidate that does not follow the naming convention makes `find`
+        raise. Subclasses whose suffix is also a prefix of other file names
+        narrow the glob so those names are not candidates.
+
+        Returns
+        -------
+        str
+        """
+        return f"*{cls.SUFFIX}*.{cls.EXT}"
+
+    @classmethod
     def find(
         cls, search_path: Path, notfound_ok: bool = True
     ) -> Sequence[t.Self] | None:
@@ -458,7 +474,7 @@ class TimestampedOutputFile(BaseModel):
             msg = f"No directory or file found at path: {search_path!r}"
             raise ValueError(msg)
 
-        matches = sorted(search_path.rglob(f"*{cls.SUFFIX}*.{cls.EXT}"))
+        matches = sorted(search_path.rglob(cls._search_glob()))
         if matches:
             return tuple(cls(path=m) for m in matches)
 
@@ -592,6 +608,33 @@ class CarbonateSensitivityFile(TimestampedOutputFile):
     SUFFIX: t.ClassVar[str] = "_cdrgas"
     """A unique suffix found in the name of carbonate sensitivity files"""
     LABEL: t.ClassVar[str] = "carbonate sensitivity"
+
+
+class CdrOutputFile(TimestampedOutputFile):
+    """Reference to a path that contains CDR diagnostics (`<base>_cdr.<timestamp>.nc`),
+    as written by a ROMS-MARBL run with CDR forcing that sets
+    `cdr_output.do_cdr_output`.
+    """
+
+    SUFFIX: t.ClassVar[str] = CDR_OUTPUT_SUFFIX
+    """A unique suffix found in the name of CDR output files."""
+    LABEL: t.ClassVar[str] = "CDR output"
+
+    @classmethod
+    def _search_glob(cls) -> str:
+        """Return a glob requiring the timestamp right after the suffix.
+
+        `_cdr` is a prefix of the suffixes of sibling ROMS output (`_cdrgas`,
+        `_cdrtrc`) and of the CDR forcing file `<name>_cdr.nc`, so the base
+        class's looser glob would match other kinds of file. A name that passes
+        this glob but not the naming convention still raises, as in the base
+        class.
+
+        Returns
+        -------
+        str
+        """
+        return f"*{cls.SUFFIX}.{TIMESTAMP_GLOB}*.{cls.EXT}"
 
 
 OUTPUT_STREAMS: t.Final[tuple[tuple[str, ArtifactKind, dict[str, str]], ...]] = (

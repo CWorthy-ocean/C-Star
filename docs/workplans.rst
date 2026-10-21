@@ -481,6 +481,116 @@ Workplan Examples
             child_grid: /path/to/child_grid.nc
 
 
+Computing CDR metrics from segmented runs
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+The ``cdr_metrics`` application computes carbon dioxide removal (CDR) metrics
+from the ``_cdr`` output of ROMS-MARBL runs, stitching the segments of a run that
+was split into several steps. Each source is a directory searched recursively for
+``_cdr`` output (or a single ``_cdr`` file), and the sources must cover the run
+from the release onward: the first holds the segment containing the release,
+because the cumulative sums start at the first record.
+
+.. code:: yaml
+
+    name: cdr-metrics-workplan
+    description: CDR metrics over two consecutive segments
+    state: draft
+
+    steps:
+    - name: seg-01
+      application: roms_marbl
+      blueprint: /path/to/segment_01.yaml
+
+    - name: seg-02
+      application: roms_marbl
+      blueprint: /path/to/segment_02.yaml
+      depends_on:
+      - seg-01
+      directives:
+        continue-from:
+          step: seg-01
+
+    - name: metrics
+      application: cdr_metrics
+      blueprint: inline
+      depends_on:
+      - seg-01
+      - seg-02
+      blueprint_overrides:
+        domains:
+          wio:
+            grid:
+              location: /path/to/wio_grid.nc
+            sources:
+            - location: "{{output_dir: seg-01}}"
+            - location: "{{output_dir: seg-02}}"
+
+The records are sorted by time after loading; a gap or an overlap between the
+averaging windows of consecutive records is an error, so a segment missing from
+``sources`` (or listed twice) is reported rather than silently skewing the
+cumulative sums. The step writes ``output/cdr_metrics.nc``, a time series of the
+CDR efficiencies and the uptake in tonnes of CO2, and ``output/cdr_metrics.png``,
+a plot of them.
+
+The producing runs must be MARBL runs with a CDR forcing; forge turns on
+``cdr_output`` for an active MARBL CDR forcing. ``domains`` maps a domain name to its
+grid and sources. A domain whose ``_cdr`` output lacks a variable the metrics need is
+reported with the ROMS setting that writes it.
+
+.. note::
+
+   With ucla-roms 0.10.1 and 0.11.0, the averaged air-sea CO2 flux diagnostics
+   (``FG_CO2``, ``FG_ALT_CO2``) written after a ``continue-from`` restart differ from
+   those of the same run without a restart, although the model state is identical. The
+   flux-based metrics of a segmented run can therefore differ from the unsegmented
+   run's; the metrics from DIC differences match it exactly.
+
+Nested (upscaled) experiments
+"""""""""""""""""""""""""""""
+
+In a nested experiment the release takes place in a child domain and the perturbation
+is handed on to one or more parent domains with the ``upscaler`` application. A parent's ``ALK_source`` and ``DIC_source`` are then
+a *transfer* of the same alkalinity, not a new release. List every domain in
+``domains``, child first, and mark each parent with ``source_role: transfer``:
+
+.. code:: yaml
+
+    - name: metrics
+      application: cdr_metrics
+      blueprint: inline
+      depends_on:
+      - child
+      - parent_up
+      blueprint_overrides:
+        domains:
+          child:
+            grid:
+              location: "{{input_dir: child}}/input_datasets/child_grid.nc"
+            sources:
+            - location: "{{output_dir: child}}"
+          parent:
+            source_role: transfer
+            grid:
+              location: "{{input_dir: parent_up}}/input_datasets/parent_grid.nc"
+            sources:
+            - location: "{{output_dir: parent_up}}"
+
+Each domain is analysed on its own grid, and the results are combined with roms-tools'
+``UpscaledCDR``: the CO2 uptake of all domains is summed, and the efficiency is the total
+uptake divided by the cumulative source of the release domain only, so the transferred
+alkalinity is not counted twice. ``output/cdr_metrics.nc`` then also holds each domain's
+uptake series and two diagnostics. ``closure_residual`` is the combined flux-based minus
+DIC-difference-based uptake; the two are independent views of the same perturbation, so a
+residual small against the uptake is the sign that the domains were combined
+consistently. ``<parent>_DIC_difference_inside_<child>`` is the DIC perturbation a parent
+carries in its cells inside the child's footprint. It is normally nonzero: the upscaler
+re-injects what leaves the child along the child's boundary, which lies inside that
+footprint, and the child's own inventory no longer holds it. ``output/cdr_domains.png``
+maps the domains. A parent must be a MARBL run writing ``_cdr`` output; a CDR-lite parent
+writes ``_cdrtrc`` output, which the metrics cannot use.
+
+
 Checking validity
 -----------------
 
