@@ -39,7 +39,7 @@
         },
         "ExecutionFacts": {
             "additionalProperties": false,
-            "description": "What ran a step: the scheduler and the allocation it was granted, read from\nthe step's own environment.\n\nThese are the granted resources, never the request: the request is in the\ntransformed workplan and the batch script.",
+            "description": "What ran a step: the scheduler and the allocation it was granted, read from\nthe step's own environment.\n\nThese are the granted resources, never the request: the request is in the\ntransformed workplan and the batch script. They describe the step's own\nprocess; a model run the step submits as a job of its own is not described.",
             "properties": {
                 "scheduler": {
                     "default": "",
@@ -120,6 +120,7 @@
                         "gas_exchange",
                         "upscaling",
                         "cdr_output",
+                        "analysis",
                         "emitted_blueprint",
                         "config",
                         "build",
