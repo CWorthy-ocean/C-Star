@@ -211,8 +211,10 @@ class DirectoryManager:
                 log.info(
                     "Replacing dangling source-data link %s from an older release", home
                 )
-                home.unlink()
-            else:
+                # Another process repairing the same link may have removed it first.
+                home.unlink(missing_ok=True)
+            elif not home.exists():
+                # Checked again: another process may have relinked it meanwhile.
                 msg = (
                     f"The source-data cache {home} links to {target}, which "
                     "does not exist. Restore the target or remove the link."

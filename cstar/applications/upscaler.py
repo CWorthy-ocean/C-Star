@@ -261,6 +261,15 @@ def _uscl_sort_key(file: Path | str) -> str:
     return match.group(1) if match else ""
 
 
+def _file_of_record(files: Sequence[Path | str], index: int) -> Path | str:
+    """Return the file holding record `index` of `files` joined along ``time``."""
+    counts = []
+    for file in files:
+        with xr.open_dataset(file) as ds:
+            counts.append(ds.sizes["time"])
+    return files[int(np.searchsorted(np.cumsum(counts), index, side="right"))]
+
+
 class CDRUpscaler:
     """
     Class for transforming CDR-relevant boundary tracers to CDR forcing profiles.
@@ -319,11 +328,19 @@ class CDRUpscaler:
             data_vars="minimal",
             coords="minimal",
         )
-        if not np.all(np.diff(self.uscl_dataset.ocean_time.values) > 0):
+        ocean_time = self.uscl_dataset.ocean_time.values
+        not_increasing = np.flatnonzero(~(np.diff(ocean_time) > 0))
+        if not_increasing.size:
             self.uscl_dataset.close()
+            record = int(not_increasing[0]) + 1
+            previous_file = Path(_file_of_record(self.files, record - 1)).name
+            record_file = Path(_file_of_record(self.files, record)).name
             msg = (
                 "`ocean_time` of the concatenated `_uscl` files is not strictly "
-                + "increasing; the files contain repeated or out-of-order records."
+                f"increasing: record {record} ({ocean_time[record]:g} s, in "
+                f"{record_file}) does not follow record {record - 1} "
+                f"({ocean_time[record - 1]:g} s, in {previous_file}). The files "
+                "contain repeated or out-of-order records."
             )
             raise ValueError(msg)
         self.eta_rho: xr.DataArray = self.uscl_dataset.eta_rho

@@ -5,6 +5,7 @@ over them. The blueprints are written once and committed, so a schema bump or a 
 that drifts to a commit hash would otherwise show up only when someone runs the example.
 """
 
+import typing as t
 from pathlib import Path
 
 import pytest
@@ -84,3 +85,26 @@ def test_workplan_parses_and_names_existing_blueprints(
         if not (workplan_path.parent / s.blueprint_path).is_file()
     ]
     assert not missing, missing
+
+
+@pytest.mark.parametrize("example", EXAMPLES)
+def test_cdr_metrics_step_assigns_the_source_roles(
+    tutorials: Path, example: str
+) -> None:
+    """``child`` is the release and ``parent_up`` only transfers its alkalinity.
+
+    A role swapped or dropped would count the release twice, or not at all, in the
+    combined metrics. Each domain is also analysed on the grid its own forge step wrote.
+    """
+    workplan = deserialize(tutorials / example / "workplan.yaml", Workplan)
+    (step,) = [s for s in workplan.steps if s.name == "cdr_metrics"]
+    domains = t.cast("dict[str, dict[str, t.Any]]", step.blueprint_overrides["domains"])
+
+    assert set(domains) == {"child", "parent_up"}
+    # "release" is the default role
+    assert domains["child"].get("source_role", "release") == "release"
+    assert domains["parent_up"]["source_role"] == "transfer"
+    assert domains["child"]["grid"]["location"].startswith("{{root_dir: forge_child}}/")
+    assert domains["parent_up"]["grid"]["location"].startswith(
+        "{{root_dir: forge_parent_up}}/"
+    )

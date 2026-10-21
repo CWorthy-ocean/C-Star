@@ -73,17 +73,22 @@ ROMS_FAILURE_PATTERN = re.compile(
     r"|MPI_(?:ABORT|Abort)"
     r"|Ran out of time records"
     r"|First available forcing record is past current time"
-    r"|Traceback"
 )
 """ROMS failure markers in a step log, which also carries C-Star's own logging.
 
 ucla-roms prints ``ERROR [raised ...] [module/routine]:`` (``ERROR`` then a bracket) and then
 calls ``MPI_Abort``; a blow-up prints ``BLOWUP``. C-Star's logger writes its level as
 ``[ERROR]``, so a transient ``[ERROR] ... An error occurred while refreshing ...git`` (C-Star
-carries on after it) does not match.
+carries on after it, logging the exception with a traceback) does not match. A
+``Traceback`` is not a marker for that reason; a real exception fails the step's status.
 """
 CDR_TIME_EPOCH = datetime(2000, 1, 1)
-"""The upscaler counts ``cdr_time`` in days since this date, whatever the model reference date."""
+"""The date ``cdr_time`` is counted from, in days, in this example.
+
+The upscaler labels ``cdr_time`` "days since 2000/01/01" but writes the child's model
+time (``ocean_time`` / 86400), which counts from the model reference date. The two agree
+here because this example's ``model_reference_date`` is 2000-01-01.
+"""
 CDF5_MAGIC = b"CDF\x05"
 COMBINED_SERIES = (
     "cdr_carbon_uptake_from_flux",
@@ -259,6 +264,16 @@ def final_record(path: Path, names: Sequence[str]) -> dict[str, float]:
         return {name: float(ds[name].values[-1]) for name in names}
 
 
+def alk_profile(ds: "xr.Dataset") -> "xr.DataArray":
+    """The ALK flux of ``ds``'s ``cdr_trcflx_profile``, tracer 0 of its third axis.
+
+    The axis is named ``two``, or ``ntrc`` when the file also holds CDR-lite tracers, so
+    it is indexed by position.
+    """
+    profile = ds["cdr_trcflx_profile"]
+    return profile.isel({profile.dims[2]: 0})
+
+
 def child_start_days() -> float:
     """The child's start, in days since `CDR_TIME_EPOCH`, from its forge blueprint."""
     blueprint = yaml.safe_load((EXAMPLE_DIR / "forge_child.yaml").read_text())
@@ -313,8 +328,7 @@ def test_upscaled_forcing_time_and_flux(nesting_run: NestingRun) -> None:
     (path,) = nesting_run.outputs("upscale", "upscaled_cdr.nc")
     with open_dataset(path) as ds:
         cdr_time = ds["cdr_time"].values
-        # tracer 0 of the profile is ALK
-        alk_flux = ds["cdr_trcflx_profile"].isel(two=0).values
+        alk_flux = alk_profile(ds).values
     assert np.all(np.diff(cdr_time) > 0), cdr_time
     # a 1e-6 day tolerance is 0.09 s; the default relative one is minutes
     assert cdr_time[0] == pytest.approx(child_start_days(), rel=0, abs=1e-6)
@@ -334,28 +348,21 @@ def test_parent_up_wrote_cdr_source(nesting_run: NestingRun) -> None:
 
 
 def test_parent_up_injects_the_upscaled_alk_flux(nesting_run: NestingRun) -> None:
-    """``parent_up``'s ``ALK_source``, summed over the domain, adds up to the file's ALK flux.
+    """``parent_up``'s ``ALK_source``, summed over the domain, matches the file's ALK flux record by record.
 
     ``parent_up`` reads ``upscaled_cdr.nc`` without time interpolation: it holds each
     hourly record from its time stamp, so the flux enters an hour after the hour it
     averages and the last record is never used. So the injected alkalinity is compared
-    with every record but the last, as totals over the run rather than record by record,
-    because the first record is zero and a ratio of it is undefined. Both are hourly
-    rates in meq/s, so the ratio of the sums is the ratio of the totals.
+    with every record but the last. Both are hourly rates in meq/s. Each record must
+    agree to ``CONSERVATION_RTOL``, with an absolute floor of that fraction of the
+    largest flux because the first record is zero and a ratio of it is undefined.
 
     ucla-roms 0.11.0 and later conserve the flux (``remap_src_to_grid`` rescaled it
-    before, so 0.10.1 injects about 1 % less here), which this checks to
-    ``CONSERVATION_RTOL``.
+    before, so 0.10.1 injects about 1 % less here), which this checks.
     """
     (upscaled,) = nesting_run.outputs("upscale", "upscaled_cdr.nc")
     with open_dataset(upscaled) as ds:
-        # tracer 0 of the profile is ALK
-        flux = (
-            ds["cdr_trcflx_profile"]
-            .isel(two=0)
-            .sum(("s_rho", "ncdr_prof"), skipna=False)
-            .values
-        )
+        flux = alk_profile(ds).sum(("s_rho", "ncdr_prof"), skipna=False).values
     sources = []
     for path in nesting_run.outputs("parent_up", "*_cdr.*.nc"):
         with open_dataset(path) as ds:
@@ -368,13 +375,29 @@ def test_parent_up_injects_the_upscaled_alk_flux(nesting_run: NestingRun) -> Non
 
     # parent_up runs to the child's end, one hourly record for each held flux record
     assert len(injected) == len(flux) - 1, (len(injected), len(flux))
-    assert injected.sum() == pytest.approx(flux[:-1].sum(), rel=CONSERVATION_RTOL)
+    np.testing.assert_allclose(
+        injected,
+        flux[:-1],
+        rtol=CONSERVATION_RTOL,
+        atol=CONSERVATION_RTOL * np.abs(flux).max(),
+    )
 
 
 def test_cdr_metrics_wrote_its_outputs(nesting_run: NestingRun) -> None:
     """``cdr_metrics`` wrote the combined metrics and the two figures."""
     for name in (METRICS_FILENAME, FIGURE_FILENAME, DOMAINS_FIGURE_FILENAME):
         assert nesting_run.outputs("cdr_metrics", name), name
+
+
+def test_cdr_metrics_assigns_the_source_roles(nesting_run: NestingRun) -> None:
+    """``cdr_metrics.nc`` records the child as the release and ``parent_up`` as a transfer.
+
+    A swapped or dropped role would count the release twice, or not at all, in the
+    combined series.
+    """
+    (path,) = nesting_run.outputs("cdr_metrics", METRICS_FILENAME)
+    with open_dataset(path) as ds:
+        assert ds.attrs["domains"] == "child:release, parent_up:transfer"
 
 
 def test_cdr_metrics_are_finite_at_the_final_record(nesting_run: NestingRun) -> None:

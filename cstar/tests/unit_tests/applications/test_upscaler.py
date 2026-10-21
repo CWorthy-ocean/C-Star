@@ -539,8 +539,27 @@ class TestCDRUpscalerTimeOrder:
         with pytest.raises(ValueError, match="strictly increasing"):
             CDRUpscaler([first, second])
 
+    def test_overlapping_records_error_names_the_record_and_files(
+        self, tmp_path: Path
+    ) -> None:
+        """Verify the error names the first offending record, its time and the
+        files holding it and the record before it.
+        """
+        first = _write_hourly_uscl(tmp_path / "roms_uscl.20240101000000.nc", [0, 1, 2])
+        second = _write_hourly_uscl(tmp_path / "roms_uscl.20240101020000.nc", [2, 3, 4])
+
+        with pytest.raises(ValueError) as excinfo:
+            CDRUpscaler([first, second])
+
+        assert str(excinfo.value) == (
+            "`ocean_time` of the concatenated `_uscl` files is not strictly "
+            "increasing: record 3 (7200 s, in roms_uscl.20240101020000.nc) does "
+            "not follow record 2 (7200 s, in roms_uscl.20240101000000.nc). The "
+            "files contain repeated or out-of-order records."
+        )
+
     def test_overlapping_records_close_the_dataset(self, tmp_path: Path) -> None:
-        """Verify the opened dataset is closed when the time check fails."""
+        """Verify the concatenated dataset is closed when the time check fails."""
         first = _write_hourly_uscl(tmp_path / "roms_uscl.20240101000000.nc", [0, 1, 2])
         second = _write_hourly_uscl(tmp_path / "roms_uscl.20240101020000.nc", [2, 3, 4])
 
@@ -552,4 +571,7 @@ class TestCDRUpscalerTimeOrder:
         ):
             CDRUpscaler([first, second])
 
-        close.assert_called_once()
+        close.assert_called()
+        # xarray closes other datasets too (the per-file ones); the joined one has
+        # all six records.
+        assert any(call.args[0].sizes.get("time") == 6 for call in close.call_args_list)

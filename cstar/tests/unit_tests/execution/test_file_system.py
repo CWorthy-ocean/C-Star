@@ -928,6 +928,26 @@ class TestSourceDataHome:
         assert standard.is_symlink()
         assert standard.readlink() == Path("../unmounted/source-data")
 
+    def test_ensure_refuses_old_relpath_link_without_legacy_cache(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The old release's link text is repaired only when the legacy cache it
+        names exists; otherwise the link is refused, not replaced by an empty
+        directory.
+        """
+        scratch = tmp_path / "scratch"
+        standard = self._expected(scratch)
+        standard.parent.mkdir(parents=True)
+        standard.symlink_to("../cstar-forge-data/source-data")
+        monkeypatch.setenv("SCRATCH", str(scratch))
+        assert not (scratch / "cstar-forge-data").exists()
+
+        with pytest.raises(CstarError, match="does not exist"):
+            DirectoryManager.ensure_source_data_home()
+
+        assert standard.is_symlink()
+        assert standard.readlink() == Path("../cstar-forge-data/source-data")
+
     def test_ensure_tolerates_losing_the_link_race(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
