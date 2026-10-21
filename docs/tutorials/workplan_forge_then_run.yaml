@@ -1,5 +1,5 @@
 # yaml-language-server: $schema=https://raw.githubusercontent.com/CWorthy-ocean/C-Star/refs/heads/main/docs/schemas/wp/workplan_schema.1.0.0.json
-name: wio-toy-forge-then-run
+name: wio-workplan-tutorial
 description: Generate the wio-toy inputs with Forge, then run the simulation
 state: draft
 

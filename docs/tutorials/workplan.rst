@@ -1,7 +1,7 @@
 .. _tutorial-workplan:
 
-The same run as a workplan
-==========================
+Automating your simple model with workplans
+===========================================
 
 The :doc:`previous page <end_to_end>` ran Forge and then the simulation as two
 separate commands, and you carried the path of the blueprint Forge wrote from
@@ -93,7 +93,7 @@ beneath it:
 
 .. code-block:: text
 
-   workplan_runs/wio-toy-forge-then-run/
+   workplan_runs/wio-workplan-tutorial/
      cstar-run.yaml                                the run manifest
      workplan_forge_then_run_transformed.yaml      the plan as actually run
      tasks/make_inputs/   input_data/, output/, logs/, ...   as in a blueprint run
@@ -116,16 +116,32 @@ ID.
 
 .. code-block:: console
 
-   cstar run status wio-toy-forge-then-run
+   cstar run status wio-workplan-tutorial
 
 prints one row per step with a tick in its current column: *Submitted*,
-*Running*, *Done*, *Failed* and so on. While Forge works, ``simulate`` shows as
-running too, because its process is already started and waiting for its
-dependency.
+*Running*, *Done*, *Failed* and so on. A minute or two after submitting, it
+looks like this:
+
+.. code-block:: text
+
+                                    Run wio-workplan-tutorial Results
+   ┏━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━┳━━━━━━━━━━┳━━━━━━━━━┳━━━━━━┳━━━━━━━━┳━━━━━━━━━━━┳━━━━━━━━━━━━━┓
+   ┃                  Step ┃ Submitted ┃ In Queue ┃ Running ┃ Done ┃ Failed ┃ Cancelled ┃ Dependencies┃
+   ┡━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━╇━━━━━━━━━━╇━━━━━━━━━╇━━━━━━╇━━━━━━━━╇━━━━━━━━━━━╇━━━━━━━━━━━━━┩
+   │1. make_inputs (forge) │           │          │    ✔    │      │        │           │             │
+   ├───────────────────────┼───────────┼──────────┼─────────┼──────┼────────┼───────────┼─────────────┤
+   │           2. simulate │           │          │    ✔    │      │        │           │      1      │
+   │          (roms_marbl) │           │          │         │      │        │           │             │
+   └───────────────────────┴───────────┴──────────┴─────────┴──────┴────────┴───────────┴─────────────┘
+               Disk usage not measured. Run: cstar run status wio-workplan-tutorial --size
+
+While Forge works, ``simulate`` shows as running too, because its process is
+already started and waiting for its dependency. When both steps have finished,
+both ticks sit in the *Done* column.
 
 .. code-block:: console
 
-   cstar run log wio-toy-forge-then-run make_inputs
+   cstar run log wio-workplan-tutorial make_inputs
 
 prints the log of one step, the same text you saw scroll past when you ran
 the blueprint directly. If you want to keep track of an actively running job,
@@ -134,14 +150,55 @@ to stop).
 
 .. code-block:: console
 
-   cstar run show wio-toy-forge-then-run
+   cstar run show wio-workplan-tutorial
 
 shows what the run was and what it produced: each time it was submitted, on
 which machine and with which package versions, and each step's status and
-outcome.
+outcome. Once the run is over:
 
-``cstar run ls`` lists every run you have started on this machine, in case
-you forget a run ID.
+.. code-block:: text
+
+                Run wio-workplan-tutorial
+   ┌──────────┬──────────────────────────────────────┐
+   │     Name │ wio-workplan-tutorial                │
+   │     Kind │ workplan                             │
+   │   Run-id │ wio-workplan-tutorial                │
+   │       Id │ b3881b52-933a-4db9-82cc-d79feb9de9fc │
+   │   System │ darwin_arm64                         │
+   │  Created │ 2026-10-21 16:50                     │
+   │ Observed │ 2026-10-21 16:57                     │
+   └──────────┴──────────────────────────────────────┘
+                                                        Attempts
+   ┏━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━┳━━━━━━━━┳━━━━━━━━━━━┳━━━━━━━━━┳━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
+   ┃ Started          ┃ Finished         ┃ Status ┃ Clobbered ┃ Resumed ┃ Pre-run ┃ cstar-ocean                      ┃
+   ┡━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━╇━━━━━━━━╇━━━━━━━━━━━╇━━━━━━━━━╇━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┩
+   │ 2026-10-21 16:50 │ 2026-10-21 16:56 │ done   │ -         │ -       │ no      │ 0.17.0                           │
+   └──────────────────┴──────────────────┴────────┴───────────┴─────────┴─────────┴──────────────────────────────────┘
+                                       Steps
+   ┏━━━━━━━━━━━━━┳━━━━━━━━━━━━━┳━━━━━━━━┳━━━━━━━━━━━┳━━━━━━━━━━┳━━━━━━┳━━━━━━━━┓
+   ┃ Step        ┃ Application ┃ Status ┃ Outcome   ┃ Products ┃ Size ┃ Record ┃
+   ┡━━━━━━━━━━━━━╇━━━━━━━━━━━━━╇━━━━━━━━╇━━━━━━━━━━━╇━━━━━━━━━━╇━━━━━━╇━━━━━━━━┩
+   │ make_inputs │ forge       │ Done   │ completed │ 0        │ 0 B  │ yes    │
+   │ simulate    │ roms_marbl  │ Done   │ completed │ 0        │ 0 B  │ yes    │
+   └─────────────┴─────────────┴────────┴───────────┴──────────┴──────┴────────┘
+
+Finally,
+
+.. code-block:: console
+
+   cstar run ls
+
+lists every run you have started on this machine, in case you forget a run
+ID:
+
+.. code-block:: text
+
+   ┏━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━┓
+   ┃                run-id ┃ workplan              ┃ disk space                    ┃    start time    ┃
+   ┡━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━┩
+   │ wio-workplan-tutorial │ wio-workplan-tutorial │ Run "cstar run status         │ 2026-10-21 16:50 │
+   │                       │                       │ wio-workplan-tutorial --size" │                  │
+   └───────────────────────┴───────────────────────┴───────────────────────────────┴──────────────────┘
 
 5. Look at the results
 ----------------------
@@ -152,13 +209,15 @@ step's directory, so you don't have to remember the layout. You can also use
 
 .. code-block:: console
 
-   cstar cd wio-toy-forge-then-run simulate
+   cstar run cd wio-workplan-tutorial simulate
 
 to go straight to a given run or step.
 
-.. note:: The first time you run this command, you'll be prompted to register a shell function
-that allows it to work. If you don't want to do this, you can use the output from ``cstar run path``
-however you like, e.g. ``cd $(cstar run path wio-toy-forge-then-run simulate)``
+.. note:: A program cannot change the directory of the shell that started it,
+   so this command needs a small shell function. The first time you run it,
+   it tells you how: run ``cstar env shell-init --install`` once and open a new
+   shell. If you would rather not, use the output of ``cstar run path`` however
+   you like, e.g. ``cd $(cstar run path wio-workplan-tutorial simulate)``.
 
 The files are the same ones the previous page produced, and you can open them
 with `roms-tools <https://roms-tools.readthedocs.io/en/latest/plotting_roms_output.html>`_

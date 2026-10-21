@@ -110,11 +110,11 @@ C-Star is built with these principles in mind:
 
 .. toctree::
     :maxdepth: 1
-    :caption: Laptop-Runnable Examples
+    :caption: Guided tutorials
     :hidden:
 
-    End to end: a new domain to a running simulation <tutorials/end_to_end>
-    The same run as a workplan <tutorials/workplan>
+    Using Blueprints to Set Up and Run an Ocean Model <tutorials/end_to_end>
+    Automating your simple model with workplans <tutorials/workplan>
     Spin-up, continuation and a nested grid <tutorials/nested_workplan>
 
 .. toctree::

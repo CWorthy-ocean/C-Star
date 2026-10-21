@@ -1,5 +1,5 @@
 # yaml-language-server: $schema=https://raw.githubusercontent.com/CWorthy-ocean/C-Star/refs/heads/main/docs/schemas/wp/workplan_schema.1.0.0.json
-name: wio-nested
+name: wio-nested-tutorial
 description: Spin up the outer domain, finish it, then run a nested inner domain
 state: draft
 
@@ -14,7 +14,7 @@ steps:
     application: forge
     blueprint: ./forge_blueprint_wio_inner.yaml
 
-  # Day 1 of the outer domain: a spin-up with the history output turned off.
+  # Day 1 of the outer domain: a spin-up with a shorter time step.
   - name: spinup
     application: roms_marbl
     blueprint:
@@ -25,11 +25,11 @@ steps:
       runtime_params:
         end_date: "2012-01-02 00:00:00"
       namelist_overrides:
-        basic_output_settings:
-          wrt_file_his: false
+        time_stepping:
+          dt: 1800
 
-  # Day 2 of the outer domain, continued from the spin-up's restart, with
-  # the history output on again.
+  # Day 2 of the outer domain, continued from the spin-up's restart, at the
+  # blueprint's own time step.
   - name: outer
     application: roms_marbl
     blueprint:

@@ -34,29 +34,31 @@ inner grid fetches its own, smaller cut.
 The two grids
 -------------
 
-Nesting is set up in Forge, before anything runs. Open the two forge
-blueprints and look at the ``domain`` section of each.
+.. figure:: ../images/nested-grids.png
+   :alt: The outer wio-toy grid with the inner grid drawn inside it
+   :width: 70%
 
-The outer blueprint describes the ``wio-toy`` grid and, under
-``grid_kwargs_child``, the grid of the child it will feed. Forge needs this to
-work out which outer cells sit on the child's edges; it writes that mapping to
-a ``nesting.nc`` file, and switches on the model's ``extract_data`` output
-stream so the outer run writes hourly boundary values for the child at those
-cells. Everything else is an ordinary domain.
+   The outer grid and, inside it, the inner grid.
 
-The inner blueprint describes the child grid and, under ``grid_kwargs_parent``,
-the outer grid it sits in. Forge uses the parent to blend the child's land
-mask and bathymetry toward the parent's along the edges, so the two agree
-where they meet. Its ``forcing`` section has no ``boundary`` entry at all: the
-child's boundary values will come from the outer run, not from a reanalysis.
-It still has initial conditions from GLORYS, because every ROMS-MARBL blueprint
-needs some, but the workplan replaces them before the run.
+Nesting is set up in Forge, before anything runs, and the two grids have to
+know about each other. The outer domain needs to know where the inner grid's
+edges are, so that its run writes out the boundary values the inner run will
+read, at every hour. The inner domain needs to know the outer grid, so that
+its land mask and bathymetry are smoothed to match the outer grid's along its
+edges, where the two have to agree. That is why the inner blueprint has no
+boundary forcing of its own: its boundaries come from the outer run, not from
+a reanalysis. Both blueprints are otherwise ordinary.
 
-In the wizard, the same two blueprints come from the nesting part of the
-*Domain and grid* section: tick *This grid is a parent* on the outer domain
-and enter the child grid, or *This is a child grid* on the inner one and enter
-the parent. The run windows differ on purpose: the outer blueprint covers
-2012-01-01 to 2012-01-03, the inner one only the second day.
+In the wizard, this is the nesting part of the *Domain and grid* section: tick
+*This grid is a parent* on the outer domain and enter the inner grid, or
+*This is a child grid* on the inner one and enter the outer grid.
+
+.. figure:: ../images/wizard-nesting.png
+   :alt: The nesting controls of the wizard's Domain and grid section
+   :width: 100%
+
+The run windows differ on purpose: the outer blueprint covers 2012-01-01 to
+2012-01-03, the inner one only the second day.
 
 The workplan
 ------------
@@ -70,8 +72,9 @@ the same time. Each of the four steps after them adds one idea.
 **spinup** runs day one of the outer grid, and shows **blueprint overrides**.
 Its blueprint is the one ``make_outer`` writes, but ``blueprint_overrides``
 changes two values in it before the model runs: the end date is pulled back
-by a day, and the history output is switched off, since nobody is going to
-look at a spin-up. The override keys follow the ROMS-MARBL blueprint:
+by a day, and the time step is halved, to resolve the adjustment from the
+reanalysis initial state more carefully. The override keys follow the
+ROMS-MARBL blueprint:
 ``runtime_params`` is the run window, and ``namelist_overrides`` is keyed by
 namelist group and setting (see :doc:`../blueprints/roms_marbl`). The
 blueprint itself is not edited; the overrides are applied to a copy when the
@@ -113,7 +116,6 @@ time it steps through, including the first one: the spin-up's last record is
 at 2012-01-02 00:00, exactly where the inner run starts, and the outer run's
 first is an hour later.
 
-
 Run it
 ------
 
@@ -126,13 +128,13 @@ Then follow it as on the :doc:`previous page <workplan>`:
 
 .. code-block:: console
 
-   cstar run status wio-nested
-   cstar run log wio-nested outer --monitor
+   cstar run status wio-nested-tutorial
+   cstar run log wio-nested-tutorial outer --monitor
 
 Each ROMS step fetches and compiles the model in its own directory, so
 expect a minute or two of compiling before each one starts stepping, and
 about as long again for the simulation itself. If a step fails, the steps
-after it are not run, and ``cstar run log wio-nested <step>`` has the reason.
+after it are not run, and ``cstar run log wio-nested-tutorial <step>`` has the reason.
 Fix the cause and submit the workplan again; finished steps are kept and the
 failed one is retried.
 
@@ -141,18 +143,18 @@ What to look at
 
 When ``cstar run status`` shows every step as *Done*:
 
-- ``spinup``'s output has one restart file and one ``child_bry.*.nc``
-  extraction file, and no history files; ``outer``'s has all three kinds.
+- ``spinup``'s and ``outer``'s outputs each have a day of history, a restart
+  file at the end of their day, and one ``child_bry.*.nc`` extraction file.
 - ``inner_ic``'s output has one file, the inner grid's initial conditions at
   2012-01-02 00:00.
 - ``inner``'s ``work`` directory holds a copy of its blueprint after each
   directive was applied; the one with the longest name is what actually
   ran. Its ``initial_conditions`` points into ``inner_ic`` and its
-  ``forcing.boundary`` lists the outer run's extraction files. Compare it
+  ``forcing.boundary`` lists the two outer-grid runs' extraction files. Compare it
   with the blueprint in ``make_inner``'s output to see exactly what the
   directives changed.
-- ``cstar run show wio-nested`` lists all six steps with their timings, and
-  ``cstar run gather wio-nested`` links every step's output files into one
+- ``cstar run show wio-nested-tutorial`` lists all six steps with their timings, and
+  ``cstar run gather wio-nested-tutorial`` links every step's output files into one
   ``gathered_output`` directory under the run, if you prefer to browse them
   in one place.
 

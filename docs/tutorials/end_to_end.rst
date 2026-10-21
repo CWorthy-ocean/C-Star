@@ -1,7 +1,7 @@
 .. _tutorial-end-to-end:
 
-End to end: a new domain to a running simulation
-================================================
+Using Blueprints to Set Up and Run an Ocean Model
+=================================================
 
 This walkthrough takes you from an installed environment to a running toy
 simulation on a laptop or workstation, using all three C-Star steps: build a
