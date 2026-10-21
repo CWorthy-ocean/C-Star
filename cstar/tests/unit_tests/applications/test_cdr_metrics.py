@@ -1041,7 +1041,6 @@ class TestCdrMetricsRunner:
                 "cdr_carbon_uptake_from_DIC_difference",
             }
             assert expected <= set(series.data_vars)
-            assert series.attrs["cdr_domain"] == "wio"
             assert series.sizes["time"] == 4
             assert all(var.dims == ("time",) for var in series.data_vars.values())
             assert {"hDIC", "area", "lat_rho"}.isdisjoint(series.variables)
@@ -1081,7 +1080,7 @@ class TestCdrMetricsRunner:
         with xr.open_dataset(
             bp.effective_working_dir / "output" / METRICS_FILENAME
         ) as series:
-            assert series.attrs["cdr_domains"] == "wio:release"
+            assert series.attrs["domains"] == "wio:release"
             assert series.attrs["cdr_source_files"] == 3
             assert series.attrs["cdr_grid_files"] == (tmp_path / "grid.nc").as_posix()
             assert isinstance(series.attrs["roms_tools_version"], str)
@@ -1106,7 +1105,7 @@ class TestCdrMetricsRunner:
         with xr.open_dataset(
             bp.effective_working_dir / "output" / METRICS_FILENAME
         ) as series:
-            assert series.attrs["cdr_domain"] == "child"
+            assert series.attrs["domains"] == "child:release"
 
     async def test_a_gap_fails_the_run_before_anything_is_written(
         self,
@@ -1245,7 +1244,7 @@ class TestNestedCdrMetricsRunner:
         with xr.open_dataset(
             nested_bp.effective_working_dir / "output" / METRICS_FILENAME
         ) as series:
-            assert series.attrs["cdr_domains"] == "child:release, parent:transfer"
+            assert series.attrs["domains"] == "child:release, parent:transfer"
             assert series.attrs["cdr_source_files"] == 4
             assert series.attrs["cdr_grid_files"] == ", ".join(
                 (tmp_path / name).as_posix() for name in ("child.nc", "parent.nc")

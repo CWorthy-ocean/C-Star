@@ -81,6 +81,7 @@ from cstar.applications.core import (
     register_application,
 )
 from cstar.applications.roms_marbl.outputs import (
+    CDR_OUTPUT_SUFFIX,
     TIMESTAMP_GLOB,
     TimestampedOutputFile,
 )
@@ -149,7 +150,7 @@ log = get_logger(__name__)
 class CdrOutputFile(TimestampedOutputFile):
     """Reference to a ROMS-MARBL CDR output file, `<base>_cdr.<timestamp>.nc`."""
 
-    SUFFIX: t.ClassVar[str] = "_cdr"
+    SUFFIX: t.ClassVar[str] = CDR_OUTPUT_SUFFIX
     """A unique suffix found in the name of CDR output files."""
     LABEL: t.ClassVar[str] = "CDR output"
 
@@ -666,9 +667,8 @@ class CdrMetricsRunner(BlueprintRunner[CdrMetricsBlueprint]):
         written = [metrics_path, figure_path]
 
         if len(ds_cdrs) == 1:
-            ((name, ds_cdr),) = ds_cdrs.items()
+            (ds_cdr,) = ds_cdrs.values()
             series = metric_series(ds_cdr)
-            series.attrs["cdr_domain"] = name
             save_figures = functools.partial(_save_figure, series, figure_path)
         else:
             upscaled = roms_tools.UpscaledCDR(domains=ds_cdrs)
@@ -679,7 +679,8 @@ class CdrMetricsRunner(BlueprintRunner[CdrMetricsBlueprint]):
                 _save_upscaled_figures, upscaled, figure_path, domains_path
             )
 
-        series.attrs["cdr_domains"] = ", ".join(
+        # UpscaledCDR's format, so single and nested files read the same
+        series.attrs["domains"] = ", ".join(
             f"{name}:{domain.source_role}" for name, domain in domains.items()
         )
         series.attrs["cdr_grid_files"] = ", ".join(
