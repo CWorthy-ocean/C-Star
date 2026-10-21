@@ -20,7 +20,7 @@ from cstar.base.utils import convert_to_cdf5
 from cstar.entrypoint.runner import BlueprintRunner
 from cstar.execution.file_system import JobFileSystemManager
 from cstar.execution.handler import ExecutionStatus
-from cstar.orchestration.manifest import product_paths, require_recorded_files
+from cstar.orchestration.manifest import recorded_files_in, require_recorded_files
 from cstar.orchestration.models import Blueprint
 
 APP_NAME: t.Final[str] = "upscaler"
@@ -103,6 +103,30 @@ class UpscalerBlueprint(Blueprint):
     ``nccopy -k cdf5`` subprocess. When False, the NETCDF4 file is written directly."""
 
 
+def _uscl_file(path: Path) -> Path:
+    """Accept a path named like a joined `_uscl` file.
+
+    Parameters
+    ----------
+    path : Path
+        The path to check.
+
+    Returns
+    -------
+    Path
+        The path.
+
+    Raises
+    ------
+    ValueError
+        If the name does not match `_USCL_GLOB`.
+    """
+    if not path.match(_USCL_GLOB):
+        msg = f"{path.name} is not named like a joined `_uscl` file"
+        raise ValueError(msg)
+    return path
+
+
 def _find_uscl_files(uscl_dir: Path) -> list[Path]:
     """Find the upscaling files of a directory.
 
@@ -125,14 +149,12 @@ def _find_uscl_files(uscl_dir: Path) -> list[Path]:
     CstarError
         If a `_uscl` file the record lists is missing.
     """
-    recorded = sorted(
-        path
-        for path in product_paths(uscl_dir.parent, ArtifactKind.upscaling)
-        if path.resolve().parent == uscl_dir.resolve() and path.match(_USCL_GLOB)
-    )
+    # resolved, so a linked directory reads the record of the step it links to
+    resolved = uscl_dir.resolve()
+    recorded = recorded_files_in(resolved, ArtifactKind.upscaling, _uscl_file)
     if recorded:
         # the glob would skip a missing file and upscale fluxes with a gap
-        require_recorded_files(uscl_dir.parent, recorded)
+        require_recorded_files(resolved.parent, recorded)
         return recorded
 
     log.debug("No recorded upscaling files in %s; searching the directory", uscl_dir)

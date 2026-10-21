@@ -2005,6 +2005,41 @@ def test_step_output_files_skips_recorded_names_that_are_not_restarts(
     assert source == parent.fsm.root_dir / STEP_RECORD_NAME
 
 
+def test_step_output_files_reads_only_records_in_the_output_directory(
+    tmp_path: Path,
+    bp_templates_dir: Path,
+    hello_world_bp_path: Path,
+) -> None:
+    """Verify a restart-named product the record lists outside the step's
+    `output` directory is left out, and that directory is searched instead.
+
+    Parameters
+    ----------
+    tmp_path : Path
+        Temporary directory for test outputs.
+    bp_templates_dir : Path
+        Fixture returning the path to the directory containing blueprint template files.
+    hello_world_bp_path : Path
+        Fixture returning the path to a hello-world blueprint file.
+    """
+    names = ["ic_from_parent_rst.20120115000000.nc"]
+    live_plan, _, parent_output = _plan_with_parent_restarts(
+        tmp_path, bp_templates_dir, hello_world_bp_path, names, {}
+    )
+    parent = live_plan["parent"]
+    elsewhere = parent.fsm.root_dir / "input_data" / "ic_rst.20120201000000.nc"
+    elsewhere.parent.mkdir(parents=True)
+    elsewhere.touch()
+    _write_record(parent, _listed(parent, ArtifactKind.initial_conditions, elsewhere))
+
+    files, source = step_output_files(
+        RestartFile, parent.fsm.root_dir, "parent", (ArtifactKind.initial_conditions,)
+    )
+
+    assert [file.path.name for file in files] == names
+    assert source == parent_output
+
+
 def test_step_output_files_searches_output_without_a_record(
     tmp_path: Path,
     bp_templates_dir: Path,
