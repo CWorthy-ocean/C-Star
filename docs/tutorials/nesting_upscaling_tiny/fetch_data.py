@@ -28,10 +28,10 @@ def main() -> int:
         from cstar.tests.integration_tests.data_registry import fetch
     except ImportError as exc:
         print(
-            "fetch_data.py needs the C-Star integration-test data registry, which "
-            "ships in the source tree but not in a wheel. Run the example from a "
-            "source checkout of C-Star (git clone, then `pip install -e .` into the "
-            f"environment). Import failed with: {exc}",
+            "fetch_data.py needs C-Star's integration-test data registry "
+            "(cstar.tests.integration_tests.data_registry). Run it with the Python "
+            "of the activated environment that C-Star is installed into (see "
+            f"'Before you start' in the tutorial). Import failed with: {exc}",
             file=sys.stderr,
         )
         return 1

@@ -1,7 +1,7 @@
 $schema: https://raw.githubusercontent.com/CWorthy-ocean/C-Star/refs/heads/main/docs/schemas/bp/forge/forge_schema.1.1.0.json
 name: nest-tiny-parent
-description: 'Tiny nesting example, parent: 24x24 cells over 400 km west of Scotland;
-  extracts boundary data for the child'
+description: 'Tiny nesting example, parent: 24x24 cells over 400 km north-west of
+  Scotland; extracts boundary data for the child'
 application: forge
 state: notset
 schema_version: 1.1.0

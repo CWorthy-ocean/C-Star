@@ -9,6 +9,9 @@
 #   forge_parent_up -------------------------|---------------------'   |
 #                                            '--> cdr_metrics <--------'
 #
+# The arrows show the main flow. nest_ic and parent_up also wait for parent (the restart
+# each of them reads), and child also waits for forge_child (its inputs).
+#
 #   parent       runs the parent over the whole window and writes the nesting
 #                extraction (child boundaries) and daily restarts
 #   nest_ic      interpolates the parent restart at the child's start onto the child grid
@@ -41,6 +44,9 @@
 # Where it runs: `compute_environment` names no launcher, so C-Star picks the one for the
 # machine: SLURM where there is a scheduler, local processes otherwise (a workstation).
 # Every step therefore carries both a `local` and a `slurm` entry in `compute_overrides`.
+# The `local` time limits are generous upper bounds, not estimates. A workstation run
+# starts the same number of MPI ranks as the tiling gives (np_x * np_y of each roms step:
+# up to 50 for full.vars), so it needs that many cores or a smaller tiling.
 # On a SLURM machine the account and queue come from your environment, as C-Star's HPC
 # docs (docs/hpc.rst) describe. `cstar workplan run` then submits all nine jobs, chained
 # with SLURM dependencies, and returns; it does not have to keep running. The SLURM
@@ -107,7 +113,7 @@ steps:
         end_date: "{{parent_end}}"
     compute_overrides:
       local:
-        max_walltime: "12:00:00"  # full.vars about 3.2 h on a workstation (about 30 s per window day)
+        max_walltime: "12:00:00"
       slurm:
         num_cpus: 32
         max_walltime: "06:00:00"  # full.vars estimate about 2 h
@@ -141,7 +147,7 @@ steps:
             - times: ["{{child_start}}", "{{cdr_end}}"]
     compute_overrides:
       local:
-        max_walltime: "04:00:00"  # full.vars about 0.7 h on a workstation
+        max_walltime: "04:00:00"
       slurm:
         num_cpus: 32
         max_walltime: "02:30:00"  # full.vars estimate about 0.8 h
@@ -165,7 +171,7 @@ steps:
         end_date: "{{child_end}}"
     compute_overrides:
       local:
-        max_walltime: "08:00:00"  # full.vars about 1.7 h on a workstation
+        max_walltime: "08:00:00"
       slurm:
         num_cpus: 32
         max_walltime: "03:00:00"  # full.vars estimate about 1 h
@@ -182,7 +188,7 @@ steps:
         end_date: "{{parent_end}}"
     compute_overrides:
       local:
-        max_walltime: "24:00:00"  # build 1.5 min + full.vars about 2.3 h on a workstation (23 s per day)
+        max_walltime: "24:00:00"
       slurm:
         num_cpus: 16
         max_walltime: "11:00:00"  # full.vars estimate about 3.6 h
@@ -225,7 +231,7 @@ steps:
         step: parent
     compute_overrides:
       local:
-        max_walltime: "24:00:00"  # build 1.5 min + full.vars about 0.9 h on a workstation (18 s per day)
+        max_walltime: "24:00:00"
       slurm:
         num_cpus: 50
         max_walltime: "08:30:00"  # full.vars estimate about 2.7 h
@@ -266,7 +272,7 @@ steps:
         timestamp: "{{child_start}}"
     compute_overrides:
       local:
-        max_walltime: "24:00:00"  # build 1.5 min + full.vars about 1.2 h on a workstation (23 s per day)
+        max_walltime: "24:00:00"
       slurm:
         num_cpus: 16
         max_walltime: "08:00:00"  # full.vars estimate about 2.6 h

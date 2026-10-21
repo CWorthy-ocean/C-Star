@@ -6,7 +6,10 @@ Nesting and upscaling on the California Current
 This page describes the same workflow as the :doc:`tiny nested tutorial
 <nesting_upscaling>` on a realistic case: a 16 km parent and a 4 km child in
 the California Current, with real forcing. It is too large for a laptop. It
-runs on a workstation or, with up to 50 MPI ranks per step, on an HPC cluster.
+runs on an HPC cluster or on a workstation. The tiling of ``full.vars`` (4 by
+4, 5 by 10 and 4 by 4) starts up to 50 MPI ranks in one step on either, so a
+workstation needs that many cores, or a smaller tiling with a matching
+``num_cpus`` (see "Running a shorter window").
 Read the tiny tutorial first: it explains nesting, ``continue-from``,
 upscaling and the metrics step, and this page does not repeat it.
 
@@ -26,6 +29,10 @@ The case
      forge_child  -> nest_ic ----------'      |                     ^   |
      forge_parent_up -------------------------|---------------------'   |
                                               '--> cdr_metrics <--------'
+
+  The arrows show the main flow. The workplan also makes ``nest_ic`` and
+  ``parent_up`` wait for ``parent`` (the restart each of them reads), and
+  ``child`` wait for ``forge_child`` (its inputs).
 
 The three forge blueprints use the bundled ``roms-marbl-0.11-default`` model
 (ucla-roms 0.11.0 with MARBL and ParallelIO) and write daily restarts.
@@ -92,8 +99,9 @@ From the root of the repository, with the environment active:
 
    cstar workplan run docs/tutorials/nesting_upscaling_ccs/workplan.yaml --varfile docs/tutorials/nesting_upscaling_ccs/full.vars
 
-``cstar workplan check`` validates the workplan with the same options. The run
-ID defaults to the workplan's name; give each window its own ``--run-id``,
+``cstar workplan check`` validates the workplan with the same
+``--var``/``--varfile`` options (``check`` has no ``--run-id``). The run ID
+defaults to the workplan's name; give each window its own ``--run-id``,
 because reusing one attaches to the earlier run. Follow a run with
 ``cstar run status <run-id>``.
 
@@ -121,8 +129,9 @@ can also edit the workplan, and edit a copy of ``full.vars``:
    cd ~/ccs-month
    cp full.vars month.vars
 
-Set these values in ``month.vars`` and leave the tiling and output variables as
-they are:
+This block is the whole of ``month.vars``, all twelve variables. Only the six
+date variables can differ from ``full.vars`` (``parent_start`` happens to be
+the same); the tiling and output variables keep their values:
 
 .. code-block:: text
 

@@ -75,11 +75,14 @@ Before you start
   <../installation>`). The example files and ``fetch_data.py`` live in the
   repository and are not part of the installed package. ROMS builds find
   NetCDF and MPI through the activated environment, so activate it in every
-  shell you run the workplan from. The environment file also installs GNU
-  coreutils, which C-Star uses to enforce the local time limits on macOS.
-- Network access for the first run. C-Star clones ROMS, MARBL and ParallelIO
-  and compiles ROMS, and roms-tools fetches some auxiliary files itself, such
-  as the ETOPO5 topography.
+  shell where you use the ``cstar`` commands, including ``cstar run status``.
+  The environment file also installs GNU coreutils, which C-Star needs to
+  enforce the local time limits on macOS; the ``cstar`` commands that read the
+  workplan, ``cstar run status`` among them, look for it too.
+- Network access on every run. For each ROMS step C-Star refreshes its cached
+  clones of ROMS, MARBL and ParallelIO (it clones them the first time) before
+  it compiles ROMS. Only the test data and the auxiliary files that roms-tools
+  fetches itself, such as the ETOPO5 topography, are downloaded just once.
 
 Run it
 ------
@@ -90,27 +93,31 @@ From the root of the repository, with the environment active:
 
    cstar workplan run docs/tutorials/nesting_upscaling_tiny/workplan.yaml --var example_data=$(python docs/tutorials/nesting_upscaling_tiny/fetch_data.py)
 
-``fetch_data.py`` downloads about 40 MB of pinned test data the first time and
+``fetch_data.py`` downloads about 44 MB of pinned test data the first time and
 prints the folder that holds it. The workplan takes that folder as its runtime
 variable ``example_data``. The script writes its progress to stderr and only
 the folder to stdout, so it is safe inside ``$(...)``.
 
-The example uses these files because they are small regional extracts that
-need no account: a GLORYS extract for the ocean state, an ERA5 extract for the
-atmosphere and a coarse UNIFIED biogeochemical climatology. They come from
-C-Star's integration-test data registry, which pins their version and
-checksums. Forge's own ocean source, GLORYS, needs a free Copernicus Marine
-login (see :ref:`forge-data-access-glorys`), and a real domain would use it.
-The three forge blueprints in this example carry placeholder source paths, and
-each forge step swaps in the real files through ``blueprint_overrides``.
+The example uses these files because they need no account and are small. The
+GLORYS file (the ocean state) and the ERA5 file (the atmosphere) are small
+regional extracts. The UNIFIED biogeochemical climatology is global, coarsened
+to 2 degrees, and is most of the 44 MB. The files come from C-Star's
+integration-test data registry, which pins their version and checksums.
+Forge's own ocean source, GLORYS, needs a free Copernicus Marine login (see
+:ref:`forge-data-access-glorys`), and a real domain would use it. The three
+forge blueprints in this example carry placeholder source paths, and each
+forge step swaps in the real files through ``blueprint_overrides``.
 
-To follow the run, use ``cstar run status nest-tiny``. The run ID defaults to
-the workplan's name, ``nest-tiny``. Each step's files are under
+``cstar workplan run`` returns once it has scheduled the steps. They run
+detached, each one waiting for the steps it depends on, so follow the run with
+``cstar run status nest-tiny``. The run ID defaults to the workplan's name,
+``nest-tiny``. Each step's files are under
 ``$CSTAR_DATA_HOME/workplan_runs/nest-tiny/tasks/<step>/``, which is
 ``~/cstar/workplan_runs/nest-tiny/`` by default, and ``cstar run path nest-tiny
 <step>`` prints a step's directory. To check the workplan without running it,
-use ``cstar workplan check`` with the same options. Running the same command
-again attaches to the existing run; give a new ``--run-id`` to start over.
+use ``cstar workplan check`` with the same ``--var``/``--varfile`` options
+(``check`` has no ``--run-id``). Running the ``run`` command again attaches to
+the existing run; give a new ``--run-id`` to start over.
 
 What each step does
 -------------------
@@ -217,14 +224,14 @@ The two domains are combined in a specific way:
   independent views of the same perturbation, so a residual that is small next
   to the uptake is the sign that the domains were combined consistently. The
   two methods can disagree for a single domain: DIC that the child took up and
-  then exported shows up as a DIC difference in ``parent_up``. They agree on
-  the sum.
+  then exported shows up as a DIC difference in ``parent_up``. The two agree
+  to within a few percent on the sum.
 
 ``cdr_metrics.nc`` also holds each domain's own uptake, such as
 ``child_carbon_uptake_from_flux`` and ``parent_up_carbon_uptake_from_flux``.
 
 At the end of the run (2012-01-03 06:00), a reference run with ucla-roms 0.11.0
-gave these values:
+gave these values (rounded):
 
 .. list-table::
    :header-rows: 1

@@ -2,7 +2,7 @@
 #
 # Tiny 2-level nesting (downscaling) + upscaling CDR example, small enough for a laptop.
 #
-#   forge_parent     forge        parent grid, 24x24 cells over 400 km west of Scotland;
+#   forge_parent     forge        parent grid, 24x24 cells over 400 km north-west of Scotland;
 #                                 the parent also extracts hourly boundary data for the child
 #   forge_child      forge        child grid, 24x24 cells over 100 km, nested in the parent;
 #                                 one ALK release near its east boundary
@@ -26,8 +26,7 @@
 # (ucla-roms 0.11.0, MARBL, ParallelIO) and carry placeholder source paths, so forge does
 # not try to download anything; each forge step swaps in the real files through
 # blueprint_overrides.
-# Run (the data directory comes from fetch_data.py; run from the repository root, or
-# anywhere: the blueprint paths are relative to this file):
+# Run from the repository root (the data directory comes from fetch_data.py):
 #   cstar workplan check docs/tutorials/nesting_upscaling_tiny/workplan.yaml --var example_data=$(python docs/tutorials/nesting_upscaling_tiny/fetch_data.py)
 #   cstar workplan run   docs/tutorials/nesting_upscaling_tiny/workplan.yaml --var example_data=$(python docs/tutorials/nesting_upscaling_tiny/fetch_data.py) --run-id nest-tiny
 #   cstar run status nest-tiny
@@ -112,7 +111,7 @@ steps:
       - forge_parent
     compute_overrides:
       local:
-        max_walltime: "01:00:00"   # clone + compile ROMS, MARBL and PIO dominates
+        max_walltime: "01:00:00"   # generous, for a slow first clone and compile (3 min in the reference run)
 
   - name: nest_ic
     application: nest_ic
@@ -144,7 +143,7 @@ steps:
         step: parent               # child_bry.*.nc: the open-boundary forcing
     compute_overrides:
       local:
-        max_walltime: "01:00:00"   # a second ROMS build (nesting off, CDR on, UPSCALING)
+        max_walltime: "01:00:00"   # a second ROMS build (CDR_FORCING and UPSCALING defined, unlike the parent's)
 
   - name: upscale
     application: upscaler
