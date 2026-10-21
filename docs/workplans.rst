@@ -560,10 +560,12 @@ Execution
     ``--resume`` also accepts the workplan path the run was started from in
     place of ``--run-id``. The :term:`run ID` is derived from the workplan
     ``name`` exactly as on the first run, and the file is used only to identify
-    that run: it must be unchanged since (edits, and blueprint schema
-    migrations applied on load, both count), otherwise the command refuses and
-    points you at ``--run-id``. ``--var`` and ``--varfile`` cannot be combined
-    with ``--resume``; the run continues with the variables it was started with.
+    that run: it must be unchanged since the latest attempt that read it, whose
+    :ref:`carried copy <workplan_carried_inputs>` it is compared with (edits,
+    and blueprint schema migrations applied on load, both count), otherwise the
+    command refuses and points you at ``--run-id``. ``--var`` and ``--varfile``
+    cannot be combined with ``--resume``; the run continues with the variables
+    it was started with.
 
     .. code-block:: console
 
@@ -596,7 +598,7 @@ Running a workplan under a :term:`run ID` that already exists re-enters that run
 - A step that is still in progress is adopted when the launcher that started it matches the current launcher; otherwise the run is refused unless that step is clobbered.
 - A workplan with the same ``name`` as an earlier run but different content than the workplan that run started from is refused, because the two would share one run directory; the same workplan arriving by another path (a remote file, a moved checkout) is not. Pass ``--run-id <other-id>`` to run it separately, or rename the workplan.
 - Each re-entry appends an attempt to the :ref:`run manifest <workplan_run_manifest>`, which records when it started, on which system, with which package versions, and which steps it clobbered or resumed.
-- Each attempt keeps the files of the attempts before it: the original workplan, the transformed workplan and the runtime variables saved in the run directory (also when a later attempt saves none) are rotated to ``<stem>_original.bak.1``, ``<stem>_transformed.yaml.1``, ``<stem>.vars.1`` and so on, where ``<stem>`` is the workplan file's name without its extension, and nothing reads the rotated copies.
+- Each attempt that reads the workplan file leaves its own directory of :ref:`carried inputs <workplan_carried_inputs>` (the workplan as given, its variables, the plan it prepared and each step's blueprint) under ``attempts/`` in the run directory, so earlier attempts are never overwritten. Runs scheduled by earlier releases keep their ``<stem>_original.bak``, ``<stem>.vars`` and rotated ``.1``, ``.2`` copies; new attempts no longer write them.
 - Step directories and state files that no step of the workplan accounts for any more (for example after a step was renamed) are listed in a warning and left in place; remove them by hand once you have confirmed they are not needed.
 - The transformed workplan saved in the run directory (``<stem>_transformed.yaml``) keeps the workplan ``name`` and is the plan the run executes. Passing it to ``cstar workplan run`` re-enters its run exactly as ``--run-id <id>`` does; a copy of it anywhere else is refused, because only the plan a run's record points at can be re-entered.
 
@@ -721,11 +723,11 @@ Every run records itself in two kinds of file.
 
 - an ``id``, minted once when the run directory is first scheduled, with the :term:`run ID`, the workplan name, whether the run is a ``workplan`` or a ``blueprint``, and the system it was first scheduled on;
 - the workplan's name, content hash and path;
-- one :term:`attempt <Attempt>` for each time the run was scheduled (``cstar workplan run``, a re-entry with ``--run-id``, ``--resume`` or ``--clobber``), with its start time, system, package versions (``cstar-ocean`` and ``roms-tools``), the steps it clobbered or resumed, its status and when it finished;
-- one entry per step: its name, application, working directory relative to the run directory, a definition hash of what the step computes, its blueprint, its status as of the time the manifest was last refreshed, and its step record once it has one;
+- one :term:`attempt <Attempt>` for each time the run was scheduled (``cstar workplan run``, a re-entry with ``--run-id``, ``--resume`` or ``--clobber``), with its start time, system, package versions (``cstar-ocean`` and ``roms-tools``), the steps it clobbered or resumed, its status and when it finished, and, when it carried inputs, their directory (``directory``) and a sha256 digest of each file (``carried``);
+- one entry per step: its name, application, working directory relative to the run directory, a definition hash of what the step computes, its blueprint, the copy of its blueprint file the latest attempt carried (``blueprint_file``), its status as of the time the manifest was last refreshed, and its step record once it has one;
 - what the run depends on outside itself: referenced runs, source data locations, codebases with their commit or branch, and the catalog entries and producer blueprints named in the blueprints' provenance.
 
-``cstar-step.yaml`` is the :term:`step record`, in each step's working directory (``tasks/<step>/``). The step process writes it when it shuts down: the outcome (``completed``, ``failed``, ``cancelled`` or ``unsubmitted``), start and finish times, the system, package versions, the :term:`products <Product>` the step left and any errors. The products are the files a user keeps, each with its size in bytes: for a ROMS step, its joined outputs by stream, its namelist, cppdefs and MARBL configuration, its executable and its log; for a forge step, its generated inputs, published blueprint, rendered configuration and log. The size ``cstar run ls`` shows for each step (``step_sizes``) is a separate measurement of the whole directory, not derived from the products.
+``cstar-step.yaml`` is the :term:`step record`, in each step's working directory (``tasks/<step>/``). The step process writes it when it shuts down: the outcome (``completed``, ``failed``, ``cancelled`` or ``unsubmitted``), start and finish times, the system, package versions, the blueprint file the step ran relative to its working directory (``blueprint_file``, for example ``work/<name>.ovrd.yaml`` once its directives were applied), the :term:`products <Product>` the step left and any errors. The products are the files a user keeps, each with its size in bytes: for a ROMS step, its joined outputs by stream, its namelist, cppdefs and MARBL configuration, its executable and its log; for a forge step, its generated inputs, published blueprint, rendered configuration and log. The size ``cstar run ls`` shows for each step (``step_sizes``) is a separate measurement of the whole directory, not derived from the products.
 
 The scheduling command writes the manifest, under a lock, so concurrent commands do not overwrite each other. The steps write their own records and never touch the manifest. ``cstar run status``, ``cstar run show <run-id>`` and ``cstar workplan run --resume`` refresh the manifest: they fold the step statuses and records into it, and once every step is terminal they set ``finished_at`` on the latest attempt. That field is the completion marker. A run that finishes while nobody is watching is closed by the next ``status`` or ``show``.
 
@@ -734,6 +736,22 @@ Because the manifest records working directories relative to the run directory, 
 Runs scheduled with an earlier C-Star release have no manifest until they are re-entered: ``cstar workplan run --run-id <my-unique-id>`` records one, and steps that are done are reused.
 
 The files are described by published schemas, listed in the :doc:`schema reference <schemas/index>`.
+
+.. _workplan_carried_inputs:
+
+Carried inputs
+""""""""""""""
+
+Each attempt that reads the workplan file (``cstar workplan run <workplan>``, also when it re-enters a run) leaves what it was asked in the run directory, under ``attempts/<YYYYMMDDTHHMMSS>/``, named after the attempt's start in UTC (``-2``, ``-3`` and so on when two attempts start in the same second):
+
+- ``workplan.yaml``: the workplan file exactly as given;
+- ``workplan.vars``: the runtime variables, when any were given;
+- ``workplan_transformed.yaml``: a copy of the plan the attempt prepared;
+- ``blueprints/<step>/<file>``: each step's blueprint file, downloaded first when it is remote. A deferred or inline blueprint has no file at that point and is not carried; an inline one is written into its step's directory.
+
+The run manifest records the directory on the attempt with a sha256 digest of each file, and points each step at the copy of its blueprint (``blueprint_file``). A re-entry by ``--run-id <my-unique-id>`` alone, or with ``--resume``, replays the recorded plan and carries nothing. The plan a run executes stays in the run directory as ``<stem>_transformed.yaml``, where ``<stem>`` is the workplan file's name without its extension; each attempt overwrites it.
+
+Only the latest attempt that carried inputs is ever read: ``--resume <workplan>``, and a re-run under a run ID derived from the workplan ``name``, compare the workplan you give with its ``workplan.yaml``. Older attempt directories are a record and can be deleted by hand; ``cstar run check`` lists a missing one for information only. If the latest one is gone too, ``--resume <workplan>`` warns and resumes the run as recorded, while a re-run under a derived run ID is refused until you pass ``--run-id``.
 
 
 Listing Runs
@@ -820,8 +838,9 @@ The command reports, kind by kind, with one line per finding:
 - symlinks with an absolute target inside the run, and symlinks whose target does not exist.
 - steps of the transformed workplan with no ``tasks/<slug>`` directory. A step that has not started has none yet.
 - products that are missing from the run, or whose size changed, compared with the step records folded into the manifest. A log is reported only when it shrank, since a step's own log is still written after its record is taken. Pass ``--verify`` to compare the content too, where a sha256 is recorded (none is yet).
+- :ref:`carried inputs <workplan_carried_inputs>` whose content differs from the digest the manifest recorded when the attempt carried them. Only the files the manifest lists are read, always: they are small.
 
-Symlinks with a target outside the run (absolute, or relative and climbing out of it), step directories that no step accounts for, sentinel files of the run that no step accounts for (found by run ID, so not for a bare path), steps that are done without a step record, and a latest attempt that has not finished are listed for information and do not fail the check. Nothing is ever deleted.
+Symlinks with a target outside the run (absolute, or relative and climbing out of it), step directories that no step accounts for, sentinel files of the run that no step accounts for (found by run ID, so not for a bare path), steps that are done without a step record, a latest attempt that has not finished, and an attempt directory or carried file that is missing (older attempts may be deleted by hand) are listed for information and do not fail the check. Nothing is ever deleted.
 
 For a run ID the manifest is refreshed first, as ``cstar run show`` does; pass ``--no-refresh`` to read it as last recorded.
 

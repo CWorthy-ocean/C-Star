@@ -1,10 +1,10 @@
 """Tier 2: the run manifest and step records a run leaves behind.
 
 A two-step ``hello_world`` workplan runs to completion through the real CLI, so no ROMS
-is compiled and the run takes seconds. The tests read ``cstar-run.yaml`` and each
-``cstar-step.yaml`` the way a user would, with ``cstar run status`` and
-``cstar run show``, and check a standalone ``cstar blueprint run`` leaves both files
-in its working directory.
+is compiled and the run takes seconds. The tests read ``cstar-run.yaml``, each
+``cstar-step.yaml`` and the inputs each attempt carried under ``attempts/`` the way
+a user would, with ``cstar run status`` and ``cstar run show``, and check a
+standalone ``cstar blueprint run`` leaves both files in its working directory.
 
 The tests share one run and are ordered: each builds on the state the previous one
 left in the run directory.
@@ -22,13 +22,20 @@ import yaml
 
 from cstar.base.utils import slugify
 from cstar.orchestration.manifest import (
+    ATTEMPT_TRANSFORMED_NAME,
+    ATTEMPT_WORKPLAN_NAME,
+    ATTEMPTS_DIR_NAME,
     RUN_MANIFEST_NAME,
     STEP_RECORD_NAME,
+    Attempt,
     AttemptStatus,
     RunManifest,
+    carried_digest,
     read_run_manifest,
     read_step_record,
 )
+from cstar.orchestration.models import Workplan
+from cstar.orchestration.serialization import deserialize
 from cstar.tests.integration_tests.cli_harness import (
     DONE,
     kill_run,
@@ -136,8 +143,44 @@ def test_scheduling_writes_the_manifest(manifest_run: ManifestRun) -> None:
         assert entry.application == "hello_world"
 
 
+def _assert_carried(run_root: Path, workplan: Path, attempt: Attempt) -> None:
+    """The attempt's directory holds the workplan as given and both blueprints, as
+    the digests it recorded say.
+    """
+    directory = run_root / attempt.directory
+    assert directory.parent == run_root / ATTEMPTS_DIR_NAME
+    assert (directory / ATTEMPT_WORKPLAN_NAME).read_bytes() == workplan.read_bytes()
+    assert (directory / ATTEMPT_TRANSFORMED_NAME).is_file()
+    assert attempt.carried == {
+        relative: carried_digest(directory / relative) for relative in attempt.carried
+    }
+    blueprints = {
+        relative for relative in attempt.carried if relative.startswith("blueprints/")
+    }
+    assert len(blueprints) == len(SHAPE)
+
+
+def test_scheduling_carries_the_inputs(manifest_run: ManifestRun) -> None:
+    """The attempt carries the workplan and each step's blueprint into its own
+    directory, and each step points at its copy.
+    """
+    manifest = manifest_run.scheduled
+    (attempt,) = manifest.attempts
+    _assert_carried(manifest_run.run_root, manifest_run.workplan, attempt)
+
+    authored = deserialize(manifest_run.workplan, Workplan)
+    for step in authored.steps:
+        entry = manifest.step(step.name)
+        assert entry is not None
+        assert entry.blueprint_file.startswith(f"{attempt.directory}/blueprints/")
+        copy = manifest_run.run_root / entry.blueprint_file
+        assert copy.read_bytes() == Path(str(step.blueprint_path)).read_bytes()
+
+
 def test_each_step_writes_its_record(manifest_run: ManifestRun) -> None:
-    """Every step process leaves a ``cstar-step.yaml`` in its working directory."""
+    """Every step process leaves a ``cstar-step.yaml`` in its working directory,
+    naming the blueprint file it ran there.
+    """
     for step in SHAPE:
         root = manifest_run.step_root(step)
         assert (root / STEP_RECORD_NAME).is_file(), run_log_tails(
@@ -148,6 +191,8 @@ def test_each_step_writes_its_record(manifest_run: ManifestRun) -> None:
         assert record.outcome == "completed"
         assert record.run_id == RUN_ID
         assert record.application == "hello_world"
+        assert record.blueprint_file
+        assert (root / record.blueprint_file).is_file()
 
 
 def test_each_record_names_its_step(manifest_run: ManifestRun) -> None:
@@ -221,6 +266,16 @@ def test_reentry_appends_an_attempt(manifest_run: ManifestRun) -> None:
     assert reentered.id == before.id
     assert len(reentered.attempts) == 2
 
+    # each attempt that read the workplan carried its own inputs
+    first, second = reentered.attempts
+    assert first.directory != second.directory
+    for attempt in (first, second):
+        _assert_carried(manifest_run.run_root, manifest_run.workplan, attempt)
+    for step in SHAPE:
+        entry = reentered.step(step)
+        assert entry is not None
+        assert entry.blueprint_file.startswith(f"{second.directory}/")
+
     proc = run_cstar(manifest_run.env, "run", "status", RUN_ID)
     assert proc.returncode == 0, _output(proc)
 
@@ -241,6 +296,14 @@ def test_show_reads_a_copied_run(manifest_run: ManifestRun, tmp_path: Path) -> N
     assert shown["id"] == manifest_run.manifest().id
     assert {entry["name"] for entry in shown["steps"]} == set(SHAPE)
 
+    # the copy carries every attempt's inputs with it
+    directories = [attempt["directory"] for attempt in shown["attempts"]]
+    assert len(directories) == 2
+    assert all(
+        (copy / directory / ATTEMPT_WORKPLAN_NAME).is_file()
+        for directory in directories
+    )
+
     proc = run_cstar(manifest_run.env, "run", "show", str(copy))
     assert proc.returncode == 0, _output(proc)
 
@@ -250,6 +313,7 @@ def test_show_reads_a_copied_run(manifest_run: ManifestRun, tmp_path: Path) -> N
     assert not any(heading in proc.stdout for heading in PRODUCT_HEADINGS), _output(
         proc
     )
+    assert "Carried inputs" not in proc.stdout, _output(proc)
 
 
 def test_standalone_blueprint_run_leaves_both_files(

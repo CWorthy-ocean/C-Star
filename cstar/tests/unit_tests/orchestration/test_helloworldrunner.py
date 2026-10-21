@@ -547,6 +547,50 @@ async def test_runner_writes_step_record(
 
 
 @pytest.mark.asyncio
+async def test_runner_records_the_blueprint_file_it_ran(tmp_path: Path) -> None:
+    """Verify the record names the blueprint the runner loaded relative to the
+    step root when it lies there, as a file written by a step's directives does,
+    and names none when it lies elsewhere.
+    """
+    step_root = tmp_path / "step"
+    inside = step_root / "work" / "hello.ovrd.yaml"
+    outside = tmp_path / "hello.yaml"
+    inside.parent.mkdir(parents=True)
+    for path in (inside, outside):
+        blueprint = HelloWorldBlueprint(
+            name="hello",
+            description="says hello",
+            target="world",
+            working_dir=step_root,
+        )
+        assert serialize(path, blueprint)
+
+    for path, expected in ((inside, "work/hello.ovrd.yaml"), (outside, "")):
+        runner = _hw_runner(path)
+        await runner.execute()
+
+        record = read_step_record(step_root)
+        assert record is not None
+        assert record.blueprint_file == expected
+
+
+def test_runner_records_no_blueprint_file_for_a_remote_blueprint(
+    hello_world_bp_path: Path,
+) -> None:
+    """Verify a blueprint fetched from a URL is not recorded as a file."""
+    runner = _hw_runner(hello_world_bp_path)
+    root = runner.blueprint.effective_working_dir
+
+    with mock.patch.object(
+        type(runner),
+        "blueprint_uri",
+        new_callable=mock.PropertyMock,
+        return_value="https://example.org/blueprints/hello.yaml",
+    ):
+        assert runner._blueprint_file(root) == ""
+
+
+@pytest.mark.asyncio
 async def test_runner_records_the_workplan_step_name(
     hello_world_bp_path: Path,
 ) -> None:

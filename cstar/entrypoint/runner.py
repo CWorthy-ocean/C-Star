@@ -1,6 +1,8 @@
 import argparse
 import os
 import typing as t
+from pathlib import Path
+from urllib.parse import urlsplit
 
 from cstar.applications.core import (
     HasApplication,
@@ -130,6 +132,28 @@ class BlueprintRunner(Service, XRunner[TBlueprint]):
             msg = f"Simulation ended with status: {self.state.status}."
             self.log.warning(msg)
 
+    def _blueprint_file(self, root: Path) -> str:
+        """Locate the blueprint this run loaded within the step root.
+
+        Parameters
+        ----------
+        root : Path
+            The step root, the blueprint's effective working directory.
+
+        Returns
+        -------
+        str
+            The POSIX path of the blueprint relative to `root`; empty for a
+            remote blueprint or one outside `root`.
+        """
+        uri = self.blueprint_uri.strip()
+        if not uri or urlsplit(uri).scheme:
+            return ""
+
+        path = Path(uri).expanduser().resolve()
+        root = root.resolve()
+        return path.relative_to(root).as_posix() if path.is_relative_to(root) else ""
+
     def _write_step_record(self) -> None:
         """Record what this step did in its working directory, with the products its
         application declares merged with those reported while it ran.
@@ -155,6 +179,7 @@ class BlueprintRunner(Service, XRunner[TBlueprint]):
                 application=bp.application,
                 blueprint=BlueprintIdentity.of(bp),
                 blueprint_schema_version=bp.schema_version,
+                blueprint_file=self._blueprint_file(root),
                 outcome=str(self.state.status),
                 start_at=self._started_at,
                 finished_at=utc_now(),

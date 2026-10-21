@@ -1,7 +1,8 @@
 """Tests for the run manifest and step record."""
 
+import hashlib
 import typing as t
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime, timedelta, timezone
 from pathlib import Path
 
 import pytest
@@ -11,11 +12,14 @@ from cstar.applications.hello_world import HelloWorldBlueprint
 from cstar.base.exceptions import CstarError, CstarExpectationFailed
 from cstar.base.utils import slugify
 from cstar.orchestration.manifest import (
+    ATTEMPT_DIR_FORMAT,
+    ATTEMPTS_DIR_NAME,
     MANIFEST_LOCK_NAME,
     RUN_MANIFEST_NAME,
     STEP_RECORD_NAME,
     Attempt,
     AttemptStatus,
+    CarriedInputs,
     CodebaseRef,
     ExternalDependencies,
     ExternalRun,
@@ -27,12 +31,15 @@ from cstar.orchestration.manifest import (
     StepRecord,
     WorkplanIdentity,
     _now,
+    carried_digest,
     collect_dependencies,
+    create_attempt_dir,
     describe_steps,
     ensure_run_manifest,
     expand_artifacts,
     finalize_standalone_run,
     fold_step_records,
+    latest_attempt_dir,
     manifest_lock,
     merge_products,
     new_attempt,
@@ -170,10 +177,53 @@ class TestRoundTrip:
         assert read_run_manifest(tmp_path) is None
         assert read_step_record(tmp_path) is None
 
+    def test_documents_carry_schema_1_1_0(self, tmp_path: Path) -> None:
+        write_run_manifest(tmp_path, _manifest("one"))
+        write_step_record(tmp_path, _record())
+
+        assert "schema_version: 1.1.0" in (tmp_path / RUN_MANIFEST_NAME).read_text()
+        assert "schema_version: 1.1.0" in (tmp_path / STEP_RECORD_NAME).read_text()
+
+    def test_a_1_0_0_manifest_and_record_still_load(self, tmp_path: Path) -> None:
+        """The carried-input fields are additive: older files read with defaults."""
+        write_run_manifest(tmp_path, _manifest("one"))
+        write_step_record(tmp_path, _record())
+        for name in (RUN_MANIFEST_NAME, STEP_RECORD_NAME):
+            path = tmp_path / name
+            path.write_text(path.read_text().replace("1.1.0", "1.0.0", 1))
+
+        manifest = read_run_manifest(tmp_path)
+        record = read_step_record(tmp_path)
+
+        assert manifest is not None
+        assert record is not None
+        assert manifest.schema_version == "1.0.0"
+        assert (manifest.attempts[0].directory, manifest.attempts[0].carried) == (
+            "",
+            {},
+        )
+        assert manifest.steps[0].blueprint_file == ""
+        assert record.blueprint_file == ""
+
+    def test_carried_inputs_round_trip(self, tmp_path: Path) -> None:
+        manifest = _manifest("one")
+        manifest.attempts[0].directory = "attempts/20261015T120000"
+        manifest.attempts[0].carried = {"workplan.yaml": "sha256:ab"}
+        manifest.steps[
+            0
+        ].blueprint_file = "attempts/20261015T120000/blueprints/one/b.yaml"
+        write_run_manifest(tmp_path, manifest)
+        write_step_record(tmp_path, _record(blueprint_file="work/b.ovrd.yaml"))
+
+        assert read_run_manifest(tmp_path) == manifest
+        record = read_step_record(tmp_path)
+        assert record is not None
+        assert record.blueprint_file == "work/b.ovrd.yaml"
+
     def test_newer_schema_refused(self, tmp_path: Path) -> None:
         write_run_manifest(tmp_path, _manifest("one"))
         path = tmp_path / RUN_MANIFEST_NAME
-        path.write_text(path.read_text().replace("1.0.0", "1.10.0", 1))
+        path.write_text(path.read_text().replace("1.1.0", "1.10.0", 1))
 
         with pytest.raises(CstarSchemaTooNewError, match="run manifest schema 1.10.0"):
             read_run_manifest(tmp_path)
@@ -181,7 +231,7 @@ class TestRoundTrip:
     def test_newer_step_record_refused(self, tmp_path: Path) -> None:
         write_step_record(tmp_path, _record())
         path = tmp_path / STEP_RECORD_NAME
-        path.write_text(path.read_text().replace("1.0.0", "2.0.0", 1))
+        path.write_text(path.read_text().replace("1.1.0", "2.0.0", 1))
 
         with pytest.raises(CstarSchemaTooNewError, match="step record"):
             read_step_record(tmp_path)
@@ -391,6 +441,7 @@ class TestEnsureRunManifest:
             attempt=kwargs.pop("attempt", Attempt(start_at=NOW, system="anvil")),
             steps=steps,
             runs=kwargs.pop("runs", {}),
+            blueprint_files=kwargs.pop("blueprint_files", None),
         )
 
     def test_mints_once_and_appends_attempts(self, tmp_path: Path) -> None:
@@ -468,6 +519,78 @@ class TestEnsureRunManifest:
             ("Done", False),
         ]
 
+    def test_blueprint_files_repoint_every_listed_step(self, tmp_path: Path) -> None:
+        """Each preparing attempt points the steps at its own copies, and a step
+        it carried nothing for is cleared.
+        """
+        steps: dict[str, tuple[str, str, StepFacts | None]] = {
+            n: ("hello_world", f"tasks/{n}", None) for n in ("one", "two")
+        }
+        first = self._ensure(
+            tmp_path,
+            steps,
+            blueprint_files={"one": "attempts/a/blueprints/one/b.yaml", "two": "x"},
+        )
+        assert [s.blueprint_file for s in first.steps] == [
+            "attempts/a/blueprints/one/b.yaml",
+            "x",
+        ]
+
+        second = self._ensure(
+            tmp_path,
+            steps,
+            blueprint_files={"one": "attempts/b/blueprints/one/b.yaml"},
+        )
+
+        assert [s.blueprint_file for s in second.steps] == [
+            "attempts/b/blueprints/one/b.yaml",
+            "",
+        ]
+
+    def test_blueprint_files_never_name_a_step_outside_the_attempt(
+        self, tmp_path: Path
+    ) -> None:
+        """A pre-run prunes steps; a pointer for a step not scheduled is ignored."""
+        steps: dict[str, tuple[str, str, StepFacts | None]] = {
+            "one": ("hello_world", "tasks/one", None)
+        }
+
+        manifest = self._ensure(
+            tmp_path, steps, blueprint_files={"one": "p", "pruned": "q"}
+        )
+
+        assert [(s.name, s.blueprint_file) for s in manifest.steps] == [("one", "p")]
+
+    def test_no_blueprint_files_leave_the_pointers_as_recorded(
+        self, tmp_path: Path
+    ) -> None:
+        """A re-entry replaying the recorded plan carries nothing."""
+        steps: dict[str, tuple[str, str, StepFacts | None]] = {
+            "one": ("hello_world", "tasks/one", None)
+        }
+        self._ensure(tmp_path, steps, blueprint_files={"one": "attempts/a/b.yaml"})
+
+        reentered = self._ensure(tmp_path, steps)
+
+        assert reentered.steps[0].blueprint_file == "attempts/a/b.yaml"
+        assert len(reentered.attempts) == 2
+
+    def test_a_pointer_survives_facts_and_a_clobber(self, tmp_path: Path) -> None:
+        steps: dict[str, tuple[str, str, StepFacts | None]] = {
+            "one": (
+                "hello_world",
+                "tasks/one",
+                StepFacts("h", None, ExternalDependencies()),
+            )
+        }
+        self._ensure(tmp_path, steps, blueprint_files={"one": "attempts/a/b.yaml"})
+
+        updated = self._ensure(
+            tmp_path, steps, attempt=Attempt(start_at=NOW, clobbered=["one"])
+        )
+
+        assert updated.steps[0].blueprint_file == "attempts/a/b.yaml"
+
     def test_merges_external_without_duplicates(self, tmp_path: Path) -> None:
         facts = StepFacts(
             "h",
@@ -515,6 +638,98 @@ def test_new_attempt(hello_world_bp_path: Path) -> None:
     assert attempt.status == AttemptStatus.scheduled
     assert attempt.finished_at is None
     assert attempt.pre_run is False
+    assert (attempt.directory, attempt.carried) == ("", {})
+
+
+def test_new_attempt_with_carried_inputs(hello_world_bp_path: Path) -> None:
+    plan = _workplan(_step(hello_world_bp_path.as_posix()))
+    carried = CarriedInputs(
+        start_at=NOW - timedelta(days=1),
+        directory="attempts/20261014T120000",
+        carried={"workplan.yaml": "sha256:ab"},
+        blueprint_files={"one": "attempts/20261014T120000/blueprints/one/b.yaml"},
+    )
+
+    attempt = new_attempt(plan, workplan_hash="wh", carried=carried)
+
+    assert attempt.start_at == NOW - timedelta(days=1)
+    assert attempt.directory == "attempts/20261014T120000"
+    assert attempt.carried == {"workplan.yaml": "sha256:ab"}
+    assert attempt.carried is not carried.carried
+
+
+class TestCreateAttemptDir:
+    def test_named_after_the_utc_start(self, tmp_path: Path) -> None:
+        created = create_attempt_dir(tmp_path, NOW)
+
+        assert created == tmp_path / ATTEMPTS_DIR_NAME / "20261015T120000"
+        assert created.is_dir()
+        assert NOW.strftime(ATTEMPT_DIR_FORMAT) == created.name
+
+    def test_a_zoned_start_is_named_in_utc(self, tmp_path: Path) -> None:
+        zoned = datetime(2026, 10, 15, 23, 30, 5, tzinfo=timezone(timedelta(hours=-5)))
+
+        created = create_attempt_dir(tmp_path, zoned)
+
+        assert created.name == "20261016T043005"
+
+    def test_the_same_second_takes_a_numeric_suffix(self, tmp_path: Path) -> None:
+        names = [create_attempt_dir(tmp_path, NOW).name for _ in range(3)]
+
+        assert names == ["20261015T120000", "20261015T120000-2", "20261015T120000-3"]
+
+    def test_a_later_second_is_a_new_name(self, tmp_path: Path) -> None:
+        create_attempt_dir(tmp_path, NOW)
+
+        later = create_attempt_dir(tmp_path, NOW + timedelta(seconds=1))
+
+        assert later.name == "20261015T120001"
+
+    def test_a_deleted_directory_frees_its_name(self, tmp_path: Path) -> None:
+        first = create_attempt_dir(tmp_path, NOW)
+        first.rmdir()
+
+        assert create_attempt_dir(tmp_path, NOW) == first
+
+
+def test_carried_digest_is_the_sha256_of_the_bytes(tmp_path: Path) -> None:
+    path = tmp_path / "workplan.yaml"
+    path.write_bytes(b"name: plan  # a comment\n")
+
+    assert carried_digest(path) == (
+        "sha256:" + hashlib.sha256(b"name: plan  # a comment\n").hexdigest()
+    )
+
+
+class TestLatestAttemptDir:
+    def _with(self, *directories: str) -> RunManifest:
+        manifest = _manifest("one")
+        manifest.attempts = [
+            Attempt(start_at=NOW, directory=directory) for directory in directories
+        ]
+        return manifest
+
+    def test_the_last_attempt_with_a_directory(self, tmp_path: Path) -> None:
+        manifest = self._with("attempts/a", "attempts/b")
+
+        assert latest_attempt_dir(manifest, tmp_path) == tmp_path / "attempts/b"
+
+    def test_a_re_entry_does_not_hide_the_preparing_attempt(
+        self, tmp_path: Path
+    ) -> None:
+        manifest = self._with("attempts/a", "", "")
+
+        assert latest_attempt_dir(manifest, tmp_path) == tmp_path / "attempts/a"
+
+    def test_none_when_no_attempt_carried_inputs(self, tmp_path: Path) -> None:
+        assert latest_attempt_dir(self._with("", ""), tmp_path) is None
+        assert latest_attempt_dir(self._with(), tmp_path) is None
+
+    def test_existence_is_not_checked(self, tmp_path: Path) -> None:
+        directory = latest_attempt_dir(self._with("attempts/gone"), tmp_path)
+
+        assert directory is not None
+        assert not directory.exists()
 
 
 class TestFoldStepRecords:

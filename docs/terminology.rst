@@ -159,7 +159,10 @@ Definitions
       One scheduling of a workplan into a run: ``cstar workplan run``, or a
       re-entry with ``--run-id``, ``--resume`` or ``--clobber``. The run
       manifest lists them oldest first; an attempt's ``finished_at`` is set
-      once every step is terminal. See :doc:`workplans`.
+      once every step is terminal. An attempt that reads the workplan file
+      carries its inputs -- the workplan as given, its variables, the plan it
+      prepared and each step's blueprint -- into ``attempts/<start time>/`` in
+      the run directory. See :doc:`workplans`.
 
     Product
       A file a step left, listed in its step record with a kind (see the

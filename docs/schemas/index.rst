@@ -18,6 +18,10 @@ Schemas for the files a run leaves behind are listed here. See
   ``cstar-run.yaml``, the description of a run: its attempts, its steps and what it depends on.
 - :download:`Step Record Schema v1.0.0 <https://raw.githubusercontent.com/CWorthy-ocean/C-Star/refs/heads/main/docs/schemas/run/step_record_schema.1.0.0.json>`:
   ``cstar-step.yaml``, what one step did, written by the step itself.
+- :download:`Run Manifest Schema v1.1.0 <https://raw.githubusercontent.com/CWorthy-ocean/C-Star/refs/heads/main/docs/schemas/run/run_manifest_schema.1.1.0.json>`:
+  adds the inputs each attempt carried (``directory``, ``carried``) and each step's carried blueprint (``blueprint_file``).
+- :download:`Step Record Schema v1.1.0 <https://raw.githubusercontent.com/CWorthy-ocean/C-Star/refs/heads/main/docs/schemas/run/step_record_schema.1.1.0.json>`:
+  adds the blueprint file the step ran (``blueprint_file``).
 
 Blueprints
 ----------

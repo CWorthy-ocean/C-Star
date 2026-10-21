@@ -17,7 +17,7 @@ import uuid
 from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import UTC, datetime
 from pathlib import Path
 from urllib.parse import urlsplit
 
@@ -27,7 +27,7 @@ from cstar.applications.core import ArtifactKind, ArtifactSpec, get_application
 from cstar.base.exceptions import CstarError, CstarExpectationFailed
 from cstar.base.log import get_logger
 from cstar.base.provenance import canonical_hash, package_versions, system_name
-from cstar.base.utils import slugify, utc_now
+from cstar.base.utils import _get_sha256_hash, slugify, utc_now
 from cstar.execution.file_system import (
     StateDirectoryManager,
     is_remote_resource,
@@ -67,6 +67,24 @@ STEP_RECORD_NAME: t.Final[str] = "cstar-step.yaml"
 MANIFEST_LOCK_NAME: t.Final[str] = "manifest.lock"
 """The name of the lock file serializing run-manifest writers, in the run's state directory."""
 
+ATTEMPTS_DIR_NAME: t.Final[str] = "attempts"
+"""The directory, in the run root, holding the inputs each attempt carried."""
+
+ATTEMPT_DIR_FORMAT: t.Final[str] = "%Y%m%dT%H%M%S"
+"""The `strftime` format naming an attempt's directory after its UTC start."""
+
+ATTEMPT_WORKPLAN_NAME: t.Final[str] = "workplan.yaml"
+"""The authored workplan, carried verbatim in an attempt's directory."""
+
+ATTEMPT_VARIABLES_NAME: t.Final[str] = "workplan.vars"
+"""The runtime variables of the attempt, in its directory, when any were given."""
+
+ATTEMPT_TRANSFORMED_NAME: t.Final[str] = "workplan_transformed.yaml"
+"""A copy of the transformed workplan the attempt prepared, in its directory."""
+
+ATTEMPT_BLUEPRINTS_DIR_NAME: t.Final[str] = "blueprints"
+"""The directory, in an attempt's directory, holding each step's blueprint by step slug."""
+
 _M = t.TypeVar("_M", bound=ConfiguredBaseModel)
 
 
@@ -82,6 +100,61 @@ def _now() -> datetime:
 
 Moment = t.Annotated[datetime, AfterValidator(_whole_second)]
 """A timestamp recorded in the documents, kept to whole seconds."""
+
+
+def carried_digest(path: Path) -> str:
+    """Digest a carried file, in the form `Attempt.carried` records.
+
+    Carried files are workplans, variables and blueprints, small by
+    construction, so the whole file is read.
+
+    Parameters
+    ----------
+    path : Path
+        The file to digest.
+
+    Returns
+    -------
+    str
+        `sha256:<hex>` of the file's bytes.
+    """
+    return f"sha256:{_get_sha256_hash(path)}"
+
+
+def create_attempt_dir(root: Path, start_at: datetime) -> Path:
+    """Create the directory an attempt carries its inputs in.
+
+    The directory is named after the UTC start of the attempt, with `-2`, `-3`,
+    ... appended when an earlier attempt of the same second holds the name. A
+    name is claimed by creating its directory, so concurrent preparers never
+    share one. This is the only place the name is derived from the time;
+    readers read `Attempt.directory`.
+
+    Parameters
+    ----------
+    root : Path
+        The run root.
+    start_at : datetime
+        When the attempt was scheduled.
+
+    Returns
+    -------
+    Path
+        The new, empty directory, `<root>/attempts/<name>`.
+    """
+    attempts = root / ATTEMPTS_DIR_NAME
+    attempts.mkdir(parents=True, exist_ok=True)
+
+    name = start_at.astimezone(UTC).strftime(ATTEMPT_DIR_FORMAT)
+    suffix = 1
+    while True:
+        candidate = attempts / (name if suffix == 1 else f"{name}-{suffix}")
+        try:
+            candidate.mkdir()
+        except FileExistsError:
+            suffix += 1
+        else:
+            return candidate
 
 
 class AttemptStatus(enum.StrEnum):
@@ -131,7 +204,7 @@ class Product(ConfiguredBaseModel):
 class StepRecord(ConfiguredBaseModel):
     """What a step did: written by the step process, in its working directory."""
 
-    schema_version: str = Field(default="1.0.0")
+    schema_version: str = Field(default="1.1.0")
     """The schema version for the document."""
 
     run_id: str = Field(default="")
@@ -148,6 +221,10 @@ class StepRecord(ConfiguredBaseModel):
 
     blueprint_schema_version: str = Field(default="")
     """The schema version of the blueprint the step ran."""
+
+    blueprint_file: str = Field(default="")
+    """The blueprint file the step ran, such as `work/<stem>.ovrd.yaml`, relative to
+    the step root; empty when it lies outside the step root."""
 
     outcome: str
     """The runner's execution status as its lowercase name, e.g. `completed`."""
@@ -213,6 +290,15 @@ class Attempt(ConfiguredBaseModel):
 
     finished_at: Moment | None = Field(default=None)
     """Set once every step reached a terminal status: the completion marker."""
+
+    directory: str = Field(default="")
+    """The directory of the inputs the attempt carried, relative to the run root;
+    empty when it carried none (a re-entry replaying the recorded plan, or an
+    attempt recorded before schema 1.1.0)."""
+
+    carried: dict[str, str] = Field(default_factory=dict)
+    """The digest of each file the attempt carried, as `sha256:<hex>`, by its path
+    relative to `directory`."""
 
 
 class ExternalRun(ConfiguredBaseModel):
@@ -311,6 +397,10 @@ class StepEntry(ConfiguredBaseModel):
     blueprint: BlueprintIdentity | None = Field(default=None)
     """The blueprint the step runs; `None` until a deferred step's record names it."""
 
+    blueprint_file: str = Field(default="")
+    """The step's blueprint as the latest attempt with a directory carried it,
+    relative to the run root; empty when that attempt carried none for the step."""
+
     status: str = Field(default="")
     """The orchestration status name as of `observed_at`; empty when never observed."""
 
@@ -321,7 +411,7 @@ class StepEntry(ConfiguredBaseModel):
 class RunManifest(ConfiguredBaseModel):
     """The description of a run: written to its run root."""
 
-    schema_version: str = Field(default="1.0.0")
+    schema_version: str = Field(default="1.1.0")
     """The schema version for the document."""
 
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
@@ -647,6 +737,24 @@ class StepFacts:
     """What the step's blueprint depends on outside itself."""
 
 
+@dataclass(frozen=True)
+class CarriedInputs:
+    """What an attempt carried into its run directory."""
+
+    start_at: datetime
+    """When the attempt was scheduled; it names the attempt's directory."""
+
+    directory: str
+    """The attempt's directory, as a POSIX path relative to the run root."""
+
+    carried: "Mapping[str, str]"
+    """The digest of each carried file, by its path relative to `directory`."""
+
+    blueprint_files: "Mapping[str, str]"
+    """The carried blueprint of each step, by step name, as a POSIX path
+    relative to the run root."""
+
+
 def _text(mapping: "Mapping[str, t.Any]", key: str) -> str:
     """Read a string value from a mapping, or an empty string.
 
@@ -877,7 +985,12 @@ def describe_steps(workplan: "Workplan", base_dir: Path) -> dict[str, StepFacts]
     return facts
 
 
-def new_attempt(workplan: "Workplan", *, workplan_hash: str) -> Attempt:
+def new_attempt(
+    workplan: "Workplan",
+    *,
+    workplan_hash: str,
+    carried: CarriedInputs | None = None,
+) -> Attempt:
     """Describe an attempt that is being scheduled now.
 
     Parameters
@@ -886,19 +999,26 @@ def new_attempt(workplan: "Workplan", *, workplan_hash: str) -> Attempt:
         The workplan being scheduled.
     workplan_hash : str
         The fingerprint of the workplan as this attempt runs it.
+    carried : CarriedInputs | None
+        What the attempt carried into the run directory, when it prepared the
+        workplan; the attempt then starts when the inputs were carried. `None`
+        for an attempt that replays the recorded plan, which starts now and
+        carries nothing.
 
     Returns
     -------
     Attempt
     """
     return Attempt(
-        start_at=_now(),
+        start_at=carried.start_at if carried else _now(),
         system=system_name(),
         versions=package_versions(),
         workplan_content_hash=workplan_hash,
         clobbered=[step.name for step in workplan.steps if step.clobber],
         resumed=[step.name for step in workplan.steps if step.resume],
         pre_run=workplan.pre_run,
+        directory=carried.directory if carried else "",
+        carried=dict(carried.carried) if carried else {},
     )
 
 
@@ -912,6 +1032,7 @@ def ensure_run_manifest(
     attempt: Attempt,
     steps: "Mapping[str, tuple[str, str, StepFacts | None]]",
     runs: "Mapping[str, RunRef]",
+    blueprint_files: "Mapping[str, str] | None" = None,
 ) -> RunManifest:
     """Create a run's manifest, or add an attempt to the one it has, and write it.
 
@@ -938,6 +1059,13 @@ def ensure_run_manifest(
         definition hash, working directory and (when they carry one) blueprint.
     runs : Mapping[str, RunRef]
         The external runs the workplan refers to, by alias.
+    blueprint_files : Mapping[str, str] | None
+        The blueprint each step's attempt carried, by step name, relative to the
+        run root. When given, every step in `steps` is pointed at its entry, or
+        at none when it has no entry: each attempt that prepares the workplan
+        re-points the steps at its own copies. `None` leaves the recorded
+        pointers as they are, for an attempt that replays the recorded plan and
+        for a standalone blueprint run.
 
     Returns
     -------
@@ -976,6 +1104,8 @@ def ensure_run_manifest(
             entry.definition_hash = facts.definition_hash
             entry.blueprint = facts.blueprint or entry.blueprint
             external = external.merged(facts.external)
+        if blueprint_files is not None:
+            entry.blueprint_file = blueprint_files.get(step_name, "")
 
     aliases = [
         ExternalRun(alias=alias, run_id=ref.run_id, start_at=ref.start_at)
@@ -994,6 +1124,32 @@ def ensure_run_manifest(
 
     write_run_manifest(root, manifest)
     return manifest
+
+
+def latest_attempt_dir(manifest: RunManifest, root: Path) -> Path | None:
+    """Locate the inputs the latest preparing attempt carried.
+
+    An attempt that re-enters a run replays the recorded plan and carries
+    nothing, so it is skipped: the latest attempt that has a directory is the one
+    whose inputs the run is running. The directory is not checked to exist,
+    since older attempt directories may be deleted by hand.
+
+    Parameters
+    ----------
+    manifest : RunManifest
+        The run's manifest.
+    root : Path
+        The run root.
+
+    Returns
+    -------
+    Path | None
+        The directory, or `None` when no attempt carried inputs.
+    """
+    for attempt in reversed(manifest.attempts):
+        if attempt.directory:
+            return root / attempt.directory
+    return None
 
 
 _OUTCOME_OF_STATUS: t.Final[dict[str, str]] = {

@@ -6854,7 +6854,7 @@ async def test_prepare_workplan_pins_external_run(
         "cstar.orchestration.dag_runner.get_launcher",
         return_value=_FakeSlurmLauncher(),
     ):
-        wp, trx_path, _ = await prepare_workplan(
+        wp, trx_path, _, _ = await prepare_workplan(
             wp_path, output_dir, {"spin_id": "spinup"}
         )
 
@@ -6968,7 +6968,7 @@ async def test_prepare_workplan_injects_compute_defaults(
     output_dir = tmp_path / "prepared"
     output_dir.mkdir()
 
-    _, trx_path, _ = await prepare_workplan(wp_path, output_dir, {})
+    _, trx_path, _, _ = await prepare_workplan(wp_path, output_dir, {})
 
     slurm = {
         s.name: t.cast("dict[str, t.Any]", s.compute_overrides["slurm"])

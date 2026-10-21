@@ -76,14 +76,17 @@ When the run has a manifest, the products each step record lists are compared
 with the directory: missing, or a size that changed (a log is reported only when
 it shrank: the step's own log is still written after the record is taken).
 {ARG_VERIFY} also compares
-the content where a sha256 is recorded, and nothing records one yet. For a
+the content where a sha256 is recorded, and nothing records one yet. The files
+each attempt carried into `attempts/` (the workplan, its variables, the
+blueprints) are compared with the digests the manifest recorded, always. For a
 run-id the manifest is refreshed first, as `cstar run show` does;
 {ARG_NO_REFRESH} reads it as last recorded.
 
 Step directories and sentinel files that no step accounts for, symlinks to a
-place outside the run, steps that are done without a record, and an attempt
-that has not finished are listed for information and do not fail the check.
-Nothing is deleted.
+place outside the run, steps that are done without a record, an attempt that
+has not finished, and carried inputs that are gone (older attempts may be
+deleted by hand) are listed for information and do not fail the check. Nothing
+is deleted.
 
 {ARG_REPAIR} rewrites each absolute symlink that points inside the run as a
 relative one and rebuilds `gathered_output` if the run has one. It changes
@@ -103,9 +106,11 @@ _HEADINGS: t.Final[dict[FindingKind, str]] = {
     FindingKind.PRODUCT_MISSING: "Products missing from the run",
     FindingKind.PRODUCT_SIZE: "Products whose size differs from the record",
     FindingKind.HASH_MISMATCH: f"Products whose content differs from the record ({ARG_VERIFY})",
+    FindingKind.INPUT_MISMATCH: "Carried inputs whose content differs from the manifest",
     FindingKind.EXTERNAL_LINK: "Symlinks with a target outside the run (informational)",
     FindingKind.RECORD_MISSING: "Steps that are done without a step record (informational)",
     FindingKind.ATTEMPT_OPEN: "Latest attempt not finished (informational)",
+    FindingKind.INPUT_MISSING: "Carried inputs missing from the run (informational)",
 }
 """The heading of each kind of finding, in the order the kinds are listed."""
 
@@ -253,9 +258,14 @@ def _format_findings(report: RunCheckReport) -> "Iterator[str]":
                     FindingKind.PRODUCT_MISSING,
                     FindingKind.RECORD_MISSING,
                     FindingKind.ATTEMPT_OPEN,
+                    FindingKind.INPUT_MISSING,
                 }:
                     yield f"  {f.file}"
-                elif kind in {FindingKind.PRODUCT_SIZE, FindingKind.HASH_MISMATCH}:
+                elif kind in {
+                    FindingKind.PRODUCT_SIZE,
+                    FindingKind.HASH_MISMATCH,
+                    FindingKind.INPUT_MISMATCH,
+                }:
                     yield f"  {f.file}: {f.path}"
                 else:
                     yield f"  {f.file} -> {f.path}"
