@@ -490,6 +490,103 @@ async def test_locallauncher_submit_records_pre_run_on_handle(
 
 
 @pytest.mark.usefixtures("read_yaml_intercept")
+async def test_locallauncher_submit_records_when_the_process_was_created(
+    wp_templates_dir: Path,
+    mock_run_id: str,
+) -> None:
+    """Verify the submission is the process creation time the launcher reads,
+    and survives the sentinel as a time, whatever form `start_at` takes later.
+    """
+    live_step = LiveStep.from_step(
+        deserialize(wp_templates_dir / "single_step.yaml", Workplan).steps[0]
+    )
+    created = 1_800_000_000.5
+
+    with (
+        mock.patch.object(subprocess, "Popen", return_value=mock.Mock(pid=777777)),
+        mock.patch(
+            "cstar.orchestration.launch.local.PsProcess",
+            return_value=mock.Mock(create_time=mock.Mock(return_value=created)),
+        ),
+    ):
+        handle = await LocalLauncher._submit(live_step, [])
+
+    expected = datetime.datetime.fromtimestamp(created, tz=datetime.UTC)
+    assert handle.submitted_at == expected
+    assert handle.start_ts == created  # turns `start_at` into a float, not the stamp
+    assert handle.submitted_at == expected
+
+    await StateRepository().put_sentinel(handle)
+    reloaded = await StateRepository().get_sentinel(live_step.name, LocalHandle)
+    assert reloaded is not None
+    assert reloaded.submitted_at == expected
+
+
+@pytest.mark.usefixtures("read_yaml_intercept")
+async def test_locallauncher_submit_falls_back_to_now_for_an_unknown_process(
+    wp_templates_dir: Path,
+    mock_run_id: str,
+) -> None:
+    """Verify a process that exits before its creation time is read is submitted
+    at the moment it was started.
+    """
+    live_step = LiveStep.from_step(
+        deserialize(wp_templates_dir / "single_step.yaml", Workplan).steps[0]
+    )
+
+    before = datetime.datetime.now(tz=datetime.UTC)
+    with (
+        mock.patch.object(subprocess, "Popen", return_value=mock.Mock(pid=777777)),
+        mock.patch(
+            "cstar.orchestration.launch.local.PsProcess",
+            side_effect=NoSuchProcess(777777),
+        ),
+    ):
+        handle = await LocalLauncher._submit(live_step, [])
+    after = datetime.datetime.now(tz=datetime.UTC)
+
+    assert handle.submitted_at is not None
+    assert before <= handle.submitted_at <= after
+
+
+@pytest.mark.parametrize(
+    "recorded",
+    [datetime.datetime(2026, 10, 15, 12, 0, 3, 123456, tzinfo=datetime.UTC), None],
+    ids=["recorded", "sentinel-before-submission-times"],
+)
+@pytest.mark.usefixtures("read_yaml_intercept")
+async def test_locallauncher_launch_adopts_the_submission_of_a_prior_handle(
+    wp_templates_dir: Path,
+    mock_run_id: str,
+    recorded: datetime.datetime | None,
+) -> None:
+    """Verify an adopted handle keeps the submission time it was persisted with,
+    or none: the launcher stamps nothing when it submits nothing.
+    """
+    live_step = LiveStep.from_step(
+        deserialize(wp_templates_dir / "single_step.yaml", Workplan).steps[0]
+    )
+    await StateRepository().put_sentinel(
+        LocalHandle(
+            pid="12345",
+            name=live_step.name,
+            run_id=mock_run_id,
+            launcher_name=LocalLauncher.name,
+            start_at=datetime.datetime.now(tz=datetime.UTC),
+            status=Status.Done,
+            submitted_at=recorded,
+        )
+    )
+
+    with mock.patch.object(LocalLauncher, "_submit", mock.AsyncMock()) as mock_submit:
+        task = await LocalLauncher.launch(live_step, [])
+
+    mock_submit.assert_not_awaited()
+    assert task.handle.pid == "12345"
+    assert task.handle.submitted_at == recorded
+
+
+@pytest.mark.usefixtures("read_yaml_intercept")
 async def test_locallauncher_launch_attaches_to_done_pre_run(
     wp_templates_dir: Path,
     mock_run_id: str,

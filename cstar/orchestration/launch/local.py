@@ -451,6 +451,7 @@ class LocalLauncher(Launcher[LocalHandle]):
                     start_at=create_time,
                     status=Status.Submitted,
                     pre_run=step.pre_run,
+                    submitted_at=create_time,
                 )
 
                 handle.process = local_process

@@ -204,10 +204,48 @@ class Product(ConfiguredBaseModel):
             return ArtifactKind.other
 
 
+class ExecutionFacts(ConfiguredBaseModel):
+    """What ran a step: the scheduler and the allocation it was granted, read from
+    the step's own environment.
+
+    These are the granted resources, never the request: the request is in the
+    transformed workplan and the batch script.
+    """
+
+    scheduler: str = Field(default="")
+    """`slurm` when the step ran inside a SLURM job, else `local`; empty in a
+    record written before schema 1.2.0."""
+
+    job_id: str = Field(default="")
+    """The id of the SLURM job the step ran in; empty outside SLURM."""
+
+    host: str = Field(default="")
+    """The host the step process ran on; under SLURM, the batch node."""
+
+    pid: int = Field(default=0)
+    """The id of the step process."""
+
+    nodes: int = Field(default=0)
+    """The nodes granted to the job; zero outside SLURM or when not reported."""
+
+    tasks: int = Field(default=0)
+    """The tasks granted to the job; zero outside SLURM or when not reported."""
+
+    cpus: int = Field(default=0)
+    """The CPUs granted per node, on the node the step process ran on; zero outside
+    SLURM or when not reported."""
+
+    partition: str = Field(default="")
+    """The partition the job ran in; empty outside SLURM or when not reported."""
+
+    account: str = Field(default="")
+    """The account the job was charged to; empty outside SLURM or when not reported."""
+
+
 class StepRecord(ConfiguredBaseModel):
     """What a step did: written by the step process, in its working directory."""
 
-    schema_version: str = Field(default="1.1.0")
+    schema_version: str = Field(default="1.2.0")
     """The schema version for the document."""
 
     run_id: str = Field(default="")
@@ -233,7 +271,7 @@ class StepRecord(ConfiguredBaseModel):
     """The runner's execution status as its lowercase name, e.g. `completed`."""
 
     start_at: Moment | None = Field(default=None)
-    """The start of the simulated period, when the step has one."""
+    """When the step process started; `None` when it never started."""
 
     finished_at: Moment
     """When the step process recorded its outcome."""
@@ -243,6 +281,9 @@ class StepRecord(ConfiguredBaseModel):
 
     versions: dict[str, str] = Field(default_factory=dict)
     """The versions of the packages the step ran with."""
+
+    execution: ExecutionFacts = Field(default_factory=ExecutionFacts)
+    """What ran the step."""
 
     products: list[Product] = Field(default_factory=list)
     """What the step produced."""
@@ -405,6 +446,18 @@ class StepEntry(ConfiguredBaseModel):
     carried, relative to the run root; empty when that attempt carried none for
     the step. Not the file the step ran: that is its record's `blueprint_file`."""
 
+    launcher: str = Field(default="")
+    """The launcher that last submitted the step (`slurm` or `local`), which says
+    what `job_id` is; empty when never submitted by an orchestrator."""
+
+    job_id: str = Field(default="")
+    """The id of the step's latest submission: a SLURM job id under `slurm`, the
+    process id of the step's launch script under `local`; empty when never
+    submitted."""
+
+    submitted_at: Moment | None = Field(default=None)
+    """When the latest submission was made; `None` when never submitted."""
+
     status: str = Field(default="")
     """The orchestration status name as of `observed_at`; empty when never observed."""
 
@@ -415,7 +468,7 @@ class StepEntry(ConfiguredBaseModel):
 class RunManifest(ConfiguredBaseModel):
     """The description of a run: written to its run root."""
 
-    schema_version: str = Field(default="1.1.0")
+    schema_version: str = Field(default="1.2.0")
     """The schema version for the document."""
 
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
@@ -1150,8 +1203,10 @@ def ensure_run_manifest(
     steps : Mapping[str, tuple[str, str, StepFacts | None]]
         Each step's name mapped to its application, its working directory
         relative to the run root and, when known, its facts. A step already in
-        the manifest keeps its status and record; given facts replace its
-        definition hash, working directory and (when they carry one) blueprint.
+        the manifest keeps its status, record and submission; given facts replace
+        its definition hash, working directory and (when they carry one)
+        blueprint. A step the attempt clobbers or resumes loses its status,
+        record and submission: it certainly runs again.
     runs : Mapping[str, RunRef]
         The external runs the workplan refers to, by alias.
     carried_blueprints : Mapping[str, str] | None
@@ -1210,15 +1265,87 @@ def ensure_run_manifest(
     manifest.attempts.append(attempt)
 
     # a step the attempt clobbers or resumes certainly runs again: what was
-    # observed of its earlier run no longer stands
+    # observed or submitted of its earlier run no longer stands
     rerun = {*attempt.clobbered, *attempt.resumed}
     for entry in manifest.steps:
         if entry.name in rerun:
             entry.status = ""
             entry.record = None
+            entry.launcher = ""
+            entry.job_id = ""
+            entry.submitted_at = None
 
     write_run_manifest(root, manifest)
     return manifest
+
+
+def record_submission(
+    root: Path,
+    run_id: str,
+    step: str,
+    *,
+    launcher: str,
+    job_id: str,
+    submitted_at: datetime,
+) -> bool:
+    """Record in a run's manifest that a step was submitted.
+
+    Takes `manifest_lock` itself: it is for workplan runs, whose steps are
+    submitted by an orchestrator alongside other writers of the manifest. An
+    entry that already holds the submission is not rewritten, so an adopted
+    sentinel, which carries the submission recorded when it was made, writes
+    nothing.
+
+    Parameters
+    ----------
+    root : Path
+        The run root.
+    run_id : str
+        The run's id, which names the lock.
+    step : str
+        The name of the step that was submitted.
+    launcher : str
+        The launcher that submitted the step.
+    job_id : str
+        The id of the submission, as the launcher knows it.
+    submitted_at : datetime
+        When the submission was made.
+
+    Returns
+    -------
+    bool
+        Whether the manifest was written. `False` when the run has no manifest,
+        the manifest has no entry for `step`, or the entry already holds the
+        submission.
+
+    Raises
+    ------
+    CstarSchemaTooNewError
+        If the manifest's schema is newer than this build reads.
+    CstarError
+        If the manifest cannot be read or is invalid.
+    """
+    submitted_at = _whole_second(submitted_at)
+
+    with manifest_lock(run_id):
+        manifest = read_run_manifest(root)
+        entry = manifest.step(step) if manifest else None
+        if manifest is None or entry is None:
+            log.debug(f"Run {run_id!r} has no manifest entry for step {step!r}")
+            return False
+
+        if (entry.launcher, entry.job_id, entry.submitted_at) == (
+            launcher,
+            job_id,
+            submitted_at,
+        ):
+            return False
+
+        entry.launcher = launcher
+        entry.job_id = job_id
+        entry.submitted_at = submitted_at
+        write_run_manifest(root, manifest)
+    return True
 
 
 def latest_attempt_dir(manifest: RunManifest, root: Path) -> Path | None:

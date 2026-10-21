@@ -2,7 +2,7 @@
 
 import json
 import typing as t
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from unittest import mock
 
@@ -12,7 +12,7 @@ from rich.console import Console
 from typer.testing import CliRunner
 
 from cstar.cli.run import app as app_run
-from cstar.cli.run.show import COMMAND_SHOW
+from cstar.cli.run.show import COMMAND_SHOW, _duration
 from cstar.entrypoint.utils import ARG_FORMAT, ARG_NO_REFRESH
 from cstar.orchestration.dag_runner import DagStatus
 from cstar.orchestration.manifest import (
@@ -77,7 +77,12 @@ def invoke(*args: str, record: WorkplanRun | None = None) -> Result:
         return CliRunner().invoke(app_run, [COMMAND_SHOW, *args], color=False)
 
 
-def write_record(run: FakeRun) -> None:
+def write_record(
+    run: FakeRun,
+    *,
+    start_at: datetime | None = None,
+    finished_at: datetime = datetime(2026, 10, 15, 13, 0, tzinfo=UTC),
+) -> None:
     """Record a finished `Spin Up` step in its directory."""
     write_step_record(
         run.spin_up,
@@ -88,9 +93,41 @@ def write_record(run: FakeRun) -> None:
                 kind="Blueprint", application="hello_world", name="bp"
             ),
             outcome="completed",
-            finished_at=datetime(2026, 10, 15, 13, 0, tzinfo=UTC),
+            start_at=start_at,
+            finished_at=finished_at,
         ),
     )
+
+
+def submit(run: FakeRun, submitted_at: datetime | None) -> None:
+    """Record in the manifest that `Spin Up` was submitted to SLURM as job 4242."""
+    manifest = read_run_manifest(run.root)
+    assert manifest is not None
+    entry = manifest.step(STEP)
+    assert entry is not None
+    entry.launcher = "slurm"
+    entry.job_id = "4242"
+    entry.submitted_at = submitted_at
+    write_run_manifest(run.root, manifest)
+
+
+def jobs_row(run: FakeRun, step: str = STEP) -> dict[str, str]:
+    """Show the run's directory and read `step`'s row of the jobs table by column."""
+    result = invoke(run.root.as_posix())
+
+    assert result.exit_code == 0, result.output
+    lines = result.stdout.splitlines()
+    start = next(i for i, line in enumerate(lines) if line.strip() == "Jobs")
+    table = lines[start : next(i for i in range(start, len(lines)) if "└" in lines[i])]
+    header = next(line for line in table if "┃" in line)
+    columns = [cell.strip() for cell in header.strip("┃ ").split("┃")]
+    rows = [
+        [cell.strip() for cell in line.strip("│ ").split("│")]
+        for line in table
+        if line.startswith("│")
+    ]
+    (cells,) = (row for row in rows if row[0] == step)
+    return dict(zip(columns, cells, strict=True))
 
 
 def test_a_run_id_shows_the_manifest(run: FakeRun) -> None:
@@ -275,3 +312,125 @@ def test_an_unreadable_manifest_is_reported(run: FakeRun, text: str) -> None:
 
     assert result.exit_code == 1
     assert RUN_MANIFEST_NAME in result.stderr or "newer" in result.stderr
+
+
+SUBMITTED = datetime(2026, 10, 15, 12, 0, tzinfo=UTC)
+
+
+def test_the_jobs_table_shows_the_job_and_how_long_it_queued_and_ran(
+    run: FakeRun,
+) -> None:
+    """Verify a step with a submission and a record shows its job, the time from
+    the submission to the step starting, and the time it ran.
+    """
+    submit(run, SUBMITTED)
+    write_record(
+        run,
+        start_at=SUBMITTED + timedelta(minutes=5, seconds=7),
+        finished_at=SUBMITTED + timedelta(hours=1, minutes=5, seconds=7),
+    )
+
+    row = jobs_row(run)
+
+    assert row["Job"] == "slurm 4242"
+    assert row["Queued"] == "0:05:07"
+    assert row["Wall"] == "1:00:00"
+
+
+def test_a_step_that_ran_over_a_day_shows_its_hours(run: FakeRun) -> None:
+    """Verify durations over 24 hours are hours, never days."""
+    submit(run, SUBMITTED)
+    start = SUBMITTED + timedelta(hours=30)
+    write_record(run, start_at=start, finished_at=start + timedelta(hours=30))
+
+    row = jobs_row(run)
+
+    assert row["Queued"] == "30:00:00"
+    assert row["Wall"] == "30:00:00"
+
+
+def test_a_step_without_a_submission_or_a_record_shows_dashes(run: FakeRun) -> None:
+    """Verify a step never submitted by an orchestrator, and one with no record,
+    show no job and no durations.
+    """
+    write_record(run, start_at=SUBMITTED, finished_at=SUBMITTED + timedelta(hours=1))
+
+    row = jobs_row(run)
+
+    assert (row["Job"], row["Queued"], row["Wall"]) == ("-", "-", "1:00:00")
+    unrecorded = jobs_row(run, step="run")
+    assert (unrecorded["Job"], unrecorded["Queued"], unrecorded["Wall"]) == ("-",) * 3
+
+
+def test_a_step_that_never_started_shows_no_durations(run: FakeRun) -> None:
+    """Verify a record without a start leaves both durations as dashes."""
+    submit(run, SUBMITTED)
+    write_record(run, start_at=None)
+
+    row = jobs_row(run)
+
+    assert row["Job"] == "slurm 4242"
+    assert (row["Queued"], row["Wall"]) == ("-", "-")
+
+
+def test_a_record_that_started_before_the_submission_shows_no_queue_time(
+    run: FakeRun,
+) -> None:
+    """Verify a record from an earlier run of the step, which started before the
+    submission on the entry, has no queue time; its wall time still shows.
+    """
+    submit(run, SUBMITTED)
+    start = SUBMITTED - timedelta(hours=2)
+    write_record(run, start_at=start, finished_at=start + timedelta(minutes=30))
+
+    row = jobs_row(run)
+
+    assert (row["Queued"], row["Wall"]) == ("-", "0:30:00")
+
+
+def test_a_submission_without_a_launcher_shows_the_bare_job_id(run: FakeRun) -> None:
+    """Verify an entry that records no launcher shows only its job id."""
+    manifest = read_run_manifest(run.root)
+    assert manifest is not None
+    entry = manifest.step(STEP)
+    assert entry is not None
+    entry.job_id = "4242"
+    write_run_manifest(run.root, manifest)
+
+    assert jobs_row(run)["Job"] == "4242"
+
+
+@pytest.mark.parametrize(
+    ("seconds", "expected"),
+    [
+        (0, "0:00:00"),
+        (59, "0:00:59"),
+        (61, "0:01:01"),
+        (3600, "1:00:00"),
+        (86399, "23:59:59"),
+        (30 * 3600, "30:00:00"),
+        (100 * 3600 + 61, "100:01:01"),
+    ],
+)
+def test_duration_formats_hours_minutes_and_seconds(
+    seconds: int, expected: str
+) -> None:
+    """Verify a duration is `H:MM:SS` with unbounded hours."""
+    assert _duration(SUBMITTED, SUBMITTED + timedelta(seconds=seconds)) == expected
+
+
+@pytest.mark.parametrize(
+    ("start", "end"),
+    [
+        (None, SUBMITTED),
+        (SUBMITTED, None),
+        (None, None),
+        (SUBMITTED, SUBMITTED - timedelta(seconds=1)),
+    ],
+    ids=["no-start", "no-end", "neither", "negative"],
+)
+def test_duration_is_a_dash_for_a_missing_moment_or_a_negative_span(
+    start: datetime | None, end: datetime | None
+) -> None:
+    """Verify a missing moment, or an end before the start, is a dash."""
+    assert _duration(start, end) == "-"

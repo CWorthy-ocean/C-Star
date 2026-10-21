@@ -144,6 +144,22 @@ def _when(moment: datetime | None) -> str:
     return f"{moment.astimezone():%Y-%m-%d %H:%M}" if moment else "-"
 
 
+def _duration(start: datetime | None, end: datetime | None) -> str:
+    """Format the time from `start` to `end` as `H:MM:SS`, or a dash.
+
+    The hours are not wrapped into days. A dash stands for a missing moment, or
+    for a negative span: the record on an entry is from an earlier run of the
+    step, as when a directory is shown without statuses or with `--no-refresh`.
+    """
+    if start is None or end is None:
+        return "-"
+    seconds = int((end - start).total_seconds())
+    if seconds < 0:
+        return "-"
+    hours, remainder = divmod(seconds, 3600)
+    return f"{hours}:{remainder // 60:02d}:{remainder % 60:02d}"
+
+
 def _size(nbytes: int) -> str:
     """Format a number of bytes with a binary unit."""
     size = float(nbytes)
@@ -165,7 +181,8 @@ def _tables(manifest: RunManifest) -> list[Table]:
     Returns
     -------
     list[Table]
-        The identity, attempts, steps and, when there are any, external runs.
+        The identity, attempts, steps, the steps' jobs and, when there are any,
+        external runs.
     """
     identity = Table(title=f"Run {manifest.run_id}", show_header=False)
     identity.add_column(justify="right", style="bold")
@@ -215,6 +232,14 @@ def _tables(manifest: RunManifest) -> list[Table]:
         "Record",
         title="Steps",
     )
+    # a table of its own: beside the steps' columns it would not fit 80 columns
+    jobs = Table(
+        "Step",
+        Column("Job", no_wrap=True),
+        Column("Queued", no_wrap=True),
+        Column("Wall", no_wrap=True),
+        title="Jobs",
+    )
     for entry in manifest.steps:
         record = entry.record
         steps.add_row(
@@ -226,8 +251,14 @@ def _tables(manifest: RunManifest) -> list[Table]:
             _size(sum(p.size_bytes for p in record.products)) if record else "-",
             "yes" if record else "no",
         )
+        jobs.add_row(
+            entry.name,
+            f"{entry.launcher} {entry.job_id}".strip() if entry.job_id else "-",
+            _duration(entry.submitted_at, record.start_at) if record else "-",
+            _duration(record.start_at, record.finished_at) if record else "-",
+        )
 
-    tables = [identity, attempts, steps]
+    tables = [identity, attempts, steps, jobs]
     if manifest.external.runs:
         external = Table("Alias", "Run-id", "Start", title="External runs")
         for ref in manifest.external.runs:

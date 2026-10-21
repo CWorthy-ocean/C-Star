@@ -1,4 +1,5 @@
 import asyncio
+import functools
 import os
 import shutil
 import typing as t
@@ -41,6 +42,7 @@ from cstar.orchestration.manifest import (
     ATTEMPT_TRANSFORMED_NAME,
     ATTEMPT_VARIABLES_NAME,
     ATTEMPT_WORKPLAN_NAME,
+    RUN_MANIFEST_NAME,
     CarriedInputs,
     RunManifest,
     StepFacts,
@@ -54,6 +56,7 @@ from cstar.orchestration.manifest import (
     manifest_lock,
     new_attempt,
     read_run_manifest,
+    record_submission,
     workplan_content_hash,
     write_run_manifest,
 )
@@ -306,11 +309,27 @@ def get_launcher(
     return launcher
 
 
-def get_orchestrator(planner: Planner) -> Orchestrator:
+def get_orchestrator(planner: Planner, *, root: Path) -> Orchestrator:
+    """Create the orchestrator that launches the steps of a plan.
+
+    Each launch persists the step's handle and records the submission in the
+    run's manifest (see `on_launched`).
+
+    Parameters
+    ----------
+    planner : Planner
+        The planner holding the plan to execute.
+    root : Path
+        The run root, which holds the manifest the submissions are recorded in.
+
+    Returns
+    -------
+    Orchestrator
+    """
     launcher = get_launcher(planner.workplan, force_local=planner.workplan.pre_run)
 
     orchestrator = Orchestrator(planner, launcher)
-    orchestrator.set_callback("launched", on_status_changed)
+    orchestrator.set_callback("launched", functools.partial(on_launched, root=root))
 
     return orchestrator
 
@@ -1322,6 +1341,42 @@ async def on_status_changed(handle: ProcessHandle) -> None:
     await run_repo.update_workplan_run(handle.run_id, _apply)
 
 
+async def on_launched(handle: ProcessHandle, *, root: Path) -> None:
+    """Persist a launched process's handle and record its submission in the manifest.
+
+    A handle adopted from a prior attempt carries the submission it was created
+    with, which `record_submission` finds already recorded. A failure to write
+    the manifest does not stop scheduling: the sentinel does not depend on it.
+
+    Parameters
+    ----------
+    handle : ProcessHandle
+        The handle of the launched process.
+    root : Path
+        The run root, which holds the manifest.
+    """
+    await on_status_changed(handle)
+
+    if handle.submitted_at is None:
+        return
+
+    try:
+        await asyncio.to_thread(
+            record_submission,
+            root,
+            handle.run_id,
+            handle.name,
+            launcher=handle.launcher_name,
+            job_id=handle.pid,
+            submitted_at=handle.submitted_at,
+        )
+    except Exception as ex:
+        log.warning(
+            f"Could not record the submission of step {handle.name!r} in "
+            f"{root / RUN_MANIFEST_NAME}: {ex}"
+        )
+
+
 def refuse_edited_done_steps(
     wp: Workplan,
     manifest: RunManifest,
@@ -1601,7 +1656,7 @@ async def run_dag(
 
     _ = await TrackingRepository().put_workplan_run(wp_run)
 
-    orchestrator = get_orchestrator(planner)
+    orchestrator = get_orchestrator(planner, root=root)
 
     # schedule the tasks without waiting for completion
     await process_plan(orchestrator)

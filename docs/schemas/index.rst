@@ -22,6 +22,10 @@ Schemas for the files a run leaves behind are listed here. See
   adds the inputs each attempt carried (``directory``, ``carried``) and each step's carried blueprint (``carried_blueprint``).
 - :download:`Step Record Schema v1.1.0 <https://raw.githubusercontent.com/CWorthy-ocean/C-Star/refs/heads/main/docs/schemas/run/step_record_schema.1.1.0.json>`:
   adds the blueprint file the step ran (``blueprint_file``).
+- :download:`Run Manifest Schema v1.2.0 <https://raw.githubusercontent.com/CWorthy-ocean/C-Star/refs/heads/main/docs/schemas/run/run_manifest_schema.1.2.0.json>`:
+  adds each step's latest submission (``launcher``, ``job_id``, ``submitted_at``).
+- :download:`Step Record Schema v1.2.0 <https://raw.githubusercontent.com/CWorthy-ocean/C-Star/refs/heads/main/docs/schemas/run/step_record_schema.1.2.0.json>`:
+  adds what ran the step (``execution``).
 
 Blueprints
 ----------

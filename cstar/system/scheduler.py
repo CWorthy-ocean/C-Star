@@ -2,15 +2,34 @@ import functools
 import os
 from abc import ABC, abstractmethod
 from collections.abc import Callable
-from typing import Final
+from typing import TYPE_CHECKING, Final
 
 from cstar.base.log import LoggingMixin, get_logger
 from cstar.base.utils import _run_cmd
+
+if TYPE_CHECKING:
+    from collections.abc import Mapping
 
 log = get_logger(__name__)
 
 UNLIMITED_WALLTIMES: Final = frozenset({"infinite", "unlimited", "n/a"})
 """Values SLURM reports for a queue with no walltime limit."""
+
+
+def slurm_job_id(environ: "Mapping[str, str]") -> str:
+    """Read the id of the SLURM job a process runs in from its environment.
+
+    Parameters
+    ----------
+    environ : Mapping[str, str]
+        The process's environment variables.
+
+    Returns
+    -------
+    str
+        `SLURM_JOB_ID`, else its older alias `SLURM_JOBID`; empty outside a job.
+    """
+    return environ.get("SLURM_JOB_ID") or environ.get("SLURM_JOBID") or ""
 
 
 def parse_walltime(walltime_str: str) -> tuple[int, int, int]:
@@ -554,7 +573,7 @@ class SlurmScheduler(Scheduler):
         if any(k in os.environ for k in jupyter_env_vars):
             return False
 
-        return os.getenv("SLURM_JOBID") is not None
+        return bool(slurm_job_id(os.environ))
 
     @property
     def global_max_cpus_per_node(self) -> int | None:

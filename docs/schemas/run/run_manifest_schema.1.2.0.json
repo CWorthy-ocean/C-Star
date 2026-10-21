@@ -1,0 +1,807 @@
+{
+    "$defs": {
+        "Attempt": {
+            "additionalProperties": false,
+            "description": "One scheduling of a workplan into a run; a resumed run has several.",
+            "properties": {
+                "start_at": {
+                    "description": "When the attempt was scheduled.",
+                    "format": "date-time",
+                    "title": "Start At",
+                    "type": "string"
+                },
+                "system": {
+                    "default": "",
+                    "description": "The C-Star system the attempt was scheduled on.",
+                    "title": "System",
+                    "type": "string"
+                },
+                "versions": {
+                    "additionalProperties": {
+                        "type": "string"
+                    },
+                    "description": "The versions of the packages the attempt was scheduled with.",
+                    "title": "Versions",
+                    "type": "object"
+                },
+                "workplan_content_hash": {
+                    "default": "",
+                    "description": "A fingerprint of the workplan as this attempt ran it.",
+                    "title": "Workplan Content Hash",
+                    "type": "string"
+                },
+                "clobbered": {
+                    "description": "The steps the attempt cleared and re-ran.",
+                    "items": {
+                        "type": "string"
+                    },
+                    "title": "Clobbered",
+                    "type": "array"
+                },
+                "resumed": {
+                    "description": "The steps the attempt resumed in place.",
+                    "items": {
+                        "type": "string"
+                    },
+                    "title": "Resumed",
+                    "type": "array"
+                },
+                "pre_run": {
+                    "default": false,
+                    "description": "Whether the attempt stopped every step before its model launch.",
+                    "title": "Pre Run",
+                    "type": "boolean"
+                },
+                "status": {
+                    "$ref": "#/$defs/AttemptStatus",
+                    "default": "scheduled",
+                    "description": "Where the attempt stands."
+                },
+                "finished_at": {
+                    "anyOf": [
+                        {
+                            "format": "date-time",
+                            "type": "string"
+                        },
+                        {
+                            "type": "null"
+                        }
+                    ],
+                    "default": null,
+                    "description": "Set once every step reached a terminal status: the completion marker.",
+                    "title": "Finished At"
+                },
+                "directory": {
+                    "default": "",
+                    "description": "The directory of the inputs the attempt carried, relative to the run root;\nempty when it carried none (a re-entry replaying the recorded plan, or an\nattempt recorded before schema 1.1.0).",
+                    "title": "Directory",
+                    "type": "string"
+                },
+                "carried": {
+                    "additionalProperties": {
+                        "type": "string"
+                    },
+                    "description": "The digest of each file the attempt carried, as `sha256:<hex>`, by its path\nrelative to `directory`.",
+                    "title": "Carried",
+                    "type": "object"
+                }
+            },
+            "required": [
+                "start_at"
+            ],
+            "title": "Attempt",
+            "type": "object"
+        },
+        "AttemptStatus": {
+            "description": "Where an attempt to run a workplan stands.",
+            "enum": [
+                "scheduled",
+                "running",
+                "done",
+                "failed",
+                "cancelled"
+            ],
+            "title": "AttemptStatus",
+            "type": "string"
+        },
+        "BlueprintIdentity": {
+            "additionalProperties": false,
+            "description": "Identifies a blueprint document by application, name and content hash.\n\nThis is identity, not location: compare `DeferredBlueprintRef`, which\nlocates the blueprint file an upstream step will write.",
+            "properties": {
+                "kind": {
+                    "const": "Blueprint",
+                    "description": "The kind of document referenced; selects the model a reference loads as.",
+                    "title": "Kind",
+                    "type": "string"
+                },
+                "application": {
+                    "description": "The application the referenced blueprint belongs to.",
+                    "minLength": 1,
+                    "title": "Application",
+                    "type": "string"
+                },
+                "name": {
+                    "description": "The name of the referenced blueprint.",
+                    "minLength": 1,
+                    "title": "Name",
+                    "type": "string"
+                },
+                "content_hash": {
+                    "default": "",
+                    "description": "A fingerprint of the referenced blueprint's configuration.",
+                    "title": "Content Hash",
+                    "type": "string"
+                }
+            },
+            "required": [
+                "kind",
+                "application",
+                "name"
+            ],
+            "title": "BlueprintIdentity",
+            "type": "object"
+        },
+        "CatalogSpecRef": {
+            "additionalProperties": false,
+            "description": "A reference to a catalog spec a document was derived from.",
+            "properties": {
+                "name": {
+                    "description": "The name of the referenced spec.",
+                    "minLength": 1,
+                    "title": "Name",
+                    "type": "string"
+                },
+                "origin": {
+                    "default": "",
+                    "description": "Where the spec came from, e.g. `catalog`, `custom` or `model_default`; empty when unknown.",
+                    "title": "Origin",
+                    "type": "string"
+                },
+                "modified": {
+                    "default": false,
+                    "description": "Whether the spec was edited after it was selected.",
+                    "title": "Modified",
+                    "type": "boolean"
+                },
+                "kind": {
+                    "description": "The kind of spec referenced.",
+                    "enum": [
+                        "ModelSpec",
+                        "DomainSpec",
+                        "ForcingSpec",
+                        "OutputSpec",
+                        "CdrSpec"
+                    ],
+                    "title": "Kind",
+                    "type": "string"
+                }
+            },
+            "required": [
+                "name",
+                "kind"
+            ],
+            "title": "CatalogSpecRef",
+            "type": "object"
+        },
+        "CodebaseRef": {
+            "additionalProperties": false,
+            "description": "An external codebase a blueprint builds.",
+            "properties": {
+                "location": {
+                    "description": "Where the code lives.",
+                    "title": "Location",
+                    "type": "string"
+                },
+                "commit": {
+                    "default": "",
+                    "description": "The commit the blueprint pins.",
+                    "title": "Commit",
+                    "type": "string"
+                },
+                "branch": {
+                    "default": "",
+                    "description": "The branch the blueprint pins.",
+                    "title": "Branch",
+                    "type": "string"
+                }
+            },
+            "required": [
+                "location"
+            ],
+            "title": "CodebaseRef",
+            "type": "object"
+        },
+        "ExecutionFacts": {
+            "additionalProperties": false,
+            "description": "What ran a step: the scheduler and the allocation it was granted, read from\nthe step's own environment.\n\nThese are the granted resources, never the request: the request is in the\ntransformed workplan and the batch script.",
+            "properties": {
+                "scheduler": {
+                    "default": "",
+                    "description": "`slurm` when the step ran inside a SLURM job, else `local`; empty in a\nrecord written before schema 1.2.0.",
+                    "title": "Scheduler",
+                    "type": "string"
+                },
+                "job_id": {
+                    "default": "",
+                    "description": "The id of the SLURM job the step ran in; empty outside SLURM.",
+                    "title": "Job Id",
+                    "type": "string"
+                },
+                "host": {
+                    "default": "",
+                    "description": "The host the step process ran on; under SLURM, the batch node.",
+                    "title": "Host",
+                    "type": "string"
+                },
+                "pid": {
+                    "default": 0,
+                    "description": "The id of the step process.",
+                    "title": "Pid",
+                    "type": "integer"
+                },
+                "nodes": {
+                    "default": 0,
+                    "description": "The nodes granted to the job; zero outside SLURM or when not reported.",
+                    "title": "Nodes",
+                    "type": "integer"
+                },
+                "tasks": {
+                    "default": 0,
+                    "description": "The tasks granted to the job; zero outside SLURM or when not reported.",
+                    "title": "Tasks",
+                    "type": "integer"
+                },
+                "cpus": {
+                    "default": 0,
+                    "description": "The CPUs granted per node, on the node the step process ran on; zero outside\nSLURM or when not reported.",
+                    "title": "Cpus",
+                    "type": "integer"
+                },
+                "partition": {
+                    "default": "",
+                    "description": "The partition the job ran in; empty outside SLURM or when not reported.",
+                    "title": "Partition",
+                    "type": "string"
+                },
+                "account": {
+                    "default": "",
+                    "description": "The account the job was charged to; empty outside SLURM or when not reported.",
+                    "title": "Account",
+                    "type": "string"
+                }
+            },
+            "title": "ExecutionFacts",
+            "type": "object"
+        },
+        "ExternalDependencies": {
+            "additionalProperties": false,
+            "description": "Everything a run depends on that lives outside the run itself.",
+            "properties": {
+                "runs": {
+                    "description": "Other workplan runs.",
+                    "items": {
+                        "$ref": "#/$defs/ExternalRun"
+                    },
+                    "title": "Runs",
+                    "type": "array"
+                },
+                "source_data": {
+                    "description": "Source datasets.",
+                    "items": {
+                        "$ref": "#/$defs/SourceDataRef"
+                    },
+                    "title": "Source Data",
+                    "type": "array"
+                },
+                "codebases": {
+                    "description": "External codebases.",
+                    "items": {
+                        "$ref": "#/$defs/CodebaseRef"
+                    },
+                    "title": "Codebases",
+                    "type": "array"
+                },
+                "catalog_entries": {
+                    "description": "Catalog specs the blueprints were derived from.",
+                    "items": {
+                        "$ref": "#/$defs/CatalogSpecRef"
+                    },
+                    "title": "Catalog Entries",
+                    "type": "array"
+                },
+                "blueprints": {
+                    "description": "Blueprints the blueprints were derived from.",
+                    "items": {
+                        "$ref": "#/$defs/BlueprintIdentity"
+                    },
+                    "title": "Blueprints",
+                    "type": "array"
+                }
+            },
+            "title": "ExternalDependencies",
+            "type": "object"
+        },
+        "ExternalRun": {
+            "additionalProperties": false,
+            "description": "Another workplan run this run reads from.",
+            "properties": {
+                "alias": {
+                    "description": "The alias the workplan refers to the run by.",
+                    "title": "Alias",
+                    "type": "string"
+                },
+                "run_id": {
+                    "description": "The id of the run.",
+                    "title": "Run Id",
+                    "type": "string"
+                },
+                "start_at": {
+                    "anyOf": [
+                        {
+                            "format": "date-time",
+                            "type": "string"
+                        },
+                        {
+                            "type": "null"
+                        }
+                    ],
+                    "default": null,
+                    "description": "The restart time the run was referenced at, when pinned.",
+                    "title": "Start At"
+                }
+            },
+            "required": [
+                "alias",
+                "run_id"
+            ],
+            "title": "ExternalRun",
+            "type": "object"
+        },
+        "Product": {
+            "additionalProperties": false,
+            "description": "A file or directory a step produced.",
+            "properties": {
+                "kind": {
+                    "description": "The classification of the product: one of `ArtifactKind` when written by\nthis release. Kept as text on disk so a record written with a kind this\nbuild no longer knows still loads; `known_kind` maps it for consumers.",
+                    "examples": [
+                        "grid",
+                        "initial_conditions",
+                        "boundary_forcing",
+                        "surface_forcing",
+                        "tidal_forcing",
+                        "river_forcing",
+                        "cdr_forcing",
+                        "restart",
+                        "history",
+                        "average",
+                        "output",
+                        "gas_exchange",
+                        "upscaling",
+                        "cdr_output",
+                        "emitted_blueprint",
+                        "config",
+                        "build",
+                        "log",
+                        "figure",
+                        "other"
+                    ],
+                    "title": "Kind",
+                    "type": "string"
+                },
+                "path": {
+                    "description": "The location of the product, relative to the step root.",
+                    "title": "Path",
+                    "type": "string"
+                },
+                "size_bytes": {
+                    "default": 0,
+                    "description": "The size of the product in bytes; zero when not measured.",
+                    "title": "Size Bytes",
+                    "type": "integer"
+                },
+                "sha256": {
+                    "default": "",
+                    "description": "The content digest of the product; empty when not computed.",
+                    "title": "Sha256",
+                    "type": "string"
+                },
+                "metadata": {
+                    "additionalProperties": {
+                        "anyOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "integer"
+                            },
+                            {
+                                "type": "number"
+                            },
+                            {
+                                "items": {
+                                    "type": "string"
+                                },
+                                "type": "array"
+                            }
+                        ]
+                    },
+                    "description": "Model-specific detail, such as an output stream.",
+                    "title": "Metadata",
+                    "type": "object"
+                }
+            },
+            "required": [
+                "kind",
+                "path"
+            ],
+            "title": "Product",
+            "type": "object"
+        },
+        "SourceDataRef": {
+            "additionalProperties": false,
+            "description": "Source data a blueprint reads.",
+            "properties": {
+                "location": {
+                    "description": "Where the data lives.",
+                    "title": "Location",
+                    "type": "string"
+                },
+                "name": {
+                    "default": "",
+                    "description": "The dataset's name, when it has one.",
+                    "title": "Name",
+                    "type": "string"
+                },
+                "hash": {
+                    "default": "",
+                    "description": "The content hash of the data, when recorded.",
+                    "title": "Hash",
+                    "type": "string"
+                }
+            },
+            "required": [
+                "location"
+            ],
+            "title": "SourceDataRef",
+            "type": "object"
+        },
+        "StepEntry": {
+            "additionalProperties": false,
+            "description": "A step of the run, as the manifest knows it.",
+            "properties": {
+                "name": {
+                    "description": "The name of the step.",
+                    "title": "Name",
+                    "type": "string"
+                },
+                "application": {
+                    "description": "The application the step runs.",
+                    "title": "Application",
+                    "type": "string"
+                },
+                "working_dir": {
+                    "description": "The step's working directory relative to the run root; `.` for a standalone run.",
+                    "title": "Working Dir",
+                    "type": "string"
+                },
+                "definition_hash": {
+                    "default": "",
+                    "description": "A fingerprint of what the step computes (see `describe_steps`).",
+                    "title": "Definition Hash",
+                    "type": "string"
+                },
+                "blueprint": {
+                    "anyOf": [
+                        {
+                            "$ref": "#/$defs/BlueprintIdentity"
+                        },
+                        {
+                            "type": "null"
+                        }
+                    ],
+                    "default": null,
+                    "description": "The blueprint the step runs; `None` until a deferred step's record names it."
+                },
+                "carried_blueprint": {
+                    "default": "",
+                    "description": "The copy of the step's blueprint file the latest attempt with a directory\ncarried, relative to the run root; empty when that attempt carried none for\nthe step. Not the file the step ran: that is its record's `blueprint_file`.",
+                    "title": "Carried Blueprint",
+                    "type": "string"
+                },
+                "launcher": {
+                    "default": "",
+                    "description": "The launcher that last submitted the step (`slurm` or `local`), which says\nwhat `job_id` is; empty when never submitted by an orchestrator.",
+                    "title": "Launcher",
+                    "type": "string"
+                },
+                "job_id": {
+                    "default": "",
+                    "description": "The id of the step's latest submission: a SLURM job id under `slurm`, the\nprocess id of the step's launch script under `local`; empty when never\nsubmitted.",
+                    "title": "Job Id",
+                    "type": "string"
+                },
+                "submitted_at": {
+                    "anyOf": [
+                        {
+                            "format": "date-time",
+                            "type": "string"
+                        },
+                        {
+                            "type": "null"
+                        }
+                    ],
+                    "default": null,
+                    "description": "When the latest submission was made; `None` when never submitted.",
+                    "title": "Submitted At"
+                },
+                "status": {
+                    "default": "",
+                    "description": "The orchestration status name as of `observed_at`; empty when never observed.",
+                    "title": "Status",
+                    "type": "string"
+                },
+                "record": {
+                    "anyOf": [
+                        {
+                            "$ref": "#/$defs/StepRecord"
+                        },
+                        {
+                            "type": "null"
+                        }
+                    ],
+                    "default": null,
+                    "description": "The step's record, folded in once the step has written it."
+                }
+            },
+            "required": [
+                "name",
+                "application",
+                "working_dir"
+            ],
+            "title": "StepEntry",
+            "type": "object"
+        },
+        "StepRecord": {
+            "additionalProperties": false,
+            "description": "What a step did: written by the step process, in its working directory.",
+            "properties": {
+                "schema_version": {
+                    "default": "1.2.0",
+                    "description": "The schema version for the document.",
+                    "title": "Schema Version",
+                    "type": "string"
+                },
+                "run_id": {
+                    "default": "",
+                    "description": "The run the step belongs to; empty for a standalone `cstar blueprint run`.",
+                    "title": "Run Id",
+                    "type": "string"
+                },
+                "step": {
+                    "description": "The name of the step.",
+                    "title": "Step",
+                    "type": "string"
+                },
+                "application": {
+                    "description": "The application the step ran.",
+                    "title": "Application",
+                    "type": "string"
+                },
+                "blueprint": {
+                    "$ref": "#/$defs/BlueprintIdentity",
+                    "description": "The blueprint the step ran."
+                },
+                "blueprint_schema_version": {
+                    "default": "",
+                    "description": "The schema version of the blueprint the step ran.",
+                    "title": "Blueprint Schema Version",
+                    "type": "string"
+                },
+                "blueprint_file": {
+                    "default": "",
+                    "description": "The blueprint file the step ran, such as `work/<stem>.ovrd.yaml`, relative to\nthe step root; empty when it lies outside the step root.",
+                    "title": "Blueprint File",
+                    "type": "string"
+                },
+                "outcome": {
+                    "description": "The runner's execution status as its lowercase name, e.g. `completed`.",
+                    "title": "Outcome",
+                    "type": "string"
+                },
+                "start_at": {
+                    "anyOf": [
+                        {
+                            "format": "date-time",
+                            "type": "string"
+                        },
+                        {
+                            "type": "null"
+                        }
+                    ],
+                    "default": null,
+                    "description": "When the step process started; `None` when it never started.",
+                    "title": "Start At"
+                },
+                "finished_at": {
+                    "description": "When the step process recorded its outcome.",
+                    "format": "date-time",
+                    "title": "Finished At",
+                    "type": "string"
+                },
+                "system": {
+                    "default": "",
+                    "description": "The C-Star system the step ran on.",
+                    "title": "System",
+                    "type": "string"
+                },
+                "versions": {
+                    "additionalProperties": {
+                        "type": "string"
+                    },
+                    "description": "The versions of the packages the step ran with.",
+                    "title": "Versions",
+                    "type": "object"
+                },
+                "execution": {
+                    "$ref": "#/$defs/ExecutionFacts",
+                    "description": "What ran the step."
+                },
+                "products": {
+                    "description": "What the step produced.",
+                    "items": {
+                        "$ref": "#/$defs/Product"
+                    },
+                    "title": "Products",
+                    "type": "array"
+                },
+                "errors": {
+                    "description": "The errors the step reported.",
+                    "items": {
+                        "type": "string"
+                    },
+                    "title": "Errors",
+                    "type": "array"
+                }
+            },
+            "required": [
+                "step",
+                "application",
+                "blueprint",
+                "outcome",
+                "finished_at"
+            ],
+            "title": "StepRecord",
+            "type": "object"
+        },
+        "WorkplanIdentity": {
+            "additionalProperties": false,
+            "description": "Identifies the workplan a run was scheduled from.",
+            "properties": {
+                "name": {
+                    "description": "The name of the workplan.",
+                    "title": "Name",
+                    "type": "string"
+                },
+                "content_hash": {
+                    "description": "A fingerprint of the workplan as authored.",
+                    "title": "Content Hash",
+                    "type": "string"
+                },
+                "path": {
+                    "description": "The workplan file, as given on the command line.",
+                    "title": "Path",
+                    "type": "string"
+                }
+            },
+            "required": [
+                "name",
+                "content_hash",
+                "path"
+            ],
+            "title": "WorkplanIdentity",
+            "type": "object"
+        }
+    },
+    "additionalProperties": false,
+    "description": "The description of a run: written to its run root.",
+    "properties": {
+        "schema_version": {
+            "default": "1.2.0",
+            "description": "The schema version for the document.",
+            "title": "Schema Version",
+            "type": "string"
+        },
+        "id": {
+            "description": "A unique identifier minted when the manifest is first written.",
+            "title": "Id",
+            "type": "string"
+        },
+        "run_id": {
+            "description": "The run's id: the name of its directory.",
+            "title": "Run Id",
+            "type": "string"
+        },
+        "name": {
+            "description": "The name of the workplan or blueprint the run was made from.",
+            "title": "Name",
+            "type": "string"
+        },
+        "kind": {
+            "description": "Whether the run is a workplan or a standalone blueprint.",
+            "enum": [
+                "workplan",
+                "blueprint"
+            ],
+            "title": "Kind",
+            "type": "string"
+        },
+        "system": {
+            "default": "",
+            "description": "The C-Star system the run was first scheduled on.",
+            "title": "System",
+            "type": "string"
+        },
+        "created_at": {
+            "description": "When the manifest was first written.",
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+        },
+        "workplan": {
+            "anyOf": [
+                {
+                    "$ref": "#/$defs/WorkplanIdentity"
+                },
+                {
+                    "type": "null"
+                }
+            ],
+            "default": null,
+            "description": "The workplan the run was scheduled from; `None` for a standalone blueprint."
+        },
+        "attempts": {
+            "description": "Every scheduling of the run, oldest first.",
+            "items": {
+                "$ref": "#/$defs/Attempt"
+            },
+            "title": "Attempts",
+            "type": "array"
+        },
+        "steps": {
+            "description": "The steps of the run.",
+            "items": {
+                "$ref": "#/$defs/StepEntry"
+            },
+            "title": "Steps",
+            "type": "array"
+        },
+        "external": {
+            "$ref": "#/$defs/ExternalDependencies",
+            "description": "What the run depends on outside itself."
+        },
+        "observed_at": {
+            "anyOf": [
+                {
+                    "format": "date-time",
+                    "type": "string"
+                },
+                {
+                    "type": "null"
+                }
+            ],
+            "default": null,
+            "description": "When the statuses and records were last folded in.",
+            "title": "Observed At"
+        }
+    },
+    "required": [
+        "run_id",
+        "name",
+        "kind",
+        "created_at",
+        "attempts",
+        "steps"
+    ],
+    "title": "RunManifest",
+    "type": "object"
+}
