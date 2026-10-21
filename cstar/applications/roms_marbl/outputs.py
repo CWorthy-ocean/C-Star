@@ -1,8 +1,8 @@
 """The names and models of the files a ROMS-MARBL step writes.
 
 How ROMS names its output streams, which streams have an artifact kind of
-their own, and the models that parse restart, boundary and carbonate
-sensitivity file names.
+their own, and the models that parse restart, boundary, carbonate sensitivity and CDR
+output file names.
 """
 
 import re
@@ -608,6 +608,33 @@ class CarbonateSensitivityFile(TimestampedOutputFile):
     SUFFIX: t.ClassVar[str] = "_cdrgas"
     """A unique suffix found in the name of carbonate sensitivity files"""
     LABEL: t.ClassVar[str] = "carbonate sensitivity"
+
+
+class CdrOutputFile(TimestampedOutputFile):
+    """Reference to a path that contains CDR diagnostics (`<base>_cdr.<timestamp>.nc`),
+    as written by a ROMS-MARBL run with CDR forcing that sets
+    `cdr_output.do_cdr_output`.
+    """
+
+    SUFFIX: t.ClassVar[str] = CDR_OUTPUT_SUFFIX
+    """A unique suffix found in the name of CDR output files."""
+    LABEL: t.ClassVar[str] = "CDR output"
+
+    @classmethod
+    def _search_glob(cls) -> str:
+        """Return a glob requiring the timestamp right after the suffix.
+
+        `_cdr` is a prefix of the suffixes of sibling ROMS output (`_cdrgas`,
+        `_cdrtrc`) and of the CDR forcing file `<name>_cdr.nc`, so the base
+        class's looser glob would match other kinds of file. A name that passes
+        this glob but not the naming convention still raises, as in the base
+        class.
+
+        Returns
+        -------
+        str
+        """
+        return f"*{cls.SUFFIX}.{TIMESTAMP_GLOB}*.{cls.EXT}"
 
 
 OUTPUT_STREAMS: t.Final[tuple[tuple[str, ArtifactKind, dict[str, str]], ...]] = (

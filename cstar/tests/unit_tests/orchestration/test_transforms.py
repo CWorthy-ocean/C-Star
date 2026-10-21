@@ -18,6 +18,7 @@ from cstar.applications.roms_marbl.models import RomsMarblBlueprint
 from cstar.applications.roms_marbl.outputs import (
     BoundaryFile,
     CarbonateSensitivityFile,
+    CdrOutputFile,
     RestartFile,
     restart_timestamp,
     warn_on_restart_start_date_mismatch,
@@ -2323,6 +2324,60 @@ def test_timestamped_output_file_find(tmp_path: Path) -> None:
         FileNotFoundError, match="No carbonate sensitivity files located"
     ):
         CarbonateSensitivityFile.find(tmp_path, notfound_ok=False)
+
+
+def test_cdr_output_file_find_skips_sibling_kinds(tmp_path: Path) -> None:
+    """Verify the `_cdr` search finds only CDR output: the sibling streams and
+    the CDR forcing file share the `_cdr` prefix and must be skipped, while a
+    name with the timestamp that breaks the naming convention still raises.
+
+    Parameters
+    ----------
+    tmp_path : Path
+        Temporary directory to search.
+    """
+    for name in (
+        "x_cdr.20120101020000.nc",
+        "x_cdr.20120101000000.nc",
+        "x_cdrgas.20120101000000.nc",
+        "x_cdrtrc.20120101000000.nc",
+        "x_his.20120101000000.nc",
+        "x_cdr.nc",
+    ):
+        (tmp_path / name).write_text("mock")
+
+    found = CdrOutputFile.find(tmp_path)
+
+    assert found is not None
+    assert [f.path.name for f in found] == [
+        "x_cdr.20120101000000.nc",
+        "x_cdr.20120101020000.nc",
+    ]
+    assert all(type(f) is CdrOutputFile for f in found)
+    assert [f.timestamp.hour for f in found] == [0, 2]
+
+    (tmp_path / "x_cdr.20120101000000_old.nc").write_text("mock")
+    with pytest.raises(ValueError, match="naming convention"):
+        CdrOutputFile.find(tmp_path)
+
+
+def test_timestamped_output_file_base_search_rejects_misnamed_files(
+    tmp_path: Path,
+) -> None:
+    """Verify the looser search of the other output kinds is unchanged by the
+    `_cdr` override: a misnamed file in the directory raises rather than
+    being skipped.
+
+    Parameters
+    ----------
+    tmp_path : Path
+        Temporary directory to search.
+    """
+    (tmp_path / "roms_cdrgas.20230201003000.nc").write_text("mock")
+    (tmp_path / "roms_cdrgas_old.nc").write_text("mock")
+
+    with pytest.raises(ValueError, match="naming convention"):
+        CarbonateSensitivityFile.find(tmp_path)
 
 
 def test_timestamped_output_file_find_single_file(tmp_path: Path) -> None:

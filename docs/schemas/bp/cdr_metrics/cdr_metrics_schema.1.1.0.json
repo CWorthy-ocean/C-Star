@@ -175,7 +175,7 @@
         },
         "PathLocation": {
             "additionalProperties": false,
-            "description": "A file or directory path in a blueprint.\n\nThe key is named `location` so that a relative value in a blueprint file is\nanchored to the blueprint file's directory by\n`cstar.orchestration.serialization.anchor_locations` when the file is\nloaded, the same rule as for dataset locations. In a workplan, placeholders\nsuch as ``{{output_dir: <step>}}`` are filled before validation. The path\nis not checked for existence here: a placeholder's path does not exist\nuntil its step has run.",
+            "description": "A file or directory path in a blueprint, under a `location` key.\n\nThe key is named `location` so that a relative value in a blueprint file is\nanchored to the blueprint file's directory by\n`cstar.orchestration.serialization.anchor_locations` when the file is\nloaded, the same rule as for dataset locations. In a workplan, placeholders\nsuch as ``{{output_dir: <step>}}`` are filled before validation. The path\nis not checked for existence: a placeholder's path does not exist until\nits step has run. Compare `Resource`, a data resource that may also be\nremote or pre-partitioned.",
             "properties": {
                 "location": {
                     "description": "The path; relative values are anchored to the blueprint file's directory.",

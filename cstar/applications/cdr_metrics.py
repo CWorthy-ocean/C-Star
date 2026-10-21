@@ -80,16 +80,17 @@ from cstar.applications.core import (
     RunnerResult,
     register_application,
 )
-from cstar.applications.roms_marbl.outputs import (
-    CDR_OUTPUT_SUFFIX,
-    TIMESTAMP_GLOB,
-    TimestampedOutputFile,
-)
+from cstar.applications.roms_marbl.outputs import CdrOutputFile
 from cstar.base.log import get_logger
 from cstar.base.utils import lazy_import
 from cstar.entrypoint.runner import BlueprintRunner
 from cstar.execution.handler import ExecutionStatus
-from cstar.orchestration.models import Blueprint, ConfiguredBaseModel, RequiredString
+from cstar.orchestration.models import (
+    Blueprint,
+    ConfiguredBaseModel,
+    PathLocation,
+    RequiredString,
+)
 
 if t.TYPE_CHECKING:
     from types import ModuleType
@@ -145,51 +146,6 @@ _REQUIRED_VARIABLES: t.Final[dict[str, str]] = {
 with the ROMS setting that writes it."""
 
 log = get_logger(__name__)
-
-
-class CdrOutputFile(TimestampedOutputFile):
-    """Reference to a ROMS-MARBL CDR output file, `<base>_cdr.<timestamp>.nc`."""
-
-    SUFFIX: t.ClassVar[str] = CDR_OUTPUT_SUFFIX
-    """A unique suffix found in the name of CDR output files."""
-    LABEL: t.ClassVar[str] = "CDR output"
-
-    @classmethod
-    def _search_glob(cls) -> str:
-        """Return a glob requiring the timestamp right after the suffix.
-
-        `_cdr` is a prefix of the suffixes of sibling ROMS output (`_cdrgas`,
-        `_cdrtrc`) and of the CDR forcing file `<name>_cdr.nc`, so the base
-        class's looser glob would match other kinds of file. A name that passes
-        this glob but not the naming convention still raises, as in the base
-        class.
-
-        Returns
-        -------
-        str
-        """
-        return f"*{cls.SUFFIX}.{TIMESTAMP_GLOB}*.{cls.EXT}"
-
-
-class PathLocation(ConfiguredBaseModel):
-    """A file or directory path in a blueprint.
-
-    The key is named `location` so that a relative value in a blueprint file is
-    anchored to the blueprint file's directory by
-    `cstar.orchestration.serialization.anchor_locations` when the file is
-    loaded, the same rule as for dataset locations. In a workplan, placeholders
-    such as ``{{output_dir: <step>}}`` are filled before validation. The path
-    is not checked for existence here: a placeholder's path does not exist
-    until its step has run.
-    """
-
-    location: Path
-    """The path; relative values are anchored to the blueprint file's directory."""
-
-    @field_validator("location", mode="after")
-    @classmethod
-    def _expand_user(cls, value: Path) -> Path:
-        return value.expanduser()
 
 
 class CdrDomain(ConfiguredBaseModel):

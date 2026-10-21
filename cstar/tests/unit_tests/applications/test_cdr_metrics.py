@@ -22,8 +22,6 @@ from cstar.applications.cdr_metrics import (
     CdrMetricsApplication,
     CdrMetricsBlueprint,
     CdrMetricsRunner,
-    CdrOutputFile,
-    PathLocation,
     check_contiguous,
     check_required_variables,
     compute_domain_metrics,
@@ -33,9 +31,10 @@ from cstar.applications.cdr_metrics import (
     source_sign_report,
 )
 from cstar.applications.core import RunnerRequest, get_application
-from cstar.applications.roms_marbl.outputs import CarbonateSensitivityFile
+from cstar.applications.roms_marbl.outputs import CdrOutputFile
 from cstar.entrypoint.config import JobConfig, ServiceConfiguration
 from cstar.execution.handler import ExecutionStatus
+from cstar.orchestration.models import PathLocation
 from cstar.orchestration.serialization import load_blueprint
 
 WINDOW = 3600.0
@@ -391,10 +390,6 @@ class TestCdrMetricsBlueprint:
         with pytest.raises(ValidationError, match="extra"):
             CdrMetricsBlueprint(**blueprint_kwargs)
 
-    def test_user_directory_is_expanded(self) -> None:
-        """Verify `~` in a location is expanded."""
-        assert PathLocation(location=Path("~/x")).location == Path("~/x").expanduser()
-
     def test_relative_locations_anchor_to_the_blueprint_file(
         self, tmp_path: Path
     ) -> None:
@@ -435,8 +430,8 @@ class TestCdrMetricsBlueprint:
         ]
 
 
-class TestCdrOutputFile:
-    """Tests for `CdrOutputFile` and `find_cdr_output`."""
+class TestFindCdrOutput:
+    """Tests for `find_cdr_output`."""
 
     def test_only_cdr_output_is_found(self, cdr_dirs: dict[str, Path]) -> None:
         """Verify the directory search skips sibling output kinds and the forcing file."""
@@ -522,25 +517,6 @@ class TestCdrOutputFile:
         """Verify a source that does not exist is refused, naming it."""
         with pytest.raises(ValueError, match="No directory or file found"):
             find_cdr_output(_locations(tmp_path / "absent"))
-
-    def test_misnamed_file_passing_the_glob_still_raises(self, tmp_path: Path) -> None:
-        """Verify a name that has the timestamp but breaks the naming convention
-        raises, as it does for the other kinds of output file.
-        """
-        _touch(tmp_path / "x_cdr.20120101000000_old.nc")
-
-        with pytest.raises(ValueError, match="naming convention"):
-            find_cdr_output(_locations(tmp_path))
-
-    def test_base_search_still_rejects_misnamed_files(self, tmp_path: Path) -> None:
-        """Verify the looser search of other output kinds is unchanged: a misnamed
-        file in the directory raises rather than being skipped.
-        """
-        _touch(tmp_path / "roms_cdrgas.20120101000000.nc")
-        _touch(tmp_path / "roms_cdrgas_old.nc")
-
-        with pytest.raises(ValueError, match="naming convention"):
-            CarbonateSensitivityFile.find(tmp_path)
 
 
 class TestCheckContiguous:

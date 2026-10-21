@@ -18,6 +18,7 @@ from cstar.orchestration.models import (
     DeferredBlueprintRef,
     InlineBlueprintRef,
     KeyValueStore,
+    PathLocation,
     RunRef,
     Step,
     StepRef,
@@ -2305,3 +2306,20 @@ def test_deferred_blueprint_from_step_is_canonical_and_matches_dependency(
     blueprint = wp.steps[0].blueprint_path
     assert isinstance(blueprint, DeferredBlueprintRef)
     assert blueprint.from_step == "build@spinup"
+
+
+def test_path_location_expands_user() -> None:
+    """Verify `~` in a location is expanded and nothing else is touched: a
+    placeholder or a missing relative path is kept as given.
+    """
+    assert PathLocation(location=Path("~/x")).location == Path("~/x").expanduser()
+    assert PathLocation(location="{{output_dir: run}}/output").location == Path(
+        "{{output_dir: run}}/output"
+    )
+    assert PathLocation(location="absent/grid.nc").location == Path("absent/grid.nc")
+
+
+def test_path_location_rejects_extra_keys() -> None:
+    """Verify a mistyped key beside `location` is an error."""
+    with pytest.raises(ValidationError, match="extra"):
+        PathLocation.model_validate({"location": "grid.nc", "path": "grid.nc"})
