@@ -337,9 +337,9 @@ class CDRUpscaler:
             record_file = Path(_file_of_record(self.files, record)).name
             msg = (
                 "`ocean_time` of the concatenated `_uscl` files is not strictly "
-                f"increasing: record {record} ({ocean_time[record]:g} s, in "
+                f"increasing: record {record} ({ocean_time[record]:.0f} s, in "
                 f"{record_file}) does not follow record {record - 1} "
-                f"({ocean_time[record - 1]:g} s, in {previous_file}). The files "
+                f"({ocean_time[record - 1]:.0f} s, in {previous_file}). The files "
                 "contain repeated or out-of-order records."
             )
             raise ValueError(msg)

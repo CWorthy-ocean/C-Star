@@ -78,8 +78,9 @@
 #   cdr_output_nrpf    records per file (nrpf x period must divide the 86400 s restart
 #                      period). Hourly CDR output on the parent grid is 5.9 GB per
 #                      simulated day, so a full run wants 86400 and 1.
-# Tiling is a forge-step override of domain.partitioning (it sets the ranks of the roms step
-# and, at run time, np_xi/np_eta); the namelist forge writes keeps the committed 4x4/2x4.
+# Tiling is a forge-step override of domain.partitioning. The committed blueprints keep
+# 4x4 (parent, parent_up) and 2x4 (child); the override replaces them before forge runs,
+# so forge's namelist (np_xi/np_eta) and the roms step both use the vars-file tiling.
 name: ccs-nest-upscale
 description: CCS 16 km parent, 4 km nested child with an ALK release, upscaled back onto the parent, with CDR metrics
 state: draft

@@ -82,13 +82,6 @@ calls ``MPI_Abort``; a blow-up prints ``BLOWUP``. C-Star's logger writes its lev
 carries on after it, logging the exception with a traceback) does not match. A
 ``Traceback`` is not a marker for that reason; a real exception fails the step's status.
 """
-CDR_TIME_EPOCH = datetime(2000, 1, 1)
-"""The date ``cdr_time`` is counted from, in days, in this example.
-
-The upscaler labels ``cdr_time`` "days since 2000/01/01" but writes the child's model
-time (``ocean_time`` / 86400), which counts from the model reference date. The two agree
-here because this example's ``model_reference_date`` is 2000-01-01.
-"""
 CDF5_MAGIC = b"CDF\x05"
 COMBINED_SERIES = (
     "cdr_carbon_uptake_from_flux",
@@ -275,10 +268,16 @@ def alk_profile(ds: "xr.Dataset") -> "xr.DataArray":
 
 
 def child_start_days() -> float:
-    """The child's start, in days since `CDR_TIME_EPOCH`, from its forge blueprint."""
-    blueprint = yaml.safe_load((EXAMPLE_DIR / "forge_child.yaml").read_text())
-    start = datetime.fromisoformat(blueprint["run"]["start_date"])
-    return (start - CDR_TIME_EPOCH).total_seconds() / 86400
+    """The child's start, in days since its model reference date, from its forge blueprint.
+
+    The upscaler labels ``cdr_time`` "days since 2000/01/01" but writes the child's model
+    time (``ocean_time`` / 86400), which counts from the model reference date, so that
+    is the epoch to use.
+    """
+    run = yaml.safe_load((EXAMPLE_DIR / "forge_child.yaml").read_text())["run"]
+    start = datetime.fromisoformat(run["start_date"])
+    epoch = datetime.fromisoformat(run["model_reference_date"])
+    return (start - epoch).total_seconds() / 86400
 
 
 def test_all_steps_done(nesting_run: NestingRun) -> None:

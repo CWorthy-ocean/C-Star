@@ -414,16 +414,17 @@ _HOUR_S = 3600.0
 """Seconds between records in the time-ordered synthetic `_uscl` files."""
 
 
-def _write_hourly_uscl(path: Path, hours: list[int]) -> Path:
+def _write_hourly_uscl(path: Path, hours: list[int], offset_s: float = 0.0) -> Path:
     """Write a tiny `_uscl` file with one record per entry of *hours*.
 
     Every flux and layer thickness at a record equals its hour, so records can be
-    traced through the concatenation.
+    traced through the concatenation. *offset_s* is added to every `ocean_time`,
+    as the seconds since the model reference date of a real run are large.
     """
     h = np.asarray(hours, dtype=float)
     ds = xr.Dataset(
         {
-            "ocean_time": (("time",), h * _HOUR_S),
+            "ocean_time": (("time",), h * _HOUR_S + offset_s),
             "lat_north": (("xi_rho",), np.linspace(10.0, 11.0, _N_XI)),
             "lon_north": (("xi_rho",), np.linspace(20.0, 21.0, _N_XI)),
             "lat_east": (("eta_rho",), np.linspace(10.0, 11.0, _N_ETA)),
@@ -555,6 +556,33 @@ class TestCDRUpscalerTimeOrder:
             "`ocean_time` of the concatenated `_uscl` files is not strictly "
             "increasing: record 3 (7200 s, in roms_uscl.20240101020000.nc) does "
             "not follow record 2 (7200 s, in roms_uscl.20240101000000.nc). The "
+            "files contain repeated or out-of-order records."
+        )
+
+    def test_overlapping_records_error_shows_large_times_to_the_second(
+        self, tmp_path: Path
+    ) -> None:
+        """Verify times of a real run (about 3.8e8 s) a minute apart print as
+        different numbers, not rounded to the same six significant digits.
+        """
+        run_start_s = 380_000_000.0
+        first = _write_hourly_uscl(
+            tmp_path / "roms_uscl.20240101000000.nc", [0, 1, 2], offset_s=run_start_s
+        )
+        # The second file starts a minute before the last record of the first.
+        second = _write_hourly_uscl(
+            tmp_path / "roms_uscl.20240101020000.nc",
+            [2, 3, 4],
+            offset_s=run_start_s - 60.0,
+        )
+
+        with pytest.raises(ValueError) as excinfo:
+            CDRUpscaler([first, second])
+
+        assert str(excinfo.value) == (
+            "`ocean_time` of the concatenated `_uscl` files is not strictly "
+            "increasing: record 3 (380007140 s, in roms_uscl.20240101020000.nc) does "
+            "not follow record 2 (380007200 s, in roms_uscl.20240101000000.nc). The "
             "files contain repeated or out-of-order records."
         )
 

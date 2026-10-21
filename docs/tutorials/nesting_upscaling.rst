@@ -139,8 +139,8 @@ steps are three different builds.
    * - ``forge_parent``
      - ``forge``
      - Builds the parent grid and its initial, surface and boundary forcing
-       (2012-01-01 12:00 to 01-03 07:00), and extracts hourly boundary data
-       for the child
+       (2012-01-01 12:00 to 01-03 07:00), and prepares the hourly boundary
+       extraction for the child
      - 9 s
    * - ``forge_child``
      - ``forge``
@@ -229,6 +229,14 @@ The two domains are combined in a specific way:
 
 ``cdr_metrics.nc`` also holds each domain's own uptake, such as
 ``child_carbon_uptake_from_flux`` and ``parent_up_carbon_uptake_from_flux``.
+It holds one diagnostic as well, ``parent_up_DIC_difference_inside_child``: the
+DIC perturbation that ``parent_up`` carries inside the child's footprint. In a
+one-way nested run it is normally not zero. The upscaled source is injected on
+the child's boundary, and anomaly that the child exported can recirculate into
+the footprint. It was 1.99 tonnes in the reference run below. A nonzero value
+is expected here; ``closure_residual`` is the consistency check. The
+:doc:`workplans page <../workplans>` explains the diagnostic in its section
+"Nested (upscaled) experiments".
 
 At the end of the run (2012-01-03 06:00), a reference run with ucla-roms 0.11.0
 gave these values (rounded):
@@ -260,6 +268,13 @@ gave these values (rounded):
 
 Your numbers should be close to these but need not match them exactly: they
 depend on the ucla-roms and roms-tools versions and on the compiler.
+
+``parent_up`` applies each hour of upscaled flux one hour late. The ``_uscl``
+records are hour averages stamped at the end of the hour, but ROMS holds each
+record from its time stamp. So the last upscaled record, the final hour's
+export, is never applied. Here that is 1 hour of 24. The weekly extended
+integration test checks that ``parent_up`` injects the upscaled alkalinity on
+every record but the last.
 
 The workplan
 ------------

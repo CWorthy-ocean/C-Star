@@ -5,13 +5,18 @@ over them. The blueprints are written once and committed, so a schema bump or a 
 that drifts to a commit hash would otherwise show up only when someone runs the example.
 """
 
+import re
 import typing as t
+from datetime import datetime
 from pathlib import Path
 
 import pytest
 import yaml
 
+from cstar.applications.cdr_metrics import CdrDomain
 from cstar.applications.forge.blueprint import FORGE_BLUEPRINT_VERSION, ForgeBlueprint
+from cstar.applications.roms_marbl.outputs import RestartFile
+from cstar.applications.roms_marbl.transforms import ContinuanceDirective
 from cstar.orchestration.models import Workplan
 from cstar.orchestration.serialization import deserialize
 from cstar.roms.namelist import is_commit_hash
@@ -101,10 +106,51 @@ def test_cdr_metrics_step_assigns_the_source_roles(
     domains = t.cast("dict[str, dict[str, t.Any]]", step.blueprint_overrides["domains"])
 
     assert set(domains) == {"child", "parent_up"}
-    # "release" is the default role
-    assert domains["child"].get("source_role", "release") == "release"
+    default_role = CdrDomain.model_fields["source_role"].default
+    assert domains["child"].get("source_role", default_role) == "release"
     assert domains["parent_up"]["source_role"] == "transfer"
     assert domains["child"]["grid"]["location"].startswith("{{root_dir: forge_child}}/")
     assert domains["parent_up"]["grid"]["location"].startswith(
         "{{root_dir: forge_parent_up}}/"
     )
+
+
+def test_tiny_workplan_starts_the_child_where_its_blueprint_does(
+    tutorials: Path,
+) -> None:
+    """The restart ``nest_ic`` reads and the one ``parent_up`` continues from are the child's start.
+
+    The tiny workplan names that restart by hand, in the file stamp of ``parent_rst`` and
+    in the ``timestamp`` of ``parent_up``'s ``continue-from``. If the child's
+    ``run.start_date`` moves and these do not, the child starts from the wrong parent
+    state, and ``parent_up`` from a different time than the child.
+    """
+    example = tutorials / "nesting_upscaling_tiny"
+    child = ForgeBlueprint.from_yaml(example / "forge_child.yaml")
+    workplan = deserialize(example / "workplan.yaml", Workplan)
+    steps = {s.name: s for s in workplan.steps}
+
+    parent_rst = str(steps["nest_ic"].blueprint_overrides["parent_rst"])
+    match = re.search(r"output_rst\.(\d{14})\.nc$", parent_rst)
+    assert match, parent_rst
+    assert datetime.strptime(match[1], RestartFile.FMT_TS) == child.run.start_date
+
+    continue_from = t.cast(
+        "dict[str, t.Any]", steps["parent_up"].directives[ContinuanceDirective.key()]
+    )
+    timestamp = datetime.fromisoformat(
+        str(continue_from[ContinuanceDirective.KEY_TIMESTAMP])
+    )
+    assert timestamp == child.run.start_date
+
+
+def test_tiny_parent_up_ends_with_the_child(tutorials: Path) -> None:
+    """``parent_up`` runs to the child's end, so both have a record at the last time.
+
+    The combined metrics' final record is finite only if both domains reach it.
+    """
+    example = tutorials / "nesting_upscaling_tiny"
+    child = ForgeBlueprint.from_yaml(example / "forge_child.yaml")
+    parent_up = ForgeBlueprint.from_yaml(example / "forge_parent_up.yaml")
+
+    assert parent_up.run.end_date == child.run.end_date

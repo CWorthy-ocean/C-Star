@@ -49,10 +49,14 @@ You need:
 - The setup of the :doc:`tiny tutorial <nesting_upscaling>`: a source checkout
   of C-Star and an activated conda environment.
 - roms-tools from its main branch, at or after commit ``f9b07d42``, until a
-  roms-tools release carries it. roms-tools `#705
+  roms-tools release carries it. The 5.2.1 release does not. roms-tools `#705
   <https://github.com/CWorthy-ocean/roms-tools/pull/705>`__ fixed the edge
   labels in ``compute_boundary_distance``, so that ``align_grids`` blends the
-  child's boundary with the parent's. Install it into the C-Star environment:
+  child's boundary with the parent's. The fix matters only when a child
+  boundary is closed. This child's east boundary is closed
+  (``open_boundaries.east: false`` in ``forge_child.yaml``). The tiny
+  tutorial's child has four open boundaries, so it does not need the fix.
+  Install it into the C-Star environment:
 
   .. code-block:: console
 
@@ -316,7 +320,9 @@ used here.
   writing them with ParallelIO on 0.10.1.
 - **parent_up applies each hour of upscaled flux one hour late.** The
   ``_uscl`` records are hour averages stamped at the end of the hour, but ROMS
-  holds each record from its time stamp. Conservation is not affected.
+  holds each record from its time stamp. Each record is applied in full, so
+  conservation is not affected. The final upscaled record, the last hour's
+  export, is never applied; over 184 days that is negligible.
 - **The child's kinetic energy was abnormally high** in the earlier run. A
   possible cause is the child's boundary, which was not blended with the
   parent's before the roms-tools fix named above. This is not yet re-checked.
