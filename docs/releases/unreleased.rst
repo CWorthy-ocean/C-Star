@@ -39,6 +39,21 @@ New features
   - A directory holding ``cstar-run.yaml`` but no ``tasks/`` (a standalone ``cstar blueprint run``) is accepted as a target.
 
 - Custom applications declare their products by overriding ``artifacts()`` on their ``ApplicationDefinition`` with glob patterns per ``ArtifactKind``; a runner may add metadata to a product while it runs. (`#786 <https://github.com/CWorthy-ocean/C-Star/pull/786>`_)
+- New ``cdr_metrics`` application writes the CDR efficiency and CO₂ uptake time series (``output/cdr_metrics.nc``) and a plot of them (``output/cdr_metrics.png``) from ROMS-MARBL ``_cdr`` output. (`#773 <https://github.com/CWorthy-ocean/C-Star/pull/773>`_)
+
+  - ``sources`` lists any number of directories or files, such as the segments of a ``continue-from`` chain; their records are stitched together and sorted by time.
+  - A gap or overlap between consecutive averaging windows (a missing or repeated segment) fails the step and names the records.
+  - Paths are given as ``location:`` entries, so relative paths resolve against the blueprint file and workplan placeholders such as ``{{output_dir: <step>}}`` work.
+
+- ``domains`` maps a domain name to its grid and sources, ordered child to parent; one domain gives single-domain metrics. (`#773 <https://github.com/CWorthy-ocean/C-Star/pull/773>`_)
+- Nested (upscaled) experiments: mark each parent domain with ``source_role: transfer``, and the domains are combined with roms-tools' ``UpscaledCDR``. (`#773 <https://github.com/CWorthy-ocean/C-Star/pull/773>`_)
+
+  - The CO₂ uptake of all domains is summed; the efficiency is normalised by the release domain's cumulative source only, so the transferred alkalinity is not counted twice.
+  - ``cdr_metrics.nc`` then also holds each domain's uptake series and the ``closure_residual`` and ``<parent>_DIC_difference_inside_<child>`` diagnostics, and ``output/cdr_domains.png`` maps the domains.
+  - Parents must be MARBL runs writing ``_cdr`` output; a CDR-lite parent (which writes ``_cdrtrc``) cannot be analysed.
+
+- ``_cdr`` output lacking a variable the metrics need is reported with the ROMS setting that writes it; a release domain whose sources have the wrong sign fails with a report of where and how much. (`#773 <https://github.com/CWorthy-ocean/C-Star/pull/773>`_)
+- The metrics file records its provenance: domains and roles, grid files, number of ``_cdr`` files and the roms-tools version. (`#773 <https://github.com/CWorthy-ocean/C-Star/pull/773>`_)
 
 Bug Fixes
 ~~~~~~~~~
@@ -62,3 +77,6 @@ Miscellaneous
 - The "Re-running a workplan" docs state the rule and its two escape hatches. (`#783 <https://github.com/CWorthy-ocean/C-Star/pull/783>`_)
 - Docs: a "Declaring Products" section with the kinds table in the custom-applications guide, the products and product checks in the workplans guide, the Product term; the published run schemas' ``kind`` examples list ``config``. (`#786 <https://github.com/CWorthy-ocean/C-Star/pull/786>`_)
 - The hello_world e2e asserts empty products and no product findings; the Tier 2 forge-to-ROMS e2e asserts both records list their products, ``show`` totals are non-zero and ``check`` finds no product problem. (`#786 <https://github.com/CWorthy-ocean/C-Star/pull/786>`_)
+- Workplans guide: new "Computing CDR metrics from segmented runs" section, including a note that flux-based metrics currently differ across a restart while DIC-based metrics match. (`#773 <https://github.com/CWorthy-ocean/C-Star/pull/773>`_)
+- Published blueprint schema ``cdr_metrics`` 1.1.0. (`#773 <https://github.com/CWorthy-ocean/C-Star/pull/773>`_)
+- Tier 2 e2e: the MARBL forge step gains an ALK release; two new ROMS steps form a ``continue-from`` chain; two ``cdr_metrics`` steps compute metrics from the whole run and from the segments. (`#773 <https://github.com/CWorthy-ocean/C-Star/pull/773>`_)
