@@ -101,6 +101,10 @@ Improvements
 
   - A recorded ``_cdr`` file missing from disk now fails the step, naming the domain and pointing at ``cstar run check``, instead of the step silently using the files that remain.
 
+- ``continue-from``, ``nest-from`` and ``carbonate-sensitivity-from`` read a step's recorded files only from its ``output`` directory, the same directory they search when the record lists none. (`#795 <https://github.com/CWorthy-ocean/C-Star/pull/795>`_)
+- The upscaler resolves a linked ``uscl_file_location`` first, so it reads the record of the step the link points to and refuses a recorded ``_uscl`` file missing from disk. (`#795 <https://github.com/CWorthy-ocean/C-Star/pull/795>`_)
+- One shared helper now reads a step's recorded files of a kind in one directory, replacing three copies of the same lookup. (`#795 <https://github.com/CWorthy-ocean/C-Star/pull/795>`_)
+
 
 
 Miscellaneous
