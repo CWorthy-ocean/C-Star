@@ -114,6 +114,8 @@ C-Star is built with these principles in mind:
     :hidden:
 
     End to end: a new domain to a running simulation <tutorials/end_to_end>
+    The same run as a workplan <tutorials/workplan>
+    Spin-up, continuation and a nested grid <tutorials/nested_workplan>
 
 .. toctree::
     :maxdepth: 2

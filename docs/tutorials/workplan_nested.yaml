@@ -1,0 +1,73 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/CWorthy-ocean/C-Star/refs/heads/main/docs/schemas/wp/workplan_schema.1.0.0.json
+name: wio-nested
+description: Spin up the outer domain, finish it, then run a nested inner domain
+state: draft
+
+steps:
+  # Generate the inputs for both grids. Neither depends on the other, so they
+  # run at the same time.
+  - name: make_outer
+    application: forge
+    blueprint: ./forge_blueprint_wio_outer.yaml
+
+  - name: make_inner
+    application: forge
+    blueprint: ./forge_blueprint_wio_inner.yaml
+
+  # Day 1 of the outer domain: a spin-up with the history output turned off.
+  - name: spinup
+    application: roms_marbl
+    blueprint:
+      from_step: make_outer
+    depends_on:
+      - make_outer
+    blueprint_overrides:
+      runtime_params:
+        end_date: "2012-01-02 00:00:00"
+      namelist_overrides:
+        basic_output_settings:
+          wrt_file_his: false
+
+  # Day 2 of the outer domain, continued from the spin-up's restart, with
+  # the history output on again.
+  - name: outer
+    application: roms_marbl
+    blueprint:
+      from_step: make_outer
+    depends_on:
+      - make_outer
+      - spinup
+    directives:
+      continue-from:
+        step: spinup
+
+  # Initial conditions for the inner grid, interpolated from the restart the
+  # spin-up wrote at the start of day 2.
+  - name: inner_ic
+    application: nest_ic
+    blueprint: inline
+    depends_on:
+      - make_outer
+      - make_inner
+      - spinup
+    blueprint_overrides:
+      parent_grid: "{{root_dir: make_outer}}/input_data/wio-outer_grid.nc"
+      parent_rst: "{{output_dir: spinup}}/output_rst.20120102000000.nc"
+      child_grid: "{{root_dir: make_inner}}/input_data/wio-inner_grid.nc"
+
+  # Day 2 of the inner domain: starts from inner_ic's file and takes its
+  # boundary values from the hourly extraction of both outer-grid runs.
+  - name: inner
+    application: roms_marbl
+    blueprint:
+      from_step: make_inner
+    depends_on:
+      - make_inner
+      - inner_ic
+      - spinup
+      - outer
+    directives:
+      continue-from:
+        step: inner_ic
+      nest-from:
+        step: spinup;outer
