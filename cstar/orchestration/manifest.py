@@ -12,6 +12,8 @@ without invalidating them.
 """
 
 import enum
+import threading
+import time
 import typing as t
 import uuid
 from collections.abc import Iterator
@@ -29,6 +31,7 @@ from cstar.base.log import get_logger
 from cstar.base.provenance import canonical_hash, package_versions, system_name
 from cstar.base.utils import _get_sha256_hash, slugify, utc_now
 from cstar.execution.file_system import (
+    LockTimeoutError,
     StateDirectoryManager,
     is_remote_resource,
     local_copy,
@@ -66,6 +69,14 @@ STEP_RECORD_NAME: t.Final[str] = "cstar-step.yaml"
 
 MANIFEST_LOCK_NAME: t.Final[str] = "manifest.lock"
 """The name of the lock file serializing run-manifest writers, in the run's state directory."""
+
+MANIFEST_LOCK_TIMEOUT: t.Final[float] = 60.0
+"""Seconds a writer waits for the manifest lock before it gives up: keeping the
+record of a run never holds up the run for longer."""
+
+_SUBMISSION_WRITERS: t.Final = threading.Lock()
+"""Serializes this process's writers of submissions, which an orchestrator runs on
+several threads at once: they queue here rather than poll the manifest lock."""
 
 ATTEMPTS_DIR_NAME: t.Final[str] = "attempts"
 """The directory, in the run root, holding the inputs each attempt carried."""
@@ -835,24 +846,37 @@ def write_step_record(step_root: Path, record: StepRecord) -> Path:
 
 
 @contextmanager
-def manifest_lock(run_id: str) -> Iterator[None]:
+def manifest_lock(
+    run_id: str, *, timeout: float = MANIFEST_LOCK_TIMEOUT
+) -> Iterator[None]:
     """Hold the exclusive lock serializing writers of a run's manifest.
 
     The lock file lives in the run's state directory. A standalone blueprint run
-    has one writer and never takes it.
+    has one writer and never takes it. A writer waits a bounded time, so one
+    that is stalled while it holds the lock (a suspended `cstar run status`, a
+    hung file system) cannot hold up the scheduling of a run.
 
     Parameters
     ----------
     run_id : str
         The run whose manifest is to be written.
+    timeout : float
+        Seconds to wait for another writer to release the lock.
 
     Yields
     ------
     None
         While the lock is held.
+
+    Raises
+    ------
+    LockTimeoutError
+        If another writer still holds the lock after `timeout` seconds.
+    LockUnsupportedError
+        If the file system holding the state directory does not support `flock`.
     """
     lock_path = StateDirectoryManager.run_state_dir(run_id=run_id) / MANIFEST_LOCK_NAME
-    with locked(lock_path):
+    with locked(lock_path, timeout=timeout):
         yield
 
 
@@ -1297,6 +1321,11 @@ def record_submission(
     sentinel, which carries the submission recorded when it was made, writes
     nothing.
 
+    The submissions this process records at once queue for each other first,
+    and all of them share one deadline of `MANIFEST_LOCK_TIMEOUT` seconds for
+    both locks: a writer stalled on the manifest lock costs the steps launched
+    together that long, not that long per step.
+
     Parameters
     ----------
     root : Path
@@ -1321,31 +1350,58 @@ def record_submission(
 
     Raises
     ------
+    LockTimeoutError
+        If the deadline passes before both locks are held.
+    LockUnsupportedError
+        If the file system holding the state directory does not support `flock`.
     CstarSchemaTooNewError
         If the manifest's schema is newer than this build reads.
     CstarError
         If the manifest cannot be read or is invalid.
     """
     submitted_at = _whole_second(submitted_at)
+    deadline = time.monotonic() + MANIFEST_LOCK_TIMEOUT
 
-    with manifest_lock(run_id):
-        manifest = read_run_manifest(root)
-        entry = manifest.step(step) if manifest else None
-        if manifest is None or entry is None:
-            log.debug(f"Run {run_id!r} has no manifest entry for step {step!r}")
-            return False
+    if not _SUBMISSION_WRITERS.acquire(timeout=MANIFEST_LOCK_TIMEOUT):
+        msg = f"Other submissions of run {run_id!r} kept the manifest busy"
+        raise LockTimeoutError(msg)
+    try:
+        remaining = max(0.0, deadline - time.monotonic())
+        with manifest_lock(run_id, timeout=remaining):
+            return _record_submission(
+                root, step, launcher=launcher, job_id=job_id, submitted_at=submitted_at
+            )
+    finally:
+        _SUBMISSION_WRITERS.release()
 
-        if (entry.launcher, entry.job_id, entry.submitted_at) == (
-            launcher,
-            job_id,
-            submitted_at,
-        ):
-            return False
 
-        entry.launcher = launcher
-        entry.job_id = job_id
-        entry.submitted_at = submitted_at
-        write_run_manifest(root, manifest)
+def _record_submission(
+    root: Path, step: str, *, launcher: str, job_id: str, submitted_at: datetime
+) -> bool:
+    """Set a step's submission in the manifest, under the caller's locks.
+
+    Returns
+    -------
+    bool
+        Whether the manifest was written.
+    """
+    manifest = read_run_manifest(root)
+    entry = manifest.step(step) if manifest else None
+    if manifest is None or entry is None:
+        log.debug(f"The manifest at {root} has no entry for step {step!r}")
+        return False
+
+    if (entry.launcher, entry.job_id, entry.submitted_at) == (
+        launcher,
+        job_id,
+        submitted_at,
+    ):
+        return False
+
+    entry.launcher = launcher
+    entry.job_id = job_id
+    entry.submitted_at = submitted_at
+    write_run_manifest(root, manifest)
     return True
 
 

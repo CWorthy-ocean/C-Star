@@ -27,6 +27,8 @@ from cstar.entrypoint.utils import ARG_CLOBBER, ARG_PRE_RUN, ARG_RUN_ID
 from cstar.execution.file_system import (
     DirectoryManager,
     JobFileSystemManager,
+    LockTimeoutError,
+    LockUnsupportedError,
     StateDirectoryManager,
 )
 from cstar.orchestration.adapter import StepToRunRequestAdapter
@@ -2017,6 +2019,34 @@ def test_refresh_run_manifest_survives_a_corrupt_manifest(
 
     assert result is None
     assert RUN_MANIFEST_NAME in caplog.text
+
+
+@pytest.mark.parametrize(
+    "error",
+    [
+        LockTimeoutError("another holder kept the lock"),
+        LockUnsupportedError("flock is not supported"),
+        PermissionError("read-only file system"),
+    ],
+    ids=["lock-busy", "no-flock", "unwritable"],
+)
+def test_refresh_run_manifest_warns_when_the_manifest_cannot_be_updated(
+    tmp_path: Path,
+    mock_run_id: str,
+    caplog: pytest.LogCaptureFixture,
+    error: Exception,
+) -> None:
+    """Verify `--resume`, which refreshes the manifest before scheduling, is not
+    stopped by a manifest it cannot update: the refresh warns and returns nothing.
+    """
+    with (
+        mock.patch("cstar.orchestration.dag_runner.manifest_lock", side_effect=error),
+        caplog.at_level("WARNING"),
+    ):
+        result = refresh_run_manifest(tmp_path, mock_run_id, DagStatus({}))
+
+    assert result is None
+    assert str(error) in caplog.text
 
 
 @pytest.mark.asyncio

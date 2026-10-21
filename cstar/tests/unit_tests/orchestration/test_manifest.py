@@ -1,5 +1,6 @@
 """Tests for the run manifest and step record."""
 
+import fcntl
 import hashlib
 import threading
 import time
@@ -15,6 +16,11 @@ from cstar.applications.core import ArtifactKind, ArtifactSpec
 from cstar.applications.hello_world import HelloWorldBlueprint
 from cstar.base.exceptions import CstarError, CstarExpectationFailed
 from cstar.base.utils import slugify
+from cstar.execution.file_system import (
+    LOCK_POLL_INTERVAL,
+    LockTimeoutError,
+    StateDirectoryManager,
+)
 from cstar.orchestration.manifest import (
     ATTEMPT_DIR_FORMAT,
     ATTEMPTS_DIR_NAME,
@@ -353,6 +359,32 @@ def test_manifest_lock_creates_the_lock_file(
 
     with manifest_lock("my-run"):  # released, so it can be taken again
         pass
+
+
+@contextmanager
+def held_manifest_lock(run_id: str) -> t.Iterator[None]:
+    """Hold a run's manifest lock as another process would: through a file of its own."""
+    path = StateDirectoryManager.run_state_dir(run_id=run_id) / MANIFEST_LOCK_NAME
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("a") as lock_file:
+        fcntl.flock(lock_file, fcntl.LOCK_EX)
+        try:
+            yield
+        finally:
+            fcntl.flock(lock_file, fcntl.LOCK_UN)
+
+
+def test_manifest_lock_gives_up_on_a_writer_that_keeps_it(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Verify a writer stalled while holding the lock makes the next one fail
+    after its timeout, rather than wait as long as the stall lasts.
+    """
+    monkeypatch.setenv("CSTAR_STATE_HOME", str(tmp_path / "state"))
+
+    with held_manifest_lock("my-run"), pytest.raises(LockTimeoutError):
+        with manifest_lock("my-run", timeout=0.1):
+            pytest.fail("the lock was taken while another writer held it")
 
 
 def test_workplan_content_hash_is_stable(hello_world_bp_path: Path) -> None:
@@ -913,7 +945,7 @@ class TestRecordSubmission:
         write = manifest_module.write_run_manifest
 
         @contextmanager
-        def lock(run_id: str) -> t.Iterator[None]:
+        def lock(run_id: str, **_: t.Any) -> t.Iterator[None]:
             events.append(f"lock {run_id}")
             yield
             events.append("unlock")
@@ -979,6 +1011,79 @@ class TestRecordSubmission:
             ("one", "one"),
             ("two", "two"),
         ]
+
+    def test_a_stalled_writer_makes_the_submission_give_up(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Verify a submission gives up once the deadline passes while another writer
+        keeps the manifest lock, and leaves the manifest as it was.
+        """
+        write_run_manifest(tmp_path, _manifest("one"))
+        before = (tmp_path / RUN_MANIFEST_NAME).read_bytes()
+        monkeypatch.setattr(manifest_module, "MANIFEST_LOCK_TIMEOUT", 0.2)
+
+        with held_manifest_lock("run"), pytest.raises(LockTimeoutError):
+            self._submit(tmp_path)
+
+        assert (tmp_path / RUN_MANIFEST_NAME).read_bytes() == before
+
+    def test_submissions_launched_together_share_one_deadline(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Verify submissions recorded at once behind a stalled writer all give up
+        at the one deadline, not one deadline after another.
+        """
+        write_run_manifest(tmp_path, _manifest("one", "two", "three"))
+        timeout = 1.0
+        monkeypatch.setattr(manifest_module, "MANIFEST_LOCK_TIMEOUT", timeout)
+        failures: list[BaseException] = []
+
+        def submit(step: str) -> None:
+            try:
+                self._submit(tmp_path, step)
+            except LockTimeoutError as ex:
+                failures.append(ex)
+
+        threads = [
+            threading.Thread(target=submit, args=(s,)) for s in ("one", "two", "three")
+        ]
+        with held_manifest_lock("run"):
+            start = time.monotonic()
+            for thread in threads:
+                thread.start()
+            for thread in threads:
+                thread.join(timeout=10)
+            elapsed = time.monotonic() - start
+
+        assert len(failures) == 3
+        assert elapsed < 2 * timeout
+
+    def test_submissions_launched_together_do_not_poll_each_other(
+        self, tmp_path: Path
+    ) -> None:
+        """Verify submissions recorded at once queue for each other instead of
+        polling the manifest lock, so all of them land without delay.
+        """
+        steps = [f"step-{n}" for n in range(12)]
+        write_run_manifest(tmp_path, _manifest(*steps))
+        threads = [
+            threading.Thread(
+                target=self._submit, args=(tmp_path, s), kwargs={"job_id": s}
+            )
+            for s in steps
+        ]
+
+        start = time.monotonic()
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join(timeout=30)
+        elapsed = time.monotonic() - start
+
+        manifest = read_run_manifest(tmp_path)
+        assert manifest is not None
+        assert [entry.job_id for entry in manifest.steps] == steps
+        assert elapsed < LOCK_POLL_INTERVAL
 
     def test_a_later_submission_replaces_the_earlier(self, tmp_path: Path) -> None:
         write_run_manifest(tmp_path, _manifest("one"))

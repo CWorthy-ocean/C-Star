@@ -398,7 +398,9 @@ def refresh_run_manifest(
 
     The manifest holds a snapshot: the sentinels stay the live truth, and this
     is the one place that copies their statuses into it. The manifest is written
-    only when something besides `observed_at` changed.
+    only when something besides `observed_at` changed. A failure to refresh it
+    is a warning: `--resume` refreshes it before scheduling, and keeping the
+    record of a run never stops the run.
 
     Parameters
     ----------
@@ -413,7 +415,8 @@ def refresh_run_manifest(
     -------
     RunManifest | None
         The refreshed manifest, or `None` when the run has no readable manifest
-        (a run that predates it, or a corrupt or too new file).
+        (a run that predates it, or a corrupt or too new file) or it could not be
+        refreshed (its lock stayed busy, its file could not be written).
     """
     statuses = {name: state.name for name, state in status.details.items()}
     try:
@@ -424,7 +427,7 @@ def refresh_run_manifest(
                 return None
             if fold_step_records(manifest, root, statuses):
                 write_run_manifest(root, manifest)
-    except (CstarError, CstarSchemaTooNewError) as ex:
+    except Exception as ex:
         log.warning(f"Could not refresh the manifest of run {run_id!r}: {ex}")
         return None
     return manifest

@@ -573,7 +573,7 @@ class SlurmScheduler(Scheduler):
         if any(k in os.environ for k in jupyter_env_vars):
             return False
 
-        return bool(slurm_job_id(os.environ))
+        return os.getenv("SLURM_JOBID") is not None
 
     @property
     def global_max_cpus_per_node(self) -> int | None:
