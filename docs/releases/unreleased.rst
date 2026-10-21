@@ -69,6 +69,21 @@ New features
   - The series is an ``analysis`` product with role ``cdr_metrics``; the figure has role ``metrics``, and the map of nested domains has role ``domains``.
   - ``analysis`` is a new product kind for a dataset a step computes from other steps' output; the role says which analysis.
 
+- Each step record says what ran the step (``execution``): the scheduler (``slurm`` or ``local``), the host and the process id. (`#794 <https://github.com/CWorthy-ocean/C-Star/pull/794>`_)
+
+  - Inside a SLURM job it also records the job id and the granted nodes, tasks, CPUs on the step's node, partition and account, read from the step's own environment.
+  - A standalone ``cstar blueprint run`` inside an ``salloc`` records that allocation.
+
+- The run manifest records each step's latest submission (``launcher``, ``job_id``, ``submitted_at``), written when the step is submitted. (`#794 <https://github.com/CWorthy-ocean/C-Star/pull/794>`_)
+
+  - ``launcher`` says whether ``job_id`` is a SLURM job id or the process id of a local step, also for a job that was killed before its step could write a record.
+  - A step an attempt clobbers or resumes loses its earlier submission.
+
+- ``cstar run show`` has a Jobs table with each step's job, how long it waited from submission to start, and its wall time. (`#794 <https://github.com/CWorthy-ocean/C-Star/pull/794>`_)
+
+  - The wait includes time a step was held for the steps it depends on; ``sacct`` can separate the two by job id.
+
+
 
 Bug Fixes
 ~~~~~~~~~
@@ -78,6 +93,8 @@ Bug Fixes
 
   - A step waits up to 30 minutes for another step to finish with the cache, logging that it is waiting, then clones the repository into its own directory instead.
   - On a file system without file-locking support, staging logs a warning and uses the cache without the lock, as before.
+
+- ``cstar workplan run --resume`` no longer fails when it cannot update the run manifest, for example on a file system without ``flock``; it warns and resumes. (`#794 <https://github.com/CWorthy-ocean/C-Star/pull/794>`_)
 
 Improvements
 ~~~~~~~~~~~~
@@ -104,6 +121,7 @@ Improvements
 - ``continue-from``, ``nest-from`` and ``carbonate-sensitivity-from`` read a step's recorded files only from its ``output`` directory, the same directory they search when the record lists none. (`#795 <https://github.com/CWorthy-ocean/C-Star/pull/795>`_)
 - The upscaler resolves a linked ``uscl_file_location`` first, so it reads the record of the step the link points to and refuses a recorded ``_uscl`` file missing from disk. (`#795 <https://github.com/CWorthy-ocean/C-Star/pull/795>`_)
 - One shared helper now reads a step's recorded files of a kind in one directory, replacing three copies of the same lookup. (`#795 <https://github.com/CWorthy-ocean/C-Star/pull/795>`_)
+- Keeping a run's records never stops or stalls the run: a command that waits more than a minute for the manifest lock skips that update with a warning. (`#794 <https://github.com/CWorthy-ocean/C-Star/pull/794>`_)
 
 
 
@@ -124,3 +142,4 @@ Miscellaneous
 - New tutorial "Spin-up, continuation and a nested grid": a six-step workplan using ``blueprint_overrides`` (a shorter spin-up time step), ``continue-from``, an inline ``nest_ic`` step and a two-source ``nest-from``, with a roms-tools plot of the nested grids and a screenshot of the wizard's nesting controls. (`#791 <https://github.com/CWorthy-ocean/C-Star/pull/791>`_)
 - Ready-made forge blueprints for the wio-toy outer grid and a 2000 km child grid nested in it, with tides and rivers off so no TPXO download is needed. (`#791 <https://github.com/CWorthy-ocean/C-Star/pull/791>`_)
 - The end-to-end tutorial is retitled "Using Blueprints to Set Up and Run an Ocean Model" and points to the workplan page as its next step. (`#791 <https://github.com/CWorthy-ocean/C-Star/pull/791>`_)
+- Published the run manifest and step record schemas v1.2.0, and documented execution facts in the workplan guide and terminology. (`#794 <https://github.com/CWorthy-ocean/C-Star/pull/794>`_)
