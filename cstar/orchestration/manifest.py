@@ -55,7 +55,7 @@ from cstar.orchestration.serialization import (
 from cstar.system.migration import CstarSchemaTooNewError, version_key
 
 if t.TYPE_CHECKING:
-    from collections.abc import Mapping, Sequence
+    from collections.abc import Callable, Mapping, Sequence
 
     from cstar.orchestration.models import Blueprint, RunRef, Step, Workplan
 
@@ -100,6 +100,7 @@ ATTEMPT_BLUEPRINTS_DIR_NAME: t.Final[str] = "blueprints"
 """The directory, in an attempt's directory, holding each step's blueprint by step slug."""
 
 _M = t.TypeVar("_M", bound=ConfiguredBaseModel)
+_F = t.TypeVar("_F")
 
 
 def _whole_second(moment: datetime) -> datetime:
@@ -759,6 +760,67 @@ def product_paths(step_root: Path, kind: ArtifactKind, *, role: str = "") -> lis
         key=lambda product: product.path,
     )
     return [step_root / product.path for product in listed]
+
+
+def recorded_files_in(
+    directory: Path,
+    kind: ArtifactKind,
+    parse: "Callable[[Path], _F]",
+    *,
+    role: str = "",
+) -> list[_F]:
+    """List the files of one kind that a step recorded in one of its directories.
+
+    The record is read from `directory`'s parent, the step's working directory
+    (e.g. that of the step whose `output` directory `directory` is). Products
+    recorded elsewhere in the step are left out, and so are those whose names
+    `parse` rejects. As with `product_paths`, an empty list means the caller
+    searches the directory itself, and the files are not looked at: the caller
+    confirms the ones it reads with `require_recorded_files`. Nothing is
+    resolved; resolve `directory` first if a linked directory should find the
+    record of the step it links to.
+
+    Parameters
+    ----------
+    directory : Path
+        The directory of the step holding the files.
+    kind : ArtifactKind
+        The kind of product to list.
+    parse : Callable[[Path], F]
+        Makes the caller's file reference from a product's location, raising
+        `ValueError` for a name that is not one.
+    role : str
+        The `role` recorded in the products' metadata; products recorded
+        without a role match the empty default.
+
+    Returns
+    -------
+    list[F]
+        The parsed products, ordered by their recorded path.
+
+    Raises
+    ------
+    CstarSchemaTooNewError
+        If the record's schema is newer than this build reads.
+    CstarError
+        If the record cannot be read or is invalid.
+    """
+    files: list[_F] = []
+    misnamed: list[str] = []
+    for path in product_paths(directory.parent, kind, role=role):
+        if path.parent != directory:
+            continue
+        try:
+            files.append(parse(path))
+        except ValueError:
+            misnamed.append(path.name)
+    if misnamed:
+        log.debug(
+            f"The record in {directory.parent} lists {', '.join(misnamed)} in "
+            f"{directory.name} as {kind.value}, but the names do not parse; "
+            "skipping them"
+        )
+    return files
 
 
 def require_recorded_files(step_root: Path, paths: "Sequence[Path]") -> None:

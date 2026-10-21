@@ -93,7 +93,7 @@ from cstar.base.utils import lazy_import
 from cstar.entrypoint.runner import BlueprintRunner
 from cstar.execution.file_system import JobFileSystemManager
 from cstar.execution.handler import ExecutionStatus
-from cstar.orchestration.manifest import product_paths, require_recorded_files
+from cstar.orchestration.manifest import recorded_files_in, require_recorded_files
 from cstar.orchestration.models import (
     Blueprint,
     ConfiguredBaseModel,
@@ -236,21 +236,10 @@ def _source_files(source: Path) -> Sequence[CdrOutputFile]:
     """
     source = source.expanduser().resolve()
     if source.is_dir():
-        recorded: list[CdrOutputFile] = []
-        misnamed: list[str] = []
         # listed under the resolved step root, as the search names its files
-        for path in product_paths(source.parent, ArtifactKind.cdr_output):
-            if path.parent != source:
-                continue
-            try:
-                recorded.append(CdrOutputFile(path=path))
-            except ValueError:
-                misnamed.append(path.name)
-        if misnamed:
-            log.debug(
-                f"The record in {source.parent} lists {', '.join(misnamed)} as CDR "
-                "output, which are not CDR output file names; skipping them"
-            )
+        recorded = recorded_files_in(
+            source, ArtifactKind.cdr_output, lambda path: CdrOutputFile(path=path)
+        )
         if recorded:
             # the search would skip a missing file and leave a gap in the series
             require_recorded_files(source.parent, [file.path for file in recorded])

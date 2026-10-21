@@ -32,7 +32,7 @@ from cstar.base.utils import (
 )
 from cstar.orchestration.manifest import (
     STEP_RECORD_NAME,
-    product_paths,
+    recorded_files_in,
     require_recorded_files,
 )
 from cstar.orchestration.orchestration import LiveStep
@@ -471,12 +471,12 @@ def step_output_files(
     """Locate the files of one type that a workplan step produced.
 
     The step's record is read first: the products of the first of `kinds` that
-    lists any file `file_cls` can name are returned. Without such a product
-    (the step wrote no record, a 0.17.0 record lists no products, or its
-    application records the file under another kind) the step's `output`
-    directory is searched instead. Neither route selects among the files,
-    rejects partition pieces or confirms recorded files exist; the caller
-    does, for the files it reads (`require_recorded_files`).
+    lists any file `file_cls` can name in the step's `output` directory are
+    returned. Without such a product (the step wrote no record, a 0.17.0
+    record lists no products, or its application records the file under
+    another kind) that directory is searched instead. Neither route selects
+    among the files, rejects partition pieces or confirms recorded files exist;
+    the caller does, for the files it reads (`require_recorded_files`).
 
     Parameters
     ----------
@@ -506,24 +506,16 @@ def step_output_files(
         If the record lists no such files and the step has no `output`
         directory or no files of the type there.
     """
+    output_dir = RomsFileSystemManager(root).output_dir
     for kind in kinds:
-        files: list[_StepFileT] = []
-        for path in product_paths(root, kind, role=role):
-            try:
-                files.append(file_cls(path=path))
-            except ValueError:
-                log.debug(
-                    "Step %r records %s as %s, which is not a %s file name; skipping",
-                    name,
-                    path.name,
-                    kind.value,
-                    file_cls.LABEL,
-                )
-        if files:
+        if files := recorded_files_in(
+            output_dir, kind, lambda path: file_cls(path=path), role=role
+        ):
             return files, root / STEP_RECORD_NAME
 
     log.debug(
-        "The record of step %r lists no %s files; searching its output directory",
+        "The record of step %r lists no %s files in its output directory; "
+        "searching the directory",
         name,
         file_cls.LABEL,
     )
@@ -550,8 +542,9 @@ def collect_output_files(
 
     Every `SOURCE_DELIMITER`-separated token of `path_value` is searched as a
     path, and every step in `step_names` is read as a step source (see
-    `step_output_files`: the files its record lists as `kind`, else those in
-    its `output` directory); every source must contain files of the kind.
+    `step_output_files`: the files its record lists as `kind` in its `output`
+    directory, else those found there); every source must contain files of the
+    kind.
     Step outputs only ever hold whole files, so a step source holding a
     partition piece is rejected.
 
@@ -866,7 +859,7 @@ class ContinuanceDirective(OverrideDirective):
             root = resolve_step_root(self.workplan, name)
             # a nested run's `nest_ic` writes the restart-named file it records
             # as its initial conditions; a forge `<domain>_initial_conditions.nc`
-            # does not parse and is skipped
+            # is recorded outside `output` and is left out
             candidates, source = step_output_files(
                 RestartFile,
                 root,
