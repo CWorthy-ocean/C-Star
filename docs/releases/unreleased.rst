@@ -14,6 +14,8 @@ Breaking Changes
 
   - Their old homes, ``roms_marbl.transforms``, ``roms_marbl.app`` and ``roms_marbl.file_system``, no longer re-export them.
 
+- New attempts no longer write ``<stem>_original.bak``, ``<stem>.vars`` or their rotated ``.1``, ``.2`` copies in the run directory; read the attempt's ``attempts/<time>/`` copies instead. (`#789 <https://github.com/CWorthy-ocean/C-Star/pull/789>`_)
+
 New features
 ~~~~~~~~~~~~
 
@@ -54,6 +56,14 @@ New features
 
 - ``_cdr`` output lacking a variable the metrics need is reported with the ROMS setting that writes it; a release domain whose sources have the wrong sign fails with a report of where and how much. (`#773 <https://github.com/CWorthy-ocean/C-Star/pull/773>`_)
 - The metrics file records its provenance: domains and roles, grid files, number of ``_cdr`` files and the roms-tools version. (`#773 <https://github.com/CWorthy-ocean/C-Star/pull/773>`_)
+- Each attempt that reads the workplan file carries its inputs into ``attempts/<YYYYMMDDTHHMMSS>/`` in the run directory: ``workplan.yaml`` (or ``workplan.json``), ``workplan.vars``, ``workplan_transformed.yaml`` and ``blueprints/<step>/<file>``. (`#789 <https://github.com/CWorthy-ocean/C-Star/pull/789>`_)
+
+  - The run manifest records each attempt's directory and a sha256 digest of each carried file, and points each step at its carried blueprint (``carried_blueprint``).
+  - Each step record names the blueprint file the step ran (``blueprint_file``), such as its directive-applied override file.
+  - A re-entry with ``--run-id`` alone or ``--resume`` replays the recorded plan and carries nothing.
+
+- ``cstar run check`` compares carried inputs with their recorded digests: a changed file fails the check, and a missing file or deleted older attempt is listed for information. (`#789 <https://github.com/CWorthy-ocean/C-Star/pull/789>`_)
+- ``cstar run show`` lists the inputs directory of each attempt. (`#789 <https://github.com/CWorthy-ocean/C-Star/pull/789>`_)
 
 Bug Fixes
 ~~~~~~~~~
@@ -70,6 +80,12 @@ Improvements
 
 - ``ArtifactKind.namelist`` is now ``config``: every file the model read as configuration, told apart by ``metadata.role`` (``cppdefs``, ``namelist``, ``marbl_in``); ``build`` means a compiled executable. (`#786 <https://github.com/CWorthy-ocean/C-Star/pull/786>`_)
 - One module, ``roms_marbl.outputs``, now holds how a ROMS-MARBL step names its output files and the models that parse those names. (`#788 <https://github.com/CWorthy-ocean/C-Star/pull/788>`_)
+- ``--resume <workplan>`` and re-runs under a derived run ID compare with the latest attempt's carried workplan; older attempt directories may be deleted by hand. (`#789 <https://github.com/CWorthy-ocean/C-Star/pull/789>`_)
+
+  - When that copy is gone too, ``--resume <workplan>`` warns and resumes the recorded plan, and a derived re-run is refused until ``--run-id`` is given.
+  - An unreadable run manifest is reported as such instead of being treated as nothing recorded.
+
+- An attempt refused while it prepares leaves the run as the previous attempt left it: the plan in the run directory is replaced only once the inputs are carried. (`#789 <https://github.com/CWorthy-ocean/C-Star/pull/789>`_)
 
 Miscellaneous
 ~~~~~~~~~~~~~
@@ -80,3 +96,4 @@ Miscellaneous
 - Workplans guide: new "Computing CDR metrics from segmented runs" section, including a note that flux-based metrics currently differ across a restart while DIC-based metrics match. (`#773 <https://github.com/CWorthy-ocean/C-Star/pull/773>`_)
 - Published blueprint schema ``cdr_metrics`` 1.1.0. (`#773 <https://github.com/CWorthy-ocean/C-Star/pull/773>`_)
 - Tier 2 e2e: the MARBL forge step gains an ALK release; two new ROMS steps form a ``continue-from`` chain; two ``cdr_metrics`` steps compute metrics from the whole run and from the segments. (`#773 <https://github.com/CWorthy-ocean/C-Star/pull/773>`_)
+- Published the run manifest and step record schemas v1.1.0, and documented carried inputs in the workplan guide and terminology. (`#789 <https://github.com/CWorthy-ocean/C-Star/pull/789>`_)
