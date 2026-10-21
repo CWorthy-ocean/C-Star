@@ -1,7 +1,8 @@
-exclude: '^(?!cstar/).*'
+# The package, plus the one Python file under docs/ (the tiny nesting example's data fetcher).
+exclude: '^(?!(cstar/|docs/tutorials/nesting_upscaling_tiny/fetch_data\.py$)).*'
 ci:
   autoupdate_schedule: monthly
-files: '^cstar/'
+files: '^(cstar/|docs/tutorials/nesting_upscaling_tiny/fetch_data\.py$)'
 repos:
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v6.0.0
