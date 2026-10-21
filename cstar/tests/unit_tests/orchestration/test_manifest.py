@@ -1,6 +1,7 @@
 """Tests for the run manifest and step record."""
 
 import hashlib
+import logging
 import typing as t
 from datetime import UTC, datetime, timedelta, timezone
 from pathlib import Path
@@ -46,6 +47,7 @@ from cstar.orchestration.manifest import (
     product_paths,
     read_run_manifest,
     read_step_record,
+    recorded_files_in,
     require_recorded_files,
     workplan_content_hash,
     write_run_manifest,
@@ -1107,18 +1109,18 @@ class TestMergeProducts:
         assert reported.metadata == {"b": 2}
 
 
-class TestProductPaths:
-    @staticmethod
-    def _record_with(root: Path, *products: Product) -> None:
-        """Write a record of `products` into `root`, creating the files they name."""
-        for product in products:
-            target = root / product.path
-            target.parent.mkdir(parents=True, exist_ok=True)
-            target.write_bytes(b"x")
-        write_step_record(root, _record(products=list(products)))
+def _record_with(root: Path, *products: Product) -> None:
+    """Write a record of `products` into `root`, creating the files they name."""
+    for product in products:
+        target = root / product.path
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(b"x")
+    write_step_record(root, _record(products=list(products)))
 
+
+class TestProductPaths:
     def test_filters_by_kind_and_orders_by_path(self, tmp_path: Path) -> None:
-        self._record_with(
+        _record_with(
             tmp_path,
             Product(kind=ArtifactKind.restart, path="output/output_rst.2.nc"),
             Product(kind=ArtifactKind.history, path="output/output_his.1.nc"),
@@ -1141,7 +1143,7 @@ class TestProductPaths:
     def test_filters_by_role(
         self, tmp_path: Path, role: str, expected: list[str]
     ) -> None:
-        self._record_with(
+        _record_with(
             tmp_path,
             Product(
                 kind=ArtifactKind.boundary_forcing,
@@ -1165,14 +1167,14 @@ class TestProductPaths:
         assert product_paths(tmp_path, ArtifactKind.restart) == []
 
     def test_unlisted_kind_lists_nothing(self, tmp_path: Path) -> None:
-        self._record_with(
+        _record_with(
             tmp_path, Product(kind=ArtifactKind.history, path="output/output_his.1.nc")
         )
 
         assert product_paths(tmp_path, ArtifactKind.restart) == []
 
     def test_missing_products_are_still_listed(self, tmp_path: Path) -> None:
-        self._record_with(
+        _record_with(
             tmp_path,
             Product(kind=ArtifactKind.restart, path="output/output_rst.1.nc"),
             Product(kind=ArtifactKind.restart, path="output/output_rst.2.nc"),
@@ -1189,6 +1191,99 @@ class TestProductPaths:
 
         with pytest.raises(CstarError, match=STEP_RECORD_NAME):
             product_paths(tmp_path, ArtifactKind.restart)
+
+
+def _restart(path: Path) -> Path:
+    """Accept a restart file name, the `parse` of the `recorded_files_in` tests."""
+    if "_rst." not in path.name:
+        raise ValueError(path.name)
+    return path
+
+
+class TestRecordedFilesIn:
+    @pytest.fixture
+    def output(self, tmp_path: Path) -> Path:
+        return tmp_path / "output"
+
+    def test_lists_the_parsed_files_of_the_directory(self, output: Path) -> None:
+        _record_with(
+            output.parent,
+            Product(kind=ArtifactKind.restart, path="output/output_rst.2.nc"),
+            Product(kind=ArtifactKind.history, path="output/output_his.1.nc"),
+            Product(kind=ArtifactKind.restart, path="output/output_rst.1.nc"),
+        )
+
+        found = recorded_files_in(output, ArtifactKind.restart, lambda p: p.name)
+
+        assert found == ["output_rst.1.nc", "output_rst.2.nc"]
+
+    def test_leaves_out_files_recorded_elsewhere_in_the_step(
+        self, output: Path
+    ) -> None:
+        _record_with(
+            output.parent,
+            Product(kind=ArtifactKind.restart, path="output/output_rst.1.nc"),
+            Product(kind=ArtifactKind.restart, path="output/sub/output_rst.2.nc"),
+            Product(kind=ArtifactKind.restart, path="input/output_rst.3.nc"),
+            Product(kind=ArtifactKind.restart, path="output_rst.4.nc"),
+        )
+
+        found = recorded_files_in(output, ArtifactKind.restart, _restart)
+
+        assert found == [output / "output_rst.1.nc"]
+
+    def test_filters_by_role(self, output: Path) -> None:
+        _record_with(
+            output.parent,
+            Product(
+                kind=ArtifactKind.boundary_forcing,
+                path="output/child_bry.1.nc",
+                metadata={"role": "child"},
+            ),
+            Product(kind=ArtifactKind.boundary_forcing, path="output/other_bry.1.nc"),
+        )
+
+        found = recorded_files_in(
+            output, ArtifactKind.boundary_forcing, Path, role="child"
+        )
+
+        assert found == [output / "child_bry.1.nc"]
+
+    def test_skips_rejected_names_in_one_message(
+        self, output: Path, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        caplog.set_level(logging.DEBUG, logger="cstar.orchestration.manifest")
+        _record_with(
+            output.parent,
+            Product(kind=ArtifactKind.restart, path="output/output_rst.1.nc"),
+            Product(kind=ArtifactKind.restart, path="output/notes_a.nc"),
+            Product(kind=ArtifactKind.restart, path="output/notes_b.nc"),
+        )
+
+        found = recorded_files_in(output, ArtifactKind.restart, _restart)
+
+        assert found == [output / "output_rst.1.nc"]
+        skipped = [
+            r.getMessage() for r in caplog.records if "skipping" in r.getMessage()
+        ]
+        assert len(skipped) == 1
+        assert "notes_a.nc, notes_b.nc" in skipped[0]
+
+    def test_missing_files_are_still_listed(self, output: Path) -> None:
+        _record_with(
+            output.parent,
+            Product(kind=ArtifactKind.restart, path="output/output_rst.1.nc"),
+        )
+        (output / "output_rst.1.nc").unlink()
+
+        found = recorded_files_in(output, ArtifactKind.restart, _restart)
+
+        assert found == [output / "output_rst.1.nc"]
+
+    def test_no_record_lists_nothing(self, output: Path) -> None:
+        output.mkdir()
+
+        assert recorded_files_in(output, ArtifactKind.restart, _restart) == []
 
 
 class TestRequireRecordedFiles:
