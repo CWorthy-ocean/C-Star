@@ -1,6 +1,7 @@
 import logging
 import textwrap
 from collections.abc import Sequence
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 from unittest import mock
@@ -30,11 +31,19 @@ from cstar.applications.cdr_metrics import (
     metric_series,
     source_sign_report,
 )
-from cstar.applications.core import RunnerRequest, get_application
+from cstar.applications.core import ArtifactKind, RunnerRequest, get_application
 from cstar.applications.roms_marbl.outputs import CdrOutputFile
+from cstar.base.exceptions import CstarError
 from cstar.entrypoint.config import JobConfig, ServiceConfiguration
 from cstar.execution.handler import ExecutionStatus
-from cstar.orchestration.models import PathLocation
+from cstar.orchestration.manifest import (
+    STEP_RECORD_NAME,
+    Product,
+    StepRecord,
+    expand_artifacts,
+    write_step_record,
+)
+from cstar.orchestration.models import BlueprintIdentity, PathLocation
 from cstar.orchestration.serialization import load_blueprint
 
 WINDOW = 3600.0
@@ -517,6 +526,172 @@ class TestFindCdrOutput:
         """Verify a source that does not exist is refused, naming it."""
         with pytest.raises(ValueError, match="No directory or file found"):
             find_cdr_output(_locations(tmp_path / "absent"))
+
+
+class TestRecordedCdrOutput:
+    """Tests for `find_cdr_output` on a step's `output` directory, which reads the
+    `_cdr` files the step's record lists.
+    """
+
+    @staticmethod
+    def _write_record(step_root: Path, *paths: Path) -> None:
+        """Write the record of a step that listed `paths` as `cdr_output` products."""
+        record = StepRecord(
+            step="producer",
+            application="roms_marbl",
+            blueprint=BlueprintIdentity(
+                kind="Blueprint", application="roms_marbl", name="bp"
+            ),
+            outcome="completed",
+            finished_at=datetime(2026, 10, 15, 12, tzinfo=UTC),
+            products=[
+                Product(
+                    kind=ArtifactKind.cdr_output,
+                    path=path.relative_to(step_root).as_posix(),
+                )
+                for path in paths
+            ],
+        )
+        write_step_record(step_root, record)
+
+    def test_recorded_files_are_read_and_unrecorded_ones_are_not(
+        self, cdr_dirs: dict[str, Path]
+    ) -> None:
+        """Verify the files the record lists are read, not every `_cdr` file beside them."""
+        seg1 = cdr_dirs["seg-01"]
+        recorded = seg1 / "output" / "x_cdr.20120101000000.nc"
+        self._write_record(seg1, recorded)
+
+        found = find_cdr_output(_locations(seg1 / "output"))
+
+        assert [f.path.name for f in found] == ["x_cdr.20120101000000.nc"]
+        assert [f.path for f in found] == [recorded.resolve()]
+
+    def test_a_symlinked_source_reads_the_record_of_the_real_step(
+        self, tmp_path: Path, cdr_dirs: dict[str, Path]
+    ) -> None:
+        """Verify the source is resolved before the record beside it is looked up."""
+        seg1 = cdr_dirs["seg-01"]
+        recorded = seg1 / "output" / "x_cdr.20120101000000.nc"
+        self._write_record(seg1, recorded)
+        link = tmp_path / "link"
+        link.symlink_to(seg1 / "output", target_is_directory=True)
+
+        found = find_cdr_output(_locations(link))
+
+        assert [f.path for f in found] == [recorded.resolve()]
+
+    def test_a_missing_recorded_file_is_refused(
+        self, cdr_dirs: dict[str, Path]
+    ) -> None:
+        """Verify a `_cdr` file the record lists but that is gone is refused, naming it
+        and pointing to `cstar run check`, rather than leaving a gap in the series.
+        """
+        seg1 = cdr_dirs["seg-01"]
+        self._write_record(seg1, seg1 / "output" / "x_cdr.20120101040000.nc")
+
+        with pytest.raises(CstarError, match=r"x_cdr\.20120101040000\.nc") as exc:
+            find_cdr_output(_locations(seg1 / "output"))
+
+        assert "cstar run check" in str(exc.value)
+
+    def test_a_missing_recorded_file_names_the_domain(
+        self, tmp_path: Path, cdr_dirs: dict[str, Path]
+    ) -> None:
+        """Verify the refusal of a missing recorded file is prefixed with the domain."""
+        seg1 = cdr_dirs["seg-01"]
+        self._write_record(seg1, seg1 / "output" / "x_cdr.20120101040000.nc")
+        domain = CdrDomain.model_validate(
+            _domain(tmp_path / "grid.nc", seg1 / "output")
+        )
+
+        with pytest.raises(CstarError, match=r"x_cdr\.20120101040000\.nc") as exc:
+            compute_domain_metrics("wio", domain)
+
+        assert str(exc.value).startswith("Domain 'wio': ")
+
+    def test_recorded_files_elsewhere_in_the_step_are_ignored(
+        self, cdr_dirs: dict[str, Path]
+    ) -> None:
+        """Verify a record listing `_cdr` output outside the directory leaves the
+        directory to be searched.
+        """
+        seg1 = cdr_dirs["seg-01"]
+        elsewhere = _touch(seg1 / "elsewhere" / "x_cdr.20120101060000.nc")
+        self._write_record(seg1, elsewhere)
+
+        found = find_cdr_output(_locations(seg1 / "output"))
+
+        assert [f.path.name for f in found] == [
+            "x_cdr.20120101000000.nc",
+            "x_cdr.20120101020000.nc",
+        ]
+
+    def test_recorded_files_not_named_like_cdr_output_are_skipped(
+        self, cdr_dirs: dict[str, Path]
+    ) -> None:
+        """Verify a record listing only a file that is not named like `_cdr` output
+        leaves the directory to be searched.
+        """
+        seg1 = cdr_dirs["seg-01"]
+        self._write_record(seg1, seg1 / "output" / "x_cdr.nc")
+
+        found = find_cdr_output(_locations(seg1 / "output"))
+
+        assert [f.path.name for f in found] == [
+            "x_cdr.20120101000000.nc",
+            "x_cdr.20120101020000.nc",
+        ]
+
+    def test_a_recorded_partitioned_piece_is_refused(
+        self, cdr_dirs: dict[str, Path]
+    ) -> None:
+        """Verify a partitioned piece the record lists is refused, asking to join it."""
+        seg1 = cdr_dirs["seg-01"]
+        piece = _touch(seg1 / "output" / "x_cdr.20120101000000.003.nc")
+        # unrecorded, and fails a directory search with a different error
+        _touch(seg1 / "output" / "x_cdr.20120101000000.abc.nc")
+        self._write_record(seg1, piece)
+
+        with pytest.raises(ValueError, match="Join the pieces"):
+            find_cdr_output(_locations(seg1 / "output"))
+
+    def test_duplicates_across_routes_are_removed(
+        self, cdr_dirs: dict[str, Path]
+    ) -> None:
+        """Verify a file reached as itself and through a recorded directory is listed
+        once, at its first occurrence.
+        """
+        seg1 = cdr_dirs["seg-01"]
+        first = seg1 / "output" / "x_cdr.20120101020000.nc"
+        self._write_record(seg1, seg1 / "output" / "x_cdr.20120101000000.nc", first)
+        _write_cdr_file(seg1 / "output" / "x_cdr.20120101010000.nc")  # unrecorded
+
+        found = find_cdr_output(_locations(first, seg1 / "output"))
+
+        assert [f.path.name for f in found] == [
+            "x_cdr.20120101020000.nc",
+            "x_cdr.20120101000000.nc",
+        ]
+
+    @pytest.mark.parametrize("record", [False, True], ids=["no record", "no products"])
+    def test_a_directory_without_recorded_output_is_searched(
+        self, cdr_dirs: dict[str, Path], record: bool
+    ) -> None:
+        """Verify a directory whose step has no record, or a record listing no
+        `_cdr` output, is searched for the files.
+        """
+        seg1 = cdr_dirs["seg-01"]
+        if record:
+            self._write_record(seg1)
+        assert (seg1 / STEP_RECORD_NAME).exists() is record
+
+        found = find_cdr_output(_locations(seg1 / "output"))
+
+        assert [f.path.name for f in found] == [
+            "x_cdr.20120101000000.nc",
+            "x_cdr.20120101020000.nc",
+        ]
 
 
 class TestCheckContiguous:
@@ -1040,6 +1215,24 @@ class TestCdrMetricsRunner:
         assert (out_dir / FIGURE_FILENAME).exists()
         assert not (out_dir / DOMAINS_FIGURE_FILENAME).exists()
 
+    async def test_the_declared_products_are_the_files_written(
+        self,
+        blueprint_kwargs: dict[str, Any],
+        fake_roms_tools: _FakeRomsTools,
+    ) -> None:
+        """Verify the products the application declares expand to the files the run wrote."""
+        bp = CdrMetricsBlueprint(**blueprint_kwargs)
+
+        await _make_runner(bp).run()
+
+        root = bp.effective_working_dir
+        declared = expand_artifacts(root, CdrMetricsApplication().artifacts(bp))
+        written = {
+            p.relative_to(root).as_posix() for p in root.rglob("*") if p.is_file()
+        }
+        assert {p.path for p in declared} == written
+        assert written == {"output/cdr_metrics.nc", "output/cdr_metrics.png"}
+
     async def test_provenance_is_recorded(
         self,
         blueprint_kwargs: dict[str, Any],
@@ -1208,6 +1401,26 @@ class TestNestedCdrMetricsRunner:
 
         for name in (FIGURE_FILENAME, DOMAINS_FIGURE_FILENAME):
             assert (out_dir / name).read_bytes().startswith(b"\x89PNG"), name
+
+    async def test_the_declared_products_are_the_files_written(
+        self, nested_bp: CdrMetricsBlueprint
+    ) -> None:
+        """Verify the products the application declares expand to the files the run
+        wrote, the map of the domains among them.
+        """
+        await _make_runner(nested_bp).run()
+
+        root = nested_bp.effective_working_dir
+        declared = expand_artifacts(root, CdrMetricsApplication().artifacts(nested_bp))
+        written = {
+            p.relative_to(root).as_posix() for p in root.rglob("*") if p.is_file()
+        }
+        assert {p.path for p in declared} == written
+        assert written == {
+            "output/cdr_metrics.nc",
+            "output/cdr_metrics.png",
+            "output/cdr_domains.png",
+        }
 
     async def test_provenance_is_recorded(
         self, nested_bp: CdrMetricsBlueprint, tmp_path: Path

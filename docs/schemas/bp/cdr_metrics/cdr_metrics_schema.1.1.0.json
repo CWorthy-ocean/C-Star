@@ -98,7 +98,7 @@
                     "description": "The domain's ROMS grid file."
                 },
                 "sources": {
-                    "description": "The ordered sources of the domain's `_cdr` output: each a directory\nsearched recursively, or a single `_cdr` file. The first must hold the\nsegment containing the release, because cumulative sums start at the first\nrecord.",
+                    "description": "The ordered sources of the domain's `_cdr` output: each a directory (a\nstep's `output` directory reads the files the step recorded; any other is\nsearched recursively), or a single `_cdr` file. The first must hold the\nsegment containing the release, because cumulative sums start at the first\nrecord.",
                     "items": {
                         "$ref": "#/$defs/PathLocation"
                     },

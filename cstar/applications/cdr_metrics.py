@@ -11,6 +11,9 @@ one or more ROMS-MARBL runs, computes the CDR metrics with roms-tools'
 - ``cdr_metrics.png``: roms-tools' "CO2 uptake and CDR efficiency" figure.
 - ``cdr_domains.png``: for nested domains, a map of the domain outlines.
 
+The step records the time series as an ``analysis`` product (role
+``cdr_metrics``) and the images as ``figure`` products.
+
 A run may be split into segments (e.g. chained with ``continue-from``), each
 writing its own `_cdr` files; the application stitches them along time. With
 ucla-roms (observed on 0.10.1 and 0.11.0) the averaged air-sea flux diagnostics
@@ -34,12 +37,13 @@ sources of its `_cdr` output::
 it through its ``blueprint_overrides``, which do not accept a top-level list
 of mappings.
 
-Each source is a directory searched recursively for `_cdr` output, or a single
-`_cdr` file. The first source must hold the segment containing the release,
-because the cumulative sums start at the first record. Records are sorted by
-time after loading, and a gap or overlap between the averaging windows of
-consecutive records is an error. In a workplan, a source can be a
-``{{output_dir: <step>}}`` placeholder naming the producing step.
+Each source is a directory or a single `_cdr` file. A step's ``output``
+directory reads the `_cdr` files the step's record lists in it; a directory
+without such a record is searched recursively. The first source must hold the
+segment containing the release, because the cumulative sums start at the first
+record. Records are sorted by time after loading, and a gap or overlap between
+the averaging windows of consecutive records is an error. In a workplan, a
+source can be a ``{{output_dir: <step>}}`` placeholder naming the producing step.
 
 A nested (upscaled) experiment lists the domains child first. The child holds
 the release; each parent receives the child's boundary perturbation as its
@@ -77,14 +81,19 @@ from pydantic import Field, field_validator
 
 from cstar.applications.core import (
     ApplicationDefinition,
+    ArtifactKind,
+    ArtifactSpec,
     RunnerResult,
     register_application,
 )
 from cstar.applications.roms_marbl.outputs import CdrOutputFile
+from cstar.base.exceptions import CstarError
 from cstar.base.log import get_logger
 from cstar.base.utils import lazy_import
 from cstar.entrypoint.runner import BlueprintRunner
+from cstar.execution.file_system import JobFileSystemManager
 from cstar.execution.handler import ExecutionStatus
+from cstar.orchestration.manifest import product_paths, require_recorded_files
 from cstar.orchestration.models import (
     Blueprint,
     ConfiguredBaseModel,
@@ -154,8 +163,9 @@ class CdrDomain(ConfiguredBaseModel):
     grid: PathLocation
     """The domain's ROMS grid file."""
     sources: list[PathLocation] = Field(min_length=1)
-    """The ordered sources of the domain's `_cdr` output: each a directory
-    searched recursively, or a single `_cdr` file. The first must hold the
+    """The ordered sources of the domain's `_cdr` output: each a directory (a
+    step's `output` directory reads the files the step recorded; any other is
+    searched recursively), or a single `_cdr` file. The first must hold the
     segment containing the release, because cumulative sums start at the first
     record."""
     source_role: t.Literal["release", "transfer"] = Field(default="release")
@@ -195,13 +205,73 @@ class CdrMetricsBlueprint(Blueprint):
         return value
 
 
+def _source_files(source: Path) -> Sequence[CdrOutputFile]:
+    """Locate the `_cdr` output of one source.
+
+    The files the record beside a directory lists as `cdr_output` products are
+    used when any of them is a `_cdr` file in the directory itself; a directory
+    without such a record (an unrelated step's, one written by C-Star 0.17.0,
+    or none) is searched recursively, and a file is taken as it is.
+
+    Parameters
+    ----------
+    source : Path
+        A directory, such as a step's `output` directory, or a `_cdr` file.
+
+    Returns
+    -------
+    Sequence[CdrOutputFile]
+        The source's files, under the resolved source.
+
+    Raises
+    ------
+    CstarError
+        If the record cannot be read, or a `_cdr` file it lists is missing.
+    CstarSchemaTooNewError
+        If the record's schema is newer than this build reads.
+    FileNotFoundError
+        If a searched source holds no `_cdr` output.
+    ValueError
+        If the source does not exist, or names a file that is not `_cdr` output.
+    """
+    source = source.expanduser().resolve()
+    if source.is_dir():
+        recorded: list[CdrOutputFile] = []
+        misnamed: list[str] = []
+        # listed under the resolved step root, as the search names its files
+        for path in product_paths(source.parent, ArtifactKind.cdr_output):
+            if path.parent != source:
+                continue
+            try:
+                recorded.append(CdrOutputFile(path=path))
+            except ValueError:
+                misnamed.append(path.name)
+        if misnamed:
+            log.debug(
+                f"The record in {source.parent} lists {', '.join(misnamed)} as CDR "
+                "output, which are not CDR output file names; skipping them"
+            )
+        if recorded:
+            # the search would skip a missing file and leave a gap in the series
+            require_recorded_files(source.parent, [file.path for file in recorded])
+            return recorded
+        log.debug(f"No recorded CDR output in {source}; searching the directory")
+
+    try:
+        return CdrOutputFile.find(source, notfound_ok=False) or ()
+    except FileNotFoundError as err:
+        raise FileNotFoundError(f"{err}. {_CDR_OUTPUT_HINT}") from err
+
+
 def find_cdr_output(sources: Sequence[PathLocation]) -> list[CdrOutputFile]:
     """Locate the `_cdr` output files in each source.
 
     Parameters
     ----------
     sources : Sequence[PathLocation]
-        The directories (searched recursively) or files to search, in order.
+        The directories or files to read, in order: a step's `output`
+        directory yields the files the step recorded, any other directory is
+        searched recursively.
 
     Returns
     -------
@@ -210,6 +280,8 @@ def find_cdr_output(sources: Sequence[PathLocation]) -> list[CdrOutputFile]:
 
     Raises
     ------
+    CstarError
+        If a step record cannot be read, or a `_cdr` file it lists is missing.
     FileNotFoundError
         If a source holds no `_cdr` output.
     ValueError
@@ -218,12 +290,7 @@ def find_cdr_output(sources: Sequence[PathLocation]) -> list[CdrOutputFile]:
     """
     found: dict[Path, CdrOutputFile] = {}
     for source in sources:
-        try:
-            files = CdrOutputFile.find(source.location, notfound_ok=False) or ()
-        except FileNotFoundError as err:
-            raise FileNotFoundError(f"{err}. {_CDR_OUTPUT_HINT}") from err
-
-        for file in files:
+        for file in _source_files(source.location):
             if file.is_partitioned:
                 msg = (
                     f"{file.path} is a partitioned piece of CDR output, not a whole "
@@ -562,6 +629,8 @@ def compute_domain_metrics(name: str, domain: CdrDomain) -> tuple["xr.Dataset", 
 
     Raises
     ------
+    CstarError
+        If a step record cannot be read, or a `_cdr` file it lists is missing.
     FileNotFoundError
         If a source holds no `_cdr` output.
     ValueError
@@ -577,6 +646,8 @@ def compute_domain_metrics(name: str, domain: CdrDomain) -> tuple["xr.Dataset", 
         raise FileNotFoundError(f"{prefix}{err}") from err
     except ValueError as err:
         raise ValueError(f"{prefix}{err}") from err
+    except CstarError as err:
+        raise CstarError(f"{prefix}{err}") from err
 
     try:
         ds_cdr = roms_tools.analysis.cdr_analysis.compute_cdr_metrics(
@@ -616,7 +687,7 @@ class CdrMetricsRunner(BlueprintRunner[CdrMetricsBlueprint]):
         }
         ds_cdrs = {name: ds_cdr for name, (ds_cdr, _) in results.items()}
 
-        out_dir = self.blueprint.effective_working_dir / "output"
+        out_dir = JobFileSystemManager(self.blueprint.effective_working_dir).output_dir
         out_dir.mkdir(parents=True, exist_ok=True)
         metrics_path = out_dir / METRICS_FILENAME
         figure_path = out_dir / FIGURE_FILENAME
@@ -662,3 +733,45 @@ class CdrMetricsApplication(
     runner = CdrMetricsRunner
     blueprint = CdrMetricsBlueprint
     applicable_transforms = ()
+
+    @t.override
+    def artifacts(self, blueprint: CdrMetricsBlueprint) -> Sequence[ArtifactSpec]:
+        """Declare the metrics and figures a cdr_metrics run leaves.
+
+        The map of the domains is declared for nested domains only, the runs
+        that write it.
+
+        Parameters
+        ----------
+        blueprint : CdrMetricsBlueprint
+            The blueprint of the cdr_metrics step.
+
+        Returns
+        -------
+        Sequence[ArtifactSpec]
+            The metrics and figure patterns.
+        """
+        # a manager on a placeholder root only spells the layout; it touches no disk
+        fs = JobFileSystemManager(Path("/"))
+        output = fs.output_dir.relative_to(fs.root_dir)
+        specs = [
+            ArtifactSpec(
+                kind=ArtifactKind.analysis,
+                pattern=(output / METRICS_FILENAME).as_posix(),
+                metadata={"role": "cdr_metrics"},
+            ),
+            ArtifactSpec(
+                kind=ArtifactKind.figure,
+                pattern=(output / FIGURE_FILENAME).as_posix(),
+                metadata={"role": "metrics"},
+            ),
+        ]
+        if len(blueprint.domains) > 1:
+            specs.append(
+                ArtifactSpec(
+                    kind=ArtifactKind.figure,
+                    pattern=(output / DOMAINS_FIGURE_FILENAME).as_posix(),
+                    metadata={"role": "domains"},
+                )
+            )
+        return specs

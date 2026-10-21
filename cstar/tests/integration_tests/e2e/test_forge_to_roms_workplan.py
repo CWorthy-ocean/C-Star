@@ -31,8 +31,9 @@ import pytest
 import yaml
 
 from cstar.applications.cdr_metrics import FIGURE_FILENAME, METRICS_FILENAME
+from cstar.applications.core import ArtifactKind
 from cstar.base.utils import slugify
-from cstar.orchestration.manifest import read_step_record
+from cstar.orchestration.manifest import product_paths, read_step_record
 from cstar.orchestration.models import InlineBlueprintRef
 from cstar.tests.integration_tests.cases import (
     DT,
@@ -534,8 +535,8 @@ def test_roms_record_lists_its_products(e2e_run: E2ERun) -> None:
 
 
 def test_show_totals_and_check_finds_no_product_problem(e2e_run: E2ERun) -> None:
-    """``cstar run show`` lists the products of both steps, and ``cstar run check``
-    finds every recorded product as recorded.
+    """``cstar run show`` lists the products of the forge, ROMS and ``cdr_metrics``
+    steps, and ``cstar run check`` finds every recorded product as recorded.
 
     The exit code is not asserted: the emitted blueprints and the transformed
     workplan name absolute paths, which the absolute-path check reports.
@@ -543,7 +544,7 @@ def test_show_totals_and_check_finds_no_product_problem(e2e_run: E2ERun) -> None
     proc = run_cstar(e2e_run.env, "run", "show", e2e_run.run_id, "--format", "json")
     assert proc.returncode == 0, _output(proc)
     entries = {entry["name"]: entry for entry in json.loads(proc.stdout)["steps"]}
-    for step in (FORGE_STEP, ROMS_STEP):
+    for step in (FORGE_STEP, ROMS_STEP, *METRICS_STEPS):
         record = entries[step]["record"]
         assert record is not None, f"no step record for {step}"
         total = sum(product["size_bytes"] for product in record["products"])
@@ -804,11 +805,16 @@ def max_relative_difference(a: np.ndarray, b: np.ndarray) -> float:
 
 
 def test_cdr_output_written(e2e_run: E2ERun) -> None:
-    """The whole run and both segments wrote ``_cdr`` output, one record per window."""
+    """The whole run and both segments wrote ``_cdr`` output, one record per window,
+    and listed it in their step records for ``cdr_metrics`` to read by kind.
+    """
     records = {}
     for step in CDR_OUTPUT_STEPS:
-        output = e2e_run.working_dir_of(step) / "output"
-        assert cdr_output_files(e2e_run, step), sorted(p.name for p in output.glob("*"))
+        root = e2e_run.working_dir_of(step)
+        output = root / "output"
+        files = cdr_output_files(e2e_run, step)
+        assert files, sorted(p.name for p in output.glob("*"))
+        assert product_paths(root, ArtifactKind.cdr_output) == files, step
         records[step] = len(averaging_windows(e2e_run, step)[0])
     assert records == {
         ROMS_STEP: METRICS_RECORDS,
@@ -834,11 +840,27 @@ def test_segments_meet_at_restart(e2e_run: E2ERun) -> None:
 
 
 def test_cdr_metrics_written(e2e_run: E2ERun) -> None:
-    """Both ``cdr_metrics`` steps wrote the figure and a series of positive CO2 uptake, one value per window."""
+    """Both ``cdr_metrics`` steps wrote the figure and a series of positive CO2 uptake, one value per window, and recorded both as products."""
     import xarray as xr
 
     for step in METRICS_STEPS:
         output = e2e_run.metrics_dir_of(step)
+        record = read_step_record(output.parent)
+        assert record is not None, f"{step} wrote no step record"
+        analyses = [p for p in record.products if p.kind == "analysis"]
+        figures = [p for p in record.products if p.kind == "figure"]
+        assert [(p.path, p.metadata) for p in analyses] == [
+            (f"output/{METRICS_FILENAME}", {"role": "cdr_metrics"})
+        ], (step, record.products)
+        # one domain: the map of the domains is only written for nested ones
+        assert [(p.path, p.metadata) for p in figures] == [
+            (f"output/{FIGURE_FILENAME}", {"role": "metrics"})
+        ], (step, record.products)
+        assert all(p.size_bytes > 0 for p in (*analyses, *figures)), (
+            step,
+            record.products,
+        )
+
         assert (output / FIGURE_FILENAME).is_file(), sorted(
             p.name for p in output.glob("*")
         )
