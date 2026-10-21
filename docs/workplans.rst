@@ -540,9 +540,9 @@ reported with the ROMS setting that writes it.
 
 .. note::
 
-   With ucla-roms 0.10.1 and 0.11.0, the averaged air-sea CO2 flux diagnostics (``FG_CO2``,
-   ``FG_ALT_CO2``) written after a ``continue-from`` restart differ from those of the
-   same run without a restart, although the model state is identical. The
+   With ucla-roms 0.10.1 and 0.11.0, the averaged air-sea CO2 flux diagnostics
+   (``FG_CO2``, ``FG_ALT_CO2``) written after a ``continue-from`` restart differ from
+   those of the same run without a restart, although the model state is identical. The
    flux-based metrics of a segmented run can therefore differ from the unsegmented
    run's; the metrics from DIC differences match it exactly.
 
