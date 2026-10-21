@@ -384,7 +384,9 @@ class ArtifactKind(enum.StrEnum):
     carbonate sensitivities `carbonate-sensitivity-from` reads), `upscaling` (the
     boundary tracer fluxes the upscaler reads) and `cdr_output` (CDR diagnostics);
     the boundary extraction a nested run reads is `boundary_forcing` with
-    `metadata["role"]` `child`. Every other stream is `output`.
+    `metadata["role"]` `child`. Every other stream is `output`. `analysis` is a
+    dataset a step computes from other steps' output, which one is
+    `metadata["role"]` (e.g. `cdr_metrics`).
     """
 
     grid = "grid"
@@ -401,6 +403,7 @@ class ArtifactKind(enum.StrEnum):
     gas_exchange = "gas_exchange"
     upscaling = "upscaling"
     cdr_output = "cdr_output"
+    analysis = "analysis"
     emitted_blueprint = "emitted_blueprint"
     config = "config"
     build = "build"

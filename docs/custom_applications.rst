@@ -217,6 +217,9 @@ The kind of a product is one of `ArtifactKind`:
    * - ``output``
      - A model output no other kind names; the ROMS stream is in
        ``metadata["stream"]``.
+   * - ``analysis``
+     - A dataset a step computes from other steps' output; ``metadata["role"]`` says
+       which one (``cdr_metrics`` for the ``cdr_metrics`` application's time series).
    * - ``emitted_blueprint``
      - A blueprint the step publishes for the steps that follow it.
    * - ``config``
