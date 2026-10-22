@@ -97,7 +97,7 @@ from cstar.applications.forge.resolve import (
     read_cdr_forcing_yaml,
     with_cdr_lite_tracer_set,
 )
-from cstar.applications.forge.user_files import hash_netcdf_contents, short_digest
+from cstar.base.digest import hash_netcdf_contents, short_digest
 from cstar.base.utils import NetCDFFormat, netcdf_format
 from cstar.wizard.ui import components
 from cstar.wizard.ui.catalog_bar import CatalogBar

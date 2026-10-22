@@ -140,8 +140,16 @@ ARG_ALL_RUNS_HELP: t.Final[str] = (
 
 ARG_VERIFY: t.Final[str] = "--verify"
 ARG_VERIFY_HELP: t.Final[str] = (
-    "Also compare each product's recorded sha256 with the file, reading every "
-    "such product in full; products recorded without one are skipped."
+    "Also compare each product's recorded digest with the file (a bounded read "
+    "for netCDF files, the whole file otherwise); products recorded without one "
+    "are skipped."
+)
+
+ARG_RECORD_DIGESTS: t.Final[str] = "--record-digests"
+ARG_RECORD_DIGESTS_HELP: t.Final[str] = (
+    "Compute and record a digest for every product that has none (nc-sample-v2 "
+    "for netCDF files, sha256 otherwise), writing the step records and the "
+    "manifest; a run tracked here must be owned."
 )
 
 ARG_SCHEMA_ONLY: t.Final[str] = "--schema-only"

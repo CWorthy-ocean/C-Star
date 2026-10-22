@@ -26,10 +26,17 @@ from urllib.parse import urlsplit
 from pydantic import AfterValidator, Field
 
 from cstar.applications.core import ArtifactKind, ArtifactSpec, get_application
+from cstar.base.digest import (
+    HASH_SCHEME,
+    KNOWN_SCHEMES,
+    SHA256_SCHEME,
+    hash_netcdf_contents,
+    sha256_digest,
+)
 from cstar.base.exceptions import CstarError, CstarExpectationFailed
 from cstar.base.log import get_logger
 from cstar.base.provenance import canonical_hash, package_versions, system_name
-from cstar.base.utils import _get_sha256_hash, slugify, utc_now
+from cstar.base.utils import slugify, utc_now
 from cstar.execution.file_system import (
     LockTimeoutError,
     StateDirectoryManager,
@@ -142,7 +149,39 @@ def carried_digest(path: Path) -> str:
     str
         `sha256:<hex>` of the file's bytes.
     """
-    return f"sha256:{_get_sha256_hash(path)}"
+    return sha256_digest(path)
+
+
+def product_digest(path: Path, *, scheme: str = "") -> str:
+    """Digest a product's content, in the form `Product.digest` records.
+
+    Parameters
+    ----------
+    path : Path
+        The file to digest.
+    scheme : str
+        The scheme to compute (`sha256` or `nc-sample-v2`), as an existing digest
+        names it. By default a netCDF file (a `.nc` suffix) takes `nc-sample-v2`,
+        a bounded read, and any other file `sha256`, a read of the whole file.
+
+    Returns
+    -------
+    str
+        `<scheme>:<hex>`.
+
+    Raises
+    ------
+    ValueError
+        If `scheme` is not one this build computes.
+    """
+    if not scheme:
+        scheme = HASH_SCHEME if path.suffix.casefold() == ".nc" else SHA256_SCHEME
+    if scheme == HASH_SCHEME:
+        return hash_netcdf_contents(path)
+    if scheme == SHA256_SCHEME:
+        return sha256_digest(path)
+    known = " and ".join(repr(known) for known in KNOWN_SCHEMES)
+    raise ValueError(f"unknown digest scheme {scheme!r}; this build computes {known}")
 
 
 def create_attempt_dir(root: Path, start_at: datetime) -> Path:
@@ -206,7 +245,14 @@ class Product(ConfiguredBaseModel):
     """The size of the product in bytes; zero when not measured."""
 
     sha256: str = Field(default="")
-    """The content digest of the product; empty when not computed."""
+    """A bare sha256 of the product's bytes, written by no current release: read for
+    records that predate `digest`."""
+
+    digest: str = Field(default="")
+    """The content digest of the product, `<scheme>:<hex>`: `nc-sample-v2` for a
+    netCDF file (structure plus a bounded sample of its data, independent of the
+    on-disk encoding), `sha256` of the bytes otherwise. Empty when not computed;
+    `cstar run check --record-digests` records it."""
 
     metadata: dict[str, str | int | float | list[str]] = Field(default_factory=dict)
     """Model-specific detail, such as an output stream."""
@@ -267,7 +313,7 @@ class ExecutionFacts(ConfiguredBaseModel):
 class StepRecord(ConfiguredBaseModel):
     """What a step did: written by the step process, in its working directory."""
 
-    schema_version: str = Field(default="1.2.0")
+    schema_version: str = Field(default="1.3.0")
     """The schema version for the document."""
 
     run_id: str = Field(default="")
@@ -495,7 +541,7 @@ class StepEntry(ConfiguredBaseModel):
 class RunManifest(ConfiguredBaseModel):
     """The description of a run: written to its run root."""
 
-    schema_version: str = Field(default="1.3.0")
+    schema_version: str = Field(default="1.4.0")
     """The schema version for the document."""
 
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
@@ -1651,6 +1697,58 @@ def fold_step_records(
 
     manifest.observed_at = _now()
     return before != manifest.model_dump(mode="json", exclude={"observed_at"})
+
+
+def record_product_digests(
+    root: Path, manifest: RunManifest, *, overwrite: bool = False
+) -> int:
+    """Compute and record the digest of each product that has none.
+
+    Each digest is `product_digest` of the file, a bounded read for a netCDF file
+    and a read of the whole file otherwise. A product whose path is not a regular
+    file is skipped, and one that cannot be digested is skipped with a warning:
+    recording is bookkeeping and never stops a run. The step records and the
+    manifest are written only when a digest was recorded.
+
+    The caller holds `manifest_lock` when the run may be refreshed concurrently.
+
+    Parameters
+    ----------
+    root : Path
+        The run root.
+    manifest : RunManifest
+        The manifest, with the step records folded in; updated in place.
+    overwrite : bool
+        Whether to recompute a digest a product already records.
+
+    Returns
+    -------
+    int
+        The number of digests recorded.
+    """
+    recorded = 0
+    for entry in manifest.steps:
+        if entry.record is None:
+            continue
+        step_root = root / entry.working_dir
+        count = 0
+        for product in entry.record.products:
+            file = step_root / product.path
+            if (product.digest and not overwrite) or not file.is_file():
+                continue
+            try:
+                product.digest = product_digest(file)
+            except Exception as ex:  # bookkeeping: an unreadable file is skipped
+                log.warning(f"No digest recorded for {file}: {ex}")
+                continue
+            count += 1
+        if count:
+            write_step_record(step_root, entry.record)
+            recorded += count
+
+    if recorded:
+        write_run_manifest(root, manifest)
+    return recorded
 
 
 def finalize_standalone_run(

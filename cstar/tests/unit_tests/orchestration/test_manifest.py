@@ -15,6 +15,7 @@ import pytest
 import cstar.orchestration.manifest as manifest_module
 from cstar.applications.core import ArtifactKind, ArtifactSpec
 from cstar.applications.hello_world import HelloWorldBlueprint
+from cstar.base.digest import HASH_SCHEME, SHA256_SCHEME, hash_netcdf_contents
 from cstar.base.exceptions import CstarError, CstarExpectationFailed
 from cstar.base.utils import slugify
 from cstar.execution.file_system import (
@@ -55,9 +56,11 @@ from cstar.orchestration.manifest import (
     manifest_lock,
     merge_products,
     new_attempt,
+    product_digest,
     product_paths,
     read_run_manifest,
     read_step_record,
+    record_product_digests,
     record_submission,
     recorded_files_in,
     require_recorded_files,
@@ -203,6 +206,30 @@ class TestRoundTrip:
         record = read_step_record(tmp_path)
         assert record is not None
         assert record.execution == ExecutionFacts()
+
+    def test_a_product_digest_round_trips(self, tmp_path: Path) -> None:
+        digest = f"{HASH_SCHEME}:" + "ab" * 32
+        write_step_record(
+            tmp_path,
+            _record(products=[Product(kind="output", path="a.nc", digest=digest)]),
+        )
+
+        record = read_step_record(tmp_path)
+
+        assert record is not None
+        assert record.products[0].digest == digest
+        assert f"digest: {digest}" in (tmp_path / STEP_RECORD_NAME).read_text()
+
+    def test_an_empty_digest_is_not_written(self, tmp_path: Path) -> None:
+        """A product without a digest writes no `digest` key, and reads back empty."""
+        write_step_record(
+            tmp_path, _record(products=[Product(kind="output", path="a.nc")])
+        )
+
+        assert "digest" not in (tmp_path / STEP_RECORD_NAME).read_text()
+        record = read_step_record(tmp_path)
+        assert record is not None
+        assert record.products[0].digest == ""
 
     def test_execution_facts_round_trip(self, tmp_path: Path) -> None:
         facts = ExecutionFacts(
@@ -842,6 +869,28 @@ class TestEnsureRunManifest:
         assert loaded is not None
         assert loaded.external.runs == [ExternalRun(alias="up", run_id="spin")]
 
+    def test_a_1_3_0_manifest_and_1_2_0_record_load_without_digests(
+        self, tmp_path: Path
+    ) -> None:
+        """Documents before the content digest hold none, and read as empty."""
+        manifest = _manifest("one")
+        manifest.steps[0].record = _record(products=[Product(kind="log", path="l")])
+        write_run_manifest(tmp_path, manifest)
+        write_step_record(tmp_path, _record(products=[Product(kind="log", path="l")]))
+        old = {RUN_MANIFEST_NAME: "1.3.0", STEP_RECORD_NAME: "1.2.0"}
+        for name, version in old.items():
+            path = tmp_path / name
+            path.write_text(path.read_text().replace(CURRENT_OF[name], version, 1))
+            assert f"schema_version: {version}" in path.read_text()
+
+        loaded = read_run_manifest(tmp_path)
+        record = read_step_record(tmp_path)
+
+        assert loaded is not None and loaded.steps[0].record is not None
+        assert loaded.steps[0].record.products[0].digest == ""
+        assert record is not None
+        assert record.products[0].digest == ""
+
     def test_merged_preserves_order(self) -> None:
         a, b, c = (SourceDataRef(location=x) for x in "abc")
 
@@ -931,6 +980,148 @@ def test_carried_digest_is_the_sha256_of_the_bytes(tmp_path: Path) -> None:
     assert carried_digest(path) == (
         "sha256:" + hashlib.sha256(b"name: plan  # a comment\n").hexdigest()
     )
+
+
+def _small_netcdf(path: Path, value: float = 1.0) -> Path:
+    import numpy as np
+    import xarray as xr
+
+    xr.Dataset({"temp": (["x"], np.array([value, 2.0]))}).to_netcdf(
+        path, engine="netcdf4"
+    )
+    return path
+
+
+class TestProductDigest:
+    def test_a_netcdf_file_takes_the_bounded_digest(self, tmp_path: Path) -> None:
+        path = _small_netcdf(tmp_path / "out.nc")
+
+        assert product_digest(path) == hash_netcdf_contents(path)
+        assert product_digest(path).startswith(f"{HASH_SCHEME}:")
+
+    def test_the_suffix_is_read_without_regard_to_case(self, tmp_path: Path) -> None:
+        path = _small_netcdf(tmp_path / "OUT.NC")
+
+        assert product_digest(path).startswith(f"{HASH_SCHEME}:")
+
+    def test_any_other_file_takes_the_sha256_of_its_bytes(self, tmp_path: Path) -> None:
+        path = tmp_path / "log.txt"
+        path.write_bytes(b"hello")
+
+        assert product_digest(path) == (
+            f"{SHA256_SCHEME}:{hashlib.sha256(b'hello').hexdigest()}"
+        )
+
+    def test_an_asked_scheme_overrides_the_suffix(self, tmp_path: Path) -> None:
+        path = _small_netcdf(tmp_path / "out.nc")
+
+        assert product_digest(path, scheme=SHA256_SCHEME) == (
+            f"{SHA256_SCHEME}:{hashlib.sha256(path.read_bytes()).hexdigest()}"
+        )
+        assert product_digest(path, scheme=HASH_SCHEME) == hash_netcdf_contents(path)
+
+    def test_an_unknown_scheme_is_refused_by_name(self, tmp_path: Path) -> None:
+        path = tmp_path / "log.txt"
+        path.write_bytes(b"hello")
+
+        with pytest.raises(ValueError, match="'md5'.*'sha256'.*'nc-sample-v2'"):
+            product_digest(path, scheme="md5")
+
+
+class TestRecordProductDigests:
+    def _run(self, tmp_path: Path) -> RunManifest:
+        """A one-step run holding a netCDF product, a log, and a missing product."""
+        step = tmp_path / "tasks" / "one"
+        (step / "output").mkdir(parents=True)
+        _small_netcdf(step / "output" / "a.nc")
+        (step / "output" / "run.log").write_bytes(b"line\n")
+        manifest = _manifest("one")
+        manifest.steps[0].record = _record(
+            products=[
+                Product(kind="output", path="output/a.nc"),
+                Product(kind="log", path="output/run.log"),
+                Product(kind="output", path="output/gone.nc"),
+            ]
+        )
+        write_step_record(step, manifest.steps[0].record)
+        write_run_manifest(tmp_path, manifest)
+        return manifest
+
+    def test_records_into_the_step_record_and_the_manifest(
+        self, tmp_path: Path, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        manifest = self._run(tmp_path)
+
+        with caplog.at_level(logging.WARNING):
+            count = record_product_digests(tmp_path, manifest)
+
+        step = tmp_path / "tasks" / "one"
+        assert count == 2
+        line_hash = hashlib.sha256(b"line\n").hexdigest()
+        wanted = [
+            hash_netcdf_contents(step / "output" / "a.nc"),
+            f"{SHA256_SCHEME}:{line_hash}",
+            "",
+        ]
+        record = read_step_record(step)
+        assert record is not None
+        assert [p.digest for p in record.products] == wanted
+        loaded = read_run_manifest(tmp_path)
+        assert loaded is not None and loaded.steps[0].record is not None
+        assert [p.digest for p in loaded.steps[0].record.products] == wanted
+
+    def test_a_missing_product_is_skipped(self, tmp_path: Path) -> None:
+        """A product that is not a file has nothing to digest, and stops nothing."""
+        manifest = self._run(tmp_path)
+
+        record_product_digests(tmp_path, manifest)
+
+        assert manifest.steps[0].record is not None
+        assert manifest.steps[0].record.products[2].digest == ""
+
+    def test_a_product_that_cannot_be_digested_is_a_warning(
+        self, tmp_path: Path, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        manifest = self._run(tmp_path)
+        (tmp_path / "tasks" / "one" / "output" / "a.nc").write_bytes(b"not netcdf")
+
+        with caplog.at_level(logging.WARNING):
+            count = record_product_digests(tmp_path, manifest)
+
+        assert count == 1
+        assert manifest.steps[0].record is not None
+        assert manifest.steps[0].record.products[0].digest == ""
+        assert "No digest recorded for" in caplog.text
+        assert "a.nc" in caplog.text
+
+    def test_a_recorded_digest_is_kept_unless_overwritten(self, tmp_path: Path) -> None:
+        manifest = self._run(tmp_path)
+        assert manifest.steps[0].record is not None
+        manifest.steps[0].record.products[1].digest = "sha256:stale"
+
+        assert record_product_digests(tmp_path, manifest) == 1
+        assert manifest.steps[0].record.products[1].digest == "sha256:stale"
+
+        assert record_product_digests(tmp_path, manifest, overwrite=True) == 2
+        assert manifest.steps[0].record.products[1].digest != "sha256:stale"
+
+    def test_nothing_is_written_when_nothing_is_recorded(self, tmp_path: Path) -> None:
+        manifest = self._run(tmp_path)
+        record_product_digests(tmp_path, manifest)
+        before = (tmp_path / RUN_MANIFEST_NAME).read_bytes()
+        record_before = (tmp_path / "tasks" / "one" / STEP_RECORD_NAME).read_bytes()
+
+        assert record_product_digests(tmp_path, manifest) == 0
+
+        assert (tmp_path / RUN_MANIFEST_NAME).read_bytes() == before
+        assert (
+            tmp_path / "tasks" / "one" / STEP_RECORD_NAME
+        ).read_bytes() == record_before
+
+    def test_a_step_without_a_record_is_skipped(self, tmp_path: Path) -> None:
+        manifest = _manifest("one")
+
+        assert record_product_digests(tmp_path, manifest) == 0
 
 
 class TestLatestAttemptDir:

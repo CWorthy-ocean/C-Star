@@ -189,7 +189,7 @@ def _normalize_user_file(
     if isinstance(value, dict):
         return UserProvidedFile(**value)
 
-    from cstar.applications.forge.user_files import hash_netcdf_contents
+    from cstar.base.digest import hash_netcdf_contents
 
     path = Path(value)
     if not path.exists():
@@ -766,7 +766,7 @@ def build_forge_blueprint(
     ``grid_file``, if given, is a user-supplied pre-made grid netCDF used in place
     of one Forge would otherwise generate from ``grid_kwargs``. A ``str``/``Path``
     is normalized into a :class:`UserProvidedFile` by hashing the file's contents
-    (``cstar.applications.forge.user_files.hash_netcdf_contents``) -- the file must exist
+    (``cstar.base.digest.hash_netcdf_contents``) -- the file must exist
     at authoring time. A dict or ``UserProvidedFile`` carrying both ``location``
     and ``content_hash`` is trusted as-is (the wizard passes this to avoid
     rehashing on every rebuild). Either way, the grid is loaded once here

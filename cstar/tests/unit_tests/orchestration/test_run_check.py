@@ -9,6 +9,7 @@ from pathlib import Path
 
 import pytest
 
+from cstar.base.digest import HASH_SCHEME, SHA256_SCHEME
 from cstar.base.env import ENV_CSTAR_DATA_HOME, ENV_CSTAR_STATE_HOME
 from cstar.base.utils import slugify
 from cstar.execution.file_system import (
@@ -24,6 +25,7 @@ from cstar.orchestration.manifest import (
     StepEntry,
     StepRecord,
     carried_digest,
+    product_digest,
 )
 from cstar.orchestration.models import BlueprintIdentity, Step
 from cstar.orchestration.orchestration import LiveStep, LiveWorkplan
@@ -58,7 +60,7 @@ ABSOLUTE = FindingKind.ABSOLUTE_PATH
 PRODUCT_KINDS = {
     FindingKind.PRODUCT_MISSING,
     FindingKind.PRODUCT_SIZE,
-    FindingKind.HASH_MISMATCH,
+    FindingKind.DIGEST_MISMATCH,
     FindingKind.INPUT_MISMATCH,
     FindingKind.RECORD_MISSING,
     FindingKind.ATTEMPT_OPEN,
@@ -645,9 +647,11 @@ def test_report_orphans_is_quiet_without_orphans(
     assert not [r for r in caplog.records if r.levelno >= logging.WARNING]
 
 
-def product(path: str, size: int = 0, sha256: str = "") -> Product:
+def product(path: str, size: int = 0, sha256: str = "", digest: str = "") -> Product:
     """A product record of the given kind-less file."""
-    return Product(kind="other", path=path, size_bytes=size, sha256=sha256)
+    return Product(
+        kind="other", path=path, size_bytes=size, sha256=sha256, digest=digest
+    )
 
 
 def manifest_of(
@@ -793,13 +797,17 @@ def test_only_the_latest_attempt_is_considered(recorded: Path) -> None:
     assert find_product_findings(recorded, manifest, verify=False) == []
 
 
-def test_verify_compares_the_recorded_hash(recorded: Path) -> None:
-    """Verify a differing hash is a mismatch carrying the digest found, a
-    matching one is silent, and nothing is hashed without `verify`.
+def test_verify_compares_the_recorded_sha256_of_an_older_record(
+    recorded: Path,
+) -> None:
+    """Verify a bare sha256, as records before `digest` hold, is still compared
+    as the sha256 of the bytes whatever the file's suffix, a differing one is a
+    mismatch carrying the digest found, and nothing is hashed without `verify`.
     """
-    good = hashlib.sha256(b"data").hexdigest()
+    good = f"{SHA256_SCHEME}:{hashlib.sha256(b'data').hexdigest()}"
     manifest = manifest_of(
-        product("output/a.nc", 4, "0" * 64), product("output/b.nc", 4, good)
+        product("output/a.nc", 4, "0" * 64),
+        product("output/b.nc", 4, good.partition(":")[2]),
     )
 
     verified = find_product_findings(recorded, manifest, verify=True)
@@ -807,11 +815,94 @@ def test_verify_compares_the_recorded_hash(recorded: Path) -> None:
 
     assert verified == [
         Finding(
-            FindingKind.HASH_MISMATCH, recorded / "tasks/one/output/a.nc", path=good
+            FindingKind.DIGEST_MISMATCH, recorded / "tasks/one/output/a.nc", path=good
         )
     ]
     assert unverified == []
     assert not RunCheckReport(recorded, tuple(verified)).clean
+
+
+def test_verify_compares_the_recorded_digest(recorded: Path) -> None:
+    """Verify `digest` is compared in its own scheme, and wins over a `sha256`."""
+    good = f"{SHA256_SCHEME}:{hashlib.sha256(b'data').hexdigest()}"
+    manifest = manifest_of(
+        product("output/a.nc", 4, digest=f"{SHA256_SCHEME}:{'0' * 64}"),
+        product("output/b.nc", 4, digest=good),
+        product("output/c.nc", 4, sha256="0" * 64, digest=good),
+    )
+
+    findings = find_product_findings(recorded, manifest, verify=True)
+
+    assert findings == [
+        Finding(
+            FindingKind.DIGEST_MISMATCH, recorded / "tasks/one/output/a.nc", path=good
+        )
+    ]
+
+
+def test_verify_digests_a_netcdf_product_by_its_content(recorded: Path) -> None:
+    """Verify an `nc-sample-v2` digest is recomputed from the file's content, so a
+    re-encoded copy matches and a changed one does not.
+    """
+    import numpy as np
+    import xarray as xr
+
+    nc = recorded / "tasks/one/output/field.nc"
+    data = {"temp": (["x"], np.array([1.0, 2.0, 3.0]))}
+    xr.Dataset(data).to_netcdf(nc, format="NETCDF4", engine="netcdf4")
+    wanted = product_digest(nc)
+    manifest = manifest_of(product("output/field.nc", digest=wanted))
+    assert wanted.startswith(f"{HASH_SCHEME}:")
+
+    xr.Dataset(data).to_netcdf(nc, format="NETCDF3_64BIT", engine="netcdf4")
+    assert find_product_findings(recorded, manifest, verify=True) == []
+
+    xr.Dataset({"temp": (["x"], np.array([1.0, 2.0, 4.0]))}).to_netcdf(
+        nc, format="NETCDF4", engine="netcdf4"
+    )
+    findings = find_product_findings(recorded, manifest, verify=True)
+    assert [(f.kind, f.file) for f in findings] == [(FindingKind.DIGEST_MISMATCH, nc)]
+    assert findings[0].path == product_digest(nc) != wanted
+
+
+def test_verify_notes_a_scheme_this_build_does_not_compute(recorded: Path) -> None:
+    """Verify products recorded with an unknown scheme are skipped, not failed,
+    and named once, collapsed, in the skipped notes.
+    """
+    manifest = manifest_of(
+        product("output/a.nc", 4, digest="blake3:" + "0" * 64),
+        product("output/b.nc", 4, digest="blake3:" + "1" * 64),
+        product("output/c.nc", 4, digest="xxh:" + "2" * 16),
+    )
+
+    report = check_run(
+        recorded,
+        workplan=None,
+        run_id=None,
+        all_files=False,
+        manifest=manifest,
+        verify=True,
+    )
+
+    assert report.clean
+    notes = [s for s in report.skipped if s.startswith("digest verification")]
+    assert notes == [
+        (
+            "digest verification: 3 product(s) recorded with a scheme this build "
+            "does not compute ('blake3', 'xxh')"
+        )
+    ]
+
+
+def test_verify_reports_a_product_it_cannot_read(recorded: Path) -> None:
+    """Verify a product that cannot be digested is a finding naming why, not a crash."""
+    (recorded / "tasks/one/output/a.nc").write_bytes(b"not netcdf")
+    manifest = manifest_of(product("output/a.nc", digest=f"{HASH_SCHEME}:{'0' * 64}"))
+
+    findings = find_product_findings(recorded, manifest, verify=True)
+
+    assert [f.kind for f in findings] == [FindingKind.DIGEST_MISMATCH]
+    assert findings[0].path.startswith("unreadable: ")
 
 
 def test_verify_skips_a_product_recorded_without_a_hash(recorded: Path) -> None:
@@ -862,8 +953,8 @@ def test_a_run_report_holds_the_product_findings(recorded: Path) -> None:
     assert not any("products" in s for s in report.skipped)
 
 
-def test_verify_without_any_recorded_hash_says_so(recorded: Path) -> None:
-    """Verify `verify` against records that hold no sha256 names the skipped check."""
+def test_verify_without_any_recorded_digest_says_so(recorded: Path) -> None:
+    """Verify `verify` against records that hold no digest names the skipped check."""
     manifest = manifest_of(product("output/a.nc", 4))
 
     def check(*, verify: bool) -> RunCheckReport:
@@ -879,14 +970,20 @@ def test_verify_without_any_recorded_hash_says_so(recorded: Path) -> None:
     verified = check(verify=True)
     plain = check(verify=False)
 
-    assert "hash verification: no product records a hash" in verified.skipped
-    assert not any("hash" in s for s in plain.skipped)
+    assert "digest verification: no product records a digest" in verified.skipped
+    assert not any("digest" in s for s in plain.skipped)
 
 
-def test_verify_with_a_recorded_hash_has_nothing_to_skip(recorded: Path) -> None:
-    """Verify the hash skip is said only when no product records a hash."""
+@pytest.mark.parametrize("field", ["sha256", "digest"])
+def test_verify_with_a_recorded_digest_has_nothing_to_skip(
+    recorded: Path, field: str
+) -> None:
+    """Verify the skip is said only when no product records a digest or sha256."""
+    good = hashlib.sha256(b"data").hexdigest()
     manifest = manifest_of(
-        product("output/a.nc", 4, hashlib.sha256(b"data").hexdigest())
+        product(
+            "output/a.nc", 4, **{field: good if field == "sha256" else f"sha256:{good}"}
+        )
     )
 
     report = check_run(
@@ -898,7 +995,7 @@ def test_verify_with_a_recorded_hash_has_nothing_to_skip(recorded: Path) -> None
         verify=True,
     )
 
-    assert not any("hash" in s for s in report.skipped)
+    assert not any("digest" in s for s in report.skipped)
     assert report.clean
 
 

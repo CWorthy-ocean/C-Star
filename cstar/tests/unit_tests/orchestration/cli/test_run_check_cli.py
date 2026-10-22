@@ -1,5 +1,6 @@
 """Tests for the `cstar run check` command."""
 
+import hashlib
 import os
 import re
 import shutil
@@ -12,10 +13,17 @@ import pytest
 from click.testing import Result
 from typer.testing import CliRunner
 
+from cstar.base.digest import HASH_SCHEME, SHA256_SCHEME
 from cstar.base.exceptions import CstarExpectationFailed
 from cstar.cli.run import app as app_run
 from cstar.cli.run.check import COMMAND_CHECK, format_findings, summarize
-from cstar.entrypoint.utils import ARG_ALL, ARG_NO_REFRESH, ARG_REPAIR, ARG_VERIFY
+from cstar.entrypoint.utils import (
+    ARG_ALL,
+    ARG_NO_REFRESH,
+    ARG_RECORD_DIGESTS,
+    ARG_REPAIR,
+    ARG_VERIFY,
+)
 from cstar.execution.file_system import StateDirectoryManager
 from cstar.orchestration.dag_runner import DagStatus
 from cstar.orchestration.index import run_uri
@@ -28,6 +36,9 @@ from cstar.orchestration.manifest import (
     StepEntry,
     StepRecord,
     carried_digest,
+    product_digest,
+    read_run_manifest,
+    read_step_record,
     write_run_manifest,
     write_step_record,
 )
@@ -65,7 +76,7 @@ HEADINGS: t.Final[tuple[str, ...]] = (
     "Steps without a directory (",
     "Products missing from the run (",
     "Products whose size differs from the record (",
-    f"Products whose content differs from the record ({ARG_VERIFY}) (",
+    f"Products whose content differs from the recorded digest ({ARG_VERIFY}) (",
     "Carried inputs whose content differs from the manifest (",
     "Symlinks with a target outside the run (informational) (",
     "Steps that are done without a step record (informational) (",
@@ -235,7 +246,7 @@ def test_a_run_id_reports_every_kind_of_finding(run: FakeRun) -> None:
     assert f"  {run.spin_up}/output/gone.nc\n" in result.stdout
     assert f"  {run.spin_up}/output/a.nc: 4 bytes, recorded 9\n" in result.stdout
     assert re.search(
-        rf"  {re.escape(str(run.spin_up))}/output/result.yaml: [0-9a-f]{{64}}\n",
+        rf"  {re.escape(str(run.spin_up))}/output/result.yaml: sha256:[0-9a-f]{{64}}\n",
         result.stdout,
     )
     assert f"  {run.root}/tasks/run/cstar-step.yaml\n" in result.stdout
@@ -595,13 +606,12 @@ def test_verify_compares_content_only_where_a_hash_is_recorded(tmp_path: Path) -
 
     assert plain.exit_code == EXIT_CLEAN, plain.output
     assert verified.exit_code == EXIT_FINDINGS, verified.output
-    assert f"Products whose content differs from the record ({ARG_VERIFY}) (1):" in (
-        verified.stdout
-    )
+    heading = f"Products whose content differs from the recorded digest ({ARG_VERIFY})"
+    assert f"{heading} (1):" in verified.stdout
 
 
-def test_verify_says_when_no_product_records_a_hash(tmp_path: Path) -> None:
-    """Verify `--verify` over records without hashes passes and names the skip."""
+def test_verify_says_when_no_product_records_a_digest(tmp_path: Path) -> None:
+    """Verify `--verify` over records without digests passes and names the skip."""
     root = small_run(tmp_path / "small")
     write(root / "tasks" / "run" / "output" / "x.nc", "data")
     write_manifest(root, entry("run", "tasks/run", product("output/x.nc", 4)))
@@ -609,7 +619,7 @@ def test_verify_says_when_no_product_records_a_hash(tmp_path: Path) -> None:
     result = invoke(str(root), ARG_VERIFY)
 
     assert result.exit_code == EXIT_CLEAN, result.output
-    assert "Skipped hash verification: no product records a hash" in result.stdout
+    assert "Skipped digest verification: no product records a digest" in result.stdout
 
 
 def test_informational_manifest_findings_alone_exit_zero(tmp_path: Path) -> None:
@@ -1135,3 +1145,186 @@ def test_the_report_is_formatted_and_summarized_for_other_commands(
     assert any(line.startswith("Symlinks with an absolute target") for line in lines)
     assert summarize(report).startswith(f"{len(report.problems)} problem(s) found in")
     assert str(run.root) in summarize(report)
+
+
+def add_product(built: BuiltRun, name: str, text: str = "line\n") -> Path:
+    """Record, in the first step of a built run, a product it holds as a file.
+
+    The record is written beside the step and folded into the manifest, so the run
+    reads the same tracked or not.
+    """
+    step_dir = built.step_dir("Spin Up")
+    file = write(step_dir / name, text)
+    manifest = read_run_manifest(built.root)
+    assert manifest is not None
+    step = manifest.steps[0]
+    step.record = entry(
+        step.name, step.working_dir, product(name, file.stat().st_size)
+    ).record
+    assert step.record is not None
+    write_step_record(step_dir, step.record)
+    write_run_manifest(built.root, manifest)
+    return file
+
+
+def recorded_digests(root: Path) -> list[str]:
+    """The digest of each product in the manifest on disk, in order."""
+    manifest = read_run_manifest(root)
+    assert manifest is not None
+    return [p.digest for e in manifest.steps if e.record for p in e.record.products]
+
+
+def test_record_digests_writes_them_into_a_tracked_run(run: FakeRun) -> None:
+    """Verify `--record-digests` on a run tracked and owned here records each
+    product's digest into the step record and the manifest, and says how many.
+    """
+    write_manifest(
+        run.root, entry("Spin Up", "tasks/spin-up", product("output/result.yaml", 8))
+    )
+    record = entry("Spin Up", "tasks/spin-up", product("output/result.yaml", 8)).record
+    assert record is not None
+    write_step_record(run.spin_up, record)
+
+    result = invoke(run.record.run_id, ARG_RECORD_DIGESTS, record=run.record)
+
+    assert "Recorded 1 digest(s)." in result.stdout
+    wanted = product_digest(run.spin_up / "output" / "result.yaml")
+    assert wanted.startswith(f"{SHA256_SCHEME}:")
+    assert recorded_digests(run.root) == [wanted]
+    on_disk = read_step_record(run.spin_up)
+    assert on_disk is not None
+    assert [p.digest for p in on_disk.products] == [wanted]
+
+
+def test_record_digests_refuses_a_run_attached_read_only(
+    colleague_run: BuiltRun,
+    refresh: Refresh,
+    squash_cli_output: t.Callable[[str], str],
+) -> None:
+    """Verify `--record-digests` writes nothing into a run attached read-only, and
+    the message says how to take ownership.
+    """
+    add_product(colleague_run, "output/run.log")
+    before = colleague_run.manifest_bytes
+
+    result = invoke(
+        colleague_run.run_id,
+        ARG_RECORD_DIGESTS,
+        record=attached_record(colleague_run, Access.read_only),
+    )
+
+    assert result.exit_code == EXIT_BAD_ARGS, result.output
+    text = squash_cli_output(result.stderr)
+    assert squash_cli_output("is attached read-only") in text
+    assert squash_cli_output(f"cstar run attach {colleague_run.root} --own") in text
+    assert squash_cli_output(ARG_RECORD_DIGESTS) in text
+    assert result.stdout == ""
+    assert colleague_run.manifest_bytes == before
+
+
+def test_record_digests_accepts_a_run_attached_and_owned(
+    colleague_run: BuiltRun,
+) -> None:
+    """Verify an owned attached run takes digests; the absolute paths a built run
+    holds still fail its check.
+    """
+    add_product(colleague_run, "output/run.log")
+
+    result = invoke(
+        colleague_run.run_id,
+        ARG_RECORD_DIGESTS,
+        record=attached_record(colleague_run, Access.owned),
+    )
+
+    assert result.exit_code == EXIT_FINDINGS, result.output
+    assert "Recorded 1 digest(s)." in result.stdout
+    line_hash = hashlib.sha256(b"line\n").hexdigest()
+    assert recorded_digests(colleague_run.root) == [f"{SHA256_SCHEME}:{line_hash}"]
+
+
+@pytest.mark.parametrize("handle", ["run-id", "uuid"])
+def test_record_digests_refuses_a_run_found_only_by_its_manifest(
+    local_run: t.Callable[..., BuiltRun],
+    squash_cli_output: t.Callable[[str], str],
+    handle: str,
+) -> None:
+    """Verify `--record-digests` writes nothing into a run that only its manifest
+    names, and says how to do it deliberately.
+    """
+    built = local_run("lonely")
+    add_product(built, "output/run.log")
+    before = built.manifest_bytes
+
+    result = invoke(
+        built.run_id if handle == "run-id" else run_uri(built.uuid),
+        ARG_RECORD_DIGESTS,
+        record=None,
+    )
+
+    assert result.exit_code == EXIT_BAD_ARGS, result.output
+    text = squash_cli_output(result.stderr)
+    assert squash_cli_output("is not tracked here") in text
+    assert (
+        squash_cli_output(f"cstar run check {built.root} {ARG_RECORD_DIGESTS}") in text
+    )
+    assert result.stdout == ""
+    assert built.manifest_bytes == before
+
+
+def test_record_digests_in_a_named_directory_is_verified_afterwards(
+    tmp_path: Path,
+) -> None:
+    """Verify a directory the user names takes digests, a netCDF file's by
+    content and a log's by bytes, that `--verify` then compares them, and that
+    asking for both at once reports against what was just recorded.
+    """
+    import numpy as np
+    import xarray as xr
+
+    root = small_run(tmp_path / "small")
+    output = root / "tasks" / "run" / "output"
+    nc = output / "x.nc"
+    xr.Dataset({"temp": (["x"], np.array([1.0, 2.0]))}).to_netcdf(nc, engine="netcdf4")
+    log = write(output / "run.log", "line\n")
+    write_manifest(
+        root,
+        entry(
+            "run",
+            "tasks/run",
+            product("output/x.nc", nc.stat().st_size),
+            product("output/run.log", log.stat().st_size),
+        ),
+    )
+    record = read_run_manifest(root)
+    assert record is not None and record.steps[0].record is not None
+    write_step_record(root / "tasks" / "run", record.steps[0].record)
+
+    before = invoke(str(root), ARG_VERIFY)
+    both = invoke(str(root), ARG_RECORD_DIGESTS, ARG_VERIFY)
+    after = invoke(str(root), ARG_VERIFY)
+
+    assert "Skipped digest verification" in before.stdout
+    assert both.exit_code == EXIT_CLEAN, both.output
+    assert "Recorded 2 digest(s)." in both.stdout
+    assert "Skipped digest verification" not in both.stdout
+    digests = recorded_digests(root)
+    assert digests[0].startswith(f"{HASH_SCHEME}:")
+    assert digests[1].startswith(f"{SHA256_SCHEME}:")
+    assert after.exit_code == EXIT_CLEAN, after.output
+    assert "Skipped digest verification" not in after.stdout
+
+    log.write_text("lone\n")
+    changed = invoke(str(root), ARG_VERIFY)
+    assert changed.exit_code == EXIT_FINDINGS, changed.output
+    assert "differs from the recorded digest" in changed.stdout
+
+
+def test_record_digests_without_a_manifest_says_so(tmp_path: Path) -> None:
+    """Verify there is nothing to record into when the run has no manifest."""
+    root = small_run(tmp_path / "small")
+
+    result = invoke(str(root), ARG_RECORD_DIGESTS)
+
+    assert result.exit_code == EXIT_FINDINGS, result.output
+    assert "no readable run manifest" in result.stderr
+    assert "Recorded" not in result.stdout

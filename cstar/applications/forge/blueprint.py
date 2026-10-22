@@ -546,7 +546,7 @@ class UserProvidedFile(_Section):
     results-affecting content, so it is excluded from :meth:`ForgeBlueprint.content_hash`.
 
     ``content_hash`` pins a digest of the file's structure and a bounded sample of its
-    data (via ``cstar.applications.forge.user_files.hash_netcdf_contents``) as it was
+    data (via ``cstar.base.digest.hash_netcdf_contents``) as it was
     when the blueprint was authored. It IS results-affecting and stays in the content hash;
     a mismatch at processing time is a warning (the file may have been
     legitimately regenerated), not an error.
