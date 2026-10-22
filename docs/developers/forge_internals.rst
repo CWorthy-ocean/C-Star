@@ -453,11 +453,11 @@ ucla-roms release: ``roms-marbl-0.5-default`` pins ``0.5.0``,
 not declare it, see below), ``roms-marbl-0.10-default`` pins ``0.10.1`` (same
 tier and same templates as the 0.9 spec; the first that runs
 ``bgc_mode: cdr_lite``), and ``roms-marbl-0.11-default`` pins ``0.11.0``
-(``RunTimeSettingsV0_11_0``; same templates as the 0.9/0.10 specs; the
-default), and ``roms-marbl-0.12-default`` pins ``0.12.0``
-(``RunTimeSettingsV0_12_0``; same templates; the first spec that declares
-``cdr_lite``, carrying only the time-interpolation key, so the wizard shows it
-in ``bgc_mode: cdr_lite``); older specs stay
+(``RunTimeSettingsV0_11_0``; same templates as the 0.9/0.10 specs), and
+``roms-marbl-0.12-default`` pins ``0.12.0`` (``RunTimeSettingsV0_12_0``; same
+templates; the first spec that declares ``cdr_lite``, carrying only the
+time-interpolation key, so the wizard shows it in ``bgc_mode: cdr_lite``; the
+default); older specs stay
 fixed and keep emitting
 byte-identical legacy namelists. ``version_gated_section_names()``
 (``namelist_model.py``) collects every section modeled by at least one

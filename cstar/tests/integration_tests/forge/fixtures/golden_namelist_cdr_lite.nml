@@ -101,6 +101,7 @@
 /
 
 &cdr_lite_settings
+    cdr_carbonate_sensitivity_time_interpolation = .true.
     cdr_online_carbonate_sensitivity = .false.
 /
 
