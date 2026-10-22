@@ -61,8 +61,11 @@ def _output(proc: subprocess.CompletedProcess[str]) -> str:
 
 
 def _flat(text: str) -> str:
-    """The text on one line, without the borders of rich's panels."""
-    return re.sub(r"\s+", " ", re.sub(r"[│╭╮╰╯─]", " ", text))
+    """The text on one line, without the borders of rich's panels or the colour
+    codes rich adds where colour is forced (CI), which can split a wrapped phrase.
+    """
+    plain = re.sub(r"\x1b\[[0-9;]*m", "", text)
+    return re.sub(r"\s+", " ", re.sub(r"[│╭╮╰╯─]", " ", plain))
 
 
 def make_env(root: Path, shim: Path, project: Path | None = None) -> dict[str, str]:
