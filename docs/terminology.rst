@@ -145,16 +145,27 @@ Definitions
       Every run also has a uuid, the ``id`` in its run manifest. It is minted
       once and kept by every copy of the run: two runs can share a run ID, but
       never a uuid. ``run://<uuid>`` names the run by it, in your data home or
-      the project runs area where its directory is kept. See
+      the project runs area where its directory is kept, or wherever an
+      attached run's directory is. See
       :ref:`workplan_external_runs`.
+
+    Attach
+      Registering a run directory that arrived from elsewhere in this
+      machine's tracking with ``cstar run attach``. It writes a tracking
+      record and never writes into the run: an attached run is inspected and
+      referenced, not relaunched. It is read-only, which refuses the commands
+      that write into its directory, when it is in the project runs area or
+      belongs to another user, and owned otherwise. See
+      :ref:`workplan_attach_run`.
 
     Run manifest
       ``cstar-run.yaml`` in a run's directory: the run's identity (its run ID
       and uuid), one **attempt** for each time it was scheduled, one entry per
       step with its latest submission, status and **step record**, and what the
       run depends on outside itself. The scheduling command writes it;
-      ``cstar run status`` and, for a run tracked on this machine,
-      ``cstar run show`` refresh it. See :doc:`workplans`.
+      ``cstar run status`` and ``cstar run show`` refresh it for a run
+      scheduled on this machine; an attached run is read as it is. See
+      :doc:`workplans`.
 
     Step record
       ``cstar-step.yaml`` in a step's working directory, written by the step
@@ -174,8 +185,8 @@ Definitions
 
     Product
       A file a step left, listed in its step record with a kind (see the
-      kinds table in :doc:`custom_applications`), its path, its size in bytes
-      and metadata. See :doc:`workplans`.
+      kinds table in :doc:`custom_applications`), its path, its size in bytes,
+      a content digest once one is recorded, and metadata. See :doc:`workplans`.
 
     Pre-run
       Performing every stage before the model launch -- staging inputs,
