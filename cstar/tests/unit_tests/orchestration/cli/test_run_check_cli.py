@@ -919,3 +919,93 @@ def test_a_malformed_uuid_handle_is_a_bad_argument(
 
     assert result.exit_code == EXIT_BAD_ARGS
     assert "run://<uuid>" in flatten_cli_output(result.stderr)
+
+
+def add_absolute_link(built: BuiltRun) -> Path:
+    """Put in the first step of a built run a link, with an absolute target, to a file in it."""
+    output = write(built.step_dir("Spin Up") / "output" / "a.nc", "data")
+    return link(built.step_dir("Spin Up") / "input" / "abs_file", output)
+
+
+@pytest.mark.parametrize("handle", ["run-id", "uuid"])
+@pytest.mark.parametrize("kept", ["local_run", "project_run"])
+def test_repair_refuses_a_run_found_only_by_its_manifest(
+    request: pytest.FixtureRequest,
+    refresh: Refresh,
+    squash_cli_output: t.Callable[[str], str],
+    handle: str,
+    kept: str,
+) -> None:
+    """Verify `--repair` writes nothing into a run that only its manifest names,
+    however it is named, and says how to repair it deliberately.
+    """
+    built = request.getfixturevalue(kept)("lonely")
+    absolute = add_absolute_link(built)
+    target = os.readlink(absolute)
+    before = built.manifest_bytes
+
+    result = invoke(
+        built.run_id if handle == "run-id" else run_uri(built.uuid),
+        ARG_REPAIR,
+        record=None,
+    )
+
+    assert result.exit_code == EXIT_BAD_ARGS, result.output
+    text = squash_cli_output(result.stderr)
+    assert (
+        squash_cli_output(f"The run at {built.root} was found by its manifest") in text
+    )
+    assert squash_cli_output("is not tracked here") in text
+    assert squash_cli_output(f"cstar run check {built.root} {ARG_REPAIR}") in text
+    assert result.stdout == ""
+    assert os.readlink(absolute) == target
+    assert built.manifest_bytes == before
+    assert not (built.root / "gathered_output").exists()
+    refresh.refresh.assert_not_called()
+
+
+def test_repair_still_repairs_a_directory_the_user_names(
+    project_run: t.Callable[..., BuiltRun],
+) -> None:
+    """Verify naming the directory of a run that only its manifest names is the
+    deliberate way to repair it.
+    """
+    built = project_run("shared-run")
+    absolute = add_absolute_link(built)
+
+    result = invoke(str(built.root), ARG_REPAIR)
+
+    assert result.exit_code == EXIT_FINDINGS, result.output
+    assert "Rewrote 1 symlink(s) as relative:" in result.stdout
+    assert os.readlink(absolute) == "../output/a.nc"
+
+
+def test_repair_still_repairs_a_run_tracked_here(
+    run: FakeRun, refresh: Refresh
+) -> None:
+    """Verify a run tracked on this machine is repaired by its run-id."""
+    result = invoke(run.record.run_id, ARG_REPAIR, record=run.record)
+
+    assert result.exit_code == EXIT_FINDINGS, result.output
+    assert "Rewrote 3 symlink(s) as relative:" in result.stdout
+    assert os.readlink(run.spin_up / "input" / "abs_file") == "../output/a.nc"
+    refresh.refresh.assert_called_once()
+
+
+def test_the_hint_names_the_directory_as_it_was_typed(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    flatten_cli_output: t.Callable[[str], str],
+) -> None:
+    """Verify the hint is for the directory the user typed, whose name is not the
+    run-id the typed text slugifies to.
+    """
+    (tmp_path / "Spin Up").mkdir()
+    monkeypatch.chdir(tmp_path)
+
+    result = invoke("Spin Up", record=None)
+
+    assert result.exit_code == EXIT_BAD_ARGS
+    text = flatten_cli_output(result.stderr)
+    assert "To check the directory ./Spin Up, pass it as a path." in text
+    assert "./spin-up" not in text

@@ -7604,6 +7604,8 @@ async def test_external_runs_done_step_handle_has_the_launchers_type(
         ("failed", "", "is recorded as Failed"),
         ("", "Running", "is recorded as Running"),
         ("", "", "has no recorded status"),
+        # the snapshot is no evidence: a copy may lack the step's own record
+        ("", "Done", "has no recorded status"),
     ],
 )
 async def test_external_runs_unfinished_step_of_an_untracked_run_is_a_problem(
@@ -7634,6 +7636,22 @@ async def test_external_runs_unfinished_step_of_an_untracked_run_is_a_problem(
     assert registry.tasks() == {}
     for expected in ("'outer'", "'spinup'", recorded, str(fab.root), "done steps only"):
         assert expected in problem
+
+
+async def test_external_runs_run_id_spelled_as_a_title_is_the_run_tracking_names(
+    fabricate_manifest_run: Callable[..., ManifestOnlyRun],
+) -> None:
+    """Verify an alias spelled `Spin Up` finds the run directory `spin-up`, as
+    tracking, which slugifies run-ids, would.
+    """
+    fab = fabricate_manifest_run("spin-up")
+    registry = ExternalRuns({"spinup": RunRef(run_id="Spin Up")})
+
+    await registry.refresh([fab.ref], _NoQueryLauncher())
+
+    assert registry.problem(fab.ref) == ""
+    assert registry.is_done(fab.ref)
+    assert registry.pinned()["spinup"].id == fab.uuid
 
 
 async def test_external_runs_missing_step_of_an_untracked_run_is_reported(

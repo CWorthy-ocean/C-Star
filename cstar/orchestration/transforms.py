@@ -821,7 +821,7 @@ class ExternalRuns:
             )
             raise CstarError(msg)
 
-        entry = record.location.manifest.step(ref.step)
+        entry = record.manifest.step(ref.step)
         handle = launcher.handle_klass().model_validate(
             {
                 "pid": entry.job_id if entry else "",

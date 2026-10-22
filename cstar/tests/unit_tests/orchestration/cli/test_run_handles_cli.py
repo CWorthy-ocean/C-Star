@@ -243,3 +243,22 @@ def test_status_does_not_find_a_run_only_a_manifest_names(
     assert "Unable to locate run with unknown run-id" in flatten_cli_output(
         result.stderr
     )
+
+
+def test_show_names_the_directory_as_it_was_typed(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    flatten_cli_output: t.Callable[[str], str],
+) -> None:
+    """Verify a run-id that is no run, and is a directory here under another
+    spelling than its slug, gets the hint for the directory as it was typed.
+    """
+    (tmp_path / "Spin Up").mkdir()
+    monkeypatch.chdir(tmp_path)
+
+    result = invoke("show", "Spin Up")
+
+    assert result.exit_code == EXIT_BAD_ARGS
+    text = flatten_cli_output(result.stderr)
+    assert "To show the directory ./Spin Up, pass it as a path." in text
+    assert "./spin-up" not in text

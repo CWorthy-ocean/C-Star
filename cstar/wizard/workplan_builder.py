@@ -108,7 +108,8 @@ if TYPE_CHECKING:
     from pydantic.fields import FieldInfo
 
     from cstar.applications.core import EmittedBlueprint
-    from cstar.orchestration.index import ManifestRecord, RunLocation, RunRecord
+    from cstar.orchestration.index import ManifestRecord, RunRecord
+    from cstar.orchestration.tracking import WorkplanRun
     from cstar.system.scheduler import Scheduler
 
 PAGE = "workplan-builder"
@@ -213,15 +214,6 @@ def _esc(text: object) -> str:
 def _aware(moment: datetime) -> datetime:
     """``moment``, taken as UTC when it carries no time zone, so runs sort together."""
     return moment if moment.tzinfo else moment.replace(tzinfo=UTC)
-
-
-def _run_where(location: RunLocation) -> str:
-    """Where an indexed run's directory is kept, as the run picker names it."""
-    from cstar.orchestration.index import Durability, Origin
-
-    if location.origin is Origin.local:
-        return "local, untracked"
-    return "project, linked" if location.durability is Durability.linked else "project"
 
 
 def _as_datetime(value: object) -> datetime | None:
@@ -2312,7 +2304,7 @@ class WorkplanBuilderPage:
         self.run_rows: list[_RunRow] = []
         self.run_steps: dict[str, list[str]] = {}
         self.run_workplans: dict[str, Any] = {}
-        self.recorded_runs: list[RunRecord] = []
+        self.recorded_runs: list[WorkplanRun] = []
         self.indexed_runs: list[ManifestRecord] = []
         self._suspended = 0
         self._accordion: Any = None
@@ -2740,7 +2732,7 @@ class WorkplanBuilderPage:
         _schedule_coroutine(self._load_runs_async())
 
     @staticmethod
-    def _scan_index(tracked: Sequence[RunRecord]) -> list[ManifestRecord]:
+    def _scan_index(tracked: Sequence[WorkplanRun]) -> list[ManifestRecord]:
         """The workplan runs the run directories hold that are not tracked here.
 
         Scans the project's runs area and the data home with a fresh index: the
@@ -2753,22 +2745,18 @@ class WorkplanBuilderPage:
             The tracked runs; a found run in the directory of one of them, or
             with its uuid, is that run.
         """
-        from cstar.orchestration.index import ManifestRecord, RunIndex
+        from cstar.orchestration.index import (
+            ManifestRecord,
+            RunIndex,
+            untracked_locations,
+        )
 
         # a standalone blueprint run has no workplan steps to reference
-        found = [
-            loc for loc in RunIndex().locations() if loc.manifest.kind == "workplan"
-        ]
+        found = [loc for loc in RunIndex().locations() if loc.kind == "workplan"]
         # a run kept in more than one place is one run; the project's copy,
         # found after the data home's, is the durable one
         found = list({loc.uuid: loc for loc in found}.values())
-        roots = {r.output_path.resolve() for r in tracked}
-        found = [loc for loc in found if loc.root.resolve() not in roots]
-        if found:  # a record's uuid may cost a read of its manifest
-            # a run whose directory is gone is not readable: a copy kept elsewhere is
-            uuids = {r.uuid for r in tracked if r.output_path.is_dir()} - {""}
-            found = [loc for loc in found if loc.uuid not in uuids]
-        return [ManifestRecord(loc) for loc in found]
+        return [ManifestRecord(loc) for loc in untracked_locations(found, tracked)]
 
     async def _load_runs_async(self) -> None:
         import asyncio
@@ -2782,7 +2770,7 @@ class WorkplanBuilderPage:
                 f"<span class='forge-msg-warn'>Could not list runs: {_esc(ex)}</span>"
             )
             return
-        from cstar.orchestration.index import run_uri
+        from cstar.orchestration.index import run_uri, where_kept
 
         self.recorded_runs = list(runs)
         try:
@@ -2802,7 +2790,7 @@ class WorkplanBuilderPage:
         ] + [
             (
                 r.start_at,
-                f"{r.run_id}  ({r.start_at:%Y-%m-%d %H:%M}, {_run_where(r.location)})",
+                f"{r.run_id}  ({r.start_at:%Y-%m-%d %H:%M}, {where_kept(r.location)})",
                 run_uri(r.uuid),
             )
             for r in self.indexed_runs

@@ -28,11 +28,12 @@ from cstar.entrypoint.utils import (
 )
 from cstar.execution.file_system import DirectoryManager
 from cstar.orchestration.index import (
-    Durability,
+    WHERE_TRACKED,
     ManifestRecord,
     Origin,
-    RunLocation,
     default_index,
+    untracked_locations,
+    where_kept,
 )
 from cstar.orchestration.models import LEGACY_TRANSFORMED_NAME_SUFFIX
 from cstar.orchestration.orchestration import LiveWorkplan
@@ -81,14 +82,6 @@ WHERE_INCLUSIONS: set[str] = INCLUSIONS | {"where"}
 """View fields included when the listing says where each run is kept."""
 UNKNOWN_NAME: t.Final[str] = "unknown"
 """Constant value used by the system when a name cannot be retrieved."""
-WHERE_TRACKED: t.Final[str] = "local"
-"""Where a run started on this machine is kept."""
-WHERE_UNTRACKED: t.Final[str] = "local, untracked"
-"""Where a run in the data home that was not started on this machine is kept."""
-WHERE_PROJECT: t.Final[str] = "project"
-"""Where a run in the project's runs area is kept."""
-WHERE_LINKED: t.Final[str] = "project, linked"
-"""Where a link in the project's runs area to a run kept elsewhere is kept."""
 
 
 class ItemView(BaseModel):
@@ -210,58 +203,6 @@ async def adapt_runs_to_views(
     return views
 
 
-def where_kept(location: RunLocation) -> str:
-    """Say where a run that the index found is kept.
-
-    Parameters
-    ----------
-    location : RunLocation
-        The run found.
-
-    Returns
-    -------
-    str
-        One of the `WHERE_*` constants.
-    """
-    if location.origin is Origin.local:
-        return WHERE_UNTRACKED
-    return WHERE_LINKED if location.durability is Durability.linked else WHERE_PROJECT
-
-
-def untracked_locations(
-    locations: Sequence[RunLocation], tracked: Sequence[WorkplanRun]
-) -> list[RunLocation]:
-    """Drop the runs the index finds that this machine tracks.
-
-    A location is a tracked run's when its directory is the run's own, else when
-    its manifest holds the run's uuid, as a copy of the run in the project area
-    does.
-
-    Parameters
-    ----------
-    locations : Sequence[RunLocation]
-        The runs the index found.
-    tracked : Sequence[WorkplanRun]
-        Every run tracked on this machine that the listing is of, before any
-        filter drops one: a run a filter drops must not come back as its copy.
-
-    Returns
-    -------
-    list[RunLocation]
-        The locations that are not a tracked run, in input order.
-    """
-    roots = {run.output_path.resolve() for run in tracked}
-    others = [loc for loc in locations if loc.root.resolve() not in roots]
-    if not others:
-        return []
-
-    # a record that does not cache its uuid reads its manifest for it; a tracked
-    # run whose directory is gone (a purged scratch) does not hide the copy kept
-    # elsewhere, which is the one still readable
-    uuids = {uuid for run in tracked if run.output_path.is_dir() and (uuid := run.uuid)}
-    return [loc for loc in others if loc.uuid not in uuids]
-
-
 def find_other_runs(
     runid_filter: str, tracked: Sequence[WorkplanRun], *, shared_only: bool
 ) -> list[ManifestRecord]:
@@ -317,7 +258,7 @@ def adapt_locations_to_views(
     return [
         ItemView(
             run_id=record.run_id,
-            name=record.location.manifest.name or UNKNOWN_NAME,
+            name=record.location.name or UNKNOWN_NAME,
             raw_size=UNKNOWN_SIZE,
             raw_start=record.start_at,
             format=format,

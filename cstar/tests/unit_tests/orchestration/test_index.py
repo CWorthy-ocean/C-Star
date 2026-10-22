@@ -14,6 +14,9 @@ import cstar.orchestration.index as index_module
 from cstar.base.exceptions import CstarError
 from cstar.execution.file_system import DirectoryManager, StateDirectoryManager
 from cstar.orchestration.index import (
+    WHERE_LINKED,
+    WHERE_PROJECT,
+    WHERE_UNTRACKED,
     Durability,
     HandleKind,
     IndexRoot,
@@ -29,6 +32,8 @@ from cstar.orchestration.index import (
     resolve_run,
     run_uri,
     scan_roots,
+    untracked_locations,
+    where_kept,
 )
 from cstar.orchestration.manifest import (
     RUN_MANIFEST_NAME,
@@ -135,6 +140,17 @@ def finished_record(outcome: str = "completed") -> StepRecord:
         ),
         outcome=outcome,
         finished_at=NOW,
+    )
+
+
+def too_new_text(manifest_file: Path) -> str:
+    """The text of a manifest file with a schema this build refuses as too new."""
+    return re.sub(
+        r"^schema_version: .*$",
+        f"schema_version: {NEWER_MAJOR}",
+        manifest_file.read_text(),
+        count=1,
+        flags=re.MULTILINE,
     )
 
 
@@ -268,8 +284,28 @@ class TestScan:
         assert [loc.origin for loc in found] == sorted(
             (loc.origin for loc in found), key=lambda o: o is Origin.project
         )
-        assert by_run["alpha"].uuid == by_run["alpha"].manifest.id
+        assert by_run["alpha"].uuid == local_manifest_id(alpha)
+        assert by_run["alpha"].name == "alpha"
+        assert by_run["alpha"].kind == "workplan"
+        assert by_run["gamma"].kind == "blueprint"
+        assert by_run["alpha"].start_at == NOW
+        # a scan keeps what identifies a run, not the manifests
+        assert not hasattr(by_run["alpha"], "manifest")
         assert not warnings_of(caplog)
+
+    def test_a_timestamp_with_no_zone_is_taken_as_utc(self) -> None:
+        naive = datetime(2026, 10, 15, 12, 0)
+        root = StateDirectoryManager.workplan_runs_dir() / "naive"
+        make_run(root, "naive")
+        manifest = index_module.read_run_manifest(root)
+        assert manifest is not None
+        manifest.attempts[0].start_at = naive
+        write_run_manifest(root, manifest)
+
+        (found,) = RunIndex().locations()
+
+        assert found.start_at == NOW
+        assert found.start_at.tzinfo is not None
 
     def test_skips_what_is_not_a_run_silently(
         self, project_runs: Path, caplog: pytest.LogCaptureFixture
@@ -302,15 +338,7 @@ class TestScan:
         (broken / RUN_MANIFEST_NAME).write_text("run_id: [unclosed\n")
         future = local_run("future")
         manifest_file = future / RUN_MANIFEST_NAME
-        manifest_file.write_text(
-            re.sub(
-                r"^schema_version: .*$",
-                f"schema_version: {NEWER_MAJOR}",
-                manifest_file.read_text(),
-                count=1,
-                flags=re.MULTILINE,
-            )
-        )
+        manifest_file.write_text(too_new_text(manifest_file))
 
         with caplog.at_level(logging.WARNING):
             found = RunIndex().locations()
@@ -453,16 +481,15 @@ class TestManifestRecord:
     @staticmethod
     def record(root: Path, **kwargs: t.Any) -> ManifestRecord:
         run_id = kwargs.pop("run_id", "run")
-        manifest = make_run(root, run_id, **kwargs)
-        return ManifestRecord(
-            RunLocation(root, manifest, Origin.local, Durability.none)
-        )
+        make_run(root, run_id, **kwargs)
+        (location,) = RunIndex([IndexRoot(root.parent, Origin.local, 1)]).locations()
+        return ManifestRecord(location)
 
     def test_identity(self, tmp_path: Path) -> None:
         record = self.record(tmp_path / "run", run_id="named")
 
         assert record.run_id == "named"
-        assert record.uuid == record.location.manifest.id
+        assert record.uuid == local_manifest_id(tmp_path / "run")
         assert record.output_path == tmp_path / "run"
 
     def test_start_is_the_latest_attempt(self, tmp_path: Path) -> None:
@@ -476,6 +503,52 @@ class TestManifestRecord:
         record = self.record(tmp_path / "run", attempts=0)
 
         assert record.start_at == NOW
+
+    def test_manifest_is_read_when_asked_for_and_kept(
+        self, tmp_path: Path, opened: list[Path]
+    ) -> None:
+        record = self.record(tmp_path / "run", steps=("one", "two"))
+        opened.clear()
+
+        manifest = record.manifest
+
+        assert [step.name for step in manifest.steps] == ["one", "two"]
+        assert manifest.id == record.uuid
+        assert record.manifest is manifest
+        assert opened == [tmp_path / "run"]
+
+    def test_manifest_that_is_gone(self, tmp_path: Path) -> None:
+        record = self.record(tmp_path / "run")
+        (tmp_path / "run" / RUN_MANIFEST_NAME).unlink()
+
+        with pytest.raises(CstarError, match="no longer holds") as raised:
+            _ = record.manifest
+
+        assert str(tmp_path / "run") in str(raised.value)
+
+    @pytest.mark.parametrize("too_new", [False, True])
+    def test_manifest_that_cannot_be_read(self, tmp_path: Path, too_new: bool) -> None:
+        record = self.record(tmp_path / "run")
+        manifest_file = tmp_path / "run" / RUN_MANIFEST_NAME
+        manifest_file.write_text(
+            too_new_text(manifest_file) if too_new else "run_id: [unclosed\n"
+        )
+
+        with pytest.raises(CstarError, match="Unable to read") as raised:
+            _ = record.manifest
+
+        assert str(tmp_path / "run") in str(raised.value)
+        assert ("newer than this build" in str(raised.value)) is too_new
+
+    def test_manifest_of_another_run(self, tmp_path: Path) -> None:
+        record = self.record(tmp_path / "run")
+        other = make_run(tmp_path / "run", "run")
+
+        with pytest.raises(CstarError, match="is now") as raised:
+            _ = record.manifest
+
+        assert run_uri(other.id) in str(raised.value)
+        assert run_uri(record.uuid) in str(raised.value)
 
     def test_transformed_workplan(self, tmp_path: Path) -> None:
         record = self.record(tmp_path / "run")
@@ -527,10 +600,26 @@ class TestManifestRecord:
 
         assert record.step_status("one") == "Done"
 
+    def test_a_record_that_disagrees_with_the_snapshot_wins(
+        self, tmp_path: Path
+    ) -> None:
+        record = self.record(tmp_path / "run", status="Done")
+        write_step_record(tmp_path / "run" / "tasks" / "one", finished_record("failed"))
+
+        assert record.step_status("one") == "Failed"
+
     def test_without_a_record_the_snapshot_is_used(self, tmp_path: Path) -> None:
         record = self.record(tmp_path / "run", steps=("one", "two"), status="Running")
 
         assert record.step_status("two") == "Running"
+
+    def test_a_snapshot_that_says_done_is_not_evidence(self, tmp_path: Path) -> None:
+        """A copy without the step's own record, or one cut short in transfer, holds
+        the same snapshot a finished run does.
+        """
+        record = self.record(tmp_path / "run", status="Done")
+
+        assert record.step_status("one") == ""
 
     def test_a_step_that_is_not_in_the_manifest_has_no_status(
         self, tmp_path: Path
@@ -538,6 +627,24 @@ class TestManifestRecord:
         record = self.record(tmp_path / "run")
 
         assert record.step_status("nine") == ""
+
+    def test_a_step_record_is_read_for_the_step_asked_about_only(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        record = self.record(tmp_path / "run", steps=("one", "two", "three"))
+        read: list[Path] = []
+        real = index_module.read_step_record
+
+        def spy(step_root: Path) -> StepRecord | None:
+            read.append(step_root)
+            return real(step_root)
+
+        monkeypatch.setattr(index_module, "read_step_record", spy)
+
+        record.step_status("two")
+        record.step_status("two")
+
+        assert read == [tmp_path / "run" / "tasks" / "two"]
 
     def test_nothing_is_written(self, tmp_path: Path) -> None:
         root = tmp_path / "run"
@@ -551,11 +658,9 @@ class TestManifestRecord:
 
         assert (root / RUN_MANIFEST_NAME).read_bytes() == before_bytes
         assert sorted(root.rglob("*")) == before_tree
-        # nor does the manifest the location holds change
-        assert record.location.manifest.step("one").record is None  # type: ignore[union-attr]
 
-    def test_the_directory_is_read_once(self, tmp_path: Path) -> None:
-        """The first question about a step fixes what the record says of every step."""
+    def test_a_step_is_read_once(self, tmp_path: Path) -> None:
+        """The first question about a step fixes what the record says of it."""
         root = tmp_path / "run"
         record = self.record(root)
         step_dir = root / "tasks" / "one"
@@ -566,16 +671,39 @@ class TestManifestRecord:
 
         assert record.step_status("one") == "Done"
 
-    def test_a_step_record_that_cannot_be_read_is_not_an_error(
-        self, tmp_path: Path, caplog: pytest.LogCaptureFixture
+    @pytest.mark.parametrize(
+        ("snapshot", "expected"), [("Running", "Running"), ("Done", "")]
+    )
+    def test_a_step_record_that_cannot_be_read_is_a_warning_and_no_evidence(
+        self,
+        tmp_path: Path,
+        caplog: pytest.LogCaptureFixture,
+        snapshot: str,
+        expected: str,
     ) -> None:
         root = tmp_path / "run"
-        record = self.record(root, status="Running")
+        record = self.record(root, status=snapshot)
         (root / "tasks" / "one").mkdir(parents=True)
         (root / "tasks" / "one" / "cstar-step.yaml").write_text("step: [unclosed\n")
 
         with caplog.at_level(logging.WARNING):
-            assert record.step_status("one") == "Running"
+            assert record.step_status("one") == expected
+            assert record.step_status("one") == expected
+
+        (warning,) = warnings_of(caplog)
+        assert "'one'" in warning
+        assert "'run'" in warning
+
+    def test_a_manifest_that_is_gone_is_a_warning_and_no_status(
+        self, tmp_path: Path, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        record = self.record(tmp_path / "run")
+        (tmp_path / "run" / RUN_MANIFEST_NAME).unlink()
+
+        with caplog.at_level(logging.WARNING):
+            assert record.step_status("one") == ""
+
+        assert "no longer holds" in "".join(warnings_of(caplog))
 
     def test_is_a_run_record(self, tmp_path: Path) -> None:
         record: RunRecord = self.record(tmp_path / "run")
@@ -795,6 +923,88 @@ class TestResolveRunId:
 
         assert isinstance(found, WorkplanRun)
         assert found.output_path == root
+
+    @pytest.mark.parametrize("spelling", ["Spin Up", " SPIN-UP ", "spin up"])
+    def test_a_run_id_is_slugified_as_tracking_does(
+        self, project_runs: Path, spelling: str
+    ) -> None:
+        copy = project_runs / "spin-up"
+        make_run(copy, "spin-up")
+
+        found = resolve_run(parse_run_handle(spelling))
+
+        assert isinstance(found, ManifestRecord)
+        assert found.output_path == copy
+
+    def test_the_shadow_of_a_tracked_run_is_looked_up_by_its_slug(
+        self, project_runs: Path, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        root = local_run("spin-up")
+        track(root, "spin-up", uuid=local_manifest_id(root))
+        theirs = make_run(project_runs / "spin-up", "spin-up")
+
+        with caplog.at_level(logging.WARNING):
+            found = resolve_run(parse_run_handle("Spin Up"))
+
+        assert isinstance(found, WorkplanRun)
+        (warning,) = warnings_of(caplog)
+        assert run_uri(theirs.id) in warning
+
+    def test_a_purged_run_of_an_unknown_identity_reports_the_copies(
+        self, tmp_path: Path, project_runs: Path, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """A record scheduled before the uuid was cached cannot say which run it
+        was once its directory, and the manifest in it, are gone: no copy is
+        guessed.
+        """
+        gone = StateDirectoryManager.workplan_runs_dir() / "purged"
+        track(gone, "purged")
+        mine = make_run(project_runs / "purged", "purged")
+        archive = tmp_path / "archive" / "purged"
+        theirs = make_run(archive, "purged")
+        link(StateDirectoryManager.workplan_runs_dir() / "purged-2", archive)
+
+        with caplog.at_level(logging.WARNING):
+            found = resolve_run(parse_run_handle("purged"))
+
+        assert isinstance(found, WorkplanRun)
+        assert found.output_path == gone
+        (warning,) = warnings_of(caplog)
+        assert f"{run_uri(mine.id)} at {project_runs / 'purged'}" in warning
+        assert "cannot be read" in warning
+        assert "run:// handle" in warning
+        assert theirs.id not in warning
+        assert not default_index().scanned
+
+    def test_a_purged_run_of_an_unknown_identity_with_no_copy_is_quiet(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        gone = StateDirectoryManager.workplan_runs_dir() / "purged"
+        track(gone, "purged")
+
+        with caplog.at_level(logging.WARNING):
+            found = resolve_run(parse_run_handle("purged"))
+
+        assert isinstance(found, WorkplanRun)
+        assert not warnings_of(caplog)
+
+    def test_a_pinned_uuid_that_replaced_the_tracked_run_says_so(
+        self, project_runs: Path
+    ) -> None:
+        root = local_run("replaced")
+        mine = local_manifest_id(root)
+        track(root, "replaced", uuid=mine)
+        asked = str(uuid4())
+
+        with pytest.raises(CstarError, match="tracked here as") as raised:
+            resolve_run(parse_run_handle("replaced"), uuid=asked)
+
+        message = str(raised.value)
+        assert f"tracked here as {run_uri(mine)}, not the {run_uri(asked)}" in message
+        assert "replaced since" in message
+        assert "No copy of the asked-for run" in message
+        assert str(project_runs) in message
+        assert "not tracked here" not in message
 
     def test_an_unknown_run_id(self) -> None:
         local_run("something-else")
@@ -1027,18 +1237,125 @@ class TestResolvePath:
         make_run(root, "bad")
         manifest_file = root / RUN_MANIFEST_NAME
         manifest_file.write_text(
-            re.sub(
-                r"^schema_version: .*$",
-                f"schema_version: {NEWER_MAJOR}",
-                manifest_file.read_text(),
-                count=1,
-                flags=re.MULTILINE,
-            )
-            if too_new
-            else "run_id: [unclosed\n"
+            too_new_text(manifest_file) if too_new else "run_id: [unclosed\n"
         )
 
         with pytest.raises(
             CstarError, match="newer than this build" if too_new else "Unable"
         ):
             resolve_run(parse_run_handle(str(root)))
+
+
+class TestWhereKept:
+    @pytest.mark.parametrize(
+        ("origin", "durability", "expected"),
+        [
+            (Origin.local, Durability.none, WHERE_UNTRACKED),
+            (Origin.project, Durability.materialized, WHERE_PROJECT),
+            (Origin.project, Durability.linked, WHERE_LINKED),
+        ],
+    )
+    def test_labels(
+        self, tmp_path: Path, origin: Origin, durability: Durability, expected: str
+    ) -> None:
+        location = RunLocation(
+            root=tmp_path,
+            origin=origin,
+            durability=durability,
+            uuid=str(uuid4()),
+            run_id="run",
+            name="run",
+            kind="workplan",
+            start_at=NOW,
+        )
+
+        assert where_kept(location) == expected
+
+
+class TestUntrackedLocations:
+    """Which of the runs the index finds are not tracked here."""
+
+    @staticmethod
+    def locations(*roots: Path) -> list[RunLocation]:
+        by_root = {loc.root: loc for loc in RunIndex().locations()}
+        return [by_root[root] for root in roots]
+
+    @pytest.fixture
+    def uuid_reads(self) -> t.Iterator[mock.PropertyMock]:
+        """Count the times a tracked run is asked for its uuid."""
+        with mock.patch.object(
+            WorkplanRun, "uuid", new_callable=mock.PropertyMock, return_value=""
+        ) as reads:
+            yield reads
+
+    def test_a_run_in_a_tracked_directory_is_tracked(
+        self, uuid_reads: mock.PropertyMock
+    ) -> None:
+        mine = local_run("mine")
+        other = local_run("other")
+        found = self.locations(mine, other)
+
+        left = untracked_locations(found, [track(mine, "mine")])
+
+        assert [loc.root for loc in left] == [other]
+        uuid_reads.assert_not_called()
+
+    def test_a_copy_of_a_tracked_run_is_that_run(
+        self, project_runs: Path, uuid_reads: mock.PropertyMock
+    ) -> None:
+        mine = local_run("mine")
+        copy = project_runs / "mine"
+        make_run(copy, "mine", uuid=local_manifest_id(mine))
+        theirs = project_runs / "theirs"
+        make_run(theirs, "mine")
+
+        left = untracked_locations(
+            self.locations(mine, copy, theirs), [track(mine, "mine")]
+        )
+
+        # the uuid is the one the scan read where the run is; the record is not asked
+        assert [loc.root for loc in left] == [theirs]
+        uuid_reads.assert_not_called()
+
+    def test_nothing_left_asks_nothing(self, uuid_reads: mock.PropertyMock) -> None:
+        mine = local_run("mine")
+
+        assert untracked_locations(self.locations(mine), [track(mine, "mine")]) == []
+        uuid_reads.assert_not_called()
+
+    def test_a_purged_run_does_not_hide_its_copy(self, project_runs: Path) -> None:
+        wanted = str(uuid4())
+        gone = StateDirectoryManager.workplan_runs_dir() / "purged"
+        copy = project_runs / "purged"
+        make_run(copy, "purged", uuid=wanted)
+
+        left = untracked_locations(
+            self.locations(copy), [track(gone, "purged", uuid=wanted)]
+        )
+
+        assert [loc.root for loc in left] == [copy]
+
+    def test_a_tracked_run_the_scan_did_not_find_is_asked_for_its_uuid(
+        self, tmp_path: Path, project_runs: Path
+    ) -> None:
+        # kept where no index root looks, so the scan did not read its manifest
+        elsewhere = tmp_path / "elsewhere" / "mine"
+        wanted = make_run(elsewhere, "mine").id
+        copy = project_runs / "mine"
+        make_run(copy, "mine", uuid=wanted)
+        unstamped = track(elsewhere, "mine")
+
+        with mock.patch.object(
+            WorkplanRun, "uuid", new_callable=mock.PropertyMock, return_value=wanted
+        ) as reads:
+            left = untracked_locations(self.locations(copy), [unstamped])
+
+        assert left == []
+        reads.assert_called_once()
+
+    def test_the_order_of_the_locations_is_kept(self) -> None:
+        roots = [local_run(name) for name in ("c", "a", "b")]
+
+        left = untracked_locations(self.locations(*roots), [])
+
+        assert [loc.root for loc in left] == roots

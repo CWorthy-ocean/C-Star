@@ -15,12 +15,14 @@ import functools
 import os
 import typing as t
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from enum import StrEnum
 from pathlib import Path
 from uuid import UUID
 
 from cstar.base.exceptions import CstarError
 from cstar.base.log import get_logger
+from cstar.base.utils import slugify
 from cstar.execution.file_system import (
     DirectoryManager,
     JobFileSystemManager,
@@ -29,17 +31,17 @@ from cstar.execution.file_system import (
 from cstar.orchestration.manifest import (
     DOCUMENT_READ_ERRORS,
     RunManifest,
-    fold_step_records,
     read_run_manifest,
+    read_step_record,
     status_of_record,
 )
+from cstar.orchestration.orchestration import Status
 from cstar.orchestration.run_check import TRANSFORMED_WORKPLAN_GLOB
 from cstar.orchestration.tracking import TrackingRepository, WorkplanRun
 from cstar.system.migration import CstarMigrationError
 
 if t.TYPE_CHECKING:
     from collections.abc import Sequence
-    from datetime import datetime
 
 log = get_logger(__name__)
 
@@ -167,14 +169,15 @@ class Durability(StrEnum):
 
 @dataclass(frozen=True)
 class RunLocation:
-    """A run directory found by the index, with the manifest read from it."""
+    """A run directory found by the index, with what identifies the run.
+
+    The manifest is read to build it and dropped: a scan keeps every location
+    resident, and a manifest listing a run's products can be megabytes.
+    """
 
     root: Path
     """The run directory as found; symlinks are not resolved, and the paths in the
     manifest are relative, so either spelling works."""
-
-    manifest: RunManifest
-    """The manifest in the run directory."""
 
     origin: Origin
     """Where the run directory is kept."""
@@ -182,15 +185,112 @@ class RunLocation:
     durability: Durability
     """How the run directory survives a purge of the user's data home."""
 
-    @property
-    def uuid(self) -> str:
-        """The uuid the run's manifest holds."""
-        return self.manifest.id
+    uuid: str
+    """The uuid the run's manifest holds."""
 
-    @property
-    def run_id(self) -> str:
-        """The run-id the run's manifest holds."""
-        return self.manifest.run_id
+    run_id: str
+    """The run-id the run's manifest holds."""
+
+    name: str
+    """The name of the workplan or blueprint the run was made from."""
+
+    kind: t.Literal["workplan", "blueprint"]
+    """Whether the run is a workplan or a standalone blueprint."""
+
+    start_at: datetime
+    """When the latest attempt was scheduled, else when the manifest was written;
+    always aware, a timestamp with no time zone being taken as UTC."""
+
+
+def _locate(root: Path, manifest: RunManifest, origin: Origin) -> RunLocation:
+    """Describe the run a manifest in `root` holds, keeping none of the manifest."""
+    started = (
+        manifest.attempts[-1].start_at if manifest.attempts else manifest.created_at
+    )
+    return RunLocation(
+        root=root,
+        origin=origin,
+        durability=_durability(root, origin),
+        uuid=manifest.id,
+        run_id=manifest.run_id,
+        name=manifest.name,
+        kind=manifest.kind,
+        start_at=started if started.tzinfo else started.replace(tzinfo=UTC),
+    )
+
+
+WHERE_TRACKED: t.Final[str] = "local"
+"""Where a run started on this machine is kept."""
+
+WHERE_UNTRACKED: t.Final[str] = "local, untracked"
+"""Where a run in the data home that was not started on this machine is kept."""
+
+WHERE_PROJECT: t.Final[str] = "project"
+"""Where a run in the project's runs area is kept."""
+
+WHERE_LINKED: t.Final[str] = "project, linked"
+"""Where a link in the project's runs area to a run kept elsewhere is kept."""
+
+
+def where_kept(location: RunLocation) -> str:
+    """Say where a run that the index found is kept.
+
+    Parameters
+    ----------
+    location : RunLocation
+        The run found.
+
+    Returns
+    -------
+    str
+        One of the `WHERE_*` constants: `WHERE_TRACKED` is not among them, as
+        the index finds the runs this machine does not track.
+    """
+    if location.origin is Origin.local:
+        return WHERE_UNTRACKED
+    return WHERE_LINKED if location.durability is Durability.linked else WHERE_PROJECT
+
+
+def untracked_locations(
+    locations: "Sequence[RunLocation]", tracked: "Sequence[WorkplanRun]"
+) -> list[RunLocation]:
+    """Drop the runs the index finds that this machine tracks.
+
+    A location is a tracked run when its directory is the run's own, else when
+    its uuid is the uuid of a tracked run whose directory exists, as a copy of
+    the run in the project area has. A tracked run whose directory is gone (a
+    purged scratch) does not hide the copy kept elsewhere, which is the one
+    still readable.
+
+    The uuid of a tracked run found by its directory is the one the scan read
+    there; a record is asked for its own, which can cost a read of its manifest,
+    only when the scan did not find it and a location is left to compare.
+
+    Parameters
+    ----------
+    locations : Sequence[RunLocation]
+        The runs the index found.
+    tracked : Sequence[WorkplanRun]
+        Every run tracked on this machine that the listing is of, before any
+        filter drops one: a run a filter drops must not come back as its copy.
+
+    Returns
+    -------
+    list[RunLocation]
+        The locations that are not a tracked run, in input order.
+    """
+    scanned = {loc.root.resolve(): loc.uuid for loc in locations}
+    runs = {run.output_path.resolve(): run for run in tracked}
+    others = [loc for loc in locations if loc.root.resolve() not in runs]
+    if not others:
+        return []
+
+    uuids = {
+        uuid
+        for root, run in runs.items()
+        if root.is_dir() and (uuid := scanned.get(root) or run.uuid)
+    }
+    return [loc for loc in others if loc.uuid not in uuids]
 
 
 @dataclass(frozen=True)
@@ -262,7 +362,7 @@ def _parents(root: IndexRoot) -> list[Path]:
 def _open(
     directory: Path, origin: Origin, unreadable: list[tuple[Path, Exception]]
 ) -> RunLocation | None:
-    """Read the manifest of a run directory.
+    """Read the manifest of a run directory, keeping what identifies the run.
 
     Parameters
     ----------
@@ -286,7 +386,7 @@ def _open(
         return None
     if manifest is None:
         return None
-    return RunLocation(directory, manifest, origin, _durability(directory, origin))
+    return _locate(directory, manifest, origin)
 
 
 def _warn_unreadable(unreadable: "Sequence[tuple[Path, Exception]]") -> None:
@@ -433,7 +533,7 @@ class RunRecord(t.Protocol):
         ...
 
     @property
-    def start_at(self) -> "datetime":
+    def start_at(self) -> datetime:
         """When the run was started."""
         ...
 
@@ -484,12 +584,39 @@ class ManifestRecord:
         return self.location.root
 
     @property
-    def start_at(self) -> "datetime":
+    def start_at(self) -> datetime:
         """When the latest attempt was scheduled, else when the manifest was written."""
-        manifest = self.location.manifest
-        return (
-            manifest.attempts[-1].start_at if manifest.attempts else manifest.created_at
-        )
+        return self.location.start_at
+
+    @functools.cached_property
+    def manifest(self) -> RunManifest:
+        """The run's manifest, read from the run directory on first use and kept.
+
+        The location holds no manifest, so this is the one read made after the
+        scan; it is kept so a record parses it once.
+
+        Raises
+        ------
+        CstarError
+            If the directory no longer holds a readable manifest, or holds the
+            manifest of another run than the one found there.
+        """
+        root = self.output_path
+        try:
+            manifest = read_run_manifest(root)
+        except DOCUMENT_READ_ERRORS as ex:
+            msg = f"Unable to read the manifest of run {self.run_id!r} at {root}: {ex}"
+            raise CstarError(msg) from ex
+        if manifest is None:
+            msg = f"Run {self.run_id!r} at {root} no longer holds a run manifest"
+            raise CstarError(msg)
+        if manifest.id != self.uuid:
+            msg = (
+                f"The run at {root} is now {run_uri(manifest.id)}, not "
+                f"{run_uri(self.uuid)} as found"
+            )
+            raise CstarError(msg)
+        return manifest
 
     @property
     def trx_workplan_path(self) -> Path:
@@ -502,7 +629,7 @@ class ManifestRecord:
             no transformed workplan or several.
         """
         root = self.output_path
-        if self.location.manifest.kind == "blueprint":
+        if self.location.kind == "blueprint":
             msg = (
                 f"Run {self.run_id!r} at {root} is a standalone blueprint run; "
                 "it has no workplan"
@@ -523,26 +650,21 @@ class ManifestRecord:
         raise CstarError(msg)
 
     @functools.cached_property
-    def _folded(self) -> RunManifest:
-        """A copy of the manifest with the step records on disk folded in.
-
-        Read on first use and kept, so a record holds the state of the run's
-        directory as of the first question about a step. Only the copy changes;
-        nothing is written.
-        """
-        folded = self.location.manifest.model_copy(deep=True)
-        try:
-            fold_step_records(folded, self.output_path)
-        except DOCUMENT_READ_ERRORS as ex:
-            log.warning(f"Using the recorded status of run {self.run_id!r}: {ex}")
-        return folded
+    def _statuses(self) -> dict[str, str]:
+        """The status of each step asked about so far, so a step's record is read once."""
+        return {}
 
     def step_status(self, name: str) -> str:
         """The orchestration status name of a step.
 
-        The status its step record stands for, else the one the manifest last
-        recorded. A run that is not tracked here is `Done` only when its step
-        records say it completed.
+        A run that is not tracked here is `Done` only when the step's own
+        record says it completed: a manifest's snapshot that says `Done` is no
+        evidence, as a copy of the run without its `cstar-step.yaml` files, or
+        one cut short in transfer, carries the same snapshot. Any other status
+        the snapshot holds is reported as it stands.
+
+        The step's record is read on the first question about the step and the
+        answer kept. Nothing is written.
 
         Parameters
         ----------
@@ -553,12 +675,33 @@ class ManifestRecord:
         -------
         str
             The status name, or an empty string when the manifest has no such
-            step or the step has no status.
+            step, or the step has no status or only the unconfirmed snapshot
+            `Done`.
         """
-        entry = self._folded.step(name)
+        if name not in self._statuses:
+            self._statuses[name] = self._read_status(name)
+        return self._statuses[name]
+
+    def _read_status(self, name: str) -> str:
+        """Read the status of a step from its record, else from the snapshot."""
+        try:
+            entry = self.manifest.step(name)
+        except CstarError as ex:
+            log.warning(str(ex))
+            return ""
         if entry is None:
             return ""
-        return status_of_record(entry.record) if entry.record else entry.status
+
+        try:
+            record = read_step_record(self.output_path / entry.working_dir)
+        except DOCUMENT_READ_ERRORS as ex:
+            log.warning(
+                f"Ignoring the record of step {name!r} of run {self.run_id!r}: {ex}"
+            )
+            record = None
+        if record is not None:
+            return status_of_record(record)
+        return "" if entry.status == Status.Done.name else entry.status
 
 
 def _tracked_for(location: RunLocation, *, same_root: bool) -> WorkplanRun | None:
@@ -578,7 +721,7 @@ def _tracked_for(location: RunLocation, *, same_root: bool) -> WorkplanRun | Non
         The record, when tracking holds one for the run-id under the run's uuid
         and its run directory exists; otherwise `None`.
     """
-    if location.manifest.kind != "workplan":
+    if location.kind != "workplan":
         return None
     try:
         tracked = TrackingRepository().get_workplan_run_sync(location.run_id)
@@ -648,7 +791,7 @@ def _read_directory(root: Path) -> RunLocation:
         if project is not None and root.parent.resolve() == project
         else Origin.local
     )
-    return RunLocation(root, manifest, origin, _durability(root, origin))
+    return _locate(root, manifest, origin)
 
 
 def _resolve_path(path: str, uuid: str) -> RunRecord:
@@ -703,33 +846,27 @@ def _warn_if_shadowed(tracked: WorkplanRun, run_id: str) -> None:
 
 
 def _resolve_run_id(
-    run_id: str, uuid: str, start_at: "datetime | None", index: RunIndex
+    run_id: str, uuid: str, start_at: datetime | None, index: RunIndex
 ) -> RunRecord:
     """Resolve a run-id: tracking first, then the manifests of that name."""
     try:
+        # tracking slugifies the run-id it is asked for, so the directories
+        # and manifests named after it must be looked up by the same slug
+        run_id = slugify(run_id)
         tracked = TrackingRepository().get_workplan_run_sync(run_id, run_date=start_at)
     except ValueError as ex:
         msg = f"Unable to look up run {run_id!r}: {ex}"
         raise CstarError(msg) from ex
 
-    if tracked is not None and (not uuid or tracked.uuid in ("", uuid)):
+    tracked_uuid = ""
+    if tracked is not None and (
+        not uuid or (tracked_uuid := tracked.uuid) in ("", uuid)
+    ):
         if tracked.output_path.is_dir():
             if not uuid:
                 _warn_if_shadowed(tracked, run_id)
             return tracked
-
-        # the scratch was purged, or the run moved: a copy of the same run may
-        # be kept elsewhere
-        wanted = uuid or tracked.uuid
-        if wanted and (
-            copies := [loc for loc in index.by_run_id(run_id) if loc.uuid == wanted]
-        ):
-            log.info(
-                f"The directory recorded for run {run_id!r}, {tracked.output_path}, "
-                f"is gone; using the copy at {copies[0].root}"
-            )
-            return ManifestRecord(copies[0])
-        return tracked
+        return _purged_run(tracked, uuid or tracked.uuid, index)
 
     candidates = index.by_run_id(run_id)
     if uuid:
@@ -740,6 +877,13 @@ def _resolve_run_id(
     uuids = list(dict.fromkeys(loc.uuid for loc in candidates))
     if not uuids:
         roots = ", ".join(str(root.path) for root in index.roots)
+        if tracked is not None:
+            msg = (
+                f"Run {run_id!r} is tracked here as {run_uri(tracked_uuid)}, not "
+                f"the {run_uri(uuid)} that was asked for: the run was replaced "
+                f"since. No copy of the asked-for run was found under {roots}."
+            )
+            raise CstarError(msg)
         msg = (
             f"No run found for run-id {run_id}: it is not tracked here and no "
             f"manifest under {roots} names it. `cstar run ls --all` lists the "
@@ -758,11 +902,57 @@ def _resolve_run_id(
     return _prefer_tracked(candidates, same_root=False)
 
 
+def _purged_run(tracked: WorkplanRun, wanted: str, index: RunIndex) -> RunRecord:
+    """Resolve a tracked run whose directory is gone.
+
+    The scratch was purged, or the run moved: a copy of the same run may be
+    kept elsewhere. Only the run's uuid says which copy that is, and a record
+    scheduled before the uuid was cached cannot give it once the manifest is
+    gone with the directory; then no copy is guessed, and the copies there are
+    reported.
+
+    Parameters
+    ----------
+    tracked : WorkplanRun
+        The tracked run.
+    wanted : str
+        The uuid of the run: the one pinned, else the record's; empty when
+        unknown.
+    index : RunIndex
+        Where to look for copies.
+
+    Returns
+    -------
+    RunRecord
+        The copy of the run, else the tracked record, whose missing directory
+        the callers report.
+    """
+    copies = index.by_run_id(tracked.run_id)
+    if not wanted:
+        if copies:
+            listed = "; ".join(f"{run_uri(loc.uuid)} at {loc.root}" for loc in copies)
+            log.warning(
+                f"Run {tracked.run_id!r} is tracked here, but its directory "
+                f"{tracked.output_path} is gone, so which run it was cannot be "
+                f"read. Runs of that run-id found: {listed}. Pass the run:// "
+                "handle of the one you mean to use it."
+            )
+        return tracked
+
+    if matching := [loc for loc in copies if loc.uuid == wanted]:
+        log.info(
+            f"The directory recorded for run {tracked.run_id!r}, "
+            f"{tracked.output_path}, is gone; using the copy at {matching[0].root}"
+        )
+        return ManifestRecord(matching[0])
+    return tracked
+
+
 def resolve_run(
     handle: RunHandle,
     *,
     uuid: str = "",
-    start_at: "datetime | None" = None,
+    start_at: datetime | None = None,
     index: RunIndex | None = None,
 ) -> RunRecord:
     """Resolve a handle to the run it names.

@@ -21,13 +21,16 @@ def resolve_by_handle(
     verb: str,
     directory: "Callable[[str], _T]",
     tracked: "Callable[[WorkplanRun], _T]",
+    indexed: "Callable[[str], _T] | None" = None,
 ) -> _T:
     """Resolve a run handle for a command that reads a run directory.
 
     The one place that decides whether a run is tracked on this machine, and so
     refreshed from its sentinels, or only read as it is on disk. A directory the
     user named, and a run known only by its manifest, are read as they are; a
-    run tracked here is refreshed first.
+    run tracked here is refreshed first. A command that must tell a run found
+    only by its manifest from a directory the user named, because it writes
+    into the run, builds the first with `indexed`.
 
     Parameters
     ----------
@@ -42,11 +45,15 @@ def resolve_by_handle(
         Builds the command's target from the path of a run directory.
     tracked : Callable[[WorkplanRun], _T]
         Builds the command's target from the tracking record of a run.
+    indexed : Callable[[str], _T] | None
+        Builds the command's target from the path of the directory of a run
+        that is not tracked here and was found by its manifest; `directory` by
+        default.
 
     Returns
     -------
     _T
-        What `directory` or `tracked` built.
+        What `directory`, `tracked` or `indexed` built.
 
     Raises
     ------
@@ -58,13 +65,15 @@ def resolve_by_handle(
     if handle.kind is HandleKind.path:
         return directory(handle.value)
 
+    # the text as typed: the run-id was slugified, the directory was not
+    typed = target.strip()
     hint = ""
-    if handle.kind is HandleKind.run_id and Path(handle.value).is_dir():
-        hint = f"To {verb} the directory ./{handle.value}, pass it as a path."
+    if handle.kind is HandleKind.run_id and Path(typed).is_dir():
+        hint = f"To {verb} the directory ./{typed}, pass it as a path."
 
     record = lookup_run(handle, hint=hint)
     if isinstance(record, WorkplanRun):
         set_ctxmap(context, KEY_RUN, record)
         return tracked(record)
 
-    return directory(str(record.output_path))
+    return (indexed or directory)(str(record.output_path))
