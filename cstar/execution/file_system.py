@@ -80,6 +80,8 @@ class DirectoryManager:
     _PKG_SUBDIR: t.Literal["cstar"] = "cstar"
     _SOURCE_DATA_SUBDIR: t.Literal["source-data"] = "source-data"
     """The source-data cache's name under ``<root>/cstar``."""
+    _RUNS_SUBDIR: t.Literal["runs"] = "runs"
+    """The name, under ``<project home>/cstar``, of the project's runs area."""
     _LEGACY_SOURCE_DATA_SUBDIR: t.Literal["cstar-forge-data/source-data"] = (
         "cstar-forge-data/source-data"
     )
@@ -156,14 +158,44 @@ class DirectoryManager:
         return cls.xdg_dir(load_xdg_metadata().state)
 
     @classmethod
+    def project_home(cls) -> Path | None:
+        """Get the durable project directory, when one is configured.
+
+        The value of ``CSTAR_PROJECT_HOME``, which defaults to ``$PROJECT``.
+        Unlike the root of the source-data cache, it does not fall back to
+        scratch or the home directory: a project area is shared and durable, so
+        its absence means there is none.
+
+        Returns
+        -------
+        Path | None
+            The directory, or `None` when neither variable is set.
+        """
+        value = get_env_item(ENV_CSTAR_PROJECT_HOME).value
+        return Path(value).expanduser().resolve() if value else None
+
+    @classmethod
+    def project_runs_home(cls) -> Path | None:
+        """Get the project's runs area, ``<project home>/cstar/runs``.
+
+        Holds the runs a project keeps durable and shares. Does not create the
+        directory.
+
+        Returns
+        -------
+        Path | None
+            The directory, or `None` when there is no project home.
+        """
+        home = cls.project_home()
+        return home / cls._PKG_SUBDIR / cls._RUNS_SUBDIR if home else None
+
+    @classmethod
     def _source_data_paths(cls) -> tuple[Path, Path]:
         """Return the standard and legacy source-data cache paths, on the same root."""
-        root = Path(
-            get_env_item(ENV_CSTAR_PROJECT_HOME).value
-            or hpc_data_directory()
-            or Path.home()
+        root = (
+            cls.project_home()
+            or Path(hpc_data_directory() or Path.home()).expanduser().resolve()
         )
-        root = root.expanduser().resolve()
         return (
             root / cls._PKG_SUBDIR / cls._SOURCE_DATA_SUBDIR,
             root / cls._LEGACY_SOURCE_DATA_SUBDIR,
@@ -421,6 +453,31 @@ class StateDirectoryManager:
         return root / cls._RUN_TRACKING_NAME
 
     @classmethod
+    def workplan_runs_dir(cls) -> Path:
+        """The data-home directory holding the workplan runs.
+
+        ``<data home>/workplan_runs``; each run is a directory of its run-id.
+
+        Returns
+        -------
+        Path
+        """
+        return DirectoryManager.data_home() / cls._WORKPLAN_RUNS_NAME
+
+    @classmethod
+    def blueprint_runs_dir(cls) -> Path:
+        """The data-home directory holding the blueprint runs made outside a workplan.
+
+        ``<data home>/blueprint_runs``; each run is a directory of its name
+        under the directory of its application.
+
+        Returns
+        -------
+        Path
+        """
+        return DirectoryManager.data_home() / cls._BLUEPRINT_RUNS_NAME
+
+    @classmethod
     def data_dir(cls, run_id: str | None = None) -> Path:
         """The directory for data files used by a run.
 
@@ -435,7 +492,7 @@ class StateDirectoryManager:
         """
         data_home = DirectoryManager.data_home()
         run_id = run_id or get_env_item(ENV_CSTAR_RUNID).value
-        run_dir = data_home / cls._WORKPLAN_RUNS_NAME / run_id
+        run_dir = cls.workplan_runs_dir() / run_id
 
         legacy_dir = data_home / run_id
         if not run_dir.exists() and JobFileSystemManager(legacy_dir).tasks_dir.is_dir():
@@ -468,8 +525,7 @@ class StateDirectoryManager:
         -------
         Path
         """
-        data_home = DirectoryManager.data_home()
-        return data_home / cls._BLUEPRINT_RUNS_NAME / application / slugify(name)
+        return cls.blueprint_runs_dir() / application / slugify(name)
 
     @classmethod
     def user_dir(cls, run_id: str | None = None) -> Path:

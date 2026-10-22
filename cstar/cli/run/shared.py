@@ -1,55 +1,79 @@
-import os
 import typing as t
 from pathlib import Path
 
 import typer
 
-WORKPLAN_FILE_SUFFIXES: t.Final[frozenset[str]] = frozenset({".yaml", ".yml"})
-"""Suffixes that identify a workplan file, which `cstar workplan check` validates."""
+from cstar.cli.common import set_ctxmap
+from cstar.cli.workplan.shared import KEY_RUN, lookup_run, parse_handle
+from cstar.orchestration.index import HandleKind
+from cstar.orchestration.tracking import WorkplanRun
+
+if t.TYPE_CHECKING:
+    from collections.abc import Callable
+
+_T = t.TypeVar("_T")
 
 
-def refuse_workplan_file(_context: typer.Context, target: str) -> str:
-    """Refuse a workplan file: a run command acts on a run, not a workplan.
+def resolve_by_handle(
+    context: typer.Context,
+    target: str,
+    *,
+    verb: str,
+    directory: "Callable[[str], _T]",
+    tracked: "Callable[[WorkplanRun], _T]",
+    indexed: "Callable[[str], _T] | None" = None,
+) -> _T:
+    """Resolve a run handle for a command that reads a run directory.
+
+    The one place that decides whether a run is tracked on this machine, and so
+    refreshed from its sentinels, or only read as it is on disk. A directory the
+    user named, and a run known only by its manifest, are read as they are; a
+    run tracked here is refreshed first. A command that must tell a run found
+    only by its manifest from a directory the user named, because it writes
+    into the run, builds the first with `indexed`.
 
     Parameters
     ----------
-    _context : typer.Context
-        The typer context (unused).
+    context : typer.Context
+        The typer context; receives the run record in the context map as "run"
+        when the run is tracked.
     target : str
-        The user-supplied target.
+        The user-supplied run-id, `run://<uuid>`, or run directory.
+    verb : str
+        What the command does with the run, to suggest its directory by.
+    directory : Callable[[str], _T]
+        Builds the command's target from the path of a run directory.
+    tracked : Callable[[WorkplanRun], _T]
+        Builds the command's target from the tracking record of a run.
+    indexed : Callable[[str], _T] | None
+        Builds the command's target from the path of the directory of a run
+        that is not tracked here and was found by its manifest; `directory` by
+        default.
 
     Returns
     -------
-    str
+    _T
+        What `directory`, `tracked` or `indexed` built.
 
     Raises
     ------
     typer.BadParameter
-        Raised when the target names a YAML file.
+        Raised when the target is no run handle or names no run, and by the
+        builders.
     """
-    if Path(target).suffix.casefold() in WORKPLAN_FILE_SUFFIXES:
-        msg = (
-            f"{target!r} is a workplan file, not a run. "
-            f"To validate it, use `cstar workplan check {target}`."
-        )
-        raise typer.BadParameter(msg)
+    handle = parse_handle(context, target)
+    if handle.kind is HandleKind.path:
+        return directory(handle.value)
 
-    return target
+    # the text as typed: the run-id was slugified, the directory was not
+    typed = target.strip()
+    hint = ""
+    if handle.kind is HandleKind.run_id and Path(typed).is_dir():
+        hint = f"To {verb} the directory ./{typed}, pass it as a path."
 
+    record = lookup_run(handle, hint=hint)
+    if isinstance(record, WorkplanRun):
+        set_ctxmap(context, KEY_RUN, record)
+        return tracked(record)
 
-def is_path_like(target: str) -> bool:
-    """Whether a target is spelled as a path rather than as a run-id.
-
-    A run-id is a slug, so it never holds a path separator or starts with a dot
-    or a tilde.
-
-    Parameters
-    ----------
-    target : str
-        The user-supplied target.
-
-    Returns
-    -------
-    bool
-    """
-    return os.sep in target or target.startswith((".", "~"))
+    return (indexed or directory)(str(record.output_path))

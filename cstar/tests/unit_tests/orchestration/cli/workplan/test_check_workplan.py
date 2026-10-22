@@ -735,7 +735,9 @@ def test_deep_check_reports_unresolvable_external_dependency(
     result = runner.invoke(app, [wp_path.as_posix()], color=False)
 
     assert result.exit_code == 1, result.stdout
-    assert "No run record found for alias 'spinup'" in result.stdout
+    output = " ".join(result.stdout.split())
+    assert "Run alias 'spinup'" in output
+    assert "No run found for run-id never-ran" in output
     assert "Traceback" not in result.stdout
 
 

@@ -31,6 +31,12 @@ plain variable references (``{{my_var}}``) from scope references
 LOCATION_KEY: t.Final[str] = "location"
 """Key under which a blueprint names where a resource (dataset, code, file) lives."""
 
+_SAFE_LOADER: t.Final[type[yaml.SafeLoader]] = getattr(
+    yaml, "CSafeLoader", yaml.SafeLoader
+)
+"""The safe YAML loader, libyaml's when PyYAML was built with it: about five times
+faster on a large run manifest, which lists every product the run recorded."""
+
 
 class PersistenceMode(enum.StrEnum):
     """Supported serialization engines."""
@@ -126,7 +132,7 @@ def read_yaml_to_raw(path: Path) -> dict[str, t.Any]:
     dict[str, t.Any]
     """
     with path.open("r", encoding="utf-8") as fp:
-        return yaml.safe_load(fp)
+        return yaml.load(fp, Loader=_SAFE_LOADER)
 
 
 def read_raw(

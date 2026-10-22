@@ -7,6 +7,7 @@ from rich.console import Console
 from cstar.base.log import get_logger
 from cstar.cli.common import get_from_ctxmap
 from cstar.cli.workplan.shared import (
+    KEY_RUN,
     RunRecordArgument,
     display_summary,
     refresh_disk_usage,
@@ -33,7 +34,16 @@ app = typer.Typer()
 console = Console()
 
 
-@app.command(name="status", help="Retrieve the current status of a workplan.")
+HELP_SHORT = "Retrieve the current status of a workplan."
+HELP_LONG = f"""\
+{HELP_SHORT}
+
+The run is named by its run-id and must be tracked on this machine: its live
+state is read from the scheduler. To see any other run, use `cstar run show`.
+"""
+
+
+@app.command(name="status", help=HELP_LONG, short_help=HELP_SHORT)
 def status(
     ctx: typer.Context,
     run_id: RunRecordArgument,
@@ -53,7 +63,7 @@ def status(
     ] = False,
 ) -> None:
     """Retrieve the current status of a workplan."""
-    run = get_from_ctxmap(ctx, "run", WorkplanRun)
+    run = get_from_ctxmap(ctx, KEY_RUN, WorkplanRun)
     wp_path = run.trx_workplan_path
 
     try:

@@ -8,8 +8,10 @@ pytest.importorskip("ipywidgets")
 
 import re
 import shutil
-from datetime import datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from typing import Any, Literal
+from uuid import uuid4
 
 import yaml
 
@@ -19,8 +21,24 @@ from cstar.applications.roms_marbl.transforms import (
     ContinuanceDirective,
     NestingDirective,
 )
-from cstar.orchestration.models import BLUEPRINT_METADATA_FIELDS, Step, Workplan
+from cstar.execution.file_system import StateDirectoryManager
+from cstar.orchestration.index import RunIndex, run_uri
+from cstar.orchestration.manifest import (
+    Attempt,
+    RunManifest,
+    StepEntry,
+    StepRecord,
+    write_run_manifest,
+    write_step_record,
+)
+from cstar.orchestration.models import (
+    BLUEPRINT_METADATA_FIELDS,
+    BlueprintIdentity,
+    Step,
+    Workplan,
+)
 from cstar.orchestration.serialization import deserialize, serialize
+from cstar.orchestration.tracking import KEY_RUN_UUID, TrackingRepository, WorkplanRun
 from cstar.wizard import workplan_builder as wb
 from cstar.wizard.ui import labels
 from cstar.wizard.wizard import WIZARD_TOOL, ForgeBlueprintWizardApp
@@ -723,54 +741,404 @@ def test_runs_table_declares_aliases_and_offers_their_steps(page, roms_bp):
     assert page.draft is None  # the dependency now names an undeclared alias
 
 
-def test_refresh_runs_lists_records_newest_first_and_loads_steps(
-    page, roms_bp, tmp_path, monkeypatch
-):
+_STAMP = datetime(2026, 3, 1, 12, tzinfo=UTC)
+_STEP = "create-ic"
+
+
+@pytest.fixture
+def run_homes(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    """Point the data and project homes at temporary directories.
+
+    Returns the project's runs area (not created). `PROJECT` is cleared so no
+    refresh can scan a real one.
+    """
+    monkeypatch.delenv("PROJECT", raising=False)
     monkeypatch.setenv("CSTAR_DATA_HOME", str(tmp_path / "data"))
-    recorded = tmp_path / "recorded.yaml"
-    recorded.write_text(
-        yaml.safe_dump(
-            {
-                "name": "old",
-                "description": "an earlier run",
-                "steps": [
-                    {
-                        "name": "create-ic",
-                        "application": "roms_marbl",
-                        "blueprint": str(roms_bp),
-                    }
-                ],
-            }
-        )
-    )
+    project = (tmp_path / "project").resolve()
+    monkeypatch.setenv("CSTAR_PROJECT_HOME", str(project))
+    return project / "cstar" / "runs"
 
-    class _Run:
-        def __init__(self, run_id: str, start_at: datetime) -> None:
-            self.run_id, self.start_at = run_id, start_at
-            self.trx_workplan_path = recorded
 
-    runs = [_Run("old", datetime(2026, 1, 1)), _Run("new", datetime(2026, 6, 1))]
+@pytest.fixture
+def tracked(monkeypatch: pytest.MonkeyPatch) -> list[WorkplanRun]:
+    """The runs tracking lists; a test appends to it."""
+    runs: list[WorkplanRun] = []
 
     async def _list(self, run_id_filter: str = ""):
         return runs
 
-    from cstar.orchestration.tracking import TrackingRepository
-
     monkeypatch.setattr(TrackingRepository, "list_latest_runs", _list)
+    return runs
 
+
+@pytest.fixture
+def scans(monkeypatch: pytest.MonkeyPatch) -> list[RunIndex]:
+    """The indexes that scanned: one entry per scan, whichever index did it."""
+    scanned: list[RunIndex] = []
+    scan = RunIndex.locations
+
+    def _locations(self: RunIndex):
+        scanned.append(self)
+        return scan(self)
+
+    monkeypatch.setattr(RunIndex, "locations", _locations)
+    return scanned
+
+
+def _workplan_text(roms_bp: Path, name: str = "earlier") -> str:
+    return yaml.safe_dump(
+        {
+            "name": name,
+            "description": "an earlier run",
+            "steps": [
+                {
+                    "name": _STEP,
+                    "application": "roms_marbl",
+                    "blueprint": str(roms_bp),
+                }
+            ],
+        }
+    )
+
+
+def _make_run(
+    root: Path,
+    run_id: str,
+    roms_bp: Path,
+    *,
+    uuid: str | None = None,
+    kind: Literal["workplan", "blueprint"] = "workplan",
+    start: datetime = _STAMP,
+    done: bool = True,
+    status: str = "",
+    transformed: bool = True,
+) -> str:
+    """Write a run directory (manifest, transformed workplan, step record); return its uuid."""
+    uuid = uuid or str(uuid4())
+    manifest = RunManifest(
+        id=uuid,
+        run_id=run_id,
+        name=run_id,
+        kind=kind,
+        created_at=start,
+        attempts=[Attempt(start_at=start)],
+        steps=[
+            StepEntry(
+                name=_STEP,
+                application="roms_marbl",
+                working_dir=f"tasks/{_STEP}",
+                status=status,
+            )
+        ],
+    )
+    root.mkdir(parents=True, exist_ok=True)
+    write_run_manifest(root, manifest)
+    if transformed:
+        (root / f"{run_id}_transformed.yaml").write_text(_workplan_text(roms_bp))
+    if done:
+        write_step_record(
+            root / "tasks" / _STEP,
+            StepRecord(
+                step=_STEP,
+                application="roms_marbl",
+                blueprint=BlueprintIdentity(
+                    kind="Blueprint",
+                    application="roms_marbl",
+                    name="bp",
+                    content_hash="abc",
+                ),
+                outcome="completed",
+                finished_at=start,
+            ),
+        )
+    return uuid
+
+
+def _local_run(run_id: str, roms_bp: Path, **kwargs: Any) -> tuple[Path, str]:
+    """A workplan run in the data home; return its directory and uuid."""
+    root = StateDirectoryManager.workplan_runs_dir() / run_id
+    return root, _make_run(root, run_id, roms_bp, **kwargs)
+
+
+def _tracked(
+    root: Path, run_id: str, *, uuid: str = "", start: datetime = _STAMP
+) -> WorkplanRun:
+    """A tracking record of the run in ``root``, stamped with ``uuid`` when given."""
+    return WorkplanRun(
+        workplan_path=root / "workplan.yaml",
+        trx_workplan_path=root / f"{run_id}_transformed.yaml",
+        output_path=root,
+        run_id=run_id,
+        start_at=start,
+        metadata={KEY_RUN_UUID: uuid} if uuid else {},
+    )
+
+
+def _labels(widget) -> list[str]:
+    """The option labels of a selection widget."""
+    return [o[0] if isinstance(o, tuple) else o for o in widget.options]
+
+
+def _run_row(page: WorkplanBuilderPage, roms_bp: Path, alias: str = "ini"):
+    """A page with one step and one run row aliased ``alias``."""
     _name_page(page)
     _path_step(page.panes[0], "run", roms_bp)
     page._add_run()
     row = page.run_rows[0]
-    row.alias.value = "ini"
+    row.alias.value = alias
+    return row
+
+
+def test_refresh_runs_lists_records_newest_first_and_loads_steps(
+    page, roms_bp, tmp_path, run_homes, tracked
+):
+    recorded = tmp_path / "recorded.yaml"
+    recorded.write_text(_workplan_text(roms_bp))
+    for run_id, start in (("old", datetime(2026, 1, 1)), ("new", datetime(2026, 6, 1))):
+        tracked.append(
+            WorkplanRun(
+                workplan_path=recorded,
+                trx_workplan_path=recorded,
+                output_path=tmp_path / run_id,
+                run_id=run_id,
+                start_at=start,
+            )
+        )
+
+    row = _run_row(page, roms_bp)
     page.refresh_runs()
     assert _values(row.pick) == ["", "new", "old"]
+    assert (
+        page.runs_status.value == "2 recorded run(s), 0 more found in run directories"
+    )
 
     row.pick.value = "old"
     assert row.run_id.value == "old"
-    assert page.run_steps["ini"] == ["create-ic"]
+    assert page.run_steps["ini"] == [_STEP]
     assert "not finished" in row.status.value  # no sentinel: not known to be Done
     assert page.draft.runs["ini"].run_id == "old"
+
+
+def test_refresh_runs_lists_runs_found_in_run_directories(
+    page, roms_bp, run_homes, tracked
+):
+    _, local_uuid = _local_run("scratch-run", roms_bp, start=_STAMP)
+    copy_uuid = _make_run(
+        run_homes / "kept-run", "kept-run", roms_bp, start=_STAMP + timedelta(days=1)
+    )
+    target, linked_uuid = _local_run(
+        "linked-source", roms_bp, start=_STAMP + timedelta(days=2)
+    )
+    (run_homes / "linked-run").symlink_to(target)  # the run, kept in the project
+    tracked.append(
+        _tracked(
+            StateDirectoryManager.workplan_runs_dir() / "tracked",
+            "tracked",
+            start=_STAMP + timedelta(days=3),
+        )
+    )
+
+    row = _run_row(page, roms_bp)
+    page.refresh_runs()
+
+    assert _values(row.pick) == [
+        "",
+        "tracked",
+        run_uri(linked_uuid),
+        run_uri(copy_uuid),
+        run_uri(local_uuid),
+    ]
+    assert _labels(row.pick)[2:] == [
+        "linked-source  (2026-03-03 12:00, project, linked)",
+        "kept-run  (2026-03-02 12:00, project)",
+        "scratch-run  (2026-03-01 12:00, local, untracked)",
+    ]
+    assert (
+        page.runs_status.value == "1 recorded run(s), 3 more found in run directories"
+    )
+
+
+def test_a_tracked_run_found_again_is_listed_once(page, roms_bp, run_homes, tracked):
+    by_root, _ = _local_run("by-root", roms_bp)
+    tracked.append(_tracked(by_root, "by-root"))  # an unstamped record: no uuid cached
+
+    # the run dir was purged from the data home; the project keeps a copy, the only
+    # readable one, so the copy is listed beside the tracked entry
+    gone = StateDirectoryManager.workplan_runs_dir() / "by-uuid"
+    uuid = _make_run(run_homes / "by-uuid", "by-uuid", roms_bp)
+    tracked.append(_tracked(gone, "by-uuid", uuid=uuid))
+
+    # a copy of a tracked run whose directory exists is that run
+    kept = _make_run(
+        StateDirectoryManager.workplan_runs_dir() / "kept", "kept", roms_bp
+    )
+    tracked.append(_tracked(StateDirectoryManager.workplan_runs_dir() / "kept", "kept"))
+    _make_run(run_homes / "kept", "kept", roms_bp, uuid=kept)
+
+    # a run of the same name that is another run is kept
+    other = _make_run(run_homes / "by-root-2", "by-root", roms_bp)
+
+    row = _run_row(page, roms_bp)
+    page.refresh_runs()
+
+    assert _values(row.pick) == [
+        "",
+        "by-root",
+        "by-uuid",
+        "kept",
+        run_uri(other),
+        run_uri(uuid),
+    ]
+    assert [r.uuid for r in page.indexed_runs] == [other, uuid]
+
+    row.pick.value = "by-uuid"  # the tracked entry: its directory is gone
+    assert "could not be read" in row.status.value
+    row.pick.value = run_uri(uuid)  # the copy
+    assert page.run_steps["ini"] == [_STEP]
+    assert "Done" in row.status.value
+
+
+def test_a_tracked_run_is_matched_by_directory_without_reading_uuids(
+    page, roms_bp, run_homes, tracked, monkeypatch
+):
+    root, _ = _local_run("mine", roms_bp)
+    tracked.append(_tracked(root, "mine", uuid="not-the-manifests"))
+    reads: list[str] = []
+
+    def _uuid(self: WorkplanRun) -> str:
+        reads.append(self.run_id)
+        return ""
+
+    monkeypatch.setattr(WorkplanRun, "uuid", property(_uuid))
+    _run_row(page, roms_bp)
+    page.refresh_runs()
+
+    assert page.indexed_runs == []
+    assert reads == []
+
+
+def test_a_run_kept_in_two_places_is_listed_once(page, roms_bp, run_homes, tracked):
+    _, uuid = _local_run("moved", roms_bp)
+    _make_run(run_homes / "moved", "moved", roms_bp, uuid=uuid)
+
+    row = _run_row(page, roms_bp)
+    page.refresh_runs()
+
+    assert _values(row.pick) == ["", run_uri(uuid)]
+    assert "(2026-03-01 12:00, project)" in _labels(row.pick)[1]
+
+
+def test_blueprint_runs_are_not_listed(page, roms_bp, run_homes, tracked):
+    _make_run(
+        StateDirectoryManager.blueprint_runs_dir() / "roms_marbl" / "solo",
+        "solo",
+        roms_bp,
+        kind="blueprint",
+    )
+    _, uuid = _local_run("plan", roms_bp)
+
+    row = _run_row(page, roms_bp)
+    page.refresh_runs()
+
+    assert _values(row.pick) == ["", run_uri(uuid)]
+
+
+def test_picking_an_indexed_run_loads_its_steps_and_statuses(
+    page, roms_bp, run_homes, tracked
+):
+    _, done = _local_run("done-run", roms_bp)
+    _, running = _local_run(
+        "running-run",
+        roms_bp,
+        done=False,
+        status="Running",
+        start=_STAMP + timedelta(days=1),
+    )
+    row = _run_row(page, roms_bp)
+    page.refresh_runs()
+
+    row.pick.value = run_uri(done)
+    assert row.run_id.value == run_uri(done)
+    assert page.run_steps["ini"] == [_STEP]
+    assert "Done" in row.status.value
+    assert "not finished" not in row.status.value
+    assert page.draft.runs["ini"].run_id == run_uri(done)
+
+    row.run_id.value = f"RUN://{running.upper()}"  # the handle is read in any case
+    assert "Running" in row.status.value
+    assert "not finished" in row.status.value
+
+    row.run_id.value = "run://not-a-uuid"
+    assert row.status.value == ""
+    row.run_id.value = ""
+    assert row.status.value == ""
+
+
+def test_an_indexed_run_without_a_workplan_says_so(page, roms_bp, run_homes, tracked):
+    _, uuid = _local_run("bare", roms_bp, transformed=False)
+    row = _run_row(page, roms_bp)
+    page.refresh_runs()
+
+    row.pick.value = run_uri(uuid)
+    assert "could not be read" in row.status.value
+    assert "holds no transformed workplan" in row.status.value
+
+
+def test_every_refresh_rescans_the_run_directories(
+    page, roms_bp, run_homes, tracked, scans
+):
+    _, first = _local_run("first", roms_bp)
+    row = _run_row(page, roms_bp)
+    page.refresh_runs()
+    assert _values(row.pick) == ["", run_uri(first)]
+
+    _, second = _local_run("second", roms_bp, start=_STAMP + timedelta(days=1))
+    assert _values(row.pick) == ["", run_uri(first)]  # nothing scans by itself
+    page.refresh_runs()
+    assert _values(row.pick) == ["", run_uri(second), run_uri(first)]
+    assert len(scans) == 2
+    assert scans[0] is not scans[1]
+
+
+def test_editing_a_row_does_not_scan(page, roms_bp, run_homes, tracked, scans):
+    _, uuid = _local_run("plan", roms_bp)
+    row = _run_row(page, roms_bp)
+    page.refresh_runs()
+    assert len(scans) == 1
+
+    row.pick.value = run_uri(uuid)
+    row.run_id.value = "something-else"
+    row.steps.value = "a, b"
+    row.alias.value = "spin"
+    page._add_run()
+    page.run_rows[1].run_id.value = run_uri(uuid)
+    assert len(scans) == 1
+
+
+def test_a_failed_scan_keeps_the_tracked_runs(
+    page, roms_bp, tmp_path, run_homes, tracked, monkeypatch
+):
+    tracked.append(_tracked(tmp_path / "mine", "mine"))
+
+    def _boom(self):
+        raise OSError("stale file handle")
+
+    monkeypatch.setattr(RunIndex, "locations", _boom)
+    row = _run_row(page, roms_bp)
+    page.refresh_runs()
+
+    assert _values(row.pick) == ["", "mine"]
+    assert "1 recorded run(s)" in page.runs_status.value
+    assert "Could not scan the run directories: stale file handle" in (
+        page.runs_status.value
+    )
+
+
+def test_run_start_times_sort_together_with_or_without_a_time_zone():
+    naive = datetime(2026, 1, 1)
+    assert wb._aware(naive) == naive.replace(tzinfo=UTC)
+    assert wb._aware(_STAMP) is _STAMP
+    assert sorted([_STAMP, naive], key=wb._aware) == [naive, _STAMP]
 
 
 # ---------------------------------------------------------------------------

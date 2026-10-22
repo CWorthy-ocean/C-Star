@@ -39,19 +39,27 @@ from cstar.applications.roms_marbl.transforms import (
 from cstar.applications.roms_marbl.transforms import (
     log as transforms_log,
 )
-from cstar.base.env import ENV_CSTAR_RUNID, FLAG_OFF
+from cstar.base.env import ENV_CSTAR_PROJECT_HOME, ENV_CSTAR_RUNID, FLAG_OFF
 from cstar.base.exceptions import CstarError, CstarExpectationFailed
 from cstar.base.feature import ENV_FF_ORCH_TRX_TIMESPLIT
 from cstar.execution.file_system import JobFileSystemManager, StateDirectoryManager
 from cstar.orchestration.adapter import DIRECTIVES_FILENAME, prepare_directive_file
+from cstar.orchestration.check import deep_check
 from cstar.orchestration.compute_environment import ComputeEnvironment
-from cstar.orchestration.dag_runner import prepare_workplan
+from cstar.orchestration.dag_runner import build_dag, prepare_workplan, run_dag
+from cstar.orchestration.index import RunIndex
 from cstar.orchestration.launch.local import LocalHandle, LocalLauncher
 from cstar.orchestration.launch.slurm import SlurmComputeSpec
 from cstar.orchestration.manifest import (
     STEP_RECORD_NAME,
+    Attempt,
+    ExternalRun,
     Product,
+    RunManifest,
+    StepEntry,
     StepRecord,
+    read_run_manifest,
+    write_run_manifest,
     write_step_record,
 )
 from cstar.orchestration.models import (
@@ -75,7 +83,7 @@ from cstar.orchestration.orchestration import (
 )
 from cstar.orchestration.serialization import deserialize, serialize
 from cstar.orchestration.state import StateRepository
-from cstar.orchestration.tracking import TrackingRepository, WorkplanRun
+from cstar.orchestration.tracking import KEY_RUN_UUID, TrackingRepository, WorkplanRun
 from cstar.orchestration.transforms import (
     ApplyOverridesDirective,
     DirectiveConfig,
@@ -6900,6 +6908,18 @@ EXTERNAL_START_AT = datetime(2026, 1, 2, 3, 4, 5, tzinfo=UTC)
 """The start time recorded for fabricated external runs."""
 
 
+@pytest.fixture(autouse=True)
+def _isolated_project_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Keep the run resolver out of a real project's runs area.
+
+    Resolving an external run looks in the project's runs area when there is
+    one, so a `PROJECT` or `CSTAR_PROJECT_HOME` in the developer's environment
+    would otherwise decide what these tests find.
+    """
+    monkeypatch.delenv("PROJECT", raising=False)
+    monkeypatch.setenv(ENV_CSTAR_PROJECT_HOME, str((tmp_path / "project").resolve()))
+
+
 class _FakeHandle(ProcessHandle):
     """A launcher-specific handle type, distinct from the generic `ProcessHandle`."""
 
@@ -7051,6 +7071,81 @@ def test_fill_runs_without_fill_transform() -> None:
 
     with pytest.raises(CstarExpectationFailed, match="'spinup'"):
         _ = fill_runs({"spinup": RunRef(run_id="{{spin_id}}")}, None)
+
+
+def test_fill_runs_keeps_id_and_path() -> None:
+    """Verify the uuid and directory a scheduled workplan pinned survive filling."""
+    pinned = RunRef(
+        run_id="spin", id="u-1", path="/runs/spin", start_at=EXTERNAL_START_AT
+    )
+
+    assert fill_runs({"spinup": pinned}, None)["spinup"] == pinned
+
+
+@pytest.mark.parametrize("text", ["spin", f"run://{uuid.uuid4()}"])
+def test_fill_runs_leaves_run_ids_and_uuids_as_authored(
+    text: str, tmp_path: Path
+) -> None:
+    """Verify only a directory is anchored: a run-id or `run://<uuid>` is kept."""
+    runs = {"spinup": RunRef(run_id=text)}
+
+    assert fill_runs(runs, None, tmp_path)["spinup"].run_id == text
+
+
+def test_fill_runs_anchors_a_relative_directory(tmp_path: Path) -> None:
+    """Verify a relative run directory is resolved against the workplan's
+    directory, and left as authored when there is none.
+    """
+    base = tmp_path / "plans"
+    base.mkdir()
+    runs = {
+        "up": RunRef(run_id="../runs/spin"),
+        "here": RunRef(run_id="./spin"),
+        "hidden": RunRef(run_id=".spin"),
+    }
+
+    anchored = fill_runs(runs, None, base)
+
+    assert anchored["up"].run_id == str(tmp_path.resolve() / "runs" / "spin")
+    assert anchored["here"].run_id == str(base.resolve() / "spin")
+    assert anchored["hidden"].run_id == str(base.resolve() / ".spin")
+    assert fill_runs(runs, None)["here"].run_id == "./spin"
+    assert fill_runs(runs, None)["up"].run_id == "../runs/spin"
+
+
+def test_fill_runs_expands_home_and_keeps_absolute_directories(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Verify `~` is expanded whether or not there is a base directory, and an
+    absolute directory is not changed.
+    """
+    home = tmp_path / "home"
+    monkeypatch.setenv("HOME", str(home))
+    absolute = str(tmp_path / "elsewhere" / "spin")
+    runs = {"tilde": RunRef(run_id="~/runs/spin"), "abs": RunRef(run_id=absolute)}
+
+    for base in (None, tmp_path / "plans"):
+        filled = fill_runs(runs, None, base)
+        assert filled["tilde"].run_id == str(home / "runs" / "spin")
+        assert filled["abs"].run_id == absolute
+
+
+def test_fill_runs_anchors_a_directory_once_its_placeholder_is_filled(
+    tmp_path: Path,
+) -> None:
+    """Verify a placeholder inside a directory is filled, then the result anchored."""
+    runs = {"spinup": RunRef(run_id="../{{where}}/spin")}
+    fill = TemplateFillTransform(variable_resolver=lambda name: f"in-{name}")
+
+    filled = fill_runs(runs, fill, tmp_path / "plans")
+
+    assert filled["spinup"].run_id == str(tmp_path.resolve() / "in-where" / "spin")
+
+
+def test_fill_runs_rejects_a_bad_uuid_naming_the_alias() -> None:
+    """Verify a `run://` reference that holds no uuid is refused, naming the alias."""
+    with pytest.raises(CstarExpectationFailed, match=r"'spinup'.*run://<uuid>"):
+        _ = fill_runs({"spinup": RunRef(run_id="run://x")}, None)
 
 
 def test_external_runs_undeclared_alias() -> None:
@@ -7219,7 +7314,7 @@ async def test_external_runs_refresh_records_resolution_errors(
     await registry.refresh(refs, _FakeSlurmLauncher())
 
     assert "has not been submitted" in registry.problem(refs[0])
-    assert "No run record" in registry.problem(refs[1])
+    assert "No run found" in registry.problem(refs[1])
     assert not registry.is_done(refs[0])
     assert not fab.sentinel.exists()
 
@@ -7344,6 +7439,439 @@ async def test_external_runs_refresh_leaves_sentinel_untouched(
     await ExternalRuns(fab.runs).refresh([fab.ref], _FakeSlurmLauncher())
 
     assert fab.sentinel.read_text() == before
+
+
+@dataclasses.dataclass(frozen=True)
+class ManifestOnlyRun:
+    """An external run known only by its manifest: it has no tracking record."""
+
+    run_id: str
+    uuid: str
+    root: Path
+    step: LiveStep
+
+    @property
+    def ref(self) -> StepRef:
+        """A reference to the run's step, using the alias `spinup`."""
+        return StepRef(step=self.step.name, run="spinup")
+
+    @property
+    def spellings(self) -> dict[str, str]:
+        """What a workplan can call the run by, by the kind of handle."""
+        return {
+            "run_id": self.run_id,
+            "uuid": f"run://{self.uuid}",
+            "path": str(self.root),
+        }
+
+    def runs(self, spelling: str = "run_id") -> dict[str, RunRef]:
+        """The `runs` declaration of a workplan referring to this run."""
+        return {"spinup": RunRef(run_id=self.spellings[spelling])}
+
+
+@pytest.fixture
+def fabricate_manifest_run(
+    hello_world_bp_path: Path,
+) -> Callable[..., ManifestOnlyRun]:
+    """Create a factory that lays out a run in the data home that tracking has
+    never heard of: a manifest, a transformed workplan holding the step `outer`
+    and, for a finished step, its record.
+
+    Parameters
+    ----------
+    hello_world_bp_path : Path
+        Fixture returning the path to a hello-world blueprint file.
+    """
+
+    def _make(
+        run_id: str = "spinup",
+        *,
+        outcome: str = "completed",
+        status: str = "",
+        launcher: str = "slurm",
+        job_id: str = "4242",
+        kind: t.Literal["workplan", "blueprint"] = "workplan",
+    ) -> ManifestOnlyRun:
+        root = StateDirectoryManager.workplan_runs_dir() / run_id
+        step = LiveStep(
+            name="outer",
+            application="hello_world",
+            blueprint=hello_world_bp_path.as_posix(),
+            working_dir=root / "tasks" / "outer",
+        )
+        if kind == "workplan":
+            plan = LiveWorkplan(name=f"{run_id}-run", description="d", steps=[step])
+            assert serialize(root / f"{run_id}_transformed.yaml", plan)
+
+        manifest = RunManifest(
+            id=str(uuid.uuid4()),
+            run_id=run_id,
+            name=run_id,
+            kind=kind,
+            created_at=EXTERNAL_START_AT,
+            attempts=[Attempt(start_at=EXTERNAL_START_AT)],
+            steps=[
+                StepEntry(
+                    name="outer",
+                    application="hello_world",
+                    working_dir="tasks/outer",
+                    launcher=launcher,
+                    job_id=job_id,
+                    status=status,
+                )
+            ],
+        )
+        write_run_manifest(root, manifest)
+        if outcome:
+            record = StepRecord(
+                step="outer",
+                application="hello_world",
+                blueprint=BlueprintIdentity(
+                    kind="Blueprint",
+                    application="hello_world",
+                    name="bp",
+                    content_hash="abc",
+                ),
+                outcome=outcome,
+                finished_at=EXTERNAL_START_AT,
+            )
+            write_step_record(step.working_dir, record)
+        return ManifestOnlyRun(run_id, manifest.id, root, step)
+
+    return _make
+
+
+class _NoQueryLauncher(_FakeSlurmLauncher):
+    """A launcher that fails when asked a status: a run known only by its
+    manifest must never reach it.
+    """
+
+    @classmethod
+    async def query_status(cls, item: t.Any) -> Status:
+        raise AssertionError("a manifest-backed step must not be queried")
+
+
+@pytest.mark.parametrize("spelling", ["run_id", "uuid", "path"])
+async def test_external_runs_done_step_of_an_untracked_run_is_usable(
+    fabricate_manifest_run: Callable[..., ManifestOnlyRun],
+    spelling: str,
+) -> None:
+    """Verify a step the manifest records as done can be depended on, however the
+    run is named, and is exposed as a done task holding the recorded submission,
+    without asking a launcher.
+
+    Parameters
+    ----------
+    spelling : str
+        How the workplan names the run: `run_id`, `uuid` or `path`.
+    """
+    fab = fabricate_manifest_run()
+    registry = ExternalRuns(fab.runs(spelling))
+
+    await registry.refresh([fab.ref], _NoQueryLauncher())
+
+    assert registry.problem(fab.ref) == ""
+    assert registry.is_done(fab.ref)
+    assert registry.statuses() == {str(fab.ref): Status.Done}
+    task = registry.tasks()[str(fab.ref)]
+    assert task.step.working_dir == fab.step.working_dir
+    assert task.handle.status == Status.Done
+    assert task.handle.pid == "4242"
+    assert task.handle.launcher_name == "slurm"
+    assert task.handle.run_id == fab.run_id
+
+
+async def test_external_runs_done_step_handle_has_the_launchers_type(
+    fabricate_manifest_run: Callable[..., ManifestOnlyRun],
+) -> None:
+    """Verify the synthesized handle is of the type the current launcher uses,
+    including the local launcher's.
+    """
+    fab = fabricate_manifest_run(launcher="local", job_id="")
+    registry = ExternalRuns(fab.runs())
+
+    await registry.refresh([fab.ref], LocalLauncher())
+
+    handle = registry.tasks()[str(fab.ref)].handle
+    assert isinstance(handle, LocalHandle)
+    assert (handle.pid, handle.launcher_name) == ("", "local")
+    assert registry.problem(fab.ref) == ""
+
+
+@pytest.mark.parametrize(
+    ("outcome", "status", "recorded"),
+    [
+        ("failed", "", "is recorded as Failed"),
+        ("", "Running", "is recorded as Running"),
+        ("", "", "has no recorded status"),
+        # the snapshot is no evidence: a copy may lack the step's own record
+        ("", "Done", "has no recorded status"),
+    ],
+)
+async def test_external_runs_unfinished_step_of_an_untracked_run_is_a_problem(
+    fabricate_manifest_run: Callable[..., ManifestOnlyRun],
+    outcome: str,
+    status: str,
+    recorded: str,
+) -> None:
+    """Verify a step the manifest does not record as done is a problem that says
+    what is recorded, where, and that an untracked run offers done steps only.
+
+    Parameters
+    ----------
+    outcome : str
+        The outcome of the step's record; empty for none.
+    status : str
+        The status the manifest holds for the step.
+    recorded : str
+        What the message says is recorded.
+    """
+    fab = fabricate_manifest_run(outcome=outcome, status=status)
+    registry = ExternalRuns(fab.runs("uuid"))
+
+    await registry.refresh([fab.ref], _NoQueryLauncher())
+    problem = registry.problem(fab.ref)
+
+    assert not registry.is_done(fab.ref)
+    assert registry.tasks() == {}
+    for expected in ("'outer'", "'spinup'", recorded, str(fab.root), "done steps only"):
+        assert expected in problem
+
+
+async def test_external_runs_run_id_spelled_as_a_title_is_the_run_tracking_names(
+    fabricate_manifest_run: Callable[..., ManifestOnlyRun],
+) -> None:
+    """Verify an alias spelled `Spin Up` finds the run directory `spin-up`, as
+    tracking, which slugifies run-ids, would.
+    """
+    fab = fabricate_manifest_run("spin-up")
+    registry = ExternalRuns({"spinup": RunRef(run_id="Spin Up")})
+
+    await registry.refresh([fab.ref], _NoQueryLauncher())
+
+    assert registry.problem(fab.ref) == ""
+    assert registry.is_done(fab.ref)
+    assert registry.pinned()["spinup"].id == fab.uuid
+
+
+async def test_external_runs_missing_step_of_an_untracked_run_is_reported(
+    fabricate_manifest_run: Callable[..., ManifestOnlyRun],
+) -> None:
+    """Verify a step the run's workplan does not have is reported as missing."""
+    fab = fabricate_manifest_run()
+    registry = ExternalRuns(fab.runs())
+    ref = StepRef(step="absent", run="spinup")
+
+    await registry.refresh([ref], _NoQueryLauncher())
+
+    assert "'absent' not found" in registry.problem(ref)
+
+
+async def test_external_runs_standalone_blueprint_run_is_a_problem(
+    fabricate_manifest_run: Callable[..., ManifestOnlyRun],
+) -> None:
+    """Verify a run that was a standalone blueprint run has no steps to depend on."""
+    fab = fabricate_manifest_run(kind="blueprint")
+    registry = ExternalRuns(fab.runs("path"))
+
+    await registry.refresh([fab.ref], _NoQueryLauncher())
+
+    assert "standalone blueprint run" in registry.problem(fab.ref)
+    assert registry.tasks() == {}
+
+
+async def test_external_runs_unknown_uuid_and_directory_are_problems(
+    fabricate_manifest_run: Callable[..., ManifestOnlyRun],
+    tmp_path: Path,
+) -> None:
+    """Verify a uuid no manifest holds and a directory that is no run are
+    problems that name the alias, not crashes.
+    """
+    fab = fabricate_manifest_run()
+    registry = ExternalRuns(
+        {
+            "spinup": RunRef(run_id=f"run://{uuid.uuid4()}"),
+            "dir": RunRef(run_id=str(tmp_path / "nothing-here")),
+        }
+    )
+    refs = [fab.ref, StepRef(step="outer", run="dir")]
+
+    await registry.refresh(refs, _NoQueryLauncher())
+
+    assert "No run has the uuid" in registry.problem(refs[0])
+    assert "'dir'" in registry.problem(refs[1])
+    assert "is not a directory" in registry.problem(refs[1])
+
+
+async def test_external_runs_bad_reference_is_a_problem() -> None:
+    """Verify a reference no handle can be read from is a problem naming the alias."""
+    registry = ExternalRuns({"spinup": RunRef(run_id="run://nonsense")})
+    ref = StepRef(step="outer", run="spinup")
+
+    await registry.refresh([ref], _NoQueryLauncher())
+
+    assert "'spinup' does not name a run" in registry.problem(ref)
+
+
+@pytest.mark.parametrize(
+    ("spelling", "path"),
+    [("run_id", False), ("uuid", False), ("path", True)],
+)
+async def test_external_runs_pinned_names_the_run_that_was_resolved(
+    fabricate_manifest_run: Callable[..., ManifestOnlyRun],
+    spelling: str,
+    path: bool,
+) -> None:
+    """Verify `pinned` records an untracked run's run-id, uuid and start whatever
+    it was called, and its directory when it was called by one.
+
+    Parameters
+    ----------
+    spelling : str
+        How the workplan names the run: `run_id`, `uuid` or `path`.
+    path : bool
+        Whether the pin also records the run directory.
+    """
+    fab = fabricate_manifest_run()
+    registry = ExternalRuns(fab.runs(spelling))
+    await registry.refresh([fab.ref], _NoQueryLauncher())
+
+    pinned = registry.pinned()["spinup"]
+
+    assert pinned.run_id == fab.run_id
+    assert pinned.id == fab.uuid
+    assert pinned.start_at == EXTERNAL_START_AT
+    assert pinned.path == (str(fab.root) if path else "")
+
+
+async def test_external_runs_pinned_runs_resolve_again_without_a_scan(
+    fabricate_manifest_run: Callable[..., ManifestOnlyRun],
+) -> None:
+    """Verify a pin made from `run://<uuid>` resolves in a fresh registry through
+    the run's directory, never by scanning every run directory for the uuid.
+    """
+    fab = fabricate_manifest_run()
+    first = ExternalRuns(fab.runs("uuid"))
+    await first.refresh([fab.ref], _NoQueryLauncher())
+
+    with mock.patch.object(
+        RunIndex, "locations", autospec=True, side_effect=AssertionError("scanned")
+    ):
+        again = ExternalRuns(first.pinned())
+        await again.refresh([fab.ref], _NoQueryLauncher())
+
+    assert again.problem(fab.ref) == ""
+    assert again.record("spinup").uuid == fab.uuid
+
+
+async def test_external_runs_pinned_directory_is_read_without_a_scan(
+    fabricate_manifest_run: Callable[..., ManifestOnlyRun],
+) -> None:
+    """Verify a pinned directory is read as it is, whatever the run-id says."""
+    fab = fabricate_manifest_run()
+    first = ExternalRuns(fab.runs("path"))
+    await first.refresh([fab.ref], _NoQueryLauncher())
+
+    with mock.patch.object(
+        RunIndex, "locations", autospec=True, side_effect=AssertionError("scanned")
+    ):
+        again = ExternalRuns(first.pinned())
+        await again.refresh([fab.ref], _NoQueryLauncher())
+
+    assert again.problem(fab.ref) == ""
+    assert again.record("spinup").output_path == fab.root
+
+
+async def test_external_runs_pinned_directory_that_is_another_run_now_is_a_problem(
+    fabricate_manifest_run: Callable[..., ManifestOnlyRun],
+) -> None:
+    """Verify a pinned directory whose manifest now holds another uuid is not
+    taken for the run that was pinned.
+    """
+    fab = fabricate_manifest_run()
+    first = ExternalRuns(fab.runs("path"))
+    await first.refresh([fab.ref], _NoQueryLauncher())
+    pinned = first.pinned()
+    replaced = fabricate_manifest_run()  # the same directory, a new manifest
+    assert replaced.uuid != fab.uuid
+
+    again = ExternalRuns(pinned)
+    await again.refresh([fab.ref], _NoQueryLauncher())
+
+    assert "not the run that was asked for" in again.problem(fab.ref)
+    assert again.tasks() == {}
+
+
+async def test_external_runs_pinned_uuid_that_another_run_holds_is_a_problem(
+    fabricate_manifest_run: Callable[..., ManifestOnlyRun],
+) -> None:
+    """Verify a pinned run-id that now names a run with another uuid is refused."""
+    fab = fabricate_manifest_run()
+    pin = RunRef(run_id=fab.run_id, id=str(uuid.uuid4()))
+    registry = ExternalRuns({"spinup": pin})
+
+    await registry.refresh([fab.ref], _NoQueryLauncher())
+
+    assert "No run found" in registry.problem(fab.ref)
+
+
+async def test_external_runs_tracked_run_keeps_the_launcher_path(
+    fabricate_external_run: Callable[..., FabricatedRun],
+) -> None:
+    """Verify a run tracked on this machine is still asked of the launcher through
+    its sentinel, whatever its manifest says, and its pin carries the manifest's uuid.
+    """
+    fab = fabricate_external_run(status=Status.Submitted)
+    manifest = RunManifest(
+        id=str(uuid.uuid4()),
+        run_id=fab.run_id,
+        name=fab.run_id,
+        kind="workplan",
+        created_at=EXTERNAL_START_AT,
+        attempts=[],
+        steps=[
+            StepEntry(
+                name="outer",
+                application="hello_world",
+                working_dir="tasks/outer",
+                status="Done",
+                job_id="9999",
+            )
+        ],
+    )
+    write_run_manifest(fab.record.output_path, manifest)
+
+    class _RunningLauncher(_FakeSlurmLauncher):
+        @classmethod
+        async def query_status(cls, item: t.Any) -> Status:
+            return Status.Running
+
+    registry = ExternalRuns(fab.runs)
+    await registry.refresh([fab.ref], _RunningLauncher())
+
+    assert registry.statuses() == {str(fab.ref): Status.Running}
+    assert registry.tasks()[str(fab.ref)].handle.pid == "1234"
+    pinned = registry.pinned()["spinup"]
+    assert (pinned.id, pinned.path, pinned.start_at) == (
+        manifest.id,
+        "",
+        EXTERNAL_START_AT,
+    )
+
+
+async def test_external_runs_tracked_run_pin_uses_the_cached_uuid(
+    fabricate_external_run: Callable[..., FabricatedRun],
+) -> None:
+    """Verify a tracked run's pin holds the uuid its record caches."""
+    fab = fabricate_external_run()
+    cached = str(uuid.uuid4())
+    TrackingRepository().put_workplan_run_sync(
+        fab.record.model_copy(update={"metadata": {KEY_RUN_UUID: cached}})
+    )
+    registry = ExternalRuns(fab.runs)
+    await registry.refresh([fab.ref], _FakeSlurmLauncher())
+
+    assert registry.pinned()["spinup"].id == cached
 
 
 def test_external_dependencies_distinct_in_first_seen_order(
@@ -7826,6 +8354,245 @@ async def test_prepare_workplan_pins_external_run(
     assert wp.runs["spinup"].start_at == EXTERNAL_START_AT
     assert persisted.runs["spinup"] == wp.runs["spinup"]
     assert persisted.runs["spinup"].run_id == "spinup"
+
+
+@pytest.mark.parametrize("spelling", ["run_id", "uuid", "relative_path"])
+async def test_prepare_workplan_pins_the_run_an_alias_resolved_to(
+    fabricate_manifest_run: Callable[..., ManifestOnlyRun],
+    hello_world_bp_path: Path,
+    tmp_path: Path,
+    spelling: str,
+) -> None:
+    """Verify `prepare_workplan` resolves an alias that names an untracked run by
+    run-id, `run://<uuid>` or a directory relative to the workplan, pins the run
+    it resolved to in the transformed workplan, and that pin survives writing,
+    reading and moving the transformed workplan.
+
+    Parameters
+    ----------
+    spelling : str
+        How the workplan names the run.
+    """
+    fab = fabricate_manifest_run()
+    plans = tmp_path / "plans"
+    plans.mkdir()
+    reference = {
+        "run_id": fab.run_id,
+        "uuid": f"run://{fab.uuid}",
+        "relative_path": os.path.relpath(fab.root, plans),
+    }[spelling]
+    workplan = Workplan(
+        name="consumer-plan",
+        description="Consumes the output of another run.",
+        runs={"spinup": RunRef(run_id=reference)},
+        steps=[
+            Step.model_validate(
+                {
+                    "name": "consumer",
+                    "application": "hello_world",
+                    "blueprint": hello_world_bp_path.as_posix(),
+                    "depends_on": ["outer@spinup"],
+                }
+            )
+        ],
+    )
+    wp_path = plans / "consumer.yaml"
+    assert serialize(wp_path, workplan)
+    output_dir = tmp_path / "prepared"
+    output_dir.mkdir()
+
+    with mock.patch(
+        "cstar.orchestration.dag_runner.get_launcher",
+        return_value=_NoQueryLauncher(),
+    ):
+        wp, trx_path, external, _ = await prepare_workplan(wp_path, output_dir, {})
+
+    expected = RunRef(
+        run_id=fab.run_id,
+        id=fab.uuid,
+        path=str(fab.root.resolve()) if spelling == "relative_path" else "",
+        start_at=EXTERNAL_START_AT,
+    )
+    assert wp.runs == {"spinup": expected}
+    assert deserialize(trx_path, LiveWorkplan).runs == wp.runs
+    assert LiveWorkplan.load(trx_path).runs == wp.runs
+    assert [task.handle.status for task in external.tasks().values()] == [Status.Done]
+
+    moved = tmp_path / "moved" / trx_path.name
+    moved.parent.mkdir()
+    shutil.copy(trx_path, moved)
+    assert LiveWorkplan.load(moved).runs == wp.runs
+
+    reloaded = ExternalRuns(wp.runs)
+    await reloaded.refresh([StepRef.parse("outer@spinup")], _NoQueryLauncher())
+    assert reloaded.problem(StepRef.parse("outer@spinup")) == ""
+
+
+async def test_prepare_workplan_refuses_a_run_that_is_not_done(
+    fabricate_manifest_run: Callable[..., ManifestOnlyRun],
+    hello_world_bp_path: Path,
+    tmp_path: Path,
+) -> None:
+    """Verify scheduling stops, naming the problem, when the untracked run it
+    depends on has not finished the step.
+    """
+    fab = fabricate_manifest_run(outcome="failed")
+    workplan = Workplan(
+        name="consumer-plan",
+        description="Consumes the output of another run.",
+        runs={"spinup": RunRef(run_id=f"run://{fab.uuid}")},
+        steps=[
+            Step.model_validate(
+                {
+                    "name": "consumer",
+                    "application": "hello_world",
+                    "blueprint": hello_world_bp_path.as_posix(),
+                    "depends_on": ["outer@spinup"],
+                }
+            )
+        ],
+    )
+    wp_path = tmp_path / "consumer.yaml"
+    assert serialize(wp_path, workplan)
+    output_dir = tmp_path / "prepared"
+    output_dir.mkdir()
+
+    with (
+        mock.patch(
+            "cstar.orchestration.dag_runner.get_launcher",
+            return_value=_NoQueryLauncher(),
+        ),
+        pytest.raises(ValueError, match="done steps only"),
+    ):
+        _ = await prepare_workplan(wp_path, output_dir, {})
+
+
+async def test_scheduling_records_the_uuid_of_the_run_a_workplan_follows(
+    fabricate_manifest_run: Callable[..., ManifestOnlyRun],
+    hello_world_bp_path: Path,
+    mock_run_id: str,
+    tmp_path: Path,
+) -> None:
+    """Verify the manifest of a scheduled run holds the run each alias resolved
+    to, with its uuid, as the scheduled workplan pinned it.
+
+    Parameters
+    ----------
+    mock_run_id : str
+        A unique run-id that has already been added to os.environ.
+    """
+    fab = fabricate_manifest_run()
+    workplan = Workplan(
+        name="consumer-plan",
+        description="Consumes the output of another run.",
+        runs={"spinup": RunRef(run_id=f"run://{fab.uuid}")},
+        steps=[
+            Step.model_validate(
+                {
+                    "name": "consumer",
+                    "application": "hello_world",
+                    "blueprint": hello_world_bp_path.as_posix(),
+                    "depends_on": ["outer@spinup"],
+                }
+            )
+        ],
+    )
+    wp_path = tmp_path / "consumer.yaml"
+    assert serialize(wp_path, workplan)
+
+    with (
+        mock.patch("cstar.orchestration.dag_runner.check_environment"),
+        mock.patch("cstar.orchestration.dag_runner.get_orchestrator"),
+        mock.patch("cstar.orchestration.dag_runner.process_plan", mock.AsyncMock()),
+        mock.patch(
+            "cstar.orchestration.dag_runner.get_launcher",
+            return_value=_NoQueryLauncher(),
+        ),
+    ):
+        planner, trx_path, facts, carried = await build_dag(wp_path, mock_run_id)
+        wp_run = await run_dag(
+            wp_path,
+            trx_path,
+            mock_run_id,
+            planner,
+            step_facts=facts,
+            carried=carried,
+        )
+
+    manifest = read_run_manifest(wp_run.output_path)
+    assert manifest is not None
+    assert manifest.external.runs == [
+        ExternalRun(
+            alias="spinup", run_id=fab.run_id, id=fab.uuid, start_at=EXTERNAL_START_AT
+        )
+    ]
+
+
+async def test_lookup_step_of_a_pinned_untracked_run_does_not_scan(
+    fabricate_manifest_run: Callable[..., ManifestOnlyRun],
+    hello_world_bp_path: Path,
+    tmp_path: Path,
+) -> None:
+    """Verify a step process finds a step of an untracked run through the pins in
+    its transformed workplan, without scanning the run directories.
+    """
+    fab = fabricate_manifest_run()
+    first = ExternalRuns(fab.runs("uuid"))
+    await first.refresh([fab.ref], _NoQueryLauncher())
+    child = LiveStep(
+        name="child",
+        application="hello_world",
+        blueprint=hello_world_bp_path.as_posix(),
+        working_dir=tmp_path / "child",
+        depends_on=["outer@spinup"],
+    )
+    plan = LiveWorkplan(
+        name="child-run", description="d", runs=first.pinned(), steps=[child]
+    )
+
+    with mock.patch.object(
+        RunIndex, "locations", autospec=True, side_effect=AssertionError("scanned")
+    ):
+        found = lookup_step(plan, "outer@spinup")
+
+    assert found.working_dir == fab.step.working_dir
+
+
+async def test_deep_check_anchors_a_relative_run_directory_to_the_workplan(
+    fabricate_manifest_run: Callable[..., ManifestOnlyRun],
+    hello_world_bp_path: Path,
+    tmp_path: Path,
+) -> None:
+    """Verify `check` resolves a relative run directory against the workplan's
+    directory, as `run` does, not against the working directory.
+    """
+    fab = fabricate_manifest_run()
+    plans = tmp_path / "plans"
+    plans.mkdir()
+    workplan = Workplan(
+        name="consumer-plan",
+        description="Consumes the output of another run.",
+        runs={"spinup": RunRef(run_id=os.path.relpath(fab.root, plans))},
+        steps=[
+            Step.model_validate(
+                {
+                    "name": "consumer",
+                    "application": "hello_world",
+                    "blueprint": hello_world_bp_path.as_posix(),
+                    "depends_on": ["outer@spinup"],
+                }
+            )
+        ],
+    )
+
+    transformed, problems = await deep_check(
+        workplan, None, lambda: _NoQueryLauncher(), wp_path=plans / "consumer.yaml"
+    )
+
+    assert problems == []
+    assert transformed is not None
+    assert transformed.runs["spinup"].id == fab.uuid
+    assert transformed.runs["spinup"].path == str(fab.root.resolve())
 
 
 def test_inject_compute_defaults_step_value_wins() -> None:

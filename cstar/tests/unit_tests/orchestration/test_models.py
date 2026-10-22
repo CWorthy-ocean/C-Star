@@ -2067,6 +2067,45 @@ def test_run_ref_mapping_and_placeholder() -> None:
     assert ref == RunRef.model_validate("{{spinup_run}}")
 
 
+def test_run_ref_pin_fields_default_empty_and_are_accepted() -> None:
+    """Verify a reference is authored without `id` and `path`, which a scheduled
+    workplan fills.
+    """
+    authored = RunRef.model_validate("my-run-id")
+    pinned = RunRef.model_validate(
+        {"run_id": "my-run-id", "id": "0b9d6a3e", "path": "/runs/my-run-id"}
+    )
+
+    assert (authored.id, authored.path) == ("", "")
+    assert (pinned.id, pinned.path) == ("0b9d6a3e", "/runs/my-run-id")
+
+
+@pytest.mark.parametrize(
+    "reference",
+    [
+        "my-run-id",
+        "run://0b9d6a3e-1111-4222-8333-444455556666",
+        "./runs/spin",
+        "../runs/spin",
+        "~/runs/spin",
+        "/abs/runs/spin",
+        "{{where}}/spin",
+    ],
+)
+def test_run_ref_accepts_every_way_of_naming_a_run(
+    fake_blueprint_path: Path, reference: str
+) -> None:
+    """Verify a workplan accepts a run named by run-id, `run://<uuid>` or
+    directory, as a bare string or as a mapping.
+    """
+    wp = _external_workplan(
+        fake_blueprint_path,
+        runs={"bare": reference, "mapped": {"run_id": reference}},
+    )
+
+    assert wp.runs["bare"].run_id == wp.runs["mapped"].run_id == reference
+
+
 def test_run_ref_rejects_extra_and_empty() -> None:
     """Verify unknown keys and an empty run-id are rejected."""
     with pytest.raises(ValidationError):

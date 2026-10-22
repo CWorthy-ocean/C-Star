@@ -2,7 +2,9 @@
 
 import os
 import re
+import typing as t
 from collections.abc import Callable, Generator
+from pathlib import Path
 from unittest import mock
 
 import pytest
@@ -12,6 +14,12 @@ from cstar.base.env import (
     ENV_CSTAR_CLI_VERBOSE,
     ENV_CSTAR_CLOBBER_WORKING_DIR,
     ENV_CSTAR_DISABLE_MIGRATION,
+    ENV_CSTAR_PROJECT_HOME,
+)
+from cstar.execution.file_system import StateDirectoryManager
+from cstar.tests.unit_tests.orchestration.manifest_runs import (
+    BuiltRun,
+    build_manifest_run,
 )
 
 _ANSI_CODES = re.compile(r"\x1b\[[0-9;]*[A-Za-z]")
@@ -103,3 +111,47 @@ def clean_flag_env() -> Generator[None]:
         ):
             os.environ.pop(flag, None)
         yield
+
+
+@pytest.fixture
+def project_runs(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    """Point the project home at a temporary directory; return its runs area.
+
+    The area does not exist until a test puts a run in it.
+    """
+    project = (tmp_path / "project").resolve()
+    monkeypatch.setenv(ENV_CSTAR_PROJECT_HOME, str(project))
+    return project / "cstar" / "runs"
+
+
+@pytest.fixture
+def build_run(hello_world_bp_path: Path) -> Callable[..., BuiltRun]:
+    """Build a run directory that only its manifest names; see `build_manifest_run`."""
+
+    def build(root: Path, run_id: str, **kwargs: t.Any) -> BuiltRun:
+        return build_manifest_run(root, run_id, hello_world_bp_path, **kwargs)
+
+    return build
+
+
+@pytest.fixture
+def local_run(build_run: Callable[..., BuiltRun]) -> Callable[..., BuiltRun]:
+    """Build a run only its manifest names in the data home."""
+
+    def build(run_id: str, **kwargs: t.Any) -> BuiltRun:
+        root = StateDirectoryManager.workplan_runs_dir() / run_id
+        return build_run(root, run_id, **kwargs)
+
+    return build
+
+
+@pytest.fixture
+def project_run(
+    build_run: Callable[..., BuiltRun], project_runs: Path
+) -> Callable[..., BuiltRun]:
+    """Build a run in the project's runs area."""
+
+    def build(run_id: str, **kwargs: t.Any) -> BuiltRun:
+        return build_run(project_runs / run_id, run_id, **kwargs)
+
+    return build

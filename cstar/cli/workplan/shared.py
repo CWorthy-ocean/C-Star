@@ -14,6 +14,7 @@ from cstar.applications.core import (
     get_application,
 )
 from cstar.base.env import ENV_CSTAR_RUNID, max_concurrency
+from cstar.base.exceptions import CstarError
 from cstar.base.log import get_logger
 from cstar.cli.common import (
     cb_pipeline,
@@ -23,6 +24,7 @@ from cstar.cli.common import (
     get_from_ctxmap,
     id_label,
     normalize_runid,
+    refuse_workplan_file,
     set_ctxmap,
     set_env,
 )
@@ -34,6 +36,13 @@ from cstar.execution.file_system import (
     StateDirectoryManager,
 )
 from cstar.orchestration.dag_runner import DagDetailRecord
+from cstar.orchestration.index import (
+    HandleKind,
+    ManifestRecord,
+    RunHandle,
+    parse_run_handle,
+    resolve_run,
+)
 from cstar.orchestration.models import Blueprint, Workplan
 from cstar.orchestration.orchestration import LiveStep, LiveWorkplan
 from cstar.orchestration.tracking import (
@@ -44,11 +53,19 @@ from cstar.orchestration.tracking import (
 
 log = get_logger(__name__)
 
+KEY_RUN: t.Final[str] = "run"
+"""Context-map key under which the resolved run record is stored."""
+
+HELP_RUN_HANDLE: t.Final[str] = (
+    "A run-id, `run://<uuid>`, or the path of a run directory."
+)
+
 
 if t.TYPE_CHECKING:
     from collections.abc import Iterable
 
     from cstar.entrypoint.config import JobConfig, ServiceConfiguration
+    from cstar.orchestration.index import RunRecord
     from cstar.orchestration.models import StepRef
     from cstar.orchestration.transforms import ExternalRuns
 
@@ -464,10 +481,159 @@ def create_xrunner(
     return klass(request, service_cfg, job_cfg)
 
 
+def parse_handle(context: typer.Context, target: str) -> RunHandle:
+    """Read what the user typed to name a run.
+
+    A run-id is normalized as `normalize_runid` does, before anything looks for
+    it; a uuid and a path never are.
+
+    Parameters
+    ----------
+    context : typer.Context
+        The typer context.
+    target : str
+        The user-supplied run-id, `run://<uuid>`, or run directory.
+
+    Returns
+    -------
+    RunHandle
+
+    Raises
+    ------
+    typer.BadParameter
+        Raised when the target is not a run handle.
+    """
+    try:
+        handle = parse_run_handle(target)
+    except ValueError as ex:
+        raise typer.BadParameter(str(ex)) from ex
+
+    if handle.kind is not HandleKind.run_id:
+        return handle
+
+    try:
+        return RunHandle(handle.kind, normalize_runid(context, handle.value))
+    except ValueError as ex:
+        msg = f"{handle.value!r} is not a valid run-id: {ex}"
+        raise typer.BadParameter(msg) from ex
+
+
+def lookup_run(handle: RunHandle, *, hint: str = "") -> "RunRecord":
+    """Resolve a handle to the run it names.
+
+    Parameters
+    ----------
+    handle : RunHandle
+        What the user named.
+    hint : str
+        Text appended to the message when no run is found.
+
+    Returns
+    -------
+    RunRecord
+
+    Raises
+    ------
+    typer.BadParameter
+        Raised when the handle does not identify a run.
+    """
+    try:
+        return resolve_run(handle)
+    except CstarError as ex:
+        raise typer.BadParameter(f"{ex} {hint}".rstrip()) from ex
+
+
+def preload_run(context: typer.Context, target: str) -> str:
+    """Resolve a run handle then load the record of the run it names.
+
+    Stores the record in the context map as "run". The record is the tracking
+    record when the run is tracked on this machine, else the run's manifest.
+
+    Parameters
+    ----------
+    context : typer.Context
+        The typer context.
+    target : str
+        The user-supplied run-id, `run://<uuid>`, or run directory.
+
+    Returns
+    -------
+    str
+        The run-id of the run found, which is not the target when that names
+        the run by its uuid or its directory.
+
+    Raises
+    ------
+    typer.BadParameter
+        Raised when the target is not a run handle or names no run.
+    """
+    record = lookup_run(parse_handle(context, target))
+    set_ctxmap(context, KEY_RUN, record)
+
+    return record.run_id
+
+
+def get_run_record(context: typer.Context) -> "RunRecord":
+    """Retrieve the run record that `preload_run` or `preload_run_record` stored.
+
+    Parameters
+    ----------
+    context : typer.Context
+        The typer context.
+
+    Returns
+    -------
+    RunRecord
+    """
+    run = get_from_ctxmap(context, KEY_RUN, object)
+    if not isinstance(run, WorkplanRun | ManifestRecord):
+        log.warning(
+            "Context map contains a run of an unexpected type: "
+            f"{run.__class__.__name__!r}"
+        )
+        raise typer.Exit(102)
+
+    return run
+
+
+def require_run_id(context: typer.Context, target: str) -> str:
+    """Refuse a run handle that is not a run-id.
+
+    For the commands that act on a run tracked on this machine: they read its
+    live state, or write into its directory.
+
+    Parameters
+    ----------
+    context : typer.Context
+        The typer context.
+    target : str
+        The user-supplied target.
+
+    Returns
+    -------
+    str
+        The target, unchanged.
+
+    Raises
+    ------
+    typer.BadParameter
+        Raised when the target is not a run-id.
+    """
+    if parse_handle(context, target).kind is not HandleKind.run_id:
+        msg = (
+            f"{target!r} is not a run-id: `cstar run {context.info_name}` acts on a "
+            "run tracked on this machine, named by its run-id; use "
+            f"`cstar run show {target}` to read that run."
+        )
+        raise typer.BadParameter(msg)
+
+    return target
+
+
 def preload_run_record(context: typer.Context, run_id: str) -> str:
     """Verify a run-id is valid then load the `WorkplanRun` record.
 
-    Stores the record in the context map as "run".
+    Looks in tracking only. Stores the record in the context map as "run".
 
     Parameters
     ----------
@@ -496,7 +662,7 @@ def preload_run_record(context: typer.Context, run_id: str) -> str:
         msg = f"Unable to locate run with unknown run-id: {run_id}"
         raise typer.BadParameter(msg)
 
-    set_ctxmap(context, "run", run)
+    set_ctxmap(context, KEY_RUN, run)
 
     return run_id
 
@@ -504,15 +670,15 @@ def preload_run_record(context: typer.Context, run_id: str) -> str:
 def preload_workplan(context: typer.Context, run_id: str) -> str:
     """Load the transformed `Workplan` of a run whose record is already loaded.
 
-    NOTE: Requires the `WorkplanRun` to be in the context map as "run"; see
-    `preload_run_record`. Stores the workplan in the context map as "workplan".
+    NOTE: Requires the run record to be in the context map as "run"; see
+    `preload_run`. Stores the workplan in the context map as "workplan".
 
     Parameters
     ----------
     context : typer.Context
         The typer context.
     run_id : str
-        The user-supplied run-id.
+        The run-id of the loaded run.
 
     Returns
     -------
@@ -522,10 +688,15 @@ def preload_workplan(context: typer.Context, run_id: str) -> str:
     Raises
     ------
     typer.BadParameter
+        - Raised when the run has no transformed workplan, as a standalone
+          blueprint run does
         - Raised when the transformed workplan cannot be deserialized
     """
-    run = get_from_ctxmap(context, "run", WorkplanRun)
-    wp_path = run.trx_workplan_path
+    run = get_run_record(context)
+    try:
+        wp_path = run.trx_workplan_path
+    except CstarError as ex:
+        raise typer.BadParameter(str(ex)) from ex
 
     wp = LiveWorkplan.try_load(wp_path)
     if not wp:
@@ -585,9 +756,49 @@ _HELP_RUN_ID: t.Final[str] = "The unique identifier of a specific workplan execu
 RunIdArgument = t.Annotated[
     str,
     typer.Argument(
+        help=HELP_RUN_HANDLE,
+        autocompletion=list_runs,
+        callback=cb_pipeline(
+            refuse_workplan_file,
+            preload_run,
+            set_env(ENV_CSTAR_RUNID),
+            preload_workplan,
+        ),
+    ),
+]
+"""Shared run argument: resolve the run handle, export the run-id of the run
+found to the environment, and preload its record and transformed workplan into
+the context map."""
+
+RunHandleArgument = t.Annotated[
+    str,
+    typer.Argument(
+        help=HELP_RUN_HANDLE,
+        autocompletion=list_runs,
+        callback=cb_pipeline(refuse_workplan_file, preload_run),
+    ),
+]
+"""Run argument that only preloads the run record into the context map."""
+
+RunRecordArgument = t.Annotated[
+    str,
+    typer.Argument(
+        help=_HELP_RUN_ID,
+        autocompletion=list_runs,
+        callback=cb_pipeline(require_run_id, preload_run_record),
+    ),
+]
+"""Run-id argument for the commands that read the live state of a tracked run;
+only preloads the `WorkplanRun` record into the context map."""
+
+TrackedRunIdArgument = t.Annotated[
+    str,
+    typer.Argument(
         help=_HELP_RUN_ID,
         autocompletion=list_runs,
         callback=cb_pipeline(
+            refuse_workplan_file,
+            require_run_id,
             normalize_runid,
             set_env(ENV_CSTAR_RUNID),
             preload_run_record,
@@ -595,18 +806,10 @@ RunIdArgument = t.Annotated[
         ),
     ),
 ]
-"""Shared run-id argument: normalize the value, export it to the environment,
-and preload the `WorkplanRun` and transformed workplan into the context map."""
-
-RunRecordArgument = t.Annotated[
-    str,
-    typer.Argument(
-        help=_HELP_RUN_ID,
-        autocompletion=list_runs,
-        callback=preload_run_record,
-    ),
-]
-"""Run-id argument that only preloads the `WorkplanRun` record into the context map."""
+"""Run-id argument for the commands that write into a tracked run's directory:
+normalize the run-id, export it to the environment, and preload the `WorkplanRun`
+and transformed workplan into the context map. A run reached by its uuid or its
+directory may not be the user's to write into."""
 
 
 async def load_workplans(

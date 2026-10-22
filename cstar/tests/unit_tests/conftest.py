@@ -24,6 +24,7 @@ from cstar.base.env import (
     ENV_CSTAR_CONFIG_HOME,
     ENV_CSTAR_DATA_HOME,
     ENV_CSTAR_ORCH_LOCAL_DELAY,
+    ENV_CSTAR_PROJECT_HOME,
     ENV_CSTAR_RUNID,
     ENV_CSTAR_STATE_HOME,
 )
@@ -43,6 +44,7 @@ from cstar.io.staged_data import (
 )
 from cstar.io.stager import Stager
 from cstar.marbl.external_codebase import MARBLExternalCodeBase
+from cstar.orchestration.index import default_index
 from cstar.orchestration.models import Step, Workplan
 from cstar.orchestration.orchestration import LiveStep, LiveWorkplan
 from cstar.orchestration.serialization import deserialize, serialize
@@ -125,6 +127,31 @@ def _clear_release_ref_cache() -> Generator[None]:
     release_ref_for_remote.cache_clear()
     yield
     release_ref_for_remote.cache_clear()
+
+
+@pytest.fixture(autouse=True)
+def _clear_default_run_index() -> Generator[None]:
+    """Forget the process's shared run index around each unit test.
+
+    `default_index` scans the run directories once per process, so what one test
+    left in its data home would otherwise decide what the next one finds.
+    """
+    default_index.cache_clear()
+    yield
+    default_index.cache_clear()
+
+
+@pytest.fixture(autouse=True)
+def _no_project_home(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Remove the project home from the environment of each unit test.
+
+    The run index reads the project's runs area, so a machine that sets
+    `CSTAR_PROJECT_HOME` or `PROJECT` would otherwise show its real runs to the
+    test. A test that wants a project area sets one itself.
+    """
+    monkeypatch.delenv(ENV_CSTAR_PROJECT_HOME, raising=False)
+    # the variable that `CSTAR_PROJECT_HOME` defaults to
+    monkeypatch.delenv("PROJECT", raising=False)
 
 
 def _tagged_git_repo(repo: Path, tags: Sequence[str | None]) -> list[str]:

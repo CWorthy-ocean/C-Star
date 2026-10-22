@@ -1,3 +1,4 @@
+from collections.abc import Callable
 from pathlib import Path
 
 import pytest
@@ -339,9 +340,11 @@ def test_cli_workplan_gather_dest_is_not_a_directory(
         assert dest.is_symlink()
 
 
-def test_cli_workplan_gather_unknown_run_id() -> None:
+def test_cli_workplan_gather_unknown_run_id(
+    flatten_cli_output: Callable[[str], str],
+) -> None:
     """Verify that an unknown run-id produces an error mentioning it cannot
-    be located.
+    be found.
     """
     runner = CliRunner()
     unknown_run_id = "run-id-dne"
@@ -349,5 +352,4 @@ def test_cli_workplan_gather_unknown_run_id() -> None:
     result = runner.invoke(app, [unknown_run_id], color=False)
 
     assert result.exit_code != 0
-    assert "unable to locate" in result.stderr.lower()
-    assert unknown_run_id in result.stderr
+    assert f"unknown run-id: {unknown_run_id}" in flatten_cli_output(result.stderr)

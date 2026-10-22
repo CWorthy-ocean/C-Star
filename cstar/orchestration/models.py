@@ -726,8 +726,18 @@ class RunRef(ConfiguredBaseModel):
     """A reference to an external workplan run."""
 
     run_id: RequiredString
-    """The run-id of the external workplan run; may be a `{{name}}`
-    runtime-variable placeholder filled when the workplan is scheduled."""
+    """The run referenced: its run-id, `run://<uuid>`, or the path of its run
+    directory (a relative path is resolved against the workplan file's
+    directory). May be a `{{name}}` runtime-variable placeholder filled when the
+    workplan is scheduled; scheduling replaces it with the run's run-id."""
+
+    id: str = Field(default="")
+    """The uuid of the run resolved when the workplan was scheduled; empty in an
+    authored workplan."""
+
+    path: str = Field(default="")
+    """The run directory a reference by path resolved to when the workplan was
+    scheduled; empty otherwise."""
 
     start_at: datetime | None = Field(default=None)
     """The start time of the exact run record resolved when the workplan was

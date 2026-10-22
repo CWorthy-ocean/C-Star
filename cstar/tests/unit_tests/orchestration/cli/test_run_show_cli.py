@@ -15,10 +15,12 @@ from cstar.cli.run import app as app_run
 from cstar.cli.run.show import COMMAND_SHOW, _duration
 from cstar.entrypoint.utils import ARG_FORMAT, ARG_NO_REFRESH
 from cstar.orchestration.dag_runner import DagStatus
+from cstar.orchestration.index import run_uri
 from cstar.orchestration.manifest import (
     RUN_MANIFEST_NAME,
     Attempt,
     ExecutionFacts,
+    ExternalRun,
     StepRecord,
     ensure_run_manifest,
     read_run_manifest,
@@ -28,14 +30,18 @@ from cstar.orchestration.manifest import (
 from cstar.orchestration.models import BlueprintIdentity
 from cstar.orchestration.orchestration import Status
 from cstar.orchestration.tracking import WorkplanRun
+from cstar.tests.unit_tests.orchestration.manifest_runs import BuiltRun
 from cstar.tests.unit_tests.orchestration.run_tree import (
     RUN_ID,
     FakeRun,
     build_fake_run,
 )
 
-LOOKUP: t.Final[str] = "cstar.cli.workplan.shared.TrackingRepository.get_workplan_run"
-"""The tracking lookup, replaced so that a run-id resolves to a chosen record."""
+LOOKUP: t.Final[str] = (
+    "cstar.orchestration.index.TrackingRepository.get_workplan_run_sync"
+)
+"""The tracking lookup the run resolver makes, replaced so that a run-id resolves
+to a chosen record."""
 
 EXIT_BAD_ARGS: t.Final[int] = 2
 STEP: t.Final[str] = "Spin Up"
@@ -74,7 +80,7 @@ def _flat(text: str) -> str:
 
 def invoke(*args: str, record: WorkplanRun | None = None) -> Result:
     """Run `cstar run show` against a repository that holds only `record`."""
-    with mock.patch(LOOKUP, mock.AsyncMock(return_value=record)):
+    with mock.patch(LOOKUP, mock.Mock(return_value=record)):
         return CliRunner().invoke(app_run, [COMMAND_SHOW, *args], color=False)
 
 
@@ -171,6 +177,26 @@ def test_the_attempts_show_the_directory_each_carried_its_inputs_in(
     ]
     header = next(line for line in result.stdout.splitlines() if "Started" in line)
     assert header.strip("┃ ").split("┃")[-1].strip() == "Inputs"
+
+
+def test_the_external_runs_show_the_uuid_each_resolved_to(run: FakeRun) -> None:
+    """Verify the external runs table names each referenced run by its uuid."""
+    uuid = "0b2f5c9e-1d4a-4e8b-9f3c-7a6d5e4c3b2a"
+    manifest = read_run_manifest(run.root)
+    assert manifest is not None
+    manifest.external.runs = [ExternalRun(alias="base", run_id="spinup", id=uuid)]
+    write_run_manifest(run.root, manifest)
+
+    with mock.patch("cstar.cli.run.show.console", Console(width=200)):
+        result = invoke(run.root.as_posix())
+
+    assert result.exit_code == 0, result.output
+    (row,) = (line for line in result.stdout.splitlines() if "spinup" in line)
+    assert [cell.strip() for cell in row.strip("│ ").split("│")[:3]] == [
+        "base",
+        "spinup",
+        uuid,
+    ]
 
 
 def test_a_directory_shows_the_manifest_and_folds_records_in_memory(
@@ -288,12 +314,12 @@ def test_a_workplan_file_is_refused(tmp_path: Path) -> None:
     assert "cstar workplan check" in " ".join(result.output.replace("│", " ").split())
 
 
-def test_an_unknown_run_id() -> None:
-    """Verify an untracked run-id is a usage error."""
+def test_an_unknown_run_id(flatten_cli_output: t.Callable[[str], str]) -> None:
+    """Verify a run-id that is neither tracked nor in a manifest is a usage error."""
     result = invoke("no-such-run", record=None)
 
     assert result.exit_code == EXIT_BAD_ARGS
-    assert "unknown run-id" in result.stderr
+    assert "No run found for run-id no-such-run" in flatten_cli_output(result.stderr)
 
 
 def test_a_tracked_run_without_a_manifest(run: FakeRun) -> None:
@@ -472,3 +498,146 @@ def test_duration_is_a_dash_for_a_missing_moment_or_a_negative_span(
 ) -> None:
     """Verify a missing moment, or an end before the start, is a dash."""
     assert _duration(start, end) == "-"
+
+
+class Observed(t.NamedTuple):
+    """The calls showing a tracked run makes to bring its manifest up to date."""
+
+    status: mock.AsyncMock
+    refresh: mock.Mock
+
+
+@pytest.fixture
+def observed() -> t.Iterator[Observed]:
+    """Replace what refreshing the manifest of a tracked run reaches for."""
+    status = mock.AsyncMock(return_value=DagStatus({}))
+    with (
+        mock.patch("cstar.cli.run.show.get_launcher"),
+        mock.patch("cstar.cli.run.show.load_run_state", status),
+        mock.patch("cstar.cli.run.show.refresh_run_manifest") as refresh_manifest,
+    ):
+        yield Observed(status, refresh_manifest)
+
+
+@pytest.mark.parametrize("handle", ["run-id", "uuid"])
+def test_an_untracked_local_run_is_read_as_a_directory(
+    local_run: t.Callable[..., BuiltRun], observed: Observed, handle: str
+) -> None:
+    """Verify a run only its manifest names is shown by its run-id or its uuid as
+    its directory would be: records beside it show, nothing is refreshed or
+    written.
+    """
+    built = local_run("lonely")
+    write_step_record(
+        built.step_dir(STEP),
+        StepRecord(
+            step=STEP,
+            application="hello_world",
+            blueprint=BlueprintIdentity(
+                kind="Blueprint", application="hello_world", name="bp"
+            ),
+            outcome="completed",
+            finished_at=datetime(2026, 10, 15, 13, 0, tzinfo=UTC),
+        ),
+    )
+    before = built.manifest_bytes
+
+    result = invoke(
+        built.run_id if handle == "run-id" else run_uri(built.uuid), record=None
+    )
+
+    assert result.exit_code == 0, result.output
+    assert "lonely" in result.stdout
+    assert "completed" in result.stdout
+    observed.status.assert_not_called()
+    observed.refresh.assert_not_called()
+    assert built.manifest_bytes == before
+
+
+def test_a_run_in_the_project_area_is_shown_by_its_uuid(
+    project_run: t.Callable[..., BuiltRun], observed: Observed
+) -> None:
+    """Verify a run kept in the project's runs area is found by its uuid."""
+    built = project_run("shared-run")
+    before = built.manifest_bytes
+
+    result = invoke(run_uri(built.uuid), ARG_FORMAT, "json", record=None)
+
+    assert result.exit_code == 0, result.output
+    assert json.loads(result.stdout)["id"] == built.uuid
+    observed.refresh.assert_not_called()
+    assert built.manifest_bytes == before
+
+
+def test_the_uuid_of_a_tracked_run_refreshes_it(run: FakeRun) -> None:
+    """Verify a run tracked on this machine is refreshed however it is named."""
+    manifest = read_run_manifest(run.root)
+    assert manifest is not None
+    write_record(run)
+
+    with (
+        mock.patch("cstar.cli.run.show.get_launcher"),
+        mock.patch(
+            "cstar.cli.run.show.load_run_state",
+            mock.AsyncMock(return_value=DagStatus({STEP: Status.Done})),
+        ),
+    ):
+        result = invoke(run_uri(manifest.id), record=run.record)
+
+    assert result.exit_code == 0, result.output
+    assert Status.Done.name in result.stdout
+    refreshed = read_run_manifest(run.root)
+    assert refreshed is not None
+    assert refreshed.observed_at is not None
+
+
+def test_an_unknown_uuid(flatten_cli_output: t.Callable[[str], str]) -> None:
+    """Verify a uuid no manifest holds is a usage error that names it."""
+    wanted = "6f1c3a58-1b2e-4c6d-8e0f-0a1b2c3d4e5f"
+
+    result = invoke(run_uri(wanted), record=None)
+
+    assert result.exit_code == EXIT_BAD_ARGS
+    assert f"No run has the uuid {wanted}" in flatten_cli_output(result.stderr)
+
+
+@pytest.mark.parametrize("text", ["run://", "run://not-a-uuid"])
+def test_a_malformed_uuid_handle(
+    text: str, flatten_cli_output: t.Callable[[str], str]
+) -> None:
+    """Verify a `run://` handle without a uuid is a usage error naming the form."""
+    result = invoke(text, record=None)
+
+    assert result.exit_code == EXIT_BAD_ARGS
+    assert "run://<uuid>" in flatten_cli_output(result.stderr)
+
+
+def test_a_run_id_that_names_a_local_directory_suggests_the_path(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    flatten_cli_output: t.Callable[[str], str],
+) -> None:
+    """Verify a bare name that is a directory here, and no run, is not silently
+    taken for either.
+    """
+    (tmp_path / "somewhere").mkdir()
+    monkeypatch.chdir(tmp_path)
+
+    result = invoke("somewhere", record=None)
+
+    assert result.exit_code == EXIT_BAD_ARGS
+    assert "To show the directory ./somewhere, pass it as a path" in (
+        flatten_cli_output(result.stderr)
+    )
+
+
+def test_a_run_id_is_slugified_before_it_is_looked_up(
+    local_run: t.Callable[..., BuiltRun],
+) -> None:
+    """Verify a run-id is normalized as every run-id is, uuids and paths excepted."""
+    local_run("lonely-run")
+
+    result = invoke("Lonely Run", record=None)
+
+    assert result.exit_code == 0, result.output
+    assert "lonely-run" in result.stdout

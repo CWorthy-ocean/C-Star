@@ -42,7 +42,8 @@ async def deep_check(
         Only called when the workplan declares external runs.
     wp_path : Path | None
         The file the workplan was read from; a step's relative blueprint path
-        is resolved against its directory, as `run` does.
+        and a relative run directory are resolved against its directory, as
+        `run` does.
 
     Returns
     -------
@@ -60,7 +61,12 @@ async def deep_check(
 
     fill = TemplateFillTransform(variable_resolver=lambda name: named_config[name])
     try:
-        external = await resolve_external_runs(wp, fill, launcher_factory)
+        external = await resolve_external_runs(
+            wp,
+            fill,
+            launcher_factory,
+            base_dir=wp_path.resolve().parent if wp_path is not None else None,
+        )
         return WorkplanTransformer(wp, fill, external, wp_path=wp_path).apply(), []
     except ValidationError as ex:
         return None, [format_validation_errors(ex)]

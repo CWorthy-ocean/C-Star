@@ -38,6 +38,7 @@ from cstar.orchestration.dag_runner import (
     NoPreparableStepsError,
     _carry_inputs,
     _ignore_ambient_clobber_env,
+    _record_attempt,
     apply_clobber_overrides,
     apply_pre_run_overrides,
     apply_resume_overrides,
@@ -112,7 +113,7 @@ from cstar.orchestration.serialization import (
     serialize,
 )
 from cstar.orchestration.state import StateRepository
-from cstar.orchestration.tracking import TrackingRepository, WorkplanRun
+from cstar.orchestration.tracking import KEY_RUN_UUID, TrackingRepository, WorkplanRun
 from cstar.orchestration.utils import ENV_CSTAR_ORCH_DELAYS
 from cstar.tests.unit_tests.orchestration.conftest import (
     EXTERNAL_TOKEN,
@@ -1406,12 +1407,17 @@ async def test_run_dag_writes_the_run_manifest(
     assert entry.application == "hello_world"
     assert entry.working_dir == "tasks/hello"
     assert entry.definition_hash == facts["hello"].definition_hash
+    assert wp_run.metadata[KEY_RUN_UUID] == manifest.id
 
     # a re-entry brings no facts: the recorded entries stay
-    await _reenter(wp_run)
+    reentered = await _reenter(wp_run)
     again = read_run_manifest(wp_run.output_path)
     assert again is not None
     assert again.id == manifest.id
+    assert reentered.metadata[KEY_RUN_UUID] == manifest.id
+    persisted = await TrackingRepository().get_workplan_run(mock_run_id)
+    assert persisted is not None
+    assert persisted.uuid == manifest.id
     assert len(again.attempts) == 2
     entry = again.step("hello")
     assert entry is not None
@@ -1557,7 +1563,66 @@ async def test_run_dag_survives_a_manifest_that_cannot_be_written(
 
     assert not (wp_run.output_path / RUN_MANIFEST_NAME).exists()
     assert "disk full" in caplog.text
+    assert KEY_RUN_UUID not in wp_run.metadata
     assert await TrackingRepository().get_workplan_run(mock_run_id) is not None
+    assert wp_run.uuid == ""
+
+
+def _attempt_args(
+    tmp_path: Path, run_id: str, blueprint: Path
+) -> tuple[Path, str, Path, Workplan, list[LiveStep]]:
+    """The arguments `_record_attempt` takes before the facts and what was carried."""
+    root = tmp_path / "run-root"
+    root.mkdir()
+    workplan = Workplan(
+        name="attempted",
+        description="A workplan to record.",
+        steps=[_hello_step(blueprint.as_posix(), "hello")],
+    )
+    steps = [LiveStep.from_step(step) for step in workplan.steps]
+    return root, run_id, tmp_path / "attempted.yaml", workplan, steps
+
+
+def test_record_attempt_returns_the_id_of_the_manifest(
+    tmp_path: Path, mock_run_id: str, hello_world_bp_path: Path
+) -> None:
+    """Verify recording an attempt returns the uuid of the manifest it wrote, the
+    same one when the run is recorded again.
+    """
+    root, run_id, wp_path, workplan, steps = _attempt_args(
+        tmp_path, mock_run_id, hello_world_bp_path
+    )
+
+    first = _record_attempt(root, run_id, wp_path, workplan, steps, {}, None)
+    second = _record_attempt(root, run_id, wp_path, workplan, steps, {}, None)
+
+    manifest = read_run_manifest(root)
+    assert manifest is not None
+    assert first == second == manifest.id
+
+
+def test_record_attempt_returns_nothing_when_the_manifest_is_not_written(
+    tmp_path: Path,
+    mock_run_id: str,
+    hello_world_bp_path: Path,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Verify a failed manifest write is a warning and an empty uuid."""
+    root, run_id, wp_path, workplan, steps = _attempt_args(
+        tmp_path, mock_run_id, hello_world_bp_path
+    )
+
+    with (
+        mock.patch(
+            "cstar.orchestration.dag_runner.ensure_run_manifest",
+            side_effect=OSError("disk full"),
+        ),
+        caplog.at_level("WARNING"),
+    ):
+        uuid = _record_attempt(root, run_id, wp_path, workplan, steps, {}, None)
+
+    assert uuid == ""
+    assert "disk full" in caplog.text
 
 
 @pytest.mark.asyncio

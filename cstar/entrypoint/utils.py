@@ -1,5 +1,7 @@
 import typing as t
 
+from cstar.base.env import ENV_CSTAR_PROJECT_HOME
+
 ARG_CLOBBER: t.Final[str] = "--clobber"
 ARG_CLOBBER_HELP: t.Final[str] = (
     "Set this flag to remove any pre-existing files in the working directory."
@@ -108,6 +110,18 @@ ARG_ALL: t.Final[str] = "--all"
 ARG_ALL_HELP: t.Final[str] = (
     "Also scan the launch artifacts (override and directive files, job scripts "
     "and namelists). Launchers regenerate them, so they are skipped by default."
+)
+
+ARG_SHARED: t.Final[str] = "--shared"
+ARG_SHARED_HELP: t.Final[str] = (
+    "List the runs in the project's runs area (`<project>/cstar/runs`, under "
+    f"`{ENV_CSTAR_PROJECT_HOME}`, which defaults to `$PROJECT`) instead of the "
+    "runs started on this machine."
+)
+
+ARG_ALL_RUNS_HELP: t.Final[str] = (
+    "List the runs started on this machine and every other run whose manifest is "
+    "in the data home or the project's runs area. Scans those directories."
 )
 
 ARG_VERIFY: t.Final[str] = "--verify"

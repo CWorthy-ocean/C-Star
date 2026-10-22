@@ -61,6 +61,7 @@ from cstar.orchestration.manifest import (
     record_submission,
     recorded_files_in,
     require_recorded_files,
+    status_of_record,
     workplan_content_hash,
     write_run_manifest,
     write_step_record,
@@ -79,7 +80,14 @@ from cstar.system.migration import CstarSchemaTooNewError
 NOW = datetime(2026, 10, 15, 12, 0, tzinfo=UTC)
 
 CURRENT = RunManifest.model_fields["schema_version"].default
-"""The schema version this build writes, which both documents carry."""
+"""The schema version this build writes in a run manifest."""
+
+CURRENT_RECORD = StepRecord.model_fields["schema_version"].default
+"""The schema version this build writes in a step record, which moves only when the
+record's own fields do."""
+
+CURRENT_OF = {RUN_MANIFEST_NAME: CURRENT, STEP_RECORD_NAME: CURRENT_RECORD}
+"""The schema version this build writes in each document, by file name."""
 
 _MAJOR, _MINOR, _ = CURRENT.split(".")
 NEWER_MINOR = f"{_MAJOR}.{int(_MINOR) + 10}.0"
@@ -251,10 +259,8 @@ class TestRoundTrip:
         write_run_manifest(tmp_path, _manifest("one"))
         write_step_record(tmp_path, _record())
 
-        assert StepRecord.model_fields["schema_version"].default == CURRENT
-        text = f"schema_version: {CURRENT}"
-        assert text in (tmp_path / RUN_MANIFEST_NAME).read_text()
-        assert text in (tmp_path / STEP_RECORD_NAME).read_text()
+        for name, current in CURRENT_OF.items():
+            assert f"schema_version: {current}" in (tmp_path / name).read_text()
 
     def test_a_1_0_0_manifest_and_record_still_load(self, tmp_path: Path) -> None:
         """The carried-input, execution and submission fields are additive: older
@@ -262,9 +268,9 @@ class TestRoundTrip:
         """
         write_run_manifest(tmp_path, _manifest("one"))
         write_step_record(tmp_path, _record())
-        for name in (RUN_MANIFEST_NAME, STEP_RECORD_NAME):
+        for name, current in CURRENT_OF.items():
             path = tmp_path / name
-            path.write_text(path.read_text().replace(CURRENT, "1.0.0", 1))
+            path.write_text(path.read_text().replace(current, "1.0.0", 1))
 
         manifest = read_run_manifest(tmp_path)
         record = read_step_record(tmp_path)
@@ -292,9 +298,9 @@ class TestRoundTrip:
         """
         write_run_manifest(tmp_path, _manifest("one"))
         write_step_record(tmp_path, _record())
-        for name in (RUN_MANIFEST_NAME, STEP_RECORD_NAME):
+        for name, current in CURRENT_OF.items():
             path = tmp_path / name
-            path.write_text(path.read_text().replace(CURRENT, "1.0.0", 1))
+            path.write_text(path.read_text().replace(current, "1.0.0", 1))
         manifest = read_run_manifest(tmp_path)
         record = read_step_record(tmp_path)
         assert manifest is not None
@@ -304,10 +310,10 @@ class TestRoundTrip:
         write_run_manifest(tmp_path, manifest)
         write_step_record(tmp_path, record)
 
-        assert manifest.schema_version == record.schema_version == CURRENT
-        text = f"schema_version: {CURRENT}"
-        assert text in (tmp_path / RUN_MANIFEST_NAME).read_text()
-        assert text in (tmp_path / STEP_RECORD_NAME).read_text()
+        assert manifest.schema_version == CURRENT
+        assert record.schema_version == CURRENT_RECORD
+        for name, current in CURRENT_OF.items():
+            assert f"schema_version: {current}" in (tmp_path / name).read_text()
 
     def test_carried_inputs_round_trip(self, tmp_path: Path) -> None:
         manifest = _manifest("one")
@@ -337,7 +343,7 @@ class TestRoundTrip:
     def test_newer_step_record_refused(self, tmp_path: Path) -> None:
         write_step_record(tmp_path, _record())
         path = tmp_path / STEP_RECORD_NAME
-        path.write_text(path.read_text().replace(CURRENT, NEWER_MAJOR, 1))
+        path.write_text(path.read_text().replace(CURRENT_RECORD, NEWER_MAJOR, 1))
 
         with pytest.raises(CstarSchemaTooNewError, match="step record"):
             read_step_record(tmp_path)
@@ -791,6 +797,51 @@ class TestEnsureRunManifest:
             ExternalRun(alias="up", run_id="spin", start_at=NOW)
         ]
 
+    def test_records_the_run_each_alias_resolved_to(self, tmp_path: Path) -> None:
+        """The pin a scheduled workplan holds is recorded, uuid included."""
+        steps: dict[str, tuple[str, str, StepFacts | None]] = {
+            "one": ("hello_world", "tasks/one", None)
+        }
+        runs = {
+            "up": RunRef(run_id="spin", id="0b9d6a3e-1111-4222-8333-444455556666"),
+            "authored": RunRef(run_id="run://0b9d6a3e-1111-4222-8333-444455556666"),
+        }
+
+        written = self._ensure(tmp_path, steps, runs=runs)
+
+        assert written.external.runs == [
+            ExternalRun(
+                alias="up", run_id="spin", id="0b9d6a3e-1111-4222-8333-444455556666"
+            ),
+            ExternalRun(
+                alias="authored", run_id="run://0b9d6a3e-1111-4222-8333-444455556666"
+            ),
+        ]
+        reread = read_run_manifest(tmp_path)
+        assert reread is not None
+        assert reread.external.runs == written.external.runs
+        assert [run.id for run in reread.external.runs] == [
+            "0b9d6a3e-1111-4222-8333-444455556666",
+            "",
+        ]
+
+    def test_a_manifest_before_1_3_0_loads_without_run_uuids(
+        self, tmp_path: Path
+    ) -> None:
+        """Manifests before 1.3.0 hold no uuid for an external run."""
+        steps: dict[str, tuple[str, str, StepFacts | None]] = {
+            "one": ("hello_world", "tasks/one", None)
+        }
+        self._ensure(tmp_path, steps, runs={"up": RunRef(run_id="spin")})
+        path = tmp_path / RUN_MANIFEST_NAME
+        path.write_text(path.read_text().replace(CURRENT, "1.2.0", 1))
+        assert "  id:" not in path.read_text()
+
+        loaded = read_run_manifest(tmp_path)
+
+        assert loaded is not None
+        assert loaded.external.runs == [ExternalRun(alias="up", run_id="spin")]
+
     def test_merged_preserves_order(self) -> None:
         a, b, c = (SourceDataRef(location=x) for x in "abc")
 
@@ -1151,6 +1202,27 @@ class TestRecordSubmission:
 
         with pytest.raises(CstarSchemaTooNewError):
             self._submit(tmp_path)
+
+
+@pytest.mark.parametrize(
+    ("outcome", "status"),
+    [
+        ("completed", "Done"),
+        ("failed", "Failed"),
+        ("cancelled", "Cancelled"),
+        ("abandoned", ""),
+        ("", ""),
+    ],
+)
+def test_status_of_record_is_the_status_the_outcome_agrees_with(
+    outcome: str, status: str
+) -> None:
+    """Verify an outcome stands for the status `fold_step_records` accepts it with,
+    and an unknown outcome for none.
+    """
+    record = _record().model_copy(update={"outcome": outcome})
+
+    assert status_of_record(record) == status
 
 
 class TestFoldStepRecords:

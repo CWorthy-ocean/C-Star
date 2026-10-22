@@ -7,7 +7,7 @@ import typer
 
 from cstar.base.log import get_logger
 from cstar.cli.common import get_from_ctxmap
-from cstar.cli.workplan.shared import RunIdArgument, console
+from cstar.cli.workplan.shared import TrackedRunIdArgument, console
 from cstar.execution.file_system import JobFileSystemManager, StateDirectoryManager
 from cstar.orchestration.orchestration import LiveStep, LiveWorkplan
 
@@ -25,6 +25,10 @@ linked under a `<step>__<filename>` name so every file is still gathered
 instead of aborting the run. Safe to re-run at any time, including while the
 workplan is still in progress: each invocation replaces the existing symlinks
 with a fresh set reflecting the current state on disk.
+
+The run is named by its run-id and must be tracked on this machine: the links are
+built inside its directory, and a run reached by its uuid or its directory (a
+copy, or a run in the project area) may not be yours to write into.
 """
 
 
@@ -169,7 +173,7 @@ def relink(dest: Path, links: dict[str, Path]) -> None:
 @app.command(name="gather", help=HELP_LONG, short_help=HELP_SHORT)
 def gather(
     context: typer.Context,
-    run_id: RunIdArgument,
+    run_id: TrackedRunIdArgument,
 ) -> None:
     """Consolidate per-step output into a run-level directory of symlinks."""
     workplan = get_from_ctxmap(context, "workplan", LiveWorkplan)

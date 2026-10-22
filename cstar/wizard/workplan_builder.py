@@ -27,7 +27,7 @@ import threading
 import warnings
 from contextlib import contextmanager
 from dataclasses import dataclass
-from datetime import date, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
@@ -108,6 +108,8 @@ if TYPE_CHECKING:
     from pydantic.fields import FieldInfo
 
     from cstar.applications.core import EmittedBlueprint
+    from cstar.orchestration.index import ManifestRecord, RunRecord
+    from cstar.orchestration.tracking import WorkplanRun
     from cstar.system.scheduler import Scheduler
 
 PAGE = "workplan-builder"
@@ -207,6 +209,11 @@ def _show(widget: Any, visible: bool) -> None:
 def _esc(text: object) -> str:
     """HTML-escape ``text``."""
     return html.escape(str(text))
+
+
+def _aware(moment: datetime) -> datetime:
+    """``moment``, taken as UTC when it carries no time zone, so runs sort together."""
+    return moment if moment.tzinfo else moment.replace(tzinfo=UTC)
 
 
 def _as_datetime(value: object) -> datetime | None:
@@ -2297,7 +2304,8 @@ class WorkplanBuilderPage:
         self.run_rows: list[_RunRow] = []
         self.run_steps: dict[str, list[str]] = {}
         self.run_workplans: dict[str, Any] = {}
-        self.recorded_runs: list[Any] = []
+        self.recorded_runs: list[WorkplanRun] = []
+        self.indexed_runs: list[ManifestRecord] = []
         self._suspended = 0
         self._accordion: Any = None
         self._shown: list[_StepPane] = []
@@ -2677,10 +2685,28 @@ class WorkplanBuilderPage:
             self._load_recorded(row)
         self._rebuild()
 
+    def _recorded_for(self, text: str) -> RunRecord | None:
+        """The listed run a row's text names: a run-id or ``run://<uuid>``.
+
+        A run-id is looked up among the tracked runs, a ``run://`` handle among
+        the runs only the index found; nothing here reads the run directories.
+        """
+        if record := next((r for r in self.recorded_runs if r.run_id == text), None):
+            return record
+        from cstar.orchestration.index import HandleKind, parse_run_handle
+
+        try:
+            handle = parse_run_handle(text)
+        except ValueError:
+            return None
+        if handle.kind is not HandleKind.uuid:
+            return None
+        return next((r for r in self.indexed_runs if r.uuid == handle.value), None)
+
     def _load_recorded(self, row: _RunRow) -> None:
-        """Load the steps of the recorded run matching ``row``'s run-id."""
-        alias, run_id = row.alias.value.strip(), row.run_id.value.strip()
-        record = next((r for r in self.recorded_runs if r.run_id == run_id), None)
+        """Load the steps of the listed run matching ``row``'s run-id."""
+        alias = row.alias.value.strip()
+        record = self._recorded_for(row.run_id.value.strip())
         if not alias or record is None:
             row.status.value = ""
             return
@@ -2695,31 +2721,46 @@ class WorkplanBuilderPage:
         typed = self.run_steps.get(alias, [])
         names = [s.name for s in live.steps]
         self.run_steps[alias] = [*names, *[t for t in typed if t not in names]]
-        statuses = {n: self._step_status(run_id, n) for n in names}
+        statuses = {n: record.step_status(n) or "recorded" for n in names}
         unfinished = [n for n, s in statuses.items() if s != "Done"]
         row.status.value = ", ".join(
             f"<code>{_esc(n)}</code> {_esc(s)}" for n, s in statuses.items()
         ) + (" " + components.chip("not finished", "warn") if unfinished else "")
 
-    @staticmethod
-    def _step_status(run_id: str, step: str) -> str:
-        """The persisted status of a recorded step, or ``recorded`` when unreadable."""
-        try:
-            from cstar.orchestration.orchestration import ProcessHandle
-            from cstar.orchestration.state import StateRepository
-
-            handle = deserialize(
-                StateRepository.sentinel_path(step, run_id=run_id), ProcessHandle
-            )
-            return handle.status.name
-        except Exception:
-            return "recorded"
-
     def refresh_runs(self) -> None:
-        """Load the recorded runs (newest first) into every row's picker."""
+        """Load the tracked and indexed runs (newest first) into every row's picker."""
         _schedule_coroutine(self._load_runs_async())
 
+    @staticmethod
+    def _scan_index(tracked: Sequence[WorkplanRun]) -> list[ManifestRecord]:
+        """The workplan runs the run directories hold that are not tracked here.
+
+        Scans the project's runs area and the data home with a fresh index: the
+        kernel outlives the runs made since the last click, so a scan is never
+        reused. Does file-system work, so it runs off the event loop.
+
+        Parameters
+        ----------
+        tracked
+            The tracked runs; a found run in the directory of one of them, or
+            with its uuid, is that run.
+        """
+        from cstar.orchestration.index import (
+            ManifestRecord,
+            RunIndex,
+            untracked_locations,
+        )
+
+        # a standalone blueprint run has no workplan steps to reference
+        found = [loc for loc in RunIndex().locations() if loc.kind == "workplan"]
+        # a run kept in more than one place is one run; the project's copy,
+        # found after the data home's, is the durable one
+        found = list({loc.uuid: loc for loc in found}.values())
+        return [ManifestRecord(loc) for loc in untracked_locations(found, tracked)]
+
     async def _load_runs_async(self) -> None:
+        import asyncio
+
         try:
             from cstar.orchestration.tracking import TrackingRepository
 
@@ -2729,16 +2770,40 @@ class WorkplanBuilderPage:
                 f"<span class='forge-msg-warn'>Could not list runs: {_esc(ex)}</span>"
             )
             return
-        self.recorded_runs = sorted(runs, key=lambda r: r.start_at, reverse=True)
-        options = [("recorded runs…", "")] + [
-            (f"{r.run_id}  ({r.start_at:%Y-%m-%d %H:%M})", r.run_id)
+        from cstar.orchestration.index import run_uri, where_kept
+
+        self.recorded_runs = list(runs)
+        try:
+            self.indexed_runs = await asyncio.to_thread(
+                self._scan_index, self.recorded_runs
+            )
+            found = f"{len(self.indexed_runs)} more found in run directories"
+        except Exception as ex:
+            self.indexed_runs = []
+            found = (
+                "<span class='forge-msg-warn'>Could not scan the run "
+                f"directories: {_esc(ex)}</span>"
+            )
+        entries = [
+            (r.start_at, f"{r.run_id}  ({r.start_at:%Y-%m-%d %H:%M})", r.run_id)
             for r in self.recorded_runs
+        ] + [
+            (
+                r.start_at,
+                f"{r.run_id}  ({r.start_at:%Y-%m-%d %H:%M}, {where_kept(r.location)})",
+                run_uri(r.uuid),
+            )
+            for r in self.indexed_runs
+        ]
+        entries.sort(key=lambda entry: _aware(entry[0]), reverse=True)
+        options = [("recorded runs…", "")] + [
+            (label, value) for _, label, value in entries
         ]
         with self.suspended():
             for row in self.run_rows:
                 row.pick.options = options
                 self._load_recorded(row)
-        self.runs_status.value = f"{len(self.recorded_runs)} recorded run(s)"
+        self.runs_status.value = f"{len(self.recorded_runs)} recorded run(s), {found}"
         self._rebuild()
 
     # ---- compute card ----------------------------------------------------

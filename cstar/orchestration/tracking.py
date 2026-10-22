@@ -19,7 +19,12 @@ from cstar.execution.file_system import (
     step_disk_usage,
     symlink_relative,
 )
-from cstar.orchestration.orchestration import LiveWorkplan, read_workplan
+from cstar.orchestration.manifest import DOCUMENT_READ_ERRORS, read_run_manifest
+from cstar.orchestration.orchestration import (
+    LiveWorkplan,
+    ProcessHandle,
+    read_workplan,
+)
 from cstar.orchestration.serialization import (
     PersistenceMode,
     deserialize,
@@ -27,11 +32,15 @@ from cstar.orchestration.serialization import (
     serialize,
     try_deserialize,
 )
+from cstar.orchestration.state import StateRepository
 
 log = get_logger(__name__)
 
 KEY_RUN_NAME: t.Final[str] = "name"
 """Key used to store the workplan name in the run metadata."""
+
+KEY_RUN_UUID: t.Final[str] = "uuid"
+"""Key used to cache the run manifest's uuid in the run metadata; the manifest owns it."""
 
 
 class WorkplanRun(BaseModel):
@@ -133,6 +142,50 @@ class WorkplanRun(BaseModel):
                 "workplan_path": _moved(self.workplan_path),
             }
         )
+
+    @property
+    def uuid(self) -> str:
+        """The uuid of the run, as its manifest names it.
+
+        The uuid cached in the metadata when the run was scheduled, else the
+        `id` of the manifest at `output_path`, read on every access.
+
+        Returns
+        -------
+        str
+            The uuid, or an empty string when the record does not cache it and
+            the run has no readable manifest.
+        """
+        if cached := self.metadata.get(KEY_RUN_UUID, ""):
+            return cached
+        try:
+            manifest = read_run_manifest(self.output_path)
+        except DOCUMENT_READ_ERRORS as ex:
+            log.debug(f"Unable to read the manifest of run {self.run_id!r}: {ex}")
+            return ""
+        return manifest.id if manifest else ""
+
+    def step_status(self, name: str) -> str:
+        """The status the run's sentinel holds for a step.
+
+        Parameters
+        ----------
+        name : str
+            The name of the step.
+
+        Returns
+        -------
+        str
+            The orchestration status name, or an empty string when the step
+            has no readable sentinel.
+        """
+        try:
+            path = StateRepository.sentinel_path(name, run_id=self.run_id)
+        except ValueError as ex:
+            log.debug(f"No sentinel path for step {name!r}: {ex}")
+            return ""
+        handle = try_deserialize(path, ProcessHandle)
+        return handle.status.name if handle else ""
 
     @staticmethod
     def get_default_run_id(uri: str) -> str:

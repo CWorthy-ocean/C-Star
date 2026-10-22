@@ -7,6 +7,8 @@ Workplans
 Schemas for the built-in `Workplan` are listed here.
 
 - :download:`Workplan Schema v1.0.0 <https://raw.githubusercontent.com/CWorthy-ocean/C-Star/refs/heads/main/docs/schemas/wp/workplan_schema.1.0.0.json>`
+- :download:`Workplan Schema v1.1.0 <https://raw.githubusercontent.com/CWorthy-ocean/C-Star/refs/heads/main/docs/schemas/wp/workplan_schema.1.1.0.json>`:
+  adds the run a ``runs`` alias resolved to when the workplan was scheduled (``id``, ``path``).
 
 Runs
 ----
@@ -26,6 +28,8 @@ Schemas for the files a run leaves behind are listed here. See
   adds each step's latest submission (``launcher``, ``job_id``, ``submitted_at``).
 - :download:`Step Record Schema v1.2.0 <https://raw.githubusercontent.com/CWorthy-ocean/C-Star/refs/heads/main/docs/schemas/run/step_record_schema.1.2.0.json>`:
   adds what ran the step (``execution``).
+- :download:`Run Manifest Schema v1.3.0 <https://raw.githubusercontent.com/CWorthy-ocean/C-Star/refs/heads/main/docs/schemas/run/run_manifest_schema.1.3.0.json>`:
+  adds the uuid of each external run (``id``).
 
 Blueprints
 ----------
