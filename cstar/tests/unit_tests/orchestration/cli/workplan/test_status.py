@@ -11,13 +11,15 @@ from cstar.orchestration.dag_runner import DagStatus
 from cstar.orchestration.launch.local import LocalLauncher
 from cstar.orchestration.manifest import (
     Attempt,
+    StepRecord,
     ensure_run_manifest,
     read_run_manifest,
+    write_step_record,
 )
-from cstar.orchestration.models import KEY_PRE_RUN, Step, Workplan
+from cstar.orchestration.models import KEY_PRE_RUN, BlueprintIdentity, Step, Workplan
 from cstar.orchestration.orchestration import LiveStep, LiveWorkplan, Status
 from cstar.orchestration.serialization import deserialize, serialize
-from cstar.orchestration.tracking import WorkplanRun
+from cstar.orchestration.tracking import KEY_ATTACHED, WorkplanRun
 from cstar.tests.unit_tests.orchestration.conftest import (
     EXTERNAL_TOKEN,
     ExternalTaskFactory,
@@ -265,3 +267,86 @@ def test_workplan_status_refreshes_the_manifest(
     else:
         assert manifest.observed_at is not None
         assert entry.status == Status.Running.name
+
+
+def test_workplan_status_of_an_attached_run_is_what_its_records_say(
+    tmp_path: Path,
+    hello_world_bp_path: Path,
+    mock_run_id: str,
+) -> None:
+    """Verify an attached run has no sentinels to load and no manifest to
+    refresh: the statuses are its step records', and the files are untouched.
+    """
+    wp = Workplan(
+        name="attached",
+        description="A workplan attached from elsewhere.",
+        steps=[
+            Step(
+                name=name,
+                application="hello_world",
+                blueprint=hello_world_bp_path.as_posix(),
+            )
+            for name in ("first", "second", "third")
+        ],
+    )
+    live_steps = [LiveStep.from_step(step) for step in wp.steps]
+    lwp = LiveWorkplan(**wp.model_dump(exclude={"steps"}), steps=live_steps)
+    trx_path = tmp_path / "live-attached.yaml"
+    assert serialize(trx_path, lwp)
+    run = WorkplanRun(
+        workplan_path=tmp_path / "attached.yaml",
+        trx_workplan_path=trx_path,
+        output_path=tmp_path,
+        run_id=mock_run_id,
+        metadata={KEY_ATTACHED: "1"},
+    )
+    ensure_run_manifest(
+        tmp_path,
+        run_id=mock_run_id,
+        name=wp.name,
+        kind="workplan",
+        workplan=None,
+        attempt=Attempt(start_at=datetime(2026, 10, 15, tzinfo=UTC)),
+        steps={
+            step.name: (step.application, f"tasks/{step.name}", None)
+            for step in live_steps
+        },
+        runs={},
+    )
+    for name, outcome in (("first", "completed"), ("second", "failed")):
+        write_step_record(
+            tmp_path / "tasks" / name,
+            StepRecord(
+                step=name,
+                application="hello_world",
+                blueprint=BlueprintIdentity(
+                    kind="Blueprint",
+                    application="hello_world",
+                    name="bp",
+                    content_hash="abc",
+                ),
+                outcome=outcome,
+                finished_at=datetime(2026, 10, 15, tzinfo=UTC),
+            ),
+        )
+    manifest_before = (tmp_path / "cstar-run.yaml").read_bytes()
+
+    with (
+        mock.patch(LOOKUP, mock.AsyncMock(return_value=run)),
+        mock.patch(
+            "cstar.cli.workplan.status.get_launcher", return_value=LocalLauncher()
+        ),
+        mock.patch("cstar.cli.workplan.status.load_run_state") as load_state,
+        mock.patch("cstar.cli.workplan.status.refresh_run_manifest") as refresh,
+        mock.patch("cstar.cli.workplan.status.display_summary") as display,
+    ):
+        result = CliRunner().invoke(app, [mock_run_id], color=False)
+
+    assert result.exit_code == 0, result.output
+    load_state.assert_not_called()
+    refresh.assert_not_called()
+    lookup = display.call_args.args[1]
+    assert lookup["first"].status == Status.Done
+    assert lookup["second"].status == Status.Failed
+    assert lookup["third"].status == Status.Unsubmitted
+    assert (tmp_path / "cstar-run.yaml").read_bytes() == manifest_before

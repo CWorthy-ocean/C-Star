@@ -27,10 +27,12 @@ def resolve_by_handle(
 
     The one place that decides whether a run is tracked on this machine, and so
     refreshed from its sentinels, or only read as it is on disk. A directory the
-    user named, and a run known only by its manifest, are read as they are; a
-    run tracked here is refreshed first. A command that must tell a run found
+    user named, a run known only by its manifest, and a run attached from
+    elsewhere (which has no sentinels here) are read as they are; a run
+    scheduled here is refreshed first. A command that must tell a run found
     only by its manifest from a directory the user named, because it writes
-    into the run, builds the first with `indexed`.
+    into the run, builds the first with `indexed`. Whether a command may write
+    into an attached run is its own question, asked through `require_writable`.
 
     Parameters
     ----------
@@ -44,7 +46,8 @@ def resolve_by_handle(
     directory : Callable[[str], _T]
         Builds the command's target from the path of a run directory.
     tracked : Callable[[WorkplanRun], _T]
-        Builds the command's target from the tracking record of a run.
+        Builds the command's target from the tracking record of a run scheduled
+        here.
     indexed : Callable[[str], _T] | None
         Builds the command's target from the path of the directory of a run
         that is not tracked here and was found by its manifest; `directory` by
@@ -74,6 +77,8 @@ def resolve_by_handle(
     record = lookup_run(handle, hint=hint)
     if isinstance(record, WorkplanRun):
         set_ctxmap(context, KEY_RUN, record)
+        if record.attached:
+            return directory(str(record.output_path))
         return tracked(record)
 
     return (indexed or directory)(str(record.output_path))

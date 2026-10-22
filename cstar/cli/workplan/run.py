@@ -671,12 +671,22 @@ async def handle_run_reloading(run_id: str) -> WorkplanRun:
     Raises
     ------
     typer.BadParameter
-        If no run record exists for the supplied run-id.
+        - If no run record exists for the supplied run-id.
+        - If the run was attached from elsewhere: it has no sentinels here and
+          is never relaunched.
     """
     repo = TrackingRepository()
     wp_run = await repo.get_workplan_run(run_id)
     if wp_run is None:
         msg = f"No runs with the id `{run_id}` could be found."
+        raise typer.BadParameter(msg)
+    if wp_run.attached:
+        msg = (
+            f"Run {run_id!r} was attached from {wp_run.output_path}: attached runs "
+            "can be inspected and referenced, and relaunching after a move is not "
+            "supported. Start a new run with `--run-id <new>` that references it "
+            "(see 'Extending a finished run' in the workplan docs)."
+        )
         raise typer.BadParameter(msg)
 
     # ensure the environment matches the prior run

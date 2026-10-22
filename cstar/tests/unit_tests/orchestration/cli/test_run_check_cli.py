@@ -14,7 +14,7 @@ from typer.testing import CliRunner
 
 from cstar.base.exceptions import CstarExpectationFailed
 from cstar.cli.run import app as app_run
-from cstar.cli.run.check import COMMAND_CHECK
+from cstar.cli.run.check import COMMAND_CHECK, format_findings, summarize
 from cstar.entrypoint.utils import ARG_ALL, ARG_NO_REFRESH, ARG_REPAIR, ARG_VERIFY
 from cstar.execution.file_system import StateDirectoryManager
 from cstar.orchestration.dag_runner import DagStatus
@@ -32,7 +32,14 @@ from cstar.orchestration.manifest import (
     write_step_record,
 )
 from cstar.orchestration.models import BlueprintIdentity
-from cstar.orchestration.tracking import WorkplanRun
+from cstar.orchestration.run_check import check_run
+from cstar.orchestration.tracking import (
+    KEY_ACCESS,
+    KEY_ATTACHED,
+    KEY_RUN_UUID,
+    Access,
+    WorkplanRun,
+)
 from cstar.tests.unit_tests.orchestration.manifest_runs import BuiltRun
 from cstar.tests.unit_tests.orchestration.run_tree import (
     FakeRun,
@@ -1009,3 +1016,122 @@ def test_the_hint_names_the_directory_as_it_was_typed(
     text = flatten_cli_output(result.stderr)
     assert "To check the directory ./Spin Up, pass it as a path." in text
     assert "./spin-up" not in text
+
+
+def attached_record(built: BuiltRun, access: Access | None = None) -> WorkplanRun:
+    """The tracking record `cstar run attach` makes of a built run kept elsewhere."""
+    metadata = {KEY_ATTACHED: "1", KEY_RUN_UUID: built.uuid}
+    if access is not None:
+        metadata[KEY_ACCESS] = access.value
+    return WorkplanRun(
+        workplan_path=built.root / f"{built.run_id}_transformed.yaml",
+        trx_workplan_path=built.root / f"{built.run_id}_transformed.yaml",
+        output_path=built.root,
+        run_id=built.run_id,
+        metadata=metadata,
+    )
+
+
+@pytest.fixture
+def colleague_run(tmp_path: Path, build_run: t.Callable[..., BuiltRun]) -> BuiltRun:
+    """A run copied from elsewhere, kept outside the data home and the project area."""
+    return build_run(tmp_path / "colleague" / "their-run", "their-run")
+
+
+@pytest.mark.parametrize("access", [None, Access.owned])
+def test_an_attached_run_is_checked_as_its_directory_and_not_refreshed(
+    colleague_run: BuiltRun, refresh: Refresh, access: Access | None
+) -> None:
+    """Verify a run attached from elsewhere has no sentinels to refresh from: it
+    is read as found, and `--repair` may rewrite its links when it is owned.
+
+    Parameters
+    ----------
+    access : Access | None
+        The access the record holds; `None` for a record that says nothing.
+    """
+    absolute = add_absolute_link(colleague_run)
+    record = attached_record(colleague_run, access)
+
+    checked = invoke(colleague_run.run_id, record=record)
+    repaired = invoke(colleague_run.run_id, ARG_REPAIR, record=record)
+
+    assert checked.exit_code == EXIT_FINDINGS, checked.output
+    assert "Symlinks with an absolute target inside the run" in checked.stdout
+    assert repaired.exit_code == EXIT_FINDINGS, repaired.output
+    assert "Rewrote 1 symlink(s) as relative:" in repaired.stdout
+    assert os.readlink(absolute) == "../output/a.nc"
+    refresh.status.assert_not_called()
+    refresh.refresh.assert_not_called()
+
+
+def test_an_attached_run_by_uuid_is_checked_as_its_directory(
+    colleague_run: BuiltRun, refresh: Refresh
+) -> None:
+    """Verify `run://<uuid>` finds the attached run wherever it is kept."""
+    record = attached_record(colleague_run)
+    with mock.patch(
+        "cstar.orchestration.index.TrackingRepository.list_latest_runs_sync",
+        mock.Mock(return_value=[record]),
+    ):
+        result = invoke(run_uri(colleague_run.uuid), record=None)
+
+    assert result.exit_code == EXIT_FINDINGS, result.output
+    assert f"problem(s) found in {colleague_run.root}" in result.stdout
+    refresh.refresh.assert_not_called()
+
+
+def test_repair_refuses_a_run_attached_read_only(
+    colleague_run: BuiltRun,
+    refresh: Refresh,
+    squash_cli_output: t.Callable[[str], str],
+) -> None:
+    """Verify `--repair` writes nothing into a run attached read-only, and the
+    message says how to take ownership.
+    """
+    absolute = add_absolute_link(colleague_run)
+    target = os.readlink(absolute)
+    before = colleague_run.manifest_bytes
+
+    result = invoke(
+        colleague_run.run_id,
+        ARG_REPAIR,
+        record=attached_record(colleague_run, Access.read_only),
+    )
+
+    assert result.exit_code == EXIT_BAD_ARGS, result.output
+    text = squash_cli_output(result.stderr)
+    assert squash_cli_output("is attached read-only") in text
+    assert squash_cli_output(f"cstar run attach {colleague_run.root} --own") in text
+    assert result.stdout == ""
+    assert os.readlink(absolute) == target
+    assert colleague_run.manifest_bytes == before
+    assert not (colleague_run.root / "gathered_output").exists()
+    refresh.refresh.assert_not_called()
+
+
+def test_a_run_attached_read_only_is_still_checked(colleague_run: BuiltRun) -> None:
+    """Verify reading a read-only run is allowed: only `--repair` is refused."""
+    add_absolute_link(colleague_run)
+
+    result = invoke(
+        colleague_run.run_id,
+        record=attached_record(colleague_run, Access.read_only),
+    )
+
+    assert result.exit_code == EXIT_FINDINGS, result.output
+
+
+def test_the_report_is_formatted_and_summarized_for_other_commands(
+    run: FakeRun,
+) -> None:
+    """Verify the formatter and the summary are public, for the commands that
+    report on a run directory as `check` does.
+    """
+    report = check_run(run.root, workplan=None, run_id=None, all_files=False)
+
+    lines = list(format_findings(report))
+
+    assert any(line.startswith("Symlinks with an absolute target") for line in lines)
+    assert summarize(report).startswith(f"{len(report.problems)} problem(s) found in")
+    assert str(run.root) in summarize(report)

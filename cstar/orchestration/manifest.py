@@ -1537,6 +1537,48 @@ def status_of_record(record: StepRecord) -> str:
     return _STATUS_OF_OUTCOME.get(record.outcome, "")
 
 
+def recorded_step_status(root: Path, manifest: RunManifest, name: str) -> str:
+    """The status a run's own records say a step has, for a run read as found.
+
+    A run with no sentinels here (not scheduled on this machine) is `Done` only
+    when the step's own record says it completed: a manifest's snapshot that
+    says `Done` is no evidence, as a copy of the run without its
+    `cstar-step.yaml` files, or one cut short in transfer, carries the same
+    snapshot. Any other status the snapshot holds is reported as it stands.
+    Nothing is written.
+
+    Parameters
+    ----------
+    root : Path
+        The run root.
+    manifest : RunManifest
+        The run's manifest.
+    name : str
+        The name of the step.
+
+    Returns
+    -------
+    str
+        The status name, or an empty string when the manifest has no such
+        step, or the step has no status or only the unconfirmed snapshot
+        `Done`.
+    """
+    entry = manifest.step(name)
+    if entry is None:
+        return ""
+
+    try:
+        record = read_step_record(root / entry.working_dir)
+    except DOCUMENT_READ_ERRORS as ex:
+        log.warning(
+            f"Ignoring the record of step {name!r} of run {manifest.run_id!r}: {ex}"
+        )
+        record = None
+    if record is not None:
+        return status_of_record(record)
+    return "" if entry.status == Status.Done.name else entry.status
+
+
 def fold_step_records(
     manifest: RunManifest,
     root: Path,

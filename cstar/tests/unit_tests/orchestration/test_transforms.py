@@ -83,7 +83,12 @@ from cstar.orchestration.orchestration import (
 )
 from cstar.orchestration.serialization import deserialize, serialize
 from cstar.orchestration.state import StateRepository
-from cstar.orchestration.tracking import KEY_RUN_UUID, TrackingRepository, WorkplanRun
+from cstar.orchestration.tracking import (
+    KEY_ATTACHED,
+    KEY_RUN_UUID,
+    TrackingRepository,
+    WorkplanRun,
+)
 from cstar.orchestration.transforms import (
     ApplyOverridesDirective,
     DirectiveConfig,
@@ -7636,6 +7641,102 @@ async def test_external_runs_unfinished_step_of_an_untracked_run_is_a_problem(
     assert registry.tasks() == {}
     for expected in ("'outer'", "'spinup'", recorded, str(fab.root), "done steps only"):
         assert expected in problem
+
+
+def _attach(fab: ManifestOnlyRun) -> WorkplanRun:
+    """Track the run `fab` laid out as one attached from elsewhere: no sentinels."""
+    record = WorkplanRun(
+        workplan_path=fab.root / "workplan.yaml",
+        trx_workplan_path=fab.root / f"{fab.run_id}_transformed.yaml",
+        output_path=fab.root,
+        run_id=fab.run_id,
+        metadata={KEY_ATTACHED: "1", KEY_RUN_UUID: fab.uuid},
+    )
+    TrackingRepository().put_workplan_run_sync(record)
+    return record
+
+
+@pytest.mark.parametrize("spelling", ["run_id", "uuid", "path"])
+async def test_external_runs_done_step_of_an_attached_run_is_usable(
+    fabricate_manifest_run: Callable[..., ManifestOnlyRun],
+    spelling: str,
+) -> None:
+    """Verify an attached run, tracked but with no sentinels, is probed through
+    its manifest and step records, and never asked of a launcher.
+
+    Parameters
+    ----------
+    spelling : str
+        How the workplan names the run: `run_id`, `uuid` or `path`.
+    """
+    fab = fabricate_manifest_run()
+    attached = _attach(fab)
+    registry = ExternalRuns(fab.runs(spelling))
+
+    await registry.refresh([fab.ref], _NoQueryLauncher())
+
+    assert isinstance(registry.record("spinup"), WorkplanRun)
+    assert registry.problem(fab.ref) == ""
+    assert registry.is_done(fab.ref)
+    task = registry.tasks()[str(fab.ref)]
+    assert task.handle.status == Status.Done
+    assert task.handle.pid == "4242"
+    assert task.handle.run_id == attached.run_id
+    assert registry.pinned()["spinup"].id == fab.uuid
+
+
+@pytest.mark.parametrize(
+    ("outcome", "status", "recorded"),
+    [
+        ("failed", "", "is recorded as Failed"),
+        ("", "Running", "is recorded as Running"),
+        ("", "Done", "has no recorded status"),
+    ],
+)
+async def test_external_runs_unfinished_step_of_an_attached_run_is_a_problem(
+    fabricate_manifest_run: Callable[..., ManifestOnlyRun],
+    outcome: str,
+    status: str,
+    recorded: str,
+) -> None:
+    """Verify an attached run's step that its records do not show done is a
+    problem that says what is recorded, as for a run known only by its manifest.
+
+    Parameters
+    ----------
+    outcome : str
+        The outcome of the step's record; empty for none.
+    status : str
+        The status the manifest holds for the step.
+    recorded : str
+        What the message says is recorded.
+    """
+    fab = fabricate_manifest_run(outcome=outcome, status=status)
+    _attach(fab)
+    registry = ExternalRuns(fab.runs())
+
+    await registry.refresh([fab.ref], _NoQueryLauncher())
+    problem = registry.problem(fab.ref)
+
+    assert not registry.is_done(fab.ref)
+    assert registry.tasks() == {}
+    for expected in ("'outer'", "'spinup'", recorded, str(fab.root)):
+        assert expected in problem
+
+
+async def test_external_runs_attached_run_without_a_manifest_is_a_problem(
+    fabricate_manifest_run: Callable[..., ManifestOnlyRun],
+) -> None:
+    """Verify an attached run whose manifest is gone is reported, not crashed on."""
+    fab = fabricate_manifest_run()
+    _attach(fab)
+    (fab.root / "cstar-run.yaml").unlink()
+    registry = ExternalRuns(fab.runs())
+
+    await registry.refresh([fab.ref], _NoQueryLauncher())
+
+    assert not registry.is_done(fab.ref)
+    assert "manifest" in registry.problem(fab.ref)
 
 
 async def test_external_runs_run_id_spelled_as_a_title_is_the_run_tracking_names(

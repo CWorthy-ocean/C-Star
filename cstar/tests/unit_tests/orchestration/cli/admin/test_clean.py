@@ -16,13 +16,20 @@ from cstar.cli.admin.clean import (
     FileSystemCleanupAction,
     app,
     get_default_cleanup_actions,
+    get_run_actions,
     perform_actions,
     runid_callback,
 )
 from cstar.entrypoint.utils import ARG_DRY_RUN
 from cstar.execution.file_system import DirectoryManager
 from cstar.orchestration.models import Workplan
-from cstar.orchestration.tracking import TrackingRepository
+from cstar.orchestration.tracking import (
+    KEY_ACCESS,
+    KEY_ATTACHED,
+    Access,
+    TrackingRepository,
+    WorkplanRun,
+)
 
 
 def test_cli_admin_clean_get_default_cleanup_actions() -> None:
@@ -429,3 +436,128 @@ def test_cli_admin_clean_default_data_action_keeps_local_catalog(
     (action,) = (a for a in actions if a.name == "C-Star Data")
 
     assert action.keep_paths == [DirectoryManager.source_data_home()]
+
+
+def _track(root: Path, run_id: str, **metadata: str) -> WorkplanRun:
+    """Make the run directory `root` and track it under `run_id`."""
+    root.mkdir(parents=True)
+    (root / "data.nc").write_text("data")
+    run = WorkplanRun(
+        workplan_path=root / "workplan.yaml",
+        trx_workplan_path=root / "workplan_transformed.yaml",
+        output_path=root,
+        run_id=run_id,
+        metadata=metadata,
+    )
+    TrackingRepository().put_workplan_run_sync(run)
+    return run
+
+
+def _names(actions: list[t.Any]) -> list[str]:
+    """The names of the actions, without the run-id they are about."""
+    return [action.name.split(" ", 1)[1] for action in actions]
+
+
+def test_cli_admin_clean_run_actions_of_a_scheduled_run_include_its_data(
+    tmp_path: Path,
+) -> None:
+    """Verify a run this machine scheduled has its state and its data removed."""
+    run = _track(tmp_path / "scheduled", "scheduled")
+
+    actions = get_run_actions("scheduled")
+
+    assert _names(actions) == ["State", "Data"]
+    data = t.cast("FileSystemCleanupAction", actions[1])
+    assert data.asset_paths == [run.output_path]
+
+
+@pytest.mark.parametrize(
+    "metadata",
+    [
+        {KEY_ATTACHED: "1", KEY_ACCESS: Access.owned.value},
+        {KEY_ATTACHED: "1"},
+    ],
+)
+def test_cli_admin_clean_run_actions_of_an_owned_attached_run_include_its_data(
+    tmp_path: Path, metadata: dict[str, str]
+) -> None:
+    """Verify an attached run the user owns is cleaned like any other."""
+    _track(tmp_path / "colleague" / "owned", "owned", **metadata)
+
+    assert _names(get_run_actions("owned")) == ["State", "Data"]
+
+
+def test_cli_admin_clean_run_actions_keep_the_data_of_a_read_only_run(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Verify the data of a run attached read-only is left alone, the tracking
+    record is still removed, and the user is told why.
+    """
+    _track(
+        tmp_path / "colleague" / "frozen",
+        "frozen",
+        **{KEY_ATTACHED: "1", KEY_ACCESS: Access.read_only.value},
+    )
+
+    actions = get_run_actions("frozen")
+
+    assert _names(actions) == ["State"]
+    out = " ".join(capsys.readouterr().out.split())
+    assert "'frozen' is attached read-only" in out
+    assert "admin clean" in out
+    assert "--own" in out
+
+
+def test_cli_admin_clean_run_actions_keep_the_data_of_a_project_area_run(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Verify a tracked run whose directory is in the project's runs area keeps
+    its data, and the user is told to remove it by hand.
+    """
+    project = (tmp_path / "project").resolve()
+    monkeypatch.setenv("CSTAR_PROJECT_HOME", str(project))
+    root = project / "cstar" / "runs" / "shared"
+    _track(root, "shared")
+
+    actions = get_run_actions("shared")
+
+    assert _names(actions) == ["State"]
+    out = " ".join(capsys.readouterr().out.split())
+    assert "project runs area" in out
+    assert "remove it by hand" in out
+
+
+def test_cli_admin_clean_removes_the_tracking_of_a_read_only_run_but_not_its_data(
+    tmp_path: Path,
+) -> None:
+    """Verify the command removes the record and leaves the run directory."""
+    run = _track(
+        tmp_path / "colleague" / "frozen",
+        "frozen",
+        **{KEY_ATTACHED: "1", KEY_ACCESS: Access.read_only.value},
+    )
+    latest = TrackingRepository().latest_path("frozen")
+    assert latest.exists()
+
+    result = CliRunner().invoke(
+        app, ["--run-id", "frozen", ARG_YES], color=False, catch_exceptions=False
+    )
+
+    assert result.exit_code == 0, result.output
+    assert not latest.exists()
+    assert TrackingRepository().get_workplan_run_sync("frozen") is None
+    assert (run.output_path / "data.nc").read_text() == "data"
+
+
+def test_cli_admin_clean_removes_the_data_of_a_scheduled_run(tmp_path: Path) -> None:
+    """Verify a run scheduled here is removed whole, as before."""
+    run = _track(tmp_path / "scheduled", "scheduled")
+
+    result = CliRunner().invoke(
+        app, ["--run-id", "scheduled", ARG_YES], color=False, catch_exceptions=False
+    )
+
+    assert result.exit_code == 0, result.output
+    assert not run.output_path.exists()

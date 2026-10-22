@@ -26,7 +26,7 @@ from cstar.orchestration.dag_runner import (
     load_run_state,
     refresh_run_manifest,
 )
-from cstar.orchestration.orchestration import LiveWorkplan, Planner
+from cstar.orchestration.orchestration import LiveWorkplan, Planner, Status
 from cstar.orchestration.tracking import WorkplanRun
 
 log = get_logger(__name__)
@@ -39,7 +39,8 @@ HELP_LONG = f"""\
 {HELP_SHORT}
 
 The run is named by its run-id and must be tracked on this machine: its live
-state is read from the scheduler. To see any other run, use `cstar run show`.
+state is read from the scheduler. An attached run's status is what its manifest
+and step records say. To see any other run, use `cstar run show`.
 """
 
 
@@ -79,9 +80,22 @@ def status(
                 soft_wrap=True,
             )
         planner = Planner(workplan, external.tasks())
-        status = asyncio.run(load_run_state(run.run_id, launcher))
-        if not no_refresh:
-            refresh_run_manifest(run.output_path, run.run_id, status)
+        if run.attached:
+            # no sentinels here: the run's own records are the status
+            recorded = {
+                step.name: run.step_status(step.name) for step in workplan.steps
+            }
+            status = DagStatus(
+                {
+                    name: Status[value]
+                    for name, value in recorded.items()
+                    if value in Status.__members__
+                }
+            )
+        else:
+            status = asyncio.run(load_run_state(run.run_id, launcher))
+            if not no_refresh:
+                refresh_run_manifest(run.output_path, run.run_id, status)
         status = DagStatus({**external.statuses(), **status.details})
         lookup = get_status_detail_map(planner, status)
 

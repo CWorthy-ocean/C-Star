@@ -772,6 +772,46 @@ def get_from_ctxmap(context: typer.Context, key: str, klass: type[_TValue]) -> _
     return value
 
 
+def try_get_from_ctxmap(
+    context: typer.Context, key: str, klass: type[_TValue]
+) -> _TValue | None:
+    """Retrieve a strongly-typed value from the typer context when it holds one.
+
+    Unlike `get_from_ctxmap`, an absent key is not an error.
+
+    Parameters
+    ----------
+    context : typer.Context
+        The typer context object.
+    key : str
+        The key the value is stored under.
+    klass : type[_TValue]
+        The type the value must have.
+
+    Returns
+    -------
+    _TValue | None
+        The value, or `None` when the key is absent or holds `None`.
+
+    Raises
+    ------
+    typer.Exit
+        With code 102 when the value is not a `klass`.
+    """
+    value = (context.obj or {}).get(key)
+    if value is None:
+        return None
+
+    if not isinstance(value, klass):
+        log.warning(
+            "Context map contains value with type mismatch. "
+            f"Expected {klass.__name__!r} but received {value.__class__.__name__!r}."
+        )
+        raise typer.Exit(102)
+
+    return value
+
+
 def set_ctxmap(context: typer.Context, key: str, value: object) -> None:
     """Prepare a mapping in the typer context and store the supplied value at
     the chosen key.

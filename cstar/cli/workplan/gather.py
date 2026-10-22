@@ -5,11 +5,13 @@ from pathlib import Path
 
 import typer
 
+from cstar.base.exceptions import CstarError
 from cstar.base.log import get_logger
 from cstar.cli.common import get_from_ctxmap
-from cstar.cli.workplan.shared import TrackedRunIdArgument, console
+from cstar.cli.workplan.shared import KEY_RUN, TrackedRunIdArgument, console
 from cstar.execution.file_system import JobFileSystemManager, StateDirectoryManager
 from cstar.orchestration.orchestration import LiveStep, LiveWorkplan
+from cstar.orchestration.tracking import WorkplanRun, require_writable
 
 log = get_logger(__name__)
 app = typer.Typer()
@@ -28,7 +30,8 @@ with a fresh set reflecting the current state on disk.
 
 The run is named by its run-id and must be tracked on this machine: the links are
 built inside its directory, and a run reached by its uuid or its directory (a
-copy, or a run in the project area) may not be yours to write into.
+copy, or a run in the project area) may not be yours to write into. A run
+attached read-only is refused: nothing is written into its directory.
 """
 
 
@@ -177,6 +180,11 @@ def gather(
 ) -> None:
     """Consolidate per-step output into a run-level directory of symlinks."""
     workplan = get_from_ctxmap(context, "workplan", LiveWorkplan)
+    run = get_from_ctxmap(context, KEY_RUN, WorkplanRun)
+    try:
+        require_writable(run, action="gather")
+    except CstarError as ex:
+        raise typer.BadParameter(str(ex)) from ex
 
     links, conflicts, mangled_count = collect_links(workplan)
 
@@ -184,7 +192,7 @@ def gather(
         report_conflicts(conflicts)
         raise typer.Exit(1)
 
-    dest = StateDirectoryManager.user_dir(run_id)
+    dest = StateDirectoryManager.user_view_dir(run.output_path)
     relink(dest, links)
 
     if not links:

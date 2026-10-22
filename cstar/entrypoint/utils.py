@@ -59,6 +59,20 @@ ARG_PRE_RUN_WORKPLAN_HELP: t.Final[str] = (
 )
 
 ARG_DRY_RUN: t.Final[str] = "--dry-run"
+ARG_DRY_RUN_HELP: t.Final[str] = "Show what would be done without doing it."
+
+ARG_OWN: t.Final[str] = "--own"
+ARG_OWN_HELP: t.Final[str] = (
+    "Record the attached run as owned: verbs that write into its directory may."
+)
+ARG_READ_ONLY: t.Final[str] = "--read-only"
+ARG_READ_ONLY_HELP: t.Final[str] = (
+    "Record the attached run as read-only: nothing writes into its directory."
+)
+ARG_AS: t.Final[str] = "--as"
+ARG_AS_HELP: t.Final[str] = (
+    "Attach the run under this run-id instead of the one its manifest names."
+)
 
 ARG_DIRECTIVES_URI_LONG: t.Final[str] = "--directives"
 ARG_DIRECTIVES_URI_SHORT: t.Final[str] = "-d"

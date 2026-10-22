@@ -11,6 +11,7 @@ from uuid import uuid4
 import pytest
 
 import cstar.orchestration.index as index_module
+import cstar.orchestration.manifest as manifest_module
 from cstar.base.exceptions import CstarError
 from cstar.execution.file_system import DirectoryManager, StateDirectoryManager
 from cstar.orchestration.index import (
@@ -32,6 +33,7 @@ from cstar.orchestration.index import (
     resolve_run,
     run_uri,
     scan_roots,
+    tracked_by_uuid,
     untracked_locations,
     where_kept,
 )
@@ -45,7 +47,12 @@ from cstar.orchestration.manifest import (
     write_step_record,
 )
 from cstar.orchestration.models import BlueprintIdentity
-from cstar.orchestration.tracking import KEY_RUN_UUID, TrackingRepository, WorkplanRun
+from cstar.orchestration.tracking import (
+    KEY_ATTACHED,
+    KEY_RUN_UUID,
+    TrackingRepository,
+    WorkplanRun,
+)
 from cstar.tests.unit_tests.orchestration.run_tree import link
 
 NOW = datetime(2026, 10, 15, 12, 0, tzinfo=UTC)
@@ -117,14 +124,19 @@ def local_manifest_id(root: Path) -> str:
     return manifest.id
 
 
-def track(root: Path, run_id: str, *, uuid: str = "") -> WorkplanRun:
+def track(
+    root: Path, run_id: str, *, uuid: str = "", attached: bool = False
+) -> WorkplanRun:
     """Record a run in tracking, stamped with `uuid` when given."""
+    metadata = {KEY_RUN_UUID: uuid} if uuid else {}
+    if attached:
+        metadata[KEY_ATTACHED] = "1"
     run = WorkplanRun(
         workplan_path=root / "workplan.yaml",
         trx_workplan_path=root / "workplan_transformed.yaml",
         output_path=root,
         run_id=run_id,
-        metadata={KEY_RUN_UUID: uuid} if uuid else {},
+        metadata=metadata,
     )
     TrackingRepository().put_workplan_run_sync(run)
     return run
@@ -633,13 +645,13 @@ class TestManifestRecord:
     ) -> None:
         record = self.record(tmp_path / "run", steps=("one", "two", "three"))
         read: list[Path] = []
-        real = index_module.read_step_record
+        real = manifest_module.read_step_record
 
         def spy(step_root: Path) -> StepRecord | None:
             read.append(step_root)
             return real(step_root)
 
-        monkeypatch.setattr(index_module, "read_step_record", spy)
+        monkeypatch.setattr(manifest_module, "read_step_record", spy)
 
         record.step_status("two")
         record.step_status("two")
@@ -1099,6 +1111,176 @@ class TestResolveUuid:
 
         with pytest.raises(CstarError, match="another uuid"):
             resolve_run(handle, uuid=str(uuid4()))
+
+
+class TestTrackedByUuid:
+    def test_a_run_outside_every_index_root(self, tmp_path: Path) -> None:
+        wanted = str(uuid4())
+        root = tmp_path / "colleague" / "their-run"
+        make_run(root, "their-run", uuid=wanted)
+        track(root, "their-run", uuid=wanted, attached=True)
+
+        found = tracked_by_uuid(wanted)
+
+        assert isinstance(found, WorkplanRun)
+        assert found.output_path == root
+        assert not any(root == loc.root for loc in RunIndex().locations())
+
+    def test_no_record_holds_the_uuid(self, tmp_path: Path) -> None:
+        track(tmp_path / "other", "other", uuid=str(uuid4()))
+        (tmp_path / "other").mkdir()
+
+        assert tracked_by_uuid(str(uuid4())) is None
+
+    def test_a_record_whose_directory_is_gone_is_not_found(
+        self, tmp_path: Path
+    ) -> None:
+        wanted = str(uuid4())
+        track(tmp_path / "purged", "purged", uuid=wanted)
+
+        assert tracked_by_uuid(wanted) is None
+
+    def test_several_records_are_an_error_that_lists_them(self, tmp_path: Path) -> None:
+        wanted = str(uuid4())
+        for name in ("first", "second"):
+            (tmp_path / name).mkdir()
+            track(tmp_path / name, name, uuid=wanted)
+
+        with pytest.raises(CstarError, match="More than one tracked run") as raised:
+            tracked_by_uuid(wanted)
+
+        message = str(raised.value)
+        assert "'first'" in message
+        assert "'second'" in message
+        assert str(tmp_path / "first") in message
+        assert "run-id" in message
+
+    def test_a_record_that_does_not_cache_its_uuid_is_never_read_for_it(
+        self, tmp_path: Path, opened: list[Path], monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        root = tmp_path / "unstamped"
+        manifest = make_run(root, "unstamped")
+        track(root, "unstamped")
+        read: list[Path] = []
+        real = manifest_module.read_run_manifest
+
+        def spy(path: Path) -> RunManifest | None:
+            read.append(path)
+            return real(path)
+
+        monkeypatch.setattr("cstar.orchestration.tracking.read_run_manifest", spy)
+
+        assert tracked_by_uuid(manifest.id) is None
+
+        assert opened == []
+        assert read == []
+
+    def test_unreadable_records_are_skipped(self, tmp_path: Path) -> None:
+        wanted = str(uuid4())
+        root = tmp_path / "good"
+        root.mkdir()
+        track(root, "good", uuid=wanted)
+        repo = TrackingRepository()
+        (repo.latest_dir / "broken.yaml").write_text("run_id: [unclosed\n")
+
+        found = tracked_by_uuid(wanted)
+
+        assert found is not None
+        assert found.run_id == "good"
+
+    def test_a_repository_that_cannot_be_read_finds_nothing(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        def refuse(self: TrackingRepository) -> t.NoReturn:
+            raise OSError("unreadable")
+
+        monkeypatch.setattr(TrackingRepository, "list_latest_runs_sync", refuse)
+
+        assert tracked_by_uuid(str(uuid4())) is None
+
+    def test_it_works_inside_a_running_event_loop(self, tmp_path: Path) -> None:
+        import asyncio
+
+        wanted = str(uuid4())
+        root = tmp_path / "in-loop"
+        root.mkdir()
+        track(root, "in-loop", uuid=wanted)
+
+        async def ask() -> WorkplanRun | None:
+            return tracked_by_uuid(wanted)
+
+        found = asyncio.run(ask())
+
+        assert found is not None
+        assert found.run_id == "in-loop"
+
+
+class TestAttachedRuns:
+    def test_a_uuid_finds_the_attached_run_without_a_scan(self, tmp_path: Path) -> None:
+        wanted = str(uuid4())
+        root = tmp_path / "colleague" / "their-run"
+        make_run(root, "their-run", uuid=wanted)
+        track(root, "their-run", uuid=wanted, attached=True)
+        index = RunIndex()
+
+        found = resolve_run(parse_run_handle(run_uri(wanted)), index=index)
+
+        assert isinstance(found, WorkplanRun)
+        assert found.attached
+        assert found.output_path == root
+        assert not index.scanned
+
+    def test_a_path_finds_the_run_attached_under_another_run_id(
+        self, tmp_path: Path
+    ) -> None:
+        root = local_run("original")
+        wanted = local_manifest_id(root)
+        track(root, "renamed", uuid=wanted, attached=True)
+
+        found = resolve_run(parse_run_handle(str(root)))
+
+        assert isinstance(found, WorkplanRun)
+        assert found.run_id == "renamed"
+
+    def test_the_manifest_run_id_finds_the_run_attached_under_another(
+        self, tmp_path: Path
+    ) -> None:
+        root = local_run("original")
+        wanted = local_manifest_id(root)
+        track(root, "renamed", uuid=wanted, attached=True)
+
+        found = resolve_run(parse_run_handle("original"))
+
+        assert isinstance(found, WorkplanRun)
+        assert found.run_id == "renamed"
+
+    def test_a_record_of_the_run_id_with_another_uuid_does_not_hide_it(self) -> None:
+        root = local_run("shared")
+        wanted = local_manifest_id(root)
+        track(root, "shared-copy", uuid=wanted, attached=True)
+        other = StateDirectoryManager.workplan_runs_dir() / "decoy"
+        make_run(other, "decoy")
+        track(other, "shared", uuid=str(uuid4()))
+
+        found = resolve_run(parse_run_handle(str(root)))
+
+        assert isinstance(found, WorkplanRun)
+        assert found.run_id == "shared-copy"
+
+    def test_a_directory_named_by_the_user_must_be_the_attached_one(
+        self, tmp_path: Path
+    ) -> None:
+        root = tmp_path / "attached"
+        wanted = str(uuid4())
+        make_run(root, "attached", uuid=wanted)
+        track(root, "attached", uuid=wanted, attached=True)
+        copy = tmp_path / "copy"
+        make_run(copy, "attached", uuid=wanted)
+
+        found = resolve_run(parse_run_handle(str(copy)))
+
+        assert isinstance(found, ManifestRecord)
+        assert found.output_path == copy
 
 
 class TestResolvePath:
