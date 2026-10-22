@@ -39,8 +39,11 @@ from cstar.cli.workplan.ls import app as app_ls
 from cstar.orchestration.index import RunIndex
 from cstar.orchestration.models import LEGACY_TRANSFORMED_NAME_SUFFIX
 from cstar.orchestration.tracking import (
+    KEY_ACCESS,
+    KEY_ATTACHED,
     KEY_RUN_NAME,
     KEY_RUN_UUID,
+    Access,
     TrackingRepository,
     WorkplanRun,
 )
@@ -1020,6 +1023,38 @@ def test_shared_without_a_project_home_is_a_bad_argument(
     assert "CSTAR_PROJECT_HOME" in text
     assert "cstar/runs" in text
     assert listing.buffer.getvalue() == ""
+
+
+def attach(built: BuiltRun, access: Access | None = None) -> WorkplanRun:
+    """Put a built run under tracking, as `cstar run attach` records it."""
+    run = track(built)
+    run.metadata[KEY_ATTACHED] = "1"
+    if access is not None:
+        run.metadata[KEY_ACCESS] = access.value
+    TrackingRepository().put_workplan_run_sync(run)
+    return run
+
+
+def test_attached_runs_say_so_in_where(
+    build_run: t.Callable[..., BuiltRun],
+    local_run: t.Callable[..., BuiltRun],
+    listing: Listing,
+    tmp_path: Path,
+) -> None:
+    """Verify a run attached from elsewhere is listed with the runs started here,
+    wherever its directory is, and says whether nothing may write into it.
+    """
+    track(local_run("mine"))
+    attach(build_run(tmp_path / "colleague" / "theirs", "theirs"))
+    attach(build_run(tmp_path / "colleague" / "owned", "owned"), Access.owned)
+    attach(build_run(tmp_path / "colleague" / "frozen", "frozen"), Access.read_only)
+
+    assert listing.where("--all") == {
+        "mine": "local",
+        "theirs": "attached",
+        "owned": "attached",
+        "frozen": "attached, read-only",
+    }
 
 
 def test_all_without_a_project_home_lists_the_local_runs(

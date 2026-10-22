@@ -5,11 +5,13 @@ import typing as t
 from collections.abc import AsyncGenerator, Callable, Mapping, Sequence
 from contextlib import AbstractAsyncContextManager, asynccontextmanager
 from datetime import datetime
+from enum import StrEnum
 from pathlib import Path
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, PrivateAttr
 
 from cstar.base.env import max_concurrency
+from cstar.base.exceptions import CstarError
 from cstar.base.log import LoggingMixin, get_logger
 from cstar.base.utils import slugify, utc_now
 from cstar.execution.file_system import (
@@ -19,7 +21,12 @@ from cstar.execution.file_system import (
     step_disk_usage,
     symlink_relative,
 )
-from cstar.orchestration.manifest import DOCUMENT_READ_ERRORS, read_run_manifest
+from cstar.orchestration.manifest import (
+    DOCUMENT_READ_ERRORS,
+    RunManifest,
+    read_run_manifest,
+    recorded_step_status,
+)
 from cstar.orchestration.orchestration import (
     LiveWorkplan,
     ProcessHandle,
@@ -41,6 +48,29 @@ KEY_RUN_NAME: t.Final[str] = "name"
 
 KEY_RUN_UUID: t.Final[str] = "uuid"
 """Key used to cache the run manifest's uuid in the run metadata; the manifest owns it."""
+
+KEY_ATTACHED: t.Final[str] = "attached"
+"""Key whose value `"1"` marks a record created by `cstar run attach` (or a move):
+the run was not scheduled on this machine, has no sentinels here and is never
+relaunched."""
+
+KEY_ACCESS: t.Final[str] = "access"
+"""Key holding an `Access` value."""
+
+
+class Access(StrEnum):
+    """Whether verbs may write into a tracked run's directory.
+
+    A record without the key is `owned`: every run this machine scheduled, and
+    records written before the key existed.
+    """
+
+    owned = "owned"
+    """The run is the user's: verbs that write into its directory (gather,
+    check --repair, --record-digests, admin clean) may."""
+
+    read_only = "read-only"
+    """The run is read and referenced; nothing writes into its directory."""
 
 
 class WorkplanRun(BaseModel):
@@ -78,6 +108,9 @@ class WorkplanRun(BaseModel):
 
     size_measured_at: datetime | None = Field(default=None)
     """When `step_sizes` was last measured; `None` until measured."""
+
+    _manifest_cache: RunManifest | None = PrivateAttr(default=None)
+    """The manifest of an attached run, kept after its first read."""
 
     @property
     def size_mb(self) -> int:
@@ -159,14 +192,95 @@ class WorkplanRun(BaseModel):
         if cached := self.metadata.get(KEY_RUN_UUID, ""):
             return cached
         try:
-            manifest = read_run_manifest(self.output_path)
-        except DOCUMENT_READ_ERRORS as ex:
+            return self.manifest.id
+        except CstarError as ex:
             log.debug(f"Unable to read the manifest of run {self.run_id!r}: {ex}")
             return ""
-        return manifest.id if manifest else ""
+
+    @property
+    def attached(self) -> bool:
+        """Whether the run was attached from elsewhere rather than scheduled here.
+
+        An attached run has no sentinels on this machine and is never relaunched.
+
+        Returns
+        -------
+        bool
+        """
+        return self.metadata.get(KEY_ATTACHED) == "1"
+
+    @property
+    def access(self) -> Access:
+        """Whether verbs may write into the run's directory.
+
+        Returns
+        -------
+        Access
+            `Access.owned` for a record that does not say.
+
+        Raises
+        ------
+        CstarError
+            If the record holds a value that is no `Access`.
+        """
+        value = self.metadata.get(KEY_ACCESS, Access.owned)
+        try:
+            return Access(value)
+        except ValueError as ex:
+            msg = f"Run {self.run_id!r} records an unknown access {value!r}."
+            raise CstarError(msg) from ex
+
+    @property
+    def live(self) -> bool:
+        """Whether the run's sentinels and launcher are on this machine.
+
+        Returns
+        -------
+        bool
+            `False` for an attached run, whose status is what its records say.
+        """
+        return not self.attached
+
+    @property
+    def manifest(self) -> RunManifest:
+        """The run's manifest, read from the run directory.
+
+        Read on every access for a run scheduled here, whose manifest changes
+        as the run goes on. An attached run's manifest is never refreshed by
+        this machine, so it is parsed once and kept.
+
+        Returns
+        -------
+        RunManifest
+
+        Raises
+        ------
+        CstarError
+            If the run directory holds no manifest, or one that cannot be read.
+        """
+        if self._manifest_cache is not None:
+            return self._manifest_cache
+        try:
+            manifest = read_run_manifest(self.output_path)
+        except DOCUMENT_READ_ERRORS as ex:
+            msg = (
+                f"Unable to read the manifest of run {self.run_id!r} at "
+                f"{self.output_path}: {ex}"
+            )
+            raise CstarError(msg) from ex
+        if manifest is None:
+            msg = f"Run {self.run_id!r} has no run manifest at {self.output_path}"
+            raise CstarError(msg)
+        if self.attached:
+            self._manifest_cache = manifest
+        return manifest
 
     def step_status(self, name: str) -> str:
-        """The status the run's sentinel holds for a step.
+        """The status of a step: its sentinel's, or for an attached run its record's.
+
+        A run scheduled on this machine holds a sentinel per step. An attached
+        run has none, so its step records are read, as for a run known only by
+        its manifest.
 
         Parameters
         ----------
@@ -177,8 +291,15 @@ class WorkplanRun(BaseModel):
         -------
         str
             The orchestration status name, or an empty string when the step
-            has no readable sentinel.
+            has no readable sentinel (no readable status, for an attached run).
         """
+        if self.attached:
+            try:
+                return recorded_step_status(self.output_path, self.manifest, name)
+            except CstarError as ex:
+                log.debug(f"No recorded status for step {name!r}: {ex}")
+                return ""
+
         try:
             path = StateRepository.sentinel_path(name, run_id=self.run_id)
         except ValueError as ex:
@@ -229,6 +350,33 @@ class WorkplanRun(BaseModel):
         Path
         """
         return StateDirectoryManager.run_state_dir(run_id=self.run_id)
+
+
+def require_writable(run: WorkplanRun, *, action: str) -> None:
+    """Refuse a write into the directory of a run recorded as read-only.
+
+    The one chokepoint every verb that writes into a tracked run's directory
+    calls before it writes anything.
+
+    Parameters
+    ----------
+    run : WorkplanRun
+        The tracked run.
+    action : str
+        What the verb would do, for the message: a verb or flag name.
+
+    Raises
+    ------
+    CstarError
+        If the run is recorded as read-only.
+    """
+    if run.access is Access.read_only:
+        msg = (
+            f"Run {run.run_id!r} is attached read-only: {action} writes into "
+            f"{run.output_path}. `cstar run attach {run.output_path} --own` takes "
+            "ownership of it."
+        )
+        raise CstarError(msg)
 
 
 def _try_read_run(path: Path) -> WorkplanRun | None:
@@ -763,6 +911,24 @@ class TrackingRepository(LoggingMixin):
         """
         run_paths = list(self.latest_dir.glob(f"{run_id_filter}*.{self._MODE}"))
         return await self._deserialize_readable_runs(run_paths)
+
+    def list_latest_runs_sync(self) -> Sequence[WorkplanRun]:
+        """Retrieve the latest `WorkplanRun` of every run-id, for a synchronous caller.
+
+        The same records as `list_latest_runs`, read one after another: for a
+        caller that may run inside an event loop and cannot start another.
+
+        Returns
+        -------
+        Sequence[WorkplanRun]
+            The latest run record per run-id; a record that cannot be read is
+            skipped.
+        """
+        paths = self.latest_dir.glob(f"*.{self._MODE}")
+        runs = [(path, _try_read_run(path)) for path in paths]
+        if unreadable := [str(path) for path, run in runs if run is None]:
+            self.log.debug(f"Skipped unreadable run record(s): {', '.join(unreadable)}")
+        return [run for _, run in runs if run is not None]
 
     async def list_history_runs(self, run_id_filter: str) -> Sequence[WorkplanRun]:
         """Retrieve a list of all WorkplanRun instances executed with a given run-id.

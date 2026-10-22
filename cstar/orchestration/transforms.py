@@ -37,7 +37,6 @@ from cstar.orchestration.compute_environment import (
 )
 from cstar.orchestration.index import (
     HandleKind,
-    ManifestRecord,
     RunHandle,
     parse_run_handle,
     resolve_run,
@@ -634,7 +633,8 @@ class ExternalRuns:
 
     A run is named by its run-id, `run://<uuid>` or its directory. One tracked
     on this machine is asked its status through a launcher; one known only by its
-    manifest can be depended on for the steps its manifest records as done.
+    manifest, or attached from elsewhere, can be depended on for the steps its
+    manifest records as done.
     """
 
     def __init__(self, runs: Mapping[str, RunRef]) -> None:
@@ -794,10 +794,10 @@ class ExternalRuns:
         self,
         ref: StepRef,
         step: LiveStep,
-        record: ManifestRecord,
+        record: "RunRecord",
         launcher: "Launcher[t.Any]",
     ) -> _Probe:
-        """Observe a step of a run known only by its manifest.
+        """Observe a step of a run known only by its manifest, or attached from elsewhere.
 
         Such a run has no sentinel on this machine and no job a launcher could
         ask about: the step is usable when its manifest says it is done. The
@@ -848,8 +848,8 @@ class ExternalRuns:
 
         A step of a run tracked on this machine is asked of the launcher through
         the sentinel its run persisted. A step of a run known only by its
-        manifest has neither: it is `Done` when the manifest records it done and
-        a problem otherwise.
+        manifest, or attached from elsewhere, has neither: it is `Done` when the
+        manifest records it done and a problem otherwise.
 
         A step that cannot be resolved (missing or unreadable record, workplan
         or sentinel, or a failed status query) is recorded as a problem rather
@@ -868,9 +868,7 @@ class ExternalRuns:
             try:
                 step = self.step(ref)
                 record = self.record(ref.run)
-                if isinstance(record, ManifestRecord):
-                    probe = self._manifest_probe(ref, step, record, launcher)
-                else:
+                if record.live:
                     handle = self.handle(ref, launcher.handle_klass())
                     status = await launcher.query_status(handle)
                     probe = _Probe(
@@ -880,6 +878,8 @@ class ExternalRuns:
                         launcher.name,
                         launcher.supports_foreign_dependencies,
                     )
+                else:
+                    probe = self._manifest_probe(ref, step, record, launcher)
             except (CstarError, ValueError, OSError, yaml.YAMLError) as ex:
                 # a corrupt sentinel or workplan, or a failed query, is a
                 # problem with this reference rather than a crash

@@ -13,6 +13,7 @@ from rich.console import Console
 from rich.prompt import Prompt
 
 from cstar.base.env import ENV_CSTAR_CLI_DRY_RUN, ENV_CSTAR_RUNID
+from cstar.base.exceptions import CstarError
 from cstar.base.feature import is_flag_enabled
 from cstar.base.log import get_logger
 from cstar.cli.common import (
@@ -24,7 +25,11 @@ from cstar.cli.common import (
 from cstar.cli.workplan.shared import colored, list_runs
 from cstar.entrypoint.utils import ARG_DRY_RUN
 from cstar.execution.file_system import DirectoryManager, StateDirectoryManager
-from cstar.orchestration.tracking import TrackingRepository
+from cstar.orchestration.tracking import (
+    TrackingRepository,
+    WorkplanRun,
+    require_writable,
+)
 
 log = get_logger(__name__)
 app = typer.Typer()
@@ -414,6 +419,33 @@ def runid_callback(_context: typer.Context, run_id: str) -> str:
     return run_id.strip()
 
 
+def _keep_data_reason(run: WorkplanRun) -> str:
+    """Say why a tracked run's data must not be removed, when it must not.
+
+    Parameters
+    ----------
+    run : WorkplanRun
+        The tracked run.
+
+    Returns
+    -------
+    str
+        The reason, or an empty string when `clean` may remove the run's data.
+    """
+    try:
+        require_writable(run, action="admin clean")
+    except CstarError as ex:
+        return str(ex)
+
+    project = DirectoryManager.project_runs_home()
+    if project is not None and run.output_path.resolve().parent == project.resolve():
+        return (
+            f"The run directory {run.output_path} is in the project runs area, "
+            "which `admin clean` leaves alone; remove it by hand."
+        )
+    return ""
+
+
 def get_run_actions(run_id: str) -> list[CleanupAction]:
     """Create a list of cleanup actions to be performed for a run.
 
@@ -433,7 +465,10 @@ def get_run_actions(run_id: str) -> list[CleanupAction]:
     run_repo = TrackingRepository()
 
     if run := asyncio.run(run_repo.get_workplan_run(run_id)):
-        rundata_paths.append(run.output_path)
+        if reason := _keep_data_reason(run):
+            console.print(reason, markup=False, soft_wrap=True)
+        else:
+            rundata_paths.append(run.output_path)
     else:
         # if we can't load a run, check the default data path.
         data_dir = StateDirectoryManager.data_dir(run_id=run_id)

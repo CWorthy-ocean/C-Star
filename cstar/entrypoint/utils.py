@@ -59,6 +59,20 @@ ARG_PRE_RUN_WORKPLAN_HELP: t.Final[str] = (
 )
 
 ARG_DRY_RUN: t.Final[str] = "--dry-run"
+ARG_DRY_RUN_HELP: t.Final[str] = "Show what would be done without doing it."
+
+ARG_OWN: t.Final[str] = "--own"
+ARG_OWN_HELP: t.Final[str] = (
+    "Record the attached run as owned: verbs that write into its directory may."
+)
+ARG_READ_ONLY: t.Final[str] = "--read-only"
+ARG_READ_ONLY_HELP: t.Final[str] = (
+    "Record the attached run as read-only: nothing writes into its directory."
+)
+ARG_AS: t.Final[str] = "--as"
+ARG_AS_HELP: t.Final[str] = (
+    "Attach the run under this run-id instead of the one its manifest names."
+)
 
 ARG_DIRECTIVES_URI_LONG: t.Final[str] = "--directives"
 ARG_DIRECTIVES_URI_SHORT: t.Final[str] = "-d"
@@ -126,8 +140,16 @@ ARG_ALL_RUNS_HELP: t.Final[str] = (
 
 ARG_VERIFY: t.Final[str] = "--verify"
 ARG_VERIFY_HELP: t.Final[str] = (
-    "Also compare each product's recorded sha256 with the file, reading every "
-    "such product in full; products recorded without one are skipped."
+    "Also compare each product's recorded digest with the file (a bounded read "
+    "for netCDF files, the whole file otherwise); products recorded without one "
+    "are skipped."
+)
+
+ARG_RECORD_DIGESTS: t.Final[str] = "--record-digests"
+ARG_RECORD_DIGESTS_HELP: t.Final[str] = (
+    "Compute and record a digest for every product that has none (nc-sample-v2 "
+    "for netCDF files, sha256 otherwise), writing the step records and the "
+    "manifest; a run tracked here must be owned."
 )
 
 ARG_SCHEMA_ONLY: t.Final[str] = "--schema-only"

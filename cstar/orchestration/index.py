@@ -32,12 +32,14 @@ from cstar.orchestration.manifest import (
     DOCUMENT_READ_ERRORS,
     RunManifest,
     read_run_manifest,
-    read_step_record,
-    status_of_record,
+    recorded_step_status,
 )
-from cstar.orchestration.orchestration import Status
 from cstar.orchestration.run_check import TRANSFORMED_WORKPLAN_GLOB
-from cstar.orchestration.tracking import TrackingRepository, WorkplanRun
+from cstar.orchestration.tracking import (
+    KEY_RUN_UUID,
+    TrackingRepository,
+    WorkplanRun,
+)
 from cstar.system.migration import CstarMigrationError
 
 if t.TYPE_CHECKING:
@@ -148,7 +150,8 @@ class Origin(StrEnum):
     """Where a run's directory is kept."""
 
     local = "local"
-    """The user's data home."""
+    """Anywhere but the project's runs area: the user's data home, or any directory a
+    run was attached from."""
 
     project = "project"
     """The project's runs area."""
@@ -224,6 +227,12 @@ WHERE_TRACKED: t.Final[str] = "local"
 
 WHERE_UNTRACKED: t.Final[str] = "local, untracked"
 """Where a run in the data home that was not started on this machine is kept."""
+
+WHERE_ATTACHED: t.Final[str] = "attached"
+"""Where a run attached from elsewhere is kept, as its tracking record says."""
+
+WHERE_ATTACHED_READ_ONLY: t.Final[str] = "attached, read-only"
+"""Where a run attached from elsewhere, and recorded as read-only, is kept."""
 
 WHERE_PROJECT: t.Final[str] = "project"
 """Where a run in the project's runs area is kept."""
@@ -553,6 +562,26 @@ class RunRecord(t.Protocol):
         """
         ...
 
+    @property
+    def manifest(self) -> RunManifest:
+        """The run's manifest.
+
+        Raises
+        ------
+        CstarError
+            If the manifest cannot be read.
+        """
+        ...
+
+    @property
+    def live(self) -> bool:
+        """Whether the run's sentinels and launcher are on this machine.
+
+        A live run's status is read from them rather than from what its records
+        say.
+        """
+        ...
+
     def step_status(self, name: str) -> str:
         """The orchestration status name of a step; empty when unknown."""
         ...
@@ -587,6 +616,11 @@ class ManifestRecord:
     def start_at(self) -> datetime:
         """When the latest attempt was scheduled, else when the manifest was written."""
         return self.location.start_at
+
+    @property
+    def live(self) -> bool:
+        """Whether the run's sentinels are on this machine: never, for a manifest."""
+        return False
 
     @functools.cached_property
     def manifest(self) -> RunManifest:
@@ -685,23 +719,59 @@ class ManifestRecord:
     def _read_status(self, name: str) -> str:
         """Read the status of a step from its record, else from the snapshot."""
         try:
-            entry = self.manifest.step(name)
+            manifest = self.manifest
         except CstarError as ex:
             log.warning(str(ex))
             return ""
-        if entry is None:
-            return ""
+        return recorded_step_status(self.output_path, manifest, name)
 
-        try:
-            record = read_step_record(self.output_path / entry.working_dir)
-        except DOCUMENT_READ_ERRORS as ex:
-            log.warning(
-                f"Ignoring the record of step {name!r} of run {self.run_id!r}: {ex}"
-            )
-            record = None
-        if record is not None:
-            return status_of_record(record)
-        return "" if entry.status == Status.Done.name else entry.status
+
+def tracked_by_uuid(uuid: str) -> WorkplanRun | None:
+    """The tracking record of the run with a uuid, wherever its directory is.
+
+    Only the uuid cached in each record's metadata is compared, so no manifest
+    is read; a record that does not cache its uuid is not found this way. Tracking
+    holds one small YAML per record, and all of them are read.
+
+    Parameters
+    ----------
+    uuid : str
+        The canonical lowercase uuid.
+
+    Returns
+    -------
+    WorkplanRun | None
+        The record whose run directory exists, or `None` when tracking holds
+        none, or the records cannot be read.
+
+    Raises
+    ------
+    CstarError
+        If more than one record with a run directory has the uuid.
+    """
+    try:
+        records = TrackingRepository().list_latest_runs_sync()
+    except (ValueError, OSError) as ex:
+        log.debug(f"Unable to read the tracking records for {run_uri(uuid)}: {ex}")
+        return None
+
+    found = [
+        run
+        for run in records
+        if run.metadata.get(KEY_RUN_UUID) == uuid and _is_dir(run.output_path)
+    ]
+    log.debug(
+        f"Read {len(records)} tracking record(s) looking for {run_uri(uuid)}: "
+        f"{len(found)} found"
+    )
+    if len(found) > 1:
+        listed = ", ".join(f"{run.run_id!r} at {run.output_path}" for run in found)
+        msg = (
+            f"More than one tracked run has the uuid {uuid}: {listed}. "
+            "Pass the run-id to say which."
+        )
+        raise CstarError(msg)
+    return found[0] if found else None
 
 
 def _tracked_for(location: RunLocation, *, same_root: bool) -> WorkplanRun | None:
@@ -719,19 +789,26 @@ def _tracked_for(location: RunLocation, *, same_root: bool) -> WorkplanRun | Non
     -------
     WorkplanRun | None
         The record, when tracking holds one for the run-id under the run's uuid
-        and its run directory exists; otherwise `None`.
+        and its run directory exists; failing that, the record that has the
+        run's uuid under another run-id, as a run attached `--as` has;
+        otherwise `None`. Records that cannot be told apart (several share the
+        run's uuid) count as none: the location is the run the user found.
     """
     if location.kind != "workplan":
         return None
     try:
         tracked = TrackingRepository().get_workplan_run_sync(location.run_id)
-        if tracked is None or not tracked.output_path.is_dir():
-            return None
-        if tracked.uuid != location.uuid:
+        if (
+            tracked is None
+            or not tracked.output_path.is_dir()
+            or tracked.uuid != location.uuid
+        ):
+            tracked = tracked_by_uuid(location.uuid)
+        if tracked is None:
             return None
         if same_root and tracked.output_path.resolve() != location.root.resolve():
             return None
-    except (ValueError, OSError) as ex:
+    except (ValueError, OSError, CstarError) as ex:
         log.debug(f"Unable to use the tracking record of {location.run_id!r}: {ex}")
         return None
     return tracked
@@ -759,7 +836,7 @@ def _prefer_tracked(
     return ManifestRecord(locations[0])
 
 
-def _read_directory(root: Path) -> RunLocation:
+def read_run_location(root: Path) -> RunLocation:
     """Read the run in a directory the user named.
 
     Raises
@@ -797,7 +874,7 @@ def _read_directory(root: Path) -> RunLocation:
 def _resolve_path(path: str, uuid: str) -> RunRecord:
     """Resolve a directory the user named."""
     root = Path(os.path.abspath(Path(path).expanduser()))
-    location = _read_directory(root)
+    location = read_run_location(root)
     if uuid and location.uuid != uuid:
         msg = (
             f"The run at {root} is {run_uri(location.uuid)}, not {run_uri(uuid)}: "
@@ -808,7 +885,13 @@ def _resolve_path(path: str, uuid: str) -> RunRecord:
 
 
 def _resolve_uuid(wanted: str, index: RunIndex) -> RunRecord:
-    """Resolve the run a manifest names by its uuid."""
+    """Resolve the run a manifest names by its uuid.
+
+    A run tracked under the uuid, wherever its directory is, answers without a
+    scan; otherwise the manifests the index scans decide.
+    """
+    if (tracked := tracked_by_uuid(wanted)) is not None:
+        return tracked
     found = index.by_id(wanted)
     if not found:
         roots = ", ".join(str(root.path) for root in index.roots)

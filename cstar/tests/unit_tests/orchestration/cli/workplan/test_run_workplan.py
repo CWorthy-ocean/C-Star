@@ -62,7 +62,7 @@ from cstar.orchestration.models import (
 from cstar.orchestration.orchestration import LiveStep, LiveWorkplan, Planner, Status
 from cstar.orchestration.serialization import deserialize, serialize
 from cstar.orchestration.state import StateRepository
-from cstar.orchestration.tracking import TrackingRepository, WorkplanRun
+from cstar.orchestration.tracking import KEY_ATTACHED, TrackingRepository, WorkplanRun
 from cstar.orchestration.utils import ENV_CSTAR_SLURM_ACCOUNT, ENV_CSTAR_SLURM_QUEUE
 from cstar.system.environment import EnvSettingsBase, SlurmSettingsBase
 
@@ -3735,3 +3735,70 @@ def test_run_summary_points_at_the_run_commands() -> None:
     assert "cstar run status my-run" in display
     assert "cstar run log my-run <step-name>" in display
     assert "cstar workplan" not in display
+
+
+def _attached_record(
+    tmp_path: Path, wp_templates_dir: Path, run_id: str
+) -> WorkplanRun:
+    """Track a run that was attached from `tmp_path / "colleague"`."""
+    root = tmp_path / "colleague" / run_id
+    root.mkdir(parents=True)
+    record = WorkplanRun(
+        workplan_path=wp_templates_dir / "workplan.yaml",
+        trx_workplan_path=root / f"{run_id}_transformed.yaml",
+        output_path=root,
+        run_id=run_id,
+        metadata={KEY_ATTACHED: "1"},
+    )
+    TrackingRepository().put_workplan_run_sync(record)
+    return record
+
+
+@pytest.mark.parametrize("flags", [[], [ARG_RESUME]])
+def test_workplan_run_refuses_to_reload_an_attached_run(
+    tmp_path: Path,
+    wp_templates_dir: Path,
+    mock_run_id: str,
+    squash_cli_output: Callable[[str], str],
+    flags: list[str],
+) -> None:
+    """Verify `--run-id` without a path, and `--resume`, name a run attached from
+    elsewhere with a usage error, before anything is scheduled.
+
+    Parameters
+    ----------
+    flags : list[str]
+        Extra flags: none for the plain reload, `--resume` for a resume.
+    """
+    record = _attached_record(tmp_path, wp_templates_dir, mock_run_id)
+
+    with (
+        mock.patch("cstar.cli.workplan.run.build_and_run_dag") as build,
+        mock.patch("cstar.cli.workplan.run.run_dag") as run_dag,
+    ):
+        result = CliRunner().invoke(app, [ARG_RUN_ID, mock_run_id, *flags], color=False)
+
+    assert result.exit_code == 2, result.output
+    text = squash_cli_output(result.stderr)
+    attached = f"Run '{mock_run_id}' was attached from {record.output_path}"
+    assert squash_cli_output(attached) in text
+    assert squash_cli_output("--run-id <new>") in text
+    assert squash_cli_output("Extending a finished run") in text
+    build.assert_not_called()
+    run_dag.assert_not_called()
+
+
+def test_handle_run_reloading_refuses_an_attached_run(
+    tmp_path: Path, wp_templates_dir: Path, mock_run_id: str
+) -> None:
+    """Verify the reload helper refuses an attached record before it re-exports
+    the environment the record holds.
+    """
+    record = _attached_record(tmp_path, wp_templates_dir, mock_run_id)
+    record = record.model_copy(update={"environment": {"CSTAR_ATTACHED_TEST": "x"}})
+    TrackingRepository().put_workplan_run_sync(record)
+
+    with pytest.raises(typer.BadParameter, match="was attached from"):
+        asyncio.run(handle_run_reloading(mock_run_id))
+
+    assert "CSTAR_ATTACHED_TEST" not in os.environ

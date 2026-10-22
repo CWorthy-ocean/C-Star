@@ -13,15 +13,24 @@ import pytest
 import yaml
 
 from cstar.base.env import ENV_CSTAR_STATE_HOME
+from cstar.base.exceptions import CstarError
 from cstar.base.utils import slugify
 from cstar.execution.file_system import StateDirectoryManager
 from cstar.orchestration.manifest import (
     Attempt,
     RunManifest,
     StepEntry,
+    StepRecord,
+    read_run_manifest,
     write_run_manifest,
+    write_step_record,
 )
-from cstar.orchestration.models import LEGACY_TRANSFORMED_NAME_SUFFIX, Step, Workplan
+from cstar.orchestration.models import (
+    LEGACY_TRANSFORMED_NAME_SUFFIX,
+    BlueprintIdentity,
+    Step,
+    Workplan,
+)
 from cstar.orchestration.orchestration import (
     LiveStep,
     LiveWorkplan,
@@ -31,11 +40,15 @@ from cstar.orchestration.orchestration import (
 from cstar.orchestration.serialization import deserialize, serialize
 from cstar.orchestration.state import StateRepository
 from cstar.orchestration.tracking import (
+    KEY_ACCESS,
+    KEY_ATTACHED,
     KEY_RUN_UUID,
     UNKNOWN_SIZE,
+    Access,
     TrackingRepository,
     WorkplanRun,
     measure_step_sizes,
+    require_writable,
 )
 
 if t.TYPE_CHECKING:
@@ -979,3 +992,199 @@ def test_workplanrun_is_a_run_record(tmp_path: Path) -> None:
     record: RunRecord = _make_workplan_run(tmp_path, "is-a-record")
 
     assert record.run_id == "is-a-record"
+
+
+def _step_record(outcome: str = "completed") -> StepRecord:
+    """A record of the step `_write_manifest` names, with the given outcome."""
+    return StepRecord(
+        step="one",
+        application="hello_world",
+        blueprint=BlueprintIdentity(
+            kind="Blueprint", application="hello_world", name="bp", content_hash="abc"
+        ),
+        outcome=outcome,
+        finished_at=datetime(2026, 10, 15, 12, 0, tzinfo=UTC),
+    )
+
+
+def test_workplanrun_is_not_attached_by_default(tmp_path: Path) -> None:
+    """Verify a record that says nothing is one this machine scheduled, and owned."""
+    run = _make_workplan_run(tmp_path, "scheduled-here")
+
+    assert not run.attached
+    assert run.access is Access.owned
+
+
+@pytest.mark.parametrize(
+    ("value", "attached"), [("1", True), ("0", False), ("", False), ("true", False)]
+)
+def test_workplanrun_attached_is_the_flag_set(
+    tmp_path: Path, value: str, attached: bool
+) -> None:
+    """Verify only the value `"1"` marks a record as attached."""
+    run = _make_workplan_run(tmp_path, "flagged", metadata={KEY_ATTACHED: value})
+
+    assert run.attached is attached
+
+
+@pytest.mark.parametrize("access", list(Access))
+def test_workplanrun_access_is_the_value_recorded(
+    tmp_path: Path, access: Access
+) -> None:
+    """Verify the access a record holds is the one it reads back."""
+    run = _make_workplan_run(tmp_path, "accessed", metadata={KEY_ACCESS: access.value})
+
+    assert run.access is access
+
+
+def test_workplanrun_unknown_access_is_an_error(tmp_path: Path) -> None:
+    """Verify an access that is none of the values fails, naming the run and the value."""
+    run = _make_workplan_run(tmp_path, "odd-access", metadata={KEY_ACCESS: "rw"})
+
+    with pytest.raises(CstarError, match="odd-access.*'rw'"):
+        run.access
+
+
+def test_workplanrun_keeps_attachment_through_the_repository(tmp_path: Path) -> None:
+    """Verify the keys ride the metadata through persistence and `reanchored`."""
+    run = _make_workplan_run(
+        tmp_path,
+        "persisted",
+        output_path=tmp_path,
+        metadata={KEY_ATTACHED: "1", KEY_ACCESS: Access.read_only.value},
+    )
+    repo = TrackingRepository()
+    repo.put_workplan_run_sync(run)
+
+    found = repo.get_workplan_run_sync("persisted")
+
+    assert found is not None
+    assert found.reanchored().attached
+    assert found.reanchored().access is Access.read_only
+
+
+def test_require_writable_lets_an_owned_run_through(tmp_path: Path) -> None:
+    """Verify a run with no access recorded, or an owned one, may be written into."""
+    require_writable(_make_workplan_run(tmp_path, "mine"), action="gather")
+    owned = _make_workplan_run(
+        tmp_path, "mine-too", metadata={KEY_ACCESS: Access.owned.value}
+    )
+
+    require_writable(owned, action="gather")
+
+
+def test_require_writable_refuses_a_read_only_run(tmp_path: Path) -> None:
+    """Verify the refusal names the run, the action, the directory and `--own`."""
+    run = _make_workplan_run(
+        tmp_path, "theirs", metadata={KEY_ACCESS: Access.read_only.value}
+    )
+
+    with pytest.raises(CstarError, match="'theirs' is attached read-only") as raised:
+        require_writable(run, action="--repair")
+
+    message = str(raised.value)
+    assert "--repair writes into" in message
+    assert str(run.output_path) in message
+    assert "--own" in message
+
+
+def test_workplanrun_manifest_is_read_on_every_access(tmp_path: Path) -> None:
+    """Verify the manifest is the one in the run directory now, not a kept one."""
+    manifest = _write_manifest(tmp_path / "output", "manifest-read")
+    run = _make_workplan_run(tmp_path, "manifest-read")
+
+    assert run.manifest.id == manifest.id
+
+    changed = manifest.model_copy(update={"name": "renamed"})
+    write_run_manifest(tmp_path / "output", changed)
+
+    assert run.manifest.name == "renamed"
+
+
+def test_attached_workplanrun_manifest_is_read_once(tmp_path: Path) -> None:
+    """Verify an attached run's manifest, which this machine never refreshes, is
+    parsed once however many steps ask for their status.
+    """
+    root = tmp_path / "output"
+    _write_manifest(root, "attached-once")
+    write_step_record(root / "tasks" / "one", _step_record())
+    run = _make_workplan_run(tmp_path, "attached-once", metadata={KEY_ATTACHED: "1"})
+
+    with mock.patch(
+        "cstar.orchestration.tracking.read_run_manifest", wraps=read_run_manifest
+    ) as read:
+        assert run.step_status("one") == "Done"
+        assert run.step_status("one") == "Done"
+
+    read.assert_called_once()
+
+
+def test_scheduled_workplanrun_manifest_is_read_again(tmp_path: Path) -> None:
+    """Verify a run scheduled here, whose manifest changes, is never kept."""
+    _write_manifest(tmp_path / "output", "scheduled-again")
+    run = _make_workplan_run(tmp_path, "scheduled-again")
+
+    with mock.patch(
+        "cstar.orchestration.tracking.read_run_manifest", wraps=read_run_manifest
+    ) as read:
+        run.manifest
+        run.manifest
+
+    assert read.call_count == 2
+
+
+@pytest.mark.parametrize(("value", "live"), [("", True), ("0", True), ("1", False)])
+def test_workplanrun_is_live_unless_attached(
+    tmp_path: Path, value: str, live: bool
+) -> None:
+    """Verify only an attached run is not live: its sentinels are elsewhere."""
+    run = _make_workplan_run(tmp_path, "liveness", metadata={KEY_ATTACHED: value})
+
+    assert run.live is live
+
+
+def test_workplanrun_manifest_that_is_missing_or_unreadable(tmp_path: Path) -> None:
+    """Verify a run directory with no usable manifest raises a `CstarError`."""
+    run = _make_workplan_run(tmp_path, "no-manifest")
+
+    with pytest.raises(CstarError, match="'no-manifest' has no run manifest at"):
+        run.manifest
+
+    (tmp_path / "output").mkdir()
+    (tmp_path / "output" / "cstar-run.yaml").write_text("run_id: [unclosed\n")
+    with pytest.raises(CstarError, match="Unable to read the manifest"):
+        run.manifest
+
+
+def test_attached_workplanrun_step_status_reads_the_step_record(
+    tmp_path: Path,
+) -> None:
+    """Verify an attached run, which has no sentinels, reports what its records say."""
+    root = tmp_path / "output"
+    _write_manifest(root, "attached-status")
+    run = _make_workplan_run(tmp_path, "attached-status", metadata={KEY_ATTACHED: "1"})
+    # a sentinel here would be a lie about another machine's run: it is not read
+    path = StateRepository.sentinel_path("one", run_id="attached-status")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    assert serialize(
+        path,
+        ProcessHandle(
+            pid="1", name="one", run_id="attached-status", status=Status.Failed
+        ),
+    )
+
+    assert run.step_status("one") == ""  # the snapshot holds no status, no record
+
+    write_step_record(root / "tasks" / "one", _step_record())
+
+    assert run.step_status("one") == "Done"
+    assert run.step_status("no-such-step") == ""
+
+
+def test_attached_workplanrun_step_status_without_a_manifest_is_empty(
+    tmp_path: Path,
+) -> None:
+    """Verify an attached run whose manifest is gone has no step status, quietly."""
+    run = _make_workplan_run(tmp_path, "attached-bare", metadata={KEY_ATTACHED: "1"})
+
+    assert run.step_status("one") == ""

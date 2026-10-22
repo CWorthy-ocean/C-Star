@@ -23,13 +23,20 @@ from datetime import UTC, datetime
 from pathlib import Path
 from urllib.parse import urlsplit
 
-from pydantic import AfterValidator, Field
+from pydantic import AfterValidator, Field, model_validator
 
 from cstar.applications.core import ArtifactKind, ArtifactSpec, get_application
+from cstar.base.digest import (
+    HASH_SCHEME,
+    KNOWN_SCHEMES,
+    SHA256_SCHEME,
+    hash_netcdf_contents,
+    sha256_digest,
+)
 from cstar.base.exceptions import CstarError, CstarExpectationFailed
 from cstar.base.log import get_logger
 from cstar.base.provenance import canonical_hash, package_versions, system_name
-from cstar.base.utils import _get_sha256_hash, slugify, utc_now
+from cstar.base.utils import slugify, utc_now
 from cstar.execution.file_system import (
     LockTimeoutError,
     StateDirectoryManager,
@@ -142,7 +149,39 @@ def carried_digest(path: Path) -> str:
     str
         `sha256:<hex>` of the file's bytes.
     """
-    return f"sha256:{_get_sha256_hash(path)}"
+    return sha256_digest(path)
+
+
+def product_digest(path: Path, *, scheme: str = "") -> str:
+    """Digest a product's content, in the form `Product.digest` records.
+
+    Parameters
+    ----------
+    path : Path
+        The file to digest.
+    scheme : str
+        The scheme to compute (`sha256` or `nc-sample-v2`), as an existing digest
+        names it. By default a netCDF file (a `.nc` suffix) takes `nc-sample-v2`,
+        a bounded read, and any other file `sha256`, a read of the whole file.
+
+    Returns
+    -------
+    str
+        `<scheme>:<hex>`.
+
+    Raises
+    ------
+    ValueError
+        If `scheme` is not one this build computes.
+    """
+    if not scheme:
+        scheme = HASH_SCHEME if path.suffix.casefold() == ".nc" else SHA256_SCHEME
+    if scheme == HASH_SCHEME:
+        return hash_netcdf_contents(path)
+    if scheme == SHA256_SCHEME:
+        return sha256_digest(path)
+    known = " and ".join(repr(known) for known in KNOWN_SCHEMES)
+    raise ValueError(f"unknown digest scheme {scheme!r}; this build computes {known}")
 
 
 def create_attempt_dir(root: Path, start_at: datetime) -> Path:
@@ -206,10 +245,24 @@ class Product(ConfiguredBaseModel):
     """The size of the product in bytes; zero when not measured."""
 
     sha256: str = Field(default="")
-    """The content digest of the product; empty when not computed."""
+    """A bare sha256 of the product's bytes, written by no current release: kept so
+    records that predate `digest` load, and folded into `digest` on load."""
+
+    digest: str = Field(default="")
+    """The content digest of the product, `<scheme>:<hex>`: `nc-sample-v2` for a
+    netCDF file (structure plus a bounded sample of its data, independent of the
+    on-disk encoding), `sha256` of the bytes otherwise. Empty when not computed;
+    `cstar run check --record-digests` records it."""
 
     metadata: dict[str, str | int | float | list[str]] = Field(default_factory=dict)
     """Model-specific detail, such as an output stream."""
+
+    @model_validator(mode="after")
+    def _fold_sha256(self) -> "Product":
+        """Read a bare `sha256` of an older record as the `digest` it stands for."""
+        if self.sha256 and not self.digest:
+            self.digest = f"{SHA256_SCHEME}:{self.sha256}"
+        return self
 
     @property
     def known_kind(self) -> ArtifactKind:
@@ -267,7 +320,7 @@ class ExecutionFacts(ConfiguredBaseModel):
 class StepRecord(ConfiguredBaseModel):
     """What a step did: written by the step process, in its working directory."""
 
-    schema_version: str = Field(default="1.2.0")
+    schema_version: str = Field(default="1.3.0")
     """The schema version for the document."""
 
     run_id: str = Field(default="")
@@ -495,7 +548,7 @@ class StepEntry(ConfiguredBaseModel):
 class RunManifest(ConfiguredBaseModel):
     """The description of a run: written to its run root."""
 
-    schema_version: str = Field(default="1.3.0")
+    schema_version: str = Field(default="1.4.0")
     """The schema version for the document."""
 
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
@@ -1537,6 +1590,48 @@ def status_of_record(record: StepRecord) -> str:
     return _STATUS_OF_OUTCOME.get(record.outcome, "")
 
 
+def recorded_step_status(root: Path, manifest: RunManifest, name: str) -> str:
+    """The status a run's own records say a step has, for a run read as found.
+
+    A run with no sentinels here (not scheduled on this machine) is `Done` only
+    when the step's own record says it completed: a manifest's snapshot that
+    says `Done` is no evidence, as a copy of the run without its
+    `cstar-step.yaml` files, or one cut short in transfer, carries the same
+    snapshot. Any other status the snapshot holds is reported as it stands.
+    Nothing is written.
+
+    Parameters
+    ----------
+    root : Path
+        The run root.
+    manifest : RunManifest
+        The run's manifest.
+    name : str
+        The name of the step.
+
+    Returns
+    -------
+    str
+        The status name, or an empty string when the manifest has no such
+        step, or the step has no status or only the unconfirmed snapshot
+        `Done`.
+    """
+    entry = manifest.step(name)
+    if entry is None:
+        return ""
+
+    try:
+        record = read_step_record(root / entry.working_dir)
+    except DOCUMENT_READ_ERRORS as ex:
+        log.warning(
+            f"Ignoring the record of step {name!r} of run {manifest.run_id!r}: {ex}"
+        )
+        record = None
+    if record is not None:
+        return status_of_record(record)
+    return "" if entry.status == Status.Done.name else entry.status
+
+
 def fold_step_records(
     manifest: RunManifest,
     root: Path,
@@ -1609,6 +1704,95 @@ def fold_step_records(
 
     manifest.observed_at = _now()
     return before != manifest.model_dump(mode="json", exclude={"observed_at"})
+
+
+def compute_product_digests(
+    root: Path, manifest: RunManifest
+) -> dict[tuple[str, str], str]:
+    """Compute the digest of each product that has none.
+
+    Each digest is `product_digest` of the file, a bounded read for a netCDF file
+    and a read of the whole file otherwise. A product whose path is not a regular
+    file is skipped, and one that cannot be digested is skipped with a warning:
+    recording is bookkeeping and never stops a run.
+
+    Nothing is locked or written, and the reads may take long; hand the result to
+    `record_product_digests`.
+
+    Parameters
+    ----------
+    root : Path
+        The run root.
+    manifest : RunManifest
+        The manifest, with the step records folded in; not changed.
+
+    Returns
+    -------
+    dict[tuple[str, str], str]
+        The digest of each product, by its step name and its path.
+    """
+    digests: dict[tuple[str, str], str] = {}
+    for entry in manifest.steps:
+        if entry.record is None:
+            continue
+        step_root = root / entry.working_dir
+        for product in entry.record.products:
+            file = step_root / product.path
+            if product.digest or not file.is_file():
+                continue
+            try:
+                digests[entry.name, product.path] = product_digest(file)
+            except Exception as ex:  # bookkeeping: an unreadable file is skipped
+                log.warning(f"No digest recorded for {file}: {ex}")
+    return digests
+
+
+def record_product_digests(root: Path, digests: "Mapping[tuple[str, str], str]") -> int:
+    """Record computed product digests in the step records and the manifest.
+
+    The manifest is read again from the run, so what another writer recorded
+    since the digests were computed is kept: a product that has a digest by now
+    keeps it. The step records and the manifest are written
+    only when a digest was recorded.
+
+    The caller holds `manifest_lock` around this call only; computing the digests
+    is not done under it.
+
+    Parameters
+    ----------
+    root : Path
+        The run root.
+    digests : Mapping[tuple[str, str], str]
+        The digests from `compute_product_digests`, by step name and product path.
+
+    Returns
+    -------
+    int
+        The number of digests recorded.
+    """
+    manifest = read_run_manifest(root)
+    if manifest is None:
+        log.debug(f"No digest recorded: {root} holds no run manifest")
+        return 0
+    fold_step_records(manifest, root)
+
+    recorded = 0
+    for entry in manifest.steps:
+        if entry.record is None:
+            continue
+        count = 0
+        for product in entry.record.products:
+            digest = digests.get((entry.name, product.path))
+            if digest and not product.digest:
+                product.digest = digest
+                count += 1
+        if count:
+            write_step_record(root / entry.working_dir, entry.record)
+            recorded += count
+
+    if recorded:
+        write_run_manifest(root, manifest)
+    return recorded
 
 
 def finalize_standalone_run(

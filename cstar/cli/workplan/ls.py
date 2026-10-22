@@ -14,6 +14,7 @@ from rich.table import Column, Table
 from rich.text import Text
 
 from cstar.base.env import ENV_CSTAR_PROJECT_HOME, max_concurrency
+from cstar.base.exceptions import CstarError
 from cstar.base.log import get_logger
 from cstar.cli.workplan.shared import console, load_workplans, refresh_disk_usage
 from cstar.entrypoint.utils import (
@@ -28,6 +29,8 @@ from cstar.entrypoint.utils import (
 )
 from cstar.execution.file_system import DirectoryManager
 from cstar.orchestration.index import (
+    WHERE_ATTACHED,
+    WHERE_ATTACHED_READ_ONLY,
     WHERE_TRACKED,
     ManifestRecord,
     Origin,
@@ -40,6 +43,7 @@ from cstar.orchestration.orchestration import LiveWorkplan
 from cstar.orchestration.tracking import (
     KEY_RUN_NAME,
     UNKNOWN_SIZE,
+    Access,
     TrackingRepository,
     WorkplanRun,
 )
@@ -64,8 +68,10 @@ a manifest names, in the data home and in the project's runs area, and
 {ARG_SHARED} lists the project's runs area alone; both scan the run directories
 and add a `where` column: `local` for a run started here, `local, untracked`
 for one in the data home that was not, `project` for a run kept in the project
-area and `project, linked` for a link there to a run kept elsewhere. The disk
-space of a run that was not started here is not known.
+area and `project, linked` for a link there to a run kept elsewhere. A run
+attached from elsewhere is listed with the runs started here, as `attached`, or
+`attached, read-only` when nothing may write into it. The disk space of a run
+that was not started here is not known.
 """
 FIELD_NAMES: t.TypeAlias = t.Literal[
     "run-id",
@@ -183,6 +189,17 @@ async def adapt_runs_to_views(
         if name == UNKNOWN_NAME:
             unresolved.append(run.run_id)
 
+        if not run.attached:
+            where = WHERE_TRACKED
+        else:
+            try:
+                read_only = run.access is Access.read_only
+            except CstarError as ex:
+                # a listing names the run however it is recorded; writes refuse it
+                log.debug(str(ex))
+                read_only = False
+            where = WHERE_ATTACHED_READ_ONLY if read_only else WHERE_ATTACHED
+
         views.append(
             ItemView(
                 run_id=run.run_id,
@@ -190,7 +207,7 @@ async def adapt_runs_to_views(
                 raw_size=run.size_mb,
                 raw_start=run.start_at,
                 format=format,
-                where=WHERE_TRACKED,
+                where=where,
             )
         )
 

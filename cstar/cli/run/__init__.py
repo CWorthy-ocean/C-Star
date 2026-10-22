@@ -1,6 +1,7 @@
 import typer
 
 from cstar.base.feature import ENV_FF_DEVELOPER_MODE, is_feature_enabled
+from cstar.cli.run.attach import app as app_attach
 from cstar.cli.run.check import app as app_check
 from cstar.cli.run.show import app as app_show
 from cstar.cli.run.verbs import NAME, RUN_LEVEL_VERBS
@@ -20,6 +21,7 @@ app = typer.Typer(
     ),
 )
 
+app.add_typer(app_attach)
 app.add_typer(app_check)
 app.add_typer(app_gather)
 app.add_typer(app_log)

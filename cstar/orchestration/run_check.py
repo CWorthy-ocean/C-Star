@@ -22,8 +22,8 @@ from enum import StrEnum, auto
 from pathlib import Path
 
 from cstar.applications.core import ArtifactKind
+from cstar.base.digest import KNOWN_SCHEMES
 from cstar.base.log import get_logger
-from cstar.base.utils import _get_sha256_hash
 from cstar.execution.file_system import (
     DirectoryManager,
     JobFileSystemManager,
@@ -34,6 +34,7 @@ from cstar.orchestration.manifest import (
     RUN_MANIFEST_NAME,
     STEP_RECORD_NAME,
     carried_digest,
+    product_digest,
 )
 from cstar.orchestration.orchestration import Status
 from cstar.orchestration.state import StateRepository
@@ -86,8 +87,8 @@ class FindingKind(StrEnum):
     """A product the step record lists is not in the run."""
     PRODUCT_SIZE = auto()
     """A product's size differs from the one its step record lists."""
-    HASH_MISMATCH = auto()
-    """A product's content differs from the sha256 its step record lists (`--verify`)."""
+    DIGEST_MISMATCH = auto()
+    """A product's content differs from the digest its step record lists, or cannot be read to compare (`--verify`)."""
     INPUT_MISMATCH = auto()
     """A file an attempt carried differs from the digest the manifest records for it."""
     RECORD_MISSING = auto()
@@ -412,7 +413,11 @@ def find_missing_step_dirs(run_root: Path, workplan: "LiveWorkplan") -> list[Fin
 
 
 def find_product_findings(
-    run_root: Path, manifest: "RunManifest", *, verify: bool
+    run_root: Path,
+    manifest: "RunManifest",
+    *,
+    verify: bool,
+    skipped: list[str] | None = None,
 ) -> list[Finding]:
     """Compare the products the step records list with the run directory.
 
@@ -428,16 +433,23 @@ def find_product_findings(
     manifest : RunManifest
         The run's manifest, with the step records folded in.
     verify : bool
-        Whether to compare the content of each product that records a sha256.
+        Whether to compare the content of each product that records a digest (a
+        record that predates digests has its sha256 folded into one). A netCDF
+        file is read in part, as its digest was computed; any other file is read
+        whole.
+    skipped : list[str] | None
+        Notes on what was not checked are appended here: one for the products
+        recorded with a digest scheme this build does not compute.
 
     Returns
     -------
     list[Finding]
-        `PRODUCT_MISSING`, `PRODUCT_SIZE` and `HASH_MISMATCH` findings in step and
+        `PRODUCT_MISSING`, `PRODUCT_SIZE` and `DIGEST_MISMATCH` findings in step and
         product order, `RECORD_MISSING` for each done step without a record, and
         `ATTEMPT_OPEN` when the latest attempt has not finished.
     """
     findings: list[Finding] = []
+    foreign: dict[str, int] = {}
 
     for entry in manifest.steps:
         step_dir = run_root / entry.working_dir
@@ -464,13 +476,33 @@ def find_product_findings(
             if product.size_bytes and regular and differs:
                 text = f"{found.st_size} bytes, recorded {product.size_bytes}"
                 findings.append(Finding(FindingKind.PRODUCT_SIZE, file, path=text))
-            elif (
-                verify
-                and product.sha256
-                and regular
-                and (digest := _get_sha256_hash(file)) != product.sha256
-            ):
-                findings.append(Finding(FindingKind.HASH_MISMATCH, file, path=digest))
+            elif verify and regular:
+                wanted = product.digest
+                if not wanted:
+                    continue
+                scheme = wanted.partition(":")[0]
+                if scheme not in KNOWN_SCHEMES:
+                    foreign[scheme] = foreign.get(scheme, 0) + 1
+                    continue
+                try:
+                    digest = product_digest(file, scheme=scheme)
+                except Exception as ex:  # a file that cannot be read cannot be verified
+                    text = f"unreadable: {ex}"
+                    findings.append(
+                        Finding(FindingKind.DIGEST_MISMATCH, file, path=text)
+                    )
+                else:
+                    if digest != wanted:
+                        findings.append(
+                            Finding(FindingKind.DIGEST_MISMATCH, file, path=digest)
+                        )
+
+    if foreign and skipped is not None:
+        skipped.append(
+            f"digest verification: {sum(foreign.values())} product(s) recorded with "
+            "a scheme this build does not compute "
+            f"({', '.join(repr(scheme) for scheme in sorted(foreign))})"
+        )
 
     if manifest.attempts and manifest.attempts[-1].finished_at is None:
         findings.append(Finding(FindingKind.ATTEMPT_OPEN, run_root / RUN_MANIFEST_NAME))
@@ -725,7 +757,7 @@ def check_run(
     manifest : RunManifest | None
         The run's manifest, when it could be read.
     verify : bool
-        Whether to compare the content of products that record a sha256.
+        Whether to compare the content of products that record a digest.
 
     Returns
     -------
@@ -753,12 +785,14 @@ def check_run(
     if manifest is None:
         skipped.append("products and carried inputs: no run manifest")
     else:
-        findings.extend(find_product_findings(run_root, manifest, verify=verify))
+        findings.extend(
+            find_product_findings(run_root, manifest, verify=verify, skipped=skipped)
+        )
         findings.extend(find_input_findings(run_root, manifest))
         if verify and not any(
-            p.sha256 for e in manifest.steps if e.record for p in e.record.products
+            p.digest for e in manifest.steps if e.record for p in e.record.products
         ):
-            skipped.append("hash verification: no product records a hash")
+            skipped.append("digest verification: no product records a digest")
 
     order = {kind: i for i, kind in enumerate(FindingKind)}
     findings.sort(key=lambda f: (order[f.kind], f.file, f.line or 0))
