@@ -114,6 +114,25 @@ New features
   - A single value is still written as a single value, so one-child namelists are unchanged.
 
 - New ``roms-marbl-0.12-default`` ModelSpec pinned to ucla-roms 0.12.0. (`#797 <https://github.com/CWorthy-ocean/C-Star/pull/797>`_)
+- ``cstar run attach <dir>`` registers a run directory that arrived from elsewhere in this machine's tracking, writing one tracking record and nothing into the run. (`#798 <https://github.com/CWorthy-ocean/C-Star/pull/798>`_)
+
+  - the run is checked first; a transfer with missing or truncated products is refused, other findings are listed and the run is attached with exit code 1
+  - a run-id already tracked for the same run (same uuid) in another directory is re-attached; one tracked for another run is refused, and ``--as <run-id>`` attaches under a free run-id
+  - ``--verify`` compares each product's recorded digest, ``--dry-run`` shows what would be recorded
+
+- Attached runs are owned or read-only: read-only by default in the project runs area or when another user owns the directory, owned otherwise; ``--own`` and ``--read-only`` choose. (`#798 <https://github.com/CWorthy-ocean/C-Star/pull/798>`_)
+
+  - a read-only run refuses ``cstar run gather``, ``cstar run check --repair``, ``cstar run check --record-digests`` and ``cstar admin clean`` of its directory (the record is forgotten, the directory left)
+  - ``cstar admin clean --run-id`` never removes a directory under the project runs area, whatever the mode
+  - an attached run is never relaunched: ``cstar workplan run --run-id`` and ``--resume`` refuse it; start a new run that references it
+
+- Each product records a content digest (``digest``, ``<scheme>:<hex>``): ``nc-sample-v2`` for netCDF files (structure plus a bounded sample of the data, independent of on-disk encoding), ``sha256`` of the bytes otherwise. (`#798 <https://github.com/CWorthy-ocean/C-Star/pull/798>`_)
+
+  - ``cstar run check --record-digests`` computes and records digests for every product that has none, writing the step records and the manifest; it needs an owned tracked run or an explicit directory
+  - ``cstar run check --verify`` compares the recorded digest in its own scheme; a record that predates digests with a bare ``sha256`` is still compared, and a scheme this build does not compute is reported as skipped
+
+- ``run://<uuid>`` finds an attached run wherever its directory is, through the tracking record, before any index scan. (`#798 <https://github.com/CWorthy-ocean/C-Star/pull/798>`_)
+- ``cstar run ls --all`` labels attached runs ``attached`` or ``attached, read-only`` in the ``where`` column. (`#798 <https://github.com/CWorthy-ocean/C-Star/pull/798>`_)
 
 
 
@@ -157,6 +176,10 @@ Improvements
 - Keeping a run's records never stops or stalls the run: a command that waits more than a minute for the manifest lock skips that update with a warning. (`#794 <https://github.com/CWorthy-ocean/C-Star/pull/794>`_)
 - YAML files are read with libyaml when PyYAML has it, about five times faster on a large run manifest. (`#796 <https://github.com/CWorthy-ocean/C-Star/pull/796>`_)
 - ``cstar run status``, ``gather`` and ``check --repair`` explain that they act on a run tracked on this machine and point at ``cstar run show`` or the run's directory for any other. (`#796 <https://github.com/CWorthy-ocean/C-Star/pull/796>`_)
+- An attached run's ``status`` is what its manifest and step records say; ``show`` and ``check`` read its directory as it is, with no sentinel refresh. (`#798 <https://github.com/CWorthy-ocean/C-Star/pull/798>`_)
+- A ``runs:`` alias can depend on the finished steps of an attached run, as for a run known only by its manifest. (`#798 <https://github.com/CWorthy-ocean/C-Star/pull/798>`_)
+- ``cstar run gather`` builds ``gathered_output`` under the run's recorded directory, so an attached run outside the data home is gathered in place. (`#798 <https://github.com/CWorthy-ocean/C-Star/pull/798>`_)
+- The netCDF digest (``hash_netcdf_contents``) moved from the forge application to ``cstar.base.digest``, unchanged, so orchestration can use it without reaching into an application module. (`#798 <https://github.com/CWorthy-ocean/C-Star/pull/798>`_)
 
 
 
@@ -182,3 +205,6 @@ Miscellaneous
 - ``pio-dev`` (tracks ucla-roms ``main``) carries the new key; the packaging check lists the new ModelSpec. (`#797 <https://github.com/CWorthy-ocean/C-Star/pull/797>`_)
 - The integration test catalog, the weekly extended workflow's release cell and the Tier 1 namelist goldens move to ucla-roms 0.12.0. (`#797 <https://github.com/CWorthy-ocean/C-Star/pull/797>`_)
 - Forge developer docs, the contributing guide and the ModelSpec docs describe the 0.12 tier and the new default spec; new unit goldens for the 0.12 spec differ from the 0.11 ones by exactly the new key. (`#797 <https://github.com/CWorthy-ocean/C-Star/pull/797>`_)
+- Run manifest schema 1.4.0 and step record schema 1.3.0 published (both add ``digest``); older documents load unchanged. (`#798 <https://github.com/CWorthy-ocean/C-Star/pull/798>`_)
+- Docs: "Attaching a run that arrived from elsewhere", the ``--verify`` / ``--record-digests`` paragraphs of "Checking a Run Directory", the ``where`` labels, and glossary entries for Attach and the product digest. (`#798 <https://github.com/CWorthy-ocean/C-Star/pull/798>`_)
+- A hello_world e2e (``test_run_attach.py``, seconds) covers attach, verify, owned and read-only verbs, re-entry refusal, ``--as``, and a workplan depending on an attached run by its run-id. (`#798 <https://github.com/CWorthy-ocean/C-Star/pull/798>`_)
