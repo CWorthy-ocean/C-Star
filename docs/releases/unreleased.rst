@@ -83,6 +83,21 @@ New features
 
   - The wait includes time a step was held for the steps it depends on; ``sacct`` can separate the two by job id.
 
+- A run can be named by ``run://<uuid>`` or by its directory as well as by its run-id, in ``runs:`` aliases and in ``cstar run show``, ``check``, ``log``, ``path`` and ``cd``. (`#796 <https://github.com/CWorthy-ocean/C-Star/pull/796>`_)
+
+  - A run-id not tracked on this machine is looked up in the run directories of that name in your data home and the project runs area; two different runs under one run-id are an error that lists both.
+  - A tracked run-id is always the tracked run; when the project runs area holds another run with that run-id, a warning names it and how to choose it.
+  - When a tracked run's directory is gone, as after a scratch purge, a copy of the same run in the project runs area is used.
+
+- A workplan can depend on a run that is not tracked on this machine, such as a copy or a promoted run, using the steps its step records say completed. (`#796 <https://github.com/CWorthy-ocean/C-Star/pull/796>`_)
+
+  - Scheduling pins each referenced run's run-id, uuid and start (and directory, when named by one) in the transformed workplan, and the run manifest records the uuid.
+
+- ``cstar run ls --shared`` lists the project runs area and ``cstar run ls --all`` adds every run found in the run directories, with a ``where`` column. (`#796 <https://github.com/CWorthy-ocean/C-Star/pull/796>`_)
+
+  - The workplan builder's Refresh runs lists the same runs, named by ``run://<uuid>``.
+
+
 
 
 Bug Fixes
@@ -122,6 +137,8 @@ Improvements
 - The upscaler resolves a linked ``uscl_file_location`` first, so it reads the record of the step the link points to and refuses a recorded ``_uscl`` file missing from disk. (`#795 <https://github.com/CWorthy-ocean/C-Star/pull/795>`_)
 - One shared helper now reads a step's recorded files of a kind in one directory, replacing three copies of the same lookup. (`#795 <https://github.com/CWorthy-ocean/C-Star/pull/795>`_)
 - Keeping a run's records never stops or stalls the run: a command that waits more than a minute for the manifest lock skips that update with a warning. (`#794 <https://github.com/CWorthy-ocean/C-Star/pull/794>`_)
+- YAML files are read with libyaml when PyYAML has it, about five times faster on a large run manifest. (`#796 <https://github.com/CWorthy-ocean/C-Star/pull/796>`_)
+- ``cstar run status``, ``gather`` and ``check --repair`` explain that they act on a run tracked on this machine and point at ``cstar run show`` or the run's directory for any other. (`#796 <https://github.com/CWorthy-ocean/C-Star/pull/796>`_)
 
 
 
@@ -143,3 +160,4 @@ Miscellaneous
 - Ready-made forge blueprints for the wio-toy outer grid and a 2000 km child grid nested in it, with tides and rivers off so no TPXO download is needed. (`#791 <https://github.com/CWorthy-ocean/C-Star/pull/791>`_)
 - The end-to-end tutorial is retitled "Using Blueprints to Set Up and Run an Ocean Model" and points to the workplan page as its next step. (`#791 <https://github.com/CWorthy-ocean/C-Star/pull/791>`_)
 - Published the run manifest and step record schemas v1.2.0, and documented execution facts in the workplan guide and terminology. (`#794 <https://github.com/CWorthy-ocean/C-Star/pull/794>`_)
+- Published the workplan schema v1.1.0 and the run manifest schema v1.3.0, and documented run handles, extending a finished run, the project runs area and ``ls --shared``/``--all``. (`#796 <https://github.com/CWorthy-ocean/C-Star/pull/796>`_)
