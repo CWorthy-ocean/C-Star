@@ -85,9 +85,9 @@ def applies_to(schema: type[RomsNamelistBase]) -> bool:
     ``RomsNamelist`` (< 0.4.0), which ``RomsNamelistV0_4_0`` (< 0.5.0)
     subclasses -- every >= 0.5.0 schema (``RomsNamelistV0_5_0``,
     ``RomsNamelistV0_6_0``, ``RomsNamelistV0_7_0``, ``RomsNamelistV0_9_0``,
-    ``RomsNamelistV0_11_0``) subclasses ``RomsNamelistBase`` directly (or a
-    later version), never ``RomsNamelist``, so ``issubclass`` here is exactly
-    the >= 0.5.0 gate.
+    ``RomsNamelistV0_11_0``, ``RomsNamelistV0_12_0``) subclasses
+    ``RomsNamelistBase`` directly (or a later version), never ``RomsNamelist``,
+    so ``issubclass`` here is exactly the >= 0.5.0 gate.
     Rule B is ungated -- it is not version-specific (see the module
     docstring) -- so it has no ``applies_to`` counterpart.
     """

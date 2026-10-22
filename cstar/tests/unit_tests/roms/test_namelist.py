@@ -9,6 +9,8 @@ from pydantic import ValidationError
 from cstar.roms.namelist import (
     CdrLiteOutputSettings,
     CdrLiteSettings,
+    CdrLiteSettingsV0_12_0,
+    ExtractDataSettingsV0_12_0,
     MarblBiogeochemistrySettingsV0_11_0,
     ParamSettings,
     ParamSettingsV0_4_0,
@@ -21,6 +23,7 @@ from cstar.roms.namelist import (
     RomsNamelistV0_7_0,
     RomsNamelistV0_9_0,
     RomsNamelistV0_11_0,
+    RomsNamelistV0_12_0,
     is_commit_hash,
     namelist_schema_for_ref,
     release_ref_for_remote,
@@ -32,6 +35,7 @@ V0_6_0_NAMELIST = Path(__file__).parent / "fixtures" / "example_namelist_v0_6_0.
 V0_7_0_NAMELIST = Path(__file__).parent / "fixtures" / "example_namelist_v0_7_0.nml"
 V0_9_0_NAMELIST = Path(__file__).parent / "fixtures" / "example_namelist_v0_9_0.nml"
 V0_11_0_NAMELIST = Path(__file__).parent / "fixtures" / "example_namelist_v0_11_0.nml"
+V0_12_0_NAMELIST = Path(__file__).parent / "fixtures" / "example_namelist_v0_12_0.nml"
 
 PIO_SETTINGS_BLOCK = "&pio_settings\n    pio_stride = 1\n/\n\n"
 
@@ -92,11 +96,20 @@ def test_namelist_schema_for_ref_post_0_9_0(checkout_target):
 
 @pytest.mark.parametrize(
     "checkout_target",
-    ["0.11.0", "v0.11.0", "0.12.0", "12.0.0"],
+    ["0.11.0", "v0.11.0", "0.11.4"],
 )
 def test_namelist_schema_for_ref_post_0_11_0(checkout_target):
-    """Refs at or above 0.11.0 select `RomsNamelistV0_11_0`."""
+    """Refs in `[0.11.0, 0.12.0)` select `RomsNamelistV0_11_0`."""
     assert namelist_schema_for_ref(checkout_target) is RomsNamelistV0_11_0
+
+
+@pytest.mark.parametrize(
+    "checkout_target",
+    ["0.12.0", "v0.12.0", "0.12.3", "0.13.0", "12.0.0"],
+)
+def test_namelist_schema_for_ref_post_0_12_0(checkout_target):
+    """Refs at or above 0.12.0 select `RomsNamelistV0_12_0`."""
+    assert namelist_schema_for_ref(checkout_target) is RomsNamelistV0_12_0
 
 
 @pytest.mark.parametrize(
@@ -115,7 +128,7 @@ def test_namelist_schema_for_ref_fallback_warns(checkout_target):
     """Non-release-tag refs fall back to the latest schema and warn about it."""
     with pytest.warns(UserWarning, match="use at your own risk"):
         schema = namelist_schema_for_ref(checkout_target)
-    assert schema is RomsNamelistV0_11_0
+    assert schema is RomsNamelistV0_12_0
 
 
 def test_namelist_schema_for_ref_resolves_hash_at_release_tag(
@@ -162,7 +175,7 @@ def test_namelist_schema_for_ref_branch_ignores_repo_path(tagged_ucla_roms_clone
     info = tagged_ucla_roms_clone
     with pytest.warns(UserWarning, match="use at your own risk"):
         schema = namelist_schema_for_ref("main", repo_path=info["repo"])
-    assert schema is RomsNamelistV0_11_0
+    assert schema is RomsNamelistV0_12_0
 
 
 def test_namelist_schema_for_ref_unresolvable_hash_falls_back():
@@ -174,12 +187,12 @@ def test_namelist_schema_for_ref_unresolvable_hash_falls_back():
     ):
         with pytest.warns(UserWarning, match="use at your own risk"):
             schema = namelist_schema_for_ref("a" * 40, repo_path="/some/repo")
-    assert schema is RomsNamelistV0_11_0
+    assert schema is RomsNamelistV0_12_0
 
     with mock.patch("cstar.roms.namelist._describe_nearest_tag", return_value=None):
         with pytest.warns(UserWarning, match="use at your own risk"):
             schema = namelist_schema_for_ref("a" * 40, repo_path="/some/repo")
-    assert schema is RomsNamelistV0_11_0
+    assert schema is RomsNamelistV0_12_0
 
 
 @pytest.mark.parametrize(
@@ -242,7 +255,7 @@ def test_release_ref_for_remote_unreachable_location_warns_and_keeps_hash():
     with pytest.warns(
         UserWarning,
         match=rf"Could not resolve .*{'a' * 40}.* latest known namelist schema "
-        rf"\({RomsNamelistV0_11_0.__name__}\)",
+        rf"\({RomsNamelistV0_12_0.__name__}\)",
     ):
         ref = release_ref_for_remote(
             "https://github.com/CWorthy-ocean/ucla-roms", "a" * 40
@@ -526,6 +539,119 @@ def test_roms_namelist_v0_9_0_does_not_write_constant_fe():
     assert "constant_fe_value" not in written
 
 
+def test_roms_namelist_v0_12_0_round_trip(tmp_path):
+    """`RomsNamelistV0_12_0.read` parses the 0.12.0 fixture, whose time
+    interpolation is switched off, and a read -> write -> read round trip
+    reproduces the same model.
+    """
+    nml = RomsNamelistV0_12_0.read(V0_12_0_NAMELIST)
+    assert isinstance(nml.cdr_lite_settings, CdrLiteSettingsV0_12_0)
+    assert nml.cdr_lite_settings.cdr_carbonate_sensitivity_time_interpolation is False
+    assert isinstance(nml.extract_data_settings, ExtractDataSettingsV0_12_0)
+
+    out = tmp_path / "namelist.nml"
+    nml.write(out)
+    assert "cdr_carbonate_sensitivity_time_interpolation = .false." in out.read_text()
+    assert RomsNamelistV0_12_0.read(out) == nml
+
+
+def test_roms_namelist_v0_11_0_rejects_v0_12_0_fixture():
+    """`RomsNamelistV0_11_0` is strict: ucla-roms before 0.12.0 stops on the
+    time-interpolation key, so the 0.11.0 schema rejects it and never writes it.
+    """
+    with pytest.raises(
+        ValidationError, match="cdr_carbonate_sensitivity_time_interpolation"
+    ):
+        RomsNamelistV0_11_0.read(V0_12_0_NAMELIST)
+    written = RomsNamelistV0_11_0.read(V0_11_0_NAMELIST).to_f90nml_dict()
+    assert (
+        "cdr_carbonate_sensitivity_time_interpolation"
+        not in written["cdr_lite_settings"]
+    )
+
+
+def test_roms_namelist_v0_12_0_time_interpolation_defaults_and_always_written():
+    """A 0.11.0 namelist without the key still validates under
+    `RomsNamelistV0_12_0`, defaulting to interpolation on (what earlier
+    releases always did), and the written namelist carries it.
+    """
+    nml = RomsNamelistV0_12_0.read(V0_11_0_NAMELIST)
+    assert nml.cdr_lite_settings.cdr_carbonate_sensitivity_time_interpolation is True
+    written = nml.to_f90nml_dict()["cdr_lite_settings"]
+    assert written["cdr_carbonate_sensitivity_time_interpolation"] is True
+
+
+_TWO_CHILDREN = {
+    "do_extract": True,
+    "output_period_extract": 3600.0,
+    "nrpf_extract": 24,
+    "extract_file": ["a.nc", "b.nc"],
+    "n_chd": [90, 50],
+    "theta_s_chd": [5.0, 6.0],
+    "theta_b_chd": [2.0, 3.0],
+    "hc_chd": [250.0, 300.0],
+    "extract_root_name": ["child_a", "child_b"],
+}
+
+
+def test_extract_v0_12_0_accepts_one_entry_per_child(tmp_path):
+    """From 0.12.0 the per-child extraction keys take one entry per child (PR
+    #395); the arrays survive a write -> read round trip, and a single value
+    stays a single value.
+    """
+    nml = RomsNamelistV0_12_0.read(V0_12_0_NAMELIST)
+    assert nml.extract_data_settings.extract_file == "sample_edata.nc"
+    nml.extract_data_settings = ExtractDataSettingsV0_12_0(**_TWO_CHILDREN)
+
+    out = tmp_path / "namelist.nml"
+    nml.write(out)
+    reread = RomsNamelistV0_12_0.read(out)
+    assert reread.extract_data_settings.n_chd == [90, 50]
+    assert reread.extract_data_settings.extract_root_name == ["child_a", "child_b"]
+    assert reread == nml
+
+
+@pytest.mark.parametrize(
+    "key", ["n_chd", "theta_s_chd", "theta_b_chd", "hc_chd", "extract_root_name"]
+)
+def test_extract_v0_12_0_needs_every_child_entry(key):
+    """ROMS stops when a child after the first lacks its own vertical-grid
+    entry (only child 1 has defaults); a list `extract_root_name` must also
+    cover every child.
+    """
+    with pytest.raises(ValidationError, match=f"{key} has 1 entries for 2 child"):
+        ExtractDataSettingsV0_12_0(**{**_TWO_CHILDREN, key: _TWO_CHILDREN[key][:1]})
+
+
+def test_extract_v0_12_0_rules_apply_only_when_extracting():
+    """ROMS checks the per-child layout only with `do_extract` on; a single
+    `extract_root_name` is fine for several children (only PARALLEL_IO builds
+    need one per child, which the schema cannot see).
+    """
+    off = {**_TWO_CHILDREN, "do_extract": False, "n_chd": 90}
+    assert ExtractDataSettingsV0_12_0(**off).n_chd == 90
+    shared_root = {**_TWO_CHILDREN, "extract_root_name": "child"}
+    assert ExtractDataSettingsV0_12_0(**shared_root).extract_root_name == "child"
+
+
+def test_extract_v0_12_0_rejects_more_than_max_children_and_blank_files():
+    many = [f"c{i}.nc" for i in range(9)]
+    with pytest.raises(ValidationError, match="extract_file has 9 entries"):
+        ExtractDataSettingsV0_12_0(
+            **{**_TWO_CHILDREN, "do_extract": False, "extract_file": many}
+        )
+    with pytest.raises(ValidationError, match="blank entry"):
+        ExtractDataSettingsV0_12_0(**{**_TWO_CHILDREN, "extract_file": ["a.nc", " "]})
+
+
+def test_extract_before_0_12_0_rejects_several_children():
+    """Earlier releases read one child; the 0.11.0 schema rejects arrays."""
+    data = RomsNamelistV0_11_0.read(V0_11_0_NAMELIST).model_dump()
+    data["extract_data_settings"] = _TWO_CHILDREN
+    with pytest.raises(ValidationError, match="extract_file"):
+        RomsNamelistV0_11_0.model_validate(data)
+
+
 def test_constant_fe_value_must_not_be_negative():
     """ROMS stops on a negative `constant_Fe_value`: the schema rejects it on
     construction and on assignment, and accepts zero.
@@ -708,6 +834,15 @@ class TestUnknownOverrideKeys:
         assert any("use_constant_fe" in v for v in violations)
         assert any("constant_fe_value" in v for v in violations)
 
+    def test_carbonate_sensitivity_time_interpolation_key(self):
+        """Known from 0.12.0 on; unknown to `RomsNamelistV0_11_0`."""
+        key = "cdr_carbonate_sensitivity_time_interpolation"
+        overrides = {"cdr_lite_settings": {key: False}}
+        assert RomsNamelistV0_12_0.unknown_override_keys(overrides) == []
+        violations = RomsNamelistV0_11_0.unknown_override_keys(overrides)
+        assert len(violations) == 1
+        assert key in violations[0]
+
 
 # ---------------------------------------------------------------------------
 # ParamSettings / ParamSettingsV0_4_0 -- passive CDR tracer counts
@@ -739,6 +874,7 @@ def test_param_settings_rejects_cdr_tracer_counts():
         RomsNamelistV0_7_0,
         RomsNamelistV0_9_0,
         RomsNamelistV0_11_0,
+        RomsNamelistV0_12_0,
     ],
 )
 def test_param_settings_v0_4_0_defaults_cdr_tracer_counts_to_zero(cls):

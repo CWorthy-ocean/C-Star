@@ -31,6 +31,7 @@ from cstar.applications.forge.namelist_model import (
     RunTimeSettingsV0_7_0,
     RunTimeSettingsV0_9_0,
     RunTimeSettingsV0_11_0,
+    RunTimeSettingsV0_12_0,
 )
 from cstar.applications.forge.resolve import build_forge_blueprint, cfl_dt
 from cstar.wizard.wizard import (
@@ -3154,6 +3155,7 @@ def test_default_model_uses_latest_settings_schema():
         RunTimeSettingsV0_7_0,
         RunTimeSettingsV0_9_0,
         RunTimeSettingsV0_11_0,
+        RunTimeSettingsV0_12_0,
     ],
 )
 def test_namelist_tooltip_for_every_settings_field(settings_cls):
@@ -3369,6 +3371,9 @@ _BGC_MODE_SETTINGS_SAMPLE = {
         ("cppdefs", "sponge_tune", "none", True),
         ("cppdefs", None, "none", True),
         ("ocean_vars", "wrt_file_his", "cdr_lite", True),
+        ("cdr_lite", "cdr_carbonate_sensitivity_time_interpolation", "cdr_lite", True),
+        ("cdr_lite", "cdr_carbonate_sensitivity_time_interpolation", "marbl", False),
+        ("cdr_lite", "cdr_carbonate_sensitivity_time_interpolation", "none", False),
     ],
 )
 def test_applies_in(section, field, bgc_mode, expected):
@@ -3392,6 +3397,59 @@ def test_settings_editor_builds_only_the_settings_that_apply_in_the_bgc_mode(
     assert (_LITE_STREAM in editor._widgets) is (bgc_mode != "none")
     for key in _EVERY_MODE_KEYS:
         assert key in editor._widgets, key
+
+
+_INTERP_KEY = ("cdr_lite", "cdr_carbonate_sensitivity_time_interpolation")
+
+
+@pytest.mark.parametrize(
+    ("settings_cls", "bgc_mode", "built"),
+    [
+        (RunTimeSettingsV0_12_0, "cdr_lite", True),
+        (RunTimeSettingsV0_12_0, "marbl", False),
+        (RunTimeSettingsV0_12_0, "none", False),
+        (RunTimeSettingsV0_11_0, "cdr_lite", False),
+    ],
+)
+def test_carbonate_sensitivity_time_interpolation_widget(settings_cls, bgc_mode, built):
+    """ucla-roms >= 0.12.0 reads the switch only for the file-based carbonate
+    sensitivities of ``bgc_mode: cdr_lite``, so the editor builds it there, in
+    the CDR pane, and nowhere else; an older tier has no such field.
+    """
+    import ipywidgets as W
+
+    model_settings = {"cdr_lite": {_INTERP_KEY[1]: True}}
+    editor = _SettingsEditor(
+        W, model_settings, settings_cls=settings_cls, bgc_mode=bgc_mode
+    )
+    assert (_INTERP_KEY in editor._widgets) is built
+    if built:
+        widget, _ = editor._widgets[_INTERP_KEY]
+        assert widget.value is True
+        assert widget.description == "Interpolate carbonate sensitivities in time"
+        assert widget.tooltip.startswith(_INTERP_KEY[1])
+        assert "held until the next one starts" in widget.tooltip
+        assert "cdr_lite" in editor._pane_sections["Carbon dioxide removal (CDR)"]
+
+
+def test_0_12_model_declares_the_time_interpolation_key():
+    """``roms-marbl-0.12-default`` carries the key at its default; the MARBL
+    default mode builds no widget for it, and ``roms-marbl-0.11-default`` (a
+    release that stops on the key) does not declare it.
+    """
+    wiz = ForgeBlueprintWizard()
+    wiz.start.value = date(2012, 1, 1)
+    wiz.end.value = date(2012, 1, 2)
+    wiz.model_dd.value = "roms-marbl-0.12-default"
+    wiz._rebuild()
+    assert wiz.config is not None
+    assert wiz.config.model_settings["cdr_lite"] == {_INTERP_KEY[1]: True}
+    assert _INTERP_KEY not in wiz.editor._widgets
+
+    wiz.model_dd.value = "roms-marbl-0.11-default"
+    wiz._rebuild()
+    assert wiz.config is not None
+    assert "cdr_lite" not in wiz.config.model_settings
 
 
 def test_settings_editor_builds_no_pane_left_without_fields():

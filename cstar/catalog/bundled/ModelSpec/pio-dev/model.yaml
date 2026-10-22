@@ -115,3 +115,7 @@ model_settings:
     # Constant-iron option (ucla-roms >= 0.11.0, PR #391, on main); off by default. Fe is in mmol/m^3 (1 nM = 1e-3).
     use_constant_fe: false
     constant_fe_value: 3.0e-3
+  cdr_lite:
+    # Time interpolation of the carbonate sensitivities read from forcing files
+    # (ucla-roms >= 0.12.0, PR #396, on main); on by default.
+    cdr_carbonate_sensitivity_time_interpolation: true

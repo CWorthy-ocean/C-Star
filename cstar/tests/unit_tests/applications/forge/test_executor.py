@@ -76,7 +76,11 @@ from cstar.orchestration.serialization import (
     load_blueprint,
     read_blueprint_raw,
 )
-from cstar.roms.namelist import RomsNamelistV0_9_0, RomsNamelistV0_11_0
+from cstar.roms.namelist import (
+    RomsNamelistV0_9_0,
+    RomsNamelistV0_11_0,
+    RomsNamelistV0_12_0,
+)
 
 requires_cstar_pio = pytest.mark.skipif(
     "pio" not in cstar_models.ROMSCompositeCodeRepository.model_fields
@@ -107,6 +111,7 @@ _MODEL_DIR_ROMS0100 = _BUNDLED_CATALOG / "ModelSpec" / "roms-marbl-0.10-default"
 # &MARBL_BIOGEOCHEMISTRY_SETTINGS, PR #391) -- used by the versioned-namelist golden
 # test below.
 _MODEL_DIR_ROMS0110 = _BUNDLED_CATALOG / "ModelSpec" / "roms-marbl-0.11-default"
+_MODEL_DIR_ROMS0120 = _BUNDLED_CATALOG / "ModelSpec" / "roms-marbl-0.12-default"
 # ModelSpec no longer embeds a default forcing/output selection -- these tests just
 # need a valid, representative pair from the bundled catalog.
 _FORCING_INPUTS = _CATALOG.forcing_data("glorys-era5-unified")
@@ -4436,7 +4441,7 @@ class TestGoldenNamelist:
         Test name note: this must NOT contain ``roms050``/``roms060`` -- the
         legacy golden is selected with ``-k "golden_namelist_test_tiny and not
         roms050 and not roms060 and not roms070 and not roms090 and not
-        roms0110"``, which would otherwise also catch this test.
+        roms0110 and not roms0120"``, which would otherwise also catch this test.
         """
         normalized = self._run_golden_namelist_case(
             mock_grid,
@@ -4580,6 +4585,39 @@ class TestGoldenNamelist:
         assert nml.marbl_biogeochemistry_settings.use_constant_fe is False
         assert nml.marbl_biogeochemistry_settings.constant_fe_value == 3.0e-3
         assert nml.cdr_lite_settings.cdr_online_carbonate_sensitivity is False
+
+    def test_golden_namelist_test_tiny_roms0120(self, mock_grid, tmp_path):
+        """Same test-tiny domain/forcing/output, but resolved against the
+        ``roms-marbl-0.12-default`` ModelSpec (ucla-roms >= 0.12.0) -- proves the
+        versioned namelist path selects ``RunTimeSettingsV0_12_0``/
+        ``RomsNamelistV0_12_0`` end to end.
+
+        The one schema-visible difference from the roms0110 golden is
+        ``cdr_carbonate_sensitivity_time_interpolation`` in
+        ``&cdr_lite_settings``, always written (here at its default, on) -- the
+        ModelSpec declares it. ``&extract_data_settings`` keeps its single-child
+        values.
+
+        Test name note: contains ``roms0120`` so the legacy golden's ``-k``
+        selector (``... and not roms0120``) excludes it, like the other tiers.
+        """
+        normalized = self._run_golden_namelist_case(
+            mock_grid,
+            tmp_path,
+            _MODEL_DIR_ROMS0120,
+            "golden_namelist_test-tiny-roms0120.nml",
+        )
+
+        cdr_lite = normalized.split("&cdr_lite_settings")[1].split("/", 1)[0]
+        assert "cdr_carbonate_sensitivity_time_interpolation = .true." in cdr_lite
+
+        # Read back through the 0.12 schema: every group validates (extra="forbid").
+        namelist_path = tmp_path / "golden_roms0120.nml"
+        namelist_path.write_text(normalized)
+        nml = RomsNamelistV0_12_0.read(namelist_path)
+        assert nml.cdr_lite_settings.cdr_carbonate_sensitivity_time_interpolation
+        assert nml.marbl_biogeochemistry_settings.use_constant_fe is False
+        assert isinstance(nml.extract_data_settings.extract_file, str)
 
     @staticmethod
     def _cdrgas_sources(directory: Path) -> list[Path]:

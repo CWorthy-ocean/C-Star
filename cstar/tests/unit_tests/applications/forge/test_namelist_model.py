@@ -23,6 +23,8 @@ from cstar.applications.forge.namelist_model import (
     RIVER_TRACERS_WITHOUT_CDR_MIN_ROMS,
     UPSCALED_CDR_WITHOUT_MARBL_MIN_ROMS,
     CdrGasExchOutputCfg,
+    CdrLiteCfg,
+    CdrLiteCfgV0_12_0,
     CdrLiteOutputCfg,
     CdrLiteOutputCfgV0_9_0,
     CdrOutputCfg,
@@ -36,6 +38,7 @@ from cstar.applications.forge.namelist_model import (
     RunTimeSettingsV0_7_0,
     RunTimeSettingsV0_9_0,
     RunTimeSettingsV0_11_0,
+    RunTimeSettingsV0_12_0,
     _settings_spellings,
     bgc_mode_from_cppdefs,
     build_namelist,
@@ -71,6 +74,7 @@ from cstar.roms.namelist import (
     RomsNamelistV0_7_0,
     RomsNamelistV0_9_0,
     RomsNamelistV0_11_0,
+    RomsNamelistV0_12_0,
 )
 
 # Every registered run-time settings tier, oldest first.
@@ -82,6 +86,7 @@ _ALL_SETTINGS_TIERS = (
     RunTimeSettingsV0_7_0,
     RunTimeSettingsV0_9_0,
     RunTimeSettingsV0_11_0,
+    RunTimeSettingsV0_12_0,
 )
 
 
@@ -1100,15 +1105,20 @@ def test_run_time_settings_for_ref_0_9_0_up_to_0_11_0_selects_v0_9_0():
         assert run_time_settings_for_ref(ref) is RunTimeSettingsV0_9_0
 
 
-def test_run_time_settings_for_ref_0_11_0_and_later_selects_v0_11_0():
-    for ref in ("0.11.0", "v0.11.0", "0.12.3", "1.0.0"):
+def test_run_time_settings_for_ref_0_11_0_up_to_0_12_0_selects_v0_11_0():
+    for ref in ("0.11.0", "v0.11.0", "0.11.3"):
         assert run_time_settings_for_ref(ref) is RunTimeSettingsV0_11_0
+
+
+def test_run_time_settings_for_ref_0_12_0_and_later_selects_v0_12_0():
+    for ref in ("0.12.0", "v0.12.0", "0.12.3", "1.0.0"):
+        assert run_time_settings_for_ref(ref) is RunTimeSettingsV0_12_0
 
 
 def test_run_time_settings_for_ref_branch_warns_and_uses_latest():
     with pytest.warns(UserWarning, match="not a release tag"):
         cls = run_time_settings_for_ref("main")
-    assert cls is RunTimeSettingsV0_11_0
+    assert cls is RunTimeSettingsV0_12_0
 
 
 def test_run_time_settings_for_ref_unresolvable_hash_warns_and_uses_latest():
@@ -1117,7 +1127,7 @@ def test_run_time_settings_for_ref_unresolvable_hash_warns_and_uses_latest():
     """
     with pytest.warns(UserWarning, match="not a release tag"):
         cls = run_time_settings_for_ref("a1b2c3d4")
-    assert cls is RunTimeSettingsV0_11_0
+    assert cls is RunTimeSettingsV0_12_0
 
 
 def test_run_time_settings_for_ref_empty_string_selects_legacy():
@@ -1269,6 +1279,7 @@ def test_output_precheck_applies_to_v0_4_0_settings_cls_is_false():
         RunTimeSettingsV0_7_0,
         RunTimeSettingsV0_9_0,
         RunTimeSettingsV0_11_0,
+        RunTimeSettingsV0_12_0,
     ],
 )
 def test_output_precheck_applies_to_versioned_settings_cls_is_true(settings_cls):
@@ -1466,6 +1477,94 @@ def test_forge_writes_constant_fe_cstar_reads_it(tmp_path):
 
 
 # ---------------------------------------------------------------------------
+# ucla-roms >= 0.12.0: RunTimeSettingsV0_12_0 (carbonate-sensitivity time
+# interpolation in cdr_lite)
+# ---------------------------------------------------------------------------
+_INTERP = "cdr_carbonate_sensitivity_time_interpolation"
+
+
+def test_build_namelist_v0_12_0_writes_carbonate_sensitivity_time_interpolation(
+    tmp_path,
+):
+    """RunTimeSettingsV0_12_0 builds ``RomsNamelistV0_12_0`` and writes the key
+    into ``&cdr_lite_settings``; the 0.11 constant-iron keys carry forward.
+    """
+    d = _populated_rt_dict()
+    d["cdr_lite"] = {_INTERP: False}
+    rt = RunTimeSettingsV0_12_0.model_validate(d)
+    assert isinstance(rt, RunTimeSettingsV0_11_0)
+    assert isinstance(rt.cdr_lite, CdrLiteCfgV0_12_0)
+    nml = build_namelist(rt, n_tracers=34)
+    assert type(nml) is RomsNamelistV0_12_0
+    assert getattr(nml.cdr_lite_settings, _INTERP) is False
+    assert nml.marbl_biogeochemistry_settings.use_constant_fe is False
+
+    nml.write(tmp_path / "namelist.nml")
+    assert f"{_INTERP} = .false." in (tmp_path / "namelist.nml").read_text()
+
+
+def test_run_time_settings_v0_12_0_defaults_time_interpolation_when_omitted():
+    """A settings dict without the key (or without ``cdr_lite`` at all) validates
+    to interpolation on, the ucla-roms default and what earlier releases did.
+    """
+    d = _populated_rt_dict()
+    d.pop("cdr_lite", None)
+    rt = RunTimeSettingsV0_12_0.model_validate(d)
+    assert getattr(rt.cdr_lite, _INTERP) is True
+    nml = build_namelist(rt, n_tracers=34)
+    assert nml.to_f90nml_dict()["cdr_lite_settings"][_INTERP] is True
+
+
+@pytest.mark.parametrize(
+    "settings_cls", [RunTimeSettingsV0_9_0, RunTimeSettingsV0_11_0]
+)
+@pytest.mark.parametrize("requested", [False, "false", 0, "not-a-bool"])
+def test_pre_0_12_0_tiers_reject_a_requested_hold(settings_cls, requested):
+    """ucla-roms < 0.12.0 always interpolates: ``extra="ignore"`` would drop a
+    request to hold each record, so it is refused, naming the release that
+    reads it. An unparseable value is not the default either.
+    """
+    d = _populated_rt_dict()
+    d["cdr_lite"] = {_INTERP: requested}
+    with pytest.raises(
+        ValidationError,
+        match=rf"cdr_lite\.{_INTERP}=False requires ucla-roms >= 0\.12\.0",
+    ):
+        settings_cls.model_validate(d)
+
+
+@pytest.mark.parametrize("default", [True, "true", 1, None])
+def test_pre_0_12_0_tiers_drop_interpolation_left_on(default):
+    """A shared spec may carry the key at its default: it passes and is dropped,
+    so the built namelist has no such key.
+    """
+    d = _populated_rt_dict()
+    d["cdr_lite"] = {_INTERP: default}
+    rt = RunTimeSettingsV0_11_0.model_validate(d)
+    assert _INTERP not in rt.cdr_lite.model_dump()
+    nml = build_namelist(rt, n_tracers=34)
+    assert type(nml) is RomsNamelistV0_11_0
+    assert _INTERP not in nml.to_f90nml_dict()["cdr_lite_settings"]
+
+
+def test_cdr_lite_cfg_tiers_differ_by_the_time_interpolation_key():
+    old = set(CdrLiteCfg.model_fields)
+    assert set(CdrLiteCfgV0_12_0.model_fields) - old == {_INTERP}
+    assert old <= set(CdrLiteCfgV0_12_0.model_fields)
+
+
+def test_forge_writes_time_interpolation_cstar_reads_it(tmp_path):
+    """``write_roms_namelist`` for a 0.12.0 pin writes a namelist the C-Star
+    schema for that release reads back, key included.
+    """
+    d = _populated_rt_dict()
+    d["cdr_lite"] = {_INTERP: False}
+    write_roms_namelist(d, tmp_path, n_tracers=34, roms_ref="0.12.0")
+    back = RomsNamelistV0_12_0.read(tmp_path / "namelist.nml")
+    assert getattr(back.cdr_lite_settings, _INTERP) is False
+
+
+# ---------------------------------------------------------------------------
 # check_cdr_lite_sections
 # ---------------------------------------------------------------------------
 _TRACERS = {"nt_cdr_oae": 1, "nt_cdr_dor": 0}
@@ -1508,6 +1607,51 @@ def test_check_cdr_lite_sections_returns_whether_cdr_lite_is_needed(
     assert (
         check_cdr_lite_sections(settings, bgc_mode=mode, settings_cls=_V09) is expected
     )
+
+
+def _held(online=False, param=None):
+    settings = _lite(online=online, param=param)
+    settings["cdr_lite"][_INTERP] = False
+    return settings
+
+
+def test_check_cdr_lite_sections_accepts_a_hold_with_file_based_sensitivities():
+    """``bgc_mode: cdr_lite`` with the online knob off reads ddic_dco2/ddic_dalk
+    from forcing files, the one case where ROMS reads the switch.
+    """
+    assert check_cdr_lite_sections(
+        _held(param={}), bgc_mode="cdr_lite", settings_cls=RunTimeSettingsV0_12_0
+    )
+
+
+@pytest.mark.parametrize(
+    ("settings", "mode", "match"),
+    [
+        (_held(online=True), "marbl", "has no effect with cdr_lite.cdr_online"),
+        (_held(param={}), "marbl", 'has no effect without CDR_LITE.*"cdr_lite" only'),
+        (_held(param={}), "none", 'has no effect without CDR_LITE.*"cdr_lite" only'),
+    ],
+)
+def test_check_cdr_lite_sections_rejects_a_hold_roms_never_reads(settings, mode, match):
+    """Switched off where ROMS never reads it -- online sensitivities, or no
+    CDR_LITE build -- the switch would silently do nothing.
+    """
+    with pytest.raises(ValueError, match=rf"cdr_lite\.{_INTERP}=False {match}"):
+        check_cdr_lite_sections(
+            settings, bgc_mode=mode, settings_cls=RunTimeSettingsV0_12_0
+        )
+
+
+def test_validate_run_time_sections_reports_a_hold_outside_cdr_lite_mode():
+    """A stored 0.12 blueprint asking for a hold in a MARBL build is reported
+    up front (engine/wizard), with the tier gate silent since the key is known.
+    """
+    settings = {
+        **_held(param={}),
+        "cppdefs": {"marbl": True, "cdr_lite": False},
+    }
+    errs = validate_run_time_sections(settings, roms_ref="0.12.0")
+    assert any(f"cdr_lite.{_INTERP}=False has no effect" in e for e in errs), errs
 
 
 @pytest.mark.parametrize(

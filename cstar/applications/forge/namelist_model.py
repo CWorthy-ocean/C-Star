@@ -44,6 +44,7 @@ from pydantic import (
 
 from cstar.roms.namelist import (
     UCLA_ROMS_0_11_0,
+    UCLA_ROMS_0_12_0,
     ForcingFiles,
     Gamma2Settings,
     LateralViscSettings,
@@ -56,6 +57,7 @@ from cstar.roms.namelist import (
     RomsNamelistV0_7_0,
     RomsNamelistV0_9_0,
     RomsNamelistV0_11_0,
+    RomsNamelistV0_12_0,
     SimulationNameSettings,
     SurfFrcSettings,
     TracerDiff2,
@@ -1070,7 +1072,28 @@ class CdrLiteOutputCfgV0_9_0(_CdrLiteOutputCfgCommon):
     wrt_gas_exchange: bool = False
 
 
-class CdrLiteCfg(_SettingsSection):
+_BOOL_ADAPTER: TypeAdapter[bool] = TypeAdapter(bool)
+
+
+def _carbonate_sensitivity_hold_requested(value: Any) -> bool:
+    """Whether a ``cdr_lite.cdr_carbonate_sensitivity_time_interpolation`` value
+    asks to hold each ddic_dco2/ddic_dalk record instead of interpolating.
+
+    The one parse rule for the version gate (:class:`CdrLiteCfg`) and the
+    CDR-lite consistency check (:func:`check_cdr_lite_sections`): ``None`` means
+    unset, a value pydantic reads as a bool asks for a hold when it is False
+    (interpolation, the default, is what earlier releases always do), and
+    anything else unparseable is not the default, so it counts as requested.
+    """
+    if value is None:
+        return False
+    try:
+        return not _BOOL_ADAPTER.validate_python(value)
+    except ValidationError:
+        return True
+
+
+class _CdrLiteCfgCommon(_SettingsSection):
     """``cdr_lite`` settings -- ucla-roms >= 0.9.0's optional
     ``&CDR_LITE_SETTINGS`` group, read only under the ``CDR_LITE`` cppkey.
     Turning ``cdr_online_carbonate_sensitivity`` on makes the resolver compile
@@ -1081,12 +1104,58 @@ class CdrLiteCfg(_SettingsSection):
     that way only for ``bgc_mode: cdr_lite`` (no MARBL), and not at all
     otherwise.
 
-    The bundled ModelSpecs do not declare this section, so
-    ``&CDR_LITE_SETTINGS`` is written at the default (off) -- what
+    The bundled ModelSpecs before 0.12 do not declare this section, so
+    ``&CDR_LITE_SETTINGS`` is written at the defaults -- what
     ``bgc_mode: cdr_lite`` runs with.
     """
 
-    cdr_online_carbonate_sensitivity: bool = False
+    cdr_online_carbonate_sensitivity: bool = Field(default=False)
+
+
+class CdrLiteCfg(_CdrLiteCfgCommon):
+    """``cdr_lite`` settings for 0.9.0 <= ucla-roms < 0.12.0, which always
+    interpolates the carbonate sensitivities in time.
+    """
+
+    @classmethod
+    def _other_tier_keys(cls) -> Iterable[str]:
+        # CdrLiteCfgV0_12_0's switch: _reject_carbonate_sensitivity_hold is its gate.
+        return ("cdr_carbonate_sensitivity_time_interpolation",)
+
+    @model_validator(mode="before")
+    @classmethod
+    def _reject_carbonate_sensitivity_hold(cls, data: Any) -> Any:
+        """Fail loudly on a requested hold rather than letting ``extra="ignore"``
+        drop it: the run would interpolate the sensitivities anyway. A value
+        asking for interpolation passes (a shared spec may carry it) and is
+        dropped.
+        """
+        if isinstance(data, dict) and _carbonate_sensitivity_hold_requested(
+            data.get("cdr_carbonate_sensitivity_time_interpolation")
+        ):
+            version = ".".join(str(part) for part in UCLA_ROMS_0_12_0)
+            raise ValueError(
+                "cdr_lite.cdr_carbonate_sensitivity_time_interpolation=False "
+                f"requires ucla-roms >= {version}; the pinned ucla-roms release "
+                "always interpolates ddic_dco2/ddic_dalk in time."
+            )
+        return data
+
+
+class CdrLiteCfgV0_12_0(_CdrLiteCfgCommon):
+    """``cdr_lite`` settings for ucla-roms >= 0.12.0: adds
+    ``cdr_carbonate_sensitivity_time_interpolation`` (PR #396). Off, ROMS holds
+    each ddic_dco2/ddic_dalk record read from the forcing files until the next
+    one starts; it has no effect with the online sensitivities, and the group is
+    read only under ``CDR_LITE``, so :func:`check_cdr_lite_sections` rejects a
+    hold outside ``bgc_mode: cdr_lite`` with file-based sensitivities.
+
+    Deliberate default (like :class:`MarblBgcCfgV0_11_0`): blueprints and
+    ModelSpecs written before the key existed bypass the resolver and hit
+    ``model_validate`` directly; the value is the ucla-roms reference one.
+    """
+
+    cdr_carbonate_sensitivity_time_interpolation: bool = Field(default=True)
 
 
 class CdrGasExchOutputCfg(_SettingsSection):
@@ -1277,12 +1346,15 @@ def check_cdr_lite_sections(
     each of which sets ``cppdefs["cdr_lite"]`` from the result.
 
     Raises ``ValueError`` for each combination ucla-roms 0.9.0 aborts on at
-    init, all reported together: the online sensitivity without MARBL;
+    init, or that would silently not take effect, all reported together: the
+    online sensitivity without MARBL;
     ``cdr_lite_output.wrt_gas_exchange`` without ``CDR_LITE``; the CDR-lite
     output stream or the online sensitivity with no CDR tracers
     (``param.nt_cdr_oae + param.nt_cdr_dor == 0``); and, on a tier that models
     ``cdr_lite`` (``settings_cls``), CDR tracers in a build without ``CDR_LITE``
-    ("Forcing type not supported").
+    ("Forcing type not supported"); and ``cdr_carbonate_sensitivity_time_interpolation``
+    switched off (ucla-roms >= 0.12.0) where ROMS never reads it, i.e. outside
+    ``bgc_mode == "cdr_lite"`` or with the online sensitivity.
 
     Under ``bgc_mode == "cdr_lite"`` the tracer counts are derived from the CDR
     forcing during generation, so this pre-generation check cannot require them:
@@ -1329,6 +1401,24 @@ def check_cdr_lite_sections(
             '"Forcing type not supported" for CDR tracers without it. Use '
             f'bgc_mode "cdr_lite" or enable {online_flag} (MARBL).'
         )
+    interp_flag = "cdr_lite.cdr_carbonate_sensitivity_time_interpolation"
+    if _carbonate_sensitivity_hold_requested(
+        (run_time_settings.get("cdr_lite") or {}).get(
+            "cdr_carbonate_sensitivity_time_interpolation"
+        )
+    ):
+        if online:
+            problems.append(
+                f"{interp_flag}=False has no effect with {online_flag}=True: "
+                "ucla-roms computes the sensitivities each step instead of "
+                "reading them from forcing files."
+            )
+        elif bgc_mode != "cdr_lite":
+            problems.append(
+                f"{interp_flag}=False has no effect without CDR_LITE reading "
+                "the sensitivities from forcing files, which Forge builds for "
+                'bgc_mode "cdr_lite" only.'
+            )
     if problems:
         raise ValueError(" ".join(problems))
     return needed
@@ -1448,9 +1538,6 @@ class VSpongeCfg(_SettingsSection):
     v_sponge: float
 
 
-_BOOL_ADAPTER: TypeAdapter[bool] = TypeAdapter(bool)
-
-
 def _constant_fe_requested(value: Any) -> bool:
     """Whether a ``marbl_bgc.use_constant_fe`` value asks for constant iron.
 
@@ -1553,14 +1640,16 @@ class _RunTimeSettingsCommon(_SettingsSection):
     sections that some schemas lack entirely (``pio_settings``, added by
     :class:`RunTimeSettingsV0_6_0`; ``cdr_lite_output``/``cdr_gas_exch_output``,
     added by :class:`RunTimeSettingsV0_7_0`; ``cdr_lite``, added by
-    :class:`RunTimeSettingsV0_9_0`) are simply absent here; use
+    :class:`RunTimeSettingsV0_9_0` and retyped by :class:`RunTimeSettingsV0_12_0`)
+    are simply absent here; use
     :class:`RunTimeSettings` (ucla-roms < 0.4.0), :class:`RunTimeSettingsV0_4_0`
     (0.4.0 <= ucla-roms < 0.5.0), :class:`RunTimeSettingsV0_5_0`
     (0.5.0 <= ucla-roms < 0.6.0), :class:`RunTimeSettingsV0_6_0`
     (0.6.0 <= ucla-roms < 0.7.0), :class:`RunTimeSettingsV0_7_0`
     (0.7.0 <= ucla-roms < 0.9.0), :class:`RunTimeSettingsV0_9_0`
-    (0.9.0 <= ucla-roms < 0.11.0), or :class:`RunTimeSettingsV0_11_0`
-    (>= 0.11.0), or select one with :func:`run_time_settings_for_ref`.
+    (0.9.0 <= ucla-roms < 0.11.0), :class:`RunTimeSettingsV0_11_0`
+    (0.11.0 <= ucla-roms < 0.12.0), or :class:`RunTimeSettingsV0_12_0`
+    (>= 0.12.0), or select one with :func:`run_time_settings_for_ref`.
     """
 
     title: TitleCfg
@@ -1706,7 +1795,8 @@ class RunTimeSettingsV0_9_0(RunTimeSettingsV0_6_0):
 
 
 class RunTimeSettingsV0_11_0(RunTimeSettingsV0_9_0):
-    """Forge's run-time settings dict for ucla-roms >= 0.11.0, typed + validated.
+    """Forge's run-time settings dict for 0.11.0 <= ucla-roms < 0.12.0, typed +
+    validated.
 
     Mirrors C-Star's ``RomsNamelistV0_11_0(RomsNamelistV0_9_0)``. Types
     ``marbl_bgc`` as :class:`MarblBgcCfgV0_11_0`, which adds the constant-iron
@@ -1715,6 +1805,21 @@ class RunTimeSettingsV0_11_0(RunTimeSettingsV0_9_0):
     """
 
     marbl_bgc: MarblBgcCfgV0_11_0
+
+
+class RunTimeSettingsV0_12_0(RunTimeSettingsV0_11_0):
+    """Forge's run-time settings dict for ucla-roms >= 0.12.0, typed + validated.
+
+    Mirrors C-Star's ``RomsNamelistV0_12_0(RomsNamelistV0_11_0)``. Types
+    ``cdr_lite`` as :class:`CdrLiteCfgV0_12_0`, which adds
+    ``cdr_carbonate_sensitivity_time_interpolation`` (``&CDR_LITE_SETTINGS``,
+    ucla-roms PR #396) with its default, so a blueprint saved before it existed
+    still validates. ``extract_data`` keeps one child: 0.12.0 also reads up to
+    8 (PR #395), which C-Star's namelist schema accepts but Forge does not
+    generate.
+    """
+
+    cdr_lite: CdrLiteCfgV0_12_0 = Field(default_factory=CdrLiteCfgV0_12_0)
 
 
 # Maps each namelist schema class (C-Star, keyed by ucla-roms version range) to
@@ -1729,6 +1834,7 @@ _RUN_TIME_SETTINGS_BY_NAMELIST_SCHEMA: dict[
     RomsNamelistV0_7_0: RunTimeSettingsV0_7_0,
     RomsNamelistV0_9_0: RunTimeSettingsV0_9_0,
     RomsNamelistV0_11_0: RunTimeSettingsV0_11_0,
+    RomsNamelistV0_12_0: RunTimeSettingsV0_12_0,
 }
 
 # The inverse of _RUN_TIME_SETTINGS_BY_NAMELIST_SCHEMA: the namelist schema a
@@ -1922,7 +2028,8 @@ def run_time_settings_for_ref(roms_ref: str | None) -> type[_RunTimeSettingsComm
         :class:`RunTimeSettingsV0_6_0` for 0.6.0 <= ucla-roms < 0.7.0;
         :class:`RunTimeSettingsV0_7_0` for 0.7.0 <= ucla-roms < 0.9.0;
         :class:`RunTimeSettingsV0_9_0` for 0.9.0 <= ucla-roms < 0.11.0;
-        :class:`RunTimeSettingsV0_11_0` for ucla-roms >= 0.11.0.
+        :class:`RunTimeSettingsV0_11_0` for 0.11.0 <= ucla-roms < 0.12.0;
+        :class:`RunTimeSettingsV0_12_0` for ucla-roms >= 0.12.0.
 
     Warns
     -----

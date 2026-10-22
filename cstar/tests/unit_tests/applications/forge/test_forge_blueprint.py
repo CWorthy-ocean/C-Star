@@ -81,6 +81,7 @@ _MODEL_DIR_ROMS0100 = _BUNDLED_CATALOG / "ModelSpec" / "roms-marbl-0.10-default"
 # &MARBL_BIOGEOCHEMISTRY_SETTINGS, PR #391) -- used by the versioned-namelist golden
 # test below.
 _MODEL_DIR_ROMS0110 = _BUNDLED_CATALOG / "ModelSpec" / "roms-marbl-0.11-default"
+_MODEL_DIR_ROMS0120 = _BUNDLED_CATALOG / "ModelSpec" / "roms-marbl-0.12-default"
 _GRID_KWARGS = dict(
     nx=6,
     ny=2,
@@ -2284,6 +2285,36 @@ def test_golden_model_settings_test_tiny_roms0110():
         "from the golden fixture. If this is an intentional schema/default "
         "change, regenerate tests/fixtures/golden_model_settings_test-tiny-"
         "roms0110.json; otherwise the change is a regression in the settings the "
+        "executor feeds to namelist.nml / cppdefs.opt."
+    )
+
+
+def test_golden_model_settings_test_tiny_roms0120():
+    """Behavior-preservation snapshot for the ``roms-marbl-0.12-default`` ModelSpec
+    (ucla-roms >= 0.12.0), resolved from the same test-tiny domain/forcing/output
+    setup as ``test_golden_model_settings_test_tiny_roms0110``.
+
+    The difference from that fixture is the ``cdr_lite`` section with
+    ``cdr_carbonate_sensitivity_time_interpolation``, which the ModelSpec
+    declares (on, the ucla-roms reference value). Regenerate the fixture with
+    ``json.dumps(cfg.model_settings, indent=2, sort_keys=True, default=str)``
+    plus a trailing newline, from ``_build(model_dir=_MODEL_DIR_ROMS0120)``.
+    """
+    import json
+
+    golden_path = (
+        Path(__file__).parent
+        / "fixtures"
+        / "golden_model_settings_test-tiny-roms0120.json"
+    )
+    golden = json.loads(golden_path.read_text())
+    cfg = _build(model_dir=_MODEL_DIR_ROMS0120)  # test-tiny, dt=7200
+    got = json.loads(json.dumps(cfg.model_settings, sort_keys=True, default=str))
+    assert got == golden, (
+        "Resolved model_settings for test-tiny (roms-marbl-0.12-default) drifted "
+        "from the golden fixture. If this is an intentional schema/default "
+        "change, regenerate tests/fixtures/golden_model_settings_test-tiny-"
+        "roms0120.json; otherwise the change is a regression in the settings the "
         "executor feeds to namelist.nml / cppdefs.opt."
     )
 

@@ -1014,9 +1014,10 @@ _ACCORDION_EXCLUDED_FIELDS: dict[str, frozenset[str]] = {
 # compiles only under MARBL come from namelist_model, which owns that fact
 # (MARBL_ONLY_OUTPUT_FLAGS, and the requires_marbl rows of CDR_OUTPUT_SECTIONS).
 # The rest are wizard-only: the bgc/marbl_bgc/dic_alk_correction groups, NHY/NOX
-# forcing and cdr_lite.cdr_online_carbonate_sensitivity read MARBL state, and
+# forcing and cdr_lite.cdr_online_carbonate_sensitivity read MARBL state,
 # cdr_lite_output needs CDR-lite tracers, which only MARBL and bgc_mode "cdr_lite"
-# provide.
+# provide, and cdr_lite.cdr_carbonate_sensitivity_time_interpolation applies only
+# to the file-based sensitivities of bgc_mode "cdr_lite".
 _MARBL_ONLY = frozenset({"marbl"})
 _BGC_MODE_SETTINGS: dict[str | tuple[str, str], frozenset[str]] = {
     **dict.fromkeys(
@@ -1031,6 +1032,9 @@ _BGC_MODE_SETTINGS: dict[str | tuple[str, str], frozenset[str]] = {
     ("cppdefs", "nhy_forcing"): _MARBL_ONLY,
     ("cppdefs", "nox_forcing"): _MARBL_ONLY,
     ("cdr_lite", "cdr_online_carbonate_sensitivity"): _MARBL_ONLY,
+    ("cdr_lite", "cdr_carbonate_sensitivity_time_interpolation"): frozenset(
+        {"cdr_lite"}
+    ),
 }
 
 
@@ -1081,7 +1085,7 @@ _FORCED_ON_BY_BGC_MODE: dict[str, dict[tuple[str, str], str]] = {
 # a user override can never collide with a resolver-owned flag. The two advection
 # fields only render for ModelSpecs that declare them (``roms-marbl-0.8-default``,
 # ``roms-marbl-0.9-default``, ``roms-marbl-0.10-default``, ``roms-marbl-0.11-default``,
-# ``pio-dev``) -- the editor type-infers a checkbox from the composed bool, so a spec
+# ``roms-marbl-0.12-default``, ``pio-dev``) -- the editor type-infers a checkbox from the composed bool, so a spec
 # that omits the key shows no widget for it.
 #
 # ``bgc``/``marbl_bgc`` are SPLIT at field granularity along the existing
