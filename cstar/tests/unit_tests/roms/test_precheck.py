@@ -26,6 +26,7 @@ from cstar.roms.namelist import (
     RomsNamelistV0_7_0,
     RomsNamelistV0_9_0,
     RomsNamelistV0_11_0,
+    RomsNamelistV0_12_0,
 )
 from cstar.roms.precheck import (
     _STREAM_CHECKS,
@@ -634,6 +635,7 @@ def test_applies_to_v0_4_0_schema_is_false():
         RomsNamelistV0_7_0,
         RomsNamelistV0_9_0,
         RomsNamelistV0_11_0,
+        RomsNamelistV0_12_0,
     ],
 )
 def test_applies_to_versioned_schemas_is_true(schema):

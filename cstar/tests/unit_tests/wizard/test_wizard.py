@@ -31,6 +31,7 @@ from cstar.applications.forge.namelist_model import (
     RunTimeSettingsV0_7_0,
     RunTimeSettingsV0_9_0,
     RunTimeSettingsV0_11_0,
+    RunTimeSettingsV0_12_0,
 )
 from cstar.applications.forge.resolve import build_forge_blueprint, cfl_dt
 from cstar.wizard.wizard import (
@@ -1860,11 +1861,11 @@ class TestBgcModeSettings:
 
 def test_use_pio_chk_default_seeded_from_model_spec():
     """use_pio_chk mirrors bgc_dd: it is seeded from the selected ModelSpec's
-    top-level use_pio (True for roms-marbl-0.11-default, the wizard's default
+    top-level use_pio (True for roms-marbl-0.12-default, the wizard's default
     model; False for cson_roms-marbl_v0.1), and reseeded on a model switch.
     """
     wiz = ForgeBlueprintWizard()
-    assert wiz.model_dd.value == "roms-marbl-0.11-default"
+    assert wiz.model_dd.value == "roms-marbl-0.12-default"
     assert wiz.use_pio_chk.value is True
     assert wiz._model_default_use_pio() is True
 
@@ -1882,7 +1883,7 @@ def test_use_pio_chk_emit_is_unconditional():
     wiz = ForgeBlueprintWizard()
     wiz.start.value = date(2012, 1, 1)
     wiz.end.value = date(2012, 1, 2)
-    # roms-marbl-0.11-default (the default model) declares use_pio: true --
+    # roms-marbl-0.12-default (the default model) declares use_pio: true --
     # exactly the ModelSpec this test guards against: unchecking must emit an
     # explicit False, not fall back to the ModelSpec default.
     assert wiz.use_pio_chk.value is True
@@ -3125,11 +3126,11 @@ def test_output_spec_defaults_to_daily_restarts():
 
 
 def test_default_model_uses_latest_settings_schema():
-    """The default catalog model (``roms-marbl-0.11-default``) is pinned to
-    ucla-roms ``0.11.0`` -- the newest registered schema boundary, which both
+    """The default catalog model (``roms-marbl-0.12-default``) is pinned to
+    ucla-roms ``0.12.0`` -- the newest registered schema boundary, which both
     the wizard and the executor (``write_roms_namelist`` ->
     ``run_time_settings_for_ref``) resolve to the *latest* known schema
-    (currently ``RunTimeSettingsV0_11_0``), not the legacy one. This is an
+    (currently ``RunTimeSettingsV0_12_0``), not the legacy one. This is an
     intentional behavior change from before this ref-awareness was added (the
     editor used to hardcode legacy ``RunTimeSettings``) -- it pins that the
     wizard now agrees with what the executor will actually write. (The tests in tests/test_forge_blueprint.py
@@ -3140,7 +3141,7 @@ def test_default_model_uses_latest_settings_schema():
     wiz.start.value = date(2012, 1, 1)
     wiz.end.value = date(2012, 1, 2)
     wiz._rebuild()
-    assert wiz._editor_key.settings_cls is RunTimeSettingsV0_11_0
+    assert wiz._editor_key.settings_cls is RunTimeSettingsV0_12_0
     assert ("ocean_vars", "nrpf_rst") not in wiz.editor._widgets
 
 
@@ -3154,6 +3155,7 @@ def test_default_model_uses_latest_settings_schema():
         RunTimeSettingsV0_7_0,
         RunTimeSettingsV0_9_0,
         RunTimeSettingsV0_11_0,
+        RunTimeSettingsV0_12_0,
     ],
 )
 def test_namelist_tooltip_for_every_settings_field(settings_cls):
@@ -3369,6 +3371,9 @@ _BGC_MODE_SETTINGS_SAMPLE = {
         ("cppdefs", "sponge_tune", "none", True),
         ("cppdefs", None, "none", True),
         ("ocean_vars", "wrt_file_his", "cdr_lite", True),
+        ("cdr_lite", "cdr_carbonate_sensitivity_time_interpolation", "cdr_lite", True),
+        ("cdr_lite", "cdr_carbonate_sensitivity_time_interpolation", "marbl", False),
+        ("cdr_lite", "cdr_carbonate_sensitivity_time_interpolation", "none", False),
     ],
 )
 def test_applies_in(section, field, bgc_mode, expected):
@@ -3392,6 +3397,59 @@ def test_settings_editor_builds_only_the_settings_that_apply_in_the_bgc_mode(
     assert (_LITE_STREAM in editor._widgets) is (bgc_mode != "none")
     for key in _EVERY_MODE_KEYS:
         assert key in editor._widgets, key
+
+
+_INTERP_KEY = ("cdr_lite", "cdr_carbonate_sensitivity_time_interpolation")
+
+
+@pytest.mark.parametrize(
+    ("settings_cls", "bgc_mode", "built"),
+    [
+        (RunTimeSettingsV0_12_0, "cdr_lite", True),
+        (RunTimeSettingsV0_12_0, "marbl", False),
+        (RunTimeSettingsV0_12_0, "none", False),
+        (RunTimeSettingsV0_11_0, "cdr_lite", False),
+    ],
+)
+def test_carbonate_sensitivity_time_interpolation_widget(settings_cls, bgc_mode, built):
+    """ucla-roms >= 0.12.0 reads the switch only for the file-based carbonate
+    sensitivities of ``bgc_mode: cdr_lite``, so the editor builds it there, in
+    the CDR pane, and nowhere else; an older tier has no such field.
+    """
+    import ipywidgets as W
+
+    model_settings = {"cdr_lite": {_INTERP_KEY[1]: True}}
+    editor = _SettingsEditor(
+        W, model_settings, settings_cls=settings_cls, bgc_mode=bgc_mode
+    )
+    assert (_INTERP_KEY in editor._widgets) is built
+    if built:
+        widget, _ = editor._widgets[_INTERP_KEY]
+        assert widget.value is True
+        assert widget.description == "Interpolate carbonate sensitivities in time"
+        assert widget.tooltip.startswith(_INTERP_KEY[1])
+        assert "held until the next one starts" in widget.tooltip
+        assert "cdr_lite" in editor._pane_sections["Carbon dioxide removal (CDR)"]
+
+
+def test_0_12_model_declares_the_time_interpolation_key():
+    """``roms-marbl-0.12-default`` carries the key at its default; the MARBL
+    default mode builds no widget for it, and ``roms-marbl-0.11-default`` (a
+    release that stops on the key) does not declare it.
+    """
+    wiz = ForgeBlueprintWizard()
+    wiz.start.value = date(2012, 1, 1)
+    wiz.end.value = date(2012, 1, 2)
+    wiz.model_dd.value = "roms-marbl-0.12-default"
+    wiz._rebuild()
+    assert wiz.config is not None
+    assert wiz.config.model_settings["cdr_lite"] == {_INTERP_KEY[1]: True}
+    assert _INTERP_KEY not in wiz.editor._widgets
+
+    wiz.model_dd.value = "roms-marbl-0.11-default"
+    wiz._rebuild()
+    assert wiz.config is not None
+    assert "cdr_lite" not in wiz.config.model_settings
 
 
 def test_settings_editor_builds_no_pane_left_without_fields():
@@ -3537,19 +3595,25 @@ def test_wizard_editor_cdr_output_streams_gated_by_model_spec_pin():
     assert ("cdr_lite_output", "do_cdr_lite_output") in wiz.editor._widgets
     assert ("cdr_gas_exch_output", "do_cdr_gas_exch_output") in wiz.editor._widgets
 
-    for model in (
-        "roms-marbl-0.9-default",
-        "roms-marbl-0.10-default",
-        "roms-marbl-0.11-default",
+    for model, cdr_lite in (
+        ("roms-marbl-0.9-default", None),
+        ("roms-marbl-0.10-default", None),
+        ("roms-marbl-0.11-default", None),
+        # From 0.12 the spec declares ``cdr_lite`` with only the time-interpolation
+        # switch, which the default MARBL mode does not show.
+        (
+            "roms-marbl-0.12-default",
+            {"cdr_carbonate_sensitivity_time_interpolation": True},
+        ),
     ):
         wiz.model_dd.value = model
         wiz._rebuild()
         assert "cdr_lite_output" in wiz.config.model_settings
         assert ("cdr_lite_output", "do_cdr_lite_output") in wiz.editor._widgets
         assert ("cdr_lite_output", "wrt_gas_exchange") in wiz.editor._widgets
-        # The bundled specs do not declare the ``cdr_lite`` knob yet (CDR-lite
-        # tracers need forcing Forge cannot generate), so there is no widget for it.
-        assert "cdr_lite" not in wiz.config.model_settings
+        # No bundled spec declares the ``cdr_lite`` online knob (CDR-lite tracers
+        # need forcing Forge cannot generate), so there is no widget for it.
+        assert wiz.config.model_settings.get("cdr_lite") == cdr_lite
         assert (
             "cdr_lite",
             "cdr_online_carbonate_sensitivity",
@@ -3782,8 +3846,9 @@ def test_constant_fe_value_hidden_until_use_constant_fe_is_on():
 
 
 def test_cdr_lite_knob_override_survives_save_and_load(tmp_path):
-    """The bundled ModelSpecs do not declare ``cdr_lite`` (CDR-lite tracers need
-    forcing Forge cannot generate), so the accordion has no widget for the knob.
+    """The bundled ModelSpecs do not declare the ``cdr_lite`` online knob
+    (CDR-lite tracers need forcing Forge cannot generate; the 0.12 spec declares
+    only the time-interpolation switch), so the accordion has no widget for it.
     Set as an override (a hand-edit), it still lands in ``model_settings``,
     survives a save/load round trip, and can be turned back off.
     ``cppdefs.cdr_lite`` is resolver-/build-derived and has no widget
@@ -3796,7 +3861,7 @@ def test_cdr_lite_knob_override_survives_save_and_load(tmp_path):
     wiz._overrides[("param", "nt_cdr_oae")] = 1
     wiz._rebuild()
     assert wiz.config is not None
-    assert "cdr_lite" not in wiz.config.model_settings
+    assert knob[1] not in wiz.config.model_settings.get("cdr_lite", {})
     assert knob not in wiz.editor._widgets
     assert ("cppdefs", "cdr_lite") not in wiz.editor._widgets
 

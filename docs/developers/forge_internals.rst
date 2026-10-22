@@ -366,7 +366,10 @@ former ``&CDR_LITE_OUTPUT_SETTINGS`` (PR #372: five keys renamed, plus PR
 #370's ``wrt_gas_exchange``; now compiled without MARBL/CDR_FORCING) and adds
 the optional ``&CDR_LITE_SETTINGS``; 0.11.0 adds the constant-iron option
 (``use_constant_Fe``/``constant_Fe_value``, PR #391) to
-``&MARBL_BIOGEOCHEMISTRY_SETTINGS``. C-Star versions the
+``&MARBL_BIOGEOCHEMISTRY_SETTINGS``; 0.12.0 adds
+``cdr_carbonate_sensitivity_time_interpolation`` to ``&CDR_LITE_SETTINGS`` (PR
+#396) and lets the six ``&EXTRACT_DATA_SETTINGS`` per-child keys take one
+entry per child, up to 8 (PR #395). C-Star versions the
 namelist schema by ucla-roms release (``cstar.roms.namelist``:
 ``RomsNamelist`` for < 0.4.0, ``RomsNamelistV0_4_0`` for 0.4.0 <= ucla-roms
 < 0.5.0 (adds the CDR tracer counts to ``&PARAM_SETTINGS``),
@@ -374,11 +377,15 @@ namelist schema by ucla-roms release (``cstar.roms.namelist``:
 for 0.6.0 <= ucla-roms < 0.7.0, ``RomsNamelistV0_7_0`` for 0.7.0 <= ucla-roms
 < 0.9.0, ``RomsNamelistV0_9_0`` for 0.9.0 <= ucla-roms < 0.11.0 (a
 ``RomsNamelistV0_6_0`` subclass, since a subclass can't drop V0_7_0's renamed
-group), ``RomsNamelistV0_11_0`` for >= 0.11.0 (a ``RomsNamelistV0_9_0``
-subclass; adds ``use_constant_Fe``/``constant_Fe_value`` to
-``&MARBL_BIOGEOCHEMISTRY_SETTINGS``, written lowercased as f90nml writes
+group), ``RomsNamelistV0_11_0`` for 0.11.0 <= ucla-roms < 0.12.0 (a
+``RomsNamelistV0_9_0`` subclass; adds ``use_constant_Fe``/``constant_Fe_value``
+to ``&MARBL_BIOGEOCHEMISTRY_SETTINGS``, written lowercased as f90nml writes
 them -- both keys are always written, so a release before 0.11.0 stops on the
-unknown keys and keeps the 0.9.0 schema), selected
+unknown keys and keeps the 0.9.0 schema), ``RomsNamelistV0_12_0`` for >= 0.12.0
+(a ``RomsNamelistV0_11_0`` subclass; ``CdrLiteSettingsV0_12_0`` adds the
+time-interpolation key, always written, and ``ExtractDataSettingsV0_12_0``
+accepts a single value or one entry per child, checking the per-child rules
+ROMS stops on in every build), selected
 by ``namelist_schema_for_ref(ref)`` -- semver tags select exactly; a commit
 hash selects the release it descends from, via ``git describe`` in a clone;
 branch names and unresolved hashes warn and fall back to the latest schema).
@@ -394,7 +401,13 @@ typed ``MarblBgcCfgV0_11_0``, which gains ``use_constant_fe``/
 ``constant_fe_value``; the earlier tiers' ``MarblBgcCfg`` rejects a requested
 ``use_constant_fe`` rather than dropping it, and ``check_constant_fe`` rejects
 it in a build without MARBL -- resolver, ``validate_run_time_sections`` and
-``configure_build``),
+``configure_build``), and ``RunTimeSettingsV0_12_0`` (``cdr_lite`` is typed
+``CdrLiteCfgV0_12_0``, which gains ``cdr_carbonate_sensitivity_time_interpolation``;
+the earlier tiers' ``CdrLiteCfg`` rejects a requested hold (the key set
+false) rather than dropping it, and ``check_cdr_lite_sections`` rejects a hold
+where ROMS never reads it, outside ``bgc_mode: cdr_lite`` or with the online
+sensitivities; ``extract_data`` stays single-child, as Forge generates one
+nesting file),
 selected by ``run_time_settings_for_ref(roms_ref)``, where ``roms_ref`` is
 the blueprint's pinned ``code.roms.commit`` (threaded resolver -> executor ->
 ``write_roms_namelist``). Forge has no ucla-roms clone, so
@@ -440,7 +453,10 @@ ucla-roms release: ``roms-marbl-0.5-default`` pins ``0.5.0``,
 not declare it, see below), ``roms-marbl-0.10-default`` pins ``0.10.1`` (same
 tier and same templates as the 0.9 spec; the first that runs
 ``bgc_mode: cdr_lite``), and ``roms-marbl-0.11-default`` pins ``0.11.0``
-(``RunTimeSettingsV0_11_0``; same templates as the 0.9/0.10 specs; the
+(``RunTimeSettingsV0_11_0``; same templates as the 0.9/0.10 specs), and
+``roms-marbl-0.12-default`` pins ``0.12.0`` (``RunTimeSettingsV0_12_0``; same
+templates; the first spec that declares ``cdr_lite``, carrying only the
+time-interpolation key, so the wizard shows it in ``bgc_mode: cdr_lite``; the
 default); older specs stay
 fixed and keep emitting
 byte-identical legacy namelists. ``version_gated_section_names()``
@@ -622,11 +638,11 @@ Two committed unit goldens pin the resolved-settings and namelist contracts
 - **Settings-level**: ``test_golden_model_settings_test_tiny`` diffs
   resolved ``model_settings`` against
   ``golden_model_settings_test-tiny.json``. No regeneration hook -- update
-  manually. Six sibling tests pin the same comparison for each
+  manually. Seven sibling tests pin the same comparison for each
   versioned-namelist schema tier: ``test_golden_model_settings_test_tiny_roms050``,
-  ``_roms060``, ``_roms070``, ``_roms090``, and ``_roms0110``
-  (``roms-marbl-0.{5,6,7,9,11}-default``, against
-  ``golden_model_settings_test-tiny-roms0{50,60,70,90,110}.json``), and for
+  ``_roms060``, ``_roms070``, ``_roms090``, ``_roms0110`` and ``_roms0120``
+  (``roms-marbl-0.{5,6,7,9,11,12}-default``, against
+  ``golden_model_settings_test-tiny-roms0{50,60,70,90,110,120}.json``), and for
   the ``bgc_mode: cdr_lite`` build on ``roms-marbl-0.10-default``,
   ``_roms090_cdr_lite`` (against
   ``golden_model_settings_test-tiny-roms090-cdr-lite.json``).
@@ -653,13 +669,17 @@ Two committed unit goldens pin the resolved-settings and namelist contracts
   the CDR forcing, ``golden_namelist_test-tiny-roms090-cdr-lite.nml``), and
   ``test_golden_namelist_test_tiny_roms0110`` (``roms-marbl-0.11-default``, the
   0.9 golden plus ``use_constant_fe``/``constant_fe_value`` in
-  ``&MARBL_BIOGEOCHEMISTRY_SETTINGS``, ``golden_namelist_test-tiny-roms0110.nml``).
+  ``&MARBL_BIOGEOCHEMISTRY_SETTINGS``, ``golden_namelist_test-tiny-roms0110.nml``),
+  and ``test_golden_namelist_test_tiny_roms0120`` (``roms-marbl-0.12-default``,
+  the 0.11 golden plus ``cdr_carbonate_sensitivity_time_interpolation`` in
+  ``&CDR_LITE_SETTINGS``, ``golden_namelist_test-tiny-roms0120.nml``).
   Regenerate one at a time via
   ``UPDATE_GOLDEN=1 pytest <path> -k <test name>`` (the run intentionally
   fails after writing; rerun without the env var to confirm). To select
   *only* the legacy test, use ``-k "golden_namelist_test_tiny and not
-  roms050 and not roms060 and not roms070 and not roms090 and not roms0110"``
-  -- a bare ``-k golden_namelist_test_tiny`` matches all seven, and ``-k
+  roms050 and not roms060 and not roms070 and not roms090 and not roms0110
+  and not roms0120"`` -- a bare ``-k golden_namelist_test_tiny`` matches all
+  eight, and ``-k
   golden_namelist_test_tiny_roms090`` matches the ``cdr_lite`` test too (add
   ``and not cdr_lite`` to select only the ``roms090`` one).
 

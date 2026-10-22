@@ -88,6 +88,7 @@ jobs:
               "roms-marbl-0.9-default",
               "roms-marbl-0.10-default",
               "roms-marbl-0.11-default",
+              "roms-marbl-0.12-default",
           }
           missing_specs = expected_specs - found_specs
           assert not missing_specs, f"missing bundled ModelSpecs: {sorted(missing_specs)}"

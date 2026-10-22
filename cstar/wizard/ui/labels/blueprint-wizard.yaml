@@ -824,6 +824,10 @@ fields:
     label: Compute carbonate sensitivities online
     symbol: cdr_online_carbonate_sensitivity
     hint: Compute the carbonate sensitivities of the CDR-lite air-sea CO2 flux online from MARBL’s alternative-CO2 state, instead of reading them from forcing files. Needs MARBL.
+  settings.cdr_lite.cdr_carbonate_sensitivity_time_interpolation:
+    label: Interpolate carbonate sensitivities in time
+    symbol: cdr_carbonate_sensitivity_time_interpolation
+    hint: Interpolate the carbonate sensitivities read from forcing files (ddic_dco2, ddic_dalk) linearly in time between records. Off, each record is held until the next one starts. Applies to the cdr_lite BGC mode only.
   settings.cdr_lite_output.do_cdr_lite_output:
     label: Write CDR-lite tracer output
     symbol: do_cdr_lite_output

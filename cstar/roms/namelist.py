@@ -26,9 +26,13 @@ subclasses:
 - :class:`RomsNamelistV0_9_0` — the schema for ucla-roms **>= 0.9.0, < 0.11.0**.
   Replaces ``&CDR_TRACER_OUTPUT_SETTINGS`` with ``&CDR_LITE_OUTPUT_SETTINGS``
   (ucla-roms PR #372) and adds ``&CDR_LITE_SETTINGS``.
-- :class:`RomsNamelistV0_11_0` — the schema for ucla-roms **>= 0.11.0**. Adds
-  ``use_constant_Fe``/``constant_Fe_value`` to ``&MARBL_BIOGEOCHEMISTRY_SETTINGS``
-  (ucla-roms PR #391) on top of 0.9.0.
+- :class:`RomsNamelistV0_11_0` — the schema for ucla-roms **>= 0.11.0, < 0.12.0**.
+  Adds ``use_constant_Fe``/``constant_Fe_value`` to
+  ``&MARBL_BIOGEOCHEMISTRY_SETTINGS`` (ucla-roms PR #391) on top of 0.9.0.
+- :class:`RomsNamelistV0_12_0` — the schema for ucla-roms **>= 0.12.0**. Adds
+  ``cdr_carbonate_sensitivity_time_interpolation`` to ``&CDR_LITE_SETTINGS``
+  (ucla-roms PR #396) and lets the ``&EXTRACT_DATA_SETTINGS`` per-child keys
+  take one entry per child, up to 8 (PR #395), on top of 0.11.0.
 
 Later breaking releases add a further ``RomsNamelistV<major>_<minor>_<patch>``
 subclass following the same ``V<major>_<minor>_<patch>`` suffix convention.
@@ -73,6 +77,9 @@ if TYPE_CHECKING:
 # overflow the declared array at run time.
 MARBL_TRACERS_TO_WRITE_MAX = 40
 MARBL_DIAGNOSTICS_TO_WRITE_MAX = 64
+# ucla-roms >= 0.12.0: `max_extract_chd` in src/param.F90, the length of the
+# &EXTRACT_DATA_SETTINGS per-child arrays.
+EXTRACT_CHILDREN_MAX = 8
 
 
 def _namelist_str_list(
@@ -359,13 +366,23 @@ class FrcOutputSettings(_NmlGroup):
     """Number of time records in forcing files"""
 
 
-class ExtractDataSettings(_NmlGroup):
+class _ExtractDataSettingsCommon(_NmlGroup):
+    """The ``&EXTRACT_DATA_SETTINGS`` keys every release reads as one value;
+    the per-child keys are on :class:`ExtractDataSettings` (one child) and
+    :class:`ExtractDataSettingsV0_12_0` (up to 8).
+    """
+
     do_extract: bool
     """Generate boundary files for a nested domain"""
     output_period_extract: float
     """How often to output these files"""
     nrpf_extract: int
     """Number of time records per file"""
+
+
+class ExtractDataSettings(_ExtractDataSettingsCommon):
+    """``&EXTRACT_DATA_SETTINGS`` for ucla-roms < 0.12.0: one child domain."""
+
     extract_file: str
     """File path containing nesting info"""
     n_chd: int
@@ -378,6 +395,82 @@ class ExtractDataSettings(_NmlGroup):
     """`hc` of nested domain"""
     extract_root_name: str = "child"
     """Root name (filename prefix) for extracted child boundary files"""
+
+
+_EXTRACT_PER_CHILD_KEYS: Final = (
+    "extract_file",
+    "n_chd",
+    "theta_s_chd",
+    "theta_b_chd",
+    "hc_chd",
+    "extract_root_name",
+)
+
+
+class ExtractDataSettingsV0_12_0(_ExtractDataSettingsCommon):
+    """``&EXTRACT_DATA_SETTINGS`` for ucla-roms >= 0.12.0: boundary data for up to
+    :data:`EXTRACT_CHILDREN_MAX` child domains (ucla-roms PR #395).
+
+    The per-child keys take one entry per child, in the same order; the children
+    are the ``extract_file`` entries. A single value sets child 1 only, as before,
+    and is written back as a single value, so a one-child namelist is unchanged.
+    Checked here, when ``do_extract`` is on, are the rules ROMS stops on in every
+    build: each child after the first has its own ``N_chd``, ``theta_s_chd``,
+    ``theta_b_chd`` and ``hc_chd`` (only child 1 has defaults), and no array is
+    longer than ``max_extract_chd``. The rules that depend on ``PARALLEL_IO``
+    (a distinct ``extract_root_name`` per child with it, one ``N_chd`` for all
+    children without it) are left to ROMS.
+    """
+
+    do_extract: bool
+    """Generate boundary files for nested domains"""
+    extract_file: str | list[str]
+    """File path(s) containing nesting info"""
+    n_chd: int | list[int]
+    """Number of vertical levels in nested domain(s)"""
+    theta_s_chd: float | list[float]
+    """`theta_s` of nested domain(s)"""
+    theta_b_chd: float | list[float]
+    """`theta_b` of nested domain(s)"""
+    hc_chd: float | list[float]
+    """`hc` of nested domain(s)"""
+    extract_root_name: str | list[str] = Field(default="child")
+    """Output file root(s) (PARALLEL_IO)"""
+
+    @model_validator(mode="after")
+    def _check_children(self) -> Self:
+        """Reject a per-child layout ROMS stops on at startup (see the class
+        docstring), reporting every problem at once.
+        """
+        entries = {key: _as_list(getattr(self, key)) for key in _EXTRACT_PER_CHILD_KEYS}
+        problems = [
+            f"{key} has {len(values)} entries; ucla-roms reads at most "
+            f"{EXTRACT_CHILDREN_MAX} (max_extract_chd)"
+            for key, values in entries.items()
+            if len(values) > EXTRACT_CHILDREN_MAX
+        ]
+        n_children = len(entries["extract_file"])
+        if self.do_extract and n_children > 1:
+            if any(not str(f).strip() for f in entries["extract_file"]):
+                problems.append(
+                    "extract_file has a blank entry; each child domain needs its "
+                    "nesting file"
+                )
+            problems.extend(
+                f"{key} has {len(entries[key])} entries for {n_children} child "
+                "domains (extract_file); give one per child"
+                for key in ("n_chd", "theta_s_chd", "theta_b_chd", "hc_chd")
+                if len(entries[key]) != n_children
+            )
+            roots = entries["extract_root_name"]
+            if isinstance(self.extract_root_name, list) and len(roots) != n_children:
+                problems.append(
+                    f"extract_root_name has {len(roots)} entries for {n_children} "
+                    "child domains (extract_file); give one per child"
+                )
+        if problems:
+            raise ValueError("; ".join(problems))
+        return self
 
 
 class SpongeTuneSettings(_NmlGroup):
@@ -595,6 +688,19 @@ class CdrLiteSettings(_NmlGroup):
     of reading ddic_dco2/ddic_dalk from the forcing files. Assumes ALT_CO2 sees
     the same atmosphere as DIC/ALK: with PCO2AIR_FORCING, xco2_air_alt must
     equal xco2_air in the forcing files."""
+
+
+class CdrLiteSettingsV0_12_0(CdrLiteSettings):
+    """``&CDR_LITE_SETTINGS`` for ucla-roms >= 0.12.0: adds the time-interpolation
+    switch for the carbonate sensitivities read from forcing files (ucla-roms
+    PR #396). Its default, on, is what earlier releases always did.
+    """
+
+    cdr_carbonate_sensitivity_time_interpolation: bool = Field(default=True)
+    """Applies to ddic_dco2/ddic_dalk read from frcfiles: if .true. (default),
+    they are interpolated linearly in time between the two bracketing records;
+    if .false., each record is held until the next one starts. It has no effect
+    with the online option."""
 
 
 class CdrLiteOutputSettings(_NmlGroup):
@@ -878,9 +984,11 @@ class RomsNamelistBase(BaseModel):
     :class:`RomsNamelistV0_7_0` for ucla-roms >= 0.7.0, < 0.9.0, which adds the
     two CDR tracer / gas-exchange output groups, :class:`RomsNamelistV0_9_0`
     for ucla-roms >= 0.9.0, < 0.11.0, which renames the CDR tracer output group
-    to ``&CDR_LITE_OUTPUT_SETTINGS``, or :class:`RomsNamelistV0_11_0` for
-    ucla-roms >= 0.11.0, which adds the constant-iron keys to
-    ``&MARBL_BIOGEOCHEMISTRY_SETTINGS``) or select one automatically with
+    to ``&CDR_LITE_OUTPUT_SETTINGS``, :class:`RomsNamelistV0_11_0` for
+    ucla-roms >= 0.11.0, < 0.12.0, which adds the constant-iron keys to
+    ``&MARBL_BIOGEOCHEMISTRY_SETTINGS``, or :class:`RomsNamelistV0_12_0` for
+    ucla-roms >= 0.12.0, which adds the carbonate-sensitivity time-interpolation
+    key and per-child extraction keys) or select one automatically with
     :func:`namelist_schema_for_ref`.
     """
 
@@ -1137,7 +1245,7 @@ class RomsNamelistV0_9_0(RomsNamelistV0_6_0):
 
 
 class RomsNamelistV0_11_0(RomsNamelistV0_9_0):
-    """The ROMS namelist schema for ucla-roms >= 0.11.0.
+    """The ROMS namelist schema for ucla-roms >= 0.11.0, < 0.12.0.
 
     Adds `use_constant_Fe`/`constant_Fe_value` to `&MARBL_BIOGEOCHEMISTRY_SETTINGS`
     (ucla-roms PR #391) on top of the 0.9.0 schema; otherwise unchanged. Both
@@ -1146,6 +1254,24 @@ class RomsNamelistV0_11_0(RomsNamelistV0_9_0):
     """
 
     marbl_biogeochemistry_settings: MarblBiogeochemistrySettingsV0_11_0
+
+
+class RomsNamelistV0_12_0(RomsNamelistV0_11_0):
+    """The ROMS namelist schema for ucla-roms >= 0.12.0.
+
+    On top of the 0.11.0 schema: `&CDR_LITE_SETTINGS` gains
+    `cdr_carbonate_sensitivity_time_interpolation` (ucla-roms PR #396, see
+    :class:`CdrLiteSettingsV0_12_0`), always written, which is why earlier
+    releases (which stop on unknown namelist keys) keep the 0.11.0 schema; and
+    the `&EXTRACT_DATA_SETTINGS` per-child keys take one entry per child (PR
+    #395, see :class:`ExtractDataSettingsV0_12_0`), which earlier releases reject
+    as too many values.
+    """
+
+    extract_data_settings: ExtractDataSettingsV0_12_0
+    cdr_lite_settings: CdrLiteSettingsV0_12_0 = Field(
+        default_factory=CdrLiteSettingsV0_12_0
+    )
 
 
 # ---- Schema version selection ----
@@ -1158,19 +1284,20 @@ UCLA_ROMS_0_6_0: Final[tuple[int, int, int]] = (0, 6, 0)
 UCLA_ROMS_0_7_0: Final[tuple[int, int, int]] = (0, 7, 0)
 UCLA_ROMS_0_9_0: Final[tuple[int, int, int]] = (0, 9, 0)
 UCLA_ROMS_0_11_0: Final[tuple[int, int, int]] = (0, 11, 0)
+UCLA_ROMS_0_12_0: Final[tuple[int, int, int]] = (0, 12, 0)
 
 # Half-open ucla-roms version ranges ``[lower, upper)`` mapped to the schema
 # class that applies; `None` bounds are unbounded. Ranges must be contiguous
 # and non-overlapping, ordered oldest-first; the last entry's upper bound
 # must be `None` (it covers "latest known release and beyond").
 #
-# Recipe for the next breaking namelist release (e.g. 0.12.0):
+# Recipe for the next breaking namelist release (e.g. 0.13.0):
 #   1. Add the release constant:
-#        UCLA_ROMS_0_12_0: Final[tuple[int, int, int]] = (0, 12, 0)
+#        UCLA_ROMS_0_13_0: Final[tuple[int, int, int]] = (0, 13, 0)
 #   2. Cap the current last entry's upper bound at the new version:
-#        (UCLA_ROMS_0_11_0, UCLA_ROMS_0_12_0, RomsNamelistV0_11_0),
+#        (UCLA_ROMS_0_12_0, UCLA_ROMS_0_13_0, RomsNamelistV0_12_0),
 #   3. Append a new open-ended entry for the new schema:
-#        (UCLA_ROMS_0_12_0, None, RomsNamelistV0_12_0),
+#        (UCLA_ROMS_0_13_0, None, RomsNamelistV0_13_0),
 NAMELIST_SCHEMA_REGISTRY: tuple[
     tuple[
         tuple[int, int, int] | None, tuple[int, int, int] | None, type[RomsNamelistBase]
@@ -1183,7 +1310,8 @@ NAMELIST_SCHEMA_REGISTRY: tuple[
     (UCLA_ROMS_0_6_0, UCLA_ROMS_0_7_0, RomsNamelistV0_6_0),
     (UCLA_ROMS_0_7_0, UCLA_ROMS_0_9_0, RomsNamelistV0_7_0),
     (UCLA_ROMS_0_9_0, UCLA_ROMS_0_11_0, RomsNamelistV0_9_0),
-    (UCLA_ROMS_0_11_0, None, RomsNamelistV0_11_0),
+    (UCLA_ROMS_0_11_0, UCLA_ROMS_0_12_0, RomsNamelistV0_11_0),
+    (UCLA_ROMS_0_12_0, None, RomsNamelistV0_12_0),
 )
 
 
