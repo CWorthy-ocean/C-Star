@@ -16,8 +16,8 @@ jobs:
   test:
     name: unit-${{ matrix.os }}-${{ matrix.python-version }}
     runs-on: ${{ matrix.os }}
-    # the suite runs in ~2 minutes; don't let a teardown hang hold a runner
-    # for the default 6 hours
+    # the suite runs in ~5 minutes locally (CI runners are slower); don't let a
+    # teardown hang hold a runner for the default 6 hours
     timeout-minutes: 30
     strategy:
       fail-fast: false
@@ -43,11 +43,14 @@ jobs:
           conda info
           printenv
 
+      # No --force-reinstall: it made pip replace the conda builds of numpy,
+      # netCDF4, h5py, numba, ... with PyPI wheels, so CI tested a different
+      # binary stack than environment-laptop.yml installs.
       - name: Install C-Star
         shell: micromamba-shell {0}
         run: |
            python -V
-           python -m pip install -e ".[dev]" --force-reinstall
+           python -m pip install -e ".[dev]"
 
       - name: Locate pooch caches
         id: pooch-caches
@@ -71,11 +74,17 @@ jobs:
           key: ${{ runner.os }}-unit-data-${{ hashFiles('environment-laptop.yml') }}
           restore-keys: ${{ runner.os }}-unit-data-
 
+      # sysmon (PEP 669) measures the same lines as coverage's default tracer at
+      # a fraction of the overhead, which roughly doubled the suite's runtime.
+      # Output stays captured (no -s): wizard tests print whole blueprints, which
+      # ran to ~1M log lines per job.
       - name: Running Tests
-        shell: micromamba-shell {0}        
+        shell: micromamba-shell {0}
+        env:
+          COVERAGE_CORE: sysmon
         run: |
            python -V
-           coverage run --rcfile=coverage.toml -m pytest -s --verbose cstar/tests/unit_tests/*
+           coverage run --rcfile=coverage.toml -m pytest --verbose --durations=25 cstar/tests/unit_tests/*
            
       - name: Get coverage report
         shell: micromamba-shell {0}                
