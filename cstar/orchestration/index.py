@@ -573,6 +573,15 @@ class RunRecord(t.Protocol):
         """
         ...
 
+    @property
+    def live(self) -> bool:
+        """Whether the run's sentinels and launcher are on this machine.
+
+        A live run's status is read from them rather than from what its records
+        say.
+        """
+        ...
+
     def step_status(self, name: str) -> str:
         """The orchestration status name of a step; empty when unknown."""
         ...
@@ -607,6 +616,11 @@ class ManifestRecord:
     def start_at(self) -> datetime:
         """When the latest attempt was scheduled, else when the manifest was written."""
         return self.location.start_at
+
+    @property
+    def live(self) -> bool:
+        """Whether the run's sentinels are on this machine: never, for a manifest."""
+        return False
 
     @functools.cached_property
     def manifest(self) -> RunManifest:
@@ -777,7 +791,8 @@ def _tracked_for(location: RunLocation, *, same_root: bool) -> WorkplanRun | Non
         The record, when tracking holds one for the run-id under the run's uuid
         and its run directory exists; failing that, the record that has the
         run's uuid under another run-id, as a run attached `--as` has;
-        otherwise `None`.
+        otherwise `None`. Records that cannot be told apart (several share the
+        run's uuid) count as none: the location is the run the user found.
     """
     if location.kind != "workplan":
         return None
@@ -793,7 +808,7 @@ def _tracked_for(location: RunLocation, *, same_root: bool) -> WorkplanRun | Non
             return None
         if same_root and tracked.output_path.resolve() != location.root.resolve():
             return None
-    except (ValueError, OSError) as ex:
+    except (ValueError, OSError, CstarError) as ex:
         log.debug(f"Unable to use the tracking record of {location.run_id!r}: {ex}")
         return None
     return tracked

@@ -1,5 +1,6 @@
 """Tests for the `cstar run check` command."""
 
+import contextlib
 import hashlib
 import os
 import re
@@ -36,9 +37,11 @@ from cstar.orchestration.manifest import (
     StepEntry,
     StepRecord,
     carried_digest,
+    compute_product_digests,
     product_digest,
     read_run_manifest,
     read_step_record,
+    record_product_digests,
     write_run_manifest,
     write_step_record,
 )
@@ -1194,6 +1197,75 @@ def test_record_digests_writes_them_into_a_tracked_run(run: FakeRun) -> None:
     on_disk = read_step_record(run.spin_up)
     assert on_disk is not None
     assert [p.digest for p in on_disk.products] == [wanted]
+
+
+def _tracked_with_one_product(run: FakeRun) -> None:
+    """Give the tracked run a manifest and step record holding one product."""
+    made = entry("Spin Up", "tasks/spin-up", product("output/result.yaml", 8))
+    write_manifest(run.root, made)
+    assert made.record is not None
+    write_step_record(run.spin_up, made.record)
+
+
+def test_record_digests_holds_the_lock_around_the_write_only(run: FakeRun) -> None:
+    """Verify the digests are computed outside `manifest_lock`, and only the
+    write of the records, from a fresh read of the manifest, is under it.
+    """
+    _tracked_with_one_product(run)
+    events: list[str] = []
+
+    @contextlib.contextmanager
+    def lock(run_id: str) -> t.Iterator[None]:
+        assert run_id == run.record.run_id
+        events.append("lock")
+        yield
+        events.append("unlock")
+
+    def spy(name: str, real: t.Callable[..., t.Any]) -> mock.Mock:
+        def call(*args: t.Any, **kwargs: t.Any) -> t.Any:
+            events.append(name)
+            return real(*args, **kwargs)
+
+        return mock.Mock(side_effect=call)
+
+    with (
+        mock.patch("cstar.cli.run.check.manifest_lock", lock),
+        mock.patch(
+            "cstar.cli.run.check.compute_product_digests",
+            spy("compute", compute_product_digests),
+        ),
+        mock.patch(
+            "cstar.cli.run.check.record_product_digests",
+            spy("record", record_product_digests),
+        ),
+    ):
+        result = invoke(run.record.run_id, ARG_RECORD_DIGESTS, record=run.record)
+
+    assert "Recorded 1 digest(s)." in result.stdout
+    assert events == ["compute", "lock", "record", "unlock"]
+
+
+def test_record_digests_with_verify_checks_once_against_the_recorded_digests(
+    run: FakeRun,
+) -> None:
+    """Verify `--record-digests --verify` runs the checks one time, on a manifest
+    that already holds the digests just recorded.
+    """
+    _tracked_with_one_product(run)
+
+    with mock.patch("cstar.cli.run.check.check_run", wraps=check_run) as checked:
+        result = invoke(
+            run.record.run_id, ARG_RECORD_DIGESTS, ARG_VERIFY, record=run.record
+        )
+
+    assert "Recorded 1 digest(s)." in result.stdout
+    assert "Skipped digest verification" not in result.stdout
+    checked.assert_called_once()
+    manifest = checked.call_args.kwargs["manifest"]
+    wanted = product_digest(run.spin_up / "output" / "result.yaml")
+    assert [
+        p.digest for e in manifest.steps if e.record for p in e.record.products
+    ] == [wanted]
 
 
 def test_record_digests_refuses_a_run_attached_read_only(

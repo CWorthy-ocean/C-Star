@@ -8,7 +8,7 @@ from datetime import datetime
 from enum import StrEnum
 from pathlib import Path
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, PrivateAttr
 
 from cstar.base.env import max_concurrency
 from cstar.base.exceptions import CstarError
@@ -108,6 +108,9 @@ class WorkplanRun(BaseModel):
 
     size_measured_at: datetime | None = Field(default=None)
     """When `step_sizes` was last measured; `None` until measured."""
+
+    _manifest_cache: RunManifest | None = PrivateAttr(default=None)
+    """The manifest of an attached run, kept after its first read."""
 
     @property
     def size_mb(self) -> int:
@@ -228,10 +231,23 @@ class WorkplanRun(BaseModel):
             raise CstarError(msg) from ex
 
     @property
-    def manifest(self) -> RunManifest:
-        """The run's manifest, read from the run directory on every access.
+    def live(self) -> bool:
+        """Whether the run's sentinels and launcher are on this machine.
 
-        Not kept: the manifest of a tracked run changes as the run goes on.
+        Returns
+        -------
+        bool
+            `False` for an attached run, whose status is what its records say.
+        """
+        return not self.attached
+
+    @property
+    def manifest(self) -> RunManifest:
+        """The run's manifest, read from the run directory.
+
+        Read on every access for a run scheduled here, whose manifest changes
+        as the run goes on. An attached run's manifest is never refreshed by
+        this machine, so it is parsed once and kept.
 
         Returns
         -------
@@ -242,6 +258,8 @@ class WorkplanRun(BaseModel):
         CstarError
             If the run directory holds no manifest, or one that cannot be read.
         """
+        if self._manifest_cache is not None:
+            return self._manifest_cache
         try:
             manifest = read_run_manifest(self.output_path)
         except DOCUMENT_READ_ERRORS as ex:
@@ -253,6 +271,8 @@ class WorkplanRun(BaseModel):
         if manifest is None:
             msg = f"Run {self.run_id!r} has no run manifest at {self.output_path}"
             raise CstarError(msg)
+        if self.attached:
+            self._manifest_cache = manifest
         return manifest
 
     def step_status(self, name: str) -> str:

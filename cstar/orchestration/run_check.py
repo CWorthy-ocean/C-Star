@@ -22,7 +22,7 @@ from enum import StrEnum, auto
 from pathlib import Path
 
 from cstar.applications.core import ArtifactKind
-from cstar.base.digest import KNOWN_SCHEMES, SHA256_SCHEME
+from cstar.base.digest import KNOWN_SCHEMES
 from cstar.base.log import get_logger
 from cstar.execution.file_system import (
     DirectoryManager,
@@ -433,9 +433,10 @@ def find_product_findings(
     manifest : RunManifest
         The run's manifest, with the step records folded in.
     verify : bool
-        Whether to compare the content of each product that records a digest (or,
-        in a record that predates digests, a sha256). A netCDF file is read in
-        part, as its digest was computed; any other file is read whole.
+        Whether to compare the content of each product that records a digest (a
+        record that predates digests has its sha256 folded into one). A netCDF
+        file is read in part, as its digest was computed; any other file is read
+        whole.
     skipped : list[str] | None
         Notes on what was not checked are appended here: one for the products
         recorded with a digest scheme this build does not compute.
@@ -476,9 +477,7 @@ def find_product_findings(
                 text = f"{found.st_size} bytes, recorded {product.size_bytes}"
                 findings.append(Finding(FindingKind.PRODUCT_SIZE, file, path=text))
             elif verify and regular:
-                wanted = product.digest or (
-                    f"{SHA256_SCHEME}:{product.sha256}" if product.sha256 else ""
-                )
+                wanted = product.digest
                 if not wanted:
                     continue
                 scheme = wanted.partition(":")[0]
@@ -791,10 +790,7 @@ def check_run(
         )
         findings.extend(find_input_findings(run_root, manifest))
         if verify and not any(
-            p.digest or p.sha256
-            for e in manifest.steps
-            if e.record
-            for p in e.record.products
+            p.digest for e in manifest.steps if e.record for p in e.record.products
         ):
             skipped.append("digest verification: no product records a digest")
 

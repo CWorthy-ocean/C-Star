@@ -77,8 +77,8 @@ def resolve_by_handle(
     record = lookup_run(handle, hint=hint)
     if isinstance(record, WorkplanRun):
         set_ctxmap(context, KEY_RUN, record)
-        if record.attached:
-            return directory(str(record.output_path))
-        return tracked(record)
+        if record.live:
+            return tracked(record)
+        return directory(str(record.output_path))
 
     return (indexed or directory)(str(record.output_path))

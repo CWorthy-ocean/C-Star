@@ -37,7 +37,6 @@ from cstar.orchestration.compute_environment import (
 )
 from cstar.orchestration.index import (
     HandleKind,
-    ManifestRecord,
     RunHandle,
     parse_run_handle,
     resolve_run,
@@ -869,11 +868,7 @@ class ExternalRuns:
             try:
                 step = self.step(ref)
                 record = self.record(ref.run)
-                if isinstance(record, ManifestRecord) or (
-                    isinstance(record, WorkplanRun) and record.attached
-                ):
-                    probe = self._manifest_probe(ref, step, record, launcher)
-                else:
+                if record.live:
                     handle = self.handle(ref, launcher.handle_klass())
                     status = await launcher.query_status(handle)
                     probe = _Probe(
@@ -883,6 +878,8 @@ class ExternalRuns:
                         launcher.name,
                         launcher.supports_foreign_dependencies,
                     )
+                else:
+                    probe = self._manifest_probe(ref, step, record, launcher)
             except (CstarError, ValueError, OSError, yaml.YAMLError) as ex:
                 # a corrupt sentinel or workplan, or a failed query, is a
                 # problem with this reference rather than a crash

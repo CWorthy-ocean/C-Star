@@ -723,6 +723,21 @@ class TestManifestRecord:
         assert record.run_id == "run"
 
 
+class TestLive:
+    def test_a_manifest_record_is_never_live(self, tmp_path: Path) -> None:
+        root = tmp_path / "kept"
+        make_run(root, "kept")
+
+        assert resolve_run(parse_run_handle(str(root))).live is False
+
+    def test_a_tracked_record_is_live_unless_attached(self, tmp_path: Path) -> None:
+        root = tmp_path / "kept"
+        make_run(root, "kept")
+
+        assert track(root, "scheduled").live is True
+        assert track(root, "attached", attached=True).live is False
+
+
 class TestResolveRunId:
     def test_a_tracked_run_wins(self) -> None:
         root = local_run("tracked")
@@ -1266,6 +1281,22 @@ class TestAttachedRuns:
 
         assert isinstance(found, WorkplanRun)
         assert found.run_id == "shared-copy"
+
+    def test_a_directory_named_by_the_user_is_found_though_the_uuid_is_ambiguous(
+        self, tmp_path: Path
+    ) -> None:
+        root = local_run("original")
+        wanted = local_manifest_id(root)
+        for name in ("first", "second"):
+            (tmp_path / name).mkdir()
+            track(tmp_path / name, name, uuid=wanted, attached=True)
+
+        by_path = resolve_run(parse_run_handle(str(root)))
+
+        assert isinstance(by_path, ManifestRecord)
+        assert by_path.output_path == root
+        with pytest.raises(CstarError, match="More than one tracked run"):
+            resolve_run(parse_run_handle(run_uri(wanted)))
 
     def test_a_directory_named_by_the_user_must_be_the_attached_one(
         self, tmp_path: Path

@@ -40,6 +40,7 @@ from cstar.orchestration.dag_runner import (
 from cstar.orchestration.manifest import (
     RUN_MANIFEST_NAME,
     RunManifest,
+    compute_product_digests,
     fold_step_records,
     manifest_lock,
     read_run_manifest,
@@ -93,7 +94,8 @@ it shrank: the step's own log is still written after the record is taken).
 {ARG_VERIFY} also compares
 the content where a digest is recorded: a bounded sample for netCDF files, the
 whole file otherwise. {ARG_RECORD_DIGESTS} computes and records the digest of
-each product that has none, which is how a run gets digests to verify. The
+each product that has none, before the checks, which is how a run gets digests
+to verify (with {ARG_VERIFY}, in one pass). The
 files each attempt carried into `attempts/` (the workplan, its variables, the
 blueprints) are compared with the digests the manifest recorded, always. For a
 run tracked on this machine the manifest is refreshed first, as `cstar run show`
@@ -431,6 +433,11 @@ def _record_digests(resolved: CheckTarget, manifest: RunManifest | None) -> None
     manifest : RunManifest | None
         The run's manifest, with the step records folded in.
 
+    Notes
+    -----
+    The digests are computed without the lock, which may take long; only the
+    write of the records, from a fresh read of the manifest, holds it.
+
     Raises
     ------
     typer.Exit
@@ -443,12 +450,13 @@ def _record_digests(resolved: CheckTarget, manifest: RunManifest | None) -> None
         )
         raise typer.Exit(1)
 
+    digests = compute_product_digests(resolved.run_root, manifest)
     try:
         if resolved.run_id is None:
-            recorded = record_product_digests(resolved.run_root, manifest)
+            recorded = record_product_digests(resolved.run_root, digests)
         else:
             with manifest_lock(resolved.run_id):
-                recorded = record_product_digests(resolved.run_root, manifest)
+                recorded = record_product_digests(resolved.run_root, digests)
     except (LockTimeoutError, LockUnsupportedError) as ex:
         typer.echo(f"No digest recorded: {ex}", err=True)
         raise typer.Exit(1) from ex
@@ -538,6 +546,10 @@ def check(
             typer.echo(msg, err=True)
 
     manifest = _load_manifest(resolved, workplan, no_refresh)
+    if record_digests:
+        # before the checks, so one `--verify` pass sees the digests just recorded
+        _record_digests(resolved, manifest)
+        manifest = _load_manifest(resolved, workplan, no_refresh=True)
 
     def run_checks() -> RunCheckReport:
         return check_run(
@@ -559,11 +571,6 @@ def check(
             report = run_checks()
         else:
             typer.echo("No symlink to rewrite.")
-
-    if record_digests:
-        _record_digests(resolved, manifest)
-        if verify:
-            report = run_checks()
 
     for line in format_findings(report):
         typer.echo(line)

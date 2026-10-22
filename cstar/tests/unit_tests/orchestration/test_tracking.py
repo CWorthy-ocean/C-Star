@@ -21,6 +21,7 @@ from cstar.orchestration.manifest import (
     RunManifest,
     StepEntry,
     StepRecord,
+    read_run_manifest,
     write_run_manifest,
     write_step_record,
 )
@@ -1098,6 +1099,48 @@ def test_workplanrun_manifest_is_read_on_every_access(tmp_path: Path) -> None:
     write_run_manifest(tmp_path / "output", changed)
 
     assert run.manifest.name == "renamed"
+
+
+def test_attached_workplanrun_manifest_is_read_once(tmp_path: Path) -> None:
+    """Verify an attached run's manifest, which this machine never refreshes, is
+    parsed once however many steps ask for their status.
+    """
+    root = tmp_path / "output"
+    _write_manifest(root, "attached-once")
+    write_step_record(root / "tasks" / "one", _step_record())
+    run = _make_workplan_run(tmp_path, "attached-once", metadata={KEY_ATTACHED: "1"})
+
+    with mock.patch(
+        "cstar.orchestration.tracking.read_run_manifest", wraps=read_run_manifest
+    ) as read:
+        assert run.step_status("one") == "Done"
+        assert run.step_status("one") == "Done"
+
+    read.assert_called_once()
+
+
+def test_scheduled_workplanrun_manifest_is_read_again(tmp_path: Path) -> None:
+    """Verify a run scheduled here, whose manifest changes, is never kept."""
+    _write_manifest(tmp_path / "output", "scheduled-again")
+    run = _make_workplan_run(tmp_path, "scheduled-again")
+
+    with mock.patch(
+        "cstar.orchestration.tracking.read_run_manifest", wraps=read_run_manifest
+    ) as read:
+        run.manifest
+        run.manifest
+
+    assert read.call_count == 2
+
+
+@pytest.mark.parametrize(("value", "live"), [("", True), ("0", True), ("1", False)])
+def test_workplanrun_is_live_unless_attached(
+    tmp_path: Path, value: str, live: bool
+) -> None:
+    """Verify only an attached run is not live: its sentinels are elsewhere."""
+    run = _make_workplan_run(tmp_path, "liveness", metadata={KEY_ATTACHED: value})
+
+    assert run.live is live
 
 
 def test_workplanrun_manifest_that_is_missing_or_unreadable(tmp_path: Path) -> None:

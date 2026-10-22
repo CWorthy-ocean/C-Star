@@ -23,7 +23,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from urllib.parse import urlsplit
 
-from pydantic import AfterValidator, Field
+from pydantic import AfterValidator, Field, model_validator
 
 from cstar.applications.core import ArtifactKind, ArtifactSpec, get_application
 from cstar.base.digest import (
@@ -245,8 +245,8 @@ class Product(ConfiguredBaseModel):
     """The size of the product in bytes; zero when not measured."""
 
     sha256: str = Field(default="")
-    """A bare sha256 of the product's bytes, written by no current release: read for
-    records that predate `digest`."""
+    """A bare sha256 of the product's bytes, written by no current release: kept so
+    records that predate `digest` load, and folded into `digest` on load."""
 
     digest: str = Field(default="")
     """The content digest of the product, `<scheme>:<hex>`: `nc-sample-v2` for a
@@ -256,6 +256,13 @@ class Product(ConfiguredBaseModel):
 
     metadata: dict[str, str | int | float | list[str]] = Field(default_factory=dict)
     """Model-specific detail, such as an output stream."""
+
+    @model_validator(mode="after")
+    def _fold_sha256(self) -> "Product":
+        """Read a bare `sha256` of an older record as the `digest` it stands for."""
+        if self.sha256 and not self.digest:
+            self.digest = f"{SHA256_SCHEME}:{self.sha256}"
+        return self
 
     @property
     def known_kind(self) -> ArtifactKind:
@@ -1699,51 +1706,88 @@ def fold_step_records(
     return before != manifest.model_dump(mode="json", exclude={"observed_at"})
 
 
-def record_product_digests(
-    root: Path, manifest: RunManifest, *, overwrite: bool = False
-) -> int:
-    """Compute and record the digest of each product that has none.
+def compute_product_digests(
+    root: Path, manifest: RunManifest
+) -> dict[tuple[str, str], str]:
+    """Compute the digest of each product that has none.
 
     Each digest is `product_digest` of the file, a bounded read for a netCDF file
     and a read of the whole file otherwise. A product whose path is not a regular
     file is skipped, and one that cannot be digested is skipped with a warning:
-    recording is bookkeeping and never stops a run. The step records and the
-    manifest are written only when a digest was recorded.
+    recording is bookkeeping and never stops a run.
 
-    The caller holds `manifest_lock` when the run may be refreshed concurrently.
+    Nothing is locked or written, and the reads may take long; hand the result to
+    `record_product_digests`.
 
     Parameters
     ----------
     root : Path
         The run root.
     manifest : RunManifest
-        The manifest, with the step records folded in; updated in place.
-    overwrite : bool
-        Whether to recompute a digest a product already records.
+        The manifest, with the step records folded in; not changed.
+
+    Returns
+    -------
+    dict[tuple[str, str], str]
+        The digest of each product, by its step name and its path.
+    """
+    digests: dict[tuple[str, str], str] = {}
+    for entry in manifest.steps:
+        if entry.record is None:
+            continue
+        step_root = root / entry.working_dir
+        for product in entry.record.products:
+            file = step_root / product.path
+            if product.digest or not file.is_file():
+                continue
+            try:
+                digests[entry.name, product.path] = product_digest(file)
+            except Exception as ex:  # bookkeeping: an unreadable file is skipped
+                log.warning(f"No digest recorded for {file}: {ex}")
+    return digests
+
+
+def record_product_digests(root: Path, digests: "Mapping[tuple[str, str], str]") -> int:
+    """Record computed product digests in the step records and the manifest.
+
+    The manifest is read again from the run, so what another writer recorded
+    since the digests were computed is kept: a product that has a digest by now
+    keeps it. The step records and the manifest are written
+    only when a digest was recorded.
+
+    The caller holds `manifest_lock` around this call only; computing the digests
+    is not done under it.
+
+    Parameters
+    ----------
+    root : Path
+        The run root.
+    digests : Mapping[tuple[str, str], str]
+        The digests from `compute_product_digests`, by step name and product path.
 
     Returns
     -------
     int
         The number of digests recorded.
     """
+    manifest = read_run_manifest(root)
+    if manifest is None:
+        log.debug(f"No digest recorded: {root} holds no run manifest")
+        return 0
+    fold_step_records(manifest, root)
+
     recorded = 0
     for entry in manifest.steps:
         if entry.record is None:
             continue
-        step_root = root / entry.working_dir
         count = 0
         for product in entry.record.products:
-            file = step_root / product.path
-            if (product.digest and not overwrite) or not file.is_file():
-                continue
-            try:
-                product.digest = product_digest(file)
-            except Exception as ex:  # bookkeeping: an unreadable file is skipped
-                log.warning(f"No digest recorded for {file}: {ex}")
-                continue
-            count += 1
+            digest = digests.get((entry.name, product.path))
+            if digest and not product.digest:
+                product.digest = digest
+                count += 1
         if count:
-            write_step_record(step_root, entry.record)
+            write_step_record(root / entry.working_dir, entry.record)
             recorded += count
 
     if recorded:
