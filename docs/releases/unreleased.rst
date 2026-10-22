@@ -15,6 +15,12 @@ Breaking Changes
   - Their old homes, ``roms_marbl.transforms``, ``roms_marbl.app`` and ``roms_marbl.file_system``, no longer re-export them.
 
 - New attempts no longer write ``<stem>_original.bak``, ``<stem>.vars`` or their rotated ``.1``, ``.2`` copies in the run directory; read the attempt's ``attempts/<time>/`` copies instead. (`#789 <https://github.com/CWorthy-ocean/C-Star/pull/789>`_)
+- The wizard's default ModelSpec, and the ucla-roms release the integration tests pin, move to ``roms-marbl-0.12-default`` / ucla-roms 0.12.0. (`#797 <https://github.com/CWorthy-ocean/C-Star/pull/797>`_)
+- New namelist tier for ucla-roms >= 0.12.0, which always writes ``cdr_carbonate_sensitivity_time_interpolation``; earlier releases stop on that key, so they keep the 0.11 tier, and Forge rejects turning it off there with an error naming 0.12.0. (`#797 <https://github.com/CWorthy-ocean/C-Star/pull/797>`_)
+- ucla-roms refs that aren't release tags (``main``, other branches, and commit hashes C-Star cannot resolve to a release) select the 0.12 tier; a ucla-roms build without #396 stops on the new key. (`#797 <https://github.com/CWorthy-ocean/C-Star/pull/797>`_)
+
+  - Pin a release tag (e.g. ``0.11.0``) to keep the 0.11 tier; a commit hash that resolves to a release keeps that release's tier in both Forge and roms_marbl.
+
 
 New features
 ~~~~~~~~~~~~
@@ -97,6 +103,18 @@ New features
 
   - The workplan builder's Refresh runs lists the same runs, named by ``run://<uuid>``.
 
+- ``cdr_lite.cdr_carbonate_sensitivity_time_interpolation`` (ucla-roms >= 0.12.0) controls whether ddic_dco2/ddic_dalk read from forcing files are interpolated in time (default, as before) or held until the next record. (`#797 <https://github.com/CWorthy-ocean/C-Star/pull/797>`_)
+
+  - Setting it to false is rejected where ROMS would ignore it: outside ``bgc_mode: cdr_lite``, or with online carbonate sensitivities.
+  - The wizard shows it under the CDR settings in ``bgc_mode: cdr_lite`` only.
+
+- The ucla-roms 0.12 namelist schema accepts one entry per child domain (up to 8) for the extraction settings, so a 0.12 namelist or namelist override with several children validates. (`#797 <https://github.com/CWorthy-ocean/C-Star/pull/797>`_)
+
+  - With extraction on, every child needs its own vertical-grid settings (``N_chd``, ``theta_s_chd``, ``theta_b_chd``, ``hc_chd``), as ROMS requires.
+  - A single value is still written as a single value, so one-child namelists are unchanged.
+
+- New ``roms-marbl-0.12-default`` ModelSpec pinned to ucla-roms 0.12.0. (`#797 <https://github.com/CWorthy-ocean/C-Star/pull/797>`_)
+
 
 
 
@@ -161,3 +179,6 @@ Miscellaneous
 - The end-to-end tutorial is retitled "Using Blueprints to Set Up and Run an Ocean Model" and points to the workplan page as its next step. (`#791 <https://github.com/CWorthy-ocean/C-Star/pull/791>`_)
 - Published the run manifest and step record schemas v1.2.0, and documented execution facts in the workplan guide and terminology. (`#794 <https://github.com/CWorthy-ocean/C-Star/pull/794>`_)
 - Published the workplan schema v1.1.0 and the run manifest schema v1.3.0, and documented run handles, extending a finished run, the project runs area and ``ls --shared``/``--all``. (`#796 <https://github.com/CWorthy-ocean/C-Star/pull/796>`_)
+- ``pio-dev`` (tracks ucla-roms ``main``) carries the new key; the packaging check lists the new ModelSpec. (`#797 <https://github.com/CWorthy-ocean/C-Star/pull/797>`_)
+- The integration test catalog, the weekly extended workflow's release cell and the Tier 1 namelist goldens move to ucla-roms 0.12.0. (`#797 <https://github.com/CWorthy-ocean/C-Star/pull/797>`_)
+- Forge developer docs, the contributing guide and the ModelSpec docs describe the 0.12 tier and the new default spec; new unit goldens for the 0.12 spec differ from the 0.11 ones by exactly the new key. (`#797 <https://github.com/CWorthy-ocean/C-Star/pull/797>`_)
