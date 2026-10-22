@@ -142,11 +142,18 @@ Definitions
       Two different workplans with the same ``name`` share a run ID, so
       running the second one without ``--run-id`` is refused.
 
+      Every run also has a uuid, the ``id`` in its run manifest. It is minted
+      once and kept by every copy of the run: two runs can share a run ID, but
+      never a uuid. ``run://<uuid>`` names the run by it, in your data home or
+      the project runs area where its directory is kept. See
+      :ref:`workplan_external_runs`.
+
     Run manifest
-      ``cstar-run.yaml`` in a run's directory: the run's identity, one
-      **attempt** for each time it was scheduled, one entry per step with its
-      latest submission, status and **step record**, and what the run depends
-      on outside itself. The scheduling command writes it; ``cstar run status`` and
+      ``cstar-run.yaml`` in a run's directory: the run's identity (its run ID
+      and uuid), one **attempt** for each time it was scheduled, one entry per
+      step with its latest submission, status and **step record**, and what the
+      run depends on outside itself. The scheduling command writes it;
+      ``cstar run status`` and, for a run tracked on this machine,
       ``cstar run show`` refresh it. See :doc:`workplans`.
 
     Step record

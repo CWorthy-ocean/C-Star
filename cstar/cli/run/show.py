@@ -10,9 +10,15 @@ from rich.table import Column, Table
 
 from cstar.base.exceptions import CstarError
 from cstar.base.log import get_logger
-from cstar.cli.common import cb_pipeline, console, get_from_ctxmap, set_ctxmap
-from cstar.cli.run.shared import is_path_like, refuse_workplan_file
-from cstar.cli.workplan.shared import list_runs, preload_run_record
+from cstar.cli.common import (
+    cb_pipeline,
+    console,
+    get_from_ctxmap,
+    refuse_workplan_file,
+    set_ctxmap,
+)
+from cstar.cli.run.shared import resolve_by_handle
+from cstar.cli.workplan.shared import KEY_RUN, list_runs
 from cstar.entrypoint.utils import (
     ARG_FORMAT,
     ARG_FORMAT_HELP,
@@ -54,15 +60,17 @@ HELP_SHORT = "Show what a run was and what it produced."
 HELP_LONG = f"""\
 {HELP_SHORT}
 
-The target is a run-id, or the path of a directory holding a run manifest
-(`{RUN_MANIFEST_NAME}`). The manifest lists each attempt to run the workplan, each
-step's status and outcome, the products the steps recorded, and each step's job
-with how long it waited and ran.
+The target is a run-id, `run://<uuid>`, or the path of a directory holding a
+run manifest (`{RUN_MANIFEST_NAME}`). The manifest lists each attempt to run the
+workplan, each step's status and outcome, the products the steps recorded, and
+each step's job with how long it waited and ran.
 
-For a run-id the step statuses are refreshed from the run first, as
-`cstar run status` does, and the manifest is updated; {ARG_NO_REFRESH} shows
-it as last recorded. A directory is read as it is: step records written since
-the manifest was last refreshed are shown, nothing is written.
+For a run tracked on this machine the step statuses are refreshed from the run
+first, as `cstar run status` does, and the manifest is updated;
+{ARG_NO_REFRESH} shows it as last recorded. A directory, and a run found only by
+its manifest in the data home or the project area, are read as they are: step
+records written since the manifest was last refreshed are shown, nothing is
+written.
 
 Exit code 0: shown. 1: the run has no readable manifest. 2: bad arguments.
 """
@@ -75,7 +83,7 @@ class ShowTarget:
     root: Path
     """The run root, which holds the manifest."""
     run_id: str | None
-    """The run-id, when the target was found through tracking."""
+    """The run-id, when the run is tracked on this machine."""
 
 
 def _directory_target(target: str) -> ShowTarget:
@@ -110,16 +118,21 @@ def _directory_target(target: str) -> ShowTarget:
     return ShowTarget(root, None)
 
 
+def _tracked_target(run: WorkplanRun) -> ShowTarget:
+    """Resolve a run tracked on this machine, which is refreshed before it is shown."""
+    return ShowTarget(run.output_path, run.run_id)
+
+
 def resolve_show_target(context: typer.Context, target: str) -> str:
     """Resolve the target to a run root and store it in the context map.
 
     Parameters
     ----------
     context : typer.Context
-        The typer context; receives the run record from `preload_run_record`
-        when the target is a run-id.
+        The typer context; receives the run record when the run is tracked on
+        this machine.
     target : str
-        The user-supplied run-id or directory path.
+        The user-supplied run-id, `run://<uuid>`, or directory path.
 
     Returns
     -------
@@ -131,13 +144,13 @@ def resolve_show_target(context: typer.Context, target: str) -> str:
     typer.BadParameter
         Raised when the target does not identify a run.
     """
-    if is_path_like(target):
-        resolved = _directory_target(target)
-    else:
-        preload_run_record(context, target)
-        run = get_from_ctxmap(context, "run", WorkplanRun)
-        resolved = ShowTarget(run.output_path, run.run_id)
-
+    resolved = resolve_by_handle(
+        context,
+        target,
+        verb=COMMAND_SHOW,
+        directory=_directory_target,
+        tracked=_tracked_target,
+    )
     set_ctxmap(context, KEY_TARGET, resolved)
     return target
 
@@ -282,9 +295,9 @@ def _tables(manifest: RunManifest) -> list[Table]:
 
     tables = [identity, attempts, steps, jobs]
     if manifest.external.runs:
-        external = Table("Alias", "Run-id", "Start", title="External runs")
+        external = Table("Alias", "Run-id", "Uuid", "Start", title="External runs")
         for ref in manifest.external.runs:
-            external.add_row(ref.alias, ref.run_id, _when(ref.start_at))
+            external.add_row(ref.alias, ref.run_id, ref.id, _when(ref.start_at))
         tables.append(external)
 
     return tables
@@ -331,7 +344,10 @@ def show(
     target: t.Annotated[
         str,
         typer.Argument(
-            help="A run-id, or the path of a directory holding a run manifest.",
+            help=(
+                "A run-id, `run://<uuid>`, or the path of a directory holding a "
+                "run manifest."
+            ),
             autocompletion=list_runs,
             callback=cb_pipeline(refuse_workplan_file, resolve_show_target),
         ),
@@ -353,7 +369,7 @@ def show(
         # steps recorded, in memory only
         fold_step_records(manifest, root)
     elif not no_refresh:
-        run = get_from_ctxmap(context, "run", WorkplanRun)
+        run = get_from_ctxmap(context, KEY_RUN, WorkplanRun)
         workplan = LiveWorkplan.try_load(run.trx_workplan_path)
         if workplan is None:
             typer.echo(

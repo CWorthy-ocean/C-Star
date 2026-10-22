@@ -61,6 +61,15 @@ if t.TYPE_CHECKING:
 
 log = get_logger(__name__)
 
+DOCUMENT_READ_ERRORS: t.Final[tuple[type[Exception], ...]] = (
+    CstarError,
+    CstarSchemaTooNewError,
+    OSError,
+)
+"""What reading a manifest or a step record raises for a document that cannot be
+used: unreadable, invalid, newer than this build reads, or out of reach. The
+newer-schema error is not a `CstarError`."""
+
 RUN_MANIFEST_NAME: t.Final[str] = "cstar-run.yaml"
 """The file name of the run manifest, in the run root."""
 
@@ -365,7 +374,12 @@ class ExternalRun(ConfiguredBaseModel):
     """The alias the workplan refers to the run by."""
 
     run_id: str
-    """The id of the run."""
+    """The id of the run: the referenced run's once it was resolved, otherwise
+    the reference as authored."""
+
+    id: str = Field(default="")
+    """The uuid of the run as resolved when the workplan was scheduled; empty when
+    it was not resolved."""
 
     start_at: datetime | None = Field(default=None)
     """The restart time the run was referenced at, when pinned."""
@@ -481,7 +495,7 @@ class StepEntry(ConfiguredBaseModel):
 class RunManifest(ConfiguredBaseModel):
     """The description of a run: written to its run root."""
 
-    schema_version: str = Field(default="1.2.0")
+    schema_version: str = Field(default="1.3.0")
     """The schema version for the document."""
 
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
@@ -1345,7 +1359,7 @@ def ensure_run_manifest(
             entry.carried_blueprint = carried_blueprints.get(step_name, "")
 
     aliases = [
-        ExternalRun(alias=alias, run_id=ref.run_id, start_at=ref.start_at)
+        ExternalRun(alias=alias, run_id=ref.run_id, id=ref.id, start_at=ref.start_at)
         for alias, ref in runs.items()
     ]
     manifest.external = external.merged(ExternalDependencies(runs=aliases))
@@ -1499,6 +1513,28 @@ _OUTCOME_OF_STATUS: t.Final[dict[str, str]] = {
     Status.Cancelled.name: "cancelled",
 }
 """The step record outcome each terminal orchestration status agrees with."""
+
+_STATUS_OF_OUTCOME: t.Final[dict[str, str]] = {
+    outcome: status for status, outcome in _OUTCOME_OF_STATUS.items()
+}
+"""The terminal orchestration status each step record outcome agrees with."""
+
+
+def status_of_record(record: StepRecord) -> str:
+    """The orchestration status a step's record stands for.
+
+    Parameters
+    ----------
+    record : StepRecord
+        The step's record.
+
+    Returns
+    -------
+    str
+        The status name (`Done`, `Failed` or `Cancelled`), or an empty string
+        when the record's outcome is none of those.
+    """
+    return _STATUS_OF_OUTCOME.get(record.outcome, "")
 
 
 def fold_step_records(

@@ -103,6 +103,19 @@ version, an existing ``cstar-forge-data/source-data`` directory in the same
 place is linked to the new location the first time Forge runs, so nothing is
 downloaded again.
 
+The **project runs area** is ``cstar/runs`` under the same ``CSTAR_PROJECT_HOME``
+(``$PROJECT/cstar/runs`` on Anvil), a place for runs that should outlast your
+scratch space. Unlike the source-data cache, it has no fallback to scratch or
+your home directory: with no project directory there is no project runs area.
+Each run is a directory directly under ``cstar/runs``, named for its run ID,
+with the run's ``cstar-run.yaml`` at its top; a link to such a directory works
+too. C-Star does not create or fill the area itself yet, and a later release
+adds a command that places a run there. Until then, copy a run directory there
+by hand, keeping its layout. ``cstar run ls --shared`` lists the area. A run in
+it is named by its run ID, by ``run://<uuid>`` or by its directory; a run under
+another directory name is found by the last two only. See
+:ref:`workplan_external_runs`.
+
 Some systems define ``PROJECT`` and ``SCRATCH`` for you (Anvil exports both,
 Perlmutter exports ``SCRATCH``); check with ``echo $PROJECT $SCRATCH`` and set
 them in your shell profile only if they are empty. Pointing

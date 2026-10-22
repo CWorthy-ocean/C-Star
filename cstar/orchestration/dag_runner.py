@@ -90,6 +90,7 @@ from cstar.orchestration.serialization import (
 from cstar.orchestration.state import StateRepository, load_sentinels
 from cstar.orchestration.tracking import (
     KEY_RUN_NAME,
+    KEY_RUN_UUID,
     TrackingRepository,
     WorkplanRun,
     measure_step_sizes,
@@ -756,7 +757,10 @@ async def prepare_workplan(
         fill_transform = TemplateFillTransform(variable_resolver=None)
 
     external = await resolve_external_runs(
-        wp_orig, fill_transform, lambda: get_launcher(wp_orig, force_local=pre_run)
+        wp_orig,
+        fill_transform,
+        lambda: get_launcher(wp_orig, force_local=pre_run),
+        base_dir=wp_path.resolve().parent,
     )
 
     transformer = WorkplanTransformer(
@@ -1525,7 +1529,7 @@ def _record_attempt(
     steps: "Sequence[LiveStep]",
     step_facts: Mapping[str, StepFacts],
     carried: CarriedInputs | None,
-) -> None:
+) -> str:
     """Record the scheduling of the workplan in the run's manifest.
 
     A failure to write the manifest does not stop scheduling: the tracking
@@ -1548,6 +1552,12 @@ def _record_attempt(
     carried : CarriedInputs | None
         What the attempt carried into the run directory; `None` when
         re-entering a run.
+
+    Returns
+    -------
+    str
+        The uuid of the run's manifest, or an empty string when it could not
+        be written.
     """
     outside: list[str] = []
 
@@ -1574,7 +1584,7 @@ def _record_attempt(
     content_hash = workplan_content_hash(workplan)
     try:
         with manifest_lock(run_id):
-            ensure_run_manifest(
+            manifest = ensure_run_manifest(
                 root,
                 run_id=run_id,
                 name=workplan.name,
@@ -1591,6 +1601,8 @@ def _record_attempt(
             )
     except Exception as ex:
         log.warning(f"Could not write the manifest of run {run_id!r}: {ex}")
+        return ""
+    return manifest.id
 
 
 async def run_dag(
@@ -1635,7 +1647,7 @@ async def run_dag(
     # so a reloaded run keeps the root it is running under
     root = Path(trx_wp_path).resolve().parent
 
-    await asyncio.to_thread(
+    uuid = await asyncio.to_thread(
         _record_attempt,
         root,
         run_id,
@@ -1646,6 +1658,10 @@ async def run_dag(
         carried,
     )
 
+    metadata = {KEY_RUN_NAME: planner.workplan.name}
+    if uuid:
+        metadata[KEY_RUN_UUID] = uuid
+
     wp_run = WorkplanRun(
         workplan_path=wp_path,
         trx_workplan_path=trx_wp_path,
@@ -1654,7 +1670,7 @@ async def run_dag(
         environment=capture_environment(),
         user_variables=user_variables or {},
         sentinels={StateRepository.sentinel_path(s) for s in steps},
-        metadata={KEY_RUN_NAME: planner.workplan.name},
+        metadata=metadata,
     )
 
     _ = await TrackingRepository().put_workplan_run(wp_run)

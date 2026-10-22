@@ -15,15 +15,31 @@ import yaml
 from cstar.base.env import ENV_CSTAR_STATE_HOME
 from cstar.base.utils import slugify
 from cstar.execution.file_system import StateDirectoryManager
+from cstar.orchestration.manifest import (
+    Attempt,
+    RunManifest,
+    StepEntry,
+    write_run_manifest,
+)
 from cstar.orchestration.models import LEGACY_TRANSFORMED_NAME_SUFFIX, Step, Workplan
-from cstar.orchestration.orchestration import LiveStep, LiveWorkplan
+from cstar.orchestration.orchestration import (
+    LiveStep,
+    LiveWorkplan,
+    ProcessHandle,
+    Status,
+)
 from cstar.orchestration.serialization import deserialize, serialize
+from cstar.orchestration.state import StateRepository
 from cstar.orchestration.tracking import (
+    KEY_RUN_UUID,
     UNKNOWN_SIZE,
     TrackingRepository,
     WorkplanRun,
     measure_step_sizes,
 )
+
+if t.TYPE_CHECKING:
+    from cstar.orchestration.index import RunRecord
 
 
 @pytest.mark.asyncio
@@ -889,3 +905,77 @@ async def test_tracking_lists_runs_following_them_off_the_event_loop(
     assert [r.output_path for r in listed] == [StateDirectoryManager.data_dir(run_id)]
     assert threads
     assert threading.main_thread() not in threads
+
+
+def _write_manifest(root: Path, run_id: str) -> RunManifest:
+    """Write the manifest of a one-step run into `root`."""
+    when = datetime(2026, 10, 15, 12, 0, tzinfo=UTC)
+    manifest = RunManifest(
+        run_id=run_id,
+        name=run_id,
+        kind="workplan",
+        created_at=when,
+        attempts=[Attempt(start_at=when)],
+        steps=[
+            StepEntry(name="one", application="hello_world", working_dir="tasks/one")
+        ],
+    )
+    root.mkdir(parents=True, exist_ok=True)
+    write_run_manifest(root, manifest)
+    return manifest
+
+
+def test_workplanrun_uuid_is_the_cached_one(tmp_path: Path) -> None:
+    """Verify the uuid the run was stamped with is used without reading the manifest."""
+    manifest = _write_manifest(tmp_path / "output", "uuid-cached")
+    stamped = str(uuid4())
+    run = _make_workplan_run(tmp_path, "uuid-cached", metadata={KEY_RUN_UUID: stamped})
+
+    with mock.patch("cstar.orchestration.tracking.read_run_manifest") as read:
+        assert run.uuid == stamped
+
+    read.assert_not_called()
+    assert stamped != manifest.id
+
+
+def test_workplanrun_uuid_falls_back_to_the_manifest(tmp_path: Path) -> None:
+    """Verify a run recorded before the uuid was stamped takes it from its manifest."""
+    manifest = _write_manifest(tmp_path / "output", "uuid-fallback")
+    run = _make_workplan_run(tmp_path, "uuid-fallback")
+
+    assert KEY_RUN_UUID not in run.metadata
+    assert run.uuid == manifest.id
+
+
+def test_workplanrun_uuid_is_empty_without_a_readable_manifest(
+    tmp_path: Path,
+) -> None:
+    """Verify a run with no manifest, or one that cannot be read, has no uuid."""
+    run = _make_workplan_run(tmp_path, "uuid-none")
+    assert run.uuid == ""
+
+    (tmp_path / "output").mkdir()
+    (tmp_path / "output" / "cstar-run.yaml").write_text("run_id: [unclosed\n")
+    assert run.uuid == ""
+
+
+def test_workplanrun_step_status_reads_the_sentinel(tmp_path: Path) -> None:
+    """Verify a step's status is the one its sentinel holds, and empty without one."""
+    run = _make_workplan_run(tmp_path, "step-status")
+    path = StateRepository.sentinel_path("Spin Up", run_id="step-status")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    handle = ProcessHandle(
+        pid="1", name="Spin Up", run_id="step-status", status=Status.Done
+    )
+    assert serialize(path, handle)
+
+    assert run.step_status("Spin Up") == "Done"
+    assert run.step_status("no-such-step") == ""
+    assert run.step_status("") == ""
+
+
+def test_workplanrun_is_a_run_record(tmp_path: Path) -> None:
+    """Verify (for the type checker, too) that tracking records are run records."""
+    record: RunRecord = _make_workplan_run(tmp_path, "is-a-record")
+
+    assert record.run_id == "is-a-record"

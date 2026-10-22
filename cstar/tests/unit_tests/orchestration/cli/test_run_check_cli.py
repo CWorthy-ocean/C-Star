@@ -16,7 +16,9 @@ from cstar.base.exceptions import CstarExpectationFailed
 from cstar.cli.run import app as app_run
 from cstar.cli.run.check import COMMAND_CHECK
 from cstar.entrypoint.utils import ARG_ALL, ARG_NO_REFRESH, ARG_REPAIR, ARG_VERIFY
+from cstar.execution.file_system import StateDirectoryManager
 from cstar.orchestration.dag_runner import DagStatus
+from cstar.orchestration.index import run_uri
 from cstar.orchestration.manifest import (
     ATTEMPTS_DIR_NAME,
     RUN_MANIFEST_NAME,
@@ -31,6 +33,7 @@ from cstar.orchestration.manifest import (
 )
 from cstar.orchestration.models import BlueprintIdentity
 from cstar.orchestration.tracking import WorkplanRun
+from cstar.tests.unit_tests.orchestration.manifest_runs import BuiltRun
 from cstar.tests.unit_tests.orchestration.run_tree import (
     FakeRun,
     build_fake_run,
@@ -38,8 +41,11 @@ from cstar.tests.unit_tests.orchestration.run_tree import (
     write,
 )
 
-LOOKUP: t.Final[str] = "cstar.cli.workplan.shared.TrackingRepository.get_workplan_run"
-"""The tracking lookup, replaced so that a run-id resolves to a chosen record."""
+LOOKUP: t.Final[str] = (
+    "cstar.orchestration.index.TrackingRepository.get_workplan_run_sync"
+)
+"""The tracking lookup the run resolver makes, replaced so that a run-id resolves
+to a chosen record."""
 
 EXIT_CLEAN: t.Final[int] = 0
 EXIT_FINDINGS: t.Final[int] = 1
@@ -166,7 +172,7 @@ def product(path: str, size: int = 0, sha256: str = "") -> Product:
 
 def invoke(*args: str, record: WorkplanRun | None = None) -> Result:
     """Run `cstar run check` against a repository that holds only `record`."""
-    with mock.patch(LOOKUP, mock.AsyncMock(return_value=record)):
+    with mock.patch(LOOKUP, mock.Mock(return_value=record)):
         return CliRunner().invoke(app_run, [COMMAND_CHECK, *args], color=False)
 
 
@@ -450,10 +456,7 @@ def test_an_unknown_run_id_is_a_bad_argument(
     result = invoke("no-such-run")
 
     assert result.exit_code == EXIT_BAD_ARGS
-    assert (
-        "Unable to locate run with unknown run-id: no-such-run"
-        in flatten_cli_output(result.stderr)
-    )
+    assert "No run found for run-id no-such-run" in flatten_cli_output(result.stderr)
 
 
 def test_an_unknown_run_id_that_names_a_directory_suggests_the_path(
@@ -829,3 +832,90 @@ def test_a_refresh_that_cannot_run_is_a_warning(run: FakeRun, refresh: Refresh) 
     assert "Warning: the manifest was not refreshed: no scheduler" in result.output
     assert "Products missing from the run (1):" in result.stdout
     refresh.refresh.assert_not_called()
+
+
+@pytest.mark.parametrize("handle", ["run-id", "uuid"])
+def test_an_untracked_run_is_checked_as_its_directory(
+    local_run: t.Callable[..., BuiltRun], refresh: Refresh, handle: str
+) -> None:
+    """Verify a run only its manifest names is checked by its run-id or its uuid
+    as its directory is: never refreshed, the manifest left as it is, and the
+    checks that need a tracked run skipped.
+    """
+    built = local_run("lonely")
+    before = built.manifest_bytes
+
+    result = invoke(
+        built.run_id if handle == "run-id" else run_uri(built.uuid), record=None
+    )
+
+    # the transformed workplan names the run's own directories, which is a finding
+    assert result.exit_code == EXIT_FINDINGS, result.output
+    assert f"problem(s) found in {built.root}" in result.stdout
+    assert "Skipped orphaned sentinels: they are found by run-id" in result.stdout
+    refresh.status.assert_not_called()
+    refresh.refresh.assert_not_called()
+    assert built.manifest_bytes == before
+
+
+def test_a_run_in_the_project_area_is_checked_by_its_uuid(
+    project_run: t.Callable[..., BuiltRun], refresh: Refresh
+) -> None:
+    """Verify a run kept in the project's runs area is found by its uuid."""
+    built = project_run("shared-run")
+
+    result = invoke(run_uri(built.uuid), record=None)
+
+    assert result.exit_code == EXIT_FINDINGS, result.output
+    assert f"problem(s) found in {built.root}" in result.stdout
+    refresh.refresh.assert_not_called()
+
+
+def test_a_standalone_blueprint_run_is_checked_by_its_uuid(
+    build_run: t.Callable[..., BuiltRun], refresh: Refresh
+) -> None:
+    """Verify a run that holds a manifest and no `tasks/` is accepted."""
+    root = StateDirectoryManager.blueprint_runs_dir() / "hello_world" / "solo"
+    built = build_run(root, "solo", kind="blueprint", steps=("solo",))
+
+    result = invoke(run_uri(built.uuid), record=None)
+
+    assert result.exit_code == EXIT_CLEAN, result.output
+    assert f"No problems found in {built.root}" in result.stdout
+
+
+def test_the_uuid_of_a_tracked_run_refreshes_it(run: FakeRun, refresh: Refresh) -> None:
+    """Verify a run tracked on this machine is refreshed however it is named."""
+    manifest = write_manifest(
+        run.root, entry("Spin Up", "tasks/spin-up", product("output/a.nc", 4))
+    )
+    manifest.id = "0f8c2ba4-6d57-4a25-9c1e-3b52f0d7a911"
+    write_run_manifest(run.root, manifest)
+
+    result = invoke(run_uri(manifest.id), record=run.record)
+
+    assert result.exit_code == EXIT_FINDINGS, result.output
+    refresh.status.assert_awaited_once()
+    refresh.refresh.assert_called_once()
+
+
+def test_an_unknown_uuid_is_a_bad_argument(
+    flatten_cli_output: t.Callable[[str], str],
+) -> None:
+    """Verify a uuid no manifest holds is a usage error that names it."""
+    wanted = "6f1c3a58-1b2e-4c6d-8e0f-0a1b2c3d4e5f"
+
+    result = invoke(run_uri(wanted), record=None)
+
+    assert result.exit_code == EXIT_BAD_ARGS
+    assert f"No run has the uuid {wanted}" in flatten_cli_output(result.stderr)
+
+
+def test_a_malformed_uuid_handle_is_a_bad_argument(
+    flatten_cli_output: t.Callable[[str], str],
+) -> None:
+    """Verify a `run://` handle without a uuid is a usage error naming the form."""
+    result = invoke("run://nonsense", record=None)
+
+    assert result.exit_code == EXIT_BAD_ARGS
+    assert "run://<uuid>" in flatten_cli_output(result.stderr)

@@ -22,7 +22,8 @@ HELP_SHORT = "Print the log for a workplan step."
 HELP_LONG = f"""\
 {HELP_SHORT}
 
-The `run_id` may be from an in-progress or completed run.
+The run may be in progress or completed, and is named by its run-id,
+`run://<uuid>`, or the path of its directory.
 """
 
 ARG_MONITOR: t.Final[str] = "--monitor"

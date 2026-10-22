@@ -14,7 +14,11 @@ from cstar.orchestration.serialization import serialize
 from cstar.orchestration.tracking import WorkplanRun
 
 STEP_NAMES: t.Final[tuple[str, ...]] = ("Spin Up", "run")
-LOOKUP: t.Final[str] = "cstar.cli.workplan.shared.TrackingRepository.get_workplan_run"
+LOOKUP: t.Final[str] = (
+    "cstar.orchestration.index.TrackingRepository.get_workplan_run_sync"
+)
+"""The tracking lookup the run resolver makes, replaced so that a run-id resolves
+to a chosen record."""
 
 
 class PreparedRun(t.NamedTuple):
@@ -60,7 +64,7 @@ def prepared(tmp_path: Path, hello_world_bp_path: Path) -> PreparedRun:
 
 def invoke(run: WorkplanRun | None, *args: str) -> t.Any:
     """Run the command group against a repository that holds only `run`."""
-    with mock.patch(LOOKUP, mock.AsyncMock(return_value=run)):
+    with mock.patch(LOOKUP, mock.Mock(return_value=run)):
         return CliRunner().invoke(app, list(args), color=False)
 
 
@@ -139,13 +143,13 @@ def test_path_unknown_step(
     assert all(repr(name) in stderr for name in STEP_NAMES)
 
 
-def test_path_unknown_run() -> None:
+def test_path_unknown_run(flatten_cli_output: t.Callable[[str], str]) -> None:
     """Verify an unrecorded run-id is rejected."""
     result = invoke(None, COMMAND_PATH, "no-such-run")
 
     assert result.exit_code != 0
     assert result.stdout == ""
-    assert "unknown run-id" in result.stderr
+    assert "No run found for run-id no-such-run" in flatten_cli_output(result.stderr)
 
 
 @pytest.mark.parametrize("run_id", ["", "  ", "!!!"])

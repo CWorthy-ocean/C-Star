@@ -8,10 +8,15 @@ import typer
 
 from cstar.base.exceptions import CstarError, CstarExpectationFailed
 from cstar.base.log import get_logger
-from cstar.cli.common import cb_pipeline, get_from_ctxmap, set_ctxmap
-from cstar.cli.run.shared import is_path_like, refuse_workplan_file
+from cstar.cli.common import (
+    cb_pipeline,
+    get_from_ctxmap,
+    refuse_workplan_file,
+    set_ctxmap,
+)
+from cstar.cli.run.shared import resolve_by_handle
 from cstar.cli.workplan.gather import collect_links, relink, report_conflicts
-from cstar.cli.workplan.shared import list_runs, preload_run_record
+from cstar.cli.workplan.shared import list_runs
 from cstar.entrypoint.utils import (
     ARG_ALL,
     ARG_ALL_HELP,
@@ -63,9 +68,11 @@ HELP_SHORT = "Check that a run directory still works when it is moved."
 HELP_LONG = f"""\
 {HELP_SHORT}
 
-The target is a run-id, or the path of a run directory (one that contains
-`tasks/`, or `cstar-run.yaml` alone for a standalone blueprint run, whose
-symlinks and products are checked; the step-directory checks need `tasks/`).
+The target is a run-id, `run://<uuid>`, or the path of a run directory (one
+that contains `tasks/`, or `cstar-run.yaml` alone for a standalone blueprint
+run, whose symlinks and products are checked; the step-directory checks need
+`tasks/`). A run found only by its manifest in the data home or the project
+area is checked as its directory.
 The run's emitted files are searched for absolute paths under the run or the
 C-Star data home, its symlinks for absolute or missing targets, and its
 transformed workplan for steps without a directory. Files that launchers
@@ -79,8 +86,8 @@ it shrank: the step's own log is still written after the record is taken).
 the content where a sha256 is recorded, and nothing records one yet. The files
 each attempt carried into `attempts/` (the workplan, its variables, the
 blueprints) are compared with the digests the manifest recorded, always. For a
-run-id the manifest is refreshed first, as `cstar run show` does;
-{ARG_NO_REFRESH} reads it as last recorded.
+run tracked on this machine the manifest is refreshed first, as `cstar run show`
+does; {ARG_NO_REFRESH} reads it as last recorded.
 
 Step directories and sentinel files that no step accounts for, symlinks to a
 place outside the run, steps that are done without a record, an attempt that
@@ -122,7 +129,7 @@ class CheckTarget:
     run_root: Path
     """The run directory to check."""
     run_id: str | None
-    """The run-id, when the target was found through tracking."""
+    """The run-id, when the run is tracked on this machine."""
     workplan_path: Path | None
     """The transformed workplan, when one is known."""
 
@@ -167,15 +174,13 @@ def _directory_target(target: str) -> CheckTarget:
     return CheckTarget(run_root, None, next(iter(workplans), None))
 
 
-def _run_target(context: typer.Context, target: str) -> CheckTarget:
-    """Resolve a target spelled as a run-id through tracking.
+def _tracked_target(run: WorkplanRun) -> CheckTarget:
+    """Resolve a run tracked on this machine, which is refreshed before it is checked.
 
     Parameters
     ----------
-    context : typer.Context
-        The typer context; receives the run record from `preload_run_record`.
-    target : str
-        The user-supplied run-id.
+    run : WorkplanRun
+        The tracking record of the run.
 
     Returns
     -------
@@ -184,18 +189,8 @@ def _run_target(context: typer.Context, target: str) -> CheckTarget:
     Raises
     ------
     typer.BadParameter
-        - Raised when no run is tracked under the run-id.
-        - Raised when the run's recorded directory does not exist.
+        Raised when the run's recorded directory does not exist.
     """
-    try:
-        preload_run_record(context, target)
-    except typer.BadParameter as ex:
-        if Path(target).is_dir():
-            msg = f"{ex.message} To check the directory ./{target}, pass it as a path."
-            raise typer.BadParameter(msg) from ex
-        raise
-
-    run = get_from_ctxmap(context, "run", WorkplanRun)
     if not run.output_path.is_dir():
         msg = (
             f"The directory recorded for run {run.run_id!r} does not exist: "
@@ -212,9 +207,10 @@ def resolve_target(context: typer.Context, target: str) -> str:
     Parameters
     ----------
     context : typer.Context
-        The typer context.
+        The typer context; receives the run record when the run is tracked on
+        this machine.
     target : str
-        The user-supplied run-id or directory path.
+        The user-supplied run-id, `run://<uuid>`, or directory path.
 
     Returns
     -------
@@ -226,10 +222,12 @@ def resolve_target(context: typer.Context, target: str) -> str:
     typer.BadParameter
         Raised when the target does not identify a run directory.
     """
-    resolved = (
-        _directory_target(target)
-        if is_path_like(target)
-        else _run_target(context, target)
+    resolved = resolve_by_handle(
+        context,
+        target,
+        verb=COMMAND_CHECK,
+        directory=_directory_target,
+        tracked=_tracked_target,
     )
     set_ctxmap(context, KEY_TARGET, resolved)
     return target
@@ -398,7 +396,7 @@ def check(
     target: t.Annotated[
         str,
         typer.Argument(
-            help="A run-id, or the path of a run directory.",
+            help="A run-id, `run://<uuid>`, or the path of a run directory.",
             autocompletion=list_runs,
             callback=cb_pipeline(refuse_workplan_file, resolve_target),
         ),

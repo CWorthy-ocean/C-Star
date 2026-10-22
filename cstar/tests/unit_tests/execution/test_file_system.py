@@ -868,6 +868,88 @@ class TestSourceDataHome:
         assert home.is_dir()
 
 
+class TestProjectHome:
+    """The project directory and its runs area: ``CSTAR_PROJECT_HOME`` (default
+    ``$PROJECT``), and no fallback when neither is set.
+    """
+
+    @pytest.fixture(autouse=True)
+    def _isolated_env(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        for var in ("CSTAR_PROJECT_HOME", "PROJECT"):
+            monkeypatch.delenv(var, raising=False)
+        monkeypatch.setenv("SCRATCH", str(tmp_path / "scratch"))
+
+    def test_explicit_home_wins_over_project(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("CSTAR_PROJECT_HOME", str(tmp_path / "explicit"))
+        monkeypatch.setenv("PROJECT", str(tmp_path / "project"))
+
+        assert DirectoryManager.project_home() == (tmp_path / "explicit").resolve()
+        assert DirectoryManager.project_runs_home() == (
+            (tmp_path / "explicit").resolve() / "cstar" / "runs"
+        )
+
+    def test_project_variable_alone_is_used(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("PROJECT", str(tmp_path / "project"))
+
+        assert DirectoryManager.project_home() == (tmp_path / "project").resolve()
+        assert DirectoryManager.project_runs_home() == (
+            (tmp_path / "project").resolve() / "cstar" / "runs"
+        )
+
+    def test_neither_variable_means_no_project(self) -> None:
+        """Scratch is no project area: only the source-data root falls back to it."""
+        assert DirectoryManager.project_home() is None
+        assert DirectoryManager.project_runs_home() is None
+
+    def test_home_is_expanded_and_resolved(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        (tmp_path / "home").mkdir()
+        monkeypatch.setenv("HOME", str(tmp_path / "home"))
+        monkeypatch.setenv("CSTAR_PROJECT_HOME", "~/proj/../proj")
+
+        assert DirectoryManager.project_home() == (tmp_path / "home" / "proj").resolve()
+
+    def test_runs_home_creates_nothing(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("PROJECT", str(tmp_path / "project"))
+
+        DirectoryManager.project_runs_home()
+
+        assert not (tmp_path / "project").exists()
+
+    def test_source_data_paths_keep_the_project_root(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The source-data cache sits beside the runs area, under the same root."""
+        monkeypatch.setenv("PROJECT", str(tmp_path / "project"))
+
+        runs = DirectoryManager.project_runs_home()
+        assert runs is not None
+        assert DirectoryManager.source_data_home() == runs.parent / "source-data"
+
+
+def test_run_directories_are_under_the_data_home() -> None:
+    """The workplan and blueprint runs live in two directories of the data home,
+    where `data_dir` and `blueprint_run_dir` put a run.
+    """
+    data_home = DirectoryManager.data_home()
+
+    assert StateDirectoryManager.workplan_runs_dir() == data_home / "workplan_runs"
+    assert StateDirectoryManager.blueprint_runs_dir() == data_home / "blueprint_runs"
+    assert StateDirectoryManager.data_dir("a-run").parent == (
+        StateDirectoryManager.workplan_runs_dir()
+    )
+    assert StateDirectoryManager.blueprint_run_dir(
+        "hello_world", "A Name"
+    ).parent.parent == (StateDirectoryManager.blueprint_runs_dir())
+
+
 class TestWriteLocalCopy:
     """Tests for `write_local_copy`."""
 
