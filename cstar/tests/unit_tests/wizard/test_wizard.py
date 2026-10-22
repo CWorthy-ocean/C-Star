@@ -3595,19 +3595,25 @@ def test_wizard_editor_cdr_output_streams_gated_by_model_spec_pin():
     assert ("cdr_lite_output", "do_cdr_lite_output") in wiz.editor._widgets
     assert ("cdr_gas_exch_output", "do_cdr_gas_exch_output") in wiz.editor._widgets
 
-    for model in (
-        "roms-marbl-0.9-default",
-        "roms-marbl-0.10-default",
-        "roms-marbl-0.11-default",
+    for model, cdr_lite in (
+        ("roms-marbl-0.9-default", None),
+        ("roms-marbl-0.10-default", None),
+        ("roms-marbl-0.11-default", None),
+        # From 0.12 the spec declares ``cdr_lite`` with only the time-interpolation
+        # switch, which the default MARBL mode does not show.
+        (
+            "roms-marbl-0.12-default",
+            {"cdr_carbonate_sensitivity_time_interpolation": True},
+        ),
     ):
         wiz.model_dd.value = model
         wiz._rebuild()
         assert "cdr_lite_output" in wiz.config.model_settings
         assert ("cdr_lite_output", "do_cdr_lite_output") in wiz.editor._widgets
         assert ("cdr_lite_output", "wrt_gas_exchange") in wiz.editor._widgets
-        # The bundled specs do not declare the ``cdr_lite`` knob yet (CDR-lite
-        # tracers need forcing Forge cannot generate), so there is no widget for it.
-        assert "cdr_lite" not in wiz.config.model_settings
+        # No bundled spec declares the ``cdr_lite`` online knob (CDR-lite tracers
+        # need forcing Forge cannot generate), so there is no widget for it.
+        assert wiz.config.model_settings.get("cdr_lite") == cdr_lite
         assert (
             "cdr_lite",
             "cdr_online_carbonate_sensitivity",

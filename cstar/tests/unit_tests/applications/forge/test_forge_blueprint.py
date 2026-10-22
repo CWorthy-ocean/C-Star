@@ -3371,6 +3371,7 @@ def test_bundled_output_specs_satisfy_roms_divides_rst_precheck(spec_name):
         "roms-marbl-0.9-default",
         "roms-marbl-0.10-default",
         "roms-marbl-0.11-default",
+        "roms-marbl-0.12-default",
     ],
 )
 def test_model_spec_streams_satisfy_roms_divides_rst_precheck(
@@ -5568,6 +5569,7 @@ def test_resolved_templates_carry_modelspec_authored_hashes():
         ("roms-marbl-0.9-default", True),
         ("roms-marbl-0.10-default", True),
         ("roms-marbl-0.11-default", True),
+        ("roms-marbl-0.12-default", True),
         ("pio-dev", True),
     ],
 )
