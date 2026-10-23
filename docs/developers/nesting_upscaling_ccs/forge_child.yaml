@@ -219,9 +219,9 @@ cdr:
     start_time: '2010-01-17T00:00:00'
     end_time: '2010-01-19T00:00:00'
     releases:
-    - name: monterey_alk
-      lat: 36.8
-      lon: -122.0
+    - name: san_simeon_alk
+      lat: 35.52
+      lon: -121.22
       depth: 2.0
       hsc: 4000.0
       vsc: 10.0
@@ -594,7 +594,7 @@ composition:
     origin: catalog
     modified: true
   cdr:
-    name: ccs-monterey-alk-placeholder
+    name: ccs-san-simeon-alk-placeholder
     origin: custom
     modified: false
   output:
@@ -624,5 +624,5 @@ provenance:
   cstar_version: null
   roms_tools_version: null
   override_files_applied: []
-  content_hash: 8762a96e8adff158b6fd8e471c6a9d0edc6e6855aa8af43a267ac338229c6d34
+  content_hash: 799bf312a00aed1e8b5ce652d53bae5f699403206f15d432744c9763a947cb93
   notes: null
