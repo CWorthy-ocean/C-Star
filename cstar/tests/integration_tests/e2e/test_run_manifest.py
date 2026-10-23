@@ -65,7 +65,7 @@ class ManifestRun:
     env: dict[str, str]
     workplan: Path
     scheduled: RunManifest
-    """The manifest read as soon as ``cstar workplan run`` returned."""
+    """The manifest read as soon as ``cstar workplan submit`` returned."""
 
     @property
     def data_home(self) -> Path:
@@ -99,7 +99,7 @@ def manifest_run(
     state_home = root / "state"
     steps = list(SHAPE)
 
-    proc = run_cstar(env, "workplan", "run", "--run-id", RUN_ID, str(workplan))
+    proc = run_cstar(env, "workplan", "submit", "--run-id", RUN_ID, str(workplan))
     try:
         run_root = root / "data" / "workplan_runs" / RUN_ID
         scheduled = read_run_manifest(run_root)
@@ -108,7 +108,7 @@ def manifest_run(
         )
         if proc.returncode != 0 or statuses != dict.fromkeys(steps, DONE):
             pytest.fail(
-                f"workplan run exited {proc.returncode} with {statuses}\n"
+                f"workplan submit exited {proc.returncode} with {statuses}\n"
                 f"stdout:\n{proc.stdout}\nstderr:\n{proc.stderr}\n"
                 f"{run_log_tails(root / 'data', RUN_ID)}"
             )
@@ -127,7 +127,7 @@ def _output(proc: subprocess.CompletedProcess[str]) -> str:
 def test_scheduling_writes_the_manifest(manifest_run: ManifestRun) -> None:
     """The manifest exists as soon as the run is scheduled and names every step.
 
-    ``workplan run`` returns once every step is launched, dependents included, so
+    ``workplan submit`` returns once every step is launched, dependents included, so
     each entry already holds its submission.
     """
     manifest = manifest_run.scheduled
@@ -273,7 +273,7 @@ def test_reentry_appends_an_attempt(manifest_run: ManifestRun) -> None:
     proc = run_cstar(
         manifest_run.env,
         "workplan",
-        "run",
+        "submit",
         "--run-id",
         RUN_ID,
         str(manifest_run.workplan),

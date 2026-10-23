@@ -94,15 +94,15 @@ From the directory with the four files:
 .. code-block:: console
 
    cstar workplan check workplan.yaml
-   cstar workplan run workplan.yaml
+   cstar workplan submit workplan.yaml
 
-``cstar workplan run`` returns once it has scheduled the steps. They run
+``cstar workplan submit`` returns once it has scheduled the steps. They run
 detached, each one waiting for the steps it depends on, so follow the run with
 ``cstar run status nest-tiny``. The run ID defaults to the workplan's name,
 ``nest-tiny``. Each step's files are under
 ``$CSTAR_DATA_HOME/workplan_runs/nest-tiny/tasks/<step>/``, which is
 ``~/cstar/workplan_runs/nest-tiny/`` by default, and ``cstar run path nest-tiny
-<step>`` prints a step's directory. Running the ``run`` command again
+<step>`` prints a step's directory. Running the ``submit`` command again
 attaches to the existing run; give a new ``--run-id`` to start over.
 
 What each step does

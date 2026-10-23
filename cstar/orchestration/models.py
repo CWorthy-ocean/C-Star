@@ -1045,7 +1045,7 @@ class Workplan(ConfiguredBaseModel):
     @property
     def pre_run(self) -> bool:
         """Return `True` if every step in this workplan is a pre-run step, as
-        produced by `cstar workplan run --pre-run`.
+        produced by `cstar workplan submit --pre-run`.
 
         Returns
         -------

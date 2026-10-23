@@ -118,7 +118,7 @@ def attach_run(
     data_home, state_home = producer / "data", producer / "state"
     steps = list(SHAPE)
 
-    proc = run_cstar(env, "workplan", "run", "--run-id", RUN_ID, str(workplan))
+    proc = run_cstar(env, "workplan", "submit", "--run-id", RUN_ID, str(workplan))
     try:
         statuses = wait_for_terminal(
             state_home,
@@ -129,7 +129,7 @@ def attach_run(
         )
         if proc.returncode != 0 or statuses != dict.fromkeys(steps, DONE):
             pytest.fail(
-                f"workplan run exited {proc.returncode} with {statuses}\n"
+                f"workplan submit exited {proc.returncode} with {statuses}\n"
                 f"{_output(proc)}\n{run_log_tails(data_home, RUN_ID)}"
             )
 
@@ -284,7 +284,7 @@ def test_attach_verify_compares_recorded_digests(attach_run: AttachRun) -> None:
 def test_owned_attached_run_may_be_gathered_and_repaired_but_not_relaunched(
     attach_run: AttachRun,
 ) -> None:
-    """An owned attached run takes ``gather`` and ``check --repair`` and refuses ``workplan run``."""
+    """An owned attached run takes ``gather`` and ``check --repair`` and refuses ``workplan submit``."""
     env, run_dir = _attached(attach_run, "owned")
 
     gathered = run_cstar(env, "run", "gather", RUN_ID)
@@ -294,7 +294,7 @@ def test_owned_attached_run_may_be_gathered_and_repaired_but_not_relaunched(
     repaired = run_cstar(env, "run", "check", RUN_ID, "--repair")
     assert repaired.returncode == 0, _output(repaired)
 
-    relaunched = run_cstar(env, "workplan", "run", "--run-id", RUN_ID)
+    relaunched = run_cstar(env, "workplan", "submit", "--run-id", RUN_ID)
     assert relaunched.returncode == 2, _output(relaunched)
     assert "attached runs can be inspected and referenced" in _flat(
         _output(relaunched)
@@ -338,7 +338,7 @@ def test_a_workplan_depends_on_an_attached_run_by_its_run_id(
     workplan = write_consumer(root / "plan", RUN_ID)
     assert OUTPUT_PLACEHOLDER in workplan.read_text()
 
-    proc = run_cstar(env, "workplan", "run", "--run-id", consumer_id, str(workplan))
+    proc = run_cstar(env, "workplan", "submit", "--run-id", consumer_id, str(workplan))
     state_home, data_home = root / "state", root / "data"
     try:
         statuses = wait_for_terminal(
@@ -350,7 +350,7 @@ def test_a_workplan_depends_on_an_attached_run_by_its_run_id(
         )
         if proc.returncode != 0 or statuses != {STEP: DONE}:
             pytest.fail(
-                f"workplan run exited {proc.returncode} with {statuses}\n"
+                f"workplan submit exited {proc.returncode} with {statuses}\n"
                 f"{_output(proc)}\n{run_log_tails(data_home, consumer_id)}"
             )
     finally:

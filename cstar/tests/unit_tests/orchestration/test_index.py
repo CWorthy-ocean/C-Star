@@ -1440,7 +1440,7 @@ class TestResolvePath:
         with pytest.raises(CstarError, match="predates the manifest") as raised:
             resolve_run(parse_run_handle(str(tmp_path / "old")))
 
-        assert "cstar workplan run --run-id <run-id>" in str(raised.value)
+        assert "cstar workplan submit --run-id <run-id>" in str(raised.value)
 
     @pytest.mark.parametrize("too_new", [False, True])
     def test_a_manifest_that_cannot_be_read(

@@ -81,7 +81,7 @@ each step is recorded in the transformed workplan in the run directory. See
 
 Two things to know when running workplans:
 
-- ``cstar workplan run --resume`` re-exports the settings recorded when the
+- ``cstar workplan submit --resume`` re-exports the settings recorded when the
   run started, except the data and state homes, so a resumed run keeps its
   original settings even if your shell or configuration file changed since.
 - On a system that requires a SLURM account and queue, C-Star asks for them

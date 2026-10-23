@@ -216,7 +216,7 @@ def test_a_directory_without_a_manifest_is_refused(
     assert result.exit_code == EXIT_BAD_ARGS
     text = flatten_cli_output(result.output + result.stderr)
     assert "holds no run manifest" in text
-    assert "cstar workplan run --run-id" in text
+    assert "cstar workplan submit --run-id" in text
     assert tracked("old") is None
 
 

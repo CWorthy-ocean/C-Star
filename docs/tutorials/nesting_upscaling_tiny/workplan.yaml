@@ -26,8 +26,8 @@
 # (ucla-roms 0.11.0, MARBL, ParallelIO). Forge downloads their source data (GLORYS,
 # UNIFIED) into its source-data cache and streams ERA5. Run from the directory that holds
 # this file and the three forge blueprints:
-#   cstar workplan check workplan.yaml
-#   cstar workplan run   workplan.yaml
+#   cstar workplan check  workplan.yaml
+#   cstar workplan submit workplan.yaml
 #   cstar run status nest-tiny
 name: nest-tiny
 description: Tiny 2-level nested ROMS-MARBL run with an ALK release in the child, upscaled to a rerun of the parent, with CDR metrics (ucla-roms 0.11.0, PIO)

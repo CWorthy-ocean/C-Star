@@ -61,7 +61,7 @@ for this; a tier is selected by path.
 
 **Tier 2: end to end** (``e2e/``)
    Runs a two-step workplan (forge, then ``roms_marbl`` through
-   ``blueprint: {from_step: ...}``) with ``cstar workplan run`` and the
+   ``blueprint: {from_step: ...}``) with ``cstar workplan submit`` and the
    local launcher. ROMS, MARBL and ParallelIO are compiled and ROMS is
    run with ``mpirun -n 4`` on the generated inputs, with ParallelIO
    enabled. A negative control (``test_pio_input_guard.py``) feeds a

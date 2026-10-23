@@ -18,7 +18,7 @@ app = typer.Typer(
     name=NAME,
     help=(
         "Inspect and manage existing workplan runs. "
-        "To launch a run, use `cstar workplan run`."
+        "To launch a run, use `cstar workplan submit`."
     ),
 )
 

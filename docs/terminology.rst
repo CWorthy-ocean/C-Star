@@ -134,7 +134,7 @@ Definitions
     Run ID
       The identifier of a run. By default it is the workplan's ``name``, which
       must already be a slug (ASCII lowercase letters, digits, ``-`` and ``_``), so
-      the same file always runs under the same ID; ``cstar workplan run --run-id
+      the same file always runs under the same ID; ``cstar workplan submit --run-id
       <id>`` overrides it. It names the run's directory
       (``CSTAR_DATA_HOME/workplan_runs/<id>``), lets you check status (``cstar run status``) or reattach to a run
       in progress, and lets you re-enter a run to retry failed steps or
@@ -183,7 +183,7 @@ Definitions
       step's record in. See :doc:`workplans`.
 
     Attempt
-      One scheduling of a workplan into a run: ``cstar workplan run``, or a
+      One scheduling of a workplan into a run: ``cstar workplan submit``, or a
       re-entry with ``--run-id``, ``--resume`` or ``--clobber``. The run
       manifest lists them oldest first; an attempt's ``finished_at`` is set
       once every step is terminal. An attempt that reads the workplan file

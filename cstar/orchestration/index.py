@@ -854,7 +854,7 @@ def read_run_location(root: Path) -> RunLocation:
         if JobFileSystemManager(root).tasks_dir.is_dir():
             msg += (
                 " The run predates the manifest: re-entering it with "
-                "`cstar workplan run --run-id <run-id>` records one."
+                "`cstar workplan submit --run-id <run-id>` records one."
             )
         raise CstarError(msg)
 

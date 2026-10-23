@@ -86,14 +86,14 @@ def relocated_run(
     data_home, state_home = root / "data", root / "state"
     steps = list(SHAPE)
 
-    proc = run_cstar(env, "workplan", "run", "--run-id", RUN_ID, str(workplan))
+    proc = run_cstar(env, "workplan", "submit", "--run-id", RUN_ID, str(workplan))
     try:
         statuses = wait_for_terminal(
             state_home, RUN_ID, steps, timeout=RUN_TIMEOUT, poll_interval=POLL_INTERVAL
         )
         if proc.returncode != 0 or statuses != dict.fromkeys(steps, DONE):
             pytest.fail(
-                f"workplan run exited {proc.returncode} with {statuses}\n"
+                f"workplan submit exited {proc.returncode} with {statuses}\n"
                 f"stdout:\n{proc.stdout}\nstderr:\n{proc.stderr}\n"
                 f"{run_log_tails(data_home, RUN_ID)}"
             )
@@ -176,7 +176,7 @@ def test_gather_links_output_in_the_copy(relocated_run: RelocatedRun) -> None:
 def test_resume_relaunches_nothing_and_repoints_the_record(
     relocated_run: RelocatedRun,
 ) -> None:
-    """``workplan run --resume`` from the copy launches no step, because every step
+    """``workplan submit --resume`` from the copy launches no step, because every step
     is ``Done``, and the record it writes names the copy.
 
     A launch writes a new ``script.sh``, ``directives.yaml`` and step log, and records
@@ -200,7 +200,7 @@ def test_resume_relaunches_nothing_and_repoints_the_record(
     proc = run_cstar(
         {**relocated_run.env, "COLUMNS": "400"},
         "workplan",
-        "run",
+        "submit",
         "--run-id",
         RUN_ID,
         "--resume",

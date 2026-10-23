@@ -3570,7 +3570,7 @@ class WorkplanBuilderPage:
         return {k.strip(): v.strip() for k, _sep, v in pairs}
 
     async def _deep_check_async(self) -> None:
-        """Resolve the draft as ``cstar workplan run`` would, listing every problem."""
+        """Resolve the draft as ``cstar workplan submit`` would, listing every problem."""
         draft = self.draft
         if draft is None:
             self.diagnostics.value = components.banner(

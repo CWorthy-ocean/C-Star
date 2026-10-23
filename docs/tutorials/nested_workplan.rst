@@ -122,7 +122,7 @@ Run it
 .. code-block:: console
 
    cstar workplan check workplan_nested.yaml
-   cstar workplan run workplan_nested.yaml
+   cstar workplan submit workplan_nested.yaml
 
 Then follow it as on the :doc:`previous page <workplan>`:
 

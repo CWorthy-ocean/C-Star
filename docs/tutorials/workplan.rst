@@ -79,7 +79,7 @@ not yet ready to submit.
 
 .. code-block:: console
 
-   cstar workplan run workplan_forge_then_run.yaml
+   cstar workplan submit workplan_forge_then_run.yaml
 
 The command sets up a directory for the run, starts the steps, prints a
 summary with the log file of each step, and returns. The steps keep running in
@@ -238,7 +238,7 @@ On a cluster
 ------------
 
 A workplan is also how a run reaches the compute nodes of an HPC system.
-There, ``cstar workplan run`` submits each step as a scheduler job and
+There, ``cstar workplan submit`` submits each step as a scheduler job and
 returns, and the ``cstar run`` commands work the same way from the login node.
 Each step can ask for its own cores, queue and walltime through
 ``compute_overrides``; see :doc:`../workplans` and :doc:`../hpc`.

@@ -292,7 +292,7 @@ def test_a_directory_without_a_manifest(tmp_path: Path) -> None:
     output = _flat(result.output)
     assert RUN_MANIFEST_NAME in output
     assert "predates the manifest" in output
-    assert "cstar workplan run --run-id" in output
+    assert "cstar workplan submit --run-id" in output
 
 
 def test_a_directory_that_is_not_one(tmp_path: Path) -> None:

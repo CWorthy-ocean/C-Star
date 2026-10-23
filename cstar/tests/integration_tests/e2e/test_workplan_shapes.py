@@ -1,7 +1,7 @@
 """Tier 2: workplan DAG shapes and failure propagation through the ``cstar`` CLI.
 
 Steps are ``hello_world`` blueprints, so no ROMS is compiled and a run takes seconds.
-``cstar workplan run`` schedules each step as a detached ``sh`` proxy that waits for
+``cstar workplan submit`` schedules each step as a detached ``sh`` proxy that waits for
 its dependencies and then runs ``cstar blueprint run``; the tests poll the step
 sentinels and read the step logs to check ordering and propagation.
 """
@@ -146,16 +146,16 @@ def schedule(
     shape: dict[str, list[str]],
     walltimes: dict[str, str] | None = None,
 ) -> tuple[ShapeRun, int, str]:
-    """Run ``cstar workplan run`` and poll until every step is terminal.
+    """Run ``cstar workplan submit`` and poll until every step is terminal.
 
     Returns
     -------
     tuple[ShapeRun, int, str]
-        The run, the exit code of ``workplan run``, and its stdout and stderr.
+        The run, the exit code of ``workplan submit``, and its stdout and stderr.
     """
     workplan = write_workplan(root, shape, walltimes)
     env = make_cli_env(root, shim)
-    proc = run_cstar(env, "workplan", "run", "--run-id", run_id, str(workplan))
+    proc = run_cstar(env, "workplan", "submit", "--run-id", run_id, str(workplan))
     run = ShapeRun(
         run_id=run_id,
         env=env,
@@ -191,7 +191,7 @@ def test_shape_runs_in_dependency_order(
     try:
         if returncode != 0:
             tails = run_log_tails(run.data_home, run_id)
-            pytest.fail(f"workplan run exited {returncode}\n{output}\n{tails}")
+            pytest.fail(f"workplan submit exited {returncode}\n{output}\n{tails}")
         assert SCHEDULED_MESSAGE in run.proc_stdout, output
 
         statuses = {s: read_status(run.sentinel(s)) for s in shape}
@@ -216,7 +216,7 @@ def test_dependency_failure_propagates(shape_root: Path) -> None:
 
     The shim delays every ``cstar`` start by `STARTUP_DELAY`, longer than step A's
     one-second walltime, so GNU ``timeout`` kills A however fast the CLI imports. The
-    exit code of ``workplan run`` is not asserted: the DAG runner reports the failure
+    exit code of ``workplan submit`` is not asserted: the DAG runner reports the failure
     only if A had already failed when B was submitted.
     """
     shape = {"A": [], "B": ["A"], "C": []}
@@ -285,7 +285,7 @@ def test_generated_chunk_chain_runs_in_order(
 
     run_id = "shape-chunks"
     env = make_cli_env(shape_root, cstar_shim)
-    proc = run_cstar(env, "workplan", "run", "--run-id", run_id, str(workplan))
+    proc = run_cstar(env, "workplan", "submit", "--run-id", run_id, str(workplan))
     output = f"stdout:\n{proc.stdout}\nstderr:\n{proc.stderr}"
     state_home, data_home = shape_root / "state", shape_root / "data"
     try:
@@ -294,7 +294,7 @@ def test_generated_chunk_chain_runs_in_order(
         )
         if proc.returncode != 0:
             tails = run_log_tails(data_home, run_id)
-            pytest.fail(f"workplan run exited {proc.returncode}\n{output}\n{tails}")
+            pytest.fail(f"workplan submit exited {proc.returncode}\n{output}\n{tails}")
         statuses = {s: read_status(sentinel_path(state_home, run_id, s)) for s in chain}
         assert statuses == dict.fromkeys(chain, DONE), output
 
@@ -309,3 +309,53 @@ def test_generated_chunk_chain_runs_in_order(
         }, transformed.read_text()
     finally:
         kill_run(state_home, run_id, chain)
+
+
+def test_run_alias_launches_and_reenters(shape_root: Path, cstar_shim: Path) -> None:
+    """``workplan run``, the earlier name of ``workplan submit``, still launches a run
+    and re-enters it through the run's transformed workplan, without a notice.
+
+    The re-entry finds every step ``Done`` and launches none of them, so each step
+    prints its hello once.
+    """
+    shape = {"A": [], "B": ["A"]}
+    run_id = "shape-run-alias"
+    workplan = write_workplan(shape_root, shape)
+    env = make_cli_env(shape_root, cstar_shim)
+    proc = run_cstar(env, "workplan", "run", "--run-id", run_id, str(workplan))
+    run = ShapeRun(
+        run_id=run_id,
+        env=env,
+        data_home=shape_root / "data",
+        state_home=shape_root / "state",
+        proc_stdout=proc.stdout,
+        steps=tuple(shape),
+    )
+    output = f"stdout:\n{proc.stdout}\nstderr:\n{proc.stderr}"
+    try:
+        wait_for_terminal(
+            run.state_home,
+            run_id,
+            run.steps,
+            timeout=RUN_TIMEOUT,
+            poll_interval=POLL_INTERVAL,
+        )
+        if proc.returncode != 0:
+            tails = run_log_tails(run.data_home, run_id)
+            pytest.fail(f"workplan run exited {proc.returncode}\n{output}\n{tails}")
+        assert SCHEDULED_MESSAGE in proc.stdout, output
+        assert "submit" not in proc.stderr, output
+
+        run_dir = run.data_home / "workplan_runs" / run_id
+        (transformed,) = run_dir.glob("*_transformed.yaml")
+        reentry = run_cstar(env, "workplan", "run", str(transformed))
+        output = f"stdout:\n{reentry.stdout}\nstderr:\n{reentry.stderr}"
+        assert reentry.returncode == 0, output
+        assert SCHEDULED_MESSAGE in reentry.stdout, output
+
+        statuses = {s: read_status(run.sentinel(s)) for s in shape}
+        assert statuses == dict.fromkeys(shape, DONE), output
+        for step in shape:
+            assert run.log_text(step).count(f"Hello, {step}") == 1, step
+    finally:
+        kill_run(run.state_home, run_id, run.steps)
