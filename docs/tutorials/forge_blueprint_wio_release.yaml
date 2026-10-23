@@ -1,25 +1,26 @@
 $schema: https://raw.githubusercontent.com/CWorthy-ocean/C-Star/refs/heads/main/docs/schemas/bp/forge/forge_schema.1.1.0.json
-name: wio-outer
-description: Western Indian Ocean toy domain (parent of wio-inner); no tides or rivers
+name: wio-release
+description: 'Western Indian Ocean toy domain, days two to five: one alkalinity release
+  at the grid centre'
 application: forge
 state: notset
 schema_version: 1.1.0
 forge_blueprint_version: 10
 run:
-  start_date: '2012-01-01T00:00:00'
-  end_date: '2012-01-03T00:00:00'
+  start_date: '2012-01-02T00:00:00'
+  end_date: '2012-01-06T00:00:00'
   model_reference_date: '2000-01-01T00:00:00'
 domain:
   grid_name: wio-toy
   grid_kwargs:
     nx: 20
     ny: 20
-    N: 10
-    size_x: 8000.0
-    size_y: 8000.0
+    size_x: 8000
+    size_y: 8000
     center_lon: 60.0
     center_lat: -4.0
-    rot: 0.0
+    rot: 0
+    N: 10
     theta_s: 5.0
     theta_b: 2.0
     hc: 300.0
@@ -36,20 +37,8 @@ domain:
     auto_tiling: false
     n_cores: null
   grid_kwargs_parent: null
-  grid_kwargs_child:
-    nx: 20
-    ny: 20
-    N: 10
-    size_x: 2000.0
-    size_y: 2000.0
-    center_lon: 60.0
-    center_lat: -4.0
-    rot: 0.0
-    theta_s: 5.0
-    theta_b: 2.0
-    hc: 300.0
-  metadata_child:
-    period: 3600.0
+  grid_kwargs_child: null
+  metadata_child: null
   nesting_include_pressure_fluxes: false
   v_sponge: 40000.0
   dt: 3600.0
@@ -177,8 +166,25 @@ forcing:
       url: null
       streamable: false
 cdr:
-  mode: none
-  cdr_forcing: null
+  mode: simple
+  cdr_forcing:
+    start_time: '2012-01-02T00:00:00'
+    end_time: '2012-01-06T00:00:00'
+    releases:
+    - name: oae_centre
+      lat: -4.0
+      lon: 60.0
+      depth: 20.0
+      hsc: 400000.0
+      vsc: 100.0
+      times:
+      - '2012-01-02T00:00:00'
+      - '2012-01-06T00:00:00'
+      tracer_fluxes:
+        ALK:
+        - 2000000.0
+        - 2000000.0
+      release_type: tracer_perturbation
   cdr_forcing_file: null
 datasets:
 - ERA5
@@ -197,7 +203,7 @@ model_settings:
     obc_east: true
     obc_north: true
     obc_south: true
-    cdr_forcing: false
+    cdr_forcing: true
     use_pio: true
     marbl: true
     co2_tvarying: false
@@ -322,8 +328,14 @@ model_settings:
     - pCO2SURF
     - FG_CO2
     - FG_ALT_CO2
+    - zsatarag
+    - zsatcalc
+    - CO3
+    - CO3_ALT_CO2
+    - co3_sat_arag
+    - co3_sat_calc
   time_stepping:
-    ntimes: 48
+    ntimes: 96
     dt: 3600.0
     ndtfast: 60
     ninfo: 1
@@ -360,13 +372,13 @@ model_settings:
     cdr_scl_vrt: cdr_vsc
     nz_chd: 50
   extract_data:
-    do_extract: true
-    extract_file: nesting.nc
+    do_extract: false
+    extract_file: sample_edata.nc
     nrpf: 24
-    n_chd: 10
+    n_chd: 90
     theta_s_chd: 5.0
     theta_b_chd: 2.0
-    hc_chd: 300.0
+    hc_chd: 250.0
     extract_period: 3600.0
     extract_root_name: child
   ocean_vars:
@@ -437,7 +449,7 @@ model_settings:
     output_period: 3600.0
     nrpf: 4
   cdr_output:
-    do_cdr_output: false
+    do_cdr_output: true
     do_avg: true
     monthly_averages: false
     output_period: 3600
@@ -523,35 +535,34 @@ composition:
     modified: false
   domain:
     name: wio-toy
-    origin: custom
-    modified: false
+    origin: catalog
+    modified: true
   forcing:
-    name: ''
-    origin: custom
+    name: simple-bgc-demo
+    origin: catalog
     modified: false
   cdr:
     name: ''
     origin: custom
     modified: false
   output:
-    name: ''
-    origin: custom
-    modified: false
-  overrides: {}
+    name: daily-restarts
+    origin: catalog
+    modified: true
+  overrides:
+    partitioning:
+      n_procs_x: 2
+      n_procs_y: 2
+    ocean_vars:
+      wrt_file_his: true
+      output_period_his: 3600
+      nrpf_his: 24
 provenance:
-  generated_at: '2026-10-21T16:34:18.499033Z'
-  generated_by:
-    tool: wizard
-    id: 49ebf9ab-3e0e-4404-81b5-ce30a70a0fd3
-    system: darwin_arm64
-    versions:
-      cstar-ocean: 0.17.0
-      roms-tools: 5.2.1
-    run_id: ''
-    working_dir: ''
+  generated_at: null
+  generated_by: null
   forge_version: null
   cstar_version: null
   roms_tools_version: null
   override_files_applied: []
-  content_hash: 83ac06da447153e73585f985fdb545a40b28c00f8ffec5cf798023115ad479e8
+  content_hash: c12af186801280c2d963ce93850c59c28a20d2f681a84b9f195dec735bfed7cb
   notes: null

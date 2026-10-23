@@ -1,0 +1,74 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/CWorthy-ocean/C-Star/refs/heads/main/docs/schemas/wp/workplan_schema.1.0.0.json
+name: wio-cdr-tutorial
+description: Spin the wio-toy domain up, continue it with an alkalinity release, and compute the release's CDR metrics
+state: draft
+
+steps:
+  # Generate the inputs for the two runs. The two blueprints differ only in the run
+  # window and the CDR section. make_release waits for make_spinup so that a first-time
+  # download of the shared source data happens once; on a warm cache the depends_on
+  # can go and the two run side by side.
+  - name: make_spinup
+    application: forge
+    blueprint: ./forge_blueprint_wio_spinup.yaml
+    compute_overrides:
+      local:
+        max_walltime: "02:00:00"   # generous: a cold cache downloads the 10 GB UNIFIED climatology
+
+  - name: make_release
+    application: forge
+    blueprint: ./forge_blueprint_wio_release.yaml
+    depends_on:
+      - make_spinup
+    compute_overrides:
+      local:
+        max_walltime: "00:30:00"
+
+  # Day 1: the spin-up, at half the blueprint's time step.
+  - name: spinup
+    application: roms_marbl
+    blueprint:
+      from_step: make_spinup
+    depends_on:
+      - make_spinup
+    blueprint_overrides:
+      namelist_overrides:
+        time_stepping:
+          dt: 1800
+    compute_overrides:
+      local:
+        max_walltime: "01:00:00"   # generous, for a slow first clone and compile
+
+  # Days 2 to 5: continued from the spin-up's restart, with the alkalinity release on
+  # from the first step to the last.
+  - name: release
+    application: roms_marbl
+    blueprint:
+      from_step: make_release
+    depends_on:
+      - make_release
+      - spinup
+    directives:
+      continue-from:
+        step: spinup
+    compute_overrides:
+      local:
+        max_walltime: "01:00:00"   # a second ROMS build, with CDR_FORCING defined
+
+  # The release's CO2 uptake and CDR efficiency, from the release run's _cdr output.
+  - name: metrics
+    application: cdr_metrics
+    blueprint: inline
+    depends_on:
+      - make_release
+      - release
+    blueprint_overrides:
+      domains:
+        wio:
+          grid:
+            location: "{{root_dir: make_release}}/input_data/wio-release_grid.nc"
+          sources:
+            - location: "{{output_dir: release}}"
+    compute_overrides:
+      local:
+        max_walltime: "00:10:00"

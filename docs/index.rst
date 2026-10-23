@@ -115,7 +115,7 @@ C-Star is built with these principles in mind:
 
     Using blueprints to set up and run an ocean model <tutorials/end_to_end>
     Automating the previous model with a workplan <tutorials/workplan>
-    Spin-up, continuation and a nested grid <tutorials/nested_workplan>
+    Spin-up, a CDR release and its metrics <tutorials/cdr_workplan>
     Nesting and upscaling: a tiny nested CDR run <tutorials/nesting_upscaling>
 
 .. toctree::
