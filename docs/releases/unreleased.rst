@@ -30,6 +30,9 @@ Breaking Changes
 
 - ``CSTAR_RUNID`` is internal: ``cstar env show`` lists it only with ``--group internal``, and neither ``--display export`` nor the configuration docs include it. (`#805 <https://github.com/CWorthy-ocean/C-Star/pull/805>`_)
 - Python API: ``cstar.base.env.max_concurrency()`` is now the constant ``cstar.base.utils.MAX_CONCURRENCY``, ``MigrationRequest.dry_run()`` is a ``dry_run`` field (``clobber()`` is removed), ``cstar.cli.common.set_flag`` is removed, and ``RunnerRequest``'s ``resume``, ``pre_run``, ``clobber`` and ``step`` are keyword-only. (`#805 <https://github.com/CWorthy-ocean/C-Star/pull/805>`_)
+- Blueprints and workplans are always read as YAML, which still loads ordinary JSON but not tab-indented JSON. (`#812 <https://github.com/CWorthy-ocean/C-Star/pull/812>`_)
+- Removed ``PersistenceMode``, ``render_model`` and ``read_json_to_raw`` from ``cstar.orchestration.serialization``, and the ``mode`` argument from ``serialize``, ``deserialize`` and the other read helpers. (`#812 <https://github.com/CWorthy-ocean/C-Star/pull/812>`_)
+- ``cstar blueprint migrate --in-place`` on a ``.json`` blueprint now writes YAML into that file. (`#812 <https://github.com/CWorthy-ocean/C-Star/pull/812>`_)
 
 
 New features
@@ -256,6 +259,7 @@ Improvements
 - ``cstar workplan run --resume`` no longer re-exports removed settings recorded in an older run's environment. (`#805 <https://github.com/CWorthy-ocean/C-Star/pull/805>`_)
 - ``--yes`` is now a shared CLI option constant, used by ``cstar admin clean`` and ``cstar init``. (`#809 <https://github.com/CWorthy-ocean/C-Star/pull/809>`_)
 - ``cstar run promote`` copies files in 64 MiB blocks: on Anvil's GPFS a run now copies at 1,750 MiB/s, 4.6× faster than before and 4× faster than ``rsync -a``. (`#811 <https://github.com/CWorthy-ocean/C-Star/pull/811>`_)
+- Each run attempt now always saves its workplan as ``workplan.yaml``, whatever the authored file's suffix. (`#812 <https://github.com/CWorthy-ocean/C-Star/pull/812>`_)
 
 
 
@@ -299,3 +303,4 @@ Miscellaneous
 - The configuration page documents the file, its precedence and the new commands; the HPC and installation pages point to it beside the existing ``export`` example. (`#806 <https://github.com/CWorthy-ocean/C-Star/pull/806>`_)
 - The configuration page gains "Where a setting can be set, and which wins": the full precedence chain, the SLURM layers a workplan and its steps add, and what ``--resume`` re-exports. (`#806 <https://github.com/CWorthy-ocean/C-Star/pull/806>`_)
 - The installation page's "After installing" section now starts with ``cstar init`` and keeps the kernel, configuration and shell-function steps as its sub-steps; the HPC page's scheduler section leads with ``cstar init`` and keeps the ``config.env`` example; the configuration page points at ``cstar init`` as the way to create the file. (`#809 <https://github.com/CWorthy-ocean/C-Star/pull/809>`_)
+- Removed the ``workplan.json`` mention from the workplans guide. (`#812 <https://github.com/CWorthy-ocean/C-Star/pull/812>`_)
