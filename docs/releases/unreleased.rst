@@ -170,6 +170,14 @@ New features
 
 - ``cstar env set NAME VALUE`` writes or updates one line of the file, creating it on first use and keeping comments; ``cstar env unset NAME`` comments the line out. (`#806 <https://github.com/CWorthy-ocean/C-Star/pull/806>`_)
 - ``cstar env show`` prints the configuration file's path and marks each value ``[env]``, ``[config]`` or ``[default]``; ``--display export`` is unchanged. (`#806 <https://github.com/CWorthy-ocean/C-Star/pull/806>`_)
+- ``cstar init`` walks through the setup that follows an install and writes ``~/.config/cstar/config.env`` from the answers. (`#809 <https://github.com/CWorthy-ocean/C-Star/pull/809>`_)
+
+  - On a SLURM system it asks for the account, queue and default walltime, listing your ``sacctmgr`` associations and ``sinfo`` partitions when they can be queried, and marks the settings the system requires.
+  - It shows the data home, project home and catalog with where each value came from (shell, file, scratch variable, system convention, ``$PROJECT``, XDG or the built-in default), recommends naming a scratch directory on a cluster where none was found, and lets you keep or change each.
+  - Pressing Enter keeps a value, ``-`` leaves a setting unset; a kept default is left as a commented line, a value exported in the shell is moved into the file with a note that the ``export`` line can go, and settings already in the file that the command does not ask about are preserved.
+  - It then offers to install the ``cstar`` shell function and to register a Jupyter kernel, prints the Copernicus Marine and TPXO registration pointers, and ends with a summary; a skipped or failed optional step is reported and the exit code stays 0 once the file is written.
+  - ``cstar init --yes`` accepts every default without prompting, for containers and scripts.
+
 
 
 
@@ -241,6 +249,7 @@ Improvements
 - Building a subchunked GLORYS reference no longer patches asyncio for the rest of the forge step, which on Python 3.14 broke asyncio timeouts, fsspec I/O and event-loop shutdown. (`#804 <https://github.com/CWorthy-ocean/C-Star/pull/804>`_)
 - The local launcher checks a waiting step's dependencies every 2 s instead of every 10 s, so local workplan steps start sooner. (`#805 <https://github.com/CWorthy-ocean/C-Star/pull/805>`_)
 - ``cstar workplan run --resume`` no longer re-exports removed settings recorded in an older run's environment. (`#805 <https://github.com/CWorthy-ocean/C-Star/pull/805>`_)
+- ``--yes`` is now a shared CLI option constant, used by ``cstar admin clean`` and ``cstar init``. (`#809 <https://github.com/CWorthy-ocean/C-Star/pull/809>`_)
 
 
 
@@ -283,3 +292,4 @@ Miscellaneous
 - The e2e step-log checks now show the lines after each error, so a failed command's stderr appears in the assertion message. (`#808 <https://github.com/CWorthy-ocean/C-Star/pull/808>`_)
 - The configuration page documents the file, its precedence and the new commands; the HPC and installation pages point to it beside the existing ``export`` example. (`#806 <https://github.com/CWorthy-ocean/C-Star/pull/806>`_)
 - The configuration page gains "Where a setting can be set, and which wins": the full precedence chain, the SLURM layers a workplan and its steps add, and what ``--resume`` re-exports. (`#806 <https://github.com/CWorthy-ocean/C-Star/pull/806>`_)
+- The installation page's "After installing" section now starts with ``cstar init`` and keeps the kernel, configuration and shell-function steps as its sub-steps; the HPC page's scheduler section leads with ``cstar init`` and keeps the ``config.env`` example; the configuration page points at ``cstar init`` as the way to create the file. (`#809 <https://github.com/CWorthy-ocean/C-Star/pull/809>`_)
