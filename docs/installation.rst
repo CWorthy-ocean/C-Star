@@ -61,33 +61,57 @@ packages; the second lists subcommands you may wish to explore in more detail.
 After installing
 ----------------
 
+Run ``cstar init``
+   One guided command covers the rest of this section. On a cluster it asks
+   for your scheduler account, queue and default walltime, listing your SLURM
+   associations and partitions when it can. It shows where C-Star will put
+   run output, the shared source-data cache and your catalog entries, and
+   lets you change each. It writes those answers to the configuration file,
+   offers to install the shell function behind ``cstar run cd``, offers to
+   register a Jupyter kernel for the environment, and ends with the two
+   dataset registrations below:
+
+   .. code-block:: console
+
+      cstar init
+
+   Every prompt defaults to the value already in effect, so run it again
+   whenever you want to review your setup. ``cstar init --yes`` accepts every
+   default without asking, for containers and scripts. Each step can also be
+   done on its own:
+
+   Configure C-Star for your cluster
+      The scheduler account and queue and the data locations live in the
+      configuration file, ``~/.config/cstar/config.env``, which ``cstar init``
+      writes. ``cstar env set`` changes one setting, or edit the file by hand;
+      ``cstar env show`` prints the active configuration and where each value
+      came from. See :doc:`configuration` and :doc:`hpc`.
+
+   Register a Jupyter kernel
+      To use Jupyter notebooks with your C-Star environment, for your own
+      analysis or for the Jupyter version of the Forge wizard, activate the
+      environment and run:
+
+      .. code-block:: console
+
+         cstar env register-kernel
+
+      This custom registration mechanism helps ensure compatibility with HPC
+      Jupyter servers. The kernel launches through a wrapper that activates
+      the environment first, so shell commands inside notebooks see the same
+      ``PATH`` and variables you do. Run ``cstar env register-kernel --help``
+      for naming options.
+
+   Install the shell function
+      ``cstar run cd <run-id>`` can only change your shell's directory
+      through a small shell function. ``cstar env shell-init --install``
+      installs it for zsh or bash; see :ref:`workplan_run_cd`.
+
 Register for dataset access
    Generating a new domain downloads forcing data from public archives. Most
    sources need no account, but GLORYS ocean reanalysis (used for essentially
    every domain) and TPXO tides require a free registration and a one-time
    setup step. See :doc:`data_access`.
-
-Register a Jupyter kernel
-   If you intend to use Jupyter notebooks with your C-Star environment, for either your own analysis or
-   to use the Jupyter version of the Forge wizard, activate your ``cstar_env`` conda environment
-   and run:
-
-   .. code-block:: console
-
-      cstar env register-kernel
-
-   This custom registration mechanism helps ensure compatibility with HPC Jupyter servers.
-   The kernel launches through a wrapper that activates the environment
-   first, so shell commands inside notebooks see the same ``PATH`` and
-   variables you do. Run ``cstar env register-kernel --help`` for naming
-   options.
-
-Configure C-Star for your cluster
-   On an HPC system, set your scheduler account and queue and review the
-   other settings before running anything. They go in the configuration file,
-   ``~/.config/cstar/config.env``, which you can write with ``cstar env set``
-   or edit by hand. ``cstar env show`` prints the active configuration and
-   where each value came from; see :doc:`configuration` and :doc:`hpc`.
 
 Install from source
 -------------------

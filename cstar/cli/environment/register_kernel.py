@@ -25,6 +25,9 @@ import typer
 
 WRAPPER_FILENAME = "start-kernel.sh"
 
+COMMAND_REGISTER_KERNEL: t.Final[str] = "register-kernel"
+"""Name of the command that registers the environment's Jupyter kernel."""
+
 PACKAGE_MANAGERS = ("auto", "micromamba", "conda", "mamba")
 
 HELP: t.Final[str] = (
@@ -261,7 +264,7 @@ def register_kernel(
 app = typer.Typer()
 
 
-@app.command(name="register-kernel", help=HELP)
+@app.command(name=COMMAND_REGISTER_KERNEL, help=HELP)
 def register_kernel_command(
     name: t.Annotated[
         str | None,

@@ -59,6 +59,9 @@ ARG_PRE_RUN_WORKPLAN_HELP: t.Final[str] = (
 ARG_DRY_RUN: t.Final[str] = "--dry-run"
 ARG_DRY_RUN_HELP: t.Final[str] = "Show what would be done without doing it."
 
+ARG_YES: t.Final[str] = "--yes"
+"""Option that accepts every prompt without user interaction."""
+
 ARG_OWN: t.Final[str] = "--own"
 ARG_OWN_HELP: t.Final[str] = (
     "Record the attached run as owned: verbs that write into its directory may."
