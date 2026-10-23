@@ -170,5 +170,6 @@ instead of one in the same workplan, so a long spin-up is done once and reused
 each continue from the previous one, and the wizard's Workplan page has a
 generator for that. Carbon dioxide removal experiments add a forcing file and
 a control run alongside the experiment, and nested CDR runs can pass their
-effect back up to the parent. :doc:`../workplans` and
+effect back up to the parent: :doc:`nesting_upscaling` walks through that
+chain, ending with the CDR metrics of both grids. :doc:`../workplans` and
 :doc:`../workplans/directives` describe every option.

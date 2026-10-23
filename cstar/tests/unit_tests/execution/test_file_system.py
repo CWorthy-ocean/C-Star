@@ -807,6 +807,69 @@ class TestSourceDataHome:
         assert home.readlink() == Path("../cstar-forge-data/source-data")
         assert (home / "glorys.nc").read_text() == "data"
 
+    def _make_symlinked_home(self, tmp_path: Path) -> tuple[Path, Path]:
+        """A home directory and legacy cache behind different symlinks:
+        ``cstar`` and ``cstar-forge-data`` in the home directory are symlinks
+        into different directories elsewhere.
+
+        Returns the fake home and the (real) legacy source-data directory.
+        """
+        mount = tmp_path / "mnt" / "volume" / "group"
+        real_cstar = mount / "user" / "name" / "cstar"
+        real_cstar.mkdir(parents=True)
+        legacy = self._make_legacy(mount)
+        home = tmp_path / "linked-home"
+        home.mkdir()
+        (home / "cstar").symlink_to(real_cstar)
+        (home / "cstar-forge-data").symlink_to(mount / "cstar-forge-data")
+        return home, legacy
+
+    def test_ensure_adopts_legacy_cache_behind_symlinks(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The link must resolve from the real ``cstar`` directory, not from the
+        symlink that points to it.
+        """
+        root, legacy = self._make_symlinked_home(tmp_path)
+        monkeypatch.setenv("SCRATCH", str(root))
+
+        home = DirectoryManager.ensure_source_data_home()
+
+        assert home == self._expected(root)
+        assert home.exists()
+        assert home.is_symlink()
+        assert not home.readlink().is_absolute()
+        assert home.resolve() == legacy.resolve()
+        assert (home / "glorys.nc").read_text() == "data"
+
+        link_target = home.readlink()
+        assert DirectoryManager.ensure_source_data_home() == home
+        assert home.is_symlink()
+        assert home.readlink() == link_target
+        assert home.resolve() == legacy.resolve()
+
+    def test_ensure_repairs_dangling_link_from_old_relpath(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Releases 0.16.0 and 0.16.1 linked with a lexical relpath, which dangles
+        behind symlinked parents; that link is replaced instead of refused.
+        """
+        root, legacy = self._make_symlinked_home(tmp_path)
+        monkeypatch.setenv("SCRATCH", str(root))
+        standard = self._expected(root)
+        standard.symlink_to("../cstar-forge-data/source-data")
+        assert standard.is_symlink()
+        assert not standard.exists()
+
+        home = DirectoryManager.ensure_source_data_home()
+
+        assert home == standard
+        assert home.is_dir()
+        assert home.is_symlink()
+        assert not home.readlink().is_absolute()
+        assert home.resolve() == legacy.resolve()
+        assert (home / "glorys.nc").read_text() == "data"
+
     def test_ensure_does_not_link_when_standard_dir_exists(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
@@ -847,6 +910,43 @@ class TestSourceDataHome:
 
         assert standard.is_symlink()
         assert not (tmp_path / "unmounted").exists()
+
+    def test_ensure_refuses_other_dangling_link_when_legacy_exists(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Only the exact link left by the old code is repaired; any other
+        dangling link is refused even when a legacy cache could be adopted.
+        """
+        root, _ = self._make_symlinked_home(tmp_path)
+        monkeypatch.setenv("SCRATCH", str(root))
+        standard = self._expected(root)
+        standard.symlink_to("../unmounted/source-data")
+
+        with pytest.raises(CstarError, match="does not exist"):
+            DirectoryManager.ensure_source_data_home()
+
+        assert standard.is_symlink()
+        assert standard.readlink() == Path("../unmounted/source-data")
+
+    def test_ensure_refuses_old_relpath_link_without_legacy_cache(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The old release's link text is repaired only when the legacy cache it
+        names exists; otherwise the link is refused, not replaced by an empty
+        directory.
+        """
+        scratch = tmp_path / "scratch"
+        standard = self._expected(scratch)
+        standard.parent.mkdir(parents=True)
+        standard.symlink_to("../cstar-forge-data/source-data")
+        monkeypatch.setenv("SCRATCH", str(scratch))
+        assert not (scratch / "cstar-forge-data").exists()
+
+        with pytest.raises(CstarError, match="does not exist"):
+            DirectoryManager.ensure_source_data_home()
+
+        assert standard.is_symlink()
+        assert standard.readlink() == Path("../cstar-forge-data/source-data")
 
     def test_ensure_tolerates_losing_the_link_race(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch

@@ -408,3 +408,198 @@ class TestCDRUpscalerTracers:
                 "DIC",
                 "CDR_OAE_ALK1",
             ]
+
+
+_HOUR_S = 3600.0
+"""Seconds between records in the time-ordered synthetic `_uscl` files."""
+
+
+def _write_hourly_uscl(path: Path, hours: list[int], offset_s: float = 0.0) -> Path:
+    """Write a tiny `_uscl` file with one record per entry of *hours*.
+
+    Every flux and layer thickness at a record equals its hour, so records can be
+    traced through the concatenation. *offset_s* is added to every `ocean_time`,
+    as the seconds since the model reference date of a real run are large.
+    """
+    h = np.asarray(hours, dtype=float)
+    ds = xr.Dataset(
+        {
+            "ocean_time": (("time",), h * _HOUR_S + offset_s),
+            "lat_north": (("xi_rho",), np.linspace(10.0, 11.0, _N_XI)),
+            "lon_north": (("xi_rho",), np.linspace(20.0, 21.0, _N_XI)),
+            "lat_east": (("eta_rho",), np.linspace(10.0, 11.0, _N_ETA)),
+            "lon_east": (("eta_rho",), np.linspace(30.0, 31.0, _N_ETA)),
+        }
+    )
+    for bry, dim, n in (("north", "xi_rho", _N_XI), ("east", "eta_rho", _N_ETA)):
+        for prefix in ("ALK_add", "DIC_add", "h"):
+            ds[f"{prefix}_{bry}"] = (
+                ("time", "s_rho", dim),
+                np.broadcast_to(h[:, None, None], (len(h), _N_S_RHO, n)).copy(),
+            )
+    ds.to_netcdf(path, unlimited_dims=["time"])
+    return path
+
+
+class TestCDRUpscalerTimeOrder:
+    """`CDRUpscaler` concatenates `_uscl` files in time order, however they arrive."""
+
+    @pytest.fixture
+    def uscl_files(self, tmp_path: Path) -> list[Path]:
+        """Four `_uscl` files with two hourly records each, in chronological order."""
+        names_and_hours = [
+            ("roms_uscl.20240101000000.nc", [0, 1]),
+            ("roms_uscl.20240101020000.nc", [2, 3]),
+            ("roms_uscl.20240101040000.nc", [4, 5]),
+            ("roms_uscl.20240101060000.nc", [6, 7]),
+        ]
+        # Write them out of chronological order, as a directory listing may return
+        # them, so the on-disk order differs from the time order too.
+        written = {
+            name: _write_hourly_uscl(tmp_path / name, hours)
+            for name, hours in reversed(names_and_hours)
+        }
+        return [written[name] for name, _ in names_and_hours]
+
+    @pytest.mark.parametrize(
+        "order",
+        [
+            pytest.param([3, 2, 1, 0], id="reversed"),
+            pytest.param([3, 0, 2, 1], id="scrambled"),
+            pytest.param([0, 1, 2, 3], id="chronological"),
+        ],
+    )
+    def test_cdr_time_is_chronological_for_any_input_order(
+        self, uscl_files: list[Path], order: list[int]
+    ) -> None:
+        """Verify `cdr_time` is strictly increasing from the earliest record, and
+        the flux records follow it, however the files are ordered when passed in.
+        """
+        upscaler = CDRUpscaler([uscl_files[i] for i in order])
+        upscaler.create_cdr_dataset()
+        upscaler.populate_cdr_dataset()
+
+        assert upscaler.cdr_dataset is not None
+        cdr_time = upscaler.cdr_dataset["cdr_time"].values
+        assert np.all(np.diff(cdr_time) > 0)
+        assert cdr_time[0] == 0.0
+        np.testing.assert_allclose(cdr_time, np.arange(8) * _HOUR_S / 86400.0)
+
+        # Each record's flux and layer thickness were written equal to its hour.
+        expected = np.arange(8, dtype=float)
+        flux = upscaler.cdr_dataset["cdr_trcflx_profile"].values
+        np.testing.assert_array_equal(flux[:, 0, 0, 0], expected)
+        np.testing.assert_array_equal(flux[:, 0, 1, -1], expected)
+        thickness = upscaler.cdr_dataset["cdr_layer_thickness"].values
+        np.testing.assert_array_equal(thickness[:, 0, 0], expected)
+
+    def test_files_are_stored_in_time_order(self, uscl_files: list[Path]) -> None:
+        """Verify `CDRUpscaler.files` is time-sorted, and the input list is untouched."""
+        shuffled: list[Path | str] = [uscl_files[i] for i in (2, 0, 3, 1)]
+        upscaler = CDRUpscaler(shuffled)
+
+        assert upscaler.files == uscl_files
+        assert shuffled == [uscl_files[i] for i in (2, 0, 3, 1)]
+
+    def test_files_without_timestamps_keep_the_given_order(
+        self, tmp_path: Path
+    ) -> None:
+        """Verify names without a 14-digit timestamp are not reordered, so numbered
+        files like ``uscl.1 ... uscl.10`` are not sorted alphabetically.
+        """
+        files: list[Path | str] = [
+            _write_hourly_uscl(
+                tmp_path / f"a_uscl.{i}.nc", [2 * (i - 1), 2 * (i - 1) + 1]
+            )
+            for i in range(1, 11)
+        ]
+
+        upscaler = CDRUpscaler(files)
+
+        assert upscaler.files == files
+        assert np.all(np.diff(upscaler.uscl_dataset.ocean_time.values) > 0)
+
+    def test_files_without_timestamps_sort_before_stamped_files(
+        self, tmp_path: Path
+    ) -> None:
+        """Verify an unstamped file is placed first, ahead of every stamped one."""
+        unstamped = _write_hourly_uscl(tmp_path / "a_uscl.restart.nc", [0, 1])
+        late = _write_hourly_uscl(tmp_path / "a_uscl.20240101040000.nc", [4, 5])
+        early = _write_hourly_uscl(tmp_path / "a_uscl.20240101020000.nc", [2, 3])
+
+        upscaler = CDRUpscaler([late, early, unstamped])
+
+        assert upscaler.files == [unstamped, early, late]
+        assert np.all(np.diff(upscaler.uscl_dataset.ocean_time.values) > 0)
+
+    def test_overlapping_records_raise(self, tmp_path: Path) -> None:
+        """Verify a record repeated across files is reported, not silently kept."""
+        first = _write_hourly_uscl(tmp_path / "roms_uscl.20240101000000.nc", [0, 1, 2])
+        second = _write_hourly_uscl(tmp_path / "roms_uscl.20240101020000.nc", [2, 3, 4])
+
+        with pytest.raises(ValueError, match="strictly increasing"):
+            CDRUpscaler([first, second])
+
+    def test_overlapping_records_error_names_the_record_and_files(
+        self, tmp_path: Path
+    ) -> None:
+        """Verify the error names the first offending record, its time and the
+        files holding it and the record before it.
+        """
+        first = _write_hourly_uscl(tmp_path / "roms_uscl.20240101000000.nc", [0, 1, 2])
+        second = _write_hourly_uscl(tmp_path / "roms_uscl.20240101020000.nc", [2, 3, 4])
+
+        with pytest.raises(ValueError) as excinfo:
+            CDRUpscaler([first, second])
+
+        assert str(excinfo.value) == (
+            "`ocean_time` of the concatenated `_uscl` files is not strictly "
+            "increasing: record 3 (7200 s, in roms_uscl.20240101020000.nc) does "
+            "not follow record 2 (7200 s, in roms_uscl.20240101000000.nc). The "
+            "files contain repeated or out-of-order records."
+        )
+
+    def test_overlapping_records_error_shows_large_times_to_the_second(
+        self, tmp_path: Path
+    ) -> None:
+        """Verify times of a real run (about 3.8e8 s) a minute apart print as
+        different numbers, not rounded to the same six significant digits.
+        """
+        run_start_s = 380_000_000.0
+        first = _write_hourly_uscl(
+            tmp_path / "roms_uscl.20240101000000.nc", [0, 1, 2], offset_s=run_start_s
+        )
+        # The second file starts a minute before the last record of the first.
+        second = _write_hourly_uscl(
+            tmp_path / "roms_uscl.20240101020000.nc",
+            [2, 3, 4],
+            offset_s=run_start_s - 60.0,
+        )
+
+        with pytest.raises(ValueError) as excinfo:
+            CDRUpscaler([first, second])
+
+        assert str(excinfo.value) == (
+            "`ocean_time` of the concatenated `_uscl` files is not strictly "
+            "increasing: record 3 (380007140 s, in roms_uscl.20240101020000.nc) does "
+            "not follow record 2 (380007200 s, in roms_uscl.20240101000000.nc). The "
+            "files contain repeated or out-of-order records."
+        )
+
+    def test_overlapping_records_close_the_dataset(self, tmp_path: Path) -> None:
+        """Verify the concatenated dataset is closed when the time check fails."""
+        first = _write_hourly_uscl(tmp_path / "roms_uscl.20240101000000.nc", [0, 1, 2])
+        second = _write_hourly_uscl(tmp_path / "roms_uscl.20240101020000.nc", [2, 3, 4])
+
+        with (
+            mock.patch.object(
+                xr.Dataset, "close", autospec=True, side_effect=xr.Dataset.close
+            ) as close,
+            pytest.raises(ValueError, match="strictly increasing"),
+        ):
+            CDRUpscaler([first, second])
+
+        close.assert_called()
+        # xarray closes other datasets too (the per-file ones); the joined one has
+        # all six records.
+        assert any(call.args[0].sizes.get("time") == 6 for call in close.call_args_list)

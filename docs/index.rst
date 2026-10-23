@@ -116,6 +116,7 @@ C-Star is built with these principles in mind:
     Using blueprints to set up and run an ocean model <tutorials/end_to_end>
     Automating the previous model with a workplan <tutorials/workplan>
     Spin-up, continuation and a nested grid <tutorials/nested_workplan>
+    Nesting and upscaling: a tiny nested CDR run <tutorials/nesting_upscaling>
 
 .. toctree::
     :maxdepth: 2
@@ -168,4 +169,5 @@ C-Star is built with these principles in mind:
     developers/forge_source_data
     developers/forge_input_data
     developers/catalog_design
+    Nesting and upscaling on the California Current System <developers/nesting_upscaling_ccs>
     releases

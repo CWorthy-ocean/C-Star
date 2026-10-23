@@ -227,4 +227,5 @@ caught. See :ref:`workplan_pre_run` for the workplan equivalent.
 
    blueprints/roms_marbl
    blueprints/forge
+   blueprints/cdr_metrics
    tutorials/tutorial_bp

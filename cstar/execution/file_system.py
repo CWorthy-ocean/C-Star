@@ -220,7 +220,12 @@ class DirectoryManager:
 
         A cache at the legacy ``<root>/cstar-forge-data/source-data`` is adopted:
         when it exists and the standard directory does not, the standard directory
-        is created as a relative symlink to it.
+        is created as a relative symlink to it. The link is computed between the
+        resolved paths, so it holds when ``<root>/cstar`` or the legacy directory
+        is itself behind a symlink.
+
+        A dangling link left by releases 0.16.0 and 0.16.1 (which computed it from
+        the unresolved paths) is replaced when the legacy cache exists.
 
         Raises
         ------
@@ -231,11 +236,22 @@ class DirectoryManager:
         """
         home, legacy = cls._source_data_paths()
         if home.is_symlink() and not home.exists():
-            msg = (
-                f"The source-data cache {home} links to {home.readlink()}, which "
-                "does not exist. Restore the target or remove the link."
-            )
-            raise CstarError(msg)
+            target = os.readlink(home)
+            # 0.16.0 and 0.16.1 linked with a lexical relpath that dangles when
+            # <root>/cstar or the legacy directory is behind a symlink.
+            if legacy.is_dir() and target == os.path.relpath(legacy, home.parent):
+                log.info(
+                    "Replacing dangling source-data link %s from an older release", home
+                )
+                # Another process repairing the same link may have removed it first.
+                home.unlink(missing_ok=True)
+            elif not home.exists():
+                # Checked again: another process may have relinked it meanwhile.
+                msg = (
+                    f"The source-data cache {home} links to {target}, which "
+                    "does not exist. Restore the target or remove the link."
+                )
+                raise CstarError(msg)
         if not home.exists() and legacy.is_dir():
             # Another process sharing the root may have linked it first.
             with contextlib.suppress(FileExistsError):
