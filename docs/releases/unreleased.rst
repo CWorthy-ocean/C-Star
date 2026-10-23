@@ -146,6 +146,12 @@ New features
   - When neither ``CSTAR_PROJECT_HOME`` nor ``$PROJECT`` is set, the output says so.
   - ``--json`` adds ``project_home`` and ``project_runs`` to ``paths``, after the existing keys; each is ``null`` without a project directory.
 
+- Two tutorial workplans run a nested ROMS-MARBL simulation with a CDR release in the child, upscaled back to the parent, and end by computing and plotting the combined CDR metrics. (`#776 <https://github.com/CWorthy-ocean/C-Star/pull/776>`_)
+
+  - The tiny tutorial runs on a laptop in about 10 minutes from about 44 MB of pinned test data, with one command and no accounts.
+  - The California Current tutorial (16 km parent, 4 km child) uses real forcing and runs under SLURM or on a workstation; ``full.vars`` holds a year-long window, and the page shows how to run a month.
+
+
 
 
 
@@ -172,6 +178,11 @@ Bug Fixes
 - ``cstar blueprint run`` no longer crashes with a traceback when a deferred blueprint or a directive reads a producer step record written by a newer cstar-ocean; it prints the upgrade guidance and exits 1. (`#803 <https://github.com/CWorthy-ocean/C-Star/pull/803>`_)
 - ``cstar blueprint run`` no longer prints a traceback when a directive (``continue-from``, ``nest-from``, …) fails with a C-Star error; it prints "Unable to apply directives: …" and exits 1. (`#803 <https://github.com/CWorthy-ocean/C-Star/pull/803>`_)
 - Listing and status commands no longer crash on a run manifest or step record from a newer cstar-ocean; they log it and show the run without that information. (`#803 <https://github.com/CWorthy-ocean/C-Star/pull/803>`_)
+- The upscaler could combine the child's ``_uscl`` files out of time order, which scrambled the upscaled CDR forcing and made the parent rerun abort. (`#776 <https://github.com/CWorthy-ocean/C-Star/pull/776>`_)
+
+  - It now orders them by the timestamp in their names, and repeated or out-of-order records raise an error that names the record and files.
+
+- C-Star now repairs the broken source-data cache link that 0.16.0 and 0.16.1 created when the C-Star root or the legacy forge data folder sits behind a symlink, which made every forge run fail. (`#776 <https://github.com/CWorthy-ocean/C-Star/pull/776>`_)
 
 
 Improvements
@@ -242,3 +253,5 @@ Miscellaneous
 - The workplan tutorial's sample ``cstar run ls`` table shows the new "not measured" wording. (`#801 <https://github.com/CWorthy-ocean/C-Star/pull/801>`_)
 - The HPC guide says what ``cstar forge show-paths`` prints, including the project runs area. (`#802 <https://github.com/CWorthy-ocean/C-Star/pull/802>`_)
 - ``nest-asyncio`` is no longer a dependency of ``cstar-ocean`` or of the conda environment files. (`#804 <https://github.com/CWorthy-ocean/C-Star/pull/804>`_)
+- New tutorial pages on nesting and upscaling: a walk-through of the tiny case and a high-level page for the California Current case. They replace the unlinked placeholder workplan sketch in ``docs/tutorials``. (`#776 <https://github.com/CWorthy-ocean/C-Star/pull/776>`_)
+- The weekly extended integration tests run the tiny tutorial end to end. They check its CDR metrics and that the parent rerun injects exactly the upscaled flux. (`#776 <https://github.com/CWorthy-ocean/C-Star/pull/776>`_)
