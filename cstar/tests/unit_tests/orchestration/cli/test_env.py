@@ -17,6 +17,7 @@ async def test_cli_env_show() -> None:
         [],
         color=False,
     )
+    assert "CSTAR_LOG_LEVEL:" in result.stdout
     assert "CSTAR_RUNID:" not in result.stdout
     assert "CSTAR_:" not in result.stdout
     assert not result.stderr
@@ -66,7 +67,7 @@ def test_cli_env_show_export_omits_internal(
 def test_cli_env_show_internal_export_is_empty(
     flatten_cli_output: Callable[[str], str],
 ) -> None:
-    """Verify that exporting only the internal group finds nothing to display.
+    """Verify that exporting the internal group says it is never exported.
 
     Parameters
     ----------
@@ -82,5 +83,5 @@ def test_cli_env_show_internal_export_is_empty(
     )
 
     assert "CSTAR_RUNID" not in result.stdout
-    assert "No environment variables found" in flatten_cli_output(result.stdout)
+    assert "The internal group is never exported" in flatten_cli_output(result.stdout)
     assert not result.stderr

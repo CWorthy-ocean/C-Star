@@ -358,28 +358,55 @@ ENV_CSTAR_RUNID: t.Annotated[
 ] = "CSTAR_RUNID"
 """Environment variable containing a unique run identifier used by the orchestrator."""
 
-REMOVED_SETTINGS: t.Final[dict[str, str]] = {
-    "CSTAR_CLI_DRY_RUN": "pass --dry-run to the command instead.",
-    "CSTAR_CLI_VERBOSE": "pass --verbose to the command instead.",
-    "CSTAR_CLOBBER_WORKING_DIR": (
-        "pass --clobber to `cstar blueprint run` instead "
-        "(`--clobber <step|all>` for `cstar workplan run`)."
+
+@dataclass(frozen=True, slots=True)
+class RemovedSetting:
+    """What to tell someone who still exports a setting C-Star no longer reads."""
+
+    guidance: str
+    """What to do instead; read after "<NAME> has no effect; "."""
+    refused: bool = False
+    """Whether commands refuse to run while it is exported, because ignoring it
+    would do more than was asked (a dry run becoming a real one)."""
+
+
+REMOVED_SETTINGS: t.Final[dict[str, RemovedSetting]] = {
+    "CSTAR_CLI_DRY_RUN": RemovedSetting(
+        "pass --dry-run to `cstar blueprint migrate` or `cstar admin clean`, or "
+        "check a workplan without running it with `cstar workplan check`.",
+        refused=True,
     ),
-    "CSTAR_FRESH_CODEBASES": (
-        "pass --clobber to `cstar blueprint run` to start from an empty working "
-        "directory instead."
+    "CSTAR_CLI_VERBOSE": RemovedSetting(
+        "pass --verbose to `cstar blueprint run` or `cstar blueprint migrate` instead."
     ),
-    "CSTAR_IN_ACTIVE_ALLOCATION": (
+    "CSTAR_CLOBBER_WORKING_DIR": RemovedSetting(
+        "pass --clobber to `cstar blueprint run` or `cstar blueprint migrate` "
+        "instead (`--clobber <step|all>` for `cstar workplan run`)."
+    ),
+    "CSTAR_FRESH_CODEBASES": RemovedSetting(
+        "pass --clobber to `cstar blueprint run` (`--clobber <step|all>` for "
+        "`cstar workplan run`) to start from an empty working directory instead."
+    ),
+    "CSTAR_IN_ACTIVE_ALLOCATION": RemovedSetting(
         "C-Star detects an active SLURM allocation from SLURM_JOBID."
     ),
-    "CSTAR_ORCH_DELAYS": "the orchestrator's polling intervals are fixed.",
-    "CSTAR_ORCH_LOCAL_DELAY": "the local launcher's polling interval is fixed.",
-    "CSTAR_ORCH_MAX_CONC": "the limit on concurrent disk operations is fixed.",
-    "CSTAR_SLURM_POST_SUBMIT_DELAY": "the delay after a SLURM submission is fixed.",
+    "CSTAR_ORCH_DELAYS": RemovedSetting(
+        "the orchestrator's polling intervals are fixed."
+    ),
+    "CSTAR_ORCH_LOCAL_DELAY": RemovedSetting(
+        "the local launcher's polling interval is fixed."
+    ),
+    "CSTAR_ORCH_MAX_CONC": RemovedSetting(
+        "the limit on concurrent disk operations is fixed."
+    ),
+    "CSTAR_SLURM_POST_SUBMIT_DELAY": RemovedSetting(
+        "the delay after a SLURM submission is fixed."
+    ),
 }
-"""Settings that were removed, each mapped to guidance for anyone still setting it.
+"""Settings that were removed, mapped to guidance for anyone still exporting one.
 
-An exported removed setting has no effect; the CLI warns about it.
+An exported removed setting has no effect; the CLI warns about it, and refuses
+to run while a `refused` one is exported.
 """
 
 
@@ -408,11 +435,19 @@ def discover_env_vars() -> dict[str, EnvItem]:
     return container
 
 
-def env_var_groups() -> dict[str, list[EnvItem]]:
-    """Return a mapping from group-name to the associated list of env variables."""
+def env_var_groups(include_internal: bool = False) -> dict[str, list[EnvItem]]:
+    """Return a mapping from group-name to the associated list of env variables.
+
+    Parameters
+    ----------
+    include_internal : bool
+        Include the internal group, which C-Star sets for its own processes and
+        which users never set.
+    """
     groups: dict[str, list[EnvItem]] = defaultdict(list)
 
     for item in discover_env_vars().values():
-        groups[item.group].append(item)
+        if include_internal or item.group != GROUP_INTERNAL:
+            groups[item.group].append(item)
 
     return groups

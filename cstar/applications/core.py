@@ -91,6 +91,7 @@ class RunnerRequest(t.Generic[TBlueprint]):
         bp_type: type[TBlueprint],
         name: str = "",
         directive_uri: str = "",
+        *,
         resume: bool = False,
         pre_run: bool = False,
         clobber: bool = False,

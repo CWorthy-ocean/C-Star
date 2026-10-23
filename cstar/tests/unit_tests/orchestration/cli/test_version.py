@@ -68,7 +68,7 @@ def test_removed_setting_warns_on_stderr(
     monkeypatch: pytest.MonkeyPatch, name: str
 ) -> None:
     """An exported removed setting is reported on stderr, with its guidance,
-    and never on stdout.
+    and never on stdout; the command stops only for a refused setting.
 
     Parameters
     ----------
@@ -78,12 +78,40 @@ def test_removed_setting_warns_on_stderr(
         The name of a removed setting.
     """
     monkeypatch.setenv(name, "1")
+    removed = REMOVED_SETTINGS[name]
 
     result = CliRunner().invoke(make_app(), ["noop"], color=False)
 
-    assert result.exit_code == 0
-    assert f"{name} has no effect; {REMOVED_SETTINGS[name]}" in result.stderr
+    assert result.exit_code == (2 if removed.refused else 0)
+    assert f"{name} has no effect; {removed.guidance}" in result.stderr
+    assert ("Refusing to run" in result.stderr) is removed.refused
     assert name not in result.stdout
+
+
+def test_refused_setting_stops_before_the_command(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A refused removed setting stops the CLI before any command runs, so a
+    command meant as a dry run cannot run for real.
+
+    Parameters
+    ----------
+    monkeypatch : pytest.MonkeyPatch
+        Fixture used to export the setting.
+    """
+    name = next(n for n, removed in REMOVED_SETTINGS.items() if removed.refused)
+    monkeypatch.setenv(name, "1")
+    ran: list[str] = []
+    app = typer.Typer(callback=common_callback)
+
+    @app.command()
+    def noop() -> None:
+        ran.append("noop")
+
+    result = CliRunner().invoke(app, ["noop"], color=False)
+
+    assert result.exit_code == 2
+    assert not ran
 
 
 def test_no_warning_without_removed_settings() -> None:

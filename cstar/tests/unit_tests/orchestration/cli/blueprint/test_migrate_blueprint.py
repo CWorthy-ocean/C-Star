@@ -26,7 +26,7 @@ from cstar.cli.blueprint.migrate import (
     report_inplace_conflicts,
     target_callback,
 )
-from cstar.entrypoint.utils import ARG_CLOBBER, ARG_DRY_RUN
+from cstar.entrypoint.utils import ARG_CLOBBER, ARG_DRY_RUN, ARG_VERBOSE
 from cstar.system.migration import KEY_APP
 
 ARG_INPLACE = "--inplace"
@@ -248,6 +248,31 @@ def test_blueprint_migrate_dry_run(
     assert not expected_output_path.exists()
     assert f"Migrating {source!r}->{target!r}" in result.stdout
     assert "will be ignored during dry-run" in " ".join(result.stdout.split())
+
+
+@pytest.mark.parametrize("verbose", [False, True])
+def test_blueprint_migrate_verbose_shows_the_plan_table(
+    plotter_v1_0_0_bp: Path,
+    verbose: bool,
+) -> None:
+    """Verify `--verbose` displays every step of the migration plan in a table,
+    and its absence a one-line summary.
+
+    Parameters
+    ----------
+    plotter_v1_0_0_bp : Path
+        The path to an out-of-date blueprint
+    verbose : bool
+        Whether `--verbose` is passed.
+    """
+    args = [plotter_v1_0_0_bp.as_posix(), ARG_DRY_RUN, *([ARG_VERBOSE] * verbose)]
+
+    result = CliRunner().invoke(app, args, color=False)
+
+    assert result.exit_code == 0, result.output
+    output = " ".join(result.stdout.split())
+    assert ("Migration Plan for" in output) is verbose
+    assert ("Migrating " in output) is not verbose
 
 
 @pytest.mark.parametrize(

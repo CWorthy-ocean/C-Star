@@ -5,7 +5,7 @@ from enum import StrEnum, auto
 import typer
 from rich import print
 
-from cstar.base.env import GROUP_INTERNAL, NOT_SET, env_var_groups
+from cstar.base.env import NOT_SET, env_var_groups
 
 if t.TYPE_CHECKING:
     from cstar.base.env import EnvItem
@@ -112,15 +112,14 @@ def show(
     The internal group is shown only when requested by name, and never as
     export statements: C-Star sets those variables for its own processes.
     """
-    group_map = env_var_groups()
+    if group == "internal" and display == DisplayFormat.EXPORT:
+        print("[bold red]The internal group is never exported[/bold red]")
+        return
 
-    if group == "all":
-        group_map = {k: v for k, v in group_map.items() if k != GROUP_INTERNAL}
-    else:
+    group_map = env_var_groups(include_internal=group == "internal")
+
+    if group != "all":
         group_map = {k: v for k, v in group_map.items() if group in k.lower()}
-
-    if display == DisplayFormat.EXPORT:
-        group_map.pop(GROUP_INTERNAL, None)
 
     if not group_map:
         msg = f"[bold red]No environment variables found for group '{group}'[/bold red]"

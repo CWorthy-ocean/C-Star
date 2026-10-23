@@ -208,9 +208,20 @@ def common_callback(
         ),
     ] = False,
 ) -> None:
-    """Warn on stderr about each exported setting that no longer has an effect."""
-    for name in sorted(REMOVED_SETTINGS.keys() & os.environ.keys()):
-        typer.echo(f"{name} has no effect; {REMOVED_SETTINGS[name]}", err=True)
+    """Warn on stderr about each exported setting that no longer has an effect,
+    and stop when one of them must not be ignored.
+    """
+    removed = sorted(REMOVED_SETTINGS.keys() & os.environ.keys())
+    for name in removed:
+        typer.echo(f"{name} has no effect; {REMOVED_SETTINGS[name].guidance}", err=True)
+
+    if refused := [name for name in removed if REMOVED_SETTINGS[name].refused]:
+        typer.echo(
+            f"Refusing to run while {', '.join(refused)} is exported; unset it to "
+            "continue.",
+            err=True,
+        )
+        raise typer.Exit(2)
 
 
 P = t.ParamSpec("P")

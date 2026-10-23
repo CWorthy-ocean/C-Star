@@ -3,7 +3,7 @@ import functools
 import shutil
 import typing as t
 from collections import OrderedDict
-from collections.abc import Generator, Iterable, Mapping, Sequence
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from itertools import cycle
 from pathlib import Path
@@ -330,16 +330,6 @@ def get_orchestrator(planner: Planner, *, root: Path) -> Orchestrator:
     return orchestrator
 
 
-def incremental_delays() -> Generator[float, None, None]:
-    """Return a value from an infinite cycle of incremental delays.
-
-    Returns
-    -------
-    Generator[float]
-    """
-    yield from cycle(POLL_DELAYS)
-
-
 async def load_run_state(
     run_id: str,
     launcher: Launcher[ProcessHandle],
@@ -456,7 +446,7 @@ async def process_plan(orchestrator: Orchestrator) -> DagStatus:
     """
     closed_set = orchestrator.get_closed_nodes()
     open_set = orchestrator.get_open_nodes()
-    delay_iter = iter(incremental_delays())
+    delay_iter = cycle(POLL_DELAYS)
 
     while open_set is not None:
         await orchestrator.run()
@@ -466,7 +456,7 @@ async def process_plan(orchestrator: Orchestrator) -> DagStatus:
 
         if curr_closed != closed_set or open_set != curr_open:
             # reset to initial delay when a task is found or completed
-            delay_iter = iter(incremental_delays())
+            delay_iter = cycle(POLL_DELAYS)
 
         open_set = curr_open
         closed_set = curr_closed

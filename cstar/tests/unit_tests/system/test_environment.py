@@ -1094,9 +1094,9 @@ def test_slurm_settings_max_walltime_default(monkeypatch: pytest.MonkeyPatch) ->
     monkeypatch.setenv(ENV_CSTAR_SLURM_ACCOUNT, "an-account")
     monkeypatch.setenv(ENV_CSTAR_SLURM_QUEUE, "a-queue")
     monkeypatch.delenv(ENV_CSTAR_SLURM_MAX_WALLTIME, raising=False)
+    item = get_env_item(ENV_CSTAR_SLURM_MAX_WALLTIME)
+    monkeypatch.setattr(item, "default", "12:34:56")
 
     settings = SlurmSettingsBase()
 
-    assert settings.SLURM_MAX_WALLTIME == (
-        get_env_item(ENV_CSTAR_SLURM_MAX_WALLTIME).default
-    )
+    assert settings.SLURM_MAX_WALLTIME == "12:34:56"

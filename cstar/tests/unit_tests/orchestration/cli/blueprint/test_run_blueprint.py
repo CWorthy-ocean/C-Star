@@ -39,6 +39,7 @@ from cstar.entrypoint.utils import (
     ARG_PRE_RUN,
     ARG_RESUME,
     ARG_STEP,
+    ARG_VERBOSE,
 )
 from cstar.execution.handler import ExecutionStatus
 from cstar.orchestration.adapter import prepare_directive_file
@@ -1013,6 +1014,93 @@ def test_blueprint_run_pre_run_reaches_runner_request(
     mock_exec_runner.assert_called_once()
     mock_request_cls.assert_called_once()
     assert mock_request_cls.call_args.kwargs["pre_run"] is True
+
+
+@pytest.mark.parametrize("clobber", [False, True])
+def test_blueprint_run_clobber_reaches_runner_request(
+    complete_blueprint_path: Path,
+    clobber: bool,
+) -> None:
+    """Verify `--clobber` reaches the runner via a `RunnerRequest` with
+    `clobber=True`, and its absence with `clobber=False`.
+
+    Parameters
+    ----------
+    complete_blueprint_path : Path
+        The path to a valid blueprint.
+    clobber : bool
+        Whether `--clobber` is passed.
+    """
+    mock_sim_instance = mock.Mock()
+    mock_sim_instance.name = "test simulation"
+
+    async def modify_runner(
+        self: BlueprintRunner[RomsMarblBlueprint],
+    ) -> RunnerResult[RomsMarblBlueprint]:
+        self.add_state(ExecutionStatus.COMPLETED)
+        return self.result
+
+    with (
+        mock.patch.object(
+            ROMSSimulation,
+            "from_blueprint",
+            return_value=mock_sim_instance,
+        ),
+        mock.patch.object(
+            RomsMarblRunner,
+            "execute",
+            side_effect=modify_runner,
+            autospec=True,
+        ) as mock_exec_runner,
+        mock.patch(
+            "cstar.cli.blueprint.run.RunnerRequest",
+            wraps=RunnerRequest,
+        ) as mock_request_cls,
+    ):
+        runner = CliRunner()
+        result = runner.invoke(
+            app,
+            [complete_blueprint_path.as_posix(), *([ARG_CLOBBER] * clobber)],
+            color=False,
+        )
+
+    assert result.exit_code == 0, result.output
+    mock_exec_runner.assert_called_once()
+    mock_request_cls.assert_called_once()
+    assert mock_request_cls.call_args.kwargs["clobber"] is clobber
+
+
+@pytest.mark.parametrize("verbose", [False, True])
+def test_blueprint_run_verbose_reaches_the_migration(
+    complete_blueprint_path: Path,
+    verbose: bool,
+) -> None:
+    """Verify `--verbose`, wherever it appears relative to the blueprint path,
+    selects the detailed display of the blueprint's migration.
+
+    Parameters
+    ----------
+    complete_blueprint_path : Path
+        The path to a valid blueprint.
+    verbose : bool
+        Whether `--verbose` is passed (after the path).
+    """
+    with (
+        mock.patch(
+            "cstar.cli.blueprint.run.localize_and_migrate",
+            return_value=(complete_blueprint_path, False),
+        ) as mock_migrate,
+        mock.patch.object(RomsMarblRunner, "execute", autospec=True),
+        mock.patch.object(ROMSSimulation, "from_blueprint"),
+    ):
+        CliRunner().invoke(
+            app,
+            [complete_blueprint_path.as_posix(), *([ARG_VERBOSE] * verbose)],
+            color=False,
+        )
+
+    mock_migrate.assert_called_once()
+    assert mock_migrate.call_args.kwargs["verbose"] is verbose
 
 
 def test_blueprint_run_pre_run_and_resume_fails_fast(
