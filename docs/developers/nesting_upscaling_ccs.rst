@@ -1,15 +1,15 @@
-.. _tutorial-nesting-upscaling-ccs:
+.. _developers-nesting-upscaling-ccs:
 
-Nesting and upscaling on the California Current
-===============================================
+Nesting and upscaling on the California Current System
+======================================================
 
 This page describes the same workflow as the :doc:`tiny nested tutorial
-<nesting_upscaling>` on a realistic case: a 16 km parent and a 4 km child in
-the California Current, with real forcing. It is too large for a laptop. It
-runs on an HPC cluster or on a workstation. The tiling of ``full.vars`` (4 by
-4, 5 by 10 and 4 by 4) starts up to 50 MPI ranks in one step on either, so a
-workstation needs that many cores, or a smaller tiling with a matching
-``num_cpus`` (see "Running a shorter window").
+<../tutorials/nesting_upscaling>` on a realistic case: a 16 km parent and a 4 km
+child in the California Current System, with real forcing. It is too large for
+a laptop. It runs on an HPC cluster or on a workstation. The tiling of
+``full.vars`` (4 by 4, 5 by 10 and 4 by 4) starts up to 50 MPI ranks in one
+step on either, so a workstation needs that many cores, or a smaller tiling
+with a matching ``num_cpus`` (see "Running a shorter window").
 Read the tiny tutorial first: it explains nesting, ``continue-from``,
 upscaling and the metrics step, and this page does not repeat it.
 
@@ -17,7 +17,7 @@ The case
 --------
 
 - The **parent** is a 168 by 336 cell grid with 20 levels, about 16 km
-  resolution, covering the California Current.
+  resolution, covering the California Current System.
 - The **child** is a 70 by 140 cell grid with 20 levels, about 4 km
   resolution, nested in the parent.
 - One **alkalinity release** (ALK) is placed in the child, in Monterey Bay.
@@ -46,8 +46,11 @@ Before you start
 
 You need:
 
-- The setup of the :doc:`tiny tutorial <nesting_upscaling>`: a source checkout
-  of C-Star and an activated conda environment.
+- A source checkout of C-Star, with the conda environment from
+  ``environment-laptop.yml`` or ``environment-hpc.yml`` created, activated, and
+  C-Star installed into it (see "Install from source" on the
+  :doc:`installation page <../installation>`). The commands below run from the
+  root of the checkout.
 - roms-tools from its main branch, at or after commit ``f9b07d42``, until a
   roms-tools release carries it. The 5.2.1 release does not. roms-tools `#705
   <https://github.com/CWorthy-ocean/roms-tools/pull/705>`__ fixed the edge
@@ -95,13 +98,13 @@ Run it
 
 .. literalinclude:: nesting_upscaling_ccs/full.vars
    :language: text
-   :caption: docs/tutorials/nesting_upscaling_ccs/full.vars
+   :caption: docs/developers/nesting_upscaling_ccs/full.vars
 
 From the root of the repository, with the environment active:
 
 .. code-block:: console
 
-   cstar workplan run docs/tutorials/nesting_upscaling_ccs/workplan.yaml --varfile docs/tutorials/nesting_upscaling_ccs/full.vars
+   cstar workplan run docs/developers/nesting_upscaling_ccs/workplan.yaml --varfile docs/developers/nesting_upscaling_ccs/full.vars
 
 ``cstar workplan check`` validates the workplan with the same
 ``--var``/``--varfile`` options (``check`` has no ``--run-id``). The run ID
@@ -129,7 +132,7 @@ can also edit the workplan, and edit a copy of ``full.vars``:
 
 .. code-block:: console
 
-   cp -r docs/tutorials/nesting_upscaling_ccs ~/ccs-month
+   cp -r docs/developers/nesting_upscaling_ccs ~/ccs-month
    cd ~/ccs-month
    cp full.vars month.vars
 
@@ -304,36 +307,6 @@ the child's release only. The outputs and the meaning of the combined uptake,
 the efficiency and ``closure_residual`` are the same as in the tiny tutorial:
 see :ref:`tutorial-nesting-upscaling-outputs`.
 
-Known issues
-------------
-
-These were found in earlier runs and are to be re-checked with the versions
-used here.
-
-- **GloFAS rivers are mostly not applied.** In the river index that roms-tools
-  writes, the stations absorbed into a merged river overwrite its river cell,
-  so most of that discharge never reaches the model. ``parent`` and
-  ``parent_up`` receive the same discharge, so the CDR chain is not affected.
-  It needs a fix in roms-tools.
-- **The nesting pressure fluxes are off.** The parent blueprint sets
-  ``nesting_include_pressure_fluxes: false``, because ucla-roms crashed while
-  writing them with ParallelIO on 0.10.1.
-- **parent_up applies each hour of upscaled flux one hour late.** The
-  ``_uscl`` records are hour averages stamped at the end of the hour, but ROMS
-  holds each record from its time stamp. Each record is applied in full, so
-  conservation is not affected. The final upscaled record, the last hour's
-  export, is never applied; over 184 days that is negligible.
-- **The child's kinetic energy was abnormally high** in the earlier run. A
-  possible cause is the child's boundary, which was not blended with the
-  parent's before the roms-tools fix named above. This is not yet re-checked.
-- **forge_parent and forge_parent_up produce different BGC boundary
-  forcing.** The blueprints use density-space interpolation
-  (``density_mld``), which averages the physics over each forge step's window,
-  and the two steps have different windows. A comparison of ``parent_up``
-  against ``parent`` is therefore not valid near the open boundaries. The CDR
-  metrics are not affected, because they compare tracers within
-  ``parent_up``'s own output.
-
 The workplan
 ------------
 
@@ -344,4 +317,4 @@ SLURM settings.
 
    .. literalinclude:: nesting_upscaling_ccs/workplan.yaml
       :language: yaml
-      :caption: docs/tutorials/nesting_upscaling_ccs/workplan.yaml
+      :caption: docs/developers/nesting_upscaling_ccs/workplan.yaml

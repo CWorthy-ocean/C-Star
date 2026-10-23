@@ -1,8 +1,9 @@
-"""The committed nesting + upscaling tutorials stay loadable and pinned to release refs.
+"""The committed nesting + upscaling examples stay loadable and pinned to release refs.
 
-Each example under ``docs/tutorials`` carries three forge blueprints and a workplan
-over them. The blueprints are written once and committed, so a schema bump or a ref
-that drifts to a commit hash would otherwise show up only when someone runs the example.
+Each example (the tiny tutorial under ``docs/tutorials``, the California Current System
+case under ``docs/developers``) carries three forge blueprints and a workplan over them.
+The blueprints are written once and committed, so a schema bump or a ref that drifts to
+a commit hash would otherwise show up only when someone runs the example.
 """
 
 import re
@@ -21,21 +22,23 @@ from cstar.orchestration.models import Workplan
 from cstar.orchestration.serialization import deserialize
 from cstar.roms.namelist import is_commit_hash
 
-EXAMPLES = ("nesting_upscaling_tiny", "nesting_upscaling_ccs")
+TINY = "tutorials/nesting_upscaling_tiny"
+EXAMPLES = (TINY, "developers/nesting_upscaling_ccs")
+"""The example directories, relative to ``docs``."""
 FORGE_STEPS = ("forge_parent", "forge_child", "forge_parent_up")
 PINNED_REPOS = ("roms", "marbl", "pio")
 """The code repositories whose refs must be names; the templates commit comes from the ModelSpec."""
 
 
 @pytest.fixture
-def tutorials(package_path: Path) -> Path:
-    return package_path / "docs" / "tutorials"
+def docs(package_path: Path) -> Path:
+    return package_path / "docs"
 
 
 @pytest.mark.parametrize("example", EXAMPLES)
 @pytest.mark.parametrize("step", FORGE_STEPS)
 def test_blueprint_loads_at_the_current_schema(
-    tutorials: Path, example: str, step: str
+    docs: Path, example: str, step: str
 ) -> None:
     """The blueprint validates, and its file declares the current forge blueprint version.
 
@@ -43,7 +46,7 @@ def test_blueprint_loads_at_the_current_schema(
     the file: a bump of ``FORGE_BLUEPRINT_VERSION`` then asks for the tutorials to be
     regenerated rather than leaving them to migrate on every load.
     """
-    path = tutorials / example / f"{step}.yaml"
+    path = docs / example / f"{step}.yaml"
     declared = yaml.safe_load(path.read_text())["forge_blueprint_version"]
     assert declared == FORGE_BLUEPRINT_VERSION
 
@@ -54,7 +57,7 @@ def test_blueprint_loads_at_the_current_schema(
 @pytest.mark.parametrize("step", FORGE_STEPS)
 @pytest.mark.parametrize("repo", PINNED_REPOS)
 def test_code_refs_are_names_not_commit_hashes(
-    tutorials: Path, example: str, step: str, repo: str
+    docs: Path, example: str, step: str, repo: str
 ) -> None:
     """The ucla-roms, MARBL and PIO refs are tags or branches, never a commit hash.
 
@@ -62,7 +65,7 @@ def test_code_refs_are_names_not_commit_hashes(
     descends from, and warn that the namelist schema of that release may not match; a tag
     does neither.
     """
-    code = ForgeBlueprint.from_yaml(tutorials / example / f"{step}.yaml").code
+    code = ForgeBlueprint.from_yaml(docs / example / f"{step}.yaml").code
     section = getattr(code, repo)
     assert section is not None, f"code.{repo} is missing"
     ref = section.commit
@@ -72,14 +75,14 @@ def test_code_refs_are_names_not_commit_hashes(
 
 @pytest.mark.parametrize("example", EXAMPLES)
 def test_workplan_parses_and_names_existing_blueprints(
-    tutorials: Path, example: str
+    docs: Path, example: str
 ) -> None:
     """The workplan validates without runtime variables, and its forge steps' files exist.
 
     The blueprint paths in the workplan are relative to the workplan itself. Nothing is
     filled in or run: the ``{{...}}`` placeholders stay as written.
     """
-    workplan_path = tutorials / example / "workplan.yaml"
+    workplan_path = docs / example / "workplan.yaml"
     workplan = deserialize(workplan_path, Workplan)
 
     forge = [s for s in workplan.steps if s.application == "forge"]
@@ -93,15 +96,13 @@ def test_workplan_parses_and_names_existing_blueprints(
 
 
 @pytest.mark.parametrize("example", EXAMPLES)
-def test_cdr_metrics_step_assigns_the_source_roles(
-    tutorials: Path, example: str
-) -> None:
+def test_cdr_metrics_step_assigns_the_source_roles(docs: Path, example: str) -> None:
     """``child`` is the release and ``parent_up`` only transfers its alkalinity.
 
     A role swapped or dropped would count the release twice, or not at all, in the
     combined metrics. Each domain is also analysed on the grid its own forge step wrote.
     """
-    workplan = deserialize(tutorials / example / "workplan.yaml", Workplan)
+    workplan = deserialize(docs / example / "workplan.yaml", Workplan)
     (step,) = [s for s in workplan.steps if s.name == "cdr_metrics"]
     domains = t.cast("dict[str, dict[str, t.Any]]", step.blueprint_overrides["domains"])
 
@@ -116,7 +117,7 @@ def test_cdr_metrics_step_assigns_the_source_roles(
 
 
 def test_tiny_workplan_starts_the_child_where_its_blueprint_does(
-    tutorials: Path,
+    docs: Path,
 ) -> None:
     """The restart ``nest_ic`` reads and the one ``parent_up`` continues from are the child's start.
 
@@ -125,7 +126,7 @@ def test_tiny_workplan_starts_the_child_where_its_blueprint_does(
     ``run.start_date`` moves and these do not, the child starts from the wrong parent
     state, and ``parent_up`` from a different time than the child.
     """
-    example = tutorials / "nesting_upscaling_tiny"
+    example = docs / TINY
     child = ForgeBlueprint.from_yaml(example / "forge_child.yaml")
     workplan = deserialize(example / "workplan.yaml", Workplan)
     steps = {s.name: s for s in workplan.steps}
@@ -144,13 +145,31 @@ def test_tiny_workplan_starts_the_child_where_its_blueprint_does(
     assert timestamp == child.run.start_date
 
 
-def test_tiny_parent_up_ends_with_the_child(tutorials: Path) -> None:
+def test_tiny_parent_up_ends_with_the_child(docs: Path) -> None:
     """``parent_up`` runs to the child's end, so both have a record at the last time.
 
     The combined metrics' final record is finite only if both domains reach it.
     """
-    example = tutorials / "nesting_upscaling_tiny"
+    example = docs / TINY
     child = ForgeBlueprint.from_yaml(example / "forge_child.yaml")
     parent_up = ForgeBlueprint.from_yaml(example / "forge_parent_up.yaml")
 
     assert parent_up.run.end_date == child.run.end_date
+
+
+@pytest.mark.parametrize("step", FORGE_STEPS)
+def test_tiny_blueprints_leave_the_sources_to_forge(docs: Path, step: str) -> None:
+    """No source of the tiny tutorial is a local file: Forge downloads or streams each one.
+
+    Readers run the tutorial from the files they download from its page, so a source
+    path would name a file they do not have. Forge stages exactly the datasets that
+    ``datasets`` lists, so it must hold every source the resolver snapshotted.
+    """
+    path = docs / TINY / f"{step}.yaml"
+    paths = re.findall(r"^\s+path: (.+)$", path.read_text(), flags=re.M)
+    assert paths, "no source paths found"
+    assert set(paths) == {"null"}, paths
+
+    blueprint = ForgeBlueprint.from_yaml(path)
+    staged = {rd.dataset_key for rd in blueprint.forcing.resolved_datasets.values()}
+    assert sorted(staged) == blueprint.datasets

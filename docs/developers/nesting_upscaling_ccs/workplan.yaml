@@ -1,8 +1,8 @@
 # yaml-language-server: $schema=https://raw.githubusercontent.com/CWorthy-ocean/C-Star/refs/heads/main/docs/schemas/wp/workplan_schema.1.0.0.json
 #
-# CCS nested + upscaled CDR example: a 16 km California Current parent with a 4 km
-# child, one alkalinity release in the child, the child's tracer tendencies upscaled
-# back onto the parent grid, and the CDR metrics of the two domains.
+# CCS nested + upscaled CDR example: a 16 km California Current System parent with a
+# 4 km child, one alkalinity release in the child, the child's tracer tendencies
+# upscaled back onto the parent grid, and the CDR metrics of the two domains.
 #
 #   forge_parent -> parent -----------.--> child --> upscale --> parent_up
 #   forge_child  -> nest_ic ----------'      |                     ^   |
@@ -35,7 +35,7 @@
 # A shorter window needs different runtime variables (all of them, as a copy of full.vars
 # with edited values or as --var key=value options: --var and --varfile cannot be combined)
 # and lower time limits: see "Running a shorter window" in
-# docs/tutorials/nesting_upscaling_ccs.rst.
+# docs/developers/nesting_upscaling_ccs.rst.
 #
 # Model and tools: the blueprints use the roms-marbl-0.11-default ModelSpec, i.e. the
 # ucla-roms 0.11.0 release, with no commit override. The child's boundary needs roms-tools
