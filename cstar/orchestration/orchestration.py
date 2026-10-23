@@ -44,7 +44,6 @@ from cstar.orchestration.models import (
     Workplan,
 )
 from cstar.orchestration.serialization import (
-    PersistenceMode,
     deserialize,
     intenum_representer,
     load_blueprint,
@@ -580,9 +579,7 @@ class LiveWorkplan(Workplan):
         return step_name in lookup
 
 
-def is_transformed_workplan(
-    path: Path, mode: PersistenceMode = PersistenceMode.auto
-) -> bool:
+def is_transformed_workplan(path: Path) -> bool:
     """Determine whether a workplan file is the transformed form a run persists.
 
     Only the transformed workplan a run persists carries a `working_dir` on
@@ -593,8 +590,6 @@ def is_transformed_workplan(
     ----------
     path : Path
         The location of the workplan
-    mode : PersistenceMode
-        The serializer that wrote the file; `auto` selects by extension.
 
     Returns
     -------
@@ -602,7 +597,7 @@ def is_transformed_workplan(
         False also when the file cannot be read as a document.
     """
     try:
-        document = read_raw(path, mode)
+        document = read_raw(path)
     except (OSError, RuntimeError, ValueError, yaml.YAMLError):
         return False
     if not isinstance(document, Mapping):
@@ -616,7 +611,7 @@ def is_transformed_workplan(
     )
 
 
-def read_workplan(path: Path, mode: PersistenceMode = PersistenceMode.auto) -> Workplan:
+def read_workplan(path: Path) -> Workplan:
     """Read a workplan persisted in either of its forms.
 
     An authored workplan reads as a `Workplan`; the transformed workplan a run
@@ -627,8 +622,6 @@ def read_workplan(path: Path, mode: PersistenceMode = PersistenceMode.auto) -> W
     ----------
     path : Path
         The location of the workplan
-    mode : PersistenceMode
-        The serializer that wrote the file; `auto` selects by extension.
 
     Returns
     -------
@@ -640,9 +633,9 @@ def read_workplan(path: Path, mode: PersistenceMode = PersistenceMode.auto) -> W
     pydantic.ValidationError
         If the document is not valid in its form.
     """
-    if is_transformed_workplan(path, mode):
+    if is_transformed_workplan(path):
         return LiveWorkplan.load(path)
-    return deserialize(path, Workplan, mode=mode)
+    return deserialize(path, Workplan)
 
 
 class Task(BaseModel, t.Generic[_THandle]):

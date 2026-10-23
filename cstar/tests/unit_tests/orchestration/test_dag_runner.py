@@ -1,6 +1,5 @@
 import asyncio
 import hashlib
-import json
 import os
 import random
 import re
@@ -60,7 +59,6 @@ from cstar.orchestration.launch.slurm import SlurmLauncher
 from cstar.orchestration.manifest import (
     ATTEMPT_BLUEPRINTS_DIR_NAME,
     ATTEMPT_DIR_FORMAT,
-    ATTEMPT_JSON_WORKPLAN_NAME,
     ATTEMPT_TRANSFORMED_NAME,
     ATTEMPT_VARIABLES_NAME,
     ATTEMPT_WORKPLAN_NAME,
@@ -102,7 +100,6 @@ from cstar.orchestration.orchestration import (
 )
 from cstar.orchestration.run_check import TRANSFORMED_WORKPLAN_GLOB
 from cstar.orchestration.serialization import (
-    PersistenceMode,
     deserialize,
     read_raw,
     serialize,
@@ -857,9 +854,7 @@ async def test_prepare_workplan_carries_variables_only_when_given(
     _, _, _, none = await prepare_workplan(wp_path, tmp_path / "without")
 
     saved = tmp_path / "with" / given.directory / ATTEMPT_VARIABLES_NAME
-    assert deserialize(
-        saved, UserDefinedVariables, mode=PersistenceMode.yaml
-    ).mapping == {"target": "x"}
+    assert deserialize(saved, UserDefinedVariables).mapping == {"target": "x"}
     assert ATTEMPT_VARIABLES_NAME in given.carried
     assert not (tmp_path / "without" / none.directory / ATTEMPT_VARIABLES_NAME).exists()
     assert ATTEMPT_VARIABLES_NAME not in none.carried
@@ -1028,32 +1023,6 @@ async def test_prepare_workplan_fails_when_a_blueprint_cannot_be_carried(
     ]
 
 
-@pytest.mark.asyncio
-async def test_prepare_workplan_carries_a_json_workplan_under_its_format(
-    tmp_path: Path, hello_world_bp_path: Path
-) -> None:
-    """Verify a workplan written as JSON is carried verbatim under a JSON name,
-    so it reads back in its own format: tab-indented JSON is not YAML.
-    """
-    wp = Workplan(
-        name="json",
-        description="A workplan written as JSON.",
-        steps=[_hello_step(hello_world_bp_path.as_posix(), "hello")],
-    )
-    wp_path = tmp_path / "plan.json"
-    wp_path.write_text(
-        json.dumps(wp.model_dump(mode="json", by_alias=True), indent="\t")
-    )
-
-    _, _, _, carried = await prepare_workplan(wp_path, tmp_path / "run")
-
-    carried_copy = tmp_path / "run" / carried.directory / ATTEMPT_JSON_WORKPLAN_NAME
-    assert carried_copy.read_bytes() == wp_path.read_bytes()
-    assert ATTEMPT_JSON_WORKPLAN_NAME in carried.carried
-    assert ATTEMPT_WORKPLAN_NAME not in carried.carried
-    assert deserialize(carried_copy, Workplan) == deserialize(wp_path, Workplan)
-
-
 @pytest.mark.parametrize("suffix", [".json", ".yml"])
 @pytest.mark.asyncio
 async def test_prepare_workplan_names_the_run_root_plan_yaml(
@@ -1069,7 +1038,7 @@ async def test_prepare_workplan_names_the_run_root_plan_yaml(
         steps=[_hello_step(hello_world_bp_path.as_posix(), "hello")],
     )
     wp_path = tmp_path / f"plan{suffix}"
-    serialize(wp_path, wp, PersistenceMode.auto)
+    serialize(wp_path, wp)
     output_dir = tmp_path / "run"
 
     prepared, trx_path, _, _ = await prepare_workplan(wp_path, output_dir)
@@ -1100,7 +1069,6 @@ def test_carry_inputs_copies_a_remote_blueprint_under_its_url_name(
         run_root,
         start,
         b"name: plan\n",
-        ATTEMPT_WORKPLAN_NAME,
         "name: plan\n",
         steps,
         None,
@@ -1133,9 +1101,7 @@ async def test_prepare_workplan_carries_the_template_workplan(
 
     copy = output_dir / carried.directory / ATTEMPT_WORKPLAN_NAME
     assert copy.read_bytes() == wp_path.read_bytes()
-    assert deserialize(copy, Workplan, mode=PersistenceMode.yaml) == deserialize(
-        wp_path, Workplan
-    )
+    assert deserialize(copy, Workplan) == deserialize(wp_path, Workplan)
     # the transformed copy keeps the name, which is the run-id, as written
     assert read_raw(trx_path)["name"] == deserialize(wp_path, Workplan).name
 
@@ -1215,7 +1181,6 @@ async def test_prepare_workplan_materializes_inline_blueprint(
     authored = deserialize(
         output_dir / carried.directory / ATTEMPT_WORKPLAN_NAME,
         Workplan,
-        mode=PersistenceMode.yaml,
     )
     assert next(s for s in authored.steps if s.name == "consumer").is_inline
     assert set(carried.carried_blueprints) == {"producer"}

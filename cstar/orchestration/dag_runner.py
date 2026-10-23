@@ -31,7 +31,6 @@ from cstar.orchestration.launch.local import LocalLauncher
 from cstar.orchestration.launch.slurm import SlurmLauncher
 from cstar.orchestration.manifest import (
     ATTEMPT_BLUEPRINTS_DIR_NAME,
-    ATTEMPT_JSON_WORKPLAN_NAME,
     ATTEMPT_TRANSFORMED_NAME,
     ATTEMPT_VARIABLES_NAME,
     ATTEMPT_WORKPLAN_NAME,
@@ -76,7 +75,7 @@ from cstar.orchestration.orchestration import (
 from cstar.orchestration.run_check import report_orphans
 from cstar.orchestration.serialization import (
     deserialize,
-    render_model,
+    model_to_yaml,
     serialize,
     try_deserialize,
 )
@@ -525,11 +524,8 @@ def recorded_workplan(wp_run: WorkplanRun) -> Path | None:
 
     attempt_dir = latest_attempt_dir(manifest, root) if manifest else None
     if attempt_dir is not None:
-        names = (ATTEMPT_WORKPLAN_NAME, ATTEMPT_JSON_WORKPLAN_NAME)
-        return next(
-            (attempt_dir / name for name in names if (attempt_dir / name).exists()),
-            None,
-        )
+        carried = attempt_dir / ATTEMPT_WORKPLAN_NAME
+        return carried if carried.exists() else None
 
     backup = original_workplan_backup(wp_run.workplan_path, root)
     return backup if backup.exists() else None
@@ -590,7 +586,6 @@ def _carry_inputs(
     output_dir: Path,
     started_at: "datetime",
     authored: bytes,
-    authored_name: str,
     transformed: str,
     steps: Sequence[Step],
     variables: UserDefinedVariables | None,
@@ -612,8 +607,6 @@ def _carry_inputs(
         When the attempt was scheduled; it names the attempt's directory.
     authored : bytes
         The content of the authored workplan file.
-    authored_name : str
-        The name its copy is given.
     transformed : str
         The rendered transformed workplan.
     steps : Sequence[Step]
@@ -634,7 +627,7 @@ def _carry_inputs(
     """
     attempt_dir = create_attempt_dir(output_dir, started_at)
     try:
-        workplan_copy = attempt_dir / authored_name
+        workplan_copy = attempt_dir / ATTEMPT_WORKPLAN_NAME
         workplan_copy.write_bytes(authored)
         transformed_copy = attempt_dir / ATTEMPT_TRANSFORMED_NAME
         transformed_copy.write_text(transformed, encoding="utf-8")
@@ -761,22 +754,20 @@ async def prepare_workplan(
         update={"steps": materialized, "root": output_dir.resolve()}
     )
 
-    transformed = render_model(wp)
-    is_json = wp_path.suffix == ".json"
+    transformed = model_to_yaml(wp)
     carried = await asyncio.to_thread(
         _carry_inputs,
         output_dir,
         started_at,
         authored,
-        ATTEMPT_JSON_WORKPLAN_NAME if is_json else ATTEMPT_WORKPLAN_NAME,
         transformed,
         transformed_steps,
         variables,
     )
 
     # replaced only once the inputs are carried: a refused attempt leaves the
-    # plan the run executes as the last attempt left it. The plan is rendered
-    # as YAML whatever the authored format, so it is named `.yaml`
+    # plan the run executes as the last attempt left it. The plan is named
+    # `.yaml` whatever the authored suffix
     persist_as = WorkplanTransformer.derived_path(
         wp_path, output_dir, "_transformed", ".yaml"
     )

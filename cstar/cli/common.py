@@ -34,7 +34,6 @@ from cstar.orchestration.formatting import (
 )
 from cstar.orchestration.models import BlueprintCore
 from cstar.orchestration.serialization import (
-    PersistenceMode,
     anchor_blueprint_file,
     anchor_locations,
     serialize,
@@ -603,11 +602,7 @@ def persist_migration(request: MigrationRequest, result: MigrateResult) -> Path:
             backup_path = get_backup_path(request.source)
             backup_path.write_bytes(request.source.read_bytes())
 
-        nbytes = serialize(
-            persist_to,
-            updated_bp,
-            mode=PersistenceMode.auto,
-        )
+        nbytes = serialize(persist_to, updated_bp)
         assert nbytes, "The migrated blueprint failed to write content"
     except (SyntaxError, CstarExpectationFailed) as ex:
         msg = f"Unable to complete migration: {ex}"

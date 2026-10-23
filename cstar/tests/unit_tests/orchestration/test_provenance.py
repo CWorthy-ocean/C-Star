@@ -19,7 +19,6 @@ from cstar.orchestration.models import (
     Provenance,
 )
 from cstar.orchestration.serialization import (
-    PersistenceMode,
     deserialize,
     read_raw,
     serialize,
@@ -207,21 +206,19 @@ def test_default_provenance_is_not_serialized(tmp_path: Path) -> None:
     assert deserialize(path, HelloWorldBlueprint).provenance == Provenance()
 
 
-@pytest.mark.parametrize("mode", [PersistenceMode.yaml, PersistenceMode.json])
 def test_populated_provenance_survives_serialization(
     tmp_path: Path,
     provenance: Provenance,
-    mode: PersistenceMode,
 ) -> None:
     """Verify a blueprint's provenance loads back equal after it is written.
 
     C-Star rewrites blueprints it transforms with `exclude_defaults`; a
     reference whose `kind` was dropped could not be loaded again.
     """
-    path = tmp_path / f"bp.{mode}"
+    path = tmp_path / "bp.yaml"
     blueprint = hello_world(provenance=provenance)
 
-    serialize(path, blueprint, mode=mode)
+    serialize(path, blueprint)
 
     written = read_raw(path)["provenance"]
     assert written["derived_from"][0] == {
