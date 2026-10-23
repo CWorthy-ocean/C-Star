@@ -213,10 +213,57 @@ class TestFormatPaths:
         payload = json.loads(config_module.format_paths(as_json=True))
         assert payload["system"] == "anvil"
         assert payload["hostname"] == "node01"
-        assert payload["paths"] == {
-            "source_data": str(fake_paths.source_data),
-            "catalog": str(fake_paths.catalog),
-        }
+        # existing keys keep their order; the project entries are appended
+        assert list(payload["paths"]) == [
+            "source_data",
+            "catalog",
+            "project_home",
+            "project_runs",
+        ]
+        assert payload["paths"]["source_data"] == str(fake_paths.source_data)
+        assert payload["paths"]["catalog"] == str(fake_paths.catalog)
+
+    def test_json_project_paths_are_null_without_a_project(self, fake_paths):
+        import json
+
+        payload = json.loads(config_module.format_paths(as_json=True))
+        assert payload["paths"]["project_home"] is None
+        assert payload["paths"]["project_runs"] is None
+
+    def test_json_project_paths_with_a_project(self, fake_paths, monkeypatch, tmp_path):
+        import json
+
+        monkeypatch.setenv("PROJECT", str(tmp_path / "proj"))
+        payload = json.loads(config_module.format_paths(as_json=True))
+        assert payload["paths"]["project_home"] == str(DirectoryManager.project_home())
+        assert payload["paths"]["project_runs"] == str(
+            DirectoryManager.project_runs_home()
+        )
+
+    def test_text_without_a_project(self, fake_paths):
+        out = config_module.format_paths()
+        assert "  project_home -> not set: set CSTAR_PROJECT_HOME (or $PROJECT)" in out
+        assert "  project_runs -> none, without a project home" in out
+
+    def test_text_names_a_missing_runs_area(self, fake_paths, monkeypatch, tmp_path):
+        monkeypatch.setenv("CSTAR_PROJECT_HOME", str(tmp_path / "proj"))
+        runs = DirectoryManager.project_runs_home()
+        out = config_module.format_paths()
+        assert f"  project_home -> {DirectoryManager.project_home()}\n" in out
+        assert out.endswith(
+            f"  project_runs -> {runs} "
+            "(does not exist yet; `cstar run promote` creates it)"
+        )
+        assert runs is not None and not runs.exists()
+
+    def test_text_shows_an_existing_runs_area_plainly(
+        self, fake_paths, monkeypatch, tmp_path
+    ):
+        monkeypatch.setenv("CSTAR_PROJECT_HOME", str(tmp_path / "proj"))
+        runs = DirectoryManager.project_runs_home()
+        assert runs is not None
+        runs.mkdir(parents=True)
+        assert config_module.format_paths().endswith(f"  project_runs -> {runs}")
 
     def test_hostname_falls_back_when_socket_is_empty(self, monkeypatch):
         monkeypatch.setattr(config_module.socket, "gethostname", lambda: "")

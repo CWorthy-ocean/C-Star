@@ -122,7 +122,8 @@ Some systems define ``PROJECT`` and ``SCRATCH`` for you (Anvil exports both,
 Perlmutter exports ``SCRATCH``); check with ``echo $PROJECT $SCRATCH`` and set
 them in your shell profile only if they are empty. Pointing
 ``CSTAR_PROJECT_HOME`` (or ``PROJECT``) at a group directory shares one
-source-data cache with your collaborators.
+source-data cache with your collaborators. ``cstar forge show-paths`` prints
+the source-data cache, the project directory and the project runs area:
 
 .. code-block:: console
 

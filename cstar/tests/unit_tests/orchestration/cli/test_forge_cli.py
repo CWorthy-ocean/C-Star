@@ -280,6 +280,7 @@ class TestShowPaths:
         payload = json.loads(result.output)
         assert {"system", "hostname", "paths"} <= payload.keys()
         assert isinstance(payload["paths"], dict)
+        assert {"project_home", "project_runs"} <= payload["paths"].keys()
 
     def test_delegates_to_config_format_paths(self):
         with patch(
