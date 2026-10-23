@@ -13,9 +13,9 @@ CDR efficiency of the whole release.
 This tutorial runs a tiny version of that workflow on a laptop, from one
 workplan, in about 20 minutes. The parent is a 24 by 24 cell grid over 400 km
 north-west of Scotland. The child is a 24 by 24 cell grid over 100 km inside it, with
-one alkalinity (ALK) release near its east boundary. If nesting and
-``continue-from`` are new to you, :doc:`nested_workplan` introduces them on a
-simpler workplan without CDR.
+one alkalinity (ALK) release near its east boundary. If workplans,
+``continue-from`` or the CDR metrics are new to you, :doc:`cdr_workplan`
+introduces them on a simpler workplan without nesting.
 
 Before you start
 ----------------

@@ -1,25 +1,25 @@
 $schema: https://raw.githubusercontent.com/CWorthy-ocean/C-Star/refs/heads/main/docs/schemas/bp/forge/forge_schema.1.1.0.json
-name: wio-inner
-description: Child grid nested inside wio-outer; boundaries come from the parent run
+name: wio-spinup
+description: 'Western Indian Ocean toy domain, day one: the spin-up, no CDR forcing'
 application: forge
 state: notset
 schema_version: 1.1.0
 forge_blueprint_version: 10
 run:
-  start_date: '2012-01-02T00:00:00'
-  end_date: '2012-01-03T00:00:00'
+  start_date: '2012-01-01T00:00:00'
+  end_date: '2012-01-02T00:00:00'
   model_reference_date: '2000-01-01T00:00:00'
 domain:
-  grid_name: wio-toy-inner
+  grid_name: wio-toy
   grid_kwargs:
     nx: 20
     ny: 20
-    N: 10
-    size_x: 2000.0
-    size_y: 2000.0
+    size_x: 8000
+    size_y: 8000
     center_lon: 60.0
     center_lat: -4.0
-    rot: 0.0
+    rot: 0
+    N: 10
     theta_s: 5.0
     theta_b: 2.0
     hc: 300.0
@@ -35,23 +35,12 @@ domain:
     n_procs_y: 2
     auto_tiling: false
     n_cores: null
-  grid_kwargs_parent:
-    nx: 20
-    ny: 20
-    N: 10
-    size_x: 8000.0
-    size_y: 8000.0
-    center_lon: 60.0
-    center_lat: -4.0
-    rot: 0.0
-    theta_s: 5.0
-    theta_b: 2.0
-    hc: 300.0
+  grid_kwargs_parent: null
   grid_kwargs_child: null
   metadata_child: null
   nesting_include_pressure_fluxes: false
-  v_sponge: 10000.0
-  dt: 900.0
+  v_sponge: 40000.0
+  dt: 3600.0
   grid_file: null
 forcing:
   initial_conditions:
@@ -123,7 +112,35 @@ forcing:
     extrap_method: null
     extrap_kwargs: null
     options: {}
-  boundary: null
+  boundary:
+    source:
+      name: GLORYS
+      climatology: false
+      glorys_layout: regional
+      path: null
+      constants: null
+      esper_method: null
+      esper_equation: null
+    bgc_sources:
+    - source:
+        name: UNIFIED
+        climatology: true
+        glorys_layout: null
+        path: null
+        constants: null
+        esper_method: null
+        esper_equation: null
+      use_vars: null
+      bgc_interpolation_method: null
+      serialize_dask: null
+    bgc_interpolation_method: depth
+    prefill: null
+    prefill_kwargs: null
+    regrid_method: null
+    extrap_method: null
+    extrap_kwargs: null
+    options: {}
+    bypass_validation: false
   tidal: []
   river: []
   resolved_datasets:
@@ -294,12 +311,12 @@ model_settings:
     - FG_CO2
     - FG_ALT_CO2
   time_stepping:
-    ntimes: 96
-    dt: 900.0
+    ntimes: 24
+    dt: 3600.0
     ndtfast: 60
     ninfo: 1
   v_sponge:
-    v_sponge: 10000.0
+    v_sponge: 40000.0
   river_frc:
     river_source: false
     analytical: false
@@ -493,36 +510,35 @@ composition:
     origin: catalog
     modified: false
   domain:
-    name: wio-toy-inner
-    origin: custom
-    modified: false
+    name: wio-toy
+    origin: catalog
+    modified: true
   forcing:
-    name: ''
-    origin: custom
+    name: simple-bgc-demo
+    origin: catalog
     modified: false
   cdr:
     name: ''
     origin: custom
     modified: false
   output:
-    name: ''
-    origin: custom
-    modified: false
-  overrides: {}
+    name: daily-restarts
+    origin: catalog
+    modified: true
+  overrides:
+    partitioning:
+      n_procs_x: 2
+      n_procs_y: 2
+    ocean_vars:
+      wrt_file_his: true
+      output_period_his: 3600
+      nrpf_his: 24
 provenance:
-  generated_at: '2026-10-21T16:34:18.507248Z'
-  generated_by:
-    tool: wizard
-    id: 5f95ee68-42e0-4a6b-9e6d-6a2951650945
-    system: darwin_arm64
-    versions:
-      cstar-ocean: 0.17.0
-      roms-tools: 5.2.1
-    run_id: ''
-    working_dir: ''
+  generated_at: null
+  generated_by: null
   forge_version: null
   cstar_version: null
   roms_tools_version: null
   override_files_applied: []
-  content_hash: 4b530a5b7749e12368fe344a2a7cf96899c9aea0fa687ea3971ab9609ceedd25
+  content_hash: fdfb437174c9ba812f1351ed65c278dd34d800031f99f45dc3712b65bfaab057
   notes: null

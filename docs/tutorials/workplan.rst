@@ -57,7 +57,7 @@ that depend on it are not run.
 
 That is the whole vocabulary for now. Steps can also override values in their
 blueprint and pass run-time information to each other; the :doc:`next page
-<nested_workplan>` uses both.
+<cdr_workplan>` uses both.
 
 2. Check it (optional)
 ----------------------
@@ -232,7 +232,7 @@ Nothing changed in the science: the same forge blueprint, the same generated
 inputs, the same simulation. What changed is that the sequence is now a file.
 It can be submitted with one command, checked on with one ID, re-entered if a
 step fails, and handed to someone else to reproduce. That matters more as the
-sequence grows, which is where the :doc:`next page <nested_workplan>` goes.
+sequence grows, which is where the :doc:`next page <cdr_workplan>` goes.
 
 On a cluster
 ------------
