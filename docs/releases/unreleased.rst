@@ -169,6 +169,10 @@ Bug Fixes
   - JSON now gives ``null`` and CSV an empty field for that size.
   - The table says "not measured", followed by the ``cstar run status <id> --size`` hint for a run tracked on this machine.
 
+- ``cstar blueprint run`` no longer crashes with a traceback when a deferred blueprint or a directive reads a producer step record written by a newer cstar-ocean; it prints the upgrade guidance and exits 1. (`#803 <https://github.com/CWorthy-ocean/C-Star/pull/803>`_)
+- ``cstar blueprint run`` no longer prints a traceback when a directive (``continue-from``, ``nest-from``, …) fails with a C-Star error; it prints "Unable to apply directives: …" and exits 1. (`#803 <https://github.com/CWorthy-ocean/C-Star/pull/803>`_)
+- Listing and status commands no longer crash on a run manifest or step record from a newer cstar-ocean; they log it and show the run without that information. (`#803 <https://github.com/CWorthy-ocean/C-Star/pull/803>`_)
+
 
 Improvements
 ~~~~~~~~~~~~
