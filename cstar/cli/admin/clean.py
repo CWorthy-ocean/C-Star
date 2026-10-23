@@ -22,7 +22,7 @@ from cstar.cli.common import (
     set_env,
 )
 from cstar.cli.workplan.shared import colored, list_runs
-from cstar.entrypoint.utils import ARG_DRY_RUN
+from cstar.entrypoint.utils import ARG_DRY_RUN, ARG_YES
 from cstar.execution.file_system import DirectoryManager, StateDirectoryManager
 from cstar.orchestration.tracking import (
     TrackingRepository,
@@ -43,9 +43,6 @@ yes_help: t.Final[str] = (
     "Perform clean operations for all stored assets without user interaction."
 )
 run_help: t.Final[str] = "Clean up stored assets for a specific run"
-
-
-ARG_YES: t.Final[str] = "--yes"
 
 
 class CleanupStatus(IntEnum):

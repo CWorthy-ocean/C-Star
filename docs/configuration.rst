@@ -38,7 +38,11 @@ pass. Not accepted are:
 - ``CSTAR_CONFIG_HOME``, because it says where to find the file;
 - settings that C-Star no longer reads.
 
-You can edit the file by hand, or let C-Star do it:
+The easiest way to create the file is ``cstar init``, which asks for the
+scheduler settings and the data locations with the current value of each as
+the default, writes the answers, and lists every other setting as a commented
+line you can fill in later. You can also edit the file by hand, or let C-Star
+change one setting:
 
 .. code-block:: console
 

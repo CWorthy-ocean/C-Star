@@ -56,7 +56,7 @@ def test_wizard_plugin_collides_with_the_core_command():
         attach_subcommands(app)
 
     assert "wizard" not in registered_names(app)
-    assert [c.name for c in app.registered_commands] == ["wizard"]
+    assert {c.name for c in app.registered_commands} == {"wizard", "init"}
 
 
 def test_failing_plugin_does_not_break_cli():

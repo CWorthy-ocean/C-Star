@@ -983,6 +983,8 @@ Use the ``log`` command to print the log of one step of a run. Add ``--monitor``
 ``cstar workplan log <my-unique-id> <step-name>`` is equivalent.
 
 
+.. _workplan_run_cd:
+
 Finding a Run's Directory
 ^^^^^^^^^^^^^^^^^^^^^^^^^
 

@@ -14,29 +14,32 @@ Configure the scheduler
 Most settings are ``CSTAR_*`` variables; :doc:`configuration` lists them
 all and ``cstar env show`` prints the values in effect. Only the SLURM ones
 are required, and a workplan run stops early if the account and queue are
-missing. A shell profile for a cluster typically carries:
+missing. Run ``cstar init`` once on the cluster to set them: it lists your
+SLURM associations and partitions when ``sacctmgr`` and ``sinfo`` are
+available, asks for the account, queue and default walltime, and writes them
+to ``~/.config/cstar/config.env``:
 
 .. code-block:: bash
 
-   export CSTAR_SLURM_ACCOUNT="my-allocation"     # the account or allocation jobs are charged to
-   export CSTAR_SLURM_QUEUE="mpi"                 # the partition or queue to submit to
-   export CSTAR_SLURM_MAX_WALLTIME="01:00:00"     # default time requested per job
+   CSTAR_SLURM_ACCOUNT=my-allocation      # the account or allocation jobs are charged to
+   CSTAR_SLURM_QUEUE=mpi                  # the partition or queue to submit to
+   CSTAR_SLURM_MAX_WALLTIME=01:00:00      # default time requested per job
+
+The same settings can be exported from your shell profile instead, with
+``export`` and quotes:
+
+.. code-block:: bash
+
+   export CSTAR_SLURM_ACCOUNT="my-allocation"
+   export CSTAR_SLURM_QUEUE="mpi"
+   export CSTAR_SLURM_MAX_WALLTIME="01:00:00"
 
    # Only if your system does not already define them (see "Where data goes"):
    # export CSTAR_PROJECT_HOME=/path/to/your/group/directory
    # export SCRATCH=/path/to/your/scratch/directory
 
-The same three settings can go in ``~/.config/cstar/config.env`` instead,
-without ``export`` and without the quotes:
-
-.. code-block:: bash
-
-   CSTAR_SLURM_ACCOUNT=my-allocation
-   CSTAR_SLURM_QUEUE=mpi
-   CSTAR_SLURM_MAX_WALLTIME=01:00:00
-
 Either works. If a name is set both ways, the exported variable takes
-precedence over the file.
+precedence over the file, and ``cstar init`` tells you when that is the case.
 
 These are the defaults for every step of a workplan; a step can override
 them, for example to send Forge steps to a general-purpose queue and ROMS
