@@ -65,8 +65,8 @@ Run ``cstar init``
    One guided command covers the rest of this section. On a cluster it asks
    for your scheduler account, queue and default walltime, listing your SLURM
    associations and partitions when it can. It shows where C-Star will put
-   run output, the shared source-data cache and your catalog entries, and
-   lets you change each. It writes those answers to the configuration file,
+   run output, the shared source-data cache and your catalog entries, asks
+   whether to use them, and lets you change each if you answer no. It writes those answers to the configuration file,
    offers to install the shell function behind ``cstar run cd``, offers to
    register a Jupyter kernel for the environment, and ends with the two
    dataset registrations below:

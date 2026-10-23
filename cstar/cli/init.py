@@ -68,7 +68,7 @@ HELP_SHORT: t.Final[str] = (
 HELP_LONG: t.Final[str] = f"""\
 {HELP_SHORT}
 
-On a cluster, asks for the SLURM account, queue and default walltime. Shows where C-Star will put run output, the shared source-data cache and your catalog entries, and lets you change each. Writes the answers to the configuration file, then offers to install the shell function that makes `cstar {NAME_RUN} {COMMAND_CD}` work and to register a Jupyter kernel for this environment.
+On a cluster, asks for the SLURM account, queue and default walltime. Shows where C-Star will put run output, the shared source-data cache and your catalog entries, asks whether to use them, and lets you change each if you answer no. Writes the answers to the configuration file, then offers to install the shell function that makes `cstar {NAME_RUN} {COMMAND_CD}` work and to register a Jupyter kernel for this environment.
 
 Every prompt defaults to the value in effect now, so re-running the command reviews and updates the setup. {ARG_YES} accepts every default without asking, for containers and scripts.
 """
@@ -166,9 +166,9 @@ def header(title: str) -> None:
     typer.secho(title, bold=True)
 
 
-def confirm(question: str, yes: bool) -> bool:
+def confirm(question: str, yes: bool, default: bool = True) -> bool:
     """Ask a yes/no question, answered yes under `--yes`."""
-    return yes or typer.confirm(f"  {question}", default=True)
+    return yes or typer.confirm(f"  {question}", default=default)
 
 
 def ask(label: str, resolved: Resolved, yes: bool) -> Decision:
@@ -331,7 +331,10 @@ def locations_section(
         echo(f"{r.item.name}: {value}  [{r.origin}]")
         echo(LOCATION_PURPOSES[r.item.name], indent=4)
 
-    if scheduler is not None and not resolved[0].explicit and not hpc_data_directory():
+    recommend = (
+        scheduler is not None and not resolved[0].explicit and not hpc_data_directory()
+    )
+    if recommend:
         echo()
         echo("Recommended: no scratch file system was found, so run output would go")
         echo("under your home directory. Give CSTAR_DATA_HOME your scratch directory")
@@ -339,10 +342,17 @@ def locations_section(
 
     if not yes:
         echo()
-        echo(
-            f"Press Enter to keep a value; type {UNSET_ANSWER} to leave a setting "
-            "unset."
-        )
+        echo("Answer no to choose each one.")
+    question = (
+        "Use these locations?"
+        if any(r.explicit for r in resolved)
+        else "Use C-Star's default locations?"
+    )
+    if confirm(question, yes, default=not recommend):
+        return [Decision(r, kept=True) for r in resolved]
+
+    echo()
+    echo(f"Press Enter to keep a value; type {UNSET_ANSWER} to leave a setting unset.")
     return [ask(r.item.name, r, yes) for r in resolved]
 
 
