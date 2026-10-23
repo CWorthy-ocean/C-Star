@@ -6,6 +6,7 @@ import typing as t
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -323,6 +324,17 @@ def test_totals_add_up(planned: Planned) -> None:
     assert plan.total_bytes >= 5 + 7 + 3
 
 
+def test_a_symlinked_root_is_walked_as_a_directory(planned: Planned) -> None:
+    """A run reached through a link, as a `--mode link` destination is, lists its files."""
+    link = planned.root.parent / "link-to-run"
+    link.symlink_to(planned.root, target_is_directory=True)
+
+    plan = plan_promotion(link, planned.manifest, include={Include.all})
+
+    assert "tasks/spin-up/output/not_a_product.nc" in relatives(plan.entries)
+    assert RUN_MANIFEST_NAME in relatives(plan.entries)
+
+
 def test_a_symlink_in_an_extra_is_not_descended(planned: Planned) -> None:
     """A link, to a file or a directory, is one entry of size 0, and nothing under it is planned."""
     step = add_roms_step_files(planned)
@@ -516,6 +528,43 @@ def test_an_absolute_link_into_the_run_is_made_relative(
     assert copy.read_text() == CONTENT
 
 
+def test_a_relative_link_climbing_inside_the_run_keeps_its_text(
+    planned: Planned, destination: Path
+) -> None:
+    """A `..` that stays inside the run still resolves in the copy."""
+    step = add_roms_step_files(planned)
+    codebases = RomsFileSystemManager(step).codebases_dir
+    (codebases / "nested").mkdir()
+    (codebases / "nested" / "up").symlink_to(
+        Path("..") / "ucla-roms" / "src" / "main.F"
+    )
+
+    execute_plan(planned.plan(Include.builds), destination)
+
+    copy = destination / codebases.relative_to(planned.root) / "nested" / "up"
+    assert os.readlink(copy) == os.path.join("..", "ucla-roms", "src", "main.F")
+    assert copy.read_text() == CONTENT
+
+
+def test_a_relative_link_leaving_the_run_becomes_absolute(
+    planned: Planned, destination: Path
+) -> None:
+    """The copy sits elsewhere, so a link that climbs out names its target outright."""
+    step = add_roms_step_files(planned)
+    codebases = RomsFileSystemManager(step).codebases_dir
+    outside = write(planned.root.parent / "outside.txt", "far")
+    climb = Path(os.path.relpath(outside, codebases))
+    (codebases / "out").symlink_to(climb)
+    assert not climb.is_absolute()
+
+    execute_plan(planned.plan(Include.builds), destination)
+
+    copy = destination / codebases.relative_to(planned.root) / "out"
+    assert os.path.isabs(os.readlink(copy))
+    assert Path(os.readlink(copy)) == outside
+    assert copy.read_text() == "far"
+
+
 def test_an_absolute_link_leaving_the_run_keeps_its_text(
     planned: Planned, destination: Path
 ) -> None:
@@ -595,6 +644,19 @@ def test_a_failed_copy_leaves_nothing(
         execute_plan(planned.plan(), destination)
 
     assert len(calls) == 2
+    assert not staging_dir(destination).exists()
+    assert not os.path.lexists(destination)
+
+
+def test_a_copy_that_does_not_fit_is_refused_before_anything_is_made(
+    planned: Planned, destination: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Too little free space leaves neither a staging directory nor a destination."""
+    monkeypatch.setattr(shutil, "disk_usage", lambda _: SimpleNamespace(free=0))
+
+    with pytest.raises(CstarError, match="has 0 free"):
+        execute_plan(planned.plan(), destination)
+
     assert not staging_dir(destination).exists()
     assert not os.path.lexists(destination)
 

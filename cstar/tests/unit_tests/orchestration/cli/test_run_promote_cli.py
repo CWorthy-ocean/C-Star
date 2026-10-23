@@ -15,6 +15,7 @@ from click.testing import Result
 from typer.testing import CliRunner
 
 from cstar.base.env import ENV_CSTAR_PROJECT_HOME
+from cstar.base.exceptions import CstarError
 from cstar.cli.run import app as app_run
 from cstar.orchestration.index import run_uri
 from cstar.orchestration.manifest import (
@@ -320,6 +321,107 @@ def test_move_of_a_directory_removes_the_source(
     assert (destination / "tasks" / "spin-up" / PRODUCT).read_text() == CONTENT
     assert read_run_manifest(destination) is not None
     assert tracked(built.run_id) is None
+
+
+def test_move_copies_the_whole_directory_whatever_include_says(
+    elsewhere: t.Callable[..., BuiltRun], project_runs: Path
+) -> None:
+    """Verify a move loses nothing: a file no product names arrives in the copy."""
+    built = elsewhere()
+    stray = built.step_dir(STEP) / "output" / "extra.txt"
+    stray.write_text("stray")
+
+    result = invoke("promote", str(built.root), "--mode", "move")
+
+    assert result.exit_code == 0, result.output + result.stderr
+    assert not built.root.exists()
+    copied = project_runs / built.run_id / "tasks" / "spin-up" / "output" / "extra.txt"
+    assert copied.read_text() == "stray"
+
+
+def test_a_copy_still_leaves_a_stray_file_behind(
+    elsewhere: t.Callable[..., BuiltRun], project_runs: Path
+) -> None:
+    """Verify only a move widens the plan: a copy takes what `--include` says."""
+    built = elsewhere()
+    (built.step_dir(STEP) / "output" / "extra.txt").write_text("stray")
+
+    result = invoke("promote", str(built.root))
+
+    assert result.exit_code == 0, result.output + result.stderr
+    assert not (
+        project_runs / built.run_id / "tasks" / "spin-up" / "output" / "extra.txt"
+    ).exists()
+
+
+def test_a_second_transformed_workplan_is_refused_before_the_copy(
+    elsewhere: t.Callable[..., BuiltRun],
+    project_runs: Path,
+    flatten_cli_output: t.Callable[[str], str],
+) -> None:
+    """Verify two transformed workplans stop a tracked run as they stop an untracked one."""
+    built = elsewhere()
+    assert invoke("attach", str(built.root)).exit_code == 0
+    (built.root / "stale_transformed.yaml").write_text("stale: true\n")
+
+    result = invoke("promote", built.run_id)
+
+    assert result.exit_code == EXIT_BAD_ARGS
+    assert "more than one transformed workplan" in text(result, flatten_cli_output)
+    assert not (project_runs / built.run_id).exists()
+    assert not project_runs.exists()
+
+
+def test_a_move_tracks_the_copy_before_it_removes_the_source(
+    elsewhere: t.Callable[..., BuiltRun],
+    project_runs: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    flatten_cli_output: t.Callable[[str], str],
+) -> None:
+    """Verify a source that cannot be removed leaves the record already on the copy."""
+    built = elsewhere()
+    assert invoke("attach", str(built.root)).exit_code == 0
+
+    def refuse(root: Path) -> t.NoReturn:
+        raise OSError("device busy")
+
+    monkeypatch.setattr("cstar.cli.run.promote.remove_run", refuse)
+
+    result = invoke("promote", built.run_id, "--mode", "move")
+
+    assert result.exit_code == 1
+    message = text(result, flatten_cli_output)
+    assert "and tracked it, but the source at" in message
+    assert "was not removed: device busy" in message
+    assert built.root.is_dir()
+    record = tracked(built.run_id)
+    assert record is not None
+    assert record.output_path == project_runs / built.run_id
+
+
+def test_a_move_that_cannot_track_keeps_the_source(
+    elsewhere: t.Callable[..., BuiltRun],
+    project_runs: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    flatten_cli_output: t.Callable[[str], str],
+) -> None:
+    """Verify a record that cannot be written stops the move before anything is removed."""
+    built = elsewhere()
+    assert invoke("attach", str(built.root)).exit_code == 0
+
+    def refuse(*args: t.Any, **kwargs: t.Any) -> t.NoReturn:
+        raise CstarError("record locked")
+
+    monkeypatch.setattr("cstar.cli.run.promote.write_attached_record", refuse)
+
+    result = invoke("promote", built.run_id, "--mode", "move")
+
+    assert result.exit_code == 1
+    assert "the move did not finish: record locked" in text(result, flatten_cli_output)
+    assert (built.root / "cstar-run.yaml").is_file()
+    record = tracked(built.run_id)
+    assert record is not None
+    assert record.output_path == built.root
 
 
 def test_move_needs_the_directory_of_a_run_found_by_its_manifest(

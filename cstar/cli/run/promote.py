@@ -45,7 +45,7 @@ from cstar.orchestration.dag_runner import (
     load_run_state,
     refresh_run_manifest,
 )
-from cstar.orchestration.index import read_run_location, run_uri
+from cstar.orchestration.index import RunLocation, read_run_location, run_uri
 from cstar.orchestration.manifest import (
     RunManifest,
     compute_product_digests,
@@ -67,7 +67,9 @@ from cstar.orchestration.promotion import (
 )
 from cstar.orchestration.run_check import (
     TRANSFORMED_WORKPLAN_GLOB,
+    Finding,
     FindingKind,
+    RunCheckReport,
     check_run,
     gathered_output_dir,
     steps_inside_run,
@@ -119,7 +121,8 @@ the project's runs area.
 
 {ARG_MODE} decides how the run gets there. `copy` (the default) copies it and
 leaves the source in place. `link` makes a symbolic link at the destination and
-copies nothing. `move` copies the run, checks the copy, removes the source only
+copies nothing. `move` copies the whole directory, whatever {ARG_INCLUDE} says,
+so nothing is lost, checks the copy, removes the source only
 after that check passed, and then updates this machine's tracking record of the
 run: it is attached, which means it can be inspected and referenced but never
 relaunched, and is read-only when the destination is in the project's runs area
@@ -168,6 +171,31 @@ class PromoteSource:
     """Whether the run was found only by its manifest."""
 
 
+def _directory_location(target: str) -> tuple[Path, RunLocation]:
+    """Read the run in a directory the user named.
+
+    Parameters
+    ----------
+    target : str
+        The user-supplied path.
+
+    Returns
+    -------
+    tuple[Path, RunLocation]
+        The directory, absolute and not resolved, and the run it holds.
+
+    Raises
+    ------
+    typer.BadParameter
+        Raised when the path is not a directory holding a run manifest.
+    """
+    root = Path(os.path.abspath(Path(target).expanduser()))
+    try:
+        return root, read_run_location(root)
+    except CstarError as ex:
+        raise typer.BadParameter(str(ex)) from ex
+
+
 def _directory_source(target: str) -> PromoteSource:
     """Resolve a target spelled as the path of a run directory.
 
@@ -185,11 +213,7 @@ def _directory_source(target: str) -> PromoteSource:
     typer.BadParameter
         Raised when the path is not a directory holding a run manifest.
     """
-    root = Path(os.path.abspath(Path(target).expanduser()))
-    try:
-        location = read_run_location(root)
-    except CstarError as ex:
-        raise typer.BadParameter(str(ex)) from ex
+    root, location = _directory_location(target)
 
     # the directory of a run tracked here is still that run: a move must follow it
     tracked = TrackingRepository().get_workplan_run_sync(location.run_id)
@@ -244,9 +268,8 @@ def _indexed_source(target: str) -> PromoteSource:
     typer.BadParameter
         Raised when the directory is not a run, as `_directory_source` does.
     """
-    return replace(
-        _directory_source(target), record=None, named_by_path=False, indexed=True
-    )
+    root, _ = _directory_location(target)
+    return PromoteSource(root, None, named_by_path=False, indexed=True)
 
 
 def resolve_source(context: typer.Context, target: str) -> str:
@@ -626,6 +649,92 @@ def _track_move(
         )
 
 
+@dataclass(frozen=True)
+class CopyCheck:
+    """What checking a finished copy found."""
+
+    report: RunCheckReport
+    """The check's report, findings included."""
+    own_problems: tuple[Finding, ...]
+    """The problems of the copy itself: those the source's own paths are not."""
+    manifest: RunManifest
+    """The copy's manifest, with the step records folded in."""
+    workplan: LiveWorkplan | None
+    """The copy's transformed workplan, when it could be loaded."""
+    workplan_path: Path | None
+    """Where the copy's transformed workplan is."""
+
+
+def _check_copy(destination: Path, *, verify: bool) -> CopyCheck:
+    """Check a finished copy as `cstar run check` does, printing what it finds.
+
+    Parameters
+    ----------
+    destination : Path
+        The copy.
+    verify : bool
+        Whether to compare each product with its recorded digest.
+
+    Returns
+    -------
+    CopyCheck
+    """
+    workplan_path = _transformed_workplan(destination)
+    workplan = _load_workplan(workplan_path)
+    manifest = _read_manifest(destination)
+    fold_step_records(manifest, destination)
+    report = check_run(
+        destination,
+        workplan=workplan,
+        run_id=None,
+        all_files=False,
+        manifest=manifest,
+        verify=verify,
+    )
+    for line in format_findings(report):
+        typer.echo(line)
+    typer.echo(summarize(report))
+
+    own = tuple(p for p in report.problems if p.kind not in INHERITED_KINDS)
+    return CopyCheck(report, own, manifest, workplan, workplan_path)
+
+
+def _finish_move(source: PromoteSource, copy: CopyCheck, destination: Path) -> None:
+    """Track the moved run, then remove the source: the record is never left behind the removal.
+
+    Parameters
+    ----------
+    source : PromoteSource
+        The run that was moved.
+    copy : CopyCheck
+        The checked copy.
+    destination : Path
+        The copy's directory.
+
+    Raises
+    ------
+    typer.Exit
+        With code 1 when the record cannot be written (the source is then still
+        in place) or the source cannot be removed (the copy is then tracked).
+    """
+    try:
+        _track_move(source, copy.manifest, destination, copy.workplan_path)
+    except CstarError as ex:
+        typer.echo(f"Promoted, but the move did not finish: {ex}", err=True)
+        raise typer.Exit(1) from ex
+
+    try:
+        remove_run(source.root)
+    except (CstarError, OSError) as ex:
+        tracked = " and tracked it" if source.record is not None else ""
+        typer.echo(
+            f"Moved the copy to {destination}{tracked}, but the source at "
+            f"{source.root} was not removed: {ex}",
+            err=True,
+        )
+        raise typer.Exit(1) from ex
+
+
 @app.command(name=COMMAND_PROMOTE, help=HELP_LONG, short_help=HELP_SHORT)
 def promote(
     context: typer.Context,
@@ -660,11 +769,9 @@ def promote(
         msg = f"The run at {root} is already in the project runs area: {project}."
         raise typer.BadParameter(msg)
 
-    workplan_path = (
-        source.record.trx_workplan_path
-        if source.record
-        else _transformed_workplan(root)
-    )
+    # refused up front for every source: the copy would carry both
+    found = _transformed_workplan(root)
+    workplan_path = source.record.trx_workplan_path if source.record else found
     manifest = _read_run(source, _load_workplan(workplan_path))
 
     destination = _destination(to, manifest.run_id)
@@ -691,7 +798,9 @@ def promote(
         typer.echo(f"Linked {handle} as {destination} -> {root}")
         return
 
-    plan = plan_promotion(root, manifest, include=set(include))
+    # a move removes the source, so it copies all of it
+    extras = {Include.all} if mode is Mode.move else set(include)
+    plan = plan_promotion(root, manifest, include=extras)
     if plan.missing_products:
         typer.echo(
             f"Products the step records list that are missing from the source "
@@ -722,41 +831,21 @@ def promote(
         recorded = record_product_digests(destination, digests)
         typer.echo(f"Recorded {recorded} digest(s) in the copy.")
 
-    copied_path = _transformed_workplan(destination)
-    copied_workplan = _load_workplan(copied_path)
-    copied = _read_manifest(destination)
-    fold_step_records(copied, destination)
-    report = check_run(
-        destination,
-        workplan=copied_workplan,
-        run_id=None,
-        all_files=False,
-        manifest=copied,
-        verify=verify,
-    )
-    for line in format_findings(report):
-        typer.echo(line)
-    typer.echo(summarize(report))
-
-    if own := [p for p in report.problems if p.kind not in INHERITED_KINDS]:
+    copy = _check_copy(destination, verify=verify)
+    if copy.own_problems:
         kept = f"; the source was kept at {root}" if mode is Mode.move else ""
         typer.echo(
-            f"Promoted with problems: {len(own)} problem(s) in the copy at "
-            f"{destination}{kept}.",
+            f"Promoted with problems: {len(copy.own_problems)} problem(s) in the "
+            f"copy at {destination}{kept}.",
             err=True,
         )
         raise typer.Exit(1)
 
     if gathered_output_dir(root).is_dir():
-        _regather(destination, copied_workplan)
+        _regather(destination, copy.workplan)
 
     if mode is Mode.move:
-        try:
-            remove_run(root)
-            _track_move(source, copied, destination, copied_path)
-        except CstarError as ex:
-            typer.echo(f"Promoted, but the move did not finish: {ex}", err=True)
-            raise typer.Exit(1) from ex
+        _finish_move(source, copy, destination)
         if source.record is None:
             typer.echo(f"Moved {handle} to {destination}.")
     elif mode is Mode.materialize:

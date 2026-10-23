@@ -149,12 +149,13 @@ class CopyPlan:
     @property
     def total_bytes(self) -> int:
         """The size of the plan's files."""
-        return sum(entry.size_bytes for entry in self.entries)
+        return sum(e.size_bytes for e in chain.from_iterable(self.groups.values()))
 
     @property
     def file_count(self) -> int:
         """The number of regular files in the plan."""
-        return sum(1 for entry in self.entries if entry.kind == "file")
+        entries = chain.from_iterable(self.groups.values())
+        return sum(1 for entry in entries if entry.kind == "file")
 
 
 def _entry(root: Path, relative: Path) -> Entry | None:
@@ -206,6 +207,9 @@ def _tree(root: Path, relative: Path) -> "Iterator[Entry]":
         The path (unless it is the run root) and each descendant, in a stable order.
     """
     top = _entry(root, relative)
+    if relative == Path() and root.is_dir():
+        # the root is given by the user, and may be a symlink to the run
+        top = Entry(relative, 0, "dir")
     if top is None:
         return
     if relative != Path():
@@ -501,9 +505,11 @@ def staging_dir(destination: Path) -> Path:
 def _link_text(plan: CopyPlan, entry: Entry) -> str:
     """Give the text a copied symlink should hold.
 
-    An absolute link into the source becomes a relative link to the same path in
-    the copy, so the copy stays self-contained once the source is gone; any other
-    link keeps its text.
+    A link into the source, absolute or relative, ends up relative to the same
+    path in the copy, so the copy stays self-contained once the source is gone.
+    A relative link that climbs out of the source becomes absolute, naming the
+    file it reached from the source (the copy sits elsewhere, so the text would
+    resolve to something else); any other absolute link keeps its text.
 
     Parameters
     ----------
@@ -517,16 +523,26 @@ def _link_text(plan: CopyPlan, entry: Entry) -> str:
     str
     """
     text = os.readlink(plan.source / entry.relative)
+    prefixes = {os.path.normpath(plan.source), os.path.normpath(plan.source.resolve())}
+
     if not os.path.isabs(text):
-        return text
+        here = os.path.dirname(plan.source / entry.relative)
+        target = os.path.normpath(os.path.join(here, text))
+        if any(_is_under(target, prefix) for prefix in prefixes):
+            return text
+        return target
 
     target = os.path.normpath(text)
-    prefixes = {os.path.normpath(plan.source), os.path.normpath(plan.source.resolve())}
     for prefix in prefixes:
-        if target == prefix or target.startswith(prefix + os.sep):
+        if _is_under(target, prefix):
             below = os.path.relpath(target, prefix)
             return os.path.relpath(below, entry.relative.parent)
     return text
+
+
+def _is_under(path: str, prefix: str) -> bool:
+    """Whether a normalized path is a directory or a path inside it."""
+    return path == prefix or path.startswith(prefix + os.sep)
 
 
 def _copy_into(plan: CopyPlan, staging: Path) -> int:
@@ -590,8 +606,9 @@ def execute_plan(
     Raises
     ------
     CstarError
-        If `destination` exists (and is not a symlink being replaced), or its
-        staging directory is left over from an earlier promotion.
+        If `destination` exists (and is not a symlink being replaced), its
+        staging directory is left over from an earlier promotion, or the file
+        system of `destination` has less free space than the plan's files.
     """
     if replace_link:
         if not destination.is_symlink():
@@ -610,6 +627,13 @@ def execute_plan(
         raise CstarError(msg)
 
     destination.parent.mkdir(parents=True, exist_ok=True)
+    free = shutil.disk_usage(destination.parent).free
+    if free < plan.total_bytes:
+        msg = (
+            f"The copy needs {plan.total_bytes} bytes and {destination.parent} "
+            f"has {free} free: short by {plan.total_bytes - free} bytes."
+        )
+        raise CstarError(msg)
     staging.mkdir()
     try:
         copied = _copy_into(plan, staging)
