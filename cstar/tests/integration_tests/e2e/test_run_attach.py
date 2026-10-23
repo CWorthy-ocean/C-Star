@@ -21,7 +21,6 @@ from pathlib import Path
 
 import pytest
 
-from cstar.base.feature import ENV_FF_DEVELOPER_MODE
 from cstar.base.utils import slugify
 from cstar.orchestration.manifest import (
     RUN_MANIFEST_NAME,
@@ -321,9 +320,7 @@ def test_read_only_attached_run_is_never_written_into(attach_run: AttachRun) -> 
     # reading is unaffected
     assert run_cstar(env, "run", "check", RUN_ID).returncode == 0
 
-    # `admin clean` is a developer-mode command
-    cleaner = {**env, ENV_FF_DEVELOPER_MODE: "1"}
-    cleaned = run_cstar(cleaner, "admin", "clean", "--run-id", RUN_ID, "--yes")
+    cleaned = run_cstar(env, "admin", "clean", "--run-id", RUN_ID, "--yes")
     assert cleaned.returncode == 0, _output(cleaned)
     assert (run_dir / RUN_MANIFEST_NAME).is_file(), _output(cleaned)
     assert _product(run_dir).read_text() == CONTENT
