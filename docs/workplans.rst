@@ -932,7 +932,7 @@ Carried inputs
 
 Each attempt that reads the workplan file (``cstar workplan run <workplan>``, also when it re-enters a run) leaves what it was asked in the run directory, under ``attempts/<YYYYMMDDTHHMMSS>/``, named after the attempt's start in UTC (``-2``, ``-3`` and so on when two attempts start in the same second):
 
-- ``workplan.yaml``: the workplan file exactly as given (``workplan.json`` for a workplan written as JSON);
+- ``workplan.yaml``: the workplan file exactly as given;
 - ``workplan.vars``: the runtime variables, when any were given;
 - ``workplan_transformed.yaml``: a copy of the plan the attempt prepared;
 - ``blueprints/<step>/<file>``: each step's blueprint file, downloaded first when it is remote. A deferred or inline blueprint has no file at that point and is not carried; an inline one is written into its step's directory.

@@ -1,6 +1,5 @@
 import asyncio
 import errno
-import json
 import shutil
 import textwrap
 import threading
@@ -21,26 +20,23 @@ from cstar.orchestration.launch.slurm import SlurmHandle
 from cstar.orchestration.models import Application, Workplan
 from cstar.orchestration.orchestration import LiveStep, LiveWorkplan
 from cstar.orchestration.serialization import (
-    PersistenceMode,
-    _mode_detect,
     anchor_blueprint_file,
     anchor_relative_path,
     deserialize,
     deserialize_all,
     load_blueprint,
+    model_to_yaml,
     read_blueprint_raw,
     read_document,
-    read_json_to_raw,
     read_raw,
     read_yaml_to_raw,
     rebase_paths,
-    render_model,
     serialize,
 )
 from cstar.orchestration.state import StateRepository
 
 
-def test_serialization_json_aliased_fields(tmp_path: Path) -> None:
+def test_serialization_aliased_fields(tmp_path: Path) -> None:
     """Verify that an aliased field is serialized and deserialized."""
     exp_value = "foo"
 
@@ -50,9 +46,9 @@ def test_serialization_json_aliased_fields(tmp_path: Path) -> None:
     model = FakeModel(the_value=exp_value)
     assert model.value == exp_value
 
-    serialize_to = tmp_path / "fake.json"
+    serialize_to = tmp_path / "fake.yaml"
 
-    serialize(serialize_to, model, mode=PersistenceMode.auto)
+    serialize(serialize_to, model)
     reloaded = deserialize(serialize_to, FakeModel)
 
     assert reloaded.value == model.value
@@ -345,54 +341,25 @@ def test_serialization_workplan_steps_with_directives(
     assert wp2.steps[-1].directives == wp.steps[-1].directives
 
 
-@pytest.mark.parametrize(
-    "mode",
-    [
-        PersistenceMode.json,
-        PersistenceMode.yaml,
-    ],
-)
-def test_serialization_handle(mode: PersistenceMode) -> None:
+def test_serialization_handle() -> None:
     """Verify that a task can be properly serialized to disk and reloaded."""
     pid, job_name, run_id = "test-pid", "abc123", "fake-run-id"
     handle = SlurmHandle(pid=pid, name=job_name, run_id=run_id)
 
-    persist_as = StateRepository.sentinel_path(handle, mode=mode)
+    persist_as = StateRepository.sentinel_path(handle)
 
-    # confirm the parametrized serialization mode is supported
-    nbytes = serialize(
-        persist_as,
-        handle,
-        mode,
-    )
+    nbytes = serialize(persist_as, handle)
     assert nbytes > 0
 
     print(f"Task persisted to: {persist_as}")
     print(persist_as.read_text(encoding="utf-8"))
 
     # confirm the output from `serialize` is valid and can be deserialized
-    dhandle: SlurmHandle = deserialize(
-        persist_as,
-        SlurmHandle,
-        mode,
-    )
+    dhandle: SlurmHandle = deserialize(persist_as, SlurmHandle)
 
     assert dhandle.name == handle.name
     assert dhandle.pid == handle.pid
     assert dhandle.run_id == run_id
-
-
-def test_serializaton_json_schema(plotter_v2_0_0_bp: Path, tmp_path: Path) -> None:
-    """Verify a json-serialized file contains a schema reference."""
-    target = tmp_path / "output.json"
-
-    bp = deserialize(plotter_v2_0_0_bp, PlotterBlueprint)
-
-    assert serialize(target, bp, mode=PersistenceMode.auto)
-
-    content = target.read_text()
-    assert '"$schema":"http' in content
-    assert f"{bp.application}_schema.{bp.schema_version}.json" in content
 
 
 def test_serializaton_yaml_schema(plotter_v2_0_0_bp: Path, tmp_path: Path) -> None:
@@ -401,26 +368,27 @@ def test_serializaton_yaml_schema(plotter_v2_0_0_bp: Path, tmp_path: Path) -> No
 
     bp = deserialize(plotter_v2_0_0_bp, PlotterBlueprint)
 
-    assert serialize(target, bp, mode=PersistenceMode.auto)
+    assert serialize(target, bp)
 
     content = target.read_text()
     assert "# yaml-language-server: $schema=" in content
     assert f"{bp.application}_schema.{bp.schema_version}.json" in content
 
 
-def test_mode_detect_unknown_extension_defaults_to_yaml(
+def test_unknown_extension_reads_as_yaml(
     plotter_v2_0_0_bp: Path,
     tmp_path: Path,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    """Verify an unrecognized extension falls back to YAML without printing to stdout."""
+    """Verify a file with an unrecognized extension reads as YAML without printing
+    to stdout.
+    """
     target = tmp_path / "workplan_original.bak"
     bp = deserialize(plotter_v2_0_0_bp, PlotterBlueprint)
-    assert serialize(target, bp, mode=PersistenceMode.yaml)
+    assert serialize(target, bp)
     capsys.readouterr()
 
-    assert _mode_detect(target) == PersistenceMode.yaml
-    assert deserialize(target, PlotterBlueprint, mode=PersistenceMode.auto) == bp
+    assert deserialize(target, PlotterBlueprint) == bp
     assert capsys.readouterr().out == ""
 
 
@@ -475,10 +443,12 @@ def person_json(tmp_path: Path) -> Path:
 
 @pytest.mark.parametrize(
     "source_fixture",
-    ["person_yaml", "person_yml"],
+    ["person_yaml", "person_yml", "person_json"],
 )
 def test_read_yaml_to_raw(request: pytest.FixtureRequest, source_fixture: str) -> None:
-    """Verify yaml parsing results in the expected dictionary."""
+    """Verify yaml parsing results in the expected dictionary, also for a
+    document written as JSON.
+    """
     person_doc = request.getfixturevalue(source_fixture)
     d = read_yaml_to_raw(person_doc)
 
@@ -496,46 +466,14 @@ def test_read_yaml_to_raw(request: pytest.FixtureRequest, source_fixture: str) -
     assert "Grits" in pets
 
 
-def test_read_json_to_raw(person_json: Path) -> None:
-    """Verify json parsing results in the expected dictionary."""
-    d = read_json_to_raw(person_json)
-
-    person = d.get("person", {})
-    assert person
-    assert person["name"] == "unit test"
-    assert person["age"] == 42
-
-    address = person.get("address", {})
-    assert address
-    assert address["street"] == "101 main st"
-
-    pets = person.get("pets", [])
-    assert "Waffles" in pets
-    assert "Grits" in pets
-
-
 @pytest.mark.parametrize(
-    ("source_fixture", "mode"),
-    [
-        pytest.param("person_yaml", PersistenceMode.yaml, id="mode:correct:yaml"),
-        pytest.param("person_yaml", PersistenceMode.auto, id="mode:auto:yaml"),
-        pytest.param("person_yaml", PersistenceMode.json, id="mode:fallback:yaml"),
-        pytest.param("person_yml", PersistenceMode.yaml, id="mode:correct:yml"),
-        pytest.param("person_yml", PersistenceMode.auto, id="mode:auto:yml"),
-        pytest.param("person_yml", PersistenceMode.json, id="mode:fallback:yml"),
-        pytest.param("person_json", PersistenceMode.json, id="mode:correct:json"),
-        pytest.param("person_json", PersistenceMode.auto, id="mode:auto:json"),
-        pytest.param("person_json", PersistenceMode.yaml, id="mode:fallback:json"),
-    ],
+    "source_fixture",
+    ["person_yaml", "person_yml", "person_json"],
 )
-def test_read_raw(
-    request: pytest.FixtureRequest, source_fixture: str, mode: PersistenceMode
-) -> None:
-    """Verify the automatic read mode selects the right reader and
-    failures are recovered by falling back to the alternate reader.
-    """
+def test_read_raw(request: pytest.FixtureRequest, source_fixture: str) -> None:
+    """Verify each document reads into the expected dictionary."""
     path = request.getfixturevalue(source_fixture)
-    d = read_raw(path, mode=mode)
+    d = read_raw(path)
 
     person = d.get("person", {})
     assert person
@@ -549,35 +487,6 @@ def test_read_raw(
     pets = person.get("pets", [])
     assert "Waffles" in pets
     assert "Grits" in pets
-
-
-def test_read_raw_no_auto(
-    person_yaml: Path,
-    person_json: Path,
-) -> None:
-    """Verify that auto-mode does not take precedence over supplied mode value.
-
-    This test renames the file(s) so auto-mode would fail.
-    """
-    renamed0 = person_yaml.rename(person_yaml.with_suffix(".stuff"))
-    d0 = read_raw(renamed0, mode=PersistenceMode.yaml)
-
-    renamed1 = person_json.rename(person_json.with_suffix(".other"))
-    d1 = read_raw(renamed1, mode=PersistenceMode.json)
-
-    for d in [d0, d1]:
-        person = d.get("person", {})
-        assert person
-        assert person["name"] == "unit test"
-        assert person["age"] == 42
-
-        address = person.get("address", {})
-        assert address
-        assert address["street"] == "101 main st"
-
-        pets = person.get("pets", [])
-        assert "Waffles" in pets
-        assert "Grits" in pets
 
 
 def test_read_raw_file_dne(tmp_path: Path) -> None:
@@ -652,7 +561,7 @@ async def test_deserialize_all_honours_supplied_semaphore(tmp_path: Path) -> Non
     lock = threading.Lock()
     state = {"in_flight": 0, "peak": 0}
 
-    def fake_try_deserialize(path, klass, mode=PersistenceMode.auto):
+    def fake_try_deserialize(path, klass):
         with lock:
             state["in_flight"] += 1
             state["peak"] = max(state["peak"], state["in_flight"])
@@ -861,7 +770,7 @@ def test_read_document_drops_the_schema_key(tmp_path: Path) -> None:
     path.write_text("$schema: https://example.org/s.json\nvalue: 1\n")
 
     assert read_document(path) == {"value": 1}
-    assert read_document(str(path), PersistenceMode.yaml) == {"value": 1}
+    assert read_document(str(path)) == {"value": 1}
     with pytest.raises(FileNotFoundError):
         read_document(tmp_path / "absent.yaml")
 
@@ -1156,10 +1065,7 @@ def test_load_blueprint_reports_every_stranded_location(
     assert "'b.nc'" in message
 
 
-@pytest.mark.parametrize("suffix", [".yaml", ".json"])
-def test_anchor_blueprint_file_rewrites_the_file_in_place(
-    tmp_path: Path, suffix: str
-) -> None:
+def test_anchor_blueprint_file_rewrites_the_file_in_place(tmp_path: Path) -> None:
     """Verify every relative location, found or not, becomes absolute in the file,
     and nothing else about the document changes.
     """
@@ -1176,18 +1082,12 @@ def test_anchor_blueprint_file_rewrites_the_file_in_place(
             ]
         },
     }
-    path = tmp_path / f"bp{suffix}"
-    path.write_text(
-        json.dumps(document) if suffix == ".json" else yaml.safe_dump(document)
-    )
+    path = tmp_path / "bp.yaml"
+    path.write_text(yaml.safe_dump(document))
 
     anchor_blueprint_file(path, base_dir)
 
-    written = (
-        json.loads(path.read_text())
-        if suffix == ".json"
-        else yaml.safe_load(path.read_text())
-    )
+    written = yaml.safe_load(path.read_text())
     assert [r["location"] for r in written["grid"]["data"]] == [
         (base_dir / "here.nc").as_posix(),
         (base_dir / "missing.nc").as_posix(),
@@ -1267,19 +1167,6 @@ class _Doc(BaseModel):
     count: int = Field(default=3)
 
 
-def test_render_model_yaml_and_json() -> None:
-    """Verify a model renders as YAML (defaults excluded) or JSON text."""
-    model = _Doc(name="y")
-
-    assert yaml.safe_load(render_model(model)) == {"name": "y"}
-    assert yaml.safe_load(render_model(model, PersistenceMode.yaml)) == {"name": "y"}
-    assert json.loads(render_model(model, PersistenceMode.json)) == {
-        "name": "y",
-        "count": 3,
-    }
-
-
-def test_render_model_rejects_auto() -> None:
-    """Verify `auto` is refused, since there is no path to detect a mode from."""
-    with pytest.raises(ValueError, match="mode"):
-        render_model(_Doc(), PersistenceMode.auto)
+def test_model_to_yaml_excludes_defaults() -> None:
+    """Verify a model renders as YAML with its defaults excluded."""
+    assert yaml.safe_load(model_to_yaml(_Doc(name="y"))) == {"name": "y"}

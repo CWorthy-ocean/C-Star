@@ -2322,9 +2322,7 @@ def resolve_deferred_blueprint(ref: DeferredBlueprintRef) -> Path:
             output_dir,
         )
         candidates = sorted(
-            path
-            for pattern in ("*.yml", "*.yaml", "*.json")
-            for path in output_dir.glob(pattern)
+            path for pattern in ("*.yml", "*.yaml") for path in output_dir.glob(pattern)
         )
     if not candidates:
         msg = f"Step {ref.from_step!r} did not produce a blueprint in: {output_dir}"

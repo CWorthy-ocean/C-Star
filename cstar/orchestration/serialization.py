@@ -1,7 +1,6 @@
 import asyncio
 import enum
 import errno
-import json
 import os
 import re
 import typing as t
@@ -11,7 +10,6 @@ from pathlib import Path, PosixPath
 from urllib.parse import urlsplit
 
 import yaml
-from pydantic_core import from_json
 from yaml.scanner import ScannerError
 
 from cstar.base.exceptions import CstarExpectationFailed
@@ -38,14 +36,6 @@ _SAFE_LOADER: t.Final[type[yaml.SafeLoader]] = getattr(
 faster on a large run manifest, which lists every product the run recorded."""
 
 
-class PersistenceMode(enum.StrEnum):
-    """Supported serialization engines."""
-
-    json = enum.auto()
-    yaml = enum.auto()
-    auto = enum.auto()
-
-
 class SerializableModel(t.Protocol):
     """Protocol defining API required to serialize and deserialize objects.
 
@@ -53,16 +43,7 @@ class SerializableModel(t.Protocol):
     with metacalases in a protocol.
     """
 
-    def model_dump_json(self, *args, **kwargs) -> str:  # type: ignore
-        """Return a JSON string representation of the object."""
-        ...
-
     def model_dump(self, *args, **kwargs) -> dict[str, t.Any]:  # type: ignore
-        """Return a dictionary representation of the object."""
-        ...
-
-    @classmethod
-    def model_validate_json(cls, *args, **kwargs) -> "t.Self":  # type: ignore
         """Return a dictionary representation of the object."""
         ...
 
@@ -102,23 +83,6 @@ class ValidationResult(t.Generic[_T]):
         return self.item is not None
 
 
-def read_json_to_raw(path: Path) -> dict[str, t.Any]:
-    """Read and process content as a JSON file.
-
-    Parameters
-    ----------
-    path : Path
-        The path to a file containing JSON.
-
-    Returns
-    -------
-    dict[str, t.Any]
-    """
-    with path.open("r", encoding="utf-8") as fp:
-        json_data = fp.read()
-        return from_json(json_data)
-
-
 def read_yaml_to_raw(path: Path) -> dict[str, t.Any]:
     """Read and process content as a YAML file.
 
@@ -135,12 +99,8 @@ def read_yaml_to_raw(path: Path) -> dict[str, t.Any]:
         return yaml.load(fp, Loader=_SAFE_LOADER)
 
 
-def read_raw(
-    path: Path,
-    mode: PersistenceMode = PersistenceMode.auto,
-) -> dict[str, t.Any]:
-    """Given a path to a persisted model, use the file extension to identify
-    the data format and load the model data into a raw dictionary.
+def read_raw(path: Path) -> dict[str, t.Any]:
+    """Load a persisted model into a raw dictionary.
 
     Parameters
     ----------
@@ -155,28 +115,15 @@ def read_raw(
         msg = f"Unable to read raw model from path: {path}"
         raise FileNotFoundError(errno.ENOENT, msg, path)
 
-    if mode == PersistenceMode.auto:
-        mode = _mode_detect(path)
-
-    readers = [read_json_to_raw]
-    if mode == PersistenceMode.json:
-        readers.append(read_yaml_to_raw)
-    else:
-        readers.insert(0, read_yaml_to_raw)
-
-    for reader_fn in readers:
-        try:
-            return reader_fn(path)
-        except (ScannerError, ValueError):
-            msg = f"Deserialization failed with {mode!r} for {str(path)!r}"
-            log.debug(msg)
-
-    msg = (
-        f"Failed to deserialize {str(path)!r}. If are loading a remote document, your URL "
-        "may point to an HTML page instead of the raw YAML content."
-    )
-    raise RuntimeError(msg)
-    # log.warning(msg)
+    try:
+        return read_yaml_to_raw(path)
+    except ScannerError as ex:
+        msg = (
+            f"Failed to deserialize {str(path)!r}. If you are loading a remote "
+            "document, your URL may point to an HTML page instead of the raw YAML "
+            "content."
+        )
+        raise RuntimeError(msg) from ex
 
 
 def path_representer(
@@ -278,36 +225,13 @@ def model_to_yaml(model: SerializableModel) -> str:
     return content
 
 
-def _mode_detect(path: Path) -> PersistenceMode:
-    """Use the file extension to select the persistence mode.
-
-    Returns
-    -------
-    PersistenceMode
-    """
-    if path.suffix == ".json":
-        return PersistenceMode.json
-
-    if path.suffix in {".yaml", ".yml"}:
-        return PersistenceMode.yaml
-
-    log.debug(f"Using default persistence mode `yaml` for file `{path}`")
-    return PersistenceMode.yaml
-
-
-def read_document(
-    path: Path | str,
-    mode: PersistenceMode = PersistenceMode.auto,
-) -> dict[str, t.Any]:
+def read_document(path: Path | str) -> dict[str, t.Any]:
     """Read a persisted document into a raw mapping, as `deserialize` reads it.
 
     Parameters
     ----------
     path : Path | str
         The location of the document.
-    mode : PersistenceMode
-        The type of serializer used to create the file; `auto` selects based
-        on the file extension.
 
     Raises
     ------
@@ -319,22 +243,13 @@ def read_document(
     dict[str, Any]
         The document, without its `$schema` key.
     """
-    path = Path(path)
-    if mode == PersistenceMode.auto:
-        mode = _mode_detect(path)
-
-    read = read_json_to_raw if mode == PersistenceMode.json else read_yaml_to_raw
-    document = read(path)
+    document = read_yaml_to_raw(Path(path))
     if document:
         document.pop("$schema", None)
     return document
 
 
-def deserialize(
-    path: Path | str,
-    klass: type[_T],
-    mode: PersistenceMode = PersistenceMode.auto,
-) -> _T:
+def deserialize(path: Path | str, klass: type[_T]) -> _T:
     """Deserialize a blueprint into a Simulation instance.
 
     Parameters
@@ -343,17 +258,13 @@ def deserialize(
         The location of the blueprint
     klass : type[_T]
         The type to instantiate.
-    mode : t.Literal["json", "yaml", "auto"]
-        The type of serializer used to create the file.
-
-        The default value of `auto` selects based on the file extension.
 
     Raises
     ------
     FileNotFoundError:
         If the blueprint file does not exist
     ValueError
-        If the blueprint cannot be deserialized with the desired mode
+        If the blueprint cannot be deserialized
 
     Returns
     -------
@@ -368,7 +279,7 @@ def deserialize(
         msg = f"No file found at path `{path}` to deserialize to `{klass.__name__}`"
         raise FileNotFoundError(errno.ENOENT, msg, path)
 
-    model = klass.model_validate(read_document(path, mode))  # type: ignore
+    model = klass.model_validate(read_document(path))  # type: ignore
 
     msg = f"Deserialized {str(path)!r} into: {model}"
     log.trace(msg)
@@ -552,7 +463,7 @@ def read_blueprint_raw(path: Path | str, *, strict: bool = True) -> dict[str, t.
     Parameters
     ----------
     path : Path | str
-        The local file holding the blueprint, as JSON or YAML.
+        The local file holding the blueprint.
     strict : bool
         Whether a relative location that exists only relative to the working
         directory is rejected; see `anchor_locations`.
@@ -586,8 +497,8 @@ def anchor_blueprint_file(path: Path, base_dir: Path) -> None:
     absolute before file-based steps that re-read the copy anchor them again.
     Unlike `anchor_locations` as `load_blueprint` calls it, a location that does
     not exist is anchored too, since leaving it relative would let a later step
-    anchor it somewhere else. The document is rewritten as YAML or JSON, as the
-    file is; comments are not kept.
+    anchor it somewhere else. The document is rewritten as YAML; comments are not
+    kept.
 
     Parameters
     ----------
@@ -596,21 +507,12 @@ def anchor_blueprint_file(path: Path, base_dir: Path) -> None:
     base_dir : Path
         The directory relative locations are relative to.
     """
-    mode = _mode_detect(path)
-    raw = (
-        read_json_to_raw(path)
-        if mode == PersistenceMode.json
-        else read_yaml_to_raw(path)
-    )
+    raw = read_yaml_to_raw(path)
     if not raw:
         return
 
     anchored = anchor_locations(raw, base_dir, strict=False)
-    text = (
-        json.dumps(anchored, indent=2)
-        if mode == PersistenceMode.json
-        else yaml.safe_dump(anchored, sort_keys=False, default_flow_style=False)
-    )
+    text = yaml.safe_dump(anchored, sort_keys=False, default_flow_style=False)
     path.write_text(text, encoding="utf-8")
 
 
@@ -654,13 +556,9 @@ def load_blueprint(path: Path | str, klass: type[_T], *, anchor: bool = True) ->
     return model
 
 
-def try_deserialize(
-    path: Path | str,
-    klass: type[_T],
-    mode: PersistenceMode = PersistenceMode.auto,
-) -> _T | None:
+def try_deserialize(path: Path | str, klass: type[_T]) -> _T | None:
     try:
-        return deserialize(path, klass, mode=mode)
+        return deserialize(path, klass)
     except Exception:
         msg = f"try-deserialize failed loading {klass.__name__!r} from {str(path)!r}"
         log.debug(msg)
@@ -744,7 +642,6 @@ async def deserialize_all(
     paths: list[Path],
     klass: type[_T],
     limit: int,
-    mode: PersistenceMode = PersistenceMode.auto,
     sem: asyncio.Semaphore | None = None,
 ) -> Sequence[_T | None]:
     """Deserialize a collection of items of the same type.
@@ -758,8 +655,6 @@ async def deserialize_all(
         The paths to the serialized items.
     klass : type[_T]
         The model type to deserialize each item into.
-    mode : PersistenceMode
-        The persistence mode used to read the items.
     limit : int
         The maximum number of concurrent reads; ignored when `sem` is supplied.
     sem : asyncio.Semaphore | None
@@ -771,50 +666,11 @@ async def deserialize_all(
         The deserialized items in input order; an item that cannot be read
         or fails validation is returned as `None`.
     """
-    return await read_all(paths, lambda p: try_deserialize(p, klass, mode), limit, sem)
+    return await read_all(paths, lambda p: try_deserialize(p, klass), limit, sem)
 
 
-def render_model(
-    model: SerializableModel,
-    mode: PersistenceMode = PersistenceMode.yaml,
-) -> str:
-    """Render a model as the text of a document.
-
-    Parameters
-    ----------
-    model : SerializableModel
-        The model to render.
-    mode : PersistenceMode
-        The type of document to produce (yaml or json); `auto` is rejected, as
-        there is no path to detect it from.
-
-    Returns
-    -------
-    str
-        The rendered document.
-
-    Raises
-    ------
-    ValueError
-        If `mode` is `auto`.
-    """
-    if mode == PersistenceMode.auto:
-        msg = "A persistence mode must be chosen to render a model without a path"
-        raise ValueError(msg)
-
-    if mode == PersistenceMode.json:
-        return model.model_dump_json(  # type: ignore[reportUnknownMemberType]
-            by_alias=True
-        )
-    return model_to_yaml(model)
-
-
-def serialize(
-    path: Path,
-    model: SerializableModel,
-    mode: PersistenceMode = PersistenceMode.yaml,
-) -> int:
-    """Serialize a model into a file.
+def serialize(path: Path, model: SerializableModel) -> int:
+    """Serialize a model into a YAML file.
 
     Parameters
     ----------
@@ -822,8 +678,6 @@ def serialize(
         The location to store the serialized model in
     model : _T
         The model to serialize
-    mode : PersistenceMode
-        Specify the type of document to produce (yaml or json)
 
     Returns
     -------
@@ -834,10 +688,7 @@ def serialize(
         msg = f"Overwriting existing file at `{path}`"
         log.debug(msg)
 
-    if mode == PersistenceMode.auto:
-        mode = _mode_detect(path)
-
-    content = render_model(model, mode)
+    content = model_to_yaml(model)
 
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open(mode="w") as fp:

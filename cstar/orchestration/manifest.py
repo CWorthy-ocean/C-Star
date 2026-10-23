@@ -56,8 +56,8 @@ from cstar.orchestration.orchestration import Status
 from cstar.orchestration.serialization import (
     anchor_relative_path,
     load_blueprint,
+    model_to_yaml,
     read_document,
-    render_model,
 )
 from cstar.system.migration import CstarSchemaTooNewError, version_key
 
@@ -97,9 +97,6 @@ ATTEMPT_DIR_FORMAT: t.Final[str] = "%Y%m%dT%H%M%S"
 
 ATTEMPT_WORKPLAN_NAME: t.Final[str] = "workplan.yaml"
 """The authored workplan, carried verbatim in an attempt's directory."""
-
-ATTEMPT_JSON_WORKPLAN_NAME: t.Final[str] = "workplan.json"
-"""The authored workplan when it was written as JSON, carried verbatim instead."""
 
 ATTEMPT_VARIABLES_NAME: t.Final[str] = "workplan.vars"
 """The runtime variables of the attempt, in its directory, when any were given."""
@@ -929,7 +926,7 @@ def _write(path: Path, document: "RunManifest | StepRecord") -> Path:
         The file written.
     """
     document.schema_version = type(document).model_fields["schema_version"].default
-    write_text_atomic(path, render_model(document))
+    write_text_atomic(path, model_to_yaml(document))
     return path
 
 

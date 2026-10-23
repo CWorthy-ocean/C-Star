@@ -47,7 +47,6 @@ from cstar.orchestration.dag_runner import (
 from cstar.orchestration.launch.local import LocalHandle
 from cstar.orchestration.launch.slurm import SlurmHandle, SlurmLauncher
 from cstar.orchestration.manifest import (
-    ATTEMPT_JSON_WORKPLAN_NAME,
     ATTEMPT_WORKPLAN_NAME,
     RUN_MANIFEST_NAME,
     Attempt,
@@ -64,7 +63,6 @@ from cstar.orchestration.models import (
 )
 from cstar.orchestration.orchestration import LiveStep, LiveWorkplan, Planner, Status
 from cstar.orchestration.serialization import (
-    PersistenceMode,
     deserialize,
     serialize,
 )
@@ -1388,28 +1386,6 @@ def test_workplan_run_resume_refuses_a_run_whose_manifest_cannot_be_read(
 
 
 @pytest.mark.usefixtures("read_yaml_intercept")
-def test_workplan_run_resume_reads_a_json_workplan_in_its_own_format(
-    tmp_path: Path,
-    wp_templates_dir: Path,
-) -> None:
-    """Verify a carried JSON workplan, which is not YAML when indented with tabs,
-    is read as JSON to verify the path against.
-    """
-    wp = deserialize(wp_templates_dir / "workplan.yaml", Workplan)
-    authored = json.dumps(wp.model_dump(mode="json", by_alias=True), indent="\t")
-    wp_path = tmp_path / "workplan.json"
-    wp_path.write_text(authored)
-    carried = _write_carried_workplan(tmp_path, wp)
-    carried.unlink()
-    carried.with_name(ATTEMPT_JSON_WORKPLAN_NAME).write_text(authored)
-
-    result, mock_run_dag, _ = _resume_with_path(tmp_path, wp_path)
-
-    assert result.exit_code == 0, result.output
-    mock_run_dag.assert_awaited_once()
-
-
-@pytest.mark.usefixtures("read_yaml_intercept")
 def test_workplan_run_resume_verifies_the_path_against_the_carried_workplan(
     tmp_path: Path,
     wp_templates_dir: Path,
@@ -1733,8 +1709,9 @@ def test_workplan_run_reenters_a_json_workplan_run(
     mock_run_id: str,
     resume: bool,
 ) -> None:
-    """Verify a run started from a JSON workplan re-enters by run-id, alone or
-    resuming with the authored path, by loading the plan prepared in its run root.
+    """Verify a run started from a workplan written as JSON, which reads as YAML,
+    re-enters by run-id, alone or resuming with the authored path, by loading the
+    plan prepared in its run root.
     """
     run_id = mock_run_id
     wp = Workplan(
@@ -1749,7 +1726,7 @@ def test_workplan_run_reenters_a_json_workplan_run(
         ],
     )
     wp_path = tmp_path / "plan.json"
-    serialize(wp_path, wp, PersistenceMode.auto)
+    wp_path.write_text(json.dumps(wp.model_dump(mode="json", by_alias=True)))
     prepared, trx_path, _, _ = asyncio.run(prepare_workplan(wp_path, tmp_path / "run"))
 
     sentinel_paths = set[Path]()

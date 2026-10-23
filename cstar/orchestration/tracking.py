@@ -32,7 +32,6 @@ from cstar.orchestration.orchestration import (
     read_workplan,
 )
 from cstar.orchestration.serialization import (
-    PersistenceMode,
     deserialize,
     read_all,
     serialize,
@@ -435,8 +434,8 @@ class TrackingRepository(LoggingMixin):
     _HISTORY_DIR: t.Final[str] = "history"
     """The directory containing all run history."""
 
-    _MODE: PersistenceMode = PersistenceMode.yaml
-    """The serialization mode to use."""
+    _EXT: t.Final[str] = "yaml"
+    """The file extension of tracking records."""
 
     _sem: asyncio.Semaphore | None = None
     """A semaphore used to limit concurrent disk accesses."""
@@ -500,7 +499,7 @@ class TrackingRepository(LoggingMixin):
         str
         """
         formatted_dt = self._format_run_date(run_date)
-        return f"{formatted_dt}.{TrackingRepository._MODE.value}"
+        return f"{formatted_dt}.{TrackingRepository._EXT}"
 
     def _latestfile_name(self, run_id: str) -> str:
         """Generate the file name for persisting the latest `WorkplanRun` history entry to disk.
@@ -514,7 +513,7 @@ class TrackingRepository(LoggingMixin):
         -------
         str
         """
-        return f"{run_id}.{TrackingRepository._MODE.value}"
+        return f"{run_id}.{TrackingRepository._EXT}"
 
     def latest_path(self, run_id: str) -> Path:
         """Generate the full path for persisting a `WorkplanRun` to disk as
@@ -909,7 +908,7 @@ class TrackingRepository(LoggingMixin):
             The latest run record per matching run-id; a record that cannot
             be read is skipped.
         """
-        run_paths = list(self.latest_dir.glob(f"{run_id_filter}*.{self._MODE}"))
+        run_paths = list(self.latest_dir.glob(f"{run_id_filter}*.{self._EXT}"))
         return await self._deserialize_readable_runs(run_paths)
 
     def list_latest_runs_sync(self) -> Sequence[WorkplanRun]:
@@ -924,7 +923,7 @@ class TrackingRepository(LoggingMixin):
             The latest run record per run-id; a record that cannot be read is
             skipped.
         """
-        paths = self.latest_dir.glob(f"*.{self._MODE}")
+        paths = self.latest_dir.glob(f"*.{self._EXT}")
         runs = [(path, _try_read_run(path)) for path in paths]
         if unreadable := [str(path) for path, run in runs if run is None]:
             self.log.debug(f"Skipped unreadable run record(s): {', '.join(unreadable)}")
@@ -946,7 +945,7 @@ class TrackingRepository(LoggingMixin):
             cannot be read is skipped.
         """
         # Filter run-id subfolder w/filename format YYYYMMDDHHMMSS.XXXXXX.yaml
-        glob_pattern = f"{run_id_filter}*/??????????????.??????.{self._MODE}"
+        glob_pattern = f"{run_id_filter}*/??????????????.??????.{self._EXT}"
         run_paths = list(self.history_dir.rglob(glob_pattern))
         return await self._deserialize_readable_runs(run_paths)
 

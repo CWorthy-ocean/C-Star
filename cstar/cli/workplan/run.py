@@ -84,7 +84,6 @@ from cstar.orchestration.orchestration import (
 )
 from cstar.orchestration.run_check import report_orphans
 from cstar.orchestration.serialization import (
-    PersistenceMode,
     deserialize,
     read_raw,
     serialize,
@@ -526,7 +525,7 @@ def is_known_run_id(value: str) -> bool:
         return False
 
 
-def read_slugged_workplan(path: Path, mode: PersistenceMode) -> Workplan:
+def read_slugged_workplan(path: Path) -> Workplan:
     """Read a workplan with its name normalized to a slug.
 
     A workplan recorded before names had to be slugs carries a free-form name
@@ -536,8 +535,6 @@ def read_slugged_workplan(path: Path, mode: PersistenceMode) -> Workplan:
     ----------
     path : Path
         The workplan file.
-    mode : PersistenceMode
-        How the file is persisted.
 
     Returns
     -------
@@ -550,7 +547,7 @@ def read_slugged_workplan(path: Path, mode: PersistenceMode) -> Workplan:
     ValueError
         If the content is not a valid workplan.
     """
-    raw = read_raw(path, mode)
+    raw = read_raw(path)
     if not isinstance(raw, dict):
         msg = f"The content of {str(path)!r} is not a mapping"
         raise ValueError(msg)
@@ -604,7 +601,7 @@ def refuse_run_id_collision(wp_path: Path, run_id: str, *, explicit: bool) -> No
     escape = f"pass {ARG_RUN_ID} <other-id> or {ARG_RUN_ID} {run_id} to re-enter"
 
     try:
-        supplied = read_slugged_workplan(wp_path, PersistenceMode.auto)
+        supplied = read_slugged_workplan(wp_path)
     except (OSError, RuntimeError, ValueError, yaml.YAMLError) as ex:
         msg = f"The workplan at {str(wp_path)!r} could not be read: {ex}"
         raise typer.BadParameter(msg) from ex
@@ -625,7 +622,7 @@ def refuse_run_id_collision(wp_path: Path, run_id: str, *, explicit: bool) -> No
         raise typer.BadParameter(msg)
 
     try:
-        recorded = read_slugged_workplan(recorded_path, PersistenceMode.auto)
+        recorded = read_slugged_workplan(recorded_path)
     except (OSError, RuntimeError, ValueError, yaml.YAMLError) as ex:
         msg = (
             f"{claim}, and the recorded workplan for that run could not be read: "
