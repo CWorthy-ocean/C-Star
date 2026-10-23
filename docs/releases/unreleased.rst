@@ -133,6 +133,13 @@ New features
 
 - ``run://<uuid>`` finds an attached run wherever its directory is, through the tracking record, before any index scan. (`#798 <https://github.com/CWorthy-ocean/C-Star/pull/798>`_)
 - ``cstar run ls --all`` labels attached runs ``attached`` or ``attached, read-only`` in the ``where`` column. (`#798 <https://github.com/CWorthy-ocean/C-Star/pull/798>`_)
+- ``cstar run promote <run> [--to DIR] [--mode copy|link|move|materialize] [--include builds|temp-output|all]... [--dry-run] [--verify]`` copies a run into the project runs area as ``<CSTAR_PROJECT_HOME>/cstar/runs/<run-id>``, or ``DIR/<run-id>`` with ``--to``. (`#800 <https://github.com/CWorthy-ocean/C-Star/pull/800>`_)
+
+  - By default the copy holds the manifest, transformed workplan, attempts, step records, logs, each step's ``work/`` YAML files and every product the step records list; ``--include builds`` adds a ROMS step's compile-time code, runtime code and cloned codebases, ``--include temp-output`` the per-rank output pieces, ``--include all`` the whole directory.
+  - ``--mode link`` registers the run with the project as a symlink without copying; ``--mode materialize`` replaces that link with a copy; ``--mode move`` copies the whole directory, removes the source once the copy passed the check, and re-points a tracked run's record (the run is then attached, read-only when it is in the project runs area).
+  - Nothing is ever overwritten: a destination holding another run, or this run already, a source missing a recorded product, and a destination file system without room for the plan are refused before any byte is copied; ``--dry-run`` prints the plan with per-group file counts and sizes.
+  - ``--verify`` computes the digest of each source product that has none, records it in the copy's step records and manifest (the source is never written) and compares the copy; exit 1 when the copy has problems of its own, with the absolute paths that the source's own files already carry listed but not counted.
+
 
 
 
@@ -148,6 +155,7 @@ Bug Fixes
 
 - ``cstar workplan run --resume`` no longer fails when it cannot update the run manifest, for example on a file system without ``flock``; it warns and resumes. (`#794 <https://github.com/CWorthy-ocean/C-Star/pull/794>`_)
 - Unit test CI no longer replaces the conda builds of numpy, netCDF4, h5py, numba and other compiled packages with PyPI wheels, so it tests the stack ``environment-laptop.yml`` installs. (`#799 <https://github.com/CWorthy-ocean/C-Star/pull/799>`_)
+- ``cstar run check <directory>`` loaded the transformed workplan without rebasing it onto the directory, so a copied run checked by path listed its own step directories as orphans and ``--repair`` never rebuilt its ``gathered_output``. (`#800 <https://github.com/CWorthy-ocean/C-Star/pull/800>`_)
 
 Improvements
 ~~~~~~~~~~~~
@@ -211,3 +219,5 @@ Miscellaneous
 - A hello_world e2e (``test_run_attach.py``, seconds) covers attach, verify, owned and read-only verbs, re-entry refusal, ``--as``, and a workplan depending on an attached run by its run-id. (`#798 <https://github.com/CWorthy-ocean/C-Star/pull/798>`_)
 - Unit test CI runs about twice as fast by measuring coverage with Python's ``sys.monitoring`` instead of the default tracer. (`#799 <https://github.com/CWorthy-ocean/C-Star/pull/799>`_)
 - Unit test CI logs stay readable: test output is captured again, and each run lists its 25 slowest tests. (`#799 <https://github.com/CWorthy-ocean/C-Star/pull/799>`_)
+- Documentation: "Promoting a run" in the workplans page, the project runs area paragraph in the HPC page (with the umask/group-permission note, since C-Star changes no permissions) and a "Promote" terminology entry. (`#800 <https://github.com/CWorthy-ocean/C-Star/pull/800>`_)
+- Tier 2 e2e module ``test_run_promote.py`` (hello_world, seconds): copy, dry run, ``--to``, link then materialize, a workplan depending on the promoted run by uuid, move with the tracking update and relaunch refusal, ``--verify``, ``gathered_output`` rebuild. (`#800 <https://github.com/CWorthy-ocean/C-Star/pull/800>`_)
