@@ -17,6 +17,7 @@ from cstar.base.exceptions import CstarError
 from cstar.base.log import get_logger
 from cstar.cli.common import (
     cb_pipeline,
+    exit_on_refused_settings,
     normalize_runid,
     set_env,
 )
@@ -549,6 +550,8 @@ def clean(
     -------
     None
     """
+    exit_on_refused_settings()
+
     if not run_id:
         all_actions = get_default_cleanup_actions()
         todo = actions_filter_prompt(all_actions, yes)

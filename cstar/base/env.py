@@ -366,8 +366,9 @@ class RemovedSetting:
     guidance: str
     """What to do instead; read after "<NAME> has no effect; "."""
     refused: bool = False
-    """Whether commands refuse to run while it is exported, because ignoring it
-    would do more than was asked (a dry run becoming a real one)."""
+    """Whether the commands it used to change refuse to run while it is exported
+    (`cstar.cli.common.exit_on_refused_settings`), because ignoring it there would
+    do more than was asked (a dry run becoming a real one)."""
 
 
 REMOVED_SETTINGS: t.Final[dict[str, RemovedSetting]] = {
@@ -405,8 +406,8 @@ REMOVED_SETTINGS: t.Final[dict[str, RemovedSetting]] = {
 }
 """Settings that were removed, mapped to guidance for anyone still exporting one.
 
-An exported removed setting has no effect; the CLI warns about it, and refuses
-to run while a `refused` one is exported.
+An exported removed setting has no effect; the CLI warns about it, and the
+commands a `refused` one used to change refuse to run while it is exported.
 """
 
 

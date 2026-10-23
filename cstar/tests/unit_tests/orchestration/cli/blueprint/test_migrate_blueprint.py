@@ -20,6 +20,7 @@ from cstar.base.env import (
     ENV_CSTAR_DISABLE_MIGRATION,
     ENV_CSTAR_STATE_HOME,
     FLAG_ON,
+    REMOVED_SETTINGS,
 )
 from cstar.cli.blueprint.migrate import (
     app,
@@ -573,6 +574,38 @@ def test_blueprint_migrate_dry_run_wins_in_any_order(
 
     assert not result.stderr, result.stderr
     assert result.exit_code == 0, result.output
+    assert output_path.read_text() == "pre-existing content"
+
+
+def test_blueprint_migrate_refuses_a_removed_dry_run_setting(
+    tmp_path: Path,
+    plotter_v1_0_0_bp: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Verify `blueprint migrate` exits 2 before clobbering or writing anything
+    while a removed setting that used to make it a dry run is still exported.
+
+    Parameters
+    ----------
+    tmp_path : Path
+        Temporary directory to read/write test assets
+    plotter_v1_0_0_bp : Path
+        The path to an out-of-date blueprint
+    monkeypatch : pytest.MonkeyPatch
+        Fixture used to export the setting.
+    """
+    name = next(n for n, removed in REMOVED_SETTINGS.items() if removed.refused)
+    monkeypatch.setenv(name, "1")
+    output_path = tmp_path / "output.json"
+    output_path.write_text("pre-existing content")
+
+    result = CliRunner().invoke(
+        app,
+        [plotter_v1_0_0_bp.as_posix(), output_path.as_posix(), ARG_CLOBBER],
+        color=False,
+    )
+
+    assert result.exit_code == 2
     assert output_path.read_text() == "pre-existing content"
 
 

@@ -208,19 +208,31 @@ def common_callback(
         ),
     ] = False,
 ) -> None:
-    """Warn on stderr about each exported setting that no longer has an effect,
-    and stop when one of them must not be ignored.
-    """
-    removed = sorted(REMOVED_SETTINGS.keys() & os.environ.keys())
-    for name in removed:
+    """Warn on stderr about each exported setting that no longer has an effect."""
+    for name in sorted(REMOVED_SETTINGS.keys() & os.environ.keys()):
         typer.echo(f"{name} has no effect; {REMOVED_SETTINGS[name].guidance}", err=True)
 
-    if refused := [name for name in removed if REMOVED_SETTINGS[name].refused]:
-        typer.echo(
-            f"Refusing to run while {', '.join(refused)} is exported; unset it to "
-            "continue.",
-            err=True,
-        )
+
+def exit_on_refused_settings() -> None:
+    """Stop a command that an exported `refused` removed setting used to change.
+
+    The commands such a setting used to change call this before they touch
+    anything: running them while it is exported would do more than was asked
+    (a dry run becoming a real one).
+
+    Raises
+    ------
+    typer.Exit
+        With code 2 when a refused setting is exported.
+    """
+    refused = [
+        name
+        for name in sorted(REMOVED_SETTINGS.keys() & os.environ.keys())
+        if REMOVED_SETTINGS[name].refused
+    ]
+    if refused:
+        msg = f"Refusing to run while {', '.join(refused)} is exported; unset it to continue."
+        typer.echo(msg, err=True)
         raise typer.Exit(2)
 
 

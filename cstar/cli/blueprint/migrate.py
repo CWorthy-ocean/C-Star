@@ -12,6 +12,7 @@ from cstar.cli.common import (
     cb_pipeline,
     console,
     execute_migration,
+    exit_on_refused_settings,
     format_validation_errors,
     report_schema_error,
     set_env,
@@ -113,6 +114,9 @@ def target_callback(ctx: typer.Context, value: str) -> str:
     -------
     str
     """
+    # before an existing output can be removed below
+    exit_on_refused_settings()
+
     if not value or not value.strip():
         return value.strip()
 

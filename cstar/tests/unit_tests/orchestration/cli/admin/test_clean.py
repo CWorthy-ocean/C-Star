@@ -8,7 +8,7 @@ import pytest
 import typer
 from typer.testing import CliRunner
 
-from cstar.base.env import ENV_CSTAR_RUNID
+from cstar.base.env import ENV_CSTAR_RUNID, REMOVED_SETTINGS
 from cstar.base.exceptions import CstarError
 from cstar.cli.admin.clean import (
     ARG_YES,
@@ -263,6 +263,30 @@ def test_cli_admin_clean_default_cleanup(dry_run: bool) -> None:
     key = "will remove" if dry_run else "removed"
 
     assert key in result.stdout.lower()
+
+
+def test_cli_admin_clean_refuses_a_removed_dry_run_setting(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Verify `admin clean` removes nothing and exits 2 while a removed setting
+    that used to make it a dry run is still exported.
+
+    Parameters
+    ----------
+    monkeypatch : pytest.MonkeyPatch
+        Fixture used to export the setting.
+    """
+    name = next(n for n, removed in REMOVED_SETTINGS.items() if removed.refused)
+    monkeypatch.setenv(name, "1")
+    actions = t.cast("list[FileSystemCleanupAction]", get_default_cleanup_actions())
+    assets = [path / "asset.mock" for action in actions for path in action.asset_paths]
+    for asset in assets:
+        asset.touch()
+
+    result = CliRunner().invoke(app, [ARG_YES], color=False)
+
+    assert result.exit_code == 2
+    assert all(asset.exists() for asset in assets)
 
 
 @pytest.fixture

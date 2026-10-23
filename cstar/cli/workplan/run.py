@@ -22,6 +22,7 @@ from cstar.base.utils import slugify
 from cstar.cli.common import (
     SCHEMA_ERRORS,
     cb_pipeline,
+    exit_on_refused_settings,
     format_validation_errors,
     localize_and_migrate,
     normalize_runid,
@@ -892,6 +893,8 @@ def run(
 
     Specify a previously used run_id option to re-start a prior run.
     """
+    exit_on_refused_settings()
+
     if user_variables and user_variables_path is not None:
         msg = "`--var` and `--varfile` must not be supplied together"
         raise typer.BadParameter(msg)
