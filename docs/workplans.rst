@@ -1060,6 +1060,23 @@ Pass ``--repair`` to rewrite each absolute symlink that points inside the run as
 A digest is recorded by ``--record-digests``, which computes one for each product that has none and writes it into the step records and the run manifest. Run it on the machine that has the run before you transfer it, so that ``cstar run attach --verify`` and ``cstar run check --verify`` can compare the files on arrival; a netCDF file costs a bounded read, any other file is read whole. It writes into the run, so it needs a run you own that is tracked here, or the run's directory passed explicitly, and it refuses a run attached read-only and a run found only by its run ID or ``run://<uuid>``, as ``--repair`` does.
 
 
+.. _workplan_clean_up:
+
+Cleaning up
+^^^^^^^^^^^
+
+Use ``cstar admin clean --run-id`` to remove one run: its tracking record, and its run directory. Add ``--dry-run`` first to see what would go:
+
+.. code-block:: console
+
+    cstar admin clean --run-id <my-unique-id> --dry-run
+    cstar admin clean --run-id <my-unique-id>
+
+The command asks before each removal; ``--yes`` answers for you. A run that is attached read-only, or whose directory is in the project runs area, loses its tracking record and keeps its directory (see :ref:`workplan_attach_run`); remove that directory yourself if you want it gone. A run ID with nothing to remove is reported, and the exit code is 0.
+
+``cstar admin clean --all`` is the other choice, and you have to ask for it: C-Star's data, state, cache and config directories are emptied, including the output of every run in your data home. The shared source-data cache and your catalog are kept, so the next run does not download its inputs again. ``--dry-run`` lists what ``--all`` would remove. Without ``--all`` or ``--run-id``, the command stops with a usage error and removes nothing.
+
+
 .. toctree::
    :hidden:
 
