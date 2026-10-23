@@ -156,6 +156,12 @@ Bug Fixes
 - ``cstar workplan run --resume`` no longer fails when it cannot update the run manifest, for example on a file system without ``flock``; it warns and resumes. (`#794 <https://github.com/CWorthy-ocean/C-Star/pull/794>`_)
 - Unit test CI no longer replaces the conda builds of numpy, netCDF4, h5py, numba and other compiled packages with PyPI wheels, so it tests the stack ``environment-laptop.yml`` installs. (`#799 <https://github.com/CWorthy-ocean/C-Star/pull/799>`_)
 - ``cstar run check <directory>`` loaded the transformed workplan without rebasing it onto the directory, so a copied run checked by path listed its own step directories as orphans and ``--repair`` never rebuilt its ``gathered_output``. (`#800 <https://github.com/CWorthy-ocean/C-Star/pull/800>`_)
+- ``cstar run ls --format json`` and ``--format csv`` produced invalid output when piped or redirected, because long lines were wrapped at 80 columns. (`#801 <https://github.com/CWorthy-ocean/C-Star/pull/801>`_)
+- A run whose disk usage was never measured was listed with a size of ``-1MB``. (`#801 <https://github.com/CWorthy-ocean/C-Star/pull/801>`_)
+
+  - JSON now gives ``null`` and CSV an empty field for that size.
+  - The table says "not measured", followed by the ``cstar run status <id> --size`` hint for a run tracked on this machine.
+
 
 Improvements
 ~~~~~~~~~~~~
@@ -221,3 +227,4 @@ Miscellaneous
 - Unit test CI logs stay readable: test output is captured again, and each run lists its 25 slowest tests. (`#799 <https://github.com/CWorthy-ocean/C-Star/pull/799>`_)
 - Documentation: "Promoting a run" in the workplans page, the project runs area paragraph in the HPC page (with the umask/group-permission note, since C-Star changes no permissions) and a "Promote" terminology entry. (`#800 <https://github.com/CWorthy-ocean/C-Star/pull/800>`_)
 - Tier 2 e2e module ``test_run_promote.py`` (hello_world, seconds): copy, dry run, ``--to``, link then materialize, a workplan depending on the promoted run by uuid, move with the tracking update and relaunch refusal, ``--verify``, ``gathered_output`` rebuild. (`#800 <https://github.com/CWorthy-ocean/C-Star/pull/800>`_)
+- The workplan tutorial's sample ``cstar run ls`` table shows the new "not measured" wording. (`#801 <https://github.com/CWorthy-ocean/C-Star/pull/801>`_)
