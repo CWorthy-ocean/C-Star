@@ -144,13 +144,12 @@ def test_itemview_size_shows_hint_for_unsized_table_rows() -> None:
     """Verify an uncomputed size renders the refresh hint in table format."""
     view = make_view(run_id="run-9", raw_size=-1, format="table")
 
-    assert "cstar run status run-9" in view.size
-    assert "--size" in view.size
+    assert view.size == "not measured (cstar run status run-9 --size)"
 
 
 @pytest.mark.parametrize("format", ["csv", "json"])
-def test_itemview_size_shows_raw_value_for_machine_formats(format: FORMATS) -> None:
-    """Verify an uncomputed size is not replaced by the hint in csv/json.
+def test_itemview_size_is_absent_for_unsized_machine_formats(format: FORMATS) -> None:
+    """Verify an uncomputed size is empty in csv/json, not the -1 sentinel.
 
     Parameters
     ----------
@@ -159,7 +158,7 @@ def test_itemview_size_shows_raw_value_for_machine_formats(format: FORMATS) -> N
     """
     view = make_view(raw_size=-1, format=format)
 
-    assert view.size == "-1MB"
+    assert view.size is None
 
 
 @pytest.mark.parametrize("format", ["table", "csv", "json"])
@@ -462,7 +461,7 @@ def test_csv_formatter_writes_header_and_rows_in_order() -> None:
     assert [r["run_id"] for r in by_header] == ["r2", "r1"]
     assert by_header[0]["name"] == "beta"
     assert by_header[0]["size"] == "7MB"
-    assert by_header[1]["size"] == "-1MB"
+    assert by_header[1]["size"] == ""
     assert by_header[0]["start"] == "2026-09-12T03:04:00+00:00"
 
 
@@ -736,6 +735,7 @@ async def test_adapt_runs_only_loads_workplans_for_runs_missing_a_name(
 def patch_ls_pipeline(
     monkeypatch: pytest.MonkeyPatch,
     runs: Sequence[WorkplanRun],
+    width: int = 200,
 ) -> tuple[io.StringIO, mock.AsyncMock]:
     """Patch the IO boundaries of `ls_runs` and capture console output.
 
@@ -745,6 +745,9 @@ def patch_ls_pipeline(
         The active monkeypatch fixture.
     runs : Sequence[WorkplanRun]
         The run records the stubbed repository will return.
+    width : int
+        The width of the console the command prints to; the console is not a
+        terminal.
 
     Returns
     -------
@@ -774,7 +777,7 @@ def patch_ls_pipeline(
     )
     monkeypatch.setattr("cstar.cli.workplan.ls.refresh_disk_usage", refresh_mock)
     monkeypatch.setattr(
-        "cstar.cli.workplan.ls.console", Console(file=buffer, width=200)
+        "cstar.cli.workplan.ls.console", Console(file=buffer, width=width)
     )
     return buffer, refresh_mock
 
@@ -847,6 +850,62 @@ def test_ls_runs_without_refresh_usage_never_awaits_refresh_disk_usage(
     ls_runs(mock.Mock(), format="json", refresh_usage=False)
 
     refresh_mock.assert_not_awaited()
+
+
+LONG_RUN_ID: t.Final[str] = "a-run-id-" + "x" * 80
+"""A run-id wider than the 80 columns a console has when it is not a terminal."""
+LONG_NAME: t.Final[str] = "a workplan name with spaces" + " and words" * 6
+"""A name with spaces, wider than the 80 columns of a console that is not a terminal."""
+
+
+@pytest.mark.parametrize("width", [40, 80])
+def test_ls_runs_json_is_not_wrapped_at_the_console_width(
+    monkeypatch: pytest.MonkeyPatch, width: int
+) -> None:
+    """Verify the JSON document parses when values are wider than the console.
+
+    Parameters
+    ----------
+    monkeypatch : pytest.MonkeyPatch
+        The active monkeypatch fixture.
+    width : int
+        The width of the console, which is not a terminal.
+    """
+    runs = [make_run(LONG_RUN_ID, size=5, name=LONG_NAME), make_run("r1")]
+    buffer, _ = patch_ls_pipeline(monkeypatch, runs, width=width)
+
+    ls_runs(mock.Mock(), format="json")
+
+    rows = {row["run_id"]: row for row in json.loads(buffer.getvalue())["data"]}
+    assert rows[LONG_RUN_ID]["name"] == LONG_NAME
+    assert rows[LONG_RUN_ID]["size"] == "5MB"
+    assert rows["r1"]["size"] is None
+
+
+@pytest.mark.parametrize("width", [40, 80])
+def test_ls_runs_csv_is_not_wrapped_at_the_console_width(
+    monkeypatch: pytest.MonkeyPatch, width: int
+) -> None:
+    """Verify each CSV row stays whole when values are wider than the console.
+
+    Parameters
+    ----------
+    monkeypatch : pytest.MonkeyPatch
+        The active monkeypatch fixture.
+    width : int
+        The width of the console, which is not a terminal.
+    """
+    runs = [make_run(LONG_RUN_ID, size=5, name=LONG_NAME), make_run("r1")]
+    buffer, _ = patch_ls_pipeline(monkeypatch, runs, width=width)
+
+    ls_runs(mock.Mock(), format="csv")
+
+    rows = list(csv.DictReader(io.StringIO(buffer.getvalue())))
+    assert all(set(row) == INCLUSIONS for row in rows), rows
+    by_id = {row["run_id"]: row for row in rows}
+    assert set(by_id) == {LONG_RUN_ID, "r1"}
+    assert by_id[LONG_RUN_ID]["name"] == LONG_NAME
+    assert by_id["r1"]["size"] == ""
 
 
 # ---------------------------------------------------------------------------
@@ -978,7 +1037,7 @@ def test_shared_lists_the_project_area_alone(
     }
     assert rows["kept"]["start"] == (T0 + datetime.timedelta(hours=2)).isoformat()
     assert rows["kept"]["name"] == "kept"
-    assert rows["kept"]["size"] == "-1MB"
+    assert rows["kept"]["size"] is None
 
 
 def test_all_lists_what_is_tracked_and_what_only_manifests_name(
@@ -1141,8 +1200,8 @@ def test_the_size_filters_never_drop_a_run_whose_size_is_not_known(
 def test_the_table_says_where_and_does_not_hint_at_a_size_it_cannot_measure(
     populated: dict[str, BuiltRun], listing: Listing
 ) -> None:
-    """Verify the table adds a column, shows `-` for the size of a run that
-    is not tracked here, and keeps the hint for one that is.
+    """Verify the table adds a column, says the size of a run that is not
+    tracked here was not measured, and keeps the hint for one that is.
     """
     result = listing.run("--all")
 
@@ -1154,7 +1213,7 @@ def test_the_table_says_where_and_does_not_hint_at_a_size_it_cannot_measure(
         for line in lines
         if line.startswith("│")
     }
-    assert cells["orphan"][2] == "-"
+    assert cells["orphan"][2] == "not measured"
     assert cells["orphan"][4] == "local, untracked"
     assert cells["linked"][4] == "project, linked"
     assert "cstar run status mine --size" in " ".join(cells["mine"])

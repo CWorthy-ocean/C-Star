@@ -196,8 +196,9 @@ ID:
    ┏━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━┓
    ┃                run-id ┃ workplan              ┃ disk space                    ┃    start time    ┃
    ┡━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━┩
-   │ wio-workplan-tutorial │ wio-workplan-tutorial │ Run "cstar run status         │ 2026-10-21 16:50 │
-   │                       │                       │ wio-workplan-tutorial --size" │                  │
+   │ wio-workplan-tutorial │ wio-workplan-tutorial │ not measured (cstar run       │ 2026-10-21 16:50 │
+   │                       │                       │ status wio-workplan-tutorial  │                  │
+   │                       │                       │ --size)                       │                  │
    └───────────────────────┴───────────────────────┴───────────────────────────────┴──────────────────┘
 
 5. Look at the results

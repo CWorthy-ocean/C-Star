@@ -82,6 +82,10 @@ FIELD_NAMES: t.TypeAlias = t.Literal[
 """Fields available for use in listing, filtering, and sorting operations."""
 FORMATS: t.TypeAlias = t.Literal["table", "csv", "json"]
 """Output format options."""
+UNWRAPPED_FORMATS: t.Final[frozenset[FORMATS]] = frozenset({"csv", "json"})
+"""Machine-readable formats, printed without wrapping lines at the console width."""
+NOT_MEASURED: t.Final[str] = "not measured"
+"""Table text for the size of a run whose disk usage has not been measured."""
 INCLUSIONS: set[str] = {"run_id", "name", "size", "start"}
 """View fields included in the rendered outputs."""
 WHERE_INCLUSIONS: set[str] = INCLUSIONS | {"where"}
@@ -122,12 +126,17 @@ class ItemView(BaseModel):
 
     @computed_field  # type: ignore[prop-decorator]
     @property
-    def size(self) -> str:
-        """The size as a string for display (includes units)."""
-        if self.raw_size == UNKNOWN_SIZE and self.format == "table":
+    def size(self) -> str | None:
+        """The size as a string for display (includes units).
+
+        `None` in machine formats when the disk usage has not been measured.
+        """
+        if self.raw_size == UNKNOWN_SIZE:
+            if self.format != "table":
+                return None
             if not self.tracked:
-                return "-"
-            return f'Run "cstar run status {self.run_id} {ARG_SIZE}"'
+                return NOT_MEASURED
+            return f"{NOT_MEASURED} (cstar run status {self.run_id} {ARG_SIZE})"
 
         return f"{self.raw_size}MB"
 
@@ -632,7 +641,7 @@ def ls_runs(
     sorted_views = sorters[sort](views, reverse)
     content = formatters[format](sorted_views, with_where=scan)
 
-    console.print(content)
+    console.print(content, soft_wrap=format in UNWRAPPED_FORMATS)
 
 
 # `list` is an alias for `ls`: the same command under a second name, hidden
