@@ -59,7 +59,6 @@ dependencies = [
     "numba",
     "fsspec",
     "kerchunk",
-    "nest-asyncio",
     "ujson",
     "fastparquet",
     # >=2026.9: fixes the netCDF4 lock-order deadlock that hung forge input

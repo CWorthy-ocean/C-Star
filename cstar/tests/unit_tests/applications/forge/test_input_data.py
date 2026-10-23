@@ -12,6 +12,7 @@ Tests cover:
 - Edge cases and error handling
 """
 
+import asyncio
 import logging
 import shutil
 import sys
@@ -30,6 +31,10 @@ import cstar.applications.roms_marbl.models as cstar_models
 from cstar.applications.forge import models as forge_models
 from cstar.applications.forge import source_datasets
 from cstar.applications.forge.blueprint import CarbonateSensitivitySpec
+from cstar.applications.forge.glorys_subchunk import (
+    build_ref_for_files,
+    open_subchunk_ref,
+)
 from cstar.applications.forge.input_data import (
     CDR_FORCING_NETCDF_STEM,
     CHILD_IC_PLACEHOLDER_LOCATION,
@@ -4351,7 +4356,6 @@ class TestGlorysSubchunkIntegration:
         """
         pytest.importorskip("kerchunk")
         pytest.importorskip("fastparquet")
-        pytest.importorskip("nest_asyncio")
         pytest.importorskip("ujson")
 
         import pandas as pd
@@ -4508,6 +4512,41 @@ class TestGlorysSubchunkIntegration:
         # than constructing a bare BoundaryForcingSource, because the wrapper is
         # what input_data.py actually calls.
         assert "temp_north" in bf.physics.ds.data_vars
+
+    def test_build_inside_running_event_loop_leaves_asyncio_usable(
+        self, tmp_path, synthetic_glorys_files
+    ):
+        """A forge step runs inline on ``cstar blueprint run``'s event loop, and
+        kerchunk's combine calls ``asyncio.run()`` itself. The build must succeed
+        there without patching asyncio process-wide (nest_asyncio did, and on
+        Python 3.14 that broke ``wait_for``/``timeout`` and loop teardown for the
+        rest of the process).
+        """
+
+        async def forge_step() -> Path:
+            ref = build_ref_for_files(
+                synthetic_glorys_files,
+                out_dir=tmp_path,
+                key="GLORYS_REGIONAL",
+                start=datetime(2020, 1, 1),
+                end=datetime(2020, 1, 3),
+            )
+            # wait_for needs a current task; to_thread gives the loop a default
+            # executor, whose shutdown on close also runs under a timeout.
+            await asyncio.wait_for(asyncio.to_thread(lambda: None), timeout=10)
+            return ref
+
+        ref = asyncio.run(forge_step())
+
+        assert asyncio.run is asyncio.runners.run  # asyncio left unpatched
+        with (
+            open_subchunk_ref(ref) as ds,
+            xr.open_dataset(synthetic_glorys_files[-1]) as last,
+        ):
+            assert ds.sizes["time"] == len(synthetic_glorys_files)
+            np.testing.assert_array_equal(
+                ds["thetao"].isel(time=-1).values, last["thetao"].isel(time=0).values
+            )
 
 
 class TestSubchunkDefaults:

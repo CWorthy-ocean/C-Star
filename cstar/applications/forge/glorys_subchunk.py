@@ -41,6 +41,7 @@ Caveats
 
 from __future__ import annotations
 
+import concurrent.futures
 import glob
 import logging
 from pathlib import Path
@@ -63,15 +64,14 @@ def _require_subchunk_deps() -> None:
     try:
         import fastparquet  # noqa: F401
         import kerchunk  # noqa: F401
-        import nest_asyncio  # noqa: F401
         import ujson  # noqa: F401
     except ImportError as e:
         raise ImportError(
-            "GLORYS subchunking (on by default) requires the 'kerchunk', "
-            "'nest_asyncio', 'ujson', and 'fastparquet' packages. They are declared "
-            "as forge dependencies, so an environment missing them predates that "
-            "change: install them (e.g. `conda install -c conda-forge kerchunk "
-            "nest-asyncio ujson fastparquet`), or rerun with --no-subchunk."
+            "GLORYS subchunking (on by default) requires the 'kerchunk', 'ujson', "
+            "and 'fastparquet' packages. They are declared as forge dependencies, "
+            "so an environment missing them predates that change: install them "
+            "(e.g. `conda install -c conda-forge kerchunk ujson fastparquet`), or "
+            "rerun with --no-subchunk."
         ) from e
 
 
@@ -244,7 +244,7 @@ def build_subchunk_refs(
     Raises
     ------
     ImportError
-        If the interim subchunking dependencies (kerchunk, ujson, nest_asyncio) are
+        If the interim subchunking dependencies (kerchunk, ujson, fastparquet) are
         not installed.
     FileNotFoundError
         If ``input_files`` matches no files.
@@ -254,9 +254,6 @@ def build_subchunk_refs(
         per-file time encodings with mismatched reference dates.
     """
     _require_subchunk_deps()
-    import nest_asyncio
-
-    nest_asyncio.apply()
 
     if isinstance(input_files, str):
         files = sorted(glob.glob(input_files))
@@ -277,17 +274,25 @@ def build_subchunk_refs(
         with xr.open_dataset(files[0]) as ds:
             depth_factor = ds.sizes["depth"]
 
-    result = _run(
-        files=files,
-        out=out,
-        output_format=output_format,
-        data_vars_4d=list(data_vars_4d),
-        concat_dim=concat_dim,
-        identical_dims=list(identical_dims),
-        inline_threshold=inline_threshold,
-        depth_factor=depth_factor,
-        lat_factor=lat_factor,
-    )
+    # kerchunk's MultiZarrToZarr calls asyncio.run() itself, which raises inside a
+    # running event loop -- and a forge step runs inline on `cstar blueprint run`'s
+    # loop (see ForgeRunner.run). A fresh worker thread has no running loop, so the
+    # build runs there rather than patching asyncio process-wide with nest_asyncio
+    # (which breaks asyncio's current-task tracking on Python 3.14). An interrupt
+    # during the build waits for it to finish.
+    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+        result = pool.submit(
+            _run,
+            files=files,
+            out=out,
+            output_format=output_format,
+            data_vars_4d=list(data_vars_4d),
+            concat_dim=concat_dim,
+            identical_dims=list(identical_dims),
+            inline_threshold=inline_threshold,
+            depth_factor=depth_factor,
+            lat_factor=lat_factor,
+        ).result()
 
     if output_format != "in-memory" and len(files) > 1:
         with open_subchunk_ref(out) as check_ds:
