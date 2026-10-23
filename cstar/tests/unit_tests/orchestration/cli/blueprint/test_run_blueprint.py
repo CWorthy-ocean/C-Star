@@ -46,6 +46,7 @@ from cstar.orchestration.manifest import (
     RUN_MANIFEST_NAME,
     STEP_RECORD_NAME,
     AttemptStatus,
+    StepRecord,
     read_run_manifest,
     read_step_record,
 )
@@ -776,6 +777,103 @@ def test_blueprint_run_deferred_blueprint_unresolvable(
 
     assert result.exit_code == 1
     assert "Unable to resolve deferred blueprint" in result.stdout
+
+
+def _write_newer_step_record(step_root: Path) -> None:
+    """Write a step record stamped with a schema major newer than this build reads."""
+    current = StepRecord.model_fields["schema_version"].default
+    newer = f"{int(current.split('.')[0]) + 1}.0.0"
+    step_root.mkdir(parents=True, exist_ok=True)
+    (step_root / STEP_RECORD_NAME).write_text(f"schema_version: {newer}\n")
+
+
+def _assert_refused_for_upgrade(result: t.Any) -> None:
+    """Assert the CLI refused the input with the upgrade guidance, not a traceback."""
+    assert isinstance(result.exception, SystemExit), result.exception
+    assert result.exit_code == 1
+    assert "Upgrade cstar-ocean" in result.stdout
+
+
+def test_blueprint_run_deferred_blueprint_newer_record_refused(
+    tmp_path: Path,
+) -> None:
+    """A deferred blueprint whose producer's record was written by a newer
+    cstar is refused with the upgrade guidance, not a traceback.
+    """
+    producer = LiveStep(
+        name="producer",
+        application="hello_world",
+        blueprint=(tmp_path / "unused.yaml").as_posix(),
+        working_dir=tmp_path / "producer",
+    )
+    producer.fsm.output_dir.mkdir(parents=True, exist_ok=True)
+    _write_newer_step_record(producer.fsm.root_dir)
+
+    live_plan = LiveWorkplan(
+        name="deferred-run",
+        description="a live workplan providing producer-step context",
+        steps=[producer],
+    )
+
+    with mock.patch(
+        "cstar.orchestration.transforms.DirectiveConfig.load_workplan",
+        mock.Mock(return_value=live_plan),
+    ):
+        result = CliRunner().invoke(app, ["step://producer"], color=False)
+
+    _assert_refused_for_upgrade(result)
+    assert "Unable to resolve deferred blueprint" in result.stdout
+
+
+def test_blueprint_run_directive_newer_record_refused(
+    tmp_path: Path,
+    package_path: Path,
+    mock_run_id: str,
+) -> None:
+    """A `continue-from` directive whose source step's record was written by a
+    newer cstar is refused with the upgrade guidance, not a traceback, and the
+    runner never starts.
+    """
+    bp_path = str(package_path / "docs/tutorials/wales_toy_blueprint.yaml")
+    producer = LiveStep(
+        name="producer",
+        application=Application.ROMS_MARBL.value,
+        blueprint=bp_path,
+        working_dir=tmp_path / "producer",
+    )
+    _write_newer_step_record(producer.fsm.root_dir)
+
+    consumer = LiveStep(
+        name="consumer",
+        application=Application.ROMS_MARBL.value,
+        blueprint=bp_path,
+        working_dir=tmp_path / "consumer",
+        depends_on=["producer"],
+        directives={"continue-from": {"step": "producer"}},
+    )
+    directive_path = prepare_directive_file(consumer)
+
+    live_plan = LiveWorkplan(
+        name="continue-run",
+        description="a live workplan providing source-step context",
+        steps=[producer, consumer],
+    )
+
+    with (
+        mock.patch(
+            "cstar.orchestration.transforms.DirectiveConfig.load_workplan",
+            mock.Mock(return_value=live_plan),
+        ),
+        mock.patch.object(RomsMarblRunner, "execute", mock.AsyncMock()) as mock_exec,
+    ):
+        result = CliRunner().invoke(
+            app,
+            [bp_path, ARG_DIRECTIVES_URI_LONG, directive_path.as_posix()],
+            color=False,
+        )
+
+    _assert_refused_for_upgrade(result)
+    mock_exec.assert_not_called()
 
 
 def test_blueprint_run_resume_non_resumable_app_fails_fast(

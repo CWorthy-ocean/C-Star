@@ -42,7 +42,6 @@ from cstar.orchestration.manifest import (
 from cstar.orchestration.orchestration import LiveWorkplan
 from cstar.orchestration.serialization import model_to_yaml
 from cstar.orchestration.tracking import WorkplanRun
-from cstar.system.migration import CstarSchemaTooNewError
 
 log = get_logger(__name__)
 app = typer.Typer()
@@ -322,7 +321,7 @@ def _read_manifest(resolved: ShowTarget) -> RunManifest:
     """
     try:
         manifest = read_run_manifest(resolved.root)
-    except (CstarError, CstarSchemaTooNewError) as ex:
+    except CstarError as ex:
         typer.echo(str(ex), err=True)
         raise typer.Exit(1) from ex
 

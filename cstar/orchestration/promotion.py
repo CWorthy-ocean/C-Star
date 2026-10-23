@@ -29,7 +29,6 @@ from cstar.orchestration.manifest import (
     read_run_manifest,
 )
 from cstar.orchestration.run_check import TRANSFORMED_WORKPLAN_GLOB
-from cstar.system.migration import CstarSchemaTooNewError
 
 if t.TYPE_CHECKING:
     from collections.abc import Collection, Iterable, Iterator, Mapping
@@ -475,7 +474,7 @@ def destination_state(destination: Path, *, uuid: str) -> DestinationState:
 
     try:
         found = read_run_manifest(destination)
-    except (CstarError, CstarSchemaTooNewError, OSError):
+    except (CstarError, OSError):
         found = None
     if found is None:
         return DestinationState.occupied

@@ -308,7 +308,11 @@ def run(
         raise typer.Exit(code=1)
 
     if directive_uri:
-        uri = DirectiveConfig.apply_directives(directive_uri, uri)
+        try:
+            uri = DirectiveConfig.apply_directives(directive_uri, uri)
+        except CstarError as ex:
+            print(f"Unable to apply directives: {ex}")
+            raise typer.Exit(code=1) from ex
 
     request = RunnerRequest(
         uri, app_config.blueprint, resume=resume, pre_run=pre_run, step=step
