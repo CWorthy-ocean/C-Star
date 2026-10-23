@@ -1670,6 +1670,53 @@ class TestProcessingAndExecution:
         assert mock_additionalcode_get.call_count == 2
         assert mock_inputdataset_get.call_count == 10
 
+    @pytest.mark.parametrize("clobber", [False, True])
+    @mock.patch.object(ROMSInputDataset, "get")
+    @mock.patch.object(AdditionalCode, "get")
+    @mock.patch.object(ExternalCodeBase, "setup")
+    def test_setup_clears_working_directory_only_when_clobbering(
+        self,
+        mock_externalcodebase_setup: mock.Mock,
+        mock_additionalcode_get: mock.Mock,
+        mock_inputdataset_get: mock.Mock,
+        stub_romssimulation: ROMSSimulation,
+        clobber: bool,
+    ) -> None:
+        """Tests that `setup` empties the working directory only when asked to.
+
+        Parameters
+        ----------
+        clobber : bool
+            The value passed to `setup`.
+        """
+        sim = stub_romssimulation
+
+        with mock.patch.object(sim.fs_manager, "clear") as mock_clear:
+            sim.setup(clobber=clobber)
+
+        assert mock_clear.call_count == int(clobber)
+
+    @mock.patch.object(ROMSInputDataset, "get")
+    @mock.patch.object(AdditionalCode, "get")
+    @mock.patch.object(ExternalCodeBase, "setup")
+    def test_setup_into_populated_directory_requires_clobber(
+        self,
+        mock_externalcodebase_setup: mock.Mock,
+        mock_additionalcode_get: mock.Mock,
+        mock_inputdataset_get: mock.Mock,
+        stub_romssimulation: ROMSSimulation,
+    ) -> None:
+        """Tests that `setup` refuses an already-staged directory and names
+        `--clobber` as the way to continue, and that clobbering then succeeds.
+        """
+        sim = stub_romssimulation
+        sim.setup()
+
+        with pytest.raises(CstarExpectationFailed, match="Re-run with --clobber"):
+            sim.setup()
+
+        sim.setup(clobber=True)
+
     @mock.patch.object(ROMSSimulation, "build")
     @mock.patch.object(ROMSInputDataset, "get")
     @mock.patch.object(AdditionalCode, "get")

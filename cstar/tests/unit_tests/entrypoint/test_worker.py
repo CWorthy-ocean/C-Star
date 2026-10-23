@@ -27,6 +27,7 @@ from cstar.entrypoint.runner import (
     create_parser,
 )
 from cstar.entrypoint.utils import (
+    ARG_CLOBBER,
     ARG_DIRECTIVES_URI_LONG,
     ARG_LOGLEVEL_LONG,
     ARG_LOGLEVEL_SHORT,
@@ -198,6 +199,21 @@ def test_create_parser_accepts_pre_run_flag() -> None:
 
     parsed_pre_run = parser.parse_args([ARG_URI_LONG, "blueprint.yaml", ARG_PRE_RUN])
     assert parsed_pre_run.pre_run is True
+
+
+def test_create_parser_accepts_clobber_flag() -> None:
+    """Verify the parser accepts `--clobber` as a boolean flag, defaulting to
+    `False` when omitted.
+    """
+    parser = create_parser()
+
+    assert ARG_CLOBBER in parser._option_string_actions
+
+    parsed_default = parser.parse_args([ARG_URI_LONG, "blueprint.yaml"])
+    assert parsed_default.clobber is False
+
+    parsed_clobber = parser.parse_args([ARG_URI_LONG, "blueprint.yaml", ARG_CLOBBER])
+    assert parsed_clobber.clobber is True
 
 
 def test_runner_request_rejects_resume_with_pre_run() -> None:
@@ -770,6 +786,37 @@ async def test_runner_on_start_resume_attaches_instead_of_setup(
     mock_simulation.build.assert_not_called()
     mock_simulation.pre_run.assert_not_called()
     mock_simulation.run.assert_called_once()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("clobber", [False, True])
+async def test_runner_on_start_passes_clobber_to_setup(
+    sim_runner: RomsMarblRunner,
+    clobber: bool,
+) -> None:
+    """The runner stages the simulation with the clobber choice of its request.
+
+    Parameters
+    ----------
+    sim_runner : RomsMarblRunner
+        A runner whose simulation is replaced for the test.
+    clobber : bool
+        The value of `clobber` on the request.
+    """
+    mock_handler = mock.Mock(spec=ExecutionHandler, status=ExecutionStatus.COMPLETED)
+    mock_simulation = mock.Mock(
+        run=mock.Mock(return_value=mock_handler), initial_conditions=None
+    )
+    sim_runner.request.clobber = clobber
+
+    with (
+        mock.patch.object(sim_runner, "_on_shutdown", mock.Mock()),
+        mock.patch.object(sim_runner, "run", mock.AsyncMock()),
+        mock.patch.object(sim_runner, "simulation", mock_simulation),
+    ):
+        await sim_runner.execute()
+
+    mock_simulation.setup.assert_called_once_with(clobber=clobber)
 
 
 @pytest.mark.asyncio

@@ -14,13 +14,13 @@ from typer.testing import CliRunner
 from cstar.applications.core import get_application
 from cstar.applications.hello_world import HelloWorldApplication
 from cstar.base.env import (
-    ENV_CSTAR_CLI_DRY_RUN,
     ENV_CSTAR_DATA_HOME,
     ENV_CSTAR_DISABLE_MIGRATION,
     ENV_CSTAR_LOG_LEVEL,
     ENV_CSTAR_RUNID,
     ENV_CSTAR_STATE_HOME,
     FLAG_ON,
+    REMOVED_SETTINGS,
 )
 from cstar.base.exceptions import CstarExpectationFailed
 from cstar.cli.common import normalize_runid
@@ -2878,25 +2878,27 @@ def test_workplan_run_pre_run_requires_workplan_path() -> None:
     mock_reload.assert_not_awaited()
 
 
-def test_workplan_run_rejects_ambient_dry_run_env(
+def test_workplan_run_refuses_a_removed_dry_run_setting(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Verify an exported `CSTAR_CLI_DRY_RUN` fails loudly: the plan-only mode
-    it used to request no longer exists, so silently running for real would
-    stage data and submit jobs the user did not ask for.
+    """Verify `workplan run` exits 2 without reloading or launching anything
+    while a removed setting that used to request a plan-only run is exported.
+
+    Parameters
+    ----------
+    monkeypatch : pytest.MonkeyPatch
+        Fixture used to export the setting.
     """
-    monkeypatch.setenv(ENV_CSTAR_CLI_DRY_RUN, FLAG_ON)
+    name = next(n for n, removed in REMOVED_SETTINGS.items() if removed.refused)
+    monkeypatch.setenv(name, FLAG_ON)
 
     with mock.patch(
         "cstar.cli.workplan.run.handle_run_reloading", mock.AsyncMock()
     ) as mock_reload:
-        runner = CliRunner()
-        result = runner.invoke(app, ["--run-id", "12345"], color=False)
+        result = CliRunner().invoke(app, ["--run-id", "12345"], color=False)
 
-    output = " ".join(result.output.replace("│", " ").split())
     assert result.exit_code == 2
-    assert ENV_CSTAR_CLI_DRY_RUN in output
-    assert "workplan check" in output
+    assert name in result.stderr
     mock_reload.assert_not_awaited()
 
 
@@ -3178,6 +3180,7 @@ def test_workplan_run_derived_run_id_refused_without_a_backup_to_compare(
 def test_workplan_run_derived_run_id_compared_with_the_carried_workplan(
     tmp_path: Path,
     wp_templates_dir: Path,
+    flatten_cli_output: Callable[[str], str],
 ) -> None:
     """Verify a derived run-id is compared with the workplan the latest preparing
     attempt carried: the same workplan by another path re-enters the run, a
@@ -3209,7 +3212,7 @@ def test_workplan_run_derived_run_id_compared_with_the_carried_workplan(
     assert serialize(carried, other)
     result, mock_build_and_run_dag = invoke()
     assert result.exit_code == 2
-    assert "its content differs" in result.output
+    assert "its content differs" in flatten_cli_output(result.output)
     mock_build_and_run_dag.assert_not_awaited()
 
 
@@ -3703,6 +3706,35 @@ def test_reload_warns_once_about_settings_that_differ(
     assert "CSTAR_RECORDED_ONLY (now None, recorded 'yes')" in warnings[0]
     assert ENV_CSTAR_DATA_HOME not in warnings[0]
     assert ENV_CSTAR_RUNID not in warnings[0]
+
+
+def test_reload_skips_removed_settings(
+    tmp_path: Path, mock_run_id: str, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Verify a reload does not re-export a recorded setting this build no longer
+    reads, nor list it among the differing settings, while it still re-exports
+    an ordinary recorded setting.
+    """
+    removed = next(iter(REMOVED_SETTINGS))
+    _record_run_with_environment(
+        tmp_path,
+        mock_run_id,
+        {removed: FLAG_ON, ENV_CSTAR_LOG_LEVEL: "TRACE"},
+    )
+
+    with mock.patch.dict(os.environ, {ENV_CSTAR_LOG_LEVEL: "INFO"}):
+        os.environ.pop(removed, None)
+
+        with caplog.at_level("WARNING"):
+            asyncio.run(handle_run_reloading(mock_run_id))
+
+        assert removed not in os.environ
+        assert os.environ[ENV_CSTAR_LOG_LEVEL] == "TRACE"
+
+    warnings = [r.getMessage() for r in caplog.records if r.levelname == "WARNING"]
+    assert len(warnings) == 1
+    assert ENV_CSTAR_LOG_LEVEL in warnings[0]
+    assert removed not in warnings[0]
 
 
 def test_reload_is_quiet_when_the_environment_matches(

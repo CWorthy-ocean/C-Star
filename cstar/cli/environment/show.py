@@ -82,7 +82,7 @@ class DisplayFormat(StrEnum):
     """Display a series of export statements."""
 
 
-ALL_GROUPS = t.Literal["all", "flags", "file", "orch", "sim", "dev"]
+ALL_GROUPS = t.Literal["all", "flags", "file", "orch", "sim", "dev", "internal"]
 
 
 @app.command(name="show", help="Display the active environment configuration.")
@@ -92,7 +92,10 @@ def show(
         typer.Option(
             "-g",
             "--group",
-            help="Specify a group key to retrieve a subset of available configuration.",
+            help=(
+                "Specify a group key to retrieve a subset of available configuration. "
+                "'all' omits the internal group, which C-Star sets for its own processes."
+            ),
         ),
     ] = "all",
     display: t.Annotated[
@@ -104,8 +107,16 @@ def show(
         ),
     ] = DisplayFormat.INTERACTIVE,
 ) -> None:
-    """Display the active environment configuration."""
-    group_map = env_var_groups()
+    """Display the active environment configuration.
+
+    The internal group is shown only when requested by name, and never as
+    export statements: C-Star sets those variables for its own processes.
+    """
+    if group == "internal" and display == DisplayFormat.EXPORT:
+        print("[bold red]The internal group is never exported[/bold red]")
+        return
+
+    group_map = env_var_groups(include_internal=group == "internal")
 
     if group != "all":
         group_map = {k: v for k, v in group_map.items() if group in k.lower()}

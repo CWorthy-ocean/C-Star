@@ -7,16 +7,6 @@ _GROUP_ORCH: t.Final[str] = "Orchestration"
 _GROUP_DEV: t.Final[str] = "Developer Only"
 
 
-ENV_CSTAR_ORCH_DELAYS: t.Annotated[
-    t.Literal["CSTAR_ORCH_DELAYS"],
-    EnvVar(
-        "Configurable delay for the orchestrator (seconds).",
-        _GROUP_ORCH,
-        "0.1, 1, 2, 5, 15, 30, 60",
-    ),
-] = "CSTAR_ORCH_DELAYS"
-"""Environment variable containing configurable delay for the orchestrator."""
-
 ENV_CSTAR_ORCH_TRX_FREQ: t.Annotated[
     t.Literal["CSTAR_ORCH_TRX_FREQ"],
     EnvVar(

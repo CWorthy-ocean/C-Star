@@ -39,18 +39,9 @@ from cstar.applications.roms_marbl.file_system import (
 from cstar.applications.roms_marbl.models import RomsMarblBlueprint
 from cstar.applications.roms_marbl.outputs import EXTRACT_ROOT_NAME, OUTPUT_ROOT_NAME
 from cstar.base.additional_code import AdditionalCode
-from cstar.base.env import (
-    ENV_CSTAR_CLOBBER_WORKING_DIR,
-    ENV_CSTAR_NPROCS_POST,
-    FLAG_ON,
-    get_env_item,
-)
+from cstar.base.env import ENV_CSTAR_NPROCS_POST, get_env_item
 from cstar.base.exceptions import CstarExpectationFailed
-from cstar.base.feature import (
-    ENV_FF_DEBUG_BUILD_MODE,
-    is_feature_enabled,
-    is_flag_enabled,
-)
+from cstar.base.feature import ENV_FF_DEBUG_BUILD_MODE, is_feature_enabled
 from cstar.base.utils import (
     _dict_to_tree,
     _get_sha256_hash,
@@ -58,6 +49,7 @@ from cstar.base.utils import (
     deep_merge,
     slugify,
 )
+from cstar.entrypoint.utils import ARG_CLOBBER
 from cstar.execution.file_system import (
     is_remote_resource,
     remove_files,
@@ -674,10 +666,6 @@ class ROMSSimulation(Simulation):
     def fs_manager(self) -> RomsFileSystemManager:
         """Return the file system manager for the simulation."""
         return cast("RomsFileSystemManager", self._fs_manager)
-
-    def _conditionally_clear_root(self):
-        if is_flag_enabled(ENV_CSTAR_CLOBBER_WORKING_DIR):
-            self.fs_manager.clear()
 
     @property
     def default_codebase(self) -> ROMSExternalCodeBase:
@@ -1456,9 +1444,7 @@ class ROMSSimulation(Simulation):
         print_dict["ROMS"] = simulation_tree_dict
         return f"{self.directory}\n{_dict_to_tree(print_dict)}"
 
-    def setup(
-        self,
-    ) -> None:
+    def setup(self, clobber: bool = False) -> None:
         """Prepare this ROMSSimulation locally by fetching necessary files and compiling
         any external codebases.
 
@@ -1471,6 +1457,12 @@ class ROMSSimulation(Simulation):
         2. Fetches and organizes compile-time code.
         3. Fetches and organizes runtime code (e.g., namelists).
         4. Fetches and prepares input datasets.
+
+        Parameters
+        ----------
+        clobber : bool
+            Empty the working directory first, so a prior attempt's files are not
+            reused.
 
         Raises
         ------
@@ -1496,7 +1488,8 @@ class ROMSSimulation(Simulation):
         input_datasets_dir = self.fs_manager.input_datasets_dir
         run_dir = self.fs_manager.run_dir
 
-        self._conditionally_clear_root()
+        if clobber:
+            self.fs_manager.clear()
 
         try:
             compile_time_code_dir.mkdir(parents=True)
@@ -1507,7 +1500,7 @@ class ROMSSimulation(Simulation):
             )  # this one gets made by C-Star FSM
         except OSError as e:
             msg = (
-                f"The input directory is not empty. Re-run with {ENV_CSTAR_CLOBBER_WORKING_DIR}={FLAG_ON} "
+                f"The input directory is not empty. Re-run with {ARG_CLOBBER} "
                 "to delete the directory and continue."
             )
             raise CstarExpectationFailed(msg) from e
@@ -1517,13 +1510,6 @@ class ROMSSimulation(Simulation):
         for codebase in (x for x in self.codebases if x is not None):
             self.log.info(f"🔧 Setting up {codebase.__class__.__name__}...")
             codebase_dir = self.fs_manager.codebase_subdir(codebase.key)
-
-            # if we're running a workplan, for now, set up a code directory for each
-            # step, otherwise they may try to clobber each other or get tripped up on
-            # detecting existing directories.
-            if os.getenv("CSTAR_FRESH_CODEBASES", "0") == "1" and codebase_dir.exists():
-                shutil.rmtree(codebase_dir)
-
             codebase_dir.mkdir(parents=True, exist_ok=True)
             codebase.setup(codebase_dir)
             os.environ[codebase.root_env_var] = str(codebase_dir)

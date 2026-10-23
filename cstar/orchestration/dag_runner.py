@@ -1,10 +1,9 @@
 import asyncio
 import functools
-import os
 import shutil
 import typing as t
 from collections import OrderedDict
-from collections.abc import Generator, Iterable, Mapping, Sequence
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from itertools import cycle
 from pathlib import Path
@@ -13,16 +12,10 @@ from urllib.parse import urlsplit
 from pydantic import BaseModel, Field, computed_field
 
 from cstar.applications.core import get_application
-from cstar.base.env import (
-    ENV_CSTAR_CLOBBER_WORKING_DIR,
-    FLAG_OFF,
-    capture_environment,
-    max_concurrency,
-    unset,
-)
+from cstar.base.env import capture_environment
 from cstar.base.exceptions import CstarError, CstarExpectationFailed
 from cstar.base.log import get_logger
-from cstar.base.utils import slugify, utc_now
+from cstar.base.utils import MAX_CONCURRENCY, slugify, utc_now
 from cstar.entrypoint.utils import ARG_CLOBBER, ARG_PRE_RUN, ARG_RUN_ID
 from cstar.execution.file_system import (
     StateDirectoryManager,
@@ -104,7 +97,6 @@ from cstar.orchestration.transforms import (
     materialize_inline_blueprints,
     resolve_external_runs,
 )
-from cstar.orchestration.utils import ENV_CSTAR_ORCH_DELAYS
 from cstar.system.manager import get_sysmgr
 from cstar.system.migration import CstarSchemaTooNewError
 
@@ -112,6 +104,9 @@ if t.TYPE_CHECKING:
     from datetime import datetime
 
 log = get_logger(__name__)
+
+POLL_DELAYS: t.Final[tuple[float, ...]] = (0.1, 1, 2, 5, 15, 30, 60)
+"""Seconds between orchestrator polls, cycled; restarts whenever a step changes state."""
 
 
 @dataclass
@@ -335,25 +330,6 @@ def get_orchestrator(planner: Planner, *, root: Path) -> Orchestrator:
     return orchestrator
 
 
-def incremental_delays() -> Generator[float, None, None]:
-    """Return a value from an infinite cycle of incremental delays.
-
-    Returns
-    -------
-    Generator[float]
-    """
-    delays: list[float] = [0.1, 1, 2, 5, 15, 30, 60]
-
-    if custom_delays := os.getenv(ENV_CSTAR_ORCH_DELAYS, ""):
-        try:
-            delays = [float(d) for d in custom_delays.split(",")]
-        except ValueError:
-            log.warning(f"Malformed delay provided: {custom_delays}. Using defaults.")
-
-    delay_cycle = cycle(delays)
-    yield from delay_cycle
-
-
 async def load_run_state(
     run_id: str,
     launcher: Launcher[ProcessHandle],
@@ -378,7 +354,7 @@ async def load_run_state(
     updates = await asyncio.gather(*map(launcher.update_status, sentinels))
     changes = [h for (is_updated, h) in updates if is_updated]
 
-    sem = asyncio.Semaphore(max_concurrency())
+    sem = asyncio.Semaphore(MAX_CONCURRENCY)
 
     async def _bounded_status_changed(handle: ProcessHandle) -> None:
         async with sem:
@@ -470,7 +446,7 @@ async def process_plan(orchestrator: Orchestrator) -> DagStatus:
     """
     closed_set = orchestrator.get_closed_nodes()
     open_set = orchestrator.get_open_nodes()
-    delay_iter = iter(incremental_delays())
+    delay_iter = cycle(POLL_DELAYS)
 
     while open_set is not None:
         await orchestrator.run()
@@ -480,7 +456,7 @@ async def process_plan(orchestrator: Orchestrator) -> DagStatus:
 
         if curr_closed != closed_set or open_set != curr_open:
             # reset to initial delay when a task is found or completed
-            delay_iter = iter(incremental_delays())
+            delay_iter = cycle(POLL_DELAYS)
 
         open_set = curr_open
         closed_set = curr_closed
@@ -954,28 +930,6 @@ class ExecutiveRunSummary(BaseModel):
             final_workplan=str(run.trx_workplan_path),
             steps=step_summaries,
         )
-
-
-def _ignore_ambient_clobber_env() -> None:
-    """Drop ``CSTAR_CLOBBER_WORKING_DIR`` from the workplan process environment.
-
-    The variable remains a blueprint-level control (``cstar blueprint run
-    --clobber`` sets it for a single simulation), but workplan runs select
-    steps to clobber with ``--clobber <step|all>``. An exported value would be
-    inherited by every step subprocess and silently clobber all of them,
-    bypassing that selection -- and it also carries a different meaning for
-    blueprint migration, so it is scrubbed from the whole run deliberately.
-    Called before the environment is configured and captured into the run
-    record; warns when the value would have had an effect.
-    """
-    value = unset(ENV_CSTAR_CLOBBER_WORKING_DIR)
-    if value is not None and value != FLAG_OFF:
-        msg = (
-            f"{ENV_CSTAR_CLOBBER_WORKING_DIR} is set but is ignored by workplan "
-            "runs; select the steps to clear and re-run explicitly instead "
-            "(`--clobber <step-name|all>` on the command line)."
-        )
-        log.warning(msg)
 
 
 def check_clobber_targets(wp: Workplan, clobber_steps: "Sequence[str]") -> list[str]:
@@ -1484,7 +1438,6 @@ async def build_dag(
     if run_id:
         run_id = slugify(run_id)
 
-    _ignore_ambient_clobber_env()
     configure_environment(run_id=run_id)
     output_dir = StateDirectoryManager.data_dir(run_id)
 

@@ -17,6 +17,7 @@ from pathlib import Path
 import yaml
 
 import cstar
+from cstar.base.env import ENV_CSTAR_RUNID, REMOVED_SETTINGS
 from cstar.base.utils import slugify
 
 if t.TYPE_CHECKING:
@@ -75,11 +76,8 @@ def make_cli_env(root: Path, shim: Path) -> dict[str, str]:
         interpreter's ``bin`` first on ``PATH``, and ``CONDA_PREFIX`` defaulted to
         ``sys.prefix`` (the system env files expand ``${CONDA_PREFIX}``).
     """
-    env = {
-        k: v
-        for k, v in os.environ.items()
-        if k not in {"CSTAR_RUNID", "CSTAR_CLOBBER_WORKING_DIR"}
-    }
+    ignored = {ENV_CSTAR_RUNID, *REMOVED_SETTINGS}
+    env = {k: v for k, v in os.environ.items() if k not in ignored}
     env_bin = str(Path(sys.prefix) / "bin")
     env.setdefault("CONDA_PREFIX", sys.prefix)
     env.update(
@@ -87,7 +85,6 @@ def make_cli_env(root: Path, shim: Path) -> dict[str, str]:
         CSTAR_STATE_HOME=str(root / "state"),
         CSTAR_CACHE_HOME=str(root / "cache"),
         CSTAR_CONFIG_HOME=str(root / "config"),
-        CSTAR_ORCH_LOCAL_DELAY="1",
         PATH=os.pathsep.join([str(shim.parent), env_bin, os.environ["PATH"]]),
         PYTHONPATH=str(REPO_ROOT),
     )

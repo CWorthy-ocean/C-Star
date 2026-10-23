@@ -23,7 +23,6 @@ from cstar.base.env import (
     ENV_CSTAR_CACHE_HOME,
     ENV_CSTAR_CONFIG_HOME,
     ENV_CSTAR_DATA_HOME,
-    ENV_CSTAR_ORCH_LOCAL_DELAY,
     ENV_CSTAR_PROJECT_HOME,
     ENV_CSTAR_RUNID,
     ENV_CSTAR_STATE_HOME,
@@ -2457,13 +2456,15 @@ def mock_xdg_dirs(tmp_path: Path) -> Generator[dict[str, Path]]:
 
 
 @pytest.fixture(autouse=True)
-def mock_local_delay() -> float:
+def mock_local_delay(monkeypatch: pytest.MonkeyPatch) -> float:
     """Set a tiny delay between status queries made by the local launcher during unit tests.
 
     NOTE: Allowing a "normal" delay may result in unit tests taking an excessive amount of time.
     """
     delay = 0.1
-    os.environ[ENV_CSTAR_ORCH_LOCAL_DELAY] = str(delay)
+    monkeypatch.setattr(
+        "cstar.orchestration.launch.local.PROXY_POLL_DELAY", delay, raising=True
+    )
     return delay
 
 

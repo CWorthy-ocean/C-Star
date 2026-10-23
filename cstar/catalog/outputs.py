@@ -210,7 +210,7 @@ async def _run_candidates(application: str) -> list[_Candidate]:
     """Find the blueprint files in the output directories of the ``application``
     steps of every tracked workplan run, in run-id order.
     """
-    from cstar.base.env import max_concurrency
+    from cstar.base.utils import MAX_CONCURRENCY
     from cstar.orchestration.orchestration import LiveWorkplan
     from cstar.orchestration.tracking import TrackingRepository
 
@@ -218,7 +218,7 @@ async def _run_candidates(application: str) -> list[_Candidate]:
         await TrackingRepository().list_latest_runs(), key=lambda run: run.run_id
     )
     workplans = await LiveWorkplan.load_all(
-        [run.trx_workplan_path for run in runs], max_concurrency()
+        [run.trx_workplan_path for run in runs], MAX_CONCURRENCY
     )
 
     # Listing each step's directory blocks, so it runs off the event loop.

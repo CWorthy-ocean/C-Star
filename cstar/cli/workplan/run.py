@@ -10,19 +10,19 @@ from click.core import ParameterSource
 from pydantic import BaseModel, ValidationError
 
 from cstar.base.env import (
-    ENV_CSTAR_CLI_DRY_RUN,
     ENV_CSTAR_DATA_HOME,
     ENV_CSTAR_LOG_LEVEL,
     ENV_CSTAR_RUNID,
     ENV_CSTAR_STATE_HOME,
+    REMOVED_SETTINGS,
 )
 from cstar.base.exceptions import CstarError, CstarExpectationFailed
-from cstar.base.feature import is_flag_enabled
 from cstar.base.log import LogLevelChoices, get_logger
 from cstar.base.utils import slugify
 from cstar.cli.common import (
     SCHEMA_ERRORS,
     cb_pipeline,
+    exit_on_refused_settings,
     format_validation_errors,
     localize_and_migrate,
     normalize_runid,
@@ -688,11 +688,12 @@ async def handle_run_reloading(run_id: str) -> WorkplanRun:
         )
         raise typer.BadParameter(msg)
 
-    # ensure the environment matches the prior run
+    # ensure the environment matches the prior run; a setting this build no
+    # longer reads is left out rather than re-exported to every step
     recorded = {
         name: value
         for name, value in wp_run.environment.items()
-        if name not in RELOCATABLE_HOMES
+        if name not in RELOCATABLE_HOMES and name not in REMOVED_SETTINGS
     }
     differing = {
         name: value for name, value in recorded.items() if os.environ.get(name) != value
@@ -892,6 +893,8 @@ def run(
 
     Specify a previously used run_id option to re-start a prior run.
     """
+    exit_on_refused_settings()
+
     if user_variables and user_variables_path is not None:
         msg = "`--var` and `--varfile` must not be supplied together"
         raise typer.BadParameter(msg)
@@ -915,13 +918,6 @@ def run(
                 (
                     f"{ARG_PRE_RUN} needs the authored workplan, not its transformed "
                     "copy, which replays the recorded plan as-is"
-                ),
-            ),
-            (
-                is_flag_enabled(ENV_CSTAR_CLI_DRY_RUN),
-                (
-                    f"{ENV_CSTAR_CLI_DRY_RUN} is set, but `workplan run` no longer "
-                    "has a plan-only mode; unset it, or use `cstar workplan check`"
                 ),
             ),
             (

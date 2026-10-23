@@ -13,9 +13,10 @@ from cstar.applications.core import (
     RunnerRequest,
     get_application,
 )
-from cstar.base.env import ENV_CSTAR_RUNID, max_concurrency
+from cstar.base.env import ENV_CSTAR_RUNID
 from cstar.base.exceptions import CstarError
 from cstar.base.log import get_logger
+from cstar.base.utils import MAX_CONCURRENCY
 from cstar.cli.common import (
     cb_pipeline,
     checkmark,
@@ -87,7 +88,7 @@ def list_runs(incomplete: str = "") -> list[tuple[str, str]]:
 
     async def _bounded() -> Sequence[WorkplanRun]:
         """Retrieve the run list while limiting concurrent reads."""
-        async with TrackingRepository.bound(max_concurrency()) as repo:
+        async with TrackingRepository.bound(MAX_CONCURRENCY) as repo:
             return await repo.list_latest_runs(incomplete)
 
     run_list = asyncio.run(_bounded())
@@ -825,8 +826,7 @@ async def load_workplans(
         The cached copy of loaded workplans, keyed on their file path;
         updated in place with the successfully loaded workplans.
     """
-    limit = max_concurrency()
-    workplans = await LiveWorkplan.load_all(paths, limit=limit)
+    workplans = await LiveWorkplan.load_all(paths, limit=MAX_CONCURRENCY)
 
     failed: list[Path] = []
     for path, wp in zip(paths, workplans):
@@ -857,7 +857,7 @@ async def refresh_disk_usage(
     plans : Mapping[Path, LiveWorkplan]
         Loaded workplans, keyed on their transformed workplan path.
     """
-    sem = asyncio.Semaphore(max_concurrency())
+    sem = asyncio.Semaphore(MAX_CONCURRENCY)
     by_id = {run.run_id: run for run in runs}
     step_dirs_by_run: dict[str, Mapping[str, Path]] = {}
     fallback: list[str] = []
@@ -905,7 +905,7 @@ async def refresh_disk_usage(
 
     # apply under each run's lock so a concurrently running orchestrator's
     # sentinel/size updates are not overwritten
-    async with TrackingRepository.bound(max_concurrency()) as repo:
+    async with TrackingRepository.bound(MAX_CONCURRENCY) as repo:
         await asyncio.gather(
             *(
                 repo.update_workplan_run(

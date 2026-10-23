@@ -12,10 +12,6 @@ from pathlib import Path
 if t.TYPE_CHECKING:
     from types import ModuleType
 
-import logging
-
-log = logging.getLogger(__name__)
-
 GROUP_FF: t.Final[str] = "Feature Flags"
 """Group name for feature flag environment variables in documentation."""
 GROUP_FS: t.Final[str] = "File System Configuration"
@@ -24,6 +20,8 @@ GROUP_SIM: t.Final[str] = "Simulation Configuration"
 """Group name for simulation-specific environment variables in documentation."""
 GROUP_UNK: t.Final[str] = "Uncategorized Configuration"
 """Group name for uncategorized environment variables in documentation."""
+GROUP_INTERNAL: t.Final[str] = "Internal"
+"""Group name for variables C-Star sets for its own processes; hidden from users."""
 
 FLAG_ON: t.Final[str] = "1"
 """Value indicating a toggle is enabled."""
@@ -52,6 +50,8 @@ class EnvVar:
     """A function used at run-time to generate the default value."""
     indirect_var: str = ""
     """An environment variable name to be used when the primary variable is not set."""
+    persistable: bool = True
+    """Whether the setting may be stored in the user's configuration file."""
 
 
 @dataclass(slots=True)
@@ -77,12 +77,13 @@ class EnvItem(EnvVar):
     @classmethod
     def from_env_var(cls, env_var: EnvVar, name: str) -> "EnvItem":
         return EnvItem(
-            env_var.description,
-            env_var.group,
-            env_var.default,
-            env_var.default_factory,
-            env_var.indirect_var,
-            name,
+            description=env_var.description,
+            group=env_var.group,
+            default=env_var.default,
+            default_factory=env_var.default_factory,
+            indirect_var=env_var.indirect_var,
+            persistable=env_var.persistable,
+            name=name,
         )
 
 
@@ -212,36 +213,6 @@ ENV_CSTAR_LOG_LEVEL: t.Annotated[
 ] = "CSTAR_LOG_LEVEL"
 """Specify the logging level for terminal messages. Options: DEBUG, INFO, WARNING, ERROR, CRITICAL."""
 
-ENV_CSTAR_CLI_DRY_RUN: t.Annotated[
-    t.Literal["CSTAR_CLI_DRY_RUN"],
-    EnvVar(
-        "Set to `1` to short-circuit CLI operations after planning steps are completed",
-        GROUP_SIM,
-        default=FLAG_OFF,
-    ),
-] = "CSTAR_CLI_DRY_RUN"
-"""Set to `1` to short-circuit CLI operations after planning steps are completed."""
-
-ENV_CSTAR_CLI_VERBOSE: t.Annotated[
-    t.Literal["CSTAR_CLI_VERBOSE"],
-    EnvVar(
-        "Set to `1` to produce verbose CLI outputs.",
-        GROUP_SIM,
-        default=FLAG_OFF,
-    ),
-] = "CSTAR_CLI_VERBOSE"
-"""Set to `1` to produce verbose CLI outputs."""
-
-ENV_CSTAR_CLOBBER_WORKING_DIR: t.Annotated[
-    t.Literal["CSTAR_CLOBBER_WORKING_DIR"],
-    EnvVar(
-        "Set to `1` to automatically clear the working directory specified in a blueprint before launching a SLURM job. Use at your own risk.",
-        GROUP_SIM,
-        default=FLAG_OFF,
-    ),
-] = "CSTAR_CLOBBER_WORKING_DIR"
-"""Set to `1` to automatically clear the working directory specified in a blueprint before launching a SLURM job. Use at your own risk."""
-
 ENV_CSTAR_DISABLE_BUILD_VERIFICATION: t.Annotated[
     t.Literal["CSTAR_DISABLE_BUILD_VERIFICATION"],
     EnvVar(
@@ -265,26 +236,6 @@ ENV_CSTAR_DISABLE_MIGRATION: t.Annotated[
     ),
 ] = "CSTAR_DISABLE_MIGRATION"
 """Set to `1` to disable automatic blueprint schema migration; commands fail early on out-of-date blueprints."""
-
-ENV_CSTAR_FRESH_CODEBASES: t.Annotated[
-    t.Literal["CSTAR_FRESH_CODEBASES"],
-    EnvVar(
-        "Set to `1` to automatically clear codebase directories and create fresh clones during each run. Otherwise, use code found in locations specified in `ROMS_ROOT` and `ROMS_MARBL`.",
-        GROUP_SIM,
-        default=FLAG_OFF,
-    ),
-] = "CSTAR_FRESH_CODEBASES"
-"""Set to `1` to automatically clear codebase directories and create fresh clones during each run. Otherwise, use code found in locations specified in `ROMS_ROOT` and `ROMS_MARBL`."""
-
-ENV_CSTAR_IN_ACTIVE_ALLOCATION: t.Annotated[
-    t.Literal["CSTAR_IN_ACTIVE_ALLOCATION"],
-    EnvVar(
-        "Override behavior for launching new jobs via SLURM or simply executing via mpirun. Only set this to 0 if you need to launch new jobs from within an existing allocation.",
-        GROUP_SIM,
-        default="",
-    ),
-] = "CSTAR_IN_ACTIVE_ALLOCATION"
-"""Override behavior for launching new jobs via SLURM or simply executing via mpirun. Only set this to 0 if you need to launch new jobs from within an existing allocation."""
 
 ENV_CSTAR_NPROCS_POST: t.Annotated[
     t.Literal["CSTAR_NPROCS_POST"],
@@ -326,6 +277,7 @@ ENV_CSTAR_CONFIG_HOME: t.Annotated[
         "~/.config/cstar",
         default_factory=indirect_default_factory,
         indirect_var="XDG_CONFIG_HOME",
+        persistable=False,
     ),
 ] = "CSTAR_CONFIG_HOME"
 """Environment variable used to override the home directory for C-Star config storage."""
@@ -399,42 +351,64 @@ ENV_CSTAR_RUNID: t.Annotated[
     t.Literal["CSTAR_RUNID"],
     EnvVar(
         description="Unique run identifier used by the orchestrator.",
-        group=GROUP_SIM,
+        group=GROUP_INTERNAL,
         default_factory=lambda _: generate_run_id(),
+        persistable=False,
     ),
 ] = "CSTAR_RUNID"
 """Environment variable containing a unique run identifier used by the orchestrator."""
 
-ENV_CSTAR_SLURM_POST_SUBMIT_DELAY: t.Annotated[
-    t.Literal["CSTAR_SLURM_POST_SUBMIT_DELAY"],
-    EnvVar(
-        "Delay (in seconds) after a submission to ensure status for a SLURM job can be queried.",
-        GROUP_SIM,
-        default="1.0",
-    ),
-] = "CSTAR_SLURM_POST_SUBMIT_DELAY"
-"""Delay (in seconds) after a submission to ensure status for a SLURM job can be queried."""
 
-ENV_CSTAR_ORCH_LOCAL_DELAY: t.Annotated[
-    t.Literal["CSTAR_ORCH_LOCAL_DELAY"],
-    EnvVar(
-        "Delay (in seconds) between status queries in the local launcher proxy script",
-        GROUP_SIM,
-        default="10.0",
-    ),
-] = "CSTAR_ORCH_LOCAL_DELAY"
-"""Delay (in seconds) between status queries in the local launcher proxy script."""
+@dataclass(frozen=True, slots=True)
+class RemovedSetting:
+    """What to tell someone who still exports a setting C-Star no longer reads."""
+
+    guidance: str
+    """What to do instead; read after "<NAME> has no effect; "."""
+    refused: bool = False
+    """Whether the commands it used to change refuse to run while it is exported
+    (`cstar.cli.common.exit_on_refused_settings`), because ignoring it there would
+    do more than was asked (a dry run becoming a real one)."""
 
 
-ENV_CSTAR_ORCH_MAX_CONC: t.Annotated[
-    t.Literal["CSTAR_ORCH_MAX_CONC"],
-    EnvVar(
-        "The maximum number of concurrent disk IO operations.",
-        GROUP_SIM,
-        default="10",
+REMOVED_SETTINGS: t.Final[dict[str, RemovedSetting]] = {
+    "CSTAR_CLI_DRY_RUN": RemovedSetting(
+        "pass --dry-run to `cstar blueprint migrate` or `cstar admin clean`, or "
+        "check a workplan without running it with `cstar workplan check`.",
+        refused=True,
     ),
-] = "CSTAR_ORCH_MAX_CONC"
-"""The maximum number of concurrent disk IO operations."""
+    "CSTAR_CLI_VERBOSE": RemovedSetting(
+        "pass --verbose to `cstar blueprint run` or `cstar blueprint migrate` instead."
+    ),
+    "CSTAR_CLOBBER_WORKING_DIR": RemovedSetting(
+        "pass --clobber to `cstar blueprint run` or `cstar blueprint migrate` "
+        "instead (`--clobber <step|all>` for `cstar workplan run`)."
+    ),
+    "CSTAR_FRESH_CODEBASES": RemovedSetting(
+        "pass --clobber to `cstar blueprint run` (`--clobber <step|all>` for "
+        "`cstar workplan run`) to start from an empty working directory instead."
+    ),
+    "CSTAR_IN_ACTIVE_ALLOCATION": RemovedSetting(
+        "C-Star detects an active SLURM allocation from SLURM_JOBID."
+    ),
+    "CSTAR_ORCH_DELAYS": RemovedSetting(
+        "the orchestrator's polling intervals are fixed."
+    ),
+    "CSTAR_ORCH_LOCAL_DELAY": RemovedSetting(
+        "the local launcher's polling interval is fixed."
+    ),
+    "CSTAR_ORCH_MAX_CONC": RemovedSetting(
+        "the limit on concurrent disk operations is fixed."
+    ),
+    "CSTAR_SLURM_POST_SUBMIT_DELAY": RemovedSetting(
+        "the delay after a SLURM submission is fixed."
+    ),
+}
+"""Settings that were removed, mapped to guidance for anyone still exporting one.
+
+An exported removed setting has no effect; the CLI warns about it, and the
+commands a `refused` one used to change refuse to run while it is exported.
+"""
 
 
 @lru_cache
@@ -462,56 +436,19 @@ def discover_env_vars() -> dict[str, EnvItem]:
     return container
 
 
-def env_var_groups() -> dict[str, list[EnvItem]]:
-    """Return a mapping from group-name to the associated list of env variables."""
-    groups: dict[str, list[EnvItem]] = defaultdict(list)
-
-    for item in discover_env_vars().values():
-        groups[item.group].append(item)
-
-    return groups
-
-
-def unset(key: str) -> str | None:
-    """Unset an environment variable.
+def env_var_groups(include_internal: bool = False) -> dict[str, list[EnvItem]]:
+    """Return a mapping from group-name to the associated list of env variables.
 
     Parameters
     ----------
-    key : str
-        The key to unset
-
-    Returns
-    -------
-    str
-        The value that was previously stored for the key
+    include_internal : bool
+        Include the internal group, which C-Star sets for its own processes and
+        which users never set.
     """
-    return os.environ.pop(key, None)
+    groups: dict[str, list[EnvItem]] = defaultdict(list)
 
+    for item in discover_env_vars().values():
+        if include_internal or item.group != GROUP_INTERNAL:
+            groups[item.group].append(item)
 
-def max_concurrency() -> int:
-    """Utility to get commonly used max-concurrency value from env vars
-    for bounding simultaneous IO operations.
-
-    A value that cannot be parsed as an integer, or is less than 1, is
-    replaced with the environment variable's default; a warning is logged.
-
-    Returns
-    -------
-    int
-        The maximum number of concurrent disk IO operations.
-    """
-    env_item = get_env_item(ENV_CSTAR_ORCH_MAX_CONC)
-
-    try:
-        value = int(env_item.value)
-    except ValueError:
-        msg = f"Unable to parse value of {ENV_CSTAR_ORCH_MAX_CONC}: {env_item.value}"
-        log.warning(msg)
-        value = -1
-
-    if value < 1:
-        # fall back to the default if it's specified as a value that will blow up
-        msg = f"The configured value of {ENV_CSTAR_ORCH_MAX_CONC} is invalid. Using default"
-        log.warning(msg)
-        value = int(env_item.default)
-    return value
+    return groups

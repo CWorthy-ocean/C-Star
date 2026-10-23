@@ -5,11 +5,7 @@ import typing as t
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
 from cstar.base.adapter import ConfiguredModelAdapter, CstarAdaptationError
-from cstar.base.env import (
-    ENV_CSTAR_RUNID,
-    ENV_CSTAR_SLURM_POST_SUBMIT_DELAY,
-    get_env_item,
-)
+from cstar.base.env import ENV_CSTAR_RUNID, get_env_item
 from cstar.base.exceptions import CstarError, CstarExpectationFailed
 from cstar.base.log import get_logger
 from cstar.base.utils import WALLTIME_RE, _run_cmd, utc_now
@@ -174,9 +170,7 @@ class SlurmLauncher(Launcher[SlurmHandle]):
     supports_foreign_dependencies: t.ClassVar[bool] = True
     """A SLURM job can depend on a job submitted by another run."""
 
-    POST_SUBMIT_DELAY: t.Final[float] = float(
-        get_env_item(ENV_CSTAR_SLURM_POST_SUBMIT_DELAY).value
-    )
+    POST_SUBMIT_DELAY: t.Final[float] = 1.0
     """Delay after a submission to ensure status for a SLURM job can be queried."""
 
     @staticmethod

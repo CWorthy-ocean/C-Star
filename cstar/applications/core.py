@@ -78,6 +78,9 @@ class RunnerRequest(t.Generic[TBlueprint]):
     and then stop, leaving the working directory for a later attempt to attach
     to. Only honoured by applications whose
     `ApplicationDefinition.pre_runnable` is `True`."""
+    clobber: bool = False
+    """Whether the runner should empty the blueprint's working directory before
+    starting fresh. Cannot be combined with `resume`."""
     step: str = ""
     """The workplan step this run executes; empty for a standalone run, which
     writes its own run manifest."""
@@ -88,8 +91,10 @@ class RunnerRequest(t.Generic[TBlueprint]):
         bp_type: type[TBlueprint],
         name: str = "",
         directive_uri: str = "",
+        *,
         resume: bool = False,
         pre_run: bool = False,
+        clobber: bool = False,
         step: str = "",
     ) -> None:
         """Initialize the request instance.
@@ -112,6 +117,9 @@ class RunnerRequest(t.Generic[TBlueprint]):
             Whether to perform every stage before the model launch and then
             stop. Only meaningful for applications whose
             `ApplicationDefinition.pre_runnable` is `True`.
+        clobber : bool
+            Whether to empty the blueprint's working directory before starting
+            fresh. Cannot be combined with `resume`.
         step : str
             The workplan step this run executes; empty for a standalone run.
         """
@@ -122,8 +130,12 @@ class RunnerRequest(t.Generic[TBlueprint]):
         if resume and pre_run:
             msg = "A request cannot both resume a prior attempt and stop before the launch (pre_run)"
             raise ValueError(msg)
+        if resume and clobber:
+            msg = "A request cannot both resume a prior attempt and empty its working directory (clobber)"
+            raise ValueError(msg)
         self.resume = resume
         self.pre_run = pre_run
+        self.clobber = clobber
         self.step = step.strip()
 
     @property

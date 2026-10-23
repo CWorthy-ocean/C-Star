@@ -1,11 +1,9 @@
-import os
 from datetime import datetime
 from pathlib import Path
 from unittest import mock
 
 import pytest
 
-from cstar.base.env import ENV_CSTAR_ORCH_LOCAL_DELAY
 from cstar.base.exceptions import CstarExpectationFailed
 from cstar.orchestration.launch.local import LocalHandle, ProxiedRunRequestFormatter
 from cstar.orchestration.orchestration import LiveStep, RunRequest, Status, Workplan
@@ -151,17 +149,14 @@ def test_proxiedrunrequestformatter_minimal_tpl_fill(
     )
 
     mock_spath = tmp_path / "mock-sentinel.yaml"
-    mock_delay = "42"
+    mock_delay = 42.0
 
     with (
         mock.patch(
             "cstar.orchestration.state.StateRepository.sentinel_path",
             mock.Mock(return_value=mock_spath),
         ),
-        mock.patch.dict(
-            os.environ,
-            {ENV_CSTAR_ORCH_LOCAL_DELAY: mock_delay},
-        ),
+        mock.patch("cstar.orchestration.launch.local.PROXY_POLL_DELAY", mock_delay),
     ):
         script = formatter.format(run_request)
 

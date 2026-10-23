@@ -8,7 +8,7 @@ import pytest
 import typer
 from typer.testing import CliRunner
 
-from cstar.base.env import ENV_CSTAR_CLI_DRY_RUN, ENV_CSTAR_RUNID, FLAG_ON
+from cstar.base.env import ENV_CSTAR_RUNID, REMOVED_SETTINGS
 from cstar.base.exceptions import CstarError
 from cstar.cli.admin.clean import (
     ARG_YES,
@@ -163,8 +163,7 @@ async def test_cli_admin_clean_perform_actions_dryrun(
         else:
             path.mkdir(parents=True, exist_ok=False)
 
-    with mock.patch.dict(os.environ, {ENV_CSTAR_CLI_DRY_RUN: FLAG_ON}):
-        await perform_actions([action])
+    await perform_actions([action], dry_run=True)
 
     # confirm the deletions didn't occur
     assert all(path.exists() for path in action.asset_paths)
@@ -266,6 +265,30 @@ def test_cli_admin_clean_default_cleanup(dry_run: bool) -> None:
     assert key in result.stdout.lower()
 
 
+def test_cli_admin_clean_refuses_a_removed_dry_run_setting(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Verify `admin clean` removes nothing and exits 2 while a removed setting
+    that used to make it a dry run is still exported.
+
+    Parameters
+    ----------
+    monkeypatch : pytest.MonkeyPatch
+        Fixture used to export the setting.
+    """
+    name = next(n for n, removed in REMOVED_SETTINGS.items() if removed.refused)
+    monkeypatch.setenv(name, "1")
+    actions = t.cast("list[FileSystemCleanupAction]", get_default_cleanup_actions())
+    assets = [path / "asset.mock" for action in actions for path in action.asset_paths]
+    for asset in assets:
+        asset.touch()
+
+    result = CliRunner().invoke(app, [ARG_YES], color=False)
+
+    assert result.exit_code == 2
+    assert all(asset.exists() for asset in assets)
+
+
 @pytest.fixture
 def data_home(tmp_path: Path) -> Path:
     """Create a data directory holding a cache, a catalog, and removable content."""
@@ -347,13 +370,13 @@ def test_cli_admin_clean_keep_path_symlink(tmp_path: Path) -> None:
     assert action.mitigated()
 
 
-def test_cli_admin_clean_keep_paths_dry_run(data_home: Path) -> None:
+@pytest.mark.asyncio
+async def test_cli_admin_clean_keep_paths_dry_run(data_home: Path) -> None:
     """Verify dry-run removes nothing when keep paths are configured."""
     before = sorted(data_home.rglob("*"))
     action = _keep_action(data_home, data_home / "source-data")
 
-    with mock.patch.dict(os.environ, {ENV_CSTAR_CLI_DRY_RUN: FLAG_ON}):
-        action.execute()
+    await perform_actions([action], dry_run=True)
 
     assert sorted(data_home.rglob("*")) == before
     assert not action.mitigated()
