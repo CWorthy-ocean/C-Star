@@ -147,6 +147,7 @@ Bug Fixes
   - On a file system without file-locking support, staging logs a warning and uses the cache without the lock, as before.
 
 - ``cstar workplan run --resume`` no longer fails when it cannot update the run manifest, for example on a file system without ``flock``; it warns and resumes. (`#794 <https://github.com/CWorthy-ocean/C-Star/pull/794>`_)
+- Unit test CI no longer replaces the conda builds of numpy, netCDF4, h5py, numba and other compiled packages with PyPI wheels, so it tests the stack ``environment-laptop.yml`` installs. (`#799 <https://github.com/CWorthy-ocean/C-Star/pull/799>`_)
 
 Improvements
 ~~~~~~~~~~~~
@@ -208,3 +209,5 @@ Miscellaneous
 - Run manifest schema 1.4.0 and step record schema 1.3.0 published (both add ``digest``); older documents load unchanged. (`#798 <https://github.com/CWorthy-ocean/C-Star/pull/798>`_)
 - Docs: "Attaching a run that arrived from elsewhere", the ``--verify`` / ``--record-digests`` paragraphs of "Checking a Run Directory", the ``where`` labels, and glossary entries for Attach and the product digest. (`#798 <https://github.com/CWorthy-ocean/C-Star/pull/798>`_)
 - A hello_world e2e (``test_run_attach.py``, seconds) covers attach, verify, owned and read-only verbs, re-entry refusal, ``--as``, and a workplan depending on an attached run by its run-id. (`#798 <https://github.com/CWorthy-ocean/C-Star/pull/798>`_)
+- Unit test CI runs about twice as fast by measuring coverage with Python's ``sys.monitoring`` instead of the default tracer. (`#799 <https://github.com/CWorthy-ocean/C-Star/pull/799>`_)
+- Unit test CI logs stay readable: test output is captured again, and each run lists its 25 slowest tests. (`#799 <https://github.com/CWorthy-ocean/C-Star/pull/799>`_)
