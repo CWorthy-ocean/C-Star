@@ -33,6 +33,10 @@ Breaking Changes
 - Blueprints and workplans are always read as YAML, which still loads ordinary JSON but not tab-indented JSON. (`#812 <https://github.com/CWorthy-ocean/C-Star/pull/812>`_)
 - Removed ``PersistenceMode``, ``render_model`` and ``read_json_to_raw`` from ``cstar.orchestration.serialization``, and the ``mode`` argument from ``serialize``, ``deserialize`` and the other read helpers. (`#812 <https://github.com/CWorthy-ocean/C-Star/pull/812>`_)
 - ``cstar blueprint migrate --in-place`` on a ``.json`` blueprint now writes YAML into that file. (`#812 <https://github.com/CWorthy-ocean/C-Star/pull/812>`_)
+- ``cstar admin clean`` now requires exactly one of ``--run-id <id>`` or ``--all``; the old bare ``cstar admin clean --yes`` full wipe is now ``cstar admin clean --all --yes``. (`#814 <https://github.com/CWorthy-ocean/C-Star/pull/814>`_)
+
+  - Without either option, or with both, the command stops with a usage error and removes nothing.
+
 
 
 New features
@@ -181,6 +185,11 @@ New features
   - It then offers to install the ``cstar`` shell function and to register a Jupyter kernel, prints the Copernicus Marine and TPXO registration pointers, and ends with a summary; a skipped or failed optional step is reported and the exit code stays 0 once the file is written.
   - ``cstar init --yes`` accepts every default without prompting, for containers and scripts.
 
+- ``cstar admin clean`` is available without developer mode: ``--run-id <id>`` removes one run's tracking record and run directory, and ``--all`` empties C-Star's data, state, cache and config directories. (`#814 <https://github.com/CWorthy-ocean/C-Star/pull/814>`_)
+
+  - The shared source-data cache and your catalog are kept by ``--all``.
+
+
 
 
 
@@ -220,6 +229,7 @@ Bug Fixes
   - The run's plan was YAML saved under a ``.json`` name, so every reader parsed it as JSON.
 
 - ``cstar run check``, ``cstar run attach`` and ``cstar run promote`` could not find the plan of a run started from a ``.json`` or ``.yml`` workplan. (`#810 <https://github.com/CWorthy-ocean/C-Star/pull/810>`_)
+- A blank ``--run-id`` exited with code 1 and no message; it now reports the problem. (`#814 <https://github.com/CWorthy-ocean/C-Star/pull/814>`_)
 
 
 Improvements
@@ -260,6 +270,8 @@ Improvements
 - ``--yes`` is now a shared CLI option constant, used by ``cstar admin clean`` and ``cstar init``. (`#809 <https://github.com/CWorthy-ocean/C-Star/pull/809>`_)
 - ``cstar run promote`` copies files in 64 MiB blocks: on Anvil's GPFS a run now copies at 1,750 MiB/s, 4.6× faster than before and 4× faster than ``rsync -a``. (`#811 <https://github.com/CWorthy-ocean/C-Star/pull/811>`_)
 - Each run attempt now always saves its workplan as ``workplan.yaml``, whatever the authored file's suffix. (`#812 <https://github.com/CWorthy-ocean/C-Star/pull/812>`_)
+- ``cstar admin clean`` exits 0 when a run ID has nothing to remove, instead of 99. (`#814 <https://github.com/CWorthy-ocean/C-Star/pull/814>`_)
+- ``cstar admin clean --dry-run`` lists what would be removed without asking about each item. (`#814 <https://github.com/CWorthy-ocean/C-Star/pull/814>`_)
 
 
 
@@ -304,3 +316,4 @@ Miscellaneous
 - The configuration page gains "Where a setting can be set, and which wins": the full precedence chain, the SLURM layers a workplan and its steps add, and what ``--resume`` re-exports. (`#806 <https://github.com/CWorthy-ocean/C-Star/pull/806>`_)
 - The installation page's "After installing" section now starts with ``cstar init`` and keeps the kernel, configuration and shell-function steps as its sub-steps; the HPC page's scheduler section leads with ``cstar init`` and keeps the ``config.env`` example; the configuration page points at ``cstar init`` as the way to create the file. (`#809 <https://github.com/CWorthy-ocean/C-Star/pull/809>`_)
 - Removed the ``workplan.json`` mention from the workplans guide. (`#812 <https://github.com/CWorthy-ocean/C-Star/pull/812>`_)
+- New "Cleaning up" section in the workplans guide. (`#814 <https://github.com/CWorthy-ocean/C-Star/pull/814>`_)
