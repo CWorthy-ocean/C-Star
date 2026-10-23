@@ -162,6 +162,14 @@ New features
   - The California Current tutorial (16 km parent, 4 km child) uses real forcing and runs under SLURM or on a workstation; ``full.vars`` holds a year-long window, and the page shows how to run a month.
 
 - ``cstar env show --group internal`` lists the variables C-Star sets for its own processes. (`#805 <https://github.com/CWorthy-ocean/C-Star/pull/805>`_)
+- C-Star reads ``config.env`` under its config home (``~/.config/cstar``, or ``CSTAR_CONFIG_HOME`` / ``XDG_CONFIG_HOME/cstar``) on every command and when used from Python. (`#806 <https://github.com/CWorthy-ocean/C-Star/pull/806>`_)
+
+  - The file is dotenv: one ``NAME=value`` per line, ``#`` comments, ``~`` and ``$VAR`` expanded in values.
+  - Precedence, highest first: a command-line option, an exported variable, the configuration file, the system's own default, the built-in default.
+  - A key the file may not set (an unknown name, a feature flag, ``CSTAR_CONFIG_HOME``, a removed setting, or a name with no value) stops the command with one error naming the file and every offending key.
+
+- ``cstar env set NAME VALUE`` writes or updates one line of the file, creating it on first use and keeping comments; ``cstar env unset NAME`` comments the line out. (`#806 <https://github.com/CWorthy-ocean/C-Star/pull/806>`_)
+- ``cstar env show`` prints the configuration file's path and marks each value ``[env]``, ``[config]`` or ``[default]``; ``--display export`` is unchanged. (`#806 <https://github.com/CWorthy-ocean/C-Star/pull/806>`_)
 
 
 
@@ -273,3 +281,5 @@ Miscellaneous
 - Documentation: the configuration page's variable table no longer lists the removed settings or ``CSTAR_RUNID``, and the workplan tutorial no longer mentions ``CSTAR_CLOBBER_WORKING_DIR``. (`#805 <https://github.com/CWorthy-ocean/C-Star/pull/805>`_)
 - Containers: the runner and NERSC images no longer set the unused ``CSTAR_INTERACTIVE``. (`#805 <https://github.com/CWorthy-ocean/C-Star/pull/805>`_)
 - The e2e step-log checks now show the lines after each error, so a failed command's stderr appears in the assertion message. (`#808 <https://github.com/CWorthy-ocean/C-Star/pull/808>`_)
+- The configuration page documents the file, its precedence and the new commands; the HPC and installation pages point to it beside the existing ``export`` example. (`#806 <https://github.com/CWorthy-ocean/C-Star/pull/806>`_)
+- The configuration page gains "Where a setting can be set, and which wins": the full precedence chain, the SLURM layers a workplan and its steps add, and what ``--resume`` re-exports. (`#806 <https://github.com/CWorthy-ocean/C-Star/pull/806>`_)
