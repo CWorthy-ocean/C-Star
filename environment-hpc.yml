@@ -16,7 +16,6 @@ dependencies:
   - numba
   - fsspec
   - kerchunk
-  - nest-asyncio
   - ujson
   - fastparquet
   - xarray>=2026.9
