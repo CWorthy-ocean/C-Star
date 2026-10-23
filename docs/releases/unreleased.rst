@@ -140,6 +140,13 @@ New features
   - Nothing is ever overwritten: a destination holding another run, or this run already, a source missing a recorded product, and a destination file system without room for the plan are refused before any byte is copied; ``--dry-run`` prints the plan with per-group file counts and sizes.
   - ``--verify`` computes the digest of each source product that has none, records it in the copy's step records and manifest (the source is never written) and compares the copy; exit 1 when the copy has problems of its own, with the absolute paths that the source's own files already carry listed but not counted.
 
+- ``cstar forge show-paths`` shows the project directory and the project runs area alongside the source-data cache and catalog. (`#802 <https://github.com/CWorthy-ocean/C-Star/pull/802>`_)
+
+  - The runs area is shown even before it exists, with a note that ``cstar run promote`` creates it.
+  - When neither ``CSTAR_PROJECT_HOME`` nor ``$PROJECT`` is set, the output says so.
+  - ``--json`` adds ``project_home`` and ``project_runs`` to ``paths``, after the existing keys; each is ``null`` without a project directory.
+
+
 
 
 
@@ -228,3 +235,4 @@ Miscellaneous
 - Documentation: "Promoting a run" in the workplans page, the project runs area paragraph in the HPC page (with the umask/group-permission note, since C-Star changes no permissions) and a "Promote" terminology entry. (`#800 <https://github.com/CWorthy-ocean/C-Star/pull/800>`_)
 - Tier 2 e2e module ``test_run_promote.py`` (hello_world, seconds): copy, dry run, ``--to``, link then materialize, a workplan depending on the promoted run by uuid, move with the tracking update and relaunch refusal, ``--verify``, ``gathered_output`` rebuild. (`#800 <https://github.com/CWorthy-ocean/C-Star/pull/800>`_)
 - The workplan tutorial's sample ``cstar run ls`` table shows the new "not measured" wording. (`#801 <https://github.com/CWorthy-ocean/C-Star/pull/801>`_)
+- The HPC guide says what ``cstar forge show-paths`` prints, including the project runs area. (`#802 <https://github.com/CWorthy-ocean/C-Star/pull/802>`_)
