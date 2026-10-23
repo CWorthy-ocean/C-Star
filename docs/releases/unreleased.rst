@@ -206,6 +206,7 @@ Improvements
 - A ``runs:`` alias can depend on the finished steps of an attached run, as for a run known only by its manifest. (`#798 <https://github.com/CWorthy-ocean/C-Star/pull/798>`_)
 - ``cstar run gather`` builds ``gathered_output`` under the run's recorded directory, so an attached run outside the data home is gathered in place. (`#798 <https://github.com/CWorthy-ocean/C-Star/pull/798>`_)
 - The netCDF digest (``hash_netcdf_contents``) moved from the forge application to ``cstar.base.digest``, unchanged, so orchestration can use it without reaching into an application module. (`#798 <https://github.com/CWorthy-ocean/C-Star/pull/798>`_)
+- Building a subchunked GLORYS reference no longer patches asyncio for the rest of the forge step, which on Python 3.14 broke asyncio timeouts, fsspec I/O and event-loop shutdown. (`#804 <https://github.com/CWorthy-ocean/C-Star/pull/804>`_)
 
 
 
@@ -240,3 +241,4 @@ Miscellaneous
 - Tier 2 e2e module ``test_run_promote.py`` (hello_world, seconds): copy, dry run, ``--to``, link then materialize, a workplan depending on the promoted run by uuid, move with the tracking update and relaunch refusal, ``--verify``, ``gathered_output`` rebuild. (`#800 <https://github.com/CWorthy-ocean/C-Star/pull/800>`_)
 - The workplan tutorial's sample ``cstar run ls`` table shows the new "not measured" wording. (`#801 <https://github.com/CWorthy-ocean/C-Star/pull/801>`_)
 - The HPC guide says what ``cstar forge show-paths`` prints, including the project runs area. (`#802 <https://github.com/CWorthy-ocean/C-Star/pull/802>`_)
+- ``nest-asyncio`` is no longer a dependency of ``cstar-ocean`` or of the conda environment files. (`#804 <https://github.com/CWorthy-ocean/C-Star/pull/804>`_)
