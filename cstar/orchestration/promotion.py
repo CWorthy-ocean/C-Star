@@ -9,7 +9,6 @@ contents. `execute_plan` makes the copy beside its destination and renames it
 into place, so a failed copy leaves nothing at the destination.
 """
 
-import errno
 import os
 import shutil
 import stat
@@ -56,14 +55,11 @@ scheduled before carried inputs left there, including their rotated `.1`, `.2` f
 _WORK_GLOBS: t.Final[tuple[str, ...]] = ("*.yaml", "*.yml")
 """Globs, relative to a step's work directory, of the files that hold its blueprint and directives."""
 
-_COPY_CHUNK_BYTES: t.Final[int] = 1 << 30
-"""The bytes one `os.copy_file_range` call asks for; it may copy fewer."""
-
-_NO_COPY_FILE_RANGE: t.Final[frozenset[int]] = frozenset(
-    {errno.EXDEV, errno.ENOSYS, errno.EINVAL, errno.EOPNOTSUPP}
-)
-"""The errors with which a first `os.copy_file_range` call says the file systems
-cannot copy this way, so `shutil.copy2` copies instead.
+_COPY_BLOCK_BYTES: t.Final[int] = 64 * 2**20
+"""The bytes `_copy_file` reads and writes at a time. Parallel file systems
+report blocks of megabytes (GPFS's `st_blksize`), and a copy in blocks this
+large runs several times faster there than the kernel's `sendfile` or
+`copy_file_range`.
 """
 
 
@@ -590,13 +586,10 @@ def _copy_into(plan: CopyPlan, staging: Path) -> int:
 
 
 def _copy_file(source: Path, target: Path) -> None:
-    """Copy a file's content and metadata, as `shutil.copy2` does.
+    """Copy a file's content in large blocks, then its metadata, as `shutil.copy2` does.
 
-    Where the platform has `os.copy_file_range` the content goes through it,
-    which lets a file system that implements it copy without a round trip
-    through user space, and some (NFS 4.2) copy on the server. When the first
-    call refuses, or copies nothing from a non-empty file, `shutil.copy2` makes
-    the copy instead.
+    `shutil.copy2` goes through `sendfile` on Linux, which GPFS serves at a
+    fraction of the speed of buffered reads and writes of `_COPY_BLOCK_BYTES`.
 
     Parameters
     ----------
@@ -605,24 +598,9 @@ def _copy_file(source: Path, target: Path) -> None:
     target : Path
         The path of the copy; it is overwritten.
     """
-    copy_file_range = getattr(os, "copy_file_range", None)
-    if copy_file_range is not None:
-        with source.open("rb") as src, target.open("wb") as dst:
-            try:
-                count = copy_file_range(src.fileno(), dst.fileno(), _COPY_CHUNK_BYTES)
-            except OSError as e:
-                if e.errno not in _NO_COPY_FILE_RANGE:
-                    raise
-                count = None
-            if count == 0 and os.fstat(src.fileno()).st_size:
-                count = None
-            while count:
-                count = copy_file_range(src.fileno(), dst.fileno(), _COPY_CHUNK_BYTES)
-        if count is not None:
-            shutil.copystat(source, target)
-            return
-
-    shutil.copy2(source, target, follow_symlinks=True)
+    with source.open("rb") as src, target.open("wb") as dst:
+        shutil.copyfileobj(src, dst, length=_COPY_BLOCK_BYTES)
+    shutil.copystat(source, target)
 
 
 def execute_plan(

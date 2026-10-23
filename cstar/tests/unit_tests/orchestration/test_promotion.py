@@ -1,6 +1,5 @@
 """Tests for the copy plan `cstar run promote` makes of a run, and its execution."""
 
-import errno
 import os
 import shutil
 import stat
@@ -716,37 +715,6 @@ def test_replace_link_refuses_a_missing_destination(
 # _copy_file
 
 
-@dataclass
-class FakeCopyFileRange:
-    """Stands in for `os.copy_file_range`, copying a few bytes per call.
-
-    It raises `errors[i]` on call `i` when that entry is set.
-    """
-
-    errors: Sequence[OSError | None] = ()
-    calls: int = 0
-
-    def __call__(self, src: int, dst: int, count: int, *args: t.Any) -> int:
-        self.calls += 1
-        if self.calls <= len(self.errors) and (e := self.errors[self.calls - 1]):
-            raise e
-        return os.write(dst, os.read(src, min(count, 3)))
-
-
-@pytest.fixture
-def copy2_calls(monkeypatch: pytest.MonkeyPatch) -> list[Path]:
-    """Record `shutil.copy2`'s sources, still copying."""
-    real = shutil.copy2
-    calls: list[Path] = []
-
-    def spy(src: t.Any, dst: t.Any, **kwargs: t.Any) -> t.Any:
-        calls.append(Path(src))
-        return real(src, dst, **kwargs)
-
-    monkeypatch.setattr(shutil, "copy2", spy)
-    return calls
-
-
 @pytest.fixture
 def source(tmp_path: Path) -> Path:
     """A file with its own mode and an old modification time."""
@@ -756,139 +724,37 @@ def source(tmp_path: Path) -> Path:
     return path
 
 
-def test_copy_file_range_copies_in_short_calls_and_keeps_metadata(
-    source: Path,
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-    copy2_calls: list[Path],
+def test_a_file_larger_than_a_block_is_copied_whole(
+    source: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Each call may copy less than asked; the loop runs to the end of the file."""
-    fake = FakeCopyFileRange()
-    monkeypatch.setattr(os, "copy_file_range", fake, raising=False)
-    target = tmp_path / "target.nc"
+    """The copy runs block by block to the end of the file, with the source's metadata."""
+    monkeypatch.setattr(promotion, "_COPY_BLOCK_BYTES", 3)
+    real = shutil.copyfileobj
+    lengths: list[int] = []
 
-    promotion._copy_file(source, target)
+    def spy(src: t.Any, dst: t.Any, length: int = 0) -> None:
+        lengths.append(length)
+        real(src, dst, length)
 
-    assert target.read_text() == CONTENT
-    assert fake.calls == 5  # 3 + 3 + 3 + 1 bytes, then the end of the file
-    assert copy2_calls == []
-    assert stat.S_IMODE(target.stat().st_mode) == 0o640
-    assert target.stat().st_mtime == 1_000_000_000
-
-
-def test_promote_copies_through_copy_file_range(
-    planned: Planned,
-    destination: Path,
-    monkeypatch: pytest.MonkeyPatch,
-    copy2_calls: list[Path],
-) -> None:
-    """Every file of the plan goes through `os.copy_file_range`."""
-    monkeypatch.setattr(os, "copy_file_range", FakeCopyFileRange(), raising=False)
-    plan = planned.plan()
-
-    copied = execute_plan(plan, destination)
-
-    assert copied == plan.total_bytes
-    assert copy2_calls == []
-    for entry in plan.entries:
-        if entry.kind == "file":
-            source = (planned.root / entry.relative).read_bytes()
-            assert (destination / entry.relative).read_bytes() == source
-
-
-@pytest.mark.parametrize(
-    "code",
-    [errno.EXDEV, errno.ENOSYS, errno.EINVAL, errno.EOPNOTSUPP],
-    ids=errno.errorcode.get,
-)
-def test_copy2_copies_when_the_first_call_refuses(
-    code: int,
-    source: Path,
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-    copy2_calls: list[Path],
-) -> None:
-    """A file system that cannot copy this way still gets the copy, with metadata."""
-    fake = FakeCopyFileRange([OSError(code, os.strerror(code))])
-    monkeypatch.setattr(os, "copy_file_range", fake, raising=False)
+    monkeypatch.setattr(shutil, "copyfileobj", spy)
     target = write(tmp_path / "target.nc", "stale and longer than the source")
 
     promotion._copy_file(source, target)
 
-    assert fake.calls == 1
-    assert copy2_calls == [source]
+    assert lengths == [3]
     assert target.read_text() == CONTENT
+    assert stat.S_IMODE(target.stat().st_mode) == 0o640
     assert target.stat().st_mtime == 1_000_000_000
 
 
-def test_copy2_copies_when_the_first_call_copies_nothing(
-    source: Path,
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-    copy2_calls: list[Path],
-) -> None:
-    """A file system that answers with 0 bytes from a non-empty file is not trusted."""
-    monkeypatch.setattr(os, "copy_file_range", lambda *args: 0, raising=False)
-    target = tmp_path / "target.nc"
-
-    promotion._copy_file(source, target)
-
-    assert copy2_calls == [source]
-    assert target.read_text() == CONTENT
-
-
-def test_an_empty_file_is_copied_through_copy_file_range(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, copy2_calls: list[Path]
-) -> None:
-    """0 bytes from an empty file is the end of the file, not a refusal."""
-    fake = FakeCopyFileRange()
-    monkeypatch.setattr(os, "copy_file_range", fake, raising=False)
+def test_an_empty_file_is_copied(tmp_path: Path) -> None:
+    """A file with nothing to read still gets its copy."""
     target = tmp_path / "target.nc"
 
     promotion._copy_file(write(tmp_path / "empty.nc", ""), target)
 
-    assert fake.calls == 1
-    assert copy2_calls == []
+    assert target.is_file()
     assert target.read_text() == ""
-
-
-def test_copy2_copies_without_copy_file_range(
-    source: Path,
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-    copy2_calls: list[Path],
-) -> None:
-    """A platform without `os.copy_file_range` (macOS) copies with `shutil.copy2`."""
-    monkeypatch.delattr(os, "copy_file_range", raising=False)
-    target = tmp_path / "target.nc"
-
-    promotion._copy_file(source, target)
-
-    assert copy2_calls == [source]
-    assert target.read_text() == CONTENT
-
-
-@pytest.mark.parametrize(
-    "errors",
-    [
-        pytest.param([OSError(errno.EIO, "I/O error")], id="other-error-first"),
-        pytest.param([None, OSError(errno.EXDEV, "cross-device")], id="later-call"),
-    ],
-)
-def test_other_copy_file_range_errors_are_raised(
-    errors: list[OSError | None],
-    source: Path,
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-    copy2_calls: list[Path],
-) -> None:
-    """Only a first call's refusal falls back; anything else fails the copy."""
-    monkeypatch.setattr(os, "copy_file_range", FakeCopyFileRange(errors), raising=False)
-
-    with pytest.raises(OSError, match="error|cross-device"):
-        promotion._copy_file(source, tmp_path / "target.nc")
-
-    assert copy2_calls == []
 
 
 def test_staging_dir_is_a_hidden_sibling(destination: Path) -> None:
