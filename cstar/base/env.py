@@ -435,6 +435,10 @@ REMOVED_SETTINGS: t.Final[dict[str, RemovedSetting]] = {
     "CSTAR_ORCH_MAX_CONC": RemovedSetting(
         "the limit on concurrent disk operations is fixed."
     ),
+    "CSTAR_ORCH_TRX_FREQ": RemovedSetting(
+        "set the feature flag CSTAR_FF_ORCH_TRX_TIMESPLIT_FREQ instead (it is read "
+        "only while CSTAR_FF_ORCH_TRX_TIMESPLIT is on)."
+    ),
     "CSTAR_SLURM_POST_SUBMIT_DELAY": RemovedSetting(
         "the delay after a SLURM submission is fixed."
     ),

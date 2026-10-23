@@ -6,10 +6,9 @@ from unittest import mock
 import pytest
 
 from cstar.applications.roms_marbl.models import RomsMarblBlueprint
-from cstar.applications.roms_marbl.transforms import SplitFrequency
 from cstar.base.env import ENV_CSTAR_RUNID, ENV_CSTAR_STATE_HOME, FLAG_ON
 from cstar.base.exceptions import CstarExpectationFailed
-from cstar.base.feature import ENV_FF_ORCH_TRX_TIMESPLIT
+from cstar.base.feature import ENV_FF_ORCH_TRX_TIMESPLIT, ENV_FF_ORCH_TRX_TIMESPLIT_FREQ
 from cstar.cli.workplan.compose import WorkplanTemplate, compose
 from cstar.execution.file_system import StateDirectoryManager
 from cstar.orchestration.adapter import StepToPlaceholderAdapter
@@ -25,9 +24,8 @@ from cstar.orchestration.orchestration import (
     configure_environment,
 )
 from cstar.orchestration.serialization import deserialize, serialize
-from cstar.orchestration.transforms import WorkplanTransformer
+from cstar.orchestration.transforms import SplitFrequency, WorkplanTransformer
 from cstar.orchestration.utils import (
-    ENV_CSTAR_ORCH_TRX_FREQ,
     ENV_CSTAR_SLURM_ACCOUNT,
     ENV_CSTAR_SLURM_MAX_WALLTIME,
     ENV_CSTAR_SLURM_QUEUE,
@@ -275,7 +273,7 @@ async def test_prepare_composed_dag(
         ENV_CSTAR_SLURM_QUEUE: "wholenode",
         ENV_CSTAR_SLURM_MAX_WALLTIME: "00:5:00",
         ENV_FF_ORCH_TRX_TIMESPLIT: FLAG_ON,
-        ENV_CSTAR_ORCH_TRX_FREQ: SplitFrequency.Monthly.value,
+        ENV_FF_ORCH_TRX_TIMESPLIT_FREQ: SplitFrequency.Monthly.value,
     }
 
     def _raise_ex(*args, **kwargs) -> None:
@@ -354,7 +352,7 @@ async def test_run_composed_dag(
         ENV_CSTAR_SLURM_QUEUE: "wholenode",
         ENV_CSTAR_SLURM_MAX_WALLTIME: "00:5:00",
         ENV_FF_ORCH_TRX_TIMESPLIT: FLAG_ON,
-        ENV_CSTAR_ORCH_TRX_FREQ: SplitFrequency.Monthly.value,
+        ENV_FF_ORCH_TRX_TIMESPLIT_FREQ: SplitFrequency.Monthly.value,
     }
 
     mock_run_cmd = mock.Mock(return_code=0, stderr="", stdout="mock-run-output")

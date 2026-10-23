@@ -7,16 +7,6 @@ _GROUP_ORCH: t.Final[str] = "Orchestration"
 _GROUP_DEV: t.Final[str] = "Developer Only"
 
 
-ENV_CSTAR_ORCH_TRX_FREQ: t.Annotated[
-    t.Literal["CSTAR_ORCH_TRX_FREQ"],
-    EnvVar(
-        "Time span for time-splitting transforms (e.g. Monthly, Yearly).",
-        _GROUP_ORCH,
-        "Monthly",
-    ),
-] = "CSTAR_ORCH_TRX_FREQ"
-"""Environment variable containing the time span for time-splitting transforms."""
-
 ENV_CSTAR_SLURM_ACCOUNT: t.Annotated[
     t.Literal["CSTAR_SLURM_ACCOUNT"],
     EnvVar(

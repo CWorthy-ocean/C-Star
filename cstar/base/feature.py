@@ -78,6 +78,18 @@ ENV_FF_ORCH_TRX_TIMESPLIT_LONGNAME: t.Annotated[
 """Enable long name generation during time-splitting."""
 
 
+ENV_FF_ORCH_TRX_TIMESPLIT_FREQ: t.Annotated[
+    t.Literal["CSTAR_FF_ORCH_TRX_TIMESPLIT_FREQ"],
+    EnvVar(
+        "Time-splitting frequency (e.g. Daily, Weekly, Monthly). Read only when "
+        "CSTAR_FF_ORCH_TRX_TIMESPLIT is on; developer mode does not set it.",
+        GROUP_FF,
+        default="Monthly",
+    ),
+] = "CSTAR_FF_ORCH_TRX_TIMESPLIT_FREQ"
+"""Time-splitting frequency (e.g. Daily, Weekly, Monthly), read only when time-splitting is on."""
+
+
 def is_flag_enabled(flag: str) -> bool:
     """Determine if a boolean environment varible is enabled.
 

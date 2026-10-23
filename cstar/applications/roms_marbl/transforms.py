@@ -1,4 +1,3 @@
-import os
 import typing as t
 import warnings
 from collections.abc import Mapping, Sequence
@@ -16,9 +15,11 @@ from cstar.applications.roms_marbl.outputs import (
     TimestampedOutputFile,
     warn_on_restart_start_date_mismatch,
 )
+from cstar.base.env import get_env_item
 from cstar.base.exceptions import CstarError
 from cstar.base.feature import (
     ENV_FF_ORCH_TRX_TIMESPLIT,
+    ENV_FF_ORCH_TRX_TIMESPLIT_FREQ,
     ENV_FF_ORCH_TRX_TIMESPLIT_LONGNAME,
     is_feature_enabled,
 )
@@ -41,11 +42,9 @@ from cstar.orchestration.transforms import (
     ApplyOverridesDirective,
     DirectiveConfig,
     OverrideDirective,
-    SplitFrequency,
     get_time_slices,
     lookup_step,
 )
-from cstar.orchestration.utils import ENV_CSTAR_ORCH_TRX_FREQ
 
 if t.TYPE_CHECKING:
     from cstar.orchestration.orchestration import LiveWorkplan
@@ -61,10 +60,9 @@ class RomsMarblTimeSplitter(Transform[LiveStep]):
     frequency: str
     """The step splitting frequency used to generate new time steps."""
 
-    def __init__(self, frequency: str = SplitFrequency.Monthly.value) -> None:
+    def __init__(self) -> None:
         """Initialize the transform instance."""
-        freq_config = os.getenv(ENV_CSTAR_ORCH_TRX_FREQ, frequency)
-        self.frequency = freq_config.lower()
+        self.frequency = get_env_item(ENV_FF_ORCH_TRX_TIMESPLIT_FREQ).value.lower()
 
     @classmethod
     def is_active(cls) -> bool:
