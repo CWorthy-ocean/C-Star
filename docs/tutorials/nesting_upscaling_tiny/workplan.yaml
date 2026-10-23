@@ -7,7 +7,7 @@
 #   forge_child      forge        child grid, 24x24 cells over 100 km, nested in the parent;
 #                                 one ALK release near its east boundary
 #   forge_parent_up  forge        the parent grid again, CDR mode "upscaled"
-#   parent           roms_marbl   2012-01-01T12 -> 01-03T07, restarts every 6 h; writes
+#   parent           roms_marbl   2012-01-01T00 -> 01-03T07, restarts every 6 h; writes
 #                                 child_bry.*.nc for the child
 #   nest_ic          nest_ic      the parent restart at 2012-01-02T06 -> the child's initial
 #                                 conditions (ic_from_parent_rst.<ts>.nc)
@@ -23,57 +23,31 @@
 #                                 combined into cdr_metrics.nc and two figures
 #
 # The three forge blueprints are built from the bundled roms-marbl-0.11-default ModelSpec
-# (ucla-roms 0.11.0, MARBL, ParallelIO) and carry placeholder source paths, so forge does
-# not try to download anything; each forge step swaps in the real files through
-# blueprint_overrides.
-# Run from the repository root (the data directory comes from fetch_data.py):
-#   cstar workplan check docs/tutorials/nesting_upscaling_tiny/workplan.yaml --var example_data=$(python docs/tutorials/nesting_upscaling_tiny/fetch_data.py)
-#   cstar workplan run   docs/tutorials/nesting_upscaling_tiny/workplan.yaml --var example_data=$(python docs/tutorials/nesting_upscaling_tiny/fetch_data.py) --run-id nest-tiny
+# (ucla-roms 0.11.0, MARBL, ParallelIO). Forge downloads their source data (GLORYS,
+# UNIFIED) into its source-data cache and streams ERA5. Run from the directory that holds
+# this file and the three forge blueprints:
+#   cstar workplan check workplan.yaml
+#   cstar workplan run   workplan.yaml
 #   cstar run status nest-tiny
 name: nest-tiny
 description: Tiny 2-level nested ROMS-MARBL run with an ALK release in the child, upscaled to a rerun of the parent, with CDR metrics (ucla-roms 0.11.0, PIO)
 state: draft
 
-runtime_vars:
-  - example_data
-
 compute_environment:
   launcher: local
 
 steps:
-  # The forge steps only write inputs and share no output files, but each builds a grid, and
-  # on a cold cache the first grid downloads and unzips the Natural Earth shapefiles of its
-  # land mask into one shared directory, which is not safe to do twice at once. So
-  # forge_child and forge_parent_up wait for forge_parent (as in the CCS workplan); on a
-  # warm cache both depends_on lines can go and the three then run side by side.
+  # The forge steps only write inputs and share no output files, but on a cold cache the
+  # first of them downloads the source data the others reuse (the UNIFIED climatology, and
+  # the Natural Earth shapefiles of the land mask) into shared directories, which is not
+  # safe to do twice at once. So forge_child and forge_parent_up wait for forge_parent; on
+  # a warm cache both depends_on lines can go and the three then run side by side.
   - name: forge_parent
     application: forge
     blueprint: ./forge_parent.yaml
-    # The sources' paths, in the order they appear in the blueprint: initial conditions
-    # (GLORYS + UNIFIED), surface forcing (ERA5, UNIFIED) and boundary (GLORYS + UNIFIED).
-    # Lists in overrides merge element by element, so only the paths are given.
-    blueprint_overrides: &parent_sources
-      forcing:
-        initial_conditions:
-          source:
-            path: "{{example_data}}/GLORYS_NA_2012.nc"
-          bgc_sources:
-            - source:
-                path: "{{example_data}}/coarsened_UNIFIED_bgc_dataset_v2_1.nc"
-        surface:
-          - source:
-              path: "{{example_data}}/ERA5_NA_2012.nc"
-          - source:
-              path: "{{example_data}}/coarsened_UNIFIED_bgc_dataset_v2_1.nc"
-        boundary:
-          source:
-            path: "{{example_data}}/GLORYS_NA_2012.nc"
-          bgc_sources:
-            - source:
-                path: "{{example_data}}/coarsened_UNIFIED_bgc_dataset_v2_1.nc"
     compute_overrides:
       local:
-        max_walltime: "00:30:00"
+        max_walltime: "02:00:00"   # generous: on a cold cache it downloads the 10 GB UNIFIED climatology
 
   - name: forge_child
     application: forge
@@ -82,13 +56,6 @@ steps:
       - forge_parent
     # A nested child takes its initial state and boundaries from the parent run, so its
     # blueprint has surface forcing only.
-    blueprint_overrides:
-      forcing:
-        surface:
-          - source:
-              path: "{{example_data}}/ERA5_NA_2012.nc"
-          - source:
-              path: "{{example_data}}/coarsened_UNIFIED_bgc_dataset_v2_1.nc"
     compute_overrides:
       local:
         max_walltime: "00:30:00"
@@ -98,7 +65,6 @@ steps:
     blueprint: ./forge_parent_up.yaml
     depends_on:
       - forge_parent
-    blueprint_overrides: *parent_sources
     compute_overrides:
       local:
         max_walltime: "00:30:00"

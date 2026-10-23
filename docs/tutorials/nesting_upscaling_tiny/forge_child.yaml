@@ -63,7 +63,7 @@ forcing:
       name: ERA5
       climatology: false
       glorys_layout: null
-      path: '{{example_data}}/ERA5_NA_2012.nc'
+      path: null
       constants: null
       esper_method: null
       esper_equation: null
@@ -82,7 +82,7 @@ forcing:
       name: UNIFIED
       climatology: true
       glorys_layout: null
-      path: '{{example_data}}/coarsened_UNIFIED_bgc_dataset_v2_1.nc'
+      path: null
       constants: null
       esper_method: null
       esper_equation: null
@@ -101,6 +101,16 @@ forcing:
   tidal: []
   river: []
   resolved_datasets:
+    ERA5:
+      dataset_key: ERA5
+      dataset_id: null
+      url: null
+      streamable: true
+    UNIFIED:
+      dataset_key: UNIFIED_BGC
+      dataset_id: null
+      url: https://drive.google.com/uc?id=1NKbAe1ARtU68Np3bcwdd7nadeEUgdcef
+      streamable: false
     ETOPO5:
       dataset_key: ETOPO5
       dataset_id: null
@@ -132,7 +142,9 @@ cdr:
         - 0.0
   cdr_forcing_file: null
 datasets:
+- ERA5
 - ETOPO5
+- UNIFIED_BGC
 model_settings:
   cppdefs:
     sponge_tune: false

@@ -94,6 +94,14 @@ MAX_CLOSURE_FRACTION = 0.10
 """The largest share of the final flux-based uptake the closure residual may be."""
 CONSERVATION_RTOL = 1e-3
 """How far ``parent_up``'s injected alkalinity may be from the upscaled file's flux."""
+REGISTRY_SOURCES = {
+    "GLORYS": "GLORYS_NA_2012.nc",
+    "ERA5": "ERA5_NA_2012.nc",
+    "UNIFIED": "coarsened_UNIFIED_bgc_dataset_v2_1.nc",
+}
+"""The pinned registry file that stands in for each source the example's Forge downloads."""
+REGISTRY_GLORYS_START = "2012-01-01T12:00:00"
+"""The first record of the registry's GLORYS extract, where a run with initial conditions starts."""
 MISSING_TOOLS = [
     tool
     for tool, found in {
@@ -134,16 +142,62 @@ class NestingRun:
         )
 
 
-def write_workplan(path: Path) -> Path:
-    """Write a copy of the example workplan that pins the ucla-roms ref under test.
+def with_registry_sources(
+    blueprint: dict[str, t.Any], data: dict[str, Path]
+) -> dict[str, t.Any]:
+    """Point ``blueprint``'s forcing sources at the pinned registry files.
+
+    The example's blueprints leave every source path empty, so Forge downloads GLORYS
+    (which needs a Copernicus Marine login) and UNIFIED and streams ERA5. CI has neither
+    the login nor the time, so each source gets its ``REGISTRY_SOURCES`` file, and the
+    sources leave ``resolved_datasets`` and ``datasets`` as the resolver leaves them for
+    a source with a path: Forge stages every dataset ``datasets`` lists, path or not.
+
+    Copernicus stamps a GLORYS daily mean at midnight, where the example's parent runs
+    start, but the extract has only a noon record, so a blueprint with initial conditions
+    starts at ``REGISTRY_GLORYS_START`` instead, with ``ntimes`` to match.
+
+    Returns
+    -------
+    dict
+        ``blueprint``, changed in place.
+    """
+    forcing = blueprint["forcing"]
+    blocks = [forcing[k] for k in ("initial_conditions", "boundary") if forcing.get(k)]
+    sources = [block["source"] for block in [*blocks, *forcing["surface"]]]
+    sources += [bgc["source"] for block in blocks for bgc in block["bgc_sources"]]
+    for source in sources:
+        source["path"] = str(data[REGISTRY_SOURCES[source["name"]]])
+    forcing["resolved_datasets"] = {
+        name: dataset
+        for name, dataset in forcing["resolved_datasets"].items()
+        if name not in REGISTRY_SOURCES
+    }
+    blueprint["datasets"] = sorted(
+        dataset["dataset_key"] for dataset in forcing["resolved_datasets"].values()
+    )
+    if forcing.get("initial_conditions"):
+        run = blueprint["run"]
+        run["start_date"] = REGISTRY_GLORYS_START
+        length = datetime.fromisoformat(run["end_date"]) - datetime.fromisoformat(
+            REGISTRY_GLORYS_START
+        )
+        stepping = blueprint["model_settings"]["time_stepping"]
+        stepping["ntimes"] = round(length.total_seconds() / stepping["dt"])
+    return blueprint
+
+
+def write_workplan(path: Path, data: dict[str, Path]) -> Path:
+    """Write a copy of the example workplan and its forge blueprints for the run under test.
 
     The example's forge blueprints come from the bundled ``roms-marbl-0.11-default``
     ModelSpec, so they build ucla-roms 0.11.0, the default ref of this suite
     (``PINNED_ROMS_REF``), which conserves the upscaled flux. The weekly workflow sets
     ``CSTAR_IT_ROMS_REF`` to each ref it covers (0.11.0 and main), so every forge step
     adds ``code.roms.commit`` to its ``blueprint_overrides``: the published blueprints,
-    and with them the ROMS the next steps build, are for that ref. The copy names its
-    forge blueprints by absolute path because it does not sit next to them.
+    and with them the ROMS the next steps build, are for that ref. The blueprint copies
+    sit next to the workplan copy and read the pinned registry data
+    (`with_registry_sources`).
 
     Returns
     -------
@@ -154,7 +208,13 @@ def write_workplan(path: Path) -> Path:
     for step in workplan["steps"]:
         if step["application"] != "forge":
             continue
-        step["blueprint"] = str(EXAMPLE_DIR / step["blueprint"])
+        name = Path(step["blueprint"]).name
+        blueprint = yaml.safe_load((EXAMPLE_DIR / name).read_text())
+        copy = path.parent / name
+        copy.write_text(
+            yaml.safe_dump(with_registry_sources(blueprint, data), sort_keys=False)
+        )
+        step["blueprint"] = str(copy)
         step["blueprint_overrides"] = {
             **step.get("blueprint_overrides", {}),
             "code": {"roms": {"commit": ROMS_REF}},
@@ -204,22 +264,11 @@ def _schedule_and_wait(
     NestingRun
         The finished run.
     """
-    workplan = write_workplan(root / "workplan.yaml")
+    workplan = write_workplan(root / "workplan.yaml", integration_test_data)
     env = make_cli_env(root, shim)
-    # pooch keeps every registry file in one cache directory
-    example_data = integration_test_data["GLORYS_NA_2012.nc"].parent
 
     started = time.monotonic()
-    proc = run_cstar(
-        env,
-        "workplan",
-        "run",
-        str(workplan),
-        "--var",
-        f"example_data={example_data}",
-        "--run-id",
-        RUN_ID,
-    )
+    proc = run_cstar(env, "workplan", "run", str(workplan), "--run-id", RUN_ID)
     data_home = root / "data"
     output = f"stdout:\n{proc.stdout}\nstderr:\n{proc.stderr}"
     if proc.returncode != 0:
