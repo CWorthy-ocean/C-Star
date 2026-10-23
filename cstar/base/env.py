@@ -1,13 +1,18 @@
 import os
 import sys
+import textwrap
 import typing as t
 from collections import defaultdict
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from functools import lru_cache
 from importlib import import_module
 from pathlib import Path
+
+from dotenv import dotenv_values
+
+from cstar.base.exceptions import CstarUserConfigError
 
 if t.TYPE_CHECKING:
     from types import ModuleType
@@ -34,6 +39,8 @@ CONSTANT_PREFIX: t.Final[str] = "ENV_"
 """The common prefix used to name an annotated environment variable constant."""
 NOT_SET: t.Final[str] = "<not-set>"
 """Default description and default for variables missing annotations."""
+USER_CONFIG_FILENAME: t.Final[str] = "config.env"
+"""The name of the user's configuration file under the config home."""
 
 
 @dataclass(slots=True)
@@ -452,3 +459,234 @@ def env_var_groups(include_internal: bool = False) -> dict[str, list[EnvItem]]:
             groups[item.group].append(item)
 
     return groups
+
+
+def user_config_path() -> Path:
+    """The user's configuration file, ``config.env`` under the config home.
+
+    The config home is resolved from the process environment alone
+    (``CSTAR_CONFIG_HOME``, then ``XDG_CONFIG_HOME``): the file cannot relocate
+    itself. Imported lazily because ``cstar.execution.file_system`` imports this
+    module.
+    """
+    from cstar.execution.file_system import DirectoryManager
+
+    return DirectoryManager.config_home() / USER_CONFIG_FILENAME
+
+
+def user_config_problems(names: Iterable[str]) -> list[str]:
+    """Explain why each of `names` may not appear in the configuration file.
+
+    A name passes when it is a registered, persistable setting that is not a
+    feature flag; the list is empty when every name passes.
+
+    Parameters
+    ----------
+    names : Iterable[str]
+        The keys to check, in the order to report them.
+
+    Returns
+    -------
+    list[str]
+        One message per offending name.
+    """
+    registry = discover_env_vars()
+    problems: list[str] = []
+    for name in names:
+        if name in REMOVED_SETTINGS:
+            problems.append(f"{name} has no effect; {REMOVED_SETTINGS[name].guidance}")
+        elif (item := registry.get(name)) is None:
+            problems.append(f"{name} is not a C-Star setting")
+        elif item.group == GROUP_FF:
+            problems.append(f"{name} is a feature flag; export it in the shell instead")
+        elif not item.persistable:
+            problems.append(f"{name} cannot be set from the configuration file")
+    return problems
+
+
+def read_user_config(path: Path) -> dict[str, str]:
+    """Parse the configuration file at `path`, validating its keys.
+
+    Values have ``~`` and ``$VAR`` references expanded against the process
+    environment. A key written without a value (``CSTAR_X=``) yields an empty
+    string, as an exported empty variable would; a bare name with no ``=`` is
+    rejected rather than guessed at.
+
+    Parameters
+    ----------
+    path : Path
+        The file to read; a missing file reads as empty.
+
+    Returns
+    -------
+    dict[str, str]
+        The settings the file names, in file order.
+
+    Raises
+    ------
+    CstarUserConfigError
+        Naming the file and every key it may not set, or why the file cannot
+        be read.
+    """
+    if not path.is_file():
+        return {}
+
+    try:
+        entries = dotenv_values(path)
+    except (OSError, UnicodeDecodeError) as ex:
+        msg = f"The configuration file {path} cannot be read: {ex}"
+        raise CstarUserConfigError(msg) from ex
+
+    rejected = {name for name in entries if user_config_problems([name])}
+    problems = user_config_problems(entries.keys()) + [
+        f"{name} has no value; write {name}=<value> or comment the line out"
+        for name, value in entries.items()
+        if value is None and name not in rejected
+    ]
+    if problems:
+        listing = "\n".join(f"  - {problem}" for problem in problems)
+        msg = f"The configuration file {path} names settings it may not set:\n{listing}"
+        raise CstarUserConfigError(msg)
+
+    return {
+        name: os.path.expandvars(os.path.expanduser(value or ""))
+        for name, value in entries.items()
+    }
+
+
+@dataclass(frozen=True, slots=True)
+class UserConfig:
+    """What `load_user_config` found and exported."""
+
+    path: Path
+    """The configuration file that was looked for."""
+    applied: Mapping[str, str]
+    """The settings the file supplied to the environment, with the values it gave
+    them; a setting the shell had already exported is not among them."""
+
+
+@lru_cache
+def load_user_config() -> UserConfig:
+    """Export the user's configuration file into the environment, once per process.
+
+    Each entry is applied with ``os.environ.setdefault``, so an exported variable
+    always wins over the file, and the file over the defaults every reader of the
+    environment falls back to (`EnvItem.value`, ``os.getenv``, pydantic settings,
+    typer ``envvar`` bindings). Loading into the environment also means step
+    subprocesses inherit the settings and a run record captures them.
+
+    Called from the CLI root callback and from `CStarSystemManager` so library
+    use loads it too; never at import time.
+
+    Returns
+    -------
+    UserConfig
+        The file's path and the settings it supplied.
+
+    Raises
+    ------
+    CstarUserConfigError
+        Naming the file and every key it may not set.
+    """
+    path = user_config_path()
+    applied = {
+        name: value
+        for name, value in read_user_config(path).items()
+        if name not in os.environ
+    }
+    for name, value in applied.items():
+        os.environ.setdefault(name, value)
+    return UserConfig(path=path, applied=applied)
+
+
+USER_CONFIG_HEADER: t.Final[str] = """\
+# C-Star configuration. Settings here apply to every cstar command; an exported
+# environment variable of the same name takes precedence. Lines starting with
+# `#` are comments; uncomment a setting and give it a value to use it.
+"""
+"""The comment block that opens a rendered configuration file."""
+
+
+def render_setting_block(item: EnvItem, value: str | None = None) -> str:
+    """Render one setting as a commented description followed by its line.
+
+    Parameters
+    ----------
+    item : EnvItem
+        The setting to render.
+    value : str | None
+        The value to set; `None` renders the setting commented out (``# NAME=``).
+
+    Returns
+    -------
+    str
+        The block, ending in a newline.
+    """
+    description = textwrap.fill(
+        item.description, width=78, initial_indent="# ", subsequent_indent="# "
+    )
+    default = f"# Default: {item.default or NOT_SET}"
+    line = (
+        f"{item.name}={format_user_config_value(value)}"
+        if value is not None
+        else f"# {item.name}="
+    )
+    return f"{description}\n{default}\n{line}\n"
+
+
+def format_user_config_value(value: str) -> str:
+    """Quote a value when the dotenv format would otherwise misread it.
+
+    A bare value runs to the end of the line, except that `` #`` begins a
+    comment and a leading quote starts a quoted value; quoting protects
+    whitespace, ``#`` and a quote character. ``~`` and ``$VAR`` are still
+    expanded when the file is read, quoted or not.
+    """
+    if (
+        not value
+        or any(c.isspace() for c in value)
+        or "#" in value
+        or value[0] in "\"'"
+    ):
+        escaped = value.replace("\\", "\\\\").replace('"', '\\"')
+        return f'"{escaped}"'
+    return value
+
+
+def render_user_config(values: Mapping[str, str]) -> str:
+    """Render a whole configuration file from the registry.
+
+    Every persistable, user-facing setting gets a block; those in `values` are
+    set, the rest are commented out so the file documents what can be set.
+
+    Parameters
+    ----------
+    values : Mapping[str, str]
+        The settings to set, by name; each must pass `user_config_problems`.
+
+    Returns
+    -------
+    str
+        The file content.
+
+    Raises
+    ------
+    CstarUserConfigError
+        Naming every key that may not be set.
+    """
+    if problems := user_config_problems(values.keys()):
+        listing = "\n".join(f"  - {problem}" for problem in problems)
+        raise CstarUserConfigError(f"Settings that cannot be written:\n{listing}")
+
+    sections = [USER_CONFIG_HEADER]
+    for group, items in env_var_groups(include_internal=False).items():
+        blocks = [
+            render_setting_block(item, values.get(item.name))
+            for item in sorted(items, key=lambda x: x.name)
+            if item.persistable and item.group != GROUP_FF
+        ]
+        if blocks:
+            sections.append(
+                f"\n# {'-' * 76}\n# {group}\n# {'-' * 76}\n\n" + "\n".join(blocks)
+            )
+    return "".join(sections)

@@ -9,6 +9,7 @@ from typing import ClassVar, Final, Protocol, override
 
 from pydantic import Field
 
+from cstar.base.env import load_user_config
 from cstar.base.exceptions import CstarError
 from cstar.base.log import get_logger
 from cstar.system.environment import (
@@ -700,8 +701,15 @@ class CStarSystemManager:
         """Initialize the CStarSystemManager.
 
         Initialize the system manager by determining the system name and initializing
-        the environment and scheduler based on that name.
+        the environment and scheduler based on that name. The user's configuration
+        file is loaded first, so library and notebook use sees it as the CLI does.
+
+        Raises
+        ------
+        CstarUserConfigError
+            If the configuration file names settings it may not set.
         """
+        load_user_config()
         self._context = get_system_context()
         self._environment = CStarEnvironment(
             system_name=self._context.name,
