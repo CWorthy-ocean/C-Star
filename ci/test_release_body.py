@@ -38,7 +38,7 @@ _SAMPLE = (
     "~~~~~~~~~~~~~~~~\n"
     "\n"
     "\n"
-    "- CSTAR_CLOBBER_WORKING_DIR is gone. Use ``--clobber all`` instead. "
+    "- The clobber environment variable is gone. Use ``--clobber all`` instead. "
     "(`#635 <https://github.com/CWorthy-ocean/C-Star/pull/635>`_)\n"
     "\n"
     "New features\n"

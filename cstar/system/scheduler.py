@@ -559,10 +559,6 @@ class SlurmScheduler(Scheduler):
 
     @property
     def in_active_allocation(self) -> bool:
-        override = os.getenv("CSTAR_IN_ACTIVE_ALLOCATION")
-        if override is not None:
-            return override.strip().lower() in {"1", "true", "yes", "on"}
-
         jupyter_env_vars = (
             "JUPYTERHUB_API_TOKEN",
             "JUPYTERHUB_USER",

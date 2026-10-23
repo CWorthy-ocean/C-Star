@@ -173,7 +173,7 @@ class RomsMarblRunner(BlueprintRunner[RomsMarblBlueprint]):
             self.simulation.attach()
         else:
             self.log.trace("Setting up simulation")
-            self.simulation.setup()
+            self.simulation.setup(clobber=self.request.clobber)
             self.log.trace("Building simulation")
             self.simulation.build()
             self.log.trace("Executing simulation pre-run")
@@ -351,6 +351,7 @@ def main() -> int:
         RomsMarblBlueprint,
         resume=args.resume,
         pre_run=args.pre_run,
+        clobber=args.clobber,
         step=args.step,
     )
     runner = RomsMarblRunner(request, service_cfg, job_cfg)

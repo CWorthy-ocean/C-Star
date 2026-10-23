@@ -337,6 +337,39 @@ def test_runnerrequest_resume_can_be_set_true(tmp_path: Path) -> None:
     assert request.resume is True
 
 
+def test_runnerrequest_clobber_defaults_false(tmp_path: Path) -> None:
+    """Verify `RunnerRequest.clobber` defaults to `False` when not supplied."""
+    fake_bp_path = tmp_path / "fake.yaml"
+    fake_bp_path.touch()
+
+    request = RunnerRequest(fake_bp_path.as_posix(), RomsMarblBlueprint)
+
+    assert request.clobber is False
+
+
+def test_runnerrequest_clobber_can_be_set_true(tmp_path: Path) -> None:
+    """Verify `RunnerRequest.clobber` is stored when explicitly supplied."""
+    fake_bp_path = tmp_path / "fake.yaml"
+    fake_bp_path.touch()
+
+    request = RunnerRequest(fake_bp_path.as_posix(), RomsMarblBlueprint, clobber=True)
+
+    assert request.clobber is True
+
+
+def test_runnerrequest_rejects_resume_with_clobber(tmp_path: Path) -> None:
+    """Verify a request cannot both resume a prior attempt and clobber its
+    working directory.
+    """
+    fake_bp_path = tmp_path / "fake.yaml"
+    fake_bp_path.touch()
+
+    with pytest.raises(ValueError, match="clobber"):
+        RunnerRequest(
+            fake_bp_path.as_posix(), RomsMarblBlueprint, resume=True, clobber=True
+        )
+
+
 def test_runnerrequest_blueprint_anchors_relative_locations(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, bp_templates_dir: Path
 ) -> None:

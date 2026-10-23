@@ -28,6 +28,9 @@ DEFAULT_OUTPUT_ROOT_NAME: t.Literal["output"] = "output"
 """A fixed `output_root_name` to be used when generating outputs with ROMS."""
 
 
+MAX_CONCURRENCY: t.Final[int] = 10
+"""The maximum number of concurrent disk IO operations."""
+
 WALLTIME_RE = r"^((\d{1,2}-\d{1,2}|\d{1,3}):)?(\d{2}):(\d{2})$"
 """Regex for the SLURM walltime forms C-Star accepts: `MM:SS`, `H:MM:SS` with one
 to three hour digits (`30:00:00` is thirty hours), or `D-H:MM:SS` with one or two

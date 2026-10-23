@@ -10,11 +10,9 @@ from unittest import mock
 import pytest
 
 from cstar.base.env import (
-    ENV_CSTAR_CLI_DRY_RUN,
-    ENV_CSTAR_CLI_VERBOSE,
-    ENV_CSTAR_CLOBBER_WORKING_DIR,
     ENV_CSTAR_DISABLE_MIGRATION,
     ENV_CSTAR_PROJECT_HOME,
+    REMOVED_SETTINGS,
 )
 from cstar.execution.file_system import StateDirectoryManager
 from cstar.tests.unit_tests.orchestration.manifest_runs import (
@@ -96,19 +94,14 @@ def squash_cli_output() -> Callable[[str], str]:
 
 @pytest.fixture(autouse=True)
 def clean_flag_env() -> Generator[None]:
-    """Remove CLI flag environment variables that may leak in from the shell.
+    """Remove settings exported in the shell that would change CLI test behavior.
 
-    The CLI reads these flags via `envvar=` and the environment, so a value
-    exported by a prior CLI run (`set_flag` never unsets them) would silently
-    change test behavior. Tests opt back in with their own `mock.patch.dict`.
+    A value of `CSTAR_DISABLE_MIGRATION` changes what the commands do, and an
+    exported removed setting adds a warning to stderr. Tests opt back in with
+    their own `mock.patch.dict`.
     """
     with mock.patch.dict(os.environ):
-        for flag in (
-            ENV_CSTAR_CLI_DRY_RUN,
-            ENV_CSTAR_CLI_VERBOSE,
-            ENV_CSTAR_CLOBBER_WORKING_DIR,
-            ENV_CSTAR_DISABLE_MIGRATION,
-        ):
+        for flag in (ENV_CSTAR_DISABLE_MIGRATION, *REMOVED_SETTINGS):
             os.environ.pop(flag, None)
         yield
 

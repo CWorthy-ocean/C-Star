@@ -12,9 +12,7 @@ from pydantic import (
 )
 
 from cstar.base.adapter import SchemaAdapter, SchemaBreak
-from cstar.base.env import ENV_CSTAR_CLI_DRY_RUN, ENV_CSTAR_CLOBBER_WORKING_DIR
 from cstar.base.exceptions import CstarError
-from cstar.base.feature import is_flag_enabled
 from cstar.base.log import LoggingMixin
 
 KEY_SV: t.Final[str] = "schema_version"
@@ -84,19 +82,14 @@ class MigrationRequest(BaseModel):
         description="Enable to overwrite the source file with the migrated content",
         frozen=True,
     )
+    dry_run: bool = Field(
+        default=False,
+        description="Enable to plan the migration without executing or persisting it",
+        frozen=True,
+    )
 
     config: t.ClassVar[ConfigDict] = ConfigDict(str_strip_whitespace=True)
     """Model configuration ensuring attributes have whitespace stripped."""
-
-    @classmethod
-    def dry_run(cls) -> bool:
-        """Return `True` if dry-run is enabled."""
-        return is_flag_enabled(ENV_CSTAR_CLI_DRY_RUN)
-
-    @classmethod
-    def clobber(cls) -> bool:
-        """Return `True` if clobber is enabled."""
-        return is_flag_enabled(ENV_CSTAR_CLOBBER_WORKING_DIR)
 
 
 class MigrationPlan(t.NamedTuple):

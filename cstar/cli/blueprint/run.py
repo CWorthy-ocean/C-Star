@@ -12,12 +12,7 @@ from cstar.applications.core import (
     RunnerRequest,
     get_app_for_blueprint,
 )
-from cstar.base.env import (
-    ENV_CSTAR_CLI_VERBOSE,
-    ENV_CSTAR_CLOBBER_WORKING_DIR,
-    ENV_CSTAR_LOG_LEVEL,
-    get_env_item,
-)
+from cstar.base.env import ENV_CSTAR_LOG_LEVEL, get_env_item
 from cstar.base.exceptions import CstarError
 from cstar.base.log import LogLevelChoices, get_logger
 from cstar.base.utils import utc_now
@@ -28,7 +23,6 @@ from cstar.cli.common import (
     localize_and_migrate,
     report_schema_error,
     set_env,
-    set_flag,
     update_loggers,
 )
 from cstar.entrypoint.config import get_job_config, get_service_config
@@ -97,6 +91,8 @@ def path_callback(
     if necessary, and stores the updated blueprint in the context for later
     use. An up-to-date blueprint is used as-is; set `CSTAR_DISABLE_MIGRATION`
     to fail instead of migrating when the blueprint is not current.
+    `--verbose` (an option, so already in `ctx.params`) selects the detailed
+    display of a planned migration.
 
     Parameters
     ----------
@@ -122,7 +118,9 @@ def path_callback(
         log.info(msg)
 
     try:
-        localized_path, _ = localize_and_migrate(path)
+        localized_path, _ = localize_and_migrate(
+            path, verbose=ctx.params.get("verbose", False)
+        )
         return str(localized_path)
     except SCHEMA_ERRORS as ex:
         report_schema_error(path, ex)
@@ -220,12 +218,7 @@ def run(
     ] = LogLevelChoices.INFO,
     clobber: t.Annotated[
         bool,
-        typer.Option(
-            ARG_CLOBBER,
-            callback=set_flag(ENV_CSTAR_CLOBBER_WORKING_DIR),
-            help=ARG_CLOBBER_HELP,
-            envvar=ENV_CSTAR_CLOBBER_WORKING_DIR,
-        ),
+        typer.Option(ARG_CLOBBER, help=ARG_CLOBBER_HELP),
     ] = False,
     directive_uri: t.Annotated[
         str | None,
@@ -241,8 +234,6 @@ def run(
         typer.Option(
             ARG_VERBOSE,
             help=ARG_VERBOSE_HELP,
-            callback=set_flag(ENV_CSTAR_CLI_VERBOSE),
-            envvar=ENV_CSTAR_CLI_VERBOSE,
         ),
     ] = False,
     resume: t.Annotated[
@@ -315,7 +306,12 @@ def run(
             raise typer.Exit(code=1) from ex
 
     request = RunnerRequest(
-        uri, app_config.blueprint, resume=resume, pre_run=pre_run, step=step
+        uri,
+        app_config.blueprint,
+        resume=resume,
+        pre_run=pre_run,
+        clobber=clobber,
+        step=step,
     )
 
     runner = app_config.runner(request, service_cfg, job_cfg)

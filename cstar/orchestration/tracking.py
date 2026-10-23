@@ -10,10 +10,9 @@ from pathlib import Path
 
 from pydantic import BaseModel, Field, PrivateAttr
 
-from cstar.base.env import max_concurrency
 from cstar.base.exceptions import CstarError
 from cstar.base.log import LoggingMixin, get_logger
-from cstar.base.utils import slugify, utc_now
+from cstar.base.utils import MAX_CONCURRENCY, slugify, utc_now
 from cstar.execution.file_system import (
     UNKNOWN_SIZE,
     StateDirectoryManager,
@@ -873,8 +872,9 @@ class TrackingRepository(LoggingMixin):
         Sequence[WorkplanRun]
             The successfully deserialized run records.
         """
-        limit = max_concurrency()
-        results = await read_all(run_paths, _try_read_run, limit, sem=self._sem)
+        results = await read_all(
+            run_paths, _try_read_run, MAX_CONCURRENCY, sem=self._sem
+        )
 
         runs: list[WorkplanRun] = []
         unreadable: list[Path] = []

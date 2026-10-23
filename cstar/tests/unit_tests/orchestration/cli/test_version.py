@@ -1,12 +1,14 @@
-"""Tests for the ``cstar --version`` output."""
+"""Tests for the ``cstar --version`` output and the common CLI callback."""
 
 from importlib.metadata import PackageNotFoundError
 from unittest import mock
 
+import pytest
 import typer
 from typer.testing import CliRunner
 
 import cstar
+from cstar.base.env import REMOVED_SETTINGS
 from cstar.cli.common import common_callback
 
 
@@ -14,7 +16,7 @@ def make_app() -> typer.Typer:
     app = typer.Typer(callback=common_callback)
 
     @app.command()
-    def noop() -> None:  # pragma: no cover - never invoked with --version
+    def noop() -> None:
         pass
 
     return app
@@ -59,3 +61,34 @@ def test_version_companion_packages_missing() -> None:
     assert lines[0].startswith("cstar executable location: ")
     assert lines[1] == f"C-Star version: {cstar.__version__}"
     assert len(lines) == 2
+
+
+@pytest.mark.parametrize("name", sorted(REMOVED_SETTINGS))
+def test_removed_setting_warns_on_stderr(
+    monkeypatch: pytest.MonkeyPatch, name: str
+) -> None:
+    """An exported removed setting is reported on stderr, with its guidance,
+    and never on stdout.
+
+    Parameters
+    ----------
+    monkeypatch : pytest.MonkeyPatch
+        Fixture used to export the setting.
+    name : str
+        The name of a removed setting.
+    """
+    monkeypatch.setenv(name, "1")
+
+    result = CliRunner().invoke(make_app(), ["noop"], color=False)
+
+    assert result.exit_code == 0
+    assert f"{name} has no effect; {REMOVED_SETTINGS[name]}" in result.stderr
+    assert name not in result.stdout
+
+
+def test_no_warning_without_removed_settings() -> None:
+    """Nothing is written to stderr when no removed setting is exported."""
+    result = CliRunner().invoke(make_app(), ["noop"], color=False)
+
+    assert result.exit_code == 0
+    assert not result.stderr

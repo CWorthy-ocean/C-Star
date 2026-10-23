@@ -25,7 +25,7 @@ from docutils import nodes  # noqa: F401
 from docutils.parsers.rst import Directive
 from sphinx.application import Sphinx
 
-from cstar.base.env import EnvItem, discover_env_vars
+from cstar.base.env import GROUP_INTERNAL, EnvItem, discover_env_vars
 
 logging.basicConfig(level=logging.DEBUG)
 
@@ -84,8 +84,10 @@ class EnvVarTableDirective(Directive):
         env_vars = discover_env_vars()
         groups: dict[str, list[EnvVarRow]] = defaultdict(list)
 
+        # internal variables are set by C-Star for its own processes, not by users
         for var in env_vars.values():
-            groups[var.group].append(EnvVarRow(var))
+            if var.group != GROUP_INTERNAL:
+                groups[var.group].append(EnvVarRow(var))
 
         return groups
 

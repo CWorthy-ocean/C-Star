@@ -12,15 +12,13 @@ from pydantic import BaseModel, Field, PrivateAttr
 from rich.console import Console
 from rich.prompt import Prompt
 
-from cstar.base.env import ENV_CSTAR_CLI_DRY_RUN, ENV_CSTAR_RUNID
+from cstar.base.env import ENV_CSTAR_RUNID
 from cstar.base.exceptions import CstarError
-from cstar.base.feature import is_flag_enabled
 from cstar.base.log import get_logger
 from cstar.cli.common import (
     cb_pipeline,
     normalize_runid,
     set_env,
-    set_flag,
 )
 from cstar.cli.workplan.shared import colored, list_runs
 from cstar.entrypoint.utils import ARG_DRY_RUN
@@ -160,7 +158,6 @@ class FileSystemCleanupAction(CleanupAction):
         -------
         `True` if cleanup was completed (or unnecessary), `False` otherwise.
         """
-        dry_run = is_flag_enabled(ENV_CSTAR_CLI_DRY_RUN)
         results = CleanupResult(name=self.name)
         self._results = results
 
@@ -175,18 +172,17 @@ class FileSystemCleanupAction(CleanupAction):
             asset_type = "file" if asset.is_file() else "directory"
 
             try:
-                if not dry_run:
-                    if keeps := self._keeps_in(asset):
-                        for child in list(_removable(asset, keeps)):
-                            if child.is_dir() and not child.is_symlink():
-                                shutil.rmtree(child)
-                            else:
-                                child.unlink()
-                    elif asset_type == "directory":
-                        shutil.rmtree(asset)
-                    elif asset_type == "file":
-                        asset.unlink()
-                    state = asset_key, CleanupStatus.DONE, ""
+                if keeps := self._keeps_in(asset):
+                    for child in list(_removable(asset, keeps)):
+                        if child.is_dir() and not child.is_symlink():
+                            shutil.rmtree(child)
+                        else:
+                            child.unlink()
+                elif asset_type == "directory":
+                    shutil.rmtree(asset)
+                elif asset_type == "file":
+                    asset.unlink()
+                state = asset_key, CleanupStatus.DONE, ""
             except Exception:
                 msg = f"An error occurred cleaning up {asset_type}: {asset}"
                 state = asset_key, CleanupStatus.INCOMPLETE, msg
@@ -308,13 +304,17 @@ def display_groups(displays: Iterable[list[str]], msg: str, color: str) -> None:
             console.print(item)
 
 
-async def perform_actions(actions: Sequence[CleanupAction]) -> int:
+async def perform_actions(
+    actions: Sequence[CleanupAction], dry_run: bool = False
+) -> int:
     """Perform all specified clean-up actions.
 
     Parameters
     ----------
     actions : Sequence[CleanupAction]
         The cleanup actions that will be processed.
+    dry_run : bool
+        Display the assets that would be removed without removing them.
 
     Returns
     -------
@@ -323,7 +323,6 @@ async def perform_actions(actions: Sequence[CleanupAction]) -> int:
     """
     COLOR_READY: t.Final[str] = "white"
     COLOR_EXECUTED: t.Final[str] = "red"
-    dry_run = is_flag_enabled(ENV_CSTAR_CLI_DRY_RUN)
     msg, color = "Will remove", COLOR_READY
 
     if not dry_run:
@@ -541,10 +540,6 @@ def clean(
         typer.Option(
             ARG_DRY_RUN,
             help="Enumerate the assets that will be removed without performing any deletions",
-            callback=cb_pipeline(
-                set_flag(ENV_CSTAR_CLI_DRY_RUN),
-            ),
-            envvar=ENV_CSTAR_CLI_DRY_RUN,
         ),
     ] = False,
 ) -> None:
@@ -561,7 +556,7 @@ def clean(
         run_actions = get_run_actions(run_id)
         todo = actions_filter_prompt(run_actions, yes)
 
-    asyncio.run(perform_actions(todo))
+    asyncio.run(perform_actions(todo, dry_run=dry_run))
 
 
 if __name__ == "__main__":

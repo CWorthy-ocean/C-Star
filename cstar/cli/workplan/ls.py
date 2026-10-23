@@ -13,9 +13,10 @@ from rich.console import ConsoleRenderable
 from rich.table import Column, Table
 from rich.text import Text
 
-from cstar.base.env import ENV_CSTAR_PROJECT_HOME, max_concurrency
+from cstar.base.env import ENV_CSTAR_PROJECT_HOME
 from cstar.base.exceptions import CstarError
 from cstar.base.log import get_logger
+from cstar.base.utils import MAX_CONCURRENCY
 from cstar.cli.workplan.shared import console, load_workplans, refresh_disk_usage
 from cstar.entrypoint.utils import (
     ARG_ALL,
@@ -604,7 +605,7 @@ def ls_runs(
         """List, filter, optionally re-measure, and adapt runs for display."""
         tracked: list[WorkplanRun] = []
         if not only_shared:
-            async with TrackingRepository.bound(max_concurrency()) as repo:
+            async with TrackingRepository.bound(MAX_CONCURRENCY) as repo:
                 tracked = list(await repo.list_latest_runs(runid_filter))
 
         others = (

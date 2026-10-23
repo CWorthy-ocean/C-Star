@@ -15,12 +15,7 @@ from unittest import mock
 import pytest
 
 from cstar.applications.hello_world import HelloWorldBlueprint
-from cstar.base.env import (
-    ENV_CSTAR_CLOBBER_WORKING_DIR,
-    ENV_CSTAR_RUNID,
-    FLAG_OFF,
-    FLAG_ON,
-)
+from cstar.base.env import ENV_CSTAR_RUNID
 from cstar.base.exceptions import CstarError, CstarExpectationFailed
 from cstar.base.utils import slugify
 from cstar.entrypoint.utils import ARG_CLOBBER, ARG_PRE_RUN, ARG_RUN_ID
@@ -37,7 +32,6 @@ from cstar.orchestration.dag_runner import (
     ExecutiveRunSummary,
     NoPreparableStepsError,
     _carry_inputs,
-    _ignore_ambient_clobber_env,
     _record_attempt,
     apply_clobber_overrides,
     apply_pre_run_overrides,
@@ -114,7 +108,6 @@ from cstar.orchestration.serialization import (
 )
 from cstar.orchestration.state import StateRepository
 from cstar.orchestration.tracking import KEY_RUN_UUID, TrackingRepository, WorkplanRun
-from cstar.orchestration.utils import ENV_CSTAR_ORCH_DELAYS
 from cstar.tests.unit_tests.orchestration.conftest import (
     EXTERNAL_TOKEN,
     ExternalTaskFactory,
@@ -428,56 +421,6 @@ def _make_workplan(steps: list[Step]) -> Workplan:
         description="A workplan used to test `_apply_clobber_overrides`",
         steps=steps,
     )
-
-
-@pytest.mark.parametrize("value", [FLAG_ON, "boo", "  "])
-def test_ignore_ambient_clobber_env_pops_and_warns(
-    monkeypatch: pytest.MonkeyPatch,
-    caplog: pytest.LogCaptureFixture,
-    value: str,
-) -> None:
-    """An exported CSTAR_CLOBBER_WORKING_DIR is scrubbed (so it cannot leak
-    into every step subprocess) and the user is pointed at `--clobber`.
-    """
-    monkeypatch.setenv(ENV_CSTAR_CLOBBER_WORKING_DIR, value)
-
-    with caplog.at_level("WARNING"):
-        _ignore_ambient_clobber_env()
-
-    assert ENV_CSTAR_CLOBBER_WORKING_DIR not in os.environ
-    assert len(caplog.records) == 1
-    assert ENV_CSTAR_CLOBBER_WORKING_DIR in caplog.text
-    assert ARG_CLOBBER in caplog.text
-
-
-def test_ignore_ambient_clobber_env_silent_when_off(
-    monkeypatch: pytest.MonkeyPatch,
-    caplog: pytest.LogCaptureFixture,
-) -> None:
-    """An explicit "off" value is scrubbed without a warning (it would have
-    had no effect on the steps).
-    """
-    monkeypatch.setenv(ENV_CSTAR_CLOBBER_WORKING_DIR, FLAG_OFF)
-
-    with caplog.at_level("WARNING"):
-        _ignore_ambient_clobber_env()
-
-    assert ENV_CSTAR_CLOBBER_WORKING_DIR not in os.environ
-    assert not caplog.records
-
-
-def test_ignore_ambient_clobber_env_noop_when_unset(
-    monkeypatch: pytest.MonkeyPatch,
-    caplog: pytest.LogCaptureFixture,
-) -> None:
-    """Absence of the variable is a silent no-op."""
-    monkeypatch.delenv(ENV_CSTAR_CLOBBER_WORKING_DIR, raising=False)
-
-    with caplog.at_level("WARNING"):
-        _ignore_ambient_clobber_env()
-
-    assert ENV_CSTAR_CLOBBER_WORKING_DIR not in os.environ
-    assert not caplog.records
 
 
 def test_apply_clobber_overrides_noop_when_none(tmp_path: Path) -> None:
@@ -3015,7 +2958,7 @@ async def test_run_dag_records_every_submission_in_the_manifest(
     submission time of every step: the steps launched in one pass, writing the
     manifest together, each keep their own, and so does a step launched later.
     """
-    monkeypatch.setenv(ENV_CSTAR_ORCH_DELAYS, "0")
+    monkeypatch.setattr("cstar.orchestration.dag_runner.POLL_DELAYS", (0.0,))
     bp = hello_world_bp_path.as_posix()
     wp = Workplan(
         name="submitted",
