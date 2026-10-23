@@ -108,6 +108,12 @@ attaches to the existing run; give a new ``--run-id`` to start over.
 What each step does
 -------------------
 
+This is the workplan you ran. The header comments explain each step.
+
+.. literalinclude:: nesting_upscaling_tiny/workplan.yaml
+   :language: yaml
+   :caption: workplan.yaml
+
 The ROMS steps use ucla-roms 0.11.0 with MARBL and ParallelIO, and each runs
 on 4 MPI ranks (a 2 by 2 tiling). The times are from a 10-core laptop that
 was also busy with other work, with the source data already downloaded; the
@@ -115,63 +121,10 @@ whole workplan took about 20 minutes, and takes less on an idle machine. The
 time of a ROMS step includes building its own ROMS executable: the three ROMS
 steps are three different builds.
 
-.. list-table::
-   :header-rows: 1
-   :widths: 16 14 58 12
-
-   * - Step
-     - Application
-     - What it does
-     - Wall time
-   * - ``forge_parent``
-     - ``forge``
-     - Builds the parent grid and its initial, surface and boundary forcing
-       (2012-01-01 00:00 to 01-03 07:00), and prepares the hourly boundary
-       extraction for the child
-     - 1:33
-   * - ``forge_child``
-     - ``forge``
-     - Builds the child grid, its surface forcing and the ALK release (a
-       nested child has no initial or boundary forcing of its own)
-     - 1:06
-   * - ``forge_parent_up``
-     - ``forge``
-     - Builds the parent grid again, with the CDR mode ``upscaled``
-     - 2:00
-   * - ``parent``
-     - ``roms_marbl``
-     - Runs the parent, writes the child's boundary data and a restart every
-       6 hours
-     - 7:16
-   * - ``nest_ic``
-     - ``nest_ic``
-     - Regrids the parent's restart at 2012-01-02 06:00 onto the child grid
-     - 10 s
-   * - ``child``
-     - ``roms_marbl``
-     - Runs 2012-01-02 06:00 to 01-03 06:00 with ``continue-from: nest_ic`` and
-       ``nest-from: parent``; releases ALK and writes the ``_uscl`` and
-       ``_cdr`` output
-     - 7:21
-   * - ``upscale``
-     - ``upscaler``
-     - Turns the child's ``_uscl`` files into ``upscaled_cdr.nc``
-     - 1 s
-   * - ``parent_up``
-     - ``roms_marbl``
-     - Reruns the parent grid from the parent's restart at the child's start,
-       with ``upscaled_cdr.nc`` as its CDR forcing, to the child's end
-     - 3:17
-   * - ``cdr_metrics``
-     - ``cdr_metrics``
-     - Computes the CO2 uptake and CDR efficiency of the release from the
-       child's and ``parent_up``'s ``_cdr`` output
-     - 5 s
-
 The release is alkalinity at 2e6 meq/s for four hours, from the child's
 start. The workplan's three forge steps share nothing, but
 ``forge_child`` and ``forge_parent_up`` wait for ``forge_parent`` so that
-first-time downloads happen once; see the comments in the workplan below.
+first-time downloads happen once.
 
 .. _tutorial-nesting-upscaling-outputs:
 
@@ -261,14 +214,6 @@ export, is never applied. Here that is 1 hour of 24. The weekly extended
 integration test checks that ``parent_up`` injects the upscaled alkalinity on
 every record but the last.
 
-The workplan
-------------
-
-This is the workplan you ran. The header comments explain each step.
-
-.. literalinclude:: nesting_upscaling_tiny/workplan.yaml
-   :language: yaml
-   :caption: workplan.yaml
 
 Where to go next
 ----------------
