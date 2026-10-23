@@ -971,6 +971,37 @@ An attached run is never relaunched: ``--run-id`` and ``--resume`` refuse it. To
 
 Pass ``--verify`` to also compare the content of each product that records a digest (see :ref:`workplan_check_run`), and ``--dry-run`` to see what ``attach`` would do without writing the record. The exit code is 0 when the run is attached or already was, 1 when problems were found or the transfer is incomplete, and 2 for bad arguments, a run ID that is taken or a directory that is not a workplan run.
 
+.. _workplan_promote_run:
+
+Promoting a run
+^^^^^^^^^^^^^^^
+
+A run in your data home lives on scratch, which is purged. Use ``promote`` to place a finished run in the project runs area (``cstar/runs`` under ``CSTAR_PROJECT_HOME``; see :doc:`hpc`), where it outlasts your scratch space and your collaborators find it:
+
+.. code-block:: console
+
+    cstar run promote <my-unique-id>
+    cstar run promote <my-unique-id> --dry-run
+
+The run is named by its run ID, by ``run://<uuid>`` or by its directory. The copy goes to ``<project runs area>/<run-id>``; pass ``--to <dir>`` to put it at ``<dir>/<run-id>`` instead. Without a project runs area and without ``--to``, ``promote`` stops with an error.
+
+What is copied is a plan read from the run's manifest, not the whole directory: the manifest, the transformed workplan, the ``attempts/`` directories, each step's record, logs and the small files in its ``work/`` directory, and every product the step records list. The layout is kept, so every path in the manifest stays valid, and nothing in the files is rewritten. The large parts of a ROMS step are left behind unless you ask for them: ``--include builds`` adds each step's compile-time code, runtime code and cloned codebases, ``--include temp-output`` the per-rank output pieces, and ``--include all`` the whole directory. ``--dry-run`` prints the plan, with the number of files and the size of each group, and copies nothing.
+
+``promote`` never overwrites. A destination that holds another run (a manifest with another uuid) is refused, and so is one that already holds this run. A product the step records list that is missing from the source, a run directory holding more than one transformed workplan, and a destination file system without room for the plan are refused before anything is copied: ``cstar run check`` the run first. Symlinks are copied as links: a link inside the run stays relative, and a link that leaves the run is written absolute so it still names the file where it is.
+
+After the copy, the destination is checked as ``cstar run check`` does (see :ref:`workplan_check_run`), and its ``gathered_output`` is rebuilt when the source has one. Absolute paths inside the copied files are the source's (the transformed workplan records the directory it was written in, which C-Star rebases when it loads it) and do not fail the promotion; a product that is missing or whose size changed, a carried input that differs, a step directory that is missing or a dangling link does, with exit code 1. Pass ``--verify`` to compare the content of every product too: the digest of each product that has none is computed from the source, recorded in the copy's step records and manifest, and the copy is compared against every recorded digest (see :ref:`workplan_check_run` for what a digest reads). The source is never written into.
+
+``--mode`` chooses what promote does; the default is ``copy``:
+
+- ``copy``: a copy of the plan's files. The run in your data home is untouched and stays tracked here; the copy in the project runs area is found by its run ID, by its uuid or by its directory (see :ref:`workplan_external_runs`), and ``cstar run ls --shared`` lists it as ``project``.
+- ``link``: no copy; ``<project runs area>/<run-id>`` becomes a symlink to the run where it is, which registers the run with the project without spending the space. ``cstar run ls --shared`` lists it as ``project, linked``: it is as durable as its target.
+- ``materialize``: replaces that link with a copy under the same uuid. The run the link pointed at is left in place; delete it yourself, or promote with ``--mode move`` to begin with.
+- ``move``: a copy of the whole directory, whatever ``--include`` says, after which the source directory is removed, once the destination passed the check; a move loses nothing. A run tracked here is then tracked as :ref:`attached <workplan_attach_run>`: it is inspected and referenced, never relaunched, and it is read-only when the destination is in the project runs area (``cstar run attach <dir> --own`` takes ownership). ``move`` refuses a run that is attached read-only, a run that is not tracked here and was found by its run ID or uuid (pass its directory to move it deliberately) and a run whose latest attempt has not finished; the other modes warn about an unfinished attempt and go ahead.
+
+A copy or a link carries the file permissions of the source. The project runs area is shared, so set your umask, or the group and permissions of the area, so that your collaborators can read what you promote; C-Star changes no permissions.
+
+The exit code is 0 when the run was promoted, 1 when it was promoted but the copy has problems of its own (or the source misses products and nothing was copied), and 2 for bad arguments, a destination that is taken and a move that is refused.
+
 .. _workplan_run_manifest:
 
 The run manifest

@@ -56,7 +56,6 @@ from cstar.orchestration.run_check import (
     repair_symlinks,
     steps_inside_run,
 )
-from cstar.orchestration.serialization import try_deserialize
 from cstar.orchestration.tracking import WorkplanRun, require_writable
 from cstar.system.migration import CstarSchemaTooNewError
 
@@ -540,7 +539,7 @@ def check(
 
     workplan = None
     if resolved.workplan_path is not None:
-        workplan = try_deserialize(resolved.workplan_path, LiveWorkplan)
+        workplan = LiveWorkplan.try_load(resolved.workplan_path)
         if workplan is None:
             msg = f"Warning: unable to load the transformed workplan {resolved.workplan_path}"
             typer.echo(msg, err=True)

@@ -17,6 +17,7 @@ from cstar.cli.run import app as app_run
 from cstar.cli.run.attach import COMMAND_ATTACH
 from cstar.cli.run.check import COMMAND_CHECK
 from cstar.cli.run.check import app as app_run_check
+from cstar.cli.run.promote import COMMAND_PROMOTE
 from cstar.cli.run.show import COMMAND_SHOW
 from cstar.cli.workplan import ALIAS as ALIAS_WORKPLAN
 from cstar.cli.workplan import app as app_workplan
@@ -32,7 +33,7 @@ from cstar.orchestration.orchestration import LiveWorkplan
 from cstar.orchestration.tracking import WorkplanRun
 from cstar.tests.unit_tests.orchestration.cli.conftest import FakeEntryPoint
 
-RUN_ONLY_COMMANDS = {COMMAND_ATTACH, COMMAND_CHECK, COMMAND_SHOW}
+RUN_ONLY_COMMANDS = {COMMAND_ATTACH, COMMAND_CHECK, COMMAND_PROMOTE, COMMAND_SHOW}
 """The commands `cstar run` serves that `cstar workplan` does not."""
 
 SUBCOMMAND_ALIASES = (("workplan", ALIAS_WORKPLAN), ("blueprint", ALIAS_BLUEPRINT))

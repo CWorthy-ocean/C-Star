@@ -325,7 +325,7 @@ def _plan(
     return Plan.already
 
 
-def _build_record(
+def build_attached_record(
     manifest: RunManifest,
     location: RunLocation,
     trx: Path,
@@ -377,7 +377,7 @@ def _build_record(
     return record.model_copy(update={"workplan_path": carried}) if carried else record
 
 
-def _write_record(plan: Plan, fresh: WorkplanRun, mode: Access) -> None:
+def write_attached_record(plan: Plan, fresh: WorkplanRun, mode: Access) -> None:
     """Write the one tracking record the command writes.
 
     Parameters
@@ -489,9 +489,11 @@ def attach(
     elif plan is Plan.already:
         typer.echo(f"Run {run_id!r} is already attached here at {root}.")
     else:
-        _write_record(
+        write_attached_record(
             plan,
-            _build_record(manifest, resolved.location, trx, run_id=run_id, mode=mode),
+            build_attached_record(
+                manifest, resolved.location, trx, run_id=run_id, mode=mode
+            ),
             mode,
         )
         if plan is Plan.reattach and tracked is not None:

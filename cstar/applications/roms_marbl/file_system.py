@@ -35,7 +35,7 @@ class RomsFileSystemManager(JobFileSystemManager):
                     self.compile_time_code_dir,
                     self.runtime_code_dir,
                     self.input_datasets_dir,
-                    self._codebases_dir,
+                    self.codebases_dir,
                     self.temp_output_dir,
                 }
             )
@@ -57,7 +57,7 @@ class RomsFileSystemManager(JobFileSystemManager):
         return self.input_dir / self._INPUT_DATASETS_NAME
 
     @property
-    def _codebases_dir(self) -> Path:
+    def codebases_dir(self) -> Path:
         """The directory for codebases."""
         return self.input_dir / self._CODEBASES_NAME
 
@@ -75,7 +75,7 @@ class RomsFileSystemManager(JobFileSystemManager):
         -------
         str
         """
-        return self._codebases_dir / key
+        return self.codebases_dir / key
 
     def clear(self) -> None:
         """Ensure the job's working directories are empty."""
@@ -86,7 +86,7 @@ class RomsFileSystemManager(JobFileSystemManager):
             self.compile_time_code_dir,
             self.runtime_code_dir,
             self.input_datasets_dir,
-            self._codebases_dir,
+            self.codebases_dir,
             self.temp_output_dir,
         ]:
             if directory.exists():
