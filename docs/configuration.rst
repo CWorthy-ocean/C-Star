@@ -24,18 +24,9 @@ The names are the ``CSTAR_*`` variables listed in the table below. Every
 ``cstar`` command reads the file before it runs, and so does C-Star when you
 use it from Python or a notebook.
 
-When the same setting is given more than one way, the first of these wins:
-
-1. A command-line option.
-2. An environment variable you have exported.
-3. The configuration file.
-4. The system's own default, such as the scratch file system for
-   ``CSTAR_DATA_HOME`` on a cluster.
-5. C-Star's built-in default.
-
 An exported variable always beats the file. If a setting in the file seems
 to be ignored, look for an old ``export`` line in your shell profile and
-remove it.
+remove it. The full order is under :ref:`configuration_precedence`.
 
 C-Star refuses to run if the file contains a name it does not accept. The
 error names the file and every offending name, so you can fix them in one
@@ -58,6 +49,40 @@ You can edit the file by hand, or let C-Star do it:
 ``cstar env set`` creates the file the first time you use it. ``cstar env
 show`` marks each value with where it came from: ``[env]`` for an exported
 variable, ``[config]`` for the file, ``[default]`` for anything else.
+
+.. _configuration_precedence:
+
+Where a setting can be set, and which wins
+------------------------------------------
+
+Most settings can be given in several places. From lowest to highest
+precedence, a later one replaces an earlier one:
+
+1. C-Star's built-in default.
+2. The system's own default: the scratch file system named by one of the
+   ``CSTAR_SCRATCH_DIRS`` variables or known to C-Star for the machine, and
+   the ``XDG_*`` and ``PROJECT`` variables that stand in for the directory
+   settings.
+3. The configuration file.
+4. An exported ``CSTAR_*`` variable.
+5. A command-line option, where the command has one (``--log-level``, for
+   example).
+
+The SLURM settings (``CSTAR_SLURM_ACCOUNT``, ``CSTAR_SLURM_QUEUE``,
+``CSTAR_SLURM_MAX_WALLTIME``) have no command-line option but two more layers
+above the environment: the workplan's ``compute_environment.slurm`` block,
+then each step's ``compute_overrides.slurm``. The value that results for
+each step is recorded in the transformed workplan in the run directory. See
+:ref:`workplan_compute_environment`.
+
+Two things to know when running workplans:
+
+- ``cstar workplan run --resume`` re-exports the settings recorded when the
+  run started, except the data and state homes, so a resumed run keeps its
+  original settings even if your shell or configuration file changed since.
+- On a system that requires a SLURM account and queue, C-Star asks for them
+  from the environment only when neither the workplan's ``compute_environment``
+  nor every step's ``compute_overrides`` supplies them.
 
 Environment Variables
 ---------------------
