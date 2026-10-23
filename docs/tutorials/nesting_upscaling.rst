@@ -11,12 +11,33 @@ sees the alkalinity that left the child, and it computes the CO2 uptake and the
 CDR efficiency of the whole release.
 
 This tutorial runs a tiny version of that workflow on a laptop, from one
-workplan, in about 10 minutes. The parent is a 24 by 24 cell grid over 400 km
+workplan, in about 20 minutes. The parent is a 24 by 24 cell grid over 400 km
 north-west of Scotland. The child is a 24 by 24 cell grid over 100 km inside it, with
 one alkalinity (ALK) release near its east boundary. If nesting and
 ``continue-from`` are new to you, :doc:`nested_workplan` introduces them on a
-simpler workplan without CDR. A :doc:`second page <nesting_upscaling_ccs>`
-shows the same workflow on a realistic case, the California Current System.
+simpler workplan without CDR.
+
+Before you start
+----------------
+
+- :doc:`Install C-Star <../installation>` and activate the environment.
+- :doc:`Register for Copernicus Marine <../data_access>` and run
+  ``copernicusmarine login``. GLORYS supplies the initial and boundary
+  conditions of the parent grid.
+- Download the four files into an empty directory:
+
+  - :download:`workplan.yaml <nesting_upscaling_tiny/workplan.yaml>`
+  - :download:`forge_parent.yaml <nesting_upscaling_tiny/forge_parent.yaml>`
+  - :download:`forge_child.yaml <nesting_upscaling_tiny/forge_child.yaml>`
+  - :download:`forge_parent_up.yaml <nesting_upscaling_tiny/forge_parent_up.yaml>`
+
+The forge blueprints use the same sources as the :doc:`earlier tutorials
+<end_to_end>`: GLORYS for the ocean state, ERA5 for the atmosphere, and the
+UNIFIED biogeochemical climatology. Forge downloads GLORYS and UNIFIED into
+its source-data cache, and ERA5 is read over the network as the inputs are
+generated. If you have run the earlier tutorials, UNIFIED is already in the
+cache; otherwise the first run downloads it, about 10 GB, and the first forge
+step takes correspondingly longer.
 
 How the workflow fits together
 ------------------------------
@@ -62,34 +83,18 @@ forcing from a file.
 
 **CDR metrics.** The ``cdr_metrics`` application computes the CO2 uptake and
 the CDR efficiency from the ``_cdr`` output of the child and of ``parent_up``.
-It analyses each domain on its own grid and combines them. The
-:doc:`workplans page <../workplans>` describes the application in its
-sections "Computing CDR metrics from segmented runs" and "Nested (upscaled)
-experiments".
+It analyses each domain on its own grid and combines them.
+:doc:`../blueprints/cdr_metrics` describes the application and its blueprint.
 
 Run it
 ------
 
-From the root of the repository, with the environment active:
+From the directory with the four files:
 
 .. code-block:: console
 
-   cstar workplan run docs/tutorials/nesting_upscaling_tiny/workplan.yaml --var example_data=$(python docs/tutorials/nesting_upscaling_tiny/fetch_data.py)
-
-``fetch_data.py`` downloads about 44 MB of pinned test data the first time and
-prints the folder that holds it. The workplan takes that folder as its runtime
-variable ``example_data``. The script writes its progress to stderr and only
-the folder to stdout, so it is safe inside ``$(...)``.
-
-The example uses these files because they need no account and are small. The
-GLORYS file (the ocean state) and the ERA5 file (the atmosphere) are small
-regional extracts. The UNIFIED biogeochemical climatology is global, coarsened
-to 2 degrees, and is most of the 44 MB. The files come from C-Star's
-integration-test data registry, which pins their version and checksums.
-Forge's own ocean source, GLORYS, needs a free Copernicus Marine login (see
-:ref:`forge-data-access-glorys`), and a real domain would use it. The three
-forge blueprints in this example carry placeholder source paths, and each
-forge step swaps in the real files through ``blueprint_overrides``.
+   cstar workplan check workplan.yaml
+   cstar workplan run workplan.yaml
 
 ``cstar workplan run`` returns once it has scheduled the steps. They run
 detached, each one waiting for the steps it depends on, so follow the run with
@@ -97,17 +102,16 @@ detached, each one waiting for the steps it depends on, so follow the run with
 ``nest-tiny``. Each step's files are under
 ``$CSTAR_DATA_HOME/workplan_runs/nest-tiny/tasks/<step>/``, which is
 ``~/cstar/workplan_runs/nest-tiny/`` by default, and ``cstar run path nest-tiny
-<step>`` prints a step's directory. To check the workplan without running it,
-use ``cstar workplan check`` with the same ``--var``/``--varfile`` options
-(``check`` has no ``--run-id``). Running the ``run`` command again attaches to
-the existing run; give a new ``--run-id`` to start over.
+<step>`` prints a step's directory. Running the ``run`` command again
+attaches to the existing run; give a new ``--run-id`` to start over.
 
 What each step does
 -------------------
 
 The ROMS steps use ucla-roms 0.11.0 with MARBL and ParallelIO, and each runs
-on 4 MPI ranks (a 2 by 2 tiling). The times are from a 10-core laptop with the
-source data already downloaded; the whole workplan takes about 10 minutes. The
+on 4 MPI ranks (a 2 by 2 tiling). The times are from a 10-core laptop that
+was also busy with other work, with the source data already downloaded; the
+whole workplan took about 20 minutes, and takes less on an idle machine. The
 time of a ROMS step includes building its own ROMS executable: the three ROMS
 steps are three different builds.
 
@@ -122,33 +126,33 @@ steps are three different builds.
    * - ``forge_parent``
      - ``forge``
      - Builds the parent grid and its initial, surface and boundary forcing
-       (2012-01-01 12:00 to 01-03 07:00), and prepares the hourly boundary
+       (2012-01-01 00:00 to 01-03 07:00), and prepares the hourly boundary
        extraction for the child
-     - 9 s
+     - 1:33
    * - ``forge_child``
      - ``forge``
      - Builds the child grid, its surface forcing and the ALK release (a
        nested child has no initial or boundary forcing of its own)
-     - 6 s
+     - 1:06
    * - ``forge_parent_up``
      - ``forge``
      - Builds the parent grid again, with the CDR mode ``upscaled``
-     - 10 s
+     - 2:00
    * - ``parent``
      - ``roms_marbl``
      - Runs the parent, writes the child's boundary data and a restart every
        6 hours
-     - 3:01
+     - 7:16
    * - ``nest_ic``
      - ``nest_ic``
      - Regrids the parent's restart at 2012-01-02 06:00 onto the child grid
-     - 6 s
+     - 10 s
    * - ``child``
      - ``roms_marbl``
      - Runs 2012-01-02 06:00 to 01-03 06:00 with ``continue-from: nest_ic`` and
        ``nest-from: parent``; releases ALK and writes the ``_uscl`` and
        ``_cdr`` output
-     - 3:49
+     - 7:21
    * - ``upscale``
      - ``upscaler``
      - Turns the child's ``_uscl`` files into ``upscaled_cdr.nc``
@@ -157,12 +161,12 @@ steps are three different builds.
      - ``roms_marbl``
      - Reruns the parent grid from the parent's restart at the child's start,
        with ``upscaled_cdr.nc`` as its CDR forcing, to the child's end
-     - 2:02
+     - 3:17
    * - ``cdr_metrics``
      - ``cdr_metrics``
      - Computes the CO2 uptake and CDR efficiency of the release from the
        child's and ``parent_up``'s ``_cdr`` output
-     - 3 s
+     - 5 s
 
 The release is alkalinity at 2e6 meq/s for four hours, from the child's
 start. The workplan's three forge steps share nothing, but
@@ -204,11 +208,10 @@ The two domains are combined in a specific way:
   a second time.
 - **Closure residual** (``closure_residual``) is the combined uptake from the
   flux minus the combined uptake from the DIC difference. The two are
-  independent views of the same perturbation, so a residual that is small next
-  to the uptake is the sign that the domains were combined consistently. The
-  two methods can disagree for a single domain: DIC that the child took up and
-  then exported shows up as a DIC difference in ``parent_up``. The two agree
-  to within a few percent on the sum.
+  independent views of the same perturbation. They can disagree for a single
+  domain: DIC that the child took up and then exported shows up as a DIC
+  difference in ``parent_up``. On the sum, the residual was about a tenth of
+  the flux-based uptake in the reference run below.
 
 ``cdr_metrics.nc`` also holds each domain's own uptake, such as
 ``child_carbon_uptake_from_flux`` and ``parent_up_carbon_uptake_from_flux``.
@@ -216,13 +219,12 @@ It holds one diagnostic as well, ``parent_up_DIC_difference_inside_child``: the
 DIC perturbation that ``parent_up`` carries inside the child's footprint. In a
 one-way nested run it is normally not zero. The upscaled source is injected on
 the child's boundary, and anomaly that the child exported can recirculate into
-the footprint. It was 1.99 tonnes in the reference run below. A nonzero value
-is expected here; ``closure_residual`` is the consistency check. The
-:doc:`workplans page <../workplans>` explains the diagnostic in its section
-"Nested (upscaled) experiments".
+the footprint. It was 0.22 tonnes in the reference run below. A nonzero value
+is expected here; ``closure_residual`` is the consistency check.
+:ref:`blueprints-cdr-metrics-nested` explains the diagnostic.
 
 At the end of the run (2012-01-03 06:00), a reference run with ucla-roms 0.11.0
-gave these values (rounded):
+and roms-tools 5.2.1 gave these values (rounded):
 
 .. list-table::
    :header-rows: 1
@@ -233,21 +235,21 @@ gave these values (rounded):
      - ``parent_up``
      - Combined
    * - CO2 uptake from the flux (tonnes)
-     - 7.00
-     - 0.75
-     - 7.75
+     - 5.32
+     - 0.04
+     - 5.35
    * - CO2 uptake from the DIC difference (tonnes)
-     - 5.31
-     - 2.62
-     - 7.92
+     - 4.53
+     - 0.26
+     - 4.79
    * - CDR efficiency from the flux
      -
      -
-     - 0.0061
+     - 0.0042
    * - ``closure_residual`` (tonnes)
      -
      -
-     - -0.17 (2.2 % of the flux uptake)
+     - 0.56 (10.5 % of the flux uptake)
 
 Your numbers should be close to these but need not match them exactly: they
 depend on the ucla-roms and roms-tools versions and on the compiler.
@@ -262,16 +264,15 @@ every record but the last.
 The workplan
 ------------
 
-This is the workplan you ran, as it is in the repository. The header comments
-explain each step.
+This is the workplan you ran. The header comments explain each step.
 
 .. literalinclude:: nesting_upscaling_tiny/workplan.yaml
    :language: yaml
-   :caption: docs/tutorials/nesting_upscaling_tiny/workplan.yaml
+   :caption: workplan.yaml
 
 Where to go next
 ----------------
 
-The weekly extended integration test runs this workplan, so it is kept working
-as C-Star changes. For the same chain on a 16 km parent and a 4 km child with
-real forcing, see :doc:`nesting_upscaling_ccs`.
+:doc:`../workplans/directives` describes ``nest-from`` and ``continue-from`` in
+full, and :doc:`../blueprints/cdr_metrics` the metrics step, including the
+metrics of a run split into several segments.
