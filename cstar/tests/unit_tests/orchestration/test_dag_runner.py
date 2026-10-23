@@ -100,6 +100,7 @@ from cstar.orchestration.orchestration import (
     Status,
     Task,
 )
+from cstar.orchestration.run_check import TRANSFORMED_WORKPLAN_GLOB
 from cstar.orchestration.serialization import (
     PersistenceMode,
     deserialize,
@@ -1051,6 +1052,31 @@ async def test_prepare_workplan_carries_a_json_workplan_under_its_format(
     assert ATTEMPT_JSON_WORKPLAN_NAME in carried.carried
     assert ATTEMPT_WORKPLAN_NAME not in carried.carried
     assert deserialize(carried_copy, Workplan) == deserialize(wp_path, Workplan)
+
+
+@pytest.mark.parametrize("suffix", [".json", ".yml"])
+@pytest.mark.asyncio
+async def test_prepare_workplan_names_the_run_root_plan_yaml(
+    tmp_path: Path, hello_world_bp_path: Path, suffix: str
+) -> None:
+    """Verify the plan written into the run root is named `.yaml` whatever the
+    authored suffix, since it is rendered as YAML, so it loads back as written
+    and is the one file the run-root glob finds.
+    """
+    wp = Workplan(
+        name="authored",
+        description="A workplan authored under another suffix.",
+        steps=[_hello_step(hello_world_bp_path.as_posix(), "hello")],
+    )
+    wp_path = tmp_path / f"plan{suffix}"
+    serialize(wp_path, wp, PersistenceMode.auto)
+    output_dir = tmp_path / "run"
+
+    prepared, trx_path, _, _ = await prepare_workplan(wp_path, output_dir)
+
+    assert trx_path == output_dir / "plan_transformed.yaml"
+    assert sorted(output_dir.glob(TRANSFORMED_WORKPLAN_GLOB)) == [trx_path]
+    assert LiveWorkplan.load(trx_path) == prepared
 
 
 def test_carry_inputs_copies_a_remote_blueprint_under_its_url_name(
