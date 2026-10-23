@@ -300,12 +300,12 @@ Review and run
    would, in this session, listing every problem; blueprints or run records
    that cannot be read on this machine are reported as not verifiable here
    rather than as errors. A readiness list shows which steps a pre-run would
-   prepare and which it would skip, and why. **Check** and **Run** save the
+   prepare and which it would skip, and why. **Check** and **Submit** save the
    draft if needed and stream ``cstar workplan check`` and ``cstar workplan
-   run`` into the page. On a SLURM target with at least one preparable step,
+   submit`` into the page. On a SLURM target with at least one preparable step,
    **Pre-run first** is on by default: it prepares those steps on this
    machine, then shows the command that submits the same run-id. After a run
-   the page names ``cstar run status <run-id>``. Run returns once the
+   the page names ``cstar run status <run-id>``. Submit returns once the
    workplan is scheduled; on a cluster's login node that only submits jobs.
 
 Where your work goes

@@ -781,11 +781,11 @@ boundary or tide files, or writes its first restart, are not caught.
 Inspecting a Run
 ----------------
 
-Once a workplan has been run, the ``cstar run`` commands operate on the run: they take the :term:`run ID` you gave to ``--run-id`` (or the one derived from the workplan name, shown by ``cstar run ls``). ``show``, ``check``, ``log``, ``path`` and ``cd`` also take ``run://<uuid>`` or the path of a run directory (see :ref:`workplan_external_runs`). ``status`` and ``gather`` take only the run ID of a run tracked on this machine: ``status`` reads the run's live state, and ``gather`` writes into the run's directory, which a copy or a run in the project area may not be yours to change. A run :ref:`attached <workplan_attach_run>` from elsewhere counts as tracked; one attached read-only is read but never written into, so ``gather`` refuses it. ``cstar workplan submit`` still launches a run, and ``cstar workplan check`` still validates a workplan file.
+Once a workplan has been run, the ``cstar run`` commands operate on the run: they take the :term:`run ID` you gave to ``--run-id`` (or the one derived from the workplan name, shown by ``cstar run ls``). ``show``, ``check``, ``log``, ``path`` and ``cd`` also take ``run://<uuid>`` or the path of a run directory (see :ref:`workplan_external_runs`). ``status`` and ``gather`` take only the run ID of a run tracked on this machine: ``status`` reads the run's live state, and ``gather`` writes into the run's directory, which a copy or a run in the project area may not be yours to change. A run :ref:`attached <workplan_attach_run>` from elsewhere counts as tracked; one attached read-only is read but never written into, so ``gather`` refuses it. ``cstar workplan submit`` launches a run, and ``cstar workplan check`` validates a workplan file.
 
 .. note::
 
-   Earlier releases listed these commands under ``cstar workplan`` (``cstar workplan status``, ``log``, ``gather``, ``path``, ``cd``, ``ls`` and ``list``, or ``cstar wp ...``), and named ``cstar workplan submit`` ``cstar workplan run``. Those spellings still work and run the same command; they are no longer listed in ``--help``.
+   Earlier releases listed these commands under ``cstar workplan`` (``cstar workplan status``, ``log``, ``gather``, ``path``, ``cd``, ``ls`` and ``list``, or ``cstar wp ...``), and called the launch command ``cstar workplan run`` rather than ``cstar workplan submit``. Those spellings still work and run the same command; they are no longer listed in ``--help``.
 
 Checking Workplan Status
 ^^^^^^^^^^^^^^^^^^^^^^^^

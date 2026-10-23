@@ -313,7 +313,8 @@ def test_generated_chunk_chain_runs_in_order(
 
 def test_run_alias_launches_and_reenters(shape_root: Path, cstar_shim: Path) -> None:
     """``workplan run``, the earlier name of ``workplan submit``, still launches a run
-    and re-enters it through the run's transformed workplan, without a notice.
+    and re-enters it through the run's transformed workplan, without a notice, and
+    ``workplan log`` still prints a step's log.
 
     The re-entry finds every step ``Done`` and launches none of them, so each step
     prints its hello once.
@@ -357,5 +358,10 @@ def test_run_alias_launches_and_reenters(shape_root: Path, cstar_shim: Path) -> 
         assert statuses == dict.fromkeys(shape, DONE), output
         for step in shape:
             assert run.log_text(step).count(f"Hello, {step}") == 1, step
+
+        # `workplan log` is the earlier spelling of `run log`
+        log = run_cstar(env, "workplan", "log", run_id, "A")
+        assert log.returncode == 0, log.stderr
+        assert "Hello, A" in log.stdout, log.stdout
     finally:
         kill_run(run.state_home, run_id, run.steps)
