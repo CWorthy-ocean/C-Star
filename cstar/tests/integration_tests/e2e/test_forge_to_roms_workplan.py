@@ -115,6 +115,8 @@ MISSING_FLX_MESSAGE = "CDR_OAE_DIC1_flx not in forcing files"
 ERROR_PATTERN = re.compile(
     r"\bERROR\b|BLOWUP|blow.?up|MPI_ABORT|Traceback", re.IGNORECASE
 )
+LOG_RECORD_START = re.compile(r"^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2},\d{3} ")
+ERROR_CONTEXT_LINES = 20
 PARTITIONED_NC = re.compile(r"\.\d+\.nc$")
 TIMESTAMP = re.compile(r"^\d{14}$")
 PRODUCT_HEADINGS = ("Products missing", "Products whose size", "Products whose content")
@@ -614,13 +616,30 @@ def test_restart_fields_are_finite(e2e_run: E2ERun) -> None:
     assert not bad, bad
 
 
+def error_hits(lines: Sequence[str]) -> list[str]:
+    """The lines matching ``ERROR_PATTERN``, each with the lines that continue it.
+
+    A logged command failure puts the command's stderr on the lines after the
+    ``[ERROR]`` record, so each hit carries the following lines up to the next log
+    record, at most ``ERROR_CONTEXT_LINES`` of them.
+    """
+    hits = []
+    for i, line in enumerate(lines):
+        if not ERROR_PATTERN.search(line):
+            continue
+        rest = lines[i + 1 : i + 1 + ERROR_CONTEXT_LINES]
+        n = next((j for j, ln in enumerate(rest) if LOG_RECORD_START.match(ln)), None)
+        hits.append("\n".join([line.strip(), *rest[:n]]))
+    return hits
+
+
 def test_roms_logs_are_clean(e2e_run: E2ERun) -> None:
     """The ROMS step's stdout shows time stepping ran and contains no error markers."""
     log = e2e_run.roms_root / "logs" / f"{slugify(ROMS_STEP)}.out"
     lines = log.read_text(errors="replace").splitlines()
     assert any("started time-stepping" in line for line in lines), "ROMS never stepped"
-    hits = [line.strip() for line in lines if ERROR_PATTERN.search(line)]
-    assert not hits, hits[:10]
+    hits = error_hits(lines)
+    assert not hits, "\n\n".join(hits[:10])
 
 
 def gas_exch_files(run: E2ERun) -> list[Path]:
@@ -736,8 +755,8 @@ def test_cdr_lite_log_is_clean(e2e_run: E2ERun) -> None:
     log = e2e_run.cdr_root / "logs" / f"{slugify(CDR_STEP)}.out"
     lines = log.read_text(errors="replace").splitlines()
     assert any("started time-stepping" in line for line in lines), "ROMS never stepped"
-    hits = [line.strip() for line in lines if ERROR_PATTERN.search(line)]
-    assert not hits, hits[:10]
+    hits = error_hits(lines)
+    assert not hits, "\n\n".join(hits[:10])
     # the _cdrgas files hold sensitivities only, so the DIC flux is expected to be absent
     assert sum(MISSING_FLX_MESSAGE in line for line in lines) == 1
     assert not [ln for ln in lines if "Could not find var" in ln]
