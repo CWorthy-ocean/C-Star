@@ -232,6 +232,28 @@ ENV_CSTAR_DISABLE_BUILD_VERIFICATION: t.Annotated[
 ] = "CSTAR_DISABLE_BUILD_VERIFICATION"
 """Set to `1` to skip the pre- and post-build toolchain consistency checks performed when compiling ROMS."""
 
+ENV_CSTAR_DEBUG_BUILD_MODE: t.Annotated[
+    t.Literal["CSTAR_DEBUG_BUILD_MODE"],
+    EnvVar(
+        "Set to `1` to build ROMS and its dependencies in debug mode "
+        "(`BUILD_MODE=debug`).",
+        GROUP_SIM,
+        default=FLAG_OFF,
+    ),
+] = "CSTAR_DEBUG_BUILD_MODE"
+"""Set to `1` to build ROMS and its dependencies in debug mode."""
+
+ENV_CSTAR_SLURM_DISABLE_MT: t.Annotated[
+    t.Literal["CSTAR_SLURM_DISABLE_MT"],
+    EnvVar(
+        "Set to `1` to pass SLURM the hint `--hint=nomultithread`, which "
+        "disables hardware multi-threading for submitted jobs.",
+        GROUP_SIM,
+        default=FLAG_OFF,
+    ),
+] = "CSTAR_SLURM_DISABLE_MT"
+"""Set to `1` to pass SLURM a hint that disables multi-threading."""
+
 ENV_CSTAR_DISABLE_MIGRATION: t.Annotated[
     t.Literal["CSTAR_DISABLE_MIGRATION"],
     EnvVar(
@@ -391,6 +413,24 @@ REMOVED_SETTINGS: t.Final[dict[str, RemovedSetting]] = {
         "pass --clobber to `cstar blueprint run` or `cstar blueprint migrate` "
         "instead (`--clobber <step|all>` for `cstar workplan run`)."
     ),
+    "CSTAR_FF_CLI_TEMPLATE_CREATE": RemovedSetting(
+        "the `cstar template create` command was removed."
+    ),
+    "CSTAR_FF_CLI_WORKPLAN_COMPOSE": RemovedSetting(
+        "the `cstar workplan compose` command was removed."
+    ),
+    "CSTAR_FF_CLI_WORKPLAN_GEN": RemovedSetting(
+        "the `cstar workplan generate` command was removed."
+    ),
+    "CSTAR_FF_CLI_WORKPLAN_PLAN": RemovedSetting(
+        "the `cstar workplan plan` command was removed."
+    ),
+    "CSTAR_FF_DEBUG_BUILD_MODE": RemovedSetting(
+        "set CSTAR_DEBUG_BUILD_MODE=1 instead; developer mode no longer enables it."
+    ),
+    "CSTAR_FF_SLURM_DISABLE_MT": RemovedSetting(
+        "set CSTAR_SLURM_DISABLE_MT=1 instead; developer mode no longer enables it."
+    ),
     "CSTAR_FRESH_CODEBASES": RemovedSetting(
         "pass --clobber to `cstar blueprint run` (`--clobber <step|all>` for "
         "`cstar workplan run`) to start from an empty working directory instead."
@@ -406,6 +446,10 @@ REMOVED_SETTINGS: t.Final[dict[str, RemovedSetting]] = {
     ),
     "CSTAR_ORCH_MAX_CONC": RemovedSetting(
         "the limit on concurrent disk operations is fixed."
+    ),
+    "CSTAR_ORCH_TRX_FREQ": RemovedSetting(
+        "set the feature flag CSTAR_FF_ORCH_TRX_TIMESPLIT_FREQ instead (it is read "
+        "only while CSTAR_FF_ORCH_TRX_TIMESPLIT is on)."
     ),
     "CSTAR_SLURM_POST_SUBMIT_DELAY": RemovedSetting(
         "the delay after a SLURM submission is fixed."

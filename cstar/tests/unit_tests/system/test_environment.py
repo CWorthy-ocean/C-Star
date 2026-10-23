@@ -13,20 +13,18 @@ from cstar.base.env import (
     ENV_CSTAR_CACHE_HOME,
     ENV_CSTAR_CONFIG_HOME,
     ENV_CSTAR_DATA_HOME,
+    ENV_CSTAR_DEBUG_BUILD_MODE,
     ENV_CSTAR_DISABLE_BUILD_VERIFICATION,
     ENV_CSTAR_DISABLE_MIGRATION,
     ENV_CSTAR_NPROCS_POST,
+    ENV_CSTAR_SLURM_DISABLE_MT,
     ENV_CSTAR_STATE_HOME,
     FLAG_OFF,
     FLAG_ON,
     get_env_item,
     hpc_data_directory,
 )
-from cstar.base.feature import (
-    ENV_FF_DEBUG_BUILD_MODE,
-    ENV_FF_SLURM_DISABLE_MT,
-    is_flag_enabled,
-)
+from cstar.base.feature import is_flag_enabled
 from cstar.orchestration.utils import (
     ENV_CSTAR_SLURM_ACCOUNT,
     ENV_CSTAR_SLURM_MAX_WALLTIME,
@@ -1002,10 +1000,10 @@ def test_env_show_default(
 @pytest.mark.parametrize(
     "key",
     [
-        ENV_FF_DEBUG_BUILD_MODE,
+        ENV_CSTAR_DEBUG_BUILD_MODE,
         ENV_CSTAR_DISABLE_MIGRATION,
         ENV_CSTAR_DISABLE_BUILD_VERIFICATION,
-        ENV_FF_SLURM_DISABLE_MT,
+        ENV_CSTAR_SLURM_DISABLE_MT,
     ],
 )
 def test_is_flag_enabled(key: str) -> None:

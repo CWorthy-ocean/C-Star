@@ -39,9 +39,13 @@ from cstar.applications.roms_marbl.file_system import (
 from cstar.applications.roms_marbl.models import RomsMarblBlueprint
 from cstar.applications.roms_marbl.outputs import EXTRACT_ROOT_NAME, OUTPUT_ROOT_NAME
 from cstar.base.additional_code import AdditionalCode
-from cstar.base.env import ENV_CSTAR_NPROCS_POST, get_env_item
+from cstar.base.env import (
+    ENV_CSTAR_DEBUG_BUILD_MODE,
+    ENV_CSTAR_NPROCS_POST,
+    get_env_item,
+)
 from cstar.base.exceptions import CstarExpectationFailed
-from cstar.base.feature import ENV_FF_DEBUG_BUILD_MODE, is_feature_enabled
+from cstar.base.feature import is_flag_enabled
 from cstar.base.utils import (
     _dict_to_tree,
     _get_sha256_hash,
@@ -1876,7 +1880,7 @@ class ROMSSimulation(Simulation):
         self._ensure_makefile(build_dir)
 
         mode_clause = ""
-        if is_feature_enabled(ENV_FF_DEBUG_BUILD_MODE):
+        if is_flag_enabled(ENV_CSTAR_DEBUG_BUILD_MODE):
             mode_clause = "BUILD_MODE=debug "
 
         cstar_sysmgr = get_sysmgr()

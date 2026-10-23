@@ -13,10 +13,8 @@ from pathlib import Path
 
 from pydantic import BaseModel, Field, PrivateAttr
 
-from cstar.base.feature import (
-    ENV_FF_SLURM_DISABLE_MT,
-    is_feature_enabled,
-)
+from cstar.base.env import ENV_CSTAR_SLURM_DISABLE_MT
+from cstar.base.feature import is_flag_enabled
 from cstar.base.utils import _run_cmd
 from cstar.execution.handler import ExecutionHandler, ExecutionStatus
 from cstar.system.manager import get_sysmgr
@@ -1072,7 +1070,7 @@ class SlurmJob(SchedulerJob):
             scheduler_script += f"\n#SBATCH --ntasks={self.cpus}"
         if self.account_key:
             scheduler_script += f"\n#SBATCH --account={self.account_key}"
-        if is_feature_enabled(ENV_FF_SLURM_DISABLE_MT):
+        if is_flag_enabled(ENV_CSTAR_SLURM_DISABLE_MT):
             scheduler_script += "\n#SBATCH --hint=nomultithread"
 
         # scheduler_script += "\n#SBATCH --mem-per-cpu=3900"

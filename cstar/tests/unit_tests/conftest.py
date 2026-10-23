@@ -2168,6 +2168,48 @@ def templates_dir() -> Path:
     return additional_files_dir() / "templates"
 
 
+TEMPLATE_BLUEPRINT_PLACEHOLDER: str = (
+    "~/code/cstar/cstar/additional_files/templates/blueprint.yaml"
+)
+"""The blueprint path written into the template workplans."""
+TEMPLATE_WORKING_DIR_DEFAULT: str = "working_dir: ."
+"""The working directory line in the template blueprint."""
+
+
+@pytest.fixture
+def create_host_workplan(templates_dir: Path) -> Callable[[str, Path, Path, str], Path]:
+    """Return a function that hosts a copy of the template blueprint in a template workplan.
+
+    The function takes the template workplan name (`fanout`, `linear`, `parallel` or
+    `single_step`), the path whose name the blueprint copy takes, a working directory
+    and a run id. It writes the blueprint (with its `working_dir` set to the working
+    directory) and a copy of the workplan (pointing at that blueprint) under
+    `<working_dir>/<run_id>`, and returns the path of the workplan.
+    """
+
+    def _create(template: str, bp_path: Path, working_dir: Path, run_id: str) -> Path:
+        run_dir = working_dir / run_id
+        bp_target_path = run_dir / bp_path.name
+
+        bp_content = (templates_dir / "bp" / "blueprint.yaml").read_text()
+        bp_content = bp_content.replace(
+            TEMPLATE_WORKING_DIR_DEFAULT, f"working_dir: {working_dir}"
+        )
+        bp_target_path.parent.mkdir(parents=True, exist_ok=True)
+        bp_target_path.write_text(bp_content)
+
+        wp_content = (templates_dir / "wp" / f"{template}.yaml").read_text()
+        wp_content = wp_content.replace(
+            TEMPLATE_BLUEPRINT_PLACEHOLDER, bp_target_path.as_posix()
+        )
+        wp_path = run_dir / f"{template}-host.yaml"
+        wp_path.write_text(wp_content)
+
+        return wp_path
+
+    return _create
+
+
 @pytest.fixture
 def wp_templates_dir(templates_dir: Path) -> Path:
     """Return the path to the `Workplan` templates directory contained in the package

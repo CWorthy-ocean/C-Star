@@ -17,46 +17,6 @@ ENV_FF_DEVELOPER_MODE: t.Annotated[
 """Enable developer mode to enable all feature flags (not recommended)."""
 
 
-ENV_FF_CLI_TEMPLATE_CREATE: t.Annotated[
-    t.Literal["CSTAR_FF_CLI_TEMPLATE_CREATE"],
-    EnvVar(
-        "Enable CLI for creating blueprints and workplans from standard templates.",
-        GROUP_FF,
-        default=FLAG_OFF,
-    ),
-] = "CSTAR_FF_CLI_TEMPLATE_CREATE"
-"""Enable CLI for creating blueprints and workplans from standard templates."""
-
-ENV_FF_CLI_WORKPLAN_COMPOSE: t.Annotated[
-    t.Literal["CSTAR_FF_CLI_WORKPLAN_COMPOSE"],
-    EnvVar(
-        "Enable CLI for composing a workplan from pre-existing blueprints.",
-        GROUP_FF,
-        default=FLAG_OFF,
-    ),
-] = "CSTAR_FF_CLI_WORKPLAN_COMPOSE"
-"""Enable CLI for composing a workplan from pre-existing blueprints."""
-
-ENV_FF_CLI_WORKPLAN_GEN: t.Annotated[
-    t.Literal["CSTAR_FF_CLI_WORKPLAN_GEN"],
-    EnvVar(
-        "Enable CLI for generating a workplan from a directory of blueprints.",
-        GROUP_FF,
-        default=FLAG_OFF,
-    ),
-] = "CSTAR_FF_CLI_WORKPLAN_GEN"
-"""Enable CLI for generating a workplan from a directory of blueprints."""
-
-ENV_FF_CLI_WORKPLAN_PLAN: t.Annotated[
-    t.Literal["CSTAR_FF_CLI_WORKPLAN_PLAN"],
-    EnvVar(
-        "Enable CLI for generating the execution plan of a workplan.",
-        GROUP_FF,
-        default=FLAG_OFF,
-    ),
-] = "CSTAR_FF_CLI_WORKPLAN_PLAN"
-"""Enable CLI for generating the execution plan of a workplan."""
-
 ENV_FF_ORCH_TRX_TIMESPLIT: t.Annotated[
     t.Literal["CSTAR_FF_ORCH_TRX_TIMESPLIT"],
     EnvVar(
@@ -78,26 +38,16 @@ ENV_FF_ORCH_TRX_TIMESPLIT_LONGNAME: t.Annotated[
 """Enable long name generation during time-splitting."""
 
 
-ENV_FF_DEBUG_BUILD_MODE: t.Annotated[
-    t.Literal["CSTAR_FF_DEBUG_BUILD_MODE"],
+ENV_FF_ORCH_TRX_TIMESPLIT_FREQ: t.Annotated[
+    t.Literal["CSTAR_FF_ORCH_TRX_TIMESPLIT_FREQ"],
     EnvVar(
-        "Enable building dependent packages in developer/debug mode.",
+        "Time-splitting frequency (e.g. Daily, Weekly, Monthly). Read only when "
+        "CSTAR_FF_ORCH_TRX_TIMESPLIT is on; developer mode does not set it.",
         GROUP_FF,
-        default=FLAG_OFF,
+        default="Monthly",
     ),
-] = "CSTAR_FF_DEBUG_BUILD_MODE"
-"""Enable building dependent packages in developer/debug mode."""
-
-
-ENV_FF_SLURM_DISABLE_MT: t.Annotated[
-    t.Literal["CSTAR_FF_SLURM_DISABLE_MT"],
-    EnvVar(
-        "Enable passing a hint to SLURM to disable multi-threading",
-        GROUP_FF,
-        default=FLAG_OFF,
-    ),
-] = "CSTAR_FF_SLURM_DISABLE_MT"
-"""Enable passing a hint to SLURM to disable multi-threading."""
+] = "CSTAR_FF_ORCH_TRX_TIMESPLIT_FREQ"
+"""Time-splitting frequency (e.g. Daily, Weekly, Monthly), read only when time-splitting is on."""
 
 
 def is_flag_enabled(flag: str) -> bool:
@@ -137,11 +87,11 @@ def is_feature_enabled(flag: str) -> bool:
         flag = f"{FF_PREFIX}{flag}"
 
     # Enable hierarchical feature flag segments - Given a flag:
-    #   CSTAR_FF_CLI_BLUEPRINT_CHECK
+    #   CSTAR_FF_ORCH_TRX_TIMESPLIT
     # inspect environment for the segments:
-    # - CSTAR_FF_CLI
-    # - CSTAR_FF_CLI_BLUEPRINT
-    # - CSTAR_FF_CLI_BLUEPRINT_CHECK
+    # - CSTAR_FF_ORCH
+    # - CSTAR_FF_ORCH_TRX
+    # - CSTAR_FF_ORCH_TRX_TIMESPLIT
     flag_parts = flag.split("_")
     if len(flag_parts) > 2:
         for i in range(2, len(flag_parts)):

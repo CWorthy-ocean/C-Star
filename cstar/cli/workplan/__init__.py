@@ -2,12 +2,6 @@ import typing as t
 
 import typer
 
-from cstar.base.feature import (
-    ENV_FF_CLI_WORKPLAN_COMPOSE,
-    ENV_FF_CLI_WORKPLAN_GEN,
-    ENV_FF_CLI_WORKPLAN_PLAN,
-    is_feature_enabled,
-)
 from cstar.cli.workplan.check import app as app_check
 from cstar.cli.workplan.gather import app as app_gather
 from cstar.cli.workplan.log import app as app_log
@@ -35,23 +29,6 @@ app.add_typer(app_check)
 app.add_typer(app_gather)
 app.add_typer(app_log)
 app.add_typer(app_path)
-
-if is_feature_enabled(ENV_FF_CLI_WORKPLAN_GEN):
-    from cstar.cli.workplan.generate import app as app_gen
-
-    app.add_typer(app_gen)
-
-if is_feature_enabled(ENV_FF_CLI_WORKPLAN_PLAN):
-    from cstar.cli.workplan.plan import app as app_plan
-
-    app.add_typer(app_plan)
-
 app.add_typer(app_run)
 app.add_typer(app_status)
-
-if is_feature_enabled(ENV_FF_CLI_WORKPLAN_COMPOSE):
-    from cstar.cli.workplan.compose import app as app_compose
-
-    app.add_typer(app_compose)
-
 app.add_typer(app_ls)

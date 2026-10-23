@@ -9,7 +9,7 @@ import pytest
 
 from cstar.applications.roms_marbl.models import RomsMarblBlueprint
 from cstar.base.env import ENV_CSTAR_RUNID, FLAG_ON
-from cstar.base.feature import ENV_FF_ORCH_TRX_TIMESPLIT
+from cstar.base.feature import ENV_FF_ORCH_TRX_TIMESPLIT, ENV_FF_ORCH_TRX_TIMESPLIT_FREQ
 from cstar.orchestration.launch.local import LocalLauncher
 from cstar.orchestration.models import Application, Step, Workplan
 from cstar.orchestration.orchestration import (
@@ -29,7 +29,6 @@ from cstar.orchestration.transforms import (
     WorkplanTransformer,
     get_time_slices,
 )
-from cstar.orchestration.utils import ENV_CSTAR_ORCH_TRX_FREQ
 from cstar.tests.unit_tests.orchestration.conftest import (
     EXTERNAL_TOKEN,
     ExternalTaskFactory,
@@ -136,7 +135,7 @@ def test_workplan_transformation(diamond_workplan: Workplan) -> None:
             {
                 ENV_CSTAR_RUNID: str(uuid.uuid4()),
                 ENV_FF_ORCH_TRX_TIMESPLIT: FLAG_ON,
-                ENV_CSTAR_ORCH_TRX_FREQ: SplitFrequency.Monthly.value,
+                ENV_FF_ORCH_TRX_TIMESPLIT_FREQ: SplitFrequency.Monthly.value,
             },
         ),
     ):

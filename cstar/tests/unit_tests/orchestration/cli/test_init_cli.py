@@ -24,7 +24,7 @@ from cstar.base.env import (
     read_user_config,
 )
 from cstar.base.exceptions import CstarError, CstarUserConfigError
-from cstar.base.feature import ENV_FF_DEBUG_BUILD_MODE
+from cstar.base.feature import ENV_FF_DEVELOPER_MODE
 from cstar.cli import init as init_module
 from cstar.cli.cli import app as root_app
 from cstar.cli.cli import attach_subcommands
@@ -60,7 +60,7 @@ NEVER_WRITTEN = (
     *REMOVED_SETTINGS,
     ENV_CSTAR_CONFIG_HOME,
     ENV_CSTAR_RUNID,
-    ENV_FF_DEBUG_BUILD_MODE,
+    ENV_FF_DEVELOPER_MODE,
 )
 """Names that must not appear anywhere in a file `init` writes."""
 
@@ -195,6 +195,8 @@ def test_yes_on_a_laptop_writes_a_file_of_commented_examples(
     assert "# CSTAR_DATA_HOME=" in text
     for name in NEVER_WRITTEN:
         assert name not in text
+    assert "'cstar run cd' shell support" in output
+    assert "The 'cstar run cd' command requires a shell function to operate." in output
     assert "Shell function: installed for zsh" in output
     assert "Jupyter kernel: registered (cstar-env)" in output
     assert safe_environment.installs == [Shell.ZSH]
@@ -224,10 +226,12 @@ def test_interactive_laptop_run_applies_each_answer(
     isolate_user_config: Path,
     safe_environment: Recorder,
 ) -> None:
-    """Typed values override, an empty line keeps, and `n` skips shell and kernel."""
+    """Answering no to the gate walks the prompts: typed values override, an empty
+    line keeps, and `n` skips shell and kernel.
+    """
     path = isolate_user_config
 
-    result = run_init(input="/data/x\n/proj\n\nn\nn\n")
+    result = run_init(input="n\n/data/x\n/proj\n\nn\nn\n")
     output = flatten_cli_output(result.output)
 
     assert result.exit_code == 0, result.output
@@ -240,6 +244,102 @@ def test_interactive_laptop_run_applies_each_answer(
     assert "Jupyter kernel: skipped" in output
     assert safe_environment.installs == []
     assert safe_environment.kernels == []
+
+
+def test_locations_gate_yes_keeps_every_value(
+    run_init: Callable[..., Result],
+    flatten_cli_output: Callable[[str], str],
+    isolate_user_config: Path,
+    laptop_data_home: None,
+) -> None:
+    """Answering yes to the gate asks about no location and writes no location line."""
+    path = isolate_user_config
+
+    result = run_init(input="y\nn\nn\n")
+    output = flatten_cli_output(result.output)
+
+    assert result.exit_code == 0, result.output
+    assert "Use C-Star's default locations?" in output
+    assert "Answer no to choose each one." in output
+    assert f"{ENV_CSTAR_DATA_HOME} [" not in output
+    assert "Press Enter to keep a value" not in output
+    assert read_user_config(path) == {}
+    assert f"# {ENV_CSTAR_DATA_HOME}=" in path.read_text()
+
+
+def test_locations_gate_names_explicit_values_and_moves_them_into_the_file(
+    run_init: Callable[..., Result],
+    flatten_cli_output: Callable[[str], str],
+    isolate_user_config: Path,
+) -> None:
+    """With a location set by the user the question is "Use these locations?", and
+    yes keeps that value just as `--yes` does.
+    """
+    value = os.environ[ENV_CSTAR_DATA_HOME]
+
+    result = run_init(input="y\nn\nn\n")
+    output = flatten_cli_output(result.output)
+
+    assert result.exit_code == 0, result.output
+    assert "Use these locations?" in output
+    assert "default locations?" not in output
+    assert read_user_config(isolate_user_config) == {ENV_CSTAR_DATA_HOME: value}
+
+
+def test_locations_gate_no_walks_each_location(
+    run_init: Callable[..., Result],
+    flatten_cli_output: Callable[[str], str],
+    isolate_user_config: Path,
+    laptop_data_home: None,
+) -> None:
+    """Answering no to the gate prompts for each location in turn."""
+    result = run_init(input="n\n/data/x\n-\n/cat\nn\nn\n")
+    output = flatten_cli_output(result.output)
+
+    assert result.exit_code == 0, result.output
+    assert "Press Enter to keep a value" in output
+    assert read_user_config(isolate_user_config) == {
+        ENV_CSTAR_DATA_HOME: "/data/x",
+        ENV_CSTAR_CATALOG: "/cat",
+    }
+
+
+def test_locations_gate_defaults_to_no_when_scratch_is_recommended(
+    run_init: Callable[..., Result],
+    flatten_cli_output: Callable[[str], str],
+    isolate_user_config: Path,
+    laptop_data_home: None,
+    slurm: None,
+) -> None:
+    """On a cluster with no scratch file system the recommendation fires, and
+    pressing Enter at the gate walks the prompts instead of accepting the home
+    directory.
+    """
+    result = run_init(input="\n\n\n\n/scratch/me/cstar\n\n\nn\nn\n")
+    output = flatten_cli_output(result.output)
+
+    assert result.exit_code == 0, result.output
+    assert "Recommended: no scratch file system was found" in output
+    assert "Use C-Star's default locations? [y/N]" in output
+    assert "Press Enter to keep a value" in output
+    assert read_user_config(isolate_user_config) == {
+        ENV_CSTAR_DATA_HOME: "/scratch/me/cstar"
+    }
+
+
+def test_yes_never_asks_the_locations_gate(
+    run_init: Callable[..., Result],
+    flatten_cli_output: Callable[[str], str],
+    laptop_data_home: None,
+) -> None:
+    """`--yes` answers the gate itself: no question, no hint, no prompts."""
+    result = run_init("--yes")
+    output = flatten_cli_output(result.output)
+
+    assert result.exit_code == 0, result.output
+    assert "locations?" not in output
+    assert "Answer no to choose each one." not in output
+    assert "Press Enter to keep" not in output
 
 
 def test_yes_on_slurm_keeps_exported_scheduler_settings(
@@ -296,7 +396,7 @@ def test_interactive_slurm_run_sets_only_what_is_answered(
     slurm: None,
 ) -> None:
     """An empty answer keeps an unset setting unset, and `-` leaves a default unset."""
-    result = run_init(input="m1234\n\n-\n\n\n\nn\nn\n")
+    result = run_init(input="m1234\n\n-\nn\n\n\n\nn\nn\n")
     output = flatten_cli_output(result.output)
 
     assert result.exit_code == 0, result.output
@@ -316,7 +416,7 @@ def test_rerun_prefills_from_the_file_and_carries_other_settings(
     path = isolate_user_config
     path.write_text(f"{ENV_CSTAR_SLURM_ACCOUNT}=m1234\n{ENV_CSTAR_LOG_LEVEL}=DEBUG\n")
 
-    result = run_init(input="\n\n\n\n\n\nn\nn\n")
+    result = run_init(input="\n\n\nn\n\n\n\nn\nn\n")
     output = flatten_cli_output(result.output)
 
     assert result.exit_code == 0, result.output
@@ -337,11 +437,11 @@ def test_rerun_with_all_defaults_rewrites_the_file_identically(
 ) -> None:
     """Accepting every default on a re-run leaves the file byte for byte the same."""
     path = isolate_user_config
-    first = run_init(input="m1234\n\n\n/data/my runs\n$HOME/proj\n\nn\nn\n")
+    first = run_init(input="m1234\n\n\nn\n/data/my runs\n$HOME/proj\n\nn\nn\n")
     assert first.exit_code == 0, first.output
     before = path.read_text()
 
-    second = run_init(input="\n\n\n\n\n\nn\nn\n")
+    second = run_init(input="\n\n\ny\nn\nn\n")
 
     assert second.exit_code == 0, second.output
     assert path.read_text() == before
@@ -357,7 +457,7 @@ def test_whitespace_answer_keeps_the_value(
     laptop_data_home: None,
 ) -> None:
     """An answer of only spaces is a blank answer, not an empty value."""
-    result = run_init(input="   \n\n\nn\nn\n")
+    result = run_init(input="n\n   \n\n\nn\nn\n")
 
     assert result.exit_code == 0, result.output
     assert read_user_config(isolate_user_config) == {}
@@ -387,7 +487,7 @@ def test_dash_unsets_a_value_the_file_set(
     path = isolate_user_config
     path.write_text(f"{ENV_CSTAR_SLURM_ACCOUNT}=m1234\n")
 
-    result = run_init(input="-\n\n\n\n\n\nn\nn\n")
+    result = run_init(input="-\n\n\nn\n\n\n\nn\nn\n")
 
     assert result.exit_code == 0, result.output
     assert read_user_config(path) == {}

@@ -14,8 +14,10 @@ import xarray as xr
 from pydantic import ValidationError
 
 from cstar.base.additional_code import AdditionalCode
+from cstar.base.env import ENV_CSTAR_DEBUG_BUILD_MODE, FLAG_OFF, FLAG_ON
 from cstar.base.exceptions import CstarExpectationFailed
 from cstar.base.external_codebase import ExternalCodeBase
+from cstar.base.feature import ENV_FF_DEVELOPER_MODE
 from cstar.base.input_dataset import InputDataset
 from cstar.execution.handler import ExecutionStatus
 from cstar.marbl.external_codebase import MARBLExternalCodeBase
@@ -2024,6 +2026,66 @@ class TestProcessingAndExecution:
 
         assert sim.exe_path == build_dir / "roms"
         assert sim._exe_hash == "mockhash123"
+
+    @pytest.mark.parametrize(
+        ("value", "expected_clause"),
+        [(FLAG_ON, "BUILD_MODE=debug "), (FLAG_OFF, ""), (None, "")],
+    )
+    @mock.patch("cstar.roms.simulation.rpath_link_flags", return_value=None)
+    @mock.patch("cstar.roms.simulation.verify_roms_linkage")
+    @mock.patch("cstar.roms.simulation.assert_single_toolchain_stack")
+    @mock.patch("cstar.roms.simulation.explicit_mpi_wrapper", return_value=None)
+    @mock.patch("cstar.roms.simulation._get_sha256_hash", return_value="dummy_hash")
+    @mock.patch("subprocess.run")
+    def test_build_debug_mode_setting(
+        self,
+        mock_subprocess,
+        mock_get_hash,
+        mock_explicit_mpi_wrapper,
+        mock_assert_toolchain,
+        mock_verify_linkage,
+        mock_rpath_flags,
+        value: str | None,
+        expected_clause: str,
+        stub_romssimulation: ROMSSimulation,
+        stageddatacollection_remote_files,
+        monkeypatch: pytest.MonkeyPatch,
+    ):
+        """Tests that `CSTAR_DEBUG_BUILD_MODE=1` adds `BUILD_MODE=debug` to the
+        `make` command, and that it is the only thing that does: developer mode,
+        exported throughout, no longer enables it.
+        """
+        monkeypatch.setenv(ENV_FF_DEVELOPER_MODE, FLAG_ON)
+        if value is None:
+            monkeypatch.delenv(ENV_CSTAR_DEBUG_BUILD_MODE, raising=False)
+        else:
+            monkeypatch.setenv(ENV_CSTAR_DEBUG_BUILD_MODE, value)
+        sim = stub_romssimulation
+        build_dir = sim.fs_manager.compile_time_code_dir
+        (build_dir / "Compile").mkdir(exist_ok=True, parents=True)
+
+        assert sim.compile_time_code
+        sim.compile_time_code._working_copy = stageddatacollection_remote_files(
+            paths=[build_dir / f.basename for f in sim.compile_time_code.source]
+        )
+        mock_subprocess.return_value = mock.MagicMock(returncode=0, stderr="")
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            sim.codebase = mock.MagicMock()
+            sim.codebase.working_copy = mock.MagicMock()
+            sim.codebase.working_copy.path = Path(tmpdir)
+            (Path(tmpdir) / "Work").mkdir(exist_ok=True, parents=True)
+            (Path(tmpdir) / "Work" / "Makefile").touch()
+            sim.build()
+
+        compiler = get_sysmgr().environment.compiler
+        mock_subprocess.assert_any_call(
+            f"make {expected_clause}COMPILER={compiler}",
+            cwd=build_dir,
+            shell=True,
+            capture_output=True,
+            text=True,
+        )
 
     @mock.patch("cstar.roms.simulation.rpath_link_flags", return_value=None)
     @mock.patch("cstar.roms.simulation.verify_roms_linkage")
