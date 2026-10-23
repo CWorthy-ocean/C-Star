@@ -150,6 +150,11 @@ ARG_SHARED_HELP: t.Final[str] = (
     "runs started on this machine."
 )
 
+ARG_ALL_CLEAN_HELP: t.Final[str] = (
+    "Remove everything: the data, state, cache and config directories. The data "
+    "directory holds run output. The shared source-data cache and the user "
+    "catalog are kept."
+)
 ARG_ALL_RUNS_HELP: t.Final[str] = (
     "List the runs started on this machine and every other run whose manifest is "
     "in the data home or the project's runs area. Scans those directories."
