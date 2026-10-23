@@ -15,7 +15,7 @@ from cstar.base.env import (
     read_user_config,
     render_setting_block,
 )
-from cstar.base.feature import ENV_FF_DEBUG_BUILD_MODE
+from cstar.base.feature import ENV_FF_DEVELOPER_MODE
 from cstar.cli.environment.config_file import app_set, app_unset
 from cstar.orchestration.utils import ENV_CSTAR_SLURM_ACCOUNT
 
@@ -272,7 +272,7 @@ def test_unset_without_file_reports_and_succeeds(
 
 REJECTED_NAMES = [
     "CSTAR_NOT_A_SETTING",
-    ENV_FF_DEBUG_BUILD_MODE,
+    ENV_FF_DEVELOPER_MODE,
     ENV_CSTAR_CONFIG_HOME,
     ENV_CSTAR_RUNID,
     next(iter(REMOVED_SETTINGS)),

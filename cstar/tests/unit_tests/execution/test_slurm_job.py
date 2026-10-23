@@ -3,6 +3,7 @@ from unittest.mock import MagicMock, PropertyMock, patch
 
 import pytest
 
+from cstar.base.env import ENV_CSTAR_SLURM_DISABLE_MT, FLAG_OFF, FLAG_ON
 from cstar.execution.scheduler_job import ExecutionStatus, SlurmJob
 from cstar.system.scheduler import SlurmPartition, SlurmQOS, SlurmScheduler
 
@@ -140,6 +141,25 @@ class TestSlurmJob:
             f"The SBATCH script is missing required content: {missing_content}"
         )
         assert "#SBATCH --ntasks-per-node" not in job.script
+
+    @pytest.mark.parametrize(
+        ("value", "expected"), [(FLAG_ON, True), (FLAG_OFF, False), (None, False)]
+    )
+    def test_script_multithread_hint(
+        self,
+        value: str | None,
+        expected: bool,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Verifies `CSTAR_SLURM_DISABLE_MT=1` adds `--hint=nomultithread`."""
+        if value is None:
+            monkeypatch.delenv(ENV_CSTAR_SLURM_DISABLE_MT, raising=False)
+        else:
+            monkeypatch.setenv(ENV_CSTAR_SLURM_DISABLE_MT, value)
+
+        job = SlurmJob(**self.common_job_params)
+
+        assert ("#SBATCH --hint=nomultithread" in job.script) is expected
 
     def test_script_task_distribution_not_required_with_cpus_per_node(self):
         """Verifies that a user-supplied `cpus_per_node` acts as the per-node capacity

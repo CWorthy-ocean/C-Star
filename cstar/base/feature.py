@@ -78,28 +78,6 @@ ENV_FF_ORCH_TRX_TIMESPLIT_LONGNAME: t.Annotated[
 """Enable long name generation during time-splitting."""
 
 
-ENV_FF_DEBUG_BUILD_MODE: t.Annotated[
-    t.Literal["CSTAR_FF_DEBUG_BUILD_MODE"],
-    EnvVar(
-        "Enable building dependent packages in developer/debug mode.",
-        GROUP_FF,
-        default=FLAG_OFF,
-    ),
-] = "CSTAR_FF_DEBUG_BUILD_MODE"
-"""Enable building dependent packages in developer/debug mode."""
-
-
-ENV_FF_SLURM_DISABLE_MT: t.Annotated[
-    t.Literal["CSTAR_FF_SLURM_DISABLE_MT"],
-    EnvVar(
-        "Enable passing a hint to SLURM to disable multi-threading",
-        GROUP_FF,
-        default=FLAG_OFF,
-    ),
-] = "CSTAR_FF_SLURM_DISABLE_MT"
-"""Enable passing a hint to SLURM to disable multi-threading."""
-
-
 def is_flag_enabled(flag: str) -> bool:
     """Determine if a boolean environment varible is enabled.
 

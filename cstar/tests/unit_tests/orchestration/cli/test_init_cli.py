@@ -24,7 +24,7 @@ from cstar.base.env import (
     read_user_config,
 )
 from cstar.base.exceptions import CstarError, CstarUserConfigError
-from cstar.base.feature import ENV_FF_DEBUG_BUILD_MODE
+from cstar.base.feature import ENV_FF_DEVELOPER_MODE
 from cstar.cli import init as init_module
 from cstar.cli.cli import app as root_app
 from cstar.cli.cli import attach_subcommands
@@ -60,7 +60,7 @@ NEVER_WRITTEN = (
     *REMOVED_SETTINGS,
     ENV_CSTAR_CONFIG_HOME,
     ENV_CSTAR_RUNID,
-    ENV_FF_DEBUG_BUILD_MODE,
+    ENV_FF_DEVELOPER_MODE,
 )
 """Names that must not appear anywhere in a file `init` writes."""
 
