@@ -413,6 +413,18 @@ REMOVED_SETTINGS: t.Final[dict[str, RemovedSetting]] = {
         "pass --clobber to `cstar blueprint run` or `cstar blueprint migrate` "
         "instead (`--clobber <step|all>` for `cstar workplan run`)."
     ),
+    "CSTAR_FF_CLI_TEMPLATE_CREATE": RemovedSetting(
+        "the `cstar template create` command was removed."
+    ),
+    "CSTAR_FF_CLI_WORKPLAN_COMPOSE": RemovedSetting(
+        "the `cstar workplan compose` command was removed."
+    ),
+    "CSTAR_FF_CLI_WORKPLAN_GEN": RemovedSetting(
+        "the `cstar workplan generate` command was removed."
+    ),
+    "CSTAR_FF_CLI_WORKPLAN_PLAN": RemovedSetting(
+        "the `cstar workplan plan` command was removed."
+    ),
     "CSTAR_FF_DEBUG_BUILD_MODE": RemovedSetting(
         "set CSTAR_DEBUG_BUILD_MODE=1 instead; developer mode no longer enables it."
     ),

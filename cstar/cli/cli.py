@@ -16,7 +16,6 @@ from cstar.cli.forge import app as app_forge
 from cstar.cli.init import COMMAND_INIT, HELP_LONG, HELP_SHORT, init
 from cstar.cli.run import NAME as NAME_RUN
 from cstar.cli.run import app as app_run
-from cstar.cli.template import app as app_template
 from cstar.cli.workplan import ALIAS as ALIAS_WORKPLAN
 from cstar.cli.workplan import NAME as NAME_WORKPLAN
 from cstar.cli.workplan import app as app_workplan
@@ -56,7 +55,6 @@ def attach_subcommands(app: typer.Typer) -> None:
         (app_blueprint, "blueprint", (ALIAS_BLUEPRINT,)),
         (app_env, NAME_ENV, ()),
         (app_forge, "forge", ()),
-        (app_template, "template", ()),
         (app_workplan, NAME_WORKPLAN, (ALIAS_WORKPLAN,)),
         (app_run, NAME_RUN, ()),
         (app_admin, "admin", ()),

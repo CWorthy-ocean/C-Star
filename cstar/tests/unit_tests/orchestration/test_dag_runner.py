@@ -7,7 +7,7 @@ import re
 import shutil
 import textwrap
 import typing as t
-from collections.abc import AsyncGenerator
+from collections.abc import AsyncGenerator, Callable
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from unittest import mock
@@ -15,8 +15,10 @@ from unittest import mock
 import pytest
 
 from cstar.applications.hello_world import HelloWorldBlueprint
-from cstar.base.env import ENV_CSTAR_RUNID
+from cstar.applications.roms_marbl.models import RomsMarblBlueprint
+from cstar.base.env import ENV_CSTAR_RUNID, ENV_CSTAR_STATE_HOME, FLAG_ON
 from cstar.base.exceptions import CstarError, CstarExpectationFailed
+from cstar.base.feature import ENV_FF_ORCH_TRX_TIMESPLIT, ENV_FF_ORCH_TRX_TIMESPLIT_FREQ
 from cstar.base.utils import slugify
 from cstar.entrypoint.utils import ARG_CLOBBER, ARG_PRE_RUN, ARG_RUN_ID
 from cstar.execution.file_system import (
@@ -36,6 +38,7 @@ from cstar.orchestration.dag_runner import (
     apply_clobber_overrides,
     apply_pre_run_overrides,
     apply_resume_overrides,
+    build_and_run_dag,
     build_dag,
     build_planner,
     check_clobber_dependents,
@@ -99,6 +102,8 @@ from cstar.orchestration.orchestration import (
     ProcessHandle,
     Status,
     Task,
+    check_environment,
+    configure_environment,
 )
 from cstar.orchestration.run_check import TRANSFORMED_WORKPLAN_GLOB
 from cstar.orchestration.serialization import (
@@ -109,6 +114,15 @@ from cstar.orchestration.serialization import (
 )
 from cstar.orchestration.state import StateRepository
 from cstar.orchestration.tracking import KEY_RUN_UUID, TrackingRepository, WorkplanRun
+from cstar.orchestration.transforms import SplitFrequency
+from cstar.orchestration.utils import (
+    ENV_CSTAR_SLURM_ACCOUNT,
+    ENV_CSTAR_SLURM_MAX_WALLTIME,
+    ENV_CSTAR_SLURM_QUEUE,
+    get_run_id,
+)
+from cstar.system.environment import EnvSettingsBase, SlurmSettingsBase
+from cstar.system.manager import AnvilEnvSettings
 from cstar.tests.unit_tests.orchestration.conftest import (
     EXTERNAL_TOKEN,
     ExternalTaskFactory,
@@ -3119,3 +3133,152 @@ async def test_prepare_workplan_anchors_relative_blueprint_path(
     command = StepToRunRequestAdapter().adapt(step).command
     assert command[:4] == ["cstar", "blueprint", "run", str(expected)]
     assert command[4:6] == ["--step", step.name]
+
+
+@pytest.mark.parametrize(
+    ("drop_var", "key", "settings_klass"),
+    [
+        (ENV_CSTAR_SLURM_ACCOUNT, "ACCOUNT", SlurmSettingsBase),
+        (ENV_CSTAR_SLURM_QUEUE, "QUEUE", SlurmSettingsBase),
+        (ENV_CSTAR_SLURM_ACCOUNT, "ACCOUNT", AnvilEnvSettings),
+        (ENV_CSTAR_SLURM_QUEUE, "QUEUE", AnvilEnvSettings),
+    ],
+)
+@pytest.mark.asyncio
+async def test_build_and_run_dag_env(
+    drop_var: str,
+    key: str,
+    settings_klass: type[EnvSettingsBase],
+    tmp_path: Path,
+    bp_templates_dir: Path,
+    create_host_workplan: Callable[[str, Path, Path, str], Path],
+) -> None:
+    """Verify that the DAG runner fails when required environment variables are not passed.
+
+    Parameters
+    ----------
+    drop_var : str
+        The environment variable to be removed from the environment.
+    key : str
+        A unique string verifying the correct exception was caught.
+    tmp_path : Path
+        Temporary directory for test outputs
+    bp_templates_dir: Path
+        Fixture returning the path to the directory containing blueprint template files
+    create_host_workplan : Callable
+        Fixture that writes a template workplan hosting a blueprint, returning its path
+    """
+    workplan_name: str = "single_step"
+
+    bp_template_file = "blueprint.yaml"
+    bp_template_path = bp_templates_dir / bp_template_file
+
+    working_dir = tmp_path / "original-output-dir"
+    working_dir_override = tmp_path / "overridden-output-dir"
+    run_id = "my-run"
+
+    mock_process = mock.AsyncMock()
+
+    # mock the sys manager to engage the checks for Slurm env-vars
+    mock_sys_manager = mock.Mock()
+    mock_sys_manager.scheduler = mock.Mock()
+    mock_get_mgr = mock.Mock(return_value=mock_sys_manager)
+
+    mock_env = {
+        ENV_CSTAR_STATE_HOME: working_dir_override.as_posix(),
+        ENV_CSTAR_SLURM_ACCOUNT: "xyz",
+        ENV_CSTAR_SLURM_QUEUE: "wholenode",
+        ENV_CSTAR_SLURM_MAX_WALLTIME: "00:5:00",
+        ENV_CSTAR_RUNID: run_id,
+    }
+
+    # get rid of one required env var.
+    del mock_env[drop_var]
+
+    with (
+        mock.patch("cstar.orchestration.dag_runner.process_plan", mock_process),
+        mock.patch("cstar.orchestration.dag_runner.get_sysmgr", mock_get_mgr),
+        mock.patch.dict(os.environ, mock_env, clear=True),
+        mock.patch(
+            "cstar.system.environment.CStarEnvironment.settings_klass",
+            settings_klass,
+        ),
+        pytest.raises(CstarExpectationFailed) as ex,
+    ):
+        generated_wp_path = create_host_workplan(
+            workplan_name, bp_template_path, working_dir, run_id
+        )
+
+        await build_and_run_dag(generated_wp_path, run_id)
+
+    assert key in str(ex)
+
+
+@pytest.mark.asyncio
+async def test_prepare_template_hosted_dag(
+    tmp_path: Path,
+    bp_templates_dir: Path,
+    create_host_workplan: Callable[[str, Path, Path, str], Path],
+) -> None:
+    """Verify that a template-hosted DAG is transformed by the DAG runner.
+
+    Parameters
+    ----------
+    tmp_path : Path
+        Temporary directory for test outputs
+    bp_templates_dir: Path
+        Fixture returning the path to the directory containing blueprint template files
+    create_host_workplan : Callable
+        Fixture that writes a template workplan hosting a blueprint, returning its path
+    """
+    workplan_name: str = "single_step"
+
+    bp_template_file = "blueprint.yaml"
+    bp_template_path = bp_templates_dir / bp_template_file
+
+    working_dir = tmp_path / "original-output-dir"
+    run_id = "my-run"
+
+    mock_env = {
+        ENV_CSTAR_SLURM_ACCOUNT: "xyz",
+        ENV_CSTAR_SLURM_QUEUE: "wholenode",
+        ENV_CSTAR_SLURM_MAX_WALLTIME: "00:5:00",
+        ENV_FF_ORCH_TRX_TIMESPLIT: FLAG_ON,
+        ENV_FF_ORCH_TRX_TIMESPLIT_FREQ: SplitFrequency.Monthly.value,
+    }
+
+    def _raise_ex(*args, **kwargs) -> None:
+        msg = "on-purpose-fail"
+        raise RuntimeError(msg)
+
+    with (
+        mock.patch("cstar.orchestration.orchestration.Planner.__init__", _raise_ex),
+        mock.patch.dict(os.environ, mock_env),
+    ):
+        generated_wp_path = create_host_workplan(
+            workplan_name, bp_template_path, working_dir, run_id
+        )
+
+        configure_environment(working_dir, run_id)
+        run_id = get_run_id()
+        check_environment()
+        wp, wp_path, _, _ = await prepare_workplan(
+            generated_wp_path, StateDirectoryManager.data_dir(run_id)
+        )
+
+    wp = deserialize(wp_path, LiveWorkplan)
+    steps = list(wp.steps)
+
+    # default blueprint is 366 days; confirm 366 steps after tranform is applied.
+    num_timeslices = 12
+    assert len(steps) == num_timeslices
+
+    paths: set[Path] = set()
+    for step in steps:
+        bp = deserialize(step.blueprint_path, RomsMarblBlueprint)
+        paths.add(bp.effective_working_dir)
+
+        assert bp.effective_working_dir.exists()
+
+    # confirm that every step has a unique output path
+    assert len(steps) == num_timeslices
