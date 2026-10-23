@@ -20,7 +20,7 @@ The case
   resolution, covering the California Current System.
 - The **child** is a 70 by 140 cell grid with 20 levels, about 4 km
   resolution, nested in the parent.
-- One **alkalinity release** (ALK) is placed in the child, in Monterey Bay.
+- One **alkalinity release** (ALK) is placed in the child, off San Simeon.
 - The chain is the one of the tiny tutorial, nine steps in all:
 
   .. code-block:: text
@@ -38,7 +38,7 @@ The three forge blueprints use the bundled ``roms-marbl-0.11-default`` model
 (ucla-roms 0.11.0 with MARBL and ParallelIO) and write daily restarts.
 
 The release values are placeholders, to be confirmed. The release is 1e4 mol/s
-of ALK (1e7 meq/s) at 36.8 N, 122.0 W and 2 m depth, constant for 30 days from
+of ALK (1e7 meq/s) at 35.52 N, 121.22 W and 2 m depth, constant for 30 days from
 the child's start, then zero.
 
 Before you start

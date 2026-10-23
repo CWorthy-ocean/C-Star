@@ -115,11 +115,11 @@ This is the workplan you ran. The header comments explain each step.
    :caption: workplan.yaml
 
 The ROMS steps use ucla-roms 0.11.0 with MARBL and ParallelIO, and each runs
-on 4 MPI ranks (a 2 by 2 tiling). The times are from a 10-core laptop that
-was also busy with other work, with the source data already downloaded; the
-whole workplan took about 20 minutes, and takes less on an idle machine. The
-time of a ROMS step includes building its own ROMS executable: the three ROMS
-steps are three different builds.
+on 4 MPI ranks (a 2 by 2 tiling). Each ROMS step builds its own ROMS
+executable: the three ROMS steps are three different builds. On a 10-core
+laptop that was also busy with other work, with the source data already
+downloaded, the whole workplan took about 20 minutes; it takes less on an
+idle machine.
 
 The release is alkalinity at 2e6 meq/s for four hours, from the child's
 start. The workplan's three forge steps share nothing, but
