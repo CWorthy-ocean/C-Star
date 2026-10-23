@@ -80,7 +80,6 @@ from cstar.orchestration.tracking import (
     WorkplanRun,
     require_writable,
 )
-from cstar.system.migration import CstarSchemaTooNewError
 
 log = get_logger(__name__)
 app = typer.Typer()
@@ -406,7 +405,7 @@ def _read_manifest(root: Path) -> RunManifest:
     """
     try:
         manifest = read_run_manifest(root)
-    except (CstarError, CstarSchemaTooNewError) as ex:
+    except CstarError as ex:
         raise typer.BadParameter(str(ex)) from ex
     if manifest is None:
         msg = f"{str(root)!r} no longer holds a run manifest."

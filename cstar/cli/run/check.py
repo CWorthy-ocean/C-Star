@@ -57,7 +57,6 @@ from cstar.orchestration.run_check import (
     steps_inside_run,
 )
 from cstar.orchestration.tracking import WorkplanRun, require_writable
-from cstar.system.migration import CstarSchemaTooNewError
 
 if t.TYPE_CHECKING:
     from collections.abc import Iterator
@@ -375,7 +374,7 @@ def _load_manifest(
 
     try:
         manifest = read_run_manifest(run_root)
-    except (CstarError, CstarSchemaTooNewError) as ex:
+    except CstarError as ex:
         typer.echo(f"Warning: {ex}", err=True)
         return None
 

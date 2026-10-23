@@ -97,7 +97,6 @@ from cstar.orchestration.transforms import (
     anchor_blueprint_path,
     external_dependencies,
 )
-from cstar.system.migration import CstarSchemaTooNewError
 
 if t.TYPE_CHECKING:
     from collections.abc import Mapping
@@ -612,7 +611,7 @@ def refuse_run_id_collision(wp_path: Path, run_id: str, *, explicit: bool) -> No
 
     try:
         recorded_path = recorded_workplan(record)
-    except (CstarError, CstarSchemaTooNewError) as ex:
+    except CstarError as ex:
         # the run cannot be re-entered either: scheduling reads the same manifest
         msg = (
             f"{claim}, and the manifest of that run could not be read: {ex}; pass "
@@ -773,7 +772,7 @@ def verify_resume_source(wp_path: Path, wp_run: WorkplanRun) -> None:
     )
     try:
         recorded_path = recorded_workplan(wp_run)
-    except (CstarError, CstarSchemaTooNewError) as ex:
+    except CstarError as ex:
         msg = (
             f"Unable to verify {str(wp_path)!r} against run {wp_run.run_id!r}: "
             f"{ex}. {escape}."

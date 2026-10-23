@@ -60,7 +60,6 @@ from cstar.orchestration.tracking import (
     TrackingRepository,
     WorkplanRun,
 )
-from cstar.system.migration import CstarSchemaTooNewError
 
 log = get_logger(__name__)
 app = typer.Typer()
@@ -247,7 +246,7 @@ def _read_run(root: Path) -> tuple[RunManifest, Path]:
     """
     try:
         manifest = read_run_manifest(root)
-    except (CstarError, CstarSchemaTooNewError) as ex:
+    except CstarError as ex:
         raise typer.BadParameter(str(ex)) from ex
     if manifest is None:
         msg = f"{str(root)!r} no longer holds a run manifest."
@@ -370,7 +369,7 @@ def build_attached_record(
     )
     try:
         carried = recorded_workplan(record)
-    except (CstarError, CstarSchemaTooNewError) as ex:
+    except CstarError as ex:
         typer.echo(f"Warning: the carried workplan was not located: {ex}", err=True)
         return record
 

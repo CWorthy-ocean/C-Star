@@ -40,7 +40,6 @@ from cstar.orchestration.tracking import (
     TrackingRepository,
     WorkplanRun,
 )
-from cstar.system.migration import CstarMigrationError
 
 if t.TYPE_CHECKING:
     from collections.abc import Sequence
@@ -849,10 +848,7 @@ def read_run_location(root: Path) -> RunLocation:
         msg = f"{str(root)!r} is not a directory."
         raise CstarError(msg)
 
-    try:
-        manifest = read_run_manifest(root)
-    except CstarMigrationError as ex:
-        raise CstarError(str(ex)) from ex
+    manifest = read_run_manifest(root)
     if manifest is None:
         msg = f"{str(root)!r} holds no run manifest."
         if JobFileSystemManager(root).tasks_dir.is_dir():

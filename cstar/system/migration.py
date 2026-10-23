@@ -13,6 +13,7 @@ from pydantic import (
 
 from cstar.base.adapter import SchemaAdapter, SchemaBreak
 from cstar.base.env import ENV_CSTAR_CLI_DRY_RUN, ENV_CSTAR_CLOBBER_WORKING_DIR
+from cstar.base.exceptions import CstarError
 from cstar.base.feature import is_flag_enabled
 from cstar.base.log import LoggingMixin
 
@@ -20,7 +21,7 @@ KEY_SV: t.Final[str] = "schema_version"
 KEY_APP: t.Final[str] = "application"
 
 
-class CstarMigrationError(Exception):
+class CstarMigrationError(CstarError):
     """Base class for errors arising from a schema migration."""
 
 

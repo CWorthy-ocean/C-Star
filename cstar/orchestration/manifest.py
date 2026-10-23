@@ -68,14 +68,9 @@ if t.TYPE_CHECKING:
 
 log = get_logger(__name__)
 
-DOCUMENT_READ_ERRORS: t.Final[tuple[type[Exception], ...]] = (
-    CstarError,
-    CstarSchemaTooNewError,
-    OSError,
-)
+DOCUMENT_READ_ERRORS: t.Final[tuple[type[Exception], ...]] = (CstarError, OSError)
 """What reading a manifest or a step record raises for a document that cannot be
-used: unreadable, invalid, newer than this build reads, or out of reach. The
-newer-schema error is not a `CstarError`."""
+used: unreadable, invalid, newer than this build reads, or out of reach."""
 
 RUN_MANIFEST_NAME: t.Final[str] = "cstar-run.yaml"
 """The file name of the run manifest, in the run root."""
