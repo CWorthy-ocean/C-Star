@@ -195,6 +195,8 @@ def test_yes_on_a_laptop_writes_a_file_of_commented_examples(
     assert "# CSTAR_DATA_HOME=" in text
     for name in NEVER_WRITTEN:
         assert name not in text
+    assert "'cstar run cd' shell support" in output
+    assert "The 'cstar run cd' command requires a shell function to operate." in output
     assert "Shell function: installed for zsh" in output
     assert "Jupyter kernel: registered (cstar-env)" in output
     assert safe_environment.installs == [Shell.ZSH]

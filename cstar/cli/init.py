@@ -420,9 +420,9 @@ def write_section(config: UserConfig, decisions: "Sequence[Decision]") -> list[s
 
 def shell_section(yes: bool) -> str:
     """Offer to install the shell function; the outcome for the summary."""
-    header("Shell function")
-    echo(f"A shell function named cstar makes `cstar {NAME_RUN} {COMMAND_CD} <run-id>`")
-    echo("change to a run's directory; every other command passes through.")
+    command = f"cstar {NAME_RUN} {COMMAND_CD}"
+    header(f"'{command}' shell support")
+    echo(f"The '{command}' command requires a shell function to operate.")
     if not confirm("Install it for your shell?", yes):
         return "skipped"
 
