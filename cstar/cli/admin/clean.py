@@ -22,7 +22,13 @@ from cstar.cli.common import (
     set_env,
 )
 from cstar.cli.workplan.shared import colored, list_runs
-from cstar.entrypoint.utils import ARG_ALL, ARG_ALL_CLEAN_HELP, ARG_DRY_RUN, ARG_YES
+from cstar.entrypoint.utils import (
+    ARG_ALL,
+    ARG_ALL_CLEAN_HELP,
+    ARG_DRY_RUN,
+    ARG_RUN_ID,
+    ARG_YES,
+)
 from cstar.execution.file_system import DirectoryManager, StateDirectoryManager
 from cstar.orchestration.tracking import (
     TrackingRepository,
@@ -36,9 +42,9 @@ console = Console()
 
 short_help: t.Final[str] = "Clean up leftover data and files written to disk."
 help: t.Final[str] = (
-    f"{short_help} Pass --run-id to remove one run's state and data, or --all "
-    "to wipe C-Star's directories. WARNING: Removed data is unrecoverable; "
-    "preview with --dry-run."
+    f"{short_help} Pass {ARG_RUN_ID} to remove one run's state and data, or "
+    f"{ARG_ALL} to wipe C-Star's directories. WARNING: Removed data is "
+    f"unrecoverable; preview with {ARG_DRY_RUN}."
 )
 yes_help: t.Final[str] = "Remove without asking for confirmation of each item."
 run_help: t.Final[str] = "Remove the state and data of this run."
@@ -522,7 +528,7 @@ def clean(
     run_id: t.Annotated[
         str,
         typer.Option(
-            "--run-id",
+            ARG_RUN_ID,
             help=run_help,
             callback=cb_pipeline(
                 runid_callback, normalize_runid, set_env(ENV_CSTAR_RUNID)
@@ -546,7 +552,7 @@ def clean(
     """
     if bool(run_id) == all_:
         raise typer.BadParameter(
-            f"Give exactly one of --run-id <id> (clean one run) or {ARG_ALL} "
+            f"Give exactly one of {ARG_RUN_ID} <id> (clean one run) or {ARG_ALL} "
             "(wipe the data, state, cache and config directories)."
         )
 
