@@ -212,6 +212,11 @@ Bug Fixes
 
 - C-Star now repairs the broken source-data cache link that 0.16.0 and 0.16.1 created when the C-Star root or the legacy forge data folder sits behind a symlink, which made every forge run fail. (`#776 <https://github.com/CWorthy-ocean/C-Star/pull/776>`_)
 - Copying a codebase out of the repository cache no longer fails intermittently because git was still writing into the cache after refreshing it. (`#808 <https://github.com/CWorthy-ocean/C-Star/pull/808>`_)
+- A workplan written as ``.json`` could not be run cleanly: its first run exited with an error after scheduling, and ``--run-id`` re-entry and ``--resume`` failed with "expected ident". (`#810 <https://github.com/CWorthy-ocean/C-Star/pull/810>`_)
+
+  - The run's plan was YAML saved under a ``.json`` name, so every reader parsed it as JSON.
+
+- ``cstar run check``, ``cstar run attach`` and ``cstar run promote`` could not find the plan of a run started from a ``.json`` or ``.yml`` workplan. (`#810 <https://github.com/CWorthy-ocean/C-Star/pull/810>`_)
 
 
 Improvements
