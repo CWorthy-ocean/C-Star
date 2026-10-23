@@ -775,8 +775,11 @@ async def prepare_workplan(
     )
 
     # replaced only once the inputs are carried: a refused attempt leaves the
-    # plan the run executes as the last attempt left it
-    persist_as = WorkplanTransformer.derived_path(wp_path, output_dir, "_transformed")
+    # plan the run executes as the last attempt left it. The plan is rendered
+    # as YAML whatever the authored format, so it is named `.yaml`
+    persist_as = WorkplanTransformer.derived_path(
+        wp_path, output_dir, "_transformed", ".yaml"
+    )
     await asyncio.to_thread(write_text_atomic, persist_as, transformed)
 
     return wp, persist_as, external, carried

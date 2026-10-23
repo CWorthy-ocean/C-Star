@@ -42,6 +42,7 @@ from cstar.orchestration.dag_runner import (
     NoPreparableStepsError,
     get_launcher,
     original_workplan_backup,
+    prepare_workplan,
 )
 from cstar.orchestration.launch.local import LocalHandle
 from cstar.orchestration.launch.slurm import SlurmHandle, SlurmLauncher
@@ -62,7 +63,11 @@ from cstar.orchestration.models import (
     Workplan,
 )
 from cstar.orchestration.orchestration import LiveStep, LiveWorkplan, Planner, Status
-from cstar.orchestration.serialization import deserialize, serialize
+from cstar.orchestration.serialization import (
+    PersistenceMode,
+    deserialize,
+    serialize,
+)
 from cstar.orchestration.state import StateRepository
 from cstar.orchestration.tracking import KEY_ATTACHED, TrackingRepository, WorkplanRun
 from cstar.orchestration.utils import ENV_CSTAR_SLURM_ACCOUNT, ENV_CSTAR_SLURM_QUEUE
@@ -1719,6 +1724,75 @@ def test_workplan_run_reload_prior_run(
     # confirm the status-change handler fires to update the persisted record
     statuses = {deserialize(p, SlurmHandle).status for p in sentinel_paths}
     assert statuses == {Status.Done}
+
+
+@pytest.mark.parametrize("resume", [False, True])
+def test_workplan_run_reenters_a_json_workplan_run(
+    tmp_path: Path,
+    hello_world_bp_path: Path,
+    mock_run_id: str,
+    resume: bool,
+) -> None:
+    """Verify a run started from a JSON workplan re-enters by run-id, alone or
+    resuming with the authored path, by loading the plan prepared in its run root.
+    """
+    run_id = mock_run_id
+    wp = Workplan(
+        name="json",
+        description="A workplan written as JSON.",
+        steps=[
+            Step(
+                name="hello",
+                application="hello_world",
+                blueprint=hello_world_bp_path.as_posix(),
+            )
+        ],
+    )
+    wp_path = tmp_path / "plan.json"
+    serialize(wp_path, wp, PersistenceMode.auto)
+    prepared, trx_path, _, _ = asyncio.run(prepare_workplan(wp_path, tmp_path / "run"))
+
+    sentinel_paths = set[Path]()
+    for step in prepared.steps:
+        handle = LocalHandle(
+            pid="1000",
+            name=LiveStep.from_step(step).safe_name,
+            run_id=run_id,
+            status=Status.Done,
+            start_at=datetime.now(),
+        )
+        path = StateRepository.sentinel_path(handle)
+        assert serialize(path, handle), "serializing the mock handles failed in test"
+        sentinel_paths.add(path)
+
+    TrackingRepository().put_workplan_run_sync(
+        WorkplanRun(
+            workplan_path=wp_path,
+            trx_workplan_path=trx_path,
+            output_path=trx_path.parent,
+            run_id=run_id,
+            sentinels=sentinel_paths,
+        )
+    )
+
+    args = [ARG_RUN_ID, run_id]
+    if resume:
+        args += [ARG_RESUME, str(wp_path)]
+
+    with (
+        mock.patch("cstar.orchestration.dag_runner.get_launcher", _slurm_launcher),
+        mock.patch(
+            "cstar.orchestration.launch.slurm.SlurmLauncher.query_status",
+            mock.AsyncMock(return_value=Status.Done),
+        ),
+        mock.patch(
+            "cstar.orchestration.launch.slurm.SlurmLauncher._submit"
+        ) as mock_submit,
+    ):
+        result = CliRunner().invoke(app, args, color=False)
+
+    assert result.exit_code == 0, result.output
+    assert not mock_submit.called
 
 
 @pytest.mark.parametrize("status", [Status.Submitted, Status.Running, Status.Ending])
