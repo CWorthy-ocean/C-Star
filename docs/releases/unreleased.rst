@@ -21,6 +21,16 @@ Breaking Changes
 
   - Pin a release tag (e.g. ``0.11.0``) to keep the 0.11 tier; a commit hash that resolves to a release keeps that release's tier in both Forge and roms_marbl.
 
+- Nine environment settings are removed; an exported one has no effect, and ``cstar`` prints a warning naming the replacement. (`#805 <https://github.com/CWorthy-ocean/C-Star/pull/805>`_)
+
+  - ``CSTAR_CLOBBER_WORKING_DIR`` and ``CSTAR_FRESH_CODEBASES``: pass ``--clobber`` to ``cstar blueprint run`` or ``cstar blueprint migrate`` (``--clobber <step|all>`` for ``cstar workplan run``).
+  - ``CSTAR_CLI_DRY_RUN``: pass ``--dry-run`` to ``cstar blueprint migrate`` or ``cstar admin clean``, or use ``cstar workplan check``; those two commands and ``cstar workplan run`` refuse to run while it is exported.
+  - ``CSTAR_CLI_VERBOSE``: pass ``--verbose`` to ``cstar blueprint run`` or ``cstar blueprint migrate``.
+  - ``CSTAR_IN_ACTIVE_ALLOCATION``, ``CSTAR_ORCH_DELAYS``, ``CSTAR_ORCH_MAX_CONC``, ``CSTAR_ORCH_LOCAL_DELAY``, ``CSTAR_SLURM_POST_SUBMIT_DELAY``: no replacement; C-Star detects an active SLURM allocation from ``SLURM_JOBID``, and the polling intervals, I/O concurrency limit and post-submit delay are fixed.
+
+- ``CSTAR_RUNID`` is internal: ``cstar env show`` lists it only with ``--group internal``, and neither ``--display export`` nor the configuration docs include it. (`#805 <https://github.com/CWorthy-ocean/C-Star/pull/805>`_)
+- Python API: ``cstar.base.env.max_concurrency()`` is now the constant ``cstar.base.utils.MAX_CONCURRENCY``, ``MigrationRequest.dry_run()`` is a ``dry_run`` field (``clobber()`` is removed), ``cstar.cli.common.set_flag`` is removed, and ``RunnerRequest``'s ``resume``, ``pre_run``, ``clobber`` and ``step`` are keyword-only. (`#805 <https://github.com/CWorthy-ocean/C-Star/pull/805>`_)
+
 
 New features
 ~~~~~~~~~~~~
@@ -151,6 +161,8 @@ New features
   - The tiny tutorial runs on a laptop in about 10 minutes from about 44 MB of pinned test data, with one command and no accounts.
   - The California Current tutorial (16 km parent, 4 km child) uses real forcing and runs under SLURM or on a workstation; ``full.vars`` holds a year-long window, and the page shows how to run a month.
 
+- ``cstar env show --group internal`` lists the variables C-Star sets for its own processes. (`#805 <https://github.com/CWorthy-ocean/C-Star/pull/805>`_)
+
 
 
 
@@ -218,6 +230,8 @@ Improvements
 - ``cstar run gather`` builds ``gathered_output`` under the run's recorded directory, so an attached run outside the data home is gathered in place. (`#798 <https://github.com/CWorthy-ocean/C-Star/pull/798>`_)
 - The netCDF digest (``hash_netcdf_contents``) moved from the forge application to ``cstar.base.digest``, unchanged, so orchestration can use it without reaching into an application module. (`#798 <https://github.com/CWorthy-ocean/C-Star/pull/798>`_)
 - Building a subchunked GLORYS reference no longer patches asyncio for the rest of the forge step, which on Python 3.14 broke asyncio timeouts, fsspec I/O and event-loop shutdown. (`#804 <https://github.com/CWorthy-ocean/C-Star/pull/804>`_)
+- The local launcher checks a waiting step's dependencies every 2 s instead of every 10 s, so local workplan steps start sooner. (`#805 <https://github.com/CWorthy-ocean/C-Star/pull/805>`_)
+- ``cstar workplan run --resume`` no longer re-exports removed settings recorded in an older run's environment. (`#805 <https://github.com/CWorthy-ocean/C-Star/pull/805>`_)
 
 
 
@@ -255,3 +269,5 @@ Miscellaneous
 - ``nest-asyncio`` is no longer a dependency of ``cstar-ocean`` or of the conda environment files. (`#804 <https://github.com/CWorthy-ocean/C-Star/pull/804>`_)
 - New tutorial pages on nesting and upscaling: a walk-through of the tiny case and a high-level page for the California Current case. They replace the unlinked placeholder workplan sketch in ``docs/tutorials``. (`#776 <https://github.com/CWorthy-ocean/C-Star/pull/776>`_)
 - The weekly extended integration tests run the tiny tutorial end to end. They check its CDR metrics and that the parent rerun injects exactly the upscaled flux. (`#776 <https://github.com/CWorthy-ocean/C-Star/pull/776>`_)
+- Documentation: the configuration page's variable table no longer lists the removed settings or ``CSTAR_RUNID``, and the workplan tutorial no longer mentions ``CSTAR_CLOBBER_WORKING_DIR``. (`#805 <https://github.com/CWorthy-ocean/C-Star/pull/805>`_)
+- Containers: the runner and NERSC images no longer set the unused ``CSTAR_INTERACTIVE``. (`#805 <https://github.com/CWorthy-ocean/C-Star/pull/805>`_)
