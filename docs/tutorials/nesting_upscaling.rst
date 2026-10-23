@@ -16,7 +16,7 @@ north-west of Scotland. The child is a 24 by 24 cell grid over 100 km inside it,
 one alkalinity (ALK) release near its east boundary. If nesting and
 ``continue-from`` are new to you, :doc:`nested_workplan` introduces them on a
 simpler workplan without CDR. A :doc:`second page <nesting_upscaling_ccs>`
-shows the same workflow on a realistic case, the California Current.
+shows the same workflow on a realistic case, the California Current System.
 
 How the workflow fits together
 ------------------------------
@@ -66,24 +66,6 @@ It analyses each domain on its own grid and combines them. The
 :doc:`workplans page <../workplans>` describes the application in its
 sections "Computing CDR metrics from segmented runs" and "Nested (upscaled)
 experiments".
-
-Before you start
-----------------
-
-- A source checkout of C-Star, with the conda environment from
-  ``environment-laptop.yml`` created, activated, and C-Star installed into it
-  (see "Install from source" on the :doc:`installation page
-  <../installation>`). The example files and ``fetch_data.py`` live in the
-  repository and are not part of the installed package. ROMS builds find
-  NetCDF and MPI through the activated environment, so activate it in every
-  shell where you use the ``cstar`` commands, including ``cstar run status``.
-  The environment file also installs GNU coreutils, which C-Star needs to
-  enforce the local time limits on macOS; the ``cstar`` commands that read the
-  workplan, ``cstar run status`` among them, look for it too.
-- Network access on every run. For each ROMS step C-Star refreshes its cached
-  clones of ROMS, MARBL and ParallelIO (it clones them the first time) before
-  it compiles ROMS. Only the test data and the auxiliary files that roms-tools
-  fetches itself, such as the ETOPO5 topography, are downloaded just once.
 
 Run it
 ------
