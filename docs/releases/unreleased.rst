@@ -195,6 +195,7 @@ Bug Fixes
   - It now orders them by the timestamp in their names, and repeated or out-of-order records raise an error that names the record and files.
 
 - C-Star now repairs the broken source-data cache link that 0.16.0 and 0.16.1 created when the C-Star root or the legacy forge data folder sits behind a symlink, which made every forge run fail. (`#776 <https://github.com/CWorthy-ocean/C-Star/pull/776>`_)
+- Copying a codebase out of the repository cache no longer fails intermittently because git was still writing into the cache after refreshing it. (`#808 <https://github.com/CWorthy-ocean/C-Star/pull/808>`_)
 
 
 Improvements
@@ -271,3 +272,4 @@ Miscellaneous
 - The weekly extended integration tests run the tiny tutorial end to end. They check its CDR metrics and that the parent rerun injects exactly the upscaled flux. (`#776 <https://github.com/CWorthy-ocean/C-Star/pull/776>`_)
 - Documentation: the configuration page's variable table no longer lists the removed settings or ``CSTAR_RUNID``, and the workplan tutorial no longer mentions ``CSTAR_CLOBBER_WORKING_DIR``. (`#805 <https://github.com/CWorthy-ocean/C-Star/pull/805>`_)
 - Containers: the runner and NERSC images no longer set the unused ``CSTAR_INTERACTIVE``. (`#805 <https://github.com/CWorthy-ocean/C-Star/pull/805>`_)
+- The e2e step-log checks now show the lines after each error, so a failed command's stderr appears in the assertion message. (`#808 <https://github.com/CWorthy-ocean/C-Star/pull/808>`_)
