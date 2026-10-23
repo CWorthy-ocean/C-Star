@@ -37,6 +37,15 @@ Breaking Changes
 
   - Without either option, or with both, the command stops with a usage error and removes nothing.
 
+- ``CSTAR_FF_DEBUG_BUILD_MODE`` is renamed ``CSTAR_DEBUG_BUILD_MODE``, and developer mode no longer turns it on; set it to ``1`` explicitly for debug ROMS builds. (`#813 <https://github.com/CWorthy-ocean/C-Star/pull/813>`_)
+- ``CSTAR_FF_SLURM_DISABLE_MT`` is renamed ``CSTAR_SLURM_DISABLE_MT``, and developer mode no longer turns it on; Elja still sets it through its system settings. (`#813 <https://github.com/CWorthy-ocean/C-Star/pull/813>`_)
+- ``CSTAR_ORCH_TRX_FREQ`` is renamed ``CSTAR_FF_ORCH_TRX_TIMESPLIT_FREQ``, a time-splitting feature flag read only while ``CSTAR_FF_ORCH_TRX_TIMESPLIT`` is on. (`#813 <https://github.com/CWorthy-ocean/C-Star/pull/813>`_)
+
+  - Like every feature flag it is set in the shell, not the configuration file; a configuration file that still names ``CSTAR_ORCH_TRX_FREQ`` stops cstar commands until that line is removed.
+
+- The developer-only commands ``cstar workplan compose``, ``cstar workplan generate``, ``cstar workplan plan`` and ``cstar template create`` are removed, with their four ``CSTAR_FF_CLI_*`` flags. (`#813 <https://github.com/CWorthy-ocean/C-Star/pull/813>`_)
+- Every old name above prints a warning naming its replacement when it is still exported. (`#813 <https://github.com/CWorthy-ocean/C-Star/pull/813>`_)
+
 
 
 New features
@@ -272,6 +281,12 @@ Improvements
 - Each run attempt now always saves its workplan as ``workplan.yaml``, whatever the authored file's suffix. (`#812 <https://github.com/CWorthy-ocean/C-Star/pull/812>`_)
 - ``cstar admin clean`` exits 0 when a run ID has nothing to remove, instead of 99. (`#814 <https://github.com/CWorthy-ocean/C-Star/pull/814>`_)
 - ``cstar admin clean --dry-run`` lists what would be removed without asking about each item. (`#814 <https://github.com/CWorthy-ocean/C-Star/pull/814>`_)
+- ``cstar init`` shows the run-output, project and catalog locations and asks one question, "Use C-Star's default locations?" (or "Use these locations?" when any is customised), before prompting for each. (`#813 <https://github.com/CWorthy-ocean/C-Star/pull/813>`_)
+
+  - Answering no walks through each location as before; ``--yes`` keeps them all.
+  - On a cluster where no scratch directory was found, the question defaults to no, so pressing Enter leads to the prompts.
+
+- ``cstar init`` introduces the shell function as "'cstar run cd' shell support": the ``cstar run cd`` command requires a shell function to operate. (`#813 <https://github.com/CWorthy-ocean/C-Star/pull/813>`_)
 
 
 
@@ -317,3 +332,4 @@ Miscellaneous
 - The installation page's "After installing" section now starts with ``cstar init`` and keeps the kernel, configuration and shell-function steps as its sub-steps; the HPC page's scheduler section leads with ``cstar init`` and keeps the ``config.env`` example; the configuration page points at ``cstar init`` as the way to create the file. (`#809 <https://github.com/CWorthy-ocean/C-Star/pull/809>`_)
 - Removed the ``workplan.json`` mention from the workplans guide. (`#812 <https://github.com/CWorthy-ocean/C-Star/pull/812>`_)
 - New "Cleaning up" section in the workplans guide. (`#814 <https://github.com/CWorthy-ocean/C-Star/pull/814>`_)
+- The installation guide describes the new ``cstar init`` locations question. (`#813 <https://github.com/CWorthy-ocean/C-Star/pull/813>`_)
