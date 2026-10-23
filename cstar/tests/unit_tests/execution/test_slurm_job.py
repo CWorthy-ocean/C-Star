@@ -4,6 +4,7 @@ from unittest.mock import MagicMock, PropertyMock, patch
 import pytest
 
 from cstar.base.env import ENV_CSTAR_SLURM_DISABLE_MT, FLAG_OFF, FLAG_ON
+from cstar.base.feature import ENV_FF_DEVELOPER_MODE
 from cstar.execution.scheduler_job import ExecutionStatus, SlurmJob
 from cstar.system.scheduler import SlurmPartition, SlurmQOS, SlurmScheduler
 
@@ -151,7 +152,10 @@ class TestSlurmJob:
         expected: bool,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
-        """Verifies `CSTAR_SLURM_DISABLE_MT=1` adds `--hint=nomultithread`."""
+        """Verifies `CSTAR_SLURM_DISABLE_MT=1` adds `--hint=nomultithread`, and that
+        developer mode no longer does.
+        """
+        monkeypatch.setenv(ENV_FF_DEVELOPER_MODE, FLAG_ON)
         if value is None:
             monkeypatch.delenv(ENV_CSTAR_SLURM_DISABLE_MT, raising=False)
         else:

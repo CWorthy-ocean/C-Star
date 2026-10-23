@@ -17,6 +17,7 @@ from cstar.base.additional_code import AdditionalCode
 from cstar.base.env import ENV_CSTAR_DEBUG_BUILD_MODE, FLAG_OFF, FLAG_ON
 from cstar.base.exceptions import CstarExpectationFailed
 from cstar.base.external_codebase import ExternalCodeBase
+from cstar.base.feature import ENV_FF_DEVELOPER_MODE
 from cstar.base.input_dataset import InputDataset
 from cstar.execution.handler import ExecutionStatus
 from cstar.marbl.external_codebase import MARBLExternalCodeBase
@@ -2051,8 +2052,10 @@ class TestProcessingAndExecution:
         monkeypatch: pytest.MonkeyPatch,
     ):
         """Tests that `CSTAR_DEBUG_BUILD_MODE=1` adds `BUILD_MODE=debug` to the
-        `make` command, and that it is the only thing that does.
+        `make` command, and that it is the only thing that does: developer mode,
+        exported throughout, no longer enables it.
         """
+        monkeypatch.setenv(ENV_FF_DEVELOPER_MODE, FLAG_ON)
         if value is None:
             monkeypatch.delenv(ENV_CSTAR_DEBUG_BUILD_MODE, raising=False)
         else:
