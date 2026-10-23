@@ -75,7 +75,8 @@ rather than the latest one.
 **Upscaling.** The child writes the boundary fluxes of the CDR tracers
 (alkalinity and DIC) through its open boundary, in ``*_uscl.*.nc`` files. The
 ``upscaler`` application turns them into ``upscaled_cdr.nc``, a CDR forcing
-file for the parent grid. ``parent_up`` is the parent grid run again from its
+file for the parent grid, with each hour's flux stamped at the start of that
+hour so the parent applies it in the hour it left the child. ``parent_up`` is the parent grid run again from its
 own restart at the child's start, with that file as its CDR forcing, so the
 parent receives what the child exported. Forge builds ``parent_up`` from a
 blueprint with the CDR mode ``upscaled``, which compiles ROMS to read its CDR
@@ -163,8 +164,9 @@ The two domains are combined in a specific way:
   flux minus the combined uptake from the DIC difference. The two are
   independent views of the same perturbation. They can disagree for a single
   domain: DIC that the child took up and then exported shows up as a DIC
-  difference in ``parent_up``. On the sum, the residual was about a tenth of
-  the flux-based uptake in the reference run below.
+  difference in ``parent_up``. On the sum the residual should be small next to
+  the flux-based uptake: the weekly extended integration test, which runs this
+  workplan, requires it to stay under a tenth.
 
 ``cdr_metrics.nc`` also holds each domain's own uptake, such as
 ``child_carbon_uptake_from_flux`` and ``parent_up_carbon_uptake_from_flux``.
@@ -172,48 +174,9 @@ It holds one diagnostic as well, ``parent_up_DIC_difference_inside_child``: the
 DIC perturbation that ``parent_up`` carries inside the child's footprint. In a
 one-way nested run it is normally not zero. The upscaled source is injected on
 the child's boundary, and anomaly that the child exported can recirculate into
-the footprint. It was 0.22 tonnes in the reference run below. A nonzero value
-is expected here; ``closure_residual`` is the consistency check.
+the footprint. A nonzero value is expected here; ``closure_residual`` is the
+consistency check.
 :ref:`blueprints-cdr-metrics-nested` explains the diagnostic.
-
-At the end of the run (2012-01-03 06:00), a reference run with ucla-roms 0.11.0
-and roms-tools 5.2.1 gave these values (rounded):
-
-.. list-table::
-   :header-rows: 1
-   :widths: 40 20 20 20
-
-   * - Quantity
-     - Child
-     - ``parent_up``
-     - Combined
-   * - CO2 uptake from the flux (tonnes)
-     - 5.32
-     - 0.04
-     - 5.35
-   * - CO2 uptake from the DIC difference (tonnes)
-     - 4.53
-     - 0.26
-     - 4.79
-   * - CDR efficiency from the flux
-     -
-     -
-     - 0.0042
-   * - ``closure_residual`` (tonnes)
-     -
-     -
-     - 0.56 (10.5 % of the flux uptake)
-
-Your numbers should be close to these but need not match them exactly: they
-depend on the ucla-roms and roms-tools versions and on the compiler.
-
-``parent_up`` applies each hour of upscaled flux one hour late. The ``_uscl``
-records are hour averages stamped at the end of the hour, but ROMS holds each
-record from its time stamp. So the last upscaled record, the final hour's
-export, is never applied. Here that is 1 hour of 24. The weekly extended
-integration test checks that ``parent_up`` injects the upscaled alkalinity on
-every record but the last.
-
 
 Where to go next
 ----------------
