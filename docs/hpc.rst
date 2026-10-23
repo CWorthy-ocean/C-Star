@@ -109,12 +109,14 @@ scratch space. Unlike the source-data cache, it has no fallback to scratch or
 your home directory: with no project directory there is no project runs area.
 Each run is a directory directly under ``cstar/runs``, named for its run ID,
 with the run's ``cstar-run.yaml`` at its top; a link to such a directory works
-too. C-Star does not create or fill the area itself yet, and a later release
-adds a command that places a run there. Until then, copy a run directory there
-by hand, keeping its layout. ``cstar run ls --shared`` lists the area. A run in
-it is named by its run ID, by ``run://<uuid>`` or by its directory; a run under
-another directory name is found by the last two only. See
-:ref:`workplan_external_runs`.
+too. ``cstar run promote <run>`` places a run there (a copy of its manifest,
+records and products, a link, or a move; see :ref:`workplan_promote_run`), and
+``cstar run ls --shared`` lists the area. A run in it is named by its run ID,
+by ``run://<uuid>`` or by its directory; a run under another directory name is
+found by the last two only. See :ref:`workplan_external_runs`. The area is
+shared and C-Star changes no permissions: set your umask, or the group and
+permissions of the area, so that your collaborators can read the runs you
+promote.
 
 Some systems define ``PROJECT`` and ``SCRATCH`` for you (Anvil exports both,
 Perlmutter exports ``SCRATCH``); check with ``echo $PROJECT $SCRATCH`` and set

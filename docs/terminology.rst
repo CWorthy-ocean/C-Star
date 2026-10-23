@@ -158,6 +158,14 @@ Definitions
       belongs to another user, and owned otherwise. See
       :ref:`workplan_attach_run`.
 
+    Promote
+      Placing a run in the project runs area (``cstar/runs`` under
+      ``CSTAR_PROJECT_HOME``) with ``cstar run promote``: a copy of what its
+      manifest names (records, logs and products; the large build and
+      per-rank files on request), a link to the run where it is, or a move,
+      after which the run is tracked as attached. The copy keeps the run's
+      uuid. See :ref:`workplan_promote_run`.
+
     Run manifest
       ``cstar-run.yaml`` in a run's directory: the run's identity (its run ID
       and uuid), one **attempt** for each time it was scheduled, one entry per

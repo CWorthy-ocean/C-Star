@@ -69,6 +69,22 @@ ARG_READ_ONLY: t.Final[str] = "--read-only"
 ARG_READ_ONLY_HELP: t.Final[str] = (
     "Record the attached run as read-only: nothing writes into its directory."
 )
+ARG_TO: t.Final[str] = "--to"
+ARG_TO_HELP: t.Final[str] = (
+    "Put the run at <DIR>/<run-id> instead of the project's runs area."
+)
+ARG_MODE: t.Final[str] = "--mode"
+ARG_MODE_HELP: t.Final[str] = (
+    "copy the run (default), link it, move it (copy, check, remove the source), "
+    "or materialize a linked run as a copy."
+)
+ARG_INCLUDE: t.Final[str] = "--include"
+ARG_INCLUDE_HELP: t.Final[str] = (
+    "Also take what is not taken by default: builds (compile-time code, runtime "
+    "code and cloned codebases), temp-output (per-rank output pieces), or all "
+    "(the whole directory). Repeatable."
+)
+
 ARG_AS: t.Final[str] = "--as"
 ARG_AS_HELP: t.Final[str] = (
     "Attach the run under this run-id instead of the one its manifest names."
