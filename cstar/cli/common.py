@@ -17,8 +17,9 @@ from cstar.base.env import (
     ENV_CSTAR_DISABLE_MIGRATION,
     ENV_CSTAR_LOG_LEVEL,
     REMOVED_SETTINGS,
+    load_user_config,
 )
-from cstar.base.exceptions import CstarExpectationFailed
+from cstar.base.exceptions import CstarExpectationFailed, CstarUserConfigError
 from cstar.base.feature import is_flag_enabled
 from cstar.base.log import LogLevelChoices, get_logger, reset_log_level
 from cstar.base.utils import slugify
@@ -208,7 +209,23 @@ def common_callback(
         ),
     ] = False,
 ) -> None:
-    """Warn on stderr about each exported setting that no longer has an effect."""
+    """Load the user's configuration file, then warn on stderr about each
+    exported setting that no longer has an effect.
+
+    The file is loaded before any command's options are parsed, so an option's
+    ``envvar`` binding sees it; an exported variable still wins over it.
+
+    Raises
+    ------
+    typer.Exit
+        With code 2 when the configuration file names settings it may not set.
+    """
+    try:
+        load_user_config()
+    except CstarUserConfigError as ex:
+        typer.echo(str(ex), err=True)
+        raise typer.Exit(2) from ex
+
     for name in sorted(REMOVED_SETTINGS.keys() & os.environ.keys()):
         typer.echo(f"{name} has no effect; {REMOVED_SETTINGS[name].guidance}", err=True)
 

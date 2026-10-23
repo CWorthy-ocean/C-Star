@@ -11,7 +11,7 @@ system, and Python environments need protecting from the module system.
 Configure the scheduler
 -----------------------
 
-Most settings are environment variables; :doc:`configuration` lists them
+Most settings are ``CSTAR_*`` variables; :doc:`configuration` lists them
 all and ``cstar env show`` prints the values in effect. Only the SLURM ones
 are required, and a workplan run stops early if the account and queue are
 missing. A shell profile for a cluster typically carries:
@@ -25,6 +25,18 @@ missing. A shell profile for a cluster typically carries:
    # Only if your system does not already define them (see "Where data goes"):
    # export CSTAR_PROJECT_HOME=/path/to/your/group/directory
    # export SCRATCH=/path/to/your/scratch/directory
+
+The same three settings can go in ``~/.config/cstar/config.env`` instead,
+without ``export`` and without the quotes:
+
+.. code-block:: bash
+
+   CSTAR_SLURM_ACCOUNT=my-allocation
+   CSTAR_SLURM_QUEUE=mpi
+   CSTAR_SLURM_MAX_WALLTIME=01:00:00
+
+Either works. If a name is set both ways, the exported variable takes
+precedence over the file.
 
 These are the defaults for every step of a workplan; a step can override
 them, for example to send Forge steps to a general-purpose queue and ROMS

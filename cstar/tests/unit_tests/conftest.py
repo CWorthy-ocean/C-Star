@@ -26,6 +26,8 @@ from cstar.base.env import (
     ENV_CSTAR_PROJECT_HOME,
     ENV_CSTAR_RUNID,
     ENV_CSTAR_STATE_HOME,
+    USER_CONFIG_FILENAME,
+    load_user_config,
 )
 from cstar.base.external_codebase import ExternalCodeBase
 from cstar.base.gitutils import git_location_to_raw
@@ -2453,6 +2455,25 @@ def mock_xdg_dirs(tmp_path: Path) -> Generator[dict[str, Path]]:
 
     with mock.patch.dict(os.environ, variables):
         yield xdg_vars
+
+
+@pytest.fixture(autouse=True)
+def isolate_user_config(
+    mock_xdg_dirs: dict[str, Path], monkeypatch: pytest.MonkeyPatch
+) -> Generator[Path]:
+    """Point the configuration-file loader at the temporary config home and forget
+    what an earlier test loaded.
+
+    The loader resolves the file from the environment, which a test that patches
+    the environment with ``clear=True`` would turn back into the developer's real
+    ``~/.config/cstar/config.env``; pinning the path keeps every test on its own
+    file. Tests write the returned path to exercise the loader.
+    """
+    path = mock_xdg_dirs[ENV_CSTAR_CONFIG_HOME] / USER_CONFIG_FILENAME
+    monkeypatch.setattr("cstar.base.env.user_config_path", lambda: path)
+    load_user_config.cache_clear()
+    yield path
+    load_user_config.cache_clear()
 
 
 @pytest.fixture(autouse=True)

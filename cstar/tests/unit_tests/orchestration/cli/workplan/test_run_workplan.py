@@ -21,6 +21,8 @@ from cstar.base.env import (
     ENV_CSTAR_STATE_HOME,
     FLAG_ON,
     REMOVED_SETTINGS,
+    capture_environment,
+    load_user_config,
 )
 from cstar.base.exceptions import CstarExpectationFailed
 from cstar.cli.common import normalize_runid
@@ -3676,6 +3678,28 @@ def test_reload_leaves_the_data_and_state_homes_to_the_shell(
         assert os.environ[ENV_CSTAR_DATA_HOME] == current_data
         assert os.environ[ENV_CSTAR_STATE_HOME] == current_state
         assert os.environ[ENV_CSTAR_LOG_LEVEL] == "TRACE"
+
+
+def test_reload_re_exports_a_setting_the_config_file_supplied(
+    tmp_path: Path,
+    mock_run_id: str,
+    isolate_user_config: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Verify a run that captured a setting from the configuration file gets it
+    back on a reload into a shell that lacks it.
+    """
+    monkeypatch.delenv(ENV_CSTAR_SLURM_ACCOUNT, raising=False)
+    isolate_user_config.write_text(f"{ENV_CSTAR_SLURM_ACCOUNT}=m1234\n")
+    load_user_config()
+    _record_run_with_environment(tmp_path, mock_run_id, capture_environment())
+
+    with mock.patch.dict(os.environ):
+        os.environ.pop(ENV_CSTAR_SLURM_ACCOUNT)
+
+        asyncio.run(handle_run_reloading(mock_run_id))
+
+        assert os.environ[ENV_CSTAR_SLURM_ACCOUNT] == "m1234"
 
 
 def test_reload_warns_once_about_settings_that_differ(

@@ -84,8 +84,10 @@ Register a Jupyter kernel
 
 Configure C-Star for your cluster
    On an HPC system, set your scheduler account and queue and review the
-   other environment variables before running anything. ``cstar env show``
-   prints the active configuration; see :doc:`configuration` and :doc:`hpc`.
+   other settings before running anything. They go in the configuration file,
+   ``~/.config/cstar/config.env``, which you can write with ``cstar env set``
+   or edit by hand. ``cstar env show`` prints the active configuration and
+   where each value came from; see :doc:`configuration` and :doc:`hpc`.
 
 Install from source
 -------------------
