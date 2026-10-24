@@ -220,6 +220,12 @@ New features
   - ``cstar workplan check <workplan file>`` still validates a workplan file and stays listed; ``cstar run check <run>`` checks a run.
 
 - The upscaler reads each record's averaging window from ``avg_begin_time``/``avg_end_time`` in ``_uscl`` files from ucla-roms after 0.12.0, including a shorter final window. (`#815 <https://github.com/CWorthy-ocean/C-Star/pull/815>`_)
+- A model spec can set ``archived: true`` to hide it from the wizard's model dropdown; it still loads, runs, and appears in catalog listings. (`#824 <https://github.com/CWorthy-ocean/C-Star/pull/824>`_)
+
+  - The wizard has a "Show archived" checkbox next to the Model dropdown, and archived entries are labelled "(archived)".
+  - Loading a blueprint whose model is archived ticks the checkbox and selects that model.
+  - A model saved from the wizard is never archived, even when its base spec was.
+
 
 
 
@@ -404,4 +410,7 @@ Miscellaneous
   - The catalog's ``roms_marbl_blueprint_names``, ``roms_marbl_blueprint_path``, ``roms_marbl_blueprint_df`` and ``roms_marbl_blueprint`` are now ``ucla_roms_blueprint_*``; ``blueprint_names("ucla_roms")`` and its siblings still work.
   - Workplan templates from ``cstar template create`` now write ``application: ucla_roms``.
   - The docs, the API reference and the developer guides use the new class and module names.
+
+- The bundled ``roms-marbl-0.3-default`` through ``roms-marbl-0.8-default`` and ``cson_roms-marbl_v0.1`` model specs are marked archived. (`#824 <https://github.com/CWorthy-ocean/C-Star/pull/824>`_)
+- The model spec docs describe the ``archived`` key and list the archived bundled specs. (`#824 <https://github.com/CWorthy-ocean/C-Star/pull/824>`_)
 
