@@ -274,7 +274,7 @@ class ROMSSimulation(Simulation):
         Compiles the ROMS executable if necessary.
     pre_run()
         Performs pre-processing steps before execution.
-    run(account_key="", walltime=None, queue_name=None, job_name=None)
+    run(account_key="", walltime="", queue_name="", job_name=None)
         Submits the ROMS simulation for execution.
     post_run()
         Processes model outputs after execution.
@@ -2394,8 +2394,8 @@ class ROMSSimulation(Simulation):
     def run(
         self,
         account_key: str = "",
-        walltime: str | None = None,
-        queue_name: str | None = None,
+        walltime: str = "",
+        queue_name: str = "",
         job_name: str | None = None,
     ) -> "ExecutionHandler":
         """Execute the ROMS simulation.
@@ -2411,11 +2411,11 @@ class ROMSSimulation(Simulation):
             The user's account key on the system, for a scheduler job on a system
             that requires one.
         queue_name : str, optional
-            The name of the scheduler queue to submit the job to. Defaults to the
-            system's primary queue.
+            The name of the scheduler queue to submit the job to. When empty, the
+            system's primary queue, unless the system requires a queue to be set.
         walltime : str, optional
             The maximum allowed execution time for a scheduler job in HH:MM:SS format.
-            Defaults to the queue's max walltime if a scheduler is used.
+            When empty, the queue's max walltime.
         job_name : str, optional
             The name of the job submitted to the scheduler, which also sets
             the output file name `job_name.out`.
@@ -2463,11 +2463,6 @@ class ROMSSimulation(Simulation):
         plan = self.prepare_launch(job_name)
 
         cstar_sysmgr = get_sysmgr()
-
-        if (queue_name is None) and (cstar_sysmgr.scheduler is not None):
-            queue_name = cstar_sysmgr.scheduler.primary_queue_name
-        if (walltime is None) and (cstar_sysmgr.scheduler is not None):
-            walltime = cstar_sysmgr.scheduler.get_queue(queue_name).max_walltime
 
         ## 2: RUN ROMS
 

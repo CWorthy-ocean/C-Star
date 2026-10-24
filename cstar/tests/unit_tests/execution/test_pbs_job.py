@@ -116,6 +116,14 @@ class TestPBSJob:
             f"Script mismatch!\nExpected:\n{expected_script}\n\nGot:\n{job.script}"
         )
 
+    def test_script_omits_an_empty_account(self):
+        """Without an account the script carries no `-A`, so PBS charges the user's
+        default project (NCAR's `PBS_ACCOUNT`) instead of rejecting an empty one.
+        """
+        job = PBSJob(**{**self.common_job_params, "account_key": ""})
+
+        assert "#PBS -A" not in job.script
+
     def test_script_folds_a_day_form_walltime_into_hours(self):
         """PBS has no `D-HH:MM:SS` form, so the directive carries plain hours."""
         queue = PBSQueue(name="long", max_walltime="72:00:00")

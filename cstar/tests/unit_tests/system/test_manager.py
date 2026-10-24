@@ -4,11 +4,25 @@ from unittest import mock
 from unittest.mock import patch
 
 import pytest
+from pydantic import ValidationError
 
-from cstar.system.environment import CStarEnvironment, LmodEnvSettings
+from cstar.orchestration.utils import (
+    ENV_CSTAR_SLURM_ACCOUNT,
+    ENV_CSTAR_SLURM_MAX_WALLTIME,
+    ENV_CSTAR_SLURM_QUEUE,
+)
+from cstar.system.environment import (
+    CStarEnvironment,
+    LmodEnvSettings,
+    SlurmSettingsBase,
+    get_envfield_alias,
+)
 from cstar.system.manager import (
+    AnvilSystemContext,
+    BouchetSystemContext,
     CStarSystemManager,
     DerechoSystemContext,
+    EljaSystemContext,
     ExpanseSystemContext,
     LinuxSystemContext,
     MacOSSystemContext,
@@ -124,3 +138,49 @@ class TestSchedulerProperty:
 
         # Verify that the scheduler is cached
         assert first_scheduler is second_scheduler
+
+
+@pytest.mark.parametrize(
+    ("system_ctx", "required"),
+    [
+        pytest.param(
+            AnvilSystemContext,
+            {ENV_CSTAR_SLURM_ACCOUNT, ENV_CSTAR_SLURM_QUEUE},
+            id="anvil",
+        ),
+        pytest.param(
+            BouchetSystemContext,
+            {ENV_CSTAR_SLURM_ACCOUNT, ENV_CSTAR_SLURM_QUEUE},
+            id="bouchet",
+        ),
+        pytest.param(EljaSystemContext, set(), id="elja"),
+        pytest.param(ExpanseSystemContext, {ENV_CSTAR_SLURM_ACCOUNT}, id="expanse"),
+        pytest.param(PerlmutterSystemContext, set(), id="perlmutter"),
+    ],
+)
+def test_slurm_system_required_settings(
+    monkeypatch: pytest.MonkeyPatch,
+    system_ctx: type[SystemContext],
+    required: set[str],
+) -> None:
+    """Verify which SLURM settings each SLURM system requires, and that loading its
+    settings with none set refuses exactly those (the run-start precondition).
+    """
+    for name in (
+        ENV_CSTAR_SLURM_ACCOUNT,
+        ENV_CSTAR_SLURM_MAX_WALLTIME,
+        ENV_CSTAR_SLURM_QUEUE,
+    ):
+        monkeypatch.delenv(name, raising=False)
+    klass = system_ctx.settings_klass()
+    assert klass is not None
+    assert issubclass(klass, SlurmSettingsBase)
+
+    assert klass.required_settings() == required
+
+    refused: set[str] = set()
+    try:
+        klass()
+    except ValidationError as ex:
+        refused = {get_envfield_alias(klass, str(e["loc"][0])) for e in ex.errors()}
+    assert refused == required
