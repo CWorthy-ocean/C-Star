@@ -10,6 +10,7 @@ from unittest import mock
 
 import pytest
 import typer
+import yaml
 from typer.testing import CliRunner
 
 from cstar.applications.core import get_application
@@ -1005,6 +1006,91 @@ def test_workplan_run_invalid_file_content(
     assert "improper" in result.stderr
     assert "formatted" in result.stderr
     mock_build_and_run_dag.assert_not_awaited()
+
+
+@pytest.mark.parametrize(
+    ("application", "blueprint", "expected"),
+    [
+        pytest.param(
+            "hello_world",
+            {
+                "name": "hello",
+                "description": "d",
+                "application": "hello_world",
+                "target": "world",
+                "unknown_key": 1,
+            },
+            "HelloWorldBlueprint failed validation: `Invalid unknown_key value (1): "
+            "Extra inputs are not permitted`",
+            id="unknown-key",
+        ),
+        pytest.param(
+            "forge",
+            {
+                "name": "forge",
+                "description": "d",
+                "application": "forge",
+                "forge_blueprint_version": 99,
+            },
+            "forge_blueprint_version 99 is newer than this build supports",
+            id="forge-too-new",
+        ),
+    ],
+)
+def test_workplan_run_invalid_step_blueprint_is_one_message(
+    tmp_path: Path,
+    application: str,
+    blueprint: dict[str, t.Any],
+    expected: str,
+    flatten_cli_output: Callable[[str], str],
+) -> None:
+    """Verify a step blueprint that fails strict validation exits 2 with the
+    validation message, not an `IndexError` and its tracebacks.
+
+    Parameters
+    ----------
+    tmp_path : Path
+        Temporary directory to read/write test inputs and outputs
+    application : str
+        The application of the step.
+    blueprint : dict[str, t.Any]
+        The content of the step's blueprint.
+    expected : str
+        Text the message must contain.
+    flatten_cli_output : Callable[[str], str]
+        Removes the box drawing and wrapping from CLI output.
+    """
+    bp_path = tmp_path / "blueprint.yaml"
+    bp_path.write_text(yaml.safe_dump(blueprint))
+    wp_path = tmp_path / "workplan.yaml"
+    wp_path.write_text(
+        yaml.safe_dump(
+            {
+                "name": "invalid-step",
+                "description": "d",
+                "steps": [
+                    {
+                        "name": "s1",
+                        "application": application,
+                        "blueprint": bp_path.as_posix(),
+                    }
+                ],
+            }
+        )
+    )
+    env = {
+        ENV_CSTAR_STATE_HOME: (tmp_path / "state").as_posix(),
+        ENV_CSTAR_DATA_HOME: (tmp_path / "data").as_posix(),
+    }
+
+    with mock.patch.dict(os.environ, env):
+        result = CliRunner().invoke(app, [wp_path.as_posix()], color=False)
+
+    assert result.exit_code == 2, result.output
+    assert result.exception is None or isinstance(result.exception, SystemExit)
+    assert expected in flatten_cli_output(result.output)
+    assert "IndexError" not in result.output
+    assert "Traceback" not in result.output
 
 
 def test_workplan_run_reload_invokes_run_dag_not_build_and_run_dag(

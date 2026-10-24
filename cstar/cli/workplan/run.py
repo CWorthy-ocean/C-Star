@@ -1032,10 +1032,16 @@ def submit(
         log.exception(msg)
         print(msg)
         raise typer.Exit(1) from ex
+    except ValidationError as ex:
+        # a step blueprint (or the workplan) that fails strict validation: the
+        # message says what is wrong, so the traceback is only logged for debugging
+        log.debug("Invalid inputs encountered while running the dag", exc_info=True)
+        msg = f"{ex.title} failed validation: {format_validation_errors(ex)}"
+        raise typer.BadParameter(msg) from ex
     except ValueError as ex:
         msg = "Invalid inputs encountered while running the dag"
         log.exception(msg)
-        raise typer.BadParameter(ex.args[0]) from ex
+        raise typer.BadParameter(str(ex)) from ex
     except Exception as ex:
         msg = f"Workplan run {run_id!r} has failed: {ex}"
         log.exception(msg)
