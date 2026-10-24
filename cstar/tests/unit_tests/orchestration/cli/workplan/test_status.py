@@ -20,6 +20,7 @@ from cstar.orchestration.models import KEY_PRE_RUN, BlueprintIdentity, Step, Wor
 from cstar.orchestration.orchestration import LiveStep, LiveWorkplan, Status
 from cstar.orchestration.serialization import deserialize, serialize
 from cstar.orchestration.tracking import WorkplanRun
+from cstar.system.migration import CstarSchemaTooNewError
 from cstar.tests.unit_tests.orchestration.conftest import (
     EXTERNAL_TOKEN,
     ExternalTaskFactory,
@@ -181,6 +182,22 @@ def test_workplan_status_unknown_run() -> None:
 
     assert result.exit_code == 2
     assert "unknown run-id" in result.stderr
+
+
+def test_workplan_status_of_a_newer_record() -> None:
+    """Verify a run whose record a newer release wrote is a usage error naming
+    the record and the upgrade, not a traceback.
+    """
+    refused = CstarSchemaTooNewError(
+        "run record /state/latest/newer.yaml", "2.0.0", "1.1.0"
+    )
+    with mock.patch(LOOKUP, mock.AsyncMock(side_effect=refused)):
+        result = CliRunner().invoke(app, ["newer"], color=False)
+
+    assert result.exit_code == 2
+    message = " ".join(result.stderr.replace("│", " ").split())
+    assert "run record /state/latest/newer.yaml schema 2.0.0 is newer" in message
+    assert "Upgrade cstar-ocean" in message
 
 
 @pytest.mark.parametrize("run_id", ["", "  ", "!!!"])

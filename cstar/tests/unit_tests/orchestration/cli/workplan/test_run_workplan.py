@@ -74,6 +74,7 @@ from cstar.orchestration.state import StateRepository
 from cstar.orchestration.tracking import TrackingRepository, WorkplanRun
 from cstar.orchestration.utils import ENV_CSTAR_SLURM_ACCOUNT, ENV_CSTAR_SLURM_QUEUE
 from cstar.system.environment import EnvSettingsBase, SlurmSettingsBase
+from cstar.system.migration import CstarSchemaTooNewError
 from cstar.tests.unit_tests.orchestration.manifest_runs import write_identity
 
 
@@ -1208,6 +1209,26 @@ def test_workplan_run_reload_refuses_a_newer_transformed_workplan(
     )
     assert "Upgrade cstar-ocean" in message
     mock_run_dag.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_handle_run_reloading_refuses_a_newer_record() -> None:
+    """Verify re-entering a run whose tracking record a newer release wrote is a
+    usage error carrying the upgrade message.
+    """
+    refused = CstarSchemaTooNewError(
+        "run record /state/latest/r.yaml", "2.0.0", "1.1.0"
+    )
+    with (
+        mock.patch(
+            "cstar.cli.workplan.run.TrackingRepository.get_workplan_run",
+            mock.AsyncMock(side_effect=refused),
+        ),
+        pytest.raises(typer.BadParameter, match="Upgrade cstar-ocean") as caught,
+    ):
+        await handle_run_reloading("r")
+
+    assert "Run 'r' cannot be re-entered" in str(caught.value)
 
 
 def test_workplan_run_reload_refuses_unusable_external_dependency(

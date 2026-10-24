@@ -48,8 +48,10 @@ from cstar.orchestration.tracking import (
     TrackingRepository,
     WorkplanRun,
     measure_step_sizes,
+    read_run_record,
     require_writable,
 )
+from cstar.system.migration import CstarSchemaTooNewError
 
 if t.TYPE_CHECKING:
     from cstar.orchestration.index import RunRecord
@@ -683,6 +685,98 @@ async def test_tracking_list_latest_runs_skips_corrupt_record(
     assert len(warnings) == 1
     assert "corrupt-run.yaml" in warnings[0].message
     assert "1 run record(s)" in warnings[0].message
+
+
+def _restamp(path: Path, version: str | None) -> None:
+    """Rewrite the `schema_version` of a persisted record; `None` removes it."""
+    doc = yaml.safe_load(path.read_text())
+    doc.pop("schema_version", None)
+    if version is not None:
+        doc["schema_version"] = version
+    path.write_text(yaml.safe_dump(doc))
+
+
+def test_workplanrun_record_states_its_version(tmp_path: Path) -> None:
+    """Verify a persisted record carries the current record version."""
+    repo = TrackingRepository()
+    path = repo.put_workplan_run_sync(_make_workplan_run(tmp_path, "versioned"))
+
+    doc = yaml.safe_load(path.read_text())
+
+    assert doc["schema_version"] == WorkplanRun.model_fields["schema_version"].default
+
+
+@pytest.mark.parametrize("version", [None, "1.0.0", "1.1.0"])
+def test_read_run_record_reads_older_records(
+    tmp_path: Path, version: str | None
+) -> None:
+    """Verify a record without a version (cstar 0.17.0 or earlier) and one of
+    an older or the current version load.
+    """
+    repo = TrackingRepository()
+    path = repo.put_workplan_run_sync(_make_workplan_run(tmp_path, "older"))
+    _restamp(path, version)
+
+    assert read_run_record(path).run_id == "older"
+    assert repo.get_workplan_run_sync("older") is not None
+
+
+@pytest.mark.parametrize("content", ["", "just text\n", "- a\n- b\n"])
+def test_read_run_record_rejects_a_record_that_is_not_a_mapping(
+    tmp_path: Path, content: str
+) -> None:
+    """Verify an empty or non-mapping record is a `ValueError`, as an invalid
+    record is, so callers report it rather than crash.
+    """
+    path = tmp_path / "record.yaml"
+    path.write_text(content)
+
+    with pytest.raises(ValueError, match="not a mapping"):
+        read_run_record(path)
+
+
+def test_tracking_get_refuses_a_newer_record(tmp_path: Path) -> None:
+    """Verify reading one record a newer release wrote raises the upgrade
+    error, naming the record, rather than returning nothing.
+    """
+    repo = TrackingRepository()
+    path = repo.put_workplan_run_sync(_make_workplan_run(tmp_path, "newer"))
+    _restamp(path, "1.2.0")
+
+    with pytest.raises(CstarSchemaTooNewError, match="Upgrade cstar-ocean") as caught:
+        repo.get_workplan_run_sync("newer")
+
+    # the record is read through its "latest" link
+    assert str(repo.latest_path("newer")) in str(caught.value)
+
+
+@pytest.mark.asyncio
+async def test_tracking_list_latest_runs_reports_a_newer_record(
+    tmp_path: Path,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Verify a record a newer release wrote is left out of a listing with one
+    warning that names it and the upgrade, and is not also counted as corrupt.
+    """
+    repo = TrackingRepository()
+    await repo.put_workplan_run(_make_workplan_run(tmp_path, "good-run"))
+    newer = await repo.put_workplan_run(_make_workplan_run(tmp_path, "newer-run"))
+    _restamp(newer, "2.0.0")
+
+    with caplog.at_level(logging.WARNING):
+        runs = await repo.list_latest_runs()
+        runs_sync = repo.list_latest_runs_sync()
+
+    assert [r.run_id for r in runs] == ["good-run"]
+    assert [r.run_id for r in runs_sync] == ["good-run"]
+    warnings = [
+        rec.getMessage() for rec in caplog.records if rec.levelname == "WARNING"
+    ]
+    assert len(warnings) == 2  # one per listing
+    for message in warnings:
+        assert "run record" in message
+        assert "newer-run" in message
+        assert "Upgrade cstar-ocean" in message
 
 
 @pytest.mark.asyncio

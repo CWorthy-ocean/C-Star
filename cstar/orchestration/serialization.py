@@ -246,7 +246,7 @@ def read_document(path: Path | str) -> dict[str, t.Any]:
         The document, without its `$schema` key.
     """
     document = read_yaml_to_raw(Path(path))
-    if document:
+    if isinstance(document, dict):
         document.pop("$schema", None)
     return document
 

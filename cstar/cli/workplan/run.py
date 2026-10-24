@@ -597,7 +597,11 @@ def refuse_run_id_collision(wp_path: Path, run_id: str, *, explicit: bool) -> No
     if explicit:
         return
 
-    record = asyncio.run(TrackingRepository().get_workplan_run(run_id))
+    try:
+        record = asyncio.run(TrackingRepository().get_workplan_run(run_id))
+    except CstarError as ex:
+        msg = f"Run-id {run_id!r} cannot be checked against its record: {ex}"
+        raise typer.BadParameter(msg) from ex
     if record is None:
         return
 
@@ -688,13 +692,18 @@ async def handle_run_reloading(run_id: str) -> WorkplanRun:
     Raises
     ------
     typer.BadParameter
-        - If no run record exists for the supplied run-id.
+        - If no run record exists for the supplied run-id, or it cannot be
+          read (one a newer cstar-ocean wrote).
         - If the run was attached from elsewhere: it has no sentinels here and
           is never relaunched.
         - If the run's workplan or transformed workplan cannot be found.
     """
     repo = TrackingRepository()
-    wp_run = await repo.get_workplan_run(run_id)
+    try:
+        wp_run = await repo.get_workplan_run(run_id)
+    except CstarError as ex:
+        msg = f"Run {run_id!r} cannot be re-entered: {ex}"
+        raise typer.BadParameter(msg) from ex
     if wp_run is None:
         msg = f"No runs with the id `{run_id}` could be found."
         raise typer.BadParameter(msg)

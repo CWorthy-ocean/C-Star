@@ -44,12 +44,13 @@ from cstar.orchestration.orchestration import (
     read_workplan,
 )
 from cstar.orchestration.serialization import (
-    deserialize,
     read_all,
+    read_document,
     serialize,
     try_deserialize,
 )
 from cstar.orchestration.state import StateRepository
+from cstar.system.migration import CstarSchemaTooNewError, refuse_newer_schema
 
 log = get_logger(__name__)
 
@@ -169,6 +170,11 @@ class WorkplanRun(BaseModel):
     or earlier holds them too; those are kept as `legacy` and read when the run
     has no manifest to ask.
     """
+
+    schema_version: str = Field(default="1.1.0")
+    """The version of the record's format. A record without one was written by
+    cstar 0.17.0 or earlier and reads as 1.0.0; `read_run_record` refuses a
+    newer one than this build's."""
 
     output_path: Path
     """The path where workplan output is written: the run directory."""
@@ -631,10 +637,53 @@ def require_writable(run: WorkplanRun, *, action: str) -> None:
         raise CstarError(msg)
 
 
-def _try_read_run(path: Path) -> WorkplanRun | None:
-    """Read a run record, following the run if it has moved; `None` if unreadable."""
-    run = try_deserialize(path, WorkplanRun)
-    return run.reanchored() if run is not None else None
+def read_run_record(path: Path) -> WorkplanRun:
+    """Read a run record, refusing one a newer cstar-ocean wrote.
+
+    Parameters
+    ----------
+    path : Path
+        The record file.
+
+    Returns
+    -------
+    WorkplanRun
+
+    Raises
+    ------
+    FileNotFoundError
+        If the file does not exist.
+    CstarSchemaTooNewError
+        If the record's `schema_version` is newer than this build reads; the
+        message names the record.
+    ValueError
+        If the file is not a valid run record.
+    """
+    raw = read_document(path)
+    if not isinstance(raw, Mapping):
+        msg = f"The run record at {path} is not a mapping"
+        raise ValueError(msg)
+    target = WorkplanRun.model_fields["schema_version"].default
+    refuse_newer_schema(f"run record {path}", raw.get("schema_version"), target)
+    return WorkplanRun.model_validate(raw)
+
+
+def _try_read_run(path: Path, refused: set[Path]) -> WorkplanRun | None:
+    """Read a run record, following the run if it has moved; `None` if unreadable.
+
+    A record a newer cstar-ocean wrote is reported with one warning that names
+    it and the upgrade, and its path is added to `refused`.
+    """
+    try:
+        run = read_run_record(path)
+    except CstarSchemaTooNewError as ex:
+        log.warning(str(ex))
+        refused.add(path)
+        return None
+    except Exception:
+        log.debug(f"Unable to read the run record at {path}", exc_info=True)
+        return None
+    return run.reanchored()
 
 
 async def measure_step_sizes(
@@ -922,7 +971,7 @@ class TrackingRepository(LoggingMixin):
                 self.log.debug(msg)
                 return None
 
-            return deserialize(run_path, WorkplanRun).reanchored()
+            return read_run_record(run_path).reanchored()
 
     async def get_workplan_run(
         self,
@@ -1013,7 +1062,7 @@ class TrackingRepository(LoggingMixin):
                 self.log.warning(f"No run file for `{run_id}` found in {run_path}`")
                 return None
 
-            run = deserialize(run_path, WorkplanRun).reanchored()
+            run = read_run_record(run_path).reanchored()
             mutate(run)
             self._write_run_locked(run)
             return run
@@ -1125,17 +1174,21 @@ class TrackingRepository(LoggingMixin):
         Sequence[WorkplanRun]
             The successfully deserialized run records.
         """
+        refused: set[Path] = set()
         results = await read_all(
-            run_paths, _try_read_run, MAX_CONCURRENCY, sem=self._sem
+            run_paths,
+            lambda path: _try_read_run(path, refused),
+            MAX_CONCURRENCY,
+            sem=self._sem,
         )
 
         runs: list[WorkplanRun] = []
         unreadable: list[Path] = []
         for path, run in zip(run_paths, results, strict=True):
-            if run is None:
-                unreadable.append(path)
-            else:
+            if run is not None:
                 runs.append(run)
+            elif path not in refused:
+                unreadable.append(path)
 
         if unreadable:
             paths_str = ", ".join(str(p) for p in unreadable)
@@ -1178,8 +1231,11 @@ class TrackingRepository(LoggingMixin):
             skipped.
         """
         paths = self.latest_dir.glob(f"*.{self._EXT}")
-        runs = [(path, _try_read_run(path)) for path in paths]
-        if unreadable := [str(path) for path, run in runs if run is None]:
+        refused: set[Path] = set()
+        runs = [(path, _try_read_run(path, refused)) for path in paths]
+        if unreadable := [
+            str(path) for path, run in runs if run is None and path not in refused
+        ]:
             self.log.debug(f"Skipped unreadable run record(s): {', '.join(unreadable)}")
         return [run for _, run in runs if run is not None]
 
