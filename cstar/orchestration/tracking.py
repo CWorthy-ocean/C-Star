@@ -58,7 +58,8 @@ KEY_RUN_UUID: t.Final[str] = "uuid"
 
 _LEGACY_KEY_NAME: t.Final[str] = "name"
 """Metadata key under which records written by cstar 0.17.0 and earlier held the
-workplan name; the manifest holds it now."""
+workplan name; the manifest holds it now. The three `_LEGACY_KEY_*` keys leave
+with `LegacyRecord` in release 0.20.0."""
 
 _LEGACY_KEY_ATTACHED: t.Final[str] = "attached"
 """Metadata key whose value `"1"` marked an attached run in records written by
@@ -91,6 +92,12 @@ class LegacyRecord(BaseModel):
     them for a run it schedules. A record that arrived with them keeps them,
     under `legacy`, for the run that has no readable manifest to ask: one
     scheduled before the manifest existed, or whose directory is gone.
+
+    Slated for removal in release 0.20.0, together with the folding of the
+    0.17.0 metadata keys in `WorkplanRun._read_older_record`: by then no run
+    scheduled before the manifest existed is expected to matter, and a record
+    without one degrades to an unknown name and the transformed workplan the
+    run root holds.
     """
 
     model_config = ConfigDict(
