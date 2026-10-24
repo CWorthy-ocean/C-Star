@@ -4695,7 +4695,7 @@ class ForgeBlueprintWizard:
             tooltip=(
                 "Where the carbonate sensitivity files come from. By default the "
                 "carbonate-sensitivity-from workplan directive supplies them from an "
-                "earlier ROMS-MARBL step at run time; attach a directory to put them "
+                "earlier UCLA-ROMS step at run time; attach a directory to put them "
                 "on the blueprint now."
             ),
         )
@@ -8710,7 +8710,7 @@ class ForgeBlueprintWizard:
         """Command the Run button invokes: ``cstar blueprint run <path>``.
 
         The same command the docs give for both pipeline steps, and the same one
-        the emitted ``roms_marbl`` blueprint is run with -- the button exposes no
+        the emitted ``ucla_roms`` blueprint is run with -- the button exposes no
         per-run flags, so the full-option ``cstar forge run`` passthrough buys it
         nothing. Resolving ``application: forge`` this way goes through C-Star's
         registry, which finds the app as the in-tree
@@ -8787,12 +8787,12 @@ class ForgeBlueprintWizard:
             for line in lines:
                 self.run_output.append_stdout(line)
             code = await proc.wait()
-            # On success the log above names the emitted roms_marbl blueprint (the
+            # On success the log above names the emitted ucla_roms blueprint (the
             # runner logs where it published it). Point at it rather than restating
             # a path this widget would have to derive for itself.
             self.run_status.value = (
                 "<span style='color:#080'>✓ finished</span> — run the emitted "
-                "ROMS-MARBL blueprint named in the log with <code>cstar blueprint "
+                "UCLA-ROMS blueprint named in the log with <code>cstar blueprint "
                 "run &lt;path&gt;</code>"
                 if code == 0
                 else f"<span style='color:#b00'>exited with code {code}</span>"

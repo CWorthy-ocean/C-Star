@@ -42,7 +42,8 @@ def blueprint_1_0_0(
     work_dir.mkdir(parents=True)
 
     versioned_file_name = "blueprint.1.0.0.yaml"
-    bp_2025_1 = bp_templates_dir / APP_ROMS / versioned_file_name
+    # The 1.0.0 template stays under the earlier application name's directory.
+    bp_2025_1 = bp_templates_dir / "roms_marbl" / versioned_file_name
     bp_path = work_dir / versioned_file_name
     content = bp_2025_1.read_text()
     bp_path.write_text(content)

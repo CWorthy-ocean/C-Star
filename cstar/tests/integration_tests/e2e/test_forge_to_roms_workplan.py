@@ -1,4 +1,4 @@
-"""Tier 2: a forge -> roms_marbl -> CDR metrics and CDR-LiTE workplan run end to end through the ``cstar`` CLI.
+"""Tier 2: a forge -> ucla_roms -> CDR metrics and CDR-LiTE workplan run end to end through the ``cstar`` CLI.
 
 ``cstar workplan submit`` only schedules: each step is a detached ``sh`` proxy script that
 calls the ``cstar`` executable on ``PATH``. A shim pins that executable to this
@@ -137,7 +137,7 @@ pytestmark = pytest.mark.skipif(
 
 @dataclass(frozen=True)
 class E2ERun:
-    """A completed forge -> roms_marbl workplan run and where its artifacts live."""
+    """A completed forge -> ucla_roms workplan run and where its artifacts live."""
 
     run_id: str
     env: dict[str, str]
@@ -166,7 +166,7 @@ class E2ERun:
         return _executed_working_dir(self.cdr_root, self.cdr_forge_root)
 
     def working_dir_of(self, step: str) -> Path:
-        """The directory the roms_marbl ``step`` ran in."""
+        """The directory the ucla_roms ``step`` ran in."""
         # lazy: resolving a step that never ran raises, so resolve only ``step``
         working_dirs = {
             ROMS_STEP: lambda: self.roms_working_dir,
@@ -218,7 +218,7 @@ class E2ERun:
 
 
 def _executed_working_dir(step_root: Path, forge_root: Path) -> Path:
-    """The ``working_dir`` of the blueprint a roms_marbl step executed.
+    """The ``working_dir`` of the blueprint a ucla_roms step executed.
 
     The scheduler overrides ``working_dir`` with the step root through an
     ``apply-overrides`` directive, which is persisted as ``work/*.ovrd.yaml``; the
@@ -270,8 +270,8 @@ def write_workplan(
     workplan = {
         "name": "forge-roms-e2e",
         "description": (
-            "forge, whole and segmented roms_marbl runs with CDR metrics, "
-            "then a CDR-LiTE forge and roms_marbl run"
+            "forge, whole and segmented ucla_roms runs with CDR metrics, "
+            "then a CDR-LiTE forge and ucla_roms run"
         ),
         "steps": [
             {
@@ -282,6 +282,7 @@ def write_workplan(
             },
             {
                 "name": ROMS_STEP,
+                # the earlier application name, kept so this run covers the alias end to end
                 "application": "roms_marbl",
                 "blueprint": {"from_step": FORGE_STEP},
                 "depends_on": [FORGE_STEP],
@@ -449,7 +450,7 @@ def _warm_grid_downloads(blueprint: "ForgeBlueprint") -> None:
 
 
 def restart_files(run: E2ERun, step: str = ROMS_STEP) -> list[Path]:
-    """The restart files of the roms_marbl ``step``, ordered by their timestamp."""
+    """The restart files of the ucla_roms ``step``, ordered by their timestamp."""
     return sorted((run.working_dir_of(step) / "output").glob("*_rst*.nc"))
 
 
@@ -518,9 +519,9 @@ def test_forge_record_lists_its_products(e2e_run: E2ERun) -> None:
 
 
 def test_roms_record_lists_its_products(e2e_run: E2ERun) -> None:
-    """The roms_marbl step record lists its restarts by stream, its build, configuration and log."""
+    """The ucla_roms step record lists its restarts by stream, its build, configuration and log."""
     record = read_step_record(e2e_run.roms_working_dir)
-    assert record is not None, "roms_marbl wrote no step record"
+    assert record is not None, "ucla_roms wrote no step record"
 
     restarts = [p for p in record.products if p.kind == "restart"]
     assert restarts, [p.kind for p in record.products]
@@ -716,7 +717,7 @@ def test_cdr_lite_sensitivity_is_the_recorded_gas_exchange(e2e_run: E2ERun) -> N
     that the directive and the producer's record agree on real ROMS output.
     """
     record = read_step_record(e2e_run.roms_working_dir)
-    assert record is not None, "roms_marbl wrote no step record"
+    assert record is not None, "ucla_roms wrote no step record"
     recorded = [
         (e2e_run.roms_working_dir / p.path).resolve()
         for p in record.products
@@ -797,7 +798,7 @@ def seconds_since_reference(when: datetime) -> float:
 
 
 def cdr_output_files(run: E2ERun, step: str) -> list[Path]:
-    """The ``_cdr`` output files of the roms_marbl ``step``, ordered by their timestamp."""
+    """The ``_cdr`` output files of the ucla_roms ``step``, ordered by their timestamp."""
     return sorted((run.working_dir_of(step) / "output").glob("*_cdr.[0-9]*.nc"))
 
 

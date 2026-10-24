@@ -59,10 +59,10 @@ The catalog is read with validation suppressed, so an incomplete catalog can
 still be migrated. Every destination ends in ``.yaml`` (a ``.yml`` source is
 renamed). A blueprint whose destination already exists is left where it is
 and reported, never overwritten. After a per-machine blueprint is moved, its
-``<name>/`` and ``<machine>/`` directories are removed if they are empty;
-whatever else lives there (a ``Build/`` directory, ``_grid.yaml``,
-``settings_B_*.yaml``) is not a blueprint, so it is left in place and listed
-for you to keep or delete.
+``<name>/`` and ``<machine>/`` directories are removed if they are empty, as
+is an emptied ``blueprints/roms_marbl/``; whatever else lives there (a
+``Build/`` directory, ``_grid.yaml``, ``settings_B_*.yaml``) is not a
+blueprint, so it is left in place and listed for you to keep or delete.
 
 Layers
 ------

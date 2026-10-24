@@ -49,8 +49,8 @@ _BP_TEMPLATE = (
     / "additional_files"
     / "templates"
     / "bp"
-    / "roms_marbl"
-    / "blueprint.3.2.0.yaml"
+    / "ucla_roms"
+    / "blueprint.3.3.0.yaml"
 )
 _FORGE_BP = "wio-toy-simple"
 
@@ -75,7 +75,7 @@ def page(bp_app: ForgeBlueprintWizardApp) -> WorkplanBuilderPage:
 
 @pytest.fixture
 def roms_bp(tmp_path: Path) -> Path:
-    """A readable roms_marbl blueprint (128 CPUs, 2020-01-01 start, ucla-roms ``main``)."""
+    """A readable ucla_roms blueprint (128 CPUs, 2020-01-01 start, ucla-roms ``main``)."""
     path = tmp_path / "roms.yaml"
     shutil.copy(_BP_TEMPLATE, path)
     return path
@@ -1030,7 +1030,7 @@ def test_a_run_kept_in_two_places_is_listed_once(page, roms_bp, run_homes, track
 
 def test_blueprint_runs_are_not_listed(page, roms_bp, run_homes, tracked):
     _make_run(
-        StateDirectoryManager.blueprint_runs_dir() / "roms_marbl" / "solo",
+        StateDirectoryManager.blueprint_runs_dir() / "ucla_roms" / "solo",
         "solo",
         roms_bp,
         kind="blueprint",
@@ -1495,7 +1495,7 @@ def test_time_recipes_offer_only_roms_marbl_steps_as_bases(page):
     assert page.roms_step_names() == []
     assert _values(page.chunk_base.step) == [""]
     assert _values(page.ramp_base.step) == [""]
-    assert "upscaling needs roms_marbl steps" in page.recipe_hint.value
+    assert "upscaling needs ucla_roms steps" in page.recipe_hint.value
     assert page.upscale_btn.disabled
     # chunk and ramp can still start from a blueprint, so they stay enabled
     assert not page.chunk_btn.disabled and not page.ramp_btn.disabled

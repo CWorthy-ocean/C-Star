@@ -409,7 +409,7 @@ def process_forge_blueprint(
         against the run-time schema *before* any downloads/generation. A
         commit-hash ``code.roms`` pin is first resolved to its release tag
         (:func:`~cstar.roms.namelist.release_ref_for_remote`, a treeless clone
-        of ``code.roms.location``), as the roms_marbl step resolves it.
+        of ``code.roms.location``), as the ucla_roms step resolves it.
     executor_factory :
         Maps the ``ForgeBlueprint`` to an executor; defaults to the forge
         ``ForgeExecutor``. Injectable for tests and for the eventual C-Star app

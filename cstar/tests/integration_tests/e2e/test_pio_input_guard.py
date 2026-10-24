@@ -1,6 +1,6 @@
 """Tier 2 negative control: ROMS with ParallelIO refuses a non-classic-format grid.
 
-Forge runs in-process; the emitted ``roms_marbl`` blueprint is then edited to point at
+Forge runs in-process; the emitted ``ucla_roms`` blueprint is then edited to point at
 a NETCDF4 copy of the grid and run with ``cstar blueprint run``. The check lives in
 ``pre_run``, after the compile, so this test also builds ROMS and takes minutes.
 """

@@ -1,4 +1,4 @@
-"""Resume an interrupted roms_marbl step from its own restart output.
+"""Resume an interrupted ucla_roms step from its own restart output.
 
 When a step is retried after failing partway through, this module builds a
 derived blueprint that continues from the newest *usable* restart the

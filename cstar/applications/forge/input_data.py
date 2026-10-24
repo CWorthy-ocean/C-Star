@@ -3,7 +3,7 @@ Input data generation classes for CSFORGE models.
 
 This module provides classes for generating input data files for ocean models.
 The base InputData class defines the interface, and RomsMarblInputData provides
-the ROMS-MARBL specific implementation.
+the UCLA-ROMS specific implementation.
 """
 
 from __future__ import annotations
@@ -435,9 +435,9 @@ def _require_element(value: _T | None, field_name: str) -> _T:
 @dataclass
 class RomsMarblInputData(InputData):
     """
-    ROMS-MARBL specific input data generation.
+    UCLA-ROMS specific input data generation.
 
-    This class handles generation of all ROMS-MARBL input files including:
+    This class handles generation of all UCLA-ROMS input files including:
     - Grid
     - Initial conditions
     - Surface forcing

@@ -2,7 +2,7 @@
 
 Each case runs ``process_forge_blueprint`` once (no ROMS compile, no run) and the tests
 inspect what landed under the working directory: the PIO-compatible input files, the
-emitted ``roms_marbl`` blueprint, the rendered namelist and cppdefs.
+emitted ``ucla_roms`` blueprint, the rendered namelist and cppdefs.
 
 Regenerate the namelist goldens after an intentional change with
 ``UPDATE_GOLDEN=1 pytest cstar/tests/integration_tests/forge -k golden``, review the
@@ -121,7 +121,7 @@ class Run:
 
     @property
     def blueprint_path(self) -> Path:
-        """The emitted ``roms_marbl`` blueprint."""
+        """The emitted ``ucla_roms`` blueprint."""
         return self.working_dir / "blueprints" / f"B_{self.cfg.name}.yaml"
 
 
@@ -237,12 +237,12 @@ class TestInputs:
 
 
 class TestBlueprint:
-    """The emitted ``roms_marbl`` blueprint and its sidecar."""
+    """The emitted ``ucla_roms`` blueprint and its sidecar."""
 
     def test_blueprint_loads(self, run: Run) -> None:
         assert run.blueprint_path.is_file()
         bp = _load_blueprint(run.blueprint_path)
-        assert bp.application == "roms_marbl"
+        assert bp.application == "ucla_roms"
         assert bp.code.roms.commit == ROMS_REF
         assert bp.partitioning.use_pio is True
         assert (bp.partitioning.n_procs_x, bp.partitioning.n_procs_y) == (2, 2)

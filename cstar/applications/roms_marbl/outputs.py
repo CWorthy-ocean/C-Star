@@ -1,4 +1,4 @@
-"""The names and models of the files a ROMS-MARBL step writes.
+"""The names and models of the files a UCLA-ROMS step writes.
 
 How ROMS names its output streams, which streams have an artifact kind of
 their own, and the models that parse restart, boundary, carbonate sensitivity and CDR
@@ -689,7 +689,7 @@ BoundaryFile.PATTERN_BRY = BoundaryFile.PATTERN
 
 class CarbonateSensitivityFile(TimestampedOutputFile):
     """Reference to a path that contains carbonate sensitivities
-    (`ddic_dco2`, `ddic_dalk`), as written by a ROMS-MARBL run that sets
+    (`ddic_dco2`, `ddic_dalk`), as written by a UCLA-ROMS run with MARBL that sets
     `cdr_gas_exch_output.do_cdr_gas_exch_output`.
     """
 
@@ -700,7 +700,7 @@ class CarbonateSensitivityFile(TimestampedOutputFile):
 
 class CdrOutputFile(TimestampedOutputFile):
     """Reference to a path that contains CDR diagnostics (`<base>_cdr.<timestamp>.nc`),
-    as written by a ROMS-MARBL run with CDR forcing that sets
+    as written by a UCLA-ROMS run with MARBL and CDR forcing that sets
     `cdr_output.do_cdr_output`.
     """
 

@@ -10,15 +10,15 @@ to resolve the host, which the guarded ``cstar.applications.forge`` modules that
 implement blueprint processing itself must never do.
 
 Discovered by ``cstar.applications.core.get_application`` as a built-in application,
-the same way ``roms_marbl`` is: ``get_application`` imports the in-tree
+the same way ``ucla_roms`` is: ``get_application`` imports the in-tree
 ``cstar.applications.forge`` package, whose ``__init__.py`` imports this module so its
 :func:`register_application` decorator runs. No entry point or environment variable is
 involved.
 
-Scope (2026-07, first cut): :meth:`ForgeRunner.run` generates ROMS-MARBL inputs and
-emits the downstream ``roms_marbl`` blueprint (``B_{name}.yaml``), then stops -- it
-does not chain into actually running the ROMS-MARBL simulation. That is the existing
-``roms_marbl`` application's job, consuming the blueprint forge just produced. See
+Scope (2026-07, first cut): :meth:`ForgeRunner.run` generates UCLA-ROMS inputs and
+emits the downstream ``ucla_roms`` blueprint (``B_{name}.yaml``), then stops -- it
+does not chain into actually running the UCLA-ROMS simulation. That is the existing
+``ucla_roms`` application's job, consuming the blueprint forge just produced. See
 ``docs/developers/forge_internals.rst`` for the producer/consumer boundary between the two
 applications.
 """
@@ -130,7 +130,7 @@ class ForgeRunner(BlueprintRunner[ForgeBlueprint]):
 
     @t.override
     async def run(self) -> RunnerResult[ForgeBlueprint]:
-        """Generate ROMS-MARBL inputs and emit the downstream ``roms_marbl`` blueprint.
+        """Generate UCLA-ROMS inputs and emit the downstream ``ucla_roms`` blueprint.
 
         Delegates to ``cstar.applications.forge.runtime.process`` (host-resolution glue) ->
         ``forge_blueprint_engine.process_forge_blueprint`` -> the ``ForgeExecutor``
@@ -195,7 +195,7 @@ class ForgeApplication(ApplicationDefinition[ForgeBlueprint, ForgeRunner]):
 
     @t.override
     def emitted_blueprint(self, blueprint: ForgeBlueprint) -> EmittedBlueprint:
-        """Describe the `roms_marbl` blueprint a forge run of `blueprint` publishes.
+        """Describe the `ucla_roms` blueprint a forge run of `blueprint` publishes.
 
         Parameters
         ----------
@@ -205,7 +205,7 @@ class ForgeApplication(ApplicationDefinition[ForgeBlueprint, ForgeRunner]):
         Returns
         -------
         EmittedBlueprint
-            The predicted `roms_marbl` blueprint.
+            The predicted `ucla_roms` blueprint.
         """
         # Deferred: this package's import (registration) must stay light, and
         # these pull in roms_tools/xarray/dask.
@@ -236,7 +236,7 @@ class ForgeApplication(ApplicationDefinition[ForgeBlueprint, ForgeRunner]):
         Returns
         -------
         Sequence[ArtifactSpec]
-            The published `roms_marbl` blueprint, the generated input NetCDF files,
+            The published `ucla_roms` blueprint, the generated input NetCDF files,
             the rendered build configuration and the run log.
         """
         # Deferred like `emitted_blueprint`: these pull in roms_tools/xarray/dask.
