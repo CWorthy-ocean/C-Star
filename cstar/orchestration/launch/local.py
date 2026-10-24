@@ -27,6 +27,7 @@ from cstar.orchestration.formatting import ModelFormatter
 from cstar.orchestration.launch.common import (
     build_attempt_log_header,
     is_foreign_handle,
+    prior_of_this_run,
     resolve_prior_attempt,
 )
 from cstar.orchestration.models import KeyValueStore
@@ -548,6 +549,8 @@ class LocalLauncher(Launcher[LocalHandle]):
         cls,
         step: "LiveStep",
         dependencies: list[LocalHandle],
+        *,
+        run_uuid: str,
     ) -> Task[LocalHandle]:
         """Launch a step in local process.
 
@@ -557,6 +560,8 @@ class LocalLauncher(Launcher[LocalHandle]):
             The step to run in a local process.
         dependencies : list[LocalHandle]
             The list of tasks that must complete prior to execution of the submitted Step.
+        run_uuid : str
+            The uuid of the run's manifest; see `Launcher.launch`.
 
         Returns
         -------
@@ -596,7 +601,9 @@ class LocalLauncher(Launcher[LocalHandle]):
         live_step = LiveStep.from_step(step)
 
         state_repo = StateRepository()
-        prior_handle = await state_repo.get_sentinel(live_step.name, LocalHandle)
+        prior_handle = prior_of_this_run(
+            await state_repo.get_sentinel(live_step.name, LocalHandle), run_uuid
+        )
         last_status: Status = Status.Unsubmitted
         reuse_prior: bool = False
 
@@ -620,6 +627,7 @@ class LocalLauncher(Launcher[LocalHandle]):
                     prior_handle and prior_handle.pre_run and not live_step.pre_run
                 ),
             )
+        handle.run_uuid = run_uuid or handle.run_uuid
 
         return Task[LocalHandle](
             step=live_step,

@@ -8,6 +8,7 @@ from cstar.base.exceptions import CstarExpectationFailed
 from cstar.orchestration.launch.common import (
     build_attempt_log_header,
     is_foreign_handle,
+    prior_of_this_run,
     resolve_prior_attempt,
 )
 from cstar.orchestration.models import (
@@ -204,6 +205,36 @@ def test_is_foreign_handle(handle_launcher: str, expected: bool) -> None:
     )
 
     assert is_foreign_handle(handle, "local") is expected
+
+
+@pytest.mark.parametrize(
+    ("handle_uuid", "run_uuid", "kept"),
+    [
+        pytest.param("a", "a", True, id="same-run"),
+        pytest.param("a", "b", False, id="another-run"),
+        pytest.param("", "b", True, id="sentinel-before-uuids"),
+        pytest.param("a", "", True, id="manifest-not-written"),
+    ],
+)
+def test_prior_of_this_run(
+    handle_uuid: str,
+    run_uuid: str,
+    kept: bool,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Only a handle recording a different manifest uuid than the run's is
+    dropped, with one warning; one whose run cannot be told is kept.
+    """
+    handle = ProcessHandle(pid="1", name="step", run_id="run", run_uuid=handle_uuid)
+
+    assert prior_of_this_run(handle, run_uuid) is (handle if kept else None)
+    warnings = [r for r in caplog.records if r.levelname == "WARNING"]
+    assert len(warnings) == (0 if kept else 1)
+
+
+def test_prior_of_this_run_without_a_handle() -> None:
+    """No sentinel stays no handle."""
+    assert prior_of_this_run(None, "a") is None
 
 
 @pytest.mark.parametrize("prior_status", [Status.Submitted, Status.Running])

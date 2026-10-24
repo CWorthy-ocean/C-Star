@@ -176,6 +176,20 @@ class StateRepository:
         coros = [asyncio.to_thread(deserialize, path, klass) for path in files]
         return await asyncio.gather(*coros)
 
+    async def has_sentinels(self, *, run_id: str) -> bool:
+        """Report whether a run's state directory holds any sentinel.
+
+        Parameters
+        ----------
+        run_id : str
+            The run whose state directory is searched.
+
+        Returns
+        -------
+        bool
+        """
+        return bool(await self._list_sentinel_files(run_id=run_id))
+
     async def _list_sentinel_files(
         self,
         *,

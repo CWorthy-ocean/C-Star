@@ -22,6 +22,8 @@ if t.TYPE_CHECKING:
 
 log = get_logger(__name__)
 
+_THandle = t.TypeVar("_THandle", bound="ProcessHandle")
+
 
 def is_foreign_handle(handle: "ProcessHandle", launcher_name: str) -> bool:
     """Report whether a handle was created by a launcher other than `launcher_name`.
@@ -43,6 +45,47 @@ def is_foreign_handle(handle: "ProcessHandle", launcher_name: str) -> bool:
     bool
     """
     return bool(handle.launcher_name) and handle.launcher_name != launcher_name
+
+
+def prior_of_this_run(
+    handle: "_THandle | None",
+    run_uuid: str,
+) -> "_THandle | None":
+    """Drop a persisted prior handle that belongs to another run of the same run-id.
+
+    Sentinels are kept by run-id, so a run started under the id of one whose
+    directory was removed or moved finds that run's handles. Adopting one
+    would report the step done without running it. A handle is another run's
+    when it records a manifest uuid other than `run_uuid`; one recording none
+    (written before the uuid was recorded, or when the manifest could not be
+    written) cannot be told apart and is kept.
+
+    Parameters
+    ----------
+    handle : ProcessHandle | None
+        The handle read from the step's sentinel, if any.
+    run_uuid : str
+        The uuid of the current run's manifest; empty when it could not be written.
+
+    Returns
+    -------
+    ProcessHandle | None
+        `handle`, or `None` when it belongs to another run.
+    """
+    if handle is None or not handle.run_uuid or not run_uuid:
+        return handle
+    if handle.run_uuid == run_uuid:
+        return handle
+
+    log.warning(
+        "Step %r has a sentinel from another run of %r (%s, not %s); "
+        "launching the step again.",
+        handle.name,
+        handle.run_id,
+        handle.run_uuid,
+        run_uuid,
+    )
+    return None
 
 
 def resolve_prior_attempt(

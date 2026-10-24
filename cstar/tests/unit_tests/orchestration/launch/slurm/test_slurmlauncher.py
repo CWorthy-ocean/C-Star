@@ -585,12 +585,68 @@ async def test_slurmlauncher_launch_adopts_the_submission_of_a_prior_handle(
         mock.patch.object(SlurmLauncher, "adapt_step") as adapt_step,
         mock.patch("cstar.orchestration.launch.slurm.utc_now") as now,
     ):
-        task = await SlurmLauncher.launch(live_step, [])
+        task = await SlurmLauncher.launch(live_step, [], run_uuid="")
 
     adapt_step.assert_not_called()
     now.assert_not_called()
     assert task.handle.pid == "12345"
     assert task.handle.submitted_at == recorded
+
+
+@pytest.mark.parametrize(
+    ("prior_uuid", "run_uuid", "adopted", "recorded"),
+    [
+        pytest.param("earlier", "this", False, "this", id="another-run"),
+        pytest.param("this", "this", True, "this", id="this-run"),
+        pytest.param("", "this", True, "this", id="sentinel-before-uuids"),
+        pytest.param("earlier", "", True, "earlier", id="manifest-not-written"),
+    ],
+)
+@pytest.mark.usefixtures("read_yaml_intercept")
+async def test_slurmlauncher_launch_ignores_the_sentinel_of_another_run(
+    wp_templates_dir: Path,
+    mock_run_id: str,
+    prior_uuid: str,
+    run_uuid: str,
+    adopted: bool,
+    recorded: str,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Verify a Done prior handle recording another run's manifest uuid is not
+    adopted, though SLURM still reports its job COMPLETED, and the step is
+    submitted again; a handle of this run, or one whose run cannot be told,
+    is adopted. The handle records the run's uuid either way.
+    """
+    live_step = LiveStep.from_step(
+        deserialize(wp_templates_dir / "single_step.yaml", Workplan).steps[0]
+    )
+    await StateRepository().put_sentinel(
+        SlurmHandle(
+            pid="12345",
+            name=live_step.name,
+            run_id=mock_run_id,
+            launcher_name=SlurmLauncher.name,
+            status=Status.Done,
+            run_uuid=prior_uuid,
+        )
+    )
+    completed = mock.Mock(status=ExecutionStatus.COMPLETED)
+    captured: dict[str, list[str]] = {}
+
+    with (
+        mock.patch(
+            "cstar.orchestration.launch.slurm.get_slurm_batch",
+            mock.AsyncMock(return_value=completed),
+        ),
+        mock.patch.object(SlurmLauncher, "POST_SUBMIT_DELAY", 0),
+        mock.patch.object(SlurmLauncher, "adapt_step", _capture_command_job(captured)),
+    ):
+        task = await SlurmLauncher.launch(live_step, [], run_uuid=run_uuid)
+
+    assert task.handle.pid == ("12345" if adopted else "4242")
+    assert task.handle.run_uuid == recorded
+    warnings = [r.getMessage() for r in caplog.records if r.levelname == "WARNING"]
+    assert any("another run" in w for w in warnings) is not adopted
 
 
 @pytest.mark.usefixtures("read_yaml_intercept")
@@ -627,7 +683,7 @@ async def test_slurmlauncher_launch_attaches_to_done_pre_run(
         mock.patch.object(SlurmLauncher, "POST_SUBMIT_DELAY", 0),
         mock.patch.object(SlurmLauncher, "adapt_step", _capture_command_job(captured)),
     ):
-        task = await SlurmLauncher.launch(live_step, [])
+        task = await SlurmLauncher.launch(live_step, [], run_uuid="")
 
     mock_batch.assert_not_awaited()
     assert task.handle.pid == "4242"
@@ -669,7 +725,7 @@ async def test_slurmlauncher_launch_queries_unnamed_pre_run_sentinel(
         mock.patch.object(SlurmLauncher, "POST_SUBMIT_DELAY", 0),
         mock.patch.object(SlurmLauncher, "adapt_step", _capture_command_job(captured)),
     ):
-        await SlurmLauncher.launch(live_step, [])
+        await SlurmLauncher.launch(live_step, [], run_uuid="")
 
     mock_batch.assert_awaited_once_with("12345")
     assert ARG_CLOBBER in captured["command"]
@@ -710,7 +766,7 @@ async def test_slurmlauncher_launch_depends_on_running_foreign_job(
         mock.patch.object(SlurmLauncher, "POST_SUBMIT_DELAY", 0),
         mock.patch.object(SlurmLauncher, "adapt_step", fake_adapt_step),
     ):
-        task = await SlurmLauncher.launch(live_step, [foreign])
+        task = await SlurmLauncher.launch(live_step, [foreign], run_uuid="")
 
     assert seen["ids"] == ["9001"]
     assert task.handle.pid == "4242"

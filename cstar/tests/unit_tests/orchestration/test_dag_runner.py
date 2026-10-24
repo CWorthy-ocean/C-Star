@@ -1892,6 +1892,58 @@ async def test_build_dag_without_a_manifest_loads_no_run_state(
     load_state.assert_not_called()
 
 
+def _leave_sentinel(run_id: str, step: str) -> Path:
+    """Write a Done sentinel for `step`, as an earlier run of `run_id` left it."""
+    sentinel = StateRepository.sentinel_path(step, run_id=run_id)
+    sentinel.parent.mkdir(parents=True, exist_ok=True)
+    handle = ProcessHandle(
+        pid="1", name=step, run_id=run_id, status=Status.Done, run_uuid="earlier"
+    )
+    assert serialize(sentinel, handle)
+    return sentinel
+
+
+@pytest.mark.asyncio
+async def test_build_dag_refuses_the_state_of_a_run_whose_directory_is_gone(
+    tmp_path: Path, mock_run_id: str, hello_world_bp_path: Path
+) -> None:
+    """Verify a run-id whose sentinels outlived its run directory is refused
+    before anything is written, naming the state directory and how to clear it.
+    """
+    wp_path, output_dir = _build_guarded(tmp_path, mock_run_id, hello_world_bp_path)
+    sentinel = _leave_sentinel(mock_run_id, "hello")
+
+    with (
+        mock.patch("cstar.orchestration.dag_runner.check_environment"),
+        pytest.raises(CstarExpectationFailed) as exc_info,
+    ):
+        await build_dag(wp_path, mock_run_id)
+
+    msg = str(exc_info.value)
+    assert str(sentinel.parent) in msg
+    assert f"cstar admin clean {ARG_RUN_ID} {mock_run_id}" in msg
+    assert f"{ARG_RUN_ID} <other-id>" in msg
+    assert not list(output_dir.glob(TRANSFORMED_WORKPLAN_GLOB))
+
+
+@pytest.mark.asyncio
+async def test_build_dag_re_enters_a_run_directory_that_has_no_manifest(
+    tmp_path: Path, mock_run_id: str, hello_world_bp_path: Path
+) -> None:
+    """Verify a run directory that still holds its transformed workplan is
+    re-entered with its sentinels, even without a manifest: one could not be
+    written, or the run predates manifests.
+    """
+    wp_path, output_dir = _build_guarded(tmp_path, mock_run_id, hello_world_bp_path)
+    _leave_sentinel(mock_run_id, "hello")
+    (output_dir / f"{wp_path.stem}_transformed.yaml").write_text(wp_path.read_text())
+
+    with mock.patch("cstar.orchestration.dag_runner.check_environment"):
+        await build_dag(wp_path, mock_run_id)
+
+    assert read_run_manifest(output_dir) is None
+
+
 @pytest.mark.asyncio
 async def test_build_dag_refuses_a_corrupt_manifest_before_writing_anything(
     tmp_path: Path, mock_run_id: str, hello_world_bp_path: Path
@@ -2912,7 +2964,7 @@ def test_get_orchestrator_uses_local_launcher_for_pre_run_workplan(
         ),
         mock.patch.object(SlurmLauncher, "check_preconditions"),
     ):
-        orchestrator = get_orchestrator(Planner(wp), root=tmp_path)
+        orchestrator = get_orchestrator(Planner(wp), root=tmp_path, run_uuid="")
 
     assert type(orchestrator.launcher) is exp_klass
 
@@ -3053,7 +3105,9 @@ class _SubmittingLauncher(Launcher[ProcessHandle]):
     name = "queue"
 
     @classmethod
-    async def launch(cls, step: LiveStep, dependencies: list[ProcessHandle]) -> t.Any:
+    async def launch(
+        cls, step: LiveStep, dependencies: list[ProcessHandle], *, run_uuid: str
+    ) -> t.Any:
         await asyncio.sleep(0)  # let the steps of one pass interleave
         handle = ProcessHandle(
             pid=f"job-{step.name}",
@@ -3062,6 +3116,7 @@ class _SubmittingLauncher(Launcher[ProcessHandle]):
             launcher_name=cls.name,
             status=Status.Running,
             submitted_at=SUBMITTED + timedelta(seconds=len(step.name)),
+            run_uuid=run_uuid,
         )
         return Task(step=step, handle=handle)
 
@@ -3080,6 +3135,7 @@ async def test_run_dag_records_every_submission_in_the_manifest(
     """Verify scheduling a workplan records the launcher, the job id and the
     submission time of every step: the steps launched in one pass, writing the
     manifest together, each keep their own, and so does a step launched later.
+    Every launch is given the uuid of the run's manifest.
     """
     monkeypatch.setattr("cstar.orchestration.dag_runner.POLL_DELAYS", (0.0,))
     bp = hello_world_bp_path.as_posix()
@@ -3124,6 +3180,7 @@ async def test_run_dag_records_every_submission_in_the_manifest(
     sentinel = await StateRepository().get_sentinel("a", ProcessHandle)
     assert sentinel is not None
     assert sentinel.submitted_at == SUBMITTED + timedelta(seconds=1)
+    assert sentinel.run_uuid == manifest.id
 
 
 @pytest.mark.parametrize(

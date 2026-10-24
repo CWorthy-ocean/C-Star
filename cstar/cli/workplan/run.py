@@ -605,7 +605,8 @@ def refuse_run_id_collision(wp_path: Path, run_id: str, *, explicit: bool) -> No
         msg = (
             f"Run-id {run_id!r}, derived from the workplan name, belongs to a run "
             f"whose workplan could not be found: {ex}; pass {ARG_RUN_ID} "
-            "<other-id> to start a new run."
+            "<other-id> to start a new run, or, when that run's directory was "
+            f"deleted, forget the run with `cstar admin clean {ARG_RUN_ID} {run_id}`."
         )
         raise typer.BadParameter(msg) from ex
     if started_from.resolve() == wp_path.resolve():
