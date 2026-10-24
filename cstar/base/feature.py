@@ -9,12 +9,14 @@ FF_PREFIX: t.Literal["CSTAR_FF_"] = "CSTAR_FF_"
 ENV_FF_DEVELOPER_MODE: t.Annotated[
     t.Literal["CSTAR_FF_DEVELOPER_MODE"],
     EnvVar(
-        "Enable developer mode to enable all feature flags (not recommended).",
+        "Enable developer-only commands, such as the schema generators. It does "
+        "not enable any other feature flag.",
         GROUP_FF,
         default=FLAG_OFF,
     ),
 ] = "CSTAR_FF_DEVELOPER_MODE"
-"""Enable developer mode to enable all feature flags (not recommended)."""
+"""Enable developer-only commands, such as the schema generators. It does not
+enable any other feature flag."""
 
 
 ENV_FF_ORCH_TRX_TIMESPLIT: t.Annotated[
@@ -68,7 +70,8 @@ def is_flag_enabled(flag: str) -> bool:
 def is_feature_enabled(flag: str) -> bool:
     """Determine if an environment variable for a feature is set.
 
-    Enable all development features via the `CSTAR_FF_DEVELOPER_MODE` flag.
+    Each feature is enabled by its own flag or by an enclosing segment of it;
+    `CSTAR_FF_DEVELOPER_MODE` does not enable other features.
 
     Parameters
     ----------
@@ -78,10 +81,6 @@ def is_feature_enabled(flag: str) -> bool:
         May take the full feature-flag form, such as `CSTAR_FF_<FLAG_NAME>` or
         pass only the <FLAG_NAME> and exclude the `CSTAR_FF_` prefix.
     """
-    # developer mode enables all feature flags
-    if is_flag_enabled(ENV_FF_DEVELOPER_MODE):
-        return True
-
     # enable omitting the CSTAR_FF_ prefix at the call-site
     if not flag.startswith(FF_PREFIX):
         flag = f"{FF_PREFIX}{flag}"
