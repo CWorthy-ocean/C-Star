@@ -45,6 +45,17 @@ Breaking Changes
 
 - The developer-only commands ``cstar workplan compose``, ``cstar workplan generate``, ``cstar workplan plan`` and ``cstar template create`` are removed, with their four ``CSTAR_FF_CLI_*`` flags. (`#813 <https://github.com/CWorthy-ocean/C-Star/pull/813>`_)
 - Every old name above prints a warning naming its replacement when it is still exported. (`#813 <https://github.com/CWorthy-ocean/C-Star/pull/813>`_)
+- The ROMS application is named ``ucla_roms``; ``roms_marbl`` is still accepted everywhere (blueprints, workplan steps, CLI arguments, catalog lookups) and never needs editing. (`#818 <https://github.com/CWorthy-ocean/C-Star/pull/818>`_)
+
+  - Files C-Star writes (transformed workplans, blueprints emitted by forge, chunk and resume blueprints, migrated copies) now say ``ucla_roms``, which earlier releases refuse.
+  - In Python, ``Application.ROMS_MARBL`` is now ``Application.UCLA_ROMS``.
+
+- Standalone runs and catalogs use the new name: the default run directory is ``blueprint_runs/ucla_roms/<name>``, and catalogs keep ROMS blueprints under ``blueprints/ucla_roms/``. (`#818 <https://github.com/CWorthy-ocean/C-Star/pull/818>`_)
+
+  - An existing ``blueprint_runs/roms_marbl/<name>`` is still found and reused, so resuming or continuing an earlier run works.
+  - A catalog's ``blueprints/roms_marbl/`` directory is read with a warning for one more release; ``cstar admin migrate-catalog`` moves it.
+
+- Run manifest schema 1.5.0: step definition hashes recorded by an older manifest are dropped when it is read, so a re-entered run skips the edited-step check once; the next run records them again. (`#818 <https://github.com/CWorthy-ocean/C-Star/pull/818>`_)
 
 
 
@@ -249,6 +260,7 @@ Bug Fixes
 
 - ``cstar run check``, ``cstar run attach`` and ``cstar run promote`` could not find the plan of a run started from a ``.json`` or ``.yml`` workplan. (`#810 <https://github.com/CWorthy-ocean/C-Star/pull/810>`_)
 - A blank ``--run-id`` exited with code 1 and no message; it now reports the problem. (`#814 <https://github.com/CWorthy-ocean/C-Star/pull/814>`_)
+- ``cstar admin migrate-catalog`` no longer fails after moving blueprints out of a legacy directory that is a symbolic link; the link is reported as left in place. (`#818 <https://github.com/CWorthy-ocean/C-Star/pull/818>`_)
 
 
 Improvements
@@ -346,3 +358,6 @@ Miscellaneous
 - New "Cleaning up" section in the workplans guide. (`#814 <https://github.com/CWorthy-ocean/C-Star/pull/814>`_)
 - The installation guide describes the new ``cstar init`` locations question. (`#813 <https://github.com/CWorthy-ocean/C-Star/pull/813>`_)
 - Docs and tutorials use ``cstar workplan submit`` and ``cstar run <command>`` throughout, and note that the earlier spellings still work. (`#816 <https://github.com/CWorthy-ocean/C-Star/pull/816>`_)
+- Blueprint schema 3.3.0 (a minor bump: older files load and run unchanged) is published as ``ucla_roms_schema.3.3.0.json``, alongside run manifest schema 1.5.0. (`#818 <https://github.com/CWorthy-ocean/C-Star/pull/818>`_)
+- Docs: the blueprint page moved to ``blueprints/ucla_roms``; examples, tutorials and templates use ``application: ucla_roms``, with a note wherever the old name is still accepted. (`#818 <https://github.com/CWorthy-ocean/C-Star/pull/818>`_)
+- Wizard labels, hints and log messages say UCLA-ROMS, keeping "with MARBL" where the output needs MARBL. (`#818 <https://github.com/CWorthy-ocean/C-Star/pull/818>`_)
