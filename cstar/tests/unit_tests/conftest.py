@@ -17,7 +17,6 @@ from unittest import mock
 import dotenv
 import pytest
 
-from cstar.roms.file_system import RomsFileSystemManager
 from cstar.base.additional_code import AdditionalCode
 from cstar.base.discretization import Discretization
 from cstar.base.env import (
@@ -52,6 +51,7 @@ from cstar.orchestration.orchestration import LiveStep, LiveWorkplan
 from cstar.orchestration.serialization import deserialize, serialize
 from cstar.orchestration.tracking import TrackingRepository, WorkplanRun
 from cstar.pio.external_codebase import PIOExternalCodeBase
+from cstar.roms.file_system import RomsFileSystemManager
 from cstar.roms.namelist import release_ref_for_remote
 from cstar.tests.unit_tests.fake_abc_subclasses import (
     FakeExternalCodeBase,

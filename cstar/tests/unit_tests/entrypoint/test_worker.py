@@ -12,7 +12,6 @@ import pytest
 
 from cstar.applications.core import RunnerRequest, RunnerResult, RunnerState
 from cstar.applications.ucla_roms.app import UclaRomsRunner, main
-from cstar.roms.file_system import RomsFileSystemManager
 from cstar.applications.ucla_roms.models import UclaRomsBlueprint
 from cstar.applications.ucla_roms.transforms import ContinuanceDirective
 from cstar.base.env import get_env_item
@@ -45,6 +44,7 @@ from cstar.orchestration.utils import (
     ENV_CSTAR_SLURM_MAX_WALLTIME,
     ENV_CSTAR_SLURM_QUEUE,
 )
+from cstar.roms.file_system import RomsFileSystemManager
 from cstar.system.manager import (
     AnvilEnvSettings,
     DerechoSystemContext,

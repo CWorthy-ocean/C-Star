@@ -12,7 +12,6 @@ from cstar.applications.core import (
     RunnerResult,
     register_application,
 )
-from cstar.roms.outputs import RestartFile
 from cstar.base.log import get_logger
 from cstar.base.utils import convert_to_cdf5, lazy_import
 from cstar.entrypoint.runner import BlueprintRunner
@@ -20,6 +19,7 @@ from cstar.execution.file_system import JobFileSystemManager
 from cstar.execution.handler import ExecutionStatus
 from cstar.orchestration.models import Blueprint
 from cstar.roms.input_dataset import read_model_reference_date
+from cstar.roms.outputs import RestartFile
 
 roms_tools = lazy_import("roms_tools")
 

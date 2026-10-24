@@ -18,7 +18,6 @@ from enum import StrEnum
 from itertools import chain
 from pathlib import Path
 
-from cstar.roms.file_system import RomsFileSystemManager
 from cstar.base.exceptions import CstarError
 from cstar.base.log import get_logger
 from cstar.execution.file_system import DirectoryManager, symlink_relative
@@ -29,6 +28,7 @@ from cstar.orchestration.manifest import (
     read_run_manifest,
 )
 from cstar.orchestration.run_check import TRANSFORMED_WORKPLAN_GLOB
+from cstar.roms.file_system import RomsFileSystemManager
 
 if t.TYPE_CHECKING:
     from collections.abc import Collection, Iterable, Iterator, Mapping

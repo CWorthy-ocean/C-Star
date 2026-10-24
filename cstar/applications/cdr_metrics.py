@@ -87,7 +87,6 @@ from cstar.applications.core import (
     RunnerResult,
     register_application,
 )
-from cstar.roms.outputs import CdrOutputFile
 from cstar.base.exceptions import CstarError
 from cstar.base.log import get_logger
 from cstar.base.utils import lazy_import
@@ -101,6 +100,7 @@ from cstar.orchestration.models import (
     PathLocation,
     RequiredString,
 )
+from cstar.roms.outputs import CdrOutputFile
 
 if t.TYPE_CHECKING:
     from types import ModuleType

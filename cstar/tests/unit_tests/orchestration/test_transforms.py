@@ -14,17 +14,7 @@ from pydantic import ValidationError
 
 from cstar.applications.core import ArtifactKind
 from cstar.applications.hello_world import HelloWorldBlueprint
-from cstar.roms.file_system import RomsFileSystemManager
 from cstar.applications.ucla_roms.models import UclaRomsBlueprint
-from cstar.roms.outputs import (
-    EXTRACT_ROLE,
-    BoundaryFile,
-    CarbonateSensitivityFile,
-    CdrOutputFile,
-    RestartFile,
-    restart_timestamp,
-    warn_on_restart_start_date_mismatch,
-)
 from cstar.applications.ucla_roms.transforms import (
     SOURCE_DELIMITER,
     CarbonateSensitivityDirective,
@@ -111,6 +101,16 @@ from cstar.orchestration.transforms import (
     mustache,
     package_runtime_overrides,
     resolve_deferred_blueprint,
+)
+from cstar.roms.file_system import RomsFileSystemManager
+from cstar.roms.outputs import (
+    EXTRACT_ROLE,
+    BoundaryFile,
+    CarbonateSensitivityFile,
+    CdrOutputFile,
+    RestartFile,
+    restart_timestamp,
+    warn_on_restart_start_date_mismatch,
 )
 from cstar.tests.unit_tests.orchestration.manifest_runs import write_identity
 
@@ -2235,9 +2235,7 @@ def test_nesting_directive_bry_path_deprecated_matches_path(
     step.blueprint_overrides.clear()
 
     path_transform = NestingDirective({NestingDirective.KEY_PATH: str(bry_dir)})
-    bp_via_path = deserialize(
-        path_transform(step)[0].blueprint_path, UclaRomsBlueprint
-    )
+    bp_via_path = deserialize(path_transform(step)[0].blueprint_path, UclaRomsBlueprint)
 
     with (
         caplog.at_level(logging.WARNING, logger=TRANSFORMS_LOGGER_NAME),
@@ -3788,9 +3786,7 @@ def test_carbonate_sensitivity_directive_config_problems(
     ucla_roms_step : LiveStep
         A `ucla_roms` step to validate the config against.
     """
-    problems = CarbonateSensitivityDirective.validate_directives(
-        config, ucla_roms_step
-    )
+    problems = CarbonateSensitivityDirective.validate_directives(config, ucla_roms_step)
 
     assert len(problems) == 1
     assert expected in problems[0]

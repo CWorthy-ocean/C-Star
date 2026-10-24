@@ -2740,9 +2740,7 @@ class ForgeExecutor(BaseModel):
         with warnings.catch_warnings():
             warnings.filterwarnings("ignore", category=UserWarning, module="pydantic")
 
-            ucla_roms_blueprint_dict = self.ucla_roms_blueprint.model_dump(
-                mode="json"
-            )
+            ucla_roms_blueprint_dict = self.ucla_roms_blueprint.model_dump(mode="json")
             code_dict = ucla_roms_blueprint_dict["code"]
             # Convert dicts from render_roms_settings / write_roms_namelist to CodeRepository objects
             code_dict["compile_time"] = cstar_models.CodeRepository.model_construct(

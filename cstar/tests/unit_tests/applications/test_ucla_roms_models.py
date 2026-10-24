@@ -14,8 +14,8 @@ from cstar.applications.ucla_roms.adapter import (
 )
 from cstar.applications.ucla_roms.models import (
     PartitioningParameterSet,
-    UclaRomsBlueprint,
     RuntimeParameterSet,
+    UclaRomsBlueprint,
 )
 from cstar.orchestration.models import BlueprintIdentity, CatalogSpecRef, Provenance
 from cstar.orchestration.serialization import model_to_yaml

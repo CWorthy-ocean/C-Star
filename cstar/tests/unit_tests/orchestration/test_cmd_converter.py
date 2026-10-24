@@ -7,7 +7,6 @@ from unittest import mock
 import pytest
 from pydantic import ValidationError
 
-from cstar.roms.file_system import RomsFileSystemManager
 from cstar.applications.ucla_roms.models import UclaRomsBlueprint
 from cstar.applications.ucla_roms.transforms import ContinuanceDirective
 from cstar.entrypoint.utils import (
@@ -29,6 +28,7 @@ from cstar.orchestration.models import (
 )
 from cstar.orchestration.orchestration import LiveStep, RunRequestCommandFormatter
 from cstar.orchestration.serialization import deserialize
+from cstar.roms.file_system import RomsFileSystemManager
 
 
 @pytest.mark.parametrize(

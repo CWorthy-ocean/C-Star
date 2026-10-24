@@ -31,13 +31,7 @@ from cstar.applications.ucla_roms.adapter import (
     SurfaceForcingAdapter,
     TidalForcingAdapter,
 )
-from cstar.roms.file_system import (
-    GENERATED_NAMELIST_NAME,
-    ROMS_EXECUTABLE_NAME,
-    RomsFileSystemManager,
-)
 from cstar.applications.ucla_roms.models import UclaRomsBlueprint
-from cstar.roms.outputs import EXTRACT_ROOT_NAME, OUTPUT_ROOT_NAME
 from cstar.base.additional_code import AdditionalCode
 from cstar.base.env import (
     ENV_CSTAR_DEBUG_BUILD_MODE,
@@ -75,6 +69,11 @@ from cstar.roms.build_verification import (
 )
 from cstar.roms.discretization import ROMSDiscretization
 from cstar.roms.external_codebase import ROMSExternalCodeBase
+from cstar.roms.file_system import (
+    GENERATED_NAMELIST_NAME,
+    ROMS_EXECUTABLE_NAME,
+    RomsFileSystemManager,
+)
 from cstar.roms.input_dataset import (
     CARBONATE_SENSITIVITY_REMEDY,
     CARBONATE_SENSITIVITY_VARIABLES,
@@ -93,6 +92,7 @@ from cstar.roms.input_dataset import (
     missing_carbonate_sensitivity_variables,
 )
 from cstar.roms.namelist import RomsNamelistBase, namelist_schema_for_ref
+from cstar.roms.outputs import EXTRACT_ROOT_NAME, OUTPUT_ROOT_NAME
 from cstar.roms.precheck import applies_to, check_output_streams_divide_rst
 from cstar.simulation import Simulation
 from cstar.system.manager import get_sysmgr

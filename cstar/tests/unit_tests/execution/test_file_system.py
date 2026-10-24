@@ -11,7 +11,6 @@ from unittest import mock
 import pytest
 import requests
 
-from cstar.roms.file_system import RomsFileSystemManager
 from cstar.base.env import ENV_CSTAR_DATA_HOME, ENV_CSTAR_RUNID
 from cstar.base.exceptions import CstarError
 from cstar.execution.file_system import (
@@ -36,6 +35,7 @@ from cstar.execution.file_system import (
 )
 from cstar.orchestration.models import Step
 from cstar.orchestration.orchestration import LiveStep
+from cstar.roms.file_system import RomsFileSystemManager
 
 
 @pytest.fixture

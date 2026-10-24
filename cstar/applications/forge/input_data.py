@@ -2463,9 +2463,7 @@ class RomsInputGenerator(InputGenerator):
         self._settings_run_time["forcing"]["river_path"] = str(output_path)
 
         resource = Resource(location=str(output_path), partitioned=False)
-        getattr(self.ucla_roms_blueprint_elements.forcing, subkey).data.append(
-            resource
-        )
+        getattr(self.ucla_roms_blueprint_elements.forcing, subkey).data.append(resource)
 
     @register_input(name="forcing.river", order=60, label="Generating river forcing")
     def _generate_river_forcing(self, key: str = "forcing.river", **kwargs):

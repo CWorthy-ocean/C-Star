@@ -41,8 +41,8 @@ from cstar.applications.forge.input_data import (
     INPUT_REGISTRY,
     InputGenerator,
     InputStep,
-    UclaRomsBlueprintInputData,
     RomsInputGenerator,
+    UclaRomsBlueprintInputData,
     filter_paths_by_time_window,
     register_input,
     resolve_input_selection,
@@ -1275,9 +1275,7 @@ class TestPlannedOutputReuseDetection:
 
         assert data._planned_netcdf_already_present(grid_path)
 
-    def test_nc4_mangled_file_not_counted_as_present(
-        self, sample_roms_input_generator
-    ):
+    def test_nc4_mangled_file_not_counted_as_present(self, sample_roms_input_generator):
         """An unfinished PIO ``_nc4`` intermediate must not count as a valid output."""
         data = sample_roms_input_generator
         grid_path = data._forcing_filename("grid")
@@ -1287,9 +1285,7 @@ class TestPlannedOutputReuseDetection:
 
         assert not data._planned_netcdf_already_present(grid_path)
 
-    def test_unrelated_suffix_not_counted_as_present(
-        self, sample_roms_input_generator
-    ):
+    def test_unrelated_suffix_not_counted_as_present(self, sample_roms_input_generator):
         """A sibling planned output's file (e.g. ``_nesting``) never counts, even if
         it isn't registered in ``_planned_output_paths``.
         """
@@ -1388,8 +1384,7 @@ class TestRomsInputGeneratorGeneration:
 
         # Check that resource was added to ucla_roms_blueprint_elements
         assert (
-            len(sample_roms_input_generator.ucla_roms_blueprint_elements.grid.data)
-            > 0
+            len(sample_roms_input_generator.ucla_roms_blueprint_elements.grid.data) > 0
         )
 
     @patch("cstar.base.utils.subprocess.run")
@@ -1868,10 +1863,7 @@ class TestRomsInputGeneratorGeneration:
     ):
         """Test _generate_cdr_forcing method."""
         # Initialize cdr_forcing as a Dataset if it's None
-        if (
-            sample_roms_input_generator.ucla_roms_blueprint_elements.cdr_forcing
-            is None
-        ):
+        if sample_roms_input_generator.ucla_roms_blueprint_elements.cdr_forcing is None:
             sample_roms_input_generator.ucla_roms_blueprint_elements.cdr_forcing = (
                 cstar_models.Dataset(data=[])
             )
@@ -1941,9 +1933,7 @@ class TestRomsInputGeneratorGeneration:
         nc_path = Path(resources[0].location)
         assert nc_path.exists() and nc_path.stat().st_size > 0
         assert (
-            sample_roms_input_generator._settings_compile_time["cppdefs"][
-                "cdr_forcing"
-            ]
+            sample_roms_input_generator._settings_compile_time["cppdefs"]["cdr_forcing"]
             is True
         )
         assert (

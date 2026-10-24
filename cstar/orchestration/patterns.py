@@ -20,7 +20,6 @@ import yaml
 from pydantic import Field, model_validator
 
 from cstar.applications.ucla_roms.models import APP_NAME
-from cstar.roms.outputs import RestartFile, restart_timestamp
 from cstar.applications.ucla_roms.transforms import (
     ContinuanceDirective,
     NestingDirective,
@@ -36,6 +35,7 @@ from cstar.orchestration.models import (
     StepRef,
     Workplan,
 )
+from cstar.roms.outputs import RestartFile, restart_timestamp
 
 if t.TYPE_CHECKING:
     from cstar.applications.core import EmittedBlueprint

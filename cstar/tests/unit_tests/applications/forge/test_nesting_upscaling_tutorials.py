@@ -16,11 +16,11 @@ import yaml
 
 from cstar.applications.cdr_metrics import CdrDomain
 from cstar.applications.forge.blueprint import FORGE_BLUEPRINT_VERSION, ForgeBlueprint
-from cstar.roms.outputs import RestartFile
 from cstar.applications.ucla_roms.transforms import ContinuanceDirective
 from cstar.orchestration.models import Workplan
 from cstar.orchestration.serialization import deserialize
 from cstar.roms.namelist import is_commit_hash
+from cstar.roms.outputs import RestartFile
 
 TINY = "tutorials/nesting_upscaling_tiny"
 EXAMPLES = (TINY, "developers/nesting_upscaling_ccs")

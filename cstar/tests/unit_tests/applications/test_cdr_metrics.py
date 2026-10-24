@@ -32,7 +32,6 @@ from cstar.applications.cdr_metrics import (
     source_sign_report,
 )
 from cstar.applications.core import ArtifactKind, RunnerRequest, get_application
-from cstar.roms.outputs import CdrOutputFile
 from cstar.base.exceptions import CstarError
 from cstar.entrypoint.config import JobConfig, ServiceConfiguration
 from cstar.execution.handler import ExecutionStatus
@@ -45,6 +44,7 @@ from cstar.orchestration.manifest import (
 )
 from cstar.orchestration.models import BlueprintIdentity, PathLocation
 from cstar.orchestration.serialization import load_blueprint
+from cstar.roms.outputs import CdrOutputFile
 
 WINDOW = 3600.0
 """The averaging window length (seconds) of the synthetic CDR output."""

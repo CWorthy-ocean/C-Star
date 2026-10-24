@@ -5,7 +5,6 @@ import pytest
 import xarray as xr
 import yaml
 
-from cstar.roms.file_system import RomsFileSystemManager
 from cstar.applications.ucla_roms.models import UclaRomsBlueprint
 from cstar.applications.ucla_roms.resume import (
     RESUME_SUFFIX,
@@ -14,6 +13,7 @@ from cstar.applications.ucla_roms.resume import (
 )
 from cstar.base.exceptions import CstarExpectationFailed
 from cstar.orchestration.serialization import deserialize
+from cstar.roms.file_system import RomsFileSystemManager
 
 RESUME_LOGGER_NAME = "cstar.applications.ucla_roms.resume"
 """The logger name used by `cstar.applications.ucla_roms.resume`."""

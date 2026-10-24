@@ -8,8 +8,8 @@ import pytest
 from cstar.applications.core import ArtifactKind, get_application
 from cstar.applications.forge.app import INPUT_ARTIFACTS, input_products
 from cstar.applications.ucla_roms.app import output_products
-from cstar.roms.outputs import OUTPUT_FILE_PATTERN, OUTPUT_STREAMS
 from cstar.orchestration.manifest import Product, expand_artifacts
+from cstar.roms.outputs import OUTPUT_FILE_PATTERN, OUTPUT_STREAMS
 
 _STAMP = "20120101000000"
 
