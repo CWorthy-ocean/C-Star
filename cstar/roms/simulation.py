@@ -274,7 +274,7 @@ class ROMSSimulation(Simulation):
         Compiles the ROMS executable if necessary.
     pre_run()
         Performs pre-processing steps before execution.
-    run(account_key=None, walltime=None, queue_name=None, job_name=None)
+    run(account_key="", walltime=None, queue_name=None, job_name=None)
         Submits the ROMS simulation for execution.
     post_run()
         Processes model outputs after execution.
@@ -2393,7 +2393,7 @@ class ROMSSimulation(Simulation):
 
     def run(
         self,
-        account_key: str | None = None,
+        account_key: str = "",
         walltime: str | None = None,
         queue_name: str | None = None,
         job_name: str | None = None,
@@ -2408,7 +2408,8 @@ class ROMSSimulation(Simulation):
         Parameters
         ----------
         account_key : str, optional
-            The user's account key on the system (required if using a job scheduler).
+            The user's account key on the system, for a scheduler job on a system
+            that requires one.
         queue_name : str, optional
             The name of the scheduler queue to submit the job to. Defaults to the
             system's primary queue.
@@ -2428,8 +2429,10 @@ class ROMSSimulation(Simulation):
         Raises
         ------
         ValueError
-            - If the preconditions of `prepare_launch` are not met.
-            - If `account_key` is required but not provided for scheduled jobs.
+            If the preconditions of `prepare_launch` are not met.
+        CstarError
+            If a scheduler job is needed and the system requires an account or
+            queue that is empty (see `create_scheduler_job`).
         RuntimeError
             If ROMS fails to start or encounters an execution error.
 
@@ -2474,11 +2477,6 @@ class ROMSSimulation(Simulation):
             cstar_sysmgr.scheduler is not None
             and not cstar_sysmgr.scheduler.in_active_allocation
         ):
-            if account_key is None:
-                raise ValueError(
-                    "please call Simulation.run() with a value for account_key"
-                )
-
             job_instance = create_scheduler_job(
                 commands=plan.command,
                 job_name=job_name,

@@ -15,6 +15,7 @@ from cstar.applications.roms_marbl.app import RomsMarblRunner, main
 from cstar.applications.roms_marbl.file_system import RomsFileSystemManager
 from cstar.applications.roms_marbl.models import RomsMarblBlueprint
 from cstar.applications.roms_marbl.transforms import ContinuanceDirective
+from cstar.base.env import get_env_item
 from cstar.base.exceptions import BlueprintError, CstarError, CstarExpectationFailed
 from cstar.entrypoint.config import (
     JobConfig,
@@ -44,6 +45,7 @@ from cstar.orchestration.utils import (
     ENV_CSTAR_SLURM_MAX_WALLTIME,
     ENV_CSTAR_SLURM_QUEUE,
 )
+from cstar.system.manager import AnvilEnvSettings
 
 DEFAULT_LOOP_DELAY = 5
 DEFAULT_HEALTH_CHECK_FREQUENCY: int | None = None
@@ -353,6 +355,53 @@ def test_get_service_config(
 
     # log level is dynamic. verify.
     assert logging._levelToName[config.log_level] == parsed_args.log_level
+
+
+@pytest.mark.parametrize(
+    ("environ", "expected"),
+    [
+        pytest.param(
+            {},
+            ("", get_env_item(ENV_CSTAR_SLURM_MAX_WALLTIME).default, ""),
+            id="unset",
+        ),
+        pytest.param(
+            {
+                ENV_CSTAR_SLURM_ACCOUNT: " m1234 ",
+                ENV_CSTAR_SLURM_MAX_WALLTIME: "01:00:00",
+                ENV_CSTAR_SLURM_QUEUE: "debug",
+            },
+            ("m1234", "01:00:00", "debug"),
+            id="set",
+        ),
+    ],
+)
+def test_get_job_config_on_slurm_system(
+    monkeypatch: pytest.MonkeyPatch,
+    environ: dict[str, str],
+    expected: tuple[str, str, str],
+) -> None:
+    """Verify the job config reads the SLURM settings on a system that requires an
+    account and queue without refusing to load when they are unset.
+
+    Only a step that submits a scheduler job needs them; `create_scheduler_job`
+    enforces the requirement. An unset walltime keeps its default.
+    """
+    for name in (
+        ENV_CSTAR_SLURM_ACCOUNT,
+        ENV_CSTAR_SLURM_MAX_WALLTIME,
+        ENV_CSTAR_SLURM_QUEUE,
+    ):
+        monkeypatch.delenv(name, raising=False)
+    for var, value in environ.items():
+        monkeypatch.setenv(var, value)
+
+    with mock.patch(
+        "cstar.system.environment.CStarEnvironment.settings_klass", AnvilEnvSettings
+    ):
+        job_cfg = get_job_config()
+
+    assert (job_cfg.account_id, job_cfg.walltime, job_cfg.priority) == expected
 
 
 @pytest.mark.parametrize(

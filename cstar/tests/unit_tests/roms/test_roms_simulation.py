@@ -15,12 +15,14 @@ from pydantic import ValidationError
 
 from cstar.base.additional_code import AdditionalCode
 from cstar.base.env import ENV_CSTAR_DEBUG_BUILD_MODE, FLAG_OFF, FLAG_ON
-from cstar.base.exceptions import CstarExpectationFailed
+from cstar.base.exceptions import CstarError, CstarExpectationFailed
 from cstar.base.external_codebase import ExternalCodeBase
 from cstar.base.feature import ENV_FF_DEVELOPER_MODE
 from cstar.base.input_dataset import InputDataset
 from cstar.execution.handler import ExecutionStatus
+from cstar.execution.scheduler_job import SlurmJob
 from cstar.marbl.external_codebase import MARBLExternalCodeBase
+from cstar.orchestration.utils import ENV_CSTAR_SLURM_ACCOUNT, ENV_CSTAR_SLURM_QUEUE
 from cstar.pio.external_codebase import PIOExternalCodeBase
 from cstar.roms.discretization import ROMSDiscretization
 from cstar.roms.external_codebase import ROMSExternalCodeBase
@@ -51,7 +53,8 @@ from cstar.roms.namelist import (
 )
 from cstar.roms.simulation import ROMSSimulation
 from cstar.system.environment import CStarEnvironment
-from cstar.system.manager import get_sysmgr
+from cstar.system.manager import AnvilEnvSettings, get_sysmgr
+from cstar.system.scheduler import SlurmQOS, SlurmScheduler
 
 # A complete, forge-produced runtime namelist used to back the
 # roms_runtime_settings tests (RomsNamelist is a strict 40-group schema).
@@ -2837,48 +2840,49 @@ class TestProcessingAndExecution:
     @mock.patch.object(
         ROMSSimulation, "roms_runtime_settings", new_callable=mock.PropertyMock
     )
-    def test_run_with_scheduler_raises_if_no_account_key(
+    def test_run_with_scheduler_requires_slurm_settings(
         self,
         mock_runtime_settings,
         stub_romssimulation,
         stageddatacollection_remote_files,
     ):
-        """Tests that `run` raises a `ValueError` if no account key is provided when
-        using a scheduler.
-
-        This test ensures that if a scheduler is available but `account_key` is not provided,
-        the method raises an appropriate error instead of submitting a job.
+        """Tests that `run` submits no job, and names the settings to set, when a
+        scheduler job is needed and the system's required account and queue are
+        empty (the values a step gets when `CSTAR_SLURM_*` are unset).
         """
         sim = stub_romssimulation
         build_dir = sim.directory / "ROMS/compile_time_code"
         sim.runtime_code._working_copy = stageddatacollection_remote_files()
 
-        # Mock scheduler object
-        mock_scheduler = mock.MagicMock()
-        mock_scheduler.primary_queue_name = "default_queue"
-        mock_scheduler.get_queue.return_value.max_walltime = "12:00:00"
-        mock_scheduler.in_active_allocation = False
+        scheduler = SlurmScheduler(
+            queues=[SlurmQOS(name="default_queue", query_name="default_queue")],
+            primary_queue_name="default_queue",
+        )
 
         with (
-            mock.patch("cstar.roms.simulation.create_scheduler_job") as mock_create_job,
             mock.patch(
                 "cstar.system.manager.CStarSystemManager.scheduler",
                 new_callable=mock.PropertyMock,
-                return_value=mock_scheduler,
+                return_value=scheduler,
             ),
+            mock.patch.object(
+                SlurmScheduler,
+                "in_active_allocation",
+                new_callable=mock.PropertyMock,
+                return_value=False,
+            ),
+            mock.patch.object(CStarEnvironment, "settings_klass", AnvilEnvSettings),
+            mock.patch.object(SlurmJob, "submit") as mock_submit,
             mock.patch("pathlib.Path.rename", new_callable=mock.Mock),
         ):
             sim.exe_path = build_dir / "roms"
 
-            # Call `run()` without explicitly passing `queue_name` and `walltime`
             with pytest.raises(
-                ValueError,
-                match=re.escape(
-                    "please call Simulation.run() with a value for account_key"
-                ),
+                CstarError,
+                match=f"{ENV_CSTAR_SLURM_ACCOUNT} and {ENV_CSTAR_SLURM_QUEUE} must be set",
             ):
-                sim.run()
-            mock_create_job.assert_not_called()
+                sim.run(account_key="", walltime="01:00:00", queue_name="")
+            mock_submit.assert_not_called()
 
     def test_post_run_raises_if_called_before_run(self, stub_romssimulation):
         """Tests that `post_run` raises a `RuntimeError` if called before `run`.

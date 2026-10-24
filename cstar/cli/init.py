@@ -48,7 +48,7 @@ from cstar.orchestration.utils import (
     ENV_CSTAR_SLURM_MAX_WALLTIME,
     ENV_CSTAR_SLURM_QUEUE,
 )
-from cstar.system.environment import SlurmSettingsBase, get_envfield_alias
+from cstar.system.environment import SlurmSettingsBase
 from cstar.system.manager import current_user, get_system_context
 from cstar.system.scheduler import PBSScheduler, SlurmScheduler
 
@@ -271,11 +271,7 @@ def required_slurm_settings(context: "SystemContext") -> set[str]:
     klass = context.settings_klass()
     if klass is None or not issubclass(klass, SlurmSettingsBase):
         return set()
-    return {
-        get_envfield_alias(klass, field_name)
-        for field_name, field in klass.model_fields.items()
-        if any(getattr(m, "min_length", 0) for m in field.metadata)
-    }
+    return klass.required_settings()
 
 
 def scheduler_section(

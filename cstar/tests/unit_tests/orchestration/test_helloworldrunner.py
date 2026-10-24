@@ -38,6 +38,8 @@ from cstar.orchestration.utils import (
     ENV_CSTAR_SLURM_MAX_WALLTIME,
     ENV_CSTAR_SLURM_QUEUE,
 )
+from cstar.system.manager import AnvilEnvSettings
+from cstar.system.scheduler import SlurmQOS, SlurmScheduler
 
 
 @pytest.fixture
@@ -432,6 +434,45 @@ def test_hw_runner_bp_only(
 
         assert "Hello," in result.stdout
         assert result.exit_code == 0
+
+
+def test_hello_world_blueprint_runs_without_slurm_settings(
+    hello_world_bp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Verify a step that submits no scheduler job starts on a SLURM system whose
+    required account and queue are unset, as a local-launcher step does on an
+    HPC login node before the user has run `cstar init`.
+
+    Parameters
+    ----------
+    hello_world_bp_path : Path
+        A fixture that stores an HW blueprint and returns the path.
+    monkeypatch : pytest.MonkeyPatch
+        Fixture used to unset the SLURM settings.
+    """
+    monkeypatch.delenv(ENV_CSTAR_SLURM_ACCOUNT, raising=False)
+    monkeypatch.delenv(ENV_CSTAR_SLURM_QUEUE, raising=False)
+    scheduler = SlurmScheduler(
+        queues=[SlurmQOS(name="wholenode", query_name="wholenode")],
+        primary_queue_name="wholenode",
+    )
+    with (
+        mock.patch(
+            "cstar.system.environment.CStarEnvironment.settings_klass",
+            AnvilEnvSettings,
+        ),
+        mock.patch(
+            "cstar.system.manager.CStarSystemManager.scheduler",
+            mock.PropertyMock(return_value=scheduler),
+        ),
+    ):
+        result = CliRunner().invoke(
+            app_run_blueprint, [str(hello_world_bp_path)], color=False
+        )
+
+    assert result.exit_code == 0, result.output
+    assert "Hello," in result.stdout
 
 
 @pytest.mark.parametrize("run_from_workplan_dir", [True, False])
