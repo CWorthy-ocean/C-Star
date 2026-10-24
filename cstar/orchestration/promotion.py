@@ -18,7 +18,7 @@ from enum import StrEnum
 from itertools import chain
 from pathlib import Path
 
-from cstar.applications.roms_marbl.file_system import RomsFileSystemManager
+from cstar.roms.file_system import RomsFileSystemManager
 from cstar.base.exceptions import CstarError
 from cstar.base.log import get_logger
 from cstar.execution.file_system import DirectoryManager, symlink_relative

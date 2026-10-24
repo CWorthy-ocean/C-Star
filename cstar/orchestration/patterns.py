@@ -20,7 +20,7 @@ import yaml
 from pydantic import Field, model_validator
 
 from cstar.applications.roms_marbl.models import APP_NAME
-from cstar.applications.roms_marbl.outputs import RestartFile, restart_timestamp
+from cstar.roms.outputs import RestartFile, restart_timestamp
 from cstar.applications.roms_marbl.transforms import (
     ContinuanceDirective,
     NestingDirective,

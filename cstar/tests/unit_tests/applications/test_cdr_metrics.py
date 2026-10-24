@@ -32,7 +32,7 @@ from cstar.applications.cdr_metrics import (
     source_sign_report,
 )
 from cstar.applications.core import ArtifactKind, RunnerRequest, get_application
-from cstar.applications.roms_marbl.outputs import CdrOutputFile
+from cstar.roms.outputs import CdrOutputFile
 from cstar.base.exceptions import CstarError
 from cstar.entrypoint.config import JobConfig, ServiceConfiguration
 from cstar.execution.handler import ExecutionStatus

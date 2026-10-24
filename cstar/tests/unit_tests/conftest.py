@@ -17,7 +17,7 @@ from unittest import mock
 import dotenv
 import pytest
 
-from cstar.applications.roms_marbl.file_system import RomsFileSystemManager
+from cstar.roms.file_system import RomsFileSystemManager
 from cstar.base.additional_code import AdditionalCode
 from cstar.base.discretization import Discretization
 from cstar.base.env import (

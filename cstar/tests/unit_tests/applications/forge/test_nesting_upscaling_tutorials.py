@@ -16,7 +16,7 @@ import yaml
 
 from cstar.applications.cdr_metrics import CdrDomain
 from cstar.applications.forge.blueprint import FORGE_BLUEPRINT_VERSION, ForgeBlueprint
-from cstar.applications.roms_marbl.outputs import RestartFile
+from cstar.roms.outputs import RestartFile
 from cstar.applications.roms_marbl.transforms import ContinuanceDirective
 from cstar.orchestration.models import Workplan
 from cstar.orchestration.serialization import deserialize

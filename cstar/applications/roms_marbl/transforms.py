@@ -5,9 +5,9 @@ from datetime import datetime
 from pathlib import Path
 
 from cstar.applications.core import ArtifactKind, Transform
-from cstar.applications.roms_marbl.file_system import RomsFileSystemManager
+from cstar.roms.file_system import RomsFileSystemManager
 from cstar.applications.roms_marbl.models import RomsMarblBlueprint
-from cstar.applications.roms_marbl.outputs import (
+from cstar.roms.outputs import (
     EXTRACT_ROLE,
     BoundaryFile,
     CarbonateSensitivityFile,

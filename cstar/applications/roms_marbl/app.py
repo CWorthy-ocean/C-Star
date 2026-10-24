@@ -12,7 +12,7 @@ from cstar.applications.core import (
     RunnerResult,
     register_application,
 )
-from cstar.applications.roms_marbl.file_system import (
+from cstar.roms.file_system import (
     GENERATED_NAMELIST_NAME,
     ROMS_EXECUTABLE_NAME,
     RomsFileSystemManager,
@@ -23,7 +23,7 @@ from cstar.applications.roms_marbl.migration import (
     RomsMarblSchemaAdapterV21V3,
 )
 from cstar.applications.roms_marbl.models import APP_NAME, RomsMarblBlueprint
-from cstar.applications.roms_marbl.outputs import (
+from cstar.roms.outputs import (
     OUTPUT_FILE_PATTERN,
     OUTPUT_STREAMS,
     warn_on_restart_start_date_mismatch,

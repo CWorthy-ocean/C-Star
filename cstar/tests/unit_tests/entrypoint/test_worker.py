@@ -12,7 +12,7 @@ import pytest
 
 from cstar.applications.core import RunnerRequest, RunnerResult, RunnerState
 from cstar.applications.roms_marbl.app import RomsMarblRunner, main
-from cstar.applications.roms_marbl.file_system import RomsFileSystemManager
+from cstar.roms.file_system import RomsFileSystemManager
 from cstar.applications.roms_marbl.models import RomsMarblBlueprint
 from cstar.applications.roms_marbl.transforms import ContinuanceDirective
 from cstar.base.env import get_env_item

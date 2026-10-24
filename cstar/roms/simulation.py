@@ -31,13 +31,13 @@ from cstar.applications.roms_marbl.adapter import (
     SurfaceForcingAdapter,
     TidalForcingAdapter,
 )
-from cstar.applications.roms_marbl.file_system import (
+from cstar.roms.file_system import (
     GENERATED_NAMELIST_NAME,
     ROMS_EXECUTABLE_NAME,
     RomsFileSystemManager,
 )
 from cstar.applications.roms_marbl.models import RomsMarblBlueprint
-from cstar.applications.roms_marbl.outputs import EXTRACT_ROOT_NAME, OUTPUT_ROOT_NAME
+from cstar.roms.outputs import EXTRACT_ROOT_NAME, OUTPUT_ROOT_NAME
 from cstar.base.additional_code import AdditionalCode
 from cstar.base.env import (
     ENV_CSTAR_DEBUG_BUILD_MODE,

@@ -11,7 +11,7 @@ from unittest import mock
 import pytest
 import requests
 
-from cstar.applications.roms_marbl.file_system import RomsFileSystemManager
+from cstar.roms.file_system import RomsFileSystemManager
 from cstar.base.env import ENV_CSTAR_DATA_HOME, ENV_CSTAR_RUNID
 from cstar.base.exceptions import CstarError
 from cstar.execution.file_system import (

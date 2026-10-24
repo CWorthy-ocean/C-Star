@@ -106,7 +106,7 @@ if TYPE_CHECKING:
     from collections.abc import Sequence
     from datetime import datetime
 
-    from cstar.applications.roms_marbl.outputs import CarbonateSensitivityFile
+    from cstar.roms.outputs import CarbonateSensitivityFile
 
 log = logging.getLogger(__name__)
 
@@ -216,7 +216,7 @@ def find_carbonate_sensitivity_files(
     """
     # Lazy: the file-name convention lives with the transforms, which pull in
     # the orchestration layer.
-    from cstar.applications.roms_marbl.outputs import CarbonateSensitivityFile
+    from cstar.roms.outputs import CarbonateSensitivityFile
 
     if not directory.is_dir():
         raise NotADirectoryError(f"not a directory: {directory}")

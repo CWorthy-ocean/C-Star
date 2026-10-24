@@ -87,7 +87,7 @@ from cstar.applications.core import (
     RunnerResult,
     register_application,
 )
-from cstar.applications.roms_marbl.outputs import CdrOutputFile
+from cstar.roms.outputs import CdrOutputFile
 from cstar.base.exceptions import CstarError
 from cstar.base.log import get_logger
 from cstar.base.utils import lazy_import

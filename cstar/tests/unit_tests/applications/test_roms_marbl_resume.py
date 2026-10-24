@@ -5,7 +5,7 @@ import pytest
 import xarray as xr
 import yaml
 
-from cstar.applications.roms_marbl.file_system import RomsFileSystemManager
+from cstar.roms.file_system import RomsFileSystemManager
 from cstar.applications.roms_marbl.models import RomsMarblBlueprint
 from cstar.applications.roms_marbl.resume import (
     RESUME_SUFFIX,

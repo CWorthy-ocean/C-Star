@@ -7,7 +7,7 @@ from unittest import mock
 import pytest
 from pydantic import ValidationError
 
-from cstar.applications.roms_marbl.file_system import RomsFileSystemManager
+from cstar.roms.file_system import RomsFileSystemManager
 from cstar.applications.roms_marbl.models import RomsMarblBlueprint
 from cstar.applications.roms_marbl.transforms import ContinuanceDirective
 from cstar.entrypoint.utils import (
