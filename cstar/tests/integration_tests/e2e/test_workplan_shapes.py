@@ -429,3 +429,29 @@ def test_rerun_after_the_run_directory_is_removed_runs_the_steps_again(
             assert sentinel["run_uuid"] == second_uuid, step
     finally:
         kill_run(run.state_home, run_id, run.steps)
+
+
+def test_rerun_by_workplan_name_after_the_run_directory_is_removed_is_refused(
+    shape_root: Path, cstar_shim: Path
+) -> None:
+    """Re-running a workplan without ``--run-id`` after its run directory was removed
+    is refused before scheduling, with the ``cstar admin clean`` that clears the run.
+    """
+    shape: dict[str, list[str]] = {"A": []}
+    run_id = slugify("shapes")  # the workplan's name, which is the derived run-id
+    run, returncode, output = schedule(shape_root, cstar_shim, run_id, shape)
+    try:
+        assert returncode == 0, output
+        shutil.rmtree(run.data_home / "workplan_runs" / run_id)
+
+        # a wide terminal keeps rich from wrapping the message inside its panel
+        env = {**run.env, "COLUMNS": "400"}
+        refused = run_cstar(
+            env, "workplan", "submit", str(shape_root / "workplan.yaml")
+        )
+        output = f"stdout:\n{refused.stdout}\nstderr:\n{refused.stderr}"
+        assert refused.returncode == 2, output
+        assert f"cstar admin clean --run-id {run_id}" in refused.stderr, output
+        assert not run.log("A").exists()
+    finally:
+        kill_run(run.state_home, run_id, run.steps)

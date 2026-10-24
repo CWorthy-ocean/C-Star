@@ -1423,7 +1423,17 @@ async def refuse_stale_run_state(run_id: str, root: Path) -> None:
 
     state_dir = StateDirectoryManager.run_state_dir(run_id=run_id)
     escape = f"pass {ARG_RUN_ID} <other-id> to start a new run"
-    if root.is_dir() and any(root.iterdir()):
+    record = await TrackingRepository().get_workplan_run(run_id)
+    elsewhere = record.output_path if record else None
+    if elsewhere and elsewhere.is_dir() and elsewhere.resolve() != root.resolve():
+        # the run lives on (under another data home): `admin clean` would remove it
+        msg = (
+            f"Run {run_id!r} is tracked in {elsewhere}, not {root}, and has step "
+            f"state in {state_dir}; this run would report its steps done without "
+            f"running them. Re-enter it under the data home it was started in, "
+            f"or {escape}"
+        )
+    elif root.is_dir() and any(root.iterdir()):
         # something of the run is left: `admin clean` would remove it too
         msg = (
             f"Run {run_id!r} has step state in {state_dir}, but its directory "

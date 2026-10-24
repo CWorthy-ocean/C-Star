@@ -1950,6 +1950,33 @@ async def test_build_dag_refuses_state_over_a_run_directory_left_without_its_fil
 
 
 @pytest.mark.asyncio
+async def test_build_dag_refuses_state_of_a_run_tracked_in_another_directory(
+    tmp_path: Path, mock_run_id: str, hello_world_bp_path: Path
+) -> None:
+    """Verify a run-id whose tracked run lives in another directory (another
+    data home) is refused naming that directory, without advice to
+    `admin clean` it, which would remove that run.
+    """
+    wp_path, _ = _build_guarded(tmp_path, mock_run_id, hello_world_bp_path)
+    _leave_sentinel(mock_run_id, "hello")
+    elsewhere = tmp_path / "other-data-home" / mock_run_id
+    elsewhere.mkdir(parents=True)
+    TrackingRepository().put_workplan_run_sync(
+        WorkplanRun(output_path=elsewhere, run_id=mock_run_id)
+    )
+
+    with (
+        mock.patch("cstar.orchestration.dag_runner.check_environment"),
+        pytest.raises(CstarExpectationFailed) as exc_info,
+    ):
+        await build_dag(wp_path, mock_run_id)
+
+    msg = str(exc_info.value)
+    assert f"tracked in {elsewhere}" in msg
+    assert "admin clean" not in msg
+
+
+@pytest.mark.asyncio
 async def test_build_dag_re_enters_a_run_directory_that_has_no_manifest(
     tmp_path: Path, mock_run_id: str, hello_world_bp_path: Path
 ) -> None:
