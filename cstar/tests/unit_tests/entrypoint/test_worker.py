@@ -45,7 +45,13 @@ from cstar.orchestration.utils import (
     ENV_CSTAR_SLURM_MAX_WALLTIME,
     ENV_CSTAR_SLURM_QUEUE,
 )
-from cstar.system.manager import AnvilEnvSettings
+from cstar.system.manager import (
+    AnvilEnvSettings,
+    DerechoSystemContext,
+    ExpanseSystemContext,
+    PerlmutterSystemContext,
+    SystemContext,
+)
 
 DEFAULT_LOOP_DELAY = 5
 DEFAULT_HEALTH_CHECK_FREQUENCY: int | None = None
@@ -398,6 +404,40 @@ def test_get_job_config_on_slurm_system(
 
     with mock.patch(
         "cstar.system.environment.CStarEnvironment.settings_klass", AnvilEnvSettings
+    ):
+        job_cfg = get_job_config()
+
+    assert (job_cfg.account_id, job_cfg.walltime, job_cfg.priority) == expected
+
+
+@pytest.mark.parametrize(
+    ("system_ctx", "expected"),
+    [
+        pytest.param(
+            PerlmutterSystemContext, ("m1234", "01:00:00", "debug"), id="perlmutter"
+        ),
+        pytest.param(
+            ExpanseSystemContext, ("m1234", "01:00:00", "debug"), id="expanse"
+        ),
+        pytest.param(DerechoSystemContext, ("", "", ""), id="derecho"),
+    ],
+)
+def test_get_job_config_by_system(
+    monkeypatch: pytest.MonkeyPatch,
+    system_ctx: type[SystemContext],
+    expected: tuple[str, str, str],
+) -> None:
+    """Verify the job config reads the SLURM settings on Perlmutter and Expanse,
+    and leaves them empty on Derecho (PBS), whose jobs then take the primary
+    queue and its maximum walltime.
+    """
+    monkeypatch.setenv(ENV_CSTAR_SLURM_ACCOUNT, "m1234")
+    monkeypatch.setenv(ENV_CSTAR_SLURM_MAX_WALLTIME, "01:00:00")
+    monkeypatch.setenv(ENV_CSTAR_SLURM_QUEUE, "debug")
+
+    with mock.patch(
+        "cstar.system.environment.CStarEnvironment.settings_klass",
+        system_ctx.settings_klass(),
     ):
         job_cfg = get_job_config()
 

@@ -19,7 +19,12 @@ from cstar.execution.scheduler_job import (
 )
 from cstar.orchestration.utils import ENV_CSTAR_SLURM_ACCOUNT, ENV_CSTAR_SLURM_QUEUE
 from cstar.system.environment import EnvSettingsBase
-from cstar.system.manager import AnvilEnvSettings, EljaEnvSettings
+from cstar.system.manager import (
+    AnvilEnvSettings,
+    EljaEnvSettings,
+    ExpanseEnvSettings,
+    PerlmutterEnvSettings,
+)
 from cstar.system.scheduler import (
     PBSQueue,
     PBSScheduler,
@@ -890,28 +895,40 @@ def slurm_system() -> Iterator[None]:
 
 
 @pytest.mark.parametrize(
-    ("account_key", "queue_name", "missing"),
+    ("settings_klass", "account_key", "queue_name", "missing"),
     [
-        pytest.param("", "test_queue", [ENV_CSTAR_SLURM_ACCOUNT], id="account"),
-        pytest.param("acct", "", [ENV_CSTAR_SLURM_QUEUE], id="queue"),
         pytest.param(
-            "", "", [ENV_CSTAR_SLURM_ACCOUNT, ENV_CSTAR_SLURM_QUEUE], id="both"
+            AnvilEnvSettings, "", "test_queue", [ENV_CSTAR_SLURM_ACCOUNT], id="account"
+        ),
+        pytest.param(AnvilEnvSettings, "acct", "", [ENV_CSTAR_SLURM_QUEUE], id="queue"),
+        pytest.param(
+            AnvilEnvSettings,
+            "",
+            "",
+            [ENV_CSTAR_SLURM_ACCOUNT, ENV_CSTAR_SLURM_QUEUE],
+            id="both",
+        ),
+        pytest.param(
+            ExpanseEnvSettings, "", "", [ENV_CSTAR_SLURM_ACCOUNT], id="expanse-account"
         ),
     ],
 )
 @pytest.mark.usefixtures("slurm_system")
 def test_create_scheduler_job_requires_slurm_settings(
+    settings_klass: type[EnvSettingsBase],
     account_key: str,
     queue_name: str,
     missing: list[str],
 ) -> None:
     """Verify a job is refused, naming every missing setting and `cstar init`, when
-    the system requires a SLURM account and queue and one is empty.
+    a setting the system requires is empty.
+
+    Anvil requires the account and the queue; Expanse only the account.
     """
     with (
         patch(
             "cstar.system.environment.CStarEnvironment.settings_klass",
-            AnvilEnvSettings,
+            settings_klass,
         ),
         pytest.raises(CstarError) as ex,
     ):
@@ -931,25 +948,27 @@ def test_create_scheduler_job_requires_slurm_settings(
 
 
 @pytest.mark.parametrize(
-    ("settings_klass", "account_key", "queue_name", "expected_queue"),
+    ("settings_klass", "account_key", "queue_name"),
     [
-        pytest.param(AnvilEnvSettings, "acct", "test_queue", "test_queue", id="set"),
-        pytest.param(AnvilEnvSettings, "acct", None, "test_queue", id="primary-q"),
-        pytest.param(EljaEnvSettings, "", "test_queue", "test_queue", id="no-acct"),
-        pytest.param(EnvSettingsBase, "", "test_queue", "test_queue", id="no-rules"),
+        pytest.param(AnvilEnvSettings, "acct", "test_queue", id="set"),
+        pytest.param(EljaEnvSettings, "", "test_queue", id="no-acct"),
+        pytest.param(EljaEnvSettings, "", "", id="elja-primary-q"),
+        pytest.param(ExpanseEnvSettings, "acct", "", id="expanse-primary-q"),
+        pytest.param(PerlmutterEnvSettings, "", "", id="perlmutter-primary-q"),
+        pytest.param(EnvSettingsBase, "", "", id="no-rules"),
     ],
 )
 @pytest.mark.usefixtures("slurm_system")
 def test_create_scheduler_job_with_required_settings(
     settings_klass: type[EnvSettingsBase],
     account_key: str,
-    queue_name: str | None,
-    expected_queue: str,
+    queue_name: str,
 ) -> None:
     """Verify a job is created when every setting the system requires is supplied.
 
     Elja does not use SLURM accounts, a system without SLURM settings requires
-    none, and a queue of `None` still selects the primary queue.
+    none, and an empty queue selects the primary queue where the system does not
+    require one.
     """
     with patch(
         "cstar.system.environment.CStarEnvironment.settings_klass", settings_klass
@@ -964,7 +983,26 @@ def test_create_scheduler_job_with_required_settings(
         )
 
     assert job.account_key == account_key
-    assert job.queue_name == expected_queue
+    assert job.queue_name == "test_queue"
+
+
+@pytest.mark.usefixtures("slurm_system")
+def test_create_scheduler_job_empty_walltime_uses_queue_maximum() -> None:
+    """Verify an empty walltime requests the queue's maximum walltime."""
+    with patch(
+        "cstar.system.environment.CStarEnvironment.settings_klass", EljaEnvSettings
+    ):
+        job = create_scheduler_job(
+            commands="echo Hello, World",
+            cpus=4,
+            nodes=1,
+            account_key="",
+            queue_name="",
+            walltime="",
+        )
+
+    assert job.queue_name == "test_queue"
+    assert job.walltime == "02:00:00"
 
 
 @pytest.mark.asyncio

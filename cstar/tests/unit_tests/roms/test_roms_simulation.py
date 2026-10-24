@@ -20,7 +20,7 @@ from cstar.base.external_codebase import ExternalCodeBase
 from cstar.base.feature import ENV_FF_DEVELOPER_MODE
 from cstar.base.input_dataset import InputDataset
 from cstar.execution.handler import ExecutionStatus
-from cstar.execution.scheduler_job import SlurmJob
+from cstar.execution.scheduler_job import PBSJob, SchedulerJob, SlurmJob
 from cstar.marbl.external_codebase import MARBLExternalCodeBase
 from cstar.orchestration.utils import ENV_CSTAR_SLURM_ACCOUNT, ENV_CSTAR_SLURM_QUEUE
 from cstar.pio.external_codebase import PIOExternalCodeBase
@@ -53,8 +53,21 @@ from cstar.roms.namelist import (
 )
 from cstar.roms.simulation import ROMSSimulation
 from cstar.system.environment import CStarEnvironment
-from cstar.system.manager import AnvilEnvSettings, get_sysmgr
-from cstar.system.scheduler import SlurmQOS, SlurmScheduler
+from cstar.system.manager import (
+    AnvilEnvSettings,
+    DerechoSystemContext,
+    EljaSystemContext,
+    ExpanseSystemContext,
+    PerlmutterSystemContext,
+    SystemContext,
+    get_sysmgr,
+)
+from cstar.system.scheduler import (
+    PBSScheduler,
+    SlurmQOS,
+    SlurmQueue,
+    SlurmScheduler,
+)
 
 # A complete, forge-produced runtime namelist used to back the
 # roms_runtime_settings tests (RomsNamelist is a strict 40-group schema).
@@ -2784,8 +2797,6 @@ class TestProcessingAndExecution:
 
         # Mock scheduler object
         mock_scheduler = mock.MagicMock()
-        mock_scheduler.primary_queue_name = "default_queue"
-        mock_scheduler.get_queue.return_value.max_walltime = "12:00:00"
         mock_scheduler.in_active_allocation = False
 
         with (
@@ -2819,7 +2830,8 @@ class TestProcessingAndExecution:
             mock_job_instance = mock.MagicMock()
             mock_create_job.return_value = mock_job_instance
 
-            # Call `run()` without explicitly passing `queue_name` and `walltime`
+            # without `queue_name` and `walltime`, `run()` passes them on empty
+            # for `create_scheduler_job` to resolve
             execution_handler = sim.run(account_key="some_key")
             mock_create_job.assert_called_once_with(
                 commands=f"{exp_mpi_prefix} -n 6 ./roms cstar_generated_roms.nml",
@@ -2828,10 +2840,11 @@ class TestProcessingAndExecution:
                 account_key="some_key",
                 run_path=sim.fs_manager.run_dir,
                 script_path=script_dir / "romstest.sh",
-                queue_name="default_queue",
-                walltime="12:00:00",
+                queue_name="",
+                walltime="",
                 output_file=sim.fs_manager.logs_dir / "romstest.out",
             )
+            mock_scheduler.get_queue.assert_not_called()
 
             mock_job_instance.submit.assert_called_once()
 
@@ -2883,6 +2896,83 @@ class TestProcessingAndExecution:
             ):
                 sim.run(account_key="", walltime="01:00:00", queue_name="")
             mock_submit.assert_not_called()
+
+    @pytest.mark.parametrize(
+        ("context", "account_key", "exp_queue", "exp_walltime"),
+        [
+            pytest.param(EljaSystemContext, "", "any_cpu", "2-00:00:00", id="elja"),
+            pytest.param(
+                ExpanseSystemContext, "acct", "compute", "2-00:00:00", id="expanse"
+            ),
+            pytest.param(
+                PerlmutterSystemContext, "", "regular", "2-00:00:00", id="perlmutter"
+            ),
+            pytest.param(DerechoSystemContext, "", "main", "12:00:00", id="derecho"),
+        ],
+    )
+    @mock.patch.object(
+        ROMSSimulation, "roms_runtime_settings", new_callable=mock.PropertyMock
+    )
+    def test_run_with_scheduler_unset_queue_uses_primary_queue(
+        self,
+        mock_runtime_settings,
+        stub_romssimulation,
+        stageddatacollection_remote_files,
+        context: type[SystemContext],
+        account_key: str,
+        exp_queue: str,
+        exp_walltime: str,
+    ):
+        """Tests that `run` submits to the system's primary queue, with that queue's
+        maximum walltime, when the step's queue and walltime are empty, on each
+        system that does not require a queue.
+        """
+        sim = stub_romssimulation
+        build_dir = sim.directory / "ROMS/compile_time_code"
+        sim.runtime_code._working_copy = stageddatacollection_remote_files()
+        scheduler = context.create_scheduler()
+        assert scheduler is not None
+
+        with (
+            mock.patch(
+                "cstar.system.manager.CStarSystemManager.scheduler",
+                new_callable=mock.PropertyMock,
+                return_value=scheduler,
+            ),
+            mock.patch.object(
+                type(scheduler),
+                "in_active_allocation",
+                new_callable=mock.PropertyMock,
+                return_value=False,
+            ),
+            mock.patch.object(
+                SlurmQueue,
+                "max_walltime",
+                new_callable=mock.PropertyMock,
+                return_value="2-00:00:00",
+            ),
+            mock.patch.object(
+                SchedulerJob, "_resolve_distribution", return_value=(6, 1, 6)
+            ),
+            mock.patch.object(
+                CStarEnvironment, "settings_klass", context.settings_klass()
+            ),
+            mock.patch.object(SlurmJob, "submit") as mock_slurm_submit,
+            mock.patch.object(PBSJob, "submit") as mock_pbs_submit,
+            mock.patch("pathlib.Path.rename", new_callable=mock.Mock),
+        ):
+            sim.exe_path = build_dir / "roms"
+            job = sim.run(account_key=account_key, walltime="", queue_name="")
+
+        assert isinstance(job, SchedulerJob)
+        assert job.queue_name == exp_queue
+        assert job.walltime == exp_walltime
+        submit = (
+            mock_pbs_submit
+            if isinstance(scheduler, PBSScheduler)
+            else mock_slurm_submit
+        )
+        submit.assert_called_once()
 
     def test_post_run_raises_if_called_before_run(self, stub_romssimulation):
         """Tests that `post_run` raises a `RuntimeError` if called before `run`.

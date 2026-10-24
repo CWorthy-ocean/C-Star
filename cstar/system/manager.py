@@ -581,6 +581,20 @@ class EljaSystemContext(SystemContext):
         return os.getenv("SLURM_CLUSTER_NAME", "") == EljaEnvSettings.CLUSTER_IDENTIFIER
 
 
+class ExpanseEnvSettings(SlurmSettingsBase):
+    """Environment variables required to execute a simulation on the *Expanse* system.
+
+    Expanse requires a project (account) on every job; an unset queue submits to
+    the primary `compute` partition.
+    """
+
+    SLURM_QUEUE: str = Field(default="", frozen=True)
+    """The SLURM queue name.
+
+    Overridden from SlurmSettingsBase to allow an empty queue.
+    """
+
+
 @register_sys_context
 @dataclass(frozen=True)
 class ExpanseSystemContext(SystemContext):
@@ -605,6 +619,12 @@ class ExpanseSystemContext(SystemContext):
             requires_task_distribution=True,
             documentation=cls.docs,
         )
+
+    @override
+    @classmethod
+    def settings_klass(cls) -> type[SlurmSettingsBase] | None:
+        """Return the type used to load settings required by the target system."""
+        return ExpanseEnvSettings
 
 
 @register_sys_context
@@ -657,6 +677,25 @@ class MacOSSystemContext(SystemContext):
         return None
 
 
+class PerlmutterEnvSettings(SlurmSettingsBase):
+    """Environment variables required to execute a simulation on the *Perlmutter* system.
+
+    NOTE: Perlmutter charges a job without an account to the user's default
+    project; an unset queue submits to the primary `regular` QOS.
+    """
+
+    SLURM_ACCOUNT: str = Field(default="", frozen=True, min_length=0)
+    """The SLURM account name.
+
+    Overridden from SlurmSettingsBase to allow an empty account.
+    """
+    SLURM_QUEUE: str = Field(default="", frozen=True)
+    """The SLURM queue name.
+
+    Overridden from SlurmSettingsBase to allow an empty queue.
+    """
+
+
 @register_sys_context
 @dataclass(frozen=True)
 class PerlmutterSystemContext(SystemContext):
@@ -685,6 +724,12 @@ class PerlmutterSystemContext(SystemContext):
             documentation=cls.docs,
             max_cpus_per_node=128,
         )
+
+    @override
+    @classmethod
+    def settings_klass(cls) -> type[SlurmSettingsBase] | None:
+        """Return the type used to load settings required by the target system."""
+        return PerlmutterEnvSettings
 
 
 class CStarSystemManager:

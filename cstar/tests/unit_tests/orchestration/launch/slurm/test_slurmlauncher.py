@@ -29,6 +29,7 @@ from cstar.orchestration.utils import (
     ENV_CSTAR_SLURM_QUEUE,
 )
 from cstar.system.environment import EnvSettingsBase
+from cstar.system.manager import EljaSystemContext
 from cstar.system.scheduler import SlurmPartition, SlurmScheduler
 
 
@@ -88,10 +89,11 @@ def test_slurmlauncher_adapt_step_no_overrides(
     ):
         job = SlurmLauncher.adapt_step(live_step, [])
 
-    # confirm that no job attributes have been overridden from the minimal spec
+    # confirm that no job attributes have been overridden from the minimal spec;
+    # an unset queue submits to the scheduler's primary queue
     assert minimum_spec.account_name == job.account_key
     assert minimum_spec.num_cpus == job.cpus
-    assert minimum_spec.queue_name == job.queue_name
+    assert (minimum_spec.queue_name or "default-q") == job.queue_name
     assert minimum_spec.max_walltime == job.walltime
 
     # confirm default behaviors of `create_scheduler_job` for unspecified spec
@@ -100,6 +102,39 @@ def test_slurmlauncher_adapt_step_no_overrides(
     assert minimum_spec.num_nodes is None
     assert job.nodes == 1
     assert minimum_spec.cpus_per_node == job.cpus_per_node
+
+
+@pytest.mark.usefixtures("read_yaml_intercept")
+def test_slurmlauncher_adapt_step_unset_queue_on_elja(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    wp_templates_dir: Path,
+) -> None:
+    """On Elja, where the queue is optional, a step with `CSTAR_SLURM_QUEUE` and
+    `CSTAR_SLURM_ACCOUNT` unset is submitted to the primary `any_cpu` partition.
+    """
+    monkeypatch.delenv(ENV_CSTAR_SLURM_ACCOUNT, raising=False)
+    monkeypatch.delenv(ENV_CSTAR_SLURM_QUEUE, raising=False)
+    wp_path = wp_templates_dir / "single_step.yaml"
+    workplan = deserialize(wp_path, Workplan)
+    live_step = LiveStep.from_step(workplan.steps[0])
+
+    mock_mgr = mock.Mock()
+    mock_mgr.environment.package_root = tmp_path
+    mock_mgr.environment.settings_klass = EljaSystemContext.settings_klass()
+    mock_mgr.scheduler = EljaSystemContext.create_scheduler()
+    mock_getsysmgr = mock.Mock(return_value=mock_mgr)
+
+    with (
+        mock.patch("cstar.execution.scheduler_job.get_sysmgr", mock_getsysmgr),
+        mock.patch.object(mock_mgr.scheduler, "get_queue", fake_get_queue),
+    ):
+        job = SlurmLauncher.adapt_step(live_step, [])
+
+    assert job.queue_name == "any_cpu"
+    assert job.account_key == ""
+    assert "--partition=any_cpu" in job.script
+    assert "--account" not in job.script
 
 
 @pytest.mark.usefixtures("read_yaml_intercept")

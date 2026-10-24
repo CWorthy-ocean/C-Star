@@ -14,12 +14,12 @@ Configure the scheduler
 Most settings are ``CSTAR_*`` variables; :doc:`configuration` lists them
 all and ``cstar env show`` prints the values in effect. Only the SLURM ones
 are required, and only to submit jobs: a workplan run with the SLURM launcher
-stops early if the account and queue are missing, and a step that submits its
-own job (a ROMS step run with the local launcher outside an allocation) is
-refused. Run ``cstar init`` once on the cluster to set them: it lists your
-SLURM associations and partitions when ``sacctmgr`` and ``sinfo`` are
-available, asks for the account, queue and default walltime, and writes them
-to ``~/.config/cstar/config.env``:
+stops early if a setting the system requires is missing, and a step that
+submits its own job (a ROMS step run with the local launcher outside an
+allocation) is refused. Run ``cstar init`` once on the cluster to set them:
+it lists your SLURM associations and partitions when ``sacctmgr`` and
+``sinfo`` are available, asks for the account, queue and default walltime,
+and writes them to ``~/.config/cstar/config.env``:
 
 .. code-block:: bash
 
@@ -47,6 +47,22 @@ These are the defaults for every step of a workplan; a step can override
 them, for example to send Forge steps to a general-purpose queue and ROMS
 steps to an MPI queue. See the compute overrides on the :doc:`workplans`
 page.
+
+What each system requires, and where a job goes when ``CSTAR_SLURM_QUEUE``
+is unset:
+
+- **Anvil, Bouchet**: the account and the queue are both required.
+- **Elja**: no account is used; an unset queue submits to ``any_cpu``.
+- **Expanse**: the account is required; an unset queue submits to ``compute``.
+- **Perlmutter**: an unset account charges your default NERSC project; an
+  unset queue submits to the ``regular`` QOS.
+- **Derecho** (PBS): the ``CSTAR_SLURM_*`` settings are not read. A job goes
+  to the ``main`` queue with that queue's maximum walltime; set
+  ``PBS_ACCOUNT`` (or ``PBS_ACCOUNT_DERECHO``) to the project code to charge.
+
+An unset ``CSTAR_SLURM_MAX_WALLTIME`` requests 48 hours, which is more than
+some queues allow (Bouchet's ``day`` queue, for one); set it to fit the queue
+you use.
 
 Where a blueprint runs
 ----------------------

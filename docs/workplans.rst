@@ -639,11 +639,11 @@ Execution
 .. include:: snippets/review-config.rst
 
 .. attention::
-    An error will occur if the SLURM **account** and **queue** are not configured when running on a HPC.
+    Submitting a job on an HPC system needs the SLURM settings the system requires: the **account** and **queue** on Anvil and Bouchet, the **account** on Expanse (see :doc:`hpc`). Run ``cstar init`` once on the system to write them to your configuration file, or export them.
 
 .. note::
 
-   On a system whose settings require a SLURM account and queue (such as Anvil and Bouchet), every step reads ``CSTAR_SLURM_ACCOUNT`` and ``CSTAR_SLURM_QUEUE`` when it starts, even a step that submits no job: each step runs ``cstar blueprint run``, which loads the system's SLURM settings. Under the SLURM launcher, values the workplan sets in ``compute_environment.slurm`` or ``compute_overrides`` are passed to each step. A step run as a local process, under ``launcher: local``, in a ``--pre-run``, or as a standalone ``cstar blueprint run``, sees only your environment and configuration file. Without the two settings there, the steps fail at start-up, and ``cstar run log <run-id> <step-name>`` shows ``Environment settings for the system could not be loaded``. Run ``cstar init`` once on the system to write them to your configuration file (see :doc:`hpc`), or export them.
+   A workplan run with the SLURM launcher checks these settings before it schedules any step, and stops if one the system requires is neither set in your environment or configuration file nor supplied by the workplan in ``compute_environment.slurm`` or every step's ``compute_overrides``. A step that submits no job of its own does not need them. A ROMS step run as a local process outside an allocation (under ``launcher: local`` on a login node, or as a standalone ``cstar blueprint run``) submits its model run itself, using only your environment and configuration file: a missing required setting fails the step after setup, build and pre-run, and ``cstar run log <run-id> <step-name>`` shows ``Unable to submit a job``, naming the setting. Where the queue is not required, an unset ``CSTAR_SLURM_QUEUE`` submits to the system's primary queue.
 
 
 .. tab-set::
