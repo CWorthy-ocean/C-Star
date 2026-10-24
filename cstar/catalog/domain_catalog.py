@@ -424,6 +424,7 @@ class DomainCatalog:
         legacy model.yml).
         """
         self._models = {}
+        self._archived_model_names: list[str] | None = None
         model_dir_root = self.catalog_root / "ModelSpec"
         try:
             for f in sorted(self._fs_glob_dual(model_dir_root, "*/model")):
@@ -713,6 +714,25 @@ class DomainCatalog:
     def model_names(self) -> list[str]:
         """Return a sorted list of available model names."""
         return sorted(self._models.keys())
+
+    @property
+    def archived_model_names(self) -> list[str]:
+        """Return a sorted list of model names whose spec is marked archived.
+
+        Read lazily on first access (a GitHub-backed catalog pays one fetch per
+        spec) and cached until the next model scan. An unreadable spec counts
+        as not archived, so it still fails loudly when selected.
+        """
+        if self._archived_model_names is None:
+            archived = []
+            for name in self.model_names:
+                try:
+                    if self.load_model_spec(name).archived:
+                        archived.append(name)
+                except Exception as exc:
+                    logger.debug("Could not read model spec '%s': %s", name, exc)
+            self._archived_model_names = archived
+        return list(self._archived_model_names)
 
     @property
     def domain_names(self) -> list[str]:
@@ -1586,6 +1606,14 @@ class LayeredCatalog:
     @property
     def model_names(self) -> list[str]:
         return sorted({n for store in self.stores for n in store.model_names})
+
+    @property
+    def archived_model_names(self) -> list[str]:
+        return sorted(
+            n
+            for n in self.model_names
+            if n in self._store_for("model", n).archived_model_names
+        )
 
     @property
     def domain_names(self) -> list[str]:

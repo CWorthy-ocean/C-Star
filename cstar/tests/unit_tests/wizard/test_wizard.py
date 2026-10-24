@@ -1869,9 +1869,90 @@ def test_use_pio_chk_default_seeded_from_model_spec():
     assert wiz.use_pio_chk.value is True
     assert wiz._model_default_use_pio() is True
 
+    wiz.show_archived_models.value = True
     wiz.model_dd.value = "cson_roms-marbl_v0.1"
     assert wiz.use_pio_chk.value is False
     assert wiz._model_default_use_pio() is False
+
+
+def test_model_dd_hides_archived_specs_by_default():
+    """The model dropdown lists only non-archived specs until "Show archived" is
+    checked; checking it adds the archived ones, labelled, in catalog order.
+    """
+    wiz = ForgeBlueprintWizard()
+    archived = wiz.catalog.archived_model_names
+    assert archived  # the bundled layer ships archived specs
+    assert wiz.show_archived_models.value is False
+    assert set(wiz._dd_values(wiz.model_dd)) == set(wiz.catalog.model_names) - set(
+        archived
+    )
+    assert wiz.model_dd.value == "roms-marbl-0.12-default"
+
+    wiz.show_archived_models.value = True
+    assert wiz._dd_values(wiz.model_dd) == list(wiz.catalog.model_names)
+    assert wiz.model_dd.value == "roms-marbl-0.12-default"
+    labels = {value: label for label, value in wiz.model_dd.options}
+    for name in archived:
+        assert labels[name] == f"{name} (bundled, archived)"
+    assert labels["roms-marbl-0.12-default"] == "roms-marbl-0.12-default (bundled)"
+
+    wiz.show_archived_models.value = False
+    assert set(wiz._dd_values(wiz.model_dd)) == set(wiz.catalog.model_names) - set(
+        archived
+    )
+
+
+def test_dd_options_labels_archived_names_homogeneously():
+    wiz = ForgeBlueprintWizard()
+    assert wiz._dd_options(["a", "b"], "model") == ["a", "b"]
+    options = wiz._dd_options(["a", "b"], "model", prefix=["<custom>"], archived=["b"])
+    assert options == [
+        ("<custom>", "<custom>"),
+        ("a", "a"),
+        ("b (archived)", "b"),
+    ]
+
+
+def test_unchecking_show_archived_keeps_an_archived_selection():
+    wiz = ForgeBlueprintWizard()
+    wiz.show_archived_models.value = True
+    wiz.model_dd.value = "roms-marbl-0.7-default"
+    overrides = {("param", "nt_passive"): 1}
+    wiz._overrides = dict(overrides)
+
+    wiz.show_archived_models.value = False
+
+    assert wiz.model_dd.value == "roms-marbl-0.7-default"
+    assert "roms-marbl-0.7-default" in wiz._dd_values(wiz.model_dd)
+    assert "roms-marbl-0.6-default" not in wiz._dd_values(wiz.model_dd)
+    # re-optioning is not a model switch: overrides are kept
+    assert wiz._overrides == overrides
+
+    wiz.model_dd.value = "roms-marbl-0.12-default"
+    wiz.show_archived_models.value = True
+    wiz.show_archived_models.value = False
+    assert "roms-marbl-0.7-default" not in wiz._dd_values(wiz.model_dd)
+
+
+def test_loading_a_blueprint_with_an_archived_model_selects_it(tmp_path):
+    wiz = ForgeBlueprintWizard()
+    wiz.start.value = date(2012, 1, 1)
+    wiz.end.value = date(2012, 1, 2)
+    wiz.show_archived_models.value = True
+    wiz.model_dd.value = "roms-marbl-0.7-default"
+    wiz._rebuild()
+    assert wiz.config is not None, wiz.derived.value
+    saved = tmp_path / "forge_blueprint.yaml"
+    wiz.config.to_yaml(saved)
+
+    wiz2 = ForgeBlueprintWizard()
+    assert wiz2.show_archived_models.value is False
+    wiz2.load_path.value = str(saved)
+    wiz2._on_load_path(None)
+
+    assert wiz2.show_archived_models.value is True
+    assert wiz2.model_dd.value == "roms-marbl-0.7-default"
+    assert "roms-marbl-0.7-default" in wiz2._dd_values(wiz2.model_dd)
 
 
 def test_use_pio_chk_emit_is_unconditional():
@@ -3221,6 +3302,7 @@ def test_advection_cppdefs_editable_only_for_models_that_declare_them():
     for key in ("parabolic_splines", "upstream_ts_land_curv"):
         assert "0.8.0" in wiz.editor._widgets[("cppdefs", key)][0].tooltip
 
+    wiz.show_archived_models.value = True
     wiz.model_dd.value = "roms-marbl-0.7-default"
     wiz._rebuild()
     assert "parabolic_splines" not in wiz.config.model_settings["cppdefs"]
@@ -3578,6 +3660,7 @@ def test_wizard_editor_cdr_output_streams_gated_by_model_spec_pin():
     wiz.start.value = date(2012, 1, 1)
     wiz.end.value = date(2012, 1, 2)
 
+    wiz.show_archived_models.value = True
     wiz.model_dd.value = "roms-marbl-0.6-default"
     wiz._rebuild()
     assert "cdr_lite_output" not in wiz.config.model_settings
@@ -3636,6 +3719,7 @@ def test_cdr_tracer_counts_survive_wizard_save_and_load_round_trip(tmp_path):
     wiz = ForgeBlueprintWizard()
     wiz.start.value = date(2012, 1, 1)
     wiz.end.value = date(2012, 1, 2)
+    wiz.show_archived_models.value = True
     wiz.model_dd.value = "roms-marbl-0.7-default"
     wiz._overrides[("param", "nt_cdr_oae")] = 2
     wiz._overrides[("param", "nt_cdr_dor")] = 1

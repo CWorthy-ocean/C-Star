@@ -39,7 +39,11 @@
 # ana_tides) are real, still-relevant model defaults. `pipe_frc` stays here in full:
 # there is no pipe forcing item or generation path, so it has no other spec to
 # live in.
+#
+# `archived` (bool) hides the spec from the wizard's model dropdown unless "Show
+# archived" is checked; it stays loadable and usable by blueprints that name it.
 
+archived: true
 bgc_mode: marbl  # marbl|none -- prepopulates the wizard; resolver derives cppdefs.marbl from it
 use_pio: false  # prepopulates the wizard's PIO checkbox; resolver derives cppdefs.use_pio from it
 

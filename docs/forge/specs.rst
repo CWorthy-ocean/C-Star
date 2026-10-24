@@ -103,6 +103,14 @@ A ``model.yaml`` has this shape:
    from the generated CDR forcing at build time; see
    :doc:`../developers/forge_internals`.
 
+``archived``
+   Optional, default ``false``. An archived spec stays fully usable: blueprints
+   that name it load and run unchanged, and it appears in catalog listings.
+   The only effect is that the wizard's model dropdown hides it unless
+   "Show archived" is checked, so a catalog can retire a spec from day-to-day
+   choice without breaking blueprints that compose it. A spec saved from the
+   wizard is not archived, even when its base was.
+
 ``code``
    The repositories to build, each a ``location`` with a ``commit`` or
    ``branch``, and the render templates: the compile-time template that
@@ -144,6 +152,13 @@ constant-iron option;
 ``cdr_lite`` mode's minimum), ``pio-dev`` tracks
 ucla-roms ``main`` with PIO enabled, and ``cson_roms-marbl_v0.1`` is the
 configuration the toy domain and the example blueprint use.
+
+``roms-marbl-0.3-default`` through ``roms-marbl-0.8-default`` and
+``cson_roms-marbl_v0.1`` are marked ``archived: true``. They remain
+loadable, and blueprints that name them keep working, but the wizard's model
+dropdown lists them only when "Show archived" is checked (loading a blueprint
+that uses one checks the box for you). ``archived`` works the same way in a
+spec of your own catalog.
 
 .. literalinclude:: ../../cstar/catalog/bundled/ModelSpec/roms-marbl-0.12-default/model.yaml
    :language: yaml
