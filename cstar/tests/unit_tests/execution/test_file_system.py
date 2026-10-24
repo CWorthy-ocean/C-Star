@@ -213,7 +213,58 @@ def test_blueprint_run_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> N
 
     actual = StateDirectoryManager.blueprint_run_dir("roms_marbl", "NA 8x8 / Test")
 
-    assert actual == tmp_path / "blueprint_runs" / "roms_marbl" / "na-8x8-test"
+    assert actual == tmp_path / "blueprint_runs" / "ucla_roms" / "na-8x8-test"
+
+
+@pytest.mark.parametrize(
+    ("existing", "expected"),
+    [
+        pytest.param([], "ucla_roms/my-run", id="nothing-exists"),
+        pytest.param(["roms_marbl/my-run"], "roms_marbl/my-run", id="legacy-run-kept"),
+        pytest.param(
+            ["roms_marbl/my-run", "ucla_roms/my-run"],
+            "ucla_roms/my-run",
+            id="canonical-wins",
+        ),
+        pytest.param(
+            ["roms_marbl/other-run"], "ucla_roms/my-run", id="legacy-other-run-ignored"
+        ),
+    ],
+)
+@pytest.mark.parametrize("application", ["ucla_roms", "roms_marbl"])
+def test_blueprint_run_dir_legacy_application_dir(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    application: str,
+    existing: list[str],
+    expected: str,
+) -> None:
+    """A run made under an earlier application name is found where it ran.
+
+    The application is canonicalised first, so the earlier name resolves
+    exactly as the current one.
+    """
+    monkeypatch.setenv(ENV_CSTAR_DATA_HOME, str(tmp_path))
+    for rel_path in existing:
+        (tmp_path / "blueprint_runs" / rel_path).mkdir(parents=True)
+
+    actual = StateDirectoryManager.blueprint_run_dir(application, "My Run")
+
+    assert actual == tmp_path / "blueprint_runs" / expected
+
+
+def test_blueprint_run_dir_legacy_file_is_not_a_run(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A stray file at the earlier location is not adopted as a run directory."""
+    monkeypatch.setenv(ENV_CSTAR_DATA_HOME, str(tmp_path))
+    legacy_parent = tmp_path / "blueprint_runs" / "roms_marbl"
+    legacy_parent.mkdir(parents=True)
+    (legacy_parent / "my-run").write_text("not a directory")
+
+    actual = StateDirectoryManager.blueprint_run_dir("ucla_roms", "my-run")
+
+    assert actual == tmp_path / "blueprint_runs" / "ucla_roms" / "my-run"
 
 
 def test_data_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
