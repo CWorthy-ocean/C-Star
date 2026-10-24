@@ -100,7 +100,7 @@ def header_html(
     title: str = PAGE_TITLE,
     subtitle: str = (
         "Assemble a reproducible <code>forge_blueprint.yaml</code> for a "
-        "ROMS-MARBL regional domain"
+        "UCLA-ROMS regional domain"
     ),
 ) -> str:
     """The logo + title header bar (also sets the favicon/title in Voila)."""

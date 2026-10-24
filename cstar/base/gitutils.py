@@ -37,9 +37,17 @@ def _pull(local_path: str | Path) -> None:
     ----------
     local_path : str
         The path to a local directory containing a cloned repository.
+
+    Notes
+    -----
+    Automatic maintenance is switched off: `git pull` otherwise ends by starting
+    `git maintenance run --auto` in the background, which goes on writing into the
+    repository (e.g. a commit-graph) after `pull` returns. The repository cache is
+    copied with `cp` right after it is pulled, and a file renamed under `cp` fails
+    the copy.
     """
     _run_cmd(
-        f"git -C {local_path} pull",
+        f"git -C {local_path} -c maintenance.auto=false -c gc.auto=0 pull",
         msg_pre=f"Pulling latest to `{local_path}`",
         msg_post=f"Pulled latest in {local_path}",
         msg_err=f"Error when pulling latest changes to {local_path}",

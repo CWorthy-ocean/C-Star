@@ -8,7 +8,7 @@ parent grid, a parent rerun that reads it, and the CDR metrics of the child and 
 combined. It is nine steps and compiles ROMS with ParallelIO three times, so a run takes
 about ten minutes on a 10-core laptop.
 
-As in the e2e tier, ``cstar workplan run`` only schedules: each step is a detached
+As in the e2e tier, ``cstar workplan submit`` only schedules: each step is a detached
 ``sh`` proxy that calls the ``cstar`` executable on ``PATH``, and a shim pins that to
 this checkout. The module polls the step sentinels until all nine are terminal.
 """
@@ -30,6 +30,10 @@ from cstar.applications.cdr_metrics import (
     DOMAINS_FIGURE_FILENAME,
     FIGURE_FILENAME,
     METRICS_FILENAME,
+)
+from cstar.applications.upscaler import (
+    USCL_WINDOWS_FROM_BOUNDS,
+    USCL_WINDOWS_INFERRED,
 )
 from cstar.base.utils import slugify
 from cstar.orchestration.launch.local import find_timeout_exe
@@ -102,6 +106,8 @@ REGISTRY_SOURCES = {
 """The pinned registry file that stands in for each source the example's Forge downloads."""
 REGISTRY_GLORYS_START = "2012-01-01T12:00:00"
 """The first record of the registry's GLORYS extract, where a run with initial conditions starts."""
+USCL_BOUNDARIES = ("north", "south", "east", "west")
+"""The sides of the child that can carry an ``ALK_add_<side>`` export in ``_uscl``."""
 MISSING_TOOLS = [
     tool
     for tool, found in {
@@ -231,7 +237,7 @@ def nesting_run(
 ) -> Iterator[NestingRun]:
     """Schedule the workplan once for the module and wait for all steps to finish.
 
-    Prints the wall time from ``workplan run`` to the last step's sentinel; ``-s``
+    Prints the wall time from ``workplan submit`` to the last step's sentinel; ``-s``
     shows it.
 
     Yields
@@ -257,7 +263,7 @@ def nesting_run(
 def _schedule_and_wait(
     integration_test_data: dict[str, Path], shim: Path, root: Path
 ) -> NestingRun:
-    """Run ``cstar workplan run`` on the example and poll the sentinels to the end.
+    """Run ``cstar workplan submit`` on the example and poll the sentinels to the end.
 
     Returns
     -------
@@ -268,12 +274,12 @@ def _schedule_and_wait(
     env = make_cli_env(root, shim)
 
     started = time.monotonic()
-    proc = run_cstar(env, "workplan", "run", str(workplan), "--run-id", RUN_ID)
+    proc = run_cstar(env, "workplan", "submit", str(workplan), "--run-id", RUN_ID)
     data_home = root / "data"
     output = f"stdout:\n{proc.stdout}\nstderr:\n{proc.stderr}"
     if proc.returncode != 0:
         tails = run_log_tails(data_home, RUN_ID)
-        pytest.fail(f"workplan run exited {proc.returncode}\n{output}\n{tails}")
+        pytest.fail(f"workplan submit exited {proc.returncode}\n{output}\n{tails}")
     assert SCHEDULED_MESSAGE in proc.stdout, output
 
     statuses = wait_for_terminal(
@@ -314,6 +320,52 @@ def alk_profile(ds: "xr.Dataset") -> "xr.DataArray":
     """
     profile = ds["cdr_trcflx_profile"]
     return profile.isel({profile.dims[2]: 0})
+
+
+def _alk_source_total(path: Path) -> "np.ndarray":
+    """The ``ALK_source`` of the ``_cdr`` file ``path`` summed over the domain, per record."""
+    with open_dataset(path) as ds:
+        return ds["ALK_source"].sum(("s_rho", "eta_rho", "xi_rho"), skipna=False).values
+
+
+def child_export(nesting_run: NestingRun) -> "np.ndarray":
+    """The child's ALK export at each ``_uscl`` record, summed over its open boundaries.
+
+    The sum runs over every dimension but time, of ``ALK_add_<side>`` for each side the
+    child writes. These are the per-cell rates in meq/s that the upscaler copies into
+    ``cdr_trcflx_profile``, so the sum is comparable with ``alk_profile`` summed over
+    its depth and profile axes. The files are read as the upscaler reads them, with
+    fill values masked.
+    """
+    import xarray as xr
+
+    records = []
+    for path in nesting_run.outputs("child", "*_uscl.*.nc"):
+        with xr.open_dataset(path) as ds:
+            exports = [
+                ds[name].sum([d for d in ds[name].dims if d != "time"], skipna=False)
+                for name in (f"ALK_add_{side}" for side in USCL_BOUNDARIES)
+                if name in ds
+            ]
+            assert exports, f"{path.name} has no ALK_add_<side> variable"
+            records.append(sum(exports).values)
+    return np.concatenate(records)
+
+
+def child_uscl_times(nesting_run: NestingRun) -> dict[str, "np.ndarray"]:
+    """The child's ``_uscl`` ``ocean_time`` (s), and ``avg_begin_time``/``avg_end_time`` if the files carry them.
+
+    Each series is concatenated over the files, in order, as the upscaler reads them. The
+    window bounds are left out for the files of ucla-roms 0.12.0 and earlier.
+    """
+    names = ("ocean_time", "avg_begin_time", "avg_end_time")
+    series: dict[str, list[np.ndarray]] = {}
+    for path in nesting_run.outputs("child", "*_uscl.*.nc"):
+        with open_dataset(path) as ds:
+            for name in names:
+                if name in ds.variables:
+                    series.setdefault(name, []).append(ds[name].values)
+    return {name: np.concatenate(values) for name, values in series.items()}
 
 
 def child_start_days() -> float:
@@ -372,16 +424,19 @@ def test_upscaled_forcing_is_cdf5(nesting_run: NestingRun) -> None:
 
 
 def test_upscaled_forcing_time_and_flux(nesting_run: NestingRun) -> None:
-    """``cdr_time`` increases from the child's start, and the ALK flux is finite and non-zero."""
+    """``cdr_time`` increases from the child's start, and the ALK flux is finite, non-zero and closed by a zero record."""
     (path,) = nesting_run.outputs("upscale", "upscaled_cdr.nc")
     with open_dataset(path) as ds:
         cdr_time = ds["cdr_time"].values
         alk_flux = alk_profile(ds).values
     assert np.all(np.diff(cdr_time) > 0), cdr_time
-    # a 1e-6 day tolerance is 0.09 s; the default relative one is minutes
+    # cdr_time holds the start of each hour the flux covers, so the first is the child's
+    # start; a 1e-6 day tolerance is 0.09 s, where the default relative one is minutes
     assert cdr_time[0] == pytest.approx(child_start_days(), rel=0, abs=1e-6)
     assert np.isfinite(alk_flux).all()
     assert np.abs(alk_flux).max() > 0
+    # the file ends with a closing record of zeros: cdr_time[-1] is the end of the last hour
+    assert not alk_flux[-1].any()
 
 
 def test_parent_up_wrote_cdr_source(nesting_run: NestingRun) -> None:
@@ -398,30 +453,31 @@ def test_parent_up_wrote_cdr_source(nesting_run: NestingRun) -> None:
 def test_parent_up_injects_the_upscaled_alk_flux(nesting_run: NestingRun) -> None:
     """``parent_up``'s ``ALK_source``, summed over the domain, matches the file's ALK flux record by record.
 
-    ``parent_up`` reads ``upscaled_cdr.nc`` without time interpolation: it holds each
-    hourly record from its time stamp, so the flux enters an hour after the hour it
-    averages and the last record is never used. So the injected alkalinity is compared
-    with every record but the last. Both are hourly rates in meq/s. Each record must
-    agree to ``CONSERVATION_RTOL``, with an absolute floor of that fraction of the
-    largest flux because the first record is zero and a ratio of it is undefined.
+    ``parent_up`` reads ``upscaled_cdr.nc`` without time interpolation: ROMS holds each
+    hourly record from its time stamp. The upscaler stamps each record at the start of
+    the hour it covers, so every record but the last is applied in its own hour. The last
+    is the all-zero closing record, which ends the final hour, and ``parent_up`` stops
+    there. So the injected alkalinity is compared with every record but the last. Both
+    are hourly rates in meq/s. Each record must agree to ``CONSERVATION_RTOL``, with an
+    absolute floor of that fraction of the largest flux because hours with next to no
+    flux, such as the first hours after the release starts, have no usable ratio.
 
     ucla-roms 0.11.0 and later conserve the flux (``remap_src_to_grid`` rescaled it
-    before, so 0.10.1 injects about 1 % less here), which this checks.
+    before, so 0.10.1 injects about 1 % less here), which this checks. That the file's
+    records are the right hours of the child's export is checked by
+    ``test_parent_up_injects_the_childs_export_in_the_same_hour``.
     """
     (upscaled,) = nesting_run.outputs("upscale", "upscaled_cdr.nc")
     with open_dataset(upscaled) as ds:
         flux = alk_profile(ds).sum(("s_rho", "ncdr_prof"), skipna=False).values
-    sources = []
-    for path in nesting_run.outputs("parent_up", "*_cdr.*.nc"):
-        with open_dataset(path) as ds:
-            sources.append(
-                ds["ALK_source"]
-                .sum(("s_rho", "eta_rho", "xi_rho"), skipna=False)
-                .values
-            )
-    injected = np.concatenate(sources)
+    injected = np.concatenate(
+        [
+            _alk_source_total(path)
+            for path in nesting_run.outputs("parent_up", "*_cdr.*.nc")
+        ]
+    )
 
-    # parent_up runs to the child's end, one hourly record for each held flux record
+    # parent_up runs to the child's end: one hourly record for each flux record but the closing one
     assert len(injected) == len(flux) - 1, (len(injected), len(flux))
     np.testing.assert_allclose(
         injected,
@@ -429,6 +485,63 @@ def test_parent_up_injects_the_upscaled_alk_flux(nesting_run: NestingRun) -> Non
         rtol=CONSERVATION_RTOL,
         atol=CONSERVATION_RTOL * np.abs(flux).max(),
     )
+
+
+def test_parent_up_injects_the_childs_export_in_the_same_hour(
+    nesting_run: NestingRun,
+) -> None:
+    """In each hour, ``parent_up`` injects the alkalinity the child exported in that hour.
+
+    This ties ``parent_up`` to the child's own ``_uscl`` output, which the record-by-record
+    comparison with ``upscaled_cdr.nc`` cannot: that one passes when the upscaler stamps
+    every record an hour late. ``ALK_add_<side>`` is the child's export across each side,
+    summed here over all its cells and depths. A ``_uscl`` record is the average over the
+    hour that ends at its stamp, and ucla-roms 0.12.0 and earlier also write a start-up
+    sample before the first hour. The alignment is decided from the child's own ``_uscl``
+    files, not from what the upscaler wrote about them:
+
+    - no ``avg_begin_time`` in ``_uscl``: the first record is the start-up sample, so
+      record ``j + 1`` is hour ``j``, and ``cdr_time`` is the files' ``ocean_time``.
+    - ``avg_begin_time``/``avg_end_time`` in ``_uscl``: there is no start-up sample, so
+      record ``j`` is hour ``j``, and ``cdr_time`` is the window starts then the last end.
+
+    ``upscaled_cdr.nc`` must agree on both counts: its ``uscl_windows`` attribute names
+    the same alignment, and its ``cdr_time`` is the one given above, within a 1e-6 day
+    tolerance. Every hour must then agree to ``CONSERVATION_RTOL``, with the same
+    absolute floor as the record-by-record test, and so must the totals. A one-hour lag
+    would not: the export changes from hour to hour while the release is on.
+    """
+    times = child_uscl_times(nesting_run)
+    has_bounds = "avg_begin_time" in times
+    first_window_record = 0 if has_bounds else 1
+    (upscaled,) = nesting_run.outputs("upscale", "upscaled_cdr.nc")
+    with open_dataset(upscaled) as ds:
+        windows = ds.attrs["uscl_windows"]
+        cdr_time = ds["cdr_time"].values
+
+    assert windows == (
+        USCL_WINDOWS_FROM_BOUNDS if has_bounds else USCL_WINDOWS_INFERRED
+    )
+    if has_bounds:
+        expected_time = np.append(times["avg_begin_time"], times["avg_end_time"][-1])
+    else:
+        expected_time = times["ocean_time"]
+    assert len(cdr_time) == len(expected_time), (len(cdr_time), len(expected_time))
+    np.testing.assert_allclose(cdr_time, expected_time / 86400, rtol=0, atol=1e-6)
+
+    injected = np.concatenate(
+        [
+            _alk_source_total(path)
+            for path in nesting_run.outputs("parent_up", "*_cdr.*.nc")
+        ]
+    )
+    exported = child_export(nesting_run)[first_window_record:]
+
+    assert len(injected) == len(exported), (windows, len(injected), len(exported))
+    assert np.abs(exported).max() > 0
+    atol = CONSERVATION_RTOL * np.abs(exported).max()
+    np.testing.assert_allclose(injected, exported, rtol=CONSERVATION_RTOL, atol=atol)
+    assert injected.sum() == pytest.approx(exported.sum(), rel=CONSERVATION_RTOL)
 
 
 def test_cdr_metrics_wrote_its_outputs(nesting_run: NestingRun) -> None:

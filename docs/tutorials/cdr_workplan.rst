@@ -107,9 +107,9 @@ after them adds one idea.
 the one ``make_spinup`` writes, but ``blueprint_overrides`` changes one value
 in it before the model runs: the time step is halved, to resolve the
 adjustment from the reanalysis initial state more carefully. The override
-keys follow the ROMS-MARBL blueprint: ``namelist_overrides`` is keyed by
+keys follow the UCLA-ROMS blueprint: ``namelist_overrides`` is keyed by
 namelist group and setting, and ``runtime_params`` would hold the run window
-(see :doc:`../blueprints/roms_marbl`). The blueprint itself is not edited;
+(see :doc:`../blueprints/ucla_roms`). The blueprint itself is not edited;
 the overrides are applied to a copy when the step starts, and that copy is
 kept in the step's ``work`` directory. The spin-up leaves behind a restart
 file at the end of 2012-01-01.
@@ -147,7 +147,7 @@ Run it
 .. code-block:: console
 
    cstar workplan check workplan_cdr.yaml
-   cstar workplan run workplan_cdr.yaml
+   cstar workplan submit workplan_cdr.yaml
 
 Then follow it as on the :doc:`previous page <workplan>`:
 

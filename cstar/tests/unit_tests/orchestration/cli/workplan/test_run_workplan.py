@@ -1,6 +1,7 @@
 import asyncio
 import json
 import os
+import shutil
 import typing as t
 from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
@@ -14,17 +15,20 @@ from typer.testing import CliRunner
 from cstar.applications.core import get_application
 from cstar.applications.hello_world import HelloWorldApplication
 from cstar.base.env import (
-    ENV_CSTAR_CLI_DRY_RUN,
     ENV_CSTAR_DATA_HOME,
     ENV_CSTAR_DISABLE_MIGRATION,
     ENV_CSTAR_LOG_LEVEL,
     ENV_CSTAR_RUNID,
     ENV_CSTAR_STATE_HOME,
     FLAG_ON,
+    REMOVED_SETTINGS,
+    capture_environment,
+    load_user_config,
 )
 from cstar.base.exceptions import CstarExpectationFailed
 from cstar.cli.common import normalize_runid
 from cstar.cli.workplan.run import (
+    COMMAND_SUBMIT,
     app,
     auto_compose,
     get_run_summary_display,
@@ -40,15 +44,16 @@ from cstar.orchestration.dag_runner import (
     NoPreparableStepsError,
     get_launcher,
     original_workplan_backup,
+    prepare_workplan,
 )
 from cstar.orchestration.launch.local import LocalHandle
 from cstar.orchestration.launch.slurm import SlurmHandle, SlurmLauncher
 from cstar.orchestration.manifest import (
-    ATTEMPT_JSON_WORKPLAN_NAME,
     ATTEMPT_WORKPLAN_NAME,
     RUN_MANIFEST_NAME,
     Attempt,
     RunManifest,
+    WorkplanIdentity,
     create_attempt_dir,
     write_run_manifest,
 )
@@ -60,11 +65,15 @@ from cstar.orchestration.models import (
     Workplan,
 )
 from cstar.orchestration.orchestration import LiveStep, LiveWorkplan, Planner, Status
-from cstar.orchestration.serialization import deserialize, serialize
+from cstar.orchestration.serialization import (
+    deserialize,
+    serialize,
+)
 from cstar.orchestration.state import StateRepository
-from cstar.orchestration.tracking import KEY_ATTACHED, TrackingRepository, WorkplanRun
+from cstar.orchestration.tracking import TrackingRepository, WorkplanRun
 from cstar.orchestration.utils import ENV_CSTAR_SLURM_ACCOUNT, ENV_CSTAR_SLURM_QUEUE
 from cstar.system.environment import EnvSettingsBase, SlurmSettingsBase
+from cstar.tests.unit_tests.orchestration.manifest_runs import write_identity
 
 
 def _slurm_launcher(
@@ -74,6 +83,38 @@ def _slurm_launcher(
     return SlurmLauncher()
 
 
+def _place_transformed(workplan_path: Path, output_path: Path, run_id: str) -> Path:
+    """Make `output_path` the run directory of a run of `workplan_path`.
+
+    Its manifest names `workplan_path`, and `<stem>_transformed.yaml` beside it
+    is a copy of the workplan when that exists, an empty file when not. A manifest
+    the test already wrote there is kept.
+    """
+    if not (output_path / RUN_MANIFEST_NAME).exists():
+        write_identity(output_path, run_id, workplan=workplan_path)
+    transformed = output_path / f"{workplan_path.stem}_transformed.yaml"
+    if workplan_path.is_file() and not transformed.exists():
+        shutil.copy(workplan_path, transformed)
+    transformed.touch()
+    return transformed
+
+
+def _scheduled_run(wp_path: Path, run_id: str) -> WorkplanRun:
+    """The record of a run of the workplan at `wp_path` scheduled into the data home.
+
+    The run directory holds the manifest naming `wp_path` and its transformed
+    workplan, so the record derives its workplan paths.
+    """
+    output_path = StateDirectoryManager.data_dir(run_id)
+    _place_transformed(wp_path, output_path, run_id)
+    return WorkplanRun(
+        output_path=output_path,
+        run_id=run_id,
+        environment={},
+        user_variables={},
+    )
+
+
 async def fake_build_and_run_dag(
     wp_path: Path,
     run_id: str,
@@ -81,14 +122,7 @@ async def fake_build_and_run_dag(
     clobber_steps: list[str] | None = None,
     pre_run: bool = False,
 ) -> WorkplanRun:
-    return WorkplanRun(
-        workplan_path=wp_path,
-        trx_workplan_path=wp_path,
-        output_path=wp_path.parent,
-        run_id=run_id,
-        environment={},
-        user_variables={},
-    )
+    return _scheduled_run(wp_path, run_id)
 
 
 def test_workplan_run_file_dne(
@@ -918,14 +952,7 @@ def test_workplan_run_default_run_id(
     runner = CliRunner()
 
     mock_build_and_run_dag = mock.AsyncMock(
-        return_value=WorkplanRun(
-            workplan_path=wp_path,
-            trx_workplan_path=wp_path,
-            output_path=wp_path.parent,
-            run_id=exp_default_run_id,
-            environment={},
-            user_variables={},
-        )
+        return_value=_scheduled_run(wp_path, exp_default_run_id)
     )
 
     with mock.patch("cstar.cli.workplan.run.build_and_run_dag", mock_build_and_run_dag):
@@ -994,15 +1021,10 @@ def test_workplan_run_reload_invokes_run_dag_not_build_and_run_dag(
     wp = deserialize(wp_path, Workplan)
     live_steps = [LiveStep.from_step(step) for step in wp.steps]
     lwp = LiveWorkplan(**wp.model_dump(exclude={"steps"}), steps=live_steps)
-    trx_path = tmp_path / f"live-{wp_path.name}"
+    trx_path = tmp_path / f"{wp_path.stem}_transformed.yaml"
     assert serialize(trx_path, lwp), "serializing live workplan failed in test"
 
-    fake_run_result = WorkplanRun(
-        workplan_path=wp_path,
-        trx_workplan_path=trx_path,
-        output_path=tmp_path,
-        run_id=run_id,
-    )
+    fake_run_result = _recorded_run(run_id, wp_path, tmp_path)
 
     with (
         mock.patch(
@@ -1050,11 +1072,9 @@ def test_workplan_run_reload_refuses_unusable_external_dependency(
     lwp = LiveWorkplan(
         **external_workplan.model_dump(exclude={"steps"}), steps=live_steps
     )
-    trx_path = tmp_path / "consumer-trx.yaml"
+    trx_path = tmp_path / "consumer_transformed.yaml"
     assert serialize(trx_path, lwp)
     fake_run_result = WorkplanRun(
-        workplan_path=trx_path,
-        trx_workplan_path=trx_path,
         output_path=tmp_path,
         run_id=mock_run_id,
     )
@@ -1096,18 +1116,13 @@ def test_workplan_run_resume_with_path_reloads_by_derived_run_id(
     wp = deserialize(wp_path, Workplan)
     live_steps = [LiveStep.from_step(step) for step in wp.steps]
     lwp = LiveWorkplan(**wp.model_dump(exclude={"steps"}), steps=live_steps)
-    trx_path = tmp_path / f"live-{wp_path.name}"
+    trx_path = tmp_path / f"{wp_path.stem}_transformed.yaml"
     assert serialize(trx_path, lwp), "serializing live workplan failed in test"
     assert serialize(original_workplan_backup(wp_path, tmp_path), wp), (
         "serializing the original workplan backup failed in test"
     )
 
-    fake_run_result = WorkplanRun(
-        workplan_path=wp_path,
-        trx_workplan_path=trx_path,
-        output_path=tmp_path,
-        run_id=run_id,
-    )
+    fake_run_result = _recorded_run(run_id, wp_path, tmp_path)
 
     with (
         mock.patch(
@@ -1165,18 +1180,13 @@ def test_workplan_run_resume_with_explicit_run_id_and_path(
     wp = deserialize(wp_path, Workplan)
     live_steps = [LiveStep.from_step(step) for step in wp.steps]
     lwp = LiveWorkplan(**wp.model_dump(exclude={"steps"}), steps=live_steps)
-    trx_path = tmp_path / f"live-{wp_path.name}"
+    trx_path = tmp_path / f"{wp_path.stem}_transformed.yaml"
     assert serialize(trx_path, lwp), "serializing live workplan failed in test"
     assert serialize(original_workplan_backup(wp_path, tmp_path), wp), (
         "serializing the original workplan backup failed in test"
     )
 
-    fake_run_result = WorkplanRun(
-        workplan_path=wp_path,
-        trx_workplan_path=trx_path,
-        output_path=tmp_path,
-        run_id=run_id,
-    )
+    fake_run_result = _recorded_run(run_id, wp_path, tmp_path)
 
     with (
         mock.patch(
@@ -1234,7 +1244,7 @@ def test_workplan_run_resume_with_changed_workplan_fails_fast(
     wp = deserialize(wp_path, Workplan)
     live_steps = [LiveStep.from_step(step) for step in wp.steps]
     lwp = LiveWorkplan(**wp.model_dump(exclude={"steps"}), steps=live_steps)
-    trx_path = tmp_path / f"live-{wp_path.name}"
+    trx_path = tmp_path / f"{wp_path.stem}_transformed.yaml"
     assert serialize(trx_path, lwp), "serializing live workplan failed in test"
 
     changed = wp.model_copy(update={"description": "changed since the run started"})
@@ -1242,12 +1252,7 @@ def test_workplan_run_resume_with_changed_workplan_fails_fast(
         "serializing the original workplan backup failed in test"
     )
 
-    fake_run_result = WorkplanRun(
-        workplan_path=wp_path,
-        trx_workplan_path=trx_path,
-        output_path=tmp_path,
-        run_id=run_id,
-    )
+    fake_run_result = _recorded_run(run_id, wp_path, tmp_path)
 
     with (
         mock.patch(
@@ -1277,8 +1282,13 @@ def test_workplan_run_resume_with_changed_workplan_fails_fast(
     mock_build_and_run_dag.assert_not_awaited()
 
 
-def _write_carried_workplan(output_path: Path, workplan: Workplan) -> Path:
-    """Record an attempt that carried `workplan` into the run at `output_path`."""
+def _write_carried_workplan(
+    output_path: Path, workplan: Workplan, workplan_path: Path | None = None
+) -> Path:
+    """Record an attempt that carried `workplan` into the run at `output_path`.
+
+    The manifest names `workplan_path` as the authored workplan when given.
+    """
     start = datetime(2026, 10, 20, 12, 0, tzinfo=UTC)
     attempt_dir = create_attempt_dir(output_path, start)
     carried = attempt_dir / ATTEMPT_WORKPLAN_NAME
@@ -1288,6 +1298,13 @@ def _write_carried_workplan(output_path: Path, workplan: Workplan) -> Path:
         name="sample-workplan",
         kind="workplan",
         created_at=start,
+        workplan=(
+            WorkplanIdentity(
+                name="sample-workplan", content_hash="", path=str(workplan_path)
+            )
+            if workplan_path is not None
+            else None
+        ),
         attempts=[
             Attempt(
                 start_at=start,
@@ -1307,15 +1324,10 @@ def _resume_with_path(
     wp = deserialize(wp_path, Workplan)
     live_steps = [LiveStep.from_step(step) for step in wp.steps]
     lwp = LiveWorkplan(**wp.model_dump(exclude={"steps"}), steps=live_steps)
-    trx_path = tmp_path / f"live-{wp_path.stem}.yaml"
+    trx_path = tmp_path / f"{wp_path.stem}_transformed.yaml"
     assert serialize(trx_path, lwp), "serializing live workplan failed in test"
 
-    fake_run_result = WorkplanRun(
-        workplan_path=wp_path,
-        trx_workplan_path=trx_path,
-        output_path=tmp_path,
-        run_id="sample-workplan",
-    )
+    fake_run_result = _recorded_run("sample-workplan", wp_path, tmp_path)
 
     with (
         mock.patch(
@@ -1381,28 +1393,6 @@ def test_workplan_run_resume_refuses_a_run_whose_manifest_cannot_be_read(
 
 
 @pytest.mark.usefixtures("read_yaml_intercept")
-def test_workplan_run_resume_reads_a_json_workplan_in_its_own_format(
-    tmp_path: Path,
-    wp_templates_dir: Path,
-) -> None:
-    """Verify a carried JSON workplan, which is not YAML when indented with tabs,
-    is read as JSON to verify the path against.
-    """
-    wp = deserialize(wp_templates_dir / "workplan.yaml", Workplan)
-    authored = json.dumps(wp.model_dump(mode="json", by_alias=True), indent="\t")
-    wp_path = tmp_path / "workplan.json"
-    wp_path.write_text(authored)
-    carried = _write_carried_workplan(tmp_path, wp)
-    carried.unlink()
-    carried.with_name(ATTEMPT_JSON_WORKPLAN_NAME).write_text(authored)
-
-    result, mock_run_dag, _ = _resume_with_path(tmp_path, wp_path)
-
-    assert result.exit_code == 0, result.output
-    mock_run_dag.assert_awaited_once()
-
-
-@pytest.mark.usefixtures("read_yaml_intercept")
 def test_workplan_run_resume_verifies_the_path_against_the_carried_workplan(
     tmp_path: Path,
     wp_templates_dir: Path,
@@ -1413,7 +1403,7 @@ def test_workplan_run_resume_verifies_the_path_against_the_carried_workplan(
     """
     wp_path = wp_templates_dir / "workplan.yaml"
     wp = deserialize(wp_path, Workplan)
-    carried = _write_carried_workplan(tmp_path, wp)
+    carried = _write_carried_workplan(tmp_path, wp, wp_path)
     # a stale legacy backup never decides the comparison
     changed = wp.model_copy(update={"description": "a stale legacy backup"})
     assert serialize(original_workplan_backup(wp_path, tmp_path), changed)
@@ -1443,16 +1433,11 @@ def test_workplan_run_resume_with_unreadable_backup_fails_fast(
     wp = deserialize(wp_path, Workplan)
     live_steps = [LiveStep.from_step(step) for step in wp.steps]
     lwp = LiveWorkplan(**wp.model_dump(exclude={"steps"}), steps=live_steps)
-    trx_path = tmp_path / f"live-{wp_path.name}"
+    trx_path = tmp_path / f"{wp_path.stem}_transformed.yaml"
     assert serialize(trx_path, lwp), "serializing live workplan failed in test"
     original_workplan_backup(wp_path, tmp_path).write_text("name: [truncated")
 
-    fake_run_result = WorkplanRun(
-        workplan_path=wp_path,
-        trx_workplan_path=trx_path,
-        output_path=tmp_path,
-        run_id=run_id,
-    )
+    fake_run_result = _recorded_run(run_id, wp_path, tmp_path)
 
     with (
         mock.patch(
@@ -1576,16 +1561,11 @@ def test_workplan_run_resume_reload_invokes_apply_resume_overrides(
     wp = deserialize(wp_path, Workplan)
     live_steps = [LiveStep.from_step(step) for step in wp.steps]
     lwp = LiveWorkplan(**wp.model_dump(exclude={"steps"}), steps=live_steps)
-    trx_path = tmp_path / f"live-{wp_path.name}"
+    trx_path = tmp_path / f"{wp_path.stem}_transformed.yaml"
     assert serialize(trx_path, lwp), "serializing live workplan failed in test"
 
     loaded = DagStatus({"first": Status.Failed})
-    fake_run_result = WorkplanRun(
-        workplan_path=wp_path,
-        trx_workplan_path=trx_path,
-        output_path=tmp_path,
-        run_id=run_id,
-    )
+    fake_run_result = _recorded_run(run_id, wp_path, tmp_path)
 
     with (
         mock.patch(
@@ -1654,7 +1634,7 @@ def test_workplan_run_reload_prior_run(
     wp = deserialize(wp_path, Workplan)
     live_steps = [LiveStep.from_step(step) for step in wp.steps]
     lwp = LiveWorkplan(**wp.model_dump(exclude={"steps"}), steps=live_steps)
-    lwp_path = tmp_path / f"live-{wp_path.name}"
+    lwp_path = tmp_path / f"{wp_path.stem}_transformed.yaml"
     assert serialize(lwp_path, lwp), "serializing live workplan failed in test"
 
     sentinel_paths = set[Path]()
@@ -1671,11 +1651,10 @@ def test_workplan_run_reload_prior_run(
         assert serialize(p, h), "serializing the mock handles failed in test"
         sentinel_paths.add(p)
 
-    fake_run = WorkplanRun(
-        workplan_path=wp_path,
-        trx_workplan_path=lwp_path,
-        output_path=lwp_path.parent,
-        run_id=run_id,
+    fake_run = _recorded_run(
+        run_id,
+        wp_path,
+        lwp_path.parent,
         environment={"CSTAR_LOG_LEVEL": "TRACE"},
         sentinels=sentinel_paths,
     )
@@ -1719,6 +1698,70 @@ def test_workplan_run_reload_prior_run(
     assert statuses == {Status.Done}
 
 
+@pytest.mark.parametrize("resume", [False, True])
+def test_workplan_run_reenters_a_json_workplan_run(
+    tmp_path: Path,
+    hello_world_bp_path: Path,
+    mock_run_id: str,
+    resume: bool,
+) -> None:
+    """Verify a run started from a workplan written as JSON, which reads as YAML,
+    re-enters by run-id, alone or resuming with the authored path, by loading the
+    plan prepared in its run root.
+    """
+    run_id = mock_run_id
+    wp = Workplan(
+        name="json",
+        description="A workplan written as JSON.",
+        steps=[
+            Step(
+                name="hello",
+                application="hello_world",
+                blueprint=hello_world_bp_path.as_posix(),
+            )
+        ],
+    )
+    wp_path = tmp_path / "plan.json"
+    wp_path.write_text(json.dumps(wp.model_dump(mode="json", by_alias=True)))
+    prepared, trx_path, _, _ = asyncio.run(prepare_workplan(wp_path, tmp_path / "run"))
+
+    sentinel_paths = set[Path]()
+    for step in prepared.steps:
+        handle = LocalHandle(
+            pid="1000",
+            name=LiveStep.from_step(step).safe_name,
+            run_id=run_id,
+            status=Status.Done,
+            start_at=datetime.now(),
+        )
+        path = StateRepository.sentinel_path(handle)
+        assert serialize(path, handle), "serializing the mock handles failed in test"
+        sentinel_paths.add(path)
+
+    TrackingRepository().put_workplan_run_sync(
+        _recorded_run(run_id, wp_path, trx_path.parent, sentinels=sentinel_paths)
+    )
+
+    args = [ARG_RUN_ID, run_id]
+    if resume:
+        args += [ARG_RESUME, str(wp_path)]
+
+    with (
+        mock.patch("cstar.orchestration.dag_runner.get_launcher", _slurm_launcher),
+        mock.patch(
+            "cstar.orchestration.launch.slurm.SlurmLauncher.query_status",
+            mock.AsyncMock(return_value=Status.Done),
+        ),
+        mock.patch(
+            "cstar.orchestration.launch.slurm.SlurmLauncher._submit"
+        ) as mock_submit,
+    ):
+        result = CliRunner().invoke(app, args, color=False)
+
+    assert result.exit_code == 0, result.output
+    assert not mock_submit.called
+
+
 @pytest.mark.parametrize("status", [Status.Submitted, Status.Running, Status.Ending])
 @pytest.mark.usefixtures("read_yaml_intercept")
 def test_workplan_run_reload_prior_run_in_progress(
@@ -1742,7 +1785,7 @@ def test_workplan_run_reload_prior_run_in_progress(
     wp = deserialize(wp_path, Workplan)
     live_steps = [LiveStep.from_step(step) for step in wp.steps]
     lwp = LiveWorkplan(**wp.model_dump(exclude={"steps"}), steps=live_steps)
-    lwp_path = tmp_path / f"live-{wp_path.name}"
+    lwp_path = tmp_path / f"{wp_path.stem}_transformed.yaml"
     assert serialize(lwp_path, lwp), "serializing live workplan failed in test"
 
     sentinel_paths = set[Path]()
@@ -1759,11 +1802,10 @@ def test_workplan_run_reload_prior_run_in_progress(
         assert serialize(p, h), "serializing the mock handles failed in test"
         sentinel_paths.add(p)
 
-    fake_run = WorkplanRun(
-        workplan_path=wp_path,
-        trx_workplan_path=lwp_path,
-        output_path=lwp_path.parent,
-        run_id=run_id,
+    fake_run = _recorded_run(
+        run_id,
+        wp_path,
+        lwp_path.parent,
         environment={"CSTAR_LOG_LEVEL": "TRACE"},
         sentinels=sentinel_paths,
     )
@@ -1832,7 +1874,7 @@ def test_workplan_run_reload_prior_run_repeat_failures(
     wp = deserialize(wp_path, Workplan)
     live_steps = [LiveStep.from_step(step) for step in wp.steps]
     lwp = LiveWorkplan(**wp.model_dump(exclude={"steps"}), steps=live_steps)
-    lwp_path = tmp_path / f"live-{wp_path.name}"
+    lwp_path = tmp_path / f"{wp_path.stem}_transformed.yaml"
     assert serialize(lwp_path, lwp), "serializing live workplan failed in test"
 
     sentinel_paths = set[Path]()
@@ -1849,11 +1891,10 @@ def test_workplan_run_reload_prior_run_repeat_failures(
         assert serialize(p, h), "serializing the mock handles failed in test"
         sentinel_paths.add(p)
 
-    fake_run = WorkplanRun(
-        workplan_path=wp_path,
-        trx_workplan_path=lwp_path,
-        output_path=lwp_path.parent,
-        run_id=run_id,
+    fake_run = _recorded_run(
+        run_id,
+        wp_path,
+        lwp_path.parent,
         environment={"CSTAR_LOG_LEVEL": "TRACE"},
         sentinels=sentinel_paths,
     )
@@ -1928,13 +1969,8 @@ def test_cli_workplan_run_normalizes_mixed_case_runid(
     wp_path = wp_templates_dir / "workplan.yaml"
 
     mock_build_and_run_dag = mock.AsyncMock(
-        return_value=WorkplanRun(
-            workplan_path=wp_path,
-            trx_workplan_path=wp_path,
-            output_path=tmp_path,
-            run_id="not-used",
-            environment={},
-            user_variables={},
+        return_value=_recorded_run(
+            "not-used", wp_path, tmp_path, environment={}, user_variables={}
         )
     )
 
@@ -2038,7 +2074,7 @@ def test_auto_compose_ignores_non_blueprint_content(tmp_path: Path) -> None:
 
 
 def test_workplan_run_blueprint_auto_composes(hello_world_bp_path: Path) -> None:
-    """Verify submitting a blueprint to `cstar workplan run` generates a host
+    """Verify submitting a blueprint to `cstar workplan submit` generates a host
     workplan and passes the generated workplan (not the blueprint) on to
     `build_and_run_dag`.
 
@@ -2732,7 +2768,7 @@ def test_workplan_run_reports_all_directive_problems_before_submission(
     tmp_path: Path,
     hello_world_bp_path: Path,
 ) -> None:
-    """Verify `workplan run` rejects a workplan whose directives are
+    """Verify `workplan submit` rejects a workplan whose directives are
     misconfigured as a usage error listing every problem, and never reaches
     the DAG runner.
 
@@ -2878,25 +2914,27 @@ def test_workplan_run_pre_run_requires_workplan_path() -> None:
     mock_reload.assert_not_awaited()
 
 
-def test_workplan_run_rejects_ambient_dry_run_env(
+def test_workplan_run_refuses_a_removed_dry_run_setting(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Verify an exported `CSTAR_CLI_DRY_RUN` fails loudly: the plan-only mode
-    it used to request no longer exists, so silently running for real would
-    stage data and submit jobs the user did not ask for.
+    """Verify `workplan submit` exits 2 without reloading or launching anything
+    while a removed setting that used to request a plan-only run is exported.
+
+    Parameters
+    ----------
+    monkeypatch : pytest.MonkeyPatch
+        Fixture used to export the setting.
     """
-    monkeypatch.setenv(ENV_CSTAR_CLI_DRY_RUN, FLAG_ON)
+    name = next(n for n, removed in REMOVED_SETTINGS.items() if removed.refused)
+    monkeypatch.setenv(name, FLAG_ON)
 
     with mock.patch(
         "cstar.cli.workplan.run.handle_run_reloading", mock.AsyncMock()
     ) as mock_reload:
-        runner = CliRunner()
-        result = runner.invoke(app, ["--run-id", "12345"], color=False)
+        result = CliRunner().invoke(app, ["--run-id", "12345"], color=False)
 
-    output = " ".join(result.output.replace("│", " ").split())
     assert result.exit_code == 2
-    assert ENV_CSTAR_CLI_DRY_RUN in output
-    assert "workplan check" in output
+    assert name in result.stderr
     mock_reload.assert_not_awaited()
 
 
@@ -2936,15 +2974,10 @@ def test_workplan_run_resume_of_pre_run_workplan_fails_fast(
         for step in wp.steps
     ]
     lwp = LiveWorkplan(**wp.model_dump(exclude={"steps"}), steps=live_steps)
-    trx_path = tmp_path / f"live-{wp_path.name}"
+    trx_path = tmp_path / f"{wp_path.stem}_transformed.yaml"
     assert serialize(trx_path, lwp)
 
-    run = WorkplanRun(
-        workplan_path=wp_path,
-        trx_workplan_path=trx_path,
-        output_path=tmp_path,
-        run_id=mock_run_id,
-    )
+    run = _recorded_run(mock_run_id, wp_path, tmp_path)
 
     with (
         mock.patch(
@@ -2969,14 +3002,16 @@ RUN_LOOKUP = "cstar.cli.workplan.run.TrackingRepository.get_workplan_run"
 """The run-record lookup made by the run command."""
 
 
-def _recorded_run(run_id: str, workplan_path: Path, output_path: Path) -> WorkplanRun:
-    """A record of a prior run of `run_id` that started from `workplan_path`."""
-    return WorkplanRun(
-        workplan_path=workplan_path,
-        trx_workplan_path=workplan_path,
-        output_path=output_path,
-        run_id=run_id,
-    )
+def _recorded_run(
+    run_id: str, workplan_path: Path, output_path: Path, **overrides: t.Any
+) -> WorkplanRun:
+    """A record of a prior run of `run_id` that started from `workplan_path`.
+
+    The run directory holds the manifest that says so, and an empty transformed
+    workplan beside it.
+    """
+    _place_transformed(workplan_path, output_path, run_id)
+    return WorkplanRun(output_path=output_path, run_id=run_id, **overrides)
 
 
 def _write_original_backup(record: WorkplanRun, workplan: Workplan) -> None:
@@ -3178,6 +3213,7 @@ def test_workplan_run_derived_run_id_refused_without_a_backup_to_compare(
 def test_workplan_run_derived_run_id_compared_with_the_carried_workplan(
     tmp_path: Path,
     wp_templates_dir: Path,
+    flatten_cli_output: Callable[[str], str],
 ) -> None:
     """Verify a derived run-id is compared with the workplan the latest preparing
     attempt carried: the same workplan by another path re-enters the run, a
@@ -3209,7 +3245,7 @@ def test_workplan_run_derived_run_id_compared_with_the_carried_workplan(
     assert serialize(carried, other)
     result, mock_build_and_run_dag = invoke()
     assert result.exit_code == 2
-    assert "its content differs" in result.output
+    assert "its content differs" in flatten_cli_output(result.output)
     mock_build_and_run_dag.assert_not_awaited()
 
 
@@ -3358,7 +3394,7 @@ def test_workplan_run_run_id_in_place_of_path_names_the_right_command(
     assert result.exit_code == 2
     output = flatten_cli_output(result.output)
     assert "'my-run' is a run-id, not a workplan file" in output
-    assert f"cstar workplan run {ARG_RUN_ID} my-run {ARG_RESUME}" in output
+    assert f"cstar workplan {COMMAND_SUBMIT} {ARG_RUN_ID} my-run {ARG_RESUME}" in output
 
 
 @pytest.mark.parametrize("value", ["no-such-run", "typo.yaml", "dir/typo", "!!!"])
@@ -3444,12 +3480,10 @@ def test_workplan_run_reload_reports_orphans(
         for step in wp.steps
     ]
     lwp = LiveWorkplan(**wp.model_dump(exclude={"steps"}), steps=live_steps)
-    trx_path = tmp_path / f"live-{wp_path.name}"
-    assert serialize(trx_path, lwp)
     leftover = run_root / "tasks" / "renamed-step"
     leftover.mkdir(parents=True)
     record = _recorded_run(run_id, wp_path, run_root)
-    record.trx_workplan_path = trx_path
+    assert serialize(record.trx_workplan_path, lwp)
 
     with (
         mock.patch(
@@ -3492,12 +3526,7 @@ def test_workplan_run_reenters_the_run_of_a_transformed_workplan(
     wp_path = wp_templates_dir / "workplan.yaml"
     trx_path = tmp_path / "workplan_transformed.yaml"
     lwp = _persist_transformed_workplan(wp_path, trx_path)
-    record = WorkplanRun(
-        workplan_path=wp_path,
-        trx_workplan_path=trx_path,
-        output_path=tmp_path,
-        run_id=lwp.name,
-    )
+    record = _recorded_run(lwp.name, wp_path, tmp_path)
 
     with (
         mock.patch(
@@ -3539,12 +3568,7 @@ def test_workplan_run_refuses_a_transformed_workplan_its_run_does_not_execute(
     trx_path.parent.mkdir()
     lwp = _persist_transformed_workplan(wp_path, trx_path)
     recorded_trx = tmp_path / "run" / "workplan_transformed.yaml"
-    record = WorkplanRun(
-        workplan_path=wp_path,
-        trx_workplan_path=recorded_trx,
-        output_path=tmp_path / "run",
-        run_id=lwp.name,
-    )
+    record = _recorded_run(lwp.name, wp_path, tmp_path / "run")
 
     with (
         mock.patch(
@@ -3610,12 +3634,7 @@ def test_workplan_run_reenters_a_run_started_under_an_explicit_run_id(
     trx_path = run_dir / "workplan_transformed.yaml"
     lwp = _persist_transformed_workplan(wp_path, trx_path)
     assert lwp.name != run_id
-    record = WorkplanRun(
-        workplan_path=wp_path,
-        trx_workplan_path=trx_path,
-        output_path=run_dir,
-        run_id=run_id,
-    )
+    record = _recorded_run(run_id, wp_path, run_dir)
 
     with (
         mock.patch(
@@ -3639,9 +3658,8 @@ def _record_run_with_environment(
     tmp_path: Path, run_id: str, environment: dict[str, str]
 ) -> None:
     """Persist a run record that captured `environment` when it started."""
+    (tmp_path / "workplan_transformed.yaml").touch()
     record = WorkplanRun(
-        workplan_path=tmp_path / "workplan.yaml",
-        trx_workplan_path=tmp_path / "workplan_transformed.yaml",
         output_path=tmp_path,
         run_id=run_id,
         environment=environment,
@@ -3675,6 +3693,28 @@ def test_reload_leaves_the_data_and_state_homes_to_the_shell(
         assert os.environ[ENV_CSTAR_LOG_LEVEL] == "TRACE"
 
 
+def test_reload_re_exports_a_setting_the_config_file_supplied(
+    tmp_path: Path,
+    mock_run_id: str,
+    isolate_user_config: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Verify a run that captured a setting from the configuration file gets it
+    back on a reload into a shell that lacks it.
+    """
+    monkeypatch.delenv(ENV_CSTAR_SLURM_ACCOUNT, raising=False)
+    isolate_user_config.write_text(f"{ENV_CSTAR_SLURM_ACCOUNT}=m1234\n")
+    load_user_config()
+    _record_run_with_environment(tmp_path, mock_run_id, capture_environment())
+
+    with mock.patch.dict(os.environ):
+        os.environ.pop(ENV_CSTAR_SLURM_ACCOUNT)
+
+        asyncio.run(handle_run_reloading(mock_run_id))
+
+        assert os.environ[ENV_CSTAR_SLURM_ACCOUNT] == "m1234"
+
+
 def test_reload_warns_once_about_settings_that_differ(
     tmp_path: Path, mock_run_id: str, caplog: pytest.LogCaptureFixture
 ) -> None:
@@ -3703,6 +3743,35 @@ def test_reload_warns_once_about_settings_that_differ(
     assert "CSTAR_RECORDED_ONLY (now None, recorded 'yes')" in warnings[0]
     assert ENV_CSTAR_DATA_HOME not in warnings[0]
     assert ENV_CSTAR_RUNID not in warnings[0]
+
+
+def test_reload_skips_removed_settings(
+    tmp_path: Path, mock_run_id: str, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Verify a reload does not re-export a recorded setting this build no longer
+    reads, nor list it among the differing settings, while it still re-exports
+    an ordinary recorded setting.
+    """
+    removed = next(iter(REMOVED_SETTINGS))
+    _record_run_with_environment(
+        tmp_path,
+        mock_run_id,
+        {removed: FLAG_ON, ENV_CSTAR_LOG_LEVEL: "TRACE"},
+    )
+
+    with mock.patch.dict(os.environ, {ENV_CSTAR_LOG_LEVEL: "INFO"}):
+        os.environ.pop(removed, None)
+
+        with caplog.at_level("WARNING"):
+            asyncio.run(handle_run_reloading(mock_run_id))
+
+        assert removed not in os.environ
+        assert os.environ[ENV_CSTAR_LOG_LEVEL] == "TRACE"
+
+    warnings = [r.getMessage() for r in caplog.records if r.levelname == "WARNING"]
+    assert len(warnings) == 1
+    assert ENV_CSTAR_LOG_LEVEL in warnings[0]
+    assert removed not in warnings[0]
 
 
 def test_reload_is_quiet_when_the_environment_matches(
@@ -3744,11 +3813,9 @@ def _attached_record(
     root = tmp_path / "colleague" / run_id
     root.mkdir(parents=True)
     record = WorkplanRun(
-        workplan_path=wp_templates_dir / "workplan.yaml",
-        trx_workplan_path=root / f"{run_id}_transformed.yaml",
         output_path=root,
         run_id=run_id,
-        metadata={KEY_ATTACHED: "1"},
+        attached=True,
     )
     TrackingRepository().put_workplan_run_sync(record)
     return record

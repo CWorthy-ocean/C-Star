@@ -4,7 +4,7 @@ CDR metrics blueprint
 =====================
 
 The ``cdr_metrics`` application computes the carbon dioxide removal (CDR)
-metrics of a release from the ``_cdr`` output of ROMS-MARBL runs: the CO2
+metrics of a release from the ``_cdr`` output of UCLA-ROMS runs with MARBL: the CO2
 uptake in tonnes and the CDR efficiency, each from the air-sea CO2 flux and
 from the difference in dissolved inorganic carbon (DIC). The metrics are
 roms-tools' ``compute_cdr_metrics``; the application finds the output, checks
@@ -101,11 +101,11 @@ under ``sources``, in order, from the segment containing the release onward.
 
     steps:
     - name: seg-01
-      application: roms_marbl
+      application: ucla_roms
       blueprint: /path/to/segment_01.yaml
 
     - name: seg-02
-      application: roms_marbl
+      application: ucla_roms
       blueprint: /path/to/segment_02.yaml
       depends_on:
       - seg-01

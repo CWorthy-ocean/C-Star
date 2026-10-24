@@ -15,6 +15,7 @@ from cstar.execution.file_system import StateDirectoryManager
 from cstar.orchestration.models import (
     KEY_PRE_RUN,
     KEY_RESUME,
+    BlueprintCore,
     DeferredBlueprintRef,
     InlineBlueprintRef,
     KeyValueStore,
@@ -135,6 +136,28 @@ def test_step_application_validation(
         )
 
     assert "application" in str(error)
+
+
+@pytest.mark.parametrize("authored", ["roms_marbl", "  roms_marbl  "])
+def test_step_application_loads_earlier_name_as_current(
+    fake_blueprint_path: Path,
+    authored: str,
+) -> None:
+    """Verify a step authored with an earlier application name carries the current one."""
+    step = Step(
+        name="run",
+        application=authored,
+        blueprint=fake_blueprint_path,
+    )
+
+    assert step.application == "ucla_roms"
+
+
+def test_blueprint_core_loads_earlier_application_name_as_current() -> None:
+    """Verify metadata-only loading of a blueprint reports the current application name."""
+    core = BlueprintCore.model_validate({"name": "bp", "application": "roms_marbl"})
+
+    assert core.application == "ucla_roms"
 
 
 @pytest.mark.parametrize(

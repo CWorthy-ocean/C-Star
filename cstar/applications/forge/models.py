@@ -139,6 +139,10 @@ class ModelSpec(BaseModel):
         and to decide whether ``code.pio`` is populated (raising if PIO is
         requested but the model has no ``code.pio`` pin). Not part of
         ``model_settings`` -- it's a build mode, not a namelist section.
+    archived : bool
+        Hide this spec from the wizard's model dropdown (it stays loadable, and
+        blueprints that compose it by name keep working). For specs pinned to
+        superseded ucla-roms releases.
     model_settings : dict[str, Any]
         Flat model-specific physics/numerics defaults, mirroring
         ``ForgeBlueprint.model_settings`` 1:1. Contains nothing a Domain/Forcing/
@@ -152,6 +156,7 @@ class ModelSpec(BaseModel):
     code: ModelCode
     bgc_mode: BgcMode = "marbl"
     use_pio: bool = False
+    archived: bool = Field(default=False)
     model_settings: dict[str, Any] = Field(default_factory=dict)
 
     @model_validator(mode="after")
@@ -288,5 +293,6 @@ def load_models_yaml(path: Path, model_name: str) -> ModelSpec:
         code=model_code,
         bgc_mode=block.get("bgc_mode", "marbl"),
         use_pio=block.get("use_pio", False),
+        archived=block.get("archived", False),
         model_settings=block.get("model_settings", {}) or {},
     )

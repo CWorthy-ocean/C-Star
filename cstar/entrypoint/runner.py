@@ -19,6 +19,8 @@ from cstar.base.provenance import package_versions, system_name
 from cstar.base.utils import utc_now
 from cstar.entrypoint.service import Service
 from cstar.entrypoint.utils import (
+    ARG_CLOBBER,
+    ARG_CLOBBER_HELP,
     ARG_DIRECTIVES_URI_LONG,
     ARG_DIRECTIVES_URI_SHORT,
     ARG_LOGLEVEL_HELP,
@@ -390,6 +392,11 @@ def create_parser() -> argparse.ArgumentParser:
         ARG_PRE_RUN,
         action="store_true",
         help=ARG_PRE_RUN_HELP,
+    )
+    parser.add_argument(
+        ARG_CLOBBER,
+        action="store_true",
+        help=ARG_CLOBBER_HELP,
     )
     parser.add_argument(
         ARG_STEP,

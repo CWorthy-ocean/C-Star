@@ -33,8 +33,6 @@ class FakeRun:
     def record(self) -> WorkplanRun:
         """The tracking record of the run."""
         return WorkplanRun(
-            workplan_path=self.trx_path,
-            trx_workplan_path=self.trx_path,
             output_path=self.root,
             run_id=RUN_ID,
         )

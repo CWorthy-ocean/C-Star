@@ -1,7 +1,8 @@
-"""Compute CDR (carbon dioxide removal) metrics from ROMS-MARBL `_cdr` output.
+"""Compute CDR (carbon dioxide removal) metrics from the `_cdr` output of
+UCLA-ROMS runs with MARBL.
 
 The application reads the `_cdr` output (``<root>_cdr.<YYYYMMDDHHMMSS>.nc``) of
-one or more ROMS-MARBL runs, computes the CDR metrics with roms-tools'
+one or more UCLA-ROMS runs with MARBL, computes the CDR metrics with roms-tools'
 ``compute_cdr_metrics``, and writes the resulting time series and figures to
 ``<working_dir>/output``:
 
@@ -86,7 +87,6 @@ from cstar.applications.core import (
     RunnerResult,
     register_application,
 )
-from cstar.applications.roms_marbl.outputs import CdrOutputFile
 from cstar.base.exceptions import CstarError
 from cstar.base.log import get_logger
 from cstar.base.utils import lazy_import
@@ -100,6 +100,7 @@ from cstar.orchestration.models import (
     PathLocation,
     RequiredString,
 )
+from cstar.roms.outputs import CdrOutputFile
 
 if t.TYPE_CHECKING:
     from types import ModuleType
@@ -176,7 +177,7 @@ class CdrDomain(ConfiguredBaseModel):
 
 
 class CdrMetricsBlueprint(Blueprint):
-    """A blueprint for computing CDR metrics from the `_cdr` output of ROMS-MARBL runs."""
+    """A blueprint for computing CDR metrics from the `_cdr` output of UCLA-ROMS runs with MARBL."""
 
     application: str = APP_NAME
     """The application identifier."""
@@ -658,7 +659,7 @@ def compute_domain_metrics(name: str, domain: CdrDomain) -> tuple["xr.Dataset", 
 
 
 class CdrMetricsRunner(BlueprintRunner[CdrMetricsBlueprint]):
-    """Worker class that computes CDR metrics from ROMS-MARBL `_cdr` output."""
+    """Worker class that computes CDR metrics from the `_cdr` output of UCLA-ROMS runs with MARBL."""
 
     @t.override
     async def run(self) -> RunnerResult[CdrMetricsBlueprint]:

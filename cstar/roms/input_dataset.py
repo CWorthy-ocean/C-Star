@@ -807,7 +807,7 @@ class ROMSCarbonateSensitivity(ROMSInputDataset):
 
     Surface fields read through the generic `frcfiles` list when the build does
     not compute them online -- typically the `_cdrgas` output of an earlier
-    ROMS-MARBL run.
+    UCLA-ROMS run with MARBL.
     """
 
 

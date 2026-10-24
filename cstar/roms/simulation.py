@@ -14,7 +14,7 @@ from typing import TYPE_CHECKING, Any, ClassVar, Optional, TypeVar, cast
 import yaml
 from pydantic import ValidationError
 
-from cstar.applications.roms_marbl.adapter import (
+from cstar.applications.ucla_roms.adapter import (
     AddtlCodeAdapter,
     BoundaryForcingAdapter,
     CarbonateSensitivityAdapter,
@@ -31,26 +31,15 @@ from cstar.applications.roms_marbl.adapter import (
     SurfaceForcingAdapter,
     TidalForcingAdapter,
 )
-from cstar.applications.roms_marbl.file_system import (
-    GENERATED_NAMELIST_NAME,
-    ROMS_EXECUTABLE_NAME,
-    RomsFileSystemManager,
-)
-from cstar.applications.roms_marbl.models import RomsMarblBlueprint
-from cstar.applications.roms_marbl.outputs import EXTRACT_ROOT_NAME, OUTPUT_ROOT_NAME
+from cstar.applications.ucla_roms.models import UclaRomsBlueprint
 from cstar.base.additional_code import AdditionalCode
 from cstar.base.env import (
-    ENV_CSTAR_CLOBBER_WORKING_DIR,
+    ENV_CSTAR_DEBUG_BUILD_MODE,
     ENV_CSTAR_NPROCS_POST,
-    FLAG_ON,
     get_env_item,
 )
 from cstar.base.exceptions import CstarExpectationFailed
-from cstar.base.feature import (
-    ENV_FF_DEBUG_BUILD_MODE,
-    is_feature_enabled,
-    is_flag_enabled,
-)
+from cstar.base.feature import is_flag_enabled
 from cstar.base.utils import (
     _dict_to_tree,
     _get_sha256_hash,
@@ -58,6 +47,7 @@ from cstar.base.utils import (
     deep_merge,
     slugify,
 )
+from cstar.entrypoint.utils import ARG_CLOBBER
 from cstar.execution.file_system import (
     is_remote_resource,
     remove_files,
@@ -79,6 +69,11 @@ from cstar.roms.build_verification import (
 )
 from cstar.roms.discretization import ROMSDiscretization
 from cstar.roms.external_codebase import ROMSExternalCodeBase
+from cstar.roms.file_system import (
+    GENERATED_NAMELIST_NAME,
+    ROMS_EXECUTABLE_NAME,
+    RomsFileSystemManager,
+)
 from cstar.roms.input_dataset import (
     CARBONATE_SENSITIVITY_REMEDY,
     CARBONATE_SENSITIVITY_VARIABLES,
@@ -97,6 +92,7 @@ from cstar.roms.input_dataset import (
     missing_carbonate_sensitivity_variables,
 )
 from cstar.roms.namelist import RomsNamelistBase, namelist_schema_for_ref
+from cstar.roms.outputs import EXTRACT_ROOT_NAME, OUTPUT_ROOT_NAME
 from cstar.roms.precheck import applies_to, check_output_streams_divide_rst
 from cstar.simulation import Simulation
 from cstar.system.manager import get_sysmgr
@@ -278,7 +274,7 @@ class ROMSSimulation(Simulation):
         Compiles the ROMS executable if necessary.
     pre_run()
         Performs pre-processing steps before execution.
-    run(account_key=None, walltime=None, queue_name=None, job_name=None)
+    run(account_key="", walltime="", queue_name="", job_name=None)
         Submits the ROMS simulation for execution.
     post_run()
         Processes model outputs after execution.
@@ -674,10 +670,6 @@ class ROMSSimulation(Simulation):
     def fs_manager(self) -> RomsFileSystemManager:
         """Return the file system manager for the simulation."""
         return cast("RomsFileSystemManager", self._fs_manager)
-
-    def _conditionally_clear_root(self):
-        if is_flag_enabled(ENV_CSTAR_CLOBBER_WORKING_DIR):
-            self.fs_manager.clear()
 
     @property
     def default_codebase(self) -> ROMSExternalCodeBase:
@@ -1372,9 +1364,9 @@ class ROMSSimulation(Simulation):
             # be relative to, so they are left as authored
             source = SourceData(location=blueprint)
             data = source.retriever.read()
-            bp = RomsMarblBlueprint.model_validate(yaml.safe_load(data.decode("utf-8")))
+            bp = UclaRomsBlueprint.model_validate(yaml.safe_load(data.decode("utf-8")))
         else:
-            bp = load_blueprint(blueprint, RomsMarblBlueprint)
+            bp = load_blueprint(blueprint, UclaRomsBlueprint)
 
         return cls(
             name=bp.name,
@@ -1456,9 +1448,7 @@ class ROMSSimulation(Simulation):
         print_dict["ROMS"] = simulation_tree_dict
         return f"{self.directory}\n{_dict_to_tree(print_dict)}"
 
-    def setup(
-        self,
-    ) -> None:
+    def setup(self, clobber: bool = False) -> None:
         """Prepare this ROMSSimulation locally by fetching necessary files and compiling
         any external codebases.
 
@@ -1471,6 +1461,12 @@ class ROMSSimulation(Simulation):
         2. Fetches and organizes compile-time code.
         3. Fetches and organizes runtime code (e.g., namelists).
         4. Fetches and prepares input datasets.
+
+        Parameters
+        ----------
+        clobber : bool
+            Empty the working directory first, so a prior attempt's files are not
+            reused.
 
         Raises
         ------
@@ -1496,7 +1492,8 @@ class ROMSSimulation(Simulation):
         input_datasets_dir = self.fs_manager.input_datasets_dir
         run_dir = self.fs_manager.run_dir
 
-        self._conditionally_clear_root()
+        if clobber:
+            self.fs_manager.clear()
 
         try:
             compile_time_code_dir.mkdir(parents=True)
@@ -1507,7 +1504,7 @@ class ROMSSimulation(Simulation):
             )  # this one gets made by C-Star FSM
         except OSError as e:
             msg = (
-                f"The input directory is not empty. Re-run with {ENV_CSTAR_CLOBBER_WORKING_DIR}={FLAG_ON} "
+                f"The input directory is not empty. Re-run with {ARG_CLOBBER} "
                 "to delete the directory and continue."
             )
             raise CstarExpectationFailed(msg) from e
@@ -1517,13 +1514,6 @@ class ROMSSimulation(Simulation):
         for codebase in (x for x in self.codebases if x is not None):
             self.log.info(f"🔧 Setting up {codebase.__class__.__name__}...")
             codebase_dir = self.fs_manager.codebase_subdir(codebase.key)
-
-            # if we're running a workplan, for now, set up a code directory for each
-            # step, otherwise they may try to clobber each other or get tripped up on
-            # detecting existing directories.
-            if os.getenv("CSTAR_FRESH_CODEBASES", "0") == "1" and codebase_dir.exists():
-                shutil.rmtree(codebase_dir)
-
             codebase_dir.mkdir(parents=True, exist_ok=True)
             codebase.setup(codebase_dir)
             os.environ[codebase.root_env_var] = str(codebase_dir)
@@ -1890,7 +1880,7 @@ class ROMSSimulation(Simulation):
         self._ensure_makefile(build_dir)
 
         mode_clause = ""
-        if is_feature_enabled(ENV_FF_DEBUG_BUILD_MODE):
+        if is_flag_enabled(ENV_CSTAR_DEBUG_BUILD_MODE):
             mode_clause = "BUILD_MODE=debug "
 
         cstar_sysmgr = get_sysmgr()
@@ -2403,9 +2393,9 @@ class ROMSSimulation(Simulation):
 
     def run(
         self,
-        account_key: str | None = None,
-        walltime: str | None = None,
-        queue_name: str | None = None,
+        account_key: str = "",
+        walltime: str = "",
+        queue_name: str = "",
         job_name: str | None = None,
     ) -> "ExecutionHandler":
         """Execute the ROMS simulation.
@@ -2418,13 +2408,14 @@ class ROMSSimulation(Simulation):
         Parameters
         ----------
         account_key : str, optional
-            The user's account key on the system (required if using a job scheduler).
+            The user's account key on the system, for a scheduler job on a system
+            that requires one.
         queue_name : str, optional
-            The name of the scheduler queue to submit the job to. Defaults to the
-            system's primary queue.
+            The name of the scheduler queue to submit the job to. When empty, the
+            system's primary queue, unless the system requires a queue to be set.
         walltime : str, optional
             The maximum allowed execution time for a scheduler job in HH:MM:SS format.
-            Defaults to the queue's max walltime if a scheduler is used.
+            When empty, the queue's max walltime.
         job_name : str, optional
             The name of the job submitted to the scheduler, which also sets
             the output file name `job_name.out`.
@@ -2438,8 +2429,10 @@ class ROMSSimulation(Simulation):
         Raises
         ------
         ValueError
-            - If the preconditions of `prepare_launch` are not met.
-            - If `account_key` is required but not provided for scheduled jobs.
+            If the preconditions of `prepare_launch` are not met.
+        CstarError
+            If a scheduler job is needed and the system requires an account or
+            queue that is empty (see `create_scheduler_job`).
         RuntimeError
             If ROMS fails to start or encounters an execution error.
 
@@ -2471,11 +2464,6 @@ class ROMSSimulation(Simulation):
 
         cstar_sysmgr = get_sysmgr()
 
-        if (queue_name is None) and (cstar_sysmgr.scheduler is not None):
-            queue_name = cstar_sysmgr.scheduler.primary_queue_name
-        if (walltime is None) and (cstar_sysmgr.scheduler is not None):
-            walltime = cstar_sysmgr.scheduler.get_queue(queue_name).max_walltime
-
         ## 2: RUN ROMS
 
         self.log.info(f"Running {plan.command}")
@@ -2484,11 +2472,6 @@ class ROMSSimulation(Simulation):
             cstar_sysmgr.scheduler is not None
             and not cstar_sysmgr.scheduler.in_active_allocation
         ):
-            if account_key is None:
-                raise ValueError(
-                    "please call Simulation.run() with a value for account_key"
-                )
-
             job_instance = create_scheduler_job(
                 commands=plan.command,
                 job_name=job_name,

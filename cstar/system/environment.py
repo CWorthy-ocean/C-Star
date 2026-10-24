@@ -8,7 +8,9 @@ from dotenv import dotenv_values
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from cstar.base.env import get_env_item
 from cstar.base.utils import _run_cmd
+from cstar.orchestration.utils import ENV_CSTAR_SLURM_MAX_WALLTIME
 
 
 class EnvSettingsBase(BaseSettings):
@@ -63,8 +65,29 @@ class SlurmSettingsBase(EnvSettingsBase):
     """The SLURM account name."""
     SLURM_QUEUE: str = Field(default="", frozen=True, min_length=1)
     """The SLURM queue name."""
-    SLURM_MAX_WALLTIME: str = Field(default="48:00:00", frozen=True)
-    """The SLURM queue name."""
+    SLURM_MAX_WALLTIME: str = Field(
+        default_factory=lambda: get_env_item(ENV_CSTAR_SLURM_MAX_WALLTIME).default,
+        frozen=True,
+    )
+    """The maximum walltime of a SLURM job."""
+
+    @classmethod
+    def required_settings(cls) -> set[str]:
+        """Return the environment variables the system refuses to submit a job without.
+
+        A setting is required when its field declares a `min_length`; a system
+        that does not need one (e.g. *Elja* has no SLURM accounts) overrides the
+        field without it.
+
+        Returns
+        -------
+        set[str]
+        """
+        return {
+            get_envfield_alias(cls, field_name)
+            for field_name, field in cls.model_fields.items()
+            if any(getattr(m, "min_length", 0) for m in field.metadata)
+        }
 
 
 def get_envfield_alias(

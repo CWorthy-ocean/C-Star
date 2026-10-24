@@ -7,10 +7,8 @@ from unittest import mock
 import pytest
 from pydantic import ValidationError
 
-from cstar.applications.roms_marbl.file_system import RomsFileSystemManager
-from cstar.applications.roms_marbl.models import RomsMarblBlueprint
-from cstar.applications.roms_marbl.transforms import ContinuanceDirective
-from cstar.base.env import ENV_CSTAR_CLOBBER_WORKING_DIR
+from cstar.applications.ucla_roms.models import UclaRomsBlueprint
+from cstar.applications.ucla_roms.transforms import ContinuanceDirective
 from cstar.entrypoint.utils import (
     ARG_CLOBBER,
     ARG_DIRECTIVES_URI_LONG,
@@ -30,12 +28,13 @@ from cstar.orchestration.models import (
 )
 from cstar.orchestration.orchestration import LiveStep, RunRequestCommandFormatter
 from cstar.orchestration.serialization import deserialize
+from cstar.roms.file_system import RomsFileSystemManager
 
 
 @pytest.mark.parametrize(
     ("target_application"),
     [
-        Application.ROMS_MARBL,
+        Application.UCLA_ROMS,
         Application.HELLO_WORLD,
     ],
 )
@@ -70,7 +69,7 @@ def test_converter_defaults(
 @pytest.mark.parametrize(
     ("target_application"),
     [
-        Application.ROMS_MARBL,
+        Application.UCLA_ROMS,
         Application.HELLO_WORLD,
     ],
 )
@@ -192,7 +191,7 @@ def test_continuance_transform(
     bp_path_before = step.blueprint_path
     fsm = RomsFileSystemManager(step.working_dir)
 
-    original_bp = deserialize(bp_path_before, RomsMarblBlueprint)
+    original_bp = deserialize(bp_path_before, UclaRomsBlueprint)
     assert original_bp.initial_conditions.data, "data list is unexpectedly empty"
     original_ic = original_bp.initial_conditions.data[0].location
 
@@ -213,7 +212,7 @@ def test_continuance_transform(
     # confirm the path includes a suffix specified by the transform
     assert ContinuanceDirective.suffix() in str(bp_path_after)
 
-    bp = deserialize(bp_path_after, RomsMarblBlueprint)
+    bp = deserialize(bp_path_after, UclaRomsBlueprint)
     assert bp.initial_conditions.data, "data list is unexpectedly empty"
 
     # confirm the location has been swapped to match the fixture
@@ -226,7 +225,7 @@ def test_continuance_transform(
 
 def test_adapt_appends_clobber_for_targeted_step(tmp_path: Path) -> None:
     """Verify `--clobber` is appended when the step's `workflow_overrides`
-    mark it for per-step clobber, even though the global clobber flag is unset.
+    mark it for per-step clobber.
     """
     bp_path = tmp_path / "blueprint.yaml"
     bp_path.touch()
@@ -247,7 +246,7 @@ def test_adapt_appends_clobber_for_targeted_step(tmp_path: Path) -> None:
 
 def test_adapt_omits_clobber_for_untargeted_step(tmp_path: Path) -> None:
     """Verify `--clobber` is not appended when the step's `workflow_overrides`
-    do not mark it for per-step clobber and the global flag is unset.
+    do not mark it for per-step clobber.
     """
     bp_path = tmp_path / "blueprint.yaml"
     bp_path.touch()
@@ -260,35 +259,6 @@ def test_adapt_omits_clobber_for_untargeted_step(tmp_path: Path) -> None:
     )
 
     with mock.patch.dict(os.environ, {}, clear=True):
-        request = StepToRunRequestAdapter().adapt(step)
-
-    assert ARG_CLOBBER not in request.command
-
-
-def test_adapt_omits_clobber_when_only_global_env_flag_set(
-    tmp_path: Path,
-) -> None:
-    """Verify the global `CSTAR_CLOBBER_WORKING_DIR` env var alone does not
-    cause `--clobber` to be appended to the generated command. Workplan-run
-    clobber selection now flows exclusively through the step's
-    `workflow_overrides`; the env var only takes effect inside the
-    subprocess started by the generated `cstar blueprint run` command.
-    """
-    bp_path = tmp_path / "blueprint.yaml"
-    bp_path.touch()
-
-    step = LiveStep(
-        name="test step",
-        application=Application.HELLO_WORLD,
-        blueprint=bp_path,
-        working_dir=tmp_path / "unit-test-work-dir",
-    )
-
-    with mock.patch.dict(
-        os.environ,
-        {ENV_CSTAR_CLOBBER_WORKING_DIR: "1"},
-        clear=True,
-    ):
         request = StepToRunRequestAdapter().adapt(step)
 
     assert ARG_CLOBBER not in request.command

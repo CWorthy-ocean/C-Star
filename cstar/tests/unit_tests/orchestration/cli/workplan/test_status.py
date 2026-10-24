@@ -19,7 +19,7 @@ from cstar.orchestration.manifest import (
 from cstar.orchestration.models import KEY_PRE_RUN, BlueprintIdentity, Step, Workplan
 from cstar.orchestration.orchestration import LiveStep, LiveWorkplan, Status
 from cstar.orchestration.serialization import deserialize, serialize
-from cstar.orchestration.tracking import KEY_ATTACHED, WorkplanRun
+from cstar.orchestration.tracking import WorkplanRun
 from cstar.tests.unit_tests.orchestration.conftest import (
     EXTERNAL_TOKEN,
     ExternalTaskFactory,
@@ -49,12 +49,10 @@ def test_workplan_status_launcher_follows_pre_run(
         for step in wp.steps
     ]
     lwp = LiveWorkplan(**wp.model_dump(exclude={"steps"}), steps=live_steps)
-    trx_path = tmp_path / f"live-{wp_path.name}"
+    trx_path = tmp_path / "live_transformed.yaml"
     assert serialize(trx_path, lwp)
 
     run = WorkplanRun(
-        workplan_path=wp_path,
-        trx_workplan_path=trx_path,
         output_path=tmp_path,
         run_id=mock_run_id,
     )
@@ -95,11 +93,9 @@ def test_workplan_status_reports_external_dependency(
     lwp = LiveWorkplan(
         **external_workplan.model_dump(exclude={"steps"}), steps=live_steps
     )
-    trx_path = tmp_path / "consumer-trx.yaml"
+    trx_path = tmp_path / "consumer_transformed.yaml"
     assert serialize(trx_path, lwp)
     run = WorkplanRun(
-        workplan_path=trx_path,
-        trx_workplan_path=trx_path,
         output_path=tmp_path,
         run_id=mock_run_id,
     )
@@ -146,11 +142,9 @@ def test_workplan_status_warns_about_unresolvable_external_dependency(
     lwp = LiveWorkplan(
         **external_workplan.model_dump(exclude={"steps"}), steps=live_steps
     )
-    trx_path = tmp_path / "consumer-trx.yaml"
+    trx_path = tmp_path / "consumer_transformed.yaml"
     assert serialize(trx_path, lwp)
     run = WorkplanRun(
-        workplan_path=trx_path,
-        trx_workplan_path=trx_path,
         output_path=tmp_path,
         run_id=mock_run_id,
     )
@@ -219,14 +213,11 @@ def test_workplan_status_refreshes_the_manifest(
             )
         ],
     )
-    wp_path = tmp_path / "refreshed.yaml"
     live_steps = [LiveStep.from_step(step) for step in wp.steps]
     lwp = LiveWorkplan(**wp.model_dump(exclude={"steps"}), steps=live_steps)
-    trx_path = tmp_path / "live-refreshed.yaml"
+    trx_path = tmp_path / "live-refreshed_transformed.yaml"
     assert serialize(trx_path, lwp)
     run = WorkplanRun(
-        workplan_path=wp_path,
-        trx_workplan_path=trx_path,
         output_path=tmp_path,
         run_id=mock_run_id,
     )
@@ -291,14 +282,12 @@ def test_workplan_status_of_an_attached_run_is_what_its_records_say(
     )
     live_steps = [LiveStep.from_step(step) for step in wp.steps]
     lwp = LiveWorkplan(**wp.model_dump(exclude={"steps"}), steps=live_steps)
-    trx_path = tmp_path / "live-attached.yaml"
+    trx_path = tmp_path / "live-attached_transformed.yaml"
     assert serialize(trx_path, lwp)
     run = WorkplanRun(
-        workplan_path=tmp_path / "attached.yaml",
-        trx_workplan_path=trx_path,
         output_path=tmp_path,
         run_id=mock_run_id,
-        metadata={KEY_ATTACHED: "1"},
+        attached=True,
     )
     ensure_run_manifest(
         tmp_path,

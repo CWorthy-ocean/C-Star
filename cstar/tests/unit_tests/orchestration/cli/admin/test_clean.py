@@ -8,8 +8,16 @@ import pytest
 import typer
 from typer.testing import CliRunner
 
-from cstar.base.env import ENV_CSTAR_CLI_DRY_RUN, ENV_CSTAR_RUNID, FLAG_ON
+from cstar.base.env import (
+    ENV_CSTAR_CACHE_HOME,
+    ENV_CSTAR_CONFIG_HOME,
+    ENV_CSTAR_DATA_HOME,
+    ENV_CSTAR_RUNID,
+    ENV_CSTAR_STATE_HOME,
+    REMOVED_SETTINGS,
+)
 from cstar.base.exceptions import CstarError
+from cstar.base.feature import ENV_FF_DEVELOPER_MODE
 from cstar.cli.admin.clean import (
     ARG_YES,
     CleanupStatus,
@@ -20,12 +28,11 @@ from cstar.cli.admin.clean import (
     perform_actions,
     runid_callback,
 )
-from cstar.entrypoint.utils import ARG_DRY_RUN
+from cstar.cli.cli import app as root_app
+from cstar.entrypoint.utils import ARG_ALL, ARG_DRY_RUN
 from cstar.execution.file_system import DirectoryManager
 from cstar.orchestration.models import Workplan
 from cstar.orchestration.tracking import (
-    KEY_ACCESS,
-    KEY_ATTACHED,
     Access,
     TrackingRepository,
     WorkplanRun,
@@ -163,8 +170,7 @@ async def test_cli_admin_clean_perform_actions_dryrun(
         else:
             path.mkdir(parents=True, exist_ok=False)
 
-    with mock.patch.dict(os.environ, {ENV_CSTAR_CLI_DRY_RUN: FLAG_ON}):
-        await perform_actions([action])
+    await perform_actions([action], dry_run=True)
 
     # confirm the deletions didn't occur
     assert all(path.exists() for path in action.asset_paths)
@@ -254,7 +260,7 @@ def test_cli_admin_clean_default_cleanup(dry_run: bool) -> None:
             asset_idx += 1
 
     # use non-interactive mode
-    args: list[str] = [ARG_YES]
+    args: list[str] = [ARG_ALL, ARG_YES]
     if dry_run:
         args.append(ARG_DRY_RUN)
 
@@ -264,6 +270,179 @@ def test_cli_admin_clean_default_cleanup(dry_run: bool) -> None:
     key = "will remove" if dry_run else "removed"
 
     assert key in result.stdout.lower()
+
+
+def _seed_roots() -> list[Path]:
+    """Put an asset in each of the four C-Star roots and return the assets."""
+    roots = [
+        Path(os.environ[name])
+        for name in (
+            ENV_CSTAR_CACHE_HOME,
+            ENV_CSTAR_CONFIG_HOME,
+            ENV_CSTAR_DATA_HOME,
+            ENV_CSTAR_STATE_HOME,
+        )
+    ]
+    assets = [root / "asset.mock" for root in roots]
+    for asset in assets:
+        asset.touch()
+    return assets
+
+
+@pytest.mark.parametrize("extra", [[], [ARG_YES], [ARG_YES, ARG_DRY_RUN]])
+def test_cli_admin_clean_requires_all_or_run_id(extra: list[str]) -> None:
+    """Verify neither `--all` nor `--run-id` is a usage error that names both
+    choices and removes nothing, even with `--yes`.
+    """
+    assets = _seed_roots()
+
+    result = CliRunner().invoke(app, extra, color=False)
+
+    assert result.exit_code == 2
+    assert "--all" in result.output
+    assert "--run-id" in result.output
+    assert all(asset.exists() for asset in assets)
+
+
+def test_cli_admin_clean_rejects_all_with_run_id() -> None:
+    """Verify `--all` together with `--run-id` is a usage error removing nothing."""
+    assets = _seed_roots()
+
+    result = CliRunner().invoke(
+        app, [ARG_ALL, "--run-id", "some-run", ARG_YES], color=False
+    )
+
+    assert result.exit_code == 2
+    assert all(asset.exists() for asset in assets)
+
+
+def test_cli_admin_clean_all_dry_run_lists_the_four_roots() -> None:
+    """Verify `--all --dry-run` lists exactly the four roots in the environment
+    and removes nothing.
+    """
+    assets = _seed_roots()
+    roots = {
+        os.environ[name]
+        for name in (
+            ENV_CSTAR_CACHE_HOME,
+            ENV_CSTAR_CONFIG_HOME,
+            ENV_CSTAR_DATA_HOME,
+            ENV_CSTAR_STATE_HOME,
+        )
+    }
+
+    result = CliRunner().invoke(
+        app,
+        [ARG_ALL, ARG_DRY_RUN],
+        color=False,
+        catch_exceptions=False,
+        env={"COLUMNS": "1000"},  # keep rich from wrapping the long tmp paths
+    )
+
+    assert result.exit_code == 0, result.output
+    listed = {
+        line
+        for line in (ln.strip() for ln in result.output.splitlines())
+        if line.startswith("/") and "keeps" not in line
+    }
+    assert listed == roots
+    assert all(asset.exists() for asset in assets)
+
+
+def test_cli_admin_clean_all_keeps_the_source_cache_and_catalog(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Verify `--all` removes everything under the data home except the shared
+    source-data cache and the user catalog.
+    """
+    data = _isolate_env(monkeypatch, tmp_path.resolve(), catalog=None)
+    source_data = DirectoryManager.source_data_home()
+    catalog = data / "catalog"
+    run = data / "runs" / "run1"
+    for d in (source_data, catalog, run):
+        d.mkdir(parents=True, exist_ok=True)
+    (source_data / "glorys.nc").touch()
+    (catalog / "domains.yaml").touch()
+    (run / "out.nc").touch()
+    state = Path(os.environ[ENV_CSTAR_STATE_HOME]) / "state.mock"
+    state.touch()
+
+    result = CliRunner().invoke(
+        app, [ARG_ALL, ARG_YES], color=False, catch_exceptions=False
+    )
+
+    assert result.exit_code == 0, result.output
+    assert (source_data / "glorys.nc").exists()
+    assert (catalog / "domains.yaml").exists()
+    assert not (data / "runs").exists()
+    assert not state.exists()
+
+
+@pytest.mark.parametrize("blank", [" ", "\n\t "])
+def test_cli_admin_clean_blank_runid_is_explained(blank: str) -> None:
+    """Verify a whitespace run-id gives a message, not a silent exit 1."""
+    assets = _seed_roots()
+
+    result = CliRunner().invoke(app, ["--run-id", blank, ARG_YES], color=False)
+
+    assert result.exit_code == 2
+    assert "blank" in " ".join(result.output.split())
+    assert all(asset.exists() for asset in assets)
+
+
+def test_cli_admin_clean_unknown_runid_exits_zero() -> None:
+    """Verify a run-id with nothing to clean says so and exits 0."""
+    result = CliRunner().invoke(
+        app, ["--run-id", "no-such-run", ARG_YES], color=False, catch_exceptions=False
+    )
+
+    assert result.exit_code == 0, result.output
+    assert "No cleanup actions to perform" in result.output
+
+
+def test_cli_admin_clean_is_mounted_without_developer_mode(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Verify `cstar admin clean` is reachable from the root app with the
+    developer-mode flag off.
+    """
+    monkeypatch.delenv(ENV_FF_DEVELOPER_MODE, raising=False)
+    assets = _seed_roots()
+
+    result = CliRunner().invoke(
+        root_app,
+        ["admin", "clean", ARG_ALL, ARG_DRY_RUN],
+        color=False,
+        catch_exceptions=False,
+    )
+
+    assert result.exit_code == 0, result.output
+    assert "will remove" in result.output.lower()
+    assert all(asset.exists() for asset in assets)
+
+
+def test_cli_admin_clean_refuses_a_removed_dry_run_setting(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Verify `admin clean` removes nothing and exits 2 while a removed setting
+    that used to make it a dry run is still exported.
+
+    Parameters
+    ----------
+    monkeypatch : pytest.MonkeyPatch
+        Fixture used to export the setting.
+    """
+    name = next(n for n, removed in REMOVED_SETTINGS.items() if removed.refused)
+    monkeypatch.setenv(name, "1")
+    actions = t.cast("list[FileSystemCleanupAction]", get_default_cleanup_actions())
+    assets = [path / "asset.mock" for action in actions for path in action.asset_paths]
+    for asset in assets:
+        asset.touch()
+
+    result = CliRunner().invoke(app, [ARG_ALL, ARG_YES], color=False)
+
+    assert result.exit_code == 2
+    assert all(asset.exists() for asset in assets)
 
 
 @pytest.fixture
@@ -347,13 +526,13 @@ def test_cli_admin_clean_keep_path_symlink(tmp_path: Path) -> None:
     assert action.mitigated()
 
 
-def test_cli_admin_clean_keep_paths_dry_run(data_home: Path) -> None:
+@pytest.mark.asyncio
+async def test_cli_admin_clean_keep_paths_dry_run(data_home: Path) -> None:
     """Verify dry-run removes nothing when keep paths are configured."""
     before = sorted(data_home.rglob("*"))
     action = _keep_action(data_home, data_home / "source-data")
 
-    with mock.patch.dict(os.environ, {ENV_CSTAR_CLI_DRY_RUN: FLAG_ON}):
-        action.execute()
+    await perform_actions([action], dry_run=True)
 
     assert sorted(data_home.rglob("*")) == before
     assert not action.mitigated()
@@ -438,16 +617,14 @@ def test_cli_admin_clean_default_data_action_keeps_local_catalog(
     assert action.keep_paths == [DirectoryManager.source_data_home()]
 
 
-def _track(root: Path, run_id: str, **metadata: str) -> WorkplanRun:
+def _track(root: Path, run_id: str, **fields: t.Any) -> WorkplanRun:
     """Make the run directory `root` and track it under `run_id`."""
     root.mkdir(parents=True)
     (root / "data.nc").write_text("data")
     run = WorkplanRun(
-        workplan_path=root / "workplan.yaml",
-        trx_workplan_path=root / "workplan_transformed.yaml",
         output_path=root,
         run_id=run_id,
-        metadata=metadata,
+        **fields,
     )
     TrackingRepository().put_workplan_run_sync(run)
     return run
@@ -471,18 +648,12 @@ def test_cli_admin_clean_run_actions_of_a_scheduled_run_include_its_data(
     assert data.asset_paths == [run.output_path]
 
 
-@pytest.mark.parametrize(
-    "metadata",
-    [
-        {KEY_ATTACHED: "1", KEY_ACCESS: Access.owned.value},
-        {KEY_ATTACHED: "1"},
-    ],
-)
+@pytest.mark.parametrize("fields", [{"access": Access.owned}, {}])
 def test_cli_admin_clean_run_actions_of_an_owned_attached_run_include_its_data(
-    tmp_path: Path, metadata: dict[str, str]
+    tmp_path: Path, fields: dict[str, Access]
 ) -> None:
     """Verify an attached run the user owns is cleaned like any other."""
-    _track(tmp_path / "colleague" / "owned", "owned", **metadata)
+    _track(tmp_path / "colleague" / "owned", "owned", attached=True, **fields)
 
     assert _names(get_run_actions("owned")) == ["State", "Data"]
 
@@ -496,7 +667,8 @@ def test_cli_admin_clean_run_actions_keep_the_data_of_a_read_only_run(
     _track(
         tmp_path / "colleague" / "frozen",
         "frozen",
-        **{KEY_ATTACHED: "1", KEY_ACCESS: Access.read_only.value},
+        attached=True,
+        access=Access.read_only,
     )
 
     actions = get_run_actions("frozen")
@@ -536,7 +708,8 @@ def test_cli_admin_clean_removes_the_tracking_of_a_read_only_run_but_not_its_dat
     run = _track(
         tmp_path / "colleague" / "frozen",
         "frozen",
-        **{KEY_ATTACHED: "1", KEY_ACCESS: Access.read_only.value},
+        attached=True,
+        access=Access.read_only,
     )
     latest = TrackingRepository().latest_path("frozen")
     assert latest.exists()

@@ -3,6 +3,7 @@
 import json
 import os
 import typing as t
+from collections.abc import Callable
 from pathlib import Path
 from unittest import mock
 
@@ -10,6 +11,7 @@ import pytest
 import typer
 import yaml
 from pydantic import Field
+from typer.testing import CliRunner
 
 from cstar.applications import core
 from cstar.applications.hello_world import (
@@ -17,6 +19,7 @@ from cstar.applications.hello_world import (
     HelloWorldBlueprint,
 )
 from cstar.base.env import ENV_CSTAR_DISABLE_MIGRATION, FLAG_ON
+from cstar.cli.cli import app as root_app
 from cstar.cli.common import (
     checkmark,
     colored,
@@ -32,6 +35,7 @@ from cstar.cli.common import (
 )
 from cstar.execution.file_system import DirectoryManager
 from cstar.orchestration.serialization import read_blueprint_raw
+from cstar.orchestration.utils import ENV_CSTAR_SLURM_ACCOUNT
 from cstar.system.migration import (
     BlueprintMigration,
     CstarManualMigrationError,
@@ -237,7 +241,7 @@ def test_set_ctxmap_overwrite(capsys: pytest.CaptureFixture) -> None:
 
 @pytest.fixture
 def relative_location_bp(tmp_path: Path, bp_templates_dir: Path) -> Path:
-    """A ROMS-MARBL blueprint, in its own directory, with a relative location."""
+    """A UCLA-ROMS blueprint, in its own directory, with a relative location."""
     bp_dir = tmp_path / "blueprints"
     bp_dir.mkdir()
     bp_path = bp_dir / "bp.yaml"
@@ -357,3 +361,59 @@ def test_localize_and_migrate_anchors_a_remote_blueprint_to_the_working_director
         read_blueprint_raw(localized)["forcing"]["boundary"]["data"][0]["location"]
         == expected
     )
+
+
+def test_root_callback_exits_on_a_bad_configuration_file(
+    isolate_user_config: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Verify a configuration file naming a setting it may not set stops any
+    command with exit code 2 and the error on stderr, applying nothing.
+
+    Parameters
+    ----------
+    isolate_user_config : Path
+        The configuration file the loader reads for this test.
+    monkeypatch : pytest.MonkeyPatch
+        Fixture to modify the environment.
+    """
+    monkeypatch.delenv(ENV_CSTAR_SLURM_ACCOUNT, raising=False)
+    isolate_user_config.write_text(
+        f"{ENV_CSTAR_SLURM_ACCOUNT}=m1234\nCSTAR_NOT_A_SETTING=1\n"
+    )
+
+    result = CliRunner().invoke(root_app, ["env", "show"], color=False)
+
+    assert result.exit_code == 2
+    assert str(isolate_user_config) in result.stderr.replace("\n", "")
+    assert "CSTAR_NOT_A_SETTING" in result.stderr
+    assert "C-Star Environment Configuration" not in result.stdout
+    assert ENV_CSTAR_SLURM_ACCOUNT not in os.environ
+
+
+def test_root_callback_loads_the_configuration_file(
+    isolate_user_config: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    flatten_cli_output: Callable[[str], str],
+) -> None:
+    """Verify a subcommand run through the root app sees a setting the
+    configuration file supplies.
+
+    Parameters
+    ----------
+    isolate_user_config : Path
+        The configuration file the loader reads for this test.
+    monkeypatch : pytest.MonkeyPatch
+        Fixture to modify the environment.
+    flatten_cli_output : Callable[[str], str]
+        Fixture that joins the output lines that rich wrapped.
+    """
+    monkeypatch.delenv(ENV_CSTAR_SLURM_ACCOUNT, raising=False)
+    isolate_user_config.write_text(f"{ENV_CSTAR_SLURM_ACCOUNT}=m1234\n")
+
+    result = CliRunner().invoke(root_app, ["env", "show"], color=False)
+
+    assert result.exit_code == 0, result.stderr
+    assert f"{ENV_CSTAR_SLURM_ACCOUNT}: m1234 [config]" in flatten_cli_output(
+        result.stdout
+    )
+    assert os.environ[ENV_CSTAR_SLURM_ACCOUNT] == "m1234"

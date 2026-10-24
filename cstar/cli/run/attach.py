@@ -31,8 +31,7 @@ from cstar.entrypoint.utils import (
     ARG_VERIFY,
     ARG_VERIFY_HELP,
 )
-from cstar.execution.file_system import DirectoryManager
-from cstar.orchestration.dag_runner import recorded_workplan
+from cstar.execution.file_system import DirectoryManager, StateDirectoryManager
 from cstar.orchestration.index import (
     HandleKind,
     RunLocation,
@@ -44,7 +43,7 @@ from cstar.orchestration.manifest import (
     fold_step_records,
     read_run_manifest,
 )
-from cstar.orchestration.orchestration import LiveWorkplan
+from cstar.orchestration.orchestration import LiveWorkplan, ProcessHandle, Status
 from cstar.orchestration.run_check import (
     TRANSFORMED_WORKPLAN_GLOB,
     FindingKind,
@@ -52,9 +51,6 @@ from cstar.orchestration.run_check import (
 )
 from cstar.orchestration.serialization import try_deserialize
 from cstar.orchestration.tracking import (
-    KEY_ACCESS,
-    KEY_ATTACHED,
-    KEY_RUN_NAME,
     KEY_RUN_UUID,
     Access,
     TrackingRepository,
@@ -109,7 +105,7 @@ to another user, since the verbs that write into a run (`cstar run gather`,
 directory; it is owned otherwise. {ARG_OWN} and {ARG_READ_ONLY} decide it
 instead, and on a run that is already attached they change its mode alone.
 
-An attached run is never relaunched: `cstar workplan run --run-id` and
+An attached run is never relaunched: `cstar workplan submit --run-id` and
 `--resume` refuse it, as it has no sentinels here. To continue from it, start a
 new run that references it (see "Extending a finished run").
 
@@ -327,7 +323,6 @@ def _plan(
 def build_attached_record(
     manifest: RunManifest,
     location: RunLocation,
-    trx: Path,
     *,
     run_id: str,
     mode: Access,
@@ -340,8 +335,6 @@ def build_attached_record(
         The manifest of the run.
     location : RunLocation
         The run as found in its directory.
-    trx : Path
-        The transformed workplan in the run directory.
     run_id : str
         The run-id to attach the run under.
     mode : Access
@@ -350,30 +343,56 @@ def build_attached_record(
     Returns
     -------
     WorkplanRun
-        A record whose `workplan_path` is the workplan the latest attempt
-        carried, else the transformed workplan.
+        A record of the run directory, the uuid and the access. It holds no
+        workplan path, name or start time: those are read from the run's
+        manifest.
     """
-    record = WorkplanRun(
-        workplan_path=trx,
-        trx_workplan_path=trx,
+    return WorkplanRun(
         output_path=location.root,
         run_id=run_id,
-        start_at=location.start_at,
         sentinels=set(),
-        metadata={
-            KEY_RUN_NAME: manifest.name,
-            KEY_RUN_UUID: manifest.id,
-            KEY_ATTACHED: "1",
-            KEY_ACCESS: mode.value,
-        },
+        attached=True,
+        access=mode,
+        metadata={KEY_RUN_UUID: manifest.id},
     )
-    try:
-        carried = recorded_workplan(record)
-    except CstarError as ex:
-        typer.echo(f"Warning: the carried workplan was not located: {ex}", err=True)
-        return record
 
-    return record.model_copy(update={"workplan_path": carried}) if carried else record
+
+def _drop_sentinels(run: WorkplanRun) -> None:
+    """Remove the sentinels a record names, and the run's state directory when empty.
+
+    An attached run has no sentinels on this machine; those a re-attached
+    run's earlier record named would otherwise be left behind, nothing
+    tracking them. A sentinel whose step has not reached a terminal status is
+    the state of a step that may still be running here, and is left with a
+    warning. Record-keeping never stops the command: a path that cannot be
+    removed is warned about and left.
+
+    Parameters
+    ----------
+    run : WorkplanRun
+        The record being replaced, whose `sentinels` are removed.
+    """
+    for sentinel in run.sentinels:
+        handle = try_deserialize(sentinel, ProcessHandle)
+        if handle is not None and not Status.is_terminal(handle.status):
+            log.warning(
+                f"Left the sentinel {sentinel}: step {handle.name!r} is "
+                f"{handle.status.name}, not finished."
+            )
+            continue
+        try:
+            sentinel.unlink(missing_ok=True)
+        except OSError as ex:
+            log.warning(f"Unable to remove the sentinel {sentinel}: {ex}")
+
+    state_dir = StateDirectoryManager.run_state_dir(run_id=run.run_id)
+    try:
+        state_dir.rmdir()
+    except FileNotFoundError:
+        pass
+    except OSError as ex:
+        # not empty (the manifest lock may remain) or unreadable: leave it
+        log.debug(f"Left the state directory {state_dir}: {ex}")
 
 
 def write_attached_record(plan: Plan, fresh: WorkplanRun, mode: Access) -> None:
@@ -387,6 +406,11 @@ def write_attached_record(plan: Plan, fresh: WorkplanRun, mode: Access) -> None:
         The record that attaches the run.
     mode : Access
         The access the run is attached with.
+
+    Raises
+    ------
+    CstarError
+        If the record of the run vanished before it was updated.
     """
     repository = TrackingRepository()
     if plan is Plan.new:
@@ -395,15 +419,12 @@ def write_attached_record(plan: Plan, fresh: WorkplanRun, mode: Access) -> None:
 
     def mutate(run: WorkplanRun) -> None:
         if plan is Plan.reattach:
+            _drop_sentinels(run)
             run.output_path = fresh.output_path
-            run.trx_workplan_path = fresh.trx_workplan_path
-            run.workplan_path = fresh.workplan_path
-            run.start_at = fresh.start_at
             run.sentinels = set()
-            run.metadata.update(
-                {k: v for k, v in fresh.metadata.items() if k != KEY_ACCESS}
-            )
-        run.metadata[KEY_ACCESS] = mode.value
+            run.attached = True
+            run.metadata[KEY_RUN_UUID] = fresh.metadata[KEY_RUN_UUID]
+        run.access = mode
 
     if repository.update_workplan_run_sync(fresh.run_id, mutate) is None:
         msg = f"The record of run {fresh.run_id!r} vanished before it was updated."
@@ -491,7 +512,7 @@ def attach(
         write_attached_record(
             plan,
             build_attached_record(
-                manifest, resolved.location, trx, run_id=run_id, mode=mode
+                manifest, resolved.location, run_id=run_id, mode=mode
             ),
             mode,
         )

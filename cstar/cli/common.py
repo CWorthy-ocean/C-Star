@@ -14,12 +14,12 @@ from rich.console import Console
 import cstar
 from cstar.applications.core import get_application
 from cstar.base.env import (
-    ENV_CSTAR_CLI_VERBOSE,
     ENV_CSTAR_DISABLE_MIGRATION,
     ENV_CSTAR_LOG_LEVEL,
-    FLAG_ON,
+    REMOVED_SETTINGS,
+    load_user_config,
 )
-from cstar.base.exceptions import CstarExpectationFailed
+from cstar.base.exceptions import CstarExpectationFailed, CstarUserConfigError
 from cstar.base.feature import is_flag_enabled
 from cstar.base.log import LogLevelChoices, get_logger, reset_log_level
 from cstar.base.utils import slugify
@@ -34,7 +34,6 @@ from cstar.orchestration.formatting import (
 )
 from cstar.orchestration.models import BlueprintCore
 from cstar.orchestration.serialization import (
-    PersistenceMode,
     anchor_blueprint_file,
     anchor_locations,
     serialize,
@@ -73,7 +72,6 @@ SCHEMA_ERRORS: t.Final[tuple[type[CstarMigrationError], ...]] = (
 )
 """Errors raised while planning a migration that no CLI command can recover from."""
 
-BoolCallback: t.TypeAlias = Callable[[typer.Context, bool], bool]
 StrCallback: t.TypeAlias = Callable[[typer.Context, str], str]
 
 
@@ -210,7 +208,48 @@ def common_callback(
         ),
     ] = False,
 ) -> None:
-    pass
+    """Load the user's configuration file, then warn on stderr about each
+    exported setting that no longer has an effect.
+
+    The file is loaded before any command's options are parsed, so an option's
+    ``envvar`` binding sees it; an exported variable still wins over it.
+
+    Raises
+    ------
+    typer.Exit
+        With code 2 when the configuration file names settings it may not set.
+    """
+    try:
+        load_user_config()
+    except CstarUserConfigError as ex:
+        typer.echo(str(ex), err=True)
+        raise typer.Exit(2) from ex
+
+    for name in sorted(REMOVED_SETTINGS.keys() & os.environ.keys()):
+        typer.echo(f"{name} has no effect; {REMOVED_SETTINGS[name].guidance}", err=True)
+
+
+def exit_on_refused_settings() -> None:
+    """Stop a command that an exported `refused` removed setting used to change.
+
+    The commands such a setting used to change call this before they touch
+    anything: running them while it is exported would do more than was asked
+    (a dry run becoming a real one).
+
+    Raises
+    ------
+    typer.Exit
+        With code 2 when a refused setting is exported.
+    """
+    refused = [
+        name
+        for name in sorted(REMOVED_SETTINGS.keys() & os.environ.keys())
+        if REMOVED_SETTINGS[name].refused
+    ]
+    if refused:
+        msg = f"Refusing to run while {', '.join(refused)} is exported; unset it to continue."
+        typer.echo(msg, err=True)
+        raise typer.Exit(2)
 
 
 P = t.ParamSpec("P")
@@ -236,40 +275,6 @@ def cb_pipeline(
         """Callback wrapper that executes all specified callbacks."""
         for callback in callbacks:
             value = callback(ctx, value)
-
-        return value
-
-    return _callback
-
-
-def set_flag(
-    key: str,
-    extra: BoolCallback | None = None,
-) -> BoolCallback:
-    """Create a typer Callback function that sets the value of an environment
-    variable to the value of the argument supplied by the user.
-
-    Parameters
-    ----------
-    key : str
-        The environment variable to be set
-    extra : StrCallback
-        Additional logic called after setting the environment variable.
-
-    Returns
-    -------
-    StrCallback
-    """
-
-    def _callback(ctx: typer.Context, value: bool) -> bool:
-        """Callback that sets the specified environment variable to `FLAG_ON`
-        if `value` is `True`.
-        """
-        if value:
-            os.environ[key] = FLAG_ON
-
-        if extra:
-            value = extra(ctx, value)
 
         return value
 
@@ -448,13 +453,15 @@ def get_migrator(
     app_def = get_application(application)
     return BlueprintMigration(
         adapters=app_def.migrations or [],
-        targets={application: app_def.schema_version},
+        targets={app_def.name: app_def.schema_version},
         on_planned=on_planned,
         on_migrated=on_migrated,
     )
 
 
-def on_planned_callback(bp_path: Path, plan: MigrationPlan) -> None:
+def on_planned_callback(
+    bp_path: Path, plan: MigrationPlan, verbose: bool = False
+) -> None:
     """Display a summary of a migration plan.
 
     Only called for plans that require adapters.
@@ -465,8 +472,10 @@ def on_planned_callback(bp_path: Path, plan: MigrationPlan) -> None:
         The path to the blueprint being migrated.
     plan : MigrationPlan
         Details of the planned migration.
+    verbose : bool
+        Display every migration step in a table instead of a one-line summary.
     """
-    if not is_flag_enabled(ENV_CSTAR_CLI_VERBOSE):
+    if not verbose:
         num_steps = len(plan.adapters)
         msg = f"Migrating {plan.source!r}->{plan.target!r} in {num_steps} step(s)."
         console.print(msg)
@@ -593,11 +602,7 @@ def persist_migration(request: MigrationRequest, result: MigrateResult) -> Path:
             backup_path = get_backup_path(request.source)
             backup_path.write_bytes(request.source.read_bytes())
 
-        nbytes = serialize(
-            persist_to,
-            updated_bp,
-            mode=PersistenceMode.auto,
-        )
+        nbytes = serialize(persist_to, updated_bp)
         assert nbytes, "The migrated blueprint failed to write content"
     except (SyntaxError, CstarExpectationFailed) as ex:
         msg = f"Unable to complete migration: {ex}"
@@ -606,13 +611,17 @@ def persist_migration(request: MigrationRequest, result: MigrateResult) -> Path:
     return persist_to
 
 
-def execute_migration(request: MigrationRequest) -> PersistedMigrateResult:
+def execute_migration(
+    request: MigrationRequest, verbose: bool = False
+) -> PersistedMigrateResult:
     """Execute the schema migration for a blueprint.
 
     Parameters
     ----------
     request : MigrationRequest
         Parameters to pass to the migrator.
+    verbose : bool
+        Display every step of a planned migration instead of a summary.
 
     Returns
     -------
@@ -641,13 +650,15 @@ def execute_migration(request: MigrationRequest) -> PersistedMigrateResult:
     dumped = validation_result.item.model_dump()
     migrator = get_migrator(
         validation_result.item.application,
-        on_planned=functools.partial(on_planned_callback, request.source),
+        on_planned=functools.partial(
+            on_planned_callback, request.source, verbose=verbose
+        ),
         on_migrated=on_migrated_callback,
     )
 
     plan = migrator.plan(dumped)
 
-    if request.dry_run() or plan.is_compatible:
+    if request.dry_run or plan.is_compatible:
         log.debug("Short-circuiting migration after planning")
         result = MigrateResult(dumped, dumped, plan=plan)
         # result with target == source indicates no change occurred
@@ -679,13 +690,15 @@ def execute_migration(request: MigrationRequest) -> PersistedMigrateResult:
     return PersistedMigrateResult(result, persisted_to)
 
 
-def localize_and_migrate(path: str) -> tuple[Path, bool]:
+def localize_and_migrate(path: str, verbose: bool = False) -> tuple[Path, bool]:
     """Copy the blueprint locally and auto-migrate its schema if necessary.
 
     Parameters
     ----------
     path : str
         The path to the blueprint.
+    verbose : bool
+        Display every step of a planned migration instead of a summary.
 
     A blueprint downloaded from a URL has no directory of its own, so the
     relative locations in its local copy are anchored to the working directory,
@@ -720,7 +733,7 @@ def localize_and_migrate(path: str) -> tuple[Path, bool]:
         is_migrated = False
 
         try:
-            persist_result = execute_migration(request)
+            persist_result = execute_migration(request, verbose=verbose)
 
             if persist_result.migration_result.error:
                 console.print(persist_result.migration_result.error)

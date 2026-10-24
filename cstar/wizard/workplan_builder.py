@@ -38,13 +38,14 @@ from cstar.applications.core import get_application, get_application_name
 from cstar.applications.forge.blueprint import DEFAULT_APPLICATION as FORGE
 from cstar.applications.hello_world import APP_NAME as HELLO_WORLD
 from cstar.applications.nest_ic import APP_NAME as NEST_IC
-from cstar.applications.roms_marbl.models import APP_NAME as ROMS_MARBL
-from cstar.applications.roms_marbl.transforms import (
+from cstar.applications.ucla_roms.models import APP_NAME as UCLA_ROMS
+from cstar.applications.ucla_roms.transforms import (
     CarbonateSensitivityDirective,
     ContinuanceDirective,
     NestingDirective,
 )
 from cstar.applications.upscaler import APP_NAME as UPSCALER
+from cstar.base.application_names import canonical_application
 from cstar.base.utils import deep_merge, slugify
 from cstar.entrypoint.utils import ARG_PRE_RUN, ARG_RUN_ID, ARG_VAR_LONG
 from cstar.orchestration.check import deep_check
@@ -121,7 +122,7 @@ WORKPLAN_SCHEMA_REF = (
 )
 """The JSON schema editors validate a workplan file against."""
 
-APPLICATIONS = (ROMS_MARBL, FORGE, NEST_IC, UPSCALER, HELLO_WORLD)
+APPLICATIONS = (UCLA_ROMS, FORGE, NEST_IC, UPSCALER, HELLO_WORLD)
 """The applications a step may be authored for."""
 
 VIEW_YAML, VIEW_DAG, VIEW_BOTH = "YAML", "DAG", "Both"
@@ -135,7 +136,7 @@ PLACEMENTS = [PLACE_RIGHT, PLACE_BOTTOM, PLACE_TOP, PLACE_HIDDEN]
 _SIDE_CLASSES = ("forge-side-right", "forge-side-bottom", "forge-side-top")
 """The placement classes of the preview pane, one at a time."""
 
-CHECK, RUN = "check", "run"
+CHECK, SUBMIT = "check", "submit"
 """The ``cstar workplan`` subcommands the Run subsection streams."""
 
 FREQUENT_RESTARTS = {"output_period_rst": 86400.0, "monthly_restarts": False}
@@ -164,7 +165,7 @@ SOURCE_DEFERRED = "deferred"
 SOURCE_INLINE = "inline"
 SOURCE_CURRENT = "current"
 _SOURCES = [
-    ("catalog roms_marbl", SOURCE_CATALOG_ROMS),
+    ("catalog ucla_roms", SOURCE_CATALOG_ROMS),
     ("catalog forge", SOURCE_CATALOG_FORGE),
     ("path", SOURCE_PATH),
     ("upload", SOURCE_UPLOAD),
@@ -266,7 +267,7 @@ def _read_facts(path: str, mtime_ns: int) -> BlueprintFacts | None:
     runtime = _section("runtime_params")
     use_pio = partitioning.get("use_pio")
     return BlueprintFacts(
-        application=str(raw.get("application", "")),
+        application=canonical_application(str(raw.get("application", ""))),
         start_date=_as_datetime(runtime.get("start_date")),
         end_date=_as_datetime(runtime.get("end_date")),
         cpus_needed=int(cpus) if isinstance(cpus, int) else 0,
@@ -501,7 +502,7 @@ def unsupported_machines() -> list[str]:
 # dependency graph
 # ---------------------------------------------------------------------------
 _DAG_FILLS = {
-    ROMS_MARBL: "#cfe3f7",
+    UCLA_ROMS: "#cfe3f7",
     FORGE: "#d5ecd0",
     NEST_IC: "#f6e3c4",
     UPSCALER: "#e6d4f2",
@@ -796,7 +797,7 @@ class _StepPane:
         self._current_path = ""
         self._cpus_touched = False
         self._cpus_prefilled = 0
-        self._app_fallback: str = ROMS_MARBL
+        self._app_fallback: str = UCLA_ROMS
         self._form_app = ""
         self._form: dict[str, tuple[Any, type, Any]] = {}
         self._form_touched: set[str] = set()
@@ -819,7 +820,7 @@ class _StepPane:
         self.upload_note = W.HTML("")
         self.producer = W.Dropdown(options=[])
         self.filename = text(placeholder="B_<name>.yaml")
-        self.application = W.Dropdown(options=list(APPLICATIONS), value=ROMS_MARBL)
+        self.application = W.Dropdown(options=list(APPLICATIONS), value=UCLA_ROMS)
         self.current_note = W.HTML("")
         self.source_note = W.HTML("")
 
@@ -828,7 +829,7 @@ class _StepPane:
         )
         self.locked_deps = W.HTML("")
 
-        # roms_marbl overrides
+        # ucla_roms overrides
         self.start_note = W.HTML("")
         self.end_date = text(placeholder="ISO date, blank = from the blueprint")
         self.cdr_location = text(placeholder="path to a CDR forcing netCDF")
@@ -1202,7 +1203,7 @@ class _StepPane:
                 cpus = emitted.cpus_needed
                 if not self.filename.value:
                     self.filename.value = emitted.filename
-                if self.app == ROMS_MARBL or self.app not in APPLICATIONS:
+                if self.app == UCLA_ROMS or self.app not in APPLICATIONS:
                     self.application.value = emitted.application
         elif facts := self.facts():
             cpus = facts.cpus_needed
@@ -1230,7 +1231,7 @@ class _StepPane:
             self._schema_ref = facts.roms_ref if facts else None
             for row in self._rows:
                 row.refresh_sections()
-        roms = app == ROMS_MARBL
+        roms = app == UCLA_ROMS
         for widget in (
             self.end_date,
             self.cdr_location,
@@ -1593,7 +1594,7 @@ class _StepPane:
     def _gather_overrides(self, app: str) -> dict[str, Any]:
         """The ``blueprint_overrides`` the widgets describe, raw YAML merged last."""
         out: dict[str, Any] = {}
-        if app == ROMS_MARBL:
+        if app == UCLA_ROMS:
             if end := self.end_date.value.strip():
                 out["runtime_params"] = {"end_date": _parse_datetime(end)}
             for row in self._rows:
@@ -1708,7 +1709,7 @@ class _StepPane:
                 if n not in self._form_touched
                 and _read_field_widget(*self._form[n][:2]) in ("", None)
             ]
-            if missing and self.app != ROMS_MARBL:
+            if missing and self.app != UCLA_ROMS:
                 lines.append(f"inline blueprint fields missing: {', '.join(missing)}")
         self.problem_lines = lines
         return lines
@@ -1717,7 +1718,7 @@ class _StepPane:
     def title(self) -> str:
         """``<name> · <application> · <window>`` for the accordion header."""
         window = ""
-        if self.app == ROMS_MARBL:
+        if self.app == UCLA_ROMS:
             facts = self.facts()
             end = self.end_date.value.strip() or (
                 str(facts.end_date) if facts and facts.end_date else ""
@@ -1773,7 +1774,7 @@ class _StepPane:
         self.raw_overrides.value = ""
         self._rows, self._form_app, self._form_touched = [], "", set()
         self.rows_box.children = []
-        if app == ROMS_MARBL:
+        if app == UCLA_ROMS:
             end = _pop_path(rest, "runtime_params", "end_date")
             self.end_date.value = "" if end is None else str(end)
             for section, fields in list(rest.get("namelist_overrides", {}).items()):
@@ -1938,7 +1939,7 @@ class _BaseChooser:
     """Form fields choosing the base of a time recipe: a step or a blueprint.
 
     A blueprint is turned into a base step on demand; a forge blueprint yields
-    a forge step plus the deferred roms_marbl step that runs what it emits.
+    a forge step plus the deferred ucla_roms step that runs what it emits.
     """
 
     def __init__(
@@ -1950,8 +1951,8 @@ class _BaseChooser:
         self._on_change = on_change
         self.kind = W.Dropdown(
             options=[
-                ("an existing roms_marbl step", _KIND_STEP),
-                ("a catalog roms_marbl blueprint", SOURCE_CATALOG_ROMS),
+                ("an existing ucla_roms step", _KIND_STEP),
+                ("a catalog ucla_roms blueprint", SOURCE_CATALOG_ROMS),
                 ("a catalog forge blueprint (forge, then run)", SOURCE_CATALOG_FORGE),
                 ("a blueprint path", SOURCE_PATH),
             ],
@@ -2005,7 +2006,7 @@ class _BaseChooser:
         self._on_change()
 
     def refresh(self, step_names: list[str]) -> None:
-        """Reload the choices from the page's roms_marbl steps and the catalog."""
+        """Reload the choices from the page's ucla_roms steps and the catalog."""
         page = self.page
         _set_options(self.step, [("(choose a step)", ""), *step_names])
         _set_options(
@@ -2104,15 +2105,15 @@ class _BaseChooser:
             emitted = emitted_for(path, FORGE)
             if emitted is None:
                 raise ValueError(f"cannot read a forge blueprint at {path!r}")
-            names = page.unique_names(FORGE, ROMS_MARBL)
+            names = page.unique_names(FORGE, UCLA_ROMS)
             forge, run = forge_then_run(
                 Path(path), emitted, names=(names[0], names[1])
             ).steps
             return run, [forge]
-        if app != ROMS_MARBL:
+        if app != UCLA_ROMS:
             raise ValueError(
                 f"the base blueprint is a {app!r} blueprint; time recipes need "
-                "roms_marbl (or forge, which generates one)"
+                "ucla_roms (or forge, which generates one)"
             )
         facts = blueprint_facts(path)
         compute = (
@@ -2124,7 +2125,7 @@ class _BaseChooser:
         return (
             Step(
                 name=name,
-                application=ROMS_MARBL,
+                application=UCLA_ROMS,
                 blueprint=path,
                 compute_overrides=compute,
             ),
@@ -2368,18 +2369,18 @@ class WorkplanBuilderPage:
         return list(names(application)) if names else []
 
     def roms_blueprint_names(self) -> list[str]:
-        """The catalog's roms_marbl blueprint names."""
-        return self._blueprint_names(ROMS_MARBL)
+        """The catalog's ucla_roms blueprint names."""
+        return self._blueprint_names(UCLA_ROMS)
 
     def forge_blueprint_names(self) -> list[str]:
         """The catalog's forge blueprint names."""
         return self._blueprint_names(FORGE)
 
     def roms_blueprint_file(self, name: str) -> tuple[str, list[str]]:
-        """The roms_marbl blueprint file of a catalog entry, and any problems."""
+        """The ucla_roms blueprint file of a catalog entry, and any problems."""
         if not name:
             return "", []
-        return str(self.catalog.blueprint_path(ROMS_MARBL, name)), []
+        return str(self.catalog.blueprint_path(UCLA_ROMS, name)), []
 
     def external_tokens(self) -> list[str]:
         """``step@alias`` tokens for the steps of the declared runs."""
@@ -3349,11 +3350,11 @@ class WorkplanBuilderPage:
         remove.on_click(_remove)
 
     def roms_step_names(self) -> list[str]:
-        """The names of the roms_marbl steps (the bases the time recipes accept)."""
+        """The names of the ucla_roms steps (the bases the time recipes accept)."""
         return [
             p.name.value.strip()
             for p in self.panes
-            if p.name.value.strip() and p.app == ROMS_MARBL
+            if p.name.value.strip() and p.app == UCLA_ROMS
         ]
 
     def _refresh_recipes(self) -> None:
@@ -3374,7 +3375,7 @@ class WorkplanBuilderPage:
             ""
             if names
             else "<span class='forge-hint'>Chunk and ramp can start from a "
-            "blueprint; upscaling needs roms_marbl steps in the Steps card.</span>"
+            "blueprint; upscaling needs ucla_roms steps in the Steps card.</span>"
         )
         self.upscale_btn.disabled = not names
 
@@ -3522,7 +3523,7 @@ class WorkplanBuilderPage:
         emitted = emitted_for(path, FORGE)
         if emitted is None:
             raise ValueError(f"cannot read a forge blueprint at {path!r}")
-        forge_name, run_name = self.unique_names(FORGE, ROMS_MARBL)
+        forge_name, run_name = self.unique_names(FORGE, UCLA_ROMS)
         return forge_then_run(Path(path), emitted, names=(forge_name, run_name))
 
     def _upscale(self) -> Generated:
@@ -3570,7 +3571,7 @@ class WorkplanBuilderPage:
         return {k.strip(): v.strip() for k, _sep, v in pairs}
 
     async def _deep_check_async(self) -> None:
-        """Resolve the draft as ``cstar workplan run`` would, listing every problem."""
+        """Resolve the draft as ``cstar workplan submit`` would, listing every problem."""
         draft = self.draft
         if draft is None:
             self.diagnostics.value = components.banner(
@@ -3668,7 +3669,7 @@ class WorkplanBuilderPage:
         self.pre_run_first = W.Checkbox(value=False, indent=False)
         self.check_btn = W.Button(description=_caption("check", "Check"), icon="check")
         self.run_btn = W.Button(
-            description=_caption("run", "Run"), icon="play", button_style="primary"
+            description=_caption("run", "Submit"), icon="play", button_style="primary"
         )
         self.run_status = W.HTML("")
         self._run_id_touched = False
@@ -3690,7 +3691,7 @@ class WorkplanBuilderPage:
         )
         self.run_id.observe(self._on_run_id, names="value")
         self.check_btn.on_click(lambda _b: self._start_run(CHECK))
-        self.run_btn.on_click(lambda _b: self._start_run(RUN))
+        self.run_btn.on_click(lambda _b: self._start_run(SUBMIT))
 
     def _on_run_id(self, _change: Any) -> None:
         if not self.is_suspended:
@@ -3721,11 +3722,11 @@ class WorkplanBuilderPage:
         exe = Path(sys.executable).with_name("cstar")
         cmd = [str(exe)] if exe.exists() else [sys.executable, "-m", "cstar.cli.cli"]
         cmd += ["workplan", action, str(path)]
-        if action == RUN and self.run_id.value.strip():
+        if action == SUBMIT and self.run_id.value.strip():
             cmd += [ARG_RUN_ID, self.run_id.value.strip()]
         for key, value in self.parsed_vars().items():
             cmd += [ARG_VAR_LONG, f"{key}={value}"]
-        if action == RUN and self.pre_run_first.value and self._pre_run_offered:
+        if action == SUBMIT and self.pre_run_first.value and self._pre_run_offered:
             cmd.append(ARG_PRE_RUN)
         return cmd
 

@@ -1,6 +1,7 @@
 import functools
 import logging
 import os
+import shutil
 import signal
 import socket
 import subprocess
@@ -16,17 +17,17 @@ from unittest import mock
 import dotenv
 import pytest
 
-from cstar.applications.roms_marbl.file_system import RomsFileSystemManager
 from cstar.base.additional_code import AdditionalCode
 from cstar.base.discretization import Discretization
 from cstar.base.env import (
     ENV_CSTAR_CACHE_HOME,
     ENV_CSTAR_CONFIG_HOME,
     ENV_CSTAR_DATA_HOME,
-    ENV_CSTAR_ORCH_LOCAL_DELAY,
     ENV_CSTAR_PROJECT_HOME,
     ENV_CSTAR_RUNID,
     ENV_CSTAR_STATE_HOME,
+    USER_CONFIG_FILENAME,
+    load_user_config,
 )
 from cstar.base.external_codebase import ExternalCodeBase
 from cstar.base.gitutils import git_location_to_raw
@@ -50,12 +51,14 @@ from cstar.orchestration.orchestration import LiveStep, LiveWorkplan
 from cstar.orchestration.serialization import deserialize, serialize
 from cstar.orchestration.tracking import TrackingRepository, WorkplanRun
 from cstar.pio.external_codebase import PIOExternalCodeBase
+from cstar.roms.file_system import RomsFileSystemManager
 from cstar.roms.namelist import release_ref_for_remote
 from cstar.tests.unit_tests.fake_abc_subclasses import (
     FakeExternalCodeBase,
     FakeInputDataset,
     StubSimulation,
 )
+from cstar.tests.unit_tests.orchestration.manifest_runs import write_identity
 
 ################################################################################
 # Network guard
@@ -2167,6 +2170,48 @@ def templates_dir() -> Path:
     return additional_files_dir() / "templates"
 
 
+TEMPLATE_BLUEPRINT_PLACEHOLDER: str = (
+    "~/code/cstar/cstar/additional_files/templates/blueprint.yaml"
+)
+"""The blueprint path written into the template workplans."""
+TEMPLATE_WORKING_DIR_DEFAULT: str = "working_dir: ."
+"""The working directory line in the template blueprint."""
+
+
+@pytest.fixture
+def create_host_workplan(templates_dir: Path) -> Callable[[str, Path, Path, str], Path]:
+    """Return a function that hosts a copy of the template blueprint in a template workplan.
+
+    The function takes the template workplan name (`fanout`, `linear`, `parallel` or
+    `single_step`), the path whose name the blueprint copy takes, a working directory
+    and a run id. It writes the blueprint (with its `working_dir` set to the working
+    directory) and a copy of the workplan (pointing at that blueprint) under
+    `<working_dir>/<run_id>`, and returns the path of the workplan.
+    """
+
+    def _create(template: str, bp_path: Path, working_dir: Path, run_id: str) -> Path:
+        run_dir = working_dir / run_id
+        bp_target_path = run_dir / bp_path.name
+
+        bp_content = (templates_dir / "bp" / "blueprint.yaml").read_text()
+        bp_content = bp_content.replace(
+            TEMPLATE_WORKING_DIR_DEFAULT, f"working_dir: {working_dir}"
+        )
+        bp_target_path.parent.mkdir(parents=True, exist_ok=True)
+        bp_target_path.write_text(bp_content)
+
+        wp_content = (templates_dir / "wp" / f"{template}.yaml").read_text()
+        wp_content = wp_content.replace(
+            TEMPLATE_BLUEPRINT_PLACEHOLDER, bp_target_path.as_posix()
+        )
+        wp_path = run_dir / f"{template}-host.yaml"
+        wp_path.write_text(wp_content)
+
+        return wp_path
+
+    return _create
+
+
 @pytest.fixture
 def wp_templates_dir(templates_dir: Path) -> Path:
     """Return the path to the `Workplan` templates directory contained in the package
@@ -2313,12 +2358,12 @@ def create_mocked_simulation_outputs(
 
         wp = deserialize(trx_wp_path, LiveWorkplan)
 
-        # simulate a run occurring
+        # simulate a run occurring: the run directory holds the transformed workplan
+        shutil.copy(trx_wp_path, container_dir / f"{wp_path.stem}_transformed.yaml")
+        write_identity(container_dir, run_id, workplan=wp_path)
         repo = TrackingRepository()
         await repo.put_workplan_run(
             WorkplanRun(
-                workplan_path=wp_path,
-                trx_workplan_path=trx_wp_path,
                 output_path=container_dir,
                 run_id=run_id,
             )
@@ -2360,7 +2405,7 @@ def create_mocked_simulation_outputs(
 def preprocessable_roms_step(
     mocked_simulation_outputs: tuple[Path, Path, Path],
 ) -> Step:
-    """Create a valid step with an underlying RomsMarblBlueprint.
+    """Create a valid step with an underlying UclaRomsBlueprint.
 
     Parameters
     ----------
@@ -2387,7 +2432,7 @@ def preprocessable_roms_livestep(
     preprocessable_roms_step: Step,
     mocked_simulation_outputs: tuple[Path, Path, Path],
 ) -> LiveStep:
-    """Create a valid step with an underlying RomsMarblBlueprint.
+    """Create a valid step with an underlying UclaRomsBlueprint.
 
     Parameters
     ----------
@@ -2457,13 +2502,34 @@ def mock_xdg_dirs(tmp_path: Path) -> Generator[dict[str, Path]]:
 
 
 @pytest.fixture(autouse=True)
-def mock_local_delay() -> float:
+def isolate_user_config(
+    mock_xdg_dirs: dict[str, Path], monkeypatch: pytest.MonkeyPatch
+) -> Generator[Path]:
+    """Point the configuration-file loader at the temporary config home and forget
+    what an earlier test loaded.
+
+    The loader resolves the file from the environment, which a test that patches
+    the environment with ``clear=True`` would turn back into the developer's real
+    ``~/.config/cstar/config.env``; pinning the path keeps every test on its own
+    file. Tests write the returned path to exercise the loader.
+    """
+    path = mock_xdg_dirs[ENV_CSTAR_CONFIG_HOME] / USER_CONFIG_FILENAME
+    monkeypatch.setattr("cstar.base.env.user_config_path", lambda: path)
+    load_user_config.cache_clear()
+    yield path
+    load_user_config.cache_clear()
+
+
+@pytest.fixture(autouse=True)
+def mock_local_delay(monkeypatch: pytest.MonkeyPatch) -> float:
     """Set a tiny delay between status queries made by the local launcher during unit tests.
 
     NOTE: Allowing a "normal" delay may result in unit tests taking an excessive amount of time.
     """
     delay = 0.1
-    os.environ[ENV_CSTAR_ORCH_LOCAL_DELAY] = str(delay)
+    monkeypatch.setattr(
+        "cstar.orchestration.launch.local.PROXY_POLL_DELAY", delay, raising=True
+    )
     return delay
 
 

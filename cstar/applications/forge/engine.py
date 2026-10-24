@@ -71,7 +71,7 @@ class ForgeBlueprintExecutor(Protocol):
 
     def configure_build(self, *args: Any, **kwargs: Any) -> Any: ...
 
-    def path_roms_marbl_blueprint(self, *args: Any, **kwargs: Any) -> Any: ...
+    def path_ucla_roms_blueprint(self, *args: Any, **kwargs: Any) -> Any: ...
 
 
 # A factory maps a host-independent ForgeBlueprint + the injected host + a verbose flag to
@@ -94,7 +94,7 @@ PROCESSING_FILLED_SECTIONS = (
     "output_root_name",
 )
 
-# Leaf keys that ``generate_inputs`` (in ``input_data.py``) derives from the
+# Leaf keys that ``generate_inputs`` (in ``input_generator.py``) derives from the
 # *actual* generated forcing/tidal objects — never from ``ForgeBlueprint.model_settings``.
 # The resolver never computes real values for these: it leaves them at
 # whatever the ModelSpec's disabled placeholder says (``river_frc``/``cdr_frc``/
@@ -155,7 +155,7 @@ GENERATION_DERIVED_LEAF_KEYS: dict[str, tuple[str, ...]] = {
 
 
 def sources_to_forcing_override(cfg: ForgeBlueprint) -> dict[str, Any]:
-    """Convert cfg.forcing to the forcing_override dict for RomsMarblInputData.
+    """Convert cfg.forcing to the forcing_override dict for RomsInputGenerator.
 
     Always returns a dict with a ``forcing`` key, mirroring the model.yaml inputs
     block. ``initial_conditions`` is included too unless ``cfg.forcing.initial_conditions``
@@ -181,7 +181,7 @@ def sources_to_forcing_override(cfg: ForgeBlueprint) -> dict[str, Any]:
             d["method"] = spec.esper_method
         if spec.esper_equation:
             d["equation"] = spec.esper_equation
-        # Only the switch travels here; input_data._resolve_source_block turns it
+        # Only the switch travels here; input_generator._resolve_source_block turns it
         # into roms-tools' mapping with the staged WOA23 file's path.
         if spec.esper_salinity_conditioning:
             d["salinity_conditioning"] = True
@@ -204,7 +204,7 @@ def sources_to_forcing_override(cfg: ForgeBlueprint) -> dict[str, Any]:
         # InitialConditions and BoundaryForcing, which have this identical shape.
         # Forwarding the typed fields (bgc_interpolation_method, allow_flex_time)
         # and the options passthrough here is what lets authored/UI choices
-        # actually reach input_data — previously only source/bgc_source were
+        # actually reach input_generator — previously only source/bgc_source were
         # propagated, so any other field set in the wizard was silently dropped
         # on the ForgeBlueprint path.
         d = spec.model_dump(exclude={"source", "bgc_sources"}, mode="json")
@@ -214,7 +214,7 @@ def sources_to_forcing_override(cfg: ForgeBlueprint) -> dict[str, Any]:
             # hand-listing them: a hand-written dict silently DROPS any field
             # added to the model later -- that is how `serialize_dask` first
             # went missing here, so the per-source write-scheduler flag never
-            # reached input_data._bgc_serialize_flags in production even though
+            # reached input_generator._bgc_serialize_flags in production even though
             # the resolver had already introspected+carried it faithfully.
             d["bgc_sources"] = [
                 {
@@ -390,7 +390,7 @@ def process_forge_blueprint(
     :func:`~cstar.applications.forge.blueprint.emitted_provenance`).
 
     Returns the executor (``ForgeExecutor`` by default), so callers can reach
-    ``.path_roms_marbl_blueprint()``.
+    ``.path_ucla_roms_blueprint()``.
 
     Parameters
     ----------
@@ -409,14 +409,14 @@ def process_forge_blueprint(
         against the run-time schema *before* any downloads/generation. A
         commit-hash ``code.roms`` pin is first resolved to its release tag
         (:func:`~cstar.roms.namelist.release_ref_for_remote`, a treeless clone
-        of ``code.roms.location``), as the roms_marbl step resolves it.
+        of ``code.roms.location``), as the ucla_roms step resolves it.
     executor_factory :
         Maps the ``ForgeBlueprint`` to an executor; defaults to the forge
         ``ForgeExecutor``. Injectable for tests and for the eventual C-Star app
         (which supplies its own executor for the same ``ForgeBlueprint`` blueprint).
     only_inputs :
         One-off subset mode: category names (see
-        ``input_data.resolve_input_selection`` for the accepted aliases —
+        ``input_generator.resolve_input_selection`` for the accepted aliases —
         ``grid``, ``initial_conditions``/``ic``, ``surface``, ``boundary``/``bry``,
         ``tidal``/``tides``, ``river``, ``cdr``) to generate, skipping the rest.
         Validated up front (before ``ensure_source_data``) so a typo fails fast. The
@@ -475,7 +475,7 @@ def process_forge_blueprint(
 
     resolved_only = None
     if only_inputs is not None:
-        from cstar.applications.forge.input_data import resolve_input_selection
+        from cstar.applications.forge.input_generator import resolve_input_selection
 
         resolved_only = resolve_input_selection(only_inputs)
         if configure:
@@ -497,7 +497,7 @@ def process_forge_blueprint(
         raise TypeError(
             f"executor_factory returned {type(executor).__name__}, which does not "
             "implement the ForgeBlueprintExecutor interface (ensure_source_data / "
-            "generate_inputs / configure_build / path_roms_marbl_blueprint)."
+            "generate_inputs / configure_build / path_ucla_roms_blueprint)."
         )
 
     if ensure_data:

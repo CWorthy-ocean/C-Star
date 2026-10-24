@@ -62,7 +62,7 @@ Blueprints you save from the wizard land in your own catalog layer at
 C-Star reads the ``application: forge`` line and hands the blueprint to
 Forge, which fetches the source data (most of the time in a first run goes
 here), builds the grid, generates every input file, renders the model
-settings, and writes a ROMS-MARBL blueprint. Everything lands under the
+settings, and writes a UCLA-ROMS blueprint. Everything lands under the
 blueprint's working directory. A forge blueprint normally omits
 ``working_dir``, so for wio-toy that is
 ``~/cstar/blueprint_runs/forge/cson_roms-marbl_v0-1_wio-toy_10procs/`` (the
@@ -96,14 +96,14 @@ the command that runs it (``Run it with:  cstar blueprint run <path>``). See
 
    cstar blueprint run ~/cstar/blueprint_runs/forge/.../output/B_cson_roms-marbl_v0.1_wio-toy_10procs.yaml
 
-This time the ``application: roms_marbl`` line routes the blueprint to the
-ROMS-MARBL application. C-Star clones and compiles the model code pinned in
+This time the ``application: ucla_roms`` line routes the blueprint to the
+UCLA-ROMS application. C-Star clones and compiles the model code pinned in
 the blueprint, partitions the inputs, runs the simulation, and joins the
 output. The blueprint has no ``working_dir``, so results land under
-``~/cstar/blueprint_runs/roms_marbl/cson_roms-marbl_v0-1_wio-toy_10procs/``.
+``~/cstar/blueprint_runs/ucla_roms/cson_roms-marbl_v0-1_wio-toy_10procs/``.
 
 Both steps use the same command; the blueprint's ``application`` field
-decides which application handles it. The :doc:`ROMS-MARBL blueprint example
+decides which application handles it. The :doc:`UCLA-ROMS blueprint example
 <tutorial_bp>` walks through what is in the blueprint Forge just wrote. The
 :doc:`next page <workplan>` runs these same two steps as a workplan, so you
 submit once and let C-Star carry the blueprint from one step to the next.
@@ -115,6 +115,6 @@ Each step can run on a different machine. A common pattern is to build the
 blueprint in a browser on your laptop, copy the YAML to the cluster, and run
 steps 2 and 3 there, where the forcing data and the compute are. On an HPC
 system, both steps' working directories land under ``CSTAR_DATA_HOME``, which
-resolves to scratch, and the ROMS-MARBL step should be submitted through a
+resolves to scratch, and the UCLA-ROMS step should be submitted through a
 workplan so it runs on compute nodes rather than the login node. See
 :doc:`../hpc`.

@@ -30,3 +30,7 @@ class CstarExpectationFailed(Exception):
     """Raise this error when a component cannot proceed due to prerequisites."""
 
     ...
+
+
+class CstarUserConfigError(CstarError):
+    """The user's configuration file names settings it may not set."""

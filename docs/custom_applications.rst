@@ -155,7 +155,7 @@ Likewise, an application that can perform every stage before its model launch an
 stop sets ``pre_runnable = True``. Its `BlueprintRunner` then honours
 `RunnerRequest.pre_run`: it performs every pre-launch stage, reports a completed
 state, launches nothing and skips post-run. Only then does ``--pre-run`` on
-``cstar blueprint run`` or ``cstar workplan run`` reach that application. Otherwise
+``cstar blueprint run`` or ``cstar workplan submit`` reach that application. Otherwise
 the CLI rejects the flag for a blueprint run, and a workplan pre-run skips the
 application's steps and reports why.
 
@@ -345,7 +345,7 @@ and set the new default on the blueprint model's ``schema_version``:
       blueprint = HelloWorldBlueprint
       migrations = (HelloWorldSchemaAdapterV1V2,)
 
-See ``RomsMarblSchemaAdapter2025v1`` in ``cstar/applications/roms_marbl/migration.py``
+See ``UclaRomsSchemaAdapter2025v1`` in ``cstar/applications/ucla_roms/migration.py``
 for a working example.
 
 A major bump with no automatic migration is registered the same way, as a
@@ -401,16 +401,16 @@ needs migration (with the ``cstar blueprint migrate`` command to run), or an old
 major that cannot be migrated (with your ``guidance()``), and exits non-zero in
 each case; a compatible file is validated normally. ``cstar blueprint migrate``
 reports that a compatible file needs nothing and writes nothing. ``cstar blueprint
-run`` and ``cstar workplan run`` migrate automatically, and only when adapters
+run`` and ``cstar workplan submit`` migrate automatically, and only when adapters
 are needed; a workplan reports every step it cannot migrate at once and refuses
 before creating a run directory. ``CSTAR_DISABLE_MIGRATION=1`` turns off that
 automatic migration, and has no effect on a compatible older file. For example:
 
 .. code-block:: text
 
-   roms_marbl schema 9.9.9 is newer than this build of cstar-ocean reads (3.0.0). Upgrade cstar-ocean to read this file.
+   ucla_roms schema 9.9.9 is newer than this build of cstar-ocean reads (3.3.0). Upgrade cstar-ocean to read this file.
 
-   roms_marbl schema 0.5.0 has no automatic migration to 3.0.0 from 0.x. Update the blueprint by hand to the 3.0.0 schema (published under docs/schemas), then validate it with: cstar blueprint check <path>
+   ucla_roms schema 0.5.0 has no automatic migration to 3.3.0 from 0.x. Update the blueprint by hand to the 3.3.0 schema (published under docs/schemas), then validate it with: cstar blueprint check <path>
 
 Tying it Together
 -----------------
@@ -478,6 +478,13 @@ The entry-point name must be the application's ``name`` -- the same value your
 blueprints carry in their ``application`` field. *C-Star* imports that module
 (and only that module -- the entry point's return value is unused) the first
 time an application by that name is requested.
+
+An application can be renamed without breaking the documents written under its
+earlier name. *C-Star* keeps a table of earlier names,
+``cstar.base.application_names.APPLICATION_ALIASES``, mapping each to the current
+name. An alias is replaced by the current name when a blueprint, a workplan step
+or a reference is loaded, so those documents keep working. The in-tree module
+(or the entry point) is looked up by the current name, so register that one.
 
 Choose a name no built-in already uses. *C-Star* resolves the in-tree
 ``cstar.applications`` module first and only consults entry points when that

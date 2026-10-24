@@ -104,7 +104,7 @@ From the root of the repository, with the environment active:
 
 .. code-block:: console
 
-   cstar workplan run docs/developers/nesting_upscaling_ccs/workplan.yaml --varfile docs/developers/nesting_upscaling_ccs/full.vars
+   cstar workplan submit docs/developers/nesting_upscaling_ccs/workplan.yaml --varfile docs/developers/nesting_upscaling_ccs/full.vars
 
 ``cstar workplan check`` validates the workplan with the same
 ``--var``/``--varfile`` options (``check`` has no ``--run-id``). The run ID
@@ -115,7 +115,7 @@ because reusing one attaches to the earlier run. Follow a run with
 The workplan names no launcher, so C-Star picks one for the machine: SLURM
 where there is a scheduler, local processes otherwise. Every step carries a
 ``local`` and a ``slurm`` entry in ``compute_overrides``. Under SLURM,
-``cstar workplan run`` submits all nine jobs, chained with SLURM dependencies,
+``cstar workplan submit`` submits all nine jobs, chained with SLURM dependencies,
 and returns. The account and queue come from your environment, as described on
 the :doc:`HPC page <../hpc>`.
 
@@ -160,7 +160,7 @@ Then run it:
 .. code-block:: console
 
    cstar workplan check workplan.yaml --varfile month.vars
-   cstar workplan run workplan.yaml --varfile month.vars --run-id ccs-month
+   cstar workplan submit workplan.yaml --varfile month.vars --run-id ccs-month
 
 The variables, with their values for the full run and for the month:
 
@@ -258,7 +258,11 @@ Resources
 The numbers in this section were measured on 2026-10-15 on one cluster, with
 earlier versions than these files use: a ucla-roms commit before 0.11.0 and
 roms-tools 5.1.2.dev. Treat them as a guide. A rerun with these files will
-refresh them.
+refresh them. They also predate the upscaler's time-convention fix:
+``parent_up`` now receives the final hour of the child's export too. On the
+one-month CCS run of 2026-10-21 that hour carried 1.5 % of the export, because
+the plume reached the child's boundary late, so a month's alkalinity is about
+1.5 % higher.
 
 CPUs per step, as in the workplan:
 

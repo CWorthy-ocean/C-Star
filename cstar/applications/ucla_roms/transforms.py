@@ -1,4 +1,3 @@
-import os
 import typing as t
 import warnings
 from collections.abc import Mapping, Sequence
@@ -6,19 +5,12 @@ from datetime import datetime
 from pathlib import Path
 
 from cstar.applications.core import ArtifactKind, Transform
-from cstar.applications.roms_marbl.file_system import RomsFileSystemManager
-from cstar.applications.roms_marbl.models import RomsMarblBlueprint
-from cstar.applications.roms_marbl.outputs import (
-    EXTRACT_ROLE,
-    BoundaryFile,
-    CarbonateSensitivityFile,
-    RestartFile,
-    TimestampedOutputFile,
-    warn_on_restart_start_date_mismatch,
-)
+from cstar.applications.ucla_roms.models import UclaRomsBlueprint
+from cstar.base.env import get_env_item
 from cstar.base.exceptions import CstarError
 from cstar.base.feature import (
     ENV_FF_ORCH_TRX_TIMESPLIT,
+    ENV_FF_ORCH_TRX_TIMESPLIT_FREQ,
     ENV_FF_ORCH_TRX_TIMESPLIT_LONGNAME,
     is_feature_enabled,
 )
@@ -41,11 +33,18 @@ from cstar.orchestration.transforms import (
     ApplyOverridesDirective,
     DirectiveConfig,
     OverrideDirective,
-    SplitFrequency,
     get_time_slices,
     lookup_step,
 )
-from cstar.orchestration.utils import ENV_CSTAR_ORCH_TRX_FREQ
+from cstar.roms.file_system import RomsFileSystemManager
+from cstar.roms.outputs import (
+    EXTRACT_ROLE,
+    BoundaryFile,
+    CarbonateSensitivityFile,
+    RestartFile,
+    TimestampedOutputFile,
+    warn_on_restart_start_date_mismatch,
+)
 
 if t.TYPE_CHECKING:
     from cstar.orchestration.orchestration import LiveWorkplan
@@ -53,18 +52,17 @@ if t.TYPE_CHECKING:
 log = get_logger(__name__)
 
 
-class RomsMarblTimeSplitter(Transform[LiveStep]):
-    """A step tranformation that splits a ROMS-MARBL simulation into
+class RomsTimeSplitter(Transform[LiveStep]):
+    """A step tranformation that splits a ROMS simulation into
     multiple sub-steps based on the timespan covered by the simulation.
     """
 
     frequency: str
     """The step splitting frequency used to generate new time steps."""
 
-    def __init__(self, frequency: str = SplitFrequency.Monthly.value) -> None:
+    def __init__(self) -> None:
         """Initialize the transform instance."""
-        freq_config = os.getenv(ENV_CSTAR_ORCH_TRX_FREQ, frequency)
-        self.frequency = freq_config.lower()
+        self.frequency = get_env_item(ENV_FF_ORCH_TRX_TIMESPLIT_FREQ).value.lower()
 
     @classmethod
     def is_active(cls) -> bool:
@@ -114,7 +112,7 @@ class RomsMarblTimeSplitter(Transform[LiveStep]):
         Sequence[LiveStep]
             Steps for each subtask resulting from the split.
         """
-        blueprint = t.cast("RomsMarblBlueprint", step.blueprint)
+        blueprint = t.cast("UclaRomsBlueprint", step.blueprint)
         start_date = blueprint.runtime_params.start_date
         end_date = blueprint.runtime_params.end_date
 
@@ -134,7 +132,7 @@ class RomsMarblTimeSplitter(Transform[LiveStep]):
 
         results: list[LiveStep] = []
         for i, (sd, ed) in enumerate(time_slices):
-            bp_copy = RomsMarblBlueprint(
+            bp_copy = UclaRomsBlueprint(
                 **blueprint.model_dump(
                     exclude_unset=True,
                     exclude_defaults=True,
@@ -321,7 +319,7 @@ _LEGACY_LAYOUT_HINT: t.Final[str] = (
 def _require_step_output_dir(root: Path, name: str) -> Path:
     """Locate a step's `output` directory and require it to exist.
 
-    Every step type writes its final, whole files to `output` (ROMS-MARBL
+    Every step type writes its final, whole files to `output` (UCLA-ROMS
     steps write partitioned pieces to `temp_output` first and join them
     into `output`; other apps, e.g. nest_ic, write straight to `output`), so a
     step's outputs are always found there regardless of how the step ran.
@@ -1159,7 +1157,7 @@ class NestingDirective(OverrideDirective):
 
 
 _CDR_GAS_OUTPUT_HINT: t.Final[str] = (
-    "Carbonate sensitivities come from the `_cdrgas` files a ROMS-MARBL run "
+    "Carbonate sensitivities come from the `_cdrgas` files a UCLA-ROMS run "
     "writes only when MARBL is enabled and its namelist sets "
     "`do_cdr_gas_exch_output` to true (`cdr_gas_exch_output_settings` in a "
     "blueprint's `namelist_overrides`, `cdr_gas_exch_output` in a forge output spec)."
@@ -1170,7 +1168,7 @@ _CDR_GAS_OUTPUT_HINT: t.Final[str] = (
 class CarbonateSensitivityDirective(OverrideDirective):
     """A transform that supplies the carbonate sensitivities (`ddic_dco2`,
     `ddic_dalk`) a CDR-lite run reads as surface forcing, from the output of an
-    earlier ROMS-MARBL run.
+    earlier UCLA-ROMS run with MARBL.
 
     The source is exactly one of `path` (a directory or file) or `step` (a step
     name resolved via the workplan), the same shape used by `NestingDirective`

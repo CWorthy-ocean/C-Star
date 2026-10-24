@@ -34,11 +34,12 @@ from cstar.orchestration.orchestration import LiveWorkplan
 from cstar.orchestration.serialization import deserialize, serialize
 from cstar.orchestration.tracking import TrackingRepository
 from cstar.orchestration.utils import (
-    ENV_CSTAR_ORCH_DELAYS,
     ENV_CSTAR_SLURM_ACCOUNT,
     ENV_CSTAR_SLURM_MAX_WALLTIME,
     ENV_CSTAR_SLURM_QUEUE,
 )
+from cstar.system.manager import AnvilEnvSettings
+from cstar.system.scheduler import SlurmQOS, SlurmScheduler
 
 
 @pytest.fixture
@@ -114,7 +115,7 @@ def heterogeneous_workplan_path(
     hw_single_step_wp : Path
         Path to a workplan that contains a single hello_world step.
     single_step_workplan : Path
-        Path to a workplan that contains a single roms_marbl/sleep step.
+        Path to a workplan that contains a single ucla_roms/sleep step.
 
     Returns
     -------
@@ -192,7 +193,7 @@ async def test_hello_world_workplan(
     hello_world_bp_content: str,
     fill_workplan_template: Callable[[dict[str, t.Any]], str],
 ) -> None:
-    """Test deserialization of a workplan containing a non ROMS-MARBL application.
+    """Test deserialization of a workplan containing a non UCLA-ROMS application.
 
     Consider moving to a parametrized test that executes the same evaluation on all
     known application types.
@@ -258,17 +259,20 @@ async def test_hello_world_workplan(
 
 def test_hello_world_workplan_scheduling(
     hw_single_step_wp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Test the execution of a workplan containing a non ROMS-MARBL application.
+    """Test the execution of a workplan containing a non UCLA-ROMS application.
 
     Parameters
     ----------
     hw_single_step_wp_path : Path
         The path to the workplan containing a single step that runs the hello_world application.
+    monkeypatch : pytest.MonkeyPatch
+        Fixture used to shorten the orchestrator's polling delays.
     """
+    monkeypatch.setattr("cstar.orchestration.dag_runner.POLL_DELAYS", (0.01,))
     runner = CliRunner()
     custom_env = {
-        ENV_CSTAR_ORCH_DELAYS: "0.01",
         ENV_CSTAR_SLURM_MAX_WALLTIME: "00:02:00",
         ENV_CSTAR_SLURM_QUEUE: "debug",
     }
@@ -299,6 +303,7 @@ def test_hello_world_workplan_scheduling(
 
 def test_workplan_run_unknown_clobber_step_fails_fast(
     hw_single_step_wp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Verify an unrecognized `--clobber` step value fails fast as a CLI usage
     error (rather than a generic failure) and lists the valid step names.
@@ -308,10 +313,12 @@ def test_workplan_run_unknown_clobber_step_fails_fast(
     hw_single_step_wp_path : Path
         The path to the workplan containing a single step that runs the
         hello_world application.
+    monkeypatch : pytest.MonkeyPatch
+        Fixture used to shorten the orchestrator's polling delays.
     """
+    monkeypatch.setattr("cstar.orchestration.dag_runner.POLL_DELAYS", (0.01,))
     runner = CliRunner()
     custom_env = {
-        ENV_CSTAR_ORCH_DELAYS: "0.01",
         ENV_CSTAR_SLURM_MAX_WALLTIME: "00:02:00",
         ENV_CSTAR_SLURM_QUEUE: "debug",
     }
@@ -341,6 +348,7 @@ def test_workplan_run_unknown_clobber_step_fails_fast(
 
 def test_heterogeneous_workplan(
     heterogeneous_workplan_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Test the execution of a workplan containing multiple applications.
 
@@ -348,12 +356,14 @@ def test_heterogeneous_workplan(
     ----------
     heterogeneous_workplan_path : Path
         The path to the workplan containing a step relying on the hello_world application
-        and a step relying on the ROMS-MARBL application.
+        and a step relying on the UCLA-ROMS application.
+    monkeypatch : pytest.MonkeyPatch
+        Fixture used to shorten the orchestrator's polling delays.
     """
+    monkeypatch.setattr("cstar.orchestration.dag_runner.POLL_DELAYS", (0.01,))
     runner = CliRunner()
     custom_env = {
         ENV_CSTAR_SLURM_ACCOUNT: "abc123",
-        ENV_CSTAR_ORCH_DELAYS: "0.01",
         ENV_CSTAR_SLURM_MAX_WALLTIME: "00:02:00",
         ENV_CSTAR_SLURM_QUEUE: "debug",
     }
@@ -384,6 +394,7 @@ def test_heterogeneous_workplan(
 
 def test_hw_runner_bp_only(
     hello_world_bp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Verify that a blueprint containing the sample application is executed
     correctly by the `cstar blueprint run` command.
@@ -392,10 +403,12 @@ def test_hw_runner_bp_only(
     ----------
     hello_world_bp_path : Path
         A fixture that stores an HW blueprint and returns the path.
+    monkeypatch : pytest.MonkeyPatch
+        Fixture used to shorten the orchestrator's polling delays.
     """
+    monkeypatch.setattr("cstar.orchestration.dag_runner.POLL_DELAYS", (0.01,))
     runner = CliRunner()
     custom_env: dict[str, str] = {
-        ENV_CSTAR_ORCH_DELAYS: "0.01",
         ENV_CSTAR_SLURM_MAX_WALLTIME: "00:02:00",
         ENV_CSTAR_SLURM_QUEUE: "debug",
     }
@@ -423,6 +436,45 @@ def test_hw_runner_bp_only(
         assert result.exit_code == 0
 
 
+def test_hello_world_blueprint_runs_without_slurm_settings(
+    hello_world_bp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Verify a step that submits no scheduler job starts on a SLURM system whose
+    required account and queue are unset, as a local-launcher step does on an
+    HPC login node before the user has run `cstar init`.
+
+    Parameters
+    ----------
+    hello_world_bp_path : Path
+        A fixture that stores an HW blueprint and returns the path.
+    monkeypatch : pytest.MonkeyPatch
+        Fixture used to unset the SLURM settings.
+    """
+    monkeypatch.delenv(ENV_CSTAR_SLURM_ACCOUNT, raising=False)
+    monkeypatch.delenv(ENV_CSTAR_SLURM_QUEUE, raising=False)
+    scheduler = SlurmScheduler(
+        queues=[SlurmQOS(name="wholenode", query_name="wholenode")],
+        primary_queue_name="wholenode",
+    )
+    with (
+        mock.patch(
+            "cstar.system.environment.CStarEnvironment.settings_klass",
+            AnvilEnvSettings,
+        ),
+        mock.patch(
+            "cstar.system.manager.CStarSystemManager.scheduler",
+            mock.PropertyMock(return_value=scheduler),
+        ),
+    ):
+        result = CliRunner().invoke(
+            app_run_blueprint, [str(hello_world_bp_path)], color=False
+        )
+
+    assert result.exit_code == 0, result.output
+    assert "Hello," in result.stdout
+
+
 @pytest.mark.parametrize("run_from_workplan_dir", [True, False])
 def test_hello_world_workplan_relative_blueprint_path(
     tmp_path: Path,
@@ -431,7 +483,7 @@ def test_hello_world_workplan_relative_blueprint_path(
     run_from_workplan_dir: bool,
 ) -> None:
     """Verify a step whose `blueprint` is a path relative to the workplan file
-    is launched with the absolute path, whether `cstar workplan run` is
+    is launched with the absolute path, whether `cstar workplan submit` is
     invoked from the workplan's directory or from elsewhere.
 
     Parameters
@@ -439,7 +491,8 @@ def test_hello_world_workplan_relative_blueprint_path(
     tmp_path : Path
         Temporary directory for the workplan, blueprint and run outputs
     monkeypatch : pytest.MonkeyPatch
-        Fixture used to change the working directory
+        Fixture used to change the working directory and to shorten the
+        orchestrator's polling delays
     hello_world_bp_content : str
         Fixture providing the content of a minimal hello-world blueprint
     run_from_workplan_dir : bool
@@ -469,9 +522,9 @@ def test_hello_world_workplan_relative_blueprint_path(
         monkeypatch.chdir(elsewhere)
         wp_arg = wp_path.as_posix()
 
+    monkeypatch.setattr("cstar.orchestration.dag_runner.POLL_DELAYS", (0.01,))
     runner = CliRunner()
     custom_env = {
-        ENV_CSTAR_ORCH_DELAYS: "0.01",
         ENV_CSTAR_SLURM_MAX_WALLTIME: "00:02:00",
         ENV_CSTAR_SLURM_QUEUE: "debug",
     }

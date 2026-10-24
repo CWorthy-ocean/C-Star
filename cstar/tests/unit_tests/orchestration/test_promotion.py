@@ -2,6 +2,7 @@
 
 import os
 import shutil
+import stat
 import typing as t
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
@@ -10,9 +11,9 @@ from types import SimpleNamespace
 
 import pytest
 
-from cstar.applications.roms_marbl.file_system import RomsFileSystemManager
 from cstar.base.env import ENV_CSTAR_PROJECT_HOME
 from cstar.base.exceptions import CstarError
+from cstar.orchestration import promotion
 from cstar.orchestration.manifest import (
     ATTEMPTS_DIR_NAME,
     RUN_MANIFEST_NAME,
@@ -41,6 +42,7 @@ from cstar.orchestration.promotion import (
     remove_run,
     staging_dir,
 )
+from cstar.roms.file_system import RomsFileSystemManager
 from cstar.tests.unit_tests.orchestration.manifest_runs import (
     STARTED,
     BuiltRun,
@@ -629,16 +631,16 @@ def test_a_failed_copy_leaves_nothing(
     planned: Planned, destination: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """The staging directory is removed and the destination never appears."""
-    real = shutil.copy2
+    real = promotion._copy_file
     calls: list[Path] = []
 
-    def flaky(src: t.Any, dst: t.Any, **kwargs: t.Any) -> t.Any:
-        calls.append(Path(src))
+    def flaky(source: Path, target: Path) -> None:
+        calls.append(source)
         if len(calls) == 2:
             raise OSError("disk full")
-        return real(src, dst, **kwargs)
+        real(source, target)
 
-    monkeypatch.setattr(shutil, "copy2", flaky)
+    monkeypatch.setattr(promotion, "_copy_file", flaky)
 
     with pytest.raises(OSError, match="disk full"):
         execute_plan(planned.plan(), destination)
@@ -680,10 +682,10 @@ def test_replace_link_keeps_the_link_when_the_copy_fails(
     destination.parent.mkdir(parents=True)
     destination.symlink_to(planned.root, target_is_directory=True)
 
-    def fail(*args: t.Any, **kwargs: t.Any) -> t.NoReturn:
+    def fail(source: Path, target: Path) -> t.NoReturn:
         raise OSError("disk full")
 
-    monkeypatch.setattr(shutil, "copy2", fail)
+    monkeypatch.setattr(promotion, "_copy_file", fail)
 
     with pytest.raises(OSError, match="disk full"):
         execute_plan(planned.plan(), destination, replace_link=True)
@@ -708,6 +710,51 @@ def test_replace_link_refuses_a_missing_destination(
     """There is no link to replace."""
     with pytest.raises(CstarError, match="not a symlink"):
         execute_plan(planned.plan(), destination, replace_link=True)
+
+
+# _copy_file
+
+
+@pytest.fixture
+def source(tmp_path: Path) -> Path:
+    """A file with its own mode and an old modification time."""
+    path = write(tmp_path / "source.nc")
+    path.chmod(0o640)
+    os.utime(path, (1_000_000_000, 1_000_000_000))
+    return path
+
+
+def test_a_file_larger_than_a_block_is_copied_whole(
+    source: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The copy runs block by block to the end of the file, with the source's metadata."""
+    monkeypatch.setattr(promotion, "_COPY_BLOCK_BYTES", 3)
+    real = shutil.copyfileobj
+    lengths: list[int] = []
+
+    def spy(src: t.Any, dst: t.Any, length: int = 0) -> None:
+        lengths.append(length)
+        real(src, dst, length)
+
+    monkeypatch.setattr(shutil, "copyfileobj", spy)
+    target = write(tmp_path / "target.nc", "stale and longer than the source")
+
+    promotion._copy_file(source, target)
+
+    assert lengths == [3]
+    assert target.read_text() == CONTENT
+    assert stat.S_IMODE(target.stat().st_mode) == 0o640
+    assert target.stat().st_mtime == 1_000_000_000
+
+
+def test_an_empty_file_is_copied(tmp_path: Path) -> None:
+    """A file with nothing to read still gets its copy."""
+    target = tmp_path / "target.nc"
+
+    promotion._copy_file(write(tmp_path / "empty.nc", ""), target)
+
+    assert target.is_file()
+    assert target.read_text() == ""
 
 
 def test_staging_dir_is_a_hidden_sibling(destination: Path) -> None:

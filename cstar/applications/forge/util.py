@@ -71,7 +71,7 @@ def compute_timestep_from_cfl(
         Equivalent depth ``h_e`` (m) for baroclinic mode. Default 2000.0 m with
         default ``g'`` gives ``c`` ~ 9.0 m/s, but is tuned for a timestep of ~900s
         @ a 12km grid size. A typical internal wave speed is ~3 m/s but the timestep
-        generated for that speed is longer than current ROMS-MARBL stability requires.
+        generated for that speed is longer than current UCLA-ROMS stability requires.
     mode : {"baroclinic", "barotropic"}, optional
         ``"baroclinic"`` (default): ``c = sqrt(reduced_gravity * equivalent_depth)``.
         ``"barotropic"``: ``c = sqrt(g * H_max)`` from ``grid_ds['h']`` or

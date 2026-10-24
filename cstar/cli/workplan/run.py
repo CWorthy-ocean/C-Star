@@ -10,19 +10,19 @@ from click.core import ParameterSource
 from pydantic import BaseModel, ValidationError
 
 from cstar.base.env import (
-    ENV_CSTAR_CLI_DRY_RUN,
     ENV_CSTAR_DATA_HOME,
     ENV_CSTAR_LOG_LEVEL,
     ENV_CSTAR_RUNID,
     ENV_CSTAR_STATE_HOME,
+    REMOVED_SETTINGS,
 )
 from cstar.base.exceptions import CstarError, CstarExpectationFailed
-from cstar.base.feature import is_flag_enabled
 from cstar.base.log import LogLevelChoices, get_logger
 from cstar.base.utils import slugify
 from cstar.cli.common import (
     SCHEMA_ERRORS,
     cb_pipeline,
+    exit_on_refused_settings,
     format_validation_errors,
     localize_and_migrate,
     normalize_runid,
@@ -84,7 +84,6 @@ from cstar.orchestration.orchestration import (
 )
 from cstar.orchestration.run_check import report_orphans
 from cstar.orchestration.serialization import (
-    PersistenceMode,
     deserialize,
     read_raw,
     serialize,
@@ -106,9 +105,14 @@ if t.TYPE_CHECKING:
 app = typer.Typer()
 log = get_logger(__name__)
 
-HELP_SHORT = "Execute a workplan."
+COMMAND_SUBMIT: t.Final[str] = "submit"
+"""Name under which the workplan launch command is listed."""
+ALIAS = "run"
+"""Earlier name of the launch command, still registered but hidden from `--help`."""
+HELP_SHORT = "Submit a workplan: schedule every step and exit."
+HELP_ALIASED = f"{HELP_SHORT} (alias: {ALIAS})"
 HELP_LONG = f"""\
-{HELP_SHORT}
+{HELP_ALIASED}
 
 Specify a previously used `run_id` to re-start (or reattach) to a prior run.
 
@@ -120,8 +124,8 @@ with the workplan path it was started from (the run-id is derived from the
 workplan name exactly as on the first run; the file must be unchanged since).
 
 Pass `--pre-run` to perform every stage before the model launch for each step
-(locally, even on scheduler systems) without launching any model. Re-run the
-workplan without `--pre-run` to attach to the prepared directories and launch.
+(locally, even on scheduler systems) without launching any model. Submit the
+workplan again without `--pre-run` to attach to the prepared directories and launch.
 """
 
 CATEGORY_HEADER_COLOR: t.Final[str] = "white"
@@ -491,7 +495,7 @@ def preprocess_path(workplan_path: str | None) -> str | None:
             if is_known_run_id(workplan_path):
                 msg = (
                     f"{workplan_path!r} is a run-id, not a workplan file; use "
-                    f"`cstar workplan run {ARG_RUN_ID} {workplan_path} {ARG_RESUME}`"
+                    f"`cstar workplan {COMMAND_SUBMIT} {ARG_RUN_ID} {workplan_path} {ARG_RESUME}`"
                 )
                 raise typer.BadParameter(msg) from ex
 
@@ -526,7 +530,7 @@ def is_known_run_id(value: str) -> bool:
         return False
 
 
-def read_slugged_workplan(path: Path, mode: PersistenceMode) -> Workplan:
+def read_slugged_workplan(path: Path) -> Workplan:
     """Read a workplan with its name normalized to a slug.
 
     A workplan recorded before names had to be slugs carries a free-form name
@@ -536,8 +540,6 @@ def read_slugged_workplan(path: Path, mode: PersistenceMode) -> Workplan:
     ----------
     path : Path
         The workplan file.
-    mode : PersistenceMode
-        How the file is persisted.
 
     Returns
     -------
@@ -550,7 +552,7 @@ def read_slugged_workplan(path: Path, mode: PersistenceMode) -> Workplan:
     ValueError
         If the content is not a valid workplan.
     """
-    raw = read_raw(path, mode)
+    raw = read_raw(path)
     if not isinstance(raw, dict):
         msg = f"The content of {str(path)!r} is not a mapping"
         raise ValueError(msg)
@@ -593,18 +595,31 @@ def refuse_run_id_collision(wp_path: Path, run_id: str, *, explicit: bool) -> No
         return
 
     record = asyncio.run(TrackingRepository().get_workplan_run(run_id))
-    if record is None or record.workplan_path.resolve() == wp_path.resolve():
+    if record is None:
+        return
+
+    try:
+        started_from = record.workplan_path
+    except CstarError as ex:
+        # the run cannot be re-entered either: scheduling reads the same manifest
+        msg = (
+            f"Run-id {run_id!r}, derived from the workplan name, belongs to a run "
+            f"whose workplan could not be found: {ex}; pass {ARG_RUN_ID} "
+            "<other-id> to start a new run."
+        )
+        raise typer.BadParameter(msg) from ex
+    if started_from.resolve() == wp_path.resolve():
         return
 
     claim = (
         f"Run-id {run_id!r}, derived from the workplan name, belongs to a run "
-        f"started from {str(record.workplan_path)!r}; the workplan at "
+        f"started from {str(started_from)!r}; the workplan at "
         f"{str(wp_path)!r} would overwrite it"
     )
     escape = f"pass {ARG_RUN_ID} <other-id> or {ARG_RUN_ID} {run_id} to re-enter"
 
     try:
-        supplied = read_slugged_workplan(wp_path, PersistenceMode.auto)
+        supplied = read_slugged_workplan(wp_path)
     except (OSError, RuntimeError, ValueError, yaml.YAMLError) as ex:
         msg = f"The workplan at {str(wp_path)!r} could not be read: {ex}"
         raise typer.BadParameter(msg) from ex
@@ -625,7 +640,7 @@ def refuse_run_id_collision(wp_path: Path, run_id: str, *, explicit: bool) -> No
         raise typer.BadParameter(msg)
 
     try:
-        recorded = read_slugged_workplan(recorded_path, PersistenceMode.auto)
+        recorded = read_slugged_workplan(recorded_path)
     except (OSError, RuntimeError, ValueError, yaml.YAMLError) as ex:
         msg = (
             f"{claim}, and the recorded workplan for that run could not be read: "
@@ -673,6 +688,7 @@ async def handle_run_reloading(run_id: str) -> WorkplanRun:
         - If no run record exists for the supplied run-id.
         - If the run was attached from elsewhere: it has no sentinels here and
           is never relaunched.
+        - If the run's workplan or transformed workplan cannot be found.
     """
     repo = TrackingRepository()
     wp_run = await repo.get_workplan_run(run_id)
@@ -688,11 +704,19 @@ async def handle_run_reloading(run_id: str) -> WorkplanRun:
         )
         raise typer.BadParameter(msg)
 
-    # ensure the environment matches the prior run
+    try:
+        source = wp_run.workplan_path
+        _ = wp_run.trx_workplan_path
+    except CstarError as ex:
+        msg = f"Run {run_id!r} cannot be re-entered: {ex}"
+        raise typer.BadParameter(msg) from ex
+
+    # ensure the environment matches the prior run; a setting this build no
+    # longer reads is left out rather than re-exported to every step
     recorded = {
         name: value
         for name, value in wp_run.environment.items()
-        if name not in RELOCATABLE_HOMES
+        if name not in RELOCATABLE_HOMES and name not in REMOVED_SETTINGS
     }
     differing = {
         name: value for name, value in recorded.items() if os.environ.get(name) != value
@@ -707,7 +731,6 @@ async def handle_run_reloading(run_id: str) -> WorkplanRun:
         )
     os.environ.update(recorded)
 
-    source = wp_run.workplan_path
     msg = f"Re-starting run-id {run_id!r} with workplan originating in {source!r}"
     log.info(msg)
 
@@ -813,8 +836,8 @@ def verify_resume_source(wp_path: Path, wp_run: WorkplanRun) -> None:
     log.debug(msg)
 
 
-@app.command(name="run", help=HELP_LONG, short_help=HELP_SHORT)
-def run(
+@app.command(name=COMMAND_SUBMIT, help=HELP_LONG, short_help=HELP_SHORT)
+def submit(
     ctx: typer.Context,
     run_id: t.Annotated[
         str,
@@ -892,6 +915,8 @@ def run(
 
     Specify a previously used run_id option to re-start a prior run.
     """
+    exit_on_refused_settings()
+
     if user_variables and user_variables_path is not None:
         msg = "`--var` and `--varfile` must not be supplied together"
         raise typer.BadParameter(msg)
@@ -915,13 +940,6 @@ def run(
                 (
                     f"{ARG_PRE_RUN} needs the authored workplan, not its transformed "
                     "copy, which replays the recorded plan as-is"
-                ),
-            ),
-            (
-                is_flag_enabled(ENV_CSTAR_CLI_DRY_RUN),
-                (
-                    f"{ENV_CSTAR_CLI_DRY_RUN} is set, but `workplan run` no longer "
-                    "has a plan-only mode; unset it, or use `cstar workplan check`"
                 ),
             ),
             (
@@ -958,7 +976,7 @@ def run(
                 if resume and wp.pre_run:
                     msg = (
                         f"Run {run_id!r} is a pre-run; retry its failed steps with "
-                        f"`cstar workplan run <workplan> {ARG_PRE_RUN}` instead"
+                        f"`cstar workplan {COMMAND_SUBMIT} <workplan> {ARG_PRE_RUN}` instead"
                     )
                     raise typer.BadParameter(msg, param_hint=ARG_RESUME)
                 pre_run = wp.pre_run
@@ -1027,11 +1045,11 @@ def run(
     console.print(f"{summary.workplan_name!r} run scheduling has completed")
     if pre_run:
         console.print(
-            "Pre-run scheduled. Re-run "
-            f"`cstar workplan run {summary.source_workplan} --run-id {summary.run_id}` "
+            "Pre-run scheduled. Submit "
+            f"`cstar workplan {COMMAND_SUBMIT} {summary.source_workplan} {ARG_RUN_ID} {summary.run_id}` "
             f"without {ARG_PRE_RUN} to attach to the prepared directories and launch."
         )
 
 
 if __name__ == "__main__":
-    typer.run(run)
+    typer.run(submit)

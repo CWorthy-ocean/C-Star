@@ -1,13 +1,12 @@
 import asyncio
 import hashlib
-import json
 import os
 import random
 import re
 import shutil
 import textwrap
 import typing as t
-from collections.abc import AsyncGenerator
+from collections.abc import AsyncGenerator, Callable
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from unittest import mock
@@ -15,13 +14,10 @@ from unittest import mock
 import pytest
 
 from cstar.applications.hello_world import HelloWorldBlueprint
-from cstar.base.env import (
-    ENV_CSTAR_CLOBBER_WORKING_DIR,
-    ENV_CSTAR_RUNID,
-    FLAG_OFF,
-    FLAG_ON,
-)
+from cstar.applications.ucla_roms.models import UclaRomsBlueprint
+from cstar.base.env import ENV_CSTAR_RUNID, ENV_CSTAR_STATE_HOME, FLAG_ON
 from cstar.base.exceptions import CstarError, CstarExpectationFailed
+from cstar.base.feature import ENV_FF_ORCH_TRX_TIMESPLIT, ENV_FF_ORCH_TRX_TIMESPLIT_FREQ
 from cstar.base.utils import slugify
 from cstar.entrypoint.utils import ARG_CLOBBER, ARG_PRE_RUN, ARG_RUN_ID
 from cstar.execution.file_system import (
@@ -37,11 +33,11 @@ from cstar.orchestration.dag_runner import (
     ExecutiveRunSummary,
     NoPreparableStepsError,
     _carry_inputs,
-    _ignore_ambient_clobber_env,
     _record_attempt,
     apply_clobber_overrides,
     apply_pre_run_overrides,
     apply_resume_overrides,
+    build_and_run_dag,
     build_dag,
     build_planner,
     check_clobber_dependents,
@@ -66,11 +62,11 @@ from cstar.orchestration.launch.slurm import SlurmLauncher
 from cstar.orchestration.manifest import (
     ATTEMPT_BLUEPRINTS_DIR_NAME,
     ATTEMPT_DIR_FORMAT,
-    ATTEMPT_JSON_WORKPLAN_NAME,
     ATTEMPT_TRANSFORMED_NAME,
     ATTEMPT_VARIABLES_NAME,
     ATTEMPT_WORKPLAN_NAME,
     ATTEMPTS_DIR_NAME,
+    CANONICAL_NAMES_SINCE,
     RUN_MANIFEST_NAME,
     Attempt,
     AttemptStatus,
@@ -105,20 +101,31 @@ from cstar.orchestration.orchestration import (
     ProcessHandle,
     Status,
     Task,
+    check_environment,
+    configure_environment,
 )
+from cstar.orchestration.run_check import TRANSFORMED_WORKPLAN_GLOB
 from cstar.orchestration.serialization import (
-    PersistenceMode,
     deserialize,
     read_raw,
     serialize,
 )
 from cstar.orchestration.state import StateRepository
 from cstar.orchestration.tracking import KEY_RUN_UUID, TrackingRepository, WorkplanRun
-from cstar.orchestration.utils import ENV_CSTAR_ORCH_DELAYS
+from cstar.orchestration.transforms import SplitFrequency
+from cstar.orchestration.utils import (
+    ENV_CSTAR_SLURM_ACCOUNT,
+    ENV_CSTAR_SLURM_MAX_WALLTIME,
+    ENV_CSTAR_SLURM_QUEUE,
+    get_run_id,
+)
+from cstar.system.environment import EnvSettingsBase, SlurmSettingsBase
+from cstar.system.manager import AnvilEnvSettings
 from cstar.tests.unit_tests.orchestration.conftest import (
     EXTERNAL_TOKEN,
     ExternalTaskFactory,
 )
+from cstar.tests.unit_tests.orchestration.manifest_runs import write_identity
 
 
 def draw_graph(planner: Planner) -> None:
@@ -219,10 +226,13 @@ async def layered_workplan(
     serialize(wp_path, workplan)
 
     repo = TrackingRepository()
+    output_path = tmp_path / "mock-output"
+    # the run directory holds the transformed workplan the record derives
+    output_path.mkdir(parents=True, exist_ok=True)
+    shutil.copy(wp_path, output_path / f"{wp_path.stem}_transformed.yaml")
+    write_identity(output_path, mock_run_id, workplan=wp_path)
     wp_run = WorkplanRun(
-        workplan_path=wp_path,
-        trx_workplan_path=wp_path,
-        output_path=tmp_path / "mock-output",
+        output_path=output_path,
         run_id=mock_run_id,
     )
     await repo.put_workplan_run(wp_run)
@@ -430,56 +440,6 @@ def _make_workplan(steps: list[Step]) -> Workplan:
     )
 
 
-@pytest.mark.parametrize("value", [FLAG_ON, "boo", "  "])
-def test_ignore_ambient_clobber_env_pops_and_warns(
-    monkeypatch: pytest.MonkeyPatch,
-    caplog: pytest.LogCaptureFixture,
-    value: str,
-) -> None:
-    """An exported CSTAR_CLOBBER_WORKING_DIR is scrubbed (so it cannot leak
-    into every step subprocess) and the user is pointed at `--clobber`.
-    """
-    monkeypatch.setenv(ENV_CSTAR_CLOBBER_WORKING_DIR, value)
-
-    with caplog.at_level("WARNING"):
-        _ignore_ambient_clobber_env()
-
-    assert ENV_CSTAR_CLOBBER_WORKING_DIR not in os.environ
-    assert len(caplog.records) == 1
-    assert ENV_CSTAR_CLOBBER_WORKING_DIR in caplog.text
-    assert ARG_CLOBBER in caplog.text
-
-
-def test_ignore_ambient_clobber_env_silent_when_off(
-    monkeypatch: pytest.MonkeyPatch,
-    caplog: pytest.LogCaptureFixture,
-) -> None:
-    """An explicit "off" value is scrubbed without a warning (it would have
-    had no effect on the steps).
-    """
-    monkeypatch.setenv(ENV_CSTAR_CLOBBER_WORKING_DIR, FLAG_OFF)
-
-    with caplog.at_level("WARNING"):
-        _ignore_ambient_clobber_env()
-
-    assert ENV_CSTAR_CLOBBER_WORKING_DIR not in os.environ
-    assert not caplog.records
-
-
-def test_ignore_ambient_clobber_env_noop_when_unset(
-    monkeypatch: pytest.MonkeyPatch,
-    caplog: pytest.LogCaptureFixture,
-) -> None:
-    """Absence of the variable is a silent no-op."""
-    monkeypatch.delenv(ENV_CSTAR_CLOBBER_WORKING_DIR, raising=False)
-
-    with caplog.at_level("WARNING"):
-        _ignore_ambient_clobber_env()
-
-    assert ENV_CSTAR_CLOBBER_WORKING_DIR not in os.environ
-    assert not caplog.records
-
-
 def test_apply_clobber_overrides_noop_when_none(tmp_path: Path) -> None:
     """Verify no overrides are applied when `clobber_steps` is `None`."""
     step_a = _make_step(tmp_path, "Step A")
@@ -607,7 +567,7 @@ async def test_apply_resume_overrides_marks_resumable_failed_steps(
         tmp_path, "Resumable Step", application=Application.HELLO_WORLD
     )
     step_unresumable = _make_step(
-        tmp_path, "Unresumable Step", application=Application.ROMS_MARBL
+        tmp_path, "Unresumable Step", application=Application.UCLA_ROMS
     )
     step_done = _make_step(tmp_path, "Done Step")
     wp = _make_workplan([step_resumable, step_unresumable, step_done])
@@ -913,9 +873,7 @@ async def test_prepare_workplan_carries_variables_only_when_given(
     _, _, _, none = await prepare_workplan(wp_path, tmp_path / "without")
 
     saved = tmp_path / "with" / given.directory / ATTEMPT_VARIABLES_NAME
-    assert deserialize(
-        saved, UserDefinedVariables, mode=PersistenceMode.yaml
-    ).mapping == {"target": "x"}
+    assert deserialize(saved, UserDefinedVariables).mapping == {"target": "x"}
     assert ATTEMPT_VARIABLES_NAME in given.carried
     assert not (tmp_path / "without" / none.directory / ATTEMPT_VARIABLES_NAME).exists()
     assert ATTEMPT_VARIABLES_NAME not in none.carried
@@ -1084,30 +1042,29 @@ async def test_prepare_workplan_fails_when_a_blueprint_cannot_be_carried(
     ]
 
 
+@pytest.mark.parametrize("suffix", [".json", ".yml"])
 @pytest.mark.asyncio
-async def test_prepare_workplan_carries_a_json_workplan_under_its_format(
-    tmp_path: Path, hello_world_bp_path: Path
+async def test_prepare_workplan_names_the_run_root_plan_yaml(
+    tmp_path: Path, hello_world_bp_path: Path, suffix: str
 ) -> None:
-    """Verify a workplan written as JSON is carried verbatim under a JSON name,
-    so it reads back in its own format: tab-indented JSON is not YAML.
+    """Verify the plan written into the run root is named `.yaml` whatever the
+    authored suffix, since it is rendered as YAML, so it loads back as written
+    and is the one file the run-root glob finds.
     """
     wp = Workplan(
-        name="json",
-        description="A workplan written as JSON.",
+        name="authored",
+        description="A workplan authored under another suffix.",
         steps=[_hello_step(hello_world_bp_path.as_posix(), "hello")],
     )
-    wp_path = tmp_path / "plan.json"
-    wp_path.write_text(
-        json.dumps(wp.model_dump(mode="json", by_alias=True), indent="\t")
-    )
+    wp_path = tmp_path / f"plan{suffix}"
+    serialize(wp_path, wp)
+    output_dir = tmp_path / "run"
 
-    _, _, _, carried = await prepare_workplan(wp_path, tmp_path / "run")
+    prepared, trx_path, _, _ = await prepare_workplan(wp_path, output_dir)
 
-    carried_copy = tmp_path / "run" / carried.directory / ATTEMPT_JSON_WORKPLAN_NAME
-    assert carried_copy.read_bytes() == wp_path.read_bytes()
-    assert ATTEMPT_JSON_WORKPLAN_NAME in carried.carried
-    assert ATTEMPT_WORKPLAN_NAME not in carried.carried
-    assert deserialize(carried_copy, Workplan) == deserialize(wp_path, Workplan)
+    assert trx_path == output_dir / "plan_transformed.yaml"
+    assert sorted(output_dir.glob(TRANSFORMED_WORKPLAN_GLOB)) == [trx_path]
+    assert LiveWorkplan.load(trx_path) == prepared
 
 
 def test_carry_inputs_copies_a_remote_blueprint_under_its_url_name(
@@ -1131,7 +1088,6 @@ def test_carry_inputs_copies_a_remote_blueprint_under_its_url_name(
         run_root,
         start,
         b"name: plan\n",
-        ATTEMPT_WORKPLAN_NAME,
         "name: plan\n",
         steps,
         None,
@@ -1164,9 +1120,7 @@ async def test_prepare_workplan_carries_the_template_workplan(
 
     copy = output_dir / carried.directory / ATTEMPT_WORKPLAN_NAME
     assert copy.read_bytes() == wp_path.read_bytes()
-    assert deserialize(copy, Workplan, mode=PersistenceMode.yaml) == deserialize(
-        wp_path, Workplan
-    )
+    assert deserialize(copy, Workplan) == deserialize(wp_path, Workplan)
     # the transformed copy keeps the name, which is the run-id, as written
     assert read_raw(trx_path)["name"] == deserialize(wp_path, Workplan).name
 
@@ -1246,7 +1200,6 @@ async def test_prepare_workplan_materializes_inline_blueprint(
     authored = deserialize(
         output_dir / carried.directory / ATTEMPT_WORKPLAN_NAME,
         Workplan,
-        mode=PersistenceMode.yaml,
     )
     assert next(s for s in authored.steps if s.name == "consumer").is_inline
     assert set(carried.carried_blueprints) == {"producer"}
@@ -1317,6 +1270,7 @@ async def test_run_dag_records_the_root_of_the_transformed_workplan(
     workplan = LiveWorkplan(
         name="reloaded", description="A reloaded run.", steps=[step], root=run_root
     )
+    assert serialize(trx_path, workplan)
 
     with (
         mock.patch("cstar.orchestration.dag_runner.get_orchestrator"),
@@ -1667,14 +1621,15 @@ async def test_recorded_workplan_deleted_with_its_attempt_is_not_replaced(
 
 
 def _legacy_run(tmp_path: Path) -> WorkplanRun:
-    """A recorded run whose run directory exists and holds nothing yet."""
+    """A recorded run whose run directory exists and holds no manifest yet, only
+    its transformed workplan.
+    """
     wp_run = WorkplanRun(
-        workplan_path=tmp_path / "plan.yaml",
-        trx_workplan_path=tmp_path / "run" / "plan_transformed.yaml",
         output_path=tmp_path / "run",
         run_id="legacy",
     )
     wp_run.output_path.mkdir()
+    (wp_run.output_path / "plan_transformed.yaml").touch()
     return wp_run
 
 
@@ -2014,6 +1969,119 @@ async def test_build_dag_refuses_an_edited_done_step_before_writing_anything(
     assert len(list((output_dir / ATTEMPTS_DIR_NAME).iterdir())) == 1
 
 
+CURRENT_MANIFEST_SCHEMA = RunManifest.model_fields["schema_version"].default
+"""The schema version this build writes in a run manifest."""
+
+
+def _write_manifest_as_of(root: Path, manifest: RunManifest, version: str) -> None:
+    """Write a manifest as the build of schema `version` left it.
+
+    `write_run_manifest` stamps this build's version, so the document is
+    serialized directly.
+    """
+    manifest.schema_version = version
+    assert serialize(root / RUN_MANIFEST_NAME, manifest)
+
+
+@pytest.mark.asyncio
+async def test_build_dag_accepts_a_done_step_hashed_before_canonical_names(
+    tmp_path: Path, mock_run_id: str, hello_world_bp_path: Path
+) -> None:
+    """Verify re-entering a run whose manifest predates `CANONICAL_NAMES_SINCE`
+    is not refused for its recorded hashes (which may use an earlier application
+    name), and that scheduling it rewrites the manifest under the current schema
+    with the step's current hash.
+    """
+    wp_path, output_dir = _build_guarded(tmp_path, mock_run_id, hello_world_bp_path)
+    # a hash this build cannot reproduce: it stands for one made under `roms_marbl`
+    older = _recorded(mock_run_id, {"hello": "hashed-under-an-earlier-name"})
+    _write_manifest_as_of(output_dir, older, "1.4.0")
+    done = DagStatus({"hello": Status.Done})
+
+    with (
+        mock.patch("cstar.orchestration.dag_runner.check_environment"),
+        mock.patch(
+            "cstar.orchestration.dag_runner.load_run_state",
+            mock.AsyncMock(return_value=done),
+        ),
+        mock.patch("cstar.orchestration.dag_runner.get_orchestrator"),
+        mock.patch("cstar.orchestration.dag_runner.process_plan", mock.AsyncMock()),
+    ):
+        planner, trx_path, facts, carried = await build_dag(wp_path, mock_run_id)
+        await run_dag(
+            wp_path,
+            trx_path,
+            mock_run_id,
+            planner,
+            step_facts=facts,
+            carried=carried,
+        )
+
+    rewritten = read_run_manifest(output_dir)
+    assert rewritten is not None
+    assert rewritten.schema_version == CURRENT_MANIFEST_SCHEMA
+    entry = rewritten.step("hello")
+    assert entry is not None
+    assert entry.definition_hash == facts["hello"].definition_hash
+    assert (
+        "hashed-under-an-earlier-name"
+        not in (output_dir / RUN_MANIFEST_NAME).read_text()
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("writer", ["reentry", "refresh"])
+@pytest.mark.parametrize(
+    ("version", "refused"),
+    [
+        pytest.param("1.4.0", False, id="before-canonical-names"),
+        pytest.param(CANONICAL_NAMES_SINCE, True, id="canonical-names-since"),
+    ],
+)
+async def test_restamping_does_not_make_an_older_hash_comparable(
+    tmp_path: Path,
+    mock_run_id: str,
+    hello_world_bp_path: Path,
+    writer: str,
+    version: str,
+    refused: bool,
+) -> None:
+    """Verify a writer that restamps an older manifest and keeps its recorded
+    hashes (a re-entry that replays the recorded plan, or a status refresh) does
+    not turn them into hashes the next authored re-entry compares.
+
+    A manifest left at `CANONICAL_NAMES_SINCE` still has its edited Done step refused.
+    """
+    wp_path, wp_run = await _schedule(tmp_path, mock_run_id, hello_world_bp_path)
+    root = wp_run.output_path
+    manifest = read_run_manifest(root)
+    assert manifest is not None
+    manifest.steps[0].definition_hash = "hashed-under-an-earlier-name"
+    _write_manifest_as_of(root, manifest, version)
+
+    if writer == "reentry":
+        await _reenter(wp_run)
+    else:
+        refresh_run_manifest(root, mock_run_id, DagStatus({"hello": Status.Done}))
+
+    # the writer restamped the file under this build's schema
+    assert (
+        f"schema_version: {CURRENT_MANIFEST_SCHEMA}"
+        in (root / RUN_MANIFEST_NAME).read_text()
+    )
+    wp = deserialize(wp_path, Workplan)
+    facts = describe_steps(wp, wp_path.parent)
+    reread = read_run_manifest(root)
+    assert reread is not None
+    done = DagStatus({"hello": Status.Done})
+
+    if refused:
+        with pytest.raises(CstarExpectationFailed):
+            refuse_edited_done_steps(wp, reread, done, facts, [])
+    else:
+        refuse_edited_done_steps(wp, reread, done, facts, [])
+
+
 @pytest.mark.asyncio
 async def test_refresh_run_manifest_folds_records_and_closes_the_attempt(
     tmp_path: Path, mock_run_id: str, hello_world_bp_path: Path
@@ -2169,7 +2237,7 @@ async def status_change_workplan_run(
     tmp_path: Path,
     mock_run_id: str,
 ) -> WorkplanRun:
-    """Persist a `WorkplanRun` whose `trx_workplan_path` holds a real `LiveWorkplan`.
+    """Persist a `WorkplanRun` whose transformed workplan is a real `LiveWorkplan`.
 
     Parameters
     ----------
@@ -2196,12 +2264,10 @@ async def status_change_workplan_run(
         description="A workplan used to test on_status_changed",
         steps=[step],
     )
-    trx_path = tmp_path / "trx.yaml"
+    trx_path = tmp_path / "trx_transformed.yaml"
     assert serialize(trx_path, live_plan)
 
     run = WorkplanRun(
-        workplan_path=tmp_path / "wp.yaml",
-        trx_workplan_path=trx_path,
         output_path=tmp_path,
         run_id=mock_run_id,
     )
@@ -2382,7 +2448,7 @@ def _roms_step(
     bp_path.touch()
     return Step(
         name=name,
-        application=Application.ROMS_MARBL,
+        application=Application.UCLA_ROMS,
         blueprint=bp_path,
         depends_on=depends_on or [],
         directives=directives or {},
@@ -2552,7 +2618,7 @@ def test_prune_unpreparable_steps_drops_transitively(tmp_path: Path) -> None:
     deferred = Step.model_validate(
         {
             "name": "Deferred",
-            "application": Application.ROMS_MARBL,
+            "application": Application.UCLA_ROMS,
             "blueprint": {"from_step": "Producer", "filename": "generated.yaml"},
             "depends_on": ["Producer"],
         }
@@ -3015,7 +3081,7 @@ async def test_run_dag_records_every_submission_in_the_manifest(
     submission time of every step: the steps launched in one pass, writing the
     manifest together, each keep their own, and so does a step launched later.
     """
-    monkeypatch.setenv(ENV_CSTAR_ORCH_DELAYS, "0")
+    monkeypatch.setattr("cstar.orchestration.dag_runner.POLL_DELAYS", (0.0,))
     bp = hello_world_bp_path.as_posix()
     wp = Workplan(
         name="submitted",
@@ -3150,3 +3216,152 @@ async def test_prepare_workplan_anchors_relative_blueprint_path(
     command = StepToRunRequestAdapter().adapt(step).command
     assert command[:4] == ["cstar", "blueprint", "run", str(expected)]
     assert command[4:6] == ["--step", step.name]
+
+
+@pytest.mark.parametrize(
+    ("drop_var", "key", "settings_klass"),
+    [
+        (ENV_CSTAR_SLURM_ACCOUNT, "ACCOUNT", SlurmSettingsBase),
+        (ENV_CSTAR_SLURM_QUEUE, "QUEUE", SlurmSettingsBase),
+        (ENV_CSTAR_SLURM_ACCOUNT, "ACCOUNT", AnvilEnvSettings),
+        (ENV_CSTAR_SLURM_QUEUE, "QUEUE", AnvilEnvSettings),
+    ],
+)
+@pytest.mark.asyncio
+async def test_build_and_run_dag_env(
+    drop_var: str,
+    key: str,
+    settings_klass: type[EnvSettingsBase],
+    tmp_path: Path,
+    bp_templates_dir: Path,
+    create_host_workplan: Callable[[str, Path, Path, str], Path],
+) -> None:
+    """Verify that the DAG runner fails when required environment variables are not passed.
+
+    Parameters
+    ----------
+    drop_var : str
+        The environment variable to be removed from the environment.
+    key : str
+        A unique string verifying the correct exception was caught.
+    tmp_path : Path
+        Temporary directory for test outputs
+    bp_templates_dir: Path
+        Fixture returning the path to the directory containing blueprint template files
+    create_host_workplan : Callable
+        Fixture that writes a template workplan hosting a blueprint, returning its path
+    """
+    workplan_name: str = "single_step"
+
+    bp_template_file = "blueprint.yaml"
+    bp_template_path = bp_templates_dir / bp_template_file
+
+    working_dir = tmp_path / "original-output-dir"
+    working_dir_override = tmp_path / "overridden-output-dir"
+    run_id = "my-run"
+
+    mock_process = mock.AsyncMock()
+
+    # mock the sys manager to engage the checks for Slurm env-vars
+    mock_sys_manager = mock.Mock()
+    mock_sys_manager.scheduler = mock.Mock()
+    mock_get_mgr = mock.Mock(return_value=mock_sys_manager)
+
+    mock_env = {
+        ENV_CSTAR_STATE_HOME: working_dir_override.as_posix(),
+        ENV_CSTAR_SLURM_ACCOUNT: "xyz",
+        ENV_CSTAR_SLURM_QUEUE: "wholenode",
+        ENV_CSTAR_SLURM_MAX_WALLTIME: "00:5:00",
+        ENV_CSTAR_RUNID: run_id,
+    }
+
+    # get rid of one required env var.
+    del mock_env[drop_var]
+
+    with (
+        mock.patch("cstar.orchestration.dag_runner.process_plan", mock_process),
+        mock.patch("cstar.orchestration.dag_runner.get_sysmgr", mock_get_mgr),
+        mock.patch.dict(os.environ, mock_env, clear=True),
+        mock.patch(
+            "cstar.system.environment.CStarEnvironment.settings_klass",
+            settings_klass,
+        ),
+        pytest.raises(CstarExpectationFailed) as ex,
+    ):
+        generated_wp_path = create_host_workplan(
+            workplan_name, bp_template_path, working_dir, run_id
+        )
+
+        await build_and_run_dag(generated_wp_path, run_id)
+
+    assert key in str(ex)
+
+
+@pytest.mark.asyncio
+async def test_prepare_template_hosted_dag(
+    tmp_path: Path,
+    bp_templates_dir: Path,
+    create_host_workplan: Callable[[str, Path, Path, str], Path],
+) -> None:
+    """Verify that a template-hosted DAG is transformed by the DAG runner.
+
+    Parameters
+    ----------
+    tmp_path : Path
+        Temporary directory for test outputs
+    bp_templates_dir: Path
+        Fixture returning the path to the directory containing blueprint template files
+    create_host_workplan : Callable
+        Fixture that writes a template workplan hosting a blueprint, returning its path
+    """
+    workplan_name: str = "single_step"
+
+    bp_template_file = "blueprint.yaml"
+    bp_template_path = bp_templates_dir / bp_template_file
+
+    working_dir = tmp_path / "original-output-dir"
+    run_id = "my-run"
+
+    mock_env = {
+        ENV_CSTAR_SLURM_ACCOUNT: "xyz",
+        ENV_CSTAR_SLURM_QUEUE: "wholenode",
+        ENV_CSTAR_SLURM_MAX_WALLTIME: "00:5:00",
+        ENV_FF_ORCH_TRX_TIMESPLIT: FLAG_ON,
+        ENV_FF_ORCH_TRX_TIMESPLIT_FREQ: SplitFrequency.Monthly.value,
+    }
+
+    def _raise_ex(*args, **kwargs) -> None:
+        msg = "on-purpose-fail"
+        raise RuntimeError(msg)
+
+    with (
+        mock.patch("cstar.orchestration.orchestration.Planner.__init__", _raise_ex),
+        mock.patch.dict(os.environ, mock_env),
+    ):
+        generated_wp_path = create_host_workplan(
+            workplan_name, bp_template_path, working_dir, run_id
+        )
+
+        configure_environment(working_dir, run_id)
+        run_id = get_run_id()
+        check_environment()
+        wp, wp_path, _, _ = await prepare_workplan(
+            generated_wp_path, StateDirectoryManager.data_dir(run_id)
+        )
+
+    wp = deserialize(wp_path, LiveWorkplan)
+    steps = list(wp.steps)
+
+    # default blueprint is 366 days; confirm 366 steps after tranform is applied.
+    num_timeslices = 12
+    assert len(steps) == num_timeslices
+
+    paths: set[Path] = set()
+    for step in steps:
+        bp = deserialize(step.blueprint_path, UclaRomsBlueprint)
+        paths.add(bp.effective_working_dir)
+
+        assert bp.effective_working_dir.exists()
+
+    # confirm that every step has a unique output path
+    assert len(steps) == num_timeslices

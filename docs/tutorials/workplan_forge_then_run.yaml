@@ -9,7 +9,7 @@ steps:
     blueprint: ./forge_blueprint.yaml
 
   - name: simulate
-    application: roms_marbl
+    application: ucla_roms
     blueprint:
       from_step: make_inputs
     depends_on:

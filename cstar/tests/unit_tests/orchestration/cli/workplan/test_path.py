@@ -49,13 +49,11 @@ def prepared(tmp_path: Path, hello_world_bp_path: Path) -> PreparedRun:
         )
         for name, directory in step_dirs.items()
     ]
-    trx_path = tmp_path / "trx.yaml"
+    trx_path = output / "paths_transformed.yaml"
     assert serialize(
         trx_path, LiveWorkplan(name="paths", description="step paths", steps=steps)
     )
     run = WorkplanRun(
-        workplan_path=trx_path,
-        trx_workplan_path=trx_path,
         output_path=output,
         run_id="my-run",
     )

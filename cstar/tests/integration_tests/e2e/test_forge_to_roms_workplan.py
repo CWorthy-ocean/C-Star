@@ -1,6 +1,6 @@
-"""Tier 2: a forge -> roms_marbl -> CDR metrics and CDR-LiTE workplan run end to end through the ``cstar`` CLI.
+"""Tier 2: a forge -> ucla_roms -> CDR metrics and CDR-LiTE workplan run end to end through the ``cstar`` CLI.
 
-``cstar workplan run`` only schedules: each step is a detached ``sh`` proxy script that
+``cstar workplan submit`` only schedules: each step is a detached ``sh`` proxy script that
 calls the ``cstar`` executable on ``PATH``. A shim pins that executable to this
 checkout, and the fixture then polls the step sentinels until all eight are terminal.
 
@@ -115,6 +115,8 @@ MISSING_FLX_MESSAGE = "CDR_OAE_DIC1_flx not in forcing files"
 ERROR_PATTERN = re.compile(
     r"\bERROR\b|BLOWUP|blow.?up|MPI_ABORT|Traceback", re.IGNORECASE
 )
+LOG_RECORD_START = re.compile(r"^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2},\d{3} ")
+ERROR_CONTEXT_LINES = 20
 PARTITIONED_NC = re.compile(r"\.\d+\.nc$")
 TIMESTAMP = re.compile(r"^\d{14}$")
 PRODUCT_HEADINGS = ("Products missing", "Products whose size", "Products whose content")
@@ -135,7 +137,7 @@ pytestmark = pytest.mark.skipif(
 
 @dataclass(frozen=True)
 class E2ERun:
-    """A completed forge -> roms_marbl workplan run and where its artifacts live."""
+    """A completed forge -> ucla_roms workplan run and where its artifacts live."""
 
     run_id: str
     env: dict[str, str]
@@ -164,7 +166,7 @@ class E2ERun:
         return _executed_working_dir(self.cdr_root, self.cdr_forge_root)
 
     def working_dir_of(self, step: str) -> Path:
-        """The directory the roms_marbl ``step`` ran in."""
+        """The directory the ucla_roms ``step`` ran in."""
         # lazy: resolving a step that never ran raises, so resolve only ``step``
         working_dirs = {
             ROMS_STEP: lambda: self.roms_working_dir,
@@ -216,7 +218,7 @@ class E2ERun:
 
 
 def _executed_working_dir(step_root: Path, forge_root: Path) -> Path:
-    """The ``working_dir`` of the blueprint a roms_marbl step executed.
+    """The ``working_dir`` of the blueprint a ucla_roms step executed.
 
     The scheduler overrides ``working_dir`` with the step root through an
     ``apply-overrides`` directive, which is persisted as ``work/*.ovrd.yaml``; the
@@ -268,8 +270,8 @@ def write_workplan(
     workplan = {
         "name": "forge-roms-e2e",
         "description": (
-            "forge, whole and segmented roms_marbl runs with CDR metrics, "
-            "then a CDR-LiTE forge and roms_marbl run"
+            "forge, whole and segmented ucla_roms runs with CDR metrics, "
+            "then a CDR-LiTE forge and ucla_roms run"
         ),
         "steps": [
             {
@@ -280,6 +282,7 @@ def write_workplan(
             },
             {
                 "name": ROMS_STEP,
+                # the earlier application name, kept so this run covers the alias end to end
                 "application": "roms_marbl",
                 "blueprint": {"from_step": FORGE_STEP},
                 "depends_on": [FORGE_STEP],
@@ -366,7 +369,7 @@ def _schedule_and_wait(
     shim: Path,
     root: Path,
 ) -> E2ERun:
-    """Build the blueprints and workplan, run ``cstar workplan run``, and poll to the end.
+    """Build the blueprints and workplan, run ``cstar workplan submit``, and poll to the end.
 
     Returns
     -------
@@ -384,7 +387,7 @@ def _schedule_and_wait(
     )
     _warm_grid_downloads(blueprint)
     # lazy: pulls in roms_tools, like the grid warm-up
-    from cstar.applications.forge.input_data import netcdf_basename
+    from cstar.applications.forge.input_generator import netcdf_basename
 
     workplan = write_workplan(
         root / "workplan.yaml",
@@ -394,11 +397,11 @@ def _schedule_and_wait(
     )
     env = make_cli_env(root, shim)
 
-    proc = run_cstar(env, "workplan", "run", "--run-id", RUN_ID, str(workplan))
+    proc = run_cstar(env, "workplan", "submit", "--run-id", RUN_ID, str(workplan))
     output = f"stdout:\n{proc.stdout}\nstderr:\n{proc.stderr}"
     if proc.returncode != 0:
         tails = run_log_tails(root / "data", RUN_ID)
-        pytest.fail(f"workplan run exited {proc.returncode}\n{output}\n{tails}")
+        pytest.fail(f"workplan submit exited {proc.returncode}\n{output}\n{tails}")
     assert SCHEDULED_MESSAGE in proc.stdout, output
 
     state_home = root / "state"
@@ -447,7 +450,7 @@ def _warm_grid_downloads(blueprint: "ForgeBlueprint") -> None:
 
 
 def restart_files(run: E2ERun, step: str = ROMS_STEP) -> list[Path]:
-    """The restart files of the roms_marbl ``step``, ordered by their timestamp."""
+    """The restart files of the ucla_roms ``step``, ordered by their timestamp."""
     return sorted((run.working_dir_of(step) / "output").glob("*_rst*.nc"))
 
 
@@ -516,9 +519,9 @@ def test_forge_record_lists_its_products(e2e_run: E2ERun) -> None:
 
 
 def test_roms_record_lists_its_products(e2e_run: E2ERun) -> None:
-    """The roms_marbl step record lists its restarts by stream, its build, configuration and log."""
+    """The ucla_roms step record lists its restarts by stream, its build, configuration and log."""
     record = read_step_record(e2e_run.roms_working_dir)
-    assert record is not None, "roms_marbl wrote no step record"
+    assert record is not None, "ucla_roms wrote no step record"
 
     restarts = [p for p in record.products if p.kind == "restart"]
     assert restarts, [p.kind for p in record.products]
@@ -614,13 +617,30 @@ def test_restart_fields_are_finite(e2e_run: E2ERun) -> None:
     assert not bad, bad
 
 
+def error_hits(lines: Sequence[str]) -> list[str]:
+    """The lines matching ``ERROR_PATTERN``, each with the lines that continue it.
+
+    A logged command failure puts the command's stderr on the lines after the
+    ``[ERROR]`` record, so each hit carries the following lines up to the next log
+    record, at most ``ERROR_CONTEXT_LINES`` of them.
+    """
+    hits = []
+    for i, line in enumerate(lines):
+        if not ERROR_PATTERN.search(line):
+            continue
+        rest = lines[i + 1 : i + 1 + ERROR_CONTEXT_LINES]
+        n = next((j for j, ln in enumerate(rest) if LOG_RECORD_START.match(ln)), None)
+        hits.append("\n".join([line.strip(), *rest[:n]]))
+    return hits
+
+
 def test_roms_logs_are_clean(e2e_run: E2ERun) -> None:
     """The ROMS step's stdout shows time stepping ran and contains no error markers."""
     log = e2e_run.roms_root / "logs" / f"{slugify(ROMS_STEP)}.out"
     lines = log.read_text(errors="replace").splitlines()
     assert any("started time-stepping" in line for line in lines), "ROMS never stepped"
-    hits = [line.strip() for line in lines if ERROR_PATTERN.search(line)]
-    assert not hits, hits[:10]
+    hits = error_hits(lines)
+    assert not hits, "\n\n".join(hits[:10])
 
 
 def gas_exch_files(run: E2ERun) -> list[Path]:
@@ -697,7 +717,7 @@ def test_cdr_lite_sensitivity_is_the_recorded_gas_exchange(e2e_run: E2ERun) -> N
     that the directive and the producer's record agree on real ROMS output.
     """
     record = read_step_record(e2e_run.roms_working_dir)
-    assert record is not None, "roms_marbl wrote no step record"
+    assert record is not None, "ucla_roms wrote no step record"
     recorded = [
         (e2e_run.roms_working_dir / p.path).resolve()
         for p in record.products
@@ -736,8 +756,8 @@ def test_cdr_lite_log_is_clean(e2e_run: E2ERun) -> None:
     log = e2e_run.cdr_root / "logs" / f"{slugify(CDR_STEP)}.out"
     lines = log.read_text(errors="replace").splitlines()
     assert any("started time-stepping" in line for line in lines), "ROMS never stepped"
-    hits = [line.strip() for line in lines if ERROR_PATTERN.search(line)]
-    assert not hits, hits[:10]
+    hits = error_hits(lines)
+    assert not hits, "\n\n".join(hits[:10])
     # the _cdrgas files hold sensitivities only, so the DIC flux is expected to be absent
     assert sum(MISSING_FLX_MESSAGE in line for line in lines) == 1
     assert not [ln for ln in lines if "Could not find var" in ln]
@@ -778,7 +798,7 @@ def seconds_since_reference(when: datetime) -> float:
 
 
 def cdr_output_files(run: E2ERun, step: str) -> list[Path]:
-    """The ``_cdr`` output files of the roms_marbl ``step``, ordered by their timestamp."""
+    """The ``_cdr`` output files of the ucla_roms ``step``, ordered by their timestamp."""
     return sorted((run.working_dir_of(step) / "output").glob("*_cdr.[0-9]*.nc"))
 
 
@@ -937,7 +957,7 @@ def test_workplan_status_names_all_steps(e2e_run: E2ERun) -> None:
 def test_resume_of_completed_run_keeps_steps_done(e2e_run: E2ERun) -> None:
     """Resuming a finished run succeeds and leaves every step ``Done``."""
     proc = run_cstar(
-        e2e_run.env, "workplan", "run", "--run-id", e2e_run.run_id, "--resume"
+        e2e_run.env, "workplan", "submit", "--run-id", e2e_run.run_id, "--resume"
     )
     assert proc.returncode == 0, f"{proc.stdout}\n{proc.stderr}"
 

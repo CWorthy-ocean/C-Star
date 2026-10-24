@@ -1,39 +1,47 @@
-.. _blueprints-roms-marbl:
+.. _blueprints-ucla-roms:
 
-ROMS-MARBL blueprint
-=====================
+UCLA-ROMS blueprint
+===================
+
+The ``ucla_roms`` application runs any **UCLA-ROMS** configuration: with
+biogeochemistry handled by **MARBL**, with no biogeochemistry, or with CDR-LiTE
+(with or without MARBL). Its blueprint describes one such simulation.
+
+.. note::
+
+   Blueprints written as ``application: roms_marbl``, the application's earlier
+   name, still load and run unchanged.
 
 Attributes
 ----------
 
-:class:`cstar.applications.roms_marbl.models.RomsMarblBlueprint` contains all information
-necessary to execute a coupled simulation using **UCLA-ROMS** with biogeochemistry
-handled by **MARBL**. It adds the following attributes:
+:class:`cstar.applications.ucla_roms.models.UclaRomsBlueprint` contains all information
+necessary to execute a UCLA-ROMS simulation. It adds the following attributes:
 
-.. rubric:: RomsMarblBlueprint Attributes
+.. rubric:: UclaRomsBlueprint Attributes
 
 .. autosummary::
 
-  ~cstar.applications.roms_marbl.models.RomsMarblBlueprint.valid_start_date
-  ~cstar.applications.roms_marbl.models.RomsMarblBlueprint.valid_end_date
-  ~cstar.applications.roms_marbl.models.RomsMarblBlueprint.code
-  ~cstar.applications.roms_marbl.models.RomsMarblBlueprint.initial_conditions
-  ~cstar.applications.roms_marbl.models.RomsMarblBlueprint.grid
-  ~cstar.applications.roms_marbl.models.RomsMarblBlueprint.forcing
-  ~cstar.applications.roms_marbl.models.RomsMarblBlueprint.partitioning
-  ~cstar.applications.roms_marbl.models.RomsMarblBlueprint.runtime_params
-  ~cstar.applications.roms_marbl.models.RomsMarblBlueprint.cdr_forcing
-  ~cstar.applications.roms_marbl.models.RomsMarblBlueprint.nesting_info
-  ~cstar.applications.roms_marbl.models.RomsMarblBlueprint.namelist_overrides
+  ~cstar.applications.ucla_roms.models.UclaRomsBlueprint.valid_start_date
+  ~cstar.applications.ucla_roms.models.UclaRomsBlueprint.valid_end_date
+  ~cstar.applications.ucla_roms.models.UclaRomsBlueprint.code
+  ~cstar.applications.ucla_roms.models.UclaRomsBlueprint.initial_conditions
+  ~cstar.applications.ucla_roms.models.UclaRomsBlueprint.grid
+  ~cstar.applications.ucla_roms.models.UclaRomsBlueprint.forcing
+  ~cstar.applications.ucla_roms.models.UclaRomsBlueprint.partitioning
+  ~cstar.applications.ucla_roms.models.UclaRomsBlueprint.runtime_params
+  ~cstar.applications.ucla_roms.models.UclaRomsBlueprint.cdr_forcing
+  ~cstar.applications.ucla_roms.models.UclaRomsBlueprint.nesting_info
+  ~cstar.applications.ucla_roms.models.UclaRomsBlueprint.namelist_overrides
 
-Explore the API reference of :class:`cstar.applications.roms_marbl.models.RomsMarblBlueprint`
+Explore the API reference of :class:`cstar.applications.ucla_roms.models.UclaRomsBlueprint`
 for more detail on each item.
 
 
 Example
 -------
 
-This example YAML demonstrates a configured ``RomsMarblBlueprint``. Notice that:
+This example YAML demonstrates a configured ``ucla_roms`` blueprint. Notice that:
 
 - ROMS code can be built from a fork, branch, or even a git commit hash, by specifying :attr:`branch:` or :attr:`commit:`
 - Remote or local resources can be used to build and execute a simulation, under :attr:`compile_time:`
@@ -41,15 +49,15 @@ This example YAML demonstrates a configured ``RomsMarblBlueprint``. Notice that:
 - C-Star handles both partitioned and unpartitioned data
 - Runtime and compile-time behaviors can be customized in the ``.opt`` and ``.in`` files
 - ``use_pio`` (whether to use the ParallelIO library for model input/output) is set under ``partitioning:``
-- ``forcing.carbonate_sensitivity`` (optional) lists the carbonate sensitivity files (``ddic_dco2``, ``ddic_dalk`` and their time variables) that a CDR-LiTE build (ucla-roms >= 0.9.0) reads when it does not compute them online, typically the ``_cdrgas`` output of an earlier ROMS-MARBL run
+- ``forcing.carbonate_sensitivity`` (optional) lists the carbonate sensitivity files (``ddic_dco2``, ``ddic_dalk`` and their time variables) that a CDR-LiTE build (ucla-roms >= 0.9.0) reads when it does not compute them online, typically the ``_cdrgas`` output of an earlier UCLA-ROMS run with MARBL
 - ``namelist_overrides`` maps a ROMS namelist group to key/value overrides. These are applied last, over C-Star's own derived runtime namelist settings, so user-supplied values win. For example, the model time step is set via ``namelist_overrides.time_stepping.dt`` (or directly in the namelist file itself).
 
 .. code-block:: yaml
 
     name: 2node_1wk_example
     description: this is mainly to test infra like containers and workplans. it should run on 256 processors (2 nodes)
-    application: roms_marbl
-    schema_version: 3.2.0
+    application: ucla_roms
+    schema_version: 3.3.0
     working_dir: /anvil/scratch/x-seilerman/2node_1wk_job1/
     state: draft
     valid_start_date: 2000-01-15 0:00:00

@@ -11,7 +11,7 @@ Core Blueprint Schema
 ---------------------
 
 The core attributes of a blueprint come from :class:`cstar.orchestration.models.Blueprint`.
-The example on the :doc:`ROMS-MARBL blueprint <blueprints/roms_marbl>` page shows them in use.
+The example on the :doc:`UCLA-ROMS blueprint <blueprints/ucla_roms>` page shows them in use.
 
 .. rubric:: Core Blueprint Attributes
 
@@ -56,8 +56,8 @@ Customizing Blueprints
 -----------------------
 
 Each supported application defines its own ``Blueprint`` subclass, adding the
-attributes needed to configure that application. See :doc:`blueprints/roms_marbl`
-for the ROMS-MARBL blueprint and :doc:`blueprints/forge` for the blueprint
+attributes needed to configure that application. See :doc:`blueprints/ucla_roms`
+for the UCLA-ROMS blueprint and :doc:`blueprints/forge` for the blueprint
 produced by Forge.
 
 
@@ -95,10 +95,10 @@ Blueprints can be checked for errors using the CLI and in code.
 
     .. code-block:: python
 
-        from cstar.orchestration.models import RomsMarblBlueprint
+        from cstar.applications.ucla_roms.models import UclaRomsBlueprint
         from cstar.orchestration.serialization import deserialize
 
-        deserialize("my_blueprint.yaml", RomsMarblBlueprint)
+        deserialize("my_blueprint.yaml", UclaRomsBlueprint)
 
 
 Execution
@@ -112,7 +112,7 @@ Where a blueprint runs
 ``cstar blueprint run`` runs on the machine you invoke it on. What happens
 next depends on the application:
 
-- The ``roms_marbl`` application submits the model run to the job scheduler
+- The ``ucla_roms`` application submits the model run to the job scheduler
   itself when one is available, so on a cluster it is fine to invoke it from
   a login node: the code is fetched and compiled there, and the simulation
   runs in a SLURM job. Without a scheduler it runs the model in place.
@@ -130,7 +130,7 @@ overrides them.
 .. warning::
     The post-processing step joining partitioned data may consume all available cores of a login node and be terminated (and make the admins angry).
 
-    - We *strongly* recommend setting ``CSTAR_NPROCS_POST`` to a small number (~2) when running a ROMS-MARBL blueprint directly on a HPC login node.
+    - We *strongly* recommend setting ``CSTAR_NPROCS_POST`` to a small number (~2) when running a UCLA-ROMS blueprint directly on a HPC login node.
     - Consider making a :ref:`single-step workplan <workplan_examples>` to run a simulation entirely on the compute cluster.
 
 CLI
@@ -151,24 +151,24 @@ Use the ``run`` command from the ``cstar`` CLI to execute a blueprint.
 
    .. tab-item:: Programmatic Execution
 
-    Use a ``RomsMarblRunner`` to execute the blueprint.
+    Use a ``UclaRomsRunner`` to execute the blueprint.
 
     .. code-block:: python
       :caption: Executing a blueprint YAML file in python.
 
         from cstar.entrypoint.config import JobConfig, ServiceConfiguration
-        from cstar.applications.roms_marbl.app import RomsMarblRunner
-        from cstar.applications.roms_marbl.models import RomsMarblBlueprint
+        from cstar.applications.ucla_roms.app import UclaRomsRunner
+        from cstar.applications.ucla_roms.models import UclaRomsBlueprint
         from cstar.applications.core import RunnerRequest
 
         account_id = "your-account-id"
         queue_id = "wholenode"
 
-        request = RunnerRequest("my_blueprint.yaml", RomsMarblBlueprint)
+        request = RunnerRequest("my_blueprint.yaml", UclaRomsBlueprint)
         service_cfg = ServiceConfiguration()
         job_cfg = JobConfig(account_id=account_id, walltime="00:90:00", priority=queue_id)
 
-        runner = RomsMarblRunner(request, service_cfg, job_cfg)
+        runner = UclaRomsRunner(request, service_cfg, job_cfg)
         await runner.execute()
 
 A standalone run records itself in its working directory: ``cstar-step.yaml``
@@ -191,7 +191,7 @@ declare themselves resumable accept it -- the CLI rejects the flag for any other
 application before execution begins. No workplan or run-id is needed; this is a
 standalone alternative to running a blueprint fresh.
 
-A resumed ROMS-MARBL run adopts the codebases already cloned and compiled in the
+A resumed UCLA-ROMS run adopts the codebases already cloned and compiled in the
 working directory, provided each is a clean checkout of the blueprint's
 ``checkout_target`` with its build artifacts present. The target is resolved in
 the local clone, so the check needs no network access and is unaffected by a
@@ -216,7 +216,7 @@ a normal ``blueprint run`` does:
 
 ``--pre-run`` cannot be combined with ``--resume``; combined with ``--clobber`` it
 starts the preparation from scratch. Only applications that declare themselves
-pre-runnable accept it (today, ``roms_marbl``); the CLI rejects the flag with an
+pre-runnable accept it (today, ``ucla_roms``); the CLI rejects the flag with an
 error for any other application. Preparing writes a full working directory, so it
 is not free of side effects, and since ROMS is never started, errors that only
 surface when it opens boundary or tide files or writes its first restart are not
@@ -225,7 +225,7 @@ caught. See :ref:`workplan_pre_run` for the workplan equivalent.
 .. toctree::
    :hidden:
 
-   blueprints/roms_marbl
+   blueprints/ucla_roms
    blueprints/forge
    blueprints/cdr_metrics
    tutorials/tutorial_bp

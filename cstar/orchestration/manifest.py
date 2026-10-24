@@ -56,8 +56,8 @@ from cstar.orchestration.orchestration import Status
 from cstar.orchestration.serialization import (
     anchor_relative_path,
     load_blueprint,
+    model_to_yaml,
     read_document,
-    render_model,
 )
 from cstar.system.migration import CstarSchemaTooNewError, version_key
 
@@ -98,14 +98,37 @@ ATTEMPT_DIR_FORMAT: t.Final[str] = "%Y%m%dT%H%M%S"
 ATTEMPT_WORKPLAN_NAME: t.Final[str] = "workplan.yaml"
 """The authored workplan, carried verbatim in an attempt's directory."""
 
-ATTEMPT_JSON_WORKPLAN_NAME: t.Final[str] = "workplan.json"
-"""The authored workplan when it was written as JSON, carried verbatim instead."""
-
 ATTEMPT_VARIABLES_NAME: t.Final[str] = "workplan.vars"
 """The runtime variables of the attempt, in its directory, when any were given."""
 
 ATTEMPT_TRANSFORMED_NAME: t.Final[str] = "workplan_transformed.yaml"
 """A copy of the transformed workplan the attempt prepared, in its directory."""
+
+TRANSFORMED_WORKPLAN_SUFFIX: t.Final[str] = "_transformed"
+"""What the transformed workplan's file stem adds to the authored workplan's."""
+
+TRANSFORMED_WORKPLAN_GLOB: t.Final[str] = f"*{TRANSFORMED_WORKPLAN_SUFFIX}.yaml"
+"""The transformed workplan a run directory holds, by name; one per run."""
+
+
+def transformed_workplan_path(root: Path, authored: Path) -> Path:
+    """The transformed workplan a run writes into its root for an authored workplan.
+
+    The plan is named `.yaml` whatever the authored suffix.
+
+    Parameters
+    ----------
+    root : Path
+        The run root.
+    authored : Path
+        The authored workplan, as given when the run was scheduled.
+
+    Returns
+    -------
+    Path
+    """
+    return root / f"{authored.stem}{TRANSFORMED_WORKPLAN_SUFFIX}.yaml"
+
 
 ATTEMPT_BLUEPRINTS_DIR_NAME: t.Final[str] = "blueprints"
 """The directory, in an attempt's directory, holding each step's blueprint by step slug."""
@@ -540,10 +563,18 @@ class StepEntry(ConfiguredBaseModel):
     """The step's record, folded in once the step has written it."""
 
 
+CANONICAL_NAMES_SINCE: t.Final[str] = "1.5.0"
+"""The first manifest schema whose step definition hashes use current application
+names. A hash recorded under an older manifest may use an earlier name (see
+`cstar.base.application_names`), so `read_run_manifest` drops it rather than let
+the re-entry guard compare it. A separate constant on purpose: it stays `1.5.0`
+when the manifest schema later moves on."""
+
+
 class RunManifest(ConfiguredBaseModel):
     """The description of a run: written to its run root."""
 
-    schema_version: str = Field(default="1.4.0")
+    schema_version: str = Field(default="1.5.0")
     """The schema version for the document."""
 
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
@@ -742,7 +773,13 @@ def read_run_manifest(root: Path) -> RunManifest | None:
     Returns
     -------
     RunManifest | None
-        The manifest, or `None` when the run has none.
+        The manifest, or `None` when the run has none. A manifest older than
+        `CANONICAL_NAMES_SINCE` comes back with its steps' definition hashes
+        blank: the hashes it recorded may use an earlier application name, so
+        they are not comparable with a current one. Every writer restamps the
+        manifest, so the hashes are dropped here, where its recorded schema
+        version is still known; the next attempt that describes the steps
+        records them again.
 
     Raises
     ------
@@ -751,7 +788,22 @@ def read_run_manifest(root: Path) -> RunManifest | None:
     CstarError
         If the manifest cannot be read or is invalid.
     """
-    return _read(root / RUN_MANIFEST_NAME, RunManifest, "run manifest")
+    manifest = _read(root / RUN_MANIFEST_NAME, RunManifest, "run manifest")
+    if manifest is None or version_key(manifest.schema_version) >= version_key(
+        CANONICAL_NAMES_SINCE
+    ):
+        return manifest
+
+    recorded = [entry for entry in manifest.steps if entry.definition_hash]
+    for entry in recorded:
+        entry.definition_hash = ""
+    if recorded:
+        log.debug(
+            f"Dropped the step definition hashes of the run manifest at {root}: "
+            f"recorded under schema {manifest.schema_version}, before "
+            f"{CANONICAL_NAMES_SINCE}"
+        )
+    return manifest
 
 
 def read_step_record(step_root: Path) -> StepRecord | None:
@@ -929,7 +981,7 @@ def _write(path: Path, document: "RunManifest | StepRecord") -> Path:
         The file written.
     """
     document.schema_version = type(document).model_fields["schema_version"].default
-    write_text_atomic(path, render_model(document))
+    write_text_atomic(path, model_to_yaml(document))
     return path
 
 

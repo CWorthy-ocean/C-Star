@@ -9,9 +9,7 @@ ARG_CLOBBER_HELP: t.Final[str] = (
 ARG_CLOBBER_WORKPLAN_HELP: t.Final[str] = (
     "Name of a step whose prior state should be cleared and re-executed on "
     "rerun, or 'all' to clobber every step. Repeatable. Accepts the step "
-    "name or its slugified form. This option is the only workplan-level "
-    "clobber control; the CSTAR_CLOBBER_WORKING_DIR environment variable is "
-    "ignored (with a warning) by workplan runs."
+    "name or its slugified form."
 )
 ARG_RUN_ID: t.Final[str] = "--run-id"
 """Option naming an execution of a workplan."""
@@ -60,6 +58,9 @@ ARG_PRE_RUN_WORKPLAN_HELP: t.Final[str] = (
 
 ARG_DRY_RUN: t.Final[str] = "--dry-run"
 ARG_DRY_RUN_HELP: t.Final[str] = "Show what would be done without doing it."
+
+ARG_YES: t.Final[str] = "--yes"
+"""Option that accepts every prompt without user interaction."""
 
 ARG_OWN: t.Final[str] = "--own"
 ARG_OWN_HELP: t.Final[str] = (
@@ -149,6 +150,11 @@ ARG_SHARED_HELP: t.Final[str] = (
     "runs started on this machine."
 )
 
+ARG_ALL_CLEAN_HELP: t.Final[str] = (
+    "Remove everything: the data, state, cache and config directories. The data "
+    "directory holds run output. The shared source-data cache and the user "
+    "catalog are kept."
+)
 ARG_ALL_RUNS_HELP: t.Final[str] = (
     "List the runs started on this machine and every other run whose manifest is "
     "in the data home or the project's runs area. Scans those directories."

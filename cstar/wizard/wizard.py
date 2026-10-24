@@ -33,7 +33,7 @@ import warnings
 from dataclasses import dataclass
 from datetime import date, datetime
 from pathlib import Path
-from typing import Any, Final, get_args, get_origin
+from typing import TYPE_CHECKING, Any, Final, get_args, get_origin
 
 import yaml
 from pydantic import BaseModel
@@ -102,6 +102,9 @@ from cstar.base.utils import NetCDFFormat, netcdf_format
 from cstar.wizard.ui import components
 from cstar.wizard.ui.catalog_bar import CatalogBar
 from cstar.wizard.ui.labels import known_keys, label_for, section_for
+
+if TYPE_CHECKING:
+    from collections.abc import Collection
 
 WIZARD_TOOL: Final[str] = "wizard"
 """The ``provenance.generated_by.tool`` of a blueprint the wizard writes."""
@@ -4192,7 +4195,6 @@ class ForgeBlueprintWizard:
         # Cache for the `widget` property -- built once, see `widget`.
         self._root: Any | None = None
 
-        models = list(self.catalog.model_names)
         domains = list(self.catalog.domain_names)
 
         # --- load / import an existing forge_blueprint.yaml ---
@@ -4229,15 +4231,26 @@ class ForgeBlueprintWizard:
         self._load_status_is_error = False
 
         # --- spec selectors ---
-        self.model_dd = W.Dropdown(
-            options=self._dd_options(models, "model"),
-            description="Model:",
-            value=(
-                _DEFAULT_MODEL
-                if _DEFAULT_MODEL in models
-                else (models[0] if models else None)
+        self.show_archived_models = W.Checkbox(
+            value=False,
+            description="Show archived",
+            indent=False,
+            tooltip=(
+                "Also list model specs marked archived (older ucla-roms releases). "
+                "They stay loadable; this only controls the dropdown."
             ),
+            layout=W.Layout(width="auto"),
+        )
+        self.model_dd = W.Dropdown(
+            options=self._model_dd_options(),
+            description="Model:",
             style={"description_width": "110px"},
+        )
+        models = self._dd_values(self.model_dd)
+        self.model_dd.value = (
+            _DEFAULT_MODEL
+            if _DEFAULT_MODEL in models
+            else (models[0] if models else None)
         )
         self.bgc_dd = W.Dropdown(
             options=list(get_args(BgcMode)),
@@ -4695,7 +4708,7 @@ class ForgeBlueprintWizard:
             tooltip=(
                 "Where the carbonate sensitivity files come from. By default the "
                 "carbonate-sensitivity-from workplan directive supplies them from an "
-                "earlier ROMS-MARBL step at run time; attach a directory to put them "
+                "earlier UCLA-ROMS step at run time; attach a directory to put them "
                 "on the blueprint now."
             ),
         )
@@ -5241,6 +5254,7 @@ class ForgeBlueprintWizard:
         ):
             w.observe(self._rebuild, names="value")
         self.model_dd.observe(self._on_model_change, names="value")
+        self.show_archived_models.observe(self._on_show_archived_change, names="value")
         self.bgc_dd.observe(self._sync_marbl_ref_visibility, names="value")
         self.bgc_dd.observe(self._sync_carbonate_sensitivity_visibility, names="value")
         self.bgc_dd.observe(self._on_bgc_mode, names="value")
@@ -5319,7 +5333,12 @@ class ForgeBlueprintWizard:
         self._save_path_touched = True
 
     def _dd_options(
-        self, names: list[str], kind: str, *, prefix: list[str] | None = None
+        self,
+        names: list[str],
+        kind: str,
+        *,
+        prefix: list[str] | None = None,
+        archived: Collection[str] = (),
     ) -> list:
         """Badge dropdown ``options`` with their source layer when it isn't the
         top (writable) one -- ipywidgets-homogeneous.
@@ -5337,14 +5356,16 @@ class ForgeBlueprintWizard:
         ``dd.value`` is always the bare name/sentinel either way.
 
         A ``KeyError`` from ``entry_source`` (name absent, shouldn't happen for
-        names drawn from the same catalog) is treated as "no badge".
+        names drawn from the same catalog) is treated as "no badge". Names in
+        *archived* are labelled ``archived``, combined with the layer badge as
+        ``name (layer, archived)``.
         """
         prefix = prefix or []
         entry_source = getattr(self.catalog, "entry_source", None)
         top = getattr(self.catalog, "top", None)
         top_label = top.label if top is not None else None
 
-        badges: dict[str, str] = {}
+        badges: dict[str, list[str]] = {}
         if entry_source is not None:
             for name in names:
                 try:
@@ -5352,16 +5373,46 @@ class ForgeBlueprintWizard:
                 except KeyError:
                     continue
                 if source != top_label:
-                    badges[name] = source
+                    badges[name] = [source]
+        for name in names:
+            if name in archived:
+                badges.setdefault(name, []).append("archived")
 
         if not badges:
             return [*prefix, *names]
 
         options: list[Any] = [(p, p) for p in prefix]
         for name in names:
-            label = f"{name} ({badges[name]})" if name in badges else name
+            label = f"{name} ({', '.join(badges[name])})" if name in badges else name
             options.append((label, name))
         return options
+
+    def _visible_model_names(
+        self, archived: Collection[str], selected: str | None = None
+    ) -> list[str]:
+        """Catalog models ``model_dd`` lists: all of them when "Show archived"
+        is checked, otherwise the non-*archived* ones plus *selected* (so
+        unchecking never drops the current choice).
+        """
+        names = list(self.catalog.model_names)
+        if self.show_archived_models.value:
+            return names
+        return [n for n in names if n not in archived or n == selected]
+
+    def _model_dd_options(self, selected: str | None = None) -> list:
+        archived = self.catalog.archived_model_names
+        return self._dd_options(
+            self._visible_model_names(archived, selected),
+            "model",
+            archived=archived,
+        )
+
+    def _on_show_archived_change(self, _change):
+        """Re-option ``model_dd`` for the new checkbox state, keeping its value."""
+        with self._suspend():
+            selected = self.model_dd.value
+            self.model_dd.options = self._model_dd_options(selected)
+            self.model_dd.value = selected
 
     @staticmethod
     def _dd_values(dd) -> list:
@@ -7207,6 +7258,8 @@ class ForgeBlueprintWizard:
         with self._suspend():
             # domain dropdown -> custom (the file, not a catalog entry, is authoritative)
             self.domain_dd.value = "<custom>"
+            if cfg.composition.model.name in self.catalog.archived_model_names:
+                self.show_archived_models.value = True
             if cfg.composition.model.name in self._dd_values(self.model_dd):
                 self.model_dd.value = cfg.composition.model.name
             self.grid_name.value = cfg.domain.grid_name
@@ -8527,9 +8580,7 @@ class ForgeBlueprintWizard:
         ok = self._verify_spec_roundtrip("model", name)
         with self._suspend():
             old_value = self.model_dd.value
-            self.model_dd.options = self._dd_options(
-                list(self.catalog.model_names), "model"
-            )
+            self.model_dd.options = self._model_dd_options(old_value)
             self.model_dd.value = name if ok else old_value
             if ok:
                 active = self._active_overrides
@@ -8710,7 +8761,7 @@ class ForgeBlueprintWizard:
         """Command the Run button invokes: ``cstar blueprint run <path>``.
 
         The same command the docs give for both pipeline steps, and the same one
-        the emitted ``roms_marbl`` blueprint is run with -- the button exposes no
+        the emitted ``ucla_roms`` blueprint is run with -- the button exposes no
         per-run flags, so the full-option ``cstar forge run`` passthrough buys it
         nothing. Resolving ``application: forge`` this way goes through C-Star's
         registry, which finds the app as the in-tree
@@ -8787,12 +8838,12 @@ class ForgeBlueprintWizard:
             for line in lines:
                 self.run_output.append_stdout(line)
             code = await proc.wait()
-            # On success the log above names the emitted roms_marbl blueprint (the
+            # On success the log above names the emitted ucla_roms blueprint (the
             # runner logs where it published it). Point at it rather than restating
             # a path this widget would have to derive for itself.
             self.run_status.value = (
                 "<span style='color:#080'>✓ finished</span> — run the emitted "
-                "ROMS-MARBL blueprint named in the log with <code>cstar blueprint "
+                "UCLA-ROMS blueprint named in the log with <code>cstar blueprint "
                 "run &lt;path&gt;</code>"
                 if code == 0
                 else f"<span style='color:#b00'>exited with code {code}</span>"
@@ -8860,7 +8911,9 @@ class ForgeBlueprintWizard:
         model_card = components.card(
             W,
             "model",
-            components.field_row(W, "model_dd", self.model_dd),
+            components.field_row(
+                W, "model_dd", self.model_dd, extra=(self.show_archived_models,)
+            ),
             # bgc_dd is placed before roms_ref/marbl_ref's grid so marbl_ref
             # (only relevant once bgc mode is "marbl") reads after bgc_dd.
             components.field_row(W, "bgc_dd", self.bgc_dd),

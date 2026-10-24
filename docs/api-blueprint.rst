@@ -32,16 +32,16 @@ Simulation Components
 .. autosummary::
    :toctree: generated/
 
-   cstar.applications.roms_marbl.models.ForcingConfiguration
-   cstar.applications.roms_marbl.models.BlueprintState
-   cstar.applications.roms_marbl.models.RuntimeParameterSet
-   cstar.applications.roms_marbl.models.PartitioningParameterSet
+   cstar.applications.ucla_roms.models.ForcingConfiguration
+   cstar.applications.ucla_roms.models.BlueprintState
+   cstar.applications.ucla_roms.models.RuntimeParameterSet
+   cstar.applications.ucla_roms.models.PartitioningParameterSet
 
-ROMS-MARBL
-----------
+UCLA-ROMS
+---------
 
 .. autosummary::
    :toctree: generated/
 
-   cstar.applications.roms_marbl.models.ROMSCompositeCodeRepository
-   cstar.applications.roms_marbl.models.RomsMarblBlueprint
+   cstar.applications.ucla_roms.models.ROMSCompositeCodeRepository
+   cstar.applications.ucla_roms.models.UclaRomsBlueprint

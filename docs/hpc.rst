@@ -11,35 +11,68 @@ system, and Python environments need protecting from the module system.
 Configure the scheduler
 -----------------------
 
-Most settings are environment variables; :doc:`configuration` lists them
+Most settings are ``CSTAR_*`` variables; :doc:`configuration` lists them
 all and ``cstar env show`` prints the values in effect. Only the SLURM ones
-are required, and a workplan run stops early if the account and queue are
-missing. A shell profile for a cluster typically carries:
+are required, and only to submit jobs: a workplan run with the SLURM launcher
+stops early if a setting the system requires is missing, and a step that
+submits its own job (a ROMS step run with the local launcher outside an
+allocation) is refused. Run ``cstar init`` once on the cluster to set them:
+it lists your SLURM associations and partitions when ``sacctmgr`` and
+``sinfo`` are available, asks for the account, queue and default walltime,
+and writes them to ``~/.config/cstar/config.env``:
 
 .. code-block:: bash
 
-   export CSTAR_SLURM_ACCOUNT="my-allocation"     # the account or allocation jobs are charged to
-   export CSTAR_SLURM_QUEUE="mpi"                 # the partition or queue to submit to
-   export CSTAR_SLURM_MAX_WALLTIME="01:00:00"     # default time requested per job
+   CSTAR_SLURM_ACCOUNT=my-allocation      # the account or allocation jobs are charged to
+   CSTAR_SLURM_QUEUE=mpi                  # the partition or queue to submit to
+   CSTAR_SLURM_MAX_WALLTIME=01:00:00      # default time requested per job
+
+The same settings can be exported from your shell profile instead, with
+``export`` and quotes:
+
+.. code-block:: bash
+
+   export CSTAR_SLURM_ACCOUNT="my-allocation"
+   export CSTAR_SLURM_QUEUE="mpi"
+   export CSTAR_SLURM_MAX_WALLTIME="01:00:00"
 
    # Only if your system does not already define them (see "Where data goes"):
    # export CSTAR_PROJECT_HOME=/path/to/your/group/directory
    # export SCRATCH=/path/to/your/scratch/directory
+
+Either works. If a name is set both ways, the exported variable takes
+precedence over the file, and ``cstar init`` tells you when that is the case.
 
 These are the defaults for every step of a workplan; a step can override
 them, for example to send Forge steps to a general-purpose queue and ROMS
 steps to an MPI queue. See the compute overrides on the :doc:`workplans`
 page.
 
+What each system requires, and where a job goes when ``CSTAR_SLURM_QUEUE``
+is unset:
+
+- **Anvil, Bouchet**: the account and the queue are both required.
+- **Elja**: no account is used; an unset queue submits to ``any_cpu``.
+- **Expanse**: the account is required; an unset queue submits to ``compute``.
+- **Perlmutter**: an unset account charges your default NERSC project; an
+  unset queue submits to the ``regular`` QOS.
+- **Derecho** (PBS): the ``CSTAR_SLURM_*`` settings are not read. A job goes
+  to the ``main`` queue with that queue's maximum walltime; set
+  ``PBS_ACCOUNT`` (or ``PBS_ACCOUNT_DERECHO``) to the project code to charge.
+
+An unset ``CSTAR_SLURM_MAX_WALLTIME`` requests 48 hours, which is more than
+some queues allow (Bouchet's ``day`` queue, for one); set it to fit the queue
+you use.
+
 Where a blueprint runs
 ----------------------
 
-``cstar blueprint run`` runs where you invoke it. The ROMS-MARBL application
+``cstar blueprint run`` runs where you invoke it. The UCLA-ROMS application
 submits the model run to SLURM itself, so it can be started from a login
 node; Forge does not, and generates every input file wherever the command
 runs. For anything beyond a toy domain, run Forge from a compute node or
 through a workplan, even a :ref:`single-step one <workplan_examples>`. If
-you must run a ROMS-MARBL blueprint directly on a login node, set
+you must run a UCLA-ROMS blueprint directly on a login node, set
 ``CSTAR_NPROCS_POST`` to a small number (about 2): the post-processing step
 that joins partitioned output otherwise uses every core it can find.
 
@@ -78,11 +111,11 @@ from your home. ``cstar env show`` prints the value in effect.
 
 Forge follows the same rule. A forge blueprint normally omits
 ``working_dir``, so Forge writes its generated inputs under
-``CSTAR_DATA_HOME/blueprint_runs/forge/<name>``. The ROMS-MARBL blueprint it
+``CSTAR_DATA_HOME/blueprint_runs/forge/<name>``. The UCLA-ROMS blueprint it
 emits has the same name and no ``working_dir`` either, so it runs under
-``CSTAR_DATA_HOME/blueprint_runs/roms_marbl/<name>``. On a laptop those are
+``CSTAR_DATA_HOME/blueprint_runs/ucla_roms/<name>``. On a laptop those are
 ``~/cstar/blueprint_runs/forge/<name>`` and
-``~/cstar/blueprint_runs/roms_marbl/<name>``; on an HPC system both are on
+``~/cstar/blueprint_runs/ucla_roms/<name>``; on an HPC system both are on
 scratch.
 
 Forge also keeps a **source-data cache** of the downloaded and user-staged

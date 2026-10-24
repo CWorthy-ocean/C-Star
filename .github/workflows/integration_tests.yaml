@@ -157,7 +157,7 @@ jobs:
         shell: micromamba-shell {0}
         run: |
            python -V
-           coverage run --rcfile=coverage.toml -m pytest -s --verbose cstar/tests/integration_tests/e2e cstar/tests/integration_tests/roms_marbl
+           coverage run --rcfile=coverage.toml -m pytest -s --verbose cstar/tests/integration_tests/e2e cstar/tests/integration_tests/ucla_roms
 
       - name: Get coverage report
         shell: micromamba-shell {0}

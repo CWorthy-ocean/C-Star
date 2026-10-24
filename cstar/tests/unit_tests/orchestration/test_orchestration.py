@@ -7,9 +7,9 @@ from unittest import mock
 
 import pytest
 
-from cstar.applications.roms_marbl.models import RomsMarblBlueprint
+from cstar.applications.ucla_roms.models import UclaRomsBlueprint
 from cstar.base.env import ENV_CSTAR_RUNID, FLAG_ON
-from cstar.base.feature import ENV_FF_ORCH_TRX_TIMESPLIT
+from cstar.base.feature import ENV_FF_ORCH_TRX_TIMESPLIT, ENV_FF_ORCH_TRX_TIMESPLIT_FREQ
 from cstar.orchestration.launch.local import LocalLauncher
 from cstar.orchestration.models import Application, Step, Workplan
 from cstar.orchestration.orchestration import (
@@ -29,7 +29,6 @@ from cstar.orchestration.transforms import (
     WorkplanTransformer,
     get_time_slices,
 )
-from cstar.orchestration.utils import ENV_CSTAR_ORCH_TRX_FREQ
 from cstar.tests.unit_tests.orchestration.conftest import (
     EXTERNAL_TOKEN,
     ExternalTaskFactory,
@@ -125,7 +124,7 @@ def test_dep_keys(tmp_path: Path) -> None:
 def test_workplan_transformation(diamond_workplan: Workplan) -> None:
     """Verify that the workplan transformation applies appropriate transforms when enabled."""
     for step in diamond_workplan.steps:
-        step.application = Application.ROMS_MARBL.value
+        step.application = Application.UCLA_ROMS.value
 
     diamond_steps = {str(s.name) for s in diamond_workplan.steps}
 
@@ -136,7 +135,7 @@ def test_workplan_transformation(diamond_workplan: Workplan) -> None:
             {
                 ENV_CSTAR_RUNID: str(uuid.uuid4()),
                 ENV_FF_ORCH_TRX_TIMESPLIT: FLAG_ON,
-                ENV_CSTAR_ORCH_TRX_FREQ: SplitFrequency.Monthly.value,
+                ENV_FF_ORCH_TRX_TIMESPLIT_FREQ: SplitFrequency.Monthly.value,
             },
         ),
     ):
@@ -156,7 +155,7 @@ def test_workplan_transformation(diamond_workplan: Workplan) -> None:
         assert not diamond_steps.intersection(step.depends_on)
 
         assert step.blueprint_overrides is not None
-        blueprint = deserialize(step.blueprint_path, RomsMarblBlueprint)
+        blueprint = deserialize(step.blueprint_path, UclaRomsBlueprint)
 
         # overrides will be transferred to the model after call to .apply
         assert "runtime_params" not in step.blueprint_overrides
@@ -336,12 +335,12 @@ def test_live_step_blueprint_anchors_relative_locations(
     monkeypatch.chdir(elsewhere)
     step = LiveStep(
         name="step",
-        application=Application.ROMS_MARBL.value,
+        application=Application.UCLA_ROMS.value,
         blueprint=bp_path,
         working_dir=tmp_path / "work",
     )
 
-    blueprint = t.cast("RomsMarblBlueprint", step.blueprint)
+    blueprint = t.cast("UclaRomsBlueprint", step.blueprint)
 
     assert str(blueprint.forcing.boundary.data[0].location) == str(
         tmp_path / "data" / "boundary.nc"

@@ -16,14 +16,14 @@ Forge is split into two layers along a hard boundary:
   (``cstar.applications.forge.resolve``) that assembles them into a single
   reviewable file, and a **wizard** UI (``cstar.wizard``).
 - **Execution** (``cstar.applications.forge``): an **engine** that turns
-  that file into ROMS-MARBL input NetCDFs, a namelist, and a downstream
+  that file into UCLA-ROMS input NetCDFs, a namelist, and a downstream
   blueprint, plus the **executor** that does the actual work. Execution
   never touches the catalog.
 
 The file that crosses the boundary is ``ForgeBlueprint`` -- **the forge
 application's own blueprint**. Terminology trap to avoid: C-Star also has an
-existing, unrelated ``roms_marbl`` application whose blueprint
-(``RomsMarblBlueprint``) forge *emits as an output artifact*. "Building a
+existing, unrelated ``ucla_roms`` application whose blueprint
+(``UclaRomsBlueprint``) forge *emits as an output artifact*. "Building a
 blueprint" means producing that downstream artifact, not forge's own input.
 
 .. code-block:: text
@@ -34,7 +34,7 @@ blueprint" means producing that downstream artifact, not forge's own input.
                     |                             portable)           |
     wizard UI ------+                                                 v
                                                         input NetCDFs, namelist.nml,
-                                                        cppdefs.opt, roms_marbl blueprint
+                                                        cppdefs.opt, ucla_roms blueprint
 
 Directory map
 --------------------
@@ -52,7 +52,7 @@ Directory map
     |   |   |                              # sources_to_forcing_override()
     |   |   +-- executor.py                # ForgeExecutor -- the processing engine
     |   |   +-- host.py                    # HostPaths -- frozen host-boundary contract injected into the executor
-    |   |   +-- input_data.py              # Input file generation
+    |   |   +-- input_generator.py         # Input file generation
     |   |   +-- source_datasets.py         # Dataset download and preparation
     |   |   +-- source_registry.py         # Dataset alias map / provenance metadata (stdlib-only)
     |   |   +-- glorys_subchunk.py         # Just-in-time kerchunk subchunking for GLORYS
@@ -70,7 +70,10 @@ Directory map
     |   |                                  # already-parsed option values (called by cli/forge's 'run');
     |   |                                  # publish_emitted_blueprint(): copies B_{name}.yaml to output/
     |   +-- core.py                    # get_application() / register_application / ApplicationDefinition
-    |   +-- roms_marbl/                # the roms_marbl application forge's output feeds into
+    |   +-- ucla_roms/                 # package of the ucla_roms application forge's output feeds into
+    +-- roms/
+    |   +-- outputs.py                 # Names and models of the files a ROMS step writes
+    |   +-- file_system.py             # RomsFileSystemManager: run-directory layout
     +-- catalog/                       # Bundled + layered spec catalog (see docs/developers/catalog_design.rst)
     |   +-- bundled/
     |   |   +-- ModelSpec/{model}/model.yaml    # Code repos, templates, settings, defaults
@@ -96,7 +99,7 @@ Directory map
     +-- additional_files/templates/forge/  # Bundled render templates (compile-time/run-time);
                                             # see forge_templates.rst.
 
-``glorys_subchunk.py`` is called from ``input_data.py`` and is covered by the
+``glorys_subchunk.py`` is called from ``input_generator.py`` and is covered by the
 boundary guard test (below) like any other execution module: the guard's
 module list is every ``.py`` file in ``cstar/applications/forge`` minus a
 small, fixed exclusion set for the authoring/host modules (``resolve``,
@@ -198,7 +201,7 @@ filenames off it.
   every write of its config to disk goes through, and carries the stamp through
   re-resolves (``build_forge_blueprint(provenance=...)``).
 - **``emitted_provenance(blueprint, run_id=..., working_dir=...)``** -- the one
-  place the *emitted* ``roms_marbl`` blueprint's provenance is assembled (and
+  place the *emitted* ``ucla_roms`` blueprint's provenance is assembled (and
   ``emitted_blueprint_description(name, description)`` its description), built
   from ``producer_ref``, ``composition_refs`` and ``new_generated_by``. Unlike a
   forge blueprint's, it is minted afresh by every run, never carried over:
@@ -229,14 +232,14 @@ requires:
   ``process_forge_blueprint`` -> ``ensure_source_data``/``generate_inputs``/
   ``configure_build``, publishes the emitted blueprint (below), then reports
   ``ExecutionStatus.COMPLETED``. Scope: generates inputs and emits the
-  downstream ``roms_marbl`` blueprint (``B_{name}.yaml``), then stops -- the
-  existing ``roms_marbl`` application consumes that blueprint separately.
+  downstream ``ucla_roms`` blueprint (``B_{name}.yaml``), then stops -- the
+  existing ``ucla_roms`` application consumes that blueprint separately.
 - ``ForgeApplication`` -- ``@register_application``-decorated
   ``ApplicationDefinition`` wiring ``ForgeBlueprint`` + ``ForgeRunner``
   together under ``name = "forge"``.
 
 Forge is discovered by ``cstar.applications.core.get_application`` as a
-**built-in** application, the same way ``roms_marbl`` is: ``get_application``
+**built-in** application, the same way ``ucla_roms`` is: ``get_application``
 imports the in-tree
 ``cstar.applications.forge`` package, whose ``__init__.py`` imports
 ``app.py`` so its ``@register_application`` decorator runs. No entry point
@@ -322,11 +325,11 @@ The call chain end to end
    minted once for the call (``emitted_provenance``; ``run_id`` is read from the
    ``CSTAR_RUNID`` a workplan step inherits, and is empty for a standalone run).
 7. Outputs land under ``host.working_dir``: input NetCDFs, ``namelist.nml``,
-   ``cppdefs.opt``, and the emitted downstream ``roms_marbl`` blueprint YAML
+   ``cppdefs.opt``, and the emitted downstream ``ucla_roms`` blueprint YAML
    (``B_{name}.yaml``, persisted once by ``configure_build()`` -- there is
    no per-stage blueprint file). The emitted blueprint leaves ``working_dir``
    unset, so it runs under
-   ``CSTAR_DATA_HOME/blueprint_runs/roms_marbl/<name>``. Its ``description``
+   ``CSTAR_DATA_HOME/blueprint_runs/ucla_roms/<name>``. Its ``description``
    says it was generated by forge from the forge blueprint of that name, and its
    ``provenance`` is the one the engine handed ``configure_build``; ``persist()``
    leaves the block out when none was supplied (a direct use of the executor),
@@ -414,7 +417,7 @@ the blueprint's pinned ``code.roms.commit`` (threaded resolver -> executor ->
 ``process_forge_blueprint`` and ``configure_build`` first resolve a commit
 hash to its release tag with ``release_ref_for_remote`` (a throwaway treeless
 clone of ``code.roms.location``, cached per process); Forge then writes the
-namelist of the tier roms_marbl reads it with. The resolver, which the wizard
+namelist of the tier ucla_roms reads it with. The resolver, which the wizard
 calls on every keystroke, keeps the latest tier for a hash and leaves an
 upscaled run's ``cdr_nz_chd`` at its seeded value; the executor re-prunes and
 sets ``cdr_nz_chd = 0`` if the resolved release reads the level count from the

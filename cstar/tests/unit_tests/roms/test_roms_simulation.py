@@ -14,11 +14,15 @@ import xarray as xr
 from pydantic import ValidationError
 
 from cstar.base.additional_code import AdditionalCode
-from cstar.base.exceptions import CstarExpectationFailed
+from cstar.base.env import ENV_CSTAR_DEBUG_BUILD_MODE, FLAG_OFF, FLAG_ON
+from cstar.base.exceptions import CstarError, CstarExpectationFailed
 from cstar.base.external_codebase import ExternalCodeBase
+from cstar.base.feature import ENV_FF_DEVELOPER_MODE
 from cstar.base.input_dataset import InputDataset
 from cstar.execution.handler import ExecutionStatus
+from cstar.execution.scheduler_job import PBSJob, SchedulerJob, SlurmJob
 from cstar.marbl.external_codebase import MARBLExternalCodeBase
+from cstar.orchestration.utils import ENV_CSTAR_SLURM_ACCOUNT, ENV_CSTAR_SLURM_QUEUE
 from cstar.pio.external_codebase import PIOExternalCodeBase
 from cstar.roms.discretization import ROMSDiscretization
 from cstar.roms.external_codebase import ROMSExternalCodeBase
@@ -49,7 +53,21 @@ from cstar.roms.namelist import (
 )
 from cstar.roms.simulation import ROMSSimulation
 from cstar.system.environment import CStarEnvironment
-from cstar.system.manager import get_sysmgr
+from cstar.system.manager import (
+    AnvilEnvSettings,
+    DerechoSystemContext,
+    EljaSystemContext,
+    ExpanseSystemContext,
+    PerlmutterSystemContext,
+    SystemContext,
+    get_sysmgr,
+)
+from cstar.system.scheduler import (
+    PBSScheduler,
+    SlurmQOS,
+    SlurmQueue,
+    SlurmScheduler,
+)
 
 # A complete, forge-produced runtime namelist used to back the
 # roms_runtime_settings tests (RomsNamelist is a strict 40-group schema).
@@ -1670,6 +1688,53 @@ class TestProcessingAndExecution:
         assert mock_additionalcode_get.call_count == 2
         assert mock_inputdataset_get.call_count == 10
 
+    @pytest.mark.parametrize("clobber", [False, True])
+    @mock.patch.object(ROMSInputDataset, "get")
+    @mock.patch.object(AdditionalCode, "get")
+    @mock.patch.object(ExternalCodeBase, "setup")
+    def test_setup_clears_working_directory_only_when_clobbering(
+        self,
+        mock_externalcodebase_setup: mock.Mock,
+        mock_additionalcode_get: mock.Mock,
+        mock_inputdataset_get: mock.Mock,
+        stub_romssimulation: ROMSSimulation,
+        clobber: bool,
+    ) -> None:
+        """Tests that `setup` empties the working directory only when asked to.
+
+        Parameters
+        ----------
+        clobber : bool
+            The value passed to `setup`.
+        """
+        sim = stub_romssimulation
+
+        with mock.patch.object(sim.fs_manager, "clear") as mock_clear:
+            sim.setup(clobber=clobber)
+
+        assert mock_clear.call_count == int(clobber)
+
+    @mock.patch.object(ROMSInputDataset, "get")
+    @mock.patch.object(AdditionalCode, "get")
+    @mock.patch.object(ExternalCodeBase, "setup")
+    def test_setup_into_populated_directory_requires_clobber(
+        self,
+        mock_externalcodebase_setup: mock.Mock,
+        mock_additionalcode_get: mock.Mock,
+        mock_inputdataset_get: mock.Mock,
+        stub_romssimulation: ROMSSimulation,
+    ) -> None:
+        """Tests that `setup` refuses an already-staged directory and names
+        `--clobber` as the way to continue, and that clobbering then succeeds.
+        """
+        sim = stub_romssimulation
+        sim.setup()
+
+        with pytest.raises(CstarExpectationFailed, match="Re-run with --clobber"):
+            sim.setup()
+
+        sim.setup(clobber=True)
+
     @mock.patch.object(ROMSSimulation, "build")
     @mock.patch.object(ROMSInputDataset, "get")
     @mock.patch.object(AdditionalCode, "get")
@@ -1977,6 +2042,66 @@ class TestProcessingAndExecution:
 
         assert sim.exe_path == build_dir / "roms"
         assert sim._exe_hash == "mockhash123"
+
+    @pytest.mark.parametrize(
+        ("value", "expected_clause"),
+        [(FLAG_ON, "BUILD_MODE=debug "), (FLAG_OFF, ""), (None, "")],
+    )
+    @mock.patch("cstar.roms.simulation.rpath_link_flags", return_value=None)
+    @mock.patch("cstar.roms.simulation.verify_roms_linkage")
+    @mock.patch("cstar.roms.simulation.assert_single_toolchain_stack")
+    @mock.patch("cstar.roms.simulation.explicit_mpi_wrapper", return_value=None)
+    @mock.patch("cstar.roms.simulation._get_sha256_hash", return_value="dummy_hash")
+    @mock.patch("subprocess.run")
+    def test_build_debug_mode_setting(
+        self,
+        mock_subprocess,
+        mock_get_hash,
+        mock_explicit_mpi_wrapper,
+        mock_assert_toolchain,
+        mock_verify_linkage,
+        mock_rpath_flags,
+        value: str | None,
+        expected_clause: str,
+        stub_romssimulation: ROMSSimulation,
+        stageddatacollection_remote_files,
+        monkeypatch: pytest.MonkeyPatch,
+    ):
+        """Tests that `CSTAR_DEBUG_BUILD_MODE=1` adds `BUILD_MODE=debug` to the
+        `make` command, and that it is the only thing that does: developer mode,
+        exported throughout, no longer enables it.
+        """
+        monkeypatch.setenv(ENV_FF_DEVELOPER_MODE, FLAG_ON)
+        if value is None:
+            monkeypatch.delenv(ENV_CSTAR_DEBUG_BUILD_MODE, raising=False)
+        else:
+            monkeypatch.setenv(ENV_CSTAR_DEBUG_BUILD_MODE, value)
+        sim = stub_romssimulation
+        build_dir = sim.fs_manager.compile_time_code_dir
+        (build_dir / "Compile").mkdir(exist_ok=True, parents=True)
+
+        assert sim.compile_time_code
+        sim.compile_time_code._working_copy = stageddatacollection_remote_files(
+            paths=[build_dir / f.basename for f in sim.compile_time_code.source]
+        )
+        mock_subprocess.return_value = mock.MagicMock(returncode=0, stderr="")
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            sim.codebase = mock.MagicMock()
+            sim.codebase.working_copy = mock.MagicMock()
+            sim.codebase.working_copy.path = Path(tmpdir)
+            (Path(tmpdir) / "Work").mkdir(exist_ok=True, parents=True)
+            (Path(tmpdir) / "Work" / "Makefile").touch()
+            sim.build()
+
+        compiler = get_sysmgr().environment.compiler
+        mock_subprocess.assert_any_call(
+            f"make {expected_clause}COMPILER={compiler}",
+            cwd=build_dir,
+            shell=True,
+            capture_output=True,
+            text=True,
+        )
 
     @mock.patch("cstar.roms.simulation.rpath_link_flags", return_value=None)
     @mock.patch("cstar.roms.simulation.verify_roms_linkage")
@@ -2672,8 +2797,6 @@ class TestProcessingAndExecution:
 
         # Mock scheduler object
         mock_scheduler = mock.MagicMock()
-        mock_scheduler.primary_queue_name = "default_queue"
-        mock_scheduler.get_queue.return_value.max_walltime = "12:00:00"
         mock_scheduler.in_active_allocation = False
 
         with (
@@ -2707,7 +2830,8 @@ class TestProcessingAndExecution:
             mock_job_instance = mock.MagicMock()
             mock_create_job.return_value = mock_job_instance
 
-            # Call `run()` without explicitly passing `queue_name` and `walltime`
+            # without `queue_name` and `walltime`, `run()` passes them on empty
+            # for `create_scheduler_job` to resolve
             execution_handler = sim.run(account_key="some_key")
             mock_create_job.assert_called_once_with(
                 commands=f"{exp_mpi_prefix} -n 6 ./roms cstar_generated_roms.nml",
@@ -2716,10 +2840,11 @@ class TestProcessingAndExecution:
                 account_key="some_key",
                 run_path=sim.fs_manager.run_dir,
                 script_path=script_dir / "romstest.sh",
-                queue_name="default_queue",
-                walltime="12:00:00",
+                queue_name="",
+                walltime="",
                 output_file=sim.fs_manager.logs_dir / "romstest.out",
             )
+            mock_scheduler.get_queue.assert_not_called()
 
             mock_job_instance.submit.assert_called_once()
 
@@ -2728,48 +2853,126 @@ class TestProcessingAndExecution:
     @mock.patch.object(
         ROMSSimulation, "roms_runtime_settings", new_callable=mock.PropertyMock
     )
-    def test_run_with_scheduler_raises_if_no_account_key(
+    def test_run_with_scheduler_requires_slurm_settings(
         self,
         mock_runtime_settings,
         stub_romssimulation,
         stageddatacollection_remote_files,
     ):
-        """Tests that `run` raises a `ValueError` if no account key is provided when
-        using a scheduler.
-
-        This test ensures that if a scheduler is available but `account_key` is not provided,
-        the method raises an appropriate error instead of submitting a job.
+        """Tests that `run` submits no job, and names the settings to set, when a
+        scheduler job is needed and the system's required account and queue are
+        empty (the values a step gets when `CSTAR_SLURM_*` are unset).
         """
         sim = stub_romssimulation
         build_dir = sim.directory / "ROMS/compile_time_code"
         sim.runtime_code._working_copy = stageddatacollection_remote_files()
 
-        # Mock scheduler object
-        mock_scheduler = mock.MagicMock()
-        mock_scheduler.primary_queue_name = "default_queue"
-        mock_scheduler.get_queue.return_value.max_walltime = "12:00:00"
-        mock_scheduler.in_active_allocation = False
+        scheduler = SlurmScheduler(
+            queues=[SlurmQOS(name="default_queue", query_name="default_queue")],
+            primary_queue_name="default_queue",
+        )
 
         with (
-            mock.patch("cstar.roms.simulation.create_scheduler_job") as mock_create_job,
             mock.patch(
                 "cstar.system.manager.CStarSystemManager.scheduler",
                 new_callable=mock.PropertyMock,
-                return_value=mock_scheduler,
+                return_value=scheduler,
             ),
+            mock.patch.object(
+                SlurmScheduler,
+                "in_active_allocation",
+                new_callable=mock.PropertyMock,
+                return_value=False,
+            ),
+            mock.patch.object(CStarEnvironment, "settings_klass", AnvilEnvSettings),
+            mock.patch.object(SlurmJob, "submit") as mock_submit,
             mock.patch("pathlib.Path.rename", new_callable=mock.Mock),
         ):
             sim.exe_path = build_dir / "roms"
 
-            # Call `run()` without explicitly passing `queue_name` and `walltime`
             with pytest.raises(
-                ValueError,
-                match=re.escape(
-                    "please call Simulation.run() with a value for account_key"
-                ),
+                CstarError,
+                match=f"{ENV_CSTAR_SLURM_ACCOUNT} and {ENV_CSTAR_SLURM_QUEUE} must be set",
             ):
-                sim.run()
-            mock_create_job.assert_not_called()
+                sim.run(account_key="", walltime="01:00:00", queue_name="")
+            mock_submit.assert_not_called()
+
+    @pytest.mark.parametrize(
+        ("context", "account_key", "exp_queue", "exp_walltime"),
+        [
+            pytest.param(EljaSystemContext, "", "any_cpu", "2-00:00:00", id="elja"),
+            pytest.param(
+                ExpanseSystemContext, "acct", "compute", "2-00:00:00", id="expanse"
+            ),
+            pytest.param(
+                PerlmutterSystemContext, "", "regular", "2-00:00:00", id="perlmutter"
+            ),
+            pytest.param(DerechoSystemContext, "", "main", "12:00:00", id="derecho"),
+        ],
+    )
+    @mock.patch.object(
+        ROMSSimulation, "roms_runtime_settings", new_callable=mock.PropertyMock
+    )
+    def test_run_with_scheduler_unset_queue_uses_primary_queue(
+        self,
+        mock_runtime_settings,
+        stub_romssimulation,
+        stageddatacollection_remote_files,
+        context: type[SystemContext],
+        account_key: str,
+        exp_queue: str,
+        exp_walltime: str,
+    ):
+        """Tests that `run` submits to the system's primary queue, with that queue's
+        maximum walltime, when the step's queue and walltime are empty, on each
+        system that does not require a queue.
+        """
+        sim = stub_romssimulation
+        build_dir = sim.directory / "ROMS/compile_time_code"
+        sim.runtime_code._working_copy = stageddatacollection_remote_files()
+        scheduler = context.create_scheduler()
+        assert scheduler is not None
+
+        with (
+            mock.patch(
+                "cstar.system.manager.CStarSystemManager.scheduler",
+                new_callable=mock.PropertyMock,
+                return_value=scheduler,
+            ),
+            mock.patch.object(
+                type(scheduler),
+                "in_active_allocation",
+                new_callable=mock.PropertyMock,
+                return_value=False,
+            ),
+            mock.patch.object(
+                SlurmQueue,
+                "max_walltime",
+                new_callable=mock.PropertyMock,
+                return_value="2-00:00:00",
+            ),
+            mock.patch.object(
+                SchedulerJob, "_resolve_distribution", return_value=(6, 1, 6)
+            ),
+            mock.patch.object(
+                CStarEnvironment, "settings_klass", context.settings_klass()
+            ),
+            mock.patch.object(SlurmJob, "submit") as mock_slurm_submit,
+            mock.patch.object(PBSJob, "submit") as mock_pbs_submit,
+            mock.patch("pathlib.Path.rename", new_callable=mock.Mock),
+        ):
+            sim.exe_path = build_dir / "roms"
+            job = sim.run(account_key=account_key, walltime="", queue_name="")
+
+        assert isinstance(job, SchedulerJob)
+        assert job.queue_name == exp_queue
+        assert job.walltime == exp_walltime
+        submit = (
+            mock_pbs_submit
+            if isinstance(scheduler, PBSScheduler)
+            else mock_slurm_submit
+        )
+        submit.assert_called_once()
 
     def test_post_run_raises_if_called_before_run(self, stub_romssimulation):
         """Tests that `post_run` raises a `RuntimeError` if called before `run`.

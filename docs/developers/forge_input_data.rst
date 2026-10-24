@@ -9,12 +9,12 @@ Forge internals: input data generation
    <forge_blueprint.yaml>``, or the app-framework ``cstar blueprint run``
    with defaults only). Both load a ``ForgeBlueprint`` and call
    ``ForgeExecutor.generate_inputs()`` (``cstar/applications/forge/executor.py``),
-   which constructs a ``RomsMarblInputData`` instance and calls
-   ``generate_all()`` on it. Constructing ``RomsMarblInputData`` directly (as
+   which constructs a ``RomsInputGenerator`` instance and calls
+   ``generate_all()`` on it. Constructing ``RomsInputGenerator`` directly (as
    shown later on this page) is for developers debugging or extending input
    generation -- normal usage goes through the forge application.
 
-The ``input_data`` module (``cstar/applications/forge/input_data.py``)
+The ``input_generator`` module (``cstar/applications/forge/input_generator.py``)
 generates model-ready input files from prepared source datasets. It uses a
 **registry-based framework** similar to the ``source_data`` module (see
 :doc:`forge_source_data`): input steps are decorator-registered functions run
@@ -36,7 +36,7 @@ model-ready input files:
   never emits a ``corrections`` category, and the handler raises
   ``NotImplementedError``)
 
-Base class: ``InputData``
+Base class: ``InputGenerator``
 ----------------------------
 
 An abstract dataclass defining the interface for input data generation:
@@ -69,17 +69,17 @@ Execution order (steps run in order, lowest ``order`` value first):
 - ``forcing.corrections`` (order=90; registered but unwired -- never emitted
   by the resolver)
 
-``RomsMarblInputData``
+``RomsInputGenerator``
 -------------------------
 
-``RomsMarblInputData`` (a dataclass subclass of ``InputData``, both defined
-in ``input_data.py``) implements ROMS-MARBL-specific input generation: grid,
+``RomsInputGenerator`` (a dataclass subclass of ``InputGenerator``, both defined
+in ``input_generator.py``) implements UCLA-ROMS-specific input generation: grid,
 initial conditions, and every forcing category.
 
 There is no ``model_spec`` field -- the class is host-/model-spec-independent.
-Beyond the fields inherited from ``InputData``, the constructor takes the
+Beyond the fields inherited from ``InputGenerator``, the constructor takes the
 injected ``grid``/``grid_parent``/``grid_child`` objects, ``boundaries``,
-``source_data``, ``partitioning``, and ``roms_marbl_blueprint_dir``; the CDR
+``source_data``, ``partitioning``, and ``ucla_roms_blueprint_dir``; the CDR
 selection (``cdr_mode``, plus ``cdr_forcing`` or a pre-made
 ``cdr_forcing_file`` -- mutually exclusive, enforced upstream by the
 ``ForgeBlueprint`` schema); the optional ``carbonate_sensitivity`` spec
@@ -88,7 +88,7 @@ below); ``settings_compile_time``/``settings_run_time`` (the executor's own live
 settings dicts, bound **by reference**, not copied -- see `Settings
 initialization`_ below); and tuning flags (``use_dask``,
 ``dask_num_workers``, ``use_pio``, ``subchunk``, ``verbose``, ``has_bgc``).
-See ``input_data.py`` for the full field list and docstrings; it changes
+See ``input_generator.py`` for the full field list and docstrings; it changes
 often enough that reproducing it here would drift.
 
 ``forcing_override`` (injected by the caller, typically built by
@@ -153,11 +153,11 @@ Registry validation
 The class validates that every key in ``input_list`` has a registered
 handler in ``INPUT_REGISTRY``; a missing handler raises ``ValueError``.
 
-ROMS-MARBL blueprint elements initialization
+UCLA-ROMS blueprint elements initialization
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-``__post_init__`` also creates ``roms_marbl_blueprint_elements``
-(``RomsMarblBlueprintInputData``), pre-populating an empty ``Dataset`` for
+``__post_init__`` also creates ``ucla_roms_blueprint_elements``
+(``UclaRomsBlueprintInputData``), pre-populating an empty ``Dataset`` for
 each planned category so downstream steps only ever append to it:
 
 - **Surface forcing is always required** once any forcing category is
@@ -170,7 +170,7 @@ each planned category so downstream steps only ever append to it:
   rather than raising.
 - **Initial conditions are required unless the domain is a nested child.** A
   child domain that generates no IC gets a schema-valid *placeholder*
-  ``Resource`` instead (C-Star's ``RomsMarblBlueprint`` requires
+  ``Resource`` instead (C-Star's ``UclaRomsBlueprint`` requires
   ``initial_conditions`` non-empty, and its orchestrator validates the
   emitted blueprint before the runtime ``nest-from`` directive gets a chance
   to replace the placeholder with the parent-derived initial state).
@@ -183,7 +183,7 @@ each planned category so downstream steps only ever append to it:
 - **CDR forcing is optional.** When CDR mode is ``"upscaled"``, no
   ``cdr_forcing`` generation step is scheduled (see the CDR forcing handler
   below), but a placeholder ``Resource`` is still emitted onto
-  ``roms_marbl_blueprint_elements.cdr_forcing`` for the runtime path to
+  ``ucla_roms_blueprint_elements.cdr_forcing`` for the runtime path to
   replace, mirroring the child-IC placeholder.
 
 Settings initialization
@@ -207,7 +207,7 @@ use), a fresh empty dict is created instead.
 ~~~~~~~~~~~~~~~~~~~~
 
 Main entry point for generating all input files. Returns
-``roms_marbl_blueprint_elements: RomsMarblBlueprintInputData`` (or ``None``
+``ucla_roms_blueprint_elements: UclaRomsBlueprintInputData`` (or ``None``
 if the input directory is non-empty and ``clobber`` is ``False``). Settings
 are NOT returned: they are the executor-owned
 ``_settings_compile_time``/``_settings_run_time`` dicts, mutated in place --
@@ -240,7 +240,7 @@ Process:
    ``only`` is given), calls the handler with ``key`` and ``kwargs``.
 6. **Partitioning**: Optionally partitions files across tiles if
    ``partition_files=True``.
-7. **Return**: Returns ``roms_marbl_blueprint_elements`` (settings dicts are
+7. **Return**: Returns ``ucla_roms_blueprint_elements`` (settings dicts are
    mutated in place, not returned -- see above).
 
 Registered input handlers
@@ -250,9 +250,9 @@ Each handler is registered via ``@register_input(name=..., order=...,
 label=...)`` on a method ``def _generate_<x>(self, key: str = "<name>",
 **kwargs)``; ``kwargs`` are the input's entry from ``input_list``. A
 handler's side effects are: write NetCDF file(s) to ``input_data_dir``,
-write a YAML metadata sidecar to ``roms_marbl_blueprint_dir``, append
+write a YAML metadata sidecar to ``ucla_roms_blueprint_dir``, append
 ``Resource`` object(s) to the matching
-``roms_marbl_blueprint_elements`` field, and update
+``ucla_roms_blueprint_elements`` field, and update
 ``_settings_compile_time``/``_settings_run_time``.
 
 Grid (``grid``, order=10)
@@ -381,10 +381,10 @@ River forcing (``forcing.river``, order=60)
 dataset. If ``rt.RiverForcing`` raises the roms-tools ``ValueError`` whose
 message contains *no relevant rivers found* (no river mouths survive the
 domain filters), the step logs at INFO, clears
-``roms_marbl_blueprint_elements.forcing.river``, and returns; any other
+``ucla_roms_blueprint_elements.forcing.river``, and returns; any other
 ``ValueError`` propagates. If the domain simply has no rivers
 (``river.ds.sizes["nriver"] == 0``), also clears
-``roms_marbl_blueprint_elements.forcing.river`` without treating it as an
+``ucla_roms_blueprint_elements.forcing.river`` without treating it as an
 error.
 
 **Source resolution**: ``source`` (typically DAI), via
@@ -404,7 +404,7 @@ passes, see ``CDR_FORCING_NETCDF_STEM``) and YAML metadata.
 
 **Key features**: Optional: only appears in ``input_list`` when
 ``cdr_forcing`` or ``cdr_forcing_file`` is set (CDR mode ``"upscaled"`` sets
-neither -- see `ROMS-MARBL blueprint elements initialization`_ above); the
+neither -- see `UCLA-ROMS blueprint elements initialization`_ above); the
 handler itself also no-ops if the merged kwargs are empty. ``cdr_kwargs`` is
 merged via ``_build_input_args()`` and passed to ``rt.CDRForcing(**input_args)``.
 Output paths are normalized to absolute strings.
@@ -457,7 +457,7 @@ list when the simulation runs. The online alternative,
 resolve time (there would be nothing to read).
 
 **Records**: a ``Resource(location=str(dest), partitioned=False)`` per file, in
-order, appended to ``roms_marbl_blueprint_elements.forcing.carbonate_sensitivity``.
+order, appended to ``ucla_roms_blueprint_elements.forcing.carbonate_sensitivity``.
 
 Corrections forcing (``forcing.corrections``, order=90)
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -509,12 +509,12 @@ honors the reference's native layout.
 ``SourceDatasets.dataset_key_for_source()`` is used elsewhere (subchunk-
 reference memoization), not inside this method.
 
-ROMS-MARBL blueprint element updates
+UCLA-ROMS blueprint element updates
 ----------------------------------------
 
 Each handler appends a ``Resource`` (``location=str(out_path),
 partitioned=False``, from ``cstar.orchestration.models``) to the matching
-``roms_marbl_blueprint_elements`` field: ``grid.data``,
+``ucla_roms_blueprint_elements`` field: ``grid.data``,
 ``initial_conditions.data``, ``forcing.{surface,boundary,tidal,river}.data``,
 ``cdr_forcing.data`` or, for user-supplied carbonate sensitivity files,
 ``forcing.carbonate_sensitivity.data`` (one ``Resource`` per staged copy; the
@@ -528,7 +528,7 @@ using ``rt.partition_netcdf()`` for each ``Resource.location``, with
 ``np_eta``/``np_xi`` from ``self.partitioning``, ``output_dir=input_data_dir``,
 and ``include_coarse_dims`` (set during surface forcing generation). The
 original whole-field files are left unchanged; partitioned files are created
-in ``input_data_dir``; ``roms_marbl_blueprint_elements`` is updated with
+in ``input_data_dir``; ``ucla_roms_blueprint_elements`` is updated with
 partitioned ``Resource`` objects, and each one's ``partitioned`` flag is set
 to ``True``. Every ``forcing.*`` dataset is covered, so the staged carbonate
 sensitivity files are split like any other forcing file.
@@ -557,14 +557,14 @@ above).
 Return value
 ---------------
 
-``generate_all()`` returns just ``roms_marbl_blueprint_elements:
-RomsMarblBlueprintInputData`` (or ``None``; see ``generate_all()`` above).
+``generate_all()`` returns just ``ucla_roms_blueprint_elements:
+UclaRomsBlueprintInputData`` (or ``None``; see ``generate_all()`` above).
 The settings dicts are not returned -- they are the executor-owned
 ``_settings_compile_time``/``_settings_run_time``, mutated in place by
 generation:
 
-- ``roms_marbl_blueprint_elements``: Merged into the in-memory
-  ``RomsMarblBlueprint`` by ``generate_inputs()``; persisted in
+- ``ucla_roms_blueprint_elements``: Merged into the in-memory
+  ``UclaRomsBlueprint`` by ``generate_inputs()``; persisted in
   ``configure_build()``.
 - ``_settings_compile_time``: Merged with template defaults, used to render
   ``cppdefs.opt``.
@@ -581,8 +581,8 @@ Usage pattern
 
 Direct construction is for developers; normal usage goes through the forge
 application (``cstar forge run``, see the note at the top of this page).
-Construct ``RomsMarblInputData`` with the injected ``grid``/``boundaries``/
-``source_data``/``partitioning``/``roms_marbl_blueprint_dir`` and a
+Construct ``RomsInputGenerator`` with the injected ``grid``/``boundaries``/
+``source_data``/``partitioning``/``ucla_roms_blueprint_dir`` and a
 ``forcing_override`` (typically produced by ``sources_to_forcing_override()``
 from a ``ForgeBlueprint``); omit ``settings_compile_time``/``settings_run_time``
 for standalone use, since they default to fresh empty dicts. Then call
@@ -591,13 +591,13 @@ for standalone use, since they default to fresh empty dicts. Then call
 Integration with ``ForgeExecutor``
 --------------------------------------
 
-``RomsMarblInputData`` is used internally by
+``RomsInputGenerator`` is used internally by
 ``ForgeExecutor.generate_inputs()`` (``cstar/applications/forge/executor.py``;
 see :doc:`forge_internals` for the architecture), called in turn by
 ``process_forge_blueprint()`` (``cstar/applications/forge/engine.py``), which
 is what ``cstar forge run`` invokes:
 
-1. Creates ``RomsMarblInputData``, passing ``self.forcing_override``, the
+1. Creates ``RomsInputGenerator``, passing ``self.forcing_override``, the
    other executor-resolved fields, and
    ``self._settings_compile_time``/``self._settings_run_time`` BY REFERENCE
    (as ``settings_compile_time=``/``settings_run_time=``) and
@@ -606,7 +606,7 @@ is what ``cstar forge run`` invokes:
    the executor's settings dicts in place; the executor already holds the
    up-to-date values through its own reference, so there is no merge-back
    step.
-3. Updates the in-memory blueprint with ``roms_marbl_blueprint_elements``.
+3. Updates the in-memory blueprint with ``ucla_roms_blueprint_elements``.
 4. Persists blueprint and settings to disk (in ``configure_build()``).
 
 This completes the ``generate_inputs`` stage; the blueprint and settings are

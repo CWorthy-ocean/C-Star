@@ -1,5 +1,5 @@
 # yaml-language-server: $schema=https://raw.githubusercontent.com/CWorthy-ocean/C-Star/refs/heads/main/docs/schemas/bp/roms_marbl/roms_marbl_schema.3.0.0.json
-name: roms_marbl_example_new_bp
+name: ucla_roms_example_new_bp
 description: this is to test the new blueprint schema, here's "a few" weird characters.
 application: roms_marbl
 schema_version: 3.0.0

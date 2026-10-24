@@ -48,7 +48,6 @@ from cstar.orchestration.manifest import (
 )
 from cstar.orchestration.models import BlueprintIdentity
 from cstar.orchestration.tracking import (
-    KEY_ATTACHED,
     KEY_RUN_UUID,
     TrackingRepository,
     WorkplanRun,
@@ -129,14 +128,11 @@ def track(
 ) -> WorkplanRun:
     """Record a run in tracking, stamped with `uuid` when given."""
     metadata = {KEY_RUN_UUID: uuid} if uuid else {}
-    if attached:
-        metadata[KEY_ATTACHED] = "1"
     run = WorkplanRun(
-        workplan_path=root / "workplan.yaml",
-        trx_workplan_path=root / "workplan_transformed.yaml",
         output_path=root,
         run_id=run_id,
         metadata=metadata,
+        attached=attached,
     )
     TrackingRepository().put_workplan_run_sync(run)
     return run
@@ -1440,7 +1436,7 @@ class TestResolvePath:
         with pytest.raises(CstarError, match="predates the manifest") as raised:
             resolve_run(parse_run_handle(str(tmp_path / "old")))
 
-        assert "cstar workplan run --run-id <run-id>" in str(raised.value)
+        assert "cstar workplan submit --run-id <run-id>" in str(raised.value)
 
     @pytest.mark.parametrize("too_new", [False, True])
     def test_a_manifest_that_cannot_be_read(

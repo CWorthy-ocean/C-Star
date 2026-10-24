@@ -18,6 +18,7 @@ from pathlib import Path
 from urllib.parse import quote, unquote
 
 from pydantic import (
+    AfterValidator,
     BaseModel,
     ConfigDict,
     Field,
@@ -37,6 +38,7 @@ from pydantic.json_schema import GetJsonSchemaHandler, JsonSchemaValue
 from pydantic_core import CoreSchema
 
 from cstar.base.adapter import CstarAdaptationError
+from cstar.base.application_names import canonical_application
 from cstar.base.exceptions import CstarExpectationFailed
 from cstar.base.provenance import canonical_hash
 from cstar.base.utils import generate_schema_ref, lazy_import, slugify
@@ -48,6 +50,11 @@ RequiredString: t.TypeAlias = t.Annotated[
     StringConstraints(strip_whitespace=True, min_length=1),
 ]
 """A non-empty string with no leading or trailing whitespace."""
+
+ApplicationName: t.TypeAlias = t.Annotated[
+    RequiredString, AfterValidator(canonical_application)
+]
+"""An application name, stripped, with an earlier name replaced by the current one."""
 
 LEGACY_TRANSFORMED_NAME_SUFFIX: t.Final[str] = " (transformed)"
 """The suffix releases before 0.17 appended to a workplan's name in its transformed copy."""
@@ -220,8 +227,8 @@ class BlueprintState(StrEnum):
 class Application(StrEnum):
     """The supported application types."""
 
-    ROMS_MARBL = "roms_marbl"
-    """A UCLA-ROMS simulation coupled with a MARBL biogeochemical component."""
+    UCLA_ROMS = "ucla_roms"
+    """A UCLA-ROMS simulation, in any ucla-roms configuration (MARBL, no BGC, or CDR-LiTE)."""
     HELLO_WORLD = "hello_world"
     """Sample custom application."""
     PLOTTER = "plotter"
@@ -238,7 +245,7 @@ class BlueprintCore(ConfiguredBaseModel):
     name: RequiredString
     """A unique, user-friendly name for this blueprint."""
 
-    application: RequiredString
+    application: ApplicationName
     """The process type to be executed by the blueprint."""
 
     schema_version: str = "1.0.0"
@@ -296,7 +303,7 @@ class BlueprintIdentity(ConfiguredBaseModel):
     kind: t.Literal["Blueprint"]
     """The kind of document referenced; selects the model a reference loads as."""
 
-    application: RequiredString
+    application: ApplicationName
     """The application the referenced blueprint belongs to."""
 
     name: RequiredString
@@ -453,6 +460,22 @@ class Blueprint(ConfiguredBaseModel, ABC):
             data.pop(key, None)
         return canonical_hash(data)
 
+    @property
+    def schema_ref(self) -> str:
+        """The URL of the published JSON schema the blueprint's ``$schema`` names."""
+        return generate_schema_ref(self.application, self.schema_version)
+
+    @field_validator("application", mode="after")
+    @classmethod
+    def _canonicalize_application(cls, value: str) -> str:
+        """Replace an earlier application name with the current one.
+
+        A validator rather than the `ApplicationName` annotation: every concrete
+        blueprint redeclares `application`, and a redeclared field takes the
+        subclass's annotation, dropping annotation-level validators.
+        """
+        return canonical_application(value)
+
     @field_validator("working_dir", mode="after")
     @classmethod
     def _resolve_out_dir(
@@ -470,13 +493,7 @@ class Blueprint(ConfiguredBaseModel, ABC):
     ) -> dict[str, t.Any]:
         data = handler(self)
         if not info.exclude or "$schema" not in info.exclude:
-            return {
-                "$schema": generate_schema_ref(
-                    self.application,
-                    self.schema_version,
-                ),
-                **data,
-            }
+            return {"$schema": self.schema_ref, **data}
         return data
 
 
@@ -756,7 +773,7 @@ class Step(ConfiguredBaseModel):
     name: StepName
     """The user-friendly name of the step."""
 
-    application: RequiredString
+    application: ApplicationName
     """The user-friendly name of the application executed in the step."""
 
     blueprint_path: FilePath | DeferredBlueprintRef | InlineBlueprintRef | str = Field(
@@ -1045,7 +1062,7 @@ class Workplan(ConfiguredBaseModel):
     @property
     def pre_run(self) -> bool:
         """Return `True` if every step in this workplan is a pre-run step, as
-        produced by `cstar workplan run --pre-run`.
+        produced by `cstar workplan submit --pre-run`.
 
         Returns
         -------

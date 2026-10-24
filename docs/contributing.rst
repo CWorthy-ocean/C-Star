@@ -52,7 +52,7 @@ for this; a tier is selected by path.
    Runs the forge application with real ``roms-tools`` against the pinned
    source data, without building ROMS. It checks the generated input
    files (classic-format netCDF that ParallelIO can read), the emitted
-   ``roms_marbl`` blueprint, the rendered namelist and ``cppdefs``, and
+   ``ucla_roms`` blueprint, the rendered namelist and ``cppdefs``, and
    compares the namelist to a golden file. It takes about a minute (about
    ten seconds per case after the first fetch) and runs on Ubuntu and
    macOS for every pull request::
@@ -60,13 +60,13 @@ for this; a tier is selected by path.
       python -m pytest cstar/tests/integration_tests/test_fixtures.py cstar/tests/integration_tests/forge
 
 **Tier 2: end to end** (``e2e/``)
-   Runs a two-step workplan (forge, then ``roms_marbl`` through
-   ``blueprint: {from_step: ...}``) with ``cstar workplan run`` and the
+   Runs a two-step workplan (forge, then ``ucla_roms`` through
+   ``blueprint: {from_step: ...}``) with ``cstar workplan submit`` and the
    local launcher. ROMS, MARBL and ParallelIO are compiled and ROMS is
    run with ``mpirun -n 4`` on the generated inputs, with ParallelIO
    enabled. A negative control (``test_pio_input_guard.py``) feeds a
    NETCDF4 input to a ParallelIO build and expects it to be refused.
-   ``roms_marbl/test_prebuilt_case.py`` (Tier 2b) runs the prebuilt
+   ``ucla_roms/test_prebuilt_case.py`` (Tier 2b) runs the prebuilt
    ``cstar_blueprint_test_case`` through ``cstar blueprint run`` (no
    ParallelIO, partitioned inputs) in the same CI job.
    ``e2e/test_workplan_shapes.py`` covers DAG shapes and dependency-failure
@@ -164,8 +164,8 @@ GitHub evicts caches that are idle for seven days, and caches saved on
 warm. A cache miss only costs a re-download.
 
 Data roles: ``roms-tools-test-data`` is the source of all upstream data;
-``cstar_blueprint_test_case`` is the older ``roms_marbl``-only case used by
-``roms_marbl/test_prebuilt_case.py``; ``cstar_blueprint_roms_marbl_example`` is
+``cstar_blueprint_test_case`` is the older ``ucla_roms``-only case used by
+``ucla_roms/test_prebuilt_case.py``; ``cstar_blueprint_roms_marbl_example`` is
 used by the documentation tutorials only.
 
 Contributing code

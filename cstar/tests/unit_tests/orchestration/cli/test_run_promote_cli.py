@@ -5,6 +5,7 @@ disk would be, with a finished attempt and a completed step record that lists a
 product.
 """
 
+import logging
 import shutil
 import typing as t
 from dataclasses import replace
@@ -29,7 +30,10 @@ from cstar.orchestration.manifest import (
     write_step_record,
 )
 from cstar.orchestration.models import BlueprintIdentity
+from cstar.orchestration.orchestration import ProcessHandle, Status
 from cstar.orchestration.run_check import Finding, FindingKind, RunCheckReport
+from cstar.orchestration.serialization import serialize
+from cstar.orchestration.state import StateRepository
 from cstar.orchestration.tracking import Access, TrackingRepository, WorkplanRun
 from cstar.tests.unit_tests.orchestration.manifest_runs import STARTED, BuiltRun
 
@@ -468,6 +472,106 @@ def test_move_of_a_tracked_run_updates_its_record(
     expected = Access.read_only if where == "project" else Access.owned
     assert record.access is expected
     assert ("--own" in result.output) is (where == "project")
+
+
+def test_move_of_a_run_tracked_live_drops_its_sentinels(
+    elsewhere: t.Callable[..., BuiltRun], project_runs: Path
+) -> None:
+    """Verify moving a run this machine tracked as live removes its sentinel files
+    and leaves an attached record that names none.
+    """
+    built = elsewhere()
+    assert invoke("attach", str(built.root)).exit_code == 0
+    sentinels = {
+        StateRepository.sentinel_path(name, run_id=built.run_id)
+        for name in (STEP, "run")
+    }
+    for sentinel in sentinels:
+        sentinel.parent.mkdir(parents=True, exist_ok=True)
+        handle = ProcessHandle(
+            pid="1", name=sentinel.stem, run_id=built.run_id, status=Status.Done
+        )
+        assert serialize(sentinel, handle)
+
+    def go_live(run: WorkplanRun) -> None:
+        run.attached = False
+        run.sentinels = set(sentinels)
+
+    TrackingRepository().update_workplan_run_sync(built.run_id, go_live)
+    live = tracked(built.run_id)
+    assert live is not None
+    assert live.live
+    assert live.sentinels == sentinels
+
+    result = invoke("promote", built.run_id, "--mode", "move")
+
+    assert result.exit_code == 0, result.output + result.stderr
+    assert not any(sentinel.exists() for sentinel in sentinels)
+    record = tracked(built.run_id)
+    assert record is not None
+    assert record.output_path == project_runs / built.run_id
+    assert record.sentinels == set()
+    assert record.attached is True
+    assert not record.live
+
+
+def test_move_of_a_run_with_a_step_still_in_flight_keeps_that_sentinel(
+    elsewhere: t.Callable[..., BuiltRun],
+    project_runs: Path,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Verify moving a run tracked as live removes the sentinels of finished steps,
+    leaves, with a warning, the one of a step that has not reached a terminal
+    status, and still attaches the record with no sentinels.
+
+    Parameters
+    ----------
+    elsewhere : Callable[..., BuiltRun]
+        Factory building a finished run in a directory of its own.
+    project_runs : Path
+        The project's runs area.
+    caplog : pytest.LogCaptureFixture
+        Fixture used to capture log output.
+    """
+    built = elsewhere()
+    assert invoke("attach", str(built.root)).exit_code == 0
+    statuses = {STEP: Status.Running, "run": Status.Done}
+    sentinels = {
+        name: StateRepository.sentinel_path(name, run_id=built.run_id)
+        for name in statuses
+    }
+    for name, sentinel in sentinels.items():
+        sentinel.parent.mkdir(parents=True, exist_ok=True)
+        handle = ProcessHandle(
+            pid="1", name=name, run_id=built.run_id, status=statuses[name]
+        )
+        assert serialize(sentinel, handle)
+    state_dir = sentinels[STEP].parent
+
+    def go_live(run: WorkplanRun) -> None:
+        run.attached = False
+        run.sentinels = set(sentinels.values())
+
+    TrackingRepository().update_workplan_run_sync(built.run_id, go_live)
+
+    with caplog.at_level(logging.WARNING):
+        result = invoke("promote", built.run_id, "--mode", "move")
+
+    assert result.exit_code == 0, result.output + result.stderr
+    assert sentinels[STEP].exists()
+    assert not sentinels["run"].exists()
+    assert state_dir.is_dir()
+    warnings = [r.getMessage() for r in caplog.records if r.levelno >= logging.WARNING]
+    [kept] = [w for w in warnings if "Left the sentinel" in w]
+    assert str(sentinels[STEP]) in kept
+    assert STEP in kept
+    assert "Running" in kept
+    assert str(sentinels["run"]) not in kept
+    record = tracked(built.run_id)
+    assert record is not None
+    assert record.output_path == project_runs / built.run_id
+    assert record.attached is True
+    assert record.sentinels == set()
 
 
 def test_move_of_a_tracked_run_named_by_its_directory_follows_the_record(

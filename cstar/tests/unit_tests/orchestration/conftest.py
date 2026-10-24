@@ -1,5 +1,6 @@
 import json
 import os
+import shutil
 import textwrap
 import typing as t
 from collections.abc import AsyncGenerator, Callable, Generator
@@ -9,7 +10,7 @@ from unittest import mock
 
 import pytest
 
-from cstar.applications.roms_marbl.models import RomsMarblBlueprint
+from cstar.applications.ucla_roms.models import UclaRomsBlueprint
 from cstar.base.env import ENV_CSTAR_RUNID
 from cstar.execution import file_system
 from cstar.execution.file_system import (
@@ -22,6 +23,7 @@ from cstar.orchestration.orchestration import LiveStep, ProcessHandle, Status, T
 from cstar.orchestration.serialization import deserialize
 from cstar.orchestration.state import StateRepository
 from cstar.orchestration.tracking import TrackingRepository, WorkplanRun
+from cstar.tests.unit_tests.orchestration.manifest_runs import write_identity
 
 
 @pytest.fixture
@@ -145,7 +147,7 @@ def blueprint_schema_path(tmp_path: Path) -> Path:
     """Create a schema file that can be referenced in a yaml document."""
     # yaml-language-server: $schema=/this/path.json
     path = tmp_path / "schema.json"
-    schema = json.dumps(RomsMarblBlueprint.model_json_schema())
+    schema = json.dumps(UclaRomsBlueprint.model_json_schema())
     path.write_text(schema)
     return path
 
@@ -442,7 +444,7 @@ def single_step_workplan(
         steps=[
             Step(
                 name="s-00",
-                application=Application.ROMS_MARBL,
+                application=Application.UCLA_ROMS,
                 blueprint=bp_path,
             ),
         ],
@@ -618,10 +620,13 @@ async def executed_workplan(
 
     with mock.patch.dict(os.environ, {ENV_CSTAR_RUNID: fake_run_id}):
         repo = TrackingRepository()
+        output_path = tmp_path / "mock-output"
+        output_path.mkdir(parents=True, exist_ok=True)
+        # the run directory holds the transformed workplan the record derives
+        shutil.copy(wp_path, output_path / f"{wp_path.stem}_transformed.yaml")
+        write_identity(output_path, fake_run_id, workplan=wp_path)
         wp_run = WorkplanRun(
-            workplan_path=wp_path,
-            trx_workplan_path=wp_path,
-            output_path=tmp_path / "mock-output",
+            output_path=output_path,
             run_id=fake_run_id,
         )
         await repo.put_workplan_run(wp_run)
@@ -719,7 +724,7 @@ async def read_yaml_intercept(
                     if step_dict["application"] == "hello_world":
                         bp_path.write_text(hw_bp_content)
                     else:
-                        # default to roms_marbl blueprint ....
+                        # default to ucla_roms blueprint ....
                         bp_path.write_text(rm_bp_content)
             # else:
             return original_dict

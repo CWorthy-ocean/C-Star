@@ -9,6 +9,7 @@ from typing import ClassVar, Final, Protocol, override
 
 from pydantic import Field
 
+from cstar.base.env import load_user_config
 from cstar.base.exceptions import CstarError
 from cstar.base.log import get_logger
 from cstar.system.environment import (
@@ -580,6 +581,20 @@ class EljaSystemContext(SystemContext):
         return os.getenv("SLURM_CLUSTER_NAME", "") == EljaEnvSettings.CLUSTER_IDENTIFIER
 
 
+class ExpanseEnvSettings(SlurmSettingsBase):
+    """Environment variables required to execute a simulation on the *Expanse* system.
+
+    Expanse requires a project (account) on every job; an unset queue submits to
+    the primary `compute` partition.
+    """
+
+    SLURM_QUEUE: str = Field(default="", frozen=True)
+    """The SLURM queue name.
+
+    Overridden from SlurmSettingsBase to allow an empty queue.
+    """
+
+
 @register_sys_context
 @dataclass(frozen=True)
 class ExpanseSystemContext(SystemContext):
@@ -604,6 +619,12 @@ class ExpanseSystemContext(SystemContext):
             requires_task_distribution=True,
             documentation=cls.docs,
         )
+
+    @override
+    @classmethod
+    def settings_klass(cls) -> type[SlurmSettingsBase] | None:
+        """Return the type used to load settings required by the target system."""
+        return ExpanseEnvSettings
 
 
 @register_sys_context
@@ -656,6 +677,25 @@ class MacOSSystemContext(SystemContext):
         return None
 
 
+class PerlmutterEnvSettings(SlurmSettingsBase):
+    """Environment variables required to execute a simulation on the *Perlmutter* system.
+
+    NOTE: Perlmutter charges a job without an account to the user's default
+    project; an unset queue submits to the primary `regular` QOS.
+    """
+
+    SLURM_ACCOUNT: str = Field(default="", frozen=True, min_length=0)
+    """The SLURM account name.
+
+    Overridden from SlurmSettingsBase to allow an empty account.
+    """
+    SLURM_QUEUE: str = Field(default="", frozen=True)
+    """The SLURM queue name.
+
+    Overridden from SlurmSettingsBase to allow an empty queue.
+    """
+
+
 @register_sys_context
 @dataclass(frozen=True)
 class PerlmutterSystemContext(SystemContext):
@@ -685,6 +725,12 @@ class PerlmutterSystemContext(SystemContext):
             max_cpus_per_node=128,
         )
 
+    @override
+    @classmethod
+    def settings_klass(cls) -> type[SlurmSettingsBase] | None:
+        """Return the type used to load settings required by the target system."""
+        return PerlmutterEnvSettings
+
 
 class CStarSystemManager:
     """Manage system-specific configuration and resources."""
@@ -700,8 +746,15 @@ class CStarSystemManager:
         """Initialize the CStarSystemManager.
 
         Initialize the system manager by determining the system name and initializing
-        the environment and scheduler based on that name.
+        the environment and scheduler based on that name. The user's configuration
+        file is loaded first, so library and notebook use sees it as the CLI does.
+
+        Raises
+        ------
+        CstarUserConfigError
+            If the configuration file names settings it may not set.
         """
+        load_user_config()
         self._context = get_system_context()
         self._environment = CStarEnvironment(
             system_name=self._context.name,

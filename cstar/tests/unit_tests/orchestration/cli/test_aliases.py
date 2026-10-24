@@ -1,4 +1,4 @@
-"""Tests for the CLI command aliases (`wp`, `bp`, `list`) and the `run` group."""
+"""Tests for the CLI command aliases (`wp`, `bp`, `list`, `run`) and the `run` group."""
 
 from collections.abc import Callable, Generator
 from pathlib import Path
@@ -27,6 +27,8 @@ from cstar.cli.workplan.log import app as app_log
 from cstar.cli.workplan.ls import ALIAS as ALIAS_LS
 from cstar.cli.workplan.ls import app as app_ls
 from cstar.cli.workplan.path import app as app_path
+from cstar.cli.workplan.run import ALIAS as ALIAS_SUBMIT
+from cstar.cli.workplan.run import COMMAND_SUBMIT
 from cstar.cli.workplan.run import app as app_workplan_run
 from cstar.cli.workplan.status import app as app_status
 from cstar.orchestration.orchestration import LiveWorkplan
@@ -77,7 +79,7 @@ def test_subcommand_aliases_are_hidden_from_help(build_app):
 
 @pytest.mark.parametrize(
     ("primary", "alias"),
-    [*SUBCOMMAND_ALIASES, ("ls", ALIAS_LS)],
+    [*SUBCOMMAND_ALIASES, ("ls", ALIAS_LS), (COMMAND_SUBMIT, ALIAS_SUBMIT)],
     ids=lambda v: v,
 )
 def test_help_text_advertises_the_registered_alias(build_app, primary, alias):
@@ -88,7 +90,8 @@ def test_help_text_advertises_the_registered_alias(build_app, primary, alias):
     """
     root = get_command(build_app())
     workplan = root.commands["workplan"]
-    command = workplan.commands[primary] if primary == "ls" else root.commands[primary]
+    group = workplan if primary in {"ls", COMMAND_SUBMIT} else root
+    command = group.commands[primary]
 
     assert f"(alias: {alias})" in (command.help or "")
 
@@ -100,6 +103,19 @@ def test_ls_alias_is_the_same_command():
     assert registered["list"].callback is registered["ls"].callback
     assert registered["list"].hidden
     assert not registered["ls"].hidden
+
+
+def test_submit_alias_is_the_same_command():
+    """`run` is a second registration of `submit`, not a wrapper, so `--run-id`,
+    `--resume` and the re-entry forms work under both names.
+    """
+    (listed,) = app_workplan_run.registered_commands
+    alias = next(c for c in app_workplan.registered_commands if c.name == ALIAS_SUBMIT)
+
+    assert listed.name == COMMAND_SUBMIT
+    assert alias.callback is listed.callback
+    assert alias.hidden
+    assert not listed.hidden
 
 
 @pytest.mark.parametrize(
@@ -138,7 +154,7 @@ def test_alias_names_are_reserved_against_plugins():
 
 
 RUN_LEVEL_APPS = (app_status, app_log, app_gather, app_path, app_ls)
-"""The sub-apps that implement the run-level verbs, shared by both groups."""
+"""The sub-apps that implement the run-level verbs."""
 
 
 def attached(group: typer.Typer) -> set[typer.Typer]:
@@ -146,12 +162,51 @@ def attached(group: typer.Typer) -> set[typer.Typer]:
     return {g.typer_instance for g in group.registered_groups if g.typer_instance}
 
 
-def test_run_and_workplan_share_the_run_level_sub_apps():
-    """`run` serves the run-level verbs with the very objects `workplan` does,
-    so the two spellings cannot drift apart.
-    """
+def test_run_attaches_the_run_level_sub_apps():
+    """`run` is the listed home of the run-level verbs."""
     assert set(RUN_LEVEL_APPS) <= attached(app_run)
-    assert set(RUN_LEVEL_APPS) <= attached(app_workplan)
+
+
+@pytest.mark.parametrize("verb", sorted(RUN_LEVEL_VERBS))
+def test_workplan_spelling_of_a_run_level_verb_is_the_same_command(verb):
+    """`cstar workplan <verb>` runs the very callback `cstar run <verb>` does, with
+    the same help, so the two spellings cannot drift apart.
+    """
+    run_command = get_command(app_run).commands[verb]
+    workplan_command = get_command(app_workplan).commands[verb]
+
+    assert workplan_command.callback is not None
+    assert workplan_command.callback.__wrapped__ is run_command.callback.__wrapped__
+    assert workplan_command.help == run_command.help
+    assert [p.name for p in workplan_command.params] == [
+        p.name for p in run_command.params
+    ]
+
+
+def test_workplan_lists_only_its_own_commands():
+    """`cstar workplan --help` lists `submit` and `check`; the run-level verbs and
+    the `run` alias stay registered but unlisted, while `cstar run` lists the
+    verbs.
+    """
+    workplan = get_command(app_workplan).commands
+    run = get_command(app_run).commands
+    listed = {name for name, command in workplan.items() if not command.hidden}
+
+    assert {COMMAND_SUBMIT, "check"} <= listed
+    assert listed.isdisjoint(RUN_LEVEL_VERBS | {ALIAS_SUBMIT})
+    assert {name for name in RUN_LEVEL_VERBS if not run[name].hidden} == (
+        RUN_LEVEL_VERBS - {ALIAS_LS}
+    )
+
+
+def test_workplan_help_output_omits_the_hidden_spellings(build_app):
+    """The rendered `cstar workplan --help` names the listed commands only."""
+    result = CliRunner().invoke(build_app(), ["workplan", "--help"])
+
+    assert result.exit_code == 0, result.output
+    assert COMMAND_SUBMIT in result.output
+    for hidden in ("status", "gather", "log", "ls"):
+        assert f" {hidden} " not in result.output
 
 
 def test_run_attaches_check_but_not_the_workplan_verbs():
@@ -173,7 +228,7 @@ def test_run_level_verbs_are_what_the_groups_attach():
 
     assert run_commands == RUN_LEVEL_VERBS | RUN_ONLY_COMMANDS
     assert RUN_LEVEL_VERBS <= workplan_commands
-    assert {COMMAND_CHECK, NAME_RUN} <= workplan_commands
+    assert {COMMAND_CHECK, COMMAND_SUBMIT, ALIAS_SUBMIT} <= workplan_commands
 
 
 def test_run_group_is_attached_to_the_root(build_app):
@@ -208,12 +263,11 @@ def invoke(build_app, tmp_path: Path) -> Generator[Callable[[list[str]], Result]
         return []
 
     # `status x` finds a record through the shared argument callback, then stops
-    # at the missing transformed workplan, which it reports without failing.
+    # at the transformed workplan, which it fails to load and reports without failing.
     # The `ls` stub replaces `asyncio.run` on the shared module object, so the
     # record lookup gets its own loop stub.
+    (tmp_path / "x_transformed.yaml").touch()
     record = WorkplanRun(
-        workplan_path=tmp_path / "x.yaml",
-        trx_workplan_path=tmp_path / "x_transformed.yaml",
         output_path=tmp_path,
         run_id="x",
     )

@@ -17,7 +17,7 @@ from cstar.base.adapter import (
     CstarAdaptationError,
     ModelEnricher,
 )
-from cstar.base.env import ENV_CSTAR_ORCH_LOCAL_DELAY, ENV_CSTAR_RUNID, get_env_item
+from cstar.base.env import ENV_CSTAR_RUNID
 from cstar.base.exceptions import CstarError, CstarExpectationFailed
 from cstar.base.log import get_logger
 from cstar.base.utils import WALLTIME_RE, additional_files_dir
@@ -46,6 +46,9 @@ if t.TYPE_CHECKING:
 
 
 log = get_logger(__name__)
+
+PROXY_POLL_DELAY: t.Final[float] = 2.0
+"""Seconds between the status checks made by the local launcher's proxy script."""
 
 
 def run_as_process(step: "Step", cmd: list[str], log_file: Path) -> dict[str, int]:
@@ -740,7 +743,6 @@ class ProxiedRunRequestFormatter(ModelFormatter[RunRequest]):
         self.dependencies = dependencies or []
         self.step = step
         self.updates = updates or {}
-        self.delay = ""
 
     @t.override
     def _to_string(self, value: RunRequest) -> str:
@@ -762,7 +764,6 @@ class ProxiedRunRequestFormatter(ModelFormatter[RunRequest]):
                 ]
             )
 
-        delay = get_env_item(ENV_CSTAR_ORCH_LOCAL_DELAY).value
         declarations = [f"export {k}='{v}'\n" for k, v in value.environment.items()]
         env_vars = " ".join(declarations)
 
@@ -774,7 +775,7 @@ class ProxiedRunRequestFormatter(ModelFormatter[RunRequest]):
             "{running}": str(Status.Running.value),
             "{done}": str(Status.Done.value),
             "{failed}": str(Status.Failed.value),
-            "{delay}": delay,
+            "{delay}": str(PROXY_POLL_DELAY),
             "{command}": " ".join(shlex.quote(token) for token in value.command),
             "{env_vars}": env_vars,
         }

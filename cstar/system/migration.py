@@ -12,9 +12,8 @@ from pydantic import (
 )
 
 from cstar.base.adapter import SchemaAdapter, SchemaBreak
-from cstar.base.env import ENV_CSTAR_CLI_DRY_RUN, ENV_CSTAR_CLOBBER_WORKING_DIR
+from cstar.base.application_names import canonical_application
 from cstar.base.exceptions import CstarError
-from cstar.base.feature import is_flag_enabled
 from cstar.base.log import LoggingMixin
 
 KEY_SV: t.Final[str] = "schema_version"
@@ -84,19 +83,14 @@ class MigrationRequest(BaseModel):
         description="Enable to overwrite the source file with the migrated content",
         frozen=True,
     )
+    dry_run: bool = Field(
+        default=False,
+        description="Enable to plan the migration without executing or persisting it",
+        frozen=True,
+    )
 
     config: t.ClassVar[ConfigDict] = ConfigDict(str_strip_whitespace=True)
     """Model configuration ensuring attributes have whitespace stripped."""
-
-    @classmethod
-    def dry_run(cls) -> bool:
-        """Return `True` if dry-run is enabled."""
-        return is_flag_enabled(ENV_CSTAR_CLI_DRY_RUN)
-
-    @classmethod
-    def clobber(cls) -> bool:
-        """Return `True` if clobber is enabled."""
-        return is_flag_enabled(ENV_CSTAR_CLOBBER_WORKING_DIR)
 
 
 class MigrationPlan(t.NamedTuple):
@@ -159,7 +153,7 @@ OnMigratedCallback: t.TypeAlias = Callable[[MigrationPlan], None]
 
 
 class BlueprintMigration(Migration):
-    """A migration controller for RomsMarblBlueprints."""
+    """A migration controller for UclaRomsBlueprints."""
 
     adapters: list[type[SchemaAdapter]]
     """The adapters available to migrate the blueprint."""
@@ -241,7 +235,7 @@ class BlueprintMigration(Migration):
         CstarManualMigrationError
             If an older major version has no automatic upgrade path.
         """
-        application = str(dumped[KEY_APP])
+        application = canonical_application(str(dumped[KEY_APP]))
 
         if application not in self.targets:
             msg = f"No schema version registered for application {application!r}"
@@ -340,6 +334,7 @@ class BlueprintMigration(Migration):
             If the migration cannot be completed.
         """
         model = deepcopy(dumped)
+        model[KEY_APP] = canonical_application(str(model[KEY_APP]))
 
         for klass in plan.adapters:
             if model := klass(model).adapt():

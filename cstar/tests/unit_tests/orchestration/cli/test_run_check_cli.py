@@ -48,8 +48,6 @@ from cstar.orchestration.manifest import (
 from cstar.orchestration.models import BlueprintIdentity
 from cstar.orchestration.run_check import check_run
 from cstar.orchestration.tracking import (
-    KEY_ACCESS,
-    KEY_ATTACHED,
     KEY_RUN_UUID,
     Access,
     WorkplanRun,
@@ -1033,15 +1031,12 @@ def test_the_hint_names_the_directory_as_it_was_typed(
 
 def attached_record(built: BuiltRun, access: Access | None = None) -> WorkplanRun:
     """The tracking record `cstar run attach` makes of a built run kept elsewhere."""
-    metadata = {KEY_ATTACHED: "1", KEY_RUN_UUID: built.uuid}
-    if access is not None:
-        metadata[KEY_ACCESS] = access.value
     return WorkplanRun(
-        workplan_path=built.root / f"{built.run_id}_transformed.yaml",
-        trx_workplan_path=built.root / f"{built.run_id}_transformed.yaml",
         output_path=built.root,
         run_id=built.run_id,
-        metadata=metadata,
+        attached=True,
+        access=access or Access.owned,
+        metadata={KEY_RUN_UUID: built.uuid},
     )
 
 

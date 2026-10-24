@@ -8,7 +8,7 @@ Forge
    :align: center
    :width: 300px
 
-Forge is C-Star's application for creating new ROMS-MARBL domains. Setting up
+Forge is C-Star's application for creating new UCLA-ROMS domains. Setting up
 a regional simulation has traditionally meant weeks of work: designing a grid,
 collecting and regridding forcing datasets, hand-editing configuration files,
 and hoping the result reproduces on the next machine. Forge automates that
@@ -39,10 +39,10 @@ whatever machine you run it, Forge:
    dioxide removal forcing where requested;
 3. renders the model's compile-time switches (``cppdefs.opt``) and run-time
    namelist (``namelist.nml``) from the blueprint's settings;
-4. writes a :doc:`ROMS-MARBL blueprint <../blueprints/roms_marbl>` that
+4. writes a :doc:`UCLA-ROMS blueprint <../blueprints/ucla_roms>` that
    points at all of the above.
 
-Running that ROMS-MARBL blueprint is a normal C-Star simulation; Forge is no
+Running that UCLA-ROMS blueprint is a normal C-Star simulation; Forge is no
 longer involved. The :doc:`end-to-end tutorial <../tutorials/end_to_end>`
 walks through the whole sequence on a toy domain.
 

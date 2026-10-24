@@ -1,6 +1,7 @@
 """Tests for the run manifest and step record."""
 
 import fcntl
+import fnmatch
 import hashlib
 import logging
 import threading
@@ -26,6 +27,7 @@ from cstar.execution.file_system import (
 from cstar.orchestration.manifest import (
     ATTEMPT_DIR_FORMAT,
     ATTEMPTS_DIR_NAME,
+    CANONICAL_NAMES_SINCE,
     MANIFEST_LOCK_NAME,
     RUN_MANIFEST_NAME,
     STEP_RECORD_NAME,
@@ -342,6 +344,41 @@ class TestRoundTrip:
         assert record.schema_version == CURRENT_RECORD
         for name, current in CURRENT_OF.items():
             assert f"schema_version: {current}" in (tmp_path / name).read_text()
+
+    @pytest.mark.parametrize(
+        ("version", "kept"),
+        [
+            pytest.param("1.0.0", False, id="first-schema"),
+            pytest.param("1.4.0", False, id="last-before-canonical-names"),
+            pytest.param(CANONICAL_NAMES_SINCE, True, id="canonical-names-since"),
+            pytest.param(CURRENT, True, id="current"),
+        ],
+    )
+    def test_definition_hashes_before_canonical_names_are_not_read(
+        self, tmp_path: Path, version: str, kept: bool
+    ) -> None:
+        """A manifest older than `CANONICAL_NAMES_SINCE` may have hashed an earlier
+        application name, so it reads without its hashes. The file is left alone.
+        """
+        manifest = _manifest("one", "two")
+        manifest.steps[0].definition_hash = "abc"
+        write_run_manifest(tmp_path, manifest)
+        path = tmp_path / RUN_MANIFEST_NAME
+        path.write_text(
+            path.read_text().replace(
+                f"schema_version: {CURRENT}", f"schema_version: {version}", 1
+            )
+        )
+        before = path.read_text()
+
+        loaded = read_run_manifest(tmp_path)
+
+        assert loaded is not None
+        assert loaded.schema_version == version
+        assert [e.definition_hash for e in loaded.steps] == (
+            ["abc", ""] if kept else ["", ""]
+        )
+        assert path.read_text() == before
 
     def test_carried_inputs_round_trip(self, tmp_path: Path) -> None:
         manifest = _manifest("one")
@@ -2052,3 +2089,31 @@ class TestRequireRecordedFiles:
 
         assert str(tmp_path) in str(error.value)
         assert "cstar run check" in str(error.value)
+
+
+@pytest.mark.parametrize(
+    ("authored", "expected"),
+    [
+        pytest.param("plan.yml", "plan_transformed.yaml", id="yml"),
+        pytest.param("plan.yaml", "plan_transformed.yaml", id="yaml"),
+        pytest.param("plan.json", "plan_transformed.yaml", id="json"),
+        pytest.param("a.b.yaml", "a.b_transformed.yaml", id="dotted-stem"),
+    ],
+)
+def test_transformed_workplan_path_is_named_yaml_after_the_authored_stem(
+    authored: str, expected: str
+) -> None:
+    """Verify the transformed workplan sits in the run root as `<stem>_transformed.yaml`
+    whatever the authored suffix, and matches the glob that finds it.
+
+    Parameters
+    ----------
+    authored : str
+        The authored workplan's file name.
+    expected : str
+        The transformed workplan's file name.
+    """
+    named = manifest_module.transformed_workplan_path(Path("/r"), Path(authored))
+
+    assert named == Path("/r") / expected
+    assert fnmatch.fnmatch(named.name, manifest_module.TRANSFORMED_WORKPLAN_GLOB)

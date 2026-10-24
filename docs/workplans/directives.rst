@@ -86,7 +86,7 @@ carbonate-sensitivity-from
 
 Supplies the carbonate sensitivities that a CDR-LiTE run reads as surface
 forcing -- the variables ``ddic_dco2`` and ``ddic_dalk`` -- from an earlier
-ROMS-MARBL run, by setting the blueprint's ``forcing.carbonate_sensitivity``
+UCLA-ROMS run, by setting the blueprint's ``forcing.carbonate_sensitivity``
 dataset. Configure exactly one of:
 
 - ``step`` -- the name of the step whose output holds the carbonate
@@ -104,8 +104,8 @@ ROMS writes the sensitivities to ``<output_root_name>_cdrgas.<timestamp>.nc``
 files only when the producing run has MARBL enabled and its namelist sets
 ``do_cdr_gas_exch_output`` to true (``cdr_gas_exch_output_settings`` in the
 blueprint's ``namelist_overrides``; ``cdr_gas_exch_output`` in a forge output
-spec), so the step the directive reads from must be a ROMS-MARBL run with that
-option on. The files found there replace any ``forcing.carbonate_sensitivity``
+spec), so the step the directive reads from must be a UCLA-ROMS run with MARBL and
+that option on. The files found there replace any ``forcing.carbonate_sensitivity``
 entries already in the blueprint.
 
 .. code-block:: yaml
@@ -159,11 +159,11 @@ its boundary forcing from the parent's output.
 
     steps:
       - name: parent_run
-        application: roms_marbl
+        application: ucla_roms
         blueprint: ./blueprints/parent_blueprint.yaml
 
       - name: child_run
-        application: roms_marbl
+        application: ucla_roms
         blueprint: ./blueprints/child_blueprint.yaml
         depends_on:
           - parent_run

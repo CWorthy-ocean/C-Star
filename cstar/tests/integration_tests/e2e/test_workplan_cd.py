@@ -133,14 +133,14 @@ def finished_run(
     env.pop(ENV_CSTAR_LOG_LEVEL, None)
     state_home, data_home = root / "state", root / "data"
 
-    proc = run_cstar(env, "workplan", "run", "--run-id", RUN_ID, str(workplan))
+    proc = run_cstar(env, "workplan", "submit", "--run-id", RUN_ID, str(workplan))
     try:
         statuses = wait_for_terminal(
             state_home, RUN_ID, [STEP], timeout=RUN_TIMEOUT, poll_interval=POLL_INTERVAL
         )
         if proc.returncode != 0 or statuses != {STEP: DONE}:
             pytest.fail(
-                f"workplan run exited {proc.returncode} with {statuses}\n"
+                f"workplan submit exited {proc.returncode} with {statuses}\n"
                 f"stdout:\n{proc.stdout}\nstderr:\n{proc.stderr}\n"
                 f"{run_log_tails(data_home, RUN_ID)}"
             )

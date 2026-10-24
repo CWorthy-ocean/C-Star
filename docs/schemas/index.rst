@@ -34,6 +34,8 @@ Schemas for the files a run leaves behind are listed here. See
   adds the content digest of each product (``digest``).
 - :download:`Step Record Schema v1.3.0 <https://raw.githubusercontent.com/CWorthy-ocean/C-Star/refs/heads/main/docs/schemas/run/step_record_schema.1.3.0.json>`:
   adds the content digest of each product (``digest``).
+- :download:`Run Manifest Schema v1.5.0 <https://raw.githubusercontent.com/CWorthy-ocean/C-Star/refs/heads/main/docs/schemas/run/run_manifest_schema.1.5.0.json>`:
+  adds no fields: each step's ``definition_hash`` is computed under current application names, so the hashes an older manifest recorded are not compared when its run is re-entered.
 
 Blueprints
 ----------
@@ -44,11 +46,18 @@ major means older files need migration (automatic where the application provides
 an adapter), while an older minor or patch loads unchanged. See
 :ref:`versioning_blueprint_schema`.
 
-ROMS-MARBL Blueprint
-~~~~~~~~~~~~~~~~~~~~
+UCLA-ROMS Blueprint
+~~~~~~~~~~~~~~~~~~~
 
-The `roms_marbl` blueprint enables the orchestration of an application that 
-executes a ROMS simulation.
+The `ucla_roms` blueprint enables the orchestration of an application that
+executes a UCLA-ROMS simulation.
+
+- :download:`UCLA-ROMS Blueprint Schema v3.3.0 <https://raw.githubusercontent.com/CWorthy-ocean/C-Star/refs/heads/main/docs/schemas/bp/ucla_roms/ucla_roms_schema.3.3.0.json>`
+
+ROMS-MARBL Blueprint (earlier name)
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+These schemas were published under the application's earlier name, `roms_marbl`.
 
 - :download:`ROMS-MARBL Blueprint Schema v1.0.0 <https://raw.githubusercontent.com/CWorthy-ocean/C-Star/refs/heads/main/docs/schemas/bp/roms_marbl/roms_marbl_schema.1.0.0.json>`
 - :download:`ROMS-MARBL Blueprint Schema v2.0.0 <https://raw.githubusercontent.com/CWorthy-ocean/C-Star/refs/heads/main/docs/schemas/bp/roms_marbl/roms_marbl_schema.2.0.0.json>`
@@ -84,7 +93,7 @@ CDR Metrics Blueprint
 ~~~~~~~~~~~~~~~~~~~~~
 
 The `cdr_metrics` blueprint computes CDR metrics from the `_cdr` output of
-ROMS-MARBL runs.
+UCLA-ROMS runs with MARBL.
 
 - :download:`CDR Metrics Blueprint Schema v1.1.0 <https://raw.githubusercontent.com/CWorthy-ocean/C-Star/refs/heads/main/docs/schemas/bp/cdr_metrics/cdr_metrics_schema.1.1.0.json>`
 
@@ -93,5 +102,5 @@ Forge Blueprint
 ~~~~~~~~~~~~~~~
 
 The `forge` blueprint (see :doc:`../forge/index`) configures the domain-generation
-application that produces ROMS-MARBL blueprints; its JSON schema is not yet published
+application that produces UCLA-ROMS blueprints; its JSON schema is not yet published
 here.

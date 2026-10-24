@@ -632,7 +632,6 @@ def _track_move(
     fresh = build_attached_record(
         manifest,
         read_run_location(destination),
-        workplan_path,
         run_id=record.run_id,
         mode=mode,
     )

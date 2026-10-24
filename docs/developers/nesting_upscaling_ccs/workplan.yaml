@@ -29,8 +29,8 @@
 # time through the runtime variables below; the same files serve a year-long and a
 # month-long run. The values for the full run are in full.vars:
 #
-#   cstar workplan check workplan.yaml --varfile full.vars
-#   cstar workplan run   workplan.yaml --varfile full.vars
+#   cstar workplan check  workplan.yaml --varfile full.vars
+#   cstar workplan submit workplan.yaml --varfile full.vars
 #
 # A shorter window needs different runtime variables (all of them, as a copy of full.vars
 # with edited values or as --var key=value options: --var and --varfile cannot be combined)
@@ -48,7 +48,7 @@
 # starts the same number of MPI ranks as the tiling gives (np_x * np_y of each roms step:
 # up to 50 for full.vars), so it needs that many cores or a smaller tiling.
 # On a SLURM machine the account and queue come from your environment, as C-Star's HPC
-# docs (docs/hpc.rst) describe. `cstar workplan run` then submits all nine jobs, chained
+# docs (docs/hpc.rst) describe. `cstar workplan submit` then submits all nine jobs, chained
 # with SLURM dependencies, and returns; it does not have to keep running. The SLURM
 # `num_cpus` of the roms steps (a deferred blueprint cannot be read at submit time) must
 # equal the ranks, np_x * np_y of the vars file: 16 / 50 / 16 for full.vars (parent 4x4,
@@ -61,7 +61,7 @@
 # estimate is rough, from rates measured per simulated day on one cluster: forge about 19 s
 # (forge_child 15 s) plus 1 min fixed; ROMS 35 s for parent, 53 s for child and 51 s for
 # parent_up, plus a 1.5 min build. For a shorter window lower the limits before
-# `cstar workplan run` (shorter limits also let the scheduler start a job sooner). SLURM
+# `cstar workplan submit` (shorter limits also let the scheduler start a job sooner). SLURM
 # lets you lower a queued job's limit with `scontrol update` but not raise it, so a limit
 # that is too small kills the job and everything after it.
 #
@@ -179,7 +179,7 @@ steps:
 
   # ---------------------------------------------------------------- parent
   - name: parent
-    application: roms_marbl
+    application: ucla_roms
     blueprint:
       from_step: forge_parent
     depends_on:
@@ -215,7 +215,7 @@ steps:
         max_walltime: "00:30:00"
 
   - name: child
-    application: roms_marbl
+    application: ucla_roms
     blueprint:
       from_step: forge_child
     depends_on:
@@ -254,7 +254,7 @@ steps:
         max_walltime: "00:30:00"
 
   - name: parent_up
-    application: roms_marbl
+    application: ucla_roms
     blueprint:
       from_step: forge_parent_up
     depends_on:

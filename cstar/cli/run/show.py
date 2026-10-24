@@ -110,7 +110,7 @@ def _directory_target(target: str) -> ShowTarget:
         if JobFileSystemManager(root).tasks_dir.is_dir():
             msg += (
                 " The run predates the manifest: re-entering it with "
-                "`cstar workplan run --run-id <run-id>` records one."
+                "`cstar workplan submit --run-id <run-id>` records one."
             )
         raise typer.BadParameter(msg)
 
@@ -329,7 +329,7 @@ def _read_manifest(resolved: ShowTarget) -> RunManifest:
         typer.echo(
             f"Run {resolved.run_id or str(resolved.root)!r} has no manifest: it "
             "predates the manifest, and re-entering it with "
-            "`cstar workplan run --run-id <run-id>` records one.",
+            "`cstar workplan submit --run-id <run-id>` records one.",
             err=True,
         )
         raise typer.Exit(1)
@@ -369,10 +369,12 @@ def show(
         fold_step_records(manifest, root)
     elif not no_refresh:
         run = get_from_ctxmap(context, KEY_RUN, WorkplanRun)
-        workplan = LiveWorkplan.try_load(run.trx_workplan_path)
+        workplan_path = run.try_trx_workplan_path()
+        workplan = LiveWorkplan.try_load(workplan_path) if workplan_path else None
         if workplan is None:
+            where = str(workplan_path) if workplan_path else f"of run {run.run_id!r}"
             typer.echo(
-                f"Unable to load the transformed workplan {run.trx_workplan_path}; "
+                f"Unable to load the transformed workplan {where}; "
                 "showing the manifest as last recorded.",
                 err=True,
             )

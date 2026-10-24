@@ -18,7 +18,6 @@ from enum import StrEnum
 from itertools import chain
 from pathlib import Path
 
-from cstar.applications.roms_marbl.file_system import RomsFileSystemManager
 from cstar.base.exceptions import CstarError
 from cstar.base.log import get_logger
 from cstar.execution.file_system import DirectoryManager, symlink_relative
@@ -29,6 +28,7 @@ from cstar.orchestration.manifest import (
     read_run_manifest,
 )
 from cstar.orchestration.run_check import TRANSFORMED_WORKPLAN_GLOB
+from cstar.roms.file_system import RomsFileSystemManager
 
 if t.TYPE_CHECKING:
     from collections.abc import Collection, Iterable, Iterator, Mapping
@@ -54,6 +54,13 @@ scheduled before carried inputs left there, including their rotated `.1`, `.2` f
 
 _WORK_GLOBS: t.Final[tuple[str, ...]] = ("*.yaml", "*.yml")
 """Globs, relative to a step's work directory, of the files that hold its blueprint and directives."""
+
+_COPY_BLOCK_BYTES: t.Final[int] = 64 * 2**20
+"""The bytes `_copy_file` reads and writes at a time. Parallel file systems
+report blocks of megabytes (GPFS's `st_blksize`), and a copy in blocks this
+large runs several times faster there than the kernel's `sendfile` or
+`copy_file_range`.
+"""
 
 
 def product_group(step: str) -> str:
@@ -573,9 +580,27 @@ def _copy_into(plan: CopyPlan, staging: Path) -> int:
         if entry.kind == "link":
             target.symlink_to(_link_text(plan, entry))
         else:
-            shutil.copy2(source, target, follow_symlinks=True)
+            _copy_file(source, target)
             copied += entry.size_bytes
     return copied
+
+
+def _copy_file(source: Path, target: Path) -> None:
+    """Copy a file's content in large blocks, then its metadata, as `shutil.copy2` does.
+
+    `shutil.copy2` goes through `sendfile` on Linux, which GPFS serves at a
+    fraction of the speed of buffered reads and writes of `_COPY_BLOCK_BYTES`.
+
+    Parameters
+    ----------
+    source : Path
+        The file to copy; a symlink is followed.
+    target : Path
+        The path of the copy; it is overwritten.
+    """
+    with source.open("rb") as src, target.open("wb") as dst:
+        shutil.copyfileobj(src, dst, length=_COPY_BLOCK_BYTES)
+    shutil.copystat(source, target)
 
 
 def execute_plan(

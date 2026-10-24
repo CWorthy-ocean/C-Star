@@ -1,7 +1,7 @@
 """Prior-attempt reuse logic shared by every launcher.
 
 Both `SlurmLauncher` and `LocalLauncher` reload a step's persisted sentinel
-handle when re-entering a run (`workplan run --run-id`), decide whether to
+handle when re-entering a run (`workplan submit --run-id`), decide whether to
 reuse it or resubmit, and, on resubmission, rotate the prior log out of the
 way and annotate the fresh one. Centralizing that decision and the log
 wording here keeps the two launchers in lockstep and gives the logic a

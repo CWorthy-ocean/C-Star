@@ -207,7 +207,7 @@ def shared_run(
     data_home, state_home = producer / "data", producer / "state"
     steps = list(BASE_SHAPE)
 
-    proc = run_cstar(env, "workplan", "run", "--run-id", BASE_RUN_ID, str(workplan))
+    proc = run_cstar(env, "workplan", "submit", "--run-id", BASE_RUN_ID, str(workplan))
     try:
         statuses = wait_for_terminal(
             state_home,
@@ -218,7 +218,7 @@ def shared_run(
         )
         if proc.returncode != 0 or statuses != dict.fromkeys(steps, DONE):
             pytest.fail(
-                f"workplan run exited {proc.returncode} with {statuses}\n"
+                f"workplan submit exited {proc.returncode} with {statuses}\n"
                 f"{_output(proc)}\n{run_log_tails(data_home, BASE_RUN_ID)}"
             )
 
@@ -305,7 +305,7 @@ def schedule_consumer(
     root = shared.root / name
     workplan = write_consumer(root, runs_ref)
     env = shared.env(name, project)
-    proc = run_cstar(env, "workplan", "run", "--run-id", name, str(workplan))
+    proc = run_cstar(env, "workplan", "submit", "--run-id", name, str(workplan))
     run = ConsumerRun(name, env, root, proc.returncode, _output(proc))
     if not expect_done:
         return run
@@ -320,7 +320,7 @@ def schedule_consumer(
         )
         if proc.returncode != 0 or statuses != {STEP: DONE}:
             pytest.fail(
-                f"workplan run exited {proc.returncode} with {statuses}\n"
+                f"workplan submit exited {proc.returncode} with {statuses}\n"
                 f"{run.output}\n{run_log_tails(run.data_home, name)}"
             )
     finally:

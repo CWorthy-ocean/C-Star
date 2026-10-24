@@ -12,10 +12,10 @@ Definitions
       how to turn one into a result. C-Star ships two applications for ocean
       modeling:
 
-      * ``roms_marbl`` runs a UCLA-ROMS simulation, optionally coupled to
-        MARBL biogeochemistry.
-      * ``forge`` generates a new ROMS-MARBL domain: it produces the input
-        files and settings for a simulation and writes the ROMS-MARBL
+      * ``ucla_roms`` runs a UCLA-ROMS simulation: with MARBL biogeochemistry,
+        without biogeochemistry, or with CDR-LiTE.
+      * ``forge`` generates a new UCLA-ROMS domain: it produces the input
+        files and settings for a simulation and writes the UCLA-ROMS
         blueprint that runs it.
 
       Smaller applications (``nest_ic``, ``upscaler``, ``cdr_metrics``,
@@ -24,7 +24,7 @@ Definitions
 
     Blueprint
       A YAML file holding everything an application needs to produce its
-      result. What it contains depends on the application: a ROMS-MARBL
+      result. What it contains depends on the application: a UCLA-ROMS
       blueprint names the model code, input files, partitioning and runtime
       settings of one simulation; a forge blueprint describes the domain to
       build. Every blueprint shares a small core (``name``, ``description``,
@@ -37,18 +37,18 @@ Definitions
       (``cstar blueprint check``) and run (``cstar blueprint run``) from the
       command line. See :doc:`blueprints`.
 
-    ROMS-MARBL blueprint
-      The blueprint of the ``roms_marbl`` application: a runnable
+    UCLA-ROMS blueprint
+      The blueprint of the ``ucla_roms`` application: a runnable
       description of one simulation. Forge writes one at the end of domain
       generation; you can also write one by hand for input files you already
-      have. See :doc:`blueprints/roms_marbl`.
+      have. See :doc:`blueprints/ucla_roms`.
 
     Forge
       C-Star's domain-generation application. From a forge blueprint it
       downloads the source datasets, builds the grid and every ROMS input
       file (initial conditions, surface and boundary forcing, tides, rivers,
       optional carbon dioxide removal forcing), renders the model's
-      compile-time and run-time settings, and emits the ROMS-MARBL blueprint
+      compile-time and run-time settings, and emits the UCLA-ROMS blueprint
       that runs the result. Forge is driven by ``cstar blueprint run`` like
       any other application, with ``cstar forge run`` exposing its extra
       options. See :doc:`forge/index`.
@@ -120,7 +120,7 @@ Definitions
       ``continue-from`` takes a restart file written by an earlier step as
       initial conditions; ``nest-from`` takes a parent run's output as the
       boundary forcing of a nested child; ``carbonate-sensitivity-from`` takes
-      the carbonate sensitivities that an earlier ROMS-MARBL run wrote as
+      the carbonate sensitivities that an earlier UCLA-ROMS run with MARBL wrote as
       surface forcing for a CDR-LiTE run. See :doc:`workplans/directives`.
 
     Orchestrator
@@ -134,7 +134,7 @@ Definitions
     Run ID
       The identifier of a run. By default it is the workplan's ``name``, which
       must already be a slug (ASCII lowercase letters, digits, ``-`` and ``_``), so
-      the same file always runs under the same ID; ``cstar workplan run --run-id
+      the same file always runs under the same ID; ``cstar workplan submit --run-id
       <id>`` overrides it. It names the run's directory
       (``CSTAR_DATA_HOME/workplan_runs/<id>``), lets you check status (``cstar run status``) or reattach to a run
       in progress, and lets you re-enter a run to retry failed steps or
@@ -183,7 +183,7 @@ Definitions
       step's record in. See :doc:`workplans`.
 
     Attempt
-      One scheduling of a workplan into a run: ``cstar workplan run``, or a
+      One scheduling of a workplan into a run: ``cstar workplan submit``, or a
       re-entry with ``--run-id``, ``--resume`` or ``--clobber``. The run
       manifest lists them oldest first; an attempt's ``finished_at`` is set
       once every step is terminal. An attempt that reads the workplan file

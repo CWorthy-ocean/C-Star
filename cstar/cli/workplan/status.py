@@ -4,6 +4,7 @@ import typing as t
 import typer
 from rich.console import Console
 
+from cstar.base.exceptions import CstarError
 from cstar.base.log import get_logger
 from cstar.cli.common import get_from_ctxmap
 from cstar.cli.workplan.shared import (
@@ -65,7 +66,10 @@ def status(
 ) -> None:
     """Retrieve the current status of a workplan."""
     run = get_from_ctxmap(ctx, KEY_RUN, WorkplanRun)
-    wp_path = run.trx_workplan_path
+    try:
+        wp_path = run.trx_workplan_path
+    except CstarError as ex:
+        raise typer.BadParameter(str(ex)) from ex
 
     try:
         workplan = LiveWorkplan.load(wp_path)

@@ -737,7 +737,7 @@ class TestReviewFixes:
 # ---------------------------------------------------------------------------
 # blueprints/<application>/<name>.yaml scan, legacy layouts, layered reads
 # ---------------------------------------------------------------------------
-def _write_bp(path: Path, application: str = "roms_marbl") -> Path:
+def _write_bp(path: Path, application: str = "ucla_roms") -> Path:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(f"name: {path.stem}\napplication: {application}\n")
     return path
@@ -752,20 +752,20 @@ class TestBlueprintLayout:
     def test_application_directories_are_scanned(self, tmp_path, caplog):
         root = tmp_path / "cat"
         forge = _write_bp(root / "blueprints" / "forge" / "a.yaml", "forge")
-        rm = _write_bp(root / "blueprints" / "roms_marbl" / "a.yaml")
-        dotted = _write_bp(root / "blueprints" / "roms_marbl" / "v0.1.x.yml")
+        rm = _write_bp(root / "blueprints" / "ucla_roms" / "a.yaml")
+        dotted = _write_bp(root / "blueprints" / "ucla_roms" / "v0.1.x.yml")
 
         with caplog.at_level(logging.WARNING, logger="cstar.catalog.domain_catalog"):
             catalog = _catalog(root)
 
         assert not caplog.records
-        assert catalog.blueprint_applications == ["forge", "roms_marbl"]
+        assert catalog.blueprint_applications == ["forge", "ucla_roms"]
         assert catalog.blueprint_names("forge") == ["a"]
-        assert catalog.blueprint_names("roms_marbl") == ["a", "v0.1.x"]
+        assert catalog.blueprint_names("ucla_roms") == ["a", "v0.1.x"]
         assert catalog.blueprint_names("no-such-app") == []
         assert catalog.blueprint_path("forge", "a").samefile(forge)
-        assert catalog.blueprint_path("roms_marbl", "a").samefile(rm)
-        assert catalog.blueprint_path("roms_marbl", "v0.1.x").samefile(dotted)
+        assert catalog.blueprint_path("ucla_roms", "a").samefile(rm)
+        assert catalog.blueprint_path("ucla_roms", "v0.1.x").samefile(dotted)
         assert catalog.legacy_blueprints == []
         assert catalog.blueprints_dir == root.resolve() / "blueprints"
         assert catalog.blueprint_dir("forge") == catalog.blueprints_dir / "forge"
@@ -774,16 +774,16 @@ class TestBlueprintLayout:
     def test_wrappers_delegate(self, tmp_path):
         root = tmp_path / "cat"
         _write_bp(root / "blueprints" / "forge" / "f.yaml", "forge")
-        rm = _write_bp(root / "blueprints" / "roms_marbl" / "r.yaml")
+        rm = _write_bp(root / "blueprints" / "ucla_roms" / "r.yaml")
         catalog = _catalog(root)
 
         assert catalog.forge_blueprint_names == ["f"]
-        assert catalog.roms_marbl_blueprint_names == ["r"]
+        assert catalog.ucla_roms_blueprint_names == ["r"]
         assert catalog.forge_blueprint_path("f") == catalog.blueprint_path("forge", "f")
-        assert catalog.roms_marbl_blueprint_path("r").samefile(rm)
+        assert catalog.ucla_roms_blueprint_path("r").samefile(rm)
         # an int index returns the file, not a directory
-        assert catalog.roms_marbl_blueprint(0).samefile(rm)
-        assert catalog.roms_marbl_blueprint("r").samefile(rm)
+        assert catalog.ucla_roms_blueprint(0).samefile(rm)
+        assert catalog.ucla_roms_blueprint("r").samefile(rm)
 
     def test_blueprint_path_keyerror_lists_available(self, tmp_path):
         root = tmp_path / "cat"
@@ -808,6 +808,7 @@ class TestBlueprintLayout:
         nested = _write_bp(
             root / "blueprints" / "some-machine" / "nested" / "B_nested.yaml"
         )
+        earlier = _write_bp(root / "blueprints" / "roms_marbl" / "earlier.yaml")
         _write_bp(root / "blueprints" / "forge" / "new.yaml", "forge")
 
         with caplog.at_level(logging.WARNING, logger="cstar.catalog.domain_catalog"):
@@ -816,28 +817,35 @@ class TestBlueprintLayout:
         legacy = {(a, n): p for a, n, p in catalog.legacy_blueprints}
         assert set(legacy) == {
             ("forge", "old"),
-            ("roms_marbl", "flat"),
-            ("roms_marbl", "nested"),
+            ("ucla_roms", "flat"),
+            ("ucla_roms", "nested"),
+            ("ucla_roms", "earlier"),
         }
         assert legacy[("forge", "old")].samefile(flat_forge)
-        assert legacy[("roms_marbl", "flat")].samefile(flat_rm)
-        assert legacy[("roms_marbl", "nested")].samefile(nested)
+        assert legacy[("ucla_roms", "flat")].samefile(flat_rm)
+        assert legacy[("ucla_roms", "nested")].samefile(nested)
+        assert legacy[("ucla_roms", "earlier")].samefile(earlier)
         # the public API reads every entry, new layout and legacy alike
         assert catalog.blueprint_names("forge") == ["new", "old"]
-        assert catalog.roms_marbl_blueprint_names == ["flat", "nested"]
+        assert catalog.ucla_roms_blueprint_names == ["earlier", "flat", "nested"]
         assert catalog.forge_blueprint_path("old").samefile(flat_forge)
-        assert catalog.roms_marbl_blueprint("nested").samefile(nested)
+        assert catalog.ucla_roms_blueprint("nested").samefile(nested)
         assert any(
-            f.samefile(nested) for f in catalog._find_roms_marbl_blueprint_files()
+            f.samefile(nested) for f in catalog._find_ucla_roms_blueprint_files()
         )
         # a returned list is a copy
         catalog.legacy_blueprints.clear()
-        assert len(catalog.legacy_blueprints) == 3
+        assert len(catalog.legacy_blueprints) == 4
 
         warnings = [r for r in caplog.records if r.levelno == logging.WARNING]
         assert len(warnings) == 1
         text = warnings[0].getMessage()
-        for entry in ("forge/old", "roms_marbl/flat", "roms_marbl/nested"):
+        for entry in (
+            "forge/old",
+            "ucla_roms/flat",
+            "ucla_roms/nested",
+            "ucla_roms/earlier",
+        ):
             assert entry in text
         assert f"cstar admin migrate-catalog {catalog.catalog_root}" in text
         assert "blueprints/<application>/<name>.yaml" in text
@@ -864,13 +872,13 @@ class TestBlueprintLayout:
         with caplog.at_level(logging.WARNING, logger="cstar.catalog.domain_catalog"):
             catalog = _catalog(root)
 
-        assert catalog.roms_marbl_blueprint_path("dup").samefile(flat)
+        assert catalog.ucla_roms_blueprint_path("dup").samefile(flat)
         legacy = catalog.legacy_blueprints
         # winners first (flat dup, per-machine zed), then the loser
         assert [(a, n) for a, n, _ in legacy] == [
-            ("roms_marbl", "dup"),
-            ("roms_marbl", "zed"),
-            ("roms_marbl", "dup"),
+            ("ucla_roms", "dup"),
+            ("ucla_roms", "zed"),
+            ("ucla_roms", "dup"),
         ]
         assert legacy[0][2].samefile(flat)
         assert legacy[1][2].samefile(other)
@@ -879,6 +887,85 @@ class TestBlueprintLayout:
         assert len(warnings) == 1
         assert str(nested) in warnings[0].getMessage()
         assert "ignored: duplicate" in warnings[0].getMessage()
+
+    def test_earlier_application_name_directory_is_a_legacy_layout(
+        self, tmp_path, caplog
+    ):
+        root = tmp_path / "cat"
+        old = _write_bp(root / "blueprints" / "roms_marbl" / "x.yaml")
+
+        with caplog.at_level(logging.WARNING, logger="cstar.catalog.domain_catalog"):
+            catalog = _catalog(root)
+
+        assert catalog.blueprint_applications == ["ucla_roms"]
+        assert catalog.blueprint_names("ucla_roms") == ["x"]
+        # a caller written against the earlier name keeps working
+        assert catalog.blueprint_names("roms_marbl") == ["x"]
+        assert catalog.ucla_roms_blueprint_names == ["x"]
+        assert catalog.blueprint_path("roms_marbl", "x").samefile(old)
+        assert catalog.blueprint_path("ucla_roms", "x").samefile(old)
+        [(application, name, path)] = catalog.legacy_blueprints
+        assert (application, name) == ("ucla_roms", "x")
+        assert path.samefile(old)
+        # new files belong in the current layout, whichever name asks
+        assert (
+            catalog.blueprint_dir("roms_marbl") == catalog.blueprints_dir / "ucla_roms"
+        )
+
+        warnings = [r for r in caplog.records if r.levelno == logging.WARNING]
+        assert len(warnings) == 1
+        text = warnings[0].getMessage()
+        assert "ucla_roms/x" in text
+        assert str(path) in text
+        assert f"cstar admin migrate-catalog {catalog.catalog_root}" in text
+
+    def test_current_layout_shadows_earlier_application_name_directory(
+        self, tmp_path, caplog
+    ):
+        root = tmp_path / "cat"
+        new = _write_bp(root / "blueprints" / "ucla_roms" / "x.yaml")
+        _write_bp(root / "blueprints" / "roms_marbl" / "x.yaml")
+
+        with caplog.at_level(logging.DEBUG, logger="cstar.catalog.domain_catalog"):
+            catalog = _catalog(root)
+
+        assert catalog.blueprint_names("ucla_roms") == ["x"]
+        assert catalog.blueprint_path("ucla_roms", "x").samefile(new)
+        assert catalog.blueprint_path("roms_marbl", "x").samefile(new)
+        assert catalog.legacy_blueprints == []
+        assert not [r for r in caplog.records if r.levelno >= logging.WARNING]
+        assert "shadowed" in caplog.text
+
+    def test_earlier_application_name_directory_loses_to_a_flat_legacy_file(
+        self, tmp_path, caplog
+    ):
+        # Flat files are classified before application directories, so among
+        # legacy forms the flat file wins and the earlier-name entry is the
+        # duplicate that is reported and left alone.
+        root = tmp_path / "cat"
+        flat = _write_bp(root / "blueprints" / "B_x.yaml")
+        old = _write_bp(root / "blueprints" / "roms_marbl" / "x.yaml")
+
+        with caplog.at_level(logging.WARNING, logger="cstar.catalog.domain_catalog"):
+            catalog = _catalog(root)
+
+        assert catalog.blueprint_path("ucla_roms", "x").samefile(flat)
+        legacy = catalog.legacy_blueprints
+        assert [(a, n) for a, n, _ in legacy] == [("ucla_roms", "x")] * 2
+        assert legacy[0][2].samefile(flat)
+        assert legacy[1][2].samefile(old)
+        warnings = [r for r in caplog.records if r.levelno == logging.WARNING]
+        assert len(warnings) == 1
+        text = warnings[0].getMessage()
+        assert f"{old}, ignored: duplicate" in text
+        assert f"{flat}, ignored: duplicate" not in text
+
+    def test_bundled_catalog_logs_no_legacy_warning(self, caplog):
+        with caplog.at_level(logging.WARNING, logger="cstar.catalog.domain_catalog"):
+            bundled = DomainCatalog(read_only=True)
+
+        assert bundled.legacy_blueprints == []
+        assert not [r for r in caplog.records if r.levelno >= logging.WARNING]
 
     def test_hidden_directories_and_files_are_skipped(self, tmp_path, caplog):
         root = tmp_path / "cat"
@@ -908,9 +995,9 @@ class TestBlueprintLayout:
         with caplog.at_level(logging.DEBUG, logger="cstar.catalog.domain_catalog"):
             catalog = _catalog(root)
 
-        assert catalog.blueprint_applications == ["roms_marbl"]
+        assert catalog.blueprint_applications == ["ucla_roms"]
         assert catalog.blueprint_names("machine") == []
-        assert catalog.roms_marbl_blueprint_path("n1").samefile(nested)
+        assert catalog.ucla_roms_blueprint_path("n1").samefile(nested)
         assert "Ignoring files in legacy machine directory" in caplog.text
         assert "_grid.yaml" in caplog.text
         assert catalog.blueprint_names("empty") == []
@@ -925,10 +1012,10 @@ class TestBlueprintLayout:
         catalog = _catalog(root)
 
         # one file: named after its directory; several: each by its stem minus B_
-        assert catalog.roms_marbl_blueprint_names == ["a", "b", "single"]
-        assert catalog.roms_marbl_blueprint_path("single").samefile(one)
-        assert catalog.roms_marbl_blueprint_path("a").samefile(a)
-        assert catalog.roms_marbl_blueprint_path("b").samefile(b)
+        assert catalog.ucla_roms_blueprint_names == ["a", "b", "single"]
+        assert catalog.ucla_roms_blueprint_path("single").samefile(one)
+        assert catalog.ucla_roms_blueprint_path("a").samefile(a)
+        assert catalog.ucla_roms_blueprint_path("b").samefile(b)
         assert len(catalog.legacy_blueprints) == 3
 
     def test_yaml_wins_over_yml_for_the_same_stem(self, tmp_path):
@@ -963,7 +1050,7 @@ class TestBlueprintLayout:
 
         assert catalog.blueprint_names("forge") == ["ok"]
         assert catalog.blueprint_names("bad") == []
-        assert catalog.roms_marbl_blueprint_names == ["flat", "n"]
+        assert catalog.ucla_roms_blueprint_names == ["flat", "n"]
         failures = [
             r.getMessage() for r in caplog.records if "Failed to scan" in r.getMessage()
         ]
@@ -994,7 +1081,7 @@ class TestLayeredBlueprints:
         _write_bp(top_root / "blueprints" / "forge" / "shared.yaml", "forge")
         _write_bp(top_root / "blueprints" / "forge" / "top-only.yaml", "forge")
         _write_bp(bottom_root / "blueprints" / "forge" / "shared.yaml", "forge")
-        _write_bp(bottom_root / "blueprints" / "roms_marbl" / "low.yaml")
+        _write_bp(bottom_root / "blueprints" / "ucla_roms" / "low.yaml")
         top = _catalog(top_root, label="top")
         bottom = _catalog(bottom_root, read_only=True, label="bottom")
         return LayeredCatalog([top, bottom])
@@ -1003,10 +1090,10 @@ class TestLayeredBlueprints:
         with caplog.at_level(logging.WARNING, logger="cstar.catalog.domain_catalog"):
             layered = self._stack(tmp_path)
 
-        assert layered.blueprint_applications == ["forge", "roms_marbl"]
+        assert layered.blueprint_applications == ["forge", "ucla_roms"]
         assert layered.blueprint_names("forge") == ["shared", "top-only"]
         assert layered.forge_blueprint_names == ["shared", "top-only"]
-        assert layered.roms_marbl_blueprint_names == ["low"]
+        assert layered.ucla_roms_blueprint_names == ["low"]
         assert layered.blueprint_names("nope") == []
         assert layered.blueprints_dir == layered.top.blueprints_dir
         assert layered.blueprint_dir("forge") == layered.top.blueprint_dir("forge")
@@ -1017,8 +1104,8 @@ class TestLayeredBlueprints:
         assert layered.forge_blueprint_path("top-only").samefile(
             layered.top.blueprint_path("forge", "top-only")
         )
-        assert layered.roms_marbl_blueprint(0).samefile(
-            layered.stores[1].blueprint_path("roms_marbl", "low")
+        assert layered.ucla_roms_blueprint(0).samefile(
+            layered.stores[1].blueprint_path("ucla_roms", "low")
         )
         assert "forge_blueprint:shared" in caplog.text
 
@@ -1028,7 +1115,9 @@ class TestLayeredBlueprints:
         assert layered.collisions() == {"forge_blueprint:shared": ["top", "bottom"]}
         assert layered.entry_source("forge_blueprint", "shared") == "top"
         assert layered.entry_source("forge_blueprint", "top-only") == "top"
-        assert layered.entry_source("roms_marbl_blueprint", "low") == "bottom"
+        assert layered.entry_source("ucla_roms_blueprint", "low") == "bottom"
+        # a kind built from the application's earlier name reads the same
+        assert layered.entry_source("ucla_roms_blueprint", "low") == "bottom"
         with pytest.raises(KeyError, match=r"Blueprint \(forge\) 'nope'"):
             layered.entry_source("forge_blueprint", "nope")
         with pytest.raises(KeyError, match="not found in any catalog layer"):
@@ -1038,8 +1127,10 @@ class TestLayeredBlueprints:
         layered = self._stack(tmp_path)
 
         with pytest.raises(FileExistsError, match="bottom"):
-            layered._check_unique("roms_marbl_blueprint", "low")
-        layered._check_unique("roms_marbl_blueprint", "fresh")
+            layered._check_unique("ucla_roms_blueprint", "low")
+        with pytest.raises(FileExistsError, match="bottom"):
+            layered._check_unique("ucla_roms_blueprint", "low")
+        layered._check_unique("ucla_roms_blueprint", "fresh")
 
     def test_legacy_blueprints_concatenate_over_stores(self, tmp_path):
         top_root, bottom_root = tmp_path / "top", tmp_path / "bottom"
@@ -1050,9 +1141,23 @@ class TestLayeredBlueprints:
         )
 
         assert [(a, n) for a, n, _ in layered.legacy_blueprints] == [
-            ("roms_marbl", "x"),
+            ("ucla_roms", "x"),
             ("forge", "y"),
         ]
+
+    def test_earlier_application_name_is_read_as_the_current_one(self, tmp_path):
+        top_root, bottom_root = tmp_path / "top", tmp_path / "bottom"
+        _write_bp(top_root / "blueprints" / "forge" / "f.yaml", "forge")
+        low = _write_bp(bottom_root / "blueprints" / "ucla_roms" / "low.yaml")
+        layered = LayeredCatalog(
+            [_catalog(top_root, label="top"), _catalog(bottom_root, read_only=True)]
+        )
+
+        assert layered.blueprint_names("roms_marbl") == ["low"]
+        assert layered.blueprint_path("roms_marbl", "low").samefile(low)
+        assert layered.blueprint_dir("roms_marbl") == layered.top.blueprint_dir(
+            "ucla_roms"
+        )
 
     def test_union_names_are_sorted_like_the_other_unions(self, tmp_path):
         top_root, bottom_root = tmp_path / "top", tmp_path / "bottom"
@@ -1080,7 +1185,7 @@ class TestCatalogBarBlueprintCount:
         root = tmp_path / "cat"
         _write_bp(root / "blueprints" / "forge" / "f1.yaml", "forge")
         _write_bp(root / "blueprints" / "forge" / "f2.yaml", "forge")
-        _write_bp(root / "blueprints" / "roms_marbl" / "r1.yaml")
+        _write_bp(root / "blueprints" / "ucla_roms" / "r1.yaml")
         catalog = _catalog(root)
 
         bar = self._bar()
@@ -1091,7 +1196,7 @@ class TestCatalogBarBlueprintCount:
         top_root, bottom_root = tmp_path / "top", tmp_path / "bottom"
         _write_bp(top_root / "blueprints" / "forge" / "a.yaml", "forge")
         _write_bp(bottom_root / "blueprints" / "forge" / "a.yaml", "forge")
-        _write_bp(bottom_root / "blueprints" / "roms_marbl" / "b.yaml")
+        _write_bp(bottom_root / "blueprints" / "ucla_roms" / "b.yaml")
         layered = LayeredCatalog(
             [_catalog(top_root, label="top"), _catalog(bottom_root, read_only=True)]
         )
@@ -1101,13 +1206,13 @@ class TestCatalogBarBlueprintCount:
         assert "2 blueprints" in bar._cat_status.value
 
 
-def test_bundled_catalog_ships_the_wales_toy_roms_marbl_blueprint():
-    """The bundled layer carries one ROMS-MARBL blueprint, `wales-toy`, as a file."""
+def test_bundled_catalog_ships_the_wales_toy_ucla_roms_blueprint():
+    """The bundled layer carries one UCLA-ROMS blueprint, `wales-toy`, as a file."""
     bundled = DomainCatalog(read_only=True)
-    assert "wales-toy" in bundled.blueprint_names("roms_marbl")
-    path = bundled.blueprint_path("roms_marbl", "wales-toy")
+    assert "wales-toy" in bundled.blueprint_names("ucla_roms")
+    path = bundled.blueprint_path("ucla_roms", "wales-toy")
     assert path.name == "wales-toy.yaml" and path.is_file()
-    assert "roms_marbl" in bundled.blueprint_applications
+    assert "ucla_roms" in bundled.blueprint_applications
 
 
 def test_wales_tutorial_blueprint_matches_the_bundled_copy():
@@ -1116,5 +1221,104 @@ def test_wales_tutorial_blueprint_matches_the_bundled_copy():
 
     repo_root = Path(cstar.__file__).resolve().parents[1]
     tutorial = repo_root / "docs" / "tutorials" / "wales_toy_blueprint.yaml"
-    bundled = DomainCatalog(read_only=True).blueprint_path("roms_marbl", "wales-toy")
+    bundled = DomainCatalog(read_only=True).blueprint_path("ucla_roms", "wales-toy")
     assert tutorial.read_text() == bundled.read_text()
+
+
+# ---------------------------------------------------------------------------
+# archived model specs (hidden from the wizard dropdown, still fully loadable)
+# ---------------------------------------------------------------------------
+
+_BUNDLED_ARCHIVED_MODELS = [
+    "cson_roms-marbl_v0.1",
+    "roms-marbl-0.3-default",
+    "roms-marbl-0.4-default",
+    "roms-marbl-0.5-default",
+    "roms-marbl-0.6-default",
+    "roms-marbl-0.7-default",
+    "roms-marbl-0.8-default",
+]
+
+
+def _write_model(root: Path, name: str, text: str | None = None, **extra) -> Path:
+    """Write ``ModelSpec/<name>/model.yaml``: a copy of a bundled spec plus *extra*
+    top-level keys, or *text* verbatim.
+    """
+    model_dir = root / "ModelSpec" / name
+    model_dir.mkdir(parents=True)
+    if text is None:
+        base = yaml.safe_load(
+            (
+                _DEFAULT_CATALOG_ROOT / "ModelSpec/roms-marbl-0.9-default/model.yaml"
+            ).read_text()
+        )
+        text = yaml.safe_dump({**base, **extra})
+    (model_dir / "model.yaml").write_text(text)
+    return model_dir
+
+
+class TestArchivedModelNames:
+    def test_bundled_archived_models_are_exactly_the_superseded_pins(self):
+        bundled = DomainCatalog(read_only=True)
+        assert bundled.archived_model_names == _BUNDLED_ARCHIVED_MODELS
+        # archived specs stay listed and loadable
+        for name in _BUNDLED_ARCHIVED_MODELS:
+            assert name in bundled.model_names
+            assert bundled.load_model_spec(name).archived is True
+        assert bundled.load_model_spec("roms-marbl-0.9-default").archived is False
+
+    def test_specs_are_not_read_at_scan_time(self, tmp_path):
+        with patch.object(DomainCatalog, "load_model_spec") as load:
+            catalog = DomainCatalog(read_only=True)
+            _ = catalog.model_names
+        load.assert_not_called()
+        assert catalog._archived_model_names is None
+
+    def test_registering_a_model_invalidates_the_cache(
+        self, isolated_catalog, tmp_path
+    ):
+        assert isolated_catalog.archived_model_names == _BUNDLED_ARCHIVED_MODELS
+        new_dir = _write_model(tmp_path / "src", "my-old-model", archived=True)
+        isolated_catalog.register_model(new_dir)
+        assert "my-old-model" in isolated_catalog.archived_model_names
+
+    def test_unreadable_spec_counts_as_not_archived(self, tmp_path, caplog):
+        _write_model(tmp_path, "good-archived", archived=True)
+        _write_model(tmp_path, "broken", text="not: [valid")
+        catalog = DomainCatalog(catalog_root=tmp_path, suppress_validation=True)
+        with caplog.at_level(logging.DEBUG):
+            assert catalog.archived_model_names == ["good-archived"]
+        assert "broken" in catalog.model_names
+        assert "Could not read model spec 'broken'" in caplog.text
+
+    def test_spec_saved_from_an_archived_base_is_not_archived(self, isolated_catalog):
+        base_dir = isolated_catalog.model_dir("roms-marbl-0.7-default")
+        assert "roms-marbl-0.7-default" in isolated_catalog.archived_model_names
+        settings = isolated_catalog.model_data("roms-marbl-0.7-default")[
+            "model_settings"
+        ]
+        isolated_catalog.register_model_from_settings(
+            "my-model", settings, base_dir, description="m"
+        )
+        assert "my-model" in isolated_catalog.model_names
+        assert "my-model" not in isolated_catalog.archived_model_names
+        assert isolated_catalog.load_model_spec("my-model").archived is False
+
+    def test_layered_winning_store_decides(self, tmp_path):
+        top_root = tmp_path / "top"
+        top_root.mkdir()
+        # Shadows an archived bundled name with a non-archived spec.
+        _write_model(top_root, "roms-marbl-0.3-default")
+        _write_model(top_root, "user-archived", archived=True)
+        top = DomainCatalog(
+            catalog_root=top_root, suppress_validation=True, label="top"
+        )
+        bottom = DomainCatalog(read_only=True, label="bundled")
+        layered = LayeredCatalog([top, bottom])
+
+        expected = sorted(
+            [n for n in _BUNDLED_ARCHIVED_MODELS if n != "roms-marbl-0.3-default"]
+            + ["user-archived"]
+        )
+        assert layered.archived_model_names == expected
+        assert "roms-marbl-0.3-default" in layered.model_names

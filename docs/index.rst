@@ -6,7 +6,7 @@ ocean simulations. It is developed by ocean and biogeochemical modelers and
 scientific software engineers at `[C]Worthy <https://cworthy.org>`_ to support
 Monitoring, Reporting and Verification (MRV) of ocean-based carbon dioxide
 removal. Today it runs `UCLA-ROMS <https://github.com/CWorthy-ocean/ucla-roms>`_
-coupled to the `MARBL <https://marbl-ecosys.github.io>`_ biogeochemistry model,
+optionally coupled to the `MARBL <https://marbl-ecosys.github.io>`_ biogeochemistry model,
 on a laptop or on a supported HPC system, from the same description of the run.
 
 .. raw:: html
@@ -25,8 +25,8 @@ How it works
 C-Star is organized around two ideas.
 
 An **application** is something you can run:
-- the ROMS-MARBL model
-- Forge, the tool that builds a new ROMS-MARBL domain
+- the UCLA-ROMS model
+- Forge, the tool that builds a new UCLA-ROMS domain
 - any number of smaller data transformation steps or analysis packages
 
 A **blueprint** is a YAML file holding every input an application needs to produce its result: which model
@@ -42,8 +42,8 @@ A simple ocean modeling project moves through three basic steps:
 2. **Generate the inputs.** Running that forge blueprint downloads the source
    datasets, builds the grid, initial conditions, boundary and surface forcing,
    and rivers and tides where requested, and writes the ROMS namelist. Its
-   output is a *ROMS-MARBL blueprint* pointing at everything the model needs.
-3. **Run the simulation.** Running the ROMS-MARBL blueprint fetches and
+   output is a *UCLA-ROMS blueprint* pointing at everything the model needs.
+3. **Run the simulation.** Running the UCLA-ROMS blueprint fetches and
    compiles the model code and executes the simulation. Output lands in the
    blueprint's working directory.
 

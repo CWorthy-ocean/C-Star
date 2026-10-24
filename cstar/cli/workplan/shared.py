@@ -13,9 +13,10 @@ from cstar.applications.core import (
     RunnerRequest,
     get_application,
 )
-from cstar.base.env import ENV_CSTAR_RUNID, max_concurrency
+from cstar.base.env import ENV_CSTAR_RUNID
 from cstar.base.exceptions import CstarError
 from cstar.base.log import get_logger
+from cstar.base.utils import MAX_CONCURRENCY
 from cstar.cli.common import (
     cb_pipeline,
     checkmark,
@@ -87,7 +88,7 @@ def list_runs(incomplete: str = "") -> list[tuple[str, str]]:
 
     async def _bounded() -> Sequence[WorkplanRun]:
         """Retrieve the run list while limiting concurrent reads."""
-        async with TrackingRepository.bound(max_concurrency()) as repo:
+        async with TrackingRepository.bound(MAX_CONCURRENCY) as repo:
             return await repo.list_latest_runs(incomplete)
 
     run_list = asyncio.run(_bounded())
@@ -98,7 +99,15 @@ def list_runs(incomplete: str = "") -> list[tuple[str, str]]:
 
         return [("run-id", "no results found")]
 
-    return [(r.run_id, f"Workplan path: {r.workplan_path}") for r in run_list]
+    def _hint(run: WorkplanRun) -> str:
+        """Describe a run by its workplan, or by nothing when none is known."""
+        try:
+            return f"Workplan path: {run.workplan_path}"
+        except CstarError as ex:
+            log.debug(str(ex))
+            return ""
+
+    return [(r.run_id, _hint(r)) for r in run_list]
 
 
 async def list_steps(run_id: str, incomplete: str) -> list[str]:
@@ -128,15 +137,18 @@ async def list_steps(run_id: str, incomplete: str) -> list[str]:
 
     if wp_run := await repo.get_workplan_run(run_id):
         try:
-            wp = LiveWorkplan.load(wp_run.trx_workplan_path)
+            wp_path = wp_run.trx_workplan_path
+            wp = LiveWorkplan.load(wp_path)
             step_names = [str(s.name) for s in wp.steps]
 
             if incomplete:
                 step_names = [s for s in step_names if s.lower().startswith(incomplete)]
 
             return step_names
+        except CstarError as ex:
+            log.debug(f"Workplan run has no transformed workplan: {ex}")
         except FileNotFoundError:
-            msg = f"Workplan run contains a dead path: {wp_run.trx_workplan_path} was not found"
+            msg = f"Workplan run contains a dead path: {wp_path} was not found"
             log.debug(msg)
     else:
         log.debug(f"No run for run-id {run_id!r} could be found.")
@@ -825,8 +837,7 @@ async def load_workplans(
         The cached copy of loaded workplans, keyed on their file path;
         updated in place with the successfully loaded workplans.
     """
-    limit = max_concurrency()
-    workplans = await LiveWorkplan.load_all(paths, limit=limit)
+    workplans = await LiveWorkplan.load_all(paths, limit=MAX_CONCURRENCY)
 
     failed: list[Path] = []
     for path, wp in zip(paths, workplans):
@@ -857,14 +868,16 @@ async def refresh_disk_usage(
     plans : Mapping[Path, LiveWorkplan]
         Loaded workplans, keyed on their transformed workplan path.
     """
-    sem = asyncio.Semaphore(max_concurrency())
+    sem = asyncio.Semaphore(MAX_CONCURRENCY)
     by_id = {run.run_id: run for run in runs}
     step_dirs_by_run: dict[str, Mapping[str, Path]] = {}
     fallback: list[str] = []
     skipped: list[str] = []
 
     for run in runs:
-        if (plan := plans.get(run.trx_workplan_path)) is not None:
+        path = run.try_trx_workplan_path()
+        plan = plans.get(path) if path is not None else None
+        if plan is not None:
             step_dirs_by_run[run.run_id] = {s.name: s.working_dir for s in plan.steps}
             continue
 
@@ -905,7 +918,7 @@ async def refresh_disk_usage(
 
     # apply under each run's lock so a concurrently running orchestrator's
     # sentinel/size updates are not overwritten
-    async with TrackingRepository.bound(max_concurrency()) as repo:
+    async with TrackingRepository.bound(MAX_CONCURRENCY) as repo:
         await asyncio.gather(
             *(
                 repo.update_workplan_run(

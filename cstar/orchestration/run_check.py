@@ -33,6 +33,7 @@ from cstar.execution.file_system import (
 from cstar.orchestration.manifest import (
     RUN_MANIFEST_NAME,
     STEP_RECORD_NAME,
+    TRANSFORMED_WORKPLAN_GLOB,
     carried_digest,
     product_digest,
 )
@@ -62,9 +63,6 @@ LAUNCH_FILES: t.Final[tuple[str, ...]] = (
     "input/runtime_code/namelist.nml",
 )
 """Globs, relative to a step directory, of the files a launcher regenerates at launch."""
-
-TRANSFORMED_WORKPLAN_GLOB: t.Final[str] = "*_transformed.yaml"
-"""Glob, relative to a run directory, of the transformed workplan C-Star writes there."""
 
 _PATH_CHARS_AFTER: t.Final[str] = r"""[^\s'"`,;<>()\[\]{}]*"""
 """The characters that continue a path once its leading prefix has matched."""

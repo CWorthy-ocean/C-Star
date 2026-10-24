@@ -12,6 +12,8 @@ from pydantic import (
 )
 from pytimeparse import parse
 
+from cstar.base.application_names import legacy_names
+from cstar.base.utils import generate_schema_ref
 from cstar.orchestration.models import (
     Blueprint,
     ConfiguredBaseModel,
@@ -20,8 +22,14 @@ from cstar.orchestration.models import (
     PathFilter,
 )
 from cstar.roms.namelist import _parse_semver, namelist_schema_for_ref
+from cstar.system.migration import version_key
 
-APP_NAME: t.Literal["roms_marbl"] = "roms_marbl"
+APP_NAME: t.Literal["ucla_roms"] = "ucla_roms"
+
+SCHEMA_PUBLISHED_AS_APP_NAME: t.Final[str] = "3.3.0"
+"""The first blueprint schema version published under `APP_NAME`. Earlier
+versions were published under the application's earlier name, so a blueprint
+of an earlier version names that schema in its ``$schema`` header."""
 
 
 class ForcingConfiguration(ConfiguredBaseModel):
@@ -265,11 +273,29 @@ class PartitioningParameterSet(ParameterSet):
         return self
 
 
-class RomsMarblBlueprint(Blueprint):
-    """Blueprint schema for running a ROMS-MARBL simulation."""
+class UclaRomsBlueprint(Blueprint):
+    """Blueprint schema for running a UCLA-ROMS simulation."""
 
-    schema_version: str = "3.2.0"
+    schema_version: str = "3.3.0"
     """The blueprint schema version."""
+
+    @property
+    @t.override
+    def schema_ref(self) -> str:
+        """The URL of the published JSON schema the blueprint's ``$schema`` names.
+
+        A version older than `SCHEMA_PUBLISHED_AS_APP_NAME` names the schema
+        published under the application's earlier name.
+        """
+        try:
+            earlier = version_key(self.schema_version) < version_key(
+                SCHEMA_PUBLISHED_AS_APP_NAME
+            )
+        except ValueError:  # not a dotted version; the header is informational
+            earlier = False
+        if not earlier:
+            return super().schema_ref
+        return generate_schema_ref(legacy_names(APP_NAME)[0], self.schema_version)
 
     application: str = APP_NAME
     """The process type to be executed by the blueprint."""
@@ -320,7 +346,7 @@ class RomsMarblBlueprint(Blueprint):
     """
 
     @model_validator(mode="after")
-    def _model_validator(self) -> "RomsMarblBlueprint":
+    def _model_validator(self) -> "UclaRomsBlueprint":
         """Perform validation on the model after field-level validation is complete."""
         if self.valid_end_date <= self.valid_start_date:
             msg = "valid_start_date must precede valid_end_date"

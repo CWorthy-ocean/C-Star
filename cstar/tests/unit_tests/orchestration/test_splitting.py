@@ -7,9 +7,9 @@ from unittest import mock
 
 import pytest
 
-from cstar.applications.roms_marbl.transforms import RomsMarblTimeSplitter
+from cstar.applications.ucla_roms.transforms import RomsTimeSplitter
 from cstar.base.env import ENV_CSTAR_RUNID
-from cstar.base.feature import ENV_FF_ORCH_TRX_TIMESPLIT
+from cstar.base.feature import ENV_FF_ORCH_TRX_TIMESPLIT, ENV_FF_ORCH_TRX_TIMESPLIT_FREQ
 from cstar.base.utils import DEFAULT_OUTPUT_ROOT_NAME
 from cstar.orchestration.models import Application, Step, Workplan
 from cstar.orchestration.orchestration import LiveStep
@@ -18,7 +18,6 @@ from cstar.orchestration.transforms import (
     get_time_slices,
     get_transforms,
 )
-from cstar.orchestration.utils import ENV_CSTAR_ORCH_TRX_FREQ
 
 N_MONTHS: t.Final[int] = 12
 
@@ -45,13 +44,27 @@ def test_time_splitting() -> None:
 
 
 @pytest.mark.parametrize(
-    ("application", "transform_fn"),
+    ("env", "expected"),
     [
-        ("roms_marbl", RomsMarblTimeSplitter()),
-        (Application.ROMS_MARBL.value, RomsMarblTimeSplitter()),
+        ({}, "monthly"),
+        ({ENV_FF_ORCH_TRX_TIMESPLIT_FREQ: "Daily"}, "daily"),
+        ({ENV_FF_ORCH_TRX_TIMESPLIT_FREQ: "WEEKLY"}, "weekly"),
     ],
 )
-def test_roms_marbl_transform_registry(
+def test_splitter_frequency_setting(env: dict[str, str], expected: str) -> None:
+    """Verify the splitter reads its frequency from the feature flag, Monthly by default."""
+    with mock.patch.dict(os.environ, env, clear=True):
+        assert RomsTimeSplitter().frequency == expected
+
+
+@pytest.mark.parametrize(
+    ("application", "transform_fn"),
+    [
+        ("roms_marbl", RomsTimeSplitter()),
+        (Application.UCLA_ROMS.value, RomsTimeSplitter()),
+    ],
+)
+def test_ucla_roms_transform_registry(
     application: str, transform_fn: Callable[[Step], Iterable[Step]]
 ) -> None:
     """Verify that the transform registry returns the expected transform."""
@@ -63,7 +76,7 @@ def test_roms_marbl_transform_registry(
         transform = get_transforms(application)
 
     assert transform is not None
-    assert isinstance(transform, RomsMarblTimeSplitter)
+    assert isinstance(transform, RomsTimeSplitter)
 
 
 @pytest.mark.parametrize(
@@ -90,11 +103,11 @@ def test_splitter(single_step_workplan: Workplan, tmp_path: Path) -> None:
         {
             ENV_CSTAR_RUNID: "12345",
             ENV_FF_ORCH_TRX_TIMESPLIT: "1",
-            ENV_CSTAR_ORCH_TRX_FREQ: SplitFrequency.Monthly.value,
+            ENV_FF_ORCH_TRX_TIMESPLIT_FREQ: SplitFrequency.Monthly.value,
         },
         clear=True,
     ):
-        transform = RomsMarblTimeSplitter()
+        transform = RomsTimeSplitter()
 
         transformed_steps = list(transform(original_step))
 
