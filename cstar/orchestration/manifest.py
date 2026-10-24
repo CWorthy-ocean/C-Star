@@ -545,8 +545,8 @@ class StepEntry(ConfiguredBaseModel):
     """The step's working directory relative to the run root; `.` for a standalone run."""
 
     definition_hash: str = Field(default="")
-    """A fingerprint of what the step computes, tagged with `DEFINITION_HASH_SCHEME`
-    (see `describe_steps`)."""
+    """A fingerprint of what the step computes (see `describe_steps`), as
+    ``def-v<N>:<hex>``: tagged with the version of the recipe that computed it."""
 
     blueprint: BlueprintIdentity | None = Field(default=None)
     """The blueprint the step runs; `None` until a deferred step's record names it."""

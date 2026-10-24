@@ -176,11 +176,13 @@ filenames off it.
   default, ``CSTAR_DATA_HOME/blueprint_runs/forge/<name>``. It's
   host/location, not results-affecting, so it's excluded from
   ``content_hash``.
-- **``content_hash()``** -- ``bp-v2:`` plus the sha256 of the base
-  ``Blueprint`` recipe (``_hashed_content``: the fields that differ from their
-  defaults, so an additive field with a default changes no recorded hash, minus
-  the base metadata ``name``, ``description``, ``provenance``, ``working_dir``,
-  ``state``, ``schema_version`` and ``$schema``), minus
+- **``content_hash()``** -- ``bp-v<N>:`` (``N`` = ``HASH_RECIPE_VERSION``,
+  ``cstar/base/provenance.py``, bumped with any change to the recipe) plus the
+  sha256 of the fields that differ from their defaults, so an additive field
+  with a default changes no recorded hash (``Blueprint._hashed_content``). It
+  hashes everything *except* the base metadata (``BLUEPRINT_METADATA_FIELDS``:
+  ``application``, ``name``, ``description``, ``provenance``, ``working_dir``,
+  ``state``, ``schema_version``) and ``$schema``;
   ``forge_blueprint_version`` and ``composition`` (``_HASH_EXCLUDE``); each
   code repo's ``location`` (fetch
   address) and ``file_hashes`` (a derived cache, not independent content);
@@ -190,10 +192,10 @@ filenames off it.
   ``serialize_dask`` -- none of these change what the run produces, only how
   or where it's produced. Recorded on ``to_yaml``; ``verify_content_hash``
   warns (doesn't block) on a mismatched hand-edit at load, and skips a hash
-  recorded under another scheme (an earlier recipe). A change to the recipe
-  bumps ``HASH_RECIPE_VERSION`` (``cstar/base/provenance.py``).
+  recorded under another scheme (another release's recipe).
 - **``stamp_provenance(tool)``** -- the one place a blueprint's provenance is
-  stamped. When the recomputed ``content_hash`` equals the recorded one and a
+  stamped. When the recomputed ``content_hash`` equals the recorded one (or the
+  recorded one has another scheme, which cannot tell) and a
   ``generated_by`` is recorded it returns ``self`` (a matching hash alone is not
   enough: ``to_yaml_str`` records it on every write, stamped or not); otherwise a
   copy with the new hash, ``generated_at`` now (UTC) and a fresh ``generated_by``

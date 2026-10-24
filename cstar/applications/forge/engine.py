@@ -44,9 +44,8 @@ from typing import (
 from cstar.applications.forge.blueprint import ForgeBlueprint, emitted_provenance
 from cstar.applications.forge.host import HostPaths
 from cstar.applications.forge.namelist_model import validate_run_time_sections
-from cstar.base.digest import short_digest
+from cstar.base.digest import digest_scheme, short_digest
 from cstar.base.env import ENV_CSTAR_RUNID
-from cstar.base.provenance import hash_scheme
 from cstar.roms.namelist import release_ref_for_remote
 
 if TYPE_CHECKING:
@@ -342,18 +341,18 @@ def verify_content_hash(cfg: ForgeBlueprint) -> str | None:
     recomputed hash of the results-affecting data, return a warning message (the file
     appears hand-edited since write-out); otherwise None.
 
-    A hash recorded under another scheme (an earlier recipe) cannot be compared, so
-    it is not checked; the next save records the current one.
+    A hash recorded under another scheme (another release's recipe) cannot be
+    compared, so it is not checked; the next save records the current one.
     """
     recorded = cfg.provenance.content_hash
     if recorded:
         actual = cfg.content_hash()
-        if hash_scheme(recorded) != hash_scheme(actual):
+        if digest_scheme(recorded) != digest_scheme(actual):
             logger.debug(
-                "forge_blueprint %r records its content hash under an earlier scheme "
+                "forge_blueprint %r records its content hash under another scheme "
                 "(%r); not checked",
                 cfg.name,
-                hash_scheme(recorded) or "untagged",
+                digest_scheme(recorded) or "untagged",
             )
         elif recorded != actual:
             return (

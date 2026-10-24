@@ -46,6 +46,7 @@ from cstar.orchestration.manifest import (
     StepFacts,
     StepRecord,
     WorkplanIdentity,
+    _blueprint_data,
     _now,
     carried_digest,
     collect_dependencies,
@@ -548,6 +549,9 @@ class TestDescribeSteps:
         assert consumer_hash({"from_step": "producer", "filename": ""}) == omitted
         # a file the reference names is part of what the consumer runs
         assert consumer_hash({"from_step": "producer", "filename": "b.yaml"}) != omitted
+        # a field at its default is not hashed, so one added later moves nothing
+        step = _step({"from_step": "producer", "filename": ""}, name="consumer")
+        assert _blueprint_data(step) == {"from_step": "producer"}
 
     def test_deferred_with_unknown_producer(self, tmp_path: Path) -> None:
         step = _step({"from_step": "up@ext"}, depends_on=["up@ext"])

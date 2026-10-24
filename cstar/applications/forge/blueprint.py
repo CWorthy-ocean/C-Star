@@ -70,6 +70,7 @@ from typing import TYPE_CHECKING, Any, Literal, get_args
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
+from cstar.base.digest import digest_scheme
 from cstar.base.provenance import package_version, package_versions, system_name
 from cstar.orchestration.models import (
     Blueprint,
@@ -344,8 +345,8 @@ class TopographySource(StrEnum):
 
 
 # Top-level sections EXCLUDED from the integrity hash on top of the Blueprint-base
-# metadata (name, description, provenance -- where the hash lives --, working_dir,
-# state, schema_version; see ``Blueprint._hashed_content``): the schema version and
+# metadata (``BLUEPRINT_METADATA_FIELDS``, provenance -- where the hash lives --
+# among them; see ``Blueprint._hashed_content``): the forge schema version and
 # composition (labels/provenance, not results-affecting). Everything else (run,
 # domain, sources, model_settings, code) is hashed.
 _HASH_EXCLUDE = frozenset({"forge_blueprint_version", "composition"})
@@ -1732,17 +1733,20 @@ class ForgeBlueprint(Blueprint):
         recorded (a resave, an unchanged round trip), ``self`` comes back as is and
         keeps its ``generated_by.id`` and ``generated_at``; a matching hash alone is
         not enough, as :meth:`to_yaml_str` records it on every write, stamped or
-        not. Otherwise the copy takes the new hash, ``generated_at`` now (UTC) and a
+        not. A hash recorded under another scheme (another release's recipe) cannot
+        tell whether the content changed, so it counts as matching: the file keeps
+        its identity, and the write records the current hash. Otherwise the copy takes the new hash, ``generated_at`` now (UTC) and a
         fresh ``generated_by`` (see :func:`new_generated_by`), and the legacy
         version fields are cleared (``generated_by.versions`` replaces them).
         ``notes`` and ``override_files_applied`` are kept; ``self`` is never
         mutated.
         """
         content_hash = self.content_hash()
-        if (
-            content_hash == self.provenance.content_hash
-            and self.provenance.generated_by is not None
-        ):
+        recorded = self.provenance.content_hash or ""
+        unchanged = recorded == content_hash or (
+            bool(recorded) and digest_scheme(recorded) != digest_scheme(content_hash)
+        )
+        if unchanged and self.provenance.generated_by is not None:
             return self
         stamped = self.provenance.model_copy(
             update={

@@ -21,7 +21,7 @@ import yaml
 from pydantic import Field, ValidationError
 
 from cstar.base.application_names import canonical_application
-from cstar.base.provenance import hash_scheme
+from cstar.base.digest import digest_scheme
 from cstar.orchestration.models import (
     BlueprintCore,
     BlueprintIdentity,
@@ -55,8 +55,8 @@ class OutputStatus(StrEnum):
     UNVERIFIED = "unverified"
     """The output cannot be checked against the catalog: it records no producer
     (e.g. it was emitted before provenance existed), it records its producer's
-    content hash under an earlier hash scheme, or the catalog entry of its recorded
-    producer could not be loaded."""
+    content hash under another hash scheme (another release's recipe), or the
+    catalog entry of its recorded producer could not be loaded."""
 
 
 class BlueprintOutput(ConfiguredBaseModel):
@@ -249,9 +249,9 @@ def _compare(recorded: BlueprintIdentity, current: BlueprintIdentity) -> OutputS
     """Compare an output's recorded producer with the catalog entry's current one.
 
     A content hash recorded under another scheme than the current one was computed
-    by an earlier recipe, so the two cannot be compared.
+    by another recipe, so the two cannot be compared.
     """
-    if hash_scheme(recorded.content_hash) != hash_scheme(current.content_hash):
+    if digest_scheme(recorded.content_hash) != digest_scheme(current.content_hash):
         return OutputStatus.UNVERIFIED
     return OutputStatus.CURRENT if recorded == current else OutputStatus.CHANGED
 

@@ -1888,7 +1888,7 @@ def test_refuse_edited_done_steps_warns_about_a_step_of_an_earlier_recipe(
 
     (message,) = _warnings(caplog)
     assert "'A'" in message
-    assert "earlier C-Star release" in message
+    assert "another C-Star release" in message
 
 
 def test_refuse_edited_done_steps_shares_one_warning_between_steps(
@@ -1919,7 +1919,8 @@ def test_refuse_edited_done_steps_refuses_an_edit_beside_an_unchecked_step(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
     """Verify a step of the current scheme that was edited is refused even when
-    another step could not be compared, and that the warning names only the latter.
+    another step could not be compared, and that the refusal names only the edited
+    step and warns about nothing: the attempt it stops would not record anything.
     """
     wp = _guard_workplan(
         _hello_step(hello_world_bp_path.as_posix(), "A"),
@@ -1934,9 +1935,7 @@ def test_refuse_edited_done_steps_refuses_an_edit_beside_an_unchecked_step(
 
     assert "'B'" in str(exc_info.value)
     assert "'A'" not in str(exc_info.value)
-    (message,) = _warnings(caplog)
-    assert "'A'" in message
-    assert "'B'" not in message
+    assert _warnings(caplog) == []
 
 
 @pytest.mark.parametrize("by", ["name", "safe_name"])
@@ -2259,7 +2258,7 @@ async def test_build_dag_accepts_a_done_step_hashed_by_an_earlier_recipe(
             carried=carried,
         )
 
-    (message,) = [m for m in _warnings(caplog) if "earlier C-Star release" in m]
+    (message,) = [m for m in _warnings(caplog) if "another C-Star release" in m]
     assert "'hello'" in message
     rewritten = read_run_manifest(output_dir)
     assert rewritten is not None

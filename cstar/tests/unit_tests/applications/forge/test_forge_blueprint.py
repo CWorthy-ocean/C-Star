@@ -6187,6 +6187,29 @@ class TestProvenanceStamping:
         )
         assert restamped.provenance.generated_at >= stamped.provenance.generated_at
 
+    def test_a_hash_of_another_scheme_keeps_the_identity(
+        self, monkeypatch, tmp_path: Path
+    ) -> None:
+        """A hash recorded under another scheme (another release's recipe) cannot
+        tell whether the content changed, so an unchanged legacy file keeps its
+        ``generated_by`` and ``generated_at``; writing it records the current hash.
+        """
+        self._patched_fb(monkeypatch)
+        stamped = _build().stamp_provenance("wizard")
+        legacy = stamped.model_copy(
+            update={
+                "provenance": stamped.provenance.model_copy(
+                    update={"content_hash": "ab" * 32}
+                )
+            }
+        )
+
+        assert legacy.stamp_provenance("forge") is legacy
+        back = ForgeBlueprint.from_yaml(legacy.to_yaml(tmp_path / "bp.yaml"))
+        assert back.provenance.generated_by == stamped.provenance.generated_by
+        assert back.provenance.generated_at == stamped.provenance.generated_at
+        assert back.provenance.content_hash == stamped.content_hash()
+
     def test_blueprint_that_never_recorded_a_hash_is_stamped(self, monkeypatch):
         """An old file with no ``content_hash`` has nothing to match, so it is
         stamped on the first write.

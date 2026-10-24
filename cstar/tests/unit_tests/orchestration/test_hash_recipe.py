@@ -120,8 +120,10 @@ class TestRecipeProperties:
     def test_an_added_field_at_its_default_does_not_move_the_hash(
         self, blueprint: UclaRomsBlueprint
     ) -> None:
-        """Verify a defaulted field a blueprint states explicitly, as a schema bump
-        that adds the field would write it, leaves the hash as it was.
+        """Verify a defaulted field leaves no trace in what is hashed, whether the
+        blueprint omits it or states its default (`forcing.carbonate_sensitivity:
+        null`), so the blueprint hashes as it did under a schema without the field:
+        the audit's reproduction, where the old recipe hashed the explicit null.
         """
         raw = read_document(UCLA_ROMS_BLUEPRINT)
         assert "carbonate_sensitivity" not in raw["forcing"]
@@ -130,6 +132,8 @@ class TestRecipeProperties:
         grown = UclaRomsBlueprint.model_validate(raw)
 
         assert grown.forcing.carbonate_sensitivity is None
+        for loaded in (blueprint, grown):
+            assert "carbonate_sensitivity" not in loaded._hashed_content()["forcing"]
         assert grown.content_hash() == blueprint.content_hash()
 
     def test_writing_and_reading_back_keeps_the_hash(
@@ -169,7 +173,8 @@ class TestRecipeProperties:
         default: t.Any,
     ) -> None:
         """Verify a field the blueprint omits, written out at its default, leaves
-        the hash as it was.
+        the hash as it was (a recipe that hashed what a file sets, rather than what
+        differs from the defaults, would count it as an edit).
         """
         assert _edited(path, default).content_hash() == blueprint.content_hash()
 
