@@ -15,26 +15,26 @@ biogeochemistry handled by **MARBL**, with no biogeochemistry, or with CDR-LiTE
 Attributes
 ----------
 
-:class:`cstar.applications.roms_marbl.models.RomsMarblBlueprint` contains all information
+:class:`cstar.applications.ucla_roms.models.UclaRomsBlueprint` contains all information
 necessary to execute a UCLA-ROMS simulation. It adds the following attributes:
 
-.. rubric:: RomsMarblBlueprint Attributes
+.. rubric:: UclaRomsBlueprint Attributes
 
 .. autosummary::
 
-  ~cstar.applications.roms_marbl.models.RomsMarblBlueprint.valid_start_date
-  ~cstar.applications.roms_marbl.models.RomsMarblBlueprint.valid_end_date
-  ~cstar.applications.roms_marbl.models.RomsMarblBlueprint.code
-  ~cstar.applications.roms_marbl.models.RomsMarblBlueprint.initial_conditions
-  ~cstar.applications.roms_marbl.models.RomsMarblBlueprint.grid
-  ~cstar.applications.roms_marbl.models.RomsMarblBlueprint.forcing
-  ~cstar.applications.roms_marbl.models.RomsMarblBlueprint.partitioning
-  ~cstar.applications.roms_marbl.models.RomsMarblBlueprint.runtime_params
-  ~cstar.applications.roms_marbl.models.RomsMarblBlueprint.cdr_forcing
-  ~cstar.applications.roms_marbl.models.RomsMarblBlueprint.nesting_info
-  ~cstar.applications.roms_marbl.models.RomsMarblBlueprint.namelist_overrides
+  ~cstar.applications.ucla_roms.models.UclaRomsBlueprint.valid_start_date
+  ~cstar.applications.ucla_roms.models.UclaRomsBlueprint.valid_end_date
+  ~cstar.applications.ucla_roms.models.UclaRomsBlueprint.code
+  ~cstar.applications.ucla_roms.models.UclaRomsBlueprint.initial_conditions
+  ~cstar.applications.ucla_roms.models.UclaRomsBlueprint.grid
+  ~cstar.applications.ucla_roms.models.UclaRomsBlueprint.forcing
+  ~cstar.applications.ucla_roms.models.UclaRomsBlueprint.partitioning
+  ~cstar.applications.ucla_roms.models.UclaRomsBlueprint.runtime_params
+  ~cstar.applications.ucla_roms.models.UclaRomsBlueprint.cdr_forcing
+  ~cstar.applications.ucla_roms.models.UclaRomsBlueprint.nesting_info
+  ~cstar.applications.ucla_roms.models.UclaRomsBlueprint.namelist_overrides
 
-Explore the API reference of :class:`cstar.applications.roms_marbl.models.RomsMarblBlueprint`
+Explore the API reference of :class:`cstar.applications.ucla_roms.models.UclaRomsBlueprint`
 for more detail on each item.
 
 

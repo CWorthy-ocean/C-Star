@@ -345,7 +345,7 @@ and set the new default on the blueprint model's ``schema_version``:
       blueprint = HelloWorldBlueprint
       migrations = (HelloWorldSchemaAdapterV1V2,)
 
-See ``RomsMarblSchemaAdapter2025v1`` in ``cstar/applications/roms_marbl/migration.py``
+See ``UclaRomsSchemaAdapter2025v1`` in ``cstar/applications/ucla_roms/migration.py``
 for a working example.
 
 A major bump with no automatic migration is registered the same way, as a

@@ -95,10 +95,10 @@ Blueprints can be checked for errors using the CLI and in code.
 
     .. code-block:: python
 
-        from cstar.orchestration.models import RomsMarblBlueprint
+        from cstar.applications.ucla_roms.models import UclaRomsBlueprint
         from cstar.orchestration.serialization import deserialize
 
-        deserialize("my_blueprint.yaml", RomsMarblBlueprint)
+        deserialize("my_blueprint.yaml", UclaRomsBlueprint)
 
 
 Execution
@@ -151,24 +151,24 @@ Use the ``run`` command from the ``cstar`` CLI to execute a blueprint.
 
    .. tab-item:: Programmatic Execution
 
-    Use a ``RomsMarblRunner`` to execute the blueprint.
+    Use a ``UclaRomsRunner`` to execute the blueprint.
 
     .. code-block:: python
       :caption: Executing a blueprint YAML file in python.
 
         from cstar.entrypoint.config import JobConfig, ServiceConfiguration
-        from cstar.applications.roms_marbl.app import RomsMarblRunner
-        from cstar.applications.roms_marbl.models import RomsMarblBlueprint
+        from cstar.applications.ucla_roms.app import UclaRomsRunner
+        from cstar.applications.ucla_roms.models import UclaRomsBlueprint
         from cstar.applications.core import RunnerRequest
 
         account_id = "your-account-id"
         queue_id = "wholenode"
 
-        request = RunnerRequest("my_blueprint.yaml", RomsMarblBlueprint)
+        request = RunnerRequest("my_blueprint.yaml", UclaRomsBlueprint)
         service_cfg = ServiceConfiguration()
         job_cfg = JobConfig(account_id=account_id, walltime="00:90:00", priority=queue_id)
 
-        runner = RomsMarblRunner(request, service_cfg, job_cfg)
+        runner = UclaRomsRunner(request, service_cfg, job_cfg)
         await runner.execute()
 
 A standalone run records itself in its working directory: ``cstar-step.yaml``
