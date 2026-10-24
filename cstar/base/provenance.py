@@ -79,6 +79,33 @@ def system_name() -> str:
         return ""
 
 
+HASH_RECIPE_VERSION: t.Final[int] = 2
+"""The version of the recipes behind blueprint content hashes and step definition
+hashes, tagged into each hash as ``bp-v<N>:`` and ``def-v<N>:``.
+
+One version for both: a definition hash folds in a content hash, so a change to
+either recipe changes definition hashes. Bump it whenever either recipe changes;
+a recorded hash whose tag differs is then never compared with a current one.
+Version 1 is the untagged recipe of 0.17.0 and earlier."""
+
+
+def hash_scheme(value: str) -> str:
+    """The scheme a ``<scheme>:<hex>`` hash is tagged with.
+
+    Parameters
+    ----------
+    value : str
+        The hash.
+
+    Returns
+    -------
+    str
+        The scheme, or ``""`` for an untagged (or empty) hash.
+    """
+    scheme, separator, _ = value.partition(":")
+    return scheme if separator else ""
+
+
 def canonical_hash(data: t.Any) -> str:
     """Fingerprint JSON-able data independent of key order.
 

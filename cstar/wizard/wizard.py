@@ -6047,7 +6047,7 @@ class ForgeBlueprintWizard:
         Reads ``self._gather()``/``self._active_overrides``/``self.catalog`` only --
         mutates nothing on the wizard. Compares ``content_hash()``, which covers
         exactly the results-affecting data (excludes identity/composition/
-        provenance/working_dir -- see ``ForgeBlueprint._HASH_EXCLUDE``), so a
+        provenance/working_dir -- see ``ForgeBlueprint._hashed_content``), so a
         match proves the saved spec is a safe substitute for what's currently
         composed/edited and the spec can be marked ``modified=False``.
         """

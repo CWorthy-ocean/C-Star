@@ -59,8 +59,6 @@ imports it lazily.
 
 from __future__ import annotations
 
-import hashlib
-import json
 import math
 import re
 from collections import Counter
@@ -345,25 +343,12 @@ class TopographySource(StrEnum):
     EMOD = "EMOD"
 
 
-# Top-level sections EXCLUDED from the integrity hash: provenance (where the hash
-# lives), composition + name/description (labels/provenance, not results-affecting),
-# and the schema version/state (Blueprint-base metadata, not content). Everything else
-# (application, run, domain, sources, properties, model_settings, code) is hashed.
-_HASH_EXCLUDE = {
-    "forge_blueprint_version",
-    "name",
-    "description",
-    "composition",
-    "provenance",
-    # host/location only — set per run (an override or the workplan step directory);
-    # must not change the content hash.
-    "working_dir",
-    # Blueprint-base (cstar.orchestration.models) metadata, not blueprint content.
-    "state",
-    "schema_version",
-    # injected only by Blueprint's serializer (never a real field) -- pop unconditionally.
-    "$schema",
-}
+# Top-level sections EXCLUDED from the integrity hash on top of the Blueprint-base
+# metadata (name, description, provenance -- where the hash lives --, working_dir,
+# state, schema_version; see ``Blueprint._hashed_content``): the schema version and
+# composition (labels/provenance, not results-affecting). Everything else (run,
+# domain, sources, model_settings, code) is hashed.
+_HASH_EXCLUDE = frozenset({"forge_blueprint_version", "composition"})
 # Note: "properties" is no longer a top-level ForgeBlueprint field (removed); n_tracers
 # and marbl are derived from model_settings at processing time.
 
@@ -1450,8 +1435,9 @@ class ForgeProvenance(Provenance):
     cstar_version: str | None = None
     roms_tools_version: str | None = None
     override_files_applied: list[str] = Field(default_factory=list)
-    # sha256 of the results-affecting data (set on save by ForgeBlueprint.to_yaml*).
-    # Processing recomputes and compares it to detect hand-edits since write-out.
+    # The scheme-tagged sha256 of the results-affecting data (set on save by
+    # ForgeBlueprint.to_yaml*). Processing recomputes and compares it to detect
+    # hand-edits since write-out.
     content_hash: str | None = None
     notes: str | None = None
 
@@ -1665,12 +1651,14 @@ class ForgeBlueprint(Blueprint):
         return str(self.run_output_dir(scratch) / "output" / self.casename)
 
     # ---- integrity hash ----
-    def content_hash(self) -> str:
-        """sha256 over the *results-affecting* data (everything except the sections in
-        ``_HASH_EXCLUDE``). Deterministic across a YAML round-trip — used to detect
-        hand-edits between write-out and processing.
+    def _hashed_content(self) -> dict[str, Any]:
+        """The *results-affecting* data ``content_hash`` covers: the base blueprint's
+        (fields away from their defaults, metadata excluded) without the sections in
+        ``_HASH_EXCLUDE`` and the host/transport leaves scrubbed below. Deterministic
+        across a YAML round-trip -- used to detect hand-edits between write-out and
+        processing.
         """
-        data = self.model_dump(mode="json")
+        data = super()._hashed_content()
         for key in _HASH_EXCLUDE:
             data.pop(key, None)
         # ``location`` (the fetch address — a git URL or, in tests, a local path) is
@@ -1709,14 +1697,10 @@ class ForgeBlueprint(Blueprint):
             cdr_forcing_file = cdr.get("cdr_forcing_file")
             if cdr_forcing_file:
                 cdr_forcing_file.pop("location", None)
-        # An unset carbonate_sensitivity leaves no trace in the hash (a recorded
-        # hash from before the field existed must still verify); a set one is
-        # scrubbed of its host paths like the other user files.
-        carbonate = data.pop("carbonate_sensitivity", None)
+        carbonate = data.get("carbonate_sensitivity")
         if carbonate:
             for f in carbonate["files"]:
                 f.pop("location", None)
-            data["carbonate_sensitivity"] = carbonate
         forcing = data.get("forcing")
         if forcing:
             for river in forcing.get("river") or []:
@@ -1736,8 +1720,7 @@ class ForgeBlueprint(Blueprint):
                     section.pop("bypass_validation", None)
                     for bs in section.get("bgc_sources") or []:
                         bs.pop("serialize_dask", None)
-        blob = json.dumps(data, sort_keys=True, separators=(",", ":"))
-        return hashlib.sha256(blob.encode("utf-8")).hexdigest()
+        return data
 
     # ---- provenance ----
     def stamp_provenance(self, tool: str) -> ForgeBlueprint:

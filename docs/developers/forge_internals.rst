@@ -176,17 +176,22 @@ filenames off it.
   default, ``CSTAR_DATA_HOME/blueprint_runs/forge/<name>``. It's
   host/location, not results-affecting, so it's excluded from
   ``content_hash``.
-- **``content_hash()``** -- sha256 over everything *except*
-  ``forge_blueprint_version``, ``name``, ``description``, ``composition``,
-  ``provenance``, ``working_dir``, ``state``, ``schema_version``,
-  ``$schema`` (see ``_HASH_EXCLUDE``); each code repo's ``location`` (fetch
+- **``content_hash()``** -- ``bp-v2:`` plus the sha256 of the base
+  ``Blueprint`` recipe (``_hashed_content``: the fields that differ from their
+  defaults, so an additive field with a default changes no recorded hash, minus
+  the base metadata ``name``, ``description``, ``provenance``, ``working_dir``,
+  ``state``, ``schema_version`` and ``$schema``), minus
+  ``forge_blueprint_version`` and ``composition`` (``_HASH_EXCLUDE``); each
+  code repo's ``location`` (fetch
   address) and ``file_hashes`` (a derived cache, not independent content);
   each user-provided file's ``location`` (host path, not its pinned
   ``content_hash``); and, on ``initial_conditions``/``boundary``, the
   execution-environment knobs ``bypass_validation`` and each bgc source's
   ``serialize_dask`` -- none of these change what the run produces, only how
   or where it's produced. Recorded on ``to_yaml``; ``verify_content_hash``
-  warns (doesn't block) on a mismatched hand-edit at load.
+  warns (doesn't block) on a mismatched hand-edit at load, and skips a hash
+  recorded under another scheme (an earlier recipe). A change to the recipe
+  bumps ``HASH_RECIPE_VERSION`` (``cstar/base/provenance.py``).
 - **``stamp_provenance(tool)``** -- the one place a blueprint's provenance is
   stamped. When the recomputed ``content_hash`` equals the recorded one and a
   ``generated_by`` is recorded it returns ``self`` (a matching hash alone is not

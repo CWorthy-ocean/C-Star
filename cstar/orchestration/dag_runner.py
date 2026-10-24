@@ -15,6 +15,7 @@ from cstar.applications.core import get_application
 from cstar.base.env import capture_environment
 from cstar.base.exceptions import CstarError, CstarExpectationFailed
 from cstar.base.log import get_logger
+from cstar.base.provenance import hash_scheme
 from cstar.base.utils import MAX_CONCURRENCY, slugify, utc_now
 from cstar.entrypoint.utils import ARG_CLOBBER, ARG_PRE_RUN, ARG_RUN_ID
 from cstar.execution.file_system import (
@@ -1343,9 +1344,11 @@ def refuse_edited_done_steps(
 ) -> None:
     """Refuse to re-enter a run in which a `Done` step was edited and not clobbered.
 
-    A step with no recorded definition is not checked. `read_run_manifest`
-    leaves none on a manifest older than `CANONICAL_NAMES_SINCE`, whose hashes
-    may use an earlier application name.
+    A step with no recorded definition is not checked. Nor is a `Done` step whose
+    recorded definition hash has another scheme than its current one: an earlier
+    release computed it (see `DEFINITION_HASH_SCHEME`), so the two cannot be
+    compared. Such steps are named in one warning; the attempt that follows
+    records their current definitions, so the next re-entry checks them.
 
     Parameters
     ----------
@@ -1368,6 +1371,7 @@ def refuse_edited_done_steps(
     """
     tokens = {x for token in clobber_steps if (x := token.strip())}
     edited: list[str] = []
+    unchecked: list[str] = []
     for step in wp.steps:
         entry = manifest.step(step.name)
         if entry is None:
@@ -1378,11 +1382,22 @@ def refuse_edited_done_steps(
         if status[step.name] is not Status.Done:
             continue
         current = facts.get(step.name)
-        if current is None or current.definition_hash == entry.definition_hash:
+        if current is None or step.name in tokens or step.safe_name in tokens:
             continue
-        if step.name in tokens or step.safe_name in tokens:
-            continue
-        edited.append(step.name)
+        if hash_scheme(entry.definition_hash) != hash_scheme(current.definition_hash):
+            unchecked.append(step.name)
+        elif current.definition_hash != entry.definition_hash:
+            edited.append(step.name)
+
+    if unchecked:
+        names = ", ".join(repr(name) for name in unchecked)
+        log.warning(
+            f"Steps {names} reached Done in run {manifest.run_id!r} under "
+            "definitions recorded by an earlier C-Star release, which this one "
+            "cannot compare, so an edit made to them since is not detected; pass "
+            f"{ARG_CLOBBER} <step-name> to re-run a step you changed. This attempt "
+            "records their definitions again."
+        )
 
     if edited:
         names = ", ".join(repr(name) for name in edited)

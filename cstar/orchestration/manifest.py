@@ -35,7 +35,12 @@ from cstar.base.digest import (
 )
 from cstar.base.exceptions import CstarError, CstarExpectationFailed
 from cstar.base.log import get_logger
-from cstar.base.provenance import canonical_hash, package_versions, system_name
+from cstar.base.provenance import (
+    HASH_RECIPE_VERSION,
+    canonical_hash,
+    package_versions,
+    system_name,
+)
 from cstar.base.utils import slugify, utc_now
 from cstar.execution.file_system import (
     LockTimeoutError,
@@ -521,6 +526,12 @@ class ExternalDependencies(ConfiguredBaseModel):
         )
 
 
+DEFINITION_HASH_SCHEME: t.Final[str] = f"def-v{HASH_RECIPE_VERSION}"
+"""The scheme every step `definition_hash` is tagged with. A recorded hash with
+another scheme, or none, was computed by an earlier recipe and is never compared
+with a current one."""
+
+
 class StepEntry(ConfiguredBaseModel):
     """A step of the run, as the manifest knows it."""
 
@@ -534,7 +545,8 @@ class StepEntry(ConfiguredBaseModel):
     """The step's working directory relative to the run root; `.` for a standalone run."""
 
     definition_hash: str = Field(default="")
-    """A fingerprint of what the step computes (see `describe_steps`)."""
+    """A fingerprint of what the step computes, tagged with `DEFINITION_HASH_SCHEME`
+    (see `describe_steps`)."""
 
     blueprint: BlueprintIdentity | None = Field(default=None)
     """The blueprint the step runs; `None` until a deferred step's record names it."""
@@ -561,14 +573,6 @@ class StepEntry(ConfiguredBaseModel):
 
     record: StepRecord | None = Field(default=None)
     """The step's record, folded in once the step has written it."""
-
-
-CANONICAL_NAMES_SINCE: t.Final[str] = "1.5.0"
-"""The first manifest schema whose step definition hashes use current application
-names. A hash recorded under an older manifest may use an earlier name (see
-`cstar.base.application_names`), so `read_run_manifest` drops it rather than let
-the re-entry guard compare it. A separate constant on purpose: it stays `1.5.0`
-when the manifest schema later moves on."""
 
 
 class RunManifest(ConfiguredBaseModel):
@@ -773,13 +777,7 @@ def read_run_manifest(root: Path) -> RunManifest | None:
     Returns
     -------
     RunManifest | None
-        The manifest, or `None` when the run has none. A manifest older than
-        `CANONICAL_NAMES_SINCE` comes back with its steps' definition hashes
-        blank: the hashes it recorded may use an earlier application name, so
-        they are not comparable with a current one. Every writer restamps the
-        manifest, so the hashes are dropped here, where its recorded schema
-        version is still known; the next attempt that describes the steps
-        records them again.
+        The manifest, or `None` when the run has none.
 
     Raises
     ------
@@ -788,22 +786,7 @@ def read_run_manifest(root: Path) -> RunManifest | None:
     CstarError
         If the manifest cannot be read or is invalid.
     """
-    manifest = _read(root / RUN_MANIFEST_NAME, RunManifest, "run manifest")
-    if manifest is None or version_key(manifest.schema_version) >= version_key(
-        CANONICAL_NAMES_SINCE
-    ):
-        return manifest
-
-    recorded = [entry for entry in manifest.steps if entry.definition_hash]
-    for entry in recorded:
-        entry.definition_hash = ""
-    if recorded:
-        log.debug(
-            f"Dropped the step definition hashes of the run manifest at {root}: "
-            f"recorded under schema {manifest.schema_version}, before "
-            f"{CANONICAL_NAMES_SINCE}"
-        )
-    return manifest
+    return _read(root / RUN_MANIFEST_NAME, RunManifest, "run manifest")
 
 
 def read_step_record(step_root: Path) -> StepRecord | None:
@@ -1201,7 +1184,8 @@ def collect_dependencies(blueprint: "Blueprint") -> ExternalDependencies:
 
 
 def _blueprint_data(step: "Step") -> t.Any:
-    """Express a step's blueprint reference as JSON-able data.
+    """Express a step's blueprint reference as JSON-able data, defaults left out
+    (see `Blueprint._hashed_content`).
 
     Parameters
     ----------
@@ -1215,7 +1199,7 @@ def _blueprint_data(step: "Step") -> t.Any:
     """
     value = step.blueprint_path
     if isinstance(value, DeferredBlueprintRef | InlineBlueprintRef):
-        return value.model_dump(mode="json")
+        return value.model_dump(mode="json", exclude_defaults=True)
     return str(value)
 
 
@@ -1260,6 +1244,22 @@ def _load_step_blueprint(step: "Step", base_dir: Path) -> "Blueprint | None":
     return load_blueprint(path, klass)  # type: ignore[no-any-return]
 
 
+def _definition_hash(definition: dict[str, t.Any]) -> str:
+    """Fingerprint a step's definition, tagged with `DEFINITION_HASH_SCHEME`.
+
+    Parameters
+    ----------
+    definition : dict[str, Any]
+        The JSON-able definition of the step.
+
+    Returns
+    -------
+    str
+        ``<DEFINITION_HASH_SCHEME>:<hex>``.
+    """
+    return f"{DEFINITION_HASH_SCHEME}:{canonical_hash(definition)}"
+
+
 def describe_steps(workplan: "Workplan", base_dir: Path) -> dict[str, StepFacts]:
     """Fingerprint what each step of a workplan computes, before it runs.
 
@@ -1268,7 +1268,8 @@ def describe_steps(workplan: "Workplan", base_dir: Path) -> dict[str, StepFacts]
     blueprint it names. It leaves out `compute_overrides` and `workflow_overrides`:
     resources and clobber or resume choices do not change what a step that reached
     `Done` computed. A deferred step takes its producer's `definition_hash` as its
-    blueprint content, so a change upstream moves every consumer.
+    blueprint content, so a change upstream moves every consumer. The hash is
+    tagged with `DEFINITION_HASH_SCHEME`.
 
     Parameters
     ----------
@@ -1309,7 +1310,7 @@ def describe_steps(workplan: "Workplan", base_dir: Path) -> dict[str, StepFacts]
             blueprint = _load_step_blueprint(step, base_dir)
             content_hash = blueprint.content_hash() if blueprint else ""
 
-        definition_hash = canonical_hash(
+        definition_hash = _definition_hash(
             {
                 "name": step.name,
                 "application": step.application,
@@ -1878,7 +1879,9 @@ def finalize_standalone_run(
         versions=package_versions(),
     )
     facts = StepFacts(
-        definition_hash=blueprint.content_hash(),
+        definition_hash=_definition_hash(
+            {"blueprint_content_hash": blueprint.content_hash()}
+        ),
         blueprint=BlueprintIdentity.of(blueprint),
         external=collect_dependencies(blueprint),
     )
