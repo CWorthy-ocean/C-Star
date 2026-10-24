@@ -5,6 +5,7 @@ import pytest
 from cstar.base.env import (
     ENV_CSTAR_CATALOG,
     ENV_CSTAR_CONFIG_HOME,
+    ENV_CSTAR_CONFIG_REPORTED,
     ENV_CSTAR_DATA_HOME,
     ENV_CSTAR_LOG_LEVEL,
     ENV_CSTAR_RUNID,
@@ -59,15 +60,21 @@ def test_runid_is_internal_and_not_persistable() -> None:
     assert item.persistable is False
 
 
-def test_only_runid_and_config_home_are_not_persistable() -> None:
-    """Verify every registered setting but the run id and config home is persistable."""
+def test_only_internal_settings_and_config_home_are_not_persistable() -> None:
+    """Verify every registered setting but the run id, the configuration report
+    marker and the config home is persistable.
+    """
     assert get_env_item(ENV_CSTAR_CONFIG_HOME).persistable is False
 
     not_persistable = {
         name for name, item in discover_env_vars().items() if not item.persistable
     }
 
-    assert not_persistable == {ENV_CSTAR_RUNID, ENV_CSTAR_CONFIG_HOME}
+    assert not_persistable == {
+        ENV_CSTAR_RUNID,
+        ENV_CSTAR_CONFIG_REPORTED,
+        ENV_CSTAR_CONFIG_HOME,
+    }
 
 
 def test_env_item_keeps_name_and_reads_environment(

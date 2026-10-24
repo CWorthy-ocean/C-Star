@@ -2938,6 +2938,36 @@ def test_workplan_run_refuses_a_removed_dry_run_setting(
     mock_reload.assert_not_awaited()
 
 
+def test_workplan_run_refuses_a_removed_dry_run_setting_in_the_file(
+    isolate_user_config: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Verify `workplan submit` exits 2 without reloading or launching anything
+    while the configuration file names a removed setting that used to request a
+    plan-only run: the loader skips the line, which must not turn the plan-only
+    run into a real one.
+
+    Parameters
+    ----------
+    isolate_user_config : Path
+        The configuration file the loader reads for this test.
+    monkeypatch : pytest.MonkeyPatch
+        Fixture used to clear the setting from the environment.
+    """
+    name = next(n for n, removed in REMOVED_SETTINGS.items() if removed.refused)
+    monkeypatch.delenv(name, raising=False)
+    isolate_user_config.write_text(f"{name}={FLAG_ON}\n")
+
+    with mock.patch(
+        "cstar.cli.workplan.run.handle_run_reloading", mock.AsyncMock()
+    ) as mock_reload:
+        result = CliRunner().invoke(app, ["--run-id", "12345"], color=False)
+
+    assert result.exit_code == 2
+    assert f"Refusing to run while {name}" in result.stderr
+    assert str(isolate_user_config) in result.stderr.replace("\n", "")
+    mock_reload.assert_not_awaited()
+
+
 @pytest.mark.usefixtures("read_yaml_intercept")
 def test_workplan_run_pre_run_with_nothing_to_prepare_exits_cleanly() -> None:
     """Verify a pre-run that leaves no step to prepare reports it and exits 0."""

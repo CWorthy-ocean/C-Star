@@ -212,42 +212,54 @@ def common_callback(
     exported setting that no longer has an effect.
 
     The file is loaded before any command's options are parsed, so an option's
-    ``envvar`` binding sees it; an exported variable still wins over it.
+    ``envvar`` binding sees it; an exported variable still wins over it. A file
+    the loader refuses (one it cannot read) stops every command except the ones
+    that manage it, ``cstar init`` and ``cstar env``.
 
     Raises
     ------
     typer.Exit
-        With code 2 when the configuration file names settings it may not set.
+        With code 2 when the loader refuses the configuration file.
     """
     try:
         load_user_config()
     except CstarUserConfigError as ex:
+        from cstar.cli.environment import NAME as NAME_ENV
+        from cstar.cli.init import COMMAND_INIT
+
         typer.echo(str(ex), err=True)
-        raise typer.Exit(2) from ex
+        if ctx.invoked_subcommand not in {NAME_ENV, COMMAND_INIT}:
+            raise typer.Exit(2) from ex
 
     for name in sorted(REMOVED_SETTINGS.keys() & os.environ.keys()):
         typer.echo(f"{name} has no effect; {REMOVED_SETTINGS[name].guidance}", err=True)
 
 
 def exit_on_refused_settings() -> None:
-    """Stop a command that an exported `refused` removed setting used to change.
+    """Stop a command that a `refused` removed setting used to change.
 
     The commands such a setting used to change call this before they touch
-    anything: running them while it is exported would do more than was asked
-    (a dry run becoming a real one).
+    anything: running them while it is exported, or named in the configuration
+    file (which skips it), would do more than was asked (a dry run becoming a
+    real one).
 
     Raises
     ------
     typer.Exit
-        With code 2 when a refused setting is exported.
+        With code 2 when a refused setting is exported or in the file.
     """
+    config = load_user_config()
+    named = os.environ.keys() | config.skipped.keys()
     refused = [
         name
-        for name in sorted(REMOVED_SETTINGS.keys() & os.environ.keys())
+        for name in sorted(REMOVED_SETTINGS.keys() & named)
         if REMOVED_SETTINGS[name].refused
     ]
     if refused:
-        msg = f"Refusing to run while {', '.join(refused)} is exported; unset it to continue."
+        msg = (
+            f"Refusing to run while {', '.join(refused)} is exported or set in "
+            f"{config.path}; remove it to continue."
+        )
         typer.echo(msg, err=True)
         raise typer.Exit(2)
 

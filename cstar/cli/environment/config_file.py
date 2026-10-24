@@ -8,11 +8,14 @@ from cstar.base.env import (
     USER_CONFIG_HEADER,
     format_user_config_value,
     get_env_item,
-    load_user_config,
+    load_user_config_for_repair,
     read_user_config,
     render_setting_block,
     user_config_problems,
 )
+
+if t.TYPE_CHECKING:
+    from pathlib import Path
 
 app_set = typer.Typer()
 app_unset = typer.Typer()
@@ -23,9 +26,9 @@ NameArg = t.Annotated[str, typer.Argument(help="The setting to change.")]
 
 def _active_pattern(name: str) -> re.Pattern[str]:
     """Match a line that sets `name`, as the dotenv format reads it (an ``export``
-    prefix is accepted).
+    prefix is accepted), or names it without ``=``, which the loader refuses.
     """
-    return re.compile(rf"^\s*(?:export\s+)?{re.escape(name)}\s*=")
+    return re.compile(rf"^\s*(?:export\s+)?{re.escape(name)}\s*(?:=|#|$)")
 
 
 def _placeholder_pattern(name: str) -> re.Pattern[str]:
@@ -59,12 +62,28 @@ def _validated_name(name: str) -> str:
     return name
 
 
+def _read_lines(path: "Path") -> list[str]:
+    """The file's lines, with their line endings.
+
+    Raises
+    ------
+    typer.Exit
+        With code 1 when the file cannot be read: rewriting it would lose what
+        it holds.
+    """
+    try:
+        return path.read_text().splitlines(keepends=True)
+    except (OSError, UnicodeDecodeError) as ex:
+        typer.echo(f"Error: cannot read {path}: {ex}", err=True)
+        raise typer.Exit(1) from ex
+
+
 def set_setting_lines(lines: list[str], name: str, value: str) -> list[str] | None:
     """Rewrite file lines so that `name` is set to `value`.
 
-    The first active line for `name` takes the new value and later active
-    duplicates are dropped; with no active line, the first placeholder is filled
-    in place. Every other line is kept as it was.
+    The first active line for `name` (one without ``=`` included) takes the new
+    value and later active duplicates are dropped; with no active line, the
+    first placeholder is filled in place. Every other line is kept as it was.
 
     Parameters
     ----------
@@ -135,10 +154,11 @@ def set_value(
 
     The file is located through the loader's record, so the path is the one
     this process read. A shell that exports the same setting still takes
-    precedence over the file.
+    precedence over the file. The name is checked strictly, so a typo is caught
+    here rather than skipped by every later command.
     """
     name = _validated_name(name)
-    config = load_user_config()
+    config = load_user_config_for_repair()
     path = config.path
 
     if not path.exists():
@@ -146,8 +166,9 @@ def set_value(
         block = render_setting_block(get_env_item(name), value)
         path.write_text(f"{USER_CONFIG_HEADER}\n{block}")
     else:
-        text = path.read_text()
-        lines = set_setting_lines(text.splitlines(keepends=True), name, value)
+        current = _read_lines(path)
+        text = "".join(current)
+        lines = set_setting_lines(current, name, value)
         if lines is not None:
             path.write_text("".join(lines))
         else:
@@ -171,15 +192,15 @@ def set_value(
 
 @app_unset.command(name="unset", help="Remove a value from the configuration file.")
 def unset_value(name: NameArg) -> None:
-    """Comment a setting out of the configuration file, keeping its description."""
-    name = _validated_name(name)
-    path = load_user_config().path
+    """Comment a setting out of the configuration file, keeping its description.
 
-    lines = (
-        unset_setting_lines(path.read_text().splitlines(keepends=True), name)
-        if path.is_file()
-        else None
-    )
+    Any name is accepted, so a line the loader skips (a removed setting, a name
+    this version does not know) can be taken out as well.
+    """
+    name = name.strip()
+    path = load_user_config_for_repair().path
+
+    lines = unset_setting_lines(_read_lines(path), name) if path.is_file() else None
     if lines is None:
         typer.echo(f"{name} is not set in {path}")
         return

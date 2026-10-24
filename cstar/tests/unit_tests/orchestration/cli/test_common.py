@@ -363,11 +363,14 @@ def test_localize_and_migrate_anchors_a_remote_blueprint_to_the_working_director
     )
 
 
-def test_root_callback_exits_on_a_bad_configuration_file(
-    isolate_user_config: Path, monkeypatch: pytest.MonkeyPatch
+def test_root_callback_skips_unknown_and_removed_settings(
+    isolate_user_config: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    flatten_cli_output: Callable[[str], str],
 ) -> None:
-    """Verify a configuration file naming a setting it may not set stops any
-    command with exit code 2 and the error on stderr, applying nothing.
+    """Verify a configuration file naming a removed setting and one from a newer
+    version runs the command, applying the rest of the file and warning once
+    about each skipped line.
 
     Parameters
     ----------
@@ -375,19 +378,87 @@ def test_root_callback_exits_on_a_bad_configuration_file(
         The configuration file the loader reads for this test.
     monkeypatch : pytest.MonkeyPatch
         Fixture to modify the environment.
+    flatten_cli_output : Callable[[str], str]
+        Fixture that joins the output lines that rich wrapped.
     """
     monkeypatch.delenv(ENV_CSTAR_SLURM_ACCOUNT, raising=False)
     isolate_user_config.write_text(
-        f"{ENV_CSTAR_SLURM_ACCOUNT}=m1234\nCSTAR_NOT_A_SETTING=1\n"
+        f"{ENV_CSTAR_SLURM_ACCOUNT}=m1234\n"
+        "CSTAR_ORCH_TRX_FREQ=1D\n"
+        "CSTAR_FROM_A_NEWER_VERSION=1\n"
     )
 
     result = CliRunner().invoke(root_app, ["env", "show"], color=False)
 
+    assert result.exit_code == 0, result.stderr
+    assert result.stderr.count("Ignoring a line in") == 2
+    assert "CSTAR_ORCH_TRX_FREQ has no effect" in result.stderr
+    assert "CSTAR_FROM_A_NEWER_VERSION is not a setting C-Star" in result.stderr
+    assert f"{ENV_CSTAR_SLURM_ACCOUNT}: m1234 [config]" in flatten_cli_output(
+        result.stdout
+    )
+
+
+@pytest.fixture
+def unreadable_config(isolate_user_config: Path) -> Path:
+    """A configuration file the loader refuses: it cannot be decoded."""
+    isolate_user_config.write_bytes(b"\xff\xfeCSTAR_LOG_LEVEL=DEBUG\n")
+    return isolate_user_config
+
+
+def test_root_callback_exits_on_an_unreadable_configuration_file(
+    unreadable_config: Path,
+) -> None:
+    """Verify a configuration file the loader cannot read stops an ordinary
+    command with exit code 2 and the error on stderr.
+
+    Parameters
+    ----------
+    unreadable_config : Path
+        The configuration file the loader refuses.
+    """
+    result = CliRunner().invoke(root_app, ["blueprint", "--help"], color=False)
+
     assert result.exit_code == 2
-    assert str(isolate_user_config) in result.stderr.replace("\n", "")
-    assert "CSTAR_NOT_A_SETTING" in result.stderr
-    assert "C-Star Environment Configuration" not in result.stdout
-    assert ENV_CSTAR_SLURM_ACCOUNT not in os.environ
+    assert str(unreadable_config) in result.stderr.replace("\n", "")
+    assert "cannot be read" in result.stderr
+
+
+@pytest.mark.parametrize(
+    "args",
+    [
+        ["env", "show"],
+        ["env", "set", "CSTAR_LOG_LEVEL", "DEBUG"],
+        ["env", "unset", "CSTAR_LOG_LEVEL"],
+        ["init", "--yes"],
+    ],
+)
+def test_root_callback_lets_the_repair_commands_run(
+    unreadable_config: Path, args: list[str]
+) -> None:
+    """Verify a configuration file the loader refuses does not stop the commands
+    that manage it: each gets past the root callback (which reports the error)
+    and fails, if at all, on its own terms rather than with exit code 2.
+
+    Parameters
+    ----------
+    unreadable_config : Path
+        The configuration file the loader refuses.
+    args : list[str]
+        The command to run.
+    """
+    result = CliRunner().invoke(root_app, args, color=False)
+
+    assert result.exit_code != 2, result.output
+    assert result.exception is None or isinstance(result.exception, SystemExit)
+    assert "cannot be read" in result.stderr
+    if args[:2] == ["env", "show"]:
+        assert result.exit_code == 0
+        assert "C-Star Environment Configuration" in result.stdout
+    else:
+        # a file that cannot be read is never rewritten
+        assert result.exit_code == 1
+        assert unreadable_config.read_bytes().startswith(b"\xff\xfe")
 
 
 def test_root_callback_loads_the_configuration_file(
