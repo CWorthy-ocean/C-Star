@@ -70,10 +70,10 @@ optional, and unknown keys are rejected when the workplan is loaded:
 .. note::
 
    On systems whose settings require a SLURM account and queue (such as Anvil
-   and Bouchet), values the workplan supplies here, or in every step's
-   ``compute_overrides``, stand in for ``CSTAR_SLURM_ACCOUNT`` and
-   ``CSTAR_SLURM_QUEUE``; only the ones it leaves out must be set in the
-   environment.
+   and Bouchet), under the SLURM launcher, values the workplan supplies here,
+   or in every step's ``compute_overrides``, stand in for
+   ``CSTAR_SLURM_ACCOUNT`` and ``CSTAR_SLURM_QUEUE``; only the ones it leaves
+   out must be set in the environment.
 
 Per-step compute requirements are set with each step's ``compute_overrides``
 (see below).
@@ -641,6 +641,10 @@ Execution
 .. attention::
     An error will occur if the SLURM **account** and **queue** are not configured when running on a HPC.
 
+.. note::
+
+   On a system whose settings require a SLURM account and queue (such as Anvil and Bouchet), every step reads ``CSTAR_SLURM_ACCOUNT`` and ``CSTAR_SLURM_QUEUE`` when it starts, even a step that submits no job: each step runs ``cstar blueprint run``, which loads the system's SLURM settings. Under the SLURM launcher, values the workplan sets in ``compute_environment.slurm`` or ``compute_overrides`` are passed to each step. A step run as a local process, under ``launcher: local``, in a ``--pre-run``, or as a standalone ``cstar blueprint run``, sees only your environment and configuration file. Without the two settings there, the steps fail at start-up, and ``cstar run log <run-id> <step-name>`` shows ``Environment settings for the system could not be loaded``. Run ``cstar init`` once on the system to write them to your configuration file (see :doc:`hpc`), or export them.
+
 
 .. tab-set::
 
@@ -887,6 +891,19 @@ A copy or a link carries the file permissions of the source. The project runs ar
 
 The exit code is 0 when the run was promoted, 1 when it was promoted but the copy has problems of its own (or the source misses products and nothing was copied), and 2 for bad arguments, a destination that is taken and a move that is refused.
 
+.. _workplan_linked_promotions:
+
+Linked promotions
+"""""""""""""""""
+
+A run promoted with ``--mode link`` may stay linked for as long as you like: C-Star never expires the link or asks you to replace it. ``cstar run ls --shared`` lists it as ``project, linked``, so you and your collaborators can tell it from a copy. The link is only as durable as the run it points at in your data home, and that run is yours: before your scratch space is purged, or before you delete or move the run there, materialize it, which replaces the link with a copy under the same uuid (add ``--to <dir>`` if you linked it with ``--to``):
+
+.. code-block:: console
+
+    cstar run promote <my-unique-id> --mode materialize
+
+Permissions work as for a copy, and C-Star changes none: collaborators who follow the link read the run in your data home directly, so that run must be readable by the project's group, and the directories above it searchable, through your umask and group settings.
+
 .. _workplan_run_manifest:
 
 The run manifest
@@ -1073,6 +1090,19 @@ Use ``cstar admin clean --run-id`` to remove one run: its tracking record, and i
 The command asks before each removal; ``--yes`` answers for you. A run that is attached read-only, or whose directory is in the project runs area, loses its tracking record and keeps its directory (see :ref:`workplan_attach_run`); remove that directory yourself if you want it gone. A run ID with nothing to remove is reported, and the exit code is 0.
 
 ``cstar admin clean --all`` is the other choice, and you have to ask for it: C-Star's data, state, cache and config directories are emptied, including the output of every run in your data home. The shared source-data cache and your catalog are kept, so the next run does not download its inputs again. ``--dry-run`` lists what ``--all`` would remove. Without ``--all`` or ``--run-id``, the command stops with a usage error and removes nothing.
+
+
+.. _workplan_known_limitations:
+
+Known limitations
+-----------------
+
+These edges of re-entering, promoting and recording runs are known in this release. Each entry says what you see and what to do about it.
+
+- **Moving a run whose directory is a symlink.** ``cstar run promote --mode move --to <dir>`` given a run whose directory is itself a symbolic link copies and checks the run, then cannot remove the source: it prints ``Moved the copy to <dir> ..., but the source at <link> was not removed`` and exits with code 1. The copy is complete and checked, and is tracked here when the source was. Once you have confirmed it, remove the link, and the directory it points at, yourself. To avoid this, name the run by the directory the link points at. A link that ``--mode link`` made is replaced with a copy by ``--mode materialize``, not moved (see :ref:`workplan_linked_promotions`).
+- **Referenced runs listed twice after a re-entry.** When a run whose manifest was written by C-Star 0.17.0 or earlier, and whose workplan references other runs through ``runs``, is re-entered, its manifest keeps the earlier entry for each referenced run beside the new one. ``cstar run show`` then lists each alias twice under ``External runs``, once with an empty ``Uuid``. The entry with a uuid is the current one; ignore the other.
+- **Attempt directories the manifest does not list.** An attempt that reads the workplan file writes its :ref:`carried inputs <workplan_carried_inputs>` under ``attempts/`` before it records them in the run manifest. When that record is not written, the directory stays without a manifest entry: either the manifest write failed, which logs a warning and lets the run go on, or a ``--pre-run`` found no step it could prepare and printed ``No step can be prepared in pre-run mode; nothing was scheduled.`` ``cstar run show`` does not list such a directory and ``cstar run check`` does not report it, since it reads only the attempt directories the manifest lists. Nothing reads it, so you can delete it by hand. After a failed manifest write, ``--resume <workplan>`` compares your workplan with the latest attempt the manifest does list; if it refuses, pass ``--run-id`` instead.
+- **Locks on an NFS state home.** C-Star serializes writes to a run's manifest and tracking record with lock files in your state home (``CSTAR_STATE_HOME``, ``~/.local/state/cstar`` by default). On NFS, Linux implements these ``flock`` locks with POSIX record locks, which belong to a process: they keep separate processes apart, such as two ``cstar`` commands, but not two threads of one process. A program that calls C-Star's Python API from several threads on the same run can lose one of two simultaneous updates to its manifest or tracking record. Make such calls from one thread at a time, or keep the state home on a local disk or a parallel file system such as GPFS or Lustre (not on scratch, which is purged). ``cstar run status <run-id>`` refreshes a manifest from the step records.
 
 
 .. toctree::
