@@ -6,6 +6,7 @@ import typer
 from rich.console import Console
 from rich.markup import escape
 
+from cstar.base.application_names import APPLICATION_ALIASES, canonical_application
 from cstar.base.log import get_logger
 from cstar.entrypoint.utils import ARG_DRY_RUN
 
@@ -16,25 +17,32 @@ console = Console()
 short_help: t.Final[str] = (
     "Move a catalog's blueprints into the blueprints/<application>/ layout."
 )
+_EARLIER_NAME_FORMS: t.Final[str] = "\n".join(
+    f"- `blueprints/{alias}/<name>.yaml` (a {current} blueprint under the "
+    "application's earlier name)."
+    for alias, current in APPLICATION_ALIASES.items()
+)
 help: t.Final[str] = f"""\
 {short_help}
 
 A catalog keeps each blueprint at `blueprints/<application>/<name>.yaml`,
 where the directory is the registered application name (`forge`,
-`roms_marbl`, ...). Older catalogs used three other forms, which are still
-read (with a warning) for one more release:
+`ucla_roms`, ...). Older catalogs used other forms, which are still read
+(with a warning) for one more release:
 
 - `blueprints/<name>.forge_blueprint.yaml` (a forge blueprint),
-- `blueprints/B_<name>.yaml` (a roms_marbl blueprint),
-- `blueprints/<machine>/<name>/B_*.yaml` (a roms_marbl blueprint).
+- `blueprints/B_<name>.yaml` (a ucla_roms blueprint),
+- `blueprints/<machine>/<name>/B_*.yaml` (a ucla_roms blueprint),
+{_EARLIER_NAME_FORMS}
 
 Given a catalog root, this command moves every blueprint found in one of
 those forms to `blueprints/<application>/<name>.yaml` (always with a `.yaml`
 extension). A blueprint whose destination already exists is left where it is
 and reported, never overwritten. After a per-machine blueprint is moved, its
 `<name>/` and `<machine>/` directories are removed if they are then empty;
-anything else in them (a `Build/` directory, `_grid.yaml`, `settings_B_*.yaml`,
-...) is left in place and reported.
+so is an application's earlier-name directory. Anything else in them (a
+`Build/` directory, `_grid.yaml`, `settings_B_*.yaml`, ...) is left in place
+and reported.
 
 The catalog is read with validation suppressed, so an otherwise incomplete
 catalog can still be migrated. Pass `--dry-run` to see what would change
@@ -60,8 +68,8 @@ class CatalogMigrationReport:
     the destination already exists.
     """
     removed_dirs: list[Path] = field(default_factory=list[Path])
-    """Now-empty legacy `<name>/` and `<machine>/` directories removed (or, in
-    `dry_run` mode, that would be removed).
+    """Now-empty legacy `<name>/`, `<machine>/` and earlier-application-name
+    directories removed (or, in `dry_run` mode, that would be removed).
     """
     left_in_place: list[Path] = field(default_factory=list[Path])
     """Legacy directories that still hold other files after the move, and so
@@ -113,13 +121,22 @@ def migrate_catalog_layout(
             report.moved.append((src, dst))
 
     # Directories of the form `blueprints/<machine>/<name>/` (the file sits four
-    # levels below the root) are cleaned up once their moved blueprint is gone;
-    # a flat file sits three levels below it and has nothing to clean.
+    # levels below the root) are cleaned up once their moved blueprint is gone,
+    # as is a `blueprints/<earlier name>/` (three levels); a flat file sits two
+    # levels below the root and has nothing to clean.
     gone = {src for src, _ in report.moved}
     name_dirs = sorted(
         {src.parent for src, _ in report.moved if len(src.relative_to(root).parts) == 4}
     )
     machine_dirs = sorted({d.parent for d in name_dirs})
+    earlier_dirs = sorted(
+        {
+            src.parent
+            for src, _ in report.moved
+            if len(src.relative_to(root).parts) == 3
+            and canonical_application(src.parent.name) != src.parent.name
+        }
+    )
 
     # A directory that is also a destination (a machine named like an
     # application) holds the migrated files now and must stay.
@@ -139,6 +156,11 @@ def migrate_catalog_layout(
         if _remaining(directory, gone | kept):
             report.left_in_place.append(directory)
         elif not any(d.parent == directory for d in kept):
+            report.removed_dirs.append(directory)
+    for directory in earlier_dirs:
+        if _remaining(directory, gone):
+            report.left_in_place.append(directory)
+        else:
             report.removed_dirs.append(directory)
 
     if not dry_run:

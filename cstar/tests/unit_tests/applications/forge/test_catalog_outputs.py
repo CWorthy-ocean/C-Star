@@ -396,6 +396,23 @@ async def test_steps_of_other_applications_are_ignored(tmp_path: Path) -> None:
     assert await _catalog(root).blueprint_outputs(FORGE) == []
 
 
+async def test_an_earlier_application_name_finds_what_the_current_one_does(
+    tmp_path: Path,
+) -> None:
+    root = tmp_path / "catalog"
+    root.mkdir()
+    step = _run(tmp_path, "run-a", tmp_path / "entry.yaml", application="ucla_roms")
+    emitted = _emit(step.fsm.output_dir / "B_wio.yaml", name="wio")
+    catalog = _catalog(root)
+
+    [output] = await catalog.blueprint_outputs("ucla_roms")
+
+    assert output.path == emitted
+    assert output.run_id == "run-a"
+    assert await catalog.blueprint_outputs("roms_marbl") == [output]
+    assert await find_blueprint_outputs(catalog, "roms_marbl") == [output]
+
+
 async def test_unloadable_entries_are_skipped_and_named_in_one_message(
     tmp_path: Path, caplog: pytest.LogCaptureFixture
 ) -> None:
