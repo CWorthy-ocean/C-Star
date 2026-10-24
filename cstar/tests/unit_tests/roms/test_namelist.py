@@ -277,11 +277,12 @@ def test_namelist_schema_for_ref_newer_than_known_release_warns(
     assert _newer_than_known_records(caplog) == [message]
 
 
-def test_namelist_schema_for_ref_newer_than_known_logs_once_per_ref(
+def test_namelist_schema_for_ref_newer_than_known_logs_once_per_release(
     caplog: pytest.LogCaptureFixture,
 ):
     """Logging ignores warning filters and the wizard reselects the schema on
-    every rebuild, so each too-new ref is logged once; the warning repeats.
+    every rebuild, so each too-new release is logged once, however it is
+    spelled; the warning repeats.
     """
     major = NEWEST_KNOWN_UCLA_ROMS[0] + 1
     with (
@@ -289,7 +290,7 @@ def test_namelist_schema_for_ref_newer_than_known_logs_once_per_ref(
         pytest.warns(UserWarning, match=NEWER_THAN_KNOWN) as record,
     ):
         namelist_schema_for_ref(f"{major}.0.0")
-        namelist_schema_for_ref(f"{major}.0.0")
+        namelist_schema_for_ref(f"v{major}.0.0")
         namelist_schema_for_ref(f"{major}.0.1")
     assert len(record) == 3
     assert len(_newer_than_known_records(caplog)) == 2
