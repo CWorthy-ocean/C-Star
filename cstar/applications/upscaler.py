@@ -368,7 +368,8 @@ def _averaging_windows(dataset: xr.Dataset, files: Sequence[Path | str]) -> _Win
             raise ValueError(msg)
     else:
         # The windows are the stamp spacing, so a missing `_uscl` file shows only as
-        # one window longer than the first; a partial final window is shorter.
+        # one window longer than the first. A shorter last window cannot hide one,
+        # so it is let through, though these releases drop a partial last hour.
         length = end - begin
         wrong = np.abs(length[:-1] - length[0]) > _WINDOW_TOLERANCE_S
         wrong = np.append(wrong, length[-1] > length[0] + _WINDOW_TOLERANCE_S)

@@ -871,7 +871,11 @@ class TestCDRUpscalerWindows:
         assert Path(files[-1]).name in message
 
     def test_a_shorter_last_legacy_window_is_accepted(self, tmp_path: Path) -> None:
-        """Verify a partial final window, as a run that ends mid-hour writes, is kept."""
+        """Verify a shorter final window is kept: it cannot hide a missing file.
+
+        ucla-roms <= 0.12.0 does not write one (a run ending mid-hour drops the
+        partial hour), so this only pins that the length check does not refuse it.
+        """
         only = _write_hourly_uscl(
             tmp_path / "roms_uscl.20240101000000.nc", [0, 1, 2, 2.5]
         )
