@@ -258,7 +258,11 @@ Resources
 The numbers in this section were measured on 2026-10-15 on one cluster, with
 earlier versions than these files use: a ucla-roms commit before 0.11.0 and
 roms-tools 5.1.2.dev. Treat them as a guide. A rerun with these files will
-refresh them.
+refresh them. They also predate the upscaler's time-convention fix:
+``parent_up`` now receives the final hour of the child's export too. On the
+one-month CCS run of 2026-10-21 that hour carried 1.5 % of the export, because
+the plume reached the child's boundary late, so a month's alkalinity is about
+1.5 % higher.
 
 CPUs per step, as in the workplan:
 
