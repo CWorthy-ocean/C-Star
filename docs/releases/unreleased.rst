@@ -198,6 +198,16 @@ New features
 
   - The shared source-data cache and your catalog are kept by ``--all``.
 
+- ``cstar workplan submit`` launches a workplan: it schedules every step and exits, under SLURM or locally. (`#816 <https://github.com/CWorthy-ocean/C-Star/pull/816>`_)
+
+  - ``cstar workplan run`` still works with every option and re-entry form, unlisted in ``--help`` and without a notice.
+
+- ``cstar workplan --help`` lists only ``check`` and ``submit``; ``cstar run`` lists the run-level commands. (`#816 <https://github.com/CWorthy-ocean/C-Star/pull/816>`_)
+
+  - ``cstar workplan status``, ``ls``, ``list``, ``gather``, ``log``, ``path`` and ``cd`` (and their ``cstar wp ...`` forms) still run the same commands as ``cstar run ...``, unlisted and without a notice.
+  - ``cstar workplan check <workplan file>`` still validates a workplan file and stays listed; ``cstar run check <run>`` checks a run.
+
+
 
 
 
@@ -287,6 +297,8 @@ Improvements
   - On a cluster where no scratch directory was found, the question defaults to no, so pressing Enter leads to the prompts.
 
 - ``cstar init`` introduces the shell function as "'cstar run cd' shell support": the ``cstar run cd`` command requires a shell function to operate. (`#813 <https://github.com/CWorthy-ocean/C-Star/pull/813>`_)
+- Hints and error messages that suggest launching or re-entering a run now name ``cstar workplan submit``. (`#816 <https://github.com/CWorthy-ocean/C-Star/pull/816>`_)
+- The workplan builder in the wizard labels its launch button **Submit** and streams ``cstar workplan submit``. (`#816 <https://github.com/CWorthy-ocean/C-Star/pull/816>`_)
 
 
 
@@ -333,3 +345,4 @@ Miscellaneous
 - Removed the ``workplan.json`` mention from the workplans guide. (`#812 <https://github.com/CWorthy-ocean/C-Star/pull/812>`_)
 - New "Cleaning up" section in the workplans guide. (`#814 <https://github.com/CWorthy-ocean/C-Star/pull/814>`_)
 - The installation guide describes the new ``cstar init`` locations question. (`#813 <https://github.com/CWorthy-ocean/C-Star/pull/813>`_)
+- Docs and tutorials use ``cstar workplan submit`` and ``cstar run <command>`` throughout, and note that the earlier spellings still work. (`#816 <https://github.com/CWorthy-ocean/C-Star/pull/816>`_)
