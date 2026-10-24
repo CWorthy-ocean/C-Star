@@ -22,6 +22,7 @@ from cstar.base.discretization import Discretization
 from cstar.base.env import (
     ENV_CSTAR_CACHE_HOME,
     ENV_CSTAR_CONFIG_HOME,
+    ENV_CSTAR_CONFIG_REPORTED,
     ENV_CSTAR_DATA_HOME,
     ENV_CSTAR_PROJECT_HOME,
     ENV_CSTAR_RUNID,
@@ -2515,6 +2516,8 @@ def isolate_user_config(
     """
     path = mock_xdg_dirs[ENV_CSTAR_CONFIG_HOME] / USER_CONFIG_FILENAME
     monkeypatch.setattr("cstar.base.env.user_config_path", lambda: path)
+    # the loader exports it after reporting skipped lines; restore it afterwards
+    monkeypatch.delenv(ENV_CSTAR_CONFIG_REPORTED, raising=False)
     load_user_config.cache_clear()
     yield path
     load_user_config.cache_clear()

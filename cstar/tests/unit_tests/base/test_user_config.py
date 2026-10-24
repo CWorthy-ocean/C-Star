@@ -3,8 +3,10 @@ from pathlib import Path
 
 import pytest
 
+import cstar
 from cstar.base.env import (
     ENV_CSTAR_CONFIG_HOME,
+    ENV_CSTAR_CONFIG_REPORTED,
     ENV_CSTAR_DATA_HOME,
     ENV_CSTAR_LOG_LEVEL,
     ENV_CSTAR_RUNID,
@@ -12,6 +14,7 @@ from cstar.base.env import (
     capture_environment,
     get_env_item,
     load_user_config,
+    parse_user_config,
     read_user_config,
     user_config_problems,
 )
@@ -118,11 +121,13 @@ def test_key_without_a_value_is_empty(isolate_user_config: Path) -> None:
     assert read_user_config(isolate_user_config) == {ENV_CSTAR_SLURM_ACCOUNT: ""}
 
 
-def test_bad_keys_are_rejected_together(
-    isolate_user_config: Path, monkeypatch: pytest.MonkeyPatch
+def test_bad_keys_are_skipped_with_one_line_each(
+    isolate_user_config: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
 ) -> None:
-    """Verify one error names the file and every key it may not set, and nothing
-    in the file is applied.
+    """Verify every key the file may not set is skipped with one stderr line
+    naming the file, and the file's other settings still apply.
     """
     monkeypatch.delenv(ENV_CSTAR_SLURM_ACCOUNT, raising=False)
     removed = next(iter(REMOVED_SETTINGS))
@@ -137,14 +142,109 @@ def test_bad_keys_are_rejected_together(
         "\n".join([f"{ENV_CSTAR_SLURM_ACCOUNT}=m1234", *(f"{n}=1" for n in bad)])
     )
 
-    with pytest.raises(CstarUserConfigError) as excinfo:
-        load_user_config()
+    config = load_user_config()
 
-    message = str(excinfo.value)
-    assert str(isolate_user_config) in message
-    for name in bad:
-        assert name in message
-    assert ENV_CSTAR_SLURM_ACCOUNT not in os.environ
+    lines = capsys.readouterr().err.splitlines()
+    assert len(lines) == len(bad)
+    for name, line in zip(bad, lines, strict=True):
+        assert line.startswith(f"Ignoring a line in {isolate_user_config}: {name} ")
+    assert list(config.skipped) == bad
+    assert config.applied == {ENV_CSTAR_SLURM_ACCOUNT: "m1234"}
+    assert os.environ[ENV_CSTAR_SLURM_ACCOUNT] == "m1234"
+
+
+def test_removed_setting_is_skipped_with_its_guidance(
+    isolate_user_config: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Verify a file written with a setting this version removed (as one written
+    by an older C-Star is) loads, skipping it with one line that quotes the
+    registry's guidance.
+    """
+    name = "CSTAR_ORCH_TRX_FREQ"
+    monkeypatch.delenv(name, raising=False)
+    isolate_user_config.write_text(f"{name}=1D\n")
+
+    config = load_user_config()
+
+    err = capsys.readouterr().err
+    assert err == (
+        f"Ignoring a line in {isolate_user_config}: {name} has no effect; "
+        f"{REMOVED_SETTINGS[name].guidance}\n"
+    )
+    assert name not in os.environ
+    assert config.applied == {}
+
+
+def test_newer_versions_setting_is_skipped_as_unknown(
+    isolate_user_config: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Verify a file naming a setting from a newer C-Star loads, skipping it with
+    one line saying this version does not know it, and applying the rest.
+    """
+    name = "CSTAR_FROM_A_NEWER_VERSION"
+    monkeypatch.delenv(name, raising=False)
+    monkeypatch.delenv(ENV_CSTAR_SLURM_ACCOUNT, raising=False)
+    isolate_user_config.write_text(f"{name}=1\n{ENV_CSTAR_SLURM_ACCOUNT}=m1234\n")
+
+    config = load_user_config()
+
+    err = capsys.readouterr().err
+    assert err == (
+        f"Ignoring a line in {isolate_user_config}: {name} is not a setting "
+        f"C-Star {cstar.__version__} knows\n"
+    )
+    assert name not in os.environ
+    assert config.applied == {ENV_CSTAR_SLURM_ACCOUNT: "m1234"}
+
+
+def test_other_names_are_not_c_star_settings() -> None:
+    """Verify a name without the C-Star prefix is reported as not a setting at all,
+    with no version: no version of C-Star reads it.
+    """
+    assert user_config_problems(["SLURM_ACCOUNT"]) == [
+        "SLURM_ACCOUNT is not a C-Star setting"
+    ]
+
+
+def test_skipped_lines_are_reported_once_per_process_tree(
+    isolate_user_config: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Verify the loader reports skipped lines once and marks the file reported,
+    so a step subprocess that inherits the marker and reads the same file stays
+    quiet, while one reading another file reports it.
+    """
+    isolate_user_config.write_text("CSTAR_FROM_A_NEWER_VERSION=1\n")
+
+    load_user_config()
+    load_user_config()
+    assert len(capsys.readouterr().err.splitlines()) == 1
+    assert os.environ[ENV_CSTAR_CONFIG_REPORTED] == str(isolate_user_config)
+
+    # a subprocess: a fresh cache, the parent's environment
+    load_user_config.cache_clear()
+    config = load_user_config()
+    assert capsys.readouterr().err == ""
+    assert list(config.skipped) == ["CSTAR_FROM_A_NEWER_VERSION"]
+
+    monkeypatch.setenv(ENV_CSTAR_CONFIG_REPORTED, "/another/config.env")
+    load_user_config.cache_clear()
+    load_user_config()
+    assert "CSTAR_FROM_A_NEWER_VERSION" in capsys.readouterr().err
+
+
+def test_a_clean_file_sets_no_report_marker(isolate_user_config: Path) -> None:
+    """Verify a file with nothing to skip leaves the report marker unset."""
+    isolate_user_config.write_text(f"{ENV_CSTAR_LOG_LEVEL}=INFO\n")
+
+    load_user_config()
+
+    assert ENV_CSTAR_CONFIG_REPORTED not in os.environ
 
 
 def test_good_key_has_no_problems() -> None:
@@ -197,12 +297,14 @@ def test_system_manager_loads_the_file(
     assert os.environ[ENV_CSTAR_SLURM_ACCOUNT] == "m1234"
 
 
-def test_bare_name_without_equals_is_rejected(isolate_user_config: Path) -> None:
-    """Verify a name written with no ``=`` is reported rather than exported empty."""
+def test_bare_name_without_equals_is_skipped(isolate_user_config: Path) -> None:
+    """Verify a name written with no ``=`` is skipped rather than exported empty."""
     isolate_user_config.write_text(f"{ENV_CSTAR_SLURM_ACCOUNT}\n")
 
-    with pytest.raises(CstarUserConfigError, match="has no value"):
-        read_user_config(isolate_user_config)
+    values, skipped = parse_user_config(isolate_user_config)
+
+    assert values == {}
+    assert "has no value" in skipped[ENV_CSTAR_SLURM_ACCOUNT]
 
 
 def test_unreadable_file_is_reported_cleanly(isolate_user_config: Path) -> None:

@@ -28,15 +28,23 @@ An exported variable always beats the file. If a setting in the file seems
 to be ignored, look for an old ``export`` line in your shell profile and
 remove it. The full order is under :ref:`configuration_precedence`.
 
-C-Star refuses to run if the file contains a name it does not accept. The
-error names the file and every offending name, so you can fix them in one
-pass. Not accepted are:
+A line C-Star will not apply is skipped, with one warning naming it and why,
+and every other line still applies; ``cstar env set`` refuses such a name
+outright, so a typo is caught when it is written. C-Star stops only when it
+cannot read the file at all, and even then ``cstar init`` and ``cstar env``
+still run, so you can repair it. Skipped are:
 
-- names it does not recognise, which are usually typos;
+- names this version does not know: a typo, or a setting from a newer
+  version of C-Star sharing the file;
+- settings this version no longer reads (an older version may still);
 - feature flags (``CSTAR_FF_*``), which are developer toggles and must be
   exported;
 - ``CSTAR_CONFIG_HOME``, because it says where to find the file;
-- settings that C-Star no longer reads.
+- a name written without ``=``.
+
+``cstar init`` keeps these lines when it rewrites the file, in a section of
+their own: a setting another version may read stays as it was, and the rest
+are commented out.
 
 The easiest way to create the file is ``cstar init``, which asks for the
 scheduler settings and the data locations with the current value of each as
