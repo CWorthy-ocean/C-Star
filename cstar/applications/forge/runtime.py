@@ -205,7 +205,7 @@ def process(spec, *, working_dir=None, **kwargs):
 
 
 def publish_emitted_blueprint(executor: ForgeBlueprintExecutor) -> Path:
-    """Copy the emitted ``roms_marbl`` blueprint into ``<working root>/output/``.
+    """Copy the emitted ``ucla_roms`` blueprint into ``<working root>/output/``.
 
     Under a workplan, C-Star's deferred-blueprint resolution
     (``cstar.orchestration.transforms.resolve_deferred_blueprint``) looks for the

@@ -442,7 +442,7 @@ def single_step_workplan(
         steps=[
             Step(
                 name="s-00",
-                application=Application.ROMS_MARBL,
+                application=Application.UCLA_ROMS,
                 blueprint=bp_path,
             ),
         ],

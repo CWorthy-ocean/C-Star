@@ -179,7 +179,7 @@ steps:
 
   # ---------------------------------------------------------------- parent
   - name: parent
-    application: roms_marbl
+    application: ucla_roms
     blueprint:
       from_step: forge_parent
     depends_on:
@@ -215,7 +215,7 @@ steps:
         max_walltime: "00:30:00"
 
   - name: child
-    application: roms_marbl
+    application: ucla_roms
     blueprint:
       from_step: forge_child
     depends_on:
@@ -254,7 +254,7 @@ steps:
         max_walltime: "00:30:00"
 
   - name: parent_up
-    application: roms_marbl
+    application: ucla_roms
     blueprint:
       from_step: forge_parent_up
     depends_on:

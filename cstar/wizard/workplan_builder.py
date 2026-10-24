@@ -45,6 +45,7 @@ from cstar.applications.roms_marbl.transforms import (
     NestingDirective,
 )
 from cstar.applications.upscaler import APP_NAME as UPSCALER
+from cstar.base.application_names import canonical_application
 from cstar.base.utils import deep_merge, slugify
 from cstar.entrypoint.utils import ARG_PRE_RUN, ARG_RUN_ID, ARG_VAR_LONG
 from cstar.orchestration.check import deep_check
@@ -164,7 +165,7 @@ SOURCE_DEFERRED = "deferred"
 SOURCE_INLINE = "inline"
 SOURCE_CURRENT = "current"
 _SOURCES = [
-    ("catalog roms_marbl", SOURCE_CATALOG_ROMS),
+    ("catalog ucla_roms", SOURCE_CATALOG_ROMS),
     ("catalog forge", SOURCE_CATALOG_FORGE),
     ("path", SOURCE_PATH),
     ("upload", SOURCE_UPLOAD),
@@ -266,7 +267,7 @@ def _read_facts(path: str, mtime_ns: int) -> BlueprintFacts | None:
     runtime = _section("runtime_params")
     use_pio = partitioning.get("use_pio")
     return BlueprintFacts(
-        application=str(raw.get("application", "")),
+        application=canonical_application(str(raw.get("application", ""))),
         start_date=_as_datetime(runtime.get("start_date")),
         end_date=_as_datetime(runtime.get("end_date")),
         cpus_needed=int(cpus) if isinstance(cpus, int) else 0,
@@ -828,7 +829,7 @@ class _StepPane:
         )
         self.locked_deps = W.HTML("")
 
-        # roms_marbl overrides
+        # ucla_roms overrides
         self.start_note = W.HTML("")
         self.end_date = text(placeholder="ISO date, blank = from the blueprint")
         self.cdr_location = text(placeholder="path to a CDR forcing netCDF")
@@ -1938,7 +1939,7 @@ class _BaseChooser:
     """Form fields choosing the base of a time recipe: a step or a blueprint.
 
     A blueprint is turned into a base step on demand; a forge blueprint yields
-    a forge step plus the deferred roms_marbl step that runs what it emits.
+    a forge step plus the deferred ucla_roms step that runs what it emits.
     """
 
     def __init__(
@@ -1950,8 +1951,8 @@ class _BaseChooser:
         self._on_change = on_change
         self.kind = W.Dropdown(
             options=[
-                ("an existing roms_marbl step", _KIND_STEP),
-                ("a catalog roms_marbl blueprint", SOURCE_CATALOG_ROMS),
+                ("an existing ucla_roms step", _KIND_STEP),
+                ("a catalog ucla_roms blueprint", SOURCE_CATALOG_ROMS),
                 ("a catalog forge blueprint (forge, then run)", SOURCE_CATALOG_FORGE),
                 ("a blueprint path", SOURCE_PATH),
             ],
@@ -2005,7 +2006,7 @@ class _BaseChooser:
         self._on_change()
 
     def refresh(self, step_names: list[str]) -> None:
-        """Reload the choices from the page's roms_marbl steps and the catalog."""
+        """Reload the choices from the page's ucla_roms steps and the catalog."""
         page = self.page
         _set_options(self.step, [("(choose a step)", ""), *step_names])
         _set_options(
@@ -2112,7 +2113,7 @@ class _BaseChooser:
         if app != ROMS_MARBL:
             raise ValueError(
                 f"the base blueprint is a {app!r} blueprint; time recipes need "
-                "roms_marbl (or forge, which generates one)"
+                "ucla_roms (or forge, which generates one)"
             )
         facts = blueprint_facts(path)
         compute = (
@@ -2368,7 +2369,7 @@ class WorkplanBuilderPage:
         return list(names(application)) if names else []
 
     def roms_blueprint_names(self) -> list[str]:
-        """The catalog's roms_marbl blueprint names."""
+        """The catalog's ucla_roms blueprint names."""
         return self._blueprint_names(ROMS_MARBL)
 
     def forge_blueprint_names(self) -> list[str]:
@@ -2376,7 +2377,7 @@ class WorkplanBuilderPage:
         return self._blueprint_names(FORGE)
 
     def roms_blueprint_file(self, name: str) -> tuple[str, list[str]]:
-        """The roms_marbl blueprint file of a catalog entry, and any problems."""
+        """The ucla_roms blueprint file of a catalog entry, and any problems."""
         if not name:
             return "", []
         return str(self.catalog.blueprint_path(ROMS_MARBL, name)), []
@@ -3349,7 +3350,7 @@ class WorkplanBuilderPage:
         remove.on_click(_remove)
 
     def roms_step_names(self) -> list[str]:
-        """The names of the roms_marbl steps (the bases the time recipes accept)."""
+        """The names of the ucla_roms steps (the bases the time recipes accept)."""
         return [
             p.name.value.strip()
             for p in self.panes
@@ -3374,7 +3375,7 @@ class WorkplanBuilderPage:
             ""
             if names
             else "<span class='forge-hint'>Chunk and ramp can start from a "
-            "blueprint; upscaling needs roms_marbl steps in the Steps card.</span>"
+            "blueprint; upscaling needs ucla_roms steps in the Steps card.</span>"
         )
         self.upscale_btn.disabled = not names
 

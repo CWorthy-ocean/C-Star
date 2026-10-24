@@ -222,19 +222,19 @@ def test_get_transforms() -> None:
     """Confirm that registered transforms are returned via `get_transforms`"""
     with mock.patch.dict(
         "cstar.orchestration.transforms.TRANSFORMS",
-        {Application.ROMS_MARBL.value: [OverrideTransform]},
+        {Application.UCLA_ROMS.value: [OverrideTransform]},
         clear=True,
     ):
-        transforms = get_transforms(Application.ROMS_MARBL.value)
+        transforms = get_transforms(Application.UCLA_ROMS.value)
 
     assert not any(isinstance(tx, OverrideTransform) for tx in transforms)
 
     with mock.patch.dict(
         "cstar.orchestration.transforms.TRANSFORMS",
-        {Application.ROMS_MARBL.value: [RomsMarblTimeSplitter()]},
+        {Application.UCLA_ROMS.value: [RomsMarblTimeSplitter()]},
         clear=True,
     ):
-        transforms = get_transforms(Application.ROMS_MARBL.value)
+        transforms = get_transforms(Application.UCLA_ROMS.value)
 
     assert any(isinstance(tx, RomsMarblTimeSplitter) for tx in transforms)
 
@@ -244,7 +244,7 @@ def test_get_transforms_empty() -> None:
     for an application that has no transforms registered.
     """
     with mock.patch.dict("cstar.orchestration.transforms.TRANSFORMS", {}, clear=True):
-        transforms = get_transforms(Application.ROMS_MARBL.value)
+        transforms = get_transforms(Application.UCLA_ROMS.value)
 
     assert not any(isinstance(tx, OverrideTransform) for tx in transforms)
     assert not any(isinstance(tx, RomsMarblTimeSplitter) for tx in transforms)
@@ -5797,6 +5797,48 @@ def test_workplan_transformer_deferred_step(deferred_workplan: Workplan) -> None
     assert config[ApplyOverridesDirective.KEY_APPLICATION] == "hello_world"
 
 
+def test_workplan_transformer_deferred_step_packages_current_application_name(
+    blueprint_path: Path,
+) -> None:
+    """Verify a deferred step authored under an earlier application name packages
+    the current one for the runtime mismatch check.
+
+    Parameters
+    ----------
+    blueprint_path : Path
+        Fixture returning the path to a roms blueprint file.
+    """
+    producer = Step(
+        name="producer",
+        application="roms_marbl",
+        blueprint=blueprint_path.as_posix(),
+    )
+    consumer = Step.model_validate(
+        {
+            "name": "consumer",
+            "application": "roms_marbl",
+            "blueprint": {"from_step": "producer", "filename": "generated.yaml"},
+            "depends_on": ["producer"],
+            "blueprint_overrides": {"description": "@overridden"},
+        },
+    )
+    workplan = Workplan(
+        name="deferred-workplan",
+        description="A workplan with a deferred blueprint.",
+        steps=[producer, consumer],
+    )
+
+    transformed = WorkplanTransformer(workplan).apply()
+
+    consumer_trx = t.cast(
+        "LiveStep",
+        next(s for s in transformed.steps if s.name == "consumer"),
+    )
+    directives = t.cast("dict[str, dict[str, t.Any]]", consumer_trx.directives)
+    config = directives[ApplyOverridesDirective.key()]
+    assert config[ApplyOverridesDirective.KEY_APPLICATION] == "ucla_roms"
+
+
 def test_workplan_transformer_deferred_untouched_by_producer_transform(
     deferred_workplan: Workplan,
 ) -> None:
@@ -5847,7 +5889,7 @@ def test_workplan_transformer_deferred_active_transform_raises(
     consumer = Step.model_validate(
         {
             "name": "consumer",
-            "application": Application.ROMS_MARBL.value,
+            "application": Application.UCLA_ROMS.value,
             "blueprint": {"from_step": "producer"},
             "depends_on": ["producer"],
         },
@@ -5893,7 +5935,7 @@ def test_workplan_transformer_deferred_inactive_transform_ok(
     consumer = Step.model_validate(
         {
             "name": "consumer",
-            "application": Application.ROMS_MARBL.value,
+            "application": Application.UCLA_ROMS.value,
             "blueprint": {"from_step": "producer"},
             "depends_on": ["producer"],
         },
@@ -6192,6 +6234,43 @@ def test_apply_overrides_directive_application_mismatch(
 
     assert "hello_world" in str(error.value)
     assert "plotter" in str(error.value)
+
+
+def test_apply_overrides_directive_accepts_earlier_application_name(
+    tmp_path: Path,
+    blueprint_path: Path,
+) -> None:
+    """Verify a directive packaged under an earlier application name accepts a
+    blueprint that declares the current one.
+
+    A transformed workplan written by an earlier release carries the name it
+    was written under inside the directive configuration.
+
+    Parameters
+    ----------
+    tmp_path : Path
+        Temporary directory for test outputs
+    blueprint_path : Path
+        Fixture returning the path to a roms blueprint file.
+    """
+    step = LiveStep(
+        name="directive-step",
+        application="roms_marbl",
+        blueprint=blueprint_path.as_posix(),
+        working_dir=tmp_path / "wd",
+    )
+    assert step.application == "ucla_roms"
+
+    config: dict[str, t.Any] = {
+        ApplyOverridesDirective.KEY_OVERRIDES: {"partitioning": {"n_procs_x": 1}},
+        ApplyOverridesDirective.KEY_APPLICATION: "roms_marbl",
+    }
+    directive = ApplyOverridesDirective(config)
+    transformed = directive(step)[0]
+
+    bp = deserialize(Path(transformed.blueprint_path), RomsMarblBlueprint)
+    assert bp.application == "ucla_roms"
+    assert bp.partitioning.n_procs_x == 1
 
 
 def test_apply_overrides_directive_requires_overrides() -> None:
@@ -6553,7 +6632,7 @@ def test_workplan_transformer_deferred_split_producer_raises(
 
     producer = Step(
         name="producer",
-        application=Application.ROMS_MARBL.value,
+        application=Application.UCLA_ROMS.value,
         blueprint=bp_path.as_posix(),
     )
     consumer = Step.model_validate(
@@ -6812,7 +6891,7 @@ def test_workplan_transformer_inline_active_transform_raises() -> None:
     consumer = Step.model_validate(
         {
             "name": "consumer",
-            "application": Application.ROMS_MARBL.value,
+            "application": Application.UCLA_ROMS.value,
             "blueprint": "inline",
         },
     )

@@ -1,7 +1,7 @@
 # yaml-language-server: $schema=https://raw.githubusercontent.com/CWorthy-ocean/C-Star/refs/heads/main/docs/schemas/bp/roms_marbl/roms_marbl_schema.3.0.0.json
 name: wio_toy
 description: wio toy domain for laptop
-application: roms_marbl
+application: ucla_roms
 schema_version: 3.0.0
 working_dir: "~/cstar/wio_toy_blueprint"
 state: draft

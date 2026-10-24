@@ -1,9 +1,9 @@
 import typing as t
 
+from cstar.applications.roms_marbl.models import APP_NAME
 from cstar.base.adapter import SchemaAdapter
 from cstar.base.utils import deep_merge
 
-APP_NAME: t.Final[str] = "roms_marbl"
 APP_ROMS_MARBL_SCHEMA_1_0_0: t.Final[str] = "1.0.0"
 APP_ROMS_MARBL_SCHEMA_2_0_0: t.Final[str] = "2.0.0"
 APP_ROMS_MARBL_SCHEMA_2_1_0: t.Final[str] = "2.1.0"
@@ -14,7 +14,7 @@ rm_bounds = {
     "min": APP_ROMS_MARBL_SCHEMA_1_0_0,
     "max": APP_ROMS_MARBL_SCHEMA_3_0_0,
 }
-"""Schema bounds for the roms_marbl blueprint schema.
+"""Schema bounds for the ucla_roms blueprint schema.
 
 The schema bounds enable the migration tool to:
 - automatically set version to  minimum version for a blueprint that predated versioning

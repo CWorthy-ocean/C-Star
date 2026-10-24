@@ -21,28 +21,31 @@ Specs, one directory per entry, under a directory per kind:
 - ``CdrSpec/<name>/...``: carbon dioxide removal forcing.
 
 Plus ``blueprints/<application>/<name>.yaml`` for blueprints -- the directory
-is the registered application name (``forge``, ``roms_marbl``, ...) and the
+is the registered application name (``forge``, ``ucla_roms``, ...) and the
 file name is the entry's name -- and ``workplans/`` for workplans saved from
 the wizard. The directory name (for blueprints, the file name) is an entry's
 name; there are no version numbers or identifiers beyond it. The older flat
 ``<name>.forge_blueprint.yaml`` and ``B_<name>.yaml`` files and
-``blueprints/<machine>/<name>/B_*.yaml`` directories are still read for one
-release, with a warning; ``cstar admin migrate-catalog <root>`` moves them
-into the current layout. Each file under ``blueprints/<application>/`` is one
-blueprint, so sidecar files (``settings_B_*.yaml``, ``_grid.yaml``) do not
-belong there. :doc:`forge/specs` describes
-what each spec kind contains.
+``blueprints/<machine>/<name>/B_*.yaml`` directories, and a
+``blueprints/roms_marbl/`` directory named for the UCLA-ROMS application's
+earlier name, are still read for one release, with a warning;
+``cstar admin migrate-catalog <root>`` moves them into the current layout. Each
+file under ``blueprints/<application>/`` is one blueprint, so sidecar files
+(``settings_B_*.yaml``, ``_grid.yaml``) do not belong there. :doc:`forge/specs`
+describes what each spec kind contains.
 
 Migrating an older catalog
 --------------------------
 
-Earlier versions kept blueprints in three other forms, which C-Star still
+Earlier versions kept blueprints in four other forms, which C-Star still
 reads for one more release:
 
 - ``blueprints/<name>.forge_blueprint.yaml``, a forge blueprint;
-- ``blueprints/B_<name>.yaml``, a ROMS-MARBL blueprint;
-- ``blueprints/<machine>/<name>/B_*.yaml``, a ROMS-MARBL blueprint in a
-  per-machine directory.
+- ``blueprints/B_<name>.yaml``, a UCLA-ROMS blueprint;
+- ``blueprints/<machine>/<name>/B_*.yaml``, a UCLA-ROMS blueprint in a
+  per-machine directory;
+- ``blueprints/roms_marbl/<name>.yaml``, a UCLA-ROMS blueprint under the
+  application's earlier name.
 
 Loading a catalog that holds any of them logs one warning listing them. To
 move them into ``blueprints/<application>/<name>.yaml``, run:
@@ -56,10 +59,10 @@ The catalog is read with validation suppressed, so an incomplete catalog can
 still be migrated. Every destination ends in ``.yaml`` (a ``.yml`` source is
 renamed). A blueprint whose destination already exists is left where it is
 and reported, never overwritten. After a per-machine blueprint is moved, its
-``<name>/`` and ``<machine>/`` directories are removed if they are empty;
-whatever else lives there (a ``Build/`` directory, ``_grid.yaml``,
-``settings_B_*.yaml``) is not a blueprint, so it is left in place and listed
-for you to keep or delete.
+``<name>/`` and ``<machine>/`` directories are removed if they are empty, as
+is an emptied ``blueprints/roms_marbl/``; whatever else lives there (a
+``Build/`` directory, ``_grid.yaml``, ``settings_B_*.yaml``) is not a
+blueprint, so it is left in place and listed for you to keep or delete.
 
 Layers
 ------

@@ -1485,7 +1485,7 @@ def release_ref_for_remote(location: str, checkout_target: str) -> str:
     warnings.warn(
         f"Could not resolve ucla-roms commit {checkout_target!r} in {location} to "
         f"a release tag; using the latest known namelist schema "
-        f"({NAMELIST_SCHEMA_REGISTRY[-1][2].__name__}). If the roms_marbl step "
+        f"({NAMELIST_SCHEMA_REGISTRY[-1][2].__name__}). If the ucla_roms step "
         f"refuses the namelist, pin a release tag (or use a branch pin).",
         UserWarning,
         stacklevel=2,

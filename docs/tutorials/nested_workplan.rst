@@ -74,9 +74,9 @@ Its blueprint is the one ``make_outer`` writes, but ``blueprint_overrides``
 changes two values in it before the model runs: the end date is pulled back
 by a day, and the time step is halved, to resolve the adjustment from the
 reanalysis initial state more carefully. The override keys follow the
-ROMS-MARBL blueprint:
+UCLA-ROMS blueprint:
 ``runtime_params`` is the run window, and ``namelist_overrides`` is keyed by
-namelist group and setting (see :doc:`../blueprints/roms_marbl`). The
+namelist group and setting (see :doc:`../blueprints/ucla_roms`). The
 blueprint itself is not edited; the overrides are applied to a copy when the
 step starts, and that copy is kept in the step's ``work`` directory. The
 spin-up leaves behind a restart file at the end of 2012-01-01 and, because

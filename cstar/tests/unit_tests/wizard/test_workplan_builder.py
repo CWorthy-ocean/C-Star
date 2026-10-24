@@ -49,8 +49,8 @@ _BP_TEMPLATE = (
     / "additional_files"
     / "templates"
     / "bp"
-    / "roms_marbl"
-    / "blueprint.3.2.0.yaml"
+    / "ucla_roms"
+    / "blueprint.3.3.0.yaml"
 )
 _FORGE_BP = "wio-toy-simple"
 
@@ -75,7 +75,7 @@ def page(bp_app: ForgeBlueprintWizardApp) -> WorkplanBuilderPage:
 
 @pytest.fixture
 def roms_bp(tmp_path: Path) -> Path:
-    """A readable roms_marbl blueprint (128 CPUs, 2020-01-01 start, ucla-roms ``main``)."""
+    """A readable ucla_roms blueprint (128 CPUs, 2020-01-01 start, ucla-roms ``main``)."""
     path = tmp_path / "roms.yaml"
     shutil.copy(_BP_TEMPLATE, path)
     return path
@@ -196,7 +196,7 @@ def test_pane_prefills_cpus_and_shows_the_blueprint_window(page, roms_bp):
     pane = page.panes[0]
     _path_step(pane, "run", roms_bp)
     assert pane.num_cpus.value == 128
-    assert pane.application.value == "roms_marbl"
+    assert pane.application.value == "ucla_roms"
     assert pane.application.disabled  # derived from the file
     assert "2020-01-01" in pane.start_note.value
     assert "start_date" not in str(pane.gather().blueprint_overrides)
@@ -530,7 +530,7 @@ def test_deferred_step_is_prefilled_from_the_forge_hook(page):
     run.producer.value = "forge"
     assert run.filename.value == f"B_{_FORGE_BP}.yaml"
     assert run.num_cpus.value == 10
-    assert run.application.value == "roms_marbl"
+    assert run.application.value == "ucla_roms"
     step = page.draft.steps[1]
     assert step.is_deferred
     assert step.blueprint_path.filename == f"B_{_FORGE_BP}.yaml"
@@ -650,7 +650,7 @@ def test_upload_source_stages_the_file(page, roms_bp):
     )
     assert Path(pane._uploaded_path).name == "up.yaml"
     assert Path(pane._uploaded_path).read_bytes() == roms_bp.read_bytes()
-    assert pane.application.value == "roms_marbl"
+    assert pane.application.value == "ucla_roms"
 
 
 # ---------------------------------------------------------------------------
@@ -1030,7 +1030,7 @@ def test_a_run_kept_in_two_places_is_listed_once(page, roms_bp, run_homes, track
 
 def test_blueprint_runs_are_not_listed(page, roms_bp, run_homes, tracked):
     _make_run(
-        StateDirectoryManager.blueprint_runs_dir() / "roms_marbl" / "solo",
+        StateDirectoryManager.blueprint_runs_dir() / "ucla_roms" / "solo",
         "solo",
         roms_bp,
         kind="blueprint",
@@ -1353,7 +1353,7 @@ class _StubCatalog:
         self.root = root
         self.read_only = read_only
         self.workplans_dir = root / "workplans"
-        self.blueprint_applications = ["roms_marbl"]
+        self.blueprint_applications = ["ucla_roms"]
 
     def blueprint_names(self, application: str) -> list[str]:
         return sorted(p.stem for p in (self.root / application).glob("*.yaml"))
@@ -1370,9 +1370,9 @@ def _stub_page(catalog: _StubCatalog) -> WorkplanBuilderPage:
 
 
 def test_catalog_blueprint_entry_resolves_to_its_file(tmp_path, roms_bp):
-    """A ``blueprints/roms_marbl/<name>.yaml`` entry maps to that file."""
-    (tmp_path / "roms_marbl").mkdir()
-    entry = tmp_path / "roms_marbl" / "flat.yaml"
+    """A ``blueprints/ucla_roms/<name>.yaml`` entry maps to that file."""
+    (tmp_path / "ucla_roms").mkdir()
+    entry = tmp_path / "ucla_roms" / "flat.yaml"
     shutil.copy(roms_bp, entry)
 
     page = _stub_page(_StubCatalog(tmp_path))
@@ -1495,7 +1495,7 @@ def test_time_recipes_offer_only_roms_marbl_steps_as_bases(page):
     assert page.roms_step_names() == []
     assert _values(page.chunk_base.step) == [""]
     assert _values(page.ramp_base.step) == [""]
-    assert "upscaling needs roms_marbl steps" in page.recipe_hint.value
+    assert "upscaling needs ucla_roms steps" in page.recipe_hint.value
     assert page.upscale_btn.disabled
     # chunk and ramp can still start from a blueprint, so they stay enabled
     assert not page.chunk_btn.disabled and not page.ramp_btn.disabled
@@ -1540,7 +1540,7 @@ def test_forge_then_run_recipe_adds_forge_and_deferred_steps(page, tmp_path):
     _name_page(page)
     page.forge_source.value = _FORGE_BP
     page.forge_btn.click()
-    assert [p.name.value for p in page.panes] == ["forge", "roms_marbl"]
+    assert [p.name.value for p in page.panes] == ["forge", "ucla_roms"]
     draft = _round_trips(page, tmp_path)
     forge, run = draft.steps
     assert forge.application == "forge"
@@ -1549,7 +1549,7 @@ def test_forge_then_run_recipe_adds_forge_and_deferred_steps(page, tmp_path):
     assert run.compute_overrides == {"slurm": {"num_cpus": 10}}
     # a second addition picks fresh names
     page.forge_btn.click()
-    assert [p.name.value for p in page.panes][2:] == ["forge-2", "roms_marbl-2"]
+    assert [p.name.value for p in page.panes][2:] == ["forge-2", "ucla_roms-2"]
     page.forge_source.value = ""
     page.forge_path.value = str(tmp_path / "missing.yaml")
     page.forge_btn.click()
@@ -1901,7 +1901,7 @@ def test_upscale_use_pio_defaults_to_off_when_unknown(page, tmp_path):
         pane.name.value = name
         pane.source.value = wb.SOURCE_PATH
         pane.path.value = str(tmp_path / "unreadable.yaml")
-        pane.application.value = "roms_marbl"
+        pane.application.value = "ucla_roms"
     page.upscale_levels.value = ["inner", "outer"]
     page.upscale_btn.click()
     upscale = {p.name.value: p for p in page.panes}["upscale_inner_outer"]
@@ -2040,11 +2040,11 @@ def test_chunk_window_is_prefilled_from_a_deferred_producer(page):
     _name_page(page)
     page.forge_source.value = _FORGE_BP
     page.forge_btn.click()
-    assert page.roms_step_names() == ["roms_marbl"]
-    page.chunk_base.step.value = "roms_marbl"
+    assert page.roms_step_names() == ["ucla_roms"]
+    page.chunk_base.step.value = "ucla_roms"
     assert page.chunk_start.value == "2012-01-01 00:00:00"
     assert page.chunk_end.value == "2012-01-02 00:00:00"
-    assert page.chunk_prefix.value == "roms_marbl"
+    assert page.chunk_prefix.value == "ucla_roms"
 
 
 # ---------------------------------------------------------------------------
@@ -2078,8 +2078,8 @@ def test_runs_section_title():
 
 
 def test_chunk_recipe_from_a_catalog_roms_blueprint(tmp_path, roms_bp):
-    (tmp_path / "roms_marbl").mkdir()
-    shutil.copy(roms_bp, tmp_path / "roms_marbl" / "my.bp.yaml")
+    (tmp_path / "ucla_roms").mkdir()
+    shutil.copy(roms_bp, tmp_path / "ucla_roms" / "my.bp.yaml")
     page = _stub_page(_StubCatalog(tmp_path))
     page._delete(page.panes[0])
     _name_page(page)
@@ -2093,7 +2093,7 @@ def test_chunk_recipe_from_a_catalog_roms_blueprint(tmp_path, roms_bp):
     names = [p.name.value for p in page.panes]
     assert names == ["my.bp-01", "my.bp-02"]  # the base is synthesized, not added
     first, second = page.draft.steps
-    assert first.blueprint_path == str(tmp_path / "roms_marbl" / "my.bp.yaml")
+    assert first.blueprint_path == str(tmp_path / "ucla_roms" / "my.bp.yaml")
     assert first.compute_overrides == {"slurm": {"num_cpus": 128}}
     assert second.directives["continue-from"] == {"step": "my.bp-01"}
 

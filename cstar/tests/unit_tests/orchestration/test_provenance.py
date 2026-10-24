@@ -180,6 +180,15 @@ def test_blueprint_ref_dump_keeps_kind_when_defaults_are_excluded() -> None:
     }
 
 
+def test_blueprint_ref_loads_earlier_application_name_as_current() -> None:
+    """Verify a reference written under an earlier application name names the current one."""
+    ref = BlueprintIdentity(
+        kind="Blueprint", application="roms_marbl", name="wales-toy"
+    )
+
+    assert ref.application == "ucla_roms"
+
+
 def test_blueprint_metadata_is_exactly_the_base_blueprint_fields() -> None:
     """Verify an application's own configuration is what is left over."""
     assert BLUEPRINT_METADATA_FIELDS == {

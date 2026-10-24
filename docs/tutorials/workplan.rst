@@ -43,11 +43,11 @@ gets. The two steps here are exactly the two commands from the previous page:
    can be moved around together.
 
 ``simulate``
-   Runs the ROMS-MARBL application. Its blueprint does not exist yet when you
+   Runs the UCLA-ROMS application. Its blueprint does not exist yet when you
    submit the workplan, because Forge has not written it. Instead of a path,
    ``blueprint`` names the step that will produce it: ``from_step:
    make_inputs``. When the step starts, C-Star knows where Forge will output
-   the ROMS-MARBL blueprint, and looks there for its instructions.
+   the UCLA-ROMS blueprint, and looks there for its instructions.
 
 ``depends_on`` is the ordering. A step does not start until every step it
 lists has finished successfully, and a step that depends on nothing starts at
@@ -131,7 +131,7 @@ looks like this:
    │1. make_inputs (forge) │           │          │    ✔    │      │        │           │             │
    ├───────────────────────┼───────────┼──────────┼─────────┼──────┼────────┼───────────┼─────────────┤
    │           2. simulate │           │          │    ✔    │      │        │           │      1      │
-   │          (roms_marbl) │           │          │         │      │        │           │             │
+   │           (ucla_roms) │           │          │         │      │        │           │             │
    └───────────────────────┴───────────┴──────────┴─────────┴──────┴────────┴───────────┴─────────────┘
                Disk usage not measured. Run: cstar run status wio-workplan-tutorial --size
 
@@ -179,7 +179,7 @@ outcome. Once the run is over:
    ┃ Step        ┃ Application ┃ Status ┃ Outcome   ┃ Products ┃ Size ┃ Record ┃
    ┡━━━━━━━━━━━━━╇━━━━━━━━━━━━━╇━━━━━━━━╇━━━━━━━━━━━╇━━━━━━━━━━╇━━━━━━╇━━━━━━━━┩
    │ make_inputs │ forge       │ Done   │ completed │ 0        │ 0 B  │ yes    │
-   │ simulate    │ roms_marbl  │ Done   │ completed │ 0        │ 0 B  │ yes    │
+   │ simulate    │ ucla_roms   │ Done   │ completed │ 0        │ 0 B  │ yes    │
    └─────────────┴─────────────┴────────┴───────────┴──────────┴──────┴────────┘
 
 Finally,
@@ -222,7 +222,7 @@ to go straight to a given run or step.
 
 The files are the same ones the previous page produced, and you can open them
 with `roms-tools <https://roms-tools.readthedocs.io/en/latest/plotting_roms_output.html>`_
-or any netCDF tool exactly as before. The ROMS-MARBL blueprint that
+or any netCDF tool exactly as before. The UCLA-ROMS blueprint that
 ``simulate`` ran is in the ``output`` directory of ``make_inputs``.
 
 What you gained

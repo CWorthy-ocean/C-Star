@@ -1,9 +1,11 @@
 import sys
 import textwrap
 from pathlib import Path
+from typing import Any
 from unittest import mock
 
 import pytest
+import yaml
 from pydantic import ValidationError
 
 from cstar.applications.core import (
@@ -98,6 +100,30 @@ def test_get_application_unknown_name_raises_value_error() -> None:
     """Verify that an unregistered application name raises ValueError."""
     with pytest.raises(ValueError, match="No application for"):
         get_application("no_such_application")
+
+
+def test_get_application_resolves_alias_to_current_application() -> None:
+    """An earlier application name returns the application that replaced it."""
+    current = get_application("ucla_roms")
+
+    assert current.name == "ucla_roms"
+    assert type(get_application("roms_marbl")) is type(current)
+
+
+def test_roms_marbl_blueprint_loads_earlier_application_name_as_current(
+    complete_blueprint_path: Path,
+) -> None:
+    """A blueprint authored under the earlier name loads under the current one.
+
+    Loads through `RomsMarblBlueprint` itself: the subclass redeclares
+    `application`, which must not drop the canonicalisation.
+    """
+    data: dict[str, Any] = yaml.safe_load(complete_blueprint_path.read_text())
+    assert data["application"] == "roms_marbl"
+
+    blueprint = RomsMarblBlueprint.model_validate(data)
+
+    assert blueprint.application == "ucla_roms"
 
 
 def test_get_application_via_installed_entry_point(

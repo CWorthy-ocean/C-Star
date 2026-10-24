@@ -32,14 +32,15 @@ def _tree(root: Path) -> dict[str, str | None]:
 
 @pytest.fixture
 def legacy_root(tmp_path: Path) -> Path:
-    """A catalog root holding all three legacy blueprint forms.
+    """A catalog root holding all four legacy blueprint forms.
 
     ``suppress_validation`` means no ModelSpec etc. is needed to read it.
 
     - flat forge: ``blueprints/flat-forge.forge_blueprint.yaml``
-    - flat roms_marbl: ``blueprints/B_flat-roms.yml`` (a ``.yml`` source)
+    - flat ucla_roms: ``blueprints/B_flat-roms.yml`` (a ``.yml`` source)
     - per-machine, fully movable: ``blueprints/anvil/clean/B_clean.yaml``
     - per-machine with leftovers: ``blueprints/anvil/messy/{B_messy.yaml,Build/,_grid.yaml}``
+    - earlier application name: ``blueprints/roms_marbl/earlier.yaml``
     """
     root = tmp_path / "catalog"
     bp = root / "blueprints"
@@ -49,6 +50,7 @@ def legacy_root(tmp_path: Path) -> Path:
     _write(bp / "anvil" / "messy" / "B_messy.yaml", "roms-messy")
     _write(bp / "anvil" / "messy" / "_grid.yaml", "grid")
     _write(bp / "anvil" / "messy" / "Build" / "keep.txt", "build")
+    _write(bp / "roms_marbl" / "earlier.yaml", "roms-earlier")
     return root
 
 
@@ -67,25 +69,32 @@ def test_migrate_catalog_layout_report_and_tree(legacy_root: Path) -> None:
                 bp / "flat-forge.forge_blueprint.yaml",
                 bp / "forge" / "flat-forge.yaml",
             ),
-            (bp / "B_flat-roms.yml", bp / "roms_marbl" / "flat-roms.yaml"),
+            (bp / "B_flat-roms.yml", bp / "ucla_roms" / "flat-roms.yaml"),
             (
                 bp / "anvil" / "clean" / "B_clean.yaml",
-                bp / "roms_marbl" / "clean.yaml",
+                bp / "ucla_roms" / "clean.yaml",
             ),
             (
                 bp / "anvil" / "messy" / "B_messy.yaml",
-                bp / "roms_marbl" / "messy.yaml",
+                bp / "ucla_roms" / "messy.yaml",
+            ),
+            (
+                bp / "roms_marbl" / "earlier.yaml",
+                bp / "ucla_roms" / "earlier.yaml",
             ),
         ]
     )
     assert report.skipped_collisions == []
-    assert report.removed_dirs == [bp / "anvil" / "clean"]
+    assert report.removed_dirs == [bp / "anvil" / "clean", bp / "roms_marbl"]
     assert report.left_in_place == [bp / "anvil" / "messy"]
 
     assert (bp / "forge" / "flat-forge.yaml").read_text() == "forge-flat"
-    assert (bp / "roms_marbl" / "flat-roms.yaml").read_text() == "roms-flat"
-    assert (bp / "roms_marbl" / "clean.yaml").read_text() == "roms-clean"
-    assert (bp / "roms_marbl" / "messy.yaml").read_text() == "roms-messy"
+    assert (bp / "ucla_roms" / "flat-roms.yaml").read_text() == "roms-flat"
+    assert (bp / "ucla_roms" / "clean.yaml").read_text() == "roms-clean"
+    assert (bp / "ucla_roms" / "messy.yaml").read_text() == "roms-messy"
+    assert (bp / "ucla_roms" / "earlier.yaml").read_text() == "roms-earlier"
+    # the earlier-name directory is gone with its only file
+    assert not (bp / "roms_marbl").exists()
     # `clean/` is gone, `messy/` keeps what is not a blueprint, `anvil/` stays
     # because `messy/` is still inside it (and is not itself reported).
     assert not (bp / "anvil" / "clean").exists()
@@ -104,11 +113,16 @@ def test_migrated_catalog_reloads_without_legacy_entries(legacy_root: Path) -> N
 
     assert reloaded.legacy_blueprints == []
     assert reloaded.blueprint_names("forge") == ["flat-forge"]
-    assert reloaded.blueprint_names("roms_marbl") == ["clean", "flat-roms", "messy"]
+    assert reloaded.blueprint_names("ucla_roms") == [
+        "clean",
+        "earlier",
+        "flat-roms",
+        "messy",
+    ]
     assert reloaded.blueprint_path("forge", "flat-forge") == (
         root / "blueprints" / "forge" / "flat-forge.yaml"
     )
-    assert reloaded.blueprint_path("roms_marbl", "messy").read_text() == "roms-messy"
+    assert reloaded.blueprint_path("ucla_roms", "messy").read_text() == "roms-messy"
 
 
 def test_migrate_catalog_layout_collision_is_skipped(
@@ -122,11 +136,11 @@ def test_migrate_catalog_layout_collision_is_skipped(
     """
     root = tmp_path.resolve()
     src = _write(root / "blueprints" / "B_dup.yaml", "legacy-dup")
-    dst = _write(root / "blueprints" / "roms_marbl" / "dup.yaml", "current-dup")
+    dst = _write(root / "blueprints" / "ucla_roms" / "dup.yaml", "current-dup")
     monkeypatch.setattr(
         DomainCatalog,
         "legacy_blueprints",
-        property(lambda self: [("roms_marbl", "dup", src)]),
+        property(lambda self: [("ucla_roms", "dup", src)]),
     )
     snapshot = _tree(root)
 
@@ -146,7 +160,7 @@ def test_migrate_catalog_layout_moves_winner_and_skips_duplicate_loser(
     bp = root / "blueprints"
     flat = _write(bp / "B_dup.yaml", "flat")
     nested = _write(bp / "anvil" / "dup" / "B_dup.yaml", "nested")
-    dst = bp / "roms_marbl" / "dup.yaml"
+    dst = bp / "ucla_roms" / "dup.yaml"
 
     report = migrate_catalog_layout(root)
 
@@ -186,19 +200,140 @@ def test_migrate_catalog_layout_machine_named_like_application(tmp_path: Path) -
     holding the migrated file and is not removed.
     """
     root = tmp_path.resolve()
-    _write(root / "blueprints" / "roms_marbl" / "x" / "B_x.yaml", "x")
+    _write(root / "blueprints" / "ucla_roms" / "x" / "B_x.yaml", "x")
 
     report = migrate_catalog_layout(root)
 
-    assert (root / "blueprints" / "roms_marbl" / "x.yaml").read_text() == "x"
+    assert (root / "blueprints" / "ucla_roms" / "x.yaml").read_text() == "x"
     assert report.moved == [
         (
-            root / "blueprints" / "roms_marbl" / "x" / "B_x.yaml",
-            root / "blueprints" / "roms_marbl" / "x.yaml",
+            root / "blueprints" / "ucla_roms" / "x" / "B_x.yaml",
+            root / "blueprints" / "ucla_roms" / "x.yaml",
         )
     ]
-    assert report.removed_dirs == [root / "blueprints" / "roms_marbl" / "x"]
+    assert report.removed_dirs == [root / "blueprints" / "ucla_roms" / "x"]
     assert report.left_in_place == []
+
+
+def test_migrate_catalog_layout_earlier_application_name_directory(
+    tmp_path: Path,
+) -> None:
+    """`blueprints/roms_marbl/x.yaml` moves to `blueprints/ucla_roms/x.yaml`; a
+    dry run plans that and the directory's removal and changes nothing, and the
+    real run does both.
+    """
+    root = tmp_path.resolve()
+    src = _write(root / "blueprints" / "roms_marbl" / "x.yaml", "x")
+    dst = root / "blueprints" / "ucla_roms" / "x.yaml"
+    snapshot = _tree(root)
+
+    planned = migrate_catalog_layout(root, dry_run=True)
+
+    assert planned == CatalogMigrationReport(
+        moved=[(src, dst)], removed_dirs=[src.parent]
+    )
+    assert _tree(root) == snapshot
+
+    report = migrate_catalog_layout(root)
+
+    assert report == planned
+    assert dst.read_text() == "x"
+    assert not src.parent.exists()
+    assert DomainCatalog(root, suppress_validation=True).legacy_blueprints == []
+
+
+def test_migrate_catalog_layout_keeps_a_non_empty_earlier_name_directory(
+    tmp_path: Path,
+) -> None:
+    """Whatever else sits in an earlier-name directory stays, and the directory
+    with it, reported as left in place.
+    """
+    root = tmp_path.resolve()
+    directory = root / "blueprints" / "roms_marbl"
+    src = _write(directory / "x.yaml", "x")
+    notes = _write(directory / "notes.txt", "keep me")
+    dst = root / "blueprints" / "ucla_roms" / "x.yaml"
+
+    report = migrate_catalog_layout(root)
+
+    assert report == CatalogMigrationReport(
+        moved=[(src, dst)], left_in_place=[directory]
+    )
+    assert dst.read_text() == "x"
+    assert notes.read_text() == "keep me"
+    assert not src.exists()
+
+
+def test_migrate_catalog_layout_keeps_a_symlinked_earlier_name_directory(
+    tmp_path: Path,
+) -> None:
+    """A symlinked earlier-name directory is reported as left in place, never
+    removed, so the migration finishes instead of failing in `rmdir`.
+    """
+    root = (tmp_path / "catalog").resolve()
+    shared = _write(tmp_path / "shared" / "x.yaml", "x").parent
+    link = root / "blueprints" / "roms_marbl"
+    link.parent.mkdir(parents=True)
+    link.symlink_to(shared, target_is_directory=True)
+    dst = root / "blueprints" / "ucla_roms" / "x.yaml"
+
+    report = migrate_catalog_layout(root)
+
+    assert report == CatalogMigrationReport(
+        moved=[(link / "x.yaml", dst)], left_in_place=[link]
+    )
+    assert dst.read_text() == "x"
+    assert link.is_symlink()
+
+
+def test_migrate_catalog_layout_collision_in_earlier_name_directory(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An earlier-name entry whose destination already exists is left in place,
+    and so is the directory.
+    """
+    root = tmp_path.resolve()
+    src = _write(root / "blueprints" / "roms_marbl" / "dup.yaml", "legacy-dup")
+    other = _write(root / "blueprints" / "roms_marbl" / "other.yaml", "other")
+    dst = root / "blueprints" / "ucla_roms" / "other.yaml"
+    taken = _write(root / "blueprints" / "ucla_roms" / "dup.yaml", "current-dup")
+    # the catalog hides an entry whose current twin it sees (see above), so the
+    # plan is fed the entry directly
+    monkeypatch.setattr(
+        DomainCatalog,
+        "legacy_blueprints",
+        property(
+            lambda self: [("ucla_roms", "dup", src), ("ucla_roms", "other", other)]
+        ),
+    )
+
+    report = migrate_catalog_layout(root)
+
+    assert report == CatalogMigrationReport(
+        moved=[(other, dst)],
+        skipped_collisions=[(src, taken)],
+        left_in_place=[src.parent],
+    )
+    assert src.read_text() == "legacy-dup"
+    assert taken.read_text() == "current-dup"
+
+
+def test_cli_migrate_catalog_dry_run_plans_the_earlier_name_directory(
+    tmp_path: Path,
+) -> None:
+    """`--dry-run` names the planned move and directory removal, and touches nothing."""
+    src = _write(tmp_path / "blueprints" / "roms_marbl" / "x.yaml", "x")
+    snapshot = _tree(tmp_path)
+
+    result = CliRunner().invoke(app, [str(tmp_path), "--dry-run"])
+
+    out = result.stdout.replace("\n", "")
+    assert result.exit_code == 0, result.output
+    assert f"[dry-run] moved {src.resolve()} -> " in out
+    assert str(tmp_path.resolve() / "blueprints" / "ucla_roms" / "x.yaml") in out
+    assert f"[dry-run] removed empty directory {src.parent.resolve()}" in out
+    assert "removed 1 empty director(y/ies)" in out
+    assert _tree(tmp_path) == snapshot
 
 
 def test_cli_migrate_catalog(legacy_root: Path) -> None:
@@ -217,11 +352,11 @@ def test_cli_migrate_catalog_reports_collision(
 ) -> None:
     """A skipped collision is named in the output."""
     src = _write(tmp_path / "blueprints" / "B_dup.yaml", "legacy-dup")
-    _write(tmp_path / "blueprints" / "roms_marbl" / "dup.yaml", "current-dup")
+    _write(tmp_path / "blueprints" / "ucla_roms" / "dup.yaml", "current-dup")
     monkeypatch.setattr(
         DomainCatalog,
         "legacy_blueprints",
-        property(lambda self: [("roms_marbl", "dup", src.resolve())]),
+        property(lambda self: [("ucla_roms", "dup", src.resolve())]),
     )
 
     result = CliRunner().invoke(app, [str(tmp_path)])

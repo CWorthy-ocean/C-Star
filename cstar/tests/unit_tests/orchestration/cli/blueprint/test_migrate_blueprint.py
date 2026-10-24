@@ -42,7 +42,8 @@ def blueprint_1_0_0(
     work_dir.mkdir(parents=True)
 
     versioned_file_name = "blueprint.1.0.0.yaml"
-    bp_2025_1 = bp_templates_dir / APP_ROMS / versioned_file_name
+    # The 1.0.0 template stays under the earlier application name's directory.
+    bp_2025_1 = bp_templates_dir / "roms_marbl" / versioned_file_name
     bp_path = work_dir / versioned_file_name
     content = bp_2025_1.read_text()
     bp_path.write_text(content)
@@ -193,6 +194,29 @@ def test_blueprint_migrate_compatible_untouched(
     assert "nothing to migrate" in " ".join(result.stdout.split())
     assert hello_world_bp_path.read_bytes() == original
     assert set(hello_world_bp_path.parent.glob("*")) == siblings
+
+
+@pytest.mark.parametrize("flag", ["--inplace", ARG_DRY_RUN])
+def test_blueprint_migrate_compatible_earlier_application_name_untouched(
+    blueprint_path: Path,
+    flag: str,
+) -> None:
+    """Verify a compatible blueprint authored under an earlier application name
+    is reported as nothing to migrate and is not rewritten.
+    """
+    original = blueprint_path.read_bytes()
+    assert b"application: roms_marbl" in original
+    siblings = set(blueprint_path.parent.glob("*"))
+
+    runner = CliRunner()
+    result = runner.invoke(app, [blueprint_path.as_posix(), flag], color=False)
+
+    assert result.exit_code == 0
+    output = " ".join(result.stdout.split())
+    assert f"is {APP_ROMS} schema 3.0.0" in output
+    assert "nothing to migrate" in output
+    assert blueprint_path.read_bytes() == original
+    assert set(blueprint_path.parent.glob("*")) == siblings
 
 
 def test_blueprint_migrate_custom_output(

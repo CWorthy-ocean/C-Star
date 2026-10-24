@@ -226,7 +226,7 @@ def find_carbonate_sensitivity_files(
         raise FileNotFoundError(
             f"carbonate_sensitivity: no joined {CarbonateSensitivityFile.LABEL} "
             f"files in {directory} ({len(found)} per-rank tile file(s) skipped). "
-            "Expected the output of a ROMS-MARBL run with cdr_gas_exch_output "
+            "Expected the output of a UCLA-ROMS run with MARBL and cdr_gas_exch_output "
             f"enabled, named <root>{CarbonateSensitivityFile.SUFFIX}."
             "<14-digit timestamp>.nc."
         )
@@ -795,7 +795,7 @@ def build_forge_blueprint(
 
     ``carbonate_sensitivity``, if given, lists the carbonate sensitivity files a
     ``bgc_mode == "cdr_lite"`` build reads as surface forcing (the ``_cdrgas``
-    files of a ROMS-MARBL run). Normally it is left out: the
+    files of a UCLA-ROMS run with MARBL). Normally it is left out: the
     ``carbonate-sensitivity-from`` workplan directive supplies them at run time.
     Accepts a directory (scanned for joined ``_cdrgas`` files; an error if it has
     none), a single file path, a sequence of file paths (kept in order), a

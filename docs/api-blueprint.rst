@@ -37,8 +37,8 @@ Simulation Components
    cstar.applications.roms_marbl.models.RuntimeParameterSet
    cstar.applications.roms_marbl.models.PartitioningParameterSet
 
-ROMS-MARBL
-----------
+UCLA-ROMS
+---------
 
 .. autosummary::
    :toctree: generated/

@@ -3,7 +3,7 @@ Installation
 
 C-Star is published on `conda-forge <https://anaconda.org/conda-forge/cstar-ocean>`__
 as ``cstar-ocean``. One install gives you the ``cstar`` command line, the
-ROMS-MARBL application and Forge, the domain-generation application, including
+UCLA-ROMS application and Forge, the domain-generation application, including
 its wizard.
 
 Install with conda

@@ -523,7 +523,7 @@ def directive_run_harness(
 
     temp_step = LiveStep(
         name="step-for-testing",
-        application=Application.ROMS_MARBL.value,
+        application=Application.UCLA_ROMS.value,
         blueprint=bp_path,
         working_dir=tmp_path,
         directives={
@@ -838,7 +838,7 @@ def test_blueprint_run_directive_newer_record_refused(
     bp_path = str(package_path / "docs/tutorials/wales_toy_blueprint.yaml")
     producer = LiveStep(
         name="producer",
-        application=Application.ROMS_MARBL.value,
+        application=Application.UCLA_ROMS.value,
         blueprint=bp_path,
         working_dir=tmp_path / "producer",
     )
@@ -846,7 +846,7 @@ def test_blueprint_run_directive_newer_record_refused(
 
     consumer = LiveStep(
         name="consumer",
-        application=Application.ROMS_MARBL.value,
+        application=Application.UCLA_ROMS.value,
         blueprint=bp_path,
         working_dir=tmp_path / "consumer",
         depends_on=["producer"],
@@ -898,7 +898,7 @@ def test_blueprint_run_resume_non_resumable_app_fails_fast(
 
     assert result.exit_code == 2
     stderr_flat = flatten_cli_output(result.stderr)
-    assert "roms_marbl" in stderr_flat
+    assert "ucla_roms" in stderr_flat
     assert "does not support" in stderr_flat
     mock_exec.assert_not_called()
 
@@ -1146,7 +1146,7 @@ def test_blueprint_run_pre_run_non_pre_runnable_app_fails_fast(
 
     assert result.exit_code == 2
     stderr_flat = flatten_cli_output(result.stderr)
-    assert "roms_marbl" in stderr_flat
+    assert "ucla_roms" in stderr_flat
     assert "does not support" in stderr_flat
     mock_exec.assert_not_called()
 

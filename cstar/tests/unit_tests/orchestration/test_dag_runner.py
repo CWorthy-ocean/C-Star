@@ -66,6 +66,7 @@ from cstar.orchestration.manifest import (
     ATTEMPT_VARIABLES_NAME,
     ATTEMPT_WORKPLAN_NAME,
     ATTEMPTS_DIR_NAME,
+    CANONICAL_NAMES_SINCE,
     RUN_MANIFEST_NAME,
     Attempt,
     AttemptStatus,
@@ -562,7 +563,7 @@ async def test_apply_resume_overrides_marks_resumable_failed_steps(
         tmp_path, "Resumable Step", application=Application.HELLO_WORLD
     )
     step_unresumable = _make_step(
-        tmp_path, "Unresumable Step", application=Application.ROMS_MARBL
+        tmp_path, "Unresumable Step", application=Application.UCLA_ROMS
     )
     step_done = _make_step(tmp_path, "Done Step")
     wp = _make_workplan([step_resumable, step_unresumable, step_done])
@@ -1962,6 +1963,119 @@ async def test_build_dag_refuses_an_edited_done_step_before_writing_anything(
     assert len(list((output_dir / ATTEMPTS_DIR_NAME).iterdir())) == 1
 
 
+CURRENT_MANIFEST_SCHEMA = RunManifest.model_fields["schema_version"].default
+"""The schema version this build writes in a run manifest."""
+
+
+def _write_manifest_as_of(root: Path, manifest: RunManifest, version: str) -> None:
+    """Write a manifest as the build of schema `version` left it.
+
+    `write_run_manifest` stamps this build's version, so the document is
+    serialized directly.
+    """
+    manifest.schema_version = version
+    assert serialize(root / RUN_MANIFEST_NAME, manifest)
+
+
+@pytest.mark.asyncio
+async def test_build_dag_accepts_a_done_step_hashed_before_canonical_names(
+    tmp_path: Path, mock_run_id: str, hello_world_bp_path: Path
+) -> None:
+    """Verify re-entering a run whose manifest predates `CANONICAL_NAMES_SINCE`
+    is not refused for its recorded hashes (which may use an earlier application
+    name), and that scheduling it rewrites the manifest under the current schema
+    with the step's current hash.
+    """
+    wp_path, output_dir = _build_guarded(tmp_path, mock_run_id, hello_world_bp_path)
+    # a hash this build cannot reproduce: it stands for one made under `roms_marbl`
+    older = _recorded(mock_run_id, {"hello": "hashed-under-an-earlier-name"})
+    _write_manifest_as_of(output_dir, older, "1.4.0")
+    done = DagStatus({"hello": Status.Done})
+
+    with (
+        mock.patch("cstar.orchestration.dag_runner.check_environment"),
+        mock.patch(
+            "cstar.orchestration.dag_runner.load_run_state",
+            mock.AsyncMock(return_value=done),
+        ),
+        mock.patch("cstar.orchestration.dag_runner.get_orchestrator"),
+        mock.patch("cstar.orchestration.dag_runner.process_plan", mock.AsyncMock()),
+    ):
+        planner, trx_path, facts, carried = await build_dag(wp_path, mock_run_id)
+        await run_dag(
+            wp_path,
+            trx_path,
+            mock_run_id,
+            planner,
+            step_facts=facts,
+            carried=carried,
+        )
+
+    rewritten = read_run_manifest(output_dir)
+    assert rewritten is not None
+    assert rewritten.schema_version == CURRENT_MANIFEST_SCHEMA
+    entry = rewritten.step("hello")
+    assert entry is not None
+    assert entry.definition_hash == facts["hello"].definition_hash
+    assert (
+        "hashed-under-an-earlier-name"
+        not in (output_dir / RUN_MANIFEST_NAME).read_text()
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("writer", ["reentry", "refresh"])
+@pytest.mark.parametrize(
+    ("version", "refused"),
+    [
+        pytest.param("1.4.0", False, id="before-canonical-names"),
+        pytest.param(CANONICAL_NAMES_SINCE, True, id="canonical-names-since"),
+    ],
+)
+async def test_restamping_does_not_make_an_older_hash_comparable(
+    tmp_path: Path,
+    mock_run_id: str,
+    hello_world_bp_path: Path,
+    writer: str,
+    version: str,
+    refused: bool,
+) -> None:
+    """Verify a writer that restamps an older manifest and keeps its recorded
+    hashes (a re-entry that replays the recorded plan, or a status refresh) does
+    not turn them into hashes the next authored re-entry compares.
+
+    A manifest left at `CANONICAL_NAMES_SINCE` still has its edited Done step refused.
+    """
+    wp_path, wp_run = await _schedule(tmp_path, mock_run_id, hello_world_bp_path)
+    root = wp_run.output_path
+    manifest = read_run_manifest(root)
+    assert manifest is not None
+    manifest.steps[0].definition_hash = "hashed-under-an-earlier-name"
+    _write_manifest_as_of(root, manifest, version)
+
+    if writer == "reentry":
+        await _reenter(wp_run)
+    else:
+        refresh_run_manifest(root, mock_run_id, DagStatus({"hello": Status.Done}))
+
+    # the writer restamped the file under this build's schema
+    assert (
+        f"schema_version: {CURRENT_MANIFEST_SCHEMA}"
+        in (root / RUN_MANIFEST_NAME).read_text()
+    )
+    wp = deserialize(wp_path, Workplan)
+    facts = describe_steps(wp, wp_path.parent)
+    reread = read_run_manifest(root)
+    assert reread is not None
+    done = DagStatus({"hello": Status.Done})
+
+    if refused:
+        with pytest.raises(CstarExpectationFailed):
+            refuse_edited_done_steps(wp, reread, done, facts, [])
+    else:
+        refuse_edited_done_steps(wp, reread, done, facts, [])
+
+
 @pytest.mark.asyncio
 async def test_refresh_run_manifest_folds_records_and_closes_the_attempt(
     tmp_path: Path, mock_run_id: str, hello_world_bp_path: Path
@@ -2330,7 +2444,7 @@ def _roms_step(
     bp_path.touch()
     return Step(
         name=name,
-        application=Application.ROMS_MARBL,
+        application=Application.UCLA_ROMS,
         blueprint=bp_path,
         depends_on=depends_on or [],
         directives=directives or {},
@@ -2500,7 +2614,7 @@ def test_prune_unpreparable_steps_drops_transitively(tmp_path: Path) -> None:
     deferred = Step.model_validate(
         {
             "name": "Deferred",
-            "application": Application.ROMS_MARBL,
+            "application": Application.UCLA_ROMS,
             "blueprint": {"from_step": "Producer", "filename": "generated.yaml"},
             "depends_on": ["Producer"],
         }

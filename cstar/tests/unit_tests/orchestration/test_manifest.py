@@ -26,6 +26,7 @@ from cstar.execution.file_system import (
 from cstar.orchestration.manifest import (
     ATTEMPT_DIR_FORMAT,
     ATTEMPTS_DIR_NAME,
+    CANONICAL_NAMES_SINCE,
     MANIFEST_LOCK_NAME,
     RUN_MANIFEST_NAME,
     STEP_RECORD_NAME,
@@ -342,6 +343,41 @@ class TestRoundTrip:
         assert record.schema_version == CURRENT_RECORD
         for name, current in CURRENT_OF.items():
             assert f"schema_version: {current}" in (tmp_path / name).read_text()
+
+    @pytest.mark.parametrize(
+        ("version", "kept"),
+        [
+            pytest.param("1.0.0", False, id="first-schema"),
+            pytest.param("1.4.0", False, id="last-before-canonical-names"),
+            pytest.param(CANONICAL_NAMES_SINCE, True, id="canonical-names-since"),
+            pytest.param(CURRENT, True, id="current"),
+        ],
+    )
+    def test_definition_hashes_before_canonical_names_are_not_read(
+        self, tmp_path: Path, version: str, kept: bool
+    ) -> None:
+        """A manifest older than `CANONICAL_NAMES_SINCE` may have hashed an earlier
+        application name, so it reads without its hashes. The file is left alone.
+        """
+        manifest = _manifest("one", "two")
+        manifest.steps[0].definition_hash = "abc"
+        write_run_manifest(tmp_path, manifest)
+        path = tmp_path / RUN_MANIFEST_NAME
+        path.write_text(
+            path.read_text().replace(
+                f"schema_version: {CURRENT}", f"schema_version: {version}", 1
+            )
+        )
+        before = path.read_text()
+
+        loaded = read_run_manifest(tmp_path)
+
+        assert loaded is not None
+        assert loaded.schema_version == version
+        assert [e.definition_hash for e in loaded.steps] == (
+            ["abc", ""] if kept else ["", ""]
+        )
+        assert path.read_text() == before
 
     def test_carried_inputs_round_trip(self, tmp_path: Path) -> None:
         manifest = _manifest("one")

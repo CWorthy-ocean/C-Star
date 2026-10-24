@@ -12,7 +12,7 @@ sections:
     required: false
   model:
     title: Model
-    desc: Choose the ROMS-MARBL model preset, biogeochemistry mode, and code versions this blueprint builds against.
+    desc: Choose the UCLA-ROMS model preset, biogeochemistry mode, and code versions this blueprint builds against.
     required: true
   grid:
     title: Domain and grid
@@ -28,11 +28,11 @@ sections:
     required: true
   output:
     title: Output
-    desc: Which output streams ROMS-MARBL writes, how often, and how many records per file.
+    desc: Which output streams UCLA-ROMS writes, how often, and how many records per file.
     required: false
   advanced:
     title: Advanced settings
-    desc: Fine-tune individual ROMS-MARBL namelist settings beyond what the other sections expose.
+    desc: Fine-tune individual UCLA-ROMS namelist settings beyond what the other sections expose.
     required: false
   review:
     title: Review and export
@@ -238,10 +238,10 @@ fields:
     hint: MARBL couples biogeochemistry to the physics; “none” runs physics only; “cdr_lite” runs only the CDR-lite tracers, without MARBL.
   cs_source_dd:
     label: Sensitivity source
-    hint: By default the carbonate-sensitivity-from workplan directive supplies the files from an earlier ROMS-MARBL step at run time; choose a directory to put them on the blueprint now.
+    hint: By default the carbonate-sensitivity-from workplan directive supplies the files from an earlier UCLA-ROMS step at run time; choose a directory to put them on the blueprint now.
   cs_path:
     label: Sensitivity files
-    hint: A directory of joined ROMS _cdrgas files, written by a ROMS-MARBL run with the gas-exchange output enabled.
+    hint: A directory of joined ROMS _cdrgas files, written by a UCLA-ROMS run with MARBL and the gas-exchange output enabled.
   domain_dd:
     label: Domain preset
     required: true

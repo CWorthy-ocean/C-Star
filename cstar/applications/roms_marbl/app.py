@@ -60,9 +60,7 @@ if TYPE_CHECKING:
     from cstar.roms.simulation import ROMSSimulation
 
 
-_APP_NAME_LONG: t.Literal["ROMS-MARBL simulation runner"] = (
-    "ROMS-MARBL simulation runner"
-)
+_APP_NAME_LONG: t.Literal["UCLA-ROMS simulation runner"] = "UCLA-ROMS simulation runner"
 log = get_logger(__name__)
 
 
@@ -267,12 +265,12 @@ class RomsMarblApplication(ApplicationDefinition[RomsMarblBlueprint, RomsMarblRu
 
     @override
     def artifacts(self, blueprint: RomsMarblBlueprint) -> "Sequence[ArtifactSpec]":
-        """Declare the files a ROMS-MARBL run leaves in its step root.
+        """Declare the files a UCLA-ROMS run leaves in its step root.
 
         Parameters
         ----------
         blueprint : RomsMarblBlueprint
-            The blueprint of the ROMS-MARBL step.
+            The blueprint of the UCLA-ROMS step.
 
         Returns
         -------

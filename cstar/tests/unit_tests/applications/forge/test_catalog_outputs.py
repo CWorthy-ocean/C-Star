@@ -147,7 +147,7 @@ async def test_current_standalone_output(tmp_path: Path) -> None:
     assert outputs == [
         BlueprintOutput(
             path=emitted,
-            application="roms_marbl",
+            application="ucla_roms",
             producer=producer,
             status=OutputStatus.CURRENT,
             generated_at=_NEWER,
@@ -184,7 +184,7 @@ async def test_standalone_output_without_provenance_is_unverified(
 
     assert output == BlueprintOutput(
         path=emitted,
-        application="roms_marbl",
+        application="ucla_roms",
         producer=BlueprintIdentity(kind="Blueprint", application=FORGE, name="wio"),
         status=OutputStatus.UNVERIFIED,
     )
@@ -206,7 +206,7 @@ async def test_workplan_output_carries_its_run_and_step(tmp_path: Path) -> None:
     assert outputs == [
         BlueprintOutput(
             path=emitted,
-            application="roms_marbl",
+            application="ucla_roms",
             producer=producer,
             status=OutputStatus.CURRENT,
             generated_at=_NEWER,
@@ -394,6 +394,23 @@ async def test_steps_of_other_applications_are_ignored(tmp_path: Path) -> None:
     _emit(other.fsm.output_dir / "B_wio.yaml", derived_from=[producer.model_dump()])
 
     assert await _catalog(root).blueprint_outputs(FORGE) == []
+
+
+async def test_an_earlier_application_name_finds_what_the_current_one_does(
+    tmp_path: Path,
+) -> None:
+    root = tmp_path / "catalog"
+    root.mkdir()
+    step = _run(tmp_path, "run-a", tmp_path / "entry.yaml", application="ucla_roms")
+    emitted = _emit(step.fsm.output_dir / "B_wio.yaml", name="wio")
+    catalog = _catalog(root)
+
+    [output] = await catalog.blueprint_outputs("ucla_roms")
+
+    assert output.path == emitted
+    assert output.run_id == "run-a"
+    assert await catalog.blueprint_outputs("roms_marbl") == [output]
+    assert await find_blueprint_outputs(catalog, "roms_marbl") == [output]
 
 
 async def test_unloadable_entries_are_skipped_and_named_in_one_message(
@@ -657,7 +674,7 @@ async def test_application_that_emits_no_blueprint_finds_nothing(
     stack = LayeredCatalog(
         [DomainCatalog(root, suppress_validation=True), DomainCatalog(read_only=True)]
     )
-    assert "wales-toy" in stack.blueprint_names("roms_marbl")
+    assert "wales-toy" in stack.blueprint_names("ucla_roms")
 
     assert await stack.blueprint_outputs("roms_marbl") == []
 

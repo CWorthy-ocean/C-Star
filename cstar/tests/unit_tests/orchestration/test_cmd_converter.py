@@ -34,7 +34,7 @@ from cstar.orchestration.serialization import deserialize
 @pytest.mark.parametrize(
     ("target_application"),
     [
-        Application.ROMS_MARBL,
+        Application.UCLA_ROMS,
         Application.HELLO_WORLD,
     ],
 )
@@ -69,7 +69,7 @@ def test_converter_defaults(
 @pytest.mark.parametrize(
     ("target_application"),
     [
-        Application.ROMS_MARBL,
+        Application.UCLA_ROMS,
         Application.HELLO_WORLD,
     ],
 )

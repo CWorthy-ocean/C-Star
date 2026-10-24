@@ -20,6 +20,7 @@ from urllib.parse import urlsplit
 
 from requests import RequestException, request
 
+from cstar.base.application_names import canonical_application, legacy_names
 from cstar.base.env import (
     ENV_CSTAR_CACHE_HOME,
     ENV_CSTAR_CONFIG_HOME,
@@ -528,12 +529,15 @@ class StateDirectoryManager:
         ``<data home>/blueprint_runs/<application>/<name>``: where a blueprint
         that declares no ``working_dir`` is executed from. The application
         segment keeps a producer and the blueprint it emits apart when they
-        share a name (forge and its ``roms_marbl`` blueprint).
+        share a name (forge and its ``ucla_roms`` blueprint). A run made under
+        an earlier name of the application keeps its directory there, so
+        resuming or continuing it finds the earlier attempt.
 
         Parameters
         ----------
         application : str
-            The application the blueprint runs.
+            The application the blueprint runs, under its current or an
+            earlier name.
         name : str
             The blueprint name, slugified for use as a directory name.
 
@@ -541,7 +545,24 @@ class StateDirectoryManager:
         -------
         Path
         """
-        return cls.blueprint_runs_dir() / application / slugify(name)
+        application = canonical_application(application)
+        runs_dir = cls.blueprint_runs_dir()
+        slug = slugify(name)
+        run_dir = runs_dir / application / slug
+        if run_dir.exists():
+            return run_dir
+
+        for legacy in legacy_names(application):
+            legacy_dir = runs_dir / legacy / slug
+            if legacy_dir.is_dir():
+                log.debug(
+                    "Using run directory %s, which predates the %s name",
+                    legacy_dir,
+                    application,
+                )
+                return legacy_dir
+
+        return run_dir
 
     @classmethod
     def user_dir(cls, run_id: str | None = None) -> Path:

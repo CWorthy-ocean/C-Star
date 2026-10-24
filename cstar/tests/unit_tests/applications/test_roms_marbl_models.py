@@ -7,6 +7,7 @@ import pytest
 import yaml
 from pydantic import ValidationError
 
+import cstar
 from cstar.applications.roms_marbl.adapter import (
     CarbonateSensitivityAdapter,
     PIOAdapter,
@@ -480,6 +481,38 @@ class TestProvenance:
             RomsMarblBlueprint.model_validate(complete_blueprint_dict)
 
 
+@pytest.mark.parametrize(
+    ("application", "schema_version", "published"),
+    [
+        ("roms_marbl", "3.0.0", "roms_marbl/roms_marbl_schema.3.0.0.json"),
+        ("roms_marbl", "3.2.0", "roms_marbl/roms_marbl_schema.3.2.0.json"),
+        ("ucla_roms", "3.2.0", "roms_marbl/roms_marbl_schema.3.2.0.json"),
+        ("roms_marbl", "3.3.0", "ucla_roms/ucla_roms_schema.3.3.0.json"),
+        ("ucla_roms", "3.3.0", "ucla_roms/ucla_roms_schema.3.3.0.json"),
+    ],
+)
+def test_schema_header_names_a_published_schema(
+    complete_blueprint_dict: dict[str, Any],
+    application: str,
+    schema_version: str,
+    published: str,
+) -> None:
+    """A blueprint of a version published under the earlier name keeps naming
+    that schema when it is written back; a current one names the new schema.
+    """
+    complete_blueprint_dict |= {
+        "application": application,
+        "schema_version": schema_version,
+    }
+    bp = RomsMarblBlueprint.model_validate(complete_blueprint_dict)
+
+    header = bp.model_dump(mode="json")["$schema"]
+
+    assert header.endswith(f"/docs/schemas/bp/{published}")
+    repo_root = Path(cstar.__file__).resolve().parents[1]
+    assert (repo_root / "docs" / "schemas" / "bp" / published).is_file()
+
+
 class TestCarbonateSensitivity:
     """Tests for the `forcing.carbonate_sensitivity` field and its adapter."""
 
@@ -499,8 +532,8 @@ class TestCarbonateSensitivity:
         return complete_blueprint_dict
 
     def test_schema_version(self):
-        """Adding the optional field is a minor bump of the schema."""
-        assert RomsMarblBlueprint.model_fields["schema_version"].default == "3.2.0"
+        """Adding the optional field was a minor bump of the schema, now at 3.3.0."""
+        assert RomsMarblBlueprint.model_fields["schema_version"].default == "3.3.0"
 
     def test_defaults_to_none(self, complete_blueprint_dict):
         """A blueprint without the field validates, with no sensitivity forcing."""

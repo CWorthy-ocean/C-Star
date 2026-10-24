@@ -207,7 +207,7 @@ class ForgeExecutor(BaseModel):
     Builder for C-Star RomsMarblBlueprint specifications.
 
     This class provides a Pydantic-based interface for constructing and
-    managing a ROMS-MARBL blueprint. It builds up the blueprint in memory
+    managing a UCLA-ROMS blueprint. It builds up the blueprint in memory
     across three steps, and persists it to disk exactly once, at the end:
 
     1. **Initialization** (`model_post_init()` / `_initialize_roms_marbl_blueprint()`):
@@ -1042,7 +1042,7 @@ class ForgeExecutor(BaseModel):
             return cstar_models.RomsMarblBlueprint.model_validate(data)
         except ValidationError as exc:
             msg = (
-                "The emitted ROMS-MARBL blueprint does not validate against the "
+                "The emitted UCLA-ROMS blueprint does not validate against the "
                 f"installed C-Star models ({cstar_models.__file__}); C-Star would "
                 "reject it at load time. Most likely Forge emits a field this "
                 "C-Star version does not declare (its models are extra='forbid'), "
@@ -2765,7 +2765,7 @@ class ForgeExecutor(BaseModel):
             roms_marbl_blueprint_dict["partitioning"]["use_pio"] = self._use_pio
             # No output_dir here: it is a pre-2.0.0 field superseded by the
             # blueprint working_dir. That one is left unset too, so C-Star places
-            # the run under its own default (blueprint_runs/roms_marbl/<name>) or
+            # the run under its own default (blueprint_runs/ucla_roms/<name>) or
             # the workplan step directory.
             roms_marbl_blueprint_dict["runtime_params"] = {
                 "start_date": self.start_date,

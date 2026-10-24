@@ -1341,6 +1341,10 @@ def refuse_edited_done_steps(
 ) -> None:
     """Refuse to re-enter a run in which a `Done` step was edited and not clobbered.
 
+    A step with no recorded definition is not checked. `read_run_manifest`
+    leaves none on a manifest older than `CANONICAL_NAMES_SINCE`, whose hashes
+    may use an earlier application name.
+
     Parameters
     ----------
     wp : Workplan

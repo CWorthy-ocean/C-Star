@@ -49,12 +49,12 @@ page.
 Where a blueprint runs
 ----------------------
 
-``cstar blueprint run`` runs where you invoke it. The ROMS-MARBL application
+``cstar blueprint run`` runs where you invoke it. The UCLA-ROMS application
 submits the model run to SLURM itself, so it can be started from a login
 node; Forge does not, and generates every input file wherever the command
 runs. For anything beyond a toy domain, run Forge from a compute node or
 through a workplan, even a :ref:`single-step one <workplan_examples>`. If
-you must run a ROMS-MARBL blueprint directly on a login node, set
+you must run a UCLA-ROMS blueprint directly on a login node, set
 ``CSTAR_NPROCS_POST`` to a small number (about 2): the post-processing step
 that joins partitioned output otherwise uses every core it can find.
 
@@ -93,11 +93,11 @@ from your home. ``cstar env show`` prints the value in effect.
 
 Forge follows the same rule. A forge blueprint normally omits
 ``working_dir``, so Forge writes its generated inputs under
-``CSTAR_DATA_HOME/blueprint_runs/forge/<name>``. The ROMS-MARBL blueprint it
+``CSTAR_DATA_HOME/blueprint_runs/forge/<name>``. The UCLA-ROMS blueprint it
 emits has the same name and no ``working_dir`` either, so it runs under
-``CSTAR_DATA_HOME/blueprint_runs/roms_marbl/<name>``. On a laptop those are
+``CSTAR_DATA_HOME/blueprint_runs/ucla_roms/<name>``. On a laptop those are
 ``~/cstar/blueprint_runs/forge/<name>`` and
-``~/cstar/blueprint_runs/roms_marbl/<name>``; on an HPC system both are on
+``~/cstar/blueprint_runs/ucla_roms/<name>``; on an HPC system both are on
 scratch.
 
 Forge also keeps a **source-data cache** of the downloaded and user-staged
