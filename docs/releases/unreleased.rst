@@ -344,6 +344,13 @@ Improvements
 - On Expanse, which requires a project on every job, a missing ``CSTAR_SLURM_ACCOUNT`` now stops a SLURM-launcher run at start and refuses a ROMS job before submission, naming the setting and ``cstar init``. (`#821 <https://github.com/CWorthy-ocean/C-Star/pull/821>`_)
 - ``cstar init`` on Expanse marks the SLURM account as required on this system. (`#821 <https://github.com/CWorthy-ocean/C-Star/pull/821>`_)
 - Forge's input-file generator is renamed ``RomsInputGenerator`` (base class ``InputGenerator``), in ``cstar.applications.forge.input_generator``, and the time-splitting transform is renamed ``RomsTimeSplitter``. (`#823 <https://github.com/CWorthy-ocean/C-Star/pull/823>`_)
+- ``cstar init`` and ``cstar env`` run even when the configuration file cannot be read; the other commands stop with the error as before. (`#825 <https://github.com/CWorthy-ocean/C-Star/pull/825>`_)
+- ``cstar env unset`` accepts any name, so a line the loader skips can be removed from the CLI; ``cstar env set`` still refuses a name it does not know, catching typos when they are written. (`#825 <https://github.com/CWorthy-ocean/C-Star/pull/825>`_)
+- ``cstar init`` keeps lines it does not apply when it rewrites the file, in a section of their own under the reason for each. (`#825 <https://github.com/CWorthy-ocean/C-Star/pull/825>`_)
+
+  - A removed setting or an unknown ``CSTAR_*`` name stays active, for the version that reads it; the rest are commented out.
+
+- A removed setting that used to request a dry run (``CSTAR_CLI_DRY_RUN``) still stops ``cstar admin clean``, ``cstar blueprint migrate`` and ``cstar workplan run`` when it is in the file, not only when exported. (`#825 <https://github.com/CWorthy-ocean/C-Star/pull/825>`_)
 
 
 
@@ -413,4 +420,5 @@ Miscellaneous
 
 - The bundled ``roms-marbl-0.3-default`` through ``roms-marbl-0.8-default`` and ``cson_roms-marbl_v0.1`` model specs are marked archived. (`#824 <https://github.com/CWorthy-ocean/C-Star/pull/824>`_)
 - The model spec docs describe the ``archived`` key and list the archived bundled specs. (`#824 <https://github.com/CWorthy-ocean/C-Star/pull/824>`_)
+- The configuration guide states the skip rule and what ``cstar init`` does with skipped lines. (`#825 <https://github.com/CWorthy-ocean/C-Star/pull/825>`_)
 
