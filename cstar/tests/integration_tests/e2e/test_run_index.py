@@ -29,6 +29,7 @@ from cstar.orchestration.manifest import (
 )
 from cstar.tests.integration_tests.cli_harness import (
     DONE,
+    flat_output,
     kill_run,
     make_cli_env,
     run_cstar,
@@ -58,14 +59,6 @@ OUTPUT_PLACEHOLDER = f"{{{{output_dir: {PRODUCER}@base}}}}"
 def _output(proc: subprocess.CompletedProcess[str]) -> str:
     """The captured streams of a finished ``cstar`` process, for assertion messages."""
     return f"stdout:\n{proc.stdout}\nstderr:\n{proc.stderr}"
-
-
-def _flat(text: str) -> str:
-    """The text on one line, without the borders of rich's panels or the colour
-    codes rich adds where colour is forced (CI), which can split a wrapped phrase.
-    """
-    plain = re.sub(r"\x1b\[[0-9;]*m", "", text)
-    return re.sub(r"\s+", " ", re.sub(r"[│╭╮╰╯─]", " ", plain))
 
 
 def make_env(root: Path, shim: Path, project: Path | None = None) -> dict[str, str]:
@@ -428,7 +421,9 @@ def test_run_status_refuses_a_run_that_is_not_tracked(
     proc = run_cstar(by_uuid.env, "run", "status", shared_run.handle)
 
     assert proc.returncode == 2, _output(proc)
-    assert f"cstar run show {shared_run.handle}" in _flat(_output(proc)), _output(proc)
+    assert f"cstar run show {shared_run.handle}" in flat_output(_output(proc)), _output(
+        proc
+    )
 
 
 def test_a_producer_that_is_not_done_is_refused(shared_run: SharedRun) -> None:
@@ -448,8 +443,8 @@ def test_a_producer_that_is_not_done_is_refused(shared_run: SharedRun) -> None:
     )
     try:
         assert run.returncode != 0, run.output
-        assert "done steps only" in _flat(run.output), run.output
-        assert f"step {PRODUCER!r} of run {BASE_RUN_ID!r}" in _flat(run.output), (
+        assert "done steps only" in flat_output(run.output), run.output
+        assert f"step {PRODUCER!r} of run {BASE_RUN_ID!r}" in flat_output(run.output), (
             run.output
         )
         # the step was refused before it was submitted

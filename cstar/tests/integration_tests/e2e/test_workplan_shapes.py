@@ -6,6 +6,7 @@ its dependencies and then runs ``cstar blueprint run``; the tests poll the step
 sentinels and read the step logs to check ordering and propagation.
 """
 
+import shutil
 import typing as t
 from dataclasses import dataclass
 from datetime import datetime
@@ -15,12 +16,14 @@ import pytest
 import yaml
 
 from cstar.base.utils import slugify
+from cstar.orchestration.manifest import RUN_MANIFEST_NAME
 from cstar.orchestration.models import Step, Workplan
 from cstar.orchestration.patterns import chunk_steps, equal_windows
 from cstar.orchestration.serialization import serialize
 from cstar.tests.integration_tests.cli_harness import (
     DONE,
     FAILED,
+    flat_output,
     kill_run,
     make_cli_env,
     make_shim,
@@ -363,5 +366,91 @@ def test_run_alias_launches_and_reenters(shape_root: Path, cstar_shim: Path) -> 
         log = run_cstar(env, "workplan", "log", run_id, "A")
         assert log.returncode == 0, log.stderr
         assert "Hello, A" in log.stdout, log.stdout
+    finally:
+        kill_run(run.state_home, run_id, run.steps)
+
+
+def test_rerun_after_the_run_directory_is_removed_runs_the_steps_again(
+    shape_root: Path, cstar_shim: Path
+) -> None:
+    """A run-id whose directory was removed (a scratch purge) does not adopt the
+    sentinels its earlier run left: re-running it is refused, naming the state
+    directory, and once ``cstar admin clean`` clears it the steps run again.
+    """
+    shape = {"A": [], "B": ["A"]}
+    run_id = "shape-purged"
+    run, returncode, output = schedule(shape_root, cstar_shim, run_id, shape)
+    run_dir = run.data_home / "workplan_runs" / run_id
+    workplan = shape_root / "workplan.yaml"
+    try:
+        assert returncode == 0, output
+        statuses = {s: read_status(run.sentinel(s)) for s in shape}
+        assert statuses == dict.fromkeys(shape, DONE), output
+        first_uuid = yaml.safe_load((run_dir / RUN_MANIFEST_NAME).read_text())["id"]
+        assert yaml.safe_load(run.sentinel("A").read_text())["run_uuid"] == first_uuid
+
+        shutil.rmtree(run_dir)
+        refused = run_cstar(
+            run.env, "workplan", "submit", "--run-id", run_id, str(workplan)
+        )
+        output = f"stdout:\n{refused.stdout}\nstderr:\n{refused.stderr}"
+        assert refused.returncode == 1, output
+        flat = flat_output(refused.stdout)
+        assert str(run.sentinel("A").parent) in flat, output
+        assert f"cstar admin clean --run-id {run_id}" in flat, output
+        assert not run.log("A").exists()
+
+        cleaned = run_cstar(run.env, "admin", "clean", "--run-id", run_id, "--yes")
+        assert cleaned.returncode == 0, cleaned.stdout + cleaned.stderr
+        assert not run.sentinel("A").parent.exists()
+
+        rerun = run_cstar(
+            run.env, "workplan", "submit", "--run-id", run_id, str(workplan)
+        )
+        output = f"stdout:\n{rerun.stdout}\nstderr:\n{rerun.stderr}"
+        wait_for_terminal(
+            run.state_home,
+            run_id,
+            run.steps,
+            timeout=RUN_TIMEOUT,
+            poll_interval=POLL_INTERVAL,
+        )
+        if rerun.returncode != 0:
+            tails = run_log_tails(run.data_home, run_id)
+            pytest.fail(f"workplan submit exited {rerun.returncode}\n{output}\n{tails}")
+
+        statuses = {s: read_status(run.sentinel(s)) for s in shape}
+        assert statuses == dict.fromkeys(shape, DONE), output
+        for step in shape:
+            assert f"Hello, {step}" in run.log_text(step), step
+        second_uuid = yaml.safe_load((run_dir / RUN_MANIFEST_NAME).read_text())["id"]
+        assert second_uuid != first_uuid
+        for step in shape:
+            sentinel = yaml.safe_load(run.sentinel(step).read_text())
+            assert sentinel["run_uuid"] == second_uuid, step
+    finally:
+        kill_run(run.state_home, run_id, run.steps)
+
+
+def test_rerun_by_workplan_name_after_the_run_directory_is_removed_is_refused(
+    shape_root: Path, cstar_shim: Path
+) -> None:
+    """Re-running a workplan without ``--run-id`` after its run directory was removed
+    is refused before scheduling, with the ``cstar admin clean`` that clears the run.
+    """
+    shape: dict[str, list[str]] = {"A": []}
+    run_id = slugify("shapes")  # the workplan's name, which is the derived run-id
+    run, returncode, output = schedule(shape_root, cstar_shim, run_id, shape)
+    try:
+        assert returncode == 0, output
+        shutil.rmtree(run.data_home / "workplan_runs" / run_id)
+
+        workplan = shape_root / "workplan.yaml"
+        refused = run_cstar(run.env, "workplan", "submit", str(workplan))
+        output = f"stdout:\n{refused.stdout}\nstderr:\n{refused.stderr}"
+        assert refused.returncode == 2, output
+        remedy = f"cstar admin clean --run-id {run_id}"
+        assert remedy in flat_output(refused.stderr), output
+        assert not run.log("A").exists()
     finally:
         kill_run(run.state_home, run_id, run.steps)

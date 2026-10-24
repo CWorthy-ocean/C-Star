@@ -32,6 +32,7 @@ from cstar.orchestration.manifest import (
 )
 from cstar.tests.integration_tests.cli_harness import (
     DONE,
+    flat_output,
     kill_run,
     run_cstar,
     run_log_tails,
@@ -42,7 +43,6 @@ from cstar.tests.integration_tests.e2e.test_run_index import (
     OUTPUT_PLACEHOLDER,
     PRODUCER,
     STEP,
-    _flat,
     make_env,
     write_consumer,
 )
@@ -205,13 +205,13 @@ def test_attach_registers_a_copied_run(attach_run: AttachRun) -> None:
 
     attached = _attach(env, run_dir)
     assert attached.returncode == 0, _output(attached)
-    flat = _flat(attached.stdout)
+    flat = flat_output(attached.stdout)
     assert f"Attached run '{RUN_ID}' ({attach_run.handle})" in flat, _output(attached)
     assert "as owned" in flat, _output(attached)
 
     status = run_cstar(env, "run", "status", RUN_ID)
     assert status.returncode == 0, _output(status)
-    assert RUN_ID in _flat(status.stdout), _output(status)
+    assert RUN_ID in flat_output(status.stdout), _output(status)
     for step in SHAPE:
         assert step in status.stdout, _output(status)
 
@@ -233,7 +233,7 @@ def test_attach_registers_a_copied_run(attach_run: AttachRun) -> None:
     # attaching again changes nothing
     again = _attach(env, run_dir)
     assert again.returncode == 0, _output(again)
-    assert "already attached" in _flat(again.stdout), _output(again)
+    assert "already attached" in flat_output(again.stdout), _output(again)
 
 
 def test_attach_verify_compares_recorded_digests(attach_run: AttachRun) -> None:
@@ -242,7 +242,7 @@ def test_attach_verify_compares_recorded_digests(attach_run: AttachRun) -> None:
         attach_run.original_env, "run", "check", RUN_ID, "--record-digests"
     )
     # the original is checked in place, where its workplan's absolute paths are found
-    assert "Recorded 1 digest(s)." in _flat(recorded.stdout), _output(recorded)
+    assert "Recorded 1 digest(s)." in flat_output(recorded.stdout), _output(recorded)
     record = read_step_record(attach_run.original / "tasks" / slugify(PRODUCER))
     assert record is not None
     (product,) = record.products
@@ -252,7 +252,7 @@ def test_attach_verify_compares_recorded_digests(attach_run: AttachRun) -> None:
     env = attach_run.env("verify-intact")
     proc = _attach(env, intact, "--verify")
     assert proc.returncode == 0, _output(proc)
-    assert DIGEST_HEADING not in _flat(proc.stdout), _output(proc)
+    assert DIGEST_HEADING not in flat_output(proc.stdout), _output(proc)
 
     # a byte of the product differs and its size does not: attached, with a problem
     changed = attach_run.copy("verify-changed", attach_run.original)
@@ -260,7 +260,7 @@ def test_attach_verify_compares_recorded_digests(attach_run: AttachRun) -> None:
     env = attach_run.env("verify-changed")
     proc = _attach(env, changed, "--verify")
     assert proc.returncode == 1, _output(proc)
-    assert DIGEST_HEADING in _flat(proc.stdout), _output(proc)
+    assert DIGEST_HEADING in flat_output(proc.stdout), _output(proc)
     path = run_cstar(env, "run", "path", RUN_ID)
     assert path.returncode == 0, _output(path)
 
@@ -275,8 +275,8 @@ def test_attach_verify_compares_recorded_digests(attach_run: AttachRun) -> None:
     env = attach_run.env("verify-truncated")
     proc = _attach(env, truncated, "--verify")
     assert proc.returncode == 1, _output(proc)
-    assert INCOMPLETE in _flat(_output(proc)), _output(proc)
-    assert "Not attached" in _flat(proc.stderr), _output(proc)
+    assert INCOMPLETE in flat_output(_output(proc)), _output(proc)
+    assert "Not attached" in flat_output(proc.stderr), _output(proc)
     path = run_cstar(env, "run", "path", RUN_ID)
     assert path.returncode == 2, _output(path)
 
@@ -296,7 +296,7 @@ def test_owned_attached_run_may_be_gathered_and_repaired_but_not_relaunched(
 
     relaunched = run_cstar(env, "workplan", "submit", "--run-id", RUN_ID)
     assert relaunched.returncode == 2, _output(relaunched)
-    assert "attached runs can be inspected and referenced" in _flat(
+    assert "attached runs can be inspected and referenced" in flat_output(
         _output(relaunched)
     ), _output(relaunched)
 
@@ -315,7 +315,7 @@ def test_read_only_attached_run_is_never_written_into(attach_run: AttachRun) -> 
 
     repaired = run_cstar(env, "run", "check", RUN_ID, "--repair")
     assert repaired.returncode == 2, _output(repaired)
-    assert "--own" in _flat(_output(repaired)), _output(repaired)
+    assert "--own" in flat_output(_output(repaired)), _output(repaired)
 
     # reading is unaffected
     assert run_cstar(env, "run", "check", RUN_ID).returncode == 0
@@ -376,12 +376,12 @@ def test_attach_as_another_run_id(attach_run: AttachRun) -> None:
 
     refused = _attach(env, other)
     assert refused.returncode == 2, _output(refused)
-    assert "--as" in _flat(_output(refused)), _output(refused)
+    assert "--as" in flat_output(_output(refused)), _output(refused)
     assert run_cstar(env, "run", "show", f"run://{other_uuid}").returncode == 2
 
     renamed = _attach(env, other, "--as", "other-id")
     assert renamed.returncode == 0, _output(renamed)
-    assert re.search(r"Attached run 'other-id'", _flat(renamed.stdout)), _output(
+    assert re.search(r"Attached run 'other-id'", flat_output(renamed.stdout)), _output(
         renamed
     )
 

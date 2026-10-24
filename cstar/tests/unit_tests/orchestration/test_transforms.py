@@ -7003,7 +7003,9 @@ class _FakeLauncher(Launcher[ProcessHandle]):
         return t.cast("ProcessHandle", item).status
 
     @classmethod
-    async def launch(cls, step: LiveStep, dependencies: list[ProcessHandle]) -> t.Any:
+    async def launch(
+        cls, step: LiveStep, dependencies: list[ProcessHandle], *, run_uuid: str
+    ) -> t.Any:
         raise NotImplementedError
 
     @classmethod

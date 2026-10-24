@@ -1892,6 +1892,108 @@ async def test_build_dag_without_a_manifest_loads_no_run_state(
     load_state.assert_not_called()
 
 
+def _leave_sentinel(run_id: str, step: str) -> Path:
+    """Write a Done sentinel for `step`, as an earlier run of `run_id` left it."""
+    sentinel = StateRepository.sentinel_path(step, run_id=run_id)
+    sentinel.parent.mkdir(parents=True, exist_ok=True)
+    handle = ProcessHandle(
+        pid="1", name=step, run_id=run_id, status=Status.Done, run_uuid="earlier"
+    )
+    assert serialize(sentinel, handle)
+    return sentinel
+
+
+@pytest.mark.asyncio
+async def test_build_dag_refuses_the_state_of_a_run_whose_directory_is_gone(
+    tmp_path: Path, mock_run_id: str, hello_world_bp_path: Path
+) -> None:
+    """Verify a run-id whose sentinels outlived its run directory is refused
+    before anything is written, naming the state directory and how to clear it.
+    """
+    wp_path, output_dir = _build_guarded(tmp_path, mock_run_id, hello_world_bp_path)
+    sentinel = _leave_sentinel(mock_run_id, "hello")
+
+    with (
+        mock.patch("cstar.orchestration.dag_runner.check_environment"),
+        pytest.raises(CstarExpectationFailed) as exc_info,
+    ):
+        await build_dag(wp_path, mock_run_id)
+
+    msg = str(exc_info.value)
+    assert str(sentinel.parent) in msg
+    assert f"cstar admin clean {ARG_RUN_ID} {mock_run_id}" in msg
+    assert f"{ARG_RUN_ID} <other-id>" in msg
+    assert not list(output_dir.glob(TRANSFORMED_WORKPLAN_GLOB))
+
+
+@pytest.mark.asyncio
+async def test_build_dag_refuses_state_over_a_run_directory_left_without_its_files(
+    tmp_path: Path, mock_run_id: str, hello_world_bp_path: Path
+) -> None:
+    """Verify a run directory that holds something but neither its manifest nor
+    its transformed workplan is refused without advice to `admin clean` it,
+    which would remove what is left.
+    """
+    wp_path, output_dir = _build_guarded(tmp_path, mock_run_id, hello_world_bp_path)
+    sentinel = _leave_sentinel(mock_run_id, "hello")
+    (output_dir / "tasks").mkdir()
+
+    with (
+        mock.patch("cstar.orchestration.dag_runner.check_environment"),
+        pytest.raises(CstarExpectationFailed) as exc_info,
+    ):
+        await build_dag(wp_path, mock_run_id)
+
+    msg = str(exc_info.value)
+    assert f"Remove {sentinel.parent}" in msg
+    assert "admin clean" not in msg
+
+
+@pytest.mark.asyncio
+async def test_build_dag_refuses_state_of_a_run_tracked_in_another_directory(
+    tmp_path: Path, mock_run_id: str, hello_world_bp_path: Path
+) -> None:
+    """Verify a run-id whose tracked run lives in another directory (another
+    data home) is refused naming that directory, without advice to
+    `admin clean` it, which would remove that run.
+    """
+    wp_path, _ = _build_guarded(tmp_path, mock_run_id, hello_world_bp_path)
+    _leave_sentinel(mock_run_id, "hello")
+    elsewhere = tmp_path / "other-data-home" / mock_run_id
+    elsewhere.mkdir(parents=True)
+    TrackingRepository().put_workplan_run_sync(
+        WorkplanRun(output_path=elsewhere, run_id=mock_run_id)
+    )
+
+    with (
+        mock.patch("cstar.orchestration.dag_runner.check_environment"),
+        pytest.raises(CstarExpectationFailed) as exc_info,
+    ):
+        await build_dag(wp_path, mock_run_id)
+
+    msg = str(exc_info.value)
+    assert f"tracked in {elsewhere}" in msg
+    assert "admin clean" not in msg
+
+
+@pytest.mark.asyncio
+async def test_build_dag_re_enters_a_run_directory_that_has_no_manifest(
+    tmp_path: Path, mock_run_id: str, hello_world_bp_path: Path
+) -> None:
+    """Verify a run directory that still holds its transformed workplan is
+    re-entered with its sentinels, even without a manifest: one could not be
+    written, or the run predates manifests.
+    """
+    wp_path, output_dir = _build_guarded(tmp_path, mock_run_id, hello_world_bp_path)
+    _leave_sentinel(mock_run_id, "hello")
+    (output_dir / f"{wp_path.stem}_transformed.yaml").write_text(wp_path.read_text())
+
+    with mock.patch("cstar.orchestration.dag_runner.check_environment"):
+        await build_dag(wp_path, mock_run_id)
+
+    assert read_run_manifest(output_dir) is None
+
+
 @pytest.mark.asyncio
 async def test_build_dag_refuses_a_corrupt_manifest_before_writing_anything(
     tmp_path: Path, mock_run_id: str, hello_world_bp_path: Path
@@ -2912,7 +3014,7 @@ def test_get_orchestrator_uses_local_launcher_for_pre_run_workplan(
         ),
         mock.patch.object(SlurmLauncher, "check_preconditions"),
     ):
-        orchestrator = get_orchestrator(Planner(wp), root=tmp_path)
+        orchestrator = get_orchestrator(Planner(wp), root=tmp_path, run_uuid="")
 
     assert type(orchestrator.launcher) is exp_klass
 
@@ -3053,7 +3155,9 @@ class _SubmittingLauncher(Launcher[ProcessHandle]):
     name = "queue"
 
     @classmethod
-    async def launch(cls, step: LiveStep, dependencies: list[ProcessHandle]) -> t.Any:
+    async def launch(
+        cls, step: LiveStep, dependencies: list[ProcessHandle], *, run_uuid: str
+    ) -> t.Any:
         await asyncio.sleep(0)  # let the steps of one pass interleave
         handle = ProcessHandle(
             pid=f"job-{step.name}",
@@ -3080,6 +3184,7 @@ async def test_run_dag_records_every_submission_in_the_manifest(
     """Verify scheduling a workplan records the launcher, the job id and the
     submission time of every step: the steps launched in one pass, writing the
     manifest together, each keep their own, and so does a step launched later.
+    Every handle records the uuid of the run's manifest.
     """
     monkeypatch.setattr("cstar.orchestration.dag_runner.POLL_DELAYS", (0.0,))
     bp = hello_world_bp_path.as_posix()
@@ -3124,6 +3229,49 @@ async def test_run_dag_records_every_submission_in_the_manifest(
     sentinel = await StateRepository().get_sentinel("a", ProcessHandle)
     assert sentinel is not None
     assert sentinel.submitted_at == SUBMITTED + timedelta(seconds=1)
+    assert sentinel.run_uuid == manifest.id
+
+
+@pytest.mark.asyncio
+async def test_run_dag_keeps_the_uuid_of_a_run_whose_manifest_was_removed(
+    tmp_path: Path,
+    mock_run_id: str,
+    hello_world_bp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Verify a manifest recreated in a run directory takes the uuid the run's
+    sentinels record, so the run still adopts them.
+    """
+    monkeypatch.setattr("cstar.orchestration.dag_runner.POLL_DELAYS", (0.0,))
+    wp = Workplan(
+        name="recreated",
+        description="A workplan whose manifest is removed.",
+        steps=[_hello_step(hello_world_bp_path.as_posix(), "a")],
+    )
+    wp_path = tmp_path / "recreated.yaml"
+    assert serialize(wp_path, wp)
+
+    async def _schedule() -> str:
+        planner, trx_path, facts, carried = await build_dag(wp_path, mock_run_id)
+        wp_run = await run_dag(
+            wp_path, trx_path, mock_run_id, planner, step_facts=facts, carried=carried
+        )
+        manifest = read_run_manifest(wp_run.output_path)
+        assert manifest is not None
+        return manifest.id
+
+    with (
+        mock.patch("cstar.orchestration.dag_runner.check_environment"),
+        mock.patch(
+            "cstar.orchestration.dag_runner.get_launcher",
+            return_value=_SubmittingLauncher,
+        ),
+    ):
+        first = await _schedule()
+        (StateDirectoryManager.data_dir(mock_run_id) / RUN_MANIFEST_NAME).unlink()
+        second = await _schedule()
+
+    assert second == first
 
 
 @pytest.mark.parametrize(

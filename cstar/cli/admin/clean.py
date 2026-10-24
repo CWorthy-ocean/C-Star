@@ -483,13 +483,18 @@ def get_run_actions(run_id: str) -> list[CleanupAction]:
         runstate_paths.update(run_paths)  # remove history entries
         runstate_paths.add(run_repo.latest_path(run_id))  # remove symlink to latest
 
+    # the sentinels outlive the run directory; left behind, a later run of this
+    # id would adopt them and report its steps done without running them
+    if (sentinels_dir := StateDirectoryManager.run_state_dir(run_id=run_id)).is_dir():
+        runstate_paths.add(sentinels_dir)
+
     actions: list[CleanupAction] = []
 
     if runstate_paths:
         actions.append(
             FileSystemCleanupAction(
                 name=f"{run_id!r} State",
-                description="Internal C-Star state information related to run history.",
+                description="Internal C-Star state information: the run's history and step status.",
                 asset_paths=list(runstate_paths),
             ),
         )

@@ -21,6 +21,7 @@ from cstar.orchestration.adapter import StepToRunRequestAdapter
 from cstar.orchestration.launch.common import (
     build_attempt_log_header,
     is_foreign_handle,
+    prior_of_this_run,
     resolve_prior_attempt,
 )
 from cstar.orchestration.models import KeyValueStore
@@ -462,6 +463,8 @@ class SlurmLauncher(Launcher[SlurmHandle]):
         cls,
         step: "LiveStep",
         dependencies: list[SlurmHandle],
+        *,
+        run_uuid: str,
     ) -> Task[SlurmHandle]:
         """Launch a step in SLURM.
 
@@ -471,6 +474,8 @@ class SlurmLauncher(Launcher[SlurmHandle]):
             The step to submit to SLURM.
         dependencies : list[SlurmHandle]
             The list of tasks that must complete prior to execution of the submitted Step.
+        run_uuid : str
+            The uuid of the run's manifest; see `Launcher.launch`.
 
         Returns
         -------
@@ -479,7 +484,9 @@ class SlurmLauncher(Launcher[SlurmHandle]):
         """
         state_repo = StateRepository()
 
-        prior_handle = await state_repo.get_sentinel(step.name, SlurmHandle)
+        prior_handle = prior_of_this_run(
+            await state_repo.get_sentinel(step.name, SlurmHandle), run_uuid
+        )
         submit_fn = SlurmLauncher._submit
         last_status: Status = Status.Unsubmitted
         reuse_prior: bool = False

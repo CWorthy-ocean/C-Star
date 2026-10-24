@@ -228,6 +228,8 @@ class ProcessHandle(BaseModel):
     """Whether the attempt this handle tracks ran in pre-run mode (prepared without launching the model)."""
     submitted_at: datetime | None = Field(default=None)
     """When the launcher submitted the process; `None` on a sentinel written before submission times were recorded."""
+    run_uuid: str = Field(default="")
+    """The uuid of the run manifest the process was launched for; empty on sentinels written before it was recorded, or when the manifest could not be written."""
 
     @property
     def safe_name(self) -> str:
@@ -963,6 +965,8 @@ class Launcher(t.Protocol, t.Generic[_THandle]):
         cls,
         step: LiveStep,
         dependencies: list[_THandle],
+        *,
+        run_uuid: str,
     ) -> Task[_THandle]:
         """Launch a process for a step.
 
@@ -970,6 +974,13 @@ class Launcher(t.Protocol, t.Generic[_THandle]):
         ----------
         step : LiveStep
             The step to launch
+        dependencies : list[_THandle]
+            The handles of the tasks that must complete before the step runs.
+        run_uuid : str
+            The uuid of the run's manifest; a prior handle recording another
+            uuid belongs to another run and is not adopted (the orchestrator
+            records the uuid on the handle). Empty when the manifest could not
+            be written.
 
         Returns
         -------
@@ -1047,10 +1058,15 @@ class Orchestrator(LoggingMixin):
     launcher: Launcher[t.Any]
     """The launcher used by the orchestrator to manage task execution."""
 
+    run_uuid: str
+    """The uuid of the run's manifest, passed to every launch and recorded on its handle."""
+
     _on_launched: Callable[[ProcessHandle], Awaitable[None]] | None = None
     """A callback to be executed when the orchestrator launches a task."""
 
-    def __init__(self, planner: Planner, launcher: Launcher[t.Any]) -> None:
+    def __init__(
+        self, planner: Planner, launcher: Launcher[t.Any], *, run_uuid: str
+    ) -> None:
         """Initialize the orchestrator.
 
         Parameters
@@ -1059,9 +1075,12 @@ class Orchestrator(LoggingMixin):
             The planner containing an execution plan for a workplan.
         launcher : Launcher
             A launcher to manage processes for tasks.
+        run_uuid : str
+            The uuid of the run's manifest; empty when it could not be written.
         """
         self.planner = planner
         self.launcher = launcher
+        self.run_uuid = run_uuid
 
     def get_open_nodes(self) -> Mapping[str, Status] | None:
         """Retrieve the set of unscheduled task nodes that are ready to launch.
@@ -1195,7 +1214,9 @@ class Orchestrator(LoggingMixin):
             # prerequisite tasks weren't all started, yet.
             return None
 
-        task = await self.launcher.launch(step, dependencies)
+        task = await self.launcher.launch(step, dependencies, run_uuid=self.run_uuid)
+        # an adopted handle written before uuids were recorded joins this run
+        task.handle.run_uuid = self.run_uuid or task.handle.run_uuid
         self.planner.store(node, KEY_TASK, task)
         self.log.info(f"Launched step: {step.name}")
 

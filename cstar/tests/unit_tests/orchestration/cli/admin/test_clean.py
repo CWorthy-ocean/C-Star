@@ -32,6 +32,9 @@ from cstar.cli.cli import app as root_app
 from cstar.entrypoint.utils import ARG_ALL, ARG_DRY_RUN
 from cstar.execution.file_system import DirectoryManager
 from cstar.orchestration.models import Workplan
+from cstar.orchestration.orchestration import ProcessHandle
+from cstar.orchestration.serialization import serialize
+from cstar.orchestration.state import StateRepository
 from cstar.orchestration.tracking import (
     Access,
     TrackingRepository,
@@ -734,3 +737,45 @@ def test_cli_admin_clean_removes_the_data_of_a_scheduled_run(tmp_path: Path) -> 
 
     assert result.exit_code == 0, result.output
     assert not run.output_path.exists()
+
+
+def _leave_sentinel(run_id: str) -> Path:
+    """Write a sentinel for a step of `run_id`; return the run's state directory."""
+    sentinel = StateRepository.sentinel_path("step", run_id=run_id)
+    sentinel.parent.mkdir(parents=True, exist_ok=True)
+    assert serialize(sentinel, ProcessHandle(pid="1", name="step", run_id=run_id))
+    return sentinel.parent
+
+
+def test_cli_admin_clean_removes_the_step_state_of_a_run_whose_directory_is_gone(
+    tmp_path: Path,
+) -> None:
+    """Verify the run's sentinels go with its tracking record when its
+    directory was already removed, so a later run of the id starts afresh.
+    """
+    run = _track(tmp_path / "purged", "purged")
+    state_dir = _leave_sentinel("purged")
+    for path in run.output_path.iterdir():
+        path.unlink()
+    run.output_path.rmdir()
+
+    result = CliRunner().invoke(
+        app, ["--run-id", "purged", ARG_YES], color=False, catch_exceptions=False
+    )
+
+    assert result.exit_code == 0, result.output
+    assert not state_dir.exists()
+    assert TrackingRepository().get_workplan_run_sync("purged") is None
+
+
+def test_cli_admin_clean_run_actions_of_an_untracked_run_include_its_step_state(
+    tmp_path: Path,
+) -> None:
+    """Verify a run-id with nothing left but its sentinels still has them removed."""
+    state_dir = _leave_sentinel("forgotten")
+
+    actions = get_run_actions("forgotten")
+
+    assert _names(actions) == ["State"]
+    state = t.cast("FileSystemCleanupAction", actions[0])
+    assert state.asset_paths == [state_dir]

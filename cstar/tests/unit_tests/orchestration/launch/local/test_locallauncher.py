@@ -377,11 +377,63 @@ async def test_locallauncher_launch_reuses_done_prior_handle(
     await StateRepository().put_sentinel(prior_handle)
 
     with mock.patch.object(LocalLauncher, "_submit", mock.AsyncMock()) as mock_submit:
-        task = await LocalLauncher.launch(live_step, [])
+        task = await LocalLauncher.launch(live_step, [], run_uuid="")
 
     mock_submit.assert_not_awaited()
     assert task.handle.pid == prior_handle.pid
     assert task.handle.status == Status.Done
+
+
+@pytest.mark.parametrize(
+    ("prior_uuid", "adopted"),
+    [
+        pytest.param("earlier", False, id="another-run"),
+        pytest.param("this", True, id="this-run"),
+        pytest.param("", True, id="sentinel-before-uuids"),
+    ],
+)
+@pytest.mark.usefixtures("read_yaml_intercept")
+async def test_locallauncher_launch_ignores_the_sentinel_of_another_run(
+    wp_templates_dir: Path,
+    mock_run_id: str,
+    prior_uuid: str,
+    adopted: bool,
+) -> None:
+    """Verify an expired Done prior handle recording another run's manifest uuid
+    is not adopted and the step is submitted again; a handle of this run, or
+    one whose run cannot be told, is adopted.
+    """
+    workplan = deserialize(wp_templates_dir / "single_step.yaml", Workplan)
+    live_step = LiveStep.from_step(workplan.steps[0])
+    prior_handle = LocalHandle(
+        pid="12345",
+        name=live_step.name,
+        run_id=mock_run_id,
+        start_at=datetime.datetime.now(tz=datetime.UTC),
+        status=Status.Done,
+        run_uuid=prior_uuid,
+    )
+    await StateRepository().put_sentinel(prior_handle)
+    new_handle = LocalHandle(
+        pid="999",
+        name=live_step.name,
+        run_id=mock_run_id,
+        start_at=datetime.datetime.now(tz=datetime.UTC),
+        status=Status.Submitted,
+    )
+
+    with mock.patch.object(
+        LocalLauncher, "_submit", mock.AsyncMock(return_value=new_handle)
+    ) as mock_submit:
+        task = await LocalLauncher.launch(live_step, [], run_uuid="this")
+
+    assert mock_submit.await_count == (0 if adopted else 1)
+    assert task.handle.pid == ("12345" if adopted else "999")
+    if not adopted:
+        # a stale pre-run or failure must not steer the new submission
+        assert mock_submit.await_args is not None
+        assert mock_submit.await_args.kwargs["after_pre_run"] is False
+        assert KEY_CLOBBER not in mock_submit.await_args.args[0].workflow_overrides
 
 
 @pytest.mark.usefixtures("read_yaml_intercept")
@@ -415,7 +467,7 @@ async def test_locallauncher_launch_resubmits_failed_prior_handle_with_clobber(
     with mock.patch.object(
         LocalLauncher, "_submit", mock.AsyncMock(return_value=fake_new_handle)
     ) as mock_submit:
-        task = await LocalLauncher.launch(live_step, [])
+        task = await LocalLauncher.launch(live_step, [], run_uuid="")
 
     mock_submit.assert_awaited_once()
     assert mock_submit.await_args is not None
@@ -450,7 +502,7 @@ async def test_locallauncher_launch_failed_prior_with_resume_no_clobber(
 
     fake_process = mock.Mock(pid=999999)
     with mock.patch.object(subprocess, "Popen", return_value=fake_process):
-        task = await LocalLauncher.launch(live_step, [])
+        task = await LocalLauncher.launch(live_step, [], run_uuid="")
 
     submitted_step = task.step
     assert submitted_step.workflow_overrides.get(KEY_CLOBBER, False) is False
@@ -579,7 +631,7 @@ async def test_locallauncher_launch_adopts_the_submission_of_a_prior_handle(
     )
 
     with mock.patch.object(LocalLauncher, "_submit", mock.AsyncMock()) as mock_submit:
-        task = await LocalLauncher.launch(live_step, [])
+        task = await LocalLauncher.launch(live_step, [], run_uuid="")
 
     mock_submit.assert_not_awaited()
     assert task.handle.pid == "12345"
@@ -611,7 +663,7 @@ async def test_locallauncher_launch_attaches_to_done_pre_run(
 
     fake_process = mock.Mock(pid=999999)
     with mock.patch.object(subprocess, "Popen", return_value=fake_process):
-        task = await LocalLauncher.launch(live_step, [])
+        task = await LocalLauncher.launch(live_step, [], run_uuid="")
 
     assert task.handle.pid != prior_handle.pid
     assert task.handle.pre_run is False
@@ -737,7 +789,7 @@ async def test_locallauncher_launch_clobbers_failed_slurm_sentinel_for_pre_run(
         mock.patch.object(subprocess, "Popen", return_value=fake_process),
         mock.patch.object(LocalLauncher, "_status", mock.AsyncMock()) as mock_status,
     ):
-        task = await LocalLauncher.launch(live_step, [])
+        task = await LocalLauncher.launch(live_step, [], run_uuid="")
 
     mock_status.assert_not_awaited()
     assert task.handle.pid != prior_handle.pid
@@ -775,7 +827,7 @@ async def test_locallauncher_launch_refuses_running_slurm_sentinel(
         mock.patch.object(LocalLauncher, "_submit", mock.AsyncMock()) as mock_submit,
         pytest.raises(CstarExpectationFailed, match="another launcher"),
     ):
-        await LocalLauncher.launch(live_step, [])
+        await LocalLauncher.launch(live_step, [], run_uuid="")
 
     mock_submit.assert_not_awaited()
 
@@ -813,7 +865,7 @@ async def test_locallauncher_launch_refuses_dependency_it_cannot_wait_on(
         mock.patch.object(LocalLauncher, "_submit", mock.AsyncMock()) as mock_submit,
         pytest.raises(CstarError, match="another run"),
     ):
-        await LocalLauncher.launch(live_step, [foreign])
+        await LocalLauncher.launch(live_step, [foreign], run_uuid="")
 
     mock_submit.assert_not_awaited()
 
@@ -844,7 +896,7 @@ async def test_locallauncher_launch_waits_on_dependency_of_this_run(
             LocalLauncher, "_submit", mock.AsyncMock(return_value=submitted)
         ) as mock_submit,
     ):
-        task = await LocalLauncher.launch(live_step, [dependency])
+        task = await LocalLauncher.launch(live_step, [dependency], run_uuid="")
 
     assert task.handle.pid == "777"
     assert mock_submit.await_args is not None

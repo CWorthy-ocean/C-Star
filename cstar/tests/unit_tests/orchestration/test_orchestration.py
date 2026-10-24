@@ -199,7 +199,7 @@ def test_planner_tolerates_unresolved_external_step(
     Unsubmitted node, so its dependents are planned but never launched.
     """
     planner = Planner(external_workplan)
-    orchestrator = Orchestrator(planner, LocalLauncher())
+    orchestrator = Orchestrator(planner, LocalLauncher(), run_uuid="")
     first = planner.retrieve("first", KEY_STEP)
     assert first is not None
 
@@ -239,7 +239,7 @@ def test_locate_dependencies_external(
     """
     task = external_task(status)
     planner = Planner(external_workplan, {EXTERNAL_TOKEN: task})
-    orchestrator = Orchestrator(planner, LocalLauncher())
+    orchestrator = Orchestrator(planner, LocalLauncher(), run_uuid="")
     first = planner.retrieve("first", KEY_STEP)
     second = planner.retrieve("second", KEY_STEP)
     assert first is not None
@@ -282,7 +282,7 @@ def test_open_nodes_with_external_dependency(
     """
     task = external_task(status)
     planner = Planner(external_workplan, {EXTERNAL_TOKEN: task})
-    orchestrator = Orchestrator(planner, LocalLauncher())
+    orchestrator = Orchestrator(planner, LocalLauncher(), run_uuid="")
 
     open_nodes = orchestrator.get_open_nodes()
 
@@ -297,7 +297,7 @@ async def test_process_node_refuses_relaunch(
 ) -> None:
     """Verify a step that already holds a task is never launched again."""
     planner = Planner(external_workplan, {EXTERNAL_TOKEN: external_task(Status.Done)})
-    orchestrator = Orchestrator(planner, LocalLauncher())
+    orchestrator = Orchestrator(planner, LocalLauncher(), run_uuid="")
     first = planner.retrieve("first", KEY_STEP)
     assert first is not None
 

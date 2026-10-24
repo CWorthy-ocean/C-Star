@@ -35,6 +35,7 @@ from cstar.orchestration.manifest import (
     ATTEMPT_VARIABLES_NAME,
     ATTEMPT_WORKPLAN_NAME,
     RUN_MANIFEST_NAME,
+    TRANSFORMED_WORKPLAN_GLOB,
     CarriedInputs,
     RunManifest,
     StepFacts,
@@ -304,7 +305,7 @@ def get_launcher(
     return launcher
 
 
-def get_orchestrator(planner: Planner, *, root: Path) -> Orchestrator:
+def get_orchestrator(planner: Planner, *, root: Path, run_uuid: str) -> Orchestrator:
     """Create the orchestrator that launches the steps of a plan.
 
     Each launch persists the step's handle and records the submission in the
@@ -316,6 +317,8 @@ def get_orchestrator(planner: Planner, *, root: Path) -> Orchestrator:
         The planner holding the plan to execute.
     root : Path
         The run root, which holds the manifest the submissions are recorded in.
+    run_uuid : str
+        The uuid of the run's manifest; empty when it could not be written.
 
     Returns
     -------
@@ -323,7 +326,7 @@ def get_orchestrator(planner: Planner, *, root: Path) -> Orchestrator:
     """
     launcher = get_launcher(planner.workplan, force_local=planner.workplan.pre_run)
 
-    orchestrator = Orchestrator(planner, launcher)
+    orchestrator = Orchestrator(planner, launcher, run_uuid=run_uuid)
     orchestrator.set_callback("launched", functools.partial(on_launched, root=root))
 
     return orchestrator
@@ -1391,6 +1394,63 @@ def refuse_edited_done_steps(
         )
 
 
+async def refuse_stale_run_state(run_id: str, root: Path) -> None:
+    """Refuse to start a run over the step state of an earlier run whose directory is gone.
+
+    Sentinels are kept by run-id, outside the run directory, so they outlive a
+    run directory that was purged from scratch or removed by hand. A launcher
+    adopts a sentinel that reads Done, so the new run would report those steps
+    done without running them. A run root that still holds its transformed
+    workplan is the earlier run itself (its manifest could not be written, or
+    predates manifests), and is re-entered as before.
+
+    Parameters
+    ----------
+    run_id : str
+        The run-id.
+    root : Path
+        The run root, which holds no manifest.
+
+    Raises
+    ------
+    CstarExpectationFailed
+        If the run root holds no transformed workplan and the run-id has sentinels.
+    """
+    if any(root.glob(TRANSFORMED_WORKPLAN_GLOB)):
+        return
+    if not await StateRepository().has_sentinels(run_id=run_id):
+        return
+
+    state_dir = StateDirectoryManager.run_state_dir(run_id=run_id)
+    escape = f"pass {ARG_RUN_ID} <other-id> to start a new run"
+    record = await TrackingRepository().get_workplan_run(run_id)
+    elsewhere = record.output_path if record else None
+    if elsewhere and elsewhere.is_dir() and elsewhere.resolve() != root.resolve():
+        # the run lives on (under another data home): `admin clean` would remove it
+        msg = (
+            f"Run {run_id!r} is tracked in {elsewhere}, not {root}, and has step "
+            f"state in {state_dir}; this run would report its steps done without "
+            f"running them. Re-enter it under the data home it was started in, "
+            f"or {escape}"
+        )
+    elif root.is_dir() and any(root.iterdir()):
+        # something of the run is left: `admin clean` would remove it too
+        msg = (
+            f"Run {run_id!r} has step state in {state_dir}, but its directory "
+            f"{root} holds neither its manifest nor its transformed workplan; "
+            f"this run would report those steps done without running them. "
+            f"Remove {state_dir} to run them again, or {escape}"
+        )
+    else:
+        msg = (
+            f"Run {run_id!r} has step state in {state_dir} left by an earlier run "
+            f"whose directory {root} is gone; this run would report those steps "
+            f"done without running them. Clear it with `cstar admin clean "
+            f"{ARG_RUN_ID} {run_id}`, or {escape}"
+        )
+    raise CstarExpectationFailed(msg)
+
+
 async def build_dag(
     wp_path: Path,
     run_id: str = "",
@@ -1429,8 +1489,9 @@ async def build_dag(
     NoPreparableStepsError
         If `pre_run` leaves no step to prepare.
     CstarExpectationFailed
-        If the run's manifest cannot be read, or a step that reached Done was
-        edited and not clobbered.
+        If the run's manifest cannot be read, a step that reached Done was
+        edited and not clobbered, or the run-id has step state left by a run
+        whose directory is gone.
     """
     if run_id:
         run_id = slugify(run_id)
@@ -1454,6 +1515,7 @@ async def build_dag(
         raise CstarExpectationFailed(msg) from ex
 
     if manifest is None:
+        await refuse_stale_run_state(run_id, output_dir)
         log.debug(f"Run {run_id!r} has no manifest; no step definition is checked")
     else:
         status = await load_run_state(
@@ -1469,6 +1531,42 @@ async def build_dag(
     planner = build_planner(wp, external.tasks())
 
     return planner, prepared_wp_path, facts, carried
+
+
+def _uuid_of_sentinels(root: Path, run_id: str) -> str:
+    """Return the manifest uuid the sentinels of a run without a manifest record.
+
+    A run whose manifest was removed from its directory keeps the identity
+    its sentinels record, so a launcher still adopts them (`build_dag` has
+    refused a run whose directory is gone).
+
+    Parameters
+    ----------
+    root : Path
+        The run root.
+    run_id : str
+        The run-id.
+
+    Returns
+    -------
+    str
+        The one uuid the run's sentinels record, or an empty string when the
+        run has a manifest, or its sentinels record none or several.
+    """
+    if (root / RUN_MANIFEST_NAME).exists():
+        return ""
+
+    state_dir = StateDirectoryManager.run_state_dir(run_id=run_id)
+    uuids = {
+        handle.run_uuid
+        for path in state_dir.glob(StateRepository.sentinel_name("*"))
+        if (handle := try_deserialize(path, ProcessHandle)) and handle.run_uuid
+    }
+    if len(uuids) != 1:
+        if uuids:
+            log.debug(f"The sentinels of run {run_id!r} record several uuids: {uuids}")
+        return ""
+    return uuids.pop()
 
 
 def _record_attempt(
@@ -1548,6 +1646,7 @@ def _record_attempt(
                 steps=entries,
                 runs=workplan.runs,
                 carried_blueprints=carried.carried_blueprints if carried else None,
+                minted_id=_uuid_of_sentinels(root, run_id),
             )
     except Exception as ex:
         log.warning(f"Could not write the manifest of run {run_id!r}: {ex}")
@@ -1621,7 +1720,7 @@ async def run_dag(
 
     _ = await TrackingRepository().put_workplan_run(wp_run)
 
-    orchestrator = get_orchestrator(planner, root=root)
+    orchestrator = get_orchestrator(planner, root=root, run_uuid=uuid)
 
     # schedule the tasks without waiting for completion
     await process_plan(orchestrator)
@@ -1665,8 +1764,9 @@ async def build_and_run_dag(
     NoPreparableStepsError
         If `pre_run` leaves no step to prepare.
     CstarExpectationFailed
-        If the run's manifest cannot be read, or a step that reached Done was
-        edited and not clobbered.
+        If the run's manifest cannot be read, a step that reached Done was
+        edited and not clobbered, or the run-id has step state left by a run
+        whose directory is gone.
     """
     planner, prepared_wp_path, facts, carried = await build_dag(
         wp_path,

@@ -32,6 +32,7 @@ from cstar.orchestration.manifest import (
 from cstar.orchestration.run_check import TRANSFORMED_WORKPLAN_GLOB
 from cstar.tests.integration_tests.cli_harness import (
     DONE,
+    flat_output,
     kill_run,
     run_cstar,
     run_log_tails,
@@ -41,7 +42,6 @@ from cstar.tests.integration_tests.cli_harness import (
 from cstar.tests.integration_tests.e2e.test_run_index import (
     PRODUCER,
     STEP,
-    _flat,
     make_env,
     write_consumer,
 )
@@ -255,8 +255,8 @@ def test_promote_copies_the_run_into_the_project_runs_area(
 
     proc = _promote(env, RUN_ID)
     assert proc.returncode == 0, _output(proc)
-    assert "Promoted run" in _flat(proc.stdout), _output(proc)
-    assert "products of second" in _flat(proc.stdout), _output(proc)
+    assert "Promoted run" in flat_output(proc.stdout), _output(proc)
+    assert "products of second" in flat_output(proc.stdout), _output(proc)
 
     copy = promote_run.runs_area(name) / RUN_ID
     _assert_complete_copy(promote_run, copy)
@@ -277,7 +277,7 @@ def test_promote_copies_the_run_into_the_project_runs_area(
 
     again = _promote(env, RUN_ID)
     assert again.returncode == 2, _output(again)
-    assert "already promoted" in _flat(_output(again)), _output(again)
+    assert "already promoted" in flat_output(_output(again)), _output(again)
 
 
 def test_promote_dry_run_writes_nothing(promote_run: PromoteRun) -> None:
@@ -287,7 +287,7 @@ def test_promote_dry_run_writes_nothing(promote_run: PromoteRun) -> None:
 
     proc = _promote(env, RUN_ID, "--dry-run")
     assert proc.returncode == 0, _output(proc)
-    flat = _flat(proc.stdout)
+    flat = flat_output(proc.stdout)
     assert "Would copy" in flat, _output(proc)
     assert "Total:" in flat, _output(proc)
     assert not (promote_run.runs_area(name) / RUN_ID).exists()
@@ -304,7 +304,7 @@ def test_promote_needs_a_project_home_or_to(promote_run: PromoteRun) -> None:
 
     refused = _promote(env, RUN_ID)
     assert refused.returncode == 2, _output(refused)
-    message = _flat(_output(refused))
+    message = flat_output(_output(refused))
     assert ENV_CSTAR_PROJECT_HOME in message, _output(refused)
     assert "--to" in message, _output(refused)
 
@@ -330,7 +330,7 @@ def test_link_then_materialize(promote_run: PromoteRun) -> None:
 
     refused = _promote(env, RUN_ID, "--mode", "copy")
     assert refused.returncode == 2, _output(refused)
-    assert "materialize" in _flat(_output(refused)), _output(refused)
+    assert "materialize" in flat_output(_output(refused)), _output(refused)
 
     proc = _promote(env, RUN_ID, "--mode", "materialize")
     assert proc.returncode == 0, _output(proc)
@@ -394,8 +394,8 @@ def test_move_updates_the_tracking_record_and_relaunch_is_refused(
     assert proc.returncode == 0, _output(proc)
     assert not run_dir.exists(), _output(proc)
     _assert_complete_copy(promote_run, destination)
-    assert "it is tracked here as attached (read-only)" in _flat(proc.stdout), _output(
-        proc
+    assert "it is tracked here as attached (read-only)" in flat_output(proc.stdout), (
+        _output(proc)
     )
 
     path = run_cstar(env, "run", "path", RUN_ID)
@@ -407,7 +407,7 @@ def test_move_updates_the_tracking_record_and_relaunch_is_refused(
 
     relaunched = run_cstar(env, "workplan", "submit", "--run-id", RUN_ID)
     assert relaunched.returncode == 2, _output(relaunched)
-    assert "attached runs can be inspected and referenced" in _flat(
+    assert "attached runs can be inspected and referenced" in flat_output(
         _output(relaunched)
     ), _output(relaunched)
 
@@ -434,7 +434,9 @@ def test_verify_records_digests_in_the_copy(promote_run: PromoteRun) -> None:
 
     proc = _promote(env, RUN_ID, "--verify")
     assert proc.returncode == 0, _output(proc)
-    assert "Recorded 1 digest(s) in the copy." in _flat(proc.stdout), _output(proc)
+    assert "Recorded 1 digest(s) in the copy." in flat_output(proc.stdout), _output(
+        proc
+    )
 
     step = Path("tasks") / slugify(PRODUCER)
     copied = read_step_record(destination / step)
