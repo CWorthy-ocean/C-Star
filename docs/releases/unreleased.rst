@@ -261,6 +261,8 @@ Bug Fixes
 - ``cstar run check``, ``cstar run attach`` and ``cstar run promote`` could not find the plan of a run started from a ``.json`` or ``.yml`` workplan. (`#810 <https://github.com/CWorthy-ocean/C-Star/pull/810>`_)
 - A blank ``--run-id`` exited with code 1 and no message; it now reports the problem. (`#814 <https://github.com/CWorthy-ocean/C-Star/pull/814>`_)
 - ``cstar admin migrate-catalog`` no longer fails after moving blueprints out of a legacy directory that is a symbolic link; the link is reported as left in place. (`#818 <https://github.com/CWorthy-ocean/C-Star/pull/818>`_)
+- ``cstar run promote --mode move`` of a run tracked on this machine (and re-attaching a copy of such a run) no longer leaves the run's sentinel files behind under ``run_state/<run-id>/``; those of finished steps are removed and the directory with them when empty, while a sentinel whose step has not finished is kept with a warning. (`#817 <https://github.com/CWorthy-ocean/C-Star/pull/817>`_)
+- A ``runs:`` alias pinned to a run directory that has since moved or been removed no longer fails on the stale path: it warns, naming the pinned directory and the run's uuid, finds the run by that uuid and re-pins the alias by uuid; a pinned directory that holds another run is still an error. (`#817 <https://github.com/CWorthy-ocean/C-Star/pull/817>`_)
 
 
 Improvements
@@ -311,6 +313,13 @@ Improvements
 - ``cstar init`` introduces the shell function as "'cstar run cd' shell support": the ``cstar run cd`` command requires a shell function to operate. (`#813 <https://github.com/CWorthy-ocean/C-Star/pull/813>`_)
 - Hints and error messages that suggest launching or re-entering a run now name ``cstar workplan submit``. (`#816 <https://github.com/CWorthy-ocean/C-Star/pull/816>`_)
 - The workplan builder in the wizard labels its launch button **Submit** and streams ``cstar workplan submit``. (`#816 <https://github.com/CWorthy-ocean/C-Star/pull/816>`_)
+- The tracking record no longer stores the workplan name, start time, authored workplan path or transformed workplan path, nor the ``name``, ``attached`` and ``access`` metadata keys; it holds the run directory, sentinels, environment, user variables, measured step sizes, the cached uuid, typed ``attached`` and ``access`` fields, and ``recorded_at`` (when the record was written on this machine). (`#817 <https://github.com/CWorthy-ocean/C-Star/pull/817>`_)
+
+  - The name, start time and workplan paths are read from the run's manifest (``cstar-run.yaml``), so ``ls``, ``status``, ``show`` and ``--resume`` see the run as it is, wherever its directory now is.
+  - A record written by 0.17.0 or earlier still loads: its attached and access marks become the typed fields, and what it held that this release derives is kept under ``legacy`` and used only for a run that has no manifest to ask (one scheduled before the manifest existed, or whose directory is gone).
+  - A record carrying an ``access`` value this release does not know is read as read-only with a warning, so the run stays listed and nothing writes into its directory.
+
+- ``cstar run ls`` without ``--all`` or ``--shared`` reads only the tracking records in your state home and each tracked run's manifest for its name and start time; it scans no run directories. (`#817 <https://github.com/CWorthy-ocean/C-Star/pull/817>`_)
 
 
 
@@ -361,3 +370,4 @@ Miscellaneous
 - Blueprint schema 3.3.0 (a minor bump: older files load and run unchanged) is published as ``ucla_roms_schema.3.3.0.json``, alongside run manifest schema 1.5.0. (`#818 <https://github.com/CWorthy-ocean/C-Star/pull/818>`_)
 - Docs: the blueprint page moved to ``blueprints/ucla_roms``; examples, tutorials and templates use ``application: ucla_roms``, with a note wherever the old name is still accepted. (`#818 <https://github.com/CWorthy-ocean/C-Star/pull/818>`_)
 - Wizard labels, hints and log messages say UCLA-ROMS, keeping "with MARBL" where the output needs MARBL. (`#818 <https://github.com/CWorthy-ocean/C-Star/pull/818>`_)
+- The run docs state what ``cstar run ls`` reads without flags. (`#817 <https://github.com/CWorthy-ocean/C-Star/pull/817>`_)
