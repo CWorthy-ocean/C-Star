@@ -340,8 +340,8 @@ def test_forge_then_run_matches_wizard_export() -> None:
     assert (forge.name, forge.application) == ("forge", "forge")
     assert forge.blueprint_path == "/data/forge.yaml"
     assert (run.name, run.application, run.depends_on) == (
-        "roms_marbl",
-        "roms_marbl",
+        "ucla_roms",
+        "ucla_roms",
         ["forge"],
     )
     assert run.blueprint_path == DeferredBlueprintRef(
@@ -437,6 +437,20 @@ class TestUpscaleChain:
         other = Step(name="o", application="nest_ic", blueprint="inline")
         with pytest.raises(ValueError, match="not yet supported"):
             upscale_chain([self.level("inner"), other], use_pio_of=lambda _: True)
+
+    def test_accepts_level_authored_under_earlier_application_name(self) -> None:
+        inner = self.level("inner")
+        assert inner.application == "ucla_roms"
+        generated = upscale_chain(
+            [inner, self.level("outer")], use_pio_of=lambda _: False
+        )
+        assert [s.name for s in generated.steps] == ["upscale_inner_outer", "outer_up"]
+
+    def test_refusal_names_the_application_it_supports(self) -> None:
+        other = Step(name="o", application="nest_ic", blueprint="inline")
+        with pytest.raises(ValueError, match="other than ucla_roms") as ex:
+            upscale_chain([self.level("inner"), other], use_pio_of=lambda _: True)
+        assert "['o']" in str(ex.value)
 
     def test_name_collision_is_loud(self) -> None:
         with pytest.raises(ValueError, match="collide"):

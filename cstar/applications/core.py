@@ -12,6 +12,7 @@ from pathlib import Path
 from pydantic import Field
 
 from cstar.base.adapter import SchemaAdapter
+from cstar.base.application_names import canonical_application
 from cstar.base.log import get_logger
 from cstar.entrypoint.config import JOBFILE_DATE_FORMAT
 from cstar.execution.file_system import is_remote_resource, local_copy
@@ -640,7 +641,13 @@ def get_application(name: str) -> ApplicationDefinition[t.Any, t.Any]:
     Each step is attempted only while *name* is still unregistered. A plugin
     therefore can never shadow a built-in application: a name that resolves in
     step 1 never reaches step 2, and the plugin claiming it is never imported.
+
+    An earlier name of an application (see
+    :data:`~cstar.base.application_names.APPLICATION_ALIASES`) resolves to the
+    application that replaced it, so all three lookups see the current name.
     """
+    name = canonical_application(name)
+
     if name not in _registry:
         _load_builtin_application(name)
 

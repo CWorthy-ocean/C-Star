@@ -19,6 +19,7 @@ from pathlib import Path
 import yaml
 from pydantic import Field, model_validator
 
+from cstar.applications.roms_marbl.models import APP_NAME
 from cstar.applications.roms_marbl.outputs import RestartFile, restart_timestamp
 from cstar.applications.roms_marbl.transforms import (
     ContinuanceDirective,
@@ -445,7 +446,7 @@ def forge_then_run(
     forge_blueprint: Path,
     emitted: "EmittedBlueprint",
     *,
-    names: tuple[str, str] = ("forge", "roms_marbl"),
+    names: tuple[str, str] = ("forge", "ucla_roms"),
 ) -> Generated:
     """Generate a forge step followed by the run of the blueprint it emits.
 
@@ -513,7 +514,7 @@ def upscale_chain(
     Parameters
     ----------
     levels : Sequence[Step]
-        The `roms_marbl` steps, innermost grid first.
+        The `ucla_roms` steps, innermost grid first.
     use_pio_of : Callable[[Step], bool]
         Whether a level's build uses ParallelIO, which the upscaler must match.
 
@@ -524,14 +525,14 @@ def upscale_chain(
     Raises
     ------
     ValueError
-        If fewer than two levels are given, a level is not `roms_marbl`, is
+        If fewer than two levels are given, a level is not `ucla_roms`, is
         time-chunked, or a parent already sets `cdr_forcing`.
     """
     if len(levels) < 2:
         msg = "upscaling needs at least two levels"
         raise ValueError(msg)
-    if bad := [s.name for s in levels if s.application != "roms_marbl"]:
-        msg = f"upscaling levels other than roms_marbl is not yet supported: {bad}"
+    if bad := [s.name for s in levels if s.application != APP_NAME]:
+        msg = f"upscaling levels other than {APP_NAME} is not yet supported: {bad}"
         raise ValueError(msg)
     _check_unchunked(levels)
     if with_cdr := [

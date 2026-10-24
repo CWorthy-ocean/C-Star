@@ -1104,10 +1104,10 @@ class TestCatalogBarBlueprintCount:
 def test_bundled_catalog_ships_the_wales_toy_roms_marbl_blueprint():
     """The bundled layer carries one ROMS-MARBL blueprint, `wales-toy`, as a file."""
     bundled = DomainCatalog(read_only=True)
-    assert "wales-toy" in bundled.blueprint_names("roms_marbl")
-    path = bundled.blueprint_path("roms_marbl", "wales-toy")
+    assert "wales-toy" in bundled.blueprint_names("ucla_roms")
+    path = bundled.blueprint_path("ucla_roms", "wales-toy")
     assert path.name == "wales-toy.yaml" and path.is_file()
-    assert "roms_marbl" in bundled.blueprint_applications
+    assert "ucla_roms" in bundled.blueprint_applications
 
 
 def test_wales_tutorial_blueprint_matches_the_bundled_copy():
@@ -1116,5 +1116,5 @@ def test_wales_tutorial_blueprint_matches_the_bundled_copy():
 
     repo_root = Path(cstar.__file__).resolve().parents[1]
     tutorial = repo_root / "docs" / "tutorials" / "wales_toy_blueprint.yaml"
-    bundled = DomainCatalog(read_only=True).blueprint_path("roms_marbl", "wales-toy")
+    bundled = DomainCatalog(read_only=True).blueprint_path("ucla_roms", "wales-toy")
     assert tutorial.read_text() == bundled.read_text()

@@ -12,6 +12,7 @@ from pydantic import (
 )
 
 from cstar.base.adapter import SchemaAdapter, SchemaBreak
+from cstar.base.application_names import canonical_application
 from cstar.base.exceptions import CstarError
 from cstar.base.log import LoggingMixin
 
@@ -234,7 +235,7 @@ class BlueprintMigration(Migration):
         CstarManualMigrationError
             If an older major version has no automatic upgrade path.
         """
-        application = str(dumped[KEY_APP])
+        application = canonical_application(str(dumped[KEY_APP]))
 
         if application not in self.targets:
             msg = f"No schema version registered for application {application!r}"
@@ -333,6 +334,7 @@ class BlueprintMigration(Migration):
             If the migration cannot be completed.
         """
         model = deepcopy(dumped)
+        model[KEY_APP] = canonical_application(str(model[KEY_APP]))
 
         for klass in plan.adapters:
             if model := klass(model).adapt():

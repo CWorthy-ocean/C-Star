@@ -61,7 +61,7 @@ def test_splitter_frequency_setting(env: dict[str, str], expected: str) -> None:
     ("application", "transform_fn"),
     [
         ("roms_marbl", RomsMarblTimeSplitter()),
-        (Application.ROMS_MARBL.value, RomsMarblTimeSplitter()),
+        (Application.UCLA_ROMS.value, RomsMarblTimeSplitter()),
     ],
 )
 def test_roms_marbl_transform_registry(

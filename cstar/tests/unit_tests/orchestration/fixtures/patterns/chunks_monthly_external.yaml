@@ -5,7 +5,7 @@ runs:
     run_id: iceland0_ini
 steps:
 - name: run-01
-  application: roms_marbl
+  application: ucla_roms
   blueprint: /path/B.yaml
   depends_on:
   - seg8@spinup
@@ -17,7 +17,7 @@ steps:
       step: seg8@spinup
       timestamp: '2023-01-15 00:00:00'
 - name: run-02
-  application: roms_marbl
+  application: ucla_roms
   blueprint: /path/B.yaml
   depends_on:
   - run-01
@@ -28,7 +28,7 @@ steps:
     continue-from:
       step: run-01
 - name: run-03
-  application: roms_marbl
+  application: ucla_roms
   blueprint: /path/B.yaml
   depends_on:
   - run-02
@@ -39,7 +39,7 @@ steps:
     continue-from:
       step: run-02
 - name: run-04
-  application: roms_marbl
+  application: ucla_roms
   blueprint: /path/B.yaml
   depends_on:
   - run-03

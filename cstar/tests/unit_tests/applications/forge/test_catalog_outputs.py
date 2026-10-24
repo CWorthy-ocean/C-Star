@@ -147,7 +147,7 @@ async def test_current_standalone_output(tmp_path: Path) -> None:
     assert outputs == [
         BlueprintOutput(
             path=emitted,
-            application="roms_marbl",
+            application="ucla_roms",
             producer=producer,
             status=OutputStatus.CURRENT,
             generated_at=_NEWER,
@@ -184,7 +184,7 @@ async def test_standalone_output_without_provenance_is_unverified(
 
     assert output == BlueprintOutput(
         path=emitted,
-        application="roms_marbl",
+        application="ucla_roms",
         producer=BlueprintIdentity(kind="Blueprint", application=FORGE, name="wio"),
         status=OutputStatus.UNVERIFIED,
     )
@@ -206,7 +206,7 @@ async def test_workplan_output_carries_its_run_and_step(tmp_path: Path) -> None:
     assert outputs == [
         BlueprintOutput(
             path=emitted,
-            application="roms_marbl",
+            application="ucla_roms",
             producer=producer,
             status=OutputStatus.CURRENT,
             generated_at=_NEWER,
@@ -657,7 +657,7 @@ async def test_application_that_emits_no_blueprint_finds_nothing(
     stack = LayeredCatalog(
         [DomainCatalog(root, suppress_validation=True), DomainCatalog(read_only=True)]
     )
-    assert "wales-toy" in stack.blueprint_names("roms_marbl")
+    assert "wales-toy" in stack.blueprint_names("ucla_roms")
 
     assert await stack.blueprint_outputs("roms_marbl") == []
 

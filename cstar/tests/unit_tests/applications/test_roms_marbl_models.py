@@ -499,8 +499,8 @@ class TestCarbonateSensitivity:
         return complete_blueprint_dict
 
     def test_schema_version(self):
-        """Adding the optional field is a minor bump of the schema."""
-        assert RomsMarblBlueprint.model_fields["schema_version"].default == "3.2.0"
+        """Adding the optional field was a minor bump of the schema, now at 3.3.0."""
+        assert RomsMarblBlueprint.model_fields["schema_version"].default == "3.3.0"
 
     def test_defaults_to_none(self, complete_blueprint_dict):
         """A blueprint without the field validates, with no sensitivity forcing."""

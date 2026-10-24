@@ -124,7 +124,7 @@ def test_dep_keys(tmp_path: Path) -> None:
 def test_workplan_transformation(diamond_workplan: Workplan) -> None:
     """Verify that the workplan transformation applies appropriate transforms when enabled."""
     for step in diamond_workplan.steps:
-        step.application = Application.ROMS_MARBL.value
+        step.application = Application.UCLA_ROMS.value
 
     diamond_steps = {str(s.name) for s in diamond_workplan.steps}
 
@@ -335,7 +335,7 @@ def test_live_step_blueprint_anchors_relative_locations(
     monkeypatch.chdir(elsewhere)
     step = LiveStep(
         name="step",
-        application=Application.ROMS_MARBL.value,
+        application=Application.UCLA_ROMS.value,
         blueprint=bp_path,
         working_dir=tmp_path / "work",
     )

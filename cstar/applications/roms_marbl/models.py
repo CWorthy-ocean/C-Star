@@ -21,7 +21,7 @@ from cstar.orchestration.models import (
 )
 from cstar.roms.namelist import _parse_semver, namelist_schema_for_ref
 
-APP_NAME: t.Literal["roms_marbl"] = "roms_marbl"
+APP_NAME: t.Literal["ucla_roms"] = "ucla_roms"
 
 
 class ForcingConfiguration(ConfiguredBaseModel):
@@ -268,7 +268,7 @@ class PartitioningParameterSet(ParameterSet):
 class RomsMarblBlueprint(Blueprint):
     """Blueprint schema for running a ROMS-MARBL simulation."""
 
-    schema_version: str = "3.2.0"
+    schema_version: str = "3.3.0"
     """The blueprint schema version."""
 
     application: str = APP_NAME

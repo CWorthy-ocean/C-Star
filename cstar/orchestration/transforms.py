@@ -21,6 +21,7 @@ from cstar.applications.core import (
     get_app_for_blueprint,
     get_application,
 )
+from cstar.base.application_names import canonical_application
 from cstar.base.env import ENV_CSTAR_RUNID
 from cstar.base.exceptions import CstarError, CstarExpectationFailed
 from cstar.base.log import LoggingMixin, get_logger
@@ -2065,7 +2066,8 @@ class ApplyOverridesDirective(OverrideDirective):
             If the blueprint's application differs from the one declared
             by the step.
         """
-        expected = self._config.get(self.KEY_APPLICATION)
+        # a transformed workplan written under an earlier name still carries it
+        expected = canonical_application(self._config.get(self.KEY_APPLICATION, ""))
         if expected and bp.application != expected:
             msg = (
                 f"Blueprint declares application {bp.application!r} but the "

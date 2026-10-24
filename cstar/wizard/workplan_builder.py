@@ -45,6 +45,7 @@ from cstar.applications.roms_marbl.transforms import (
     NestingDirective,
 )
 from cstar.applications.upscaler import APP_NAME as UPSCALER
+from cstar.base.application_names import canonical_application
 from cstar.base.utils import deep_merge, slugify
 from cstar.entrypoint.utils import ARG_PRE_RUN, ARG_RUN_ID, ARG_VAR_LONG
 from cstar.orchestration.check import deep_check
@@ -266,7 +267,7 @@ def _read_facts(path: str, mtime_ns: int) -> BlueprintFacts | None:
     runtime = _section("runtime_params")
     use_pio = partitioning.get("use_pio")
     return BlueprintFacts(
-        application=str(raw.get("application", "")),
+        application=canonical_application(str(raw.get("application", ""))),
         start_date=_as_datetime(runtime.get("start_date")),
         end_date=_as_datetime(runtime.get("end_date")),
         cpus_needed=int(cpus) if isinstance(cpus, int) else 0,

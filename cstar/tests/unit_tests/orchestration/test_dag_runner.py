@@ -562,7 +562,7 @@ async def test_apply_resume_overrides_marks_resumable_failed_steps(
         tmp_path, "Resumable Step", application=Application.HELLO_WORLD
     )
     step_unresumable = _make_step(
-        tmp_path, "Unresumable Step", application=Application.ROMS_MARBL
+        tmp_path, "Unresumable Step", application=Application.UCLA_ROMS
     )
     step_done = _make_step(tmp_path, "Done Step")
     wp = _make_workplan([step_resumable, step_unresumable, step_done])
@@ -2330,7 +2330,7 @@ def _roms_step(
     bp_path.touch()
     return Step(
         name=name,
-        application=Application.ROMS_MARBL,
+        application=Application.UCLA_ROMS,
         blueprint=bp_path,
         depends_on=depends_on or [],
         directives=directives or {},
@@ -2500,7 +2500,7 @@ def test_prune_unpreparable_steps_drops_transitively(tmp_path: Path) -> None:
     deferred = Step.model_validate(
         {
             "name": "Deferred",
-            "application": Application.ROMS_MARBL,
+            "application": Application.UCLA_ROMS,
             "blueprint": {"from_step": "Producer", "filename": "generated.yaml"},
             "depends_on": ["Producer"],
         }

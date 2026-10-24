@@ -60,9 +60,7 @@ if TYPE_CHECKING:
     from cstar.roms.simulation import ROMSSimulation
 
 
-_APP_NAME_LONG: t.Literal["ROMS-MARBL simulation runner"] = (
-    "ROMS-MARBL simulation runner"
-)
+_APP_NAME_LONG: t.Literal["UCLA-ROMS simulation runner"] = "UCLA-ROMS simulation runner"
 log = get_logger(__name__)
 
 

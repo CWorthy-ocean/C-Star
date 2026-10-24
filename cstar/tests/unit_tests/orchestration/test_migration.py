@@ -25,6 +25,7 @@ from cstar.applications.roms_marbl.migration import (
     RomsMarblSchemaAdapterV21V3,
 )
 from cstar.base.adapter import SchemaAdapter, SchemaBreak
+from cstar.cli.common import get_migrator
 from cstar.orchestration.serialization import deserialize
 from cstar.system.migration import (
     KEY_APP,
@@ -506,7 +507,7 @@ def test_migrate_plotter(plotter_v1_0_0_model: dict[str, t.Any]) -> None:
 @pytest.mark.parametrize(
     ("app_name", "exp_version"),
     [
-        (APP_ROMS, "3.2.0"),
+        (APP_ROMS, "3.3.0"),
         (APP_PLOTTER, "2.1.0"),
         (APP_HW, "1.1.0"),
         (APP_CDR_METRICS, "1.1.0"),
@@ -515,3 +516,43 @@ def test_migrate_plotter(plotter_v1_0_0_model: dict[str, t.Any]) -> None:
 def test_application_schema_version(app_name: str, exp_version: str) -> None:
     """Verify an application reports the version its blueprint model defaults to."""
     assert get_application(app_name).schema_version == exp_version
+
+
+def test_get_migrator_accepts_earlier_application_name() -> None:
+    """Verify the migrator for an earlier application name plans against the
+    application it resolves to.
+    """
+    migrator = get_migrator("roms_marbl")
+
+    assert migrator.targets == {APP_ROMS: get_application(APP_ROMS).schema_version}
+
+
+def test_plan_earlier_application_name_walks_the_adapters() -> None:
+    """Verify a pre-versioning document authored under an earlier application
+    name is planned and migrated under the current one.
+    """
+    migrator = get_migrator("roms_marbl")
+    target = get_application(APP_ROMS).schema_version
+    dumped = {KEY_APP: "roms_marbl", KEY_SV: APP_ROMS_MARBL_SCHEMA_1_0_0}
+
+    plan = migrator.plan(dumped)
+    result = migrator.migrate(dumped, plan)
+
+    assert list(plan.adapters) == ROMS_ADAPTERS
+    assert (plan.source, plan.target) == (APP_ROMS_MARBL_SCHEMA_1_0_0, target)
+    assert result.original[KEY_APP] == "roms_marbl"
+    assert result.migrated[KEY_APP] == APP_ROMS
+    assert result.migrated[KEY_SV] == target
+
+
+def test_plan_earlier_application_name_current_schema_is_compatible() -> None:
+    """Verify a current-major document under an earlier application name needs
+    nothing migrated.
+    """
+    migrator = get_migrator("roms_marbl")
+
+    plan = migrator.plan({KEY_APP: "roms_marbl", KEY_SV: "3.2.0"})
+
+    assert plan.is_compatible
+    assert not plan.adapters
+    assert plan.source == "3.2.0"

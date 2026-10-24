@@ -8782,7 +8782,7 @@ def test_forge_application_emitted_blueprint(use_pio):
     emitted = ForgeApplication().emitted_blueprint(cfg)
 
     assert emitted.filename == f"B_{cfg.name}.yaml"
-    assert emitted.application == "roms_marbl"
+    assert emitted.application == "ucla_roms"
     assert emitted.cpus_needed == cfg.n_procs
     assert emitted.single_node is False
     assert emitted.start_date == cfg.run.start_date

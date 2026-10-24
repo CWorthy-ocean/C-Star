@@ -453,7 +453,7 @@ def get_migrator(
     app_def = get_application(application)
     return BlueprintMigration(
         adapters=app_def.migrations or [],
-        targets={application: app_def.schema_version},
+        targets={app_def.name: app_def.schema_version},
         on_planned=on_planned,
         on_migrated=on_migrated,
     )
