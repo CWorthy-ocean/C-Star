@@ -594,12 +594,12 @@ async def test_slurmlauncher_launch_adopts_the_submission_of_a_prior_handle(
 
 
 @pytest.mark.parametrize(
-    ("prior_uuid", "run_uuid", "adopted", "recorded"),
+    ("prior_uuid", "run_uuid", "adopted"),
     [
-        pytest.param("earlier", "this", False, "this", id="another-run"),
-        pytest.param("this", "this", True, "this", id="this-run"),
-        pytest.param("", "this", True, "this", id="sentinel-before-uuids"),
-        pytest.param("earlier", "", True, "earlier", id="manifest-not-written"),
+        pytest.param("earlier", "this", False, id="another-run"),
+        pytest.param("this", "this", True, id="this-run"),
+        pytest.param("", "this", True, id="sentinel-before-uuids"),
+        pytest.param("earlier", "", True, id="manifest-not-written"),
     ],
 )
 @pytest.mark.usefixtures("read_yaml_intercept")
@@ -609,13 +609,12 @@ async def test_slurmlauncher_launch_ignores_the_sentinel_of_another_run(
     prior_uuid: str,
     run_uuid: str,
     adopted: bool,
-    recorded: str,
     caplog: pytest.LogCaptureFixture,
 ) -> None:
     """Verify a Done prior handle recording another run's manifest uuid is not
     adopted, though SLURM still reports its job COMPLETED, and the step is
     submitted again; a handle of this run, or one whose run cannot be told,
-    is adopted. The handle records the run's uuid either way.
+    is adopted.
     """
     live_step = LiveStep.from_step(
         deserialize(wp_templates_dir / "single_step.yaml", Workplan).steps[0]
@@ -644,7 +643,6 @@ async def test_slurmlauncher_launch_ignores_the_sentinel_of_another_run(
         task = await SlurmLauncher.launch(live_step, [], run_uuid=run_uuid)
 
     assert task.handle.pid == ("12345" if adopted else "4242")
-    assert task.handle.run_uuid == recorded
     warnings = [r.getMessage() for r in caplog.records if r.levelname == "WARNING"]
     assert any("another run" in w for w in warnings) is not adopted
 

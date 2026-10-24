@@ -1382,6 +1382,7 @@ def ensure_run_manifest(
     steps: "Mapping[str, tuple[str, str, StepFacts | None]]",
     runs: "Mapping[str, RunRef]",
     carried_blueprints: "Mapping[str, str] | None" = None,
+    minted_id: str = "",
 ) -> RunManifest:
     """Create a run's manifest, or add an attempt to the one it has, and write it.
 
@@ -1417,6 +1418,10 @@ def ensure_run_manifest(
         re-points the steps at its own copies. `None` leaves the recorded
         pointers as they are, for an attempt that replays the recorded plan and
         for a standalone blueprint run.
+    minted_id : str
+        The id a manifest this call creates is given, for a run that already
+        has one recorded elsewhere; empty mints a new uuid. Ignored when the
+        run has a manifest.
 
     Returns
     -------
@@ -1431,6 +1436,7 @@ def ensure_run_manifest(
     # minted with the first attempt: a value equal to "now" would be dropped
     # as a default when the document is written
     manifest = read_run_manifest(root) or RunManifest(
+        **({"id": minted_id} if minted_id else {}),
         run_id=run_id,
         name=name,
         kind=kind,

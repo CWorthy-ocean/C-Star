@@ -627,7 +627,6 @@ class LocalLauncher(Launcher[LocalHandle]):
                     prior_handle and prior_handle.pre_run and not live_step.pre_run
                 ),
             )
-        handle.run_uuid = run_uuid or handle.run_uuid
 
         return Task[LocalHandle](
             step=live_step,

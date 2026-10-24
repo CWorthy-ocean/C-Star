@@ -977,9 +977,10 @@ class Launcher(t.Protocol, t.Generic[_THandle]):
         dependencies : list[_THandle]
             The handles of the tasks that must complete before the step runs.
         run_uuid : str
-            The uuid of the run's manifest, recorded on the handle; a prior
-            handle recording another uuid belongs to another run and is not
-            adopted. Empty when the manifest could not be written.
+            The uuid of the run's manifest; a prior handle recording another
+            uuid belongs to another run and is not adopted (the orchestrator
+            records the uuid on the handle). Empty when the manifest could not
+            be written.
 
         Returns
         -------
@@ -1058,7 +1059,7 @@ class Orchestrator(LoggingMixin):
     """The launcher used by the orchestrator to manage task execution."""
 
     run_uuid: str
-    """The uuid of the run's manifest, passed to every launch."""
+    """The uuid of the run's manifest, passed to every launch and recorded on its handle."""
 
     _on_launched: Callable[[ProcessHandle], Awaitable[None]] | None = None
     """A callback to be executed when the orchestrator launches a task."""
@@ -1214,6 +1215,8 @@ class Orchestrator(LoggingMixin):
             return None
 
         task = await self.launcher.launch(step, dependencies, run_uuid=self.run_uuid)
+        # an adopted handle written before uuids were recorded joins this run
+        task.handle.run_uuid = self.run_uuid or task.handle.run_uuid
         self.planner.store(node, KEY_TASK, task)
         self.log.info(f"Launched step: {step.name}")
 

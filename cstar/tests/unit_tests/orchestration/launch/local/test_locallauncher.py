@@ -401,7 +401,7 @@ async def test_locallauncher_launch_ignores_the_sentinel_of_another_run(
 ) -> None:
     """Verify an expired Done prior handle recording another run's manifest uuid
     is not adopted and the step is submitted again; a handle of this run, or
-    one whose run cannot be told, is adopted and records this run's uuid.
+    one whose run cannot be told, is adopted.
     """
     workplan = deserialize(wp_templates_dir / "single_step.yaml", Workplan)
     live_step = LiveStep.from_step(workplan.steps[0])
@@ -429,7 +429,6 @@ async def test_locallauncher_launch_ignores_the_sentinel_of_another_run(
 
     assert mock_submit.await_count == (0 if adopted else 1)
     assert task.handle.pid == ("12345" if adopted else "999")
-    assert task.handle.run_uuid == "this"
     if not adopted:
         # a stale pre-run or failure must not steer the new submission
         assert mock_submit.await_args is not None

@@ -513,7 +513,6 @@ class SlurmLauncher(Launcher[SlurmHandle]):
         else:
             handle = prior_handle
             handle.status = last_status
-        handle.run_uuid = run_uuid or handle.run_uuid
 
         return Task(
             step=step,
