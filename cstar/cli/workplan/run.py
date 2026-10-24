@@ -595,12 +595,25 @@ def refuse_run_id_collision(wp_path: Path, run_id: str, *, explicit: bool) -> No
         return
 
     record = asyncio.run(TrackingRepository().get_workplan_run(run_id))
-    if record is None or record.workplan_path.resolve() == wp_path.resolve():
+    if record is None:
+        return
+
+    try:
+        started_from = record.workplan_path
+    except CstarError as ex:
+        # the run cannot be re-entered either: scheduling reads the same manifest
+        msg = (
+            f"Run-id {run_id!r}, derived from the workplan name, belongs to a run "
+            f"whose workplan could not be found: {ex}; pass {ARG_RUN_ID} "
+            "<other-id> to start a new run."
+        )
+        raise typer.BadParameter(msg) from ex
+    if started_from.resolve() == wp_path.resolve():
         return
 
     claim = (
         f"Run-id {run_id!r}, derived from the workplan name, belongs to a run "
-        f"started from {str(record.workplan_path)!r}; the workplan at "
+        f"started from {str(started_from)!r}; the workplan at "
         f"{str(wp_path)!r} would overwrite it"
     )
     escape = f"pass {ARG_RUN_ID} <other-id> or {ARG_RUN_ID} {run_id} to re-enter"
@@ -675,6 +688,7 @@ async def handle_run_reloading(run_id: str) -> WorkplanRun:
         - If no run record exists for the supplied run-id.
         - If the run was attached from elsewhere: it has no sentinels here and
           is never relaunched.
+        - If the run's workplan or transformed workplan cannot be found.
     """
     repo = TrackingRepository()
     wp_run = await repo.get_workplan_run(run_id)
@@ -689,6 +703,13 @@ async def handle_run_reloading(run_id: str) -> WorkplanRun:
             "(see 'Extending a finished run' in the workplan docs)."
         )
         raise typer.BadParameter(msg)
+
+    try:
+        source = wp_run.workplan_path
+        _ = wp_run.trx_workplan_path
+    except CstarError as ex:
+        msg = f"Run {run_id!r} cannot be re-entered: {ex}"
+        raise typer.BadParameter(msg) from ex
 
     # ensure the environment matches the prior run; a setting this build no
     # longer reads is left out rather than re-exported to every step
@@ -710,7 +731,6 @@ async def handle_run_reloading(run_id: str) -> WorkplanRun:
         )
     os.environ.update(recorded)
 
-    source = wp_run.workplan_path
     msg = f"Re-starting run-id {run_id!r} with workplan originating in {source!r}"
     log.info(msg)
 

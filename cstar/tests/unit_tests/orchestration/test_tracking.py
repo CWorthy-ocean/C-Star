@@ -4,9 +4,9 @@ import os
 import threading
 import time
 import typing as t
-import unittest.mock as mock
 from datetime import UTC, datetime
 from pathlib import Path
+from unittest import mock
 from uuid import uuid4
 
 import pytest
@@ -17,10 +17,12 @@ from cstar.base.exceptions import CstarError
 from cstar.base.utils import slugify
 from cstar.execution.file_system import StateDirectoryManager
 from cstar.orchestration.manifest import (
+    RUN_MANIFEST_NAME,
     Attempt,
     RunManifest,
     StepEntry,
     StepRecord,
+    WorkplanIdentity,
     read_run_manifest,
     write_run_manifest,
     write_step_record,
@@ -40,8 +42,6 @@ from cstar.orchestration.orchestration import (
 from cstar.orchestration.serialization import deserialize, serialize
 from cstar.orchestration.state import StateRepository
 from cstar.orchestration.tracking import (
-    KEY_ACCESS,
-    KEY_ATTACHED,
     KEY_RUN_UUID,
     UNKNOWN_SIZE,
     Access,
@@ -66,14 +66,10 @@ async def test_tracking_create(tmp_path: Path) -> None:
     """
     state_dir = tmp_path / "state"
     output_path = tmp_path / "output"
-    wp_path = tmp_path / "fake_workplan.yaml"
-    wp_trx_path = tmp_path / "mock_transformed_workplan.yaml"
     run_id = "test-tracking-create-run-id"
 
     repo = TrackingRepository()
     wp_run = WorkplanRun(
-        workplan_path=wp_path,
-        trx_workplan_path=wp_trx_path,
         output_path=output_path,
         run_id=run_id,
     )
@@ -142,18 +138,14 @@ async def test_tracking_retrieve(tmp_path: Path) -> None:
         Temporary directory for test outputs
     """
     output_path = tmp_path / "output"
-    wp_path = tmp_path / "fake_workplan.yaml"
-    wp_trx_path = tmp_path / "mock_transformed_workplan.yaml"
     run_id = "test-tracking-retrieve-run-id"
-    start_at = datetime.now(tz=UTC)
+    recorded_at = datetime.now(tz=UTC)
     captured_env = {"foo": "foo-value"}
 
     wp_run = WorkplanRun(
-        workplan_path=wp_path,
-        trx_workplan_path=wp_trx_path,
         output_path=output_path,
         run_id=run_id,
-        start_at=start_at,
+        recorded_at=recorded_at,
         environment=captured_env,
     )
 
@@ -166,15 +158,13 @@ async def test_tracking_retrieve(tmp_path: Path) -> None:
     assert latest.__dict__ == wp_run.__dict__  # confirm same stored values
 
     # use public API to retrieve using "history" record (by passing run_id & run_date)
-    history = await repo.get_workplan_run(run_id=run_id, run_date=wp_run.start_at)
+    history = await repo.get_workplan_run(run_id=run_id, run_date=wp_run.recorded_at)
     assert history
     assert history.__dict__ == wp_run.__dict__  # confirm same stored values
 
     assert history.output_path == output_path
-    assert history.workplan_path == wp_path
-    assert history.trx_workplan_path == wp_trx_path
     assert history.run_id == run_id
-    assert history.start_at == start_at
+    assert history.recorded_at == recorded_at
     assert history.environment == captured_env
 
 
@@ -194,14 +184,10 @@ async def test_tracking_retrieve_variant(
     """
     state_dir = tmp_path / "state"
     output_path = tmp_path / "output"
-    wp_path = tmp_path / "fake_workplan.yaml"
-    wp_trx_path = tmp_path / "mock_transformed_workplan.yaml"
     run_id = "test-tracking-retrieve-run-id"
 
     repo = TrackingRepository()
     wp_run = WorkplanRun(
-        workplan_path=wp_path,
-        trx_workplan_path=wp_trx_path,
         output_path=output_path,
         run_id=run_id,
     )
@@ -222,7 +208,7 @@ async def test_tracking_retrieve_variant(
         lp_fn.assert_called()
         hp_fn.assert_not_called()
 
-        history = await repo.get_workplan_run(wp_run.run_id, wp_run.start_at)
+        history = await repo.get_workplan_run(wp_run.run_id, wp_run.recorded_at)
         assert history
 
         # confirm the history search was used
@@ -374,8 +360,6 @@ async def test_tracking_list_latest_run_id(tmp_path: Path, num_runs: int) -> Non
     """
     state_dir = tmp_path / "state"
     output_path = tmp_path / "output"
-    wp_path = tmp_path / "fake_workplan.yaml"
-    wp_trx_path = tmp_path / "mock_transformed_workplan.yaml"
     base_run_id = "test-tracking-list-latest-run-id"
     captured_env = {"foo": "foo-value"}
 
@@ -391,8 +375,6 @@ async def test_tracking_list_latest_run_id(tmp_path: Path, num_runs: int) -> Non
 
             _ = await repo.put_workplan_run(
                 WorkplanRun(
-                    workplan_path=wp_path,
-                    trx_workplan_path=wp_trx_path,
                     output_path=output_path,
                     run_id=current_run_id,
                     environment=captured_env,
@@ -437,8 +419,6 @@ async def test_tracking_list_history_run_id(
     """
     state_dir = tmp_path / "state"
     output_path = tmp_path / "output"
-    wp_path = tmp_path / "fake_workplan.yaml"
-    wp_trx_path = tmp_path / "mock_transformed_workplan.yaml"
     base_run_id = "test-tracking-list-history-run-id"
     captured_env = {"foo": "foo-value"}
 
@@ -451,8 +431,6 @@ async def test_tracking_list_history_run_id(
             coros.append(
                 repo.put_workplan_run(
                     WorkplanRun(
-                        workplan_path=wp_path,
-                        trx_workplan_path=wp_trx_path,
                         output_path=output_path,
                         run_id=str(uuid4()),
                         environment=captured_env,
@@ -469,8 +447,6 @@ async def test_tracking_list_history_run_id(
             for _ in range(num_runs):
                 await repo.put_workplan_run(
                     WorkplanRun(
-                        workplan_path=wp_path,
-                        trx_workplan_path=wp_trx_path,
                         output_path=output_path,
                         run_id=current_run_id,
                         environment=captured_env,
@@ -524,8 +500,6 @@ async def test_tracking_get_run_paths(
         Pass `True` to test retrieval of all historical run paths.
     """
     output_path = tmp_path / "output"
-    wp_path = tmp_path / "fake_workplan.yaml"
-    wp_trx_path = tmp_path / "mock_transformed_workplan.yaml"
     run_id = "test-get-run-paths-run-id"
     captured_env = {"foo": "foo-value"}
 
@@ -533,19 +507,17 @@ async def test_tracking_get_run_paths(
     expected_paths = [repo.latest_path(run_id=run_id)]  # type: ignore
 
     # insert some runs that re-use the same run-id
-    start_times = [datetime(2020, 1, 1 + i) for i in range(num_runs)]
+    record_times = [datetime(2020, 1, 1 + i, tzinfo=UTC) for i in range(num_runs)]
     inserts = [
         repo.put_workplan_run(
             WorkplanRun(
-                workplan_path=wp_path,
-                trx_workplan_path=wp_trx_path,
                 output_path=output_path,
                 run_id=run_id,
                 environment=captured_env,
-                start_at=start_at,
+                recorded_at=recorded_at,
             )
         )
-        for start_at in start_times
+        for recorded_at in record_times
     ]
     run_paths = await asyncio.gather(*inserts)
     expected_paths.extend(run_paths)
@@ -581,8 +553,6 @@ async def test_tracking_retrieve_mixed_case_runid(tmp_path: Path) -> None:
         Temporary directory for test outputs
     """
     wp_run = WorkplanRun(
-        workplan_path=tmp_path / "fake_workplan.yaml",
-        trx_workplan_path=tmp_path / "mock_transformed_workplan.yaml",
         output_path=tmp_path / "output",
         run_id="mixed-case-run-id",
     )
@@ -610,8 +580,6 @@ def _make_workplan_run(tmp_path: Path, run_id: str, **overrides) -> WorkplanRun:
         The run-id to assign to the record.
     """
     defaults: dict = {
-        "workplan_path": tmp_path / "fake_workplan.yaml",
-        "trx_workplan_path": tmp_path / "mock_transformed_workplan.yaml",
         "output_path": tmp_path / "output",
         "run_id": run_id,
     }
@@ -738,7 +706,6 @@ async def test_tracking_bound_caps_concurrency(tmp_path: Path) -> None:
         time.sleep(0.05)
         with lock:
             state["in_flight"] -= 1
-        return None
 
     state_dir = tmp_path / "state"
 
@@ -810,14 +777,9 @@ async def test_tracking_update_workplan_run_unknown_run_returns_none(
     assert result is None
 
 
-def _record(tmp_path: Path, run_id: str, output_path: Path) -> WorkplanRun:
-    """Build a record of a run whose transformed workplan sits in `output_path`."""
-    return WorkplanRun(
-        workplan_path=tmp_path / "workplan.yaml",
-        trx_workplan_path=output_path / "workplan_transformed.yaml",
-        output_path=output_path,
-        run_id=run_id,
-    )
+def _record(run_id: str, output_path: Path) -> WorkplanRun:
+    """Build a record of the run in `output_path`."""
+    return WorkplanRun(output_path=output_path, run_id=run_id)
 
 
 @pytest.mark.asyncio
@@ -828,9 +790,10 @@ async def test_tracking_follows_a_run_whose_directory_moved(tmp_path: Path) -> N
     run_id = "moved-run"
     recorded = tmp_path / "old-data" / "workplan_runs" / run_id
     current = StateDirectoryManager.data_dir(run_id)
-    current.mkdir(parents=True)
+    _write_manifest(current, run_id, workplan_path=tmp_path / "workplan.yaml")
+    (current / "workplan_transformed.yaml").touch()
     repo = TrackingRepository()
-    await repo.put_workplan_run(_record(tmp_path, run_id, recorded))
+    await repo.put_workplan_run(_record(run_id, recorded))
 
     found = await repo.get_workplan_run(run_id)
     listed = await repo.list_latest_runs()
@@ -854,10 +817,11 @@ async def test_tracking_keeps_a_run_whose_directory_exists(tmp_path: Path) -> No
     """
     run_id = "kept-run"
     recorded = tmp_path / "other-data" / "workplan_runs" / run_id
-    recorded.mkdir(parents=True)
+    _write_manifest(recorded, run_id, workplan_path=tmp_path / "workplan.yaml")
+    (recorded / "workplan_transformed.yaml").touch()
     StateDirectoryManager.data_dir(run_id).mkdir(parents=True)
     repo = TrackingRepository()
-    await repo.put_workplan_run(_record(tmp_path, run_id, recorded))
+    await repo.put_workplan_run(_record(run_id, recorded))
 
     found = await repo.get_workplan_run(run_id)
 
@@ -875,7 +839,7 @@ async def test_tracking_keeps_a_run_it_cannot_inspect(tmp_path: Path) -> None:
     recorded = tmp_path / "old-data" / "workplan_runs" / run_id
     StateDirectoryManager.data_dir(run_id).mkdir(parents=True)
     repo = TrackingRepository()
-    await repo.put_workplan_run(_record(tmp_path, run_id, recorded))
+    await repo.put_workplan_run(_record(run_id, recorded))
 
     real_exists = Path.exists
 
@@ -903,7 +867,7 @@ async def test_tracking_lists_runs_following_them_off_the_event_loop(
     StateDirectoryManager.data_dir(run_id).mkdir(parents=True)
     repo = TrackingRepository()
     await repo.put_workplan_run(
-        _record(tmp_path, run_id, tmp_path / "old-data" / "workplan_runs" / run_id)
+        _record(run_id, tmp_path / "old-data" / "workplan_runs" / run_id)
     )
     threads: list[threading.Thread] = []
     reanchored = WorkplanRun.reanchored
@@ -920,15 +884,29 @@ async def test_tracking_lists_runs_following_them_off_the_event_loop(
     assert threading.main_thread() not in threads
 
 
-def _write_manifest(root: Path, run_id: str) -> RunManifest:
-    """Write the manifest of a one-step run into `root`."""
-    when = datetime(2026, 10, 15, 12, 0, tzinfo=UTC)
+MANIFEST_START = datetime(2026, 10, 15, 12, 0, tzinfo=UTC)
+"""The start of the attempt `_write_manifest` records."""
+
+
+def _write_manifest(
+    root: Path, run_id: str, *, workplan_path: Path | str | None = None
+) -> RunManifest:
+    """Write the manifest of a one-step run into `root`.
+
+    The run is named `run_id`, started at `MANIFEST_START`, and made from the
+    workplan at `workplan_path` when one is given.
+    """
     manifest = RunManifest(
         run_id=run_id,
         name=run_id,
         kind="workplan",
-        created_at=when,
-        attempts=[Attempt(start_at=when)],
+        created_at=MANIFEST_START,
+        attempts=[Attempt(start_at=MANIFEST_START)],
+        workplan=(
+            WorkplanIdentity(name=run_id, content_hash="", path=str(workplan_path))
+            if workplan_path is not None
+            else None
+        ),
         steps=[
             StepEntry(name="one", application="hello_world", working_dir="tasks/one")
         ],
@@ -1015,14 +993,10 @@ def test_workplanrun_is_not_attached_by_default(tmp_path: Path) -> None:
     assert run.access is Access.owned
 
 
-@pytest.mark.parametrize(
-    ("value", "attached"), [("1", True), ("0", False), ("", False), ("true", False)]
-)
-def test_workplanrun_attached_is_the_flag_set(
-    tmp_path: Path, value: str, attached: bool
-) -> None:
-    """Verify only the value `"1"` marks a record as attached."""
-    run = _make_workplan_run(tmp_path, "flagged", metadata={KEY_ATTACHED: value})
+@pytest.mark.parametrize("attached", [True, False])
+def test_workplanrun_attached_is_the_flag_set(tmp_path: Path, attached: bool) -> None:
+    """Verify the `attached` field is the flag the record was made with."""
+    run = _make_workplan_run(tmp_path, "flagged", attached=attached)
 
     assert run.attached is attached
 
@@ -1032,26 +1006,85 @@ def test_workplanrun_access_is_the_value_recorded(
     tmp_path: Path, access: Access
 ) -> None:
     """Verify the access a record holds is the one it reads back."""
-    run = _make_workplan_run(tmp_path, "accessed", metadata={KEY_ACCESS: access.value})
+    run = _make_workplan_run(tmp_path, "accessed", access=access)
 
     assert run.access is access
 
 
-def test_workplanrun_unknown_access_is_an_error(tmp_path: Path) -> None:
-    """Verify an access that is none of the values fails, naming the run and the value."""
-    run = _make_workplan_run(tmp_path, "odd-access", metadata={KEY_ACCESS: "rw"})
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "spelling",
+    [
+        pytest.param({"access": "rw"}, id="typed"),
+        pytest.param({"metadata": {"access": "rw"}}, id="legacy-metadata"),
+    ],
+)
+async def test_workplanrun_unknown_access_is_read_as_read_only(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture, spelling: dict
+) -> None:
+    """Verify a record whose access this release does not know loads as read-only
+    with a warning, refuses writes, and stays in the listing.
 
-    with pytest.raises(CstarError, match="odd-access.*'rw'"):
-        run.access
+    Parameters
+    ----------
+    tmp_path : Path
+        Temporary directory for test outputs.
+    caplog : pytest.LogCaptureFixture
+        Captures the warning.
+    spelling : dict
+        The record fields that carry the unknown access, typed or legacy.
+    """
+    repo = TrackingRepository()
+    await repo.put_workplan_run(_make_workplan_run(tmp_path, "even-access"))
+    odd = repo.latest_dir / "odd-access.yaml"
+    odd.write_text(
+        yaml.safe_dump(
+            {"output_path": str(tmp_path), "run_id": "odd-access", **spelling}
+        )
+    )
+
+    with caplog.at_level(logging.WARNING):
+        loaded = deserialize(odd, WorkplanRun)
+
+    assert loaded.access is Access.read_only
+    assert "records an access this release does not know" in caplog.text
+    assert "'odd-access'" in caplog.text
+    assert "'rw'" in caplog.text
+    with pytest.raises(CstarError, match="'odd-access' is attached read-only"):
+        require_writable(loaded, action="gather")
+    listed = await repo.list_latest_runs()
+
+    assert sorted(r.run_id for r in listed) == ["even-access", "odd-access"]
+    assert {r.run_id: r.access for r in listed}["odd-access"] is Access.read_only
+
+
+def test_workplanrun_known_access_is_read_without_a_warning(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Verify a record whose access is one of the known values warns of nothing.
+
+    Parameters
+    ----------
+    tmp_path : Path
+        Temporary directory for test outputs.
+    caplog : pytest.LogCaptureFixture
+        Captures any warning.
+    """
+    with caplog.at_level(logging.WARNING):
+        run = _make_workplan_run(tmp_path, "known-access", access="read-only")
+
+    assert run.access is Access.read_only
+    assert "does not know" not in caplog.text
 
 
 def test_workplanrun_keeps_attachment_through_the_repository(tmp_path: Path) -> None:
-    """Verify the keys ride the metadata through persistence and `reanchored`."""
+    """Verify the typed fields ride through persistence and `reanchored`."""
     run = _make_workplan_run(
         tmp_path,
         "persisted",
         output_path=tmp_path,
-        metadata={KEY_ATTACHED: "1", KEY_ACCESS: Access.read_only.value},
+        attached=True,
+        access=Access.read_only,
     )
     repo = TrackingRepository()
     repo.put_workplan_run_sync(run)
@@ -1061,23 +1094,42 @@ def test_workplanrun_keeps_attachment_through_the_repository(tmp_path: Path) -> 
     assert found is not None
     assert found.reanchored().attached
     assert found.reanchored().access is Access.read_only
+    assert found.metadata == {}
+
+
+def test_workplanrun_defaults_are_not_written(tmp_path: Path) -> None:
+    """Verify an owned, scheduled-here record writes neither `attached` nor `access`,
+    and an attached read-only one writes them as fields rather than metadata.
+    """
+    repo = TrackingRepository()
+    plain = repo.put_workplan_run_sync(_make_workplan_run(tmp_path, "plain"))
+    flagged = repo.put_workplan_run_sync(
+        _make_workplan_run(tmp_path, "flagged", attached=True, access=Access.read_only)
+    )
+
+    plain_doc = yaml.safe_load(plain.read_text())
+    flagged_doc = yaml.safe_load(flagged.read_text())
+
+    assert "attached" not in plain_doc
+    assert "access" not in plain_doc
+    assert "legacy" not in plain_doc
+    assert "legacy" not in flagged_doc
+    assert flagged_doc["attached"] is True
+    assert flagged_doc["access"] == "read-only"
+    assert "attached" not in flagged_doc.get("metadata", {})
 
 
 def test_require_writable_lets_an_owned_run_through(tmp_path: Path) -> None:
     """Verify a run with no access recorded, or an owned one, may be written into."""
     require_writable(_make_workplan_run(tmp_path, "mine"), action="gather")
-    owned = _make_workplan_run(
-        tmp_path, "mine-too", metadata={KEY_ACCESS: Access.owned.value}
-    )
+    owned = _make_workplan_run(tmp_path, "mine-too", access=Access.owned)
 
     require_writable(owned, action="gather")
 
 
 def test_require_writable_refuses_a_read_only_run(tmp_path: Path) -> None:
     """Verify the refusal names the run, the action, the directory and `--own`."""
-    run = _make_workplan_run(
-        tmp_path, "theirs", metadata={KEY_ACCESS: Access.read_only.value}
-    )
+    run = _make_workplan_run(tmp_path, "theirs", access=Access.read_only)
 
     with pytest.raises(CstarError, match="'theirs' is attached read-only") as raised:
         require_writable(run, action="--repair")
@@ -1108,7 +1160,7 @@ def test_attached_workplanrun_manifest_is_read_once(tmp_path: Path) -> None:
     root = tmp_path / "output"
     _write_manifest(root, "attached-once")
     write_step_record(root / "tasks" / "one", _step_record())
-    run = _make_workplan_run(tmp_path, "attached-once", metadata={KEY_ATTACHED: "1"})
+    run = _make_workplan_run(tmp_path, "attached-once", attached=True)
 
     with mock.patch(
         "cstar.orchestration.tracking.read_run_manifest", wraps=read_run_manifest
@@ -1133,12 +1185,12 @@ def test_scheduled_workplanrun_manifest_is_read_again(tmp_path: Path) -> None:
     assert read.call_count == 2
 
 
-@pytest.mark.parametrize(("value", "live"), [("", True), ("0", True), ("1", False)])
+@pytest.mark.parametrize(("attached", "live"), [(False, True), (True, False)])
 def test_workplanrun_is_live_unless_attached(
-    tmp_path: Path, value: str, live: bool
+    tmp_path: Path, attached: bool, live: bool
 ) -> None:
     """Verify only an attached run is not live: its sentinels are elsewhere."""
-    run = _make_workplan_run(tmp_path, "liveness", metadata={KEY_ATTACHED: value})
+    run = _make_workplan_run(tmp_path, "liveness", attached=attached)
 
     assert run.live is live
 
@@ -1162,7 +1214,7 @@ def test_attached_workplanrun_step_status_reads_the_step_record(
     """Verify an attached run, which has no sentinels, reports what its records say."""
     root = tmp_path / "output"
     _write_manifest(root, "attached-status")
-    run = _make_workplan_run(tmp_path, "attached-status", metadata={KEY_ATTACHED: "1"})
+    run = _make_workplan_run(tmp_path, "attached-status", attached=True)
     # a sentinel here would be a lie about another machine's run: it is not read
     path = StateRepository.sentinel_path("one", run_id="attached-status")
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -1185,6 +1237,343 @@ def test_attached_workplanrun_step_status_without_a_manifest_is_empty(
     tmp_path: Path,
 ) -> None:
     """Verify an attached run whose manifest is gone has no step status, quietly."""
-    run = _make_workplan_run(tmp_path, "attached-bare", metadata={KEY_ATTACHED: "1"})
+    run = _make_workplan_run(tmp_path, "attached-bare", attached=True)
 
     assert run.step_status("one") == ""
+
+
+LEGACY_START = datetime(2026, 9, 1, 10, 30, 15, 123456, tzinfo=UTC)
+"""When the records written by hand below say their run was triggered."""
+
+LEGACY_KEYS = ("workplan_path", "trx_workplan_path", "start_at")
+"""The top-level keys of a record written by cstar 0.17.0 that this release drops."""
+
+
+def _write_legacy_record(
+    repo: TrackingRepository, run_id: str, output_path: Path, **metadata: str
+) -> Path:
+    """Write a record in the shape cstar 0.17.0 wrote, where `latest_path` points.
+
+    The record names the workplan, transformed workplan and start time itself,
+    and holds the workplan name in its metadata beside `metadata`.
+    """
+    document = {
+        "workplan_path": str(output_path.parent / "authored.yaml"),
+        "trx_workplan_path": str(output_path / "legacy_transformed.yaml"),
+        "output_path": str(output_path),
+        "run_id": run_id,
+        "start_at": LEGACY_START.isoformat(),
+        "environment": {"FOO": "bar"},
+        "metadata": {"name": "legacy-plan (transformed)", **metadata},
+    }
+    path = repo.latest_path(run_id)
+    path.write_text(yaml.safe_dump(document))
+    return path
+
+
+def test_workplanrun_reads_a_record_written_by_cstar_0_17(tmp_path: Path) -> None:
+    """Verify a 0.17.0 record loads, folding its metadata marks into the typed
+    fields, keeping its identity as the fallback and its start time as `recorded_at`.
+    """
+    run_id = "legacy-attached"
+    output_path = tmp_path / "output"
+    repo = TrackingRepository()
+    stamped = str(uuid4())
+    _write_legacy_record(
+        repo,
+        run_id,
+        output_path,
+        uuid=stamped,
+        attached="1",
+        access="read-only",
+    )
+
+    found = repo.get_workplan_run_sync(run_id)
+
+    assert found is not None
+    assert found.attached is True
+    assert found.live is False
+    assert found.access is Access.read_only
+    assert found.metadata == {KEY_RUN_UUID: stamped}
+    assert found.recorded_at == LEGACY_START
+    assert found.environment == {"FOO": "bar"}
+    # no manifest in the run directory: the record's own words are used
+    assert found.name == "legacy-plan"
+    assert found.start_at == LEGACY_START
+    assert found.workplan_path == tmp_path / "authored.yaml"
+    assert found.trx_workplan_path == output_path / "legacy_transformed.yaml"
+    assert found.legacy.name == "legacy-plan (transformed)"
+
+
+@pytest.mark.asyncio
+async def test_workplanrun_of_cstar_0_17_is_rewritten_in_place(tmp_path: Path) -> None:
+    """Verify updating a 0.17.0 record rewrites its own history entry, in this
+    release's shape: the old keys move under `legacy`, which a record read back
+    from the rewrite still answers from when the run has no manifest.
+    """
+    run_id = "legacy-updated"
+    output_path = tmp_path / "output"
+    repo = TrackingRepository()
+    _write_legacy_record(repo, run_id, output_path, uuid=str(uuid4()), attached="1")
+    legacy_history = repo.history_path(run_id, LEGACY_START)
+
+    updated = await repo.update_workplan_run(
+        run_id, lambda run: run.sentinels.add(tmp_path / "a.sentinel")
+    )
+
+    assert updated is not None
+    assert legacy_history.exists()
+    assert list(repo.run_history_dir(run_id).iterdir()) == [legacy_history]
+    assert repo.latest_path(run_id).resolve() == legacy_history.resolve()
+
+    document = yaml.safe_load(legacy_history.read_text())
+    assert not set(LEGACY_KEYS) & set(document)
+    assert "name" not in document["metadata"]
+    assert "access" not in document["metadata"]
+    assert document["attached"] is True
+    assert document["metadata"] == {KEY_RUN_UUID: updated.uuid}
+    held = document["legacy"]
+    assert held["name"] == "legacy-plan (transformed)"
+    assert datetime.fromisoformat(str(held["start_at"])) == LEGACY_START
+    assert Path(held["workplan_path"]) == tmp_path / "authored.yaml"
+    assert Path(held["trx_workplan_path"]) == output_path / "legacy_transformed.yaml"
+
+    reread = await repo.get_workplan_run(run_id)
+    assert reread is not None
+    assert not (output_path / RUN_MANIFEST_NAME).exists()
+    assert reread.attached is True
+    assert reread.recorded_at == LEGACY_START
+    assert reread.sentinels == {tmp_path / "a.sentinel"}
+    # no manifest in the run directory: what the old record said is still answered
+    assert reread.name == "legacy-plan"
+    assert reread.start_at == LEGACY_START
+    assert reread.workplan_path == tmp_path / "authored.yaml"
+    assert reread.trx_workplan_path == output_path / "legacy_transformed.yaml"
+
+
+def test_workplanrun_keeps_an_existing_legacy_block_over_the_old_keys(
+    tmp_path: Path,
+) -> None:
+    """Verify the values of a nested `legacy` block win over the 0.17.0 top-level
+    keys, which fill only what the block leaves empty.
+    """
+    document = {
+        "output_path": str(tmp_path),
+        "run_id": "both-spellings",
+        "workplan_path": str(tmp_path / "old-authored.yaml"),
+        "start_at": LEGACY_START.isoformat(),
+        "metadata": {"name": "old-name"},
+        "legacy": {"name": "kept-name", "workplan_path": str(tmp_path / "kept.yaml")},
+    }
+
+    run = WorkplanRun.model_validate(document)
+
+    assert run.legacy.name == "kept-name"
+    assert run.legacy.workplan_path == tmp_path / "kept.yaml"
+    assert run.legacy.start_at == LEGACY_START
+
+
+def test_workplanrun_of_a_run_before_the_manifest_takes_its_identity_from_the_record(
+    tmp_path: Path,
+) -> None:
+    """Verify a run scheduled before `cstar-run.yaml` existed, recorded in the
+    0.17.0 shape without a uuid or attachment marks, answers from the record.
+    """
+    run_id = "pre-manifest"
+    output_path = tmp_path / "output"
+    (output_path / "tasks").mkdir(parents=True)
+    trx = output_path / "workplan_transformed.yaml"
+    trx.touch()
+    document = {
+        "workplan_path": str(tmp_path / "authored.yaml"),
+        "trx_workplan_path": str(trx),
+        "output_path": str(output_path),
+        "run_id": run_id,
+        "start_at": LEGACY_START.isoformat(),
+        "metadata": {"name": "old-plan (transformed)"},
+    }
+    repo = TrackingRepository()
+    repo.latest_path(run_id).write_text(yaml.safe_dump(document))
+
+    found = repo.get_workplan_run_sync(run_id)
+
+    assert found is not None
+    assert not (output_path / RUN_MANIFEST_NAME).exists()
+    assert found.name == "old-plan"
+    assert found.start_at == LEGACY_START
+    assert found.trx_workplan_path == trx
+    assert found.workplan_path == tmp_path / "authored.yaml"
+    assert found.attached is False
+    assert found.live is True
+    assert found.access is Access.owned
+    assert found.uuid == ""
+    assert found.metadata == {}
+
+
+def test_workplanrun_derives_its_identity_from_the_manifest(tmp_path: Path) -> None:
+    """Verify name, start, workplan paths come from the run's manifest, and none
+    of them is written into the record.
+    """
+    run_id = "thin"
+    output_path = tmp_path / "output"
+    _write_manifest(output_path, run_id, workplan_path="/some/where/plan.yaml")
+    trx = output_path / "plan_transformed.yaml"
+    trx.touch()
+    repo = TrackingRepository()
+    persisted = repo.put_workplan_run_sync(
+        _make_workplan_run(tmp_path, run_id, metadata={KEY_RUN_UUID: str(uuid4())})
+    )
+
+    document = yaml.safe_load(persisted.read_text())
+    assert not set(LEGACY_KEYS) & set(document)
+    assert "name" not in document["metadata"]
+
+    found = repo.get_workplan_run_sync(run_id)
+
+    assert found is not None
+    assert found.name == run_id
+    assert found.start_at == MANIFEST_START
+    assert found.start_at.tzinfo is not None
+    assert found.workplan_path == Path("/some/where/plan.yaml")
+    assert found.trx_workplan_path == trx
+    assert found.legacy.name == ""
+    assert found.legacy.trx_workplan_path is None
+
+
+def test_workplanrun_start_is_the_latest_attempts_else_the_manifests_creation(
+    tmp_path: Path,
+) -> None:
+    """Verify `start_at` follows the latest attempt, falls back to the manifest's
+    creation without one, and is aware even when the manifest holds a naive time.
+    """
+    root = tmp_path / "output"
+    manifest = _write_manifest(root, "attempts")
+    later = datetime(2026, 10, 16, 8, 30, tzinfo=UTC)
+
+    resumed = manifest.model_copy(
+        update={"attempts": [*manifest.attempts, Attempt(start_at=later)]}
+    )
+    write_run_manifest(root, resumed)
+    assert _make_workplan_run(tmp_path, "attempts").start_at == later
+
+    write_run_manifest(root, manifest.model_copy(update={"attempts": []}))
+    created = _make_workplan_run(tmp_path, "attempts").start_at
+    assert created == MANIFEST_START
+    assert created.tzinfo is not None
+
+
+def test_workplanrun_transformed_workplan_is_named_for_the_authored_stem(
+    tmp_path: Path,
+) -> None:
+    """Verify the transformed workplan is `<stem>_transformed.yaml`, falling back
+    to the only `*_transformed.yaml` of the run directory, and failing when there
+    is none, or several and no way to choose.
+    """
+    root = tmp_path / "output"
+    _write_manifest(root, "trx", workplan_path="/some/where/plan.yaml")
+
+    with pytest.raises(CstarError, match="holds no transformed workplan"):
+        _make_workplan_run(tmp_path, "trx").trx_workplan_path
+
+    other = root / "other_transformed.yaml"
+    other.touch()
+    assert _make_workplan_run(tmp_path, "trx").trx_workplan_path == other
+
+    named = root / "plan_transformed.yaml"
+    named.touch()
+    assert _make_workplan_run(tmp_path, "trx").trx_workplan_path == named
+
+    named.unlink()
+    (root / "third_transformed.yaml").touch()
+    with pytest.raises(CstarError, match="more than one transformed workplan"):
+        _make_workplan_run(tmp_path, "trx").trx_workplan_path
+
+
+def test_workplanrun_workplan_path_falls_back_to_the_transformed_workplan(
+    tmp_path: Path,
+) -> None:
+    """Verify a run whose manifest records no authored workplan answers with the
+    transformed one.
+    """
+    root = tmp_path / "output"
+    _write_manifest(root, "no-workplan")
+    trx = root / "plan_transformed.yaml"
+    trx.touch()
+
+    assert _make_workplan_run(tmp_path, "no-workplan").workplan_path == trx
+
+
+def test_workplanrun_without_manifest_or_legacy_falls_back_to_the_record(
+    tmp_path: Path,
+) -> None:
+    """Verify a thin record whose run has no manifest starts when it was recorded
+    and has no name.
+    """
+    recorded = datetime(2026, 8, 3, 4, 5, 6, tzinfo=UTC)
+    run = _make_workplan_run(tmp_path, "bare", recorded_at=recorded)
+
+    assert run.name == ""
+    assert run.start_at == recorded
+    assert run.legacy.start_at is None
+    with pytest.raises(CstarError, match="holds no transformed workplan"):
+        run.workplan_path
+
+
+def test_workplanrun_reads_the_manifest_once_for_what_it_derives(
+    tmp_path: Path,
+) -> None:
+    """Verify name, start and both workplan paths cost one manifest read per
+    instance, even for a run scheduled here whose `manifest` is otherwise read afresh.
+    """
+    root = tmp_path / "output"
+    _write_manifest(root, "once", workplan_path="/some/where/plan.yaml")
+    (root / "plan_transformed.yaml").touch()
+    run = _make_workplan_run(tmp_path, "once")
+
+    with mock.patch(
+        "cstar.orchestration.tracking.read_run_manifest", wraps=read_run_manifest
+    ) as read:
+        assert run.name == "once"
+        assert run.start_at == MANIFEST_START
+        assert run.workplan_path == Path("/some/where/plan.yaml")
+        assert run.trx_workplan_path == root / "plan_transformed.yaml"
+        assert run.name == "once"
+
+    read.assert_called_once()
+
+
+def test_workplanrun_does_not_keep_a_failed_manifest_read(tmp_path: Path) -> None:
+    """Verify a manifest that cannot be read yet is asked for again later: the
+    fallbacks are used meanwhile, and the manifest once it is there.
+    """
+    root = tmp_path / "output"
+    run = _make_workplan_run(tmp_path, "late")
+    assert run.name == ""
+
+    _write_manifest(root, "late")
+
+    assert run.name == "late"
+    assert run.start_at == MANIFEST_START
+
+
+def test_reanchored_workplanrun_derives_the_transformed_workplan_from_the_new_directory(
+    tmp_path: Path,
+) -> None:
+    """Verify a record that follows a moved run reads that run's manifest and finds
+    the transformed workplan beside it, however the old directory was named.
+    """
+    run_id = "relocated"
+    recorded = tmp_path / "old-data" / "workplan_runs" / run_id
+    current = StateDirectoryManager.data_dir(run_id)
+    _write_manifest(current, run_id, workplan_path="/some/where/plan.yaml")
+    (current / "plan_transformed.yaml").touch()
+    run = _make_workplan_run(tmp_path, run_id, output_path=recorded)
+
+    # reading the old (absent) directory first must not be remembered
+    assert run.name == ""
+    moved = run.reanchored()
+
+    assert moved.output_path == current
+    assert moved.name == run_id
+    assert moved.trx_workplan_path == current / "plan_transformed.yaml"
+    assert moved.workplan_path == Path("/some/where/plan.yaml")

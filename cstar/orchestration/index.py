@@ -15,7 +15,7 @@ import functools
 import os
 import typing as t
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import datetime
 from enum import StrEnum
 from pathlib import Path
 from uuid import UUID
@@ -39,6 +39,7 @@ from cstar.orchestration.tracking import (
     KEY_RUN_UUID,
     TrackingRepository,
     WorkplanRun,
+    aware_utc,
 )
 
 if t.TYPE_CHECKING:
@@ -217,7 +218,7 @@ def _locate(root: Path, manifest: RunManifest, origin: Origin) -> RunLocation:
         run_id=manifest.run_id,
         name=manifest.name,
         kind=manifest.kind,
-        start_at=started if started.tzinfo else started.replace(tzinfo=UTC),
+        start_at=aware_utc(started),
     )
 
 

@@ -14,7 +14,6 @@ from rich.table import Column, Table
 from rich.text import Text
 
 from cstar.base.env import ENV_CSTAR_PROJECT_HOME
-from cstar.base.exceptions import CstarError
 from cstar.base.log import get_logger
 from cstar.base.utils import MAX_CONCURRENCY
 from cstar.cli.workplan.shared import console, load_workplans, refresh_disk_usage
@@ -39,10 +38,8 @@ from cstar.orchestration.index import (
     untracked_locations,
     where_kept,
 )
-from cstar.orchestration.models import LEGACY_TRANSFORMED_NAME_SUFFIX
 from cstar.orchestration.orchestration import LiveWorkplan
 from cstar.orchestration.tracking import (
-    KEY_RUN_NAME,
     UNKNOWN_SIZE,
     Access,
     TrackingRepository,
@@ -157,9 +154,9 @@ async def adapt_runs_to_views(
 ) -> Sequence[ItemView]:
     """Build the raw dataset that will be rendered in the view.
 
-    A run's name is taken from its recorded metadata when present; otherwise
-    its transformed workplan is loaded to resolve the name, and a run whose
-    workplan cannot be loaded is shown as "unknown".
+    A run's name is the one its manifest holds; for a run whose name is not
+    known that way, its transformed workplan is loaded to resolve the name, and
+    a run whose workplan cannot be found or loaded is shown as "unknown".
 
     Parameters
     ----------
@@ -176,11 +173,14 @@ async def adapt_runs_to_views(
     Sequence[ItemView]
         One view per run, in input order.
     """
-    missing = {
-        r.trx_workplan_path
-        for r in runs
-        if KEY_RUN_NAME not in r.metadata and r.trx_workplan_path not in plan_cache
-    }
+    missing: set[Path] = set()
+    trx_paths: dict[str, Path] = {}
+    for r in runs:
+        if r.name or (path := r.try_trx_workplan_path()) is None:
+            continue
+        trx_paths[r.run_id] = path
+        if path not in plan_cache:
+            missing.add(path)
     if missing:
         await load_workplans(sorted(missing), plan_cache)
 
@@ -188,12 +188,14 @@ async def adapt_runs_to_views(
     unresolved: list[str] = []
 
     for run in runs:
-        name = (run.metadata.get(KEY_RUN_NAME) or "").removesuffix(
-            LEGACY_TRANSFORMED_NAME_SUFFIX
-        )
+        name = run.name
 
         if not name:
-            plan = plan_cache.get(run.trx_workplan_path)
+            plan = (
+                plan_cache.get(trx_paths[run.run_id])
+                if run.run_id in trx_paths
+                else None
+            )
             name = plan.name if plan else UNKNOWN_NAME
 
         if name == UNKNOWN_NAME:
@@ -202,12 +204,7 @@ async def adapt_runs_to_views(
         if not run.attached:
             where = WHERE_TRACKED
         else:
-            try:
-                read_only = run.access is Access.read_only
-            except CstarError as ex:
-                # a listing names the run however it is recorded; writes refuse it
-                log.debug(str(ex))
-                read_only = False
+            read_only = run.access is Access.read_only
             where = WHERE_ATTACHED_READ_ONLY if read_only else WHERE_ATTACHED
 
         views.append(
@@ -621,7 +618,11 @@ def ls_runs(
         filtered = filter_time(tracked, time_lt_filter, time_gt_filter)
 
         if refresh_usage:
-            paths = {r.trx_workplan_path for r in filtered}
+            paths = {
+                path
+                for r in filtered
+                if (path := r.try_trx_workplan_path()) is not None
+            }
             await load_workplans(sorted(paths), plan_cache)
             await refresh_disk_usage(filtered, plan_cache)
 

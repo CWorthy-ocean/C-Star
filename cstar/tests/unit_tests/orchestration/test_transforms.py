@@ -84,7 +84,6 @@ from cstar.orchestration.orchestration import (
 from cstar.orchestration.serialization import deserialize, serialize
 from cstar.orchestration.state import StateRepository
 from cstar.orchestration.tracking import (
-    KEY_ATTACHED,
     KEY_RUN_UUID,
     TrackingRepository,
     WorkplanRun,
@@ -113,6 +112,7 @@ from cstar.orchestration.transforms import (
     package_runtime_overrides,
     resolve_deferred_blueprint,
 )
+from cstar.tests.unit_tests.orchestration.manifest_runs import write_identity
 
 TRANSFORMS_LOGGER_NAME = "cstar.applications.roms_marbl.transforms"
 """The logger name used by `cstar.applications.roms_marbl.transforms`."""
@@ -6290,14 +6290,12 @@ async def deferred_run_context(
         steps=[producer],
     )
 
-    trx_wp_path = tmp_path / "deferred_run_trx.yaml"
+    trx_wp_path = tmp_path / "deferred_run_transformed.yaml"
     assert serialize(trx_wp_path, live_plan)
 
     repo = TrackingRepository()
     await repo.put_workplan_run(
         WorkplanRun(
-            workplan_path=tmp_path / "deferred_run.yaml",
-            trx_workplan_path=trx_wp_path,
             output_path=tmp_path,
             run_id=mock_run_id,
         ),
@@ -6581,8 +6579,8 @@ async def test_load_workplan_missing_trx_file_raises_runtime_error(
     tmp_path: Path,
     mock_run_id: str,
 ) -> None:
-    """A run record pointing at a nonexistent trx workplan surfaces
-    `FileNotFoundError` rather than a generic `RuntimeError`.
+    """A run record whose run directory holds no transformed workplan is
+    reported as a `RuntimeError` saying the workplan could not be located.
 
     Parameters
     ----------
@@ -6591,19 +6589,15 @@ async def test_load_workplan_missing_trx_file_raises_runtime_error(
     mock_run_id : str
         A unique run-id that has already been added to os.environ.
     """
-    trx_path = tmp_path / "missing_trx.yaml"
-
     repo = TrackingRepository()
     await repo.put_workplan_run(
         WorkplanRun(
-            workplan_path=tmp_path / "wp.yaml",
-            trx_workplan_path=trx_path,
             output_path=tmp_path,
             run_id=mock_run_id,
         ),
     )
 
-    with pytest.raises(RuntimeError, match="Unable to load workplan"):
+    with pytest.raises(RuntimeError, match="Unable to locate the workplan"):
         DirectiveConfig.load_workplan()
 
 
@@ -6622,7 +6616,7 @@ async def test_load_workplan_invalid_content_raises_runtime_error(
     mock_run_id : str
         A unique run-id that has already been added to os.environ.
     """
-    trx_path = tmp_path / "bad_trx.yaml"
+    trx_path = tmp_path / "bad_transformed.yaml"
     # valid YAML, but missing the `name` required by `Workplan`
     trx_path.write_text(
         """\
@@ -6634,8 +6628,6 @@ steps: []
     repo = TrackingRepository()
     await repo.put_workplan_run(
         WorkplanRun(
-            workplan_path=tmp_path / "wp.yaml",
-            trx_workplan_path=trx_path,
             output_path=tmp_path,
             run_id=mock_run_id,
         ),
@@ -6659,14 +6651,12 @@ async def test_load_workplan_malformed_yaml_raises_runtime_error(
     mock_run_id : str
         A unique run-id that has already been added to os.environ.
     """
-    trx_path = tmp_path / "truncated_trx.yaml"
+    trx_path = tmp_path / "truncated_transformed.yaml"
     trx_path.write_text("name: truncated\nsteps: [\n  - name: step-a\n")
 
     repo = TrackingRepository()
     await repo.put_workplan_run(
         WorkplanRun(
-            workplan_path=tmp_path / "wp.yaml",
-            trx_workplan_path=trx_path,
             output_path=tmp_path,
             run_id=mock_run_id,
         ),
@@ -7026,16 +7016,16 @@ def fabricate_external_run(
             description="A fabricated external run.",
             steps=[step],
         )
-        trx_path = tmp_path / f"{run_id}_trx.yaml"
-        assert serialize(trx_path, plan)
-
-        record = WorkplanRun(
-            workplan_path=tmp_path / f"{run_id}.yaml",
-            trx_workplan_path=trx_path,
-            output_path=tmp_path,
-            run_id=run_id,
+        run_dir = tmp_path / "records" / run_id
+        write_identity(
+            run_dir,
+            run_id,
+            workplan=tmp_path / f"{run_id}.yaml",
             start_at=EXTERNAL_START_AT,
         )
+        assert serialize(run_dir / f"{run_id}_transformed.yaml", plan)
+
+        record = WorkplanRun(output_path=run_dir, run_id=run_id)
         TrackingRepository().put_workplan_run_sync(record)
 
         sentinel_path = StateRepository.sentinel_path("outer", run_id=run_id)
@@ -7183,11 +7173,13 @@ def test_external_runs_unknown_step(
 def test_external_runs_missing_workplan_file(
     fabricate_external_run: Callable[..., FabricatedRun],
 ) -> None:
-    """Verify an unreadable recorded workplan is reported as a `CstarError`."""
+    """Verify a run directory without its transformed workplan is reported as a
+    `CstarError`.
+    """
     fab = fabricate_external_run()
     fab.record.trx_workplan_path.unlink()
 
-    with pytest.raises(CstarError, match="Unable to load workplan"):
+    with pytest.raises(CstarError, match="holds no transformed workplan"):
         _ = ExternalRuns(fab.runs).step(fab.ref)
 
 
@@ -7370,7 +7362,7 @@ async def test_external_runs_refresh_resolves_step_up_front(
 
     await registry.refresh([fab.ref], _FakeSlurmLauncher())
 
-    assert "Unable to load workplan" in registry.problem(fab.ref)
+    assert "holds no transformed workplan" in registry.problem(fab.ref)
     assert registry.tasks() == {}
 
 
@@ -7646,11 +7638,10 @@ async def test_external_runs_unfinished_step_of_an_untracked_run_is_a_problem(
 def _attach(fab: ManifestOnlyRun) -> WorkplanRun:
     """Track the run `fab` laid out as one attached from elsewhere: no sentinels."""
     record = WorkplanRun(
-        workplan_path=fab.root / "workplan.yaml",
-        trx_workplan_path=fab.root / f"{fab.run_id}_transformed.yaml",
         output_path=fab.root,
         run_id=fab.run_id,
-        metadata={KEY_ATTACHED: "1", KEY_RUN_UUID: fab.uuid},
+        metadata={KEY_RUN_UUID: fab.uuid},
+        attached=True,
     )
     TrackingRepository().put_workplan_run_sync(record)
     return record
@@ -8304,12 +8295,10 @@ async def test_resolve_deferred_blueprint_external_step(
         }
     )
     plan = _live_plan_with_external(fab, consumer)
-    trx_path = tmp_path / "consumer_trx.yaml"
+    trx_path = tmp_path / "consumer_transformed.yaml"
     assert serialize(trx_path, plan)
     await TrackingRepository().put_workplan_run(
         WorkplanRun(
-            workplan_path=tmp_path / "consumer.yaml",
-            trx_workplan_path=trx_path,
             output_path=tmp_path,
             run_id=mock_run_id,
         )
@@ -8975,3 +8964,144 @@ def test_workplan_transformer_anchors_after_filling_placeholders(
     transformed = WorkplanTransformer(wp, fill, wp_path=wp_path).apply()
 
     assert Path(transformed.steps[0].blueprint_path) == (plans / "hw.yaml").resolve()
+
+
+async def test_external_runs_pinned_directory_that_lost_the_run_falls_back_to_the_uuid(
+    fabricate_manifest_run: Callable[..., ManifestOnlyRun],
+    caplog: pytest.LogCaptureFixture,
+    tmp_path: Path,
+) -> None:
+    """Verify a run pinned to a directory that no longer holds it is found by the
+    uuid the pin also holds, with a warning naming the directory and the uuid,
+    and is then pinned without the directory.
+
+    Parameters
+    ----------
+    fabricate_manifest_run : Callable[..., ManifestOnlyRun]
+        Factory laying out a run in the data home.
+    caplog : pytest.LogCaptureFixture
+        Fixture used to capture log output.
+    tmp_path : Path
+        Temporary directory for test outputs.
+    """
+    fab = fabricate_manifest_run()
+    moved_from = tmp_path / "moved-from"
+    moved_from.mkdir()
+    declared = {
+        "spinup": RunRef(
+            run_id=fab.run_id,
+            id=fab.uuid,
+            path=str(moved_from),
+            start_at=EXTERNAL_START_AT,
+        )
+    }
+    registry = ExternalRuns(declared)
+
+    with caplog.at_level(logging.WARNING):
+        await registry.refresh([fab.ref], _NoQueryLauncher())
+
+    assert registry.problem(fab.ref) == ""
+    assert registry.record("spinup").output_path == fab.root
+    warnings = [r.getMessage() for r in caplog.records if r.levelno >= logging.WARNING]
+    [warning] = [w for w in warnings if str(moved_from) in w]
+    assert f"run://{fab.uuid}" in warning
+
+    pinned = registry.pinned()["spinup"]
+
+    assert pinned.path == ""
+    assert pinned.id == fab.uuid
+    assert pinned.run_id == fab.run_id
+
+
+async def test_external_runs_pinned_directory_holding_another_run_is_an_error(
+    fabricate_manifest_run: Callable[..., ManifestOnlyRun],
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Verify a run pinned to a directory that holds another run's manifest is
+    not looked for by its uuid: the step has a problem naming the mismatch, no
+    fallback is warned of, and the record is refused.
+
+    Parameters
+    ----------
+    fabricate_manifest_run : Callable[..., ManifestOnlyRun]
+        Factory laying out a run in the data home.
+    caplog : pytest.LogCaptureFixture
+        Fixture used to capture log output.
+    """
+    fab = fabricate_manifest_run()
+    other = fabricate_manifest_run()
+    assert other.uuid != fab.uuid
+    registry = ExternalRuns(
+        {
+            "spinup": RunRef(
+                run_id=fab.run_id,
+                id=fab.uuid,
+                path=str(other.root),
+                start_at=EXTERNAL_START_AT,
+            )
+        }
+    )
+
+    with caplog.at_level(logging.WARNING):
+        await registry.refresh([fab.ref], _NoQueryLauncher())
+
+    problem = registry.problem(fab.ref)
+    assert problem
+    assert fab.uuid in problem
+    assert other.uuid in problem
+    assert not [r for r in caplog.records if "looking for the run by" in r.getMessage()]
+    with pytest.raises(CstarError, match="spinup"):
+        registry.record("spinup")
+
+
+@pytest.mark.parametrize(
+    "holds",
+    [
+        pytest.param(None, id="directory-is-gone"),
+        pytest.param("notes.txt", id="directory-has-no-manifest"),
+    ],
+)
+async def test_external_runs_pinned_directory_without_a_manifest_falls_back_to_the_uuid(
+    fabricate_manifest_run: Callable[..., ManifestOnlyRun],
+    caplog: pytest.LogCaptureFixture,
+    tmp_path: Path,
+    holds: str | None,
+) -> None:
+    """Verify a pinned directory that is gone, or exists with files but no
+    `cstar-run.yaml`, is a run that moved: it is found by its uuid, with a warning.
+
+    Parameters
+    ----------
+    fabricate_manifest_run : Callable[..., ManifestOnlyRun]
+        Factory laying out a run in the data home.
+    caplog : pytest.LogCaptureFixture
+        Fixture used to capture log output.
+    tmp_path : Path
+        Temporary directory for test outputs.
+    holds : str | None
+        A file the pinned directory holds, or `None` for a directory that is gone.
+    """
+    fab = fabricate_manifest_run()
+    pinned_dir = tmp_path / "moved-from"
+    if holds is not None:
+        pinned_dir.mkdir()
+        (pinned_dir / holds).write_text("not a run")
+    registry = ExternalRuns(
+        {
+            "spinup": RunRef(
+                run_id=fab.run_id,
+                id=fab.uuid,
+                path=str(pinned_dir),
+                start_at=EXTERNAL_START_AT,
+            )
+        }
+    )
+
+    with caplog.at_level(logging.WARNING):
+        await registry.refresh([fab.ref], _NoQueryLauncher())
+
+    assert registry.problem(fab.ref) == ""
+    assert registry.record("spinup").output_path == fab.root
+    warnings = [r.getMessage() for r in caplog.records if r.levelno >= logging.WARNING]
+    assert [w for w in warnings if str(pinned_dir) in w and fab.uuid in w]
+    assert registry.pinned()["spinup"].path == ""

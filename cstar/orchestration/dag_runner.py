@@ -49,6 +49,7 @@ from cstar.orchestration.manifest import (
     new_attempt,
     read_run_manifest,
     record_submission,
+    transformed_workplan_path,
     workplan_content_hash,
     write_run_manifest,
 )
@@ -81,7 +82,6 @@ from cstar.orchestration.serialization import (
 )
 from cstar.orchestration.state import StateRepository, load_sentinels
 from cstar.orchestration.tracking import (
-    KEY_RUN_NAME,
     KEY_RUN_UUID,
     TrackingRepository,
     WorkplanRun,
@@ -768,9 +768,7 @@ async def prepare_workplan(
     # replaced only once the inputs are carried: a refused attempt leaves the
     # plan the run executes as the last attempt left it. The plan is named
     # `.yaml` whatever the authored suffix
-    persist_as = WorkplanTransformer.derived_path(
-        wp_path, output_dir, "_transformed", ".yaml"
-    )
+    persist_as = transformed_workplan_path(output_dir, wp_path)
     await asyncio.to_thread(write_text_atomic, persist_as, transformed)
 
     return wp, persist_as, external, carried
@@ -1270,7 +1268,8 @@ async def on_status_changed(handle: ProcessHandle) -> None:
     sizes: dict[str, int] = {}
 
     if Status.is_terminal(handle.status):
-        wp = LiveWorkplan.try_load(run.trx_workplan_path)
+        wp_path = run.try_trx_workplan_path()
+        wp = LiveWorkplan.try_load(wp_path) if wp_path else None
         step = (
             next((s for s in wp.steps if s.name == handle.name), None) if wp else None
         )
@@ -1605,13 +1604,9 @@ async def run_dag(
         carried,
     )
 
-    metadata = {KEY_RUN_NAME: planner.workplan.name}
-    if uuid:
-        metadata[KEY_RUN_UUID] = uuid
+    metadata = {KEY_RUN_UUID: uuid} if uuid else {}
 
     wp_run = WorkplanRun(
-        workplan_path=wp_path,
-        trx_workplan_path=trx_wp_path,
         output_path=root,
         run_id=run_id,
         environment=capture_environment(),

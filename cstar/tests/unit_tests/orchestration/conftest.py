@@ -1,5 +1,6 @@
 import json
 import os
+import shutil
 import textwrap
 import typing as t
 from collections.abc import AsyncGenerator, Callable, Generator
@@ -22,6 +23,7 @@ from cstar.orchestration.orchestration import LiveStep, ProcessHandle, Status, T
 from cstar.orchestration.serialization import deserialize
 from cstar.orchestration.state import StateRepository
 from cstar.orchestration.tracking import TrackingRepository, WorkplanRun
+from cstar.tests.unit_tests.orchestration.manifest_runs import write_identity
 
 
 @pytest.fixture
@@ -618,10 +620,13 @@ async def executed_workplan(
 
     with mock.patch.dict(os.environ, {ENV_CSTAR_RUNID: fake_run_id}):
         repo = TrackingRepository()
+        output_path = tmp_path / "mock-output"
+        output_path.mkdir(parents=True, exist_ok=True)
+        # the run directory holds the transformed workplan the record derives
+        shutil.copy(wp_path, output_path / f"{wp_path.stem}_transformed.yaml")
+        write_identity(output_path, fake_run_id, workplan=wp_path)
         wp_run = WorkplanRun(
-            workplan_path=wp_path,
-            trx_workplan_path=wp_path,
-            output_path=tmp_path / "mock-output",
+            output_path=output_path,
             run_id=fake_run_id,
         )
         await repo.put_workplan_run(wp_run)

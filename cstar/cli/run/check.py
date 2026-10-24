@@ -214,7 +214,7 @@ def _tracked_target(run: WorkplanRun) -> CheckTarget:
         )
         raise typer.BadParameter(msg)
 
-    return CheckTarget(run.output_path, run.run_id, run.trx_workplan_path)
+    return CheckTarget(run.output_path, run.run_id, run.try_trx_workplan_path())
 
 
 def _indexed_target(run_root: str) -> CheckTarget:

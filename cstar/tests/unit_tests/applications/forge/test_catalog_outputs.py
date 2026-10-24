@@ -110,15 +110,11 @@ def _run(
     plan = LiveWorkplan(
         name=f"{run_id}-plan", description="A fabricated run.", steps=[step]
     )
-    trx_path = tmp_path / "trx" / f"{run_id}.yaml"
+    run_dir = tmp_path / "trx" / run_id
+    trx_path = run_dir / f"{run_id}_transformed.yaml"
     assert serialize(trx_path, plan)
     TrackingRepository().put_workplan_run_sync(
-        WorkplanRun(
-            workplan_path=tmp_path / f"{run_id}.yaml",
-            trx_workplan_path=trx_path,
-            output_path=tmp_path,
-            run_id=run_id,
-        )
+        WorkplanRun(output_path=run_dir, run_id=run_id)
     )
     if purged:
         trx_path.unlink()
@@ -377,7 +373,7 @@ async def test_purged_run_is_skipped(
     _run(tmp_path, "run-a", entry, purged=True)
     kept = _run(tmp_path, "run-b", entry)
     _emit(kept.fsm.output_dir / "B_wio.yaml", derived_from=[producer.model_dump()])
-    assert not (tmp_path / "trx" / "run-a.yaml").exists()
+    assert not (tmp_path / "trx" / "run-a" / "run-a_transformed.yaml").exists()
 
     with caplog.at_level(logging.DEBUG, logger=_LOGGER):
         outputs = await _catalog(root).blueprint_outputs(FORGE)

@@ -4,11 +4,20 @@ import os
 import typing as t
 from collections.abc import AsyncGenerator, Callable, Mapping, Sequence
 from contextlib import AbstractAsyncContextManager, asynccontextmanager
-from datetime import datetime
+from dataclasses import dataclass
+from datetime import UTC, datetime
 from enum import StrEnum
 from pathlib import Path
 
-from pydantic import BaseModel, Field, PrivateAttr
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    PrivateAttr,
+    TypeAdapter,
+    ValidationError,
+    model_validator,
+)
 
 from cstar.base.exceptions import CstarError
 from cstar.base.log import LoggingMixin, get_logger
@@ -22,10 +31,13 @@ from cstar.execution.file_system import (
 )
 from cstar.orchestration.manifest import (
     DOCUMENT_READ_ERRORS,
+    TRANSFORMED_WORKPLAN_GLOB,
     RunManifest,
     read_run_manifest,
     recorded_step_status,
+    transformed_workplan_path,
 )
+from cstar.orchestration.models import LEGACY_TRANSFORMED_NAME_SUFFIX
 from cstar.orchestration.orchestration import (
     LiveWorkplan,
     ProcessHandle,
@@ -41,26 +53,27 @@ from cstar.orchestration.state import StateRepository
 
 log = get_logger(__name__)
 
-KEY_RUN_NAME: t.Final[str] = "name"
-"""Key used to store the workplan name in the run metadata."""
-
 KEY_RUN_UUID: t.Final[str] = "uuid"
 """Key used to cache the run manifest's uuid in the run metadata; the manifest owns it."""
 
-KEY_ATTACHED: t.Final[str] = "attached"
-"""Key whose value `"1"` marks a record created by `cstar run attach` (or a move):
-the run was not scheduled on this machine, has no sentinels here and is never
-relaunched."""
+_LEGACY_KEY_NAME: t.Final[str] = "name"
+"""Metadata key under which records written by cstar 0.17.0 and earlier held the
+workplan name; the manifest holds it now."""
 
-KEY_ACCESS: t.Final[str] = "access"
-"""Key holding an `Access` value."""
+_LEGACY_KEY_ATTACHED: t.Final[str] = "attached"
+"""Metadata key whose value `"1"` marked an attached run in records written by
+cstar 0.17.0 and earlier; the `attached` field holds it now."""
+
+_LEGACY_KEY_ACCESS: t.Final[str] = "access"
+"""Metadata key that held the `Access` value in records written by cstar 0.17.0
+and earlier; the `access` field holds it now."""
 
 
 class Access(StrEnum):
     """Whether verbs may write into a tracked run's directory.
 
-    A record without the key is `owned`: every run this machine scheduled, and
-    records written before the key existed.
+    A record without the field is `owned`: every run this machine scheduled, and
+    records written before the field existed.
     """
 
     owned = "owned"
@@ -71,23 +84,95 @@ class Access(StrEnum):
     """The run is read and referenced; nothing writes into its directory."""
 
 
+class LegacyRecord(BaseModel):
+    """What a record written by cstar 0.17.0 or earlier said about its run.
+
+    This release derives these from the run's manifest and records none of
+    them for a run it schedules. A record that arrived with them keeps them,
+    under `legacy`, for the run that has no readable manifest to ask: one
+    scheduled before the manifest existed, or whose directory is gone.
+    """
+
+    model_config = ConfigDict(
+        extra="forbid", str_strip_whitespace=True, use_attribute_docstrings=True
+    )
+
+    name: str = Field(default="")
+    """The workplan name the record held; empty when it held none."""
+
+    start_at: datetime | None = Field(default=None)
+    """When the record said the run was triggered."""
+
+    workplan_path: Path | None = Field(default=None)
+    """The authored workplan the record named."""
+
+    trx_workplan_path: Path | None = Field(default=None)
+    """The transformed workplan the record named."""
+
+
+@dataclass(frozen=True)
+class _Identity:
+    """What the manifest says about a run, read once per record instance."""
+
+    name: str
+    start_at: datetime
+    workplan_path: Path | None
+    """The authored workplan as given when the run was scheduled; `None` for a
+    manifest that records no workplan."""
+
+
+def aware_utc(moment: datetime) -> datetime:
+    """Return a moment with a time zone, a naive one being taken as UTC.
+
+    Parameters
+    ----------
+    moment : datetime
+        A timestamp read from a document.
+
+    Returns
+    -------
+    datetime
+    """
+    return moment if moment.tzinfo else moment.replace(tzinfo=UTC)
+
+
+def _legacy_moment(value: t.Any) -> datetime | None:
+    """Read a timestamp an older record held, `None` when it held none or junk."""
+    if value is None:
+        return None
+    try:
+        return TypeAdapter(datetime).validate_python(value)
+    except ValidationError:
+        return None
+
+
+def _legacy_path(value: t.Any) -> Path | None:
+    """Read a path an older record held, `None` when it held none."""
+    return Path(str(value)) if value else None
+
+
 class WorkplanRun(BaseModel):
-    """A record containing metadata about an individual execution of a `Workplan`."""
+    """The record this machine keeps of a run: what is live and local to it.
 
-    workplan_path: Path
-    """The path to the original workplan."""
-
-    trx_workplan_path: Path
-    """The path to the transformed workplan."""
+    The record lives in the state home and holds the run directory, the
+    sentinels, the environment the run was scheduled with and what this machine
+    measured. The run's name, start time and workplan paths are the manifest's
+    (`cstar-run.yaml` in the run directory) and are derived from it, so a record
+    never disagrees with the run it points at. A record written by cstar 0.17.0
+    or earlier holds them too; those are kept as `legacy` and read when the run
+    has no manifest to ask.
+    """
 
     output_path: Path
-    """The path where workplan output is written."""
+    """The path where workplan output is written: the run directory."""
 
     run_id: str
     """The unique identifier used to reference the run."""
 
-    start_at: datetime = Field(default_factory=utc_now)
-    """The date and time when the workplan run was triggered."""
+    recorded_at: datetime = Field(default_factory=utc_now)
+    """When this record was written on this machine: the key of its history
+    entry, and the start time of last resort for a run whose manifest cannot
+    be read."""
 
     environment: dict[str, str] = Field(default_factory=dict)
     """The environment variables at the time of the run."""
@@ -99,7 +184,16 @@ class WorkplanRun(BaseModel):
     """State files expected to be created during execution of the run."""
 
     metadata: dict[str, str] = Field(default_factory=dict)
-    """Optional metadata for the run."""
+    """Optional metadata for the run; the manifest's uuid is cached under
+    `KEY_RUN_UUID`."""
+
+    attached: bool = Field(default=False)
+    """Whether the run was attached from elsewhere (by `cstar run attach`, or a
+    move) rather than scheduled here: it has no sentinels on this machine and is
+    never relaunched."""
+
+    access: Access = Field(default=Access.owned)
+    """Whether verbs may write into the run's directory."""
 
     step_sizes: dict[str, int] = Field(default_factory=dict)
     """Disk usage in MB per step name (each step's own tree, excluding nested sub-steps)."""
@@ -107,8 +201,63 @@ class WorkplanRun(BaseModel):
     size_measured_at: datetime | None = Field(default=None)
     """When `step_sizes` was last measured; `None` until measured."""
 
+    legacy: LegacyRecord = Field(default_factory=LegacyRecord)
+    """What the record said when cstar 0.17.0 or earlier wrote it; empty for a
+    record of this release, and never written when empty."""
+
+    _identity: _Identity | None = PrivateAttr(default=None)
+    """The manifest's account of the run, once read."""
+
     _manifest_cache: RunManifest | None = PrivateAttr(default=None)
     """The manifest of an attached run, kept after its first read."""
+
+    @model_validator(mode="before")
+    @classmethod
+    def _read_older_record(cls, data: t.Any) -> t.Any:
+        """Accept a record written by cstar 0.17.0 or earlier.
+
+        Such a record marks attachment and access in its metadata, and holds the
+        workplan name there and the start time and workplan paths as fields.
+        The marks become the typed fields, the start time keys the history
+        entry as it did, and the rest moves under `legacy`, where this release
+        keeps it. An access value this release does not know (a newer release
+        wrote it) is read as read-only, the safe side, with a warning: the run
+        stays listed and nothing writes into it.
+        """
+        if not isinstance(data, Mapping):
+            return data
+        data = dict(data)
+        metadata = dict(data.get("metadata") or {})
+        attached = metadata.pop(_LEGACY_KEY_ATTACHED, None)
+        access = metadata.pop(_LEGACY_KEY_ACCESS, None)
+        name = metadata.pop(_LEGACY_KEY_NAME, "")
+        data["metadata"] = metadata
+        if attached is not None:
+            data.setdefault("attached", attached == "1")
+        if access is not None:
+            data.setdefault("access", access)
+        if "access" in data and data["access"] not in set(Access):
+            log.warning(
+                f"Run {data.get('run_id')!r} records an access this release does "
+                f"not know ({data['access']!r}); treating it as read-only."
+            )
+            data["access"] = Access.read_only
+
+        start_at = _legacy_moment(data.pop("start_at", None))
+        if start_at is not None:
+            data.setdefault("recorded_at", start_at)
+        held = {
+            "name": str(name or ""),
+            "start_at": start_at,
+            "workplan_path": _legacy_path(data.pop("workplan_path", None)),
+            "trx_workplan_path": _legacy_path(data.pop("trx_workplan_path", None)),
+        }
+        legacy = dict(data.get("legacy") or {})
+        for key, value in held.items():
+            if value and not legacy.get(key):
+                legacy[key] = value
+        data["legacy"] = legacy
+        return data
 
     @property
     def size_mb(self) -> int:
@@ -134,18 +283,18 @@ class WorkplanRun(BaseModel):
     def reanchored(self) -> "WorkplanRun":
         """Follow the run to where the current data home keeps it, if it has moved.
 
-        The record lives in the state home but names directories in the data
-        home. When the recorded run directory is gone and the data home holds
-        a directory for the run-id, the run was copied or moved and
-        `CSTAR_DATA_HOME` repointed: the run directory and the recorded paths
-        under it (the transformed workplan) follow. A record whose run
+        The record lives in the state home but names the run directory in the
+        data home. When the recorded run directory is gone and the data home
+        holds a directory for the run-id, the run was copied or moved and
+        `CSTAR_DATA_HOME` repointed: the run directory follows, and with it
+        everything derived from the manifest there. A record whose run
         directory exists is left alone, wherever it is, and so is one whose
         directories cannot be inspected.
 
         Returns
         -------
         WorkplanRun
-            This record, or a copy with the relocated paths.
+            This record, or a copy pointing at the relocated run directory.
         """
         try:
             if self.output_path.exists():
@@ -159,20 +308,151 @@ class WorkplanRun(BaseModel):
             log.debug(f"Unable to tell whether run {self.run_id!r} has moved: {ex}")
             return self
 
-        def _moved(path: Path) -> Path:
-            """Return `path` under the current run directory when it was under the recorded one."""
-            if path.is_relative_to(self.output_path):
-                return current / path.relative_to(self.output_path)
-            return path
-
         log.debug(f"Run {self.run_id!r} moved from {self.output_path} to {current}")
-        return self.model_copy(
-            update={
-                "output_path": current,
-                "trx_workplan_path": _moved(self.trx_workplan_path),
-                "workplan_path": _moved(self.workplan_path),
-            }
-        )
+        moved = self.model_copy(update={"output_path": current})
+        moved._identity = None
+        return moved
+
+    def _from_manifest(self) -> _Identity | None:
+        """The manifest's account of the run, read once; `None` when it cannot be read.
+
+        A failed read is not remembered: the manifest may be being written.
+        """
+        if self._identity is None:
+            try:
+                manifest = self.manifest
+            except CstarError as ex:
+                log.debug(f"Run {self.run_id!r}: no manifest to derive from: {ex}")
+                return None
+            started = (
+                manifest.attempts[-1].start_at
+                if manifest.attempts
+                else manifest.created_at
+            )
+            self._identity = _Identity(
+                name=manifest.name,
+                start_at=aware_utc(started),
+                workplan_path=(
+                    Path(manifest.workplan.path) if manifest.workplan else None
+                ),
+            )
+        return self._identity
+
+    @property
+    def name(self) -> str:
+        """The name of the workplan the run was made from.
+
+        Returns
+        -------
+        str
+            The manifest's name; for a run without a readable manifest, the
+            name an older record held, else an empty string.
+        """
+        if (found := self._from_manifest()) is not None:
+            return found.name
+        return self.legacy.name.removesuffix(LEGACY_TRANSFORMED_NAME_SUFFIX)
+
+    @property
+    def start_at(self) -> datetime:
+        """When the run was last scheduled.
+
+        Returns
+        -------
+        datetime
+            The start of the manifest's latest attempt (the manifest's creation
+            when it has none), always aware; for a run without a readable
+            manifest, the start an older record held, else `recorded_at`.
+        """
+        if (found := self._from_manifest()) is not None:
+            return found.start_at
+        if self.legacy.start_at is not None:
+            return self.legacy.start_at
+        return self.recorded_at
+
+    @property
+    def trx_workplan_path(self) -> Path:
+        """The transformed workplan in the run directory.
+
+        The scheduler writes it next to the manifest as `<stem>_transformed.yaml`,
+        the stem being the authored workplan's. A run directory that holds one
+        transformed workplan under another name (an earlier release's naming)
+        answers with it, and a record of an older release with the path it
+        held.
+
+        Returns
+        -------
+        Path
+
+        Raises
+        ------
+        CstarError
+            If the run directory holds no transformed workplan, or more than one
+            and nothing says which.
+        """
+        root = self.output_path
+        found = self._from_manifest()
+        if found is not None and found.workplan_path is not None:
+            named = transformed_workplan_path(root, found.workplan_path)
+            if named.exists():
+                return named
+
+        try:
+            candidates = sorted(root.glob(TRANSFORMED_WORKPLAN_GLOB))
+        except OSError as ex:
+            log.debug(f"Unable to list the run directory {root}: {ex}")
+            candidates = []
+        if len(candidates) == 1:
+            return candidates[0]
+        if self.legacy.trx_workplan_path is not None:
+            return self.legacy.trx_workplan_path
+        if candidates:
+            names = ", ".join(path.name for path in candidates)
+            msg = (
+                f"Run {self.run_id!r} at {root} holds more than one transformed "
+                f"workplan ({names}); remove the stale ones."
+            )
+            raise CstarError(msg)
+        msg = f"Run {self.run_id!r} at {root} holds no transformed workplan"
+        raise CstarError(msg)
+
+    def try_trx_workplan_path(self) -> Path | None:
+        """The transformed workplan in the run directory, or `None` when it cannot be located.
+
+        For the callers that treat a run without one as a run whose workplan
+        does not load: the reason is logged at debug.
+
+        Returns
+        -------
+        Path | None
+        """
+        try:
+            return self.trx_workplan_path
+        except CstarError as ex:
+            log.debug(str(ex))
+            return None
+
+    @property
+    def workplan_path(self) -> Path:
+        """The authored workplan the run was scheduled from, as given at the time.
+
+        Returns
+        -------
+        Path
+            The manifest's `workplan.path`; for a run without a readable
+            manifest, the path an older record held, else the transformed
+            workplan.
+
+        Raises
+        ------
+        CstarError
+            If nothing is known and the run has no transformed workplan either.
+        """
+        found = self._from_manifest()
+        if found is not None and found.workplan_path is not None:
+            return found.workplan_path
+        if self.legacy.workplan_path is not None:
+            return self.legacy.workplan_path
+        return self.trx_workplan_path
 
     @property
     def uuid(self) -> str:
@@ -194,39 +474,6 @@ class WorkplanRun(BaseModel):
         except CstarError as ex:
             log.debug(f"Unable to read the manifest of run {self.run_id!r}: {ex}")
             return ""
-
-    @property
-    def attached(self) -> bool:
-        """Whether the run was attached from elsewhere rather than scheduled here.
-
-        An attached run has no sentinels on this machine and is never relaunched.
-
-        Returns
-        -------
-        bool
-        """
-        return self.metadata.get(KEY_ATTACHED) == "1"
-
-    @property
-    def access(self) -> Access:
-        """Whether verbs may write into the run's directory.
-
-        Returns
-        -------
-        Access
-            `Access.owned` for a record that does not say.
-
-        Raises
-        ------
-        CstarError
-            If the record holds a value that is no `Access`.
-        """
-        value = self.metadata.get(KEY_ACCESS, Access.owned)
-        try:
-            return Access(value)
-        except ValueError as ex:
-            msg = f"Run {self.run_id!r} records an unknown access {value!r}."
-            raise CstarError(msg) from ex
 
     @property
     def live(self) -> bool:
@@ -709,7 +956,7 @@ class TrackingRepository(LoggingMixin):
         Path
             The path to the persisted history record
         """
-        run_path = self.history_path(run.run_id, run.start_at)
+        run_path = self.history_path(run.run_id, run.recorded_at)
         latest_path = self.latest_path(run.run_id)
 
         if not serialize(run_path, run):

@@ -1,6 +1,7 @@
 """Tests for the run manifest and step record."""
 
 import fcntl
+import fnmatch
 import hashlib
 import logging
 import threading
@@ -2052,3 +2053,31 @@ class TestRequireRecordedFiles:
 
         assert str(tmp_path) in str(error.value)
         assert "cstar run check" in str(error.value)
+
+
+@pytest.mark.parametrize(
+    ("authored", "expected"),
+    [
+        pytest.param("plan.yml", "plan_transformed.yaml", id="yml"),
+        pytest.param("plan.yaml", "plan_transformed.yaml", id="yaml"),
+        pytest.param("plan.json", "plan_transformed.yaml", id="json"),
+        pytest.param("a.b.yaml", "a.b_transformed.yaml", id="dotted-stem"),
+    ],
+)
+def test_transformed_workplan_path_is_named_yaml_after_the_authored_stem(
+    authored: str, expected: str
+) -> None:
+    """Verify the transformed workplan sits in the run root as `<stem>_transformed.yaml`
+    whatever the authored suffix, and matches the glob that finds it.
+
+    Parameters
+    ----------
+    authored : str
+        The authored workplan's file name.
+    expected : str
+        The transformed workplan's file name.
+    """
+    named = manifest_module.transformed_workplan_path(Path("/r"), Path(authored))
+
+    assert named == Path("/r") / expected
+    assert fnmatch.fnmatch(named.name, manifest_module.TRANSFORMED_WORKPLAN_GLOB)

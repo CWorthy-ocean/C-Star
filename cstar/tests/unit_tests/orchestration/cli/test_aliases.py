@@ -263,12 +263,11 @@ def invoke(build_app, tmp_path: Path) -> Generator[Callable[[list[str]], Result]
         return []
 
     # `status x` finds a record through the shared argument callback, then stops
-    # at the missing transformed workplan, which it reports without failing.
+    # at the transformed workplan, which it fails to load and reports without failing.
     # The `ls` stub replaces `asyncio.run` on the shared module object, so the
     # record lookup gets its own loop stub.
+    (tmp_path / "x_transformed.yaml").touch()
     record = WorkplanRun(
-        workplan_path=tmp_path / "x.yaml",
-        trx_workplan_path=tmp_path / "x_transformed.yaml",
         output_path=tmp_path,
         run_id="x",
     )

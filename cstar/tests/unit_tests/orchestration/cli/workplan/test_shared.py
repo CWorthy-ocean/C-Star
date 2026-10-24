@@ -359,7 +359,7 @@ def make_plan(steps: Mapping[str, Path]) -> SimpleNamespace:
 
 
 def make_workplan_run(run_id: str, tmp_path: Path) -> WorkplanRun:
-    """Build a bare `WorkplanRun` with dummy paths under `tmp_path`.
+    """Build a bare `WorkplanRun` whose run directory is under `tmp_path`.
 
     Parameters
     ----------
@@ -373,8 +373,6 @@ def make_workplan_run(run_id: str, tmp_path: Path) -> WorkplanRun:
     WorkplanRun
     """
     return WorkplanRun(
-        workplan_path=tmp_path / run_id / "workplan.yaml",
-        trx_workplan_path=tmp_path / run_id / "trx.yaml",
         output_path=tmp_path / run_id / "out",
         run_id=run_id,
     )
@@ -405,6 +403,8 @@ async def test_refresh_disk_usage_measures_and_persists(
         "cstar.cli.workplan.shared.TrackingRepository.update_workplan_run", put_mock
     )
 
+    run.output_path.mkdir(parents=True)
+    (run.output_path / "plan_transformed.yaml").touch()
     plans = t.cast("dict[Path, t.Any]", {run.trx_workplan_path: plan})
     await refresh_disk_usage([run], plans)
 
