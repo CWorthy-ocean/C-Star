@@ -12,28 +12,18 @@ from cstar.applications.core import (
     RunnerResult,
     register_application,
 )
-from cstar.applications.roms_marbl.file_system import (
-    GENERATED_NAMELIST_NAME,
-    ROMS_EXECUTABLE_NAME,
-    RomsFileSystemManager,
+from cstar.applications.ucla_roms.migration import (
+    UclaRomsSchemaAdapter2025v1,
+    UclaRomsSchemaAdapterV2V21,
+    UclaRomsSchemaAdapterV21V3,
 )
-from cstar.applications.roms_marbl.migration import (
-    RomsMarblSchemaAdapter2025v1,
-    RomsMarblSchemaAdapterV2V21,
-    RomsMarblSchemaAdapterV21V3,
-)
-from cstar.applications.roms_marbl.models import APP_NAME, RomsMarblBlueprint
-from cstar.applications.roms_marbl.outputs import (
-    OUTPUT_FILE_PATTERN,
-    OUTPUT_STREAMS,
-    warn_on_restart_start_date_mismatch,
-)
-from cstar.applications.roms_marbl.resume import prepare_resume_blueprint
-from cstar.applications.roms_marbl.transforms import (
+from cstar.applications.ucla_roms.models import APP_NAME, UclaRomsBlueprint
+from cstar.applications.ucla_roms.resume import prepare_resume_blueprint
+from cstar.applications.ucla_roms.transforms import (
     CarbonateSensitivityDirective,
     ContinuanceDirective,
     NestingDirective,
-    RomsMarblTimeSplitter,
+    RomsTimeSplitter,
 )
 from cstar.base.exceptions import CstarError
 from cstar.base.log import get_logger
@@ -51,6 +41,16 @@ from cstar.orchestration.models import (
 from cstar.orchestration.serialization import register_representer, strenum_representer
 from cstar.orchestration.transforms import (
     DirectiveConfig,
+)
+from cstar.roms.file_system import (
+    GENERATED_NAMELIST_NAME,
+    ROMS_EXECUTABLE_NAME,
+    RomsFileSystemManager,
+)
+from cstar.roms.outputs import (
+    OUTPUT_FILE_PATTERN,
+    OUTPUT_STREAMS,
+    warn_on_restart_start_date_mismatch,
 )
 
 if TYPE_CHECKING:
@@ -111,7 +111,7 @@ def output_products(output_dir: Path, root: Path, *, use_pio: bool) -> list[Prod
     return products
 
 
-class RomsMarblRunner(BlueprintRunner[RomsMarblBlueprint]):
+class UclaRomsRunner(BlueprintRunner[UclaRomsBlueprint]):
     """Worker class to run c-star simulations."""
 
     simulation: Final["ROMSSimulation"]
@@ -121,15 +121,15 @@ class RomsMarblRunner(BlueprintRunner[RomsMarblBlueprint]):
 
     def __init__(
         self,
-        request: RunnerRequest[RomsMarblBlueprint],
+        request: RunnerRequest[UclaRomsBlueprint],
         service_cfg: "ServiceConfiguration",
         job_cfg: "JobConfig",
     ) -> None:
-        """Initialize the RomsMarblRunner with the supplied configuration.
+        """Initialize the UclaRomsRunner with the supplied configuration.
 
         Parameters
         ----------
-        request: RunnerRequest[RomsMarblBlueprint]
+        request: RunnerRequest[UclaRomsBlueprint]
             A request containing information about the simulation to run
 
         service_cfg: ServiceConfiguration
@@ -199,7 +199,7 @@ class RomsMarblRunner(BlueprintRunner[RomsMarblBlueprint]):
         )
 
     @override
-    async def run(self) -> RunnerResult[RomsMarblBlueprint]:
+    async def run(self) -> RunnerResult[UclaRomsBlueprint]:
         """Execute the c-star simulation."""
         if self._handler is None:
             msg = "Simulation did not start up successfully"
@@ -244,12 +244,12 @@ class RomsMarblRunner(BlueprintRunner[RomsMarblBlueprint]):
 
 
 @register_application
-class RomsMarblApplication(ApplicationDefinition[RomsMarblBlueprint, RomsMarblRunner]):
+class UclaRomsApplication(ApplicationDefinition[UclaRomsBlueprint, UclaRomsRunner]):
     name: str = APP_NAME
     long_name: str = _APP_NAME_LONG
-    runner = RomsMarblRunner
-    blueprint = RomsMarblBlueprint
-    applicable_transforms = (RomsMarblTimeSplitter,)
+    runner = UclaRomsRunner
+    blueprint = UclaRomsBlueprint
+    applicable_transforms = (RomsTimeSplitter,)
     directives = (
         ContinuanceDirective,
         NestingDirective,
@@ -258,18 +258,18 @@ class RomsMarblApplication(ApplicationDefinition[RomsMarblBlueprint, RomsMarblRu
     resumable = True
     pre_runnable = True
     migrations = (
-        RomsMarblSchemaAdapter2025v1,
-        RomsMarblSchemaAdapterV2V21,
-        RomsMarblSchemaAdapterV21V3,
+        UclaRomsSchemaAdapter2025v1,
+        UclaRomsSchemaAdapterV2V21,
+        UclaRomsSchemaAdapterV21V3,
     )
 
     @override
-    def artifacts(self, blueprint: RomsMarblBlueprint) -> "Sequence[ArtifactSpec]":
+    def artifacts(self, blueprint: UclaRomsBlueprint) -> "Sequence[ArtifactSpec]":
         """Declare the files a UCLA-ROMS run leaves in its step root.
 
         Parameters
         ----------
-        blueprint : RomsMarblBlueprint
+        blueprint : UclaRomsBlueprint
             The blueprint of the UCLA-ROMS step.
 
         Returns
@@ -338,7 +338,7 @@ def main() -> int:
         return 1
 
     job_cfg = get_job_config()
-    service_cfg = get_service_config(args.log_level, name="RomsMarblRunner")
+    service_cfg = get_service_config(args.log_level, name="UclaRomsRunner")
 
     blueprint_uri = str(args.blueprint_uri)
     if args.directives:
@@ -346,13 +346,13 @@ def main() -> int:
 
     request = RunnerRequest(
         blueprint_uri,
-        RomsMarblBlueprint,
+        UclaRomsBlueprint,
         resume=args.resume,
         pre_run=args.pre_run,
         clobber=args.clobber,
         step=args.step,
     )
-    runner = RomsMarblRunner(request, service_cfg, job_cfg)
+    runner = UclaRomsRunner(request, service_cfg, job_cfg)
 
     try:
         asyncio.run(runner.execute())

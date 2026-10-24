@@ -5,16 +5,7 @@ from datetime import datetime
 from pathlib import Path
 
 from cstar.applications.core import ArtifactKind, Transform
-from cstar.applications.roms_marbl.file_system import RomsFileSystemManager
-from cstar.applications.roms_marbl.models import RomsMarblBlueprint
-from cstar.applications.roms_marbl.outputs import (
-    EXTRACT_ROLE,
-    BoundaryFile,
-    CarbonateSensitivityFile,
-    RestartFile,
-    TimestampedOutputFile,
-    warn_on_restart_start_date_mismatch,
-)
+from cstar.applications.ucla_roms.models import UclaRomsBlueprint
 from cstar.base.env import get_env_item
 from cstar.base.exceptions import CstarError
 from cstar.base.feature import (
@@ -45,6 +36,15 @@ from cstar.orchestration.transforms import (
     get_time_slices,
     lookup_step,
 )
+from cstar.roms.file_system import RomsFileSystemManager
+from cstar.roms.outputs import (
+    EXTRACT_ROLE,
+    BoundaryFile,
+    CarbonateSensitivityFile,
+    RestartFile,
+    TimestampedOutputFile,
+    warn_on_restart_start_date_mismatch,
+)
 
 if t.TYPE_CHECKING:
     from cstar.orchestration.orchestration import LiveWorkplan
@@ -52,8 +52,8 @@ if t.TYPE_CHECKING:
 log = get_logger(__name__)
 
 
-class RomsMarblTimeSplitter(Transform[LiveStep]):
-    """A step tranformation that splits a UCLA-ROMS simulation into
+class RomsTimeSplitter(Transform[LiveStep]):
+    """A step tranformation that splits a ROMS simulation into
     multiple sub-steps based on the timespan covered by the simulation.
     """
 
@@ -112,7 +112,7 @@ class RomsMarblTimeSplitter(Transform[LiveStep]):
         Sequence[LiveStep]
             Steps for each subtask resulting from the split.
         """
-        blueprint = t.cast("RomsMarblBlueprint", step.blueprint)
+        blueprint = t.cast("UclaRomsBlueprint", step.blueprint)
         start_date = blueprint.runtime_params.start_date
         end_date = blueprint.runtime_params.end_date
 
@@ -132,7 +132,7 @@ class RomsMarblTimeSplitter(Transform[LiveStep]):
 
         results: list[LiveStep] = []
         for i, (sd, ed) in enumerate(time_slices):
-            bp_copy = RomsMarblBlueprint(
+            bp_copy = UclaRomsBlueprint(
                 **blueprint.model_dump(
                     exclude_unset=True,
                     exclude_defaults=True,

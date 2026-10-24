@@ -38,8 +38,8 @@ from cstar.applications.core import get_application, get_application_name
 from cstar.applications.forge.blueprint import DEFAULT_APPLICATION as FORGE
 from cstar.applications.hello_world import APP_NAME as HELLO_WORLD
 from cstar.applications.nest_ic import APP_NAME as NEST_IC
-from cstar.applications.roms_marbl.models import APP_NAME as ROMS_MARBL
-from cstar.applications.roms_marbl.transforms import (
+from cstar.applications.ucla_roms.models import APP_NAME as UCLA_ROMS
+from cstar.applications.ucla_roms.transforms import (
     CarbonateSensitivityDirective,
     ContinuanceDirective,
     NestingDirective,
@@ -122,7 +122,7 @@ WORKPLAN_SCHEMA_REF = (
 )
 """The JSON schema editors validate a workplan file against."""
 
-APPLICATIONS = (ROMS_MARBL, FORGE, NEST_IC, UPSCALER, HELLO_WORLD)
+APPLICATIONS = (UCLA_ROMS, FORGE, NEST_IC, UPSCALER, HELLO_WORLD)
 """The applications a step may be authored for."""
 
 VIEW_YAML, VIEW_DAG, VIEW_BOTH = "YAML", "DAG", "Both"
@@ -502,7 +502,7 @@ def unsupported_machines() -> list[str]:
 # dependency graph
 # ---------------------------------------------------------------------------
 _DAG_FILLS = {
-    ROMS_MARBL: "#cfe3f7",
+    UCLA_ROMS: "#cfe3f7",
     FORGE: "#d5ecd0",
     NEST_IC: "#f6e3c4",
     UPSCALER: "#e6d4f2",
@@ -797,7 +797,7 @@ class _StepPane:
         self._current_path = ""
         self._cpus_touched = False
         self._cpus_prefilled = 0
-        self._app_fallback: str = ROMS_MARBL
+        self._app_fallback: str = UCLA_ROMS
         self._form_app = ""
         self._form: dict[str, tuple[Any, type, Any]] = {}
         self._form_touched: set[str] = set()
@@ -820,7 +820,7 @@ class _StepPane:
         self.upload_note = W.HTML("")
         self.producer = W.Dropdown(options=[])
         self.filename = text(placeholder="B_<name>.yaml")
-        self.application = W.Dropdown(options=list(APPLICATIONS), value=ROMS_MARBL)
+        self.application = W.Dropdown(options=list(APPLICATIONS), value=UCLA_ROMS)
         self.current_note = W.HTML("")
         self.source_note = W.HTML("")
 
@@ -1203,7 +1203,7 @@ class _StepPane:
                 cpus = emitted.cpus_needed
                 if not self.filename.value:
                     self.filename.value = emitted.filename
-                if self.app == ROMS_MARBL or self.app not in APPLICATIONS:
+                if self.app == UCLA_ROMS or self.app not in APPLICATIONS:
                     self.application.value = emitted.application
         elif facts := self.facts():
             cpus = facts.cpus_needed
@@ -1231,7 +1231,7 @@ class _StepPane:
             self._schema_ref = facts.roms_ref if facts else None
             for row in self._rows:
                 row.refresh_sections()
-        roms = app == ROMS_MARBL
+        roms = app == UCLA_ROMS
         for widget in (
             self.end_date,
             self.cdr_location,
@@ -1594,7 +1594,7 @@ class _StepPane:
     def _gather_overrides(self, app: str) -> dict[str, Any]:
         """The ``blueprint_overrides`` the widgets describe, raw YAML merged last."""
         out: dict[str, Any] = {}
-        if app == ROMS_MARBL:
+        if app == UCLA_ROMS:
             if end := self.end_date.value.strip():
                 out["runtime_params"] = {"end_date": _parse_datetime(end)}
             for row in self._rows:
@@ -1709,7 +1709,7 @@ class _StepPane:
                 if n not in self._form_touched
                 and _read_field_widget(*self._form[n][:2]) in ("", None)
             ]
-            if missing and self.app != ROMS_MARBL:
+            if missing and self.app != UCLA_ROMS:
                 lines.append(f"inline blueprint fields missing: {', '.join(missing)}")
         self.problem_lines = lines
         return lines
@@ -1718,7 +1718,7 @@ class _StepPane:
     def title(self) -> str:
         """``<name> · <application> · <window>`` for the accordion header."""
         window = ""
-        if self.app == ROMS_MARBL:
+        if self.app == UCLA_ROMS:
             facts = self.facts()
             end = self.end_date.value.strip() or (
                 str(facts.end_date) if facts and facts.end_date else ""
@@ -1774,7 +1774,7 @@ class _StepPane:
         self.raw_overrides.value = ""
         self._rows, self._form_app, self._form_touched = [], "", set()
         self.rows_box.children = []
-        if app == ROMS_MARBL:
+        if app == UCLA_ROMS:
             end = _pop_path(rest, "runtime_params", "end_date")
             self.end_date.value = "" if end is None else str(end)
             for section, fields in list(rest.get("namelist_overrides", {}).items()):
@@ -2105,12 +2105,12 @@ class _BaseChooser:
             emitted = emitted_for(path, FORGE)
             if emitted is None:
                 raise ValueError(f"cannot read a forge blueprint at {path!r}")
-            names = page.unique_names(FORGE, ROMS_MARBL)
+            names = page.unique_names(FORGE, UCLA_ROMS)
             forge, run = forge_then_run(
                 Path(path), emitted, names=(names[0], names[1])
             ).steps
             return run, [forge]
-        if app != ROMS_MARBL:
+        if app != UCLA_ROMS:
             raise ValueError(
                 f"the base blueprint is a {app!r} blueprint; time recipes need "
                 "ucla_roms (or forge, which generates one)"
@@ -2125,7 +2125,7 @@ class _BaseChooser:
         return (
             Step(
                 name=name,
-                application=ROMS_MARBL,
+                application=UCLA_ROMS,
                 blueprint=path,
                 compute_overrides=compute,
             ),
@@ -2370,7 +2370,7 @@ class WorkplanBuilderPage:
 
     def roms_blueprint_names(self) -> list[str]:
         """The catalog's ucla_roms blueprint names."""
-        return self._blueprint_names(ROMS_MARBL)
+        return self._blueprint_names(UCLA_ROMS)
 
     def forge_blueprint_names(self) -> list[str]:
         """The catalog's forge blueprint names."""
@@ -2380,7 +2380,7 @@ class WorkplanBuilderPage:
         """The ucla_roms blueprint file of a catalog entry, and any problems."""
         if not name:
             return "", []
-        return str(self.catalog.blueprint_path(ROMS_MARBL, name)), []
+        return str(self.catalog.blueprint_path(UCLA_ROMS, name)), []
 
     def external_tokens(self) -> list[str]:
         """``step@alias`` tokens for the steps of the declared runs."""
@@ -3354,7 +3354,7 @@ class WorkplanBuilderPage:
         return [
             p.name.value.strip()
             for p in self.panes
-            if p.name.value.strip() and p.app == ROMS_MARBL
+            if p.name.value.strip() and p.app == UCLA_ROMS
         ]
 
     def _refresh_recipes(self) -> None:
@@ -3523,7 +3523,7 @@ class WorkplanBuilderPage:
         emitted = emitted_for(path, FORGE)
         if emitted is None:
             raise ValueError(f"cannot read a forge blueprint at {path!r}")
-        forge_name, run_name = self.unique_names(FORGE, ROMS_MARBL)
+        forge_name, run_name = self.unique_names(FORGE, UCLA_ROMS)
         return forge_then_run(Path(path), emitted, names=(forge_name, run_name))
 
     def _upscale(self) -> Generated:

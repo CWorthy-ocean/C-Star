@@ -66,7 +66,7 @@ for this; a tier is selected by path.
    run with ``mpirun -n 4`` on the generated inputs, with ParallelIO
    enabled. A negative control (``test_pio_input_guard.py``) feeds a
    NETCDF4 input to a ParallelIO build and expects it to be refused.
-   ``roms_marbl/test_prebuilt_case.py`` (Tier 2b) runs the prebuilt
+   ``ucla_roms/test_prebuilt_case.py`` (Tier 2b) runs the prebuilt
    ``cstar_blueprint_test_case`` through ``cstar blueprint run`` (no
    ParallelIO, partitioned inputs) in the same CI job.
    ``e2e/test_workplan_shapes.py`` covers DAG shapes and dependency-failure
@@ -165,7 +165,7 @@ warm. A cache miss only costs a re-download.
 
 Data roles: ``roms-tools-test-data`` is the source of all upstream data;
 ``cstar_blueprint_test_case`` is the older ``ucla_roms``-only case used by
-``roms_marbl/test_prebuilt_case.py``; ``cstar_blueprint_roms_marbl_example`` is
+``ucla_roms/test_prebuilt_case.py``; ``cstar_blueprint_roms_marbl_example`` is
 used by the documentation tutorials only.
 
 Contributing code

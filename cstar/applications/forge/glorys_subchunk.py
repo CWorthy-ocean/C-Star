@@ -20,7 +20,7 @@ opens via the kerchunk backend instead of guessing netcdf -- confirmed against
 ``GLORYSDataset``, ``rt.InitialConditions``, and ``rt.BoundaryForcing`` directly, with
 both ``use_dask=True`` and ``use_dask=False``. So forge's job is only to build the
 reference and hand its path through the existing ``source["path"]`` plumbing
-(``RomsMarblInputData._resolve_source_block``) -- nothing in roms-tools is patched.
+(``RomsInputGenerator._resolve_source_block``) -- nothing in roms-tools is patched.
 
 This remains an *interim, experimental* module (not something roms-tools documents or
 guarantees) rather than a permanent feature, pending review from the roms-tools

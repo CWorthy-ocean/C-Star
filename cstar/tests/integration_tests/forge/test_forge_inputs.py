@@ -26,7 +26,7 @@ from typer.testing import CliRunner
 from cstar.applications.forge.engine import process_forge_blueprint
 from cstar.applications.forge.host import HostPaths
 from cstar.applications.forge.namelist_model import check_cdr_lite_mode_roms
-from cstar.applications.roms_marbl.models import RomsMarblBlueprint
+from cstar.applications.ucla_roms.models import UclaRomsBlueprint
 from cstar.cli.blueprint.check import app as check_app
 from cstar.orchestration.models import BlueprintIdentity
 from cstar.orchestration.serialization import load_blueprint
@@ -181,9 +181,9 @@ def _pio_problems(path: Path) -> list[str]:
         ]
 
 
-def _load_blueprint(path: Path) -> RomsMarblBlueprint:
+def _load_blueprint(path: Path) -> UclaRomsBlueprint:
     """Load an emitted blueprint, anchoring its relative locations at its directory."""
-    return load_blueprint(path, RomsMarblBlueprint)
+    return load_blueprint(path, UclaRomsBlueprint)
 
 
 def _normalize(text: str, working_dir: Path) -> str:

@@ -1,18 +1,18 @@
 import typing as t
 
-from cstar.applications.roms_marbl.models import APP_NAME
+from cstar.applications.ucla_roms.models import APP_NAME
 from cstar.base.adapter import SchemaAdapter
 from cstar.base.utils import deep_merge
 
-APP_ROMS_MARBL_SCHEMA_1_0_0: t.Final[str] = "1.0.0"
-APP_ROMS_MARBL_SCHEMA_2_0_0: t.Final[str] = "2.0.0"
-APP_ROMS_MARBL_SCHEMA_2_1_0: t.Final[str] = "2.1.0"
-APP_ROMS_MARBL_SCHEMA_3_0_0: t.Final[str] = "3.0.0"
+APP_UCLA_ROMS_SCHEMA_1_0_0: t.Final[str] = "1.0.0"
+APP_UCLA_ROMS_SCHEMA_2_0_0: t.Final[str] = "2.0.0"
+APP_UCLA_ROMS_SCHEMA_2_1_0: t.Final[str] = "2.1.0"
+APP_UCLA_ROMS_SCHEMA_3_0_0: t.Final[str] = "3.0.0"
 
 
 rm_bounds = {
-    "min": APP_ROMS_MARBL_SCHEMA_1_0_0,
-    "max": APP_ROMS_MARBL_SCHEMA_3_0_0,
+    "min": APP_UCLA_ROMS_SCHEMA_1_0_0,
+    "max": APP_UCLA_ROMS_SCHEMA_3_0_0,
 }
 """Schema bounds for the ucla_roms blueprint schema.
 
@@ -22,7 +22,7 @@ The schema bounds enable the migration tool to:
 """
 
 
-class RomsMarblSchemaAdapter2025v1(SchemaAdapter):
+class UclaRomsSchemaAdapter2025v1(SchemaAdapter):
     """Schema migration from schema version `1.0.0` to `2.0.0`.
 
     Adapting `1.0.0` to `2.0.0`:
@@ -35,11 +35,11 @@ class RomsMarblSchemaAdapter2025v1(SchemaAdapter):
 
     @classmethod
     def source(cls) -> str:
-        return APP_ROMS_MARBL_SCHEMA_1_0_0
+        return APP_UCLA_ROMS_SCHEMA_1_0_0
 
     @classmethod
     def target(cls) -> str:
-        return APP_ROMS_MARBL_SCHEMA_2_0_0
+        return APP_UCLA_ROMS_SCHEMA_2_0_0
 
     @classmethod
     def _migrate_schema(cls, model: dict[str, t.Any]) -> dict[str, t.Any]:
@@ -52,7 +52,7 @@ class RomsMarblSchemaAdapter2025v1(SchemaAdapter):
         return {**model}
 
 
-class RomsMarblSchemaAdapterV2V21(SchemaAdapter):
+class UclaRomsSchemaAdapterV2V21(SchemaAdapter):
     """Schema migration from schema version `2.0.0` to `2.1.0`.
 
     Adapting `2.0.0` to `2.1.0`:
@@ -67,18 +67,18 @@ class RomsMarblSchemaAdapterV2V21(SchemaAdapter):
 
     @classmethod
     def source(cls) -> str:
-        return APP_ROMS_MARBL_SCHEMA_2_0_0
+        return APP_UCLA_ROMS_SCHEMA_2_0_0
 
     @classmethod
     def target(cls) -> str:
-        return APP_ROMS_MARBL_SCHEMA_2_1_0
+        return APP_UCLA_ROMS_SCHEMA_2_1_0
 
     @classmethod
     def _migrate_schema(cls, model: dict[str, t.Any]) -> dict[str, t.Any]:
         return {**model}
 
 
-class RomsMarblSchemaAdapterV21V3(SchemaAdapter):
+class UclaRomsSchemaAdapterV21V3(SchemaAdapter):
     """Schema migration from schema version `2.1.0` to `3.0.0`.
 
     Adapting `2.1.0` to `3.0.0`:
@@ -96,11 +96,11 @@ class RomsMarblSchemaAdapterV21V3(SchemaAdapter):
 
     @classmethod
     def source(cls) -> str:
-        return APP_ROMS_MARBL_SCHEMA_2_1_0
+        return APP_UCLA_ROMS_SCHEMA_2_1_0
 
     @classmethod
     def target(cls) -> str:
-        return APP_ROMS_MARBL_SCHEMA_3_0_0
+        return APP_UCLA_ROMS_SCHEMA_3_0_0
 
     @classmethod
     def _migrate_schema(cls, model: dict[str, t.Any]) -> dict[str, t.Any]:

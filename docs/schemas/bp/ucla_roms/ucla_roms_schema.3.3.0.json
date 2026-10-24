@@ -668,7 +668,7 @@
         }
     },
     "additionalProperties": false,
-    "description": "Blueprint schema for running a ROMS-MARBL simulation.",
+    "description": "Blueprint schema for running a UCLA-ROMS simulation.",
     "properties": {
         "name": {
             "description": "A unique, user-friendly name for this blueprint.",
@@ -803,6 +803,6 @@
         "partitioning",
         "runtime_params"
     ],
-    "title": "RomsMarblBlueprint",
+    "title": "UclaRomsBlueprint",
     "type": "object"
 }

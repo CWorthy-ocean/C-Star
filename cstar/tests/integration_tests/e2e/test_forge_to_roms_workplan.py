@@ -387,7 +387,7 @@ def _schedule_and_wait(
     )
     _warm_grid_downloads(blueprint)
     # lazy: pulls in roms_tools, like the grid warm-up
-    from cstar.applications.forge.input_data import netcdf_basename
+    from cstar.applications.forge.input_generator import netcdf_basename
 
     workplan = write_workplan(
         root / "workplan.yaml",

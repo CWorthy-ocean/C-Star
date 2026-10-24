@@ -17,7 +17,6 @@ from unittest import mock
 import dotenv
 import pytest
 
-from cstar.applications.roms_marbl.file_system import RomsFileSystemManager
 from cstar.base.additional_code import AdditionalCode
 from cstar.base.discretization import Discretization
 from cstar.base.env import (
@@ -52,6 +51,7 @@ from cstar.orchestration.orchestration import LiveStep, LiveWorkplan
 from cstar.orchestration.serialization import deserialize, serialize
 from cstar.orchestration.tracking import TrackingRepository, WorkplanRun
 from cstar.pio.external_codebase import PIOExternalCodeBase
+from cstar.roms.file_system import RomsFileSystemManager
 from cstar.roms.namelist import release_ref_for_remote
 from cstar.tests.unit_tests.fake_abc_subclasses import (
     FakeExternalCodeBase,
@@ -2405,7 +2405,7 @@ def create_mocked_simulation_outputs(
 def preprocessable_roms_step(
     mocked_simulation_outputs: tuple[Path, Path, Path],
 ) -> Step:
-    """Create a valid step with an underlying RomsMarblBlueprint.
+    """Create a valid step with an underlying UclaRomsBlueprint.
 
     Parameters
     ----------
@@ -2432,7 +2432,7 @@ def preprocessable_roms_livestep(
     preprocessable_roms_step: Step,
     mocked_simulation_outputs: tuple[Path, Path, Path],
 ) -> LiveStep:
-    """Create a valid step with an underlying RomsMarblBlueprint.
+    """Create a valid step with an underlying UclaRomsBlueprint.
 
     Parameters
     ----------

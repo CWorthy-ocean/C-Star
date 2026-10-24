@@ -1,9 +1,9 @@
 """
-Input data generation classes for CSFORGE models.
+Input generation classes for CSFORGE models.
 
 This module provides classes for generating input data files for ocean models.
-The base InputData class defines the interface, and RomsMarblInputData provides
-the UCLA-ROMS specific implementation.
+The base InputGenerator class defines the interface, and RomsInputGenerator
+generates the ROMS input files.
 """
 
 from __future__ import annotations
@@ -26,7 +26,7 @@ import yaml
 from pydantic import BaseModel, ConfigDict, Field
 from threadpoolctl import threadpool_limits
 
-import cstar.applications.roms_marbl.models as cstar_models
+import cstar.applications.ucla_roms.models as cstar_models
 from cstar.applications.forge import source_datasets
 from cstar.applications.forge.blueprint import (
     CarbonateSensitivitySpec,
@@ -89,7 +89,7 @@ def _numba_num_threads(n: int):
 
 # Sentinel Resource.location for a child domain with no generated initial
 # conditions -- see the ``initial_conditions`` placeholder in
-# RomsMarblInputData.__init__ for why this exists. A plain string validates
+# RomsInputGenerator.__init__ for why this exists. A plain string validates
 # fine (Resource.location is ``FilePath | HttpUrl | str``); the "cstar-forge:"
 # prefix and greppable name make it obvious this was never a real file path.
 CHILD_IC_PLACEHOLDER_LOCATION = (
@@ -112,7 +112,7 @@ UPSCALED_CDR_PLACEHOLDER_LOCATION = "cstar-forge:upscaled-cdr-forcing-placeholde
 # (``_YYYYMM``/``_YYYY``, e.g. ``_202001``), climatology (``_clim``), and
 # ``partition_netcdf`` tiles (``.N``, e.g. ``.0``). Empty match = exact stem.
 # Deliberately does NOT match arbitrary suffixes like ``_child`` -- see
-# ``RomsMarblInputData._matches_planned_output``.
+# ``RomsInputGenerator._matches_planned_output``.
 _PLANNED_OUTPUT_TAIL_RE = re.compile(r"^(_\d+|_clim|\.\d+)?$")
 
 
@@ -190,14 +190,14 @@ def carbonate_sensitivity_destinations(
     carry no ``{domain}_{input}`` name).
 
     The one place that spells the rule, shared by the staging step, the planned
-    outputs of ``RomsMarblInputData`` and the executor's.
+    outputs of ``RomsInputGenerator`` and the executor's.
     """
     return [Path(input_data_dir) / Path(f.location).name for f in files]
 
 
-class RomsMarblBlueprintInputData(BaseModel):
+class UclaRomsBlueprintInputData(BaseModel):
     """
-    Subset of RomsMarblBlueprint containing only input data fields.
+    Subset of UclaRomsBlueprint containing only input data fields.
 
     This includes only the fields related to input data generation:
     - grid
@@ -233,7 +233,7 @@ class RomsMarblBlueprintInputData(BaseModel):
 
 
 @dataclass
-class InputData:
+class InputGenerator:
     """
     Base class for generating input data files for ocean models.
 
@@ -247,7 +247,7 @@ class InputData:
     end_date: Any
 
     # Output directory for generated NetCDFs — injected by the caller (executor).
-    # Required: input_data no longer resolves paths from cstar.applications.forge.config (so C-Star can
+    # Required: input_generator no longer resolves paths from cstar.applications.forge.config (so C-Star can
     # supply its own when the forge application relocates). kw_only so subclasses can
     # declare required positional fields without dataclass default-ordering conflicts.
     input_data_dir: Path = field(kw_only=True)
@@ -306,7 +306,7 @@ class InputStep:
         self.order = order  # execution order
         self.label = label  # human-readable label
         self.handler = (
-            handler  # function expecting `self` (RomsMarblInputData instance)
+            handler  # function expecting `self` (RomsInputGenerator instance)
         )
 
 
@@ -417,27 +417,27 @@ def _cdr_axis(ds: xr.Dataset) -> _CdrAxis:
 
 
 def _require_element(value: _T | None, field_name: str) -> _T:
-    """Narrow a ``roms_marbl_blueprint_elements`` field to non-``None``.
+    """Narrow a ``ucla_roms_blueprint_elements`` field to non-``None``.
 
-    ``RomsMarblInputData.__post_init__`` creates the placeholder for each field
+    ``RomsInputGenerator.__post_init__`` creates the placeholder for each field
     (``grid``/``initial_conditions``/``cdr_forcing``/``forcing``) exactly when a
     generator that fills it is scheduled in ``input_list``; the only callers are
     those generators, so the field is always set by the time they run.
     """
     if value is None:
         raise ValueError(
-            f"roms_marbl_blueprint_elements.{field_name} was not initialized before "
+            f"ucla_roms_blueprint_elements.{field_name} was not initialized before "
             "generation; its input step must be scheduled in input_list."
         )
     return value
 
 
 @dataclass
-class RomsMarblInputData(InputData):
+class RomsInputGenerator(InputGenerator):
     """
-    UCLA-ROMS specific input data generation.
+    ROMS input file generation.
 
-    This class handles generation of all UCLA-ROMS input files including:
+    This class handles generation of all ROMS input files including:
     - Grid
     - Initial conditions
     - Surface forcing
@@ -452,7 +452,7 @@ class RomsMarblInputData(InputData):
     grid: rt.Grid
     boundaries: OpenBoundaries
     source_data: source_datasets.SourceDatasets
-    roms_marbl_blueprint_dir: Path
+    ucla_roms_blueprint_dir: Path
     partitioning: cstar_models.PartitioningParameterSet
     cdr_mode: str = "none"
     """Which of the five CDR modes drives this run (from ``ForgeExecutor.cdr_mode``
@@ -461,7 +461,7 @@ class RomsMarblInputData(InputData):
     nor ``cdr_forcing_file`` is populated for that mode, so the ``if self.cdr_forcing
     or self.cdr_forcing_file`` check below is already False for it), and a
     placeholder ``Resource`` (``UPSCALED_CDR_PLACEHOLDER_LOCATION``) is emitted onto
-    ``roms_marbl_blueprint_elements.cdr_forcing`` instead, mirroring the child-IC
+    ``ucla_roms_blueprint_elements.cdr_forcing`` instead, mirroring the child-IC
     placeholder pattern below. The other four modes need no branch here: "none"
     already schedules nothing (both fields unset), and "simple"/"yaml"/"netcdf" are
     indistinguishable from each other at this layer (all just "cdr_forcing or
@@ -561,7 +561,7 @@ class RomsMarblInputData(InputData):
     _subchunk_refs: dict[str, Path] = field(default_factory=dict, init=False)
 
     # Blueprint elements containing input data
-    roms_marbl_blueprint_elements: RomsMarblBlueprintInputData = field(init=False)
+    ucla_roms_blueprint_elements: UclaRomsBlueprintInputData = field(init=False)
 
     # Settings dictionaries
     _settings_compile_time: dict = field(init=False)
@@ -594,7 +594,7 @@ class RomsMarblInputData(InputData):
         # (filled by the resolver from the model default or an authored selection).
         if self.forcing_override is None:
             raise ValueError(
-                "RomsMarblInputData requires a forcing_override (resolved initial "
+                "RomsInputGenerator requires a forcing_override (resolved initial "
                 "conditions + forcing); none was provided."
             )
         fo = self.forcing_override
@@ -665,7 +665,7 @@ class RomsMarblInputData(InputData):
                 f"have no registered handlers: {', '.join(missing)}"
             )
 
-        # Initialize roms_marbl_blueprint_elements with empty datasets
+        # Initialize ucla_roms_blueprint_elements with empty datasets
         forcing_keys = set(cstar_models.ForcingConfiguration.model_fields)
         forcing_dict = {}
         for key in unique_keys:
@@ -710,7 +710,7 @@ class RomsMarblInputData(InputData):
         # rejects a non-child domain with no IC upstream -- see
         # forge_blueprint_resolve._build_forcing -- this is defense in depth).
         # A child can't just get None/an empty Dataset the way boundary does:
-        # C-Star's RomsMarblBlueprint requires initial_conditions non-empty
+        # C-Star's UclaRomsBlueprint requires initial_conditions non-empty
         # (min_length=1), and its orchestrator validates the emitted blueprint
         # eagerly at workplan-prep time -- BEFORE the runtime 'nest-from'
         # directive gets a chance to replace it with the parent-derived initial
@@ -741,7 +741,7 @@ class RomsMarblInputData(InputData):
         # Dataset here, like grid/initial_conditions -- filled in once generated.
         # "upscaled" mode schedules no generation step at all (see cdr_mode's
         # docstring above), so "cdr_forcing" is never in unique_keys for it; it
-        # instead needs its own real Resource here (C-Star's RomsMarblBlueprint
+        # instead needs its own real Resource here (C-Star's UclaRomsBlueprint
         # declares cdr_forcing Dataset | None -- nullable, unlike
         # initial_conditions -- so there is no schema-validity forcing function
         # requiring this like there is for the child-IC placeholder above, but
@@ -762,8 +762,8 @@ class RomsMarblInputData(InputData):
         else:
             cdr_forcing_dataset = None
 
-        # Initialize roms_marbl_blueprint_elements
-        self.roms_marbl_blueprint_elements = RomsMarblBlueprintInputData(
+        # Initialize ucla_roms_blueprint_elements
+        self.ucla_roms_blueprint_elements = UclaRomsBlueprintInputData(
             grid=cstar_models.Dataset(data=[]) if "grid" in unique_keys else None,
             initial_conditions=initial_conditions,
             forcing=forcing_config,
@@ -863,8 +863,8 @@ class RomsMarblInputData(InputData):
 
         Returns
         -------
-        RomsMarblBlueprintInputData | None
-            ``self.roms_marbl_blueprint_elements``, or ``None`` if the input
+        UclaRomsBlueprintInputData | None
+            ``self.ucla_roms_blueprint_elements``, or ``None`` if the input
             directory is non-empty and ``clobber`` is False. Compile-time and
             run-time settings are not returned: they are the executor-owned dicts
             passed in via ``settings_compile_time``/``settings_run_time`` and
@@ -1001,7 +1001,7 @@ class RomsMarblInputData(InputData):
             else:
                 print("\n✅ All input files generated.\n")
 
-        return self.roms_marbl_blueprint_elements
+        return self.ucla_roms_blueprint_elements
 
     def _preflight_esper_sources(
         self,
@@ -1339,8 +1339,8 @@ class RomsMarblInputData(InputData):
 
     def _yaml_filename(self, input_name: str) -> Path:
         """Construct the YAML filename for a given input key."""
-        self.roms_marbl_blueprint_dir.mkdir(parents=True, exist_ok=True)
-        return self.roms_marbl_blueprint_dir / f"_{input_name}.yaml"
+        self.ucla_roms_blueprint_dir.mkdir(parents=True, exist_ok=True)
+        return self.ucla_roms_blueprint_dir / f"_{input_name}.yaml"
 
     def _resolve_source_block(
         self,
@@ -1700,13 +1700,13 @@ class RomsMarblInputData(InputData):
                         **nesting_kwargs,
                     )
                     self._pio_finalize(out_path_nesting_mangled)
-            self.roms_marbl_blueprint_elements.nesting_info = cstar_models.Dataset(
+            self.ucla_roms_blueprint_elements.nesting_info = cstar_models.Dataset(
                 data=[Resource(location=str(out_path_nesting), partitioned=False)]
             )
 
-        # Append Resource directly to roms_marbl_blueprint_elements.grid
+        # Append Resource directly to ucla_roms_blueprint_elements.grid
         resource = Resource(location=str(out_path), partitioned=False)
-        _require_element(self.roms_marbl_blueprint_elements.grid, "grid").data.append(
+        _require_element(self.ucla_roms_blueprint_elements.grid, "grid").data.append(
             resource
         )
 
@@ -1838,9 +1838,9 @@ class RomsMarblInputData(InputData):
                     )
                 )
 
-        # Append Resources directly to roms_marbl_blueprint_elements.initial_conditions
+        # Append Resources directly to ucla_roms_blueprint_elements.initial_conditions
         ic_dataset = _require_element(
-            self.roms_marbl_blueprint_elements.initial_conditions, "initial_conditions"
+            self.ucla_roms_blueprint_elements.initial_conditions, "initial_conditions"
         )
         if isinstance(paths, (list, tuple)):
             for path in paths:
@@ -1942,17 +1942,17 @@ class RomsMarblInputData(InputData):
         elif input_args["type"] == "bgc" and input_args["source"]["name"] == "MBL_co2":
             self._settings_compile_time.setdefault("cppdefs", {})["co2_tvarying"] = True
 
-        # Append Resources directly to roms_marbl_blueprint_elements.forcing[subkey]
+        # Append Resources directly to ucla_roms_blueprint_elements.forcing[subkey]
 
         if isinstance(paths, (list, tuple)):
             for path in paths:
                 resource = Resource(location=path, partitioned=False)
-                getattr(self.roms_marbl_blueprint_elements.forcing, subkey).data.append(
+                getattr(self.ucla_roms_blueprint_elements.forcing, subkey).data.append(
                     resource
                 )
         else:
             resource = Resource(location=paths, partitioned=False)
-            getattr(self.roms_marbl_blueprint_elements.forcing, subkey).data.append(
+            getattr(self.ucla_roms_blueprint_elements.forcing, subkey).data.append(
                 resource
             )
 
@@ -2004,7 +2004,7 @@ class RomsMarblInputData(InputData):
             )
 
     def _record_boundary_forcing_result(self, type_: str, paths) -> None:
-        """Append Resource(s) to ``roms_marbl_blueprint_elements.forcing.boundary``
+        """Append Resource(s) to ``ucla_roms_blueprint_elements.forcing.boundary``
         and record the generated path(s) into ``_settings_run_time['forcing']``.
 
         For ``type_='bgc'``, paths accumulate across multiple bgc boundary items
@@ -2013,7 +2013,7 @@ class RomsMarblInputData(InputData):
         """
         path_list = list(paths) if isinstance(paths, (list, tuple)) else [paths]
         boundary = _require_element(
-            self.roms_marbl_blueprint_elements.forcing, "forcing"
+            self.ucla_roms_blueprint_elements.forcing, "forcing"
         ).boundary
         for path in path_list:
             resource = Resource(location=path, partitioned=False)
@@ -2302,16 +2302,16 @@ class RomsMarblInputData(InputData):
             with mem_log("TidalForcing.save", enabled=self.verbose):
                 paths = self._pio_finalize(tidal.save(self._pio_mangle(output_path)))
 
-        # Append Resources directly to roms_marbl_blueprint_elements.forcing[subkey]
+        # Append Resources directly to ucla_roms_blueprint_elements.forcing[subkey]
         if isinstance(paths, (list, tuple)):
             for path in paths:
                 resource = Resource(location=path, partitioned=False)
-                getattr(self.roms_marbl_blueprint_elements.forcing, subkey).data.append(
+                getattr(self.ucla_roms_blueprint_elements.forcing, subkey).data.append(
                     resource
                 )
         else:
             resource = Resource(location=paths, partitioned=False)
-            getattr(self.roms_marbl_blueprint_elements.forcing, subkey).data.append(
+            getattr(self.ucla_roms_blueprint_elements.forcing, subkey).data.append(
                 resource
             )
 
@@ -2463,9 +2463,7 @@ class RomsMarblInputData(InputData):
         self._settings_run_time["forcing"]["river_path"] = str(output_path)
 
         resource = Resource(location=str(output_path), partitioned=False)
-        getattr(self.roms_marbl_blueprint_elements.forcing, subkey).data.append(
-            resource
-        )
+        getattr(self.ucla_roms_blueprint_elements.forcing, subkey).data.append(resource)
 
     @register_input(name="forcing.river", order=60, label="Generating river forcing")
     def _generate_river_forcing(self, key: str = "forcing.river", **kwargs):
@@ -2525,7 +2523,7 @@ class RomsMarblInputData(InputData):
             )
             for path in paths:
                 resource = Resource(location=path, partitioned=False)
-                getattr(self.roms_marbl_blueprint_elements.forcing, subkey).data.append(
+                getattr(self.ucla_roms_blueprint_elements.forcing, subkey).data.append(
                     resource
                 )
             return
@@ -2548,8 +2546,8 @@ class RomsMarblInputData(InputData):
                     key,
                     e,
                 )
-                if self.roms_marbl_blueprint_elements.forcing is not None:
-                    self.roms_marbl_blueprint_elements.forcing.river = None
+                if self.ucla_roms_blueprint_elements.forcing is not None:
+                    self.ucla_roms_blueprint_elements.forcing.river = None
                 return None
             raise
 
@@ -2558,8 +2556,8 @@ class RomsMarblInputData(InputData):
         # paths list -- checking it here lets the YAML sidecar be written
         # before save() runs instead of depending on save()'s return value.
         if river.ds.sizes["nriver"] == 0:
-            if self.roms_marbl_blueprint_elements.forcing is not None:
-                self.roms_marbl_blueprint_elements.forcing.river = None
+            if self.ucla_roms_blueprint_elements.forcing is not None:
+                self.ucla_roms_blueprint_elements.forcing.river = None
             return river
         if "ntracers" in river.ds.sizes:
             self._check_river_tracer_floor(
@@ -2587,16 +2585,16 @@ class RomsMarblInputData(InputData):
         else:
             with mem_log("RiverForcing.save", enabled=self.verbose):
                 paths = self._pio_finalize(river.save(self._pio_mangle(output_path)))
-        # Append Resources directly to roms_marbl_blueprint_elements.forcing[subkey]
+        # Append Resources directly to ucla_roms_blueprint_elements.forcing[subkey]
         if isinstance(paths, (list, tuple)):
             for path in paths:
                 resource = Resource(location=path, partitioned=False)
-                getattr(self.roms_marbl_blueprint_elements.forcing, subkey).data.append(
+                getattr(self.ucla_roms_blueprint_elements.forcing, subkey).data.append(
                     resource
                 )
         else:
             resource = Resource(location=paths, partitioned=False)
-            getattr(self.roms_marbl_blueprint_elements.forcing, subkey).data.append(
+            getattr(self.ucla_roms_blueprint_elements.forcing, subkey).data.append(
                 resource
             )
 
@@ -2810,7 +2808,7 @@ class RomsMarblInputData(InputData):
 
         resource = Resource(location=str(output_path), partitioned=False)
         _require_element(
-            self.roms_marbl_blueprint_elements.cdr_forcing, "cdr_forcing"
+            self.ucla_roms_blueprint_elements.cdr_forcing, "cdr_forcing"
         ).data.append(resource)
 
     @register_input(name="cdr_forcing", order=80, label="Generating CDR forcing")
@@ -2891,9 +2889,9 @@ class RomsMarblInputData(InputData):
             normalized_paths.append(str(path_obj.resolve()))
         paths = normalized_paths
 
-        # Append Resources directly to roms_marbl_blueprint_elements.cdr_forcing
+        # Append Resources directly to ucla_roms_blueprint_elements.cdr_forcing
         cdr_dataset = _require_element(
-            self.roms_marbl_blueprint_elements.cdr_forcing, "cdr_forcing"
+            self.ucla_roms_blueprint_elements.cdr_forcing, "cdr_forcing"
         )
         for path in paths:
             resource = Resource(location=path, partitioned=False)
@@ -2952,7 +2950,7 @@ class RomsMarblInputData(InputData):
 
         dataset = _require_element(
             _require_element(
-                self.roms_marbl_blueprint_elements.forcing, "forcing"
+                self.ucla_roms_blueprint_elements.forcing, "forcing"
             ).carbonate_sensitivity,
             "forcing.carbonate_sensitivity",
         )
@@ -2978,7 +2976,7 @@ class RomsMarblInputData(InputData):
         """
         Partition whole input files across tiles using roms_tools.partition_netcdf.
 
-        Uses the paths stored in `roms_marbl_blueprint_elements` to build the list of whole-field files,
+        Uses the paths stored in `ucla_roms_blueprint_elements` to build the list of whole-field files,
         and records the partitioned paths in the Resource objects.
 
         Always writes NETCDF4 (roms-tools' default) regardless of ``use_pio``: the
@@ -3014,20 +3012,20 @@ class RomsMarblInputData(InputData):
             name = function_key
             dataset = None
 
-            # Get the appropriate dataset from roms_marbl_blueprint_elements
+            # Get the appropriate dataset from ucla_roms_blueprint_elements
             if name == "grid":
-                dataset = self.roms_marbl_blueprint_elements.grid
+                dataset = self.ucla_roms_blueprint_elements.grid
             elif name == "initial_conditions":
-                dataset = self.roms_marbl_blueprint_elements.initial_conditions
+                dataset = self.ucla_roms_blueprint_elements.initial_conditions
             elif name.startswith("forcing."):
                 # Extract subkey from "forcing.surface" -> "surface"
                 subkey = name.split(".", 1)[1]
-                if self.roms_marbl_blueprint_elements.forcing is not None:
+                if self.ucla_roms_blueprint_elements.forcing is not None:
                     dataset = getattr(
-                        self.roms_marbl_blueprint_elements.forcing, subkey, None
+                        self.ucla_roms_blueprint_elements.forcing, subkey, None
                     )
             elif name == "cdr_forcing":
-                dataset = self.roms_marbl_blueprint_elements.cdr_forcing
+                dataset = self.ucla_roms_blueprint_elements.cdr_forcing
 
             if dataset is None or not dataset.data:
                 print(f"⚠️  Skipping {name} because it is empty")

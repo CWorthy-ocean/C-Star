@@ -7,9 +7,9 @@ import pytest
 
 from cstar.applications.core import ArtifactKind, get_application
 from cstar.applications.forge.app import INPUT_ARTIFACTS, input_products
-from cstar.applications.roms_marbl.app import output_products
-from cstar.applications.roms_marbl.outputs import OUTPUT_FILE_PATTERN, OUTPUT_STREAMS
+from cstar.applications.ucla_roms.app import output_products
 from cstar.orchestration.manifest import Product, expand_artifacts
+from cstar.roms.outputs import OUTPUT_FILE_PATTERN, OUTPUT_STREAMS
 
 _STAMP = "20120101000000"
 
@@ -27,7 +27,7 @@ def _expanded(app_name: str, root: Path, **fields: t.Any) -> dict[str, Product]:
     return {p.path: p for p in expand_artifacts(root, app.artifacts(bp))}
 
 
-class TestRomsMarblArtifacts:
+class TestUclaRomsArtifacts:
     def test_declares_each_file_the_run_leaves(self, tmp_path: Path) -> None:
         _touch(
             tmp_path,
@@ -185,7 +185,7 @@ class TestForgeArtifacts:
         assert {p: (v.kind, v.metadata) for p, v in found.items()} == expected
 
     def test_cdr_stem_is_the_one_input_data_names(self) -> None:
-        from cstar.applications.forge.input_data import CDR_FORCING_NETCDF_STEM
+        from cstar.applications.forge.input_generator import CDR_FORCING_NETCDF_STEM
 
         assert CDR_FORCING_NETCDF_STEM in {stem for stem, _, _ in INPUT_ARTIFACTS}
 

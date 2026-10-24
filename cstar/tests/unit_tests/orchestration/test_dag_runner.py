@@ -14,7 +14,7 @@ from unittest import mock
 import pytest
 
 from cstar.applications.hello_world import HelloWorldBlueprint
-from cstar.applications.roms_marbl.models import RomsMarblBlueprint
+from cstar.applications.ucla_roms.models import UclaRomsBlueprint
 from cstar.base.env import ENV_CSTAR_RUNID, ENV_CSTAR_STATE_HOME, FLAG_ON
 from cstar.base.exceptions import CstarError, CstarExpectationFailed
 from cstar.base.feature import ENV_FF_ORCH_TRX_TIMESPLIT, ENV_FF_ORCH_TRX_TIMESPLIT_FREQ
@@ -3358,7 +3358,7 @@ async def test_prepare_template_hosted_dag(
 
     paths: set[Path] = set()
     for step in steps:
-        bp = deserialize(step.blueprint_path, RomsMarblBlueprint)
+        bp = deserialize(step.blueprint_path, UclaRomsBlueprint)
         paths.add(bp.effective_working_dir)
 
         assert bp.effective_working_dir.exists()

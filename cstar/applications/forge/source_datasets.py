@@ -972,7 +972,7 @@ def _prepare_woa_salinity(self: SourceDatasets) -> Path:
     training data at river-plume salinities and extrapolate unphysically there.
     PyESPER deliberately does not download it, so Forge does, and hands roms-tools
     the path as ``source["salinity_conditioning"]["woa_salinity_path"]`` (see
-    ``input_data._resolve_source_block``).
+    ``input_generator._resolve_source_block``).
 
     Stored in ``self.source_data_dir / "WOA"`` under its NCEI name. The ``WOA_BGC``
     handler stages the same file as its annual salinity member, so whichever runs

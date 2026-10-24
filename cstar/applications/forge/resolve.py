@@ -106,7 +106,7 @@ if TYPE_CHECKING:
     from collections.abc import Sequence
     from datetime import datetime
 
-    from cstar.applications.roms_marbl.outputs import CarbonateSensitivityFile
+    from cstar.roms.outputs import CarbonateSensitivityFile
 
 log = logging.getLogger(__name__)
 
@@ -216,7 +216,7 @@ def find_carbonate_sensitivity_files(
     """
     # Lazy: the file-name convention lives with the transforms, which pull in
     # the orchestration layer.
-    from cstar.applications.roms_marbl.outputs import CarbonateSensitivityFile
+    from cstar.roms.outputs import CarbonateSensitivityFile
 
     if not directory.is_dir():
         raise NotADirectoryError(f"not a directory: {directory}")
@@ -1015,7 +1015,7 @@ def build_forge_blueprint(
         # source of these statics. C-Star's orchestrator symlinks the real,
         # run-specific CDR forcing file to the fixed "cdr.nc" name at run time
         # (the same filename a generated/custom-file CDR run also opens -- see
-        # CDR_FORCING_NETCDF_STEM in input_data.py), so ROMS always opens "cdr.nc"
+        # CDR_FORCING_NETCDF_STEM in input_generator.py), so ROMS always opens "cdr.nc"
         # regardless of which CDR mode produced it.
         settings["cdr_frc"].update(
             {
@@ -1104,7 +1104,7 @@ def build_forge_blueprint(
 
     # ntides is Forcing-owned (no ModelSpec default): drive it from the tidal
     # forcing item's ntides, or 0 when there is no tidal forcing -- see
-    # input_data._generate_tidal_forcing, which re-derives the same value at
+    # input_generator._generate_tidal_forcing, which re-derives the same value at
     # generation time.
     _ntides = next(
         (
@@ -1125,7 +1125,7 @@ def build_forge_blueprint(
     if grid_kwargs_child is not None:
         extract = dict(settings.get("extract_data", {}))
         extract["do_extract"] = True
-        extract["extract_file"] = "nesting.nc"  # fixed convention (see input_data)
+        extract["extract_file"] = "nesting.nc"  # fixed convention (see input_generator)
         if "N" in grid_kwargs_child:
             extract["n_chd"] = grid_kwargs_child["N"]
         for src, dst in (
@@ -1377,7 +1377,7 @@ def build_forge_blueprint(
     # A child grid (has a parent) receives its boundary values from the parent's
     # nesting.nc extraction, not from reanalysis boundary forcing -- the executor
     # already skips boundary-forcing generation for a child (grid_parent is not
-    # None, see ForgeExecutor/RomsMarblInputData). Skip building boundary items
+    # None, see ForgeExecutor/RomsInputGenerator). Skip building boundary items
     # here too (defense-in-depth, the wizard also clears this at the UI layer) --
     # done inside _build_forcing (not by zeroing sources.boundary afterward) so a
     # boundary-only source is never noted into resolved_datasets/datasets either.
@@ -1683,7 +1683,7 @@ def _build_forcing(
         if str(src.name).upper() in DERIVED_BGC_SOURCES:
             # ESPER itself is derived, but its salinity conditioning reads one staged
             # WOA23 file -- note *that* dataset so the executor stages it and
-            # input_data._resolve_source_block can look its path up.
+            # input_generator._resolve_source_block can look its path up.
             if str(src.name).upper() == "ESPER" and src.esper_salinity_conditioning:
                 resolved.setdefault("WOA_SALINITY", _resolved_dataset("WOA_SALINITY"))
             return
@@ -1695,7 +1695,7 @@ def _build_forcing(
             return
         # An explicit path (SourceSpec.path) bypasses staging entirely -- mirrors
         # topography_path semantics -- so the item is never noted into
-        # resolved_datasets/datasets (see input_data._resolve_source_block, which
+        # resolved_datasets/datasets (see input_generator._resolve_source_block, which
         # returns an explicit path verbatim without ever calling path_for_source).
         if src.path:
             return

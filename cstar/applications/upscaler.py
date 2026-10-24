@@ -14,7 +14,6 @@ from cstar.applications.core import (
     RunnerResult,
     register_application,
 )
-from cstar.applications.roms_marbl.outputs import UPSCALING_SUFFIX
 from cstar.base.log import get_logger
 from cstar.base.utils import convert_to_cdf5
 from cstar.entrypoint.runner import BlueprintRunner
@@ -22,6 +21,7 @@ from cstar.execution.file_system import JobFileSystemManager
 from cstar.execution.handler import ExecutionStatus
 from cstar.orchestration.manifest import recorded_files_in, require_recorded_files
 from cstar.orchestration.models import Blueprint
+from cstar.roms.outputs import UPSCALING_SUFFIX
 
 APP_NAME: t.Final[str] = "upscaler"
 """The unique identifier for the upscaler application type."""

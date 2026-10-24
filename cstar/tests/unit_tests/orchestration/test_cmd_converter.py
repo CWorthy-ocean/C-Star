@@ -7,9 +7,8 @@ from unittest import mock
 import pytest
 from pydantic import ValidationError
 
-from cstar.applications.roms_marbl.file_system import RomsFileSystemManager
-from cstar.applications.roms_marbl.models import RomsMarblBlueprint
-from cstar.applications.roms_marbl.transforms import ContinuanceDirective
+from cstar.applications.ucla_roms.models import UclaRomsBlueprint
+from cstar.applications.ucla_roms.transforms import ContinuanceDirective
 from cstar.entrypoint.utils import (
     ARG_CLOBBER,
     ARG_DIRECTIVES_URI_LONG,
@@ -29,6 +28,7 @@ from cstar.orchestration.models import (
 )
 from cstar.orchestration.orchestration import LiveStep, RunRequestCommandFormatter
 from cstar.orchestration.serialization import deserialize
+from cstar.roms.file_system import RomsFileSystemManager
 
 
 @pytest.mark.parametrize(
@@ -191,7 +191,7 @@ def test_continuance_transform(
     bp_path_before = step.blueprint_path
     fsm = RomsFileSystemManager(step.working_dir)
 
-    original_bp = deserialize(bp_path_before, RomsMarblBlueprint)
+    original_bp = deserialize(bp_path_before, UclaRomsBlueprint)
     assert original_bp.initial_conditions.data, "data list is unexpectedly empty"
     original_ic = original_bp.initial_conditions.data[0].location
 
@@ -212,7 +212,7 @@ def test_continuance_transform(
     # confirm the path includes a suffix specified by the transform
     assert ContinuanceDirective.suffix() in str(bp_path_after)
 
-    bp = deserialize(bp_path_after, RomsMarblBlueprint)
+    bp = deserialize(bp_path_after, UclaRomsBlueprint)
     assert bp.initial_conditions.data, "data list is unexpectedly empty"
 
     # confirm the location has been swapped to match the fixture

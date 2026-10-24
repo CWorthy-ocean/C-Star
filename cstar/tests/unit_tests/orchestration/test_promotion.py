@@ -11,7 +11,6 @@ from types import SimpleNamespace
 
 import pytest
 
-from cstar.applications.roms_marbl.file_system import RomsFileSystemManager
 from cstar.base.env import ENV_CSTAR_PROJECT_HOME
 from cstar.base.exceptions import CstarError
 from cstar.orchestration import promotion
@@ -43,6 +42,7 @@ from cstar.orchestration.promotion import (
     remove_run,
     staging_dir,
 )
+from cstar.roms.file_system import RomsFileSystemManager
 from cstar.tests.unit_tests.orchestration.manifest_runs import (
     STARTED,
     BuiltRun,

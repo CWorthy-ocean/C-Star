@@ -14,7 +14,7 @@ from typing import TYPE_CHECKING, Any, ClassVar, Optional, TypeVar, cast
 import yaml
 from pydantic import ValidationError
 
-from cstar.applications.roms_marbl.adapter import (
+from cstar.applications.ucla_roms.adapter import (
     AddtlCodeAdapter,
     BoundaryForcingAdapter,
     CarbonateSensitivityAdapter,
@@ -31,13 +31,7 @@ from cstar.applications.roms_marbl.adapter import (
     SurfaceForcingAdapter,
     TidalForcingAdapter,
 )
-from cstar.applications.roms_marbl.file_system import (
-    GENERATED_NAMELIST_NAME,
-    ROMS_EXECUTABLE_NAME,
-    RomsFileSystemManager,
-)
-from cstar.applications.roms_marbl.models import RomsMarblBlueprint
-from cstar.applications.roms_marbl.outputs import EXTRACT_ROOT_NAME, OUTPUT_ROOT_NAME
+from cstar.applications.ucla_roms.models import UclaRomsBlueprint
 from cstar.base.additional_code import AdditionalCode
 from cstar.base.env import (
     ENV_CSTAR_DEBUG_BUILD_MODE,
@@ -75,6 +69,11 @@ from cstar.roms.build_verification import (
 )
 from cstar.roms.discretization import ROMSDiscretization
 from cstar.roms.external_codebase import ROMSExternalCodeBase
+from cstar.roms.file_system import (
+    GENERATED_NAMELIST_NAME,
+    ROMS_EXECUTABLE_NAME,
+    RomsFileSystemManager,
+)
 from cstar.roms.input_dataset import (
     CARBONATE_SENSITIVITY_REMEDY,
     CARBONATE_SENSITIVITY_VARIABLES,
@@ -93,6 +92,7 @@ from cstar.roms.input_dataset import (
     missing_carbonate_sensitivity_variables,
 )
 from cstar.roms.namelist import RomsNamelistBase, namelist_schema_for_ref
+from cstar.roms.outputs import EXTRACT_ROOT_NAME, OUTPUT_ROOT_NAME
 from cstar.roms.precheck import applies_to, check_output_streams_divide_rst
 from cstar.simulation import Simulation
 from cstar.system.manager import get_sysmgr
@@ -1364,9 +1364,9 @@ class ROMSSimulation(Simulation):
             # be relative to, so they are left as authored
             source = SourceData(location=blueprint)
             data = source.retriever.read()
-            bp = RomsMarblBlueprint.model_validate(yaml.safe_load(data.decode("utf-8")))
+            bp = UclaRomsBlueprint.model_validate(yaml.safe_load(data.decode("utf-8")))
         else:
-            bp = load_blueprint(blueprint, RomsMarblBlueprint)
+            bp = load_blueprint(blueprint, UclaRomsBlueprint)
 
         return cls(
             name=bp.name,

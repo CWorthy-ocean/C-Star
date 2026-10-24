@@ -23,7 +23,7 @@ Forge is split into two layers along a hard boundary:
 The file that crosses the boundary is ``ForgeBlueprint`` -- **the forge
 application's own blueprint**. Terminology trap to avoid: C-Star also has an
 existing, unrelated ``ucla_roms`` application whose blueprint
-(``RomsMarblBlueprint``) forge *emits as an output artifact*. "Building a
+(``UclaRomsBlueprint``) forge *emits as an output artifact*. "Building a
 blueprint" means producing that downstream artifact, not forge's own input.
 
 .. code-block:: text
@@ -52,7 +52,7 @@ Directory map
     |   |   |                              # sources_to_forcing_override()
     |   |   +-- executor.py                # ForgeExecutor -- the processing engine
     |   |   +-- host.py                    # HostPaths -- frozen host-boundary contract injected into the executor
-    |   |   +-- input_data.py              # Input file generation
+    |   |   +-- input_generator.py         # Input file generation
     |   |   +-- source_datasets.py         # Dataset download and preparation
     |   |   +-- source_registry.py         # Dataset alias map / provenance metadata (stdlib-only)
     |   |   +-- glorys_subchunk.py         # Just-in-time kerchunk subchunking for GLORYS
@@ -70,7 +70,10 @@ Directory map
     |   |                                  # already-parsed option values (called by cli/forge's 'run');
     |   |                                  # publish_emitted_blueprint(): copies B_{name}.yaml to output/
     |   +-- core.py                    # get_application() / register_application / ApplicationDefinition
-    |   +-- roms_marbl/                # package of the ucla_roms application forge's output feeds into
+    |   +-- ucla_roms/                 # package of the ucla_roms application forge's output feeds into
+    +-- roms/
+    |   +-- outputs.py                 # Names and models of the files a ROMS step writes
+    |   +-- file_system.py             # RomsFileSystemManager: run-directory layout
     +-- catalog/                       # Bundled + layered spec catalog (see docs/developers/catalog_design.rst)
     |   +-- bundled/
     |   |   +-- ModelSpec/{model}/model.yaml    # Code repos, templates, settings, defaults
@@ -96,7 +99,7 @@ Directory map
     +-- additional_files/templates/forge/  # Bundled render templates (compile-time/run-time);
                                             # see forge_templates.rst.
 
-``glorys_subchunk.py`` is called from ``input_data.py`` and is covered by the
+``glorys_subchunk.py`` is called from ``input_generator.py`` and is covered by the
 boundary guard test (below) like any other execution module: the guard's
 module list is every ``.py`` file in ``cstar/applications/forge`` minus a
 small, fixed exclusion set for the authoring/host modules (``resolve``,

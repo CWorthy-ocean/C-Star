@@ -1,5 +1,5 @@
 # yaml-language-server: $schema=https://raw.githubusercontent.com/CWorthy-ocean/C-Star/refs/heads/main/docs/schemas/bp/roms_marbl/roms_marbl_schema.3.0.0.json
-name: roms_marbl_example_wales_new_bp
+name: ucla_roms_example_wales_new_bp
 description: toy domain near wales, for fast laptop/CI runs
 application: roms_marbl
 schema_version: 3.0.0

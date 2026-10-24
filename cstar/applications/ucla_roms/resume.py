@@ -24,15 +24,15 @@ from pathlib import Path
 
 import xarray as xr
 
-from cstar.applications.roms_marbl.file_system import RomsFileSystemManager
-from cstar.applications.roms_marbl.models import RomsMarblBlueprint
-from cstar.applications.roms_marbl.outputs import RestartFile
-from cstar.applications.roms_marbl.transforms import RestartFileTrxAdapter
+from cstar.applications.ucla_roms.models import UclaRomsBlueprint
+from cstar.applications.ucla_roms.transforms import RestartFileTrxAdapter
 from cstar.base.exceptions import CstarExpectationFailed
 from cstar.base.log import get_logger
 from cstar.execution.file_system import is_remote_resource, local_copy
 from cstar.orchestration.serialization import load_blueprint, serialize
 from cstar.orchestration.transforms import OverrideTransform
+from cstar.roms.file_system import RomsFileSystemManager
+from cstar.roms.outputs import RestartFile
 
 if t.TYPE_CHECKING:
     from datetime import datetime
@@ -178,7 +178,7 @@ def prepare_resume_blueprint(blueprint_uri: str) -> str:
     """
     with local_copy(blueprint_uri) as bp_path:
         bp = load_blueprint(
-            bp_path, RomsMarblBlueprint, anchor=not is_remote_resource(blueprint_uri)
+            bp_path, UclaRomsBlueprint, anchor=not is_remote_resource(blueprint_uri)
         )
 
     fs = RomsFileSystemManager(bp.effective_working_dir)

@@ -10,7 +10,7 @@ from unittest import mock
 
 import pytest
 
-from cstar.applications.roms_marbl.models import RomsMarblBlueprint
+from cstar.applications.ucla_roms.models import UclaRomsBlueprint
 from cstar.base.env import ENV_CSTAR_RUNID
 from cstar.execution import file_system
 from cstar.execution.file_system import (
@@ -147,7 +147,7 @@ def blueprint_schema_path(tmp_path: Path) -> Path:
     """Create a schema file that can be referenced in a yaml document."""
     # yaml-language-server: $schema=/this/path.json
     path = tmp_path / "schema.json"
-    schema = json.dumps(RomsMarblBlueprint.model_json_schema())
+    schema = json.dumps(UclaRomsBlueprint.model_json_schema())
     path.write_text(schema)
     return path
 
@@ -724,7 +724,7 @@ async def read_yaml_intercept(
                     if step_dict["application"] == "hello_world":
                         bp_path.write_text(hw_bp_content)
                     else:
-                        # default to roms_marbl blueprint ....
+                        # default to ucla_roms blueprint ....
                         bp_path.write_text(rm_bp_content)
             # else:
             return original_dict

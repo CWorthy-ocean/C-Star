@@ -115,7 +115,7 @@ def heterogeneous_workplan_path(
     hw_single_step_wp : Path
         Path to a workplan that contains a single hello_world step.
     single_step_workplan : Path
-        Path to a workplan that contains a single roms_marbl/sleep step.
+        Path to a workplan that contains a single ucla_roms/sleep step.
 
     Returns
     -------
@@ -193,7 +193,7 @@ async def test_hello_world_workplan(
     hello_world_bp_content: str,
     fill_workplan_template: Callable[[dict[str, t.Any]], str],
 ) -> None:
-    """Test deserialization of a workplan containing a non ROMS-MARBL application.
+    """Test deserialization of a workplan containing a non UCLA-ROMS application.
 
     Consider moving to a parametrized test that executes the same evaluation on all
     known application types.
@@ -261,7 +261,7 @@ def test_hello_world_workplan_scheduling(
     hw_single_step_wp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Test the execution of a workplan containing a non ROMS-MARBL application.
+    """Test the execution of a workplan containing a non UCLA-ROMS application.
 
     Parameters
     ----------
@@ -356,7 +356,7 @@ def test_heterogeneous_workplan(
     ----------
     heterogeneous_workplan_path : Path
         The path to the workplan containing a step relying on the hello_world application
-        and a step relying on the ROMS-MARBL application.
+        and a step relying on the UCLA-ROMS application.
     monkeypatch : pytest.MonkeyPatch
         Fixture used to shorten the orchestrator's polling delays.
     """

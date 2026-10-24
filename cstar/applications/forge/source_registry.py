@@ -145,7 +145,7 @@ UNSTAGED_DATASETS: set[str] = {"ETOPO5", "DAI"}
 #                  (SourceSpec.constants), or roms-tools' own auto-downloaded river-BGC
 #                  default -- either way, nothing for Forge to stage.
 #   - "ESPER":     BGC fields derived from physics T/S via PyESPER at generation time
-#                  (SourceSpec.esper_method/esper_equation); see input_data.py's ESPER
+#                  (SourceSpec.esper_method/esper_equation); see input_generator.py's ESPER
 #                  handling, which already recognizes this by name, not by dataset lookup.
 #                  With SourceSpec.esper_salinity_conditioning the resolver notes the
 #                  one staged file it needs (WOA_SALINITY) instead of the source itself.

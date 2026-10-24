@@ -241,7 +241,7 @@ def test_set_ctxmap_overwrite(capsys: pytest.CaptureFixture) -> None:
 
 @pytest.fixture
 def relative_location_bp(tmp_path: Path, bp_templates_dir: Path) -> Path:
-    """A ROMS-MARBL blueprint, in its own directory, with a relative location."""
+    """A UCLA-ROMS blueprint, in its own directory, with a relative location."""
     bp_dir = tmp_path / "blueprints"
     bp_dir.mkdir()
     bp_path = bp_dir / "bp.yaml"

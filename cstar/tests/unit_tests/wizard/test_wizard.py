@@ -1249,7 +1249,7 @@ def test_marbl_ref_repopulates_on_model_change(monkeypatch):
 def test_co2_tvarying_is_not_user_editable():
     """co2_tvarying is controlled solely by the presence of an MBL_co2 bgc surface
     source; the wizard must not expose a checkbox letting the user override it --
-    that derivation happens behind the scenes in the resolver/input_data.
+    that derivation happens behind the scenes in the resolver/input_generator.
     """
     wiz = ForgeBlueprintWizard()
     assert not hasattr(wiz, "co2_tvarying_chk")

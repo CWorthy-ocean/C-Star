@@ -18,7 +18,7 @@ from cstar.applications.core import (
     _registry,
     get_application,
 )
-from cstar.applications.roms_marbl.models import RomsMarblBlueprint
+from cstar.applications.ucla_roms.models import UclaRomsBlueprint
 from cstar.execution.handler import ExecutionStatus
 from cstar.orchestration.models import BlueprintIdentity
 from cstar.orchestration.transforms import DirectiveConfig
@@ -110,18 +110,18 @@ def test_get_application_resolves_alias_to_current_application() -> None:
     assert type(get_application("roms_marbl")) is type(current)
 
 
-def test_roms_marbl_blueprint_loads_earlier_application_name_as_current(
+def test_ucla_roms_blueprint_loads_earlier_application_name_as_current(
     complete_blueprint_path: Path,
 ) -> None:
     """A blueprint authored under the earlier name loads under the current one.
 
-    Loads through `RomsMarblBlueprint` itself: the subclass redeclares
+    Loads through `UclaRomsBlueprint` itself: the subclass redeclares
     `application`, which must not drop the canonicalisation.
     """
     data: dict[str, Any] = yaml.safe_load(complete_blueprint_path.read_text())
     assert data["application"] == "roms_marbl"
 
-    blueprint = RomsMarblBlueprint.model_validate(data)
+    blueprint = UclaRomsBlueprint.model_validate(data)
 
     assert blueprint.application == "ucla_roms"
 
@@ -348,7 +348,7 @@ def test_runnerrequest_resume_defaults_false(tmp_path: Path) -> None:
     fake_bp_path = tmp_path / "fake.yaml"
     fake_bp_path.touch()
 
-    request = RunnerRequest(fake_bp_path.as_posix(), RomsMarblBlueprint)
+    request = RunnerRequest(fake_bp_path.as_posix(), UclaRomsBlueprint)
 
     assert request.resume is False
 
@@ -358,7 +358,7 @@ def test_runnerrequest_resume_can_be_set_true(tmp_path: Path) -> None:
     fake_bp_path = tmp_path / "fake.yaml"
     fake_bp_path.touch()
 
-    request = RunnerRequest(fake_bp_path.as_posix(), RomsMarblBlueprint, resume=True)
+    request = RunnerRequest(fake_bp_path.as_posix(), UclaRomsBlueprint, resume=True)
 
     assert request.resume is True
 
@@ -368,7 +368,7 @@ def test_runnerrequest_clobber_defaults_false(tmp_path: Path) -> None:
     fake_bp_path = tmp_path / "fake.yaml"
     fake_bp_path.touch()
 
-    request = RunnerRequest(fake_bp_path.as_posix(), RomsMarblBlueprint)
+    request = RunnerRequest(fake_bp_path.as_posix(), UclaRomsBlueprint)
 
     assert request.clobber is False
 
@@ -378,7 +378,7 @@ def test_runnerrequest_clobber_can_be_set_true(tmp_path: Path) -> None:
     fake_bp_path = tmp_path / "fake.yaml"
     fake_bp_path.touch()
 
-    request = RunnerRequest(fake_bp_path.as_posix(), RomsMarblBlueprint, clobber=True)
+    request = RunnerRequest(fake_bp_path.as_posix(), UclaRomsBlueprint, clobber=True)
 
     assert request.clobber is True
 
@@ -392,7 +392,7 @@ def test_runnerrequest_rejects_resume_with_clobber(tmp_path: Path) -> None:
 
     with pytest.raises(ValueError, match="clobber"):
         RunnerRequest(
-            fake_bp_path.as_posix(), RomsMarblBlueprint, resume=True, clobber=True
+            fake_bp_path.as_posix(), UclaRomsBlueprint, resume=True, clobber=True
         )
 
 
@@ -414,7 +414,7 @@ def test_runnerrequest_blueprint_anchors_relative_locations(
     elsewhere.mkdir()
     monkeypatch.chdir(elsewhere)
 
-    request = RunnerRequest(bp_path.as_posix(), RomsMarblBlueprint)
+    request = RunnerRequest(bp_path.as_posix(), UclaRomsBlueprint)
 
     assert str(request.blueprint.forcing.boundary.data[0].location) == str(
         tmp_path / "data" / "boundary.nc"
@@ -435,7 +435,7 @@ def test_runnerrequest_blueprint_leaves_remote_locations_as_authored(
     response = mock.Mock(status_code=200, text=text)
 
     with mock.patch("cstar.execution.file_system.request", return_value=response):
-        request = RunnerRequest("https://example.com/bp.yaml", RomsMarblBlueprint)
+        request = RunnerRequest("https://example.com/bp.yaml", UclaRomsBlueprint)
         blueprint = request.blueprint
 
     assert str(blueprint.forcing.boundary.data[0].location) == "../data/boundary.nc"
@@ -458,8 +458,8 @@ def test_runnerresult_initial_state(tmp_path: Path) -> None:
 
     request = RunnerRequest(
         fake_bp_path.as_posix(),
-        RomsMarblBlueprint,
-        f"test-{RomsMarblBlueprint.__name__}-request",
+        UclaRomsBlueprint,
+        f"test-{UclaRomsBlueprint.__name__}-request",
     )
     result = RunnerResult(request, RunnerState(ExecutionStatus.UNSUBMITTED))
 
@@ -521,8 +521,8 @@ def test_runnerresult_state_updates(
 
     request = RunnerRequest(
         fake_bp_path.as_posix(),
-        RomsMarblBlueprint,
-        f"test-{RomsMarblBlueprint.__name__}-request",
+        UclaRomsBlueprint,
+        f"test-{UclaRomsBlueprint.__name__}-request",
     )
     result = RunnerResult(request, states)
 
@@ -583,8 +583,8 @@ def test_runnerresult_state_add_state(
 
     request = RunnerRequest(
         fake_bp_path.as_posix(),
-        RomsMarblBlueprint,
-        f"test-{RomsMarblBlueprint.__name__}-request",
+        UclaRomsBlueprint,
+        f"test-{UclaRomsBlueprint.__name__}-request",
     )
 
     result = RunnerResult(request, RunnerState())
@@ -667,8 +667,8 @@ def test_runnerresult_state_add_duplicate_status(
 
     request = RunnerRequest(
         fake_bp_path.as_posix(),
-        RomsMarblBlueprint,
-        f"test-{RomsMarblBlueprint.__name__}-request",
+        UclaRomsBlueprint,
+        f"test-{UclaRomsBlueprint.__name__}-request",
     )
 
     all_states = [RunnerState(s) for s in updates]
@@ -740,8 +740,8 @@ def test_runnerresult_state_add_errors(
 
     request = RunnerRequest(
         fake_bp_path.as_posix(),
-        RomsMarblBlueprint,
-        f"test-{RomsMarblBlueprint.__name__}-request",
+        UclaRomsBlueprint,
+        f"test-{UclaRomsBlueprint.__name__}-request",
     )
 
     result = RunnerResult(request, RunnerState())
@@ -752,8 +752,8 @@ def test_runnerresult_state_add_errors(
     assert len(result.errors) == exp_num_errors
 
 
-def test_roms_marbl_directives_registered_in_directive_map() -> None:
-    """Verify every directive `roms_marbl` declares is registered in
+def test_ucla_roms_directives_registered_in_directive_map() -> None:
+    """Verify every directive `ucla_roms` declares is registered in
     `DirectiveConfig.directive_map` under its own `key()`.
 
     The application's `directives` and the global registry are populated

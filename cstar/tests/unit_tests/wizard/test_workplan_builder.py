@@ -16,7 +16,7 @@ from uuid import uuid4
 import yaml
 
 from cstar.applications.forge.blueprint import ForgeBlueprint
-from cstar.applications.roms_marbl.transforms import (
+from cstar.applications.ucla_roms.transforms import (
     CarbonateSensitivityDirective,
     ContinuanceDirective,
     NestingDirective,
@@ -1483,7 +1483,7 @@ def test_chunk_recipe_first_source_declares_the_external_run(page, roms_bp, tmp_
     _round_trips(page, tmp_path)
 
 
-def test_time_recipes_offer_only_roms_marbl_steps_as_bases(page):
+def test_time_recipes_offer_only_ucla_roms_steps_as_bases(page):
     pane = page.panes[0]
     pane.name.value = "hello"
     pane.source.value = wb.SOURCE_INLINE

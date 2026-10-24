@@ -854,7 +854,7 @@ class SourceSpec(_Section):
 
 # The sanctioned escape hatch: raw roms-tools constructor kwargs that have NOT (yet)
 # been promoted to typed fields on these item models. Merged in
-# ``RomsMarblInputData._build_input_args`` AFTER the typed defaults and BEFORE the
+# ``RomsInputGenerator._build_input_args`` AFTER the typed defaults and BEFORE the
 # run-time injections (``extra``). Lets a new roms-tools parameter be operated
 # end-to-end with no schema change; promote it to a typed field later for validation,
 # UI, and discoverability. ``cstar.applications.forge.models`` re-exports these item models rather
