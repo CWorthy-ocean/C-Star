@@ -1790,7 +1790,8 @@ class ROMSSimulation(Simulation):
                 f"Cannot resume simulation {self.name!r}: the working "
                 f"directory {self.directory} is missing previously staged "
                 f"components:\n{problem_list}\n"
-                "Re-run the step with --clobber to start over."
+                "Re-run the step with --clobber to start over; its unjoined "
+                "outputs in temp_output are kept as temp_output.<N>."
             )
             raise CstarExpectationFailed(msg)
 

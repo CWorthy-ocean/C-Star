@@ -2,7 +2,7 @@ import shutil
 import typing as t
 from pathlib import Path
 
-from cstar.execution.file_system import JobFileSystemManager
+from cstar.execution.file_system import JobFileSystemManager, rotate_file
 
 ROMS_EXECUTABLE_NAME: t.Final[str] = "roms"
 """The name of the compiled ROMS executable in the compile-time code directory."""
@@ -78,7 +78,14 @@ class RomsFileSystemManager(JobFileSystemManager):
         return self.codebases_dir / key
 
     def clear(self) -> None:
-        """Ensure the job's working directories are empty."""
+        """Ensure the job's working directories are empty.
+
+        A non-empty `temp_output` is moved aside to `temp_output.<N>` rather
+        than deleted: for a non-ParallelIO run it holds the previous attempt's
+        unjoined outputs, including the only copy of its restart pieces. Moving
+        it, rather than leaving it in place, keeps the next attempt's join and
+        `--resume` from picking up pieces that attempt did not write.
+        """
         msg = f"Emptying ROMS working directories for job `{self.root_dir.name}`"
         self.log.debug(msg)
 
@@ -87,13 +94,30 @@ class RomsFileSystemManager(JobFileSystemManager):
             self.runtime_code_dir,
             self.input_datasets_dir,
             self.codebases_dir,
-            self.temp_output_dir,
         ]:
             if directory.exists():
                 shutil.rmtree(directory)
+
+        self._set_aside_temp_output()
 
         # clear everything from workdir except blueprints
         if self.run_dir.exists():
             for f in self.run_dir.iterdir():
                 if not f.name.endswith(".yml") and not f.name.endswith(".yaml"):
                     f.unlink()
+
+    def _set_aside_temp_output(self) -> None:
+        """Move a non-empty `temp_output` to `temp_output.<N>`; remove an empty one."""
+        temp_output = self.temp_output_dir
+        if not temp_output.is_dir():
+            return
+
+        if next(temp_output.iterdir(), None) is None:
+            temp_output.rmdir()
+            return
+
+        kept = rotate_file(temp_output)
+        self.log.info(
+            f"Kept the previous attempt's unjoined outputs (including any restart "
+            f"pieces) at `{kept}`; remove it once it is no longer needed"
+        )

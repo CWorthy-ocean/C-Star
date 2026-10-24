@@ -118,11 +118,34 @@ def test_file_system_clear(
     assert not fs.runtime_code_dir.exists()
     assert not fs.input_datasets_dir.exists()
     assert not fs.temp_output_dir.exists()
+    # the previous attempt's unjoined outputs are moved aside, not deleted
+    assert (fs.root_dir / "temp_output.1" / "d.txt").exists()
 
     # confirm yaml in work_dir is not removed.
     assert not (fs.run_dir / "e.txt").exists()
     assert (fs.run_dir / "f.yaml").exists()
     assert (fs.run_dir / "g.yml").exists()
+
+
+def test_file_system_clear_rotates_temp_output_each_time(tmp_path: Path) -> None:
+    """Verify each clear keeps the unjoined outputs it finds under a new
+    `temp_output.<N>`, and removes an empty `temp_output` without a rotation.
+    """
+    fs = RomsFileSystemManager(tmp_path / "step")
+    fs.prepare()
+
+    fs.clear()
+    assert not fs.temp_output_dir.exists()
+    assert not (fs.root_dir / "temp_output.1").exists()
+
+    for attempt in (1, 2):
+        fs.temp_output_dir.mkdir()
+        (fs.temp_output_dir / f"attempt{attempt}.nc").touch()
+        fs.clear()
+
+    assert not fs.temp_output_dir.exists()
+    assert (fs.root_dir / "temp_output.1" / "attempt1.nc").exists()
+    assert (fs.root_dir / "temp_output.2" / "attempt2.nc").exists()
 
 
 def test_file_system_pickle_job_fs(tmp_path: Path) -> None:

@@ -293,3 +293,23 @@ class TestPrepareResumeBlueprint:
 
         new_bp = deserialize(result, UclaRomsBlueprint)
         assert str(new_bp.grid.data[0].location) == str(tmp_path / "relative_grid.nc")
+
+
+def test_clobbered_restart_pieces_are_kept_but_not_resumed(tmp_path: Path) -> None:
+    """Verify `clear()` (`--clobber`) keeps a non-ParallelIO step's restart
+    pieces under `temp_output.<N>`, where the next attempt's resume does not
+    find them: they are the previous attempt's, not the clobbered one's.
+    """
+    fs = RomsFileSystemManager(tmp_path / "step")
+    fs.prepare()
+    ts = "20200601000000"
+    for seg in ("000", "001"):
+        _write_netcdf(fs.temp_output_dir / _piece_name(ts, seg))
+    assert find_resume_restart(fs.temp_output_dir, expected_pieces=2) is not None
+
+    fs.clear()
+
+    assert find_resume_restart(fs.temp_output_dir, expected_pieces=2) is None
+    kept = find_resume_restart(fs.root_dir / "temp_output.1", expected_pieces=2)
+    assert kept is not None
+    assert kept.formatted_timestamp == ts
