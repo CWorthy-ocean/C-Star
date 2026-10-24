@@ -1223,3 +1223,102 @@ def test_wales_tutorial_blueprint_matches_the_bundled_copy():
     tutorial = repo_root / "docs" / "tutorials" / "wales_toy_blueprint.yaml"
     bundled = DomainCatalog(read_only=True).blueprint_path("ucla_roms", "wales-toy")
     assert tutorial.read_text() == bundled.read_text()
+
+
+# ---------------------------------------------------------------------------
+# archived model specs (hidden from the wizard dropdown, still fully loadable)
+# ---------------------------------------------------------------------------
+
+_BUNDLED_ARCHIVED_MODELS = [
+    "cson_roms-marbl_v0.1",
+    "roms-marbl-0.3-default",
+    "roms-marbl-0.4-default",
+    "roms-marbl-0.5-default",
+    "roms-marbl-0.6-default",
+    "roms-marbl-0.7-default",
+    "roms-marbl-0.8-default",
+]
+
+
+def _write_model(root: Path, name: str, text: str | None = None, **extra) -> Path:
+    """Write ``ModelSpec/<name>/model.yaml``: a copy of a bundled spec plus *extra*
+    top-level keys, or *text* verbatim.
+    """
+    model_dir = root / "ModelSpec" / name
+    model_dir.mkdir(parents=True)
+    if text is None:
+        base = yaml.safe_load(
+            (
+                _DEFAULT_CATALOG_ROOT / "ModelSpec/roms-marbl-0.9-default/model.yaml"
+            ).read_text()
+        )
+        text = yaml.safe_dump({**base, **extra})
+    (model_dir / "model.yaml").write_text(text)
+    return model_dir
+
+
+class TestArchivedModelNames:
+    def test_bundled_archived_models_are_exactly_the_superseded_pins(self):
+        bundled = DomainCatalog(read_only=True)
+        assert bundled.archived_model_names == _BUNDLED_ARCHIVED_MODELS
+        # archived specs stay listed and loadable
+        for name in _BUNDLED_ARCHIVED_MODELS:
+            assert name in bundled.model_names
+            assert bundled.load_model_spec(name).archived is True
+        assert bundled.load_model_spec("roms-marbl-0.9-default").archived is False
+
+    def test_specs_are_not_read_at_scan_time(self, tmp_path):
+        with patch.object(DomainCatalog, "load_model_spec") as load:
+            catalog = DomainCatalog(read_only=True)
+            _ = catalog.model_names
+        load.assert_not_called()
+        assert catalog._archived_model_names is None
+
+    def test_registering_a_model_invalidates_the_cache(
+        self, isolated_catalog, tmp_path
+    ):
+        assert isolated_catalog.archived_model_names == _BUNDLED_ARCHIVED_MODELS
+        new_dir = _write_model(tmp_path / "src", "my-old-model", archived=True)
+        isolated_catalog.register_model(new_dir)
+        assert "my-old-model" in isolated_catalog.archived_model_names
+
+    def test_unreadable_spec_counts_as_not_archived(self, tmp_path, caplog):
+        _write_model(tmp_path, "good-archived", archived=True)
+        _write_model(tmp_path, "broken", text="not: [valid")
+        catalog = DomainCatalog(catalog_root=tmp_path, suppress_validation=True)
+        with caplog.at_level(logging.DEBUG):
+            assert catalog.archived_model_names == ["good-archived"]
+        assert "broken" in catalog.model_names
+        assert "Could not read model spec 'broken'" in caplog.text
+
+    def test_spec_saved_from_an_archived_base_is_not_archived(self, isolated_catalog):
+        base_dir = isolated_catalog.model_dir("roms-marbl-0.7-default")
+        assert "roms-marbl-0.7-default" in isolated_catalog.archived_model_names
+        settings = isolated_catalog.model_data("roms-marbl-0.7-default")[
+            "model_settings"
+        ]
+        isolated_catalog.register_model_from_settings(
+            "my-model", settings, base_dir, description="m"
+        )
+        assert "my-model" in isolated_catalog.model_names
+        assert "my-model" not in isolated_catalog.archived_model_names
+        assert isolated_catalog.load_model_spec("my-model").archived is False
+
+    def test_layered_winning_store_decides(self, tmp_path):
+        top_root = tmp_path / "top"
+        top_root.mkdir()
+        # Shadows an archived bundled name with a non-archived spec.
+        _write_model(top_root, "roms-marbl-0.3-default")
+        _write_model(top_root, "user-archived", archived=True)
+        top = DomainCatalog(
+            catalog_root=top_root, suppress_validation=True, label="top"
+        )
+        bottom = DomainCatalog(read_only=True, label="bundled")
+        layered = LayeredCatalog([top, bottom])
+
+        expected = sorted(
+            [n for n in _BUNDLED_ARCHIVED_MODELS if n != "roms-marbl-0.3-default"]
+            + ["user-archived"]
+        )
+        assert layered.archived_model_names == expected
+        assert "roms-marbl-0.3-default" in layered.model_names

@@ -1,4 +1,5 @@
 description: Generated blueprint
+archived: true
 bgc_mode: marbl
 use_pio: true
 code:

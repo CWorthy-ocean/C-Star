@@ -8133,6 +8133,7 @@ class TestSaveModifiedSpecsToCatalog:
         wiz = self._wizard(isolated_catalog)
         # Pin a spec where use_pio=True / roms_ref="main" are genuine
         # deviations (the default pio-dev spec already declares both).
+        wiz.show_archived_models.value = True
         wiz.model_dd.value = "cson_roms-marbl_v0.1"
         wiz.use_pio_chk.value = True
         wiz.roms_ref.value = "main"
@@ -8189,6 +8190,7 @@ class TestSaveModifiedSpecsToCatalog:
         # Pin a spec whose base pin is NOT "main", so a spec that drops the
         # live roms_ref actually loses information (pio-dev's base pin is
         # already "main", which would make the roundtrip spuriously succeed).
+        wiz.show_archived_models.value = True
         wiz.model_dd.value = "cson_roms-marbl_v0.1"
         wiz.roms_ref.value = "main"
         # Simulate the pre-fix writer: a spec saved without the live roms_ref.
@@ -8212,6 +8214,7 @@ class TestSaveModifiedSpecsToCatalog:
         wiz = self._wizard(isolated_catalog)
         # Pin a spec whose base pin is NOT "main", so roms_ref="main" below is
         # a real deviation (pio-dev, the default, already pins "main").
+        wiz.show_archived_models.value = True
         wiz.model_dd.value = "cson_roms-marbl_v0.1"
         assert wiz.config.composition.model.modified is False
 
@@ -8236,6 +8239,7 @@ class TestSaveModifiedSpecsToCatalog:
     def test_save_model_spec_persists_marbl_ref(self, isolated_catalog):
         spec_name = "marbl-ref-test"
         wiz = self._wizard(isolated_catalog)
+        wiz.show_archived_models.value = True
         wiz.model_dd.value = "cson_roms-marbl_v0.1"
         wiz.marbl_ref.value = "my-marbl-tag"
         assert wiz.config.composition.model.modified is True  # spec deviation
@@ -8268,6 +8272,7 @@ class TestSaveModifiedSpecsToCatalog:
         from cstar.wizard.wizard import _model_owned_settings
 
         wiz = self._wizard(isolated_catalog)
+        wiz.show_archived_models.value = True
         wiz.model_dd.value = "cson_roms-marbl_v0.1"
         wiz.marbl_ref.value = "some-other-marbl-tag"
         # Simulate a pre-fix writer: a spec saved without the live marbl_ref.
