@@ -263,6 +263,7 @@ Bug Fixes
 - ``cstar admin migrate-catalog`` no longer fails after moving blueprints out of a legacy directory that is a symbolic link; the link is reported as left in place. (`#818 <https://github.com/CWorthy-ocean/C-Star/pull/818>`_)
 - ``cstar run promote --mode move`` of a run tracked on this machine (and re-attaching a copy of such a run) no longer leaves the run's sentinel files behind under ``run_state/<run-id>/``; those of finished steps are removed and the directory with them when empty, while a sentinel whose step has not finished is kept with a warning. (`#817 <https://github.com/CWorthy-ocean/C-Star/pull/817>`_)
 - A ``runs:`` alias pinned to a run directory that has since moved or been removed no longer fails on the stale path: it warns, naming the pinned directory and the run's uuid, finds the run by that uuid and re-pins the alias by uuid; a pinned directory that holds another run is still an error. (`#817 <https://github.com/CWorthy-ocean/C-Star/pull/817>`_)
+- On a SLURM system such as Anvil, a workplan step run with the local launcher no longer fails at startup with "Environment settings for the system could not be loaded" when ``CSTAR_SLURM_ACCOUNT`` or ``CSTAR_SLURM_QUEUE`` is unset. (`#820 <https://github.com/CWorthy-ocean/C-Star/pull/820>`_)
 
 
 Improvements
@@ -320,6 +321,7 @@ Improvements
   - A record carrying an ``access`` value this release does not know is read as read-only with a warning, so the run stays listed and nothing writes into its directory.
 
 - ``cstar run ls`` without ``--all`` or ``--shared`` reads only the tracking records in your state home and each tracked run's manifest for its name and start time; it scans no run directories. (`#817 <https://github.com/CWorthy-ocean/C-Star/pull/817>`_)
+- Submitting a SLURM job on a system that requires an account and queue, without them, now fails before anything is submitted, naming every missing setting and pointing to ``cstar init``. (`#820 <https://github.com/CWorthy-ocean/C-Star/pull/820>`_)
 
 
 
@@ -374,3 +376,4 @@ Miscellaneous
 - The workplans page gains a "Known limitations" section: what you see and what to do for each known edge of re-entering, promoting and recording runs. (`#819 <https://github.com/CWorthy-ocean/C-Star/pull/819>`_)
 - The workplans page states the linked-promotion policy: a ``promote --mode link`` run may stay linked indefinitely, shows as ``project, linked``, and its owner materializes it before a scratch purge. (`#819 <https://github.com/CWorthy-ocean/C-Star/pull/819>`_)
 - The workplans page notes that on a scheduler system every step, even one run locally, needs ``CSTAR_SLURM_ACCOUNT`` and ``CSTAR_SLURM_QUEUE``, which ``cstar init`` sets. (`#819 <https://github.com/CWorthy-ocean/C-Star/pull/819>`_)
+- The HPC guide now says the SLURM settings are needed only to submit jobs. (`#820 <https://github.com/CWorthy-ocean/C-Star/pull/820>`_)
