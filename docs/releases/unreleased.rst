@@ -371,3 +371,6 @@ Miscellaneous
 - Docs: the blueprint page moved to ``blueprints/ucla_roms``; examples, tutorials and templates use ``application: ucla_roms``, with a note wherever the old name is still accepted. (`#818 <https://github.com/CWorthy-ocean/C-Star/pull/818>`_)
 - Wizard labels, hints and log messages say UCLA-ROMS, keeping "with MARBL" where the output needs MARBL. (`#818 <https://github.com/CWorthy-ocean/C-Star/pull/818>`_)
 - The run docs state what ``cstar run ls`` reads without flags. (`#817 <https://github.com/CWorthy-ocean/C-Star/pull/817>`_)
+- The workplans page gains a "Known limitations" section: what you see and what to do for each known edge of re-entering, promoting and recording runs. (`#819 <https://github.com/CWorthy-ocean/C-Star/pull/819>`_)
+- The workplans page states the linked-promotion policy: a ``promote --mode link`` run may stay linked indefinitely, shows as ``project, linked``, and its owner materializes it before a scratch purge. (`#819 <https://github.com/CWorthy-ocean/C-Star/pull/819>`_)
+- The workplans page notes that on a scheduler system every step, even one run locally, needs ``CSTAR_SLURM_ACCOUNT`` and ``CSTAR_SLURM_QUEUE``, which ``cstar init`` sets. (`#819 <https://github.com/CWorthy-ocean/C-Star/pull/819>`_)
