@@ -105,6 +105,14 @@ def run_cstar(
     )
 
 
+def flat_output(text: str) -> str:
+    """The text on one line, without the borders of rich's panels or the colour
+    codes rich adds where colour is forced (CI), which can split a wrapped phrase.
+    """
+    plain = re.sub(r"\x1b\[[0-9;]*m", "", text)
+    return re.sub(r"\s+", " ", re.sub(r"[│╭╮╰╯─]", " ", plain))
+
+
 def sentinel_path(state_home: Path, run_id: str, step: str) -> Path:
     """Path of the sentinel file of ``step`` in ``run_id``."""
     return state_home / "run_state" / run_id / f"{slugify(step)}.sentinel.yaml"

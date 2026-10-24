@@ -23,6 +23,7 @@ from cstar.orchestration.serialization import serialize
 from cstar.tests.integration_tests.cli_harness import (
     DONE,
     FAILED,
+    flat_output,
     kill_run,
     make_cli_env,
     make_shim,
@@ -394,7 +395,7 @@ def test_rerun_after_the_run_directory_is_removed_runs_the_steps_again(
         )
         output = f"stdout:\n{refused.stdout}\nstderr:\n{refused.stderr}"
         assert refused.returncode == 1, output
-        flat = " ".join(refused.stdout.split())
+        flat = flat_output(refused.stdout)
         assert str(run.sentinel("A").parent) in flat, output
         assert f"cstar admin clean --run-id {run_id}" in flat, output
         assert not run.log("A").exists()
@@ -444,14 +445,12 @@ def test_rerun_by_workplan_name_after_the_run_directory_is_removed_is_refused(
         assert returncode == 0, output
         shutil.rmtree(run.data_home / "workplan_runs" / run_id)
 
-        # a wide terminal keeps rich from wrapping the message inside its panel
-        env = {**run.env, "COLUMNS": "400"}
-        refused = run_cstar(
-            env, "workplan", "submit", str(shape_root / "workplan.yaml")
-        )
+        workplan = shape_root / "workplan.yaml"
+        refused = run_cstar(run.env, "workplan", "submit", str(workplan))
         output = f"stdout:\n{refused.stdout}\nstderr:\n{refused.stderr}"
         assert refused.returncode == 2, output
-        assert f"cstar admin clean --run-id {run_id}" in refused.stderr, output
+        remedy = f"cstar admin clean --run-id {run_id}"
+        assert remedy in flat_output(refused.stderr), output
         assert not run.log("A").exists()
     finally:
         kill_run(run.state_home, run_id, run.steps)
