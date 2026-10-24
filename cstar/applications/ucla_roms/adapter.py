@@ -1,6 +1,6 @@
 import typing as t
 
-from cstar.applications.roms_marbl.models import CodeRepository, RomsMarblBlueprint
+from cstar.applications.ucla_roms.models import CodeRepository, UclaRomsBlueprint
 from cstar.base.adapter import ModelAdapter
 from cstar.base.additional_code import AdditionalCode
 from cstar.marbl.external_codebase import MARBLExternalCodeBase
@@ -22,7 +22,7 @@ from cstar.roms.input_dataset import (
 )
 
 
-class DiscretizationAdapter(ModelAdapter[RomsMarblBlueprint, ROMSDiscretization]):
+class DiscretizationAdapter(ModelAdapter[UclaRomsBlueprint, ROMSDiscretization]):
     """Create a ROMSDiscretization from a blueprint model."""
 
     @t.override
@@ -34,10 +34,10 @@ class DiscretizationAdapter(ModelAdapter[RomsMarblBlueprint, ROMSDiscretization]
         )
 
 
-class AddtlCodeAdapter(ModelAdapter[RomsMarblBlueprint, AdditionalCode]):
+class AddtlCodeAdapter(ModelAdapter[UclaRomsBlueprint, AdditionalCode]):
     """Create a AdditionalCode from a blueprint model."""
 
-    def __init__(self, model: RomsMarblBlueprint, key: str) -> None:
+    def __init__(self, model: UclaRomsBlueprint, key: str) -> None:
         super().__init__(model)
         self.key = key
 
@@ -53,7 +53,7 @@ class AddtlCodeAdapter(ModelAdapter[RomsMarblBlueprint, AdditionalCode]):
         )
 
 
-class CodebaseAdapter(ModelAdapter[RomsMarblBlueprint, ROMSExternalCodeBase]):
+class CodebaseAdapter(ModelAdapter[UclaRomsBlueprint, ROMSExternalCodeBase]):
     """Create a ROMSExternalCodeBase from a blueprint model."""
 
     @t.override
@@ -64,7 +64,7 @@ class CodebaseAdapter(ModelAdapter[RomsMarblBlueprint, ROMSExternalCodeBase]):
         )
 
 
-class MARBLAdapter(ModelAdapter[RomsMarblBlueprint, MARBLExternalCodeBase]):
+class MARBLAdapter(ModelAdapter[UclaRomsBlueprint, MARBLExternalCodeBase]):
     """Create a MARBLExternalCodeBase from a blueprint model."""
 
     @t.override
@@ -80,7 +80,7 @@ class MARBLAdapter(ModelAdapter[RomsMarblBlueprint, MARBLExternalCodeBase]):
         )
 
 
-class PIOAdapter(ModelAdapter[RomsMarblBlueprint, PIOExternalCodeBase]):
+class PIOAdapter(ModelAdapter[UclaRomsBlueprint, PIOExternalCodeBase]):
     """Create a PIOExternalCodeBase from a blueprint model.
 
     Unlike MARBL, a missing `code.pio` section is not an error: the default
@@ -99,7 +99,7 @@ class PIOAdapter(ModelAdapter[RomsMarblBlueprint, PIOExternalCodeBase]):
         )
 
 
-class GridAdapter(ModelAdapter[RomsMarblBlueprint, ROMSModelGrid]):
+class GridAdapter(ModelAdapter[UclaRomsBlueprint, ROMSModelGrid]):
     """Create a ROMSModelGrid from a blueprint model."""
 
     @t.override
@@ -122,7 +122,7 @@ class GridAdapter(ModelAdapter[RomsMarblBlueprint, ROMSModelGrid]):
         )
 
 
-class InitialConditionAdapter(ModelAdapter[RomsMarblBlueprint, ROMSInitialConditions]):
+class InitialConditionAdapter(ModelAdapter[UclaRomsBlueprint, ROMSInitialConditions]):
     """Create a ROMSInitialCondition from a blueprint model."""
 
     @t.override
@@ -147,7 +147,7 @@ class InitialConditionAdapter(ModelAdapter[RomsMarblBlueprint, ROMSInitialCondit
         )
 
 
-class TidalForcingAdapter(ModelAdapter[RomsMarblBlueprint, ROMSTidalForcing]):
+class TidalForcingAdapter(ModelAdapter[UclaRomsBlueprint, ROMSTidalForcing]):
     """Create a ROMSTidalForcing from a blueprint model."""
 
     @t.override
@@ -174,7 +174,7 @@ class TidalForcingAdapter(ModelAdapter[RomsMarblBlueprint, ROMSTidalForcing]):
         )
 
 
-class RiverForcingAdapter(ModelAdapter[RomsMarblBlueprint, ROMSRiverForcing]):
+class RiverForcingAdapter(ModelAdapter[UclaRomsBlueprint, ROMSRiverForcing]):
     """Create a ROMSRiverForcing from a blueprint model."""
 
     @t.override
@@ -203,7 +203,7 @@ class RiverForcingAdapter(ModelAdapter[RomsMarblBlueprint, ROMSRiverForcing]):
 
 
 class BoundaryForcingAdapter(
-    ModelAdapter[RomsMarblBlueprint, list[ROMSBoundaryForcing]]
+    ModelAdapter[UclaRomsBlueprint, list[ROMSBoundaryForcing]]
 ):
     """Create a ROMSBoundaryForcing from a blueprint model."""
 
@@ -226,7 +226,7 @@ class BoundaryForcingAdapter(
         ]
 
 
-class SurfaceForcingAdapter(ModelAdapter[RomsMarblBlueprint, list[ROMSSurfaceForcing]]):
+class SurfaceForcingAdapter(ModelAdapter[UclaRomsBlueprint, list[ROMSSurfaceForcing]]):
     """Create a ROMSSurfaceForcing from a blueprint model."""
 
     @t.override
@@ -248,7 +248,7 @@ class SurfaceForcingAdapter(ModelAdapter[RomsMarblBlueprint, list[ROMSSurfaceFor
         ]
 
 
-class CdrForcingAdapter(ModelAdapter[RomsMarblBlueprint, ROMSCdrForcing]):
+class CdrForcingAdapter(ModelAdapter[UclaRomsBlueprint, ROMSCdrForcing]):
     """Create a ROMSCdrForcing from a blueprint model."""
 
     @t.override
@@ -268,7 +268,7 @@ class CdrForcingAdapter(ModelAdapter[RomsMarblBlueprint, ROMSCdrForcing]):
         )
 
 
-class NestingInfoAdapter(ModelAdapter[RomsMarblBlueprint, ROMSNestingInfo]):
+class NestingInfoAdapter(ModelAdapter[UclaRomsBlueprint, ROMSNestingInfo]):
     """Create a ROMSNestingInfo from a blueprint model."""
 
     @t.override
@@ -289,7 +289,7 @@ class NestingInfoAdapter(ModelAdapter[RomsMarblBlueprint, ROMSNestingInfo]):
 
 
 class ForcingCorrectionAdapter(
-    ModelAdapter[RomsMarblBlueprint, list[ROMSForcingCorrections]]
+    ModelAdapter[UclaRomsBlueprint, list[ROMSForcingCorrections]]
 ):
     """Create a ROMSForcingCorrections from a blueprint model."""
 
@@ -315,7 +315,7 @@ class ForcingCorrectionAdapter(
 
 
 class CarbonateSensitivityAdapter(
-    ModelAdapter[RomsMarblBlueprint, list[ROMSCarbonateSensitivity]]
+    ModelAdapter[UclaRomsBlueprint, list[ROMSCarbonateSensitivity]]
 ):
     """Create a ROMSCarbonateSensitivity from a blueprint model."""
 

@@ -166,7 +166,7 @@ class ForgeRunner(BlueprintRunner[ForgeBlueprint]):
             return self.result
 
         self.log.debug(
-            f"Forge blueprint emitted: {executor.path_roms_marbl_blueprint()}"
+            f"Forge blueprint emitted: {executor.path_ucla_roms_blueprint()}"
         )
         # reporting never changes the outcome: the declared patterns still
         # list the files at shutdown, without the sidecar metadata
@@ -210,11 +210,11 @@ class ForgeApplication(ApplicationDefinition[ForgeBlueprint, ForgeRunner]):
         # Deferred: this package's import (registration) must stay light, and
         # these pull in roms_tools/xarray/dask.
         from cstar.applications.forge.input_data import netcdf_basename
-        from cstar.applications.roms_marbl.models import APP_NAME as ROMS_MARBL_APP
+        from cstar.applications.ucla_roms.models import APP_NAME as UCLA_ROMS_APP
 
         return EmittedBlueprint(
             filename=emitted_blueprint_filename(blueprint.name),
-            application=ROMS_MARBL_APP,
+            application=UCLA_ROMS_APP,
             producer=producer_ref(blueprint),
             cpus_needed=blueprint.n_procs,
             single_node=False,

@@ -71,7 +71,7 @@ class ForgeBlueprintExecutor(Protocol):
 
     def configure_build(self, *args: Any, **kwargs: Any) -> Any: ...
 
-    def path_roms_marbl_blueprint(self, *args: Any, **kwargs: Any) -> Any: ...
+    def path_ucla_roms_blueprint(self, *args: Any, **kwargs: Any) -> Any: ...
 
 
 # A factory maps a host-independent ForgeBlueprint + the injected host + a verbose flag to
@@ -155,7 +155,7 @@ GENERATION_DERIVED_LEAF_KEYS: dict[str, tuple[str, ...]] = {
 
 
 def sources_to_forcing_override(cfg: ForgeBlueprint) -> dict[str, Any]:
-    """Convert cfg.forcing to the forcing_override dict for RomsMarblInputData.
+    """Convert cfg.forcing to the forcing_override dict for RomsInputGenerator.
 
     Always returns a dict with a ``forcing`` key, mirroring the model.yaml inputs
     block. ``initial_conditions`` is included too unless ``cfg.forcing.initial_conditions``
@@ -390,7 +390,7 @@ def process_forge_blueprint(
     :func:`~cstar.applications.forge.blueprint.emitted_provenance`).
 
     Returns the executor (``ForgeExecutor`` by default), so callers can reach
-    ``.path_roms_marbl_blueprint()``.
+    ``.path_ucla_roms_blueprint()``.
 
     Parameters
     ----------
@@ -497,7 +497,7 @@ def process_forge_blueprint(
         raise TypeError(
             f"executor_factory returned {type(executor).__name__}, which does not "
             "implement the ForgeBlueprintExecutor interface (ensure_source_data / "
-            "generate_inputs / configure_build / path_roms_marbl_blueprint)."
+            "generate_inputs / configure_build / path_ucla_roms_blueprint)."
         )
 
     if ensure_data:

@@ -273,7 +273,7 @@ class PartitioningParameterSet(ParameterSet):
         return self
 
 
-class RomsMarblBlueprint(Blueprint):
+class UclaRomsBlueprint(Blueprint):
     """Blueprint schema for running a UCLA-ROMS simulation."""
 
     schema_version: str = "3.3.0"
@@ -346,7 +346,7 @@ class RomsMarblBlueprint(Blueprint):
     """
 
     @model_validator(mode="after")
-    def _model_validator(self) -> "RomsMarblBlueprint":
+    def _model_validator(self) -> "UclaRomsBlueprint":
         """Perform validation on the model after field-level validation is complete."""
         if self.valid_end_date <= self.valid_start_date:
             msg = "valid_start_date must precede valid_end_date"

@@ -6,8 +6,8 @@ import xarray as xr
 import yaml
 
 from cstar.roms.file_system import RomsFileSystemManager
-from cstar.applications.roms_marbl.models import RomsMarblBlueprint
-from cstar.applications.roms_marbl.resume import (
+from cstar.applications.ucla_roms.models import UclaRomsBlueprint
+from cstar.applications.ucla_roms.resume import (
     RESUME_SUFFIX,
     find_resume_restart,
     prepare_resume_blueprint,
@@ -15,8 +15,8 @@ from cstar.applications.roms_marbl.resume import (
 from cstar.base.exceptions import CstarExpectationFailed
 from cstar.orchestration.serialization import deserialize
 
-RESUME_LOGGER_NAME = "cstar.applications.roms_marbl.resume"
-"""The logger name used by `cstar.applications.roms_marbl.resume`."""
+RESUME_LOGGER_NAME = "cstar.applications.ucla_roms.resume"
+"""The logger name used by `cstar.applications.ucla_roms.resume`."""
 
 
 def _write_netcdf(path: Path) -> None:
@@ -146,7 +146,7 @@ class TestFindResumeRestart:
 
 @pytest.fixture
 def bp_factory(tmp_path: Path, bp_templates_dir: Path) -> Callable[..., Path]:
-    """Return a factory that writes a roms_marbl blueprint YAML file to disk.
+    """Return a factory that writes a ucla_roms blueprint YAML file to disk.
 
     Parameters
     ----------
@@ -196,7 +196,7 @@ class TestPrepareResumeBlueprint:
         bp_path = bp_factory(use_pio=False, n_procs_x=2, n_procs_y=3)
         before = bp_path.read_bytes()
 
-        bp = deserialize(bp_path, RomsMarblBlueprint)
+        bp = deserialize(bp_path, UclaRomsBlueprint)
         fs = RomsFileSystemManager(bp.effective_working_dir)
 
         ts = "20200601000000"
@@ -212,7 +212,7 @@ class TestPrepareResumeBlueprint:
         expected_out = fs.run_dir / f"{bp_path.stem}.{RESUME_SUFFIX}.yaml"
         assert Path(result) == expected_out
 
-        new_bp = deserialize(result, RomsMarblBlueprint)
+        new_bp = deserialize(result, UclaRomsBlueprint)
         ic = new_bp.initial_conditions.data[0]
         assert Path(str(ic.location)) == piece_paths[0].resolve()
         assert ic.partitioned is True
@@ -241,7 +241,7 @@ class TestPrepareResumeBlueprint:
         since the run appears to have already finished.
         """
         bp_path = bp_factory(use_pio=False, n_procs_x=2, n_procs_y=3)
-        bp = deserialize(bp_path, RomsMarblBlueprint)
+        bp = deserialize(bp_path, UclaRomsBlueprint)
         fs = RomsFileSystemManager(bp.effective_working_dir)
 
         ts = "20201201000000"  # == end_date
@@ -258,7 +258,7 @@ class TestPrepareResumeBlueprint:
         the resulting override is not marked as partitioned.
         """
         bp_path = bp_factory(use_pio=True)
-        bp = deserialize(bp_path, RomsMarblBlueprint)
+        bp = deserialize(bp_path, UclaRomsBlueprint)
         fs = RomsFileSystemManager(bp.effective_working_dir)
 
         ts = "20200601000000"
@@ -267,7 +267,7 @@ class TestPrepareResumeBlueprint:
 
         result = prepare_resume_blueprint(str(bp_path))
 
-        new_bp = deserialize(result, RomsMarblBlueprint)
+        new_bp = deserialize(result, UclaRomsBlueprint)
         ic = new_bp.initial_conditions.data[0]
         assert Path(str(ic.location)) == whole_path.resolve()
         assert ic.partitioned is False
@@ -285,11 +285,11 @@ class TestPrepareResumeBlueprint:
         nested_bp_path.parent.mkdir()
         nested_bp_path.write_text(yaml.safe_dump(data))
 
-        bp = deserialize(bp_path, RomsMarblBlueprint)
+        bp = deserialize(bp_path, UclaRomsBlueprint)
         fs = RomsFileSystemManager(bp.effective_working_dir)
         _write_netcdf(fs.output_dir / _whole_name("20200601000000"))
 
         result = prepare_resume_blueprint(str(nested_bp_path))
 
-        new_bp = deserialize(result, RomsMarblBlueprint)
+        new_bp = deserialize(result, UclaRomsBlueprint)
         assert str(new_bp.grid.data[0].location) == str(tmp_path / "relative_grid.nc")

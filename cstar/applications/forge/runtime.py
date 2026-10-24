@@ -224,7 +224,7 @@ def publish_emitted_blueprint(executor: ForgeBlueprintExecutor) -> Path:
     Path
         The published blueprint path.
     """
-    src = Path(executor.path_roms_marbl_blueprint())
+    src = Path(executor.path_ucla_roms_blueprint())
     out_dir = JobFileSystemManager(src.parent.parent).output_dir
     out_dir.mkdir(parents=True, exist_ok=True)
     dest = out_dir / src.name

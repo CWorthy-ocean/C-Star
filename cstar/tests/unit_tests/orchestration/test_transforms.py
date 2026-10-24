@@ -15,7 +15,7 @@ from pydantic import ValidationError
 from cstar.applications.core import ArtifactKind
 from cstar.applications.hello_world import HelloWorldBlueprint
 from cstar.roms.file_system import RomsFileSystemManager
-from cstar.applications.roms_marbl.models import RomsMarblBlueprint
+from cstar.applications.ucla_roms.models import UclaRomsBlueprint
 from cstar.roms.outputs import (
     EXTRACT_ROLE,
     BoundaryFile,
@@ -25,18 +25,18 @@ from cstar.roms.outputs import (
     restart_timestamp,
     warn_on_restart_start_date_mismatch,
 )
-from cstar.applications.roms_marbl.transforms import (
+from cstar.applications.ucla_roms.transforms import (
     SOURCE_DELIMITER,
     CarbonateSensitivityDirective,
     CarbonateSensitivityTrxAdapter,
     ContinuanceDirective,
     NestingDirective,
     RestartFileTrxAdapter,
-    RomsMarblTimeSplitter,
+    RomsTimeSplitter,
     _split_sources,
     step_output_files,
 )
-from cstar.applications.roms_marbl.transforms import (
+from cstar.applications.ucla_roms.transforms import (
     log as transforms_log,
 )
 from cstar.base.env import ENV_CSTAR_PROJECT_HOME, ENV_CSTAR_RUNID, FLAG_OFF
@@ -114,8 +114,8 @@ from cstar.orchestration.transforms import (
 )
 from cstar.tests.unit_tests.orchestration.manifest_runs import write_identity
 
-TRANSFORMS_LOGGER_NAME = "cstar.applications.roms_marbl.transforms"
-"""The logger name used by `cstar.applications.roms_marbl.transforms`."""
+TRANSFORMS_LOGGER_NAME = "cstar.applications.ucla_roms.transforms"
+"""The logger name used by `cstar.applications.ucla_roms.transforms`."""
 
 
 @pytest.fixture(autouse=True)
@@ -231,12 +231,12 @@ def test_get_transforms() -> None:
 
     with mock.patch.dict(
         "cstar.orchestration.transforms.TRANSFORMS",
-        {Application.UCLA_ROMS.value: [RomsMarblTimeSplitter()]},
+        {Application.UCLA_ROMS.value: [RomsTimeSplitter()]},
         clear=True,
     ):
         transforms = get_transforms(Application.UCLA_ROMS.value)
 
-    assert any(isinstance(tx, RomsMarblTimeSplitter) for tx in transforms)
+    assert any(isinstance(tx, RomsTimeSplitter) for tx in transforms)
 
 
 def test_get_transforms_empty() -> None:
@@ -247,7 +247,7 @@ def test_get_transforms_empty() -> None:
         transforms = get_transforms(Application.UCLA_ROMS.value)
 
     assert not any(isinstance(tx, OverrideTransform) for tx in transforms)
-    assert not any(isinstance(tx, RomsMarblTimeSplitter) for tx in transforms)
+    assert not any(isinstance(tx, RomsTimeSplitter) for tx in transforms)
 
 
 def test_override_transform(
@@ -281,8 +281,8 @@ def test_override_transform(
     # confirm a new blueprint was created.
     assert Path(step.blueprint_path) != Path(transformed.blueprint_path)
 
-    bp_old = deserialize(step.blueprint_path, RomsMarblBlueprint)
-    bp_new = deserialize(transformed.blueprint_path, RomsMarblBlueprint)
+    bp_old = deserialize(step.blueprint_path, UclaRomsBlueprint)
+    bp_new = deserialize(transformed.blueprint_path, UclaRomsBlueprint)
 
     # confirm nested attributes (bp.runtime_params.xxx)) is changed
     assert bp_old.effective_working_dir == dir_orig.expanduser().resolve()
@@ -337,7 +337,7 @@ def test_override_transform_anchors_relative_locations(
     transformed = next(iter(OverrideTransform()(step)))
 
     assert Path(transformed.blueprint_path).parent != bp_dir
-    bp_new = deserialize(transformed.blueprint_path, RomsMarblBlueprint)
+    bp_new = deserialize(transformed.blueprint_path, UclaRomsBlueprint)
     assert str(bp_new.forcing.boundary.data[0].location) == str(
         tmp_path / "data" / "boundary.nc"
     )
@@ -377,8 +377,8 @@ def test_override_transform_system_precedence(
     # confirm a new blueprint was created.
     assert Path(step.blueprint_path) != Path(transformed.blueprint_path)
 
-    bp_old = deserialize(step.blueprint_path, RomsMarblBlueprint)
-    bp_new = deserialize(transformed.blueprint_path, RomsMarblBlueprint)
+    bp_old = deserialize(step.blueprint_path, UclaRomsBlueprint)
+    bp_new = deserialize(transformed.blueprint_path, UclaRomsBlueprint)
 
     # confirm that even though a working directory override was applied, the
     # system level override was applied last.
@@ -406,7 +406,7 @@ def test_override_transform_system_list_replaces_wholesale(
     user_working_dir = tmp_path / "user_override"
     step.blueprint_overrides["working_dir"] = user_working_dir.as_posix()
 
-    bp_before = deserialize(step.blueprint_path, RomsMarblBlueprint)
+    bp_before = deserialize(step.blueprint_path, UclaRomsBlueprint)
     assert len(bp_before.forcing.boundary.data) == 3
 
     location = "http://mockdoc.com/x_bry.20230201003000.nc"
@@ -420,7 +420,7 @@ def test_override_transform_system_list_replaces_wholesale(
     )
 
     steps = transform(step)
-    bp_after = deserialize(steps[0].blueprint_path, RomsMarblBlueprint)
+    bp_after = deserialize(steps[0].blueprint_path, UclaRomsBlueprint)
 
     assert len(bp_after.forcing.boundary.data) == 1
     assert bp_after.forcing.boundary.data[0].location == location
@@ -456,7 +456,7 @@ def test_override_transform_system_list_without_flag_merges_elementwise(
     )
 
     steps = transform(step)
-    bp_after = deserialize(steps[0].blueprint_path, RomsMarblBlueprint)
+    bp_after = deserialize(steps[0].blueprint_path, UclaRomsBlueprint)
     data = bp_after.forcing.boundary.data
 
     assert len(data) == 3
@@ -486,7 +486,7 @@ def test_override_transform_user_list_merges_elementwise(
     transform = OverrideTransform()
     steps = transform(step)
 
-    bp_after = deserialize(steps[0].blueprint_path, RomsMarblBlueprint)
+    bp_after = deserialize(steps[0].blueprint_path, UclaRomsBlueprint)
     data = bp_after.forcing.boundary.data
 
     assert len(data) == 3
@@ -582,7 +582,7 @@ async def test_continuance_directive_step_resolution(
             prior_fsm = RomsFileSystemManager(prior_step.fsm.root_dir)
             expected_dir = prior_fsm.output_dir
 
-            bp = deserialize(altered.blueprint_path, RomsMarblBlueprint)
+            bp = deserialize(altered.blueprint_path, UclaRomsBlueprint)
             location = Path(bp.initial_conditions.data[0].location)
             assert location.is_relative_to(expected_dir)
             assert location.name == expected_name
@@ -705,8 +705,8 @@ def test_continuance_directive_extra_unknown_key_rejected(
 
 
 @pytest.fixture
-def roms_marbl_step(tmp_path: Path, hello_world_bp_path: Path) -> LiveStep:
-    """A minimal `roms_marbl` LiveStep to validate directive configs against.
+def ucla_roms_step(tmp_path: Path, hello_world_bp_path: Path) -> LiveStep:
+    """A minimal `ucla_roms` LiveStep to validate directive configs against.
 
     Schedule-time directive validation never reads the step's blueprint, so the
     hello-world blueprint file only has to exist.
@@ -742,7 +742,7 @@ def roms_marbl_step(tmp_path: Path, hello_world_bp_path: Path) -> LiveStep:
     ],
 )
 def test_continuance_directive_timestamp_accepted_forms(
-    value: t.Any, roms_marbl_step: LiveStep
+    value: t.Any, ucla_roms_step: LiveStep
 ) -> None:
     """Verify every form YAML can deliver for a `timestamp` parses to the same
     instant, a date alone meaning midnight, and passes schedule-time validation.
@@ -751,7 +751,7 @@ def test_continuance_directive_timestamp_accepted_forms(
     ----------
     value : t.Any
         The `timestamp` value as it would arrive from the workplan.
-    roms_marbl_step : LiveStep
+    ucla_roms_step : LiveStep
         A minimal step to validate the directive config against.
     """
     assert ContinuanceDirective._parse_timestamp(value) == datetime(2012, 1, 15)
@@ -760,7 +760,7 @@ def test_continuance_directive_timestamp_accepted_forms(
         ContinuanceDirective.KEY_PATH: "x",
         ContinuanceDirective.KEY_TIMESTAMP: value,
     }
-    assert not ContinuanceDirective.validate_directives(config, roms_marbl_step)
+    assert not ContinuanceDirective.validate_directives(config, ucla_roms_step)
 
 
 @pytest.mark.parametrize(
@@ -776,7 +776,7 @@ def test_continuance_directive_timestamp_accepted_forms(
     ],
 )
 def test_continuance_directive_timestamp_rejected_values(
-    value: t.Any, reason: str, roms_marbl_step: LiveStep
+    value: t.Any, reason: str, ucla_roms_step: LiveStep
 ) -> None:
     """Verify a malformed `timestamp` is reported once at schedule time rather
     than completed, guessed at, or read as "latest".
@@ -787,7 +787,7 @@ def test_continuance_directive_timestamp_rejected_values(
         The malformed `timestamp` value.
     reason : str
         A fragment of the message expected for this kind of malformation.
-    roms_marbl_step : LiveStep
+    ucla_roms_step : LiveStep
         A minimal step to validate the directive config against.
     """
     config = {
@@ -795,7 +795,7 @@ def test_continuance_directive_timestamp_rejected_values(
         ContinuanceDirective.KEY_TIMESTAMP: value,
     }
 
-    problems = ContinuanceDirective.validate_directives(config, roms_marbl_step)
+    problems = ContinuanceDirective.validate_directives(config, ucla_roms_step)
 
     assert len(problems) == 1
     assert ContinuanceDirective.KEY_TIMESTAMP in problems[0]
@@ -803,33 +803,33 @@ def test_continuance_directive_timestamp_rejected_values(
 
 
 def test_continuance_directive_timestamp_without_source_rejected(
-    roms_marbl_step: LiveStep,
+    ucla_roms_step: LiveStep,
 ) -> None:
     """Verify `timestamp` without a `step` or `path` source is rejected with a
     message naming the missing source.
 
     Parameters
     ----------
-    roms_marbl_step : LiveStep
+    ucla_roms_step : LiveStep
         A minimal step to validate the directive config against.
     """
     config = {ContinuanceDirective.KEY_TIMESTAMP: "2012-01-15"}
 
-    problems = ContinuanceDirective.validate_directives(config, roms_marbl_step)
+    problems = ContinuanceDirective.validate_directives(config, ucla_roms_step)
 
     assert len(problems) == 1
     assert "also supply" in problems[0]
 
 
 def test_continuance_directive_timestamp_with_unknown_key_rejected(
-    roms_marbl_step: LiveStep,
+    ucla_roms_step: LiveStep,
 ) -> None:
     """Verify an unrecognized key alongside `path` and `timestamp` gets the
     generic message, listing the supported and provided keys in sorted order.
 
     Parameters
     ----------
-    roms_marbl_step : LiveStep
+    ucla_roms_step : LiveStep
         A minimal step to validate the directive config against.
     """
     config = {
@@ -838,7 +838,7 @@ def test_continuance_directive_timestamp_with_unknown_key_rejected(
         "bogus": 1,
     }
 
-    problems = ContinuanceDirective.validate_directives(config, roms_marbl_step)
+    problems = ContinuanceDirective.validate_directives(config, ucla_roms_step)
 
     assert len(problems) == 1
     assert "supported configuration: path, step, timestamp" in problems[0]
@@ -895,8 +895,8 @@ def test_continuance_directive_happy_path(
 
     transformed = steps[0]
 
-    bp_old = deserialize(step.blueprint_path, RomsMarblBlueprint)
-    bp_new = deserialize(transformed.blueprint_path, RomsMarblBlueprint)
+    bp_old = deserialize(step.blueprint_path, UclaRomsBlueprint)
+    bp_new = deserialize(transformed.blueprint_path, UclaRomsBlueprint)
 
     # confirm the old blueprint has a different initial conditions location
     assert str(continue_from_dir) not in str(bp_old.initial_conditions.data[0].location)
@@ -967,7 +967,7 @@ def test_continuance_directive_warns_on_explicit_start_date_mismatch(
     assert explicit_start in records[0].getMessage()
     assert str(expected_ts) in records[0].getMessage()
 
-    bp_after = deserialize(steps[0].blueprint_path, RomsMarblBlueprint)
+    bp_after = deserialize(steps[0].blueprint_path, UclaRomsBlueprint)
     assert bp_after.runtime_params.start_date == expected_ts
 
 
@@ -1001,7 +1001,7 @@ def test_continuance_directive_no_warning_without_explicit_start_date(
     step = single_step_workplan.steps[0]
     step.blueprint_overrides.clear()
 
-    bp_before = deserialize(step.blueprint_path, RomsMarblBlueprint)
+    bp_before = deserialize(step.blueprint_path, UclaRomsBlueprint)
     assert bp_before.runtime_params.start_date != datetime(2012, 1, 1, 0, 20, 0)
     assert ApplyOverridesDirective.key() not in step.directives
 
@@ -1073,14 +1073,14 @@ def test_nesting_directive_path_only_sets_boundary_only(
     step = single_step_workplan.steps[0]
     step.blueprint_overrides.clear()
 
-    bp_before = deserialize(step.blueprint_path, RomsMarblBlueprint)
+    bp_before = deserialize(step.blueprint_path, UclaRomsBlueprint)
 
     transform = NestingDirective({NestingDirective.KEY_PATH: str(bry_dir)})
     assert set(transform._system_overrides) == {"forcing"}
 
     steps = transform(step)
 
-    bp_after = deserialize(steps[0].blueprint_path, RomsMarblBlueprint)
+    bp_after = deserialize(steps[0].blueprint_path, UclaRomsBlueprint)
     assert Path(bp_after.forcing.boundary.data[0].location).name == (
         "parent_bry.20230201003000.nc"
     )
@@ -1155,13 +1155,13 @@ async def test_nesting_directive_step_resolution(
     modifier = NestingDirective(config, workplan=live_plan)
     altered = modifier(step)[0]
 
-    bp_after = deserialize(altered.blueprint_path, RomsMarblBlueprint)
+    bp_after = deserialize(altered.blueprint_path, UclaRomsBlueprint)
     location = Path(bp_after.forcing.boundary.data[0].location)
     assert location.is_relative_to(expected_dir)
     assert location.name == expected_name
 
 
-async def test_continuance_directive_resolves_step_output_for_non_roms_marbl_source(
+async def test_continuance_directive_resolves_step_output_for_non_ucla_roms_source(
     tmp_path: Path,
     bp_templates_dir: Path,
     hello_world_bp_path: Path,
@@ -1169,8 +1169,8 @@ async def test_continuance_directive_resolves_step_output_for_non_roms_marbl_sou
 ) -> None:
     """Verify `continue-from: {step: <name>}` resolves a restart-style file
     produced under a referenced step's `output` directory even when that
-    step's own blueprint is not a `RomsMarblBlueprint`, mirroring the
-    tutorial's nest_ic-conversion-step -> ROMS-MARBL-child migration path.
+    step's own blueprint is not a `UclaRomsBlueprint`, mirroring the
+    tutorial's nest_ic-conversion-step -> UCLA-ROMS-child migration path.
 
     Parameters
     ----------
@@ -1223,7 +1223,7 @@ async def test_continuance_directive_resolves_step_output_for_non_roms_marbl_sou
     modifier = ContinuanceDirective(config, workplan=live_plan)
     altered = modifier(child_step)[0]
 
-    bp_after = deserialize(altered.blueprint_path, RomsMarblBlueprint)
+    bp_after = deserialize(altered.blueprint_path, UclaRomsBlueprint)
     location = Path(bp_after.initial_conditions.data[0].location)
     assert location == ic_file.resolve()
 
@@ -1527,7 +1527,7 @@ def test_continuance_directive_step_timestamp_selects_restart(
     )
     altered = ContinuanceDirective(config, workplan=live_plan)(child_step)[0]
 
-    bp_after = deserialize(altered.blueprint_path, RomsMarblBlueprint)
+    bp_after = deserialize(altered.blueprint_path, UclaRomsBlueprint)
     location = Path(bp_after.initial_conditions.data[0].location)
     assert location == (parent_output / expected_name).resolve()
     assert bp_after.runtime_params.start_date == expected_start
@@ -1683,7 +1683,7 @@ def test_continuance_directive_step_reads_the_producers_record(
     )
     altered = ContinuanceDirective(config, workplan=live_plan)(child_step)[0]
 
-    bp_after = deserialize(altered.blueprint_path, RomsMarblBlueprint)
+    bp_after = deserialize(altered.blueprint_path, UclaRomsBlueprint)
     location = Path(bp_after.initial_conditions.data[0].location)
     assert location == (parent_output / expected_name).resolve()
 
@@ -1842,7 +1842,7 @@ def test_continuance_directive_step_reads_recorded_initial_conditions(
     )
     altered = ContinuanceDirective(config, workplan=live_plan)(child_step)[0]
 
-    bp_after = deserialize(altered.blueprint_path, RomsMarblBlueprint)
+    bp_after = deserialize(altered.blueprint_path, UclaRomsBlueprint)
     location = Path(bp_after.initial_conditions.data[0].location)
     assert location == (parent_output / expected_name).resolve()
 
@@ -1882,7 +1882,7 @@ def test_continuance_directive_step_without_recorded_products_searches_output(
     with caplog.at_level(logging.DEBUG, logger=TRANSFORMS_LOGGER_NAME):
         altered = ContinuanceDirective(config, workplan=live_plan)(child_step)[0]
 
-    bp_after = deserialize(altered.blueprint_path, RomsMarblBlueprint)
+    bp_after = deserialize(altered.blueprint_path, UclaRomsBlueprint)
     location = Path(bp_after.initial_conditions.data[0].location)
     assert location == (parent_output / "output_rst.20120201000000.nc").resolve()
     assert any(
@@ -1971,7 +1971,7 @@ def test_continuance_directive_step_pruned_older_restarts_are_not_needed(
 
     altered = ContinuanceDirective(config, workplan=live_plan)(child_step)[0]
 
-    bp_after = deserialize(altered.blueprint_path, RomsMarblBlueprint)
+    bp_after = deserialize(altered.blueprint_path, UclaRomsBlueprint)
     location = Path(bp_after.initial_conditions.data[0].location)
     assert location == (parent_output / latest).resolve()
 
@@ -2203,7 +2203,7 @@ def test_nesting_directive_path_allows_partitioned(
     transform = NestingDirective({NestingDirective.KEY_PATH: str(bry_dir)})
     steps = transform(step)
 
-    bp_after = deserialize(steps[0].blueprint_path, RomsMarblBlueprint)
+    bp_after = deserialize(steps[0].blueprint_path, UclaRomsBlueprint)
     assert Path(bp_after.forcing.boundary.data[0].location).name == (
         "parent_bry.20230201003000.000.nc"
     )
@@ -2236,7 +2236,7 @@ def test_nesting_directive_bry_path_deprecated_matches_path(
 
     path_transform = NestingDirective({NestingDirective.KEY_PATH: str(bry_dir)})
     bp_via_path = deserialize(
-        path_transform(step)[0].blueprint_path, RomsMarblBlueprint
+        path_transform(step)[0].blueprint_path, UclaRomsBlueprint
     )
 
     with (
@@ -2248,7 +2248,7 @@ def test_nesting_directive_bry_path_deprecated_matches_path(
     records = [r for r in caplog.records if r.name == TRANSFORMS_LOGGER_NAME]
     assert any("bry_path" in r.getMessage() for r in records)
 
-    bp_via_bry = deserialize(bry_transform(step)[0].blueprint_path, RomsMarblBlueprint)
+    bp_via_bry = deserialize(bry_transform(step)[0].blueprint_path, UclaRomsBlueprint)
 
     assert bp_via_bry.forcing.boundary == bp_via_path.forcing.boundary
 
@@ -2299,7 +2299,7 @@ def test_nesting_directive_rst_path_deprecated_still_applies_restart(
     assert any("rst_path" in r.getMessage() for r in records)
 
     steps = transform(step)
-    bp_after = deserialize(steps[0].blueprint_path, RomsMarblBlueprint)
+    bp_after = deserialize(steps[0].blueprint_path, UclaRomsBlueprint)
 
     assert bp_after.runtime_params.start_date == datetime(2012, 1, 1, 0, 20, 0)
     assert Path(bp_after.forcing.boundary.data[0].location).name == (
@@ -2466,7 +2466,7 @@ def test_nesting_directive_multiple_paths(
     transform = NestingDirective({NestingDirective.KEY_PATH: f"{dir_a} ; {dir_b}"})
     steps = transform(step)
 
-    bp_after = deserialize(steps[0].blueprint_path, RomsMarblBlueprint)
+    bp_after = deserialize(steps[0].blueprint_path, UclaRomsBlueprint)
     assert [Path(d.location).name for d in bp_after.forcing.boundary.data] == [
         "parent_bry.20230201003000.nc",
         "sibling_bry.20230301003000.nc",
@@ -2500,7 +2500,7 @@ def test_nesting_directive_path_names_a_single_file(
     transform = NestingDirective({NestingDirective.KEY_PATH: str(chosen)})
     steps = transform(step)
 
-    bp_after = deserialize(steps[0].blueprint_path, RomsMarblBlueprint)
+    bp_after = deserialize(steps[0].blueprint_path, UclaRomsBlueprint)
     assert [Path(d.location) for d in bp_after.forcing.boundary.data] == [
         chosen.resolve()
     ]
@@ -2534,7 +2534,7 @@ def test_nesting_directive_path_mixes_directory_and_file(
     transform = NestingDirective({NestingDirective.KEY_PATH: f"{file_b} ; {dir_a}"})
     steps = transform(step)
 
-    bp_after = deserialize(steps[0].blueprint_path, RomsMarblBlueprint)
+    bp_after = deserialize(steps[0].blueprint_path, UclaRomsBlueprint)
     assert [Path(d.location).name for d in bp_after.forcing.boundary.data] == [
         "sibling_bry.20230301003000.nc",
         "parent_bry.20230201003000.nc",
@@ -2629,7 +2629,7 @@ def test_nesting_directive_multiple_steps(
     transform = NestingDirective(config, workplan=live_plan)
     steps = transform(child_step)
 
-    bp_after = deserialize(steps[0].blueprint_path, RomsMarblBlueprint)
+    bp_after = deserialize(steps[0].blueprint_path, UclaRomsBlueprint)
     data = bp_after.forcing.boundary.data
     assert len(data) == 2
     assert Path(data[0].location).is_relative_to(first_fsm.output_dir)
@@ -2645,7 +2645,7 @@ def _plan_with_parent_outputs(
     config: Mapping[str, t.Any],
 ) -> tuple[LiveWorkplan, LiveStep, dict[str, RomsFileSystemManager]]:
     """Build parent steps holding files in their `output` directories and a
-    `roms_marbl` child step carrying a `directive`.
+    `ucla_roms` child step carrying a `directive`.
 
     Parameters
     ----------
@@ -2769,7 +2769,7 @@ def test_nesting_directive_step_reads_recorded_child_boundaries(
 
     altered = NestingDirective(config, workplan=plan)(child)[0]
 
-    bp_after = deserialize(altered.blueprint_path, RomsMarblBlueprint)
+    bp_after = deserialize(altered.blueprint_path, UclaRomsBlueprint)
     assert [Path(d.location) for d in bp_after.forcing.boundary.data] == [
         output / name for name in expected_names
     ]
@@ -2868,7 +2868,7 @@ def test_nesting_directive_duplicate_paths_deduplicated(
     transform = NestingDirective({NestingDirective.KEY_PATH: f"{bry_dir}; {bry_dir}"})
     steps = transform(step)
 
-    bp_after = deserialize(steps[0].blueprint_path, RomsMarblBlueprint)
+    bp_after = deserialize(steps[0].blueprint_path, UclaRomsBlueprint)
     assert len(bp_after.forcing.boundary.data) == 1
 
 
@@ -2909,7 +2909,7 @@ def test_nesting_directive_bry_path_multiple_paths(
         )
 
     steps = transform(step)
-    bp_after = deserialize(steps[0].blueprint_path, RomsMarblBlueprint)
+    bp_after = deserialize(steps[0].blueprint_path, UclaRomsBlueprint)
     assert len(bp_after.forcing.boundary.data) == 2
 
 
@@ -3190,7 +3190,7 @@ def test_carbonate_sensitivity_directive_path_sets_forcing_only(
     step = single_step_workplan.steps[0]
     step.blueprint_overrides.clear()
 
-    bp_before = deserialize(step.blueprint_path, RomsMarblBlueprint)
+    bp_before = deserialize(step.blueprint_path, UclaRomsBlueprint)
     assert bp_before.forcing.carbonate_sensitivity is None
 
     transform = CarbonateSensitivityDirective(
@@ -3200,7 +3200,7 @@ def test_carbonate_sensitivity_directive_path_sets_forcing_only(
 
     steps = transform(step)
 
-    bp_after = deserialize(steps[0].blueprint_path, RomsMarblBlueprint)
+    bp_after = deserialize(steps[0].blueprint_path, UclaRomsBlueprint)
     assert bp_after.forcing.carbonate_sensitivity is not None
     data = bp_after.forcing.carbonate_sensitivity.data
     assert [Path(d.location).name for d in data] == [
@@ -3240,7 +3240,7 @@ def test_carbonate_sensitivity_directive_path_whole_file(
     )
     steps = transform(step)
 
-    bp_after = deserialize(steps[0].blueprint_path, RomsMarblBlueprint)
+    bp_after = deserialize(steps[0].blueprint_path, UclaRomsBlueprint)
     assert bp_after.forcing.carbonate_sensitivity is not None
     data = bp_after.forcing.carbonate_sensitivity.data
     assert [Path(d.location).name for d in data] == ["parent_cdrgas.20230201003000.nc"]
@@ -3277,7 +3277,7 @@ def test_carbonate_sensitivity_directive_multiple_paths(
     )
     steps = transform(step)
 
-    bp_after = deserialize(steps[0].blueprint_path, RomsMarblBlueprint)
+    bp_after = deserialize(steps[0].blueprint_path, UclaRomsBlueprint)
     assert bp_after.forcing.carbonate_sensitivity is not None
     assert [
         Path(d.location).name for d in bp_after.forcing.carbonate_sensitivity.data
@@ -3312,7 +3312,7 @@ def test_carbonate_sensitivity_directive_path_names_a_single_file(
     )
     steps = transform(step)
 
-    bp_after = deserialize(steps[0].blueprint_path, RomsMarblBlueprint)
+    bp_after = deserialize(steps[0].blueprint_path, UclaRomsBlueprint)
     assert bp_after.forcing.carbonate_sensitivity is not None
     data = bp_after.forcing.carbonate_sensitivity.data
     assert [Path(d.location) for d in data] == [chosen.resolve()]
@@ -3349,7 +3349,7 @@ def test_carbonate_sensitivity_directive_path_mixes_directory_and_file(
     )
     steps = transform(step)
 
-    bp_after = deserialize(steps[0].blueprint_path, RomsMarblBlueprint)
+    bp_after = deserialize(steps[0].blueprint_path, UclaRomsBlueprint)
     assert bp_after.forcing.carbonate_sensitivity is not None
     assert [
         Path(d.location).name for d in bp_after.forcing.carbonate_sensitivity.data
@@ -3386,7 +3386,7 @@ def _plan_with_cdrgas_parents(
     config: Mapping[str, t.Any],
 ) -> tuple[LiveWorkplan, LiveStep, dict[str, RomsFileSystemManager]]:
     """Build parent steps holding files in their `output` directories and a
-    `roms_marbl` child step carrying a `carbonate-sensitivity-from` directive.
+    `ucla_roms` child step carrying a `carbonate-sensitivity-from` directive.
 
     Parameters
     ----------
@@ -3478,7 +3478,7 @@ def test_carbonate_sensitivity_directive_step_source(
     transform = CarbonateSensitivityDirective(config, workplan=plan)
     altered = transform(child)[0]
 
-    bp_after = deserialize(altered.blueprint_path, RomsMarblBlueprint)
+    bp_after = deserialize(altered.blueprint_path, UclaRomsBlueprint)
     assert bp_after.forcing.carbonate_sensitivity is not None
     data = bp_after.forcing.carbonate_sensitivity.data
     assert len(data) == 1
@@ -3529,7 +3529,7 @@ def test_carbonate_sensitivity_directive_step_reads_recorded_gas_exchange(
 
     altered = CarbonateSensitivityDirective(config, workplan=plan)(child)[0]
 
-    bp_after = deserialize(altered.blueprint_path, RomsMarblBlueprint)
+    bp_after = deserialize(altered.blueprint_path, UclaRomsBlueprint)
     assert bp_after.forcing.carbonate_sensitivity is not None
     data = bp_after.forcing.carbonate_sensitivity.data
     assert [Path(d.location) for d in data] == [
@@ -3620,7 +3620,7 @@ def test_carbonate_sensitivity_directive_multiple_steps(
     transform = CarbonateSensitivityDirective(config, workplan=plan)
     altered = transform(child)[0]
 
-    bp_after = deserialize(altered.blueprint_path, RomsMarblBlueprint)
+    bp_after = deserialize(altered.blueprint_path, UclaRomsBlueprint)
     assert bp_after.forcing.carbonate_sensitivity is not None
     data = bp_after.forcing.carbonate_sensitivity.data
     assert len(data) == 2
@@ -3774,7 +3774,7 @@ def test_carbonate_sensitivity_directive_step_requires_workplan() -> None:
 def test_carbonate_sensitivity_directive_config_problems(
     config: dict[str, str | None],
     expected: str,
-    roms_marbl_step: LiveStep,
+    ucla_roms_step: LiveStep,
 ) -> None:
     """Verify a malformed configuration is reported at schedule time by
     `validate_directives` and refused when the directive is constructed.
@@ -3785,11 +3785,11 @@ def test_carbonate_sensitivity_directive_config_problems(
         The directive configuration.
     expected : str
         Text the (single) problem must contain.
-    roms_marbl_step : LiveStep
-        A `roms_marbl` step to validate the config against.
+    ucla_roms_step : LiveStep
+        A `ucla_roms` step to validate the config against.
     """
     problems = CarbonateSensitivityDirective.validate_directives(
-        config, roms_marbl_step
+        config, ucla_roms_step
     )
 
     assert len(problems) == 1
@@ -3882,7 +3882,7 @@ def test_workplan_transformer_applies_working_dir_overrides(
     wp_transformer = WorkplanTransformer(step_overiding_wp)
     original_bp_path = Path(step_overiding_wp.steps[0].blueprint_path)
     step_orig: Step = step_overiding_wp.steps[0]
-    bp_orig = deserialize(step_orig.blueprint_path, RomsMarblBlueprint)
+    bp_orig = deserialize(step_orig.blueprint_path, UclaRomsBlueprint)
     mock_overrides = {"working_dir": sys_working_dir_override}
 
     with (
@@ -4135,7 +4135,7 @@ def test_collect_directive_problems_roms_directive_on_hello_world_step(
     tmp_path: Path,
     hello_world_bp_path: Path,
 ) -> None:
-    """Verify a `roms_marbl` directive (`nest-from`) on a `hello_world` step
+    """Verify a `ucla_roms` directive (`nest-from`) on a `hello_world` step
     is reported as unknown -- `hello_world` does not declare it.
 
     Parameters
@@ -4502,7 +4502,7 @@ def test_continue_from_timestamp_survives_directive_file_round_trip(
     monkeypatch.delenv(ENV_CSTAR_RUNID, raising=False)
     result = DirectiveConfig.apply_directives(str(directive_path), str(bp_path))
 
-    bp_after = deserialize(Path(result), RomsMarblBlueprint)
+    bp_after = deserialize(Path(result), UclaRomsBlueprint)
     location = Path(bp_after.initial_conditions.data[0].location)
     assert location == (rst_dir / "output_rst.20120115000000.nc").resolve()
     assert bp_after.runtime_params.start_date == datetime(2012, 1, 15)
@@ -4550,7 +4550,7 @@ directives:
     result = DirectiveConfig.apply_directives(str(directive_path), str(bp_path))
 
     assert Path(result).parent != bp_dir
-    bp_after = deserialize(Path(result), RomsMarblBlueprint)
+    bp_after = deserialize(Path(result), UclaRomsBlueprint)
     assert str(bp_after.forcing.boundary.data[0].location) == str(
         tmp_path / "data" / "boundary.nc"
     )
@@ -5896,7 +5896,7 @@ def test_workplan_transformer_deferred_active_transform_raises(
     )
     wp = Workplan(
         name="deferred-workplan",
-        description="A workplan with a deferred roms-marbl blueprint.",
+        description="A workplan with a deferred ucla_roms blueprint.",
         steps=[producer, consumer],
     )
 
@@ -5907,7 +5907,7 @@ def test_workplan_transformer_deferred_active_transform_raises(
             _ = transformer.apply()
 
     assert "deferred" in str(error.value)
-    assert RomsMarblTimeSplitter.__name__ in str(error.value)
+    assert RomsTimeSplitter.__name__ in str(error.value)
 
 
 def test_workplan_transformer_deferred_inactive_transform_ok(
@@ -5915,7 +5915,7 @@ def test_workplan_transformer_deferred_inactive_transform_ok(
     test_bp_path: Path,
     bp_templates_dir: Path,
 ) -> None:
-    """Verify that a deferred roms-marbl step is permitted when the time
+    """Verify that a deferred ucla_roms step is permitted when the time
     splitter feature flag is disabled.
 
     Parameters
@@ -5942,7 +5942,7 @@ def test_workplan_transformer_deferred_inactive_transform_ok(
     )
     wp = Workplan(
         name="deferred-workplan",
-        description="A workplan with a deferred roms-marbl blueprint.",
+        description="A workplan with a deferred ucla_roms blueprint.",
         steps=[producer, consumer],
     )
 
@@ -6268,7 +6268,7 @@ def test_apply_overrides_directive_accepts_earlier_application_name(
     directive = ApplyOverridesDirective(config)
     transformed = directive(step)[0]
 
-    bp = deserialize(Path(transformed.blueprint_path), RomsMarblBlueprint)
+    bp = deserialize(Path(transformed.blueprint_path), UclaRomsBlueprint)
     assert bp.application == "ucla_roms"
     assert bp.partitioning.n_procs_x == 1
 
@@ -6324,7 +6324,7 @@ def test_apply_overrides_directive_user_list_merges_elementwise(
     directive = ApplyOverridesDirective(config)
     transformed = directive(packaged)[0]
 
-    bp_after = deserialize(Path(transformed.blueprint_path), RomsMarblBlueprint)
+    bp_after = deserialize(Path(transformed.blueprint_path), UclaRomsBlueprint)
     data = bp_after.forcing.boundary.data
 
     assert len(data) == 3
@@ -6887,7 +6887,7 @@ def test_workplan_transformer_inline_active_transform_raises() -> None:
     )
     wp = Workplan(
         name="inline-workplan",
-        description="A workplan with an inline roms-marbl blueprint.",
+        description="A workplan with an inline ucla_roms blueprint.",
         steps=[consumer],
     )
 
@@ -6896,7 +6896,7 @@ def test_workplan_transformer_inline_active_transform_raises() -> None:
             _ = WorkplanTransformer(wp).apply()
 
     assert "inline" in str(error.value)
-    assert RomsMarblTimeSplitter.__name__ in str(error.value)
+    assert RomsTimeSplitter.__name__ in str(error.value)
 
 
 def test_materialize_inline_blueprints(inline_workplan: Workplan) -> None:
@@ -8428,7 +8428,7 @@ def test_continuance_directive_step_from_external_run(
     config = t.cast("dict[str, str]", child.directives[ContinuanceDirective.key()])
     altered = ContinuanceDirective(config, workplan=plan)(child)[0]
 
-    bp_after = deserialize(altered.blueprint_path, RomsMarblBlueprint)
+    bp_after = deserialize(altered.blueprint_path, UclaRomsBlueprint)
     assert Path(bp_after.initial_conditions.data[0].location) == restart.resolve()
 
 
@@ -8486,7 +8486,7 @@ def test_nesting_directive_step_from_external_run(
     config = t.cast("dict[str, str]", child.directives[NestingDirective.key()])
     altered = NestingDirective(config, workplan=plan)(child)[0]
 
-    data = deserialize(altered.blueprint_path, RomsMarblBlueprint).forcing.boundary.data
+    data = deserialize(altered.blueprint_path, UclaRomsBlueprint).forcing.boundary.data
     assert len(data) == 2
     assert Path(data[0].location).is_relative_to(local_fsm.output_dir)
     assert Path(data[1].location).is_relative_to(external_out)

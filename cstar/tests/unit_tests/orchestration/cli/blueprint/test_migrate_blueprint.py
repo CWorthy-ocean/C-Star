@@ -15,7 +15,7 @@ from cstar.applications.plotter import APP_NAME as APP_PLOTTER
 from cstar.applications.plotter import (
     APP_PLOTTER_SCHEMA_1_0_0,
 )
-from cstar.applications.roms_marbl.app import APP_NAME as APP_ROMS
+from cstar.applications.ucla_roms.app import APP_NAME as APP_ROMS
 from cstar.base.env import (
     ENV_CSTAR_DISABLE_MIGRATION,
     ENV_CSTAR_STATE_HOME,

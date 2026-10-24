@@ -2405,7 +2405,7 @@ def create_mocked_simulation_outputs(
 def preprocessable_roms_step(
     mocked_simulation_outputs: tuple[Path, Path, Path],
 ) -> Step:
-    """Create a valid step with an underlying RomsMarblBlueprint.
+    """Create a valid step with an underlying UclaRomsBlueprint.
 
     Parameters
     ----------
@@ -2432,7 +2432,7 @@ def preprocessable_roms_livestep(
     preprocessable_roms_step: Step,
     mocked_simulation_outputs: tuple[Path, Path, Path],
 ) -> LiveStep:
-    """Create a valid step with an underlying RomsMarblBlueprint.
+    """Create a valid step with an underlying UclaRomsBlueprint.
 
     Parameters
     ----------

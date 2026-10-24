@@ -7,7 +7,7 @@ import pytest
 
 from cstar.applications.core import ArtifactKind, get_application
 from cstar.applications.forge.app import INPUT_ARTIFACTS, input_products
-from cstar.applications.roms_marbl.app import output_products
+from cstar.applications.ucla_roms.app import output_products
 from cstar.roms.outputs import OUTPUT_FILE_PATTERN, OUTPUT_STREAMS
 from cstar.orchestration.manifest import Product, expand_artifacts
 
@@ -27,7 +27,7 @@ def _expanded(app_name: str, root: Path, **fields: t.Any) -> dict[str, Product]:
     return {p.path: p for p in expand_artifacts(root, app.artifacts(bp))}
 
 
-class TestRomsMarblArtifacts:
+class TestUclaRomsArtifacts:
     def test_declares_each_file_the_run_leaves(self, tmp_path: Path) -> None:
         _touch(
             tmp_path,

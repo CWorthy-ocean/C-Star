@@ -137,9 +137,9 @@ _FORGE_FIELDS = {
 # ── intentional skip-lists ────────────────────────────────────────────────────
 # Params deliberately NOT typed into the Forge schema. Document the reason.
 _SKIP = {
-    # All rt classes: use_dask is hardcoded from RomsMarblInputData.use_dask.
+    # All rt classes: use_dask is hardcoded from RomsInputGenerator.use_dask.
     # serialize_dask: forge-only write flag (a `.save()` kwarg, not a
-    # constructor param of any class here) -- RomsMarblInputData.serialize_dask_write
+    # constructor param of any class here) -- RomsInputGenerator.serialize_dask_write
     # / BgcSourceItem.serialize_dask control it; never a user-facing rt option.
     "*": {"use_dask", "serialize_dask"},
     "InitialConditions": {
@@ -234,7 +234,7 @@ def test_bgc_marbl_process_bgc_fields_params_are_data_inputs():
     """``BGCMarbl.process_bgc_fields`` isn't a constructor (so it isn't covered by
     ``test_all_rt_params_are_exposed_or_skipped`` above) but is still user-facing
     roms-tools surface Forge drives (batched boundary/IC bgc completion + save --
-    see ``RomsMarblInputData._generate_boundary_forcing``/``_generate_initial_conditions``).
+    see ``RomsInputGenerator._generate_boundary_forcing``/``_generate_initial_conditions``).
     Both its params (``forcings``, the already-built objects; ``filepath``, output
     path(s)) are pure data/output-path inputs, not user-configurable Forge fields.
     """

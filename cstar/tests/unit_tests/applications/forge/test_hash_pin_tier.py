@@ -1,6 +1,6 @@
-"""A ucla-roms commit-hash pin selects the same namelist tier in Forge as in roms_marbl.
+"""A ucla-roms commit-hash pin selects the same namelist tier in Forge as in ucla_roms.
 
-roms_marbl resolves a commit hash to its nearest release tag in its clone and
+ucla_roms resolves a commit hash to its nearest release tag in its clone and
 reads Forge's namelist strictly, so Forge must write the namelist of that
 release's tier rather than the newest one.
 """
@@ -46,11 +46,11 @@ def _quiet_commit_ahead_warning():
 
 @pytest.mark.usefixtures("_quiet_commit_ahead_warning")
 @pytest.mark.parametrize(("hash_key", "expected"), _TIER_OF_HASH)
-def test_forge_selects_the_tier_roms_marbl_selects(
+def test_forge_selects_the_tier_ucla_roms_selects(
     tagged_ucla_roms_clone, hash_key, expected
 ):
     """Forge (no clone: the hash is resolved through the repository's location)
-    and roms_marbl (the full clone) pick the same namelist schema for a hash pin.
+    and ucla_roms (the full clone) pick the same namelist schema for a hash pin.
     """
     info = tagged_ucla_roms_clone
     pin = info[hash_key]
@@ -58,15 +58,15 @@ def test_forge_selects_the_tier_roms_marbl_selects(
     forge_cls = run_time_settings_for_ref(
         release_ref_for_remote(str(info["repo"]), pin)
     )
-    roms_marbl_cls = namelist_schema_for_ref(pin, repo_path=info["repo"])
+    ucla_roms_cls = namelist_schema_for_ref(pin, repo_path=info["repo"])
 
-    assert namelist_schema_for(forge_cls) is roms_marbl_cls
-    assert roms_marbl_cls is expected
+    assert namelist_schema_for(forge_cls) is ucla_roms_cls
+    assert ucla_roms_cls is expected
 
 
 def test_unresolved_hash_selects_the_newest_tier(tagged_ucla_roms_clone):
     """The bug: Forge, handed the raw hash, guesses the newest tier while
-    roms_marbl resolves the same hash to an older one.
+    ucla_roms resolves the same hash to an older one.
     """
     info = tagged_ucla_roms_clone
     with pytest.warns(UserWarning, match="not a release tag"):
@@ -81,10 +81,10 @@ def test_unresolved_hash_selects_the_newest_tier(tagged_ucla_roms_clone):
 
 @pytest.mark.usefixtures("_quiet_commit_ahead_warning")
 @pytest.mark.parametrize(("hash_key", "expected"), _TIER_OF_HASH)
-def test_forge_namelist_for_a_hash_pin_reads_in_roms_marbl(
+def test_forge_namelist_for_a_hash_pin_reads_in_ucla_roms(
     tagged_ucla_roms_clone, tmp_path, hash_key, expected
 ):
-    """The namelist Forge writes for a hash pin passes roms_marbl's strict read
+    """The namelist Forge writes for a hash pin passes ucla_roms's strict read
     of the schema it selects for that hash.
     """
     info = tagged_ucla_roms_clone
@@ -101,11 +101,11 @@ def test_forge_namelist_for_a_hash_pin_reads_in_roms_marbl(
     assert isinstance(schema.read(tmp_path / "namelist.nml"), expected)
 
 
-def test_forge_namelist_for_an_unresolved_hash_is_refused_by_roms_marbl(
+def test_forge_namelist_for_an_unresolved_hash_is_refused_by_ucla_roms(
     tagged_ucla_roms_clone, tmp_path
 ):
     """The bug end to end: the namelist Forge writes for the raw hash (newest
-    tier) fails roms_marbl's strict read of the older tier it selects.
+    tier) fails ucla_roms's strict read of the older tier it selects.
     """
     info = tagged_ucla_roms_clone
     pin = info["hash_0_4_2"]

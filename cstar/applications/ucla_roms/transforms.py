@@ -6,7 +6,7 @@ from pathlib import Path
 
 from cstar.applications.core import ArtifactKind, Transform
 from cstar.roms.file_system import RomsFileSystemManager
-from cstar.applications.roms_marbl.models import RomsMarblBlueprint
+from cstar.applications.ucla_roms.models import UclaRomsBlueprint
 from cstar.roms.outputs import (
     EXTRACT_ROLE,
     BoundaryFile,
@@ -52,8 +52,8 @@ if t.TYPE_CHECKING:
 log = get_logger(__name__)
 
 
-class RomsMarblTimeSplitter(Transform[LiveStep]):
-    """A step tranformation that splits a UCLA-ROMS simulation into
+class RomsTimeSplitter(Transform[LiveStep]):
+    """A step tranformation that splits a ROMS simulation into
     multiple sub-steps based on the timespan covered by the simulation.
     """
 
@@ -112,7 +112,7 @@ class RomsMarblTimeSplitter(Transform[LiveStep]):
         Sequence[LiveStep]
             Steps for each subtask resulting from the split.
         """
-        blueprint = t.cast("RomsMarblBlueprint", step.blueprint)
+        blueprint = t.cast("UclaRomsBlueprint", step.blueprint)
         start_date = blueprint.runtime_params.start_date
         end_date = blueprint.runtime_params.end_date
 
@@ -132,7 +132,7 @@ class RomsMarblTimeSplitter(Transform[LiveStep]):
 
         results: list[LiveStep] = []
         for i, (sd, ed) in enumerate(time_slices):
-            bp_copy = RomsMarblBlueprint(
+            bp_copy = UclaRomsBlueprint(
                 **blueprint.model_dump(
                     exclude_unset=True,
                     exclude_defaults=True,

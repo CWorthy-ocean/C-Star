@@ -153,7 +153,7 @@ OnMigratedCallback: t.TypeAlias = Callable[[MigrationPlan], None]
 
 
 class BlueprintMigration(Migration):
-    """A migration controller for RomsMarblBlueprints."""
+    """A migration controller for UclaRomsBlueprints."""
 
     adapters: list[type[SchemaAdapter]]
     """The adapters available to migrate the blueprint."""

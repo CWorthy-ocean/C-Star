@@ -463,7 +463,7 @@ def test_forge_blueprint_import_stays_light():
         "numba",
         "ipywidgets",
         "cstar.roms",
-        "cstar.applications.roms_marbl",
+        "cstar.applications.ucla_roms",
         "cstar.applications.forge.executor",
         "cstar.applications.forge.engine",
         "cstar.applications.forge.input_data",
@@ -2099,7 +2099,7 @@ def test_engine_warns_on_hash_mismatch(tmp_path):
         def configure_build(self, **k):
             self.calls.append("c")
 
-        def path_roms_marbl_blueprint(self):
+        def path_ucla_roms_blueprint(self):
             return "/bp"
 
     with pytest.warns(UserWarning, match="integrity check FAILED"):
@@ -3234,7 +3234,7 @@ def test_global_enum_representer_handles_safedumper_subclass():
 
 
 def test_forcing_override_used_by_input_data(tmp_path):
-    """When forcing_override is provided, RomsMarblInputData uses it instead of
+    """When forcing_override is provided, RomsInputGenerator uses it instead of
     model_spec.inputs — the input_list reflects the override, not the defaults.
     """
     from unittest.mock import MagicMock, patch
@@ -3262,13 +3262,13 @@ def test_forcing_override_used_by_input_data(tmp_path):
     # not read from model_spec.settings.properties — no need to set it on mock_spec.
 
     with patch.object(
-        id_mod.RomsMarblInputData,
+        id_mod.RomsInputGenerator,
         "__post_init__",
-        id_mod.RomsMarblInputData.__post_init__,
+        id_mod.RomsInputGenerator.__post_init__,
     ):
         # Just verify input_list is built from the override, not model_spec.inputs
         # Use a lightweight construction that skips heavy validation
-        obj = object.__new__(id_mod.RomsMarblInputData)
+        obj = object.__new__(id_mod.RomsInputGenerator)
         object.__setattr__(obj, "forcing_override", override)
         object.__setattr__(obj, "model_spec", mock_spec)
         object.__setattr__(obj, "cdr_forcing", None)
@@ -7619,7 +7619,7 @@ class _FakeBuilder:
     def configure_build(self, **k):
         self.calls.append(("configure", k))
 
-    def path_roms_marbl_blueprint(self):
+    def path_ucla_roms_blueprint(self):
         return "/bp.yaml"
 
 
@@ -8789,7 +8789,7 @@ def test_forge_application_emitted_blueprint(use_pio):
     assert emitted.end_date == cfg.run.end_date
     assert emitted.use_pio is use_pio
     assert emitted.use_pio == bool(cfg.model_settings["cppdefs"].get("use_pio"))
-    # Mirrors InputData._forcing_filename("grid"): {domain}_{grid}.nc
+    # Mirrors InputGenerator._forcing_filename("grid"): {domain}_{grid}.nc
     assert emitted.grid_filename == netcdf_basename(cfg.name, "grid")
     assert emitted.producer == producer_ref(cfg)
     assert emitted.producer.content_hash == cfg.content_hash()
@@ -8923,7 +8923,7 @@ class TestEmittedProvenance:
         provenance = emitted_provenance(cfg)
         after = datetime.now(UTC)
 
-        # the base Provenance: the emitted blueprint is a roms_marbl one
+        # the base Provenance: the emitted blueprint is a ucla_roms one
         assert type(provenance) is Provenance
         assert before <= provenance.generated_at <= after
         assert provenance.generated_by.tool == "forge"

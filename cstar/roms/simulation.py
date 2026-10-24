@@ -14,7 +14,7 @@ from typing import TYPE_CHECKING, Any, ClassVar, Optional, TypeVar, cast
 import yaml
 from pydantic import ValidationError
 
-from cstar.applications.roms_marbl.adapter import (
+from cstar.applications.ucla_roms.adapter import (
     AddtlCodeAdapter,
     BoundaryForcingAdapter,
     CarbonateSensitivityAdapter,
@@ -36,7 +36,7 @@ from cstar.roms.file_system import (
     ROMS_EXECUTABLE_NAME,
     RomsFileSystemManager,
 )
-from cstar.applications.roms_marbl.models import RomsMarblBlueprint
+from cstar.applications.ucla_roms.models import UclaRomsBlueprint
 from cstar.roms.outputs import EXTRACT_ROOT_NAME, OUTPUT_ROOT_NAME
 from cstar.base.additional_code import AdditionalCode
 from cstar.base.env import (
@@ -1364,9 +1364,9 @@ class ROMSSimulation(Simulation):
             # be relative to, so they are left as authored
             source = SourceData(location=blueprint)
             data = source.retriever.read()
-            bp = RomsMarblBlueprint.model_validate(yaml.safe_load(data.decode("utf-8")))
+            bp = UclaRomsBlueprint.model_validate(yaml.safe_load(data.decode("utf-8")))
         else:
-            bp = load_blueprint(blueprint, RomsMarblBlueprint)
+            bp = load_blueprint(blueprint, UclaRomsBlueprint)
 
         return cls(
             name=bp.name,

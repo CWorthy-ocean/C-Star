@@ -8,13 +8,13 @@ import yaml
 from pydantic import ValidationError
 
 import cstar
-from cstar.applications.roms_marbl.adapter import (
+from cstar.applications.ucla_roms.adapter import (
     CarbonateSensitivityAdapter,
     PIOAdapter,
 )
-from cstar.applications.roms_marbl.models import (
+from cstar.applications.ucla_roms.models import (
     PartitioningParameterSet,
-    RomsMarblBlueprint,
+    UclaRomsBlueprint,
     RuntimeParameterSet,
 )
 from cstar.orchestration.models import BlueprintIdentity, CatalogSpecRef, Provenance
@@ -35,7 +35,7 @@ class TestUsePIOSchema:
     def test_use_pio_defaults_false(self, complete_blueprint_dict):
         """Test that `partitioning.use_pio` defaults to False when absent."""
         complete_blueprint_dict["partitioning"].pop("use_pio", None)
-        bp = RomsMarblBlueprint.model_validate(complete_blueprint_dict)
+        bp = UclaRomsBlueprint.model_validate(complete_blueprint_dict)
         assert bp.partitioning.use_pio is False
         assert bp.code.pio is None
 
@@ -50,7 +50,7 @@ class TestUsePIOSchema:
             ValidationError,
             match="PIO is not enabled in the partitioning configuration",
         ):
-            RomsMarblBlueprint.model_validate(complete_blueprint_dict)
+            UclaRomsBlueprint.model_validate(complete_blueprint_dict)
 
     def test_code_pio_with_use_pio_validates(self, complete_blueprint_dict):
         """Test that `code.pio` together with `use_pio: true` validates."""
@@ -59,7 +59,7 @@ class TestUsePIOSchema:
             "branch": "pio2_7_0",
         }
         complete_blueprint_dict["partitioning"]["use_pio"] = True
-        bp = RomsMarblBlueprint.model_validate(complete_blueprint_dict)
+        bp = UclaRomsBlueprint.model_validate(complete_blueprint_dict)
         assert bp.partitioning.use_pio is True
         assert bp.code.pio is not None
         assert bp.code.pio.checkout_target == "pio2_7_0"
@@ -69,7 +69,7 @@ class TestUsePIOSchema:
         default ParallelIO source is used).
         """
         complete_blueprint_dict["partitioning"]["use_pio"] = True
-        bp = RomsMarblBlueprint.model_validate(complete_blueprint_dict)
+        bp = UclaRomsBlueprint.model_validate(complete_blueprint_dict)
         assert bp.partitioning.use_pio is True
         assert bp.code.pio is None
 
@@ -86,7 +86,7 @@ class TestPIOAdapter:
         blueprint has no `code.pio` section.
         """
         complete_blueprint_dict["partitioning"]["use_pio"] = True
-        bp = RomsMarblBlueprint.model_validate(complete_blueprint_dict)
+        bp = UclaRomsBlueprint.model_validate(complete_blueprint_dict)
 
         source_data = mocksourcedata_remote_repo(
             location="https://github.com/NCAR/ParallelIO.git", identifier="pio2_7_0"
@@ -113,7 +113,7 @@ class TestPIOAdapter:
             "commit": "abc1234",
         }
         complete_blueprint_dict["partitioning"]["use_pio"] = True
-        bp = RomsMarblBlueprint.model_validate(complete_blueprint_dict)
+        bp = UclaRomsBlueprint.model_validate(complete_blueprint_dict)
 
         source_data = mocksourcedata_remote_repo(
             location="https://github.com/my-fork/ParallelIO.git",
@@ -132,12 +132,12 @@ class TestPIOAdapter:
 
 
 class TestNamelistOverrides:
-    """Tests for the `namelist_overrides` field on `RomsMarblBlueprint`."""
+    """Tests for the `namelist_overrides` field on `UclaRomsBlueprint`."""
 
     def test_defaults_to_empty_dict(self, complete_blueprint_dict):
         """Test that `namelist_overrides` defaults to `{}` when absent."""
         complete_blueprint_dict.pop("namelist_overrides", None)
-        bp = RomsMarblBlueprint.model_validate(complete_blueprint_dict)
+        bp = UclaRomsBlueprint.model_validate(complete_blueprint_dict)
         assert bp.namelist_overrides == {}
 
     def test_accepts_nested_partial_mapping(self, complete_blueprint_dict):
@@ -146,7 +146,7 @@ class TestNamelistOverrides:
             "time_stepping": {"dt": 30},
             "param_settings": {"np_xi": 3},
         }
-        bp = RomsMarblBlueprint.model_validate(complete_blueprint_dict)
+        bp = UclaRomsBlueprint.model_validate(complete_blueprint_dict)
         assert bp.namelist_overrides == {
             "time_stepping": {"dt": 30},
             "param_settings": {"np_xi": 3},
@@ -156,7 +156,7 @@ class TestNamelistOverrides:
         """Test that the removed `model_params` field is rejected as extra."""
         complete_blueprint_dict["model_params"] = {"time_step": 60}
         with pytest.raises(ValidationError, match="model_params"):
-            RomsMarblBlueprint.model_validate(complete_blueprint_dict)
+            UclaRomsBlueprint.model_validate(complete_blueprint_dict)
 
     def test_unknown_names_rejected_for_pinned_release(self, complete_blueprint_dict):
         """Test that unknown groups/keys are an error when `code.roms` pins a
@@ -168,7 +168,7 @@ class TestNamelistOverrides:
             "time_stepping": {"not_a_key": 1},
         }
         with pytest.raises(ValidationError, match="not_a_group.*not_a_key"):
-            RomsMarblBlueprint.model_validate(complete_blueprint_dict)
+            UclaRomsBlueprint.model_validate(complete_blueprint_dict)
 
     def test_version_specific_key_checked_against_pinned_schema(
         self, complete_blueprint_dict
@@ -182,10 +182,10 @@ class TestNamelistOverrides:
 
         complete_blueprint_dict["code"]["roms"]["branch"] = "v0.5.0"
         with pytest.raises(ValidationError, match="nrpf_rst"):
-            RomsMarblBlueprint.model_validate(complete_blueprint_dict)
+            UclaRomsBlueprint.model_validate(complete_blueprint_dict)
 
         complete_blueprint_dict["code"]["roms"]["branch"] = "v0.4.9"
-        bp = RomsMarblBlueprint.model_validate(complete_blueprint_dict)
+        bp = UclaRomsBlueprint.model_validate(complete_blueprint_dict)
         assert bp.namelist_overrides["basic_output_settings"]["nrpf_rst"] == 1
 
     def test_unknown_names_warn_for_unpinned_ref(self, complete_blueprint_dict):
@@ -194,7 +194,7 @@ class TestNamelistOverrides:
         """
         complete_blueprint_dict["namelist_overrides"] = {"not_a_group": {"dt": 1}}
         with pytest.warns(UserWarning, match="not_a_group"):
-            bp = RomsMarblBlueprint.model_validate(complete_blueprint_dict)
+            bp = UclaRomsBlueprint.model_validate(complete_blueprint_dict)
         assert bp.namelist_overrides == {"not_a_group": {"dt": 1}}
 
     def test_valid_names_no_warning_for_unpinned_ref(self, complete_blueprint_dict):
@@ -202,7 +202,7 @@ class TestNamelistOverrides:
         complete_blueprint_dict["namelist_overrides"] = {"time_stepping": {"dt": 30.0}}
         with warnings.catch_warnings():
             warnings.simplefilter("error")
-            RomsMarblBlueprint.model_validate(complete_blueprint_dict)
+            UclaRomsBlueprint.model_validate(complete_blueprint_dict)
 
     def test_np_xi_conflict_rejected_even_unpinned(self, complete_blueprint_dict):
         """Test that a `param_settings.np_xi`/`np_eta` conflict with
@@ -215,7 +215,7 @@ class TestNamelistOverrides:
         with pytest.raises(
             ValidationError, match="conflicts with the blueprint partitioning"
         ):
-            RomsMarblBlueprint.model_validate(complete_blueprint_dict)
+            UclaRomsBlueprint.model_validate(complete_blueprint_dict)
 
     def test_np_xi_matching_value_accepted(self, complete_blueprint_dict):
         """Test that `np_xi`/`np_eta` overrides matching `partitioning` pass."""
@@ -224,7 +224,7 @@ class TestNamelistOverrides:
                 "np_xi": complete_blueprint_dict["partitioning"]["n_procs_x"]
             }
         }
-        RomsMarblBlueprint.model_validate(complete_blueprint_dict)
+        UclaRomsBlueprint.model_validate(complete_blueprint_dict)
 
     def test_pio_settings_override_valid_for_unpinned_ref(
         self, complete_blueprint_dict
@@ -239,7 +239,7 @@ class TestNamelistOverrides:
         }
         with warnings.catch_warnings():
             warnings.simplefilter("error")
-            bp = RomsMarblBlueprint.model_validate(complete_blueprint_dict)
+            bp = UclaRomsBlueprint.model_validate(complete_blueprint_dict)
         assert bp.namelist_overrides == {"pio_settings": {"pio_stride": 4}}
 
     def test_pio_settings_override_rejected_for_0_5_0_pin(
@@ -253,7 +253,7 @@ class TestNamelistOverrides:
             "pio_settings": {"pio_stride": 4}
         }
         with pytest.raises(ValidationError, match="pio_settings"):
-            RomsMarblBlueprint.model_validate(complete_blueprint_dict)
+            UclaRomsBlueprint.model_validate(complete_blueprint_dict)
 
     def test_cdr_lite_output_settings_override_valid_for_unpinned_ref(
         self, complete_blueprint_dict
@@ -268,7 +268,7 @@ class TestNamelistOverrides:
         }
         with warnings.catch_warnings():
             warnings.simplefilter("error")
-            bp = RomsMarblBlueprint.model_validate(complete_blueprint_dict)
+            bp = UclaRomsBlueprint.model_validate(complete_blueprint_dict)
         assert bp.namelist_overrides == {"cdr_lite_output_settings": {"wrt_alk": False}}
 
     def test_cdr_tracer_output_settings_override_warns_for_unpinned_ref(
@@ -282,7 +282,7 @@ class TestNamelistOverrides:
             "cdr_tracer_output_settings": {"wrt_alk": False}
         }
         with pytest.warns(UserWarning, match="cdr_tracer_output_settings"):
-            RomsMarblBlueprint.model_validate(complete_blueprint_dict)
+            UclaRomsBlueprint.model_validate(complete_blueprint_dict)
 
     def test_cdr_tracer_output_settings_override_valid_for_0_8_0_pin(
         self, complete_blueprint_dict
@@ -296,7 +296,7 @@ class TestNamelistOverrides:
         complete_blueprint_dict["namelist_overrides"] = {
             "cdr_tracer_output_settings": {"wrt_alk": False}
         }
-        bp = RomsMarblBlueprint.model_validate(complete_blueprint_dict)
+        bp = UclaRomsBlueprint.model_validate(complete_blueprint_dict)
         assert bp.namelist_overrides == {
             "cdr_tracer_output_settings": {"wrt_alk": False}
         }
@@ -305,7 +305,7 @@ class TestNamelistOverrides:
             "cdr_lite_output_settings": {"wrt_alk": False}
         }
         with pytest.raises(ValidationError, match="cdr_lite_output_settings"):
-            RomsMarblBlueprint.model_validate(complete_blueprint_dict)
+            UclaRomsBlueprint.model_validate(complete_blueprint_dict)
 
     def test_cdr_tracer_output_settings_override_rejected_for_0_9_0_pin(
         self, complete_blueprint_dict
@@ -319,7 +319,7 @@ class TestNamelistOverrides:
             "cdr_tracer_output_settings": {"wrt_alk": False}
         }
         with pytest.raises(ValidationError, match="cdr_tracer_output_settings"):
-            RomsMarblBlueprint.model_validate(complete_blueprint_dict)
+            UclaRomsBlueprint.model_validate(complete_blueprint_dict)
 
     def test_cdr_tracer_output_settings_override_rejected_for_0_6_1_pin(
         self, complete_blueprint_dict
@@ -333,7 +333,7 @@ class TestNamelistOverrides:
             "cdr_tracer_output_settings": {"wrt_alk": False}
         }
         with pytest.raises(ValidationError, match="cdr_tracer_output_settings"):
-            RomsMarblBlueprint.model_validate(complete_blueprint_dict)
+            UclaRomsBlueprint.model_validate(complete_blueprint_dict)
 
 
 class TestPartitioningParameterSet:
@@ -422,11 +422,11 @@ class TestPartitioningParameterSet:
 
 
 class TestCpusNeeded:
-    """Tests for the `cpus_needed` property on `RomsMarblBlueprint`."""
+    """Tests for the `cpus_needed` property on `UclaRomsBlueprint`."""
 
     def test_returns_product_of_procs_by_default(self, complete_blueprint_dict):
         """Test that `cpus_needed` returns `n_procs_x * n_procs_y` by default."""
-        bp = RomsMarblBlueprint.model_validate(complete_blueprint_dict)
+        bp = UclaRomsBlueprint.model_validate(complete_blueprint_dict)
         assert bp.cpus_needed == (bp.partitioning.n_procs_x * bp.partitioning.n_procs_y)
 
     def test_returns_n_cores_when_set(self, complete_blueprint_dict):
@@ -436,17 +436,17 @@ class TestCpusNeeded:
             "auto_tiling": True,
             "n_cores": 16,
         }
-        bp = RomsMarblBlueprint.model_validate(complete_blueprint_dict)
+        bp = UclaRomsBlueprint.model_validate(complete_blueprint_dict)
         assert bp.cpus_needed == 16
 
 
 class TestProvenance:
-    """Tests for the `provenance` block `RomsMarblBlueprint` inherits."""
+    """Tests for the `provenance` block `UclaRomsBlueprint` inherits."""
 
     def test_defaults_to_empty(self, complete_blueprint_dict):
         """Test that a blueprint without a `provenance` block validates."""
         assert "provenance" not in complete_blueprint_dict
-        bp = RomsMarblBlueprint.model_validate(complete_blueprint_dict)
+        bp = UclaRomsBlueprint.model_validate(complete_blueprint_dict)
         assert bp.provenance == Provenance()
 
     def test_validates_with_a_provenance_block(self, complete_blueprint_dict):
@@ -465,7 +465,7 @@ class TestProvenance:
                 {"kind": "DomainSpec", "name": "wio-toy", "origin": "catalog"},
             ],
         }
-        bp = RomsMarblBlueprint.model_validate(complete_blueprint_dict)
+        bp = UclaRomsBlueprint.model_validate(complete_blueprint_dict)
 
         assert bp.provenance.generated_by.tool == "forge"
         assert bp.provenance.generated_by.id == "3f9c2a7e-5b1d-4c8e-9a0f-1d2e3f4a5b6c"
@@ -478,7 +478,7 @@ class TestProvenance:
         """Test that `provenance` accepts only the fields it declares."""
         complete_blueprint_dict["provenance"] = {"notes": "anything"}
         with pytest.raises(ValidationError, match="notes"):
-            RomsMarblBlueprint.model_validate(complete_blueprint_dict)
+            UclaRomsBlueprint.model_validate(complete_blueprint_dict)
 
 
 @pytest.mark.parametrize(
@@ -504,7 +504,7 @@ def test_schema_header_names_a_published_schema(
         "application": application,
         "schema_version": schema_version,
     }
-    bp = RomsMarblBlueprint.model_validate(complete_blueprint_dict)
+    bp = UclaRomsBlueprint.model_validate(complete_blueprint_dict)
 
     header = bp.model_dump(mode="json")["$schema"]
 
@@ -533,21 +533,21 @@ class TestCarbonateSensitivity:
 
     def test_schema_version(self):
         """Adding the optional field was a minor bump of the schema, now at 3.3.0."""
-        assert RomsMarblBlueprint.model_fields["schema_version"].default == "3.3.0"
+        assert UclaRomsBlueprint.model_fields["schema_version"].default == "3.3.0"
 
     def test_defaults_to_none(self, complete_blueprint_dict):
         """A blueprint without the field validates, with no sensitivity forcing."""
         assert "carbonate_sensitivity" not in complete_blueprint_dict["forcing"]
-        bp = RomsMarblBlueprint.model_validate(complete_blueprint_dict)
+        bp = UclaRomsBlueprint.model_validate(complete_blueprint_dict)
         assert bp.forcing.carbonate_sensitivity is None
 
     def test_round_trips(self, with_sensitivity):
         """The field survives serialization to YAML and validation back."""
-        bp = RomsMarblBlueprint.model_validate(with_sensitivity)
+        bp = UclaRomsBlueprint.model_validate(with_sensitivity)
         assert bp.forcing.carbonate_sensitivity is not None
         assert len(bp.forcing.carbonate_sensitivity) == 2
 
-        reloaded = RomsMarblBlueprint.model_validate(yaml.safe_load(model_to_yaml(bp)))
+        reloaded = UclaRomsBlueprint.model_validate(yaml.safe_load(model_to_yaml(bp)))
 
         assert (
             reloaded.forcing.carbonate_sensitivity == bp.forcing.carbonate_sensitivity
@@ -557,11 +557,11 @@ class TestCarbonateSensitivity:
         """The forcing block stays strict: only declared keys are accepted."""
         complete_blueprint_dict["forcing"]["carbonate_sensitivities"] = {"data": []}
         with pytest.raises(ValidationError, match="carbonate_sensitivities"):
-            RomsMarblBlueprint.model_validate(complete_blueprint_dict)
+            UclaRomsBlueprint.model_validate(complete_blueprint_dict)
 
     def test_adapter_returns_none_when_absent(self, complete_blueprint_dict):
         """No `forcing.carbonate_sensitivity`, no datasets (not an empty list)."""
-        bp = RomsMarblBlueprint.model_validate(complete_blueprint_dict)
+        bp = UclaRomsBlueprint.model_validate(complete_blueprint_dict)
         assert CarbonateSensitivityAdapter(bp).adapt() is None
 
     def test_adapter_builds_one_dataset_per_entry(self, with_sensitivity):
@@ -569,11 +569,11 @@ class TestCarbonateSensitivity:
         entry takes the blueprint's processor grid as its source partitioning,
         and a hash is passed through only when the entry has one.
         """
-        bp = RomsMarblBlueprint.model_validate(with_sensitivity)
+        bp = UclaRomsBlueprint.model_validate(with_sensitivity)
         n_x, n_y = bp.partitioning.n_procs_x, bp.partitioning.n_procs_y
 
         with mock.patch(
-            "cstar.applications.roms_marbl.adapter.ROMSCarbonateSensitivity"
+            "cstar.applications.ucla_roms.adapter.ROMSCarbonateSensitivity"
         ) as mock_dataset:
             datasets = CarbonateSensitivityAdapter(bp).adapt()
 

@@ -15,14 +15,14 @@ from cstar.applications.plotter import (
     APP_PLOTTER_SCHEMA_1_0_0,
     PlotterSchemaAdapterV1V2,
 )
-from cstar.applications.roms_marbl.app import APP_NAME as APP_ROMS
-from cstar.applications.roms_marbl.migration import (
-    APP_ROMS_MARBL_SCHEMA_1_0_0,
-    APP_ROMS_MARBL_SCHEMA_2_1_0,
-    APP_ROMS_MARBL_SCHEMA_3_0_0,
-    RomsMarblSchemaAdapter2025v1,
-    RomsMarblSchemaAdapterV2V21,
-    RomsMarblSchemaAdapterV21V3,
+from cstar.applications.ucla_roms.app import APP_NAME as APP_ROMS
+from cstar.applications.ucla_roms.migration import (
+    APP_UCLA_ROMS_SCHEMA_1_0_0,
+    APP_UCLA_ROMS_SCHEMA_2_1_0,
+    APP_UCLA_ROMS_SCHEMA_3_0_0,
+    UclaRomsSchemaAdapter2025v1,
+    UclaRomsSchemaAdapterV2V21,
+    UclaRomsSchemaAdapterV21V3,
 )
 from cstar.base.adapter import SchemaAdapter, SchemaBreak
 from cstar.cli.common import get_migrator
@@ -41,14 +41,14 @@ APP_NAME: t.Final[str] = "fake_app"
 """Application name used by the in-file fake adapters."""
 
 ROMS_ADAPTERS: t.Final[list[type[SchemaAdapter]]] = [
-    RomsMarblSchemaAdapter2025v1,
-    RomsMarblSchemaAdapterV2V21,
-    RomsMarblSchemaAdapterV21V3,
+    UclaRomsSchemaAdapter2025v1,
+    UclaRomsSchemaAdapterV2V21,
+    UclaRomsSchemaAdapterV21V3,
 ]
-"""The real roms_marbl adapter chain."""
+"""The real ucla_roms adapter chain."""
 
 ROMS_TARGET: t.Final[str] = "3.1.0"
-"""A build version one minor ahead of the last roms_marbl adapter target."""
+"""A build version one minor ahead of the last ucla_roms adapter target."""
 
 
 def _fake_adapter(
@@ -74,18 +74,18 @@ def _fake_adapter(
     [
         pytest.param(
             {KEY_APP: APP_ROMS},
-            APP_ROMS_MARBL_SCHEMA_3_0_0,
-            APP_ROMS_MARBL_SCHEMA_3_0_0,
+            APP_UCLA_ROMS_SCHEMA_3_0_0,
+            APP_UCLA_ROMS_SCHEMA_3_0_0,
             id="rm::app-only",
         ),
         pytest.param(
-            {KEY_APP: APP_ROMS, KEY_SV: APP_ROMS_MARBL_SCHEMA_1_0_0},
-            APP_ROMS_MARBL_SCHEMA_3_0_0,
-            APP_ROMS_MARBL_SCHEMA_3_0_0,
+            {KEY_APP: APP_ROMS, KEY_SV: APP_UCLA_ROMS_SCHEMA_1_0_0},
+            APP_UCLA_ROMS_SCHEMA_3_0_0,
+            APP_UCLA_ROMS_SCHEMA_3_0_0,
             id="rm::with source schema",
         ),
         pytest.param(
-            {KEY_APP: APP_ROMS, KEY_SV: APP_ROMS_MARBL_SCHEMA_1_0_0},
+            {KEY_APP: APP_ROMS, KEY_SV: APP_UCLA_ROMS_SCHEMA_1_0_0},
             ROMS_TARGET,
             ROMS_TARGET,
             id="rm::stamped with the build version",
@@ -118,17 +118,17 @@ def test_migrate_v21_to_v3_moves_time_step_and_use_pio() -> None:
     """
     model = {
         KEY_APP: APP_ROMS,
-        KEY_SV: APP_ROMS_MARBL_SCHEMA_2_1_0,
+        KEY_SV: APP_UCLA_ROMS_SCHEMA_2_1_0,
         "model_params": {"time_step": 360, "use_pio": True},
         "partitioning": {"n_procs_x": 2, "n_procs_y": 2},
     }
 
-    adapted = RomsMarblSchemaAdapterV21V3(model).adapt()
+    adapted = UclaRomsSchemaAdapterV21V3(model).adapt()
 
     assert adapted["namelist_overrides"]["time_stepping"]["dt"] == 360
     assert adapted["partitioning"]["use_pio"] is True
     assert "model_params" not in adapted
-    assert adapted[KEY_SV] == APP_ROMS_MARBL_SCHEMA_3_0_0
+    assert adapted[KEY_SV] == APP_UCLA_ROMS_SCHEMA_3_0_0
 
     # source model is not mutated
     assert model["model_params"] == {"time_step": 360, "use_pio": True}
@@ -138,16 +138,16 @@ def test_migrate_v21_to_v3_without_model_params_passes_through() -> None:
     """Verify a model with no `model_params` migrates cleanly."""
     model = {
         KEY_APP: APP_ROMS,
-        KEY_SV: APP_ROMS_MARBL_SCHEMA_2_1_0,
+        KEY_SV: APP_UCLA_ROMS_SCHEMA_2_1_0,
         "partitioning": {"n_procs_x": 2, "n_procs_y": 2},
     }
 
-    adapted = RomsMarblSchemaAdapterV21V3(model).adapt()
+    adapted = UclaRomsSchemaAdapterV21V3(model).adapt()
 
     assert "model_params" not in adapted
     assert "namelist_overrides" not in adapted
     assert adapted["partitioning"] == {"n_procs_x": 2, "n_procs_y": 2}
-    assert adapted[KEY_SV] == APP_ROMS_MARBL_SCHEMA_3_0_0
+    assert adapted[KEY_SV] == APP_UCLA_ROMS_SCHEMA_3_0_0
 
 
 def test_migrate_v21_to_v3_existing_namelist_override_wins() -> None:
@@ -156,12 +156,12 @@ def test_migrate_v21_to_v3_existing_namelist_override_wins() -> None:
     """
     model = {
         KEY_APP: APP_ROMS,
-        KEY_SV: APP_ROMS_MARBL_SCHEMA_2_1_0,
+        KEY_SV: APP_UCLA_ROMS_SCHEMA_2_1_0,
         "model_params": {"time_step": 360},
         "namelist_overrides": {"time_stepping": {"dt": 999}},
     }
 
-    adapted = RomsMarblSchemaAdapterV21V3(model).adapt()
+    adapted = UclaRomsSchemaAdapterV21V3(model).adapt()
 
     assert adapted["namelist_overrides"]["time_stepping"]["dt"] == 999
 
@@ -238,7 +238,7 @@ def test_plan_missing_version_is_1_0_0() -> None:
         pytest.param("2.2.0", ROMS_ADAPTERS[2:], id="2.2.0 uses the 2.1.0 adapter"),
     ],
 )
-def test_plan_roms_marbl_chain(
+def test_plan_ucla_roms_chain(
     found: str, exp_adapters: list[type[SchemaAdapter]]
 ) -> None:
     """Verify older-major documents walk the adapters by major version."""
@@ -533,13 +533,13 @@ def test_plan_earlier_application_name_walks_the_adapters() -> None:
     """
     migrator = get_migrator("roms_marbl")
     target = get_application(APP_ROMS).schema_version
-    dumped = {KEY_APP: "roms_marbl", KEY_SV: APP_ROMS_MARBL_SCHEMA_1_0_0}
+    dumped = {KEY_APP: "roms_marbl", KEY_SV: APP_UCLA_ROMS_SCHEMA_1_0_0}
 
     plan = migrator.plan(dumped)
     result = migrator.migrate(dumped, plan)
 
     assert list(plan.adapters) == ROMS_ADAPTERS
-    assert (plan.source, plan.target) == (APP_ROMS_MARBL_SCHEMA_1_0_0, target)
+    assert (plan.source, plan.target) == (APP_UCLA_ROMS_SCHEMA_1_0_0, target)
     assert result.original[KEY_APP] == "roms_marbl"
     assert result.migrated[KEY_APP] == APP_ROMS
     assert result.migrated[KEY_SV] == target

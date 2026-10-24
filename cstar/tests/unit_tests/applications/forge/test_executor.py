@@ -8,9 +8,9 @@ The executor is now config/authoring-free: it is constructed the canonical way v
 
 Tests cover:
 - ForgeExecutor initialization and validation
-- Properties (name, input_data_dir, roms_marbl_blueprint_dir, path_roms_marbl_blueprint, datasets)
+- Properties (name, input_data_dir, ucla_roms_blueprint_dir, path_ucla_roms_blueprint, datasets)
 - Model post-init behavior
-- Blueprint persist / path_roms_marbl_blueprint
+- Blueprint persist / path_ucla_roms_blueprint
 - get_ds method
 - ensure_source_data
 - generate_inputs
@@ -39,7 +39,7 @@ import xarray as xr
 import yaml
 from pydantic import ValidationError
 
-import cstar.applications.roms_marbl.models as cstar_models
+import cstar.applications.ucla_roms.models as cstar_models
 import cstar.catalog
 from cstar.applications.core import RunnerRequest
 from cstar.applications.forge import models as forge_models
@@ -410,18 +410,18 @@ class TestForgeExecutorProperties:
         builder = _make_builder(minimal_cstar_spec_builder_args)
         assert builder.input_data_dir == builder.host.working_dir / "input_data"
 
-    def test_roms_marbl_blueprint_dir_property(self, minimal_cstar_spec_builder_args):
-        """Test the roms_marbl_blueprint_dir property (under host.working_dir)."""
+    def test_ucla_roms_blueprint_dir_property(self, minimal_cstar_spec_builder_args):
+        """Test the ucla_roms_blueprint_dir property (under host.working_dir)."""
         builder = _make_builder(minimal_cstar_spec_builder_args)
         assert (
-            builder.roms_marbl_blueprint_dir == builder.host.working_dir / "blueprints"
+            builder.ucla_roms_blueprint_dir == builder.host.working_dir / "blueprints"
         )
 
-    def test_path_roms_marbl_blueprint_method(self, minimal_cstar_spec_builder_args):
-        """Test the path_roms_marbl_blueprint method (host-based)."""
+    def test_path_ucla_roms_blueprint_method(self, minimal_cstar_spec_builder_args):
+        """Test the path_ucla_roms_blueprint method (host-based)."""
         builder = _make_builder(minimal_cstar_spec_builder_args)
-        expected_path = builder.roms_marbl_blueprint_dir / f"B_{builder.name}.yaml"
-        assert builder.path_roms_marbl_blueprint() == expected_path
+        expected_path = builder.ucla_roms_blueprint_dir / f"B_{builder.name}.yaml"
+        assert builder.path_ucla_roms_blueprint() == expected_path
 
     def test_datasets_property_auto_populates(
         self, minimal_cstar_spec_builder_args, tmp_path
@@ -436,10 +436,10 @@ class TestForgeExecutorProperties:
         builder = _make_builder(minimal_cstar_spec_builder_args)
 
         # Set blueprint with data
-        builder.roms_marbl_blueprint.grid = cstar_models.Dataset(
+        builder.ucla_roms_blueprint.grid = cstar_models.Dataset(
             data=[Resource(location=str(grid_file), partitioned=False)]
         )
-        builder.roms_marbl_blueprint.initial_conditions = cstar_models.Dataset(
+        builder.ucla_roms_blueprint.initial_conditions = cstar_models.Dataset(
             data=[Resource(location=str(ic_file), partitioned=False)]
         )
 
@@ -457,15 +457,15 @@ class TestForgeExecutorProperties:
 class TestForgeExecutorModelPostInit:
     """Tests for model_post_init behavior."""
 
-    def test_model_post_init_initializes_roms_marbl_blueprint(
+    def test_model_post_init_initializes_ucla_roms_blueprint(
         self, minimal_cstar_spec_builder_args
     ):
         """Test that model_post_init initializes the blueprint."""
         builder = _make_builder(minimal_cstar_spec_builder_args)
 
-        assert builder.roms_marbl_blueprint is not None
-        assert isinstance(builder.roms_marbl_blueprint, cstar_models.RomsMarblBlueprint)
-        assert builder.roms_marbl_blueprint.name == builder.name
+        assert builder.ucla_roms_blueprint is not None
+        assert isinstance(builder.ucla_roms_blueprint, cstar_models.UclaRomsBlueprint)
+        assert builder.ucla_roms_blueprint.name == builder.name
 
     def test_model_post_init_creates_grid(
         self, minimal_cstar_spec_builder_args, mock_grid
@@ -579,17 +579,17 @@ class TestForgeExecutorModelPostInit:
     def test_model_post_init_does_not_persist(self, minimal_cstar_spec_builder_args):
         """model_post_init only builds the in-memory blueprint; the executor now
         persists exactly once, at the end of configure_build(). Nothing should be
-        on disk yet, so roms_marbl_blueprint_from_file finds nothing to load.
+        on disk yet, so ucla_roms_blueprint_from_file finds nothing to load.
         """
         builder = _make_builder(minimal_cstar_spec_builder_args)
 
-        assert not builder.path_roms_marbl_blueprint().exists()
-        assert builder.roms_marbl_blueprint_from_file is None
+        assert not builder.path_ucla_roms_blueprint().exists()
+        assert builder.ucla_roms_blueprint_from_file is None
 
     def test_configure_build_blueprint_loads_back_from_file(
         self, minimal_cstar_spec_builder_args
     ):
-        """After configure_build() persists the blueprint, roms_marbl_blueprint_from_file
+        """After configure_build() persists the blueprint, ucla_roms_blueprint_from_file
         loads it back from disk.
         """
         builder = _make_builder(minimal_cstar_spec_builder_args)
@@ -607,9 +607,9 @@ class TestForgeExecutorModelPostInit:
             }
             builder.configure_build()
 
-        assert builder.roms_marbl_blueprint_from_file is not None
+        assert builder.ucla_roms_blueprint_from_file is not None
         assert isinstance(
-            builder.roms_marbl_blueprint_from_file, cstar_models.RomsMarblBlueprint
+            builder.ucla_roms_blueprint_from_file, cstar_models.UclaRomsBlueprint
         )
 
 
@@ -1001,7 +1001,7 @@ class TestGridBuildErrorLabels:
 class TestForgeExecutorGetDs:
     """Tests for the get_ds method."""
 
-    def test_get_ds_grid_from_roms_marbl_blueprint(
+    def test_get_ds_grid_from_ucla_roms_blueprint(
         self,
         minimal_cstar_spec_builder_args,
         sample_runtime_params,
@@ -1024,12 +1024,12 @@ class TestForgeExecutorGetDs:
         grid_dataset = cstar_models.Dataset(
             data=[Resource(location=str(test_file), partitioned=False)]
         )
-        roms_marbl_blueprint = cstar_models.RomsMarblBlueprint(
+        ucla_roms_blueprint = cstar_models.UclaRomsBlueprint(
             name="test",
             description="Test",
             valid_start_date=datetime(2012, 1, 1),
             valid_end_date=datetime(2012, 1, 2),
-            code=builder.roms_marbl_blueprint.code,
+            code=builder.ucla_roms_blueprint.code,
             grid=grid_dataset,
             initial_conditions=cstar_models.Dataset(
                 data=[Resource(location=str(ic_file), partitioned=False)]
@@ -1045,7 +1045,7 @@ class TestForgeExecutorGetDs:
             partitioning=minimal_cstar_spec_builder_args["partitioning"],
             runtime_params=sample_runtime_params,
         )
-        builder.roms_marbl_blueprint = roms_marbl_blueprint
+        builder.ucla_roms_blueprint = ucla_roms_blueprint
 
         with patch("cstar.applications.forge.executor.xr.open_dataset") as mock_open:
             mock_ds = MagicMock(spec=xr.Dataset)
@@ -1059,12 +1059,12 @@ class TestForgeExecutorGetDs:
             assert result[0] == mock_ds
             mock_open.assert_called_once_with(str(test_file), decode_timedelta=False)
 
-    def test_get_ds_returns_none_when_roms_marbl_blueprint_none(
+    def test_get_ds_returns_none_when_ucla_roms_blueprint_none(
         self, minimal_cstar_spec_builder_args
     ):
         """Test that get_ds returns None when blueprint is None."""
         builder = _make_builder(minimal_cstar_spec_builder_args)
-        builder.roms_marbl_blueprint = None
+        builder.ucla_roms_blueprint = None
 
         result = builder.get_ds("grid", from_file=False)
         assert result is None
@@ -1099,12 +1099,12 @@ class TestForgeExecutorGetDs:
         surface_dataset = cstar_models.Dataset(
             data=[Resource(location=str(test_file), partitioned=False)]
         )
-        roms_marbl_blueprint = cstar_models.RomsMarblBlueprint(
+        ucla_roms_blueprint = cstar_models.UclaRomsBlueprint(
             name="test",
             description="Test",
             valid_start_date=datetime(2012, 1, 1),
             valid_end_date=datetime(2012, 1, 2),
-            code=builder.roms_marbl_blueprint.code,
+            code=builder.ucla_roms_blueprint.code,
             grid=cstar_models.Dataset(
                 data=[Resource(location=str(grid_file), partitioned=False)]
             ),
@@ -1120,7 +1120,7 @@ class TestForgeExecutorGetDs:
             partitioning=minimal_cstar_spec_builder_args["partitioning"],
             runtime_params=sample_runtime_params,
         )
-        builder.roms_marbl_blueprint = roms_marbl_blueprint
+        builder.ucla_roms_blueprint = ucla_roms_blueprint
 
         with patch("cstar.applications.forge.executor.xr.open_dataset") as mock_open:
             mock_ds = MagicMock(spec=xr.Dataset)
@@ -1173,12 +1173,12 @@ class TestForgeExecutorEnsureSourceData:
 class TestForgeExecutorGenerateInputs:
     """Tests for the generate_inputs method."""
 
-    def test_generate_inputs_raises_when_roms_marbl_blueprint_none(
+    def test_generate_inputs_raises_when_ucla_roms_blueprint_none(
         self, minimal_cstar_spec_builder_args
     ):
         """Test that generate_inputs raises when blueprint is None."""
         builder = _make_builder(minimal_cstar_spec_builder_args)
-        builder.roms_marbl_blueprint = None
+        builder.ucla_roms_blueprint = None
 
         with pytest.raises(RuntimeError) as exc_info:
             builder.generate_inputs()
@@ -1209,22 +1209,22 @@ class TestForgeExecutorBuildAndRun:
 
             builder.configure_build()
 
-            assert builder.roms_marbl_blueprint is not None
-            assert builder.roms_marbl_blueprint.code is not None
-            assert builder.roms_marbl_blueprint.code.compile_time is not None
+            assert builder.ucla_roms_blueprint is not None
+            assert builder.ucla_roms_blueprint.code is not None
+            assert builder.ucla_roms_blueprint.code.compile_time is not None
             assert (
-                builder.roms_marbl_blueprint.code.compile_time.location
+                builder.ucla_roms_blueprint.code.compile_time.location
                 == expected_location
             )
 
-    def test_build_persists_roms_marbl_blueprint(self, minimal_cstar_spec_builder_args):
+    def test_build_persists_ucla_roms_blueprint(self, minimal_cstar_spec_builder_args):
         """Test that configure_build() persists the blueprint to file -- the only
         time the executor writes it to disk.
         """
         builder = _make_builder(minimal_cstar_spec_builder_args)
 
         # Nothing is persisted before configure_build() runs.
-        assert not builder.path_roms_marbl_blueprint().exists()
+        assert not builder.path_ucla_roms_blueprint().exists()
 
         with (
             patch(
@@ -1240,20 +1240,20 @@ class TestForgeExecutorBuildAndRun:
 
             builder.configure_build()
 
-            expected_bp_path = builder.path_roms_marbl_blueprint()
+            expected_bp_path = builder.path_ucla_roms_blueprint()
             assert expected_bp_path.exists()
 
             with open(expected_bp_path) as f:
-                roms_marbl_blueprint_data = yaml.safe_load(f)
-                assert roms_marbl_blueprint_data is not None
-                assert "code" in roms_marbl_blueprint_data
-                assert "compile_time" in roms_marbl_blueprint_data["code"]
-                assert "location" in roms_marbl_blueprint_data["code"]["compile_time"]
+                ucla_roms_blueprint_data = yaml.safe_load(f)
+                assert ucla_roms_blueprint_data is not None
+                assert "code" in ucla_roms_blueprint_data
+                assert "compile_time" in ucla_roms_blueprint_data["code"]
+                assert "location" in ucla_roms_blueprint_data["code"]["compile_time"]
 
     def test_emitted_blueprint_leaves_working_dir_unset(
         self, minimal_cstar_spec_builder_args
     ):
-        """The roms_marbl blueprint carries no ``working_dir``, in memory or on disk,
+        """The ucla_roms blueprint carries no ``working_dir``, in memory or on disk,
         so C-Star places the run under its own default or the workplan step directory.
         """
         builder = _make_builder(minimal_cstar_spec_builder_args)
@@ -1271,15 +1271,15 @@ class TestForgeExecutorBuildAndRun:
             }
             builder.configure_build()
 
-        assert builder.roms_marbl_blueprint.working_dir is None
-        emitted = yaml.safe_load(builder.path_roms_marbl_blueprint().read_text())
+        assert builder.ucla_roms_blueprint.working_dir is None
+        emitted = yaml.safe_load(builder.path_ucla_roms_blueprint().read_text())
         assert "working_dir" not in emitted
 
     def test_configure_build_writes_exactly_one_blueprint_and_sidecar(
         self, minimal_cstar_spec_builder_args
     ):
         """No preconfig/postconfig/run stage artifacts are ever written -- the
-        stages concept is gone. `roms_marbl_blueprint_dir` holds exactly one
+        stages concept is gone. `ucla_roms_blueprint_dir` holds exactly one
         `B_{name}.yaml` and one `settings_B_{name}.yaml` after configure_build().
         """
         builder = _make_builder(minimal_cstar_spec_builder_args)
@@ -1297,14 +1297,14 @@ class TestForgeExecutorBuildAndRun:
             }
             builder.configure_build()
 
-        bp_files = sorted(builder.roms_marbl_blueprint_dir.glob("B_*.yaml"))
+        bp_files = sorted(builder.ucla_roms_blueprint_dir.glob("B_*.yaml"))
         settings_files = sorted(
-            builder.roms_marbl_blueprint_dir.glob("settings_B_*.yaml")
+            builder.ucla_roms_blueprint_dir.glob("settings_B_*.yaml")
         )
-        assert bp_files == [builder.path_roms_marbl_blueprint()]
+        assert bp_files == [builder.path_ucla_roms_blueprint()]
         assert settings_files == [
-            builder.path_roms_marbl_blueprint().parent
-            / f"settings_{builder.path_roms_marbl_blueprint().name}"
+            builder.path_ucla_roms_blueprint().parent
+            / f"settings_{builder.path_ucla_roms_blueprint().name}"
         ]
         for suffix in ("_preconfig", "_postconfig", "_run"):
             assert suffix not in bp_files[0].name
@@ -1639,7 +1639,7 @@ class TestForgeExecutorBuildAndRun:
     def test_build_with_use_pio_emits_code_pio_and_partitioning_use_pio(
         self, minimal_cstar_spec_builder_args
     ):
-        """With use_pio, the emitted RomsMarblBlueprint carries code.pio and
+        """With use_pio, the emitted UclaRomsBlueprint carries code.pio and
         partitioning.use_pio: true.
         """
         builder = _make_builder(minimal_cstar_spec_builder_args, use_pio=True)
@@ -1660,7 +1660,7 @@ class TestForgeExecutorBuildAndRun:
 
             builder.configure_build()
 
-        bp_path = builder.path_roms_marbl_blueprint()
+        bp_path = builder.path_ucla_roms_blueprint()
         with open(bp_path) as f:
             data = yaml.safe_load(f)
         assert data["partitioning"]["use_pio"] is True
@@ -1693,7 +1693,7 @@ class TestForgeExecutorBuildAndRun:
 
             builder.configure_build()
 
-        bp_path = builder.path_roms_marbl_blueprint()
+        bp_path = builder.path_ucla_roms_blueprint()
         with open(bp_path) as f:
             data = yaml.safe_load(f)
         assert data["partitioning"]["use_pio"] is False
@@ -1734,7 +1734,7 @@ class TestForgeExecutorBuildAndRun:
 
             builder.configure_build()
 
-        bp_path = builder.path_roms_marbl_blueprint()
+        bp_path = builder.path_ucla_roms_blueprint()
         with open(bp_path) as f:
             data = yaml.safe_load(f)
         assert data["partitioning"]["auto_tiling"] is True
@@ -2071,7 +2071,7 @@ class TestForgeExecutorBuildAndRun:
         tagged_ucla_roms_clone,
     ):
         """A commit-hash pin selects the namelist tier of the release it descends
-        from (the one roms_marbl reads it with), while the emitted blueprint
+        from (the one ucla_roms reads it with), while the emitted blueprint
         keeps pinning the hash itself.
         """
         from cstar.applications.forge.engine import split_model_settings
@@ -2103,7 +2103,7 @@ class TestForgeExecutorBuildAndRun:
             )
 
         assert mock_write.call_args.kwargs["roms_ref"] == "0.4.2"
-        assert builder.roms_marbl_blueprint.code.roms["commit"] == info["hash_0_4_2"]
+        assert builder.ucla_roms_blueprint.code.roms["commit"] == info["hash_0_4_2"]
 
     @pytest.mark.parametrize(
         ("hash_key", "nz_chd"),
@@ -2322,21 +2322,21 @@ class TestForgeExecutorBuildAndRun:
     def test_upscaled_cdr_mode_emits_placeholder_resource(self, tmp_path):
         """The "upscaled" CDR mode schedules no CDR generation step at all (unlike
         "simple"/"yaml"/"netcdf", where ``cdr_forcing``/``cdr_forcing_file`` puts
-        "cdr_forcing" into ``input_list``) -- ``RomsMarblInputData.__post_init__``
+        "cdr_forcing" into ``input_list``) -- ``RomsInputGenerator.__post_init__``
         must instead emit a placeholder ``Resource`` directly onto
-        ``roms_marbl_blueprint_elements.cdr_forcing``, mirroring the child-IC
+        ``ucla_roms_blueprint_elements.cdr_forcing``, mirroring the child-IC
         placeholder pattern (``CHILD_IC_PLACEHOLDER_LOCATION``).
 
-        Constructs ``RomsMarblInputData`` directly (bypassing the executor/grid/
+        Constructs ``RomsInputGenerator`` directly (bypassing the executor/grid/
         source-data machinery entirely) -- ``__post_init__`` only needs the
         constructor-time attributes, not a real grid or dataset.
         """
         from cstar.applications.forge.input_data import (
             UPSCALED_CDR_PLACEHOLDER_LOCATION,
-            RomsMarblInputData,
+            RomsInputGenerator,
         )
 
-        obj = RomsMarblInputData(
+        obj = RomsInputGenerator(
             domain_name="upscaled-test",
             start_date=datetime(2012, 1, 1),
             end_date=datetime(2012, 1, 2),
@@ -2344,7 +2344,7 @@ class TestForgeExecutorBuildAndRun:
             grid=MagicMock(),
             boundaries=forge_models.OpenBoundaries(),
             source_data=MagicMock(),
-            roms_marbl_blueprint_dir=tmp_path,
+            ucla_roms_blueprint_dir=tmp_path,
             partitioning=cstar_models.PartitioningParameterSet(
                 n_procs_x=1, n_procs_y=1
             ),
@@ -2357,7 +2357,7 @@ class TestForgeExecutorBuildAndRun:
         )
 
         assert not any(key == "cdr_forcing" for key, _ in obj.input_list)
-        cdr_elem = obj.roms_marbl_blueprint_elements.cdr_forcing
+        cdr_elem = obj.ucla_roms_blueprint_elements.cdr_forcing
         assert cdr_elem is not None
         assert len(cdr_elem.data) == 1
         assert cdr_elem.data[0].location == UPSCALED_CDR_PLACEHOLDER_LOCATION
@@ -2457,17 +2457,17 @@ class TestForgeBlueprintToBuilderKwargsPartitioning:
         assert kwargs["partitioning"]["use_pio"] is False
 
 
-class TestForgeExecutorPathRomsMarblBlueprint:
-    """Tests for path_roms_marbl_blueprint method."""
+class TestForgeExecutorPathUclaRomsBlueprint:
+    """Tests for path_ucla_roms_blueprint method."""
 
-    def test_path_roms_marbl_blueprint(self, minimal_cstar_spec_builder_args):
-        """path_roms_marbl_blueprint returns the single B_{name}.yaml path -- there
+    def test_path_ucla_roms_blueprint(self, minimal_cstar_spec_builder_args):
+        """path_ucla_roms_blueprint returns the single B_{name}.yaml path -- there
         is no stage suffix and no stage/run_params arguments to pass.
         """
         builder = _make_builder(minimal_cstar_spec_builder_args)
-        path = builder.path_roms_marbl_blueprint()
+        path = builder.path_ucla_roms_blueprint()
 
-        assert path == builder.roms_marbl_blueprint_dir / f"B_{builder.name}.yaml"
+        assert path == builder.ucla_roms_blueprint_dir / f"B_{builder.name}.yaml"
         assert path.suffix == ".yaml"
 
 
@@ -2482,7 +2482,7 @@ class TestForgeExecutorPersist:
 
         builder.persist()
 
-        bp_path = builder.path_roms_marbl_blueprint()
+        bp_path = builder.path_ucla_roms_blueprint()
         assert bp_path.exists()
 
         with bp_path.open("r") as f:
@@ -2509,8 +2509,8 @@ class TestForgeExecutorPersist:
         """
         builder = _make_builder(args)
         work = builder.host.working_dir
-        blueprint = builder.roms_marbl_blueprint
-        builder.roms_marbl_blueprint = blueprint.model_copy(
+        blueprint = builder.ucla_roms_blueprint
+        builder.ucla_roms_blueprint = blueprint.model_copy(
             update={
                 "grid": cstar_models.Dataset.model_construct(
                     data=[Resource(location=str(work / "input_data" / "grid.nc"))]
@@ -2550,7 +2550,7 @@ class TestForgeExecutorPersist:
 
         builder.persist()
 
-        data = yaml.safe_load(builder.path_roms_marbl_blueprint().read_text())
+        data = yaml.safe_load(builder.path_ucla_roms_blueprint().read_text())
         assert data["grid"]["data"][0]["location"] == "../input_data/grid.nc"
         assert data["code"]["run_time"]["location"] == "../builds/run-time"
         assert data["code"]["compile_time"]["location"] == "../builds/compile-time"
@@ -2561,7 +2561,7 @@ class TestForgeExecutorPersist:
             "/elsewhere/bry.nc"
         )
 
-        in_memory = builder.roms_marbl_blueprint
+        in_memory = builder.ucla_roms_blueprint
         assert in_memory.grid.data[0].location == str(
             builder.host.working_dir / "input_data" / "grid.nc"
         )
@@ -2576,7 +2576,7 @@ class TestForgeExecutorPersist:
         builder.persist()
         resolved_work = builder.host.working_dir.resolve()
 
-        loaded = builder.roms_marbl_blueprint_from_file
+        loaded = builder.ucla_roms_blueprint_from_file
 
         assert loaded is not None
         grid = loaded.grid
@@ -2594,7 +2594,7 @@ class TestForgeExecutorPersist:
         """
         builder = self._builder_with_locations(minimal_cstar_spec_builder_args)
         builder.persist()
-        bp_path = builder.path_roms_marbl_blueprint()
+        bp_path = builder.path_ucla_roms_blueprint()
         data = yaml.safe_load(bp_path.read_text())
         data["grid"]["data"][0]["location"] = "data/grid.nc"
         bp_path.write_text(yaml.safe_dump(data))
@@ -2603,9 +2603,9 @@ class TestForgeExecutorPersist:
         (cwd / "data" / "grid.nc").touch()
         monkeypatch.chdir(cwd)
         with pytest.raises(CstarExpectationFailed):
-            load_blueprint(bp_path, cstar_models.RomsMarblBlueprint)
+            load_blueprint(bp_path, cstar_models.UclaRomsBlueprint)
 
-        loaded = builder.roms_marbl_blueprint_from_file
+        loaded = builder.ucla_roms_blueprint_from_file
 
         assert loaded is not None
         grid = loaded.grid
@@ -2613,12 +2613,12 @@ class TestForgeExecutorPersist:
         location = first["location"] if isinstance(first, dict) else first.location
         assert str(location) == str(bp_path.parent.resolve() / "data" / "grid.nc")
 
-    def test_persist_raises_when_roms_marbl_blueprint_none(
+    def test_persist_raises_when_ucla_roms_blueprint_none(
         self, minimal_cstar_spec_builder_args
     ):
         """Test persist raises error when blueprint is None."""
         builder = _make_builder(minimal_cstar_spec_builder_args)
-        builder.roms_marbl_blueprint = None
+        builder.ucla_roms_blueprint = None
 
         with pytest.raises(ValueError) as exc_info:
             builder.persist()
@@ -2635,7 +2635,7 @@ class TestForgeExecutorPersist:
 
         builder.persist()
 
-        data = yaml.safe_load(builder.path_roms_marbl_blueprint().read_text())
+        data = yaml.safe_load(builder.path_ucla_roms_blueprint().read_text())
         assert "provenance" not in data
 
     def test_persist_writes_a_provenance_that_records_something(
@@ -2645,13 +2645,13 @@ class TestForgeExecutorPersist:
         derived_from = BlueprintIdentity(
             kind="Blueprint", application="forge", name="demo", content_hash="abc"
         )
-        builder.roms_marbl_blueprint = builder.roms_marbl_blueprint.model_copy(
+        builder.ucla_roms_blueprint = builder.ucla_roms_blueprint.model_copy(
             update={"provenance": Provenance(derived_from=[derived_from])}
         )
 
         builder.persist()
 
-        data = yaml.safe_load(builder.path_roms_marbl_blueprint().read_text())
+        data = yaml.safe_load(builder.path_ucla_roms_blueprint().read_text())
         assert data["provenance"] == {
             "derived_from": [
                 {
@@ -2665,7 +2665,7 @@ class TestForgeExecutorPersist:
 
 
 class TestEmittedBlueprintIdentity:
-    """What the emitted ``roms_marbl`` blueprint says about itself: a description
+    """What the emitted ``ucla_roms`` blueprint says about itself: a description
     of where it came from and, when the engine supplies one, its provenance.
     """
 
@@ -2684,7 +2684,7 @@ class TestEmittedBlueprintIdentity:
                 "branch": "main",
             }
             builder.configure_build(**kwargs)
-        return yaml.safe_load(builder.path_roms_marbl_blueprint().read_text())
+        return yaml.safe_load(builder.path_ucla_roms_blueprint().read_text())
 
     @staticmethod
     def _provenance(working_dir):
@@ -2730,7 +2730,7 @@ class TestEmittedBlueprintIdentity:
         emitted = self._configure(builder, provenance=provenance)
 
         assert Provenance.model_validate(emitted["provenance"]) == provenance
-        assert builder.roms_marbl_blueprint.provenance is provenance
+        assert builder.ucla_roms_blueprint.provenance is provenance
 
     def test_a_complete_blueprint_loads_back_with_the_given_provenance(
         self, minimal_cstar_spec_builder_args, tmp_path
@@ -2744,7 +2744,7 @@ class TestEmittedBlueprintIdentity:
         dataset = cstar_models.Dataset(
             data=[Resource(location=str(input_file), partitioned=False)]
         )
-        builder.roms_marbl_blueprint = builder.roms_marbl_blueprint.model_copy(
+        builder.ucla_roms_blueprint = builder.ucla_roms_blueprint.model_copy(
             update={
                 "grid": dataset,
                 "initial_conditions": dataset,
@@ -2759,10 +2759,10 @@ class TestEmittedBlueprintIdentity:
         self._configure(builder, provenance=provenance)
 
         loaded = deserialize(
-            builder.path_roms_marbl_blueprint(), cstar_models.RomsMarblBlueprint
+            builder.path_ucla_roms_blueprint(), cstar_models.UclaRomsBlueprint
         )
         assert loaded.provenance == provenance
-        assert builder.roms_marbl_blueprint.provenance == provenance
+        assert builder.ucla_roms_blueprint.provenance == provenance
 
     def test_no_provenance_block_is_written_without_one(
         self, minimal_cstar_spec_builder_args
@@ -2774,8 +2774,8 @@ class TestEmittedBlueprintIdentity:
         assert "provenance" not in emitted
 
 
-class TestValidatedRomsMarblBlueprint:
-    """Tests for the emit-time validation gate (_validated_roms_marbl_blueprint).
+class TestValidatedUclaRomsBlueprint:
+    """Tests for the emit-time validation gate (_validated_ucla_roms_blueprint).
 
     The blueprint is assembled with model_construct (placeholder stages are
     deliberately partial), so an extra field smuggled onto a cstar model --
@@ -2793,7 +2793,7 @@ class TestValidatedRomsMarblBlueprint:
         ds = cstar_models.Dataset(
             data=[Resource(location=str(placeholder_file), partitioned=False)]
         )
-        bp_dict = builder.roms_marbl_blueprint.model_dump()
+        bp_dict = builder.ucla_roms_blueprint.model_dump()
         bp_dict.pop("$schema", None)
         bp_dict.update(
             grid=ds,
@@ -2805,20 +2805,20 @@ class TestValidatedRomsMarblBlueprint:
                 **(runtime_params_extra or {}),
             },
         )
-        return cstar_models.RomsMarblBlueprint.model_construct(**bp_dict)
+        return cstar_models.UclaRomsBlueprint.model_construct(**bp_dict)
 
     def test_validated_blueprint_round_trips(
         self, minimal_cstar_spec_builder_args, tmp_path
     ):
         """A complete blueprint validates and comes back as a real (validated)
-        RomsMarblBlueprint instance.
+        UclaRomsBlueprint instance.
         """
         builder = _make_builder(minimal_cstar_spec_builder_args)
-        builder.roms_marbl_blueprint = self._complete_blueprint(builder, tmp_path)
+        builder.ucla_roms_blueprint = self._complete_blueprint(builder, tmp_path)
 
-        validated = builder._validated_roms_marbl_blueprint()
+        validated = builder._validated_ucla_roms_blueprint()
 
-        assert isinstance(validated, cstar_models.RomsMarblBlueprint)
+        assert isinstance(validated, cstar_models.UclaRomsBlueprint)
         assert validated.runtime_params.start_date == builder.start_date
         # model_params (schema < 3.0.0) is gone; time_step now comes solely
         # from the namelist. partitioning survives the round trip instead.
@@ -2832,12 +2832,12 @@ class TestValidatedRomsMarblBlueprint:
         bug) fails at emit time with a clear error, not at C-Star load time.
         """
         builder = _make_builder(minimal_cstar_spec_builder_args)
-        builder.roms_marbl_blueprint = self._complete_blueprint(
+        builder.ucla_roms_blueprint = self._complete_blueprint(
             builder, tmp_path, runtime_params_extra={"output_dir": str(tmp_path)}
         )
 
         with pytest.raises(ValueError) as exc_info:
-            builder._validated_roms_marbl_blueprint()
+            builder._validated_ucla_roms_blueprint()
         assert "does not validate against the installed C-Star" in str(exc_info.value)
         assert "output_dir" in str(exc_info.value)
 
@@ -3030,7 +3030,7 @@ class TestProcessCapturesRunOutput:
 
 class TestPublishEmittedBlueprint:
     """``forge_run.publish_emitted_blueprint``: the one place the emitted
-    ``roms_marbl`` blueprint is copied into ``<working root>/output/``.
+    ``ucla_roms`` blueprint is copied into ``<working root>/output/``.
     """
 
     @staticmethod
@@ -3040,7 +3040,7 @@ class TestPublishEmittedBlueprint:
         blueprint.parent.mkdir(parents=True)
         blueprint.write_text("name: demo\n")
         (blueprint.parent / "settings_B_demo.yaml").write_text("compile_time: {}\n")
-        return SimpleNamespace(path_roms_marbl_blueprint=lambda: blueprint)
+        return SimpleNamespace(path_ucla_roms_blueprint=lambda: blueprint)
 
     def test_copies_only_the_blueprint_into_output(self, tmp_path):
         published = forge_run.publish_emitted_blueprint(self._executor(tmp_path / "wd"))
@@ -3059,7 +3059,7 @@ class TestPublishEmittedBlueprint:
         data_file = working_dir / "input_data" / "grid.nc"
         data_file.parent.mkdir()
         data_file.touch()
-        original = executor.path_roms_marbl_blueprint()
+        original = executor.path_ucla_roms_blueprint()
         original.write_text(
             "name: demo\ngrid:\n  data:\n    - location: ../input_data/grid.nc\n"
         )
@@ -3076,7 +3076,7 @@ class TestPublishEmittedBlueprint:
     def test_publishing_again_replaces_the_copy(self, tmp_path):
         executor = self._executor(tmp_path / "wd")
         forge_run.publish_emitted_blueprint(executor)
-        executor.path_roms_marbl_blueprint().write_text("name: changed\n")
+        executor.path_ucla_roms_blueprint().write_text("name: changed\n")
 
         published = forge_run.publish_emitted_blueprint(executor)
 
@@ -3128,7 +3128,7 @@ class TestRunBlueprintPublishes:
             if configure and not only_inputs:
                 blueprint.parent.mkdir(parents=True, exist_ok=True)
                 blueprint.write_text("name: demo\n")
-            return SimpleNamespace(path_roms_marbl_blueprint=lambda: blueprint)
+            return SimpleNamespace(path_ucla_roms_blueprint=lambda: blueprint)
 
         def _run(**kwargs):
             with (
@@ -3174,21 +3174,21 @@ class TestRunBlueprintPublishes:
 class TestForgeExecutorGenerateInputsComprehensive:
     """Comprehensive tests for generate_inputs method covering full workflow."""
 
-    @patch("cstar.applications.forge.executor.input_data.RomsMarblInputData")
+    @patch("cstar.applications.forge.executor.input_data.RomsInputGenerator")
     def test_generate_inputs_creates_input_data_instance(
         self,
         mock_input_data_class,
         minimal_cstar_spec_builder_args,
     ):
-        """Test generate_inputs creates RomsMarblInputData with correct parameters."""
+        """Test generate_inputs creates RomsInputGenerator with correct parameters."""
         mock_input_data_instance = MagicMock()
-        mock_roms_marbl_blueprint_elements = MagicMock()
-        mock_roms_marbl_blueprint_elements.grid = MagicMock()
-        mock_roms_marbl_blueprint_elements.initial_conditions = MagicMock()
-        mock_roms_marbl_blueprint_elements.forcing = MagicMock()
-        mock_roms_marbl_blueprint_elements.cdr_forcing = None
+        mock_ucla_roms_blueprint_elements = MagicMock()
+        mock_ucla_roms_blueprint_elements.grid = MagicMock()
+        mock_ucla_roms_blueprint_elements.initial_conditions = MagicMock()
+        mock_ucla_roms_blueprint_elements.forcing = MagicMock()
+        mock_ucla_roms_blueprint_elements.cdr_forcing = None
         mock_input_data_instance.generate_all.return_value = (
-            mock_roms_marbl_blueprint_elements
+            mock_ucla_roms_blueprint_elements
         )
         mock_input_data_class.return_value = mock_input_data_instance
 
@@ -3214,22 +3214,22 @@ class TestForgeExecutorGenerateInputsComprehensive:
             # The minimal fixture is a marbl (BGC) model.
             assert call_kwargs["has_bgc"] is True
 
-    @patch("cstar.applications.forge.executor.input_data.RomsMarblInputData")
+    @patch("cstar.applications.forge.executor.input_data.RomsInputGenerator")
     @requires_cstar_pio
     def test_generate_inputs_use_pio_forwards_use_pio(
         self,
         mock_input_data_class,
         minimal_cstar_spec_builder_args,
     ):
-        """With use_pio, RomsMarblInputData is told to do its own CDF-5 conversion."""
+        """With use_pio, RomsInputGenerator is told to do its own CDF-5 conversion."""
         mock_input_data_instance = MagicMock()
-        mock_roms_marbl_blueprint_elements = MagicMock()
-        mock_roms_marbl_blueprint_elements.grid = MagicMock()
-        mock_roms_marbl_blueprint_elements.initial_conditions = MagicMock()
-        mock_roms_marbl_blueprint_elements.forcing = MagicMock()
-        mock_roms_marbl_blueprint_elements.cdr_forcing = None
+        mock_ucla_roms_blueprint_elements = MagicMock()
+        mock_ucla_roms_blueprint_elements.grid = MagicMock()
+        mock_ucla_roms_blueprint_elements.initial_conditions = MagicMock()
+        mock_ucla_roms_blueprint_elements.forcing = MagicMock()
+        mock_ucla_roms_blueprint_elements.cdr_forcing = None
         mock_input_data_instance.generate_all.return_value = (
-            mock_roms_marbl_blueprint_elements
+            mock_ucla_roms_blueprint_elements
         )
         mock_input_data_class.return_value = mock_input_data_instance
 
@@ -3240,7 +3240,7 @@ class TestForgeExecutorGenerateInputsComprehensive:
             call_kwargs = mock_input_data_class.call_args[1]
             assert call_kwargs["use_pio"] is True
 
-    @patch("cstar.applications.forge.executor.input_data.RomsMarblInputData")
+    @patch("cstar.applications.forge.executor.input_data.RomsInputGenerator")
     def test_generate_inputs_does_not_persist(
         self,
         mock_input_data_class,
@@ -3251,13 +3251,13 @@ class TestForgeExecutorGenerateInputsComprehensive:
         once, at the end of configure_build().
         """
         mock_input_data_instance = MagicMock()
-        mock_roms_marbl_blueprint_elements = MagicMock()
-        mock_roms_marbl_blueprint_elements.grid = MagicMock()
-        mock_roms_marbl_blueprint_elements.initial_conditions = MagicMock()
-        mock_roms_marbl_blueprint_elements.forcing = MagicMock()
-        mock_roms_marbl_blueprint_elements.cdr_forcing = None
+        mock_ucla_roms_blueprint_elements = MagicMock()
+        mock_ucla_roms_blueprint_elements.grid = MagicMock()
+        mock_ucla_roms_blueprint_elements.initial_conditions = MagicMock()
+        mock_ucla_roms_blueprint_elements.forcing = MagicMock()
+        mock_ucla_roms_blueprint_elements.cdr_forcing = None
         mock_input_data_instance.generate_all.return_value = (
-            mock_roms_marbl_blueprint_elements
+            mock_ucla_roms_blueprint_elements
         )
         mock_input_data_class.return_value = mock_input_data_instance
 
@@ -3271,13 +3271,13 @@ class TestForgeExecutorGenerateInputsComprehensive:
 
                 mock_persist.assert_not_called()
 
-    @patch("cstar.applications.forge.executor.input_data.RomsMarblInputData")
-    def test_generate_inputs_raises_when_roms_marbl_blueprint_elements_none(
+    @patch("cstar.applications.forge.executor.input_data.RomsInputGenerator")
+    def test_generate_inputs_raises_when_ucla_roms_blueprint_elements_none(
         self,
         mock_input_data_class,
         minimal_cstar_spec_builder_args,
     ):
-        """Test generate_inputs raises RuntimeError when roms_marbl_blueprint_elements is None."""
+        """Test generate_inputs raises RuntimeError when ucla_roms_blueprint_elements is None."""
         mock_input_data_instance = MagicMock()
         mock_input_data_instance.generate_all.return_value = None
         mock_input_data_class.return_value = mock_input_data_instance
@@ -3291,33 +3291,33 @@ class TestForgeExecutorGenerateInputsComprehensive:
                 exc_info.value
             ) or "Blueprint mismatch" in str(exc_info.value)
 
-    @patch("cstar.applications.forge.executor.input_data.RomsMarblInputData")
-    def test_generate_inputs_nesting_info_serialized_to_roms_marbl_blueprint_dict(
+    @patch("cstar.applications.forge.executor.input_data.RomsInputGenerator")
+    def test_generate_inputs_nesting_info_serialized_to_ucla_roms_blueprint_dict(
         self,
         mock_input_data_class,
         minimal_cstar_spec_builder_args,
         tmp_path,
     ):
-        """Test that nesting_info from roms_marbl_blueprint_elements is written into the blueprint dict."""
+        """Test that nesting_info from ucla_roms_blueprint_elements is written into the blueprint dict."""
         nesting_file = tmp_path / "nesting.nc"
         nesting_file.touch()
         nesting_dataset = cstar_models.Dataset(
             data=[Resource(location=str(nesting_file), partitioned=False)]
         )
 
-        mock_roms_marbl_blueprint_elements = MagicMock()
-        mock_roms_marbl_blueprint_elements.grid = MagicMock()
-        mock_roms_marbl_blueprint_elements.grid.model_dump.return_value = {}
-        mock_roms_marbl_blueprint_elements.initial_conditions = MagicMock()
-        mock_roms_marbl_blueprint_elements.initial_conditions.model_dump.return_value = {}
-        mock_roms_marbl_blueprint_elements.forcing = MagicMock()
-        mock_roms_marbl_blueprint_elements.forcing.model_dump.return_value = {}
-        mock_roms_marbl_blueprint_elements.cdr_forcing = None
-        mock_roms_marbl_blueprint_elements.nesting_info = nesting_dataset
+        mock_ucla_roms_blueprint_elements = MagicMock()
+        mock_ucla_roms_blueprint_elements.grid = MagicMock()
+        mock_ucla_roms_blueprint_elements.grid.model_dump.return_value = {}
+        mock_ucla_roms_blueprint_elements.initial_conditions = MagicMock()
+        mock_ucla_roms_blueprint_elements.initial_conditions.model_dump.return_value = {}
+        mock_ucla_roms_blueprint_elements.forcing = MagicMock()
+        mock_ucla_roms_blueprint_elements.forcing.model_dump.return_value = {}
+        mock_ucla_roms_blueprint_elements.cdr_forcing = None
+        mock_ucla_roms_blueprint_elements.nesting_info = nesting_dataset
 
         mock_input_data_instance = MagicMock()
         mock_input_data_instance.generate_all.return_value = (
-            mock_roms_marbl_blueprint_elements
+            mock_ucla_roms_blueprint_elements
         )
         mock_input_data_class.return_value = mock_input_data_instance
 
@@ -3332,31 +3332,31 @@ class TestForgeExecutorGenerateInputsComprehensive:
 
             # blueprint is built via model_construct (no validation), so nesting_info
             # is the raw dict from model_dump(), not a Dataset instance
-            nesting_info = builder.roms_marbl_blueprint.nesting_info
+            nesting_info = builder.ucla_roms_blueprint.nesting_info
             assert nesting_info is not None
             assert nesting_info["data"][0]["location"] == str(nesting_file)
 
-    @patch("cstar.applications.forge.executor.input_data.RomsMarblInputData")
-    def test_generate_inputs_nesting_info_none_in_roms_marbl_blueprint_dict(
+    @patch("cstar.applications.forge.executor.input_data.RomsInputGenerator")
+    def test_generate_inputs_nesting_info_none_in_ucla_roms_blueprint_dict(
         self,
         mock_input_data_class,
         minimal_cstar_spec_builder_args,
         tmp_path,
     ):
         """Test that nesting_info is None in blueprint when elements.nesting_info is None."""
-        mock_roms_marbl_blueprint_elements = MagicMock()
-        mock_roms_marbl_blueprint_elements.grid = MagicMock()
-        mock_roms_marbl_blueprint_elements.grid.model_dump.return_value = {}
-        mock_roms_marbl_blueprint_elements.initial_conditions = MagicMock()
-        mock_roms_marbl_blueprint_elements.initial_conditions.model_dump.return_value = {}
-        mock_roms_marbl_blueprint_elements.forcing = MagicMock()
-        mock_roms_marbl_blueprint_elements.forcing.model_dump.return_value = {}
-        mock_roms_marbl_blueprint_elements.cdr_forcing = None
-        mock_roms_marbl_blueprint_elements.nesting_info = None
+        mock_ucla_roms_blueprint_elements = MagicMock()
+        mock_ucla_roms_blueprint_elements.grid = MagicMock()
+        mock_ucla_roms_blueprint_elements.grid.model_dump.return_value = {}
+        mock_ucla_roms_blueprint_elements.initial_conditions = MagicMock()
+        mock_ucla_roms_blueprint_elements.initial_conditions.model_dump.return_value = {}
+        mock_ucla_roms_blueprint_elements.forcing = MagicMock()
+        mock_ucla_roms_blueprint_elements.forcing.model_dump.return_value = {}
+        mock_ucla_roms_blueprint_elements.cdr_forcing = None
+        mock_ucla_roms_blueprint_elements.nesting_info = None
 
         mock_input_data_instance = MagicMock()
         mock_input_data_instance.generate_all.return_value = (
-            mock_roms_marbl_blueprint_elements
+            mock_ucla_roms_blueprint_elements
         )
         mock_input_data_class.return_value = mock_input_data_instance
 
@@ -3368,7 +3368,7 @@ class TestForgeExecutorGenerateInputsComprehensive:
 
                 builder.generate_inputs(clobber=True, test=False)
 
-            assert builder.roms_marbl_blueprint.nesting_info is None
+            assert builder.ucla_roms_blueprint.nesting_info is None
 
 
 class TestForgeExecutorGetDsComprehensive:
@@ -3384,12 +3384,12 @@ class TestForgeExecutorGetDsComprehensive:
         boundary_dataset = cstar_models.Dataset(
             data=[Resource(location=str(test_file1), partitioned=False)]
         )
-        roms_marbl_blueprint = cstar_models.RomsMarblBlueprint(
+        ucla_roms_blueprint = cstar_models.UclaRomsBlueprint(
             name="test",
             description="Test",
             valid_start_date=datetime(2012, 1, 1),
             valid_end_date=datetime(2012, 1, 2),
-            code=builder.roms_marbl_blueprint.code,
+            code=builder.ucla_roms_blueprint.code,
             grid=_create_empty_dataset(tmp_path),
             initial_conditions=_create_empty_dataset(tmp_path),
             forcing=cstar_models.ForcingConfiguration(
@@ -3403,7 +3403,7 @@ class TestForgeExecutorGetDsComprehensive:
                 checkpoint_frequency="1d",
             ),
         )
-        builder.roms_marbl_blueprint = roms_marbl_blueprint
+        builder.ucla_roms_blueprint = ucla_roms_blueprint
 
         with patch("cstar.applications.forge.executor.xr.open_dataset") as mock_open:
             mock_ds1 = MagicMock(spec=xr.Dataset)
@@ -3428,12 +3428,12 @@ class TestForgeExecutorGetDsComprehensive:
         grid_dataset = cstar_models.Dataset(
             data=[Resource(location=str(placeholder_file), partitioned=False)]
         )
-        roms_marbl_blueprint = cstar_models.RomsMarblBlueprint(
+        ucla_roms_blueprint = cstar_models.UclaRomsBlueprint(
             name="test",
             description="Test",
             valid_start_date=datetime(2012, 1, 1),
             valid_end_date=datetime(2012, 1, 2),
-            code=builder.roms_marbl_blueprint.code,
+            code=builder.ucla_roms_blueprint.code,
             grid=grid_dataset,
             initial_conditions=_create_empty_dataset(tmp_path),
             forcing=cstar_models.ForcingConfiguration(
@@ -3447,7 +3447,7 @@ class TestForgeExecutorGetDsComprehensive:
                 checkpoint_frequency="1d",
             ),
         )
-        builder.roms_marbl_blueprint = roms_marbl_blueprint
+        builder.ucla_roms_blueprint = ucla_roms_blueprint
 
         with patch("cstar.applications.forge.executor.xr.open_dataset") as mock_open:
             mock_open.side_effect = FileNotFoundError("File not found")
@@ -3466,12 +3466,12 @@ class TestForgeExecutorGetDsComprehensive:
         grid_dataset = cstar_models.Dataset(
             data=[Resource(location=str(test_file), partitioned=False)]
         )
-        roms_marbl_blueprint = cstar_models.RomsMarblBlueprint(
+        ucla_roms_blueprint = cstar_models.UclaRomsBlueprint(
             name="test",
             description="Test",
             valid_start_date=datetime(2012, 1, 1),
             valid_end_date=datetime(2012, 1, 2),
-            code=builder.roms_marbl_blueprint.code,
+            code=builder.ucla_roms_blueprint.code,
             grid=grid_dataset,
             initial_conditions=_create_empty_dataset(tmp_path),
             forcing=cstar_models.ForcingConfiguration(
@@ -3485,7 +3485,7 @@ class TestForgeExecutorGetDsComprehensive:
                 checkpoint_frequency="1d",
             ),
         )
-        builder.roms_marbl_blueprint = roms_marbl_blueprint
+        builder.ucla_roms_blueprint = ucla_roms_blueprint
 
         with patch("cstar.applications.forge.executor.xr.open_dataset") as mock_open:
             mock_ds = MagicMock(spec=xr.Dataset)
@@ -3687,7 +3687,7 @@ class TestGoldenNamelist:
         ``carbonate_sensitivity`` is handed to ``build_forge_blueprint`` as is (a
         ``cdr_lite`` case's user-supplied ``_cdrgas`` files). ``capture``, if given,
         receives the run's objects -- ``cfg`` (the resolved ForgeBlueprint),
-        ``builder`` (the ForgeExecutor) and ``emitted`` (the roms_marbl blueprint
+        ``builder`` (the ForgeExecutor) and ``emitted`` (the ucla_roms blueprint
         ``generate_inputs`` returned) -- for assertions beyond the namelist.
         """
         mode_kwargs: dict[str, Any] = (
@@ -4638,7 +4638,7 @@ class TestGoldenNamelist:
         """User-supplied ``_cdrgas`` files travel blueprint -> executor ->
         ``forcing.carbonate_sensitivity`` step: staged under their basenames next to
         the generated inputs, listed (unpartitioned, in order) in the emitted
-        roms_marbl blueprint and among the executor's planned outputs. The rendered
+        ucla_roms blueprint and among the executor's planned outputs. The rendered
         namelist is the golden one: C-Star adds the files to ``frcfiles`` from the
         blueprint when the run starts, so Forge's namelist does not list them.
         """
@@ -4669,7 +4669,7 @@ class TestGoldenNamelist:
         assert [Path(r["location"]) for r in recorded] == staged
         assert [r["partitioned"] for r in recorded] == [False, False]
         # the persisted blueprint names the staged files relative to itself
-        written = yaml.safe_load(builder.path_roms_marbl_blueprint().read_text())
+        written = yaml.safe_load(builder.path_ucla_roms_blueprint().read_text())
         assert [
             r["location"] for r in written["forcing"]["carbonate_sensitivity"]["data"]
         ] == [f"../input_data/{p.name}" for p in sources]
@@ -4697,7 +4697,7 @@ class TestGoldenNamelist:
         assert cfg.carbonate_sensitivity is None
         assert builder.carbonate_sensitivity is None
         assert emitted.forcing["carbonate_sensitivity"] is None
-        written = yaml.safe_load(builder.path_roms_marbl_blueprint().read_text())
+        written = yaml.safe_load(builder.path_ucla_roms_blueprint().read_text())
         assert written["forcing"].get("carbonate_sensitivity") is None
         assert not any("_cdrgas" in p.name for p in builder._planned_netcdf_outputs())
         assert not list(builder.input_data_dir.glob("*_cdrgas*"))
@@ -4994,20 +4994,20 @@ class TestChildDomainNoInitialConditionsValidatesAtEmit:
     ``forge_blueprint_resolve._build_forcing``) survives the real
     ``generate_inputs()`` -> ``configure_build()`` chain (the same
     roms-tools-mocked chain ``TestGoldenNamelist`` drives) and emits a
-    schema-valid roms_marbl blueprint plus a valid namelist.
+    schema-valid ucla_roms blueprint plus a valid namelist.
 
-    C-Star's ``RomsMarblBlueprint.initial_conditions`` requires a non-empty
+    C-Star's ``UclaRomsBlueprint.initial_conditions`` requires a non-empty
     Dataset (min_length=1), and its orchestrator validates the emitted
     blueprint eagerly -- before the runtime 'nest-from' directive can replace
-    it with the parent-derived initial state -- so ``RomsMarblInputData`` must
+    it with the parent-derived initial state -- so ``RomsInputGenerator`` must
     emit a schema-valid PLACEHOLDER resource for a child with no generated IC
     (``CHILD_IC_PLACEHOLDER_LOCATION`` in input_data.py). This closes the gap
-    ``_validated_roms_marbl_blueprint`` would otherwise hit at emit time.
+    ``_validated_ucla_roms_blueprint`` would otherwise hit at emit time.
 
     Separately, C-Star's namelist ``InitialConditions.inifile`` is also
     required non-None, and ``_generate_initial_conditions`` (the only code
     that normally populates the run-time "initial" settings section) never
-    runs for this child -- so ``RomsMarblInputData.__init__`` seeds the same
+    runs for this child -- so ``RomsInputGenerator.__init__`` seeds the same
     sentinel into ``self._settings_run_time["initial"]`` up front. The
     run-time namelist gets regenerated downstream from the blueprint once the
     'nest-from' directive supplies the real parent-derived IC.
@@ -5128,7 +5128,7 @@ class TestChildDomainNoInitialConditionsValidatesAtEmit:
         # Right after generate_inputs the in-memory blueprint is a plain dict
         # (model_construct round-tripped via model_dump -- see generate_inputs);
         # the typed-model assertion comes after configure_build re-validates.
-        ic_elem = builder.roms_marbl_blueprint.initial_conditions
+        ic_elem = builder.ucla_roms_blueprint.initial_conditions
         assert len(ic_elem["data"]) == 1
         assert ic_elem["data"][0]["location"] == CHILD_IC_PLACEHOLDER_LOCATION
         assert (
@@ -5151,8 +5151,8 @@ class TestChildDomainNoInitialConditionsValidatesAtEmit:
                 compile_time_settings=compile_ov, run_time_settings=run_ov
             )
 
-        validated = builder.roms_marbl_blueprint
-        assert isinstance(validated, cstar_models.RomsMarblBlueprint)
+        validated = builder.ucla_roms_blueprint
+        assert isinstance(validated, cstar_models.UclaRomsBlueprint)
         assert len(validated.initial_conditions.data) == 1
         assert (
             validated.initial_conditions.data[0].location
@@ -5334,7 +5334,7 @@ class TestForgeRunnerEndToEnd:
         assert namelist_path.exists()
 
         blueprint_yaml_paths = list((run_dir / "blueprints").glob("B_*.yaml"))
-        assert blueprint_yaml_paths, "expected an emitted roms_marbl B_{name}.yaml"
+        assert blueprint_yaml_paths, "expected an emitted ucla_roms B_{name}.yaml"
 
         # ForgeRunner also publishes a copy to <working root>/output/ -- where
         # C-Star's deferred-blueprint resolution looks for a producer step's
@@ -5347,7 +5347,7 @@ class TestForgeRunnerEndToEnd:
         # The emitted blueprint loads strictly and records what produced it: the
         # forge run that generated it, derived from the forge blueprint it read.
         cfg = ForgeBlueprint.from_yaml(bp_path)
-        emitted = deserialize(published[0], cstar_models.RomsMarblBlueprint)
+        emitted = deserialize(published[0], cstar_models.UclaRomsBlueprint)
         assert emitted.description == emitted_blueprint_description(
             cfg.name, cfg.description
         )
@@ -5622,7 +5622,7 @@ class TestOnlyInputsReuseIsIdempotent:
             )
 
         namelist_text = (builder.run_time_code_dir / "namelist.nml").read_text()
-        blueprint_text = builder.path_roms_marbl_blueprint().read_text()
+        blueprint_text = builder.path_ucla_roms_blueprint().read_text()
         return namelist_text, blueprint_text
 
     def test_second_pass_reuse_matches_first_pass_byte_for_byte(

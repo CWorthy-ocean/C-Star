@@ -7,7 +7,7 @@ from unittest import mock
 
 import pytest
 
-from cstar.applications.roms_marbl.models import RomsMarblBlueprint
+from cstar.applications.ucla_roms.models import UclaRomsBlueprint
 from cstar.base.env import ENV_CSTAR_RUNID, FLAG_ON
 from cstar.base.feature import ENV_FF_ORCH_TRX_TIMESPLIT, ENV_FF_ORCH_TRX_TIMESPLIT_FREQ
 from cstar.orchestration.launch.local import LocalLauncher
@@ -155,7 +155,7 @@ def test_workplan_transformation(diamond_workplan: Workplan) -> None:
         assert not diamond_steps.intersection(step.depends_on)
 
         assert step.blueprint_overrides is not None
-        blueprint = deserialize(step.blueprint_path, RomsMarblBlueprint)
+        blueprint = deserialize(step.blueprint_path, UclaRomsBlueprint)
 
         # overrides will be transferred to the model after call to .apply
         assert "runtime_params" not in step.blueprint_overrides
@@ -340,7 +340,7 @@ def test_live_step_blueprint_anchors_relative_locations(
         working_dir=tmp_path / "work",
     )
 
-    blueprint = t.cast("RomsMarblBlueprint", step.blueprint)
+    blueprint = t.cast("UclaRomsBlueprint", step.blueprint)
 
     assert str(blueprint.forcing.boundary.data[0].location) == str(
         tmp_path / "data" / "boundary.nc"

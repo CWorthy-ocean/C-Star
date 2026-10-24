@@ -1377,7 +1377,7 @@ def build_forge_blueprint(
     # A child grid (has a parent) receives its boundary values from the parent's
     # nesting.nc extraction, not from reanalysis boundary forcing -- the executor
     # already skips boundary-forcing generation for a child (grid_parent is not
-    # None, see ForgeExecutor/RomsMarblInputData). Skip building boundary items
+    # None, see ForgeExecutor/RomsInputGenerator). Skip building boundary items
     # here too (defense-in-depth, the wizard also clears this at the UI layer) --
     # done inside _build_forcing (not by zeroing sources.boundary afterward) so a
     # boundary-only source is never noted into resolved_datasets/datasets either.
