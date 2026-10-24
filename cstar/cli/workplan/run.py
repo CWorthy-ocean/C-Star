@@ -96,6 +96,7 @@ from cstar.orchestration.transforms import (
     anchor_blueprint_path,
     external_dependencies,
 )
+from cstar.system.migration import CstarSchemaTooNewError
 
 if t.TYPE_CHECKING:
     from collections.abc import Mapping
@@ -478,6 +479,8 @@ def preprocess_path(workplan_path: str | None) -> str | None:
                 live = is_transformed_workplan(local_path)
                 klass: type[Workplan] = LiveWorkplan if live else Workplan
                 validation_result = validate_serialized_entity(local_path, klass)
+                if isinstance(validation_result.error, CstarSchemaTooNewError):
+                    raise typer.BadParameter(validation_result.error_msg)
                 if not validation_result.item:
                     log.error(validation_result.error_msg)
                     msg = f"The workplan file in `{workplan_path}` is improperly formatted"
@@ -1032,6 +1035,11 @@ def submit(
         log.exception(msg)
         print(msg)
         raise typer.Exit(1) from ex
+    except CstarSchemaTooNewError as ex:
+        # a file of the run (the workplan, its manifest or a blueprint) was
+        # written by a newer release; the message names it and the upgrade
+        log.debug("A file of the run is newer than this build reads", exc_info=True)
+        raise typer.BadParameter(f"Run {run_id!r} cannot be continued: {ex}") from ex
     except ValidationError as ex:
         # a step blueprint (or the workplan) that fails strict validation: the
         # message says what is wrong, so the traceback is only logged for debugging

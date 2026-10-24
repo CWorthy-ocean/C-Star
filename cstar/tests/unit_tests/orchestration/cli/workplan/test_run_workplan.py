@@ -1146,6 +1146,70 @@ def test_workplan_run_reload_invokes_run_dag_not_build_and_run_dag(
     assert isinstance(call_args[3], Planner)
 
 
+def test_workplan_run_refuses_a_newer_workplan(
+    tmp_path: Path,
+    wp_templates_dir: Path,
+    flatten_cli_output: Callable[[str], str],
+) -> None:
+    """Verify submitting a workplan written by a newer release exits 2 with the
+    upgrade message before anything is built.
+    """
+    content = (wp_templates_dir / "single_step.yaml").read_text()
+    wp_path = tmp_path / "workplan.yaml"
+    wp_path.write_text(
+        content.replace("schema_version: '1.2.0'", "schema_version: '2.0.0'")
+    )
+
+    with mock.patch("cstar.cli.workplan.run.build_and_run_dag") as mock_build:
+        result = CliRunner().invoke(app, [wp_path.as_posix()], color=False)
+
+    assert result.exit_code == 2, result.output
+    message = flatten_cli_output(result.output)
+    assert "workplan schema 2.0.0 is newer than this build" in message
+    assert "Upgrade cstar-ocean" in message
+    mock_build.assert_not_called()
+
+
+def test_workplan_run_reload_refuses_a_newer_transformed_workplan(
+    tmp_path: Path,
+    wp_templates_dir: Path,
+    mock_run_id: str,
+    flatten_cli_output: Callable[[str], str],
+) -> None:
+    """Verify re-entering a run whose transformed workplan a newer release wrote
+    exits 2 with the upgrade message, not a traceback and exit 3.
+    """
+    run_id = mock_run_id
+    wp_path = wp_templates_dir / "workplan.yaml"
+    wp = deserialize(wp_path, Workplan)
+    live_steps = [LiveStep.from_step(step) for step in wp.steps]
+    lwp = LiveWorkplan(**wp.model_dump(exclude={"steps"}), steps=live_steps)
+    trx_path = tmp_path / f"{wp_path.stem}_transformed.yaml"
+    assert serialize(trx_path, lwp), "serializing live workplan failed in test"
+    content = trx_path.read_text()
+    assert "schema_version: 1.2.0" in content
+    trx_path.write_text(
+        content.replace("schema_version: 1.2.0", "schema_version: 1.3.0")
+    )
+
+    with (
+        mock.patch(
+            "cstar.cli.workplan.run.handle_run_reloading",
+            mock.AsyncMock(return_value=_recorded_run(run_id, wp_path, tmp_path)),
+        ),
+        mock.patch("cstar.cli.workplan.run.run_dag") as mock_run_dag,
+    ):
+        result = CliRunner().invoke(app, ["--run-id", run_id], color=False)
+
+    assert result.exit_code == 2, result.output
+    message = flatten_cli_output(result.output)
+    assert (
+        f"Run {run_id!r} cannot be continued: workplan schema 1.3.0 is newer" in message
+    )
+    assert "Upgrade cstar-ocean" in message
+    mock_run_dag.assert_not_called()
+
+
 def test_workplan_run_reload_refuses_unusable_external_dependency(
     tmp_path: Path,
     mock_run_id: str,

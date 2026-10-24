@@ -356,6 +356,39 @@ class BlueprintMigration(Migration):
         )
 
 
+def refuse_newer_schema(label: str, found: t.Any, target: str) -> None:
+    """Refuse a document whose schema is newer than this build reads.
+
+    A missing or empty version marks a document written before its kind was
+    versioned; every schema began at 1.0.0.
+
+    Parameters
+    ----------
+    label : str
+        What the document is called in messages.
+    found : t.Any
+        The `schema_version` the document holds, or `None` when it has none.
+    target : str
+        The schema version this build reads and writes.
+
+    Raises
+    ------
+    CstarSchemaTooNewError
+        If the document's schema is newer than `target`, at any level.
+    ValueError
+        If the document's version is not dotted integers.
+    """
+    version = str(found or "").strip() or "1.0.0"
+    try:
+        newer = version_key(version) > version_key(target)
+    except ValueError as ex:
+        msg = f"Unrecognized schema_version {version!r}; expected dotted integers like 1.0.0"
+        raise ValueError(msg) from ex
+
+    if newer:
+        raise CstarSchemaTooNewError(label, version, target)
+
+
 def version_key(version: str) -> tuple[int, ...]:
     """Return a numeric sort key for a dotted-integer schema version.
 

@@ -9,6 +9,8 @@ Schemas for the built-in `Workplan` are listed here.
 - :download:`Workplan Schema v1.0.0 <https://raw.githubusercontent.com/CWorthy-ocean/C-Star/refs/heads/main/docs/schemas/wp/workplan_schema.1.0.0.json>`
 - :download:`Workplan Schema v1.1.0 <https://raw.githubusercontent.com/CWorthy-ocean/C-Star/refs/heads/main/docs/schemas/wp/workplan_schema.1.1.0.json>`:
   adds the run a ``runs`` alias resolved to when the workplan was scheduled (``id``, ``path``).
+- :download:`Workplan Schema v1.2.0 <https://raw.githubusercontent.com/CWorthy-ocean/C-Star/refs/heads/main/docs/schemas/wp/workplan_schema.1.2.0.json>`:
+  adds the version of the schema the workplan was written with (``schema_version``); a workplan without one reads as 1.0.0, and a newer one is refused.
 
 Runs
 ----
