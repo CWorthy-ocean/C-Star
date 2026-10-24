@@ -572,7 +572,7 @@ async def test_tracking_retrieve_mixed_case_runid(tmp_path: Path) -> None:
     """Verify a mixed-case run-id query resolves to the slugified run record.
 
     Run records are persisted with slugified (lowercase) run-ids; the lookup
-    must normalize the same way so `cstar workplan status MYRUN` finds the
+    must normalize the same way so `cstar run status MYRUN` finds the
     record created for `myrun`.
 
     Parameters

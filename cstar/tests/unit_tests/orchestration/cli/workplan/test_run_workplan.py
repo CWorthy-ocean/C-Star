@@ -27,6 +27,7 @@ from cstar.base.env import (
 from cstar.base.exceptions import CstarExpectationFailed
 from cstar.cli.common import normalize_runid
 from cstar.cli.workplan.run import (
+    COMMAND_SUBMIT,
     app,
     auto_compose,
     get_run_summary_display,
@@ -2091,7 +2092,7 @@ def test_auto_compose_ignores_non_blueprint_content(tmp_path: Path) -> None:
 
 
 def test_workplan_run_blueprint_auto_composes(hello_world_bp_path: Path) -> None:
-    """Verify submitting a blueprint to `cstar workplan run` generates a host
+    """Verify submitting a blueprint to `cstar workplan submit` generates a host
     workplan and passes the generated workplan (not the blueprint) on to
     `build_and_run_dag`.
 
@@ -2785,7 +2786,7 @@ def test_workplan_run_reports_all_directive_problems_before_submission(
     tmp_path: Path,
     hello_world_bp_path: Path,
 ) -> None:
-    """Verify `workplan run` rejects a workplan whose directives are
+    """Verify `workplan submit` rejects a workplan whose directives are
     misconfigured as a usage error listing every problem, and never reaches
     the DAG runner.
 
@@ -2934,7 +2935,7 @@ def test_workplan_run_pre_run_requires_workplan_path() -> None:
 def test_workplan_run_refuses_a_removed_dry_run_setting(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Verify `workplan run` exits 2 without reloading or launching anything
+    """Verify `workplan submit` exits 2 without reloading or launching anything
     while a removed setting that used to request a plan-only run is exported.
 
     Parameters
@@ -3414,7 +3415,7 @@ def test_workplan_run_run_id_in_place_of_path_names_the_right_command(
     assert result.exit_code == 2
     output = flatten_cli_output(result.output)
     assert "'my-run' is a run-id, not a workplan file" in output
-    assert f"cstar workplan run {ARG_RUN_ID} my-run {ARG_RESUME}" in output
+    assert f"cstar workplan {COMMAND_SUBMIT} {ARG_RUN_ID} my-run {ARG_RESUME}" in output
 
 
 @pytest.mark.parametrize("value", ["no-such-run", "typo.yaml", "dir/typo", "!!!"])

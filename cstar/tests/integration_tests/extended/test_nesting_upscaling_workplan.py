@@ -8,7 +8,7 @@ parent grid, a parent rerun that reads it, and the CDR metrics of the child and 
 combined. It is nine steps and compiles ROMS with ParallelIO three times, so a run takes
 about ten minutes on a 10-core laptop.
 
-As in the e2e tier, ``cstar workplan run`` only schedules: each step is a detached
+As in the e2e tier, ``cstar workplan submit`` only schedules: each step is a detached
 ``sh`` proxy that calls the ``cstar`` executable on ``PATH``, and a shim pins that to
 this checkout. The module polls the step sentinels until all nine are terminal.
 """
@@ -231,7 +231,7 @@ def nesting_run(
 ) -> Iterator[NestingRun]:
     """Schedule the workplan once for the module and wait for all steps to finish.
 
-    Prints the wall time from ``workplan run`` to the last step's sentinel; ``-s``
+    Prints the wall time from ``workplan submit`` to the last step's sentinel; ``-s``
     shows it.
 
     Yields
@@ -257,7 +257,7 @@ def nesting_run(
 def _schedule_and_wait(
     integration_test_data: dict[str, Path], shim: Path, root: Path
 ) -> NestingRun:
-    """Run ``cstar workplan run`` on the example and poll the sentinels to the end.
+    """Run ``cstar workplan submit`` on the example and poll the sentinels to the end.
 
     Returns
     -------
@@ -268,12 +268,12 @@ def _schedule_and_wait(
     env = make_cli_env(root, shim)
 
     started = time.monotonic()
-    proc = run_cstar(env, "workplan", "run", str(workplan), "--run-id", RUN_ID)
+    proc = run_cstar(env, "workplan", "submit", str(workplan), "--run-id", RUN_ID)
     data_home = root / "data"
     output = f"stdout:\n{proc.stdout}\nstderr:\n{proc.stderr}"
     if proc.returncode != 0:
         tails = run_log_tails(data_home, RUN_ID)
-        pytest.fail(f"workplan run exited {proc.returncode}\n{output}\n{tails}")
+        pytest.fail(f"workplan submit exited {proc.returncode}\n{output}\n{tails}")
     assert SCHEDULED_MESSAGE in proc.stdout, output
 
     statuses = wait_for_terminal(

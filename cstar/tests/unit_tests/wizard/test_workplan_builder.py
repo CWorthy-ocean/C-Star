@@ -1705,7 +1705,7 @@ def test_run_saves_streams_and_runs_pre_run_first_on_slurm(
     cmd = commands[0]
     assert cmd[-6:] == (
         "workplan",
-        "run",
+        "submit",
         str(tmp_path / "plans" / "demo.yaml"),
         "--run-id",
         "demo",

@@ -135,7 +135,7 @@ PLACEMENTS = [PLACE_RIGHT, PLACE_BOTTOM, PLACE_TOP, PLACE_HIDDEN]
 _SIDE_CLASSES = ("forge-side-right", "forge-side-bottom", "forge-side-top")
 """The placement classes of the preview pane, one at a time."""
 
-CHECK, RUN = "check", "run"
+CHECK, SUBMIT = "check", "submit"
 """The ``cstar workplan`` subcommands the Run subsection streams."""
 
 FREQUENT_RESTARTS = {"output_period_rst": 86400.0, "monthly_restarts": False}
@@ -3570,7 +3570,7 @@ class WorkplanBuilderPage:
         return {k.strip(): v.strip() for k, _sep, v in pairs}
 
     async def _deep_check_async(self) -> None:
-        """Resolve the draft as ``cstar workplan run`` would, listing every problem."""
+        """Resolve the draft as ``cstar workplan submit`` would, listing every problem."""
         draft = self.draft
         if draft is None:
             self.diagnostics.value = components.banner(
@@ -3668,7 +3668,7 @@ class WorkplanBuilderPage:
         self.pre_run_first = W.Checkbox(value=False, indent=False)
         self.check_btn = W.Button(description=_caption("check", "Check"), icon="check")
         self.run_btn = W.Button(
-            description=_caption("run", "Run"), icon="play", button_style="primary"
+            description=_caption("run", "Submit"), icon="play", button_style="primary"
         )
         self.run_status = W.HTML("")
         self._run_id_touched = False
@@ -3690,7 +3690,7 @@ class WorkplanBuilderPage:
         )
         self.run_id.observe(self._on_run_id, names="value")
         self.check_btn.on_click(lambda _b: self._start_run(CHECK))
-        self.run_btn.on_click(lambda _b: self._start_run(RUN))
+        self.run_btn.on_click(lambda _b: self._start_run(SUBMIT))
 
     def _on_run_id(self, _change: Any) -> None:
         if not self.is_suspended:
@@ -3721,11 +3721,11 @@ class WorkplanBuilderPage:
         exe = Path(sys.executable).with_name("cstar")
         cmd = [str(exe)] if exe.exists() else [sys.executable, "-m", "cstar.cli.cli"]
         cmd += ["workplan", action, str(path)]
-        if action == RUN and self.run_id.value.strip():
+        if action == SUBMIT and self.run_id.value.strip():
             cmd += [ARG_RUN_ID, self.run_id.value.strip()]
         for key, value in self.parsed_vars().items():
             cmd += [ARG_VAR_LONG, f"{key}={value}"]
-        if action == RUN and self.pre_run_first.value and self._pre_run_offered:
+        if action == SUBMIT and self.pre_run_first.value and self._pre_run_offered:
             cmd.append(ARG_PRE_RUN)
         return cmd
 

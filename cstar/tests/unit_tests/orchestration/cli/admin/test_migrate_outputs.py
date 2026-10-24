@@ -130,7 +130,7 @@ def test_migrate_output_layout_removes_symlink_only_gather_dir(
     tmp_path: Path,
 ) -> None:
     """Verify a `joined_output` directory holding only symlinks (an old
-    run-level `cstar workplan gather` result) is removed outright rather
+    run-level `cstar run gather` result) is removed outright rather
     than migrated.
 
     Parameters

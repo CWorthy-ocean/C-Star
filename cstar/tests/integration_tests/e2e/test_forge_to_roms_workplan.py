@@ -1,6 +1,6 @@
 """Tier 2: a forge -> roms_marbl -> CDR metrics and CDR-LiTE workplan run end to end through the ``cstar`` CLI.
 
-``cstar workplan run`` only schedules: each step is a detached ``sh`` proxy script that
+``cstar workplan submit`` only schedules: each step is a detached ``sh`` proxy script that
 calls the ``cstar`` executable on ``PATH``. A shim pins that executable to this
 checkout, and the fixture then polls the step sentinels until all eight are terminal.
 
@@ -368,7 +368,7 @@ def _schedule_and_wait(
     shim: Path,
     root: Path,
 ) -> E2ERun:
-    """Build the blueprints and workplan, run ``cstar workplan run``, and poll to the end.
+    """Build the blueprints and workplan, run ``cstar workplan submit``, and poll to the end.
 
     Returns
     -------
@@ -396,11 +396,11 @@ def _schedule_and_wait(
     )
     env = make_cli_env(root, shim)
 
-    proc = run_cstar(env, "workplan", "run", "--run-id", RUN_ID, str(workplan))
+    proc = run_cstar(env, "workplan", "submit", "--run-id", RUN_ID, str(workplan))
     output = f"stdout:\n{proc.stdout}\nstderr:\n{proc.stderr}"
     if proc.returncode != 0:
         tails = run_log_tails(root / "data", RUN_ID)
-        pytest.fail(f"workplan run exited {proc.returncode}\n{output}\n{tails}")
+        pytest.fail(f"workplan submit exited {proc.returncode}\n{output}\n{tails}")
     assert SCHEDULED_MESSAGE in proc.stdout, output
 
     state_home = root / "state"
@@ -956,7 +956,7 @@ def test_workplan_status_names_all_steps(e2e_run: E2ERun) -> None:
 def test_resume_of_completed_run_keeps_steps_done(e2e_run: E2ERun) -> None:
     """Resuming a finished run succeeds and leaves every step ``Done``."""
     proc = run_cstar(
-        e2e_run.env, "workplan", "run", "--run-id", e2e_run.run_id, "--resume"
+        e2e_run.env, "workplan", "submit", "--run-id", e2e_run.run_id, "--resume"
     )
     assert proc.returncode == 0, f"{proc.stdout}\n{proc.stderr}"
 

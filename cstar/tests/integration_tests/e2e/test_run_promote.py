@@ -136,7 +136,7 @@ def promote_run(
     data_home, state_home = producer / "data", producer / "state"
     steps = list(SHAPE)
 
-    proc = run_cstar(env, "workplan", "run", "--run-id", RUN_ID, str(workplan))
+    proc = run_cstar(env, "workplan", "submit", "--run-id", RUN_ID, str(workplan))
     try:
         statuses = wait_for_terminal(
             state_home,
@@ -147,7 +147,7 @@ def promote_run(
         )
         if proc.returncode != 0 or statuses != dict.fromkeys(steps, DONE):
             pytest.fail(
-                f"workplan run exited {proc.returncode} with {statuses}\n"
+                f"workplan submit exited {proc.returncode} with {statuses}\n"
                 f"{_output(proc)}\n{run_log_tails(data_home, RUN_ID)}"
             )
 
@@ -354,7 +354,7 @@ def test_a_workplan_depends_on_the_promoted_run_by_uuid(
     env = promote_run.env(name)
     root = promote_run.root / name
     workplan = write_consumer(root / "plan", promote_run.handle)
-    proc = run_cstar(env, "workplan", "run", "--run-id", name, str(workplan))
+    proc = run_cstar(env, "workplan", "submit", "--run-id", name, str(workplan))
     state_home, data_home = root / "state", root / "data"
     try:
         statuses = wait_for_terminal(
@@ -366,7 +366,7 @@ def test_a_workplan_depends_on_the_promoted_run_by_uuid(
         )
         if proc.returncode != 0 or statuses != {STEP: DONE}:
             pytest.fail(
-                f"workplan run exited {proc.returncode} with {statuses}\n"
+                f"workplan submit exited {proc.returncode} with {statuses}\n"
                 f"{_output(proc)}\n{run_log_tails(data_home, name)}"
             )
     finally:
@@ -405,7 +405,7 @@ def test_move_updates_the_tracking_record_and_relaunch_is_refused(
     status = run_cstar(env, "run", "status", RUN_ID)
     assert status.returncode == 0, _output(status)
 
-    relaunched = run_cstar(env, "workplan", "run", "--run-id", RUN_ID)
+    relaunched = run_cstar(env, "workplan", "submit", "--run-id", RUN_ID)
     assert relaunched.returncode == 2, _output(relaunched)
     assert "attached runs can be inspected and referenced" in _flat(
         _output(relaunched)

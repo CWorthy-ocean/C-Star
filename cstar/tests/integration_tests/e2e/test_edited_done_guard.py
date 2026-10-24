@@ -88,11 +88,11 @@ class GuardedRun:
         return sorted(p.name for p in self.run_root.glob("workplan_transformed.yaml*"))
 
     def rerun(self, *args: str) -> subprocess.CompletedProcess[str]:
-        """Re-enter the run with the workplan, passing ``args`` to ``workplan run``."""
+        """Re-enter the run with the workplan, passing ``args`` to ``workplan submit``."""
         return run_cstar(
             self.env,
             "workplan",
-            "run",
+            "submit",
             "--run-id",
             RUN_ID,
             *args,
@@ -111,14 +111,14 @@ def guarded_run(
     state_home = root / "state"
     steps = list(SHAPE)
 
-    proc = run_cstar(env, "workplan", "run", "--run-id", RUN_ID, str(workplan))
+    proc = run_cstar(env, "workplan", "submit", "--run-id", RUN_ID, str(workplan))
     try:
         statuses = wait_for_terminal(
             state_home, RUN_ID, steps, timeout=RUN_TIMEOUT, poll_interval=POLL_INTERVAL
         )
         if proc.returncode != 0 or statuses != dict.fromkeys(steps, DONE):
             pytest.fail(
-                f"workplan run exited {proc.returncode} with {statuses}\n"
+                f"workplan submit exited {proc.returncode} with {statuses}\n"
                 f"stdout:\n{proc.stdout}\nstderr:\n{proc.stderr}\n"
                 f"{run_log_tails(root / 'data', RUN_ID)}"
             )

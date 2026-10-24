@@ -74,7 +74,7 @@ sections:
     required: false
   review.run:
     title: Run
-    desc: Save, check and run the workplan with the C-Star CLI.
+    desc: Save, check and submit the workplan with the C-Star CLI.
     required: false
   review.report:
     title: What loading changed
@@ -331,6 +331,6 @@ fields:
   buttons.check:
     label: Check
   buttons.run:
-    label: Run
+    label: Submit
   buttons.revert:
     label: revert

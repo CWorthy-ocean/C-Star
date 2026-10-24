@@ -109,7 +109,7 @@ to another user, since the verbs that write into a run (`cstar run gather`,
 directory; it is owned otherwise. {ARG_OWN} and {ARG_READ_ONLY} decide it
 instead, and on a run that is already attached they change its mode alone.
 
-An attached run is never relaunched: `cstar workplan run --run-id` and
+An attached run is never relaunched: `cstar workplan submit --run-id` and
 `--resume` refuse it, as it has no sentinels here. To continue from it, start a
 new run that references it (see "Extending a finished run").
 

@@ -442,7 +442,7 @@ def test_hello_world_workplan_relative_blueprint_path(
     run_from_workplan_dir: bool,
 ) -> None:
     """Verify a step whose `blueprint` is a path relative to the workplan file
-    is launched with the absolute path, whether `cstar workplan run` is
+    is launched with the absolute path, whether `cstar workplan submit` is
     invoked from the workplan's directory or from elsewhere.
 
     Parameters

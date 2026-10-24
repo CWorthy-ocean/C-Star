@@ -105,9 +105,14 @@ if t.TYPE_CHECKING:
 app = typer.Typer()
 log = get_logger(__name__)
 
-HELP_SHORT = "Execute a workplan."
+COMMAND_SUBMIT: t.Final[str] = "submit"
+"""Name under which the workplan launch command is listed."""
+ALIAS = "run"
+"""Earlier name of the launch command, still registered but hidden from `--help`."""
+HELP_SHORT = "Submit a workplan: schedule every step and exit."
+HELP_ALIASED = f"{HELP_SHORT} (alias: {ALIAS})"
 HELP_LONG = f"""\
-{HELP_SHORT}
+{HELP_ALIASED}
 
 Specify a previously used `run_id` to re-start (or reattach) to a prior run.
 
@@ -119,8 +124,8 @@ with the workplan path it was started from (the run-id is derived from the
 workplan name exactly as on the first run; the file must be unchanged since).
 
 Pass `--pre-run` to perform every stage before the model launch for each step
-(locally, even on scheduler systems) without launching any model. Re-run the
-workplan without `--pre-run` to attach to the prepared directories and launch.
+(locally, even on scheduler systems) without launching any model. Submit the
+workplan again without `--pre-run` to attach to the prepared directories and launch.
 """
 
 CATEGORY_HEADER_COLOR: t.Final[str] = "white"
@@ -490,7 +495,7 @@ def preprocess_path(workplan_path: str | None) -> str | None:
             if is_known_run_id(workplan_path):
                 msg = (
                     f"{workplan_path!r} is a run-id, not a workplan file; use "
-                    f"`cstar workplan run {ARG_RUN_ID} {workplan_path} {ARG_RESUME}`"
+                    f"`cstar workplan {COMMAND_SUBMIT} {ARG_RUN_ID} {workplan_path} {ARG_RESUME}`"
                 )
                 raise typer.BadParameter(msg) from ex
 
@@ -811,8 +816,8 @@ def verify_resume_source(wp_path: Path, wp_run: WorkplanRun) -> None:
     log.debug(msg)
 
 
-@app.command(name="run", help=HELP_LONG, short_help=HELP_SHORT)
-def run(
+@app.command(name=COMMAND_SUBMIT, help=HELP_LONG, short_help=HELP_SHORT)
+def submit(
     ctx: typer.Context,
     run_id: t.Annotated[
         str,
@@ -951,7 +956,7 @@ def run(
                 if resume and wp.pre_run:
                     msg = (
                         f"Run {run_id!r} is a pre-run; retry its failed steps with "
-                        f"`cstar workplan run <workplan> {ARG_PRE_RUN}` instead"
+                        f"`cstar workplan {COMMAND_SUBMIT} <workplan> {ARG_PRE_RUN}` instead"
                     )
                     raise typer.BadParameter(msg, param_hint=ARG_RESUME)
                 pre_run = wp.pre_run
@@ -1020,11 +1025,11 @@ def run(
     console.print(f"{summary.workplan_name!r} run scheduling has completed")
     if pre_run:
         console.print(
-            "Pre-run scheduled. Re-run "
-            f"`cstar workplan run {summary.source_workplan} --run-id {summary.run_id}` "
+            "Pre-run scheduled. Submit "
+            f"`cstar workplan {COMMAND_SUBMIT} {summary.source_workplan} {ARG_RUN_ID} {summary.run_id}` "
             f"without {ARG_PRE_RUN} to attach to the prepared directories and launch."
         )
 
 
 if __name__ == "__main__":
-    typer.run(run)
+    typer.run(submit)

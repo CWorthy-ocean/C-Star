@@ -411,7 +411,7 @@ REMOVED_SETTINGS: t.Final[dict[str, RemovedSetting]] = {
     ),
     "CSTAR_CLOBBER_WORKING_DIR": RemovedSetting(
         "pass --clobber to `cstar blueprint run` or `cstar blueprint migrate` "
-        "instead (`--clobber <step|all>` for `cstar workplan run`)."
+        "instead (`--clobber <step|all>` for `cstar workplan submit`)."
     ),
     "CSTAR_FF_CLI_TEMPLATE_CREATE": RemovedSetting(
         "the `cstar template create` command was removed."
@@ -433,7 +433,7 @@ REMOVED_SETTINGS: t.Final[dict[str, RemovedSetting]] = {
     ),
     "CSTAR_FRESH_CODEBASES": RemovedSetting(
         "pass --clobber to `cstar blueprint run` (`--clobber <step|all>` for "
-        "`cstar workplan run`) to start from an empty working directory instead."
+        "`cstar workplan submit`) to start from an empty working directory instead."
     ),
     "CSTAR_IN_ACTIVE_ALLOCATION": RemovedSetting(
         "C-Star detects an active SLURM allocation from SLURM_JOBID."

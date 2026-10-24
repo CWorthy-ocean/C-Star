@@ -155,7 +155,7 @@ Likewise, an application that can perform every stage before its model launch an
 stop sets ``pre_runnable = True``. Its `BlueprintRunner` then honours
 `RunnerRequest.pre_run`: it performs every pre-launch stage, reports a completed
 state, launches nothing and skips post-run. Only then does ``--pre-run`` on
-``cstar blueprint run`` or ``cstar workplan run`` reach that application. Otherwise
+``cstar blueprint run`` or ``cstar workplan submit`` reach that application. Otherwise
 the CLI rejects the flag for a blueprint run, and a workplan pre-run skips the
 application's steps and reports why.
 
@@ -401,7 +401,7 @@ needs migration (with the ``cstar blueprint migrate`` command to run), or an old
 major that cannot be migrated (with your ``guidance()``), and exits non-zero in
 each case; a compatible file is validated normally. ``cstar blueprint migrate``
 reports that a compatible file needs nothing and writes nothing. ``cstar blueprint
-run`` and ``cstar workplan run`` migrate automatically, and only when adapters
+run`` and ``cstar workplan submit`` migrate automatically, and only when adapters
 are needed; a workplan reports every step it cannot migrate at once and refuses
 before creating a run directory. ``CSTAR_DISABLE_MIGRATION=1`` turns off that
 automatic migration, and has no effect on a compatible older file. For example:

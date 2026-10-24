@@ -110,7 +110,7 @@ def _directory_target(target: str) -> ShowTarget:
         if JobFileSystemManager(root).tasks_dir.is_dir():
             msg += (
                 " The run predates the manifest: re-entering it with "
-                "`cstar workplan run --run-id <run-id>` records one."
+                "`cstar workplan submit --run-id <run-id>` records one."
             )
         raise typer.BadParameter(msg)
 
@@ -329,7 +329,7 @@ def _read_manifest(resolved: ShowTarget) -> RunManifest:
         typer.echo(
             f"Run {resolved.run_id or str(resolved.root)!r} has no manifest: it "
             "predates the manifest, and re-entering it with "
-            "`cstar workplan run --run-id <run-id>` records one.",
+            "`cstar workplan submit --run-id <run-id>` records one.",
             err=True,
         )
         raise typer.Exit(1)
