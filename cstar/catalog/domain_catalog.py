@@ -543,12 +543,12 @@ class DomainCatalog:
         subdirs, files = self._fs_list(directory)
         if not subdirs:
             application = canonical_application(directory.name)
-            for f in _yaml_files(files):
-                name = f.name.removesuffix(f.suffix)
-                if application == directory.name:
-                    current.setdefault(application, {}).setdefault(name, f)
-                else:
-                    legacy.append((application, name, f))
+            entries = [(f.name.removesuffix(f.suffix), f) for f in _yaml_files(files)]
+            if application != directory.name:  # an earlier name: a legacy form
+                legacy.extend((application, name, f) for name, f in entries)
+                return
+            for name, f in entries:
+                current.setdefault(application, {}).setdefault(name, f)
             return
         if files:
             logger.debug(

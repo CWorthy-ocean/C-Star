@@ -52,9 +52,7 @@ RequiredString: t.TypeAlias = t.Annotated[
 """A non-empty string with no leading or trailing whitespace."""
 
 ApplicationName: t.TypeAlias = t.Annotated[
-    str,
-    StringConstraints(strip_whitespace=True, min_length=1),
-    AfterValidator(canonical_application),
+    RequiredString, AfterValidator(canonical_application)
 ]
 """An application name, stripped, with an earlier name replaced by the current one."""
 

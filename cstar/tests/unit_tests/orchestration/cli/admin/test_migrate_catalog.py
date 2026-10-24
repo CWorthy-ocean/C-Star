@@ -264,6 +264,28 @@ def test_migrate_catalog_layout_keeps_a_non_empty_earlier_name_directory(
     assert not src.exists()
 
 
+def test_migrate_catalog_layout_keeps_a_symlinked_earlier_name_directory(
+    tmp_path: Path,
+) -> None:
+    """A symlinked earlier-name directory is reported as left in place, never
+    removed, so the migration finishes instead of failing in `rmdir`.
+    """
+    root = (tmp_path / "catalog").resolve()
+    shared = _write(tmp_path / "shared" / "x.yaml", "x").parent
+    link = root / "blueprints" / "roms_marbl"
+    link.parent.mkdir(parents=True)
+    link.symlink_to(shared, target_is_directory=True)
+    dst = root / "blueprints" / "ucla_roms" / "x.yaml"
+
+    report = migrate_catalog_layout(root)
+
+    assert report == CatalogMigrationReport(
+        moved=[(link / "x.yaml", dst)], left_in_place=[link]
+    )
+    assert dst.read_text() == "x"
+    assert link.is_symlink()
+
+
 def test_migrate_catalog_layout_collision_in_earlier_name_directory(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

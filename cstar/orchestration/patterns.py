@@ -446,7 +446,7 @@ def forge_then_run(
     forge_blueprint: Path,
     emitted: "EmittedBlueprint",
     *,
-    names: tuple[str, str] = ("forge", "ucla_roms"),
+    names: tuple[str, str] = ("forge", APP_NAME),
 ) -> Generated:
     """Generate a forge step followed by the run of the blueprint it emits.
 

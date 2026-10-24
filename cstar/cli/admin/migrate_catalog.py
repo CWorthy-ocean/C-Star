@@ -42,7 +42,7 @@ and reported, never overwritten. After a per-machine blueprint is moved, its
 `<name>/` and `<machine>/` directories are removed if they are then empty;
 so is an application's earlier-name directory. Anything else in them (a
 `Build/` directory, `_grid.yaml`, `settings_B_*.yaml`, ...) is left in place
-and reported.
+and reported, as is a directory that is a symbolic link.
 
 The catalog is read with validation suppressed, so an otherwise incomplete
 catalog can still be migrated. Pass `--dry-run` to see what would change
@@ -72,14 +72,22 @@ class CatalogMigrationReport:
     directories removed (or, in `dry_run` mode, that would be removed).
     """
     left_in_place: list[Path] = field(default_factory=list[Path])
-    """Legacy directories that still hold other files after the move, and so
-    were not removed.
+    """Legacy directories that still hold other files after the move, or are
+    symbolic links, and so were not removed.
     """
 
 
 def _remaining(directory: Path, gone: set[Path]) -> list[Path]:
     """List the entries of `directory` that will still exist once `gone` is removed."""
     return [e for e in sorted(directory.iterdir()) if e not in gone]
+
+
+def _kept(directory: Path, gone: set[Path]) -> bool:
+    """Whether `directory` stays once `gone` is removed: it still holds other
+    entries, or it is a symbolic link, which `rmdir` cannot remove and whose
+    target may be shared.
+    """
+    return directory.is_symlink() or bool(_remaining(directory, gone))
 
 
 def migrate_catalog_layout(
@@ -144,7 +152,7 @@ def migrate_catalog_layout(
     for directory in name_dirs:
         if directory in destinations:
             continue
-        if _remaining(directory, gone):
+        if _kept(directory, gone):
             report.left_in_place.append(directory)
             kept.add(directory)
         else:
@@ -153,12 +161,12 @@ def migrate_catalog_layout(
     for directory in machine_dirs:
         if directory in destinations:
             continue
-        if _remaining(directory, gone | kept):
+        if _kept(directory, gone | kept):
             report.left_in_place.append(directory)
         elif not any(d.parent == directory for d in kept):
             report.removed_dirs.append(directory)
     for directory in earlier_dirs:
-        if _remaining(directory, gone):
+        if _kept(directory, gone):
             report.left_in_place.append(directory)
         else:
             report.removed_dirs.append(directory)
