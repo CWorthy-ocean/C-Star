@@ -76,11 +76,11 @@ rather than the latest one.
 (alkalinity and DIC) through its open boundary, in ``*_uscl.*.nc`` files. The
 ``upscaler`` application turns them into ``upscaled_cdr.nc``, a CDR forcing
 file for the parent grid, with each hour's flux stamped at the start of that
-hour so the parent applies it in the hour it left the child. ``parent_up`` is the parent grid run again from its
-own restart at the child's start, with that file as its CDR forcing, so the
-parent receives what the child exported. Forge builds ``parent_up`` from a
-blueprint with the CDR mode ``upscaled``, which compiles ROMS to read its CDR
-forcing from a file.
+hour so the parent applies it in the hour it left the child. ``parent_up`` is
+the parent grid run again from its own restart at the child's start, with that
+file as its CDR forcing, so the parent receives what the child exported. Forge
+builds ``parent_up`` from a blueprint with the CDR mode ``upscaled``, which
+compiles ROMS to read its CDR forcing from a file.
 
 **CDR metrics.** The ``cdr_metrics`` application computes the CO2 uptake and
 the CDR efficiency from the ``_cdr`` output of the child and of ``parent_up``.
