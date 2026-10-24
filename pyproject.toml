@@ -19,6 +19,7 @@ classifiers = [
     "Programming Language :: Python",
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
     "Topic :: Scientific/Engineering :: Oceanography"
 ]
 requires-python = ">=3.12"
@@ -42,8 +43,9 @@ dependencies = [
     # first release without the xarray<2025.8 cap, which the xarray floor below needs.
     # >=5.2.1: 5.2.0 is the first release that reads an ESPER source's
     # `salinity_conditioning` (earlier ones accept it and silently ignore it), and
-    # 5.2.1 adds the nested CDR `domains=` API.
-    "roms_tools>=5.2.1,<6",
+    # 5.2.1 adds the nested CDR `domains=` API. >=5.2.2: the first release that
+    # supports Python 3.14.
+    "roms_tools>=5.2.2,<6",
     "typer<=0.25",
     "shellingham>=1.3",
     # -- direct imports in cstar.applications.forge (arrive with the forge
