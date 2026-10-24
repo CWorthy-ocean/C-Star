@@ -1,6 +1,7 @@
 import functools
 import logging
 import os
+import shutil
 import signal
 import socket
 import subprocess
@@ -57,6 +58,7 @@ from cstar.tests.unit_tests.fake_abc_subclasses import (
     FakeInputDataset,
     StubSimulation,
 )
+from cstar.tests.unit_tests.orchestration.manifest_runs import write_identity
 
 ################################################################################
 # Network guard
@@ -2356,12 +2358,12 @@ def create_mocked_simulation_outputs(
 
         wp = deserialize(trx_wp_path, LiveWorkplan)
 
-        # simulate a run occurring
+        # simulate a run occurring: the run directory holds the transformed workplan
+        shutil.copy(trx_wp_path, container_dir / f"{wp_path.stem}_transformed.yaml")
+        write_identity(container_dir, run_id, workplan=wp_path)
         repo = TrackingRepository()
         await repo.put_workplan_run(
             WorkplanRun(
-                workplan_path=wp_path,
-                trx_workplan_path=trx_wp_path,
                 output_path=container_dir,
                 run_id=run_id,
             )

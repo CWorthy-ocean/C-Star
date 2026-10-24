@@ -1,3 +1,4 @@
+import shutil
 import typing as t
 from collections.abc import Callable
 from contextlib import AbstractContextManager
@@ -12,8 +13,6 @@ from cstar.execution.file_system import JobFileSystemManager, StateDirectoryMana
 from cstar.orchestration.models import Step, Workplan
 from cstar.orchestration.orchestration import LiveStep, LiveWorkplan
 from cstar.orchestration.tracking import (
-    KEY_ACCESS,
-    KEY_ATTACHED,
     Access,
     TrackingRepository,
     WorkplanRun,
@@ -389,12 +388,12 @@ def _attach(
     """
     recorded = TrackingRepository().get_workplan_run_sync(run_id)
     assert recorded is not None
-    metadata = {KEY_ATTACHED: "1"}
+    # the attached directory holds the run's transformed workplan, as a copy would
+    shutil.copy(recorded.trx_workplan_path, where / recorded.trx_workplan_path.name)
+    update: dict[str, t.Any] = {"output_path": where, "attached": True}
     if access is not None:
-        metadata[KEY_ACCESS] = access.value
-    attached: WorkplanRun = recorded.model_copy(
-        update={"output_path": where, "metadata": metadata}
-    )
+        update["access"] = access
+    attached: WorkplanRun = recorded.model_copy(update=update)
     return mock.patch(
         "cstar.orchestration.tracking.TrackingRepository.get_workplan_run",
         mock.AsyncMock(return_value=attached),
@@ -456,12 +455,14 @@ def test_cli_workplan_gather_refuses_a_run_attached_read_only(
     output.mkdir(parents=True)
     (output / "only.nc").write_text("data")
 
-    with _attach(fake_run_id, where, Access.read_only):
+    attach = _attach(fake_run_id, where, Access.read_only)
+    held = sorted(where.iterdir())  # the transformed workplan the attachment holds
+    with attach:
         result = CliRunner().invoke(app, [fake_run_id], color=False)
 
     assert result.exit_code == 2
     text = flatten_cli_output(result.stderr)
     assert "is attached read-only" in text
     assert "--own" in text
-    assert list(where.iterdir()) == []
+    assert sorted(where.iterdir()) == held
     assert not _dest_dir().exists()

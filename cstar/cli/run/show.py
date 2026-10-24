@@ -369,10 +369,12 @@ def show(
         fold_step_records(manifest, root)
     elif not no_refresh:
         run = get_from_ctxmap(context, KEY_RUN, WorkplanRun)
-        workplan = LiveWorkplan.try_load(run.trx_workplan_path)
+        workplan_path = run.try_trx_workplan_path()
+        workplan = LiveWorkplan.try_load(workplan_path) if workplan_path else None
         if workplan is None:
+            where = str(workplan_path) if workplan_path else f"of run {run.run_id!r}"
             typer.echo(
-                f"Unable to load the transformed workplan {run.trx_workplan_path}; "
+                f"Unable to load the transformed workplan {where}; "
                 "showing the manifest as last recorded.",
                 err=True,
             )

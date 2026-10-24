@@ -218,16 +218,28 @@ async def _run_candidates(application: str) -> list[_Candidate]:
     runs = sorted(
         await TrackingRepository().list_latest_runs(), key=lambda run: run.run_id
     )
-    workplans = await LiveWorkplan.load_all(
-        [run.trx_workplan_path for run in runs], MAX_CONCURRENCY
-    )
+    # a run whose directory holds no transformed workplan is as unreadable as one
+    # whose workplan fails to load
+    readable: list[WorkplanRun] = []
+    paths: list[Path] = []
+    unlocated: list[str] = []
+    for run in runs:
+        if (path := run.try_trx_workplan_path()) is None:
+            unlocated.append(run.run_id)
+        else:
+            paths.append(path)
+            readable.append(run)
+    workplans = await LiveWorkplan.load_all(paths, MAX_CONCURRENCY)
 
     # Listing each step's directory blocks, so it runs off the event loop.
     candidates, unreadable = await asyncio.to_thread(
-        _step_candidates, runs, workplans, application
+        _step_candidates, readable, workplans, application
     )
 
-    _log_skipped("runs have no readable workplan and were skipped", unreadable)
+    _log_skipped(
+        "runs have no readable workplan and were skipped",
+        sorted([*unlocated, *unreadable]),
+    )
     return candidates
 
 

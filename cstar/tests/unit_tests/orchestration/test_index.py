@@ -48,7 +48,6 @@ from cstar.orchestration.manifest import (
 )
 from cstar.orchestration.models import BlueprintIdentity
 from cstar.orchestration.tracking import (
-    KEY_ATTACHED,
     KEY_RUN_UUID,
     TrackingRepository,
     WorkplanRun,
@@ -129,14 +128,11 @@ def track(
 ) -> WorkplanRun:
     """Record a run in tracking, stamped with `uuid` when given."""
     metadata = {KEY_RUN_UUID: uuid} if uuid else {}
-    if attached:
-        metadata[KEY_ATTACHED] = "1"
     run = WorkplanRun(
-        workplan_path=root / "workplan.yaml",
-        trx_workplan_path=root / "workplan_transformed.yaml",
         output_path=root,
         run_id=run_id,
         metadata=metadata,
+        attached=attached,
     )
     TrackingRepository().put_workplan_run_sync(run)
     return run

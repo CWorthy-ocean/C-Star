@@ -955,7 +955,7 @@ Use the ``ls`` command (also spelled ``list``) to list the runs started by a use
 
     cstar run ls
 
-``cstar run ls`` lists the runs tracked on this machine. Two flags also read the run manifests in your data home and in the project runs area (``cstar/runs`` under ``CSTAR_PROJECT_HOME``; see :doc:`hpc`), and add a ``where`` column to the table (a ``where`` field to the CSV and JSON output):
+``cstar run ls`` lists the runs tracked on this machine. Without ``--all`` or ``--shared`` it reads only the tracking records in your state home, plus each tracked run's manifest for its name and start time, and scans no run directories. Two flags also read the run manifests in your data home and in the project runs area (``cstar/runs`` under ``CSTAR_PROJECT_HOME``; see :doc:`hpc`), and add a ``where`` column to the table (a ``where`` field to the CSV and JSON output):
 
 .. code-block:: console
 

@@ -37,17 +37,19 @@ from cstar.cli.workplan.ls import (
 )
 from cstar.cli.workplan.ls import app as app_ls
 from cstar.orchestration.index import RunIndex
+from cstar.orchestration.manifest import Attempt, read_run_manifest, write_run_manifest
 from cstar.orchestration.models import LEGACY_TRANSFORMED_NAME_SUFFIX
 from cstar.orchestration.tracking import (
-    KEY_ACCESS,
-    KEY_ATTACHED,
-    KEY_RUN_NAME,
     KEY_RUN_UUID,
     Access,
     TrackingRepository,
     WorkplanRun,
 )
-from cstar.tests.unit_tests.orchestration.manifest_runs import BuiltRun
+from cstar.tests.unit_tests.orchestration.manifest_runs import (
+    STARTED,
+    BuiltRun,
+    write_identity,
+)
 
 LS_LOGGER = "cstar.cli.workplan.ls"
 
@@ -56,48 +58,57 @@ T0 = datetime.datetime(2026, 9, 12, 3, 4, 0, tzinfo=UTC)
 """An arbitrary tz-aware reference time used to build test data."""
 
 
-def make_run(
-    run_id: str,
-    size: int | None = None,
-    name: str | None = None,
-    start: datetime.datetime | None = None,
-) -> WorkplanRun:
-    """Build a `WorkplanRun` with dummy paths for filter tests.
+MakeRun = t.Callable[..., WorkplanRun]
+"""The factory the `make_run` fixture is."""
+
+
+@pytest.fixture
+def make_run(tmp_path: Path) -> MakeRun:
+    """Provide a factory of `WorkplanRun` records for filter, adapter and ls tests.
+
+    The factory makes a run directory under `tmp_path` holding a manifest that
+    names the run and starts it, and a transformed workplan, so the record
+    derives its name, start and workplan paths as it would for a real run.
 
     Parameters
     ----------
-    run_id : str
-        The unique run identifier.
-    size : int | None
-        When supplied, stored as a single step's measured size; `None`
-        leaves `step_sizes` empty (i.e. unmeasured).
-    name : str | None
-        When supplied, stored in metadata under the run-name key.
-    start : datetime.datetime | None
-        When supplied, used as the run start time.
+    tmp_path : Path
+        Temporary directory the run directories are made in.
 
     Returns
     -------
-    WorkplanRun
+    MakeRun
+        `make_run(run_id, size=None, name=None, start=None, root=None)`: `size`
+        is a single step's measured size (unmeasured when `None`), `name` the
+        name the manifest holds (none by default, so the workplan is loaded),
+        `start` the start of the manifest's attempt, and `root` a run
+        directory to record without making it (to share one with another run).
     """
-    metadata: dict[str, str] = {}
 
-    if name is not None:
-        metadata[KEY_RUN_NAME] = name
+    def _make(
+        run_id: str,
+        size: int | None = None,
+        name: str | None = None,
+        start: datetime.datetime | None = None,
+        root: Path | None = None,
+    ) -> WorkplanRun:
+        if root is None:
+            root = tmp_path / run_id / "out"
+            write_identity(
+                root,
+                run_id,
+                workplan=tmp_path / f"{run_id}.yaml",
+                name=name or "",
+                start_at=start or STARTED,
+            )
+            (root / f"{run_id}_transformed.yaml").touch()
+        return WorkplanRun(
+            output_path=root,
+            run_id=run_id,
+            step_sizes={} if size is None else {"step": size},
+        )
 
-    step_sizes: dict[str, int] = {} if size is None else {"step": size}
-
-    kwargs: dict[str, t.Any] = {} if start is None else {"start_at": start}
-
-    return WorkplanRun(
-        workplan_path=Path(f"/tmp/{run_id}/workplan.yaml"),
-        trx_workplan_path=Path(f"/tmp/{run_id}/trx.yaml"),
-        output_path=Path(f"/tmp/{run_id}/out"),
-        run_id=run_id,
-        metadata=metadata,
-        step_sizes=step_sizes,
-        **kwargs,
-    )
+    return _make
 
 
 def make_view(
@@ -204,7 +215,7 @@ def test_itemview_start_renders_isoformat_for_machine_formats(
 # ---------------------------------------------------------------------------
 
 
-def test_filter_size_without_bounds_returns_copy_of_all_runs() -> None:
+def test_filter_size_without_bounds_returns_copy_of_all_runs(make_run: MakeRun) -> None:
     """Verify no bounds means no filtering and the input is not aliased."""
     runs = [make_run("a", size=1), make_run("b", size=2)]
 
@@ -228,6 +239,7 @@ def test_filter_size_without_bounds_returns_copy_of_all_runs() -> None:
     ],
 )
 def test_filter_size_bounds(
+    make_run: MakeRun,
     lt_filter: int | None,
     gt_filter: int | None,
     expected: list[str],
@@ -251,6 +263,7 @@ def test_filter_size_bounds(
 
 
 def test_filter_size_never_drops_unsized_runs(
+    make_run: MakeRun,
     caplog: pytest.LogCaptureFixture,
 ) -> None:
     """Verify unmeasured runs pass every filter and warn once."""
@@ -264,6 +277,7 @@ def test_filter_size_never_drops_unsized_runs(
 
 
 def test_filter_size_does_not_warn_when_all_runs_are_sized(
+    make_run: MakeRun,
     caplog: pytest.LogCaptureFixture,
 ) -> None:
     """Verify no warning is emitted when every run has a computed size."""
@@ -280,7 +294,7 @@ def test_filter_size_does_not_warn_when_all_runs_are_sized(
 # ---------------------------------------------------------------------------
 
 
-def test_filter_time_without_bounds_returns_copy_of_all_runs() -> None:
+def test_filter_time_without_bounds_returns_copy_of_all_runs(make_run: MakeRun) -> None:
     """Verify no bounds means no filtering and the input is not aliased."""
     runs = [make_run("a"), make_run("b")]
 
@@ -302,6 +316,7 @@ def test_filter_time_without_bounds_returns_copy_of_all_runs() -> None:
     ],
 )
 def test_filter_time_bounds(
+    make_run: MakeRun,
     lt_offset: int | None,
     gt_offset: int | None,
     expected: list[str],
@@ -333,7 +348,7 @@ def test_filter_time_bounds(
     assert [r.run_id for r in actual] == expected
 
 
-def test_filter_time_normalizes_mixed_offsets() -> None:
+def test_filter_time_normalizes_mixed_offsets(make_run: MakeRun) -> None:
     """Verify equal instants expressed in different zones compare as equal."""
     plus_two = datetime.timezone(datetime.timedelta(hours=2))
     run = make_run("a", start=T0.astimezone(plus_two))
@@ -597,6 +612,7 @@ def stub_load_workplans(
 
 
 async def test_adapt_runs_builds_views_from_cached_workplans(
+    make_run: MakeRun,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Verify names, sizes, start times, and format are threaded into views."""
@@ -619,9 +635,11 @@ async def test_adapt_runs_builds_views_from_cached_workplans(
     "name",
     ["Workplan 0", "Workplan 1", "Workplan 2"],
 )
-async def test_adapt_runs_builds_views_from_run_metadata(name: str) -> None:
-    """Verify that the name in the run metadata is used when the workplan can't be
-    loaded from disk.
+async def test_adapt_runs_builds_views_from_run_metadata(
+    make_run: MakeRun, name: str
+) -> None:
+    """Verify that the name in the run's manifest is used without loading the
+    workplan from disk.
     """
     run = make_run("r1", size=7, start=T0, name=name)
 
@@ -636,11 +654,19 @@ async def test_adapt_runs_builds_views_from_run_metadata(name: str) -> None:
     assert view.name == name
 
 
-async def test_adapt_runs_strips_the_legacy_suffix_from_a_stored_name() -> None:
+async def test_adapt_runs_strips_the_legacy_suffix_from_a_stored_name(
+    tmp_path: Path,
+) -> None:
     """Verify a run recorded by an earlier release, whose stored name carries
     the `(transformed)` suffix, is listed under the plain workplan name.
     """
-    run = make_run("r1", name=f"plan-a{LEGACY_TRANSFORMED_NAME_SUFFIX}")
+    run = WorkplanRun.model_validate(
+        {
+            "output_path": str(tmp_path / "no-manifest"),
+            "run_id": "r1",
+            "metadata": {"name": f"plan-a{LEGACY_TRANSFORMED_NAME_SUFFIX}"},
+        }
+    )
 
     views = await adapt_runs_to_views([run], {}, "json")
 
@@ -648,6 +674,7 @@ async def test_adapt_runs_strips_the_legacy_suffix_from_a_stored_name() -> None:
 
 
 async def test_adapt_runs_defaults_size_when_metadata_is_missing(
+    make_run: MakeRun,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Verify a run without measured step sizes renders the -1 sentinel."""
@@ -663,6 +690,7 @@ async def test_adapt_runs_defaults_size_when_metadata_is_missing(
 
 
 async def test_adapt_runs_falls_back_to_unknown_on_failed_deserialization(
+    make_run: MakeRun,
     monkeypatch: pytest.MonkeyPatch,
     caplog: pytest.LogCaptureFixture,
 ) -> None:
@@ -682,11 +710,13 @@ async def test_adapt_runs_falls_back_to_unknown_on_failed_deserialization(
 
 
 async def test_adapt_runs_deserializes_each_path_once(
+    make_run: MakeRun,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Verify shared and pre-cached workplan paths are not loaded again."""
-    first, second = make_run("r1", size=1), make_run("r2", size=2)
-    object.__setattr__(second, "trx_workplan_path", first.trx_workplan_path)
+    first = make_run("r1", size=1)
+    second = make_run("r2", size=2, root=first.output_path)
+    assert second.trx_workplan_path == first.trx_workplan_path
     cached = make_run("r3", size=3)
     calls: list[list[Path]] = []
     monkeypatch.setattr(
@@ -706,6 +736,7 @@ async def test_adapt_runs_deserializes_each_path_once(
 
 
 async def test_adapt_runs_only_loads_workplans_for_runs_missing_a_name(
+    make_run: MakeRun,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Verify a cached run-name skips the workplan load entirely.
@@ -783,6 +814,7 @@ def patch_ls_pipeline(
 
 
 def test_ls_runs_renders_sorted_json_document(
+    make_run: MakeRun,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Verify the end-to-end command emits parseable, sorted JSON."""
@@ -800,6 +832,7 @@ def test_ls_runs_renders_sorted_json_document(
 
 
 def test_ls_runs_applies_filters_and_reverse_sort(
+    make_run: MakeRun,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Verify size/time filters and reverse ordering apply before rendering."""
@@ -825,6 +858,7 @@ def test_ls_runs_applies_filters_and_reverse_sort(
 
 
 def test_ls_runs_refresh_usage_awaits_refresh_disk_usage_once(
+    make_run: MakeRun,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Verify `--size` triggers exactly one refresh call with all filtered runs."""
@@ -841,6 +875,7 @@ def test_ls_runs_refresh_usage_awaits_refresh_disk_usage_once(
 
 
 def test_ls_runs_without_refresh_usage_never_awaits_refresh_disk_usage(
+    make_run: MakeRun,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Verify omitting `--size` never triggers a refresh."""
@@ -860,7 +895,7 @@ LONG_NAME: t.Final[str] = "a workplan name with spaces" + " and words" * 6
 
 @pytest.mark.parametrize("width", [40, 80])
 def test_ls_runs_json_is_not_wrapped_at_the_console_width(
-    monkeypatch: pytest.MonkeyPatch, width: int
+    make_run: MakeRun, monkeypatch: pytest.MonkeyPatch, width: int
 ) -> None:
     """Verify the JSON document parses when values are wider than the console.
 
@@ -884,7 +919,7 @@ def test_ls_runs_json_is_not_wrapped_at_the_console_width(
 
 @pytest.mark.parametrize("width", [40, 80])
 def test_ls_runs_csv_is_not_wrapped_at_the_console_width(
-    monkeypatch: pytest.MonkeyPatch, width: int
+    make_run: MakeRun, monkeypatch: pytest.MonkeyPatch, width: int
 ) -> None:
     """Verify each CSV row stays whole when values are wider than the console.
 
@@ -950,21 +985,24 @@ def listing(monkeypatch: pytest.MonkeyPatch) -> Listing:
     return Listing(monkeypatch)
 
 
-def track(
-    built: BuiltRun, *, size: int | None = None, start: datetime.datetime = LATER
-) -> WorkplanRun:
+def track(built: BuiltRun, *, size: int | None = None) -> WorkplanRun:
     """Put a built run under tracking, as a run started on this machine."""
     run = WorkplanRun(
-        workplan_path=built.root / "workplan.yaml",
-        trx_workplan_path=built.root / f"{built.run_id}_transformed.yaml",
         output_path=built.root,
         run_id=built.run_id,
-        start_at=start,
-        metadata={KEY_RUN_NAME: built.run_id, KEY_RUN_UUID: built.uuid},
+        metadata={KEY_RUN_UUID: built.uuid},
         step_sizes={} if size is None else {"step": size},
     )
     TrackingRepository().put_workplan_run_sync(run)
     return run
+
+
+def restart(built: BuiltRun, start: datetime.datetime) -> None:
+    """Make the one attempt of a built run's manifest start at `start`."""
+    manifest = read_run_manifest(built.root)
+    assert manifest is not None
+    manifest.attempts = [Attempt(start_at=start)]
+    write_run_manifest(built.root, manifest)
 
 
 @pytest.fixture
@@ -994,10 +1032,12 @@ def populated(
             tmp_path / "elsewhere" / "linked", "linked", start_at=T0 + 3 * hour
         ),
     }
+    shutil.copytree(runs["copied"].root, project_runs / "copied-copy", symlinks=True)
+    # a tracked run starts as its manifest says: the copy keeps the earlier start
+    for name in ("mine", "copied"):
+        restart(runs[name], LATER)
     track(runs["mine"])
     track(runs["copied"], size=5)
-
-    shutil.copytree(runs["copied"].root, project_runs / "copied-copy", symlinks=True)
     (project_runs / "mine-link").symlink_to(runs["mine"].root)
     (project_runs / "linked").symlink_to(runs["linked"].root)
     return runs
@@ -1087,9 +1127,9 @@ def test_shared_without_a_project_home_is_a_bad_argument(
 def attach(built: BuiltRun, access: Access | None = None) -> WorkplanRun:
     """Put a built run under tracking, as `cstar run attach` records it."""
     run = track(built)
-    run.metadata[KEY_ATTACHED] = "1"
+    run.attached = True
     if access is not None:
-        run.metadata[KEY_ACCESS] = access.value
+        run.access = access
     TrackingRepository().put_workplan_run_sync(run)
     return run
 
@@ -1145,10 +1185,9 @@ def test_the_filters_apply_to_the_runs_only_a_manifest_names(
         "kept",
         "linked",
     }
-    assert set(listing.where("--shared", "--max-time", between)) == {
-        "copied",
-        "mine",
-    }
+    # `mine-link` is the tracked directory, which started later; `copied-copy`
+    # is a copy of its manifest as it was
+    assert set(listing.where("--shared", "--max-time", between)) == {"copied"}
 
 
 def test_a_tracked_run_a_filter_drops_does_not_return_as_its_copy(

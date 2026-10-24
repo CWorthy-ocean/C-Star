@@ -13,6 +13,7 @@ from cstar.orchestration.manifest import (
     Attempt,
     RunManifest,
     StepEntry,
+    WorkplanIdentity,
     write_run_manifest,
 )
 from cstar.orchestration.models import Step
@@ -133,3 +134,54 @@ def build_manifest_run(
         ),
     )
     return built
+
+
+def write_identity(
+    root: Path,
+    run_id: str,
+    *,
+    workplan: Path | str | None = None,
+    name: str | None = None,
+    start_at: datetime = STARTED,
+) -> RunManifest:
+    """Write a bare manifest into `root`, so a tracking record of the run derives
+    its name, start and workplan paths from it.
+
+    A thin `WorkplanRun` holds none of these: `name` and `start_at` are the
+    manifest's, `workplan_path` is its `workplan.path` and `trx_workplan_path`
+    is `<root>/<stem of workplan.path>_transformed.yaml` when that file exists.
+
+    Parameters
+    ----------
+    root : Path
+        The run directory; created when absent.
+    run_id : str
+        The run-id the manifest holds.
+    workplan : Path | str | None
+        The authored workplan the run was scheduled from; the manifest records
+        none by default.
+    name : str | None
+        The name of the run; the run-id by default.
+    start_at : datetime
+        When the one attempt the manifest holds started; `created_at` too.
+
+    Returns
+    -------
+    RunManifest
+    """
+    manifest = RunManifest(
+        run_id=run_id,
+        name=name if name is not None else run_id,
+        kind="workplan",
+        created_at=start_at,
+        workplan=(
+            WorkplanIdentity(name=run_id, content_hash="", path=str(workplan))
+            if workplan is not None
+            else None
+        ),
+        attempts=[Attempt(start_at=start_at)],
+        steps=[],
+    )
+    root.mkdir(parents=True, exist_ok=True)
+    write_run_manifest(root, manifest)
+    return manifest

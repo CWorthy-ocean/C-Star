@@ -41,10 +41,15 @@ from cstar.orchestration.index import (
     RunHandle,
     parse_run_handle,
     resolve_run,
+    run_uri,
 )
 from cstar.orchestration.launch.common import is_foreign_handle
 from cstar.orchestration.launch.slurm import SlurmComputeSpec
-from cstar.orchestration.manifest import product_paths, require_recorded_files
+from cstar.orchestration.manifest import (
+    RUN_MANIFEST_NAME,
+    product_paths,
+    require_recorded_files,
+)
 from cstar.orchestration.models import (
     Blueprint,
     DeferredBlueprintRef,
@@ -625,6 +630,29 @@ class _Probe(t.NamedTuple):
     """Whether that launcher can wait on an in-progress handle of another run."""
 
 
+def _run_gone(path: str) -> bool:
+    """Whether a pinned run directory no longer holds a run at all.
+
+    A directory that is gone, or holds no manifest, is a run that was moved or
+    removed since it was pinned. One that holds a manifest, of another run or
+    unreadable, is not: the pin then names the wrong place, which is an error.
+
+    Parameters
+    ----------
+    path : str
+        The pinned run directory.
+
+    Returns
+    -------
+    bool
+    """
+    root = Path(os.path.abspath(Path(path).expanduser()))
+    try:
+        return not root.is_dir() or not (root / RUN_MANIFEST_NAME).exists()
+    except OSError:
+        return False
+
+
 class ExternalRuns:
     """The registry of other workplan runs a workplan refers to.
 
@@ -649,6 +677,7 @@ class ExternalRuns:
         """
         self._runs = dict(runs)
         self._records: dict[str, RunRecord] = {}
+        self._handles: dict[str, RunHandle] = {}
         self._workplans: dict[str, LiveWorkplan] = {}
         self._probes: dict[StepRef, _Probe] = {}
         self._errors: dict[StepRef, str] = {}
@@ -701,19 +730,67 @@ class ExternalRuns:
         Raises
         ------
         CstarError
-            If the alias is undeclared or the run cannot be found.
+            If the alias is undeclared or the run cannot be found. A run pinned
+            to a directory that is gone, or holds no run any more, is looked
+            for by its pinned uuid, with a warning; the alias is then pinned by
+            uuid. A directory that holds another run is an error.
         """
         if alias not in self._records:
             run = self._declared(alias)
             handle = self._handle(alias)
             try:
-                self._records[alias] = resolve_run(
-                    handle, uuid=run.id, start_at=run.start_at
-                )
+                record = resolve_run(handle, uuid=run.id, start_at=run.start_at)
             except CstarError as ex:
-                msg = f"Run alias {alias!r} ({run.run_id!r}): {ex}"
-                raise CstarError(msg) from ex
+                if not (run.path and run.id and _run_gone(run.path)):
+                    msg = f"Run alias {alias!r} ({run.run_id!r}): {ex}"
+                    raise CstarError(msg) from ex
+                handle = RunHandle(HandleKind.uuid, run.id)
+                record = self._resolve_by_uuid(alias, run, ex)
+            self._records[alias] = record
+            self._handles[alias] = handle
         return self._records[alias]
+
+    @staticmethod
+    def _resolve_by_uuid(
+        alias: str, run: RunRef, pinned_error: CstarError
+    ) -> "RunRecord":
+        """Find by its uuid a run whose pinned directory cannot be resolved.
+
+        The run was copied or moved since the workplan pinned it, and is
+        looked for by the uuid the pin holds.
+
+        Parameters
+        ----------
+        alias : str
+            The run alias.
+        run : RunRef
+            The declared run, pinned to a directory and a uuid.
+        pinned_error : CstarError
+            Why the pinned directory failed.
+
+        Returns
+        -------
+        RunRecord
+
+        Raises
+        ------
+        CstarError
+            If the uuid names no run either.
+        """
+        log.warning(
+            f"Run alias {alias!r} pinned the directory {run.path!r}, which does "
+            f"not resolve: {pinned_error}; looking for the run by {run_uri(run.id)}"
+        )
+        try:
+            return resolve_run(
+                RunHandle(HandleKind.uuid, run.id), uuid=run.id, start_at=run.start_at
+            )
+        except CstarError as ex:
+            msg = (
+                f"Run alias {alias!r} ({run.run_id!r}): {ex} (its pinned "
+                f"directory {run.path!r} failed too: {pinned_error})"
+            )
+            raise CstarError(msg) from ex
 
     def workplan(self, alias: str) -> LiveWorkplan:
         """Return the transformed workplan recorded for the run declared as `alias`.
@@ -1004,7 +1081,7 @@ class ExternalRuns:
         for alias, run in self._runs.items():
             if alias in resolved:
                 record = self.record(alias)
-                handle = self._handle(alias)
+                handle = self._handles[alias]
                 run = run.model_copy(
                     update={
                         "run_id": record.run_id,
@@ -2193,9 +2270,12 @@ class DirectiveConfig(BaseModel):
             msg = f"Workplan context could not be provided to directives for run: {run_id}"
             raise RuntimeError(msg)
 
-        wp_path = run.trx_workplan_path
         try:
+            wp_path = run.trx_workplan_path
             return LiveWorkplan.load(wp_path)
+        except CstarError as ex:
+            msg = f"Unable to locate the workplan for run-id {run_id!r}: {ex}"
+            raise RuntimeError(msg) from ex
         except (FileNotFoundError, ValueError, yaml.YAMLError) as ex:
             msg = f"Unable to load workplan for run-id {run_id!r} from {str(wp_path)!r}: {ex}"
             raise RuntimeError(msg) from ex

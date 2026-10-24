@@ -12,6 +12,7 @@ from datetime import timedelta
 from pathlib import Path
 
 import pytest
+import yaml
 from click.testing import Result
 from typer.testing import CliRunner
 
@@ -19,19 +20,15 @@ from cstar.cli.run import app as app_run
 from cstar.cli.run.attach import default_access
 from cstar.orchestration.index import parse_run_handle, resolve_run, run_uri
 from cstar.orchestration.manifest import (
-    ATTEMPT_WORKPLAN_NAME,
-    ATTEMPTS_DIR_NAME,
     Product,
     StepRecord,
+    WorkplanIdentity,
     read_run_manifest,
     write_run_manifest,
     write_step_record,
 )
 from cstar.orchestration.models import BlueprintIdentity
 from cstar.orchestration.tracking import (
-    KEY_ACCESS,
-    KEY_ATTACHED,
-    KEY_RUN_NAME,
     KEY_RUN_UUID,
     Access,
     TrackingRepository,
@@ -53,6 +50,11 @@ def invoke(*args: str) -> Result:
 def tracked(run_id: str) -> WorkplanRun | None:
     """The tracking record of a run-id, as the repository finds it."""
     return TrackingRepository().get_workplan_run_sync(run_id)
+
+
+def tracked_path(run_id: str) -> Path:
+    """The file holding the latest record of a run-id."""
+    return TrackingRepository().latest_path(run_id).resolve()
 
 
 def history_files(run_id: str) -> list[Path]:
@@ -111,7 +113,9 @@ def elsewhere(
 def test_a_new_record_holds_what_the_manifest_says(
     elsewhere: t.Callable[..., BuiltRun],
 ) -> None:
-    """Verify attach writes one record naming the run, its directory and its latest attempt."""
+    """Verify attach writes one thin record: the run, its directory, its uuid and
+    attachment, with the name and start read from the manifest rather than stored.
+    """
     built = elsewhere(attempts=2)
 
     result = invoke("attach", str(built.root))
@@ -121,19 +125,20 @@ def test_a_new_record_holds_what_the_manifest_says(
     assert record is not None
     assert record.run_id == built.run_id
     assert record.output_path == built.root
+    assert record.name == built.run_id
     assert record.trx_workplan_path == built.root / f"{built.run_id}_transformed.yaml"
     assert record.workplan_path == record.trx_workplan_path
     assert record.start_at == STARTED + timedelta(hours=1)
     assert record.environment == {}
     assert record.user_variables == {}
     assert record.sentinels == set()
-    assert record.metadata == {
-        KEY_RUN_NAME: built.run_id,
-        KEY_RUN_UUID: built.uuid,
-        KEY_ATTACHED: "1",
-        KEY_ACCESS: Access.owned.value,
-    }
-    assert record.attached
+    assert record.metadata == {KEY_RUN_UUID: built.uuid}
+    assert record.attached is True
+    assert record.access is Access.owned
+    assert record.legacy.name == ""
+    stored = yaml.safe_load(tracked_path(built.run_id).read_text())
+    assert not {"workplan_path", "trx_workplan_path", "start_at"} & set(stored)
+    assert "name" not in stored["metadata"]
     assert f"Attached run {built.run_id!r} ({run_uri(built.uuid)})" in result.output
     assert len(history_files(built.run_id)) == 1
 
@@ -305,7 +310,7 @@ def test_a_run_attached_again_from_another_directory_is_re_attached(
     assert record.output_path == moved
     assert record.trx_workplan_path.parent == moved
     assert record.workplan_path.parent == moved
-    assert record.metadata[KEY_ATTACHED] == "1"
+    assert record.attached is True
     assert record.metadata[KEY_RUN_UUID] == built.uuid
 
 
@@ -570,17 +575,17 @@ def test_verify_reports_a_digest_mismatch_and_still_attaches(
     assert written.output_path == built.root
 
 
-def test_the_carried_workplan_is_the_record_workplan(
+def test_the_authored_workplan_is_the_manifests(
     elsewhere: t.Callable[..., BuiltRun],
 ) -> None:
-    """Verify `workplan_path` names the workplan the latest attempt carried when there is one."""
+    """Verify `workplan_path` is the one the manifest records, however the run's
+    transformed workplan is named, and that attach stores neither.
+    """
     built = elsewhere()
-    carried = built.root / ATTEMPTS_DIR_NAME / "first" / ATTEMPT_WORKPLAN_NAME
-    carried.parent.mkdir(parents=True)
-    carried.write_text("name: authored\n")
+    authored = "/where/it/was/authored/plan.yaml"
     manifest = read_run_manifest(built.root)
     assert manifest is not None
-    manifest.attempts[-1].directory = f"{ATTEMPTS_DIR_NAME}/first"
+    manifest.workplan = WorkplanIdentity(name="plan", content_hash="", path=authored)
     write_run_manifest(built.root, manifest)
 
     result = invoke("attach", str(built.root))
@@ -588,8 +593,11 @@ def test_the_carried_workplan_is_the_record_workplan(
     assert result.exit_code == 0, result.output
     record = tracked(built.run_id)
     assert record is not None
-    assert record.workplan_path == carried
+    assert record.workplan_path == Path(authored)
+    # the run holds one transformed workplan, under the run-id's name rather than plan's
     assert record.trx_workplan_path == built.root / f"{built.run_id}_transformed.yaml"
+    stored = yaml.safe_load(tracked_path(built.run_id).read_text())
+    assert "workplan_path" not in stored
 
 
 def test_attached_runs_are_known_by_their_run_id(

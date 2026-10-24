@@ -125,6 +125,7 @@ from cstar.tests.unit_tests.orchestration.conftest import (
     EXTERNAL_TOKEN,
     ExternalTaskFactory,
 )
+from cstar.tests.unit_tests.orchestration.manifest_runs import write_identity
 
 
 def draw_graph(planner: Planner) -> None:
@@ -225,10 +226,13 @@ async def layered_workplan(
     serialize(wp_path, workplan)
 
     repo = TrackingRepository()
+    output_path = tmp_path / "mock-output"
+    # the run directory holds the transformed workplan the record derives
+    output_path.mkdir(parents=True, exist_ok=True)
+    shutil.copy(wp_path, output_path / f"{wp_path.stem}_transformed.yaml")
+    write_identity(output_path, mock_run_id, workplan=wp_path)
     wp_run = WorkplanRun(
-        workplan_path=wp_path,
-        trx_workplan_path=wp_path,
-        output_path=tmp_path / "mock-output",
+        output_path=output_path,
         run_id=mock_run_id,
     )
     await repo.put_workplan_run(wp_run)
@@ -1266,6 +1270,7 @@ async def test_run_dag_records_the_root_of_the_transformed_workplan(
     workplan = LiveWorkplan(
         name="reloaded", description="A reloaded run.", steps=[step], root=run_root
     )
+    assert serialize(trx_path, workplan)
 
     with (
         mock.patch("cstar.orchestration.dag_runner.get_orchestrator"),
@@ -1616,14 +1621,15 @@ async def test_recorded_workplan_deleted_with_its_attempt_is_not_replaced(
 
 
 def _legacy_run(tmp_path: Path) -> WorkplanRun:
-    """A recorded run whose run directory exists and holds nothing yet."""
+    """A recorded run whose run directory exists and holds no manifest yet, only
+    its transformed workplan.
+    """
     wp_run = WorkplanRun(
-        workplan_path=tmp_path / "plan.yaml",
-        trx_workplan_path=tmp_path / "run" / "plan_transformed.yaml",
         output_path=tmp_path / "run",
         run_id="legacy",
     )
     wp_run.output_path.mkdir()
+    (wp_run.output_path / "plan_transformed.yaml").touch()
     return wp_run
 
 
@@ -2231,7 +2237,7 @@ async def status_change_workplan_run(
     tmp_path: Path,
     mock_run_id: str,
 ) -> WorkplanRun:
-    """Persist a `WorkplanRun` whose `trx_workplan_path` holds a real `LiveWorkplan`.
+    """Persist a `WorkplanRun` whose transformed workplan is a real `LiveWorkplan`.
 
     Parameters
     ----------
@@ -2258,12 +2264,10 @@ async def status_change_workplan_run(
         description="A workplan used to test on_status_changed",
         steps=[step],
     )
-    trx_path = tmp_path / "trx.yaml"
+    trx_path = tmp_path / "trx_transformed.yaml"
     assert serialize(trx_path, live_plan)
 
     run = WorkplanRun(
-        workplan_path=tmp_path / "wp.yaml",
-        trx_workplan_path=trx_path,
         output_path=tmp_path,
         run_id=mock_run_id,
     )

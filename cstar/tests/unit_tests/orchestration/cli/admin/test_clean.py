@@ -33,8 +33,6 @@ from cstar.entrypoint.utils import ARG_ALL, ARG_DRY_RUN
 from cstar.execution.file_system import DirectoryManager
 from cstar.orchestration.models import Workplan
 from cstar.orchestration.tracking import (
-    KEY_ACCESS,
-    KEY_ATTACHED,
     Access,
     TrackingRepository,
     WorkplanRun,
@@ -619,16 +617,14 @@ def test_cli_admin_clean_default_data_action_keeps_local_catalog(
     assert action.keep_paths == [DirectoryManager.source_data_home()]
 
 
-def _track(root: Path, run_id: str, **metadata: str) -> WorkplanRun:
+def _track(root: Path, run_id: str, **fields: t.Any) -> WorkplanRun:
     """Make the run directory `root` and track it under `run_id`."""
     root.mkdir(parents=True)
     (root / "data.nc").write_text("data")
     run = WorkplanRun(
-        workplan_path=root / "workplan.yaml",
-        trx_workplan_path=root / "workplan_transformed.yaml",
         output_path=root,
         run_id=run_id,
-        metadata=metadata,
+        **fields,
     )
     TrackingRepository().put_workplan_run_sync(run)
     return run
@@ -652,18 +648,12 @@ def test_cli_admin_clean_run_actions_of_a_scheduled_run_include_its_data(
     assert data.asset_paths == [run.output_path]
 
 
-@pytest.mark.parametrize(
-    "metadata",
-    [
-        {KEY_ATTACHED: "1", KEY_ACCESS: Access.owned.value},
-        {KEY_ATTACHED: "1"},
-    ],
-)
+@pytest.mark.parametrize("fields", [{"access": Access.owned}, {}])
 def test_cli_admin_clean_run_actions_of_an_owned_attached_run_include_its_data(
-    tmp_path: Path, metadata: dict[str, str]
+    tmp_path: Path, fields: dict[str, Access]
 ) -> None:
     """Verify an attached run the user owns is cleaned like any other."""
-    _track(tmp_path / "colleague" / "owned", "owned", **metadata)
+    _track(tmp_path / "colleague" / "owned", "owned", attached=True, **fields)
 
     assert _names(get_run_actions("owned")) == ["State", "Data"]
 
@@ -677,7 +667,8 @@ def test_cli_admin_clean_run_actions_keep_the_data_of_a_read_only_run(
     _track(
         tmp_path / "colleague" / "frozen",
         "frozen",
-        **{KEY_ATTACHED: "1", KEY_ACCESS: Access.read_only.value},
+        attached=True,
+        access=Access.read_only,
     )
 
     actions = get_run_actions("frozen")
@@ -717,7 +708,8 @@ def test_cli_admin_clean_removes_the_tracking_of_a_read_only_run_but_not_its_dat
     run = _track(
         tmp_path / "colleague" / "frozen",
         "frozen",
-        **{KEY_ATTACHED: "1", KEY_ACCESS: Access.read_only.value},
+        attached=True,
+        access=Access.read_only,
     )
     latest = TrackingRepository().latest_path("frozen")
     assert latest.exists()

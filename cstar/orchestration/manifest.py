@@ -104,6 +104,32 @@ ATTEMPT_VARIABLES_NAME: t.Final[str] = "workplan.vars"
 ATTEMPT_TRANSFORMED_NAME: t.Final[str] = "workplan_transformed.yaml"
 """A copy of the transformed workplan the attempt prepared, in its directory."""
 
+TRANSFORMED_WORKPLAN_SUFFIX: t.Final[str] = "_transformed"
+"""What the transformed workplan's file stem adds to the authored workplan's."""
+
+TRANSFORMED_WORKPLAN_GLOB: t.Final[str] = f"*{TRANSFORMED_WORKPLAN_SUFFIX}.yaml"
+"""The transformed workplan a run directory holds, by name; one per run."""
+
+
+def transformed_workplan_path(root: Path, authored: Path) -> Path:
+    """The transformed workplan a run writes into its root for an authored workplan.
+
+    The plan is named `.yaml` whatever the authored suffix.
+
+    Parameters
+    ----------
+    root : Path
+        The run root.
+    authored : Path
+        The authored workplan, as given when the run was scheduled.
+
+    Returns
+    -------
+    Path
+    """
+    return root / f"{authored.stem}{TRANSFORMED_WORKPLAN_SUFFIX}.yaml"
+
+
 ATTEMPT_BLUEPRINTS_DIR_NAME: t.Final[str] = "blueprints"
 """The directory, in an attempt's directory, holding each step's blueprint by step slug."""
 

@@ -863,13 +863,15 @@ def _local_run(run_id: str, roms_bp: Path, **kwargs: Any) -> tuple[Path, str]:
 def _tracked(
     root: Path, run_id: str, *, uuid: str = "", start: datetime = _STAMP
 ) -> WorkplanRun:
-    """A tracking record of the run in ``root``, stamped with ``uuid`` when given."""
+    """A tracking record of the run in ``root``, stamped with ``uuid`` when given.
+
+    ``start`` is when the record was written: the run's start unless its
+    directory holds a manifest that says otherwise.
+    """
     return WorkplanRun(
-        workplan_path=root / "workplan.yaml",
-        trx_workplan_path=root / f"{run_id}_transformed.yaml",
         output_path=root,
         run_id=run_id,
-        start_at=start,
+        recorded_at=start,
         metadata={KEY_RUN_UUID: uuid} if uuid else {},
     )
 
@@ -892,18 +894,12 @@ def _run_row(page: WorkplanBuilderPage, roms_bp: Path, alias: str = "ini"):
 def test_refresh_runs_lists_records_newest_first_and_loads_steps(
     page, roms_bp, tmp_path, run_homes, tracked
 ):
-    recorded = tmp_path / "recorded.yaml"
-    recorded.write_text(_workplan_text(roms_bp))
-    for run_id, start in (("old", datetime(2026, 1, 1)), ("new", datetime(2026, 6, 1))):
-        tracked.append(
-            WorkplanRun(
-                workplan_path=recorded,
-                trx_workplan_path=recorded,
-                output_path=tmp_path / run_id,
-                run_id=run_id,
-                start_at=start,
-            )
-        )
+    for run_id, start in (
+        ("old", datetime(2026, 1, 1, tzinfo=UTC)),
+        ("new", datetime(2026, 6, 1, tzinfo=UTC)),
+    ):
+        _make_run(tmp_path / run_id, run_id, roms_bp, start=start)
+        tracked.append(_tracked(tmp_path / run_id, run_id))
 
     row = _run_row(page, roms_bp)
     page.refresh_runs()

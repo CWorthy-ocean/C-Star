@@ -99,7 +99,15 @@ def list_runs(incomplete: str = "") -> list[tuple[str, str]]:
 
         return [("run-id", "no results found")]
 
-    return [(r.run_id, f"Workplan path: {r.workplan_path}") for r in run_list]
+    def _hint(run: WorkplanRun) -> str:
+        """Describe a run by its workplan, or by nothing when none is known."""
+        try:
+            return f"Workplan path: {run.workplan_path}"
+        except CstarError as ex:
+            log.debug(str(ex))
+            return ""
+
+    return [(r.run_id, _hint(r)) for r in run_list]
 
 
 async def list_steps(run_id: str, incomplete: str) -> list[str]:
@@ -129,15 +137,18 @@ async def list_steps(run_id: str, incomplete: str) -> list[str]:
 
     if wp_run := await repo.get_workplan_run(run_id):
         try:
-            wp = LiveWorkplan.load(wp_run.trx_workplan_path)
+            wp_path = wp_run.trx_workplan_path
+            wp = LiveWorkplan.load(wp_path)
             step_names = [str(s.name) for s in wp.steps]
 
             if incomplete:
                 step_names = [s for s in step_names if s.lower().startswith(incomplete)]
 
             return step_names
+        except CstarError as ex:
+            log.debug(f"Workplan run has no transformed workplan: {ex}")
         except FileNotFoundError:
-            msg = f"Workplan run contains a dead path: {wp_run.trx_workplan_path} was not found"
+            msg = f"Workplan run contains a dead path: {wp_path} was not found"
             log.debug(msg)
     else:
         log.debug(f"No run for run-id {run_id!r} could be found.")
@@ -864,7 +875,9 @@ async def refresh_disk_usage(
     skipped: list[str] = []
 
     for run in runs:
-        if (plan := plans.get(run.trx_workplan_path)) is not None:
+        path = run.try_trx_workplan_path()
+        plan = plans.get(path) if path is not None else None
+        if plan is not None:
             step_dirs_by_run[run.run_id] = {s.name: s.working_dir for s in plan.steps}
             continue
 
