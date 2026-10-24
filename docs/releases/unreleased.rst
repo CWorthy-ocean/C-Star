@@ -218,6 +218,8 @@ New features
   - ``cstar workplan status``, ``ls``, ``list``, ``gather``, ``log``, ``path`` and ``cd`` (and their ``cstar wp ...`` forms) still run the same commands as ``cstar run ...``, unlisted and without a notice.
   - ``cstar workplan check <workplan file>`` still validates a workplan file and stays listed; ``cstar run check <run>`` checks a run.
 
+- The upscaler reads each record's averaging window from ``avg_begin_time``/``avg_end_time`` in ``_uscl`` files from ucla-roms after 0.12.0, including a shorter final window. (`#815 <https://github.com/CWorthy-ocean/C-Star/pull/815>`_)
+
 
 
 
@@ -264,6 +266,7 @@ Bug Fixes
 - ``cstar run promote --mode move`` of a run tracked on this machine (and re-attaching a copy of such a run) no longer leaves the run's sentinel files behind under ``run_state/<run-id>/``; those of finished steps are removed and the directory with them when empty, while a sentinel whose step has not finished is kept with a warning. (`#817 <https://github.com/CWorthy-ocean/C-Star/pull/817>`_)
 - A ``runs:`` alias pinned to a run directory that has since moved or been removed no longer fails on the stale path: it warns, naming the pinned directory and the run's uuid, finds the run by that uuid and re-pins the alias by uuid; a pinned directory that holds another run is still an error. (`#817 <https://github.com/CWorthy-ocean/C-Star/pull/817>`_)
 - On a SLURM system such as Anvil, a workplan step run with the local launcher no longer fails at startup with "Environment settings for the system could not be loaded" when ``CSTAR_SLURM_ACCOUNT`` or ``CSTAR_SLURM_QUEUE`` is unset. (`#820 <https://github.com/CWorthy-ocean/C-Star/pull/820>`_)
+- ``parent_up`` applied each hour of upscaled CDR flux one hour late and never applied the child's final hour of export. (`#815 <https://github.com/CWorthy-ocean/C-Star/pull/815>`_)
 
 
 Improvements
@@ -322,6 +325,8 @@ Improvements
 
 - ``cstar run ls`` without ``--all`` or ``--shared`` reads only the tracking records in your state home and each tracked run's manifest for its name and start time; it scans no run directories. (`#817 <https://github.com/CWorthy-ocean/C-Star/pull/817>`_)
 - Submitting a SLURM job on a system that requires an account and queue, without them, now fails before anything is submitted, naming every missing setting and pointing to ``cstar init``. (`#820 <https://github.com/CWorthy-ocean/C-Star/pull/820>`_)
+- The upscaler refuses a set of ``_uscl`` files with a missing file, a gap or overlap between windows, or a mix of ucla-roms versions, and names the offending file. (`#815 <https://github.com/CWorthy-ocean/C-Star/pull/815>`_)
+- ``upscaled_cdr.nc`` records its time convention (``cdr_time:convention``) and where its windows came from (``uscl_windows``). (`#815 <https://github.com/CWorthy-ocean/C-Star/pull/815>`_)
 
 
 
@@ -377,3 +382,5 @@ Miscellaneous
 - The workplans page states the linked-promotion policy: a ``promote --mode link`` run may stay linked indefinitely, shows as ``project, linked``, and its owner materializes it before a scratch purge. (`#819 <https://github.com/CWorthy-ocean/C-Star/pull/819>`_)
 - The workplans page notes that on a scheduler system every step, even one run locally, needs ``CSTAR_SLURM_ACCOUNT`` and ``CSTAR_SLURM_QUEUE``, which ``cstar init`` sets. (`#819 <https://github.com/CWorthy-ocean/C-Star/pull/819>`_)
 - The HPC guide now says the SLURM settings are needed only to submit jobs. (`#820 <https://github.com/CWorthy-ocean/C-Star/pull/820>`_)
+- The nesting and upscaling tutorial drops its version-sensitive reference-numbers table and the known issue this fixes, and says what the weekly test's closure bound does and does not check. (`#815 <https://github.com/CWorthy-ocean/C-Star/pull/815>`_)
+- The CCS developer page notes that its resource numbers predate the fix and that ``parent_up`` now receives about 1.5 % more alkalinity over a month. (`#815 <https://github.com/CWorthy-ocean/C-Star/pull/815>`_)
