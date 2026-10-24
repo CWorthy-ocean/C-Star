@@ -60,6 +60,7 @@ that this model reads back.)
 from __future__ import annotations
 
 import functools
+import logging
 import re
 import warnings
 from typing import TYPE_CHECKING, Any, ClassVar, Final, Self, cast
@@ -71,6 +72,8 @@ from cstar.base.gitutils import _describe_nearest_tag, _describe_remote_nearest_
 
 if TYPE_CHECKING:
     from pathlib import Path
+
+log = logging.getLogger(__name__)
 
 # Fortran array bounds declared in ROMS src/marbl_driver.F90 for the namelist
 # string lists (pinned ucla-roms commit). A list longer than these would
@@ -1298,6 +1301,7 @@ UCLA_ROMS_0_12_0: Final[tuple[int, int, int]] = (0, 12, 0)
 #        (UCLA_ROMS_0_12_0, UCLA_ROMS_0_13_0, RomsNamelistV0_12_0),
 #   3. Append a new open-ended entry for the new schema:
 #        (UCLA_ROMS_0_13_0, None, RomsNamelistV0_13_0),
+#   4. Bump NEWEST_KNOWN_UCLA_ROMS (below) to the new release.
 NAMELIST_SCHEMA_REGISTRY: tuple[
     tuple[
         tuple[int, int, int] | None, tuple[int, int, int] | None, type[RomsNamelistBase]
@@ -1313,6 +1317,14 @@ NAMELIST_SCHEMA_REGISTRY: tuple[
     (UCLA_ROMS_0_11_0, UCLA_ROMS_0_12_0, RomsNamelistV0_11_0),
     (UCLA_ROMS_0_12_0, None, RomsNamelistV0_12_0),
 )
+
+# The newest ucla-roms release whose namelist C-Star has been checked against.
+# A release tag above it still selects the last registry entry, but warns: that
+# release may write or expect a namelist key C-Star does not model. Bump it
+# with every new tier (recipe step 4 above) and also for a release that changes
+# no namelist key (e.g. 0.10.1), once checked. Never below the last entry's
+# lower bound.
+NEWEST_KNOWN_UCLA_ROMS: Final[tuple[int, int, int]] = UCLA_ROMS_0_12_0
 
 
 def _parse_semver(ref: str) -> tuple[int, int, int] | None:
@@ -1369,6 +1381,47 @@ def _warn_commit_ahead_of_release(
     )
 
 
+def format_roms_version(version: tuple[int, int, int]) -> str:
+    """A ucla-roms version tuple as its release tag, e.g. ``(0, 12, 0)`` -> ``"0.12.0"``."""
+    return ".".join(str(part) for part in version)
+
+
+_LOGGED_NEWER_THAN_KNOWN: set[str] = set()
+"""Refs already logged by :func:`_warn_newer_than_known`: logging is not
+silenced by warning filters, and the wizard reselects the schema on every
+rebuild, so each ref is logged once per process."""
+
+
+def _warn_newer_than_known(
+    checkout_target: str, release_tag: str | None, cls: type[RomsNamelistBase]
+) -> None:
+    """Warn that a ucla-roms release is newer than the newest one C-Star knows.
+
+    Emitted as a `UserWarning` on every call (reported at the caller of
+    :func:`namelist_schema_for_ref`) and logged once per `checkout_target`.
+    `release_tag` is the tag a commit-hash `checkout_target` resolved to, or
+    `None` when `checkout_target` is itself the tag.
+    """
+    tag = release_tag or checkout_target
+    pinned = (
+        f"ucla-roms commit {checkout_target!r} (release {release_tag})"
+        if release_tag
+        else f"ucla-roms release {checkout_target}"
+    )
+    message = (
+        f"{pinned} is newer than the newest release this C-Star knows "
+        f"({format_roms_version(NEWEST_KNOWN_UCLA_ROMS)}); using the latest "
+        f"namelist schema C-Star has ({cls.__name__}). If {tag} changed the "
+        f"namelist, ROMS may stop on the generated namelist or run on the "
+        f"default of a key it lacks. Upgrade C-Star, or pin a ucla-roms release "
+        f"at or below {format_roms_version(NEWEST_KNOWN_UCLA_ROMS)}."
+    )
+    warnings.warn(message, UserWarning, stacklevel=3)
+    if checkout_target not in _LOGGED_NEWER_THAN_KNOWN:
+        _LOGGED_NEWER_THAN_KNOWN.add(checkout_target)
+        log.warning(message)
+
+
 def namelist_schema_for_ref(
     checkout_target: str | None, repo_path: str | Path | None = None
 ) -> type[RomsNamelistBase]:
@@ -1398,8 +1451,19 @@ def namelist_schema_for_ref(
         (`None`, a branch name, an unresolvable hash, or an unparsable
         string), a `UserWarning` is emitted and the last (most recent)
         registry entry's class is returned.
+
+    Warns
+    -----
+    UserWarning
+        If `checkout_target` is not a release tag (see above), if a commit
+        hash is ahead of its release tag, or if the release `checkout_target`
+        names or resolves to is newer than :data:`NEWEST_KNOWN_UCLA_ROMS`: the
+        last registry entry's class is used for it, but that release may have
+        namelist changes C-Star does not model. The newer-release warning is
+        also logged, once per `checkout_target` per process.
     """
     version = _parse_semver(checkout_target) if checkout_target is not None else None
+    release_tag: str | None = None
 
     if (
         version is None
@@ -1409,10 +1473,12 @@ def namelist_schema_for_ref(
     ):
         described = _describe_nearest_tag(repo_path, checkout_target)
         if described is not None:
-            tag, commits_ahead = described
-            version = _parse_semver(tag)
+            release_tag, commits_ahead = described
+            version = _parse_semver(release_tag)
             if version is not None and commits_ahead:
-                _warn_commit_ahead_of_release(checkout_target, tag, commits_ahead)
+                _warn_commit_ahead_of_release(
+                    checkout_target, release_tag, commits_ahead
+                )
 
     last_cls = NAMELIST_SCHEMA_REGISTRY[-1][2]
     if version is None:
@@ -1425,6 +1491,11 @@ def namelist_schema_for_ref(
             UserWarning,
             stacklevel=2,
         )
+        return last_cls
+    if version > NEWEST_KNOWN_UCLA_ROMS and checkout_target is not None:
+        # NEWEST_KNOWN_UCLA_ROMS is never below the last entry's lower bound,
+        # so a newer release always selects the last entry.
+        _warn_newer_than_known(checkout_target, release_tag, last_cls)
         return last_cls
     for lower, upper, cls in NAMELIST_SCHEMA_REGISTRY:
         if (lower is None or version >= lower) and (upper is None or version < upper):

@@ -60,8 +60,9 @@ console = Console()
 log = get_logger(__name__)
 
 HELP_SHORT = (
-    "Print the cstar executable location, the C-Star version, and the versions "
-    "of installed companion packages, then exit."
+    "Print the cstar executable location, the C-Star version, the versions of "
+    "installed companion packages, and the newest ucla-roms release this C-Star "
+    "knows, then exit."
 )
 
 
@@ -180,7 +181,9 @@ def id_label(id: int, name: str, app: str | None) -> str:
 
 
 def version_callback(value: bool) -> bool:
-    """Print the executable location and installed package versions, then exit."""
+    """Print the executable location, installed package versions and the newest
+    ucla-roms release this C-Star knows, then exit.
+    """
     if value:
         typer.echo(f"cstar executable location: {Path(sys.argv[0]).resolve()}")
         typer.echo(f"C-Star version: {cstar.__version__}")
@@ -190,6 +193,13 @@ def version_callback(value: bool) -> bool:
                 typer.echo(f"{pkg} version: {_pkg_version(pkg)}")
             except PackageNotFoundError:
                 pass
+        # Imported here: the namelist models are not needed to start the CLI.
+        from cstar.roms.namelist import NEWEST_KNOWN_UCLA_ROMS, format_roms_version
+
+        typer.echo(
+            "Newest known ucla-roms release: "
+            f"{format_roms_version(NEWEST_KNOWN_UCLA_ROMS)}"
+        )
         raise typer.Exit(0)
 
     return value

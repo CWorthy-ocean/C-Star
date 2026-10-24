@@ -1,12 +1,16 @@
 """Tests for the versioned ROMS namelist schemas in `cstar.roms.namelist`."""
 
+import logging
 from pathlib import Path
 from unittest import mock
 
 import pytest
+import yaml
 from pydantic import ValidationError
 
 from cstar.roms.namelist import (
+    NAMELIST_SCHEMA_REGISTRY,
+    NEWEST_KNOWN_UCLA_ROMS,
     CdrLiteOutputSettings,
     CdrLiteSettings,
     CdrLiteSettingsV0_12_0,
@@ -24,6 +28,8 @@ from cstar.roms.namelist import (
     RomsNamelistV0_9_0,
     RomsNamelistV0_11_0,
     RomsNamelistV0_12_0,
+    _parse_semver,
+    format_roms_version,
     is_commit_hash,
     namelist_schema_for_ref,
     release_ref_for_remote,
@@ -105,10 +111,12 @@ def test_namelist_schema_for_ref_post_0_11_0(checkout_target):
 
 @pytest.mark.parametrize(
     "checkout_target",
-    ["0.12.0", "v0.12.0", "0.12.3", "0.13.0", "12.0.0"],
+    ["0.12.0", "v0.12.0"],
 )
 def test_namelist_schema_for_ref_post_0_12_0(checkout_target):
-    """Refs at or above 0.12.0 select `RomsNamelistV0_12_0`."""
+    """Refs at or above 0.12.0 select `RomsNamelistV0_12_0` (newer releases
+    too, with a warning: see the newer-than-known tests below).
+    """
     assert namelist_schema_for_ref(checkout_target) is RomsNamelistV0_12_0
 
 
@@ -193,6 +201,181 @@ def test_namelist_schema_for_ref_unresolvable_hash_falls_back():
         with pytest.warns(UserWarning, match="use at your own risk"):
             schema = namelist_schema_for_ref("a" * 40, repo_path="/some/repo")
     assert schema is RomsNamelistV0_12_0
+
+
+NEWER_THAN_KNOWN = "newer than the newest release this C-Star knows"
+BUNDLED_MODEL_SPECS = (
+    Path(__file__).parents[3] / "catalog" / "bundled" / "ModelSpec"
+).glob("*/model.yaml")
+
+
+def _newer_than_known_records(caplog: pytest.LogCaptureFixture) -> list[str]:
+    return [
+        r.getMessage()
+        for r in caplog.records
+        if r.name == "cstar.roms.namelist" and NEWER_THAN_KNOWN in r.getMessage()
+    ]
+
+
+def test_newest_known_ucla_roms_not_behind_registry():
+    """Adding a namelist tier bumps `NEWEST_KNOWN_UCLA_ROMS`: a release the
+    registry has a tier for must never warn that C-Star does not know it.
+    """
+    last_lower = NAMELIST_SCHEMA_REGISTRY[-1][0]
+    assert last_lower is not None
+    assert last_lower <= NEWEST_KNOWN_UCLA_ROMS
+
+
+@pytest.mark.parametrize(
+    "spec", sorted(BUNDLED_MODEL_SPECS), ids=lambda p: p.parent.name
+)
+def test_bundled_model_specs_pin_known_releases(spec: Path):
+    """Adopting a ucla-roms release as a bundled ModelSpec bumps
+    `NEWEST_KNOWN_UCLA_ROMS`, so the shipped models never warn.
+    """
+    roms = yaml.safe_load(spec.read_text())["code"]["roms"]
+    version = _parse_semver(str(roms.get("commit") or roms.get("branch")))
+    if version is not None:
+        assert version <= NEWEST_KNOWN_UCLA_ROMS
+
+
+def test_format_roms_version():
+    assert format_roms_version((0, 12, 0)) == "0.12.0"
+
+
+@pytest.mark.parametrize(
+    "version",
+    [
+        (*NEWEST_KNOWN_UCLA_ROMS[:2], NEWEST_KNOWN_UCLA_ROMS[2] + 1),
+        (NEWEST_KNOWN_UCLA_ROMS[0], NEWEST_KNOWN_UCLA_ROMS[1] + 1, 0),
+        (NEWEST_KNOWN_UCLA_ROMS[0] + 1, 0, 0),
+    ],
+    ids=["patch", "minor", "major"],
+)
+def test_namelist_schema_for_ref_newer_than_known_release_warns(
+    version: tuple[int, int, int], caplog: pytest.LogCaptureFixture
+):
+    """A release tag above `NEWEST_KNOWN_UCLA_ROMS` selects the latest schema
+    with one warning and one log line naming the tag, the schema and the newest
+    known release.
+    """
+    tag = format_roms_version(version)
+    newest = format_roms_version(NEWEST_KNOWN_UCLA_ROMS)
+    last_cls = NAMELIST_SCHEMA_REGISTRY[-1][2]
+    with (
+        caplog.at_level(logging.WARNING, logger="cstar.roms.namelist"),
+        pytest.warns(UserWarning) as record,
+    ):
+        schema = namelist_schema_for_ref(f"v{tag}")
+
+    assert schema is last_cls
+    assert len(record) == 1
+    message = str(record[0].message)
+    assert f"ucla-roms release v{tag} is {NEWER_THAN_KNOWN} ({newest})" in message
+    assert last_cls.__name__ in message
+    assert record[0].filename == __file__
+    assert _newer_than_known_records(caplog) == [message]
+
+
+def test_namelist_schema_for_ref_newer_than_known_logs_once_per_ref(
+    caplog: pytest.LogCaptureFixture,
+):
+    """Logging ignores warning filters and the wizard reselects the schema on
+    every rebuild, so each too-new ref is logged once; the warning repeats.
+    """
+    major = NEWEST_KNOWN_UCLA_ROMS[0] + 1
+    with (
+        caplog.at_level(logging.WARNING, logger="cstar.roms.namelist"),
+        pytest.warns(UserWarning, match=NEWER_THAN_KNOWN) as record,
+    ):
+        namelist_schema_for_ref(f"{major}.0.0")
+        namelist_schema_for_ref(f"{major}.0.0")
+        namelist_schema_for_ref(f"{major}.0.1")
+    assert len(record) == 3
+    assert len(_newer_than_known_records(caplog)) == 2
+
+
+@pytest.mark.parametrize(
+    "checkout_target",
+    [
+        format_roms_version(NEWEST_KNOWN_UCLA_ROMS),
+        f"v{format_roms_version(NEWEST_KNOWN_UCLA_ROMS)}",
+        format_roms_version(NAMELIST_SCHEMA_REGISTRY[-1][0]),  # type: ignore[arg-type]
+    ],
+)
+def test_namelist_schema_for_ref_known_release_in_last_range_is_silent(
+    checkout_target: str, recwarn: pytest.WarningsRecorder, caplog
+):
+    """A release inside the last range, up to the newest known one, selects
+    the latest schema without any warning or log line.
+    """
+    with caplog.at_level(logging.WARNING, logger="cstar.roms.namelist"):
+        schema = namelist_schema_for_ref(checkout_target)
+    assert schema is NAMELIST_SCHEMA_REGISTRY[-1][2]
+    assert len(recwarn) == 0
+    assert not _newer_than_known_records(caplog)
+
+
+def test_namelist_schema_for_ref_hash_at_newer_than_known_release_warns(
+    caplog: pytest.LogCaptureFixture,
+):
+    """A commit hash whose nearest release tag is newer than the newest known
+    release gets the same warning, naming both the hash and the tag.
+    """
+    tag = format_roms_version((NEWEST_KNOWN_UCLA_ROMS[0] + 1, 0, 0))
+    with (
+        mock.patch("cstar.roms.namelist._describe_nearest_tag", return_value=(tag, 0)),
+        caplog.at_level(logging.WARNING, logger="cstar.roms.namelist"),
+        pytest.warns(UserWarning) as record,
+    ):
+        schema = namelist_schema_for_ref("a" * 40, repo_path="/some/repo")
+
+    assert schema is NAMELIST_SCHEMA_REGISTRY[-1][2]
+    assert len(record) == 1
+    message = str(record[0].message)
+    assert f"commit {'a' * 40!r} (release {tag}) is {NEWER_THAN_KNOWN}" in message
+    assert _newer_than_known_records(caplog) == [message]
+
+
+def test_namelist_schema_for_ref_hash_ahead_of_newer_than_known_release_warns_twice():
+    """A commit after a too-new release warns about both: the commits since
+    the tag, and the tag being newer than C-Star knows.
+    """
+    tag = format_roms_version((NEWEST_KNOWN_UCLA_ROMS[0] + 1, 0, 0))
+    with (
+        mock.patch("cstar.roms.namelist._describe_nearest_tag", return_value=(tag, 3)),
+        pytest.warns(UserWarning) as record,
+    ):
+        namelist_schema_for_ref("a" * 40, repo_path="/some/repo")
+
+    messages = [str(w.message) for w in record]
+    assert len(messages) == 2
+    assert f"3 commit(s) after release {tag}" in messages[0]
+    assert NEWER_THAN_KNOWN in messages[1]
+
+
+def test_namelist_schema_for_ref_hash_at_known_release_is_silent(recwarn):
+    """A commit hash on the newest known release does not warn."""
+    with mock.patch(
+        "cstar.roms.namelist._describe_nearest_tag",
+        return_value=(format_roms_version(NEWEST_KNOWN_UCLA_ROMS), 0),
+    ):
+        namelist_schema_for_ref("a" * 40, repo_path="/some/repo")
+    assert len(recwarn) == 0
+
+
+def test_release_ref_for_remote_newer_than_known_tag_warns_on_selection():
+    """Without a clone, the hash resolves to its tag silently; selecting the
+    schema for that tag then warns that the release is newer than known.
+    """
+    tag = format_roms_version((NEWEST_KNOWN_UCLA_ROMS[0] + 1, 0, 0))
+    with mock.patch(
+        "cstar.roms.namelist._describe_remote_nearest_tag", return_value=(tag, 0)
+    ):
+        ref = release_ref_for_remote("/some/repo", "a" * 40)
+    assert ref == tag
+    with pytest.warns(UserWarning, match=f"release {tag} is {NEWER_THAN_KNOWN}"):
+        namelist_schema_for_ref(ref)
 
 
 @pytest.mark.parametrize(

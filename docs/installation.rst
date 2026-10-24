@@ -55,8 +55,9 @@ Verify the installation
    cstar --version
    cstar --help
 
-The first command prints the C-Star version and the versions of its companion
-packages; the second lists subcommands you may wish to explore in more detail.
+The first command prints the C-Star version, the versions of its companion
+packages and the newest ucla-roms release this C-Star knows; the second lists
+subcommands you may wish to explore in more detail.
 
 After installing
 ----------------

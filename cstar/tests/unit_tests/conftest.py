@@ -52,7 +52,7 @@ from cstar.orchestration.serialization import deserialize, serialize
 from cstar.orchestration.tracking import TrackingRepository, WorkplanRun
 from cstar.pio.external_codebase import PIOExternalCodeBase
 from cstar.roms.file_system import RomsFileSystemManager
-from cstar.roms.namelist import release_ref_for_remote
+from cstar.roms.namelist import _LOGGED_NEWER_THAN_KNOWN, release_ref_for_remote
 from cstar.tests.unit_tests.fake_abc_subclasses import (
     FakeExternalCodeBase,
     FakeInputDataset,
@@ -130,6 +130,18 @@ def _clear_release_ref_cache() -> Generator[None]:
     release_ref_for_remote.cache_clear()
     yield
     release_ref_for_remote.cache_clear()
+
+
+@pytest.fixture(autouse=True)
+def _clear_newer_release_log() -> Generator[None]:
+    """Forget which too-new ucla-roms refs were logged around each unit test.
+
+    The newer-than-known release warning is logged once per ref per process,
+    so one test's log line would otherwise hide the next one's.
+    """
+    _LOGGED_NEWER_THAN_KNOWN.clear()
+    yield
+    _LOGGED_NEWER_THAN_KNOWN.clear()
 
 
 @pytest.fixture(autouse=True)

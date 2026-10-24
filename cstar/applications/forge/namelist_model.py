@@ -2036,7 +2036,9 @@ def run_time_settings_for_ref(roms_ref: str | None) -> type[_RunTimeSettingsComm
     UserWarning
         Propagated unchanged from :func:`cstar.roms.namelist.namelist_schema_for_ref`
         when `roms_ref` isn't a release tag (branch name, commit hash, or
-        unparseable) — the latest known schema is used in that case.
+        unparseable), or is a release newer than
+        :data:`cstar.roms.namelist.NEWEST_KNOWN_UCLA_ROMS` — the latest known
+        schema is used in both cases.
     """
     # Falsy covers "" as well as None: a hand-edited blueprint can carry
     # commit=null + branch="", and callers pass `commit or branch` — an empty
