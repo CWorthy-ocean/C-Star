@@ -281,6 +281,12 @@ Bug Fixes
 
 - With ``CSTAR_SLURM_QUEUE`` unset, a workplan run with the SLURM launcher on Elja or Perlmutter failed the same way; it now submits to the primary queue. (`#821 <https://github.com/CWorthy-ocean/C-Star/pull/821>`_)
 - A PBS job script with no account carried an empty ``-A``; it now leaves ``-A`` out, so PBS charges the project set in ``PBS_ACCOUNT``. (`#821 <https://github.com/CWorthy-ocean/C-Star/pull/821>`_)
+- Re-running a workplan whose run directory was purged or deleted no longer reports its steps Done without running them, and no longer records the earlier run's job ids. (`#826 <https://github.com/CWorthy-ocean/C-Star/pull/826>`_)
+
+  - The re-run is refused before anything is written, naming the leftover state directory; ``cstar admin clean --run-id <id>`` clears it, or pass ``--run-id <other-id>``.
+  - A step whose state belongs to another run under the same run-id is launched again rather than reused, with one warning.
+
+- ``cstar admin clean --run-id`` now also removes the run's step state, which it previously left behind. (`#826 <https://github.com/CWorthy-ocean/C-Star/pull/826>`_)
 
 
 Improvements
@@ -351,6 +357,7 @@ Improvements
   - A removed setting or an unknown ``CSTAR_*`` name stays active, for the version that reads it; the rest are commented out.
 
 - A removed setting that used to request a dry run (``CSTAR_CLI_DRY_RUN``) still stops ``cstar admin clean``, ``cstar blueprint migrate`` and ``cstar workplan run`` when it is in the file, not only when exported. (`#825 <https://github.com/CWorthy-ocean/C-Star/pull/825>`_)
+- Removing a corrupt run manifest from an intact run directory no longer cuts the run off from its own step state: the recreated manifest keeps the run's uuid. (`#826 <https://github.com/CWorthy-ocean/C-Star/pull/826>`_)
 
 
 
@@ -421,4 +428,5 @@ Miscellaneous
 - The bundled ``roms-marbl-0.3-default`` through ``roms-marbl-0.8-default`` and ``cson_roms-marbl_v0.1`` model specs are marked archived. (`#824 <https://github.com/CWorthy-ocean/C-Star/pull/824>`_)
 - The model spec docs describe the ``archived`` key and list the archived bundled specs. (`#824 <https://github.com/CWorthy-ocean/C-Star/pull/824>`_)
 - The configuration guide states the skip rule and what ``cstar init`` does with skipped lines. (`#825 <https://github.com/CWorthy-ocean/C-Star/pull/825>`_)
+- The workplan docs describe the refusal under "Re-running a workplan", and the known limitations list a run directory purged in part that keeps its manifest. (`#826 <https://github.com/CWorthy-ocean/C-Star/pull/826>`_)
 
