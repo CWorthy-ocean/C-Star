@@ -480,7 +480,6 @@ class CDRUpscaler:
         self.eta_rho: xr.DataArray = self.uscl_dataset.eta_rho
         self.xi_rho: xr.DataArray = self.uscl_dataset.xi_rho
         self.s_rho: xr.DataArray = self.uscl_dataset.s_rho
-        self.time: xr.DataArray = self.uscl_dataset.time
 
         # Determine active boundaries and add up all columns to get no. profiles
         self.child_boundaries: dict = {}
