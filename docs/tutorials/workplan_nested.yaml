@@ -16,7 +16,7 @@ steps:
 
   # Day 1 of the outer domain: a spin-up with a shorter time step.
   - name: spinup
-    application: roms_marbl
+    application: ucla_roms
     blueprint:
       from_step: make_outer
     depends_on:
@@ -31,7 +31,7 @@ steps:
   # Day 2 of the outer domain, continued from the spin-up's restart, at the
   # blueprint's own time step.
   - name: outer
-    application: roms_marbl
+    application: ucla_roms
     blueprint:
       from_step: make_outer
     depends_on:
@@ -58,7 +58,7 @@ steps:
   # Day 2 of the inner domain: starts from inner_ic's file and takes its
   # boundary values from the hourly extraction of both outer-grid runs.
   - name: inner
-    application: roms_marbl
+    application: ucla_roms
     blueprint:
       from_step: make_inner
     depends_on:

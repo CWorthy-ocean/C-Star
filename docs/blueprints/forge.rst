@@ -5,8 +5,8 @@ Forge blueprint
 
 A forge blueprint is the input to Forge, the domain-generation application:
 one YAML file describing the domain you want. Processing it produces every
-input file a ROMS-MARBL simulation needs and a :doc:`ROMS-MARBL blueprint
-<roms_marbl>` that runs it.
+input file a UCLA-ROMS simulation needs and a :doc:`UCLA-ROMS blueprint
+<ucla_roms>` that runs it.
 
 Most forge blueprints are written by the :doc:`wizard <../wizard>`, which
 assembles one from catalog specs and your choices, then shows the result for
@@ -45,12 +45,12 @@ normally omits), a forge blueprint has these sections:
    them; the basenames must be distinct. It is normally absent, and a saved
    blueprint then has no such key: the ``carbonate-sensitivity-from``
    :doc:`workplan directive <../workplans/directives>` supplies the files at
-   run time, from the ``_cdrgas`` output of an earlier ROMS-MARBL step. When
-   it is present, each ``location`` must exist on the machine running Forge (a
+   run time, from the ``_cdrgas`` output of an earlier UCLA-ROMS step
+   with MARBL. When it is present, each ``location`` must exist on the machine running Forge (a
    relative one resolves against the directory of the forge blueprint file):
    Forge checks each file for the variables above, copies it into
    ``input_data/`` under its own name (as classic netCDF when the build uses
-   ParallelIO), and lists the copies in the ROMS-MARBL blueprint's
+   ParallelIO), and lists the copies in the UCLA-ROMS blueprint's
    ``forcing.carbonate_sensitivity``. The ``content_hash`` pins the file's
    structure and a sample of its data, so a changed file only warns; the
    ``location`` is not part of the blueprint's content hash. Files are rejected for any other biogeochemistry
@@ -60,7 +60,7 @@ normally omits), a forge blueprint has these sections:
    The list of source datasets Forge must stage before generating inputs
    (derived from ``forcing``; see :doc:`../forge/source_datasets`).
 ``model_settings``
-   The resolved ROMS-MARBL settings, one section per namelist group plus the
+   The resolved UCLA-ROMS settings, one section per namelist group plus the
    compile-time ``cppdefs`` switches. These start from the model spec's
    defaults and are adjusted by the resolver for the chosen domain and
    forcing; the *Advanced settings* section of the wizard edits them.
@@ -116,7 +116,7 @@ Processing
 The ``application: forge`` field routes the blueprint to Forge, which runs
 three stages: stage the source data, generate the input files, and configure
 the build (render ``cppdefs.opt`` and ``namelist.nml`` and write the
-ROMS-MARBL blueprint). ``cstar forge run`` runs the same stages with Forge's
+UCLA-ROMS blueprint). ``cstar forge run`` runs the same stages with Forge's
 full option set:
 
 .. code-block:: console
@@ -133,7 +133,7 @@ The options you are most likely to want:
    generating the rest.
 ``--clobber``
    Regenerate inputs that already exist. Without it, existing files are
-   reused. To run the emitted ROMS-MARBL blueprint again in the same
+   reused. To run the emitted UCLA-ROMS blueprint again in the same
    directory, pass ``--clobber`` to ``cstar blueprint run``, as for any
    application.
 ``--no-data``, ``--no-generate``, ``--no-configure``
@@ -163,12 +163,12 @@ Everything goes under the blueprint's working directory: by default
      builds/compile-time/     cppdefs.opt
      builds/run-time/         namelist.nml, marbl_in
      blueprints/
-       B_<name>.yaml          the ROMS-MARBL blueprint
+       B_<name>.yaml          the UCLA-ROMS blueprint
        settings_B_<name>.yaml the resolved model settings, for reference
      output/
-       B_<name>.yaml          a copy of the ROMS-MARBL blueprint
+       B_<name>.yaml          a copy of the UCLA-ROMS blueprint
 
-The ROMS-MARBL blueprint points at the generated files with paths relative to
+The UCLA-ROMS blueprint points at the generated files with paths relative to
 its own directory (``../input_data/<file>``, ``../builds/run-time``), so the
 working directory can be moved or copied as a unit; the copy in ``output/``
 sits at the same depth and names the same files. It pins the same model code
@@ -176,7 +176,7 @@ the forge blueprint did, carries the processor layout and run window, and
 lists the rendered ``cppdefs.opt``, ``namelist.nml`` and ``marbl_in`` as its
 compile-time and run-time code. It has no
 ``working_dir`` of its own, so it runs under
-``CSTAR_DATA_HOME/blueprint_runs/roms_marbl/<name>`` unless a workplan places
+``CSTAR_DATA_HOME/blueprint_runs/ucla_roms/<name>`` unless a workplan places
 it. Both ``cstar blueprint run`` and ``cstar forge run`` copy it into
 ``output/``, where a later step of a workplan looks for it; run that copy with
 ``cstar blueprint run output/B_<name>.yaml``. ``cstar forge run`` prints the

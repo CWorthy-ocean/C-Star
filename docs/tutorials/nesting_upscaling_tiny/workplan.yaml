@@ -7,15 +7,15 @@
 #   forge_child      forge        child grid, 24x24 cells over 100 km, nested in the parent;
 #                                 one ALK release near its east boundary
 #   forge_parent_up  forge        the parent grid again, CDR mode "upscaled"
-#   parent           roms_marbl   2012-01-01T00 -> 01-03T07, restarts every 6 h; writes
+#   parent           ucla_roms    2012-01-01T00 -> 01-03T07, restarts every 6 h; writes
 #                                 child_bry.*.nc for the child
 #   nest_ic          nest_ic      the parent restart at 2012-01-02T06 -> the child's initial
 #                                 conditions (ic_from_parent_rst.<ts>.nc)
-#   child            roms_marbl   2012-01-02T06 -> 01-03T06; continue-from nest_ic, nest-from
+#   child            ucla_roms    2012-01-02T06 -> 01-03T06; continue-from nest_ic, nest-from
 #                                 parent; writes *_uscl.*.nc (boundary flux of the CDR tracers)
 #   upscale          upscaler     *_uscl.*.nc -> upscaled_cdr.nc, CDF-5, the CDR forcing for
 #                                 the parent grid
-#   parent_up        roms_marbl   the parent grid rerun from the parent's restart at the
+#   parent_up        ucla_roms    the parent grid rerun from the parent's restart at the
 #                                 child's start, with upscaled_cdr.nc as its CDR forcing,
 #                                 to the child's end
 #   cdr_metrics      cdr_metrics  the CO2 uptake and CDR efficiency of the release: the
@@ -30,7 +30,7 @@
 #   cstar workplan submit workplan.yaml
 #   cstar run status nest-tiny
 name: nest-tiny
-description: Tiny 2-level nested ROMS-MARBL run with an ALK release in the child, upscaled to a rerun of the parent, with CDR metrics (ucla-roms 0.11.0, PIO)
+description: Tiny 2-level nested UCLA-ROMS run with an ALK release in the child, upscaled to a rerun of the parent, with CDR metrics (ucla-roms 0.11.0, PIO)
 state: draft
 
 compute_environment:
@@ -70,7 +70,7 @@ steps:
         max_walltime: "00:30:00"
 
   - name: parent
-    application: roms_marbl
+    application: ucla_roms
     blueprint:
       from_step: forge_parent
     depends_on:
@@ -95,7 +95,7 @@ steps:
         max_walltime: "00:30:00"
 
   - name: child
-    application: roms_marbl
+    application: ucla_roms
     blueprint:
       from_step: forge_child
     depends_on:
@@ -123,7 +123,7 @@ steps:
         max_walltime: "00:30:00"
 
   - name: parent_up
-    application: roms_marbl
+    application: ucla_roms
     blueprint:
       from_step: forge_parent_up
     depends_on:

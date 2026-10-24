@@ -73,7 +73,7 @@ Execution order (steps run in order, lowest ``order`` value first):
 -------------------------
 
 ``RomsMarblInputData`` (a dataclass subclass of ``InputData``, both defined
-in ``input_data.py``) implements ROMS-MARBL-specific input generation: grid,
+in ``input_data.py``) implements UCLA-ROMS-specific input generation: grid,
 initial conditions, and every forcing category.
 
 There is no ``model_spec`` field -- the class is host-/model-spec-independent.
@@ -153,7 +153,7 @@ Registry validation
 The class validates that every key in ``input_list`` has a registered
 handler in ``INPUT_REGISTRY``; a missing handler raises ``ValueError``.
 
-ROMS-MARBL blueprint elements initialization
+UCLA-ROMS blueprint elements initialization
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 ``__post_init__`` also creates ``roms_marbl_blueprint_elements``
@@ -404,7 +404,7 @@ passes, see ``CDR_FORCING_NETCDF_STEM``) and YAML metadata.
 
 **Key features**: Optional: only appears in ``input_list`` when
 ``cdr_forcing`` or ``cdr_forcing_file`` is set (CDR mode ``"upscaled"`` sets
-neither -- see `ROMS-MARBL blueprint elements initialization`_ above); the
+neither -- see `UCLA-ROMS blueprint elements initialization`_ above); the
 handler itself also no-ops if the merged kwargs are empty. ``cdr_kwargs`` is
 merged via ``_build_input_args()`` and passed to ``rt.CDRForcing(**input_args)``.
 Output paths are normalized to absolute strings.
@@ -509,7 +509,7 @@ honors the reference's native layout.
 ``SourceDatasets.dataset_key_for_source()`` is used elsewhere (subchunk-
 reference memoization), not inside this method.
 
-ROMS-MARBL blueprint element updates
+UCLA-ROMS blueprint element updates
 ----------------------------------------
 
 Each handler appends a ``Resource`` (``location=str(out_path),

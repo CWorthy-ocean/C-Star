@@ -408,9 +408,9 @@ automatic migration, and has no effect on a compatible older file. For example:
 
 .. code-block:: text
 
-   roms_marbl schema 9.9.9 is newer than this build of cstar-ocean reads (3.0.0). Upgrade cstar-ocean to read this file.
+   ucla_roms schema 9.9.9 is newer than this build of cstar-ocean reads (3.3.0). Upgrade cstar-ocean to read this file.
 
-   roms_marbl schema 0.5.0 has no automatic migration to 3.0.0 from 0.x. Update the blueprint by hand to the 3.0.0 schema (published under docs/schemas), then validate it with: cstar blueprint check <path>
+   ucla_roms schema 0.5.0 has no automatic migration to 3.3.0 from 0.x. Update the blueprint by hand to the 3.3.0 schema (published under docs/schemas), then validate it with: cstar blueprint check <path>
 
 Tying it Together
 -----------------
@@ -478,6 +478,13 @@ The entry-point name must be the application's ``name`` -- the same value your
 blueprints carry in their ``application`` field. *C-Star* imports that module
 (and only that module -- the entry point's return value is unused) the first
 time an application by that name is requested.
+
+An application can be renamed without breaking the documents written under its
+earlier name. *C-Star* keeps a table of earlier names,
+``cstar.base.application_names.APPLICATION_ALIASES``, mapping each to the current
+name. An alias is replaced by the current name when a blueprint, a workplan step
+or a reference is loaded, so those documents keep working. The in-tree module
+(or the entry point) is looked up by the current name, so register that one.
 
 Choose a name no built-in already uses. *C-Star* resolves the in-tree
 ``cstar.applications`` module first and only consults entry points when that
