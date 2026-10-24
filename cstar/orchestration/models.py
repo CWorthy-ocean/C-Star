@@ -462,6 +462,11 @@ class Blueprint(ConfiguredBaseModel, ABC):
             data.pop(key, None)
         return canonical_hash(data)
 
+    @property
+    def schema_ref(self) -> str:
+        """The URL of the published JSON schema the blueprint's ``$schema`` names."""
+        return generate_schema_ref(self.application, self.schema_version)
+
     @field_validator("application", mode="after")
     @classmethod
     def _canonicalize_application(cls, value: str) -> str:
@@ -490,13 +495,7 @@ class Blueprint(ConfiguredBaseModel, ABC):
     ) -> dict[str, t.Any]:
         data = handler(self)
         if not info.exclude or "$schema" not in info.exclude:
-            return {
-                "$schema": generate_schema_ref(
-                    self.application,
-                    self.schema_version,
-                ),
-                **data,
-            }
+            return {"$schema": self.schema_ref, **data}
         return data
 
 

@@ -7,6 +7,7 @@ import pytest
 import yaml
 from pydantic import ValidationError
 
+import cstar
 from cstar.applications.roms_marbl.adapter import (
     CarbonateSensitivityAdapter,
     PIOAdapter,
@@ -478,6 +479,38 @@ class TestProvenance:
         complete_blueprint_dict["provenance"] = {"notes": "anything"}
         with pytest.raises(ValidationError, match="notes"):
             RomsMarblBlueprint.model_validate(complete_blueprint_dict)
+
+
+@pytest.mark.parametrize(
+    ("application", "schema_version", "published"),
+    [
+        ("roms_marbl", "3.0.0", "roms_marbl/roms_marbl_schema.3.0.0.json"),
+        ("roms_marbl", "3.2.0", "roms_marbl/roms_marbl_schema.3.2.0.json"),
+        ("ucla_roms", "3.2.0", "roms_marbl/roms_marbl_schema.3.2.0.json"),
+        ("roms_marbl", "3.3.0", "ucla_roms/ucla_roms_schema.3.3.0.json"),
+        ("ucla_roms", "3.3.0", "ucla_roms/ucla_roms_schema.3.3.0.json"),
+    ],
+)
+def test_schema_header_names_a_published_schema(
+    complete_blueprint_dict: dict[str, Any],
+    application: str,
+    schema_version: str,
+    published: str,
+) -> None:
+    """A blueprint of a version published under the earlier name keeps naming
+    that schema when it is written back; a current one names the new schema.
+    """
+    complete_blueprint_dict |= {
+        "application": application,
+        "schema_version": schema_version,
+    }
+    bp = RomsMarblBlueprint.model_validate(complete_blueprint_dict)
+
+    header = bp.model_dump(mode="json")["$schema"]
+
+    assert header.endswith(f"/docs/schemas/bp/{published}")
+    repo_root = Path(cstar.__file__).resolve().parents[1]
+    assert (repo_root / "docs" / "schemas" / "bp" / published).is_file()
 
 
 class TestCarbonateSensitivity:
