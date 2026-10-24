@@ -247,7 +247,7 @@ class InputGenerator:
     end_date: Any
 
     # Output directory for generated NetCDFs — injected by the caller (executor).
-    # Required: input_data no longer resolves paths from cstar.applications.forge.config (so C-Star can
+    # Required: input_generator no longer resolves paths from cstar.applications.forge.config (so C-Star can
     # supply its own when the forge application relocates). kw_only so subclasses can
     # declare required positional fields without dataclass default-ordering conflicts.
     input_data_dir: Path = field(kw_only=True)

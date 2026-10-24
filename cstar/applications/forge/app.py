@@ -71,7 +71,7 @@ INPUT_ARTIFACTS: t.Final[tuple[tuple[str, ArtifactKind, dict[str, str]], ...]] =
 )
 """The stem of each generated input NetCDF (`input_data/<domain>_<stem>.nc`), as
 `fnmatch` globs in precedence order, with its kind and starting metadata. The `cdr`
-stem is `input_data.CDR_FORCING_NETCDF_STEM`, spelled out here because importing
+stem is `input_generator.CDR_FORCING_NETCDF_STEM`, spelled out here because importing
 that module is too heavy for registration."""
 
 
@@ -94,7 +94,7 @@ def input_products(executor: ForgeExecutor) -> list[Product]:
     """
     # Deferred: this package's import (registration) must stay light.
     from cstar.applications.forge.executor import BLUEPRINTS_DIR_NAME
-    from cstar.applications.forge.input_data import netcdf_filename_component
+    from cstar.applications.forge.input_generator import netcdf_filename_component
 
     root = executor.run_output_dir.resolve()
     prefix = f"{netcdf_filename_component(executor.name)}_"
@@ -209,7 +209,7 @@ class ForgeApplication(ApplicationDefinition[ForgeBlueprint, ForgeRunner]):
         """
         # Deferred: this package's import (registration) must stay light, and
         # these pull in roms_tools/xarray/dask.
-        from cstar.applications.forge.input_data import netcdf_basename
+        from cstar.applications.forge.input_generator import netcdf_basename
         from cstar.applications.ucla_roms.models import APP_NAME as UCLA_ROMS_APP
 
         return EmittedBlueprint(
@@ -246,7 +246,7 @@ class ForgeApplication(ApplicationDefinition[ForgeBlueprint, ForgeRunner]):
             INPUT_DATA_DIR_NAME,
             RUN_TIME_DIR_NAME,
         )
-        from cstar.applications.forge.input_data import netcdf_filename_component
+        from cstar.applications.forge.input_generator import netcdf_filename_component
 
         fs = JobFileSystemManager(Path("/"))
         output = fs.output_dir.relative_to(fs.root_dir)

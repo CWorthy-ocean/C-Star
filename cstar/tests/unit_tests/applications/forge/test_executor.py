@@ -53,7 +53,7 @@ from cstar.applications.forge.blueprint import (
 from cstar.applications.forge.engine import process_forge_blueprint
 from cstar.applications.forge.executor import ForgeExecutor, _deep_merge_settings_dict
 from cstar.applications.forge.host import HostPaths
-from cstar.applications.forge.input_data import CHILD_IC_PLACEHOLDER_LOCATION
+from cstar.applications.forge.input_generator import CHILD_IC_PLACEHOLDER_LOCATION
 from cstar.applications.forge.namelist_model import n_tracers_from_param
 from cstar.applications.forge.resolve import build_forge_blueprint
 from cstar.applications.forge.templates import bundled_template_dir
@@ -1754,7 +1754,7 @@ class TestForgeExecutorBuildAndRun:
 
         Drives the exact real call chain ``process_forge_blueprint`` uses
         (``split_model_settings(cfg)`` -> ``ForgeExecutor.configure_build``), with the
-        ``generate_inputs`` step simulated (as input_data.py's ``_generate_river_forcing``/
+        ``generate_inputs`` step simulated (as input_generator.py's ``_generate_river_forcing``/
         ``_generate_tidal_forcing`` would) rather than actually downloading/generating
         real forcing data.
         """
@@ -2331,7 +2331,7 @@ class TestForgeExecutorBuildAndRun:
         source-data machinery entirely) -- ``__post_init__`` only needs the
         constructor-time attributes, not a real grid or dataset.
         """
-        from cstar.applications.forge.input_data import (
+        from cstar.applications.forge.input_generator import (
             UPSCALED_CDR_PLACEHOLDER_LOCATION,
             RomsInputGenerator,
         )
@@ -3174,7 +3174,7 @@ class TestRunBlueprintPublishes:
 class TestForgeExecutorGenerateInputsComprehensive:
     """Comprehensive tests for generate_inputs method covering full workflow."""
 
-    @patch("cstar.applications.forge.executor.input_data.RomsInputGenerator")
+    @patch("cstar.applications.forge.executor.input_generator.RomsInputGenerator")
     def test_generate_inputs_creates_input_data_instance(
         self,
         mock_input_data_class,
@@ -3214,7 +3214,7 @@ class TestForgeExecutorGenerateInputsComprehensive:
             # The minimal fixture is a marbl (BGC) model.
             assert call_kwargs["has_bgc"] is True
 
-    @patch("cstar.applications.forge.executor.input_data.RomsInputGenerator")
+    @patch("cstar.applications.forge.executor.input_generator.RomsInputGenerator")
     @requires_cstar_pio
     def test_generate_inputs_use_pio_forwards_use_pio(
         self,
@@ -3240,7 +3240,7 @@ class TestForgeExecutorGenerateInputsComprehensive:
             call_kwargs = mock_input_data_class.call_args[1]
             assert call_kwargs["use_pio"] is True
 
-    @patch("cstar.applications.forge.executor.input_data.RomsInputGenerator")
+    @patch("cstar.applications.forge.executor.input_generator.RomsInputGenerator")
     def test_generate_inputs_does_not_persist(
         self,
         mock_input_data_class,
@@ -3271,7 +3271,7 @@ class TestForgeExecutorGenerateInputsComprehensive:
 
                 mock_persist.assert_not_called()
 
-    @patch("cstar.applications.forge.executor.input_data.RomsInputGenerator")
+    @patch("cstar.applications.forge.executor.input_generator.RomsInputGenerator")
     def test_generate_inputs_raises_when_ucla_roms_blueprint_elements_none(
         self,
         mock_input_data_class,
@@ -3291,7 +3291,7 @@ class TestForgeExecutorGenerateInputsComprehensive:
                 exc_info.value
             ) or "Blueprint mismatch" in str(exc_info.value)
 
-    @patch("cstar.applications.forge.executor.input_data.RomsInputGenerator")
+    @patch("cstar.applications.forge.executor.input_generator.RomsInputGenerator")
     def test_generate_inputs_nesting_info_serialized_to_ucla_roms_blueprint_dict(
         self,
         mock_input_data_class,
@@ -3336,7 +3336,7 @@ class TestForgeExecutorGenerateInputsComprehensive:
             assert nesting_info is not None
             assert nesting_info["data"][0]["location"] == str(nesting_file)
 
-    @patch("cstar.applications.forge.executor.input_data.RomsInputGenerator")
+    @patch("cstar.applications.forge.executor.input_generator.RomsInputGenerator")
     def test_generate_inputs_nesting_info_none_in_ucla_roms_blueprint_dict(
         self,
         mock_input_data_class,
@@ -3622,7 +3622,7 @@ class TestGoldenNamelist:
     def _mock_source_data(tmp_path):
         """A SourceDatasets stand-in covering every source name the glorys-era5-unified
         ForcingSpec references (GLORYS/UNIFIED/ERA5/TPXO/DAI/MBL_co2/WOA); mirrors
-        ``sample_source_data`` in tests/test_input_data.py.
+        ``sample_source_data`` in tests/test_input_generator.py.
         """
         mock_sd = MagicMock()
         source_file = tmp_path / "source.nc"
@@ -3744,23 +3744,23 @@ class TestGoldenNamelist:
 
         with (
             patch(
-                "cstar.applications.forge.input_data.rt.InitialConditions"
+                "cstar.applications.forge.input_generator.rt.InitialConditions"
             ) as mock_ic,
             patch(
-                "cstar.applications.forge.input_data.rt.SurfaceForcing"
+                "cstar.applications.forge.input_generator.rt.SurfaceForcing"
             ) as mock_surface,
             patch(
-                "cstar.applications.forge.input_data.rt.BoundaryForcing"
+                "cstar.applications.forge.input_generator.rt.BoundaryForcing"
             ) as mock_boundary,
-            patch("cstar.applications.forge.input_data.rt.TidalForcing") as mock_tidal,
-            patch("cstar.applications.forge.input_data.rt.RiverForcing") as mock_river,
+            patch("cstar.applications.forge.input_generator.rt.TidalForcing") as mock_tidal,
+            patch("cstar.applications.forge.input_generator.rt.RiverForcing") as mock_river,
             (
                 contextlib.nullcontext(MagicMock())
                 if cdr_lite
-                else patch("cstar.applications.forge.input_data.rt.CDRForcing")
+                else patch("cstar.applications.forge.input_generator.rt.CDRForcing")
             ) as mock_cdr,
             patch(
-                "cstar.applications.forge.input_data.source_datasets.STREAMABLE_SOURCES",
+                "cstar.applications.forge.input_generator.source_datasets.STREAMABLE_SOURCES",
                 {"ERA5"},
             ),
         ):
@@ -3960,18 +3960,18 @@ class TestGoldenNamelist:
 
         with (
             patch(
-                "cstar.applications.forge.input_data.rt.InitialConditions"
+                "cstar.applications.forge.input_generator.rt.InitialConditions"
             ) as mock_ic,
             patch(
-                "cstar.applications.forge.input_data.rt.SurfaceForcing"
+                "cstar.applications.forge.input_generator.rt.SurfaceForcing"
             ) as mock_surface,
             patch(
-                "cstar.applications.forge.input_data.rt.BoundaryForcing"
+                "cstar.applications.forge.input_generator.rt.BoundaryForcing"
             ) as mock_boundary,
-            patch("cstar.applications.forge.input_data.rt.TidalForcing") as mock_tidal,
-            patch("cstar.applications.forge.input_data.rt.RiverForcing") as mock_river,
+            patch("cstar.applications.forge.input_generator.rt.TidalForcing") as mock_tidal,
+            patch("cstar.applications.forge.input_generator.rt.RiverForcing") as mock_river,
             patch(
-                "cstar.applications.forge.input_data.source_datasets.STREAMABLE_SOURCES",
+                "cstar.applications.forge.input_generator.source_datasets.STREAMABLE_SOURCES",
                 {"ERA5"},
             ),
         ):
@@ -4624,7 +4624,7 @@ class TestGoldenNamelist:
         """Two real ``_cdrgas`` files (the variables a CDR-LiTE build reads) under
         ``directory``, outside the run's working tree.
         """
-        from test_input_data import _write_cdrgas_netcdf
+        from test_input_generator import _write_cdrgas_netcdf
 
         directory.mkdir()
         return [
@@ -5001,7 +5001,7 @@ class TestChildDomainNoInitialConditionsValidatesAtEmit:
     blueprint eagerly -- before the runtime 'nest-from' directive can replace
     it with the parent-derived initial state -- so ``RomsInputGenerator`` must
     emit a schema-valid PLACEHOLDER resource for a child with no generated IC
-    (``CHILD_IC_PLACEHOLDER_LOCATION`` in input_data.py). This closes the gap
+    (``CHILD_IC_PLACEHOLDER_LOCATION`` in input_generator.py). This closes the gap
     ``_validated_ucla_roms_blueprint`` would otherwise hit at emit time.
 
     Separately, C-Star's namelist ``InitialConditions.inifile`` is also
@@ -5079,18 +5079,18 @@ class TestChildDomainNoInitialConditionsValidatesAtEmit:
 
         with (
             patch(
-                "cstar.applications.forge.input_data.rt.InitialConditions"
+                "cstar.applications.forge.input_generator.rt.InitialConditions"
             ) as mock_ic,
             patch(
-                "cstar.applications.forge.input_data.rt.SurfaceForcing"
+                "cstar.applications.forge.input_generator.rt.SurfaceForcing"
             ) as mock_surface,
             patch(
-                "cstar.applications.forge.input_data.rt.BoundaryForcing"
+                "cstar.applications.forge.input_generator.rt.BoundaryForcing"
             ) as mock_boundary,
-            patch("cstar.applications.forge.input_data.rt.TidalForcing") as mock_tidal,
-            patch("cstar.applications.forge.input_data.rt.RiverForcing") as mock_river,
+            patch("cstar.applications.forge.input_generator.rt.TidalForcing") as mock_tidal,
+            patch("cstar.applications.forge.input_generator.rt.RiverForcing") as mock_river,
             patch(
-                "cstar.applications.forge.input_data.source_datasets.STREAMABLE_SOURCES",
+                "cstar.applications.forge.input_generator.source_datasets.STREAMABLE_SOURCES",
                 {"ERA5"},
             ),
         ):
@@ -5246,19 +5246,19 @@ class TestForgeRunnerEndToEnd:
         with (
             patch("cstar.applications.forge.runtime.process", side_effect=fake_process),
             patch(
-                "cstar.applications.forge.input_data.rt.InitialConditions"
+                "cstar.applications.forge.input_generator.rt.InitialConditions"
             ) as mock_ic,
             patch(
-                "cstar.applications.forge.input_data.rt.SurfaceForcing"
+                "cstar.applications.forge.input_generator.rt.SurfaceForcing"
             ) as mock_surface,
             patch(
-                "cstar.applications.forge.input_data.rt.BoundaryForcing"
+                "cstar.applications.forge.input_generator.rt.BoundaryForcing"
             ) as mock_boundary,
-            patch("cstar.applications.forge.input_data.rt.TidalForcing") as mock_tidal,
-            patch("cstar.applications.forge.input_data.rt.RiverForcing") as mock_river,
-            patch("cstar.applications.forge.input_data.rt.CDRForcing") as mock_cdr,
+            patch("cstar.applications.forge.input_generator.rt.TidalForcing") as mock_tidal,
+            patch("cstar.applications.forge.input_generator.rt.RiverForcing") as mock_river,
+            patch("cstar.applications.forge.input_generator.rt.CDRForcing") as mock_cdr,
             patch(
-                "cstar.applications.forge.input_data.source_datasets.STREAMABLE_SOURCES",
+                "cstar.applications.forge.input_generator.source_datasets.STREAMABLE_SOURCES",
                 {"ERA5"},
             ),
             patch(
@@ -5545,19 +5545,19 @@ class TestOnlyInputsReuseIsIdempotent:
 
         with (
             patch(
-                "cstar.applications.forge.input_data.rt.InitialConditions"
+                "cstar.applications.forge.input_generator.rt.InitialConditions"
             ) as mock_ic,
             patch(
-                "cstar.applications.forge.input_data.rt.SurfaceForcing"
+                "cstar.applications.forge.input_generator.rt.SurfaceForcing"
             ) as mock_surface,
             patch(
-                "cstar.applications.forge.input_data.rt.BoundaryForcing"
+                "cstar.applications.forge.input_generator.rt.BoundaryForcing"
             ) as mock_boundary,
-            patch("cstar.applications.forge.input_data.rt.TidalForcing") as mock_tidal,
-            patch("cstar.applications.forge.input_data.rt.RiverForcing") as mock_river,
-            patch("cstar.applications.forge.input_data.rt.CDRForcing") as mock_cdr,
+            patch("cstar.applications.forge.input_generator.rt.TidalForcing") as mock_tidal,
+            patch("cstar.applications.forge.input_generator.rt.RiverForcing") as mock_river,
+            patch("cstar.applications.forge.input_generator.rt.CDRForcing") as mock_cdr,
             patch(
-                "cstar.applications.forge.input_data.source_datasets.STREAMABLE_SOURCES",
+                "cstar.applications.forge.input_generator.source_datasets.STREAMABLE_SOURCES",
                 {"ERA5"},
             ),
         ):

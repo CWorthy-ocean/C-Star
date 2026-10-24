@@ -185,7 +185,7 @@ class TestForgeArtifacts:
         assert {p: (v.kind, v.metadata) for p, v in found.items()} == expected
 
     def test_cdr_stem_is_the_one_input_data_names(self) -> None:
-        from cstar.applications.forge.input_data import CDR_FORCING_NETCDF_STEM
+        from cstar.applications.forge.input_generator import CDR_FORCING_NETCDF_STEM
 
         assert CDR_FORCING_NETCDF_STEM in {stem for stem, _, _ in INPUT_ARTIFACTS}
 

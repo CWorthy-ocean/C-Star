@@ -40,7 +40,7 @@ from cstar.applications.forge.blueprint import (
     emitted_provenance,
     producer_ref,
 )
-from cstar.applications.forge.input_data import netcdf_basename
+from cstar.applications.forge.input_generator import netcdf_basename
 from cstar.applications.forge.migration import migrate_forge_blueprint_data
 from cstar.applications.forge.namelist_model import validate_run_time_sections
 from cstar.applications.forge.resolve import (
@@ -466,7 +466,7 @@ def test_forge_blueprint_import_stays_light():
         "cstar.applications.ucla_roms",
         "cstar.applications.forge.executor",
         "cstar.applications.forge.engine",
-        "cstar.applications.forge.input_data",
+        "cstar.applications.forge.input_generator",
         "cstar.applications.forge.source_datasets",
         "cstar.applications.forge.resolve",
         "cstar.catalog",
@@ -1904,7 +1904,7 @@ def test_build_forge_blueprint_source_path_round_trips_to_blueprint():
 def test_build_forge_blueprint_source_path_skips_dataset_noting():
     """An item whose source carries an explicit path bypasses staging entirely
     (mirrors topography_path semantics) -- it must not be noted into
-    resolved_datasets/datasets, since input_data._resolve_source_block returns
+    resolved_datasets/datasets, since input_generator._resolve_source_block returns
     the explicit path verbatim without ever staging/verifying via SourceDatasets.
     """
     import copy
@@ -2673,7 +2673,7 @@ def test_resolver_threads_river_bgc_source_and_climatology():
 
 def test_resolver_river_bgc_source_with_path_not_noted():
     """An explicit bgc_source path bypasses staging (the executor reads it verbatim,
-    see input_data._resolve_source_block), so RIVR2O must NOT be noted into
+    see input_generator._resolve_source_block), so RIVR2O must NOT be noted into
     datasets/resolved_datasets -- otherwise _prepare_rivr2o would demand files at
     the canonical staged location that are never used. Same rule as `_note` and
     the river surface_forcing_source loop.
@@ -2803,7 +2803,7 @@ def test_resolver_boundary_bgc_esper_source_excluded_from_datasets():
 def test_resolver_esper_salinity_conditioning_notes_the_woa_salinity_file():
     """An ESPER source stays out of ``datasets`` (it is derived), but switching on
     ``esper_salinity_conditioning`` must note the one file PyESPER needs
-    (``WOA_SALINITY``) so the executor stages it and input_data can look it up.
+    (``WOA_SALINITY``) so the executor stages it and input_generator can look it up.
     Without the switch nothing WOA-related is staged.
     """
     import copy
@@ -3239,7 +3239,7 @@ def test_forcing_override_used_by_input_data(tmp_path):
     """
     from unittest.mock import MagicMock, patch
 
-    from cstar.applications.forge import input_data as id_mod
+    from cstar.applications.forge import input_generator as id_mod
 
     override = {
         "initial_conditions": {"source": {"name": "GLORYS", "climatology": False}},

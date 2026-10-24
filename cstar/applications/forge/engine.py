@@ -94,7 +94,7 @@ PROCESSING_FILLED_SECTIONS = (
     "output_root_name",
 )
 
-# Leaf keys that ``generate_inputs`` (in ``input_data.py``) derives from the
+# Leaf keys that ``generate_inputs`` (in ``input_generator.py``) derives from the
 # *actual* generated forcing/tidal objects — never from ``ForgeBlueprint.model_settings``.
 # The resolver never computes real values for these: it leaves them at
 # whatever the ModelSpec's disabled placeholder says (``river_frc``/``cdr_frc``/
@@ -181,7 +181,7 @@ def sources_to_forcing_override(cfg: ForgeBlueprint) -> dict[str, Any]:
             d["method"] = spec.esper_method
         if spec.esper_equation:
             d["equation"] = spec.esper_equation
-        # Only the switch travels here; input_data._resolve_source_block turns it
+        # Only the switch travels here; input_generator._resolve_source_block turns it
         # into roms-tools' mapping with the staged WOA23 file's path.
         if spec.esper_salinity_conditioning:
             d["salinity_conditioning"] = True
@@ -204,7 +204,7 @@ def sources_to_forcing_override(cfg: ForgeBlueprint) -> dict[str, Any]:
         # InitialConditions and BoundaryForcing, which have this identical shape.
         # Forwarding the typed fields (bgc_interpolation_method, allow_flex_time)
         # and the options passthrough here is what lets authored/UI choices
-        # actually reach input_data — previously only source/bgc_source were
+        # actually reach input_generator — previously only source/bgc_source were
         # propagated, so any other field set in the wizard was silently dropped
         # on the ForgeBlueprint path.
         d = spec.model_dump(exclude={"source", "bgc_sources"}, mode="json")
@@ -214,7 +214,7 @@ def sources_to_forcing_override(cfg: ForgeBlueprint) -> dict[str, Any]:
             # hand-listing them: a hand-written dict silently DROPS any field
             # added to the model later -- that is how `serialize_dask` first
             # went missing here, so the per-source write-scheduler flag never
-            # reached input_data._bgc_serialize_flags in production even though
+            # reached input_generator._bgc_serialize_flags in production even though
             # the resolver had already introspected+carried it faithfully.
             d["bgc_sources"] = [
                 {
@@ -416,7 +416,7 @@ def process_forge_blueprint(
         (which supplies its own executor for the same ``ForgeBlueprint`` blueprint).
     only_inputs :
         One-off subset mode: category names (see
-        ``input_data.resolve_input_selection`` for the accepted aliases —
+        ``input_generator.resolve_input_selection`` for the accepted aliases —
         ``grid``, ``initial_conditions``/``ic``, ``surface``, ``boundary``/``bry``,
         ``tidal``/``tides``, ``river``, ``cdr``) to generate, skipping the rest.
         Validated up front (before ``ensure_source_data``) so a typo fails fast. The
@@ -475,7 +475,7 @@ def process_forge_blueprint(
 
     resolved_only = None
     if only_inputs is not None:
-        from cstar.applications.forge.input_data import resolve_input_selection
+        from cstar.applications.forge.input_generator import resolve_input_selection
 
         resolved_only = resolve_input_selection(only_inputs)
         if configure:

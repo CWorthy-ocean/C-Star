@@ -29,7 +29,7 @@ from pydantic import (
 )
 
 import cstar.applications.ucla_roms.models as cstar_models
-from cstar.applications.forge import input_data, source_datasets
+from cstar.applications.forge import input_generator, source_datasets
 from cstar.applications.forge.blueprint import (
     CDR_MODES,
     CarbonateSensitivitySpec,
@@ -300,7 +300,7 @@ class ForgeExecutor(BaseModel):
             "orchestrator, not generated here: no generation step runs (neither "
             "cdr_forcing nor cdr_forcing_file is populated for this mode), and "
             "RomsInputGenerator emits a placeholder Resource instead -- see "
-            "input_data.UPSCALED_CDR_PLACEHOLDER_LOCATION. Backward-compat: a "
+            "input_generator.UPSCALED_CDR_PLACEHOLDER_LOCATION. Backward-compat: a "
             "caller constructing the executor directly with cdr_forcing/"
             "cdr_forcing_file set but cdr_mode left at its default 'none' gets "
             "the mode inferred ('yaml' for cdr_forcing, 'netcdf' for "
@@ -322,7 +322,7 @@ class ForgeExecutor(BaseModel):
             "``rt.CDRForcing`` from ``cdr_forcing``. Mutually exclusive with "
             "``cdr_forcing`` (the ForgeBlueprint schema already forbids the "
             "combination); verified and staged directly in "
-            "``input_data._generate_cdr_forcing``'s custom-file branch."
+            "``input_generator._generate_cdr_forcing``'s custom-file branch."
         ),
     )
     carbonate_sensitivity: CarbonateSensitivitySpec | None = Field(
@@ -331,7 +331,7 @@ class ForgeExecutor(BaseModel):
         description=(
             "User-supplied carbonate sensitivity files (from ForgeBlueprint "
             "``carbonate_sensitivity``) a ``bgc_mode: cdr_lite`` build reads as "
-            "surface forcing; staged by ``input_data``'s "
+            "surface forcing; staged by ``input_generator``'s "
             "``forcing.carbonate_sensitivity`` step. ``None`` leaves them to the "
             "``carbonate-sensitivity-from`` workplan directive."
         ),
@@ -804,8 +804,8 @@ class ForgeExecutor(BaseModel):
         planned_paths: list[Path] = []
 
         def _add_nc(stem: str) -> None:
-            base = input_data.netcdf_filename_component(self.name)
-            part = input_data.netcdf_filename_component(stem)
+            base = input_generator.netcdf_filename_component(self.name)
+            part = input_generator.netcdf_filename_component(stem)
             path = (input_data_dir / f"{base}_{part}.nc").resolve()
             if path not in planned_paths:
                 planned_paths.append(path)
@@ -839,7 +839,7 @@ class ForgeExecutor(BaseModel):
                     _add_nc("boundary-physics")
                     for bs in entries.get("bgc_sources") or []:
                         bs_source = bs.get("source") or {}
-                        suffix = input_data.RomsInputGenerator._bgc_output_suffix(
+                        suffix = input_generator.RomsInputGenerator._bgc_output_suffix(
                             bs_source.get("name"), bs.get("use_vars")
                         )
                         _add_nc(f"boundary-bgc-{suffix}")
@@ -878,10 +878,10 @@ class ForgeExecutor(BaseModel):
         # runs -- see RomsInputGenerator's cdr_mode handling), so this condition
         # is already False for it without a separate cdr_mode check.
         if self.cdr_forcing or self.cdr_forcing_file:
-            _add_nc(input_data.CDR_FORCING_NETCDF_STEM)
+            _add_nc(input_generator.CDR_FORCING_NETCDF_STEM)
 
         if self.carbonate_sensitivity is not None:
-            for path in input_data.carbonate_sensitivity_destinations(
+            for path in input_generator.carbonate_sensitivity_destinations(
                 input_data_dir, self.carbonate_sensitivity.files
             ):
                 if path.resolve() not in planned_paths:
@@ -1933,7 +1933,7 @@ class ForgeExecutor(BaseModel):
             Truncate the generation loop after 2 iterations (for unit tests).
         only : set[str], optional
             Canonical input-category keys (see
-            ``input_data.resolve_input_selection``) to restrict generation to.
+            ``input_generator.resolve_input_selection``) to restrict generation to.
             The resulting in-memory blueprint/settings only reflect the generated
             subset (plus grid, which always runs) -- callers doing a subset run
             should not proceed to ``configure_build()``.
@@ -1980,7 +1980,7 @@ class ForgeExecutor(BaseModel):
         if self.src_data is None:
             self.ensure_source_data(include_streamable=False)
 
-        ucla_roms_blueprint_elements = input_data.RomsInputGenerator(
+        ucla_roms_blueprint_elements = input_generator.RomsInputGenerator(
             domain_name=self.name,
             start_date=self.start_date,
             end_date=self.end_date,
