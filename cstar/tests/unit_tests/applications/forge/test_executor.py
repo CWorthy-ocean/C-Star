@@ -3752,8 +3752,12 @@ class TestGoldenNamelist:
             patch(
                 "cstar.applications.forge.input_generator.rt.BoundaryForcing"
             ) as mock_boundary,
-            patch("cstar.applications.forge.input_generator.rt.TidalForcing") as mock_tidal,
-            patch("cstar.applications.forge.input_generator.rt.RiverForcing") as mock_river,
+            patch(
+                "cstar.applications.forge.input_generator.rt.TidalForcing"
+            ) as mock_tidal,
+            patch(
+                "cstar.applications.forge.input_generator.rt.RiverForcing"
+            ) as mock_river,
             (
                 contextlib.nullcontext(MagicMock())
                 if cdr_lite
@@ -3968,8 +3972,12 @@ class TestGoldenNamelist:
             patch(
                 "cstar.applications.forge.input_generator.rt.BoundaryForcing"
             ) as mock_boundary,
-            patch("cstar.applications.forge.input_generator.rt.TidalForcing") as mock_tidal,
-            patch("cstar.applications.forge.input_generator.rt.RiverForcing") as mock_river,
+            patch(
+                "cstar.applications.forge.input_generator.rt.TidalForcing"
+            ) as mock_tidal,
+            patch(
+                "cstar.applications.forge.input_generator.rt.RiverForcing"
+            ) as mock_river,
             patch(
                 "cstar.applications.forge.input_generator.source_datasets.STREAMABLE_SOURCES",
                 {"ERA5"},
@@ -5087,8 +5095,12 @@ class TestChildDomainNoInitialConditionsValidatesAtEmit:
             patch(
                 "cstar.applications.forge.input_generator.rt.BoundaryForcing"
             ) as mock_boundary,
-            patch("cstar.applications.forge.input_generator.rt.TidalForcing") as mock_tidal,
-            patch("cstar.applications.forge.input_generator.rt.RiverForcing") as mock_river,
+            patch(
+                "cstar.applications.forge.input_generator.rt.TidalForcing"
+            ) as mock_tidal,
+            patch(
+                "cstar.applications.forge.input_generator.rt.RiverForcing"
+            ) as mock_river,
             patch(
                 "cstar.applications.forge.input_generator.source_datasets.STREAMABLE_SOURCES",
                 {"ERA5"},
@@ -5254,8 +5266,12 @@ class TestForgeRunnerEndToEnd:
             patch(
                 "cstar.applications.forge.input_generator.rt.BoundaryForcing"
             ) as mock_boundary,
-            patch("cstar.applications.forge.input_generator.rt.TidalForcing") as mock_tidal,
-            patch("cstar.applications.forge.input_generator.rt.RiverForcing") as mock_river,
+            patch(
+                "cstar.applications.forge.input_generator.rt.TidalForcing"
+            ) as mock_tidal,
+            patch(
+                "cstar.applications.forge.input_generator.rt.RiverForcing"
+            ) as mock_river,
             patch("cstar.applications.forge.input_generator.rt.CDRForcing") as mock_cdr,
             patch(
                 "cstar.applications.forge.input_generator.source_datasets.STREAMABLE_SOURCES",
@@ -5553,8 +5569,12 @@ class TestOnlyInputsReuseIsIdempotent:
             patch(
                 "cstar.applications.forge.input_generator.rt.BoundaryForcing"
             ) as mock_boundary,
-            patch("cstar.applications.forge.input_generator.rt.TidalForcing") as mock_tidal,
-            patch("cstar.applications.forge.input_generator.rt.RiverForcing") as mock_river,
+            patch(
+                "cstar.applications.forge.input_generator.rt.TidalForcing"
+            ) as mock_tidal,
+            patch(
+                "cstar.applications.forge.input_generator.rt.RiverForcing"
+            ) as mock_river,
             patch("cstar.applications.forge.input_generator.rt.CDRForcing") as mock_cdr,
             patch(
                 "cstar.applications.forge.input_generator.source_datasets.STREAMABLE_SOURCES",

@@ -2619,7 +2619,9 @@ class TestCdrTracerAxis:
         self, data, tmp_path, mode, caplog
     ):
         self._set_mode(data, mode, nt_cdr_oae=3)
-        with caplog.at_level("DEBUG", logger="cstar.applications.forge.input_generator"):
+        with caplog.at_level(
+            "DEBUG", logger="cstar.applications.forge.input_generator"
+        ):
             self._run(data, tmp_path, tracers=None)
 
         # counts stay as set; the file is simply described by ncdr_parm etc.
