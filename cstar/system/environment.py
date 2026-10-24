@@ -71,6 +71,24 @@ class SlurmSettingsBase(EnvSettingsBase):
     )
     """The maximum walltime of a SLURM job."""
 
+    @classmethod
+    def required_settings(cls) -> set[str]:
+        """Return the environment variables the system refuses to submit a job without.
+
+        A setting is required when its field declares a `min_length`; a system
+        that does not need one (e.g. *Elja* has no SLURM accounts) overrides the
+        field without it.
+
+        Returns
+        -------
+        set[str]
+        """
+        return {
+            get_envfield_alias(cls, field_name)
+            for field_name, field in cls.model_fields.items()
+            if any(getattr(m, "min_length", 0) for m in field.metadata)
+        }
+
 
 def get_envfield_alias(
     klass: type[EnvSettingsBase | LmodEnvSettings], field_name: str

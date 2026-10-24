@@ -28,6 +28,7 @@ from cstar.orchestration.utils import (
     ENV_CSTAR_SLURM_MAX_WALLTIME,
     ENV_CSTAR_SLURM_QUEUE,
 )
+from cstar.system.environment import EnvSettingsBase
 from cstar.system.scheduler import SlurmPartition, SlurmScheduler
 
 
@@ -70,6 +71,7 @@ def test_slurmlauncher_adapt_step_no_overrides(
 
     mock_mgr = mock.Mock()
     mock_mgr.environment.package_root = tmp_path
+    mock_mgr.environment.settings_klass = EnvSettingsBase
     mock_mgr.scheduler = SlurmScheduler(
         queues=[fake_get_queue("default-q"), fake_get_queue("alt-q")],
         primary_queue_name="default-q",
@@ -118,6 +120,7 @@ def test_slurmlauncher_adapt_step_single_node_clamps_cpus(
 
     mock_mgr = mock.Mock()
     mock_mgr.environment.package_root = tmp_path
+    mock_mgr.environment.settings_klass = EnvSettingsBase
     mock_mgr.scheduler = SlurmScheduler(
         queues=[fake_get_queue("default-q")],
         primary_queue_name="default-q",
@@ -265,6 +268,7 @@ def test_slurmlauncher_adapt_step_with_overrides(
 
     mock_mgr = mock.Mock()
     mock_mgr.environment.package_root = tmp_path
+    mock_mgr.environment.settings_klass = EnvSettingsBase
     mock_mgr.scheduler = SlurmScheduler(
         queues=[fake_get_queue("default-q"), fake_get_queue("alt-q")],
         primary_queue_name="default-q",

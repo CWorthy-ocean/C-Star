@@ -14,9 +14,12 @@ from pathlib import Path
 from pydantic import BaseModel, Field, PrivateAttr
 
 from cstar.base.env import ENV_CSTAR_SLURM_DISABLE_MT
+from cstar.base.exceptions import CstarError
 from cstar.base.feature import is_flag_enabled
 from cstar.base.utils import _run_cmd
 from cstar.execution.handler import ExecutionHandler, ExecutionStatus
+from cstar.orchestration.utils import ENV_CSTAR_SLURM_ACCOUNT, ENV_CSTAR_SLURM_QUEUE
+from cstar.system.environment import SlurmSettingsBase
 from cstar.system.manager import get_sysmgr
 from cstar.system.scheduler import (
     PBSScheduler,
@@ -412,10 +415,13 @@ def create_scheduler_job(
     ------
     TypeError
         If the active scheduler is not SLURM or PBS.
+    CstarError
+        If the system requires a SLURM account or queue and it is empty.
     """
     # mypy assigns type based on first condition, assigning explicitly:
     job_type: type[SlurmJob] | type[PBSJob]
-    scheduler = get_sysmgr().scheduler
+    sysmgr = get_sysmgr()
+    scheduler = sysmgr.scheduler
 
     if isinstance(scheduler, SlurmScheduler):
         job_type = SlurmJob
@@ -423,6 +429,22 @@ def create_scheduler_job(
         job_type = PBSJob
     else:
         raise TypeError(f"Unsupported scheduler type: {type(scheduler).__name__}")
+
+    klass = sysmgr.environment.settings_klass
+    if klass is not None and issubclass(klass, SlurmSettingsBase):
+        # a queue of `None` asks for the primary queue; only an empty one is unset
+        supplied = {
+            ENV_CSTAR_SLURM_ACCOUNT: account_key,
+            ENV_CSTAR_SLURM_QUEUE: queue_name,
+        }
+        required = klass.required_settings()
+        if missing := [n for n, v in supplied.items() if n in required and v == ""]:
+            msg = (
+                f"Unable to submit a job: {' and '.join(missing)} must be set on "
+                "this system. Run `cstar init` to save your SLURM settings, or "
+                "export them in your shell."
+            )
+            raise CstarError(msg)
 
     return job_type(
         scheduler=scheduler,

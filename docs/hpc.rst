@@ -13,8 +13,10 @@ Configure the scheduler
 
 Most settings are ``CSTAR_*`` variables; :doc:`configuration` lists them
 all and ``cstar env show`` prints the values in effect. Only the SLURM ones
-are required, and a workplan run stops early if the account and queue are
-missing. Run ``cstar init`` once on the cluster to set them: it lists your
+are required, and only to submit jobs: a workplan run with the SLURM launcher
+stops early if the account and queue are missing, and a step that submits its
+own job (a ROMS step run with the local launcher outside an allocation) is
+refused. Run ``cstar init`` once on the cluster to set them: it lists your
 SLURM associations and partitions when ``sacctmgr`` and ``sinfo`` are
 available, asks for the account, queue and default walltime, and writes them
 to ``~/.config/cstar/config.env``:
