@@ -56,6 +56,7 @@ Breaking Changes
   - A catalog's ``blueprints/roms_marbl/`` directory is read with a warning for one more release; ``cstar admin migrate-catalog`` moves it.
 
 - Run manifest schema 1.5.0: step definition hashes recorded by an older manifest are dropped when it is read, so a re-entered run skips the edited-step check once; the next run records them again. (`#818 <https://github.com/CWorthy-ocean/C-Star/pull/818>`_)
+- On Anvil and Bouchet, calling ``ROMSSimulation.run()`` from Python without a ``queue_name`` is now refused, because those systems require a queue; it used to submit to the primary queue. (`#821 <https://github.com/CWorthy-ocean/C-Star/pull/821>`_)
 
 
 
@@ -267,6 +268,13 @@ Bug Fixes
 - A ``runs:`` alias pinned to a run directory that has since moved or been removed no longer fails on the stale path: it warns, naming the pinned directory and the run's uuid, finds the run by that uuid and re-pins the alias by uuid; a pinned directory that holds another run is still an error. (`#817 <https://github.com/CWorthy-ocean/C-Star/pull/817>`_)
 - On a SLURM system such as Anvil, a workplan step run with the local launcher no longer fails at startup with "Environment settings for the system could not be loaded" when ``CSTAR_SLURM_ACCOUNT`` or ``CSTAR_SLURM_QUEUE`` is unset. (`#820 <https://github.com/CWorthy-ocean/C-Star/pull/820>`_)
 - ``parent_up`` applied each hour of upscaled CDR flux one hour late and never applied the child's final hour of export. (`#815 <https://github.com/CWorthy-ocean/C-Star/pull/815>`_)
+- With ``CSTAR_SLURM_QUEUE`` unset, a ROMS step run with the local launcher on Perlmutter, Expanse, Derecho or Elja failed with "not found in list of queues"; it now submits to the system's primary queue. (`#821 <https://github.com/CWorthy-ocean/C-Star/pull/821>`_)
+
+  - The primary queues are ``regular`` (Perlmutter), ``compute`` (Expanse), ``main`` (Derecho) and ``any_cpu`` (Elja).
+  - With the walltime unset, the job requests the queue's maximum walltime.
+
+- With ``CSTAR_SLURM_QUEUE`` unset, a workplan run with the SLURM launcher on Elja or Perlmutter failed the same way; it now submits to the primary queue. (`#821 <https://github.com/CWorthy-ocean/C-Star/pull/821>`_)
+- A PBS job script with no account carried an empty ``-A``; it now leaves ``-A`` out, so PBS charges the project set in ``PBS_ACCOUNT``. (`#821 <https://github.com/CWorthy-ocean/C-Star/pull/821>`_)
 
 
 Improvements
@@ -327,6 +335,8 @@ Improvements
 - Submitting a SLURM job on a system that requires an account and queue, without them, now fails before anything is submitted, naming every missing setting and pointing to ``cstar init``. (`#820 <https://github.com/CWorthy-ocean/C-Star/pull/820>`_)
 - The upscaler refuses a set of ``_uscl`` files with a missing file, a gap or overlap between windows, or a mix of ucla-roms versions, and names the offending file. (`#815 <https://github.com/CWorthy-ocean/C-Star/pull/815>`_)
 - ``upscaled_cdr.nc`` records its time convention (``cdr_time:convention``) and where its windows came from (``uscl_windows``). (`#815 <https://github.com/CWorthy-ocean/C-Star/pull/815>`_)
+- On Expanse, which requires a project on every job, a missing ``CSTAR_SLURM_ACCOUNT`` now stops a SLURM-launcher run at start and refuses a ROMS job before submission, naming the setting and ``cstar init``. (`#821 <https://github.com/CWorthy-ocean/C-Star/pull/821>`_)
+- ``cstar init`` on Expanse marks the SLURM account as required on this system. (`#821 <https://github.com/CWorthy-ocean/C-Star/pull/821>`_)
 
 
 
@@ -384,3 +394,5 @@ Miscellaneous
 - The HPC guide now says the SLURM settings are needed only to submit jobs. (`#820 <https://github.com/CWorthy-ocean/C-Star/pull/820>`_)
 - The nesting and upscaling tutorial drops its version-sensitive reference-numbers table and the known issue this fixes, and says what the weekly test's closure bound does and does not check. (`#815 <https://github.com/CWorthy-ocean/C-Star/pull/815>`_)
 - The CCS developer page notes that its resource numbers predate the fix and that ``parent_up`` now receives about 1.5 % more alkalinity over a month. (`#815 <https://github.com/CWorthy-ocean/C-Star/pull/815>`_)
+- The HPC guide lists, for each system, which SLURM settings are required and which queue a job uses when ``CSTAR_SLURM_QUEUE`` is unset. (`#821 <https://github.com/CWorthy-ocean/C-Star/pull/821>`_)
+- The workplans guide's Execution note no longer says every step fails at start-up without the SLURM account and queue; it names the settings each system requires and when they are checked. (`#821 <https://github.com/CWorthy-ocean/C-Star/pull/821>`_)
