@@ -337,6 +337,7 @@ Improvements
 - ``upscaled_cdr.nc`` records its time convention (``cdr_time:convention``) and where its windows came from (``uscl_windows``). (`#815 <https://github.com/CWorthy-ocean/C-Star/pull/815>`_)
 - On Expanse, which requires a project on every job, a missing ``CSTAR_SLURM_ACCOUNT`` now stops a SLURM-launcher run at start and refuses a ROMS job before submission, naming the setting and ``cstar init``. (`#821 <https://github.com/CWorthy-ocean/C-Star/pull/821>`_)
 - ``cstar init`` on Expanse marks the SLURM account as required on this system. (`#821 <https://github.com/CWorthy-ocean/C-Star/pull/821>`_)
+- Forge's input-file generator is renamed ``RomsInputGenerator`` (base class ``InputGenerator``), in ``cstar.applications.forge.input_generator``, and the time-splitting transform is renamed ``RomsTimeSplitter``. (`#823 <https://github.com/CWorthy-ocean/C-Star/pull/823>`_)
 
 
 
@@ -396,3 +397,11 @@ Miscellaneous
 - The CCS developer page notes that its resource numbers predate the fix and that ``parent_up`` now receives about 1.5 % more alkalinity over a month. (`#815 <https://github.com/CWorthy-ocean/C-Star/pull/815>`_)
 - The HPC guide lists, for each system, which SLURM settings are required and which queue a job uses when ``CSTAR_SLURM_QUEUE`` is unset. (`#821 <https://github.com/CWorthy-ocean/C-Star/pull/821>`_)
 - The workplans guide's Execution note no longer says every step fails at start-up without the SLURM account and queue; it names the settings each system requires and when they are checked. (`#821 <https://github.com/CWorthy-ocean/C-Star/pull/821>`_)
+- Python code that imports the ROMS application must use its new module and class names; the old names are removed, with no deprecation aliases. (`#823 <https://github.com/CWorthy-ocean/C-Star/pull/823>`_)
+
+  - ``cstar.applications.roms_marbl`` is now ``cstar.applications.ucla_roms``, and ``RomsMarblBlueprint``, ``RomsMarblApplication`` and ``RomsMarblRunner`` are now ``UclaRomsBlueprint``, ``UclaRomsApplication`` and ``UclaRomsRunner``.
+  - The ROMS output-file and file-system helpers (``RestartFile``, ``CdrOutputFile``, ``RomsFileSystemManager``, …) are now imported from ``cstar.roms.outputs`` and ``cstar.roms.file_system``.
+  - The catalog's ``roms_marbl_blueprint_names``, ``roms_marbl_blueprint_path``, ``roms_marbl_blueprint_df`` and ``roms_marbl_blueprint`` are now ``ucla_roms_blueprint_*``; ``blueprint_names("ucla_roms")`` and its siblings still work.
+  - Workplan templates from ``cstar template create`` now write ``application: ucla_roms``.
+  - The docs, the API reference and the developer guides use the new class and module names.
+
