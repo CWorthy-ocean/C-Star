@@ -52,7 +52,9 @@ from cstar.base.env import ENV_CSTAR_DATA_HOME, ENV_CSTAR_RUNID
 from cstar.base.utils import slugify
 from cstar.catalog.domain_catalog import default_catalog as _CATALOG
 from cstar.orchestration.models import (
+    CONTENT_HASH_SCHEME,
     BlueprintIdentity,
+    BlueprintState,
     CatalogSpecRef,
     GeneratedBy,
     Provenance,
@@ -1945,7 +1947,7 @@ def test_schema_round_trip_identity(tmp_path):
     assert back.application == cfg.application
 
 
-def test_content_hash_ignores_excluded_sections():
+def test_content_hash_ignores_excluded_sections(tmp_path: Path) -> None:
     from cstar.applications.forge.blueprint import _HASH_EXCLUDE, SpecRef
 
     cfg = _build()
@@ -1962,17 +1964,37 @@ def test_content_hash_ignores_excluded_sections():
         }
     )
     assert c2.content_hash() == h
-    assert _HASH_EXCLUDE == {
-        "forge_blueprint_version",
-        "name",
-        "description",
-        "composition",
-        "provenance",
-        "working_dir",
-        "state",
-        "schema_version",
-        "$schema",
-    }
+    # the base metadata (working_dir, state, ...) is left out by the base recipe
+    c3 = cfg.model_copy(
+        update={"working_dir": tmp_path, "state": BlueprintState.Validated}
+    )
+    assert c3.content_hash() == h
+    # only what the forge blueprint leaves out on top of that is listed here
+    assert _HASH_EXCLUDE == frozenset({"forge_blueprint_version", "composition"})
+
+
+_HASH_RECIPE_CHANGED = (
+    "The hash recipe changed, so every hash recorded by earlier runs stops "
+    "matching. If the change is deliberate, bump HASH_RECIPE_VERSION in "
+    "cstar/base/provenance.py and re-pin this value; never re-pin without bumping."
+)
+
+_FROZEN_BLUEPRINT = (
+    Path(__file__).parent / "fixtures" / "hash_recipe_forge_blueprint.yaml"
+)
+_FROZEN_BLUEPRINT_HASH = (
+    "bp-v2:0bffa2ad1a95b968b3006e91e79b255d73c84418a98d42019e0bb999f377c6e8"
+)
+
+
+def test_content_hash_of_a_frozen_blueprint_is_pinned() -> None:
+    """Verify a frozen blueprint hashes to its pinned digest. The shipped
+    blueprints are restamped with whatever recipe is current, so their hygiene test
+    cannot notice a recipe change; this copy is never restamped.
+    """
+    blueprint = ForgeBlueprint.from_yaml(_FROZEN_BLUEPRINT)
+
+    assert blueprint.content_hash() == _FROZEN_BLUEPRINT_HASH, _HASH_RECIPE_CHANGED
 
 
 def test_content_hash_changes_with_results_affecting_data():
@@ -2105,6 +2127,54 @@ def test_engine_warns_on_hash_mismatch(tmp_path):
     with pytest.warns(UserWarning, match="integrity check FAILED"):
         b = process_forge_blueprint(tampered, validate=False, executor_factory=_Fake)
     assert b.calls == ["e", "g", "c"]  # processing proceeded
+
+
+def _with_recorded_hash(
+    cfg: ForgeBlueprint, path: Path, content_hash: str
+) -> ForgeBlueprint:
+    """Write ``cfg`` to ``path`` and read it back with ``content_hash`` recorded."""
+    cfg.to_yaml(path)
+    data = yaml.safe_load(path.read_text())
+    data["provenance"]["content_hash"] = content_hash
+    path.write_text(yaml.safe_dump(data))
+    return ForgeBlueprint.from_yaml(path)
+
+
+def test_verify_content_hash_skips_a_hash_of_an_earlier_scheme(
+    tmp_path: Path,
+) -> None:
+    """Verify an untagged recorded hash (from before hashes were tagged) cannot be
+    compared with the tagged one, so it is not reported as a hand-edit.
+    """
+    from cstar.applications.forge.engine import verify_content_hash
+
+    loaded = _with_recorded_hash(_build(), tmp_path / "bp.yaml", "ab" * 32)
+
+    assert verify_content_hash(loaded) is None
+
+
+def test_verify_content_hash_reports_both_hashes_by_their_short_form(
+    tmp_path: Path,
+) -> None:
+    """Verify a mismatch under the current scheme names both hashes by the first 12
+    characters of their digests, not in full.
+    """
+    from cstar.applications.forge.engine import verify_content_hash
+
+    recorded = f"{CONTENT_HASH_SCHEME}:{'ab' * 32}"
+    loaded = _with_recorded_hash(_build(), tmp_path / "bp.yaml", recorded)
+    computed = loaded.content_hash()
+    assert computed != recorded
+
+    message = verify_content_hash(loaded)
+
+    assert message is not None
+    assert "integrity check FAILED" in message
+    assert "ab" * 6 in message
+    assert computed.removeprefix(f"{CONTENT_HASH_SCHEME}:")[:12] in message
+    assert recorded not in message
+    assert computed not in message
+    assert "ab" * 32 not in message
 
 
 def test_golden_model_settings_test_tiny():
@@ -4474,23 +4544,20 @@ class TestCarbonateSensitivitySpec:
         assert _build().carbonate_sensitivity is None
         assert _build_cdr_lite(use_pio=False).carbonate_sensitivity is None
 
-    def test_an_unset_field_leaves_no_trace_in_the_hash(self, monkeypatch):
+    def test_an_unset_field_leaves_no_trace_in_the_hash(self):
         """A hash recorded before the field existed must still verify: with the field
         unset, ``content_hash`` is what it would be if the model had no such key.
         """
         cfg = _build_cdr_lite(use_pio=False)
         assert cfg.carbonate_sensitivity is None
-        recorded = cfg.content_hash()
-        dump = ForgeBlueprint.model_dump
-
-        def dump_as_before_the_field(self, **kwargs):
-            data = dump(self, **kwargs)
-            assert data.pop("carbonate_sensitivity") is None
-            return data
-
-        monkeypatch.setattr(ForgeBlueprint, "model_dump", dump_as_before_the_field)
-
-        assert cfg.content_hash() == recorded
+        assert "carbonate_sensitivity" not in cfg._hashed_content()
+        # an explicit null is the default too, so it is not hashed either
+        explicit = ForgeBlueprint.model_validate(
+            cfg.model_dump(mode="json") | {"carbonate_sensitivity": None}
+        )
+        assert explicit.carbonate_sensitivity is None
+        assert "carbonate_sensitivity" not in explicit._hashed_content()
+        assert explicit.content_hash() == cfg.content_hash()
 
     def test_a_set_spec_changes_the_hash(self):
         unset = _build_cdr_lite(use_pio=False)

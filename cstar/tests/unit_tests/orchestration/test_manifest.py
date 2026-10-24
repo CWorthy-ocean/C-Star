@@ -4,6 +4,7 @@ import fcntl
 import fnmatch
 import hashlib
 import logging
+import re
 import threading
 import time
 import typing as t
@@ -27,7 +28,7 @@ from cstar.execution.file_system import (
 from cstar.orchestration.manifest import (
     ATTEMPT_DIR_FORMAT,
     ATTEMPTS_DIR_NAME,
-    CANONICAL_NAMES_SINCE,
+    DEFINITION_HASH_SCHEME,
     MANIFEST_LOCK_NAME,
     RUN_MANIFEST_NAME,
     STEP_RECORD_NAME,
@@ -345,23 +346,17 @@ class TestRoundTrip:
         for name, current in CURRENT_OF.items():
             assert f"schema_version: {current}" in (tmp_path / name).read_text()
 
-    @pytest.mark.parametrize(
-        ("version", "kept"),
-        [
-            pytest.param("1.0.0", False, id="first-schema"),
-            pytest.param("1.4.0", False, id="last-before-canonical-names"),
-            pytest.param(CANONICAL_NAMES_SINCE, True, id="canonical-names-since"),
-            pytest.param(CURRENT, True, id="current"),
-        ],
-    )
-    def test_definition_hashes_before_canonical_names_are_not_read(
-        self, tmp_path: Path, version: str, kept: bool
+    @pytest.mark.parametrize("version", ["1.0.0", "1.4.0"])
+    def test_an_older_manifest_reads_with_its_hashes_as_recorded(
+        self, tmp_path: Path, version: str
     ) -> None:
-        """A manifest older than `CANONICAL_NAMES_SINCE` may have hashed an earlier
-        application name, so it reads without its hashes. The file is left alone.
+        """A manifest recorded under an older schema reads back with its step
+        definition hashes untouched, and the file is left alone: the re-entry guard
+        decides from a hash's scheme what to compare, the reader does not.
         """
         manifest = _manifest("one", "two")
         manifest.steps[0].definition_hash = "abc"
+        manifest.steps[1].definition_hash = f"{DEFINITION_HASH_SCHEME}:{'0' * 64}"
         write_run_manifest(tmp_path, manifest)
         path = tmp_path / RUN_MANIFEST_NAME
         path.write_text(
@@ -375,9 +370,10 @@ class TestRoundTrip:
 
         assert loaded is not None
         assert loaded.schema_version == version
-        assert [e.definition_hash for e in loaded.steps] == (
-            ["abc", ""] if kept else ["", ""]
-        )
+        assert [e.definition_hash for e in loaded.steps] == [
+            "abc",
+            f"{DEFINITION_HASH_SCHEME}:{'0' * 64}",
+        ]
         assert path.read_text() == before
 
     def test_carried_inputs_round_trip(self, tmp_path: Path) -> None:
@@ -492,6 +488,11 @@ class TestDescribeSteps:
 
         assert facts.blueprint is not None
 
+    def test_hash_is_tagged_with_its_scheme(self, tmp_path: Path) -> None:
+        assert re.fullmatch(
+            rf"{DEFINITION_HASH_SCHEME}:[0-9a-f]{{64}}", self._hash(tmp_path)
+        )
+
     def test_blueprint_content_moves_the_hash(self, tmp_path: Path) -> None:
         bp = tmp_path / "bp.yaml"
         _write_blueprint(bp, "world")
@@ -531,6 +532,22 @@ class TestDescribeSteps:
         assert before["consumer"].blueprint is None
         assert before["consumer"].definition_hash != after["consumer"].definition_hash
         assert before["producer"].definition_hash != after["producer"].definition_hash
+
+    def test_deferred_filename_left_at_its_default_does_not_move_the_hash(
+        self, tmp_path: Path
+    ) -> None:
+        def consumer_hash(reference: dict[str, str]) -> str:
+            bp = _write_blueprint(tmp_path / "bp.yaml")
+            consumer = _step(reference, name="consumer", depends_on=["producer"])
+            producer = _step(bp.as_posix(), name="producer")
+            plan = _workplan(consumer, producer)
+            return describe_steps(plan, tmp_path)["consumer"].definition_hash
+
+        omitted = consumer_hash({"from_step": "producer"})
+
+        assert consumer_hash({"from_step": "producer", "filename": ""}) == omitted
+        # a file the reference names is part of what the consumer runs
+        assert consumer_hash({"from_step": "producer", "filename": "b.yaml"}) != omitted
 
     def test_deferred_with_unknown_producer(self, tmp_path: Path) -> None:
         step = _step({"from_step": "up@ext"}, depends_on=["up@ext"])
@@ -1745,7 +1762,10 @@ class TestFinalizeStandaloneRun:
         ]
         assert len(second.steps) == 1
         assert second.steps[0].working_dir == "."
-        assert second.steps[0].definition_hash == blueprint.content_hash()
+        # not the content hash itself: the standalone step is hashed as a definition
+        assert second.steps[0].definition_hash.startswith(f"{DEFINITION_HASH_SCHEME}:")
+        assert second.steps[0].definition_hash != blueprint.content_hash()
+        assert second.steps[0].definition_hash == first.steps[0].definition_hash
 
 
 class TestExpandArtifacts:

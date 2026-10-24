@@ -8,6 +8,7 @@ from cstar.base import provenance
 from cstar.base.provenance import (
     DEFAULT_PACKAGES,
     canonical_hash,
+    hash_scheme,
     package_version,
     package_versions,
     system_name,
@@ -59,3 +60,18 @@ def test_canonical_hash_ignores_key_order_and_stringifies_odd_values() -> None:
 
     assert first == second
     assert first != canonical_hash({"a": str(when), "b": [2, 1]})
+
+
+@pytest.mark.parametrize(
+    ("value", "scheme"),
+    [
+        pytest.param("bp-v2:abc", "bp-v2", id="tagged"),
+        pytest.param("sha256:x", "sha256", id="another-scheme"),
+        pytest.param("a:b:c", "a", id="first-colon"),
+        pytest.param("0123456789abcdef" * 4, "", id="untagged"),
+        pytest.param("", "", id="empty"),
+    ],
+)
+def test_hash_scheme_is_the_tag_before_the_first_colon(value: str, scheme: str) -> None:
+    """Verify a tagged hash names its scheme, and an untagged or empty one has none."""
+    assert hash_scheme(value) == scheme

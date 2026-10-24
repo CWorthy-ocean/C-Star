@@ -1,0 +1,111 @@
+# FROZEN FILE. It pins a hash recipe for the golden digests in
+# cstar/tests/unit_tests/orchestration/test_hash_recipe.py. Never edit it: the
+# tests fail when the recipe changes, and an edited copy would hide that.
+# yaml-language-server: $schema=https://raw.githubusercontent.com/CWorthy-ocean/C-Star/refs/heads/main/docs/schemas/bp/ucla_roms/ucla_roms_schema.3.3.0.json
+name: Test Blueprint
+description: This is the description of my test blueprint
+application: ucla_roms
+state: draft
+valid_start_date: 2000-01-01 00:00:00
+valid_end_date: 2025-01-01 00:00:00
+working_dir: .
+schema_version: 3.3.0
+code:
+  roms:
+    location: https://github.com/CWorthy-ocean/ucla-roms.git
+    branch: main
+    filter: null
+  run_time:
+    location: https://github.com/CWorthy-ocean/ucla-roms.git
+    branch: main
+    filter:
+      files:
+        - roms_2.in
+        - marbl_in
+        - marbl_tracer_output_list
+        - marbl_diagnostic_output_list
+  compile_time:
+    location: https://github.com/CWorthy-ocean/ucla-roms.git
+    branch: main
+    filter:
+      files:
+        - bgc.opt
+        - bulk_frc.opt
+        - cppdefs.opt
+        - diagnostics.opt
+        - ocean_vars.opt
+        - param.opt
+        - tracers.opt
+        - river_frc.opt
+        - tides.opt
+        - Makefile
+  pio:
+    location: https://github.com/NCAR/ParallelIO.git
+    branch: pio2_7_0
+forcing:
+  boundary:
+    data:
+      - location: http://mockdoc.com/partitioning1.nc
+        hash: abc
+      - location: http://mockdoc.com/partitioning2.nc
+        hash: pqr
+      - location: http://mockdoc.com/partitioning3.nc
+        hash: xyz
+  surface:
+    documentation: http://mockdoc.com/partitioning
+    locked: false
+    data:
+      - location: http://mockdoc.com/partitioning.nc
+        hash: abc123
+  corrections:
+    documentation: http://mockdoc.com/partitioning
+    locked: false
+    data:
+      - location: http://mockdoc.com/partitioning.nc
+        hash: abc123
+  tidal:
+    documentation: http://mockdoc.com/partitioning
+    locked: false
+    data:
+      - location: http://mockdoc.com/partitioning.nc
+        hash: abc123
+  river:
+    documentation: http://mockdoc.com/partitioning
+    locked: false
+    data:
+      - location: http://mockdoc.com/partitioning.nc
+        hash: abc123
+  # Optional. Carbonate sensitivities (ddic_dco2, ddic_dalk and their time
+  # variables) read by a CDR-LiTE build (ucla-roms >= 0.9.0) that does not
+  # compute them online, e.g. the _cdrgas output of an earlier ROMS-MARBL run.
+  # carbonate_sensitivity:
+  #   documentation: http://mockdoc.com/partitioning
+  #   locked: false
+  #   data:
+  #     - location: http://mockdoc.com/output_cdrgas.20200101000000.nc
+  #       hash: abc123
+partitioning:
+  documentation: http://mockdoc.com/partitioning
+  hash: null
+  locked: false
+  n_procs_x: 16
+  n_procs_y: 8
+  use_pio: true
+namelist_overrides:
+  time_stepping:
+    dt: 1
+runtime_params:
+  documentation: http://mockdoc.com/runtime-params
+  hash: null
+  locked: false
+  start_date: 2020-01-01 00:00:00
+  end_date: 2021-01-01 00:00:00
+  checkpoint_frequency: 1d
+grid:
+  documentation: http://mockdoc.com/model-params
+  data:
+    - location: http://mockdoc.com/grid
+initial_conditions:
+  data:
+    - location: http://mockdoc.com/grid
+      partitioned: true

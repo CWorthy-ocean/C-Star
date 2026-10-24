@@ -1,0 +1,16 @@
+# FROZEN FILE. It pins a hash recipe for the golden digests in
+# cstar/tests/unit_tests/orchestration/test_hash_recipe.py. Never edit it: the
+# tests fail when the recipe changes, and an edited copy would hide that.
+name: hash-recipe
+description: Two steps, the second running the blueprint the first produces.
+steps:
+  - name: hello
+    application: hello_world
+    blueprint: hello.yaml
+    blueprint_overrides:
+      target: moon
+  - name: again
+    application: hello_world
+    depends_on: [hello]
+    blueprint:
+      from_step: hello
