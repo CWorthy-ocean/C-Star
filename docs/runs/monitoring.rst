@@ -5,8 +5,9 @@ Monitoring runs
 
 Once a workplan is submitted, the ``cstar run`` commands are how you follow
 it, find its files, and pick it up again when something goes wrong. They
-take the :term:`run ID` you gave to ``--run-id``, or the one derived from
-the workplan's name. ``cstar run ls`` lists them in case you forget.
+take the :term:`run ID` the one derived from
+the workplan's name in most cases, or the one you deliberately gave to ``--run-id``
+when you submitted it. ``cstar run ls`` lists your tracked run IDs, in case you forget.
 
 .. note::
 
@@ -39,7 +40,7 @@ prints one row per step with a tick in its current column:
    └───────────────────────┴───────────┴──────────┴─────────┴──────┴────────┴───────────┴─────────────┘
                Disk usage not measured. Run: cstar run status wio-workplan-tutorial --size
 
-On a laptop a step that is waiting for its dependencies shows as *Running*,
+On a laptop, a step that is waiting for its dependencies shows as *Running*,
 because its process has started and is waiting; on a cluster it sits *In
 Queue* until the scheduler releases it. ``--size`` measures each step's disk
 usage as well, which can take a while on a large run.
@@ -52,73 +53,17 @@ step statuses and records into it and closing the latest attempt once every
 step is terminal; pass ``--no-refresh`` to read the run as last recorded
 without writing.
 
-What is in the log?
--------------------
+How can I see the logs from a step?
+-----------------------------------
 
 .. code-block:: console
 
    cstar run log <run-id> <step-name>
 
-prints the log of one step: for a UCLA-ROMS step, the stages going by and
-then the model's own output. Add ``--monitor`` to keep streaming it, like
-``tail -f``, and press ``Ctrl-C`` to stop. When a step has failed, this is
-the first place to look.
+prints the log of any step, whether it's running, crashed, or completed.
+For an active step, add ``--monitor`` to keep streaming it (and press ``Ctrl-C``
+to stop). When a step has failed, this is the first place to look.
 
-.. _workplan_show_run:
-
-What was the run?
------------------
-
-.. code-block:: console
-
-   cstar run show <run-id>
-
-shows what a run was and what it produced: each time the workplan was
-submitted, on which machine and with which package versions, each step's
-status and outcome, and what the run depends on outside itself.
-
-.. code-block:: text
-
-                Run wio-workplan-tutorial
-   ┌──────────┬──────────────────────────────────────┐
-   │     Name │ wio-workplan-tutorial                │
-   │     Kind │ workplan                             │
-   │   Run-id │ wio-workplan-tutorial                │
-   │       Id │ b3881b52-933a-4db9-82cc-d79feb9de9fc │
-   │   System │ darwin_arm64                         │
-   │  Created │ 2026-10-21 16:50                     │
-   │ Observed │ 2026-10-21 16:57                     │
-   └──────────┴──────────────────────────────────────┘
-                                                        Attempts
-   ┏━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━┳━━━━━━━━┳━━━━━━━━━━━┳━━━━━━━━━┳━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
-   ┃ Started          ┃ Finished         ┃ Status ┃ Clobbered ┃ Resumed ┃ Pre-run ┃ cstar-ocean                      ┃
-   ┡━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━╇━━━━━━━━╇━━━━━━━━━━━╇━━━━━━━━━╇━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┩
-   │ 2026-10-21 16:50 │ 2026-10-21 16:56 │ done   │ -         │ -       │ no      │ 0.17.0                           │
-   └──────────────────┴──────────────────┴────────┴───────────┴─────────┴─────────┴──────────────────────────────────┘
-                                       Steps
-   ┏━━━━━━━━━━━━━┳━━━━━━━━━━━━━┳━━━━━━━━┳━━━━━━━━━━━┳━━━━━━━━━━┳━━━━━━┳━━━━━━━━┓
-   ┃ Step        ┃ Application ┃ Status ┃ Outcome   ┃ Products ┃ Size ┃ Record ┃
-   ┡━━━━━━━━━━━━━╇━━━━━━━━━━━━━╇━━━━━━━━╇━━━━━━━━━━━╇━━━━━━━━━━╇━━━━━━╇━━━━━━━━┩
-   │ make_inputs │ forge       │ Done   │ completed │ 0        │ 0 B  │ yes    │
-   │ simulate    │ ucla_roms   │ Done   │ completed │ 0        │ 0 B  │ yes    │
-   └─────────────┴─────────────┴────────┴───────────┴──────────┴──────┴────────┘
-
-Unlike ``status``, ``show`` works on any run: give it a run ID,
-``run://<uuid>``, or the path of any directory that holds a run manifest,
-such as a copy of a run made on another machine. The ``Id`` row is the run's
-uuid, which is how another workplan can refer to this run unambiguously (see
-:doc:`../workplans/references`). A ``Jobs`` table shows each step's job and
-how long it waited and ran, derived from its submission and its step record;
-a dash means a time is missing, or the record is from an earlier run of the
-step.
-
-For a run tracked on this machine, ``show`` refreshes the manifest first, as
-``status`` does; pass ``--no-refresh`` to show it as last recorded. A
-directory, and a run found only by its manifest, are read as they are, and
-nothing is written, so the command is safe on a run that is not yours.
-``--format yaml`` or ``--format json`` prints the manifest itself, ready to
-pipe into another tool. The exit code is 0 when the run is shown, 1 when it
-has no readable manifest and 2 for bad arguments.
 
 Which runs do I have?
 ---------------------
@@ -170,32 +115,18 @@ Where are the files?
    cstar run path <run-id>
    cstar run path <run-id> <step-name>
 
-prints the directory of a run, or of one of its steps. The path is the only
-output, so it composes with other commands; a failed lookup prints nothing
-and exits non-zero, so guard a ``cd`` with ``&&``:
+prints the directory of a run, or of one of its steps. Assuming you
+installed the additional shell hook when you first ran `cstar init`,
+you can use
 
 .. code-block:: console
 
-   dir=$(cstar run path <run-id> <step-name>) && cd "$dir"
+   cstar run cd <run-id>
+   cstar run cd <run-id> <step-name>
 
-A program cannot change the directory of the shell that started it, so
-``cstar run cd <run-id> [step-name]`` works only once your shell has a small
-``cstar`` function. Install it once, then open a new shell:
-
-.. code-block:: console
-
-   cstar env shell-init --install
-
-The command detects whether you run zsh or bash (pass ``zsh`` or ``bash`` to
-choose), writes the function under the C-Star config directory, and adds a
-marked block to ``~/.zshrc`` or ``~/.bashrc`` that sources it. For bash,
-login shells, such as SSH sessions and the macOS Terminal, read
-``~/.bash_profile`` instead, so make sure that file sources ``~/.bashrc``.
-Run the command again after upgrading C-Star to refresh the function, and
-add ``--uninstall`` to remove the block and the function. To manage your
-dotfiles yourself, omit ``--install``: the command prints the function
-instead, for example ``cstar env shell-init zsh > <file>``, ready to source
-from your own configuration. ``cstar init`` offers the same installation.
+to move your active terminal directly to that directory. If you didn't
+install the shell hook or need to update it, you can do so at any time with
+``cstar env shell-init``.
 
 Every step writes its final outputs to its own ``output`` directory. To see
 them all in one place, ``gather`` collects every step's ``output`` files
@@ -208,9 +139,7 @@ directory:
 
 It is safe to re-run while a workplan is still in progress. When two steps
 produce a file with the same name, each link is prefixed with its step name
-(``<step>__<file>``) so both remain reachable. ``gather`` writes into the
-run, so it takes the run ID of a run tracked on this machine and refuses a
-run attached read-only.
+(``<step>__<file>``) so both remain reachable.
 
 Runs completed with an earlier C-Star release kept joined files in a
 ``joined_output`` directory next to ``output``. Move such a run to the
@@ -243,9 +172,7 @@ step is handled according to its recorded state:
 
 - A step that is **done** is reused as it is. Nothing is recomputed.
 - A step that **failed** is run again from scratch.
-- A step that is **still in progress** is adopted when the launcher that
-  started it matches the current launcher; otherwise the run is refused
-  unless that step is clobbered.
+- A step that is **still in progress** has its status refreshed.
 - A step that was never reached, because something before it failed, is
   scheduled as usual.
 
@@ -255,7 +182,7 @@ there is to it. Two options change the default handling:
 ``--clobber <step-name>``, ``--clobber all``
    Clear the named step (or every step) and run it again from scratch, even
    if it is done. This is how you rerun a step after changing its inputs.
-   ``--clobber`` is repeatable.
+   The ``--clobber`` flag is repeatable if you need to clear multiple steps at once.
 ``--resume``
    Continue every failed step in place, from its last usable restart,
    instead of clearing it. Only applications that declare themselves
@@ -263,7 +190,10 @@ there is to it. Two options change the default handling:
    again from scratch with a warning, and completed steps are left
    untouched. See :doc:`pre_run_resume`.
 
-A few more rules keep a re-entry honest:
+Additional reentry rules
+^^^^^^^^^^^^^^^^^^^^^^^^
+
+A few more rules keep a re-entry safe and reproducible:
 
 - A step that is done is not re-run under a changed definition: if its
   blueprint file, its ``blueprint_overrides``, its ``directives``, its
@@ -299,6 +229,64 @@ A few more rules keep a re-entry honest:
 Submitting again with a **different** run ID starts the workplan from
 scratch in a new directory, which is the right thing when you want to keep
 the first run as it is.
+
+
+
+.. _workplan_show_run:
+
+I want to see the full history of a run
+---------------------------------------
+
+.. code-block:: console
+
+   cstar run show <run-id>
+
+shows what a run was and what it produced: each time the workplan was
+submitted, on which machine and with which package versions, each step's
+status and outcome, and what the run depends on outside itself.
+
+.. code-block:: text
+
+                Run wio-workplan-tutorial
+   ┌──────────┬──────────────────────────────────────┐
+   │     Name │ wio-workplan-tutorial                │
+   │     Kind │ workplan                             │
+   │   Run-id │ wio-workplan-tutorial                │
+   │       Id │ b3881b52-933a-4db9-82cc-d79feb9de9fc │
+   │   System │ darwin_arm64                         │
+   │  Created │ 2026-10-21 16:50                     │
+   │ Observed │ 2026-10-21 16:57                     │
+   └──────────┴──────────────────────────────────────┘
+                                                        Attempts
+   ┏━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━┳━━━━━━━━┳━━━━━━━━━━━┳━━━━━━━━━┳━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
+   ┃ Started          ┃ Finished         ┃ Status ┃ Clobbered ┃ Resumed ┃ Pre-run ┃ cstar-ocean                      ┃
+   ┡━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━╇━━━━━━━━╇━━━━━━━━━━━╇━━━━━━━━━╇━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┩
+   │ 2026-10-21 16:50 │ 2026-10-21 16:56 │ done   │ -         │ -       │ no      │ 0.17.0                           │
+   └──────────────────┴──────────────────┴────────┴───────────┴─────────┴─────────┴──────────────────────────────────┘
+                                       Steps
+   ┏━━━━━━━━━━━━━┳━━━━━━━━━━━━━┳━━━━━━━━┳━━━━━━━━━━━┳━━━━━━━━━━┳━━━━━━┳━━━━━━━━┓
+   ┃ Step        ┃ Application ┃ Status ┃ Outcome   ┃ Products ┃ Size ┃ Record ┃
+   ┡━━━━━━━━━━━━━╇━━━━━━━━━━━━━╇━━━━━━━━╇━━━━━━━━━━━╇━━━━━━━━━━╇━━━━━━╇━━━━━━━━┩
+   │ make_inputs │ forge       │ Done   │ completed │ 0        │ 0 B  │ yes    │
+   │ simulate    │ ucla_roms   │ Done   │ completed │ 0        │ 0 B  │ yes    │
+   └─────────────┴─────────────┴────────┴───────────┴──────────┴──────┴────────┘
+
+Unlike ``status``, ``show`` works on any run: give it a run ID,
+``run://<uuid>``, or the path of any directory that holds a run manifest,
+such as a copy of a run made on another machine. The ``Id`` row is the run's
+uuid, which is how another workplan can refer to this run unambiguously (see
+:doc:`../workplans/references`). A ``Jobs`` table shows each step's job and
+how long it waited and ran, derived from its submission and its step record;
+a dash means a time is missing, or the record is from an earlier run of the
+step.
+
+For a run tracked on this machine, ``show`` refreshes the manifest first, as
+``status`` does; pass ``--no-refresh`` to show it as last recorded. A
+directory, and a run found only by its manifest, are read as they are, and
+nothing is written, so the command is safe on a run that is not yours.
+``--format yaml`` or ``--format json`` prints the manifest itself, ready to
+pipe into another tool. The exit code is 0 when the run is shown, 1 when it
+has no readable manifest and 2 for bad arguments.
 
 .. _workplan_check_run:
 
@@ -372,7 +360,7 @@ whose directory is in the project runs area, loses its tracking record and
 keeps its directory; remove that directory yourself if you want it gone. A
 run ID with nothing to remove is reported, and the exit code is 0.
 
-``cstar admin clean --all`` is the other choice, and you have to ask for it:
+``cstar admin clean --all`` is the other choice, and should be used with caution:
 C-Star's data, state, cache and config directories are emptied, including
 the output of every run in your data home. The shared source-data cache and
 your catalog are kept, so the next run does not download its inputs again.
