@@ -8,14 +8,15 @@ which steps wait for which, and lets steps pass files and settings to one
 another. You submit the whole thing once, and C-Star schedules the steps,
 submits them to the job scheduler on a cluster or runs them as processes on
 a laptop, and keeps track of how they are doing under a single **run ID**.
-A spin-up followed by an experiment and its control, a Forge step feeding a
-simulation, an ensemble that varies one setting across steps, an analysis of
-an earlier step's output: each is a workplan.
+Any multi-step sequence might be a workplan: a Forge step feeding a simulation,
+a domain spin-up followed by an experiment and its control, an ensemble that varies one
+setting across steps, an analysis of an earlier step's output, or all of the above,
+all in sequence.
 
 This page covers the shape of a workplan and the commands that check and
 submit one. :doc:`directives` describes how steps hand run-time files to one
-another, :doc:`references` how a step points at another step's directories
-and at earlier runs, and :doc:`variables` how a workplan takes values from
+another, :doc:`references` describes how a step points at another step's directories
+and at earlier runs, and :doc:`variables` describes how a workplan takes values from
 the command line. Following a run after it is submitted is covered under
 :doc:`../runs/monitoring`.
 
@@ -86,8 +87,8 @@ can carry:
 
 ``blueprint_overrides``
    Values to change in the blueprint before it runs, in the blueprint's own
-   layout. The same blueprint can then serve several steps that differ in
-   one setting, and a deferred blueprint can be adjusted once it exists.
+   layout. The same blueprint can then serve several steps that differ by
+   only a few settings, and a deferred blueprint can be adjusted once it exists.
    Placeholders such as ``{{output_dir: parent}}`` are filled in (see
    :doc:`references`).
 ``compute_overrides``
@@ -102,75 +103,6 @@ can carry:
 
 The model behind a step is :class:`cstar.orchestration.models.Step`, and
 behind the file :class:`cstar.orchestration.models.Workplan`.
-
-.. _workplan_compute_environment:
-
-Where the steps run
--------------------
-
-The workplan's ``compute_environment`` says what the workplan expects of the
-machine, and provides scheduler defaults for every step. Every key is
-optional:
-
-.. code-block:: yaml
-
-    compute_environment:
-      launcher: slurm          # "local" | "slurm" | omitted
-      system: anvil            # optional, informational
-      slurm:                   # workplan-wide SLURM defaults
-        account_name: x-ees250129
-        queue_name: wholenode
-        max_walltime: "04:00:00"
-
-``launcher`` selects how steps are executed. Omitted, C-Star picks the
-launcher for the current system: SLURM when the system has a scheduler,
-otherwise local. ``slurm`` on a system with no scheduler stops the run with
-an error; ``local`` on a system with a scheduler runs the steps as local
-processes and logs a warning. ``system`` names the machine the workplan was
-written for, and a mismatch with the detected system produces one warning.
-
-Per step, ``compute_overrides`` replaces any of the scheduler settings under
-a key naming the launcher. A common pattern sends Forge steps to a
-general-purpose queue and ROMS steps to an MPI queue:
-
-.. code-block:: yaml
-
-    steps:
-    - name: make_inputs
-      application: forge
-      blueprint: forge_blueprint.yaml
-      compute_overrides:
-        slurm:
-          queue_name: day          # a general-purpose queue for data processing
-          max_walltime: "04:00:00"
-          num_cpus: 8
-    - name: simulate
-      application: ucla_roms
-      blueprint:
-        from_step: make_inputs
-      depends_on: [make_inputs]
-      compute_overrides:
-        slurm:
-          queue_name: mpi
-          account_name: my-allocation
-          num_cpus: 128
-
-The ``slurm`` keys are ``account_name``, ``queue_name``, ``max_walltime``
-(``HH:MM:SS`` or SLURM's ``D-HH:MM:SS``), ``num_cpus``, ``num_nodes``,
-``cpus_per_node`` and ``single_node``. The ``local`` launcher accepts
-``max_walltime`` and ``force_kill_timeout``, enforced with GNU ``timeout``
-(on macOS, install ``coreutils`` from conda-forge or Homebrew, which
-provides ``gtimeout``). ``num_cpus`` is also where a deferred-blueprint step
-declares its allocation.
-
-The SLURM settings layer, lowest to highest precedence: the
-``CSTAR_SLURM_*`` settings from your :doc:`configuration <../configuration>`,
-then ``compute_environment.slurm``, then the step's ``compute_overrides``.
-The merged result is recorded on each step of the transformed workplan in the
-run directory. On systems that require a SLURM account and queue (Anvil and
-Bouchet, for example), values the workplan supplies stand in for
-``CSTAR_SLURM_ACCOUNT`` and ``CSTAR_SLURM_QUEUE``; only the ones it leaves
-out must be set in your environment. See :doc:`../hpc`.
 
 .. _workplan_examples:
 
@@ -376,12 +308,73 @@ covers following a run and re-entering it after a failure, including
 ``--clobber`` to run steps again and ``--resume`` to continue a failed
 UCLA-ROMS step from its last restart.
 
-Schema versions
----------------
 
-:attr:`~cstar.orchestration.models.Workplan.schema_version` records the version
-of the workplan schema a file was written with (published under
-:doc:`../schemas/index`). A workplan without one was written before workplans
-were versioned and reads as 1.0.0. A workplan whose version is newer than
-the installed C-Star reads is refused with a message to upgrade
-``cstar-ocean``.
+.. _workplan_compute_environment:
+
+Where the steps run
+-------------------
+
+The workplan's ``compute_environment`` says what the workplan expects of the
+machine, and provides scheduler defaults for every step. Every key is
+optional:
+
+.. code-block:: yaml
+
+    compute_environment:
+      launcher: slurm          # "local" | "slurm" | omitted
+      system: anvil            # optional, informational
+      slurm:                   # workplan-wide SLURM defaults
+        account_name: x-ees250129
+        queue_name: wholenode
+        max_walltime: "04:00:00"
+
+``launcher`` selects how steps are executed. Omitted, C-Star picks the
+launcher for the current system: SLURM when the system has a scheduler,
+otherwise local. ``slurm`` on a system with no scheduler stops the run with
+an error; ``local`` on a system with a scheduler runs the steps as local
+processes and logs a warning. ``system`` names the machine the workplan was
+written for, and a mismatch with the detected system produces one warning.
+
+Per step, ``compute_overrides`` replaces any of the scheduler settings under
+a key naming the launcher. A common pattern sends Forge steps to a
+general-purpose queue and ROMS steps to an MPI queue:
+
+.. code-block:: yaml
+
+    steps:
+    - name: make_inputs
+      application: forge
+      blueprint: forge_blueprint.yaml
+      compute_overrides:
+        slurm:
+          queue_name: day          # a general-purpose queue for data processing
+          max_walltime: "04:00:00"
+          num_cpus: 8
+    - name: simulate
+      application: ucla_roms
+      blueprint:
+        from_step: make_inputs
+      depends_on: [make_inputs]
+      compute_overrides:
+        slurm:
+          queue_name: mpi
+          account_name: my-allocation
+          num_cpus: 128
+
+The ``slurm`` keys are ``account_name``, ``queue_name``, ``max_walltime``
+(``HH:MM:SS`` or SLURM's ``D-HH:MM:SS``), ``num_cpus``, ``num_nodes``,
+``cpus_per_node`` and ``single_node``. The ``local`` launcher accepts
+``max_walltime`` and ``force_kill_timeout``, enforced with GNU ``timeout``
+(on macOS, install ``coreutils`` from conda-forge or Homebrew, which
+provides ``gtimeout``). ``num_cpus`` is also where a deferred-blueprint step
+declares its allocation.
+
+The SLURM settings layer, lowest to highest precedence: the
+``CSTAR_SLURM_*`` settings from your :doc:`configuration <../configuration>`,
+then ``compute_environment.slurm``, then the step's ``compute_overrides``.
+The merged result is recorded on each step of the transformed workplan in the
+run directory. On systems that require a SLURM account and queue (Anvil and
+Bouchet, for example), values the workplan supplies stand in for
+``CSTAR_SLURM_ACCOUNT`` and ``CSTAR_SLURM_QUEUE``; only the ones it leaves
+out must be set in your environment. See :doc:`../hpc`.
+

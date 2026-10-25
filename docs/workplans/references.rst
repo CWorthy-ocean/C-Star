@@ -5,10 +5,11 @@ Path references and run aliases
 
 Steps need to find one another's files: the restart a simulation wrote, the
 grid a Forge step generated, the output an analysis step reads. Rather than
-spelling out paths into the run directory, which would tie the workplan to
+spelling out paths into the run directory, which would require the user to
+understand and predict C-Star's directory handling and also tie the workplan to
 one machine and one run, a step names the other step and the kind of
-directory it wants. The same mechanism reaches into runs that were executed
-earlier, through an alias declared at the top of the workplan.
+directory it wants. The same mechanism can reach into entirely different runs that
+were executed from different workplans, through an alias declared at the top of the workplan.
 
 Reaching another step's directories
 -----------------------------------
