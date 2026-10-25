@@ -55,7 +55,10 @@ def format_validation_errors(ex: "ValidationError") -> str:
     for error in ex.errors():
         msg = f"{error['msg']!r}"
 
-        if error.get("loc"):
+        if error.get("loc") and error["type"] == "missing":
+            # the input of a missing field is the whole enclosing document
+            msg = "`Invalid {} value: {}`".format(error["loc"][0], error["msg"])
+        elif error.get("loc"):
             msg = "`Invalid {} value ({}): {}`".format(
                 error["loc"][0],
                 error["input"],

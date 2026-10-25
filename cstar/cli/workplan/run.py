@@ -96,6 +96,7 @@ from cstar.orchestration.transforms import (
     anchor_blueprint_path,
     external_dependencies,
 )
+from cstar.system.migration import CstarSchemaTooNewError
 
 if t.TYPE_CHECKING:
     from collections.abc import Mapping
@@ -478,6 +479,8 @@ def preprocess_path(workplan_path: str | None) -> str | None:
                 live = is_transformed_workplan(local_path)
                 klass: type[Workplan] = LiveWorkplan if live else Workplan
                 validation_result = validate_serialized_entity(local_path, klass)
+                if isinstance(validation_result.error, CstarSchemaTooNewError):
+                    raise typer.BadParameter(validation_result.error_msg)
                 if not validation_result.item:
                     log.error(validation_result.error_msg)
                     msg = f"The workplan file in `{workplan_path}` is improperly formatted"
@@ -594,7 +597,11 @@ def refuse_run_id_collision(wp_path: Path, run_id: str, *, explicit: bool) -> No
     if explicit:
         return
 
-    record = asyncio.run(TrackingRepository().get_workplan_run(run_id))
+    try:
+        record = asyncio.run(TrackingRepository().get_workplan_run(run_id))
+    except CstarError as ex:
+        msg = f"Run-id {run_id!r} cannot be checked against its record: {ex}"
+        raise typer.BadParameter(msg) from ex
     if record is None:
         return
 
@@ -686,13 +693,18 @@ async def handle_run_reloading(run_id: str) -> WorkplanRun:
     Raises
     ------
     typer.BadParameter
-        - If no run record exists for the supplied run-id.
+        - If no run record exists for the supplied run-id, or it cannot be
+          read (one a newer cstar-ocean wrote).
         - If the run was attached from elsewhere: it has no sentinels here and
           is never relaunched.
         - If the run's workplan or transformed workplan cannot be found.
     """
     repo = TrackingRepository()
-    wp_run = await repo.get_workplan_run(run_id)
+    try:
+        wp_run = await repo.get_workplan_run(run_id)
+    except CstarError as ex:
+        msg = f"Run {run_id!r} cannot be re-entered: {ex}"
+        raise typer.BadParameter(msg) from ex
     if wp_run is None:
         msg = f"No runs with the id `{run_id}` could be found."
         raise typer.BadParameter(msg)
@@ -1033,10 +1045,21 @@ def submit(
         log.exception(msg)
         print(msg)
         raise typer.Exit(1) from ex
+    except CstarSchemaTooNewError as ex:
+        # a file of the run (the workplan, its manifest or a blueprint) was
+        # written by a newer release; the message names it and the upgrade
+        log.debug("A file of the run is newer than this build reads", exc_info=True)
+        raise typer.BadParameter(f"Run {run_id!r} cannot be continued: {ex}") from ex
+    except ValidationError as ex:
+        # a step blueprint (or the workplan) that fails strict validation: the
+        # message says what is wrong, so the traceback is only logged for debugging
+        log.debug("Invalid inputs encountered while running the dag", exc_info=True)
+        msg = f"{ex.title} failed validation: {format_validation_errors(ex)}"
+        raise typer.BadParameter(msg) from ex
     except ValueError as ex:
         msg = "Invalid inputs encountered while running the dag"
         log.exception(msg)
-        raise typer.BadParameter(ex.args[0]) from ex
+        raise typer.BadParameter(str(ex)) from ex
     except Exception as ex:
         msg = f"Workplan run {run_id!r} has failed: {ex}"
         log.exception(msg)

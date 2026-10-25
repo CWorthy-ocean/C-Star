@@ -44,6 +44,7 @@ from cstar.base.provenance import canonical_hash
 from cstar.base.utils import generate_schema_ref, lazy_import, slugify
 from cstar.execution.file_system import StateDirectoryManager
 from cstar.orchestration.serialization import register_representer, strenum_representer
+from cstar.system.migration import refuse_newer_schema
 
 RequiredString: t.TypeAlias = t.Annotated[
     str,
@@ -976,6 +977,11 @@ class Step(ConfiguredBaseModel):
 class Workplan(ConfiguredBaseModel):
     """A collection of executable steps and the associated configuration to run them."""
 
+    schema_version: str = Field(default="1.2.0")
+    """The version of the workplan schema the document was written with. A
+    document without one predates versioning and reads as 1.0.0; a newer one
+    than this build's is refused."""
+
     name: RequiredString
     """The name of the workplan, written as a slug: it is the default run-id."""
 
@@ -1012,6 +1018,22 @@ class Workplan(ConfiguredBaseModel):
         polymorphic_serialization=True,
     )
     """Configures the behavior of the pydantic model."""
+
+    @model_validator(mode="before")
+    @classmethod
+    def _refuse_newer_schema(cls, data: t.Any) -> t.Any:
+        """Refuse a workplan written by a newer cstar-ocean before its keys are
+        validated, so it reads as "upgrade" rather than as unknown keys.
+
+        Raises
+        ------
+        CstarSchemaTooNewError
+            If the document's `schema_version` is newer than this build's.
+        """
+        if isinstance(data, Mapping):
+            target = cls.model_fields["schema_version"].default
+            refuse_newer_schema("workplan", data.get("schema_version"), target)
+        return data
 
     @field_validator("name")
     @classmethod

@@ -15,6 +15,7 @@ from yaml.scanner import ScannerError
 from cstar.base.exceptions import CstarExpectationFailed
 from cstar.base.log import get_logger
 from cstar.execution.file_system import local_copy
+from cstar.system.migration import CstarSchemaTooNewError
 
 log = get_logger(__name__)
 
@@ -68,9 +69,10 @@ class ValidationResult(t.Generic[_T]):
     path: Path | None = None
     """The local file the item was read from (a temporary copy of a remote
     URI); `None` if validation fails."""
-    error: ValueError | None = None
+    error: ValueError | CstarSchemaTooNewError | None = None
     """The exception behind `error_msg`, when validation failed; a pydantic
-    `ValidationError` locates each problem in the document."""
+    `ValidationError` locates each problem in the document, and a
+    `CstarSchemaTooNewError` says the file was written by a newer release."""
 
     @property
     def is_valid(self) -> bool:
@@ -244,7 +246,7 @@ def read_document(path: Path | str) -> dict[str, t.Any]:
         The document, without its `$schema` key.
     """
     document = read_yaml_to_raw(Path(path))
-    if document:
+    if isinstance(document, dict):
         document.pop("$schema", None)
     return document
 
@@ -723,6 +725,8 @@ def validate_serialized_entity(
             item = deserialize(wp_path, item_type)
     except ValueError as ex:
         return ValidationResult(f"The {item_type.__name__} is invalid: {ex}", error=ex)
+    except CstarSchemaTooNewError as ex:
+        return ValidationResult(f"The file at {path} cannot be read: {ex}", error=ex)
     except FileNotFoundError:
         return ValidationResult(f"File not found at path: {path}")
 

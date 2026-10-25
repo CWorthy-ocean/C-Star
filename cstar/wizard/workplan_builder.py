@@ -118,7 +118,7 @@ PAGE = "workplan-builder"
 
 WORKPLAN_SCHEMA_REF = (
     "https://raw.githubusercontent.com/CWorthy-ocean/C-Star/refs/heads/main/"
-    "docs/schemas/wp/workplan_schema.1.0.0.json"
+    f"docs/schemas/wp/workplan_schema.{Workplan.model_fields['schema_version'].default}.json"
 )
 """The JSON schema editors validate a workplan file against."""
 

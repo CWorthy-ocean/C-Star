@@ -10,6 +10,7 @@ from unittest import mock
 
 import pytest
 import typer
+import yaml
 from typer.testing import CliRunner
 
 from cstar.applications.core import get_application
@@ -73,6 +74,7 @@ from cstar.orchestration.state import StateRepository
 from cstar.orchestration.tracking import TrackingRepository, WorkplanRun
 from cstar.orchestration.utils import ENV_CSTAR_SLURM_ACCOUNT, ENV_CSTAR_SLURM_QUEUE
 from cstar.system.environment import EnvSettingsBase, SlurmSettingsBase
+from cstar.system.migration import CstarSchemaTooNewError
 from cstar.tests.unit_tests.orchestration.manifest_runs import write_identity
 
 
@@ -1007,6 +1009,91 @@ def test_workplan_run_invalid_file_content(
     mock_build_and_run_dag.assert_not_awaited()
 
 
+@pytest.mark.parametrize(
+    ("application", "blueprint", "expected"),
+    [
+        pytest.param(
+            "hello_world",
+            {
+                "name": "hello",
+                "description": "d",
+                "application": "hello_world",
+                "target": "world",
+                "unknown_key": 1,
+            },
+            "HelloWorldBlueprint failed validation: `Invalid unknown_key value (1): "
+            "Extra inputs are not permitted`",
+            id="unknown-key",
+        ),
+        pytest.param(
+            "forge",
+            {
+                "name": "forge",
+                "description": "d",
+                "application": "forge",
+                "forge_blueprint_version": 99,
+            },
+            "forge_blueprint_version 99 is newer than this build supports",
+            id="forge-too-new",
+        ),
+    ],
+)
+def test_workplan_run_invalid_step_blueprint_is_one_message(
+    tmp_path: Path,
+    application: str,
+    blueprint: dict[str, t.Any],
+    expected: str,
+    flatten_cli_output: Callable[[str], str],
+) -> None:
+    """Verify a step blueprint that fails strict validation exits 2 with the
+    validation message, not an `IndexError` and its tracebacks.
+
+    Parameters
+    ----------
+    tmp_path : Path
+        Temporary directory to read/write test inputs and outputs
+    application : str
+        The application of the step.
+    blueprint : dict[str, t.Any]
+        The content of the step's blueprint.
+    expected : str
+        Text the message must contain.
+    flatten_cli_output : Callable[[str], str]
+        Removes the box drawing and wrapping from CLI output.
+    """
+    bp_path = tmp_path / "blueprint.yaml"
+    bp_path.write_text(yaml.safe_dump(blueprint))
+    wp_path = tmp_path / "workplan.yaml"
+    wp_path.write_text(
+        yaml.safe_dump(
+            {
+                "name": "invalid-step",
+                "description": "d",
+                "steps": [
+                    {
+                        "name": "s1",
+                        "application": application,
+                        "blueprint": bp_path.as_posix(),
+                    }
+                ],
+            }
+        )
+    )
+    env = {
+        ENV_CSTAR_STATE_HOME: (tmp_path / "state").as_posix(),
+        ENV_CSTAR_DATA_HOME: (tmp_path / "data").as_posix(),
+    }
+
+    with mock.patch.dict(os.environ, env):
+        result = CliRunner().invoke(app, [wp_path.as_posix()], color=False)
+
+    assert result.exit_code == 2, result.output
+    assert result.exception is None or isinstance(result.exception, SystemExit)
+    assert expected in flatten_cli_output(result.output)
+    assert "IndexError" not in result.output
+    assert "Traceback" not in result.output
+
+
 def test_workplan_run_reload_invokes_run_dag_not_build_and_run_dag(
     tmp_path: Path,
     wp_templates_dir: Path,
@@ -1058,6 +1145,90 @@ def test_workplan_run_reload_invokes_run_dag_not_build_and_run_dag(
     assert call_args[1] == trx_path
     assert call_args[2] == run_id
     assert isinstance(call_args[3], Planner)
+
+
+def test_workplan_run_refuses_a_newer_workplan(
+    tmp_path: Path,
+    wp_templates_dir: Path,
+    flatten_cli_output: Callable[[str], str],
+) -> None:
+    """Verify submitting a workplan written by a newer release exits 2 with the
+    upgrade message before anything is built.
+    """
+    content = (wp_templates_dir / "single_step.yaml").read_text()
+    wp_path = tmp_path / "workplan.yaml"
+    wp_path.write_text(
+        content.replace("schema_version: '1.2.0'", "schema_version: '2.0.0'")
+    )
+
+    with mock.patch("cstar.cli.workplan.run.build_and_run_dag") as mock_build:
+        result = CliRunner().invoke(app, [wp_path.as_posix()], color=False)
+
+    assert result.exit_code == 2, result.output
+    message = flatten_cli_output(result.output)
+    assert "workplan schema 2.0.0 is newer than this build" in message
+    assert "Upgrade cstar-ocean" in message
+    mock_build.assert_not_called()
+
+
+def test_workplan_run_reload_refuses_a_newer_transformed_workplan(
+    tmp_path: Path,
+    wp_templates_dir: Path,
+    mock_run_id: str,
+    flatten_cli_output: Callable[[str], str],
+) -> None:
+    """Verify re-entering a run whose transformed workplan a newer release wrote
+    exits 2 with the upgrade message, not a traceback and exit 3.
+    """
+    run_id = mock_run_id
+    wp_path = wp_templates_dir / "workplan.yaml"
+    wp = deserialize(wp_path, Workplan)
+    live_steps = [LiveStep.from_step(step) for step in wp.steps]
+    lwp = LiveWorkplan(**wp.model_dump(exclude={"steps"}), steps=live_steps)
+    trx_path = tmp_path / f"{wp_path.stem}_transformed.yaml"
+    assert serialize(trx_path, lwp), "serializing live workplan failed in test"
+    content = trx_path.read_text()
+    assert "schema_version: 1.2.0" in content
+    trx_path.write_text(
+        content.replace("schema_version: 1.2.0", "schema_version: 1.3.0")
+    )
+
+    with (
+        mock.patch(
+            "cstar.cli.workplan.run.handle_run_reloading",
+            mock.AsyncMock(return_value=_recorded_run(run_id, wp_path, tmp_path)),
+        ),
+        mock.patch("cstar.cli.workplan.run.run_dag") as mock_run_dag,
+    ):
+        result = CliRunner().invoke(app, ["--run-id", run_id], color=False)
+
+    assert result.exit_code == 2, result.output
+    message = flatten_cli_output(result.output)
+    assert (
+        f"Run {run_id!r} cannot be continued: workplan schema 1.3.0 is newer" in message
+    )
+    assert "Upgrade cstar-ocean" in message
+    mock_run_dag.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_handle_run_reloading_refuses_a_newer_record() -> None:
+    """Verify re-entering a run whose tracking record a newer release wrote is a
+    usage error carrying the upgrade message.
+    """
+    refused = CstarSchemaTooNewError(
+        "run record /state/latest/r.yaml", "2.0.0", "1.1.0"
+    )
+    with (
+        mock.patch(
+            "cstar.cli.workplan.run.TrackingRepository.get_workplan_run",
+            mock.AsyncMock(side_effect=refused),
+        ),
+        pytest.raises(typer.BadParameter, match="Upgrade cstar-ocean") as caught,
+    ):
+        await handle_run_reloading("r")
+
+    assert "Run 'r' cannot be re-entered" in str(caught.value)
 
 
 def test_workplan_run_reload_refuses_unusable_external_dependency(

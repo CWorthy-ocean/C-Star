@@ -1,4 +1,6 @@
-"""Tests for the `cstar run schemas` command and the shared schema writer."""
+"""Tests for the `cstar run schemas` and `cstar workplan schemas` commands and
+the shared schema writer.
+"""
 
 import json
 from pathlib import Path
@@ -11,7 +13,10 @@ from cstar.cli.blueprint.schemas import generate_schema
 from cstar.cli.common import write_model_schema
 from cstar.cli.run.schemas import CMD_NAME
 from cstar.cli.run.schemas import app as app_schemas
+from cstar.cli.workplan.schemas import CMD_NAME as WP_CMD_NAME
+from cstar.cli.workplan.schemas import app as app_wp_schemas
 from cstar.orchestration.manifest import RunManifest, StepRecord
+from cstar.orchestration.models import Workplan
 
 # a sub-app with one command is invoked without its name; a group needs a parent
 app_run = typer.Typer()
@@ -51,3 +56,19 @@ def test_generate_schema_keeps_its_layout(tmp_path: Path) -> None:
     assert path.parent == tmp_path / "hello_world"
     assert path.name.startswith("hello_world_schema.")
     assert "properties" in json.loads(path.read_text())
+
+
+def test_workplan_schemas_writes_the_current_version(tmp_path: Path) -> None:
+    """Verify `cstar workplan schemas` writes the workplan schema named for the
+    version on the model.
+    """
+    app_wp = typer.Typer()
+    app_wp.add_typer(app_wp_schemas)
+    output = tmp_path / "wp"
+
+    result = CliRunner().invoke(app_wp, [WP_CMD_NAME, output.as_posix()], color=False)
+
+    assert result.exit_code == 0, result.output
+    version = Workplan.model_fields["schema_version"].default
+    schema = json.loads((output / f"workplan_schema.{version}.json").read_text())
+    assert schema["properties"]["schema_version"]["default"] == version

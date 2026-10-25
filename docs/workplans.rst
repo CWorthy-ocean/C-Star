@@ -22,6 +22,18 @@ Workplans are defined in :class:`cstar.orchestration.models.Workplan`.
   ~cstar.orchestration.models.Workplan.compute_environment
   ~cstar.orchestration.models.Workplan.runtime_vars
   ~cstar.orchestration.models.Workplan.runs
+  ~cstar.orchestration.models.Workplan.schema_version
+
+
+Schema Version
+^^^^^^^^^^^^^^
+
+:attr:`~cstar.orchestration.models.Workplan.schema_version` records the version
+of the workplan schema a file was written with (published under
+:doc:`schemas/index`). A workplan without one was written before workplans were
+versioned and reads as 1.0.0. A workplan whose version is newer than the
+installed C-Star reads, at any level, is refused with a message to upgrade
+``cstar-ocean``.
 
 
 State

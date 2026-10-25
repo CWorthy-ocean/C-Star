@@ -3,6 +3,7 @@ import typing as t
 
 import typer
 
+from cstar.base.feature import ENV_FF_DEVELOPER_MODE, is_feature_enabled
 from cstar.cli.workplan.check import app as app_check
 from cstar.cli.workplan.gather import app as app_gather
 from cstar.cli.workplan.log import app as app_log
@@ -60,3 +61,8 @@ app.command(
 )(submit)
 _add_hidden(app_status)
 _add_hidden(app_ls)
+
+if is_feature_enabled(ENV_FF_DEVELOPER_MODE):
+    from cstar.cli.workplan.schemas import app as app_schemas
+
+    app.add_typer(app_schemas)

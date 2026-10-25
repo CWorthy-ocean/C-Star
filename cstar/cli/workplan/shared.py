@@ -662,12 +662,13 @@ def preload_run_record(context: typer.Context, run_id: str) -> str:
     Raises
     ------
     typer.BadParameter
-        - Raised when the run-id is invalid or no `WorkplanRun` exists for it
+        - Raised when the run-id is invalid, no `WorkplanRun` exists for it, or
+          its record cannot be read (one a newer cstar-ocean wrote)
     """
     repo = TrackingRepository()
     try:
         run = asyncio.run(repo.get_workplan_run(run_id))
-    except ValueError as ex:
+    except (ValueError, CstarError) as ex:
         raise typer.BadParameter(str(ex)) from ex
 
     if not run:

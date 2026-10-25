@@ -33,6 +33,7 @@ from cstar.orchestration.orchestration import (
     read_workplan,
 )
 from cstar.orchestration.serialization import deserialize, model_to_yaml, serialize
+from cstar.system.migration import CstarSchemaTooNewError
 
 
 def test_step_defaults(fake_blueprint_path: Path) -> None:
@@ -678,6 +679,100 @@ def test_workplan_defaults(
     assert "foo" not in plan.compute_environment  # ensure non-null
     assert not plan.runtime_vars
     assert "foo" not in plan.compute_environment  # ensure non-null
+
+
+@pytest.mark.parametrize(
+    ("version", "expected"),
+    [
+        (None, "1.2.0"),
+        ("1.0.0", "1.0.0"),
+        ("1.1.0", "1.1.0"),
+        ("1.2.0", "1.2.0"),
+    ],
+)
+def test_workplan_reads_its_version_and_older_ones(
+    gen_fake_steps: Callable[[int], Generator[Step, None, None]],
+    version: str | None,
+    expected: str,
+) -> None:
+    """Verify a workplan without a `schema_version` (written before workplans
+    were versioned) and one of an older version load unchanged, and that a new
+    workplan carries the current version into its YAML.
+    """
+    data: dict[str, t.Any] = {
+        "name": "plan",
+        "description": "d",
+        "steps": list(gen_fake_steps(1)),
+    }
+    if version is not None:
+        data["schema_version"] = version
+
+    plan = Workplan.model_validate(data)
+
+    assert plan.schema_version == expected
+    assert f"schema_version: {expected}" in model_to_yaml(plan)
+
+
+@pytest.mark.parametrize("klass", [Workplan, LiveWorkplan])
+@pytest.mark.parametrize("version", ["1.2.1", "1.3.0", "2.0.0"])
+def test_workplan_refuses_a_newer_version(
+    gen_fake_steps: Callable[[int], Generator[Step, None, None]],
+    klass: type[Workplan],
+    version: str,
+) -> None:
+    """Verify a workplan written by a newer release is refused with the upgrade
+    message before its keys are validated, so a key this build does not know
+    does not surface as a raw validation error.
+    """
+    data = {
+        "schema_version": version,
+        "name": "plan",
+        "description": "d",
+        "steps": list(gen_fake_steps(1)),
+        "a_key_from_the_future": True,
+    }
+
+    with pytest.raises(CstarSchemaTooNewError, match="Upgrade cstar-ocean") as caught:
+        klass.model_validate(data)
+
+    assert caught.value.found == version
+    assert caught.value.target == "1.2.0"
+
+
+def test_workplan_rejects_a_malformed_version(
+    gen_fake_steps: Callable[[int], Generator[Step, None, None]],
+) -> None:
+    """Verify a `schema_version` that is not dotted integers is a validation error."""
+    data = {
+        "schema_version": "latest",
+        "name": "plan",
+        "description": "d",
+        "steps": list(gen_fake_steps(1)),
+    }
+
+    with pytest.raises(ValidationError, match="expected dotted integers"):
+        Workplan.model_validate(data)
+
+
+def test_workplan_templates_carry_the_current_version(wp_templates_dir: Path) -> None:
+    """Verify each bundled workplan template states the current version and
+    points editors at that version's published schema.
+    """
+    current = Workplan.model_fields["schema_version"].default
+    templates = sorted(wp_templates_dir.glob("*.yaml"))
+    assert templates
+
+    for path in templates:
+        header = path.read_text().splitlines()[0]
+        assert header.endswith(f"/docs/schemas/wp/workplan_schema.{current}.json")
+        assert yaml.safe_load(path.read_text())["schema_version"] == current
+        assert (
+            Path(__file__).parents[4]
+            / "docs"
+            / "schemas"
+            / "wp"
+            / header.rsplit("/", 1)[1]
+        ).exists()
 
 
 @pytest.mark.parametrize(

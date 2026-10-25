@@ -338,6 +338,29 @@ def test_workplan_check_rejects_non_slug_name(
     assert "'sample-workplan'" in result.stderr
 
 
+def test_workplan_check_refuses_a_newer_workplan(
+    tmp_path: Path,
+    wp_templates_dir: Path,
+) -> None:
+    """Verify a workplan written by a newer release fails the check with the
+    upgrade message and the file, not a validation error or a traceback.
+    """
+    content = (wp_templates_dir / "workplan.yaml").read_text()
+    wp_path = tmp_path / "workplan.yaml"
+    wp_path.write_text(
+        content.replace("schema_version: '1.2.0'", "schema_version: '1.3.0'")
+        + "a_key_from_the_future: true\n"
+    )
+
+    result = CliRunner().invoke(app, [wp_path.as_posix()], color=False)
+
+    assert result.exit_code == 2
+    message = " ".join(result.stderr.replace("│", " ").split())
+    assert "workplan schema 1.3.0 is newer than this build" in message
+    assert "Upgrade cstar-ocean" in message
+    assert "Traceback" not in result.output
+
+
 def _persist_live_workplan(path: Path, name: str, blueprint: Path) -> LiveWorkplan:
     """Persist a workplan in its live form, which a plain `Workplan` rejects."""
     step = LiveStep.from_step(

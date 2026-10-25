@@ -1792,6 +1792,12 @@ class ROMSSimulation(Simulation):
                 f"components:\n{problem_list}\n"
                 "Re-run the step with --clobber to start over."
             )
+            if not self.use_pio:
+                msg += (
+                    f" Note that --clobber deletes {self.fs_manager.temp_output_dir}, "
+                    "which holds the interrupted attempt's unjoined outputs, "
+                    "including its restart pieces; move it aside first to keep them."
+                )
             raise CstarExpectationFailed(msg)
 
         msg = f"Attached previously staged simulation {self.name!r}"
