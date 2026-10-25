@@ -74,9 +74,7 @@ placeholder.
     name: production
     description: Continue the spin-up run on the same grid
     runs:
-      spinup: "{{spinup_run}}"      # a run, or a runtime variable holding one
-    runtime_vars:
-      - spinup_run
+      spinup: "the-spinup-run-id-you-ran-earlier"
 
     steps:
       - name: nest_conversion
@@ -109,7 +107,7 @@ A run is named in one of three ways:
 .. code-block:: yaml
 
     runs:
-      spinup: "{{spinup_run}}"                            # its run-id
+      spinup: "the-spinup-run-id-you-ran-earlier"         # its run-id
       base: run://6f1c2d3e-8a4b-4c57-9e21-3b7d5a0c4f18    # its uuid
       colleague: /path/to/their/run                       # its directory
 
