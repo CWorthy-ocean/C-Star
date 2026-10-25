@@ -28,7 +28,8 @@ field of its own:
    What the blueprint is called. It names the working directory when you do
    not give one, and a workplan step names it in its logs.
 ``description``
-   A sentence or two for the next person who opens the file.
+   Any information you'd like to include about what the blueprint contains or
+   where it came from
 ``application``
    Which application runs this blueprint. ``cstar blueprint run`` reads this
    line to decide what to do with the file, so a forge blueprint and a
@@ -60,8 +61,13 @@ Schema versions
 ^^^^^^^^^^^^^^^
 
 Each application's blueprint schema has a version, and a blueprint records
-the version it was written with in ``schema_version``. The version is semver
-read from the file's point of view: a file with an older minor or patch
+the version it was written with in ``schema_version``. Users can largely ignore
+these versions; they are used by C-Star to know how to read and adapt older
+files. Developers should increment the schema version when adding or changing
+fields in a given blueprint.
+
+The schema version is based on `semantic versioning <https://semver.org/>`_
+, read from the file's point of view: a file with an older minor or patch
 version loads unchanged; a file with an older major version is migrated
 automatically when the application provides a migration (``cstar blueprint
 migrate`` writes the migrated file out); and a file newer than the installed

@@ -36,7 +36,7 @@ A blueprint is a YAML file that holds every input an application needs: for
 a simulation, which model code to build, which input files to use and which
 settings to apply; for a domain, which region, resolution, datasets and run
 window. Given the same blueprint, an application produces the same result on
-any supported machine, which is what makes C-Star results shareable and
+a given machine, which is what makes C-Star results shareable and
 reproducible. Every blueprint has the same small core (a name, the
 application it is for, and where to work), and each application adds the
 fields it needs. :doc:`blueprints` describes the core and the commands that

@@ -237,23 +237,3 @@ What a run leaves behind
       per-rank files on request), a link to the run where it is, or a move
       of the whole directory, after which the run is tracked as attached. The copy keeps the run's
       uuid. See :doc:`runs/moving/promote`.
-
-Example HPC deployment
-----------------------
-
-.. image:: images/hpc_arch_diagram.png
-    :alt: Components of a C-Star deployment in an HPC environment
-
-The diagram shows a user-initiated workflow on an HPC system. The user has
-already prepared a workplan and its blueprints, with the input data on the
-cluster's storage (for example by running Forge there first).
-
-The user logs in to a login node and starts the workplan with the ``cstar``
-command line. This creates an orchestrator that reads the workplan, works
-out which steps can run, prepares each step's blueprint, and submits the
-steps to SLURM. SLURM allocates compute resources, enforces the dependencies,
-and monitors the jobs. Each step gets its own allocation, in which a worker
-reads the step's blueprint and runs the application.
-
-The user can log off and come back later. Calling ``cstar run status``
-with the same run ID reports how far the workplan has progressed.
