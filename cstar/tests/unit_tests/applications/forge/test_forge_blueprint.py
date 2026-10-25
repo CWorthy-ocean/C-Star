@@ -6187,12 +6187,14 @@ class TestProvenanceStamping:
         )
         assert restamped.provenance.generated_at >= stamped.provenance.generated_at
 
-    def test_a_hash_of_another_scheme_keeps_the_identity(
-        self, monkeypatch, tmp_path: Path
+    @pytest.mark.parametrize("edited", [False, True], ids=["unchanged", "edited"])
+    def test_a_hash_of_another_scheme_is_stamped_anew(
+        self, monkeypatch, tmp_path: Path, edited: bool
     ) -> None:
         """A hash recorded under another scheme (another release's recipe) cannot
-        tell whether the content changed, so an unchanged legacy file keeps its
-        ``generated_by`` and ``generated_at``; writing it records the current hash.
+        tell whether the content changed, and the wizard carries a loaded file's
+        provenance onto every edit, so the file is stamped anew whether or not it
+        was edited; the save after that keeps the new stamp.
         """
         self._patched_fb(monkeypatch)
         stamped = _build().stamp_provenance("wizard")
@@ -6203,12 +6205,26 @@ class TestProvenanceStamping:
                 )
             }
         )
+        if edited:
+            legacy = legacy.model_copy(
+                update={
+                    "model_settings": {
+                        **legacy.model_settings,
+                        "v_sponge": {"v_sponge": 999.0},
+                    }
+                }
+            )
 
-        assert legacy.stamp_provenance("forge") is legacy
-        back = ForgeBlueprint.from_yaml(legacy.to_yaml(tmp_path / "bp.yaml"))
-        assert back.provenance.generated_by == stamped.provenance.generated_by
-        assert back.provenance.generated_at == stamped.provenance.generated_at
-        assert back.provenance.content_hash == stamped.content_hash()
+        restamped = legacy.stamp_provenance("forge")
+
+        assert restamped.provenance.generated_by is not None
+        assert restamped.provenance.generated_by.tool == "forge"
+        assert (
+            restamped.provenance.generated_by.id != stamped.provenance.generated_by.id
+        )
+        assert restamped.provenance.content_hash == restamped.content_hash()
+        back = ForgeBlueprint.from_yaml(restamped.to_yaml(tmp_path / "bp.yaml"))
+        assert back.stamp_provenance("forge") is back
 
     def test_blueprint_that_never_recorded_a_hash_is_stamped(self, monkeypatch):
         """An old file with no ``content_hash`` has nothing to match, so it is

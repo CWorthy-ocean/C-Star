@@ -70,7 +70,6 @@ from typing import TYPE_CHECKING, Any, Literal, get_args
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
-from cstar.base.digest import digest_scheme
 from cstar.base.provenance import package_version, package_versions, system_name
 from cstar.orchestration.models import (
     Blueprint,
@@ -1733,20 +1732,20 @@ class ForgeBlueprint(Blueprint):
         recorded (a resave, an unchanged round trip), ``self`` comes back as is and
         keeps its ``generated_by.id`` and ``generated_at``; a matching hash alone is
         not enough, as :meth:`to_yaml_str` records it on every write, stamped or
-        not. A hash recorded under another scheme (another release's recipe) cannot
-        tell whether the content changed, so it counts as matching: the file keeps
-        its identity, and the write records the current hash. Otherwise the copy takes the new hash, ``generated_at`` now (UTC) and a
+        not. A hash recorded under another scheme (another release's recipe) never
+        matches: it cannot tell whether the content changed, and the wizard carries
+        a loaded file's provenance onto every edit, so the first save after an
+        upgrade stamps the file anew. Otherwise the copy takes the new hash, ``generated_at`` now (UTC) and a
         fresh ``generated_by`` (see :func:`new_generated_by`), and the legacy
         version fields are cleared (``generated_by.versions`` replaces them).
         ``notes`` and ``override_files_applied`` are kept; ``self`` is never
         mutated.
         """
         content_hash = self.content_hash()
-        recorded = self.provenance.content_hash or ""
-        unchanged = recorded == content_hash or (
-            bool(recorded) and digest_scheme(recorded) != digest_scheme(content_hash)
-        )
-        if unchanged and self.provenance.generated_by is not None:
+        if (
+            content_hash == self.provenance.content_hash
+            and self.provenance.generated_by is not None
+        ):
             return self
         stamped = self.provenance.model_copy(
             update={
