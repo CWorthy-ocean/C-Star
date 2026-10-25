@@ -1,7 +1,7 @@
 .. _tutorial-cdr-workplan:
 
-Spin-up, a CDR release and its metrics
-======================================
+Spin-up, a CDR intervention and its metrics
+===========================================
 
 This page puts the pieces of a small carbon dioxide removal (CDR) experiment
 into one workplan: generate the inputs, spin the domain up, continue it with
@@ -31,8 +31,8 @@ off, so there is nothing further to register for or download. If you have run
 the previous pages, the biogeochemistry climatology is already cached; GLORYS
 is fetched again for the longer window, a few hundred megabytes.
 
-The release
------------
+Defining the CDR intervention
+-----------------------------
 
 The two forge blueprints describe the same domain, forcing and output. They
 differ in the run window (``wio-spinup`` covers 2012-01-01, ``wio-release``
@@ -79,10 +79,8 @@ at the start and at the end:
    :start-at: cdr:
    :end-before: datasets:
 
-A simple release is held at one rate for its whole window, and the window has
-to cover the run: ROMS stops when the model time passes the last record of a
-forcing file, so a release that ends early would end the run with it. For
-anything beyond that, build the forcing with roms-tools directly: a pulse that
+The simple release built by the wizard is held at one rate for its whole window.
+For anything beyond that, build the forcing with roms-tools directly: a pulse that
 stops before the run does, several releases, a flux that varies in time, a
 volume release of seawater with modified tracers, or a release of other
 tracers. The `roms-tools CDR forcing documentation
