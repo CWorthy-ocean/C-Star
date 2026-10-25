@@ -1256,13 +1256,19 @@ async def on_status_changed(handle: ProcessHandle) -> None:
     """Persist updates to process handles.
 
     On a terminal status transition, the step's own disk usage is measured
-    and recorded on the run's `step_sizes` before the run is persisted.
+    and recorded on the run's `step_sizes` before the run is persisted. A run
+    record that cannot be read or written is a warning: keeping the record of
+    a run never stops the run, and the sentinel is written first.
     """
     state_repo = StateRepository()
     run_repo = TrackingRepository()
 
     path = await state_repo.put_sentinel(handle)
-    run = await run_repo.get_workplan_run(handle.run_id)
+    try:
+        run = await run_repo.get_workplan_run(handle.run_id)
+    except Exception as ex:
+        log.warning(f"Could not read the record of run {handle.run_id!r}: {ex}")
+        return
 
     if not path or run is None:
         return
@@ -1295,7 +1301,13 @@ async def on_status_changed(handle: ProcessHandle) -> None:
 
     # measured outside the lock, applied atomically: concurrent step events for
     # the same run must not overwrite each other's sentinels or sizes
-    await run_repo.update_workplan_run(handle.run_id, _apply)
+    try:
+        await run_repo.update_workplan_run(handle.run_id, _apply)
+    except Exception as ex:
+        log.warning(
+            f"Could not record step {handle.name!r} in the record of run "
+            f"{handle.run_id!r}: {ex}"
+        )
 
 
 async def on_launched(handle: ProcessHandle, *, root: Path) -> None:
