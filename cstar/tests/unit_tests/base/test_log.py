@@ -1,6 +1,7 @@
 import logging
 import pathlib
 import re
+import time
 import typing as t
 import uuid
 from collections.abc import Callable
@@ -151,6 +152,26 @@ def test_filehandler_no_dupes(
 
     # ... and isn't written more than once
     assert len(matches) == 1
+
+
+def test_filehandler_keeps_local_time_when_converter_is_replaced(
+    request: pytest.FixtureRequest,
+    tmp_path: pathlib.Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Verify C-Star's entries stay in local time after a dependency replaces the
+    class-wide `logging.Formatter.converter`, as copernicusmarine does on import.
+    """
+    monkeypatch.setattr(
+        logging.Formatter, "converter", staticmethod(lambda _: time.gmtime(0))
+    )
+    filename = tmp_path / f"{request.function.__name__}.log"
+    log = get_logger(request.function.__name__, logging.INFO, filename=filename)
+
+    log.info("stamped")
+
+    today = strftime("%Y\\-%m\\-%d")
+    assert re.search(rf"^{today} .* - stamped$", filename.read_text(), re.MULTILINE)
 
 
 @pytest.mark.parametrize(
