@@ -4,7 +4,9 @@ Content digests of run products and user-supplied files: ``<scheme>:<hex>``.
 Two schemes: :data:`HASH_SCHEME` (``nc-sample-v2``), a bounded-read digest of a
 netCDF file's structure and data that survives re-encoding, and
 :data:`SHA256_SCHEME` (``sha256``), the sha256 of a file's bytes. The prefix lets a
-verifier recompute the scheme a digest was recorded with.
+verifier recompute the scheme a digest was recorded with. Blueprint content hashes
+and step definition hashes carry the same kind of tag (see
+:data:`~cstar.base.provenance.HASH_RECIPE_VERSION`).
 
 Module top stays light (xarray/numpy are imported inside the functions that need
 them), since the authoring/wizard layer imports it.
@@ -45,6 +47,14 @@ FULL_HASH_LIMIT = 1 << 20
 
 SAMPLE_BUDGET = 2 << 20
 """Most bytes read from any one larger variable."""
+
+
+def digest_scheme(content_hash: str) -> str:
+    """The scheme a ``<scheme>:<hex>`` digest is tagged with, or ``""`` for an
+    untagged (legacy) or empty one.
+    """
+    scheme, separator, _ = content_hash.partition(":")
+    return scheme if separator else ""
 
 
 def short_digest(content_hash: str) -> str:

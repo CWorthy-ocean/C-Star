@@ -66,7 +66,7 @@ from cstar.orchestration.manifest import (
     ATTEMPT_VARIABLES_NAME,
     ATTEMPT_WORKPLAN_NAME,
     ATTEMPTS_DIR_NAME,
-    CANONICAL_NAMES_SINCE,
+    DEFINITION_HASH_SCHEME,
     RUN_MANIFEST_NAME,
     Attempt,
     AttemptStatus,
@@ -1716,9 +1716,17 @@ def _recorded(
     )
 
 
+EDITED_HASH = f"{DEFINITION_HASH_SCHEME}:{'0' * 64}"
+"""A recorded definition hash under the current scheme that no step has: the one a
+step edited since it was recorded leaves behind."""
+
+UNTAGGED_HASH = "hashed-by-an-earlier-recipe"
+"""A recorded definition hash with no scheme, as releases before the tag recorded."""
+
+
 def _stale(facts: t.Mapping[str, StepFacts]) -> dict[str, str]:
     """Return a recorded hash for each step that differs from its current one."""
-    return {name: f"stale-{f.definition_hash}" for name, f in facts.items()}
+    return {name: EDITED_HASH for name in facts}
 
 
 def test_refuse_edited_done_steps_refuses_an_edited_done_step(
@@ -1732,7 +1740,7 @@ def test_refuse_edited_done_steps_refuses_an_edited_done_step(
         _hello_step(hello_world_bp_path.as_posix(), "B"),
     )
     facts = describe_steps(wp, tmp_path)
-    recorded = {n: f.definition_hash for n, f in facts.items()} | {"B": "old"}
+    recorded = {n: f.definition_hash for n, f in facts.items()} | {"B": EDITED_HASH}
     status = DagStatus({"A": Status.Done, "B": Status.Done})
 
     with pytest.raises(CstarExpectationFailed) as exc_info:
@@ -1812,6 +1820,36 @@ def test_refuse_edited_done_steps_honors_clobber(
     refuse_edited_done_steps(wp, manifest, status, facts, [f" {getattr(step, by)} "])
 
 
+@pytest.mark.parametrize(
+    "recorded", [EDITED_HASH, UNTAGGED_HASH], ids=["edited", "untagged"]
+)
+def test_refuse_edited_done_steps_honors_a_clobber_the_workplan_sets(
+    tmp_path: Path,
+    hello_world_bp_path: Path,
+    caplog: pytest.LogCaptureFixture,
+    recorded: str,
+) -> None:
+    """Verify a Done step whose `workflow_overrides` set `clobber` runs again, so
+    it is neither refused nor warned about, as with `--clobber`.
+    """
+    step = _hello_step(
+        hello_world_bp_path.as_posix(), "B", workflow_overrides={"clobber": True}
+    )
+    wp = _guard_workplan(step)
+    facts = describe_steps(wp, tmp_path)
+
+    with caplog.at_level("WARNING"):
+        refuse_edited_done_steps(
+            wp,
+            _recorded("run", {"B": recorded}),
+            DagStatus({"B": Status.Done}),
+            facts,
+            [],
+        )
+
+    assert _warnings(caplog) == []
+
+
 def test_refuse_edited_done_steps_names_the_consumer_of_an_edited_producer(
     tmp_path: Path,
 ) -> None:
@@ -1845,6 +1883,134 @@ def test_refuse_edited_done_steps_skips_an_unrecorded_definition(
     refuse_edited_done_steps(
         wp, _recorded("run", {"A": ""}), DagStatus({"A": Status.Done}), facts, []
     )
+
+
+def _warnings(caplog: pytest.LogCaptureFixture) -> list[str]:
+    """Return the messages of the warnings captured so far."""
+    return [r.getMessage() for r in caplog.records if r.levelname == "WARNING"]
+
+
+@pytest.mark.parametrize(
+    "recorded",
+    [UNTAGGED_HASH, f"sha256:{'0' * 64}"],
+    ids=["untagged", "another-scheme"],
+)
+def test_refuse_edited_done_steps_warns_about_a_step_of_an_earlier_recipe(
+    tmp_path: Path,
+    hello_world_bp_path: Path,
+    caplog: pytest.LogCaptureFixture,
+    recorded: str,
+) -> None:
+    """Verify a Done step whose recorded hash has another scheme than its current
+    one is not refused, and that one warning names it.
+    """
+    wp = _guard_workplan(_hello_step(hello_world_bp_path.as_posix(), "A"))
+    facts = describe_steps(wp, tmp_path)
+
+    with caplog.at_level("WARNING"):
+        refuse_edited_done_steps(
+            wp,
+            _recorded("run", {"A": recorded}),
+            DagStatus({"A": Status.Done}),
+            facts,
+            [],
+        )
+
+    (message,) = _warnings(caplog)
+    assert "'A'" in message
+    assert "another C-Star release" in message
+
+
+def test_refuse_edited_done_steps_shares_one_warning_between_steps(
+    tmp_path: Path,
+    hello_world_bp_path: Path,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Verify several steps recorded under an earlier recipe share one warning."""
+    wp = _guard_workplan(
+        _hello_step(hello_world_bp_path.as_posix(), "A"),
+        _hello_step(hello_world_bp_path.as_posix(), "B"),
+    )
+    facts = describe_steps(wp, tmp_path)
+    recorded = {"A": UNTAGGED_HASH, "B": UNTAGGED_HASH}
+    status = DagStatus({"A": Status.Done, "B": Status.Done})
+
+    with caplog.at_level("WARNING"):
+        refuse_edited_done_steps(wp, _recorded("run", recorded), status, facts, [])
+
+    (message,) = _warnings(caplog)
+    assert "'A'" in message
+    assert "'B'" in message
+
+
+def test_refuse_edited_done_steps_refuses_an_edit_beside_an_unchecked_step(
+    tmp_path: Path,
+    hello_world_bp_path: Path,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Verify a step of the current scheme that was edited is refused even when
+    another step could not be compared, and that the refusal names only the edited
+    step and warns about nothing: the attempt it stops would not record anything.
+    """
+    wp = _guard_workplan(
+        _hello_step(hello_world_bp_path.as_posix(), "A"),
+        _hello_step(hello_world_bp_path.as_posix(), "B"),
+    )
+    facts = describe_steps(wp, tmp_path)
+    recorded = {"A": UNTAGGED_HASH, "B": EDITED_HASH}
+    status = DagStatus({"A": Status.Done, "B": Status.Done})
+
+    with caplog.at_level("WARNING"), pytest.raises(CstarExpectationFailed) as exc_info:
+        refuse_edited_done_steps(wp, _recorded("run", recorded), status, facts, [])
+
+    assert "'B'" in str(exc_info.value)
+    assert "'A'" not in str(exc_info.value)
+    assert _warnings(caplog) == []
+
+
+@pytest.mark.parametrize("by", ["name", "safe_name"])
+def test_refuse_edited_done_steps_does_not_warn_about_a_clobbered_step(
+    tmp_path: Path,
+    hello_world_bp_path: Path,
+    caplog: pytest.LogCaptureFixture,
+    by: str,
+) -> None:
+    """Verify a step of an earlier recipe that is selected for clobber is not
+    warned about: it runs again anyway.
+    """
+    step = _hello_step(hello_world_bp_path.as_posix(), "Step B")
+    assert step.name != step.safe_name
+    wp = _guard_workplan(step)
+    facts = describe_steps(wp, tmp_path)
+    manifest = _recorded("run", {"Step B": UNTAGGED_HASH})
+
+    with caplog.at_level("WARNING"):
+        refuse_edited_done_steps(
+            wp, manifest, DagStatus({"Step B": Status.Done}), facts, [getattr(step, by)]
+        )
+
+    assert _warnings(caplog) == []
+
+
+@pytest.mark.parametrize("status", [{"A": Status.Failed}, {}])
+def test_refuse_edited_done_steps_does_not_warn_about_a_step_that_is_not_done(
+    tmp_path: Path,
+    hello_world_bp_path: Path,
+    caplog: pytest.LogCaptureFixture,
+    status: dict[str, Status],
+) -> None:
+    """Verify a step of an earlier recipe that failed or was never submitted is
+    not warned about: nothing it recorded is relied on.
+    """
+    wp = _guard_workplan(_hello_step(hello_world_bp_path.as_posix(), "A"))
+    facts = describe_steps(wp, tmp_path)
+
+    with caplog.at_level("WARNING"):
+        refuse_edited_done_steps(
+            wp, _recorded("run", {"A": UNTAGGED_HASH}), DagStatus(status), facts, []
+        )
+
+    assert _warnings(caplog) == []
 
 
 def test_refuse_edited_done_steps_skips_a_step_new_to_the_run(
@@ -2047,7 +2213,7 @@ async def test_build_dag_refuses_an_edited_done_step_before_writing_anything(
     workplan is written, and that clobbering the step lets it through.
     """
     wp_path, output_dir = _build_guarded(tmp_path, mock_run_id, hello_world_bp_path)
-    write_run_manifest(output_dir, _recorded(mock_run_id, {"hello": "stale"}))
+    write_run_manifest(output_dir, _recorded(mock_run_id, {"hello": EDITED_HASH}))
     done = DagStatus({"hello": Status.Done})
 
     with (
@@ -2086,17 +2252,19 @@ def _write_manifest_as_of(root: Path, manifest: RunManifest, version: str) -> No
 
 
 @pytest.mark.asyncio
-async def test_build_dag_accepts_a_done_step_hashed_before_canonical_names(
-    tmp_path: Path, mock_run_id: str, hello_world_bp_path: Path
+async def test_build_dag_accepts_a_done_step_hashed_by_an_earlier_recipe(
+    tmp_path: Path,
+    mock_run_id: str,
+    hello_world_bp_path: Path,
+    caplog: pytest.LogCaptureFixture,
 ) -> None:
-    """Verify re-entering a run whose manifest predates `CANONICAL_NAMES_SINCE`
-    is not refused for its recorded hashes (which may use an earlier application
-    name), and that scheduling it rewrites the manifest under the current schema
-    with the step's current hash.
+    """Verify re-entering a run whose Done step records an untagged hash (one an
+    earlier release computed) is not refused, that a warning names the step, and
+    that scheduling it rewrites the manifest under the current schema with the
+    step's current, tagged hash.
     """
     wp_path, output_dir = _build_guarded(tmp_path, mock_run_id, hello_world_bp_path)
-    # a hash this build cannot reproduce: it stands for one made under `roms_marbl`
-    older = _recorded(mock_run_id, {"hello": "hashed-under-an-earlier-name"})
+    older = _recorded(mock_run_id, {"hello": UNTAGGED_HASH})
     _write_manifest_as_of(output_dir, older, "1.4.0")
     done = DagStatus({"hello": Status.Done})
 
@@ -2108,6 +2276,7 @@ async def test_build_dag_accepts_a_done_step_hashed_before_canonical_names(
         ),
         mock.patch("cstar.orchestration.dag_runner.get_orchestrator"),
         mock.patch("cstar.orchestration.dag_runner.process_plan", mock.AsyncMock()),
+        caplog.at_level("WARNING"),
     ):
         planner, trx_path, facts, carried = await build_dag(wp_path, mock_run_id)
         await run_dag(
@@ -2119,25 +2288,25 @@ async def test_build_dag_accepts_a_done_step_hashed_before_canonical_names(
             carried=carried,
         )
 
+    (message,) = [m for m in _warnings(caplog) if "another C-Star release" in m]
+    assert "'hello'" in message
     rewritten = read_run_manifest(output_dir)
     assert rewritten is not None
     assert rewritten.schema_version == CURRENT_MANIFEST_SCHEMA
     entry = rewritten.step("hello")
     assert entry is not None
     assert entry.definition_hash == facts["hello"].definition_hash
-    assert (
-        "hashed-under-an-earlier-name"
-        not in (output_dir / RUN_MANIFEST_NAME).read_text()
-    )
+    assert entry.definition_hash.startswith(f"{DEFINITION_HASH_SCHEME}:")
+    assert UNTAGGED_HASH not in (output_dir / RUN_MANIFEST_NAME).read_text()
 
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("writer", ["reentry", "refresh"])
 @pytest.mark.parametrize(
-    ("version", "refused"),
+    ("recorded", "refused"),
     [
-        pytest.param("1.4.0", False, id="before-canonical-names"),
-        pytest.param(CANONICAL_NAMES_SINCE, True, id="canonical-names-since"),
+        pytest.param(UNTAGGED_HASH, False, id="untagged"),
+        pytest.param(EDITED_HASH, True, id="current-scheme"),
     ],
 )
 async def test_restamping_does_not_make_an_older_hash_comparable(
@@ -2145,21 +2314,21 @@ async def test_restamping_does_not_make_an_older_hash_comparable(
     mock_run_id: str,
     hello_world_bp_path: Path,
     writer: str,
-    version: str,
+    recorded: str,
     refused: bool,
 ) -> None:
     """Verify a writer that restamps an older manifest and keeps its recorded
     hashes (a re-entry that replays the recorded plan, or a status refresh) does
-    not turn them into hashes the next authored re-entry compares.
+    not turn an untagged one into a hash the next authored re-entry compares.
 
-    A manifest left at `CANONICAL_NAMES_SINCE` still has its edited Done step refused.
+    A hash under the current scheme that differs still has its Done step refused.
     """
     wp_path, wp_run = await _schedule(tmp_path, mock_run_id, hello_world_bp_path)
     root = wp_run.output_path
     manifest = read_run_manifest(root)
     assert manifest is not None
-    manifest.steps[0].definition_hash = "hashed-under-an-earlier-name"
-    _write_manifest_as_of(root, manifest, version)
+    manifest.steps[0].definition_hash = recorded
+    _write_manifest_as_of(root, manifest, "1.4.0")
 
     if writer == "reentry":
         await _reenter(wp_run)

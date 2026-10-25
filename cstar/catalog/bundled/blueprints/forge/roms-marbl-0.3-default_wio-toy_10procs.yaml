@@ -592,5 +592,5 @@ provenance:
   cstar_version: cstar-ocean==0.9.1
   roms_tools_version: roms-tools==4.0.1
   override_files_applied: []
-  content_hash: 6f27b17122bdc762de70d9d9fd78197aad54c619a339151a4f23bafa9559a007
+  content_hash: bp-v2:3db3387e022c1e79af714f9551d9b2536fc5631613f0637c58499ddcd411fc13
   notes: null

@@ -26,7 +26,7 @@ from cstar.catalog.outputs import (
     find_blueprint_outputs,
 )
 from cstar.execution.file_system import JobFileSystemManager, StateDirectoryManager
-from cstar.orchestration.models import BlueprintIdentity
+from cstar.orchestration.models import CONTENT_HASH_SCHEME, BlueprintIdentity
 from cstar.orchestration.orchestration import LiveStep, LiveWorkplan
 from cstar.orchestration.serialization import serialize
 from cstar.orchestration.tracking import TrackingRepository, WorkplanRun
@@ -166,6 +166,33 @@ async def test_output_of_an_edited_entry_is_changed(tmp_path: Path) -> None:
     [output] = await _catalog(root).blueprint_outputs(FORGE)
 
     assert output.status is OutputStatus.CHANGED
+    assert output.producer == recorded
+
+
+@pytest.mark.parametrize("same_digest", [True, False], ids=["same-digest", "other"])
+async def test_output_hashed_under_an_earlier_scheme_is_unverified(
+    tmp_path: Path, same_digest: bool
+) -> None:
+    """A producer hash with another scheme than the entry's was computed by an
+    earlier recipe: it is neither current nor changed, even when its digest is
+    the entry's own.
+    """
+    root, work = tmp_path / "catalog", tmp_path / "work"
+    _, current = _entry(root, "wio", work)
+    digest = current.content_hash.removeprefix(f"{CONTENT_HASH_SCHEME}:")
+    recorded = current.model_copy(
+        update={"content_hash": digest if same_digest else "ab" * 32}
+    )
+    assert recorded.content_hash != current.content_hash
+    _emit(
+        work / "output" / "B_wio.yaml",
+        name="wio",
+        derived_from=[recorded.model_dump()],
+    )
+
+    [output] = await _catalog(root).blueprint_outputs(FORGE)
+
+    assert output.status is OutputStatus.UNVERIFIED
     assert output.producer == recorded
 
 
