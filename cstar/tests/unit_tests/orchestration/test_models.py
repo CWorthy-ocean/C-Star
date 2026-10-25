@@ -36,11 +36,20 @@ from cstar.orchestration.serialization import deserialize, model_to_yaml, serial
 from cstar.system.migration import (
     TOLERATE_UNKNOWN,
     CstarSchemaTooNewError,
-    holds_unknown_keys,
+    for_writing,
 )
 
 CURRENT_WORKPLAN = Workplan.model_fields["schema_version"].default
 """The schema version this build writes in a workplan."""
+
+
+def _unwritable(model: object) -> bool:
+    """Whether a writer refuses the model: it holds keys a newer file set."""
+    try:
+        for_writing(model)
+    except CstarSchemaTooNewError:
+        return True
+    return False
 
 
 def test_step_defaults(fake_blueprint_path: Path) -> None:
@@ -749,7 +758,7 @@ def test_workplan_reads_a_newer_version_without_new_keys(
 
     assert plan.schema_version == version
     assert plan.unknown_keys == ()
-    assert not holds_unknown_keys(plan)
+    assert not _unwritable(plan)
     assert f"schema_version: {version}" in model_to_yaml(plan)
 
 
@@ -825,7 +834,7 @@ def test_workplan_tolerates_unknown_keys_when_asked(
 
     assert plan.schema_version == "1.3.0"
     assert plan.unknown_keys == ("a_key_from_the_future",)
-    assert holds_unknown_keys(plan)
+    assert _unwritable(plan)
     with pytest.raises(CstarSchemaTooNewError, match="to write this file"):
         model_to_yaml(plan)
 

@@ -84,7 +84,7 @@ from cstar.orchestration.models import (
     Workplan,
 )
 from cstar.orchestration.serialization import load_blueprint
-from cstar.system.migration import CstarSchemaTooNewError, holds_unknown_keys
+from cstar.system.migration import CstarSchemaTooNewError, for_writing
 
 NOW = datetime(2026, 10, 15, 12, 0, tzinfo=UTC)
 
@@ -108,6 +108,15 @@ NEWER_MAJOR = f"{int(_MAJOR) + 1}.0.0"
 _RECORD_MAJOR, _RECORD_MINOR, _ = CURRENT_RECORD.split(".")
 NEWER_RECORD_MINOR = f"{_RECORD_MAJOR}.{int(_RECORD_MINOR) + 10}.0"
 """A newer minor of the step record's schema."""
+
+
+def _unwritable(model: object) -> bool:
+    """Whether a writer refuses the model: it holds keys a newer file set."""
+    try:
+        for_writing(model)
+    except CstarSchemaTooNewError:
+        return True
+    return False
 
 
 def _identity(name: str = "bp", content_hash: str = "abc") -> BlueprintIdentity:
@@ -448,7 +457,7 @@ class TestNewerSchema:
         assert manifest is not None
         assert manifest.schema_version == NEWER_MINOR
         assert manifest.unknown_keys == ()
-        assert not holds_unknown_keys(manifest)
+        assert not _unwritable(manifest)
 
     def test_a_newer_minor_without_new_keys_is_written_at_its_version(
         self, tmp_path: Path
@@ -498,7 +507,7 @@ class TestNewerSchema:
         assert manifest is not None
         assert manifest.schema_version == NEWER_MINOR
         assert manifest.unknown_keys == ("future_field",)
-        assert holds_unknown_keys(manifest)
+        assert _unwritable(manifest)
         assert any(
             "future_field" in r.getMessage() and str(path) in r.getMessage()
             for r in caplog.records
@@ -613,7 +622,7 @@ class TestNewerSchema:
 
         assert manifest.steps[0].record is not None
         assert manifest.schema_version == CURRENT
-        assert holds_unknown_keys(manifest)
+        assert _unwritable(manifest)
         with pytest.raises(CstarSchemaTooNewError, match="step record schema"):
             write_run_manifest(tmp_path, manifest)
         assert not (tmp_path / RUN_MANIFEST_NAME).exists()
@@ -631,7 +640,7 @@ class TestNewerSchema:
         fold_step_records(manifest, tmp_path)
 
         assert manifest.steps[0].record is None
-        assert not holds_unknown_keys(manifest)
+        assert not _unwritable(manifest)
 
     def test_a_manifest_with_a_newer_record_nested_in_it_loads_tolerantly(
         self, tmp_path: Path
@@ -652,7 +661,7 @@ class TestNewerSchema:
         assert manifest.schema_version == CURRENT
         assert manifest.steps[0].record is not None
         assert manifest.steps[0].record.unknown_keys == ("future_field",)
-        assert holds_unknown_keys(manifest)
+        assert _unwritable(manifest)
 
     def test_an_older_manifest_is_written_at_the_current_version(
         self, tmp_path: Path

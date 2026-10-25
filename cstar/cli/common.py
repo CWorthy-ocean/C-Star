@@ -659,7 +659,7 @@ def execute_migration(
         If the planned migration fails to complete, or the blueprint requires
         migration but migration is disabled via `CSTAR_DISABLE_MIGRATION`.
     CstarSchemaTooNewError
-        If the blueprint's schema is newer than this build reads.
+        If the blueprint's schema is newer than this build reads (see `VersionedDocument`).
     CstarManualMigrationError
         If the blueprint's schema has no automatic migration to this build's.
     CstarUnsupportedMigrationError
@@ -739,7 +739,7 @@ def localize_and_migrate(path: str, verbose: bool = False) -> tuple[Path, bool]:
     Raises
     ------
     CstarSchemaTooNewError
-        If the blueprint's schema is newer than this build reads.
+        If the blueprint's schema is newer than this build reads (see `VersionedDocument`).
     CstarManualMigrationError
         If the blueprint's schema has no automatic migration to this build's.
     CstarUnsupportedMigrationError

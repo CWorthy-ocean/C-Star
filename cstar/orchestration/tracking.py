@@ -656,7 +656,7 @@ def require_writable(run: WorkplanRun, *, action: str) -> None:
 
 
 def read_run_record(path: Path, *, tolerant: bool = False) -> WorkplanRun:
-    """Read a run record, refusing one a newer cstar-ocean wrote that this build cannot.
+    """Read a run record, refusing one this build cannot read.
 
     Parameters
     ----------
@@ -698,8 +698,10 @@ def read_run_record(path: Path, *, tolerant: bool = False) -> WorkplanRun:
 def _try_read_run(path: Path, refused: set[Path]) -> WorkplanRun | None:
     """Read a run record, following the run if it has moved; `None` if unreadable.
 
-    A record a newer cstar-ocean wrote is reported with one warning that names
-    it and the upgrade, and its path is added to `refused`.
+    A record of a newer major, or of a newer minor that does not validate, is
+    reported with one warning that names it and the upgrade, and its path is
+    added to `refused`; one that only holds keys this build does not know loads,
+    with a warning.
     """
     try:
         run = read_run_record(path, tolerant=True)

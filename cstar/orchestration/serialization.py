@@ -15,12 +15,7 @@ from yaml.scanner import ScannerError
 from cstar.base.exceptions import CstarExpectationFailed
 from cstar.base.log import get_logger
 from cstar.execution.file_system import local_copy
-from cstar.system.migration import (
-    KEY_SV,
-    CstarSchemaTooNewError,
-    refuse_unwritable,
-    stamped_version,
-)
+from cstar.system.migration import KEY_SV, CstarSchemaTooNewError, for_writing
 
 log = get_logger(__name__)
 
@@ -189,24 +184,11 @@ def register_representer(
     dumper.add_representer(model_type, conversion_fn)
 
 
-def _stamped(model: _T) -> _T:
-    """Return the model at the schema version it is written at (`stamped_version`).
-
-    The copy, not just the written key, carries the version, so a blueprint's
-    `$schema` header names the schema its `schema_version` does.
-    """
-    fields = getattr(type(model), "model_fields", {})
-    if KEY_SV not in fields:
-        return model
-    found = str(getattr(model, KEY_SV))
-    stamped = stamped_version(found, str(fields[KEY_SV].default))
-    if stamped == found:
-        return model
-    return t.cast("_T", model.model_copy(update={KEY_SV: stamped}))  # type: ignore[attr-defined]
-
-
 def model_to_yaml(model: SerializableModel) -> str:
-    """Serialize a model to yaml.
+    """Serialize a model to yaml, to be written to a file.
+
+    The model is serialized at the schema version it is written at (see
+    `for_writing`).
 
     Parameters
     ----------
@@ -224,8 +206,22 @@ def model_to_yaml(model: SerializableModel) -> str:
         If the model holds content read from a newer file with keys this build
         does not know ignored: writing it would drop them.
     """
-    refuse_unwritable(model)
-    model = _stamped(model)
+    return dump_yaml(for_writing(model))
+
+
+def dump_yaml(model: SerializableModel) -> str:
+    """Serialize a model to yaml as it is, to be displayed rather than written.
+
+    Parameters
+    ----------
+    model : _T
+        The model to be serialized.
+
+    Returns
+    -------
+    str
+        The serialized model
+    """
     dumped = model.model_dump(exclude_defaults=True, by_alias=True)
 
     # 'application' is required by the base Blueprint type for deserialization

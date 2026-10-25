@@ -941,7 +941,7 @@ Because the manifest records working directories relative to the run directory, 
 
 Runs scheduled with an earlier C-Star release have no manifest until they are re-entered: ``cstar workplan submit --run-id <my-unique-id>`` records one, and steps that are done are reused.
 
-Two C-Star installs of the same major can share a run, such as a stable and a development install on one cluster. Each reads the other's manifest and step records, and a refresh writes the manifest without lowering its ``schema_version``. When a newer install recorded a field the older one does not know, the older one's ``cstar run status``, ``show``, ``check`` and ``ls`` still read the run: they warn, naming the field, and leave the file as it is. Re-entering, resuming, promoting or recording digests in such a run is refused with a message to upgrade ``cstar-ocean``: use the newer install for it.
+Two C-Star installs of the same major can share a run, such as a stable and a development install on one cluster. Each reads the other's manifest and step records, and a refresh writes the manifest without lowering its ``schema_version``. When a newer install recorded a field the older one does not know, the older one's ``cstar run status``, ``show``, ``ls``, ``path``, ``log``, ``cd`` and ``attach``, and ``check`` without ``--repair`` or ``--record-digests``, still read the run: they warn, naming the field, and leave the file as it is. Re-entering, resuming, promoting or recording digests in such a run is refused with a message to upgrade ``cstar-ocean``: use the newer install for it.
 
 The files are described by published schemas, listed in the :doc:`schema reference <schemas/index>`.
 

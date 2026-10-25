@@ -80,7 +80,7 @@ from cstar.orchestration.models import (
     SpecSelection,
 )
 from cstar.orchestration.serialization import read_blueprint_raw
-from cstar.system.migration import refuse_unwritable, stamped_version
+from cstar.system.migration import for_writing
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -1773,18 +1773,11 @@ class ForgeBlueprint(Blueprint):
         # reflects current content, for hand-edit detection. Who wrote the file and
         # when is ``stamp_provenance``'s job -- a caller that is producing the
         # file stamps first -- so writing never mints a new identity.
-        # never written below the version it was read at (`stamped_version`), and
-        # never at all when it was read with keys a newer cstar-ocean wrote ignored
-        refuse_unwritable(self)
-        schema_version = stamped_version(
-            self.schema_version, type(self).model_fields["schema_version"].default
-        )
-        stamped = self.model_copy(
+        stamped = for_writing(self).model_copy(
             update={
-                "schema_version": schema_version,
                 "provenance": self.provenance.model_copy(
                     update={"content_hash": self.content_hash()}
-                ),
+                )
             }
         )
         # ``exclude_none=False`` keeps explicit nulls, so a field that is unset by

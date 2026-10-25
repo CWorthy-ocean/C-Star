@@ -289,12 +289,12 @@ workplans, run manifests, step records and run records. That is what lets two
 C-Star releases of the same major, such as a stable and a development install on
 one cluster, share blueprints and runs. A field a minor bump adds is only written
 when it is set to something other than its default, so a file the newer release
-wrote reads in the older one until it uses the new field. Commands that only
-display a run (``cstar run status``, ``show``, ``check`` and ``ls``) go further:
-they read a newer manifest, step record, run record or transformed workplan
-even when it sets fields they do not know, ignore those fields with a warning
-that names them, and never write the file back. Releases before this rule
-refuse a newer file at any level.
+wrote reads in the older one until it uses the new field. Commands that read a
+run without writing its files (``cstar run status``, ``show``, ``ls``, ``path``,
+``log``, ``cd``, ``attach``, and ``check`` without ``--repair`` or
+``--record-digests``) go further: they read a newer manifest, step record, run
+record or transformed workplan even when it sets fields they do not know, ignore
+those fields with a warning that names them, and never write the file back.
 
 When C-Star writes a file back, it stamps the newer of the file's version and
 its own: a file never moves to an older version, and an older file it rewrites

@@ -479,7 +479,7 @@ class LiveWorkplan(Workplan):
         FileNotFoundError
             If the workplan file does not exist.
         CstarSchemaTooNewError
-            If the workplan is newer than this build reads.
+            If the workplan is newer than this build reads (see `VersionedDocument`).
 
         Returns
         -------

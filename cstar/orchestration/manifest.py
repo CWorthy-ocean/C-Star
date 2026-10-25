@@ -60,15 +60,15 @@ from cstar.orchestration.models import (
 from cstar.orchestration.orchestration import Status
 from cstar.orchestration.serialization import (
     anchor_relative_path,
+    dump_yaml,
     load_blueprint,
-    model_to_yaml,
     read_document,
 )
 from cstar.system.migration import (
     TOLERATE_UNKNOWN,
     CstarSchemaTooNewError,
     VersionedDocument,
-    stamped_version,
+    for_writing,
     warn_unknown_keys,
 )
 
@@ -759,7 +759,7 @@ def _read(path: Path, klass: type[_M], label: str, *, tolerant: bool) -> _M | No
     Raises
     ------
     CstarSchemaTooNewError
-        If the document's schema is newer than this build reads.
+        If the document's schema is newer than this build reads (see `VersionedDocument`).
     CstarError
         If the file cannot be read or is not a valid document.
     """
@@ -797,7 +797,7 @@ def read_run_manifest(root: Path, *, tolerant: bool = False) -> RunManifest | No
     Raises
     ------
     CstarSchemaTooNewError
-        If the manifest's schema is newer than this build reads.
+        If the manifest's schema is newer than this build reads (see `VersionedDocument`).
     CstarError
         If the manifest cannot be read or is invalid.
     """
@@ -825,7 +825,7 @@ def read_step_record(step_root: Path, *, tolerant: bool = False) -> StepRecord |
     Raises
     ------
     CstarSchemaTooNewError
-        If the record's schema is newer than this build reads.
+        If the record's schema is newer than this build reads (see `VersionedDocument`).
     CstarError
         If the record cannot be read or is invalid.
     """
@@ -862,7 +862,7 @@ def product_paths(step_root: Path, kind: ArtifactKind, *, role: str = "") -> lis
     Raises
     ------
     CstarSchemaTooNewError
-        If the record's schema is newer than this build reads.
+        If the record's schema is newer than this build reads (see `VersionedDocument`).
     CstarError
         If the record cannot be read or is invalid.
     """
@@ -920,7 +920,7 @@ def recorded_files_in(
     Raises
     ------
     CstarSchemaTooNewError
-        If the record's schema is newer than this build reads.
+        If the record's schema is newer than this build reads (see `VersionedDocument`).
     CstarError
         If the record cannot be read or is invalid.
     """
@@ -967,7 +967,7 @@ def require_recorded_files(step_root: Path, paths: "Sequence[Path]") -> None:
 
 
 def _write(path: Path, document: "RunManifest | StepRecord") -> Path:
-    """Write a document atomically, at the schema version `stamped_version` gives.
+    """Write a document atomically, at the schema version `for_writing` gives.
 
     Parameters
     ----------
@@ -988,11 +988,9 @@ def _write(path: Path, document: "RunManifest | StepRecord") -> Path:
         If the document holds content read from a newer file with keys this
         build does not know ignored.
     """
-    text = model_to_yaml(document)
-    document.schema_version = stamped_version(
-        document.schema_version, type(document).model_fields["schema_version"].default
-    )
-    write_text_atomic(path, text)
+    written = for_writing(document)
+    write_text_atomic(path, dump_yaml(written))
+    document.schema_version = written.schema_version
     return path
 
 
@@ -1566,7 +1564,7 @@ def record_submission(
     LockUnsupportedError
         If the file system holding the state directory does not support `flock`.
     CstarSchemaTooNewError
-        If the manifest's schema is newer than this build reads.
+        If the manifest's schema is newer than this build reads (see `VersionedDocument`).
     CstarError
         If the manifest cannot be read or is invalid.
     """

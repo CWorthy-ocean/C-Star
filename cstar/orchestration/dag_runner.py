@@ -99,7 +99,7 @@ from cstar.orchestration.transforms import (
     resolve_external_runs,
 )
 from cstar.system.manager import get_sysmgr
-from cstar.system.migration import CstarSchemaTooNewError, holds_unknown_keys
+from cstar.system.migration import CstarSchemaTooNewError
 
 if t.TYPE_CHECKING:
     from datetime import datetime
@@ -407,14 +407,13 @@ def refresh_run_manifest(
             if manifest is None:
                 log.debug(f"Run {run_id!r} has no manifest to refresh.")
                 return None
-            changed = fold_step_records(manifest, root, statuses, tolerant=True)
-            if changed and holds_unknown_keys(manifest):
-                log.debug(
-                    f"Not writing the manifest of run {run_id!r}: it holds keys "
-                    "a newer cstar-ocean wrote"
-                )
-            elif changed:
-                write_run_manifest(root, manifest)
+            if fold_step_records(manifest, root, statuses, tolerant=True):
+                try:
+                    write_run_manifest(root, manifest)
+                except CstarSchemaTooNewError as ex:
+                    # read with keys a newer cstar-ocean wrote ignored, which
+                    # the reads warned about: the refresh stays in memory
+                    log.debug(f"Not writing the manifest of run {run_id!r}: {ex}")
     except Exception as ex:
         log.warning(f"Could not refresh the manifest of run {run_id!r}: {ex}")
         return None
@@ -527,7 +526,7 @@ def recorded_workplan(wp_run: WorkplanRun) -> Path | None:
     Raises
     ------
     CstarSchemaTooNewError
-        If the run's manifest is newer than this build reads.
+        If the run's manifest is newer than this build reads (see `VersionedDocument`).
     CstarError
         If the run's manifest cannot be read.
     """

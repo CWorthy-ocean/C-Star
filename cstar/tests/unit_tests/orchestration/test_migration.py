@@ -35,7 +35,8 @@ from cstar.system.migration import (
     CstarMigrationError,
     CstarSchemaTooNewError,
     CstarUnsupportedMigrationError,
-    newer_in_major,
+    refuse_newer_major,
+    schema_version_of,
     stamped_version,
 )
 
@@ -563,32 +564,50 @@ def test_plan_earlier_application_name_current_schema_is_compatible() -> None:
 
 
 @pytest.mark.parametrize(
-    ("found", "target", "newer"),
+    ("found", "expected"),
     [
-        pytest.param("1.2.0", "1.2.0", False, id="equal"),
-        pytest.param("1.1.0", "1.2.0", False, id="older minor"),
-        pytest.param("1.2.0", "1.10.0", False, id="older minor numerically"),
-        pytest.param("0.9.9", "1.0.0", False, id="older major"),
-        pytest.param("1.2.1", "1.2.0", True, id="newer patch"),
-        pytest.param("1.3.0", "1.2.0", True, id="newer minor"),
-        pytest.param("1.10.0", "1.9.0", True, id="newer minor numerically"),
-        pytest.param(None, "1.0.0", False, id="missing reads as 1.0.0"),
-        pytest.param("", "1.0.0", False, id="empty reads as 1.0.0"),
-        pytest.param("  1.3.0 ", "1.2.0", True, id="whitespace is ignored"),
+        pytest.param("1.2.0", "1.2.0", id="dotted"),
+        pytest.param(None, "1.0.0", id="missing reads as 1.0.0"),
+        pytest.param("", "1.0.0", id="empty reads as 1.0.0"),
+        pytest.param("  1.3.0 ", "1.3.0", id="whitespace is ignored"),
     ],
 )
-def test_newer_in_major_classifies_within_the_major(
-    found: str | None, target: str, newer: bool
+def test_schema_version_of_reads_a_document_version(
+    found: str | None, expected: str
 ) -> None:
-    """Verify a version is newer only by minor or patch within the target's major."""
-    assert newer_in_major("thing", found, target) is newer
+    """Verify a missing version reads as 1.0.0 and surrounding space is ignored."""
+    assert schema_version_of(found) == expected
+
+
+@pytest.mark.parametrize("found", ["abc", "1.x.0", "latest"])
+def test_schema_version_of_rejects_a_version_that_is_not_dotted(found: str) -> None:
+    """Verify a version that is not dotted integers is a `ValueError`."""
+    with pytest.raises(ValueError, match="expected dotted integers"):
+        schema_version_of(found)
+
+
+@pytest.mark.parametrize(
+    ("found", "target"),
+    [
+        pytest.param("1.2.0", "1.2.0", id="equal"),
+        pytest.param("1.1.0", "1.2.0", id="older minor"),
+        pytest.param("0.9.9", "1.0.0", id="older major"),
+        pytest.param("1.2.1", "1.2.0", id="newer patch"),
+        pytest.param("1.10.0", "1.9.0", id="newer minor"),
+    ],
+)
+def test_refuse_newer_major_admits_the_same_or_an_older_major(
+    found: str, target: str
+) -> None:
+    """Verify a document of the build's major, newer or not, is not refused."""
+    refuse_newer_major("thing", found, target)
 
 
 @pytest.mark.parametrize("found", ["2.0.0", "2.0.1", "10.0.0"])
-def test_newer_in_major_refuses_a_newer_major(found: str) -> None:
+def test_refuse_newer_major_refuses_a_newer_major(found: str) -> None:
     """Verify a newer major raises the upgrade error naming the document."""
     with pytest.raises(CstarSchemaTooNewError, match="Upgrade cstar-ocean") as ex:
-        newer_in_major("thing", found, "1.9.0")
+        refuse_newer_major("thing", found, "1.9.0")
 
     assert (ex.value.application, ex.value.found, ex.value.target) == (
         "thing",
@@ -598,19 +617,12 @@ def test_newer_in_major_refuses_a_newer_major(found: str) -> None:
     assert ex.value.unknown == ()
 
 
-def test_newer_in_major_names_a_missing_version_in_the_error() -> None:
+def test_refuse_newer_major_names_a_missing_version_in_the_error() -> None:
     """Verify a missing version is reported as the 1.0.0 it reads as."""
     with pytest.raises(CstarSchemaTooNewError) as ex:
-        newer_in_major("thing", None, "0.5.0")
+        refuse_newer_major("thing", schema_version_of(None), "0.5.0")
 
     assert ex.value.found == "1.0.0"
-
-
-@pytest.mark.parametrize("found", ["abc", "1.x.0", "latest"])
-def test_newer_in_major_rejects_a_version_that_is_not_dotted(found: str) -> None:
-    """Verify a version that is not dotted integers is a `ValueError`."""
-    with pytest.raises(ValueError, match="expected dotted integers"):
-        newer_in_major("thing", found, "1.0.0")
 
 
 @pytest.mark.parametrize(

@@ -663,7 +663,8 @@ def preload_run_record(context: typer.Context, run_id: str) -> str:
     ------
     typer.BadParameter
         - Raised when the run-id is invalid, no `WorkplanRun` exists for it, or
-          its record cannot be read (one a newer cstar-ocean wrote)
+          its record cannot be read (one a newer cstar-ocean wrote that this
+          build cannot read)
     """
     repo = TrackingRepository()
     try:
