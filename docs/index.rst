@@ -136,6 +136,15 @@ C-Star is built with these principles in mind:
 
 .. toctree::
     :maxdepth: 1
+    :caption: Managing Runs
+    :hidden:
+
+    runs/monitoring
+    runs/pre_run_resume
+    Moving runs <runs/moving/index>
+
+.. toctree::
+    :maxdepth: 1
     :caption: The C-Star Catalog and Wizard
     :hidden:
 
@@ -143,15 +152,6 @@ C-Star is built with these principles in mind:
     wizard/launching
     wizard/blueprints
     wizard/workplans
-
-.. toctree::
-    :maxdepth: 1
-    :caption: Managing Runs
-    :hidden:
-
-    runs/monitoring
-    runs/pre_run_resume
-    Moving runs <runs/moving/index>
 
 .. toctree::
     :maxdepth: 1
