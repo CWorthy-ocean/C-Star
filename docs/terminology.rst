@@ -1,11 +1,6 @@
 Terminology and Concepts
 ========================
 
-The words that come up on every other page of this documentation, grouped by
-where you meet them: the things you describe (applications and blueprints),
-the places C-Star keeps reusable pieces, the things you run (workplans and
-their steps), and the records a run leaves behind.
-
 Applications and blueprints
 ---------------------------
 
