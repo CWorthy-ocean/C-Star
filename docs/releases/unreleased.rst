@@ -57,6 +57,8 @@ Breaking Changes
 
 - Run manifest schema 1.5.0: step definition hashes recorded by an older manifest are dropped when it is read, so a re-entered run skips the edited-step check once; the next run records them again. (`#818 <https://github.com/CWorthy-ocean/C-Star/pull/818>`_)
 - On Anvil and Bouchet, calling ``ROMSSimulation.run()`` from Python without a ``queue_name`` is now refused, because those systems require a queue; it used to submit to the primary queue. (`#821 <https://github.com/CWorthy-ocean/C-Star/pull/821>`_)
+- Workplan files written by this release (wizard output, the bundled templates, a run's transformed workplan) carry ``schema_version: 1.2.0``, which earlier releases reject as an unknown key; run tracking records stay readable by earlier releases. (`#827 <https://github.com/CWorthy-ocean/C-Star/pull/827>`_)
+- ``CSTAR_FF_DEVELOPER_MODE`` no longer enables other feature flags; set ``CSTAR_FF_ORCH_TRX_TIMESPLIT=1`` to turn on automatic time-splitting. (`#827 <https://github.com/CWorthy-ocean/C-Star/pull/827>`_)
 
 
 
@@ -227,6 +229,14 @@ New features
   - A model saved from the wizard is never archived, even when its base spec was.
 
 - ``cstar --version`` prints the newest ucla-roms release this C-Star knows. (`#828 <https://github.com/CWorthy-ocean/C-Star/pull/828>`_)
+- Workplans have a ``schema_version`` (1.2.0); a workplan without one reads as 1.0.0, and one newer than the installed C-Star is refused with a message to upgrade ``cstar-ocean``. (`#827 <https://github.com/CWorthy-ocean/C-Star/pull/827>`_)
+
+  - ``cstar workplan submit``, ``cstar workplan check`` and re-entering a run by ``--run-id`` print the message and exit 2.
+
+- Run tracking records have a ``schema_version`` (1.1.0); a record written by a newer release is reported, naming the record and the upgrade, instead of being skipped silently. (`#827 <https://github.com/CWorthy-ocean/C-Star/pull/827>`_)
+
+  - ``cstar run ls`` prints one warning line per such record and lists the rest; ``cstar run status`` and the other run commands exit 2 with the message.
+
 
 
 
@@ -294,6 +304,9 @@ Bug Fixes
   - Pinning such a release now warns, whether the pin is a release tag or a commit hash that resolves to one.
   - The same warning appears when a ``roms_marbl`` blueprint is validated or run, and when Forge generates its namelist.
   - The warning is also written to the log once per release, so it shows up in Forge run logs and batch output.
+
+- ``cstar workplan submit`` crashed with ``IndexError`` and three tracebacks when a step blueprint failed validation (an unknown key, a forge file from a newer release); it now prints the validation error and exits 2. (`#827 <https://github.com/CWorthy-ocean/C-Star/pull/827>`_)
+- After a failed re-attach, the advice to re-run with ``--clobber`` did not say it deletes a non-ParallelIO step's unjoined outputs, including the restart pieces ``--resume`` continues from; it now names the directory and says to move it aside first to keep them. (`#827 <https://github.com/CWorthy-ocean/C-Star/pull/827>`_)
 
 
 
@@ -366,6 +379,7 @@ Improvements
 
 - A removed setting that used to request a dry run (``CSTAR_CLI_DRY_RUN``) still stops ``cstar admin clean``, ``cstar blueprint migrate`` and ``cstar workplan run`` when it is in the file, not only when exported. (`#825 <https://github.com/CWorthy-ocean/C-Star/pull/825>`_)
 - Removing a corrupt run manifest from an intact run directory no longer cuts the run off from its own step state: the recreated manifest keeps the run's uuid. (`#826 <https://github.com/CWorthy-ocean/C-Star/pull/826>`_)
+- A validation error for a missing field no longer prints the whole enclosing document. (`#827 <https://github.com/CWorthy-ocean/C-Star/pull/827>`_)
 
 
 
@@ -440,4 +454,6 @@ Miscellaneous
 - The Forge model-spec docs explain what each kind of ucla-roms pin (release tag, commit hash, branch) does to the generated namelist, and what happens with a release newer than C-Star knows. (`#828 <https://github.com/CWorthy-ocean/C-Star/pull/828>`_)
 - Docs: the tutorial "Spin-up, continuation and a nested grid" is replaced by "Spin-up, a CDR release and its metrics", a five-step workplan on the wio-toy domain (spin-up, release run with ``continue-from``, CDR metrics) with the wizard's CDR panel, release plots and the reference run's metrics on the page; the old page, its workplan, its two forge blueprints and its two images are removed. (`#807 <https://github.com/CWorthy-ocean/C-Star/pull/807>`_)
 - The tutorial-fixture unit tests now also check the new page's forge blueprints and workplan (current forge blueprint version, release refs rather than commit hashes, the release blueprint starting where the spin-up ends, the metrics step pointing at the release run). (`#807 <https://github.com/CWorthy-ocean/C-Star/pull/807>`_)
+- Workplan schema 1.2.0 is published, with a developer-mode ``cstar workplan schemas`` command that writes it; the bundled workplan templates and the wizard state the version and point editors at the 1.2.0 schema. (`#827 <https://github.com/CWorthy-ocean/C-Star/pull/827>`_)
+- The workplan documentation describes ``schema_version``. (`#827 <https://github.com/CWorthy-ocean/C-Star/pull/827>`_)
 
