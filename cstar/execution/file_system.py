@@ -850,17 +850,16 @@ def symlink_relative(link: Path, target: Path, *, within: Path | None = None) ->
 
 
 def rotate_file(path: Path) -> Path | None:
-    """Rotate an existing file or directory out of the way, logrotate-style.
+    """Rotate an existing file out of the way, logrotate-style.
 
     If `path` exists, it is renamed to the lowest-numbered unused
     `<name>.<i>` sibling (starting at `.1`), so a fresh file can be written
-    at `path` without discarding the previous attempt's content. The rename
-    stays within the parent directory, so nothing is copied.
+    at `path` without discarding the previous attempt's content.
 
     Parameters
     ----------
     path : Path
-        The file or directory to rotate out of the way.
+        The file to rotate out of the way.
 
     Returns
     -------

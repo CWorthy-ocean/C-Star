@@ -3989,6 +3989,10 @@ class TestAttach:
         msg = str(exc_info.value)
         assert str(exe_path) in msg
         assert sim.tidal_forcing.source.location in msg
+        # the advice to clobber warns what it deletes for a non-ParallelIO step
+        assert not sim.use_pio
+        assert f"--clobber deletes {sim.fs_manager.temp_output_dir}" in msg
+        assert "restart pieces; move it aside first" in msg
         mock_partition.assert_not_called()
 
     @mock.patch.object(ROMSExternalCodeBase, "attach")
