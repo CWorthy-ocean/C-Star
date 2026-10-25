@@ -173,8 +173,5 @@ spec of your own catalog.
    :language: yaml
    :lines: 1-36
 
-Working with model specs in Python
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-:class:`~cstar.applications.forge.models.ModelSpec` loads a ``model.yaml``
-into a validated object; see :doc:`../../api-forge`.
+To load a ``model.yaml`` into a validated object from Python, see
+:doc:`../../python`.

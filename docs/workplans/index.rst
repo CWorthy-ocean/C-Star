@@ -329,16 +329,8 @@ upstream dependency are reported together. Nothing is written to disk. If
 the workplan declares :doc:`runtime variables <variables>`, supply them with
 ``--var`` or ``--varfile`` exactly as you would when submitting. Pass
 ``--schema-only`` to validate only the file's structure, for example when
-the referenced blueprints are not available on the current machine.
-
-From Python:
-
-.. code-block:: python
-
-    from cstar.orchestration.models import Workplan
-    from cstar.orchestration.serialization import deserialize
-
-    deserialize("my_workplan.yaml", Workplan)
+the referenced blueprints are not available on the current machine. To
+load and check a workplan from Python, see :doc:`../python`.
 
 Submitting a workplan
 ---------------------

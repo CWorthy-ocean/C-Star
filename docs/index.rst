@@ -166,6 +166,7 @@ C-Star is built with these principles in mind:
     :caption: Reference
     :hidden:
 
+    Using C-Star from Python <python>
     api-blueprint
     api-orchestration
     api-forge

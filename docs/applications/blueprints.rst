@@ -124,15 +124,8 @@ This reads the file, validates it against the application's schema and
 reports every problem it finds: a misspelled field, a missing required
 value, a date that does not parse. It does not check that the files the
 blueprint points at exist. A valid file prints ``The blueprint is valid``.
-
-The same check is available from Python, which is handy in a notebook:
-
-.. code-block:: python
-
-   from cstar.applications.ucla_roms.models import UclaRomsBlueprint
-   from cstar.orchestration.serialization import deserialize
-
-   deserialize("my_blueprint.yaml", UclaRomsBlueprint)
+To check a blueprint from a notebook or script instead, see
+:doc:`../python`.
 
 Running a blueprint
 --------------------
@@ -178,23 +171,5 @@ workplan step does: ``cstar-step.yaml`` holds what the run did and
 single step. Read them with ``cstar run show <working directory>``. See
 :doc:`../runs/moving/manifest`.
 
-Running from Python
-^^^^^^^^^^^^^^^^^^^
-
-The command line is the usual interface, but a blueprint can also be run
-from Python, for example from a notebook or a script of your own. A
-``UclaRomsRunner`` executes a UCLA-ROMS blueprint:
-
-.. code-block:: python
-
-   from cstar.entrypoint.config import JobConfig, ServiceConfiguration
-   from cstar.applications.ucla_roms.app import UclaRomsRunner
-   from cstar.applications.ucla_roms.models import UclaRomsBlueprint
-   from cstar.applications.core import RunnerRequest
-
-   request = RunnerRequest("my_blueprint.yaml", UclaRomsBlueprint)
-   service_cfg = ServiceConfiguration()
-   job_cfg = JobConfig(account_id="your-account-id", walltime="00:90:00", priority="wholenode")
-
-   runner = UclaRomsRunner(request, service_cfg, job_cfg)
-   await runner.execute()
+A blueprint can also be run from Python, for example from a notebook; see
+:doc:`../python`.
