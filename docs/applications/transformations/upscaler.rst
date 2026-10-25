@@ -1,6 +1,6 @@
 .. _upscaler:
 
-Upscaling CDR signals
+Upscaling CDR tracers
 =====================
 
 A carbon dioxide removal (CDR) release is best resolved on a fine grid, but

@@ -12,7 +12,7 @@ fine one and back without any hand-editing in between.
    :maxdepth: 1
 
    Creating initial conditions for a nest <nest_ic>
-   Upscaling CDR signals <upscaler>
+   Upscaling CDR tracers <upscaler>
 
 Both have blueprints of only a few fields, all of them paths into other
 steps' directories, so in a workplan they are written inline: the step says
