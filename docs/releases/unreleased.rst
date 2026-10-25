@@ -226,6 +226,8 @@ New features
   - Loading a blueprint whose model is archived ticks the checkbox and selects that model.
   - A model saved from the wizard is never archived, even when its base spec was.
 
+- ``cstar --version`` prints the newest ucla-roms release this C-Star knows. (`#828 <https://github.com/CWorthy-ocean/C-Star/pull/828>`_)
+
 
 
 
@@ -287,6 +289,12 @@ Bug Fixes
   - A step whose state belongs to another run under the same run-id is launched again rather than reused, with one warning.
 
 - ``cstar admin clean --run-id`` now also removes the run's step state, which it previously left behind. (`#826 <https://github.com/CWorthy-ocean/C-Star/pull/826>`_)
+- A ucla-roms release newer than C-Star knows no longer silently gets the previous release's namelist, which could leave ROMS running on a Fortran default for a new key or stopping without explanation. (`#828 <https://github.com/CWorthy-ocean/C-Star/pull/828>`_)
+
+  - Pinning such a release now warns, whether the pin is a release tag or a commit hash that resolves to one.
+  - The same warning appears when a ``roms_marbl`` blueprint is validated or run, and when Forge generates its namelist.
+  - The warning is also written to the log once per release, so it shows up in Forge run logs and batch output.
+
 
 
 Improvements
@@ -429,4 +437,5 @@ Miscellaneous
 - The model spec docs describe the ``archived`` key and list the archived bundled specs. (`#824 <https://github.com/CWorthy-ocean/C-Star/pull/824>`_)
 - The configuration guide states the skip rule and what ``cstar init`` does with skipped lines. (`#825 <https://github.com/CWorthy-ocean/C-Star/pull/825>`_)
 - The workplan docs describe the refusal under "Re-running a workplan", and the known limitations list a run directory purged in part that keeps its manifest. (`#826 <https://github.com/CWorthy-ocean/C-Star/pull/826>`_)
+- The Forge model-spec docs explain what each kind of ucla-roms pin (release tag, commit hash, branch) does to the generated namelist, and what happens with a release newer than C-Star knows. (`#828 <https://github.com/CWorthy-ocean/C-Star/pull/828>`_)
 
