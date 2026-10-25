@@ -132,6 +132,7 @@ def test_submit_alias_is_the_same_command():
     [["workplan", "ls"], ["workplan", "list"], ["wp", "ls"], ["wp", "list"]],
     ids=lambda argv: " ".join(argv),
 )
+@pytest.mark.filterwarnings("ignore::cstar.base.deprecation.CstarDeprecationWarning")
 def test_aliases_dispatch(build_app, argv):
     """Every alias path reaches the same underlying command."""
 

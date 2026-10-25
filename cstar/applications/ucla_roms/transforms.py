@@ -1005,23 +1005,29 @@ class NestingDirective(OverrideDirective):
         return problems
 
     @classmethod
-    def _warn_deprecated_keys(cls, config: Mapping[str, t.Any]) -> None:
+    def _warn_deprecated_keys(
+        cls, config: Mapping[str, t.Any], step_name: str = ""
+    ) -> None:
         """Announce each deprecated key `config` uses.
 
         Parameters
         ----------
         config : Mapping[str, t.Any]
             This directive's own configuration mapping.
+        step_name : str
+            The step the directive is configured on, named in the message so
+            the user knows which step to edit; empty where it is not known.
         """
+        where = f" (step {step_name!r})" if step_name else ""
         if cls.KEY_BRY_PATH in config:
             deprecated(
-                f"The {cls.key()!r} key {cls.KEY_BRY_PATH!r}",
+                f"The {cls.key()!r} key {cls.KEY_BRY_PATH!r}{where}",
                 repr(cls.KEY_PATH),
                 removal="0.20.0",
             )
         if cls.KEY_RST_PATH in config:
             deprecated(
-                f"The {cls.key()!r} key {cls.KEY_RST_PATH!r}",
+                f"The {cls.key()!r} key {cls.KEY_RST_PATH!r}{where}",
                 f"a {ContinuanceDirective.key()!r} directive with the same "
                 f"{ContinuanceDirective.KEY_PATH!r}",
                 removal="0.20.0",
@@ -1052,7 +1058,7 @@ class NestingDirective(OverrideDirective):
         -------
         Sequence[str]
         """
-        cls._warn_deprecated_keys(config)
+        cls._warn_deprecated_keys(config, step.name)
         problems = list(cls._config_problems(config))
         if cls.KEY_RST_PATH in config and ContinuanceDirective.key() in step.directives:
             problems.append(_rst_path_continue_from_conflict_message(step.name))

@@ -4032,7 +4032,8 @@ def test_collect_directive_problems_allows_boundary_only_nest_from(
     [
         pytest.param(
             {NestingDirective.KEY_BRY_PATH: "prior/bry"},
-            "The 'nest-from' key 'bry_path' is deprecated and stops working in "
+            "The 'nest-from' key 'bry_path' (step 'nested-step') is deprecated and "
+            "stops working in "
             "cstar-ocean 0.20.0; use 'path' instead.",
             id="bry_path",
         ),
@@ -4041,7 +4042,8 @@ def test_collect_directive_problems_allows_boundary_only_nest_from(
                 NestingDirective.KEY_PATH: "prior/bry",
                 NestingDirective.KEY_RST_PATH: "prior/run",
             },
-            "The 'nest-from' key 'rst_path' is deprecated and stops working in "
+            "The 'nest-from' key 'rst_path' (step 'nested-step') is deprecated and "
+            "stops working in "
             "cstar-ocean 0.20.0; use a 'continue-from' directive with the same "
             "'path' instead.",
             id="rst_path",

@@ -1,7 +1,10 @@
 """Tests for `cstar.base.deprecation` and the removal guard over its call sites."""
 
 import ast
+import importlib.util
 import logging
+import textwrap
+import warnings
 from pathlib import Path
 
 import pytest
@@ -10,82 +13,118 @@ from packaging.version import InvalidVersion, Version
 import cstar
 from cstar.base.deprecation import CstarDeprecationWarning, deprecated
 
-CSTAR_ROOT = Path(cstar.__file__).parent
-"""The package source tree the guard reads."""
-RELEASE_NOTES = CSTAR_ROOT.parent / "docs" / "releases"
+REPO_ROOT = Path(cstar.__file__).parent.parent
+"""The checkout: the guard and the release notes are not part of the package."""
+RELEASE_NOTES = REPO_ROOT / "docs" / "releases"
 """One `<version>.rst` per release, written when the release is finalized."""
+CHECK_SCRIPT = REPO_ROOT / "ci" / "check_deprecations.py"
+"""The guard the finalize-release workflow runs."""
+
+if not CHECK_SCRIPT.is_file():
+    pytest.skip("ci/ is not part of this installation", allow_module_level=True)
+
+_SPEC = importlib.util.spec_from_file_location("check_deprecations", CHECK_SCRIPT)
+assert _SPEC is not None and _SPEC.loader is not None
+check_deprecations = importlib.util.module_from_spec(_SPEC)
+_SPEC.loader.exec_module(check_deprecations)
 
 
-def _deprecated_calls() -> list[tuple[str, ast.expr | None]]:
-    """Return `(file:line, removal argument)` for every `deprecated` call in `cstar/`."""
-    calls: list[tuple[str, ast.expr | None]] = []
-    for path in sorted(CSTAR_ROOT.rglob("*.py")):
-        if "tests" in path.relative_to(CSTAR_ROOT).parts:
-            continue
-        for node in ast.walk(ast.parse(path.read_text(), filename=str(path))):
-            if not isinstance(node, ast.Call):
-                continue
-            func = node.func
-            name = func.id if isinstance(func, ast.Name) else getattr(func, "attr", "")
-            if name != deprecated.__name__:
-                continue
-            removal = next((k.value for k in node.keywords if k.arg == "removal"), None)
-            site = f"{path.relative_to(CSTAR_ROOT.parent)}:{node.lineno}"
-            calls.append((site, removal))
-    return calls
-
-
-def _release_being_cut() -> Version:
+def _release_being_cut() -> tuple[int, int, int]:
     """Return the newest release this checkout is, or is finalizing.
 
-    The finalize-release PR adds ``docs/releases/<version>.rst``, so that file
-    is how a checkout knows the release before it is tagged; a tagged build
-    also reports it as its version. A development version (and the ``9999``
-    fallback when no package metadata exists) says nothing about the release.
+    The finalize-release PR adds ``docs/releases/<version>.rst`` and a tagged
+    build reports the release as its version. A development version (and the
+    ``9999`` fallback when no package metadata exists) says nothing about the
+    release.
     """
-    versions = []
+    releases = []
     for notes in RELEASE_NOTES.glob("*.rst"):
         try:
-            versions.append(Version(notes.stem))
-        except InvalidVersion:
+            releases.append(check_deprecations.parse_release(notes.stem))
+        except ValueError:
             continue
-    installed = Version(cstar.__version__)
-    if not (installed.is_devrelease or installed.local or installed.major >= 9999):
-        versions.append(installed)
-    return max(versions)
+    try:
+        installed: Version | None = Version(cstar.__version__)
+    except InvalidVersion:
+        installed = None
+    if installed and not (
+        installed.is_devrelease or installed.local or installed.major >= 9999
+    ):
+        releases.append(check_deprecations.parse_release(installed.base_version))
+    return max(releases, default=(0, 0, 0))
 
 
-DEPRECATED_CALLS = _deprecated_calls()
+DEPRECATION_CALLS = check_deprecations.deprecation_calls()
 
 
-def test_deprecated_calls_are_found() -> None:
-    """Verify the guard below sees the call sites, so it cannot pass vacuously."""
-    assert DEPRECATED_CALLS
+@pytest.mark.parametrize(("site", "removal"), DEPRECATION_CALLS)
+def test_deprecation_is_removed_by_its_release(site: str, removal: ast.expr) -> None:
+    """Verify no deprecation outlives the release it promises to remove it in.
+
+    The finalize-release workflow refuses that release first
+    (``ci/check_deprecations.py``); this fails `main` too once the release is
+    finalized or tagged. The fix is the removal in ``docs/contributing.rst``:
+    drop the old form, and turn its detection into an error naming the
+    migration, never into silence.
+    """
+    release = _release_being_cut()
+    assert not check_deprecations.removal_problem(site, removal, release)
+
+
+def test_guard_reports_due_and_malformed_removals(tmp_path: Path) -> None:
+    """Verify the guard finds the calls, skips tests, and names each problem."""
+    pkg = tmp_path / "cstar"
+    (pkg / "tests").mkdir(parents=True)
+    (pkg / "mod.py").write_text(
+        textwrap.dedent(
+            """\
+            deprecated("a", "b", removal="0.20.0")
+            deprecated("a", "b", removal="0.21.0")
+            deprecated("a", "b", removal=RELEASE)
+            deprecated("a", "b", removal="0.20.1")
+            deprecation_message("a", "b", removal="0.19.0")
+            warnings.deprecated("not ours")
+            """
+        )
+    )
+    (pkg / "tests" / "test_mod.py").write_text(
+        'deprecated("a", "b", removal="0.1.0")\n'
+    )
+
+    calls = check_deprecations.deprecation_calls(pkg)
+    problems = [
+        check_deprecations.removal_problem(site, removal, (0, 20, 0))
+        for site, removal in calls
+    ]
+
+    assert [site for site, _ in calls] == [f"cstar/mod.py:{n}" for n in range(1, 6)]
+    assert "due in this release" in problems[0]
+    assert problems[1] == ""
+    assert "string literal" in problems[2]
+    assert "minor releases" in problems[3]
+    assert "due in this release" in problems[4]
 
 
 @pytest.mark.parametrize(
-    ("site", "removal"), DEPRECATED_CALLS, ids=[site for site, _ in DEPRECATED_CALLS]
+    ("tag", "expected"),
+    [("0.20.0", (0, 20, 0)), ("v0.7.0", (0, 7, 0)), ("0.20.0rc1", (0, 20, 0))],
 )
-def test_deprecation_is_removed_by_its_release(site: str, removal: ast.expr) -> None:
-    """Verify no deprecation outlives the release its warning promises to remove it in.
+def test_guard_parses_release_tags(tag: str, expected: tuple[int, int, int]) -> None:
+    """Verify the tags the finalize workflow accepts parse to their release."""
+    assert check_deprecations.parse_release(tag) == expected
 
-    Fails on the finalize PR of that release (or on its tag). The fix is the
-    removal described in ``docs/contributing.rst``: drop the old form, and turn
-    its detection into an error naming the migration, never into silence.
-    """
-    if not RELEASE_NOTES.is_dir():
-        pytest.skip("release notes are not part of this installation")
-    assert isinstance(removal, ast.Constant) and isinstance(removal.value, str), (
-        f"{site}: pass `removal` to `deprecated` as a string literal"
-    )
-    due = Version(removal.value)
-    assert due.release[2:] == (0,), f"{site}: removals happen in minor releases"
-    cutting = _release_being_cut()
-    assert due > cutting, (
-        f"{site} promises removal in {due}, and {cutting} is being released: "
-        "remove the deprecated form and make its detection an error that names "
-        "the migration (docs/contributing.rst, Deprecations and compatibility)"
-    )
+
+def test_guard_fails_only_the_release_a_deprecation_is_due_in(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Verify the script's exit code for a release before and at the removal."""
+    pkg = tmp_path / "cstar"
+    pkg.mkdir()
+    (pkg / "mod.py").write_text('deprecated("a", "b", removal="0.20.0")\n')
+    monkeypatch.setattr(check_deprecations, "CSTAR_ROOT", pkg)
+
+    assert check_deprecations.main(["0.19.0"]) == 0
+    assert check_deprecations.main(["0.20.0"]) == 1
 
 
 def test_deprecated_warns_and_logs_once(caplog: pytest.LogCaptureFixture) -> None:
@@ -112,3 +151,18 @@ def test_deprecated_warns_per_message() -> None:
         deprecated("The 'x' key", "'y'", removal="0.20.0")
         deprecated("The 'z' key", "'y'", removal="0.20.0")
     assert len(record) == 2
+
+
+def test_deprecated_logs_before_an_error_filter_raises(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Verify the log line is written when warnings are turned into errors."""
+    with (
+        warnings.catch_warnings(),
+        caplog.at_level(logging.WARNING),
+        pytest.raises(CstarDeprecationWarning),
+    ):
+        warnings.simplefilter("error", CstarDeprecationWarning)
+        deprecated("The 'x' key", "'y'", removal="0.20.0")
+
+    assert len(caplog.records) == 1

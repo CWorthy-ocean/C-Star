@@ -28,7 +28,7 @@ help: t.Final[str] = f"""\
 A catalog keeps each blueprint at `blueprints/<application>/<name>.yaml`,
 where the directory is the registered application name (`forge`,
 `ucla_roms`, ...). Older catalogs used other forms, which are still read
-(with a warning) for one more release:
+(with a warning) until C-Star 0.20.0:
 
 - `blueprints/<name>.forge_blueprint.yaml` (a forge blueprint),
 - `blueprints/B_<name>.yaml` (a ucla_roms blueprint),

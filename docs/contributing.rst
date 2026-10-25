@@ -277,11 +277,14 @@ removed layout must not just disappear from listings, and an unknown key
 must not be ignored. Add a ``Removed: <what>; <migration>.`` bullet under
 **Breaking Changes**.
 
-``cstar/tests/unit_tests/base/test_deprecation.py`` makes sure removals happen.
-It reads every ``deprecated`` call under ``cstar/`` and fails once the release
-it names is being cut, which is when ``docs/releases/<release>.rst`` exists
-(the finalize-release pull request adds it) or when the installed version is
-that release. A forgotten removal then stops the release, not the user.
+``ci/check_deprecations.py`` makes sure removals happen. It reads every
+``deprecated`` call under ``cstar/`` (and every ``deprecation_message`` call,
+for text C-Star prints without Python, such as the ``cstar env shell-init``
+function), and the Finalize Release Notes workflow runs it before it opens the
+release pull request: a release that a deprecation is due in is refused until
+the removal lands on ``main``. A forgotten removal then stops the release, not
+the user. ``cstar/tests/unit_tests/base/test_deprecation.py`` runs the same
+check on every pull request against the newest finalized release.
 
 Building the documentation locally
 ----------------------------------

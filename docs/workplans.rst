@@ -1035,7 +1035,7 @@ The command detects whether you run zsh or bash (pass ``zsh`` or ``bash`` to cho
 
 To manage your dotfiles yourself, omit ``--install``: the command prints the function instead, for example ``cstar env shell-init zsh > <file>``, ready to source from your own configuration.
 
-The shell function also accepts the earlier ``cstar workplan cd`` spelling. Regenerate the function after upgrading so that it knows ``cstar run cd``.
+The shell function also accepts the deprecated ``cstar workplan cd`` spelling, with a warning, until C-Star 0.20.0. Regenerate the function after upgrading so that it knows ``cstar run cd``.
 
 
 Gathering Workplan Outputs
