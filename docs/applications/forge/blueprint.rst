@@ -6,7 +6,11 @@ Forge blueprint
 A forge blueprint is the input to Forge, the domain-generation application:
 one YAML file describing the domain you want. Processing it produces every
 input file a UCLA-ROMS simulation needs and a :doc:`UCLA-ROMS blueprint
-<../ucla_roms/blueprint>` that runs it.
+<../ucla_roms/blueprint>` that runs it. The Forge blueprint is particularly
+interesting, in that it encapsulates all of the choices needed to set up and
+run a full ocean model, all in a lightweight YAML file. It is entirely portable
+and shareable: by simply handing a Forge blueprint to a colleague, they can reproduce
+the same model on their own machine.
 
 Most forge blueprints are written by the :doc:`wizard <../../wizard/blueprints>`, which
 assembles one from catalog specs and your choices, then shows the result for
