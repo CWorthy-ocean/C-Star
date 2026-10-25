@@ -389,11 +389,9 @@ def test_all_steps_done(nesting_run: NestingRun) -> None:
 
 
 def test_workplan_status_names_all_steps(nesting_run: NestingRun) -> None:
-    """``cstar workplan status`` succeeds and shows every step as done."""
+    """``cstar run status`` succeeds and shows every step as done."""
     # a wide terminal keeps rich from truncating step names
-    proc = run_cstar(
-        {**nesting_run.env, "COLUMNS": "200"}, "workplan", "status", RUN_ID
-    )
+    proc = run_cstar({**nesting_run.env, "COLUMNS": "200"}, "run", "status", RUN_ID)
     assert proc.returncode == 0, proc.stderr
     for step in STEPS:
         assert step in proc.stdout

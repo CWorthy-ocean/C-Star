@@ -2,7 +2,8 @@
 <!-- Feel free to remove sections irrelevant to this PR or leave the default `N/A` content -->
 
 ## Breaking Changes
-<!-- List any breaking changes to interfaces, changes to inputs or outputs, or procedural changes -->
+<!-- List any breaking changes to interfaces, changes to inputs or outputs, or procedural changes.
+Deprecating something? Add "Deprecated: <what>, removed in <release>; use <replacement>." (see "Deprecations and compatibility" in docs/contributing.rst) -->
 - N/A
 
 ## New Features

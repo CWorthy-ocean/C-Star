@@ -1,11 +1,11 @@
 import typing as t
-import warnings
 from collections.abc import Mapping, Sequence
 from datetime import datetime
 from pathlib import Path
 
 from cstar.applications.core import ArtifactKind, Transform
 from cstar.applications.ucla_roms.models import UclaRomsBlueprint
+from cstar.base.deprecation import deprecated
 from cstar.base.env import get_env_item
 from cstar.base.exceptions import CstarError
 from cstar.base.feature import (
@@ -920,8 +920,9 @@ class NestingDirective(OverrideDirective):
     that restores the historical "nest-from also sets initial conditions"
     behavior by applying a restart-file override directly; it is rejected
     when a `continue-from` directive is also present on the step, since both
-    would set `initial_conditions`. Both deprecated keys emit a
-    `FutureWarning` and a log warning.
+    would set `initial_conditions`. Both deprecated keys are announced by
+    `deprecated` at check and schedule time and again where the directive is
+    applied, and stop working in 0.20.0.
     """
 
     REPLACE_LISTS = True
@@ -1004,6 +1005,29 @@ class NestingDirective(OverrideDirective):
         return problems
 
     @classmethod
+    def _warn_deprecated_keys(cls, config: Mapping[str, t.Any]) -> None:
+        """Announce each deprecated key `config` uses.
+
+        Parameters
+        ----------
+        config : Mapping[str, t.Any]
+            This directive's own configuration mapping.
+        """
+        if cls.KEY_BRY_PATH in config:
+            deprecated(
+                f"The {cls.key()!r} key {cls.KEY_BRY_PATH!r}",
+                repr(cls.KEY_PATH),
+                removal="0.20.0",
+            )
+        if cls.KEY_RST_PATH in config:
+            deprecated(
+                f"The {cls.key()!r} key {cls.KEY_RST_PATH!r}",
+                f"a {ContinuanceDirective.key()!r} directive with the same "
+                f"{ContinuanceDirective.KEY_PATH!r}",
+                removal="0.20.0",
+            )
+
+    @classmethod
     def validate_directives(
         cls, config: Mapping[str, t.Any], step: LiveStep
     ) -> Sequence[str]:
@@ -1012,7 +1036,8 @@ class NestingDirective(OverrideDirective):
         In addition to the config-shape rules in `_config_problems`, rejects
         a `rst_path` config combined with a `continue-from` directive on the
         same step (both would set `initial_conditions`), a conflict that
-        would otherwise only surface on the compute node.
+        would otherwise only surface on the compute node. Announces the
+        deprecated keys, so `cstar workplan check` reports them too.
 
         Parameters
         ----------
@@ -1027,6 +1052,7 @@ class NestingDirective(OverrideDirective):
         -------
         Sequence[str]
         """
+        cls._warn_deprecated_keys(config)
         problems = list(cls._config_problems(config))
         if cls.KEY_RST_PATH in config and ContinuanceDirective.key() in step.directives:
             problems.append(_rst_path_continue_from_conflict_message(step.name))
@@ -1102,15 +1128,7 @@ class NestingDirective(OverrideDirective):
         CstarError
             If a file a listed step's record lists is missing.
         """
-        if self.KEY_BRY_PATH in self._config:
-            msg = (
-                f"{self.key()!r} config key {self.KEY_BRY_PATH!r} is deprecated "
-                f"and will be removed in a future release; use {self.KEY_PATH!r} "
-                "instead."
-            )
-            warnings.warn(msg, FutureWarning, stacklevel=2)
-            log.warning(msg)
-
+        self._warn_deprecated_keys(self._config)
         if problems := self._config_problems(self._config):
             raise NotImplementedError("; ".join(problems))
 
@@ -1126,15 +1144,6 @@ class NestingDirective(OverrideDirective):
         overrides = BoundaryFileTrxAdapter.adapt(boundary_files)
 
         if rst_path := self._config.get(self.KEY_RST_PATH):
-            msg = (
-                f"{self.key()!r} config key {self.KEY_RST_PATH!r} is deprecated "
-                "and will be removed in a future release; use "
-                f"{ContinuanceDirective.key()!r}: {{{ContinuanceDirective.KEY_PATH!r}: "
-                f"{rst_path!r}}} instead."
-            )
-            warnings.warn(msg, FutureWarning, stacklevel=2)
-            log.warning(msg)
-
             rst_search_path = Path(rst_path)
             if restart_file := RestartFile.find(rst_search_path, notfound_ok=False):
                 overrides = {**overrides, **RestartFileTrxAdapter.adapt(restart_file)}

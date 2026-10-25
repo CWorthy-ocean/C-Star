@@ -804,7 +804,7 @@ Once a workplan has been run, the ``cstar run`` commands operate on the run: the
 
 .. note::
 
-   Earlier releases listed these commands under ``cstar workplan`` (``cstar workplan status``, ``log``, ``gather``, ``path``, ``cd``, ``ls`` and ``list``, or ``cstar wp ...``), and called the launch command ``cstar workplan run`` rather than ``cstar workplan submit``. Those spellings still work and run the same command; they are no longer listed in ``--help``.
+   Earlier releases listed these commands under ``cstar workplan`` (``cstar workplan status``, ``log``, ``gather``, ``path``, ``cd``, ``ls`` and ``list``, or ``cstar wp ...``), and called the launch command ``cstar workplan run`` rather than ``cstar workplan submit``. Those spellings still run the same command, after a warning naming the current one; they are no longer listed in ``--help`` and stop working in C-Star 0.20.0.
 
 Checking Workplan Status
 ^^^^^^^^^^^^^^^^^^^^^^^^

@@ -1,5 +1,8 @@
 """Tests for the CLI command aliases (`wp`, `bp`, `list`, `run`) and the `run` group."""
 
+import inspect
+import logging
+import warnings
 from collections.abc import Callable, Generator
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -9,8 +12,10 @@ import typer
 from typer.main import get_command
 from typer.testing import CliRunner, Result
 
+from cstar.base.deprecation import CstarDeprecationWarning, deprecated
 from cstar.cli.blueprint import ALIAS as ALIAS_BLUEPRINT
 from cstar.cli.cli import attach_subcommands
+from cstar.cli.common import common_callback
 from cstar.cli.run import NAME as NAME_RUN
 from cstar.cli.run import RUN_LEVEL_VERBS
 from cstar.cli.run import app as app_run
@@ -31,6 +36,7 @@ from cstar.cli.workplan.run import ALIAS as ALIAS_SUBMIT
 from cstar.cli.workplan.run import COMMAND_SUBMIT
 from cstar.cli.workplan.run import app as app_workplan_run
 from cstar.cli.workplan.status import app as app_status
+from cstar.entrypoint.utils import ARG_RUN_ID, ARG_VAR_LONG, ARG_VARFILE_LONG
 from cstar.orchestration.orchestration import LiveWorkplan
 from cstar.orchestration.tracking import WorkplanRun
 from cstar.tests.unit_tests.orchestration.cli.conftest import FakeEntryPoint
@@ -106,14 +112,17 @@ def test_ls_alias_is_the_same_command():
 
 
 def test_submit_alias_is_the_same_command():
-    """`run` is a second registration of `submit`, not a wrapper, so `--run-id`,
-    `--resume` and the re-entry forms work under both names.
+    """`run` is a second registration of `submit`, wrapped only to announce its
+    deprecation, so `--run-id`, `--resume` and the re-entry forms work under both
+    names.
     """
     (listed,) = app_workplan_run.registered_commands
     alias = next(c for c in app_workplan.registered_commands if c.name == ALIAS_SUBMIT)
 
     assert listed.name == COMMAND_SUBMIT
-    assert alias.callback is listed.callback
+    assert alias.callback is not None
+    assert inspect.unwrap(alias.callback) is listed.callback
+    assert inspect.signature(alias.callback) == inspect.signature(listed.callback)
     assert alias.hidden
     assert not listed.hidden
 
@@ -176,7 +185,10 @@ def test_workplan_spelling_of_a_run_level_verb_is_the_same_command(verb):
     workplan_command = get_command(app_workplan).commands[verb]
 
     assert workplan_command.callback is not None
-    assert workplan_command.callback.__wrapped__ is run_command.callback.__wrapped__
+    assert run_command.callback is not None
+    assert inspect.unwrap(workplan_command.callback) is inspect.unwrap(
+        run_command.callback
+    )
     assert workplan_command.help == run_command.help
     assert [p.name for p in workplan_command.params] == [
         p.name for p in run_command.params
@@ -283,23 +295,77 @@ def invoke(build_app, tmp_path: Path) -> Generator[Callable[[list[str]], Result]
         yield lambda argv: CliRunner().invoke(build_app(), argv)
 
 
-@pytest.mark.parametrize(
-    "argv",
-    [
-        [group, *verb]
-        for group in ("run", "workplan", "wp")
-        for verb in (["status", "x"], ["ls"], ["list"])
-    ],
-    ids=lambda argv: " ".join(argv),
-)
-def test_run_level_verbs_are_silent_under_every_group(invoke, argv):
-    """Both spellings of a run-level verb run the same command with nothing on
-    stderr: neither is deprecated.
-    """
-    result = invoke(argv)
+RUN_LEVEL_ARGV = (["status", "x"], ["ls"], ["list"])
+"""Run-level verbs with arguments that run them to completion under `invoke`."""
+
+
+@pytest.mark.parametrize("argv", RUN_LEVEL_ARGV, ids=" ".join)
+def test_run_level_verbs_are_silent_under_run(invoke, argv, caplog):
+    """`cstar run <verb>` runs with no deprecation."""
+    with warnings.catch_warnings():
+        warnings.simplefilter("error", CstarDeprecationWarning)
+        with caplog.at_level(logging.WARNING):
+            result = invoke(["run", *argv])
 
     assert result.exit_code == 0, result.output
-    assert result.stderr == ""
+    assert not caplog.records
+
+
+@pytest.mark.parametrize(
+    "argv",
+    [[group, *verb] for group in ("workplan", "wp") for verb in RUN_LEVEL_ARGV],
+    ids=" ".join,
+)
+def test_workplan_spelling_of_a_run_level_verb_is_deprecated(invoke, argv, caplog):
+    """`cstar workplan <verb>` still runs the command, after one warning that names
+    the spelling typed, `cstar run <verb>` and the removal release.
+    """
+    group, verb = argv[:2]
+    with pytest.warns(CstarDeprecationWarning), caplog.at_level(logging.WARNING):
+        result = invoke(argv)
+
+    assert result.exit_code == 0, result.output
+    [record] = caplog.records
+    assert record.getMessage() == (
+        f"`cstar {group} {verb}` is deprecated and stops working in cstar-ocean "
+        f"0.20.0; use `cstar run {verb}` instead."
+    )
+
+
+@pytest.mark.parametrize("group", ["workplan", "wp"])
+def test_run_alias_of_submit_is_deprecated(build_app, group, tmp_path, caplog):
+    """`cstar workplan run` names `cstar workplan submit` before `submit` runs (here
+    to its first check, which refuses `--var` with `--varfile`).
+    """
+    varfile = tmp_path / "vars.env"
+    varfile.write_text("a=b\n")
+    argv = [group, ALIAS_SUBMIT, ARG_RUN_ID, "x", ARG_VAR_LONG, "a=b"]
+    argv += [ARG_VARFILE_LONG, str(varfile)]
+    with pytest.warns(CstarDeprecationWarning), caplog.at_level(logging.WARNING):
+        result = CliRunner().invoke(build_app(), argv)
+
+    assert result.exit_code == 2
+    assert "must not be supplied together" in result.output
+    [record] = caplog.records
+    assert record.getMessage() == (
+        f"`cstar {group} {ALIAS_SUBMIT}` is deprecated and stops working in "
+        f"cstar-ocean 0.20.0; use `cstar workplan {COMMAND_SUBMIT}` instead."
+    )
+
+
+def test_cli_reports_a_deprecation_by_its_log_line_alone(monkeypatch, caplog):
+    """The root callback silences the Python warning `deprecated` emits beside its
+    log line, so the terminal shows one line.
+    """
+    monkeypatch.setattr("cstar.cli.common.load_user_config", lambda: None)
+    with warnings.catch_warnings(record=True) as record:
+        warnings.simplefilter("always")
+        common_callback(MagicMock())
+        with caplog.at_level(logging.WARNING):
+            deprecated("The 'x' key", "'y'", removal="0.20.0")
+
+    assert not record
+    assert len(caplog.records) == 1
 
 
 def test_workplan_help_names_the_run_group(build_app):

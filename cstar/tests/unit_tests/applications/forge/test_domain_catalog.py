@@ -797,7 +797,7 @@ class TestBlueprintLayout:
         assert "Blueprint 'zzz' for application 'forge' not found in catalog at" in msg
         assert "Available: a, b, c" in msg
 
-    def test_legacy_layouts_are_readable_with_one_collapsed_warning(
+    def test_legacy_layouts_are_readable_with_one_warning_per_grace(
         self, tmp_path, caplog
     ):
         root = tmp_path / "cat"
@@ -837,18 +837,18 @@ class TestBlueprintLayout:
         catalog.legacy_blueprints.clear()
         assert len(catalog.legacy_blueprints) == 4
 
+        # the 0.16.0 layouts and the application's earlier name are separate
+        # deprecations, each naming the migration and the removal release
         warnings = [r for r in caplog.records if r.levelno == logging.WARNING]
-        assert len(warnings) == 1
-        text = warnings[0].getMessage()
-        for entry in (
-            "forge/old",
-            "ucla_roms/flat",
-            "ucla_roms/nested",
-            "ucla_roms/earlier",
-        ):
-            assert entry in text
-        assert f"cstar admin migrate-catalog {catalog.catalog_root}" in text
-        assert "blueprints/<application>/<name>.yaml" in text
+        layouts, renamed = (w.getMessage() for w in warnings)
+        for entry in ("forge/old", "ucla_roms/flat", "ucla_roms/nested"):
+            assert entry in layouts
+        assert "blueprints/<application>/<name>.yaml" in layouts
+        assert "ucla_roms/earlier" in renamed
+        assert "ucla_roms/earlier" not in layouts
+        for text in (layouts, renamed):
+            assert f"cstar admin migrate-catalog {catalog.catalog_root}" in text
+            assert "stops working in cstar-ocean 0.20.0" in text
 
     def test_current_layout_shadows_legacy_entry(self, tmp_path, caplog):
         root = tmp_path / "cat"
@@ -955,10 +955,9 @@ class TestBlueprintLayout:
         assert legacy[0][2].samefile(flat)
         assert legacy[1][2].samefile(old)
         warnings = [r for r in caplog.records if r.levelno == logging.WARNING]
-        assert len(warnings) == 1
-        text = warnings[0].getMessage()
-        assert f"{old}, ignored: duplicate" in text
-        assert f"{flat}, ignored: duplicate" not in text
+        layouts, renamed = (w.getMessage() for w in warnings)
+        assert f"{old}, ignored: duplicate" in renamed
+        assert f"({flat})" in layouts
 
     def test_bundled_catalog_logs_no_legacy_warning(self, caplog):
         with caplog.at_level(logging.WARNING, logger="cstar.catalog.domain_catalog"):

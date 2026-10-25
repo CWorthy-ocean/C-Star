@@ -29,6 +29,7 @@ from cstar.applications.ucla_roms.transforms import (
 from cstar.applications.ucla_roms.transforms import (
     log as transforms_log,
 )
+from cstar.base.deprecation import CstarDeprecationWarning
 from cstar.base.env import ENV_CSTAR_PROJECT_HOME, ENV_CSTAR_RUNID, FLAG_OFF
 from cstar.base.exceptions import CstarError, CstarExpectationFailed
 from cstar.base.feature import ENV_FF_ORCH_TRX_TIMESPLIT
@@ -2238,13 +2239,15 @@ def test_nesting_directive_bry_path_deprecated_matches_path(
     bp_via_path = deserialize(path_transform(step)[0].blueprint_path, UclaRomsBlueprint)
 
     with (
-        caplog.at_level(logging.WARNING, logger=TRANSFORMS_LOGGER_NAME),
+        caplog.at_level(logging.WARNING),
         pytest.warns(FutureWarning, match="bry_path"),
     ):
         bry_transform = NestingDirective({NestingDirective.KEY_BRY_PATH: str(bry_dir)})
 
-    records = [r for r in caplog.records if r.name == TRANSFORMS_LOGGER_NAME]
-    assert any("bry_path" in r.getMessage() for r in records)
+    assert any(
+        "bry_path" in r.getMessage() and "0.20.0" in r.getMessage()
+        for r in caplog.records
+    )
 
     bp_via_bry = deserialize(bry_transform(step)[0].blueprint_path, UclaRomsBlueprint)
 
@@ -2283,7 +2286,7 @@ def test_nesting_directive_rst_path_deprecated_still_applies_restart(
     step.blueprint_overrides.clear()
 
     with (
-        caplog.at_level(logging.WARNING, logger=TRANSFORMS_LOGGER_NAME),
+        caplog.at_level(logging.WARNING),
         pytest.warns(FutureWarning, match="rst_path"),
     ):
         transform = NestingDirective(
@@ -2293,8 +2296,10 @@ def test_nesting_directive_rst_path_deprecated_still_applies_restart(
             }
         )
 
-    records = [r for r in caplog.records if r.name == TRANSFORMS_LOGGER_NAME]
-    assert any("rst_path" in r.getMessage() for r in records)
+    assert any(
+        "rst_path" in r.getMessage() and "0.20.0" in r.getMessage()
+        for r in caplog.records
+    )
 
     steps = transform(step)
     bp_after = deserialize(steps[0].blueprint_path, UclaRomsBlueprint)
@@ -2399,15 +2404,15 @@ def test_nesting_directive_rst_path_alone_has_no_boundary_source(
 ) -> None:
     """Verify `rst_path` alone (a recognized key, but not itself a boundary
     source) is rejected for lacking a boundary source, not treated as an
-    unrecognized key.
-
-    Config-shape validation runs before the deprecated-key warnings, so no
-    `FutureWarning` is emitted for this rejected config.
+    unrecognized key. The deprecated key is still announced.
     """
     rst_dir = tmp_path / "rst"
     rst_dir.mkdir()
 
-    with pytest.raises(NotImplementedError, match="supported"):
+    with (
+        pytest.raises(NotImplementedError, match="supported"),
+        pytest.warns(FutureWarning, match="rst_path"),
+    ):
         NestingDirective({NestingDirective.KEY_RST_PATH: str(rst_dir)})
 
 
@@ -4020,6 +4025,64 @@ def test_collect_directive_problems_allows_boundary_only_nest_from(
     )
 
     assert collect_directive_problems([step]) == []
+
+
+@pytest.mark.parametrize(
+    ("config", "expected"),
+    [
+        pytest.param(
+            {NestingDirective.KEY_BRY_PATH: "prior/bry"},
+            "The 'nest-from' key 'bry_path' is deprecated and stops working in "
+            "cstar-ocean 0.20.0; use 'path' instead.",
+            id="bry_path",
+        ),
+        pytest.param(
+            {
+                NestingDirective.KEY_PATH: "prior/bry",
+                NestingDirective.KEY_RST_PATH: "prior/run",
+            },
+            "The 'nest-from' key 'rst_path' is deprecated and stops working in "
+            "cstar-ocean 0.20.0; use a 'continue-from' directive with the same "
+            "'path' instead.",
+            id="rst_path",
+        ),
+    ],
+)
+def test_collect_directive_problems_announces_deprecated_nest_from_keys(
+    tmp_path: Path,
+    hello_world_bp_path: Path,
+    config: dict[str, str],
+    expected: str,
+) -> None:
+    """Verify a deprecated `nest-from` key is announced at check and schedule
+    time (`collect_directive_problems`), naming its replacement and removal
+    release, while the workplan is still accepted.
+
+    Parameters
+    ----------
+    tmp_path : Path
+        The pytest-provided temporary directory.
+    hello_world_bp_path : Path
+        Fixture returning the path to a blueprint file; `collect_directive_problems`
+        never reads it, so any existing file works.
+    config : dict[str, str]
+        The `nest-from` configuration.
+    expected : str
+        The deprecation message.
+    """
+    step = LiveStep(
+        name="nested-step",
+        application="roms_marbl",
+        blueprint=hello_world_bp_path.as_posix(),
+        working_dir=tmp_path / "step-root",
+        directives={NestingDirective.key(): config},
+    )
+
+    with pytest.warns(CstarDeprecationWarning) as record:
+        problems = collect_directive_problems([step])
+
+    assert problems == []
+    assert [str(w.message) for w in record] == [expected]
 
 
 def test_collect_directive_problems_rejects_malformed_continue_from_timestamp(

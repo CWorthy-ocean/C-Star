@@ -18,6 +18,7 @@ import dotenv
 import pytest
 
 from cstar.base.additional_code import AdditionalCode
+from cstar.base.deprecation import _WARNED
 from cstar.base.discretization import Discretization
 from cstar.base.env import (
     ENV_CSTAR_CACHE_HOME,
@@ -143,6 +144,18 @@ def _clear_newer_release_log() -> Generator[None]:
     _LOGGED_NEWER_THAN_KNOWN.clear()
     yield
     _LOGGED_NEWER_THAN_KNOWN.clear()
+
+
+@pytest.fixture(autouse=True)
+def _clear_deprecation_warnings() -> Generator[None]:
+    """Forget which deprecations were announced around each unit test.
+
+    `deprecated` warns once per message per process, so one test's warning
+    would otherwise hide the next one's.
+    """
+    _WARNED.clear()
+    yield
+    _WARNED.clear()
 
 
 @pytest.fixture(autouse=True)

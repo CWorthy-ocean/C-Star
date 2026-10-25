@@ -121,6 +121,8 @@ def shell_function(shell: Shell) -> str:
     <run-id> [step]` and its `cstar workplan cd` (or `wp`) spelling, and passes
     everything else, including `--help` and an incomplete command, through to
     the executable. Every spelling looks the directory up with `cstar run path`.
+    The `workplan` spellings are deprecated with the other `cstar workplan`
+    copies of the run verbs; drop them here when those are removed (0.20.0).
     A `cstar` alias is removed first, as it would break the function definition.
 
     The log level is pinned to WARNING for the lookup so that no INFO or DEBUG

@@ -73,7 +73,9 @@ Several sources can be joined by separating them with ``;`` in a single
 ``step`` or ``path`` value; boundary files from every listed source are
 combined, in the order given.
 
-Two keys are deprecated:
+Two keys are deprecated. ``cstar workplan check`` and ``cstar workplan
+submit`` print a warning for each, and they stop working in C-Star 0.20.0
+(the wizard rewrites both when it loads a workplan):
 
 - ``bry_path`` was an alias for ``path``; use ``path`` instead.
 - ``rst_path`` additionally set the step's initial conditions from a restart

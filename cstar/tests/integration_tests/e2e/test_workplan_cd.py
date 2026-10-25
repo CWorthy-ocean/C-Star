@@ -1,8 +1,8 @@
-"""Tier 2: finding a run's directory with ``cstar workplan path`` and ``cstar workplan cd``.
+"""Tier 2: finding a run's directory with ``cstar run path`` and ``cstar run cd``.
 
 A one-step ``hello_world`` workplan runs through the real CLI, so no ROMS is compiled
-and the run takes seconds. ``workplan path`` must print the recorded directory and
-nothing else on stdout; ``workplan cd`` only changes directory through the shell
+and the run takes seconds. ``run path`` must print the recorded directory and
+nothing else on stdout; ``run cd`` only changes directory through the shell
 function from ``cstar env shell-init``, so that is exercised in real shells.
 """
 
@@ -177,25 +177,25 @@ def shell(request: pytest.FixtureRequest) -> str:
 
 
 def test_run_directory_is_the_recorded_output_path(finished_run: FinishedRun) -> None:
-    """The run directory is the only thing ``workplan path`` prints."""
+    """The run directory is the only thing ``run path`` prints."""
     assert Path(finished_run.run_dir).is_dir()
     assert os.path.realpath(finished_run.run_dir) == os.path.realpath(
         finished_run.data_home / "workplan_runs" / RUN_ID
     )
 
-    proc = run_cstar(finished_run.env, "workplan", "path", RUN_ID)
+    proc = run_cstar(finished_run.env, "run", "path", RUN_ID)
 
     assert proc.returncode == 0, proc.stderr
     assert proc.stdout == f"{finished_run.run_dir}\n"
 
 
 def test_step_directory_is_the_workplans_working_dir(finished_run: FinishedRun) -> None:
-    """With a step, ``workplan path`` prints the step's working directory."""
+    """With a step, ``run path`` prints the step's working directory."""
     assert os.path.realpath(finished_run.step_dir) == os.path.realpath(
         step_root(finished_run.data_home, RUN_ID, STEP)
     )
 
-    proc = run_cstar(finished_run.env, "workplan", "path", RUN_ID, STEP)
+    proc = run_cstar(finished_run.env, "run", "path", RUN_ID, STEP)
 
     assert proc.returncode == 0, proc.stderr
     assert proc.stdout == f"{finished_run.step_dir}\n"
@@ -203,7 +203,7 @@ def test_step_directory_is_the_workplans_working_dir(finished_run: FinishedRun) 
 
 def test_path_accepts_the_run_id_in_any_case(finished_run: FinishedRun) -> None:
     """The run-id is looked up as the repository stores it, not as typed."""
-    proc = run_cstar(finished_run.env, "workplan", "path", RUN_ID.upper())
+    proc = run_cstar(finished_run.env, "run", "path", RUN_ID.upper())
 
     assert proc.returncode == 0, proc.stderr
     assert proc.stdout == f"{finished_run.run_dir}\n"
@@ -211,7 +211,7 @@ def test_path_accepts_the_run_id_in_any_case(finished_run: FinishedRun) -> None:
 
 def test_path_unknown_run_prints_nothing_on_stdout(finished_run: FinishedRun) -> None:
     """A failed lookup leaves stdout empty so ``cd "$(...)"`` cannot misfire."""
-    proc = run_cstar(finished_run.env, "workplan", "path", "no-such-run")
+    proc = run_cstar(finished_run.env, "run", "path", "no-such-run")
 
     assert proc.returncode != 0
     assert proc.stdout == ""
@@ -299,7 +299,7 @@ def test_cd_without_the_shell_function_explains_itself(
     args = [RUN_ID, STEP] if with_step else [RUN_ID]
     expected = finished_run.step_dir if with_step else finished_run.run_dir
 
-    proc = run_cstar(finished_run.env, "workplan", "cd", *args)
+    proc = run_cstar(finished_run.env, "run", "cd", *args)
 
     assert proc.returncode == 1
     assert proc.stdout == ""

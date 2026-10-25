@@ -238,7 +238,7 @@ def test_dependency_failure_propagates(shape_root: Path) -> None:
         assert "Hello, C" in run.log_text("C")
 
         # a wide terminal keeps rich from truncating step names; it prints their slugs
-        proc = run_cstar({**run.env, "COLUMNS": "200"}, "workplan", "status", run_id)
+        proc = run_cstar({**run.env, "COLUMNS": "200"}, "run", "status", run_id)
         assert proc.returncode == 0, proc.stderr
         assert all(slugify(step) in proc.stdout for step in shape), proc.stdout
     finally:
@@ -315,9 +315,9 @@ def test_generated_chunk_chain_runs_in_order(
 
 
 def test_run_alias_launches_and_reenters(shape_root: Path, cstar_shim: Path) -> None:
-    """``workplan run``, the earlier name of ``workplan submit``, still launches a run
-    and re-enters it through the run's transformed workplan, without a notice, and
-    ``workplan log`` still prints a step's log.
+    """``workplan run``, the deprecated name of ``workplan submit``, still launches a
+    run and re-enters it through the run's transformed workplan, after one line
+    naming ``submit``, and ``workplan log`` still prints a step's log.
 
     The re-entry finds every step ``Done`` and launches none of them, so each step
     prints its hello once.
@@ -348,7 +348,10 @@ def test_run_alias_launches_and_reenters(shape_root: Path, cstar_shim: Path) -> 
             tails = run_log_tails(run.data_home, run_id)
             pytest.fail(f"workplan run exited {proc.returncode}\n{output}\n{tails}")
         assert SCHEDULED_MESSAGE in proc.stdout, output
-        assert "submit" not in proc.stderr, output
+        notice = "`cstar workplan run` is deprecated and stops working in cstar-ocean"
+        assert proc.stderr.count(notice) == 1, output
+        assert "use `cstar workplan submit` instead" in proc.stderr, output
+        assert "CstarDeprecationWarning" not in proc.stderr, output
 
         run_dir = run.data_home / "workplan_runs" / run_id
         (transformed,) = run_dir.glob("*_transformed.yaml")
@@ -362,7 +365,7 @@ def test_run_alias_launches_and_reenters(shape_root: Path, cstar_shim: Path) -> 
         for step in shape:
             assert run.log_text(step).count(f"Hello, {step}") == 1, step
 
-        # `workplan log` is the earlier spelling of `run log`
+        # `workplan log` is the deprecated spelling of `run log`
         log = run_cstar(env, "workplan", "log", run_id, "A")
         assert log.returncode == 0, log.stderr
         assert "Hello, A" in log.stdout, log.stdout
