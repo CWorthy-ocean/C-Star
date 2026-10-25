@@ -321,6 +321,9 @@ Bug Fixes
 
   - The Forge run log no longer mixes a local-time header with UTC entries.
 
+- Loading a run's status no longer fails intermittently with ``OSError`` while another step of the same run is updating the run's record. (`#831 <https://github.com/CWorthy-ocean/C-Star/pull/831>`_)
+- Run listings no longer drop a run, or report its record as unreadable, while that run is updating its record. (`#831 <https://github.com/CWorthy-ocean/C-Star/pull/831>`_)
+
 
 
 
@@ -395,6 +398,7 @@ Improvements
 - Removing a corrupt run manifest from an intact run directory no longer cuts the run off from its own step state: the recreated manifest keeps the run's uuid. (`#826 <https://github.com/CWorthy-ocean/C-Star/pull/826>`_)
 - A validation error for a missing field no longer prints the whole enclosing document. (`#827 <https://github.com/CWorthy-ocean/C-Star/pull/827>`_)
 - Writing a field out at its default value, or leaving it out, no longer counts as an edit to a blueprint or a workplan step. (`#829 <https://github.com/CWorthy-ocean/C-Star/pull/829>`_)
+- A run record that cannot be read or written while a step's status is recorded now logs a warning instead of stopping status loading; keeping the record of a run never stops the run. (`#831 <https://github.com/CWorthy-ocean/C-Star/pull/831>`_)
 
 
 
