@@ -59,6 +59,12 @@ Breaking Changes
 - On Anvil and Bouchet, calling ``ROMSSimulation.run()`` from Python without a ``queue_name`` is now refused, because those systems require a queue; it used to submit to the primary queue. (`#821 <https://github.com/CWorthy-ocean/C-Star/pull/821>`_)
 - Workplan files written by this release (wizard output, the bundled templates, a run's transformed workplan) carry ``schema_version: 1.2.0``, which earlier releases reject as an unknown key; run tracking records stay readable by earlier releases. (`#827 <https://github.com/CWorthy-ocean/C-Star/pull/827>`_)
 - ``CSTAR_FF_DEVELOPER_MODE`` no longer enables other feature flags; set ``CSTAR_FF_ORCH_TRX_TIMESPLIT=1`` to turn on automatic time-splitting. (`#827 <https://github.com/CWorthy-ocean/C-Star/pull/827>`_)
+- Hashes recorded by 0.17.0 and earlier are untagged, so they are not compared with this release's hashes: (`#829 <https://github.com/CWorthy-ocean/C-Star/pull/829>`_)
+
+  - The first ``--run-id`` re-entry of a run recorded by 0.17.0 does not check its Done steps for edits. It warns, naming them, and records their definitions again, so later re-entries are checked.
+  - A forge blueprint file saved before this release is not integrity-checked until it is saved again, and its first save stamps a new ``generated_by``.
+  - An emitted ``ucla_roms`` blueprint whose recorded producer predates this release lists as ``unverified`` in the catalog's blueprint outputs until its forge entry is run again.
+
 
 
 
@@ -307,6 +313,10 @@ Bug Fixes
 
 - ``cstar workplan submit`` crashed with ``IndexError`` and three tracebacks when a step blueprint failed validation (an unknown key, a forge file from a newer release); it now prints the validation error and exits 2. (`#827 <https://github.com/CWorthy-ocean/C-Star/pull/827>`_)
 - After a failed re-attach, the advice to re-run with ``--clobber`` did not say it deletes a non-ParallelIO step's unjoined outputs, including the restart pieces ``--resume`` continues from; it now names the directory and says to move it aside first to keep them. (`#827 <https://github.com/CWorthy-ocean/C-Star/pull/827>`_)
+- A field added to a blueprint schema with a default changed the content hash of every existing blueprint, so the re-entry guard would refuse unchanged Done steps. (`#829 <https://github.com/CWorthy-ocean/C-Star/pull/829>`_)
+- The re-entry guard refused an edited Done step whose workplan sets ``workflow_overrides: {clobber: true}``, although that step runs again anyway. (`#829 <https://github.com/CWorthy-ocean/C-Star/pull/829>`_)
+- Forge's warning for a user-provided file with an untagged legacy hash named the hash itself as its scheme. (`#829 <https://github.com/CWorthy-ocean/C-Star/pull/829>`_)
+- The forge blueprints of the tiny nesting and upscaling tutorial carried stale content hashes, so ``cstar forge run`` on them warned that they had been hand-edited. (`#829 <https://github.com/CWorthy-ocean/C-Star/pull/829>`_)
 
 
 
@@ -380,6 +390,7 @@ Improvements
 - A removed setting that used to request a dry run (``CSTAR_CLI_DRY_RUN``) still stops ``cstar admin clean``, ``cstar blueprint migrate`` and ``cstar workplan run`` when it is in the file, not only when exported. (`#825 <https://github.com/CWorthy-ocean/C-Star/pull/825>`_)
 - Removing a corrupt run manifest from an intact run directory no longer cuts the run off from its own step state: the recreated manifest keeps the run's uuid. (`#826 <https://github.com/CWorthy-ocean/C-Star/pull/826>`_)
 - A validation error for a missing field no longer prints the whole enclosing document. (`#827 <https://github.com/CWorthy-ocean/C-Star/pull/827>`_)
+- Writing a field out at its default value, or leaving it out, no longer counts as an edit to a blueprint or a workplan step. (`#829 <https://github.com/CWorthy-ocean/C-Star/pull/829>`_)
 
 
 
@@ -456,4 +467,6 @@ Miscellaneous
 - The tutorial-fixture unit tests now also check the new page's forge blueprints and workplan (current forge blueprint version, release refs rather than commit hashes, the release blueprint starting where the spin-up ends, the metrics step pointing at the release run). (`#807 <https://github.com/CWorthy-ocean/C-Star/pull/807>`_)
 - Workplan schema 1.2.0 is published, with a developer-mode ``cstar workplan schemas`` command that writes it; the bundled workplan templates and the wizard state the version and point editors at the 1.2.0 schema. (`#827 <https://github.com/CWorthy-ocean/C-Star/pull/827>`_)
 - The workplan documentation describes ``schema_version``. (`#827 <https://github.com/CWorthy-ocean/C-Star/pull/827>`_)
+- The shipped forge blueprints (bundled, the docs example, the tutorials and the developer walk-throughs) are restamped with the new hash. (`#829 <https://github.com/CWorthy-ocean/C-Star/pull/829>`_)
+- The workplans guide describes which re-entries are checked; the published run manifest 1.5.0 and step record 1.3.0 schemas are regenerated (both unreleased). (`#829 <https://github.com/CWorthy-ocean/C-Star/pull/829>`_)
 
