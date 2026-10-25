@@ -317,6 +317,10 @@ Bug Fixes
 - The re-entry guard refused an edited Done step whose workplan sets ``workflow_overrides: {clobber: true}``, although that step runs again anyway. (`#829 <https://github.com/CWorthy-ocean/C-Star/pull/829>`_)
 - Forge's warning for a user-provided file with an untagged legacy hash named the hash itself as its scheme. (`#829 <https://github.com/CWorthy-ocean/C-Star/pull/829>`_)
 - The forge blueprints of the tiny nesting and upscaling tutorial carried stale content hashes, so ``cstar forge run`` on them warned that they had been hand-edited. (`#829 <https://github.com/CWorthy-ocean/C-Star/pull/829>`_)
+- C-Star log entries stay in local time after Forge loads, instead of switching to UTC partway through a run. (`#832 <https://github.com/CWorthy-ocean/C-Star/pull/832>`_)
+
+  - The Forge run log no longer mixes a local-time header with UTC entries.
+
 
 
 
@@ -469,4 +473,5 @@ Miscellaneous
 - The workplan documentation describes ``schema_version``. (`#827 <https://github.com/CWorthy-ocean/C-Star/pull/827>`_)
 - The shipped forge blueprints (bundled, the docs example, the tutorials and the developer walk-throughs) are restamped with the new hash. (`#829 <https://github.com/CWorthy-ocean/C-Star/pull/829>`_)
 - The workplans guide describes which re-entries are checked; the published run manifest 1.5.0 and step record 1.3.0 schemas are regenerated (both unreleased). (`#829 <https://github.com/CWorthy-ocean/C-Star/pull/829>`_)
+- Fixes 7 ``test_log`` unit tests that failed in a full test run whenever the local date differed from the UTC date (evenings in US time zones; never on CI, which runs in UTC). (`#832 <https://github.com/CWorthy-ocean/C-Star/pull/832>`_)
 
