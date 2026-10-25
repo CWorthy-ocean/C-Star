@@ -1,6 +1,7 @@
 import enum
 import logging
 import sys
+import time
 import typing as t
 from pathlib import Path
 
@@ -41,6 +42,28 @@ class TraceLogger(logging.Logger):
 
 logging.addLevelName(TRACE_LOG_LEVEL, TRACE_LOG_NAME)
 logging.setLoggerClass(TraceLogger)
+
+
+def make_formatter(fmt: str = DEFAULT_LOG_FORMAT) -> logging.Formatter:
+    """Create a formatter that stamps log entries in local time.
+
+    Some dependencies (copernicusmarine, arcosparse) set the class-wide
+    `logging.Formatter.converter` to `time.gmtime` when imported, which would
+    switch every C-Star timestamp to UTC partway through a process. Pinning the
+    converter on the instance keeps C-Star's own entries in local time.
+
+    Parameters
+    ----------
+    fmt : str
+        The log format string.
+
+    Returns
+    -------
+    logging.Formatter
+    """
+    formatter = logging.Formatter(fmt)
+    formatter.converter = time.localtime
+    return formatter
 
 
 def register_file_handler(
@@ -100,7 +123,7 @@ def register_file_handler(
     if not existing_fh:
         file_handler = logging.FileHandler(file_path)
         file_handler.setLevel(level)
-        file_handler.setFormatter(logging.Formatter(fmt=fmt))
+        file_handler.setFormatter(make_formatter(fmt))
         logger.addHandler(file_handler)
         logger.info(f"FileHandler registered to write to: {file_path}")
         existing_fh = file_handler
@@ -144,13 +167,15 @@ def get_logger(
     logger.propagate = False
 
     logger.setLevel(level)
-    formatter = logging.Formatter(fmt)
+    formatter = make_formatter(fmt)
 
     # Set up root logger if not already configured
     root = logging.getLogger()
 
     if not root.hasHandlers():
-        logging.basicConfig(level=logging.WARNING, format=DEFAULT_LOG_FORMAT)
+        stderr_handler = logging.StreamHandler()
+        stderr_handler.setFormatter(make_formatter())
+        logging.basicConfig(level=logging.WARNING, handlers=[stderr_handler])
 
     # Ensure root handlers only handle WARNING and higher
     for handler in root.handlers:
