@@ -31,7 +31,7 @@ Before you start
 
 The top of the file describes the workplan itself. The ``name`` doubles as the
 :term:`run ID`, the handle you use to check on the run later. ``state: draft`` means
-the file may still change; see :doc:`../workplans` for the ``validated`` state.
+the file may still change; see :doc:`../workplans/index` for the ``validated`` state.
 
 Everything else is the list of ``steps``. A step is one thing to run: it has a
 ``name``, the ``application`` that runs it, and the ``blueprint`` that application
@@ -241,4 +241,4 @@ A workplan is also how a run reaches the compute nodes of an HPC system.
 There, ``cstar workplan submit`` submits each step as a scheduler job and
 returns, and the ``cstar run`` commands work the same way from the login node.
 Each step can ask for its own cores, queue and walltime through
-``compute_overrides``; see :doc:`../workplans` and :doc:`../hpc`.
+``compute_overrides``; see :doc:`../workplans/index` and :doc:`../hpc`.

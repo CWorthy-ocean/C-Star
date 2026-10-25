@@ -45,7 +45,7 @@ precedence over the file, and ``cstar init`` tells you when that is the case.
 
 These are the defaults for every step of a workplan; a step can override
 them, for example to send Forge steps to a general-purpose queue and ROMS
-steps to an MPI queue. See the compute overrides on the :doc:`workplans`
+steps to an MPI queue. See the compute overrides on the :doc:`workplans/index`
 page.
 
 What each system requires, and where a job goes when ``CSTAR_SLURM_QUEUE``
@@ -198,5 +198,5 @@ The wizard from a login node
 ----------------------------
 
 Serve the wizard on the login node and forward its port from your laptop, or
-build blueprints on your laptop and copy them over; see :doc:`wizard`. Forge
+build blueprints on your laptop and copy them over; see :doc:`wizard/launching`. Forge
 blueprints do not depend on the machine they were written on.

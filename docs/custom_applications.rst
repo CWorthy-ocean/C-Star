@@ -164,7 +164,7 @@ Declaring Products
 
 A *product* is a file a step leaves that a user keeps: an output, a restart file, the
 namelist the model read, a log. Each step records its products in its step record,
-``cstar-step.yaml`` (see :doc:`workplans`), with a kind, a path relative to the step
+``cstar-step.yaml`` (see :doc:`runs/moving/manifest`), with a kind, a path relative to the step
 root, a size in bytes and metadata. An application declares where its products land by
 overriding ``artifacts`` on its `ApplicationDefinition`, which returns a list of
 `ArtifactSpec` (see :class:`cstar.applications.core.ArtifactSpec`). The default returns

@@ -44,7 +44,7 @@ Work down the sections:
 - **Review and export**: read through the resolved YAML, then **Save** it
   to your catalog or **Download** ``forge_blueprint.yaml``.
 
-:doc:`../wizard` describes each section. If you would rather skip the wizard, a
+:doc:`../wizard/blueprints` describes each section. If you would rather skip the wizard, a
 ready-made blueprint for this domain ships with the documentation:
 :download:`forge-blueprint-example.wio-toy.yaml <../forge-blueprint-example.wio-toy.yaml>`.
 
@@ -87,7 +87,7 @@ it is, in a line like this:
 full option set: regenerate only some inputs, overwrite existing files, tune
 dask, or change the working directory. It also ends by printing that path and
 the command that runs it (``Run it with:  cstar blueprint run <path>``). See
-:doc:`../blueprints/forge`.
+:doc:`../applications/forge/blueprint`.
 
 3. Run the simulation
 ---------------------
@@ -104,7 +104,7 @@ output. The blueprint has no ``working_dir``, so results land under
 
 Both steps use the same command; the blueprint's ``application`` field
 decides which application handles it. The :doc:`UCLA-ROMS blueprint example
-<tutorial_bp>` walks through what is in the blueprint Forge just wrote. The
+<../applications/ucla_roms/example>` walks through what is in the blueprint Forge just wrote. The
 :doc:`next page <workplan>` runs these same two steps as a workplan, so you
 submit once and let C-Star carry the blueprint from one step to the next.
 

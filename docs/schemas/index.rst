@@ -103,6 +103,6 @@ UCLA-ROMS runs with MARBL.
 Forge Blueprint
 ~~~~~~~~~~~~~~~
 
-The `forge` blueprint (see :doc:`../forge/index`) configures the domain-generation
+The `forge` blueprint (see :doc:`../applications/forge/index`) configures the domain-generation
 application that produces UCLA-ROMS blueprints; its JSON schema is not yet published
 here.

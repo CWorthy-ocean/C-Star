@@ -9,7 +9,7 @@ dropdowns, the resolver merges the chosen ones (plus your edits) into a
 blueprint, and the blueprint records the resulting values in full. Editing a
 spec afterwards does not change blueprints already built from it.
 
-Specs live in the :doc:`catalog <../catalog>` as one directory per entry,
+Specs live in the :doc:`catalog <../../catalog>` as one directory per entry,
 ``<Kind>/<name>/<file>.yaml``. C-Star bundles a small set of each kind to
 start from; save your own from the wizard's Review section or copy a bundled
 directory and edit it.
@@ -28,7 +28,7 @@ DomainSpec (``DomainSpec/<name>/Domain.yaml``)
    number of vertical levels, which boundaries are open, the processor
    layout, and a default run window. The bundled ``wio-toy`` domain is:
 
-   .. literalinclude:: ../../cstar/catalog/bundled/DomainSpec/wio-toy/Domain.yaml
+   .. literalinclude:: ../../../cstar/catalog/bundled/DomainSpec/wio-toy/Domain.yaml
       :language: yaml
 
 ForcingSpec (``ForcingSpec/<name>/Forcing.yaml``)
@@ -101,7 +101,7 @@ A ``model.yaml`` has this shape:
    and, like ``none``, rejects a forcing selection that asks for BGC
    forcing. The tracer counts and the ``cdr_lite_output`` stream are derived
    from the generated CDR forcing at build time; see
-   :doc:`../developers/forge_internals`.
+   :doc:`../../developers/forge_internals`.
 
 ``archived``
    Optional, default ``false``. An archived spec stays fully usable: blueprints
@@ -118,7 +118,7 @@ A ``model.yaml`` has this shape:
    namelist. Templates are pinned to a commit and, per file, to a checksum of
    its content, so a model spec always renders with the templates it was
    validated against even as C-Star's bundled copy moves on. Details are in
-   :doc:`../developers/forge_templates`.
+   :doc:`../../developers/forge_templates`.
 
    The ucla-roms pin decides which namelist Forge writes. A release tag
    (``commit: 0.12.0``) selects that release's namelist exactly; a commit hash
@@ -169,7 +169,7 @@ dropdown lists them only when "Show archived" is checked (loading a blueprint
 that uses one checks the box for you). ``archived`` works the same way in a
 spec of your own catalog.
 
-.. literalinclude:: ../../cstar/catalog/bundled/ModelSpec/roms-marbl-0.12-default/model.yaml
+.. literalinclude:: ../../../cstar/catalog/bundled/ModelSpec/roms-marbl-0.12-default/model.yaml
    :language: yaml
    :lines: 1-36
 
@@ -177,4 +177,4 @@ Working with model specs in Python
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 :class:`~cstar.applications.forge.models.ModelSpec` loads a ``model.yaml``
-into a validated object; see :doc:`../api-forge`.
+into a validated object; see :doc:`../../api-forge`.

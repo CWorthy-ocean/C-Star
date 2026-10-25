@@ -36,7 +36,7 @@ machine, which is what makes a C-Star simulation shareable and reproducible.
 
 A simple ocean modeling project moves through three basic steps:
 
-1. **Describe the domain.** The Forge :ref:`wizard <wizard>`, a form that runs in your
+1. **Describe the domain.** The Forge :doc:`wizard <wizard/launching>`, a form that runs in your
    browser or as a Jupyter notebook, walks you through choosing a model configuration, a region and
    grid, forcing datasets, and a run window. It writes a *forge blueprint*.
 2. **Generate the inputs.** Running that forge blueprint downloads the source
@@ -100,12 +100,6 @@ C-Star is built with these principles in mind:
     Installing C-Star <installation>
     Registering for datasets <data_access>
     configuration
-
-.. toctree::
-    :maxdepth: 1
-    :caption: Terminology and Concepts
-    :hidden:
-
     terminology
 
 .. toctree::
@@ -120,30 +114,52 @@ C-Star is built with these principles in mind:
 
 .. toctree::
     :maxdepth: 2
-    :caption: User Guide
+    :caption: Applications and Blueprints
     :hidden:
 
-    blueprints
-    workplans
+    applications/index
+    General blueprint concepts <applications/blueprints>
+    UCLA-ROMS <applications/ucla_roms/index>
+    Forge <applications/forge/index>
+    Data transformations <applications/transformations/index>
+    Analytics <applications/analytics/index>
+
+.. toctree::
+    :maxdepth: 1
+    :caption: Workplans and Directives
+    :hidden:
+
+    General workplan concepts <workplans/index>
+    workplans/directives
+    workplans/references
+    workplans/variables
+
+.. toctree::
+    :maxdepth: 1
+    :caption: The C-Star Catalog and Wizard
+    :hidden:
+
     catalog
-    wizard
+    wizard/launching
+    wizard/blueprints
+    wizard/workplans
 
 .. toctree::
     :maxdepth: 1
-    :caption: Domain generation (Forge)
+    :caption: Managing Runs
     :hidden:
 
-    forge/index
-    forge/specs
-    forge/source_datasets
+    runs/monitoring
+    runs/pre_run_resume
+    Moving runs <runs/moving/index>
 
 .. toctree::
     :maxdepth: 1
-    :caption: Deployment
+    :caption: Deployments
     :hidden:
 
-    machines
     hpc
+    machines
 
 .. toctree::
     :maxdepth: 1

@@ -8,13 +8,13 @@ inputs it stages each source the blueprint lists (the blueprint's
 ``datasets`` field): downloading it into the shared source-data cache,
 verifying that a file you were asked to provide is present, or, for sources
 ROMS-Tools reads directly, doing nothing. The cache location is per machine;
-``cstar forge show-paths`` prints it, and :doc:`../hpc` explains where it goes.
+``cstar forge show-paths`` prints it, and :doc:`../../hpc` explains where it goes.
 Handlers check that files exist, never that they are current, so a cached
 dataset is reused until you remove it.
 
 The datasets themselves, their variables and their citations are documented
 in `ROMS-Tools <https://roms-tools.readthedocs.io/en/latest/datasets.html>`__.
-Registration steps for GLORYS and TPXO are in :doc:`../data_access`.
+Registration steps for GLORYS and TPXO are in :doc:`../../data_access`.
 
 Downloaded automatically
 ------------------------
@@ -118,5 +118,5 @@ submitting a job, run the blueprint with the later stages skipped:
 
 The Python interface behind this is
 :class:`~cstar.applications.forge.source_datasets.SourceDatasets`; see
-:doc:`../developers/forge_source_data` for how sources are registered and
+:doc:`../../developers/forge_source_data` for how sources are registered and
 how to add one.

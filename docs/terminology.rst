@@ -1,8 +1,13 @@
 Terminology and Concepts
 ========================
 
-Definitions
------------
+The words that come up on every other page of this documentation, grouped by
+where you meet them: the things you describe (applications and blueprints),
+the places C-Star keeps reusable pieces, the things you run (workplans and
+their steps), and the records a run leaves behind.
+
+Applications and blueprints
+---------------------------
 
 .. glossary::
 
@@ -21,6 +26,7 @@ Definitions
       Smaller applications (``nest_ic``, ``upscaler``, ``cdr_metrics``,
       ``plotter``, ``hello_world``) support nesting and CDR workflows and
       serve as examples for :doc:`writing your own <custom_applications>`.
+      See :doc:`applications/index`.
 
     Blueprint
       A YAML file holding everything an application needs to produce its
@@ -35,13 +41,13 @@ Definitions
       Blueprints are complete and self-contained. The same blueprint produces
       the same result on any supported machine, and can be checked
       (``cstar blueprint check``) and run (``cstar blueprint run``) from the
-      command line. See :doc:`blueprints`.
+      command line. See :doc:`applications/blueprints`.
 
     UCLA-ROMS blueprint
       The blueprint of the ``ucla_roms`` application: a runnable
       description of one simulation. Forge writes one at the end of domain
       generation; you can also write one by hand for input files you already
-      have. See :doc:`blueprints/ucla_roms`.
+      have. See :doc:`applications/ucla_roms/blueprint`.
 
     Forge
       C-Star's domain-generation application. From a forge blueprint it
@@ -51,7 +57,7 @@ Definitions
       compile-time and run-time settings, and emits the UCLA-ROMS blueprint
       that runs the result. Forge is driven by ``cstar blueprint run`` like
       any other application, with ``cstar forge run`` exposing its extra
-      options. See :doc:`forge/index`.
+      options. See :doc:`applications/forge/index`.
 
     Forge blueprint
       The blueprint of the ``forge`` application: the single input to domain
@@ -60,7 +66,20 @@ Definitions
       for one domain, with the values written out in full rather than
       referenced, so it keeps working even if the catalog entries it was
       built from change. Usually written by the wizard. See
-      :doc:`blueprints/forge`.
+      :doc:`applications/forge/blueprint`.
+
+    Working directory
+      Where an application writes its results. A blueprint's ``working_dir``
+      names it; omitted, it is
+      ``CSTAR_DATA_HOME/blueprint_runs/<application>/<name>``. A workplan
+      lays out one directory per step under the run's directory,
+      ``CSTAR_DATA_HOME/workplan_runs/<run id>/tasks/<step>``. See
+      :doc:`hpc`.
+
+The catalog and the wizard
+--------------------------
+
+.. glossary::
 
     Spec
       A reusable, named piece of a domain description stored in the catalog.
@@ -78,7 +97,7 @@ Definitions
       * a **CdrSpec** describes optional carbon dioxide removal forcing.
 
       The wizard presents specs as dropdowns, and can save your own edited
-      versions under new names. See :doc:`forge/specs`.
+      versions under new names. See :doc:`applications/forge/specs`.
 
     Catalog
       Where specs and saved blueprints live. A catalog is a stack of plain
@@ -89,11 +108,18 @@ Definitions
       See :doc:`catalog`.
 
     Wizard
-      Forge's point-and-click interface for building a forge blueprint,
-      served as a web page by ``cstar forge wizard`` or opened as a Jupyter
-      notebook. It walks through model, domain, forcing, run setup and
-      advanced settings, shows the resolved blueprint for review, and saves
-      or downloads it. See :doc:`wizard`.
+      C-Star's point-and-click interface, served as a web page by
+      ``cstar wizard`` or opened as a Jupyter notebook. Its Blueprint page
+      builds a forge blueprint section by section (model, domain, forcing,
+      run setup, output and advanced settings), shows the resolved YAML for
+      review, and saves or downloads it. Its Workplan page composes steps
+      into a workplan, checks it as you edit, and submits it. See
+      :doc:`wizard/launching`.
+
+Workplans and their steps
+-------------------------
+
+.. glossary::
 
     Workplan
       A YAML file listing one or more **steps** to execute as a unit. Each
@@ -106,7 +132,7 @@ Definitions
 
       Steps can override values in their blueprint, pass information to one
       another through directives, and consume a blueprint that an earlier
-      step generates. See :doc:`workplans`.
+      step generates. See :doc:`workplans/index`.
 
     Step
       One unit of work in a workplan: an application, a blueprint, optional
@@ -131,6 +157,12 @@ Definitions
       it runs the steps as local processes. It is ephemeral and can be
       stopped and restarted without loss of state.
 
+    Worker
+      The process that executes a single blueprint on a compute resource. It
+      reads the blueprint and runs the application exactly as the blueprint
+      specifies. Each workplan step, and each ``cstar blueprint run``, is a
+      worker.
+
     Run ID
       The identifier of a run. By default it is the workplan's ``name``, which
       must already be a slug (ASCII lowercase letters, digits, ``-`` and ``_``), so
@@ -149,22 +181,19 @@ Definitions
       attached run's directory is. See
       :ref:`workplan_external_runs`.
 
-    Attach
-      Registering a run directory that arrived from elsewhere in this
-      machine's tracking with ``cstar run attach``. It writes a tracking
-      record and never writes into the run: an attached run is inspected and
-      referenced, not relaunched. It is read-only, which refuses the commands
-      that write into its directory, when it is in the project runs area or
-      belongs to another user, and owned otherwise. See
-      :ref:`workplan_attach_run`.
+    Pre-run
+      Performing every stage before the model launch -- staging inputs,
+      cloning and compiling the codebases, partitioning inputs, and
+      generating and validating the namelist -- and then exiting without
+      launching the model (``--pre-run``). It leaves the working directory
+      in place, so a later run of the same blueprint or step attaches to it
+      and launches the model. Only applications that declare themselves
+      pre-runnable support it. See :doc:`runs/pre_run_resume`.
 
-    Promote
-      Placing a run in the project runs area (``cstar/runs`` under
-      ``CSTAR_PROJECT_HOME``) with ``cstar run promote``: a copy of what its
-      manifest names (records, logs and products; the large build and
-      per-rank files on request), a link to the run where it is, or a move
-      of the whole directory, after which the run is tracked as attached. The copy keeps the run's
-      uuid. See :ref:`workplan_promote_run`.
+What a run leaves behind
+------------------------
+
+.. glossary::
 
     Run manifest
       ``cstar-run.yaml`` in a run's directory: the run's identity (its run ID
@@ -173,14 +202,14 @@ Definitions
       run depends on outside itself. The scheduling command writes it;
       ``cstar run status`` and ``cstar run show`` refresh it for a run
       scheduled on this machine; an attached run is read as it is. See
-      :doc:`workplans`.
+      :doc:`runs/moving/manifest`.
 
     Step record
       ``cstar-step.yaml`` in a step's working directory, written by the step
       process when it shuts down: its outcome, start and finish times, system,
       package versions, what ran it (the scheduler, host and granted
       allocation), **products** and errors. The run manifest folds each
-      step's record in. See :doc:`workplans`.
+      step's record in. See :doc:`runs/moving/manifest`.
 
     Attempt
       One scheduling of a workplan into a run: ``cstar workplan submit``, or a
@@ -189,35 +218,30 @@ Definitions
       once every step is terminal. An attempt that reads the workplan file
       carries its inputs -- the workplan as given, its variables, the plan it
       prepared and each step's blueprint -- into ``attempts/<start time>/`` in
-      the run directory. See :doc:`workplans`.
+      the run directory. See :doc:`runs/moving/manifest`.
 
     Product
       A file a step left, listed in its step record with a kind (see the
       kinds table in :doc:`custom_applications`), its path, its size in bytes,
-      a content digest once one is recorded, and metadata. See :doc:`workplans`.
+      a content digest once one is recorded, and metadata. See
+      :doc:`runs/moving/manifest`.
 
-    Pre-run
-      Performing every stage before the model launch -- staging inputs,
-      cloning and compiling the codebases, partitioning inputs, and
-      generating and validating the namelist -- and then exiting without
-      launching the model (``--pre-run``). It leaves the working directory
-      in place, so a later run of the same blueprint or step attaches to it
-      and launches the model. Only applications that declare themselves
-      pre-runnable support it. See :ref:`workplan_pre_run`.
+    Attach
+      Registering a run directory that arrived from elsewhere in this
+      machine's tracking with ``cstar run attach``. It writes a tracking
+      record and never writes into the run: an attached run is inspected and
+      referenced, not relaunched. It is read-only, which refuses the commands
+      that write into its directory, when it is in the project runs area or
+      belongs to another user, and owned otherwise. See
+      :doc:`runs/moving/attach`.
 
-    Worker
-      The process that executes a single blueprint on a compute resource. It
-      reads the blueprint and runs the application exactly as the blueprint
-      specifies. Each workplan step, and each ``cstar blueprint run``, is a
-      worker.
-
-    Working directory
-      Where an application writes its results. A blueprint's ``working_dir``
-      names it; omitted, it is
-      ``CSTAR_DATA_HOME/blueprint_runs/<application>/<name>``. A workplan
-      lays out one directory per step under the run's directory,
-      ``CSTAR_DATA_HOME/workplan_runs/<run id>/tasks/<step>``. See
-      :doc:`hpc`.
+    Promote
+      Placing a run in the project runs area (``cstar/runs`` under
+      ``CSTAR_PROJECT_HOME``) with ``cstar run promote``: a copy of what its
+      manifest names (records, logs and products; the large build and
+      per-rank files on request), a link to the run where it is, or a move
+      of the whole directory, after which the run is tracked as attached. The copy keeps the run's
+      uuid. See :doc:`runs/moving/promote`.
 
 Example HPC deployment
 ----------------------

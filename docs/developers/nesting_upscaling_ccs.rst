@@ -85,7 +85,7 @@ RIVR2O) and MBL CO2, plus SRTM15 bathymetry. They come in three ways:
   expected if a staged file is missing.
 
 ``cstar forge show-paths`` prints the cache location. See
-:doc:`../forge/source_datasets` for the layout each staged source expects and
+:doc:`../applications/forge/source_datasets` for the layout each staged source expects and
 :doc:`../data_access` for registration.
 
 Run it

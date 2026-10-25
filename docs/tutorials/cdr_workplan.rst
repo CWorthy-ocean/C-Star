@@ -107,7 +107,7 @@ in it before the model runs: the time step is halved, to resolve the
 adjustment from the reanalysis initial state more carefully. The override
 keys follow the UCLA-ROMS blueprint: ``namelist_overrides`` is keyed by
 namelist group and setting, and ``runtime_params`` would hold the run window
-(see :doc:`../blueprints/ucla_roms`). The blueprint itself is not edited;
+(see :doc:`../applications/ucla_roms/blueprint`). The blueprint itself is not edited;
 the overrides are applied to a copy when the step starts, and that copy is
 kept in the step's ``work`` directory. The spin-up leaves behind a restart
 file at the end of 2012-01-01.
@@ -137,7 +137,7 @@ Each path uses a placeholder for another step's directory:
 ``input_data/`` holds the grid it wrote), and ``{{output_dir: release}}`` is
 the release run's output. Placeholders are filled in when the workplan is
 submitted, which is why the step depends on both steps it points into.
-:doc:`../blueprints/cdr_metrics` describes the application.
+:doc:`../applications/analytics/cdr_metrics` describes the application.
 
 Run it
 ------
@@ -238,8 +238,8 @@ in the same workplan, so a long spin-up is done once and reused
 (:ref:`workplan_external_runs`). Long runs are usually split into chunks that
 each continue from the previous one, and the wizard's Workplan page has a
 generator for that; the metrics step takes every chunk's output in order
-(:doc:`../blueprints/cdr_metrics`). A release is best resolved on a fine grid
+(:doc:`../applications/analytics/cdr_metrics`). A release is best resolved on a fine grid
 nested inside a coarser one, with its effect passed back up to the parent:
 :doc:`nesting_upscaling` walks through that chain, ending with the CDR metrics
-of both grids. :doc:`../workplans` and :doc:`../workplans/directives`
+of both grids. :doc:`../workplans/index` and :doc:`../workplans/directives`
 describe every option.

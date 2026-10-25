@@ -86,7 +86,7 @@ directory and stops with instructions if they are absent.
 - **GLODAP** mapped climatology as a biogeochemical initial and boundary
   source.
 
-:doc:`forge/source_datasets` lists every source Forge knows about, which are
+:doc:`applications/forge/source_datasets` lists every source Forge knows about, which are
 downloaded automatically, which stream at generation time, and the expected
 file layout for each user-staged one.
 

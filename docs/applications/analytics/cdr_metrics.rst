@@ -1,7 +1,7 @@
 .. _blueprints-cdr-metrics:
 
-CDR metrics blueprint
-=====================
+CDR metrics
+===========
 
 The ``cdr_metrics`` application computes the carbon dioxide removal (CDR)
 metrics of a release from the ``_cdr`` output of UCLA-ROMS runs with MARBL: the CO2
@@ -45,7 +45,7 @@ One domain gives the metrics of a single run. Several domains, listed child
 first, are combined into one set of metrics. In a workplan the whole blueprint
 is usually given inline, with ``blueprint: inline`` and ``domains`` under the
 step's ``blueprint_overrides``, as in the examples below. The published JSON
-schema is listed under :doc:`../schemas/index`.
+schema is listed under :doc:`../../schemas/index`.
 
 Example
 -------
@@ -188,5 +188,5 @@ footprint, and the child's own inventory no longer holds it. A parent must be a 
 run writing ``_cdr`` output; a CDR-lite parent writes ``_cdrtrc`` output, which the
 metrics cannot use.
 
-The :doc:`nesting and upscaling tutorial <../tutorials/nesting_upscaling>` runs a
+The :doc:`nesting and upscaling tutorial <../../tutorials/nesting_upscaling>` runs a
 nested experiment end to end, with this step last.

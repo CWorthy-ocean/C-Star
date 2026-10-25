@@ -31,7 +31,7 @@ name; there are no version numbers or identifiers beyond it. The older flat
 earlier name, are still read for one release, with a warning;
 ``cstar admin migrate-catalog <root>`` moves them into the current layout. Each
 file under ``blueprints/<application>/`` is one blueprint, so sidecar files
-(``settings_B_*.yaml``, ``_grid.yaml``) do not belong there. :doc:`forge/specs`
+(``settings_B_*.yaml``, ``_grid.yaml``) do not belong there. :doc:`applications/forge/specs`
 describes what each spec kind contains.
 
 Migrating an older catalog

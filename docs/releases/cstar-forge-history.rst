@@ -6,7 +6,7 @@ cstar-forge release history
 These are the release notes of the standalone ``cstar-forge`` package, up
 through its final release as an independent project, **0.8.2**. They are
 kept here as a historical record; ``cstar-forge`` was subsequently merged
-into C-Star (see :doc:`../forge/index`), and its releases now follow
+into C-Star (see :doc:`../applications/forge/index`), and its releases now follow
 C-Star's own release history. Module paths, CLI commands, and package names
 below reflect the standalone repository at the time of each release, not the
 merged layout described elsewhere in these docs.

@@ -6,9 +6,9 @@ Forge blueprint
 A forge blueprint is the input to Forge, the domain-generation application:
 one YAML file describing the domain you want. Processing it produces every
 input file a UCLA-ROMS simulation needs and a :doc:`UCLA-ROMS blueprint
-<ucla_roms>` that runs it.
+<../ucla_roms/blueprint>` that runs it.
 
-Most forge blueprints are written by the :doc:`wizard <../wizard>`, which
+Most forge blueprints are written by the :doc:`wizard <../../wizard/blueprints>`, which
 assembles one from catalog specs and your choices, then shows the result for
 review. You can also start from a saved blueprint and edit the YAML directly.
 Values are written out in full rather than referenced back to the catalog, so
@@ -44,7 +44,7 @@ normally omits), a forge blueprint has these sections:
    list of ``location`` and ``content_hash`` entries, in the order ROMS reads
    them; the basenames must be distinct. It is normally absent, and a saved
    blueprint then has no such key: the ``carbonate-sensitivity-from``
-   :doc:`workplan directive <../workplans/directives>` supplies the files at
+   :doc:`workplan directive <../../workplans/directives>` supplies the files at
    run time, from the ``_cdrgas`` output of an earlier UCLA-ROMS step
    with MARBL. When it is present, each ``location`` must exist on the machine running Forge (a
    relative one resolves against the directory of the forge blueprint file):
@@ -58,7 +58,7 @@ normally omits), a forge blueprint has these sections:
    ROMS then computes the sensitivities itself.
 ``datasets``
    The list of source datasets Forge must stage before generating inputs
-   (derived from ``forcing``; see :doc:`../forge/source_datasets`).
+   (derived from ``forcing``; see :doc:`source_datasets`).
 ``model_settings``
    The resolved UCLA-ROMS settings, one section per namelist group plus the
    compile-time ``cppdefs`` switches. These start from the model spec's
@@ -91,13 +91,13 @@ Example
 -------
 
 The bundled toy domain used in the :doc:`end-to-end tutorial
-<../tutorials/end_to_end>`:
+<../../tutorials/end_to_end>`:
 
-.. literalinclude:: ../forge-blueprint-example.wio-toy.yaml
+.. literalinclude:: ../../forge-blueprint-example.wio-toy.yaml
    :language: yaml
    :lines: 1-60
 
-:download:`Download the full file <../forge-blueprint-example.wio-toy.yaml>`.
+:download:`Download the full file <../../forge-blueprint-example.wio-toy.yaml>`.
 
 Checking validity
 -----------------
@@ -153,7 +153,7 @@ What Forge writes
 -----------------
 
 Everything goes under the blueprint's working directory: by default
-``CSTAR_DATA_HOME/blueprint_runs/forge/<name>`` (see :doc:`../hpc`), or the
+``CSTAR_DATA_HOME/blueprint_runs/forge/<name>`` (see :doc:`../../hpc`), or the
 ``working_dir`` you set, used exactly as written.
 
 .. code-block:: text
