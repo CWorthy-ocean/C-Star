@@ -173,3 +173,68 @@ def test_tiny_blueprints_leave_the_sources_to_forge(docs: Path, step: str) -> No
     blueprint = ForgeBlueprint.from_yaml(path)
     staged = {rd.dataset_key for rd in blueprint.forcing.resolved_datasets.values()}
     assert sorted(staged) == blueprint.datasets
+
+
+CDR_TUTORIAL = "tutorials"
+"""The spin-up, CDR release and metrics tutorial: two forge blueprints and a workplan."""
+CDR_FORGE_FILES = {
+    "make_spinup": "forge_blueprint_wio_spinup.yaml",
+    "make_release": "forge_blueprint_wio_release.yaml",
+}
+
+
+@pytest.mark.parametrize("name", CDR_FORGE_FILES.values())
+def test_cdr_tutorial_blueprint_loads_at_the_current_schema(
+    docs: Path, name: str
+) -> None:
+    """Each blueprint validates and declares the current forge blueprint version."""
+    path = docs / CDR_TUTORIAL / name
+    declared = yaml.safe_load(path.read_text())["forge_blueprint_version"]
+    assert declared == FORGE_BLUEPRINT_VERSION
+
+    blueprint = ForgeBlueprint.from_yaml(path)
+    assert blueprint.application == "forge"
+    for repo in PINNED_REPOS:
+        ref = getattr(blueprint.code, repo).commit
+        assert ref and not is_commit_hash(ref), f"code.{repo}.commit is {ref!r}"
+
+
+def test_cdr_tutorial_workplan_names_its_blueprints(docs: Path) -> None:
+    """The workplan's forge steps point at the two committed blueprints, by relative path."""
+    workplan_path = docs / CDR_TUTORIAL / "workplan_cdr.yaml"
+    workplan = deserialize(workplan_path, Workplan)
+    forge = {
+        s.name: s.blueprint_path for s in workplan.steps if s.application == "forge"
+    }
+    assert {k: Path(v).name for k, v in forge.items()} == CDR_FORGE_FILES
+    assert all((workplan_path.parent / v).is_file() for v in forge.values())
+
+
+def test_cdr_tutorial_release_continues_where_the_spinup_ends(docs: Path) -> None:
+    """``release`` continues from ``spinup``'s last restart, which is the release blueprint's start.
+
+    The directive sets the start date from the restart it finds, so a spin-up that ends
+    elsewhere would quietly shift the release run.
+    """
+    spinup = ForgeBlueprint.from_yaml(
+        docs / CDR_TUTORIAL / CDR_FORGE_FILES["make_spinup"]
+    )
+    release = ForgeBlueprint.from_yaml(
+        docs / CDR_TUTORIAL / CDR_FORGE_FILES["make_release"]
+    )
+    assert spinup.run.end_date == release.run.start_date
+    assert spinup.cdr.mode == "none"
+    assert release.cdr.mode == "simple"
+
+    workplan = deserialize(docs / CDR_TUTORIAL / "workplan_cdr.yaml", Workplan)
+    steps = {s.name: s for s in workplan.steps}
+    continue_from = t.cast(
+        "dict[str, t.Any]", steps["release"].directives[ContinuanceDirective.key()]
+    )
+    assert continue_from == {"step": "spinup"}
+    domains = t.cast(
+        "dict[str, dict[str, t.Any]]", steps["metrics"].blueprint_overrides["domains"]
+    )
+    (domain,) = domains.values()
+    assert domain["grid"]["location"].startswith("{{root_dir: make_release}}/")
+    assert domain["sources"] == [{"location": "{{output_dir: release}}"}]
