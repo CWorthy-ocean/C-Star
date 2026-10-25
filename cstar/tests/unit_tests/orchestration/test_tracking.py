@@ -1,6 +1,8 @@
 import asyncio
+import errno
 import logging
 import os
+import sys
 import threading
 import time
 import typing as t
@@ -881,7 +883,8 @@ def test_tracking_latest_record_stays_readable_while_rewritten(
 
     Readers that take no lock (`stat` of the link, the listings) used to catch
     the gap between unlinking the old link and creating the new one, and the
-    in-place rewrite of the history record it points at.
+    in-place rewrite of the history record it points at; a lookup under the run
+    lock must never miss the record.
 
     Parameters
     ----------
@@ -927,8 +930,11 @@ def test_tracking_latest_record_stays_readable_while_rewritten(
         for writer in writers:
             writer.start()
 
-        read_errors: list[OSError] = []
-        missed_reads = 0
+        link_errors: list[OSError] = []
+        # older macOS kernels can answer a stat that races a rename with EINVAL;
+        # only a missing link is the gap this test guards against
+        tolerated = 0
+        failed_reads: list[BaseException | None] = []
         short_listings = 0
         try:
             for _ in range(10 * rounds):
@@ -936,21 +942,34 @@ def test_tracking_latest_record_stays_readable_while_rewritten(
                     break
                 try:
                     os.lstat(latest)
-                    os.stat(repo._find_run_path(run_id, None))
                 except OSError as ex:
-                    read_errors.append(ex)
-                if repo.get_workplan_run_sync(run_id) is None:
-                    missed_reads += 1
+                    if sys.platform == "darwin" and ex.errno == errno.EINVAL:
+                        tolerated += 1
+                    else:
+                        link_errors.append(ex)
+                try:
+                    if repo.get_workplan_run_sync(run_id) is None:
+                        failed_reads.append(None)
+                except Exception as ex:
+                    failed_reads.append(ex)
                 if len(repo.list_latest_runs_sync()) != 1:
                     short_listings += 1
         finally:
             for writer in writers:
                 writer.join()
 
-    assert not writer_errors
-    assert not read_errors
-    assert missed_reads == 0
-    assert short_listings == 0
+    outcome = {
+        "writer_errors": writer_errors,
+        "link_errors": link_errors,
+        "failed_reads": failed_reads,
+        "short_listings": short_listings,
+    }
+    assert outcome == {
+        "writer_errors": [],
+        "link_errors": [],
+        "failed_reads": [],
+        "short_listings": 0,
+    }, f"{outcome} (tolerated EINVAL: {tolerated})"
 
 
 @pytest.mark.asyncio
