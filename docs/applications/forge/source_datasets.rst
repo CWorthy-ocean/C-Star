@@ -39,6 +39,12 @@ WOA_BGC
    source: 78 files, about 3 GB, staged into ``<source_data>/WOA/`` and
    resumable. WOA has no DIC, alkalinity or iron, so a MARBL run pairs it
    with GLODAP, ESPER or constants.
+WOA_SALINITY
+   The single World Ocean Atlas 2023 annual-mean salinity file (about 25 MB)
+   that ESPER's salinity conditioning reads (see ESPER below). Downloaded
+   only when an ESPER source has ``esper_salinity_conditioning`` on, into
+   ``<source_data>/WOA/``; ``WOA_BGC`` stages the same file, so whichever
+   runs first downloads it.
 MBL_CO2
    NOAA marine boundary layer xCO2 surface reference.
 
@@ -54,7 +60,11 @@ DAI
 ETOPO5
    The default topography source, fetched when the grid is built.
 constants
-   Uniform biogeochemical values you specify in the blueprint.
+   Uniform biogeochemical values you specify in the blueprint, for initial
+   and boundary conditions.
+CONSTANTS (river biogeochemistry)
+   The default river biogeochemistry: ROMS-Tools downloads its own file of
+   default river tracer concentrations when the river forcing is generated.
 ESPER *(experimental)*
    Biogeochemical fields estimated from the temperature and salinity of the
    physical source at generation time, using the CWorthy fork of PyESPER
@@ -90,20 +100,80 @@ TPXO
       <source_data>/TPXO/TPXO10.v2a/u_tpxo10.v2a.nc
 
 WOA
-   The 0.25 degree World Ocean Atlas salinity climatology used for
+   The 0.25 degree World Ocean Atlas monthly salinity climatology used for
    sea-surface salinity restoring, distinct from the auto-downloaded
-   ``WOA_BGC`` above. Both live in ``<source_data>/WOA/``; the restoring
-   files carry the ``_04`` suffix and the nutrient files ``_01``.
+   ``WOA_BGC`` and ``WOA_SALINITY`` above. Download the twelve monthly files
+   from the `WOA18 0.25 degree salinity directory
+   <https://www.ncei.noaa.gov/data/oceans/woa/WOA18/DATA/salinity/netcdf/decav/0.25/>`__
+   (WOA23 works the same way) and place them as:
+
+   .. code-block:: text
+
+      <source_data>/WOA/woa18_decav_s01_04.nc
+      ...
+      <source_data>/WOA/woa18_decav_s12_04.nc
+
+   Leave out the ``s00`` and ``s13`` to ``s16`` files. All the WOA files
+   share ``<source_data>/WOA/``: the restoring files carry the ``_04``
+   (quarter-degree) suffix and the nutrient files ``_01``.
 GLODAP
    The GLODAPv2.2016b mapped climatology (ALK, DIC, NO3, PO4, SiO3, O2), one
    file per variable under ``<source_data>/GLODAP/``:
    ``GLODAPv2.2016b.{TAlk,TCO2,NO3,PO4,silicate,oxygen}.nc``. The
    ``temperature`` and ``salinity`` files are optional but recommended;
    without them ROMS-Tools uses a uniform density for the unit conversion.
-GLOFAS, RIVR2O
-   River discharge and river biogeochemistry.
+GLOFAS
+   GloFAS v4.0 daily river discharge, an alternative to Dai. It comes from
+   the Copernicus Early Warning Data Store and must be preprocessed to place
+   river mouths on coastal cells and add RIVR2O river concentrations, so
+   Forge expects one prepared file:
+
+   .. code-block:: text
+
+      <source_data>/GLOFAS/glofas_v4_rivers_daily_w_rivr2o.nc
+
+RIVR2O
+   River biogeochemistry, an alternative to the default constants. One
+   netCDF file per year, any names:
+
+   .. code-block:: text
+
+      <source_data>/RIVR2O/*.nc
+
 EMOD
-   EMODnet bathymetry, as an alternative topography source.
+   EMODnet bathymetry, as an alternative topography source. Export a
+   netCDF file for your region from the `EMODnet viewer
+   <https://emodnet.ec.europa.eu/geoviewer/>`__ and place it, under any name,
+   in ``<source_data>/EMOD/``.
+
+Your own files
+--------------
+
+Any source can be pointed at your own copy of the data instead. Give the
+source a ``path`` in the forge blueprint (in the wizard, the path field next
+to the source), and Forge skips staging for it and hands that path to
+ROMS-Tools as it is:
+
+.. code-block:: yaml
+
+   forcing:
+     initial_conditions:
+       bgc_sources:
+         - source:
+             name: GLODAP
+             path: /project/shared/data/GLODAPv2.2016b
+
+Two sources work only this way:
+
+CESM_REGRIDDED
+   Biogeochemical fields from CESM output on a regular latitude-longitude
+   grid, for surface forcing and initial and boundary conditions. Forge has
+   nothing to download or check for it, so it needs a ``path``.
+A pre-made river forcing file
+   A river source named ``CUSTOM_FILE`` uses a river forcing netCDF you
+   already have in place of building one from Dai or GloFAS. The file goes
+   in the river item's ``custom_file`` (a ``location`` and a
+   ``content_hash``), which the wizard fills in when you attach the file.
 
 Staging outside a full run
 --------------------------
