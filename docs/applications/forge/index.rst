@@ -3,10 +3,6 @@
 Forge
 =====
 
-.. image:: ../../images/csforge.png
-   :alt: C-Star Forge logo
-   :align: center
-   :width: 300px
 
 Forge is C-Star's application for creating new UCLA-ROMS domains. Setting up
 a regional simulation has traditionally meant weeks of work: designing a grid,
@@ -16,6 +12,12 @@ path. You describe what you want (a region, a resolution, a time window,
 forcing sources) in a :doc:`forge blueprint <blueprint>`, and Forge
 produces everything the model needs to run, in a form C-Star can build and
 execute anywhere.
+
+.. image:: ../../images/csforge.png
+   :alt: C-Star Forge logo
+   :align: center
+   :width: 600px
+
 
 How it works
 ------------
@@ -29,7 +31,7 @@ your edits, and writes out the resolved values in full.
 
 **Processing** happens when you run the blueprint with
 ``cstar blueprint run`` (or ``cstar forge run`` for the full option set). On
-whatever machine you run it, Forge:
+whatever machine you run it, the Forge application:
 
 1. stages the :doc:`source datasets <source_datasets>` the blueprint needs,
    downloading what it can and checking for the files you must provide;
@@ -56,6 +58,7 @@ Pages in this section
 
 .. toctree::
    :maxdepth: 1
+   :hidden:
 
    Overview <self>
    source_datasets

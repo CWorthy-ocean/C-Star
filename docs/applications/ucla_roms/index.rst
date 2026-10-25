@@ -13,6 +13,7 @@ fetching the model code to joining the output files.
 
 .. toctree::
    :maxdepth: 1
+   :hidden:
 
    What it does <self>
    What's in the blueprint <blueprint>
@@ -30,19 +31,21 @@ when a stage fails you can look at what it left behind.
    and the input datasets are fetched from wherever the blueprint says they
    are: a git repository, a URL, or a local path. Only the datasets whose
    dates overlap the run window are fetched. Everything lands under
-   ``input/`` in the working directory.
+   ``input/`` in the working directory. Datasets that are on the
+   same machine are symlinked rather than copied.
 2. **Compile the model.** ucla-roms is compiled against the blueprint's
    compile-time files (``cppdefs.opt`` and friends), with MARBL and
    ParallelIO built first when they are in use. On a supported HPC system the
    build uses the site's compiler and MPI modules; on a laptop it uses the
    toolchain from the conda environment. The executable is kept with the
    compile-time code.
-3. **Partition the inputs.** ROMS reads one file per MPI rank unless it is
+3. **Partition the inputs (if needed).** ROMS reads one file per MPI rank unless it is
    built with ParallelIO. Without ParallelIO, every input file is split into
    tiles according to the blueprint's ``partitioning`` layout; files that are
    already partitioned are used as they are. With ParallelIO
    (``use_pio: true``), the inputs are left whole and only checked for a
-   compatible netCDF format.
+   compatible netCDF format. Using ParallelIO is the recommended mode, as
+   partitioning and rejoining files is slow and storage-intensive.
 4. **Fill in the namelist.** The run-time file the blueprint names is a
    template. C-Star keeps its scientific settings and fills in everything that
    depends on this run: the input file paths, the output location, the time
@@ -62,8 +65,9 @@ when a stage fails you can look at what it left behind.
    ``temp_output/``; C-Star joins them into whole files in ``output/`` and
    removes the pieces. With ParallelIO, ROMS writes the whole files directly
    and C-Star only checks that they are there. The step record
-   (``cstar-step.yaml``) is written last, listing the outputs by stream so a
-   later step, or ``cstar run check``, can find them.
+   (``cstar-step.yaml``) is written last, listing the outputs by type (e.g.
+   restart files, history files, CDR outputs, etc.) so a later step, or
+   ``cstar run check``, can find them.
 
 The working directory then looks like this:
 

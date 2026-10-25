@@ -4,22 +4,27 @@ Specs
 =====
 
 A forge blueprint is composed from **specs**: named, reusable catalog
-entries, each covering one aspect of a domain. The wizard presents them as
-dropdowns, the resolver merges the chosen ones (plus your edits) into a
-blueprint, and the blueprint records the resulting values in full. Editing a
-spec afterwards does not change blueprints already built from it.
+entries, each covering one aspect of a domain. Specs are intended to provide
+modular, shareable building blocks for the different aspects of a complete
+ocean model setup, so that you don't have to remake every individual choice
+whenever you start a new model.
+
+The wizard presents them as dropdowns, the resolver merges the chosen ones
+(plus your edits) into a blueprint, and the blueprint records the resulting
+values in full. Editing a spec afterwards does not change blueprints already
+built from it.
 
 Specs live in the :doc:`catalog <../../catalog>` as one directory per entry,
 ``<Kind>/<name>/<file>.yaml``. C-Star bundles a small set of each kind to
 start from; save your own from the wizard's Review section or copy a bundled
 directory and edit it.
 
-Kinds
------
+Types of specs
+--------------
 
 ModelSpec (``ModelSpec/<name>/model.yaml``)
-   A trusted model configuration: the pinned ROMS, MARBL and PIO code, the
-   render templates, the default biogeochemistry and PIO modes, and the
+   A trusted model configuration: the pinned ROMS, MARBL and PIO code,
+   the default biogeochemistry and PIO modes, and the
    model-level default settings. Choosing a model preset in the wizard
    selects one of these. Detailed below.
 
