@@ -2,8 +2,18 @@ import asyncio
 import fcntl
 import os
 import typing as t
-from collections.abc import AsyncGenerator, Callable, Mapping, Sequence
-from contextlib import AbstractAsyncContextManager, asynccontextmanager
+from collections.abc import (
+    AsyncGenerator,
+    Callable,
+    Generator,
+    Mapping,
+    Sequence,
+)
+from contextlib import (
+    AbstractAsyncContextManager,
+    asynccontextmanager,
+    contextmanager,
+)
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from enum import StrEnum
@@ -686,6 +696,30 @@ def _try_read_run(path: Path, refused: set[Path]) -> WorkplanRun | None:
     return run.reanchored()
 
 
+@contextmanager
+def _replacing(path: Path) -> Generator[Path]:
+    """Yield a sibling of `path` to build, then rename it onto `path` atomically.
+
+    The caller holds the run lock, so one fixed staging name per path suffices;
+    a leftover from a crashed writer is cleared first. The staged name is removed
+    if building or renaming it fails.
+
+    Parameters
+    ----------
+    path : Path
+        The file or link to replace.
+    """
+    staged = path.with_name(f".{path.name}.tmp")
+    staged.parent.mkdir(parents=True, exist_ok=True)
+    staged.unlink(missing_ok=True)
+    try:
+        yield staged
+        os.replace(staged, path)
+    except BaseException:
+        staged.unlink(missing_ok=True)
+        raise
+
+
 async def measure_step_sizes(
     run: WorkplanRun, step_dirs: Mapping[str, Path], sem: asyncio.Semaphore
 ) -> dict[str, int]:
@@ -920,7 +954,12 @@ class TrackingRepository(LoggingMixin):
                 run_paths.append(latest)
 
             search_dir = self.run_history_dir(run_id=run_id)
-            all_runs = search_dir.iterdir() if search_dir.exists() else list[Path]()
+            all_runs = [
+                path
+                for path in (search_dir.iterdir() if search_dir.exists() else ())
+                # a dotted name is a record a crashed writer left half-staged
+                if not path.name.startswith(".")
+            ]
 
             if all_history:
                 run_paths.extend(all_runs)
@@ -958,13 +997,12 @@ class TrackingRepository(LoggingMixin):
             msg = "A valid run-id was not provided; unable to retrieve run"
             raise ValueError(msg) from ex
 
-        run_path = self._find_run_path(run_id, run_date)
-
         lock_path = self._get_lock_path(run_id)
 
         with lock_path.open("w") as lock_file:
             fcntl.flock(lock_file, fcntl.LOCK_EX)
 
+            run_path = self._find_run_path(run_id, run_date)
             if not run_path.exists():
                 rd_out = run_date or "latest"
                 msg = f"No run file for `{run_id}` on `{rd_out}` found in {run_path}`"
@@ -1015,11 +1053,15 @@ class TrackingRepository(LoggingMixin):
         run_path = self.history_path(run.run_id, run.recorded_at)
         latest_path = self.latest_path(run.run_id)
 
-        if not serialize(run_path, run):
-            self.log.warning("Run could not be persisted")
+        # Readers that take no lock (the listings) must see the old record or
+        # the new one, never a missing or half-written one: each is built under
+        # a dotted name the listing globs skip, then renamed into place.
+        with _replacing(run_path) as staged_record:
+            if not serialize(staged_record, run):
+                self.log.warning("Run could not be persisted")
 
-        latest_path.unlink(missing_ok=True)
-        symlink_relative(latest_path, run_path)
+        with _replacing(latest_path) as staged_link:
+            symlink_relative(staged_link, run_path)
 
         msg = f"Run persisted to: {run_path}"
         self.log.debug(msg)
@@ -1052,12 +1094,12 @@ class TrackingRepository(LoggingMixin):
             msg = "A valid run-id was not provided; unable to update run"
             raise ValueError(msg) from ex
 
-        run_path = self._find_run_path(run_id, None)
         lock_path = self._get_lock_path(run_id)
 
         with lock_path.open("w") as lock_file:
             fcntl.flock(lock_file, fcntl.LOCK_EX)
 
+            run_path = self._find_run_path(run_id, None)
             if not run_path.exists():
                 self.log.warning(f"No run file for `{run_id}` found in {run_path}`")
                 return None

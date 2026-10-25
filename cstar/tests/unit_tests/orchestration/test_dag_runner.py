@@ -2587,6 +2587,52 @@ async def test_on_status_changed_non_terminal_skips_measurement(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("failing", ["get_workplan_run", "update_workplan_run"])
+async def test_on_status_changed_warns_when_the_run_record_fails(
+    status_change_workplan_run: WorkplanRun,
+    mock_run_id: str,
+    failing: str,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """A run record that cannot be read or written is a warning, not an error
+    that stops loading the run's status; the sentinel is still written.
+    """
+    handle = LocalHandle(
+        pid="1",
+        name="step-a",
+        run_id=mock_run_id,
+        start_at=datetime.now(),
+        status=Status.Running,
+    )
+    calls = {
+        "get_workplan_run": mock.AsyncMock(return_value=status_change_workplan_run),
+        "update_workplan_run": mock.AsyncMock(),
+    }
+    calls[failing] = mock.AsyncMock(side_effect=OSError(22, "Invalid argument"))
+
+    with (
+        mock.patch(
+            "cstar.orchestration.tracking.TrackingRepository.get_workplan_run",
+            calls["get_workplan_run"],
+        ),
+        mock.patch(
+            "cstar.orchestration.tracking.TrackingRepository.update_workplan_run",
+            calls["update_workplan_run"],
+        ),
+        mock.patch(
+            "cstar.orchestration.state.StateRepository.put_sentinel",
+            mock.AsyncMock(return_value=Path("/tmp/sentinel")),
+        ) as mock_put,
+        caplog.at_level("WARNING"),
+    ):
+        await on_status_changed(handle)
+
+    mock_put.assert_awaited_once()
+    assert "Invalid argument" in caplog.text
+    assert mock_run_id in caplog.text
+
+
+@pytest.mark.asyncio
 async def test_on_status_changed_terminal_measures_known_step(
     tmp_path: Path,
     status_change_workplan_run: WorkplanRun,
