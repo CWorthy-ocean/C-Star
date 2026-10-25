@@ -35,6 +35,8 @@ from cstar.system.migration import (
     CstarMigrationError,
     CstarSchemaTooNewError,
     CstarUnsupportedMigrationError,
+    newer_in_major,
+    stamped_version,
 )
 
 APP_NAME: t.Final[str] = "fake_app"
@@ -184,11 +186,13 @@ def test_migration_simple_plan() -> None:
         pytest.param("3.0.0", "3.0.0", id="same version"),
         pytest.param("3.0.0", "3.1.0", id="older minor"),
         pytest.param("3.0.0", "3.0.7", id="older patch"),
+        pytest.param("3.1.0", "3.0.0", id="newer minor"),
+        pytest.param("3.0.1", "3.0.0", id="newer patch"),
     ],
 )
 def test_plan_compatible_has_no_adapters(found: str, target: str) -> None:
-    """Verify documents of the build's major version plan with no adapters and
-    do not report a plan to the callback.
+    """Verify documents of the build's major version, older or newer, plan with
+    no adapters and do not report a plan to the callback.
     """
     on_planned = mock.Mock()
     migrator = BlueprintMigration(
@@ -203,9 +207,9 @@ def test_plan_compatible_has_no_adapters(found: str, target: str) -> None:
     on_planned.assert_not_called()
 
 
-@pytest.mark.parametrize("found", ["9.9.9", "3.0.1", "3.1.0"])
+@pytest.mark.parametrize("found", ["9.9.9", "4.0.0"])
 def test_plan_too_new(found: str) -> None:
-    """Verify a document newer than the build in any component is refused."""
+    """Verify a document of a newer major than the build's is refused."""
     migrator = BlueprintMigration(ROMS_ADAPTERS, targets={APP_ROMS: "3.0.0"})
 
     with pytest.raises(CstarSchemaTooNewError, match="Upgrade cstar-ocean") as ex:
@@ -556,3 +560,126 @@ def test_plan_earlier_application_name_current_schema_is_compatible() -> None:
     assert plan.is_compatible
     assert not plan.adapters
     assert plan.source == "3.2.0"
+
+
+@pytest.mark.parametrize(
+    ("found", "target", "newer"),
+    [
+        pytest.param("1.2.0", "1.2.0", False, id="equal"),
+        pytest.param("1.1.0", "1.2.0", False, id="older minor"),
+        pytest.param("1.2.0", "1.10.0", False, id="older minor numerically"),
+        pytest.param("0.9.9", "1.0.0", False, id="older major"),
+        pytest.param("1.2.1", "1.2.0", True, id="newer patch"),
+        pytest.param("1.3.0", "1.2.0", True, id="newer minor"),
+        pytest.param("1.10.0", "1.9.0", True, id="newer minor numerically"),
+        pytest.param(None, "1.0.0", False, id="missing reads as 1.0.0"),
+        pytest.param("", "1.0.0", False, id="empty reads as 1.0.0"),
+        pytest.param("  1.3.0 ", "1.2.0", True, id="whitespace is ignored"),
+    ],
+)
+def test_newer_in_major_classifies_within_the_major(
+    found: str | None, target: str, newer: bool
+) -> None:
+    """Verify a version is newer only by minor or patch within the target's major."""
+    assert newer_in_major("thing", found, target) is newer
+
+
+@pytest.mark.parametrize("found", ["2.0.0", "2.0.1", "10.0.0"])
+def test_newer_in_major_refuses_a_newer_major(found: str) -> None:
+    """Verify a newer major raises the upgrade error naming the document."""
+    with pytest.raises(CstarSchemaTooNewError, match="Upgrade cstar-ocean") as ex:
+        newer_in_major("thing", found, "1.9.0")
+
+    assert (ex.value.application, ex.value.found, ex.value.target) == (
+        "thing",
+        found,
+        "1.9.0",
+    )
+    assert ex.value.unknown == ()
+
+
+def test_newer_in_major_names_a_missing_version_in_the_error() -> None:
+    """Verify a missing version is reported as the 1.0.0 it reads as."""
+    with pytest.raises(CstarSchemaTooNewError) as ex:
+        newer_in_major("thing", None, "0.5.0")
+
+    assert ex.value.found == "1.0.0"
+
+
+@pytest.mark.parametrize("found", ["abc", "1.x.0", "latest"])
+def test_newer_in_major_rejects_a_version_that_is_not_dotted(found: str) -> None:
+    """Verify a version that is not dotted integers is a `ValueError`."""
+    with pytest.raises(ValueError, match="expected dotted integers"):
+        newer_in_major("thing", found, "1.0.0")
+
+
+@pytest.mark.parametrize(
+    ("found", "target", "expected"),
+    [
+        pytest.param("1.3.0", "1.2.0", "1.3.0", id="newer minor is kept"),
+        pytest.param("1.2.1", "1.2.0", "1.2.1", id="newer patch is kept"),
+        pytest.param("1.10.0", "1.9.0", "1.10.0", id="newer is compared numerically"),
+        pytest.param("1.1.0", "1.2.0", "1.2.0", id="older takes the target"),
+        pytest.param("1.9.0", "1.10.0", "1.10.0", id="older numerically"),
+        pytest.param("1.2.0", "1.2.0", "1.2.0", id="equal"),
+        pytest.param("latest", "1.2.0", "1.2.0", id="not dotted takes the target"),
+        pytest.param("", "1.2.0", "1.2.0", id="empty takes the target"),
+    ],
+)
+def test_stamped_version_is_never_older_than_the_document(
+    found: str, target: str, expected: str
+) -> None:
+    """Verify a document is stamped at the newer of its version and the build's."""
+    assert stamped_version(found, target) == expected
+
+
+def test_schema_too_new_error_message_reads() -> None:
+    """Verify the message names the document, both versions and the upgrade."""
+    error = CstarSchemaTooNewError("run manifest", "1.6.0", "1.5.0")
+
+    assert str(error) == (
+        "run manifest schema 1.6.0 is newer than this build of cstar-ocean "
+        "reads (1.5.0). Upgrade cstar-ocean to read this file."
+    )
+    assert error.unknown == ()
+
+
+def test_schema_too_new_error_message_names_unknown_keys() -> None:
+    """Verify the message names each location the build does not know."""
+    error = CstarSchemaTooNewError(
+        "run manifest", "1.6.0", "1.5.0", ["future_field", "steps.0.newkey"]
+    )
+
+    assert str(error) == (
+        "run manifest schema 1.6.0 is newer than this build of cstar-ocean "
+        "reads (1.5.0) and sets future_field, steps.0.newkey, which this build "
+        "does not know. Upgrade cstar-ocean to read this file."
+    )
+    assert error.unknown == ("future_field", "steps.0.newkey")
+
+
+def test_schema_too_new_error_message_separates_invalid_values() -> None:
+    """Verify a location that fails for another reason is not called unknown."""
+    error = CstarSchemaTooNewError(
+        "run manifest", "1.6.0", "1.5.0", ["future_field"], ["steps.0.status"]
+    )
+
+    assert str(error) == (
+        "run manifest schema 1.6.0 is newer than this build of cstar-ocean "
+        "reads (1.5.0) and sets future_field, which this build does not know "
+        "and does not validate at steps.0.status. Upgrade cstar-ocean to read "
+        "this file."
+    )
+    assert error.invalid == ("steps.0.status",)
+
+
+def test_schema_too_new_error_message_for_a_write() -> None:
+    """Verify a refused write says to upgrade in order to write."""
+    error = CstarSchemaTooNewError(
+        "step record", "1.4.0", "1.3.0", ("future_field",), action="write"
+    )
+
+    assert str(error).endswith(
+        "and sets future_field, which this build does not know. "
+        "Upgrade cstar-ocean to write this file."
+    )

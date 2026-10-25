@@ -6,6 +6,7 @@ from cstar.applications.core import get_application
 from cstar.cli.common import SCHEMA_ERRORS, get_migrator, report_schema_error
 from cstar.orchestration.models import Blueprint, BlueprintCore
 from cstar.orchestration.serialization import validate_serialized_entity
+from cstar.system.migration import CstarSchemaTooNewError
 
 app = typer.Typer()
 
@@ -19,9 +20,10 @@ def check(
 ) -> None:
     """Perform content validation on a user-supplied blueprint.
 
-    The schema version is checked first: a blueprint newer than this build
-    reads, or one without an automatic migration, is reported before its
-    content is validated.
+    The schema version is checked first: a blueprint of a newer major than
+    this build reads, or one without an automatic migration, is reported before
+    its content is validated. A newer minor is validated, and reported as too
+    new if it holds anything this build does not know.
 
     Raises
     ------
@@ -50,6 +52,9 @@ def check(
     bp_type: type[Blueprint] = get_application(application).blueprint
     result = validate_serialized_entity(path, bp_type)
 
+    # a newer minor holding what this build does not know is refused as too new
+    if isinstance(result.error, CstarSchemaTooNewError):
+        report_schema_error(path, result.error)
     if result.item is None:
         raise typer.BadParameter(result.error_msg)
 

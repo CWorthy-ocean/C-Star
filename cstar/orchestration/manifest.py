@@ -64,7 +64,13 @@ from cstar.orchestration.serialization import (
     model_to_yaml,
     read_document,
 )
-from cstar.system.migration import CstarSchemaTooNewError, version_key
+from cstar.system.migration import (
+    TOLERATE_UNKNOWN,
+    CstarSchemaTooNewError,
+    VersionedDocument,
+    stamped_version,
+    warn_unknown_keys,
+)
 
 if t.TYPE_CHECKING:
     from collections.abc import Callable, Mapping, Sequence
@@ -340,8 +346,10 @@ class ExecutionFacts(ConfiguredBaseModel):
     """The account the job was charged to; empty outside SLURM or when not reported."""
 
 
-class StepRecord(ConfiguredBaseModel):
+class StepRecord(ConfiguredBaseModel, VersionedDocument):
     """What a step did: written by the step process, in its working directory."""
+
+    SCHEMA_LABEL: t.ClassVar[str] = "step record"
 
     schema_version: str = Field(default="1.3.0")
     """The schema version for the document."""
@@ -575,8 +583,10 @@ class StepEntry(ConfiguredBaseModel):
     """The step's record, folded in once the step has written it."""
 
 
-class RunManifest(ConfiguredBaseModel):
+class RunManifest(ConfiguredBaseModel, VersionedDocument):
     """The description of a run: written to its run root."""
+
+    SCHEMA_LABEL: t.ClassVar[str] = "run manifest"
 
     schema_version: str = Field(default="1.5.0")
     """The schema version for the document."""
@@ -726,7 +736,7 @@ def merge_products(
     return [*merged.values(), *undeclared]
 
 
-def _read(path: Path, klass: type[_M], label: str) -> _M | None:
+def _read(path: Path, klass: type[_M], label: str, *, tolerant: bool) -> _M | None:
     """Read a persisted document into its model.
 
     Parameters
@@ -737,6 +747,9 @@ def _read(path: Path, klass: type[_M], label: str) -> _M | None:
         The model of the document.
     label : str
         What the document is called in messages.
+    tolerant : bool
+        Whether a document newer than this build, within its major, loads with
+        the keys this build does not know ignored (see `VersionedDocument`).
 
     Returns
     -------
@@ -750,29 +763,31 @@ def _read(path: Path, klass: type[_M], label: str) -> _M | None:
     CstarError
         If the file cannot be read or is not a valid document.
     """
-    target = klass.model_fields["schema_version"].default
     try:
         raw = read_document(path)
-        found = str(raw.get("schema_version", "1.0.0"))
-        newer = version_key(found) > version_key(target)
-        if not newer:
-            return klass.model_validate(raw)
+        document = klass.model_validate(raw, context={TOLERATE_UNKNOWN: tolerant})
     except FileNotFoundError:
         return None
+    except CstarSchemaTooNewError:
+        raise
     except Exception as ex:
         msg = f"Unable to read the {label} at {path}: {ex}"
         raise CstarError(msg) from ex
 
-    raise CstarSchemaTooNewError(label, found, target)
+    warn_unknown_keys(document, path)
+    return document
 
 
-def read_run_manifest(root: Path) -> RunManifest | None:
+def read_run_manifest(root: Path, *, tolerant: bool = False) -> RunManifest | None:
     """Read a run's manifest.
 
     Parameters
     ----------
     root : Path
         The run root.
+    tolerant : bool
+        Read a manifest newer than this build, within its major, with the keys
+        this build does not know ignored; for readers that never write it.
 
     Returns
     -------
@@ -786,16 +801,21 @@ def read_run_manifest(root: Path) -> RunManifest | None:
     CstarError
         If the manifest cannot be read or is invalid.
     """
-    return _read(root / RUN_MANIFEST_NAME, RunManifest, "run manifest")
+    return _read(
+        root / RUN_MANIFEST_NAME, RunManifest, "run manifest", tolerant=tolerant
+    )
 
 
-def read_step_record(step_root: Path) -> StepRecord | None:
+def read_step_record(step_root: Path, *, tolerant: bool = False) -> StepRecord | None:
     """Read a step's record.
 
     Parameters
     ----------
     step_root : Path
         The step's working directory.
+    tolerant : bool
+        Read a record newer than this build, within its major, with the keys
+        this build does not know ignored; for readers that never write it.
 
     Returns
     -------
@@ -809,7 +829,9 @@ def read_step_record(step_root: Path) -> StepRecord | None:
     CstarError
         If the record cannot be read or is invalid.
     """
-    return _read(step_root / STEP_RECORD_NAME, StepRecord, "step record")
+    return _read(
+        step_root / STEP_RECORD_NAME, StepRecord, "step record", tolerant=tolerant
+    )
 
 
 def product_paths(step_root: Path, kind: ArtifactKind, *, role: str = "") -> list[Path]:
@@ -945,26 +967,32 @@ def require_recorded_files(step_root: Path, paths: "Sequence[Path]") -> None:
 
 
 def _write(path: Path, document: "RunManifest | StepRecord") -> Path:
-    """Write a document atomically, stamped with the schema version this build writes.
-
-    A document read from an older file may now hold fields of the newer schema,
-    so it is restamped: an older build then refuses it as too new, rather than
-    failing on fields it does not know.
+    """Write a document atomically, at the schema version `stamped_version` gives.
 
     Parameters
     ----------
     path : Path
         The file to write.
     document : RunManifest | StepRecord
-        The manifest or record; its `schema_version` is updated in place.
+        The manifest or record; its `schema_version` is updated in place to the
+        version written.
 
     Returns
     -------
     Path
         The file written.
+
+    Raises
+    ------
+    CstarSchemaTooNewError
+        If the document holds content read from a newer file with keys this
+        build does not know ignored.
     """
-    document.schema_version = type(document).model_fields["schema_version"].default
-    write_text_atomic(path, model_to_yaml(document))
+    text = model_to_yaml(document)
+    document.schema_version = stamped_version(
+        document.schema_version, type(document).model_fields["schema_version"].default
+    )
+    write_text_atomic(path, text)
     return path
 
 
@@ -1690,6 +1718,8 @@ def fold_step_records(
     manifest: RunManifest,
     root: Path,
     statuses: "Mapping[str, str] | None" = None,
+    *,
+    tolerant: bool = False,
 ) -> bool:
     """Fold what the steps have recorded, and their statuses, into a manifest.
 
@@ -1711,6 +1741,10 @@ def fold_step_records(
         The run root.
     statuses : Mapping[str, str] | None
         The orchestration status name of each step, by step name.
+    tolerant : bool
+        Read records newer than this build, within their major, with the keys
+        this build does not know ignored (see `read_step_record`); a manifest
+        holding one is not written.
 
     Returns
     -------
@@ -1721,7 +1755,7 @@ def fold_step_records(
 
     for entry in manifest.steps:
         try:
-            record = read_step_record(root / entry.working_dir)
+            record = read_step_record(root / entry.working_dir, tolerant=tolerant)
         except CstarError as ex:
             log.warning(f"Ignoring the record of step {entry.name!r}: {ex}")
             record = None

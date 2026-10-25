@@ -13,6 +13,7 @@ from datetime import UTC, datetime, timedelta, timezone
 from pathlib import Path
 
 import pytest
+import yaml
 
 import cstar.orchestration.manifest as manifest_module
 from cstar.applications.core import ArtifactKind, ArtifactSpec
@@ -83,7 +84,7 @@ from cstar.orchestration.models import (
     Workplan,
 )
 from cstar.orchestration.serialization import load_blueprint
-from cstar.system.migration import CstarSchemaTooNewError
+from cstar.system.migration import CstarSchemaTooNewError, holds_unknown_keys
 
 NOW = datetime(2026, 10, 15, 12, 0, tzinfo=UTC)
 
@@ -103,6 +104,10 @@ NEWER_MINOR = f"{_MAJOR}.{int(_MINOR) + 10}.0"
 
 NEWER_MAJOR = f"{int(_MAJOR) + 1}.0.0"
 """A newer major."""
+
+_RECORD_MAJOR, _RECORD_MINOR, _ = CURRENT_RECORD.split(".")
+NEWER_RECORD_MINOR = f"{_RECORD_MAJOR}.{int(_RECORD_MINOR) + 10}.0"
+"""A newer minor of the step record's schema."""
 
 
 def _identity(name: str = "bp", content_hash: str = "abc") -> BlueprintIdentity:
@@ -392,16 +397,6 @@ class TestRoundTrip:
         assert record is not None
         assert record.blueprint_file == "work/b.ovrd.yaml"
 
-    def test_newer_schema_refused(self, tmp_path: Path) -> None:
-        write_run_manifest(tmp_path, _manifest("one"))
-        path = tmp_path / RUN_MANIFEST_NAME
-        path.write_text(path.read_text().replace(CURRENT, NEWER_MINOR, 1))
-
-        with pytest.raises(
-            CstarSchemaTooNewError, match=f"run manifest schema {NEWER_MINOR}"
-        ):
-            read_run_manifest(tmp_path)
-
     def test_newer_step_record_refused(self, tmp_path: Path) -> None:
         write_step_record(tmp_path, _record())
         path = tmp_path / STEP_RECORD_NAME
@@ -416,6 +411,289 @@ class TestRoundTrip:
 
         with pytest.raises(CstarError, match=str(tmp_path / RUN_MANIFEST_NAME)):
             read_run_manifest(tmp_path)
+
+
+def _newer(path: Path, version: str, *, key: str = "", step_key: str = "") -> None:
+    """Rewrite a persisted document as a newer release would have written it.
+
+    Parameters
+    ----------
+    path : Path
+        The document.
+    version : str
+        The `schema_version` to stamp.
+    key : str
+        A top-level key to add, which this build does not know.
+    step_key : str
+        A key to add to the first step, which this build does not know.
+    """
+    document = yaml.safe_load(path.read_text())
+    document["schema_version"] = version
+    if key:
+        document[key] = {"nested": 1}
+    if step_key:
+        document["steps"][0][step_key] = "future"
+    path.write_text(yaml.safe_dump(document))
+
+
+class TestNewerSchema:
+    """What this build does with documents a newer cstar-ocean wrote."""
+
+    def test_a_newer_minor_without_new_keys_loads(self, tmp_path: Path) -> None:
+        write_run_manifest(tmp_path, _manifest("one"))
+        _newer(tmp_path / RUN_MANIFEST_NAME, NEWER_MINOR)
+
+        manifest = read_run_manifest(tmp_path)
+
+        assert manifest is not None
+        assert manifest.schema_version == NEWER_MINOR
+        assert manifest.unknown_keys == ()
+        assert not holds_unknown_keys(manifest)
+
+    def test_a_newer_minor_without_new_keys_is_written_at_its_version(
+        self, tmp_path: Path
+    ) -> None:
+        """Writing it back keeps the newer version: it holds only fields that
+        version has, so an older stamp would misreport it.
+        """
+        write_run_manifest(tmp_path, _manifest("one"))
+        _newer(tmp_path / RUN_MANIFEST_NAME, NEWER_MINOR)
+        manifest = read_run_manifest(tmp_path)
+        assert manifest is not None
+        manifest.attempts[0].directory = "attempts/20261015T120000"
+
+        write_run_manifest(tmp_path, manifest)
+
+        assert (
+            f"schema_version: {NEWER_MINOR}"
+            in (tmp_path / RUN_MANIFEST_NAME).read_text()
+        )
+        assert manifest.schema_version == NEWER_MINOR
+
+    def test_a_newer_minor_with_a_new_key_is_refused(self, tmp_path: Path) -> None:
+        write_run_manifest(tmp_path, _manifest("one"))
+        _newer(tmp_path / RUN_MANIFEST_NAME, NEWER_MINOR, key="future_field")
+
+        with pytest.raises(CstarSchemaTooNewError) as caught:
+            read_run_manifest(tmp_path)
+
+        message = str(caught.value)
+        assert f"run manifest schema {NEWER_MINOR} is newer" in message
+        assert f"({CURRENT})" in message
+        assert "sets future_field, which this build does not know" in message
+        assert "Upgrade cstar-ocean to read this file." in message
+        assert caught.value.unknown == ("future_field",)
+
+    def test_a_tolerant_read_ignores_a_new_key_and_will_not_write_it(
+        self, tmp_path: Path, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        write_run_manifest(tmp_path, _manifest("one"))
+        path = tmp_path / RUN_MANIFEST_NAME
+        _newer(path, NEWER_MINOR, key="future_field")
+        before = path.read_bytes()
+
+        with caplog.at_level(logging.WARNING):
+            manifest = read_run_manifest(tmp_path, tolerant=True)
+
+        assert manifest is not None
+        assert manifest.schema_version == NEWER_MINOR
+        assert manifest.unknown_keys == ("future_field",)
+        assert holds_unknown_keys(manifest)
+        assert any(
+            "future_field" in r.getMessage() and str(path) in r.getMessage()
+            for r in caplog.records
+            if r.levelno == logging.WARNING
+        )
+        with pytest.raises(CstarSchemaTooNewError, match="to write this file"):
+            write_run_manifest(tmp_path, manifest)
+        assert path.read_bytes() == before
+        assert manifest.schema_version == NEWER_MINOR
+
+    def test_a_new_key_in_a_step_is_located(self, tmp_path: Path) -> None:
+        write_run_manifest(tmp_path, _manifest("one"))
+        path = tmp_path / RUN_MANIFEST_NAME
+        _newer(path, NEWER_MINOR, step_key="future_field")
+
+        with pytest.raises(CstarSchemaTooNewError) as caught:
+            read_run_manifest(tmp_path)
+        manifest = read_run_manifest(tmp_path, tolerant=True)
+
+        assert caught.value.unknown == ("steps.0.future_field",)
+        assert "sets steps.0.future_field" in str(caught.value)
+        assert manifest is not None
+        assert manifest.unknown_keys == ("steps.0.future_field",)
+        with pytest.raises(CstarSchemaTooNewError, match="to write this file"):
+            write_run_manifest(tmp_path, manifest)
+
+    def test_every_unknown_key_is_named(self, tmp_path: Path) -> None:
+        write_run_manifest(tmp_path, _manifest("one"))
+        _newer(
+            tmp_path / RUN_MANIFEST_NAME,
+            NEWER_MINOR,
+            key="future_field",
+            step_key="other_field",
+        )
+
+        with pytest.raises(CstarSchemaTooNewError) as caught:
+            read_run_manifest(tmp_path)
+
+        assert set(caught.value.unknown) == {"future_field", "steps.0.other_field"}
+
+    def test_tolerance_does_not_cover_other_problems(self, tmp_path: Path) -> None:
+        """A newer manifest that is also invalid is refused whatever the reader."""
+        write_run_manifest(tmp_path, _manifest("one"))
+        path = tmp_path / RUN_MANIFEST_NAME
+        _newer(path, NEWER_MINOR, key="future_field")
+        document = yaml.safe_load(path.read_text())
+        del document["run_id"]
+        path.write_text(yaml.safe_dump(document))
+
+        with pytest.raises(CstarSchemaTooNewError, match="run_id"):
+            read_run_manifest(tmp_path, tolerant=True)
+
+    @pytest.mark.parametrize("tolerant", [False, True])
+    @pytest.mark.parametrize("key", ["", "future_field"])
+    def test_a_newer_major_is_refused(
+        self, tmp_path: Path, key: str, tolerant: bool
+    ) -> None:
+        write_run_manifest(tmp_path, _manifest("one"))
+        _newer(tmp_path / RUN_MANIFEST_NAME, NEWER_MAJOR, key=key)
+
+        with pytest.raises(
+            CstarSchemaTooNewError, match=f"run manifest schema {NEWER_MAJOR}"
+        ) as caught:
+            read_run_manifest(tmp_path, tolerant=tolerant)
+
+        assert caught.value.unknown == ()
+
+    def test_a_newer_step_record_without_new_keys_loads(self, tmp_path: Path) -> None:
+        write_step_record(tmp_path, _record())
+        path = tmp_path / STEP_RECORD_NAME
+        _newer(path, NEWER_RECORD_MINOR)
+
+        record = read_step_record(tmp_path)
+
+        assert record is not None
+        assert record.schema_version == NEWER_RECORD_MINOR
+        write_step_record(tmp_path, record)
+        assert f"schema_version: {NEWER_RECORD_MINOR}" in path.read_text()
+
+    def test_a_newer_step_record_with_a_new_key(self, tmp_path: Path) -> None:
+        write_step_record(tmp_path, _record())
+        path = tmp_path / STEP_RECORD_NAME
+        _newer(path, NEWER_RECORD_MINOR, key="future_field")
+        before = path.read_bytes()
+
+        with pytest.raises(CstarSchemaTooNewError, match="step record") as caught:
+            read_step_record(tmp_path)
+        record = read_step_record(tmp_path, tolerant=True)
+
+        assert caught.value.unknown == ("future_field",)
+        assert record is not None
+        assert record.unknown_keys == ("future_field",)
+        with pytest.raises(CstarSchemaTooNewError, match="to write this file"):
+            write_step_record(tmp_path, record)
+        assert path.read_bytes() == before
+
+    def test_folding_a_newer_record_makes_the_manifest_unwritable(
+        self, tmp_path: Path
+    ) -> None:
+        """A manifest that holds a record read with unknown keys ignored is itself
+        not to be written, though its own keys were all known.
+        """
+        manifest = _manifest("one")
+        write_step_record(tmp_path / "tasks" / "one", _record(step="one"))
+        _newer(
+            tmp_path / "tasks" / "one" / STEP_RECORD_NAME,
+            NEWER_RECORD_MINOR,
+            key="future_field",
+        )
+
+        assert fold_step_records(manifest, tmp_path, tolerant=True)
+
+        assert manifest.steps[0].record is not None
+        assert manifest.schema_version == CURRENT
+        assert holds_unknown_keys(manifest)
+        with pytest.raises(CstarSchemaTooNewError, match="step record schema"):
+            write_run_manifest(tmp_path, manifest)
+        assert not (tmp_path / RUN_MANIFEST_NAME).exists()
+
+    def test_folding_a_newer_record_is_strict_by_default(self, tmp_path: Path) -> None:
+        """Strict, an unreadable record is ignored with a warning, as any is."""
+        manifest = _manifest("one")
+        write_step_record(tmp_path / "tasks" / "one", _record(step="one"))
+        _newer(
+            tmp_path / "tasks" / "one" / STEP_RECORD_NAME,
+            NEWER_RECORD_MINOR,
+            key="future_field",
+        )
+
+        fold_step_records(manifest, tmp_path)
+
+        assert manifest.steps[0].record is None
+        assert not holds_unknown_keys(manifest)
+
+    def test_a_manifest_with_a_newer_record_nested_in_it_loads_tolerantly(
+        self, tmp_path: Path
+    ) -> None:
+        write_run_manifest(tmp_path, _manifest("one"))
+        path = tmp_path / RUN_MANIFEST_NAME
+        document = yaml.safe_load(path.read_text())
+        document["steps"][0]["record"] = {
+            **_record(step="one").model_dump(mode="json"),
+            "schema_version": NEWER_RECORD_MINOR,
+            "future_field": 1,
+        }
+        path.write_text(yaml.safe_dump(document))
+
+        manifest = read_run_manifest(tmp_path, tolerant=True)
+
+        assert manifest is not None
+        assert manifest.schema_version == CURRENT
+        assert manifest.steps[0].record is not None
+        assert manifest.steps[0].record.unknown_keys == ("future_field",)
+        assert holds_unknown_keys(manifest)
+
+    def test_an_older_manifest_is_written_at_the_current_version(
+        self, tmp_path: Path
+    ) -> None:
+        write_run_manifest(tmp_path, _manifest("one"))
+        path = tmp_path / RUN_MANIFEST_NAME
+        path.write_text(path.read_text().replace(CURRENT, "1.0.0", 1))
+        manifest = read_run_manifest(tmp_path)
+        assert manifest is not None
+        assert manifest.schema_version == "1.0.0"
+
+        write_run_manifest(tmp_path, manifest)
+
+        assert f"schema_version: {CURRENT}" in path.read_text()
+        assert manifest.schema_version == CURRENT
+
+    def test_an_older_step_record_is_written_at_the_current_version(
+        self, tmp_path: Path
+    ) -> None:
+        write_step_record(tmp_path, _record())
+        path = tmp_path / STEP_RECORD_NAME
+        path.write_text(path.read_text().replace(CURRENT_RECORD, "1.0.0", 1))
+        record = read_step_record(tmp_path)
+        assert record is not None
+
+        write_step_record(tmp_path, record)
+
+        assert f"schema_version: {CURRENT_RECORD}" in path.read_text()
+        assert record.schema_version == CURRENT_RECORD
+
+    def test_a_newly_built_document_is_written_at_the_current_version(
+        self, tmp_path: Path
+    ) -> None:
+        manifest = _manifest("one")
+
+        write_run_manifest(tmp_path, manifest)
+
+        assert manifest.schema_version == CURRENT
+        assert (
+            f"schema_version: {CURRENT}" in (tmp_path / RUN_MANIFEST_NAME).read_text()
+        )
 
 
 def test_manifest_lock_creates_the_lock_file(

@@ -60,7 +60,12 @@ from cstar.orchestration.serialization import (
     try_deserialize,
 )
 from cstar.orchestration.state import StateRepository
-from cstar.system.migration import CstarSchemaTooNewError, refuse_newer_schema
+from cstar.system.migration import (
+    TOLERATE_UNKNOWN,
+    CstarSchemaTooNewError,
+    VersionedDocument,
+    warn_unknown_keys,
+)
 
 log = get_logger(__name__)
 
@@ -169,7 +174,7 @@ def _legacy_path(value: t.Any) -> Path | None:
     return Path(str(value)) if value else None
 
 
-class WorkplanRun(BaseModel):
+class WorkplanRun(VersionedDocument):
     """The record this machine keeps of a run: what is live and local to it.
 
     The record lives in the state home and holds the run directory, the
@@ -181,10 +186,13 @@ class WorkplanRun(BaseModel):
     has no manifest to ask.
     """
 
+    SCHEMA_LABEL: t.ClassVar[str] = "run record"
+
     schema_version: str = Field(default="1.1.0")
     """The version of the record's format. A record without one was written by
-    cstar 0.17.0 or earlier and reads as 1.0.0; `read_run_record` refuses a
-    newer one than this build's."""
+    cstar 0.17.0 or earlier and reads as 1.0.0; a newer one than this build's
+    loads only when it holds nothing this build does not know (see
+    `VersionedDocument`)."""
 
     output_path: Path
     """The path where workplan output is written: the run directory."""
@@ -529,7 +537,7 @@ class WorkplanRun(BaseModel):
         if self._manifest_cache is not None:
             return self._manifest_cache
         try:
-            manifest = read_run_manifest(self.output_path)
+            manifest = read_run_manifest(self.output_path, tolerant=True)
         except DOCUMENT_READ_ERRORS as ex:
             msg = (
                 f"Unable to read the manifest of run {self.run_id!r} at "
@@ -647,13 +655,16 @@ def require_writable(run: WorkplanRun, *, action: str) -> None:
         raise CstarError(msg)
 
 
-def read_run_record(path: Path) -> WorkplanRun:
-    """Read a run record, refusing one a newer cstar-ocean wrote.
+def read_run_record(path: Path, *, tolerant: bool = False) -> WorkplanRun:
+    """Read a run record, refusing one a newer cstar-ocean wrote that this build cannot.
 
     Parameters
     ----------
     path : Path
         The record file.
+    tolerant : bool
+        Read a record newer than this build, within its major, with the keys
+        this build does not know ignored; for readers that never write it.
 
     Returns
     -------
@@ -664,8 +675,8 @@ def read_run_record(path: Path) -> WorkplanRun:
     FileNotFoundError
         If the file does not exist.
     CstarSchemaTooNewError
-        If the record's `schema_version` is newer than this build reads; the
-        message names the record.
+        If the record is newer than this build reads (see `VersionedDocument`);
+        the message names the record.
     ValueError
         If the file is not a valid run record.
     """
@@ -673,9 +684,15 @@ def read_run_record(path: Path) -> WorkplanRun:
     if not isinstance(raw, Mapping):
         msg = f"The run record at {path} is not a mapping"
         raise ValueError(msg)
-    target = WorkplanRun.model_fields["schema_version"].default
-    refuse_newer_schema(f"run record {path}", raw.get("schema_version"), target)
-    return WorkplanRun.model_validate(raw)
+    try:
+        run = WorkplanRun.model_validate(raw, context={TOLERATE_UNKNOWN: tolerant})
+    except CstarSchemaTooNewError as ex:
+        label = f"{WorkplanRun.SCHEMA_LABEL} {path}"
+        raise CstarSchemaTooNewError(
+            label, ex.found, ex.target, ex.unknown, ex.invalid
+        ) from ex
+    warn_unknown_keys(run, path)
+    return run
 
 
 def _try_read_run(path: Path, refused: set[Path]) -> WorkplanRun | None:
@@ -685,7 +702,7 @@ def _try_read_run(path: Path, refused: set[Path]) -> WorkplanRun | None:
     it and the upgrade, and its path is added to `refused`.
     """
     try:
-        run = read_run_record(path)
+        run = read_run_record(path, tolerant=True)
     except CstarSchemaTooNewError as ex:
         log.warning(str(ex))
         refused.add(path)
@@ -1009,7 +1026,7 @@ class TrackingRepository(LoggingMixin):
                 self.log.debug(msg)
                 return None
 
-            return read_run_record(run_path).reanchored()
+            return read_run_record(run_path, tolerant=True).reanchored()
 
     async def get_workplan_run(
         self,

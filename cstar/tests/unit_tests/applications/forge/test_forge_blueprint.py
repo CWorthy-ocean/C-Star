@@ -60,6 +60,7 @@ from cstar.orchestration.models import (
     Provenance,
 )
 from cstar.roms.precheck import NamelistConsistencyError
+from cstar.system.migration import TOLERATE_UNKNOWN, CstarSchemaTooNewError
 
 _BUNDLED_CATALOG = Path(cstar.catalog.__file__).parent / "bundled"
 _MODEL_DIR = _BUNDLED_CATALOG / "ModelSpec" / "cson_roms-marbl_v0.1"
@@ -506,6 +507,94 @@ def test_from_yaml_rejects_newer_version(tmp_path):
     p.write_text(_yaml.safe_dump(data))
     with pytest.raises(ValueError, match="newer than this build"):
         ForgeBlueprint.from_yaml(p)
+
+
+def _edited_yaml(tmp_path, **changes):
+    """Write a forge blueprint and edit its top-level keys, as a release with a
+    different schema would have written them.
+    """
+    p = tmp_path / "forge_blueprint.yaml"
+    _build().to_yaml(p)
+    data = yaml.safe_load(p.read_text())
+    data.update(changes)
+    p.write_text(yaml.safe_dump(data))
+    return p
+
+
+def _newer_schema_version():
+    """A minor version of the blueprint schema newer than this build's."""
+    major, minor, _ = ForgeBlueprint.model_fields["schema_version"].default.split(".")
+    return f"{major}.{int(minor) + 1}.0"
+
+
+def test_a_newer_minor_schema_without_new_keys_loads_and_keeps_its_version(tmp_path):
+    """A forge blueprint a newer minor release wrote loads when it holds nothing
+    this build does not know, and is written back at that version.
+    """
+    newer = _newer_schema_version()
+    p = _edited_yaml(tmp_path, schema_version=newer)
+
+    loaded = ForgeBlueprint.from_yaml(p)
+
+    assert loaded.schema_version == newer
+    assert f"schema_version: {newer}" in loaded.to_yaml_str()
+    assert (
+        yaml.safe_load(loaded.to_yaml(tmp_path / "again.yaml").read_text())[
+            "schema_version"
+        ]
+        == newer
+    )
+
+
+def test_a_newer_minor_schema_with_a_new_key_is_refused(tmp_path):
+    """A key this build does not know in a newer minor blueprint is refused as
+    too new, naming the key, rather than as an invalid blueprint.
+    """
+    p = _edited_yaml(
+        tmp_path, schema_version=_newer_schema_version(), a_key_from_the_future=1
+    )
+
+    with pytest.raises(
+        CstarSchemaTooNewError, match="sets a_key_from_the_future"
+    ) as ex:
+        ForgeBlueprint.from_yaml(p)
+
+    assert ex.value.application == "forge"
+    assert ex.value.unknown == ("a_key_from_the_future",)
+
+
+def test_a_newer_major_schema_is_refused(tmp_path):
+    p = _edited_yaml(tmp_path, schema_version="99.0.0")
+
+    with pytest.raises(CstarSchemaTooNewError, match="forge schema 99.0.0"):
+        ForgeBlueprint.from_yaml(p)
+
+
+def test_a_tolerated_forge_blueprint_will_not_be_written(tmp_path):
+    """A forge blueprint read with unknown keys ignored refuses to serialize,
+    as writing it would drop them under a newer schema_version.
+    """
+    p = _edited_yaml(
+        tmp_path, schema_version=_newer_schema_version(), a_key_from_the_future=1
+    )
+    data = yaml.safe_load(p.read_text())
+
+    loaded = ForgeBlueprint.model_validate(data, context={TOLERATE_UNKNOWN: True})
+
+    assert loaded.unknown_keys == ("a_key_from_the_future",)
+    with pytest.raises(CstarSchemaTooNewError, match="Upgrade cstar-ocean to write"):
+        loaded.to_yaml_str()
+
+
+def test_to_yaml_str_stamps_an_older_schema_with_the_builds_version(tmp_path):
+    """A blueprint read from an older schema version is written at this build's."""
+    current = ForgeBlueprint.model_fields["schema_version"].default
+    p = _edited_yaml(tmp_path, schema_version="1.0.0")
+
+    loaded = ForgeBlueprint.from_yaml(p)
+
+    assert loaded.schema_version == "1.0.0"
+    assert f"schema_version: {current}" in loaded.to_yaml_str()
 
 
 @pytest.mark.parametrize("legacy_value", [False, True])

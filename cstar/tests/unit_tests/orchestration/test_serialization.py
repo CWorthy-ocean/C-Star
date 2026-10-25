@@ -1,5 +1,6 @@
 import asyncio
 import errno
+import logging
 import shutil
 import textwrap
 import threading
@@ -34,6 +35,7 @@ from cstar.orchestration.serialization import (
     serialize,
 )
 from cstar.orchestration.state import StateRepository
+from cstar.system.migration import TOLERATE_UNKNOWN, CstarSchemaTooNewError
 
 
 def test_serialization_aliased_fields(tmp_path: Path) -> None:
@@ -363,16 +365,22 @@ def test_serialization_handle() -> None:
 
 
 def test_serializaton_yaml_schema(plotter_v2_0_0_bp: Path, tmp_path: Path) -> None:
-    """Verify a YAML-serialized file contains a schema reference."""
+    """Verify a YAML-serialized file contains a schema reference, and that it
+    names the version the file is written at: the build's, for an older blueprint.
+    """
     target = tmp_path / "output.yaml"
+    current = PlotterBlueprint.model_fields["schema_version"].default
 
     bp = deserialize(plotter_v2_0_0_bp, PlotterBlueprint)
+    assert bp.schema_version != current, "the fixture must be an older blueprint"
 
     assert serialize(target, bp)
 
     content = target.read_text()
     assert "# yaml-language-server: $schema=" in content
-    assert f"{bp.application}_schema.{bp.schema_version}.json" in content
+    assert f"{bp.application}_schema.{current}.json" in content
+    assert f"schema_version: {current}" in content
+    assert bp.schema_version == "2.0.0", "writing leaves the model unchanged"
 
 
 def test_unknown_extension_reads_as_yaml(
@@ -388,8 +396,116 @@ def test_unknown_extension_reads_as_yaml(
     assert serialize(target, bp)
     capsys.readouterr()
 
-    assert deserialize(target, PlotterBlueprint) == bp
+    # written at the build's version, which is newer than the fixture's
+    current = PlotterBlueprint.model_fields["schema_version"].default
+    assert deserialize(target, PlotterBlueprint) == bp.model_copy(
+        update={"schema_version": current}
+    )
     assert capsys.readouterr().out == ""
+
+
+def _plotter_document(version: str, **extra: t.Any) -> dict[str, t.Any]:
+    """Describe a plotter blueprint document of `version`."""
+    return {
+        "name": "plotter",
+        "application": "plotter",
+        "schema_version": version,
+        "description": "plot outputs",
+        "input_dir": "/data/out",
+        "variables": ["ALK"],
+        "time_indices": [-1],
+        "s_indices": [0],
+        "grid_file_path": "/data/grid.nc",
+        **extra,
+    }
+
+
+def _newer_plotter_version() -> str:
+    """Name a minor version of the plotter schema newer than this build's."""
+    major, minor, _ = PlotterBlueprint.model_fields["schema_version"].default.split(".")
+    return f"{major}.{int(minor) + 1}.0"
+
+
+@pytest.mark.parametrize("read", [deserialize, load_blueprint])
+def test_a_newer_minor_blueprint_without_new_keys_loads(
+    tmp_path: Path, read: Callable[[Path, type[PlotterBlueprint]], PlotterBlueprint]
+) -> None:
+    """Verify a blueprint a newer minor release wrote loads when it holds nothing
+    this build does not know, keeps its version, and is written back at it, with
+    a `$schema` header naming that version.
+    """
+    newer = _newer_plotter_version()
+    path = tmp_path / "newer.yaml"
+    path.write_text(yaml.safe_dump(_plotter_document(newer)))
+
+    bp = read(path, PlotterBlueprint)
+
+    assert bp.schema_version == newer
+    assert bp.unknown_keys == ()
+    target = tmp_path / "out.yaml"
+    assert serialize(target, bp)
+    content = target.read_text()
+    assert f"schema_version: {newer}" in content
+    assert f"plotter_schema.{newer}.json" in content
+
+
+@pytest.mark.parametrize("read", [deserialize, load_blueprint])
+def test_a_newer_minor_blueprint_with_a_new_key_is_refused(
+    tmp_path: Path, read: Callable[[Path, type[PlotterBlueprint]], PlotterBlueprint]
+) -> None:
+    """Verify a blueprint a newer minor release wrote with a key this build does
+    not know is refused with the upgrade message, labelled by its application and
+    naming the key.
+    """
+    newer = _newer_plotter_version()
+    path = tmp_path / "newer.yaml"
+    path.write_text(yaml.safe_dump(_plotter_document(newer, future_field=1)))
+
+    with pytest.raises(CstarSchemaTooNewError) as caught:
+        read(path, PlotterBlueprint)
+
+    assert caught.value.application == "plotter"
+    assert caught.value.unknown == ("future_field",)
+    assert str(caught.value).startswith(f"plotter schema {newer} is newer")
+    assert "sets future_field" in str(caught.value)
+
+
+def test_a_newer_major_blueprint_is_refused(tmp_path: Path) -> None:
+    """Verify a blueprint of a newer major is refused whatever it holds."""
+    path = tmp_path / "newer.yaml"
+    path.write_text(yaml.safe_dump(_plotter_document("99.0.0")))
+
+    with pytest.raises(CstarSchemaTooNewError, match="plotter schema 99.0.0"):
+        deserialize(path, PlotterBlueprint)
+
+
+def test_a_blueprint_tolerated_with_unknown_keys_will_not_be_written() -> None:
+    """Verify a blueprint read with unknown keys ignored refuses `model_to_yaml`."""
+    newer = _newer_plotter_version()
+
+    bp = PlotterBlueprint.model_validate(
+        _plotter_document(newer, future_field=1), context={TOLERATE_UNKNOWN: True}
+    )
+
+    assert bp.unknown_keys == ("future_field",)
+    with pytest.raises(CstarSchemaTooNewError, match="Upgrade cstar-ocean to write"):
+        model_to_yaml(bp)
+
+
+def test_model_to_yaml_stamps_an_older_blueprint_with_the_builds_version() -> None:
+    """Verify a blueprint read from an older version is written at the build's
+    version, in the `schema_version` key and the `$schema` header alike.
+    """
+    current = PlotterBlueprint.model_fields["schema_version"].default
+    bp = PlotterBlueprint.model_validate(_plotter_document("2.0.0"))
+    assert bp.schema_version == "2.0.0"
+
+    content = model_to_yaml(bp)
+
+    assert f"schema_version: {current}" in content
+    assert f"plotter_schema.{current}.json" in content
+    assert "plotter_schema.2.0.0.json" not in content
+    assert bp.schema_version == "2.0.0", "writing leaves the model unchanged"
 
 
 @pytest.fixture
@@ -705,6 +821,94 @@ def test_live_workplan_load_missing_file(tmp_path: Path) -> None:
         LiveWorkplan.load(tmp_path / "absent.yaml")
 
     assert LiveWorkplan.try_load(tmp_path / "absent.yaml") is None
+
+
+def _newer_transformed_workplan(root: Path, *, key: str = "") -> Path:
+    """Write a transformed workplan as a newer minor release would, with `key`
+    (if any) set at the top level.
+    """
+    path = _write_transformed_workplan(root)
+    current = LiveWorkplan.model_fields["schema_version"].default
+    text = path.read_text()
+    assert f"schema_version: {current}" in text
+    major, minor, _ = current.split(".")
+    newer = f"{major}.{int(minor) + 1}.0"
+    text = text.replace(f"schema_version: {current}", f"schema_version: {newer}")
+    path.write_text(text + (f"{key}: true\n" if key else ""))
+    return path
+
+
+def test_live_workplan_load_reads_a_newer_minor_without_new_keys(
+    tmp_path: Path,
+) -> None:
+    """Verify a transformed workplan a newer minor release wrote loads, strictly,
+    when it holds nothing this build does not know, and is written at its version.
+    """
+    path = _newer_transformed_workplan(tmp_path.resolve() / "run")
+
+    workplan = LiveWorkplan.load(path)
+
+    assert (
+        workplan.schema_version != LiveWorkplan.model_fields["schema_version"].default
+    )
+    assert workplan.unknown_keys == ()
+    assert serialize(tmp_path / "again.yaml", workplan)
+    assert (
+        f"schema_version: {workplan.schema_version}"
+        in (tmp_path / "again.yaml").read_text()
+    )
+
+
+def test_live_workplan_load_refuses_a_newer_minor_with_a_new_key(
+    tmp_path: Path,
+) -> None:
+    """Verify a strict load of a transformed workplan with a key this build does
+    not know is refused naming the key, and that `try_load` yields `None`.
+    """
+    path = _newer_transformed_workplan(tmp_path.resolve() / "run", key="future_field")
+
+    with pytest.raises(CstarSchemaTooNewError, match="sets future_field") as caught:
+        LiveWorkplan.load(path)
+
+    assert caught.value.unknown == ("future_field",)
+    assert LiveWorkplan.try_load(path) is None
+
+
+def test_live_workplan_load_tolerant_ignores_a_new_key_and_will_not_write_it(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Verify a tolerant load keeps the workplan for display with a warning that
+    names the key, and that serializing it is refused.
+    """
+    path = _newer_transformed_workplan(tmp_path.resolve() / "run", key="future_field")
+
+    with caplog.at_level(logging.WARNING):
+        workplan = LiveWorkplan.load(path, tolerant=True)
+    tried = LiveWorkplan.try_load(path, tolerant=True)
+
+    assert workplan.unknown_keys == ("future_field",)
+    assert tried is not None
+    assert any(
+        "future_field" in r.getMessage() and str(path) in r.getMessage()
+        for r in caplog.records
+        if r.levelno == logging.WARNING
+    )
+    target = tmp_path / "again.yaml"
+    with pytest.raises(CstarSchemaTooNewError, match="to write this file"):
+        serialize(target, workplan)
+    assert not target.exists()
+
+
+async def test_live_workplan_load_all_is_tolerant(tmp_path: Path) -> None:
+    """Verify the batch loader, which lists workplans, loads one holding a key a
+    newer release wrote.
+    """
+    path = _newer_transformed_workplan(tmp_path.resolve() / "run", key="future_field")
+
+    (result,) = await LiveWorkplan.load_all([path], limit=1)
+
+    assert result is not None
+    assert result.unknown_keys == ("future_field",)
 
 
 async def test_live_workplan_load_all_returns_none_for_unreadable(

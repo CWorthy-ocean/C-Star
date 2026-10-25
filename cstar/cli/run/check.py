@@ -339,7 +339,11 @@ def summarize(report: RunCheckReport) -> str:
 
 
 def _load_manifest(
-    resolved: CheckTarget, workplan: LiveWorkplan | None, no_refresh: bool
+    resolved: CheckTarget,
+    workplan: LiveWorkplan | None,
+    no_refresh: bool,
+    *,
+    tolerant: bool,
 ) -> RunManifest | None:
     """Read the manifest of the run, refreshed first when the run is tracked.
 
@@ -357,6 +361,10 @@ def _load_manifest(
         The run's transformed workplan, when it could be loaded.
     no_refresh : bool
         Whether to read a tracked run's manifest without refreshing it.
+    tolerant : bool
+        Whether a manifest or record newer than this build, within its major,
+        loads with the keys this build does not know ignored: true unless the
+        check writes into the run.
 
     Returns
     -------
@@ -373,13 +381,13 @@ def _load_manifest(
             typer.echo(f"Warning: the manifest was not refreshed: {ex}", err=True)
 
     try:
-        manifest = read_run_manifest(run_root)
+        manifest = read_run_manifest(run_root, tolerant=tolerant)
     except CstarError as ex:
         typer.echo(f"Warning: {ex}", err=True)
         return None
 
     if manifest is not None and resolved.run_id is None:
-        fold_step_records(manifest, run_root)
+        fold_step_records(manifest, run_root, tolerant=tolerant)
 
     return manifest
 
@@ -536,18 +544,22 @@ def check(
     if record_digests:
         _require_may_write(context, resolved, ARG_RECORD_DIGESTS, "record digests in")
 
+    # a check that writes into the run reads what it writes strictly
+    tolerant = not (repair or record_digests)
     workplan = None
     if resolved.workplan_path is not None:
-        workplan = LiveWorkplan.try_load(resolved.workplan_path)
+        workplan = LiveWorkplan.try_load(resolved.workplan_path, tolerant=tolerant)
         if workplan is None:
             msg = f"Warning: unable to load the transformed workplan {resolved.workplan_path}"
             typer.echo(msg, err=True)
 
-    manifest = _load_manifest(resolved, workplan, no_refresh)
+    manifest = _load_manifest(resolved, workplan, no_refresh, tolerant=tolerant)
     if record_digests:
         # before the checks, so one `--verify` pass sees the digests just recorded
         _record_digests(resolved, manifest)
-        manifest = _load_manifest(resolved, workplan, no_refresh=True)
+        manifest = _load_manifest(
+            resolved, workplan, no_refresh=True, tolerant=tolerant
+        )
 
     def run_checks() -> RunCheckReport:
         return check_run(

@@ -15,7 +15,12 @@ from yaml.scanner import ScannerError
 from cstar.base.exceptions import CstarExpectationFailed
 from cstar.base.log import get_logger
 from cstar.execution.file_system import local_copy
-from cstar.system.migration import CstarSchemaTooNewError
+from cstar.system.migration import (
+    KEY_SV,
+    CstarSchemaTooNewError,
+    refuse_unwritable,
+    stamped_version,
+)
 
 log = get_logger(__name__)
 
@@ -184,6 +189,22 @@ def register_representer(
     dumper.add_representer(model_type, conversion_fn)
 
 
+def _stamped(model: _T) -> _T:
+    """Return the model at the schema version it is written at (`stamped_version`).
+
+    The copy, not just the written key, carries the version, so a blueprint's
+    `$schema` header names the schema its `schema_version` does.
+    """
+    fields = getattr(type(model), "model_fields", {})
+    if KEY_SV not in fields:
+        return model
+    found = str(getattr(model, KEY_SV))
+    stamped = stamped_version(found, str(fields[KEY_SV].default))
+    if stamped == found:
+        return model
+    return t.cast("_T", model.model_copy(update={KEY_SV: stamped}))  # type: ignore[attr-defined]
+
+
 def model_to_yaml(model: SerializableModel) -> str:
     """Serialize a model to yaml.
 
@@ -196,7 +217,15 @@ def model_to_yaml(model: SerializableModel) -> str:
     -------
     str
         The serialized model
+
+    Raises
+    ------
+    CstarSchemaTooNewError
+        If the model holds content read from a newer file with keys this build
+        does not know ignored: writing it would drop them.
     """
+    refuse_unwritable(model)
+    model = _stamped(model)
     dumped = model.model_dump(exclude_defaults=True, by_alias=True)
 
     # 'application' is required by the base Blueprint type for deserialization
@@ -206,8 +235,8 @@ def model_to_yaml(model: SerializableModel) -> str:
 
     # 'schema_version' records which schema wrote the document; always include
     # it (even at the current default) so persisted artifacts self-describe.
-    if hasattr(model, "schema_version"):
-        dumped["schema_version"] = str(getattr(model, "schema_version"))
+    if hasattr(model, KEY_SV):
+        dumped[KEY_SV] = str(getattr(model, KEY_SV))
 
     dumper = yaml.Dumper
     dumper.ignore_aliases = lambda *_args: True  # type: ignore[method-assign]

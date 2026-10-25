@@ -389,7 +389,7 @@ def _open(
         predates it) or one that could not be read.
     """
     try:
-        manifest = read_run_manifest(directory)
+        manifest = read_run_manifest(directory, tolerant=True)
     except DOCUMENT_READ_ERRORS as ex:
         unreadable.append((directory, ex))
         return None
@@ -637,7 +637,7 @@ class ManifestRecord:
         """
         root = self.output_path
         try:
-            manifest = read_run_manifest(root)
+            manifest = read_run_manifest(root, tolerant=True)
         except DOCUMENT_READ_ERRORS as ex:
             msg = f"Unable to read the manifest of run {self.run_id!r} at {root}: {ex}"
             raise CstarError(msg) from ex
@@ -849,7 +849,7 @@ def read_run_location(root: Path) -> RunLocation:
         msg = f"{str(root)!r} is not a directory."
         raise CstarError(msg)
 
-    manifest = read_run_manifest(root)
+    manifest = read_run_manifest(root, tolerant=True)
     if manifest is None:
         msg = f"{str(root)!r} holds no run manifest."
         if JobFileSystemManager(root).tasks_dir.is_dir():
@@ -906,7 +906,7 @@ def _warn_if_shadowed(tracked: WorkplanRun, run_id: str) -> None:
     if runs is None:
         return
     try:
-        other = read_run_manifest(runs / run_id)
+        other = read_run_manifest(runs / run_id, tolerant=True)
     except DOCUMENT_READ_ERRORS as ex:
         log.debug(f"Unable to read a run of {run_id!r} in {runs}: {ex}")
         return

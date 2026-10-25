@@ -44,7 +44,7 @@ from cstar.base.provenance import HASH_RECIPE_VERSION, canonical_hash
 from cstar.base.utils import generate_schema_ref, lazy_import, slugify
 from cstar.execution.file_system import StateDirectoryManager
 from cstar.orchestration.serialization import register_representer, strenum_representer
-from cstar.system.migration import refuse_newer_schema
+from cstar.system.migration import VersionedDocument
 
 RequiredString: t.TypeAlias = t.Annotated[
     str,
@@ -388,8 +388,10 @@ class Provenance(ConfiguredBaseModel):
     """The blueprints and catalog specs the document was derived from."""
 
 
-class Blueprint(ConfiguredBaseModel, ABC):
+class Blueprint(ConfiguredBaseModel, VersionedDocument, ABC):
     """Common elements of all blueprints."""
+
+    SCHEMA_LABEL: t.ClassVar[str] = "blueprint"
 
     name: RequiredString
     """A unique, user-friendly name for this blueprint."""
@@ -487,6 +489,13 @@ class Blueprint(ConfiguredBaseModel, ABC):
     def schema_ref(self) -> str:
         """The URL of the published JSON schema the blueprint's ``$schema`` names."""
         return generate_schema_ref(self.application, self.schema_version)
+
+    @classmethod
+    @t.override
+    def schema_label(cls) -> str:
+        """Name a blueprint in messages by its application."""
+        application = cls.model_fields["application"].default
+        return application if isinstance(application, str) else cls.SCHEMA_LABEL
 
     @field_validator("application", mode="after")
     @classmethod
@@ -996,13 +1005,16 @@ class Step(ConfiguredBaseModel):
         return value
 
 
-class Workplan(ConfiguredBaseModel):
+class Workplan(ConfiguredBaseModel, VersionedDocument):
     """A collection of executable steps and the associated configuration to run them."""
+
+    SCHEMA_LABEL: t.ClassVar[str] = "workplan"
 
     schema_version: str = Field(default="1.2.0")
     """The version of the workplan schema the document was written with. A
     document without one predates versioning and reads as 1.0.0; a newer one
-    than this build's is refused."""
+    than this build's loads only when it holds nothing this build does not know
+    (see `VersionedDocument`)."""
 
     name: RequiredString
     """The name of the workplan, written as a slug: it is the default run-id."""
@@ -1040,22 +1052,6 @@ class Workplan(ConfiguredBaseModel):
         polymorphic_serialization=True,
     )
     """Configures the behavior of the pydantic model."""
-
-    @model_validator(mode="before")
-    @classmethod
-    def _refuse_newer_schema(cls, data: t.Any) -> t.Any:
-        """Refuse a workplan written by a newer cstar-ocean before its keys are
-        validated, so it reads as "upgrade" rather than as unknown keys.
-
-        Raises
-        ------
-        CstarSchemaTooNewError
-            If the document's `schema_version` is newer than this build's.
-        """
-        if isinstance(data, Mapping):
-            target = cls.model_fields["schema_version"].default
-            refuse_newer_schema("workplan", data.get("schema_version"), target)
-        return data
 
     @field_validator("name")
     @classmethod

@@ -72,7 +72,7 @@ def status(
         raise typer.BadParameter(str(ex)) from ex
 
     try:
-        workplan = LiveWorkplan.load(wp_path)
+        workplan = LiveWorkplan.load(wp_path, tolerant=True)
 
         # a pre-run's steps are local processes, whatever the system scheduler
         launcher = get_launcher(workplan, force_local=workplan.pre_run)

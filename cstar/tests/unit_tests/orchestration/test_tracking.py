@@ -753,16 +753,95 @@ def test_read_run_record_rejects_a_record_that_is_not_a_mapping(
         read_run_record(path)
 
 
-def test_tracking_get_refuses_a_newer_record(tmp_path: Path) -> None:
-    """Verify reading one record a newer release wrote raises the upgrade
-    error, naming the record, rather than returning nothing.
+def _add_key(path: Path, key: str) -> None:
+    """Add a key to a persisted record, as a newer release's schema would."""
+    doc = yaml.safe_load(path.read_text())
+    doc[key] = True
+    path.write_text(yaml.safe_dump(doc))
+
+
+def test_tracking_get_reads_a_newer_record_without_new_keys(tmp_path: Path) -> None:
+    """Verify a record a newer minor release wrote that holds nothing this build
+    does not know loads and keeps its version, and is written back at it.
+    """
+    repo = TrackingRepository()
+    path = repo.put_workplan_run_sync(_make_workplan_run(tmp_path, "newer"))
+    _restamp(path, "1.12.0")
+
+    run = repo.get_workplan_run_sync("newer")
+
+    assert run is not None
+    assert run.schema_version == "1.12.0"
+    assert run.unknown_keys == ()
+    assert read_run_record(path).run_id == "newer"
+    updated = repo.update_workplan_run_sync("newer", lambda r: None)
+    assert updated is not None
+    written = yaml.safe_load(repo.latest_path("newer").read_text())
+    assert written["schema_version"] == "1.12.0"
+
+
+def test_tracking_get_reads_a_newer_record_with_a_new_key_but_will_not_write_it(
+    tmp_path: Path,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Verify a plain read of a record that holds a key a newer release wrote
+    loads it with the key ignored and a warning, while strict reads, a repeat
+    write of it, and an update of it are refused naming the key.
     """
     repo = TrackingRepository()
     path = repo.put_workplan_run_sync(_make_workplan_run(tmp_path, "newer"))
     _restamp(path, "1.2.0")
+    _add_key(path, "a_key_from_the_future")
+    before = path.read_bytes()
+
+    with caplog.at_level(logging.WARNING):
+        run = repo.get_workplan_run_sync("newer")
+
+    assert run is not None
+    assert run.unknown_keys == ("a_key_from_the_future",)
+    assert any("a_key_from_the_future" in r.getMessage() for r in caplog.records)
+    with pytest.raises(CstarSchemaTooNewError, match="sets a_key_from_the_future"):
+        read_run_record(path)
+    with pytest.raises(CstarSchemaTooNewError, match="to write this file"):
+        repo.put_workplan_run_sync(run)
+    with pytest.raises(CstarSchemaTooNewError, match="Upgrade cstar-ocean") as caught:
+        repo.update_workplan_run_sync("newer", lambda r: None)
+    assert str(repo.latest_path("newer")) in str(caught.value)
+    assert path.read_bytes() == before
+
+
+def test_read_run_record_tolerant_ignores_a_new_key(tmp_path: Path) -> None:
+    """Verify `read_run_record` is strict by default and loads a record whose only
+    problem is an unknown key when asked to be tolerant.
+    """
+    repo = TrackingRepository()
+    path = repo.put_workplan_run_sync(_make_workplan_run(tmp_path, "newer"))
+    _restamp(path, "1.2.0")
+    _add_key(path, "a_key_from_the_future")
+
+    with pytest.raises(CstarSchemaTooNewError) as caught:
+        read_run_record(path)
+    run = read_run_record(path, tolerant=True)
+
+    assert caught.value.unknown == ("a_key_from_the_future",)
+    assert str(path) in str(caught.value)
+    assert run.run_id == "newer"
+    assert run.unknown_keys == ("a_key_from_the_future",)
+
+
+def test_tracking_get_refuses_a_newer_major_record(tmp_path: Path) -> None:
+    """Verify reading one record a newer major release wrote raises the upgrade
+    error, naming the record, rather than returning nothing, even when the
+    reader is tolerant.
+    """
+    repo = TrackingRepository()
+    path = repo.put_workplan_run_sync(_make_workplan_run(tmp_path, "newer"))
+    _restamp(path, "2.0.0")
 
     with pytest.raises(CstarSchemaTooNewError, match="Upgrade cstar-ocean") as caught:
         repo.get_workplan_run_sync("newer")
+    with pytest.raises(CstarSchemaTooNewError):
+        read_run_record(path, tolerant=True)
 
     # the record is read through its "latest" link
     assert str(repo.latest_path("newer")) in str(caught.value)

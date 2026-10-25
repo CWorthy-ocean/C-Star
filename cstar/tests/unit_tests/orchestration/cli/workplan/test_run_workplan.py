@@ -1177,8 +1177,9 @@ def test_workplan_run_reload_refuses_a_newer_transformed_workplan(
     mock_run_id: str,
     flatten_cli_output: Callable[[str], str],
 ) -> None:
-    """Verify re-entering a run whose transformed workplan a newer release wrote
-    exits 2 with the upgrade message, not a traceback and exit 3.
+    """Verify re-entering a run whose transformed workplan a newer release wrote,
+    with a key this build does not know, exits 2 with the upgrade message naming
+    the key, not a traceback and exit 3.
     """
     run_id = mock_run_id
     wp_path = wp_templates_dir / "workplan.yaml"
@@ -1191,6 +1192,7 @@ def test_workplan_run_reload_refuses_a_newer_transformed_workplan(
     assert "schema_version: 1.2.0" in content
     trx_path.write_text(
         content.replace("schema_version: 1.2.0", "schema_version: 1.3.0")
+        + "future_field: true\n"
     )
 
     with (
@@ -1207,6 +1209,7 @@ def test_workplan_run_reload_refuses_a_newer_transformed_workplan(
     assert (
         f"Run {run_id!r} cannot be continued: workplan schema 1.3.0 is newer" in message
     )
+    assert "sets future_field" in message
     assert "Upgrade cstar-ocean" in message
     mock_run_dag.assert_not_called()
 

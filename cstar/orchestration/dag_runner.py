@@ -99,7 +99,7 @@ from cstar.orchestration.transforms import (
     resolve_external_runs,
 )
 from cstar.system.manager import get_sysmgr
-from cstar.system.migration import CstarSchemaTooNewError
+from cstar.system.migration import CstarSchemaTooNewError, holds_unknown_keys
 
 if t.TYPE_CHECKING:
     from datetime import datetime
@@ -378,9 +378,11 @@ def refresh_run_manifest(
 
     The manifest holds a snapshot: the sentinels stay the live truth, and this
     is the one place that copies their statuses into it. The manifest is written
-    only when something besides `observed_at` changed. A failure to refresh it
-    is a warning: `--resume` refreshes it before scheduling, and keeping the
-    record of a run never stops the run.
+    only when something besides `observed_at` changed, and never when it or a
+    record folded into it was written by a newer cstar-ocean with keys this build
+    does not know: those are read with the keys ignored, so the refresh is kept
+    in memory. A failure to refresh it is a warning: `--resume` refreshes it
+    before scheduling, and keeping the record of a run never stops the run.
 
     Parameters
     ----------
@@ -401,11 +403,17 @@ def refresh_run_manifest(
     statuses = {name: state.name for name, state in status.details.items()}
     try:
         with manifest_lock(run_id):
-            manifest = read_run_manifest(root)
+            manifest = read_run_manifest(root, tolerant=True)
             if manifest is None:
                 log.debug(f"Run {run_id!r} has no manifest to refresh.")
                 return None
-            if fold_step_records(manifest, root, statuses):
+            changed = fold_step_records(manifest, root, statuses, tolerant=True)
+            if changed and holds_unknown_keys(manifest):
+                log.debug(
+                    f"Not writing the manifest of run {run_id!r}: it holds keys "
+                    "a newer cstar-ocean wrote"
+                )
+            elif changed:
                 write_run_manifest(root, manifest)
     except Exception as ex:
         log.warning(f"Could not refresh the manifest of run {run_id!r}: {ex}")
