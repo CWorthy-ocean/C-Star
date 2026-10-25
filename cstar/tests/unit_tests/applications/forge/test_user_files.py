@@ -91,7 +91,11 @@ class TestVerifyUserFile:
         records = [r for r in caplog.records if r.name == _LOGGER]
         assert len(records) == 1
         assert records[0].levelno == logging.WARNING
-        assert "not verified" in records[0].getMessage()
+        message = records[0].getMessage()
+        assert "not verified" in message
+        # named as the earlier scheme, not by the digest itself
+        assert "the full-content hash scheme of an earlier C-Star" in message
+        assert "deadbeef" not in message
 
 
 _RUN = "cstar.base.utils.subprocess.run"

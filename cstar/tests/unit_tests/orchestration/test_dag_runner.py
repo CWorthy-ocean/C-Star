@@ -1820,6 +1820,36 @@ def test_refuse_edited_done_steps_honors_clobber(
     refuse_edited_done_steps(wp, manifest, status, facts, [f" {getattr(step, by)} "])
 
 
+@pytest.mark.parametrize(
+    "recorded", [EDITED_HASH, UNTAGGED_HASH], ids=["edited", "untagged"]
+)
+def test_refuse_edited_done_steps_honors_a_clobber_the_workplan_sets(
+    tmp_path: Path,
+    hello_world_bp_path: Path,
+    caplog: pytest.LogCaptureFixture,
+    recorded: str,
+) -> None:
+    """Verify a Done step whose `workflow_overrides` set `clobber` runs again, so
+    it is neither refused nor warned about, as with `--clobber`.
+    """
+    step = _hello_step(
+        hello_world_bp_path.as_posix(), "B", workflow_overrides={"clobber": True}
+    )
+    wp = _guard_workplan(step)
+    facts = describe_steps(wp, tmp_path)
+
+    with caplog.at_level("WARNING"):
+        refuse_edited_done_steps(
+            wp,
+            _recorded("run", {"B": recorded}),
+            DagStatus({"B": Status.Done}),
+            facts,
+            [],
+        )
+
+    assert _warnings(caplog) == []
+
+
 def test_refuse_edited_done_steps_names_the_consumer_of_an_edited_producer(
     tmp_path: Path,
 ) -> None:

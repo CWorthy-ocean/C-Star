@@ -1368,7 +1368,8 @@ def refuse_edited_done_steps(
     ------
     CstarExpectationFailed
         If a step that reached `Done` in this run now has a different definition
-        than the one recorded in the manifest and is not selected for clobber.
+        than the one recorded in the manifest and is not selected for clobber, by
+        `clobber_steps` or by its own `workflow_overrides`.
     """
     tokens = {x for token in clobber_steps if (x := token.strip())}
     edited: list[str] = []
@@ -1383,7 +1384,7 @@ def refuse_edited_done_steps(
         if status[step.name] is not Status.Done:
             continue
         current = facts.get(step.name)
-        if current is None or step.name in tokens or step.safe_name in tokens:
+        if current is None or step.clobber or {step.name, step.safe_name} & tokens:
             continue
         recorded, now = entry.definition_hash, current.definition_hash
         if digest_scheme(recorded) != digest_scheme(now):

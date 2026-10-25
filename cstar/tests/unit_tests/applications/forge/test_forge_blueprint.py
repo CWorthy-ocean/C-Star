@@ -5821,16 +5821,17 @@ class TestBgcSourcesUseVarsPartitioning:
 
     def test_shipped_blueprints_have_single_bgc_source_and_still_validate(self):
         """The new validator must not break any file already in the repo -- every
-        shipped blueprint has exactly one bgc source per section.
+        shipped blueprint has one bgc source per section, or several partitioned
+        by ``use_vars`` (the shape the cases above cover).
         """
         for p in _shipped_blueprint_paths():
             cfg = ForgeBlueprint.from_yaml(p)
             for section in (cfg.forcing.initial_conditions, cfg.forcing.boundary):
-                if section is not None:
-                    assert len(section.bgc_sources) <= 1, (
-                        f"{p} has multiple bgc_sources -- the validator matrix "
-                        "above should gain a case for this instead of relying "
-                        "on this assumption"
+                if section is not None and len(section.bgc_sources) > 1:
+                    assert all(bs.use_vars for bs in section.bgc_sources), (
+                        f"{p} has multiple bgc_sources without use_vars -- the "
+                        "validator matrix above should gain a case for this "
+                        "instead of relying on this assumption"
                     )
 
 
@@ -5932,11 +5933,18 @@ class TestMigrateForcingInputsHardening:
 # hash-consistent with its own content, and load with no warnings.
 # ---------------------------------------------------------------------------
 def _shipped_blueprint_paths() -> list[Path]:
-    repo_root = Path(cstar.__file__).parents[1]
+    """The bundled forge blueprints, plus every forge blueprint in the docs (the
+    example, the tutorials and the developer walk-throughs).
+    """
+    docs = Path(cstar.__file__).parents[1] / "docs"
     paths = sorted((_BUNDLED_CATALOG / "blueprints" / "forge").glob("*.yaml"))
-    example = repo_root / "docs" / "forge-blueprint-example.wio-toy.yaml"
-    if example.exists():
-        paths.append(example)
+    for path in sorted(docs.rglob("*.yaml")) if docs.is_dir() else []:
+        try:
+            head = next(yaml.safe_load_all(path.read_text()), None)
+        except yaml.YAMLError:  # not a document a blueprint could be
+            continue
+        if isinstance(head, dict) and head.get("application") == "forge":
+            paths.append(path)
     return paths
 
 
