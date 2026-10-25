@@ -784,9 +784,10 @@ def test_tracking_get_reads_a_newer_record_with_a_new_key_but_will_not_write_it(
     tmp_path: Path,
     caplog: pytest.LogCaptureFixture,
 ) -> None:
-    """Verify a plain read of a record that holds a key a newer release wrote
-    loads it with the key ignored and a warning, while strict reads, a repeat
-    write of it, and an update of it are refused naming the key.
+    """Verify a tolerant get of a record that holds a key a newer release wrote
+    loads it with the key ignored and a warning, while a plain (strict) get,
+    strict reads, a repeat write of it, and an update of it are refused naming
+    the key.
     """
     repo = TrackingRepository()
     path = repo.put_workplan_run_sync(_make_workplan_run(tmp_path, "newer"))
@@ -794,8 +795,10 @@ def test_tracking_get_reads_a_newer_record_with_a_new_key_but_will_not_write_it(
     _add_key(path, "a_key_from_the_future")
     before = path.read_bytes()
 
+    with pytest.raises(CstarSchemaTooNewError, match="sets a_key_from_the_future"):
+        repo.get_workplan_run_sync("newer")
     with caplog.at_level(logging.WARNING):
-        run = repo.get_workplan_run_sync("newer")
+        run = repo.get_workplan_run_sync("newer", tolerant=True)
 
     assert run is not None
     assert run.unknown_keys == ("a_key_from_the_future",)

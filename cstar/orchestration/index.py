@@ -797,7 +797,9 @@ def _tracked_for(location: RunLocation, *, same_root: bool) -> WorkplanRun | Non
     if location.kind != "workplan":
         return None
     try:
-        tracked = TrackingRepository().get_workplan_run_sync(location.run_id)
+        tracked = TrackingRepository().get_workplan_run_sync(
+            location.run_id, tolerant=True
+        )
         if (
             tracked is None
             or not tracked.output_path.is_dir()
@@ -933,7 +935,9 @@ def _resolve_run_id(
         # tracking slugifies the run-id it is asked for, so the directories
         # and manifests named after it must be looked up by the same slug
         run_id = slugify(run_id)
-        tracked = TrackingRepository().get_workplan_run_sync(run_id, run_date=start_at)
+        tracked = TrackingRepository().get_workplan_run_sync(
+            run_id, run_date=start_at, tolerant=True
+        )
     except ValueError as ex:
         msg = f"Unable to look up run {run_id!r}: {ex}"
         raise CstarError(msg) from ex

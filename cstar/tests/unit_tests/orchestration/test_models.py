@@ -762,6 +762,33 @@ def test_workplan_reads_a_newer_version_without_new_keys(
     assert f"schema_version: {version}" in model_to_yaml(plan)
 
 
+@pytest.mark.filterwarnings("error::UserWarning")
+def test_a_newer_workplan_and_blueprint_rebuild_through_their_constructors(
+    gen_fake_steps: Callable[[int], Generator[Step, None, None]],
+) -> None:
+    """Verify a newer-minor document that loaded can be rebuilt with `Cls(**dump)`,
+    as the transformer and the override transform do: under `__init__`, the
+    validator must return the instance pydantic builds.
+    """
+    plan = Workplan.model_validate(_workplan_data(list(gen_fake_steps(1)), "1.3.0"))
+    current = HelloWorldBlueprint.model_fields["schema_version"].default
+    major, minor, _ = current.split(".")
+    blueprint = HelloWorldBlueprint.model_validate(
+        {
+            "name": "b",
+            "description": "d",
+            "target": "t",
+            "schema_version": f"{major}.{int(minor) + 1}.0",
+        }
+    )
+
+    rebuilt_plan = Workplan(**plan.model_dump(by_alias=True))
+    rebuilt_blueprint = HelloWorldBlueprint(**blueprint.model_dump(exclude={"$schema"}))
+
+    assert rebuilt_plan == plan
+    assert rebuilt_blueprint == blueprint
+
+
 @pytest.mark.parametrize("klass", [Workplan, LiveWorkplan])
 @pytest.mark.parametrize("version", ["1.2.1", "1.3.0"])
 def test_workplan_refuses_a_newer_version_with_a_new_key(

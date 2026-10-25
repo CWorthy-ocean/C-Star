@@ -1701,7 +1701,7 @@ def recorded_step_status(root: Path, manifest: RunManifest, name: str) -> str:
         return ""
 
     try:
-        record = read_step_record(root / entry.working_dir)
+        record = read_step_record(root / entry.working_dir, tolerant=True)
     except DOCUMENT_READ_ERRORS as ex:
         log.warning(
             f"Ignoring the record of step {name!r} of run {manifest.run_id!r}: {ex}"

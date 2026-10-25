@@ -643,9 +643,9 @@ class TestManifestRecord:
         read: list[Path] = []
         real = manifest_module.read_step_record
 
-        def spy(step_root: Path) -> StepRecord | None:
+        def spy(step_root: Path, *, tolerant: bool = False) -> StepRecord | None:
             read.append(step_root)
-            return real(step_root)
+            return real(step_root, tolerant=tolerant)
 
         monkeypatch.setattr(manifest_module, "read_step_record", spy)
 

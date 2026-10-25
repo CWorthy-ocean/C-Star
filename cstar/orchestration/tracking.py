@@ -994,7 +994,11 @@ class TrackingRepository(LoggingMixin):
         return tuple(sorted(list({p.resolve() for p in items})))
 
     def get_workplan_run_sync(
-        self, run_id: str, run_date: datetime | None = None
+        self,
+        run_id: str,
+        run_date: datetime | None = None,
+        *,
+        tolerant: bool = False,
     ) -> WorkplanRun | None:
         """Locate a WorkplanRun record.
 
@@ -1004,6 +1008,9 @@ class TrackingRepository(LoggingMixin):
             The run_id of the WorkplanRun
         run_date : datetime | None
             The datetime the run was executed or `None`.
+        tolerant : bool
+            Passed to `read_run_record`: for callers that never act on the run
+            or write the record.
 
         Returns
         -------
@@ -1028,12 +1035,14 @@ class TrackingRepository(LoggingMixin):
                 self.log.debug(msg)
                 return None
 
-            return read_run_record(run_path, tolerant=True).reanchored()
+            return read_run_record(run_path, tolerant=tolerant).reanchored()
 
     async def get_workplan_run(
         self,
         run_id: str,
         run_date: datetime | None = None,
+        *,
+        tolerant: bool = False,
     ) -> WorkplanRun | None:
         """Locate a WorkplanRun record.
 
@@ -1043,6 +1052,8 @@ class TrackingRepository(LoggingMixin):
             The run_id of the WorkplanRun
         run_date : datetime | None
             The datetime the run was executed or `None`.
+        tolerant : bool
+            Passed to `get_workplan_run_sync`.
 
         Returns
         -------
@@ -1052,9 +1063,11 @@ class TrackingRepository(LoggingMixin):
         if self._sem:
             async with self._sem:
                 return await asyncio.to_thread(
-                    self.get_workplan_run_sync, run_id, run_date
+                    self.get_workplan_run_sync, run_id, run_date, tolerant=tolerant
                 )
-        return await asyncio.to_thread(self.get_workplan_run_sync, run_id, run_date)
+        return await asyncio.to_thread(
+            self.get_workplan_run_sync, run_id, run_date, tolerant=tolerant
+        )
 
     def _write_run_locked(self, run: WorkplanRun) -> Path:
         """Persist a run record and repoint its "latest" link; caller holds the lock.

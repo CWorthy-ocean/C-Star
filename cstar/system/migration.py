@@ -534,28 +534,41 @@ class VersionedDocument(BaseModel):
             within the major and fails to validate (other than only by unknown
             keys, for a tolerant reader).
         """
-        context = dict(info.context or {})
-        if not isinstance(data, Mapping) or context.get(_ADMITTED):
+        if not isinstance(data, Mapping):
             return handler(data)
 
         label = cls.schema_label()
         target = str(cls.model_fields[KEY_SV].default)
         found = schema_version_of(data.get(KEY_SV))
         refuse_newer_major(label, found, target)
-        if version_key(found) <= version_key(target):
+        context = dict(info.context or {})
+        if context.get(_ADMITTED) or version_key(found) <= version_key(target):
             return handler(data)
 
+        # checked without keeping the result: under `__init__` the validator
+        # must return the instance `handler` builds
         context[_ADMITTED] = True
         try:
-            return cls.model_validate(data, extra="forbid", context=context)
+            cls.__pydantic_validator__.validate_python(
+                data, extra="forbid", context=context
+            )
         except ValidationError as ex:
             unknown, invalid = _failed_locations(ex)
             if invalid or not context.get(TOLERATE_UNKNOWN):
                 raise CstarSchemaTooNewError(
                     label, found, target, unknown, invalid
                 ) from ex
+        else:
+            return handler(data)
 
-        document = cls.model_validate(data, extra="ignore", context=context)
+        # only a reader's `model_validate` passes the context, so this is never
+        # reached under `__init__`
+        try:
+            document = cls.model_validate(data, extra="ignore", context=context)
+        except ValidationError as ex:
+            raise CstarSchemaTooNewError(
+                label, found, target, unknown, _failed_locations(ex)[1]
+            ) from ex
         document._unknown_keys = tuple(unknown)
         return document
 
