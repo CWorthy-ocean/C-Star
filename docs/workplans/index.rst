@@ -324,7 +324,7 @@ optional:
       launcher: slurm          # "local" | "slurm" | omitted
       system: anvil            # optional, informational
       slurm:                   # workplan-wide SLURM defaults
-        account_name: x-ees250129
+        account_name: my-allocation
         queue_name: wholenode
         max_walltime: "04:00:00"
 

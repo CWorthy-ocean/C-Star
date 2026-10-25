@@ -419,12 +419,12 @@ After completing our components, we still need to create an instance of the
 blueprint. First, I configure a `HelloWorldBlueprint` and save it to a file.
 
 .. code-block:: yaml
-   :caption: notify-ankona.yaml
+   :caption: notify-oceanographers.yaml
 
-   name: notify @ankona
-   description: Send a notification to @ankona
+   name: notify @oceanographers
+   description: Send a notification to @oceanographers
    application: hello_world
-   target: '@ankona'
+   target: '@oceanographers'
 
 Notice the additional fields that are included from the `Blueprint` base class:
 
@@ -432,15 +432,15 @@ Notice the additional fields that are included from the `Blueprint` base class:
 * description - a user-friendly description of the purpose of this blueprint instance
 
 These fields are required when creating the configured blueprint instance. For example, we
-might later create another file `notify-scott.yaml` with:
+might later create another file `notify-modelers.yaml` with:
 
 .. code-block:: yaml
-   :caption: notify-scott.yaml
+   :caption: notify-modelers.yaml
 
-   name: notify @scott
-   description: Send a notification to @scott
+   name: notify @modelers
+   description: Send a notification to @modelers
    application: hello_world
-   target: '@scott'
+   target: '@modelers'
 
 Remember - a `Blueprint` defines the available configuration. The
 blueprint files specify how an *execution* of the application should behave.
@@ -454,11 +454,11 @@ We have finally reached the point where we can execute the application using the
 .. code-block:: console
    :caption: Executing an application with the CLI
 
-   > cstar blueprint run notify-ankona.yaml
-   Hello, @ankona
+   > cstar blueprint run notify-oceanographers.yaml
+   Hello, @oceanographers
 
-   > cstar blueprint run notify-scott.yaml
-   Hello, @scott
+   > cstar blueprint run notify-modelers.yaml
+   Hello, @modelers
 
 Making Your Application Discoverable
 ------------------------------------

@@ -120,7 +120,7 @@ ahead of time. Notice that:
     description: this is mainly to test infra like containers and workplans. it should run on 256 processors (2 nodes)
     application: ucla_roms
     schema_version: 3.3.0
-    working_dir: /anvil/scratch/x-seilerman/2node_1wk_job1/
+    working_dir: /anvil/scratch/x-oceanographer/2node_1wk_job1/
     state: draft
     valid_start_date: 2000-01-15 0:00:00
     valid_end_date: 2000-01-23 0:00:00
@@ -133,7 +133,7 @@ ahead of time. Notice that:
         branch: marbl0.45.0
 
       run_time:
-        location: /anvil/scratch/x-seilerman/2node_test_domain
+        location: /anvil/scratch/x-oceanographer/2node_test_domain
         branch: "na"
         filter:
           files:
@@ -142,7 +142,7 @@ ahead of time. Notice that:
           - marbl_tracer_output_list
           - marbl_diagnostic_output_list
       compile_time:
-        location: /anvil/scratch/x-seilerman/2node_test_domain/compile
+        location: /anvil/scratch/x-oceanographer/2node_test_domain/compile
         branch: "na"
         filter:
           files:
@@ -157,29 +157,29 @@ ahead of time. Notice that:
 
     grid:
       data:
-        - location: /anvil/scratch/x-seilerman/2node_test_domain/input_files/partitioned_files/grid_64x64x5.000.nc
+        - location: /anvil/scratch/x-oceanographer/2node_test_domain/input_files/partitioned_files/grid_64x64x5.000.nc
           partitioned: true
     initial_conditions:
       data:
-        - location: /anvil/scratch/x-seilerman/2node_test_domain/input_files/partitioned_files/init_condis_bgc.000.nc
+        - location: /anvil/scratch/x-oceanographer/2node_test_domain/input_files/partitioned_files/init_condis_bgc.000.nc
           partitioned: true
 
     forcing:
       tidal:
         data:
-          - location: /anvil/scratch/x-seilerman/2node_test_domain/input_files/partitioned_files/tides_Jan1_2000.000.nc
+          - location: /anvil/scratch/x-oceanographer/2node_test_domain/input_files/partitioned_files/tides_Jan1_2000.000.nc
             partitioned: true
       surface:
         data:
-          - location: /anvil/scratch/x-seilerman/2node_test_domain/input_files/partitioned_files/surf_phys_filepath_200001.000.nc
+          - location: /anvil/scratch/x-oceanographer/2node_test_domain/input_files/partitioned_files/surf_phys_filepath_200001.000.nc
             partitioned: true
-          - location: /anvil/scratch/x-seilerman/2node_test_domain/input_files/partitioned_files/surf_frc_bgc_clim.000.nc
+          - location: /anvil/scratch/x-oceanographer/2node_test_domain/input_files/partitioned_files/surf_frc_bgc_clim.000.nc
             partitioned: true
       boundary:
         data:
-          - location: /anvil/scratch/x-seilerman/2node_test_domain/input_files/partitioned_files/boundary_force_phys_jan15_feb21_200001.000.nc
+          - location: /anvil/scratch/x-oceanographer/2node_test_domain/input_files/partitioned_files/boundary_force_phys_jan15_feb21_200001.000.nc
             partitioned: true
-          - location: /anvil/scratch/x-seilerman/2node_test_domain/input_files/partitioned_files/boundary_force_bgc_jan15_feb21_clim.000.nc
+          - location: /anvil/scratch/x-oceanographer/2node_test_domain/input_files/partitioned_files/boundary_force_bgc_jan15_feb21_clim.000.nc
             partitioned: true
 
     partitioning:
