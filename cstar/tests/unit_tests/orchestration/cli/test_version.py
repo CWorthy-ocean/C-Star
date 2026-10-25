@@ -10,6 +10,11 @@ from typer.testing import CliRunner
 import cstar
 from cstar.base.env import REMOVED_SETTINGS
 from cstar.cli.common import common_callback, exit_on_refused_settings
+from cstar.roms.namelist import NEWEST_KNOWN_UCLA_ROMS, format_roms_version
+
+NEWEST_KNOWN_LINE = (
+    f"Newest known ucla-roms release: {format_roms_version(NEWEST_KNOWN_UCLA_ROMS)}"
+)
 
 
 def make_app() -> typer.Typer:
@@ -33,7 +38,9 @@ def fake_pkg_version(installed: dict[str, str]):
 
 
 def test_version_all_packages_installed() -> None:
-    """All lines appear, in order, when the companion packages are installed."""
+    """All lines appear, in order, when the companion packages are installed,
+    ending with the newest ucla-roms release this C-Star knows.
+    """
     runner = CliRunner()
     installed = {"roms-tools": "4.5.6"}
 
@@ -47,10 +54,13 @@ def test_version_all_packages_installed() -> None:
     assert lines[0].startswith("cstar executable location: ")
     assert lines[1] == f"C-Star version: {cstar.__version__}"
     assert lines[2] == "roms-tools version: 4.5.6"
+    assert lines[3] == NEWEST_KNOWN_LINE
 
 
 def test_version_companion_packages_missing() -> None:
-    """Lines for uninstalled companion packages are omitted."""
+    """Lines for uninstalled companion packages are omitted; the newest known
+    ucla-roms release is always printed.
+    """
     runner = CliRunner()
 
     with mock.patch("cstar.cli.common._pkg_version", side_effect=fake_pkg_version({})):
@@ -60,7 +70,8 @@ def test_version_companion_packages_missing() -> None:
     lines = result.stdout.strip().splitlines()
     assert lines[0].startswith("cstar executable location: ")
     assert lines[1] == f"C-Star version: {cstar.__version__}"
-    assert len(lines) == 2
+    assert lines[2] == NEWEST_KNOWN_LINE
+    assert len(lines) == 3
 
 
 @pytest.mark.parametrize("name", sorted(REMOVED_SETTINGS))

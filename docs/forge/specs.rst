@@ -120,6 +120,15 @@ A ``model.yaml`` has this shape:
    validated against even as C-Star's bundled copy moves on. Details are in
    :doc:`../developers/forge_templates`.
 
+   The ucla-roms pin decides which namelist Forge writes. A release tag
+   (``commit: 0.12.0``) selects that release's namelist exactly; a commit hash
+   selects the release it descends from; a branch gets the newest namelist
+   C-Star has, with a warning. A release newer than the newest one your C-Star
+   knows (``cstar --version`` prints it) also gets the newest namelist C-Star
+   has, with a warning naming both releases: if that release changed the
+   namelist, ROMS may stop on the generated file or run on the default of a
+   key it lacks. Upgrade C-Star before adopting a newer ucla-roms release.
+
 ``model_settings``
    The model-level defaults, one top-level key per namelist section or
    scalar (``cppdefs``, ``param``, ``tides``, ``marbl_bgc``, ...). This is the

@@ -391,7 +391,13 @@ accepts a single value or one entry per child, checking the per-child rules
 ROMS stops on in every build), selected
 by ``namelist_schema_for_ref(ref)`` -- semver tags select exactly; a commit
 hash selects the release it descends from, via ``git describe`` in a clone;
-branch names and unresolved hashes warn and fall back to the latest schema).
+branch names and unresolved hashes warn and fall back to the latest schema; a
+release newer than ``NEWEST_KNOWN_UCLA_ROMS``, named or resolved from a hash,
+also gets the latest schema with a warning, logged once per ref, since it may
+have namelist changes C-Star does not model. Every new tier bumps that
+constant, and so does adopting a release with no namelist change; a unit test
+fails if it falls behind the registry or a bundled ModelSpec's release-tag
+pin).
 Forge mirrors this in
 ``namelist_model.py``: ``RunTimeSettings`` (legacy, < 0.4.0),
 ``RunTimeSettingsV0_4_0`` (adds ``param.nt_cdr_oae``/``param.nt_cdr_dor``),
