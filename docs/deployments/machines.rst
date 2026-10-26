@@ -1,6 +1,6 @@
 
-Machines
-========
+Support Machines
+================
 
 C-Star aims to be deployable on a wide range of HPC systems, but configuration
 is needed on each system. This process is becoming more automated over time.
@@ -22,8 +22,8 @@ We would love to help you get set up!
 +--------------------------------------------------------------------------------------+------------+-------------------------+
 | `Bouchet (YCRC) <https://docs.ycrc.yale.edu/clusters/bouchet/>`__                    | ✅         | ✅                      |
 +--------------------------------------------------------------------------------------+------------+-------------------------+
-| `Derecho (NCAR)                                                                      | ✅         | ❌ (PBS not currently   |
-| <https://ncar-hpc-docs.readthedocs.io/en/latest/compute-systems/derecho/>`__         |            |    supported)           |
+| `Derecho (NCAR)                                                                      | ✅         | ❌ (PBS not currently supported)  |
+| <https://ncar-hpc-docs.readthedocs.io/en/latest/compute-systems/derecho/>`__         |            |                         |
 +--------------------------------------------------------------------------------------+------------+-------------------------+
 | `Elja (IRHPC) <https://wiki.irei.is>`__                                              | ✅         | ✅                      |
 +--------------------------------------------------------------------------------------+------------+-------------------------+
