@@ -2,9 +2,9 @@ name: cstar-env
 channels:
   - conda-forge
 dependencies:
-  - python>=3.12,<3.14
+  - python>=3.12,<3.15
   - pip
-  - roms-tools>=5.2.1,<6
+  - roms-tools>=5.2.2,<6
   # forge application runtime dependencies
   - jinja2
   - pandas
