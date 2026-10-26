@@ -103,6 +103,7 @@ from cstar.system.manager import get_sysmgr
 from cstar.system.migration import CstarSchemaTooNewError, version_key
 
 if t.TYPE_CHECKING:
+    from collections.abc import Callable
     from datetime import datetime
 
 log = get_logger(__name__)
@@ -1452,12 +1453,29 @@ def _major_moved(recorded: str, now: str) -> bool:
     return bool(recorded and now) and version_key(recorded)[0] != version_key(now)[0]
 
 
+def clobber_each_step(names: "Sequence[str]") -> str:
+    """Spell the `--clobber` options of `cstar workplan submit` that re-run steps.
+
+    Parameters
+    ----------
+    names : Sequence[str]
+        The names of the steps to re-run.
+
+    Returns
+    -------
+    str
+        One `--clobber <name>` per step.
+    """
+    return " ".join(f"{ARG_CLOBBER} {name}" for name in names)
+
+
 def refuse_edited_steps(
     wp: Workplan,
     manifest: RunManifest,
     status: DagStatus,
     facts: Mapping[str, StepFacts],
     clobber_steps: "Sequence[str]",
+    clobber_hint: "Callable[[Sequence[str]], str]" = clobber_each_step,
 ) -> None:
     """Refuse to re-enter a run in which a done, queued or running step was edited.
 
@@ -1486,6 +1504,9 @@ def refuse_edited_steps(
         The facts known about each authored step (see `describe_steps`).
     clobber_steps : Sequence[str]
         Names or safe_names of the steps the user chose to re-run.
+    clobber_hint : Callable[[Sequence[str]], str]
+        Spells the options that re-run the named steps, in the command the user
+        ran, for the refusal and the warning.
 
     Raises
     ------
@@ -1525,19 +1546,18 @@ def refuse_edited_steps(
     problems: list[str] = []
     if edited_done:
         names = ", ".join(repr(name) for name in edited_done)
-        rerun = " ".join(f"{ARG_CLOBBER} {name}" for name in edited_done)
         problems.append(
             f"Steps {names} reached Done in run {manifest.run_id!r} under a "
-            f"different definition; pass {rerun} to re-run them"
+            f"different definition; pass {clobber_hint(edited_done)} to re-run them"
         )
     if edited_in_progress:
         names = ", ".join(repr(name) for name in edited_in_progress)
-        rerun = " ".join(f"{ARG_CLOBBER} {name}" for name in edited_in_progress)
         problems.append(
             f"Steps {names} are still queued or running in run "
             f"{manifest.run_id!r} under the definition they were submitted with, "
-            f"which they would keep; pass {rerun} to cancel and resubmit them, or "
-            "undo the edit to let them finish as submitted"
+            f"which they would keep; pass {clobber_hint(edited_in_progress)} to "
+            "cancel and resubmit them, or undo the edit to let them finish as "
+            "submitted"
         )
     if problems:
         raise CstarExpectationFailed(
@@ -1550,8 +1570,9 @@ def refuse_edited_steps(
             f"Steps {names} in run {manifest.run_id!r} have definitions recorded "
             "by another C-Star release, which this one cannot compare (a changed "
             "hash recipe, or a blueprint migrated to a newer schema), so an edit "
-            f"made to them since is not detected; pass {ARG_CLOBBER} <step-name> to "
-            "re-run a step you changed. This attempt records their definitions again."
+            f"made to them since is not detected; pass {clobber_hint(['<step-name>'])} "
+            "to re-run a step you changed. This attempt records their definitions "
+            "again."
         )
 
 
@@ -1619,6 +1640,7 @@ async def build_dag(
     clobber_steps: "Sequence[str] | None" = None,
     pre_run: bool = False,
     blueprint_sources: "Mapping[str, Path] | None" = None,
+    clobber_hint: "Callable[[Sequence[str]], str]" = clobber_each_step,
 ) -> tuple[Planner, Path, dict[str, StepFacts], CarriedInputs]:
     """Execute the steps in the workplan.
 
@@ -1640,6 +1662,9 @@ async def build_dag(
     blueprint_sources : Mapping[str, Path] | None
         The migrated copy of a step's blueprint, by step name, read and prepared
         in place of the file the step names (see `describe_steps`).
+    clobber_hint : Callable[[Sequence[str]], str]
+        Spells the options that re-run the named steps, in the command the user
+        ran (see `refuse_edited_steps`).
 
     Returns
     -------
@@ -1688,7 +1713,9 @@ async def build_dag(
         status = await load_run_state(
             run_id, get_launcher(wp_orig, force_local=pre_run)
         )
-        refuse_edited_steps(wp_orig, manifest, status, facts, clobber_steps or [])
+        refuse_edited_steps(
+            wp_orig, manifest, status, facts, clobber_steps or [], clobber_hint
+        )
 
     wp, prepared_wp_path, external, carried = await prepare_workplan(
         wp_path, output_dir, user_variables, clobber_steps, pre_run, blueprint_sources
@@ -1901,6 +1928,7 @@ async def build_and_run_dag(
     clobber_steps: "Sequence[str] | None" = None,
     pre_run: bool = False,
     blueprint_sources: "Mapping[str, Path] | None" = None,
+    clobber_hint: "Callable[[Sequence[str]], str]" = clobber_each_step,
 ) -> WorkplanRun:
     """Execute the steps in the workplan.
 
@@ -1924,6 +1952,9 @@ async def build_and_run_dag(
     blueprint_sources : Mapping[str, Path] | None
         The migrated copy of a step's blueprint, by step name, run in place of
         the file the step names.
+    clobber_hint : Callable[[Sequence[str]], str]
+        Spells the options that re-run the named steps, in the command the user
+        ran (see `refuse_edited_steps`).
 
     Returns
     -------
@@ -1946,6 +1977,7 @@ async def build_and_run_dag(
         clobber_steps=clobber_steps,
         pre_run=pre_run,
         blueprint_sources=blueprint_sources,
+        clobber_hint=clobber_hint,
     )
     return await run_dag(
         wp_path,

@@ -1769,6 +1769,45 @@ def test_refuse_edited_steps_refuses_an_edited_done_step(
     assert ARG_RUN_ID in message
 
 
+def test_refuse_edited_steps_spells_the_rerun_as_the_command_takes_it(
+    tmp_path: Path, hello_world_bp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Verify the refusal and the warning name the re-run as `clobber_hint`
+    spells it for the steps, as `cstar blueprint submit`'s flag does, and not
+    as one `--clobber <name>` per step.
+    """
+    wp = _guard_workplan(
+        _hello_step(hello_world_bp_path.as_posix(), "A"),
+        _hello_step(hello_world_bp_path.as_posix(), "B"),
+    )
+    facts = describe_steps(wp, tmp_path)
+    status = DagStatus({"A": Status.Done, "B": Status.Submitted})
+    spelled: list[list[str]] = []
+
+    def hint(names: t.Sequence[str]) -> str:
+        spelled.append(list(names))
+        return ARG_CLOBBER
+
+    with pytest.raises(CstarExpectationFailed) as exc_info:
+        refuse_edited_steps(
+            wp, _recorded("run", _stale(facts)), status, facts, [], hint
+        )
+
+    message = str(exc_info.value)
+    assert f"pass {ARG_CLOBBER} to re-run them" in message
+    assert f"pass {ARG_CLOBBER} to cancel and resubmit them" in message
+    assert f"{ARG_CLOBBER} A" not in message
+    assert spelled == [["A"], ["B"]]
+
+    with caplog.at_level("WARNING"):
+        refuse_edited_steps(
+            wp, _recorded("run", {"A": UNTAGGED_HASH}), status, facts, [], hint
+        )
+
+    (warning,) = _warnings(caplog)
+    assert f"pass {ARG_CLOBBER} to re-run a step you changed" in warning
+
+
 def test_refuse_edited_steps_names_every_edited_step(
     tmp_path: Path, hello_world_bp_path: Path
 ) -> None:
@@ -2734,6 +2773,9 @@ async def test_build_dag_refuses_an_edited_queued_step_before_writing_anything(
             CstarExpectationFailed, match=re.escape(f"{ARG_CLOBBER} hello")
         ):
             await build_dag(wp_path, mock_run_id)
+        # a command whose --clobber is a flag spells the re-run its own way
+        with pytest.raises(CstarExpectationFailed, match="pass --again to cancel"):
+            await build_dag(wp_path, mock_run_id, clobber_hint=lambda _: "--again")
 
         assert not list(output_dir.glob("*_transformed.yaml*"))
         assert not (output_dir / ATTEMPTS_DIR_NAME).exists()
