@@ -73,6 +73,7 @@ from cstar.orchestration.dag_runner import (
     build_and_run_dag,
     build_planner,
     check_clobber_targets,
+    drop_spent_clobbers,
     get_launcher,
     load_external_runs,
     load_run_state,
@@ -1011,6 +1012,7 @@ def submit_workplan(
                     )
                     raise typer.BadParameter(msg, param_hint=ARG_RESUME)
                 pre_run = wp.pre_run
+                asyncio.run(drop_spent_clobbers(wp, wp_run))
                 apply_clobber_overrides(wp, clobber)
                 if resume:
                     # load the state once: refresh the manifest, then apply it

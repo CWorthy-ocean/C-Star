@@ -251,6 +251,22 @@ def test_clobbered_edited_step_reruns(guarded_run: GuardedRun) -> None:
     assert untouched == guarded_run.records["A"]
 
 
+def test_reload_by_run_id_does_not_clobber_again(guarded_run: GuardedRun) -> None:
+    """Re-entering by the run-id alone, which replays the recorded plan and its
+    ``--clobber B``, leaves ``B`` as the previous attempt re-ran it.
+    """
+    record = read_step_record(guarded_run.step_root(EDITED_STEP))
+    sentinel = sentinel_path(guarded_run.state_home, RUN_ID, EDITED_STEP)
+    pid = yaml.safe_load(sentinel.read_text())["pid"]
+
+    proc = run_cstar(guarded_run.env, "workplan", "submit", "--run-id", RUN_ID)
+
+    assert proc.returncode == 0, _output(proc)
+    assert guarded_run.current_manifest().attempts[-1].clobbered == []
+    assert yaml.safe_load(sentinel.read_text())["pid"] == pid
+    assert read_step_record(guarded_run.step_root(EDITED_STEP)) == record
+
+
 # --- steps that are still queued or running ---------------------------------------
 
 GATE_TIMEOUT = 60.0
@@ -517,6 +533,13 @@ def test_edited_queued_step_is_refused_then_clobber_replaces_it(
     assert new_pid_b not in (None, pid_b), run.diagnostics()
     assert run.pid("A") == pid_a and _alive(proxy_a), run.diagnostics()
     assert read_status(run.sentinel("B")) == int(Status.Submitted), run.diagnostics()
+
+    # by the run-id alone, the recorded --clobber B is spent: B is left queued
+    reloaded = run_cstar(run.fast_env, "workplan", "submit", "--run-id", run.run_id)
+
+    assert reloaded.returncode == 0, _output(reloaded) + run.diagnostics()
+    assert "Cancelled job" not in reloaded.stdout, _output(reloaded)
+    assert run.pid("B") == new_pid_b, run.diagnostics()
 
     run.gate.touch()
     statuses = wait_for_terminal(

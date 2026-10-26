@@ -87,6 +87,7 @@ from cstar.orchestration.tracking import (
     KEY_RUN_UUID,
     TrackingRepository,
     WorkplanRun,
+    aware_utc,
     measure_step_sizes,
 )
 from cstar.orchestration.transforms import (
@@ -1041,6 +1042,75 @@ def apply_clobber_overrides(
             f"{', '.join(stale)}"
         )
         log.warning(msg)
+
+
+async def drop_spent_clobbers(wp: Workplan, wp_run: WorkplanRun) -> list[str]:
+    """Drop the recorded clobber of each step submitted again since it was selected.
+
+    A run re-entered by its run-id alone replays its transformed workplan, which
+    keeps the `--clobber` selection of the attempt that prepared it. Replayed
+    after the step was submitted again, the selection would clear the step once
+    more: a finished step would be re-run, a running one cancelled and restarted.
+    A selection stands until the step is submitted at or after the start of the
+    latest attempt that clobbered it, so one whose attempt stopped before
+    reaching the step still applies. A clobber the authored workplan sets is
+    applied by every re-entry and is kept.
+
+    Parameters
+    ----------
+    wp : Workplan
+        The replayed workplan; a spent clobber is removed from its steps'
+        `workflow_overrides`.
+    wp_run : WorkplanRun
+        The recorded run being re-entered.
+
+    Returns
+    -------
+    list[str]
+        The names of the steps whose clobber was dropped; none when the run has
+        no readable manifest, whose attempts tell when each was selected.
+    """
+    if not (selected := [step for step in wp.steps if step.clobber]):
+        return []
+    try:
+        manifest = read_run_manifest(wp_run.output_path)
+        authored_path = recorded_workplan(wp_run)
+    except CstarError as ex:
+        log.warning(
+            f"Could not read the manifest of run {wp_run.run_id!r}, so its recorded "
+            f"clobber selections are applied again: {ex}"
+        )
+        return []
+    if manifest is None:
+        return []
+
+    authored = try_deserialize(authored_path, Workplan) if authored_path else None
+    standing = (
+        {step.name for step in authored.steps if step.clobber} if authored else set()
+    )
+
+    configure_environment(run_id=wp_run.run_id)
+    repo = StateRepository()
+    spent: list[str] = []
+    for step in selected:
+        if step.name in standing:
+            continue
+        asked = [
+            aware_utc(a.start_at) for a in manifest.attempts if step.name in a.clobbered
+        ]
+        handle = await repo.get_sentinel(step.name, ProcessHandle)
+        if (
+            asked
+            and handle is not None
+            and handle.submitted_at is not None
+            and aware_utc(handle.submitted_at) >= max(asked)
+        ):
+            step.workflow_overrides.pop(KEY_CLOBBER)
+            spent.append(step.name)
+
+    if spent:
+        log.debug(f"Steps {spent} were submitted again since they were clobbered")
+    return spent
 
 
 class NoPreparableStepsError(Exception):

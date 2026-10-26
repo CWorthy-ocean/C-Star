@@ -46,6 +46,7 @@ from cstar.orchestration.dag_runner import (
     check_clobber_dependents,
     check_clobber_targets,
     check_pre_run_support,
+    drop_spent_clobbers,
     get_launcher,
     get_orchestrator,
     get_status_detail_map,
@@ -2196,6 +2197,310 @@ def test_refuse_edited_steps_warns_about_an_in_progress_step_of_an_earlier_recip
     assert "'A'" in message
     assert "'B'" in message
     assert "another C-Star release" in message
+
+
+T1 = datetime(2026, 10, 20, 9, 0, tzinfo=UTC)
+T2 = T1 + timedelta(hours=1)
+T3 = T1 + timedelta(hours=2)
+"""Increasing moments for the attempts of a run and the submissions of its steps."""
+
+Attempts = t.Sequence[tuple[datetime, t.Sequence[str]]]
+"""The attempts of a run as the moment each started and the steps it clobbered."""
+
+
+def _clobber_plans(
+    blueprint: Path,
+    *,
+    selected: t.Collection[str] = (),
+    standing: t.Collection[str] = (),
+) -> tuple[Workplan, Workplan]:
+    """Build the workplan a run was authored with and the one replayed from it.
+
+    The authored workplan sets `clobber` on the `standing` steps; the replayed one
+    also has the `selected` steps, as an earlier `--clobber` left them.
+    """
+
+    def plan(clobbered: t.Collection[str]) -> Workplan:
+        return _guard_workplan(
+            *(
+                _hello_step(
+                    blueprint.as_posix(),
+                    name,
+                    workflow_overrides={KEY_CLOBBER: True} if name in clobbered else {},
+                )
+                for name in ("A", "B", "C")
+            )
+        )
+
+    return plan(standing), plan({*selected, *standing})
+
+
+async def _clobbered_run(
+    root: Path,
+    run_id: str,
+    authored: Workplan,
+    attempts: Attempts,
+    submitted: t.Mapping[str, datetime | None],
+) -> WorkplanRun:
+    """Record a run whose attempts clobbered steps and whose steps were submitted.
+
+    The first attempt carries the authored workplan, as a preparing attempt does;
+    the others replay it. A step absent from `submitted` has no sentinel.
+    """
+    carried = f"{ATTEMPTS_DIR_NAME}/first"
+    assert serialize(root / carried / ATTEMPT_WORKPLAN_NAME, authored)
+    manifest = RunManifest(
+        run_id=run_id,
+        name=run_id,
+        kind="workplan",
+        created_at=attempts[0][0],
+        attempts=[
+            Attempt(
+                start_at=start,
+                clobbered=list(clobbered),
+                directory=carried if i == 0 else "",
+            )
+            for i, (start, clobbered) in enumerate(attempts)
+        ],
+        steps=[],
+    )
+    write_run_manifest(root, manifest)
+
+    repo = StateRepository()
+    for name, at in submitted.items():
+        handle = ProcessHandle(
+            pid="1", name=name, run_id=run_id, status=Status.Done, submitted_at=at
+        )
+        assert await repo.put_sentinel(handle)
+    return WorkplanRun(output_path=root, run_id=run_id)
+
+
+def _clobbering(wp: Workplan) -> list[str]:
+    """Return the names of the steps of a workplan that set `clobber`."""
+    return [step.name for step in wp.steps if step.clobber]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "submitted",
+    [T2, T1, T2.replace(tzinfo=None)],
+    ids=["after-the-attempt-started", "at-the-attempt-start", "naive-moment-is-utc"],
+)
+async def test_drop_spent_clobbers_drops_a_step_submitted_since_its_attempt_started(
+    tmp_path: Path, mock_run_id: str, hello_world_bp_path: Path, submitted: datetime
+) -> None:
+    """Verify a selected step submitted at or after the start of the attempt that
+    clobbered it has spent its clobber: it is dropped and reported.
+    """
+    authored, wp = _clobber_plans(hello_world_bp_path, selected=["B"])
+    wp_run = await _clobbered_run(
+        tmp_path / "run", mock_run_id, authored, [(T1, ["B"])], {"B": submitted}
+    )
+
+    assert await drop_spent_clobbers(wp, wp_run) == ["B"]
+    assert _clobbering(wp) == []
+
+
+@pytest.mark.asyncio
+async def test_drop_spent_clobbers_keeps_a_step_submitted_before_its_attempt(
+    tmp_path: Path, mock_run_id: str, hello_world_bp_path: Path
+) -> None:
+    """Verify a selected step last submitted before the attempt that clobbered it
+    keeps its clobber, since that attempt stopped before it reached the step.
+    """
+    authored, wp = _clobber_plans(hello_world_bp_path, selected=["B"])
+    wp_run = await _clobbered_run(
+        tmp_path / "run", mock_run_id, authored, [(T2, ["B"])], {"B": T1}
+    )
+
+    assert await drop_spent_clobbers(wp, wp_run) == []
+    assert _clobbering(wp) == ["B"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("attempts", "submitted", "dropped"),
+    [
+        ([(T1, ["B"]), (T3, ["B"])], T2, False),
+        ([(T1, ["B"]), (T3, ["B"])], T3, True),
+        ([(T1, ["B"]), (T3, ["A"])], T2, True),
+    ],
+    ids=[
+        "between-two-clobbers",
+        "since-the-latest-clobber",
+        "later-attempt-clobbers-another-step",
+    ],
+)
+async def test_drop_spent_clobbers_counts_the_latest_clobbering_attempt(
+    tmp_path: Path,
+    mock_run_id: str,
+    hello_world_bp_path: Path,
+    attempts: Attempts,
+    submitted: datetime,
+    dropped: bool,
+) -> None:
+    """Verify the latest attempt that clobbered the step decides whether its
+    clobber is spent, not the first, and not a later attempt that clobbered
+    another step.
+    """
+    authored, wp = _clobber_plans(hello_world_bp_path, selected=["B"])
+    wp_run = await _clobbered_run(
+        tmp_path / "run", mock_run_id, authored, attempts, {"B": submitted}
+    )
+
+    assert await drop_spent_clobbers(wp, wp_run) == (["B"] if dropped else [])
+    assert _clobbering(wp) == ([] if dropped else ["B"])
+
+
+@pytest.mark.asyncio
+async def test_drop_spent_clobbers_keeps_a_clobber_the_authored_workplan_sets(
+    tmp_path: Path, mock_run_id: str, hello_world_bp_path: Path
+) -> None:
+    """Verify a clobber the authored workplan sets is kept though the step was
+    submitted since, since every re-entry applies it.
+    """
+    authored, wp = _clobber_plans(hello_world_bp_path, selected=["C"], standing=["B"])
+    wp_run = await _clobbered_run(
+        tmp_path / "run",
+        mock_run_id,
+        authored,
+        [(T1, ["B", "C"])],
+        {"B": T2, "C": T2},
+    )
+
+    assert await drop_spent_clobbers(wp, wp_run) == ["C"]
+    assert _clobbering(wp) == ["B"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "submitted",
+    [{}, {"B": None}],
+    ids=["no-sentinel", "no-submission-time"],
+)
+async def test_drop_spent_clobbers_keeps_a_step_without_a_submission_time(
+    tmp_path: Path,
+    mock_run_id: str,
+    hello_world_bp_path: Path,
+    submitted: t.Mapping[str, datetime | None],
+) -> None:
+    """Verify a selected step with no sentinel, or one written before submission
+    times were recorded, keeps its clobber: nothing shows it was submitted since.
+    """
+    authored, wp = _clobber_plans(hello_world_bp_path, selected=["B"])
+    wp_run = await _clobbered_run(
+        tmp_path / "run", mock_run_id, authored, [(T1, ["B"])], submitted
+    )
+
+    assert await drop_spent_clobbers(wp, wp_run) == []
+    assert _clobbering(wp) == ["B"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "attempts",
+    [[(T1, ["A"])], [(T1, [])]],
+    ids=["another-step-clobbered", "nothing-clobbered"],
+)
+async def test_drop_spent_clobbers_keeps_a_step_no_attempt_clobbered(
+    tmp_path: Path, mock_run_id: str, hello_world_bp_path: Path, attempts: Attempts
+) -> None:
+    """Verify a selected step that no attempt lists as clobbered keeps its clobber
+    though it was submitted since.
+    """
+    authored, wp = _clobber_plans(hello_world_bp_path, selected=["B"])
+    wp_run = await _clobbered_run(
+        tmp_path / "run", mock_run_id, authored, attempts, {"B": T2}
+    )
+
+    assert await drop_spent_clobbers(wp, wp_run) == []
+    assert _clobbering(wp) == ["B"]
+
+
+@pytest.mark.asyncio
+async def test_drop_spent_clobbers_without_a_manifest(
+    tmp_path: Path, hello_world_bp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Verify a run with no manifest, which cannot say when a step was selected,
+    drops nothing and says nothing.
+    """
+    _, wp = _clobber_plans(hello_world_bp_path, selected=["B"])
+    wp_run = _legacy_run(tmp_path)
+
+    with caplog.at_level("WARNING"):
+        assert await drop_spent_clobbers(wp, wp_run) == []
+
+    assert _clobbering(wp) == ["B"]
+    assert _warnings(caplog) == []
+
+
+@pytest.mark.asyncio
+async def test_drop_spent_clobbers_warns_once_for_an_unreadable_manifest(
+    tmp_path: Path,
+    mock_run_id: str,
+    hello_world_bp_path: Path,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Verify a manifest that cannot be read drops nothing and warns once, naming
+    the run, since the clobber selections are then applied again.
+    """
+    _, wp = _clobber_plans(hello_world_bp_path, selected=["B"])
+    root = tmp_path / "run"
+    root.mkdir()
+    (root / RUN_MANIFEST_NAME).write_text("name: [unclosed\n")
+    wp_run = WorkplanRun(output_path=root, run_id=mock_run_id)
+
+    with caplog.at_level("WARNING"):
+        assert await drop_spent_clobbers(wp, wp_run) == []
+
+    assert _clobbering(wp) == ["B"]
+    assert len(warnings := _warnings(caplog)) == 1
+    assert mock_run_id in warnings[0]
+
+
+@pytest.mark.asyncio
+async def test_drop_spent_clobbers_leaves_steps_without_clobber_alone(
+    tmp_path: Path, mock_run_id: str, hello_world_bp_path: Path
+) -> None:
+    """Verify a workplan that selects no step is left as it is, whatever the
+    attempts clobbered and the steps did since.
+    """
+    authored, wp = _clobber_plans(hello_world_bp_path)
+    wp_run = await _clobbered_run(
+        tmp_path / "run",
+        mock_run_id,
+        authored,
+        [(T1, ["A", "B", "C"])],
+        {"A": T2, "B": T2, "C": T2},
+    )
+
+    assert await drop_spent_clobbers(wp, wp_run) == []
+    assert [step.workflow_overrides for step in wp.steps] == [{}, {}, {}]
+
+
+@pytest.mark.asyncio
+async def test_drop_spent_clobbers_drops_only_the_spent_steps(
+    tmp_path: Path, mock_run_id: str, hello_world_bp_path: Path
+) -> None:
+    """Verify of two selected steps only the one submitted since its attempt
+    started is dropped and reported; the other keeps its clobber, and a step that
+    was not selected is not touched.
+    """
+    authored, wp = _clobber_plans(hello_world_bp_path, selected=["B", "C"])
+    wp_run = await _clobbered_run(
+        tmp_path / "run",
+        mock_run_id,
+        authored,
+        [(T2, ["A", "B", "C"])],
+        {"A": T3, "B": T3, "C": T1},
+    )
+
+    assert await drop_spent_clobbers(wp, wp_run) == ["B"]
+    assert _clobbering(wp) == ["C"]
+    assert [step.workflow_overrides for step in wp.steps if step.name != "C"] == [
+        {},
+        {},
+    ]
 
 
 def _build_guarded(tmp_path: Path, run_id: str, blueprint: Path) -> tuple[Path, Path]:
