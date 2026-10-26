@@ -1918,6 +1918,14 @@ class ROMSSimulation(Simulation):
             )
             return
 
+        # an executable this build replaces takes its record with it, so a
+        # record never outlives the build it describes
+        self._namelist_schema = None
+        try:
+            (build_dir / BUILD_RECORD_NAME).unlink(missing_ok=True)
+        except OSError as e:
+            self.log.warning(f"Could not remove the previous ROMS build record: {e}")
+
         if (build_dir / "Compile").is_dir():
             _run_cmd(
                 "make compile_clean",
@@ -2009,6 +2017,7 @@ class ROMSSimulation(Simulation):
         ValueError
             If the record names a schema this C-Star does not have.
         """
+        self._namelist_schema = None
         path = build_dir / BUILD_RECORD_NAME
         if not path.exists():
             self.log.debug(
@@ -2028,7 +2037,8 @@ class ROMSSimulation(Simulation):
         if schema is None:
             raise ValueError(
                 f"it was built for namelist schema {name!r} (recorded in {path}), "
-                "which this C-Star does not have; the executable must be rebuilt"
+                "which this C-Star does not have. If a newer C-Star built it, "
+                "upgrade cstar-ocean; otherwise the executable must be rebuilt"
             )
         self._namelist_schema = schema
 

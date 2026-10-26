@@ -6,7 +6,7 @@ executable was built for even after C-Star gains a newer schema.
 import json
 import logging
 import tempfile
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from pathlib import Path
 from unittest import mock
 
@@ -122,54 +122,92 @@ def staged_sim(stub_romssimulation: ROMSSimulation) -> Iterator[ROMSSimulation]:
         yield sim
 
 
-@mock.patch("cstar.roms.simulation.rpath_link_flags", return_value=None)
-@mock.patch("cstar.roms.simulation.verify_roms_linkage")
-@mock.patch("cstar.roms.simulation.assert_single_toolchain_stack")
-@mock.patch("cstar.roms.simulation.explicit_mpi_wrapper", return_value=None)
-@mock.patch("cstar.roms.simulation._get_sha256_hash", return_value="dummy_hash")
-@mock.patch("subprocess.run")
-def test_branch_pinned_build_records_newest_schema(
-    mock_subprocess,
-    mock_get_hash,
-    mock_mpi_wrapper,
-    mock_toolchain,
-    mock_verify_linkage,
-    mock_rpath_flags,
-    staged_sim: ROMSSimulation,
-    stageddatacollection_remote_files,
-):
-    """A build records the schema it selected, with the pin and the commit it built."""
+@pytest.fixture
+def build(
+    staged_sim: ROMSSimulation, stageddatacollection_remote_files
+) -> Iterator[Callable[[], None]]:
+    """Call `staged_sim.build()` with compilation and linkage checks patched out,
+    the ucla-roms clone at commit ``abc123``.
+    """
     sim = staged_sim
     assert sim.compile_time_code is not None
     build_dir = sim.fs_manager.compile_time_code_dir
     sim.compile_time_code._working_copy = stageddatacollection_remote_files(
         paths=[build_dir / f.basename for f in sim.compile_time_code.source]
     )
-    mock_subprocess.return_value = mock.MagicMock(returncode=0, stderr="")
-    checkout_target = sim.codebase.source.checkout_target
-    assert checkout_target == "roms_branch"
-
     with tempfile.TemporaryDirectory() as tmpdir:
         (Path(tmpdir) / "Work").mkdir()
         (Path(tmpdir) / "Work" / "Makefile").touch()
         working_copy = mock.MagicMock(path=Path(tmpdir), checkout_hash="abc123")
         with (
+            mock.patch("cstar.roms.simulation.rpath_link_flags", return_value=None),
+            mock.patch("cstar.roms.simulation.assert_single_toolchain_stack"),
+            mock.patch("cstar.roms.simulation.explicit_mpi_wrapper", return_value=None),
+            mock.patch(
+                "cstar.roms.simulation._get_sha256_hash", return_value="dummy_hash"
+            ),
+            mock.patch(
+                "subprocess.run",
+                return_value=mock.MagicMock(returncode=0, stderr=""),
+            ),
             mock.patch.object(
                 ROMSExternalCodeBase,
                 "working_copy",
                 new_callable=mock.PropertyMock,
                 return_value=working_copy,
             ),
-            pytest.warns(UserWarning, match="not a release tag"),
         ):
-            sim.build()
 
-    assert json.loads((build_dir / BUILD_RECORD_NAME).read_text()) == {
+            def _build() -> None:
+                with pytest.warns(UserWarning, match="not a release tag"):
+                    sim.build(rebuild=True)
+
+            yield _build
+
+
+def test_branch_pinned_build_records_newest_schema(
+    staged_sim: ROMSSimulation, build: Callable[[], None]
+):
+    """A build records the schema it selected, with the pin and the commit it built."""
+    sim = staged_sim
+    checkout_target = sim.codebase.source.checkout_target
+    assert checkout_target == "roms_branch"
+
+    build()
+
+    record_path = sim.fs_manager.compile_time_code_dir / BUILD_RECORD_NAME
+    assert json.loads(record_path.read_text()) == {
         "namelist_schema": NAMELIST_SCHEMA_REGISTRY[-1][2].__name__,
         "ucla_roms_ref": checkout_target,
         "ucla_roms_commit": "abc123",
     }
     assert sim._namelist_schema is NAMELIST_SCHEMA_REGISTRY[-1][2]
+
+
+def test_a_failed_record_write_warns_and_leaves_no_stale_record(
+    staged_sim: ROMSSimulation,
+    build: Callable[[], None],
+    caplog: pytest.LogCaptureFixture,
+):
+    """A rebuild removes the previous build's record before compiling; a write
+    that then fails is warned about, never a reason to stop the run.
+    """
+    sim = staged_sim
+    _write_record(sim, json.dumps({"namelist_schema": "RomsNamelistV0_11_0"}))
+    caplog.set_level(logging.WARNING, logger=sim.log.name)
+    real_write_text = Path.write_text
+
+    def _write_text(path: Path, *args, **kwargs):
+        if path.name == BUILD_RECORD_NAME:
+            raise OSError("disk full")
+        return real_write_text(path, *args, **kwargs)
+
+    with mock.patch.object(Path, "write_text", _write_text):
+        build()
+
+    assert not (sim.fs_manager.compile_time_code_dir / BUILD_RECORD_NAME).exists()
+    assert sim._namelist_schema is NAMELIST_SCHEMA_REGISTRY[-1][2]
+    assert any("disk full" in r.message for r in caplog.records)
 
 
 def test_resume_writes_the_recorded_schema_after_a_newer_one_is_added(
@@ -210,6 +248,7 @@ def test_tag_pinned_resume_is_unchanged(
         sim.attach()
         _, schema, _ = sim._read_raw_namelist()
         assert schema is namelist_schema_for_ref("v0.11.0") is RomsNamelistV0_11_0
+    assert sim._namelist_schema is RomsNamelistV0_11_0
 
 
 def test_resume_without_a_record_selects_from_the_ref(
@@ -230,12 +269,13 @@ def test_resume_without_a_record_selects_from_the_ref(
     assert sum("No build record" in r.message for r in caplog.records) == 1
 
 
+@pytest.mark.parametrize("content", ["{not json", "[]", '{"other": 1}'])
 def test_resume_with_an_unreadable_record_warns_and_selects_from_the_ref(
-    staged_sim: ROMSSimulation, caplog: pytest.LogCaptureFixture
+    staged_sim: ROMSSimulation, caplog: pytest.LogCaptureFixture, content: str
 ):
     """A record that cannot be read is warned about, never a reason to stop the run."""
     sim = staged_sim
-    _write_record(sim, "{not json")
+    _write_record(sim, content)
     caplog.set_level(logging.WARNING, logger=sim.log.name)
 
     sim.attach()
@@ -249,8 +289,13 @@ def test_resume_with_an_unreadable_record_warns_and_selects_from_the_ref(
 def test_resume_refuses_a_schema_this_cstar_does_not_have(
     staged_sim: ROMSSimulation,
 ):
-    """A recorded schema since removed or renamed is refused, naming it and the way to rebuild."""
+    """A recorded schema this C-Star lacks is refused, naming it and the way to
+    rebuild, and drops the schema an earlier attach adopted.
+    """
     sim = staged_sim
+    _write_record(sim, json.dumps({"namelist_schema": "RomsNamelistV0_12_0"}))
+    sim.attach()
+    assert sim._namelist_schema is RomsNamelistV0_12_0
     _write_record(sim, json.dumps({"namelist_schema": "RomsNamelistV0_99_0"}))
 
     with pytest.raises(CstarExpectationFailed) as exc_info:
@@ -258,5 +303,6 @@ def test_resume_refuses_a_schema_this_cstar_does_not_have(
 
     message = str(exc_info.value)
     assert "'RomsNamelistV0_99_0'" in message
+    assert "upgrade cstar-ocean" in message
     assert "--clobber" in message
     assert sim._namelist_schema is None
