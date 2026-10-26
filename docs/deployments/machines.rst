@@ -22,8 +22,8 @@ We would love to help you get set up!
 +--------------------------------------------------------------------------------------+------------+-------------------------+
 | `Bouchet (YCRC) <https://docs.ycrc.yale.edu/clusters/bouchet/>`__                    | ✅         | ✅                      |
 +--------------------------------------------------------------------------------------+------------+-------------------------+
-| `Derecho (NCAR)                                                                      | ✅         | ❌ (PBS not currently supported)  |
-| <https://ncar-hpc-docs.readthedocs.io/en/latest/compute-systems/derecho/>`__         |            |                         |
+| `Derecho (NCAR)                                                                      | ✅         | ❌ (PBS not             |
+| <https://ncar-hpc-docs.readthedocs.io/en/latest/compute-systems/derecho/>`__         |            | currently supported)    |
 +--------------------------------------------------------------------------------------+------------+-------------------------+
 | `Elja (IRHPC) <https://wiki.irei.is>`__                                              | ✅         | ✅                      |
 +--------------------------------------------------------------------------------------+------------+-------------------------+
