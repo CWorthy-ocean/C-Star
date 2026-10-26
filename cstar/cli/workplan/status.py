@@ -97,7 +97,9 @@ def status(
                 }
             )
         else:
-            status = asyncio.run(load_run_state(run.run_id, launcher))
+            status = asyncio.run(
+                load_run_state(run.run_id, launcher, persist=not no_refresh)
+            )
             if not no_refresh:
                 refresh_run_manifest(run.output_path, run.run_id, status)
         status = DagStatus({**external.statuses(), **status.details})

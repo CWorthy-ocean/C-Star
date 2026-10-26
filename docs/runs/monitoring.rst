@@ -41,8 +41,8 @@ run ID of a run tracked on this machine; to look at any other run (a copy, a
 colleague's run, a run in the project runs area), use ``show`` below. It
 also refreshes the run's :doc:`manifest <moving/manifest>`, folding the
 step statuses and records into it and closing the latest attempt once every
-step is terminal; pass ``--no-refresh`` to read the run as last recorded
-without writing.
+step is terminal; pass ``--no-refresh`` to show its status without
+updating any of its records.
 
 Viewing individual logs
 -----------------------

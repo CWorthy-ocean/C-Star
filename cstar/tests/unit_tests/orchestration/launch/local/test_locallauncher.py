@@ -1,7 +1,10 @@
 import asyncio
 import datetime
 import shlex
+import signal
 import subprocess
+import threading
+import time
 from pathlib import Path
 from unittest import mock
 
@@ -69,6 +72,31 @@ async def test_locallauncher_query_status_observes_exit(
     assert status == expected
 
 
+def _write_sentinel(path: Path, name: str, status: Status, pid: int | str) -> None:
+    """Write a sentinel as the launcher does: complete, then renamed into place."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_suffix(".tmp-test")
+    tmp.write_text(f"pid: '{pid}'\nname: {name}\nstatus: {status.value}\n")
+    tmp.replace(path)
+
+
+def _run_proxy(script_path: Path, name: str) -> subprocess.CompletedProcess[str]:
+    """Run a proxy script, then write its sentinel recording the script's pid,
+    as the launcher does once `Popen` has returned.
+    """
+    proc = subprocess.Popen(
+        ["sh", str(script_path)],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+    _write_sentinel(
+        StateRepository.sentinel_path(name), name, Status.Submitted, proc.pid
+    )
+    out, err = proc.communicate(timeout=30)
+    return subprocess.CompletedProcess(proc.args, proc.returncode, out, err)
+
+
 @pytest.mark.parametrize(
     ("dep_status", "exp_rc", "exp_status", "exp_ran"),
     [
@@ -109,10 +137,7 @@ def test_proxy_script_propagates_dependency_outcome(
         status=dep_status,
     )
 
-    for name, status in (("dep", dep_status), (live_step.name, Status.Submitted)):
-        sentinel = StateRepository.sentinel_path(name)
-        sentinel.parent.mkdir(parents=True, exist_ok=True)
-        sentinel.write_text(f"name: {name}\nstatus: {status.value}\n")
+    _write_sentinel(StateRepository.sentinel_path("dep"), "dep", dep_status, 1)
 
     marker = tmp_path / "step-ran.txt"
     script = ProxiedRunRequestFormatter(live_step, [dep_handle]).format(
@@ -121,7 +146,7 @@ def test_proxy_script_propagates_dependency_outcome(
     script_path = tmp_path / "script.sh"
     script_path.write_text(script)
 
-    result = subprocess.run(["sh", str(script_path)], capture_output=True, timeout=30)
+    result = _run_proxy(script_path, live_step.name)
 
     assert result.returncode == exp_rc
     assert marker.exists() == exp_ran
@@ -565,7 +590,8 @@ async def test_locallauncher_submit_records_when_the_process_was_created(
 
     expected = datetime.datetime.fromtimestamp(created, tz=datetime.UTC)
     assert handle.submitted_at == expected
-    assert handle.start_ts == created  # turns `start_at` into a float, not the stamp
+    assert handle.start_ts == created
+    assert handle.start_at == expected  # reading the timestamp leaves `start_at` alone
     assert handle.submitted_at == expected
 
     await StateRepository().put_sentinel(handle)
@@ -912,3 +938,275 @@ def test_localhandle_start_ts_requires_start_time(mock_run_id: str) -> None:
     assert handle.start_at is None
     with pytest.raises(CstarExpectationFailed, match="no start time"):
         _ = handle.start_ts
+
+
+def test_localhandle_start_ts_does_not_change_start_at(mock_run_id: str) -> None:
+    """Reading `start_ts` must not turn an ISO `start_at` into a float, which
+    would change what is written the next time the sentinel is saved.
+    """
+    start = datetime.datetime(2026, 10, 15, 12, 0, 3, tzinfo=datetime.UTC)
+    handle = LocalHandle(pid="12345", name="step", run_id=mock_run_id, start_at=start)
+
+    assert handle.start_ts == start.timestamp()
+    assert handle.start_at == start
+
+
+@pytest.mark.parametrize(
+    ("stored", "expected"),
+    [
+        pytest.param(Status.Submitted, Status.Submitted, id="submitted stays"),
+        pytest.param(Status.Unsubmitted, Status.Submitted, id="unsubmitted waits"),
+        pytest.param(Status.Running, Status.Running, id="running stays"),
+        pytest.param(Status.Ending, Status.Running, id="ending is running"),
+    ],
+)
+async def test_update_status_of_live_expired_handle_keeps_stored_phase(
+    mock_run_id: str, stored: Status, expected: Status
+) -> None:
+    """A step whose proxy is alive but waiting on dependencies must not be
+    rewritten from Submitted to Running by a status read.
+    """
+    handle = LocalHandle(
+        pid="12345",
+        name="step",
+        run_id=mock_run_id,
+        start_at=datetime.datetime.now(tz=datetime.UTC),
+        status=stored,
+    )
+
+    with mock.patch.object(LocalLauncher, "_is_alive", return_value=True):
+        changed, updated = await LocalLauncher.update_status(handle)
+
+    assert updated.status == expected
+    assert changed == (stored != expected)
+
+
+@pytest.mark.usefixtures("read_yaml_intercept")
+async def test_locallauncher_submit_starts_a_new_session(
+    wp_templates_dir: Path,
+    mock_run_id: str,
+) -> None:
+    """Verify the proxy is detached from the launching terminal's session."""
+    live_step = LiveStep.from_step(
+        deserialize(wp_templates_dir / "single_step.yaml", Workplan).steps[0]
+    )
+
+    with (
+        mock.patch.object(
+            subprocess, "Popen", return_value=mock.Mock(pid=777777)
+        ) as popen,
+        mock.patch("cstar.orchestration.launch.local.PsProcess"),
+    ):
+        await LocalLauncher._submit(live_step, [])
+
+    assert popen.call_args.kwargs["start_new_session"] is True
+
+
+def _cancel_task(returncode: int | None = None) -> mock.Mock:
+    """Build a task whose live proxy process has the given return code."""
+    process = mock.Mock(pid=100, returncode=returncode)
+    process.poll.return_value = returncode
+    handle = mock.Mock(is_expired=False, process=process)
+    return mock.Mock(handle=handle, status=Status.Running)
+
+
+async def test_cancel_kills_every_process_group_of_the_proxy() -> None:
+    """Verify cancelling freezes the proxy, then kills the group of each
+    descendant and the proxy's last, once each and never our own: `timeout`
+    moves the job into a group of its own.
+    """
+    task = _cancel_task()
+    children = [
+        mock.Mock(pid=101),
+        mock.Mock(pid=102),
+        mock.Mock(pid=103),
+        mock.Mock(pid=104),
+    ]
+    groups = {100: 100, 101: 100, 102: 102, 103: 102, 104: 555}
+
+    with (
+        mock.patch("cstar.orchestration.launch.local.PsProcess") as ps_process,
+        mock.patch("os.getpgid", side_effect=groups.__getitem__),
+        mock.patch("os.getpgrp", return_value=555),
+        mock.patch("os.killpg") as killpg,
+    ):
+        ps_process.return_value.children.return_value = children
+        result = await LocalLauncher.cancel(task)
+
+    ps_process.assert_called_once_with(100)
+    ps_process.return_value.children.assert_called_once_with(recursive=True)
+    assert killpg.call_args_list == [
+        mock.call(100, signal.SIGSTOP),
+        mock.call(102, signal.SIGKILL),
+        mock.call(100, signal.SIGKILL),
+    ]
+    assert result.status == Status.Cancelled
+
+
+@pytest.mark.parametrize("error", [ProcessLookupError, PermissionError])
+async def test_cancel_tolerates_processes_that_already_exited(
+    error: type[OSError],
+) -> None:
+    """Verify a descendant or group that has gone (or, on macOS, holds only
+    zombies) is not an error, and the remaining groups are still killed.
+    """
+    task = _cancel_task()
+    children = [mock.Mock(pid=101), mock.Mock(pid=102)]
+
+    def getpgid(pid: int) -> int:
+        if pid == 101:
+            raise error
+        return pid
+
+    def killpg(pgid: int, sig: int) -> None:
+        if pgid == 102:
+            raise error
+
+    with (
+        mock.patch("cstar.orchestration.launch.local.PsProcess") as ps_process,
+        mock.patch("os.getpgid", side_effect=getpgid),
+        mock.patch("os.killpg", side_effect=killpg) as mock_killpg,
+    ):
+        ps_process.return_value.children.return_value = children
+        result = await LocalLauncher.cancel(task)
+
+    assert mock_killpg.call_args_list == [
+        mock.call(100, signal.SIGSTOP),
+        mock.call(102, signal.SIGKILL),
+        mock.call(100, signal.SIGKILL),
+    ]
+    assert result.status == Status.Cancelled
+
+
+async def test_cancel_of_a_proxy_that_exits_mid_cancel_is_not_an_error() -> None:
+    """Verify a proxy that is gone by the time it is signalled, or whose
+    descendants can no longer be listed, is cancelled without raising.
+    """
+    with (
+        mock.patch("os.getpgid", side_effect=ProcessLookupError),
+        mock.patch("os.killpg") as killpg,
+    ):
+        result = await LocalLauncher.cancel(_cancel_task())
+    killpg.assert_not_called()
+    assert result.status == Status.Cancelled
+
+    with (
+        mock.patch(
+            "cstar.orchestration.launch.local.PsProcess",
+            side_effect=NoSuchProcess(100),
+        ),
+        mock.patch("os.getpgid", return_value=100),
+        mock.patch("os.killpg") as killpg,
+    ):
+        result = await LocalLauncher.cancel(_cancel_task())
+    killpg.assert_called_once_with(100, signal.SIGSTOP)
+    assert result.status == Status.Cancelled
+
+
+async def test_cancel_leaves_a_completed_task_alone() -> None:
+    """Verify nothing is signalled for a proxy that has already exited."""
+    task = _cancel_task(returncode=0)
+
+    with mock.patch("os.killpg") as killpg:
+        result = await LocalLauncher.cancel(task)
+
+    killpg.assert_not_called()
+    assert result.status == Status.Running
+
+
+def _render_proxy(
+    tmp_path: Path,
+    wp_templates_dir: Path,
+    dependencies: list[LocalHandle],
+    command: list[str],
+) -> Path:
+    """Render a proxy script for the single-step workplan and write it to disk."""
+    workplan = deserialize(wp_templates_dir / "single_step.yaml", Workplan)
+    live_step = LiveStep.from_step(workplan.steps[0])
+    script = ProxiedRunRequestFormatter(live_step, dependencies).format(
+        RunRequest(command=command)
+    )
+    script_path = tmp_path / "script.sh"
+    script_path.write_text(script)
+    return script_path
+
+
+def test_proxy_script_waits_for_its_sentinel_before_updating_status(
+    tmp_path: Path, wp_templates_dir: Path
+) -> None:
+    """Verify the rendered proxy waits for a sentinel recording its pid, which the launcher writes only
+    after it has started the script, ahead of its first status update.
+    """
+    script_path = _render_proxy(tmp_path, wp_templates_dir, [], ["true"])
+    script = script_path.read_text()
+
+    wait = script.index("while ! sentinel_is_ours")
+    assert wait < script.index("update_status $FAILED")
+    assert wait < script.index("update_status $RUNNING")
+
+    awaiting = script.index('echo "Awaiting process $DEP_PID"')
+    loop = script.index('while kill -0 "$DEP_PID"', awaiting)
+    assert awaiting < loop  # announced once, outside the poll loop
+
+
+@pytest.mark.parametrize("stale", [False, True], ids=["missing", "stale"])
+def test_proxy_script_waits_for_a_sentinel_recording_its_pid(
+    tmp_path: Path, wp_templates_dir: Path, stale: bool
+) -> None:
+    """Verify a proxy started before the launcher has written its sentinel
+    waits, whether the sentinel is missing or left by a previous attempt with
+    another pid, then records Running and Done instead of rewriting the old one.
+    """
+    script_path = _render_proxy(tmp_path, wp_templates_dir, [], ["true"])
+    live_step = LiveStep.from_step(
+        deserialize(wp_templates_dir / "single_step.yaml", Workplan).steps[0]
+    )
+    name = live_step.name
+    sentinel = StateRepository.sentinel_path(name)
+    sentinel.parent.mkdir(parents=True, exist_ok=True)
+    sentinel.unlink(missing_ok=True)
+    if stale:
+        _write_sentinel(sentinel, name, Status.Failed, 1)
+
+    proc = subprocess.Popen(["sh", str(script_path)])
+    time.sleep(0.5)
+    assert proc.poll() is None  # still waiting: no sentinel is its own yet
+    if stale:
+        assert f"status: {Status.Failed.value}" in sentinel.read_text()
+    _write_sentinel(sentinel, name, Status.Submitted, proc.pid)
+
+    assert proc.wait(timeout=30) == 0
+    assert f"status: {Status.Done.value}" in sentinel.read_text()
+
+
+def test_proxy_script_announces_each_dependency_once(
+    tmp_path: Path, wp_templates_dir: Path
+) -> None:
+    """Verify a dependency still running is announced once, however long the
+    proxy polls for it.
+    """
+    live_step = LiveStep.from_step(
+        deserialize(wp_templates_dir / "single_step.yaml", Workplan).steps[0]
+    )
+    _write_sentinel(StateRepository.sentinel_path("dep"), "dep", Status.Done, 1)
+
+    dep_process = subprocess.Popen(["sleep", "1.5"])
+    # reap the dependency as soon as it exits: a zombie still answers `kill -0`
+    reaper = threading.Thread(target=dep_process.wait)
+    reaper.start()
+    dep_handle = LocalHandle(
+        pid=str(dep_process.pid),
+        name="dep",
+        run_id="fake-run-id",
+        start_at=datetime.datetime.now(tz=datetime.UTC),
+        status=Status.Running,
+    )
+    # poll often: a message per poll would repeat several times in 1.5s
+    with mock.patch("cstar.orchestration.launch.local.PROXY_POLL_DELAY", 0.2):
+        script_path = _render_proxy(tmp_path, wp_templates_dir, [dep_handle], ["true"])
+    result = _run_proxy(script_path, live_step.name)
+    reaper.join()
+
+    assert result.returncode == 0
+    assert "sleep 0.2" in script_path.read_text()
+    assert result.stdout.count(f"Awaiting process {dep_process.pid}") == 1

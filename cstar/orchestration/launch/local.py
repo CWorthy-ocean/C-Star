@@ -3,6 +3,7 @@ import datetime
 import os
 import shlex
 import shutil
+import signal
 import subprocess
 import typing as t
 from pathlib import Path
@@ -81,7 +82,7 @@ class LocalHandle(ProcessHandle):
             )
             raise CstarExpectationFailed(msg)
         if isinstance(self.start_at, datetime.datetime):
-            self.start_at = self.start_at.timestamp()
+            return self.start_at.timestamp()
         return self.start_at
 
     @property
@@ -426,6 +427,7 @@ class LocalLauncher(Launcher[LocalHandle]):
                 stdin=subprocess.PIPE,
                 stdout=step.log_path.open("a"),
                 stderr=subprocess.STDOUT,
+                start_new_session=True,
             )
 
             create_time = datetime.datetime.now(tz=datetime.UTC)
@@ -518,7 +520,8 @@ class LocalLauncher(Launcher[LocalHandle]):
             if Status.is_terminal(handle.status):
                 return "COMPLETED"
             if LocalLauncher._is_alive(handle):
-                return "RUNNING"
+                # a proxy still waiting on its dependencies has not started
+                return "RUNNING" if Status.is_running(handle.status) else "PENDING"
             msg = (
                 f"Process {handle.pid} for step {handle.name!r} is gone but its "
                 f"status was never finalized ({handle.status.name}); treating as failed."
@@ -697,6 +700,52 @@ class LocalLauncher(Launcher[LocalHandle]):
 
         return changed, handle
 
+    @staticmethod
+    def _kill_process_groups(pid: int) -> None:
+        """Kill the proxy process and every process descended from it.
+
+        `timeout` puts the step command in a process group of its own, so
+        killing the proxy alone would orphan the job.
+
+        Parameters
+        ----------
+        pid : int
+            The process ID of the proxy script.
+        """
+        try:
+            proxy_pgid = os.getpgid(pid)
+            if proxy_pgid == os.getpgrp():
+                # not a session of its own: never signal our own group
+                os.kill(pid, signal.SIGKILL)
+                return
+            # freeze the proxy first so it cannot start anything while the
+            # descendants are enumerated; a stopped process still dies on SIGKILL
+            os.killpg(proxy_pgid, signal.SIGSTOP)
+            descendants = PsProcess(pid).children(recursive=True)
+        except (ProcessLookupError, PermissionError, NoSuchProcess):
+            log.debug(f"Process {pid} exited before it could be cancelled")
+            return
+
+        pgids: list[int] = []
+        for child in descendants:
+            try:
+                pgid = os.getpgid(child.pid)
+            except (ProcessLookupError, PermissionError):
+                continue
+            if pgid not in pgids:
+                pgids.append(pgid)
+
+        # the proxy's group last; never our own
+        pgids = [g for g in pgids if g != proxy_pgid] + [proxy_pgid]
+        for pgid in pgids:
+            if pgid == os.getpgrp():
+                continue
+            try:
+                os.killpg(pgid, signal.SIGKILL)
+            except (ProcessLookupError, PermissionError):
+                # gone, or (on macOS) a group of only zombies
+                log.debug(f"Process group {pgid} exited before it could be cancelled")
+
     @classmethod
     async def cancel(cls, item: Task[LocalHandle]) -> Task[LocalHandle]:
         """Cancel a task, if possible.
@@ -713,11 +762,11 @@ class LocalLauncher(Launcher[LocalHandle]):
         """
         if not item.handle.is_expired:  # wonky is-null check...
             process = item.handle.process
-            if process.returncode is not None:
+            if process.poll() is not None:
                 msg = f"Unable to cancel a completed task `{process.pid}"
                 log.debug(msg)
             else:
-                process.kill()
+                LocalLauncher._kill_process_groups(process.pid)
                 item.status = Status.Cancelled
 
         return item
