@@ -10,7 +10,7 @@ Schemas for the built-in `Workplan` are listed here.
 - :download:`Workplan Schema v1.1.0 <https://raw.githubusercontent.com/CWorthy-ocean/C-Star/refs/heads/main/docs/schemas/wp/workplan_schema.1.1.0.json>`:
   adds the run a ``runs`` alias resolved to when the workplan was scheduled (``id``, ``path``).
 - :download:`Workplan Schema v1.2.0 <https://raw.githubusercontent.com/CWorthy-ocean/C-Star/refs/heads/main/docs/schemas/wp/workplan_schema.1.2.0.json>`:
-  adds the version of the schema the workplan was written with (``schema_version``); a workplan without one reads as 1.0.0, and a newer one is refused.
+  adds the version of the schema the workplan was written with (``schema_version``); a workplan without one reads as 1.0.0.
 
 Runs
 ----
@@ -45,7 +45,8 @@ Blueprints
 Schemas for the built-in blueprints are listed here. Each blueprint's
 ``schema_version`` is semver read from an older file's point of view: a newer
 major means older files need migration (automatic where the application provides
-an adapter), while an older minor or patch loads unchanged. See
+an adapter), while an older minor or patch loads unchanged, and so does a newer
+minor or patch that sets no field the installed C-Star does not know. See
 :ref:`versioning_blueprint_schema`.
 
 UCLA-ROMS Blueprint

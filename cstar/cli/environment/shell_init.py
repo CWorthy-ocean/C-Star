@@ -10,6 +10,7 @@ from pathlib import Path
 import shellingham
 import typer
 
+from cstar.base.deprecation import deprecation_message
 from cstar.base.env import ENV_CSTAR_LOG_LEVEL
 from cstar.base.exceptions import CstarError
 from cstar.cli.run import NAME as NAME_RUN
@@ -41,7 +42,8 @@ A process cannot change the directory of the shell that started it, so
 `cstar {NAME_RUN} {COMMAND_CD} <run-id> \\[step]` needs a shell function named `cstar`.
 The function runs `cstar {NAME_RUN} {COMMAND_PATH}` and changes directory to the
 path it prints; every other command passes through to the cstar executable. The
-`cstar {NAME} {COMMAND_CD}` (or `cstar {ALIAS} {COMMAND_CD}`) works the same way.
+deprecated `cstar {NAME} {COMMAND_CD}` (or `cstar {ALIAS} {COMMAND_CD}`) still works
+the same way, after a warning.
 
 By default the function is printed, for dotfiles you manage yourself. With
 {ARG_INSTALL} it is written to the C-Star config directory and sourced from a
@@ -121,6 +123,8 @@ def shell_function(shell: Shell) -> str:
     <run-id> [step]` and its `cstar workplan cd` (or `wp`) spelling, and passes
     everything else, including `--help` and an incomplete command, through to
     the executable. Every spelling looks the directory up with `cstar run path`.
+    The `workplan` spellings are deprecated with the other `cstar workplan`
+    copies of the run verbs, so the function prints the same warning for them.
     A `cstar` alias is removed first, as it would break the function definition.
 
     The log level is pinned to WARNING for the lookup so that no INFO or DEBUG
@@ -139,6 +143,12 @@ def shell_function(shell: Shell) -> str:
     path_command = (
         f"{ENV_CSTAR_LOG_LEVEL}=WARNING command cstar {NAME_RUN} {COMMAND_PATH}"
     )
+    # `%s` is the group the user typed, filled in by the function's printf
+    notice = deprecation_message(
+        f"`cstar %s {COMMAND_CD}`",
+        f"`cstar {NAME_RUN} {COMMAND_CD}`",
+        removal="0.20.0",
+    )
 
     return f"""\
 # cstar shell integration for {shell}. Regenerate after upgrading C-Star.
@@ -148,6 +158,7 @@ cstar() {{
         && {{ [ "$1" = "{NAME_RUN}" ] || [ "$1" = "{NAME}" ] || [ "$1" = "{ALIAS}" ]; }}; then
         case "$3" in -*) command cstar "$@"; return ;; esac
         case "${{4-}}" in -*) command cstar "$@"; return ;; esac
+        [ "$1" = "{NAME_RUN}" ] || printf '{notice}\\n' "$1" >&2
         local __cstar_dir
         if [ "$#" -eq 3 ]; then
             __cstar_dir="$({path_command} "$3")" || return

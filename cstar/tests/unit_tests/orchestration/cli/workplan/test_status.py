@@ -3,6 +3,8 @@ from pathlib import Path
 from unittest import mock
 
 import pytest
+import yaml
+from click.testing import Result
 from typer.testing import CliRunner
 
 from cstar.cli.workplan.status import app
@@ -10,6 +12,7 @@ from cstar.entrypoint.utils import ARG_NO_REFRESH
 from cstar.orchestration.dag_runner import DagStatus
 from cstar.orchestration.launch.local import LocalLauncher
 from cstar.orchestration.manifest import (
+    RUN_MANIFEST_NAME,
     Attempt,
     StepRecord,
     ensure_run_manifest,
@@ -275,6 +278,111 @@ def test_workplan_status_refreshes_the_manifest(
     else:
         assert manifest.observed_at is not None
         assert entry.status == Status.Running.name
+
+
+def _tracked_run(
+    tmp_path: Path, hello_world_bp_path: Path, run_id: str
+) -> tuple[WorkplanRun, Path]:
+    """Lay out a run with one step: its transformed workplan and manifest.
+
+    Returns
+    -------
+    tuple[WorkplanRun, Path]
+        The run's record and the path of its transformed workplan.
+    """
+    wp = Workplan(
+        name="refreshed",
+        description="A workplan whose manifest status refreshes.",
+        steps=[
+            Step(
+                name="first",
+                application="hello_world",
+                blueprint=hello_world_bp_path.as_posix(),
+            )
+        ],
+    )
+    live_steps = [LiveStep.from_step(step) for step in wp.steps]
+    lwp = LiveWorkplan(**wp.model_dump(exclude={"steps"}), steps=live_steps)
+    trx_path = tmp_path / "live-refreshed_transformed.yaml"
+    assert serialize(trx_path, lwp)
+    ensure_run_manifest(
+        tmp_path,
+        run_id=run_id,
+        name=wp.name,
+        kind="workplan",
+        workplan=None,
+        attempt=Attempt(start_at=datetime(2026, 10, 15, tzinfo=UTC)),
+        steps={"first": ("hello_world", "tasks/first", None)},
+        runs={},
+    )
+    return WorkplanRun(output_path=tmp_path, run_id=run_id), trx_path
+
+
+def _status(run: WorkplanRun, observed: Status) -> tuple[Result, mock.MagicMock]:
+    """Run `cstar run status` on a run whose only step is observed as `observed`.
+
+    Returns
+    -------
+    tuple[Result, MagicMock]
+        The command's result and the mock standing in for the summary display.
+    """
+    with (
+        mock.patch(LOOKUP, mock.AsyncMock(return_value=run)),
+        mock.patch(
+            "cstar.cli.workplan.status.get_launcher", return_value=LocalLauncher()
+        ),
+        mock.patch(
+            "cstar.cli.workplan.status.load_run_state",
+            mock.AsyncMock(return_value=DagStatus({"first": observed})),
+        ),
+        mock.patch("cstar.cli.workplan.status.display_summary") as display,
+    ):
+        result = CliRunner().invoke(app, [run.run_id], color=False)
+    return result, display
+
+
+def test_workplan_status_leaves_an_unchanged_manifest_byte_for_byte(
+    tmp_path: Path, hello_world_bp_path: Path, mock_run_id: str
+) -> None:
+    """Verify observing a run again, with nothing changed besides the time it was
+    observed, does not rewrite the manifest.
+    """
+    run, _ = _tracked_run(tmp_path, hello_world_bp_path, mock_run_id)
+    manifest_path = tmp_path / RUN_MANIFEST_NAME
+    first, _ = _status(run, Status.Running)
+    assert first.exit_code == 0, first.output
+    observed = manifest_path.read_bytes()
+    mtime = manifest_path.stat().st_mtime_ns
+
+    second, _ = _status(run, Status.Running)
+
+    assert second.exit_code == 0, second.output
+    assert manifest_path.read_bytes() == observed
+    assert manifest_path.stat().st_mtime_ns == mtime
+
+
+def test_workplan_status_shows_a_run_a_newer_release_wrote_without_writing_it(
+    tmp_path: Path, hello_world_bp_path: Path, mock_run_id: str
+) -> None:
+    """Verify status shows a run whose transformed workplan and manifest hold keys
+    a newer minor release wrote, and leaves the manifest as it found it.
+    """
+    run, trx_path = _tracked_run(tmp_path, hello_world_bp_path, mock_run_id)
+    manifest_path = tmp_path / RUN_MANIFEST_NAME
+    for path, key in ((trx_path, "future_field"), (manifest_path, "other_field")):
+        document = yaml.safe_load(path.read_text())
+        major, minor, _ = document["schema_version"].split(".")
+        document["schema_version"] = f"{major}.{int(minor) + 1}.0"
+        document[key] = True
+        path.write_text(yaml.safe_dump(document))
+    before = manifest_path.read_bytes()
+
+    result, display = _status(run, Status.Running)
+
+    assert result.exit_code == 0, result.output
+    display.assert_called_once()
+    assert display.call_args.args[1]["first"].status == Status.Running
+    assert manifest_path.read_bytes() == before
 
 
 def test_workplan_status_of_an_attached_run_is_what_its_records_say(

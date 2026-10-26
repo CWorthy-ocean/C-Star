@@ -62,7 +62,7 @@ simulation. Configure exactly one of:
 
 Several sources can be joined by separating them with ``;`` in a single
 ``step`` or ``path`` value; boundary files from every listed source are
-combined, in the order given. If you parent and child are split into matching
+combined, in the order given. If your parent and child are split into matching
 time segments, you may need to specify the directly corresponding parent segment
 as well as the one right after it, so that ROMS has enough forcing data to finish
 the last time step.

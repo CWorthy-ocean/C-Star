@@ -13,6 +13,7 @@ import fsspec
 import yaml
 
 from cstar.base.application_names import canonical_application
+from cstar.base.deprecation import deprecated
 from cstar.base.env import ENV_CSTAR_CATALOG, default_catalog_root, get_env_item
 
 if TYPE_CHECKING:
@@ -177,6 +178,19 @@ def _yaml_files(files: Iterable[Path]) -> list[Path]:
     return sorted(by_stem.values())
 
 
+def _in_earlier_name_dir(entry: tuple[str, str, Path]) -> bool:
+    """Return whether a legacy ``(application, name, path)`` entry sits in
+    ``blueprints/<earlier application name>/``.
+    """
+    application, _, path = entry
+    directory = path.parent
+    return (
+        directory.parent.name.lower() == "blueprints"
+        and directory.name != application
+        and canonical_application(directory.name) == application
+    )
+
+
 class DomainCatalog:
     """C-Star DomainCatalog manages the hierarchical system of validated/registered "domains."
 
@@ -191,7 +205,7 @@ class DomainCatalog:
 
         catalog/
         ├── ModelSpec/
-        │   └── cson_roms-marbl_v0.1/
+        │   └── roms-marbl-0.12-default/
         │       └── model.yaml   (single consolidated file: code + model_settings)
         ├── DomainSpec/
         │   ├── ccs-12km/
@@ -439,11 +453,11 @@ class DomainCatalog:
         The layout is ``blueprints/<application>/<name>.yaml``: the directory
         is the registered application name, the file (minus its final
         ``.yaml``/``.yml``) the entry name. Four legacy forms stay readable
-        for one release and are recorded in ``legacy_blueprints``: flat
+        until 0.20.0 and are recorded in ``legacy_blueprints``: flat
         ``<name>.forge_blueprint.yaml`` (forge), flat ``B_<name>.yaml`` and
         ``<machine>/<name>/B_*.yaml`` (ucla_roms), and
         ``roms_marbl/<name>.yaml`` (ucla_roms, under the application's earlier
-        name). One warning lists them all.
+        name). One deprecation warning lists the first three, another the last.
 
         A subdirectory of ``blueprints/`` holding subdirectories is a legacy
         machine directory; any other is an application directory. Hidden names
@@ -511,20 +525,32 @@ class DomainCatalog:
                 self._blueprints.setdefault(application, {})[name] = path
                 winners.append((application, name, path))
         self._legacy_blueprints = [*winners, *losers]
-        if self._legacy_blueprints:
-            listing = ", ".join(
+
+        def listing(entries: list[tuple[str, str, Path]]) -> str:
+            return ", ".join(
                 f"{application}/{name} ({path}"
                 f"{', ignored: duplicate' if (application, name, path) in losers else ''})"
-                for application, name, path in self._legacy_blueprints
+                for application, name, path in entries
             )
-            logger.warning(
-                "Catalog %s has %d blueprint(s) in a legacy layout, readable for "
-                "one more release: %s; run `cstar admin migrate-catalog %s` to "
-                "move them into blueprints/<application>/<name>.yaml",
-                self.catalog_root,
-                len(self._legacy_blueprints),
-                listing,
-                self.catalog_root,
+
+        # On removal, keep this detection and raise an error naming
+        # `cstar admin migrate-catalog`: a legacy file must never just vanish.
+        renamed = [e for e in self._legacy_blueprints if _in_earlier_name_dir(e)]
+        if others := [e for e in self._legacy_blueprints if e not in renamed]:
+            deprecated(
+                f"The legacy blueprint layout in catalog {self.catalog_root} "
+                f"({listing(others)})",
+                "blueprints/<application>/<name>.yaml (`cstar admin "
+                f"migrate-catalog {self.catalog_root}` moves the files)",
+                removal="0.20.0",
+            )
+        if renamed:
+            deprecated(
+                f"An application's earlier name as a blueprint directory in "
+                f"catalog {self.catalog_root} ({listing(renamed)})",
+                "blueprints/<application>/ under its current name (`cstar admin "
+                f"migrate-catalog {self.catalog_root}` moves the files)",
+                removal="0.20.0",
             )
 
     def _scan_blueprint_dir(

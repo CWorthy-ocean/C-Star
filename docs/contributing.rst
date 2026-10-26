@@ -226,6 +226,66 @@ maintain code quality and reliability. Follow these guidelines:
   - Select tests by path rather than by marker: the repository defines no
     ``pytest.mark`` categories, and ``-m`` selection does not work here.
 
+Deprecations and compatibility
+------------------------------
+
+Users keep workplans, blueprints, catalogs and shell scripts for months, so
+anything a user may have written down -- a CLI command, a directive key, a
+catalog layout, a configuration setting -- is renamed or removed in two steps:
+first deprecated, then removed. Blueprint schema changes follow their own
+rule (a major ``schema_version`` with a migration, see
+:doc:`custom_applications`) and are not covered here.
+
+**Deprecating.** The old form keeps working, and the code that detects it
+calls ``cstar.base.deprecation.deprecated``:
+
+.. code:: python
+
+   from cstar.base.deprecation import deprecated
+
+   deprecated(
+       f"The {cls.key()!r} key {cls.KEY_BRY_PATH!r}",
+       repr(cls.KEY_PATH),
+       removal="0.20.0",
+   )
+
+which warns once per process::
+
+   The 'nest-from' key 'bry_path' is deprecated and stops working in
+   cstar-ocean 0.20.0; use 'path' instead.
+
+- Call it where the old form is first read: at load time, or in the
+  validation ``cstar workplan check`` runs. A warning that only appears in a
+  step's log on the compute node comes too late.
+- Name the replacement in ``replacement``, and when a command does the
+  migration (``cstar admin migrate-catalog``), name the command.
+- ``removal`` is a minor release at least two minor releases after the first
+  release that ships the warning: a deprecation first released in 0.18.0 is
+  removed in 0.20.0 at the earliest. Pass it as a string literal.
+- The message goes out as a ``CstarDeprecationWarning`` (a
+  ``FutureWarning``, so Python shows it by default) and as a log line. The CLI
+  shows only the log line.
+- Add a bullet under **Breaking Changes** in the pull request:
+  ``Deprecated: <what>, removed in <release>; use <replacement>.`` Pull request
+  descriptions become the release notes.
+
+**Removing.** When the removal release comes, delete the code that still
+honors the old form, but keep the code that detects it, and raise an error
+naming the migration command, or the edit to make if there is no command.
+Never let an old form silently stop meaning anything: a catalog file in a
+removed layout must not just disappear from listings, and an unknown key
+must not be ignored. Add a ``Removed: <what>; <migration>.`` bullet under
+**Breaking Changes**.
+
+``ci/check_deprecations.py`` makes sure removals happen. It reads every
+``deprecated`` call under ``cstar/`` (and every ``deprecation_message`` call,
+for text C-Star prints without Python, such as the ``cstar env shell-init``
+function), and the Finalize Release Notes workflow runs it before it opens the
+release pull request: a release that a deprecation is due in is refused until
+the removal lands on ``main``. A forgotten removal then stops the release, not
+the user. ``cstar/tests/unit_tests/base/test_deprecation.py`` runs the same
+check on every pull request against the newest finalized release.
+
 Building the documentation locally
 ----------------------------------
 

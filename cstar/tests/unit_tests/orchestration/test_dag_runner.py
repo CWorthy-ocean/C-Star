@@ -12,6 +12,7 @@ from pathlib import Path
 from unittest import mock
 
 import pytest
+import yaml
 
 from cstar.applications.hello_world import HelloWorldBlueprint
 from cstar.applications.ucla_roms.models import UclaRomsBlueprint
@@ -2244,11 +2245,15 @@ CURRENT_MANIFEST_SCHEMA = RunManifest.model_fields["schema_version"].default
 def _write_manifest_as_of(root: Path, manifest: RunManifest, version: str) -> None:
     """Write a manifest as the build of schema `version` left it.
 
-    `write_run_manifest` stamps this build's version, so the document is
-    serialized directly.
+    Writers stamp the newer of the document's version and this build's, so
+    the version is set in the text written, and read back to be sure it took.
     """
-    manifest.schema_version = version
-    assert serialize(root / RUN_MANIFEST_NAME, manifest)
+    path = root / RUN_MANIFEST_NAME
+    assert serialize(path, manifest)
+    stamped = f"schema_version: {manifest.schema_version}"
+    assert stamped in path.read_text()
+    path.write_text(path.read_text().replace(stamped, f"schema_version: {version}", 1))
+    assert f"schema_version: {version}" in path.read_text()
 
 
 @pytest.mark.asyncio
@@ -2400,6 +2405,130 @@ async def test_refresh_run_manifest_folds_records_and_closes_the_attempt(
     assert done.attempts[-1].status == AttemptStatus.done
     assert done.attempts[-1].finished_at is not None
     assert read_run_manifest(root) == done
+
+
+@pytest.mark.asyncio
+async def test_refresh_run_manifest_leaves_an_unchanged_manifest_untouched(
+    tmp_path: Path, mock_run_id: str, hello_world_bp_path: Path
+) -> None:
+    """Verify refreshing again, with nothing changed besides the time observed,
+    does not rewrite the manifest: not its bytes, not its modification time.
+    """
+    _, wp_run = await _schedule(tmp_path, mock_run_id, hello_world_bp_path)
+    root = wp_run.output_path
+    path = root / RUN_MANIFEST_NAME
+    refresh_run_manifest(root, mock_run_id, DagStatus({"hello": Status.Running}))
+    before = (path.read_bytes(), path.stat().st_mtime_ns)
+
+    again = refresh_run_manifest(
+        root, mock_run_id, DagStatus({"hello": Status.Running})
+    )
+
+    assert again is not None
+    assert (path.read_bytes(), path.stat().st_mtime_ns) == before
+
+
+@pytest.mark.asyncio
+async def test_refresh_run_manifest_does_not_write_a_newer_steps_record(
+    tmp_path: Path, mock_run_id: str, hello_world_bp_path: Path
+) -> None:
+    """Verify a refresh that folds in a step record a newer minor release wrote,
+    with a key this build does not know, returns the folded manifest but does not
+    write it, so the key is not dropped from the run's files.
+    """
+    _, wp_run = await _schedule(tmp_path, mock_run_id, hello_world_bp_path)
+    root = wp_run.output_path
+    step_root = root / "tasks" / "hello"
+    step_root.mkdir(parents=True, exist_ok=True)
+    record = write_step_record(
+        step_root,
+        StepRecord(
+            step="hello",
+            application="hello_world",
+            blueprint=BlueprintIdentity(
+                kind="Blueprint", application="hello_world", name="bp"
+            ),
+            outcome="completed",
+            finished_at=datetime(2026, 1, 1, tzinfo=UTC),
+        ),
+    )
+    document = yaml.safe_load(record.read_text())
+    major, minor, _ = document["schema_version"].split(".")
+    document["schema_version"] = f"{major}.{int(minor) + 1}.0"
+    document["future_field"] = True
+    record.write_text(yaml.safe_dump(document))
+    path = root / RUN_MANIFEST_NAME
+    before = (path.read_bytes(), path.stat().st_mtime_ns)
+
+    refreshed = refresh_run_manifest(
+        root, mock_run_id, DagStatus({"hello": Status.Done})
+    )
+
+    assert refreshed is not None
+    entry = refreshed.step("hello")
+    assert entry is not None
+    assert entry.status == Status.Done.name
+    assert entry.record is not None
+    assert entry.record.unknown_keys == ("future_field",)
+    assert (path.read_bytes(), path.stat().st_mtime_ns) == before
+
+
+@pytest.mark.asyncio
+async def test_refresh_run_manifest_does_not_write_a_newer_manifest_with_new_keys(
+    tmp_path: Path, mock_run_id: str, hello_world_bp_path: Path
+) -> None:
+    """Verify a manifest a newer minor release wrote with a key this build does
+    not know is refreshed in memory only, and its file is left as it was.
+    """
+    _, wp_run = await _schedule(tmp_path, mock_run_id, hello_world_bp_path)
+    root = wp_run.output_path
+    path = root / RUN_MANIFEST_NAME
+    document = yaml.safe_load(path.read_text())
+    major, minor, _ = document["schema_version"].split(".")
+    document["schema_version"] = f"{major}.{int(minor) + 1}.0"
+    document["future_field"] = True
+    path.write_text(yaml.safe_dump(document))
+    before = (path.read_bytes(), path.stat().st_mtime_ns)
+
+    refreshed = refresh_run_manifest(
+        root, mock_run_id, DagStatus({"hello": Status.Running})
+    )
+
+    assert refreshed is not None
+    entry = refreshed.step("hello")
+    assert entry is not None
+    assert entry.status == Status.Running.name
+    assert refreshed.unknown_keys == ("future_field",)
+    assert (path.read_bytes(), path.stat().st_mtime_ns) == before
+
+
+@pytest.mark.asyncio
+async def test_refresh_run_manifest_keeps_the_version_of_a_newer_manifest(
+    tmp_path: Path, mock_run_id: str, hello_world_bp_path: Path
+) -> None:
+    """Verify a refresh that does write a newer minor manifest holding nothing
+    this build does not know keeps the version it was written at.
+    """
+    _, wp_run = await _schedule(tmp_path, mock_run_id, hello_world_bp_path)
+    root = wp_run.output_path
+    path = root / RUN_MANIFEST_NAME
+    document = yaml.safe_load(path.read_text())
+    major, minor, _ = document["schema_version"].split(".")
+    newer = f"{major}.{int(minor) + 1}.0"
+    document["schema_version"] = newer
+    path.write_text(yaml.safe_dump(document))
+
+    refreshed = refresh_run_manifest(
+        root, mock_run_id, DagStatus({"hello": Status.Running})
+    )
+
+    assert refreshed is not None
+    assert f"schema_version: {newer}" in path.read_text()
+    reread = read_run_manifest(root)
+    assert reread is not None
+    entry = reread.step("hello")
+    assert entry is not None
+    assert entry.status == Status.Running.name
 
 
 def test_refresh_run_manifest_without_a_manifest(

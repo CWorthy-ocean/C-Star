@@ -92,8 +92,8 @@ Migrating an older catalog
 Catalogs written by earlier versions of C-Star kept blueprints in other
 places: flat ``<name>.forge_blueprint.yaml`` and ``B_<name>.yaml`` files,
 per-machine ``blueprints/<machine>/<name>/`` directories, or a
-``blueprints/roms_marbl/`` directory. C-Star still reads them for now, with
-a warning. To move them into the current ``blueprints/<application>/<name>.yaml``
+``blueprints/roms_marbl/`` directory. C-Star reads them, with a warning,
+until 0.20.0, which refuses such a catalog until it is migrated. To move them into the current ``blueprints/<application>/<name>.yaml``
 layout, run:
 
 .. code-block:: bash

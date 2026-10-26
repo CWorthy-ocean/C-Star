@@ -378,9 +378,11 @@ def refresh_run_manifest(
 
     The manifest holds a snapshot: the sentinels stay the live truth, and this
     is the one place that copies their statuses into it. The manifest is written
-    only when something besides `observed_at` changed. A failure to refresh it
-    is a warning: `--resume` refreshes it before scheduling, and keeping the
-    record of a run never stops the run.
+    only when something besides `observed_at` changed, and never when it or a
+    record folded into it was written by a newer cstar-ocean with keys this build
+    does not know: those are read with the keys ignored, so the refresh is kept
+    in memory. A failure to refresh it is a warning: `--resume` refreshes it
+    before scheduling, and keeping the record of a run never stops the run.
 
     Parameters
     ----------
@@ -401,12 +403,17 @@ def refresh_run_manifest(
     statuses = {name: state.name for name, state in status.details.items()}
     try:
         with manifest_lock(run_id):
-            manifest = read_run_manifest(root)
+            manifest = read_run_manifest(root, tolerant=True)
             if manifest is None:
                 log.debug(f"Run {run_id!r} has no manifest to refresh.")
                 return None
-            if fold_step_records(manifest, root, statuses):
-                write_run_manifest(root, manifest)
+            if fold_step_records(manifest, root, statuses, tolerant=True):
+                try:
+                    write_run_manifest(root, manifest)
+                except CstarSchemaTooNewError as ex:
+                    # read with keys a newer cstar-ocean wrote ignored, which
+                    # the reads warned about: the refresh stays in memory
+                    log.debug(f"Not writing the manifest of run {run_id!r}: {ex}")
     except Exception as ex:
         log.warning(f"Could not refresh the manifest of run {run_id!r}: {ex}")
         return None
@@ -519,7 +526,7 @@ def recorded_workplan(wp_run: WorkplanRun) -> Path | None:
     Raises
     ------
     CstarSchemaTooNewError
-        If the run's manifest is newer than this build reads.
+        If the run's manifest is newer than this build reads (see `VersionedDocument`).
     CstarError
         If the run's manifest cannot be read.
     """

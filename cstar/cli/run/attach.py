@@ -241,14 +241,14 @@ def _read_run(root: Path) -> tuple[RunManifest, Path]:
         exactly one transformed workplan.
     """
     try:
-        manifest = read_run_manifest(root)
+        manifest = read_run_manifest(root, tolerant=True)
     except CstarError as ex:
         raise typer.BadParameter(str(ex)) from ex
     if manifest is None:
         msg = f"{str(root)!r} no longer holds a run manifest."
         raise typer.BadParameter(msg)
 
-    fold_step_records(manifest, root)
+    fold_step_records(manifest, root, tolerant=True)
 
     found = sorted(root.glob(TRANSFORMED_WORKPLAN_GLOB))
     if len(found) == 1:

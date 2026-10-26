@@ -890,6 +890,11 @@ def normalize_legacy(
     restart file named by a `continue-from` path); and a blueprint file that
     adds nothing beyond the step's overrides becomes `inline`.
 
+    This is the wizard's rewrite on loading a workplan, and the migration that
+    the deprecation warnings for `rst_path` and `bry_path` point to. The CLI
+    never rewrites a workplan file: `cstar workplan check` warns about those
+    keys (`NestingDirective`) and leaves the edit to the user.
+
     Parameters
     ----------
     wp : Workplan

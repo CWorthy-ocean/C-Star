@@ -694,7 +694,7 @@ async def handle_run_reloading(run_id: str) -> WorkplanRun:
     ------
     typer.BadParameter
         - If no run record exists for the supplied run-id, or it cannot be
-          read (one a newer cstar-ocean wrote).
+          read (one a newer cstar-ocean wrote that this build cannot read).
         - If the run was attached from elsewhere: it has no sentinels here and
           is never relaunched.
         - If the run's workplan or transformed workplan cannot be found.

@@ -70,8 +70,9 @@ The schema version is based on `semantic versioning <https://semver.org/>`_
 , read from the file's point of view: a file with an older minor or patch
 version loads unchanged; a file with an older major version is migrated
 automatically when the application provides a migration (``cstar blueprint
-migrate`` writes the migrated file out); and a file newer than the installed
-C-Star is refused with a message to upgrade. The published schemas are listed
+migrate`` writes the migrated file out); a file with a newer minor or patch
+version loads unless it sets a field the installed C-Star does not know; and a
+file with a newer major version is refused with a message to upgrade. The published schemas are listed
 under :doc:`../schemas/index`, and the rules are spelled out in
 :ref:`versioning_blueprint_schema`.
 
