@@ -77,8 +77,6 @@ A step that will produce it (``from_step``)
    records exactly what ran. (A relative blueprint file literally named
    ``inline`` must be written ``./inline``.)
 
-UCLA-ROMS time splitting cannot be used with a deferred or inline
-blueprint.
 
 Besides ``name``, ``application``, ``blueprint`` and ``depends_on``, a step
 can carry:

@@ -1,13 +1,21 @@
 .. _hpc:
 
 
-Example HPC deployment
+Working on HPC systems
 ======================
+
+C-Star runs on a laptop with no special setup. On a cluster a few things
+differ: the scheduler must be configured, data goes on the right file
+system, and Python environments need protecting from the module system.
+:doc:`machines` lists the systems C-Star has been tested on.
+
+
+
 
 .. image:: images/hpc_arch_diagram.png
     :alt: Components of a C-Star deployment in an HPC environment
 
-The diagram shows a user-initiated workflow on an HPC system. The user has
+This diagram shows a user-initiated workflow on an HPC system. The user has
 already prepared a workplan and its blueprints, with the input data on the
 cluster's storage (for example by running Forge there first).
 
@@ -21,14 +29,6 @@ reads the step's blueprint and runs the application.
 The user can log off and come back later. Calling ``cstar run status``
 with the same run ID reports how far the workplan has progressed.
 
-
-Working on HPC systems
-======================
-
-C-Star runs on a laptop with no special setup. On a cluster a few things
-differ: the scheduler must be configured, data goes on the right file
-system, and Python environments need protecting from the module system.
-:doc:`machines` lists the systems C-Star has been tested on.
 
 Configure the scheduler
 -----------------------
@@ -110,12 +110,16 @@ Every C-Star application writes under its blueprint's ``working_dir``. A
 blueprint that omits it runs under
 ``CSTAR_DATA_HOME/blueprint_runs/<application>/<name>``, with the blueprint
 name slugified. A workplan gives each step
-``CSTAR_DATA_HOME/workplan_runs/<run id>/tasks/<step>``. A ``working_dir`` you set is used exactly as written; a
+``CSTAR_DATA_HOME/workplan_runs/<run id>/tasks/<step>``; a run started
+before that layout keeps its ``CSTAR_DATA_HOME/<run id>`` directory when you
+re-run or resume it. A ``working_dir`` you set is used exactly as written; a
 relative path is resolved against the directory you run from.
 
 A relative ``location:`` inside a blueprint, such as an input dataset or local
 code, is different: it resolves against the directory of the blueprint file,
-wherever you run from. A blueprint fetched from a URL has
+wherever you run from. A location that exists only relative to the directory
+you run from, where earlier releases looked, is rejected with both paths
+named, rather than read from the wrong place. A blueprint fetched from a URL has
 no directory of its own, so its relative locations resolve against the
 directory you run ``cstar`` from.
 
