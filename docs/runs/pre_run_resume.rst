@@ -11,7 +11,8 @@ the queue. The model run itself can also be lost part way through, to a
 walltime limit or a node failure, with hours of restarts already on disk.
 Two options address these: ``--pre-run`` does everything up to the launch
 and stops, and ``--resume`` picks a run up from where it left off. Both
-exist for ``cstar blueprint run`` and for ``cstar workplan submit``.
+exist for ``cstar blueprint run``, ``cstar blueprint submit`` and
+``cstar workplan submit``.
 
 .. _workplan_pre_run:
 
@@ -27,19 +28,28 @@ queue, and it moves cloning and compilation out of the eventual allocation.
 Unlike ``cstar workplan check``, it is not free of side effects: it writes
 the full working directory, which can hold many GB of staged inputs.
 
-For a single blueprint:
+For a single blueprint on a cluster:
+
+.. code-block:: console
+
+   cstar blueprint submit my_blueprint.yaml --pre-run
+   cstar blueprint submit my_blueprint.yaml
+
+The first command prepares the working directory on the login node. The
+second, under the same run ID, attaches to it, reusing the staged inputs,
+compiled executable and partitions, and launches the model in a scheduler
+job.
+
+On a laptop or workstation, or inside an allocation, the same pair is:
 
 .. code-block:: console
 
    cstar blueprint run my_blueprint.yaml --pre-run
    cstar blueprint run my_blueprint.yaml --resume
 
-The first command leaves the prepared working directory in place. The
-second attaches to it, reusing the staged inputs, compiled executable and
-partitions, and launches the model; on a scheduler system it submits ROMS as
-a job, exactly as a plain ``blueprint run`` does. ``--pre-run`` cannot be
-combined with ``--resume``; combined with ``--clobber`` it starts the
-preparation from scratch.
+which launches the model where the second command runs. ``--pre-run``
+cannot be combined with ``--resume``; combined with ``--clobber`` it starts
+the preparation from scratch.
 
 For a workplan:
 
@@ -109,6 +119,12 @@ step in place:
 .. code-block:: console
 
    cstar workplan submit my_workplan.yaml --resume
+
+A blueprint you submitted resumes the same way, in a new scheduler job:
+
+.. code-block:: console
+
+   cstar blueprint submit my_blueprint.yaml --resume
 
 Failed steps whose application supports resume continue from their last
 usable restart; failed steps of other applications are run again from

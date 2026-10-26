@@ -57,10 +57,10 @@ when a stage fails you can look at what it left behind.
    namelist expects, that the model reference date of the inputs matches the
    namelist, and, for a CDR-LiTE build that reads carbonate sensitivities from
    files, that those files are present and complete.
-6. **Run the model.** On a system with a job scheduler the model is submitted
-   as a job, with the account, queue and walltime from your configuration or
-   the workplan; otherwise it runs in place under ``mpirun``. The model's own
-   log goes to ``logs/``.
+6. **Run the model.** The model runs under ``mpirun`` on the machine C-Star
+   is running on: your laptop or workstation, an allocation you started, or
+   the scheduler job of a workplan step. The model's own log goes to
+   ``logs/``.
 7. **Post-run.** Without ParallelIO, ROMS writes one output file per rank into
    ``temp_output/``; C-Star joins them into whole files in ``output/`` and
    removes the pieces. With ParallelIO, ROMS writes the whole files directly
@@ -100,14 +100,11 @@ A UCLA-ROMS blueprint runs like any other:
 
    cstar blueprint run my_simulation.yaml
 
-On a cluster this can be started from a login node: the code is fetched and
-compiled there and the model itself goes to the scheduler. Joining the
-output afterwards is the one stage that is heavy on the login node, so set
-``CSTAR_NPROCS_POST`` to a small number there, or run the simulation as a
-step of a :doc:`workplan <../../workplans/index>` so that every stage runs on
-a compute node. In a workplan a UCLA-ROMS step can also take its initial
-conditions, boundary forcing or carbonate sensitivities from an earlier step
-through :doc:`directives <../../workplans/directives>`.
+On a cluster, submit it instead with ``cstar blueprint submit
+my_simulation.yaml`` (see :doc:`../blueprints`). In a
+:doc:`workplan <../../workplans/index>` a UCLA-ROMS step can also take its
+initial conditions, boundary forcing or carbonate sensitivities from an
+earlier step through :doc:`directives <../../workplans/directives>`.
 
 Most UCLA-ROMS blueprints are written by :doc:`Forge <../forge/index>` at the
 end of domain generation. :doc:`blueprint` describes what is in one, and

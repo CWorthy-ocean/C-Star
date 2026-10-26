@@ -162,7 +162,8 @@ Workplans and their steps
       The identifier of a run. By default it is the workplan's ``name``, which
       must already be a slug (ASCII lowercase letters, digits, ``-`` and ``_``), so
       the same file always runs under the same ID; ``cstar workplan submit --run-id
-      <id>`` overrides it. It names the run's directory
+      <id>`` overrides it. For ``cstar blueprint submit`` it is the blueprint's
+      ``name`` made into a slug. It names the run's directory
       (``CSTAR_DATA_HOME/workplan_runs/<id>``), lets you check status (``cstar run status``) or reattach to a run
       in progress, and lets you re-enter a run to retry failed steps or
       resume them in place. A new run ID starts the workplan from scratch.

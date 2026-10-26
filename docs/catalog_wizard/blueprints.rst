@@ -127,8 +127,8 @@ Review and export
    C-Star command line. To run this blueprint as part of a workplan, build
    one on the Workplan page. **Run** executes ``cstar blueprint run`` on the
    machine the wizard is running on, so on a cluster's login node use it only
-   for toy domains; for real domains save the blueprint and submit it through a
-   workplan or from a compute node (see :doc:`../deployments/hpc`).
+   for toy domains; for real domains save the blueprint and submit it with
+   ``cstar blueprint submit`` (see :doc:`../applications/blueprints`).
 
 .. figure:: ../images/wizard-review.png
    :alt: The Review and export section: validation result, resolved YAML, download, save and run

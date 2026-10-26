@@ -86,8 +86,15 @@ it is, in a line like this:
 ``cstar forge run <forge_blueprint.yaml>`` runs the same thing with Forge's
 full option set: regenerate only some inputs, overwrite existing files, tune
 dask, or change the working directory. It also ends by printing that path and
-the command that runs it (``Run it with:  cstar blueprint run <path>``). See
-:doc:`../applications/forge/blueprint`.
+the command that runs it; on a cluster a second line gives the command that
+submits it:
+
+.. code-block:: text
+
+   Run it with:      cstar blueprint run <path>
+   On this cluster:  cstar blueprint submit <path>
+
+See :doc:`../applications/forge/blueprint`.
 
 3. Run the simulation
 ---------------------
@@ -115,6 +122,8 @@ Each step can run on a different machine. A common pattern is to build the
 blueprint in a browser on your laptop, copy the YAML to the cluster, and run
 steps 2 and 3 there, where the forcing data and the compute are. On an HPC
 system, both steps' working directories land under ``CSTAR_DATA_HOME``, which
-resolves to scratch, and the UCLA-ROMS step should be submitted through a
-workplan so it runs on compute nodes rather than the login node. See
-:doc:`../deployments/hpc`.
+resolves to scratch. Run step 3 with ``cstar blueprint submit`` instead of
+``cstar blueprint run`` so the simulation runs on a compute node, or run both
+steps as a workplan (next page). A submitted run keeps its results in the
+run's directory, which ``cstar run path cson_roms-marbl_v0-1_wio-toy_10procs
+ucla_roms`` prints. See :doc:`../deployments/hpc`.

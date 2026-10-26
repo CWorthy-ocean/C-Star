@@ -35,3 +35,7 @@ We would love to help you get set up!
 +--------------------------------------------------------------------------------------+------------+-------------------------+
 | Linux (x86_64 and aarch 64)                                                          | ✅         | ✅                      |
 +--------------------------------------------------------------------------------------+------------+-------------------------+
+
+On Derecho, which uses PBS, ``cstar blueprint submit`` and ``cstar workplan
+submit`` are not available. Run ``cstar blueprint run`` from inside a PBS job
+(an interactive ``qsub -I`` session or your own batch script).

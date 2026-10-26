@@ -97,48 +97,32 @@ Running a blueprint
 
 A blueprint can also be run from Python. ``cstar blueprint run`` runs the
 same runner (see :doc:`../applications/blueprints`). A
-``UclaRomsRunner`` executes a UCLA-ROMS blueprint, with the job and service
-settings taken from your configuration, as the command takes them:
+``UclaRomsRunner`` executes a UCLA-ROMS blueprint in the Python process
+that calls it:
 
 .. code-block:: python
 
    from cstar.applications.core import RunnerRequest
    from cstar.applications.ucla_roms.app import UclaRomsRunner
    from cstar.applications.ucla_roms.models import UclaRomsBlueprint
-   from cstar.entrypoint.config import get_job_config, get_service_config
+   from cstar.entrypoint.config import get_service_config
 
    request = RunnerRequest("my_blueprint.yaml", UclaRomsBlueprint)
-   runner = UclaRomsRunner(
-       request,
-       get_service_config("INFO", name="UclaRomsRunner"),
-       get_job_config(),
-   )
+   runner = UclaRomsRunner(request, get_service_config("INFO", name="UclaRomsRunner"))
    await runner.execute()
-
-``get_job_config()`` reads the scheduler account, queue and walltime from
-your ``CSTAR_SLURM_*`` settings. To set them for this run only, build a
-``JobConfig`` yourself instead:
-
-.. code-block:: python
-
-   from cstar.entrypoint.config import JobConfig
-
-   job_cfg = JobConfig(account_id="my-allocation", walltime="01:30:00", priority="wholenode")
 
 ``RunnerRequest`` takes the same choices as the command's options:
 ``clobber=True``, ``resume=True`` and ``pre_run=True`` match ``--clobber``,
 ``--resume`` and ``--pre-run`` (see :doc:`../runs/pre_run_resume`).
 
-Two differences from the command are worth knowing:
+``execute()`` runs the model in this process and keeps the notebook cell
+busy until it finishes, so on a cluster call it from inside an allocation.
+To submit the run as a scheduler job instead, run ``!cstar blueprint submit
+my_blueprint.yaml`` in a notebook cell (or the same command in a terminal),
+and follow the run with ``cstar run status``.
 
-- ``execute()`` waits until the simulation finishes, and so does the
-  notebook cell that calls it. On a cluster the model still runs as a
-  scheduler job, but the cell is busy for the whole time the job waits in
-  the queue and runs. For long runs, submit a :doc:`workplan
-  <../workplans/index>` from the command line instead, and follow it with
-  ``cstar run status``.
-- ``await`` at the top level works in a Jupyter notebook. In a script, wrap
-  the call in ``asyncio.run(runner.execute())``.
+``await`` at the top level works in a Jupyter notebook. In a script, wrap
+the call in ``asyncio.run(runner.execute())``.
 
 The classes behind these snippets are documented in the rest of this
 Reference section: :doc:`api-blueprint` for the blueprint models,

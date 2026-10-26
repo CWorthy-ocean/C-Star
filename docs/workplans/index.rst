@@ -294,8 +294,8 @@ step under ``tasks/``:
     Submitting on an HPC system needs the SLURM settings the system requires: the **account** and **queue** on Anvil and Bouchet, the **account** on Expanse (see :doc:`../deployments/hpc`). Run ``cstar init`` once on the system to write them to your configuration file. A workplan run with the SLURM launcher checks them before it schedules any step, and stops if one the system requires is neither set in your environment or configuration file nor supplied by the workplan.
 
 A path to a blueprint file can be given instead of a workplan: it is run as
-a single-step workplan, which is the simplest way to send one simulation to
-the compute nodes.
+a single-step workplan, the same as ``cstar blueprint submit`` (see
+:doc:`../applications/blueprints`).
 
 Submitting the same workplan again does not start a second copy. The run ID
 is the same, so the command re-enters the existing run: finished steps are

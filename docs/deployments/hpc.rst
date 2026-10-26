@@ -62,16 +62,18 @@ Run work on the compute nodes
 
 Submit your work as a :doc:`workplan <../workplans/index>`. ``cstar workplan
 submit`` sends each step to SLURM and returns, so every stage runs on a
-compute node and you can log off. A workplan can have a single step, so this
-works for one simulation too.
+compute node and you can log off. For one blueprint, ``cstar blueprint
+submit my_blueprint.yaml`` does the same with a single-step workplan (see
+:doc:`../applications/blueprints`).
 
-``cstar blueprint run`` instead runs on the node you start it from. That is
-fine for a UCLA-ROMS blueprint, which submits the model run to SLURM itself,
-but Forge generates every input file right there, which is too much for a
-login node beyond a toy domain (see :doc:`../applications/blueprints`).
+``cstar blueprint run`` instead runs everything on the node you start it
+from, so use it inside an allocation (``salloc``, or your own batch script).
+UCLA-ROMS will not start the model on a login node unless you set
+``CSTAR_ALLOW_LOGIN_NODE_RUN=1``, which is only for runs small enough for
+one.
 
-To catch start-up problems before waiting in the queue, prepare a run on the
-login node with ``--pre-run``; see :doc:`../runs/pre_run_resume`.
+To catch start-up problems before waiting in the queue, prepare the run on
+the login node first with ``--pre-run``; see :doc:`../runs/pre_run_resume`.
 
 Where data goes
 ---------------
