@@ -21,25 +21,25 @@ syntax of every directive.
    editing in a text editor.
 
 Open it with the **Workplan** tab at the top of the wizard (see
-:doc:`launching`). A sticky bar under the tabs lists the cards, names the
-draft and says whether it is valid.
+:doc:`launching`). A sticky bar under the tabs lists the sections, names
+the draft and says whether it is valid.
 
 .. figure:: ../images/wizard-workplan-overview.png
-   :alt: The Workplan page with the Start and Workplan cards on the left and the YAML and dependency graph preview on the right
+   :alt: The Workplan page with the Start and Workplan sections on the left and the YAML and dependency graph preview on the right
    :width: 100%
 
-   The Workplan page: cards on the left, the live YAML and dependency graph on the right.
+   The Workplan page: sections on the left, the live YAML and dependency graph on the right.
 
 The layout
 ----------
 
-On a wide screen the page has two columns. The cards are on the left. On the
+On a wide screen the page has two columns. The sections are on the left. On the
 right, kept in view while you scroll, is a live picture of what you are
 building, switchable between the **YAML**, the **DAG** (the steps drawn left
 to right by dependency, coloured by application, with edges labelled by what
 they carry: a restart, boundary data, carbonate sensitivities, a deferred
 blueprint) and both. The YAML is editable: change it and press **Apply
-edits** to load the text back into the cards. The **Preview** control moves
+edits** to load the text back into the sections. The **Preview** control moves
 the pane to the bottom or top of the page, or hides it. On a narrow screen
 the columns stack.
 
@@ -69,7 +69,7 @@ Compute
 
 Recipes
    Generators for the recurring shapes. Each adds ordinary steps to the Steps
-   card, which you can keep editing:
+   section, which you can keep editing:
 
    - **Forge inputs, then run** adds a Forge step and the simulation step
      that runs the blueprint it generates.
@@ -107,10 +107,10 @@ Review
    ``cstar run status`` command to follow the run with.
 
 .. figure:: ../images/wizard-workplan-review.png
-   :alt: The Review card with the validation result and the save, check and submit controls
+   :alt: The Review section with the validation result and the save, check and submit controls
    :width: 100%
 
-   The Review card.
+   The Review section.
 
 Where the workplan goes
 -----------------------
