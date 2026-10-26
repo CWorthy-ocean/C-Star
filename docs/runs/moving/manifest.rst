@@ -50,11 +50,9 @@ and MARBL configuration, its executable and its log; for a Forge step, its
 generated inputs, published blueprint, rendered configuration and log; for
 a ``cdr_metrics`` step, its metrics series and figures.
 
-The scheduling command writes the manifest, under a lock, and records each
+The scheduling command writes the manifest and records each
 step's submission as it makes it. The steps write their own records and
-never touch the manifest. Keeping these records never stops a run: a step
-that cannot write its record, or a command that cannot update the manifest,
-logs a warning and carries on. ``cstar run status`` and ``cstar run show``
+never touch the manifest. ``cstar run status`` and ``cstar run show``
 refresh the manifest: they fold the step statuses and records into it, and
 once every step is terminal they set ``finished_at`` on the latest attempt,
 which is the completion marker. A run that finishes while nobody is watching
@@ -68,8 +66,8 @@ reference <../../schemas/index>`.
 
 .. _workplan_execution_facts:
 
-What the manifest says about timing
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+Timing records
+^^^^^^^^^^^^^^
 
 The manifest records each step's latest submission (``launcher``,
 ``job_id``, ``submitted_at``), and the step record says what ran the step.
@@ -91,8 +89,8 @@ step could write a record. Query it by job id while your site retains it:
 
 .. _workplan_carried_inputs:
 
-What the run was asked
-^^^^^^^^^^^^^^^^^^^^^^
+Per-attempt records
+^^^^^^^^^^^^^^^^^^^
 
 Each attempt that reads the workplan file leaves what it was asked in the
 run directory, under ``attempts/<YYYYMMDDTHHMMSS>/``, named after the
@@ -129,12 +127,7 @@ old location.
 The transformed workplan holds absolute paths into the run directory, and
 records the run directory it was written under. Every command that reads
 it rebases the paths that begin with the recorded root onto the directory
-the file now sits in, so the plan stays valid too. The run record in the
-state home follows a moved run only into the current data home: moving one
-run from one data home to another on the same machine (move
-``<old>/workplan_runs/<id>`` to ``<new>/workplan_runs/<id>`` and point
-``CSTAR_DATA_HOME`` at ``<new>``) keeps ``status``, ``gather``,
-``continue-from`` and ``--resume`` working.
+the file now sits in, so the plan stays valid too.
 
 A run copied to any other path, or to another machine, has valid internal
 paths and is read through its directory, but it is not tracked there:
@@ -157,8 +150,8 @@ digests were recorded before it. Run this on the machine that has the run:
 It computes a digest for each product that has none and writes it into the
 step records and the run manifest. For a netCDF file the digest covers the
 structure and a bounded sample of the data, which does not depend on how
-the file is stored on disk and reads little however large the file is; for
-any other file it is the sha256 of its bytes. ``--record-digests`` writes
+the file is stored on disk and balances accuracy with potentially length hash
+computations across hundreds of terabytes of files. ``--record-digests`` writes
 into the run, so it needs a run you own that is tracked here, or the run's
 directory passed explicitly.
 

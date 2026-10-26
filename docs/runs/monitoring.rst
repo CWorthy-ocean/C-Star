@@ -18,8 +18,8 @@ when you submitted it. ``cstar run ls`` lists your tracked run IDs, in case you 
    still work and run the same command; they are no longer listed in
    ``--help``.
 
-Is it running?
---------------
+Checking run status
+-------------------
 
 .. code-block:: console
 
@@ -53,8 +53,8 @@ step statuses and records into it and closing the latest attempt once every
 step is terminal; pass ``--no-refresh`` to read the run as last recorded
 without writing.
 
-How can I see the logs from a step?
------------------------------------
+Viewing individual logs
+-----------------------
 
 .. code-block:: console
 
@@ -65,8 +65,8 @@ For an active step, add ``--monitor`` to keep streaming it (and press ``Ctrl-C``
 to stop). When a step has failed, this is the first place to look.
 
 
-Which runs do I have?
----------------------
+Listing all known runs
+----------------------
 
 .. code-block:: console
 
@@ -107,8 +107,8 @@ shows ``-``.
 
 .. _workplan_run_cd:
 
-Where are the files?
---------------------
+Navigating to the run directory
+-------------------------------
 
 .. code-block:: console
 
@@ -234,8 +234,8 @@ the first run as it is.
 
 .. _workplan_show_run:
 
-I want to see the full history of a run
----------------------------------------
+Viewing run history and metadata
+--------------------------------
 
 .. code-block:: console
 
@@ -345,8 +345,8 @@ files can be verified after a transfer; see :doc:`moving/index`.
 
 .. _workplan_clean_up:
 
-Cleaning up
------------
+Cleaning up unneeded runs
+-------------------------
 
 .. code-block:: console
 

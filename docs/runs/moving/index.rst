@@ -26,5 +26,4 @@ In short:
   shared runs area, where it outlasts your scratch space and your
   collaborators can find it.
 - :doc:`attach` registers a run that arrived by copy, so that the ``cstar
-  run`` commands and other workplans can refer to it by name on this
-  machine.
+  run`` commands and other workplans can refer to it by name in your environment.

@@ -87,7 +87,8 @@ Two things a pre-run does not do. When a step uses ParallelIO, the inputs
 are not partitioned, so the pre-run only validates them and preparation is
 light. And ROMS itself is not started, so errors that only surface when
 ROMS opens its boundary or tide files, or writes its first restart, are not
-caught.
+caught. Future work is planned to expand pre-run capabilities to include ROMS
+start-up.
 
 Resume: continue from the last restart
 --------------------------------------
@@ -108,29 +109,18 @@ executable, and continues from the last usable restart file the previous
 attempt wrote. When no restart was written, it starts from the original
 initial conditions. ``--resume`` cannot be combined with ``--clobber``, and
 only applications that declare themselves resumable accept it (today,
-``ucla_roms``); the CLI rejects the flag for any other application before
-execution begins.
+``ucla_roms``).
 
 For a workplan, ``--resume`` re-enters the run and continues every failed
 step in place:
 
 .. code-block:: console
 
-   cstar workplan submit --run-id <run-id> --resume
    cstar workplan submit my_workplan.yaml --resume
 
 Failed steps whose application supports resume continue from their last
 usable restart; failed steps of other applications are run again from
-scratch, with a warning; completed steps are reused. The second form names
-the run by the workplan file it was started from: the run ID is derived
-from the workplan ``name`` exactly as on the first run, and the file is used
-only to identify that run, so it must be unchanged since the latest attempt
-that read it (edits, and blueprint schema migrations applied on load, both
-count), otherwise the command refuses and points you at ``--run-id``.
-``--var`` and ``--varfile`` cannot be combined with ``--resume``; the run
-continues with the variables it was started with, and the settings
-recorded when the run started are re-exported, so a resumed run keeps its
-original configuration even if your shell has changed since.
+scratch, with a warning; completed steps are reused.
 
 Resume and clobber are the two ways to handle a failed step when a run is
 re-entered, and they cannot be combined on one step. The default, without
