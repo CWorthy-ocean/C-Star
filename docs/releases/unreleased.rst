@@ -98,6 +98,11 @@ Breaking Changes
   - ``DomainCatalog.register_domain`` refuses a name the catalog already has, like the other ``register_*`` writers, instead of overwriting it.
 
 - Deprecated: the per-entry spec directories ``<Kind>/<name>/<File>.yaml`` (``ModelSpec/<name>/model.yaml``, ``DomainSpec/<name>/Domain.yaml``, ...), removed in 0.20.0; run ``cstar admin migrate-catalog <root>``. (`#842 <https://github.com/CWorthy-ocean/C-Star/pull/842>`_)
+- Re-entering a run in which a queued or running step was edited now refuses, naming the steps, instead of ignoring the edit and running the old definition; pass ``--clobber <step-name>``, undo the edit, or cancel the job and submit again. (`#846 <https://github.com/CWorthy-ocean/C-Star/pull/846>`_)
+- ``--clobber`` of a step that is still queued or running now cancels its job (or local processes) first, and refuses if it cannot, instead of submitting a second job beside it. (`#846 <https://github.com/CWorthy-ocean/C-Star/pull/846>`_)
+
+  - Queued steps waiting on the clobbered step are cancelled and queued again behind its new job.
+
 
 
 
@@ -395,6 +400,11 @@ Bug Fixes
   - Editing a blueprint and submitting it again writes a new copy, so it never replaces the copy an earlier, still-running step reads.
 
 - The migrated copy is written atomically, so a concurrent submit never reads a half-written blueprint. (`#845 <https://github.com/CWorthy-ocean/C-Star/pull/845>`_)
+- A queued step whose dependency was submitted again (after a failure or ``--clobber``) no longer stays queued forever behind the replaced job; it is queued again behind the new one. (`#846 <https://github.com/CWorthy-ocean/C-Star/pull/846>`_)
+- Cancelling a step run by the local launcher now stops every process it started, not only its wrapper script, including steps adopted from an earlier submission. (`#846 <https://github.com/CWorthy-ocean/C-Star/pull/846>`_)
+- With the local launcher, ``cstar run status`` shows a step waiting for its dependencies as Submitted instead of Running. (`#846 <https://github.com/CWorthy-ocean/C-Star/pull/846>`_)
+- ``cstar blueprint submit`` refused over an edited blueprint now tells you to pass ``--clobber``, the flag it takes, instead of ``--clobber <step-name>``, which it rejects. (`#846 <https://github.com/CWorthy-ocean/C-Star/pull/846>`_)
+- Re-entering a run by its run-id alone no longer clears again a step that ``--clobber`` already re-ran in an earlier attempt (it re-ran a finished step, and now would have restarted a running one). (`#846 <https://github.com/CWorthy-ocean/C-Star/pull/846>`_)
 
 
 
@@ -592,4 +602,5 @@ Miscellaneous
 - The bundled catalog ships in the one-file-per-entry layout. (`#842 <https://github.com/CWorthy-ocean/C-Star/pull/842>`_)
 - The catalog, specs, wizard-launching, Python reference and developer pages describe the new layout, and the catalog page's migration section covers spec directories. (`#842 <https://github.com/CWorthy-ocean/C-Star/pull/842>`_)
 - The ``cstar blueprint migrate --help`` text now says where a copy is written when no output path is given. (`#845 <https://github.com/CWorthy-ocean/C-Star/pull/845>`_)
+- The re-entry and run-status documentation describe queued and running steps as they behave now, and the ``--clobber`` help says a queued or running step is cancelled first. (`#846 <https://github.com/CWorthy-ocean/C-Star/pull/846>`_)
 
