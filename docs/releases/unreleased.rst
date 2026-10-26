@@ -66,6 +66,17 @@ Breaking Changes
   - An emitted ``ucla_roms`` blueprint whose recorded producer predates this release lists as ``unverified`` in the catalog's blueprint outputs until its forge entry is run again.
 
 - The bundled forge blueprints ``cson_roms-marbl_v0.1_wio-toy_10procs`` and ``roms-marbl-0.3-default_wio-toy_10procs`` are removed; load ``wio-toy-example``, the same toy domain on the current model spec, instead. (`#835 <https://github.com/CWorthy-ocean/C-Star/pull/835>`_)
+- Deprecated: the ``nest-from`` keys ``bry_path`` and ``rst_path``, removed in 0.20.0; use ``path``, and a ``continue-from`` directive for the restart. (`#833 <https://github.com/CWorthy-ocean/C-Star/pull/833>`_)
+
+  - ``cstar workplan check`` and ``cstar workplan submit`` now warn about them, naming the step, not only the step's log on the compute node.
+
+- Deprecated: the catalog's legacy blueprint layouts (flat ``<name>.forge_blueprint.yaml`` and ``B_<name>.yaml``, and ``blueprints/<machine>/<name>/B_*.yaml``), removed in 0.20.0; run ``cstar admin migrate-catalog <root>``. (`#833 <https://github.com/CWorthy-ocean/C-Star/pull/833>`_)
+- Deprecated: ``blueprints/roms_marbl/`` in a catalog, removed in 0.20.0; run ``cstar admin migrate-catalog <root>`` to move it to ``blueprints/ucla_roms/``. (`#833 <https://github.com/CWorthy-ocean/C-Star/pull/833>`_)
+- Deprecated: ``cstar workplan run``, removed in 0.20.0; use ``cstar workplan submit``. (`#833 <https://github.com/CWorthy-ocean/C-Star/pull/833>`_)
+- Deprecated: the ``cstar workplan`` and ``cstar wp`` spellings of the run verbs (``status``, ``log``, ``gather``, ``path``, ``cd``, ``ls``, ``list``), removed in 0.20.0; use ``cstar run <verb>``. (`#833 <https://github.com/CWorthy-ocean/C-Star/pull/833>`_)
+
+  - Each prints one line naming the replacement, including ``cstar wp cd`` through the ``cstar env shell-init`` function once it is regenerated.
+
 
 
 
@@ -411,6 +422,7 @@ Improvements
 - ``cstar blueprint check`` and ``cstar blueprint migrate`` report a newer-minor blueprint that sets an unknown field as too new, rather than as invalid or as compatible. (`#834 <https://github.com/CWorthy-ocean/C-Star/pull/834>`_)
 - A blueprint, workplan, run manifest, step record or run record newer than the installed C-Star is refused only when its major is newer, or when it sets a field this C-Star does not know; the message names the field. Earlier releases keep refusing any newer file. (`#834 <https://github.com/CWorthy-ocean/C-Star/pull/834>`_)
 - Writing a file back stamps the newer of its own schema version and the installed C-Star's, so an older blueprint or workplan this C-Star rewrites (override and resume copies, the transformed workplan) is stamped at the current version, which earlier releases refuse. (`#834 <https://github.com/CWorthy-ocean/C-Star/pull/834>`_)
+- Deprecation warnings appear once per command, at check or load time, and name the release that removes the old form. (`#833 <https://github.com/CWorthy-ocean/C-Star/pull/833>`_)
 
 
 
@@ -495,4 +507,6 @@ Miscellaneous
 - The example forge blueprint in the documentation is regenerated on ``roms-marbl-0.12-default``, and the Forge model-spec page says the bundled domains and the example use it. (`#835 <https://github.com/CWorthy-ocean/C-Star/pull/835>`_)
 - The bundled DomainSpecs record ``roms-marbl-0.12-default`` as their model; the wizard never applies this field when you pick a domain, so it only changes what the spec files say. (`#835 <https://github.com/CWorthy-ocean/C-Star/pull/835>`_)
 - The schema versioning docs gain a "newer file" column, and the run manifest docs describe two installs sharing a run. (`#834 <https://github.com/CWorthy-ocean/C-Star/pull/834>`_)
+- The developer guide has a new "Deprecations and compatibility" section, and the PR template asks for a "Deprecated: <what>, removed in <release>" line. (`#833 <https://github.com/CWorthy-ocean/C-Star/pull/833>`_)
+- The Finalize Release Notes workflow refuses a release that a deprecation is due to be removed in. (`#833 <https://github.com/CWorthy-ocean/C-Star/pull/833>`_)
 
