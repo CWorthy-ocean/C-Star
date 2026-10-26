@@ -24,9 +24,7 @@ Plus ``blueprints/<application>/<name>.yaml`` for blueprints -- the directory
 is the registered application name (``forge``, ``ucla_roms``, ...) and the
 file name is the entry's name -- and ``workplans/`` for workplans saved from
 the wizard. The directory name (for blueprints, the file name) is an entry's
-name; there are no version numbers or identifiers beyond it. If C-Star
-warns that your catalog uses an older layout, ``cstar admin migrate-catalog
-<root>`` moves its entries into this one. Each
+name; there are no version numbers or identifiers beyond it. Each
 file under ``blueprints/<application>/`` is one blueprint, so sidecar files
 (``settings_B_*.yaml``, ``_grid.yaml``) do not belong there. :doc:`applications/forge/specs`
 describes what each spec kind contains.
@@ -86,8 +84,26 @@ You can also create the directory and YAML file by hand, following a bundled
 entry of the same kind as a template; the catalog is rescanned when the
 wizard is reloaded.
 
-If you used the standalone ``cstar-forge`` package before, your old catalog
-may still be at ``~/cstar-forge-data/catalog``. It is not read from there.
-Move it to ``~/cstar/catalog``, or point ``CSTAR_CATALOG`` at it; a
-one-time log message reminds you if the new location is empty and the old
-one exists.
+.. _catalog-migrating:
+
+Migrating an older catalog
+--------------------------
+
+Catalogs written by earlier versions of C-Star kept blueprints in other
+places: flat ``<name>.forge_blueprint.yaml`` and ``B_<name>.yaml`` files,
+per-machine ``blueprints/<machine>/<name>/`` directories, or a
+``blueprints/roms_marbl/`` directory. C-Star still reads them for now, with
+a warning. To move them into the current ``blueprints/<application>/<name>.yaml``
+layout, run:
+
+.. code-block:: bash
+
+   cstar admin migrate-catalog ~/cstar/catalog --dry-run   # report only
+   cstar admin migrate-catalog ~/cstar/catalog
+
+Nothing is overwritten: a blueprint whose new location is already taken is
+left where it is and reported, and so is anything that is not a blueprint.
+
+If you used the standalone ``cstar-forge`` package, your old catalog may be
+at ``~/cstar-forge-data/catalog``, which C-Star does not read. Move it to
+``~/cstar/catalog``, or point ``CSTAR_CATALOG`` at it.
