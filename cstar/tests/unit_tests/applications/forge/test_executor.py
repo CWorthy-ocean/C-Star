@@ -92,26 +92,26 @@ requires_cstar_pio = pytest.mark.skipif(
 )
 
 _BUNDLED_CATALOG = Path(cstar.catalog.__file__).parent / "bundled"
-_MODEL_DIR = _BUNDLED_CATALOG / "ModelSpec" / "cson_roms-marbl_v0.1"
+_MODEL_PATH = _BUNDLED_CATALOG / "ModelSpec" / "cson_roms-marbl_v0.1.yaml"
 # ucla-roms >= 0.5.0 ModelSpec -- used by the versioned-namelist golden test below.
-_MODEL_DIR_ROMS050 = _BUNDLED_CATALOG / "ModelSpec" / "roms-marbl-0.5-default"
+_MODEL_PATH_ROMS050 = _BUNDLED_CATALOG / "ModelSpec" / "roms-marbl-0.5-default.yaml"
 # ucla-roms >= 0.6.0 ModelSpec (adds &PIO_SETTINGS) -- used by the versioned-namelist
 # golden test below.
-_MODEL_DIR_ROMS060 = _BUNDLED_CATALOG / "ModelSpec" / "roms-marbl-0.6-default"
+_MODEL_PATH_ROMS060 = _BUNDLED_CATALOG / "ModelSpec" / "roms-marbl-0.6-default.yaml"
 # ucla-roms >= 0.7.0 ModelSpec (adds &CDR_TRACER_OUTPUT_SETTINGS/
 # &CDR_GAS_EXCH_OUTPUT_SETTINGS, PR #351) -- used by the versioned-namelist golden
 # test below.
-_MODEL_DIR_ROMS070 = _BUNDLED_CATALOG / "ModelSpec" / "roms-marbl-0.7-default"
+_MODEL_PATH_ROMS070 = _BUNDLED_CATALOG / "ModelSpec" / "roms-marbl-0.7-default.yaml"
 # ucla-roms >= 0.9.0 ModelSpec (CDR_TRACER renamed CDR_LITE: &CDR_LITE_SETTINGS/
 # &CDR_LITE_OUTPUT_SETTINGS, PR #372) -- used by the versioned-namelist golden
 # test below.
-_MODEL_DIR_ROMS090 = _BUNDLED_CATALOG / "ModelSpec" / "roms-marbl-0.9-default"
-_MODEL_DIR_ROMS0100 = _BUNDLED_CATALOG / "ModelSpec" / "roms-marbl-0.10-default"
+_MODEL_PATH_ROMS090 = _BUNDLED_CATALOG / "ModelSpec" / "roms-marbl-0.9-default.yaml"
+_MODEL_PATH_ROMS0100 = _BUNDLED_CATALOG / "ModelSpec" / "roms-marbl-0.10-default.yaml"
 # ucla-roms >= 0.11.0 ModelSpec (adds marbl_bgc.use_constant_fe/constant_fe_value to
 # &MARBL_BIOGEOCHEMISTRY_SETTINGS, PR #391) -- used by the versioned-namelist golden
 # test below.
-_MODEL_DIR_ROMS0110 = _BUNDLED_CATALOG / "ModelSpec" / "roms-marbl-0.11-default"
-_MODEL_DIR_ROMS0120 = _BUNDLED_CATALOG / "ModelSpec" / "roms-marbl-0.12-default"
+_MODEL_PATH_ROMS0110 = _BUNDLED_CATALOG / "ModelSpec" / "roms-marbl-0.11-default.yaml"
+_MODEL_PATH_ROMS0120 = _BUNDLED_CATALOG / "ModelSpec" / "roms-marbl-0.12-default.yaml"
 # ModelSpec no longer embeds a default forcing/output selection -- these tests just
 # need a valid, representative pair from the bundled catalog.
 _FORCING_INPUTS = _CATALOG.forcing_data("glorys-era5-unified")
@@ -155,7 +155,7 @@ def _make_builder(args, **overrides):
     ob = merged["open_boundaries"]
     part = merged["partitioning"]
     cfg = build_forge_blueprint(
-        model_dir=_MODEL_DIR,
+        model_path=_MODEL_PATH,
         grid_name=merged["grid_name"],
         grid_kwargs=merged["grid_kwargs"],
         open_boundaries=ob.model_dump() if hasattr(ob, "model_dump") else ob,
@@ -499,7 +499,7 @@ class TestForgeExecutorModelPostInit:
         """
         args = minimal_cstar_spec_builder_args
         cfg = build_forge_blueprint(
-            model_dir=_MODEL_DIR,
+            model_path=_MODEL_PATH,
             grid_name=args["grid_name"],
             grid_kwargs=args["grid_kwargs"],
             open_boundaries=args["open_boundaries"].model_dump(),
@@ -542,7 +542,7 @@ class TestForgeExecutorModelPostInit:
         """
         args = minimal_cstar_spec_builder_args
         cfg = build_forge_blueprint(
-            model_dir=_MODEL_DIR,
+            model_path=_MODEL_PATH,
             grid_name=args["grid_name"],
             grid_kwargs=args["grid_kwargs"],
             open_boundaries=args["open_boundaries"].model_dump(),
@@ -642,7 +642,7 @@ class TestForgeExecutorModelPostInitGridFile:
     def _cfg_with_grid_file(self, minimal_cstar_spec_builder_args, tmp_path, gf):
         args = minimal_cstar_spec_builder_args
         cfg = build_forge_blueprint(
-            model_dir=_MODEL_DIR,
+            model_path=_MODEL_PATH,
             grid_name=args["grid_name"],
             grid_kwargs=args["grid_kwargs"],
             open_boundaries=args["open_boundaries"].model_dump(),
@@ -766,7 +766,7 @@ class TestNestedGridTopography:
 
     def _cfg(self, args, parent_extra, topo_source="EMOD", topo_path="/data/emod.nc"):
         return build_forge_blueprint(
-            model_dir=_MODEL_DIR,
+            model_path=_MODEL_PATH,
             grid_name=args["grid_name"],
             grid_kwargs=args["grid_kwargs"],
             grid_kwargs_parent={**self._PARENT, **parent_extra},
@@ -934,7 +934,7 @@ class TestGridBuildErrorLabels:
         }
         args = minimal_cstar_spec_builder_args
         cfg = build_forge_blueprint(
-            model_dir=_MODEL_DIR,
+            model_path=_MODEL_PATH,
             grid_name=args["grid_name"],
             grid_kwargs=args["grid_kwargs"],
             grid_kwargs_parent=parent_kwargs,
@@ -977,7 +977,7 @@ class TestGridBuildErrorLabels:
     ):
         args = minimal_cstar_spec_builder_args
         cfg = build_forge_blueprint(
-            model_dir=_MODEL_DIR,
+            model_path=_MODEL_PATH,
             grid_name=args["grid_name"],
             grid_kwargs=args["grid_kwargs"],
             open_boundaries=args["open_boundaries"].model_dump(),
@@ -1762,7 +1762,7 @@ class TestForgeExecutorBuildAndRun:
         from cstar.applications.forge.resolve import build_forge_blueprint
 
         cfg = build_forge_blueprint(
-            model_dir=_MODEL_DIR,
+            model_path=_MODEL_PATH,
             grid_name="test-grid",
             grid_kwargs=sample_grid_kwargs,
             open_boundaries=sample_open_boundaries.model_dump(),
@@ -1839,7 +1839,7 @@ class TestForgeExecutorBuildAndRun:
         the clobber test above).
         """
         kwargs = dict(
-            model_dir=_MODEL_DIR,
+            model_path=_MODEL_PATH,
             grid_name="test-grid",
             grid_kwargs=sample_grid_kwargs,
             open_boundaries=sample_open_boundaries.model_dump(),
@@ -1957,7 +1957,7 @@ class TestForgeExecutorBuildAndRun:
             sample_grid_kwargs,
             sample_open_boundaries,
             sample_partitioning,
-            model_dir=_MODEL_DIR_ROMS090,
+            model_path=_MODEL_PATH_ROMS090,
             bgc_mode="none",
             forcing_inputs=_PHYSICS_ONLY_FORCING,
             cdr_forcing={"enabled": True},
@@ -2005,7 +2005,7 @@ class TestForgeExecutorBuildAndRun:
             sample_grid_kwargs,
             sample_open_boundaries,
             sample_partitioning,
-            model_dir=_MODEL_DIR_ROMS0110,
+            model_path=_MODEL_PATH_ROMS0110,
             bgc_mode="cdr_lite",
             forcing_inputs=_PHYSICS_ONLY_FORCING,
             cdr={"mode": "upscaled"},
@@ -2130,7 +2130,7 @@ class TestForgeExecutorBuildAndRun:
                 sample_grid_kwargs,
                 sample_open_boundaries,
                 sample_partitioning,
-                model_dir=_MODEL_DIR_ROMS0110,
+                model_path=_MODEL_PATH_ROMS0110,
                 cdr={"mode": "upscaled"},
                 roms_ref=info[hash_key],
             )
@@ -2157,7 +2157,7 @@ class TestForgeExecutorBuildAndRun:
             sample_grid_kwargs,
             sample_open_boundaries,
             sample_partitioning,
-            model_dir=_MODEL_DIR_ROMS0110,
+            model_path=_MODEL_PATH_ROMS0110,
             cdr={"mode": "upscaled"},
             run_time_overrides={"cdr_frc": {"nz_chd": 42}},
         )
@@ -2186,7 +2186,7 @@ class TestForgeExecutorBuildAndRun:
                 sample_grid_kwargs,
                 sample_open_boundaries,
                 sample_partitioning,
-                model_dir=_MODEL_DIR_ROMS0110,
+                model_path=_MODEL_PATH_ROMS0110,
                 roms_ref=info["hash_0_11_0"],
             )
             cfg.code.roms.location = str(info["repo"])
@@ -2380,9 +2380,7 @@ class TestForgeExecutorBuildAndRun:
             assert args["files"] == list(repo.files)
         # Resolver default: github repo pinned at the ModelSpec code.templates_commit,
         # repo-root-relative directory.
-        pinned = yaml.safe_load((_MODEL_DIR / "model.yaml").read_text())["code"][
-            "templates_commit"
-        ]
+        pinned = yaml.safe_load(_MODEL_PATH.read_text())["code"]["templates_commit"]
         ct = builder._template_repo_args("compile_time")
         assert ct["location"].endswith("C-Star.git")
         assert ct["subdir"] == "cstar/additional_files/templates/forge/compile-time"
@@ -2405,7 +2403,7 @@ class TestForgeBlueprintToBuilderKwargsPartitioning:
         doesn't reject a use_pio=True blueprint.
         """
         cfg = build_forge_blueprint(
-            model_dir=_MODEL_DIR,
+            model_path=_MODEL_PATH,
             grid_name=minimal_cstar_spec_builder_args["grid_name"],
             grid_kwargs=minimal_cstar_spec_builder_args["grid_kwargs"],
             open_boundaries=minimal_cstar_spec_builder_args[
@@ -2433,7 +2431,7 @@ class TestForgeBlueprintToBuilderKwargsPartitioning:
     ):
         """Without use_pio in cppdefs, the injected partitioning.use_pio is False."""
         cfg = build_forge_blueprint(
-            model_dir=_MODEL_DIR,
+            model_path=_MODEL_PATH,
             grid_name=minimal_cstar_spec_builder_args["grid_name"],
             grid_kwargs=minimal_cstar_spec_builder_args["grid_kwargs"],
             open_boundaries=minimal_cstar_spec_builder_args[
@@ -2996,7 +2994,7 @@ class TestProcessCapturesRunOutput:
         sample_partitioning,
     ):
         cfg = build_forge_blueprint(
-            model_dir=_MODEL_DIR,
+            model_path=_MODEL_PATH,
             grid_name="test-grid",
             grid_kwargs=sample_grid_kwargs,
             open_boundaries=sample_open_boundaries.model_dump(),
@@ -3102,7 +3100,7 @@ class TestRunBlueprintPublishes:
         sample_partitioning,
     ):
         cfg = build_forge_blueprint(
-            model_dir=_MODEL_DIR,
+            model_path=_MODEL_PATH,
             grid_name="test-grid",
             grid_kwargs=sample_grid_kwargs,
             open_boundaries=sample_open_boundaries.model_dump(),
@@ -3684,7 +3682,7 @@ class TestGoldenNamelist:
         self,
         mock_grid,
         tmp_path,
-        model_dir,
+        model_path,
         golden_filename: str | None,
         param_overrides: dict[str, int] | None = None,
         *,
@@ -3693,7 +3691,7 @@ class TestGoldenNamelist:
         capture: dict[str, Any] | None = None,
     ) -> str:
         """Shared body for the golden namelist tests: drives the real
-        ``generate_inputs()`` -> ``configure_build()`` chain against ``model_dir``
+        ``generate_inputs()`` -> ``configure_build()`` chain against ``model_path``
         and diffs the rendered ``namelist.nml`` against
         ``tests/fixtures/<golden_filename>``.
 
@@ -3729,7 +3727,7 @@ class TestGoldenNamelist:
             else {"cdr_forcing": self._CDR_FORCING}
         )
         cfg = build_forge_blueprint(
-            model_dir=model_dir,
+            model_path=model_path,
             grid_name="test-tiny",
             grid_kwargs=self._GRID_KWARGS,
             open_boundaries=self._BOUNDARIES,
@@ -3931,12 +3929,12 @@ class TestGoldenNamelist:
         self,
         mock_grid,
         tmp_path,
-        model_dir=_MODEL_DIR_ROMS070,
+        model_path=_MODEL_PATH_ROMS070,
         stored_model_settings=None,
         param_overrides=None,
     ):
-        """Builds against ``model_dir`` (default: the 0.7.0-pinned
-        ``_MODEL_DIR_ROMS070``, so ``cdr_lite_output``/``cdr_gas_exch_output``
+        """Builds against ``model_path`` (default: the 0.7.0-pinned
+        ``_MODEL_PATH_ROMS070``, so ``cdr_lite_output``/``cdr_gas_exch_output``
         exist in ``model_settings``) and runs the real ``generate_inputs()``, but --
         unlike ``_run_golden_namelist_case`` -- with NO CDR forcing configured
         (no ``_CDR_FORCING`` kwarg), so ``cdr_output.do_cdr_output`` and
@@ -3960,7 +3958,7 @@ class TestGoldenNamelist:
         count sees them.
         """
         cfg = build_forge_blueprint(
-            model_dir=model_dir,
+            model_path=model_path,
             grid_name="test-tiny",
             grid_kwargs=self._GRID_KWARGS,
             open_boundaries=self._BOUNDARIES,
@@ -4181,7 +4179,7 @@ class TestGoldenNamelist:
         runs first, does not fire instead.
         """
         cfg, builder = self._generate_inputs_no_cdr_forcing(
-            mock_grid, tmp_path, model_dir=_MODEL_DIR_ROMS0110
+            mock_grid, tmp_path, model_path=_MODEL_PATH_ROMS0110
         )
         cfg.model_settings["cppdefs"]["marbl"] = False
         cfg.model_settings["param"]["ntrc_bio"] = 0
@@ -4196,7 +4194,7 @@ class TestGoldenNamelist:
         self, mock_grid, tmp_path
     ):
         cfg, builder = self._generate_inputs_no_cdr_forcing(
-            mock_grid, tmp_path, model_dir=_MODEL_DIR_ROMS0110
+            mock_grid, tmp_path, model_path=_MODEL_PATH_ROMS0110
         )
         cfg.model_settings["marbl_bgc"].update(
             use_constant_fe=True, constant_fe_value=5.0e-4
@@ -4217,7 +4215,7 @@ class TestGoldenNamelist:
         drops the request.
         """
         cfg, builder = self._generate_inputs_no_cdr_forcing(
-            mock_grid, tmp_path, model_dir=_MODEL_DIR_ROMS0100
+            mock_grid, tmp_path, model_path=_MODEL_PATH_ROMS0100
         )
         cfg.model_settings["marbl_bgc"]["use_constant_fe"] = True
 
@@ -4250,7 +4248,7 @@ class TestGoldenNamelist:
         cfg, builder = self._generate_inputs_no_cdr_forcing(
             mock_grid,
             tmp_path,
-            model_dir=_MODEL_DIR_ROMS060,
+            model_path=_MODEL_PATH_ROMS060,
             stored_model_settings=stale,
         )
 
@@ -4290,7 +4288,7 @@ class TestGoldenNamelist:
         cfg, builder = self._generate_inputs_no_cdr_forcing(
             mock_grid,
             tmp_path,
-            model_dir=_MODEL_DIR_ROMS060,
+            model_path=_MODEL_PATH_ROMS060,
             stored_model_settings=stale,
         )
 
@@ -4375,7 +4373,7 @@ class TestGoldenNamelist:
 
     def test_golden_namelist_test_tiny(self, mock_grid, tmp_path):
         self._run_golden_namelist_case(
-            mock_grid, tmp_path, _MODEL_DIR, "golden_namelist_test-tiny.nml"
+            mock_grid, tmp_path, _MODEL_PATH, "golden_namelist_test-tiny.nml"
         )
 
     def test_cdr_tracer_counts_reach_namelist_and_tracer_arrays(
@@ -4389,7 +4387,7 @@ class TestGoldenNamelist:
         normalized = self._run_golden_namelist_case(
             mock_grid,
             tmp_path,
-            _MODEL_DIR_ROMS070,
+            _MODEL_PATH_ROMS070,
             None,
             param_overrides={"nt_cdr_oae": 2, "nt_cdr_dor": 1},
         )
@@ -4414,7 +4412,7 @@ class TestGoldenNamelist:
         normalized = self._run_golden_namelist_case(
             mock_grid,
             tmp_path,
-            _MODEL_DIR_ROMS050,
+            _MODEL_PATH_ROMS050,
             "golden_namelist_test-tiny-roms050.nml",
         )
 
@@ -4447,7 +4445,7 @@ class TestGoldenNamelist:
         normalized = self._run_golden_namelist_case(
             mock_grid,
             tmp_path,
-            _MODEL_DIR_ROMS060,
+            _MODEL_PATH_ROMS060,
             "golden_namelist_test-tiny-roms060.nml",
         )
 
@@ -4484,7 +4482,7 @@ class TestGoldenNamelist:
         normalized = self._run_golden_namelist_case(
             mock_grid,
             tmp_path,
-            _MODEL_DIR_ROMS070,
+            _MODEL_PATH_ROMS070,
             "golden_namelist_test-tiny-roms070.nml",
         )
 
@@ -4529,7 +4527,7 @@ class TestGoldenNamelist:
         normalized = self._run_golden_namelist_case(
             mock_grid,
             tmp_path,
-            _MODEL_DIR_ROMS090,
+            _MODEL_PATH_ROMS090,
             "golden_namelist_test-tiny-roms090.nml",
         )
 
@@ -4573,7 +4571,7 @@ class TestGoldenNamelist:
         normalized = self._run_golden_namelist_case(
             mock_grid,
             tmp_path,
-            _MODEL_DIR_ROMS0100,
+            _MODEL_PATH_ROMS0100,
             "golden_namelist_test-tiny-roms090-cdr-lite.nml",
             cdr_lite=True,
         )
@@ -4607,7 +4605,7 @@ class TestGoldenNamelist:
         normalized = self._run_golden_namelist_case(
             mock_grid,
             tmp_path,
-            _MODEL_DIR_ROMS0110,
+            _MODEL_PATH_ROMS0110,
             "golden_namelist_test-tiny-roms0110.nml",
         )
 
@@ -4642,7 +4640,7 @@ class TestGoldenNamelist:
         normalized = self._run_golden_namelist_case(
             mock_grid,
             tmp_path,
-            _MODEL_DIR_ROMS0120,
+            _MODEL_PATH_ROMS0120,
             "golden_namelist_test-tiny-roms0120.nml",
         )
 
@@ -4688,7 +4686,7 @@ class TestGoldenNamelist:
         self._run_golden_namelist_case(
             mock_grid,
             tmp_path,
-            _MODEL_DIR_ROMS0100,
+            _MODEL_PATH_ROMS0100,
             "golden_namelist_test-tiny-roms090-cdr-lite.nml",
             cdr_lite=True,
             carbonate_sensitivity=sources,
@@ -4725,7 +4723,7 @@ class TestGoldenNamelist:
         self._run_golden_namelist_case(
             mock_grid,
             tmp_path,
-            _MODEL_DIR_ROMS0100,
+            _MODEL_PATH_ROMS0100,
             "golden_namelist_test-tiny-roms090-cdr-lite.nml",
             cdr_lite=True,
             capture=captured,
@@ -4751,7 +4749,7 @@ class TestGoldenNamelist:
         cfg, builder = self._generate_inputs_no_cdr_forcing(
             mock_grid,
             tmp_path,
-            model_dir=_MODEL_DIR_ROMS090,
+            model_path=_MODEL_PATH_ROMS090,
             stored_model_settings={
                 "cdr_lite": {"cdr_online_carbonate_sensitivity": True}
             },
@@ -4779,7 +4777,7 @@ class TestGoldenNamelist:
         cfg, builder = self._generate_inputs_no_cdr_forcing(
             mock_grid,
             tmp_path,
-            model_dir=_MODEL_DIR_ROMS090,
+            model_path=_MODEL_PATH_ROMS090,
             stored_model_settings={
                 "cdr_lite": {"cdr_online_carbonate_sensitivity": False}
             },
@@ -4811,7 +4809,7 @@ class TestGoldenNamelist:
         cfg, builder = self._generate_inputs_no_cdr_forcing(
             mock_grid,
             tmp_path,
-            model_dir=_MODEL_DIR_ROMS090,
+            model_path=_MODEL_PATH_ROMS090,
             stored_model_settings={
                 "cdr_lite": {"cdr_online_carbonate_sensitivity": True}
             },
@@ -4853,7 +4851,7 @@ class TestGoldenNamelist:
         having been configured (the unit-level mock has none).
         """
         cfg, builder = self._generate_inputs_no_cdr_forcing(
-            mock_grid, tmp_path, model_dir=_MODEL_DIR_ROMS0100
+            mock_grid, tmp_path, model_path=_MODEL_PATH_ROMS0100
         )
         cfg.model_settings["cppdefs"].update(marbl=False, cdr_lite=True)
         cfg.model_settings["param"]["ntrc_bio"] = 0
@@ -4944,7 +4942,7 @@ class TestGoldenNamelist:
         CDR forcing keeps ``do_cdr_lite_output`` as authored.
         """
         cfg, builder = self._generate_inputs_no_cdr_forcing(
-            mock_grid, tmp_path, model_dir=_MODEL_DIR_ROMS090
+            mock_grid, tmp_path, model_path=_MODEL_PATH_ROMS090
         )
         builder.cdr_forcing = {"releases": []}
         builder.cdr_mode = "simple"
@@ -4991,7 +4989,7 @@ class TestGoldenNamelist:
             mock_grid,
             tmp_path,
             offset,
-            model_dir=_MODEL_DIR_ROMS090,
+            model_path=_MODEL_PATH_ROMS090,
             cdr_tracers=True,
         )
         self._configure_build_for(cfg, builder)
@@ -5004,7 +5002,7 @@ class TestGoldenNamelist:
             mock_grid,
             tmp_path,
             offset,
-            model_dir=_MODEL_DIR_ROMS090,
+            model_path=_MODEL_PATH_ROMS090,
             cdr_tracers=True,
         )
         n_tracers = n_tracers_from_param(builder._settings_run_time["param"])
@@ -5020,7 +5018,7 @@ class TestGoldenNamelist:
     ):
         """Before ucla-roms 0.9.0 the extra tracers are read past, not rejected."""
         cfg, builder, _ = self._river_builder(
-            mock_grid, tmp_path, 5, model_dir=_MODEL_DIR_ROMS070
+            mock_grid, tmp_path, 5, model_path=_MODEL_PATH_ROMS070
         )
         with pytest.warns(UserWarning, match=r"ucla-roms 0\.7\.0 reads the first"):
             self._configure_build_for(cfg, builder)
@@ -5076,7 +5074,7 @@ class TestChildDomainNoInitialConditionsValidatesAtEmit:
         del forcing_inputs["initial_conditions"]
 
         cfg = build_forge_blueprint(
-            model_dir=_MODEL_DIR,
+            model_path=_MODEL_PATH,
             grid_name="test-tiny",
             grid_kwargs=self._GRID_KWARGS,
             grid_kwargs_parent=self._PARENT_GRID_KWARGS,
@@ -5228,7 +5226,7 @@ class TestForgeRunnerEndToEnd:
 
     def _make_blueprint_yaml(self, tmp_path) -> Path:
         cfg = build_forge_blueprint(
-            model_dir=_MODEL_DIR,
+            model_path=_MODEL_PATH,
             grid_name="test-tiny",
             grid_kwargs=self._GRID_KWARGS,
             open_boundaries=self._BOUNDARIES,
@@ -5678,7 +5676,7 @@ class TestOnlyInputsReuseIsIdempotent:
         self, mock_grid, tmp_path
     ):
         cfg = build_forge_blueprint(
-            model_dir=_MODEL_DIR,
+            model_path=_MODEL_PATH,
             grid_name="test-tiny",
             grid_kwargs=self._GRID_KWARGS,
             open_boundaries=self._BOUNDARIES,

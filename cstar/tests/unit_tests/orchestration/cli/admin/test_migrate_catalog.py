@@ -32,7 +32,8 @@ def _tree(root: Path) -> dict[str, str | None]:
 
 @pytest.fixture
 def legacy_root(tmp_path: Path) -> Path:
-    """A catalog root holding all four legacy blueprint forms.
+    """A catalog root holding all four legacy blueprint forms and a legacy
+    spec directory of every kind.
 
     ``suppress_validation`` means no ModelSpec etc. is needed to read it.
 
@@ -41,8 +42,21 @@ def legacy_root(tmp_path: Path) -> Path:
     - per-machine, fully movable: ``blueprints/anvil/clean/B_clean.yaml``
     - per-machine with leftovers: ``blueprints/anvil/messy/{B_messy.yaml,Build/,_grid.yaml}``
     - earlier application name: ``blueprints/roms_marbl/earlier.yaml``
+    - specs: ``ModelSpec/m/model.yaml``, ``ForcingSpec/f/Forcing.yml`` (a
+      ``.yml`` source), ``OutputSpec/o/Output.yaml``, ``CdrSpec/c/Cdr.yaml``
+    - a domain whose ``Assets/`` holds only ``.gitkeep``:
+      ``DomainSpec/clean-domain/{Domain.yaml,Assets/.gitkeep}``
+    - a domain with a real asset: ``DomainSpec/asset-domain/{Domain.yaml,Assets/bathy.nc}``
     """
     root = tmp_path / "catalog"
+    _write(root / "ModelSpec" / "m" / "model.yaml", "model-m")
+    _write(root / "DomainSpec" / "clean-domain" / "Domain.yaml", "domain-clean")
+    _write(root / "DomainSpec" / "clean-domain" / "Assets" / ".gitkeep", "")
+    _write(root / "DomainSpec" / "asset-domain" / "Domain.yaml", "domain-asset")
+    _write(root / "DomainSpec" / "asset-domain" / "Assets" / "bathy.nc", "asset")
+    _write(root / "ForcingSpec" / "f" / "Forcing.yml", "forcing-f")
+    _write(root / "OutputSpec" / "o" / "Output.yaml", "output-o")
+    _write(root / "CdrSpec" / "c" / "Cdr.yaml", "cdr-c")
     bp = root / "blueprints"
     _write(bp / "flat-forge.forge_blueprint.yaml", "forge-flat")
     _write(bp / "B_flat-roms.yml", "roms-flat")
@@ -55,11 +69,13 @@ def legacy_root(tmp_path: Path) -> Path:
 
 
 def test_migrate_catalog_layout_report_and_tree(legacy_root: Path) -> None:
-    """Every legacy form moves to ``blueprints/<application>/<name>.yaml`` and
-    leftovers pin their directory.
+    """Every legacy form moves to ``blueprints/<application>/<name>.yaml`` or
+    ``<Kind>/<name>.yaml`` and leftovers pin their directory.
     """
     root = legacy_root.resolve()
     bp = root / "blueprints"
+    clean = root / "DomainSpec" / "clean-domain"
+    asset = root / "DomainSpec" / "asset-domain"
 
     report = migrate_catalog_layout(root)
 
@@ -82,11 +98,30 @@ def test_migrate_catalog_layout_report_and_tree(legacy_root: Path) -> None:
                 bp / "roms_marbl" / "earlier.yaml",
                 bp / "ucla_roms" / "earlier.yaml",
             ),
+            (root / "ModelSpec" / "m" / "model.yaml", root / "ModelSpec" / "m.yaml"),
+            (asset / "Domain.yaml", root / "DomainSpec" / "asset-domain.yaml"),
+            (clean / "Domain.yaml", root / "DomainSpec" / "clean-domain.yaml"),
+            (
+                root / "ForcingSpec" / "f" / "Forcing.yml",
+                root / "ForcingSpec" / "f.yaml",
+            ),
+            (root / "OutputSpec" / "o" / "Output.yaml", root / "OutputSpec" / "o.yaml"),
+            (root / "CdrSpec" / "c" / "Cdr.yaml", root / "CdrSpec" / "c.yaml"),
         ]
     )
     assert report.skipped_collisions == []
-    assert report.removed_dirs == [bp / "anvil" / "clean", bp / "roms_marbl"]
-    assert report.left_in_place == [bp / "anvil" / "messy"]
+    assert report.removed_files == [clean / "Assets" / ".gitkeep"]
+    assert report.removed_dirs == [
+        bp / "anvil" / "clean",
+        bp / "roms_marbl",
+        root / "ModelSpec" / "m",
+        clean / "Assets",
+        clean,
+        root / "ForcingSpec" / "f",
+        root / "OutputSpec" / "o",
+        root / "CdrSpec" / "c",
+    ]
+    assert report.left_in_place == [bp / "anvil" / "messy", asset]
 
     assert (bp / "forge" / "flat-forge.yaml").read_text() == "forge-flat"
     assert (bp / "ucla_roms" / "flat-roms.yaml").read_text() == "roms-flat"
@@ -101,6 +136,20 @@ def test_migrate_catalog_layout_report_and_tree(legacy_root: Path) -> None:
     assert (bp / "anvil" / "messy" / "_grid.yaml").is_file()
     assert (bp / "anvil" / "messy" / "Build" / "keep.txt").is_file()
 
+    # each spec kind directory now holds only `<name>.yaml` files, apart from the
+    # domain whose real asset keeps its directory
+    assert _tree(root / "ModelSpec") == {"m.yaml": "model-m"}
+    assert _tree(root / "ForcingSpec") == {"f.yaml": "forcing-f"}
+    assert _tree(root / "OutputSpec") == {"o.yaml": "output-o"}
+    assert _tree(root / "CdrSpec") == {"c.yaml": "cdr-c"}
+    assert _tree(root / "DomainSpec") == {
+        "asset-domain": None,
+        "asset-domain.yaml": "domain-asset",
+        "asset-domain/Assets": None,
+        "asset-domain/Assets/bathy.nc": "asset",
+        "clean-domain.yaml": "domain-clean",
+    }
+
 
 def test_migrated_catalog_reloads_without_legacy_entries(legacy_root: Path) -> None:
     """After migration the catalog has nothing legacy left and resolves the
@@ -112,6 +161,15 @@ def test_migrated_catalog_reloads_without_legacy_entries(legacy_root: Path) -> N
     reloaded = DomainCatalog(root, suppress_validation=True)
 
     assert reloaded.legacy_blueprints == []
+    assert reloaded.legacy_specs == []
+    assert reloaded.model_names == ["m"]
+    assert reloaded.domain_names == ["asset-domain", "clean-domain"]
+    assert reloaded.forcing_names == ["f"]
+    assert reloaded.output_names == ["o"]
+    assert reloaded.cdr_names == ["c"]
+    assert reloaded.domain_path("clean-domain") == (
+        root / "DomainSpec" / "clean-domain.yaml"
+    )
     assert reloaded.blueprint_names("forge") == ["flat-forge"]
     assert reloaded.blueprint_names("ucla_roms") == [
         "clean",
@@ -318,6 +376,81 @@ def test_migrate_catalog_layout_collision_in_earlier_name_directory(
     assert taken.read_text() == "current-dup"
 
 
+def test_migrate_catalog_layout_spec_collision_is_skipped(tmp_path: Path) -> None:
+    """A legacy spec whose name already has a flat file (`.yaml` or `.yml`, the
+    one the catalog reads) is left in place, its directory untouched, and the
+    flat file is named as the destination; nothing else changes.
+    """
+    root = tmp_path.resolve()
+    model = _write(root / "ModelSpec" / "dup" / "model.yaml", "legacy-model")
+    model_flat = _write(root / "ModelSpec" / "dup.yml", "current-model")
+    domain = _write(root / "DomainSpec" / "d" / "Domain.yaml", "legacy-domain")
+    _write(root / "DomainSpec" / "d" / "Assets" / ".gitkeep", "")
+    domain_flat = _write(root / "DomainSpec" / "d.yaml", "current-domain")
+    snapshot = _tree(root)
+
+    report = migrate_catalog_layout(root)
+
+    assert report == CatalogMigrationReport(
+        skipped_collisions=[(model, model_flat), (domain, domain_flat)]
+    )
+    assert _tree(root) == snapshot
+
+
+def test_migrate_catalog_layout_keeps_a_symlinked_spec_directory(
+    tmp_path: Path,
+) -> None:
+    """A spec directory that is a symbolic link is left in place and nothing
+    inside its (possibly shared) target is cleaned up.
+    """
+    root = (tmp_path / "catalog").resolve()
+    shared = _write(tmp_path / "shared" / "Domain.yaml", "domain").parent
+    _write(shared / "Assets" / ".gitkeep", "")
+    link = root / "DomainSpec" / "linked"
+    link.parent.mkdir(parents=True)
+    link.symlink_to(shared, target_is_directory=True)
+    dst = root / "DomainSpec" / "linked.yaml"
+
+    report = migrate_catalog_layout(root)
+
+    assert report == CatalogMigrationReport(
+        moved=[(link / "Domain.yaml", dst)], left_in_place=[link]
+    )
+    assert dst.read_text() == "domain"
+    assert (shared / "Assets" / ".gitkeep").is_file()
+
+
+def test_cli_migrate_catalog_dry_run_names_the_spec_cleanup(legacy_root: Path) -> None:
+    """`--dry-run` names each spec move, the `.gitkeep` and `Assets/` removal,
+    and the directory a real asset keeps; it touches nothing.
+    """
+    root = legacy_root.resolve()
+    clean = root / "DomainSpec" / "clean-domain"
+    snapshot = _tree(root)
+
+    result = CliRunner().invoke(app, [str(root), "--dry-run"])
+
+    out = result.stdout.replace("\n", "")
+    assert result.exit_code == 0, result.output
+    assert (
+        f"[dry-run] moved {root / 'ModelSpec' / 'm' / 'model.yaml'} -> "
+        f"{root / 'ModelSpec' / 'm.yaml'}"
+    ) in out
+    assert f"[dry-run] removed placeholder {clean / 'Assets' / '.gitkeep'}" in out
+    assert f"[dry-run] removed empty directory {clean / 'Assets'}" in out
+    assert f"[dry-run] removed empty directory {clean}" in out
+    assert (
+        "[dry-run] left in place (still holds other files): "
+        f"{root / 'DomainSpec' / 'asset-domain'}"
+    ) in out
+    assert (
+        "[dry-run] Summary: moved 11 entr(y/ies), skipped 0 collision(s), "
+        "removed 1 placeholder(s) and 8 empty director(y/ies), "
+        "left 2 director(y/ies) in place."
+    ) in out
+    assert _tree(root) == snapshot
+
+
 def test_cli_migrate_catalog_dry_run_plans_the_earlier_name_directory(
     tmp_path: Path,
 ) -> None:
@@ -332,7 +465,7 @@ def test_cli_migrate_catalog_dry_run_plans_the_earlier_name_directory(
     assert f"[dry-run] moved {src.resolve()} -> " in out
     assert str(tmp_path.resolve() / "blueprints" / "ucla_roms" / "x.yaml") in out
     assert f"[dry-run] removed empty directory {src.parent.resolve()}" in out
-    assert "removed 1 empty director(y/ies)" in out
+    assert "removed 0 placeholder(s) and 1 empty director(y/ies)" in out
     assert _tree(tmp_path) == snapshot
 
 

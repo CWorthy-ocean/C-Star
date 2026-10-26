@@ -63,7 +63,8 @@ def spec_entry_name(path: Path) -> str:
     """Return the catalog entry name a spec file stands for.
 
     That is the file's stem, except for a file in the legacy
-    ``<Kind>/<name>/<File>.yaml`` layout, which is named by its directory.
+    ``<Kind>/<name>/<File>.yaml`` layout, which is named by its directory;
+    that exception goes with the legacy layout in 0.20.0.
     """
     if any(
         path.parent.parent.name == kind and path.stem == stem

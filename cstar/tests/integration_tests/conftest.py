@@ -230,7 +230,7 @@ def forge_blueprint_factory(
         case = FORGE_CASES[case_name]
         domain = test_catalog.domain_data(case.domain)
         cfg = build_forge_blueprint(
-            model_dir=test_catalog.model_dir(MODEL_SPEC),
+            model_path=test_catalog.model_path(MODEL_SPEC),
             grid_name=domain["grid_name"],
             grid_kwargs=domain["grid_kwargs"],
             open_boundaries=domain["open_boundaries"],

@@ -204,9 +204,9 @@ def test_namelist_schema_for_ref_unresolvable_hash_falls_back():
 
 
 NEWER_THAN_KNOWN = "newer than the newest release this C-Star knows"
-BUNDLED_MODEL_SPECS = (
-    Path(__file__).parents[3] / "catalog" / "bundled" / "ModelSpec"
-).glob("*/model.yaml")
+BUNDLED_MODEL_SPECS = sorted(
+    (Path(__file__).parents[3] / "catalog" / "bundled" / "ModelSpec").glob("*.yaml")
+)
 
 
 def _newer_than_known_records(caplog: pytest.LogCaptureFixture) -> list[str]:
@@ -226,9 +226,12 @@ def test_newest_known_ucla_roms_not_behind_registry():
     assert last_lower <= NEWEST_KNOWN_UCLA_ROMS
 
 
-@pytest.mark.parametrize(
-    "spec", sorted(BUNDLED_MODEL_SPECS), ids=lambda p: p.parent.name
-)
+def test_bundled_model_specs_are_found():
+    """The parametrization below is not silently empty."""
+    assert BUNDLED_MODEL_SPECS
+
+
+@pytest.mark.parametrize("spec", BUNDLED_MODEL_SPECS, ids=lambda p: p.stem)
 def test_bundled_model_specs_pin_known_releases(spec: Path):
     """Adopting a ucla-roms release as a bundled ModelSpec bumps
     `NEWEST_KNOWN_UCLA_ROMS`, so the shipped models never warn.

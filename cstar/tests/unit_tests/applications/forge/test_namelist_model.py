@@ -103,11 +103,11 @@ def _section_classes(settings_cls):
     }
 
 
-_MODEL_DIR = (
+_MODEL_PATH = (
     Path(cstar.catalog.__file__).parent
     / "bundled"
     / "ModelSpec"
-    / "cson_roms-marbl_v0.1"
+    / "cson_roms-marbl_v0.1.yaml"
 )
 
 
@@ -120,7 +120,7 @@ def _populated_rt_dict():
     write_roms_namelist directly (bypassing the resolver), so they need the full
     namelist shape assembled by hand.
     """
-    model = load_model_spec_data(_MODEL_DIR)["model"]
+    model = load_model_spec_data(_MODEL_PATH)["model"]
     rt = yaml.safe_load(yaml.safe_dump(model["model_settings"]))  # deep copy
     output = default_catalog.output_data("standard")
     for k, v in output.items():

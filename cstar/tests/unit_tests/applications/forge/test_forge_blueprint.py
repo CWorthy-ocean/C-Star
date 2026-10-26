@@ -63,28 +63,28 @@ from cstar.roms.precheck import NamelistConsistencyError
 from cstar.system.migration import TOLERATE_UNKNOWN, CstarSchemaTooNewError
 
 _BUNDLED_CATALOG = Path(cstar.catalog.__file__).parent / "bundled"
-_MODEL_DIR = _BUNDLED_CATALOG / "ModelSpec" / "cson_roms-marbl_v0.1"
+_MODEL_PATH = _BUNDLED_CATALOG / "ModelSpec" / "cson_roms-marbl_v0.1.yaml"
 # ucla-roms >= 0.5.0 ModelSpec -- used by the versioned-namelist golden test below.
-_MODEL_DIR_ROMS050 = _BUNDLED_CATALOG / "ModelSpec" / "roms-marbl-0.5-default"
+_MODEL_PATH_ROMS050 = _BUNDLED_CATALOG / "ModelSpec" / "roms-marbl-0.5-default.yaml"
 # ucla-roms >= 0.6.0 ModelSpec (adds &PIO_SETTINGS) -- used by the versioned-namelist
 # golden test below.
-_MODEL_DIR_ROMS060 = _BUNDLED_CATALOG / "ModelSpec" / "roms-marbl-0.6-default"
+_MODEL_PATH_ROMS060 = _BUNDLED_CATALOG / "ModelSpec" / "roms-marbl-0.6-default.yaml"
 # ucla-roms >= 0.7.0 ModelSpec (adds &CDR_TRACER_OUTPUT_SETTINGS/
 # &CDR_GAS_EXCH_OUTPUT_SETTINGS, PR #351) -- used by the versioned-namelist golden
 # test below.
-_MODEL_DIR_ROMS070 = _BUNDLED_CATALOG / "ModelSpec" / "roms-marbl-0.7-default"
+_MODEL_PATH_ROMS070 = _BUNDLED_CATALOG / "ModelSpec" / "roms-marbl-0.7-default.yaml"
 # ucla-roms >= 0.8.0 ModelSpec (adds the PARABOLIC_SPLINES/UPSTREAM_TS_LAND_CURV
 # advection cppdefs switches, PR #361) -- no namelist-schema change from 0.7.0, so
 # there is no versioned-namelist golden fixture for this tier (unlike 0.5.0-0.7.0
 # above).
-_MODEL_DIR_ROMS080 = _BUNDLED_CATALOG / "ModelSpec" / "roms-marbl-0.8-default"
-_MODEL_DIR_ROMS090 = _BUNDLED_CATALOG / "ModelSpec" / "roms-marbl-0.9-default"
-_MODEL_DIR_ROMS0100 = _BUNDLED_CATALOG / "ModelSpec" / "roms-marbl-0.10-default"
+_MODEL_PATH_ROMS080 = _BUNDLED_CATALOG / "ModelSpec" / "roms-marbl-0.8-default.yaml"
+_MODEL_PATH_ROMS090 = _BUNDLED_CATALOG / "ModelSpec" / "roms-marbl-0.9-default.yaml"
+_MODEL_PATH_ROMS0100 = _BUNDLED_CATALOG / "ModelSpec" / "roms-marbl-0.10-default.yaml"
 # ucla-roms >= 0.11.0 ModelSpec (adds marbl_bgc.use_constant_fe/constant_fe_value to
 # &MARBL_BIOGEOCHEMISTRY_SETTINGS, PR #391) -- used by the versioned-namelist golden
 # test below.
-_MODEL_DIR_ROMS0110 = _BUNDLED_CATALOG / "ModelSpec" / "roms-marbl-0.11-default"
-_MODEL_DIR_ROMS0120 = _BUNDLED_CATALOG / "ModelSpec" / "roms-marbl-0.12-default"
+_MODEL_PATH_ROMS0110 = _BUNDLED_CATALOG / "ModelSpec" / "roms-marbl-0.11-default.yaml"
+_MODEL_PATH_ROMS0120 = _BUNDLED_CATALOG / "ModelSpec" / "roms-marbl-0.12-default.yaml"
 _GRID_KWARGS = dict(
     nx=6,
     ny=2,
@@ -104,7 +104,7 @@ _PART = {"n_procs_x": 1, "n_procs_y": 1}
 
 def _build(**over):
     kw = dict(
-        model_dir=_MODEL_DIR,
+        model_path=_MODEL_PATH,
         grid_name="test-tiny",
         grid_kwargs=_GRID_KWARGS,
         open_boundaries=_BOUNDARIES,
@@ -1645,7 +1645,7 @@ def test_resolver_rejects_a_generated_river_with_passive_tracers():
         ValueError, match=r"(?s)reads 35 river tracers.*river\[0\] \(include_bgc=True\)"
     ):
         _build(
-            model_dir=_MODEL_DIR_ROMS0100,
+            model_path=_MODEL_PATH_ROMS0100,
             run_time_overrides={"param": {"nt_passive": 1}},
         )
 
@@ -1660,7 +1660,7 @@ def test_resolver_rejects_a_generated_marbl_river_without_include_bgc():
     with pytest.raises(
         ValueError, match=r"river\[0\] \(include_bgc=False\) is generated with 2"
     ):
-        _build(model_dir=_MODEL_DIR_ROMS0100, forcing_inputs=fdata)
+        _build(model_path=_MODEL_PATH_ROMS0100, forcing_inputs=fdata)
 
 
 def test_resolver_accepts_a_custom_file_river_with_passive_tracers(tmp_path):
@@ -1675,7 +1675,7 @@ def test_resolver_accepts_a_custom_file_river_with_passive_tracers(tmp_path):
         }
     ]
     cfg = _build(
-        model_dir=_MODEL_DIR_ROMS0100,
+        model_path=_MODEL_PATH_ROMS0100,
         forcing_inputs=fdata,
         run_time_overrides={"param": {"nt_passive": 1}},
     )
@@ -1745,7 +1745,7 @@ def test_build_forge_blueprint_cdr_forcing_file_without_marbl_on_roms_0_9_1(tmp_
     """
     cdr_path = _write_tiny_netcdf(tmp_path, name="cdr.nc")
     cfg = _build(
-        model_dir=_MODEL_DIR_ROMS090,
+        model_path=_MODEL_PATH_ROMS090,
         cdr_forcing_file=str(cdr_path),
         bgc_mode="none",
         forcing_inputs=_PHYSICS_ONLY_FORCING,
@@ -1756,7 +1756,7 @@ def test_build_forge_blueprint_cdr_forcing_file_without_marbl_on_roms_0_9_1(tmp_
 def test_build_forge_blueprint_cdr_forcing_without_marbl_on_roms_0_9_1():
     """Same for a generated cdr_forcing."""
     cfg = _build(
-        model_dir=_MODEL_DIR_ROMS090,
+        model_path=_MODEL_PATH_ROMS090,
         cdr_forcing={"releases": []},
         bgc_mode="none",
         forcing_inputs=_PHYSICS_ONLY_FORCING,
@@ -1770,7 +1770,7 @@ def test_build_forge_blueprint_cdr_forcing_without_marbl_rejected_before_roms_0_
     """
     with pytest.raises(ValueError, match="0.9.1"):
         _build(
-            model_dir=_MODEL_DIR_ROMS080,
+            model_path=_MODEL_PATH_ROMS080,
             cdr_forcing={"releases": []},
             bgc_mode="none",
             forcing_inputs=_PHYSICS_ONLY_FORCING,
@@ -1903,16 +1903,16 @@ def test_build_forge_blueprint_cdr_kwarg_upscaled_mode_sets_cdr_frc_statics():
 
 
 @pytest.mark.parametrize(
-    ("model_dir", "roms_ref", "nz_chd"),
+    ("model_path", "roms_ref", "nz_chd"),
     [
-        (_MODEL_DIR_ROMS0100, None, 50),
-        (_MODEL_DIR_ROMS0110, None, 0),
-        (_MODEL_DIR_ROMS0100, "main", 0),
-        (_MODEL_DIR_ROMS0110, "65fdf96f", 50),
+        (_MODEL_PATH_ROMS0100, None, 50),
+        (_MODEL_PATH_ROMS0110, None, 0),
+        (_MODEL_PATH_ROMS0100, "main", 0),
+        (_MODEL_PATH_ROMS0110, "65fdf96f", 50),
     ],
 )
 def test_build_forge_blueprint_upscaled_nz_chd_follows_the_pin(
-    model_dir, roms_ref, nz_chd
+    model_path, roms_ref, nz_chd
 ):
     """From ucla-roms 0.11.0 cdr_nz_chd = 0 takes the depth-profile level count
     from the runtime file's s_rho (the child grid's, which Forge cannot see), and a
@@ -1920,29 +1920,29 @@ def test_build_forge_blueprint_upscaled_nz_chd_follows_the_pin(
     keep the seeded value. A branch counts as the latest release; a commit hash
     keeps the seeded value for configure_build to decide with its release.
     """
-    cfg = _build(model_dir=model_dir, roms_ref=roms_ref, cdr={"mode": "upscaled"})
+    cfg = _build(model_path=model_path, roms_ref=roms_ref, cdr={"mode": "upscaled"})
     assert cfg.model_settings["cdr_frc"]["nz_chd"] == nz_chd
 
 
 def test_build_forge_blueprint_upscaled_nz_chd_override_wins():
     """An explicit cdr_nz_chd (matching a known child) still overrides the 0."""
     cfg = _build(
-        model_dir=_MODEL_DIR_ROMS0110,
+        model_path=_MODEL_PATH_ROMS0110,
         cdr={"mode": "upscaled"},
         run_time_overrides={"cdr_frc": {"nz_chd": 42}},
     )
     assert cfg.model_settings["cdr_frc"]["nz_chd"] == 42
 
 
-@pytest.mark.parametrize("model_dir", [_MODEL_DIR_ROMS090, _MODEL_DIR_ROMS0110])
-def test_build_forge_blueprint_cdr_kwarg_upscaled_rejects_physics_only(model_dir):
+@pytest.mark.parametrize("model_path", [_MODEL_PATH_ROMS090, _MODEL_PATH_ROMS0110])
+def test_build_forge_blueprint_cdr_kwarg_upscaled_rejects_physics_only(model_path):
     """Upscaled CDR feeds its depth profiles to MARBL's ALK/DIC or (ucla-roms
     >= 0.11.0) to CDR-lite tracers, so a physics-only build is rejected on every
     release, including those that run parameterized CDR forcing without MARBL.
     """
     with pytest.raises(ValueError, match=r'"upscaled" with bgc_mode "none"'):
         _build(
-            model_dir=model_dir,
+            model_path=model_path,
             cdr={"mode": "upscaled"},
             bgc_mode="none",
             forcing_inputs=_PHYSICS_ONLY_FORCING,
@@ -2314,7 +2314,7 @@ def test_golden_model_settings_test_tiny_roms050():
         / "golden_model_settings_test-tiny-roms050.json"
     )
     golden = json.loads(golden_path.read_text())
-    cfg = _build(model_dir=_MODEL_DIR_ROMS050)  # test-tiny, dt=7200
+    cfg = _build(model_path=_MODEL_PATH_ROMS050)  # test-tiny, dt=7200
     got = json.loads(json.dumps(cfg.model_settings, sort_keys=True, default=str))
     assert got == golden, (
         "Resolved model_settings for test-tiny (roms-marbl-0.5-default) drifted "
@@ -2343,7 +2343,7 @@ def test_golden_model_settings_test_tiny_roms060():
         / "golden_model_settings_test-tiny-roms060.json"
     )
     golden = json.loads(golden_path.read_text())
-    cfg = _build(model_dir=_MODEL_DIR_ROMS060)  # test-tiny, dt=7200
+    cfg = _build(model_path=_MODEL_PATH_ROMS060)  # test-tiny, dt=7200
     got = json.loads(json.dumps(cfg.model_settings, sort_keys=True, default=str))
     assert got == golden, (
         "Resolved model_settings for test-tiny (roms-marbl-0.6-default) drifted "
@@ -2374,7 +2374,7 @@ def test_golden_model_settings_test_tiny_roms070():
         / "golden_model_settings_test-tiny-roms070.json"
     )
     golden = json.loads(golden_path.read_text())
-    cfg = _build(model_dir=_MODEL_DIR_ROMS070)  # test-tiny, dt=7200
+    cfg = _build(model_path=_MODEL_PATH_ROMS070)  # test-tiny, dt=7200
     got = json.loads(json.dumps(cfg.model_settings, sort_keys=True, default=str))
     assert got == golden, (
         "Resolved model_settings for test-tiny (roms-marbl-0.7-default) drifted "
@@ -2397,7 +2397,7 @@ def test_golden_model_settings_test_tiny_roms090():
     ``TestGoldenNamelist.test_golden_namelist_test_tiny_roms090`` for the
     versioned-namelist assertion). Regenerate the fixture with
     ``json.dumps(cfg.model_settings, indent=2, sort_keys=True, default=str)``
-    plus a trailing newline, from ``_build(model_dir=_MODEL_DIR_ROMS090)``.
+    plus a trailing newline, from ``_build(model_path=_MODEL_PATH_ROMS090)``.
     """
     import json
 
@@ -2407,7 +2407,7 @@ def test_golden_model_settings_test_tiny_roms090():
         / "golden_model_settings_test-tiny-roms090.json"
     )
     golden = json.loads(golden_path.read_text())
-    cfg = _build(model_dir=_MODEL_DIR_ROMS090)  # test-tiny, dt=7200
+    cfg = _build(model_path=_MODEL_PATH_ROMS090)  # test-tiny, dt=7200
     got = json.loads(json.dumps(cfg.model_settings, sort_keys=True, default=str))
     assert got == golden, (
         "Resolved model_settings for test-tiny (roms-marbl-0.9-default) drifted "
@@ -2427,7 +2427,7 @@ def test_golden_model_settings_test_tiny_roms0110():
     ``constant_fe_value``, which the ModelSpec declares (off, at the ucla-roms
     reference value). Regenerate the fixture with
     ``json.dumps(cfg.model_settings, indent=2, sort_keys=True, default=str)``
-    plus a trailing newline, from ``_build(model_dir=_MODEL_DIR_ROMS0110)``.
+    plus a trailing newline, from ``_build(model_path=_MODEL_PATH_ROMS0110)``.
     """
     import json
 
@@ -2437,7 +2437,7 @@ def test_golden_model_settings_test_tiny_roms0110():
         / "golden_model_settings_test-tiny-roms0110.json"
     )
     golden = json.loads(golden_path.read_text())
-    cfg = _build(model_dir=_MODEL_DIR_ROMS0110)  # test-tiny, dt=7200
+    cfg = _build(model_path=_MODEL_PATH_ROMS0110)  # test-tiny, dt=7200
     got = json.loads(json.dumps(cfg.model_settings, sort_keys=True, default=str))
     assert got == golden, (
         "Resolved model_settings for test-tiny (roms-marbl-0.11-default) drifted "
@@ -2457,7 +2457,7 @@ def test_golden_model_settings_test_tiny_roms0120():
     ``cdr_carbonate_sensitivity_time_interpolation``, which the ModelSpec
     declares (on, the ucla-roms reference value). Regenerate the fixture with
     ``json.dumps(cfg.model_settings, indent=2, sort_keys=True, default=str)``
-    plus a trailing newline, from ``_build(model_dir=_MODEL_DIR_ROMS0120)``.
+    plus a trailing newline, from ``_build(model_path=_MODEL_PATH_ROMS0120)``.
     """
     import json
 
@@ -2467,7 +2467,7 @@ def test_golden_model_settings_test_tiny_roms0120():
         / "golden_model_settings_test-tiny-roms0120.json"
     )
     golden = json.loads(golden_path.read_text())
-    cfg = _build(model_dir=_MODEL_DIR_ROMS0120)  # test-tiny, dt=7200
+    cfg = _build(model_path=_MODEL_PATH_ROMS0120)  # test-tiny, dt=7200
     got = json.loads(json.dumps(cfg.model_settings, sort_keys=True, default=str))
     assert got == golden, (
         "Resolved model_settings for test-tiny (roms-marbl-0.12-default) drifted "
@@ -2482,7 +2482,7 @@ _CONSTANT_FE_ON = {"marbl_bgc": {"use_constant_fe": True}}
 
 
 def test_resolver_0_11_model_spec_carries_the_constant_fe_keys():
-    cfg = _build(model_dir=_MODEL_DIR_ROMS0110)
+    cfg = _build(model_path=_MODEL_PATH_ROMS0110)
     assert cfg.code.roms.commit == "0.11.0"
     marbl_bgc = cfg.model_settings["marbl_bgc"]
     assert marbl_bgc["use_constant_fe"] is False
@@ -2491,7 +2491,7 @@ def test_resolver_0_11_model_spec_carries_the_constant_fe_keys():
 
 def test_resolver_applies_a_constant_fe_override_on_a_marbl_build():
     cfg = _build(
-        model_dir=_MODEL_DIR_ROMS0110,
+        model_path=_MODEL_PATH_ROMS0110,
         run_time_overrides={
             "marbl_bgc": {"use_constant_fe": True, "constant_fe_value": 5.0e-4}
         },
@@ -2506,7 +2506,7 @@ def test_resolver_keeps_the_switched_off_constant_fe_in_a_non_marbl_build():
     stay in the settings, switched off, and the MARBL guard passes them.
     """
     cfg = _build(
-        model_dir=_MODEL_DIR_ROMS0110,
+        model_path=_MODEL_PATH_ROMS0110,
         bgc_mode="none",
         forcing_inputs=_PHYSICS_ONLY_FORCING,
     )
@@ -2521,7 +2521,7 @@ def test_resolver_rejects_constant_fe_without_marbl():
     """
     with pytest.raises(ValueError, match=r"marbl_bgc\.use_constant_fe.*MARBL is off"):
         _build(
-            model_dir=_MODEL_DIR_ROMS0110,
+            model_path=_MODEL_PATH_ROMS0110,
             bgc_mode="none",
             forcing_inputs=_PHYSICS_ONLY_FORCING,
             run_time_overrides=_CONSTANT_FE_ON,
@@ -2531,7 +2531,7 @@ def test_resolver_rejects_constant_fe_without_marbl():
 def test_resolver_rejects_constant_fe_in_cdr_lite_mode():
     with pytest.raises(ValueError, match=r"marbl_bgc\.use_constant_fe.*MARBL is off"):
         _build_cdr_lite(
-            model_dir=_MODEL_DIR_ROMS0110, run_time_overrides=_CONSTANT_FE_ON
+            model_path=_MODEL_PATH_ROMS0110, run_time_overrides=_CONSTANT_FE_ON
         )
 
 
@@ -2542,7 +2542,7 @@ def test_resolver_constant_fe_guard_reads_the_merged_cppdefs():
     """
     with pytest.raises(ValueError, match=r"marbl_bgc\.use_constant_fe.*MARBL is off"):
         _build(
-            model_dir=_MODEL_DIR_ROMS0110,
+            model_path=_MODEL_PATH_ROMS0110,
             compile_time_overrides={"cppdefs": {"marbl": False}},
             run_time_overrides={"param": {"ntrc_bio": 0}, **_CONSTANT_FE_ON},
         )
@@ -2553,7 +2553,7 @@ def test_constant_fe_on_a_pre_0_11_0_pin_is_reported_by_run_time_validation():
     blueprint's settings, and the validation ``process_forge_blueprint`` runs
     before any data work reports it, naming the release that supports it.
     """
-    cfg = _build(model_dir=_MODEL_DIR_ROMS0100, run_time_overrides=_CONSTANT_FE_ON)
+    cfg = _build(model_path=_MODEL_PATH_ROMS0100, run_time_overrides=_CONSTANT_FE_ON)
     problems = validate_run_time_sections(
         cfg.model_settings, roms_ref=cfg.code.roms.commit
     )
@@ -2562,11 +2562,11 @@ def test_constant_fe_on_a_pre_0_11_0_pin_is_reported_by_run_time_validation():
 
 
 @pytest.mark.parametrize(
-    ("model_dir", "roms_commit"),
-    [(_MODEL_DIR_ROMS080, "0.8.0"), (_MODEL_DIR_ROMS090, "0.9.1")],
+    ("model_path", "roms_commit"),
+    [(_MODEL_PATH_ROMS080, "0.8.0"), (_MODEL_PATH_ROMS090, "0.9.1")],
 )
 def test_roms08x_09x_model_specs_declare_advection_cppdefs_and_render(
-    tmp_path, model_dir, roms_commit
+    tmp_path, model_path, roms_commit
 ):
     """``roms-marbl-0.8-default`` (ucla-roms 0.8.0, PR #361) and
     ``roms-marbl-0.9-default`` declare the two advection cppdefs keys both off
@@ -2582,7 +2582,7 @@ def test_roms08x_09x_model_specs_declare_advection_cppdefs_and_render(
     cannot catch a stale pin. See TestCppdefsTemplate in tests/test_settings.py
     for the synthetic-settings coverage of the same two keys.
     """
-    cfg = _build(model_dir=model_dir)  # test-tiny, dt=7200
+    cfg = _build(model_path=model_path)  # test-tiny, dt=7200
     assert cfg.model_settings["cppdefs"]["parabolic_splines"] is False
     assert cfg.model_settings["cppdefs"]["upstream_ts_land_curv"] is False
     assert cfg.code.roms.commit == roms_commit
@@ -2616,7 +2616,7 @@ def test_roms090_cdr_lite_cppdef_renders_when_the_knob_is_on(tmp_path):
     """The resolver-derived ``cppdefs.cdr_lite`` reaches the template: on with
     the online sensitivity, ``#define CDR_LITE``.
     """
-    cfg = _build(model_dir=_MODEL_DIR_ROMS090, run_time_overrides=_LITE_ON)
+    cfg = _build(model_path=_MODEL_PATH_ROMS090, run_time_overrides=_LITE_ON)
     template_dir = (
         Path(cstar.__file__).parent
         / "additional_files"
@@ -3541,7 +3541,7 @@ def test_model_spec_streams_satisfy_roms_divides_rst_precheck(
     since a resolved blueprint combines the two.
     """
     model_settings = yaml.safe_load(
-        (_BUNDLED_CATALOG / "ModelSpec" / model_spec_name / "model.yaml").read_text()
+        (_BUNDLED_CATALOG / "ModelSpec" / f"{model_spec_name}.yaml").read_text()
     )["model_settings"]
     rst = _CATALOG.output_data(spec_name)["ocean_vars"]["output_period_rst"]
     _assert_streams_divide_rst(
@@ -3577,7 +3577,7 @@ def test_resolver_rejects_extract_period_not_dividing_rst_for_roms050():
     # seeded nrpf=24; 24 * 5000 = 120000 s does not divide rst 86400 s
     with pytest.raises(ValueError, match="evenly divide"):
         _build(
-            model_dir=_MODEL_DIR_ROMS050,
+            model_path=_MODEL_PATH_ROMS050,
             grid_kwargs_child=_CHILD_GRID,
             metadata_child={"period": 5000.0},
         )
@@ -3585,7 +3585,7 @@ def test_resolver_rejects_extract_period_not_dividing_rst_for_roms050():
 
 def test_resolver_accepts_conforming_extract_period_for_roms050():
     cfg = _build(
-        model_dir=_MODEL_DIR_ROMS050,
+        model_path=_MODEL_PATH_ROMS050,
         grid_kwargs_child=_CHILD_GRID,
         metadata_child={"period": 1800.0},  # 24 * 1800 = 43200 | 86400
     )
@@ -3596,7 +3596,7 @@ def test_resolver_extract_check_gated_off_for_legacy_roms():
     """The same nonconforming period resolves fine for a pre-0.5.0 model --
     older ucla-roms has no such precheck, so authoring isn't blocked.
     """
-    cfg = _build(  # default _MODEL_DIR pins roms 0.2.0 (legacy schema)
+    cfg = _build(  # default _MODEL_PATH pins roms 0.2.0 (legacy schema)
         grid_kwargs_child=_CHILD_GRID,
         metadata_child={"period": 5000.0},
     )
@@ -3627,7 +3627,7 @@ def test_resolver_rejects_non_extract_stream_not_dividing_rst_for_roms050():
     """
     with pytest.raises(ValueError, match="evenly divide"):
         _build(
-            model_dir=_MODEL_DIR_ROMS050,
+            model_path=_MODEL_PATH_ROMS050,
             output_settings=_standard_output_settings_with_bad_frc(),
         )
 
@@ -3636,7 +3636,7 @@ def test_resolver_non_extract_stream_check_gated_off_for_legacy_roms():
     """The same nonconforming `frc` config resolves fine for a pre-0.5.0 model
     -- older ucla-roms has no such precheck, so authoring isn't blocked.
     """
-    cfg = _build(  # default _MODEL_DIR pins roms 0.2.0 (legacy schema)
+    cfg = _build(  # default _MODEL_PATH pins roms 0.2.0 (legacy schema)
         output_settings=_standard_output_settings_with_bad_frc(),
     )
     assert cfg.model_settings["frc_output"]["wrt_frc"] is True
@@ -3673,7 +3673,7 @@ def test_extract_output_settings_helper():
     # (ucla-roms >= 0.7.0, PR #351), which prune_version_gated_sections drops
     # from an older-pinned build's model_settings -- use a 0.7.0-pinned
     # ModelSpec so every OUTPUT_SECTIONS entry actually survives resolution.
-    cfg = _build(model_dir=_MODEL_DIR_ROMS070)
+    cfg = _build(model_path=_MODEL_PATH_ROMS070)
     out = extract_output_settings(cfg.model_settings)
     assert set(OUTPUT_SECTIONS) <= set(out)
     assert set(out["marbl_bgc"]) == {
@@ -3901,7 +3901,7 @@ def test_cdr_lite_output_does_not_require_marbl():
     compile guard. cppdefs.cdr_forcing is still forced on.
     """
     cfg = _build(
-        model_dir=_MODEL_DIR_ROMS070,
+        model_path=_MODEL_PATH_ROMS070,
         bgc_mode="none",
         forcing_inputs=_PHYSICS_ONLY_FORCING,
         run_time_overrides={
@@ -3922,7 +3922,7 @@ def test_cdr_gas_exch_output_requires_marbl():
     """
     with pytest.raises(ValueError, match="do_cdr_gas_exch_output"):
         _build(
-            model_dir=_MODEL_DIR_ROMS070,
+            model_path=_MODEL_PATH_ROMS070,
             bgc_mode="none",
             forcing_inputs=_PHYSICS_ONLY_FORCING,
             run_time_overrides={
@@ -3937,7 +3937,7 @@ def test_cdr_lite_output_enabled_sets_cppdef():
     compiling the CDR tracer output module.
     """
     cfg = _build(
-        model_dir=_MODEL_DIR_ROMS070,
+        model_path=_MODEL_PATH_ROMS070,
         run_time_overrides={
             "cdr_lite_output": {"do_cdr_lite_output": True},
             "param": {"nt_cdr_oae": 1},
@@ -3954,7 +3954,7 @@ def test_cdr_gas_exch_output_enabled_sets_cppdef():
     output group.
     """
     cfg = _build(
-        model_dir=_MODEL_DIR_ROMS070,
+        model_path=_MODEL_PATH_ROMS070,
         run_time_overrides={"cdr_gas_exch_output": {"do_cdr_gas_exch_output": True}},
     )
     settings = cfg.model_settings
@@ -3969,7 +3969,7 @@ def test_active_cdr_forcing_does_not_enable_tracer_gas_exch_output():
     user enables explicitly (see the resolver's CDR tracer/gas-exchange output
     consistency check).
     """
-    cfg = _build(model_dir=_MODEL_DIR_ROMS070, cdr_forcing_yaml=_CDR_SAMPLE_YAML)
+    cfg = _build(model_path=_MODEL_PATH_ROMS070, cdr_forcing_yaml=_CDR_SAMPLE_YAML)
     settings = cfg.model_settings
     assert settings["cdr_output"]["do_cdr_output"] is True  # forced on, as before
     assert settings["cdr_lite_output"]["do_cdr_lite_output"] is False
@@ -3982,11 +3982,11 @@ def test_cdr_lite_gas_exch_output_sections_pruned_before_0_7_0():
     section in model_settings -- see prune_version_gated_sections in
     namelist_model.py. The matching 0.7.0-pinned build keeps both.
     """
-    cfg_060 = _build(model_dir=_MODEL_DIR_ROMS060)
+    cfg_060 = _build(model_path=_MODEL_PATH_ROMS060)
     assert "cdr_lite_output" not in cfg_060.model_settings
     assert "cdr_gas_exch_output" not in cfg_060.model_settings
 
-    cfg_070 = _build(model_dir=_MODEL_DIR_ROMS070)
+    cfg_070 = _build(model_path=_MODEL_PATH_ROMS070)
     assert "cdr_lite_output" in cfg_070.model_settings
     assert "cdr_gas_exch_output" in cfg_070.model_settings
     assert "cdr_lite" not in cfg_070.model_settings  # 0.9.0-only section
@@ -4000,7 +4000,7 @@ def test_enabled_cdr_lite_output_override_is_rejected_before_0_7_0():
     """
     with pytest.raises(ValueError, match=r"cdr_lite_output\.do_cdr_lite_output"):
         _build(
-            model_dir=_MODEL_DIR_ROMS060,
+            model_path=_MODEL_PATH_ROMS060,
             run_time_overrides={"cdr_lite_output": {"do_cdr_lite_output": True}},
         )
 
@@ -4010,7 +4010,7 @@ def test_disabled_gated_sections_are_pruned_silently_before_0_7_0():
     ``cdr_gas_exch_output``: an older pin drops them without complaint and
     flips no cppdef.
     """
-    cfg = _build(model_dir=_MODEL_DIR_ROMS060)
+    cfg = _build(model_path=_MODEL_PATH_ROMS060)
     settings = cfg.model_settings
     assert "cdr_lite_output" not in settings
     assert settings["cppdefs"].get("cdr_forcing", False) is False
@@ -4027,7 +4027,7 @@ _LITE_ON = {
 
 
 def test_0_9_0_online_sensitivity_sets_cdr_lite_cppdef():
-    cfg = _build(model_dir=_MODEL_DIR_ROMS090, run_time_overrides=_LITE_ON)
+    cfg = _build(model_path=_MODEL_PATH_ROMS090, run_time_overrides=_LITE_ON)
     settings = cfg.model_settings
     assert settings["cdr_lite"]["cdr_online_carbonate_sensitivity"] is True
     assert settings["cppdefs"]["cdr_lite"] is True
@@ -4036,10 +4036,10 @@ def test_0_9_0_online_sensitivity_sets_cdr_lite_cppdef():
 
 
 def test_0_9_0_cdr_lite_cppdef_absent_without_the_knob():
-    cfg = _build(model_dir=_MODEL_DIR_ROMS090)
+    cfg = _build(model_path=_MODEL_PATH_ROMS090)
     assert "cdr_lite" not in cfg.model_settings  # the bundled spec leaves it unset
     assert "cdr_lite" not in cfg.model_settings["cppdefs"]
-    cfg = _build(model_dir=_MODEL_DIR_ROMS080)
+    cfg = _build(model_path=_MODEL_PATH_ROMS080)
     assert "cdr_lite" not in cfg.model_settings["cppdefs"]
 
 
@@ -4049,7 +4049,7 @@ def test_0_9_0_cdr_lite_cppdef_without_the_knob_or_the_mode_is_rejected():
     """
     with pytest.raises(ValueError, match="nothing needs CDR_LITE"):
         _build(
-            model_dir=_MODEL_DIR_ROMS090,
+            model_path=_MODEL_PATH_ROMS090,
             compile_time_overrides={"cppdefs": {"cdr_lite": True}},
         )
 
@@ -4057,7 +4057,7 @@ def test_0_9_0_cdr_lite_cppdef_without_the_knob_or_the_mode_is_rejected():
 def test_0_9_0_online_sensitivity_requires_marbl():
     with pytest.raises(ValueError, match="MARBL"):
         _build(
-            model_dir=_MODEL_DIR_ROMS090,
+            model_path=_MODEL_PATH_ROMS090,
             bgc_mode="none",
             forcing_inputs=_PHYSICS_ONLY_FORCING,
             run_time_overrides=_LITE_ON,
@@ -4067,7 +4067,7 @@ def test_0_9_0_online_sensitivity_requires_marbl():
 def test_0_9_0_online_sensitivity_requires_cdr_tracers():
     with pytest.raises(ValueError, match="nt_cdr_oae"):
         _build(
-            model_dir=_MODEL_DIR_ROMS090,
+            model_path=_MODEL_PATH_ROMS090,
             run_time_overrides={"cdr_lite": {"cdr_online_carbonate_sensitivity": True}},
         )
 
@@ -4075,7 +4075,7 @@ def test_0_9_0_online_sensitivity_requires_cdr_tracers():
 def test_0_9_0_gas_exchange_output_needs_the_online_sensitivity():
     with pytest.raises(ValueError, match="needs CDR_LITE"):
         _build(
-            model_dir=_MODEL_DIR_ROMS090,
+            model_path=_MODEL_PATH_ROMS090,
             run_time_overrides={
                 "cdr_lite_output": {
                     "do_cdr_lite_output": True,
@@ -4085,7 +4085,7 @@ def test_0_9_0_gas_exchange_output_needs_the_online_sensitivity():
             },
         )
     cfg = _build(
-        model_dir=_MODEL_DIR_ROMS090,
+        model_path=_MODEL_PATH_ROMS090,
         run_time_overrides={
             **_LITE_ON,
             "cdr_lite_output": {"do_cdr_lite_output": True, "wrt_gas_exchange": True},
@@ -4107,19 +4107,19 @@ def test_cdr_lite_output_forces_cdr_forcing_only_before_0_9_0():
     over_090 = {**over, "cdr_lite": {"cdr_online_carbonate_sensitivity": True}}
     assert (
         _build(
-            model_dir=_MODEL_DIR_ROMS090, run_time_overrides=over_090
+            model_path=_MODEL_PATH_ROMS090, run_time_overrides=over_090
         ).model_settings["cppdefs"]["cdr_forcing"]
         is False
     )
-    for model_dir in (_MODEL_DIR_ROMS070, _MODEL_DIR_ROMS080):
-        cfg = _build(model_dir=model_dir, run_time_overrides=over)
+    for model_path in (_MODEL_PATH_ROMS070, _MODEL_PATH_ROMS080):
+        cfg = _build(model_path=model_path, run_time_overrides=over)
         assert cfg.model_settings["cppdefs"]["cdr_forcing"] is True
 
 
 def test_0_9_0_cdr_lite_output_needs_tracers():
     with pytest.raises(ValueError, match="aborts at init"):
         _build(
-            model_dir=_MODEL_DIR_ROMS090,
+            model_path=_MODEL_PATH_ROMS090,
             run_time_overrides={"cdr_lite_output": {"do_cdr_lite_output": True}},
         )
 
@@ -4131,7 +4131,7 @@ def test_0_9_0_precheck_runs_on_the_renamed_output_group():
     """
     with pytest.raises(ValueError, match="cdr_lite_output_settings.nrpf_cdr_lite"):
         _build(
-            model_dir=_MODEL_DIR_ROMS090,
+            model_path=_MODEL_PATH_ROMS090,
             run_time_overrides={
                 "cdr_lite_output": {
                     "do_cdr_lite_output": True,
@@ -4179,7 +4179,7 @@ def _build_cdr_lite(**over):
     that must be stated through ``cdr=``: a bare ``cdr_forcing=`` is "yaml").
     """
     kw = {
-        "model_dir": _MODEL_DIR_ROMS0100,
+        "model_path": _MODEL_PATH_ROMS0100,
         "bgc_mode": "cdr_lite",
         "forcing_inputs": _PHYSICS_ONLY_FORCING,
         "cdr": {"mode": "simple", "cdr_forcing": _cdr_lite_forcing()},
@@ -4211,15 +4211,13 @@ def test_resolver_bgc_mode_cdr_lite_derives_cppdefs_param_and_code():
 def test_resolver_bgc_mode_cdr_lite_defaults_to_the_model_spec(tmp_path):
     import shutil
 
-    model_dir = tmp_path / "roms-marbl-0.10-default"
-    shutil.copytree(_MODEL_DIR_ROMS0100, model_dir)
-    text = (model_dir / "model.yaml").read_text()
+    model_path = tmp_path / "roms-marbl-0.10-default.yaml"
+    shutil.copy2(_MODEL_PATH_ROMS0100, model_path)
+    text = model_path.read_text()
     assert "bgc_mode: marbl" in text
-    (model_dir / "model.yaml").write_text(
-        text.replace("bgc_mode: marbl", "bgc_mode: cdr_lite")
-    )
+    model_path.write_text(text.replace("bgc_mode: marbl", "bgc_mode: cdr_lite"))
     cfg = _build(
-        model_dir=model_dir,
+        model_path=model_path,
         forcing_inputs=_PHYSICS_ONLY_FORCING,
         cdr_forcing=_cdr_lite_forcing(_cdr_lite_release(tracer_set="cdr_lite")),
     )
@@ -4258,7 +4256,7 @@ def test_resolver_rejects_do_upscale_in_none_mode():
         ValueError, match=r"upscale_output\.do_upscale=True but bgc_mode"
     ):
         _build(
-            model_dir=_MODEL_DIR_ROMS0100,
+            model_path=_MODEL_PATH_ROMS0100,
             bgc_mode="none",
             forcing_inputs=_PHYSICS_ONLY_FORCING,
             run_time_overrides=_UPSCALE_ON,
@@ -4267,7 +4265,7 @@ def test_resolver_rejects_do_upscale_in_none_mode():
 
 def test_resolver_accepts_do_upscale_with_marbl():
     cfg = _build(
-        model_dir=_MODEL_DIR_ROMS0100,
+        model_path=_MODEL_PATH_ROMS0100,
         # one upscaled file per day, so it divides the daily restart period
         run_time_overrides={"upscale_output": {"do_upscale": True, "nrpf_uscl": 24}},
     )
@@ -4286,7 +4284,7 @@ def test_resolver_bgc_mode_cdr_lite_rejects_tracer_override_without_cdr_lite():
     """
     with pytest.raises(ValueError, match="Forcing type not supported"):
         _build(
-            model_dir=_MODEL_DIR_ROMS090,
+            model_path=_MODEL_PATH_ROMS090,
             bgc_mode="none",
             forcing_inputs=_PHYSICS_ONLY_FORCING,
             cdr_forcing=_cdr_lite_forcing(),
@@ -4317,18 +4315,18 @@ def test_resolver_bgc_mode_cdr_lite_rejects_upscaled_before_ucla_roms_0_11_0():
 
 
 @pytest.mark.parametrize(
-    ("model_dir", "roms_ref"),
-    [(_MODEL_DIR_ROMS0110, None), (_MODEL_DIR_ROMS0100, "main")],
+    ("model_path", "roms_ref"),
+    [(_MODEL_PATH_ROMS0110, None), (_MODEL_PATH_ROMS0100, "main")],
 )
 def test_resolver_bgc_mode_cdr_lite_accepts_upscaled_from_ucla_roms_0_11_0(
-    model_dir, roms_ref
+    model_path, roms_ref
 ):
     """From ucla-roms 0.11.0 the depth profiles feed the CDR-lite tracers their
     file names in cdr_trc_name (ucla-roms #390): a CDR-lite parent of an
     upscaled run resolves, with CDR_FORCING on and cdr_output (MARBL-only) off.
     """
     cfg = _build_cdr_lite(
-        model_dir=model_dir,
+        model_path=model_path,
         roms_ref=roms_ref,
         cdr={"mode": "upscaled"},
         run_time_overrides=_UPSCALED_COUNTS,
@@ -4362,7 +4360,7 @@ def test_resolver_bgc_mode_cdr_lite_upscaled_needs_tracer_counts(param):
         r"run_time_overrides=\{\"param\"",
     ):
         _build_cdr_lite(
-            model_dir=_MODEL_DIR_ROMS0110,
+            model_path=_MODEL_PATH_ROMS0110,
             cdr={"mode": "upscaled"},
             run_time_overrides={"param": param},
         )
@@ -4373,7 +4371,7 @@ def test_resolver_bgc_mode_cdr_lite_upscaled_needs_tracer_counts(param):
 )
 def test_resolver_bgc_mode_cdr_lite_upscaled_accepts_either_tracer_family(param):
     cfg = _build_cdr_lite(
-        model_dir=_MODEL_DIR_ROMS0110,
+        model_path=_MODEL_PATH_ROMS0110,
         cdr={"mode": "upscaled"},
         run_time_overrides={"param": param},
     )
@@ -4415,9 +4413,9 @@ def test_resolver_bgc_mode_cdr_lite_needs_ucla_roms_0_10_0(roms_ref, ok):
 
 def test_resolver_bgc_mode_cdr_lite_gate_applies_to_a_pinned_older_model_spec():
     with pytest.raises(ValueError, match=r'bgc_mode "cdr_lite" on ucla-roms 0\.8\.0'):
-        _build_cdr_lite(model_dir=_MODEL_DIR_ROMS080)
+        _build_cdr_lite(model_path=_MODEL_PATH_ROMS080)
     with pytest.raises(ValueError, match=r'bgc_mode "cdr_lite" on ucla-roms 0\.9\.1'):
-        _build_cdr_lite(model_dir=_MODEL_DIR_ROMS090)
+        _build_cdr_lite(model_path=_MODEL_PATH_ROMS090)
 
 
 def test_resolver_bgc_mode_cdr_lite_gate_follows_the_named_constant(monkeypatch):
@@ -4474,7 +4472,7 @@ def test_resolver_cdr_lite_rejects_volume_releases():
 def test_resolver_marbl_mode_accepts_volume_releases():
     forcing = _cdr_lite_forcing(_cdr_lite_release("pump", release_type="volume"))
     cfg = _build(
-        model_dir=_MODEL_DIR_ROMS090, cdr={"mode": "simple", "cdr_forcing": forcing}
+        model_path=_MODEL_PATH_ROMS090, cdr={"mode": "simple", "cdr_forcing": forcing}
     )
     assert cfg.cdr.cdr_forcing["releases"][0]["release_type"] == "volume"
 
@@ -4493,7 +4491,7 @@ def test_resolver_cdr_lite_leaves_the_other_cdr_modes_as_authored():
 
 def test_resolver_marbl_mode_never_adds_a_tracer_set():
     cfg = _build(
-        model_dir=_MODEL_DIR_ROMS090,
+        model_path=_MODEL_PATH_ROMS090,
         cdr={"mode": "simple", "cdr_forcing": _cdr_lite_forcing()},
     )
     assert "tracer_set" not in cfg.cdr.cdr_forcing["releases"][0]
@@ -4505,7 +4503,7 @@ def test_resolver_marbl_mode_online_sensitivity_still_derives_cdr_lite():
     """The marbl-mode path is unchanged: the online knob compiles CDR_LITE on top
     of MARBL (a MARBL build, not the CDR-lite mode).
     """
-    cfg = _build(model_dir=_MODEL_DIR_ROMS090, run_time_overrides=_LITE_ON)
+    cfg = _build(model_path=_MODEL_PATH_ROMS090, run_time_overrides=_LITE_ON)
     cppdefs = cfg.model_settings["cppdefs"]
     assert cppdefs["marbl"] is True
     assert cppdefs["cdr_lite"] is True
@@ -4819,7 +4817,7 @@ def test_resolver_carbonate_sensitivity_missing_file_raises(tmp_path):
 @pytest.mark.parametrize("mode", ["marbl", "none"])
 def test_resolver_carbonate_sensitivity_requires_bgc_mode_cdr_lite(tmp_path, mode):
     path = _cdrgas_file(tmp_path, "20120101130000")
-    over = {"model_dir": _MODEL_DIR_ROMS090}
+    over = {"model_path": _MODEL_PATH_ROMS090}
     if mode == "none":
         over.update(bgc_mode="none", forcing_inputs=_PHYSICS_ONLY_FORCING)
 
@@ -4852,7 +4850,7 @@ def test_resolver_carbonate_sensitivity_lists_every_problem_at_once(tmp_path):
 
     with pytest.raises(ValueError) as exc_info:
         _build(
-            model_dir=_MODEL_DIR_ROMS090,
+            model_path=_MODEL_PATH_ROMS090,
             use_pio=False,
             carbonate_sensitivity=[path],
             run_time_overrides=_LITE_ON,
@@ -4921,7 +4919,7 @@ def test_resolver_cdr_lite_precheck_covers_the_stream_configure_build_forces_on(
 
     # The same stream is not checked while it stays off in a MARBL build.
     marbl = _build(
-        model_dir=_MODEL_DIR_ROMS090, run_time_overrides={"cdr_lite_output": stream}
+        model_path=_MODEL_PATH_ROMS090, run_time_overrides={"cdr_lite_output": stream}
     )
     assert marbl.model_settings["cdr_lite_output"]["nrpf"] == 7
     assert marbl.model_settings["cdr_lite_output"]["do_cdr_lite_output"] is False
@@ -4968,18 +4966,18 @@ def _legacy_output_settings(enabled=False):
     return out
 
 
-@pytest.mark.parametrize("model_dir", [_MODEL_DIR_ROMS070, _MODEL_DIR_ROMS090])
-def test_resolver_renames_a_legacy_output_spec_with_a_warning(model_dir, caplog):
+@pytest.mark.parametrize("model_path", [_MODEL_PATH_ROMS070, _MODEL_PATH_ROMS090])
+def test_resolver_renames_a_legacy_output_spec_with_a_warning(model_path, caplog):
     import copy
 
     legacy = _legacy_output_settings(enabled=True)
     snapshot = copy.deepcopy(legacy)
     overrides: dict[str, t.Any] = {"param": {"nt_cdr_oae": 1}}
-    if model_dir == _MODEL_DIR_ROMS090:  # CDR tracers need CDR_LITE on 0.9
+    if model_path == _MODEL_PATH_ROMS090:  # CDR tracers need CDR_LITE on 0.9
         overrides["cdr_lite"] = {"cdr_online_carbonate_sensitivity": True}
     with caplog.at_level(logging.WARNING, logger="cstar.applications.forge.resolve"):
         cfg = _build(
-            model_dir=model_dir,
+            model_path=model_path,
             output_settings=legacy,
             run_time_overrides=overrides,
         )
@@ -4997,7 +4995,7 @@ def test_resolver_renames_a_legacy_output_spec_with_a_warning(model_dir, caplog)
 def test_resolver_renames_legacy_run_time_overrides(caplog):
     with caplog.at_level(logging.WARNING, logger="cstar.applications.forge.resolve"):
         cfg = _build(
-            model_dir=_MODEL_DIR_ROMS070,
+            model_path=_MODEL_PATH_ROMS070,
             run_time_overrides={
                 "cdr_tracer_output": {"do_cdr_tracer_output": True},
                 "param": {"nt_cdr_oae": 1},
@@ -5007,14 +5005,36 @@ def test_resolver_renames_legacy_run_time_overrides(caplog):
     assert "run_time_overrides" in caplog.text
 
 
+def test_resolver_names_a_model_by_its_catalog_entry_in_either_layout(tmp_path):
+    """The model's name in the composition and the default blueprint name is
+    its catalog entry name: the file's stem, or the directory of a ModelSpec
+    still in the legacy ``ModelSpec/<name>/model.yaml`` layout.
+    """
+    import shutil
+
+    from cstar.base.deprecation import CstarDeprecationWarning
+    from cstar.catalog.domain_catalog import DomainCatalog
+
+    legacy = tmp_path / "ModelSpec" / "legacy-model" / "model.yaml"
+    legacy.parent.mkdir(parents=True)
+    shutil.copy2(_MODEL_PATH, legacy)
+    shutil.copy2(_MODEL_PATH, tmp_path / "ModelSpec" / "flat-model.yaml")
+    with pytest.warns(CstarDeprecationWarning):
+        catalog = DomainCatalog(tmp_path, suppress_validation=True)
+
+    for name in ("flat-model", "legacy-model"):
+        cfg = _build(model_path=catalog.model_path(name), name=None)
+        assert cfg.composition.model.name == name
+        assert cfg.name.startswith(f"{name}_test-tiny_")
+
+
 def test_resolver_renames_a_legacy_model_spec(tmp_path, caplog):
-    model = yaml.safe_load((_MODEL_DIR_ROMS070 / "model.yaml").read_text())
+    model = yaml.safe_load(_MODEL_PATH_ROMS070.read_text())
     model["model_settings"]["cdr_tracer_output"] = {"do_cdr_tracer_output": False}
-    model_dir = tmp_path / "legacy-model"
-    model_dir.mkdir()
-    (model_dir / "model.yaml").write_text(yaml.safe_dump(model))
+    model_path = tmp_path / "legacy-model.yaml"
+    model_path.write_text(yaml.safe_dump(model))
     with caplog.at_level(logging.WARNING, logger="cstar.applications.forge.resolve"):
-        cfg = _build(model_dir=model_dir)
+        cfg = _build(model_path=model_path)
     assert "cdr_tracer_output" not in cfg.model_settings
     assert cfg.model_settings["cdr_lite_output"]["do_cdr_lite_output"] is False
     assert "ModelSpec 'legacy-model'" in caplog.text
@@ -5022,7 +5042,7 @@ def test_resolver_renames_a_legacy_model_spec(tmp_path, caplog):
 
 def test_resolver_does_not_warn_for_current_names(caplog):
     with caplog.at_level(logging.WARNING, logger="cstar.applications.forge.resolve"):
-        _build(model_dir=_MODEL_DIR_ROMS090)
+        _build(model_path=_MODEL_PATH_ROMS090)
     assert not _resolver_warnings(caplog)
 
 
@@ -5062,7 +5082,7 @@ def test_stored_v9_blueprint_loads_with_the_renamed_section(tmp_path):
     """A 0.7-pinned blueprint saved before the rename loads (via the validator
     that runs the migration) with its stream settings under the new names.
     """
-    cfg = _build(model_dir=_MODEL_DIR_ROMS070)
+    cfg = _build(model_path=_MODEL_PATH_ROMS070)
     data = cfg.model_dump(mode="json")
     data["forge_blueprint_version"] = 9
     settings = data["model_settings"]
@@ -5085,7 +5105,7 @@ def _v10_data_with_legacy_cdr_section(**extra_settings):
     section is swapped for the pre-rename ``cdr_tracer_output`` one, as a workplan
     blueprint override merged onto a v10 dump would leave it.
     """
-    data = _build(model_dir=_MODEL_DIR_ROMS070).model_dump(mode="json")
+    data = _build(model_path=_MODEL_PATH_ROMS070).model_dump(mode="json")
     assert data["forge_blueprint_version"] == FORGE_BLUEPRINT_VERSION
     settings = data["model_settings"]
     section = settings.pop("cdr_lite_output")
@@ -5122,7 +5142,7 @@ def test_workplan_override_adding_a_legacy_cdr_section_fails_at_validation():
     """
     from cstar.orchestration.transforms import OverrideTransform
 
-    bp = _build(model_dir=_MODEL_DIR_ROMS070)
+    bp = _build(model_path=_MODEL_PATH_ROMS070)
     overrides = {
         "model_settings": {"cdr_tracer_output": {"do_cdr_tracer_output": True}}
     }
@@ -5302,20 +5322,18 @@ def test_resolver_use_pio_defaults_from_model_spec(tmp_path):
     """
     import shutil
 
-    model_dir = tmp_path / "cson_roms-marbl_v0.1"
-    shutil.copytree(_MODEL_DIR, model_dir)
-    text = (model_dir / "model.yaml").read_text()
+    model_path = tmp_path / "cson_roms-marbl_v0.1.yaml"
+    shutil.copy2(_MODEL_PATH, model_path)
+    text = model_path.read_text()
     assert "use_pio: false" in text
-    (model_dir / "model.yaml").write_text(
-        text.replace("use_pio: false", "use_pio: true")
-    )
+    model_path.write_text(text.replace("use_pio: false", "use_pio: true"))
 
-    cfg = _build(model_dir=model_dir)
+    cfg = _build(model_path=model_path)
     assert cfg.model_settings["cppdefs"]["use_pio"] is True
     assert cfg.code.pio is not None
 
     # an explicit kwarg still overrides the ModelSpec default
-    cfg_off = _build(model_dir=model_dir, use_pio=False)
+    cfg_off = _build(model_path=model_path, use_pio=False)
     assert cfg_off.model_settings["cppdefs"]["use_pio"] is False
     assert cfg_off.code.pio is None
 
@@ -5693,7 +5711,7 @@ def test_resolved_templates_carry_modelspec_authored_hashes():
     to be bundled in this C-Star build (which may be a newer commit).
     """
     cfg = _build()
-    authored = yaml.safe_load((_MODEL_DIR / "model.yaml").read_text())["code"]
+    authored = yaml.safe_load(_MODEL_PATH.read_text())["code"]
     assert (
         cfg.code.templates_compile_time.file_hashes
         == authored["templates_compile_time"]["file_hashes"]
@@ -5744,7 +5762,7 @@ def test_bundled_modelspec_fast_path_eligibility_by_stage(
     )
 
     code = yaml.safe_load(
-        (_BUNDLED_CATALOG / "ModelSpec" / model_spec_name / "model.yaml").read_text()
+        (_BUNDLED_CATALOG / "ModelSpec" / f"{model_spec_name}.yaml").read_text()
     )["code"]
     expected = {
         "templates_compile_time": compile_time_fast_path,
@@ -8173,7 +8191,7 @@ class TestResolverBuilderParity:
         # that its settings-init faithfully reproduces the resolver's model_settings for
         # every reviewable section (host-independent, catalog-free construction).
         cfg = build_forge_blueprint(
-            model_dir=_MODEL_DIR,
+            model_path=_MODEL_PATH,
             grid_name=grid_name,
             grid_kwargs=grid_kwargs,
             open_boundaries=boundaries,
@@ -8379,7 +8397,7 @@ class TestSaveModifiedSpecsToCatalog:
         isolated_catalog.register_model_from_settings(
             "no-pio",
             _model_owned_settings(wiz.config.model_settings),
-            isolated_catalog.model_dir(wiz.model_dd.value),
+            isolated_catalog.model_path(wiz.model_dd.value),
             use_pio=False,
             roms_ref=wiz.roms_ref.value.strip() or None,
         )
@@ -8402,7 +8420,7 @@ class TestSaveModifiedSpecsToCatalog:
         isolated_catalog.register_model_from_settings(
             "stale-ref",
             _model_owned_settings(wiz.config.model_settings),
-            isolated_catalog.model_dir(wiz.model_dd.value),
+            isolated_catalog.model_path(wiz.model_dd.value),
             use_pio=wiz.use_pio_chk.value,
             roms_ref=None,
         )
@@ -8484,7 +8502,7 @@ class TestSaveModifiedSpecsToCatalog:
         isolated_catalog.register_model_from_settings(
             "stale-marbl-ref",
             _model_owned_settings(wiz.config.model_settings),
-            isolated_catalog.model_dir(wiz.model_dd.value),
+            isolated_catalog.model_path(wiz.model_dd.value),
             use_pio=wiz.use_pio_chk.value,
             roms_ref=wiz.roms_ref.value.strip() or None,
             marbl_ref=None,
@@ -8845,7 +8863,9 @@ def _shipped_cppdefs_sources() -> list[tuple[str, dict]]:
         out.append(
             (str(path.relative_to(repo_root)), bp["model_settings"].get("cppdefs", {}))
         )
-    for path in sorted((bundled / "ModelSpec").glob("*/model.yaml")):
+    specs = sorted((bundled / "ModelSpec").glob("*.yaml"))
+    assert specs, "no bundled ModelSpec files found"
+    for path in specs:
         spec = yaml.safe_load(path.read_text())
         out.append(
             (
