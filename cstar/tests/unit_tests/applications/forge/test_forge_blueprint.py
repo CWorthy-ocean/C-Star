@@ -5829,6 +5829,8 @@ def test_committed_example_validates():
     example = (
         Path(cstar.__file__).parents[1]
         / "docs"
+        / "applications"
+        / "forge"
         / "forge-blueprint-example.wio-toy.yaml"
     )
     if not example.exists():
@@ -8831,7 +8833,11 @@ def _shipped_cppdefs_sources() -> list[tuple[str, dict]]:
     bundled = Path(cstar.catalog.__file__).parent / "bundled"
     out: list[tuple[str, dict]] = []
     for path in [
-        repo_root / "docs" / "forge-blueprint-example.wio-toy.yaml",
+        repo_root
+        / "docs"
+        / "applications"
+        / "forge"
+        / "forge-blueprint-example.wio-toy.yaml",
         *sorted((bundled / "blueprints" / "forge").glob("*.y*ml")),
     ]:
         docs = [d for d in yaml.safe_load_all(path.read_text()) if isinstance(d, dict)]
