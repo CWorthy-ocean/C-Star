@@ -14,29 +14,29 @@ The wizard presents them as dropdowns, the resolver merges the chosen ones
 values in full. Editing a spec afterwards does not change blueprints already
 built from it.
 
-Specs live in the :doc:`catalog <../../catalog_wizard/catalog>` as one directory per entry,
-``<Kind>/<name>/<file>.yaml``. C-Star bundles a small set of each kind to
-start from; save your own from the wizard's Review section or copy a bundled
-directory and edit it.
+Specs live in the :doc:`catalog <../../catalog_wizard/catalog>` as one file per entry,
+``<Kind>/<name>.yaml``. C-Star bundles a small set of each kind to start
+from; save your own from the wizard's Review section or copy a bundled file
+and edit it.
 
 Types of specs
 --------------
 
-ModelSpec (``ModelSpec/<name>/model.yaml``)
+ModelSpec (``ModelSpec/<name>.yaml``)
    A trusted model configuration: the pinned ROMS, MARBL and PIO code,
    the default biogeochemistry and PIO modes, and the
    model-level default settings. Choosing a model preset in the wizard
    selects one of these. Detailed below.
 
-DomainSpec (``DomainSpec/<name>/Domain.yaml``)
+DomainSpec (``DomainSpec/<name>.yaml``)
    A grid: its horizontal extent, resolution and rotation (``grid_kwargs``),
    number of vertical levels, which boundaries are open, the processor
    layout, and a default run window. The bundled ``wio-toy`` domain is:
 
-   .. literalinclude:: ../../../cstar/catalog/bundled/DomainSpec/wio-toy/Domain.yaml
+   .. literalinclude:: ../../../cstar/catalog/bundled/DomainSpec/wio-toy.yaml
       :language: yaml
 
-ForcingSpec (``ForcingSpec/<name>/Forcing.yaml``)
+ForcingSpec (``ForcingSpec/<name>.yaml``)
    Which datasets supply the initial conditions and the surface, boundary,
    tidal and river forcing, including biogeochemical sources and the
    interpolation method for each. The bundled entries pair GLORYS and ERA5
@@ -45,21 +45,21 @@ ForcingSpec (``ForcingSpec/<name>/Forcing.yaml``)
    for ``bgc_mode`` ``none`` and ``cdr_lite``. See :doc:`source_datasets` for
    the sources.
 
-OutputSpec (``OutputSpec/<name>/Output.yaml``)
+OutputSpec (``OutputSpec/<name>.yaml``)
    Which fields the model writes, how often, and how files are packed, per
    output stream, plus the restart frequency. The bundled ``standard``,
    ``daily-restarts``, ``weekly-restarts`` and ``monthly-restarts`` entries
    differ in restart cadence, with every stream chosen so restart boundaries
    never truncate a partially written file.
 
-CdrSpec
+CdrSpec (``CdrSpec/<name>.yaml``)
    Optional carbon dioxide removal forcing. Nothing is bundled; the wizard's
    Run setup section creates one from a netCDF file or by hand.
 
 Model specs in detail
 ---------------------
 
-A ``model.yaml`` has this shape:
+A ModelSpec file has this shape:
 
 .. code-block:: yaml
 
@@ -165,9 +165,9 @@ dropdown lists them only when "Show archived" is checked (loading a blueprint
 that uses one checks the box for you). ``archived`` works the same way in a
 spec of your own catalog.
 
-.. literalinclude:: ../../../cstar/catalog/bundled/ModelSpec/roms-marbl-0.12-default/model.yaml
+.. literalinclude:: ../../../cstar/catalog/bundled/ModelSpec/roms-marbl-0.12-default.yaml
    :language: yaml
    :lines: 1-36
 
-To load a ``model.yaml`` into a validated object from Python, see
+To load a ModelSpec file into a validated object from Python, see
 :doc:`../../reference/python`.

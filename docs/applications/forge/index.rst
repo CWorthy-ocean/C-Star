@@ -68,7 +68,7 @@ Pages in this section
 - :doc:`source_datasets`: every source Forge knows about, how each is
   obtained, and where user-staged files go.
 - :doc:`specs`: the catalog entries a blueprint is composed from, and the
-  ``model.yaml`` format.
+  ModelSpec format.
 - :doc:`blueprint`: the blueprint itself, its processing options and what
   Forge writes.
 
