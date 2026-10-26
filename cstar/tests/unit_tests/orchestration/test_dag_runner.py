@@ -2864,14 +2864,17 @@ async def test_restamping_does_not_make_an_older_hash_comparable(
         refuse_edited_steps(wp, reread, done, facts, [])
 
 
+@pytest.mark.parametrize("step_status", [Status.Done, Status.Submitted])
 def test_refuse_edited_steps_warns_about_a_step_whose_blueprint_changed_major(
     tmp_path: Path,
     hello_world_bp_path: Path,
     caplog: pytest.LogCaptureFixture,
+    step_status: Status,
 ) -> None:
-    """Verify a Done step whose definition differs under the current scheme is not
-    refused when its blueprint's schema major moved since it was recorded (an
-    automatic migration changes the content hashed), and that one warning names it.
+    """Verify a Done or queued step whose definition differs under the current
+    scheme is not refused when its blueprint's schema major moved since it was
+    recorded (an automatic migration changes the content hashed), and that one
+    warning names it.
     """
     wp = _guard_workplan(_hello_step(hello_world_bp_path.as_posix(), "A"))
     facts = describe_steps(wp, tmp_path)
@@ -2881,7 +2884,7 @@ def test_refuse_edited_steps_warns_about_a_step_whose_blueprint_changed_major(
     )
 
     with caplog.at_level("WARNING"):
-        refuse_edited_steps(wp, recorded, DagStatus({"A": Status.Done}), facts, [])
+        refuse_edited_steps(wp, recorded, DagStatus({"A": step_status}), facts, [])
 
     (message,) = _warnings(caplog)
     assert "'A'" in message
