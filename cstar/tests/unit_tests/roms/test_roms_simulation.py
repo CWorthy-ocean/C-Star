@@ -2105,7 +2105,7 @@ class TestProcessingAndExecution:
     @mock.patch("cstar.roms.simulation._get_sha256_hash", return_value="dummy_hash")
     @mock.patch("subprocess.run")
     @mock.patch.object(ROMSSimulation, "_validate_cppdef_flag")
-    def test_build_validates_parallel_io_and_mpi_masking_cppdefs(
+    def test_build_validates_parallel_io_mpi_masking_and_cdr_forcing_cppdefs(
         self,
         mock_validate_cppdef_flag,
         mock_subprocess,
@@ -2117,8 +2117,9 @@ class TestProcessingAndExecution:
         stub_romssimulation: ROMSSimulation,
         stageddatacollection_remote_files,
     ):
-        """Test that `build` checks both the `PARALLEL_IO` cppdef against
-        `use_pio` and the `MPI_MASKING` cppdef against `auto_tiling`.
+        """Test that `build` checks the `PARALLEL_IO` cppdef against `use_pio`,
+        the `MPI_MASKING` cppdef against `auto_tiling`, and the `CDR_FORCING`
+        cppdef against the presence of CDR forcing.
         """
         sim = stub_romssimulation
         build_dir = sim.fs_manager.compile_time_code_dir
@@ -2141,15 +2142,19 @@ class TestProcessingAndExecution:
             (Path(tmpdir) / "Work" / "Makefile").touch()
             sim.build()
 
-        assert mock_validate_cppdef_flag.call_count == 2
+        assert mock_validate_cppdef_flag.call_count == 3
         defines = [
             call.kwargs["define"] for call in mock_validate_cppdef_flag.call_args_list
         ]
         enabled = [
             call.kwargs["enabled"] for call in mock_validate_cppdef_flag.call_args_list
         ]
-        assert defines == ["PARALLEL_IO", "MPI_MASKING"]
-        assert enabled == [sim.use_pio, sim.auto_tiling]
+        assert defines == ["PARALLEL_IO", "MPI_MASKING", "CDR_FORCING"]
+        assert enabled == [
+            sim.use_pio,
+            sim.auto_tiling,
+            sim.cdr_forcing is not None,
+        ]
 
     @mock.patch("cstar.roms.simulation.rpath_link_flags", return_value=None)
     @mock.patch("cstar.roms.simulation.verify_roms_linkage")
@@ -4509,6 +4514,54 @@ class TestROMSSimulationUsePIO:
                 sim._validate_cppdef_flag(build_dir, **kwargs)
         else:
             sim._validate_cppdef_flag(build_dir, **kwargs)
+
+    @pytest.mark.parametrize(
+        "has_cdr_forcing, cppdefs_content, should_raise",
+        [
+            # CDR forcing and the define agree
+            (True, "#define CDR_FORCING\n#define MARBL\n", False),
+            # CDR forcing without the define: ROMS would never read it
+            (True, "#define MARBL\n", True),
+            # a commented-out define does not count
+            (True, "! #define CDR_FORCING\n", True),
+            # define present without CDR forcing: one-directional, no error
+            (False, "#define CDR_FORCING\n", False),
+            (False, "#define MARBL\n", False),
+        ],
+    )
+    def test_validate_build_flags_cdr_forcing(
+        self,
+        stub_romssimulation: ROMSSimulation,
+        tmp_path: Path,
+        has_cdr_forcing: bool,
+        cppdefs_content: str,
+        should_raise: bool,
+    ):
+        """Test that `_validate_build_flags` refuses CDR forcing when
+        `CDR_FORCING` is not defined in cppdefs.opt, and checks nothing the
+        other way round.
+        """
+        sim = stub_romssimulation
+        if has_cdr_forcing:
+            assert sim.cdr_forcing is not None
+        else:
+            sim.cdr_forcing = None
+        # keep the other two checks satisfied so only CDR_FORCING can fail
+        sim.use_pio = False
+        sim.auto_tiling = False
+        build_dir = tmp_path / "cppdefs_test"
+        build_dir.mkdir()
+        (build_dir / "cppdefs.opt").write_text(cppdefs_content)
+
+        if should_raise:
+            with pytest.raises(
+                ValueError, match="CDR forcing is given but 'CDR_FORCING'"
+            ) as exc:
+                sim._validate_build_flags(build_dir)
+            assert str(build_dir / "cppdefs.opt") in str(exc.value)
+            assert "cdr.mode" in str(exc.value)
+        else:
+            sim._validate_build_flags(build_dir)
 
     def test_validate_cppdef_flag_skips_if_no_cppdefs(
         self, stub_romssimulation: ROMSSimulation, tmp_path: Path

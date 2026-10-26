@@ -72,7 +72,7 @@ from cstar.orchestration.orchestration import (
     ProcessHandle,
     Status,
 )
-from cstar.orchestration.serialization import deserialize, serialize
+from cstar.orchestration.serialization import deserialize, dump_yaml, serialize
 from cstar.orchestration.state import StateRepository
 from cstar.orchestration.tracking import (
     KEY_RUN_UUID,
@@ -113,6 +113,7 @@ from cstar.roms.outputs import (
     restart_timestamp,
     warn_on_restart_start_date_mismatch,
 )
+from cstar.system.migration import for_writing
 from cstar.tests.unit_tests.orchestration.manifest_runs import write_identity
 
 TRANSFORMS_LOGGER_NAME = "cstar.applications.ucla_roms.transforms"
@@ -305,6 +306,30 @@ def test_override_transform(
     # confirm some other attribute of the step is unchanged
     assert bp_old.initial_conditions.data[0].partitioned
     assert bp_new.initial_conditions.data[0].partitioned
+
+
+def test_serialize_leaves_a_blueprint_without_a_recorded_hash_unchanged(
+    hello_world_bp_path: Path, tmp_path: Path
+) -> None:
+    """Verify serializing a blueprint whose provenance records no hash writes the
+    same YAML as before the write hook existed, with no provenance recorded.
+
+    Parameters
+    ----------
+    hello_world_bp_path : Path
+        Fixture returning the path to a hello-world blueprint file.
+    tmp_path : Path
+        Temporary directory for test outputs.
+    """
+    bp = deserialize(hello_world_bp_path, HelloWorldBlueprint)
+    assert bp.integrity_problem() is None
+    assert bp.stamped_for_write() is bp
+
+    written = tmp_path / "written.yaml"
+    serialize(written, bp)
+
+    assert written.read_text() == dump_yaml(for_writing(bp))
+    assert "provenance" not in written.read_text()
 
 
 def test_override_transform_anchors_relative_locations(

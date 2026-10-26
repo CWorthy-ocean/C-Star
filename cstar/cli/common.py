@@ -633,6 +633,10 @@ def persist_migration(request: MigrationRequest, result: MigrateResult) -> Path:
         if persist_to.expanduser().resolve().parent != source_dir:
             migrated = anchor_locations(migrated, source_dir)
         updated_bp = bp_type(**migrated)
+        # Report a file edited by hand before the write records the hash of the
+        # content it holds: afterwards the edit could no longer be told.
+        if problem := updated_bp.integrity_problem():
+            log.warning(problem)
         if request.in_place:
             backup_path = get_backup_path(request.source)
             backup_path.write_bytes(request.source.read_bytes())

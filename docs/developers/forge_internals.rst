@@ -197,14 +197,15 @@ filenames off it.
   ``content_hash``); and, on ``initial_conditions``/``boundary``, the
   execution-environment knobs ``bypass_validation`` and each bgc source's
   ``serialize_dask`` -- none of these change what the run produces, only how
-  or where it's produced. Recorded on ``to_yaml``; ``verify_content_hash``
+  or where it's produced. Recorded on every write (``to_yaml`` or the generic ``serialize``, via
+  ``stamped_for_write``); ``verify_content_hash``
   warns (doesn't block) on a mismatched hand-edit at load, and skips a hash
   recorded under another scheme (another release's recipe).
 - **``stamp_provenance(tool)``** -- the one place a blueprint's provenance is
   stamped. When the recomputed ``content_hash`` equals the recorded one (never
   true for a hash of another scheme, so the first save after an upgrade stamps
   anew) and a ``generated_by`` is recorded it returns ``self`` (a matching hash alone is not
-  enough: ``to_yaml_str`` records it on every write, stamped or not); otherwise a
+  enough: any write records it, stamped or not); otherwise a
   copy with the new hash, ``generated_at`` now (UTC) and a fresh ``generated_by``
   from ``new_generated_by(tool)`` (the tool, a uuid4 minted once, the system, and
   ``generation_versions()``: the ``cstar-ocean`` and ``roms-tools`` versions),

@@ -59,17 +59,19 @@ imports it lazily.
 
 from __future__ import annotations
 
+import logging
 import math
 import re
 from collections import Counter
 from datetime import UTC, datetime
 from enum import StrEnum
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Literal, get_args
+from typing import TYPE_CHECKING, Any, Literal, Self, get_args
 
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
+from cstar.base.digest import digest_scheme, short_digest
 from cstar.base.provenance import package_version, package_versions, system_name
 from cstar.orchestration.models import (
     Blueprint,
@@ -81,6 +83,8 @@ from cstar.orchestration.models import (
 )
 from cstar.orchestration.serialization import read_blueprint_raw
 from cstar.system.migration import for_writing
+
+logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -1437,7 +1441,8 @@ class ForgeProvenance(Provenance):
     roms_tools_version: str | None = None
     override_files_applied: list[str] = Field(default_factory=list)
     # The scheme-tagged sha256 of the results-affecting data (set on save by
-    # ForgeBlueprint.to_yaml*). Processing recomputes and compares it to detect
+    # any write: ``stamped_for_write``, via ``to_yaml`` or C-Star's generic
+    # ``serialize``/``model_to_yaml``). Processing recomputes and compares it to detect
     # hand-edits since write-out.
     content_hash: str | None = None
     notes: str | None = None
@@ -1732,7 +1737,7 @@ class ForgeBlueprint(Blueprint):
         the recorded ``content_hash`` still matches and a ``generated_by`` is
         recorded (a resave, an unchanged round trip), ``self`` comes back as is and
         keeps its ``generated_by.id`` and ``generated_at``; a matching hash alone is
-        not enough, as :meth:`to_yaml_str` records it on every write, stamped or
+        not enough, as any write records it (see :meth:`stamped_for_write`), stamped or
         not. A hash recorded under another scheme (another release's recipe) never
         matches: it cannot tell whether the content changed, and the wizard carries
         a loaded file's provenance onto every edit, so the first save after an
@@ -1760,6 +1765,47 @@ class ForgeBlueprint(Blueprint):
         )
         return self.model_copy(update={"provenance": stamped})
 
+    def integrity_problem(self) -> str | None:
+        """If the recorded integrity hash no longer matches, return a warning message
+        (the file appears hand-edited since write-out); otherwise None.
+
+        A hash recorded under another scheme (another release's recipe) cannot be
+        compared, so it is not checked; the next save records the current one.
+        """
+        recorded = self.provenance.content_hash
+        if recorded:
+            actual = self.content_hash()
+            if digest_scheme(recorded) != digest_scheme(actual):
+                logger.debug(
+                    "forge_blueprint %r records its content hash under another "
+                    "scheme (%r); not checked",
+                    self.name,
+                    digest_scheme(recorded) or "untagged",
+                )
+            elif recorded != actual:
+                return (
+                    "forge_blueprint integrity check FAILED: the results-affecting "
+                    "data does not match the recorded hash — the file appears to have "
+                    f"been hand-edited since it was written (recorded "
+                    f"{short_digest(recorded)}…, computed {short_digest(actual)}…). "
+                    "Processing will continue with the data as read."
+                )
+        return None
+
+    def stamped_for_write(self) -> Self:
+        """Return this blueprint with ``provenance.content_hash`` recomputed.
+
+        The one place the hash is recorded: it always reflects the content the copy
+        holds (the hash itself excludes provenance, so this doesn't perturb it), for
+        hand-edit detection. Who wrote the file and when is :meth:`stamp_provenance`'s
+        job -- a caller that is producing the file stamps first -- so writing never
+        mints a new identity. ``self`` is never mutated.
+        """
+        provenance = self.provenance.model_copy(
+            update={"content_hash": self.content_hash()}
+        )
+        return self.model_copy(update={"provenance": provenance})
+
     # ---- serialization ----
     def to_yaml(self, path: str | Path) -> Path:
         """Write the authoritative config to ``path`` and return it."""
@@ -1768,18 +1814,10 @@ class ForgeBlueprint(Blueprint):
         return path
 
     def to_yaml_str(self) -> str:
-        # Serializing records only the fingerprint: content_hash always recomputes
-        # (the hash itself excludes provenance, so this doesn't perturb it) so it
-        # reflects current content, for hand-edit detection. Who wrote the file and
-        # when is ``stamp_provenance``'s job -- a caller that is producing the
-        # file stamps first -- so writing never mints a new identity.
-        stamped = for_writing(self).model_copy(
-            update={
-                "provenance": self.provenance.model_copy(
-                    update={"content_hash": self.content_hash()}
-                )
-            }
-        )
+        # Serializing records only the fingerprint (see ``stamped_for_write``); who
+        # wrote the file and when is ``stamp_provenance``'s job, so writing never
+        # mints a new identity.
+        stamped = for_writing(self.stamped_for_write())
         # ``exclude_none=False`` keeps explicit nulls, so a field that is unset by
         # default is dropped by name: a saved file simply has no such line (and an
         # earlier build, which forbids unknown keys, still reads a file that does
