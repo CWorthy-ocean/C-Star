@@ -405,6 +405,9 @@ Bug Fixes
 - With the local launcher, ``cstar run status`` shows a step waiting for its dependencies as Submitted instead of Running. (`#846 <https://github.com/CWorthy-ocean/C-Star/pull/846>`_)
 - ``cstar blueprint submit`` refused over an edited blueprint now tells you to pass ``--clobber``, the flag it takes, instead of ``--clobber <step-name>``, which it rejects. (`#846 <https://github.com/CWorthy-ocean/C-Star/pull/846>`_)
 - Re-entering a run by its run-id alone no longer clears again a step that ``--clobber`` already re-ran in an earlier attempt (it re-ran a finished step, and now would have restarted a running one). (`#846 <https://github.com/CWorthy-ocean/C-Star/pull/846>`_)
+- A ucla_roms run given CDR forcing whose build does not define ``CDR_FORCING`` is refused at build and on resume, instead of staging a file ROMS never reads. (`#849 <https://github.com/CWorthy-ocean/C-Star/pull/849>`_)
+- The wizard's "Upscale a nested run" recipe is marked not yet supported and its controls are disabled, because the rerun it generated ignored the upscaled CDR forcing. (`#849 <https://github.com/CWorthy-ocean/C-Star/pull/849>`_)
+- A forge step with workplan overrides (dates, tiling, a ucla-roms commit) no longer warns that its blueprint "appears to have been hand-edited". (`#849 <https://github.com/CWorthy-ocean/C-Star/pull/849>`_)
 
 
 
@@ -489,6 +492,7 @@ Improvements
 - Deprecation warnings appear once per command, at check or load time, and name the release that removes the old form. (`#833 <https://github.com/CWorthy-ocean/C-Star/pull/833>`_)
 - An error while a blueprint's runner starts, including the login-node refusal, prints a message and exits 1 instead of a traceback. (`#836 <https://github.com/CWorthy-ocean/C-Star/pull/836>`_)
 - Inside a scheduler job, joining ROMS output sizes its pool from the job's cores rather than the whole node. (`#836 <https://github.com/CWorthy-ocean/C-Star/pull/836>`_)
+- A forge blueprint that really was edited by hand is reported once, before workplan overrides or a migration rewrite it, rather than twice. (`#849 <https://github.com/CWorthy-ocean/C-Star/pull/849>`_)
 
 
 
@@ -605,4 +609,5 @@ Miscellaneous
 - The re-entry and run-status documentation describe queued and running steps as they behave now, and the ``--clobber`` help says a queued or running step is cancelled first. (`#846 <https://github.com/CWorthy-ocean/C-Star/pull/846>`_)
 - The generated ``cppdefs.opt`` no longer lists ``EXACT_RESTARTS`` or ``PRINT_HOSTNAME``, which never had any effect; exact restarts stay on in every 3D build, as before. (`#847 <https://github.com/CWorthy-ocean/C-Star/pull/847>`_)
 - Every bundled model spec now pins its Forge templates to the commit that drops them; builds are unchanged for every ucla-roms release the specs pin. (`#847 <https://github.com/CWorthy-ocean/C-Star/pull/847>`_)
+- The wizard pages point to the nesting and upscaling tutorial for building an upscaled rerun by hand. (`#849 <https://github.com/CWorthy-ocean/C-Star/pull/849>`_)
 
