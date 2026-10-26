@@ -146,10 +146,8 @@ Everything happens on the machine you run the command on, whatever the
 application: Forge downloads source data and generates input files there,
 and UCLA-ROMS compiles the model and runs it there. On a cluster, run it
 inside an allocation (an interactive job, or your own batch script that
-calls ``cstar blueprint run``), or submit it as described below. A login
-node is too small for either beyond a toy domain; UCLA-ROMS will not start
-the model there, and stops with a message pointing to ``cstar blueprint
-submit``.
+calls ``cstar blueprint run``), or submit it as described below. UCLA-ROMS
+refuses to launch the model on a login node; see :doc:`../deployments/hpc`.
 
 Two more options matter for UCLA-ROMS runs. ``--pre-run`` performs every
 stage before the model launch, so start-up problems surface without waiting
@@ -161,9 +159,6 @@ workplan step does: ``cstar-step.yaml`` holds what the run did and
 ``cstar-run.yaml`` is a :term:`run manifest` with ``kind: blueprint`` and a
 single step. Read them with ``cstar run show <working directory>``. See
 :doc:`../runs/moving/manifest`.
-
-A blueprint can also be run from Python, for example from a notebook; see
-:doc:`../reference/python`.
 
 Submitting a blueprint
 ----------------------
@@ -194,3 +189,6 @@ second one, as for a workplan (see :doc:`../runs/monitoring`). ``--run-id``
 names the run yourself, and ``--clobber`` empties its working directory
 first. ``--pre-run`` and ``--resume`` are described in
 :doc:`../runs/pre_run_resume`.
+
+A blueprint can also be run from Python, for example from a notebook; see
+:doc:`../reference/python`.

@@ -125,5 +125,5 @@ system, both steps' working directories land under ``CSTAR_DATA_HOME``, which
 resolves to scratch. Run step 3 with ``cstar blueprint submit`` instead of
 ``cstar blueprint run`` so the simulation runs on a compute node, or run both
 steps as a workplan (next page). A submitted run keeps its results in the
-run's directory, which ``cstar run path cson_roms-marbl_v0-1_wio-toy_10procs
-ucla_roms`` prints. See :doc:`../deployments/hpc`.
+run's directory, which ``cstar run path <run-id> ucla_roms`` prints; the run ID
+is the blueprint's name made into a slug. See :doc:`../deployments/hpc`.
