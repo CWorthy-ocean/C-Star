@@ -1239,7 +1239,9 @@ def _blueprint_data(step: "Step") -> t.Any:
     return str(value)
 
 
-def _load_step_blueprint(step: "Step", base_dir: Path) -> "Blueprint | None":
+def _load_step_blueprint(
+    step: "Step", base_dir: Path, source: Path | None = None
+) -> "Blueprint | None":
     """Load the blueprint a step names by file, when it can be loaded now.
 
     Parameters
@@ -1248,6 +1250,8 @@ def _load_step_blueprint(step: "Step", base_dir: Path) -> "Blueprint | None":
         The step whose blueprint to load.
     base_dir : Path
         The directory a relative blueprint path is relative to.
+    source : Path | None
+        A migrated copy of the blueprint, read in place of the file the step names.
 
     Returns
     -------
@@ -1262,6 +1266,9 @@ def _load_step_blueprint(step: "Step", base_dir: Path) -> "Blueprint | None":
     """
     text = str(step.blueprint_path).strip()
     klass = get_application(step.application).blueprint
+
+    if source is not None:
+        return load_blueprint(source, klass)  # type: ignore[no-any-return]
 
     if is_remote_resource(text):
         with local_copy(text) as path:
@@ -1360,11 +1367,7 @@ def describe_steps(
         elif isinstance(step.blueprint_path, InlineBlueprintRef):
             content_hash = ""
         else:
-            if source := sources.get(name):
-                klass = get_application(step.application).blueprint
-                blueprint = load_blueprint(source, klass)
-            else:
-                blueprint = _load_step_blueprint(step, base_dir)
+            blueprint = _load_step_blueprint(step, base_dir, sources.get(name))
             content_hash = blueprint.content_hash() if blueprint else ""
             schema_version = blueprint.schema_version if blueprint else ""
 

@@ -517,7 +517,7 @@ def migrate_steps(path: Path, workplan: Workplan) -> dict[str, Path]:
 
     if migrated:
         listing = ", ".join(f"{name!r} ({src})" for name, src in migrated.items())
-        log.info(f"Running the migrated copies of the blueprints of steps {listing}")
+        log.debug(f"Running the migrated copies of the blueprints of steps {listing}")
     return migrated
 
 
