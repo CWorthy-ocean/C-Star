@@ -35,10 +35,12 @@ from cstar.applications.core import ArtifactKind
 from cstar.base.utils import slugify
 from cstar.orchestration.manifest import product_paths, read_step_record
 from cstar.orchestration.models import InlineBlueprintRef
+from cstar.roms.namelist import roms_version_from_ref
 from cstar.tests.integration_tests.cases import (
     DT,
     MARBL_CDR_FORCING,
     MODEL_REFERENCE_DATE,
+    ROMS_REF,
     RUN_END,
     RUN_START,
 )
@@ -928,10 +930,16 @@ def test_segmented_dic_metrics_match_whole_run(e2e_run: E2ERun) -> None:
     assert_segmented_metrics_match_whole_run(e2e_run, names)
 
 
+RESTART_EXACT_MARBL_AVERAGES_MIN_ROMS = (0, 13, 0)
+"""ucla-roms release whose averaged MARBL output is bit-identical across a restart (PR #400)."""
+_ROMS_VERSION = roms_version_from_ref(ROMS_REF)
+
+
 @pytest.mark.xfail(
+    _ROMS_VERSION is not None and _ROMS_VERSION < RESTART_EXACT_MARBL_AVERAGES_MIN_ROMS,
     strict=True,
     reason=(
-        "observed with ucla-roms 0.10.1 (macOS, ubuntu) and 0.11.0 (ubuntu): the "
+        "ucla-roms < 0.13.0, observed with 0.10.1 (macOS, ubuntu) and 0.11.0 (ubuntu): the "
         "averaged FG_CO2/FG_ALT_CO2 written after a continue-from restart differ from "
         "an uninterrupted run's (up to 2e-6 mmol/m^2/s) while DIC, ALK and hDIC stay "
         "bit-identical and the namelists differ only in inifile and ntimes, so "

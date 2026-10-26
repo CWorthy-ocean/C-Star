@@ -779,12 +779,12 @@ def test_live_v0_12_0_namelist_with_cdr_output_raises():
         ("0.13.0", True),
         ("v0.13.1", True),
         ("main", True),
-        ("3220b701", True),
+        ("3220b701", False),
         (None, True),
     ],
 )
 def test_averages_check_applies_from_0_13_0(roms_ref, applies):
-    """Releases before 0.13.0 do not check; a ref that is not a release tag counts
-    as the latest release.
+    """Releases before 0.13.0 do not check; a branch counts as the latest release,
+    and an unresolved commit hash is left to the callers that resolve it.
     """
     assert averages_end_on_marbl_step_applies_to(roms_ref) is applies

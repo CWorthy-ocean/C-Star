@@ -56,7 +56,12 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any
 
-from cstar.roms.namelist import RomsNamelist, RomsNamelistBase, roms_version_from_ref
+from cstar.roms.namelist import (
+    RomsNamelist,
+    RomsNamelistBase,
+    is_commit_hash,
+    roms_version_from_ref,
+)
 
 AVERAGES_END_ON_MARBL_STEP_MIN_ROMS: tuple[int, int, int] = (0, 13, 0)
 """ucla-roms release from which ROMS checks Rule C at startup (PR #400)."""
@@ -108,11 +113,15 @@ def averages_end_on_marbl_step_applies_to(roms_ref: str | None) -> bool:
     ucla-roms pin ``roms_ref``.
 
     That is a release tag at or above :data:`AVERAGES_END_ON_MARBL_STEP_MIN_ROMS`,
-    or a ref that is not a release tag (a branch, an unresolved commit hash,
-    ``None``), which counts as the latest release, as in Forge's other
-    release-gated checks. A caller that can resolve a commit hash passes the
-    release tag it resolves to.
+    or a branch or ``None``, which counts as the latest release, as in Forge's
+    other release-gated checks. A commit hash is not checked: the rule refuses
+    runs, and a hash from before 0.13.0 must not be refused for one its release
+    accepts. A caller that can resolve the hash (``process_forge_blueprint``,
+    ``configure_build``) passes the release tag it resolves to, as the resolver
+    leaves the hash-dependent ``cdr_nz_chd`` default to them.
     """
+    if is_commit_hash(roms_ref):
+        return False
     version = roms_version_from_ref(roms_ref)
     return version is None or version >= AVERAGES_END_ON_MARBL_STEP_MIN_ROMS
 
@@ -503,6 +512,19 @@ def check_restart_period_divisible_by_dt(
         )
 
 
+def marbl_step(dt: float, marbl_timestep: float) -> float:
+    """The MARBL timestep ucla-roms uses: ``marbl_timestep`` rounded down to a whole
+    multiple of ``dt``, at least one ``dt`` (``marbldrv_configure_tracers``).
+    """
+    return dt * max(1, int(marbl_timestep / dt))
+
+
+def is_whole_multiple(value: float, step: float) -> bool:
+    """Whether ``value`` is a whole multiple of ``step`` (0 included), to round-off."""
+    ratio = value / step
+    return abs(ratio - round(ratio)) <= 1e-9
+
+
 @dataclass(frozen=True)
 class _AverageCheck:
     """One ``check_avg_ends_on_marbl_step`` call in ucla-roms' ``do_precheck``.
@@ -584,8 +606,7 @@ def check_averages_end_on_marbl_step(
     )
     if dt is None or marbl_timestep is None or dt <= 0:
         return
-    # marbldrv_configure_tracers: marbl_timestep_ratio = max(1, int(marbl_timestep / dt))
-    marbl_dt = dt * max(1, int(marbl_timestep / dt))
+    marbl_dt = marbl_step(dt, marbl_timestep)
 
     cppdefs = cppdefs or {}
     for check in _AVERAGE_CHECKS:
@@ -601,8 +622,7 @@ def check_averages_end_on_marbl_step(
         period = _section(section, check.period_field)
         if period is None:
             continue
-        ratio = period / marbl_dt
-        if abs(ratio - round(ratio)) > 1e-9:
+        if not is_whole_multiple(period, marbl_dt):
             minimum = ".".join(
                 str(part) for part in AVERAGES_END_ON_MARBL_STEP_MIN_ROMS
             )

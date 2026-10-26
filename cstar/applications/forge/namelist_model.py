@@ -650,8 +650,9 @@ def check_marbl_step_averages(
     Forge-vocabulary shim over
     :func:`cstar.roms.precheck.check_averages_end_on_marbl_step` (the single
     home for this rule), gated on ``roms_ref`` by
-    :func:`cstar.roms.precheck.averages_end_on_marbl_step_applies_to`: a ref
-    that is not a release tag counts as the latest release. The ``cdr_output``
+    :func:`cstar.roms.precheck.averages_end_on_marbl_step_applies_to`: a branch
+    counts as the latest release, and an unresolved commit hash is not checked
+    (``configure_build`` checks the release it resolves to). The ``cdr_output``
     and ``bgc`` streams are translated through ``settings_cls``'s Cfg classes
     (:func:`canonical_output_sections_for_precheck`); ``dt`` and
     ``marbl_timestep`` already are the real Fortran keys. Raises pydantic's

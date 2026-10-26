@@ -2733,6 +2733,52 @@ def test_resolver_leaves_averages_off_the_marbl_step_to_older_releases():
     assert cfg.model_settings["bgc"]["output_period_avg_dia"] == 60
 
 
+def test_resolver_moves_the_cdr_average_it_turns_on_onto_marbl_steps(caplog):
+    """An active CDR forcing turns ``_cdr`` output on at the OutputSpec's hourly
+    period; with ``_build``'s 7200 s ``dt`` ucla-roms 0.13.0 steps MARBL every
+    7200 s, so the resolver averages over 7200 s, 12 records per file, keeping the
+    daily file length the restart precheck checks.
+    """
+    with caplog.at_level(logging.INFO, logger="cstar.applications.forge.resolve"):
+        cfg = _build(model_path=_MODEL_PATH_ROMS0130, cdr={"mode": "upscaled"})
+    cdr_out = cfg.model_settings["cdr_output"]
+    assert cdr_out["do_cdr_output"] is True
+    assert (cdr_out["output_period"], cdr_out["nrpf"]) == (7200, 12)
+    assert "Writing the _cdr averages every 7200 s (12 per file)" in caplog.text
+
+
+def test_resolver_keeps_the_cdr_average_before_0_13_0():
+    cfg = _build(model_path=_MODEL_PATH_ROMS0120, cdr={"mode": "upscaled"})
+    cdr_out = cfg.model_settings["cdr_output"]
+    assert (cdr_out["output_period"], cdr_out["nrpf"]) == (3600, 24)
+
+
+@pytest.mark.parametrize(
+    "cdr_output",
+    [
+        {"output_period": 3600},
+        {"nrpf": 24},
+        {"do_cdr_output": True},
+    ],
+)
+def test_resolver_checks_a_cdr_average_the_caller_set(cdr_output):
+    """A ``_cdr`` stream or period the caller chose is checked as given."""
+    with pytest.raises(NamelistConsistencyError, match="output_period_cdr"):
+        _build(
+            model_path=_MODEL_PATH_ROMS0130,
+            cdr={"mode": "upscaled"},
+            run_time_overrides={"cdr_output": cdr_output},
+        )
+
+
+def test_resolver_refuses_a_cdr_average_no_marbl_step_fits():
+    """With ``dt`` 480 s MARBL steps every 3360 s, and no multiple of that divides
+    the daily file length, so nothing is moved and the precheck refuses.
+    """
+    with pytest.raises(NamelistConsistencyError, match="3360"):
+        _build(model_path=_MODEL_PATH_ROMS0130, dt=480, cdr={"mode": "upscaled"})
+
+
 def test_resolver_0_11_model_spec_carries_the_constant_fe_keys():
     cfg = _build(model_path=_MODEL_PATH_ROMS0110)
     assert cfg.code.roms.commit == "0.11.0"
