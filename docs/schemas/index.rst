@@ -9,6 +9,8 @@ Schemas for the built-in `Workplan` are listed here.
 - :download:`Workplan Schema v1.0.0 <https://raw.githubusercontent.com/CWorthy-ocean/C-Star/refs/heads/main/docs/schemas/wp/workplan_schema.1.0.0.json>`
 - :download:`Workplan Schema v1.1.0 <https://raw.githubusercontent.com/CWorthy-ocean/C-Star/refs/heads/main/docs/schemas/wp/workplan_schema.1.1.0.json>`:
   adds the run a ``runs`` alias resolved to when the workplan was scheduled (``id``, ``path``).
+- :download:`Workplan Schema v1.2.0 <https://raw.githubusercontent.com/CWorthy-ocean/C-Star/refs/heads/main/docs/schemas/wp/workplan_schema.1.2.0.json>`:
+  adds the version of the schema the workplan was written with (``schema_version``); a workplan without one reads as 1.0.0.
 
 Runs
 ----
@@ -35,7 +37,7 @@ Schemas for the files a run leaves behind are listed here. See
 - :download:`Step Record Schema v1.3.0 <https://raw.githubusercontent.com/CWorthy-ocean/C-Star/refs/heads/main/docs/schemas/run/step_record_schema.1.3.0.json>`:
   adds the content digest of each product (``digest``).
 - :download:`Run Manifest Schema v1.5.0 <https://raw.githubusercontent.com/CWorthy-ocean/C-Star/refs/heads/main/docs/schemas/run/run_manifest_schema.1.5.0.json>`:
-  adds no fields: each step's ``definition_hash`` is computed under current application names, so the hashes an older manifest recorded are not compared when its run is re-entered.
+  adds the schema version of the blueprint each step's definition was hashed from (``blueprint_schema_version``), and tags each step's ``definition_hash`` with the recipe that computed it (``def-v2:<hex>``: current application names, fields at their defaults left out). A hash with another tag or none, such as every hash an older manifest recorded, is not compared when its run is re-entered, nor is one whose blueprint has since moved to another schema major.
 
 Blueprints
 ----------
@@ -43,7 +45,8 @@ Blueprints
 Schemas for the built-in blueprints are listed here. Each blueprint's
 ``schema_version`` is semver read from an older file's point of view: a newer
 major means older files need migration (automatic where the application provides
-an adapter), while an older minor or patch loads unchanged. See
+an adapter), while an older minor or patch loads unchanged, and so does a newer
+minor or patch that sets no field the installed C-Star does not know. See
 :ref:`versioning_blueprint_schema`.
 
 UCLA-ROMS Blueprint
@@ -101,6 +104,6 @@ UCLA-ROMS runs with MARBL.
 Forge Blueprint
 ~~~~~~~~~~~~~~~
 
-The `forge` blueprint (see :doc:`../forge/index`) configures the domain-generation
+The `forge` blueprint (see :doc:`../applications/forge/index`) configures the domain-generation
 application that produces UCLA-ROMS blueprints; its JSON schema is not yet published
 here.

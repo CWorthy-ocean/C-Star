@@ -94,6 +94,12 @@ COMBINED_SERIES = (
     "closure_residual",
 )
 """The ``cdr_metrics.nc`` series that combine the child and ``parent_up``."""
+CDR_DOMAINS = ("child", "parent_up")
+"""The ``cdr_metrics`` step's domains, release first, as the workplan names them."""
+UPTAKE_SERIES = ("carbon_uptake_from_flux", "carbon_uptake_from_DIC_difference")
+"""The uptake series ``cdr_metrics.nc`` holds per domain (``<domain>_<series>``) and combined (``cdr_<series>``)."""
+FOOTPRINT_SERIES = "parent_up_DIC_difference_inside_child"
+"""The DIC perturbation ``parent_up`` carries inside the child, which the combined uptake would count twice."""
 MAX_CLOSURE_FRACTION = 1e-3
 """The largest share of the final flux-based uptake the closure residual may be.
 
@@ -398,11 +404,9 @@ def test_all_steps_done(nesting_run: NestingRun) -> None:
 
 
 def test_workplan_status_names_all_steps(nesting_run: NestingRun) -> None:
-    """``cstar workplan status`` succeeds and shows every step as done."""
+    """``cstar run status`` succeeds and shows every step as done."""
     # a wide terminal keeps rich from truncating step names
-    proc = run_cstar(
-        {**nesting_run.env, "COLUMNS": "200"}, "workplan", "status", RUN_ID
-    )
+    proc = run_cstar({**nesting_run.env, "COLUMNS": "200"}, "run", "status", RUN_ID)
     assert proc.returncode == 0, proc.stderr
     for step in STEPS:
         assert step in proc.stdout
@@ -599,6 +603,39 @@ def test_cdr_metrics_close_at_the_final_record(nesting_run: NestingRun) -> None:
     )
     assert uptake > 0, final
     assert abs(final["closure_residual"]) / uptake < bound, final
+
+
+def test_cdr_metrics_keep_each_domains_series(nesting_run: NestingRun) -> None:
+    """``cdr_metrics.nc`` holds each domain's uptake and the parent's DIC inside the child, finite at the last time.
+
+    These come from roms-tools' ``UpscaledCDR``, so they show the step combined the
+    two domains rather than analysing one of them.
+    """
+    (path,) = nesting_run.outputs("cdr_metrics", METRICS_FILENAME)
+    names = [f"{domain}_{series}" for domain in CDR_DOMAINS for series in UPTAKE_SERIES]
+    final = final_record(path, [*names, FOOTPRINT_SERIES])
+    assert all(np.isfinite(value) for value in final.values()), final
+    assert final["child_carbon_uptake_from_flux"] > 0, final
+
+
+@pytest.mark.parametrize("series", UPTAKE_SERIES)
+def test_cdr_metrics_combined_uptake_is_the_domain_sum(
+    nesting_run: NestingRun, series: str
+) -> None:
+    """At every record, the combined uptake is the child's plus ``parent_up``'s.
+
+    ``parent_up`` is a transfer domain: its uptake adds to the total, while its source
+    stays out of the efficiency's denominator. Both domains run from the child's start
+    to its end, so every record is complete and finite.
+    """
+    import xarray as xr
+
+    (path,) = nesting_run.outputs("cdr_metrics", METRICS_FILENAME)
+    with xr.open_dataset(path) as ds:
+        combined = ds[f"cdr_{series}"].values
+        parts = [ds[f"{domain}_{series}"].values for domain in CDR_DOMAINS]
+    assert np.isfinite(combined).all(), combined
+    np.testing.assert_allclose(combined, sum(parts), rtol=1e-12)
 
 
 @pytest.mark.parametrize("step", ROMS_STEPS)

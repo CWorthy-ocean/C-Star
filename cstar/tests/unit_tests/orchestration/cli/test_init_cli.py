@@ -191,7 +191,7 @@ def test_yes_on_a_laptop_writes_a_file_of_commented_examples(
     assert path.is_file()
     assert read_user_config(path) == {}
     text = path.read_text()
-    assert "# CSTAR_NPROCS_POST=" in text
+    assert "# CSTAR_DEBUG_BUILD_MODE=" in text
     assert "# CSTAR_DATA_HOME=" in text
     for name in NEVER_WRITTEN:
         assert name not in text
@@ -748,15 +748,94 @@ def test_init_is_reserved_against_plugins() -> None:
     assert "init" in [c.name for c in app.registered_commands]
 
 
-def test_invalid_config_file_exits_without_writing(
-    run_init: Callable[..., Result], isolate_user_config: Path
+def test_rewrite_keeps_lines_it_does_not_apply(
+    run_init: Callable[..., Result],
+    isolate_user_config: Path,
+    laptop_data_home: None,
 ) -> None:
-    """The root callback refuses a file naming an unknown setting; it is left alone."""
+    """A rewrite keeps every line this version will not apply, under its reason:
+    a removed setting and a name from a newer version stay active, for the
+    version that reads them; the rest, which no version reads from the file,
+    are commented out.
+    """
     path = isolate_user_config
-    text = "CSTAR_NOT_A_SETTING=1\n"
-    path.write_text(text)
+    path.write_text(
+        f"{ENV_CSTAR_LOG_LEVEL}=DEBUG\n"
+        "CSTAR_ORCH_TRX_FREQ=1D\n"
+        "CSTAR_FROM_A_NEWER_VERSION='a b'\n"
+        f"{ENV_FF_DEVELOPER_MODE}=1\n"
+        f"{ENV_CSTAR_RUNID}=abc\n"
+        "SLURM_ACCOUNT=m1234\n"
+        f"{ENV_CSTAR_SLURM_ACCOUNT}\n"
+    )
 
     result = run_init("--yes")
 
-    assert result.exit_code == 2
-    assert path.read_text() == text
+    assert result.exit_code == 0, result.output
+    text = path.read_text()
+    lines = text.splitlines()
+    assert "CSTAR_ORCH_TRX_FREQ=1D" in lines
+    assert REMOVED_SETTINGS["CSTAR_ORCH_TRX_FREQ"].guidance.split()[0] in text
+    assert 'CSTAR_FROM_A_NEWER_VERSION="a b"' in lines
+    assert "# CSTAR_FROM_A_NEWER_VERSION is not a setting C-Star" in text
+    assert f"# {ENV_FF_DEVELOPER_MODE}=1" in lines
+    assert f"# {ENV_CSTAR_RUNID}=abc" in lines
+    assert "# SLURM_ACCOUNT=m1234" in lines
+    assert f"# {ENV_CSTAR_SLURM_ACCOUNT}" in lines
+    assert read_user_config(path) == {ENV_CSTAR_LOG_LEVEL: "DEBUG"}
+
+
+def test_rerun_keeps_lines_for_another_version_identically(
+    run_init: Callable[..., Result],
+    isolate_user_config: Path,
+    laptop_data_home: None,
+) -> None:
+    """A second rewrite of a file holding lines for another version leaves it
+    byte for byte the same.
+    """
+    path = isolate_user_config
+    path.write_text("CSTAR_ORCH_TRX_FREQ=1D\nCSTAR_FROM_A_NEWER_VERSION=1\n")
+    assert run_init("--yes").exit_code == 0
+    before = path.read_text()
+
+    result = run_init("--yes")
+
+    assert result.exit_code == 0, result.output
+    assert path.read_text() == before
+
+
+def test_answered_setting_replaces_its_line_without_a_value(
+    run_init: Callable[..., Result],
+    isolate_user_config: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A setting named without ``=`` that the walkthrough then sets is written
+    once, with its value, and not kept as an unapplied line as well.
+    """
+    path = isolate_user_config
+    path.write_text(f"{ENV_CSTAR_DATA_HOME}\n")
+    monkeypatch.setenv(ENV_CSTAR_DATA_HOME, "/data/runs")
+
+    result = run_init("--yes")
+
+    assert result.exit_code == 0, result.output
+    assert read_user_config(path) == {ENV_CSTAR_DATA_HOME: "/data/runs"}
+    assert f"# {ENV_CSTAR_DATA_HOME}\n" not in path.read_text()
+
+
+def test_unreadable_file_stops_before_any_question(
+    run_init: Callable[..., Result], isolate_user_config: Path
+) -> None:
+    """A file that cannot be read stops the walkthrough before it asks anything,
+    and is not rewritten: that would lose what it holds.
+    """
+    path = isolate_user_config
+    content = b"\xff\xfeCSTAR_LOG_LEVEL=DEBUG\n"
+    path.write_bytes(content)
+
+    result = run_init()
+
+    assert result.exit_code == 1
+    assert "cannot read" in result.stderr
+    assert "Use C-Star's default locations?" not in result.output
+    assert path.read_bytes() == content

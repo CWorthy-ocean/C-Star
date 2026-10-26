@@ -229,7 +229,7 @@ def _source_files(source: Path) -> Sequence[CdrOutputFile]:
     CstarError
         If the record cannot be read, or a `_cdr` file it lists is missing.
     CstarSchemaTooNewError
-        If the record's schema is newer than this build reads.
+        If the record's schema is newer than this build reads (see `VersionedDocument`).
     FileNotFoundError
         If a searched source holds no `_cdr` output.
     ValueError

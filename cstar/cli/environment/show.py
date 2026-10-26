@@ -7,7 +7,7 @@ import typer
 from rich import print
 from rich.markup import escape
 
-from cstar.base.env import NOT_SET, env_var_groups, load_user_config
+from cstar.base.env import NOT_SET, env_var_groups, load_user_config_for_repair
 
 if t.TYPE_CHECKING:
     from cstar.base.env import EnvItem, UserConfig
@@ -175,7 +175,7 @@ def show(
         _export(group_map)
         return
 
-    _interactive(group_map, load_user_config())
+    _interactive(group_map, load_user_config_for_repair())
 
 
 if __name__ == "__main__":

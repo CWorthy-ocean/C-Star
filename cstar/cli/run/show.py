@@ -40,7 +40,7 @@ from cstar.orchestration.manifest import (
     read_run_manifest,
 )
 from cstar.orchestration.orchestration import LiveWorkplan
-from cstar.orchestration.serialization import model_to_yaml
+from cstar.orchestration.serialization import dump_yaml
 from cstar.orchestration.tracking import WorkplanRun
 
 log = get_logger(__name__)
@@ -320,7 +320,7 @@ def _read_manifest(resolved: ShowTarget) -> RunManifest:
         With code 1 when the manifest is missing, corrupt or too new.
     """
     try:
-        manifest = read_run_manifest(resolved.root)
+        manifest = read_run_manifest(resolved.root, tolerant=True)
     except CstarError as ex:
         typer.echo(str(ex), err=True)
         raise typer.Exit(1) from ex
@@ -366,11 +366,15 @@ def show(
     if resolved.run_id is None:
         # a copied run's manifest may never have been refreshed: fold what its
         # steps recorded, in memory only
-        fold_step_records(manifest, root)
+        fold_step_records(manifest, root, tolerant=True)
     elif not no_refresh:
         run = get_from_ctxmap(context, KEY_RUN, WorkplanRun)
         workplan_path = run.try_trx_workplan_path()
-        workplan = LiveWorkplan.try_load(workplan_path) if workplan_path else None
+        workplan = (
+            LiveWorkplan.try_load(workplan_path, tolerant=True)
+            if workplan_path
+            else None
+        )
         if workplan is None:
             where = str(workplan_path) if workplan_path else f"of run {run.run_id!r}"
             typer.echo(
@@ -384,7 +388,7 @@ def show(
             manifest = refresh_run_manifest(root, resolved.run_id, status) or manifest
 
     if format == "yaml":
-        typer.echo(model_to_yaml(manifest))
+        typer.echo(dump_yaml(manifest))
     elif format == "json":
         typer.echo(manifest.model_dump_json(indent=2))
     else:

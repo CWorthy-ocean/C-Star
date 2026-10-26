@@ -2,7 +2,7 @@ import json
 import pathlib
 import typing as t
 import uuid
-from collections.abc import Callable, Generator
+from collections.abc import Callable, Generator, Sequence
 from pathlib import Path
 
 import pytest
@@ -33,6 +33,23 @@ from cstar.orchestration.orchestration import (
     read_workplan,
 )
 from cstar.orchestration.serialization import deserialize, model_to_yaml, serialize
+from cstar.system.migration import (
+    TOLERATE_UNKNOWN,
+    CstarSchemaTooNewError,
+    for_writing,
+)
+
+CURRENT_WORKPLAN = Workplan.model_fields["schema_version"].default
+"""The schema version this build writes in a workplan."""
+
+
+def _unwritable(model: object) -> bool:
+    """Whether a writer refuses the model: it holds keys a newer file set."""
+    try:
+        for_writing(model)
+    except CstarSchemaTooNewError:
+        return True
+    return False
 
 
 def test_step_defaults(fake_blueprint_path: Path) -> None:
@@ -678,6 +695,224 @@ def test_workplan_defaults(
     assert "foo" not in plan.compute_environment  # ensure non-null
     assert not plan.runtime_vars
     assert "foo" not in plan.compute_environment  # ensure non-null
+
+
+@pytest.mark.parametrize(
+    ("version", "expected"),
+    [
+        (None, "1.2.0"),
+        ("1.0.0", "1.0.0"),
+        ("1.1.0", "1.1.0"),
+        ("1.2.0", "1.2.0"),
+    ],
+)
+def test_workplan_reads_its_version_and_older_ones(
+    gen_fake_steps: Callable[[int], Generator[Step, None, None]],
+    version: str | None,
+    expected: str,
+) -> None:
+    """Verify a workplan without a `schema_version` (written before workplans
+    were versioned) and one of an older version load unchanged, and that each
+    is written at the version this build writes, as a new workplan is.
+    """
+    data: dict[str, t.Any] = {
+        "name": "plan",
+        "description": "d",
+        "steps": list(gen_fake_steps(1)),
+    }
+    if version is not None:
+        data["schema_version"] = version
+
+    plan = Workplan.model_validate(data)
+
+    assert plan.schema_version == expected
+    assert f"schema_version: {CURRENT_WORKPLAN}" in model_to_yaml(plan)
+
+
+def _workplan_data(
+    steps: Sequence[Step], version: str, **extra: t.Any
+) -> dict[str, t.Any]:
+    """Describe a workplan document of `version` as a reader would see it."""
+    return {
+        "schema_version": version,
+        "name": "plan",
+        "description": "d",
+        "steps": [step.model_dump(by_alias=True) for step in steps],
+        **extra,
+    }
+
+
+@pytest.mark.parametrize("klass", [Workplan, LiveWorkplan])
+@pytest.mark.parametrize("version", ["1.2.1", "1.3.0", "1.12.0"])
+def test_workplan_reads_a_newer_version_without_new_keys(
+    gen_fake_steps: Callable[[int], Generator[Step, None, None]],
+    klass: type[Workplan],
+    version: str,
+) -> None:
+    """Verify a workplan a newer minor or patch release wrote loads when it holds
+    nothing this build does not know, keeps its version, and is written at it.
+    """
+    data = _workplan_data(list(gen_fake_steps(1)), version)
+
+    plan = klass.model_validate(data)
+
+    assert plan.schema_version == version
+    assert plan.unknown_keys == ()
+    assert not _unwritable(plan)
+    assert f"schema_version: {version}" in model_to_yaml(plan)
+
+
+@pytest.mark.filterwarnings("error::UserWarning")
+def test_a_newer_workplan_and_blueprint_rebuild_through_their_constructors(
+    gen_fake_steps: Callable[[int], Generator[Step, None, None]],
+) -> None:
+    """Verify a newer-minor document that loaded can be rebuilt with `Cls(**dump)`,
+    as the transformer and the override transform do: under `__init__`, the
+    validator must return the instance pydantic builds.
+    """
+    plan = Workplan.model_validate(_workplan_data(list(gen_fake_steps(1)), "1.3.0"))
+    current = HelloWorldBlueprint.model_fields["schema_version"].default
+    major, minor, _ = current.split(".")
+    blueprint = HelloWorldBlueprint.model_validate(
+        {
+            "name": "b",
+            "description": "d",
+            "target": "t",
+            "schema_version": f"{major}.{int(minor) + 1}.0",
+        }
+    )
+
+    rebuilt_plan = Workplan(**plan.model_dump(by_alias=True))
+    rebuilt_blueprint = HelloWorldBlueprint(**blueprint.model_dump(exclude={"$schema"}))
+
+    assert rebuilt_plan == plan
+    assert rebuilt_blueprint == blueprint
+
+
+@pytest.mark.parametrize("klass", [Workplan, LiveWorkplan])
+@pytest.mark.parametrize("version", ["1.2.1", "1.3.0"])
+def test_workplan_refuses_a_newer_version_with_a_new_key(
+    gen_fake_steps: Callable[[int], Generator[Step, None, None]],
+    klass: type[Workplan],
+    version: str,
+) -> None:
+    """Verify a workplan a newer release wrote with a key this build does not
+    know is refused with the upgrade message naming the key, so the key does not
+    surface as a raw validation error or drop silently.
+    """
+    data = _workplan_data(list(gen_fake_steps(1)), version, a_key_from_the_future=True)
+
+    with pytest.raises(CstarSchemaTooNewError, match="Upgrade cstar-ocean") as caught:
+        klass.model_validate(data)
+
+    assert caught.value.found == version
+    assert caught.value.target == CURRENT_WORKPLAN
+    assert caught.value.unknown == ("a_key_from_the_future",)
+    assert "workplan schema" in str(caught.value)
+    assert "sets a_key_from_the_future" in str(caught.value)
+
+
+def test_workplan_refuses_a_newer_version_with_a_new_step_key(
+    gen_fake_steps: Callable[[int], Generator[Step, None, None]],
+) -> None:
+    """Verify the refusal reaches the steps: a key this build does not know in a
+    step is named by its location.
+    """
+    data = _workplan_data(list(gen_fake_steps(1)), "1.3.0")
+    data["steps"][0]["a_step_key_from_the_future"] = 1
+
+    with pytest.raises(CstarSchemaTooNewError) as caught:
+        Workplan.model_validate(data)
+
+    assert caught.value.unknown == ("steps.0.a_step_key_from_the_future",)
+
+
+@pytest.mark.parametrize("klass", [Workplan, LiveWorkplan])
+@pytest.mark.parametrize("extra", [{}, {"a_key_from_the_future": True}])
+def test_workplan_refuses_a_newer_major_version(
+    gen_fake_steps: Callable[[int], Generator[Step, None, None]],
+    klass: type[Workplan],
+    extra: dict[str, t.Any],
+) -> None:
+    """Verify a workplan of a newer major is refused with the upgrade message,
+    whether or not it holds anything this build does not know.
+    """
+    data = _workplan_data(list(gen_fake_steps(1)), "2.0.0", **extra)
+
+    with pytest.raises(CstarSchemaTooNewError, match="Upgrade cstar-ocean") as caught:
+        klass.model_validate(data)
+
+    assert caught.value.found == "2.0.0"
+    assert caught.value.target == CURRENT_WORKPLAN
+    assert caught.value.unknown == ()
+
+
+@pytest.mark.parametrize("klass", [Workplan, LiveWorkplan])
+def test_workplan_tolerates_unknown_keys_when_asked(
+    gen_fake_steps: Callable[[int], Generator[Step, None, None]],
+    klass: type[Workplan],
+) -> None:
+    """Verify a tolerant reader loads a newer workplan whose only problems are
+    unknown keys, names them, and that the workplan then refuses to be written.
+    """
+    data = _workplan_data(list(gen_fake_steps(1)), "1.3.0", a_key_from_the_future=True)
+
+    plan = klass.model_validate(data, context={TOLERATE_UNKNOWN: True})
+
+    assert plan.schema_version == "1.3.0"
+    assert plan.unknown_keys == ("a_key_from_the_future",)
+    assert _unwritable(plan)
+    with pytest.raises(CstarSchemaTooNewError, match="to write this file"):
+        model_to_yaml(plan)
+
+
+def test_workplan_tolerance_does_not_cover_other_problems(
+    gen_fake_steps: Callable[[int], Generator[Step, None, None]],
+) -> None:
+    """Verify a tolerant reader still refuses a newer workplan that is invalid
+    for a reason besides unknown keys.
+    """
+    data = _workplan_data(list(gen_fake_steps(1)), "1.3.0", a_key_from_the_future=True)
+    del data["name"]
+
+    with pytest.raises(CstarSchemaTooNewError, match="name"):
+        Workplan.model_validate(data, context={TOLERATE_UNKNOWN: True})
+
+
+def test_workplan_rejects_a_malformed_version(
+    gen_fake_steps: Callable[[int], Generator[Step, None, None]],
+) -> None:
+    """Verify a `schema_version` that is not dotted integers is a validation error."""
+    data = {
+        "schema_version": "latest",
+        "name": "plan",
+        "description": "d",
+        "steps": list(gen_fake_steps(1)),
+    }
+
+    with pytest.raises(ValidationError, match="expected dotted integers"):
+        Workplan.model_validate(data)
+
+
+def test_workplan_templates_carry_the_current_version(wp_templates_dir: Path) -> None:
+    """Verify each bundled workplan template states the current version and
+    points editors at that version's published schema.
+    """
+    current = Workplan.model_fields["schema_version"].default
+    templates = sorted(wp_templates_dir.glob("*.yaml"))
+    assert templates
+
+    for path in templates:
+        header = path.read_text().splitlines()[0]
+        assert header.endswith(f"/docs/schemas/wp/workplan_schema.{current}.json")
+        assert yaml.safe_load(path.read_text())["schema_version"] == current
+        assert (
+            Path(__file__).parents[4]
+            / "docs"
+            / "schemas"
+            / "wp"
+            / header.rsplit("/", 1)[1]
+        ).exists()
 
 
 @pytest.mark.parametrize(

@@ -8,8 +8,8 @@ ARG_CLOBBER_HELP: t.Final[str] = (
 )
 ARG_CLOBBER_WORKPLAN_HELP: t.Final[str] = (
     "Name of a step whose prior state should be cleared and re-executed on "
-    "rerun, or 'all' to clobber every step. Repeatable. Accepts the step "
-    "name or its slugified form."
+    "rerun, or 'all' to clobber every step. A step still queued or running is "
+    "cancelled first. Repeatable. Accepts the step name or its slugified form."
 )
 ARG_RUN_ID: t.Final[str] = "--run-id"
 """Option naming an execution of a workplan."""
@@ -54,6 +54,19 @@ ARG_PRE_RUN_WORKPLAN_HELP: t.Final[str] = (
     "inputs are produced by another step, are skipped and reported. Re-run the "
     "workplan without this flag (same run-id) to attach to the prepared "
     "directories and launch."
+)
+ARG_RESUME_BLUEPRINT_SUBMIT_HELP: t.Final[str] = (
+    "Re-enter the prior run of this blueprint (see --run-id) and resume its failed "
+    "step in place. An application that supports resume continues from its last "
+    "usable restart; any other is re-run from scratch with a warning. Cannot be "
+    "combined with --clobber or --pre-run."
+)
+ARG_PRE_RUN_BLUEPRINT_SUBMIT_HELP: t.Final[str] = (
+    "Perform every stage before the model launch -- stage inputs, clone and "
+    "compile, generate and validate the namelist -- without launching the model. "
+    "The step runs locally even on scheduler systems, so this is suitable for a "
+    "login node. Submit the blueprint again without this flag (same run-id) to "
+    "attach to the prepared directory and launch."
 )
 
 ARG_DRY_RUN: t.Final[str] = "--dry-run"

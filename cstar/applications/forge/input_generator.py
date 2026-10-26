@@ -10,7 +10,6 @@ from __future__ import annotations
 
 import contextlib
 import logging
-import os
 import re
 import warnings
 from dataclasses import dataclass, field
@@ -42,7 +41,7 @@ from cstar.applications.forge.namelist_model import (
 from cstar.applications.forge.source_registry import ROMS_TOOLS_SOURCE_NAME
 from cstar.applications.forge.user_files import stage_user_netcdf, verify_user_file
 from cstar.applications.forge.util import mem_log
-from cstar.base.utils import convert_to_cdf5
+from cstar.base.utils import convert_to_cdf5, cpus_available
 from cstar.orchestration.models import Resource
 from cstar.roms.input_dataset import (
     CARBONATE_SENSITIVITY_REMEDY,
@@ -78,7 +77,7 @@ def _numba_num_threads(n: int):
     # numba.set_num_threads raises ValueError for n > numba.config.NUMBA_NUM_THREADS
     # (the launch-time ceiling -- the whole node's core count, or a smaller value
     # if the NUMBA_NUM_THREADS env var pinned it) -- clamp rather than let a
-    # generous `inner_threads` computed from os.sched_getaffinity crash generation.
+    # generous `inner_threads` computed from `cpus_available` crash generation.
     prev = numba.get_num_threads()
     numba.set_num_threads(min(n, numba.config.NUMBA_NUM_THREADS))
     try:
@@ -927,20 +926,10 @@ class RomsInputGenerator(InputGenerator):
         # is exactly the case that pin was first written for. Only meaningful when
         # dask is actually driving the computation; the eager (use_dask=False) path
         # has nothing to oversubscribe.
-        # sched_getaffinity respects cgroup/cpuset/taskset restrictions (Slurm
+        # cpus_available respects cgroup/cpuset/taskset restrictions (Slurm
         # allocations, containers); os.cpu_count() reports the whole node and
         # would oversubscribe a restricted allocation.
-        # getattr, not a direct os.sched_getaffinity reference: typeshed only
-        # declares that attribute on Linux, so a direct call fails mypy's
-        # attr-defined check on other platforms even inside this try/except.
-        sched_getaffinity = getattr(os, "sched_getaffinity", None)
-        if sched_getaffinity is not None:
-            try:
-                cpu_count = len(sched_getaffinity(0))
-            except OSError:  # non-Linux fallback
-                cpu_count = os.cpu_count() or 1
-        else:
-            cpu_count = os.cpu_count() or 1
+        cpu_count = cpus_available()
         # Guard against a non-positive dask_num_workers (misconfiguration, or an
         # explicit 0/negative override) -- it would otherwise divide by zero (0)
         # or produce a negative inner_threads (negative), either of which crashes

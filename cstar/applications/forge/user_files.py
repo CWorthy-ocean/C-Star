@@ -42,7 +42,12 @@ import warnings
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from cstar.base.digest import HASH_SCHEME, hash_netcdf_contents, short_digest
+from cstar.base.digest import (
+    HASH_SCHEME,
+    digest_scheme,
+    hash_netcdf_contents,
+    short_digest,
+)
 from cstar.base.utils import convert_to_cdf5, netcdf_format
 
 if TYPE_CHECKING:
@@ -78,7 +83,7 @@ def verify_user_file(f: UserProvidedFile, label: str) -> Path:
             "present at this exact path on the machine running the executor."
         )
 
-    scheme, _, _ = f.content_hash.partition(":")
+    scheme = digest_scheme(f.content_hash)
     if scheme != HASH_SCHEME:
         recorded_with = (
             f"hash scheme {scheme!r}"

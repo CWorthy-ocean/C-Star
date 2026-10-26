@@ -945,9 +945,7 @@ def test_segmented_flux_metrics_match_whole_run(e2e_run: E2ERun) -> None:
 def test_workplan_status_names_all_steps(e2e_run: E2ERun) -> None:
     """``cstar workplan status`` succeeds and shows every step as done."""
     # a wide terminal keeps rich from truncating step names
-    proc = run_cstar(
-        {**e2e_run.env, "COLUMNS": "200"}, "workplan", "status", e2e_run.run_id
-    )
+    proc = run_cstar({**e2e_run.env, "COLUMNS": "200"}, "run", "status", e2e_run.run_id)
     assert proc.returncode == 0, proc.stderr
     for step in STEPS:
         assert step in proc.stdout

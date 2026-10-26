@@ -454,6 +454,15 @@ class TestCppdefsTemplate:
         )
         return (output_dir / "cppdefs.opt").read_text()
 
+    def test_no_op_keys_are_not_rendered(self, tmp_path):
+        """No ucla-roms release since 0.2.0 reads EXACT_RESTARTS or PRINT_HOSTNAME
+        (exact restarts are EXACT_RESTART, set under SOLVE3D), so the template
+        doesn't present them as switches.
+        """
+        text = self._render(tmp_path, {})
+        assert "EXACT_RESTARTS" not in text
+        assert "PRINT_HOSTNAME" not in text
+
     def test_use_pio_true_defines_parallel_io(self, tmp_path):
         text = self._render(tmp_path, {"use_pio": True})
         assert "#define PARALLEL_IO" in text

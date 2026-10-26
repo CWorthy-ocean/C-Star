@@ -22,7 +22,9 @@ APPLICATION_ALIASES: t.Final[Mapping[str, str]] = MappingProxyType(
 )
 """Earlier names of applications, mapped to the current name.
 
-Documents written under an alias keep loading.
+Documents written under an alias keep loading. Renaming an application changes
+the step definition hashes runs record, so it bumps
+`cstar.base.provenance.HASH_RECIPE_VERSION`.
 """
 
 

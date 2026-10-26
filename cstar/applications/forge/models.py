@@ -1,7 +1,8 @@
 """
 Pydantic models for the ModelSpec catalog format.
 
-A ModelSpec is a single YAML (``model.yaml``) with two top-level sections:
+A ModelSpec is a single YAML file (``ModelSpec/<name>.yaml`` in a catalog) with
+two top-level sections:
 ``code`` (roms/marbl/pio source pins + template refs) and ``model_settings``
 (flat, mirrors ``ForgeBlueprint.model_settings`` 1:1). It intentionally holds
 nothing a Domain/Forcing/Output spec already provides -- no grid/initial-
@@ -83,7 +84,7 @@ class ModelTemplates(BaseModel):
     files: list[str] = Field(default_factory=list)
     # sha256 hex digest of each of ``files``, *as they exist at the ModelSpec's own
     # ``templates_commit`` pin* -- authored by hand (not computed from the bundled
-    # copy, which may be a newer commit -- see roms-marbl-0.8-default/model.yaml for
+    # copy, which may be a newer commit -- see ModelSpec/roms-marbl-0.8-default.yaml for
     # the regeneration recipe), keyed by filename. ``resolve.py``'s ``_build_code``
     # copies this straight into ``TemplateRepo.file_hashes``: the executor's local
     # fast path only fires when the bundled copy matches these hashes exactly, so a
@@ -120,7 +121,7 @@ class ModelSpec(BaseModel):
     Parameters
     ----------
     name : str
-        Logical name of the model (e.g., "cson_roms-marbl_v0.1").
+        Logical name of the model (e.g., "roms-marbl-0.12-default").
     description : str, optional
         Human-readable one-liner for catalogs/wizard display.
     code : ModelCode
@@ -218,16 +219,16 @@ class ModelSpec(BaseModel):
 
 
 def load_models_yaml(path: Path, model_name: str) -> ModelSpec:
-    """Load a ModelSpec from a ``model.yaml`` file.
+    """Load a ModelSpec from its YAML file.
 
     Parameters
     ----------
     path : Path
-        Path to the model.yaml file.
+        Path to the ModelSpec file.
     model_name : str
         Name of the model (used as ``ModelSpec.name``; either the multi-model
-        block key, or -- for a single-model file -- the directory/file's logical
-        name).
+        block key, or -- for a single-model file -- the catalog entry name,
+        the file's stem).
 
     Returns
     -------
@@ -252,7 +253,7 @@ def load_models_yaml(path: Path, model_name: str) -> ModelSpec:
         raise KeyError(f"Model '{model_name}' not found in models YAML file: {path}")
 
     if "code" not in block:
-        raise ValueError(f"Model '{model_name}' must specify 'code' in model.yaml")
+        raise ValueError(f"Model '{model_name}' must specify 'code' in {path}")
 
     code_block = block["code"]
 

@@ -49,7 +49,7 @@ You need:
 - A source checkout of C-Star, with the conda environment from
   ``environment-laptop.yml`` or ``environment-hpc.yml`` created, activated, and
   C-Star installed into it (see "Install from source" on the
-  :doc:`installation page <../installation>`). The commands below run from the
+  :doc:`installation page <../getting_started/installation>`). The commands below run from the
   root of the checkout.
 - roms-tools from its main branch, at or after commit ``f9b07d42``, until a
   roms-tools release carries it. The 5.2.1 release does not. roms-tools `#705
@@ -85,8 +85,8 @@ RIVR2O) and MBL CO2, plus SRTM15 bathymetry. They come in three ways:
   expected if a staged file is missing.
 
 ``cstar forge show-paths`` prints the cache location. See
-:doc:`../forge/source_datasets` for the layout each staged source expects and
-:doc:`../data_access` for registration.
+:doc:`../applications/forge/source_datasets` for the layout each staged source expects and
+:doc:`../getting_started/data_access` for registration.
 
 Run it
 ------
@@ -117,7 +117,7 @@ where there is a scheduler, local processes otherwise. Every step carries a
 ``local`` and a ``slurm`` entry in ``compute_overrides``. Under SLURM,
 ``cstar workplan submit`` submits all nine jobs, chained with SLURM dependencies,
 and returns. The account and queue come from your environment, as described on
-the :doc:`HPC page <../hpc>`.
+the :doc:`HPC page <../deployments/hpc>`.
 
 Running a shorter window
 ^^^^^^^^^^^^^^^^^^^^^^^^

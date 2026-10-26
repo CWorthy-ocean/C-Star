@@ -17,6 +17,7 @@ from cstar.base.digest import (
     HASH_SCHEME,
     SAMPLE_BUDGET,
     SHA256_SCHEME,
+    digest_scheme,
     hash_netcdf_contents,
     sha256_digest,
     short_digest,
@@ -356,6 +357,23 @@ class TestHashLargeVariables:
 def test_short_digest_strips_scheme_tag():
     assert short_digest(f"{HASH_SCHEME}:" + "0123456789abcdef" * 4) == "0123456789ab"
     assert short_digest("deadbeef" * 8) == "deadbeefdead"
+
+
+@pytest.mark.parametrize(
+    ("value", "scheme"),
+    [
+        pytest.param("bp-v2:abc", "bp-v2", id="tagged"),
+        pytest.param(f"{SHA256_SCHEME}:x", SHA256_SCHEME, id="another-scheme"),
+        pytest.param("a:b:c", "a", id="first-colon"),
+        pytest.param("0123456789abcdef" * 4, "", id="untagged"),
+        pytest.param("", "", id="empty"),
+    ],
+)
+def test_digest_scheme_is_the_tag_before_the_first_colon(
+    value: str, scheme: str
+) -> None:
+    """Verify a tagged digest names its scheme, and an untagged or empty one has none."""
+    assert digest_scheme(value) == scheme
 
 
 def test_sha256_digest_is_the_scheme_tagged_hash_of_the_bytes(tmp_path):

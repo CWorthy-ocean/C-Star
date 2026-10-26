@@ -31,6 +31,7 @@ from cstar.base.env import (
     ENV_CSTAR_STATE_HOME,
     FLAG_ON,
 )
+from cstar.base.exceptions import CstarError
 from cstar.cli.blueprint.run import app
 from cstar.entrypoint.runner import BlueprintRunner
 from cstar.entrypoint.utils import (
@@ -278,7 +279,7 @@ def test_blueprint_run_auto_migrates_2_1_0_blueprint(
 
     state_home = mock_xdg_dirs[ENV_CSTAR_STATE_HOME]
     current = get_application(UclaRomsApplication.name).schema_version
-    migrated_path = next(state_home.rglob(f"{bp_path.stem}_{current}*"))
+    migrated_path = next(state_home.rglob(f"{bp_path.stem}-*_{current}*"))
     migrated = yaml.safe_load(migrated_path.read_text())
     assert "model_params" not in migrated
     # serialize() excludes model defaults, so validate to see effective values
@@ -401,7 +402,7 @@ def test_blueprint_run_current_blueprint_not_persisted(
 
     mock_exec_runner.assert_called_once()
     state_home = mock_xdg_dirs[ENV_CSTAR_STATE_HOME]
-    assert not list(state_home.rglob(f"{complete_blueprint_path.stem}_*"))
+    assert not list(state_home.rglob(f"{complete_blueprint_path.stem}-*"))
 
 
 def test_blueprint_run_invalid_blueprint_exits_nonzero(
@@ -923,6 +924,46 @@ def test_blueprint_run_resume_and_clobber_fails_fast(
     assert "--resume" in stderr_flat
     assert "--clobber" in stderr_flat
     mock_exec.assert_not_called()
+
+
+def test_blueprint_run_runner_error_exits_cleanly(
+    hello_world_bp_path: Path,
+    flatten_cli_output: Callable[[str], str],
+) -> None:
+    """Verify a `CstarError` raised while the runner executes is reported as a
+    message with exit code 1, not a traceback.
+    """
+    error = "The runner could not start"
+    with mock.patch.object(
+        HelloWorldRunner, "execute", mock.AsyncMock(side_effect=CstarError(error))
+    ):
+        runner = CliRunner()
+        result = runner.invoke(app, [hello_world_bp_path.as_posix()], color=False)
+
+    assert result.exit_code == 1, result.output
+    assert f"Unable to run the blueprint: {error}" in flatten_cli_output(result.output)
+    assert not isinstance(result.exception, CstarError)
+
+
+def test_blueprint_run_runner_construction_error_exits_cleanly(
+    hello_world_bp_path: Path,
+    flatten_cli_output: Callable[[str], str],
+) -> None:
+    """Verify a `CstarError` raised while the runner is constructed (a launch
+    refused on a login node is raised there) is reported as a message with exit
+    code 1, not a traceback.
+    """
+    refusal = "Refusing to launch ROMS outside a scheduler job"
+    with mock.patch.object(
+        HelloWorldRunner, "__init__", mock.Mock(side_effect=CstarError(refusal))
+    ):
+        runner = CliRunner()
+        result = runner.invoke(app, [hello_world_bp_path.as_posix()], color=False)
+
+    assert result.exit_code == 1, result.output
+    flat = flatten_cli_output(result.output)
+    assert f"Unable to run the blueprint: {refusal}" in flat
+    assert not isinstance(result.exception, CstarError)
 
 
 def test_blueprint_run_resume_reaches_runner_request(

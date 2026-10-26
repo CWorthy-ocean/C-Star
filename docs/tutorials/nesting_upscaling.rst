@@ -13,15 +13,15 @@ CDR efficiency of the whole release.
 This tutorial runs a tiny version of that workflow on a laptop, from one
 workplan, in about 20 minutes. The parent is a 24 by 24 cell grid over 400 km
 north-west of Scotland. The child is a 24 by 24 cell grid over 100 km inside it, with
-one alkalinity (ALK) release near its east boundary. If nesting and
-``continue-from`` are new to you, :doc:`nested_workplan` introduces them on a
-simpler workplan without CDR.
+one alkalinity (ALK) release near its east boundary. If workplans,
+``continue-from`` or the CDR metrics are new to you, :doc:`cdr_workplan`
+introduces them on a simpler workplan without nesting.
 
 Before you start
 ----------------
 
-- :doc:`Install C-Star <../installation>` and activate the environment.
-- :doc:`Register for Copernicus Marine <../data_access>` and run
+- :doc:`Install C-Star <../getting_started/installation>` and activate the environment.
+- :doc:`Register for Copernicus Marine <../getting_started/data_access>` and run
   ``copernicusmarine login``. GLORYS supplies the initial and boundary
   conditions of the parent grid.
 - Download the four files into an empty directory:
@@ -32,7 +32,7 @@ Before you start
   - :download:`forge_parent_up.yaml <nesting_upscaling_tiny/forge_parent_up.yaml>`
 
 The forge blueprints use the same sources as the :doc:`earlier tutorials
-<end_to_end>`: GLORYS for the ocean state, ERA5 for the atmosphere, and the
+<blueprint_tutorial>`: GLORYS for the ocean state, ERA5 for the atmosphere, and the
 UNIFIED biogeochemical climatology. Forge downloads GLORYS and UNIFIED into
 its source-data cache, and ERA5 is read over the network as the inputs are
 generated. If you have run the earlier tutorials, UNIFIED is already in the
@@ -85,7 +85,7 @@ compiles ROMS to read its CDR forcing from a file.
 **CDR metrics.** The ``cdr_metrics`` application computes the CO2 uptake and
 the CDR efficiency from the ``_cdr`` output of the child and of ``parent_up``.
 It analyses each domain on its own grid and combines them.
-:doc:`../blueprints/cdr_metrics` describes the application and its blueprint.
+:doc:`../applications/analytics/cdr_metrics` describes the application and its blueprint.
 
 Run it
 ------
@@ -165,9 +165,7 @@ The two domains are combined in a specific way:
   independent views of the same perturbation. They can disagree for a single
   domain: DIC that the child took up and then exported shows up as a DIC
   difference in ``parent_up``. On the sum the residual should be small next to
-  the flux-based uptake. The weekly extended integration test runs this
-  workplan on small stand-in forcing data and requires it to stay under a tenth
-  there; it does not check a run on the real forcing.
+  the flux-based uptake.
 
 ``cdr_metrics.nc`` also holds each domain's own uptake, such as
 ``child_carbon_uptake_from_flux`` and ``parent_up_carbon_uptake_from_flux``.
@@ -183,5 +181,5 @@ Where to go next
 ----------------
 
 :doc:`../workplans/directives` describes ``nest-from`` and ``continue-from`` in
-full, and :doc:`../blueprints/cdr_metrics` the metrics step, including the
+full, and :doc:`../applications/analytics/cdr_metrics` the metrics step, including the
 metrics of a run split into several segments.

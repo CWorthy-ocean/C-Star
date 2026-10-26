@@ -12,6 +12,7 @@ from urllib.parse import urlsplit
 from pydantic import BaseModel, Field, computed_field
 
 from cstar.applications.core import get_application
+from cstar.base.digest import digest_scheme
 from cstar.base.env import capture_environment
 from cstar.base.exceptions import CstarError, CstarExpectationFailed
 from cstar.base.log import get_logger
@@ -35,6 +36,7 @@ from cstar.orchestration.manifest import (
     ATTEMPT_VARIABLES_NAME,
     ATTEMPT_WORKPLAN_NAME,
     RUN_MANIFEST_NAME,
+    TRANSFORMED_WORKPLAN_GLOB,
     CarriedInputs,
     RunManifest,
     StepFacts,
@@ -85,6 +87,7 @@ from cstar.orchestration.tracking import (
     KEY_RUN_UUID,
     TrackingRepository,
     WorkplanRun,
+    aware_utc,
     measure_step_sizes,
 )
 from cstar.orchestration.transforms import (
@@ -97,9 +100,10 @@ from cstar.orchestration.transforms import (
     resolve_external_runs,
 )
 from cstar.system.manager import get_sysmgr
-from cstar.system.migration import CstarSchemaTooNewError
+from cstar.system.migration import CstarSchemaTooNewError, version_key
 
 if t.TYPE_CHECKING:
+    from collections.abc import Callable
     from datetime import datetime
 
 log = get_logger(__name__)
@@ -304,7 +308,7 @@ def get_launcher(
     return launcher
 
 
-def get_orchestrator(planner: Planner, *, root: Path) -> Orchestrator:
+def get_orchestrator(planner: Planner, *, root: Path, run_uuid: str) -> Orchestrator:
     """Create the orchestrator that launches the steps of a plan.
 
     Each launch persists the step's handle and records the submission in the
@@ -316,6 +320,8 @@ def get_orchestrator(planner: Planner, *, root: Path) -> Orchestrator:
         The planner holding the plan to execute.
     root : Path
         The run root, which holds the manifest the submissions are recorded in.
+    run_uuid : str
+        The uuid of the run's manifest; empty when it could not be written.
 
     Returns
     -------
@@ -323,7 +329,7 @@ def get_orchestrator(planner: Planner, *, root: Path) -> Orchestrator:
     """
     launcher = get_launcher(planner.workplan, force_local=planner.workplan.pre_run)
 
-    orchestrator = Orchestrator(planner, launcher)
+    orchestrator = Orchestrator(planner, launcher, run_uuid=run_uuid)
     orchestrator.set_callback("launched", functools.partial(on_launched, root=root))
 
     return orchestrator
@@ -374,9 +380,11 @@ def refresh_run_manifest(
 
     The manifest holds a snapshot: the sentinels stay the live truth, and this
     is the one place that copies their statuses into it. The manifest is written
-    only when something besides `observed_at` changed. A failure to refresh it
-    is a warning: `--resume` refreshes it before scheduling, and keeping the
-    record of a run never stops the run.
+    only when something besides `observed_at` changed, and never when it or a
+    record folded into it was written by a newer cstar-ocean with keys this build
+    does not know: those are read with the keys ignored, so the refresh is kept
+    in memory. A failure to refresh it is a warning: `--resume` refreshes it
+    before scheduling, and keeping the record of a run never stops the run.
 
     Parameters
     ----------
@@ -397,12 +405,17 @@ def refresh_run_manifest(
     statuses = {name: state.name for name, state in status.details.items()}
     try:
         with manifest_lock(run_id):
-            manifest = read_run_manifest(root)
+            manifest = read_run_manifest(root, tolerant=True)
             if manifest is None:
                 log.debug(f"Run {run_id!r} has no manifest to refresh.")
                 return None
-            if fold_step_records(manifest, root, statuses):
-                write_run_manifest(root, manifest)
+            if fold_step_records(manifest, root, statuses, tolerant=True):
+                try:
+                    write_run_manifest(root, manifest)
+                except CstarSchemaTooNewError as ex:
+                    # read with keys a newer cstar-ocean wrote ignored, which
+                    # the reads warned about: the refresh stays in memory
+                    log.debug(f"Not writing the manifest of run {run_id!r}: {ex}")
     except Exception as ex:
         log.warning(f"Could not refresh the manifest of run {run_id!r}: {ex}")
         return None
@@ -515,7 +528,7 @@ def recorded_workplan(wp_run: WorkplanRun) -> Path | None:
     Raises
     ------
     CstarSchemaTooNewError
-        If the run's manifest is newer than this build reads.
+        If the run's manifest is newer than this build reads (see `VersionedDocument`).
     CstarError
         If the run's manifest cannot be read.
     """
@@ -671,6 +684,7 @@ async def prepare_workplan(
     user_variables: Mapping[str, str] | None = None,
     clobber_steps: "Sequence[str] | None" = None,
     pre_run: bool = False,
+    blueprint_sources: "Mapping[str, Path] | None" = None,
 ) -> tuple[Workplan, Path, ExternalRuns, CarriedInputs]:
     """Load the workplan and apply any applicable transforms.
 
@@ -688,6 +702,10 @@ async def prepare_workplan(
     pre_run : bool
         Mark every step to perform its pre-launch stages and stop. Unlike
         clobber, this is persisted with the prepared workplan.
+    blueprint_sources : Mapping[str, Path] | None
+        The migrated copy of a step's blueprint, by step name, that the step is
+        prepared from in place of the file it names. The authored workplan is
+        carried as it is.
 
     Returns
     -------
@@ -707,6 +725,9 @@ async def prepare_workplan(
     # read beside the parse, so an edit made while the attempt prepares is not carried
     authored = await asyncio.to_thread(wp_path.read_bytes)
     wp_orig = await asyncio.to_thread(deserialize, wp_path, Workplan)
+    for step in wp_orig.steps:
+        if source := (blueprint_sources or {}).get(step.name):
+            step.blueprint_path = source
 
     fill_transform: TemplateFillTransform | None = None
     variables: UserDefinedVariables | None = None
@@ -947,8 +968,9 @@ def check_clobber_targets(wp: Workplan, clobber_steps: "Sequence[str]") -> list[
 def check_clobber_dependents(wp: Workplan, clobber_steps: "Sequence[str]") -> list[str]:
     """Return the untargeted steps that depend on a step selected for clobber.
 
-    Such steps will not be re-run and may consume stale outputs derived from
-    their re-executed dependencies.
+    Such a step that has already started is not re-run and may consume stale
+    outputs derived from its re-executed dependencies; one still queued is
+    queued again behind them by its launcher.
 
     Parameters
     ----------
@@ -983,7 +1005,7 @@ def apply_clobber_overrides(
     `safe_name`), then mutates the matched steps' `workflow_overrides` in
     place so the selection is persisted with the workplan. Emits a single
     warning listing any untargeted steps that depend on a targeted one, since
-    they will not be re-run and may consume stale outputs.
+    one that has already started is not re-run and may consume stale outputs.
 
     Selections must be concrete step identifiers; the CLI-only token `all` is
     expanded to every step's safe_name before it reaches this layer.
@@ -1016,10 +1038,80 @@ def apply_clobber_overrides(
     if stale := check_clobber_dependents(wp, tokens):
         msg = (
             "Some steps depend on clobbered steps but were not selected for "
-            "clobber themselves; they will not be re-run and may consume "
-            f"stale outputs. Review the following steps: {', '.join(stale)}"
+            "clobber themselves; those that have already started are not re-run "
+            "and may consume stale outputs. Review the following steps: "
+            f"{', '.join(stale)}"
         )
         log.warning(msg)
+
+
+async def drop_spent_clobbers(wp: Workplan, wp_run: WorkplanRun) -> list[str]:
+    """Drop the recorded clobber of each step submitted again since it was selected.
+
+    A run re-entered by its run-id alone replays its transformed workplan, which
+    keeps the `--clobber` selection of the attempt that prepared it. Replayed
+    after the step was submitted again, the selection would clear the step once
+    more: a finished step would be re-run, a running one cancelled and restarted.
+    A selection stands until the step is submitted at or after the start of the
+    latest attempt that clobbered it, so one whose attempt stopped before
+    reaching the step still applies. A clobber the authored workplan sets is
+    applied by every re-entry and is kept.
+
+    Parameters
+    ----------
+    wp : Workplan
+        The replayed workplan; a spent clobber is removed from its steps'
+        `workflow_overrides`.
+    wp_run : WorkplanRun
+        The recorded run being re-entered.
+
+    Returns
+    -------
+    list[str]
+        The names of the steps whose clobber was dropped; none when the run has
+        no readable manifest, whose attempts tell when each was selected.
+    """
+    if not (selected := [step for step in wp.steps if step.clobber]):
+        return []
+    try:
+        manifest = read_run_manifest(wp_run.output_path)
+        authored_path = recorded_workplan(wp_run)
+    except CstarError as ex:
+        log.warning(
+            f"Could not read the manifest of run {wp_run.run_id!r}, so its recorded "
+            f"clobber selections are applied again: {ex}"
+        )
+        return []
+    if manifest is None:
+        return []
+
+    authored = try_deserialize(authored_path, Workplan) if authored_path else None
+    standing = (
+        {step.name for step in authored.steps if step.clobber} if authored else set()
+    )
+
+    configure_environment(run_id=wp_run.run_id)
+    repo = StateRepository()
+    spent: list[str] = []
+    for step in selected:
+        if step.name in standing:
+            continue
+        asked = [
+            aware_utc(a.start_at) for a in manifest.attempts if step.name in a.clobbered
+        ]
+        handle = await repo.get_sentinel(step.name, ProcessHandle)
+        if (
+            asked
+            and handle is not None
+            and handle.submitted_at is not None
+            and aware_utc(handle.submitted_at) >= max(asked)
+        ):
+            step.workflow_overrides.pop(KEY_CLOBBER)
+            spent.append(step.name)
+
+    if spent:
+        log.debug(f"Steps {spent} were submitted again since they were clobbered")
+    return spent
 
 
 class NoPreparableStepsError(Exception):
@@ -1253,13 +1345,19 @@ async def on_status_changed(handle: ProcessHandle) -> None:
     """Persist updates to process handles.
 
     On a terminal status transition, the step's own disk usage is measured
-    and recorded on the run's `step_sizes` before the run is persisted.
+    and recorded on the run's `step_sizes` before the run is persisted. A run
+    record that cannot be read or written is a warning: keeping the record of
+    a run never stops the run, and the sentinel is written first.
     """
     state_repo = StateRepository()
     run_repo = TrackingRepository()
 
     path = await state_repo.put_sentinel(handle)
-    run = await run_repo.get_workplan_run(handle.run_id)
+    try:
+        run = await run_repo.get_workplan_run(handle.run_id)
+    except Exception as ex:
+        log.warning(f"Could not read the record of run {handle.run_id!r}: {ex}")
+        return
 
     if not path or run is None:
         return
@@ -1292,7 +1390,13 @@ async def on_status_changed(handle: ProcessHandle) -> None:
 
     # measured outside the lock, applied atomically: concurrent step events for
     # the same run must not overwrite each other's sentinels or sizes
-    await run_repo.update_workplan_run(handle.run_id, _apply)
+    try:
+        await run_repo.update_workplan_run(handle.run_id, _apply)
+    except Exception as ex:
+        log.warning(
+            f"Could not record step {handle.name!r} in the record of run "
+            f"{handle.run_id!r}: {ex}"
+        )
 
 
 async def on_launched(handle: ProcessHandle, *, root: Path) -> None:
@@ -1331,18 +1435,62 @@ async def on_launched(handle: ProcessHandle, *, root: Path) -> None:
         )
 
 
-def refuse_edited_done_steps(
+def _major_moved(recorded: str, now: str) -> bool:
+    """Whether a blueprint's schema major differs from the one recorded for its step.
+
+    Parameters
+    ----------
+    recorded : str
+        The schema version the step's manifest entry records; empty when unknown.
+    now : str
+        The schema version of the blueprint content loaded now; empty when none.
+
+    Returns
+    -------
+    bool
+        False when either version is unknown.
+    """
+    return bool(recorded and now) and version_key(recorded)[0] != version_key(now)[0]
+
+
+def clobber_each_step(names: "Sequence[str]") -> str:
+    """Spell the `--clobber` options of `cstar workplan submit` that re-run steps.
+
+    Parameters
+    ----------
+    names : Sequence[str]
+        The names of the steps to re-run.
+
+    Returns
+    -------
+    str
+        One `--clobber <name>` per step.
+    """
+    return " ".join(f"{ARG_CLOBBER} {name}" for name in names)
+
+
+def refuse_edited_steps(
     wp: Workplan,
     manifest: RunManifest,
     status: DagStatus,
     facts: Mapping[str, StepFacts],
     clobber_steps: "Sequence[str]",
+    clobber_hint: "Callable[[Sequence[str]], str]" = clobber_each_step,
 ) -> None:
-    """Refuse to re-enter a run in which a `Done` step was edited and not clobbered.
+    """Refuse to re-enter a run in which a done, queued or running step was edited.
 
-    A step with no recorded definition is not checked. `read_run_manifest`
-    leaves none on a manifest older than `CANONICAL_NAMES_SINCE`, whose hashes
-    may use an earlier application name.
+    A step selected for clobber is not refused. A launcher adopts a step that is
+    still queued or running, which keeps the definition it was submitted with,
+    while the attempt records the edited one, so the edit would never be seen.
+
+    A step with no recorded definition is not checked. Nor is a step whose
+    recorded definition hash has another scheme than its current one: another
+    release computed it (see `DEFINITION_HASH_SCHEME`), so the two cannot be
+    compared. Nor is one whose definition changed while its blueprint moved to
+    another schema major: an automatic migration changes the content it hashes.
+    Unless the re-entry is refused, such steps are named in one warning; the
+    attempt that follows records their current definitions, so the next
+    re-entry checks them.
 
     Parameters
     ----------
@@ -1356,15 +1504,22 @@ def refuse_edited_done_steps(
         The facts known about each authored step (see `describe_steps`).
     clobber_steps : Sequence[str]
         Names or safe_names of the steps the user chose to re-run.
+    clobber_hint : Callable[[Sequence[str]], str]
+        Spells the options that re-run the named steps, in the command the user
+        ran, for the refusal and the warning.
 
     Raises
     ------
     CstarExpectationFailed
-        If a step that reached `Done` in this run now has a different definition
-        than the one recorded in the manifest and is not selected for clobber.
+        If a step that reached `Done`, or is still queued or running, in this run
+        now has a different definition than the one recorded in the manifest and
+        is not selected for clobber, by `clobber_steps` or by its own
+        `workflow_overrides`.
     """
     tokens = {x for token in clobber_steps if (x := token.strip())}
-    edited: list[str] = []
+    edited_done: list[str] = []
+    edited_in_progress: list[str] = []
+    unchecked: list[str] = []
     for step in wp.steps:
         entry = manifest.step(step.name)
         if entry is None:
@@ -1372,23 +1527,110 @@ def refuse_edited_done_steps(
         if not entry.definition_hash:
             log.debug(f"Step {step.name!r} has no recorded definition; not checked")
             continue
-        if status[step.name] is not Status.Done:
+        step_status = status[step.name]
+        if step_status is not Status.Done and not Status.is_in_progress(step_status):
             continue
         current = facts.get(step.name)
-        if current is None or current.definition_hash == entry.definition_hash:
+        if current is None or step.clobber or {step.name, step.safe_name} & tokens:
             continue
-        if step.name in tokens or step.safe_name in tokens:
-            continue
-        edited.append(step.name)
+        recorded, now = entry.definition_hash, current.definition_hash
+        if digest_scheme(recorded) != digest_scheme(now):
+            unchecked.append(step.name)
+        elif now != recorded:
+            migrated = _major_moved(
+                entry.blueprint_schema_version, current.blueprint_schema_version
+            )
+            edited = edited_done if step_status is Status.Done else edited_in_progress
+            (unchecked if migrated else edited).append(step.name)
 
-    if edited:
-        names = ", ".join(repr(name) for name in edited)
-        rerun = " ".join(f"{ARG_CLOBBER} {name}" for name in edited)
-        raise CstarExpectationFailed(
+    problems: list[str] = []
+    if edited_done:
+        names = ", ".join(repr(name) for name in edited_done)
+        problems.append(
             f"Steps {names} reached Done in run {manifest.run_id!r} under a "
-            f"different definition; pass {rerun} to re-run them, or "
-            f"{ARG_RUN_ID} <other-id> to start a new run"
+            f"different definition; pass {clobber_hint(edited_done)} to re-run them"
         )
+    if edited_in_progress:
+        names = ", ".join(repr(name) for name in edited_in_progress)
+        problems.append(
+            f"Steps {names} are still queued or running in run "
+            f"{manifest.run_id!r} under the definition they were submitted with, "
+            f"which they would keep; pass {clobber_hint(edited_in_progress)} to "
+            "cancel and resubmit them, or undo the edit to let them finish as "
+            "submitted"
+        )
+    if problems:
+        raise CstarExpectationFailed(
+            f"{'. '.join(problems)}, or {ARG_RUN_ID} <other-id> to start a new run"
+        )
+
+    if unchecked:
+        names = ", ".join(repr(name) for name in unchecked)
+        log.warning(
+            f"Steps {names} in run {manifest.run_id!r} have definitions recorded "
+            "by another C-Star release, which this one cannot compare (a changed "
+            "hash recipe, or a blueprint migrated to a newer schema), so an edit "
+            f"made to them since is not detected; pass {clobber_hint(['<step-name>'])} "
+            "to re-run a step you changed. This attempt records their definitions "
+            "again."
+        )
+
+
+async def refuse_stale_run_state(run_id: str, root: Path) -> None:
+    """Refuse to start a run over the step state of an earlier run whose directory is gone.
+
+    Sentinels are kept by run-id, outside the run directory, so they outlive a
+    run directory that was purged from scratch or removed by hand. A launcher
+    adopts a sentinel that reads Done, so the new run would report those steps
+    done without running them. A run root that still holds its transformed
+    workplan is the earlier run itself (its manifest could not be written, or
+    predates manifests), and is re-entered as before.
+
+    Parameters
+    ----------
+    run_id : str
+        The run-id.
+    root : Path
+        The run root, which holds no manifest.
+
+    Raises
+    ------
+    CstarExpectationFailed
+        If the run root holds no transformed workplan and the run-id has sentinels.
+    """
+    if any(root.glob(TRANSFORMED_WORKPLAN_GLOB)):
+        return
+    if not await StateRepository().has_sentinels(run_id=run_id):
+        return
+
+    state_dir = StateDirectoryManager.run_state_dir(run_id=run_id)
+    escape = f"pass {ARG_RUN_ID} <other-id> to start a new run"
+    record = await TrackingRepository().get_workplan_run(run_id)
+    elsewhere = record.output_path if record else None
+    if elsewhere and elsewhere.is_dir() and elsewhere.resolve() != root.resolve():
+        # the run lives on (under another data home): `admin clean` would remove it
+        msg = (
+            f"Run {run_id!r} is tracked in {elsewhere}, not {root}, and has step "
+            f"state in {state_dir}; this run would report its steps done without "
+            f"running them. Re-enter it under the data home it was started in, "
+            f"or {escape}"
+        )
+    elif root.is_dir() and any(root.iterdir()):
+        # something of the run is left: `admin clean` would remove it too
+        msg = (
+            f"Run {run_id!r} has step state in {state_dir}, but its directory "
+            f"{root} holds neither its manifest nor its transformed workplan; "
+            f"this run would report those steps done without running them. "
+            f"Remove {state_dir} to run them again, or {escape}"
+        )
+    else:
+        msg = (
+            f"Run {run_id!r} has step state in {state_dir} left by an earlier run "
+            f"whose directory {root} is gone; this run would report those steps "
+            f"done without running them. Clear it with `cstar admin clean "
+            f"{ARG_RUN_ID} {run_id}`, or {escape}"
+        )
+    raise CstarExpectationFailed(msg)
 
 
 async def build_dag(
@@ -1397,6 +1639,8 @@ async def build_dag(
     user_variables: Mapping[str, str] | None = None,
     clobber_steps: "Sequence[str] | None" = None,
     pre_run: bool = False,
+    blueprint_sources: "Mapping[str, Path] | None" = None,
+    clobber_hint: "Callable[[Sequence[str]], str]" = clobber_each_step,
 ) -> tuple[Planner, Path, dict[str, StepFacts], CarriedInputs]:
     """Execute the steps in the workplan.
 
@@ -1415,6 +1659,12 @@ async def build_dag(
     pre_run : bool
         Prepare every step without launching its model, as supplied via
         `--pre-run`; steps that cannot be prepared are skipped.
+    blueprint_sources : Mapping[str, Path] | None
+        The migrated copy of a step's blueprint, by step name, read and prepared
+        in place of the file the step names (see `describe_steps`).
+    clobber_hint : Callable[[Sequence[str]], str]
+        Spells the options that re-run the named steps, in the command the user
+        ran (see `refuse_edited_steps`).
 
     Returns
     -------
@@ -1429,8 +1679,9 @@ async def build_dag(
     NoPreparableStepsError
         If `pre_run` leaves no step to prepare.
     CstarExpectationFailed
-        If the run's manifest cannot be read, or a step that reached Done was
-        edited and not clobbered.
+        If the run's manifest cannot be read, a step that reached Done or is
+        still queued or running was edited and not clobbered, or the run-id has
+        step state left by a run whose directory is gone.
     """
     if run_id:
         run_id = slugify(run_id)
@@ -1440,7 +1691,9 @@ async def build_dag(
 
     check_environment()
     wp_orig = await asyncio.to_thread(deserialize, wp_path, Workplan)
-    facts = await asyncio.to_thread(describe_steps, wp_orig, wp_path.parent)
+    facts = await asyncio.to_thread(
+        describe_steps, wp_orig, wp_path.parent, blueprint_sources
+    )
 
     # the guard runs before `prepare_workplan` writes anything
     escape = f"pass {ARG_RUN_ID} <other-id> to start a new run"
@@ -1454,21 +1707,60 @@ async def build_dag(
         raise CstarExpectationFailed(msg) from ex
 
     if manifest is None:
+        await refuse_stale_run_state(run_id, output_dir)
         log.debug(f"Run {run_id!r} has no manifest; no step definition is checked")
     else:
         status = await load_run_state(
             run_id, get_launcher(wp_orig, force_local=pre_run)
         )
-        refuse_edited_done_steps(wp_orig, manifest, status, facts, clobber_steps or [])
+        refuse_edited_steps(
+            wp_orig, manifest, status, facts, clobber_steps or [], clobber_hint
+        )
 
     wp, prepared_wp_path, external, carried = await prepare_workplan(
-        wp_path, output_dir, user_variables, clobber_steps, pre_run
+        wp_path, output_dir, user_variables, clobber_steps, pre_run, blueprint_sources
     )
     # the steps are live once prepared; report before a pre-run prunes any of them
     report_orphans(output_dir, run_id, t.cast("LiveWorkplan", wp))
     planner = build_planner(wp, external.tasks())
 
     return planner, prepared_wp_path, facts, carried
+
+
+def _uuid_of_sentinels(root: Path, run_id: str) -> str:
+    """Return the manifest uuid the sentinels of a run without a manifest record.
+
+    A run whose manifest was removed from its directory keeps the identity
+    its sentinels record, so a launcher still adopts them (`build_dag` has
+    refused a run whose directory is gone).
+
+    Parameters
+    ----------
+    root : Path
+        The run root.
+    run_id : str
+        The run-id.
+
+    Returns
+    -------
+    str
+        The one uuid the run's sentinels record, or an empty string when the
+        run has a manifest, or its sentinels record none or several.
+    """
+    if (root / RUN_MANIFEST_NAME).exists():
+        return ""
+
+    state_dir = StateDirectoryManager.run_state_dir(run_id=run_id)
+    uuids = {
+        handle.run_uuid
+        for path in state_dir.glob(StateRepository.sentinel_name("*"))
+        if (handle := try_deserialize(path, ProcessHandle)) and handle.run_uuid
+    }
+    if len(uuids) != 1:
+        if uuids:
+            log.debug(f"The sentinels of run {run_id!r} record several uuids: {uuids}")
+        return ""
+    return uuids.pop()
 
 
 def _record_attempt(
@@ -1548,6 +1840,7 @@ def _record_attempt(
                 steps=entries,
                 runs=workplan.runs,
                 carried_blueprints=carried.carried_blueprints if carried else None,
+                minted_id=_uuid_of_sentinels(root, run_id),
             )
     except Exception as ex:
         log.warning(f"Could not write the manifest of run {run_id!r}: {ex}")
@@ -1621,7 +1914,7 @@ async def run_dag(
 
     _ = await TrackingRepository().put_workplan_run(wp_run)
 
-    orchestrator = get_orchestrator(planner, root=root)
+    orchestrator = get_orchestrator(planner, root=root, run_uuid=uuid)
 
     # schedule the tasks without waiting for completion
     await process_plan(orchestrator)
@@ -1634,6 +1927,8 @@ async def build_and_run_dag(
     user_variables: Mapping[str, str] | None = None,
     clobber_steps: "Sequence[str] | None" = None,
     pre_run: bool = False,
+    blueprint_sources: "Mapping[str, Path] | None" = None,
+    clobber_hint: "Callable[[Sequence[str]], str]" = clobber_each_step,
 ) -> WorkplanRun:
     """Execute the steps in the workplan.
 
@@ -1654,6 +1949,12 @@ async def build_and_run_dag(
     pre_run : bool
         Prepare every step without launching its model, as supplied via
         `--pre-run`.
+    blueprint_sources : Mapping[str, Path] | None
+        The migrated copy of a step's blueprint, by step name, run in place of
+        the file the step names.
+    clobber_hint : Callable[[Sequence[str]], str]
+        Spells the options that re-run the named steps, in the command the user
+        ran (see `refuse_edited_steps`).
 
     Returns
     -------
@@ -1665,8 +1966,9 @@ async def build_and_run_dag(
     NoPreparableStepsError
         If `pre_run` leaves no step to prepare.
     CstarExpectationFailed
-        If the run's manifest cannot be read, or a step that reached Done was
-        edited and not clobbered.
+        If the run's manifest cannot be read, a step that reached Done or is
+        still queued or running was edited and not clobbered, or the run-id has
+        step state left by a run whose directory is gone.
     """
     planner, prepared_wp_path, facts, carried = await build_dag(
         wp_path,
@@ -1674,6 +1976,8 @@ async def build_and_run_dag(
         user_variables=user_variables,
         clobber_steps=clobber_steps,
         pre_run=pre_run,
+        blueprint_sources=blueprint_sources,
+        clobber_hint=clobber_hint,
     )
     return await run_dag(
         wp_path,

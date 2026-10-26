@@ -6,7 +6,7 @@ Forge internals: render templates and pinning
 Rendering templates
 -----------------------
 
-A model specification in ``model.yaml`` references its code templates under
+A model specification (a ``ModelSpec/<name>.yaml`` file) references its code templates under
 ``code.templates_compile_time`` and ``code.templates_run_time``.
 
 Compile-time options use a Jinja2 template, ``cppdefs.opt.j2``, which renders
@@ -43,7 +43,7 @@ relative to that template repository's root. For example:
 .. code-block:: yaml
 
    code:
-     templates_commit: d35d06265515965c7daaa54c111ee0185166bca4  # C-Star: adds the CDR_LITE gate (ucla-roms 0.9.0)
+     templates_commit: d47142ec249bce91aac938030dfd5ea3f7dacfd4  # C-Star: drops the no-op EXACT_RESTARTS/PRINT_HOSTNAME keys
      templates_compile_time:
        directory: cstar/additional_files/templates/forge/compile-time
        files:
@@ -103,14 +103,10 @@ of two paths:
    content that the fetched commit does not match.
 
 The template repository is this one (``resolve.DEFAULT_TEMPLATE_REPO``), and every
-bundled ModelSpec pins ``templates_commit`` to a C-Star commit whose
-templates are the bundled copy (normally a release commit; the commit that
-added the ``CDR_LITE`` gate, merged with its PR, until the next release), so
-a release build never fetches. Blueprints
-written against the standalone cstar-forge repository carry the legacy
-``templates/<stage>`` directory form; ``bundled_template_dir`` maps both forms
-onto the bundled copy, and such a blueprint still fetches its pinned forge
-commit when the hashes differ.
+bundled ModelSpec pins ``templates_commit`` to a C-Star commit whose templates
+match the bundled copy, so a release build never fetches. Blueprints written
+before Forge moved into C-Star use an older directory form, which
+``bundled_template_dir`` maps onto the same bundled copy.
 
 Staging cache
 ~~~~~~~~~~~~~~~~

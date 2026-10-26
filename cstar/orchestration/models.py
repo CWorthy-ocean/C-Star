@@ -40,10 +40,11 @@ from pydantic_core import CoreSchema
 from cstar.base.adapter import CstarAdaptationError
 from cstar.base.application_names import canonical_application
 from cstar.base.exceptions import CstarExpectationFailed
-from cstar.base.provenance import canonical_hash
+from cstar.base.provenance import HASH_RECIPE_VERSION, canonical_hash
 from cstar.base.utils import generate_schema_ref, lazy_import, slugify
 from cstar.execution.file_system import StateDirectoryManager
 from cstar.orchestration.serialization import register_representer, strenum_representer
+from cstar.system.migration import VersionedDocument
 
 RequiredString: t.TypeAlias = t.Annotated[
     str,
@@ -55,6 +56,9 @@ ApplicationName: t.TypeAlias = t.Annotated[
     RequiredString, AfterValidator(canonical_application)
 ]
 """An application name, stripped, with an earlier name replaced by the current one."""
+
+CONTENT_HASH_SCHEME: t.Final[str] = f"bp-v{HASH_RECIPE_VERSION}"
+"""The scheme every `Blueprint.content_hash` is tagged with."""
 
 LEGACY_TRANSFORMED_NAME_SUFFIX: t.Final[str] = " (transformed)"
 """The suffix releases before 0.17 appended to a workplan's name in its transformed copy."""
@@ -384,8 +388,10 @@ class Provenance(ConfiguredBaseModel):
     """The blueprints and catalog specs the document was derived from."""
 
 
-class Blueprint(ConfiguredBaseModel, ABC):
+class Blueprint(ConfiguredBaseModel, VersionedDocument, ABC):
     """Common elements of all blueprints."""
+
+    SCHEMA_LABEL: t.ClassVar[str] = "blueprint"
 
     name: RequiredString
     """A unique, user-friendly name for this blueprint."""
@@ -445,25 +451,51 @@ class Blueprint(ConfiguredBaseModel, ABC):
         return StateDirectoryManager.blueprint_run_dir(self.application, self.name)
 
     def content_hash(self) -> str:
-        """A fingerprint of the blueprint's configuration.
-
-        The metadata fields (`BLUEPRINT_METADATA_FIELDS`) and the schema reference
-        are excluded, so renaming or moving a blueprint does not change it.
+        """A fingerprint of the blueprint's configuration (see `_hashed_content`).
 
         Returns
         -------
         str
-            The SHA-256 hex digest of the configuration.
+            ``<CONTENT_HASH_SCHEME>:<hex>``, the SHA-256 hex digest of the
+            configuration tagged with the recipe that computed it.
         """
-        data = self.model_dump(mode="json")
-        for key in (*BLUEPRINT_METADATA_FIELDS, "$schema"):
-            data.pop(key, None)
-        return canonical_hash(data)
+        return f"{CONTENT_HASH_SCHEME}:{canonical_hash(self._hashed_content())}"
+
+    def _hashed_content(self) -> dict[str, t.Any]:
+        """The configuration `content_hash` covers.
+
+        Only the fields that differ from their defaults count, so a field added
+        with a default (a minor schema bump) leaves the hash of every existing
+        blueprint unchanged, and writing a default out is not an edit. The
+        metadata fields (`BLUEPRINT_METADATA_FIELDS`) and the schema reference
+        are excluded, so renaming or moving a blueprint does not change it.
+
+        An application that leaves more out overrides this, starting from the
+        base dump. A change to what it returns changes recorded hashes: bump
+        `HASH_RECIPE_VERSION` with it.
+
+        Returns
+        -------
+        dict[str, Any]
+            The JSON-able configuration.
+        """
+        return self.model_dump(
+            mode="json",
+            exclude_defaults=True,
+            exclude={*BLUEPRINT_METADATA_FIELDS, "$schema"},
+        )
 
     @property
     def schema_ref(self) -> str:
         """The URL of the published JSON schema the blueprint's ``$schema`` names."""
         return generate_schema_ref(self.application, self.schema_version)
+
+    @classmethod
+    @t.override
+    def schema_label(cls) -> str:
+        """Name a blueprint in messages by its application."""
+        application = cls.model_fields["application"].default
+        return application if isinstance(application, str) else cls.SCHEMA_LABEL
 
     @field_validator("application", mode="after")
     @classmethod
@@ -973,8 +1005,16 @@ class Step(ConfiguredBaseModel):
         return value
 
 
-class Workplan(ConfiguredBaseModel):
+class Workplan(ConfiguredBaseModel, VersionedDocument):
     """A collection of executable steps and the associated configuration to run them."""
+
+    SCHEMA_LABEL: t.ClassVar[str] = "workplan"
+
+    schema_version: str = Field(default="1.2.0")
+    """The version of the workplan schema the document was written with. A
+    document without one predates versioning and reads as 1.0.0; a newer one
+    than this build's loads only when it holds nothing this build does not know
+    (see `VersionedDocument`)."""
 
     name: RequiredString
     """The name of the workplan, written as a slug: it is the default run-id."""

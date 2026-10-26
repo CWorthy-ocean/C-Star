@@ -29,7 +29,7 @@ from cstar.cli.common import (
     set_ctxmap,
     set_env,
 )
-from cstar.entrypoint.config import get_job_config, get_service_config
+from cstar.entrypoint.config import get_service_config
 from cstar.entrypoint.runner import BlueprintRunner
 from cstar.entrypoint.utils import ARG_SIZE
 from cstar.execution.file_system import (
@@ -65,7 +65,7 @@ HELP_RUN_HANDLE: t.Final[str] = (
 if t.TYPE_CHECKING:
     from collections.abc import Iterable
 
-    from cstar.entrypoint.config import JobConfig, ServiceConfiguration
+    from cstar.entrypoint.config import ServiceConfiguration
     from cstar.orchestration.index import RunRecord
     from cstar.orchestration.models import StepRef
     from cstar.orchestration.transforms import ExternalRuns
@@ -135,10 +135,10 @@ async def list_steps(run_id: str, incomplete: str) -> list[str]:
     incomplete = incomplete.lower()
     repo = TrackingRepository()
 
-    if wp_run := await repo.get_workplan_run(run_id):
+    if wp_run := await repo.get_workplan_run(run_id, tolerant=True):
         try:
             wp_path = wp_run.trx_workplan_path
-            wp = LiveWorkplan.load(wp_path)
+            wp = LiveWorkplan.load(wp_path, tolerant=True)
             step_names = [str(s.name) for s in wp.steps]
 
             if incomplete:
@@ -463,7 +463,6 @@ def preprocess_varfile(
 def create_xrunner(
     request: RunnerRequest[Blueprint],
     service_cfg: "ServiceConfiguration | None" = None,
-    job_cfg: "JobConfig | None" = None,
     log_level: int | str = "INFO",
 ) -> BlueprintRunner[Blueprint]:
     """Dynamically create a runner using the application to look up the
@@ -471,15 +470,11 @@ def create_xrunner(
 
     Parameters
     ----------
-    job_cfg : JobConfig
-        Configuration applied to the scheduler.
     service_cfg : ServiceConfiguration
         Configuration applied to the service.
     request : RunnerRequest
         A request specifying the blueprint to be executed.
     """
-    if job_cfg is None:
-        job_cfg = get_job_config()
     if service_cfg is None:
         service_cfg = get_service_config(
             log_level,
@@ -490,7 +485,7 @@ def create_xrunner(
         request.application
     )
     klass = app.runner
-    return klass(request, service_cfg, job_cfg)
+    return klass(request, service_cfg)
 
 
 def parse_handle(context: typer.Context, target: str) -> RunHandle:
@@ -662,12 +657,14 @@ def preload_run_record(context: typer.Context, run_id: str) -> str:
     Raises
     ------
     typer.BadParameter
-        - Raised when the run-id is invalid or no `WorkplanRun` exists for it
+        - Raised when the run-id is invalid, no `WorkplanRun` exists for it, or
+          its record cannot be read (one a newer cstar-ocean wrote that this
+          build cannot read)
     """
     repo = TrackingRepository()
     try:
-        run = asyncio.run(repo.get_workplan_run(run_id))
-    except ValueError as ex:
+        run = asyncio.run(repo.get_workplan_run(run_id, tolerant=True))
+    except (ValueError, CstarError) as ex:
         raise typer.BadParameter(str(ex)) from ex
 
     if not run:
@@ -859,7 +856,9 @@ async def refresh_disk_usage(
     """Re-measure and persist per-step disk usage for a collection of runs.
 
     A run whose transformed workplan is not present in `plans` falls back to
-    the subdirectories of its tasks directory; a run with neither is skipped.
+    the subdirectories of its tasks directory; a run with neither is skipped,
+    and so is a run whose record holds keys a newer cstar-ocean wrote, which
+    this build does not write.
 
     Parameters
     ----------
@@ -873,8 +872,12 @@ async def refresh_disk_usage(
     step_dirs_by_run: dict[str, Mapping[str, Path]] = {}
     fallback: list[str] = []
     skipped: list[str] = []
+    newer: list[str] = []
 
     for run in runs:
+        if run.unknown_keys:
+            newer.append(run.run_id)
+            continue
         path = run.try_trx_workplan_path()
         plan = plans.get(path) if path is not None else None
         if plan is not None:
@@ -903,6 +906,11 @@ async def refresh_disk_usage(
         log.warning(
             "Disk usage was not refreshed for run(s) without a loadable workplan "
             f"or tasks directory: {', '.join(skipped)}"
+        )
+    if newer:
+        log.warning(
+            "Disk usage was not refreshed for run(s) whose record a newer "
+            f"cstar-ocean wrote; upgrade cstar-ocean to refresh it: {', '.join(newer)}"
         )
 
     if not step_dirs_by_run:

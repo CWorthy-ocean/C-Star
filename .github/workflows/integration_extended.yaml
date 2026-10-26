@@ -1,9 +1,9 @@
 name: integration_extended
 
-# Non-PR-gating tier: tracks upstream ucla-roms (a pinned release and main) across
-# both operating systems and both Python versions, and runs the heavier
-# scenarios under cstar/tests/integration_tests/extended. Failures here are an
-# early warning, not a merge blocker.
+# Non-PR-gating tier: tracks upstream ucla-roms (a pinned release and main) on
+# every supported Python version on Ubuntu and the newest one on macOS, and runs
+# the heavier scenarios under cstar/tests/integration_tests/extended. Failures
+# here are an early warning, not a merge blocker.
 
 on:
   schedule:
@@ -27,8 +27,14 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, macos-latest]
-        python-version: ["3.12", "3.13"]
+        python-version: ["3.12", "3.13", "3.14"]
         roms_ref: ["0.12.0", "main"]
+        # macOS runs only the newest Python, against both ucla-roms refs
+        exclude:
+          - os: macos-latest
+            python-version: "3.12"
+          - os: macos-latest
+            python-version: "3.13"
     steps:
       - uses: actions/checkout@v4
 

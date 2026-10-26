@@ -4,6 +4,7 @@ from pathlib import Path
 import typer
 from pydantic import ValidationError
 
+from cstar.applications.core import get_application
 from cstar.base.env import ENV_CSTAR_LOG_LEVEL
 from cstar.base.log import LogLevelChoices, get_logger
 from cstar.cli.common import (
@@ -33,7 +34,12 @@ from cstar.execution.file_system import (
     is_remote_resource,
     write_local_copy,
 )
-from cstar.system.migration import CstarMigrationError
+from cstar.orchestration.serialization import validate_serialized_entity
+from cstar.system.migration import (
+    CstarMigrationError,
+    CstarSchemaTooNewError,
+    version_key,
+)
 
 app = typer.Typer()
 log = get_logger(__name__)
@@ -44,8 +50,9 @@ HELP_LONG = f"""\
 {HELP_SHORT}
 
 The schema will be updated to the latest available version. If an output
-path is not provided, it will be written next to the existing
-file with the version number appended to the file name.
+path is not provided, it will be written to the C-Star state directory
+(CSTAR_STATE_HOME), named after the existing file with a short digest and
+the version number appended.
 """
 
 
@@ -249,6 +256,14 @@ def migrate(
 
     if plan.is_compatible:
         app_name = result.migration_result.application
+        if version_key(plan.source) > version_key(plan.target):
+            # a newer minor is this build's to read only if it holds nothing
+            # this build does not know: validating it says so
+            checked = validate_serialized_entity(
+                path, get_application(app_name).blueprint
+            )
+            if isinstance(checked.error, CstarSchemaTooNewError):
+                report_schema_error(path, checked.error)
         msg = (
             f"Blueprint {str(path)!r} is {app_name} schema {plan.source}, "
             f"compatible with this build ({plan.target}); nothing to migrate."

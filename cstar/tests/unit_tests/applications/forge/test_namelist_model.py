@@ -8,6 +8,7 @@ Tests for the Pydantic namelist/settings models (``cstar.applications.forge.name
 """
 
 from pathlib import Path
+from unittest import mock
 
 import pytest
 import yaml
@@ -69,12 +70,15 @@ from cstar.applications.forge.resolve import load_model_spec_data
 from cstar.applications.forge.settings import write_roms_namelist
 from cstar.catalog.domain_catalog import default_catalog
 from cstar.roms.namelist import (
+    NEWEST_KNOWN_UCLA_ROMS,
     RomsNamelist,
     RomsNamelistV0_5_0,
     RomsNamelistV0_7_0,
     RomsNamelistV0_9_0,
     RomsNamelistV0_11_0,
     RomsNamelistV0_12_0,
+    format_roms_version,
+    release_ref_for_remote,
 )
 
 # Every registered run-time settings tier, oldest first.
@@ -99,11 +103,11 @@ def _section_classes(settings_cls):
     }
 
 
-_MODEL_DIR = (
+_MODEL_PATH = (
     Path(cstar.catalog.__file__).parent
     / "bundled"
     / "ModelSpec"
-    / "cson_roms-marbl_v0.1"
+    / "cson_roms-marbl_v0.1.yaml"
 )
 
 
@@ -116,7 +120,7 @@ def _populated_rt_dict():
     write_roms_namelist directly (bypassing the resolver), so they need the full
     namelist shape assembled by hand.
     """
-    model = load_model_spec_data(_MODEL_DIR)["model"]
+    model = load_model_spec_data(_MODEL_PATH)["model"]
     rt = yaml.safe_load(yaml.safe_dump(model["model_settings"]))  # deep copy
     output = default_catalog.output_data("standard")
     for k, v in output.items():
@@ -1110,9 +1114,65 @@ def test_run_time_settings_for_ref_0_11_0_up_to_0_12_0_selects_v0_11_0():
         assert run_time_settings_for_ref(ref) is RunTimeSettingsV0_11_0
 
 
-def test_run_time_settings_for_ref_0_12_0_and_later_selects_v0_12_0():
-    for ref in ("0.12.0", "v0.12.0", "0.12.3", "1.0.0"):
+def test_run_time_settings_for_ref_0_12_0_and_later_selects_v0_12_0(recwarn):
+    for ref in ("0.12.0", "v0.12.0"):
         assert run_time_settings_for_ref(ref) is RunTimeSettingsV0_12_0
+    assert len(recwarn) == 0
+
+
+_NEWER_THAN_KNOWN = "newer than the newest release this C-Star knows"
+_NEWER_TAG = format_roms_version(
+    (*NEWEST_KNOWN_UCLA_ROMS[:2], NEWEST_KNOWN_UCLA_ROMS[2] + 1)
+)
+
+
+@pytest.mark.parametrize(
+    "ref",
+    [
+        _NEWER_TAG,
+        format_roms_version((NEWEST_KNOWN_UCLA_ROMS[0] + 1, 0, 0)),
+    ],
+)
+def test_run_time_settings_for_ref_newer_than_known_release_warns(ref):
+    """A release above the newest one C-Star knows selects the latest tier
+    with one warning naming the release, the schema and the newest known one.
+    """
+    with pytest.warns(UserWarning) as record:
+        cls = run_time_settings_for_ref(ref)
+    assert cls is RunTimeSettingsV0_12_0
+    assert len(record) == 1
+    message = str(record[0].message)
+    assert f"ucla-roms release {ref} is {_NEWER_THAN_KNOWN}" in message
+    assert f"({format_roms_version(NEWEST_KNOWN_UCLA_ROMS)})" in message
+    assert RomsNamelistV0_12_0.__name__ in message
+
+
+def test_run_time_settings_for_ref_hash_at_newer_than_known_release_warns():
+    """Forge resolves a hash to its release tag without a clone; a tag newer
+    than C-Star knows then warns when the tier is selected.
+    """
+    with mock.patch(
+        "cstar.roms.namelist._describe_remote_nearest_tag",
+        return_value=(_NEWER_TAG, 0),
+    ):
+        ref = release_ref_for_remote("/some/ucla-roms", "a" * 40)
+    with pytest.warns(
+        UserWarning, match=f"release {_NEWER_TAG} is {_NEWER_THAN_KNOWN}"
+    ):
+        cls = run_time_settings_for_ref(ref)
+    assert cls is RunTimeSettingsV0_12_0
+
+
+def test_write_roms_namelist_newer_than_known_release_warns(tmp_path):
+    """The namelist Forge writes for a too-new release is the latest tier's,
+    and writing it warns: the executor's tier probe silences warnings, the
+    write does not.
+    """
+    with pytest.warns(UserWarning, match=_NEWER_THAN_KNOWN):
+        write_roms_namelist(
+            _populated_rt_dict(), tmp_path, n_tracers=34, roms_ref=_NEWER_TAG
+        )
+    RomsNamelistV0_12_0.read(tmp_path / "namelist.nml")
 
 
 def test_run_time_settings_for_ref_branch_warns_and_uses_latest():

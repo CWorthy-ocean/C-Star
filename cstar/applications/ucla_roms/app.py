@@ -28,10 +28,7 @@ from cstar.applications.ucla_roms.transforms import (
 from cstar.base.exceptions import CstarError
 from cstar.base.log import get_logger
 from cstar.base.utils import slugify
-from cstar.entrypoint.config import (
-    get_job_config,
-    get_service_config,
-)
+from cstar.entrypoint.config import get_service_config
 from cstar.entrypoint.runner import BlueprintRunner, create_parser
 from cstar.execution.handler import ExecutionHandler, ExecutionStatus
 from cstar.orchestration.manifest import Product
@@ -56,7 +53,7 @@ from cstar.roms.outputs import (
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
-    from cstar.entrypoint.config import JobConfig, ServiceConfiguration
+    from cstar.entrypoint.config import ServiceConfiguration
     from cstar.roms.simulation import ROMSSimulation
 
 
@@ -123,7 +120,6 @@ class UclaRomsRunner(BlueprintRunner[UclaRomsBlueprint]):
         self,
         request: RunnerRequest[UclaRomsBlueprint],
         service_cfg: "ServiceConfiguration",
-        job_cfg: "JobConfig",
     ) -> None:
         """Initialize the UclaRomsRunner with the supplied configuration.
 
@@ -135,13 +131,21 @@ class UclaRomsRunner(BlueprintRunner[UclaRomsBlueprint]):
         service_cfg: ServiceConfiguration
             Configuration for modifying behavior of the service process.
 
-        job_cfg: JobConfig
-            Configuration for submitting jobs to an HPC, such as account ID,
-            walltime, job name, and priority.
+        Raises
+        ------
+        CstarError
+            If the model would launch outside a scheduler job on a system that
+            has a scheduler (see `ROMSSimulation.check_launch_location`). A
+            pre-run never launches the model, so it is never refused.
         """
-        super().__init__(request, service_cfg, job_cfg)
+        super().__init__(request, service_cfg)
 
         from cstar.roms.simulation import ROMSSimulation
+
+        # refuse before anything is derived or written: a refusal that reached
+        # the service's shutdown would replace a prior attempt's step record
+        if not self.request.pre_run:
+            ROMSSimulation.check_launch_location()
 
         # a resumed attempt runs from a derived blueprint that continues from
         # the interrupted attempt's last usable restart; the original is kept
@@ -178,7 +182,7 @@ class UclaRomsRunner(BlueprintRunner[UclaRomsBlueprint]):
             self.simulation.pre_run()
 
             if self.request.pre_run:
-                plan = self.simulation.prepare_launch(job_name=self._job_cfg.job_name)
+                plan = self.simulation.prepare_launch(job_name=self.request.name)
                 self.log.info(
                     "Pre-run complete; the model was not launched. "
                     "Prepared command: %s (in %s)",
@@ -191,12 +195,7 @@ class UclaRomsRunner(BlueprintRunner[UclaRomsBlueprint]):
                 return
 
         self.log.trace("Starting simulation.")
-        self._handler = self.simulation.run(
-            account_key=self._job_cfg.account_id,
-            walltime=self._job_cfg.walltime,
-            queue_name=self._job_cfg.priority,
-            job_name=self._job_cfg.job_name,
-        )
+        self._handler = self.simulation.run(job_name=self.request.name)
 
     @override
     async def run(self) -> RunnerResult[UclaRomsBlueprint]:
@@ -337,7 +336,6 @@ def main() -> int:
         print(str(ex))
         return 1
 
-    job_cfg = get_job_config()
     service_cfg = get_service_config(args.log_level, name="UclaRomsRunner")
 
     blueprint_uri = str(args.blueprint_uri)
@@ -352,9 +350,9 @@ def main() -> int:
         clobber=args.clobber,
         step=args.step,
     )
-    runner = UclaRomsRunner(request, service_cfg, job_cfg)
 
     try:
+        runner = UclaRomsRunner(request, service_cfg)
         asyncio.run(runner.execute())
         if runner.state.status == ExecutionStatus.FAILED or runner.result.errors:
             if runner.result.errors:

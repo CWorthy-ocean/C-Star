@@ -1,8 +1,10 @@
 import functools
+import hashlib
 import json
 import os
 import sys
 import typing as t
+import warnings
 from collections.abc import Callable
 from importlib.metadata import PackageNotFoundError
 from importlib.metadata import version as _pkg_version
@@ -13,6 +15,7 @@ from rich.console import Console
 
 import cstar
 from cstar.applications.core import get_application
+from cstar.base.deprecation import CstarDeprecationWarning
 from cstar.base.env import (
     ENV_CSTAR_DISABLE_MIGRATION,
     ENV_CSTAR_LOG_LEVEL,
@@ -28,6 +31,7 @@ from cstar.execution.file_system import (
     get_backup_path,
     is_remote_resource,
     local_copy,
+    write_bytes_atomic,
 )
 from cstar.orchestration.formatting import (
     format_validation_errors as format_validation_errors,  # re-export
@@ -36,7 +40,7 @@ from cstar.orchestration.models import BlueprintCore
 from cstar.orchestration.serialization import (
     anchor_blueprint_file,
     anchor_locations,
-    serialize,
+    model_to_yaml,
     validate_serialized_entity,
 )
 from cstar.system.migration import (
@@ -60,8 +64,9 @@ console = Console()
 log = get_logger(__name__)
 
 HELP_SHORT = (
-    "Print the cstar executable location, the C-Star version, and the versions "
-    "of installed companion packages, then exit."
+    "Print the cstar executable location, the C-Star version, the versions of "
+    "installed companion packages, and the newest ucla-roms release this C-Star "
+    "knows, then exit."
 )
 
 
@@ -180,7 +185,9 @@ def id_label(id: int, name: str, app: str | None) -> str:
 
 
 def version_callback(value: bool) -> bool:
-    """Print the executable location and installed package versions, then exit."""
+    """Print the executable location, installed package versions and the newest
+    ucla-roms release this C-Star knows, then exit.
+    """
     if value:
         typer.echo(f"cstar executable location: {Path(sys.argv[0]).resolve()}")
         typer.echo(f"C-Star version: {cstar.__version__}")
@@ -190,6 +197,13 @@ def version_callback(value: bool) -> bool:
                 typer.echo(f"{pkg} version: {_pkg_version(pkg)}")
             except PackageNotFoundError:
                 pass
+        # Imported here: the namelist models are not needed to start the CLI.
+        from cstar.roms.namelist import NEWEST_KNOWN_UCLA_ROMS, format_roms_version
+
+        typer.echo(
+            "Newest known ucla-roms release: "
+            f"{format_roms_version(NEWEST_KNOWN_UCLA_ROMS)}"
+        )
         raise typer.Exit(0)
 
     return value
@@ -211,43 +225,59 @@ def common_callback(
     """Load the user's configuration file, then warn on stderr about each
     exported setting that no longer has an effect.
 
+    A deprecation is reported by its log line alone: the Python warning that
+    `deprecated` also emits would repeat it, with a source line, on the terminal.
+
     The file is loaded before any command's options are parsed, so an option's
-    ``envvar`` binding sees it; an exported variable still wins over it.
+    ``envvar`` binding sees it; an exported variable still wins over it. A file
+    the loader refuses (one it cannot read) stops every command except the ones
+    that manage it, ``cstar init`` and ``cstar env``.
 
     Raises
     ------
     typer.Exit
-        With code 2 when the configuration file names settings it may not set.
+        With code 2 when the loader refuses the configuration file.
     """
+    warnings.simplefilter("ignore", CstarDeprecationWarning)
     try:
         load_user_config()
     except CstarUserConfigError as ex:
+        from cstar.cli.environment import NAME as NAME_ENV
+        from cstar.cli.init import COMMAND_INIT
+
         typer.echo(str(ex), err=True)
-        raise typer.Exit(2) from ex
+        if ctx.invoked_subcommand not in {NAME_ENV, COMMAND_INIT}:
+            raise typer.Exit(2) from ex
 
     for name in sorted(REMOVED_SETTINGS.keys() & os.environ.keys()):
         typer.echo(f"{name} has no effect; {REMOVED_SETTINGS[name].guidance}", err=True)
 
 
 def exit_on_refused_settings() -> None:
-    """Stop a command that an exported `refused` removed setting used to change.
+    """Stop a command that a `refused` removed setting used to change.
 
     The commands such a setting used to change call this before they touch
-    anything: running them while it is exported would do more than was asked
-    (a dry run becoming a real one).
+    anything: running them while it is exported, or named in the configuration
+    file (which skips it), would do more than was asked (a dry run becoming a
+    real one).
 
     Raises
     ------
     typer.Exit
-        With code 2 when a refused setting is exported.
+        With code 2 when a refused setting is exported or in the file.
     """
+    config = load_user_config()
+    named = os.environ.keys() | config.skipped.keys()
     refused = [
         name
-        for name in sorted(REMOVED_SETTINGS.keys() & os.environ.keys())
+        for name in sorted(REMOVED_SETTINGS.keys() & named)
         if REMOVED_SETTINGS[name].refused
     ]
     if refused:
-        msg = f"Refusing to run while {', '.join(refused)} is exported; unset it to continue."
+        msg = (
+            f"Refusing to run while {', '.join(refused)} is exported or set in "
+            f"{config.path}; remove it to continue."
+        )
         typer.echo(msg, err=True)
         raise typer.Exit(2)
 
@@ -527,11 +557,16 @@ def get_persist_to(request: MigrationRequest, plan: MigrationPlan) -> Path:
     directory.
 
     The resulting filename follows the convention:
-        &lt;original_stem&gt;_&lt;latest_version&gt;.&lt;ext&gt;
+        <original_stem>-<digest>_<latest_version>.<ext>
+
+    where `<digest>` is taken from the source's resolved path and content, so
+    sources sharing a filename in different directories never share a copy,
+    an edited source never replaces the copy a running step may still read,
+    and re-migrating an unchanged source reuses its copy.
 
     Example:
     - Input: foo.yaml with any prior version, latest == 3.0.0
-    - Output: foo_3.0.0.yaml
+    - Output: foo-1a2b3c4d5e6f_3.0.0.yaml
 
     Parameters
     ----------
@@ -548,10 +583,10 @@ def get_persist_to(request: MigrationRequest, plan: MigrationPlan) -> Path:
     if request.target is not None:
         output = request.target
     else:
-        stem = request.source.stem
-        suffix = request.source.suffix
-        state_dir = DirectoryManager.state_home()
-        output = state_dir / f"{stem}_{plan.target}{suffix}"
+        source = request.source.resolve()
+        digest = hashlib.sha256(str(source).encode() + b"\0" + source.read_bytes())
+        name = f"{source.stem}-{digest.hexdigest()[:12]}_{plan.target}{source.suffix}"
+        output = DirectoryManager.state_home() / name
 
     return output.expanduser().resolve()
 
@@ -602,8 +637,10 @@ def persist_migration(request: MigrationRequest, result: MigrateResult) -> Path:
             backup_path = get_backup_path(request.source)
             backup_path.write_bytes(request.source.read_bytes())
 
-        nbytes = serialize(persist_to, updated_bp)
-        assert nbytes, "The migrated blueprint failed to write content"
+        content = model_to_yaml(updated_bp).encode()
+        assert content, "The migrated blueprint failed to serialize"
+        # atomic, so a concurrent run of the same source never reads half a file
+        write_bytes_atomic(persist_to, content)
     except (SyntaxError, CstarExpectationFailed) as ex:
         msg = f"Unable to complete migration: {ex}"
         raise typer.BadParameter(msg) from ex
@@ -637,7 +674,7 @@ def execute_migration(
         If the planned migration fails to complete, or the blueprint requires
         migration but migration is disabled via `CSTAR_DISABLE_MIGRATION`.
     CstarSchemaTooNewError
-        If the blueprint's schema is newer than this build reads.
+        If the blueprint's schema is newer than this build reads (see `VersionedDocument`).
     CstarManualMigrationError
         If the blueprint's schema has no automatic migration to this build's.
     CstarUnsupportedMigrationError
@@ -717,7 +754,7 @@ def localize_and_migrate(path: str, verbose: bool = False) -> tuple[Path, bool]:
     Raises
     ------
     CstarSchemaTooNewError
-        If the blueprint's schema is newer than this build reads.
+        If the blueprint's schema is newer than this build reads (see `VersionedDocument`).
     CstarManualMigrationError
         If the blueprint's schema has no automatic migration to this build's.
     CstarUnsupportedMigrationError

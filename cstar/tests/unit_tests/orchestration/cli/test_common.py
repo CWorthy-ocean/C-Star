@@ -24,6 +24,7 @@ from cstar.cli.common import (
     checkmark,
     colored,
     execute_migration,
+    get_persist_to,
     id_label,
     italic,
     label,
@@ -239,6 +240,77 @@ def test_set_ctxmap_overwrite(capsys: pytest.CaptureFixture) -> None:
     assert "will be overwritten" in capsys.readouterr().out
 
 
+_PLAN = MigrationPlan("1.0.0", "2.0.0", ())
+"""A plan whose target names the version in a migrated copy's filename."""
+
+
+def _write_bp(path: Path, content: str = "name: bp\n") -> Path:
+    """Write a stand-in source file; `get_persist_to` reads only its bytes."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(content)
+    return path
+
+
+def test_get_persist_to_names_a_copy_in_state_home(tmp_path: Path) -> None:
+    """Verify a copy without an explicit target lands in the state home, named
+    after the source's stem and the target version.
+    """
+    bp_path = _write_bp(tmp_path / "blueprint.yaml")
+
+    persist_to = get_persist_to(MigrationRequest(path=bp_path), _PLAN)
+
+    assert persist_to.parent == DirectoryManager.state_home().resolve()
+    assert persist_to.name.startswith("blueprint-")
+    assert persist_to.name.endswith("_2.0.0.yaml")
+
+
+def test_get_persist_to_is_stable_for_one_source(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Verify an unchanged source maps to one copy, however its path is spelled."""
+    bp_path = _write_bp(tmp_path / "blueprint.yaml")
+    monkeypatch.chdir(tmp_path)
+
+    absolute = get_persist_to(MigrationRequest(path=bp_path), _PLAN)
+    relative = get_persist_to(MigrationRequest(path=Path("blueprint.yaml")), _PLAN)
+
+    assert absolute == relative
+
+
+def test_get_persist_to_separates_same_named_sources(tmp_path: Path) -> None:
+    """Verify identical files sharing a filename in different directories get
+    separate copies, since relative locations anchor to each one's directory.
+    """
+    first = _write_bp(tmp_path / "first" / "blueprint.yaml")
+    second = _write_bp(tmp_path / "second" / "blueprint.yaml")
+
+    assert get_persist_to(MigrationRequest(path=first), _PLAN) != get_persist_to(
+        MigrationRequest(path=second), _PLAN
+    )
+
+
+def test_get_persist_to_separates_edits_of_one_source(tmp_path: Path) -> None:
+    """Verify editing a source names a new copy instead of replacing the copy an
+    earlier run may still read.
+    """
+    bp_path = _write_bp(tmp_path / "blueprint.yaml")
+    before = get_persist_to(MigrationRequest(path=bp_path), _PLAN)
+
+    _write_bp(bp_path, "name: edited\n")
+
+    assert get_persist_to(MigrationRequest(path=bp_path), _PLAN) != before
+
+
+def test_get_persist_to_honours_an_explicit_target(tmp_path: Path) -> None:
+    """Verify an explicit target (`--output`) is used as given."""
+    bp_path = _write_bp(tmp_path / "blueprint.yaml")
+    target = tmp_path / "out" / "migrated.yaml"
+
+    assert get_persist_to(MigrationRequest(path=bp_path, output=target), _PLAN) == (
+        target.resolve()
+    )
+
+
 @pytest.fixture
 def relative_location_bp(tmp_path: Path, bp_templates_dir: Path) -> Path:
     """A UCLA-ROMS blueprint, in its own directory, with a relative location."""
@@ -363,11 +435,14 @@ def test_localize_and_migrate_anchors_a_remote_blueprint_to_the_working_director
     )
 
 
-def test_root_callback_exits_on_a_bad_configuration_file(
-    isolate_user_config: Path, monkeypatch: pytest.MonkeyPatch
+def test_root_callback_skips_unknown_and_removed_settings(
+    isolate_user_config: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    flatten_cli_output: Callable[[str], str],
 ) -> None:
-    """Verify a configuration file naming a setting it may not set stops any
-    command with exit code 2 and the error on stderr, applying nothing.
+    """Verify a configuration file naming a removed setting and one from a newer
+    version runs the command, applying the rest of the file and warning once
+    about each skipped line.
 
     Parameters
     ----------
@@ -375,19 +450,87 @@ def test_root_callback_exits_on_a_bad_configuration_file(
         The configuration file the loader reads for this test.
     monkeypatch : pytest.MonkeyPatch
         Fixture to modify the environment.
+    flatten_cli_output : Callable[[str], str]
+        Fixture that joins the output lines that rich wrapped.
     """
     monkeypatch.delenv(ENV_CSTAR_SLURM_ACCOUNT, raising=False)
     isolate_user_config.write_text(
-        f"{ENV_CSTAR_SLURM_ACCOUNT}=m1234\nCSTAR_NOT_A_SETTING=1\n"
+        f"{ENV_CSTAR_SLURM_ACCOUNT}=m1234\n"
+        "CSTAR_ORCH_TRX_FREQ=1D\n"
+        "CSTAR_FROM_A_NEWER_VERSION=1\n"
     )
 
     result = CliRunner().invoke(root_app, ["env", "show"], color=False)
 
+    assert result.exit_code == 0, result.stderr
+    assert result.stderr.count("Ignoring a line in") == 2
+    assert "CSTAR_ORCH_TRX_FREQ has no effect" in result.stderr
+    assert "CSTAR_FROM_A_NEWER_VERSION is not a setting C-Star" in result.stderr
+    assert f"{ENV_CSTAR_SLURM_ACCOUNT}: m1234 [config]" in flatten_cli_output(
+        result.stdout
+    )
+
+
+@pytest.fixture
+def unreadable_config(isolate_user_config: Path) -> Path:
+    """A configuration file the loader refuses: it cannot be decoded."""
+    isolate_user_config.write_bytes(b"\xff\xfeCSTAR_LOG_LEVEL=DEBUG\n")
+    return isolate_user_config
+
+
+def test_root_callback_exits_on_an_unreadable_configuration_file(
+    unreadable_config: Path,
+) -> None:
+    """Verify a configuration file the loader cannot read stops an ordinary
+    command with exit code 2 and the error on stderr.
+
+    Parameters
+    ----------
+    unreadable_config : Path
+        The configuration file the loader refuses.
+    """
+    result = CliRunner().invoke(root_app, ["blueprint", "--help"], color=False)
+
     assert result.exit_code == 2
-    assert str(isolate_user_config) in result.stderr.replace("\n", "")
-    assert "CSTAR_NOT_A_SETTING" in result.stderr
-    assert "C-Star Environment Configuration" not in result.stdout
-    assert ENV_CSTAR_SLURM_ACCOUNT not in os.environ
+    assert str(unreadable_config) in result.stderr.replace("\n", "")
+    assert "cannot be read" in result.stderr
+
+
+@pytest.mark.parametrize(
+    "args",
+    [
+        ["env", "show"],
+        ["env", "set", "CSTAR_LOG_LEVEL", "DEBUG"],
+        ["env", "unset", "CSTAR_LOG_LEVEL"],
+        ["init", "--yes"],
+    ],
+)
+def test_root_callback_lets_the_repair_commands_run(
+    unreadable_config: Path, args: list[str]
+) -> None:
+    """Verify a configuration file the loader refuses does not stop the commands
+    that manage it: each gets past the root callback (which reports the error)
+    and fails, if at all, on its own terms rather than with exit code 2.
+
+    Parameters
+    ----------
+    unreadable_config : Path
+        The configuration file the loader refuses.
+    args : list[str]
+        The command to run.
+    """
+    result = CliRunner().invoke(root_app, args, color=False)
+
+    assert result.exit_code != 2, result.output
+    assert result.exception is None or isinstance(result.exception, SystemExit)
+    assert "cannot be read" in result.stderr
+    if args[:2] == ["env", "show"]:
+        assert result.exit_code == 0
+        assert "C-Star Environment Configuration" in result.stdout
+    else:
+        # a file that cannot be read is never rewritten
+        assert result.exit_code == 1
+        assert unreadable_config.read_bytes().startswith(b"\xff\xfe")
 
 
 def test_root_callback_loads_the_configuration_file(

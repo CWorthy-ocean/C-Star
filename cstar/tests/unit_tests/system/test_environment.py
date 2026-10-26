@@ -16,7 +16,6 @@ from cstar.base.env import (
     ENV_CSTAR_DEBUG_BUILD_MODE,
     ENV_CSTAR_DISABLE_BUILD_VERIFICATION,
     ENV_CSTAR_DISABLE_MIGRATION,
-    ENV_CSTAR_NPROCS_POST,
     ENV_CSTAR_SLURM_DISABLE_MT,
     ENV_CSTAR_STATE_HOME,
     FLAG_OFF,
@@ -887,7 +886,7 @@ def test_get_env_item_value_set(
     monkeypatch: MonkeyPatch,
 ) -> None:
     """Verify the default is not returned if an env item is set."""
-    cstar_var = ENV_CSTAR_NPROCS_POST
+    cstar_var = ENV_CSTAR_DEBUG_BUILD_MODE
     default_value = "default-value"
     actual_value = "actual-value"
 
@@ -905,7 +904,7 @@ def test_get_env_item_value_not_set(
     monkeypatch: MonkeyPatch,
 ) -> None:
     """Verify the default is returned if an env item is not set."""
-    cstar_var = ENV_CSTAR_NPROCS_POST
+    cstar_var = ENV_CSTAR_DEBUG_BUILD_MODE
     default_value = "default-value"
 
     monkeypatch.delenv(cstar_var, raising=False)
@@ -921,7 +920,7 @@ def test_get_env_item_value_ignore_factory(
     monkeypatch: MonkeyPatch,
 ) -> None:
     """Verify the non-null factory value is not returned if the value is set."""
-    cstar_var = ENV_CSTAR_NPROCS_POST
+    cstar_var = ENV_CSTAR_DEBUG_BUILD_MODE
     default_value = "default-value"
     actual_value = "actual-value"
     factory_value = "factory-value"
@@ -942,7 +941,7 @@ def test_get_env_item_value_use_factory(
     monkeypatch: MonkeyPatch,
 ) -> None:
     """Verify the non-null factory value is returned if the value is not set."""
-    cstar_var = ENV_CSTAR_NPROCS_POST
+    cstar_var = ENV_CSTAR_DEBUG_BUILD_MODE
     default_value = "default-value"
     factory_value = "factory-value"
 
@@ -961,7 +960,7 @@ def test_get_env_item_value_ignore_null_factory(
     monkeypatch: MonkeyPatch,
 ) -> None:
     """Verify the null factory value is not returned and the default is returned."""
-    cstar_var = ENV_CSTAR_NPROCS_POST
+    cstar_var = ENV_CSTAR_DEBUG_BUILD_MODE
     default_value = "default-value"
 
     monkeypatch.delenv(cstar_var, raising=False)

@@ -1,4 +1,5 @@
 import asyncio
+import hashlib
 import os
 import textwrap
 import typing as t
@@ -58,7 +59,11 @@ from cstar.entrypoint.utils import (
     ARG_VARFILE_SHORT,
     OPT_CLOBBER_ALL,
 )
-from cstar.execution.file_system import local_copy
+from cstar.execution.file_system import (
+    StateDirectoryManager,
+    local_copy,
+    write_bytes_atomic,
+)
 from cstar.orchestration.dag_runner import (
     ExecutiveRunSummary,
     ExecutiveStepSummary,
@@ -68,6 +73,8 @@ from cstar.orchestration.dag_runner import (
     build_and_run_dag,
     build_planner,
     check_clobber_targets,
+    clobber_each_step,
+    drop_spent_clobbers,
     get_launcher,
     load_external_runs,
     load_run_state,
@@ -85,8 +92,8 @@ from cstar.orchestration.orchestration import (
 from cstar.orchestration.run_check import report_orphans
 from cstar.orchestration.serialization import (
     deserialize,
+    model_to_yaml,
     read_raw,
-    serialize,
     try_deserialize,
     validate_serialized_entity,
 )
@@ -96,9 +103,10 @@ from cstar.orchestration.transforms import (
     anchor_blueprint_path,
     external_dependencies,
 )
+from cstar.system.migration import CstarSchemaTooNewError
 
 if t.TYPE_CHECKING:
-    from collections.abc import Mapping
+    from collections.abc import Callable, Mapping, Sequence
 
     from pydantic.fields import ComputedFieldInfo, FieldInfo
 
@@ -116,7 +124,8 @@ HELP_LONG = f"""\
 
 Specify a previously used `run_id` to re-start (or reattach) to a prior run.
 
-If a path to a blueprint is supplied, it will be executed as a single-step workplan.
+If a path to a blueprint is supplied, it will be executed as a single-step workplan
+(the same as `cstar blueprint submit`).
 
 Pass `--resume` to re-enter a prior run and resume its failed steps in place,
 rather than re-running them from scratch. Identify the run with `--run-id`, or
@@ -361,57 +370,116 @@ def resolve_clobber_selection(wp_path: Path, clobber_steps: list[str]) -> list[s
     return clobber_steps
 
 
-def auto_compose(path: str) -> str:
-    """Automatically wrap a blueprint in a workplan when passed."""
+def composed_workplan_name(blueprint: BlueprintCore) -> str:
+    """The name of the workplan composed around a blueprint, which is its default run-id.
+
+    Parameters
+    ----------
+    blueprint : BlueprintCore
+        The blueprint the workplan wraps.
+
+    Returns
+    -------
+    str
+
+    Raises
+    ------
+    typer.BadParameter
+        If nothing of the blueprint's name survives slugifying.
+    """
     try:
-        bp = deserialize(path, BlueprintCore)
-    except Exception:
+        return slugify(blueprint.name)
+    except ValueError as ex:
+        msg = f"A run cannot be named from the blueprint's name {blueprint.name!r}"
+        raise typer.BadParameter(msg) from ex
+
+
+def compose_blueprint_workplan(path: str) -> str:
+    """Wrap a blueprint in a single-step workplan kept under C-Star's state directory.
+
+    The workplan is keyed on the blueprint's resolved path, so submitting the
+    same blueprint again composes the same file with the same content, and two
+    blueprints that share a name compose different files. It is never written
+    beside the blueprint, which may be in a shared or read-only location.
+
+    Parameters
+    ----------
+    path : str
+        The path to a blueprint, or to anything else.
+
+    Returns
+    -------
+    str
+        The path to the composed workplan, or `path` unchanged when it is not a
+        blueprint.
+
+    Raises
+    ------
+    typer.BadParameter
+        If nothing of the blueprint's name survives slugifying.
+    """
+    blueprint = try_deserialize(path, BlueprintCore)
+    if blueprint is None:
         # path isn't a blueprint. leave it alone.
         return path
-    else:
-        log.debug(f"The blueprint at {path!r} must be converted into a workplan")
-        bp_path = Path(path)
-        wp_name = f"{slugify(bp.name)}-host-workplan{bp_path.suffix}"
-        wp_path = bp_path.with_name(wp_name)
 
-        wp = Workplan(
-            name=f"{slugify(bp.name)}-host",
-            description="Automated Workplan wrapping the execution of a single blueprint.",
-            steps=[
-                Step(
-                    name=f"Execute {bp.name!r}",
-                    application=bp.application,
-                    blueprint=bp_path,
-                )
-            ],
-        )
-        serialize(wp_path, wp)
-        log.info(f"Created a host workplan for blueprint in: {wp_path}")
-        return str(wp_path)
+    bp_path = Path(path).expanduser().resolve()
+    name = composed_workplan_name(blueprint)
+    digest = hashlib.sha256(str(bp_path).encode()).hexdigest()[:12]
+    wp_path = (
+        StateDirectoryManager.composed_workplans_dir()
+        / f"{name}-{digest}"
+        / f"{name}-workplan.yaml"
+    )
+
+    wp = Workplan(
+        name=name,
+        description=f"Single-step workplan submitted for {bp_path}",
+        steps=[
+            Step(
+                name=blueprint.application,
+                application=blueprint.application,
+                blueprint=bp_path,
+            )
+        ],
+    )
+    # atomic, so a concurrent submit of the same blueprint never reads half a file
+    write_bytes_atomic(wp_path, model_to_yaml(wp).encode())
+    log.debug(f"Composed a workplan for the blueprint {str(bp_path)!r} in: {wp_path}")
+    return str(wp_path)
 
 
-def migrate_steps(path: Path, workplan: Workplan):
+def migrate_steps(path: Path, workplan: Workplan) -> dict[str, Path]:
     """Perform automatic migration of the blueprints referenced by a workplan.
 
     Every step is checked before the command exits, so all blueprints with an
-    unsupported schema are reported together. The workplan is only rewritten
-    when every step succeeded.
+    unsupported schema are reported together. Neither the workplan nor its
+    blueprints are rewritten: a migrated blueprint is written to a copy, which
+    the run reads in place of the file the step names.
 
     Parameters
     ----------
     path : Path
-        The path where the updated workplan will be persisted; a step's
-        relative blueprint path is resolved against its directory.
+        The path of the workplan; a step's relative blueprint path is resolved
+        against its directory.
     workplan : Workplan
         The workplan to perform migrations on.
 
+    Returns
+    -------
+    dict[str, Path]
+        The migrated copy of each step's blueprint, by step name, for the steps
+        whose blueprint was migrated.
+
     Raises
     ------
+    typer.BadParameter
+        If a blueprint does not exist or is invalid.
     typer.Exit
         If any blueprint's schema is newer than this build reads or has no
         automatic migration.
     """
-    is_updated = False
+    migrated: dict[str, Path] = {}
     failures: list[str] = []
     for step in workplan.steps:
         if not isinstance(step.blueprint_path, (Path, str)):
@@ -431,9 +499,12 @@ def migrate_steps(path: Path, workplan: Workplan):
         # preparation will do, so the preflight opens the same file
         bp_path = str(anchor_blueprint_path(step, path.parent).blueprint_path)
         try:
-            step.blueprint_path, modified = localize_and_migrate(bp_path)
+            source, modified = localize_and_migrate(bp_path)
             if modified:
-                is_updated = True
+                migrated[step.name] = source
+        except FileNotFoundError as ex:
+            msg = f"Blueprint not found at path: {ex.filename}"
+            raise typer.BadParameter(msg) from ex
         except SCHEMA_ERRORS as ex:
             failures.append(schema_message(bp_path, ex))
         except ValidationError as ex:
@@ -446,20 +517,23 @@ def migrate_steps(path: Path, workplan: Workplan):
             console.print(failure, soft_wrap=True, markup=False)
         raise typer.Exit(1)
 
-    if is_updated:
-        log.info("Updating workplan with migrated blueprints")
-        serialize(path, workplan)
+    if migrated:
+        listing = ", ".join(f"{name!r} ({src})" for name, src in migrated.items())
+        log.debug(f"Running the migrated copies of the blueprints of steps {listing}")
+    return migrated
 
 
-def preprocess_path(workplan_path: str | None) -> str | None:
+def preprocess_path(workplan_path: str) -> str:
     """Perform validation related to the workplan path.
+
+    A path to a blueprint is replaced by the path to the workplan composed
+    around it.
 
     Parameters
     ----------
-    ctx : typer.Context
-        A context object containing state for the typer app.
-    workplan_path : str | None
-        The user-supplied path to a workplan file.
+    workplan_path : str
+        The user-supplied path to a workplan or blueprint file, or an empty
+        string.
 
     Returns
     -------
@@ -472,24 +546,18 @@ def preprocess_path(workplan_path: str | None) -> str | None:
                     msg = f"Workplan not found at path: {workplan_path}"
                     raise typer.BadParameter(msg)
 
-                local_path = Path(auto_compose(str(local_path)))
+                local_path = Path(compose_blueprint_workplan(str(local_path)))
 
                 # the transformed workplan of a run is re-entered, never prepared
                 live = is_transformed_workplan(local_path)
                 klass: type[Workplan] = LiveWorkplan if live else Workplan
                 validation_result = validate_serialized_entity(local_path, klass)
+                if isinstance(validation_result.error, CstarSchemaTooNewError):
+                    raise typer.BadParameter(validation_result.error_msg)
                 if not validation_result.item:
                     log.error(validation_result.error_msg)
                     msg = f"The workplan file in `{workplan_path}` is improperly formatted"
                     raise typer.BadParameter(msg)
-                if live:
-                    return str(local_path)
-
-                try:
-                    migrate_steps(local_path, validation_result.item)
-                except FileNotFoundError as ex:
-                    msg = f"Blueprint not found at path: {ex.filename}"
-                    raise typer.BadParameter(msg) from ex
                 return str(local_path)
         except FileNotFoundError as ex:
             if is_known_run_id(workplan_path):
@@ -594,7 +662,11 @@ def refuse_run_id_collision(wp_path: Path, run_id: str, *, explicit: bool) -> No
     if explicit:
         return
 
-    record = asyncio.run(TrackingRepository().get_workplan_run(run_id))
+    try:
+        record = asyncio.run(TrackingRepository().get_workplan_run(run_id))
+    except CstarError as ex:
+        msg = f"Run-id {run_id!r} cannot be checked against its record: {ex}"
+        raise typer.BadParameter(msg) from ex
     if record is None:
         return
 
@@ -605,7 +677,8 @@ def refuse_run_id_collision(wp_path: Path, run_id: str, *, explicit: bool) -> No
         msg = (
             f"Run-id {run_id!r}, derived from the workplan name, belongs to a run "
             f"whose workplan could not be found: {ex}; pass {ARG_RUN_ID} "
-            "<other-id> to start a new run."
+            "<other-id> to start a new run, or, when that run's directory was "
+            f"deleted, forget the run with `cstar admin clean {ARG_RUN_ID} {run_id}`."
         )
         raise typer.BadParameter(msg) from ex
     if started_from.resolve() == wp_path.resolve():
@@ -685,13 +758,18 @@ async def handle_run_reloading(run_id: str) -> WorkplanRun:
     Raises
     ------
     typer.BadParameter
-        - If no run record exists for the supplied run-id.
+        - If no run record exists for the supplied run-id, or it cannot be
+          read (one a newer cstar-ocean wrote that this build cannot read).
         - If the run was attached from elsewhere: it has no sentinels here and
           is never relaunched.
         - If the run's workplan or transformed workplan cannot be found.
     """
     repo = TrackingRepository()
-    wp_run = await repo.get_workplan_run(run_id)
+    try:
+        wp_run = await repo.get_workplan_run(run_id)
+    except CstarError as ex:
+        msg = f"Run {run_id!r} cannot be re-entered: {ex}"
+        raise typer.BadParameter(msg) from ex
     if wp_run is None:
         msg = f"No runs with the id `{run_id}` could be found."
         raise typer.BadParameter(msg)
@@ -826,14 +904,202 @@ def verify_resume_source(wp_path: Path, wp_run: WorkplanRun) -> None:
     if supplied != recorded:
         msg = (
             f"The workplan at {str(wp_path)!r} differs from the one run {wp_run.run_id!r} "
-            f"was started from ({str(recorded_path)!r}), e.g. it was edited or its blueprints "
-            f"were auto-migrated since; {ARG_RESUME} re-enters the recorded run. "
+            f"was started from ({str(recorded_path)!r}): it was edited since; "
+            f"{ARG_RESUME} re-enters the recorded run. "
             f"{escape}, or supply a new --run-id to start a fresh run."
         )
         raise typer.BadParameter(msg)
 
     msg = f"Workplan {str(wp_path)!r} matches the recorded workplan for run {wp_run.run_id!r}"
     log.debug(msg)
+
+
+def is_live_workplan_file(path: str) -> bool:
+    """Whether a path names the transformed workplan a run persists.
+
+    Parameters
+    ----------
+    path : str
+        The user-supplied path, possibly empty.
+
+    Returns
+    -------
+    bool
+    """
+    return bool(path) and Path(path).is_file() and is_transformed_workplan(Path(path))
+
+
+def workplan_resubmit(source: str) -> str:
+    """The command that submits a workplan again.
+
+    Parameters
+    ----------
+    source : str
+        The workplan to name in the command.
+
+    Returns
+    -------
+    str
+    """
+    return f"cstar workplan {COMMAND_SUBMIT} {source}"
+
+
+def submit_workplan(
+    path: str,
+    run_id: str,
+    *,
+    clobber: list[str],
+    resume: bool,
+    pre_run: bool,
+    user_vars: "Mapping[str, str]",
+    explicit_run_id: bool,
+    resubmit: "Callable[[str], str]",
+    clobber_hint: "Callable[[Sequence[str]], str]",
+) -> None:
+    """Schedule the run of a workplan, or re-enter a recorded run, and report it.
+
+    Parameters
+    ----------
+    path : str
+        The local path to the workplan to run, or to its transformed workplan to
+        re-enter its run. Empty to re-enter the run of `run_id` as recorded.
+    run_id : str
+        The run-id the workplan runs under.
+    clobber : list[str]
+        The names of the steps whose prior state is cleared, or the literal
+        token `all`.
+    resume : bool
+        Whether to re-enter the run and resume its failed steps in place.
+    pre_run : bool
+        Whether to perform every stage before the model launch without
+        launching a model.
+    user_vars : Mapping[str, str]
+        The user-defined variables the workplan is filled with.
+    explicit_run_id : bool
+        Whether `run_id` was supplied by the user rather than derived.
+    resubmit : Callable[[str], str]
+        Names the command that submits this run's source again, given the
+        workplan the run was made from (a `<workplan>` placeholder when it is not
+        known), for the follow-up steps printed.
+    clobber_hint : Callable[[Sequence[str]], str]
+        Spells this command's options that re-run the named steps, for the
+        refusal of a re-entry over edited steps.
+
+    Raises
+    ------
+    typer.BadParameter
+        If the inputs are invalid or the run cannot be re-entered.
+    typer.Exit
+        If the run could not be scheduled.
+    """
+    live = is_live_workplan_file(path)
+    reload = resume or not path or live
+
+    if reload:
+        wp_run = asyncio.run(handle_run_reloading(run_id))
+        if path and live:
+            verify_live_source(Path(path), wp_run)
+        elif path:
+            verify_resume_source(Path(path), wp_run)
+        original_path, trx_path = wp_run.workplan_path, wp_run.trx_workplan_path
+        path = str(trx_path)
+
+    try:
+        with local_copy(path) as wp_path:
+            clobber = resolve_clobber_selection(wp_path, clobber)
+
+            if reload:
+                wp = LiveWorkplan.load(wp_path)
+                if resume and wp.pre_run:
+                    msg = (
+                        f"Run {run_id!r} is a pre-run; retry its failed steps with "
+                        f"`{resubmit('<workplan>')} {ARG_PRE_RUN}` instead"
+                    )
+                    raise typer.BadParameter(msg, param_hint=ARG_RESUME)
+                pre_run = wp.pre_run
+                asyncio.run(drop_spent_clobbers(wp, wp_run))
+                apply_clobber_overrides(wp, clobber)
+                if resume:
+                    # load the state once: refresh the manifest, then apply it
+                    launcher = get_launcher(wp)
+                    status = asyncio.run(load_run_state(run_id, launcher))
+                    refresh_run_manifest(wp_run.output_path, run_id, status)
+                    asyncio.run(apply_resume_overrides(wp, status))
+                external = asyncio.run(
+                    load_external_runs(wp, get_launcher(wp, force_local=pre_run))
+                )
+                exit_on_external_problems(external, external_dependencies(wp))
+                planner = build_planner(wp, external.tasks())
+                report_orphans(wp_run.output_path, run_id, wp)
+
+                wp_run = asyncio.run(
+                    run_dag(
+                        original_path,
+                        trx_path,
+                        run_id,
+                        planner,
+                        user_variables=user_vars,
+                    ),
+                )
+            else:
+                refuse_run_id_collision(
+                    wp_path,
+                    run_id,
+                    explicit=explicit_run_id,
+                )
+                sources = migrate_steps(wp_path, deserialize(wp_path, Workplan))
+                wp_run = asyncio.run(
+                    build_and_run_dag(
+                        wp_path,
+                        run_id,
+                        user_variables=user_vars,
+                        clobber_steps=clobber,
+                        pre_run=pre_run,
+                        blueprint_sources=sources,
+                        clobber_hint=clobber_hint,
+                    ),
+                )
+
+            summary = asyncio.run(ExecutiveRunSummary.from_run(wp_run))
+            console.print(get_run_summary_display(summary))
+    except (typer.BadParameter, typer.Exit):
+        raise
+    except NoPreparableStepsError as ex:
+        console.print(str(ex))
+        return
+    except CstarExpectationFailed as ex:
+        msg = f"An invalid request was made: {ex}"
+        log.exception(msg)
+        print(msg)
+        raise typer.Exit(1) from ex
+    except CstarSchemaTooNewError as ex:
+        # a file of the run (the workplan, its manifest or a blueprint) was
+        # written by a newer release; the message names it and the upgrade
+        log.debug("A file of the run is newer than this build reads", exc_info=True)
+        raise typer.BadParameter(f"Run {run_id!r} cannot be continued: {ex}") from ex
+    except ValidationError as ex:
+        # a step blueprint (or the workplan) that fails strict validation: the
+        # message says what is wrong, so the traceback is only logged for debugging
+        log.debug("Invalid inputs encountered while running the dag", exc_info=True)
+        msg = f"{ex.title} failed validation: {format_validation_errors(ex)}"
+        raise typer.BadParameter(msg) from ex
+    except ValueError as ex:
+        msg = "Invalid inputs encountered while running the dag"
+        log.exception(msg)
+        raise typer.BadParameter(str(ex)) from ex
+    except Exception as ex:
+        msg = f"Workplan run {run_id!r} has failed: {ex}"
+        log.exception(msg)
+        print(msg)
+        raise typer.Exit(3) from ex
+
+    console.print(f"{summary.workplan_name!r} run scheduling has completed")
+    if pre_run:
+        console.print(
+            "Pre-run scheduled. Submit "
+            f"`{resubmit(str(summary.source_workplan))} {ARG_RUN_ID} {summary.run_id}` "
+            f"without {ARG_PRE_RUN} to attach to the prepared directories and launch."
+        )
 
 
 @app.command(name=COMMAND_SUBMIT, help=HELP_LONG, short_help=HELP_SHORT)
@@ -921,7 +1187,7 @@ def submit(
         msg = "`--var` and `--varfile` must not be supplied together"
         raise typer.BadParameter(msg)
 
-    live = bool(path) and Path(path).is_file() and is_transformed_workplan(Path(path))
+    live = is_live_workplan_file(path)
 
     problems = [
         msg
@@ -955,100 +1221,18 @@ def submit(
     if problems:
         raise typer.BadParameter("; ".join(problems))
 
-    reload = resume or not path or live
-
-    if reload:
-        wp_run = asyncio.run(handle_run_reloading(run_id))
-        if path and live:
-            verify_live_source(Path(path), wp_run)
-        elif path:
-            verify_resume_source(Path(path), wp_run)
-        original_path, trx_path = wp_run.workplan_path, wp_run.trx_workplan_path
-        path = str(trx_path)
-
-    try:
-        with local_copy(path) as wp_path:
-            clobber = resolve_clobber_selection(wp_path, clobber)
-            user_vars = t.cast("Mapping[str, str]", ctx.obj)
-
-            if reload:
-                wp = LiveWorkplan.load(wp_path)
-                if resume and wp.pre_run:
-                    msg = (
-                        f"Run {run_id!r} is a pre-run; retry its failed steps with "
-                        f"`cstar workplan {COMMAND_SUBMIT} <workplan> {ARG_PRE_RUN}` instead"
-                    )
-                    raise typer.BadParameter(msg, param_hint=ARG_RESUME)
-                pre_run = wp.pre_run
-                apply_clobber_overrides(wp, clobber)
-                if resume:
-                    # load the state once: refresh the manifest, then apply it
-                    launcher = get_launcher(wp)
-                    status = asyncio.run(load_run_state(run_id, launcher))
-                    refresh_run_manifest(wp_run.output_path, run_id, status)
-                    asyncio.run(apply_resume_overrides(wp, status))
-                external = asyncio.run(
-                    load_external_runs(wp, get_launcher(wp, force_local=pre_run))
-                )
-                exit_on_external_problems(external, external_dependencies(wp))
-                planner = build_planner(wp, external.tasks())
-                report_orphans(wp_run.output_path, run_id, wp)
-
-                wp_run = asyncio.run(
-                    run_dag(
-                        original_path,
-                        trx_path,
-                        run_id,
-                        planner,
-                        user_variables=user_vars,
-                    ),
-                )
-            else:
-                refuse_run_id_collision(
-                    wp_path,
-                    run_id,
-                    explicit=ctx.get_parameter_source("run_id")
-                    is not ParameterSource.DEFAULT,
-                )
-                wp_run = asyncio.run(
-                    build_and_run_dag(
-                        wp_path,
-                        run_id,
-                        user_variables=user_vars,
-                        clobber_steps=clobber,
-                        pre_run=pre_run,
-                    ),
-                )
-
-            summary = asyncio.run(ExecutiveRunSummary.from_run(wp_run))
-            console.print(get_run_summary_display(summary))
-    except (typer.BadParameter, typer.Exit):
-        raise
-    except NoPreparableStepsError as ex:
-        console.print(str(ex))
-        return
-    except CstarExpectationFailed as ex:
-        msg = f"An invalid request was made: {ex}"
-        log.exception(msg)
-        print(msg)
-        raise typer.Exit(1) from ex
-    except ValueError as ex:
-        msg = "Invalid inputs encountered while running the dag"
-        log.exception(msg)
-        raise typer.BadParameter(ex.args[0]) from ex
-    except Exception as ex:
-        msg = f"Workplan run {run_id!r} has failed: {ex}"
-        log.exception(msg)
-        print(msg)
-        raise typer.Exit(3) from ex
-
-    console.print(f"{summary.workplan_name!r} run scheduling has completed")
-    if pre_run:
-        console.print(
-            "Pre-run scheduled. Submit "
-            f"`cstar workplan {COMMAND_SUBMIT} {summary.source_workplan} {ARG_RUN_ID} {summary.run_id}` "
-            f"without {ARG_PRE_RUN} to attach to the prepared directories and launch."
-        )
+    submit_workplan(
+        path,
+        run_id,
+        clobber=clobber,
+        resume=resume,
+        pre_run=pre_run,
+        user_vars=t.cast("Mapping[str, str]", ctx.obj),
+        explicit_run_id=ctx.get_parameter_source("run_id")
+        is not ParameterSource.DEFAULT,
+        resubmit=workplan_resubmit,
+        clobber_hint=clobber_each_step,
+    )
 
 
 if __name__ == "__main__":

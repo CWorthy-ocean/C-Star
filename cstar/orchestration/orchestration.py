@@ -1,4 +1,5 @@
 import asyncio
+import functools
 import os
 import shlex
 import typing as t
@@ -55,6 +56,7 @@ from cstar.orchestration.serialization import (
 )
 from cstar.system.environment import get_envfield_alias
 from cstar.system.manager import get_sysmgr
+from cstar.system.migration import TOLERATE_UNKNOWN, warn_unknown_keys
 
 nx = lazy_import("networkx")
 log = get_logger(__name__)
@@ -228,6 +230,8 @@ class ProcessHandle(BaseModel):
     """Whether the attempt this handle tracks ran in pre-run mode (prepared without launching the model)."""
     submitted_at: datetime | None = Field(default=None)
     """When the launcher submitted the process; `None` on a sentinel written before submission times were recorded."""
+    run_uuid: str = Field(default="")
+    """The uuid of the run manifest the process was launched for; empty on sentinels written before it was recorded, or when the manifest could not be written."""
 
     @property
     def safe_name(self) -> str:
@@ -451,7 +455,7 @@ class LiveWorkplan(Workplan):
             return authored
 
     @classmethod
-    def load(cls, path: Path | str) -> t.Self:
+    def load(cls, path: Path | str, *, tolerant: bool = False) -> t.Self:
         """Load a transformed workplan, rebasing its paths when the run has moved.
 
         `prepare_workplan` records the run root in the file it writes. When the
@@ -465,11 +469,17 @@ class LiveWorkplan(Workplan):
         ----------
         path : Path | str
             The location of the transformed workplan.
+        tolerant : bool
+            Read a workplan newer than this build, within its major, with the
+            keys this build does not know ignored; only to display a run, never
+            to run it or write it (see `VersionedDocument`).
 
         Raises
         ------
         FileNotFoundError
             If the workplan file does not exist.
+        CstarSchemaTooNewError
+            If the workplan is newer than this build reads (see `VersionedDocument`).
 
         Returns
         -------
@@ -489,23 +499,27 @@ class LiveWorkplan(Workplan):
                 log.debug(f"Rebasing {str(path)!r} from {recorded!r} to {new_root}")
                 document = rebase_paths(document, recorded, str(new_root))
 
-        return cls.model_validate(document)
+        workplan = cls.model_validate(document, context={TOLERATE_UNKNOWN: tolerant})
+        warn_unknown_keys(workplan, path)
+        return workplan
 
     @classmethod
-    def try_load(cls, path: Path | str) -> t.Self | None:
+    def try_load(cls, path: Path | str, *, tolerant: bool = False) -> t.Self | None:
         """Load a transformed workplan with `load`, or return `None` on any failure.
 
         Parameters
         ----------
         path : Path | str
             The location of the transformed workplan.
+        tolerant : bool
+            Passed to `load`.
 
         Returns
         -------
         LiveWorkplan | None
         """
         try:
-            return cls.load(path)
+            return cls.load(path, tolerant=tolerant)
         except Exception:
             log.debug(f"try-load failed loading a workplan from {str(path)!r}")
             return None
@@ -515,6 +529,8 @@ class LiveWorkplan(Workplan):
         cls, paths: Sequence[Path | str], limit: int
     ) -> Sequence[t.Self | None]:
         """Load a collection of transformed workplans concurrently with `try_load`.
+
+        The workplans are read to be listed, so tolerantly (see `load`).
 
         Parameters
         ----------
@@ -529,7 +545,9 @@ class LiveWorkplan(Workplan):
             The workplans in input order; one that cannot be read or fails
             validation is returned as `None`.
         """
-        return await read_all(paths, cls.try_load, limit)
+        return await read_all(
+            paths, functools.partial(cls.try_load, tolerant=True), limit
+        )
 
     def _get_step_lookup(self) -> Mapping[str, LiveStep]:
         """Build a mapping from step name to step for the steps
@@ -963,6 +981,8 @@ class Launcher(t.Protocol, t.Generic[_THandle]):
         cls,
         step: LiveStep,
         dependencies: list[_THandle],
+        *,
+        run_uuid: str,
     ) -> Task[_THandle]:
         """Launch a process for a step.
 
@@ -970,6 +990,13 @@ class Launcher(t.Protocol, t.Generic[_THandle]):
         ----------
         step : LiveStep
             The step to launch
+        dependencies : list[_THandle]
+            The handles of the tasks that must complete before the step runs.
+        run_uuid : str
+            The uuid of the run's manifest; a prior handle recording another
+            uuid belongs to another run and is not adopted (the orchestrator
+            records the uuid on the handle). Empty when the manifest could not
+            be written.
 
         Returns
         -------
@@ -1020,6 +1047,10 @@ class Launcher(t.Protocol, t.Generic[_THandle]):
     async def cancel(cls, item: Task[_THandle]) -> Task[_THandle]:
         """Cancel a task, if possible.
 
+        The task's handle may have been read from a sentinel by a later
+        process than the one that launched it. A failure to cancel is logged,
+        not raised.
+
         Parameters
         ----------
         item : Task[_THandle]
@@ -1027,8 +1058,9 @@ class Launcher(t.Protocol, t.Generic[_THandle]):
 
         Returns
         -------
-        Status
-            The current status of the item.
+        Task[_THandle]
+            The task; its status is `Cancelled` only when the cancellation was
+            accepted.
         """
         ...
 
@@ -1047,10 +1079,15 @@ class Orchestrator(LoggingMixin):
     launcher: Launcher[t.Any]
     """The launcher used by the orchestrator to manage task execution."""
 
+    run_uuid: str
+    """The uuid of the run's manifest, passed to every launch and recorded on its handle."""
+
     _on_launched: Callable[[ProcessHandle], Awaitable[None]] | None = None
     """A callback to be executed when the orchestrator launches a task."""
 
-    def __init__(self, planner: Planner, launcher: Launcher[t.Any]) -> None:
+    def __init__(
+        self, planner: Planner, launcher: Launcher[t.Any], *, run_uuid: str
+    ) -> None:
         """Initialize the orchestrator.
 
         Parameters
@@ -1059,9 +1096,12 @@ class Orchestrator(LoggingMixin):
             The planner containing an execution plan for a workplan.
         launcher : Launcher
             A launcher to manage processes for tasks.
+        run_uuid : str
+            The uuid of the run's manifest; empty when it could not be written.
         """
         self.planner = planner
         self.launcher = launcher
+        self.run_uuid = run_uuid
 
     def get_open_nodes(self) -> Mapping[str, Status] | None:
         """Retrieve the set of unscheduled task nodes that are ready to launch.
@@ -1195,7 +1235,9 @@ class Orchestrator(LoggingMixin):
             # prerequisite tasks weren't all started, yet.
             return None
 
-        task = await self.launcher.launch(step, dependencies)
+        task = await self.launcher.launch(step, dependencies, run_uuid=self.run_uuid)
+        # an adopted handle written before uuids were recorded joins this run
+        task.handle.run_uuid = self.run_uuid or task.handle.run_uuid
         self.planner.store(node, KEY_TASK, task)
         self.log.info(f"Launched step: {step.name}")
 

@@ -65,7 +65,7 @@ cstar --version
 
 On a supported HPC system, install `cstar-ocean` alone and let the site's
 environment modules provide the toolchain. The
-[installation guide](https://c-star.readthedocs.io/en/latest/installation.html)
+[installation guide](https://c-star.readthedocs.io/en/latest/getting_started/installation.html)
 covers the HPC variant, installing from source, and what to set up after
 installing.
 
@@ -89,27 +89,27 @@ cstar blueprint run ~/cstar/blueprint_runs/forge/<name>/blueprints/B_<name>.yaml
 The same command runs every blueprint; the blueprint's `application` field
 decides which application handles it. GLORYS ocean reanalysis supplies the
 initial and boundary conditions, so
-[register for Copernicus Marine](https://c-star.readthedocs.io/en/latest/data_access.html)
+[register for Copernicus Marine](https://c-star.readthedocs.io/en/latest/getting_started/data_access.html)
 before the first run. The
-[end-to-end tutorial](https://c-star.readthedocs.io/en/latest/tutorials/end_to_end.html)
+[blueprint tutorial](https://c-star.readthedocs.io/en/latest/tutorials/blueprint_tutorial.html)
 walks through each step in detail.
 
 ## Documentation
 
 The full documentation lives at <https://c-star.readthedocs.io>.
 
-- [Getting started](https://c-star.readthedocs.io/en/latest/installation.html):
+- [Getting started](https://c-star.readthedocs.io/en/latest/getting_started/installation.html):
   installation, dataset registration and configuration
-- [Terminology and concepts](https://c-star.readthedocs.io/en/latest/terminology.html)
+- [Terminology and concepts](https://c-star.readthedocs.io/en/latest/getting_started/terminology.html)
 - User guide:
-  [blueprints](https://c-star.readthedocs.io/en/latest/blueprints.html),
-  [workplans](https://c-star.readthedocs.io/en/latest/workplans.html),
-  [catalog](https://c-star.readthedocs.io/en/latest/catalog.html),
-  [wizard](https://c-star.readthedocs.io/en/latest/wizard.html)
-- [Domain generation with Forge](https://c-star.readthedocs.io/en/latest/forge/index.html)
-- [Supported systems](https://c-star.readthedocs.io/en/latest/machines.html)
-  and [running on HPC](https://c-star.readthedocs.io/en/latest/hpc.html)
-- [API reference](https://c-star.readthedocs.io/en/latest/api.html)
+  [blueprints](https://c-star.readthedocs.io/en/latest/applications/blueprints.html),
+  [workplans](https://c-star.readthedocs.io/en/latest/workplans/index.html),
+  [catalog](https://c-star.readthedocs.io/en/latest/catalog_wizard/catalog.html),
+  [wizard](https://c-star.readthedocs.io/en/latest/catalog_wizard/launching.html)
+- [Domain generation with Forge](https://c-star.readthedocs.io/en/latest/applications/forge/index.html)
+- [Supported systems](https://c-star.readthedocs.io/en/latest/deployments/machines.html)
+  and [running on HPC](https://c-star.readthedocs.io/en/latest/deployments/hpc.html)
+- [API reference](https://c-star.readthedocs.io/en/latest/reference/api.html)
 - [Contributor guide](https://c-star.readthedocs.io/en/latest/contributing.html)
 
 ## Related projects

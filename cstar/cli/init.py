@@ -27,8 +27,9 @@ from cstar.base.env import (
     UserConfig,
     get_env_item,
     hpc_data_directory,
-    load_user_config,
+    load_user_config_for_repair,
     render_user_config,
+    user_config_problems,
 )
 from cstar.base.exceptions import CstarError
 from cstar.cli.environment import NAME as NAME_ENV
@@ -78,12 +79,12 @@ UNSET_ANSWER: t.Final[str] = "-"
 HINT_TIMEOUT: t.Final[float] = 5.0
 """Seconds to wait for a SLURM lookup made only to show a hint."""
 DOCS_PRECEDENCE_URL: t.Final[str] = (
-    "https://c-star.readthedocs.io/en/latest/configuration.html"
+    "https://c-star.readthedocs.io/en/latest/getting_started/configuration.html"
     "#where-a-setting-can-be-set-and-which-wins"
 )
 """The documentation section on where a setting can be set and which wins."""
 DOCS_DATA_ACCESS_URL: t.Final[str] = (
-    "https://c-star.readthedocs.io/en/latest/data_access.html"
+    "https://c-star.readthedocs.io/en/latest/getting_started/data_access.html"
 )
 """The documentation page on registering for datasets."""
 
@@ -352,24 +353,49 @@ def locations_section(
     return [ask(r.item.name, r, yes) for r in resolved]
 
 
-def carried_settings(path: "Path") -> dict[str, str]:
-    """The settings the file already holds, spelled as the file spells them.
+def carried_settings(path: "Path") -> tuple[dict[str, str], dict[str, str | None]]:
+    """The lines the file already holds, spelled as the file spells them.
 
     Settings the walkthrough does not prompt for (a log level set with
     `cstar env set`, say) survive the rewrite this way; values are kept
-    unexpanded so a ``~`` or ``$VAR`` keeps meaning what it meant.
+    unexpanded so a ``~`` or ``$VAR`` keeps meaning what it meant. So do the
+    lines this version will not apply (a removed setting, a name from a newer
+    version, a setting written without ``=``), which the rewrite keeps apart.
+
+    Returns
+    -------
+    tuple[dict[str, str], dict[str, str | None]]
+        The settings to keep, and the lines this version will not apply, with
+        their values (`None` for a name written without ``=``).
+
+    Raises
+    ------
+    typer.Exit
+        With code 1 when the file cannot be read: rewriting it would lose what
+        it holds.
     """
     if not path.is_file():
-        return {}
-    return {
+        return {}, {}
+    try:
+        entries = dotenv_values(path, interpolate=False)
+    except (OSError, UnicodeDecodeError) as ex:
+        typer.echo(f"Error: cannot read {path}: {ex}", err=True)
+        raise typer.Exit(1) from ex
+    settings = {
         name: value
-        for name, value in dotenv_values(path, interpolate=False).items()
-        if value is not None
+        for name, value in entries.items()
+        if value is not None and not user_config_problems([name])
     }
+    return settings, {n: v for n, v in entries.items() if n not in settings}
 
 
-def write_section(config: UserConfig, decisions: "Sequence[Decision]") -> list[str]:
-    """Write the configuration file from the decisions and report what it holds.
+def write_section(
+    config: UserConfig,
+    carried: tuple[dict[str, str], dict[str, str | None]],
+    decisions: "Sequence[Decision]",
+) -> list[str]:
+    """Write the configuration file from what it held and the decisions, and
+    report what it holds.
 
     Returns
     -------
@@ -377,10 +403,12 @@ def write_section(config: UserConfig, decisions: "Sequence[Decision]") -> list[s
         The settings written, as ``NAME=value``.
     """
     header("Configuration file")
-    values = carried_settings(config.path)
+    values, unrecognised = carried
     for decision in decisions:
         decision.apply(values)
-    content = render_user_config(values)
+    # a setting written without a value that the walkthrough answered is replaced
+    unrecognised = {n: v for n, v in unrecognised.items() if n not in values}
+    content = render_user_config(values, unrecognised)
     try:
         write_bytes_atomic(config.path, content.encode())
     except OSError as ex:
@@ -499,8 +527,9 @@ def init(
     ] = False,
 ) -> None:
     """Walk through the setup that follows an install."""
-    # Loaded (and validated) by the root callback already; this is the cached record.
-    config = load_user_config()
+    # Loaded by the root callback already; when it cannot read the file this is an
+    # empty record, and carried_settings stops below.
+    config = load_user_config_for_repair()
 
     context: SystemContext | None
     try:
@@ -526,12 +555,14 @@ def init(
         else "not found; it will be created"
     )
     typer.echo(f"Configuration file: {config.path} ({state})")
+    # read before any question, so a file that cannot be read stops the walkthrough
+    carried = carried_settings(config.path)
 
     decisions: list[Decision] = []
     if context is not None and isinstance(scheduler, SlurmScheduler):
         decisions += scheduler_section(context, config, yes)
     decisions += locations_section(context, scheduler, config, yes)
-    written = write_section(config, decisions)
+    written = write_section(config, carried, decisions)
     shell_outcome = shell_section(yes)
     kernel_outcome = kernel_section(yes)
     data_access_section()

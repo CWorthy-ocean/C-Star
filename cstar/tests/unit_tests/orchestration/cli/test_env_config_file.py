@@ -280,26 +280,81 @@ REJECTED_NAMES = [
 
 
 @pytest.mark.parametrize("name", REJECTED_NAMES)
-@pytest.mark.parametrize("command", ["set", "unset"])
 def test_rejected_names(
     runner: CliRunner,
     isolate_user_config: Path,
     flatten_cli_output: Callable[[str], str],
     name: str,
-    command: str,
 ) -> None:
-    """Names the file may not hold are refused as a usage error, naming the
-    setting, with the file left alone.
+    """`set` refuses names the file may not hold as a usage error, naming the
+    setting, with the file left alone: a typo is caught when it is written.
     """
     path = isolate_user_config
     path.write_text(EXISTING_FILE)
-    app, args = (app_set, [name, "x"]) if command == "set" else (app_unset, [name])
 
-    result = runner.invoke(app, args, color=False)
+    result = runner.invoke(app_set, [name, "x"], color=False)
 
     assert result.exit_code == 2
     assert name in flatten_cli_output(result.stderr)
     assert path.read_text() == EXISTING_FILE
+
+
+@pytest.mark.parametrize("name", REJECTED_NAMES)
+def test_unset_takes_out_a_line_the_loader_skips(
+    runner: CliRunner, isolate_user_config: Path, name: str
+) -> None:
+    """`unset` accepts any name, so a line the loader skips (a removed setting,
+    one from a newer version) can be taken out of the file with it.
+    """
+    path = isolate_user_config
+    path.write_text(f"{EXISTING_FILE}{name}=1\n")
+
+    result = runner.invoke(app_unset, [name], color=False)
+
+    assert result.exit_code == 0, result.output
+    assert path.read_text() == f"{EXISTING_FILE}# {name}=\n"
+
+
+def test_unset_comments_out_a_name_written_without_equals(
+    runner: CliRunner, isolate_user_config: Path
+) -> None:
+    """`unset` takes out a line naming a setting with no ``=``."""
+    path = isolate_user_config
+    path.write_text(f"{ENV_CSTAR_SLURM_ACCOUNT}\n{EXISTING_FILE}")
+
+    result = runner.invoke(app_unset, [ENV_CSTAR_SLURM_ACCOUNT], color=False)
+
+    assert result.exit_code == 0, result.output
+    assert path.read_text() == f"# {ENV_CSTAR_SLURM_ACCOUNT}=\n{EXISTING_FILE}"
+
+
+def test_set_fills_in_a_name_written_without_equals(
+    runner: CliRunner, isolate_user_config: Path
+) -> None:
+    """`set` gives a value to a line naming the setting with no ``=``, in place."""
+    path = isolate_user_config
+    path.write_text(f"{ENV_CSTAR_SLURM_ACCOUNT}\n{EXISTING_FILE}")
+
+    result = runner.invoke(app_set, [ENV_CSTAR_SLURM_ACCOUNT, "m1234"], color=False)
+
+    assert result.exit_code == 0, result.output
+    assert path.read_text() == f"{ENV_CSTAR_SLURM_ACCOUNT}=m1234\n{EXISTING_FILE}"
+
+
+def test_set_keeps_lines_the_loader_skips(
+    runner: CliRunner, isolate_user_config: Path
+) -> None:
+    """`set` in a file that names a setting from a newer version leaves that line
+    alone: another version of C-Star may read it.
+    """
+    path = isolate_user_config
+    path.write_text(f"{EXISTING_FILE}CSTAR_FROM_A_NEWER_VERSION=1\n")
+
+    result = runner.invoke(app_set, [ENV_CSTAR_LOG_LEVEL, "DEBUG"], color=False)
+
+    assert result.exit_code == 0, result.output
+    assert "CSTAR_FROM_A_NEWER_VERSION=1\n" in path.read_text()
+    assert read_user_config(path)[ENV_CSTAR_LOG_LEVEL] == "DEBUG"
 
 
 @pytest.mark.parametrize("name", REJECTED_NAMES)

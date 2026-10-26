@@ -7,6 +7,7 @@ from pathlib import Path
 from unittest import mock
 
 import pytest
+import yaml
 from click.testing import Result
 from rich.console import Console
 from typer.testing import CliRunner
@@ -272,6 +273,28 @@ def test_yaml_names_the_run(run: FakeRun) -> None:
 
     assert result.exit_code == 0, result.output
     assert "run_id:" in result.stdout
+
+
+@pytest.mark.parametrize("format_", ["table", "json", "yaml"])
+def test_a_manifest_with_keys_a_newer_release_wrote_is_shown_in_every_format(
+    run: FakeRun, format_: str
+) -> None:
+    """Verify a newer-minor manifest holding a key this build does not know is
+    shown with the key ignored, in each format, and its file is left as it was.
+    """
+    path = run.root / RUN_MANIFEST_NAME
+    document = yaml.safe_load(path.read_text())
+    major, minor, _ = document["schema_version"].split(".")
+    document["schema_version"] = f"{major}.{int(minor) + 1}.0"
+    document["future_field"] = True
+    path.write_text(yaml.safe_dump(document))
+    before = path.read_bytes()
+
+    result = invoke(RUN_ID, ARG_NO_REFRESH, ARG_FORMAT, format_, record=run.record)
+
+    assert result.exit_code == 0, result.output
+    assert "future_field" not in result.stdout
+    assert path.read_bytes() == before
 
 
 def test_a_bad_format_is_a_usage_error(run: FakeRun) -> None:

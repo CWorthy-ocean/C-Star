@@ -1,43 +1,8 @@
 import logging
-import typing as t
-from datetime import UTC, datetime
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, Field
 
-from cstar.base.env import get_env_item
 from cstar.base.log import parse_log_level_name
-from cstar.orchestration.utils import (
-    ENV_CSTAR_SLURM_ACCOUNT,
-    ENV_CSTAR_SLURM_MAX_WALLTIME,
-    ENV_CSTAR_SLURM_QUEUE,
-)
-from cstar.system.environment import SlurmSettingsBase
-from cstar.system.manager import get_sysmgr
-
-JOBFILE_DATE_FORMAT: t.Final[str] = "%Y%m%d_%H%M%S"
-
-
-def _generate_job_name() -> str:
-    """Generate a unique job name based on the current date and time."""
-    now_utc = datetime.now(UTC)
-    formatted_now_utc = now_utc.strftime(JOBFILE_DATE_FORMAT)
-    return f"cstar_worker_{formatted_now_utc}"
-
-
-class JobConfig(BaseModel):
-    """Configuration required to submit HPC jobs."""
-
-    model_config: t.ClassVar[ConfigDict] = ConfigDict(str_strip_whitespace=True)
-    """Strip whitespace read from the environment."""
-
-    account_id: t.Annotated[str, Field(frozen=True)]
-    """HPC account used for billing."""
-    walltime: t.Annotated[str, Field(frozen=True)]
-    """Maximum walltime allowed for job."""
-    priority: t.Annotated[str, Field(frozen=True)]
-    """Job priority."""
-    job_name: t.Annotated[str, Field(frozen=True)] = _generate_job_name()
-    """User-friendly job name."""
 
 
 class ServiceConfiguration(BaseModel):
@@ -101,25 +66,3 @@ def get_service_config(
         health_check_log_threshold=10,
         name=name,
     )
-
-
-def get_job_config() -> JobConfig:
-    """Create and configure a `JobConfig` instance from environment variables.
-
-    A setting the system requires but the environment leaves unset stays empty
-    here: only a step that submits a scheduler job needs it, and
-    `create_scheduler_job` refuses to submit without it.
-
-    Returns
-    -------
-    JobConfig
-    """
-    account_id, walltime, priority = "", "", ""
-
-    klass = get_sysmgr().environment.settings_klass
-    if klass is not None and issubclass(klass, SlurmSettingsBase):
-        account_id = get_env_item(ENV_CSTAR_SLURM_ACCOUNT).value
-        walltime = get_env_item(ENV_CSTAR_SLURM_MAX_WALLTIME).value
-        priority = get_env_item(ENV_CSTAR_SLURM_QUEUE).value
-
-    return JobConfig(account_id=account_id, walltime=walltime, priority=priority)

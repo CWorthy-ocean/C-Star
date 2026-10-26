@@ -134,9 +134,7 @@ def test_status_reads_the_copy(relocated_run: RelocatedRun) -> None:
     which only a loaded workplan produces, are what is asserted.
     """
     # a wide terminal keeps rich from truncating the step rows
-    proc = run_cstar(
-        {**relocated_run.env, "COLUMNS": "200"}, "workplan", "status", RUN_ID
-    )
+    proc = run_cstar({**relocated_run.env, "COLUMNS": "200"}, "run", "status", RUN_ID)
 
     output = f"stdout:\n{proc.stdout}\nstderr:\n{proc.stderr}"
     assert proc.returncode == 0, output
@@ -149,8 +147,8 @@ def test_status_reads_the_copy(relocated_run: RelocatedRun) -> None:
 
 def test_path_reports_directories_in_the_copy(relocated_run: RelocatedRun) -> None:
     """``workplan path`` prints the run and step directories under the copy."""
-    run_proc = run_cstar(relocated_run.env, "workplan", "path", RUN_ID)
-    step_proc = run_cstar(relocated_run.env, "workplan", "path", RUN_ID, "B")
+    run_proc = run_cstar(relocated_run.env, "run", "path", RUN_ID)
+    step_proc = run_cstar(relocated_run.env, "run", "path", RUN_ID, "B")
 
     assert run_proc.returncode == 0, run_proc.stderr
     assert run_proc.stdout == f"{relocated_run.run_dir}\n"
@@ -162,7 +160,7 @@ def test_gather_links_output_in_the_copy(relocated_run: RelocatedRun) -> None:
     """``workplan gather`` finds a step's output through the rebased working directory
     and builds the gathered directory inside the copy.
     """
-    proc = run_cstar(relocated_run.env, "workplan", "gather", RUN_ID)
+    proc = run_cstar(relocated_run.env, "run", "gather", RUN_ID)
 
     assert proc.returncode == 0, proc.stderr
     gathered = relocated_run.run_dir / "gathered_output" / OUTPUT_NAME
@@ -223,6 +221,6 @@ def test_resume_relaunches_nothing_and_repoints_the_record(
     assert relocated_run.recorded_output_path() == relocated_run.run_dir
 
     # and what reads the record afterwards finds the copy
-    proc = run_cstar(relocated_run.env, "workplan", "path", RUN_ID, "A")
+    proc = run_cstar(relocated_run.env, "run", "path", RUN_ID, "A")
     assert proc.returncode == 0, proc.stderr
     assert proc.stdout == f"{relocated_run.step_dir('A')}\n"

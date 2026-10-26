@@ -1,7 +1,7 @@
 """The forge C-Star application: wires ``ForgeBlueprint`` into a real,
 C-Star-discoverable application via :class:`ForgeRunner` + :class:`ForgeApplication`
 (see ``cstar.orchestration.models.Blueprint`` /
-https://c-star.readthedocs.io/en/latest/custom_applications.html).
+https://c-star.readthedocs.io/en/latest/developers/custom_applications.html).
 
 Not part of the "forge application" boundary that ``tests/test_forge_app_boundary.py``
 guards -- like ``runtime.py``, this module is **host-resolution glue**: it reaches

@@ -3,7 +3,7 @@
 Automating the previous model with a workplan
 =============================================
 
-The :doc:`previous page <end_to_end>` ran Forge and then the simulation as two
+The :doc:`previous page <blueprint_tutorial>` ran Forge and then the simulation as two
 separate commands, and you carried the path of the blueprint Forge wrote from
 the first command to the second. A **workplan** does that for you. It is a
 small YAML file that lists the things to run as *steps*, says which steps wait
@@ -17,7 +17,7 @@ that help you manage more complex ocean modeling workflows.
 Before you start
 ----------------
 
-- Finish the :doc:`previous page <end_to_end>`, or at least step 1 of it: you
+- Finish the :doc:`previous page <blueprint_tutorial>`, or at least step 1 of it: you
   need a forge blueprint. Save it (or copy it) as ``forge_blueprint.yaml``
   in an empty directory.
 - Download :download:`workplan_forge_then_run.yaml <workplan_forge_then_run.yaml>`
@@ -31,7 +31,7 @@ Before you start
 
 The top of the file describes the workplan itself. The ``name`` doubles as the
 :term:`run ID`, the handle you use to check on the run later. ``state: draft`` means
-the file may still change; see :doc:`../workplans` for the ``validated`` state.
+the file may still change; see :doc:`../workplans/index` for the ``validated`` state.
 
 Everything else is the list of ``steps``. A step is one thing to run: it has a
 ``name``, the ``application`` that runs it, and the ``blueprint`` that application
@@ -57,7 +57,7 @@ that depend on it are not run.
 
 That is the whole vocabulary for now. Steps can also override values in their
 blueprint and pass run-time information to each other; the :doc:`next page
-<nested_workplan>` uses both.
+<cdr_workplan>` uses both.
 
 2. Check it (optional)
 ----------------------
@@ -70,7 +70,7 @@ This reads the workplan and every blueprint it names, and reports problems
 such as a misspelled step name, a missing dependency, or a blueprint that does
 not validate. Nothing is written to disk.
 
-Submitting the blueprint in the next step will also perform the check before proceeding,
+Submitting the workplan in the next step also performs the check before proceeding,
 but doing it manually may help you catch errors after drafting or modifying a workplan you're
 not yet ready to submit.
 
@@ -130,14 +130,13 @@ looks like this:
    ┡━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━╇━━━━━━━━━━╇━━━━━━━━━╇━━━━━━╇━━━━━━━━╇━━━━━━━━━━━╇━━━━━━━━━━━━━┩
    │1. make_inputs (forge) │           │          │    ✔    │      │        │           │             │
    ├───────────────────────┼───────────┼──────────┼─────────┼──────┼────────┼───────────┼─────────────┤
-   │           2. simulate │           │          │    ✔    │      │        │           │      1      │
+   │           2. simulate │     ✔     │          │         │      │        │           │      1      │
    │           (ucla_roms) │           │          │         │      │        │           │             │
    └───────────────────────┴───────────┴──────────┴─────────┴──────┴────────┴───────────┴─────────────┘
                Disk usage not measured. Run: cstar run status wio-workplan-tutorial --size
 
-While Forge works, ``simulate`` shows as running too, because its process is
-already started and waiting for its dependency. When both steps have finished,
-both ticks sit in the *Done* column.
+While Forge works, ``simulate`` shows as submitted: it is waiting for its
+dependency. When both steps have finished, both ticks sit in the *Done* column.
 
 .. code-block:: console
 
@@ -154,7 +153,7 @@ to stop).
 
 shows what the run was and what it produced: each time it was submitted, on
 which machine and with which package versions, and each step's status and
-outcome. Once the run is over:
+outcome, with how long each step waited and ran. Once the run is over:
 
 .. code-block:: text
 
@@ -163,24 +162,31 @@ outcome. Once the run is over:
    │     Name │ wio-workplan-tutorial                │
    │     Kind │ workplan                             │
    │   Run-id │ wio-workplan-tutorial                │
-   │       Id │ b3881b52-933a-4db9-82cc-d79feb9de9fc │
+   │       Id │ 3d023067-6415-4055-bad1-5481131e11eb │
    │   System │ darwin_arm64                         │
-   │  Created │ 2026-10-21 16:50                     │
-   │ Observed │ 2026-10-21 16:57                     │
+   │  Created │ 2026-10-25 21:06                     │
+   │ Observed │ 2026-10-25 21:11                     │
    └──────────┴──────────────────────────────────────┘
-                                                        Attempts
-   ┏━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━┳━━━━━━━━┳━━━━━━━━━━━┳━━━━━━━━━┳━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
-   ┃ Started          ┃ Finished         ┃ Status ┃ Clobbered ┃ Resumed ┃ Pre-run ┃ cstar-ocean                      ┃
-   ┡━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━╇━━━━━━━━╇━━━━━━━━━━━╇━━━━━━━━━╇━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┩
-   │ 2026-10-21 16:50 │ 2026-10-21 16:56 │ done   │ -         │ -       │ no      │ 0.17.0                           │
-   └──────────────────┴──────────────────┴────────┴───────────┴─────────┴─────────┴──────────────────────────────────┘
-                                       Steps
-   ┏━━━━━━━━━━━━━┳━━━━━━━━━━━━━┳━━━━━━━━┳━━━━━━━━━━━┳━━━━━━━━━━┳━━━━━━┳━━━━━━━━┓
-   ┃ Step        ┃ Application ┃ Status ┃ Outcome   ┃ Products ┃ Size ┃ Record ┃
-   ┡━━━━━━━━━━━━━╇━━━━━━━━━━━━━╇━━━━━━━━╇━━━━━━━━━━━╇━━━━━━━━━━╇━━━━━━╇━━━━━━━━┩
-   │ make_inputs │ forge       │ Done   │ completed │ 0        │ 0 B  │ yes    │
-   │ simulate    │ ucla_roms   │ Done   │ completed │ 0        │ 0 B  │ yes    │
-   └─────────────┴─────────────┴────────┴───────────┴──────────┴──────┴────────┘
+                                                             Attempts
+   ┏━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━┳━━━━━━━━┳━━━━━━━━━━━┳━━━━━━━━━┳━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━┓
+   ┃ Started          ┃ Finished         ┃ Status ┃ Clobbered ┃ Resumed ┃ Pre-run ┃ cstar-ocean             ┃ Inputs          ┃
+   ┡━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━╇━━━━━━━━╇━━━━━━━━━━━╇━━━━━━━━━╇━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━┩
+   │ 2026-10-25 21:06 │ 2026-10-25 21:10 │ done   │ -         │ -       │ no      │ 0.17.1.dev32+gd36876ac8 │ 20261026T030652 │
+   └──────────────────┴──────────────────┴────────┴───────────┴─────────┴─────────┴─────────────────────────┴─────────────────┘
+                                        Steps
+   ┏━━━━━━━━━━━━━┳━━━━━━━━━━━━━┳━━━━━━━━┳━━━━━━━━━━━┳━━━━━━━━━━┳━━━━━━━━━┳━━━━━━━━┓
+   ┃ Step        ┃ Application ┃ Status ┃ Outcome   ┃ Products ┃ Size    ┃ Record ┃
+   ┡━━━━━━━━━━━━━╇━━━━━━━━━━━━━╇━━━━━━━━╇━━━━━━━━━━━╇━━━━━━━━━━╇━━━━━━━━━╇━━━━━━━━┩
+   │ make_inputs │ forge       │ Done   │ completed │ 13       │ 2.7 MiB │ yes    │
+   │ simulate    │ ucla_roms   │ Done   │ completed │ 7        │ 6.7 MiB │ yes    │
+   └─────────────┴─────────────┴────────┴───────────┴──────────┴─────────┴────────┘
+                         Jobs
+   ┏━━━━━━━━━━━━━┳━━━━━━━━━━━━━┳━━━━━━━━━┳━━━━━━━━━┓
+   ┃ Step        ┃ Job         ┃ Waited  ┃ Wall    ┃
+   ┡━━━━━━━━━━━━━╇━━━━━━━━━━━━━╇━━━━━━━━━╇━━━━━━━━━┩
+   │ make_inputs │ local 50862 │ 0:00:00 │ 0:02:01 │
+   │ simulate    │ local 50866 │ 0:02:06 │ 0:01:50 │
+   └─────────────┴─────────────┴─────────┴─────────┘
 
 Finally,
 
@@ -205,8 +211,9 @@ ID:
 ----------------------
 
 When ``status`` shows both steps as *Done*, the simulation's output is in the
-``simulate`` step's ``output`` directory. ``cstar run path <step>`` prints a run's or a
-step's directory, so you don't have to remember the layout. You can also use
+``simulate`` step's ``output`` directory. ``cstar run path wio-workplan-tutorial
+simulate`` prints that step's directory (leave out the step name for the run's
+own directory), so you don't have to remember the layout. You can also use
 
 .. code-block:: console
 
@@ -214,11 +221,11 @@ step's directory, so you don't have to remember the layout. You can also use
 
 to go straight to a given run or step.
 
-.. note:: A program cannot change the directory of the shell that started it,
-   so this command needs a small shell function. The first time you run it,
-   it tells you how: run ``cstar env shell-init --install`` once and open a new
-   shell. If you would rather not, use the output of ``cstar run path`` however
-   you like, e.g. ``cd $(cstar run path wio-workplan-tutorial simulate)``.
+.. note:: The `cd` command requires a special shell hook to function. If
+   you ran `cstar init` after install, you should be all set. If not, the
+   command will remind you how to install the shell hook. If you would rather not,
+   use the output of ``cstar run path`` however you like, e.g.
+   ``cd $(cstar run path wio-workplan-tutorial simulate)``.
 
 The files are the same ones the previous page produced, and you can open them
 with `roms-tools <https://roms-tools.readthedocs.io/en/latest/plotting_roms_output.html>`_
@@ -232,7 +239,7 @@ Nothing changed in the science: the same forge blueprint, the same generated
 inputs, the same simulation. What changed is that the sequence is now a file.
 It can be submitted with one command, checked on with one ID, re-entered if a
 step fails, and handed to someone else to reproduce. That matters more as the
-sequence grows, which is where the :doc:`next page <nested_workplan>` goes.
+sequence grows, which is where the :doc:`next page <cdr_workplan>` goes.
 
 On a cluster
 ------------
@@ -240,5 +247,23 @@ On a cluster
 A workplan is also how a run reaches the compute nodes of an HPC system.
 There, ``cstar workplan submit`` submits each step as a scheduler job and
 returns, and the ``cstar run`` commands work the same way from the login node.
-Each step can ask for its own cores, queue and walltime through
-``compute_overrides``; see :doc:`../workplans` and :doc:`../hpc`.
+
+One thing to add first. C-Star sizes each job from the step's blueprint, but
+``simulate``'s blueprint doesn't exist until ``make_inputs`` writes it, so the
+job would get a single CPU. The wio-toy domain is split into 2 by 5 tiles and
+runs on 10 MPI ranks, so ask for 10 CPUs with ``compute_overrides``:
+
+.. code-block:: yaml
+
+   - name: simulate
+     application: ucla_roms
+     blueprint:
+       from_step: make_inputs
+     depends_on:
+       - make_inputs
+     compute_overrides:
+       slurm:
+         num_cpus: 10
+
+``compute_overrides`` is also where a step asks for its own queue and
+walltime; see :doc:`../workplans/index` and :doc:`../deployments/hpc`.

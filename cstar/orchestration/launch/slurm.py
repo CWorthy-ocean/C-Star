@@ -20,8 +20,11 @@ from cstar.execution.scheduler_job import (
 from cstar.orchestration.adapter import StepToRunRequestAdapter
 from cstar.orchestration.launch.common import (
     build_attempt_log_header,
+    cancel_prior_attempt,
     is_foreign_handle,
+    prior_of_this_run,
     resolve_prior_attempt,
+    waits_on_replaced_dependency,
 )
 from cstar.orchestration.models import KeyValueStore
 from cstar.orchestration.orchestration import (
@@ -462,6 +465,8 @@ class SlurmLauncher(Launcher[SlurmHandle]):
         cls,
         step: "LiveStep",
         dependencies: list[SlurmHandle],
+        *,
+        run_uuid: str,
     ) -> Task[SlurmHandle]:
         """Launch a step in SLURM.
 
@@ -471,15 +476,25 @@ class SlurmLauncher(Launcher[SlurmHandle]):
             The step to submit to SLURM.
         dependencies : list[SlurmHandle]
             The list of tasks that must complete prior to execution of the submitted Step.
+        run_uuid : str
+            The uuid of the run's manifest; see `Launcher.launch`.
 
         Returns
         -------
         Task[SlurmHandle]
             A Task containing information about the newly submitted job.
+
+        Raises
+        ------
+        CstarExpectationFailed
+            If a prior attempt still in progress is replaced and cannot be
+            cancelled (see `cancel_prior_attempt`).
         """
         state_repo = StateRepository()
 
-        prior_handle = await state_repo.get_sentinel(step.name, SlurmHandle)
+        prior_handle = prior_of_this_run(
+            await state_repo.get_sentinel(step.name, SlurmHandle), run_uuid
+        )
         submit_fn = SlurmLauncher._submit
         last_status: Status = Status.Unsubmitted
         reuse_prior: bool = False
@@ -492,7 +507,12 @@ class SlurmLauncher(Launcher[SlurmHandle]):
                 last_status,
                 prior_pre_run=prior_handle.pre_run,
                 prior_foreign=is_foreign_handle(prior_handle, cls.name),
+                replaced_dependency=waits_on_replaced_dependency(
+                    prior_handle, dependencies
+                ),
             )
+            if not reuse_prior and Status.is_in_progress(last_status):
+                await cancel_prior_attempt(cls, step, prior_handle)
 
         if not reuse_prior or not prior_handle:
             dependencies = await cls._prune_completed_dependencies(dependencies)

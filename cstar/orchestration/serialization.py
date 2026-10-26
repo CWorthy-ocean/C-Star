@@ -15,6 +15,7 @@ from yaml.scanner import ScannerError
 from cstar.base.exceptions import CstarExpectationFailed
 from cstar.base.log import get_logger
 from cstar.execution.file_system import local_copy
+from cstar.system.migration import KEY_SV, CstarSchemaTooNewError, for_writing
 
 log = get_logger(__name__)
 
@@ -68,9 +69,10 @@ class ValidationResult(t.Generic[_T]):
     path: Path | None = None
     """The local file the item was read from (a temporary copy of a remote
     URI); `None` if validation fails."""
-    error: ValueError | None = None
+    error: ValueError | CstarSchemaTooNewError | None = None
     """The exception behind `error_msg`, when validation failed; a pydantic
-    `ValidationError` locates each problem in the document."""
+    `ValidationError` locates each problem in the document, and a
+    `CstarSchemaTooNewError` says the file was written by a newer release."""
 
     @property
     def is_valid(self) -> bool:
@@ -183,7 +185,32 @@ def register_representer(
 
 
 def model_to_yaml(model: SerializableModel) -> str:
-    """Serialize a model to yaml.
+    """Serialize a model to yaml, to be written to a file.
+
+    The model is serialized at the schema version it is written at (see
+    `for_writing`).
+
+    Parameters
+    ----------
+    model : _T
+        The model to be serialized.
+
+    Returns
+    -------
+    str
+        The serialized model
+
+    Raises
+    ------
+    CstarSchemaTooNewError
+        If the model holds content read from a newer file with keys this build
+        does not know ignored: writing it would drop them.
+    """
+    return dump_yaml(for_writing(model))
+
+
+def dump_yaml(model: SerializableModel) -> str:
+    """Serialize a model to yaml as it is, to be displayed rather than written.
 
     Parameters
     ----------
@@ -204,8 +231,8 @@ def model_to_yaml(model: SerializableModel) -> str:
 
     # 'schema_version' records which schema wrote the document; always include
     # it (even at the current default) so persisted artifacts self-describe.
-    if hasattr(model, "schema_version"):
-        dumped["schema_version"] = str(getattr(model, "schema_version"))
+    if hasattr(model, KEY_SV):
+        dumped[KEY_SV] = str(getattr(model, KEY_SV))
 
     dumper = yaml.Dumper
     dumper.ignore_aliases = lambda *_args: True  # type: ignore[method-assign]
@@ -244,7 +271,7 @@ def read_document(path: Path | str) -> dict[str, t.Any]:
         The document, without its `$schema` key.
     """
     document = read_yaml_to_raw(Path(path))
-    if document:
+    if isinstance(document, dict):
         document.pop("$schema", None)
     return document
 
@@ -723,6 +750,8 @@ def validate_serialized_entity(
             item = deserialize(wp_path, item_type)
     except ValueError as ex:
         return ValidationResult(f"The {item_type.__name__} is invalid: {ex}", error=ex)
+    except CstarSchemaTooNewError as ex:
+        return ValidationResult(f"The file at {path} cannot be read: {ex}", error=ex)
     except FileNotFoundError:
         return ValidationResult(f"File not found at path: {path}")
 

@@ -1,6 +1,8 @@
 import asyncio
+import errno
 import logging
 import os
+import sys
 import threading
 import time
 import typing as t
@@ -48,8 +50,10 @@ from cstar.orchestration.tracking import (
     TrackingRepository,
     WorkplanRun,
     measure_step_sizes,
+    read_run_record,
     require_writable,
 )
+from cstar.system.migration import CstarSchemaTooNewError
 
 if t.TYPE_CHECKING:
     from cstar.orchestration.index import RunRecord
@@ -539,6 +543,22 @@ async def test_tracking_get_run_paths(
     assert len(history) == exp_num_paths
 
 
+@pytest.mark.parametrize("all_history", [True, False])
+def test_tracking_get_run_paths_skips_a_half_staged_record(
+    tmp_path: Path, all_history: bool
+) -> None:
+    """Verify a staging file a crashed writer left beside a run's history is
+    neither listed nor taken as the newest record.
+    """
+    run_id = "half-staged"
+    repo = TrackingRepository()
+    persisted = repo.put_workplan_run_sync(_record(run_id, tmp_path / "output"))
+    leftover = persisted.with_name(f".{persisted.name}.tmp")
+    leftover.write_text("partial")
+
+    assert repo.list_runtracking_paths(run_id, all_history) == (persisted.resolve(),)
+
+
 @pytest.mark.asyncio
 async def test_tracking_retrieve_mixed_case_runid(tmp_path: Path) -> None:
     """Verify a mixed-case run-id query resolves to the slugified run record.
@@ -685,6 +705,180 @@ async def test_tracking_list_latest_runs_skips_corrupt_record(
     assert "1 run record(s)" in warnings[0].message
 
 
+def _restamp(path: Path, version: str | None) -> None:
+    """Rewrite the `schema_version` of a persisted record; `None` removes it."""
+    doc = yaml.safe_load(path.read_text())
+    doc.pop("schema_version", None)
+    if version is not None:
+        doc["schema_version"] = version
+    path.write_text(yaml.safe_dump(doc))
+
+
+def test_workplanrun_record_states_its_version(tmp_path: Path) -> None:
+    """Verify a persisted record carries the current record version."""
+    repo = TrackingRepository()
+    path = repo.put_workplan_run_sync(_make_workplan_run(tmp_path, "versioned"))
+
+    doc = yaml.safe_load(path.read_text())
+
+    assert doc["schema_version"] == WorkplanRun.model_fields["schema_version"].default
+
+
+@pytest.mark.parametrize("version", [None, "1.0.0", "1.1.0"])
+def test_read_run_record_reads_older_records(
+    tmp_path: Path, version: str | None
+) -> None:
+    """Verify a record without a version (cstar 0.17.0 or earlier) and one of
+    an older or the current version load.
+    """
+    repo = TrackingRepository()
+    path = repo.put_workplan_run_sync(_make_workplan_run(tmp_path, "older"))
+    _restamp(path, version)
+
+    assert read_run_record(path).run_id == "older"
+    assert repo.get_workplan_run_sync("older") is not None
+
+
+@pytest.mark.parametrize("content", ["", "just text\n", "- a\n- b\n"])
+def test_read_run_record_rejects_a_record_that_is_not_a_mapping(
+    tmp_path: Path, content: str
+) -> None:
+    """Verify an empty or non-mapping record is a `ValueError`, as an invalid
+    record is, so callers report it rather than crash.
+    """
+    path = tmp_path / "record.yaml"
+    path.write_text(content)
+
+    with pytest.raises(ValueError, match="not a mapping"):
+        read_run_record(path)
+
+
+def _add_key(path: Path, key: str) -> None:
+    """Add a key to a persisted record, as a newer release's schema would."""
+    doc = yaml.safe_load(path.read_text())
+    doc[key] = True
+    path.write_text(yaml.safe_dump(doc))
+
+
+def test_tracking_get_reads_a_newer_record_without_new_keys(tmp_path: Path) -> None:
+    """Verify a record a newer minor release wrote that holds nothing this build
+    does not know loads and keeps its version, and is written back at it.
+    """
+    repo = TrackingRepository()
+    path = repo.put_workplan_run_sync(_make_workplan_run(tmp_path, "newer"))
+    _restamp(path, "1.12.0")
+
+    run = repo.get_workplan_run_sync("newer")
+
+    assert run is not None
+    assert run.schema_version == "1.12.0"
+    assert run.unknown_keys == ()
+    assert read_run_record(path).run_id == "newer"
+    updated = repo.update_workplan_run_sync("newer", lambda r: None)
+    assert updated is not None
+    written = yaml.safe_load(repo.latest_path("newer").read_text())
+    assert written["schema_version"] == "1.12.0"
+
+
+def test_tracking_get_reads_a_newer_record_with_a_new_key_but_will_not_write_it(
+    tmp_path: Path,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Verify a tolerant get of a record that holds a key a newer release wrote
+    loads it with the key ignored and a warning, while a plain (strict) get,
+    strict reads, a repeat write of it, and an update of it are refused naming
+    the key.
+    """
+    repo = TrackingRepository()
+    path = repo.put_workplan_run_sync(_make_workplan_run(tmp_path, "newer"))
+    _restamp(path, "1.2.0")
+    _add_key(path, "a_key_from_the_future")
+    before = path.read_bytes()
+
+    with pytest.raises(CstarSchemaTooNewError, match="sets a_key_from_the_future"):
+        repo.get_workplan_run_sync("newer")
+    with caplog.at_level(logging.WARNING):
+        run = repo.get_workplan_run_sync("newer", tolerant=True)
+
+    assert run is not None
+    assert run.unknown_keys == ("a_key_from_the_future",)
+    assert any("a_key_from_the_future" in r.getMessage() for r in caplog.records)
+    with pytest.raises(CstarSchemaTooNewError, match="sets a_key_from_the_future"):
+        read_run_record(path)
+    with pytest.raises(CstarSchemaTooNewError, match="to write this file"):
+        repo.put_workplan_run_sync(run)
+    with pytest.raises(CstarSchemaTooNewError, match="Upgrade cstar-ocean") as caught:
+        repo.update_workplan_run_sync("newer", lambda r: None)
+    assert str(repo.latest_path("newer")) in str(caught.value)
+    assert path.read_bytes() == before
+
+
+def test_read_run_record_tolerant_ignores_a_new_key(tmp_path: Path) -> None:
+    """Verify `read_run_record` is strict by default and loads a record whose only
+    problem is an unknown key when asked to be tolerant.
+    """
+    repo = TrackingRepository()
+    path = repo.put_workplan_run_sync(_make_workplan_run(tmp_path, "newer"))
+    _restamp(path, "1.2.0")
+    _add_key(path, "a_key_from_the_future")
+
+    with pytest.raises(CstarSchemaTooNewError) as caught:
+        read_run_record(path)
+    run = read_run_record(path, tolerant=True)
+
+    assert caught.value.unknown == ("a_key_from_the_future",)
+    assert str(path) in str(caught.value)
+    assert run.run_id == "newer"
+    assert run.unknown_keys == ("a_key_from_the_future",)
+
+
+def test_tracking_get_refuses_a_newer_major_record(tmp_path: Path) -> None:
+    """Verify reading one record a newer major release wrote raises the upgrade
+    error, naming the record, rather than returning nothing, even when the
+    reader is tolerant.
+    """
+    repo = TrackingRepository()
+    path = repo.put_workplan_run_sync(_make_workplan_run(tmp_path, "newer"))
+    _restamp(path, "2.0.0")
+
+    with pytest.raises(CstarSchemaTooNewError, match="Upgrade cstar-ocean") as caught:
+        repo.get_workplan_run_sync("newer")
+    with pytest.raises(CstarSchemaTooNewError):
+        read_run_record(path, tolerant=True)
+
+    # the record is read through its "latest" link
+    assert str(repo.latest_path("newer")) in str(caught.value)
+
+
+@pytest.mark.asyncio
+async def test_tracking_list_latest_runs_reports_a_newer_record(
+    tmp_path: Path,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Verify a record a newer release wrote is left out of a listing with one
+    warning that names it and the upgrade, and is not also counted as corrupt.
+    """
+    repo = TrackingRepository()
+    await repo.put_workplan_run(_make_workplan_run(tmp_path, "good-run"))
+    newer = await repo.put_workplan_run(_make_workplan_run(tmp_path, "newer-run"))
+    _restamp(newer, "2.0.0")
+
+    with caplog.at_level(logging.WARNING):
+        runs = await repo.list_latest_runs()
+        runs_sync = repo.list_latest_runs_sync()
+
+    assert [r.run_id for r in runs] == ["good-run"]
+    assert [r.run_id for r in runs_sync] == ["good-run"]
+    warnings = [
+        rec.getMessage() for rec in caplog.records if rec.levelname == "WARNING"
+    ]
+    assert len(warnings) == 2  # one per listing
+    for message in warnings:
+        assert "run record" in message
+        assert "newer-run" in message
+        assert "Upgrade cstar-ocean" in message
+
+
 @pytest.mark.asyncio
 async def test_tracking_bound_caps_concurrency(tmp_path: Path) -> None:
     """Verify that `bound(limit)` caps the number of concurrent reads performed
@@ -761,6 +955,103 @@ async def test_tracking_update_workplan_run_is_atomic_under_concurrency(
     assert persisted is not None
     assert persisted.step_sizes == {f"step-{i}": i for i in range(8)}
     assert len(persisted.sentinels) == 8
+
+
+def test_tracking_latest_record_stays_readable_while_rewritten(
+    tmp_path: Path,
+) -> None:
+    """Verify a reader never finds a run's latest record missing or half-written
+    while other threads repoint and rewrite it.
+
+    Readers that take no lock (`stat` of the link, the listings) used to catch
+    the gap between unlinking the old link and creating the new one, and the
+    in-place rewrite of the history record it points at; a lookup under the run
+    lock must never miss the record.
+
+    Parameters
+    ----------
+    tmp_path : Path
+        Temporary directory for test outputs
+    """
+    state_dir = tmp_path / "state"
+    run_id = "rewritten-run"
+    rounds = 200
+
+    with mock.patch.dict(os.environ, {ENV_CSTAR_STATE_HOME: state_dir.as_posix()}):
+        repo = TrackingRepository()
+        first = _make_workplan_run(tmp_path, run_id)
+        repo.put_workplan_run_sync(first)
+        latest = repo.latest_path(run_id)
+        writer_errors: list[BaseException] = []
+
+        def _put(offset: int) -> None:
+            try:
+                for i in range(rounds):
+                    moment = first.recorded_at.replace(microsecond=offset + i)
+                    repo.put_workplan_run_sync(
+                        first.model_copy(update={"recorded_at": moment})
+                    )
+            except BaseException as ex:
+                writer_errors.append(ex)
+
+        def _update() -> None:
+            def _size(run: WorkplanRun) -> None:
+                run.record_step_sizes({"s": len(run.step_sizes) + 1})
+
+            try:
+                for _ in range(rounds):
+                    repo.update_workplan_run_sync(run_id, _size)
+            except BaseException as ex:
+                writer_errors.append(ex)
+
+        writers = [
+            threading.Thread(target=_put, args=(1,)),
+            threading.Thread(target=_put, args=(1 + rounds,)),
+            threading.Thread(target=_update),
+        ]
+        for writer in writers:
+            writer.start()
+
+        link_errors: list[OSError] = []
+        # older macOS kernels can answer a stat that races a rename with EINVAL;
+        # only a missing link is the gap this test guards against
+        tolerated = 0
+        failed_reads: list[BaseException | None] = []
+        short_listings = 0
+        try:
+            for _ in range(10 * rounds):
+                if not any(writer.is_alive() for writer in writers):
+                    break
+                try:
+                    os.lstat(latest)
+                except OSError as ex:
+                    if sys.platform == "darwin" and ex.errno == errno.EINVAL:
+                        tolerated += 1
+                    else:
+                        link_errors.append(ex)
+                try:
+                    if repo.get_workplan_run_sync(run_id) is None:
+                        failed_reads.append(None)
+                except Exception as ex:
+                    failed_reads.append(ex)
+                if len(repo.list_latest_runs_sync()) != 1:
+                    short_listings += 1
+        finally:
+            for writer in writers:
+                writer.join()
+
+    outcome = {
+        "writer_errors": writer_errors,
+        "link_errors": link_errors,
+        "failed_reads": failed_reads,
+        "short_listings": short_listings,
+    }
+    assert outcome == {
+        "writer_errors": [],
+        "link_errors": [],
+        "failed_reads": [],
+        "short_listings": 0,
+    }, f"{outcome} (tolerated EINVAL: {tolerated})"
 
 
 @pytest.mark.asyncio

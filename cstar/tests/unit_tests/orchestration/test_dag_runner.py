@@ -12,13 +12,16 @@ from pathlib import Path
 from unittest import mock
 
 import pytest
+import yaml
 
+from cstar.applications.core import get_application
 from cstar.applications.hello_world import HelloWorldBlueprint
 from cstar.applications.ucla_roms.models import UclaRomsBlueprint
 from cstar.base.env import ENV_CSTAR_RUNID, ENV_CSTAR_STATE_HOME, FLAG_ON
 from cstar.base.exceptions import CstarError, CstarExpectationFailed
 from cstar.base.feature import ENV_FF_ORCH_TRX_TIMESPLIT, ENV_FF_ORCH_TRX_TIMESPLIT_FREQ
 from cstar.base.utils import slugify
+from cstar.cli.workplan.run import migrate_steps
 from cstar.entrypoint.utils import ARG_CLOBBER, ARG_PRE_RUN, ARG_RUN_ID
 from cstar.execution.file_system import (
     DirectoryManager,
@@ -43,6 +46,7 @@ from cstar.orchestration.dag_runner import (
     check_clobber_dependents,
     check_clobber_targets,
     check_pre_run_support,
+    drop_spent_clobbers,
     get_launcher,
     get_orchestrator,
     get_status_detail_map,
@@ -54,7 +58,7 @@ from cstar.orchestration.dag_runner import (
     prune_unpreparable_steps,
     recorded_workplan,
     refresh_run_manifest,
-    refuse_edited_done_steps,
+    refuse_edited_steps,
     run_dag,
 )
 from cstar.orchestration.launch.local import LocalHandle, LocalLauncher
@@ -66,7 +70,7 @@ from cstar.orchestration.manifest import (
     ATTEMPT_VARIABLES_NAME,
     ATTEMPT_WORKPLAN_NAME,
     ATTEMPTS_DIR_NAME,
-    CANONICAL_NAMES_SINCE,
+    DEFINITION_HASH_SCHEME,
     RUN_MANIFEST_NAME,
     Attempt,
     AttemptStatus,
@@ -1694,10 +1698,20 @@ def _hello_step(blueprint: t.Any, name: str, **kwargs: t.Any) -> Step:
 
 
 def _recorded(
-    run_id: str, hashes: t.Mapping[str, str], *, now: datetime | None = None
+    run_id: str,
+    hashes: t.Mapping[str, str],
+    *,
+    now: datetime | None = None,
+    schema_versions: t.Mapping[str, str] | None = None,
+    application: str = "hello_world",
 ) -> RunManifest:
-    """Build a `RunManifest` recording the given definition hash for each step."""
+    """Build a `RunManifest` recording the given definition hash for each step.
+
+    A step named in `schema_versions` also records the schema version of the
+    blueprint its hash was computed from.
+    """
     now = now or datetime(2026, 10, 15, 12, 0, tzinfo=UTC)
+    schema_versions = schema_versions or {}
     return RunManifest(
         run_id=run_id,
         name=run_id,
@@ -1707,21 +1721,30 @@ def _recorded(
         steps=[
             StepEntry(
                 name=name,
-                application="hello_world",
+                application=application,
                 working_dir=f"tasks/{slugify(name)}",
                 definition_hash=definition_hash,
+                blueprint_schema_version=schema_versions.get(name, ""),
             )
             for name, definition_hash in hashes.items()
         ],
     )
 
 
+EDITED_HASH = f"{DEFINITION_HASH_SCHEME}:{'0' * 64}"
+"""A recorded definition hash under the current scheme that no step has: the one a
+step edited since it was recorded leaves behind."""
+
+UNTAGGED_HASH = "hashed-by-an-earlier-recipe"
+"""A recorded definition hash with no scheme, as releases before the tag recorded."""
+
+
 def _stale(facts: t.Mapping[str, StepFacts]) -> dict[str, str]:
     """Return a recorded hash for each step that differs from its current one."""
-    return {name: f"stale-{f.definition_hash}" for name, f in facts.items()}
+    return {name: EDITED_HASH for name in facts}
 
 
-def test_refuse_edited_done_steps_refuses_an_edited_done_step(
+def test_refuse_edited_steps_refuses_an_edited_done_step(
     tmp_path: Path, hello_world_bp_path: Path
 ) -> None:
     """Verify a Done step whose definition changed is refused, naming the
@@ -1732,11 +1755,11 @@ def test_refuse_edited_done_steps_refuses_an_edited_done_step(
         _hello_step(hello_world_bp_path.as_posix(), "B"),
     )
     facts = describe_steps(wp, tmp_path)
-    recorded = {n: f.definition_hash for n, f in facts.items()} | {"B": "old"}
+    recorded = {n: f.definition_hash for n, f in facts.items()} | {"B": EDITED_HASH}
     status = DagStatus({"A": Status.Done, "B": Status.Done})
 
     with pytest.raises(CstarExpectationFailed) as exc_info:
-        refuse_edited_done_steps(wp, _recorded("run", recorded), status, facts, [])
+        refuse_edited_steps(wp, _recorded("run", recorded), status, facts, [])
 
     message = str(exc_info.value)
     assert "'B'" in message
@@ -1746,7 +1769,46 @@ def test_refuse_edited_done_steps_refuses_an_edited_done_step(
     assert ARG_RUN_ID in message
 
 
-def test_refuse_edited_done_steps_names_every_edited_step(
+def test_refuse_edited_steps_spells_the_rerun_as_the_command_takes_it(
+    tmp_path: Path, hello_world_bp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Verify the refusal and the warning name the re-run as `clobber_hint`
+    spells it for the steps, as `cstar blueprint submit`'s flag does, and not
+    as one `--clobber <name>` per step.
+    """
+    wp = _guard_workplan(
+        _hello_step(hello_world_bp_path.as_posix(), "A"),
+        _hello_step(hello_world_bp_path.as_posix(), "B"),
+    )
+    facts = describe_steps(wp, tmp_path)
+    status = DagStatus({"A": Status.Done, "B": Status.Submitted})
+    spelled: list[list[str]] = []
+
+    def hint(names: t.Sequence[str]) -> str:
+        spelled.append(list(names))
+        return ARG_CLOBBER
+
+    with pytest.raises(CstarExpectationFailed) as exc_info:
+        refuse_edited_steps(
+            wp, _recorded("run", _stale(facts)), status, facts, [], hint
+        )
+
+    message = str(exc_info.value)
+    assert f"pass {ARG_CLOBBER} to re-run them" in message
+    assert f"pass {ARG_CLOBBER} to cancel and resubmit them" in message
+    assert f"{ARG_CLOBBER} A" not in message
+    assert spelled == [["A"], ["B"]]
+
+    with caplog.at_level("WARNING"):
+        refuse_edited_steps(
+            wp, _recorded("run", {"A": UNTAGGED_HASH}), status, facts, [], hint
+        )
+
+    (warning,) = _warnings(caplog)
+    assert f"pass {ARG_CLOBBER} to re-run a step you changed" in warning
+
+
+def test_refuse_edited_steps_names_every_edited_step(
     tmp_path: Path, hello_world_bp_path: Path
 ) -> None:
     """Verify each edited Done step is named, with one clobber per step."""
@@ -1758,7 +1820,7 @@ def test_refuse_edited_done_steps_names_every_edited_step(
     status = DagStatus({"A": Status.Done, "B": Status.Done})
 
     with pytest.raises(CstarExpectationFailed) as exc_info:
-        refuse_edited_done_steps(wp, _recorded("run", _stale(facts)), status, facts, [])
+        refuse_edited_steps(wp, _recorded("run", _stale(facts)), status, facts, [])
 
     message = str(exc_info.value)
     assert "'A'" in message
@@ -1769,19 +1831,19 @@ def test_refuse_edited_done_steps_names_every_edited_step(
 
 
 @pytest.mark.parametrize("status", [{"A": Status.Failed}, {}])
-def test_refuse_edited_done_steps_ignores_edited_steps_that_are_not_done(
+def test_refuse_edited_steps_ignores_edited_steps_that_failed_or_never_ran(
     tmp_path: Path, hello_world_bp_path: Path, status: dict[str, Status]
 ) -> None:
     """Verify an edited step that failed or was never submitted is not refused."""
     wp = _guard_workplan(_hello_step(hello_world_bp_path.as_posix(), "A"))
     facts = describe_steps(wp, tmp_path)
 
-    refuse_edited_done_steps(
+    refuse_edited_steps(
         wp, _recorded("run", _stale(facts)), DagStatus(status), facts, []
     )
 
 
-def test_refuse_edited_done_steps_accepts_an_unchanged_done_step(
+def test_refuse_edited_steps_accepts_an_unchanged_done_step(
     tmp_path: Path, hello_world_bp_path: Path
 ) -> None:
     """Verify a Done step whose definition is unchanged is not refused."""
@@ -1789,13 +1851,13 @@ def test_refuse_edited_done_steps_accepts_an_unchanged_done_step(
     facts = describe_steps(wp, tmp_path)
     recorded = {n: f.definition_hash for n, f in facts.items()}
 
-    refuse_edited_done_steps(
+    refuse_edited_steps(
         wp, _recorded("run", recorded), DagStatus({"A": Status.Done}), facts, []
     )
 
 
 @pytest.mark.parametrize("by", ["name", "safe_name"])
-def test_refuse_edited_done_steps_honors_clobber(
+def test_refuse_edited_steps_honors_clobber(
     tmp_path: Path, hello_world_bp_path: Path, by: str
 ) -> None:
     """Verify clobbering an edited Done step, by name or safe name, clears it."""
@@ -1807,12 +1869,42 @@ def test_refuse_edited_done_steps_honors_clobber(
     status = DagStatus({"Step B": Status.Done})
 
     with pytest.raises(CstarExpectationFailed):
-        refuse_edited_done_steps(wp, manifest, status, facts, ["other"])
+        refuse_edited_steps(wp, manifest, status, facts, ["other"])
 
-    refuse_edited_done_steps(wp, manifest, status, facts, [f" {getattr(step, by)} "])
+    refuse_edited_steps(wp, manifest, status, facts, [f" {getattr(step, by)} "])
 
 
-def test_refuse_edited_done_steps_names_the_consumer_of_an_edited_producer(
+@pytest.mark.parametrize(
+    "recorded", [EDITED_HASH, UNTAGGED_HASH], ids=["edited", "untagged"]
+)
+def test_refuse_edited_steps_honors_a_clobber_the_workplan_sets(
+    tmp_path: Path,
+    hello_world_bp_path: Path,
+    caplog: pytest.LogCaptureFixture,
+    recorded: str,
+) -> None:
+    """Verify a Done step whose `workflow_overrides` set `clobber` runs again, so
+    it is neither refused nor warned about, as with `--clobber`.
+    """
+    step = _hello_step(
+        hello_world_bp_path.as_posix(), "B", workflow_overrides={"clobber": True}
+    )
+    wp = _guard_workplan(step)
+    facts = describe_steps(wp, tmp_path)
+
+    with caplog.at_level("WARNING"):
+        refuse_edited_steps(
+            wp,
+            _recorded("run", {"B": recorded}),
+            DagStatus({"B": Status.Done}),
+            facts,
+            [],
+        )
+
+    assert _warnings(caplog) == []
+
+
+def test_refuse_edited_steps_names_the_consumer_of_an_edited_producer(
     tmp_path: Path,
 ) -> None:
     """Verify editing a producer's blueprint also refuses its deferred consumer."""
@@ -1828,26 +1920,154 @@ def test_refuse_edited_done_steps_names_the_consumer_of_an_edited_producer(
     facts = describe_steps(wp, tmp_path)
 
     with pytest.raises(CstarExpectationFailed) as exc_info:
-        refuse_edited_done_steps(wp, _recorded("run", recorded), status, facts, [])
+        refuse_edited_steps(wp, _recorded("run", recorded), status, facts, [])
 
     message = str(exc_info.value)
     assert "'A'" in message
     assert "'B'" in message
 
 
-def test_refuse_edited_done_steps_skips_an_unrecorded_definition(
+def test_refuse_edited_steps_skips_an_unrecorded_definition(
     tmp_path: Path, hello_world_bp_path: Path
 ) -> None:
     """Verify a step recorded without a definition hash is not checked."""
     wp = _guard_workplan(_hello_step(hello_world_bp_path.as_posix(), "A"))
     facts = describe_steps(wp, tmp_path)
 
-    refuse_edited_done_steps(
+    refuse_edited_steps(
         wp, _recorded("run", {"A": ""}), DagStatus({"A": Status.Done}), facts, []
     )
 
 
-def test_refuse_edited_done_steps_skips_a_step_new_to_the_run(
+def _warnings(caplog: pytest.LogCaptureFixture) -> list[str]:
+    """Return the messages of the warnings captured so far."""
+    return [r.getMessage() for r in caplog.records if r.levelname == "WARNING"]
+
+
+@pytest.mark.parametrize(
+    "recorded",
+    [UNTAGGED_HASH, f"sha256:{'0' * 64}"],
+    ids=["untagged", "another-scheme"],
+)
+def test_refuse_edited_steps_warns_about_a_step_of_an_earlier_recipe(
+    tmp_path: Path,
+    hello_world_bp_path: Path,
+    caplog: pytest.LogCaptureFixture,
+    recorded: str,
+) -> None:
+    """Verify a Done step whose recorded hash has another scheme than its current
+    one is not refused, and that one warning names it.
+    """
+    wp = _guard_workplan(_hello_step(hello_world_bp_path.as_posix(), "A"))
+    facts = describe_steps(wp, tmp_path)
+
+    with caplog.at_level("WARNING"):
+        refuse_edited_steps(
+            wp,
+            _recorded("run", {"A": recorded}),
+            DagStatus({"A": Status.Done}),
+            facts,
+            [],
+        )
+
+    (message,) = _warnings(caplog)
+    assert "'A'" in message
+    assert "another C-Star release" in message
+
+
+def test_refuse_edited_steps_shares_one_warning_between_steps(
+    tmp_path: Path,
+    hello_world_bp_path: Path,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Verify several steps recorded under an earlier recipe share one warning."""
+    wp = _guard_workplan(
+        _hello_step(hello_world_bp_path.as_posix(), "A"),
+        _hello_step(hello_world_bp_path.as_posix(), "B"),
+    )
+    facts = describe_steps(wp, tmp_path)
+    recorded = {"A": UNTAGGED_HASH, "B": UNTAGGED_HASH}
+    status = DagStatus({"A": Status.Done, "B": Status.Done})
+
+    with caplog.at_level("WARNING"):
+        refuse_edited_steps(wp, _recorded("run", recorded), status, facts, [])
+
+    (message,) = _warnings(caplog)
+    assert "'A'" in message
+    assert "'B'" in message
+
+
+def test_refuse_edited_steps_refuses_an_edit_beside_an_unchecked_step(
+    tmp_path: Path,
+    hello_world_bp_path: Path,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Verify a step of the current scheme that was edited is refused even when
+    another step could not be compared, and that the refusal names only the edited
+    step and warns about nothing: the attempt it stops would not record anything.
+    """
+    wp = _guard_workplan(
+        _hello_step(hello_world_bp_path.as_posix(), "A"),
+        _hello_step(hello_world_bp_path.as_posix(), "B"),
+    )
+    facts = describe_steps(wp, tmp_path)
+    recorded = {"A": UNTAGGED_HASH, "B": EDITED_HASH}
+    status = DagStatus({"A": Status.Done, "B": Status.Done})
+
+    with caplog.at_level("WARNING"), pytest.raises(CstarExpectationFailed) as exc_info:
+        refuse_edited_steps(wp, _recorded("run", recorded), status, facts, [])
+
+    assert "'B'" in str(exc_info.value)
+    assert "'A'" not in str(exc_info.value)
+    assert _warnings(caplog) == []
+
+
+@pytest.mark.parametrize("by", ["name", "safe_name"])
+def test_refuse_edited_steps_does_not_warn_about_a_clobbered_step(
+    tmp_path: Path,
+    hello_world_bp_path: Path,
+    caplog: pytest.LogCaptureFixture,
+    by: str,
+) -> None:
+    """Verify a step of an earlier recipe that is selected for clobber is not
+    warned about: it runs again anyway.
+    """
+    step = _hello_step(hello_world_bp_path.as_posix(), "Step B")
+    assert step.name != step.safe_name
+    wp = _guard_workplan(step)
+    facts = describe_steps(wp, tmp_path)
+    manifest = _recorded("run", {"Step B": UNTAGGED_HASH})
+
+    with caplog.at_level("WARNING"):
+        refuse_edited_steps(
+            wp, manifest, DagStatus({"Step B": Status.Done}), facts, [getattr(step, by)]
+        )
+
+    assert _warnings(caplog) == []
+
+
+@pytest.mark.parametrize("status", [{"A": Status.Failed}, {}])
+def test_refuse_edited_steps_does_not_warn_about_a_step_that_failed_or_never_ran(
+    tmp_path: Path,
+    hello_world_bp_path: Path,
+    caplog: pytest.LogCaptureFixture,
+    status: dict[str, Status],
+) -> None:
+    """Verify a step of an earlier recipe that failed or was never submitted is
+    not warned about: nothing it recorded is relied on.
+    """
+    wp = _guard_workplan(_hello_step(hello_world_bp_path.as_posix(), "A"))
+    facts = describe_steps(wp, tmp_path)
+
+    with caplog.at_level("WARNING"):
+        refuse_edited_steps(
+            wp, _recorded("run", {"A": UNTAGGED_HASH}), DagStatus(status), facts, []
+        )
+
+    assert _warnings(caplog) == []
+
+
+def test_refuse_edited_steps_skips_a_step_new_to_the_run(
     tmp_path: Path, hello_world_bp_path: Path
 ) -> None:
     """Verify a step the manifest does not list is not refused."""
@@ -1859,7 +2079,467 @@ def test_refuse_edited_done_steps_skips_a_step_new_to_the_run(
     recorded = {"A": facts["A"].definition_hash}
     status = DagStatus({"A": Status.Done, "New": Status.Done})
 
-    refuse_edited_done_steps(wp, _recorded("run", recorded), status, facts, [])
+    refuse_edited_steps(wp, _recorded("run", recorded), status, facts, [])
+
+
+IN_PROGRESS = pytest.mark.parametrize(
+    "in_progress",
+    [Status.Submitted, Status.Running, Status.Ending],
+    ids=lambda status: status.name,
+)
+"""The statuses of a step that is still queued or running."""
+
+
+@IN_PROGRESS
+def test_refuse_edited_steps_refuses_an_edited_in_progress_step(
+    tmp_path: Path, hello_world_bp_path: Path, in_progress: Status
+) -> None:
+    """Verify a queued or running step whose definition changed is refused,
+    naming the step, the clobber to pass and the run-id alternative.
+    """
+    wp = _guard_workplan(
+        _hello_step(hello_world_bp_path.as_posix(), "A"),
+        _hello_step(hello_world_bp_path.as_posix(), "B"),
+    )
+    facts = describe_steps(wp, tmp_path)
+    recorded = {n: f.definition_hash for n, f in facts.items()} | {"B": EDITED_HASH}
+    status = DagStatus({"A": in_progress, "B": in_progress})
+
+    with pytest.raises(CstarExpectationFailed) as exc_info:
+        refuse_edited_steps(wp, _recorded("run", recorded), status, facts, [])
+
+    message = str(exc_info.value)
+    assert "'B'" in message
+    assert "'A'" not in message
+    assert "queued or running" in message
+    assert "reached Done" not in message
+    assert f"{ARG_CLOBBER} B" in message
+    assert f"{ARG_CLOBBER} A" not in message
+    assert ARG_RUN_ID in message
+
+
+@IN_PROGRESS
+def test_refuse_edited_steps_accepts_an_unchanged_in_progress_step(
+    tmp_path: Path,
+    hello_world_bp_path: Path,
+    caplog: pytest.LogCaptureFixture,
+    in_progress: Status,
+) -> None:
+    """Verify a queued or running step whose definition is unchanged is neither
+    refused nor warned about.
+    """
+    wp = _guard_workplan(_hello_step(hello_world_bp_path.as_posix(), "A"))
+    facts = describe_steps(wp, tmp_path)
+    recorded = {n: f.definition_hash for n, f in facts.items()}
+
+    with caplog.at_level("WARNING"):
+        refuse_edited_steps(
+            wp, _recorded("run", recorded), DagStatus({"A": in_progress}), facts, []
+        )
+
+    assert _warnings(caplog) == []
+
+
+@IN_PROGRESS
+@pytest.mark.parametrize("by", ["name", "safe_name"])
+def test_refuse_edited_steps_honors_clobber_of_an_in_progress_step(
+    tmp_path: Path, hello_world_bp_path: Path, in_progress: Status, by: str
+) -> None:
+    """Verify clobbering an edited queued or running step, by name or safe name,
+    clears it.
+    """
+    step = _hello_step(hello_world_bp_path.as_posix(), "Step B")
+    assert step.name != step.safe_name
+    wp = _guard_workplan(step)
+    facts = describe_steps(wp, tmp_path)
+    manifest = _recorded("run", _stale(facts))
+    status = DagStatus({"Step B": in_progress})
+
+    with pytest.raises(CstarExpectationFailed):
+        refuse_edited_steps(wp, manifest, status, facts, ["other"])
+
+    refuse_edited_steps(wp, manifest, status, facts, [f" {getattr(step, by)} "])
+
+
+@IN_PROGRESS
+def test_refuse_edited_steps_honors_a_clobber_the_workplan_sets_on_an_in_progress_step(
+    tmp_path: Path, hello_world_bp_path: Path, in_progress: Status
+) -> None:
+    """Verify a queued or running step whose `workflow_overrides` set `clobber`
+    is not refused, as with `--clobber`.
+    """
+    step = _hello_step(
+        hello_world_bp_path.as_posix(), "B", workflow_overrides={"clobber": True}
+    )
+    wp = _guard_workplan(step)
+    facts = describe_steps(wp, tmp_path)
+
+    refuse_edited_steps(
+        wp, _recorded("run", _stale(facts)), DagStatus({"B": in_progress}), facts, []
+    )
+
+
+def test_refuse_edited_steps_reports_done_and_in_progress_steps_in_one_error(
+    tmp_path: Path, hello_world_bp_path: Path
+) -> None:
+    """Verify edited Done steps and edited queued or running steps are named in
+    one error, each with its own clobber, and that the run-id alternative is
+    given once.
+    """
+    wp = _guard_workplan(
+        _hello_step(hello_world_bp_path.as_posix(), "A"),
+        _hello_step(hello_world_bp_path.as_posix(), "B"),
+        _hello_step(hello_world_bp_path.as_posix(), "C"),
+        _hello_step(hello_world_bp_path.as_posix(), "D"),
+    )
+    facts = describe_steps(wp, tmp_path)
+    status = DagStatus(
+        {"A": Status.Done, "B": Status.Submitted, "C": Status.Running, "D": Status.Done}
+    )
+    recorded = _stale(facts) | {"D": facts["D"].definition_hash}
+
+    with pytest.raises(CstarExpectationFailed) as exc_info:
+        refuse_edited_steps(wp, _recorded("run", recorded), status, facts, [])
+
+    message = str(exc_info.value)
+    assert "'D'" not in message
+    assert message.count(ARG_CLOBBER) == 3
+    for name in "ABC":
+        assert f"{ARG_CLOBBER} {name}" in message
+    assert "Steps 'A' reached Done" in message
+    assert "Steps 'B', 'C' are still queued or running" in message
+    assert message.count(ARG_RUN_ID) == 1
+
+
+@IN_PROGRESS
+def test_refuse_edited_steps_warns_about_an_in_progress_step_of_an_earlier_recipe(
+    tmp_path: Path,
+    hello_world_bp_path: Path,
+    caplog: pytest.LogCaptureFixture,
+    in_progress: Status,
+) -> None:
+    """Verify a queued or running step whose recorded hash has another scheme than
+    its current one is not refused, and shares one warning with a Done step.
+    """
+    wp = _guard_workplan(
+        _hello_step(hello_world_bp_path.as_posix(), "A"),
+        _hello_step(hello_world_bp_path.as_posix(), "B"),
+    )
+    facts = describe_steps(wp, tmp_path)
+    recorded = {"A": UNTAGGED_HASH, "B": UNTAGGED_HASH}
+    status = DagStatus({"A": Status.Done, "B": in_progress})
+
+    with caplog.at_level("WARNING"):
+        refuse_edited_steps(wp, _recorded("run", recorded), status, facts, [])
+
+    (message,) = _warnings(caplog)
+    assert "'A'" in message
+    assert "'B'" in message
+    assert "another C-Star release" in message
+
+
+T1 = datetime(2026, 10, 20, 9, 0, tzinfo=UTC)
+T2 = T1 + timedelta(hours=1)
+T3 = T1 + timedelta(hours=2)
+"""Increasing moments for the attempts of a run and the submissions of its steps."""
+
+Attempts = t.Sequence[tuple[datetime, t.Sequence[str]]]
+"""The attempts of a run as the moment each started and the steps it clobbered."""
+
+
+def _clobber_plans(
+    blueprint: Path,
+    *,
+    selected: t.Collection[str] = (),
+    standing: t.Collection[str] = (),
+) -> tuple[Workplan, Workplan]:
+    """Build the workplan a run was authored with and the one replayed from it.
+
+    The authored workplan sets `clobber` on the `standing` steps; the replayed one
+    also has the `selected` steps, as an earlier `--clobber` left them.
+    """
+
+    def plan(clobbered: t.Collection[str]) -> Workplan:
+        return _guard_workplan(
+            *(
+                _hello_step(
+                    blueprint.as_posix(),
+                    name,
+                    workflow_overrides={KEY_CLOBBER: True} if name in clobbered else {},
+                )
+                for name in ("A", "B", "C")
+            )
+        )
+
+    return plan(standing), plan({*selected, *standing})
+
+
+async def _clobbered_run(
+    root: Path,
+    run_id: str,
+    authored: Workplan,
+    attempts: Attempts,
+    submitted: t.Mapping[str, datetime | None],
+) -> WorkplanRun:
+    """Record a run whose attempts clobbered steps and whose steps were submitted.
+
+    The first attempt carries the authored workplan, as a preparing attempt does;
+    the others replay it. A step absent from `submitted` has no sentinel.
+    """
+    carried = f"{ATTEMPTS_DIR_NAME}/first"
+    assert serialize(root / carried / ATTEMPT_WORKPLAN_NAME, authored)
+    manifest = RunManifest(
+        run_id=run_id,
+        name=run_id,
+        kind="workplan",
+        created_at=attempts[0][0],
+        attempts=[
+            Attempt(
+                start_at=start,
+                clobbered=list(clobbered),
+                directory=carried if i == 0 else "",
+            )
+            for i, (start, clobbered) in enumerate(attempts)
+        ],
+        steps=[],
+    )
+    write_run_manifest(root, manifest)
+
+    repo = StateRepository()
+    for name, at in submitted.items():
+        handle = ProcessHandle(
+            pid="1", name=name, run_id=run_id, status=Status.Done, submitted_at=at
+        )
+        assert await repo.put_sentinel(handle)
+    return WorkplanRun(output_path=root, run_id=run_id)
+
+
+def _clobbering(wp: Workplan) -> list[str]:
+    """Return the names of the steps of a workplan that set `clobber`."""
+    return [step.name for step in wp.steps if step.clobber]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "submitted",
+    [T2, T1, T2.replace(tzinfo=None)],
+    ids=["after-the-attempt-started", "at-the-attempt-start", "naive-moment-is-utc"],
+)
+async def test_drop_spent_clobbers_drops_a_step_submitted_since_its_attempt_started(
+    tmp_path: Path, mock_run_id: str, hello_world_bp_path: Path, submitted: datetime
+) -> None:
+    """Verify a selected step submitted at or after the start of the attempt that
+    clobbered it has spent its clobber: it is dropped and reported.
+    """
+    authored, wp = _clobber_plans(hello_world_bp_path, selected=["B"])
+    wp_run = await _clobbered_run(
+        tmp_path / "run", mock_run_id, authored, [(T1, ["B"])], {"B": submitted}
+    )
+
+    assert await drop_spent_clobbers(wp, wp_run) == ["B"]
+    assert _clobbering(wp) == []
+
+
+@pytest.mark.asyncio
+async def test_drop_spent_clobbers_keeps_a_step_submitted_before_its_attempt(
+    tmp_path: Path, mock_run_id: str, hello_world_bp_path: Path
+) -> None:
+    """Verify a selected step last submitted before the attempt that clobbered it
+    keeps its clobber, since that attempt stopped before it reached the step.
+    """
+    authored, wp = _clobber_plans(hello_world_bp_path, selected=["B"])
+    wp_run = await _clobbered_run(
+        tmp_path / "run", mock_run_id, authored, [(T2, ["B"])], {"B": T1}
+    )
+
+    assert await drop_spent_clobbers(wp, wp_run) == []
+    assert _clobbering(wp) == ["B"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("attempts", "submitted", "dropped"),
+    [
+        ([(T1, ["B"]), (T3, ["B"])], T2, False),
+        ([(T1, ["B"]), (T3, ["B"])], T3, True),
+        ([(T1, ["B"]), (T3, ["A"])], T2, True),
+    ],
+    ids=[
+        "between-two-clobbers",
+        "since-the-latest-clobber",
+        "later-attempt-clobbers-another-step",
+    ],
+)
+async def test_drop_spent_clobbers_counts_the_latest_clobbering_attempt(
+    tmp_path: Path,
+    mock_run_id: str,
+    hello_world_bp_path: Path,
+    attempts: Attempts,
+    submitted: datetime,
+    dropped: bool,
+) -> None:
+    """Verify the latest attempt that clobbered the step decides whether its
+    clobber is spent, not the first, and not a later attempt that clobbered
+    another step.
+    """
+    authored, wp = _clobber_plans(hello_world_bp_path, selected=["B"])
+    wp_run = await _clobbered_run(
+        tmp_path / "run", mock_run_id, authored, attempts, {"B": submitted}
+    )
+
+    assert await drop_spent_clobbers(wp, wp_run) == (["B"] if dropped else [])
+    assert _clobbering(wp) == ([] if dropped else ["B"])
+
+
+@pytest.mark.asyncio
+async def test_drop_spent_clobbers_keeps_a_clobber_the_authored_workplan_sets(
+    tmp_path: Path, mock_run_id: str, hello_world_bp_path: Path
+) -> None:
+    """Verify a clobber the authored workplan sets is kept though the step was
+    submitted since, since every re-entry applies it.
+    """
+    authored, wp = _clobber_plans(hello_world_bp_path, selected=["C"], standing=["B"])
+    wp_run = await _clobbered_run(
+        tmp_path / "run",
+        mock_run_id,
+        authored,
+        [(T1, ["B", "C"])],
+        {"B": T2, "C": T2},
+    )
+
+    assert await drop_spent_clobbers(wp, wp_run) == ["C"]
+    assert _clobbering(wp) == ["B"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "submitted",
+    [{}, {"B": None}],
+    ids=["no-sentinel", "no-submission-time"],
+)
+async def test_drop_spent_clobbers_keeps_a_step_without_a_submission_time(
+    tmp_path: Path,
+    mock_run_id: str,
+    hello_world_bp_path: Path,
+    submitted: t.Mapping[str, datetime | None],
+) -> None:
+    """Verify a selected step with no sentinel, or one written before submission
+    times were recorded, keeps its clobber: nothing shows it was submitted since.
+    """
+    authored, wp = _clobber_plans(hello_world_bp_path, selected=["B"])
+    wp_run = await _clobbered_run(
+        tmp_path / "run", mock_run_id, authored, [(T1, ["B"])], submitted
+    )
+
+    assert await drop_spent_clobbers(wp, wp_run) == []
+    assert _clobbering(wp) == ["B"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "attempts",
+    [[(T1, ["A"])], [(T1, [])]],
+    ids=["another-step-clobbered", "nothing-clobbered"],
+)
+async def test_drop_spent_clobbers_keeps_a_step_no_attempt_clobbered(
+    tmp_path: Path, mock_run_id: str, hello_world_bp_path: Path, attempts: Attempts
+) -> None:
+    """Verify a selected step that no attempt lists as clobbered keeps its clobber
+    though it was submitted since.
+    """
+    authored, wp = _clobber_plans(hello_world_bp_path, selected=["B"])
+    wp_run = await _clobbered_run(
+        tmp_path / "run", mock_run_id, authored, attempts, {"B": T2}
+    )
+
+    assert await drop_spent_clobbers(wp, wp_run) == []
+    assert _clobbering(wp) == ["B"]
+
+
+@pytest.mark.asyncio
+async def test_drop_spent_clobbers_without_a_manifest(
+    tmp_path: Path, hello_world_bp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Verify a run with no manifest, which cannot say when a step was selected,
+    drops nothing and says nothing.
+    """
+    _, wp = _clobber_plans(hello_world_bp_path, selected=["B"])
+    wp_run = _legacy_run(tmp_path)
+
+    with caplog.at_level("WARNING"):
+        assert await drop_spent_clobbers(wp, wp_run) == []
+
+    assert _clobbering(wp) == ["B"]
+    assert _warnings(caplog) == []
+
+
+@pytest.mark.asyncio
+async def test_drop_spent_clobbers_warns_once_for_an_unreadable_manifest(
+    tmp_path: Path,
+    mock_run_id: str,
+    hello_world_bp_path: Path,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Verify a manifest that cannot be read drops nothing and warns once, naming
+    the run, since the clobber selections are then applied again.
+    """
+    _, wp = _clobber_plans(hello_world_bp_path, selected=["B"])
+    root = tmp_path / "run"
+    root.mkdir()
+    (root / RUN_MANIFEST_NAME).write_text("name: [unclosed\n")
+    wp_run = WorkplanRun(output_path=root, run_id=mock_run_id)
+
+    with caplog.at_level("WARNING"):
+        assert await drop_spent_clobbers(wp, wp_run) == []
+
+    assert _clobbering(wp) == ["B"]
+    assert len(warnings := _warnings(caplog)) == 1
+    assert mock_run_id in warnings[0]
+
+
+@pytest.mark.asyncio
+async def test_drop_spent_clobbers_leaves_steps_without_clobber_alone(
+    tmp_path: Path, mock_run_id: str, hello_world_bp_path: Path
+) -> None:
+    """Verify a workplan that selects no step is left as it is, whatever the
+    attempts clobbered and the steps did since.
+    """
+    authored, wp = _clobber_plans(hello_world_bp_path)
+    wp_run = await _clobbered_run(
+        tmp_path / "run",
+        mock_run_id,
+        authored,
+        [(T1, ["A", "B", "C"])],
+        {"A": T2, "B": T2, "C": T2},
+    )
+
+    assert await drop_spent_clobbers(wp, wp_run) == []
+    assert [step.workflow_overrides for step in wp.steps] == [{}, {}, {}]
+
+
+@pytest.mark.asyncio
+async def test_drop_spent_clobbers_drops_only_the_spent_steps(
+    tmp_path: Path, mock_run_id: str, hello_world_bp_path: Path
+) -> None:
+    """Verify of two selected steps only the one submitted since its attempt
+    started is dropped and reported; the other keeps its clobber, and a step that
+    was not selected is not touched.
+    """
+    authored, wp = _clobber_plans(hello_world_bp_path, selected=["B", "C"])
+    wp_run = await _clobbered_run(
+        tmp_path / "run",
+        mock_run_id,
+        authored,
+        [(T2, ["A", "B", "C"])],
+        {"A": T3, "B": T3, "C": T1},
+    )
+
+    assert await drop_spent_clobbers(wp, wp_run) == ["B"]
+    assert _clobbering(wp) == ["C"]
+    assert [step.workflow_overrides for step in wp.steps if step.name != "C"] == [
+        {},
+        {},
+    ]
 
 
 def _build_guarded(tmp_path: Path, run_id: str, blueprint: Path) -> tuple[Path, Path]:
@@ -1890,6 +2570,108 @@ async def test_build_dag_without_a_manifest_loads_no_run_state(
         await build_dag(wp_path, mock_run_id)
 
     load_state.assert_not_called()
+
+
+def _leave_sentinel(run_id: str, step: str) -> Path:
+    """Write a Done sentinel for `step`, as an earlier run of `run_id` left it."""
+    sentinel = StateRepository.sentinel_path(step, run_id=run_id)
+    sentinel.parent.mkdir(parents=True, exist_ok=True)
+    handle = ProcessHandle(
+        pid="1", name=step, run_id=run_id, status=Status.Done, run_uuid="earlier"
+    )
+    assert serialize(sentinel, handle)
+    return sentinel
+
+
+@pytest.mark.asyncio
+async def test_build_dag_refuses_the_state_of_a_run_whose_directory_is_gone(
+    tmp_path: Path, mock_run_id: str, hello_world_bp_path: Path
+) -> None:
+    """Verify a run-id whose sentinels outlived its run directory is refused
+    before anything is written, naming the state directory and how to clear it.
+    """
+    wp_path, output_dir = _build_guarded(tmp_path, mock_run_id, hello_world_bp_path)
+    sentinel = _leave_sentinel(mock_run_id, "hello")
+
+    with (
+        mock.patch("cstar.orchestration.dag_runner.check_environment"),
+        pytest.raises(CstarExpectationFailed) as exc_info,
+    ):
+        await build_dag(wp_path, mock_run_id)
+
+    msg = str(exc_info.value)
+    assert str(sentinel.parent) in msg
+    assert f"cstar admin clean {ARG_RUN_ID} {mock_run_id}" in msg
+    assert f"{ARG_RUN_ID} <other-id>" in msg
+    assert not list(output_dir.glob(TRANSFORMED_WORKPLAN_GLOB))
+
+
+@pytest.mark.asyncio
+async def test_build_dag_refuses_state_over_a_run_directory_left_without_its_files(
+    tmp_path: Path, mock_run_id: str, hello_world_bp_path: Path
+) -> None:
+    """Verify a run directory that holds something but neither its manifest nor
+    its transformed workplan is refused without advice to `admin clean` it,
+    which would remove what is left.
+    """
+    wp_path, output_dir = _build_guarded(tmp_path, mock_run_id, hello_world_bp_path)
+    sentinel = _leave_sentinel(mock_run_id, "hello")
+    (output_dir / "tasks").mkdir()
+
+    with (
+        mock.patch("cstar.orchestration.dag_runner.check_environment"),
+        pytest.raises(CstarExpectationFailed) as exc_info,
+    ):
+        await build_dag(wp_path, mock_run_id)
+
+    msg = str(exc_info.value)
+    assert f"Remove {sentinel.parent}" in msg
+    assert "admin clean" not in msg
+
+
+@pytest.mark.asyncio
+async def test_build_dag_refuses_state_of_a_run_tracked_in_another_directory(
+    tmp_path: Path, mock_run_id: str, hello_world_bp_path: Path
+) -> None:
+    """Verify a run-id whose tracked run lives in another directory (another
+    data home) is refused naming that directory, without advice to
+    `admin clean` it, which would remove that run.
+    """
+    wp_path, _ = _build_guarded(tmp_path, mock_run_id, hello_world_bp_path)
+    _leave_sentinel(mock_run_id, "hello")
+    elsewhere = tmp_path / "other-data-home" / mock_run_id
+    elsewhere.mkdir(parents=True)
+    TrackingRepository().put_workplan_run_sync(
+        WorkplanRun(output_path=elsewhere, run_id=mock_run_id)
+    )
+
+    with (
+        mock.patch("cstar.orchestration.dag_runner.check_environment"),
+        pytest.raises(CstarExpectationFailed) as exc_info,
+    ):
+        await build_dag(wp_path, mock_run_id)
+
+    msg = str(exc_info.value)
+    assert f"tracked in {elsewhere}" in msg
+    assert "admin clean" not in msg
+
+
+@pytest.mark.asyncio
+async def test_build_dag_re_enters_a_run_directory_that_has_no_manifest(
+    tmp_path: Path, mock_run_id: str, hello_world_bp_path: Path
+) -> None:
+    """Verify a run directory that still holds its transformed workplan is
+    re-entered with its sentinels, even without a manifest: one could not be
+    written, or the run predates manifests.
+    """
+    wp_path, output_dir = _build_guarded(tmp_path, mock_run_id, hello_world_bp_path)
+    _leave_sentinel(mock_run_id, "hello")
+    (output_dir / f"{wp_path.stem}_transformed.yaml").write_text(wp_path.read_text())
+
+    with mock.patch("cstar.orchestration.dag_runner.check_environment"):
+        await build_dag(wp_path, mock_run_id)
+
+    assert read_run_manifest(output_dir) is None
 
 
 @pytest.mark.asyncio
@@ -1945,7 +2727,7 @@ async def test_build_dag_refuses_an_edited_done_step_before_writing_anything(
     workplan is written, and that clobbering the step lets it through.
     """
     wp_path, output_dir = _build_guarded(tmp_path, mock_run_id, hello_world_bp_path)
-    write_run_manifest(output_dir, _recorded(mock_run_id, {"hello": "stale"}))
+    write_run_manifest(output_dir, _recorded(mock_run_id, {"hello": EDITED_HASH}))
     done = DagStatus({"hello": Status.Done})
 
     with (
@@ -1969,6 +2751,41 @@ async def test_build_dag_refuses_an_edited_done_step_before_writing_anything(
     assert len(list((output_dir / ATTEMPTS_DIR_NAME).iterdir())) == 1
 
 
+@pytest.mark.asyncio
+async def test_build_dag_refuses_an_edited_queued_step_before_writing_anything(
+    tmp_path: Path, mock_run_id: str, hello_world_bp_path: Path
+) -> None:
+    """Verify an edited queued step refuses the re-entry before the transformed
+    workplan is written, and that clobbering the step lets it through.
+    """
+    wp_path, output_dir = _build_guarded(tmp_path, mock_run_id, hello_world_bp_path)
+    write_run_manifest(output_dir, _recorded(mock_run_id, {"hello": EDITED_HASH}))
+    queued = DagStatus({"hello": Status.Submitted})
+
+    with (
+        mock.patch("cstar.orchestration.dag_runner.check_environment"),
+        mock.patch(
+            "cstar.orchestration.dag_runner.load_run_state",
+            mock.AsyncMock(return_value=queued),
+        ),
+    ):
+        with pytest.raises(
+            CstarExpectationFailed, match=re.escape(f"{ARG_CLOBBER} hello")
+        ):
+            await build_dag(wp_path, mock_run_id)
+        # a command whose --clobber is a flag spells the re-run its own way
+        with pytest.raises(CstarExpectationFailed, match="pass --again to cancel"):
+            await build_dag(wp_path, mock_run_id, clobber_hint=lambda _: "--again")
+
+        assert not list(output_dir.glob("*_transformed.yaml*"))
+        assert not (output_dir / ATTEMPTS_DIR_NAME).exists()
+
+        await build_dag(wp_path, mock_run_id, clobber_steps=["hello"])
+
+    assert list(output_dir.glob("*_transformed.yaml*"))
+    assert len(list((output_dir / ATTEMPTS_DIR_NAME).iterdir())) == 1
+
+
 CURRENT_MANIFEST_SCHEMA = RunManifest.model_fields["schema_version"].default
 """The schema version this build writes in a run manifest."""
 
@@ -1976,25 +2793,31 @@ CURRENT_MANIFEST_SCHEMA = RunManifest.model_fields["schema_version"].default
 def _write_manifest_as_of(root: Path, manifest: RunManifest, version: str) -> None:
     """Write a manifest as the build of schema `version` left it.
 
-    `write_run_manifest` stamps this build's version, so the document is
-    serialized directly.
+    Writers stamp the newer of the document's version and this build's, so
+    the version is set in the text written, and read back to be sure it took.
     """
-    manifest.schema_version = version
-    assert serialize(root / RUN_MANIFEST_NAME, manifest)
+    path = root / RUN_MANIFEST_NAME
+    assert serialize(path, manifest)
+    stamped = f"schema_version: {manifest.schema_version}"
+    assert stamped in path.read_text()
+    path.write_text(path.read_text().replace(stamped, f"schema_version: {version}", 1))
+    assert f"schema_version: {version}" in path.read_text()
 
 
 @pytest.mark.asyncio
-async def test_build_dag_accepts_a_done_step_hashed_before_canonical_names(
-    tmp_path: Path, mock_run_id: str, hello_world_bp_path: Path
+async def test_build_dag_accepts_a_done_step_hashed_by_an_earlier_recipe(
+    tmp_path: Path,
+    mock_run_id: str,
+    hello_world_bp_path: Path,
+    caplog: pytest.LogCaptureFixture,
 ) -> None:
-    """Verify re-entering a run whose manifest predates `CANONICAL_NAMES_SINCE`
-    is not refused for its recorded hashes (which may use an earlier application
-    name), and that scheduling it rewrites the manifest under the current schema
-    with the step's current hash.
+    """Verify re-entering a run whose Done step records an untagged hash (one an
+    earlier release computed) is not refused, that a warning names the step, and
+    that scheduling it rewrites the manifest under the current schema with the
+    step's current, tagged hash.
     """
     wp_path, output_dir = _build_guarded(tmp_path, mock_run_id, hello_world_bp_path)
-    # a hash this build cannot reproduce: it stands for one made under `roms_marbl`
-    older = _recorded(mock_run_id, {"hello": "hashed-under-an-earlier-name"})
+    older = _recorded(mock_run_id, {"hello": UNTAGGED_HASH})
     _write_manifest_as_of(output_dir, older, "1.4.0")
     done = DagStatus({"hello": Status.Done})
 
@@ -2006,6 +2829,7 @@ async def test_build_dag_accepts_a_done_step_hashed_before_canonical_names(
         ),
         mock.patch("cstar.orchestration.dag_runner.get_orchestrator"),
         mock.patch("cstar.orchestration.dag_runner.process_plan", mock.AsyncMock()),
+        caplog.at_level("WARNING"),
     ):
         planner, trx_path, facts, carried = await build_dag(wp_path, mock_run_id)
         await run_dag(
@@ -2017,25 +2841,25 @@ async def test_build_dag_accepts_a_done_step_hashed_before_canonical_names(
             carried=carried,
         )
 
+    (message,) = [m for m in _warnings(caplog) if "another C-Star release" in m]
+    assert "'hello'" in message
     rewritten = read_run_manifest(output_dir)
     assert rewritten is not None
     assert rewritten.schema_version == CURRENT_MANIFEST_SCHEMA
     entry = rewritten.step("hello")
     assert entry is not None
     assert entry.definition_hash == facts["hello"].definition_hash
-    assert (
-        "hashed-under-an-earlier-name"
-        not in (output_dir / RUN_MANIFEST_NAME).read_text()
-    )
+    assert entry.definition_hash.startswith(f"{DEFINITION_HASH_SCHEME}:")
+    assert UNTAGGED_HASH not in (output_dir / RUN_MANIFEST_NAME).read_text()
 
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("writer", ["reentry", "refresh"])
 @pytest.mark.parametrize(
-    ("version", "refused"),
+    ("recorded", "refused"),
     [
-        pytest.param("1.4.0", False, id="before-canonical-names"),
-        pytest.param(CANONICAL_NAMES_SINCE, True, id="canonical-names-since"),
+        pytest.param(UNTAGGED_HASH, False, id="untagged"),
+        pytest.param(EDITED_HASH, True, id="current-scheme"),
     ],
 )
 async def test_restamping_does_not_make_an_older_hash_comparable(
@@ -2043,21 +2867,21 @@ async def test_restamping_does_not_make_an_older_hash_comparable(
     mock_run_id: str,
     hello_world_bp_path: Path,
     writer: str,
-    version: str,
+    recorded: str,
     refused: bool,
 ) -> None:
     """Verify a writer that restamps an older manifest and keeps its recorded
     hashes (a re-entry that replays the recorded plan, or a status refresh) does
-    not turn them into hashes the next authored re-entry compares.
+    not turn an untagged one into a hash the next authored re-entry compares.
 
-    A manifest left at `CANONICAL_NAMES_SINCE` still has its edited Done step refused.
+    A hash under the current scheme that differs still has its Done step refused.
     """
     wp_path, wp_run = await _schedule(tmp_path, mock_run_id, hello_world_bp_path)
     root = wp_run.output_path
     manifest = read_run_manifest(root)
     assert manifest is not None
-    manifest.steps[0].definition_hash = "hashed-under-an-earlier-name"
-    _write_manifest_as_of(root, manifest, version)
+    manifest.steps[0].definition_hash = recorded
+    _write_manifest_as_of(root, manifest, "1.4.0")
 
     if writer == "reentry":
         await _reenter(wp_run)
@@ -2077,9 +2901,285 @@ async def test_restamping_does_not_make_an_older_hash_comparable(
 
     if refused:
         with pytest.raises(CstarExpectationFailed):
-            refuse_edited_done_steps(wp, reread, done, facts, [])
+            refuse_edited_steps(wp, reread, done, facts, [])
     else:
-        refuse_edited_done_steps(wp, reread, done, facts, [])
+        refuse_edited_steps(wp, reread, done, facts, [])
+
+
+@pytest.mark.parametrize("step_status", [Status.Done, Status.Submitted])
+def test_refuse_edited_steps_warns_about_a_step_whose_blueprint_changed_major(
+    tmp_path: Path,
+    hello_world_bp_path: Path,
+    caplog: pytest.LogCaptureFixture,
+    step_status: Status,
+) -> None:
+    """Verify a Done or queued step whose definition differs under the current
+    scheme is not refused when its blueprint's schema major moved since it was
+    recorded (an automatic migration changes the content hashed), and that one
+    warning names it.
+    """
+    wp = _guard_workplan(_hello_step(hello_world_bp_path.as_posix(), "A"))
+    facts = describe_steps(wp, tmp_path)
+    current_major = int(facts["A"].blueprint_schema_version.split(".")[0])
+    recorded = _recorded(
+        "run", {"A": EDITED_HASH}, schema_versions={"A": f"{current_major - 1}.2.0"}
+    )
+
+    with caplog.at_level("WARNING"):
+        refuse_edited_steps(wp, recorded, DagStatus({"A": step_status}), facts, [])
+
+    (message,) = _warnings(caplog)
+    assert "'A'" in message
+    assert "migrated" in message
+
+
+@pytest.mark.parametrize(
+    "recorded_version",
+    ["1.0.0", "1.9.9", ""],
+    ids=["same-version", "same-major", "unrecorded"],
+)
+def test_refuse_edited_steps_refuses_a_changed_hash_within_a_schema_major(
+    tmp_path: Path, hello_world_bp_path: Path, recorded_version: str
+) -> None:
+    """Verify a Done step whose hash differs is still refused when its blueprint's
+    schema major did not move, or no schema version was recorded to compare.
+    """
+    wp = _guard_workplan(_hello_step(hello_world_bp_path.as_posix(), "A"))
+    facts = describe_steps(wp, tmp_path)
+    assert facts["A"].blueprint_schema_version == "1.0.0"
+    recorded = _recorded(
+        "run", {"A": EDITED_HASH}, schema_versions={"A": recorded_version}
+    )
+
+    with pytest.raises(CstarExpectationFailed, match="'A'"):
+        refuse_edited_steps(wp, recorded, DagStatus({"A": Status.Done}), facts, [])
+
+
+def test_refuse_edited_steps_refuses_an_edit_beside_a_migrated_step(
+    tmp_path: Path, hello_world_bp_path: Path
+) -> None:
+    """Verify a migrated step's warning does not excuse an edit to another step:
+    only the edited step is refused.
+    """
+    wp = _guard_workplan(
+        _hello_step(hello_world_bp_path.as_posix(), "A"),
+        _hello_step(hello_world_bp_path.as_posix(), "B"),
+    )
+    facts = describe_steps(wp, tmp_path)
+    recorded = _recorded(
+        "run",
+        {"A": EDITED_HASH, "B": EDITED_HASH},
+        schema_versions={"A": "0.9.0", "B": "1.0.0"},
+    )
+
+    with pytest.raises(CstarExpectationFailed) as exc_info:
+        refuse_edited_steps(
+            wp, recorded, DagStatus({"A": Status.Done, "B": Status.Done}), facts, []
+        )
+
+    assert "'B'" in str(exc_info.value)
+    assert "'A'" not in str(exc_info.value)
+
+
+STALE_STEP = "roms"
+"""The name of the step over the stale blueprint of the migration re-entry tests."""
+
+
+def _author_stale_roms(tmp_path: Path, bp_templates_dir: Path) -> tuple[Path, Path]:
+    """Author a one-step ucla_roms workplan over a copy of a schema 2.1.0 blueprint.
+
+    Returns the path of the workplan, which opens with a comment that
+    re-serializing it would drop, and the path of the blueprint copy.
+    """
+    blueprint = tmp_path / "authored_blueprint.yaml"
+    shutil.copy(bp_templates_dir / "roms_marbl" / "blueprint.2.1.0.yaml", blueprint)
+    wp = _guard_workplan(
+        Step(name=STALE_STEP, application="ucla_roms", blueprint=blueprint.as_posix())
+    )
+    wp_path = tmp_path / "roms_plan.yaml"
+    assert serialize(wp_path, wp)
+    wp_path.write_text(f"# user comment\n{wp_path.read_text()}")
+    return wp_path, blueprint
+
+
+def _migrate(wp_path: Path) -> dict[str, Path]:
+    """Migrate the blueprints of the workplan at `wp_path` as a submit does."""
+    return migrate_steps(wp_path, deserialize(wp_path, Workplan))
+
+
+def _record_pre_migration_run(run_id: str) -> Path:
+    """Record the stale step as Done under the hash a release before the bump left.
+
+    The hash is one no current definition has, recorded beside the schema version
+    of the blueprint it was computed from. Returns the run directory.
+    """
+    output_dir = StateDirectoryManager.data_dir(run_id)
+    output_dir.mkdir(parents=True, exist_ok=True)
+    manifest = _recorded(
+        run_id,
+        {STALE_STEP: EDITED_HASH},
+        schema_versions={STALE_STEP: "2.1.0"},
+        application="ucla_roms",
+    )
+    write_run_manifest(output_dir, manifest)
+    return output_dir
+
+
+async def _reenter_authored(
+    wp_path: Path, run_id: str, sources: t.Mapping[str, Path]
+) -> tuple[Planner, Path, dict[str, StepFacts], t.Any]:
+    """Prepare and schedule the authored workplan over a run whose steps are Done.
+
+    The guard, `describe_steps` and `prepare_workplan` run for real; the
+    environment check, the launcher's state and the orchestrator are stood in for.
+    """
+    done = DagStatus({STALE_STEP: Status.Done})
+    with (
+        mock.patch("cstar.orchestration.dag_runner.check_environment"),
+        mock.patch(
+            "cstar.orchestration.dag_runner.load_run_state",
+            mock.AsyncMock(return_value=done),
+        ),
+        mock.patch("cstar.orchestration.dag_runner.get_orchestrator"),
+        mock.patch("cstar.orchestration.dag_runner.process_plan", mock.AsyncMock()),
+    ):
+        planner, trx_path, facts, carried = await build_dag(
+            wp_path, run_id, blueprint_sources=sources
+        )
+        await run_dag(
+            wp_path,
+            trx_path,
+            run_id,
+            planner,
+            step_facts=facts,
+            carried=carried,
+        )
+    return planner, trx_path, facts, carried
+
+
+def _migration_warnings(caplog: pytest.LogCaptureFixture) -> list[str]:
+    """Return the captured warnings about definitions the guard cannot compare."""
+    return [m for m in _warnings(caplog) if "another C-Star release" in m]
+
+
+@pytest.mark.asyncio
+async def test_reentry_after_blueprint_migration_reuses_done_step(
+    tmp_path: Path,
+    mock_run_id: str,
+    bp_templates_dir: Path,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Verify re-entering a run whose Done step was recorded under a blueprint of
+    an older schema major (the release before the bump hashed the blueprint as
+    authored) does not refuse it, that a warning names the step, and that the
+    step is prepared from the migrated copy while the authored workplan stays as
+    written and the manifest records the new schema version and the definition
+    hash of the authored reference.
+    """
+    wp_path, blueprint = _author_stale_roms(tmp_path, bp_templates_dir)
+    authored = wp_path.read_bytes()
+    output_dir = _record_pre_migration_run(mock_run_id)
+    sources = _migrate(wp_path)
+    assert set(sources) == {STALE_STEP}
+
+    with caplog.at_level("WARNING"):
+        _, trx_path, facts, carried = await _reenter_authored(
+            wp_path, mock_run_id, sources
+        )
+
+    # not refused, and the step is warned about by name
+    (message,) = _migration_warnings(caplog)
+    assert f"'{STALE_STEP}'" in message
+    assert "migrated" in message
+
+    # the Done step is reused: nothing marks it to run again
+    prepared = LiveWorkplan.load(trx_path)
+    assert not prepared.steps[0].clobber
+
+    # the authored workplan and blueprint are as written
+    assert wp_path.read_bytes() == authored
+    assert "schema_version: 2.1.0" in blueprint.read_text()
+
+    # the attempt prepared the migrated copy
+    current = get_application("ucla_roms").schema_version
+    carried_copy = output_dir / carried.carried_blueprints[STALE_STEP]
+    assert f"schema_version: {current}" in carried_copy.read_text()
+
+    # the manifest records the current schema and the authored reference's hash
+    manifest = read_run_manifest(output_dir)
+    assert manifest is not None
+    entry = manifest.step(STALE_STEP)
+    assert entry is not None
+    assert entry.blueprint_schema_version == current
+    assert entry.definition_hash == facts[STALE_STEP].definition_hash
+    assert entry.definition_hash != EDITED_HASH
+    authored_hash = describe_steps(deserialize(wp_path, Workplan), tmp_path, sources)
+    assert entry.definition_hash == authored_hash[STALE_STEP].definition_hash
+    at_copy = _guard_workplan(
+        Step(
+            name=STALE_STEP,
+            application="ucla_roms",
+            blueprint=sources[STALE_STEP].as_posix(),
+        )
+    )
+    by_copy = describe_steps(at_copy, tmp_path)
+    assert by_copy[STALE_STEP].blueprint_schema_version == current
+    assert by_copy[STALE_STEP].definition_hash != entry.definition_hash
+
+
+@pytest.mark.asyncio
+async def test_second_reentry_after_migration_is_compared_again(
+    tmp_path: Path,
+    mock_run_id: str,
+    bp_templates_dir: Path,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Verify once a re-entry recorded the migrated step's definition, the next one
+    raises no warning about it, and an edit to the authored blueprint that
+    survives the migration is refused as an edit to a Done step.
+    """
+    wp_path, blueprint = _author_stale_roms(tmp_path, bp_templates_dir)
+    _record_pre_migration_run(mock_run_id)
+    await _reenter_authored(wp_path, mock_run_id, _migrate(wp_path))
+
+    caplog.clear()
+    with caplog.at_level("WARNING"):
+        await _reenter_authored(wp_path, mock_run_id, _migrate(wp_path))
+    assert not _migration_warnings(caplog)
+
+    # the schema version recorded is the current one, so a major no longer moved
+    blueprint.write_text(
+        blueprint.read_text().replace("n_procs_x: 16", "n_procs_x: 8", 1)
+    )
+    sources = _migrate(wp_path)
+    with pytest.raises(CstarExpectationFailed, match="different definition"):
+        await _reenter_authored(wp_path, mock_run_id, sources)
+
+
+@pytest.mark.asyncio
+async def test_reentry_after_migration_with_user_edit_is_warned(
+    tmp_path: Path,
+    mock_run_id: str,
+    bp_templates_dir: Path,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Verify an edit made to the blueprint while its schema major moved is warned
+    about, not refused: the guard cannot tell the edit from the migration, and
+    names the step so the user can pass the clobber for it.
+    """
+    wp_path, blueprint = _author_stale_roms(tmp_path, bp_templates_dir)
+    blueprint.write_text(
+        blueprint.read_text().replace("n_procs_x: 16", "n_procs_x: 8", 1)
+    )
+    _record_pre_migration_run(mock_run_id)
+    sources = _migrate(wp_path)
+
+    with caplog.at_level("WARNING"):
+        await _reenter_authored(wp_path, mock_run_id, sources)
+
+    (message,) = _migration_warnings(caplog)
+    assert f"'{STALE_STEP}'" in message
+    assert f"{ARG_CLOBBER} <step-name>" in message
 
 
 @pytest.mark.asyncio
@@ -2129,6 +3229,130 @@ async def test_refresh_run_manifest_folds_records_and_closes_the_attempt(
     assert done.attempts[-1].status == AttemptStatus.done
     assert done.attempts[-1].finished_at is not None
     assert read_run_manifest(root) == done
+
+
+@pytest.mark.asyncio
+async def test_refresh_run_manifest_leaves_an_unchanged_manifest_untouched(
+    tmp_path: Path, mock_run_id: str, hello_world_bp_path: Path
+) -> None:
+    """Verify refreshing again, with nothing changed besides the time observed,
+    does not rewrite the manifest: not its bytes, not its modification time.
+    """
+    _, wp_run = await _schedule(tmp_path, mock_run_id, hello_world_bp_path)
+    root = wp_run.output_path
+    path = root / RUN_MANIFEST_NAME
+    refresh_run_manifest(root, mock_run_id, DagStatus({"hello": Status.Running}))
+    before = (path.read_bytes(), path.stat().st_mtime_ns)
+
+    again = refresh_run_manifest(
+        root, mock_run_id, DagStatus({"hello": Status.Running})
+    )
+
+    assert again is not None
+    assert (path.read_bytes(), path.stat().st_mtime_ns) == before
+
+
+@pytest.mark.asyncio
+async def test_refresh_run_manifest_does_not_write_a_newer_steps_record(
+    tmp_path: Path, mock_run_id: str, hello_world_bp_path: Path
+) -> None:
+    """Verify a refresh that folds in a step record a newer minor release wrote,
+    with a key this build does not know, returns the folded manifest but does not
+    write it, so the key is not dropped from the run's files.
+    """
+    _, wp_run = await _schedule(tmp_path, mock_run_id, hello_world_bp_path)
+    root = wp_run.output_path
+    step_root = root / "tasks" / "hello"
+    step_root.mkdir(parents=True, exist_ok=True)
+    record = write_step_record(
+        step_root,
+        StepRecord(
+            step="hello",
+            application="hello_world",
+            blueprint=BlueprintIdentity(
+                kind="Blueprint", application="hello_world", name="bp"
+            ),
+            outcome="completed",
+            finished_at=datetime(2026, 1, 1, tzinfo=UTC),
+        ),
+    )
+    document = yaml.safe_load(record.read_text())
+    major, minor, _ = document["schema_version"].split(".")
+    document["schema_version"] = f"{major}.{int(minor) + 1}.0"
+    document["future_field"] = True
+    record.write_text(yaml.safe_dump(document))
+    path = root / RUN_MANIFEST_NAME
+    before = (path.read_bytes(), path.stat().st_mtime_ns)
+
+    refreshed = refresh_run_manifest(
+        root, mock_run_id, DagStatus({"hello": Status.Done})
+    )
+
+    assert refreshed is not None
+    entry = refreshed.step("hello")
+    assert entry is not None
+    assert entry.status == Status.Done.name
+    assert entry.record is not None
+    assert entry.record.unknown_keys == ("future_field",)
+    assert (path.read_bytes(), path.stat().st_mtime_ns) == before
+
+
+@pytest.mark.asyncio
+async def test_refresh_run_manifest_does_not_write_a_newer_manifest_with_new_keys(
+    tmp_path: Path, mock_run_id: str, hello_world_bp_path: Path
+) -> None:
+    """Verify a manifest a newer minor release wrote with a key this build does
+    not know is refreshed in memory only, and its file is left as it was.
+    """
+    _, wp_run = await _schedule(tmp_path, mock_run_id, hello_world_bp_path)
+    root = wp_run.output_path
+    path = root / RUN_MANIFEST_NAME
+    document = yaml.safe_load(path.read_text())
+    major, minor, _ = document["schema_version"].split(".")
+    document["schema_version"] = f"{major}.{int(minor) + 1}.0"
+    document["future_field"] = True
+    path.write_text(yaml.safe_dump(document))
+    before = (path.read_bytes(), path.stat().st_mtime_ns)
+
+    refreshed = refresh_run_manifest(
+        root, mock_run_id, DagStatus({"hello": Status.Running})
+    )
+
+    assert refreshed is not None
+    entry = refreshed.step("hello")
+    assert entry is not None
+    assert entry.status == Status.Running.name
+    assert refreshed.unknown_keys == ("future_field",)
+    assert (path.read_bytes(), path.stat().st_mtime_ns) == before
+
+
+@pytest.mark.asyncio
+async def test_refresh_run_manifest_keeps_the_version_of_a_newer_manifest(
+    tmp_path: Path, mock_run_id: str, hello_world_bp_path: Path
+) -> None:
+    """Verify a refresh that does write a newer minor manifest holding nothing
+    this build does not know keeps the version it was written at.
+    """
+    _, wp_run = await _schedule(tmp_path, mock_run_id, hello_world_bp_path)
+    root = wp_run.output_path
+    path = root / RUN_MANIFEST_NAME
+    document = yaml.safe_load(path.read_text())
+    major, minor, _ = document["schema_version"].split(".")
+    newer = f"{major}.{int(minor) + 1}.0"
+    document["schema_version"] = newer
+    path.write_text(yaml.safe_dump(document))
+
+    refreshed = refresh_run_manifest(
+        root, mock_run_id, DagStatus({"hello": Status.Running})
+    )
+
+    assert refreshed is not None
+    assert f"schema_version: {newer}" in path.read_text()
+    reread = read_run_manifest(root)
+    assert reread is not None
+    entry = reread.step("hello")
+    assert entry is not None
+    assert entry.status == Status.Running.name
 
 
 def test_refresh_run_manifest_without_a_manifest(
@@ -2313,6 +3537,52 @@ async def test_on_status_changed_non_terminal_skips_measurement(
     mock_measure.assert_not_awaited()
     assert status_change_workplan_run.step_sizes == {}
     mock_update.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("failing", ["get_workplan_run", "update_workplan_run"])
+async def test_on_status_changed_warns_when_the_run_record_fails(
+    status_change_workplan_run: WorkplanRun,
+    mock_run_id: str,
+    failing: str,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """A run record that cannot be read or written is a warning, not an error
+    that stops loading the run's status; the sentinel is still written.
+    """
+    handle = LocalHandle(
+        pid="1",
+        name="step-a",
+        run_id=mock_run_id,
+        start_at=datetime.now(),
+        status=Status.Running,
+    )
+    calls = {
+        "get_workplan_run": mock.AsyncMock(return_value=status_change_workplan_run),
+        "update_workplan_run": mock.AsyncMock(),
+    }
+    calls[failing] = mock.AsyncMock(side_effect=OSError(22, "Invalid argument"))
+
+    with (
+        mock.patch(
+            "cstar.orchestration.tracking.TrackingRepository.get_workplan_run",
+            calls["get_workplan_run"],
+        ),
+        mock.patch(
+            "cstar.orchestration.tracking.TrackingRepository.update_workplan_run",
+            calls["update_workplan_run"],
+        ),
+        mock.patch(
+            "cstar.orchestration.state.StateRepository.put_sentinel",
+            mock.AsyncMock(return_value=Path("/tmp/sentinel")),
+        ) as mock_put,
+        caplog.at_level("WARNING"),
+    ):
+        await on_status_changed(handle)
+
+    mock_put.assert_awaited_once()
+    assert "Invalid argument" in caplog.text
+    assert mock_run_id in caplog.text
 
 
 @pytest.mark.asyncio
@@ -2912,7 +4182,7 @@ def test_get_orchestrator_uses_local_launcher_for_pre_run_workplan(
         ),
         mock.patch.object(SlurmLauncher, "check_preconditions"),
     ):
-        orchestrator = get_orchestrator(Planner(wp), root=tmp_path)
+        orchestrator = get_orchestrator(Planner(wp), root=tmp_path, run_uuid="")
 
     assert type(orchestrator.launcher) is exp_klass
 
@@ -3053,7 +4323,9 @@ class _SubmittingLauncher(Launcher[ProcessHandle]):
     name = "queue"
 
     @classmethod
-    async def launch(cls, step: LiveStep, dependencies: list[ProcessHandle]) -> t.Any:
+    async def launch(
+        cls, step: LiveStep, dependencies: list[ProcessHandle], *, run_uuid: str
+    ) -> t.Any:
         await asyncio.sleep(0)  # let the steps of one pass interleave
         handle = ProcessHandle(
             pid=f"job-{step.name}",
@@ -3080,6 +4352,7 @@ async def test_run_dag_records_every_submission_in_the_manifest(
     """Verify scheduling a workplan records the launcher, the job id and the
     submission time of every step: the steps launched in one pass, writing the
     manifest together, each keep their own, and so does a step launched later.
+    Every handle records the uuid of the run's manifest.
     """
     monkeypatch.setattr("cstar.orchestration.dag_runner.POLL_DELAYS", (0.0,))
     bp = hello_world_bp_path.as_posix()
@@ -3124,6 +4397,49 @@ async def test_run_dag_records_every_submission_in_the_manifest(
     sentinel = await StateRepository().get_sentinel("a", ProcessHandle)
     assert sentinel is not None
     assert sentinel.submitted_at == SUBMITTED + timedelta(seconds=1)
+    assert sentinel.run_uuid == manifest.id
+
+
+@pytest.mark.asyncio
+async def test_run_dag_keeps_the_uuid_of_a_run_whose_manifest_was_removed(
+    tmp_path: Path,
+    mock_run_id: str,
+    hello_world_bp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Verify a manifest recreated in a run directory takes the uuid the run's
+    sentinels record, so the run still adopts them.
+    """
+    monkeypatch.setattr("cstar.orchestration.dag_runner.POLL_DELAYS", (0.0,))
+    wp = Workplan(
+        name="recreated",
+        description="A workplan whose manifest is removed.",
+        steps=[_hello_step(hello_world_bp_path.as_posix(), "a")],
+    )
+    wp_path = tmp_path / "recreated.yaml"
+    assert serialize(wp_path, wp)
+
+    async def _schedule() -> str:
+        planner, trx_path, facts, carried = await build_dag(wp_path, mock_run_id)
+        wp_run = await run_dag(
+            wp_path, trx_path, mock_run_id, planner, step_facts=facts, carried=carried
+        )
+        manifest = read_run_manifest(wp_run.output_path)
+        assert manifest is not None
+        return manifest.id
+
+    with (
+        mock.patch("cstar.orchestration.dag_runner.check_environment"),
+        mock.patch(
+            "cstar.orchestration.dag_runner.get_launcher",
+            return_value=_SubmittingLauncher,
+        ),
+    ):
+        first = await _schedule()
+        (StateDirectoryManager.data_dir(mock_run_id) / RUN_MANIFEST_NAME).unlink()
+        second = await _schedule()
+
+    assert second == first
 
 
 @pytest.mark.parametrize(

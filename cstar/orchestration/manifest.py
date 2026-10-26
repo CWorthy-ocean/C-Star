@@ -35,7 +35,12 @@ from cstar.base.digest import (
 )
 from cstar.base.exceptions import CstarError, CstarExpectationFailed
 from cstar.base.log import get_logger
-from cstar.base.provenance import canonical_hash, package_versions, system_name
+from cstar.base.provenance import (
+    HASH_RECIPE_VERSION,
+    canonical_hash,
+    package_versions,
+    system_name,
+)
 from cstar.base.utils import slugify, utc_now
 from cstar.execution.file_system import (
     LockTimeoutError,
@@ -55,11 +60,17 @@ from cstar.orchestration.models import (
 from cstar.orchestration.orchestration import Status
 from cstar.orchestration.serialization import (
     anchor_relative_path,
+    dump_yaml,
     load_blueprint,
-    model_to_yaml,
     read_document,
 )
-from cstar.system.migration import CstarSchemaTooNewError, version_key
+from cstar.system.migration import (
+    TOLERATE_UNKNOWN,
+    CstarSchemaTooNewError,
+    VersionedDocument,
+    for_writing,
+    warn_unknown_keys,
+)
 
 if t.TYPE_CHECKING:
     from collections.abc import Callable, Mapping, Sequence
@@ -335,8 +346,10 @@ class ExecutionFacts(ConfiguredBaseModel):
     """The account the job was charged to; empty outside SLURM or when not reported."""
 
 
-class StepRecord(ConfiguredBaseModel):
+class StepRecord(ConfiguredBaseModel, VersionedDocument):
     """What a step did: written by the step process, in its working directory."""
+
+    SCHEMA_LABEL: t.ClassVar[str] = "step record"
 
     schema_version: str = Field(default="1.3.0")
     """The schema version for the document."""
@@ -521,6 +534,12 @@ class ExternalDependencies(ConfiguredBaseModel):
         )
 
 
+DEFINITION_HASH_SCHEME: t.Final[str] = f"def-v{HASH_RECIPE_VERSION}"
+"""The scheme every step `definition_hash` is tagged with. A recorded hash with
+another scheme, or none, was computed by an earlier recipe and is never compared
+with a current one."""
+
+
 class StepEntry(ConfiguredBaseModel):
     """A step of the run, as the manifest knows it."""
 
@@ -534,7 +553,14 @@ class StepEntry(ConfiguredBaseModel):
     """The step's working directory relative to the run root; `.` for a standalone run."""
 
     definition_hash: str = Field(default="")
-    """A fingerprint of what the step computes (see `describe_steps`)."""
+    """A fingerprint of what the step computes (see `describe_steps`), as
+    ``def-v<N>:<hex>``: tagged with the version of the recipe that computed it."""
+
+    blueprint_schema_version: str = Field(default="")
+    """The schema version of the blueprint content `definition_hash` folds in,
+    after any automatic migration: the step's own blueprint, or its producer's
+    for a step whose blueprint an upstream step writes; empty when none was
+    loaded."""
 
     blueprint: BlueprintIdentity | None = Field(default=None)
     """The blueprint the step runs; `None` until a deferred step's record names it."""
@@ -563,16 +589,10 @@ class StepEntry(ConfiguredBaseModel):
     """The step's record, folded in once the step has written it."""
 
 
-CANONICAL_NAMES_SINCE: t.Final[str] = "1.5.0"
-"""The first manifest schema whose step definition hashes use current application
-names. A hash recorded under an older manifest may use an earlier name (see
-`cstar.base.application_names`), so `read_run_manifest` drops it rather than let
-the re-entry guard compare it. A separate constant on purpose: it stays `1.5.0`
-when the manifest schema later moves on."""
-
-
-class RunManifest(ConfiguredBaseModel):
+class RunManifest(ConfiguredBaseModel, VersionedDocument):
     """The description of a run: written to its run root."""
+
+    SCHEMA_LABEL: t.ClassVar[str] = "run manifest"
 
     schema_version: str = Field(default="1.5.0")
     """The schema version for the document."""
@@ -722,7 +742,7 @@ def merge_products(
     return [*merged.values(), *undeclared]
 
 
-def _read(path: Path, klass: type[_M], label: str) -> _M | None:
+def _read(path: Path, klass: type[_M], label: str, *, tolerant: bool) -> _M | None:
     """Read a persisted document into its model.
 
     Parameters
@@ -733,6 +753,9 @@ def _read(path: Path, klass: type[_M], label: str) -> _M | None:
         The model of the document.
     label : str
         What the document is called in messages.
+    tolerant : bool
+        Whether a document newer than this build, within its major, loads with
+        the keys this build does not know ignored (see `VersionedDocument`).
 
     Returns
     -------
@@ -742,77 +765,63 @@ def _read(path: Path, klass: type[_M], label: str) -> _M | None:
     Raises
     ------
     CstarSchemaTooNewError
-        If the document's schema is newer than this build reads.
+        If the document's schema is newer than this build reads (see `VersionedDocument`).
     CstarError
         If the file cannot be read or is not a valid document.
     """
-    target = klass.model_fields["schema_version"].default
     try:
         raw = read_document(path)
-        found = str(raw.get("schema_version", "1.0.0"))
-        newer = version_key(found) > version_key(target)
-        if not newer:
-            return klass.model_validate(raw)
+        document = klass.model_validate(raw, context={TOLERATE_UNKNOWN: tolerant})
     except FileNotFoundError:
         return None
+    except CstarSchemaTooNewError:
+        raise
     except Exception as ex:
         msg = f"Unable to read the {label} at {path}: {ex}"
         raise CstarError(msg) from ex
 
-    raise CstarSchemaTooNewError(label, found, target)
+    warn_unknown_keys(document, path)
+    return document
 
 
-def read_run_manifest(root: Path) -> RunManifest | None:
+def read_run_manifest(root: Path, *, tolerant: bool = False) -> RunManifest | None:
     """Read a run's manifest.
 
     Parameters
     ----------
     root : Path
         The run root.
+    tolerant : bool
+        Read a manifest newer than this build, within its major, with the keys
+        this build does not know ignored; for readers that never write it.
 
     Returns
     -------
     RunManifest | None
-        The manifest, or `None` when the run has none. A manifest older than
-        `CANONICAL_NAMES_SINCE` comes back with its steps' definition hashes
-        blank: the hashes it recorded may use an earlier application name, so
-        they are not comparable with a current one. Every writer restamps the
-        manifest, so the hashes are dropped here, where its recorded schema
-        version is still known; the next attempt that describes the steps
-        records them again.
+        The manifest, or `None` when the run has none.
 
     Raises
     ------
     CstarSchemaTooNewError
-        If the manifest's schema is newer than this build reads.
+        If the manifest's schema is newer than this build reads (see `VersionedDocument`).
     CstarError
         If the manifest cannot be read or is invalid.
     """
-    manifest = _read(root / RUN_MANIFEST_NAME, RunManifest, "run manifest")
-    if manifest is None or version_key(manifest.schema_version) >= version_key(
-        CANONICAL_NAMES_SINCE
-    ):
-        return manifest
-
-    recorded = [entry for entry in manifest.steps if entry.definition_hash]
-    for entry in recorded:
-        entry.definition_hash = ""
-    if recorded:
-        log.debug(
-            f"Dropped the step definition hashes of the run manifest at {root}: "
-            f"recorded under schema {manifest.schema_version}, before "
-            f"{CANONICAL_NAMES_SINCE}"
-        )
-    return manifest
+    return _read(
+        root / RUN_MANIFEST_NAME, RunManifest, "run manifest", tolerant=tolerant
+    )
 
 
-def read_step_record(step_root: Path) -> StepRecord | None:
+def read_step_record(step_root: Path, *, tolerant: bool = False) -> StepRecord | None:
     """Read a step's record.
 
     Parameters
     ----------
     step_root : Path
         The step's working directory.
+    tolerant : bool
+        Read a record newer than this build, within its major, with the keys
+        this build does not know ignored; for readers that never write it.
 
     Returns
     -------
@@ -822,11 +831,13 @@ def read_step_record(step_root: Path) -> StepRecord | None:
     Raises
     ------
     CstarSchemaTooNewError
-        If the record's schema is newer than this build reads.
+        If the record's schema is newer than this build reads (see `VersionedDocument`).
     CstarError
         If the record cannot be read or is invalid.
     """
-    return _read(step_root / STEP_RECORD_NAME, StepRecord, "step record")
+    return _read(
+        step_root / STEP_RECORD_NAME, StepRecord, "step record", tolerant=tolerant
+    )
 
 
 def product_paths(step_root: Path, kind: ArtifactKind, *, role: str = "") -> list[Path]:
@@ -857,7 +868,7 @@ def product_paths(step_root: Path, kind: ArtifactKind, *, role: str = "") -> lis
     Raises
     ------
     CstarSchemaTooNewError
-        If the record's schema is newer than this build reads.
+        If the record's schema is newer than this build reads (see `VersionedDocument`).
     CstarError
         If the record cannot be read or is invalid.
     """
@@ -915,7 +926,7 @@ def recorded_files_in(
     Raises
     ------
     CstarSchemaTooNewError
-        If the record's schema is newer than this build reads.
+        If the record's schema is newer than this build reads (see `VersionedDocument`).
     CstarError
         If the record cannot be read or is invalid.
     """
@@ -962,26 +973,30 @@ def require_recorded_files(step_root: Path, paths: "Sequence[Path]") -> None:
 
 
 def _write(path: Path, document: "RunManifest | StepRecord") -> Path:
-    """Write a document atomically, stamped with the schema version this build writes.
-
-    A document read from an older file may now hold fields of the newer schema,
-    so it is restamped: an older build then refuses it as too new, rather than
-    failing on fields it does not know.
+    """Write a document atomically, at the schema version `for_writing` gives.
 
     Parameters
     ----------
     path : Path
         The file to write.
     document : RunManifest | StepRecord
-        The manifest or record; its `schema_version` is updated in place.
+        The manifest or record; its `schema_version` is updated in place to the
+        version written.
 
     Returns
     -------
     Path
         The file written.
+
+    Raises
+    ------
+    CstarSchemaTooNewError
+        If the document holds content read from a newer file with keys this
+        build does not know ignored.
     """
-    document.schema_version = type(document).model_fields["schema_version"].default
-    write_text_atomic(path, model_to_yaml(document))
+    written = for_writing(document)
+    write_text_atomic(path, dump_yaml(written))
+    document.schema_version = written.schema_version
     return path
 
 
@@ -1084,6 +1099,10 @@ class StepFacts:
 
     external: ExternalDependencies
     """What the step's blueprint depends on outside itself."""
+
+    blueprint_schema_version: str = ""
+    """The schema version of the blueprint content `definition_hash` folds in
+    (see `StepEntry.blueprint_schema_version`)."""
 
 
 @dataclass(frozen=True)
@@ -1201,7 +1220,8 @@ def collect_dependencies(blueprint: "Blueprint") -> ExternalDependencies:
 
 
 def _blueprint_data(step: "Step") -> t.Any:
-    """Express a step's blueprint reference as JSON-able data.
+    """Express a step's blueprint reference as JSON-able data, defaults left out
+    (see `Blueprint._hashed_content`).
 
     Parameters
     ----------
@@ -1215,11 +1235,13 @@ def _blueprint_data(step: "Step") -> t.Any:
     """
     value = step.blueprint_path
     if isinstance(value, DeferredBlueprintRef | InlineBlueprintRef):
-        return value.model_dump(mode="json")
+        return value.model_dump(mode="json", exclude_defaults=True)
     return str(value)
 
 
-def _load_step_blueprint(step: "Step", base_dir: Path) -> "Blueprint | None":
+def _load_step_blueprint(
+    step: "Step", base_dir: Path, source: Path | None = None
+) -> "Blueprint | None":
     """Load the blueprint a step names by file, when it can be loaded now.
 
     Parameters
@@ -1228,6 +1250,8 @@ def _load_step_blueprint(step: "Step", base_dir: Path) -> "Blueprint | None":
         The step whose blueprint to load.
     base_dir : Path
         The directory a relative blueprint path is relative to.
+    source : Path | None
+        A migrated copy of the blueprint, read in place of the file the step names.
 
     Returns
     -------
@@ -1242,6 +1266,9 @@ def _load_step_blueprint(step: "Step", base_dir: Path) -> "Blueprint | None":
     """
     text = str(step.blueprint_path).strip()
     klass = get_application(step.application).blueprint
+
+    if source is not None:
+        return load_blueprint(source, klass)  # type: ignore[no-any-return]
 
     if is_remote_resource(text):
         with local_copy(text) as path:
@@ -1260,7 +1287,27 @@ def _load_step_blueprint(step: "Step", base_dir: Path) -> "Blueprint | None":
     return load_blueprint(path, klass)  # type: ignore[no-any-return]
 
 
-def describe_steps(workplan: "Workplan", base_dir: Path) -> dict[str, StepFacts]:
+def _definition_hash(definition: dict[str, t.Any]) -> str:
+    """Fingerprint a step's definition, tagged with `DEFINITION_HASH_SCHEME`.
+
+    Parameters
+    ----------
+    definition : dict[str, Any]
+        The JSON-able definition of the step.
+
+    Returns
+    -------
+    str
+        ``<DEFINITION_HASH_SCHEME>:<hex>``.
+    """
+    return f"{DEFINITION_HASH_SCHEME}:{canonical_hash(definition)}"
+
+
+def describe_steps(
+    workplan: "Workplan",
+    base_dir: Path,
+    sources: "Mapping[str, Path] | None" = None,
+) -> dict[str, StepFacts]:
     """Fingerprint what each step of a workplan computes, before it runs.
 
     A step's `definition_hash` covers its name, application, blueprint reference,
@@ -1268,7 +1315,12 @@ def describe_steps(workplan: "Workplan", base_dir: Path) -> dict[str, StepFacts]
     blueprint it names. It leaves out `compute_overrides` and `workflow_overrides`:
     resources and clobber or resume choices do not change what a step that reached
     `Done` computed. A deferred step takes its producer's `definition_hash` as its
-    blueprint content, so a change upstream moves every consumer.
+    blueprint content, so a change upstream moves every consumer. The hash is
+    tagged with `DEFINITION_HASH_SCHEME`.
+
+    A step's blueprint reference is hashed as authored, so a blueprint migrated
+    to a copy in `sources` keeps its reference; only its content, read from the
+    copy, moves with the migration (see `StepEntry.blueprint_schema_version`).
 
     Parameters
     ----------
@@ -1276,6 +1328,9 @@ def describe_steps(workplan: "Workplan", base_dir: Path) -> dict[str, StepFacts]
         The workplan to describe.
     base_dir : Path
         The directory a relative blueprint path is relative to.
+    sources : Mapping[str, Path] | None
+        The migrated copy of a step's blueprint to read in place of the file the
+        step names, by step name.
 
     Returns
     -------
@@ -1288,6 +1343,7 @@ def describe_steps(workplan: "Workplan", base_dir: Path) -> dict[str, StepFacts]
         If a local blueprint file does not exist.
     """
     by_name = {step.name: step for step in workplan.steps}
+    sources = sources or {}
     facts: dict[str, StepFacts] = {}
     visiting: set[str] = set()
 
@@ -1298,18 +1354,24 @@ def describe_steps(workplan: "Workplan", base_dir: Path) -> dict[str, StepFacts]
         step = by_name[name]
 
         blueprint: Blueprint | None = None
+        schema_version = ""
         if isinstance(step.blueprint_path, DeferredBlueprintRef):
             producer = step.blueprint_path.from_step
             if producer in by_name:
                 describe(producer)
-            content_hash = facts[producer].definition_hash if producer in facts else ""
+            if producer in facts:
+                content_hash = facts[producer].definition_hash
+                schema_version = facts[producer].blueprint_schema_version
+            else:
+                content_hash = ""
         elif isinstance(step.blueprint_path, InlineBlueprintRef):
             content_hash = ""
         else:
-            blueprint = _load_step_blueprint(step, base_dir)
+            blueprint = _load_step_blueprint(step, base_dir, sources.get(name))
             content_hash = blueprint.content_hash() if blueprint else ""
+            schema_version = blueprint.schema_version if blueprint else ""
 
-        definition_hash = canonical_hash(
+        definition_hash = _definition_hash(
             {
                 "name": step.name,
                 "application": step.application,
@@ -1326,6 +1388,7 @@ def describe_steps(workplan: "Workplan", base_dir: Path) -> dict[str, StepFacts]
             external=(
                 collect_dependencies(blueprint) if blueprint else ExternalDependencies()
             ),
+            blueprint_schema_version=schema_version,
         )
         visiting.discard(name)
 
@@ -1382,6 +1445,7 @@ def ensure_run_manifest(
     steps: "Mapping[str, tuple[str, str, StepFacts | None]]",
     runs: "Mapping[str, RunRef]",
     carried_blueprints: "Mapping[str, str] | None" = None,
+    minted_id: str = "",
 ) -> RunManifest:
     """Create a run's manifest, or add an attempt to the one it has, and write it.
 
@@ -1417,6 +1481,10 @@ def ensure_run_manifest(
         re-points the steps at its own copies. `None` leaves the recorded
         pointers as they are, for an attempt that replays the recorded plan and
         for a standalone blueprint run.
+    minted_id : str
+        The id a manifest this call creates is given, for a run that already
+        has one recorded elsewhere; empty mints a new uuid. Ignored when the
+        run has a manifest.
 
     Returns
     -------
@@ -1431,6 +1499,7 @@ def ensure_run_manifest(
     # minted with the first attempt: a value equal to "now" would be dropped
     # as a default when the document is written
     manifest = read_run_manifest(root) or RunManifest(
+        **({"id": minted_id} if minted_id else {}),
         run_id=run_id,
         name=name,
         kind=kind,
@@ -1453,6 +1522,7 @@ def ensure_run_manifest(
         if facts is not None:
             entry.working_dir = working_dir
             entry.definition_hash = facts.definition_hash
+            entry.blueprint_schema_version = facts.blueprint_schema_version
             entry.blueprint = facts.blueprint or entry.blueprint
             external = external.merged(facts.external)
         if carried_blueprints is not None:
@@ -1531,7 +1601,7 @@ def record_submission(
     LockUnsupportedError
         If the file system holding the state directory does not support `flock`.
     CstarSchemaTooNewError
-        If the manifest's schema is newer than this build reads.
+        If the manifest's schema is newer than this build reads (see `VersionedDocument`).
     CstarError
         If the manifest cannot be read or is invalid.
     """
@@ -1668,7 +1738,7 @@ def recorded_step_status(root: Path, manifest: RunManifest, name: str) -> str:
         return ""
 
     try:
-        record = read_step_record(root / entry.working_dir)
+        record = read_step_record(root / entry.working_dir, tolerant=True)
     except DOCUMENT_READ_ERRORS as ex:
         log.warning(
             f"Ignoring the record of step {name!r} of run {manifest.run_id!r}: {ex}"
@@ -1683,6 +1753,8 @@ def fold_step_records(
     manifest: RunManifest,
     root: Path,
     statuses: "Mapping[str, str] | None" = None,
+    *,
+    tolerant: bool = False,
 ) -> bool:
     """Fold what the steps have recorded, and their statuses, into a manifest.
 
@@ -1704,6 +1776,10 @@ def fold_step_records(
         The run root.
     statuses : Mapping[str, str] | None
         The orchestration status name of each step, by step name.
+    tolerant : bool
+        Read records newer than this build, within their major, with the keys
+        this build does not know ignored (see `read_step_record`); a manifest
+        holding one is not written.
 
     Returns
     -------
@@ -1714,7 +1790,7 @@ def fold_step_records(
 
     for entry in manifest.steps:
         try:
-            record = read_step_record(root / entry.working_dir)
+            record = read_step_record(root / entry.working_dir, tolerant=tolerant)
         except CstarError as ex:
             log.warning(f"Ignoring the record of step {entry.name!r}: {ex}")
             record = None
@@ -1872,9 +1948,12 @@ def finalize_standalone_run(
         versions=package_versions(),
     )
     facts = StepFacts(
-        definition_hash=blueprint.content_hash(),
+        definition_hash=_definition_hash(
+            {"blueprint_content_hash": blueprint.content_hash()}
+        ),
         blueprint=BlueprintIdentity.of(blueprint),
         external=collect_dependencies(blueprint),
+        blueprint_schema_version=blueprint.schema_version,
     )
     manifest = ensure_run_manifest(
         root,

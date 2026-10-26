@@ -27,6 +27,13 @@ jobs:
         with:
           python-version: "3.12"
 
+      - name: Refuse a release that a deprecation is due in
+        # Runs on the dispatched ref (main) before anything is committed: the
+        # finalize PR runs no tests, so this is the gate that stops a release
+        # still carrying a deprecation it promised to remove
+        # (docs/contributing.rst, "Deprecations and compatibility").
+        run: python ci/check_deprecations.py "${{ inputs.tag }}"
+
       - name: Configure git identity
         run: |
           git config user.name "github-actions[bot]"
