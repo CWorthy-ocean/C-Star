@@ -1101,6 +1101,15 @@ def test_run_directories_are_under_the_data_home() -> None:
     ).parent.parent == (StateDirectoryManager.blueprint_runs_dir())
 
 
+def test_composed_workplans_are_under_the_state_home() -> None:
+    """The workplans composed around single blueprints live in the state home,
+    away from the blueprints, which may be in a read-only location.
+    """
+    assert StateDirectoryManager.composed_workplans_dir() == (
+        DirectoryManager.state_home() / "composed_workplans"
+    )
+
+
 class TestWriteLocalCopy:
     """Tests for `write_local_copy`."""
 

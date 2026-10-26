@@ -107,6 +107,24 @@ def clean_flag_env() -> Generator[None]:
 
 
 @pytest.fixture
+def readonly_blueprint(tmp_path: Path, hello_world_bp_content: str) -> Generator[Path]:
+    """A hello-world blueprint in a directory its user cannot write to.
+
+    Like a blueprint in a shared catalog, the directory takes no new file; it is
+    made writable again when the test ends.
+    """
+    catalog = tmp_path / "catalog"
+    catalog.mkdir()
+    blueprint = catalog / "helloworld.yaml"
+    blueprint.write_text(hello_world_bp_content)
+    catalog.chmod(0o555)
+    try:
+        yield blueprint
+    finally:
+        catalog.chmod(0o755)
+
+
+@pytest.fixture
 def project_runs(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     """Point the project home at a temporary directory; return its runs area.
 

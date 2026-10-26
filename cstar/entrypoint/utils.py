@@ -55,6 +55,19 @@ ARG_PRE_RUN_WORKPLAN_HELP: t.Final[str] = (
     "workplan without this flag (same run-id) to attach to the prepared "
     "directories and launch."
 )
+ARG_RESUME_BLUEPRINT_SUBMIT_HELP: t.Final[str] = (
+    "Re-enter the prior run of this blueprint (see --run-id) and resume its failed "
+    "step in place. An application that supports resume continues from its last "
+    "usable restart; any other is re-run from scratch with a warning. Cannot be "
+    "combined with --clobber or --pre-run."
+)
+ARG_PRE_RUN_BLUEPRINT_SUBMIT_HELP: t.Final[str] = (
+    "Perform every stage before the model launch -- stage inputs, clone and "
+    "compile, generate and validate the namelist -- without launching the model. "
+    "The step runs locally even on scheduler systems, so this is suitable for a "
+    "login node. Submit the blueprint again without this flag (same run-id) to "
+    "attach to the prepared directory and launch."
+)
 
 ARG_DRY_RUN: t.Final[str] = "--dry-run"
 ARG_DRY_RUN_HELP: t.Final[str] = "Show what would be done without doing it."

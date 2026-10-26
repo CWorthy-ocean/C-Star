@@ -432,6 +432,11 @@ class StateDirectoryManager:
     _WORKPLAN_RUNS_NAME: t.ClassVar[t.Literal["workplan_runs"]] = "workplan_runs"
     """The name of the data-home directory holding workplan runs."""
 
+    _COMPOSED_WORKPLANS_NAME: t.ClassVar[t.Literal["composed_workplans"]] = (
+        "composed_workplans"
+    )
+    """The name of the state-home directory holding the workplans composed around single blueprints."""
+
     @classmethod
     def root_dir(cls) -> Path:
         """The root directory containing all job outputs.
@@ -480,6 +485,19 @@ class StateDirectoryManager:
         Path
         """
         return DirectoryManager.data_home() / cls._WORKPLAN_RUNS_NAME
+
+    @classmethod
+    def composed_workplans_dir(cls) -> Path:
+        """The state-home directory holding the workplans composed around single blueprints.
+
+        ``<state home>/composed_workplans``; each blueprint's workplan is a file in
+        a directory of its own, so it never lands beside the blueprint.
+
+        Returns
+        -------
+        Path
+        """
+        return cls.root_dir() / cls._COMPOSED_WORKPLANS_NAME
 
     @classmethod
     def blueprint_runs_dir(cls) -> Path:

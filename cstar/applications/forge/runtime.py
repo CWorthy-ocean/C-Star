@@ -33,6 +33,7 @@ from cstar.applications.forge.engine import (
 )
 from cstar.base.log import make_formatter
 from cstar.execution.file_system import JobFileSystemManager
+from cstar.system.manager import get_sysmgr
 
 # Loggers whose level gets lowered while capturing, so the file actually receives
 # useful content on the C-Star app path (which never calls logging.basicConfig).
@@ -233,6 +234,21 @@ def publish_emitted_blueprint(executor: ForgeBlueprintExecutor) -> Path:
     return dest
 
 
+def _has_scheduler() -> bool:
+    """Whether C-Star recognizes this host as a system with a job scheduler.
+
+    A host it does not recognize has none: a hint about submitting must not fail
+    a run that has finished.
+    """
+    try:
+        return get_sysmgr().scheduler is not None
+    except Exception:
+        logging.getLogger(__name__).debug(
+            "The scheduler of this host could not be determined", exc_info=True
+        )
+        return False
+
+
 def _dask_client_kwargs(
     *,
     dask_workers: int | None,
@@ -351,7 +367,12 @@ def run_blueprint(
         if not no_configure and not only_inputs:
             blueprint_path = publish_emitted_blueprint(executor)
             print(f"\nBlueprint: {blueprint_path}")
-            print(f"Run it with:  cstar blueprint run {blueprint_path}")
+            hints = {"Run it with:": f"cstar blueprint run {blueprint_path}"}
+            if _has_scheduler():
+                hints["On this cluster:"] = f"cstar blueprint submit {blueprint_path}"
+            width = max(map(len, hints))
+            for label, command in hints.items():
+                print(f"{label:<{width}}  {command}")
         return 0
 
 

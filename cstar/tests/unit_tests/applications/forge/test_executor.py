@@ -3130,8 +3130,13 @@ class TestRunBlueprintPublishes:
                 blueprint.write_text("name: demo\n")
             return SimpleNamespace(path_ucla_roms_blueprint=lambda: blueprint)
 
-        def _run(**kwargs):
+        def _run(scheduler=None, sysmgr_error=None, **kwargs):
             with (
+                patch(
+                    "cstar.applications.forge.runtime.get_sysmgr",
+                    return_value=SimpleNamespace(scheduler=scheduler),
+                    side_effect=sysmgr_error,
+                ),
                 patch("cstar.applications.forge.runtime.config.ensure_data_dirs"),
                 patch(
                     "cstar.applications.forge.runtime.config.resolve_host",
@@ -3158,6 +3163,31 @@ class TestRunBlueprintPublishes:
         out = capsys.readouterr().out
         assert f"\nBlueprint: {published[0]}\n" in out
         assert f"Run it with:  cstar blueprint run {published[0]}\n" in out
+        assert "cstar blueprint submit" not in out
+
+    def test_names_the_submit_command_on_a_cluster(self, run, wd, capsys):
+        """A system with a scheduler is also told how to submit the blueprint, the
+        two commands lined up under their labels.
+        """
+        assert run(scheduler=object()) == 0
+
+        published = list((wd.resolve() / "output").glob("B_*.yaml"))
+        out = capsys.readouterr().out
+        assert f"\nRun it with:      cstar blueprint run {published[0]}\n" in out
+        assert f"\nOn this cluster:  cstar blueprint submit {published[0]}\n" in out
+
+    def test_an_unrecognized_host_is_not_told_about_a_scheduler(self, run, wd, capsys):
+        """A host C-Star cannot identify has no scheduler to name, and the run that
+        has finished is not failed by the lookup.
+        """
+        error = OSError("C-Star cannot determine your system name")
+
+        assert run(sysmgr_error=error) == 0
+
+        published = list((wd.resolve() / "output").glob("B_*.yaml"))
+        out = capsys.readouterr().out
+        assert f"Run it with:  cstar blueprint run {published[0]}\n" in out
+        assert "cstar blueprint submit" not in out
 
     @pytest.mark.parametrize(
         "skips", [{"no_configure": True}, {"only_inputs": ["grid"]}]
