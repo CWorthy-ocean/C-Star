@@ -20,8 +20,8 @@ introduces them on a simpler workplan without nesting.
 Before you start
 ----------------
 
-- :doc:`Install C-Star <../installation>` and activate the environment.
-- :doc:`Register for Copernicus Marine <../data_access>` and run
+- :doc:`Install C-Star <../getting_started/installation>` and activate the environment.
+- :doc:`Register for Copernicus Marine <../getting_started/data_access>` and run
   ``copernicusmarine login``. GLORYS supplies the initial and boundary
   conditions of the parent grid.
 - Download the four files into an empty directory:
@@ -85,7 +85,7 @@ compiles ROMS to read its CDR forcing from a file.
 **CDR metrics.** The ``cdr_metrics`` application computes the CO2 uptake and
 the CDR efficiency from the ``_cdr`` output of the child and of ``parent_up``.
 It analyses each domain on its own grid and combines them.
-:doc:`../blueprints/cdr_metrics` describes the application and its blueprint.
+:doc:`../applications/analytics/cdr_metrics` describes the application and its blueprint.
 
 Run it
 ------
@@ -183,5 +183,5 @@ Where to go next
 ----------------
 
 :doc:`../workplans/directives` describes ``nest-from`` and ``continue-from`` in
-full, and :doc:`../blueprints/cdr_metrics` the metrics step, including the
+full, and :doc:`../applications/analytics/cdr_metrics` the metrics step, including the
 metrics of a run split into several segments.

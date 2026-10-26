@@ -79,12 +79,12 @@ UNSET_ANSWER: t.Final[str] = "-"
 HINT_TIMEOUT: t.Final[float] = 5.0
 """Seconds to wait for a SLURM lookup made only to show a hint."""
 DOCS_PRECEDENCE_URL: t.Final[str] = (
-    "https://c-star.readthedocs.io/en/latest/configuration.html"
+    "https://c-star.readthedocs.io/en/latest/getting_started/configuration.html"
     "#where-a-setting-can-be-set-and-which-wins"
 )
 """The documentation section on where a setting can be set and which wins."""
 DOCS_DATA_ACCESS_URL: t.Final[str] = (
-    "https://c-star.readthedocs.io/en/latest/data_access.html"
+    "https://c-star.readthedocs.io/en/latest/getting_started/data_access.html"
 )
 """The documentation page on registering for datasets."""
 

@@ -234,7 +234,7 @@ anything a user may have written down -- a CLI command, a directive key, a
 catalog layout, a configuration setting -- is renamed or removed in two steps:
 first deprecated, then removed. Blueprint schema changes follow their own
 rule (a major ``schema_version`` with a migration, see
-:doc:`custom_applications`) and are not covered here.
+:doc:`developers/custom_applications`) and are not covered here.
 
 **Deprecating.** The old form keeps working, and the code that detects it
 calls ``cstar.base.deprecation.deprecated``:

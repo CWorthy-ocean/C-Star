@@ -12,8 +12,8 @@ simulation Forge produced. The domain is **wio-toy**, a deliberately tiny
 Before you start
 ----------------
 
-- :doc:`Install C-Star <../installation>` and activate the environment.
-- :doc:`Register for Copernicus Marine <../data_access>` and run
+- :doc:`Install C-Star <../getting_started/installation>` and activate the environment.
+- :doc:`Register for Copernicus Marine <../getting_started/data_access>` and run
   ``copernicusmarine login``. GLORYS supplies the initial and boundary
   conditions for this domain. TPXO tides are not needed here.
 
@@ -44,13 +44,13 @@ Work down the sections:
 - **Review and export**: read through the resolved YAML, then **Save** it
   to your catalog or **Download** ``forge_blueprint.yaml``.
 
-:doc:`../wizard` describes each section. If you would rather skip the wizard, a
+:doc:`../catalog_wizard/blueprints` describes each section. If you would rather skip the wizard, a
 ready-made blueprint for this domain ships with the documentation:
-:download:`forge-blueprint-example.wio-toy.yaml <../forge-blueprint-example.wio-toy.yaml>`.
+:download:`forge-blueprint-example.wio-toy.yaml <../applications/forge/forge-blueprint-example.wio-toy.yaml>`.
 
 Blueprints you save from the wizard land in your own catalog layer at
 ``~/cstar/catalog/blueprints/``, never inside the installed package. Set
-``CSTAR_CATALOG`` to put it elsewhere (see :doc:`../catalog`).
+``CSTAR_CATALOG`` to put it elsewhere (see :doc:`../catalog_wizard/catalog`).
 
 2. Run Forge
 ------------
@@ -87,7 +87,7 @@ it is, in a line like this:
 full option set: regenerate only some inputs, overwrite existing files, tune
 dask, or change the working directory. It also ends by printing that path and
 the command that runs it (``Run it with:  cstar blueprint run <path>``). See
-:doc:`../blueprints/forge`.
+:doc:`../applications/forge/blueprint`.
 
 3. Run the simulation
 ---------------------
@@ -104,7 +104,7 @@ output. The blueprint has no ``working_dir``, so results land under
 
 Both steps use the same command; the blueprint's ``application`` field
 decides which application handles it. The :doc:`UCLA-ROMS blueprint example
-<tutorial_bp>` walks through what is in the blueprint Forge just wrote. The
+<../applications/ucla_roms/example>` walks through what is in the blueprint Forge just wrote. The
 :doc:`next page <workplan>` runs these same two steps as a workplan, so you
 submit once and let C-Star carry the blueprint from one step to the next.
 
@@ -117,4 +117,4 @@ steps 2 and 3 there, where the forcing data and the compute are. On an HPC
 system, both steps' working directories land under ``CSTAR_DATA_HOME``, which
 resolves to scratch, and the UCLA-ROMS step should be submitted through a
 workplan so it runs on compute nodes rather than the login node. See
-:doc:`../hpc`.
+:doc:`../deployments/hpc`.
