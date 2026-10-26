@@ -3,6 +3,7 @@ import pickle
 import re
 import tempfile
 import warnings
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, cast
@@ -14,15 +15,18 @@ import xarray as xr
 from pydantic import ValidationError
 
 from cstar.base.additional_code import AdditionalCode
-from cstar.base.env import ENV_CSTAR_DEBUG_BUILD_MODE, FLAG_OFF, FLAG_ON
+from cstar.base.env import (
+    ENV_CSTAR_ALLOW_LOGIN_NODE_RUN,
+    ENV_CSTAR_DEBUG_BUILD_MODE,
+    FLAG_OFF,
+    FLAG_ON,
+)
 from cstar.base.exceptions import CstarError, CstarExpectationFailed
 from cstar.base.external_codebase import ExternalCodeBase
 from cstar.base.feature import ENV_FF_DEVELOPER_MODE
 from cstar.base.input_dataset import InputDataset
 from cstar.execution.handler import ExecutionStatus
-from cstar.execution.scheduler_job import PBSJob, SchedulerJob, SlurmJob
 from cstar.marbl.external_codebase import MARBLExternalCodeBase
-from cstar.orchestration.utils import ENV_CSTAR_SLURM_ACCOUNT, ENV_CSTAR_SLURM_QUEUE
 from cstar.pio.external_codebase import PIOExternalCodeBase
 from cstar.roms.discretization import ROMSDiscretization
 from cstar.roms.external_codebase import ROMSExternalCodeBase
@@ -51,22 +55,9 @@ from cstar.roms.namelist import (
     RomsNamelistV0_12_0,
     namelist_schema_for_ref,
 )
-from cstar.roms.simulation import ROMSSimulation
-from cstar.system.environment import CStarEnvironment
+from cstar.roms.simulation import ROMSSimulation, _join_workers
 from cstar.system.manager import (
-    AnvilEnvSettings,
-    DerechoSystemContext,
-    EljaSystemContext,
-    ExpanseSystemContext,
-    PerlmutterSystemContext,
-    SystemContext,
     get_sysmgr,
-)
-from cstar.system.scheduler import (
-    PBSScheduler,
-    SlurmQOS,
-    SlurmQueue,
-    SlurmScheduler,
 )
 
 # A complete, forge-produced runtime namelist used to back the
@@ -2590,10 +2581,7 @@ class TestProcessingAndExecution:
             sources=sim.runtime_code.source,
         )
 
-        with (
-            mock.patch("cstar.roms.simulation.LocalProcess"),
-            mock.patch("cstar.roms.simulation.create_scheduler_job"),
-        ):
+        with mock.patch("cstar.roms.simulation.LocalProcess"):
             sim.prepare_launch()
 
         symlink_path = sim.fs_manager.run_dir / "roms"
@@ -2614,15 +2602,11 @@ class TestProcessingAndExecution:
         stageddatacollection_remote_files,
     ):
         """`prepare_launch` writes the namelist, links the executable and
-        returns the launch command, but neither starts a local process nor
-        creates a scheduler job.
+        returns the launch command, but does not start a local process.
         """
         sim = stub_romssimulation
 
-        with (
-            mock.patch("cstar.roms.simulation.LocalProcess") as mock_local_process,
-            mock.patch("cstar.roms.simulation.create_scheduler_job") as mock_create_job,
-        ):
+        with mock.patch("cstar.roms.simulation.LocalProcess") as mock_local_process:
             sim.exe_path = sim.fs_manager.compile_time_code_dir / "roms"
             sim.exe_path.parent.mkdir(parents=True, exist_ok=True)
             sim.exe_path.write_text("binary")
@@ -2650,11 +2634,9 @@ class TestProcessingAndExecution:
         )
         assert plan.run_path == run_dir
         assert plan.runtime_settings_file == namelist_path
-        assert plan.script_path == run_dir / "romstest.sh"
         assert plan.output_file == sim.fs_manager.logs_dir / "romstest.out"
 
         mock_local_process.assert_not_called()
-        mock_create_job.assert_not_called()
 
     @pytest.mark.parametrize(
         ("use_pio", "expect_temp_output"),
@@ -2712,10 +2694,10 @@ class TestProcessingAndExecution:
         stub_romssimulation: ROMSSimulation,
         stageddatacollection_remote_files,
     ):
-        """`run` rotates a previous attempt's namelist, job script, and ROMS
-        stdout out of the way (`.1`, `.2`, ...) instead of silently
-        overwriting them, and re-creates the exe symlink instead of raising
-        `FileExistsError` when one is already there from a previous attempt.
+        """`run` rotates a previous attempt's namelist and ROMS stdout out of
+        the way (`.1`, `.2`, ...) instead of silently overwriting them, and
+        re-creates the exe symlink instead of raising `FileExistsError` when
+        one is already there from a previous attempt.
         """
         sim = stub_romssimulation
 
@@ -2744,9 +2726,6 @@ class TestProcessingAndExecution:
             namelist_path = run_dir / "cstar_generated_roms.nml"
             namelist_path.write_text("old namelist")
 
-            script_path = run_dir / "romstest.sh"
-            script_path.write_text("old script")
-
             output_file = sim.fs_manager.logs_dir / "romstest.out"
             output_file.write_text("old output")
 
@@ -2756,223 +2735,83 @@ class TestProcessingAndExecution:
             sim.run()
 
         assert (run_dir / "cstar_generated_roms.nml.1").read_text() == "old namelist"
-        assert (run_dir / "romstest.sh.1").read_text() == "old script"
         assert (sim.fs_manager.logs_dir / "romstest.out.1").read_text() == "old output"
         assert symlink_path.is_symlink()
         assert symlink_path.resolve() == sim.exe_path.resolve()
 
-    @pytest.mark.parametrize(
-        "mock_system_name,exp_mpi_prefix",
-        [
-            ["darwin_arm64", "mpirun"],
-            ["derecho", "mpirun"],
-            ["expanse", "srun --mpi=pmi2 --kill-on-bad-exit=1"],
-            ["perlmutter", "srun --kill-on-bad-exit=1"],
-        ],
-    )
-    @mock.patch.object(
-        ROMSSimulation, "roms_runtime_settings", new_callable=mock.PropertyMock
-    )
-    def test_run_with_scheduler(
+    def test_run_refuses_outside_scheduler_job(
         self,
-        mock_runtime_settings,
+        login_node: None,
         stub_romssimulation: ROMSSimulation,
-        stageddatacollection_remote_files,
-        mock_system_name: str,
-        exp_mpi_prefix: str,
     ):
-        """Tests that `run` correctly submits a job to a scheduler when available.
-
-        This test verifies that if a scheduler is present, `run` creates a scheduler job
-        with the appropriate parameters and submits it.
+        """`run` refuses, before it prepares anything, to launch ROMS outside a
+        scheduler job on a system that has a scheduler.
         """
-        sim = stub_romssimulation
-        build_dir = sim.fs_manager.compile_time_code_dir
-        runtime_code_dir = sim.fs_manager.runtime_code_dir
-        script_dir = sim.fs_manager.run_dir
-        sim.runtime_code._working_copy = stageddatacollection_remote_files(
-            paths=[runtime_code_dir / f.basename for f in sim.runtime_code.source],
-            sources=sim.runtime_code.source,
-        )
-
-        # Mock scheduler object
-        mock_scheduler = mock.MagicMock()
-        mock_scheduler.in_active_allocation = False
-
         with (
-            mock.patch("cstar.roms.simulation.create_scheduler_job") as mock_create_job,
-            mock.patch(
-                "cstar.system.environment.CStarEnvironment.uses_lmod",
-                new_callable=mock.PropertyMock,
-                return_value=False,
-            ),
-            mock.patch(
-                "cstar.system.manager.CStarSystemManager.name",
-                new_callable=mock.PropertyMock,
-                return_value=mock_system_name,
-            ),
-            mock.patch(
-                "cstar.system.manager.CStarSystemManager.environment",
-                CStarEnvironment(
-                    system_name=mock_system_name,
-                    mpi_exec_prefix=exp_mpi_prefix,
-                    compiler="mock-compiler",
-                ),
-            ),
-            mock.patch(
-                "cstar.system.manager.CStarSystemManager.scheduler",
-                new_callable=mock.PropertyMock,
-                return_value=mock_scheduler,
-            ),
-            mock.patch("pathlib.Path.rename", new_callable=mock.Mock),
+            mock.patch("cstar.roms.simulation.LocalProcess") as mock_local_process,
+            mock.patch.object(ROMSSimulation, "prepare_launch") as mock_prepare,
+            pytest.raises(CstarError) as excinfo,
         ):
-            sim.exe_path = build_dir / "roms"
-            mock_job_instance = mock.MagicMock()
-            mock_create_job.return_value = mock_job_instance
+            stub_romssimulation.run()
 
-            # without `queue_name` and `walltime`, `run()` passes them on empty
-            # for `create_scheduler_job` to resolve
-            execution_handler = sim.run(account_key="some_key")
-            mock_create_job.assert_called_once_with(
-                commands=f"{exp_mpi_prefix} -n 6 ./roms cstar_generated_roms.nml",
-                job_name=None,
-                cpus=6,
-                account_key="some_key",
-                run_path=sim.fs_manager.run_dir,
-                script_path=script_dir / "romstest.sh",
-                queue_name="",
-                walltime="",
-                output_file=sim.fs_manager.logs_dir / "romstest.out",
-            )
-            mock_scheduler.get_queue.assert_not_called()
+        message = str(excinfo.value)
+        assert "Refusing to launch ROMS outside a scheduler job on fake_hpc" in message
+        assert "cstar blueprint submit" in message
+        assert f"{ENV_CSTAR_ALLOW_LOGIN_NODE_RUN}=1" in message
+        mock_prepare.assert_not_called()
+        mock_local_process.assert_not_called()
 
-            mock_job_instance.submit.assert_called_once()
-
-            assert execution_handler == mock_job_instance
-
-    @mock.patch.object(
-        ROMSSimulation, "roms_runtime_settings", new_callable=mock.PropertyMock
-    )
-    def test_run_with_scheduler_requires_slurm_settings(
+    @pytest.mark.parametrize("job_id_var", ["SLURM_JOB_ID", "SLURM_JOBID", "PBS_JOBID"])
+    def test_run_inside_scheduler_job_runs_locally(
         self,
-        mock_runtime_settings,
-        stub_romssimulation,
-        stageddatacollection_remote_files,
+        login_node: None,
+        monkeypatch: pytest.MonkeyPatch,
+        stub_romssimulation: ROMSSimulation,
+        job_id_var: str,
     ):
-        """Tests that `run` submits no job, and names the settings to set, when a
-        scheduler job is needed and the system's required account and queue are
-        empty (the values a step gets when `CSTAR_SLURM_*` are unset).
-        """
-        sim = stub_romssimulation
-        build_dir = sim.directory / "ROMS/compile_time_code"
-        sim.runtime_code._working_copy = stageddatacollection_remote_files()
-
-        scheduler = SlurmScheduler(
-            queues=[SlurmQOS(name="default_queue", query_name="default_queue")],
-            primary_queue_name="default_queue",
-        )
+        """Inside a scheduler job, `run` starts ROMS as a local process of the job."""
+        monkeypatch.setenv(job_id_var, "12345")
 
         with (
-            mock.patch(
-                "cstar.system.manager.CStarSystemManager.scheduler",
-                new_callable=mock.PropertyMock,
-                return_value=scheduler,
-            ),
-            mock.patch.object(
-                SlurmScheduler,
-                "in_active_allocation",
-                new_callable=mock.PropertyMock,
-                return_value=False,
-            ),
-            mock.patch.object(CStarEnvironment, "settings_klass", AnvilEnvSettings),
-            mock.patch.object(SlurmJob, "submit") as mock_submit,
-            mock.patch("pathlib.Path.rename", new_callable=mock.Mock),
+            mock.patch("cstar.roms.simulation.LocalProcess") as mock_local_process,
+            mock.patch.object(ROMSSimulation, "prepare_launch") as mock_prepare,
         ):
-            sim.exe_path = build_dir / "roms"
+            execution_handler = stub_romssimulation.run(job_name="a_job")
 
-            with pytest.raises(
-                CstarError,
-                match=f"{ENV_CSTAR_SLURM_ACCOUNT} and {ENV_CSTAR_SLURM_QUEUE} must be set",
-            ):
-                sim.run(account_key="", walltime="01:00:00", queue_name="")
-            mock_submit.assert_not_called()
+        mock_prepare.assert_called_once_with("a_job")
+        mock_local_process.assert_called_once()
+        mock_local_process.return_value.start.assert_called_once()
+        assert execution_handler is mock_local_process.return_value
 
-    @pytest.mark.parametrize(
-        ("context", "account_key", "exp_queue", "exp_walltime"),
-        [
-            pytest.param(EljaSystemContext, "", "any_cpu", "2-00:00:00", id="elja"),
-            pytest.param(
-                ExpanseSystemContext, "acct", "compute", "2-00:00:00", id="expanse"
-            ),
-            pytest.param(
-                PerlmutterSystemContext, "", "regular", "2-00:00:00", id="perlmutter"
-            ),
-            pytest.param(DerechoSystemContext, "", "main", "12:00:00", id="derecho"),
-        ],
-    )
-    @mock.patch.object(
-        ROMSSimulation, "roms_runtime_settings", new_callable=mock.PropertyMock
-    )
-    def test_run_with_scheduler_unset_queue_uses_primary_queue(
+    def test_run_with_login_node_flag_runs_locally(
         self,
-        mock_runtime_settings,
-        stub_romssimulation,
-        stageddatacollection_remote_files,
-        context: type[SystemContext],
-        account_key: str,
-        exp_queue: str,
-        exp_walltime: str,
+        login_node: None,
+        monkeypatch: pytest.MonkeyPatch,
+        stub_romssimulation: ROMSSimulation,
     ):
-        """Tests that `run` submits to the system's primary queue, with that queue's
-        maximum walltime, when the step's queue and walltime are empty, on each
-        system that does not require a queue.
-        """
-        sim = stub_romssimulation
-        build_dir = sim.directory / "ROMS/compile_time_code"
-        sim.runtime_code._working_copy = stageddatacollection_remote_files()
-        scheduler = context.create_scheduler()
-        assert scheduler is not None
+        """`CSTAR_ALLOW_LOGIN_NODE_RUN=1` lets `run` start ROMS outside a scheduler job."""
+        monkeypatch.setenv(ENV_CSTAR_ALLOW_LOGIN_NODE_RUN, FLAG_ON)
 
         with (
-            mock.patch(
-                "cstar.system.manager.CStarSystemManager.scheduler",
-                new_callable=mock.PropertyMock,
-                return_value=scheduler,
-            ),
-            mock.patch.object(
-                type(scheduler),
-                "in_active_allocation",
-                new_callable=mock.PropertyMock,
-                return_value=False,
-            ),
-            mock.patch.object(
-                SlurmQueue,
-                "max_walltime",
-                new_callable=mock.PropertyMock,
-                return_value="2-00:00:00",
-            ),
-            mock.patch.object(
-                SchedulerJob, "_resolve_distribution", return_value=(6, 1, 6)
-            ),
-            mock.patch.object(
-                CStarEnvironment, "settings_klass", context.settings_klass()
-            ),
-            mock.patch.object(SlurmJob, "submit") as mock_slurm_submit,
-            mock.patch.object(PBSJob, "submit") as mock_pbs_submit,
-            mock.patch("pathlib.Path.rename", new_callable=mock.Mock),
+            mock.patch("cstar.roms.simulation.LocalProcess") as mock_local_process,
+            mock.patch.object(ROMSSimulation, "prepare_launch"),
         ):
-            sim.exe_path = build_dir / "roms"
-            job = sim.run(account_key=account_key, walltime="", queue_name="")
+            execution_handler = stub_romssimulation.run()
 
-        assert isinstance(job, SchedulerJob)
-        assert job.queue_name == exp_queue
-        assert job.walltime == exp_walltime
-        submit = (
-            mock_pbs_submit
-            if isinstance(scheduler, PBSScheduler)
-            else mock_slurm_submit
-        )
-        submit.assert_called_once()
+        mock_local_process.return_value.start.assert_called_once()
+        assert execution_handler is mock_local_process.return_value
+
+    def test_run_with_empty_job_id_still_refuses(
+        self,
+        login_node: None,
+        monkeypatch: pytest.MonkeyPatch,
+        stub_romssimulation: ROMSSimulation,
+    ):
+        """An empty job-id variable does not count as being inside a job."""
+        monkeypatch.setenv("SLURM_JOB_ID", "")
+
+        with pytest.raises(CstarError, match="Refusing to launch ROMS"):
+            stub_romssimulation.run()
 
     def test_post_run_raises_if_called_before_run(self, stub_romssimulation):
         """Tests that `post_run` raises a `RuntimeError` if called before `run`.
@@ -3097,6 +2936,65 @@ class TestProcessingAndExecution:
         assert not (temp_output_dir / "ocean_his.20240101000000.002.nc").exists()
         assert not (temp_output_dir / "ocean_ext.20240101000000.001.nc").exists()
         assert not (temp_output_dir / "ocean_rst.20240101000000.001.nc").exists()
+
+    @pytest.mark.parametrize(
+        ("available", "n_procs", "expected"),
+        [
+            pytest.param(128, 4, 4, id="capped-by-the-ranks"),
+            pytest.param(12, 64, 3, id="a-quarter-of-the-cpus"),
+            pytest.param(3, 64, 1, id="at-least-one"),
+        ],
+    )
+    def test_join_workers_is_a_quarter_of_the_cpus_up_to_the_rank_count(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        available: int,
+        n_procs: int,
+        expected: int,
+    ) -> None:
+        """The join pool takes a quarter of the CPUs the process may use, but no more
+        threads than the model had ranks, and never fewer than one.
+        """
+        monkeypatch.setattr("cstar.roms.simulation.cpus_available", lambda: available)
+
+        assert _join_workers(n_procs) == expected
+
+    @pytest.mark.parametrize(
+        ("cores", "expected_workers"),
+        [
+            pytest.param(128, 6, id="capped-by-the-ranks"),
+            pytest.param(12, 3, id="twelve-cores"),
+            pytest.param(2, 1, id="two-cores"),
+        ],
+    )
+    def test_post_run_sizes_the_join_pool_from_the_cpus_and_ranks(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        stub_romssimulation: ROMSSimulation,
+        cores: int,
+        expected_workers: int,
+    ) -> None:
+        """`post_run` joins with as many threads as `_join_workers` allows for the
+        simulation's ranks, so a process with two cores joins with one thread
+        rather than none.
+        """
+        monkeypatch.setattr("cstar.roms.simulation.cpus_available", lambda: cores)
+        sim = stub_romssimulation
+        sim.fs_manager.prepare()
+        (sim.fs_manager.temp_output_dir / "ocean_his.20240101000000.001.nc").touch()
+        sim._execution_handler = mock.MagicMock()
+        sim._execution_handler.status = ExecutionStatus.COMPLETED
+
+        with (
+            mock.patch(
+                "cstar.roms.simulation.ThreadPoolExecutor", wraps=ThreadPoolExecutor
+            ) as mock_pool,
+            mock.patch("cstar.roms.simulation._ncjoin_wildcard") as mock_ncjoin,
+        ):
+            sim.post_run()
+
+        mock_pool.assert_called_once_with(max_workers=expected_workers)
+        mock_ncjoin.assert_called_once()
 
     @mock.patch.object(Path, "glob", return_value=[])  # Mock glob to return no files
     def test_post_run_prints_message_if_no_files(

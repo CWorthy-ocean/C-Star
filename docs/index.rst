@@ -51,7 +51,8 @@ The wizard can be run on any machine, even your laptop, and the Forge blueprint 
 then be moved to a different machine, like an HPC, where you want heavier computations to take place,
 or where collections of source data may be staged among your working group.
 
-Running any blueprint independently can be done with the command  ``cstar blueprint run <blueprint.yaml>``.
+Running any blueprint independently can be done with the command  ``cstar blueprint run <blueprint.yaml>``,
+or, on a cluster, ``cstar blueprint submit <blueprint.yaml>``, which sends it to the job scheduler.
 To run several simulations as one unit, a **workplan** lists the blueprints
 to run as *steps*, with dependencies between them. C-Star schedules the steps,
 submits them to the cluster's job scheduler, and tracks their status, so a

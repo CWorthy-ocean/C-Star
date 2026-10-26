@@ -1,5 +1,4 @@
 import functools
-import os
 from abc import ABC, abstractmethod
 from collections.abc import Callable
 from typing import TYPE_CHECKING, Final
@@ -30,6 +29,23 @@ def slurm_job_id(environ: "Mapping[str, str]") -> str:
         `SLURM_JOB_ID`, else its older alias `SLURM_JOBID`; empty outside a job.
     """
     return environ.get("SLURM_JOB_ID") or environ.get("SLURM_JOBID") or ""
+
+
+def in_scheduler_job(environ: "Mapping[str, str]") -> bool:
+    """Tell whether a process runs inside a SLURM or PBS job, from its environment.
+
+    Parameters
+    ----------
+    environ : Mapping[str, str]
+        The process's environment variables.
+
+    Returns
+    -------
+    bool
+        True when a SLURM job id (`SLURM_JOB_ID` or `SLURM_JOBID`) or a PBS job id
+        (`PBS_JOBID`) is set to a non-empty value.
+    """
+    return bool(slurm_job_id(environ) or environ.get("PBS_JOBID"))
 
 
 def parse_walltime(walltime_str: str) -> tuple[int, int, int]:
@@ -474,12 +490,6 @@ class Scheduler(ABC, LoggingMixin):
         self.documentation = documentation
         self._max_cpus_per_node = max_cpus_per_node
 
-    @property
-    @abstractmethod
-    def in_active_allocation(self) -> bool:
-        """Return True if the current process is running in an active allocation."""
-        raise NotImplementedError()
-
     def get_queue(self, name: str | None) -> Queue:
         """Retrieve a queue by name.
 
@@ -556,20 +566,6 @@ class SlurmScheduler(Scheduler):
     global_max_mem_per_node_gb
         Retrieves the maximum memory available per node in GB.
     """
-
-    @property
-    def in_active_allocation(self) -> bool:
-        jupyter_env_vars = (
-            "JUPYTERHUB_API_TOKEN",
-            "JUPYTERHUB_USER",
-            "JUPYTERHUB_SERVICE_PREFIX",
-            "JUPYTER_SERVER_ROOT",
-            "JUPYTER_SERVER_URL",
-        )
-        if any(k in os.environ for k in jupyter_env_vars):
-            return False
-
-        return os.getenv("SLURM_JOBID") is not None
 
     @property
     def global_max_cpus_per_node(self) -> int | None:
@@ -654,11 +650,6 @@ class PBSScheduler(Scheduler):
     """
 
     requires_task_distribution = True
-
-    @property
-    def in_active_allocation(self) -> bool:
-        """Determine whether the process is in an active allocation by looking for the PBS_JOBID environment variable."""
-        return os.getenv("PBS_JOBID") is not None
 
     @property
     def global_max_cpus_per_node(self) -> int | None:

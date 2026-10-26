@@ -142,24 +142,12 @@ as it goes. Results land in the working directory described above. Pass
 non-empty working directory is refused so a previous result is never
 overwritten by accident.
 
-Where the work happens depends on the application:
-
-- The ``ucla_roms`` application submits the model run to the job scheduler
-  itself when one is available, so on a cluster it is fine to invoke it from
-  a login node: the code is fetched and compiled there, and the simulation
-  runs in a SLURM job. Without a scheduler it runs the model in place.
-- The ``forge`` application does no submitting. Downloading source data,
-  building the grid and generating input files all happen wherever you run
-  the command. For anything beyond a toy domain, run it from a compute node
-  (an interactive allocation, or your own batch script that calls
-  ``cstar blueprint run``), or put it in a :doc:`workplan <../workplans/index>`
-  and let C-Star submit it.
-
-.. warning::
-    The post-processing step that joins partitioned model output may use every core of a login node and be terminated (and make the admins angry).
-
-    - Set ``CSTAR_NPROCS_POST`` to a small number (about 2) when running a UCLA-ROMS blueprint directly on an HPC login node.
-    - Better, make a :ref:`single-step workplan <workplan_examples>` to run a simulation entirely on the compute cluster.
+Everything happens on the machine you run the command on, whatever the
+application: Forge downloads source data and generates input files there,
+and UCLA-ROMS compiles the model and runs it there. On a cluster, run it
+inside an allocation (an interactive job, or your own batch script that
+calls ``cstar blueprint run``), or submit it as described below. UCLA-ROMS
+refuses to launch the model on a login node; see :doc:`../deployments/hpc`.
 
 Two more options matter for UCLA-ROMS runs. ``--pre-run`` performs every
 stage before the model launch, so start-up problems surface without waiting
@@ -171,6 +159,36 @@ workplan step does: ``cstar-step.yaml`` holds what the run did and
 ``cstar-run.yaml`` is a :term:`run manifest` with ``kind: blueprint`` and a
 single step. Read them with ``cstar run show <working directory>``. See
 :doc:`../runs/moving/manifest`.
+
+Submitting a blueprint
+----------------------
+
+On a cluster, submit the blueprint to the job scheduler instead:
+
+.. code-block:: console
+
+   cstar blueprint submit my_blueprint.yaml
+
+C-Star runs it as a single-step :doc:`workplan <../workplans/index>`: the
+command schedules the job and returns, so you can log off while it waits in
+the queue and runs. The run ID is the blueprint's ``name`` made into a slug
+(``My spin-up`` becomes ``my-spin-up``), and the step is named after the
+application. Follow the run with the ``cstar run`` commands:
+
+.. code-block:: console
+
+   cstar run status my-spin-up
+   cstar run log my-spin-up ucla_roms
+
+Results land in the run's directory, ``workplan_runs/my-spin-up/tasks/ucla_roms/``
+under ``CSTAR_DATA_HOME``, laid out as in a ``cstar blueprint run``. The job
+needs your cluster's scheduler settings; see :doc:`../deployments/hpc`.
+
+Submitting the same blueprint again re-enters its run instead of starting a
+second one, as for a workplan (see :doc:`../runs/monitoring`). ``--run-id``
+names the run yourself, and ``--clobber`` empties its working directory
+first. ``--pre-run`` and ``--resume`` are described in
+:doc:`../runs/pre_run_resume`.
 
 A blueprint can also be run from Python, for example from a notebook; see
 :doc:`../reference/python`.

@@ -21,6 +21,7 @@ from cstar.base.additional_code import AdditionalCode
 from cstar.base.deprecation import _WARNED
 from cstar.base.discretization import Discretization
 from cstar.base.env import (
+    ENV_CSTAR_ALLOW_LOGIN_NODE_RUN,
     ENV_CSTAR_CACHE_HOME,
     ENV_CSTAR_CONFIG_HOME,
     ENV_CSTAR_CONFIG_REPORTED,
@@ -28,6 +29,7 @@ from cstar.base.env import (
     ENV_CSTAR_PROJECT_HOME,
     ENV_CSTAR_RUNID,
     ENV_CSTAR_STATE_HOME,
+    FLAG_ON,
     USER_CONFIG_FILENAME,
     load_user_config,
 )
@@ -181,6 +183,43 @@ def _no_project_home(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv(ENV_CSTAR_PROJECT_HOME, raising=False)
     # the variable that `CSTAR_PROJECT_HOME` defaults to
     monkeypatch.delenv("PROJECT", raising=False)
+
+
+@pytest.fixture(autouse=True)
+def _allow_login_node_run(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Let ROMS launch in each unit test, whatever the host.
+
+    On a cluster's login node `ROMSSimulation.check_launch_location` would
+    otherwise refuse every test that builds a UCLA-ROMS runner or calls `run`. A
+    test of the refusal requests `login_node`, which clears the flag.
+    """
+    monkeypatch.setenv(ENV_CSTAR_ALLOW_LOGIN_NODE_RUN, FLAG_ON)
+
+
+@pytest.fixture
+def login_node(monkeypatch: pytest.MonkeyPatch) -> Generator[None]:
+    """Put the process outside any scheduler job on a system with a scheduler."""
+    for name in (
+        "SLURM_JOB_ID",
+        "SLURM_JOBID",
+        "PBS_JOBID",
+        ENV_CSTAR_ALLOW_LOGIN_NODE_RUN,
+    ):
+        monkeypatch.delenv(name, raising=False)
+
+    with (
+        mock.patch(
+            "cstar.system.manager.CStarSystemManager.scheduler",
+            new_callable=mock.PropertyMock,
+            return_value=mock.MagicMock(),
+        ),
+        mock.patch(
+            "cstar.system.manager.CStarSystemManager.name",
+            new_callable=mock.PropertyMock,
+            return_value="fake_hpc",
+        ),
+    ):
+        yield
 
 
 def _tagged_git_repo(repo: Path, tags: Sequence[str | None]) -> list[str]:

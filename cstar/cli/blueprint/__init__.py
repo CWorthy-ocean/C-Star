@@ -7,6 +7,7 @@ from cstar.base.feature import (
 from cstar.cli.blueprint.check import app as app_check
 from cstar.cli.blueprint.migrate import app as app_migrate
 from cstar.cli.blueprint.run import app as app_run
+from cstar.cli.blueprint.submit import app as app_submit
 
 ALIAS = "bp"
 """Short alias under which this subcommand tree is also attached."""
@@ -17,6 +18,7 @@ app = typer.Typer(
 )
 
 app.add_typer(app_run)
+app.add_typer(app_submit)
 app.add_typer(app_check)
 app.add_typer(app_migrate)
 

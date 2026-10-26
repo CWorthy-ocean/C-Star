@@ -373,6 +373,64 @@ def test_run_alias_launches_and_reenters(shape_root: Path, cstar_shim: Path) -> 
         kill_run(run.state_home, run_id, run.steps)
 
 
+def test_blueprint_submit_runs_the_blueprint_as_a_single_step_workplan(
+    shape_root: Path, cstar_shim: Path
+) -> None:
+    """``blueprint submit`` schedules a blueprint as a one-step workplan: the run is
+    named for the blueprint, its step for the application, and the workplan is
+    composed under the state home, so the blueprint's directory gains no file.
+    Submitting the blueprint again re-enters that run, launching nothing.
+    """
+    catalog = shape_root / "bp"
+    catalog.mkdir()
+    blueprint = catalog / "hello.yaml"
+    blueprint.write_text(
+        yaml.safe_dump(
+            {
+                "name": "Hello Blueprint Submit",
+                "description": "says hello to a submission",
+                "application": "hello_world",
+                "state": "draft",
+                "target": "submission",
+                "schema_version": "1.0.0",
+            },
+            sort_keys=False,
+        )
+    )
+    files_before = {p.name for p in catalog.iterdir()}
+    run_id, step = "hello-blueprint-submit", "hello_world"
+    env = make_cli_env(shape_root, cstar_shim)
+    state_home, data_home = shape_root / "state", shape_root / "data"
+
+    proc = run_cstar(env, "blueprint", "submit", str(blueprint))
+    output = f"stdout:\n{proc.stdout}\nstderr:\n{proc.stderr}"
+    try:
+        wait_for_terminal(
+            state_home, run_id, [step], timeout=RUN_TIMEOUT, poll_interval=POLL_INTERVAL
+        )
+        if proc.returncode != 0:
+            tails = run_log_tails(data_home, run_id)
+            pytest.fail(f"blueprint submit exited {proc.returncode}\n{output}\n{tails}")
+        assert SCHEDULED_MESSAGE in proc.stdout, output
+
+        assert read_status(sentinel_path(state_home, run_id, step)) == DONE, output
+        log = step_root(data_home, run_id, step) / "logs" / f"{step}.out"
+        assert "Hello, submission" in log.read_text(errors="replace")
+
+        assert {p.name for p in catalog.iterdir()} == files_before
+        (composed,) = (state_home / "composed_workplans").rglob("*-workplan.yaml")
+        assert composed.name == f"{run_id}-workplan.yaml"
+
+        again = run_cstar(env, "blueprint", "submit", str(blueprint))
+        output = f"stdout:\n{again.stdout}\nstderr:\n{again.stderr}"
+        assert again.returncode == 0, output
+        assert SCHEDULED_MESSAGE in again.stdout, output
+        assert log.read_text(errors="replace").count("Hello, submission") == 1
+        assert {p.name for p in catalog.iterdir()} == files_before
+    finally:
+        kill_run(state_home, run_id, [step])
+
+
 def test_rerun_after_the_run_directory_is_removed_runs_the_steps_again(
     shape_root: Path, cstar_shim: Path
 ) -> None:

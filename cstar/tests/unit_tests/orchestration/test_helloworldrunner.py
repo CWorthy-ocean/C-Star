@@ -20,7 +20,7 @@ from cstar.applications.hello_world import (
 from cstar.base.env import ENV_CSTAR_RUNID
 from cstar.cli.blueprint.run import app as app_run_blueprint
 from cstar.cli.workplan.run import app as app_run_workplan
-from cstar.entrypoint.config import get_job_config, get_service_config
+from cstar.entrypoint.config import get_service_config
 from cstar.entrypoint.runner import execution_facts
 from cstar.execution.handler import ExecutionStatus
 from cstar.orchestration.adapter import StepToPlaceholderAdapter
@@ -173,10 +173,9 @@ async def test_hello_world_runner_happy_path(
     bp_path.write_text(bp_content)
 
     request = RunnerRequest(str(bp_path), HelloWorldBlueprint)
-    job_cfg = get_job_config()
     svc_cfg = get_service_config(log_level="INFO")
 
-    runner = HelloWorldRunner(request, svc_cfg, job_cfg)
+    runner = HelloWorldRunner(request, svc_cfg)
 
     await runner.execute()
 
@@ -559,9 +558,7 @@ def test_hello_world_workplan_relative_blueprint_path(
 
 def _hw_runner(bp_path: Path) -> HelloWorldRunner:
     request = RunnerRequest(str(bp_path), HelloWorldBlueprint)
-    return HelloWorldRunner(
-        request, get_service_config(log_level="INFO"), get_job_config()
-    )
+    return HelloWorldRunner(request, get_service_config(log_level="INFO"))
 
 
 @pytest.mark.parametrize("run_id", ["", "run-1234"])
@@ -757,9 +754,7 @@ async def test_runner_records_the_workplan_step_name(
 ) -> None:
     """Verify a request that names its workplan step is recorded under that name."""
     request = RunnerRequest(str(hello_world_bp_path), HelloWorldBlueprint, step="A")
-    runner = HelloWorldRunner(
-        request, get_service_config(log_level="INFO"), get_job_config()
-    )
+    runner = HelloWorldRunner(request, get_service_config(log_level="INFO"))
 
     await runner.execute()
 

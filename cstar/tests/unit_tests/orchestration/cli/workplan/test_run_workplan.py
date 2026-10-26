@@ -1,4 +1,5 @@
 import asyncio
+import hashlib
 import json
 import os
 import shutil
@@ -31,7 +32,7 @@ from cstar.cli.common import normalize_runid
 from cstar.cli.workplan.run import (
     COMMAND_SUBMIT,
     app,
-    auto_compose,
+    compose_blueprint_workplan,
     get_run_summary_display,
     handle_run_reloading,
     migrate_steps,
@@ -2165,14 +2166,23 @@ def test_cli_workplan_run_normalizes_mixed_case_runid(
     assert mock_build_and_run_dag.call_args.args[1] == "myrun_01"
 
 
+HELLO_WORLD_SLUG = "say-hello-to-my-little-friend"
+"""The slug of the name of the hello-world blueprint fixture."""
+
+
+def _digest(bp_path: Path) -> str:
+    """The digest that keys the composed workplan of the blueprint at `bp_path`."""
+    return hashlib.sha256(str(bp_path.resolve()).encode()).hexdigest()[:12]
+
+
 @pytest.mark.parametrize("suffix", [".yaml", ".yml"])
-def test_auto_compose_wraps_blueprint(
+def test_compose_blueprint_workplan_wraps_blueprint(
     tmp_path: Path,
     hello_world_bp_content: str,
     suffix: str,
 ) -> None:
-    """Verify a blueprint path is wrapped in a generated host workplan that
-    is written next to the blueprint, preserving the blueprint's suffix.
+    """Verify a blueprint path is wrapped in a single-step workplan written
+    under C-Star's state directory, keyed on the blueprint's path.
 
     Parameters
     ----------
@@ -2185,32 +2195,101 @@ def test_auto_compose_wraps_blueprint(
     """
     bp_path = tmp_path / f"helloworld{suffix}"
     bp_path.write_text(hello_world_bp_content)
+    files_before = set(tmp_path.iterdir())
 
-    result = auto_compose(bp_path.as_posix())
+    wp_path = Path(compose_blueprint_workplan(bp_path.as_posix()))
 
-    wp_path = Path(result)
-    assert wp_path != bp_path
-    assert wp_path.parent == bp_path.parent
-    assert wp_path.name == f"say-hello-to-my-little-friend-host-workplan{suffix}"
-    assert wp_path.exists()
+    # the state home of every test is a temporary one
+    composed_dir = StateDirectoryManager.composed_workplans_dir()
+    assert composed_dir.is_relative_to(tmp_path)
+    assert wp_path == (
+        composed_dir
+        / f"{HELLO_WORLD_SLUG}-{_digest(bp_path)}"
+        / f"{HELLO_WORLD_SLUG}-workplan.yaml"
+    )
+    assert wp_path.is_file()
+    assert set(tmp_path.iterdir()) == files_before
 
-    # the generated host workplan must contain a single step executing the blueprint
+    # the workplan is named for the blueprint and runs it as its only step, which
+    # is named for the application so the run's tasks directory is `tasks/hello_world`
     wp = deserialize(wp_path, Workplan)
-    assert wp.name == "say-hello-to-my-little-friend-host"
+    assert wp.name == HELLO_WORLD_SLUG
     assert len(wp.steps) == 1
 
     step = wp.steps[0]
+    assert step.name == "hello_world"
     assert step.application == "hello_world"
-    assert Path(step.blueprint_path).resolve() == bp_path.resolve()
-    assert "Say hello to my little friend!" in step.name
+    assert Path(step.blueprint_path).is_absolute()
+    assert Path(step.blueprint_path) == bp_path.resolve()
 
 
-def test_auto_compose_ignores_workplan(
+def test_compose_blueprint_workplan_is_deterministic(
+    hello_world_bp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Verify composing the same blueprint again, however its path is spelled,
+    gives the same file with the same bytes: nothing in it is timestamped or
+    depends on the environment, so a run's re-entry finds the workplan it started
+    from.
+    """
+    first = Path(compose_blueprint_workplan(hello_world_bp_path.as_posix()))
+    content = first.read_bytes()
+
+    monkeypatch.chdir(hello_world_bp_path.parent)
+    for spelling in (hello_world_bp_path.as_posix(), hello_world_bp_path.name):
+        again = Path(compose_blueprint_workplan(spelling))
+        assert again == first
+        assert again.read_bytes() == content
+
+
+def test_compose_blueprint_workplan_keys_on_the_blueprint_path(
+    tmp_path: Path,
+    hello_world_bp_content: str,
+) -> None:
+    """Verify two blueprints that share a name, in different directories, compose
+    different workplans, so a run-id derived from the shared name still meets the
+    collision check.
+    """
+    paths = []
+    for directory in ("one", "two"):
+        (tmp_path / directory).mkdir()
+        paths.append(tmp_path / directory / "helloworld.yaml")
+        paths[-1].write_text(hello_world_bp_content)
+
+    first, second = (Path(compose_blueprint_workplan(str(p))) for p in paths)
+
+    assert first != second
+    assert first.exists()
+    assert second.exists()
+    assert first.name == second.name
+    names = {deserialize(wp, Workplan).name for wp in (first, second)}
+    assert names == {HELLO_WORLD_SLUG}
+
+
+def test_compose_blueprint_workplan_writes_nothing_beside_the_blueprint(
+    readonly_blueprint: Path,
+) -> None:
+    """Verify a blueprint in a location the user cannot write to, as a shared
+    catalog may be, is composed without writing to its directory or changing it.
+    """
+    catalog = readonly_blueprint.parent
+    content = readonly_blueprint.read_bytes()
+    files_before = {p.name for p in catalog.iterdir()}
+
+    wp_path = Path(compose_blueprint_workplan(readonly_blueprint.as_posix()))
+
+    assert wp_path.is_file()
+    assert not wp_path.is_relative_to(catalog)
+    assert {p.name for p in catalog.iterdir()} == files_before
+    assert readonly_blueprint.read_bytes() == content
+
+
+def test_compose_blueprint_workplan_ignores_workplan(
     tmp_path: Path,
     wp_templates_dir: Path,
 ) -> None:
-    """Verify a workplan path passes through `auto_compose` unchanged and no
-    host workplan file is generated.
+    """Verify a workplan path passes through `compose_blueprint_workplan`
+    unchanged and no workplan file is composed.
 
     Parameters
     ----------
@@ -2223,15 +2302,18 @@ def test_auto_compose_ignores_workplan(
     wp_path = tmp_path / "workplan.yaml"
     wp_path.write_text(wp_template.read_text())
 
-    files_before = set(tmp_path.iterdir())
+    files_before = set(tmp_path.rglob("*"))
 
-    assert auto_compose(wp_path.as_posix()) == wp_path.as_posix()
-    assert set(tmp_path.iterdir()) == files_before
+    assert compose_blueprint_workplan(wp_path.as_posix()) == wp_path.as_posix()
+    assert set(tmp_path.rglob("*")) == files_before
+    assert not StateDirectoryManager.composed_workplans_dir().exists()
 
 
-def test_auto_compose_ignores_non_blueprint_content(tmp_path: Path) -> None:
-    """Verify a file that is neither a blueprint nor a workplan passes
-    through `auto_compose` unchanged and no host workplan file is generated.
+def test_compose_blueprint_workplan_ignores_non_blueprint_content(
+    tmp_path: Path,
+) -> None:
+    """Verify a file that is neither a blueprint nor a workplan passes through
+    `compose_blueprint_workplan` unchanged and no workplan file is composed.
 
     Parameters
     ----------
@@ -2241,15 +2323,43 @@ def test_auto_compose_ignores_non_blueprint_content(tmp_path: Path) -> None:
     path = tmp_path / "not-a-blueprint.yaml"
     path.write_text("some: [unrelated, content]\n")
 
-    files_before = set(tmp_path.iterdir())
+    files_before = set(tmp_path.rglob("*"))
 
-    assert auto_compose(path.as_posix()) == path.as_posix()
-    assert set(tmp_path.iterdir()) == files_before
+    assert compose_blueprint_workplan(path.as_posix()) == path.as_posix()
+    assert set(tmp_path.rglob("*")) == files_before
+    assert not StateDirectoryManager.composed_workplans_dir().exists()
+
+
+def test_composed_workplan_collides_only_with_another_blueprint(
+    tmp_path: Path,
+    hello_world_bp_content: str,
+) -> None:
+    """Verify the composed workplans keep `refuse_run_id_collision` meaningful: the
+    blueprint that started a run re-enters it, and a different blueprint of the
+    same name is refused.
+    """
+    blueprints = []
+    for directory in ("one", "two"):
+        (tmp_path / directory).mkdir()
+        blueprints.append(tmp_path / directory / "helloworld.yaml")
+        blueprints[-1].write_text(hello_world_bp_content)
+    started, other = (Path(compose_blueprint_workplan(str(p))) for p in blueprints)
+
+    record = _recorded_run(HELLO_WORLD_SLUG, started, tmp_path)
+    _write_original_backup(record, deserialize(started, Workplan))
+
+    with mock.patch(RUN_LOOKUP, mock.AsyncMock(return_value=record)):
+        refuse_run_id_collision(started, HELLO_WORLD_SLUG, explicit=False)
+
+        with pytest.raises(typer.BadParameter, match="would overwrite it") as error:
+            refuse_run_id_collision(other, HELLO_WORLD_SLUG, explicit=False)
+
+    assert "its content differs from the workplan recorded" in error.value.message
 
 
 def test_workplan_run_blueprint_auto_composes(hello_world_bp_path: Path) -> None:
-    """Verify submitting a blueprint to `cstar workplan submit` generates a host
-    workplan and passes the generated workplan (not the blueprint) on to
+    """Verify submitting a blueprint to `cstar workplan submit` composes a
+    workplan and passes the composed workplan (not the blueprint) on to
     `build_and_run_dag`.
 
     Parameters
@@ -2270,13 +2380,15 @@ def test_workplan_run_blueprint_auto_composes(hello_world_bp_path: Path) -> None
     assert result.exit_code == 0
     mock_build_and_run_dag.assert_awaited_once()
 
-    # confirm the composed host workplan is what continues through the run
+    # confirm the composed workplan is what continues through the run
     wp_path = mock_build_and_run_dag.call_args.args[0]
     assert isinstance(wp_path, Path)
-    assert wp_path.name.endswith("-host-workplan.yaml")
+    assert wp_path.is_relative_to(StateDirectoryManager.composed_workplans_dir())
+    assert wp_path.name == f"{HELLO_WORLD_SLUG}-workplan.yaml"
     assert wp_path.exists()
+    assert not (hello_world_bp_path.parent / wp_path.name).exists()
 
-    # confirm the host workplan step executes the submitted blueprint
+    # confirm the workplan step executes the submitted blueprint
     wp = deserialize(wp_path, Workplan)
     assert [Path(s.blueprint_path).resolve() for s in wp.steps] == [
         hello_world_bp_path.resolve()
@@ -2285,8 +2397,8 @@ def test_workplan_run_blueprint_auto_composes(hello_world_bp_path: Path) -> None
 
 def test_workplan_run_blueprint_default_run_id(hello_world_bp_path: Path) -> None:
     """Verify that omitting the run-id when submitting a blueprint derives
-    the default run-id from the generated host workplan rather than failing
-    to parse the blueprint.
+    the default run-id from the composed workplan, which is named for the
+    blueprint, rather than failing to parse the blueprint.
 
     Parameters
     ----------
@@ -2305,9 +2417,43 @@ def test_workplan_run_blueprint_default_run_id(hello_world_bp_path: Path) -> Non
 
     assert result.exit_code == 0
     mock_build_and_run_dag.assert_awaited_once()
-    assert (
-        mock_build_and_run_dag.call_args.args[1] == "say-hello-to-my-little-friend-host"
+    assert mock_build_and_run_dag.call_args.args[1] == HELLO_WORLD_SLUG
+
+
+def test_workplan_run_blueprint_with_unnameable_name_is_refused(
+    tmp_path: Path,
+    hello_world_bp_content: str,
+    flatten_cli_output: Callable[[str], str],
+) -> None:
+    """Verify submitting a blueprint whose name has no ASCII word characters to
+    `cstar workplan submit` is a usage error naming the blueprint's name, and
+    nothing is composed or scheduled.
+
+    Parameters
+    ----------
+    tmp_path : Path
+        A temporary directory for the blueprint.
+    hello_world_bp_content : str
+        The content of a minimal hello-world blueprint, which the test renames.
+    flatten_cli_output : Callable[[str], str]
+        Prepares CLI output for phrase matching.
+    """
+    bp_path = tmp_path / "helloworld.yaml"
+    bp_path.write_text(
+        hello_world_bp_content.replace("Say hello to my little friend!", "'!!!'")
     )
+
+    with mock.patch(
+        "cstar.cli.workplan.run.build_and_run_dag", wraps=fake_build_and_run_dag
+    ) as mock_build_and_run_dag:
+        result = CliRunner().invoke(app, [bp_path.as_posix()], color=False)
+
+    assert result.exit_code == 2
+    assert "A run cannot be named from the blueprint's name '!!!'" in (
+        flatten_cli_output(result.output)
+    )
+    mock_build_and_run_dag.assert_not_awaited()
+    assert not StateDirectoryManager.composed_workplans_dir().exists()
 
 
 @pytest.mark.parametrize(
@@ -3023,9 +3169,11 @@ def test_migrate_steps_skips_inline_step(tmp_path: Path) -> None:
 
 @pytest.mark.parametrize("pre_run", [True, False])
 @pytest.mark.usefixtures("read_yaml_intercept")
-def test_workplan_run_pre_run_reaches_build_and_run_dag(pre_run: bool) -> None:
+def test_workplan_run_pre_run_reaches_build_and_run_dag(
+    squash_cli_output: Callable[[str], str], pre_run: bool
+) -> None:
     """Verify `--pre-run` is forwarded to `build_and_run_dag` as a parameter,
-    and only a pre-run ends with how to continue.
+    and only a pre-run ends with how to continue, by submitting the workplan again.
     """
     wp_uri = "https://raw.githubusercontent.com/CWorthy-ocean/C-Star/refs/heads/main/cstar/additional_files/templates/wp/workplan.yaml"
     args = ["--run-id", "12345", wp_uri]
@@ -3048,6 +3196,12 @@ def test_workplan_run_pre_run_reaches_build_and_run_dag(pre_run: bool) -> None:
     assert ("Pre-run scheduled." in output) is pre_run
     assert ("without --pre-run" in output) is pre_run
     assert "run scheduling has completed" in output
+    squashed = squash_cli_output(result.stdout)
+    assert (
+        squash_cli_output(f"`cstar workplan {COMMAND_SUBMIT} ") in squashed
+    ) is pre_run
+    assert (squash_cli_output(f" {ARG_RUN_ID} 12345` without") in squashed) is pre_run
+    assert "cstar blueprint submit" not in result.stdout
 
 
 def test_workplan_run_pre_run_and_resume_fails_fast() -> None:
@@ -3167,6 +3321,7 @@ def test_workplan_run_resume_of_pre_run_workplan_fails_fast(
     tmp_path: Path,
     wp_templates_dir: Path,
     mock_run_id: str,
+    squash_cli_output: Callable[[str], str],
 ) -> None:
     """Verify `--resume` on the reloaded workplan of a pre-run is a usage
     error: resume would mark steps that are also marked for pre-run.
@@ -3198,6 +3353,8 @@ def test_workplan_run_resume_of_pre_run_workplan_fails_fast(
 
     assert result.exit_code == 2
     assert "is a pre-run" in " ".join(result.output.replace("│", " ").split())
+    retry = f"`cstar workplan {COMMAND_SUBMIT} <workplan> {ARG_PRE_RUN}` instead"
+    assert squash_cli_output(retry) in squash_cli_output(result.output)
     mock_apply_resume.assert_not_awaited()
     mock_run_dag.assert_not_awaited()
 

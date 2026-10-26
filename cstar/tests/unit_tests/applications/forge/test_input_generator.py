@@ -3613,9 +3613,7 @@ class TestGenerateAllDaskNumWorkersGuard:
         # guards actually executes -- below 16 cores generate_all always falls
         # back to the conservative 1-thread pin regardless of dask_num_workers.
         monkeypatch.setattr(
-            "cstar.applications.forge.input_generator.os.sched_getaffinity",
-            lambda _pid: set(range(32)),
-            raising=False,  # not available on macOS
+            "cstar.applications.forge.input_generator.cpus_available", lambda: 32
         )
 
         mock_boundary = MagicMock()

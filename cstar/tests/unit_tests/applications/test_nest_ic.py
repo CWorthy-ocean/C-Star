@@ -11,7 +11,7 @@ import xarray as xr
 
 from cstar.applications.core import RunnerRequest
 from cstar.applications.nest_ic import NestIcBlueprint, NestIcRunner
-from cstar.entrypoint.config import JobConfig, ServiceConfiguration
+from cstar.entrypoint.config import ServiceConfiguration
 
 
 @pytest.fixture
@@ -60,9 +60,8 @@ def _make_runner(blueprint: NestIcBlueprint) -> NestIcRunner:
         health_check_log_threshold=10,
         name="test_nest_ic_runner",
     )
-    job_config = JobConfig(account_id="", walltime="", priority="")
 
-    return NestIcRunner(request, service_config, job_config)
+    return NestIcRunner(request, service_config)
 
 
 class TestNestIcBlueprintPio:
