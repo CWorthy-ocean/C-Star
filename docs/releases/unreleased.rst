@@ -603,4 +603,6 @@ Miscellaneous
 - The catalog, specs, wizard-launching, Python reference and developer pages describe the new layout, and the catalog page's migration section covers spec directories. (`#842 <https://github.com/CWorthy-ocean/C-Star/pull/842>`_)
 - The ``cstar blueprint migrate --help`` text now says where a copy is written when no output path is given. (`#845 <https://github.com/CWorthy-ocean/C-Star/pull/845>`_)
 - The re-entry and run-status documentation describe queued and running steps as they behave now, and the ``--clobber`` help says a queued or running step is cancelled first. (`#846 <https://github.com/CWorthy-ocean/C-Star/pull/846>`_)
+- The generated ``cppdefs.opt`` no longer lists ``EXACT_RESTARTS`` or ``PRINT_HOSTNAME``, which never had any effect; exact restarts stay on in every 3D build, as before. (`#847 <https://github.com/CWorthy-ocean/C-Star/pull/847>`_)
+- Every bundled model spec now pins its Forge templates to the commit that drops them; builds are unchanged for every ucla-roms release the specs pin. (`#847 <https://github.com/CWorthy-ocean/C-Star/pull/847>`_)
 
