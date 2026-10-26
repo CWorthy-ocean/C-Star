@@ -89,6 +89,15 @@ Breaking Changes
 
 - ``CSTAR_NPROCS_POST`` is removed; joining ROMS output uses a quarter of the cores available to the process, at most one thread per model rank. (`#836 <https://github.com/CWorthy-ocean/C-Star/pull/836>`_)
 - Python API: ``ROMSSimulation.run()`` drops ``account_key``, ``walltime`` and ``queue_name``; runners take ``(request, service_cfg)``; ``JobConfig``, ``get_job_config`` and ``Scheduler.in_active_allocation`` are removed. (`#836 <https://github.com/CWorthy-ocean/C-Star/pull/836>`_)
+- ``cstar workplan submit`` (and ``cstar blueprint submit``) no longer rewrites the authored workplan when it migrates a path-referenced blueprint: the workplan keeps pointing at your original blueprint, and each submit runs a fresh migrated copy from the state home. (`#841 <https://github.com/CWorthy-ocean/C-Star/pull/841>`_)
+- Catalogs keep each spec as one file, ``<Kind>/<name>.yaml``; entries saved in this layout are not visible to earlier C-Star releases reading the same catalog. (`#842 <https://github.com/CWorthy-ocean/C-Star/pull/842>`_)
+- The catalog's Python API follows the file layout. (`#842 <https://github.com/CWorthy-ocean/C-Star/pull/842>`_)
+
+  - ``DomainCatalog.model_dir`` and ``add_asset_to_domain`` are removed (also on ``LayeredCatalog``), and ``domain_path`` returns the spec file rather than a directory.
+  - ``build_forge_blueprint`` and ``load_model_spec_data`` take the ModelSpec file (``model_path=``), ``register_model_from_settings`` takes ``base_model_path``, and ``register_model`` takes a spec file.
+  - ``DomainCatalog.register_domain`` refuses a name the catalog already has, like the other ``register_*`` writers, instead of overwriting it.
+
+- Deprecated: the per-entry spec directories ``<Kind>/<name>/<File>.yaml`` (``ModelSpec/<name>/model.yaml``, ``DomainSpec/<name>/Domain.yaml``, ...), removed in 0.20.0; run ``cstar admin migrate-catalog <root>``. (`#842 <https://github.com/CWorthy-ocean/C-Star/pull/842>`_)
 
 
 
@@ -282,6 +291,11 @@ New features
 - ``CSTAR_ALLOW_LOGIN_NODE_RUN=1`` lets ROMS launch outside a scheduler job on a cluster, for a very small run or when C-Star misjudges that it is not inside a job. (`#836 <https://github.com/CWorthy-ocean/C-Star/pull/836>`_)
 - ``cstar forge run`` also prints the ``cstar blueprint submit`` command for the emitted blueprint when it runs on a cluster. (`#836 <https://github.com/CWorthy-ocean/C-Star/pull/836>`_)
 - C-Star supports Python 3.14. (`#838 <https://github.com/CWorthy-ocean/C-Star/pull/838>`_)
+- ``cstar admin migrate-catalog`` moves a catalog's spec directories to ``<Kind>/<name>.yaml``, alongside the blueprint forms it already handled. (`#842 <https://github.com/CWorthy-ocean/C-Star/pull/842>`_)
+
+  - After a spec moves, its ``Assets/`` directory is removed if it holds nothing but ``.gitkeep``, then the emptied entry directory.
+  - Anything else, such as a file kept in ``Assets/`` or an entry whose new name is already taken, is left in place and reported; ``--dry-run`` shows the plan without changing anything.
+
 
 
 
@@ -365,6 +379,17 @@ Bug Fixes
 - Loading a run's status no longer fails intermittently with ``OSError`` while another step of the same run is updating the run's record. (`#831 <https://github.com/CWorthy-ocean/C-Star/pull/831>`_)
 - Run listings no longer drop a run, or report its record as unreadable, while that run is updating its record. (`#831 <https://github.com/CWorthy-ocean/C-Star/pull/831>`_)
 - Joining ROMS output no longer fails on a machine with one or two CPU cores, where the post-processing pool was sized to zero. (`#836 <https://github.com/CWorthy-ocean/C-Star/pull/836>`_)
+- Resuming a ``ucla_roms`` step pinned to a ucla-roms branch or unresolvable commit after upgrading C-Star no longer writes namelist keys the compiled executable rejects. (`#840 <https://github.com/CWorthy-ocean/C-Star/pull/840>`_)
+
+  - Each build records its namelist schema beside the executable, and ``--resume`` (including a run after ``--pre-run``) writes the namelist with that schema.
+  - A resume whose recorded schema this C-Star does not have is refused, naming the schema and suggesting upgrading cstar-ocean or rebuilding with ``--clobber``.
+
+- Re-entering a run after an upgrade that migrated one of its blueprints to a newer schema major refused every finished step that used it as edited; those steps are now reused, with one warning naming them. (`#841 <https://github.com/CWorthy-ocean/C-Star/pull/841>`_)
+
+  - The first re-entry after such an upgrade cannot tell the migration from an edit, so pass ``--clobber <step-name>`` for a step whose blueprint you also changed; the next re-entry checks the steps again.
+
+- ``--resume <workplan>`` after a blueprint migration no longer refuses the run because the workplan file changed. (`#841 <https://github.com/CWorthy-ocean/C-Star/pull/841>`_)
+
 
 
 
@@ -554,4 +579,10 @@ Miscellaneous
 - The nesting tutorial no longer describes the test suite. (`#837 <https://github.com/CWorthy-ocean/C-Star/pull/837>`_)
 - C-Star now requires roms-tools 5.2.2 or newer; the conda environment files allow Python 3.14. (`#838 <https://github.com/CWorthy-ocean/C-Star/pull/838>`_)
 - Unit tests and the weekly extended integration tests run Python 3.12, 3.13 and 3.14 on Ubuntu and only Python 3.14 on macOS. (`#838 <https://github.com/CWorthy-ocean/C-Star/pull/838>`_)
+- The Tier 3 nesting + upscaling integration test checks the per-domain CDR metric series and that the combined CO2 uptake is the sum of the child and upscaled parent. (`#839 <https://github.com/CWorthy-ocean/C-Star/pull/839>`_)
+- The resume section of the UCLA-ROMS pre-run and resume docs says the namelist is written for the ucla-roms version the executable was compiled from. (`#840 <https://github.com/CWorthy-ocean/C-Star/pull/840>`_)
+- The run manifest (schema 1.5.0) records each step's ``blueprint_schema_version``. (`#841 <https://github.com/CWorthy-ocean/C-Star/pull/841>`_)
+- The re-entry and blueprint versioning docs say what a blueprint major means for a run in progress. (`#841 <https://github.com/CWorthy-ocean/C-Star/pull/841>`_)
+- The bundled catalog ships in the one-file-per-entry layout. (`#842 <https://github.com/CWorthy-ocean/C-Star/pull/842>`_)
+- The catalog, specs, wizard-launching, Python reference and developer pages describe the new layout, and the catalog page's migration section covers spec directories. (`#842 <https://github.com/CWorthy-ocean/C-Star/pull/842>`_)
 
