@@ -28,7 +28,7 @@ name; there are no version numbers or identifiers beyond it. The older flat
 ``<name>.forge_blueprint.yaml`` and ``B_<name>.yaml`` files and
 ``blueprints/<machine>/<name>/B_*.yaml`` directories, and a
 ``blueprints/roms_marbl/`` directory named for the UCLA-ROMS application's
-earlier name, are still read for one release, with a warning;
+earlier name, are still read until C-Star 0.20.0, with a warning;
 ``cstar admin migrate-catalog <root>`` moves them into the current layout. Each
 file under ``blueprints/<application>/`` is one blueprint, so sidecar files
 (``settings_B_*.yaml``, ``_grid.yaml``) do not belong there. :doc:`forge/specs`
@@ -37,8 +37,8 @@ describes what each spec kind contains.
 Migrating an older catalog
 --------------------------
 
-Earlier versions kept blueprints in four other forms, which C-Star still
-reads for one more release:
+Earlier versions kept blueprints in four other forms, which C-Star reads
+until 0.20.0:
 
 - ``blueprints/<name>.forge_blueprint.yaml``, a forge blueprint;
 - ``blueprints/B_<name>.yaml``, a UCLA-ROMS blueprint;
@@ -47,8 +47,10 @@ reads for one more release:
 - ``blueprints/roms_marbl/<name>.yaml``, a UCLA-ROMS blueprint under the
   application's earlier name.
 
-Loading a catalog that holds any of them logs one warning listing them. To
-move them into ``blueprints/<application>/<name>.yaml``, run:
+Loading a catalog that holds any of them prints a deprecation warning
+listing them, one for the first three forms and one for ``roms_marbl/``.
+From 0.20.0 on, such a catalog is refused with an error until it is
+migrated. To move them into ``blueprints/<application>/<name>.yaml``, run:
 
 .. code-block:: bash
 

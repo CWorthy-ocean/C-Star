@@ -3,6 +3,7 @@ import json
 import os
 import sys
 import typing as t
+import warnings
 from collections.abc import Callable
 from importlib.metadata import PackageNotFoundError
 from importlib.metadata import version as _pkg_version
@@ -13,6 +14,7 @@ from rich.console import Console
 
 import cstar
 from cstar.applications.core import get_application
+from cstar.base.deprecation import CstarDeprecationWarning
 from cstar.base.env import (
     ENV_CSTAR_DISABLE_MIGRATION,
     ENV_CSTAR_LOG_LEVEL,
@@ -221,6 +223,9 @@ def common_callback(
     """Load the user's configuration file, then warn on stderr about each
     exported setting that no longer has an effect.
 
+    A deprecation is reported by its log line alone: the Python warning that
+    `deprecated` also emits would repeat it, with a source line, on the terminal.
+
     The file is loaded before any command's options are parsed, so an option's
     ``envvar`` binding sees it; an exported variable still wins over it. A file
     the loader refuses (one it cannot read) stops every command except the ones
@@ -231,6 +236,7 @@ def common_callback(
     typer.Exit
         With code 2 when the loader refuses the configuration file.
     """
+    warnings.simplefilter("ignore", CstarDeprecationWarning)
     try:
         load_user_config()
     except CstarUserConfigError as ex:

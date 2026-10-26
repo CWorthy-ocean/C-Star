@@ -805,7 +805,7 @@ Once a workplan has been run, the ``cstar run`` commands operate on the run: the
 
 .. note::
 
-   Earlier releases listed these commands under ``cstar workplan`` (``cstar workplan status``, ``log``, ``gather``, ``path``, ``cd``, ``ls`` and ``list``, or ``cstar wp ...``), and called the launch command ``cstar workplan run`` rather than ``cstar workplan submit``. Those spellings still work and run the same command; they are no longer listed in ``--help``.
+   Earlier releases listed these commands under ``cstar workplan`` (``cstar workplan status``, ``log``, ``gather``, ``path``, ``cd``, ``ls`` and ``list``, or ``cstar wp ...``), and called the launch command ``cstar workplan run`` rather than ``cstar workplan submit``. Those spellings still run the same command, after a warning naming the current one; they are no longer listed in ``--help`` and stop working in C-Star 0.20.0.
 
 Checking Workplan Status
 ^^^^^^^^^^^^^^^^^^^^^^^^
@@ -1038,7 +1038,7 @@ The command detects whether you run zsh or bash (pass ``zsh`` or ``bash`` to cho
 
 To manage your dotfiles yourself, omit ``--install``: the command prints the function instead, for example ``cstar env shell-init zsh > <file>``, ready to source from your own configuration.
 
-The shell function also accepts the earlier ``cstar workplan cd`` spelling. Regenerate the function after upgrading so that it knows ``cstar run cd``.
+The shell function also accepts the deprecated ``cstar workplan cd`` spelling, with a warning, until C-Star 0.20.0. Regenerate the function after upgrading so that it knows ``cstar run cd``.
 
 
 Gathering Workplan Outputs
