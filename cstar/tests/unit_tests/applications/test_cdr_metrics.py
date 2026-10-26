@@ -33,7 +33,7 @@ from cstar.applications.cdr_metrics import (
 )
 from cstar.applications.core import ArtifactKind, RunnerRequest, get_application
 from cstar.base.exceptions import CstarError
-from cstar.entrypoint.config import JobConfig, ServiceConfiguration
+from cstar.entrypoint.config import ServiceConfiguration
 from cstar.execution.handler import ExecutionStatus
 from cstar.orchestration.manifest import (
     STEP_RECORD_NAME,
@@ -219,9 +219,8 @@ def _make_runner(blueprint: CdrMetricsBlueprint) -> CdrMetricsRunner:
         health_check_log_threshold=10,
         name="test_cdr_metrics_runner",
     )
-    job_config = JobConfig(account_id="", walltime="", priority="")
 
-    return CdrMetricsRunner(request, service_config, job_config)
+    return CdrMetricsRunner(request, service_config)
 
 
 class _FakeRomsTools:

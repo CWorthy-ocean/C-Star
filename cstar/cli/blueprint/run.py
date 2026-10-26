@@ -25,7 +25,7 @@ from cstar.cli.common import (
     set_env,
     update_loggers,
 )
-from cstar.entrypoint.config import get_job_config, get_service_config
+from cstar.entrypoint.config import get_service_config
 from cstar.entrypoint.utils import (
     ARG_CLOBBER,
     ARG_CLOBBER_HELP,
@@ -55,7 +55,8 @@ if t.TYPE_CHECKING:
 
 CMD_NAME: t.Final[str] = "run"
 CMD_HELP: t.Final[str] = (
-    "Execute a blueprint in a local worker service. Pass --resume to continue "
+    "Execute a blueprint here, in the foreground, and wait for it. Use `cstar "
+    "blueprint submit` to run it as a scheduler job. Pass --resume to continue "
     "a prior attempt lost or interrupted mid-run, in place, without needing a "
     "workplan or run-id."
 )
@@ -249,7 +250,9 @@ def run(
         typer.Option(ARG_STEP, help=ARG_STEP_HELP),
     ] = "",
 ) -> None:
-    """Execute a blueprint in a local worker service.
+    """Execute a blueprint here, in the foreground, and wait for it.
+
+    Use `cstar blueprint submit` to run it as a scheduler job.
 
     Pass `--resume` to continue a prior attempt lost or interrupted mid-run:
     the run continues in place, from the blueprint's working directory,
@@ -287,7 +290,6 @@ def run(
         )
 
     name = f"{app_config.name}_runner"
-    job_cfg = get_job_config()
     service_cfg = get_service_config(get_env_item(ENV_CSTAR_LOG_LEVEL).value, name=name)
 
     msg = f"Executing {app_config.name!r} blueprint in a {type(app_config.runner).__name__} service"
@@ -314,7 +316,7 @@ def run(
         step=step,
     )
 
-    runner = app_config.runner(request, service_cfg, job_cfg)
+    runner = app_config.runner(request, service_cfg)
     started_at = utc_now()
     asyncio.run(runner.execute())
 

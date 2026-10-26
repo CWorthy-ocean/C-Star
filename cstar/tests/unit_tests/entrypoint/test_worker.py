@@ -14,14 +14,9 @@ from cstar.applications.core import RunnerRequest, RunnerResult, RunnerState
 from cstar.applications.ucla_roms.app import UclaRomsRunner, main
 from cstar.applications.ucla_roms.models import UclaRomsBlueprint
 from cstar.applications.ucla_roms.transforms import ContinuanceDirective
-from cstar.base.env import get_env_item
+from cstar.base.env import ENV_CSTAR_ALLOW_LOGIN_NODE_RUN
 from cstar.base.exceptions import BlueprintError, CstarError, CstarExpectationFailed
-from cstar.entrypoint.config import (
-    JobConfig,
-    ServiceConfiguration,
-    get_job_config,
-    get_service_config,
-)
+from cstar.entrypoint.config import ServiceConfiguration, get_service_config
 from cstar.entrypoint.runner import (
     BlueprintRunner,
     create_parser,
@@ -39,19 +34,8 @@ from cstar.entrypoint.utils import (
 from cstar.execution.handler import ExecutionHandler, ExecutionStatus
 from cstar.orchestration.orchestration import LiveStep, LiveWorkplan
 from cstar.orchestration.serialization import deserialize
-from cstar.orchestration.utils import (
-    ENV_CSTAR_SLURM_ACCOUNT,
-    ENV_CSTAR_SLURM_MAX_WALLTIME,
-    ENV_CSTAR_SLURM_QUEUE,
-)
 from cstar.roms.file_system import RomsFileSystemManager
-from cstar.system.manager import (
-    AnvilEnvSettings,
-    DerechoSystemContext,
-    ExpanseSystemContext,
-    PerlmutterSystemContext,
-    SystemContext,
-)
+from cstar.roms.simulation import ROMSSimulation
 
 DEFAULT_LOOP_DELAY = 5
 DEFAULT_HEALTH_CHECK_FREQUENCY: int | None = None
@@ -86,26 +70,37 @@ def valid_args_short() -> dict[str, str]:
 
 
 @pytest.fixture
-def fake_job_config() -> Generator[JobConfig, None, None]:
-    """Return a `JobConfig` instance configured with mocked
-    values for account, priority, and walltime.
-    """
-    with mock.patch.dict(
-        os.environ,
-        {
-            ENV_CSTAR_SLURM_ACCOUNT: "mock-account",
-            ENV_CSTAR_SLURM_MAX_WALLTIME: "01:00:00",
-            ENV_CSTAR_SLURM_QUEUE: "debug",
-        },
+def login_node(monkeypatch: pytest.MonkeyPatch) -> Generator[None, None, None]:
+    """Put the process outside any scheduler job on a system with a scheduler."""
+    for name in (
+        "SLURM_JOB_ID",
+        "SLURM_JOBID",
+        "PBS_JOBID",
+        ENV_CSTAR_ALLOW_LOGIN_NODE_RUN,
     ):
-        yield get_job_config()
+        monkeypatch.delenv(name, raising=False)
+
+    with mock.patch(
+        "cstar.system.manager.CStarSystemManager.scheduler",
+        new_callable=mock.PropertyMock,
+        return_value=mock.Mock(),
+    ):
+        yield
+
+
+def mock_simulation_with_launch_rule() -> mock.Mock:
+    """Mock a simulation whose `check_launch_location` applies the real rule."""
+    simulation = mock.Mock(initial_conditions=None)
+    simulation.check_launch_location.side_effect = lambda: (
+        ROMSSimulation.check_launch_location(simulation)
+    )
+    return simulation
 
 
 @pytest.fixture
 def sim_runner(
     blueprint_path: Path,
     patch_romssimulation_init_sourcedata,
-    fake_job_config: JobConfig,
 ) -> UclaRomsRunner:
     """Fixture to create a UclaRomsRunner instance.
 
@@ -129,7 +124,7 @@ def sim_runner(
     )
 
     with patch_romssimulation_init_sourcedata(from_worker=True):
-        runner = UclaRomsRunner(request, service_config, fake_job_config)
+        runner = UclaRomsRunner(request, service_config)
 
     output_dir = runner.simulation.fs_manager.output_dir
 
@@ -364,87 +359,6 @@ def test_get_service_config(
 
 
 @pytest.mark.parametrize(
-    ("environ", "expected"),
-    [
-        pytest.param(
-            {},
-            ("", get_env_item(ENV_CSTAR_SLURM_MAX_WALLTIME).default, ""),
-            id="unset",
-        ),
-        pytest.param(
-            {
-                ENV_CSTAR_SLURM_ACCOUNT: " m1234 ",
-                ENV_CSTAR_SLURM_MAX_WALLTIME: "01:00:00",
-                ENV_CSTAR_SLURM_QUEUE: "debug",
-            },
-            ("m1234", "01:00:00", "debug"),
-            id="set",
-        ),
-    ],
-)
-def test_get_job_config_on_slurm_system(
-    monkeypatch: pytest.MonkeyPatch,
-    environ: dict[str, str],
-    expected: tuple[str, str, str],
-) -> None:
-    """Verify the job config reads the SLURM settings on a system that requires an
-    account and queue without refusing to load when they are unset.
-
-    Only a step that submits a scheduler job needs them; `create_scheduler_job`
-    enforces the requirement. An unset walltime keeps its default.
-    """
-    for name in (
-        ENV_CSTAR_SLURM_ACCOUNT,
-        ENV_CSTAR_SLURM_MAX_WALLTIME,
-        ENV_CSTAR_SLURM_QUEUE,
-    ):
-        monkeypatch.delenv(name, raising=False)
-    for var, value in environ.items():
-        monkeypatch.setenv(var, value)
-
-    with mock.patch(
-        "cstar.system.environment.CStarEnvironment.settings_klass", AnvilEnvSettings
-    ):
-        job_cfg = get_job_config()
-
-    assert (job_cfg.account_id, job_cfg.walltime, job_cfg.priority) == expected
-
-
-@pytest.mark.parametrize(
-    ("system_ctx", "expected"),
-    [
-        pytest.param(
-            PerlmutterSystemContext, ("m1234", "01:00:00", "debug"), id="perlmutter"
-        ),
-        pytest.param(
-            ExpanseSystemContext, ("m1234", "01:00:00", "debug"), id="expanse"
-        ),
-        pytest.param(DerechoSystemContext, ("", "", ""), id="derecho"),
-    ],
-)
-def test_get_job_config_by_system(
-    monkeypatch: pytest.MonkeyPatch,
-    system_ctx: type[SystemContext],
-    expected: tuple[str, str, str],
-) -> None:
-    """Verify the job config reads the SLURM settings on Perlmutter and Expanse,
-    and leaves them empty on Derecho (PBS), whose jobs then take the primary
-    queue and its maximum walltime.
-    """
-    monkeypatch.setenv(ENV_CSTAR_SLURM_ACCOUNT, "m1234")
-    monkeypatch.setenv(ENV_CSTAR_SLURM_MAX_WALLTIME, "01:00:00")
-    monkeypatch.setenv(ENV_CSTAR_SLURM_QUEUE, "debug")
-
-    with mock.patch(
-        "cstar.system.environment.CStarEnvironment.settings_klass",
-        system_ctx.settings_klass(),
-    ):
-        job_cfg = get_job_config()
-
-    assert (job_cfg.account_id, job_cfg.walltime, job_cfg.priority) == expected
-
-
-@pytest.mark.parametrize(
     "blueprint_uri",
     [
         "blueprint1.yaml",
@@ -477,7 +391,6 @@ def test_get_request(
 def test_start_runner(
     blueprint_path: Path,
     patch_romssimulation_init_sourcedata,
-    fake_job_config: JobConfig,
 ) -> None:
     """Test creating a UclaRomsRunner and starting it.
 
@@ -501,7 +414,7 @@ def test_start_runner(
     )
 
     with patch_romssimulation_init_sourcedata(from_worker=True):
-        runner = UclaRomsRunner(request, service_config, fake_job_config)
+        runner = UclaRomsRunner(request, service_config)
 
     assert runner.request.blueprint_uri == request.blueprint_uri
 
@@ -962,9 +875,59 @@ async def test_runner_on_start_without_pre_run_launches(
     mock_simulation.prepare_launch.assert_not_called()
 
 
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("login_node")
+async def test_runner_on_start_refuses_outside_scheduler_job_before_setup(
+    sim_runner: UclaRomsRunner,
+) -> None:
+    """On a system with a scheduler, outside a scheduler job, the runner refuses
+    before it stages, builds or partitions anything.
+    """
+    mock_simulation = mock_simulation_with_launch_rule()
+
+    with (
+        mock.patch.object(sim_runner, "_on_shutdown", mock.Mock()),
+        mock.patch.object(sim_runner, "run", mock.AsyncMock()) as mock_runner_run,
+        mock.patch.object(sim_runner, "simulation", mock_simulation),
+        pytest.raises(CstarError, match="Refusing to launch ROMS"),
+    ):
+        await sim_runner.execute()
+
+    assert [c[0] for c in mock_simulation.method_calls] == ["check_launch_location"]
+    mock_runner_run.assert_not_called()
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("login_node")
+async def test_runner_on_start_pre_run_is_allowed_outside_scheduler_job(
+    sim_runner: UclaRomsRunner,
+) -> None:
+    """A pre-run never launches the model, so a login node may prepare one."""
+    mock_simulation = mock_simulation_with_launch_rule()
+    mock_simulation.prepare_launch.return_value = mock.Mock(
+        command="mpirun -n 1 ./roms cstar_generated_roms.nml", run_path=Path("run")
+    )
+    sim_runner.request.pre_run = True
+
+    with (
+        mock.patch.object(sim_runner, "_on_shutdown", mock.Mock()),
+        mock.patch.object(sim_runner, "run", mock.AsyncMock()),
+        mock.patch.object(sim_runner, "simulation", mock_simulation),
+    ):
+        await sim_runner.execute()
+
+    assert [c[0] for c in mock_simulation.method_calls] == [
+        "setup",
+        "build",
+        "pre_run",
+        "prepare_launch",
+    ]
+    assert sim_runner.state.status == ExecutionStatus.COMPLETED
+    assert not sim_runner.result.errors
+
+
 def test_runner_init_resume_builds_simulation_from_resume_blueprint(
     blueprint_path: Path,
-    fake_job_config: JobConfig,
 ) -> None:
     """A resume request derives the blueprint through `prepare_resume_blueprint`
     and builds the simulation from the derived path, not the original.
@@ -986,7 +949,7 @@ def test_runner_init_resume_builds_simulation_from_resume_blueprint(
         ) as mock_prepare,
         mock.patch("cstar.roms.simulation.ROMSSimulation", mock_sim_class),
     ):
-        UclaRomsRunner(request, service_config, fake_job_config)
+        UclaRomsRunner(request, service_config)
 
     mock_prepare.assert_called_once_with(str(blueprint_path))
     mock_sim_class.from_blueprint.assert_called_once_with(resumed_uri)

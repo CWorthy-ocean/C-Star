@@ -22,7 +22,7 @@ from cstar.applications.upscaler import (
 )
 from cstar.base.exceptions import CstarError
 from cstar.base.utils import convert_to_cdf5
-from cstar.entrypoint.config import JobConfig, ServiceConfiguration
+from cstar.entrypoint.config import ServiceConfiguration
 from cstar.orchestration.manifest import Product, StepRecord, write_step_record
 from cstar.orchestration.models import BlueprintIdentity
 
@@ -63,9 +63,8 @@ def _make_runner(blueprint: UpscalerBlueprint) -> UpscalerRunner:
         health_check_log_threshold=10,
         name="test_upscaler_runner",
     )
-    job_config = JobConfig(account_id="", walltime="", priority="")
 
-    return UpscalerRunner(request, service_config, job_config)
+    return UpscalerRunner(request, service_config)
 
 
 class TestUpscalerBlueprintPio:

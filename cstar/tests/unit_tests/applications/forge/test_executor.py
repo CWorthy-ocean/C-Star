@@ -60,7 +60,7 @@ from cstar.applications.forge.templates import bundled_template_dir
 from cstar.base.env import ENV_CSTAR_RUNID
 from cstar.base.exceptions import CstarExpectationFailed
 from cstar.catalog.domain_catalog import default_catalog as _CATALOG
-from cstar.entrypoint.config import get_job_config, get_service_config
+from cstar.entrypoint.config import get_service_config
 from cstar.execution.file_system import DirectoryManager
 from cstar.execution.handler import ExecutionStatus
 from cstar.orchestration.manifest import expand_artifacts
@@ -5336,10 +5336,9 @@ class TestForgeRunnerEndToEnd:
                 "branch": "main",
             }
 
-            job_cfg = get_job_config()
             service_cfg = get_service_config("INFO", name="ForgeRunnerTest")
             request = RunnerRequest(str(bp_path), ForgeBlueprint)
-            runner = ForgeRunner(request, service_cfg, job_cfg)
+            runner = ForgeRunner(request, service_cfg)
 
             asyncio.run(runner.execute())
 

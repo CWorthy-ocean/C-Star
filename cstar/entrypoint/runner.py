@@ -50,7 +50,7 @@ if t.TYPE_CHECKING:
     from collections.abc import Mapping
     from datetime import datetime
 
-    from cstar.entrypoint.config import JobConfig, ServiceConfiguration
+    from cstar.entrypoint.config import ServiceConfiguration
     from cstar.orchestration.manifest import Product
     from cstar.orchestration.models import Blueprint
 
@@ -132,8 +132,6 @@ class BlueprintRunner(Service, XRunner[TBlueprint]):
     """The instigating request."""
     _result: RunnerResult[TBlueprint]
     """The result produced by the application."""
-    _job_cfg: "JobConfig"
-    """Configuration required to submit jobs on an HPC."""
     _started_at: "datetime | None"
     """When the service started, recorded as the start of the step."""
     products: "list[Product]"
@@ -143,7 +141,6 @@ class BlueprintRunner(Service, XRunner[TBlueprint]):
         self,
         request: RunnerRequest[TBlueprint],
         service_cfg: "ServiceConfiguration",
-        job_cfg: "JobConfig",
     ) -> None:
         """Initialize the instance with the supplied configuration.
 
@@ -153,13 +150,9 @@ class BlueprintRunner(Service, XRunner[TBlueprint]):
             A request containing information about the blueprint to run.
         service_cfg: ServiceConfiguration
             Configuration for modifying behavior of the service process.
-        job_cfg: JobConfig
-            Configuration for submitting jobs to an HPC, such as account ID,
-            walltime, job name, and priority.
         """
         Service.__init__(self, service_cfg)
         self._request = request
-        self._job_cfg = job_cfg
         self._result = RunnerResult(
             request,
             RunnerState(ExecutionStatus.UNSUBMITTED),

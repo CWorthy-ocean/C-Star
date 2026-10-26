@@ -29,7 +29,7 @@ from cstar.cli.common import (
     set_ctxmap,
     set_env,
 )
-from cstar.entrypoint.config import get_job_config, get_service_config
+from cstar.entrypoint.config import get_service_config
 from cstar.entrypoint.runner import BlueprintRunner
 from cstar.entrypoint.utils import ARG_SIZE
 from cstar.execution.file_system import (
@@ -65,7 +65,7 @@ HELP_RUN_HANDLE: t.Final[str] = (
 if t.TYPE_CHECKING:
     from collections.abc import Iterable
 
-    from cstar.entrypoint.config import JobConfig, ServiceConfiguration
+    from cstar.entrypoint.config import ServiceConfiguration
     from cstar.orchestration.index import RunRecord
     from cstar.orchestration.models import StepRef
     from cstar.orchestration.transforms import ExternalRuns
@@ -463,7 +463,6 @@ def preprocess_varfile(
 def create_xrunner(
     request: RunnerRequest[Blueprint],
     service_cfg: "ServiceConfiguration | None" = None,
-    job_cfg: "JobConfig | None" = None,
     log_level: int | str = "INFO",
 ) -> BlueprintRunner[Blueprint]:
     """Dynamically create a runner using the application to look up the
@@ -471,15 +470,11 @@ def create_xrunner(
 
     Parameters
     ----------
-    job_cfg : JobConfig
-        Configuration applied to the scheduler.
     service_cfg : ServiceConfiguration
         Configuration applied to the service.
     request : RunnerRequest
         A request specifying the blueprint to be executed.
     """
-    if job_cfg is None:
-        job_cfg = get_job_config()
     if service_cfg is None:
         service_cfg = get_service_config(
             log_level,
@@ -490,7 +485,7 @@ def create_xrunner(
         request.application
     )
     klass = app.runner
-    return klass(request, service_cfg, job_cfg)
+    return klass(request, service_cfg)
 
 
 def parse_handle(context: typer.Context, target: str) -> RunHandle:

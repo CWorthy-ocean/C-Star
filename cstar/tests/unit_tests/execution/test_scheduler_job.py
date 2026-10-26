@@ -87,10 +87,6 @@ class MockScheduler(Scheduler):
             other_scheduler_directives={"-mock_directive": "mock_value"},
         )
 
-    @property
-    def in_active_allocation(self) -> bool:
-        return False
-
     def get_queue(self, name: str | None):
         # Return a mocked queue with default properties
         return MagicMock(name=name, max_walltime="02:00:00", max_cpus_per_node=None)

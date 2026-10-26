@@ -34,11 +34,12 @@ from cstar.applications.ucla_roms.adapter import (
 from cstar.applications.ucla_roms.models import UclaRomsBlueprint
 from cstar.base.additional_code import AdditionalCode
 from cstar.base.env import (
+    ENV_CSTAR_ALLOW_LOGIN_NODE_RUN,
     ENV_CSTAR_DEBUG_BUILD_MODE,
     ENV_CSTAR_NPROCS_POST,
     get_env_item,
 )
-from cstar.base.exceptions import CstarExpectationFailed
+from cstar.base.exceptions import CstarError, CstarExpectationFailed
 from cstar.base.feature import is_flag_enabled
 from cstar.base.utils import (
     _dict_to_tree,
@@ -56,7 +57,6 @@ from cstar.execution.file_system import (
 )
 from cstar.execution.handler import ExecutionStatus
 from cstar.execution.local_process import LocalProcess
-from cstar.execution.scheduler_job import create_scheduler_job
 from cstar.io.source_data import SourceData
 from cstar.marbl.external_codebase import MARBLExternalCodeBase
 from cstar.orchestration.serialization import load_blueprint
@@ -96,6 +96,7 @@ from cstar.roms.outputs import EXTRACT_ROOT_NAME, OUTPUT_ROOT_NAME
 from cstar.roms.precheck import applies_to, check_output_streams_divide_rst
 from cstar.simulation import Simulation
 from cstar.system.manager import get_sysmgr
+from cstar.system.scheduler import in_scheduler_job
 
 if TYPE_CHECKING:
     from cstar.base.external_codebase import ExternalCodeBase
@@ -274,8 +275,8 @@ class ROMSSimulation(Simulation):
         Compiles the ROMS executable if necessary.
     pre_run()
         Performs pre-processing steps before execution.
-    run(account_key="", walltime="", queue_name="", job_name=None)
-        Submits the ROMS simulation for execution.
+    run(job_name=None)
+        Launches the ROMS simulation as a local process.
     post_run()
         Processes model outputs after execution.
 
@@ -2397,34 +2398,43 @@ class ROMSSimulation(Simulation):
             runtime_settings_file=runtime_settings_file,
         )
 
-    def run(
-        self,
-        account_key: str = "",
-        walltime: str = "",
-        queue_name: str = "",
-        job_name: str | None = None,
-    ) -> "ExecutionHandler":
-        """Execute the ROMS simulation.
+    def check_launch_location(self) -> None:
+        """Refuse a launch outside a scheduler job on a system that has a scheduler.
+
+        ROMS always runs as a local process of the calling process. On a system
+        with a scheduler, outside any scheduler job (a login node, say), that
+        would run the model where it does not belong.
+
+        Raises
+        ------
+        CstarError
+            If the system has a scheduler, the process is not inside a scheduler
+            job, and `CSTAR_ALLOW_LOGIN_NODE_RUN` is not set to `1`.
+        """
+        cstar_sysmgr = get_sysmgr()
+        if (
+            cstar_sysmgr.scheduler is not None
+            and not in_scheduler_job(os.environ)
+            and not is_flag_enabled(ENV_CSTAR_ALLOW_LOGIN_NODE_RUN)
+        ):
+            raise CstarError(
+                f"Refusing to launch ROMS outside a scheduler job on {cstar_sysmgr.name}, "
+                "which has a scheduler. Submit it with 'cstar blueprint submit "
+                "<blueprint>', run it inside an allocation, or set "
+                f"{ENV_CSTAR_ALLOW_LOGIN_NODE_RUN}=1 to run it here anyway."
+            )
+
+    def run(self, job_name: str | None = None) -> "ExecutionHandler":
+        """Execute the ROMS simulation as a local process.
 
         Prepares the launch (see `prepare_launch`) and runs the compiled ROMS
-        executable using the configured environment. If a job scheduler is
-        available, the simulation is submitted as a scheduled job; otherwise,
-        it runs as a local process.
+        executable using the configured environment.
 
         Parameters
         ----------
-        account_key : str, optional
-            The user's account key on the system, for a scheduler job on a system
-            that requires one.
-        queue_name : str, optional
-            The name of the scheduler queue to submit the job to. When empty, the
-            system's primary queue, unless the system requires a queue to be set.
-        walltime : str, optional
-            The maximum allowed execution time for a scheduler job in HH:MM:SS format.
-            When empty, the queue's max walltime.
         job_name : str, optional
-            The name of the job submitted to the scheduler, which also sets
-            the output file name `job_name.out`.
+            The name of the run, which also sets the job script and output file
+            names (`job_name.out`). Defaults to the simulation name.
 
         Returns
         -------
@@ -2434,75 +2444,43 @@ class ROMSSimulation(Simulation):
 
         Raises
         ------
+        CstarError
+            If the system has a scheduler and the process is not inside a
+            scheduler job (see `check_launch_location`).
         ValueError
             If the preconditions of `prepare_launch` are not met.
-        CstarError
-            If a scheduler job is needed and the system requires an account or
-            queue that is empty (see `create_scheduler_job`).
         RuntimeError
             If ROMS fails to start or encounters an execution error.
 
         Notes
         -----
-        - If no scheduler is available, ROMS runs as a local process using
-          MPI (`mpiexec` or equivalent).
+        - ROMS runs as a local process using MPI (`mpiexec` or equivalent).
         - The number of time steps is computed based on `start_date` and `end_date`
           if they are set; otherwise, a default of 1 time step is used.
 
         Examples
         --------
-        Running locally:
         >>> execution = simulation.run()
         >>> execution.status
         'RUNNING'
-
-        Running with a scheduler:
-        >>> execution = simulation.run(account_key="ABC123", job_name="roms_simulation")
-        >>> execution.status
-        'QUEUED'
 
         See Also
         --------
         pre_run : Prepares the input data before running.
         post_run : Handles output processing after execution.
         """
+        self.check_launch_location()
         plan = self.prepare_launch(job_name)
 
-        cstar_sysmgr = get_sysmgr()
-
-        ## 2: RUN ROMS
-
         self.log.info(f"Running {plan.command}")
-        # If this simulation is already in a scheduler job, don't create a new one, just run it locally.
-        if (
-            cstar_sysmgr.scheduler is not None
-            and not cstar_sysmgr.scheduler.in_active_allocation
-        ):
-            job_instance = create_scheduler_job(
-                commands=plan.command,
-                job_name=job_name,
-                cpus=plan.cpus,
-                account_key=account_key,
-                run_path=plan.run_path,
-                script_path=plan.script_path,
-                queue_name=queue_name,
-                walltime=walltime,
-                output_file=plan.output_file,
-            )
-
-            job_instance.submit()
-            self._execution_handler = job_instance
-            return job_instance
-
-        else:  # cstar_sysmgr.scheduler is None
-            romsprocess = LocalProcess(
-                commands=plan.command,
-                run_path=plan.run_path,
-                output_file=plan.output_file,
-            )
-            self._execution_handler = romsprocess
-            romsprocess.start()
-            return romsprocess
+        romsprocess = LocalProcess(
+            commands=plan.command,
+            run_path=plan.run_path,
+            output_file=plan.output_file,
+        )
+        self._execution_handler = romsprocess
+        romsprocess.start()
+        return romsprocess
 
     def post_run(self) -> None:
         """Perform post-processing steps after the ROMS simulation run.

@@ -11,6 +11,7 @@ from cstar.system.scheduler import (
     SlurmQOS,
     SlurmScheduler,
     format_walltime,
+    in_scheduler_job,
     query_max_cpus_per_node_via_sinfo,
     query_max_walltime_via_sacctmgr,
     query_max_walltime_via_sinfo,
@@ -695,3 +696,33 @@ def test_query_max_walltime_via_sacctmgr_partition_not_valid() -> None:
 def test_slurm_job_id(environ: dict[str, str], expected: str) -> None:
     """Verify the job id is read from either spelling, and is empty outside a job."""
     assert slurm_job_id(environ) == expected
+
+
+@pytest.mark.parametrize(
+    ("environ", "expected"),
+    [
+        ({"SLURM_JOB_ID": "123"}, True),
+        ({"SLURM_JOBID": "456"}, True),
+        ({"PBS_JOBID": "789.server"}, True),
+        ({"SLURM_JOB_ID": "123", "PBS_JOBID": "789.server"}, True),
+        ({"SLURM_JOB_ID": "", "SLURM_JOBID": "", "PBS_JOBID": ""}, False),
+        ({"SLURM_JOBID": ""}, False),
+        ({"PBS_JOBID": ""}, False),
+        ({"SLURM_NTASKS": "4", "PBS_O_WORKDIR": "/work"}, False),
+        ({}, False),
+    ],
+    ids=[
+        "slurm-job-id",
+        "slurm-older-alias",
+        "pbs-job-id",
+        "slurm-and-pbs",
+        "all-empty",
+        "empty-slurm-alias",
+        "empty-pbs",
+        "no-job-id",
+        "none",
+    ],
+)
+def test_in_scheduler_job(environ: dict[str, str], expected: bool) -> None:
+    """Verify a SLURM or PBS job id marks a job, and an empty or absent one does not."""
+    assert in_scheduler_job(environ) is expected

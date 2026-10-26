@@ -14,7 +14,6 @@ from pydantic import Field
 from cstar.base.adapter import SchemaAdapter
 from cstar.base.application_names import canonical_application
 from cstar.base.log import get_logger
-from cstar.entrypoint.config import JOBFILE_DATE_FORMAT
 from cstar.execution.file_system import is_remote_resource, local_copy
 from cstar.execution.handler import ExecutionStatus
 from cstar.orchestration.models import (
@@ -29,8 +28,11 @@ from cstar.orchestration.serialization import (
 )
 
 if t.TYPE_CHECKING:
-    from cstar.entrypoint.config import JobConfig, ServiceConfiguration
+    from cstar.entrypoint.config import ServiceConfiguration
     from cstar.orchestration.transforms import Directive
+
+JOBFILE_DATE_FORMAT: t.Final[str] = "%Y%m%d_%H%M%S"
+"""The `strftime` format of the timestamp in a generated job name."""
 
 APP_PLUGIN_GROUP: t.Final[str] = "cstar.applications"
 """Entry-point group third-party packages use to register applications.
@@ -290,7 +292,6 @@ class XRunner(t.Protocol, t.Generic[TBlueprint]):
         self,
         request: RunnerRequest[TBlueprint],
         service_cfg: "ServiceConfiguration",
-        job_cfg: "JobConfig",
     ) -> None:
         """Initialize a runner instance.
 
@@ -300,8 +301,6 @@ class XRunner(t.Protocol, t.Generic[TBlueprint]):
             The request containing configuration for executing an application.
         service_cfg : ServiceConfiguration
             Configuration options for the execution of an application in a service.
-        job_cfg : JobConfig
-            Configuration required to submit jobs on an HPC.
         """
         ...
 

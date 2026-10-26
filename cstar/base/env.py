@@ -232,6 +232,19 @@ ENV_CSTAR_DISABLE_BUILD_VERIFICATION: t.Annotated[
 ] = "CSTAR_DISABLE_BUILD_VERIFICATION"
 """Set to `1` to skip the pre- and post-build toolchain consistency checks performed when compiling ROMS."""
 
+ENV_CSTAR_ALLOW_LOGIN_NODE_RUN: t.Annotated[
+    t.Literal["CSTAR_ALLOW_LOGIN_NODE_RUN"],
+    EnvVar(
+        "Set to `1` to let ROMS launch outside a scheduler job on a system that "
+        "has a scheduler (for example a login node). Use it only for a run small "
+        "enough for a login node, or when C-Star wrongly concludes it is not "
+        "inside a job.",
+        GROUP_SIM,
+        default=FLAG_OFF,
+    ),
+] = "CSTAR_ALLOW_LOGIN_NODE_RUN"
+"""Set to `1` to let ROMS launch outside a scheduler job on a system that has a scheduler."""
+
 ENV_CSTAR_DEBUG_BUILD_MODE: t.Annotated[
     t.Literal["CSTAR_DEBUG_BUILD_MODE"],
     EnvVar(
@@ -447,7 +460,8 @@ REMOVED_SETTINGS: t.Final[dict[str, RemovedSetting]] = {
         "`cstar workplan submit`) to start from an empty working directory instead."
     ),
     "CSTAR_IN_ACTIVE_ALLOCATION": RemovedSetting(
-        "C-Star detects an active SLURM allocation from SLURM_JOBID."
+        "`cstar blueprint run` no longer submits a scheduler job; submit the "
+        "blueprint with `cstar blueprint submit`, or run it inside an allocation."
     ),
     "CSTAR_ORCH_DELAYS": RemovedSetting(
         "the orchestrator's polling intervals are fixed."
