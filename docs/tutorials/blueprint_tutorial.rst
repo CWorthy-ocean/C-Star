@@ -72,8 +72,8 @@ here), builds the grid, generates every input file, renders the model
 settings, and writes a UCLA-ROMS blueprint. Everything lands under the
 blueprint's working directory. A forge blueprint normally omits
 ``working_dir``, so for the wizard's default name,
-``roms-marbl-0.12-default_wio-toy_10procs``, that is
-``~/cstar/blueprint_runs/forge/roms-marbl-0-12-default_wio-toy_10procs/`` (the
+``roms-marbl-0.13-default_wio-toy_10procs``, that is
+``~/cstar/blueprint_runs/forge/roms-marbl-0-13-default_wio-toy_10procs/`` (the
 directory name is the blueprint name, slugified):
 
 .. code-block:: text
@@ -89,7 +89,7 @@ it is, in a line like this:
 
 .. code-block:: text
 
-   Forge blueprint published for downstream steps: ~/cstar/blueprint_runs/forge/roms-marbl-0-12-default_wio-toy_10procs/output/B_roms-marbl-0.12-default_wio-toy_10procs.yaml
+   Forge blueprint published for downstream steps: ~/cstar/blueprint_runs/forge/roms-marbl-0-13-default_wio-toy_10procs/output/B_roms-marbl-0.13-default_wio-toy_10procs.yaml
 
 If you started from the bundled ``wio-toy-simple`` blueprint instead, it keeps
 that name, so the paths on the rest of this page use ``wio-toy-simple`` in
@@ -102,14 +102,14 @@ both places: the blueprint to run next is
 
 .. code-block:: console
 
-   cstar blueprint run ~/cstar/blueprint_runs/forge/roms-marbl-0-12-default_wio-toy_10procs/output/B_roms-marbl-0.12-default_wio-toy_10procs.yaml
+   cstar blueprint run ~/cstar/blueprint_runs/forge/roms-marbl-0-13-default_wio-toy_10procs/output/B_roms-marbl-0.13-default_wio-toy_10procs.yaml
 
 This time, when C-Star opens the blueprint you passed, it sees the ``application: ucla_roms``
 line and therefore executes the UCLA-ROMS application instead of Forge.
 C-Star clones and compiles the model code pinned in
 the blueprint and runs the simulation. The blueprint has no ``working_dir``,
 so results land under the C-Star default location:
-``~/cstar/blueprint_runs/ucla_roms/roms-marbl-0-12-default_wio-toy_10procs/``.
+``~/cstar/blueprint_runs/ucla_roms/roms-marbl-0-13-default_wio-toy_10procs/``.
 
 :doc:`../applications/ucla_roms/blueprint`
 explains each section of the UCLA-ROMS blueprint Forge just wrote. The

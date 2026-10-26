@@ -295,6 +295,9 @@ model_settings:
     rdrg: 0.0
     rdrg2: 0.001
     zob: 0.01
+  v_sponge:
+    v_sponge_trc: -1.0
+    v_sponge: 40000.0
   gamma2: 1.0
   ubind: 0.1
   param:
@@ -409,8 +412,6 @@ model_settings:
     dt: 7200.0
     ndtfast: 60
     ninfo: 1
-  v_sponge:
-    v_sponge: 40000.0
   river_frc:
     river_source: false
     analytical: false
@@ -570,7 +571,7 @@ model_settings:
 code:
   roms:
     location: https://github.com/CWorthy-ocean/ucla-roms.git
-    commit: 0.12.0
+    commit: 0.13.0
     branch: null
   marbl:
     location: https://github.com/CWorthy-ocean/MARBL.git
@@ -582,16 +583,16 @@ code:
     branch: null
   templates_compile_time:
     location: https://github.com/CWorthy-ocean/C-Star.git
-    commit: d35d06265515965c7daaa54c111ee0185166bca4
+    commit: d47142ec249bce91aac938030dfd5ea3f7dacfd4
     branch: null
     directory: cstar/additional_files/templates/forge/compile-time
     files:
     - cppdefs.opt.j2
     file_hashes:
-      cppdefs.opt.j2: 115f044081ac9c04c8803ae2d83a6e6f39a92da83c2caf7b305a7cb8b1bbfbdd
+      cppdefs.opt.j2: 7665373d4eaad6d94215660775ca66dd87f1c2309e15edc0039c9051b20b0f00
   templates_run_time:
     location: https://github.com/CWorthy-ocean/C-Star.git
-    commit: d35d06265515965c7daaa54c111ee0185166bca4
+    commit: d47142ec249bce91aac938030dfd5ea3f7dacfd4
     branch: null
     directory: cstar/additional_files/templates/forge/run-time
     files:
@@ -600,7 +601,7 @@ code:
       marbl_in: 218976e818e81001b798c1eecbbc2f659c6e3f311db24da50d990cd69c300f8f
 composition:
   model:
-    name: roms-marbl-0.12-default
+    name: roms-marbl-0.13-default
     origin: catalog
     modified: false
   domain:
@@ -621,13 +622,13 @@ composition:
     modified: false
   overrides: {}
 provenance:
-  generated_at: '2026-10-25T22:37:07.628509Z'
+  generated_at: '2026-10-27T15:50:50.294862Z'
   generated_by:
     tool: wizard
-    id: 41877806-1602-4083-9f26-8c9b3d470c90
+    id: b9895121-5235-47f9-96e0-93c206d4f377
     system: darwin_arm64
     versions:
-      cstar-ocean: 0.17.1.dev32+gd36876ac8
+      cstar-ocean: 0.17.1.dev74+g1ae9bb7c1.d20261027
       roms-tools: 5.2.1
     run_id: ''
     working_dir: ''
@@ -635,5 +636,5 @@ provenance:
   cstar_version: null
   roms_tools_version: null
   override_files_applied: []
-  content_hash: bp-v2:60d7b34bf7dc2c1edca235c5e490cdd24b9e45e471ca59d07105f78a13af32ba
+  content_hash: bp-v2:792a97c4fdfcdf2785fc0baefe0d3d8eec41af872235a728a4f3cb6ccda4c7e3
   notes: null

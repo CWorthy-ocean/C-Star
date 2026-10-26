@@ -159,7 +159,7 @@ constant-iron option;
 ``roms-marbl-0.9-default`` stays for ucla-roms 0.9.1, which predates the
 ``cdr_lite`` mode's minimum), and ``pio-dev`` tracks
 ucla-roms ``main`` with PIO enabled. The bundled domains and the example
-blueprint use ``roms-marbl-0.12-default``.
+blueprint use ``roms-marbl-0.13-default``.
 
 ``roms-marbl-0.3-default`` through ``roms-marbl-0.8-default`` and
 ``cson_roms-marbl_v0.1`` are marked ``archived: true``. They remain
