@@ -5,7 +5,7 @@ Forge's run-time settings schema (``RunTimeSettings`` and its
 
 * :class:`RunTimeSettings` / :class:`RunTimeSettingsV0_5_0` validate and type
   forge's run-time settings dict — the YAML vocabulary (``tcline``, ``np_xi``,
-  ``analytical`` …). Defaults live in each ModelSpec's ``model.yaml``
+  ``analytical`` …). Defaults live in each ModelSpec file
   (``model_settings``), merged with the catalog's Domain/Forcing/Output specs —
   not here: fields are required so an incomplete settings dict fails loudly;
   only the runtime-filled fields (grid file, IC file, s-coord, forcing paths,

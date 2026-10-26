@@ -233,7 +233,7 @@ def migrate_forcing_inputs(
 
     Shared by :func:`migrate_forge_blueprint_data` (where ``initial_conditions``
     lives inside ``forcing``) and by the wizard's ForcingSpec loader (where a
-    catalog ``Forcing.yaml`` keeps ``initial_conditions`` and ``forcing`` as
+    catalog ForcingSpec keeps ``initial_conditions`` and ``forcing`` as
     top-level siblings and is otherwise never migrated) -- one function, so
     the two entry points cannot drift.
 
