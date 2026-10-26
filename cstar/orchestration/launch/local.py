@@ -1,10 +1,11 @@
 import asyncio
+import contextlib
 import datetime
 import os
 import shlex
 import shutil
-import signal
 import subprocess
+import time
 import typing as t
 from pathlib import Path
 from subprocess import run as sprun
@@ -21,15 +22,17 @@ from cstar.base.adapter import (
 from cstar.base.env import ENV_CSTAR_RUNID
 from cstar.base.exceptions import CstarError, CstarExpectationFailed
 from cstar.base.log import get_logger
-from cstar.base.utils import WALLTIME_RE, additional_files_dir
+from cstar.base.utils import WALLTIME_RE, additional_files_dir, utc_now
 from cstar.execution.file_system import rotate_file
 from cstar.orchestration.adapter import StepToRunRequestAdapter
 from cstar.orchestration.formatting import ModelFormatter
 from cstar.orchestration.launch.common import (
     build_attempt_log_header,
+    cancel_prior_attempt,
     is_foreign_handle,
     prior_of_this_run,
     resolve_prior_attempt,
+    waits_on_replaced_dependency,
 )
 from cstar.orchestration.models import KeyValueStore
 from cstar.orchestration.orchestration import (
@@ -44,6 +47,8 @@ from cstar.orchestration.state import StateRepository
 from cstar.system.scheduler import parse_walltime
 
 if t.TYPE_CHECKING:
+    from collections.abc import Sequence
+
     from cstar.orchestration.models import Step, Workplan
 
 
@@ -51,6 +56,42 @@ log = get_logger(__name__)
 
 PROXY_POLL_DELAY: t.Final[float] = 2.0
 """Seconds between the status checks made by the local launcher's proxy script."""
+
+CANCEL_GRACE: t.Final[float] = 5.0
+"""Seconds a cancelled step's processes are given to exit before they are killed."""
+
+
+def _still_running(processes: "Sequence[PsProcess]", timeout: float) -> list[PsProcess]:
+    """Wait up to `timeout` seconds for processes to exit.
+
+    A zombie has exited: one whose parent is a stopped proxy stays unreaped
+    until the proxy is killed.
+
+    Parameters
+    ----------
+    processes : Sequence[PsProcess]
+        The processes to wait for.
+    timeout : float
+        The most seconds to wait.
+
+    Returns
+    -------
+    list[PsProcess]
+        The processes still running when they all exited or the time ran out.
+    """
+
+    def running(process: PsProcess) -> bool:
+        try:
+            return process.is_running() and process.status() != STATUS_ZOMBIE
+        except NoSuchProcess:
+            return False
+
+    deadline = time.monotonic() + timeout
+    while (alive := [p for p in processes if running(p)]) and (
+        time.monotonic() < deadline
+    ):
+        time.sleep(0.1)
+    return alive
 
 
 def run_as_process(step: "Step", cmd: list[str], log_file: Path) -> dict[str, int]:
@@ -429,6 +470,10 @@ class LocalLauncher(Launcher[LocalHandle]):
                 stderr=subprocess.STDOUT,
                 start_new_session=True,
             )
+            # the wall clock, unlike the process creation time read below: on Linux
+            # that is up to a second early, and submission times are compared with
+            # the start of an attempt
+            submitted_at = utc_now()
 
             create_time = datetime.datetime.now(tz=datetime.UTC)
 
@@ -457,7 +502,7 @@ class LocalLauncher(Launcher[LocalHandle]):
                     start_at=create_time,
                     status=Status.Submitted,
                     pre_run=step.pre_run,
-                    submitted_at=create_time,
+                    submitted_at=submitted_at,
                 )
 
                 handle.process = local_process
@@ -470,12 +515,36 @@ class LocalLauncher(Launcher[LocalHandle]):
         raise RuntimeError(msg)
 
     @staticmethod
-    def _is_alive(handle: LocalHandle) -> bool:
-        """Return `True` if the OS process recorded on a handle is still running.
+    def _process_of(handle: LocalHandle) -> PsProcess | None:
+        """Return the running OS process recorded on a handle, if there is one.
 
         The creation time is compared with the recorded `start_at` so a
         recycled PID belonging to an unrelated process is not mistaken for
         the step.
+
+        Parameters
+        ----------
+        handle : LocalHandle
+            A handle created by the local launcher.
+
+        Returns
+        -------
+        PsProcess | None
+            The step's proxy process, or `None` when it has exited.
+        """
+        try:
+            process = PsProcess(int(handle.pid))
+            if process.status() == STATUS_ZOMBIE:
+                return None
+            if abs(process.create_time() - handle.start_ts) <= 2.0:
+                return process
+        except (NoSuchProcess, AccessDenied, ValueError):
+            pass
+        return None
+
+    @staticmethod
+    def _is_alive(handle: LocalHandle) -> bool:
+        """Return `True` if the OS process recorded on a handle is still running.
 
         Parameters
         ----------
@@ -486,13 +555,77 @@ class LocalLauncher(Launcher[LocalHandle]):
         -------
         bool
         """
-        try:
-            process = PsProcess(int(handle.pid))
-            if process.status() == STATUS_ZOMBIE:
-                return False
-            return abs(process.create_time() - handle.start_ts) <= 2.0
-        except (NoSuchProcess, AccessDenied, ValueError):
+        return LocalLauncher._process_of(handle) is not None
+
+    @staticmethod
+    def _terminate(handle: LocalHandle) -> bool:
+        """Stop a step's proxy and every process it started.
+
+        The proxy is stopped first and killed last: stopped, it starts nothing
+        more, and cannot record the step `Failed` in the sentinel, which the
+        attempt replacing it owns, when its descendants exit. They are asked to
+        terminate and are killed after `CANCEL_GRACE` seconds. If one outlives
+        that, the proxy is left stopped, so the step still reads as in progress
+        and is not submitted again beside it.
+
+        Parameters
+        ----------
+        handle : LocalHandle
+            A handle created by the local launcher.
+
+        Returns
+        -------
+        bool
+            `True` once every process has exited; `False` when the proxy was
+            not running or a process could not be stopped.
+        """
+        if (proxy := LocalLauncher._process_of(handle)) is None:
+            log.debug(f"Process {handle.pid} of step {handle.name!r} is not running")
             return False
+
+        try:
+            proxy.suspend()
+            descendants = proxy.children(recursive=True)
+            for process in descendants:
+                with contextlib.suppress(NoSuchProcess):
+                    process.terminate()
+            if alive := _still_running(descendants, CANCEL_GRACE):
+                for process in alive:
+                    with contextlib.suppress(NoSuchProcess):
+                        process.kill()
+                alive = _still_running(alive, CANCEL_GRACE)
+        except NoSuchProcess:
+            log.debug(f"Process {handle.pid} of step {handle.name!r} ended by itself")
+            return False
+        except AccessDenied as ex:
+            log.warning(f"Unable to stop the processes of step {handle.name!r}: {ex}")
+            return False
+
+        if alive:
+            pids = ", ".join(str(p.pid) for p in alive)
+            log.warning(
+                f"Processes {pids} of step {handle.name!r} outlived the kill; its "
+                f"process {handle.pid} is left stopped"
+            )
+            return False
+
+        try:
+            proxy.kill()
+            if handle.is_expired:
+                alive = _still_running([proxy], CANCEL_GRACE)
+            else:
+                # reaped through the Popen, which then records the exit
+                handle.process.wait(timeout=CANCEL_GRACE)
+        except NoSuchProcess:
+            pass
+        except subprocess.TimeoutExpired:
+            alive = [proxy]
+
+        if alive:
+            log.warning(
+                f"Process {handle.pid} of step {handle.name!r} outlived the kill"
+            )
+        return not alive
 
     @staticmethod
     async def _status(handle: LocalHandle) -> str:
@@ -520,7 +653,7 @@ class LocalLauncher(Launcher[LocalHandle]):
             if Status.is_terminal(handle.status):
                 return "COMPLETED"
             if LocalLauncher._is_alive(handle):
-                # a proxy still waiting on its dependencies has not started
+                # the proxy records Running once its dependencies are done
                 return "RUNNING" if Status.is_running(handle.status) else "PENDING"
             msg = (
                 f"Process {handle.pid} for step {handle.name!r} is gone but its "
@@ -576,6 +709,9 @@ class LocalLauncher(Launcher[LocalHandle]):
         CstarError
             If a dependency was created by another launcher or run: a local
             process cannot wait on it.
+        CstarExpectationFailed
+            If a dependency failed, or a prior attempt still in progress is
+            replaced and cannot be cancelled (see `cancel_prior_attempt`).
         """
         run_id = os.getenv(ENV_CSTAR_RUNID, "")
         if outsiders := [
@@ -617,7 +753,12 @@ class LocalLauncher(Launcher[LocalHandle]):
                 last_status,
                 prior_pre_run=prior_handle.pre_run,
                 prior_foreign=is_foreign_handle(prior_handle, cls.name),
+                replaced_dependency=waits_on_replaced_dependency(
+                    prior_handle, dependencies
+                ),
             )
+            if not reuse_prior and Status.is_in_progress(last_status):
+                await cancel_prior_attempt(cls, live_step, prior_handle)
 
         if reuse_prior and prior_handle:
             handle = prior_handle
@@ -700,74 +841,31 @@ class LocalLauncher(Launcher[LocalHandle]):
 
         return changed, handle
 
-    @staticmethod
-    def _kill_process_groups(pid: int) -> None:
-        """Kill the proxy process and every process descended from it.
-
-        `timeout` puts the step command in a process group of its own, so
-        killing the proxy alone would orphan the job.
-
-        Parameters
-        ----------
-        pid : int
-            The process ID of the proxy script.
-        """
-        try:
-            proxy_pgid = os.getpgid(pid)
-            if proxy_pgid == os.getpgrp():
-                # not a session of its own: never signal our own group
-                os.kill(pid, signal.SIGKILL)
-                return
-            # freeze the proxy first so it cannot start anything while the
-            # descendants are enumerated; a stopped process still dies on SIGKILL
-            os.killpg(proxy_pgid, signal.SIGSTOP)
-            descendants = PsProcess(pid).children(recursive=True)
-        except (ProcessLookupError, PermissionError, NoSuchProcess):
-            log.debug(f"Process {pid} exited before it could be cancelled")
-            return
-
-        pgids: list[int] = []
-        for child in descendants:
-            try:
-                pgid = os.getpgid(child.pid)
-            except (ProcessLookupError, PermissionError):
-                continue
-            if pgid not in pgids:
-                pgids.append(pgid)
-
-        # the proxy's group last; never our own
-        pgids = [g for g in pgids if g != proxy_pgid] + [proxy_pgid]
-        for pgid in pgids:
-            if pgid == os.getpgrp():
-                continue
-            try:
-                os.killpg(pgid, signal.SIGKILL)
-            except (ProcessLookupError, PermissionError):
-                # gone, or (on macOS) a group of only zombies
-                log.debug(f"Process group {pgid} exited before it could be cancelled")
-
     @classmethod
     async def cancel(cls, item: Task[LocalHandle]) -> Task[LocalHandle]:
         """Cancel a task, if possible.
 
+        Stops the step's proxy and every process it started (see `_terminate`),
+        whether the handle was created by this process or read from a sentinel.
+
         Parameters
         ----------
-        item : Task or ProcessHandle
-            A task or process handle to cancel.
+        item : Task[LocalHandle]
+            A task to cancel.
 
         Returns
         -------
         Task[LocalHandle]
-            The task after the cancellation attempt has completed.
+            The task after the cancellation attempt has completed; its status is
+            `Cancelled` only when every process of the step has exited.
         """
-        if not item.handle.is_expired:  # wonky is-null check...
-            process = item.handle.process
-            if process.poll() is not None:
-                msg = f"Unable to cancel a completed task `{process.pid}"
-                log.debug(msg)
-            else:
-                LocalLauncher._kill_process_groups(process.pid)
-                item.status = Status.Cancelled
+        handle = item.handle
+        if not handle.is_expired and handle.process.poll() is not None:
+            log.debug(f"Unable to cancel a completed task `{handle.pid}`")
+            return item
+
+        if await asyncio.to_thread(LocalLauncher._terminate, handle):
+            item.status = Status.Cancelled
 
         return item
 

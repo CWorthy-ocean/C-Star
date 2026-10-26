@@ -1047,6 +1047,10 @@ class Launcher(t.Protocol, t.Generic[_THandle]):
     async def cancel(cls, item: Task[_THandle]) -> Task[_THandle]:
         """Cancel a task, if possible.
 
+        The task's handle may have been read from a sentinel by a later
+        process than the one that launched it. A failure to cancel is logged,
+        not raised.
+
         Parameters
         ----------
         item : Task[_THandle]
@@ -1054,8 +1058,9 @@ class Launcher(t.Protocol, t.Generic[_THandle]):
 
         Returns
         -------
-        Status
-            The current status of the item.
+        Task[_THandle]
+            The task; its status is `Cancelled` only when the cancellation was
+            accepted.
         """
         ...
 

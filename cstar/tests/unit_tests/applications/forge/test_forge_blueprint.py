@@ -5728,7 +5728,7 @@ def test_resolved_templates_carry_modelspec_authored_hashes():
 @pytest.mark.parametrize(
     "model_spec_name,compile_time_fast_path",
     [
-        # Every bundled ModelSpec pins templates_commit to the C-Star 0.15.0 commit,
+        # Every bundled ModelSpec pins templates_commit to the same C-Star commit,
         # whose cppdefs.opt.j2 / marbl_in are exactly the copies bundled in this
         # build, so both stages take the local fast path (no fetch). A ModelSpec
         # pinned elsewhere would show False here and fetch-and-verify instead --

@@ -25,7 +25,7 @@ from cstar.orchestration.tracking import WorkplanRun
 from cstar.tests.unit_tests.orchestration.manifest_runs import write_identity
 
 if t.TYPE_CHECKING:
-    from collections.abc import Mapping
+    from collections.abc import Mapping, Sequence
 
 SLUG = "say-hello-to-my-little-friend"
 """The slug of the name of the hello-world blueprint fixture."""
@@ -52,6 +52,7 @@ async def fake_build_and_run_dag(
     clobber_steps: list[str] | None = None,
     pre_run: bool = False,
     blueprint_sources: "Mapping[str, Path] | None" = None,
+    clobber_hint: "Callable[[Sequence[str]], str] | None" = None,
 ) -> WorkplanRun:
     """Stand in for scheduling: the run directory of the workplan is all it leaves."""
     output_path = StateDirectoryManager.data_dir(run_id)
@@ -125,11 +126,14 @@ def test_clobber_selects_the_only_step(
     flags: list[str],
     expected: list[str],
 ) -> None:
-    """Verify `--clobber`, a flag here, clobbers the workplan's one step."""
+    """Verify `--clobber`, a flag here, clobbers the workplan's one step, and a
+    refusal is told to spell a re-run as that flag, without the step name.
+    """
     result = _submit(hello_world_bp_path, *flags)
 
     assert result.exit_code == 0, result.output
     assert build_and_run_dag.call_args.kwargs["clobber_steps"] == expected
+    assert build_and_run_dag.call_args.kwargs["clobber_hint"]([STEP]) == ARG_CLOBBER
 
 
 @pytest.mark.parametrize("pre_run", [True, False])

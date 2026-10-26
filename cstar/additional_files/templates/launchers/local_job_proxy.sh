@@ -13,16 +13,14 @@ update_status() {
     sed "s/^status:.*$/status: $1/" "$2" > "$2.tmp" && mv "$2.tmp" "$2"
 }
 
-# the launcher writes this script's sentinel only after it has started the
-# script, replacing the one a previous attempt left behind: wait (up to 30s)
-# for a sentinel that records this script's pid before the first status update
-sentinel_is_ours() {
-    [ "$(sed -n "s/^pid: *['\"]*\([0-9]*\).*/\1/p" "$SENTINEL_PATH" 2>/dev/null)" = "$$" ]
-}
-SENTINEL_WAIT=0
-while ! sentinel_is_ours && [ $SENTINEL_WAIT -lt 300 ]; do
-    sleep 0.1
-    SENTINEL_WAIT=$((SENTINEL_WAIT + 1))
+# the launcher records this attempt (its pid, `Submitted`) in the sentinel just
+# after starting this script; a status written before that would be lost to it,
+# leaving a running step recorded as queued. Wait for it, but not for long: a
+# sentinel that could not be written must not stop the step.
+TRIES=0
+while [ $TRIES -lt 50 ] && ! grep -q "^pid: '*$$'*$" "$SENTINEL_PATH" 2>/dev/null; do
+    TRIES=$((TRIES + 1))
+    sleep 0.2
 done
 
 # wait for each dependency to complete, then verify that it succeeded --

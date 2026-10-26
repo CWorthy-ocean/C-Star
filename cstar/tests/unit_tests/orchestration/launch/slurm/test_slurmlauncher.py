@@ -1,14 +1,20 @@
 import asyncio
+import contextlib
+import logging
 import os
 import typing as t
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from unittest import mock
 
 import pytest
 from pydantic import ValidationError
 
-from cstar.base.exceptions import BlueprintDeferredError, CstarError
+from cstar.base.exceptions import (
+    BlueprintDeferredError,
+    CstarError,
+    CstarExpectationFailed,
+)
 from cstar.base.utils import utc_now
 from cstar.entrypoint.utils import ARG_CLOBBER, ARG_PRE_RUN, ARG_RESUME
 from cstar.execution.handler import ExecutionStatus
@@ -19,7 +25,7 @@ from cstar.orchestration.launch.slurm import (
     SlurmHandle,
     SlurmLauncher,
 )
-from cstar.orchestration.models import KEY_PRE_RUN
+from cstar.orchestration.models import KEY_CLOBBER, KEY_PRE_RUN
 from cstar.orchestration.orchestration import LiveStep, Status, Workplan
 from cstar.orchestration.serialization import deserialize
 from cstar.orchestration.state import StateRepository
@@ -468,13 +474,19 @@ def test_compute_spec_deferred_with_overrides(deferred_live_step: LiveStep) -> N
     assert spec.num_cpus == 8
 
 
-def _capture_command_job(captured: dict[str, list[str]]) -> t.Callable[..., t.Any]:
+def _capture_command_job(
+    captured: dict[str, list[str]], events: list[str] | None = None
+) -> t.Callable[..., t.Any]:
     """Build a stand-in for `SlurmLauncher.adapt_step` that records the command
-    the step would run and returns a job that "submits" as job id 4242.
+    the step would run and the ids of its dependencies, notes the submission in
+    `events`, and returns a job that "submits" as job id 4242.
     """
 
     def fake_adapt_step(step: LiveStep, dependencies: list[SlurmHandle]) -> t.Any:
         captured["command"] = StepToRunRequestAdapter().adapt(step).command
+        captured["dependencies"] = [d.pid for d in dependencies]
+        if events is not None:
+            events.append("submit")
         return mock.Mock(id=4242, commands="cstar blueprint run")
 
     return fake_adapt_step
@@ -793,3 +805,261 @@ def test_slurmlauncher_adapt_step_waits_on_foreign_job(
         SlurmLauncher.adapt_step(live_step, [foreign])
 
     assert create_job.call_args.kwargs["depends_on"] == ["9001"]
+
+
+T0 = datetime(2026, 10, 15, 12, 0, tzinfo=UTC)
+"""When the prior attempt of the re-entry tests was submitted."""
+
+
+class _Doubles(t.NamedTuple):
+    """The stand-ins `_slurm_doubles` installs."""
+
+    batch: mock.AsyncMock
+    """Answers each SLURM status query with the next of the given statuses."""
+    scancel: mock.Mock
+    """Stands in for the shell command that runs `scancel`."""
+    adapt_step: mock.Mock
+    """Wraps the stand-in that "submits" the step, noting it in the events."""
+
+
+@contextlib.contextmanager
+def _slurm_doubles(
+    statuses: list[ExecutionStatus],
+    events: list[str],
+    captured: dict[str, list[str]],
+    *,
+    scancel_error: Exception | None = None,
+) -> t.Iterator[_Doubles]:
+    """Stand in for SLURM: its status answers (a query beyond them fails), its
+    `scancel`, and a submission that is job 4242. `events` lists, in order, the
+    `scancel` and the submission that happened.
+    """
+
+    def scancel(*args: t.Any, **kwargs: t.Any) -> None:
+        events.append("scancel")
+        if scancel_error:
+            raise scancel_error
+
+    doubles = _Doubles(
+        batch=mock.AsyncMock(side_effect=[mock.Mock(status=s) for s in statuses]),
+        scancel=mock.Mock(side_effect=scancel),
+        adapt_step=mock.Mock(side_effect=_capture_command_job(captured, events)),
+    )
+    with (
+        mock.patch("cstar.orchestration.launch.slurm.get_slurm_batch", doubles.batch),
+        mock.patch(
+            "cstar.orchestration.launch.slurm.get_slurm_batches",
+            mock.AsyncMock(return_value={}),
+        ),
+        mock.patch("cstar.orchestration.launch.slurm._run_cmd", doubles.scancel),
+        mock.patch.object(SlurmLauncher, "POST_SUBMIT_DELAY", 0),
+        mock.patch.object(SlurmLauncher, "adapt_step", doubles.adapt_step),
+    ):
+        yield doubles
+
+
+async def _persist_prior(
+    step: LiveStep,
+    run_id: str,
+    *,
+    status: Status = Status.Submitted,
+    launcher_name: str = SlurmLauncher.name,
+    submitted_at: datetime | None = T0,
+) -> None:
+    """Persist job 12345 as the step's prior attempt."""
+    await StateRepository().put_sentinel(
+        SlurmHandle(
+            pid="12345",
+            name=step.name,
+            run_id=run_id,
+            launcher_name=launcher_name,
+            status=status,
+            submitted_at=submitted_at,
+        )
+    )
+
+
+def _dependency(run_id: str, submitted_at: datetime | None) -> SlurmHandle:
+    """Build a dependency of the step, job 777."""
+    return SlurmHandle(
+        pid="777",
+        name="upstream",
+        run_id=run_id,
+        launcher_name=SlurmLauncher.name,
+        status=Status.Submitted,
+        submitted_at=submitted_at,
+    )
+
+
+@pytest.mark.parametrize(
+    "in_progress",
+    [ExecutionStatus.PENDING, ExecutionStatus.RUNNING],
+    ids=["queued", "running"],
+)
+async def test_slurmlauncher_launch_cancels_the_prior_job_of_a_clobbered_step(
+    single_step: LiveStep,
+    mock_run_id: str,
+    in_progress: ExecutionStatus,
+) -> None:
+    """Verify a clobbered step whose prior job is still in progress has that job
+    cancelled with `scancel`, once and before the step is submitted again, and
+    is submitted after SLURM reports the job cancelled.
+    """
+    single_step.workflow_overrides[KEY_CLOBBER] = True
+    await _persist_prior(single_step, mock_run_id)
+    events: list[str] = []
+
+    with _slurm_doubles(
+        [in_progress, ExecutionStatus.CANCELLED], events, {}
+    ) as doubles:
+        task = await SlurmLauncher.launch(single_step, [], run_uuid="")
+
+    doubles.scancel.assert_called_once()
+    assert doubles.scancel.call_args.args[0] == "scancel 12345"
+    assert events == ["scancel", "submit"]
+    assert doubles.batch.await_count == 2
+    assert task.handle.pid == "4242"
+
+
+async def test_slurmlauncher_launch_refuses_when_scancel_fails(
+    single_step: LiveStep,
+    mock_run_id: str,
+) -> None:
+    """Verify a clobbered step whose prior job `scancel` cannot cancel is not
+    submitted again, and the job is named.
+    """
+    single_step.workflow_overrides[KEY_CLOBBER] = True
+    await _persist_prior(single_step, mock_run_id)
+    events: list[str] = []
+
+    with (
+        _slurm_doubles(
+            [ExecutionStatus.PENDING, ExecutionStatus.PENDING],
+            events,
+            {},
+            scancel_error=RuntimeError("scancel failed"),
+        ) as doubles,
+        pytest.raises(CstarExpectationFailed, match="12345"),
+    ):
+        await SlurmLauncher.launch(single_step, [], run_uuid="")
+
+    assert events == ["scancel"]
+    doubles.adapt_step.assert_not_called()
+
+
+@pytest.mark.usefixtures("instant_cancel")
+async def test_slurmlauncher_launch_refuses_when_the_cancelled_job_does_not_end(
+    single_step: LiveStep,
+    mock_run_id: str,
+) -> None:
+    """Verify a step is not submitted again while SLURM still reports the job it
+    cancelled as running once the time for it to end is up.
+    """
+    single_step.workflow_overrides[KEY_CLOBBER] = True
+    await _persist_prior(single_step, mock_run_id)
+    events: list[str] = []
+
+    with (
+        _slurm_doubles(
+            [ExecutionStatus.PENDING, ExecutionStatus.RUNNING], events, {}
+        ) as doubles,
+        pytest.raises(CstarExpectationFailed, match="12345.*still Running"),
+    ):
+        await SlurmLauncher.launch(single_step, [], run_uuid="")
+
+    assert events == ["scancel"]
+    doubles.adapt_step.assert_not_called()
+
+
+async def test_slurmlauncher_launch_requeues_a_job_behind_a_replaced_dependency(
+    single_step: LiveStep,
+    mock_run_id: str,
+) -> None:
+    """Verify a queued job whose dependency was submitted after it is cancelled
+    and submitted again, waiting on the dependency's new job, though the step
+    is not clobbered.
+    """
+    await _persist_prior(single_step, mock_run_id)
+    dependency = _dependency(mock_run_id, T0 + timedelta(hours=1))
+    events: list[str] = []
+    captured: dict[str, list[str]] = {}
+
+    with _slurm_doubles(
+        [ExecutionStatus.PENDING, ExecutionStatus.CANCELLED], events, captured
+    ) as doubles:
+        task = await SlurmLauncher.launch(single_step, [dependency], run_uuid="")
+
+    doubles.scancel.assert_called_once()
+    assert doubles.scancel.call_args.args[0] == "scancel 12345"
+    assert events == ["scancel", "submit"]
+    assert captured["dependencies"] == ["777"]
+    assert not single_step.clobber
+    assert task.handle.pid == "4242"
+
+
+@pytest.mark.parametrize(
+    ("in_progress", "dependency_at"),
+    [
+        pytest.param(
+            ExecutionStatus.PENDING, T0 - timedelta(hours=1), id="queued-older"
+        ),
+        pytest.param(
+            ExecutionStatus.PENDING, T0, id="queued-submitted-with-dependency"
+        ),
+        pytest.param(
+            ExecutionStatus.RUNNING, T0 + timedelta(hours=1), id="running-newer"
+        ),
+    ],
+)
+async def test_slurmlauncher_launch_adopts_a_job_that_waits_on_no_replaced_dependency(
+    single_step: LiveStep,
+    mock_run_id: str,
+    in_progress: ExecutionStatus,
+    dependency_at: datetime,
+) -> None:
+    """Verify a prior job is adopted, not cancelled, when its dependency is no
+    newer than it, or when it is running and has passed its dependencies.
+    """
+    await _persist_prior(single_step, mock_run_id)
+    dependency = _dependency(mock_run_id, dependency_at)
+    events: list[str] = []
+
+    with _slurm_doubles([in_progress], events, {}) as doubles:
+        task = await SlurmLauncher.launch(single_step, [dependency], run_uuid="")
+
+    doubles.scancel.assert_not_called()
+    doubles.adapt_step.assert_not_called()
+    assert events == []
+    assert task.handle.pid == "12345"
+
+
+async def test_slurmlauncher_launch_leaves_the_prior_job_of_another_launcher(
+    single_step: LiveStep,
+    mock_run_id: str,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Verify a clobbered step whose in-progress prior attempt was a local
+    process is submitted again without `scancel` being asked to cancel a pid
+    that is no SLURM job, and a warning names the attempt left behind.
+    """
+    single_step.workflow_overrides[KEY_CLOBBER] = True
+    await _persist_prior(
+        single_step,
+        mock_run_id,
+        status=Status.Running,
+        launcher_name=LocalLauncher.name,
+    )
+    events: list[str] = []
+
+    with (
+        caplog.at_level(logging.WARNING),
+        _slurm_doubles([], events, {}) as doubles,
+    ):
+        task = await SlurmLauncher.launch(single_step, [], run_uuid="")
+
+    doubles.scancel.assert_not_called()
+    doubles.batch.assert_not_awaited()
+    assert events == ["submit"]
+    assert task.handle.pid == "4242"
+    warnings = [r.getMessage() for r in caplog.records if r.levelname == "WARNING"]
+    assert any("12345" in w and LocalLauncher.name in w for w in warnings)

@@ -8,8 +8,8 @@ ARG_CLOBBER_HELP: t.Final[str] = (
 )
 ARG_CLOBBER_WORKPLAN_HELP: t.Final[str] = (
     "Name of a step whose prior state should be cleared and re-executed on "
-    "rerun, or 'all' to clobber every step. Repeatable. Accepts the step "
-    "name or its slugified form."
+    "rerun, or 'all' to clobber every step. A step still queued or running is "
+    "cancelled first. Repeatable. Accepts the step name or its slugified form."
 )
 ARG_RUN_ID: t.Final[str] = "--run-id"
 """Option naming an execution of a workplan."""

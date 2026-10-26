@@ -167,7 +167,7 @@ spec of your own catalog.
 
 .. literalinclude:: ../../../cstar/catalog/bundled/ModelSpec/roms-marbl-0.12-default.yaml
    :language: yaml
-   :lines: 1-36
+   :lines: 1-35
 
 To load a ModelSpec file into a validated object from Python, see
 :doc:`../../reference/python`.

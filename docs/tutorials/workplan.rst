@@ -130,14 +130,13 @@ looks like this:
    ┡━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━╇━━━━━━━━━━╇━━━━━━━━━╇━━━━━━╇━━━━━━━━╇━━━━━━━━━━━╇━━━━━━━━━━━━━┩
    │1. make_inputs (forge) │           │          │    ✔    │      │        │           │             │
    ├───────────────────────┼───────────┼──────────┼─────────┼──────┼────────┼───────────┼─────────────┤
-   │           2. simulate │           │          │    ✔    │      │        │           │      1      │
+   │           2. simulate │     ✔     │          │         │      │        │           │      1      │
    │           (ucla_roms) │           │          │         │      │        │           │             │
    └───────────────────────┴───────────┴──────────┴─────────┴──────┴────────┴───────────┴─────────────┘
                Disk usage not measured. Run: cstar run status wio-workplan-tutorial --size
 
-While Forge works, ``simulate`` shows as running too, because its process is
-already started and waiting for its dependency. When both steps have finished,
-both ticks sit in the *Done* column.
+While Forge works, ``simulate`` shows as submitted: it is waiting for its
+dependency. When both steps have finished, both ticks sit in the *Done* column.
 
 .. code-block:: console
 

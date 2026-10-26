@@ -43,7 +43,7 @@ relative to that template repository's root. For example:
 .. code-block:: yaml
 
    code:
-     templates_commit: d35d06265515965c7daaa54c111ee0185166bca4  # C-Star: adds the CDR_LITE gate (ucla-roms 0.9.0)
+     templates_commit: d47142ec249bce91aac938030dfd5ea3f7dacfd4  # C-Star: drops the no-op EXACT_RESTARTS/PRINT_HOSTNAME keys
      templates_compile_time:
        directory: cstar/additional_files/templates/forge/compile-time
        files:
