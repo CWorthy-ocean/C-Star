@@ -2552,12 +2552,17 @@ def _write_workplan(wp_path: Path, steps: list[Step]) -> Path:
 def _expected_migrated_path(bp_path: Path) -> Path:
     """Return the path where an auto-migrated plotter blueprint is persisted.
 
-    Follows the `<original_stem>_<latest_version>.<ext>` convention used when
-    no explicit output path is supplied to the migrator.
+    Follows the `<original_stem>-<digest>_<latest_version>.<ext>` convention
+    used when no explicit output path is supplied to the migrator, where the
+    digest covers the source's resolved path and content.
     """
     state_dir = Path(str(os.getenv(ENV_CSTAR_STATE_HOME, "")))
     latest = get_application("plotter").schema_version
-    return state_dir / f"{bp_path.stem}_{latest}{bp_path.suffix}"
+    source = bp_path.resolve()
+    digest = hashlib.sha256(str(source).encode() + b"\0" + source.read_bytes())
+    return (
+        state_dir / f"{bp_path.stem}-{digest.hexdigest()[:12]}_{latest}{bp_path.suffix}"
+    )
 
 
 @pytest.fixture
@@ -3275,6 +3280,44 @@ def test_migrate_steps_reports_a_missing_blueprint(
 
     with pytest.raises(typer.BadParameter, match="Blueprint not found at path"):
         migrate_steps(wp_path, wp)
+
+
+def test_migrate_steps_keeps_same_named_blueprints_apart(
+    tmp_path: Path, bp_templates_dir: Path
+) -> None:
+    """Verify two out-of-date blueprints sharing a filename in different
+    directories are migrated to separate copies, so each step runs its own
+    blueprint rather than whichever was migrated last.
+    """
+    template = (bp_templates_dir / "roms_marbl" / "blueprint.2.1.0.yaml").read_text()
+    paths = []
+    for name in ("first", "second"):
+        bp_path = tmp_path / name / "blueprint.yaml"
+        bp_path.parent.mkdir()
+        bp_path.write_text(
+            template.replace(
+                "This is the description of my test blueprint", f"The {name} one"
+            )
+        )
+        paths.append(bp_path)
+
+    wp_path = _write_workplan(
+        tmp_path / "workplan.yaml",
+        [
+            Step(name=f"step-{i}", application="roms_marbl", blueprint=bp_path)
+            for i, bp_path in enumerate(paths)
+        ],
+    )
+    wp = deserialize(wp_path, Workplan)
+
+    sources = migrate_steps(wp_path, wp)
+
+    migrated = [sources[step.name] for step in wp.steps]
+    assert migrated[0] != migrated[1]
+    assert [yaml.safe_load(p.read_text())["description"] for p in migrated] == [
+        "The first one",
+        "The second one",
+    ]
 
 
 @pytest.mark.parametrize("pre_run", [True, False])

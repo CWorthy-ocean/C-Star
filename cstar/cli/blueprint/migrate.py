@@ -50,8 +50,9 @@ HELP_LONG = f"""\
 {HELP_SHORT}
 
 The schema will be updated to the latest available version. If an output
-path is not provided, it will be written next to the existing
-file with the version number appended to the file name.
+path is not provided, it will be written to the C-Star state directory
+(CSTAR_STATE_HOME), named after the existing file with a short digest and
+the version number appended.
 """
 
 

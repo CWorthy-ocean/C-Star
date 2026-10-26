@@ -24,6 +24,7 @@ from cstar.cli.common import (
     checkmark,
     colored,
     execute_migration,
+    get_persist_to,
     id_label,
     italic,
     label,
@@ -237,6 +238,77 @@ def test_set_ctxmap_overwrite(capsys: pytest.CaptureFixture) -> None:
 
     assert ctx.obj["key"] == "updated"
     assert "will be overwritten" in capsys.readouterr().out
+
+
+_PLAN = MigrationPlan("1.0.0", "2.0.0", ())
+"""A plan whose target names the version in a migrated copy's filename."""
+
+
+def _write_bp(path: Path, content: str = "name: bp\n") -> Path:
+    """Write a stand-in source file; `get_persist_to` reads only its bytes."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(content)
+    return path
+
+
+def test_get_persist_to_names_a_copy_in_state_home(tmp_path: Path) -> None:
+    """Verify a copy without an explicit target lands in the state home, named
+    after the source's stem and the target version.
+    """
+    bp_path = _write_bp(tmp_path / "blueprint.yaml")
+
+    persist_to = get_persist_to(MigrationRequest(path=bp_path), _PLAN)
+
+    assert persist_to.parent == DirectoryManager.state_home().resolve()
+    assert persist_to.name.startswith("blueprint-")
+    assert persist_to.name.endswith("_2.0.0.yaml")
+
+
+def test_get_persist_to_is_stable_for_one_source(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Verify an unchanged source maps to one copy, however its path is spelled."""
+    bp_path = _write_bp(tmp_path / "blueprint.yaml")
+    monkeypatch.chdir(tmp_path)
+
+    absolute = get_persist_to(MigrationRequest(path=bp_path), _PLAN)
+    relative = get_persist_to(MigrationRequest(path=Path("blueprint.yaml")), _PLAN)
+
+    assert absolute == relative
+
+
+def test_get_persist_to_separates_same_named_sources(tmp_path: Path) -> None:
+    """Verify identical files sharing a filename in different directories get
+    separate copies, since relative locations anchor to each one's directory.
+    """
+    first = _write_bp(tmp_path / "first" / "blueprint.yaml")
+    second = _write_bp(tmp_path / "second" / "blueprint.yaml")
+
+    assert get_persist_to(MigrationRequest(path=first), _PLAN) != get_persist_to(
+        MigrationRequest(path=second), _PLAN
+    )
+
+
+def test_get_persist_to_separates_edits_of_one_source(tmp_path: Path) -> None:
+    """Verify editing a source names a new copy instead of replacing the copy an
+    earlier run may still read.
+    """
+    bp_path = _write_bp(tmp_path / "blueprint.yaml")
+    before = get_persist_to(MigrationRequest(path=bp_path), _PLAN)
+
+    _write_bp(bp_path, "name: edited\n")
+
+    assert get_persist_to(MigrationRequest(path=bp_path), _PLAN) != before
+
+
+def test_get_persist_to_honours_an_explicit_target(tmp_path: Path) -> None:
+    """Verify an explicit target (`--output`) is used as given."""
+    bp_path = _write_bp(tmp_path / "blueprint.yaml")
+    target = tmp_path / "out" / "migrated.yaml"
+
+    assert get_persist_to(MigrationRequest(path=bp_path, output=target), _PLAN) == (
+        target.resolve()
+    )
 
 
 @pytest.fixture
