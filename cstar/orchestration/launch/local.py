@@ -5,11 +5,12 @@ import os
 import shlex
 import shutil
 import subprocess
+import time
 import typing as t
 from pathlib import Path
 from subprocess import run as sprun
 
-from psutil import STATUS_ZOMBIE, AccessDenied, NoSuchProcess, wait_procs
+from psutil import STATUS_ZOMBIE, AccessDenied, NoSuchProcess
 from psutil import Process as PsProcess
 from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, ValidationError
 
@@ -46,6 +47,8 @@ from cstar.orchestration.state import StateRepository
 from cstar.system.scheduler import parse_walltime
 
 if t.TYPE_CHECKING:
+    from collections.abc import Sequence
+
     from cstar.orchestration.models import Step, Workplan
 
 
@@ -56,6 +59,39 @@ PROXY_POLL_DELAY: t.Final[float] = 2.0
 
 CANCEL_GRACE: t.Final[float] = 5.0
 """Seconds a cancelled step's processes are given to exit before they are killed."""
+
+
+def _still_running(processes: "Sequence[PsProcess]", timeout: float) -> list[PsProcess]:
+    """Wait up to `timeout` seconds for processes to exit.
+
+    A zombie has exited: one whose parent is a stopped proxy stays unreaped
+    until the proxy is killed.
+
+    Parameters
+    ----------
+    processes : Sequence[PsProcess]
+        The processes to wait for.
+    timeout : float
+        The most seconds to wait.
+
+    Returns
+    -------
+    list[PsProcess]
+        The processes still running when they all exited or the time ran out.
+    """
+
+    def running(process: PsProcess) -> bool:
+        try:
+            return process.is_running() and process.status() != STATUS_ZOMBIE
+        except NoSuchProcess:
+            return False
+
+    deadline = time.monotonic() + timeout
+    while (alive := [p for p in processes if running(p)]) and (
+        time.monotonic() < deadline
+    ):
+        time.sleep(0.1)
+    return alive
 
 
 def run_as_process(step: "Step", cmd: list[str], log_file: Path) -> dict[str, int]:
@@ -520,11 +556,12 @@ class LocalLauncher(Launcher[LocalHandle]):
     def _terminate(handle: LocalHandle) -> bool:
         """Stop a step's proxy and every process it started.
 
-        The proxy is stopped and killed before its descendants are signalled:
-        once they exit it would record the step `Failed` in the sentinel, which
-        the attempt replacing it owns, and a stopped process runs nothing more
-        before SIGKILL ends it. The descendants are asked to terminate and are
-        killed after `CANCEL_GRACE` seconds.
+        The proxy is stopped first and killed last: stopped, it starts nothing
+        more, and cannot record the step `Failed` in the sentinel, which the
+        attempt replacing it owns, when its descendants exit. They are asked to
+        terminate and are killed after `CANCEL_GRACE` seconds. If one outlives
+        that, the proxy is left stopped, so the step still reads as in progress
+        and is not submitted again beside it.
 
         Parameters
         ----------
@@ -535,7 +572,7 @@ class LocalLauncher(Launcher[LocalHandle]):
         -------
         bool
             `True` once every process has exited; `False` when the proxy was
-            not running or a process outlived the kill.
+            not running or a process could not be stopped.
         """
         if (proxy := LocalLauncher._process_of(handle)) is None:
             log.debug(f"Process {handle.pid} of step {handle.name!r} is not running")
@@ -544,30 +581,45 @@ class LocalLauncher(Launcher[LocalHandle]):
         try:
             proxy.suspend()
             descendants = proxy.children(recursive=True)
-            proxy.kill()
-            if not handle.is_expired:
-                # reaped through the Popen, which then records the exit
-                handle.process.wait(timeout=CANCEL_GRACE)
-
             for process in descendants:
                 with contextlib.suppress(NoSuchProcess):
                     process.terminate()
-            _, alive = wait_procs(descendants, timeout=CANCEL_GRACE)
-            for process in alive:
-                with contextlib.suppress(NoSuchProcess):
-                    process.kill()
-            _, alive = wait_procs(alive, timeout=CANCEL_GRACE)
-        except (AccessDenied, subprocess.TimeoutExpired) as ex:
-            log.warning(
-                f"Unable to stop process {handle.pid} of step {handle.name!r}: {ex}"
-            )
-            return False
+            if alive := _still_running(descendants, CANCEL_GRACE):
+                for process in alive:
+                    with contextlib.suppress(NoSuchProcess):
+                        process.kill()
+                alive = _still_running(alive, CANCEL_GRACE)
         except NoSuchProcess:
-            alive = []
+            log.debug(f"Process {handle.pid} of step {handle.name!r} ended by itself")
+            return False
+        except AccessDenied as ex:
+            log.warning(f"Unable to stop the processes of step {handle.name!r}: {ex}")
+            return False
 
         if alive:
             pids = ", ".join(str(p.pid) for p in alive)
-            log.warning(f"Processes {pids} of step {handle.name!r} outlived the kill")
+            log.warning(
+                f"Processes {pids} of step {handle.name!r} outlived the kill; its "
+                f"process {handle.pid} is left stopped"
+            )
+            return False
+
+        try:
+            proxy.kill()
+            if handle.is_expired:
+                alive = _still_running([proxy], CANCEL_GRACE)
+            else:
+                # reaped through the Popen, which then records the exit
+                handle.process.wait(timeout=CANCEL_GRACE)
+        except NoSuchProcess:
+            pass
+        except subprocess.TimeoutExpired:
+            alive = [proxy]
+
+        if alive:
+            log.warning(
+                f"Process {handle.pid} of step {handle.name!r} outlived the kill"
+            )
         return not alive
 
     @staticmethod

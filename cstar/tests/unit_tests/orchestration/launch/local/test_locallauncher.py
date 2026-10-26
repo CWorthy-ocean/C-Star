@@ -21,6 +21,7 @@ from cstar.orchestration.launch.local import (
     LocalLauncher,
     ProxiedRunRequestFormatter,
     TimeConstrainedRunRequestEnricher,
+    _still_running,
 )
 from cstar.orchestration.launch.slurm import SlurmHandle, SlurmLauncher
 from cstar.orchestration.models import KEY_CLOBBER, KEY_PRE_RUN, KEY_RESUME, Step
@@ -118,10 +119,9 @@ def test_proxy_script_propagates_dependency_outcome(
         status=dep_status,
     )
 
-    for name, status in (("dep", dep_status), (live_step.name, Status.Submitted)):
-        sentinel = StateRepository.sentinel_path(name)
-        sentinel.parent.mkdir(parents=True, exist_ok=True)
-        sentinel.write_text(f"name: {name}\nstatus: {status.value}\n")
+    dep_sentinel = StateRepository.sentinel_path("dep")
+    dep_sentinel.parent.mkdir(parents=True, exist_ok=True)
+    dep_sentinel.write_text(f"name: dep\nstatus: {dep_status.value}\n")
 
     marker = tmp_path / "step-ran.txt"
     script = ProxiedRunRequestFormatter(live_step, [dep_handle]).format(
@@ -130,12 +130,58 @@ def test_proxy_script_propagates_dependency_outcome(
     script_path = tmp_path / "script.sh"
     script_path.write_text(script)
 
-    result = subprocess.run(["sh", str(script_path)], capture_output=True, timeout=30)
+    proxy = subprocess.Popen(["sh", str(script_path)], stdout=subprocess.DEVNULL)
+    own_sentinel = _record_proxy(live_step.name, proxy.pid)
 
-    assert result.returncode == exp_rc
+    assert proxy.wait(timeout=30) == exp_rc
     assert marker.exists() == exp_ran
-    own_sentinel = StateRepository.sentinel_path(live_step.name)
     assert f"status: {exp_status.value}" in own_sentinel.read_text()
+
+
+def _record_proxy(step_name: str, pid: int) -> Path:
+    """Write a step's sentinel as the launcher does once its proxy has started."""
+    sentinel = StateRepository.sentinel_path(step_name)
+    sentinel.parent.mkdir(parents=True, exist_ok=True)
+    sentinel.write_text(
+        f"pid: '{pid}'\nname: {step_name}\nstatus: {Status.Submitted.value}\n"
+    )
+    return sentinel
+
+
+def test_proxy_script_records_running_only_after_its_sentinel(
+    tmp_path: Path, wp_templates_dir: Path
+) -> None:
+    """Verify the proxy waits for the launcher to record it in the sentinel
+    before it records the step running: written earlier, the launcher's record
+    would replace it and leave the running step recorded as queued.
+    """
+    live_step = LiveStep.from_step(
+        deserialize(wp_templates_dir / "single_step.yaml", Workplan).steps[0]
+    )
+    script = ProxiedRunRequestFormatter(live_step).format(
+        RunRequest(command=["sleep", "3"])
+    )
+    script_path = tmp_path / "script.sh"
+    script_path.write_text(script)
+
+    proxy = subprocess.Popen(["sh", str(script_path)], stdout=subprocess.DEVNULL)
+    try:
+        time.sleep(0.5)
+        sentinel = _record_proxy(live_step.name, proxy.pid)
+
+        for _ in range(40):
+            if f"status: {Status.Running.value}" in sentinel.read_text():
+                break
+            time.sleep(0.05)
+        assert f"status: {Status.Running.value}" in sentinel.read_text()
+        assert proxy.wait(timeout=30) == 0
+        assert f"status: {Status.Done.value}" in sentinel.read_text()
+    finally:
+        with contextlib.suppress(NoSuchProcess):
+            for child in psutil.Process(proxy.pid).children(recursive=True):
+                child.kill()
+        proxy.kill()
+        proxy.wait()
 
 
 @pytest.mark.parametrize(
@@ -1100,18 +1146,20 @@ async def test_locallauncher_cancel_of_a_process_that_is_gone(
 def test_locallauncher_terminate_stops_the_proxy_before_its_children(
     mock_run_id: str,
 ) -> None:
-    """Verify the proxy is suspended, its descendants listed, and it is killed
-    before any descendant is signalled: they exiting first would let it record
-    the step failed in the sentinel.
+    """Verify the proxy is suspended and its descendants listed before any of
+    them is signalled, and killed only once they have exited: running, it would
+    record the step failed in the sentinel when they exit.
     """
     manager = mock.Mock()
     proxy, first, second = manager.proxy, manager.first, manager.second
     proxy.children.return_value = [first, second]
-    manager.wait_procs.return_value = ([first, second], [])
+    manager.still_running.return_value = []
 
     with (
         mock.patch.object(LocalLauncher, "_process_of", return_value=proxy),
-        mock.patch("cstar.orchestration.launch.local.wait_procs", manager.wait_procs),
+        mock.patch(
+            "cstar.orchestration.launch.local._still_running", manager.still_running
+        ),
     ):
         stopped = LocalLauncher._terminate(_expired_handle(mock_run_id))
 
@@ -1120,11 +1168,11 @@ def test_locallauncher_terminate_stops_the_proxy_before_its_children(
     assert [c[0] for c in manager.mock_calls] == [
         "proxy.suspend",
         "proxy.children",
-        "proxy.kill",
         "first.terminate",
         "second.terminate",
-        "wait_procs",
-        "wait_procs",
+        "still_running",
+        "proxy.kill",
+        "still_running",
     ]
 
 
@@ -1133,24 +1181,54 @@ def test_locallauncher_terminate_kills_a_child_that_ignores_terminate(
     mock_run_id: str, survives_kill: bool
 ) -> None:
     """Verify a descendant still running after the grace period is killed, and
-    the step is reported stopped only once it has exited.
+    the step is reported stopped only once it has exited; while it runs on, the
+    proxy is left stopped, so the step still reads as in progress.
     """
     manager = mock.Mock()
     proxy, stubborn = manager.proxy, manager.stubborn
     proxy.children.return_value = [stubborn]
-    manager.wait_procs.side_effect = [
-        ([], [stubborn]),
-        ([], [stubborn]) if survives_kill else ([stubborn], []),
+    manager.still_running.side_effect = [
+        [stubborn],
+        [stubborn] if survives_kill else [],
+        [],
     ]
 
     with (
         mock.patch.object(LocalLauncher, "_process_of", return_value=proxy),
-        mock.patch("cstar.orchestration.launch.local.wait_procs", manager.wait_procs),
+        mock.patch(
+            "cstar.orchestration.launch.local._still_running", manager.still_running
+        ),
     ):
         stopped = LocalLauncher._terminate(_expired_handle(mock_run_id))
 
     stubborn.kill.assert_called_once_with()
     assert stopped is not survives_kill
+    assert proxy.kill.called is not survives_kill
+
+
+def test_still_running_counts_a_zombie_as_exited() -> None:
+    """Verify a child that exited under a stopped parent, which cannot reap it,
+    does not count as running, and a running one does until the time is up.
+    """
+    shell = subprocess.Popen(["sh", "-c", "sleep 60 & wait"])
+    try:
+        proxy = psutil.Process(shell.pid)
+        for _ in range(100):
+            if children := proxy.children():
+                break
+            time.sleep(0.05)
+        proxy.suspend()
+        assert _still_running(children, 0.2) == children
+
+        children[0].terminate()
+
+        assert _still_running(children, 5) == []
+    finally:
+        with contextlib.suppress(NoSuchProcess):
+            for child in proxy.children():
+                child.kill()
+        shell.kill()
+        shell.wait()
 
 
 @pytest.mark.usefixtures("quick_cancel")
