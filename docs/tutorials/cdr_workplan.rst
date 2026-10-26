@@ -13,8 +13,7 @@ through a **directive**.
 
 The grid is the ``wio-toy`` domain from the previous pages (20 by 20 cells,
 400 km each, 8000 km across). The whole workplan takes about ten minutes on a
-recent laptop once the source data and the model code are cached, and longer
-the first time, while they download.
+recent laptop once the source data and the model code are cached.
 
 Before you start
 ----------------
@@ -37,11 +36,13 @@ Defining the CDR intervention
 The two forge blueprints describe the same domain, forcing and output. They
 differ in the run window (``wio-spinup`` covers 2012-01-01, ``wio-release``
 the four days after it) and in one section, ``cdr``: the spin-up has none,
-and the release blueprint adds one alkalinity release.
+and the release blueprint adds one alkalinity release. These are ready to run,
+but the rest of this section describes how one can define the CDR intervention
+they include.
 
-In the wizard this is the *Carbon dioxide removal* part of the *Run setup*
+In the wizard, this is the *Carbon dioxide removal* part of the *Run setup*
 section. Setting the CDR mode to **Simple perturbation** opens a short form
-for a single release: a name, where it is (latitude, longitude and depth),
+for a single release: a name, where it is (latitude, longitude, and depth),
 how far it spreads (a Gaussian scale in the horizontal and the vertical), the
 alkalinity flux, and the dates it is on. The wizard seeds the location with
 the grid centre and the dates with the run window, which is what this

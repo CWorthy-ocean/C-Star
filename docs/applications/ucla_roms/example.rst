@@ -14,7 +14,7 @@ dataset, and live in a public `examples repository
 The run is 30 simulated minutes, so it finishes in a few minutes on a laptop.
 
 To make a domain and blueprint of your own, use :doc:`Forge <../forge/index>`;
-the :doc:`end-to-end tutorial <../../tutorials/end_to_end>` walks through it.
+the :doc:`blueprint tutorial <../../tutorials/blueprint_tutorial>` walks through it.
 
 Before you start
 ----------------
@@ -145,4 +145,4 @@ start a workplan from it without a local copy.
 To run several simulations as one unit, or to chain a spin-up and an
 experiment, put the blueprints in a :doc:`workplan <../../workplans/index>`;
 the :doc:`workplan tutorial <../../tutorials/workplan>` does that with the
-domain from the end-to-end tutorial.
+domain from the blueprint tutorial.

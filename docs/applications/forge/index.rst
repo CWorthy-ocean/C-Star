@@ -45,7 +45,7 @@ whatever machine you run it, the Forge application:
    points at all of the above.
 
 Running that UCLA-ROMS blueprint is a normal C-Star simulation; Forge is no
-longer involved. The :doc:`end-to-end tutorial <../../tutorials/end_to_end>`
+longer involved. The :doc:`blueprint tutorial <../../tutorials/blueprint_tutorial>`
 walks through the whole sequence on a toy domain.
 
 The datasets Forge draws on include GLORYS ocean reanalysis, ERA5

@@ -3,7 +3,7 @@
 Automating the previous model with a workplan
 =============================================
 
-The :doc:`previous page <end_to_end>` ran Forge and then the simulation as two
+The :doc:`previous page <blueprint_tutorial>` ran Forge and then the simulation as two
 separate commands, and you carried the path of the blueprint Forge wrote from
 the first command to the second. A **workplan** does that for you. It is a
 small YAML file that lists the things to run as *steps*, says which steps wait
@@ -17,7 +17,7 @@ that help you manage more complex ocean modeling workflows.
 Before you start
 ----------------
 
-- Finish the :doc:`previous page <end_to_end>`, or at least step 1 of it: you
+- Finish the :doc:`previous page <blueprint_tutorial>`, or at least step 1 of it: you
   need a forge blueprint. Save it (or copy it) as ``forge_blueprint.yaml``
   in an empty directory.
 - Download :download:`workplan_forge_then_run.yaml <workplan_forge_then_run.yaml>`
@@ -222,11 +222,11 @@ own directory), so you don't have to remember the layout. You can also use
 
 to go straight to a given run or step.
 
-.. note:: A program cannot change the directory of the shell that started it,
-   so this command needs a small shell function. The first time you run it,
-   it tells you how: run ``cstar env shell-init --install`` once and open a new
-   shell. If you would rather not, use the output of ``cstar run path`` however
-   you like, e.g. ``cd $(cstar run path wio-workplan-tutorial simulate)``.
+.. note:: The `cd` command requires a special shell hook to function. If
+   you ran `cstar init` after install, you should be all set. If not, the
+   command will remind you how to install the shell hook. If you would rather not,
+   use the output of ``cstar run path`` however you like, e.g.
+   ``cd $(cstar run path wio-workplan-tutorial simulate)``.
 
 The files are the same ones the previous page produced, and you can open them
 with `roms-tools <https://roms-tools.readthedocs.io/en/latest/plotting_roms_output.html>`_
