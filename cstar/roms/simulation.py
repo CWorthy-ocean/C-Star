@@ -33,12 +33,7 @@ from cstar.applications.ucla_roms.adapter import (
 )
 from cstar.applications.ucla_roms.models import UclaRomsBlueprint
 from cstar.base.additional_code import AdditionalCode
-from cstar.base.env import (
-    ENV_CSTAR_ALLOW_LOGIN_NODE_RUN,
-    ENV_CSTAR_DEBUG_BUILD_MODE,
-    ENV_CSTAR_NPROCS_POST,
-    get_env_item,
-)
+from cstar.base.env import ENV_CSTAR_ALLOW_LOGIN_NODE_RUN, ENV_CSTAR_DEBUG_BUILD_MODE
 from cstar.base.exceptions import CstarError, CstarExpectationFailed
 from cstar.base.feature import is_flag_enabled
 from cstar.base.utils import (
@@ -102,6 +97,25 @@ if TYPE_CHECKING:
     from cstar.base.external_codebase import ExternalCodeBase
     from cstar.execution.file_system import JobFileSystemManager
     from cstar.execution.handler import ExecutionHandler
+
+
+def _join_workers() -> int:
+    """Count the threads that join output files at once.
+
+    Returns
+    -------
+    int
+        A third of the CPUs this process may run on (inside a scheduler job, the
+        job's cores), and at least 1. Where the platform does not report an
+        affinity (macOS), the machine's CPU count stands in for it.
+    """
+    sched_getaffinity = getattr(os, "sched_getaffinity", None)
+    cores = (
+        len(sched_getaffinity(0))
+        if sched_getaffinity is not None
+        else (os.cpu_count() or 1)
+    )
+    return max(1, cores // 3)
 
 
 def _ncjoin_wildcard(
@@ -2561,12 +2575,11 @@ class ROMSSimulation(Simulation):
                 logger=self.log,
             )
 
-        nprocs = int(get_env_item(ENV_CSTAR_NPROCS_POST).value)
         unique_wildcards = {
             str(Path(fname.stem).with_suffix(".*.nc")) for fname in files
         }
 
-        with ThreadPoolExecutor(max_workers=nprocs) as executor:
+        with ThreadPoolExecutor(max_workers=_join_workers()) as executor:
             # list() exhausts the returned iterator, which is needed to surface any errors
             # that were raised in the threaded join operations
             list(executor.map(_spatial_join, unique_wildcards))

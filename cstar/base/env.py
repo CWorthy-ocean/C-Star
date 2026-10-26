@@ -200,11 +200,6 @@ def hpc_data_directory() -> str | None:
     return find_scratch_dir(os.environ) or _system_scratch_root()
 
 
-def nprocs_factory() -> str:
-    """Return the number of processors on the current machine, divided by 3."""
-    return str((os.cpu_count() or 3) // 3)
-
-
 def generate_run_id() -> str:
     """Generate a unique run identifier based on the current time."""
     return datetime.now(UTC).strftime("%Y%m%d_%H%M%S")
@@ -278,16 +273,6 @@ ENV_CSTAR_DISABLE_MIGRATION: t.Annotated[
     ),
 ] = "CSTAR_DISABLE_MIGRATION"
 """Set to `1` to disable automatic blueprint schema migration; commands fail early on out-of-date blueprints."""
-
-ENV_CSTAR_NPROCS_POST: t.Annotated[
-    t.Literal["CSTAR_NPROCS_POST"],
-    EnvVar(
-        "Specify the number of processes to be used for post-processing simulation output files. Dynamic default ``os.cpu_count() // 3``",
-        GROUP_SIM,
-        default_factory=lambda _: nprocs_factory(),  # type: ignore[reportOptionalOperand]
-    ),
-] = "CSTAR_NPROCS_POST"
-"""Specify the number of processes to be used for post-processing simulation output files."""
 
 ENV_CSTAR_SCRATCH_DIRS: t.Annotated[
     t.Literal["CSTAR_SCRATCH_DIRS"],
@@ -462,6 +447,10 @@ REMOVED_SETTINGS: t.Final[dict[str, RemovedSetting]] = {
     "CSTAR_IN_ACTIVE_ALLOCATION": RemovedSetting(
         "`cstar blueprint run` no longer submits a scheduler job; submit the "
         "blueprint with `cstar blueprint submit`, or run it inside an allocation."
+    ),
+    "CSTAR_NPROCS_POST": RemovedSetting(
+        "output post-processing uses the cores available to the process, which "
+        "runs on the same node as the model."
     ),
     "CSTAR_ORCH_DELAYS": RemovedSetting(
         "the orchestrator's polling intervals are fixed."

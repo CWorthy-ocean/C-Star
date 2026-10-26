@@ -191,7 +191,7 @@ def test_yes_on_a_laptop_writes_a_file_of_commented_examples(
     assert path.is_file()
     assert read_user_config(path) == {}
     text = path.read_text()
-    assert "# CSTAR_NPROCS_POST=" in text
+    assert "# CSTAR_DEBUG_BUILD_MODE=" in text
     assert "# CSTAR_DATA_HOME=" in text
     for name in NEVER_WRITTEN:
         assert name not in text

@@ -1,9 +1,11 @@
 import logging
+import os
 import pickle
 import re
 import tempfile
 import warnings
 from collections.abc import Generator
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, cast
@@ -55,7 +57,7 @@ from cstar.roms.namelist import (
     RomsNamelistV0_12_0,
     namelist_schema_for_ref,
 )
-from cstar.roms.simulation import ROMSSimulation
+from cstar.roms.simulation import ROMSSimulation, _join_workers
 from cstar.system.manager import (
     get_sysmgr,
 )
@@ -2968,6 +2970,86 @@ class TestProcessingAndExecution:
         assert not (temp_output_dir / "ocean_his.20240101000000.002.nc").exists()
         assert not (temp_output_dir / "ocean_ext.20240101000000.001.nc").exists()
         assert not (temp_output_dir / "ocean_rst.20240101000000.001.nc").exists()
+
+    @pytest.mark.parametrize(
+        ("affinity", "expected"),
+        [
+            pytest.param(set(range(12)), 4, id="twelve-cores"),
+            pytest.param(set(range(2)), 1, id="two-cores"),
+            pytest.param({3}, 1, id="one-core"),
+        ],
+    )
+    def test_join_workers_counts_a_third_of_the_cpu_affinity(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        affinity: set[int],
+        expected: int,
+    ) -> None:
+        """The join pool takes a third of the cores the process may run on, never
+        fewer than one, whatever the machine's own CPU count.
+        """
+        monkeypatch.setattr(
+            os, "sched_getaffinity", lambda _pid: affinity, raising=False
+        )
+        monkeypatch.setattr(os, "cpu_count", lambda: 128)
+
+        assert _join_workers() == expected
+
+    @pytest.mark.parametrize(
+        ("cpu_count", "expected"),
+        [
+            pytest.param(9, 3, id="nine-cpus"),
+            pytest.param(2, 1, id="two-cpus"),
+            pytest.param(None, 1, id="cpu-count-unknown"),
+        ],
+    )
+    def test_join_workers_without_affinity_counts_a_third_of_the_cpus(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        cpu_count: int | None,
+        expected: int,
+    ) -> None:
+        """Where the platform reports no affinity (macOS), the pool is sized from
+        the CPU count, again with at least one worker.
+        """
+        monkeypatch.delattr(os, "sched_getaffinity", raising=False)
+        monkeypatch.setattr(os, "cpu_count", lambda: cpu_count)
+
+        assert _join_workers() == expected
+
+    @pytest.mark.parametrize(
+        ("cores", "expected_workers"),
+        [pytest.param(12, 4, id="twelve-cores"), pytest.param(2, 1, id="two-cores")],
+    )
+    def test_post_run_sizes_the_join_pool_from_the_affinity(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        stub_romssimulation: ROMSSimulation,
+        cores: int,
+        expected_workers: int,
+    ) -> None:
+        """`post_run` joins with as many threads as `_join_workers` allows, so a
+        process with two cores joins with one thread rather than none.
+        """
+        monkeypatch.setattr(
+            os, "sched_getaffinity", lambda _pid: set(range(cores)), raising=False
+        )
+        sim = stub_romssimulation
+        sim.fs_manager.prepare()
+        (sim.fs_manager.temp_output_dir / "ocean_his.20240101000000.001.nc").touch()
+        sim._execution_handler = mock.MagicMock()
+        sim._execution_handler.status = ExecutionStatus.COMPLETED
+
+        with (
+            mock.patch(
+                "cstar.roms.simulation.ThreadPoolExecutor", wraps=ThreadPoolExecutor
+            ) as mock_pool,
+            mock.patch("cstar.roms.simulation._ncjoin_wildcard") as mock_ncjoin,
+        ):
+            sim.post_run()
+
+        mock_pool.assert_called_once_with(max_workers=expected_workers)
+        mock_ncjoin.assert_called_once()
 
     @mock.patch.object(Path, "glob", return_value=[])  # Mock glob to return no files
     def test_post_run_prints_message_if_no_files(
