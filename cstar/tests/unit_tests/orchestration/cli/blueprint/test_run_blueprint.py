@@ -31,6 +31,7 @@ from cstar.base.env import (
     ENV_CSTAR_STATE_HOME,
     FLAG_ON,
 )
+from cstar.base.exceptions import CstarError
 from cstar.cli.blueprint.run import app
 from cstar.entrypoint.runner import BlueprintRunner
 from cstar.entrypoint.utils import (
@@ -923,6 +924,26 @@ def test_blueprint_run_resume_and_clobber_fails_fast(
     assert "--resume" in stderr_flat
     assert "--clobber" in stderr_flat
     mock_exec.assert_not_called()
+
+
+def test_blueprint_run_runner_error_exits_cleanly(
+    hello_world_bp_path: Path,
+    flatten_cli_output: Callable[[str], str],
+) -> None:
+    """Verify a `CstarError` raised while the runner starts (a launch refused
+    on a login node, say) is reported as a message with exit code 1, not a
+    traceback.
+    """
+    refusal = "Refusing to launch ROMS outside a scheduler job"
+    with mock.patch.object(
+        HelloWorldRunner, "execute", mock.AsyncMock(side_effect=CstarError(refusal))
+    ):
+        runner = CliRunner()
+        result = runner.invoke(app, [hello_world_bp_path.as_posix()], color=False)
+
+    assert result.exit_code == 1, result.output
+    assert refusal in flatten_cli_output(result.output)
+    assert not isinstance(result.exception, CstarError)
 
 
 def test_blueprint_run_resume_reaches_runner_request(

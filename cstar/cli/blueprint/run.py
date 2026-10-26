@@ -318,7 +318,11 @@ def run(
 
     runner = app_config.runner(request, service_cfg)
     started_at = utc_now()
-    asyncio.run(runner.execute())
+    try:
+        asyncio.run(runner.execute())
+    except CstarError as ex:
+        print(f"Unable to run the blueprint: {ex}")
+        raise typer.Exit(code=1) from ex
 
     # a workplan step (always passed `--step`) is recorded by the orchestrator's
     # manifest instead
