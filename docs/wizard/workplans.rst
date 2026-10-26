@@ -4,17 +4,17 @@ Creating workplans with the wizard
 ==================================
 
 The wizard's Workplan page builds a :doc:`workplan <../workplans/index>` the
-way the Blueprint page builds a blueprint: card by card, with the YAML and a
+way the Blueprint page builds a blueprint: piece by piece, with the YAML and a
 picture of the step graph updating as you go, and a check that runs after
 every edit so that a problem is pointed out where you make it rather than
-when you submit. It is the quickest way to put together the recurring shapes
+when you submit. It is a convenient way to put together the recurring shapes
 of a modeling project, such as a Forge step feeding a simulation, a long run
 split into chunks, or a nested run with upscaling, without remembering the
 syntax of every directive.
 
 .. note::
 
-   The Workplan page is under active development. Its cards and recipes
+   The Workplan page is under active development. Its sections and recipes
    change between releases, and anything it writes can also be written by
    hand: the result is an ordinary workplan file that ``cstar workplan
    check`` and ``cstar workplan submit`` accept, and that you can keep
@@ -43,8 +43,8 @@ edits** to load the text back into the cards. The **Preview** control moves
 the pane to the bottom or top of the page, or hides it. On a narrow screen
 the columns stack.
 
-The cards
----------
+The sections
+------------
 
 Start
    Begin a new workplan, or load one to edit: from the catalog's
