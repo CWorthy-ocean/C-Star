@@ -11,7 +11,6 @@ from subprocess import run as sprun
 
 from psutil import STATUS_ZOMBIE, AccessDenied, NoSuchProcess, wait_procs
 from psutil import Process as PsProcess
-from psutil import TimeoutExpired as PsTimeoutExpired
 from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, ValidationError
 
 from cstar.base.adapter import (
@@ -521,10 +520,11 @@ class LocalLauncher(Launcher[LocalHandle]):
     def _terminate(handle: LocalHandle) -> bool:
         """Stop a step's proxy and every process it started.
 
-        The proxy is stopped and killed before its descendants: once they exit
-        it would record the step `Failed` in the sentinel, which the attempt
-        replacing it owns. The descendants are asked to terminate and killed
-        after `CANCEL_GRACE` seconds.
+        The proxy is stopped and killed before its descendants are signalled:
+        once they exit it would record the step `Failed` in the sentinel, which
+        the attempt replacing it owns, and a stopped process runs nothing more
+        before SIGKILL ends it. The descendants are asked to terminate and are
+        killed after `CANCEL_GRACE` seconds.
 
         Parameters
         ----------
@@ -545,9 +545,7 @@ class LocalLauncher(Launcher[LocalHandle]):
             proxy.suspend()
             descendants = proxy.children(recursive=True)
             proxy.kill()
-            if handle.is_expired:
-                proxy.wait(timeout=CANCEL_GRACE)
-            else:
+            if not handle.is_expired:
                 # reaped through the Popen, which then records the exit
                 handle.process.wait(timeout=CANCEL_GRACE)
 
@@ -559,7 +557,7 @@ class LocalLauncher(Launcher[LocalHandle]):
                 with contextlib.suppress(NoSuchProcess):
                     process.kill()
             _, alive = wait_procs(alive, timeout=CANCEL_GRACE)
-        except (AccessDenied, PsTimeoutExpired, subprocess.TimeoutExpired) as ex:
+        except (AccessDenied, subprocess.TimeoutExpired) as ex:
             log.warning(
                 f"Unable to stop process {handle.pid} of step {handle.name!r}: {ex}"
             )
