@@ -1036,8 +1036,8 @@ def apply_clobber_overrides(
     if stale := check_clobber_dependents(wp, tokens):
         msg = (
             "Some steps depend on clobbered steps but were not selected for "
-            "clobber themselves; one that has already started is not re-run and "
-            "may consume stale outputs. Review the following steps: "
+            "clobber themselves; those that have already started are not re-run "
+            "and may consume stale outputs. Review the following steps: "
             f"{', '.join(stale)}"
         )
         log.warning(msg)

@@ -517,13 +517,6 @@ def _fake_launcher(
     return _Launcher
 
 
-@pytest.fixture
-def instant_cancel(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Give a cancelled attempt no time to end, and wait for it not at all."""
-    monkeypatch.setattr("cstar.orchestration.launch.common.CANCEL_TIMEOUT", 0)
-    monkeypatch.setattr("cstar.orchestration.launch.common.CANCEL_POLL_DELAY", 0)
-
-
 async def test_cancel_prior_attempt_cancels_the_handle(
     tmp_path: Path, caplog: pytest.LogCaptureFixture
 ) -> None:

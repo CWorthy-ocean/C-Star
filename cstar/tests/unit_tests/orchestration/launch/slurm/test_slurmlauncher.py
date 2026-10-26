@@ -891,14 +891,6 @@ def _dependency(run_id: str, submitted_at: datetime | None) -> SlurmHandle:
     )
 
 
-@pytest.fixture
-def single_step(wp_templates_dir: Path, read_yaml_intercept: None) -> LiveStep:
-    """A step whose blueprint exists."""
-    return LiveStep.from_step(
-        deserialize(wp_templates_dir / "single_step.yaml", Workplan).steps[0]
-    )
-
-
 @pytest.mark.parametrize(
     "in_progress",
     [ExecutionStatus.PENDING, ExecutionStatus.RUNNING],
@@ -955,16 +947,14 @@ async def test_slurmlauncher_launch_refuses_when_scancel_fails(
     doubles.adapt_step.assert_not_called()
 
 
+@pytest.mark.usefixtures("instant_cancel")
 async def test_slurmlauncher_launch_refuses_when_the_cancelled_job_does_not_end(
     single_step: LiveStep,
     mock_run_id: str,
-    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Verify a step is not submitted again while SLURM still reports the job it
     cancelled as running once the time for it to end is up.
     """
-    monkeypatch.setattr("cstar.orchestration.launch.common.CANCEL_TIMEOUT", 0)
-    monkeypatch.setattr("cstar.orchestration.launch.common.CANCEL_POLL_DELAY", 0)
     single_step.workflow_overrides[KEY_CLOBBER] = True
     await _persist_prior(single_step, mock_run_id)
     events: list[str] = []

@@ -378,7 +378,7 @@ def gated_run(
         kill_run(run.state_home, run.run_id, list(QUEUED_SHAPE))
         for step in QUEUED_SHAPE:
             if (pid := run.pid(step)) is not None:
-                _terminate_tree(pid)
+                _kill_tree(pid)
 
 
 def _read(path: Path) -> str:
@@ -389,15 +389,15 @@ def _read(path: Path) -> str:
         return f"unreadable: {ex}"
 
 
-def _terminate_tree(pid: int) -> None:
-    """Terminate the process ``pid`` and everything under it; a process already gone
-    is skipped.
+def _kill_tree(pid: int) -> None:
+    """Kill the process ``pid`` and everything under it; a process already gone is
+    skipped. SIGKILL also ends a process a test left stopped, which SIGTERM would not.
     """
     with contextlib.suppress(psutil.Error):
         process = psutil.Process(pid)
         for child in [*process.children(recursive=True), process]:
             with contextlib.suppress(psutil.Error):
-                child.terminate()
+                child.kill()
 
 
 def _alive(process: psutil.Process) -> bool:

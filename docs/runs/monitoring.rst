@@ -26,15 +26,15 @@ prints one row per step with a tick in its current column:
    ┡━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━╇━━━━━━━━━━╇━━━━━━━━━╇━━━━━━╇━━━━━━━━╇━━━━━━━━━━━╇━━━━━━━━━━━━━┩
    │1. make_inputs (forge) │           │          │    ✔    │      │        │           │             │
    ├───────────────────────┼───────────┼──────────┼─────────┼──────┼────────┼───────────┼─────────────┤
-   │           2. simulate │           │          │    ✔    │      │        │           │      1      │
+   │           2. simulate │     ✔     │          │         │      │        │           │      1      │
    │           (ucla_roms) │           │          │         │      │        │           │             │
    └───────────────────────┴───────────┴──────────┴─────────┴──────┴────────┴───────────┴─────────────┘
                Disk usage not measured. Run: cstar run status wio-workplan-tutorial --size
 
-On a laptop, a step that is waiting for its dependencies shows as *Running*,
-because its process has started and is waiting; on a cluster it sits *In
-Queue* until the scheduler releases it. ``--size`` measures each step's disk
-usage as well, which can take a while on a large run.
+A step that is waiting for its dependencies shows as *Submitted*. Once they
+are done it starts at once on a laptop; on a cluster it sits *In Queue* until
+the scheduler releases it. ``--size`` measures each step's disk usage as well,
+which can take a while on a large run.
 
 ``status`` reads the run's live state from the scheduler, so it takes the
 run ID of a run tracked on this machine; to look at any other run (a copy, a

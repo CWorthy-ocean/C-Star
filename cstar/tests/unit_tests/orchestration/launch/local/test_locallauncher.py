@@ -953,21 +953,9 @@ def test_localhandle_start_ts_requires_start_time(mock_run_id: str) -> None:
 
 
 @pytest.fixture
-def quick_cancel(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Shorten the grace a cancelled step's processes get, and the wait for a
-    cancelled prior attempt to end.
-    """
+def quick_cancel(instant_cancel: None, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Shorten the grace a cancelled step's processes get, besides `instant_cancel`."""
     monkeypatch.setattr("cstar.orchestration.launch.local.CANCEL_GRACE", 2)
-    monkeypatch.setattr("cstar.orchestration.launch.common.CANCEL_TIMEOUT", 0)
-    monkeypatch.setattr("cstar.orchestration.launch.common.CANCEL_POLL_DELAY", 0)
-
-
-@pytest.fixture
-def single_step(wp_templates_dir: Path, read_yaml_intercept: None) -> LiveStep:
-    """A step whose blueprint exists."""
-    return LiveStep.from_step(
-        deserialize(wp_templates_dir / "single_step.yaml", Workplan).steps[0]
-    )
 
 
 @pytest.fixture
