@@ -74,7 +74,9 @@ jobs:
 
           model_spec_dir = root / "catalog" / "bundled" / "ModelSpec"
           found_specs = {
-              p.name for p in model_spec_dir.iterdir() if (p / "model.yaml").is_file()
+              p.name.removesuffix(".yaml")
+              for p in model_spec_dir.iterdir()
+              if p.is_file() and p.name.endswith(".yaml")
           }
           expected_specs = {
               "cson_roms-marbl_v0.1",
