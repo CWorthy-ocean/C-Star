@@ -188,7 +188,8 @@ def model_to_yaml(model: SerializableModel) -> str:
     """Serialize a model to yaml, to be written to a file.
 
     The model is serialized at the schema version it is written at (see
-    `for_writing`).
+    `for_writing`). A blueprint first completes its own provenance (see
+    `Blueprint.stamped_for_write`), so the file records what its content is.
 
     Parameters
     ----------
@@ -206,7 +207,10 @@ def model_to_yaml(model: SerializableModel) -> str:
         If the model holds content read from a newer file with keys this build
         does not know ignored: writing it would drop them.
     """
-    return dump_yaml(for_writing(model))
+    # Duck-typed: this module sits below `models`, which imports it, so it cannot
+    # name `Blueprint`; only blueprints define the hook.
+    stamp = getattr(model, "stamped_for_write", None)
+    return dump_yaml(for_writing(stamp() if callable(stamp) else model))
 
 
 def dump_yaml(model: SerializableModel) -> str:

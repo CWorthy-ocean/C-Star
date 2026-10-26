@@ -32,7 +32,6 @@ from __future__ import annotations
 import copy
 import logging
 import os
-import warnings
 from collections.abc import Callable, Iterable
 from typing import (
     TYPE_CHECKING,
@@ -44,7 +43,6 @@ from typing import (
 from cstar.applications.forge.blueprint import ForgeBlueprint, emitted_provenance
 from cstar.applications.forge.host import HostPaths
 from cstar.applications.forge.namelist_model import validate_run_time_sections
-from cstar.base.digest import digest_scheme, short_digest
 from cstar.base.env import ENV_CSTAR_RUNID
 from cstar.roms.namelist import release_ref_for_remote
 
@@ -341,27 +339,9 @@ def verify_content_hash(cfg: ForgeBlueprint) -> str | None:
     recomputed hash of the results-affecting data, return a warning message (the file
     appears hand-edited since write-out); otherwise None.
 
-    A hash recorded under another scheme (another release's recipe) cannot be
-    compared, so it is not checked; the next save records the current one.
+    A thin delegate to :meth:`ForgeBlueprint.integrity_problem`.
     """
-    recorded = cfg.provenance.content_hash
-    if recorded:
-        actual = cfg.content_hash()
-        if digest_scheme(recorded) != digest_scheme(actual):
-            logger.debug(
-                "forge_blueprint %r records its content hash under another scheme "
-                "(%r); not checked",
-                cfg.name,
-                digest_scheme(recorded) or "untagged",
-            )
-        elif recorded != actual:
-            return (
-                "forge_blueprint integrity check FAILED: the results-affecting data does "
-                "not match the recorded hash — the file appears to have been hand-edited "
-                f"since it was written (recorded {short_digest(recorded)}…, computed "
-                f"{short_digest(actual)}…). Processing will continue with the data as read."
-            )
-    return None
+    return cfg.integrity_problem()
 
 
 def _default_executor_factory(
@@ -471,7 +451,6 @@ def process_forge_blueprint(
     integrity = verify_content_hash(cfg)
     if integrity:
         logger.warning(integrity)
-        warnings.warn(integrity, UserWarning, stacklevel=2)
 
     if validate:
         roms_ref = cfg.code.roms.commit or cfg.code.roms.branch

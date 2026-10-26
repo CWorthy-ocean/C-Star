@@ -461,6 +461,38 @@ class Blueprint(ConfiguredBaseModel, VersionedDocument, ABC):
         """
         return f"{CONTENT_HASH_SCHEME}:{canonical_hash(self._hashed_content())}"
 
+    def integrity_problem(self) -> str | None:
+        """Describe how the blueprint's recorded integrity check fails, if it does.
+
+        The base provenance records no hash, so there is nothing to check and this
+        returns `None`. An application whose provenance records a content hash
+        overrides it to compare the record with the content it holds, so a loader
+        can report a file edited by hand since it was written.
+
+        Returns
+        -------
+        str | None
+            A message for the user when the check fails, otherwise `None`.
+        """
+        return None
+
+    def stamped_for_write(self) -> t.Self:
+        """Return the blueprint as it is to be written, with its provenance completed.
+
+        The generic write path (`model_to_yaml`) calls this on every blueprint, so
+        whatever the file records about its content is true of the content it
+        holds, however the blueprint was built (loaded, overridden, rewritten). The
+        base provenance records nothing derived from the content, so this returns
+        `self`. An application that records, for example, a content hash overrides
+        it to return a copy carrying the current one; it never changes `self`.
+
+        Returns
+        -------
+        Self
+            `self`, or a copy with its provenance completed.
+        """
+        return self
+
     def _hashed_content(self) -> dict[str, t.Any]:
         """The configuration `content_hash` covers.
 

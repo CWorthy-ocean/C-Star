@@ -103,8 +103,8 @@ Output
    are edited here, while the child grid, extraction period and file come from
    the nesting options. **Upscaled output** (``upscale_output``) is a main
    stream while *This is a child grid* is on, because its ``_uscl`` files feed
-   the parent's upscaled-CDR run (see **Upscale a nested run** on the
-   :doc:`Workplan page <workplans>`), and otherwise sits under **More output streams**.
+   the parent's upscaled-CDR run (see the
+   :doc:`nesting and upscaling tutorial <../tutorials/nesting_upscaling>`), and otherwise sits under **More output streams**.
 
 .. figure:: ../images/wizard-output.png
    :alt: The Output section: output preset, main output streams and the collapsed More output streams group

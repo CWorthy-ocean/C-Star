@@ -118,7 +118,8 @@ def migrate_forge_blueprint_data(data: dict[str, Any] | None) -> dict[str, Any]:
     Note: a migrated file's *recorded* ``provenance.content_hash`` was computed
     without ``domain.grid_name`` in the hashed data, so it no longer matches the
     recomputed hash post-migration -- ``verify_content_hash`` only warns on a
-    mismatch, and re-saving via ``to_yaml`` recomputes the hash.
+    mismatch, and any write (``to_yaml``, or C-Star's generic ``serialize``)
+    recomputes the hash.
     """
     data = dict(data or {})
     version = data.get("forge_blueprint_version")

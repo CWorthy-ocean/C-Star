@@ -77,8 +77,8 @@ Recipes
      calendar month, a fixed number of days, or equal parts, each continuing
      from the previous one's restart.
    - **Spin-up ramp** chains short segments with a growing time step.
-   - **Upscale a nested run** adds, for each pair of nested grids, an
-     upscaler step and a rerun of the parent that uses its output.
+   - **Upscale a nested run** is not yet supported. Build the upscaled rerun
+     by hand, as in :doc:`../tutorials/nesting_upscaling`.
 
 Steps
    One collapsible pane per step, with buttons to duplicate, delete and move

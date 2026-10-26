@@ -80,7 +80,6 @@ from cstar.orchestration.patterns import (
     month_windows,
     normalize_legacy,
     spinup_ramp,
-    upscale_chain,
 )
 from cstar.orchestration.serialization import (
     deserialize,
@@ -3310,10 +3309,12 @@ class WorkplanBuilderPage:
             description=_caption("add_steps", "Add steps"), icon="plus"
         )
         self.forge_status = W.HTML("")
-        # upscale a nested chain
-        self.upscale_levels = W.TagsInput(allowed_tags=[], allow_duplicates=False)
+        # upscale a nested chain: not yet supported, so both controls stay disabled
+        # (`_upscale` still refuses, as a backstop)
+        # (a SelectMultiple, as TagsInput has no `disabled` trait)
+        self.upscale_levels = W.SelectMultiple(options=[], disabled=True)
         self.upscale_btn = W.Button(
-            description=_caption("add_steps", "Add steps"), icon="plus"
+            description=_caption("add_steps", "Add steps"), icon="plus", disabled=True
         )
         self.upscale_status = W.HTML("")
 
@@ -3367,17 +3368,15 @@ class WorkplanBuilderPage:
             [("a path…", ""), *self.forge_blueprint_names()],
         )
         _show(self.forge_path, not self.forge_source.value)
-        if list(self.upscale_levels.allowed_tags) != names:
-            self.upscale_levels.allowed_tags = names
+        self.upscale_levels.options = names
         self.chunk_first.refresh()
         self.ramp_first.refresh()
         self.recipe_hint.value = (
             ""
             if names
             else "<span class='forge-hint'>Chunk and ramp can start from a "
-            "blueprint; upscaling needs ucla_roms steps in the Steps card.</span>"
+            "blueprint.</span>"
         )
-        self.upscale_btn.disabled = not names
 
     def _on_chunk_base(self) -> None:
         self._prefill_window(self.chunk_base, self.chunk_start, self.chunk_end)
@@ -3527,19 +3526,13 @@ class WorkplanBuilderPage:
         return forge_then_run(Path(path), emitted, names=(forge_name, run_name))
 
     def _upscale(self) -> Generated:
-        names = list(self.upscale_levels.value)
-        levels = [self.base_step(n) for n in names]
-
-        def use_pio(step: Step) -> bool:
-            # an unreadable level takes the blueprint model's default (off)
-            pane = self.pane_named(step.name)
-            if pane is not None and pane.source.value == SOURCE_DEFERRED:
-                emitted = self.emitted_for_token(pane.producer.value)
-                return emitted.use_pio if emitted is not None else False
-            facts = pane.facts() if pane else None
-            return bool(facts.use_pio) if facts is not None else False
-
-        return upscale_chain(levels, use_pio_of=use_pio)
+        raise ValueError(
+            "upscaling a nested run from the wizard is not yet supported: the "
+            "generated rerun would ignore the upscaled CDR forcing. Build it by "
+            "hand instead, as in the nesting and upscaling tutorial: a forge step "
+            "with cdr.mode: upscaled for the parent, and a continue-from on the "
+            "parent at the child's start."
+        )
 
     @staticmethod
     def _window_date(text: str, label: str) -> datetime:

@@ -66,7 +66,7 @@ sections:
     required: false
   recipes.upscale:
     title: Upscale a nested run
-    desc: For each pair of nested levels, an upscaler step and a re-run of the parent that uses its output. Levels must not be time chunks.
+    desc: Not yet supported. Build the upscaled rerun by hand, as in the nesting and upscaling tutorial.
     required: false
   review.diagnostics:
     title: Checks

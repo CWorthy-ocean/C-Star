@@ -1,6 +1,7 @@
 """Tests for shared CLI helpers in ``cstar.cli.common``."""
 
 import json
+import logging
 import os
 import typing as t
 from collections.abc import Callable
@@ -18,6 +19,7 @@ from cstar.applications.hello_world import (
     HelloWorldApplication,
     HelloWorldBlueprint,
 )
+from cstar.applications.ucla_roms.models import UclaRomsBlueprint
 from cstar.base.env import ENV_CSTAR_DISABLE_MIGRATION, FLAG_ON
 from cstar.cli.cli import app as root_app
 from cstar.cli.common import (
@@ -381,6 +383,29 @@ def test_persist_migration_keeps_relative_locations_for_a_relative_target(
     ]
     assert persisted.parent == relative_location_bp.parent.resolve()
     assert location == "../data/boundary.nc"
+
+
+def test_persist_migration_reports_an_integrity_problem_once(
+    relative_location_bp: Path,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Verify a blueprint failing its integrity check is reported once before the
+    write records the hash of the content it holds, and is still written.
+    """
+    problem = "integrity check FAILED: hand-edited"
+    monkeypatch.setattr(
+        UclaRomsBlueprint, "integrity_problem", lambda self: problem, raising=False
+    )
+
+    with caplog.at_level(logging.WARNING):
+        written = _persist_with_target(
+            relative_location_bp, tmp_path / "state" / "migrated.yaml"
+        )
+
+    assert written
+    assert [r.getMessage() for r in caplog.records].count(problem) == 1
 
 
 def test_persist_migration_rejects_cwd_only_locations(

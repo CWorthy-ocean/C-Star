@@ -1460,6 +1460,11 @@ class OverrideTransform(Transform[LiveStep]):
 
         blueprint: Blueprint = load_blueprint(bp_path, bp_type)
 
+        # Report a file edited by hand before the override write records the hash
+        # of the content it holds: afterwards the edit could no longer be told.
+        if problem := blueprint.integrity_problem():
+            log.warning(problem)
+
         updated_bp = self.apply(blueprint, step.blueprint_overrides)
         update: dict[str, t.Any] = {
             "blueprint_overrides": {},

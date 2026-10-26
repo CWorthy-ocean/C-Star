@@ -59,6 +59,8 @@ from cstar.orchestration.models import (
     GeneratedBy,
     Provenance,
 )
+from cstar.orchestration.orchestration import LiveStep
+from cstar.orchestration.transforms import OverrideTransform
 from cstar.roms.precheck import NamelistConsistencyError
 from cstar.system.migration import TOLERATE_UNKNOWN, CstarSchemaTooNewError
 
@@ -2174,7 +2176,7 @@ def test_content_hash_round_trips_through_yaml(tmp_path):
     assert back.content_hash() == back.provenance.content_hash
 
 
-def test_engine_warns_on_hash_mismatch(tmp_path):
+def test_engine_warns_on_hash_mismatch(tmp_path, caplog):
     from cstar.applications.forge.engine import (
         process_forge_blueprint,
         verify_content_hash,
@@ -2187,7 +2189,8 @@ def test_engine_warns_on_hash_mismatch(tmp_path):
     data["model_settings"]["v_sponge"]["v_sponge"] = 12345.0
     p.write_text(yaml.safe_dump(data))
     tampered = ForgeBlueprint.from_yaml(p)
-    assert verify_content_hash(tampered) is not None  # mismatch detected
+    integrity = verify_content_hash(tampered)
+    assert integrity is not None  # mismatch detected
     # ... and a clean (re-saved) file does not warn
     assert (
         verify_content_hash(
@@ -2213,9 +2216,82 @@ def test_engine_warns_on_hash_mismatch(tmp_path):
         def path_ucla_roms_blueprint(self):
             return "/bp"
 
-    with pytest.warns(UserWarning, match="integrity check FAILED"):
-        b = process_forge_blueprint(tampered, validate=False, executor_factory=_Fake)
+    with warnings.catch_warnings(record=True) as raised:
+        warnings.simplefilter("always")
+        with caplog.at_level(logging.WARNING):
+            b = process_forge_blueprint(
+                tampered, validate=False, executor_factory=_Fake
+            )
     assert b.calls == ["e", "g", "c"]  # processing proceeded
+    # reported once, through the log: not a second time as a UserWarning
+    assert [r.getMessage() for r in caplog.records].count(integrity) == 1
+    assert not [w for w in raised if issubclass(w.category, UserWarning)]
+
+
+def _override_step(path: Path, tmp_path: Path, **overrides: t.Any) -> t.Any:
+    """A forge step on the blueprint at ``path`` carrying ``overrides``."""
+    return LiveStep(
+        name="forge-step",
+        application="forge",
+        blueprint=path.as_posix(),
+        blueprint_overrides=overrides,
+        working_dir=tmp_path / "forge-step",
+    )
+
+
+def test_override_write_restamps_the_content_hash(tmp_path: Path) -> None:
+    """Verify a blueprint rewritten by `OverrideTransform` records the hash of the
+    content it holds, so loading it reports no integrity problem and processing it
+    does not warn.
+    """
+    p = _build().to_yaml(tmp_path / "forge_blueprint.yaml")
+    step = _override_step(p, tmp_path, run={"end_date": "2012-01-03T00:00:00"})
+
+    overridden = next(iter(OverrideTransform()(step)))
+
+    reloaded = ForgeBlueprint.from_yaml(overridden.blueprint_path)
+    assert reloaded.run.end_date == datetime(2012, 1, 3)
+    assert reloaded.provenance.content_hash == reloaded.content_hash()
+    assert reloaded.integrity_problem() is None
+
+
+def test_override_transform_reports_a_hand_edited_blueprint_once(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Verify a file edited by hand since it was written is reported once by
+    `OverrideTransform`, before the override write records the hash of its content.
+    """
+    p = _build().to_yaml(tmp_path / "forge_blueprint.yaml")
+    data = yaml.safe_load(p.read_text())
+    data["model_settings"]["v_sponge"]["v_sponge"] = 12345.0
+    p.write_text(yaml.safe_dump(data))
+    step = _override_step(p, tmp_path, run={"end_date": "2012-01-03T00:00:00"})
+
+    with caplog.at_level(logging.WARNING):
+        overridden = next(iter(OverrideTransform()(step)))
+
+    failures = [r for r in caplog.records if "integrity check FAILED" in r.getMessage()]
+    assert len(failures) == 1
+    # the rewritten file holds the edit it was given, and now matches its hash
+    assert (
+        ForgeBlueprint.from_yaml(overridden.blueprint_path).integrity_problem() is None
+    )
+
+
+def test_stamped_for_write_leaves_the_blueprint_unchanged(tmp_path: Path) -> None:
+    """Verify the write hook returns a copy carrying the current hash and does not
+    touch `self` or the identity `stamp_provenance` records.
+    """
+    cfg = _build()
+    assert cfg.provenance.content_hash is None
+
+    stamped = cfg.stamped_for_write()
+
+    assert stamped is not cfg
+    assert cfg.provenance.content_hash is None
+    assert stamped.provenance.content_hash == cfg.content_hash()
+    assert stamped.provenance.generated_by == cfg.provenance.generated_by
+    assert stamped.provenance.generated_at == cfg.provenance.generated_at
 
 
 def _with_recorded_hash(

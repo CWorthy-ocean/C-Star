@@ -2043,7 +2043,10 @@ class ROMSSimulation(Simulation):
         self._namelist_schema = schema
 
     def _validate_build_flags(self, build_dir: Path) -> None:
-        """Ensure the staged `cppdefs.opt` agrees with `use_pio` and `auto_tiling`.
+        """Ensure the staged `cppdefs.opt` agrees with the simulation's build flags.
+
+        Checks `use_pio` (`PARALLEL_IO`), `auto_tiling` (`MPI_MASKING`) and the
+        presence of `cdr_forcing` (`CDR_FORCING`).
 
         Shared by `build()` (before compiling) and `attach()` (before adopting
         a previously compiled executable), so a resumed run fails as loudly
@@ -2087,6 +2090,18 @@ class ROMSSimulation(Simulation):
                 f"auto_tiling is True but 'MPI_MASKING' is not defined in "
                 f"{cppdefs}. Either add '#define MPI_MASKING' to cppdefs.opt or "
                 "set partitioning.auto_tiling to false."
+            ),
+        )
+        self._validate_cppdef_flag(
+            build_dir,
+            define="CDR_FORCING",
+            enabled=self.cdr_forcing is not None,
+            error_if_missing=(
+                f"CDR forcing is given but 'CDR_FORCING' is not defined in "
+                f"{cppdefs}, so ROMS would stage the CDR forcing file and never "
+                "read it. Build with CDR forcing enabled (in a forge blueprint, "
+                "set cdr.mode, e.g. upscaled; otherwise add '#define CDR_FORCING' "
+                "to cppdefs.opt) or remove the CDR forcing."
             ),
         )
 

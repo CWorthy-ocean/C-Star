@@ -1491,7 +1491,7 @@ def test_time_recipes_offer_only_ucla_roms_steps_as_bases(page):
     assert page.roms_step_names() == []
     assert _values(page.chunk_base.step) == [""]
     assert _values(page.ramp_base.step) == [""]
-    assert "upscaling needs ucla_roms steps" in page.recipe_hint.value
+    assert "Chunk and ramp can start from a blueprint" in page.recipe_hint.value
     assert page.upscale_btn.disabled
     # chunk and ramp can still start from a blueprint, so they stay enabled
     assert not page.chunk_btn.disabled and not page.ramp_btn.disabled
@@ -1552,22 +1552,27 @@ def test_forge_then_run_recipe_adds_forge_and_deferred_steps(page, tmp_path):
     assert "cannot read a forge blueprint" in page.forge_status.value
 
 
-def test_upscale_recipe_reads_use_pio_from_the_blueprints(page, roms_bp, tmp_path):
+def test_upscale_recipe_refuses_as_not_yet_supported(page, roms_bp):
     _roms_page(page, roms_bp, "inner")
     outer = page.add_step("outer")
     _path_step(outer, "outer", roms_bp)
-    assert page.upscale_levels.allowed_tags == ["inner", "outer"]
-    page.upscale_levels.value = ["inner", "outer"]
+    page.upscale_levels.value = ("inner", "outer")
     page.upscale_btn.click()
-    names = [p.name.value for p in page.panes]
-    assert names == ["inner", "outer", "upscale_inner_outer", "outer_up"]
-    draft = _round_trips(page, tmp_path)
-    upscale = {s.name: s for s in draft.steps}["upscale_inner_outer"]
-    assert upscale.is_inline and upscale.blueprint_overrides["pio"] is True
-    assert page.panes[2].application.value == "upscaler"
-    page.upscale_levels.value = ["inner"]
-    page.upscale_btn.click()
-    assert "at least two levels" in page.upscale_status.value
+    assert "forge-msg-err" in page.upscale_status.value
+    assert "not yet supported" in page.upscale_status.value
+    assert "cdr.mode: upscaled" in page.upscale_status.value
+    assert "continue-from" in page.upscale_status.value
+    assert [p.name.value for p in page.panes] == ["inner", "outer"]
+
+
+def test_upscale_controls_stay_disabled_with_levels_present(page, roms_bp):
+    assert page.upscale_levels.disabled and page.upscale_btn.disabled
+    _roms_page(page, roms_bp, "inner")
+    outer = page.add_step("outer")
+    _path_step(outer, "outer", roms_bp)
+    assert list(page.upscale_levels.options) == ["inner", "outer"]
+    assert page.upscale_levels.disabled
+    assert page.upscale_btn.disabled
 
 
 # ---------------------------------------------------------------------------
@@ -1889,36 +1894,6 @@ def test_current_config_is_not_saved_when_boundaries_cannot_be_derived(
     assert "forge-banner err" in pane.current_note.value
     assert not saved.exists()
     assert any("choose a blueprint" in p for p in page.problems)
-
-
-def test_upscale_use_pio_defaults_to_off_when_unknown(page, tmp_path):
-    for name in ("inner", "outer"):
-        pane = page.panes[0] if name == "inner" else page.add_step(name)
-        pane.name.value = name
-        pane.source.value = wb.SOURCE_PATH
-        pane.path.value = str(tmp_path / "unreadable.yaml")
-        pane.application.value = "ucla_roms"
-    page.upscale_levels.value = ["inner", "outer"]
-    page.upscale_btn.click()
-    upscale = {p.name.value: p for p in page.panes}["upscale_inner_outer"]
-    assert upscale._form["pio"][0].value is False
-
-
-def test_upscale_use_pio_of_a_deferred_level_comes_from_the_hook(page):
-    page._delete(page.panes[0])
-    _name_page(page)
-    page.forge_source.value = _FORGE_BP
-    page.forge_btn.click()
-    inner = page.add_step("inner")
-    inner.source.value = wb.SOURCE_DEFERRED
-    inner.producer.value = "forge"  # wio-toy-simple predicts use_pio=True
-    outer = page.add_step("outer")
-    outer.source.value = wb.SOURCE_DEFERRED
-    outer.producer.value = "forge"
-    page.upscale_levels.value = ["inner", "outer"]
-    page.upscale_btn.click()
-    upscale = {p.name.value: p for p in page.panes}["upscale_inner_outer"]
-    assert upscale._form["pio"][0].value is True
 
 
 @pytest.mark.parametrize(
