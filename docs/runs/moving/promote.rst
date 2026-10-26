@@ -38,19 +38,10 @@ them:
 ``--include all``
    The whole directory.
 
-``promote`` never overwrites. A destination that holds another run (a
-manifest with another uuid) is refused, and so is one that already holds
-this run.
-
-After the copy, the destination is checked as ``cstar run check`` does, and
-its ``gathered_output`` is rebuilt when the source has one. A product that
-is missing or whose size changed, a carried input that differs, a step
-directory that is missing or a dangling link fails the promotion with exit
-code 1. Pass ``--verify`` to compare the content of every product too: the
-digest of each product that has none is computed from the source, recorded
-in the copy's step records and manifest, and the copy is compared against
-every recorded digest (see :doc:`manifest`). The source is never written
-into.
+``promote`` never overwrites an existing run, and never writes into the
+source. After the copy, the destination is checked as ``cstar run check``
+does; pass ``--verify`` to compare the content of every file too (see
+:doc:`manifest`).
 
 
 Copy, link, materialize or move

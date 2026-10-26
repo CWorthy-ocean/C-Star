@@ -50,13 +50,8 @@ and MARBL configuration, its executable and its log; for a Forge step, its
 generated inputs, published blueprint, rendered configuration and log; for
 a ``cdr_metrics`` step, its metrics series and figures.
 
-The scheduling command writes the manifest and records each
-step's submission as it makes it. The steps write their own records and
-never touch the manifest. ``cstar run status`` and ``cstar run show``
-refresh the manifest: they fold the step statuses and records into it, and
-once every step is terminal they set ``finished_at`` on the latest attempt,
-which is the completion marker. A run that finishes while nobody is watching
-is closed by the next ``status`` or ``show``.
+``cstar run status`` and ``cstar run show`` keep the manifest up to date
+with the steps' latest status and records.
 
 A standalone ``cstar blueprint run`` writes the same two files in its
 working directory, with ``kind: blueprint`` and one step. Runs scheduled
@@ -69,19 +64,11 @@ reference <../../schemas/index>`.
 Timing records
 ^^^^^^^^^^^^^^
 
-The manifest records each step's latest submission (``launcher``,
-``job_id``, ``submitted_at``), and the step record says what ran the step.
-``cstar run show`` derives two times from these: the time the step waited,
-from its submission to the step process starting, and its wall time, from
-that start to the recorded outcome. The wait includes the time a step was
-held for the steps it depends on, since a dependent step is submitted as
-soon as they are. ``show`` leaves both times out when the step's record is
-from an earlier run than its latest submission.
-
-The manifest keeps only the latest submission of each step. Anything else
-is SLURM accounting's to keep: an earlier submission, CPU time, the memory
-high-water mark, and the exit state of a job that was killed before its
-step could write a record. Query it by job id while your site retains it:
+``cstar run show`` lists how long each step waited in the queue and how
+long it ran, from the latest submission recorded in the manifest. For
+anything more (CPU time, memory high-water mark, earlier submissions, a job
+killed before it could write its record), ask SLURM by job id while your
+site keeps its accounting:
 
 .. code-block:: console
 
@@ -104,15 +91,9 @@ attempt's start in UTC:
   point and is not carried; an inline one is written into its step's
   directory.
 
-The run manifest records the directory on the attempt with a sha256 digest
-of each file. A re-entry by ``--run-id`` alone, or with ``--resume``,
-replays the recorded plan and carries nothing. The plan a run executes stays
-in the run directory as ``<stem>_transformed.yaml``, where ``<stem>`` is the
-workplan file's name without its extension; each attempt overwrites it.
-Only the latest attempt that carried inputs is ever read: ``--resume
-<workplan>``, and a re-run under a run ID derived from the workplan
-``name``, compare the workplan you give with its ``workplan.yaml``. Older
-attempt directories are a record and can be deleted by hand.
+The plan the run actually executes is kept beside them in the run
+directory as ``<workplan>_transformed.yaml``. Older attempt directories are
+a record and can be deleted by hand.
 
 Moving a run directory
 ----------------------
@@ -123,11 +104,6 @@ copied as a unit. ``cstar run show <directory>`` reads a copy anywhere, and
 ``cstar run check <directory>`` reports anything that did not survive the
 move: a missing product, a changed size, a symlink that points back at the
 old location.
-
-The transformed workplan holds absolute paths into the run directory, and
-records the run directory it was written under. Every command that reads
-it rebases the paths that begin with the recorded root onto the directory
-the file now sits in, so the plan stays valid too.
 
 A run copied to any other path, or to another machine, has valid internal
 paths and is read through its directory, but it is not tracked there:
@@ -150,8 +126,8 @@ digests were recorded before it. Run this on the machine that has the run:
 It computes a digest for each product that has none and writes it into the
 step records and the run manifest. For a netCDF file the digest covers the
 structure and a bounded sample of the data, which does not depend on how
-the file is stored on disk and balances accuracy with potentially length hash
-computations across hundreds of terabytes of files. ``--record-digests`` writes
+the file is stored on disk and balances accuracy against potentially lengthy
+hash computations across hundreds of terabytes of files. ``--record-digests`` writes
 into the run, so it needs a run you own that is tracked here, or the run's
 directory passed explicitly.
 

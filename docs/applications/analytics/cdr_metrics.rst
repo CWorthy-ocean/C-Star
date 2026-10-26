@@ -28,14 +28,10 @@ blueprint has one field, ``domains``. It maps a domain name to:
    The ``location`` of the domain's ROMS grid file.
 ``sources``
    The ordered sources of the domain's ``_cdr`` output, each a ``location``
-   that is a directory or a single ``_cdr`` file. A step's ``output`` directory
-   yields the ``_cdr`` files the step's :term:`step record` lists as
-   ``cdr_output`` :term:`products <Product>`, and a file the record lists that
-   is missing from disk fails the step, with an error pointing at ``cstar run
-   check``. A directory without such a record (a step run under C-Star 0.17.0
-   or earlier, or a directory of files from elsewhere) is searched recursively.
-   The first source must hold the segment containing the release, because the
-   cumulative sums start at its first record.
+   that is a step's ``output`` directory, another directory of ``_cdr``
+   files, or a single ``_cdr`` file. The first source must hold the segment
+   containing the release, because the cumulative sums start at its first
+   record.
 ``source_role``
    ``release`` (the default) for the domain holding the CDR release, or
    ``transfer`` for a parent domain that receives the release from a nested

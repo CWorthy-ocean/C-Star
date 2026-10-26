@@ -77,10 +77,8 @@ A step that will produce it (``from_step``)
    records exactly what ran. (A relative blueprint file literally named
    ``inline`` must be written ``./inline``.)
 
-A step written with ``application: roms_marbl``, the earlier name of
-``ucla_roms``, still loads and runs unchanged. Applications with
-schedule-time transforms (UCLA-ROMS time splitting) cannot be used with a
-deferred or inline blueprint.
+UCLA-ROMS time splitting cannot be used with a deferred or inline
+blueprint.
 
 Besides ``name``, ``application``, ``blueprint`` and ``depends_on``, a step
 can carry:
@@ -330,10 +328,8 @@ optional:
 
 ``launcher`` selects how steps are executed. Omitted, C-Star picks the
 launcher for the current system: SLURM when the system has a scheduler,
-otherwise local. ``slurm`` on a system with no scheduler stops the run with
-an error; ``local`` on a system with a scheduler runs the steps as local
-processes and logs a warning. ``system`` names the machine the workplan was
-written for, and a mismatch with the detected system produces one warning.
+otherwise local. ``system`` names the machine the workplan was written for,
+for the record.
 
 Per step, ``compute_overrides`` replaces any of the scheduler settings under
 a key naming the launcher. A common pattern sends Forge steps to a

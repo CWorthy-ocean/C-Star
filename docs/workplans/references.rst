@@ -117,14 +117,12 @@ A run is named in one of three ways:
   <../runs/moving/manifest>`, which the ``Id`` row of ``cstar run show``
   prints. The scheme is not case-sensitive. A uuid names one run; two runs
   can share a run-id.
-- A directory is the run directory, the one that holds ``cstar-run.yaml``. Text
-  with a ``/``, or one that starts with ``.`` or ``~``, is read as a directory,
-  so ``./spinup`` is a directory and ``spinup`` is a run-id. In ``runs``, a
-  relative directory is resolved against the directory of the workplan file (on
-  the command line, against the current directory), ``~`` is expanded, and a
-  ``{{name}}`` placeholder is filled first.
+- A directory is the run directory, the one that holds ``cstar-run.yaml``.
+  Anything with a ``/``, or starting with ``.`` or ``~``, is read as a
+  directory, so ``./spinup`` is a directory and ``spinup`` is a run ID. A
+  relative directory is resolved against the directory of the workplan file.
 
-Any of these formats can also utilize :doc:`runtime variables <Runtime Variables>`
+Any of these formats can also utilize :doc:`runtime variables <variables>`
 to dynamically reference a run passed via the command line.
 
 .. _workplan_extending_run:
@@ -165,84 +163,29 @@ directory in the same way. A base run that is not tracked here must have
 completed the steps used (see above). The new run's manifest records the base
 run by its uuid.
 
-Re-entering the base run's own workplan is for a run you own that is tracked
-on this machine: pass ``--clobber <step>`` to run steps again (see
-:ref:`workplan_rerun`). A run you were given or moved is generally not
-re-entered. Re-entry, with ``--run-id`` or ``--resume``, acts only on a run
-tracked on this machine and not attached from elsewhere, and the run's recorded plan names the blueprint
-files you wrote at the paths they had when the run was scheduled, outside the
-run directory. A blueprint generated inside the run, or declared ``inline``,
-is in the run directory. The copies under ``attempts/`` are a record.
-
 
 Further details on run referencing
 ----------------------------------
 
 How run references are resolved
-```````````````````````````````
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-A run is found as follows:
-
-- A run-id goes to the runs tracked on this machine first, and a tracked run is
-  the one used. When the project runs area (see :doc:`../hpc`) holds another run
-  with that run-id, a different uuid, C-Star warns, names it, and says to pass
-  ``run://<uuid>`` or its directory to use that one. When the tracked run's
-  directory is gone, as after a purge of scratch, a copy of the same run (the
-  same uuid) in a directory named for the run-id, in your data home or the
-  project runs area, is used.
-- A run-id that is not tracked here is looked up in the manifests of the
-  directories of that name under ``CSTAR_DATA_HOME/workplan_runs/``,
-  ``CSTAR_DATA_HOME/blueprint_runs/<application>/`` and the project runs area,
-  ``cstar/runs/`` under ``CSTAR_PROJECT_HOME``. Two different runs under one
-  run-id are an error that lists them; C-Star does not pick the more recent.
-  Name the one you mean by ``run://<uuid>`` or by its directory.
-- ``run://<uuid>`` is looked up in the manifests of the runs under those same
-  three directories, one level down. A run tracked here is used as tracked.
-  The directories are scanned at most once per command, and no index file is
-  written.
-- A directory is read directly, wherever it is; when it is the directory of a
-  run tracked here, that run is used as tracked.
-
-Tracking is kept per machine, under ``CSTAR_STATE_HOME``. A run started on
-another machine, or under another state home, is not tracked here. It is
-reached by the path of its directory, or :doc:`attached
-<../runs/moving/attach>`. When that directory is in one of the places scanned
-above, the run is also reached by ``run://<uuid>``, and by its run-id when
-the directory is named for it.
+- A run ID is looked up among the runs tracked on this machine first, then
+  in directories of that name in your data home and the project runs area.
+  If two different runs share the run ID, C-Star stops and lists them; name
+  the one you mean by ``run://<uuid>`` or by its directory.
+- ``run://<uuid>`` is looked up in the same places.
+- A directory is read directly, wherever it is.
 
 The rules
-`````````
+^^^^^^^^^
 
-- Every alias used in a token must be declared under ``runs``; an undeclared
-  alias is rejected when the workplan is loaded. Because ``@`` separates the
-  step from the alias, step names and aliases may not contain it.
-- An external step a step reads from must be listed in that step's
-  ``depends_on`` (directly or through an earlier step), exactly as a local
-  step must be. ``cstar workplan check`` and ``cstar workplan submit`` report
-  every missing dependency.
-- When the workplan is scheduled, each external step is looked up in the
-  other run's records: the run must be found, the step must exist in it, and
-  the step must have **completed** (``Done``). For a run tracked on this
-  machine, a step that is still running is accepted only when both runs use
-  the SLURM launcher; the new step is then submitted with a SLURM dependency
-  on the other run's job. A step that failed, was cancelled, was never
-  submitted, or is running under the local launcher is refused with a message
-  naming the run, step and status. If a status looks stale (the other run
-  finished but its orchestrator was not polled since), ``cstar run status
-  <run-id>`` refreshes it.
-- A run that is not tracked here is known only by its manifest: a copy, a run
-  in the project runs area, a colleague's run reached by its directory, or a
-  run in your data home that was not started on this machine. A run attached
-  from elsewhere is read the same way. It has no job to wait for, so only a
-  step its manifest records as ``Done`` can be depended on; any other status is
-  refused with the recorded status named. A run with no
-  workplan, such as a standalone blueprint run, cannot be referenced.
-- The transformed workplan written into the run directory records, for each
-  alias that a step refers to, the run it resolved to: the run's run-id
-  (``run_id``), uuid (``id``), start time (``start_at``) and, for a reference
-  by directory, that directory (``path``). The run's inputs stay traceable even
-  if the same run-id is used again later, and later lookups, such as ``cstar
-  run status`` or a step that depends on the run, go straight to that run. A
-  workplan you write does not set ``id`` or ``path``; the :doc:`workplan
-  schema <../schemas/index>` has them from version 1.1.0. The run manifest
-  records the uuid of each referenced run as well.
+- Every alias used in a step must be declared under ``runs``. Step names
+  and aliases may not contain ``@``.
+- A step that reads from another run's step must list it in ``depends_on``,
+  exactly as for a step of its own workplan.
+- The other run's step must have **completed** when the workplan is
+  submitted. The one exception is a run on this machine whose step is still
+  running under SLURM: the new step is then submitted to wait for that job.
+- The run directory records which run each alias resolved to, so the inputs
+  stay traceable even if the same run ID is used again later.

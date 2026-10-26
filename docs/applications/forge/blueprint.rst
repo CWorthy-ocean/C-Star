@@ -42,24 +42,13 @@ normally omits), a forge blueprint has these sections:
    Optional carbon dioxide removal forcing: none, a hand-authored
    description, or an imported netCDF file.
 ``carbonate_sensitivity``
-   Optional, and only valid with ``bgc_mode: cdr_lite``. The carbonate
-   sensitivity files (``ddic_dco2`` and ``ddic_dalk`` with their time
-   variables) that a CDR-lite build reads as surface forcing, as a ``files:``
-   list of ``location`` and ``content_hash`` entries, in the order ROMS reads
-   them; the basenames must be distinct. It is normally absent, and a saved
-   blueprint then has no such key: the ``carbonate-sensitivity-from``
+   Optional, and only for ``bgc_mode: cdr_lite``: the carbonate sensitivity
+   files (``ddic_dco2`` and ``ddic_dalk``) a CDR-lite build reads as surface
+   forcing, as a ``files:`` list of ``location`` and ``content_hash``
+   entries. It is normally left out, and the ``carbonate-sensitivity-from``
    :doc:`workplan directive <../../workplans/directives>` supplies the files at
-   run time, from the ``_cdrgas`` output of an earlier UCLA-ROMS step
-   with MARBL. When it is present, each ``location`` must exist on the machine running Forge (a
-   relative one resolves against the directory of the forge blueprint file):
-   Forge checks each file for the variables above, copies it into
-   ``input_data/`` under its own name (as classic netCDF when the build uses
-   ParallelIO), and lists the copies in the UCLA-ROMS blueprint's
-   ``forcing.carbonate_sensitivity``. The ``content_hash`` pins the file's
-   structure and a sample of its data, so a changed file only warns; the
-   ``location`` is not part of the blueprint's content hash. Files are rejected for any other biogeochemistry
-   mode, and when ``cdr_lite.cdr_online_carbonate_sensitivity`` is on, because
-   ROMS then computes the sensitivities itself.
+   run time from an earlier UCLA-ROMS run with MARBL. When it is given, Forge
+   checks the files and copies them into ``input_data/``.
 ``datasets``
    The list of source datasets Forge must stage before generating inputs
    (derived from ``forcing``; see :doc:`source_datasets`).
@@ -76,20 +65,11 @@ normally omits), a forge blueprint has these sections:
    and what produced the file: when (``generated_at``) and by which tool
    (``generated_by``, holding the tool, a unique id, the system and the
    versions of C-Star and roms-tools), plus a content hash. Both are
-   informational; the executor never reads the catalog. ``generated_by`` is
-   re-stamped, with a new id, only when the content hash changes (or when the
-   file was never stamped), so saving an unchanged blueprint again keeps it.
-   The ``forge_version``, ``cstar_version`` and ``roms_tools_version`` fields
-   come from older blueprints: they still load, but nothing writes them any
-   more.
+   informational; Forge never reads the catalog when it processes the
+   blueprint.
 
-A ``forge_blueprint_version`` field records the schema version (currently 10).
-Blueprints written by older versions are migrated when loaded; a blueprint newer
-than the installed C-Star is rejected with a message saying so. Version 10 is the
-first to record ``generated_by``, so an older install asks you to upgrade rather
-than choking on the new key. The migration removes an old default ``working_dir``
-(``~/cstar/_forge_bp_runs/<name>``), so that blueprint takes the default location
-described below; a path you set deliberately is kept.
+A ``forge_blueprint_version`` field records the schema version. Blueprints
+written by older versions of C-Star are migrated automatically when loaded.
 
 Example
 -------

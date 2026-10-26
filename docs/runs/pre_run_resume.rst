@@ -73,15 +73,10 @@ prepares nothing, because the simulation's blueprint comes from the Forge
 step; the pre-run earns its keep on workplans whose blueprints exist up
 front.
 
-The same run ID also works after a failed real run. If a scheduled run
-fails, fix the cause and submit the workplan again with ``--pre-run``: the
-failed steps are cleared and prepared from scratch on the login node, and
-the following plain submit attaches to them as above. Running ``--pre-run``
-again on the same run ID leaves already-prepared steps as they are; to
-prepare from scratch, add ``--clobber all`` (or ``--clobber
-<step-name>``). A pre-run is a property of the whole run, so a hand-written
-``pre_run`` key in ``workflow_overrides`` must appear on every step or on
-none; use ``--pre-run`` instead.
+The same run ID also works after a failed real run: fix the cause and
+submit the workplan again with ``--pre-run``, and the failed steps are
+prepared again from scratch on the login node. To re-prepare steps that
+already succeeded, add ``--clobber all`` (or ``--clobber <step-name>``).
 
 Two things a pre-run does not do. When a step uses ParallelIO, the inputs
 are not partitioned, so the pre-run only validates them and preparation is
@@ -101,12 +96,9 @@ For a single blueprint:
 
    cstar blueprint run my_blueprint.yaml --resume
 
-A resumed UCLA-ROMS run adopts the codebases already cloned and compiled in
-the working directory (provided each is a clean checkout of the blueprint's
-pinned version with its build artifacts present; the check needs no network
-access), the staged inputs and their partitions, and the compiled
-executable, and continues from the last usable restart file the previous
-attempt wrote. When no restart was written, it starts from the original
+A resumed UCLA-ROMS run reuses the codebases, compiled executable, staged
+inputs and partitions already in the working directory, and continues from
+the last usable restart file the previous attempt wrote. When no restart was written, it starts from the original
 initial conditions. ``--resume`` cannot be combined with ``--clobber``, and
 only applications that declare themselves resumable accept it (today,
 ``ucla_roms``).

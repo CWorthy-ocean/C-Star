@@ -94,19 +94,12 @@ A ``model.yaml`` has this shape:
      # one section per namelist group whose defaults are model-level
 
 ``bgc_mode`` and ``use_pio``
-   Build modes rather than settings. They prepopulate the wizard, and the
-   resolver derives the corresponding compile-time switches from them and
-   decides whether the MARBL and PIO code are pulled in. Requesting PIO from
-   a model with no ``code.pio`` pin is an error. ``param.ntrc_bio`` is the
-   MARBL tracer count: without MARBL (``bgc_mode: none`` or ``cdr_lite``) the
-   resolver sets it to 0, and a non-zero count without MARBL is rejected.
-   ``bgc_mode: cdr_lite`` is a build without MARBL whose only extra tracers
-   are ucla-roms' dedicated CDR-lite tracers: it needs ucla-roms 0.10.0 or
-   later and a CDR forcing (a ``cdr`` selection) with ``cdr_lite`` releases,
-   and, like ``none``, rejects a forcing selection that asks for BGC
-   forcing. The tracer counts and the ``cdr_lite_output`` stream are derived
-   from the generated CDR forcing at build time; see
-   :doc:`../../developers/forge_internals`.
+   Build modes rather than settings. They prepopulate the wizard, and Forge
+   derives the matching compile-time switches from them and decides whether
+   the MARBL and PIO code are pulled in, so PIO needs a ``code.pio`` pin.
+   ``bgc_mode: cdr_lite`` builds ucla-roms' dedicated CDR-lite tracers
+   without MARBL: it needs ucla-roms 0.10.0 or later and a CDR forcing, and
+   takes no biogeochemical forcing.
 
 ``archived``
    Optional, default ``false``. An archived spec stays fully usable: blueprints
@@ -144,10 +137,8 @@ A ``model.yaml`` has this shape:
    switches, the MARBL and tides switches, the processor grid) are set by the
    resolver and are left out of the spec; only genuinely model-level
    defaults belong here. Keys are Forge's lowercase setting names (``llm``,
-   ``np_xi``, ``wrt_z``), not the ROMS namelist spelling (``LLm``, ``NP_XI``,
-   ``wrt_Z``, or a renamed key such as ``akv_bak`` for
-   ``vertical_mixing.akv``): a key that matches a setting only that way is
-   rejected, naming the setting it meant, instead of being ignored.
+   ``np_xi``, ``wrt_z``), not the ROMS namelist spelling (``LLm``,
+   ``NP_XI``, ``wrt_Z``).
 
 Settings that a newer ROMS knows and an older one does not are declared only
 by the specs for that ROMS version; the template renders them off when a

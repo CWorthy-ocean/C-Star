@@ -109,37 +109,11 @@ entries already in the blueprint.
     such a run fails during setup with a message naming the missing
     variables.
 
-apply-overrides
-```````````````
-
-C-Star packages every step's ``blueprint_overrides``, together with the
-system-level overrides it adds (such as the step's working directory), into an
-``apply-overrides`` directive when the workplan is scheduled, and applies them
-on the compute node. You do not write this directive yourself.
-
-Finding a step's files
-----------------------
-
-A ``step`` source reads the files it needs from the :term:`step record` that
-step wrote, by :term:`product <Product>` kind: ``continue-from`` takes the
-``restart`` files (from a step that recorded none, the ``initial_conditions``
-files named like restarts, which is what ``nest_ic`` writes), ``nest-from``
-the ``boundary_forcing`` files with role ``child``, and
-``carbonate-sensitivity-from`` the ``gas_exchange`` files. When the record
-lists no product of that kind -- the step ran under C-Star 0.17.0 or earlier,
-whose records list no products, or its application does not classify its files
-that way -- the step's ``output`` directory is searched by file name instead.
-A product the record lists that is missing from disk fails the step that reads
-it, with an error pointing at ``cstar run check``. A ``path`` source is always
-searched by name.
-
 Ordering
 --------
 
-``apply-overrides`` always runs first, so a deferred blueprint's overrides
-are applied before any other directive inspects or modifies it. Other
-directives on a step run in the order they are listed under the ``directives:``
-block in the workplan.
+A step's ``blueprint_overrides`` are applied first, then its directives, in
+the order they are listed under ``directives:``.
 
 Example
 -------

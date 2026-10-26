@@ -110,16 +110,12 @@ Every C-Star application writes under its blueprint's ``working_dir``. A
 blueprint that omits it runs under
 ``CSTAR_DATA_HOME/blueprint_runs/<application>/<name>``, with the blueprint
 name slugified. A workplan gives each step
-``CSTAR_DATA_HOME/workplan_runs/<run id>/tasks/<step>``; a run started
-before that layout keeps its ``CSTAR_DATA_HOME/<run id>`` directory when you
-re-run or resume it. A ``working_dir`` you set is used exactly as written; a
+``CSTAR_DATA_HOME/workplan_runs/<run id>/tasks/<step>``. A ``working_dir`` you set is used exactly as written; a
 relative path is resolved against the directory you run from.
 
 A relative ``location:`` inside a blueprint, such as an input dataset or local
 code, is different: it resolves against the directory of the blueprint file,
-wherever you run from. A location that exists only relative to the directory
-you run from, where earlier releases looked, is rejected with both paths
-named, rather than read from the wrong place. A blueprint fetched from a URL has
+wherever you run from. A blueprint fetched from a URL has
 no directory of its own, so its relative locations resolve against the
 directory you run ``cstar`` from.
 

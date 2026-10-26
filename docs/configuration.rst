@@ -82,23 +82,8 @@ An exported variable always beats the file. If a setting in the file seems
 to be ignored, look for an old ``export`` line in your shell profile and
 remove it. The full order is under :ref:`configuration_precedence`.
 
-A line C-Star will not apply is skipped, with one warning naming it and why,
-and every other line still applies; ``cstar env set`` refuses such a name
-outright, so a typo is caught when it is written. C-Star stops only when it
-cannot read the file at all, and even then ``cstar init`` and ``cstar env``
-still run, so you can repair it. Skipped are:
-
-- names this version does not know: a typo, or a setting from a newer
-  version of C-Star sharing the file;
-- settings this version no longer reads (an older version may still);
-- feature flags (``CSTAR_FF_*``), which are developer toggles and must be
-  exported;
-- ``CSTAR_CONFIG_HOME``, because it says where to find the file;
-- a name written without ``=``.
-
-``cstar init`` keeps these lines when it rewrites the file, in a section of
-their own: a setting another version may read stays as it was, and the rest
-are commented out.
+A line C-Star does not recognize, such as a typo, is skipped with a
+warning naming it, and every other line still applies.
 
 .. _configuration_precedence:
 
