@@ -966,8 +966,9 @@ def check_clobber_targets(wp: Workplan, clobber_steps: "Sequence[str]") -> list[
 def check_clobber_dependents(wp: Workplan, clobber_steps: "Sequence[str]") -> list[str]:
     """Return the untargeted steps that depend on a step selected for clobber.
 
-    Such steps will not be re-run and may consume stale outputs derived from
-    their re-executed dependencies.
+    Such a step that has already started is not re-run and may consume stale
+    outputs derived from its re-executed dependencies; one still queued is
+    queued again behind them by its launcher.
 
     Parameters
     ----------
@@ -1002,7 +1003,7 @@ def apply_clobber_overrides(
     `safe_name`), then mutates the matched steps' `workflow_overrides` in
     place so the selection is persisted with the workplan. Emits a single
     warning listing any untargeted steps that depend on a targeted one, since
-    they will not be re-run and may consume stale outputs.
+    one that has already started is not re-run and may consume stale outputs.
 
     Selections must be concrete step identifiers; the CLI-only token `all` is
     expanded to every step's safe_name before it reaches this layer.
@@ -1035,8 +1036,9 @@ def apply_clobber_overrides(
     if stale := check_clobber_dependents(wp, tokens):
         msg = (
             "Some steps depend on clobbered steps but were not selected for "
-            "clobber themselves; they will not be re-run and may consume "
-            f"stale outputs. Review the following steps: {', '.join(stale)}"
+            "clobber themselves; one that has already started is not re-run and "
+            "may consume stale outputs. Review the following steps: "
+            f"{', '.join(stale)}"
         )
         log.warning(msg)
 
