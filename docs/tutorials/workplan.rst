@@ -70,7 +70,7 @@ This reads the workplan and every blueprint it names, and reports problems
 such as a misspelled step name, a missing dependency, or a blueprint that does
 not validate. Nothing is written to disk.
 
-Submitting the blueprint in the next step will also perform the check before proceeding,
+Submitting the workplan in the next step also performs the check before proceeding,
 but doing it manually may help you catch errors after drafting or modifying a workplan you're
 not yet ready to submit.
 
@@ -154,7 +154,7 @@ to stop).
 
 shows what the run was and what it produced: each time it was submitted, on
 which machine and with which package versions, and each step's status and
-outcome. Once the run is over:
+outcome, with how long each step waited and ran. Once the run is over:
 
 .. code-block:: text
 
@@ -163,24 +163,31 @@ outcome. Once the run is over:
    │     Name │ wio-workplan-tutorial                │
    │     Kind │ workplan                             │
    │   Run-id │ wio-workplan-tutorial                │
-   │       Id │ b3881b52-933a-4db9-82cc-d79feb9de9fc │
+   │       Id │ 3d023067-6415-4055-bad1-5481131e11eb │
    │   System │ darwin_arm64                         │
-   │  Created │ 2026-10-21 16:50                     │
-   │ Observed │ 2026-10-21 16:57                     │
+   │  Created │ 2026-10-25 21:06                     │
+   │ Observed │ 2026-10-25 21:11                     │
    └──────────┴──────────────────────────────────────┘
-                                                        Attempts
-   ┏━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━┳━━━━━━━━┳━━━━━━━━━━━┳━━━━━━━━━┳━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
-   ┃ Started          ┃ Finished         ┃ Status ┃ Clobbered ┃ Resumed ┃ Pre-run ┃ cstar-ocean                      ┃
-   ┡━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━╇━━━━━━━━╇━━━━━━━━━━━╇━━━━━━━━━╇━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┩
-   │ 2026-10-21 16:50 │ 2026-10-21 16:56 │ done   │ -         │ -       │ no      │ 0.17.0                           │
-   └──────────────────┴──────────────────┴────────┴───────────┴─────────┴─────────┴──────────────────────────────────┘
-                                       Steps
-   ┏━━━━━━━━━━━━━┳━━━━━━━━━━━━━┳━━━━━━━━┳━━━━━━━━━━━┳━━━━━━━━━━┳━━━━━━┳━━━━━━━━┓
-   ┃ Step        ┃ Application ┃ Status ┃ Outcome   ┃ Products ┃ Size ┃ Record ┃
-   ┡━━━━━━━━━━━━━╇━━━━━━━━━━━━━╇━━━━━━━━╇━━━━━━━━━━━╇━━━━━━━━━━╇━━━━━━╇━━━━━━━━┩
-   │ make_inputs │ forge       │ Done   │ completed │ 0        │ 0 B  │ yes    │
-   │ simulate    │ ucla_roms   │ Done   │ completed │ 0        │ 0 B  │ yes    │
-   └─────────────┴─────────────┴────────┴───────────┴──────────┴──────┴────────┘
+                                                             Attempts
+   ┏━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━┳━━━━━━━━┳━━━━━━━━━━━┳━━━━━━━━━┳━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━┓
+   ┃ Started          ┃ Finished         ┃ Status ┃ Clobbered ┃ Resumed ┃ Pre-run ┃ cstar-ocean             ┃ Inputs          ┃
+   ┡━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━╇━━━━━━━━╇━━━━━━━━━━━╇━━━━━━━━━╇━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━┩
+   │ 2026-10-25 21:06 │ 2026-10-25 21:10 │ done   │ -         │ -       │ no      │ 0.17.1.dev32+gd36876ac8 │ 20261026T030652 │
+   └──────────────────┴──────────────────┴────────┴───────────┴─────────┴─────────┴─────────────────────────┴─────────────────┘
+                                        Steps
+   ┏━━━━━━━━━━━━━┳━━━━━━━━━━━━━┳━━━━━━━━┳━━━━━━━━━━━┳━━━━━━━━━━┳━━━━━━━━━┳━━━━━━━━┓
+   ┃ Step        ┃ Application ┃ Status ┃ Outcome   ┃ Products ┃ Size    ┃ Record ┃
+   ┡━━━━━━━━━━━━━╇━━━━━━━━━━━━━╇━━━━━━━━╇━━━━━━━━━━━╇━━━━━━━━━━╇━━━━━━━━━╇━━━━━━━━┩
+   │ make_inputs │ forge       │ Done   │ completed │ 13       │ 2.7 MiB │ yes    │
+   │ simulate    │ ucla_roms   │ Done   │ completed │ 7        │ 6.7 MiB │ yes    │
+   └─────────────┴─────────────┴────────┴───────────┴──────────┴─────────┴────────┘
+                         Jobs
+   ┏━━━━━━━━━━━━━┳━━━━━━━━━━━━━┳━━━━━━━━━┳━━━━━━━━━┓
+   ┃ Step        ┃ Job         ┃ Waited  ┃ Wall    ┃
+   ┡━━━━━━━━━━━━━╇━━━━━━━━━━━━━╇━━━━━━━━━╇━━━━━━━━━┩
+   │ make_inputs │ local 50862 │ 0:00:00 │ 0:02:01 │
+   │ simulate    │ local 50866 │ 0:02:06 │ 0:01:50 │
+   └─────────────┴─────────────┴─────────┴─────────┘
 
 Finally,
 
@@ -205,8 +212,9 @@ ID:
 ----------------------
 
 When ``status`` shows both steps as *Done*, the simulation's output is in the
-``simulate`` step's ``output`` directory. ``cstar run path <step>`` prints a run's or a
-step's directory, so you don't have to remember the layout. You can also use
+``simulate`` step's ``output`` directory. ``cstar run path wio-workplan-tutorial
+simulate`` prints that step's directory (leave out the step name for the run's
+own directory), so you don't have to remember the layout. You can also use
 
 .. code-block:: console
 
@@ -240,5 +248,23 @@ On a cluster
 A workplan is also how a run reaches the compute nodes of an HPC system.
 There, ``cstar workplan submit`` submits each step as a scheduler job and
 returns, and the ``cstar run`` commands work the same way from the login node.
-Each step can ask for its own cores, queue and walltime through
-``compute_overrides``; see :doc:`../workplans/index` and :doc:`../deployments/hpc`.
+
+One thing to add first. C-Star sizes each job from the step's blueprint, but
+``simulate``'s blueprint doesn't exist until ``make_inputs`` writes it, so the
+job would get a single CPU. The wio-toy domain is split into 2 by 5 tiles and
+runs on 10 MPI ranks, so ask for 10 CPUs with ``compute_overrides``:
+
+.. code-block:: yaml
+
+   - name: simulate
+     application: ucla_roms
+     blueprint:
+       from_step: make_inputs
+     depends_on:
+       - make_inputs
+     compute_overrides:
+       slurm:
+         num_cpus: 10
+
+``compute_overrides`` is also where a step asks for its own queue and
+walltime; see :doc:`../workplans/index` and :doc:`../deployments/hpc`.

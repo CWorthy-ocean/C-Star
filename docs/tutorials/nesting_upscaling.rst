@@ -165,9 +165,7 @@ The two domains are combined in a specific way:
   independent views of the same perturbation. They can disagree for a single
   domain: DIC that the child took up and then exported shows up as a DIC
   difference in ``parent_up``. On the sum the residual should be small next to
-  the flux-based uptake. The weekly extended integration test runs this
-  workplan on small stand-in forcing data and requires it to stay under a tenth
-  there; it does not check a run on the real forcing.
+  the flux-based uptake.
 
 ``cdr_metrics.nc`` also holds each domain's own uptake, such as
 ``child_carbon_uptake_from_flux`` and ``parent_up_carbon_uptake_from_flux``.
