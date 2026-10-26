@@ -3,7 +3,7 @@
 Automating the previous model with a workplan
 =============================================
 
-The :doc:`previous page <end_to_end>` ran Forge and then the simulation as two
+The :doc:`previous page <blueprint_tutorial>` ran Forge and then the simulation as two
 separate commands, and you carried the path of the blueprint Forge wrote from
 the first command to the second. A **workplan** does that for you. It is a
 small YAML file that lists the things to run as *steps*, says which steps wait
@@ -17,7 +17,7 @@ that help you manage more complex ocean modeling workflows.
 Before you start
 ----------------
 
-- Finish the :doc:`previous page <end_to_end>`, or at least step 1 of it: you
+- Finish the :doc:`previous page <blueprint_tutorial>`, or at least step 1 of it: you
   need a forge blueprint. Save it (or copy it) as ``forge_blueprint.yaml``
   in an empty directory.
 - Download :download:`workplan_forge_then_run.yaml <workplan_forge_then_run.yaml>`

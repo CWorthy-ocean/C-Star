@@ -74,8 +74,8 @@ written by older versions of C-Star are migrated automatically when loaded.
 Example
 -------
 
-The bundled toy domain used in the :doc:`end-to-end tutorial
-<../../tutorials/end_to_end>`:
+The bundled toy domain used in the :doc:`blueprint tutorial
+<../../tutorials/blueprint_tutorial>`:
 
 .. literalinclude:: forge-blueprint-example.wio-toy.yaml
    :language: yaml

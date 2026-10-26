@@ -91,7 +91,7 @@ decides which application handles it. GLORYS ocean reanalysis supplies the
 initial and boundary conditions, so
 [register for Copernicus Marine](https://c-star.readthedocs.io/en/latest/getting_started/data_access.html)
 before the first run. The
-[end-to-end tutorial](https://c-star.readthedocs.io/en/latest/tutorials/end_to_end.html)
+[blueprint tutorial](https://c-star.readthedocs.io/en/latest/tutorials/blueprint_tutorial.html)
 walks through each step in detail.
 
 ## Documentation

@@ -32,7 +32,7 @@ Before you start
   - :download:`forge_parent_up.yaml <nesting_upscaling_tiny/forge_parent_up.yaml>`
 
 The forge blueprints use the same sources as the :doc:`earlier tutorials
-<end_to_end>`: GLORYS for the ocean state, ERA5 for the atmosphere, and the
+<blueprint_tutorial>`: GLORYS for the ocean state, ERA5 for the atmosphere, and the
 UNIFIED biogeochemical climatology. Forge downloads GLORYS and UNIFIED into
 its source-data cache, and ERA5 is read over the network as the inputs are
 generated. If you have run the earlier tutorials, UNIFIED is already in the

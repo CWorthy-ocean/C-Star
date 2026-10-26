@@ -108,7 +108,7 @@ C-Star is built with these principles in mind:
     :caption: Guided tutorials
     :hidden:
 
-    Using blueprints to set up and run an ocean model <tutorials/end_to_end>
+    Using blueprints to set up and run an ocean model <tutorials/blueprint_tutorial>
     Automating the previous model with a workplan <tutorials/workplan>
     Spin-up, a CDR release and its metrics <tutorials/cdr_workplan>
     Nesting and upscaling: a tiny nested CDR run <tutorials/nesting_upscaling>

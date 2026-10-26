@@ -1,4 +1,4 @@
-.. _tutorial-end-to-end:
+.. _tutorial-blueprint:
 
 Using blueprints to set up and run an ocean model
 =================================================
@@ -89,11 +89,12 @@ it is, in a line like this:
 
 .. code-block:: text
 
-   Forge blueprint published for downstream steps: ~/cstar/blueprint_runs/forge/.../output/B_roms-marbl-0.12-default_wio-toy_10procs.yaml
+   Forge blueprint published for downstream steps: ~/cstar/blueprint_runs/forge/roms-marbl-0-12-default_wio-toy_10procs/output/B_roms-marbl-0.12-default_wio-toy_10procs.yaml
 
-Note that ``cstar blueprint run`` will run the application on the machine or node you call it from: perfect for a laptop.
-If you wanted to run the example from a HPC login node, where you have limited resources available, you can use ``cstar blueprint submit``
-to send the job to the HPC's SLURM scheduler for execution on a compute node instead.
+If you started from the bundled ``wio-toy-simple`` blueprint instead, it keeps
+that name, so the paths on the rest of this page use ``wio-toy-simple`` in
+both places: the blueprint to run next is
+``~/cstar/blueprint_runs/forge/wio-toy-simple/output/B_wio-toy-simple.yaml``.
 
 
 3. Run the simulation
@@ -101,20 +102,20 @@ to send the job to the HPC's SLURM scheduler for execution on a compute node ins
 
 .. code-block:: console
 
-   cstar blueprint run ~/cstar/blueprint_runs/forge/.../output/B_roms-marbl-0.12-default_wio-toy_10procs.yaml
+   cstar blueprint run ~/cstar/blueprint_runs/forge/roms-marbl-0-12-default_wio-toy_10procs/output/B_roms-marbl-0.12-default_wio-toy_10procs.yaml
 
-This time the ``application: ucla_roms`` line routes the blueprint to the
-UCLA-ROMS application. C-Star clones and compiles the model code pinned in
-the blueprint and runs the simulation. The default model reads and writes
-whole files through ParallelIO, so there are no per-processor pieces to split
-or join. The blueprint has no ``working_dir``, so results land under
+This time, when C-Star opens the blueprint you passed, it sees the ``application: ucla_roms``
+line and therefore executes the UCLA-ROMS application instead of Forge.
+C-Star clones and compiles the model code pinned in
+the blueprint and runs the simulation. The blueprint has no ``working_dir``,
+so results land under the C-Star default location:
 ``~/cstar/blueprint_runs/ucla_roms/roms-marbl-0-12-default_wio-toy_10procs/``.
 
-Both steps use the same command; the blueprint's ``application`` field
-decides which application handles it. :doc:`../applications/ucla_roms/blueprint`
+:doc:`../applications/ucla_roms/blueprint`
 explains each section of the UCLA-ROMS blueprint Forge just wrote. The
 :doc:`next page <workplan>` runs these same two steps as a workplan, so you
-submit once and let C-Star carry the blueprint from one step to the next.
+submit once and let C-Star carry the blueprint from one step to the next, without
+needing to worry about all of the intermediate paths.
 
 On a cluster
 ------------
