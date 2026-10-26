@@ -10,12 +10,15 @@ from cstar.base.application_names import APPLICATION_ALIASES, canonical_applicat
 from cstar.base.log import get_logger
 from cstar.entrypoint.utils import ARG_DRY_RUN
 
+if t.TYPE_CHECKING:
+    from collections.abc import Iterable
+
 log = get_logger(__name__)
 app = typer.Typer()
 console = Console()
 
 short_help: t.Final[str] = (
-    "Move a catalog's blueprints into the blueprints/<application>/ layout."
+    "Move a catalog's blueprints and specs into the current layout."
 )
 _EARLIER_NAME_FORMS: t.Final[str] = "\n".join(
     f"- `blueprints/{alias}/<name>.yaml` (a {current} blueprint under the "
@@ -27,22 +30,29 @@ help: t.Final[str] = f"""\
 
 A catalog keeps each blueprint at `blueprints/<application>/<name>.yaml`,
 where the directory is the registered application name (`forge`,
-`ucla_roms`, ...). Older catalogs used other forms, which are still read
-(with a warning) until C-Star 0.20.0:
+`ucla_roms`, ...), and each spec at `<Kind>/<name>.yaml`, where the
+directory is the spec kind (`ModelSpec`, `DomainSpec`, `ForcingSpec`,
+`OutputSpec`, `CdrSpec`). Older catalogs used other forms, which are still
+read (with a warning) until C-Star 0.20.0:
 
 - `blueprints/<name>.forge_blueprint.yaml` (a forge blueprint),
 - `blueprints/B_<name>.yaml` (a ucla_roms blueprint),
 - `blueprints/<machine>/<name>/B_*.yaml` (a ucla_roms blueprint),
 {_EARLIER_NAME_FORMS}
+- `<Kind>/<name>/<File>.yaml` (a spec in a directory of its own, such as
+  `ModelSpec/<name>/model.yaml` or `DomainSpec/<name>/Domain.yaml`).
 
-Given a catalog root, this command moves every blueprint found in one of
-those forms to `blueprints/<application>/<name>.yaml` (always with a `.yaml`
-extension). A blueprint whose destination already exists is left where it is
-and reported, never overwritten. After a per-machine blueprint is moved, its
-`<name>/` and `<machine>/` directories are removed if they are then empty;
-so is an application's earlier-name directory. Anything else in them (a
-`Build/` directory, `_grid.yaml`, `settings_B_*.yaml`, ...) is left in place
-and reported, as is a directory that is a symbolic link.
+Given a catalog root, this command moves every entry found in one of those
+forms to `blueprints/<application>/<name>.yaml` or `<Kind>/<name>.yaml`
+(always with a `.yaml` extension). An entry whose destination already exists
+is left where it is and reported, never overwritten. After a per-machine
+blueprint is moved, its `<name>/` and `<machine>/` directories are removed if
+they are then empty; so is an application's earlier-name directory. After a
+spec is moved, its `Assets/` directory is removed if it holds nothing but a
+`.gitkeep` placeholder, and then its `<name>/` directory if that is empty.
+Anything else in them (a `Build/` directory, `_grid.yaml`,
+`settings_B_*.yaml`, an asset file, ...) is left in place and reported, as is
+a directory that is a symbolic link.
 
 The catalog is read with validation suppressed, so an otherwise incomplete
 catalog can still be migrated. Pass `--dry-run` to see what would change
@@ -53,23 +63,28 @@ without touching anything on disk.
 @dataclass
 class CatalogMigrationReport:
     """The result of planning (and, unless `dry_run`, performing) a migration
-    of a catalog's blueprints to the `blueprints/<application>/<name>.yaml`
-    layout.
+    of a catalog's entries to the current layout: blueprints at
+    `blueprints/<application>/<name>.yaml`, specs at `<Kind>/<name>.yaml`.
     """
 
     moved: list[tuple[Path, Path]] = field(default_factory=list[tuple[Path, Path]])
-    """Pairs of `(source, destination)` for every blueprint moved (or, in
+    """Pairs of `(source, destination)` for every entry moved (or, in
     `dry_run` mode, that would be moved).
     """
     skipped_collisions: list[tuple[Path, Path]] = field(
         default_factory=list[tuple[Path, Path]]
     )
-    """Pairs of `(source, destination)` for blueprints left in place because
+    """Pairs of `(source, destination)` for entries left in place because
     the destination already exists.
     """
+    removed_files: list[Path] = field(default_factory=list[Path])
+    """`.gitkeep` placeholders removed from a moved spec's `Assets/` directory
+    (or, in `dry_run` mode, that would be removed).
+    """
     removed_dirs: list[Path] = field(default_factory=list[Path])
-    """Now-empty legacy `<name>/`, `<machine>/` and earlier-application-name
-    directories removed (or, in `dry_run` mode, that would be removed).
+    """Now-empty legacy directories removed (or, in `dry_run` mode, that would
+    be removed): a blueprint's `<name>/`, `<machine>/` and
+    earlier-application-name directories, a spec's `Assets/` and `<name>/`.
     """
     left_in_place: list[Path] = field(default_factory=list[Path])
     """Legacy directories that still hold other files after the move, or are
@@ -93,12 +108,13 @@ def _kept(directory: Path, gone: set[Path]) -> bool:
 def migrate_catalog_layout(
     root: Path, *, dry_run: bool = False
 ) -> CatalogMigrationReport:
-    """Move a catalog's legacy-layout blueprints into `blueprints/<application>/`.
+    """Move a catalog's legacy-layout blueprints and specs into the current layout.
 
     Parameters
     ----------
     root : Path
-        The catalog root (the directory holding `blueprints/`).
+        The catalog root (the directory holding `blueprints/` and the spec
+        kind directories).
     dry_run : bool
         When `True`, compute and return the same report without making any
         changes on disk.
@@ -113,9 +129,10 @@ def migrate_catalog_layout(
 
     root = root.expanduser().resolve()
     report = CatalogMigrationReport()
+    catalog = DomainCatalog(root, suppress_validation=True)
     # Winners first, in the catalog's order: a legacy file that lost to another
     # for the same destination is then reported as a collision, not moved.
-    legacy = DomainCatalog(root, suppress_validation=True).legacy_blueprints
+    legacy = catalog.legacy_blueprints
 
     destinations: set[Path] = set()
     planned: set[Path] = set()
@@ -171,14 +188,55 @@ def migrate_catalog_layout(
         else:
             report.removed_dirs.append(directory)
 
+    _plan_spec_moves(root, catalog.legacy_specs, report)
+
     if not dry_run:
         for src, dst in report.moved:
             dst.parent.mkdir(parents=True, exist_ok=True)
             src.rename(dst)
+        for path in report.removed_files:
+            path.unlink()
         for directory in report.removed_dirs:
             directory.rmdir()
 
     return report
+
+
+def _plan_spec_moves(
+    root: Path,
+    legacy: "Iterable[tuple[str, str, Path]]",
+    report: CatalogMigrationReport,
+) -> None:
+    """Add to `report` the moves of the legacy `<Kind>/<name>/<File>.yaml` specs
+    to `<Kind>/<name>.yaml` and the cleanup of their directories.
+
+    A spec whose name already has a `<Kind>/<name>.yaml` or `.yml` (the file the
+    catalog reads) is a collision. Each moved spec's `Assets/` goes when it
+    holds nothing but a `.gitkeep`, then its `<name>/` when nothing is left.
+    """
+    for kind, name, src in legacy:
+        dst = root / kind / f"{name}.yaml"
+        taken = [
+            p for p in (dst, dst.with_suffix(".yml")) if p.exists() or p.is_symlink()
+        ]
+        if taken:
+            report.skipped_collisions.append((src, taken[0]))
+            continue
+        report.moved.append((src, dst))
+        directory = src.parent
+        gone = {src}
+        assets = directory / "Assets"
+        # Nothing inside a symbolic link is cleaned up: its target may be shared.
+        if not directory.is_symlink() and assets.is_dir() and not assets.is_symlink():
+            placeholders = sorted(assets.iterdir())
+            if all(p.name == ".gitkeep" and p.is_file() for p in placeholders):
+                report.removed_files.extend(placeholders)
+                report.removed_dirs.append(assets)
+                gone.add(assets)
+        if _kept(directory, gone):
+            report.left_in_place.append(directory)
+        else:
+            report.removed_dirs.append(directory)
 
 
 @app.command(
@@ -194,7 +252,10 @@ def migrate_catalog(
             file_okay=False,
             dir_okay=True,
             resolve_path=True,
-            help="The catalog root to migrate (the directory holding `blueprints/`).",
+            help=(
+                "The catalog root to migrate (the directory holding `blueprints/` "
+                "and `ModelSpec/`)."
+            ),
         ),
     ],
     dry_run: t.Annotated[
@@ -205,7 +266,7 @@ def migrate_catalog(
         ),
     ] = False,
 ) -> None:
-    """Move a catalog's blueprints into the blueprints/<application>/ layout."""
+    """Move a catalog's blueprints and specs into the current layout."""
     report = migrate_catalog_layout(path, dry_run=dry_run)
     # Paths and the "[dry-run]" prefix are plain text: escape them so a
     # literal `[...]` is not parsed as a Rich style tag and silently dropped.
@@ -214,7 +275,7 @@ def migrate_catalog(
 
     if not (report.moved or report.skipped_collisions):
         console.print(
-            f"{prefix}Nothing to migrate: no legacy-layout blueprints under "
+            f"{prefix}Nothing to migrate: no legacy-layout blueprints or specs under "
             f"{escape(str(path))}."
         )
         console.soft_wrap = False
@@ -227,6 +288,8 @@ def migrate_catalog(
             f"{prefix}skipped (exists): {escape(str(src))} was left in place; "
             f"{escape(str(dst))} already exists"
         )
+    for p in report.removed_files:
+        console.print(f"{prefix}removed placeholder {escape(str(p))}")
     for p in report.removed_dirs:
         console.print(f"{prefix}removed empty directory {escape(str(p))}")
     for p in report.left_in_place:
@@ -235,9 +298,10 @@ def migrate_catalog(
         )
 
     console.print(
-        f"{prefix}Summary: moved {len(report.moved)} blueprint(s), "
+        f"{prefix}Summary: moved {len(report.moved)} entr(y/ies), "
         f"skipped {len(report.skipped_collisions)} collision(s), "
-        f"removed {len(report.removed_dirs)} empty director(y/ies), "
+        f"removed {len(report.removed_files)} placeholder(s) and "
+        f"{len(report.removed_dirs)} empty director(y/ies), "
         f"left {len(report.left_in_place)} director(y/ies) in place."
     )
     console.soft_wrap = False
