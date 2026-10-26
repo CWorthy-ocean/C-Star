@@ -1,10 +1,15 @@
 import asyncio
+import contextlib
 import datetime
 import shlex
 import subprocess
+import time
+import typing as t
+from collections.abc import Iterator
 from pathlib import Path
 from unittest import mock
 
+import psutil
 import pytest
 from psutil import NoSuchProcess
 
@@ -16,6 +21,7 @@ from cstar.orchestration.launch.local import (
     LocalLauncher,
     ProxiedRunRequestFormatter,
     TimeConstrainedRunRequestEnricher,
+    _still_running,
 )
 from cstar.orchestration.launch.slurm import SlurmHandle, SlurmLauncher
 from cstar.orchestration.models import KEY_CLOBBER, KEY_PRE_RUN, KEY_RESUME, Step
@@ -24,6 +30,7 @@ from cstar.orchestration.orchestration import (
     RunRequest,
     RunRequestCommandFormatter,
     Status,
+    Task,
     Workplan,
 )
 from cstar.orchestration.serialization import deserialize
@@ -31,6 +38,9 @@ from cstar.orchestration.state import StateRepository
 
 WHICH = "cstar.orchestration.launch.local.shutil.which"
 """Where the timeout executable is looked up."""
+
+T0 = datetime.datetime(2026, 10, 15, 12, 0, tzinfo=datetime.UTC)
+"""When the prior attempt of the re-entry tests was submitted."""
 
 
 @pytest.mark.parametrize(
@@ -109,10 +119,9 @@ def test_proxy_script_propagates_dependency_outcome(
         status=dep_status,
     )
 
-    for name, status in (("dep", dep_status), (live_step.name, Status.Submitted)):
-        sentinel = StateRepository.sentinel_path(name)
-        sentinel.parent.mkdir(parents=True, exist_ok=True)
-        sentinel.write_text(f"name: {name}\nstatus: {status.value}\n")
+    dep_sentinel = StateRepository.sentinel_path("dep")
+    dep_sentinel.parent.mkdir(parents=True, exist_ok=True)
+    dep_sentinel.write_text(f"name: dep\nstatus: {dep_status.value}\n")
 
     marker = tmp_path / "step-ran.txt"
     script = ProxiedRunRequestFormatter(live_step, [dep_handle]).format(
@@ -121,12 +130,58 @@ def test_proxy_script_propagates_dependency_outcome(
     script_path = tmp_path / "script.sh"
     script_path.write_text(script)
 
-    result = subprocess.run(["sh", str(script_path)], capture_output=True, timeout=30)
+    proxy = subprocess.Popen(["sh", str(script_path)], stdout=subprocess.DEVNULL)
+    own_sentinel = _record_proxy(live_step.name, proxy.pid)
 
-    assert result.returncode == exp_rc
+    assert proxy.wait(timeout=30) == exp_rc
     assert marker.exists() == exp_ran
-    own_sentinel = StateRepository.sentinel_path(live_step.name)
     assert f"status: {exp_status.value}" in own_sentinel.read_text()
+
+
+def _record_proxy(step_name: str, pid: int) -> Path:
+    """Write a step's sentinel as the launcher does once its proxy has started."""
+    sentinel = StateRepository.sentinel_path(step_name)
+    sentinel.parent.mkdir(parents=True, exist_ok=True)
+    sentinel.write_text(
+        f"pid: '{pid}'\nname: {step_name}\nstatus: {Status.Submitted.value}\n"
+    )
+    return sentinel
+
+
+def test_proxy_script_records_running_only_after_its_sentinel(
+    tmp_path: Path, wp_templates_dir: Path
+) -> None:
+    """Verify the proxy waits for the launcher to record it in the sentinel
+    before it records the step running: written earlier, the launcher's record
+    would replace it and leave the running step recorded as queued.
+    """
+    live_step = LiveStep.from_step(
+        deserialize(wp_templates_dir / "single_step.yaml", Workplan).steps[0]
+    )
+    script = ProxiedRunRequestFormatter(live_step).format(
+        RunRequest(command=["sleep", "3"])
+    )
+    script_path = tmp_path / "script.sh"
+    script_path.write_text(script)
+
+    proxy = subprocess.Popen(["sh", str(script_path)], stdout=subprocess.DEVNULL)
+    try:
+        time.sleep(0.5)
+        sentinel = _record_proxy(live_step.name, proxy.pid)
+
+        for _ in range(40):
+            if f"status: {Status.Running.value}" in sentinel.read_text():
+                break
+            time.sleep(0.05)
+        assert f"status: {Status.Running.value}" in sentinel.read_text()
+        assert proxy.wait(timeout=30) == 0
+        assert f"status: {Status.Done.value}" in sentinel.read_text()
+    finally:
+        with contextlib.suppress(NoSuchProcess):
+            for child in psutil.Process(proxy.pid).children(recursive=True):
+                child.kill()
+        proxy.kill()
+        proxy.wait()
 
 
 @pytest.mark.parametrize(
@@ -542,17 +597,20 @@ async def test_locallauncher_submit_records_pre_run_on_handle(
 
 
 @pytest.mark.usefixtures("read_yaml_intercept")
-async def test_locallauncher_submit_records_when_the_process_was_created(
+async def test_locallauncher_submit_records_when_the_process_was_started(
     wp_templates_dir: Path,
     mock_run_id: str,
 ) -> None:
-    """Verify the submission is the process creation time the launcher reads,
-    and survives the sentinel as a time, whatever form `start_at` takes later.
+    """Verify the submission is the wall-clock time the launcher started the
+    process, not its creation time (up to a second early on Linux), which
+    `start_at` keeps; and that it survives the sentinel as a time, whatever form
+    `start_at` takes later.
     """
     live_step = LiveStep.from_step(
         deserialize(wp_templates_dir / "single_step.yaml", Workplan).steps[0]
     )
     created = 1_800_000_000.5
+    expected = datetime.datetime(2027, 1, 15, 8, 0, 0, 750000, tzinfo=datetime.UTC)
 
     with (
         mock.patch.object(subprocess, "Popen", return_value=mock.Mock(pid=777777)),
@@ -560,10 +618,10 @@ async def test_locallauncher_submit_records_when_the_process_was_created(
             "cstar.orchestration.launch.local.PsProcess",
             return_value=mock.Mock(create_time=mock.Mock(return_value=created)),
         ),
+        mock.patch("cstar.orchestration.launch.local.utc_now", return_value=expected),
     ):
         handle = await LocalLauncher._submit(live_step, [])
 
-    expected = datetime.datetime.fromtimestamp(created, tz=datetime.UTC)
     assert handle.submitted_at == expected
     assert handle.start_ts == created  # turns `start_at` into a float, not the stamp
     assert handle.submitted_at == expected
@@ -701,29 +759,58 @@ async def test_locallauncher_submit_rotates_prior_log(
 
 
 @pytest.mark.parametrize(
-    ("alive", "expected"),
+    ("persisted", "alive", "expected"),
     [
-        pytest.param(True, "RUNNING", id="process_alive"),
-        pytest.param(False, "FAILED", id="process_gone"),
+        pytest.param(Status.Running, True, "RUNNING", id="process_alive"),
+        pytest.param(Status.Running, False, "FAILED", id="process_gone"),
+        pytest.param(Status.Submitted, True, "PENDING", id="queued_process_alive"),
+        pytest.param(Status.Submitted, False, "FAILED", id="queued_process_gone"),
     ],
 )
 async def test_status_expired_nonterminal_handle_checks_process_liveness(
-    mock_run_id: str, alive: bool, expected: str
+    mock_run_id: str, persisted: Status, alive: bool, expected: str
 ) -> None:
     """A deserialized handle whose sentinel was never finalized is RUNNING only
-    while its OS process is alive; a dead process is reported as FAILED so the
-    step is re-run instead of adopted forever.
+    while its OS process is alive, or PENDING if it was persisted as submitted
+    (its proxy has not yet recorded that it is running); a dead process is
+    reported as FAILED so the step is re-run instead of adopted forever.
     """
     handle = LocalHandle(
         pid="12345",
         name="step",
         run_id=mock_run_id,
         start_at=datetime.datetime.now(tz=datetime.UTC),
-        status=Status.Running,
+        status=persisted,
     )
 
     with mock.patch.object(LocalLauncher, "_is_alive", return_value=alive):
         assert await LocalLauncher._status(handle) == expected
+
+
+@pytest.mark.parametrize(
+    ("persisted", "expected"),
+    [
+        pytest.param(Status.Submitted, Status.Submitted, id="queued"),
+        pytest.param(Status.Running, Status.Running, id="running"),
+    ],
+)
+async def test_query_status_of_a_deserialized_handle_with_a_live_process(
+    mock_run_id: str, persisted: Status, expected: Status
+) -> None:
+    """Verify a step whose proxy is alive but still waiting on its dependencies
+    reads as Submitted, so a launcher can tell it from one that is running.
+    """
+    handle = LocalHandle(
+        pid="12345",
+        name="step",
+        run_id=mock_run_id,
+        launcher_name=LocalLauncher.name,
+        start_at=datetime.datetime.now(tz=datetime.UTC),
+        status=persisted,
+    )
+
+    with mock.patch.object(LocalLauncher, "_is_alive", return_value=True):
+        assert await LocalLauncher.query_status(handle) is expected
 
 
 def test_is_alive_matches_pid_and_start_time(mock_run_id: str) -> None:
@@ -912,3 +999,345 @@ def test_localhandle_start_ts_requires_start_time(mock_run_id: str) -> None:
     assert handle.start_at is None
     with pytest.raises(CstarExpectationFailed, match="no start time"):
         _ = handle.start_ts
+
+
+@pytest.fixture
+def quick_cancel(instant_cancel: None, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Shorten the grace a cancelled step's processes get, besides `instant_cancel`."""
+    monkeypatch.setattr("cstar.orchestration.launch.local.CANCEL_GRACE", 2)
+
+
+@pytest.fixture
+def process_tree() -> Iterator[tuple[subprocess.Popen[bytes], int]]:
+    """A shell and the `sleep` it started, both running until the test ends."""
+    shell = subprocess.Popen(["sh", "-c", "sleep 60 & wait"])
+    sleeper = 0
+    try:
+        for _ in range(100):
+            if children := psutil.Process(shell.pid).children():
+                sleeper = children[0].pid
+                break
+            time.sleep(0.05)
+        assert sleeper, "the shell did not start its child"
+        yield shell, sleeper
+    finally:
+        with contextlib.suppress(NoSuchProcess):
+            psutil.Process(sleeper).kill()
+        shell.kill()
+        shell.wait()
+
+
+def _is_gone(pid: int) -> bool:
+    """Report whether a process has exited, though its parent may not have
+    collected it yet.
+    """
+    try:
+        return psutil.Process(pid).status() == psutil.STATUS_ZOMBIE
+    except NoSuchProcess:
+        return True
+
+
+def _expired_handle(run_id: str, *, status: Status = Status.Running) -> LocalHandle:
+    """Build a handle as it is read from a sentinel, of a process no
+    one has looked up.
+    """
+    return LocalHandle(
+        pid="12345",
+        name="step",
+        run_id=run_id,
+        launcher_name=LocalLauncher.name,
+        start_at=datetime.datetime.now(tz=datetime.UTC),
+        status=status,
+        submitted_at=T0,
+    )
+
+
+def _handle_of(
+    shell: subprocess.Popen[bytes],
+    run_id: str,
+    *,
+    status: Status = Status.Running,
+    live: bool = False,
+) -> LocalHandle:
+    """Build the handle of a shell, as the launcher would have: with its
+    creation time, and the `Popen` only when `live`; one read from a sentinel
+    has none.
+    """
+    created = psutil.Process(shell.pid).create_time()
+    handle = LocalHandle(
+        pid=str(shell.pid),
+        name="step",
+        run_id=run_id,
+        launcher_name=LocalLauncher.name,
+        start_at=datetime.datetime.fromtimestamp(created, tz=datetime.UTC),
+        status=status,
+    )
+    if live:
+        handle.process = shell
+        handle.status = status
+    return handle
+
+
+@pytest.mark.parametrize("live", [False, True], ids=["from-sentinel", "live-popen"])
+async def test_locallauncher_cancel_stops_the_proxy_and_what_it_started(
+    single_step: LiveStep,
+    mock_run_id: str,
+    process_tree: tuple[subprocess.Popen[bytes], int],
+    quick_cancel: None,
+    live: bool,
+) -> None:
+    """Verify cancelling a step ends its proxy and every process the proxy
+    started, whether the handle was created by this process or deserialized
+    from a sentinel, and marks the task cancelled.
+    """
+    shell, sleeper = process_tree
+    handle = _handle_of(shell, mock_run_id, live=live)
+    assert handle.is_expired is not live
+
+    task = await LocalLauncher.cancel(Task(step=single_step, handle=handle))
+
+    assert task.status is Status.Cancelled
+    assert _is_gone(shell.pid)
+    assert _is_gone(sleeper)
+    if live:
+        assert shell.returncode is not None  # reaped through the Popen
+
+
+@pytest.mark.usefixtures("quick_cancel")
+async def test_locallauncher_cancel_leaves_a_finished_live_process_alone(
+    single_step: LiveStep, mock_run_id: str
+) -> None:
+    """Verify nothing is terminated, and the status stays, for a task whose
+    process this launcher started and has since exited.
+    """
+    shell = subprocess.Popen(["sh", "-c", "exit 0"])
+    shell.wait()
+    handle = _expired_handle(mock_run_id)
+    handle.pid = str(shell.pid)
+    handle.process = shell
+    assert not handle.is_expired
+
+    with mock.patch.object(LocalLauncher, "_terminate") as terminate:
+        task = await LocalLauncher.cancel(Task(step=single_step, handle=handle))
+
+    terminate.assert_not_called()
+    assert task.status is Status.Submitted
+
+
+async def test_locallauncher_cancel_of_a_process_that_is_gone(
+    single_step: LiveStep, mock_run_id: str
+) -> None:
+    """Verify a process that is no longer running cannot be stopped, so the
+    task is not marked cancelled.
+    """
+    handle = LocalHandle(
+        pid="12345",
+        name="step",
+        run_id=mock_run_id,
+        launcher_name=LocalLauncher.name,
+        start_at=datetime.datetime.now(tz=datetime.UTC),
+        status=Status.Running,
+    )
+
+    with mock.patch.object(LocalLauncher, "_process_of", return_value=None):
+        assert LocalLauncher._terminate(handle) is False
+        task = await LocalLauncher.cancel(Task(step=single_step, handle=handle))
+
+    assert task.status is Status.Running
+
+
+def test_locallauncher_terminate_stops_the_proxy_before_its_children(
+    mock_run_id: str,
+) -> None:
+    """Verify the proxy is suspended and its descendants listed before any of
+    them is signalled, and killed only once they have exited: running, it would
+    record the step failed in the sentinel when they exit.
+    """
+    manager = mock.Mock()
+    proxy, first, second = manager.proxy, manager.first, manager.second
+    proxy.children.return_value = [first, second]
+    manager.still_running.return_value = []
+
+    with (
+        mock.patch.object(LocalLauncher, "_process_of", return_value=proxy),
+        mock.patch(
+            "cstar.orchestration.launch.local._still_running", manager.still_running
+        ),
+    ):
+        stopped = LocalLauncher._terminate(_expired_handle(mock_run_id))
+
+    assert stopped is True
+    proxy.children.assert_called_once_with(recursive=True)
+    assert [c[0] for c in manager.mock_calls] == [
+        "proxy.suspend",
+        "proxy.children",
+        "first.terminate",
+        "second.terminate",
+        "still_running",
+        "proxy.kill",
+        "still_running",
+    ]
+
+
+@pytest.mark.parametrize("survives_kill", [False, True])
+def test_locallauncher_terminate_kills_a_child_that_ignores_terminate(
+    mock_run_id: str, survives_kill: bool
+) -> None:
+    """Verify a descendant still running after the grace period is killed, and
+    the step is reported stopped only once it has exited; while it runs on, the
+    proxy is left stopped, so the step still reads as in progress.
+    """
+    manager = mock.Mock()
+    proxy, stubborn = manager.proxy, manager.stubborn
+    proxy.children.return_value = [stubborn]
+    manager.still_running.side_effect = [
+        [stubborn],
+        [stubborn] if survives_kill else [],
+        [],
+    ]
+
+    with (
+        mock.patch.object(LocalLauncher, "_process_of", return_value=proxy),
+        mock.patch(
+            "cstar.orchestration.launch.local._still_running", manager.still_running
+        ),
+    ):
+        stopped = LocalLauncher._terminate(_expired_handle(mock_run_id))
+
+    stubborn.kill.assert_called_once_with()
+    assert stopped is not survives_kill
+    assert proxy.kill.called is not survives_kill
+
+
+def test_still_running_counts_a_zombie_as_exited() -> None:
+    """Verify a child that exited under a stopped parent, which cannot reap it,
+    does not count as running, and a running one does until the time is up.
+    """
+    shell = subprocess.Popen(["sh", "-c", "sleep 60 & wait"])
+    try:
+        proxy = psutil.Process(shell.pid)
+        for _ in range(100):
+            if children := proxy.children():
+                break
+            time.sleep(0.05)
+        proxy.suspend()
+        assert _still_running(children, 0.2) == children
+
+        children[0].terminate()
+
+        assert _still_running(children, 5) == []
+    finally:
+        with contextlib.suppress(NoSuchProcess):
+            for child in proxy.children():
+                child.kill()
+        shell.kill()
+        shell.wait()
+
+
+@pytest.mark.usefixtures("quick_cancel")
+async def test_locallauncher_launch_cancels_the_prior_process_of_a_clobbered_step(
+    single_step: LiveStep, mock_run_id: str
+) -> None:
+    """Verify a clobbered step whose prior process is still running has it
+    stopped first, then is submitted as a new process.
+    """
+    single_step.workflow_overrides[KEY_CLOBBER] = True
+    prior = _expired_handle(mock_run_id)
+    prior.name = single_step.name
+    await StateRepository().put_sentinel(prior)
+    events: list[str] = []
+
+    def terminate(handle: LocalHandle) -> bool:
+        events.append("terminate")
+        return True
+
+    def popen(*args: t.Any, **kwargs: t.Any) -> t.Any:
+        events.append("submit")
+        return mock.Mock(pid=999999)
+
+    with (
+        mock.patch.object(LocalLauncher, "_is_alive", return_value=True),
+        mock.patch.object(
+            LocalLauncher, "_terminate", mock.Mock(side_effect=terminate)
+        ) as mock_terminate,
+        mock.patch.object(subprocess, "Popen", side_effect=popen),
+    ):
+        task = await LocalLauncher.launch(single_step, [], run_uuid="")
+
+    mock_terminate.assert_called_once()
+    assert mock_terminate.call_args.args[0].pid == prior.pid
+    assert events == ["terminate", "submit"]
+    assert task.handle.pid == "999999"
+
+
+@pytest.mark.usefixtures("quick_cancel")
+async def test_locallauncher_launch_refuses_when_the_prior_process_survives(
+    single_step: LiveStep, mock_run_id: str
+) -> None:
+    """Verify a clobbered step is not submitted while its prior process cannot
+    be stopped, and the process is named.
+    """
+    single_step.workflow_overrides[KEY_CLOBBER] = True
+    prior = _expired_handle(mock_run_id)
+    prior.name = single_step.name
+    await StateRepository().put_sentinel(prior)
+
+    with (
+        mock.patch.object(LocalLauncher, "_is_alive", return_value=True),
+        mock.patch.object(LocalLauncher, "_terminate", return_value=False),
+        mock.patch.object(subprocess, "Popen") as popen,
+        pytest.raises(CstarExpectationFailed, match="12345"),
+    ):
+        await LocalLauncher.launch(single_step, [], run_uuid="")
+
+    popen.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    ("dependency_at", "requeued"),
+    [
+        pytest.param(T0 + datetime.timedelta(hours=1), True, id="newer-dependency"),
+        pytest.param(T0 - datetime.timedelta(hours=1), False, id="older-dependency"),
+    ],
+)
+@pytest.mark.usefixtures("quick_cancel")
+async def test_locallauncher_launch_requeues_a_process_behind_a_replaced_dependency(
+    single_step: LiveStep,
+    mock_run_id: str,
+    dependency_at: datetime.datetime,
+    requeued: bool,
+) -> None:
+    """Verify a prior process still waiting on its dependencies is stopped and
+    submitted again, though the step is not clobbered, when a dependency was
+    submitted after it, and is adopted when none was.
+    """
+    prior = _expired_handle(mock_run_id, status=Status.Submitted)
+    prior.name = single_step.name
+    await StateRepository().put_sentinel(prior)
+    dependency = _expired_handle(mock_run_id, status=Status.Submitted)
+    dependency.pid = "555"
+    dependency.name = "upstream"
+    dependency.submitted_at = dependency_at
+
+    with (
+        mock.patch.object(LocalLauncher, "_is_alive", return_value=True),
+        mock.patch.object(
+            LocalLauncher, "_terminate", return_value=True
+        ) as mock_terminate,
+        mock.patch.object(
+            subprocess, "Popen", return_value=mock.Mock(pid=999999)
+        ) as popen,
+    ):
+        task = await LocalLauncher.launch(single_step, [dependency], run_uuid="")
+
+    assert not single_step.clobber
+    if requeued:
+        mock_terminate.assert_called_once()
+        assert mock_terminate.call_args.args[0].pid == prior.pid
+        popen.assert_called_once()
+        assert task.handle.pid == "999999"
+        assert '"555"' in task.step.script_path.read_text()
+    else:
+        mock_terminate.assert_not_called()
+        popen.assert_not_called()
+        assert task.handle.pid == prior.pid

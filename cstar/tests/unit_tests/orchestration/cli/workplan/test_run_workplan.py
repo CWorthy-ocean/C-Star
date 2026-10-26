@@ -79,7 +79,7 @@ from cstar.system.migration import CstarSchemaTooNewError
 from cstar.tests.unit_tests.orchestration.manifest_runs import write_identity
 
 if t.TYPE_CHECKING:
-    from collections.abc import Mapping
+    from collections.abc import Mapping, Sequence
 
 
 def _slurm_launcher(
@@ -128,6 +128,7 @@ async def fake_build_and_run_dag(
     clobber_steps: list[str] | None = None,
     pre_run: bool = False,
     blueprint_sources: "Mapping[str, Path] | None" = None,
+    clobber_hint: "Callable[[Sequence[str]], str] | None" = None,
 ) -> WorkplanRun:
     return _scheduled_run(wp_path, run_id)
 
@@ -222,7 +223,8 @@ def test_workplan_run_remote_workplan(wp_uri: str) -> None:
 @pytest.mark.usefixtures("read_yaml_intercept")
 def test_workplan_run_clobber_reaches_build_and_run_dag() -> None:
     """Verify repeated `--clobber` options are forwarded to
-    `build_and_run_dag`'s `clobber_steps` keyword argument.
+    `build_and_run_dag`'s `clobber_steps` keyword argument, and a refusal is
+    told to spell a re-run as this command takes it, one option per step.
     """
     wp_uri = "https://raw.githubusercontent.com/CWorthy-ocean/C-Star/refs/heads/main/cstar/additional_files/templates/wp/workplan.yaml"
 
@@ -252,6 +254,8 @@ def test_workplan_run_clobber_reaches_build_and_run_dag() -> None:
         "Prepare",
         "Ensemble X",
     ]
+    clobber_hint = mock_build_and_run_dag.await_args.kwargs["clobber_hint"]
+    assert clobber_hint(["A", "B"]) == "--clobber A --clobber B"
 
 
 @pytest.mark.usefixtures("read_yaml_intercept")

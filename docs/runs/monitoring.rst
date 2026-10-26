@@ -26,15 +26,15 @@ prints one row per step with a tick in its current column:
    ┡━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━╇━━━━━━━━━━╇━━━━━━━━━╇━━━━━━╇━━━━━━━━╇━━━━━━━━━━━╇━━━━━━━━━━━━━┩
    │1. make_inputs (forge) │           │          │    ✔    │      │        │           │             │
    ├───────────────────────┼───────────┼──────────┼─────────┼──────┼────────┼───────────┼─────────────┤
-   │           2. simulate │           │          │    ✔    │      │        │           │      1      │
+   │           2. simulate │     ✔     │          │         │      │        │           │      1      │
    │           (ucla_roms) │           │          │         │      │        │           │             │
    └───────────────────────┴───────────┴──────────┴─────────┴──────┴────────┴───────────┴─────────────┘
                Disk usage not measured. Run: cstar run status wio-workplan-tutorial --size
 
-On a laptop, a step that is waiting for its dependencies shows as *Running*,
-because its process has started and is waiting; on a cluster it sits *In
-Queue* until the scheduler releases it. ``--size`` measures each step's disk
-usage as well, which can take a while on a large run.
+A step that is waiting for its dependencies shows as *Submitted*. Once they
+are done it starts at once on a laptop; on a cluster it sits *In Queue* until
+the scheduler releases it. ``--size`` measures each step's disk usage as well,
+which can take a while on a large run.
 
 ``status`` reads the run's live state from the scheduler, so it takes the
 run ID of a run tracked on this machine; to look at any other run (a copy, a
@@ -154,7 +154,9 @@ step is handled according to its recorded state:
 
 - A step that is **done** is reused as it is. Nothing is recomputed.
 - A step that **failed** is run again from scratch.
-- A step that is **still in progress** has its status refreshed.
+- A step that is **still queued or running** is left to finish as it was
+  submitted. A queued step whose dependency is run again is queued again
+  behind it.
 - A step that was never reached, because something before it failed, is
   scheduled as usual.
 
@@ -163,7 +165,8 @@ there is to it. Two options change the default handling:
 
 ``--clobber <step-name>``, ``--clobber all``
    Clear the named step (or every step) and run it again from scratch, even
-   if it is done. This is how you rerun a step after changing its inputs.
+   if it is done. A step that is still queued or running is cancelled first,
+   then run again. This is how you rerun a step after changing its inputs.
    The ``--clobber`` flag is repeatable if you need to clear multiple steps at once.
 ``--resume``
    Continue every failed step in place, from its last usable restart,
@@ -175,16 +178,17 @@ there is to it. Two options change the default handling:
 Two things stop a re-entry
 ^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-- **A finished step whose definition changed.** If a done step's blueprint,
-  ``blueprint_overrides``, ``directives``, dependencies or application
-  changed since it ran, the re-entry is refused, and the message names the
-  steps. Pass ``--clobber <step-name>`` to rerun them, or ``--run-id
-  <other-id>`` to run the changed workplan separately. Changing ``--var``
-  values or ``compute_overrides`` does not count. A blueprint from an older
-  C-Star (an older schema major) is migrated to a copy on each submit, and
-  your files are left as they are. The first re-entry after the upgrade
-  cannot tell that migration from an edit, so it reuses the finished steps
-  and warns, naming them: pass ``--clobber <step-name>`` for any you edited.
+- **A step whose definition changed after it was submitted.** If a done,
+  queued or running step's blueprint, ``blueprint_overrides``,
+  ``directives``, dependencies or application changed since it was submitted,
+  the re-entry is refused, and the message names the steps. Pass
+  ``--clobber <step-name>`` to run them again, or ``--run-id <other-id>`` to
+  run the changed workplan separately. Changing ``--var`` values or
+  ``compute_overrides`` does not count. A blueprint from an older C-Star (an
+  older schema major) is migrated to a copy on each submit, and your files
+  are left as they are. The first re-entry after the upgrade cannot tell that
+  migration from an edit, so it keeps those steps as they are and warns,
+  naming them: pass ``--clobber <step-name>`` for any you edited.
 - **A different workplan with the same name.** Two workplans that share a
   ``name`` would share one run directory, so the second is refused. Pass
   ``--run-id <other-id>``, or rename the workplan.

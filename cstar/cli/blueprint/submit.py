@@ -206,6 +206,8 @@ def submit(
         explicit_run_id=ctx.get_parameter_source("run_id")
         is not ParameterSource.DEFAULT,
         resubmit=lambda _workplan: f"cstar blueprint {CMD_NAME} {path}",
+        # a flag here: it re-runs the only step, whose name the user never gave
+        clobber_hint=lambda _steps: ARG_CLOBBER,
     )
 
 

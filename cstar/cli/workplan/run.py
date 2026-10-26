@@ -73,6 +73,8 @@ from cstar.orchestration.dag_runner import (
     build_and_run_dag,
     build_planner,
     check_clobber_targets,
+    clobber_each_step,
+    drop_spent_clobbers,
     get_launcher,
     load_external_runs,
     load_run_state,
@@ -104,7 +106,7 @@ from cstar.orchestration.transforms import (
 from cstar.system.migration import CstarSchemaTooNewError
 
 if t.TYPE_CHECKING:
-    from collections.abc import Callable, Mapping
+    from collections.abc import Callable, Mapping, Sequence
 
     from pydantic.fields import ComputedFieldInfo, FieldInfo
 
@@ -952,6 +954,7 @@ def submit_workplan(
     user_vars: "Mapping[str, str]",
     explicit_run_id: bool,
     resubmit: "Callable[[str], str]",
+    clobber_hint: "Callable[[Sequence[str]], str]",
 ) -> None:
     """Schedule the run of a workplan, or re-enter a recorded run, and report it.
 
@@ -978,6 +981,9 @@ def submit_workplan(
         Names the command that submits this run's source again, given the
         workplan the run was made from (a `<workplan>` placeholder when it is not
         known), for the follow-up steps printed.
+    clobber_hint : Callable[[Sequence[str]], str]
+        Spells this command's options that re-run the named steps, for the
+        refusal of a re-entry over edited steps.
 
     Raises
     ------
@@ -1011,6 +1017,7 @@ def submit_workplan(
                     )
                     raise typer.BadParameter(msg, param_hint=ARG_RESUME)
                 pre_run = wp.pre_run
+                asyncio.run(drop_spent_clobbers(wp, wp_run))
                 apply_clobber_overrides(wp, clobber)
                 if resume:
                     # load the state once: refresh the manifest, then apply it
@@ -1049,6 +1056,7 @@ def submit_workplan(
                         clobber_steps=clobber,
                         pre_run=pre_run,
                         blueprint_sources=sources,
+                        clobber_hint=clobber_hint,
                     ),
                 )
 
@@ -1223,6 +1231,7 @@ def submit(
         explicit_run_id=ctx.get_parameter_source("run_id")
         is not ParameterSource.DEFAULT,
         resubmit=workplan_resubmit,
+        clobber_hint=clobber_each_step,
     )
 
 
