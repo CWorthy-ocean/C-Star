@@ -267,11 +267,16 @@ checked against the build's current version:
      - The set of valid documents changed incompatibly.
      - Does not load unchanged. It is migrated automatically if the application
        registers a ``SchemaAdapter`` for that major; otherwise the tooling
-       refuses it with guidance for migrating by hand.
+       refuses it with guidance for migrating by hand. A run in progress keeps
+       its finished steps: ``cstar workplan submit`` runs a migrated copy and
+       leaves the file and its workplan untouched, and the first re-entry
+       after the bump reuses the steps that ran it with a warning, since the
+       migration changes their definition hash.
      - Refused with a request to upgrade ``cstar-ocean``.
    * - minor
      - Additive, with defaults. An older file loads *and runs identically*.
-     - Loads unchanged: no adapter, no migration copy, no workplan rewrite.
+     - Loads unchanged: no adapter, no migration copy, and the definition
+       hash of a finished step that ran it does not move.
      - Loads when it sets none of the fields the newer version added. One that
        sets a field this build does not know is refused with a request to
        upgrade ``cstar-ocean`` that names the field.

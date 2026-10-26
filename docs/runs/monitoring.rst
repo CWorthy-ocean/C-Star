@@ -180,7 +180,11 @@ Two things stop a re-entry
   changed since it ran, the re-entry is refused, and the message names the
   steps. Pass ``--clobber <step-name>`` to rerun them, or ``--run-id
   <other-id>`` to run the changed workplan separately. Changing ``--var``
-  values or ``compute_overrides`` does not count.
+  values or ``compute_overrides`` does not count. A blueprint from an older
+  C-Star (an older schema major) is migrated to a copy on each submit, and
+  your files are left as they are. The first re-entry after the upgrade
+  cannot tell that migration from an edit, so it reuses the finished steps
+  and warns, naming them: pass ``--clobber <step-name>`` for any you edited.
 - **A different workplan with the same name.** Two workplans that share a
   ``name`` would share one run directory, so the second is refused. Pass
   ``--run-id <other-id>``, or rename the workplan.

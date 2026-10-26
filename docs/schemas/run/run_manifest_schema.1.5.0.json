@@ -503,6 +503,12 @@
                     "title": "Definition Hash",
                     "type": "string"
                 },
+                "blueprint_schema_version": {
+                    "default": "",
+                    "description": "The schema version of the blueprint content `definition_hash` folds in,\nafter any automatic migration: the step's own blueprint, or its producer's\nfor a step whose blueprint an upstream step writes; empty when none was\nloaded.",
+                    "title": "Blueprint Schema Version",
+                    "type": "string"
+                },
                 "blueprint": {
                     "anyOf": [
                         {

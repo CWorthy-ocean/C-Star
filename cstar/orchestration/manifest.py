@@ -556,6 +556,12 @@ class StepEntry(ConfiguredBaseModel):
     """A fingerprint of what the step computes (see `describe_steps`), as
     ``def-v<N>:<hex>``: tagged with the version of the recipe that computed it."""
 
+    blueprint_schema_version: str = Field(default="")
+    """The schema version of the blueprint content `definition_hash` folds in,
+    after any automatic migration: the step's own blueprint, or its producer's
+    for a step whose blueprint an upstream step writes; empty when none was
+    loaded."""
+
     blueprint: BlueprintIdentity | None = Field(default=None)
     """The blueprint the step runs; `None` until a deferred step's record names it."""
 
@@ -1094,6 +1100,10 @@ class StepFacts:
     external: ExternalDependencies
     """What the step's blueprint depends on outside itself."""
 
+    blueprint_schema_version: str = ""
+    """The schema version of the blueprint content `definition_hash` folds in
+    (see `StepEntry.blueprint_schema_version`)."""
+
 
 @dataclass(frozen=True)
 class CarriedInputs:
@@ -1286,7 +1296,11 @@ def _definition_hash(definition: dict[str, t.Any]) -> str:
     return f"{DEFINITION_HASH_SCHEME}:{canonical_hash(definition)}"
 
 
-def describe_steps(workplan: "Workplan", base_dir: Path) -> dict[str, StepFacts]:
+def describe_steps(
+    workplan: "Workplan",
+    base_dir: Path,
+    sources: "Mapping[str, Path] | None" = None,
+) -> dict[str, StepFacts]:
     """Fingerprint what each step of a workplan computes, before it runs.
 
     A step's `definition_hash` covers its name, application, blueprint reference,
@@ -1297,12 +1311,19 @@ def describe_steps(workplan: "Workplan", base_dir: Path) -> dict[str, StepFacts]
     blueprint content, so a change upstream moves every consumer. The hash is
     tagged with `DEFINITION_HASH_SCHEME`.
 
+    A step's blueprint reference is hashed as authored, so a blueprint migrated
+    to a copy in `sources` keeps its reference; only its content, read from the
+    copy, moves with the migration (see `StepEntry.blueprint_schema_version`).
+
     Parameters
     ----------
     workplan : Workplan
         The workplan to describe.
     base_dir : Path
         The directory a relative blueprint path is relative to.
+    sources : Mapping[str, Path] | None
+        The migrated copy of a step's blueprint to read in place of the file the
+        step names, by step name.
 
     Returns
     -------
@@ -1315,6 +1336,7 @@ def describe_steps(workplan: "Workplan", base_dir: Path) -> dict[str, StepFacts]
         If a local blueprint file does not exist.
     """
     by_name = {step.name: step for step in workplan.steps}
+    sources = sources or {}
     facts: dict[str, StepFacts] = {}
     visiting: set[str] = set()
 
@@ -1325,16 +1347,26 @@ def describe_steps(workplan: "Workplan", base_dir: Path) -> dict[str, StepFacts]
         step = by_name[name]
 
         blueprint: Blueprint | None = None
+        schema_version = ""
         if isinstance(step.blueprint_path, DeferredBlueprintRef):
             producer = step.blueprint_path.from_step
             if producer in by_name:
                 describe(producer)
-            content_hash = facts[producer].definition_hash if producer in facts else ""
+            if producer in facts:
+                content_hash = facts[producer].definition_hash
+                schema_version = facts[producer].blueprint_schema_version
+            else:
+                content_hash = ""
         elif isinstance(step.blueprint_path, InlineBlueprintRef):
             content_hash = ""
         else:
-            blueprint = _load_step_blueprint(step, base_dir)
+            if source := sources.get(name):
+                klass = get_application(step.application).blueprint
+                blueprint = load_blueprint(source, klass)
+            else:
+                blueprint = _load_step_blueprint(step, base_dir)
             content_hash = blueprint.content_hash() if blueprint else ""
+            schema_version = blueprint.schema_version if blueprint else ""
 
         definition_hash = _definition_hash(
             {
@@ -1353,6 +1385,7 @@ def describe_steps(workplan: "Workplan", base_dir: Path) -> dict[str, StepFacts]
             external=(
                 collect_dependencies(blueprint) if blueprint else ExternalDependencies()
             ),
+            blueprint_schema_version=schema_version,
         )
         visiting.discard(name)
 
@@ -1486,6 +1519,7 @@ def ensure_run_manifest(
         if facts is not None:
             entry.working_dir = working_dir
             entry.definition_hash = facts.definition_hash
+            entry.blueprint_schema_version = facts.blueprint_schema_version
             entry.blueprint = facts.blueprint or entry.blueprint
             external = external.merged(facts.external)
         if carried_blueprints is not None:
@@ -1916,6 +1950,7 @@ def finalize_standalone_run(
         ),
         blueprint=BlueprintIdentity.of(blueprint),
         external=collect_dependencies(blueprint),
+        blueprint_schema_version=blueprint.schema_version,
     )
     manifest = ensure_run_manifest(
         root,

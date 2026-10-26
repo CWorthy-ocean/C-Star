@@ -92,7 +92,6 @@ from cstar.orchestration.serialization import (
     deserialize,
     model_to_yaml,
     read_raw,
-    serialize,
     try_deserialize,
     validate_serialized_entity,
 )
@@ -448,28 +447,37 @@ def compose_blueprint_workplan(path: str) -> str:
     return str(wp_path)
 
 
-def migrate_steps(path: Path, workplan: Workplan):
+def migrate_steps(path: Path, workplan: Workplan) -> dict[str, Path]:
     """Perform automatic migration of the blueprints referenced by a workplan.
 
     Every step is checked before the command exits, so all blueprints with an
-    unsupported schema are reported together. The workplan is only rewritten
-    when every step succeeded.
+    unsupported schema are reported together. Neither the workplan nor its
+    blueprints are rewritten: a migrated blueprint is written to a copy, which
+    the run reads in place of the file the step names.
 
     Parameters
     ----------
     path : Path
-        The path where the updated workplan will be persisted; a step's
-        relative blueprint path is resolved against its directory.
+        The path of the workplan; a step's relative blueprint path is resolved
+        against its directory.
     workplan : Workplan
         The workplan to perform migrations on.
 
+    Returns
+    -------
+    dict[str, Path]
+        The migrated copy of each step's blueprint, by step name, for the steps
+        whose blueprint was migrated.
+
     Raises
     ------
+    typer.BadParameter
+        If a blueprint does not exist or is invalid.
     typer.Exit
         If any blueprint's schema is newer than this build reads or has no
         automatic migration.
     """
-    is_updated = False
+    migrated: dict[str, Path] = {}
     failures: list[str] = []
     for step in workplan.steps:
         if not isinstance(step.blueprint_path, (Path, str)):
@@ -489,9 +497,12 @@ def migrate_steps(path: Path, workplan: Workplan):
         # preparation will do, so the preflight opens the same file
         bp_path = str(anchor_blueprint_path(step, path.parent).blueprint_path)
         try:
-            step.blueprint_path, modified = localize_and_migrate(bp_path)
+            source, modified = localize_and_migrate(bp_path)
             if modified:
-                is_updated = True
+                migrated[step.name] = source
+        except FileNotFoundError as ex:
+            msg = f"Blueprint not found at path: {ex.filename}"
+            raise typer.BadParameter(msg) from ex
         except SCHEMA_ERRORS as ex:
             failures.append(schema_message(bp_path, ex))
         except ValidationError as ex:
@@ -504,9 +515,10 @@ def migrate_steps(path: Path, workplan: Workplan):
             console.print(failure, soft_wrap=True, markup=False)
         raise typer.Exit(1)
 
-    if is_updated:
-        log.info("Updating workplan with migrated blueprints")
-        serialize(path, workplan)
+    if migrated:
+        listing = ", ".join(f"{name!r} ({src})" for name, src in migrated.items())
+        log.info(f"Running the migrated copies of the blueprints of steps {listing}")
+    return migrated
 
 
 def preprocess_path(workplan_path: str) -> str:
@@ -544,14 +556,6 @@ def preprocess_path(workplan_path: str) -> str:
                     log.error(validation_result.error_msg)
                     msg = f"The workplan file in `{workplan_path}` is improperly formatted"
                     raise typer.BadParameter(msg)
-                if live:
-                    return str(local_path)
-
-                try:
-                    migrate_steps(local_path, validation_result.item)
-                except FileNotFoundError as ex:
-                    msg = f"Blueprint not found at path: {ex.filename}"
-                    raise typer.BadParameter(msg) from ex
                 return str(local_path)
         except FileNotFoundError as ex:
             if is_known_run_id(workplan_path):
@@ -898,8 +902,8 @@ def verify_resume_source(wp_path: Path, wp_run: WorkplanRun) -> None:
     if supplied != recorded:
         msg = (
             f"The workplan at {str(wp_path)!r} differs from the one run {wp_run.run_id!r} "
-            f"was started from ({str(recorded_path)!r}), e.g. it was edited or its blueprints "
-            f"were auto-migrated since; {ARG_RESUME} re-enters the recorded run. "
+            f"was started from ({str(recorded_path)!r}): it was edited since; "
+            f"{ARG_RESUME} re-enters the recorded run. "
             f"{escape}, or supply a new --run-id to start a fresh run."
         )
         raise typer.BadParameter(msg)
@@ -1036,6 +1040,7 @@ def submit_workplan(
                     run_id,
                     explicit=explicit_run_id,
                 )
+                sources = migrate_steps(wp_path, deserialize(wp_path, Workplan))
                 wp_run = asyncio.run(
                     build_and_run_dag(
                         wp_path,
@@ -1043,6 +1048,7 @@ def submit_workplan(
                         user_variables=user_vars,
                         clobber_steps=clobber,
                         pre_run=pre_run,
+                        blueprint_sources=sources,
                     ),
                 )
 
