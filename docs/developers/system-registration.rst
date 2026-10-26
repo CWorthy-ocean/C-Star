@@ -52,18 +52,18 @@ Required modules
 Module Identification
 ~~~~~~~~~~~~~~~~~~~~~
 
-Now, we identify the modules to be used by C-Star.
+Next, identify the modules C-Star should load.
 
 #. List the modules loaded by default (i.e. entries marked ``(d,L)`` in the
    output of ``module avail``).
-#. Identify any required modules that are loaded by default. We will
-   explicitly track default modules for stability.
+#. Identify any required modules that are loaded by default, and list them
+   explicitly anyway, so a change of site defaults doesn't change the build.
 
    * Inspect dependencies pulled in by any identified modules with ``module spider <module-name>``.
    * Ensure the chosen module dependencies do not conflict or cause unloads.
    * Filter the module list with ``module avail "<keyword>"`` - this will provide
-     additional information to select related modules. For example, we may identify
-     most required modules using this "built with GCC 11.2.0" group::
+     additional information to select related modules. Here, for example, most
+     required modules come from the "built with GCC 11.2.0" group::
 
       ❯ module avail "netCDF" "HDF" "MPI"
 
@@ -83,8 +83,8 @@ Now, we identify the modules to be used by C-Star.
    * Add one module name per line.
    * Use comments where useful (e.g. identifying system defaults, hidden modules,
      or implicitly loaded modules).
-   * We recommend adding default modules explicitly to ensure stability when
-     default modules change.
+   * List default modules explicitly too, so the build doesn't change when
+     the site's defaults do.
 
 Example (``perlmutter.lmod``)::
 
