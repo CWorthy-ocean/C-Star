@@ -77,6 +77,19 @@ Breaking Changes
 
   - Each prints one line naming the replacement, including ``cstar wp cd`` through the ``cstar env shell-init`` function once it is regenerated.
 
+- ``cstar blueprint run`` runs every application in the invoking process; UCLA-ROMS no longer submits its own SLURM/PBS job and refuses to start the model outside a scheduler job on a cluster. (`#836 <https://github.com/CWorthy-ocean/C-Star/pull/836>`_)
+
+  - Submit it with ``cstar blueprint submit <blueprint>`` or run it inside an allocation; ``CSTAR_ALLOW_LOGIN_NODE_RUN=1`` lets it run anyway.
+  - ``cstar blueprint run --pre-run`` followed by ``--resume`` launches the model where the second command runs; on a cluster use ``cstar blueprint submit --pre-run``, then ``cstar blueprint submit``.
+  - A workplan with ``compute_environment.launcher: local`` submitted from a cluster login node now refuses its ROMS step; on PBS systems (Derecho) run ``cstar blueprint run`` inside a PBS job.
+
+- ``cstar workplan submit <blueprint>`` no longer writes ``<name>-host-workplan.yaml`` beside the blueprint and names the run after the blueprint (previously ``<name>-host``). (`#836 <https://github.com/CWorthy-ocean/C-Star/pull/836>`_)
+
+  - A run started that way before this release resumes with ``cstar workplan submit --run-id <name>-host --resume``.
+
+- ``CSTAR_NPROCS_POST`` is removed; joining ROMS output uses a quarter of the cores available to the process, at most one thread per model rank. (`#836 <https://github.com/CWorthy-ocean/C-Star/pull/836>`_)
+- Python API: ``ROMSSimulation.run()`` drops ``account_key``, ``walltime`` and ``queue_name``; runners take ``(request, service_cfg)``; ``JobConfig``, ``get_job_config`` and ``Scheduler.in_active_allocation`` are removed. (`#836 <https://github.com/CWorthy-ocean/C-Star/pull/836>`_)
+
 
 
 
@@ -261,6 +274,14 @@ New features
   - The unknown fields are ignored with a warning naming them, and the files are never written back.
   - Re-entering, resuming, promoting or recording digests in such a run is refused with a message to upgrade ``cstar-ocean``.
 
+- ``cstar blueprint submit <blueprint>`` submits a blueprint as a single-step workplan and exits; the run-id is the blueprint's name and the step is named after the application. (`#836 <https://github.com/CWorthy-ocean/C-Star/pull/836>`_)
+
+  - Accepts ``--run-id``, ``--clobber``, ``--resume`` and ``--pre-run``; ``cstar workplan submit <blueprint>`` does the same.
+  - The workplan it composes is kept under C-Star's state directory, never beside the blueprint.
+
+- ``CSTAR_ALLOW_LOGIN_NODE_RUN=1`` lets ROMS launch outside a scheduler job on a cluster, for a very small run or when C-Star misjudges that it is not inside a job. (`#836 <https://github.com/CWorthy-ocean/C-Star/pull/836>`_)
+- ``cstar forge run`` also prints the ``cstar blueprint submit`` command for the emitted blueprint when it runs on a cluster. (`#836 <https://github.com/CWorthy-ocean/C-Star/pull/836>`_)
+
 
 
 
@@ -342,6 +363,7 @@ Bug Fixes
 
 - Loading a run's status no longer fails intermittently with ``OSError`` while another step of the same run is updating the run's record. (`#831 <https://github.com/CWorthy-ocean/C-Star/pull/831>`_)
 - Run listings no longer drop a run, or report its record as unreadable, while that run is updating its record. (`#831 <https://github.com/CWorthy-ocean/C-Star/pull/831>`_)
+- Joining ROMS output no longer fails on a machine with one or two CPU cores, where the post-processing pool was sized to zero. (`#836 <https://github.com/CWorthy-ocean/C-Star/pull/836>`_)
 
 
 
@@ -423,6 +445,8 @@ Improvements
 - A blueprint, workplan, run manifest, step record or run record newer than the installed C-Star is refused only when its major is newer, or when it sets a field this C-Star does not know; the message names the field. Earlier releases keep refusing any newer file. (`#834 <https://github.com/CWorthy-ocean/C-Star/pull/834>`_)
 - Writing a file back stamps the newer of its own schema version and the installed C-Star's, so an older blueprint or workplan this C-Star rewrites (override and resume copies, the transformed workplan) is stamped at the current version, which earlier releases refuse. (`#834 <https://github.com/CWorthy-ocean/C-Star/pull/834>`_)
 - Deprecation warnings appear once per command, at check or load time, and name the release that removes the old form. (`#833 <https://github.com/CWorthy-ocean/C-Star/pull/833>`_)
+- An error while a blueprint's runner starts, including the login-node refusal, prints a message and exits 1 instead of a traceback. (`#836 <https://github.com/CWorthy-ocean/C-Star/pull/836>`_)
+- Inside a scheduler job, joining ROMS output sizes its pool from the job's cores rather than the whole node. (`#836 <https://github.com/CWorthy-ocean/C-Star/pull/836>`_)
 
 
 
@@ -517,4 +541,7 @@ Miscellaneous
 - The workplans page is split into concepts, directives, path references and run aliases, and user variables. (`#830 <https://github.com/CWorthy-ocean/C-Star/pull/830>`_)
 - New "Managing Runs" section collecting monitoring, re-entering after a failure, pre-run and resume, and moving runs (the run manifest, promote, attach) from the old workplans page. (`#830 <https://github.com/CWorthy-ocean/C-Star/pull/830>`_)
 - The wizard page is split into launching, the Blueprint page and a new Workplan page with screenshots; the configuration page leads with ``cstar init``; the glossary is grouped by topic. (`#830 <https://github.com/CWorthy-ocean/C-Star/pull/830>`_)
+- Documentation describes ``cstar blueprint run`` as running where it is started and adds ``cstar blueprint submit`` to the blueprint, UCLA-ROMS, HPC, pre-run/resume, Python, wizard and tutorial pages. (`#836 <https://github.com/CWorthy-ocean/C-Star/pull/836>`_)
+- The blueprint API reference lists ``CodeRepository``, ``ParameterSet`` and ``BlueprintState`` under the modules they live in, so their pages build again. (`#836 <https://github.com/CWorthy-ocean/C-Star/pull/836>`_)
+- Unit tests set ``CSTAR_ALLOW_LOGIN_NODE_RUN`` so they pass on a cluster login node; refusal tests use a shared ``login_node`` fixture. (`#836 <https://github.com/CWorthy-ocean/C-Star/pull/836>`_)
 
