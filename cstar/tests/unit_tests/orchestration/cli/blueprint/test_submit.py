@@ -54,7 +54,7 @@ async def fake_build_and_run_dag(
 
 
 @pytest.fixture
-def build_and_run_dag() -> t.Generator[mock.AsyncMock]:
+def build_and_run_dag() -> t.Generator[mock.AsyncMock, None, None]:
     """Replace the scheduling of a workplan with one that only places its run."""
     with mock.patch(BUILD_AND_RUN_DAG, wraps=fake_build_and_run_dag) as mocked:
         yield mocked
