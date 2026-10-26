@@ -1380,16 +1380,20 @@ def _major_moved(recorded: str, now: str) -> bool:
     return bool(recorded and now) and version_key(recorded)[0] != version_key(now)[0]
 
 
-def refuse_edited_done_steps(
+def refuse_edited_steps(
     wp: Workplan,
     manifest: RunManifest,
     status: DagStatus,
     facts: Mapping[str, StepFacts],
     clobber_steps: "Sequence[str]",
 ) -> None:
-    """Refuse to re-enter a run in which a `Done` step was edited and not clobbered.
+    """Refuse to re-enter a run in which a done, queued or running step was edited.
 
-    A step with no recorded definition is not checked. Nor is a `Done` step whose
+    A step selected for clobber is not refused. A launcher adopts a step that is
+    still queued or running, which keeps the definition it was submitted with,
+    while the attempt records the edited one, so the edit would never be seen.
+
+    A step with no recorded definition is not checked. Nor is a step whose
     recorded definition hash has another scheme than its current one: another
     release computed it (see `DEFINITION_HASH_SCHEME`), so the two cannot be
     compared. Nor is one whose definition changed while its blueprint moved to
@@ -1414,12 +1418,14 @@ def refuse_edited_done_steps(
     Raises
     ------
     CstarExpectationFailed
-        If a step that reached `Done` in this run now has a different definition
-        than the one recorded in the manifest and is not selected for clobber, by
-        `clobber_steps` or by its own `workflow_overrides`.
+        If a step that reached `Done`, or is still queued or running, in this run
+        now has a different definition than the one recorded in the manifest and
+        is not selected for clobber, by `clobber_steps` or by its own
+        `workflow_overrides`.
     """
     tokens = {x for token in clobber_steps if (x := token.strip())}
-    edited: list[str] = []
+    edited_done: list[str] = []
+    edited_in_progress: list[str] = []
     unchecked: list[str] = []
     for step in wp.steps:
         entry = manifest.step(step.name)
@@ -1428,7 +1434,8 @@ def refuse_edited_done_steps(
         if not entry.definition_hash:
             log.debug(f"Step {step.name!r} has no recorded definition; not checked")
             continue
-        if status[step.name] is not Status.Done:
+        step_status = status[step.name]
+        if step_status is not Status.Done and not Status.is_in_progress(step_status):
             continue
         current = facts.get(step.name)
         if current is None or step.clobber or {step.name, step.safe_name} & tokens:
@@ -1440,26 +1447,39 @@ def refuse_edited_done_steps(
             migrated = _major_moved(
                 entry.blueprint_schema_version, current.blueprint_schema_version
             )
+            edited = edited_done if step_status is Status.Done else edited_in_progress
             (unchecked if migrated else edited).append(step.name)
 
-    if edited:
-        names = ", ".join(repr(name) for name in edited)
-        rerun = " ".join(f"{ARG_CLOBBER} {name}" for name in edited)
-        raise CstarExpectationFailed(
+    problems: list[str] = []
+    if edited_done:
+        names = ", ".join(repr(name) for name in edited_done)
+        rerun = " ".join(f"{ARG_CLOBBER} {name}" for name in edited_done)
+        problems.append(
             f"Steps {names} reached Done in run {manifest.run_id!r} under a "
-            f"different definition; pass {rerun} to re-run them, or "
-            f"{ARG_RUN_ID} <other-id> to start a new run"
+            f"different definition; pass {rerun} to re-run them"
+        )
+    if edited_in_progress:
+        names = ", ".join(repr(name) for name in edited_in_progress)
+        rerun = " ".join(f"{ARG_CLOBBER} {name}" for name in edited_in_progress)
+        problems.append(
+            f"Steps {names} are still queued or running in run "
+            f"{manifest.run_id!r} under the definition they were submitted with, "
+            f"which they would keep; pass {rerun} to cancel and resubmit them, or "
+            "undo the edit to let them finish as submitted"
+        )
+    if problems:
+        raise CstarExpectationFailed(
+            f"{'. '.join(problems)}, or {ARG_RUN_ID} <other-id> to start a new run"
         )
 
     if unchecked:
         names = ", ".join(repr(name) for name in unchecked)
         log.warning(
-            f"Steps {names} reached Done in run {manifest.run_id!r} under "
-            "definitions recorded by another C-Star release, which this one "
-            "cannot compare (a changed hash recipe, or a blueprint migrated to a "
-            "newer schema), so an edit made to them since is not detected; pass "
-            f"{ARG_CLOBBER} <step-name> to re-run a step you changed. This attempt "
-            "records their definitions again."
+            f"Steps {names} in run {manifest.run_id!r} have definitions recorded "
+            "by another C-Star release, which this one cannot compare (a changed "
+            "hash recipe, or a blueprint migrated to a newer schema), so an edit "
+            f"made to them since is not detected; pass {ARG_CLOBBER} <step-name> to "
+            "re-run a step you changed. This attempt records their definitions again."
         )
 
 
@@ -1562,9 +1582,9 @@ async def build_dag(
     NoPreparableStepsError
         If `pre_run` leaves no step to prepare.
     CstarExpectationFailed
-        If the run's manifest cannot be read, a step that reached Done was
-        edited and not clobbered, or the run-id has step state left by a run
-        whose directory is gone.
+        If the run's manifest cannot be read, a step that reached Done or is
+        still queued or running was edited and not clobbered, or the run-id has
+        step state left by a run whose directory is gone.
     """
     if run_id:
         run_id = slugify(run_id)
@@ -1596,7 +1616,7 @@ async def build_dag(
         status = await load_run_state(
             run_id, get_launcher(wp_orig, force_local=pre_run)
         )
-        refuse_edited_done_steps(wp_orig, manifest, status, facts, clobber_steps or [])
+        refuse_edited_steps(wp_orig, manifest, status, facts, clobber_steps or [])
 
     wp, prepared_wp_path, external, carried = await prepare_workplan(
         wp_path, output_dir, user_variables, clobber_steps, pre_run, blueprint_sources
@@ -1843,9 +1863,9 @@ async def build_and_run_dag(
     NoPreparableStepsError
         If `pre_run` leaves no step to prepare.
     CstarExpectationFailed
-        If the run's manifest cannot be read, a step that reached Done was
-        edited and not clobbered, or the run-id has step state left by a run
-        whose directory is gone.
+        If the run's manifest cannot be read, a step that reached Done or is
+        still queued or running was edited and not clobbered, or the run-id has
+        step state left by a run whose directory is gone.
     """
     planner, prepared_wp_path, facts, carried = await build_dag(
         wp_path,
