@@ -1,6 +1,8 @@
 import asyncio
+import errno
 import logging
 import os
+import sys
 import threading
 import time
 import typing as t
@@ -541,6 +543,22 @@ async def test_tracking_get_run_paths(
     assert len(history) == exp_num_paths
 
 
+@pytest.mark.parametrize("all_history", [True, False])
+def test_tracking_get_run_paths_skips_a_half_staged_record(
+    tmp_path: Path, all_history: bool
+) -> None:
+    """Verify a staging file a crashed writer left beside a run's history is
+    neither listed nor taken as the newest record.
+    """
+    run_id = "half-staged"
+    repo = TrackingRepository()
+    persisted = repo.put_workplan_run_sync(_record(run_id, tmp_path / "output"))
+    leftover = persisted.with_name(f".{persisted.name}.tmp")
+    leftover.write_text("partial")
+
+    assert repo.list_runtracking_paths(run_id, all_history) == (persisted.resolve(),)
+
+
 @pytest.mark.asyncio
 async def test_tracking_retrieve_mixed_case_runid(tmp_path: Path) -> None:
     """Verify a mixed-case run-id query resolves to the slugified run record.
@@ -855,6 +873,103 @@ async def test_tracking_update_workplan_run_is_atomic_under_concurrency(
     assert persisted is not None
     assert persisted.step_sizes == {f"step-{i}": i for i in range(8)}
     assert len(persisted.sentinels) == 8
+
+
+def test_tracking_latest_record_stays_readable_while_rewritten(
+    tmp_path: Path,
+) -> None:
+    """Verify a reader never finds a run's latest record missing or half-written
+    while other threads repoint and rewrite it.
+
+    Readers that take no lock (`stat` of the link, the listings) used to catch
+    the gap between unlinking the old link and creating the new one, and the
+    in-place rewrite of the history record it points at; a lookup under the run
+    lock must never miss the record.
+
+    Parameters
+    ----------
+    tmp_path : Path
+        Temporary directory for test outputs
+    """
+    state_dir = tmp_path / "state"
+    run_id = "rewritten-run"
+    rounds = 200
+
+    with mock.patch.dict(os.environ, {ENV_CSTAR_STATE_HOME: state_dir.as_posix()}):
+        repo = TrackingRepository()
+        first = _make_workplan_run(tmp_path, run_id)
+        repo.put_workplan_run_sync(first)
+        latest = repo.latest_path(run_id)
+        writer_errors: list[BaseException] = []
+
+        def _put(offset: int) -> None:
+            try:
+                for i in range(rounds):
+                    moment = first.recorded_at.replace(microsecond=offset + i)
+                    repo.put_workplan_run_sync(
+                        first.model_copy(update={"recorded_at": moment})
+                    )
+            except BaseException as ex:
+                writer_errors.append(ex)
+
+        def _update() -> None:
+            def _size(run: WorkplanRun) -> None:
+                run.record_step_sizes({"s": len(run.step_sizes) + 1})
+
+            try:
+                for _ in range(rounds):
+                    repo.update_workplan_run_sync(run_id, _size)
+            except BaseException as ex:
+                writer_errors.append(ex)
+
+        writers = [
+            threading.Thread(target=_put, args=(1,)),
+            threading.Thread(target=_put, args=(1 + rounds,)),
+            threading.Thread(target=_update),
+        ]
+        for writer in writers:
+            writer.start()
+
+        link_errors: list[OSError] = []
+        # older macOS kernels can answer a stat that races a rename with EINVAL;
+        # only a missing link is the gap this test guards against
+        tolerated = 0
+        failed_reads: list[BaseException | None] = []
+        short_listings = 0
+        try:
+            for _ in range(10 * rounds):
+                if not any(writer.is_alive() for writer in writers):
+                    break
+                try:
+                    os.lstat(latest)
+                except OSError as ex:
+                    if sys.platform == "darwin" and ex.errno == errno.EINVAL:
+                        tolerated += 1
+                    else:
+                        link_errors.append(ex)
+                try:
+                    if repo.get_workplan_run_sync(run_id) is None:
+                        failed_reads.append(None)
+                except Exception as ex:
+                    failed_reads.append(ex)
+                if len(repo.list_latest_runs_sync()) != 1:
+                    short_listings += 1
+        finally:
+            for writer in writers:
+                writer.join()
+
+    outcome = {
+        "writer_errors": writer_errors,
+        "link_errors": link_errors,
+        "failed_reads": failed_reads,
+        "short_listings": short_listings,
+    }
+    assert outcome == {
+        "writer_errors": [],
+        "link_errors": [],
+        "failed_reads": [],
+        "short_listings": 0,
+    }, f"{outcome} (tolerated EINVAL: {tolerated})"
 
 
 @pytest.mark.asyncio

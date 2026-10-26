@@ -564,5 +564,5 @@ provenance:
   cstar_version: null
   roms_tools_version: null
   override_files_applied: []
-  content_hash: c12af186801280c2d963ce93850c59c28a20d2f681a84b9f195dec735bfed7cb
+  content_hash: bp-v2:78699927e433115bf83da5b1b6ef25a88dddaaff805b0fc4be2e6fa1ada20d17
   notes: null

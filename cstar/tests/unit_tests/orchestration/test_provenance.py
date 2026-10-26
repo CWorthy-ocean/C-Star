@@ -1,5 +1,6 @@
 """Tests for the blueprint provenance models."""
 
+import re
 import typing as t
 import uuid
 from datetime import UTC, datetime
@@ -11,6 +12,7 @@ from pydantic import ValidationError
 from cstar.applications.hello_world import HelloWorldBlueprint
 from cstar.orchestration.models import (
     BLUEPRINT_METADATA_FIELDS,
+    CONTENT_HASH_SCHEME,
     BlueprintIdentity,
     BlueprintState,
     CatalogSpecKind,
@@ -253,7 +255,7 @@ def test_content_hash_ignores_metadata_fields(tmp_path: Path) -> None:
     """Verify renaming or relocating a blueprint does not change its hash."""
     base = _hello().content_hash()
 
-    assert len(base) == 64
+    assert re.fullmatch(rf"{CONTENT_HASH_SCHEME}:[0-9a-f]{{64}}", base)
     assert _hello(name="renamed").content_hash() == base
     assert _hello(description="another").content_hash() == base
     assert _hello(working_dir=tmp_path).content_hash() == base

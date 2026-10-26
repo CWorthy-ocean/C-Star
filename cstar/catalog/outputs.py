@@ -21,6 +21,7 @@ import yaml
 from pydantic import Field, ValidationError
 
 from cstar.base.application_names import canonical_application
+from cstar.base.digest import digest_scheme
 from cstar.orchestration.models import (
     BlueprintCore,
     BlueprintIdentity,
@@ -53,8 +54,9 @@ class OutputStatus(StrEnum):
 
     UNVERIFIED = "unverified"
     """The output cannot be checked against the catalog: it records no producer
-    (e.g. it was emitted before provenance existed), or the catalog entry of its
-    recorded producer could not be loaded."""
+    (e.g. it was emitted before provenance existed), it records its producer's
+    content hash under another hash scheme (another release's recipe), or the
+    catalog entry of its recorded producer could not be loaded."""
 
 
 class BlueprintOutput(ConfiguredBaseModel):
@@ -243,6 +245,17 @@ async def _run_candidates(application: str) -> list[_Candidate]:
     return candidates
 
 
+def _compare(recorded: BlueprintIdentity, current: BlueprintIdentity) -> OutputStatus:
+    """Compare an output's recorded producer with the catalog entry's current one.
+
+    A content hash recorded under another scheme than the current one was computed
+    by another recipe, so the two cannot be compared.
+    """
+    if digest_scheme(recorded.content_hash) != digest_scheme(current.content_hash):
+        return OutputStatus.UNVERIFIED
+    return OutputStatus.CURRENT if recorded == current else OutputStatus.CHANGED
+
+
 def _describe(
     candidates: Sequence[_Candidate],
     application: str,
@@ -299,8 +312,7 @@ def _describe(
         else:
             producer = recorded
             if recorded.name in current:
-                same = recorded == current[recorded.name]
-                status = OutputStatus.CURRENT if same else OutputStatus.CHANGED
+                status = _compare(recorded, current[recorded.name])
             elif recorded.name in unloadable:
                 status = OutputStatus.UNVERIFIED
             else:

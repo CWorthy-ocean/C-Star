@@ -31,6 +31,7 @@ from cstar.applications.forge.engine import (
     ForgeBlueprintExecutor,
     process_forge_blueprint,
 )
+from cstar.base.log import make_formatter
 from cstar.execution.file_system import JobFileSystemManager
 
 # Loggers whose level gets lowered while capturing, so the file actually receives
@@ -149,7 +150,7 @@ def _capture_output(working_dir, *, verbose=False, cfg=None):
         handler = logging.StreamHandler(fh)
         handler.setLevel(level)
         handler.setFormatter(
-            logging.Formatter("%(asctime)s | %(levelname)s | %(name)s | %(message)s")
+            make_formatter("%(asctime)s | %(levelname)s | %(name)s | %(message)s")
         )
         root = logging.getLogger()
         root.addHandler(handler)

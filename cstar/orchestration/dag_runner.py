@@ -12,6 +12,7 @@ from urllib.parse import urlsplit
 from pydantic import BaseModel, Field, computed_field
 
 from cstar.applications.core import get_application
+from cstar.base.digest import digest_scheme
 from cstar.base.env import capture_environment
 from cstar.base.exceptions import CstarError, CstarExpectationFailed
 from cstar.base.log import get_logger
@@ -1256,13 +1257,19 @@ async def on_status_changed(handle: ProcessHandle) -> None:
     """Persist updates to process handles.
 
     On a terminal status transition, the step's own disk usage is measured
-    and recorded on the run's `step_sizes` before the run is persisted.
+    and recorded on the run's `step_sizes` before the run is persisted. A run
+    record that cannot be read or written is a warning: keeping the record of
+    a run never stops the run, and the sentinel is written first.
     """
     state_repo = StateRepository()
     run_repo = TrackingRepository()
 
     path = await state_repo.put_sentinel(handle)
-    run = await run_repo.get_workplan_run(handle.run_id)
+    try:
+        run = await run_repo.get_workplan_run(handle.run_id)
+    except Exception as ex:
+        log.warning(f"Could not read the record of run {handle.run_id!r}: {ex}")
+        return
 
     if not path or run is None:
         return
@@ -1295,7 +1302,13 @@ async def on_status_changed(handle: ProcessHandle) -> None:
 
     # measured outside the lock, applied atomically: concurrent step events for
     # the same run must not overwrite each other's sentinels or sizes
-    await run_repo.update_workplan_run(handle.run_id, _apply)
+    try:
+        await run_repo.update_workplan_run(handle.run_id, _apply)
+    except Exception as ex:
+        log.warning(
+            f"Could not record step {handle.name!r} in the record of run "
+            f"{handle.run_id!r}: {ex}"
+        )
 
 
 async def on_launched(handle: ProcessHandle, *, root: Path) -> None:
@@ -1343,9 +1356,12 @@ def refuse_edited_done_steps(
 ) -> None:
     """Refuse to re-enter a run in which a `Done` step was edited and not clobbered.
 
-    A step with no recorded definition is not checked. `read_run_manifest`
-    leaves none on a manifest older than `CANONICAL_NAMES_SINCE`, whose hashes
-    may use an earlier application name.
+    A step with no recorded definition is not checked. Nor is a `Done` step whose
+    recorded definition hash has another scheme than its current one: another
+    release computed it (see `DEFINITION_HASH_SCHEME`), so the two cannot be
+    compared. Unless the re-entry is refused, such steps are named in one
+    warning; the attempt that follows records their current definitions, so the
+    next re-entry checks them.
 
     Parameters
     ----------
@@ -1364,10 +1380,12 @@ def refuse_edited_done_steps(
     ------
     CstarExpectationFailed
         If a step that reached `Done` in this run now has a different definition
-        than the one recorded in the manifest and is not selected for clobber.
+        than the one recorded in the manifest and is not selected for clobber, by
+        `clobber_steps` or by its own `workflow_overrides`.
     """
     tokens = {x for token in clobber_steps if (x := token.strip())}
     edited: list[str] = []
+    unchecked: list[str] = []
     for step in wp.steps:
         entry = manifest.step(step.name)
         if entry is None:
@@ -1378,11 +1396,13 @@ def refuse_edited_done_steps(
         if status[step.name] is not Status.Done:
             continue
         current = facts.get(step.name)
-        if current is None or current.definition_hash == entry.definition_hash:
+        if current is None or step.clobber or {step.name, step.safe_name} & tokens:
             continue
-        if step.name in tokens or step.safe_name in tokens:
-            continue
-        edited.append(step.name)
+        recorded, now = entry.definition_hash, current.definition_hash
+        if digest_scheme(recorded) != digest_scheme(now):
+            unchecked.append(step.name)
+        elif now != recorded:
+            edited.append(step.name)
 
     if edited:
         names = ", ".join(repr(name) for name in edited)
@@ -1391,6 +1411,16 @@ def refuse_edited_done_steps(
             f"Steps {names} reached Done in run {manifest.run_id!r} under a "
             f"different definition; pass {rerun} to re-run them, or "
             f"{ARG_RUN_ID} <other-id> to start a new run"
+        )
+
+    if unchecked:
+        names = ", ".join(repr(name) for name in unchecked)
+        log.warning(
+            f"Steps {names} reached Done in run {manifest.run_id!r} under "
+            "definitions recorded by another C-Star release, which this one "
+            "cannot compare, so an edit made to them since is not detected; pass "
+            f"{ARG_CLOBBER} <step-name> to re-run a step you changed. This attempt "
+            "records their definitions again."
         )
 
 

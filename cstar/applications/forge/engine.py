@@ -44,6 +44,7 @@ from typing import (
 from cstar.applications.forge.blueprint import ForgeBlueprint, emitted_provenance
 from cstar.applications.forge.host import HostPaths
 from cstar.applications.forge.namelist_model import validate_run_time_sections
+from cstar.base.digest import digest_scheme, short_digest
 from cstar.base.env import ENV_CSTAR_RUNID
 from cstar.roms.namelist import release_ref_for_remote
 
@@ -339,16 +340,26 @@ def verify_content_hash(cfg: ForgeBlueprint) -> str | None:
     """If the config carries a recorded integrity hash and it no longer matches the
     recomputed hash of the results-affecting data, return a warning message (the file
     appears hand-edited since write-out); otherwise None.
+
+    A hash recorded under another scheme (another release's recipe) cannot be
+    compared, so it is not checked; the next save records the current one.
     """
     recorded = cfg.provenance.content_hash
     if recorded:
         actual = cfg.content_hash()
-        if recorded != actual:
+        if digest_scheme(recorded) != digest_scheme(actual):
+            logger.debug(
+                "forge_blueprint %r records its content hash under another scheme "
+                "(%r); not checked",
+                cfg.name,
+                digest_scheme(recorded) or "untagged",
+            )
+        elif recorded != actual:
             return (
                 "forge_blueprint integrity check FAILED: the results-affecting data does "
                 "not match the recorded hash — the file appears to have been hand-edited "
-                f"since it was written (recorded {recorded[:12]}…, computed {actual[:12]}…). "
-                "Processing will continue with the data as read."
+                f"since it was written (recorded {short_digest(recorded)}…, computed "
+                f"{short_digest(actual)}…). Processing will continue with the data as read."
             )
     return None
 

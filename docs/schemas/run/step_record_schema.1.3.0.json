@@ -144,7 +144,7 @@
                 },
                 "sha256": {
                     "default": "",
-                    "description": "A bare sha256 of the product's bytes, written by no current release: read for\nrecords that predate `digest`.",
+                    "description": "A bare sha256 of the product's bytes, written by no current release: kept so\nrecords that predate `digest` load, and folded into `digest` on load.",
                     "title": "Sha256",
                     "type": "string"
                 },
