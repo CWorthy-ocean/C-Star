@@ -595,8 +595,7 @@ class TestLayeredCatalog:
     def test_forge_blueprint_names_finds_shipped_flat_blueprints(self):
         bundled = DomainCatalog(catalog_root=_DEFAULT_CATALOG_ROOT)
         expected = {
-            "cson_roms-marbl_v0.1_wio-toy_10procs",
-            "roms-marbl-0.3-default_wio-toy_10procs",
+            "wio-toy-example",
             "wio-toy-simple",
         }
         assert set(bundled.blueprint_names("forge")) >= expected

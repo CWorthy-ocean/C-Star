@@ -5745,7 +5745,7 @@ def test_committed_example_validates():
     if not example.exists():
         pytest.skip("example file not present")
     cfg = ForgeBlueprint.from_yaml(example)
-    assert cfg.composition.model.name == "cson_roms-marbl_v0.1"
+    assert cfg.composition.model.name == "roms-marbl-0.12-default"
     assert cfg.composition.model.origin == "catalog"
 
 
@@ -8743,7 +8743,7 @@ def _shipped_cppdefs_sources() -> list[tuple[str, dict]]:
     out: list[tuple[str, dict]] = []
     for path in [
         repo_root / "docs" / "forge-blueprint-example.wio-toy.yaml",
-        *sorted((bundled / "blueprints").glob("*.y*ml")),
+        *sorted((bundled / "blueprints" / "forge").glob("*.y*ml")),
     ]:
         docs = [d for d in yaml.safe_load_all(path.read_text()) if isinstance(d, dict)]
         bp = next(d for d in docs if "model_settings" in d)

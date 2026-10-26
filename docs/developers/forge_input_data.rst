@@ -543,12 +543,12 @@ All input files are written to::
 ``domain_name`` has any ``.`` replaced with ``_`` (via
 ``netcdf_filename_component()``), since generated NetCDF basenames must not
 contain a ``.`` except the final ``.nc`` suffix. For example, a domain named
-``cson_roms-marbl_v0.1_test-tiny`` produces:
+``roms-marbl-0.12-default_test-tiny`` produces:
 
-- ``cson_roms-marbl_v0_1_test-tiny_grid.nc``
-- ``cson_roms-marbl_v0_1_test-tiny_initial_conditions.nc``
-- ``cson_roms-marbl_v0_1_test-tiny_surface-physics_201201.nc``
-- ``cson_roms-marbl_v0_1_test-tiny_boundary-physics_201201.nc``
+- ``roms-marbl-0_12-default_test-tiny_grid.nc``
+- ``roms-marbl-0_12-default_test-tiny_initial_conditions.nc``
+- ``roms-marbl-0_12-default_test-tiny_surface-physics_201201.nc``
+- ``roms-marbl-0_12-default_test-tiny_boundary-physics_201201.nc``
 
 The one exception is user-supplied carbonate sensitivity files, which are
 staged under their own basenames (see the carbonate sensitivity forcing handler

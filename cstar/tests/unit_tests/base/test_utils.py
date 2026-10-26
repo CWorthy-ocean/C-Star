@@ -587,7 +587,7 @@ class TestNetcdfFormat:
     [
         ("My Run", "my-run"),
         ("  NA 8x8 / Test  ", "na-8x8-test"),
-        ("cson_roms-marbl_v0.1", "cson_roms-marbl_v0-1"),
+        ("roms-marbl-0.12-default", "roms-marbl-0-12-default"),
         ("Étude Ü", "etude-u"),
         ("straße café", "strasse-cafe"),
         ("run—2012", "run-2012"),

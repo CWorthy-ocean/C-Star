@@ -1,9 +1,9 @@
-$schema: https://raw.githubusercontent.com/CWorthy-ocean/C-Star/refs/heads/main/docs/schemas/bp/forge/forge_schema.1.0.0.json
-name: cson_roms-marbl_v0.1_wio-toy_10procs
+$schema: https://raw.githubusercontent.com/CWorthy-ocean/C-Star/refs/heads/main/docs/schemas/bp/forge/forge_schema.1.1.0.json
+name: wio-toy-example
 description: Example ForgeBlueprint for the bundled wio-toy domain
 application: forge
 state: notset
-schema_version: 1.0.0
+schema_version: 1.1.0
 forge_blueprint_version: 10
 run:
   start_date: '2012-01-01T00:00:00'
@@ -14,12 +14,12 @@ domain:
   grid_kwargs:
     nx: 20
     ny: 20
-    size_x: 8000
-    size_y: 8000
+    N: 10
+    size_x: 8000.0
+    size_y: 8000.0
     center_lon: 60.0
     center_lat: -4.0
-    rot: 0
-    N: 10
+    rot: 0.0
   topography_source: ETOPO5
   topography_path: null
   open_boundaries:
@@ -37,7 +37,7 @@ domain:
   metadata_child: null
   nesting_include_pressure_fluxes: false
   v_sponge: 40000.0
-  dt: 28800.0
+  dt: 7200.0
   grid_file: null
 forcing:
   initial_conditions:
@@ -270,12 +270,15 @@ model_settings:
     sponge_tune: false
     nhy_forcing: true
     nox_forcing: true
+    auto_tiling: false
+    parabolic_splines: false
+    upstream_ts_land_curv: false
     obc_west: true
     obc_east: true
     obc_north: true
     obc_south: true
     cdr_forcing: false
-    use_pio: false
+    use_pio: true
     marbl: true
     co2_tvarying: true
     sal_restore: true
@@ -304,19 +307,21 @@ model_settings:
     np_eta: 5
     nsub_x: 1
     nsub_e: 1
+  pio_settings:
+    pio_stride: 1
   bgc:
     nbgc_flx: 2
     interp_frc: 0
     xco2air_default: 284.7
     wrt_his: false
     output_period_his: 86400
-    nrpf_his: 7
+    nrpf_his: 1
     wrt_avg: false
     output_period_avg: 86400
-    nrpf_avg: 7
+    nrpf_avg: 1
     wrt_his_dia: false
     output_period_his_dia: 86400
-    nrpf_his_dia: 7
+    nrpf_his_dia: 1
     wrt_avg_dia: false
     output_period_avg_dia: 60
     nrpf_avg_dia: 1
@@ -341,7 +346,7 @@ model_settings:
     spn_avg: true
     sp_timscale: 86400
     wrt_sponge: false
-    nrpf: 7
+    nrpf: 1
     output_period: 86400
   flux_frc:
     interp_flux_frc: true
@@ -360,7 +365,7 @@ model_settings:
     exchange_facy: 0.1
     exchange_facc: 0.01
     output_period: 400
-    nrpf: 100
+    nrpf: 216
     ppm3: 1.0e-06
     pmin: 200
   lin_rho_eos:
@@ -377,6 +382,8 @@ model_settings:
   marbl_bgc:
     marbl_config_file: marbl_in
     marbl_timestep: 3600.0
+    use_constant_fe: false
+    constant_fe_value: 0.003
     marbl_tracers_to_write:
     - PO4
     - NO3
@@ -395,9 +402,11 @@ model_settings:
     - pCO2SURF
     - FG_CO2
     - FG_ALT_CO2
+  cdr_lite:
+    cdr_carbonate_sensitivity_time_interpolation: true
   time_stepping:
-    ntimes: 3
-    dt: 28800
+    ntimes: 12
+    dt: 7200.0
     ndtfast: 60
     ninfo: 1
   v_sponge:
@@ -449,7 +458,7 @@ model_settings:
     nrpf_rst: 2
     wrt_file_his: false
     output_period_his: 86400
-    nrpf_his: 7
+    nrpf_his: 1
     wrt_z: true
     wrt_ub: true
     wrt_vb: true
@@ -464,7 +473,7 @@ model_settings:
     wrt_hbls: false
     wrt_hbbl: false
     wrt_file_avg: false
-    output_period_avg: 604800
+    output_period_avg: 86400
     nrpf_avg: 1
     wrt_avg_z: true
     wrt_avg_ub: true
@@ -485,8 +494,8 @@ model_settings:
     wrt_rstflx: false
     wrt_swflx: false
     sflx_avg: false
-    output_period: 31536000
-    nrpf: 10
+    output_period: 86400
+    nrpf: 1
     sst_vname: sst
     sst_tname: sst_time
     sss_vname: sss
@@ -494,7 +503,7 @@ model_settings:
   diagnostics:
     diag_avg: false
     output_period: 86400
-    nrpf: 7
+    nrpf: 1
     diag_uv: false
     diag_trc: false
   stdout_diag:
@@ -515,9 +524,28 @@ model_settings:
     monthly_averages: false
     output_period: 3600
     nrpf: 24
+  cdr_lite_output:
+    do_cdr_lite_output: false
+    do_avg: true
+    monthly_averages: false
+    output_period: 3600
+    nrpf: 24
+    wrt_tracers: true
+    wrt_vertical_integrals: true
+    wrt_thickness_weighted: true
+    wrt_sources: true
+    wrt_alk: true
+    wrt_dic: true
+    wrt_gas_exchange: false
+  cdr_gas_exch_output:
+    do_cdr_gas_exch_output: false
+    do_avg: true
+    monthly_averages: false
+    output_period: 3600
+    nrpf: 24
   upscale_output:
     do_upscale: false
-    nrpf_uscl: 48
+    nrpf_uscl: 24
     output_period_uscl: 3600
   zslice:
     do_zslice: false
@@ -538,17 +566,20 @@ model_settings:
   random_output:
     do_random: false
     output_period: 3600
-    nrpf: 10
+    nrpf: 24
 code:
   roms:
     location: https://github.com/CWorthy-ocean/ucla-roms.git
-    commit: 0.2.0
+    commit: 0.12.0
     branch: null
   marbl:
     location: https://github.com/CWorthy-ocean/MARBL.git
     commit: marbl0.45.0-max-it-10
     branch: null
-  pio: null
+  pio:
+    location: https://github.com/CWorthy-ocean/ParallelIO.git
+    commit: 2.7.1-fork
+    branch: null
   templates_compile_time:
     location: https://github.com/CWorthy-ocean/C-Star.git
     commit: d35d06265515965c7daaa54c111ee0185166bca4
@@ -569,31 +600,40 @@ code:
       marbl_in: 218976e818e81001b798c1eecbbc2f659c6e3f311db24da50d990cd69c300f8f
 composition:
   model:
-    name: cson_roms-marbl_v0.1
+    name: roms-marbl-0.12-default
     origin: catalog
     modified: false
   domain:
     name: wio-toy
-    origin: custom
+    origin: catalog
     modified: false
   forcing:
-    name: ''
-    origin: custom
+    name: glorys-era5-unified
+    origin: catalog
     modified: false
   cdr:
     name: ''
     origin: custom
     modified: false
   output:
-    name: ''
-    origin: custom
+    name: daily-restarts
+    origin: catalog
     modified: false
   overrides: {}
 provenance:
-  generated_at: '2026-09-03T18:57:06.736571Z'
-  forge_version: 56109b3f-dirty
-  cstar_version: cstar-ocean==0.12.0
-  roms_tools_version: roms-tools==4.1.1.dev2+g1a564489a
+  generated_at: '2026-10-25T22:37:07.628509Z'
+  generated_by:
+    tool: wizard
+    id: 41877806-1602-4083-9f26-8c9b3d470c90
+    system: darwin_arm64
+    versions:
+      cstar-ocean: 0.17.1.dev32+gd36876ac8
+      roms-tools: 5.2.1
+    run_id: ''
+    working_dir: ''
+  forge_version: null
+  cstar_version: null
+  roms_tools_version: null
   override_files_applied: []
-  content_hash: bp-v2:eaf14f90a7177f4b2c3c38c43ac509294380985fa50ecae842a4f7e22528dab4
+  content_hash: bp-v2:60d7b34bf7dc2c1edca235c5e490cdd24b9e45e471ca59d07105f78a13af32ba
   notes: null

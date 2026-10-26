@@ -191,7 +191,7 @@ class DomainCatalog:
 
         catalog/
         ├── ModelSpec/
-        │   └── cson_roms-marbl_v0.1/
+        │   └── roms-marbl-0.12-default/
         │       └── model.yaml   (single consolidated file: code + model_settings)
         ├── DomainSpec/
         │   ├── ccs-12km/
