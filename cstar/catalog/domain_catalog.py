@@ -866,6 +866,10 @@ class DomainCatalog:
     # Path accessors (raise KeyError if not found)
     # ------------------------------------------------------------------
 
+    def spec_paths(self, kind: CatalogSpecKind) -> dict[str, Path]:
+        """Return the spec file of every *kind* entry, by name."""
+        return dict(self._specs[kind])
+
     def model_path(self, model_name: str) -> Path:
         """Return the spec file of a named model."""
         if model_name not in self._specs["ModelSpec"]:
