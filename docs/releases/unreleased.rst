@@ -544,4 +544,11 @@ Miscellaneous
 - Documentation describes ``cstar blueprint run`` as running where it is started and adds ``cstar blueprint submit`` to the blueprint, UCLA-ROMS, HPC, pre-run/resume, Python, wizard and tutorial pages. (`#836 <https://github.com/CWorthy-ocean/C-Star/pull/836>`_)
 - The blueprint API reference lists ``CodeRepository``, ``ParameterSet`` and ``BlueprintState`` under the modules they live in, so their pages build again. (`#836 <https://github.com/CWorthy-ocean/C-Star/pull/836>`_)
 - Unit tests set ``CSTAR_ALLOW_LOGIN_NODE_RUN`` so they pass on a cluster login node; refusal tests use a shared ``login_node`` fixture. (`#836 <https://github.com/CWorthy-ocean/C-Star/pull/836>`_)
+- The end-to-end tutorial now has readers pick the tides-off ``simple-bgc-demo`` forcing, so its first run needs no TPXO or WOA files downloaded by hand. (`#837 <https://github.com/CWorthy-ocean/C-Star/pull/837>`_)
+
+  - The bundled ``wio-toy-simple`` blueprint is offered as the ready-made alternative, from the wizard's Start section or as a download.
+  - The tutorial states the real first download (the 10 GB biogeochemistry climatology) and uses the names the current default model produces.
+
+- The workplan tutorial corrects the ``cstar run path`` usage, shows the ``num_cpus`` a step needs on a cluster when its blueprint comes from an earlier step, and shows ``cstar run show`` output from a real run. (`#837 <https://github.com/CWorthy-ocean/C-Star/pull/837>`_)
+- The nesting tutorial no longer describes the test suite. (`#837 <https://github.com/CWorthy-ocean/C-Star/pull/837>`_)
 
