@@ -389,6 +389,12 @@ Bug Fixes
   - The first re-entry after such an upgrade cannot tell the migration from an edit, so pass ``--clobber <step-name>`` for a step whose blueprint you also changed; the next re-entry checks the steps again.
 
 - ``--resume <workplan>`` after a blueprint migration no longer refuses the run because the workplan file changed. (`#841 <https://github.com/CWorthy-ocean/C-Star/pull/841>`_)
+- Steps whose out-of-date blueprints share a filename in different directories no longer run the same migrated blueprint; each step now runs its own. (`#845 <https://github.com/CWorthy-ocean/C-Star/pull/845>`_)
+
+  - A migrated copy is now named ``<name>-<digest>_<version>.yaml`` in ``CSTAR_STATE_HOME``, including the copy written by ``cstar blueprint migrate`` without ``--output``.
+  - Editing a blueprint and submitting it again writes a new copy, so it never replaces the copy an earlier, still-running step reads.
+
+- The migrated copy is written atomically, so a concurrent submit never reads a half-written blueprint. (`#845 <https://github.com/CWorthy-ocean/C-Star/pull/845>`_)
 
 
 
@@ -585,4 +591,5 @@ Miscellaneous
 - The re-entry and blueprint versioning docs say what a blueprint major means for a run in progress. (`#841 <https://github.com/CWorthy-ocean/C-Star/pull/841>`_)
 - The bundled catalog ships in the one-file-per-entry layout. (`#842 <https://github.com/CWorthy-ocean/C-Star/pull/842>`_)
 - The catalog, specs, wizard-launching, Python reference and developer pages describe the new layout, and the catalog page's migration section covers spec directories. (`#842 <https://github.com/CWorthy-ocean/C-Star/pull/842>`_)
+- The ``cstar blueprint migrate --help`` text now says where a copy is written when no output path is given. (`#845 <https://github.com/CWorthy-ocean/C-Star/pull/845>`_)
 
