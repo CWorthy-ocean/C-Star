@@ -3,7 +3,6 @@ import pickle
 import re
 import tempfile
 import warnings
-from collections.abc import Generator
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -2739,33 +2738,6 @@ class TestProcessingAndExecution:
         assert (sim.fs_manager.logs_dir / "romstest.out.1").read_text() == "old output"
         assert symlink_path.is_symlink()
         assert symlink_path.resolve() == sim.exe_path.resolve()
-
-    @pytest.fixture
-    def login_node(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> Generator[None, None, None]:
-        """Put the process outside any scheduler job on a system with a scheduler."""
-        for name in (
-            "SLURM_JOB_ID",
-            "SLURM_JOBID",
-            "PBS_JOBID",
-            ENV_CSTAR_ALLOW_LOGIN_NODE_RUN,
-        ):
-            monkeypatch.delenv(name, raising=False)
-
-        with (
-            mock.patch(
-                "cstar.system.manager.CStarSystemManager.scheduler",
-                new_callable=mock.PropertyMock,
-                return_value=mock.MagicMock(),
-            ),
-            mock.patch(
-                "cstar.system.manager.CStarSystemManager.name",
-                new_callable=mock.PropertyMock,
-                return_value="fake_hpc",
-            ),
-        ):
-            yield
 
     def test_run_refuses_outside_scheduler_job(
         self,

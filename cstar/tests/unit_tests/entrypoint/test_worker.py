@@ -14,7 +14,6 @@ from cstar.applications.core import RunnerRequest, RunnerResult, RunnerState
 from cstar.applications.ucla_roms.app import UclaRomsRunner, main
 from cstar.applications.ucla_roms.models import UclaRomsBlueprint
 from cstar.applications.ucla_roms.transforms import ContinuanceDirective
-from cstar.base.env import ENV_CSTAR_ALLOW_LOGIN_NODE_RUN
 from cstar.base.exceptions import BlueprintError, CstarError, CstarExpectationFailed
 from cstar.entrypoint.config import ServiceConfiguration, get_service_config
 from cstar.entrypoint.runner import (
@@ -68,25 +67,6 @@ def valid_args_short() -> dict[str, str]:
         ARG_URI_SHORT: "blueprint.yaml",
         ARG_LOGLEVEL_SHORT: "INFO",
     }
-
-
-@pytest.fixture
-def login_node(monkeypatch: pytest.MonkeyPatch) -> Generator[None, None, None]:
-    """Put the process outside any scheduler job on a system with a scheduler."""
-    for name in (
-        "SLURM_JOB_ID",
-        "SLURM_JOBID",
-        "PBS_JOBID",
-        ENV_CSTAR_ALLOW_LOGIN_NODE_RUN,
-    ):
-        monkeypatch.delenv(name, raising=False)
-
-    with mock.patch(
-        "cstar.system.manager.CStarSystemManager.scheduler",
-        new_callable=mock.PropertyMock,
-        return_value=mock.Mock(),
-    ):
-        yield
 
 
 @pytest.fixture
