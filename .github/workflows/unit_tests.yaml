@@ -21,9 +21,15 @@ jobs:
     timeout-minutes: 30
     strategy:
       fail-fast: false
+      # every Python version on Ubuntu; macOS runs only the newest
       matrix:
         os: [ubuntu-latest, macos-latest]
-        python-version: ["3.12", "3.13"]
+        python-version: ["3.12", "3.13", "3.14"]
+        exclude:
+          - os: macos-latest
+            python-version: "3.12"
+          - os: macos-latest
+            python-version: "3.13"
     steps:
       - uses: actions/checkout@v4
 
