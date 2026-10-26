@@ -18,9 +18,8 @@ Blueprint Components
    cstar.orchestration.models.VersionedResource
    cstar.orchestration.models.Dataset
    cstar.orchestration.models.PathFilter
-   cstar.orchestration.models.CodeRepository
-   cstar.orchestration.models.ParameterSet
    cstar.orchestration.models.Blueprint
+   cstar.orchestration.models.BlueprintState
    cstar.orchestration.models.Provenance
    cstar.orchestration.models.GeneratedBy
    cstar.orchestration.models.BlueprintIdentity
@@ -33,7 +32,8 @@ Simulation Components
    :toctree: ../generated/
 
    cstar.applications.ucla_roms.models.ForcingConfiguration
-   cstar.applications.ucla_roms.models.BlueprintState
+   cstar.applications.ucla_roms.models.CodeRepository
+   cstar.applications.ucla_roms.models.ParameterSet
    cstar.applications.ucla_roms.models.RuntimeParameterSet
    cstar.applications.ucla_roms.models.PartitioningParameterSet
 
