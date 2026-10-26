@@ -2700,6 +2700,39 @@ def test_shared_pio_dev_spec_passes_a_pre_0_13_0_pin():
 _CONSTANT_FE_ON = {"marbl_bgc": {"use_constant_fe": True}}
 
 
+def _bgc_diagnostics_averaged_every(period: float) -> dict:
+    """Run-time overrides turning the ``_bgc_dia_avg`` stream on at ``period``."""
+    return {"bgc": {"wrt_avg_dia": True, "output_period_avg_dia": period}}
+
+
+def test_resolver_rejects_averages_that_end_off_the_marbl_step():
+    """ucla-roms >= 0.13.0 stops at startup unless the ``_bgc_dia_avg`` period is a
+    whole multiple of the MARBL step: ``_build``'s ``dt`` of 7200 s steps MARBL
+    every 7200 s (its 3600 s ``marbl_timestep`` is below one ``dt``).
+    """
+    with pytest.raises(
+        NamelistConsistencyError,
+        match=r"bgc_settings\.output_period_bgc_avg_dia \(60(\.0)? s\).*7200",
+    ):
+        _build(
+            model_path=_MODEL_PATH_ROMS0130,
+            run_time_overrides=_bgc_diagnostics_averaged_every(60),
+        )
+    cfg = _build(
+        model_path=_MODEL_PATH_ROMS0130,
+        run_time_overrides=_bgc_diagnostics_averaged_every(86400),
+    )
+    assert cfg.model_settings["bgc"]["wrt_avg_dia"] is True
+
+
+def test_resolver_leaves_averages_off_the_marbl_step_to_older_releases():
+    cfg = _build(
+        model_path=_MODEL_PATH_ROMS0120,
+        run_time_overrides=_bgc_diagnostics_averaged_every(60),
+    )
+    assert cfg.model_settings["bgc"]["output_period_avg_dia"] == 60
+
+
 def test_resolver_0_11_model_spec_carries_the_constant_fe_keys():
     cfg = _build(model_path=_MODEL_PATH_ROMS0110)
     assert cfg.code.roms.commit == "0.11.0"

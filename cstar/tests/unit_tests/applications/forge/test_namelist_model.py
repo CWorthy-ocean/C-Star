@@ -958,6 +958,46 @@ def test_validate_run_time_sections_checks_constant_fe_against_marbl():
         assert validate_run_time_sections(settings, roms_ref="0.11.0") == []
 
 
+def test_validate_run_time_sections_checks_averages_against_the_marbl_step():
+    """A stored blueprint whose ``_bgc_dia_avg`` window ends between MARBL steps
+    is reported up front on ucla-roms >= 0.13.0, which stops on it at startup;
+    0.12.0 runs it.
+    """
+    settings = {
+        "cppdefs": {"marbl": True},
+        "time_stepping": {"ntimes": 1440, "dt": 60.0, "ndtfast": 60, "ninfo": 1},
+        "marbl_bgc": _MARBL_BGC,
+        "bgc": {
+            "interp_frc": False,
+            "wrt_his": False,
+            "output_period_his": 86400,
+            "nrpf_his": 1,
+            "wrt_avg": False,
+            "output_period_avg": 86400,
+            "nrpf_avg": 1,
+            "wrt_his_dia": False,
+            "output_period_his_dia": 86400,
+            "nrpf_his_dia": 1,
+            "wrt_avg_dia": True,
+            "output_period_avg_dia": 1800,
+            "nrpf_avg_dia": 1,
+            "xco2air_default": 284.7,
+        },
+    }
+    errs = validate_run_time_sections(settings, roms_ref="0.13.0")
+    assert len(errs) == 1
+    assert "bgc_settings.output_period_bgc_avg_dia (1800" in errs[0]
+    assert "3600.0 s" in errs[0]
+    assert validate_run_time_sections(settings, roms_ref="0.12.0") == []
+    assert (
+        validate_run_time_sections(
+            {**settings, "marbl_bgc": {**_MARBL_BGC, "marbl_timestep": 1800.0}},
+            roms_ref="0.13.0",
+        )
+        == []
+    )
+
+
 def test_validate_run_time_sections_reports_constant_fe_on_a_pre_0_11_0_pin():
     errs = validate_run_time_sections(
         {"marbl_bgc": {**_MARBL_BGC, "use_constant_fe": True}}, roms_ref="0.10.1"

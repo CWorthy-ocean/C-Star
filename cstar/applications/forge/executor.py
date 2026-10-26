@@ -52,6 +52,7 @@ from cstar.applications.forge.namelist_model import (
     check_cdr_output_sections,
     check_constant_fe,
     check_marbl_only_outputs,
+    check_marbl_step_averages,
     check_output_streams_divide_rst,
     check_river_tracer_counts,
     check_rst_period_divisible,
@@ -2672,6 +2673,17 @@ class ForgeExecutor(BaseModel):
                     self._settings_run_time.get("upscale_output", {}),
                 ),
             )
+        # Averaged MARBL streams vs the MARBL timestep net (ucla-roms >= 0.13.0's
+        # check_avg_ends_on_marbl_step), mirroring the resolver's guard for stored
+        # blueprints, on the release a commit-hash pin resolves to.
+        check_marbl_step_averages(
+            {
+                **self._settings_run_time,
+                "cppdefs": self._settings_compile_time.get("cppdefs", {}),
+            },
+            settings_cls=settings_cls,
+            roms_ref=effective_roms_ref,
+        )
 
         # Ensure build output directories exist before writing files.
         self.compile_time_code_dir.mkdir(parents=True, exist_ok=True)

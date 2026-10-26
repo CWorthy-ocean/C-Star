@@ -95,9 +95,11 @@ CDR_OUTPUT_PERIOD = 900.0
 MAKE_INPUTS_OVERRIDES = {
     **GAS_EXCH_OVERRIDES,
     "cdr_output": {"output_period": CDR_OUTPUT_PERIOD, "nrpf": 2},
+    "marbl_bgc": {"marbl_timestep": CDR_OUTPUT_PERIOD},
 }
 """Run-time overrides of ``make_inputs``: the ``_cdrgas`` and ``_cdr`` streams (forge turns
-the latter on itself for a MARBL run with an active CDR forcing)."""
+the latter on itself for a MARBL run with an active CDR forcing), and a MARBL timestep the
+``_cdr`` window is a multiple of, which ucla-roms >= 0.13.0 requires."""
 SEGMENT_SPLIT = RUN_START + timedelta(seconds=RESTART_PERIOD)
 """Where ``run_cdr_seg1`` ends and ``run_cdr_seg2`` continues: the first restart record."""
 METRICS_RECORDS = round((RUN_END - RUN_START).total_seconds() / CDR_OUTPUT_PERIOD)

@@ -71,6 +71,12 @@ from cstar.roms.namelist import (
 from cstar.roms.precheck import NamelistConsistencyError as NamelistConsistencyError
 from cstar.roms.precheck import applies_to as _output_precheck_applies_to
 from cstar.roms.precheck import (
+    averages_end_on_marbl_step_applies_to as _averages_end_on_marbl_step_applies_to,
+)
+from cstar.roms.precheck import (
+    check_averages_end_on_marbl_step as _check_averages_end_on_marbl_step,
+)
+from cstar.roms.precheck import (
     check_output_streams_divide_rst as _check_output_streams_divide_rst,
 )
 from cstar.roms.precheck import (
@@ -629,6 +635,39 @@ def check_output_streams_divide_rst(settings: Any, cppdefs: Any = None) -> None:
     alongside the forge-shaped helpers above.
     """
     _check_output_streams_divide_rst(settings, cppdefs)
+
+
+def check_marbl_step_averages(
+    settings: Mapping[str, Any],
+    *,
+    settings_cls: type[_RunTimeSettingsCommon],
+    roms_ref: str | None,
+) -> None:
+    """Raise ``NamelistConsistencyError`` if an averaged MARBL output stream of
+    forge's ``settings`` would not end on a MARBL step, which ucla-roms >= 0.13.0
+    refuses at startup.
+
+    Forge-vocabulary shim over
+    :func:`cstar.roms.precheck.check_averages_end_on_marbl_step` (the single
+    home for this rule), gated on ``roms_ref`` by
+    :func:`cstar.roms.precheck.averages_end_on_marbl_step_applies_to`: a ref
+    that is not a release tag counts as the latest release. The ``cdr_output``
+    and ``bgc`` streams are translated through ``settings_cls``'s Cfg classes
+    (:func:`canonical_output_sections_for_precheck`); ``dt`` and
+    ``marbl_timestep`` already are the real Fortran keys. Raises pydantic's
+    ``ValidationError`` for a malformed output section.
+    """
+    if not _averages_end_on_marbl_step_applies_to(roms_ref):
+        return
+    canonical = canonical_output_sections_for_precheck(dict(settings), settings_cls)
+    canonical["time_stepping"] = {"dt": (settings.get("time_stepping") or {}).get("dt")}
+    canonical["marbl_biogeochemistry_settings"] = {
+        "marbl_timestep": (settings.get("marbl_bgc") or {}).get("marbl_timestep")
+    }
+    _check_averages_end_on_marbl_step(
+        canonical,
+        cppdefs_for_precheck(settings.get("cppdefs"), settings.get("upscale_output")),
+    )
 
 
 class TsOutputCfg(_SettingsSection):
@@ -2452,6 +2491,18 @@ def validate_run_time_sections(
             )
         except ValueError as exc:
             errors.append(str(exc))
+    # And the averaged MARBL streams vs the MARBL timestep (output sections vs
+    # marbl_bgc, time_stepping and cppdefs), which ucla-roms >= 0.13.0 checks at
+    # startup: surfaced here so a stored blueprint fails before generation.
+    if "cppdefs" in settings:
+        try:
+            check_marbl_step_averages(
+                settings, settings_cls=settings_cls, roms_ref=roms_ref
+            )
+        except NamelistConsistencyError as exc:
+            errors.append(str(exc))
+        except ValidationError:
+            pass  # a malformed section is already reported by the loop above
     return errors
 
 

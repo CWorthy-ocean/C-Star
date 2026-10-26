@@ -79,6 +79,7 @@ from cstar.applications.forge.namelist_model import (
     check_cdr_output_sections,
     check_constant_fe,
     check_marbl_only_outputs,
+    check_marbl_step_averages,
     check_output_streams_divide_rst,
     check_rst_period_divisible,
     check_upscaled_cdr_lite_tracer_counts,
@@ -1375,6 +1376,12 @@ def build_forge_blueprint(
                     keys=exc.keys,
                 ) from exc
             raise
+    # Averaged MARBL streams vs the MARBL timestep (ucla-roms >= 0.13.0's
+    # check_avg_ends_on_marbl_step, precheck.F90): checked after do_cdr_output
+    # and dt are final, before any generation.
+    check_marbl_step_averages(
+        settings, settings_cls=settings_cls, roms_ref=effective_roms_ref
+    )
 
     # ----- forcing (initial conditions + surface/boundary/tidal/river) --------
     # A child grid (has a parent) receives its boundary values from the parent's

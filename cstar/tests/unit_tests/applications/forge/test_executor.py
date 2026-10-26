@@ -4197,6 +4197,30 @@ class TestGoldenNamelist:
         ):
             self._configure_build_for(cfg, builder)
 
+    @pytest.mark.parametrize(
+        ("model_path", "rejected"),
+        [(_MODEL_PATH_ROMS0130, True), (_MODEL_PATH_ROMS0120, False)],
+    )
+    def test_configure_build_checks_averages_against_the_marbl_step_end_to_end(
+        self, mock_grid, tmp_path, model_path, rejected
+    ):
+        """The net for stored blueprints: an accordion edit after the resolver ran
+        turns on a ``_bgc_dia_avg`` window shorter than the MARBL step, which
+        ucla-roms >= 0.13.0 stops on at startup and 0.12.0 runs.
+        """
+        cfg, builder = self._generate_inputs_no_cdr_forcing(
+            mock_grid, tmp_path, model_path=model_path
+        )
+        cfg.model_settings["bgc"].update(wrt_avg_dia=True, output_period_avg_dia=60)
+
+        if rejected:
+            with pytest.raises(
+                ValueError, match=r"bgc_settings\.output_period_bgc_avg_dia"
+            ):
+                self._configure_build_for(cfg, builder)
+        else:
+            self._configure_build_for(cfg, builder)
+
     def test_configure_build_accepts_constant_fe_with_marbl_end_to_end(
         self, mock_grid, tmp_path
     ):
