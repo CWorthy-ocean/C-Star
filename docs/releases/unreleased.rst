@@ -245,6 +245,12 @@ New features
 
   - ``cstar run ls`` prints one warning line per such record and lists the rest; ``cstar run status`` and the other run commands exit 2 with the message.
 
+- ``cstar run status``, ``show``, ``ls``, ``path``, ``log``, ``cd``, ``attach``, and ``check`` without ``--repair`` or ``--record-digests``, read a run another C-Star of the same major recorded with fields this one does not know. (`#834 <https://github.com/CWorthy-ocean/C-Star/pull/834>`_)
+
+  - The unknown fields are ignored with a warning naming them, and the files are never written back.
+  - Re-entering, resuming, promoting or recording digests in such a run is refused with a message to upgrade ``cstar-ocean``.
+
+
 
 
 
@@ -401,6 +407,10 @@ Improvements
 - A validation error for a missing field no longer prints the whole enclosing document. (`#827 <https://github.com/CWorthy-ocean/C-Star/pull/827>`_)
 - Writing a field out at its default value, or leaving it out, no longer counts as an edit to a blueprint or a workplan step. (`#829 <https://github.com/CWorthy-ocean/C-Star/pull/829>`_)
 - A run record that cannot be read or written while a step's status is recorded now logs a warning instead of stopping status loading; keeping the record of a run never stops the run. (`#831 <https://github.com/CWorthy-ocean/C-Star/pull/831>`_)
+- The "upgrade cstar-ocean" message names each field of a newer file this C-Star does not know, and each value it cannot validate. (`#834 <https://github.com/CWorthy-ocean/C-Star/pull/834>`_)
+- ``cstar blueprint check`` and ``cstar blueprint migrate`` report a newer-minor blueprint that sets an unknown field as too new, rather than as invalid or as compatible. (`#834 <https://github.com/CWorthy-ocean/C-Star/pull/834>`_)
+- A blueprint, workplan, run manifest, step record or run record newer than the installed C-Star is refused only when its major is newer, or when it sets a field this C-Star does not know; the message names the field. Earlier releases keep refusing any newer file. (`#834 <https://github.com/CWorthy-ocean/C-Star/pull/834>`_)
+- Writing a file back stamps the newer of its own schema version and the installed C-Star's, so an older blueprint or workplan this C-Star rewrites (override and resume copies, the transformed workplan) is stamped at the current version, which earlier releases refuse. (`#834 <https://github.com/CWorthy-ocean/C-Star/pull/834>`_)
 
 
 
@@ -484,4 +494,5 @@ Miscellaneous
 - The bundled ``wio-toy-simple`` blueprint now uses ``roms-marbl-0.12-default`` instead of the archived ``roms-marbl-0.4-default`` and writes daily restarts; its simplified forcing is unchanged. (`#835 <https://github.com/CWorthy-ocean/C-Star/pull/835>`_)
 - The example forge blueprint in the documentation is regenerated on ``roms-marbl-0.12-default``, and the Forge model-spec page says the bundled domains and the example use it. (`#835 <https://github.com/CWorthy-ocean/C-Star/pull/835>`_)
 - The bundled DomainSpecs record ``roms-marbl-0.12-default`` as their model; the wizard never applies this field when you pick a domain, so it only changes what the spec files say. (`#835 <https://github.com/CWorthy-ocean/C-Star/pull/835>`_)
+- The schema versioning docs gain a "newer file" column, and the run manifest docs describe two installs sharing a run. (`#834 <https://github.com/CWorthy-ocean/C-Star/pull/834>`_)
 
