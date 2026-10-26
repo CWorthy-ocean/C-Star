@@ -2008,6 +2008,8 @@ class TestProcessingAndExecution:
             sim.codebase = mock.MagicMock()
             sim.codebase.working_copy = mock.MagicMock()
             sim.codebase.working_copy.path = Path(tmpdir)
+            sim.codebase.source.checkout_target = "v0.12.0"
+            sim.codebase.working_copy.checkout_hash = "abc123"
             (Path(tmpdir) / "Work").mkdir(exist_ok=True, parents=True)
             (Path(tmpdir) / "Work" / "Makefile").touch()
             sim.build()
@@ -2081,6 +2083,8 @@ class TestProcessingAndExecution:
             sim.codebase = mock.MagicMock()
             sim.codebase.working_copy = mock.MagicMock()
             sim.codebase.working_copy.path = Path(tmpdir)
+            sim.codebase.source.checkout_target = "v0.12.0"
+            sim.codebase.working_copy.checkout_hash = "abc123"
             (Path(tmpdir) / "Work").mkdir(exist_ok=True, parents=True)
             (Path(tmpdir) / "Work" / "Makefile").touch()
             sim.build()
@@ -2131,6 +2135,8 @@ class TestProcessingAndExecution:
             sim.codebase = mock.MagicMock()
             sim.codebase.working_copy = mock.MagicMock()
             sim.codebase.working_copy.path = Path(tmpdir)
+            sim.codebase.source.checkout_target = "v0.12.0"
+            sim.codebase.working_copy.checkout_hash = "abc123"
             (Path(tmpdir) / "Work").mkdir(exist_ok=True, parents=True)
             (Path(tmpdir) / "Work" / "Makefile").touch()
             sim.build()
@@ -2187,6 +2193,8 @@ class TestProcessingAndExecution:
             sim.codebase = mock.MagicMock()
             sim.codebase.working_copy = mock.MagicMock()
             sim.codebase.working_copy.path = Path(tmpdir)
+            sim.codebase.source.checkout_target = "v0.12.0"
+            sim.codebase.working_copy.checkout_hash = "abc123"
             (Path(tmpdir) / "Work").mkdir(exist_ok=True, parents=True)
             (Path(tmpdir) / "Work" / "Makefile").touch()
             sim.build()
@@ -2239,6 +2247,8 @@ class TestProcessingAndExecution:
             sim.codebase = mock.MagicMock()
             sim.codebase.working_copy = mock.MagicMock()
             sim.codebase.working_copy.path = Path(tmpdir)
+            sim.codebase.source.checkout_target = "v0.12.0"
+            sim.codebase.working_copy.checkout_hash = "abc123"
             (Path(tmpdir) / "Work").mkdir(exist_ok=True, parents=True)
             (Path(tmpdir) / "Work" / "Makefile").touch()
             sim.build()
@@ -2338,6 +2348,8 @@ class TestProcessingAndExecution:
             sim.codebase = mock.MagicMock()
             sim.codebase.working_copy = mock.MagicMock()
             sim.codebase.working_copy.path = Path(tmpdir)
+            sim.codebase.source.checkout_target = "v0.12.0"
+            sim.codebase.working_copy.checkout_hash = "abc123"
             (Path(tmpdir) / "Work").mkdir(exist_ok=True, parents=True)
             (Path(tmpdir) / "Work" / "Makefile").touch()
             with pytest.raises(
@@ -2388,6 +2400,8 @@ class TestProcessingAndExecution:
             sim.codebase = mock.MagicMock()
             sim.codebase.working_copy = mock.MagicMock()
             sim.codebase.working_copy.path = Path(tmpdir)
+            sim.codebase.source.checkout_target = "v0.12.0"
+            sim.codebase.working_copy.checkout_hash = "abc123"
             (Path(tmpdir) / "Work").mkdir(exist_ok=True, parents=True)
             (Path(tmpdir) / "Work" / "Makefile").touch()
             with pytest.raises(RuntimeError, match="Error when compiling ROMS"):

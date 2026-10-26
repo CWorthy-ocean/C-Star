@@ -109,7 +109,9 @@ For a single blueprint:
 A resumed UCLA-ROMS run reuses the codebases, compiled executable, staged
 inputs and partitions already in the working directory, and continues from
 the last usable restart file the previous attempt wrote. When no restart was written, it starts from the original
-initial conditions. ``--resume`` cannot be combined with ``--clobber``, and
+initial conditions. Its namelist is written for the ucla-roms version the
+executable was compiled from, even if you have upgraded C-Star since.
+``--resume`` cannot be combined with ``--clobber``, and
 only applications that declare themselves resumable accept it (today,
 ``ucla_roms``).
 

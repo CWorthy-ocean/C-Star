@@ -7,6 +7,10 @@ from cstar.execution.file_system import JobFileSystemManager
 ROMS_EXECUTABLE_NAME: t.Final[str] = "roms"
 """The name of the compiled ROMS executable in the compile-time code directory."""
 
+BUILD_RECORD_NAME: t.Final[str] = "cstar_build.json"
+"""The name of the record C-Star writes beside the compiled ROMS executable: the
+namelist schema it was built for, which a resumed run writes its namelist with."""
+
 GENERATED_NAMELIST_NAME: t.Final[str] = "cstar_generated_roms.nml"
 """The name of the namelist C-Star generates for a run, in the run directory."""
 
