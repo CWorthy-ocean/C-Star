@@ -33,15 +33,10 @@ with the same run ID reports how far the workplan has progressed.
 Configure the scheduler
 -----------------------
 
-Most settings are ``CSTAR_*`` variables; :doc:`configuration` lists them
-all and ``cstar env show`` prints the values in effect. Only the SLURM ones
-are required, and only to submit jobs: a workplan run with the SLURM launcher
-stops early if a setting the system requires is missing, and a step that
-submits its own job (a ROMS step run with the local launcher outside an
-allocation) is refused. Run ``cstar init`` once on the cluster to set them:
-it lists your SLURM associations and partitions when ``sacctmgr`` and
-``sinfo`` are available, asks for the account, queue and default walltime,
-and writes them to ``~/.config/cstar/config.env``:
+C-Star needs to know which account and queue to submit jobs to. Run
+``cstar init`` once on the cluster: it lists your SLURM accounts and
+partitions, asks for the account, queue and default walltime, and writes
+them to your :doc:`configuration file <configuration>`:
 
 .. code-block:: bash
 
@@ -49,141 +44,63 @@ and writes them to ``~/.config/cstar/config.env``:
    CSTAR_SLURM_QUEUE=mpi                  # the partition or queue to submit to
    CSTAR_SLURM_MAX_WALLTIME=01:00:00      # default time requested per job
 
-The same settings can be exported from your shell profile instead, with
-``export`` and quotes:
-
-.. code-block:: bash
-
-   export CSTAR_SLURM_ACCOUNT="my-allocation"
-   export CSTAR_SLURM_QUEUE="mpi"
-   export CSTAR_SLURM_MAX_WALLTIME="01:00:00"
-
-   # Only if your system does not already define them (see "Where data goes"):
-   # export CSTAR_PROJECT_HOME=/path/to/your/group/directory
-   # export SCRATCH=/path/to/your/scratch/directory
-
-Either works. If a name is set both ways, the exported variable takes
-precedence over the file, and ``cstar init`` tells you when that is the case.
-
-These are the defaults for every step of a workplan; a step can override
-them, for example to send Forge steps to a general-purpose queue and ROMS
-steps to an MPI queue. See the compute overrides on the :doc:`workplans/index`
-page.
-
-What each system requires, and where a job goes when ``CSTAR_SLURM_QUEUE``
-is unset:
+What each system needs:
 
 - **Anvil, Bouchet**: the account and the queue are both required.
 - **Elja**: no account is used; an unset queue submits to ``any_cpu``.
 - **Expanse**: the account is required; an unset queue submits to ``compute``.
 - **Perlmutter**: an unset account charges your default NERSC project; an
   unset queue submits to the ``regular`` QOS.
-- **Derecho** (PBS): the ``CSTAR_SLURM_*`` settings are not read. A job goes
-  to the ``main`` queue with that queue's maximum walltime; set
-  ``PBS_ACCOUNT`` (or ``PBS_ACCOUNT_DERECHO``) to the project code to charge.
 
-An unset ``CSTAR_SLURM_MAX_WALLTIME`` requests 48 hours, which is more than
-some queues allow (Bouchet's ``day`` queue, for one); set it to fit the queue
-you use.
+Set the walltime to fit your queue: left unset, a job asks for 48 hours,
+which is more than some queues allow. These settings are the defaults for
+every step of a workplan, and a step can ask for different resources (see
+:ref:`workplan_compute_environment`).
 
-Where a blueprint runs
-----------------------
+Run work on the compute nodes
+-----------------------------
 
-``cstar blueprint run`` runs where you invoke it. The UCLA-ROMS application
-submits the model run to SLURM itself, so it can be started from a login
-node; Forge does not, and generates every input file wherever the command
-runs. For anything beyond a toy domain, run Forge from a compute node or
-through a workplan, even a :ref:`single-step one <workplan_examples>`. If
-you must run a UCLA-ROMS blueprint directly on a login node, set
-``CSTAR_NPROCS_POST`` to a small number (about 2): the post-processing step
-that joins partitioned output otherwise uses every core it can find.
+Submit your work as a :doc:`workplan <workplans/index>`. ``cstar workplan
+submit`` sends each step to SLURM and returns, so every stage runs on a
+compute node and you can log off. A workplan can have a single step, so this
+works for one simulation too.
 
-To validate a run from a login node before queueing it, use ``--pre-run``: it
-stages inputs, clones and compiles the codebases and checks the namelist
-without launching ROMS or submitting a job, and a later run attaches to the
-prepared working directory. See :ref:`workplan_pre_run`.
+``cstar blueprint run`` instead runs on the node you start it from. That is
+fine for a UCLA-ROMS blueprint, which submits the model run to SLURM itself,
+but Forge generates every input file right there, which is too much for a
+login node beyond a toy domain (see :doc:`applications/blueprints`).
+
+To catch start-up problems before waiting in the queue, prepare a run on the
+login node with ``--pre-run``; see :doc:`runs/pre_run_resume`.
 
 Where data goes
 ---------------
 
-Every C-Star application writes under its blueprint's ``working_dir``. A
-blueprint that omits it runs under
-``CSTAR_DATA_HOME/blueprint_runs/<application>/<name>``, with the blueprint
-name slugified. A workplan gives each step
-``CSTAR_DATA_HOME/workplan_runs/<run id>/tasks/<step>``; a run started
-before that layout keeps its ``CSTAR_DATA_HOME/<run id>`` directory when you
-re-run or resume it. A ``working_dir`` you set is used exactly as written; a
-relative path is resolved against the directory you run from.
+On a cluster, C-Star keeps data in three places. ``cstar env show`` prints
+``CSTAR_DATA_HOME``, and ``cstar forge show-paths`` prints the source-data
+cache and the project runs area for the machine you are on.
 
-A relative ``location:`` inside a blueprint, such as an input dataset or local
-code, is different: it resolves against the directory of the blueprint file,
-wherever you run from. A location that exists only relative to the directory
-you run from, where earlier releases looked, is rejected with both paths
-named, rather than read from the wrong place. A blueprint fetched from a URL has
-no directory of its own, so its relative locations resolve against the
-directory you run ``cstar`` from.
-
-``CSTAR_DATA_HOME`` is ``~/cstar`` on a laptop or workstation. On a
-supported HPC system it is a ``cstar`` directory on your scratch file system
-unless you set it yourself. The scratch file system is the first of
-``$SCRATCH``, ``$SCRATCH_DIR`` and ``$LOCAL_SCRATCH`` that is set (the
-``CSTAR_SCRATCH_DIRS`` list; see :doc:`configuration`). Bouchet exports none
-of these, so there C-Star uses the ``scratch_pi_*/<user>`` directory linked
-from your home. ``cstar env show`` prints the value in effect.
-
-Forge follows the same rule. A forge blueprint normally omits
-``working_dir``, so Forge writes its generated inputs under
-``CSTAR_DATA_HOME/blueprint_runs/forge/<name>``. The UCLA-ROMS blueprint it
-emits has the same name and no ``working_dir`` either, so it runs under
-``CSTAR_DATA_HOME/blueprint_runs/ucla_roms/<name>``. On a laptop those are
-``~/cstar/blueprint_runs/forge/<name>`` and
-``~/cstar/blueprint_runs/ucla_roms/<name>``; on an HPC system both are on
-scratch.
-
-Forge also keeps a **source-data cache** of the downloaded and user-staged
-datasets (GLORYS, TPXO, and so on), shared by every domain you generate. It
-is ``cstar/source-data`` under the first of these that is set:
-
-1. ``CSTAR_PROJECT_HOME``, a durable project directory. It defaults to
-   ``$PROJECT``, which Anvil exports.
-2. The scratch file system, found the same way as for ``CSTAR_DATA_HOME``
-   above.
-3. Your home directory.
-
-So a laptop uses ``~/cstar/source-data``, Anvil ``$PROJECT/cstar/source-data``,
-and Perlmutter ``$SCRATCH/cstar/source-data`` unless you set a project
-directory. The cache is meant to last, so ``CSTAR_DATA_HOME`` does not move
-it, and ``cstar admin clean`` never deletes it. If you used an earlier
-version, an existing ``cstar-forge-data/source-data`` directory in the same
-place is linked to the new location the first time Forge runs, so nothing is
-downloaded again.
-
-The **project runs area** is ``cstar/runs`` under the same ``CSTAR_PROJECT_HOME``
-(``$PROJECT/cstar/runs`` on Anvil), a place for runs that should outlast your
-scratch space. Unlike the source-data cache, it has no fallback to scratch or
-your home directory: with no project directory there is no project runs area.
-Each run is a directory directly under ``cstar/runs``, named for its run ID,
-with the run's ``cstar-run.yaml`` at its top; a link to such a directory works
-too. ``cstar run promote <run>`` places a run there (a copy of its manifest,
-records and products, a link, or a move; see :ref:`workplan_promote_run`), and
-``cstar run ls --shared`` lists the area. A run in it is named by its run ID,
-by ``run://<uuid>`` or by its directory; a run under another directory name is
-found by the last two only. See :ref:`workplan_external_runs`. The area is
-shared and C-Star changes no permissions: set your umask, or the group and
-permissions of the area, so that your collaborators can read the runs you
-promote.
+Run output
+   Everything a blueprint or workplan writes goes under ``CSTAR_DATA_HOME``.
+   On a supported HPC system that is a ``cstar`` directory on your scratch
+   file system (``$SCRATCH``, or the system's equivalent); on a laptop it is
+   ``~/cstar``. Scratch is fast and large, but it is usually purged on a
+   schedule, so move results you want to keep (see below).
+Source-data cache
+   The datasets Forge downloads or you stage by hand (GLORYS, TPXO and so
+   on), shared by every domain you build, in ``cstar/source-data`` under
+   ``CSTAR_PROJECT_HOME``. That defaults to ``$PROJECT``, so on Anvil it is
+   ``$PROJECT/cstar/source-data``; without a project directory it falls back
+   to scratch, then to your home directory. Point ``CSTAR_PROJECT_HOME`` at a
+   group directory to share one cache with your collaborators.
+Project runs area
+   ``cstar/runs`` under the same ``CSTAR_PROJECT_HOME``: a shared place for
+   finished runs that should outlast scratch. ``cstar run promote`` puts a
+   run there; see :doc:`runs/moving/promote`.
 
 Some systems define ``PROJECT`` and ``SCRATCH`` for you (Anvil exports both,
-Perlmutter exports ``SCRATCH``); check with ``echo $PROJECT $SCRATCH`` and set
-them in your shell profile only if they are empty. Pointing
-``CSTAR_PROJECT_HOME`` (or ``PROJECT``) at a group directory shares one
-source-data cache with your collaborators. ``cstar forge show-paths`` prints
-the source-data cache, the project directory and the project runs area:
-
-.. code-block:: console
-
-   cstar forge show-paths          # the detected system and the resolved paths
-   cstar forge show-paths --json
+Perlmutter exports ``SCRATCH``). Check with ``echo $PROJECT $SCRATCH``, and
+set them in your shell profile only if they are empty.
 
 Keep the environment off ``~/.local``
 --------------------------------------
@@ -202,23 +119,11 @@ that vanish, set:
 in your shell profile, or in the environment's ``activate.d`` so it applies
 whenever the environment is active.
 
-Jupyter on the cluster
-----------------------
+Notebooks and the wizard
+------------------------
 
-If your cluster offers a hosted Jupyter (an OnDemand portal, for example),
-register the environment as a kernel so notebooks, including the wizard
-notebook, run inside it:
-
-.. code-block:: console
-
-   cstar env register-kernel
-
-The kernel starts through a wrapper that activates the environment first,
-so shell commands in notebooks see the environment's ``PATH`` and variables.
-
-The wizard from a login node
-----------------------------
-
-Serve the wizard on the login node and forward its port from your laptop, or
-build blueprints on your laptop and copy them over; see :doc:`wizard/launching`. Forge
-blueprints do not depend on the machine they were written on.
+If your cluster offers a hosted Jupyter, such as an OnDemand portal, run
+``cstar env register-kernel`` once so notebooks, the wizard notebook
+included, can use your C-Star environment. To use the wizard as a web page
+instead, serve it on the login node and forward its port from your laptop;
+see :doc:`wizard/launching`.
