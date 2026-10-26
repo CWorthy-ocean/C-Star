@@ -80,6 +80,7 @@ from cstar.orchestration.models import (
     SpecSelection,
 )
 from cstar.orchestration.serialization import read_blueprint_raw
+from cstar.system.migration import for_writing
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -1772,7 +1773,7 @@ class ForgeBlueprint(Blueprint):
         # reflects current content, for hand-edit detection. Who wrote the file and
         # when is ``stamp_provenance``'s job -- a caller that is producing the
         # file stamps first -- so writing never mints a new identity.
-        stamped = self.model_copy(
+        stamped = for_writing(self).model_copy(
             update={
                 "provenance": self.provenance.model_copy(
                     update={"content_hash": self.content_hash()}

@@ -135,10 +135,10 @@ async def list_steps(run_id: str, incomplete: str) -> list[str]:
     incomplete = incomplete.lower()
     repo = TrackingRepository()
 
-    if wp_run := await repo.get_workplan_run(run_id):
+    if wp_run := await repo.get_workplan_run(run_id, tolerant=True):
         try:
             wp_path = wp_run.trx_workplan_path
-            wp = LiveWorkplan.load(wp_path)
+            wp = LiveWorkplan.load(wp_path, tolerant=True)
             step_names = [str(s.name) for s in wp.steps]
 
             if incomplete:
@@ -663,11 +663,12 @@ def preload_run_record(context: typer.Context, run_id: str) -> str:
     ------
     typer.BadParameter
         - Raised when the run-id is invalid, no `WorkplanRun` exists for it, or
-          its record cannot be read (one a newer cstar-ocean wrote)
+          its record cannot be read (one a newer cstar-ocean wrote that this
+          build cannot read)
     """
     repo = TrackingRepository()
     try:
-        run = asyncio.run(repo.get_workplan_run(run_id))
+        run = asyncio.run(repo.get_workplan_run(run_id, tolerant=True))
     except (ValueError, CstarError) as ex:
         raise typer.BadParameter(str(ex)) from ex
 
@@ -860,7 +861,9 @@ async def refresh_disk_usage(
     """Re-measure and persist per-step disk usage for a collection of runs.
 
     A run whose transformed workplan is not present in `plans` falls back to
-    the subdirectories of its tasks directory; a run with neither is skipped.
+    the subdirectories of its tasks directory; a run with neither is skipped,
+    and so is a run whose record holds keys a newer cstar-ocean wrote, which
+    this build does not write.
 
     Parameters
     ----------
@@ -874,8 +877,12 @@ async def refresh_disk_usage(
     step_dirs_by_run: dict[str, Mapping[str, Path]] = {}
     fallback: list[str] = []
     skipped: list[str] = []
+    newer: list[str] = []
 
     for run in runs:
+        if run.unknown_keys:
+            newer.append(run.run_id)
+            continue
         path = run.try_trx_workplan_path()
         plan = plans.get(path) if path is not None else None
         if plan is not None:
@@ -904,6 +911,11 @@ async def refresh_disk_usage(
         log.warning(
             "Disk usage was not refreshed for run(s) without a loadable workplan "
             f"or tasks directory: {', '.join(skipped)}"
+        )
+    if newer:
+        log.warning(
+            "Disk usage was not refreshed for run(s) whose record a newer "
+            f"cstar-ocean wrote; upgrade cstar-ocean to refresh it: {', '.join(newer)}"
         )
 
     if not step_dirs_by_run:

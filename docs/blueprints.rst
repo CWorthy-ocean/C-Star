@@ -31,7 +31,8 @@ The core blueprint attributes do not contain enough information to be executed a
 ``schema_version`` is semver relative to the installed C-Star: a file with an older
 minor or patch version loads unchanged, a file with an older major version is migrated
 automatically when the application provides a migration (``cstar blueprint migrate``),
-and a file newer than the installed C-Star is refused. See
+a file with a newer major version is refused, and a file with a newer minor or patch
+version loads unless it sets a field the installed C-Star does not know. See
 :ref:`versioning_blueprint_schema`.
 
 .. _blueprint_provenance:

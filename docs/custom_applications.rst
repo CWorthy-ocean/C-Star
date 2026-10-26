@@ -257,27 +257,50 @@ checked against the build's current version:
 
 .. list-table::
    :header-rows: 1
-   :widths: 10 45 45
+   :widths: 10 30 30 30
 
    * - Bump
      - Meaning
      - An older file
+     - A newer file
    * - major
      - The set of valid documents changed incompatibly.
      - Does not load unchanged. It is migrated automatically if the application
        registers a ``SchemaAdapter`` for that major; otherwise the tooling
        refuses it with guidance for migrating by hand.
+     - Refused with a request to upgrade ``cstar-ocean``.
    * - minor
      - Additive, with defaults. An older file loads *and runs identically*.
      - Loads unchanged: no adapter, no migration copy, no workplan rewrite.
+     - Loads when it sets none of the fields the newer version added. One that
+       sets a field this build does not know is refused with a request to
+       upgrade ``cstar-ocean`` that names the field.
    * - patch
      - The published schema document is republished without changing the set of
        valid blueprints or their meaning (descriptions, examples). Rare.
      - Loads unchanged.
+     - As for a minor.
 
-A file newer than the build, at any level, is refused with a request to upgrade
-``cstar-ocean``. Whether an older major can be migrated automatically is a
-property of the adapter registry, not of the version number.
+Whether an older major can be migrated automatically is a property of the
+adapter registry, not of the version number.
+
+The same rule applies to every versioned file C-Star keeps: blueprints,
+workplans, run manifests, step records and run records. That is what lets two
+C-Star releases of the same major, such as a stable and a development install on
+one cluster, share blueprints and runs. A field a minor bump adds is only written
+when it is set to something other than its default, so a file the newer release
+wrote reads in the older one until it uses the new field. Commands that read a
+run without writing its files (``cstar run status``, ``show``, ``ls``, ``path``,
+``log``, ``cd``, ``attach``, and ``check`` without ``--repair`` or
+``--record-digests``) go further: they read a newer manifest, step record, run
+record or transformed workplan even when it sets fields they do not know, ignore
+those fields with a warning that names them, and never write the file back.
+
+When C-Star writes a file back, it stamps the newer of the file's version and
+its own: a file never moves to an older version, and an older file it rewrites
+takes the build's version. Forge blueprints keep their own integer
+``forge_blueprint_version``: a newer one is refused, since every bump so far
+changed the file's shape.
 
 The migration planner (``cstar.system.migration.BlueprintMigration.plan``) treats
 a file with the same major as the build as compatible and returns an empty plan.
@@ -396,7 +419,8 @@ currently on the model, so bump ``schema_version`` first. Add the new file to
 What Users See
 ~~~~~~~~~~~~~~
 
-``cstar blueprint check`` reports a file that is too new, or an older major that
+``cstar blueprint check`` reports a file that is too new (a newer major, or a
+newer minor that sets a field this build does not know), or an older major that
 needs migration (with the ``cstar blueprint migrate`` command to run), or an older
 major that cannot be migrated (with your ``guidance()``), and exits non-zero in
 each case; a compatible file is validated normally. ``cstar blueprint migrate``
@@ -409,6 +433,8 @@ automatic migration, and has no effect on a compatible older file. For example:
 .. code-block:: text
 
    ucla_roms schema 9.9.9 is newer than this build of cstar-ocean reads (3.3.0). Upgrade cstar-ocean to read this file.
+
+   ucla_roms schema 3.4.0 is newer than this build of cstar-ocean reads (3.3.0) and sets runtime_params.new_option, which this build does not know. Upgrade cstar-ocean to read this file.
 
    ucla_roms schema 0.5.0 has no automatic migration to 3.3.0 from 0.x. Update the blueprint by hand to the 3.3.0 schema (published under docs/schemas), then validate it with: cstar blueprint check <path>
 

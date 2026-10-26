@@ -311,6 +311,65 @@ def test_blueprint_check_too_new(
     assert "is valid" not in output
 
 
+def _newer_minor() -> str:
+    """Name a minor version of the plotter schema that is newer than this build's."""
+    major, minor, _ = get_application(APP_PLOTTER).schema_version.split(".")
+    return f"{major}.{int(minor) + 1}.0"
+
+
+def test_blueprint_check_newer_minor_without_new_keys(
+    tmp_path: Path,
+    plotter_v2_0_0_model: dict[str, t.Any],
+) -> None:
+    """Verify a blueprint a newer minor release wrote passes the check when it
+    holds nothing this build does not know.
+    """
+    bp_path = tmp_path / "plotter_newer_minor.json"
+    bp_path.write_text(
+        json.dumps({**plotter_v2_0_0_model, "schema_version": _newer_minor()})
+    )
+
+    runner = CliRunner()
+    result = runner.invoke(app, [str(bp_path)], color=False)
+
+    assert result.exit_code == 0, result.output
+    assert "is valid" in result.stdout
+
+
+def test_blueprint_check_newer_minor_with_a_new_key(
+    tmp_path: Path,
+    plotter_v2_0_0_model: dict[str, t.Any],
+) -> None:
+    """Verify a blueprint a newer minor release wrote that sets a key this build
+    does not know is refused with the upgrade message naming the key, as a
+    newer major is, rather than reported as an invalid blueprint.
+    """
+    bp_path = tmp_path / "plotter_newer_minor_key.json"
+    bp_path.write_text(
+        json.dumps(
+            {
+                **plotter_v2_0_0_model,
+                "schema_version": _newer_minor(),
+                "future_field": True,
+            }
+        )
+    )
+
+    runner = CliRunner()
+    result = runner.invoke(app, [str(bp_path)], color=False)
+
+    latest = get_application(APP_PLOTTER).schema_version
+    output = " ".join(result.stdout.split())
+    assert result.exit_code == 1, result.output
+    assert (
+        f"Blueprint {str(bp_path)!r}: {APP_PLOTTER} schema {_newer_minor()} is newer"
+        in output
+    )
+    assert f"reads ({latest}) and sets future_field" in output
+    assert "Upgrade cstar-ocean to read this file." in output
+    assert "is valid" not in output
+
+
 def test_blueprint_check_manual_migration(
     tmp_path: Path,
     plotter_v1_0_0_model: dict[str, t.Any],

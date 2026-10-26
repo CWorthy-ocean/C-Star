@@ -9,15 +9,31 @@ from pydantic import (
     ConfigDict,
     Field,
     FilePath,
+    PrivateAttr,
+    ValidationError,
+    ValidationInfo,
+    ValidatorFunctionWrapHandler,
+    model_validator,
 )
 
 from cstar.base.adapter import SchemaAdapter, SchemaBreak
 from cstar.base.application_names import canonical_application
 from cstar.base.exceptions import CstarError
-from cstar.base.log import LoggingMixin
+from cstar.base.log import LoggingMixin, get_logger
+
+log = get_logger(__name__)
 
 KEY_SV: t.Final[str] = "schema_version"
 KEY_APP: t.Final[str] = "application"
+
+TOLERATE_UNKNOWN: t.Final[str] = "cstar_tolerate_unknown"
+"""Validation-context key: when true, a same-major newer document whose only
+problems are keys this build does not know loads with them ignored, and is
+marked so that no writer persists it."""
+
+_ADMITTED: t.Final[str] = "cstar_admitted"
+"""Validation-context key set while a newer document is validated against this
+build's model, so the validators it re-enters take the plain path."""
 
 
 class CstarMigrationError(CstarError):
@@ -31,13 +47,32 @@ class CstarUnsupportedMigrationError(CstarMigrationError):
 class CstarSchemaTooNewError(CstarMigrationError):
     """An error that occurs when a document's schema is newer than this build reads."""
 
-    def __init__(self, application: str, found: str, target: str) -> None:
+    def __init__(
+        self,
+        application: str,
+        found: str,
+        target: str,
+        unknown: Sequence[str] = (),
+        invalid: Sequence[str] = (),
+        *,
+        action: str = "read",
+    ) -> None:
         self.application = application
         self.found = found
         self.target = target
+        self.unknown = tuple(unknown)
+        self.invalid = tuple(invalid)
+        details = [
+            f"sets {', '.join(self.unknown)}, which this build does not know"
+            if self.unknown
+            else "",
+            f"does not validate at {', '.join(self.invalid)}" if self.invalid else "",
+        ]
+        said = " and ".join(detail for detail in details if detail)
         super().__init__(
             f"{application} schema {found} is newer than this build of "
-            f"cstar-ocean reads ({target}). Upgrade cstar-ocean to read this file."
+            f"cstar-ocean reads ({target}){f' and {said}' if said else ''}. "
+            f"Upgrade cstar-ocean to {action} this file."
         )
 
 
@@ -214,8 +249,9 @@ class BlueprintMigration(Migration):
         """Determine the available upgrade path.
 
         A document is classified against the build's schema version for its
-        application: newer is refused, the same major version is compatible
-        as-is, and an older major version is walked forward through adapters.
+        application: a newer major is refused, the same major version (older
+        or newer) is compatible as-is, and an older major version is walked
+        forward through adapters.
         `plan` assumes only 1 mapping for any source schema version exists. It
         will not backtrack to locate an alternative upgrade path if an adapter
         cannot traverse to the goal state and becomes stuck.
@@ -231,7 +267,7 @@ class BlueprintMigration(Migration):
             If the application is unknown to the migrator, or the document's
             schema version is not dotted integers.
         CstarSchemaTooNewError
-            If the document's schema is newer than the build's.
+            If the document's major version is newer than the build's.
         CstarManualMigrationError
             If an older major version has no automatic upgrade path.
         """
@@ -251,9 +287,9 @@ class BlueprintMigration(Migration):
             msg = f"Unrecognized schema_version {found!r}; expected dotted integers like 1.0.0"
             raise CstarUnsupportedMigrationError(msg) from ex
 
-        if version_key(found) > version_key(target):
-            raise CstarSchemaTooNewError(application, found, target)
-
+        # a newer minor is compatible: the blueprint's own validation refuses
+        # it if it holds what this build does not know
+        refuse_newer_major(application, found, target)
         if _major(found) == _major(target):
             return MigrationPlan(found, target, [])
 
@@ -356,37 +392,270 @@ class BlueprintMigration(Migration):
         )
 
 
-def refuse_newer_schema(label: str, found: t.Any, target: str) -> None:
-    """Refuse a document whose schema is newer than this build reads.
+def schema_version_of(found: t.Any) -> str:
+    """Read a document's `schema_version` as a dotted version.
 
     A missing or empty version marks a document written before its kind was
     versioned; every schema began at 1.0.0.
 
     Parameters
     ----------
-    label : str
-        What the document is called in messages.
     found : t.Any
         The `schema_version` the document holds, or `None` when it has none.
+
+    Returns
+    -------
+    str
+
+    Raises
+    ------
+    ValueError
+        If the version is not dotted integers.
+    """
+    version = str(found or "").strip() or "1.0.0"
+    try:
+        version_key(version)
+    except ValueError as ex:
+        msg = f"Unrecognized schema_version {version!r}; expected dotted integers like 1.0.0"
+        raise ValueError(msg) from ex
+    return version
+
+
+def refuse_newer_major(label: str, version: str, target: str) -> None:
+    """Refuse a document of a newer major than this build reads.
+
+    A newer minor or patch is additive, so such a document may still be read;
+    whether it is depends on its content (see `VersionedDocument`).
+
+    Parameters
+    ----------
+    label : str
+        What the document is called in messages.
+    version : str
+        The document's version, as `schema_version_of` reads it.
     target : str
         The schema version this build reads and writes.
 
     Raises
     ------
     CstarSchemaTooNewError
-        If the document's schema is newer than `target`, at any level.
-    ValueError
-        If the document's version is not dotted integers.
+        If the document's major version is newer than `target`'s.
     """
-    version = str(found or "").strip() or "1.0.0"
-    try:
-        newer = version_key(version) > version_key(target)
-    except ValueError as ex:
-        msg = f"Unrecognized schema_version {version!r}; expected dotted integers like 1.0.0"
-        raise ValueError(msg) from ex
-
-    if newer:
+    if _major(version) > _major(target):
         raise CstarSchemaTooNewError(label, version, target)
+
+
+def stamped_version(found: str, target: str) -> str:
+    """Return the schema version a document is written at: never older than it was.
+
+    A document read from a newer file holds only fields this build knows, all of
+    which the newer schema has, so it keeps the newer version. A document read
+    from an older file may now hold fields of `target`, so it takes `target`;
+    fields left at their defaults are not written, so a build that reads the
+    older version still reads it.
+
+    Parameters
+    ----------
+    found : str
+        The version the document holds.
+    target : str
+        The schema version this build writes.
+
+    Returns
+    -------
+    str
+    """
+    try:
+        newer = version_key(found) > version_key(target)
+    except ValueError:  # not a dotted version: the build's own is the safe stamp
+        return target
+    return found if newer else target
+
+
+def _failed_locations(ex: ValidationError) -> tuple[list[str], list[str]]:
+    """Locate a validation error's problems: the unknown keys, and the rest."""
+    unknown: list[str] = []
+    invalid: list[str] = []
+    for error in ex.errors():
+        location = ".".join(str(part) for part in error["loc"]) or "."
+        (unknown if error["type"] == "extra_forbidden" else invalid).append(location)
+    return unknown, invalid
+
+
+_D = t.TypeVar("_D")
+
+
+class VersionedDocument(BaseModel):
+    """A persisted document whose `schema_version` decides whether this build reads it.
+
+    A document of an older or the same version, or of an older major, is
+    validated as the model says. One of a newer major is refused. One that is
+    newer within this build's major is validated with unknown keys forbidden at
+    every level, so a key this build does not know is never silently dropped;
+    any failure then refuses it as too new, naming what failed. A reader that
+    only displays the document may pass `TOLERATE_UNKNOWN` in the validation
+    context: a document whose only problems are unknown keys then loads with them
+    ignored, and `unknown_keys` names them, so that no writer persists it; the
+    reader reports them with `warn_unknown_keys`.
+
+    The subclass declares `schema_version` with the version this build reads as
+    its default.
+    """
+
+    SCHEMA_LABEL: t.ClassVar[str] = "document"
+    """What the document is called in messages."""
+
+    _unknown_keys: tuple[str, ...] = PrivateAttr(default=())
+
+    @property
+    def unknown_keys(self) -> tuple[str, ...]:
+        """The keys of a newer file this build ignored when it read the document."""
+        return self._unknown_keys
+
+    @classmethod
+    def schema_label(cls) -> str:
+        """Name the document in messages."""
+        return cls.SCHEMA_LABEL
+
+    @model_validator(mode="wrap")
+    @classmethod
+    def _admit_newer_minor(
+        cls,
+        data: t.Any,
+        handler: ValidatorFunctionWrapHandler,
+        info: ValidationInfo,
+    ) -> t.Any:
+        """Validate a newer document strictly, or tolerantly when the reader allows.
+
+        Raises
+        ------
+        CstarSchemaTooNewError
+            If the document's major is newer than this build's, or it is newer
+            within the major and fails to validate (other than only by unknown
+            keys, for a tolerant reader).
+        """
+        if not isinstance(data, Mapping):
+            return handler(data)
+
+        label = cls.schema_label()
+        target = str(cls.model_fields[KEY_SV].default)
+        found = schema_version_of(data.get(KEY_SV))
+        refuse_newer_major(label, found, target)
+        context = dict(info.context or {})
+        if context.get(_ADMITTED) or version_key(found) <= version_key(target):
+            return handler(data)
+
+        # checked without keeping the result: under `__init__` the validator
+        # must return the instance `handler` builds
+        context[_ADMITTED] = True
+        try:
+            cls.__pydantic_validator__.validate_python(
+                data, extra="forbid", context=context
+            )
+        except ValidationError as ex:
+            unknown, invalid = _failed_locations(ex)
+            if invalid or not context.get(TOLERATE_UNKNOWN):
+                raise CstarSchemaTooNewError(
+                    label, found, target, unknown, invalid
+                ) from ex
+        else:
+            return handler(data)
+
+        # only a reader's `model_validate` passes the context, so this is never
+        # reached under `__init__`
+        try:
+            document = cls.model_validate(data, extra="ignore", context=context)
+        except ValidationError as ex:
+            raise CstarSchemaTooNewError(
+                label, found, target, unknown, _failed_locations(ex)[1]
+            ) from ex
+        document._unknown_keys = tuple(unknown)
+        return document
+
+
+def _held_unknown_keys(
+    value: t.Any,
+) -> tuple[VersionedDocument | None, tuple[str, ...]]:
+    """Find a document read with unknown keys ignored, in a model or nested in it."""
+    if isinstance(value, VersionedDocument) and value.unknown_keys:
+        return value, value.unknown_keys
+    if isinstance(value, BaseModel):
+        value = list(value.__dict__.values())
+    elif isinstance(value, Mapping):
+        value = list(value.values())
+    if isinstance(value, list | tuple):
+        for item in value:
+            found = _held_unknown_keys(item)
+            if found[0] is not None:
+                return found
+    return None, ()
+
+
+def warn_unknown_keys(model: t.Any, where: str | Path) -> None:
+    """Warn that a document was read with keys a newer cstar-ocean wrote ignored.
+
+    Parameters
+    ----------
+    model : t.Any
+        The document just read.
+    where : str | Path
+        The file it was read from.
+    """
+    document, unknown = _held_unknown_keys(model)
+    if document is None:
+        return
+    target = type(document).model_fields[KEY_SV].default
+    log.warning(
+        f"The {type(document).schema_label()} in {where} is schema "
+        f"{getattr(document, KEY_SV)}, newer than this build of cstar-ocean reads "
+        f"({target}); ignoring {', '.join(unknown)}, which this build does not "
+        "know. This build will not write the file; upgrade cstar-ocean to change it."
+    )
+
+
+def for_writing(model: _D) -> _D:
+    """Prepare a document to be written: refuse it, or return it at its written version.
+
+    A document holding content read with unknown keys ignored is refused:
+    writing it would drop the keys while the file kept claiming the newer
+    schema. Otherwise the document is returned at `stamped_version` of its own
+    version and the build's: never older than the version it holds.
+
+    Parameters
+    ----------
+    model : _D
+        The model about to be written, usually a pydantic model; not changed.
+
+    Returns
+    -------
+    _D
+        `model`, or a copy of it at the stamped version.
+
+    Raises
+    ------
+    CstarSchemaTooNewError
+        If `model`, or a document nested in it, was read with unknown keys ignored.
+    """
+    document, unknown = _held_unknown_keys(model)
+    if document is not None:
+        raise CstarSchemaTooNewError(
+            type(document).schema_label(),
+            str(getattr(document, KEY_SV)),
+            str(type(document).model_fields[KEY_SV].default),
+            unknown,
+            action="write",
+        )
+
+    fields = getattr(type(model), "model_fields", {})
+    if KEY_SV not in fields:
+        return model
+    found = str(getattr(model, KEY_SV))
+    stamped = stamped_version(found, str(fields[KEY_SV].default))
+    if stamped == found:
+        return model
+    # the copy, not just the written key, carries the version, so a blueprint's
+    # `$schema` header names the schema its `schema_version` does
+    return t.cast("_D", getattr(model, "model_copy")(update={KEY_SV: stamped}))
 
 
 def version_key(version: str) -> tuple[int, ...]:

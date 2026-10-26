@@ -31,9 +31,10 @@ Schema Version
 :attr:`~cstar.orchestration.models.Workplan.schema_version` records the version
 of the workplan schema a file was written with (published under
 :doc:`schemas/index`). A workplan without one was written before workplans were
-versioned and reads as 1.0.0. A workplan whose version is newer than the
-installed C-Star reads, at any level, is refused with a message to upgrade
-``cstar-ocean``.
+versioned and reads as 1.0.0. A workplan whose major version is newer than the
+installed C-Star reads, or whose minor version is newer and that sets a field the
+installed C-Star does not know, is refused with a message to upgrade
+``cstar-ocean`` (see :ref:`versioning_blueprint_schema`).
 
 
 State
@@ -939,6 +940,8 @@ The scheduling command writes the manifest, under a lock, so concurrent commands
 Because the manifest records working directories relative to the run directory, a copied or moved run stays readable with ``cstar run show <directory>``. A standalone ``cstar blueprint run`` writes the same two files in its working directory, with ``kind: blueprint`` and one step whose working directory is ``.``.
 
 Runs scheduled with an earlier C-Star release have no manifest until they are re-entered: ``cstar workplan submit --run-id <my-unique-id>`` records one, and steps that are done are reused.
+
+Two C-Star installs of the same major can share a run, such as a stable and a development install on one cluster. Each reads the other's manifest and step records, and a refresh writes the manifest without lowering its ``schema_version``. When a newer install recorded a field the older one does not know, the older one's ``cstar run status``, ``show``, ``ls``, ``path``, ``log``, ``cd`` and ``attach``, and ``check`` without ``--repair`` or ``--record-digests``, still read the run: they warn, naming the field, and leave the file as it is. Re-entering, resuming, promoting or recording digests in such a run is refused with a message to upgrade ``cstar-ocean``: use the newer install for it.
 
 The files are described by published schemas, listed in the :doc:`schema reference <schemas/index>`.
 

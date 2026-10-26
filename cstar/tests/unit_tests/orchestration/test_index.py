@@ -173,9 +173,9 @@ def opened(monkeypatch: pytest.MonkeyPatch) -> list[Path]:
     calls: list[Path] = []
     real = index_module.read_run_manifest
 
-    def spy(root: Path) -> RunManifest | None:
+    def spy(root: Path, *, tolerant: bool = False) -> RunManifest | None:
         calls.append(root)
-        return real(root)
+        return real(root, tolerant=tolerant)
 
     monkeypatch.setattr(index_module, "read_run_manifest", spy)
     return calls
@@ -643,9 +643,9 @@ class TestManifestRecord:
         read: list[Path] = []
         real = manifest_module.read_step_record
 
-        def spy(step_root: Path) -> StepRecord | None:
+        def spy(step_root: Path, *, tolerant: bool = False) -> StepRecord | None:
             read.append(step_root)
-            return real(step_root)
+            return real(step_root, tolerant=tolerant)
 
         monkeypatch.setattr(manifest_module, "read_step_record", spy)
 
@@ -1175,9 +1175,9 @@ class TestTrackedByUuid:
         read: list[Path] = []
         real = manifest_module.read_run_manifest
 
-        def spy(path: Path) -> RunManifest | None:
+        def spy(path: Path, *, tolerant: bool = False) -> RunManifest | None:
             read.append(path)
-            return real(path)
+            return real(path, tolerant=tolerant)
 
         monkeypatch.setattr("cstar.orchestration.tracking.read_run_manifest", spy)
 

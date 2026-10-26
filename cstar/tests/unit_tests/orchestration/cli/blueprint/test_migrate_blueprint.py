@@ -7,6 +7,7 @@ from unittest import mock
 
 import pytest
 import typer
+import yaml
 from typer.testing import CliRunner
 
 from cstar.applications.core import get_application
@@ -170,6 +171,37 @@ def test_blueprint_migrate_unnecessary(hello_world_bp_path: Path) -> None:
     assert f"compatible with this build ({latest}); nothing to migrate." in output
     assert "persisted" not in output
     assert set(state_dir.glob("*")) == before
+
+
+@pytest.mark.parametrize("new_key", [False, True])
+def test_blueprint_migrate_newer_minor(
+    tmp_path: Path, hello_world_bp_path: Path, new_key: bool
+) -> None:
+    """Verify a blueprint a newer minor release wrote needs nothing when it sets
+    only what this build knows, and is refused as too new, naming the key, when
+    it sets a key this build does not know.
+    """
+    latest = get_application(APP_HELLO_WORLD).schema_version
+    major, minor, _ = latest.split(".")
+    newer = f"{major}.{int(minor) + 1}.0"
+    document = yaml.safe_load(hello_world_bp_path.read_text())
+    document["schema_version"] = newer
+    if new_key:
+        document["future_field"] = True
+    bp_path = tmp_path / "newer.yaml"
+    bp_path.write_text(yaml.safe_dump(document))
+
+    result = CliRunner().invoke(app, [bp_path.as_posix()], color=False)
+
+    output = " ".join(result.stdout.split())
+    if new_key:
+        assert result.exit_code == 1, result.output
+        assert f"schema {newer} is newer" in output
+        assert "sets future_field" in output
+        assert "nothing to migrate" not in output
+    else:
+        assert result.exit_code == 0, result.output
+        assert f"compatible with this build ({latest}); nothing to migrate." in output
 
 
 @pytest.mark.parametrize("flag", ["--inplace", ARG_DRY_RUN])
