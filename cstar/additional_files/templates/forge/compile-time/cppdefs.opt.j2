@@ -7,10 +7,6 @@
 
 !!!!!!!!!!!!!!!!!!!!!!!!! MODEL SETUP OPTIONS !!!!!!!!!!!!!!!!!!!!!!!!!
 
-! Attempt to do an exact restart using the initial conditions
-! Usage notes: Requires two time records in the init file; will return a warning but not crash the model if two records are not available. Only known to work with double-precision output.
-#define EXACT_RESTARTS
-
 ! Use Jackett and McDougall (1995) nonlinear equation of state
 ! Usage notes: None
 #define NONLIN_EOS
@@ -71,10 +67,6 @@
 ! Write momentum equation diagnostics for non-hydrostatic mode
 ! Usage notes: None
 #undef NHMGDIAG
-
-! During initialization print information about the HPC cluster and MPI setup
-! Usage notes: None
-#undef PRINT_HOSTNAME
 
 ! Make each MPI rank print the size of its local subdomain
 ! Usage notes: None
