@@ -509,4 +509,12 @@ Miscellaneous
 - The schema versioning docs gain a "newer file" column, and the run manifest docs describe two installs sharing a run. (`#834 <https://github.com/CWorthy-ocean/C-Star/pull/834>`_)
 - The developer guide has a new "Deprecations and compatibility" section, and the PR template asks for a "Deprecated: <what>, removed in <release>" line. (`#833 <https://github.com/CWorthy-ocean/C-Star/pull/833>`_)
 - The Finalize Release Notes workflow refuses a release that a deprecation is due to be removed in. (`#833 <https://github.com/CWorthy-ocean/C-Star/pull/833>`_)
+- New "Applications and Blueprints" section: an overview page linking to custom applications, the blueprint page revised around a ``hello_world`` example, a UCLA-ROMS "what it does" page, and new pages for the ``nest_ic``, ``upscaler`` and ``plotter`` applications. (`#830 <https://github.com/CWorthy-ocean/C-Star/pull/830>`_)
+
+  - The UCLA-ROMS example page replaces the ``tutorial_bp`` notebook; the ``tutorial_wp`` notebook, which duplicated the workplan tutorial, is removed.
+  - Forge's pages move under ``applications/forge/`` and CDR metrics under ``applications/analytics/``.
+
+- The workplans page is split into concepts, directives, path references and run aliases, and user variables. (`#830 <https://github.com/CWorthy-ocean/C-Star/pull/830>`_)
+- New "Managing Runs" section collecting monitoring, re-entering after a failure, pre-run and resume, and moving runs (the run manifest, promote, attach) from the old workplans page. (`#830 <https://github.com/CWorthy-ocean/C-Star/pull/830>`_)
+- The wizard page is split into launching, the Blueprint page and a new Workplan page with screenshots; the configuration page leads with ``cstar init``; the glossary is grouped by topic. (`#830 <https://github.com/CWorthy-ocean/C-Star/pull/830>`_)
 
