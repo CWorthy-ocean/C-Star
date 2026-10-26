@@ -281,6 +281,7 @@ New features
 
 - ``CSTAR_ALLOW_LOGIN_NODE_RUN=1`` lets ROMS launch outside a scheduler job on a cluster, for a very small run or when C-Star misjudges that it is not inside a job. (`#836 <https://github.com/CWorthy-ocean/C-Star/pull/836>`_)
 - ``cstar forge run`` also prints the ``cstar blueprint submit`` command for the emitted blueprint when it runs on a cluster. (`#836 <https://github.com/CWorthy-ocean/C-Star/pull/836>`_)
+- C-Star supports Python 3.14. (`#838 <https://github.com/CWorthy-ocean/C-Star/pull/838>`_)
 
 
 
@@ -551,4 +552,6 @@ Miscellaneous
 
 - The workplan tutorial corrects the ``cstar run path`` usage, shows the ``num_cpus`` a step needs on a cluster when its blueprint comes from an earlier step, and shows ``cstar run show`` output from a real run. (`#837 <https://github.com/CWorthy-ocean/C-Star/pull/837>`_)
 - The nesting tutorial no longer describes the test suite. (`#837 <https://github.com/CWorthy-ocean/C-Star/pull/837>`_)
+- C-Star now requires roms-tools 5.2.2 or newer; the conda environment files allow Python 3.14. (`#838 <https://github.com/CWorthy-ocean/C-Star/pull/838>`_)
+- Unit tests and the weekly extended integration tests run Python 3.12, 3.13 and 3.14 on Ubuntu and only Python 3.14 on macOS. (`#838 <https://github.com/CWorthy-ocean/C-Star/pull/838>`_)
 
