@@ -279,7 +279,7 @@ def test_blueprint_run_auto_migrates_2_1_0_blueprint(
 
     state_home = mock_xdg_dirs[ENV_CSTAR_STATE_HOME]
     current = get_application(UclaRomsApplication.name).schema_version
-    migrated_path = next(state_home.rglob(f"{bp_path.stem}_{current}*"))
+    migrated_path = next(state_home.rglob(f"{bp_path.stem}-*_{current}*"))
     migrated = yaml.safe_load(migrated_path.read_text())
     assert "model_params" not in migrated
     # serialize() excludes model defaults, so validate to see effective values
@@ -402,7 +402,7 @@ def test_blueprint_run_current_blueprint_not_persisted(
 
     mock_exec_runner.assert_called_once()
     state_home = mock_xdg_dirs[ENV_CSTAR_STATE_HOME]
-    assert not list(state_home.rglob(f"{complete_blueprint_path.stem}_*"))
+    assert not list(state_home.rglob(f"{complete_blueprint_path.stem}-*"))
 
 
 def test_blueprint_run_invalid_blueprint_exits_nonzero(

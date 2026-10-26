@@ -354,13 +354,9 @@ def test_a_stale_blueprint_is_run_from_its_migrated_copy(
     assert list(sources) == [wp.steps[0].name]
     copy = Path(sources[wp.steps[0].name])
     latest = get_application(application).schema_version
-    assert (
-        copy.resolve()
-        == (
-            Path(os.environ[ENV_CSTAR_STATE_HOME])
-            / f"{blueprint.stem}_{latest}{blueprint.suffix}"
-        ).resolve()
-    )
+    assert copy.resolve().parent == Path(os.environ[ENV_CSTAR_STATE_HOME]).resolve()
+    assert copy.name.startswith(f"{blueprint.stem}-")
+    assert copy.name.endswith(f"_{latest}{blueprint.suffix}")
     assert f"schema_version: {latest}" in copy.read_text()
     assert blueprint.read_bytes() == content
 

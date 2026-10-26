@@ -1,4 +1,5 @@
 import functools
+import hashlib
 import json
 import os
 import sys
@@ -30,6 +31,7 @@ from cstar.execution.file_system import (
     get_backup_path,
     is_remote_resource,
     local_copy,
+    write_bytes_atomic,
 )
 from cstar.orchestration.formatting import (
     format_validation_errors as format_validation_errors,  # re-export
@@ -38,7 +40,7 @@ from cstar.orchestration.models import BlueprintCore
 from cstar.orchestration.serialization import (
     anchor_blueprint_file,
     anchor_locations,
-    serialize,
+    model_to_yaml,
     validate_serialized_entity,
 )
 from cstar.system.migration import (
@@ -555,11 +557,16 @@ def get_persist_to(request: MigrationRequest, plan: MigrationPlan) -> Path:
     directory.
 
     The resulting filename follows the convention:
-        &lt;original_stem&gt;_&lt;latest_version&gt;.&lt;ext&gt;
+        <original_stem>-<digest>_<latest_version>.<ext>
+
+    where `<digest>` is taken from the source's resolved path and content, so
+    sources sharing a filename in different directories never share a copy,
+    an edited source never replaces the copy a running step may still read,
+    and re-migrating an unchanged source reuses its copy.
 
     Example:
     - Input: foo.yaml with any prior version, latest == 3.0.0
-    - Output: foo_3.0.0.yaml
+    - Output: foo-1a2b3c4d5e6f_3.0.0.yaml
 
     Parameters
     ----------
@@ -576,10 +583,10 @@ def get_persist_to(request: MigrationRequest, plan: MigrationPlan) -> Path:
     if request.target is not None:
         output = request.target
     else:
-        stem = request.source.stem
-        suffix = request.source.suffix
-        state_dir = DirectoryManager.state_home()
-        output = state_dir / f"{stem}_{plan.target}{suffix}"
+        source = request.source.resolve()
+        digest = hashlib.sha256(str(source).encode() + b"\0" + source.read_bytes())
+        name = f"{source.stem}-{digest.hexdigest()[:12]}_{plan.target}{source.suffix}"
+        output = DirectoryManager.state_home() / name
 
     return output.expanduser().resolve()
 
@@ -630,8 +637,10 @@ def persist_migration(request: MigrationRequest, result: MigrateResult) -> Path:
             backup_path = get_backup_path(request.source)
             backup_path.write_bytes(request.source.read_bytes())
 
-        nbytes = serialize(persist_to, updated_bp)
-        assert nbytes, "The migrated blueprint failed to write content"
+        content = model_to_yaml(updated_bp).encode()
+        assert content, "The migrated blueprint failed to serialize"
+        # atomic, so a concurrent run of the same source never reads half a file
+        write_bytes_atomic(persist_to, content)
     except (SyntaxError, CstarExpectationFailed) as ex:
         msg = f"Unable to complete migration: {ex}"
         raise typer.BadParameter(msg) from ex

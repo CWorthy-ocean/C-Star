@@ -103,14 +103,14 @@ def test_blueprint_migrate_persist_to_default(
 ) -> None:
     """Verify that a request to migrate a blueprint without specifying an output
     path explicitly results in the creation of a file matching the expected naming
-    convention `<input_file_stem>_<latest_version>.<ext>` in `$CSTAR_STATE_HOME`
+    convention `<input_file_stem>-<digest>_<latest_version>.<ext>` in
+    `$CSTAR_STATE_HOME`
     """
     app_name = APP_PLOTTER
     latest = get_application(app_name).schema_version
 
     bp_path = plotter_v1_0_0_bp
     state_dir = Path(str(os.getenv(ENV_CSTAR_STATE_HOME, "")))
-    expected_output_path = state_dir / f"{bp_path.stem}_{latest}{bp_path.suffix}"
 
     runner = CliRunner()
     result = runner.invoke(
@@ -120,7 +120,9 @@ def test_blueprint_migrate_persist_to_default(
     )
 
     assert not result.stderr, result.stderr
-    assert expected_output_path.exists()
+    [expected_output_path] = state_dir.glob(
+        f"{bp_path.stem}-*_{latest}{bp_path.suffix}"
+    )
     assert expected_output_path.is_file()
 
     # sanity check content is not empty
