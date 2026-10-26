@@ -83,10 +83,10 @@ Directory map
     |   +-- file_system.py             # RomsFileSystemManager: run-directory layout
     +-- catalog/                       # Bundled + layered spec catalog (see docs/catalog_wizard/catalog.rst)
     |   +-- bundled/
-    |   |   +-- ModelSpec/{model}/model.yaml    # Code repos, templates, settings, defaults
-    |   |   +-- DomainSpec/{grid}/Domain.yaml   # Grid definitions
-    |   |   +-- ForcingSpec/{name}/Forcing.yaml # Forcing source configurations
-    |   |   +-- OutputSpec/{name}/Output.yaml   # Output configurations
+    |   |   +-- ModelSpec/{model}.yaml          # Code repos, templates, settings, defaults
+    |   |   +-- DomainSpec/{grid}.yaml          # Grid definitions
+    |   |   +-- ForcingSpec/{name}.yaml         # Forcing source configurations
+    |   |   +-- OutputSpec/{name}.yaml          # Output configurations
     |   |   +-- blueprints/forge/{name}.yaml    # Example blueprints (bundled, read-only layer;
     |   |                                        # user saves go to the user catalog layer instead)
     |   +-- domain_catalog.py          # DomainCatalog / LayeredCatalog
@@ -317,7 +317,7 @@ The call chain end to end
    grid/boundaries/partitioning/dates from ``catalog.domain_data(name)``.
 3. Every edit -> ``_rebuild()`` -> ``build_forge_blueprint(**self._gather())``
    (``cstar/applications/forge/resolve.py``) -- reads the single
-   consolidated ``model.yaml`` directly as a dict (no Pydantic here;
+   consolidated ModelSpec file directly as a dict (no Pydantic here;
    ``code`` + flat ``model_settings``, no embedded forcing/output defaults
    -- a ForcingSpec and OutputSpec must always be supplied explicitly),
    resolves dataset keys via ``source_registry``, computes pure-derived
@@ -416,7 +416,7 @@ The forcing/IC item models (``BoundaryForcing``, ``SurfaceForcingItem``,
 ``InitialConditions``, ``BgcSourceItem``, ``OpenBoundaries``, etc.) are
 defined once, in ``cstar/applications/forge/blueprint.py``; ``models.py``
 imports and re-exports them -- single source of truth, no duplication. What
-``models.py`` owns is the ``model.yaml`` *wrapper* shape (``ModelSpec``,
+``models.py`` owns is the ModelSpec file's *wrapper* shape (``ModelSpec``,
 ``ModelCode``, ``ModelTemplates``, ``load_models_yaml``) used by
 ``DomainCatalog.load_model_spec()`` for full Pydantic validation at
 catalog-registration time -- a heavier, separate path from the resolver's

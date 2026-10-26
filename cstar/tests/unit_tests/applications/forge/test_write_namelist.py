@@ -29,11 +29,11 @@ from cstar.roms.namelist import (
     _namelist_str_list,
 )
 
-_MODEL_DIR = (
+_MODEL_PATH = (
     Path(cstar.catalog.__file__).parent
     / "bundled"
     / "ModelSpec"
-    / "cson_roms-marbl_v0.1"
+    / "cson_roms-marbl_v0.1.yaml"
 )
 
 
@@ -46,7 +46,7 @@ def _base_settings():
     dict ready for the ``nml`` fixture to fill in) -- a complete dict ready for
     ``write_roms_namelist``.
     """
-    model = load_model_spec_data(_MODEL_DIR)["model"]
+    model = load_model_spec_data(_MODEL_PATH)["model"]
     rt = yaml.safe_load(yaml.safe_dump(model["model_settings"]))  # deep copy
     output = default_catalog.output_data("standard")
     for k, v in output.items():

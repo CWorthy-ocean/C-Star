@@ -1506,7 +1506,7 @@ class TestBgcModeForcingDefault:
 
         root = tmp_path / "catalog"
         shutil.copytree(_DEFAULT_CATALOG_ROOT, root)
-        model_yaml = root / "ModelSpec" / _DEFAULT_MODEL / "model.yaml"
+        model_yaml = root / "ModelSpec" / f"{_DEFAULT_MODEL}.yaml"
         text = model_yaml.read_text()
         assert "bgc_mode: marbl" in text
         model_yaml.write_text(text.replace("bgc_mode: marbl", "bgc_mode: cdr_lite"))
@@ -3995,14 +3995,12 @@ def test_legacy_named_output_spec_shows_up_under_the_new_section_name(tmp_path, 
 
     root = tmp_path / "catalog"
     shutil.copytree(_DEFAULT_CATALOG_ROOT, root)
-    legacy = root / "OutputSpec" / "legacy-out"
-    legacy.mkdir()
-    text = (root / "OutputSpec" / "daily-restarts" / "Output.yaml").read_text()
+    text = (root / "OutputSpec" / "daily-restarts.yaml").read_text()
     text = text.replace("cdr_lite_output:", "cdr_tracer_output:").replace(
         "do_cdr_lite_output", "do_cdr_tracer_output"
     )
     assert "cdr_tracer_output:" in text
-    (legacy / "Output.yaml").write_text(text)
+    (root / "OutputSpec" / "legacy-out.yaml").write_text(text)
     catalog = DomainCatalog(catalog_root=root)
 
     wiz = ForgeBlueprintWizard(catalog=catalog)

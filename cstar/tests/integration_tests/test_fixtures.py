@@ -112,7 +112,7 @@ def test_catalog_layers(test_catalog: "LayeredCatalog") -> None:
     assert set(forcing) >= {"initial_conditions", "forcing"}
     assert set(forcing["forcing"]) == {"surface", "boundary", "tidal", "river"}
     bundled = Path(__file__).parents[2] / "catalog" / "bundled"
-    assert bundled in test_catalog.model_dir(MODEL_SPEC).parents
+    assert bundled in test_catalog.model_path(MODEL_SPEC).parents
 
 
 def test_factory_unified(

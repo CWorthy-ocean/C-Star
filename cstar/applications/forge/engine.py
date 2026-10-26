@@ -158,7 +158,7 @@ GENERATION_DERIVED_LEAF_KEYS: dict[str, tuple[str, ...]] = {
 def sources_to_forcing_override(cfg: ForgeBlueprint) -> dict[str, Any]:
     """Convert cfg.forcing to the forcing_override dict for RomsInputGenerator.
 
-    Always returns a dict with a ``forcing`` key, mirroring the model.yaml inputs
+    Always returns a dict with a ``forcing`` key, mirroring the ModelSpec inputs
     block. ``initial_conditions`` is included too unless ``cfg.forcing.initial_conditions``
     is ``None`` (a child domain with no explicit IC -- state comes from the parent's
     nesting extraction instead), in which case the key is omitted entirely.

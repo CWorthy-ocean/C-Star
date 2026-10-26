@@ -915,7 +915,7 @@ def _model_owned_settings(effective: dict[str, Any]) -> dict[str, Any]:
 def _split_forcing_data(
     d: dict[str, Any],
 ) -> tuple[dict[str, Any], dict[str, Any] | None]:
-    """Split a raw ForcingSpec dict (as read from ``Forcing.yaml``) into the
+    """Split a raw ForcingSpec dict (as read from its catalog file) into the
     ``{initial_conditions, forcing}`` shape the forcing editor expects, plus the
     optional embedded ``cdr_forcing`` block (``None`` if absent). Strips
     ``description`` (not part of either). Shared by the round-trip verifier and
@@ -923,7 +923,7 @@ def _split_forcing_data(
     a ForcingSpec is read.
 
     Also migrates any pre-v8 forcing-input shapes in place (see
-    ``migrate_forcing_inputs``) -- a hand-authored or older catalog ``Forcing.yaml``
+    ``migrate_forcing_inputs``) -- a hand-authored or older catalog ForcingSpec
     may still carry ``initial_conditions.bgc_source`` (singular) or a list-shaped
     ``forcing.boundary``, neither of which the forcing editor understands; deep-
     copied first so this never mutates the catalog's own parsed dict.
@@ -2634,7 +2634,7 @@ class _ForcingEditor:
         # Deep-copied so migration and every `.get(...)` below never mutate the
         # caller's dict (a catalog-parsed ForcingSpec, or a resolved config's
         # `_sources_to_inputs` reconstruction). `_split_forcing_data` already
-        # migrates a catalog Forcing.yaml before it reaches here, but a caller
+        # migrates a catalog ForcingSpec before it reaches here, but a caller
         # (e.g. the fresh-wizard-startup seed) may hand a raw catalog dict
         # straight through -- migrating again is a no-op (idempotent) when it
         # already has been.
@@ -5837,12 +5837,12 @@ class ForgeBlueprintWizard:
         """The selected ModelSpec's declared ``roms_ref``/``marbl_ref``/``bgc_mode``/
         ``use_pio``.
 
-        Single re-parse of ``model.yaml`` backing ``_model_default_*`` below and
+        Single re-parse of the ModelSpec file backing ``_model_default_*`` below and
         the spec-deviation check in ``_rebuild`` -- both need the same
         catalog-declared values to compare live widget state against.
         """
         try:
-            data = load_model_spec_data(self.catalog.model_dir(self.model_dd.value))
+            data = load_model_spec_data(self.catalog.model_path(self.model_dd.value))
             model = data["model"]
             roms = model.get("code", {}).get("roms", {}) or {}
             marbl = model.get("code", {}).get("marbl", {}) or {}
@@ -6062,7 +6062,7 @@ class ForgeBlueprintWizard:
                     k: v for k, v in overrides2.items() if not _is_output_key(*k)
                 }
             elif spec == "model":
-                kw["model_dir"] = self.catalog.model_dir(new_name)
+                kw["model_path"] = self.catalog.model_path(new_name)
                 # Let the saved spec speak for these: the resolver falls back to the
                 # ModelSpec when use_pio/bgc_mode are None (resolve.py:418-421) and to
                 # code.roms/code.marbl verbatim when roms_ref/marbl_ref are absent.
@@ -6257,7 +6257,7 @@ class ForgeBlueprintWizard:
         }
 
     def _on_domain(self, _change):
-        """Prefill from a cataloged Domain.yaml when one is selected."""
+        """Prefill from a cataloged DomainSpec when one is selected."""
         name = self.domain_dd.value
         if name == "<custom>":
             self._domain_seed = None
@@ -6279,7 +6279,7 @@ class ForgeBlueprintWizard:
             self.scoord_chk.value = any(k in gk for k in _SCOORD)
             # Domain-derived properties: a picked catalog Domain replaces the
             # current grid entirely, so reset touched/derived state first, then
-            # restore only what the saved Domain.yaml actually carries --
+            # restore only what the saved DomainSpec actually carries --
             # absence means "derive fresh from the grid" (click "Derive from
             # grid", or the Save/Run safety net), mirroring
             # _domain_spec_data's save-only-when-touched symmetry. Leaves the
@@ -6322,7 +6322,7 @@ class ForgeBlueprintWizard:
             for key, picker in (("start_time", self.start), ("end_time", self.end)):
                 if data.get(key):
                     picker.value = datetime.fromisoformat(str(data[key])).date()
-            # model_name in Domain.yaml is provenance (the model in use when the
+            # model_name in a DomainSpec is provenance (the model in use when the
             # domain was saved), not a preference: picking a domain must not
             # override the user's Model selection, so it is deliberately NOT
             # restored here (unlike the load-a-full-blueprint path, where the
@@ -6330,7 +6330,7 @@ class ForgeBlueprintWizard:
             self.topo_source.value = data.get("topography_source", "ETOPO5")
             self.topo_path.value = data.get("topography_path", "") or ""
             # Nesting: mirrors _populate_nesting (loaded-blueprint path) but reads
-            # from a DomainSpec's Domain.yaml (only present if the spec was saved
+            # from a DomainSpec (only present if the spec was saved
             # via register_domain_from_dict with nesting active).
             child = data.get("grid_kwargs_child")
             self.nest_enable.value = child is not None
@@ -6414,7 +6414,7 @@ class ForgeBlueprintWizard:
         src_w.value = str(src) if src in _TOPO_SOURCES else _NESTED_TOPO_INHERIT
 
     def _domain_spec_data(self) -> dict[str, Any]:
-        """Build a ``Domain.yaml``-shaped dict from the current widget state (the
+        """Build a DomainSpec-shaped dict from the current widget state (the
         domain-spec extractor for "save modified specs to catalog"). Includes
         topography and nesting -- both results-affecting -- so a saved DomainSpec
         actually round-trips (see ``_verify_spec_roundtrip``); ``register_domain``
@@ -7519,7 +7519,7 @@ class ForgeBlueprintWizard:
 
     def _gather(self) -> dict[str, Any]:
         kw = dict(
-            model_dir=self.catalog.model_dir(self.model_dd.value),
+            model_path=self.catalog.model_path(self.model_dd.value),
             grid_name=self.grid_name.value,
             grid_kwargs=self._base_grid_kwargs(),
             open_boundaries={d: w.value for d, w in self.bnd.items()},
@@ -8543,13 +8543,13 @@ class ForgeBlueprintWizard:
             )
             return
         try:
-            base_dir = self.catalog.model_dir(self.model_dd.value)
+            base_path = self.catalog.model_path(self.model_dd.value)
             owned = _model_owned_settings(self.config.model_settings)
             if not self.config.model_settings["cppdefs"].get("marbl", False):
                 # The resolver zeroes ntrc_bio for a run without MARBL; keep the
                 # base model's MARBL tracer count so the saved spec still works
                 # when bgc_mode is switched back to "marbl".
-                base_settings = load_model_spec_data(base_dir)["model"].get(
+                base_settings = load_model_spec_data(base_path)["model"].get(
                     "model_settings", {}
                 )
                 base_param = base_settings.get("param") or {}
@@ -8558,7 +8558,7 @@ class ForgeBlueprintWizard:
             self.catalog.register_model_from_settings(
                 name,
                 owned,
-                base_dir,
+                base_path,
                 description=self.description.value,
                 # Live widget values, using _gather()'s exact conventions (use_pio/
                 # bgc_mode unconditional, roms_ref/marbl_ref only when non-blank) --
