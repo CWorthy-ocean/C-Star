@@ -597,17 +597,20 @@ async def test_locallauncher_submit_records_pre_run_on_handle(
 
 
 @pytest.mark.usefixtures("read_yaml_intercept")
-async def test_locallauncher_submit_records_when_the_process_was_created(
+async def test_locallauncher_submit_records_when_the_process_was_started(
     wp_templates_dir: Path,
     mock_run_id: str,
 ) -> None:
-    """Verify the submission is the process creation time the launcher reads,
-    and survives the sentinel as a time, whatever form `start_at` takes later.
+    """Verify the submission is the wall-clock time the launcher started the
+    process, not its creation time (up to a second early on Linux), which
+    `start_at` keeps; and that it survives the sentinel as a time, whatever form
+    `start_at` takes later.
     """
     live_step = LiveStep.from_step(
         deserialize(wp_templates_dir / "single_step.yaml", Workplan).steps[0]
     )
     created = 1_800_000_000.5
+    expected = datetime.datetime(2027, 1, 15, 8, 0, 0, 750000, tzinfo=datetime.UTC)
 
     with (
         mock.patch.object(subprocess, "Popen", return_value=mock.Mock(pid=777777)),
@@ -615,10 +618,10 @@ async def test_locallauncher_submit_records_when_the_process_was_created(
             "cstar.orchestration.launch.local.PsProcess",
             return_value=mock.Mock(create_time=mock.Mock(return_value=created)),
         ),
+        mock.patch("cstar.orchestration.launch.local.utc_now", return_value=expected),
     ):
         handle = await LocalLauncher._submit(live_step, [])
 
-    expected = datetime.datetime.fromtimestamp(created, tz=datetime.UTC)
     assert handle.submitted_at == expected
     assert handle.start_ts == created  # turns `start_at` into a float, not the stamp
     assert handle.submitted_at == expected

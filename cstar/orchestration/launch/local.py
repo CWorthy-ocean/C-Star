@@ -22,7 +22,7 @@ from cstar.base.adapter import (
 from cstar.base.env import ENV_CSTAR_RUNID
 from cstar.base.exceptions import CstarError, CstarExpectationFailed
 from cstar.base.log import get_logger
-from cstar.base.utils import WALLTIME_RE, additional_files_dir
+from cstar.base.utils import WALLTIME_RE, additional_files_dir, utc_now
 from cstar.execution.file_system import rotate_file
 from cstar.orchestration.adapter import StepToRunRequestAdapter
 from cstar.orchestration.formatting import ModelFormatter
@@ -469,6 +469,10 @@ class LocalLauncher(Launcher[LocalHandle]):
                 stdout=step.log_path.open("a"),
                 stderr=subprocess.STDOUT,
             )
+            # the wall clock, unlike the process creation time read below: on Linux
+            # that is up to a second early, and submission times are compared with
+            # the start of an attempt
+            submitted_at = utc_now()
 
             create_time = datetime.datetime.now(tz=datetime.UTC)
 
@@ -497,7 +501,7 @@ class LocalLauncher(Launcher[LocalHandle]):
                     start_at=create_time,
                     status=Status.Submitted,
                     pre_run=step.pre_run,
-                    submitted_at=create_time,
+                    submitted_at=submitted_at,
                 )
 
                 handle.process = local_process
