@@ -1,6 +1,7 @@
 """Tests for `cstar blueprint submit`."""
 
 import os
+import shutil
 import typing as t
 from collections.abc import Callable
 from pathlib import Path
@@ -9,9 +10,11 @@ from unittest import mock
 import pytest
 from typer.testing import CliRunner
 
-from cstar.base.env import ENV_CSTAR_RUNID
+from cstar.applications.core import get_application
+from cstar.base.env import ENV_CSTAR_RUNID, ENV_CSTAR_STATE_HOME
 from cstar.cli.blueprint import app as blueprint_app
 from cstar.cli.blueprint.submit import app
+from cstar.cli.workplan.run import compose_blueprint_workplan
 from cstar.entrypoint.utils import ARG_CLOBBER, ARG_PRE_RUN, ARG_RESUME, ARG_RUN_ID
 from cstar.execution.file_system import StateDirectoryManager
 from cstar.orchestration.dag_runner import DagStatus
@@ -20,6 +23,9 @@ from cstar.orchestration.orchestration import LiveStep, LiveWorkplan, Status
 from cstar.orchestration.serialization import deserialize, serialize
 from cstar.orchestration.tracking import WorkplanRun
 from cstar.tests.unit_tests.orchestration.manifest_runs import write_identity
+
+if t.TYPE_CHECKING:
+    from collections.abc import Mapping
 
 SLUG = "say-hello-to-my-little-friend"
 """The slug of the name of the hello-world blueprint fixture."""
@@ -45,6 +51,7 @@ async def fake_build_and_run_dag(
     user_variables: dict[str, str] | None = None,
     clobber_steps: list[str] | None = None,
     pre_run: bool = False,
+    blueprint_sources: "Mapping[str, Path] | None" = None,
 ) -> WorkplanRun:
     """Stand in for scheduling: the run directory of the workplan is all it leaves."""
     output_path = StateDirectoryManager.data_dir(run_id)
@@ -282,6 +289,126 @@ def test_submitting_again_composes_the_same_workplan(
     paths = [call.args[0] for call in build_and_run_dag.call_args_list]
     assert len(paths) == 2
     assert paths[0] == paths[1]
+
+
+@pytest.fixture(params=["plotter", "ucla_roms"])
+def stale_blueprint(
+    request: pytest.FixtureRequest,
+    tmp_path: Path,
+    bp_templates_dir: Path,
+    plotter_v1_0_0_bp: Path,
+) -> tuple[Path, str]:
+    """An out-of-date blueprint and the name of the application it is for.
+
+    Parameters
+    ----------
+    request : pytest.FixtureRequest
+        Selects the application.
+    tmp_path : Path
+        Temporary directory the blueprint copy is placed in.
+    bp_templates_dir : Path
+        Fixture providing the bundled blueprint templates, one of which is a
+        schema 2.1.0 blueprint of a ucla_roms step's earlier name.
+    plotter_v1_0_0_bp : Path
+        Fixture providing the path to a plotter blueprint at schema 1.0.0.
+    """
+    if request.param == "plotter":
+        return plotter_v1_0_0_bp, "plotter"
+    path = tmp_path / "stale-roms.yaml"
+    shutil.copy(bp_templates_dir / "roms_marbl" / "blueprint.2.1.0.yaml", path)
+    return path, "ucla_roms"
+
+
+def test_a_stale_blueprint_is_run_from_its_migrated_copy(
+    stale_blueprint: tuple[Path, str], build_and_run_dag: mock.AsyncMock
+) -> None:
+    """Verify submitting a blueprint of an older schema runs the migrated copy: it
+    is handed to the run as the source of the composed workplan's step, which
+    still names the blueprint as submitted and is not rewritten.
+
+    Parameters
+    ----------
+    stale_blueprint : tuple[Path, str]
+        The out-of-date blueprint and its application.
+    build_and_run_dag : mock.AsyncMock
+        The stand-in for scheduling.
+    """
+    blueprint, application = stale_blueprint
+    content = blueprint.read_bytes()
+    composed_before = set(StateDirectoryManager.composed_workplans_dir().rglob("*"))
+
+    result = _submit(blueprint)
+
+    assert result.exit_code == 0, result.output
+    build_and_run_dag.assert_awaited_once()
+    wp_path = build_and_run_dag.call_args.args[0]
+    assert wp_path.is_relative_to(StateDirectoryManager.composed_workplans_dir())
+    assert wp_path in set(StateDirectoryManager.composed_workplans_dir().rglob("*"))
+    assert wp_path not in composed_before
+    wp = deserialize(wp_path, Workplan)
+    assert len(wp.steps) == 1
+    assert Path(wp.steps[0].blueprint_path) == blueprint.resolve()
+
+    # the copy sits in the state home, at the current schema
+    sources = build_and_run_dag.call_args.kwargs["blueprint_sources"]
+    assert list(sources) == [wp.steps[0].name]
+    copy = Path(sources[wp.steps[0].name])
+    latest = get_application(application).schema_version
+    assert (
+        copy.resolve()
+        == (
+            Path(os.environ[ENV_CSTAR_STATE_HOME])
+            / f"{blueprint.stem}_{latest}{blueprint.suffix}"
+        ).resolve()
+    )
+    assert f"schema_version: {latest}" in copy.read_text()
+    assert blueprint.read_bytes() == content
+
+
+def test_a_stale_blueprint_leaves_the_composed_workplan_unchanged(
+    stale_blueprint: tuple[Path, str], build_and_run_dag: mock.AsyncMock
+) -> None:
+    """Verify migrating the blueprint does not rewrite the composed workplan: after
+    the submit it holds what composing it gives, and still names the blueprint as
+    submitted.
+
+    Parameters
+    ----------
+    stale_blueprint : tuple[Path, str]
+        The out-of-date blueprint and its application.
+    build_and_run_dag : mock.AsyncMock
+        The stand-in for scheduling.
+    """
+    blueprint, _ = stale_blueprint
+
+    result = _submit(blueprint)
+
+    assert result.exit_code == 0, result.output
+    wp_path = build_and_run_dag.call_args.args[0]
+    after_submit = wp_path.read_bytes()
+    assert compose_blueprint_workplan(str(blueprint)) == str(wp_path)
+    assert wp_path.read_bytes() == after_submit
+    assert blueprint.resolve().as_posix() in after_submit.decode()
+    assert [p for p in wp_path.parent.iterdir()] == [wp_path]
+
+
+def test_an_up_to_date_blueprint_has_no_migrated_source(
+    hello_world_bp_path: Path, build_and_run_dag: mock.AsyncMock
+) -> None:
+    """Verify a blueprint at the current schema is run as submitted: no step has a
+    migrated source.
+
+    Parameters
+    ----------
+    hello_world_bp_path : Path
+        Fixture providing the path to a minimal hello-world blueprint.
+    build_and_run_dag : mock.AsyncMock
+        The stand-in for scheduling.
+    """
+    result = _submit(hello_world_bp_path)
+
+    assert result.exit_code == 0, result.output
+    assert build_and_run_dag.call_args.kwargs["blueprint_sources"] == {}
 
 
 def _recorded_live_run(

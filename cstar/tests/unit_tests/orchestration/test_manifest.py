@@ -867,6 +867,119 @@ class TestDescribeSteps:
 
         assert facts.blueprint is None
 
+    def test_blueprint_schema_version_is_the_loaded_blueprints(
+        self, tmp_path: Path
+    ) -> None:
+        bp = _write_blueprint(tmp_path / "bp.yaml")
+
+        facts = describe_steps(_workplan(_step(bp.as_posix())), tmp_path)["one"]
+
+        # the file's own version, not the one this build writes
+        assert facts.blueprint_schema_version == "1.0.0"
+
+    @pytest.mark.parametrize(
+        "reference",
+        ["inline", "{{where}}/bp.yaml", {"from_step": "up@ext"}],
+        ids=["inline", "placeholder", "unknown-producer"],
+    )
+    def test_no_loaded_blueprint_has_no_schema_version(
+        self, tmp_path: Path, reference: t.Any
+    ) -> None:
+        plan = Workplan(
+            name="plan",
+            description="a plan",
+            runs={"ext": RunRef(run_id="spin")},
+            steps=[
+                _step(reference, depends_on=["up@ext"] if "@" in str(reference) else [])
+            ],
+        )
+
+        facts = describe_steps(plan, tmp_path)["one"]
+
+        assert facts.blueprint_schema_version == ""
+
+    def test_source_replaces_the_file_the_step_names(self, tmp_path: Path) -> None:
+        """A migrated copy is read in place of the authored file, which need not
+        be loadable (or exist): its content, identity and schema version come from
+        the copy.
+        """
+        authored = tmp_path / "authored.yaml"
+        source = _write_blueprint(tmp_path / "copy.yaml", "moon")
+        plan = _workplan(_step(authored.as_posix()))
+
+        facts = describe_steps(plan, tmp_path, {"one": source})["one"]
+
+        loaded = load_blueprint(source, HelloWorldBlueprint)
+        assert facts.blueprint == BlueprintIdentity.of(loaded)
+        assert facts.blueprint is not None
+        assert facts.blueprint.content_hash == loaded.content_hash()
+        assert facts.blueprint_schema_version == loaded.schema_version
+        assert not authored.exists()
+
+    def test_source_keeps_the_authored_reference_in_the_hash(
+        self, tmp_path: Path
+    ) -> None:
+        """A step is hashed as if the authored file held the migrated content: only
+        the content moves with a migration, not the reference the workplan names.
+        """
+        authored = tmp_path / "authored.yaml"
+        source = _write_blueprint(tmp_path / "copy.yaml", "moon")
+        by_authored = _workplan(_step(authored.as_posix()))
+        by_copy = _workplan(_step(source.as_posix()))
+
+        migrated = describe_steps(by_authored, tmp_path, {"one": source})["one"]
+        named_copy = describe_steps(by_copy, tmp_path)["one"]
+        authored.write_bytes(source.read_bytes())
+        as_authored = describe_steps(by_authored, tmp_path)["one"]
+
+        assert migrated.definition_hash == as_authored.definition_hash
+        assert migrated.definition_hash != named_copy.definition_hash
+        assert migrated.blueprint == named_copy.blueprint
+
+    def test_source_content_moves_the_hash(self, tmp_path: Path) -> None:
+        authored = _write_blueprint(tmp_path / "authored.yaml")
+        plan = _workplan(_step(authored.as_posix()))
+        world = _write_blueprint(tmp_path / "world.yaml", "world")
+        moon = _write_blueprint(tmp_path / "moon.yaml", "moon")
+
+        unmigrated = describe_steps(plan, tmp_path)["one"]
+        from_world = describe_steps(plan, tmp_path, {"one": world})["one"]
+        from_moon = describe_steps(plan, tmp_path, {"one": moon})["one"]
+
+        assert from_world.definition_hash == unmigrated.definition_hash
+        assert from_moon.definition_hash != unmigrated.definition_hash
+
+    def test_source_of_another_step_is_ignored(self, tmp_path: Path) -> None:
+        bp = _write_blueprint(tmp_path / "bp.yaml")
+        moon = _write_blueprint(tmp_path / "moon.yaml", "moon")
+        plan = _workplan(_step(bp.as_posix()))
+
+        assert describe_steps(plan, tmp_path, {"other": moon}) == describe_steps(
+            plan, tmp_path
+        )
+
+    def test_deferred_consumer_inherits_its_producers_schema_version(
+        self, tmp_path: Path
+    ) -> None:
+        authored = tmp_path / "authored.yaml"
+        source = _write_blueprint(tmp_path / "copy.yaml")
+        consumer = _step(
+            {"from_step": "producer"}, name="consumer", depends_on=["producer"]
+        )
+        producer = _step(authored.as_posix(), name="producer")
+
+        # the consumer is listed first: its producer is still described first
+        facts = describe_steps(
+            _workplan(consumer, producer), tmp_path, {"producer": source}
+        )
+
+        assert facts["producer"].blueprint_schema_version
+        assert (
+            facts["consumer"].blueprint_schema_version
+            == facts["producer"].blueprint_schema_version
+        )
+        assert facts["consumer"].blueprint is None
+
     def test_missing_file_names_the_step(self, tmp_path: Path) -> None:
         plan = _workplan(_step("missing.yaml", name="spin-up"))
 
@@ -1006,6 +1119,34 @@ class TestEnsureRunManifest:
         assert again.step("one") is not None
         assert again.step("one").blueprint == _identity("known")  # type: ignore[union-attr]
         assert again.step("one").definition_hash == "h2"  # type: ignore[union-attr]
+
+    def test_records_the_schema_version_of_the_blueprint_hashed(
+        self, tmp_path: Path
+    ) -> None:
+        facts = StepFacts(
+            definition_hash="h",
+            blueprint=_identity(),
+            external=ExternalDependencies(),
+            blueprint_schema_version="3.3.0",
+        )
+        steps: dict[str, tuple[str, str, StepFacts | None]] = {
+            "one": ("hello_world", "tasks/one", facts),
+            "two": ("hello_world", "tasks/two", None),
+        }
+
+        manifest = self._ensure(tmp_path, steps)
+
+        assert [s.blueprint_schema_version for s in manifest.steps] == ["3.3.0", ""]
+        reread = read_run_manifest(tmp_path)
+        assert reread is not None
+        assert reread.step("one").blueprint_schema_version == "3.3.0"  # type: ignore[union-attr]
+
+        # a later attempt's facts replace it, and a re-entry without facts keeps it
+        newer = StepFacts("h", _identity(), ExternalDependencies(), "4.0.0")
+        updated = self._ensure(tmp_path, {"one": ("hello_world", "tasks/one", newer)})
+        assert updated.step("one").blueprint_schema_version == "4.0.0"  # type: ignore[union-attr]
+        kept = self._ensure(tmp_path, {"one": ("hello_world", "tasks/one", None)})
+        assert kept.step("one").blueprint_schema_version == "4.0.0"  # type: ignore[union-attr]
 
     def test_rerun_steps_forget_their_earlier_observation(self, tmp_path: Path) -> None:
         """A clobbered or resumed step certainly runs again: its status and record go."""
@@ -2013,6 +2154,13 @@ class TestFinalizeStandaloneRun:
         assert manifest.attempts[0].status == attempt
         assert manifest.attempts[0].start_at == NOW
         assert read_run_manifest(root) == manifest
+
+    def test_records_the_schema_version_of_the_blueprint(
+        self, blueprint: HelloWorldBlueprint
+    ) -> None:
+        manifest = finalize_standalone_run(blueprint, started_at=NOW)
+
+        assert manifest.steps[0].blueprint_schema_version == blueprint.schema_version
 
     def test_no_record_counts_as_failed(self, blueprint: HelloWorldBlueprint) -> None:
         manifest = finalize_standalone_run(blueprint, started_at=NOW)

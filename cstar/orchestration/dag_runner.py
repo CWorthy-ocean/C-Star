@@ -99,7 +99,7 @@ from cstar.orchestration.transforms import (
     resolve_external_runs,
 )
 from cstar.system.manager import get_sysmgr
-from cstar.system.migration import CstarSchemaTooNewError
+from cstar.system.migration import CstarSchemaTooNewError, version_key
 
 if t.TYPE_CHECKING:
     from datetime import datetime
@@ -682,6 +682,7 @@ async def prepare_workplan(
     user_variables: Mapping[str, str] | None = None,
     clobber_steps: "Sequence[str] | None" = None,
     pre_run: bool = False,
+    blueprint_sources: "Mapping[str, Path] | None" = None,
 ) -> tuple[Workplan, Path, ExternalRuns, CarriedInputs]:
     """Load the workplan and apply any applicable transforms.
 
@@ -699,6 +700,10 @@ async def prepare_workplan(
     pre_run : bool
         Mark every step to perform its pre-launch stages and stop. Unlike
         clobber, this is persisted with the prepared workplan.
+    blueprint_sources : Mapping[str, Path] | None
+        The migrated copy of a step's blueprint, by step name, that the step is
+        prepared from in place of the file it names. The authored workplan is
+        carried as it is.
 
     Returns
     -------
@@ -718,6 +723,9 @@ async def prepare_workplan(
     # read beside the parse, so an edit made while the attempt prepares is not carried
     authored = await asyncio.to_thread(wp_path.read_bytes)
     wp_orig = await asyncio.to_thread(deserialize, wp_path, Workplan)
+    for step in wp_orig.steps:
+        if source := (blueprint_sources or {}).get(step.name):
+            step.blueprint_path = source
 
     fill_transform: TemplateFillTransform | None = None
     variables: UserDefinedVariables | None = None
@@ -1354,6 +1362,24 @@ async def on_launched(handle: ProcessHandle, *, root: Path) -> None:
         )
 
 
+def _major_moved(recorded: str, now: str) -> bool:
+    """Whether a blueprint's schema major differs from the one recorded for its step.
+
+    Parameters
+    ----------
+    recorded : str
+        The schema version the step's manifest entry records; empty when unknown.
+    now : str
+        The schema version of the blueprint content loaded now; empty when none.
+
+    Returns
+    -------
+    bool
+        False when either version is unknown.
+    """
+    return bool(recorded and now) and version_key(recorded)[0] != version_key(now)[0]
+
+
 def refuse_edited_done_steps(
     wp: Workplan,
     manifest: RunManifest,
@@ -1366,9 +1392,11 @@ def refuse_edited_done_steps(
     A step with no recorded definition is not checked. Nor is a `Done` step whose
     recorded definition hash has another scheme than its current one: another
     release computed it (see `DEFINITION_HASH_SCHEME`), so the two cannot be
-    compared. Unless the re-entry is refused, such steps are named in one
-    warning; the attempt that follows records their current definitions, so the
-    next re-entry checks them.
+    compared. Nor is one whose definition changed while its blueprint moved to
+    another schema major: an automatic migration changes the content it hashes.
+    Unless the re-entry is refused, such steps are named in one warning; the
+    attempt that follows records their current definitions, so the next
+    re-entry checks them.
 
     Parameters
     ----------
@@ -1409,7 +1437,10 @@ def refuse_edited_done_steps(
         if digest_scheme(recorded) != digest_scheme(now):
             unchecked.append(step.name)
         elif now != recorded:
-            edited.append(step.name)
+            migrated = _major_moved(
+                entry.blueprint_schema_version, current.blueprint_schema_version
+            )
+            (unchecked if migrated else edited).append(step.name)
 
     if edited:
         names = ", ".join(repr(name) for name in edited)
@@ -1425,7 +1456,8 @@ def refuse_edited_done_steps(
         log.warning(
             f"Steps {names} reached Done in run {manifest.run_id!r} under "
             "definitions recorded by another C-Star release, which this one "
-            "cannot compare, so an edit made to them since is not detected; pass "
+            "cannot compare (a changed hash recipe, or a blueprint migrated to a "
+            "newer schema), so an edit made to them since is not detected; pass "
             f"{ARG_CLOBBER} <step-name> to re-run a step you changed. This attempt "
             "records their definitions again."
         )
@@ -1494,6 +1526,7 @@ async def build_dag(
     user_variables: Mapping[str, str] | None = None,
     clobber_steps: "Sequence[str] | None" = None,
     pre_run: bool = False,
+    blueprint_sources: "Mapping[str, Path] | None" = None,
 ) -> tuple[Planner, Path, dict[str, StepFacts], CarriedInputs]:
     """Execute the steps in the workplan.
 
@@ -1512,6 +1545,9 @@ async def build_dag(
     pre_run : bool
         Prepare every step without launching its model, as supplied via
         `--pre-run`; steps that cannot be prepared are skipped.
+    blueprint_sources : Mapping[str, Path] | None
+        The migrated copy of a step's blueprint, by step name, read and prepared
+        in place of the file the step names (see `describe_steps`).
 
     Returns
     -------
@@ -1538,7 +1574,9 @@ async def build_dag(
 
     check_environment()
     wp_orig = await asyncio.to_thread(deserialize, wp_path, Workplan)
-    facts = await asyncio.to_thread(describe_steps, wp_orig, wp_path.parent)
+    facts = await asyncio.to_thread(
+        describe_steps, wp_orig, wp_path.parent, blueprint_sources
+    )
 
     # the guard runs before `prepare_workplan` writes anything
     escape = f"pass {ARG_RUN_ID} <other-id> to start a new run"
@@ -1561,7 +1599,7 @@ async def build_dag(
         refuse_edited_done_steps(wp_orig, manifest, status, facts, clobber_steps or [])
 
     wp, prepared_wp_path, external, carried = await prepare_workplan(
-        wp_path, output_dir, user_variables, clobber_steps, pre_run
+        wp_path, output_dir, user_variables, clobber_steps, pre_run, blueprint_sources
     )
     # the steps are live once prepared; report before a pre-run prunes any of them
     report_orphans(output_dir, run_id, t.cast("LiveWorkplan", wp))
@@ -1770,6 +1808,7 @@ async def build_and_run_dag(
     user_variables: Mapping[str, str] | None = None,
     clobber_steps: "Sequence[str] | None" = None,
     pre_run: bool = False,
+    blueprint_sources: "Mapping[str, Path] | None" = None,
 ) -> WorkplanRun:
     """Execute the steps in the workplan.
 
@@ -1790,6 +1829,9 @@ async def build_and_run_dag(
     pre_run : bool
         Prepare every step without launching its model, as supplied via
         `--pre-run`.
+    blueprint_sources : Mapping[str, Path] | None
+        The migrated copy of a step's blueprint, by step name, run in place of
+        the file the step names.
 
     Returns
     -------
@@ -1811,6 +1853,7 @@ async def build_and_run_dag(
         user_variables=user_variables,
         clobber_steps=clobber_steps,
         pre_run=pre_run,
+        blueprint_sources=blueprint_sources,
     )
     return await run_dag(
         wp_path,

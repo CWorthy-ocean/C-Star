@@ -78,6 +78,9 @@ from cstar.system.environment import EnvSettingsBase, SlurmSettingsBase
 from cstar.system.migration import CstarSchemaTooNewError
 from cstar.tests.unit_tests.orchestration.manifest_runs import write_identity
 
+if t.TYPE_CHECKING:
+    from collections.abc import Mapping
+
 
 def _slurm_launcher(
     workplan: Workplan | None = None, *, force_local: bool = False
@@ -124,6 +127,7 @@ async def fake_build_and_run_dag(
     user_variables: dict[str, str] | None = None,
     clobber_steps: list[str] | None = None,
     pre_run: bool = False,
+    blueprint_sources: "Mapping[str, Path] | None" = None,
 ) -> WorkplanRun:
     return _scheduled_run(wp_path, run_id)
 
@@ -1595,6 +1599,43 @@ def test_workplan_run_resume_verifies_the_path_against_the_carried_workplan(
     mock_run_dag.assert_not_awaited()
 
 
+def test_workplan_run_resume_after_migration_does_not_migrate(
+    tmp_path: Path, plotter_workplan_path: Path, plotter_v1_0_0_bp: Path
+) -> None:
+    """Verify `--resume` combined with the authored path of a workplan whose
+    blueprint is out of date is not refused as an edit: the run resumes as
+    recorded, the authored file is left as it is, and no migrated copy is written.
+
+    Parameters
+    ----------
+    tmp_path : Path
+        Temporary directory to read/write test inputs and outputs
+    plotter_workplan_path : Path
+        Fixture providing a workplan referencing an out-of-date blueprint
+    plotter_v1_0_0_bp : Path
+        Fixture providing the path to a plotter blueprint at schema 1.0.0
+    """
+    plotter_workplan_path.write_text(
+        f"# user comment\n{plotter_workplan_path.read_text()}"
+    )
+    authored = plotter_workplan_path.read_bytes()
+    blueprint = plotter_v1_0_0_bp.read_bytes()
+    # the attempt carried the authored bytes, as `prepare_workplan` does
+    wp = deserialize(plotter_workplan_path, Workplan)
+    _write_carried_workplan(tmp_path, wp, plotter_workplan_path).write_bytes(authored)
+    state_dir = Path(str(os.getenv(ENV_CSTAR_STATE_HOME, "")))
+    state_files_before = set(state_dir.rglob("*"))
+
+    result, mock_run_dag, _ = _resume_with_path(tmp_path, plotter_workplan_path)
+
+    assert result.exit_code == 0, result.output
+    mock_run_dag.assert_awaited_once()
+    assert plotter_workplan_path.read_bytes() == authored
+    assert plotter_v1_0_0_bp.read_bytes() == blueprint
+    assert not _expected_migrated_path(plotter_v1_0_0_bp).exists()
+    assert set(state_dir.rglob("*")) == state_files_before
+
+
 @pytest.mark.usefixtures("read_yaml_intercept")
 def test_workplan_run_resume_with_unreadable_backup_fails_fast(
     tmp_path: Path,
@@ -2541,7 +2582,8 @@ def test_workplan_run_migrates_out_of_date_blueprint(
 ) -> None:
     """Verify a workplan step referencing an out-of-date blueprint is
     automatically migrated: the migrated blueprint is persisted to the state
-    home and the workplan handed to `build_and_run_dag` references it.
+    home and handed to `build_and_run_dag` as the source of the step, while the
+    workplan handed over is the authored one, still naming the original.
 
     Parameters
     ----------
@@ -2571,33 +2613,41 @@ def test_workplan_run_migrates_out_of_date_blueprint(
     assert "working_dir" in migrated_content
     assert "output_dir" not in migrated_content
 
-    # the workplan that continues through the run references the migrated
-    # blueprint instead of the out-of-date original
+    # the run is handed the authored workplan, which still names the original
     wp_path = mock_build_and_run_dag.call_args.args[0]
+    assert Path(wp_path).resolve() == plotter_workplan_path.resolve()
     wp = deserialize(wp_path, Workplan)
     assert [Path(str(s.blueprint_path)).resolve() for s in wp.steps] == [
-        migrated_bp_path.resolve()
+        plotter_v1_0_0_bp.resolve()
     ]
 
+    # the migrated copy is what the step is run from
+    sources = mock_build_and_run_dag.call_args.kwargs["blueprint_sources"]
+    assert {name: path.resolve() for name, path in sources.items()} == {
+        "Plot": migrated_bp_path.resolve()
+    }
 
-def test_workplan_run_migration_rewrites_workplan_in_place(
+
+def test_workplan_run_migration_leaves_workplan_untouched(
     plotter_workplan_path: Path,
-    plotter_v1_0_0_bp: Path,
 ) -> None:
-    """Verify the workplan file itself is updated with the migrated blueprint
-    path so re-running the same file does not repeat the migration lookup
-    against the stale blueprint.
+    """Verify migrating a step's blueprint does not rewrite the authored
+    workplan file: it is byte-identical, comments included, after the submit.
 
     Parameters
     ----------
     plotter_workplan_path : Path
         Fixture providing a workplan referencing an out-of-date blueprint
-    plotter_v1_0_0_bp : Path
-        Fixture providing the path to a plotter blueprint at schema 1.0.0
     """
+    # a comment survives only if the file is not re-serialized
+    plotter_workplan_path.write_text(
+        f"# user comment\n{plotter_workplan_path.read_text()}"
+    )
+    content_before = plotter_workplan_path.read_bytes()
+
     with mock.patch(
         "cstar.cli.workplan.run.build_and_run_dag", wraps=fake_build_and_run_dag
-    ):
+    ) as mock_build_and_run_dag:
         runner = CliRunner()
         result = runner.invoke(
             app,
@@ -2606,11 +2656,9 @@ def test_workplan_run_migration_rewrites_workplan_in_place(
         )
 
     assert result.exit_code == 0
-
-    persisted_wp = deserialize(plotter_workplan_path, Workplan)
-    assert [Path(str(s.blueprint_path)).resolve() for s in persisted_wp.steps] == [
-        _expected_migrated_path(plotter_v1_0_0_bp).resolve()
-    ]
+    mock_build_and_run_dag.assert_awaited_once()
+    assert mock_build_and_run_dag.call_args.kwargs["blueprint_sources"]
+    assert plotter_workplan_path.read_bytes() == content_before
 
 
 def test_workplan_run_up_to_date_blueprint_not_migrated(
@@ -2664,7 +2712,10 @@ def test_workplan_run_up_to_date_blueprint_not_migrated(
         hello_world_bp_path.resolve()
     ]
 
-    # nothing was migrated, so the workplan file itself is not rewritten
+    # nothing was migrated, so the run reads every step as authored
+    assert not mock_build_and_run_dag.call_args.kwargs["blueprint_sources"]
+
+    # nor is the workplan file itself rewritten
     assert wp_path.read_text() == wp_content_before
 
 
@@ -2754,13 +2805,17 @@ def test_workplan_run_placeholder_blueprint_path_skips_preflight_migration(
     assert "Blueprint not found" not in result.output
     mock_build_and_run_dag.assert_awaited_once()
 
-    # the placeholder path reaches the run untouched while the stale sibling
-    # blueprint is still migrated
+    # the workplan reaches the run as authored, and only the stale sibling
+    # blueprint has a migrated source: the placeholder step has none
     handed_over = deserialize(mock_build_and_run_dag.call_args.args[0], Workplan)
     assert [str(s.blueprint_path) for s in handed_over.steps] == [
-        _expected_migrated_path(plotter_v1_0_0_bp).as_posix(),
+        plotter_v1_0_0_bp.as_posix(),
         placeholder_bp,
     ]
+    sources = mock_build_and_run_dag.call_args.kwargs["blueprint_sources"]
+    assert {name: path.resolve() for name, path in sources.items()} == {
+        "Plot": _expected_migrated_path(plotter_v1_0_0_bp).resolve()
+    }
 
 
 def test_workplan_run_migration_disabled_fails_fast(
@@ -2974,11 +3029,14 @@ def test_workplan_run_migration_skips_deferred_blueprint(
 
     wp = deserialize(mock_build_and_run_dag.call_args.args[0], Workplan)
 
-    # the concrete step is migrated
+    # only the concrete step is migrated, to a source beside the authored path
+    sources = mock_build_and_run_dag.call_args.kwargs["blueprint_sources"]
+    assert {name: path.resolve() for name, path in sources.items()} == {
+        "Plot": _expected_migrated_path(plotter_v1_0_0_bp).resolve()
+    }
     concrete_step = wp.steps[0]
     assert (
-        Path(str(concrete_step.blueprint_path)).resolve()
-        == _expected_migrated_path(plotter_v1_0_0_bp).resolve()
+        Path(str(concrete_step.blueprint_path)).resolve() == plotter_v1_0_0_bp.resolve()
     )
 
     # the deferred step is preserved as-is
@@ -3161,10 +3219,62 @@ def test_migrate_steps_skips_inline_step(tmp_path: Path) -> None:
     )
 
     with mock.patch("cstar.cli.workplan.run.localize_and_migrate") as mock_migrate:
-        migrate_steps(tmp_path / "workplan.yaml", wp)
+        sources = migrate_steps(tmp_path / "workplan.yaml", wp)
 
     mock_migrate.assert_not_called()
+    assert sources == {}
     assert wp.steps[0].is_inline
+
+
+def test_migrate_steps_returns_copies_without_touching_the_steps(
+    tmp_path: Path, plotter_v1_0_0_bp: Path
+) -> None:
+    """Verify `migrate_steps` maps a migrated step to its copy and leaves both the
+    step's blueprint path and the workplan file as authored.
+
+    Parameters
+    ----------
+    tmp_path : Path
+        Temporary directory to read/write test inputs and outputs
+    plotter_v1_0_0_bp : Path
+        Fixture providing the path to a plotter blueprint at schema 1.0.0
+    """
+    step = Step(name="Plot", application="plotter", blueprint=plotter_v1_0_0_bp)
+    wp_path = _write_workplan(tmp_path / "plotter-workplan.yaml", [step])
+    wp = deserialize(wp_path, Workplan)
+    content_before = wp_path.read_bytes()
+
+    sources = migrate_steps(wp_path, wp)
+
+    assert {name: path.resolve() for name, path in sources.items()} == {
+        "Plot": _expected_migrated_path(plotter_v1_0_0_bp).resolve()
+    }
+    assert Path(str(wp.steps[0].blueprint_path)).resolve() == (
+        plotter_v1_0_0_bp.resolve()
+    )
+    assert wp_path.read_bytes() == content_before
+
+
+def test_migrate_steps_reports_a_missing_blueprint(
+    tmp_path: Path, plotter_v1_0_0_bp: Path
+) -> None:
+    """Verify a blueprint removed after the workplan was read is refused with a
+    message naming it.
+
+    Parameters
+    ----------
+    tmp_path : Path
+        Temporary directory to read/write test inputs and outputs
+    plotter_v1_0_0_bp : Path
+        Fixture providing the path to a plotter blueprint at schema 1.0.0
+    """
+    step = Step(name="Plot", application="plotter", blueprint=plotter_v1_0_0_bp)
+    wp_path = _write_workplan(tmp_path / "missing-workplan.yaml", [step])
+    wp = deserialize(wp_path, Workplan)
+    plotter_v1_0_0_bp.unlink()
+
+    with pytest.raises(typer.BadParameter, match="Blueprint not found at path"):
+        migrate_steps(wp_path, wp)
 
 
 @pytest.mark.parametrize("pre_run", [True, False])
