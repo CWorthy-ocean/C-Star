@@ -1090,8 +1090,9 @@ _FORCED_ON_BY_BGC_MODE: dict[str, dict[tuple[str, str], str]] = {
 # a user override can never collide with a resolver-owned flag. The two advection
 # fields only render for ModelSpecs that declare them (``roms-marbl-0.8-default``,
 # ``roms-marbl-0.9-default``, ``roms-marbl-0.10-default``, ``roms-marbl-0.11-default``,
-# ``roms-marbl-0.12-default``, ``roms-marbl-0.13-default``, ``pio-dev``) -- the editor type-infers a checkbox from the composed bool, so a spec
-# that omits the key shows no widget for it.
+# ``roms-marbl-0.12-default``, ``roms-marbl-0.13-default``, ``pio-dev``) -- the editor
+# type-infers a checkbox from the composed bool, so a spec that omits the key shows no
+# widget for it.
 #
 # ``bgc``/``marbl_bgc`` are SPLIT at field granularity along the existing
 # ``PARTIAL_OUTPUT_SECTIONS`` seam (the same split the OutputSpec dropdown seeds):
@@ -4010,9 +4011,9 @@ class _ForcingEditor:
 
 # Preselected in the Model dropdown when present in the catalog (falls back to
 # the first catalog model otherwise): it's the newest tagged-release ModelSpec
-# (ucla-roms 0.12.0). 'pio-dev' (ucla-roms branch `main`) remains available in the
+# (ucla-roms 0.13.0). 'pio-dev' (ucla-roms branch `main`) remains available in the
 # catalog but is no longer the default.
-_DEFAULT_MODEL = "roms-marbl-0.12-default"
+_DEFAULT_MODEL = "roms-marbl-0.13-default"
 
 # Preselected in the Output dropdown when present in the catalog (falls back to
 # the first catalog spec otherwise). 'daily-restarts' conforms to the

@@ -120,7 +120,7 @@ A ModelSpec file has this shape:
    :doc:`../../developers/forge_templates`.
 
    The ucla-roms pin decides which namelist Forge writes. A release tag
-   (``commit: 0.12.0``) selects that release's namelist exactly; a commit hash
+   (``commit: 0.13.0``) selects that release's namelist exactly; a commit hash
    selects the release it descends from; a branch gets the newest namelist
    C-Star has, with a warning. A release newer than the newest one your C-Star
    knows (``cstar --version`` prints it) also gets the newest namelist C-Star
@@ -148,11 +148,11 @@ spec omits them, so older specs are unaffected by additions.
 The bundled model specs
 ~~~~~~~~~~~~~~~~~~~~~~~
 
-``roms-marbl-0.12-default`` (ucla-roms 0.12.0) is the wizard's default.
-``roms-marbl-0.13-default`` pins ucla-roms 0.13.0, which adds the sponge's tracer
-diffusivity ``v_sponge.v_sponge_trc``. Older
-``roms-marbl-0.N-default`` entries pin earlier releases (``roms-marbl-0.11-default``
-stays for ucla-roms 0.11.0, which predates the
+``roms-marbl-0.13-default`` (ucla-roms 0.13.0) is the wizard's default. Older
+``roms-marbl-0.N-default`` entries pin earlier releases (``roms-marbl-0.12-default``
+stays for ucla-roms 0.12.0, which predates the sponge's tracer diffusivity
+``v_sponge.v_sponge_trc`` and whose averaged MARBL output differs after a restart;
+``roms-marbl-0.11-default`` stays for ucla-roms 0.11.0, which predates the
 ``cdr_lite.cdr_carbonate_sensitivity_time_interpolation`` switch;
 ``roms-marbl-0.10-default`` stays for ucla-roms 0.10.1, which predates the
 constant-iron option;
@@ -168,7 +168,7 @@ dropdown lists them only when "Show archived" is checked (loading a blueprint
 that uses one checks the box for you). ``archived`` works the same way in a
 spec of your own catalog.
 
-.. literalinclude:: ../../../cstar/catalog/bundled/ModelSpec/roms-marbl-0.12-default.yaml
+.. literalinclude:: ../../../cstar/catalog/bundled/ModelSpec/roms-marbl-0.13-default.yaml
    :language: yaml
    :lines: 1-35
 
