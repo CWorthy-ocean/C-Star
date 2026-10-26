@@ -36,7 +36,7 @@ machine, which is what makes a C-Star simulation shareable and reproducible.
 
 A simple ocean modeling project moves through three basic steps:
 
-1. **Describe the domain.** The Forge :doc:`wizard <wizard/launching>`, a form that runs in your
+1. **Describe the domain.** The Forge :doc:`wizard <catalog_wizard/launching>`, a form that runs in your
    browser or as a Jupyter notebook, walks you through choosing a model configuration, a region and
    grid, forcing datasets, and a run window. It writes a *forge blueprint*.
 2. **Generate the inputs.** Running that forge blueprint downloads the source
@@ -97,10 +97,10 @@ C-Star is built with these principles in mind:
     :caption: Getting Started
     :hidden:
 
-    Installing C-Star <installation>
-    Registering for datasets <data_access>
-    configuration
-    terminology
+    Installing C-Star <getting_started/installation>
+    Registering for datasets <getting_started/data_access>
+    getting_started/configuration
+    getting_started/terminology
 
 .. toctree::
     :maxdepth: 1
@@ -148,29 +148,29 @@ C-Star is built with these principles in mind:
     :caption: The C-Star Catalog and Wizard
     :hidden:
 
-    catalog
-    wizard/launching
-    wizard/blueprints
-    wizard/workplans
+    catalog_wizard/catalog
+    catalog_wizard/launching
+    catalog_wizard/blueprints
+    catalog_wizard/workplans
 
 .. toctree::
     :maxdepth: 1
     :caption: Deployments
     :hidden:
 
-    hpc
-    machines
+    deployments/hpc
+    deployments/machines
 
 .. toctree::
     :maxdepth: 1
     :caption: Reference
     :hidden:
 
-    Using C-Star from Python <python>
-    api-blueprint
-    api-orchestration
-    api-forge
-    api
+    Using C-Star from Python <reference/python>
+    reference/api-blueprint
+    reference/api-orchestration
+    reference/api-forge
+    reference/api
     schemas/index
 
 .. toctree::
@@ -179,8 +179,8 @@ C-Star is built with these principles in mind:
     :hidden:
 
     contributing
-    custom_applications
-    system-registration
+    developers/custom_applications
+    developers/system-registration
     developers/forge_internals
     developers/forge_templates
     developers/forge_source_data

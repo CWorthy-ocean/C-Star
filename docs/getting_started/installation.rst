@@ -86,7 +86,7 @@ Run ``cstar init``
       configuration file, ``~/.config/cstar/config.env``, which ``cstar init``
       writes. ``cstar env set`` changes one setting, or edit the file by hand;
       ``cstar env show`` prints the active configuration and where each value
-      came from. See :doc:`configuration` and :doc:`hpc`.
+      came from. See :doc:`configuration` and :doc:`../deployments/hpc`.
 
    Register a Jupyter kernel
       To use Jupyter notebooks with your C-Star environment, for your own
@@ -169,7 +169,7 @@ suite and documentation dependencies.
 
          pip install .
 
-See :doc:`contributing` for running the tests and building this
+See :doc:`../contributing` for running the tests and building this
 documentation.
 
 Updating

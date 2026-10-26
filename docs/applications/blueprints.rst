@@ -37,7 +37,7 @@ field of its own:
 ``working_dir`` (optional)
    Where the application writes its results. Left out, the working directory
    is ``CSTAR_DATA_HOME/blueprint_runs/<application>/<name>``: under
-   ``~/cstar`` on a laptop, on scratch on an HPC system (see :doc:`../hpc`).
+   ``~/cstar`` on a laptop, on scratch on an HPC system (see :doc:`../deployments/hpc`).
    A relative path is resolved against the directory you run ``cstar`` from.
 
 A few more core fields are rarely written by hand. ``state`` marks a
@@ -104,7 +104,7 @@ Where blueprints come from
 There are three ways to get a blueprint:
 
 1. **Build it in the wizard.** For a new domain, the :doc:`wizard
-   <../wizard/launching>` writes a forge blueprint from your choices, and
+   <../catalog_wizard/launching>` writes a forge blueprint from your choices, and
    running that blueprint produces the UCLA-ROMS blueprint of the simulation.
    This is the usual path.
 2. **Write it by hand.** For input files you already have, or for one of the
@@ -126,7 +126,7 @@ reports every problem it finds: a misspelled field, a missing required
 value, a date that does not parse. It does not check that the files the
 blueprint points at exist. A valid file prints ``The blueprint is valid``.
 To check a blueprint from a notebook or script instead, see
-:doc:`../python`.
+:doc:`../reference/python`.
 
 Running a blueprint
 --------------------
@@ -173,4 +173,4 @@ single step. Read them with ``cstar run show <working directory>``. See
 :doc:`../runs/moving/manifest`.
 
 A blueprint can also be run from Python, for example from a notebook; see
-:doc:`../python`.
+:doc:`../reference/python`.

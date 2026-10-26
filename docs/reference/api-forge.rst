@@ -12,7 +12,7 @@ Blueprint
 ---------
 
 .. autosummary::
-   :toctree: generated/
+   :toctree: ../generated/
 
    cstar.applications.forge.blueprint.ForgeBlueprint
    cstar.applications.forge.blueprint.RunWindow
@@ -33,7 +33,7 @@ Application
 -----------
 
 .. autosummary::
-   :toctree: generated/
+   :toctree: ../generated/
 
    cstar.applications.forge.app.ForgeApplication
    cstar.applications.forge.app.ForgeRunner
@@ -42,7 +42,7 @@ Authoring
 ---------
 
 .. autosummary::
-   :toctree: generated/
+   :toctree: ../generated/
 
    cstar.applications.forge.resolve.build_forge_blueprint
    cstar.applications.forge.models.ModelSpec
@@ -53,7 +53,7 @@ Catalog
 -------
 
 .. autosummary::
-   :toctree: generated/
+   :toctree: ../generated/
 
    cstar.catalog.domain_catalog.DomainCatalog
    cstar.catalog.domain_catalog.LayeredCatalog
@@ -67,7 +67,7 @@ Execution
 ---------
 
 .. autosummary::
-   :toctree: generated/
+   :toctree: ../generated/
 
    cstar.applications.forge.engine.process_forge_blueprint
    cstar.applications.forge.executor.ForgeExecutor

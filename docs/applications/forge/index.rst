@@ -24,8 +24,8 @@ How it works
 
 Forge has two sides separated by the blueprint.
 
-**Authoring** happens in the :doc:`wizard <../../wizard/blueprints>`. It composes a forge
-blueprint from :doc:`specs <specs>` in the :doc:`catalog <../../catalog>`, a
+**Authoring** happens in the :doc:`wizard <../../catalog_wizard/blueprints>`. It composes a forge
+blueprint from :doc:`specs <specs>` in the :doc:`catalog <../../catalog_wizard/catalog>`, a
 model configuration, a domain, a forcing selection and output settings, plus
 your edits, and writes out the resolved values in full.
 
@@ -51,7 +51,7 @@ walks through the whole sequence on a toy domain.
 The datasets Forge draws on include GLORYS ocean reanalysis, ERA5
 atmospheric reanalysis, a unified biogeochemical climatology, SRTM15 and
 ETOPO bathymetry, river discharge from GloFAS and Dai, and TPXO tides. Two
-of them require a free registration; see :doc:`../../data_access`.
+of them require a free registration; see :doc:`../../getting_started/data_access`.
 
 Pages in this section
 ---------------------
@@ -72,7 +72,7 @@ Pages in this section
 - :doc:`blueprint`: the blueprint itself, its processing options and what
   Forge writes.
 
-Elsewhere: :doc:`../../wizard/blueprints` for building a forge blueprint in
-the wizard; :doc:`../../catalog` for where specs and saved blueprints live;
-:doc:`../../hpc` for data locations on clusters; and
+Elsewhere: :doc:`../../catalog_wizard/blueprints` for building a forge blueprint in
+the wizard; :doc:`../../catalog_wizard/catalog` for where specs and saved blueprints live;
+:doc:`../../deployments/hpc` for data locations on clusters; and
 :doc:`../../developers/forge_internals` for the architecture.

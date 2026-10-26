@@ -19,7 +19,7 @@ the :doc:`end-to-end tutorial <../../tutorials/end_to_end>` walks through it.
 Before you start
 ----------------
 
-- :doc:`Install C-Star <../../installation>` and activate the environment.
+- :doc:`Install C-Star <../../getting_started/installation>` and activate the environment.
 - Download :download:`wio_toy_blueprint.yaml <../../tutorials/wio_toy_blueprint.yaml>`.
 
 Nothing needs to be registered for: every input is fetched from the examples

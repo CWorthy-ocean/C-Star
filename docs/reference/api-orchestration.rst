@@ -11,7 +11,7 @@ Core
 ----
 
 .. autosummary::
-   :toctree: generated/
+   :toctree: ../generated/
 
    cstar.orchestration.orchestration.ProcessHandle
    cstar.orchestration.orchestration.Status
@@ -21,7 +21,7 @@ Execution
 ---------
 
 .. autosummary::
-   :toctree: generated/
+   :toctree: ../generated/
 
    cstar.orchestration.models.Step
    cstar.orchestration.models.Workplan
@@ -35,7 +35,7 @@ Run Directory Checks
 --------------------
 
 .. autosummary::
-   :toctree: generated/
+   :toctree: ../generated/
 
    cstar.orchestration.run_check.check_run
    cstar.orchestration.run_check.repair_symlinks
@@ -48,7 +48,7 @@ Custom Application Building
 ---------------------------
 
 .. autosummary::
-   :toctree: generated/
+   :toctree: ../generated/
 
    cstar.applications.core.ApplicationDefinition
    cstar.orchestration.models.Blueprint

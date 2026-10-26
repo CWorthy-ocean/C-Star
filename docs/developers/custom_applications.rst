@@ -5,7 +5,7 @@ Custom applications enable users to execute new types of behavior with C-Star. T
 power of custom applications becomes clear when they are integrated into a workplan.
 
 For a complete, in-tree example of a custom application built this way, see
-:doc:`developers/forge_internals` -- the domain-generation application
+:doc:`forge_internals` -- the domain-generation application
 ``forge`` (source at ``cstar/applications/forge/``) follows exactly the
 pattern described below.
 
@@ -164,7 +164,7 @@ Declaring Products
 
 A *product* is a file a step leaves that a user keeps: an output, a restart file, the
 namelist the model read, a log. Each step records its products in its step record,
-``cstar-step.yaml`` (see :doc:`runs/moving/manifest`), with a kind, a path relative to the step
+``cstar-step.yaml`` (see :doc:`../runs/moving/manifest`), with a kind, a path relative to the step
 root, a size in bytes and metadata. An application declares where its products land by
 overriding ``artifacts`` on its `ApplicationDefinition`, which returns a list of
 `ArtifactSpec` (see :class:`cstar.applications.core.ArtifactSpec`). The default returns

@@ -5,7 +5,7 @@ Simulation
 ----------
 
 .. autosummary::
-   :toctree: generated/
+   :toctree: ../generated/
 	     
    cstar.simulation.Simulation
    cstar.roms.simulation.ROMSSimulation
@@ -14,7 +14,7 @@ External Codebases
 ------------------------
 
 .. autosummary::
-   :toctree: generated/
+   :toctree: ../generated/
 
    cstar.base.external_codebase.ExternalCodeBase
    cstar.roms.external_codebase.ROMSExternalCodeBase
@@ -24,7 +24,7 @@ Additional Code
 ------------------
 
 .. autosummary::
-   :toctree: generated/
+   :toctree: ../generated/
 
    cstar.base.additional_code.AdditionalCode
 
@@ -32,7 +32,7 @@ Input Datasets
 ----------------
 
 .. autosummary::
-   :toctree: generated/
+   :toctree: ../generated/
 
    cstar.base.input_dataset.InputDataset
    cstar.roms.input_dataset.ROMSInputDataset
@@ -49,7 +49,7 @@ Discretization
 ----------------
 
 .. autosummary::
-   :toctree: generated/
+   :toctree: ../generated/
 
    cstar.base.discretization.Discretization
 
@@ -57,7 +57,7 @@ Scheduler Job
 ----------------
 
 .. autosummary::
-   :toctree: generated/
+   :toctree: ../generated/
 
    cstar.execution.handler.ExecutionHandler
    cstar.execution.local_process.LocalProcess
@@ -68,7 +68,7 @@ Scheduler Job
 io
 --
 .. autosummary::
-   :toctree: generated/
+   :toctree: ../generated/
 
    cstar.io.source_data.SourceData
    cstar.io.source_data.SourceDataCollection
@@ -81,7 +81,7 @@ io
 System
 ------
 .. autosummary::
-   :toctree: generated/
+   :toctree: ../generated/
 
    cstar.system.manager.CStarSystemManager
    cstar.system.scheduler.Scheduler

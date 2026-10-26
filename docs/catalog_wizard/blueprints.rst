@@ -65,7 +65,7 @@ Boundaries and forcing
    initial-condition, surface, boundary, tidal and river sources, with
    biogeochemical sources and the interpolation method for each. Sources
    that you must download yourself (TPXO tides, for example) are noted here;
-   see :doc:`../data_access`.
+   see :doc:`../getting_started/data_access`.
 
 .. figure:: ../images/wizard-forcing.png
    :alt: The Boundaries and forcing section with one collapsed panel per forcing type
@@ -128,7 +128,7 @@ Review and export
    one on the Workplan page. **Run** executes ``cstar blueprint run`` on the
    machine the wizard is running on, so on a cluster's login node use it only
    for toy domains; for real domains save the blueprint and submit it through a
-   workplan or from a compute node (see :doc:`../hpc`).
+   workplan or from a compute node (see :doc:`../deployments/hpc`).
 
 .. figure:: ../images/wizard-review.png
    :alt: The Review and export section: validation result, resolved YAML, download, save and run
@@ -138,7 +138,7 @@ What happens next
 -----------------
 
 Blueprints you save, and specs you register, land in your own writable
-catalog layer, ``~/cstar/catalog`` by default (see :doc:`../catalog`).
+catalog layer, ``~/cstar/catalog`` by default (see :doc:`catalog`).
 Process the blueprint with ``cstar blueprint run`` as described in
 :doc:`../applications/forge/blueprint`, or add it to a workplan on the
 :doc:`Workplan page <workplans>`.

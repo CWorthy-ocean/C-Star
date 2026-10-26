@@ -10,7 +10,7 @@ for building and running UCLA-ROMS via C-Star, but have not been tested or are n
 yet supported for full workplan orchestration.
 
 If you have a system that you would like to use with C-Star that isn't supported,
-check out :doc:`system-registration.rst`, or reach out to the repo maintainers.
+check out :doc:`../developers/system-registration`, or reach out to the repo maintainers.
 We would love to help you get set up!
 
 +--------------------------------------------------------------------------------------+------------+-------------------------+

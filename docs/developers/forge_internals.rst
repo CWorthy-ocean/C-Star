@@ -231,7 +231,7 @@ Forge as a real C-Star application
 
 ``cstar/applications/forge/app.py`` (excluded from the ``test_forge_app_boundary.py``
 guard described below -- like ``runtime.py``, it's disposable host-resolution glue)
-defines the pieces the :doc:`custom-applications contract <../custom_applications>`
+defines the pieces the :doc:`custom-applications contract <custom_applications>`
 requires:
 
 - ``ForgeRunner(BlueprintRunner[ForgeBlueprint])`` -- ``run()`` delegates to

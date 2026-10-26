@@ -1,7 +1,7 @@
 Registering a New System
 ========================
 
-C-Star runs on a fixed set of known systems (see :doc:`machines`). To add
+C-Star runs on a fixed set of known systems (see :doc:`../deployments/machines`). To add
 support for a new HPC system, register a *system context*: a small set of
 files and a Python class that tell C-Star how to identify the system, which
 modules to load, and how to manage jobs on it. 
@@ -155,5 +155,5 @@ Step 5: Add a ``SystemContext`` subclass
     def is_match(cls) -> bool:
         return os.getenv("HOSTNAME", "") == "<system-name>"
 
-Finally, add the new system to the :doc:`machines` table, keeping the
+Finally, add the new system to the :doc:`../deployments/machines` table, keeping the
 rows in alphabetical order by system name.

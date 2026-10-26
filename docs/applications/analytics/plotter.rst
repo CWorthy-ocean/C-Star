@@ -59,4 +59,4 @@ each time it is submitted:
 
 The application's source, ``cstar/applications/plotter.py``, is short and is
 a reasonable template for an analysis step of your own; see
-:doc:`../../custom_applications`.
+:doc:`../../developers/custom_applications`.

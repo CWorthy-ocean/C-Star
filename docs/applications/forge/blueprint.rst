@@ -12,7 +12,7 @@ run a full ocean model, all in a lightweight YAML file. It is entirely portable
 and shareable: by simply handing a Forge blueprint to a colleague, they can reproduce
 the same model on their own machine.
 
-Most forge blueprints are written by the :doc:`wizard <../../wizard/blueprints>`, which
+Most forge blueprints are written by the :doc:`wizard <../../catalog_wizard/blueprints>`, which
 assembles one from catalog specs and your choices, then shows the result for
 review. You can also start from a saved blueprint and edit the YAML directly.
 Values are written out in full rather than referenced back to the catalog, so
@@ -77,11 +77,11 @@ Example
 The bundled toy domain used in the :doc:`end-to-end tutorial
 <../../tutorials/end_to_end>`:
 
-.. literalinclude:: ../../forge-blueprint-example.wio-toy.yaml
+.. literalinclude:: forge-blueprint-example.wio-toy.yaml
    :language: yaml
    :lines: 1-60
 
-:download:`Download the full file <../../forge-blueprint-example.wio-toy.yaml>`.
+:download:`Download the full file <forge-blueprint-example.wio-toy.yaml>`.
 
 Checking validity
 -----------------
@@ -137,7 +137,7 @@ What Forge writes
 -----------------
 
 Everything goes under the blueprint's working directory: by default
-``CSTAR_DATA_HOME/blueprint_runs/forge/<name>`` (see :doc:`../../hpc`), or the
+``CSTAR_DATA_HOME/blueprint_runs/forge/<name>`` (see :doc:`../../deployments/hpc`), or the
 ``working_dir`` you set, used exactly as written.
 
 .. code-block:: text

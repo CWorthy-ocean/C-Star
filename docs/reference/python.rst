@@ -25,7 +25,7 @@ notebook's kernel menu:
    cstar env register-kernel
 
 C-Star reads the same configuration from Python as it does on the command
-line, so the settings in your :doc:`configuration file <configuration>`
+line, so the settings in your :doc:`configuration file <../getting_started/configuration>`
 apply here too.
 
 Checking a blueprint
@@ -34,7 +34,7 @@ Checking a blueprint
 ``deserialize`` reads a blueprint file into the application's blueprint
 class and validates it. A problem with the file raises an error that lists
 every field at fault. This is the content check that ``cstar blueprint check``
-performs (see :doc:`applications/blueprints`).
+performs (see :doc:`../applications/blueprints`).
 
 .. code-block:: python
 
@@ -69,13 +69,13 @@ A workplan file loads the same way, into the ``Workplan`` class:
 This checks the workplan file's own structure, much like ``cstar workplan
 check --schema-only``. The full ``cstar workplan check`` goes further: it
 loads every step's blueprint, merges the overrides and validates the
-directives (see :doc:`workplans/index`).
+directives (see :doc:`../workplans/index`).
 
 Loading a model spec
 --------------------
 
-The model specs in the :doc:`catalog <catalog>` are ``model.yaml`` files
-(see :doc:`applications/forge/specs`). ``load_models_yaml`` reads one into a
+The model specs in the :doc:`catalog <../catalog_wizard/catalog>` are ``model.yaml`` files
+(see :doc:`../applications/forge/specs`). ``load_models_yaml`` reads one into a
 validated ``ModelSpec``, which is a quick way to see what code and settings
 a spec pins:
 
@@ -96,7 +96,7 @@ Running a blueprint
 -------------------
 
 A blueprint can also be run from Python. ``cstar blueprint run`` runs the
-same runner (see :doc:`applications/blueprints`). A
+same runner (see :doc:`../applications/blueprints`). A
 ``UclaRomsRunner`` executes a UCLA-ROMS blueprint, with the job and service
 settings taken from your configuration, as the command takes them:
 
@@ -127,7 +127,7 @@ your ``CSTAR_SLURM_*`` settings. To set them for this run only, build a
 
 ``RunnerRequest`` takes the same choices as the command's options:
 ``clobber=True``, ``resume=True`` and ``pre_run=True`` match ``--clobber``,
-``--resume`` and ``--pre-run`` (see :doc:`runs/pre_run_resume`).
+``--resume`` and ``--pre-run`` (see :doc:`../runs/pre_run_resume`).
 
 Two differences from the command are worth knowing:
 
@@ -135,7 +135,7 @@ Two differences from the command are worth knowing:
   notebook cell that calls it. On a cluster the model still runs as a
   scheduler job, but the cell is busy for the whole time the job waits in
   the queue and runs. For long runs, submit a :doc:`workplan
-  <workplans/index>` from the command line instead, and follow it with
+  <../workplans/index>` from the command line instead, and follow it with
   ``cstar run status``.
 - ``await`` at the top level works in a Jupyter notebook. In a script, wrap
   the call in ``asyncio.run(runner.execute())``.

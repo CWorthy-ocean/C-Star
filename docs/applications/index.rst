@@ -54,5 +54,5 @@ different model, or a transformation your project needs can be wrapped as a
 C-Star application with a blueprint of its own, and then used in workplans
 alongside the built-in ones. The small applications in this section
 (``hello_world``, ``nest_ic``, ``plotter``) are written exactly that way and
-double as examples. :doc:`../custom_applications` in the developer
+double as examples. :doc:`../developers/custom_applications` in the developer
 documentation walks through it.

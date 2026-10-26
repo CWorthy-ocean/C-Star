@@ -26,7 +26,7 @@ file name is the entry's name -- and ``workplans/`` for workplans saved from
 the wizard. The directory name (for blueprints, the file name) is an entry's
 name; there are no version numbers or identifiers beyond it. Each
 file under ``blueprints/<application>/`` is one blueprint, so sidecar files
-(``settings_B_*.yaml``, ``_grid.yaml``) do not belong there. :doc:`applications/forge/specs`
+(``settings_B_*.yaml``, ``_grid.yaml``) do not belong there. :doc:`../applications/forge/specs`
 describes what each spec kind contains.
 
 Layers

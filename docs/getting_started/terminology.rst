@@ -20,8 +20,8 @@ Applications and blueprints
 
       Smaller applications (``nest_ic``, ``upscaler``, ``cdr_metrics``,
       ``plotter``, ``hello_world``) support nesting and CDR workflows and
-      serve as examples for :doc:`writing your own <custom_applications>`.
-      See :doc:`applications/index`.
+      serve as examples for :doc:`writing your own <../developers/custom_applications>`.
+      See :doc:`../applications/index`.
 
     Blueprint
       A YAML file holding everything an application needs to produce its
@@ -36,13 +36,13 @@ Applications and blueprints
       Blueprints are complete and self-contained. The same blueprint produces
       the same result on any supported machine, and can be checked
       (``cstar blueprint check``) and run (``cstar blueprint run``) from the
-      command line. See :doc:`applications/blueprints`.
+      command line. See :doc:`../applications/blueprints`.
 
     UCLA-ROMS blueprint
       The blueprint of the ``ucla_roms`` application: a runnable
       description of one simulation. Forge writes one at the end of domain
       generation; you can also write one by hand for input files you already
-      have. See :doc:`applications/ucla_roms/blueprint`.
+      have. See :doc:`../applications/ucla_roms/blueprint`.
 
     Forge
       C-Star's domain-generation application. From a forge blueprint it
@@ -52,7 +52,7 @@ Applications and blueprints
       compile-time and run-time settings, and emits the UCLA-ROMS blueprint
       that runs the result. Forge is driven by ``cstar blueprint run`` like
       any other application, with ``cstar forge run`` exposing its extra
-      options. See :doc:`applications/forge/index`.
+      options. See :doc:`../applications/forge/index`.
 
     Forge blueprint
       The blueprint of the ``forge`` application: the single input to domain
@@ -61,7 +61,7 @@ Applications and blueprints
       for one domain, with the values written out in full rather than
       referenced, so it keeps working even if the catalog entries it was
       built from change. Usually written by the wizard. See
-      :doc:`applications/forge/blueprint`.
+      :doc:`../applications/forge/blueprint`.
 
     Working directory
       Where an application writes its results. A blueprint's ``working_dir``
@@ -69,7 +69,7 @@ Applications and blueprints
       ``CSTAR_DATA_HOME/blueprint_runs/<application>/<name>``. A workplan
       lays out one directory per step under the run's directory,
       ``CSTAR_DATA_HOME/workplan_runs/<run id>/tasks/<step>``. See
-      :doc:`hpc`.
+      :doc:`../deployments/hpc`.
 
 The catalog and the wizard
 --------------------------
@@ -92,7 +92,7 @@ The catalog and the wizard
       * a **CdrSpec** describes optional carbon dioxide removal forcing.
 
       The wizard presents specs as dropdowns, and can save your own edited
-      versions under new names. See :doc:`applications/forge/specs`.
+      versions under new names. See :doc:`../applications/forge/specs`.
 
     Catalog
       Where specs and saved blueprints live. A catalog is a stack of plain
@@ -100,7 +100,7 @@ The catalog and the wizard
       optionally a shared group catalog, and your own writable catalog on top
       (``~/cstar/catalog`` by default, or the first entry of
       ``CSTAR_CATALOG``). The wizard reads all layers and writes to yours.
-      See :doc:`catalog`.
+      See :doc:`../catalog_wizard/catalog`.
 
     Wizard
       C-Star's point-and-click interface, served as a web page by
@@ -109,7 +109,7 @@ The catalog and the wizard
       run setup, output and advanced settings), shows the resolved YAML for
       review, and saves or downloads it. Its Workplan page composes steps
       into a workplan, checks it as you edit, and submits it. See
-      :doc:`wizard/launching`.
+      :doc:`../catalog_wizard/launching`.
 
 Workplans and their steps
 -------------------------
@@ -127,7 +127,7 @@ Workplans and their steps
 
       Steps can override values in their blueprint, pass information to one
       another through directives, and consume a blueprint that an earlier
-      step generates. See :doc:`workplans/index`.
+      step generates. See :doc:`../workplans/index`.
 
     Step
       One unit of work in a workplan: an application, a blueprint, optional
@@ -142,7 +142,7 @@ Workplans and their steps
       initial conditions; ``nest-from`` takes a parent run's output as the
       boundary forcing of a nested child; ``carbonate-sensitivity-from`` takes
       the carbonate sensitivities that an earlier UCLA-ROMS run with MARBL wrote as
-      surface forcing for a CDR-LiTE run. See :doc:`workplans/directives`.
+      surface forcing for a CDR-LiTE run. See :doc:`../workplans/directives`.
 
     Orchestrator
       The process that executes a workplan. It builds a graph of the steps
@@ -183,7 +183,7 @@ Workplans and their steps
       launching the model (``--pre-run``). It leaves the working directory
       in place, so a later run of the same blueprint or step attaches to it
       and launches the model. Only applications that declare themselves
-      pre-runnable support it. See :doc:`runs/pre_run_resume`.
+      pre-runnable support it. See :doc:`../runs/pre_run_resume`.
 
 What a run leaves behind
 ------------------------
@@ -197,14 +197,14 @@ What a run leaves behind
       run depends on outside itself. The scheduling command writes it;
       ``cstar run status`` and ``cstar run show`` refresh it for a run
       scheduled on this machine; an attached run is read as it is. See
-      :doc:`runs/moving/manifest`.
+      :doc:`../runs/moving/manifest`.
 
     Step record
       ``cstar-step.yaml`` in a step's working directory, written by the step
       process when it shuts down: its outcome, start and finish times, system,
       package versions, what ran it (the scheduler, host and granted
       allocation), **products** and errors. The run manifest folds each
-      step's record in. See :doc:`runs/moving/manifest`.
+      step's record in. See :doc:`../runs/moving/manifest`.
 
     Attempt
       One scheduling of a workplan into a run: ``cstar workplan submit``, or a
@@ -213,13 +213,13 @@ What a run leaves behind
       once every step is terminal. An attempt that reads the workplan file
       carries its inputs -- the workplan as given, its variables, the plan it
       prepared and each step's blueprint -- into ``attempts/<start time>/`` in
-      the run directory. See :doc:`runs/moving/manifest`.
+      the run directory. See :doc:`../runs/moving/manifest`.
 
     Product
       A file a step left, listed in its step record with a kind (see the
-      kinds table in :doc:`custom_applications`), its path, its size in bytes,
+      kinds table in :doc:`../developers/custom_applications`), its path, its size in bytes,
       a content digest once one is recorded, and metadata. See
-      :doc:`runs/moving/manifest`.
+      :doc:`../runs/moving/manifest`.
 
     Attach
       Registering a run directory that arrived from elsewhere in this
@@ -228,7 +228,7 @@ What a run leaves behind
       referenced, not relaunched. It is read-only, which refuses the commands
       that write into its directory, when it is in the project runs area or
       belongs to another user, and owned otherwise. See
-      :doc:`runs/moving/attach`.
+      :doc:`../runs/moving/attach`.
 
     Promote
       Placing a run in the project runs area (``cstar/runs`` under
@@ -236,4 +236,4 @@ What a run leaves behind
       manifest names (records, logs and products; the large build and
       per-rank files on request), a link to the run where it is, or a move
       of the whole directory, after which the run is tracked as attached. The copy keeps the run's
-      uuid. See :doc:`runs/moving/promote`.
+      uuid. See :doc:`../runs/moving/promote`.

@@ -11,7 +11,7 @@ Blueprint Components
 --------------------
 
 .. autosummary::
-   :toctree: generated/
+   :toctree: ../generated/
 
    cstar.orchestration.models.ConfiguredBaseModel
    cstar.orchestration.models.Resource
@@ -30,7 +30,7 @@ Simulation Components
 ---------------------
 
 .. autosummary::
-   :toctree: generated/
+   :toctree: ../generated/
 
    cstar.applications.ucla_roms.models.ForcingConfiguration
    cstar.applications.ucla_roms.models.BlueprintState
@@ -41,7 +41,7 @@ UCLA-ROMS
 ---------
 
 .. autosummary::
-   :toctree: generated/
+   :toctree: ../generated/
 
    cstar.applications.ucla_roms.models.ROMSCompositeCodeRepository
    cstar.applications.ucla_roms.models.UclaRomsBlueprint

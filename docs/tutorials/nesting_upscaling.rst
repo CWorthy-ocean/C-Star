@@ -20,8 +20,8 @@ introduces them on a simpler workplan without nesting.
 Before you start
 ----------------
 
-- :doc:`Install C-Star <../installation>` and activate the environment.
-- :doc:`Register for Copernicus Marine <../data_access>` and run
+- :doc:`Install C-Star <../getting_started/installation>` and activate the environment.
+- :doc:`Register for Copernicus Marine <../getting_started/data_access>` and run
   ``copernicusmarine login``. GLORYS supplies the initial and boundary
   conditions of the parent grid.
 - Download the four files into an empty directory:

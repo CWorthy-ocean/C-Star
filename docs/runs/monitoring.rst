@@ -84,7 +84,7 @@ To also see runs that were not started here, add a flag:
    cstar run ls --all        # your runs plus every other run C-Star can find
 
 Both add a ``where`` column saying where each run lives: ``local`` for your
-own runs, ``project`` for the shared runs area (see :doc:`../hpc`), and
+own runs, ``project`` for the shared runs area (see :doc:`../deployments/hpc`), and
 ``attached`` for a run :doc:`attached <moving/attach>` from elsewhere.
 
 .. _workplan_run_cd:

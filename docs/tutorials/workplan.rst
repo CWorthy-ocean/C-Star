@@ -241,4 +241,4 @@ A workplan is also how a run reaches the compute nodes of an HPC system.
 There, ``cstar workplan submit`` submits each step as a scheduler job and
 returns, and the ``cstar run`` commands work the same way from the login node.
 Each step can ask for its own cores, queue and walltime through
-``compute_overrides``; see :doc:`../workplans/index` and :doc:`../hpc`.
+``compute_overrides``; see :doc:`../workplans/index` and :doc:`../deployments/hpc`.

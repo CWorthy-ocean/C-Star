@@ -258,7 +258,7 @@ the workplan declares :doc:`runtime variables <variables>`, supply them with
 ``--var`` or ``--varfile`` exactly as you would when submitting. Pass
 ``--schema-only`` to validate only the file's structure, for example when
 the referenced blueprints are not available on the current machine. To
-load and check a workplan from Python, see :doc:`../python`.
+load and check a workplan from Python, see :doc:`../reference/python`.
 
 Submitting a workplan
 ---------------------
@@ -291,7 +291,7 @@ step under ``tasks/``:
      tasks/<step>/                        input/, output/, logs/, work/ ... as in a blueprint run
 
 .. attention::
-    Submitting on an HPC system needs the SLURM settings the system requires: the **account** and **queue** on Anvil and Bouchet, the **account** on Expanse (see :doc:`../hpc`). Run ``cstar init`` once on the system to write them to your configuration file. A workplan run with the SLURM launcher checks them before it schedules any step, and stops if one the system requires is neither set in your environment or configuration file nor supplied by the workplan.
+    Submitting on an HPC system needs the SLURM settings the system requires: the **account** and **queue** on Anvil and Bouchet, the **account** on Expanse (see :doc:`../deployments/hpc`). Run ``cstar init`` once on the system to write them to your configuration file. A workplan run with the SLURM launcher checks them before it schedules any step, and stops if one the system requires is neither set in your environment or configuration file nor supplied by the workplan.
 
 A path to a blueprint file can be given instead of a workplan: it is run as
 a single-step workplan, which is the simplest way to send one simulation to
@@ -364,11 +364,11 @@ provides ``gtimeout``). ``num_cpus`` is also where a deferred-blueprint step
 declares its allocation.
 
 The SLURM settings layer, lowest to highest precedence: the
-``CSTAR_SLURM_*`` settings from your :doc:`configuration <../configuration>`,
+``CSTAR_SLURM_*`` settings from your :doc:`configuration <../getting_started/configuration>`,
 then ``compute_environment.slurm``, then the step's ``compute_overrides``.
 The merged result is recorded on each step of the transformed workplan in the
 run directory. On systems that require a SLURM account and queue (Anvil and
 Bouchet, for example), values the workplan supplies stand in for
 ``CSTAR_SLURM_ACCOUNT`` and ``CSTAR_SLURM_QUEUE``; only the ones it leaves
-out must be set in your environment. See :doc:`../hpc`.
+out must be set in your environment. See :doc:`../deployments/hpc`.
 

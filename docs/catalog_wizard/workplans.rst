@@ -116,7 +116,7 @@ Where the workplan goes
 -----------------------
 
 A saved workplan lands in your writable catalog layer, under ``workplans/``
-in ``~/cstar/catalog`` by default (see :doc:`../catalog`), and the download
+in ``~/cstar/catalog`` by default (see :doc:`catalog`), and the download
 link gives you the same file to keep next to your blueprints. From there it
 is an ordinary workplan: submit it from the page, or with ``cstar workplan
 submit`` from the command line, and follow it as described in

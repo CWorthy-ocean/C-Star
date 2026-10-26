@@ -12,7 +12,7 @@ system, and Python environments need protecting from the module system.
 
 
 
-.. image:: images/hpc_arch_diagram.png
+.. image:: ../images/hpc_arch_diagram.png
     :alt: Components of a C-Star deployment in an HPC environment
 
 This diagram shows a user-initiated workflow on an HPC system. The user has
@@ -36,7 +36,7 @@ Configure the scheduler
 C-Star needs to know which account and queue to submit jobs to. Run
 ``cstar init`` once on the cluster: it lists your SLURM accounts and
 partitions, asks for the account, queue and default walltime, and writes
-them to your :doc:`configuration file <configuration>`:
+them to your :doc:`configuration file <../getting_started/configuration>`:
 
 .. code-block:: bash
 
@@ -60,7 +60,7 @@ every step of a workplan, and a step can ask for different resources (see
 Run work on the compute nodes
 -----------------------------
 
-Submit your work as a :doc:`workplan <workplans/index>`. ``cstar workplan
+Submit your work as a :doc:`workplan <../workplans/index>`. ``cstar workplan
 submit`` sends each step to SLURM and returns, so every stage runs on a
 compute node and you can log off. A workplan can have a single step, so this
 works for one simulation too.
@@ -68,10 +68,10 @@ works for one simulation too.
 ``cstar blueprint run`` instead runs on the node you start it from. That is
 fine for a UCLA-ROMS blueprint, which submits the model run to SLURM itself,
 but Forge generates every input file right there, which is too much for a
-login node beyond a toy domain (see :doc:`applications/blueprints`).
+login node beyond a toy domain (see :doc:`../applications/blueprints`).
 
 To catch start-up problems before waiting in the queue, prepare a run on the
-login node with ``--pre-run``; see :doc:`runs/pre_run_resume`.
+login node with ``--pre-run``; see :doc:`../runs/pre_run_resume`.
 
 Where data goes
 ---------------
@@ -96,7 +96,7 @@ Source-data cache
 Project runs area
    ``cstar/runs`` under the same ``CSTAR_PROJECT_HOME``: a shared place for
    finished runs that should outlast scratch. ``cstar run promote`` puts a
-   run there; see :doc:`runs/moving/promote`.
+   run there; see :doc:`../runs/moving/promote`.
 
 Some systems define ``PROJECT`` and ``SCRATCH`` for you (Anvil exports both,
 Perlmutter exports ``SCRATCH``). Check with ``echo $PROJECT $SCRATCH``, and
@@ -126,4 +126,4 @@ If your cluster offers a hosted Jupyter, such as an OnDemand portal, run
 ``cstar env register-kernel`` once so notebooks, the wizard notebook
 included, can use your C-Star environment. To use the wizard as a web page
 instead, serve it on the login node and forward its port from your laptop;
-see :doc:`wizard/launching`.
+see :doc:`../catalog_wizard/launching`.

@@ -7,7 +7,7 @@ The wizard is C-Star's point-and-click interface. It has two pages. The
 **Blueprint** page builds a :doc:`forge blueprint
 <../applications/forge/blueprint>` without writing YAML: it presents the
 choices as a series of sections, fills each from the :doc:`catalog
-<../catalog>`, shows the resolved blueprint for review, and saves or
+<catalog>`, shows the resolved blueprint for review, and saves or
 downloads it. The **Workplan** page composes blueprints into a
 :doc:`workplan <../workplans/index>`, checks it as you edit, and submits it.
 The wizard only writes files; nothing is downloaded or generated until you
@@ -70,4 +70,4 @@ writable catalog layer, ``~/cstar/catalog`` by default: blueprints under
 directory per spec kind. The bundled examples stay visible in the dropdowns,
 marked ``(bundled)``, and cannot be overwritten: saving an edited bundled
 spec means giving it a new name. Set ``CSTAR_CATALOG`` to use another
-location or to add a shared group catalog. See :doc:`../catalog`.
+location or to add a shared group catalog. See :doc:`catalog`.

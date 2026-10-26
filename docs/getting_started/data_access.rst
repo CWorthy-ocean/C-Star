@@ -22,7 +22,7 @@ with:
    cstar forge show-paths
 
 On a laptop it is ``~/cstar/source-data``; on HPC systems it sits under your
-project directory or scratch file system (see :doc:`hpc`).
+project directory or scratch file system (see :doc:`../deployments/hpc`).
 
 .. _forge-data-access-glorys:
 
@@ -86,7 +86,7 @@ directory and stops with instructions if they are absent.
 - **GLODAP** mapped climatology as a biogeochemical initial and boundary
   source.
 
-:doc:`applications/forge/source_datasets` lists every source Forge knows about, which are
+:doc:`../applications/forge/source_datasets` lists every source Forge knows about, which are
 downloaded automatically, which stream at generation time, and the expected
 file layout for each user-staged one.
 

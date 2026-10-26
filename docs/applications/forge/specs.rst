@@ -14,7 +14,7 @@ The wizard presents them as dropdowns, the resolver merges the chosen ones
 values in full. Editing a spec afterwards does not change blueprints already
 built from it.
 
-Specs live in the :doc:`catalog <../../catalog>` as one directory per entry,
+Specs live in the :doc:`catalog <../../catalog_wizard/catalog>` as one directory per entry,
 ``<Kind>/<name>/<file>.yaml``. C-Star bundles a small set of each kind to
 start from; save your own from the wizard's Review section or copy a bundled
 directory and edit it.
@@ -170,4 +170,4 @@ spec of your own catalog.
    :lines: 1-36
 
 To load a ``model.yaml`` into a validated object from Python, see
-:doc:`../../python`.
+:doc:`../../reference/python`.
