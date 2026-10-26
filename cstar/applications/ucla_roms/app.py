@@ -130,10 +130,22 @@ class UclaRomsRunner(BlueprintRunner[UclaRomsBlueprint]):
 
         service_cfg: ServiceConfiguration
             Configuration for modifying behavior of the service process.
+
+        Raises
+        ------
+        CstarError
+            If the model would launch outside a scheduler job on a system that
+            has a scheduler (see `ROMSSimulation.check_launch_location`). A
+            pre-run never launches the model, so it is never refused.
         """
         super().__init__(request, service_cfg)
 
         from cstar.roms.simulation import ROMSSimulation
+
+        # refuse before anything is derived or written: a refusal that reached
+        # the service's shutdown would replace a prior attempt's step record
+        if not self.request.pre_run:
+            ROMSSimulation.check_launch_location()
 
         # a resumed attempt runs from a derived blueprint that continues from
         # the interrupted attempt's last usable restart; the original is kept
@@ -151,9 +163,6 @@ class UclaRomsRunner(BlueprintRunner[UclaRomsBlueprint]):
         if not self.simulation:
             msg = "Simulation creation failed. Unable to execute simulation runner"
             raise RuntimeError(msg)
-
-        if not self.request.pre_run:
-            self.simulation.check_launch_location()
 
         ic = self.simulation.initial_conditions
         if ic is not None and self.simulation.start_date is not None:
@@ -341,9 +350,9 @@ def main() -> int:
         clobber=args.clobber,
         step=args.step,
     )
-    runner = UclaRomsRunner(request, service_cfg)
 
     try:
+        runner = UclaRomsRunner(request, service_cfg)
         asyncio.run(runner.execute())
         if runner.state.status == ExecutionStatus.FAILED or runner.result.errors:
             if runner.result.errors:

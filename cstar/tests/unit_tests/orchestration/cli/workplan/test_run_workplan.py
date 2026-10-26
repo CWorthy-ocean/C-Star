@@ -2420,6 +2420,42 @@ def test_workplan_run_blueprint_default_run_id(hello_world_bp_path: Path) -> Non
     assert mock_build_and_run_dag.call_args.args[1] == HELLO_WORLD_SLUG
 
 
+def test_workplan_run_blueprint_with_unnameable_name_is_refused(
+    tmp_path: Path,
+    hello_world_bp_content: str,
+    flatten_cli_output: Callable[[str], str],
+) -> None:
+    """Verify submitting a blueprint whose name has no ASCII word characters to
+    `cstar workplan submit` is a usage error naming the blueprint's name, and
+    nothing is composed or scheduled.
+
+    Parameters
+    ----------
+    tmp_path : Path
+        A temporary directory for the blueprint.
+    hello_world_bp_content : str
+        The content of a minimal hello-world blueprint, which the test renames.
+    flatten_cli_output : Callable[[str], str]
+        Prepares CLI output for phrase matching.
+    """
+    bp_path = tmp_path / "helloworld.yaml"
+    bp_path.write_text(
+        hello_world_bp_content.replace("Say hello to my little friend!", "'!!!'")
+    )
+
+    with mock.patch(
+        "cstar.cli.workplan.run.build_and_run_dag", wraps=fake_build_and_run_dag
+    ) as mock_build_and_run_dag:
+        result = CliRunner().invoke(app, [bp_path.as_posix()], color=False)
+
+    assert result.exit_code == 2
+    assert "A run cannot be named from the blueprint's name '!!!'" in (
+        flatten_cli_output(result.output)
+    )
+    mock_build_and_run_dag.assert_not_awaited()
+    assert not StateDirectoryManager.composed_workplans_dir().exists()
+
+
 @pytest.mark.parametrize(
     ("raw_run_id", "expected"),
     [

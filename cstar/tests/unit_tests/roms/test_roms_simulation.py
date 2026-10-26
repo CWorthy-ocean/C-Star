@@ -1,5 +1,4 @@
 import logging
-import os
 import pickle
 import re
 import tempfile
@@ -2636,7 +2635,6 @@ class TestProcessingAndExecution:
         )
         assert plan.run_path == run_dir
         assert plan.runtime_settings_file == namelist_path
-        assert plan.script_path == run_dir / "romstest.sh"
         assert plan.output_file == sim.fs_manager.logs_dir / "romstest.out"
 
         mock_local_process.assert_not_called()
@@ -2697,10 +2695,10 @@ class TestProcessingAndExecution:
         stub_romssimulation: ROMSSimulation,
         stageddatacollection_remote_files,
     ):
-        """`run` rotates a previous attempt's namelist, job script, and ROMS
-        stdout out of the way (`.1`, `.2`, ...) instead of silently
-        overwriting them, and re-creates the exe symlink instead of raising
-        `FileExistsError` when one is already there from a previous attempt.
+        """`run` rotates a previous attempt's namelist and ROMS stdout out of
+        the way (`.1`, `.2`, ...) instead of silently overwriting them, and
+        re-creates the exe symlink instead of raising `FileExistsError` when
+        one is already there from a previous attempt.
         """
         sim = stub_romssimulation
 
@@ -2729,9 +2727,6 @@ class TestProcessingAndExecution:
             namelist_path = run_dir / "cstar_generated_roms.nml"
             namelist_path.write_text("old namelist")
 
-            script_path = run_dir / "romstest.sh"
-            script_path.write_text("old script")
-
             output_file = sim.fs_manager.logs_dir / "romstest.out"
             output_file.write_text("old output")
 
@@ -2741,7 +2736,6 @@ class TestProcessingAndExecution:
             sim.run()
 
         assert (run_dir / "cstar_generated_roms.nml.1").read_text() == "old namelist"
-        assert (run_dir / "romstest.sh.1").read_text() == "old script"
         assert (sim.fs_manager.logs_dir / "romstest.out.1").read_text() == "old output"
         assert symlink_path.is_symlink()
         assert symlink_path.resolve() == sim.exe_path.resolve()
@@ -2972,68 +2966,47 @@ class TestProcessingAndExecution:
         assert not (temp_output_dir / "ocean_rst.20240101000000.001.nc").exists()
 
     @pytest.mark.parametrize(
-        ("affinity", "expected"),
+        ("available", "n_procs", "expected"),
         [
-            pytest.param(set(range(12)), 4, id="twelve-cores"),
-            pytest.param(set(range(2)), 1, id="two-cores"),
-            pytest.param({3}, 1, id="one-core"),
+            pytest.param(128, 4, 4, id="capped-by-the-ranks"),
+            pytest.param(12, 64, 4, id="a-third-of-the-cpus"),
+            pytest.param(2, 64, 1, id="at-least-one"),
         ],
     )
-    def test_join_workers_counts_a_third_of_the_cpu_affinity(
+    def test_join_workers_is_a_third_of_the_cpus_up_to_the_rank_count(
         self,
         monkeypatch: pytest.MonkeyPatch,
-        affinity: set[int],
+        available: int,
+        n_procs: int,
         expected: int,
     ) -> None:
-        """The join pool takes a third of the cores the process may run on, never
-        fewer than one, whatever the machine's own CPU count.
+        """The join pool takes a third of the CPUs the process may use, but no more
+        threads than the model had ranks, and never fewer than one.
         """
-        monkeypatch.setattr(
-            os, "sched_getaffinity", lambda _pid: affinity, raising=False
-        )
-        monkeypatch.setattr(os, "cpu_count", lambda: 128)
+        monkeypatch.setattr("cstar.roms.simulation.cpus_available", lambda: available)
 
-        assert _join_workers() == expected
-
-    @pytest.mark.parametrize(
-        ("cpu_count", "expected"),
-        [
-            pytest.param(9, 3, id="nine-cpus"),
-            pytest.param(2, 1, id="two-cpus"),
-            pytest.param(None, 1, id="cpu-count-unknown"),
-        ],
-    )
-    def test_join_workers_without_affinity_counts_a_third_of_the_cpus(
-        self,
-        monkeypatch: pytest.MonkeyPatch,
-        cpu_count: int | None,
-        expected: int,
-    ) -> None:
-        """Where the platform reports no affinity (macOS), the pool is sized from
-        the CPU count, again with at least one worker.
-        """
-        monkeypatch.delattr(os, "sched_getaffinity", raising=False)
-        monkeypatch.setattr(os, "cpu_count", lambda: cpu_count)
-
-        assert _join_workers() == expected
+        assert _join_workers(n_procs) == expected
 
     @pytest.mark.parametrize(
         ("cores", "expected_workers"),
-        [pytest.param(12, 4, id="twelve-cores"), pytest.param(2, 1, id="two-cores")],
+        [
+            pytest.param(128, 6, id="capped-by-the-ranks"),
+            pytest.param(12, 4, id="twelve-cores"),
+            pytest.param(2, 1, id="two-cores"),
+        ],
     )
-    def test_post_run_sizes_the_join_pool_from_the_affinity(
+    def test_post_run_sizes_the_join_pool_from_the_cpus_and_ranks(
         self,
         monkeypatch: pytest.MonkeyPatch,
         stub_romssimulation: ROMSSimulation,
         cores: int,
         expected_workers: int,
     ) -> None:
-        """`post_run` joins with as many threads as `_join_workers` allows, so a
-        process with two cores joins with one thread rather than none.
+        """`post_run` joins with as many threads as `_join_workers` allows for the
+        simulation's ranks, so a process with two cores joins with one thread
+        rather than none.
         """
-        monkeypatch.setattr(
-            os, "sched_getaffinity", lambda _pid: set(range(cores)), raising=False
-        )
+        monkeypatch.setattr("cstar.roms.simulation.cpus_available", lambda: cores)
         sim = stub_romssimulation
         sim.fs_manager.prepare()
         (sim.fs_manager.temp_output_dir / "ocean_his.20240101000000.001.nc").touch()

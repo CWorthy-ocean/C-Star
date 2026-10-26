@@ -316,9 +316,9 @@ def run(
         step=step,
     )
 
-    runner = app_config.runner(request, service_cfg)
-    started_at = utc_now()
     try:
+        runner = app_config.runner(request, service_cfg)
+        started_at = utc_now()
         asyncio.run(runner.execute())
     except CstarError as ex:
         print(f"Unable to run the blueprint: {ex}")

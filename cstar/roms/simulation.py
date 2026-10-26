@@ -40,6 +40,7 @@ from cstar.base.utils import (
     _dict_to_tree,
     _get_sha256_hash,
     _run_cmd,
+    cpus_available,
     deep_merge,
     slugify,
 )
@@ -99,23 +100,26 @@ if TYPE_CHECKING:
     from cstar.execution.handler import ExecutionHandler
 
 
-def _join_workers() -> int:
+def _join_workers(n_procs: int) -> int:
     """Count the threads that join output files at once.
+
+    The join runs on the node where the model ran and never uses more threads
+    than the model had ranks, so a small run on a login node (allowed with
+    `CSTAR_ALLOW_LOGIN_NODE_RUN=1`) does not start `ncjoin`s on a third of a
+    large login node's cores.
+
+    Parameters
+    ----------
+    n_procs : int
+        The number of processes the model ran on.
 
     Returns
     -------
     int
-        A third of the CPUs this process may run on (inside a scheduler job, the
-        job's cores), and at least 1. Where the platform does not report an
-        affinity (macOS), the machine's CPU count stands in for it.
+        A third of the CPUs this process may run on (see `cpus_available`),
+        capped at `n_procs`, and at least 1.
     """
-    sched_getaffinity = getattr(os, "sched_getaffinity", None)
-    cores = (
-        len(sched_getaffinity(0))
-        if sched_getaffinity is not None
-        else (os.cpu_count() or 1)
-    )
-    return max(1, cores // 3)
+    return max(1, min(cpus_available() // 3, n_procs))
 
 
 def _ncjoin_wildcard(
@@ -195,12 +199,8 @@ class LaunchPlan:
 
     command: str
     """The shell command that launches ROMS."""
-    cpus: int
-    """The number of processes ROMS runs on."""
     run_path: Path
     """The directory ROMS is launched from."""
-    script_path: Path
-    """The path of the scheduler job script."""
     output_file: Path
     """The file ROMS stdout is written to."""
     runtime_settings_file: Path
@@ -2316,15 +2316,15 @@ class ROMSSimulation(Simulation):
 
         Creates the run, logs and output directories, writes the ROMS namelist
         (which validates the runtime settings), rotates a previous attempt's
-        job script and ROMS stdout, and links the executable into the run
-        directory. Idempotent apart from rotating a previous attempt's
-        namelist, script and log files to `.1`, `.2`, ...
+        ROMS stdout, and links the executable into the run directory.
+        Idempotent apart from rotating a previous attempt's namelist and log
+        files to `.1`, `.2`, ...
 
         Parameters
         ----------
         job_name : str, optional
-            The name of the job, which also sets the job script and output file
-            names. Defaults to the simulation name.
+            The name of the job, which also sets the output file name
+            (`<job_name>.out`). Defaults to the simulation name.
 
         Returns
         -------
@@ -2376,14 +2376,11 @@ class ROMSSimulation(Simulation):
         rotate_file(runtime_settings_file)
         self.roms_runtime_settings.write(runtime_settings_file)
 
-        script_name = job_name or self.name
-        safe_name = slugify(script_name)
-        script_path = run_path / f"{safe_name}.sh"
+        safe_name = slugify(job_name or self.name)
         output_file = self.fs_manager.logs_dir / f"{safe_name}.out"
 
-        # rotate out a previous attempt's job script and ROMS stdout, same as
-        # the namelist above, so they survive as `.1`, `.2`, ...
-        rotate_file(script_path)
+        # rotate out a previous attempt's ROMS stdout, same as the namelist
+        # above, so it survives as `.1`, `.2`, ...
         rotate_file(output_file)
 
         # symlink roms exe into run dir to simplify running by hand for troubleshooting.
@@ -2405,19 +2402,20 @@ class ROMSSimulation(Simulation):
         )
         return LaunchPlan(
             command=roms_exec_cmd,
-            cpus=n_procs,
             run_path=run_path,
-            script_path=script_path,
             output_file=output_file,
             runtime_settings_file=runtime_settings_file,
         )
 
-    def check_launch_location(self) -> None:
+    @staticmethod
+    def check_launch_location() -> None:
         """Refuse a launch outside a scheduler job on a system that has a scheduler.
 
         ROMS always runs as a local process of the calling process. On a system
         with a scheduler, outside any scheduler job (a login node, say), that
-        would run the model where it does not belong.
+        would run the model where it does not belong. The answer depends only on
+        the process and the system, so a caller can ask before it builds a
+        simulation.
 
         Raises
         ------
@@ -2447,8 +2445,8 @@ class ROMSSimulation(Simulation):
         Parameters
         ----------
         job_name : str, optional
-            The name of the run, which also sets the job script and output file
-            names (`job_name.out`). Defaults to the simulation name.
+            The name of the run, which also sets the output file name
+            (`<job_name>.out`). Defaults to the simulation name.
 
         Returns
         -------
@@ -2579,7 +2577,11 @@ class ROMSSimulation(Simulation):
             str(Path(fname.stem).with_suffix(".*.nc")) for fname in files
         }
 
-        with ThreadPoolExecutor(max_workers=_join_workers()) as executor:
+        # `run` launched ROMS, so `prepare_launch` has checked the rank count
+        n_procs = self.discretization.n_procs_tot
+        assert n_procs is not None
+
+        with ThreadPoolExecutor(max_workers=_join_workers(n_procs)) as executor:
             # list() exhausts the returned iterator, which is needed to surface any errors
             # that were raised in the threaded join operations
             list(executor.map(_spatial_join, unique_wildcards))

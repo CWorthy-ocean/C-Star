@@ -59,7 +59,11 @@ from cstar.entrypoint.utils import (
     ARG_VARFILE_SHORT,
     OPT_CLOBBER_ALL,
 )
-from cstar.execution.file_system import StateDirectoryManager, local_copy
+from cstar.execution.file_system import (
+    StateDirectoryManager,
+    local_copy,
+    write_bytes_atomic,
+)
 from cstar.orchestration.dag_runner import (
     ExecutiveRunSummary,
     ExecutiveStepSummary,
@@ -86,6 +90,7 @@ from cstar.orchestration.orchestration import (
 from cstar.orchestration.run_check import report_orphans
 from cstar.orchestration.serialization import (
     deserialize,
+    model_to_yaml,
     read_raw,
     serialize,
     try_deserialize,
@@ -378,10 +383,14 @@ def composed_workplan_name(blueprint: BlueprintCore) -> str:
 
     Raises
     ------
-    ValueError
+    typer.BadParameter
         If nothing of the blueprint's name survives slugifying.
     """
-    return slugify(blueprint.name)
+    try:
+        return slugify(blueprint.name)
+    except ValueError as ex:
+        msg = f"A run cannot be named from the blueprint's name {blueprint.name!r}"
+        raise typer.BadParameter(msg) from ex
 
 
 def compose_blueprint_workplan(path: str) -> str:
@@ -402,6 +411,11 @@ def compose_blueprint_workplan(path: str) -> str:
     str
         The path to the composed workplan, or `path` unchanged when it is not a
         blueprint.
+
+    Raises
+    ------
+    typer.BadParameter
+        If nothing of the blueprint's name survives slugifying.
     """
     blueprint = try_deserialize(path, BlueprintCore)
     if blueprint is None:
@@ -416,7 +430,6 @@ def compose_blueprint_workplan(path: str) -> str:
         / f"{name}-{digest}"
         / f"{name}-workplan.yaml"
     )
-    wp_path.parent.mkdir(parents=True, exist_ok=True)
 
     wp = Workplan(
         name=name,
@@ -429,7 +442,8 @@ def compose_blueprint_workplan(path: str) -> str:
             )
         ],
     )
-    serialize(wp_path, wp)
+    # atomic, so a concurrent submit of the same blueprint never reads half a file
+    write_bytes_atomic(wp_path, model_to_yaml(wp).encode())
     log.debug(f"Composed a workplan for the blueprint {str(bp_path)!r} in: {wp_path}")
     return str(wp_path)
 

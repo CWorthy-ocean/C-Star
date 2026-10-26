@@ -930,19 +930,39 @@ def test_blueprint_run_runner_error_exits_cleanly(
     hello_world_bp_path: Path,
     flatten_cli_output: Callable[[str], str],
 ) -> None:
-    """Verify a `CstarError` raised while the runner starts (a launch refused
-    on a login node, say) is reported as a message with exit code 1, not a
-    traceback.
+    """Verify a `CstarError` raised while the runner executes is reported as a
+    message with exit code 1, not a traceback.
     """
-    refusal = "Refusing to launch ROMS outside a scheduler job"
+    error = "The runner could not start"
     with mock.patch.object(
-        HelloWorldRunner, "execute", mock.AsyncMock(side_effect=CstarError(refusal))
+        HelloWorldRunner, "execute", mock.AsyncMock(side_effect=CstarError(error))
     ):
         runner = CliRunner()
         result = runner.invoke(app, [hello_world_bp_path.as_posix()], color=False)
 
     assert result.exit_code == 1, result.output
-    assert refusal in flatten_cli_output(result.output)
+    assert f"Unable to run the blueprint: {error}" in flatten_cli_output(result.output)
+    assert not isinstance(result.exception, CstarError)
+
+
+def test_blueprint_run_runner_construction_error_exits_cleanly(
+    hello_world_bp_path: Path,
+    flatten_cli_output: Callable[[str], str],
+) -> None:
+    """Verify a `CstarError` raised while the runner is constructed (a launch
+    refused on a login node is raised there) is reported as a message with exit
+    code 1, not a traceback.
+    """
+    refusal = "Refusing to launch ROMS outside a scheduler job"
+    with mock.patch.object(
+        HelloWorldRunner, "__init__", mock.Mock(side_effect=CstarError(refusal))
+    ):
+        runner = CliRunner()
+        result = runner.invoke(app, [hello_world_bp_path.as_posix()], color=False)
+
+    assert result.exit_code == 1, result.output
+    flat = flatten_cli_output(result.output)
+    assert f"Unable to run the blueprint: {refusal}" in flat
     assert not isinstance(result.exception, CstarError)
 
 

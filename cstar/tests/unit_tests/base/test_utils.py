@@ -1,4 +1,5 @@
 import hashlib
+import os
 import re
 import subprocess
 from pathlib import Path
@@ -14,6 +15,7 @@ from cstar.base.utils import (
     _list_to_concise_str,
     _replace_text_in_file,
     convert_to_cdf5,
+    cpus_available,
     deep_merge,
     netcdf_format,
     slugify,
@@ -627,3 +629,45 @@ def test_walltime_re_accepts_the_slurm_clock_forms(
 ) -> None:
     """The regex takes SLURM's clock forms (with or without days) and nothing shorter."""
     assert bool(re.fullmatch(WALLTIME_RE, walltime)) is accepted
+
+
+@pytest.mark.parametrize("affinity", [set(range(12)), set(range(2)), {3}])
+def test_cpus_available_counts_the_cpu_affinity(
+    monkeypatch: pytest.MonkeyPatch, affinity: set[int]
+) -> None:
+    """The count is the cores the process may run on, whatever the machine's own."""
+    monkeypatch.setattr(os, "sched_getaffinity", lambda _pid: affinity, raising=False)
+    monkeypatch.setattr(os, "cpu_count", lambda: 128)
+
+    assert cpus_available() == len(affinity)
+
+
+@pytest.mark.parametrize(
+    ("cpu_count", "expected"),
+    [
+        pytest.param(9, 9, id="nine-cpus"),
+        pytest.param(None, 1, id="cpu-count-unknown"),
+    ],
+)
+def test_cpus_available_without_affinity_counts_the_cpus(
+    monkeypatch: pytest.MonkeyPatch, cpu_count: int | None, expected: int
+) -> None:
+    """Where the platform reports no affinity (macOS), the CPU count stands in."""
+    monkeypatch.delattr(os, "sched_getaffinity", raising=False)
+    monkeypatch.setattr(os, "cpu_count", lambda: cpu_count)
+
+    assert cpus_available() == expected
+
+
+def test_cpus_available_falls_back_when_the_affinity_call_fails(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An affinity call that raises `OSError` falls back to the CPU count."""
+
+    def fail(_pid: int) -> set[int]:
+        raise OSError("affinity is unavailable")
+
+    monkeypatch.setattr(os, "sched_getaffinity", fail, raising=False)
+    monkeypatch.setattr(os, "cpu_count", lambda: 6)
+
+    assert cpus_available() == 6

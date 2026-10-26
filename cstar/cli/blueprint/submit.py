@@ -77,7 +77,8 @@ def check_blueprint_path(path: str) -> str:
     ------
     typer.BadParameter
         If the file does not exist, is a workplan, or is not a valid blueprint,
-        or if nothing of the blueprint's name survives slugifying.
+        or if nothing of the blueprint's name survives slugifying (see
+        `composed_workplan_name`).
     """
     if not Path(path).expanduser().is_file():
         msg = f"Blueprint file not found: {path}"
@@ -93,11 +94,8 @@ def check_blueprint_path(path: str) -> str:
             raise typer.BadParameter(msg)
         raise typer.BadParameter(result.error_msg)
 
-    try:
-        composed_workplan_name(result.item)
-    except ValueError as ex:
-        msg = f"A run cannot be named from the blueprint's name {result.item.name!r}"
-        raise typer.BadParameter(msg) from ex
+    # validates that the blueprint's name can name a run
+    composed_workplan_name(result.item)
 
     return path
 

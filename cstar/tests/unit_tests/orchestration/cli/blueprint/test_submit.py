@@ -226,6 +226,30 @@ def test_a_path_that_is_no_blueprint_is_refused(
     assert not StateDirectoryManager.composed_workplans_dir().exists()
 
 
+def test_a_blueprint_name_that_cannot_name_a_run_is_refused(
+    tmp_path: Path,
+    hello_world_bp_content: str,
+    build_and_run_dag: mock.AsyncMock,
+    flatten_cli_output: Callable[[str], str],
+) -> None:
+    """Verify a blueprint whose name has no ASCII word characters is refused
+    with a message naming it, before anything is composed or scheduled.
+    """
+    path = tmp_path / "unnameable.yaml"
+    path.write_text(
+        hello_world_bp_content.replace("Say hello to my little friend!", "'!!!'")
+    )
+
+    result = _submit(path)
+
+    assert result.exit_code == 2
+    assert "A run cannot be named from the blueprint's name '!!!'" in (
+        flatten_cli_output(result.output)
+    )
+    build_and_run_dag.assert_not_awaited()
+    assert not StateDirectoryManager.composed_workplans_dir().exists()
+
+
 def test_a_submission_leaves_the_blueprint_directory_as_it_was(
     readonly_blueprint: Path, build_and_run_dag: mock.AsyncMock
 ) -> None:

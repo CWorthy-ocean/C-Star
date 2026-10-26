@@ -32,6 +32,7 @@ from cstar.entrypoint.utils import (
     ARG_URI_SHORT,
 )
 from cstar.execution.handler import ExecutionHandler, ExecutionStatus
+from cstar.orchestration.manifest import STEP_RECORD_NAME
 from cstar.orchestration.orchestration import LiveStep, LiveWorkplan
 from cstar.orchestration.serialization import deserialize
 from cstar.roms.file_system import RomsFileSystemManager
@@ -86,15 +87,6 @@ def login_node(monkeypatch: pytest.MonkeyPatch) -> Generator[None, None, None]:
         return_value=mock.Mock(),
     ):
         yield
-
-
-def mock_simulation_with_launch_rule() -> mock.Mock:
-    """Mock a simulation whose `check_launch_location` applies the real rule."""
-    simulation = mock.Mock(initial_conditions=None)
-    simulation.check_launch_location.side_effect = lambda: (
-        ROMSSimulation.check_launch_location(simulation)
-    )
-    return simulation
 
 
 @pytest.fixture
@@ -875,55 +867,76 @@ async def test_runner_on_start_without_pre_run_launches(
     mock_simulation.prepare_launch.assert_not_called()
 
 
-@pytest.mark.asyncio
+def _runner_request(
+    blueprint_path: Path, *, resume: bool = False, pre_run: bool = False
+) -> tuple[RunnerRequest[UclaRomsBlueprint], ServiceConfiguration]:
+    """Build the arguments of a `UclaRomsRunner` for a blueprint."""
+    request = RunnerRequest(
+        str(blueprint_path), UclaRomsBlueprint, resume=resume, pre_run=pre_run
+    )
+    service_config = ServiceConfiguration(
+        as_service=False, loop_delay=0, health_check_frequency=0, name="launch-rule"
+    )
+    return request, service_config
+
+
 @pytest.mark.usefixtures("login_node")
-async def test_runner_on_start_refuses_outside_scheduler_job_before_setup(
-    sim_runner: UclaRomsRunner,
+@pytest.mark.parametrize("resume", [False, True])
+def test_runner_init_refuses_outside_scheduler_job(
+    blueprint_path: Path, resume: bool
 ) -> None:
-    """On a system with a scheduler, outside a scheduler job, the runner refuses
-    before it stages, builds or partitions anything.
+    """On a system with a scheduler, outside a scheduler job, constructing the
+    runner raises before it derives a resumed blueprint or builds a simulation.
     """
-    mock_simulation = mock_simulation_with_launch_rule()
+    request, service_config = _runner_request(blueprint_path, resume=resume)
 
     with (
-        mock.patch.object(sim_runner, "_on_shutdown", mock.Mock()),
-        mock.patch.object(sim_runner, "run", mock.AsyncMock()) as mock_runner_run,
-        mock.patch.object(sim_runner, "simulation", mock_simulation),
+        mock.patch(
+            "cstar.applications.ucla_roms.app.prepare_resume_blueprint"
+        ) as mock_prepare,
+        mock.patch.object(ROMSSimulation, "from_blueprint") as mock_from_blueprint,
         pytest.raises(CstarError, match="Refusing to launch ROMS"),
     ):
-        await sim_runner.execute()
+        UclaRomsRunner(request, service_config)
 
-    assert [c[0] for c in mock_simulation.method_calls] == ["check_launch_location"]
-    mock_runner_run.assert_not_called()
+    mock_prepare.assert_not_called()
+    mock_from_blueprint.assert_not_called()
 
 
-@pytest.mark.asyncio
 @pytest.mark.usefixtures("login_node")
-async def test_runner_on_start_pre_run_is_allowed_outside_scheduler_job(
-    sim_runner: UclaRomsRunner,
+def test_runner_init_pre_run_is_allowed_outside_scheduler_job(
+    blueprint_path: Path,
 ) -> None:
     """A pre-run never launches the model, so a login node may prepare one."""
-    mock_simulation = mock_simulation_with_launch_rule()
-    mock_simulation.prepare_launch.return_value = mock.Mock(
-        command="mpirun -n 1 ./roms cstar_generated_roms.nml", run_path=Path("run")
-    )
-    sim_runner.request.pre_run = True
+    request, service_config = _runner_request(blueprint_path, pre_run=True)
 
-    with (
-        mock.patch.object(sim_runner, "_on_shutdown", mock.Mock()),
-        mock.patch.object(sim_runner, "run", mock.AsyncMock()),
-        mock.patch.object(sim_runner, "simulation", mock_simulation),
-    ):
-        await sim_runner.execute()
+    with mock.patch.object(ROMSSimulation, "from_blueprint") as mock_from_blueprint:
+        mock_from_blueprint.return_value.name = "sim"
+        UclaRomsRunner(request, service_config)
 
-    assert [c[0] for c in mock_simulation.method_calls] == [
-        "setup",
-        "build",
-        "pre_run",
-        "prepare_launch",
-    ]
-    assert sim_runner.state.status == ExecutionStatus.COMPLETED
-    assert not sim_runner.result.errors
+    mock_from_blueprint.assert_called_once_with(str(blueprint_path))
+
+
+@pytest.mark.usefixtures("login_node", "offline_remote_files")
+def test_worker_main_refusal_leaves_the_step_record_untouched(
+    blueprint_path: Path,
+    working_dir: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """A launch refused outside a scheduler job exits non-zero with its message,
+    and does not replace the step record a prior attempt left in the working
+    directory (as the shutdown of a started runner would).
+    """
+    record_path = working_dir / STEP_RECORD_NAME
+    record_path.write_text("a prior attempt's record")
+    args = ["cstar.applications.ucla_roms", ARG_URI_LONG, str(blueprint_path)]
+
+    with mock.patch.object(sys, "argv", args):
+        return_code = main()
+
+    assert return_code == 1
+    assert "Refusing to launch ROMS" in capsys.readouterr().out
+    assert record_path.read_text() == "a prior attempt's record"
 
 
 def test_runner_init_resume_builds_simulation_from_resume_blueprint(
