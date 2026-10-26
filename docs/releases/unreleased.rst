@@ -65,6 +65,8 @@ Breaking Changes
   - A forge blueprint file saved before this release is not integrity-checked until it is saved again, and its first save stamps a new ``generated_by``.
   - An emitted ``ucla_roms`` blueprint whose recorded producer predates this release lists as ``unverified`` in the catalog's blueprint outputs until its forge entry is run again.
 
+- The bundled forge blueprints ``cson_roms-marbl_v0.1_wio-toy_10procs`` and ``roms-marbl-0.3-default_wio-toy_10procs`` are removed; load ``wio-toy-example``, the same toy domain on the current model spec, instead. (`#835 <https://github.com/CWorthy-ocean/C-Star/pull/835>`_)
+
 
 
 
@@ -478,4 +480,8 @@ Miscellaneous
 - The shipped forge blueprints (bundled, the docs example, the tutorials and the developer walk-throughs) are restamped with the new hash. (`#829 <https://github.com/CWorthy-ocean/C-Star/pull/829>`_)
 - The workplans guide describes which re-entries are checked; the published run manifest 1.5.0 and step record 1.3.0 schemas are regenerated (both unreleased). (`#829 <https://github.com/CWorthy-ocean/C-Star/pull/829>`_)
 - Fixes 7 ``test_log`` unit tests that failed in a full test run whenever the local date differed from the UTC date (evenings in US time zones; never on CI, which runs in UTC). (`#832 <https://github.com/CWorthy-ocean/C-Star/pull/832>`_)
+- New bundled forge blueprint ``wio-toy-example``: the wio-toy domain on ``roms-marbl-0.12-default`` with GLORYS/ERA5 forcing, MARBL and daily restarts, built with the wizard's defaults. (`#835 <https://github.com/CWorthy-ocean/C-Star/pull/835>`_)
+- The bundled ``wio-toy-simple`` blueprint now uses ``roms-marbl-0.12-default`` instead of the archived ``roms-marbl-0.4-default`` and writes daily restarts; its simplified forcing is unchanged. (`#835 <https://github.com/CWorthy-ocean/C-Star/pull/835>`_)
+- The example forge blueprint in the documentation is regenerated on ``roms-marbl-0.12-default``, and the Forge model-spec page says the bundled domains and the example use it. (`#835 <https://github.com/CWorthy-ocean/C-Star/pull/835>`_)
+- The bundled DomainSpecs record ``roms-marbl-0.12-default`` as their model; the wizard never applies this field when you pick a domain, so it only changes what the spec files say. (`#835 <https://github.com/CWorthy-ocean/C-Star/pull/835>`_)
 
