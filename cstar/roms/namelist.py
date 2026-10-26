@@ -1510,6 +1510,17 @@ def namelist_schema_for_ref(
     return last_cls
 
 
+def namelist_schema_named(name: str) -> type[RomsNamelistBase] | None:
+    """The registered namelist schema class called `name`, or `None` when this C-Star has none by that name.
+
+    Reads back a schema recorded by its class name (e.g. ``"RomsNamelistV0_12_0"``),
+    such as the one a compiled ROMS executable was built for.
+    """
+    return next(
+        (cls for _, _, cls in NAMELIST_SCHEMA_REGISTRY if cls.__name__ == name), None
+    )
+
+
 @functools.cache
 def release_ref_for_remote(location: str, checkout_target: str) -> str:
     """Resolve a ucla-roms commit hash to its release tag without a local clone.
