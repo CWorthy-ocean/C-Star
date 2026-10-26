@@ -91,18 +91,10 @@ it is, in a line like this:
 
    Forge blueprint published for downstream steps: ~/cstar/blueprint_runs/forge/.../output/B_roms-marbl-0.12-default_wio-toy_10procs.yaml
 
-``cstar forge run <forge_blueprint.yaml>`` runs the same thing with Forge's
-full option set: regenerate only some inputs, overwrite existing files, tune
-dask, or change the working directory. It also ends by printing that path and
-the command that runs it; on a cluster a second line gives the command that
-submits it:
+Note that ``cstar blueprint run`` will run the application on the machine or node you call it from: perfect for a laptop.
+If you wanted to run the example from a HPC login node, where you have limited resources available, you can use ``cstar blueprint submit``
+to send the job to the HPC's SLURM scheduler for execution on a compute node instead.
 
-.. code-block:: text
-
-   Run it with:      cstar blueprint run <path>
-   On this cluster:  cstar blueprint submit <path>
-
-See :doc:`../applications/forge/blueprint`.
 
 3. Run the simulation
 ---------------------
