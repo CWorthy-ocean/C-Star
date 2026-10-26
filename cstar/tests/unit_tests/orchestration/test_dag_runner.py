@@ -14,12 +14,14 @@ from unittest import mock
 import pytest
 import yaml
 
+from cstar.applications.core import get_application
 from cstar.applications.hello_world import HelloWorldBlueprint
 from cstar.applications.ucla_roms.models import UclaRomsBlueprint
 from cstar.base.env import ENV_CSTAR_RUNID, ENV_CSTAR_STATE_HOME, FLAG_ON
 from cstar.base.exceptions import CstarError, CstarExpectationFailed
 from cstar.base.feature import ENV_FF_ORCH_TRX_TIMESPLIT, ENV_FF_ORCH_TRX_TIMESPLIT_FREQ
 from cstar.base.utils import slugify
+from cstar.cli.workplan.run import migrate_steps
 from cstar.entrypoint.utils import ARG_CLOBBER, ARG_PRE_RUN, ARG_RUN_ID
 from cstar.execution.file_system import (
     DirectoryManager,
@@ -1695,10 +1697,20 @@ def _hello_step(blueprint: t.Any, name: str, **kwargs: t.Any) -> Step:
 
 
 def _recorded(
-    run_id: str, hashes: t.Mapping[str, str], *, now: datetime | None = None
+    run_id: str,
+    hashes: t.Mapping[str, str],
+    *,
+    now: datetime | None = None,
+    schema_versions: t.Mapping[str, str] | None = None,
+    application: str = "hello_world",
 ) -> RunManifest:
-    """Build a `RunManifest` recording the given definition hash for each step."""
+    """Build a `RunManifest` recording the given definition hash for each step.
+
+    A step named in `schema_versions` also records the schema version of the
+    blueprint its hash was computed from.
+    """
     now = now or datetime(2026, 10, 15, 12, 0, tzinfo=UTC)
+    schema_versions = schema_versions or {}
     return RunManifest(
         run_id=run_id,
         name=run_id,
@@ -1708,9 +1720,10 @@ def _recorded(
         steps=[
             StepEntry(
                 name=name,
-                application="hello_world",
+                application=application,
                 working_dir=f"tasks/{slugify(name)}",
                 definition_hash=definition_hash,
+                blueprint_schema_version=schema_versions.get(name, ""),
             )
             for name, definition_hash in hashes.items()
         ],
@@ -2356,6 +2369,279 @@ async def test_restamping_does_not_make_an_older_hash_comparable(
             refuse_edited_done_steps(wp, reread, done, facts, [])
     else:
         refuse_edited_done_steps(wp, reread, done, facts, [])
+
+
+def test_refuse_edited_done_steps_warns_about_a_step_whose_blueprint_changed_major(
+    tmp_path: Path,
+    hello_world_bp_path: Path,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Verify a Done step whose definition differs under the current scheme is not
+    refused when its blueprint's schema major moved since it was recorded (an
+    automatic migration changes the content hashed), and that one warning names it.
+    """
+    wp = _guard_workplan(_hello_step(hello_world_bp_path.as_posix(), "A"))
+    facts = describe_steps(wp, tmp_path)
+    current_major = int(facts["A"].blueprint_schema_version.split(".")[0])
+    recorded = _recorded(
+        "run", {"A": EDITED_HASH}, schema_versions={"A": f"{current_major - 1}.2.0"}
+    )
+
+    with caplog.at_level("WARNING"):
+        refuse_edited_done_steps(wp, recorded, DagStatus({"A": Status.Done}), facts, [])
+
+    (message,) = _warnings(caplog)
+    assert "'A'" in message
+    assert "migrated" in message
+
+
+@pytest.mark.parametrize(
+    "recorded_version",
+    ["1.0.0", "1.9.9", ""],
+    ids=["same-version", "same-major", "unrecorded"],
+)
+def test_refuse_edited_done_steps_refuses_a_changed_hash_within_a_schema_major(
+    tmp_path: Path, hello_world_bp_path: Path, recorded_version: str
+) -> None:
+    """Verify a Done step whose hash differs is still refused when its blueprint's
+    schema major did not move, or no schema version was recorded to compare.
+    """
+    wp = _guard_workplan(_hello_step(hello_world_bp_path.as_posix(), "A"))
+    facts = describe_steps(wp, tmp_path)
+    assert facts["A"].blueprint_schema_version == "1.0.0"
+    recorded = _recorded(
+        "run", {"A": EDITED_HASH}, schema_versions={"A": recorded_version}
+    )
+
+    with pytest.raises(CstarExpectationFailed, match="'A'"):
+        refuse_edited_done_steps(wp, recorded, DagStatus({"A": Status.Done}), facts, [])
+
+
+def test_refuse_edited_done_steps_refuses_an_edit_beside_a_migrated_step(
+    tmp_path: Path, hello_world_bp_path: Path
+) -> None:
+    """Verify a migrated step's warning does not excuse an edit to another step:
+    only the edited step is refused.
+    """
+    wp = _guard_workplan(
+        _hello_step(hello_world_bp_path.as_posix(), "A"),
+        _hello_step(hello_world_bp_path.as_posix(), "B"),
+    )
+    facts = describe_steps(wp, tmp_path)
+    recorded = _recorded(
+        "run",
+        {"A": EDITED_HASH, "B": EDITED_HASH},
+        schema_versions={"A": "0.9.0", "B": "1.0.0"},
+    )
+
+    with pytest.raises(CstarExpectationFailed) as exc_info:
+        refuse_edited_done_steps(
+            wp, recorded, DagStatus({"A": Status.Done, "B": Status.Done}), facts, []
+        )
+
+    assert "'B'" in str(exc_info.value)
+    assert "'A'" not in str(exc_info.value)
+
+
+STALE_STEP = "roms"
+"""The name of the step over the stale blueprint of the migration re-entry tests."""
+
+
+def _author_stale_roms(tmp_path: Path, bp_templates_dir: Path) -> tuple[Path, Path]:
+    """Author a one-step ucla_roms workplan over a copy of a schema 2.1.0 blueprint.
+
+    Returns the path of the workplan, which opens with a comment that
+    re-serializing it would drop, and the path of the blueprint copy.
+    """
+    blueprint = tmp_path / "authored_blueprint.yaml"
+    shutil.copy(bp_templates_dir / "roms_marbl" / "blueprint.2.1.0.yaml", blueprint)
+    wp = _guard_workplan(
+        Step(name=STALE_STEP, application="ucla_roms", blueprint=blueprint.as_posix())
+    )
+    wp_path = tmp_path / "roms_plan.yaml"
+    assert serialize(wp_path, wp)
+    wp_path.write_text(f"# user comment\n{wp_path.read_text()}")
+    return wp_path, blueprint
+
+
+def _migrate(wp_path: Path) -> dict[str, Path]:
+    """Migrate the blueprints of the workplan at `wp_path` as a submit does."""
+    return migrate_steps(wp_path, deserialize(wp_path, Workplan))
+
+
+def _record_pre_migration_run(run_id: str) -> Path:
+    """Record the stale step as Done under the hash a release before the bump left.
+
+    The hash is one no current definition has, recorded beside the schema version
+    of the blueprint it was computed from. Returns the run directory.
+    """
+    output_dir = StateDirectoryManager.data_dir(run_id)
+    output_dir.mkdir(parents=True, exist_ok=True)
+    manifest = _recorded(
+        run_id,
+        {STALE_STEP: EDITED_HASH},
+        schema_versions={STALE_STEP: "2.1.0"},
+        application="ucla_roms",
+    )
+    write_run_manifest(output_dir, manifest)
+    return output_dir
+
+
+async def _reenter_authored(
+    wp_path: Path, run_id: str, sources: t.Mapping[str, Path]
+) -> tuple[Planner, Path, dict[str, StepFacts], t.Any]:
+    """Prepare and schedule the authored workplan over a run whose steps are Done.
+
+    The guard, `describe_steps` and `prepare_workplan` run for real; the
+    environment check, the launcher's state and the orchestrator are stood in for.
+    """
+    done = DagStatus({STALE_STEP: Status.Done})
+    with (
+        mock.patch("cstar.orchestration.dag_runner.check_environment"),
+        mock.patch(
+            "cstar.orchestration.dag_runner.load_run_state",
+            mock.AsyncMock(return_value=done),
+        ),
+        mock.patch("cstar.orchestration.dag_runner.get_orchestrator"),
+        mock.patch("cstar.orchestration.dag_runner.process_plan", mock.AsyncMock()),
+    ):
+        planner, trx_path, facts, carried = await build_dag(
+            wp_path, run_id, blueprint_sources=sources
+        )
+        await run_dag(
+            wp_path,
+            trx_path,
+            run_id,
+            planner,
+            step_facts=facts,
+            carried=carried,
+        )
+    return planner, trx_path, facts, carried
+
+
+def _migration_warnings(caplog: pytest.LogCaptureFixture) -> list[str]:
+    """Return the captured warnings about definitions the guard cannot compare."""
+    return [m for m in _warnings(caplog) if "another C-Star release" in m]
+
+
+@pytest.mark.asyncio
+async def test_reentry_after_blueprint_migration_reuses_done_step(
+    tmp_path: Path,
+    mock_run_id: str,
+    bp_templates_dir: Path,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Verify re-entering a run whose Done step was recorded under a blueprint of
+    an older schema major (the release before the bump hashed the blueprint as
+    authored) does not refuse it, that a warning names the step, and that the
+    step is prepared from the migrated copy while the authored workplan stays as
+    written and the manifest records the new schema version and the definition
+    hash of the authored reference.
+    """
+    wp_path, blueprint = _author_stale_roms(tmp_path, bp_templates_dir)
+    authored = wp_path.read_bytes()
+    output_dir = _record_pre_migration_run(mock_run_id)
+    sources = _migrate(wp_path)
+    assert set(sources) == {STALE_STEP}
+
+    with caplog.at_level("WARNING"):
+        _, trx_path, facts, carried = await _reenter_authored(
+            wp_path, mock_run_id, sources
+        )
+
+    # not refused, and the step is warned about by name
+    (message,) = _migration_warnings(caplog)
+    assert f"'{STALE_STEP}'" in message
+    assert "migrated" in message
+
+    # the Done step is reused: nothing marks it to run again
+    prepared = LiveWorkplan.load(trx_path)
+    assert not prepared.steps[0].clobber
+
+    # the authored workplan and blueprint are as written
+    assert wp_path.read_bytes() == authored
+    assert "schema_version: 2.1.0" in blueprint.read_text()
+
+    # the attempt prepared the migrated copy
+    current = get_application("ucla_roms").schema_version
+    carried_copy = output_dir / carried.carried_blueprints[STALE_STEP]
+    assert f"schema_version: {current}" in carried_copy.read_text()
+
+    # the manifest records the current schema and the authored reference's hash
+    manifest = read_run_manifest(output_dir)
+    assert manifest is not None
+    entry = manifest.step(STALE_STEP)
+    assert entry is not None
+    assert entry.blueprint_schema_version == current
+    assert entry.definition_hash == facts[STALE_STEP].definition_hash
+    assert entry.definition_hash != EDITED_HASH
+    authored_hash = describe_steps(deserialize(wp_path, Workplan), tmp_path, sources)
+    assert entry.definition_hash == authored_hash[STALE_STEP].definition_hash
+    at_copy = _guard_workplan(
+        Step(
+            name=STALE_STEP,
+            application="ucla_roms",
+            blueprint=sources[STALE_STEP].as_posix(),
+        )
+    )
+    by_copy = describe_steps(at_copy, tmp_path)
+    assert by_copy[STALE_STEP].blueprint_schema_version == current
+    assert by_copy[STALE_STEP].definition_hash != entry.definition_hash
+
+
+@pytest.mark.asyncio
+async def test_second_reentry_after_migration_is_compared_again(
+    tmp_path: Path,
+    mock_run_id: str,
+    bp_templates_dir: Path,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Verify once a re-entry recorded the migrated step's definition, the next one
+    raises no warning about it, and an edit to the authored blueprint that
+    survives the migration is refused as an edit to a Done step.
+    """
+    wp_path, blueprint = _author_stale_roms(tmp_path, bp_templates_dir)
+    _record_pre_migration_run(mock_run_id)
+    await _reenter_authored(wp_path, mock_run_id, _migrate(wp_path))
+
+    caplog.clear()
+    with caplog.at_level("WARNING"):
+        await _reenter_authored(wp_path, mock_run_id, _migrate(wp_path))
+    assert not _migration_warnings(caplog)
+
+    # the schema version recorded is the current one, so a major no longer moved
+    blueprint.write_text(
+        blueprint.read_text().replace("n_procs_x: 16", "n_procs_x: 8", 1)
+    )
+    sources = _migrate(wp_path)
+    with pytest.raises(CstarExpectationFailed, match="different definition"):
+        await _reenter_authored(wp_path, mock_run_id, sources)
+
+
+@pytest.mark.asyncio
+async def test_reentry_after_migration_with_user_edit_is_warned(
+    tmp_path: Path,
+    mock_run_id: str,
+    bp_templates_dir: Path,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Verify an edit made to the blueprint while its schema major moved is warned
+    about, not refused: the guard cannot tell the edit from the migration, and
+    names the step so the user can pass the clobber for it.
+    """
+    wp_path, blueprint = _author_stale_roms(tmp_path, bp_templates_dir)
+    blueprint.write_text(
+        blueprint.read_text().replace("n_procs_x: 16", "n_procs_x: 8", 1)
+    )
+    _record_pre_migration_run(mock_run_id)
+    sources = _migrate(wp_path)
+
+    with caplog.at_level("WARNING"):
+        await _reenter_authored(wp_path, mock_run_id, sources)
+
+    (message,) = _migration_warnings(caplog)
+    assert f"'{STALE_STEP}'" in message
+    assert f"{ARG_CLOBBER} <step-name>" in message
 
 
 @pytest.mark.asyncio
