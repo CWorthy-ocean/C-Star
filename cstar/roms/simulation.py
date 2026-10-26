@@ -105,7 +105,7 @@ def _join_workers(n_procs: int) -> int:
 
     The join runs on the node where the model ran and never uses more threads
     than the model had ranks, so a small run on a login node (allowed with
-    `CSTAR_ALLOW_LOGIN_NODE_RUN=1`) does not start `ncjoin`s on a third of a
+    `CSTAR_ALLOW_LOGIN_NODE_RUN=1`) does not start `ncjoin`s on a quarter of a
     large login node's cores.
 
     Parameters
@@ -116,10 +116,10 @@ def _join_workers(n_procs: int) -> int:
     Returns
     -------
     int
-        A third of the CPUs this process may run on (see `cpus_available`),
+        A quarter of the CPUs this process may run on (see `cpus_available`),
         capped at `n_procs`, and at least 1.
     """
-    return max(1, min(cpus_available() // 3, n_procs))
+    return max(1, min(cpus_available() // 4, n_procs))
 
 
 def _ncjoin_wildcard(

@@ -2941,18 +2941,18 @@ class TestProcessingAndExecution:
         ("available", "n_procs", "expected"),
         [
             pytest.param(128, 4, 4, id="capped-by-the-ranks"),
-            pytest.param(12, 64, 4, id="a-third-of-the-cpus"),
-            pytest.param(2, 64, 1, id="at-least-one"),
+            pytest.param(12, 64, 3, id="a-quarter-of-the-cpus"),
+            pytest.param(3, 64, 1, id="at-least-one"),
         ],
     )
-    def test_join_workers_is_a_third_of_the_cpus_up_to_the_rank_count(
+    def test_join_workers_is_a_quarter_of_the_cpus_up_to_the_rank_count(
         self,
         monkeypatch: pytest.MonkeyPatch,
         available: int,
         n_procs: int,
         expected: int,
     ) -> None:
-        """The join pool takes a third of the CPUs the process may use, but no more
+        """The join pool takes a quarter of the CPUs the process may use, but no more
         threads than the model had ranks, and never fewer than one.
         """
         monkeypatch.setattr("cstar.roms.simulation.cpus_available", lambda: available)
@@ -2963,7 +2963,7 @@ class TestProcessingAndExecution:
         ("cores", "expected_workers"),
         [
             pytest.param(128, 6, id="capped-by-the-ranks"),
-            pytest.param(12, 4, id="twelve-cores"),
+            pytest.param(12, 3, id="twelve-cores"),
             pytest.param(2, 1, id="two-cores"),
         ],
     )
