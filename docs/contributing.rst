@@ -77,11 +77,11 @@ for this; a tier is selected by path.
 
 **Tier 3: extended** (``extended/``)
    Not part of the pull request checks. The weekly
-   ``integration_extended.yaml`` workflow runs the suite on both operating
-   systems, Python 3.12 and 3.13, against ucla-roms ``0.12.0`` and
-   ``main``. The ``CSTAR_IT_ROMS_REF`` environment variable overrides the
-   ucla-roms ref of the model spec. Failures are an early warning for
-   upstream changes, not a merge blocker.
+   ``integration_extended.yaml`` workflow runs the suite against ucla-roms
+   ``0.12.0`` and ``main``, on Python 3.12, 3.13 and 3.14 on Ubuntu and on
+   Python 3.14 on macOS. The ``CSTAR_IT_ROMS_REF`` environment variable
+   overrides the ucla-roms ref of the model spec. Failures are an early
+   warning for upstream changes, not a merge blocker.
 
 Running the integration tiers requires ``nccopy`` (from ``libnetcdf``,
 installed with ``environment-laptop.yml``), ``mpirun`` and the compilers
