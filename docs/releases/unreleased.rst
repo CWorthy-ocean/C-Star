@@ -118,6 +118,11 @@ Breaking Changes
   - ``_bgc_avg`` and ``_bgc_dia_avg`` files now hold ``nrpf`` records each instead of one per file.
   - A MARBL run whose ``marbl_config_file`` does not exist now stops at startup; C-Star's templates and bundled specs ship ``marbl_in``.
 
+- C-Star now requires ``roms-tools>=5.3.0,<6`` (previously ``>=5.2.2``); existing environments will upgrade roms-tools. (`#863 <https://github.com/CWorthy-ocean/C-Star/pull/863>`_)
+
+  - River files that Forge generates follow roms-tools 5.3.0's river order (largest first) and keep rivers below the minimum discharge, so ``nriv`` and river IDs can differ from files made with earlier releases.
+
+
 
 New features
 ~~~~~~~~~~~~
@@ -462,6 +467,8 @@ Bug Fixes
 - Launching a workplan under the run-id of a run attached from elsewhere (with ``--run-id``, or derived from the workplan's name) is refused before anything is written, instead of replacing the attached run's tracking. (`#866 <https://github.com/CWorthy-ocean/C-Star/pull/866>`_)
 - A status read (``cstar run status``, ``show``, ``check``, ``promote``) no longer records a local step as Failed when the step finished and exited while the read was in progress. (`#866 <https://github.com/CWorthy-ocean/C-Star/pull/866>`_)
 - Runs made by cstar 0.17 from a ``.yml`` workplan, whose transformed workplan is ``<name>_transformed.yml``, work again with ``cstar run status``, ``show``, ``check``, ``attach``, ``promote`` and ``--resume``, and as cross-run references. (`#866 <https://github.com/CWorthy-ocean/C-Star/pull/866>`_)
+- ``cdr_metrics`` no longer counts CDR carbon in a domain's boundary rows and columns, which double-counted it across nested domains and kept the combined ``closure_residual`` from closing. (`#863 <https://github.com/CWorthy-ocean/C-Star/pull/863>`_)
+- ``nest_ic`` fills child levels below the parent's bottom from the nearest deep-enough parent column instead of repeating the parent's deepest water. (`#863 <https://github.com/CWorthy-ocean/C-Star/pull/863>`_)
 
 
 
