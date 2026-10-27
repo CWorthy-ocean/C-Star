@@ -267,10 +267,26 @@ continued from, or moved as a unit, and lists what it finds:
 - output files and other products that are missing, or whose size changed
   since the step recorded them (add ``--verify`` to compare their content
   too; see :doc:`moving/manifest`);
-- files and symlinks that point at absolute paths, which break when the run
-  is moved;
+- files that name an absolute path elsewhere in your data home, such as
+  another run's output, and symlinks with an absolute target, which break
+  when the run is moved;
 - symlinks whose target no longer exists;
 - steps of the workplan with no directory.
+
+Some findings are listed for information only and never fail the check
+(the exit code stays 0):
+
+- absolute paths that point inside the run itself. The transformed workplan
+  records each step's directory this way, and so do the blueprints a Forge
+  step writes; both are rebased when they are read, so they keep working
+  when the run is moved or copied;
+- symlinks inside a step's cloned codebases (``input/codebases``) whose
+  target does not exist. They come with the codebase: ucla-roms, for one,
+  holds a link to a library that is only there once that library is built,
+  which C-Star never does;
+- symlinks to a place outside the run, steps that are done without a step
+  record, an attempt that has not finished, carried inputs that are gone,
+  and step directories or sentinel files no step accounts for.
 
 Nothing is ever deleted. ``--repair`` rewrites absolute symlinks inside the
 run as relative ones and rebuilds ``gathered_output``; it changes nothing

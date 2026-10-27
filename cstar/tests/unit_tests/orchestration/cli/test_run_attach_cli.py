@@ -157,6 +157,22 @@ def test_attach_writes_nothing_into_the_run(
     assert built.manifest_bytes == manifest
 
 
+def test_the_steps_of_a_copied_run_are_found_in_its_directory(
+    elsewhere: t.Callable[..., BuiltRun],
+) -> None:
+    """Verify the transformed workplan, which names the run's old directory, is
+    rebased onto the copy: its step directories are the steps', not orphans.
+    """
+    built = elsewhere(steps=(STEP, "second"))
+    built.step_dir("second").mkdir(parents=True, exist_ok=True)
+
+    result = invoke("attach", str(built.root))
+
+    assert result.exit_code == 0, result.output
+    assert "no step accounts for" not in result.output
+    assert "Steps without a directory" not in result.output
+
+
 def test_the_path_keeps_its_symlinks(
     elsewhere: t.Callable[..., BuiltRun], tmp_path: Path
 ) -> None:
@@ -570,6 +586,9 @@ def test_verify_reports_a_digest_mismatch_and_still_attaches(
     assert plain.exit_code == 0, plain.output
     assert verified.exit_code == 1
     assert "differs from the record" in verified.output
+    summary = "Compared 1 product(s) with their recorded digest: 0 matched, 1 differed."
+    assert summary in verified.output
+    assert "Compared" not in plain.output
     written = tracked(built.run_id)
     assert written is not None
     assert written.output_path == built.root
@@ -598,6 +617,24 @@ def test_the_authored_workplan_is_the_manifests(
     assert record.trx_workplan_path == built.root / f"{built.run_id}_transformed.yaml"
     stored = yaml.safe_load(tracked_path(built.run_id).read_text())
     assert "workplan_path" not in stored
+
+
+def test_a_yml_transformed_workplan_of_cstar_0_17_is_found(
+    elsewhere: t.Callable[..., BuiltRun],
+) -> None:
+    """Verify a run whose plan 0.17 named `<stem>_transformed.yml` attaches, and
+    its record answers with that plan.
+    """
+    built = elsewhere()
+    plan = built.root / f"{built.run_id}_transformed.yaml"
+    yml = plan.rename(plan.with_suffix(".yml"))
+
+    result = invoke("attach", str(built.root))
+
+    assert result.exit_code == 0, result.output
+    record = tracked(built.run_id)
+    assert record is not None
+    assert record.trx_workplan_path == yml
 
 
 def test_attached_runs_are_known_by_their_run_id(

@@ -4,6 +4,7 @@ import contextlib
 import hashlib
 import os
 import re
+import shlex
 import shutil
 import typing as t
 from datetime import UTC, datetime
@@ -17,7 +18,12 @@ from typer.testing import CliRunner
 from cstar.base.digest import HASH_SCHEME, SHA256_SCHEME
 from cstar.base.exceptions import CstarExpectationFailed
 from cstar.cli.run import app as app_run
-from cstar.cli.run.check import COMMAND_CHECK, format_findings, summarize
+from cstar.cli.run.check import (
+    COMMAND_CHECK,
+    format_findings,
+    format_verification,
+    summarize,
+)
 from cstar.entrypoint.utils import (
     ARG_ALL,
     ARG_NO_REFRESH,
@@ -46,7 +52,7 @@ from cstar.orchestration.manifest import (
     write_step_record,
 )
 from cstar.orchestration.models import BlueprintIdentity
-from cstar.orchestration.run_check import check_run
+from cstar.orchestration.run_check import DigestTally, check_run
 from cstar.orchestration.tracking import (
     KEY_RUN_UUID,
     Access,
@@ -71,7 +77,7 @@ EXIT_FINDINGS: t.Final[int] = 1
 EXIT_BAD_ARGS: t.Final[int] = 2
 
 HEADINGS: t.Final[tuple[str, ...]] = (
-    "Absolute paths in run files (",
+    "Absolute paths outside the run in run files (",
     f"Symlinks with an absolute target inside the run (fixed by {ARG_REPAIR}) (",
     "Symlinks whose target does not exist (",
     "Steps without a directory (",
@@ -79,7 +85,9 @@ HEADINGS: t.Final[tuple[str, ...]] = (
     "Products whose size differs from the record (",
     f"Products whose content differs from the recorded digest ({ARG_VERIFY}) (",
     "Carried inputs whose content differs from the manifest (",
+    "Absolute paths inside the run in run files (informational) (",
     "Symlinks with a target outside the run (informational) (",
+    "Symlinks in cloned codebases whose target does not exist (informational) (",
     "Steps that are done without a step record (informational) (",
     "Latest attempt not finished (informational) (",
     "Carried inputs missing from the run (informational) (",
@@ -254,8 +262,13 @@ def test_a_run_id_reports_every_kind_of_finding(run: FakeRun) -> None:
     assert f"  {run.root}/{RUN_MANIFEST_NAME}\n" in result.stdout
     assert f"  {edited}: {carried_digest(edited)}\n" in result.stdout
     assert f"  {run.root}/{older.directory}\n" in result.stdout
+    assert (
+        f"  {run.spin_up}/input/codebases/roms/.libs/lib.la -> ../lib.la\n"
+        in result.stdout
+    )
+    # seven paths into the run itself and the codebase's link join the six
     assert re.search(
-        rf"\d+ problem\(s\) found in {re.escape(str(run.root))}, 6 informational",
+        rf"\d+ problem\(s\) found in {re.escape(str(run.root))}, 14 informational",
         result.stdout,
     )
     assert "Skipped" not in result.stdout
@@ -277,7 +290,7 @@ def test_a_directory_is_checked_without_the_run_record(
         assert f"  {run.root}/tasks/run\n" in result.stdout
         assert f"  {run.root}/tasks/stale\n" in result.stdout
         assert "Sentinel files" not in result.stdout
-        assert "Skipped orphaned sentinels: they are found by run-id" in result.stdout
+        assert "Skipped orphaned sentinels: sentinel files live in" in result.stdout
     assert absolute.stdout == relative.stdout
 
 
@@ -372,6 +385,41 @@ def test_repair_rebuilds_gathered_output_even_when_no_link_needed_fixing(
     assert "No symlink to rewrite." in result.stdout
     assert f"Rebuilt {gathered} with 2 link(s)." in result.stdout
     assert sorted(p.name for p in gathered.iterdir()) == ["a.nc", "result.yaml"]
+
+
+def test_a_repair_that_cannot_write_exits_1_without_a_traceback(run: FakeRun) -> None:
+    """Verify a file system error while rewriting symlinks is one line and exit 1."""
+    with mock.patch(
+        "cstar.cli.run.check.repair_symlinks",
+        side_effect=PermissionError("read-only file system"),
+    ):
+        result = invoke(str(run.root), ARG_REPAIR)
+
+    assert result.exit_code == EXIT_FINDINGS, result.output
+    assert isinstance(result.exception, SystemExit)
+    assert result.stderr.strip() == "Symlink repair stopped: read-only file system"
+
+
+def test_a_gather_that_fails_names_the_command_to_rerun(run: FakeRun) -> None:
+    """Verify a `gathered_output` that cannot be rebuilt is one line, exit 1, and says
+    which command to rerun.
+    """
+    handle = shlex.quote(str(run.root))
+
+    with mock.patch(
+        "cstar.cli.workplan.gather.shutil.rmtree",
+        side_effect=PermissionError("directory not empty"),
+    ):
+        result = invoke(str(run.root), ARG_REPAIR)
+
+    assert result.exit_code == EXIT_FINDINGS, result.output
+    assert isinstance(result.exception, SystemExit)
+    message = result.stderr.strip()
+    assert "\n" not in message
+    assert message == (
+        "`gathered_output` was not rebuilt (once the cause is fixed, rerun "
+        f"`cstar run {COMMAND_CHECK} {handle} {ARG_REPAIR}`): directory not empty"
+    )
 
 
 def test_repair_without_a_workplan_leaves_gathered_output_alone(tmp_path: Path) -> None:
@@ -532,6 +580,22 @@ def test_a_directory_with_two_transformed_workplans_is_ambiguous(
     assert "more than one transformed workplan" in flatten_cli_output(result.stderr)
 
 
+def test_a_directory_with_a_yml_transformed_workplan_is_checked_against_it(
+    run: FakeRun,
+) -> None:
+    """Verify the plan a 0.17 run wrote for a `.yml` workplan is found, loaded for
+    the checks that need it and scanned for absolute paths, as a `.yaml` one is.
+    """
+    yml = run.trx_path.rename(run.trx_path.with_suffix(".yml"))
+
+    result = invoke(str(run.root))
+
+    assert result.exit_code == EXIT_FINDINGS, result.output
+    assert f"{yml}:" in result.stdout
+    assert "Skipped step directories and orphans" not in result.stdout
+    assert f"  {run.root}/tasks/stale\n" in result.stdout
+
+
 def test_a_run_whose_directory_is_gone_suggests_the_path(
     run: FakeRun, flatten_cli_output: t.Callable[[str], str]
 ) -> None:
@@ -606,9 +670,71 @@ def test_verify_compares_content_only_where_a_hash_is_recorded(tmp_path: Path) -
     verified = invoke(str(root), ARG_VERIFY)
 
     assert plain.exit_code == EXIT_CLEAN, plain.output
+    assert "Compared" not in plain.stdout
     assert verified.exit_code == EXIT_FINDINGS, verified.output
     heading = f"Products whose content differs from the recorded digest ({ARG_VERIFY})"
     assert f"{heading} (1):" in verified.stdout
+    summary = (
+        "Compared 1 product(s) with their recorded digest: 0 matched, 1 differed.\n"
+    )
+    assert summary in verified.stdout
+    assert verified.stdout.index(heading) < verified.stdout.index(summary)
+
+
+@pytest.mark.parametrize(
+    ("tally", "line"),
+    [
+        (
+            DigestTally(matched=61),
+            "Compared 61 product(s) with their recorded digest: 61 matched.",
+        ),
+        (
+            DigestTally(matched=2, differed=1),
+            "Compared 3 product(s) with their recorded digest: 2 matched, 1 differed.",
+        ),
+        (
+            DigestTally(no_digest=12),
+            "Compared no product with a recorded digest; skipped 12 with no digest "
+            "recorded.",
+        ),
+        (
+            DigestTally(
+                matched=5, no_digest=1, foreign={"xxh": 1, "blake3": 2}, not_compared=2
+            ),
+            "Compared 5 product(s) with their recorded digest: 5 matched; skipped 1 "
+            "with no digest recorded, 3 recorded with a scheme this build does not "
+            "compute ('blake3', 'xxh'), 2 missing, resized or not a regular file.",
+        ),
+        (DigestTally(), "Compared no product with a recorded digest."),
+    ],
+)
+def test_the_verification_is_said_in_one_line(tally: DigestTally, line: str) -> None:
+    """Verify the line says how many were compared, matched and differed, and
+    how many were skipped and why.
+    """
+    assert format_verification(tally) == line
+
+
+def test_a_dangling_link_in_a_cloned_codebase_alone_exits_zero(tmp_path: Path) -> None:
+    """Verify the libtool link a cloned ucla-roms holds is listed for information
+    and does not fail the check, while the same link in a step's output does.
+    """
+    root = small_run(tmp_path / "small")
+    libs = root / "tasks" / "run" / "input" / "codebases" / "roms" / "NHMG/src/.libs"
+    link(libs / "libnhmg.la", "../libnhmg.la")
+
+    clean = invoke(str(root))
+    link(root / "tasks" / "run" / "output" / "libnhmg.la", "../libnhmg.la")
+    failed = invoke(str(root))
+
+    assert clean.exit_code == EXIT_CLEAN, clean.output
+    heading = (
+        "Symlinks in cloned codebases whose target does not exist (informational) (1):"
+    )
+    assert heading in clean.stdout
+    assert f"No problems found in {root}, 1 informational." in clean.stdout
+    assert failed.exit_code == EXIT_FINDINGS, failed.output
+    assert "Symlinks whose target does not exist (1):" in failed.stdout
 
 
 def test_verify_says_when_no_product_records_a_digest(tmp_path: Path) -> None:
@@ -620,7 +746,10 @@ def test_verify_says_when_no_product_records_a_digest(tmp_path: Path) -> None:
     result = invoke(str(root), ARG_VERIFY)
 
     assert result.exit_code == EXIT_CLEAN, result.output
-    assert "Skipped digest verification: no product records a digest" in result.stdout
+    assert (
+        "Compared no product with a recorded digest; skipped 1 with no digest "
+        "recorded.\n"
+    ) in result.stdout
 
 
 def test_informational_manifest_findings_alone_exit_zero(tmp_path: Path) -> None:
@@ -867,10 +996,10 @@ def test_an_untracked_run_is_checked_as_its_directory(
         built.run_id if handle == "run-id" else run_uri(built.uuid), record=None
     )
 
-    # the transformed workplan names the run's own directories, which is a finding
-    assert result.exit_code == EXIT_FINDINGS, result.output
-    assert f"problem(s) found in {built.root}" in result.stdout
-    assert "Skipped orphaned sentinels: they are found by run-id" in result.stdout
+    # the transformed workplan names the run's own directories: informational
+    assert result.exit_code == EXIT_CLEAN, result.output
+    assert f"No problems found in {built.root}, " in result.stdout
+    assert "Skipped orphaned sentinels: sentinel files live in" in result.stdout
     refresh.status.assert_not_called()
     refresh.refresh.assert_not_called()
     assert built.manifest_bytes == before
@@ -884,8 +1013,8 @@ def test_a_run_in_the_project_area_is_checked_by_its_uuid(
 
     result = invoke(run_uri(built.uuid), record=None)
 
-    assert result.exit_code == EXIT_FINDINGS, result.output
-    assert f"problem(s) found in {built.root}" in result.stdout
+    assert result.exit_code == EXIT_CLEAN, result.output
+    assert f"No problems found in {built.root}, " in result.stdout
     refresh.refresh.assert_not_called()
 
 
@@ -993,7 +1122,7 @@ def test_repair_still_repairs_a_directory_the_user_names(
 
     result = invoke(str(built.root), ARG_REPAIR)
 
-    assert result.exit_code == EXIT_FINDINGS, result.output
+    assert result.exit_code == EXIT_CLEAN, result.output
     assert "Rewrote 1 symlink(s) as relative:" in result.stdout
     assert os.readlink(absolute) == "../output/a.nc"
 
@@ -1066,7 +1195,7 @@ def test_an_attached_run_is_checked_as_its_directory_and_not_refreshed(
 
     assert checked.exit_code == EXIT_FINDINGS, checked.output
     assert "Symlinks with an absolute target inside the run" in checked.stdout
-    assert repaired.exit_code == EXIT_FINDINGS, repaired.output
+    assert repaired.exit_code == EXIT_CLEAN, repaired.output
     assert "Rewrote 1 symlink(s) as relative:" in repaired.stdout
     assert os.readlink(absolute) == "../output/a.nc"
     refresh.status.assert_not_called()
@@ -1084,8 +1213,8 @@ def test_an_attached_run_by_uuid_is_checked_as_its_directory(
     ):
         result = invoke(run_uri(colleague_run.uuid), record=None)
 
-    assert result.exit_code == EXIT_FINDINGS, result.output
-    assert f"problem(s) found in {colleague_run.root}" in result.stdout
+    assert result.exit_code == EXIT_CLEAN, result.output
+    assert f"No problems found in {colleague_run.root}, " in result.stdout
     refresh.refresh.assert_not_called()
 
 
@@ -1292,8 +1421,8 @@ def test_record_digests_refuses_a_run_attached_read_only(
 def test_record_digests_accepts_a_run_attached_and_owned(
     colleague_run: BuiltRun,
 ) -> None:
-    """Verify an owned attached run takes digests; the absolute paths a built run
-    holds still fail its check.
+    """Verify an owned attached run takes digests, and the absolute paths a built
+    run holds into itself do not fail its check.
     """
     add_product(colleague_run, "output/run.log")
 
@@ -1303,7 +1432,7 @@ def test_record_digests_accepts_a_run_attached_and_owned(
         record=attached_record(colleague_run, Access.owned),
     )
 
-    assert result.exit_code == EXIT_FINDINGS, result.output
+    assert result.exit_code == EXIT_CLEAN, result.output
     assert "Recorded 1 digest(s)." in result.stdout
     line_hash = hashlib.sha256(b"line\n").hexdigest()
     assert recorded_digests(colleague_run.root) == [f"{SHA256_SCHEME}:{line_hash}"]
@@ -1370,10 +1499,12 @@ def test_record_digests_in_a_named_directory_is_verified_afterwards(
     both = invoke(str(root), ARG_RECORD_DIGESTS, ARG_VERIFY)
     after = invoke(str(root), ARG_VERIFY)
 
-    assert "Skipped digest verification" in before.stdout
+    assert "Compared no product with a recorded digest; skipped 2" in before.stdout
     assert both.exit_code == EXIT_CLEAN, both.output
     assert "Recorded 2 digest(s)." in both.stdout
-    assert "Skipped digest verification" not in both.stdout
+    summary = "Compared 2 product(s) with their recorded digest: 2 matched.\n"
+    assert summary in both.stdout
+    assert summary in after.stdout
     digests = recorded_digests(root)
     assert digests[0].startswith(f"{HASH_SCHEME}:")
     assert digests[1].startswith(f"{SHA256_SCHEME}:")
@@ -1395,3 +1526,21 @@ def test_record_digests_without_a_manifest_says_so(tmp_path: Path) -> None:
     assert result.exit_code == EXIT_FINDINGS, result.output
     assert "no readable run manifest" in result.stderr
     assert "Recorded" not in result.stdout
+
+
+def test_record_digests_that_cannot_write_exits_1_without_a_traceback(
+    tmp_path: Path,
+) -> None:
+    """Verify a file system error while recording digests is one line and exit 1."""
+    root = small_run(tmp_path / "small")
+    write_manifest(root, entry("run", "tasks/run", product("output/x.yaml", size=17)))
+
+    with mock.patch(
+        "cstar.cli.run.check.record_product_digests",
+        side_effect=OSError("disk quota exceeded"),
+    ):
+        result = invoke(str(root), ARG_RECORD_DIGESTS)
+
+    assert result.exit_code == EXIT_FINDINGS, result.output
+    assert isinstance(result.exception, SystemExit)
+    assert result.stderr.strip() == "No digest recorded: disk quota exceeded"

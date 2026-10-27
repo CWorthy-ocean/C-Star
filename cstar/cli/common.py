@@ -6,6 +6,7 @@ import sys
 import typing as t
 import warnings
 from collections.abc import Callable
+from contextlib import contextmanager
 from importlib.metadata import PackageNotFoundError
 from importlib.metadata import version as _pkg_version
 from pathlib import Path
@@ -23,7 +24,11 @@ from cstar.base.env import (
     get_env_item,
     load_user_config,
 )
-from cstar.base.exceptions import CstarExpectationFailed, CstarUserConfigError
+from cstar.base.exceptions import (
+    CstarError,
+    CstarExpectationFailed,
+    CstarUserConfigError,
+)
 from cstar.base.feature import is_flag_enabled
 from cstar.base.log import LogLevelChoices, get_logger, reset_log_level
 from cstar.base.utils import slugify
@@ -63,6 +68,8 @@ from cstar.system.migration import (
 )
 
 if t.TYPE_CHECKING:
+    from collections.abc import Iterator
+
     from pydantic import BaseModel
 
 app = typer.Typer()
@@ -291,6 +298,31 @@ def exit_on_refused_settings() -> None:
         )
         typer.echo(msg, err=True)
         raise typer.Exit(2)
+
+
+@contextmanager
+def exit_on_failure(prefix: str = "Error") -> "Iterator[None]":
+    """Turn a failed operation into a one-line message and exit code 1.
+
+    A `typer.BadParameter` or `typer.Exit` raised inside passes through, so a
+    refusal keeps its own exit code.
+
+    Parameters
+    ----------
+    prefix : str
+        What the message opens with, before the exception's text.
+
+    Raises
+    ------
+    typer.Exit
+        With code 1 when a `CstarError`, `CstarExpectationFailed` or `OSError` is
+        raised inside; the message is printed to stderr.
+    """
+    try:
+        yield
+    except (CstarError, CstarExpectationFailed, OSError) as ex:
+        typer.echo(f"{prefix}: {ex}", err=True)
+        raise typer.Exit(1) from ex
 
 
 P = t.ParamSpec("P")

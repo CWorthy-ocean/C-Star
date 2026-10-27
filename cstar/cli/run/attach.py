@@ -40,12 +40,12 @@ from cstar.orchestration.index import (
 )
 from cstar.orchestration.manifest import (
     RunManifest,
+    find_transformed_workplan,
     fold_step_records,
     read_run_manifest,
 )
 from cstar.orchestration.orchestration import LiveWorkplan, ProcessHandle, Status
 from cstar.orchestration.run_check import (
-    TRANSFORMED_WORKPLAN_GLOB,
     FindingKind,
     check_run,
 )
@@ -87,7 +87,8 @@ step records list that is missing, or whose size differs, shows that the
 transfer is incomplete: the run is not attached and the command exits with
 code 1. Any other problem is listed and the run is attached all the same, with
 exit code 1: {ARG_VERIFY} also compares the content of each product that
-records a digest, and a mismatch is such a problem. Nothing is repaired or
+records a digest, says in one line how many matched, and a mismatch is such a
+problem. Nothing is repaired or
 recorded: `cstar run check <run-id> {ARG_REPAIR}` and `--record-digests` do
 that.
 
@@ -250,18 +251,14 @@ def _read_run(root: Path) -> tuple[RunManifest, Path]:
 
     fold_step_records(manifest, root, tolerant=True)
 
-    found = sorted(root.glob(TRANSFORMED_WORKPLAN_GLOB))
-    if len(found) == 1:
-        return manifest, found[0]
-    if not found:
+    try:
+        found = find_transformed_workplan(root, manifest.workplan_path)
+    except CstarError as ex:
+        raise typer.BadParameter(str(ex)) from ex
+    if found is None:
         msg = f"Run {manifest.run_id!r} at {root} holds no transformed workplan"
-    else:
-        names = ", ".join(path.name for path in found)
-        msg = (
-            f"Run {manifest.run_id!r} at {root} holds more than one transformed "
-            f"workplan ({names}); remove the stale ones."
-        )
-    raise typer.BadParameter(msg)
+        raise typer.BadParameter(msg)
+    return manifest, found
 
 
 def _tracked_as(tracked: WorkplanRun) -> str:
@@ -476,7 +473,8 @@ def attach(
     tracked = TrackingRepository().get_workplan_run_sync(run_id)
     plan = _plan(tracked, manifest, root, mode=mode, explicit=own or read_only)
 
-    workplan = try_deserialize(trx, LiveWorkplan)
+    # rebased onto the copy, so its steps are found in this directory
+    workplan = LiveWorkplan.try_load(trx, tolerant=True)
     if workplan is None:
         typer.echo(f"Warning: unable to load the transformed workplan {trx}", err=True)
 

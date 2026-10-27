@@ -99,7 +99,12 @@ from cstar.roms.namelist import (
     namelist_schema_named,
 )
 from cstar.roms.outputs import EXTRACT_ROOT_NAME, OUTPUT_ROOT_NAME
-from cstar.roms.precheck import applies_to, check_output_streams_divide_rst
+from cstar.roms.precheck import (
+    applies_to,
+    averages_end_on_marbl_step_applies_to_schema,
+    check_averages_end_on_marbl_step,
+    check_output_streams_divide_rst,
+)
 from cstar.simulation import Simulation
 from cstar.system.manager import DOCS_MACHINES_URL, get_sysmgr, warn_once
 from cstar.system.scheduler import in_scheduler_job
@@ -1074,9 +1079,14 @@ class ROMSSimulation(Simulation):
         # applies_to (the precheck landed in ucla-roms 0.5.0) -- gated on
         # `nml`'s own concrete type rather than `schema` (which selected it),
         # since `nml` may have been reassigned to a fresh, still-same-type
-        # instance by the override merge above.
+        # instance by the override merge above. Beside it runs the MARBL-step
+        # rule for the averaged `_cdr` and `_bgc_dia_avg` streams (ucla-roms >=
+        # 0.13.0's check_avg_ends_on_marbl_step), gated the same way.
+        cppdefs = self._active_cppdefs_for_precheck()
         if applies_to(type(nml)):
-            check_output_streams_divide_rst(nml, self._active_cppdefs_for_precheck())
+            check_output_streams_divide_rst(nml, cppdefs)
+        if averages_end_on_marbl_step_applies_to_schema(type(nml)):
+            check_averages_end_on_marbl_step(nml, cppdefs)
 
         return nml
 

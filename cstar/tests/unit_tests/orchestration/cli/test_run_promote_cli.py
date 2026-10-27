@@ -18,6 +18,7 @@ from typer.testing import CliRunner
 from cstar.base.env import ENV_CSTAR_PROJECT_HOME
 from cstar.base.exceptions import CstarError
 from cstar.cli.run import app as app_run
+from cstar.execution.file_system import StateDirectoryManager
 from cstar.orchestration.index import run_uri
 from cstar.orchestration.manifest import (
     STEP_RECORD_NAME,
@@ -26,12 +27,19 @@ from cstar.orchestration.manifest import (
     StepRecord,
     read_run_manifest,
     read_step_record,
+    transformed_workplans,
     write_run_manifest,
     write_step_record,
 )
 from cstar.orchestration.models import BlueprintIdentity
 from cstar.orchestration.orchestration import ProcessHandle, Status
-from cstar.orchestration.run_check import Finding, FindingKind, RunCheckReport
+from cstar.orchestration.promotion import staging_dir
+from cstar.orchestration.run_check import (
+    Finding,
+    FindingKind,
+    RunCheckReport,
+    recorded_run_root,
+)
 from cstar.orchestration.serialization import serialize
 from cstar.orchestration.state import StateRepository
 from cstar.orchestration.tracking import Access, TrackingRepository, WorkplanRun
@@ -358,6 +366,24 @@ def test_a_copy_still_leaves_a_stray_file_behind(
     ).exists()
 
 
+def test_a_yml_transformed_workplan_of_cstar_0_17_is_copied(
+    elsewhere: t.Callable[..., BuiltRun], project_runs: Path
+) -> None:
+    """Verify an untracked run whose plan 0.17 named `<stem>_transformed.yml` is
+    promoted with it, and the copy is found by its directory.
+    """
+    built = elsewhere()
+    plan = built.root / f"{built.run_id}_transformed.yaml"
+    yml = plan.rename(plan.with_suffix(".yml"))
+
+    result = invoke("promote", str(built.root))
+
+    assert result.exit_code == 0, result.output + result.stderr
+    destination = project_runs / built.run_id
+    assert (destination / yml.name).is_file()
+    assert not (destination / plan.name).exists()
+
+
 def test_a_second_transformed_workplan_is_refused_before_the_copy(
     elsewhere: t.Callable[..., BuiltRun],
     project_runs: Path,
@@ -653,6 +679,9 @@ def test_verify_records_digests_in_the_copy_only(
 
     assert result.exit_code == 0, result.output + result.stderr
     assert "Recorded 1 digest(s)" in result.output
+    assert (
+        "Compared 1 product(s) with their recorded digest: 1 matched." in result.output
+    )
     copied = read_step_record(project_runs / built.run_id / "tasks" / "spin-up")
     assert copied is not None
     assert copied.products[0].digest.startswith("sha256:")
@@ -692,7 +721,9 @@ def test_absolute_paths_are_not_problems_of_the_copy(
     monkeypatch: pytest.MonkeyPatch,
     flatten_cli_output: t.Callable[[str], str],
 ) -> None:
-    """Verify the source's absolute paths, found in the copy, do not make a promotion fail."""
+    """Verify the source's absolute paths outside the run, found in the copy, do
+    not make a promotion fail.
+    """
     built = elsewhere()
 
     def inherited(run_root: Path, **_: t.Any) -> RunCheckReport:
@@ -706,8 +737,39 @@ def test_absolute_paths_are_not_problems_of_the_copy(
     result = invoke("promote", str(built.root), "--mode", "move")
 
     assert result.exit_code == 0, result.output + result.stderr
-    assert "/old/root" in flatten_cli_output(result.output)
+    output = flatten_cli_output(result.output)
+    assert "/old/root" in output
+    assert "1 inherited from the source." in output
+    assert "problem(s) found" not in output
     assert not built.root.exists()
+
+
+def test_paths_into_the_source_are_informational_in_the_copy(
+    elsewhere: t.Callable[..., BuiltRun], project_runs: Path
+) -> None:
+    """Verify a run in the data home, whose transformed workplan names its own
+    step directories, promotes cleanly: the copy lists those paths for
+    information, by the rule `cstar run check` applies in place.
+    """
+    built = elsewhere()
+    source = StateDirectoryManager.workplan_runs_dir() / built.run_id
+    shutil.copytree(built.root, source, symlinks=True)
+    # as if the workplan had been transformed there
+    recorded = recorded_run_root(source)
+    assert recorded is not None
+    for trx in transformed_workplans(source):
+        trx.write_text(trx.read_text().replace(str(recorded), str(source)))
+
+    in_place = invoke("check", str(source))
+    result = invoke("promote", str(source))
+
+    heading = "Absolute paths inside the run in run files (informational)"
+    assert in_place.exit_code == 0, in_place.output
+    assert heading in in_place.output
+    assert result.exit_code == 0, result.output + result.stderr
+    assert heading in result.output
+    assert f"No problems found in {project_runs / built.run_id}, " in result.output
+    assert "inherited from the source" not in result.output
 
 
 def test_gathered_output_is_rebuilt_in_the_copy(
@@ -726,6 +788,103 @@ def test_gathered_output_is_rebuilt_in_the_copy(
     link = destination / "gathered_output" / "only.dat"
     assert link.is_symlink()
     assert link.resolve() == (destination / "tasks" / "spin-up" / PRODUCT).resolve()
+
+
+def test_a_failed_copy_exits_1_and_leaves_nothing(
+    elsewhere: t.Callable[..., BuiltRun],
+    project_runs: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Verify a file system error while copying is one line and exit 1, not a traceback."""
+    built = elsewhere()
+    destination = project_runs / built.run_id
+
+    def refuse(source: Path, target: Path) -> t.NoReturn:
+        raise OSError("no space left on device")
+
+    monkeypatch.setattr("cstar.orchestration.promotion._copy_file", refuse)
+
+    result = invoke("promote", str(built.root))
+
+    assert result.exit_code == 1
+    assert isinstance(result.exception, SystemExit)
+    message = result.stderr.strip()
+    assert message == "Error: no space left on device"
+    assert not destination.exists()
+    assert not staging_dir(destination).exists()
+
+
+@pytest.mark.parametrize("extra", [[], ["--dry-run"]])
+def test_a_step_directory_outside_the_run_exits_1(
+    elsewhere: t.Callable[..., BuiltRun],
+    project_runs: Path,
+    flatten_cli_output: t.Callable[[str], str],
+    extra: list[str],
+) -> None:
+    """Verify a manifest that records an absolute step directory is one line and exit 1."""
+    built = elsewhere()
+    manifest = read_run_manifest(built.root)
+    assert manifest is not None
+    manifest.steps[0].working_dir = str(built.step_dir(STEP))
+    write_run_manifest(built.root, manifest)
+
+    result = invoke("promote", str(built.root), *extra)
+
+    assert result.exit_code == 1, result.output + result.stderr
+    assert isinstance(result.exception, SystemExit)
+    message = flatten_cli_output(result.stderr)
+    assert message.startswith("Error: The path ")
+    assert "leaves the run directory" in message
+    assert "\n" not in result.stderr.strip()
+    assert not project_runs.exists()
+
+
+def test_a_failure_after_the_copy_says_where_the_copy_is(
+    elsewhere: t.Callable[..., BuiltRun],
+    project_runs: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    flatten_cli_output: t.Callable[[str], str],
+) -> None:
+    """Verify an error after the copy was renamed into place names the copy, exit 1."""
+    built = elsewhere()
+    (built.root / "gathered_output").mkdir()
+    destination = project_runs / built.run_id
+
+    def refuse(*args: t.Any, **kwargs: t.Any) -> t.NoReturn:
+        raise OSError("permission denied")
+
+    monkeypatch.setattr("cstar.cli.run.promote._regather", refuse)
+
+    result = invoke("promote", str(built.root))
+
+    assert result.exit_code == 1
+    assert isinstance(result.exception, SystemExit)
+    message = flatten_cli_output(result.stderr)
+    assert message == (
+        f"Copied to {destination}, but the promotion did not finish: permission denied"
+    )
+    assert destination.is_dir()
+    assert built.root.is_dir()
+
+
+def test_a_link_that_cannot_be_made_exits_1(
+    elsewhere: t.Callable[..., BuiltRun],
+    project_runs: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Verify a file system error while linking is one line and exit 1, not a traceback."""
+    built = elsewhere()
+
+    def refuse(*args: t.Any, **kwargs: t.Any) -> t.NoReturn:
+        raise PermissionError("read-only file system")
+
+    monkeypatch.setattr("cstar.cli.run.promote.link_run", refuse)
+
+    result = invoke("promote", str(built.root), "--mode", "link")
+
+    assert result.exit_code == 1
+    assert isinstance(result.exception, SystemExit)
+    assert result.stderr.strip() == "Error: read-only file system"
 
 
 def test_an_unknown_include_is_refused(
