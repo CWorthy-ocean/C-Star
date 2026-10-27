@@ -348,6 +348,11 @@ New features
   - In a Forge build that is the salinity flux of an SSS restoring forcing; Forge refuses the switch without one.
   - Forge refuses it on earlier releases, which write nothing for it.
 
+- Log levels are accepted in any case wherever C-Star reads one (``--log-level``, ``CSTAR_LOG_LEVEL``, the configuration file), and ``CRITICAL`` is now a level. (`#870 <https://github.com/CWorthy-ocean/C-Star/pull/870>`_)
+
+  - ``cstar env set CSTAR_LOG_LEVEL debug`` stores ``DEBUG``, and refuses a value that is not a log level.
+
+
 
 Bug Fixes
 ~~~~~~~~~
@@ -478,6 +483,17 @@ Bug Fixes
 
 - ``cstar run promote`` no longer prints "N problem(s) found" for a healthy copy: the source's paths into itself are informational, and any other absolute path the copy inherited is counted as "inherited from the source", matching the exit code. (`#864 <https://github.com/CWorthy-ocean/C-Star/pull/864>`_)
 - ``cstar run check`` no longer counts the dangling link a cloned ucla-roms holds (``NHMG/src/.libs/libnhmg.la``) as a problem: dangling links inside a step's cloned codebases are informational. (`#864 <https://github.com/CWorthy-ocean/C-Star/pull/864>`_)
+- A ``CSTAR_LOG_LEVEL`` set in the configuration file now applies to every ``cstar`` command, not only the four that take ``--log-level``. (`#870 <https://github.com/CWorthy-ocean/C-Star/pull/870>`_)
+- An unknown ``CSTAR_LOG_LEVEL`` no longer makes every ``cstar`` command fail, ``cstar --help`` included. (`#870 <https://github.com/CWorthy-ocean/C-Star/pull/870>`_)
+
+  - Exported, it prints one warning and logs at ``INFO``; in the configuration file, the line is skipped with the reason.
+  - ``cstar init`` keeps such a line apart under that reason instead of rewriting it as a setting and reporting it as set.
+
+- ``cstar env show`` reports the directories C-Star actually uses, and its ``--display export`` output is a script you can source. (`#870 <https://github.com/CWorthy-ocean/C-Star/pull/870>`_)
+
+  - The cache, config, data and state homes show the ``cstar`` directory under ``XDG_*_HOME`` or scratch, not the directory it is derived from.
+  - Export lines no longer wrap when piped, values are shell-quoted, and settings at their default or empty are commented out.
+
 
 
 
@@ -591,6 +607,7 @@ Improvements
 - ``--verify`` on ``cstar run check``, ``cstar run attach`` and ``cstar run promote`` prints one line saying how many products were compared, matched and differed, and how many were skipped and why. (`#864 <https://github.com/CWorthy-ocean/C-Star/pull/864>`_)
 - ``cstar run promote`` classifies the copy's absolute paths by the same rule as ``cstar run check``: paths into the source are informational in the copy. (`#864 <https://github.com/CWorthy-ocean/C-Star/pull/864>`_)
 - The note about sentinel files that ``check``, ``attach`` and ``promote`` print for a run checked by its directory now says why there are none to check. (`#864 <https://github.com/CWorthy-ocean/C-Star/pull/864>`_)
+- ``cstar workplan submit --help`` no longer names the deprecated ``run`` alias. (`#870 <https://github.com/CWorthy-ocean/C-Star/pull/870>`_)
 
 
 
@@ -716,5 +733,6 @@ Miscellaneous
 - The run-check findings in the monitoring docs, "Verifying a transfer" and the promote page describe the informational findings and the verification line. (`#864 <https://github.com/CWorthy-ocean/C-Star/pull/864>`_)
 - The nesting tutorial's alkalinity release moved into the current along the child's east boundary, so it crosses into the parent within the day and the run shows the transfer. (`#871 <https://github.com/CWorthy-ocean/C-Star/pull/871>`_)
 - The nesting tutorial now shows a map of the two domains, the combined CDR metrics plot and each domain's CO2 uptake, with reference values from ucla-roms 0.13.0 and roms-tools 5.3.0. (`#871 <https://github.com/CWorthy-ocean/C-Star/pull/871>`_)
+- The configuration page no longer suggests ``cstar env show --display export`` as a starter script; it already points at ``cstar init`` and ``cstar env set``. (`#870 <https://github.com/CWorthy-ocean/C-Star/pull/870>`_)
 
 
