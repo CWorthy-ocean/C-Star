@@ -1141,6 +1141,26 @@ _ADVANCED_CATEGORIES: tuple[tuple[str, tuple[str, ...]], ...] = (
     ),
 )
 
+# Settings shown in the Model card (under the carbonate sensitivities) instead of
+# their Advanced pane: section -> fields. ``_MODEL_CARD`` names the card as a
+# "place" for ``_split_fields``. Display-only like the Output card: each widget stays
+# keyed by its real ``(section, field)``, so overrides, load-back and the "modified"
+# tracking are unaffected.
+_MODEL_CARD = "Model"
+_MODEL_CARD_FIELDS: dict[str, frozenset[str]] = {
+    "cdr_lite": frozenset({"cdr_carbonate_sensitivity_time_interpolation"}),
+}
+
+# Values the wizard puts over the ModelSpec's while the setting's widget is shown,
+# until the user edits it; a fresh session and a model pick seed them, a loaded
+# blueprint keeps its own values. The ModelSpec cannot carry these:
+# check_cdr_lite_sections refuses a carbonate-sensitivity hold outside bgc_mode
+# "cdr_lite". UCLA-ROMS writes the sensitivities time-averaged by default
+# (cdr_gas_exch_output.do_avg), and an averaged record is held, not interpolated.
+_WIZARD_SETTING_DEFAULTS: dict[tuple[str, str], Any] = {
+    ("cdr_lite", "cdr_carbonate_sensitivity_time_interpolation"): False,
+}
+
 # The Output card's placement of the output streams -- the one table the editor build,
 # the card's modified-count chip and the section retitling all read. ``_OUTPUT_CARD``
 # names the card as a "place" for ``_split_fields``; the main streams are always
@@ -1580,7 +1600,7 @@ def _split_fields(
     category_title: str, section: str
 ) -> tuple[frozenset | None, frozenset]:
     """Field filter ``(include, exclude)`` for a section shown in ``category_title``
-    (an Advanced pane title, or :data:`_OUTPUT_CARD`).
+    (an Advanced pane title, :data:`_OUTPUT_CARD` or :data:`_MODEL_CARD`).
 
     ``include=None`` means "all fields"; otherwise only those in ``include`` are
     shown. ``exclude`` is always dropped. Sections split across containers (``bgc`` /
@@ -1588,18 +1608,24 @@ def _split_fields(
     controls in the Output card and the rest under their feature pane. ``cppdefs`` is
     split the same way via :data:`_CPPDEFS_PANE_FIELDS` -- each pane only sees the
     handful of compile-time flags it owns -- and ``param`` shows only
-    :data:`_PARAM_PANE_FIELDS`.
+    :data:`_PARAM_PANE_FIELDS`. The fields of :data:`_MODEL_CARD_FIELDS` show in the
+    Model card only.
     """
-    if section == "cppdefs":
-        return _CPPDEFS_PANE_FIELDS.get(category_title, frozenset()), frozenset()
-    if section == "param":
-        return _PARAM_PANE_FIELDS, frozenset()
+    model_card = _MODEL_CARD_FIELDS.get(section, frozenset())
+    if category_title == _MODEL_CARD:
+        return model_card, frozenset()
+    include: frozenset | None = None
+    exclude: frozenset = frozenset()
     parts = PARTIAL_OUTPUT_SECTIONS.get(section)
-    if parts is None:
-        return None, frozenset()
-    if category_title == _OUTPUT_CARD:
-        return frozenset(parts), frozenset()
-    return None, frozenset(parts)
+    if section == "cppdefs":
+        include = _CPPDEFS_PANE_FIELDS.get(category_title, frozenset())
+    elif section == "param":
+        include = _PARAM_PANE_FIELDS
+    elif parts is not None and category_title == _OUTPUT_CARD:
+        include = frozenset(parts)
+    elif parts is not None:
+        exclude = frozenset(parts)
+    return include, exclude | model_card
 
 
 def _in_output_card(section: str, field: str | None) -> bool:
@@ -1612,6 +1638,13 @@ def _in_output_card(section: str, field: str | None) -> bool:
         return False
     include, exclude = _split_fields(_OUTPUT_CARD, section)
     return (include is None or field in include) and field not in exclude
+
+
+def _in_model_card(section: str, field: str | None) -> bool:
+    """Whether the ``(section, field)`` setting is placed in the Model card (see
+    :data:`_MODEL_CARD_FIELDS`).
+    """
+    return field in _MODEL_CARD_FIELDS.get(section, frozenset())
 
 
 def _output_placement(
@@ -1685,7 +1718,8 @@ class _SettingsEditor:
     """A collapsible (Accordion) editor over the *editable* model_settings sections,
     consolidated into modeler-facing category panes (see :data:`_ADVANCED_CATEGORIES`)
     plus the output streams the Output card shows (``output_box``, see
-    :data:`_OUTPUT_MAIN_SECTIONS`).
+    :data:`_OUTPUT_MAIN_SECTIONS`) and the few settings the Model card shows
+    (``model_box``, see :data:`_MODEL_CARD_FIELDS`).
 
     Each pane groups several namelist sections under a sub-header per section, so the
     grouping reads by ocean-modeling concern (physics, forcing, BGC, CDR)
@@ -1727,7 +1761,8 @@ class _SettingsEditor:
         # (section, field|None) -> (widget, base_type)
         self._widgets: dict[Any, Any] = {}
         # group -> {section: fields built there}. A group is an Advanced pane (by
-        # title) or one of the Output card's two (_OUTPUT_CARD, _OUTPUT_MORE_TITLE); a
+        # title), one of the Output card's two (_OUTPUT_CARD, _OUTPUT_MORE_TITLE) or
+        # the Model card (_MODEL_CARD); a
         # section split along PARTIAL_OUTPUT_SECTIONS (bgc/marbl_bgc) sits in a pane
         # and in the Output card, each holding only its own fields.
         self._group_fields: dict[str, dict[str, list[str | None]]] = {}
@@ -1756,6 +1791,12 @@ class _SettingsEditor:
             W, more_panes, [_OUTPUT_MORE_TITLE] * len(more_panes)
         )
         self.output_box = W.VBox([*main_blocks, self.more_streams])
+        # The Model card's few settings, bare: the card's own subsection titles them.
+        self.model_box = W.VBox(
+            self._build_group(
+                _MODEL_CARD, tuple(_MODEL_CARD_FIELDS), model_settings, headers=False
+            )
+        )
         # Before the on_edit observers attach, so locking one is never an edit.
         for key, why in self._forced_on.items():
             if key in self._widgets:
@@ -1794,10 +1835,13 @@ class _SettingsEditor:
         group: str,
         members: tuple[str, ...],
         model_settings: dict[str, Any],
+        *,
+        headers: bool = True,
     ) -> list[Any]:
         """Header + (note) + widgets blocks for each of ``members`` that has editable
-        fields, flat -- an Advanced pane's (``group`` is its title) or the Output
-        card's children (``group`` is one of :data:`_OUTPUT_GROUPS`).
+        fields, flat -- an Advanced pane's (``group`` is its title), the Output
+        card's children (``group`` is one of :data:`_OUTPUT_GROUPS`) or the Model
+        card's (:data:`_MODEL_CARD`, ``headers=False``: widgets only).
         """
         W = self.W
         place = _OUTPUT_CARD if group in _OUTPUT_GROUPS else group
@@ -1826,6 +1870,9 @@ class _SettingsEditor:
             if not fields:
                 continue
             self._group_fields.setdefault(group, {})[section] = fields
+            if not headers:
+                blocks.append(box)
+                continue
             sec_header = W.HTML(self.header_html(group, section))
             # Widget-level class: the CSS draws a bold divider above every
             # section header except the container's first (:first-child).
@@ -4728,11 +4775,23 @@ class ForgeBlueprintWizard:
                 self.cs_status,
             ]
         )
+        # The time-interpolation switch: the settings editor's own widget (its
+        # model_box), mounted on each editor rebuild, so it shows only where the
+        # ucla-roms release has the switch and the ModelSpec declares it.
+        self.cs_interp_box = W.VBox([])
+        self.cs_interp_note = W.HTML(
+            "<div class='forge-hint' style='margin-bottom:10px'>Leave this off if "
+            "your sensitivity files hold "
+            "time-averaged values; turn it on if they hold instantaneous values. "
+            "UCLA-ROMS writes the sensitivities time-averaged by default "
+            "(<code>wrt_cdr_gas_avg</code>), so the wizard starts with it off.</div>"
+        )
         self.cs_group = components.subsection(
             W,
             "model.carbonate",
             components.field_row(W, "cs_source_dd", self.cs_source_dd),
             self.cs_path_box,
+            self.cs_interp_box,
         )
 
         # --- CDR (Carbon Dioxide Removal) forcing -----------------------------
@@ -5014,6 +5073,9 @@ class ForgeBlueprintWizard:
         self.output_editor_box = W.VBox([])
         # sparse manual overrides layer: (section, field|None) -> value
         self._overrides: dict[Any, Any] = {}
+        # The _WIZARD_SETTING_DEFAULTS keys the wizard still owns: neither edited by
+        # the user nor set by a loaded blueprint (see _seed_wizard_defaults).
+        self._wizard_default_keys = set(_WIZARD_SETTING_DEFAULTS)
         self._syncing = False  # True while pushing composed values into editor widgets
         # Reentrancy depth for _suspend()/_Suspender -- lets a programmatic backfill
         # (e.g. _populate_grid_widgets_from_grid) nest inside an already-suspended
@@ -5710,6 +5772,7 @@ class ForgeBlueprintWizard:
         if getattr(self, "_suspended", False):
             return
         self._overrides = {}
+        self._wizard_default_keys = set(_WIZARD_SETTING_DEFAULTS)
         self.roms_ref.value = self._model_default_roms_ref()
         self.marbl_ref.value = self._model_default_marbl_ref()
         self.bgc_dd.value = self._model_default_bgc_mode()
@@ -5721,7 +5784,21 @@ class ForgeBlueprintWizard:
         if self._syncing or getattr(self, "_suspended", False):
             return
         self._overrides[(section, field)] = self.editor.read(section, field)
+        self._wizard_default_keys.discard((section, field))
         self._rebuild()
+
+    def _seed_wizard_defaults(self) -> None:
+        """Put each wizard-owned :data:`_WIZARD_SETTING_DEFAULTS` value in the
+        overrides layer while the editor shows its widget, and take it out while it
+        does not: the editor builds a widget only where the ucla-roms release has the
+        field, the ModelSpec declares it and the BGC mode reads it, so a default never
+        reaches a blueprint that would refuse it.
+        """
+        for key in self._wizard_default_keys:
+            if self.editor is not None and key in self.editor._widgets:
+                self._overrides[key] = _WIZARD_SETTING_DEFAULTS[key]
+            else:
+                self._overrides.pop(key, None)
 
     def _on_nest_domain(self, _change):
         """Prefill the child grid from a selected DomainSpec (and enable nesting)."""
@@ -7237,6 +7314,8 @@ class ForgeBlueprintWizard:
         """
         # Before any re-resolve below, so the first rebuilt config carries it.
         self._carried_provenance = cfg.provenance
+        # The file's values are the user's: no wizard default goes over them.
+        self._wizard_default_keys = set()
         # The file's own pinned ucla-roms ref selects the schema variant it was
         # authored against -- not the (possibly different) currently-selected
         # model's default. Computed once here and reused below when seeding
@@ -7680,6 +7759,7 @@ class ForgeBlueprintWizard:
         )
         self.editor_box.children = [placeholder]
         self.output_editor_box.children = [placeholder]
+        self.cs_interp_box.children = []
         self.editor = None
         self._editor_key = None
 
@@ -7765,6 +7845,12 @@ class ForgeBlueprintWizard:
             self._editor_key = key
             self.editor_box.children = [self.editor.accordion]
             self.output_editor_box.children = [self.editor.output_box]
+            self.cs_interp_box.children = (
+                [self.editor.model_box, self.cs_interp_note]
+                if _MODEL_CARD in self.editor._group_fields
+                else []
+            )
+        self._seed_wizard_defaults()
 
         active_overrides = self._active_overrides
         effective = _apply_overrides(composed, active_overrides)
@@ -8047,10 +8133,12 @@ class ForgeBlueprintWizard:
             if forcing_modified
             else components.chip("At preset defaults", "def")
         )
-        # Placement, not OutputSpec ownership: the two chips partition the overrides.
+        # Placement, not OutputSpec ownership: the two chips partition the overrides
+        # the Model card does not show.
         active = self._active_overrides
         n_output = sum(1 for key in active if _in_output_card(*key))
-        n_advanced = len(active) - n_output
+        n_model = sum(1 for key in active if _in_model_card(*key))
+        n_advanced = len(active) - n_output - n_model
         chips["output"].value = (
             components.chip(f"● {n_output} modified", "info")
             if n_output

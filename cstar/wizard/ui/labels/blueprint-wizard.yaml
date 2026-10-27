@@ -42,7 +42,7 @@ sections:
   # --- model subsections --------------------------------------------------------
   model.carbonate:
     title: Carbonate sensitivities
-    desc: The carbonate sensitivity files a CDR-lite build reads as surface forcing, supplied at run time by default.
+    desc: The carbonate sensitivity files a CDR-lite build reads as surface forcing, supplied at run time by default, and whether they are interpolated in time.
     required: false
 
   # --- grid subsections -------------------------------------------------------

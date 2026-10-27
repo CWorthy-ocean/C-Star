@@ -37,6 +37,7 @@ from cstar.applications.forge.resolve import build_forge_blueprint, cfl_dt
 from cstar.wizard.wizard import (
     _ACCORDION_EXCLUDED_FIELDS,
     _BOUNDARY_NONE,
+    _MODEL_CARD,
     _OUTPUT_CARD,
     _OUTPUT_MORE_TITLE,
     _OUTPUT_TABLES,
@@ -1655,11 +1656,15 @@ class TestBgcModeSettings:
 
         wiz.bgc_dd.value = "cdr_lite"
 
-        # the user's record keeps all three; only the applicable one is active
-        assert len(wiz._overrides) == 3
-        assert set(wiz._active_overrides) == {("cppdefs", "sponge_tune")}
+        # the user's record keeps all three; only the applicable one is active,
+        # beside the wizard's carbonate-sensitivity default (a Model-card setting)
+        assert len(wiz._overrides) == 4
+        assert set(wiz._active_overrides) == {("cppdefs", "sponge_tune"), _INTERP_KEY}
         assert wiz.config is not None, wiz.derived.value
-        assert wiz.config.composition.overrides == {"cppdefs": {"sponge_tune": True}}
+        assert wiz.config.composition.overrides == {
+            "cppdefs": {"sponge_tune": True},
+            **_INTERP_HOLD,
+        }
         settings = wiz.config.model_settings
         assert settings.get("bgc", {}).get("wrt_his", before) is before
         assert settings["cppdefs"]["nhy_forcing"] is False
@@ -1679,7 +1684,7 @@ class TestBgcModeSettings:
         }
 
         wiz.bgc_dd.value = "cdr_lite"
-        assert wiz.config.composition.overrides == {}
+        assert wiz.config.composition.overrides == _INTERP_HOLD
         wiz.bgc_dd.value = "marbl"
 
         assert wiz.config is not None, wiz.derived.value
@@ -1748,7 +1753,7 @@ class TestBgcModeSettings:
         )
         assert wiz.editor_box.children == (wiz.editor.accordion,)
         assert wiz.output_editor_box.children == (wiz.editor.output_box,)
-        assert wiz.config.composition.overrides == {}
+        assert wiz.config.composition.overrides == _INTERP_HOLD
 
         wiz.bgc_dd.value = "marbl"
         assert wiz.config.composition.overrides == {
@@ -1830,11 +1835,15 @@ class TestBgcModeSettings:
 
         assert any("cdr_output.do_cdr_output=True" in p for p in problems)
         assert any("upscale_output.do_upscale=True" in p for p in problems)
-        assert set(wiz2._active_overrides) == {("cppdefs", "sponge_tune")}
+        # the time-interpolation hold is the file's own value, carried as authored
+        assert set(wiz2._active_overrides) == {("cppdefs", "sponge_tune"), _INTERP_KEY}
         assert wiz2.config is not None, wiz2.derived.value
         assert wiz2.config.model_settings["cdr_output"]["do_cdr_output"] is False
         assert wiz2.config.model_settings["upscale_output"]["do_upscale"] is False
-        assert wiz2.config.composition.overrides == {"cppdefs": {"sponge_tune": True}}
+        assert wiz2.config.composition.overrides == {
+            "cppdefs": {"sponge_tune": True},
+            **_INTERP_HOLD,
+        }
 
     def test_cdr_lite_stream_is_shown_on_without_recording_an_override(self):
         wiz = self._wizard()
@@ -1844,8 +1853,8 @@ class TestBgcModeSettings:
         assert master.value is True
         assert master.disabled is True
         assert _display(wiz.editor._widgets[("cdr_lite_output", "nrpf")][0]) == ""
-        assert wiz._overrides == {}
-        assert wiz.config.composition.overrides == {}
+        assert _LITE_STREAM not in wiz._overrides
+        assert "cdr_lite_output" not in wiz.config.composition.overrides
         # display only: the authored value is what is saved
         assert (
             wiz.config.model_settings["cdr_lite_output"]["do_cdr_lite_output"] is False
@@ -3491,6 +3500,9 @@ def test_settings_editor_builds_only_the_settings_that_apply_in_the_bgc_mode(
 
 
 _INTERP_KEY = ("cdr_lite", "cdr_carbonate_sensitivity_time_interpolation")
+# The wizard's own default for the key in bgc_mode cdr_lite, as composition.overrides
+# records it.
+_INTERP_HOLD = {"cdr_lite": {_INTERP_KEY[1]: False}}
 
 
 @pytest.mark.parametrize(
@@ -3504,8 +3516,9 @@ _INTERP_KEY = ("cdr_lite", "cdr_carbonate_sensitivity_time_interpolation")
 )
 def test_carbonate_sensitivity_time_interpolation_widget(settings_cls, bgc_mode, built):
     """ucla-roms >= 0.12.0 reads the switch only for the file-based carbonate
-    sensitivities of ``bgc_mode: cdr_lite``, so the editor builds it there, in
-    the CDR pane, and nowhere else; an older tier has no such field.
+    sensitivities of ``bgc_mode: cdr_lite``, so the editor builds it there, for
+    the Model card (``model_box``) rather than the CDR pane, and nowhere else; an
+    older tier has no such field.
     """
     import ipywidgets as W
 
@@ -3520,7 +3533,11 @@ def test_carbonate_sensitivity_time_interpolation_widget(settings_cls, bgc_mode,
         assert widget.description == "Interpolate carbonate sensitivities in time"
         assert widget.tooltip.startswith(_INTERP_KEY[1])
         assert "held until the next one starts" in widget.tooltip
-        assert "cdr_lite" in editor._pane_sections["Carbon dioxide removal (CDR)"]
+        assert editor._group_fields[_MODEL_CARD] == {"cdr_lite": [_INTERP_KEY[1]]}
+        assert widget in _descendants(editor.model_box)
+        assert widget not in _descendants(editor.accordion)
+    else:
+        assert not editor.model_box.children
 
 
 def test_0_12_model_declares_the_time_interpolation_key():
@@ -3541,6 +3558,98 @@ def test_0_12_model_declares_the_time_interpolation_key():
     wiz._rebuild()
     assert wiz.config is not None
     assert "cdr_lite" not in wiz.config.model_settings
+
+
+class TestCarbonateSensitivityTimeInterpolation:
+    """The time-interpolation switch sits in the Model card's carbonate
+    sensitivity group, and the wizard starts it off in ``bgc_mode: cdr_lite``:
+    UCLA-ROMS writes the sensitivities time-averaged by default.
+    """
+
+    @staticmethod
+    def _wizard():
+        wiz = ForgeBlueprintWizard()
+        wiz.start.value = date(2012, 1, 1)
+        wiz.end.value = date(2012, 1, 2)
+        wiz.use_pio_chk.value = False
+        wiz.cdr_mode_dd.value = "simple"  # cdr_lite needs a CDR forcing to resolve
+        wiz.bgc_dd.value = "cdr_lite"
+        assert wiz.config is not None, wiz.derived.value
+        return wiz
+
+    @staticmethod
+    def _checkbox(wiz):
+        return wiz.editor._widgets[_INTERP_KEY][0]
+
+    def test_cdr_lite_starts_with_the_hold_in_the_model_card(self):
+        wiz = self._wizard()
+        assert wiz.model_dd.value == "roms-marbl-0.12-default"
+        checkbox = self._checkbox(wiz)
+        assert checkbox.value is False
+        assert wiz.cs_interp_box.children == (wiz.editor.model_box, wiz.cs_interp_note)
+        assert checkbox in _descendants(wiz.cs_group)
+        assert checkbox not in _descendants(wiz.editor_box)
+        assert "time-averaged by default" in wiz.cs_interp_note.value
+        assert wiz.config.model_settings["cdr_lite"][_INTERP_KEY[1]] is False
+        assert wiz.config.composition.overrides == _INTERP_HOLD
+        # an honest deviation from the ModelSpec, but not an Advanced-pane edit
+        assert wiz.config.composition.model.modified is True
+        assert "All defaults" in wiz.card_chips["advanced"].value
+
+    def test_marbl_keeps_the_model_spec_value_and_shows_no_switch(self):
+        wiz = self._wizard()
+        wiz.bgc_dd.value = "marbl"
+        assert wiz.config is not None, wiz.derived.value
+        assert wiz.config.model_settings["cdr_lite"] == {_INTERP_KEY[1]: True}
+        assert wiz.config.composition.overrides == {}
+        assert wiz.cs_interp_box.children == ()
+
+    def test_a_user_choice_survives_mode_switches(self):
+        wiz = self._wizard()
+        self._checkbox(wiz).value = True
+        assert wiz.config.model_settings["cdr_lite"][_INTERP_KEY[1]] is True
+        wiz.bgc_dd.value = "marbl"
+        wiz.bgc_dd.value = "cdr_lite"
+        assert wiz.config is not None, wiz.derived.value
+        assert self._checkbox(wiz).value is True
+        assert wiz.config.model_settings["cdr_lite"][_INTERP_KEY[1]] is True
+        assert "1 modified" not in wiz.card_chips["advanced"].value
+
+    def test_a_model_pick_seeds_the_default_again(self):
+        wiz = self._wizard()
+        self._checkbox(wiz).value = True
+        wiz.model_dd.value = "roms-marbl-0.11-default"
+        wiz.bgc_dd.value = "cdr_lite"
+        assert wiz.config is not None, wiz.derived.value
+        assert _INTERP_KEY not in wiz.editor._widgets  # no such switch before 0.12
+        assert _INTERP_KEY not in wiz._overrides
+        assert wiz.cs_interp_box.children == ()
+
+        wiz.model_dd.value = "roms-marbl-0.12-default"
+        wiz.bgc_dd.value = "cdr_lite"
+        assert wiz.config is not None, wiz.derived.value
+        assert self._checkbox(wiz).value is False
+
+    def test_an_older_roms_ref_drops_the_default_instead_of_failing(self):
+        wiz = self._wizard()
+        wiz.roms_ref.value = "0.11.0"
+        assert wiz.config is not None, wiz.derived.value
+        assert _INTERP_KEY not in wiz._overrides
+        wiz.roms_ref.value = ""
+        assert wiz.config is not None, wiz.derived.value
+        assert self._checkbox(wiz).value is False
+
+    def test_a_loaded_blueprint_keeps_its_own_value(self):
+        wiz = self._wizard()
+        self._checkbox(wiz).value = True
+
+        wiz2 = ForgeBlueprintWizard()
+        wiz2._populate_from(wiz.config)
+
+        assert wiz2.config is not None, wiz2.derived.value
+        assert self._checkbox(wiz2).value is True
+        assert wiz2.config.model_settings["cdr_lite"][_INTERP_KEY[1]] is True
+        assert _INTERP_KEY not in wiz2._overrides
 
 
 def test_settings_editor_builds_no_pane_left_without_fields():
