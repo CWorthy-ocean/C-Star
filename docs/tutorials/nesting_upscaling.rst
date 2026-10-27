@@ -98,7 +98,8 @@ From the directory with the four files:
    cstar workplan submit workplan.yaml
 
 ``cstar workplan submit`` returns once it has scheduled the steps. They run
-detached, each one waiting for the steps it depends on, so follow the run with
+detached, each one waiting for the steps it depends on, and closing the
+terminal does not stop them, so follow the run with
 ``cstar run status nest-tiny``. The run ID defaults to the workplan's name,
 ``nest-tiny``. Each step's files are under
 ``$CSTAR_DATA_HOME/workplan_runs/nest-tiny/tasks/<step>/``, which is

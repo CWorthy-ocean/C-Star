@@ -140,7 +140,7 @@ ARG_FORMAT_HELP: t.Final[str] = "Pass the desired output format."
 
 ARG_NO_REFRESH: t.Final[str] = "--no-refresh"
 ARG_NO_REFRESH_HELP: t.Final[str] = (
-    "Read the run as last recorded without refreshing its manifest."
+    "Show the run's status without updating any of its records."
 )
 
 ARG_REPAIR: t.Final[str] = "--repair"

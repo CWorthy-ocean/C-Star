@@ -220,7 +220,8 @@ def test_workplan_status_refreshes_the_manifest(
     no_refresh: bool,
 ) -> None:
     """Verify status stamps the run's manifest with what it observed, and that
-    `--no-refresh` leaves the manifest as it was recorded.
+    `--no-refresh` leaves the manifest as it was recorded and writes no
+    sentinels.
     """
     wp = Workplan(
         name="refreshed",
@@ -262,12 +263,15 @@ def test_workplan_status_refreshes_the_manifest(
         mock.patch(
             "cstar.cli.workplan.status.load_run_state",
             mock.AsyncMock(return_value=DagStatus({step.name: Status.Running})),
-        ),
+        ) as load_state,
         mock.patch("cstar.cli.workplan.status.display_summary"),
     ):
         result = CliRunner().invoke(app, args, color=False)
 
     assert result.exit_code == 0, result.output
+    # `--no-refresh` reads the sentinels without writing them back
+    assert load_state.await_args is not None
+    assert load_state.await_args.kwargs == {"persist": not no_refresh}
     manifest = read_run_manifest(tmp_path)
     assert manifest is not None
     entry = manifest.step(step.name)

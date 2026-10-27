@@ -31,10 +31,12 @@ set -- {dep_sentinels}
 for DEP_PID in {pids}; do
     DEP_SENTINEL=$1
     shift
-    while kill -0 "$DEP_PID" 2>/dev/null; do
+    if kill -0 "$DEP_PID" 2>/dev/null; then
         echo "Awaiting process $DEP_PID"
-        sleep {delay}
-    done
+        while kill -0 "$DEP_PID" 2>/dev/null; do
+            sleep {delay}
+        done
+    fi
 
     DEP_STATUS=$(sed -n 's/^status: *//p' "$DEP_SENTINEL" 2>/dev/null)
     if [ "$DEP_STATUS" != "$DONE" ]; then

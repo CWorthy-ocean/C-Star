@@ -338,6 +338,8 @@ def get_orchestrator(planner: Planner, *, root: Path, run_uuid: str) -> Orchestr
 async def load_run_state(
     run_id: str,
     launcher: Launcher[ProcessHandle],
+    *,
+    persist: bool = True,
 ) -> DagStatus:
     """Load the run state.
 
@@ -347,6 +349,9 @@ async def load_run_state(
         The run-id to load status for.
     launcher : Launcher[t.Any]
         The launcher used to execute the workplan.
+    persist : bool
+        Whether to write the statuses found to be stale back to the run's
+        records. When `False` the statuses are computed and returned only.
 
     Returns
     -------
@@ -365,7 +370,8 @@ async def load_run_state(
         async with sem:
             await on_status_changed(handle)
 
-    await asyncio.gather(*map(_bounded_status_changed, changes))
+    if persist:
+        await asyncio.gather(*map(_bounded_status_changed, changes))
 
     closed_set = {s.name: s.status for s in sentinels if Status.is_terminal(s.status)}
     open_set = {s.name: s.status for s in sentinels if s.name not in closed_set}

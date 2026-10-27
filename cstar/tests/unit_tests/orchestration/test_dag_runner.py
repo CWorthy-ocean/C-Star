@@ -244,6 +244,37 @@ async def layered_workplan(
     yield workplan, handles
 
 
+@pytest.mark.parametrize("persist", [True, False])
+@pytest.mark.asyncio
+async def test_dag_runner_load_run_state_persist(
+    layered_workplan: tuple[Workplan, dict[str, LocalHandle]],
+    mock_run_id: str,
+    persist: bool,
+) -> None:
+    """Verify a changed status is written back to its sentinel only when asked,
+    while the statuses returned reflect the change either way.
+    """
+    _, handles = layered_workplan
+    handle = next(iter(handles.values()))
+    handle.status = Status.Submitted
+    state_repo = StateRepository()
+    await state_repo.put_sentinel(handle)
+
+    with (
+        mock.patch(
+            "cstar.orchestration.dag_runner.LocalLauncher.update_status",
+            mock.AsyncMock(side_effect=lambda h: (True, h)),
+        ),
+        mock.patch(
+            "cstar.orchestration.dag_runner.on_status_changed", mock.AsyncMock()
+        ) as changed,
+    ):
+        dag_status = await load_run_state(mock_run_id, LocalLauncher(), persist=persist)
+
+    assert changed.await_count == (len(handles) if persist else 0)
+    assert handle.name in dag_status.details
+
+
 @pytest.mark.parametrize(
     ("closed_indices", "open_indices"),
     [

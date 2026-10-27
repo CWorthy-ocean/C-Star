@@ -3,6 +3,7 @@ import contextlib
 import datetime
 import shlex
 import subprocess
+import threading
 import time
 import typing as t
 from collections.abc import Iterator
@@ -1341,3 +1342,109 @@ async def test_locallauncher_launch_requeues_a_process_behind_a_replaced_depende
         mock_terminate.assert_not_called()
         popen.assert_not_called()
         assert task.handle.pid == prior.pid
+
+
+def test_localhandle_start_ts_does_not_change_start_at(mock_run_id: str) -> None:
+    """Reading `start_ts` must not turn an ISO `start_at` into a float, which
+    would change what is written the next time the sentinel is saved.
+    """
+    start = datetime.datetime(2026, 10, 15, 12, 0, 3, tzinfo=datetime.UTC)
+    handle = LocalHandle(pid="12345", name="step", run_id=mock_run_id, start_at=start)
+
+    assert handle.start_ts == start.timestamp()
+    assert handle.start_at == start
+
+
+@pytest.mark.parametrize(
+    ("stored", "expected"),
+    [
+        pytest.param(Status.Submitted, Status.Submitted, id="submitted stays"),
+        pytest.param(Status.Unsubmitted, Status.Submitted, id="unsubmitted waits"),
+        pytest.param(Status.Running, Status.Running, id="running stays"),
+        pytest.param(Status.Ending, Status.Running, id="ending is running"),
+    ],
+)
+async def test_update_status_of_live_expired_handle_keeps_stored_phase(
+    mock_run_id: str, stored: Status, expected: Status
+) -> None:
+    """A step whose proxy is alive but waiting on dependencies must not be
+    rewritten from Submitted to Running by a status read.
+    """
+    handle = LocalHandle(
+        pid="12345",
+        name="step",
+        run_id=mock_run_id,
+        start_at=datetime.datetime.now(tz=datetime.UTC),
+        status=stored,
+    )
+
+    with mock.patch.object(LocalLauncher, "_is_alive", return_value=True):
+        changed, updated = await LocalLauncher.update_status(handle)
+
+    assert updated.status == expected
+    assert changed == (stored != expected)
+
+
+@pytest.mark.usefixtures("read_yaml_intercept")
+async def test_locallauncher_submit_starts_a_new_session(
+    wp_templates_dir: Path,
+    mock_run_id: str,
+) -> None:
+    """Verify the proxy is detached from the launching terminal's session."""
+    live_step = LiveStep.from_step(
+        deserialize(wp_templates_dir / "single_step.yaml", Workplan).steps[0]
+    )
+
+    with (
+        mock.patch.object(
+            subprocess, "Popen", return_value=mock.Mock(pid=777777)
+        ) as popen,
+        mock.patch("cstar.orchestration.launch.local.PsProcess"),
+    ):
+        await LocalLauncher._submit(live_step, [])
+
+    assert popen.call_args.kwargs["start_new_session"] is True
+
+
+def test_proxy_script_announces_each_dependency_once(
+    tmp_path: Path, wp_templates_dir: Path
+) -> None:
+    """Verify a dependency still running is announced once, however long the
+    proxy polls for it.
+    """
+    live_step = LiveStep.from_step(
+        deserialize(wp_templates_dir / "single_step.yaml", Workplan).steps[0]
+    )
+    dep_sentinel = StateRepository.sentinel_path("dep")
+    dep_sentinel.parent.mkdir(parents=True, exist_ok=True)
+    dep_sentinel.write_text(f"name: dep\nstatus: {Status.Done.value}\n")
+
+    dep_process = subprocess.Popen(["sleep", "1.5"])
+    # reap the dependency as soon as it exits: a zombie still answers `kill -0`
+    reaper = threading.Thread(target=dep_process.wait)
+    reaper.start()
+    dep_handle = LocalHandle(
+        pid=str(dep_process.pid),
+        name="dep",
+        run_id="fake-run-id",
+        start_at=datetime.datetime.now(tz=datetime.UTC),
+        status=Status.Running,
+    )
+    # poll often: a message per poll would repeat several times in 1.5s
+    with mock.patch("cstar.orchestration.launch.local.PROXY_POLL_DELAY", 0.2):
+        script = ProxiedRunRequestFormatter(live_step, [dep_handle]).format(
+            RunRequest(command=["true"])
+        )
+    script_path = tmp_path / "script.sh"
+    script_path.write_text(script)
+
+    proxy = subprocess.Popen(
+        ["sh", str(script_path)], stdout=subprocess.PIPE, text=True
+    )
+    _record_proxy(live_step.name, proxy.pid)
+    out, _ = proxy.communicate(timeout=30)
+    reaper.join()
+
+    assert proxy.returncode == 0
+    assert "sleep 0.2" in script
+    assert out.count(f"Awaiting process {dep_process.pid}") == 1

@@ -123,7 +123,7 @@ class LocalHandle(ProcessHandle):
             )
             raise CstarExpectationFailed(msg)
         if isinstance(self.start_at, datetime.datetime):
-            self.start_at = self.start_at.timestamp()
+            return self.start_at.timestamp()
         return self.start_at
 
     @property
@@ -468,6 +468,7 @@ class LocalLauncher(Launcher[LocalHandle]):
                 stdin=subprocess.PIPE,
                 stdout=step.log_path.open("a"),
                 stderr=subprocess.STDOUT,
+                start_new_session=True,
             )
             # the wall clock, unlike the process creation time read below: on Linux
             # that is up to a second early, and submission times are compared with
@@ -653,7 +654,7 @@ class LocalLauncher(Launcher[LocalHandle]):
                 return "COMPLETED"
             if LocalLauncher._is_alive(handle):
                 # the proxy records Running once its dependencies are done
-                return "PENDING" if handle.status == Status.Submitted else "RUNNING"
+                return "RUNNING" if Status.is_running(handle.status) else "PENDING"
             msg = (
                 f"Process {handle.pid} for step {handle.name!r} is gone but its "
                 f"status was never finalized ({handle.status.name}); treating as failed."
