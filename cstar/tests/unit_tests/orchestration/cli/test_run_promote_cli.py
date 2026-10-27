@@ -359,6 +359,24 @@ def test_a_copy_still_leaves_a_stray_file_behind(
     ).exists()
 
 
+def test_a_yml_transformed_workplan_of_cstar_0_17_is_copied(
+    elsewhere: t.Callable[..., BuiltRun], project_runs: Path
+) -> None:
+    """Verify an untracked run whose plan 0.17 named `<stem>_transformed.yml` is
+    promoted with it, and the copy is found by its directory.
+    """
+    built = elsewhere()
+    plan = built.root / f"{built.run_id}_transformed.yaml"
+    yml = plan.rename(plan.with_suffix(".yml"))
+
+    result = invoke("promote", str(built.root))
+
+    assert result.exit_code == 0, result.output + result.stderr
+    destination = project_runs / built.run_id
+    assert (destination / yml.name).is_file()
+    assert not (destination / plan.name).exists()
+
+
 def test_a_second_transformed_workplan_is_refused_before_the_copy(
     elsewhere: t.Callable[..., BuiltRun],
     project_runs: Path,

@@ -50,6 +50,7 @@ from cstar.orchestration.index import RunLocation, read_run_location, run_uri
 from cstar.orchestration.manifest import (
     RunManifest,
     compute_product_digests,
+    find_transformed_workplan,
     fold_step_records,
     read_run_manifest,
     record_product_digests,
@@ -67,7 +68,6 @@ from cstar.orchestration.promotion import (
     remove_run,
 )
 from cstar.orchestration.run_check import (
-    TRANSFORMED_WORKPLAN_GLOB,
     Finding,
     FindingKind,
     RunCheckReport,
@@ -336,15 +336,10 @@ def _transformed_workplan(root: Path) -> Path | None:
     typer.BadParameter
         Raised when the directory holds more than one.
     """
-    found = sorted(root.glob(TRANSFORMED_WORKPLAN_GLOB))
-    if len(found) > 1:
-        names = ", ".join(path.name for path in found)
-        msg = (
-            f"{str(root)!r} holds more than one transformed workplan ({names}); "
-            "remove the stale ones."
-        )
-        raise typer.BadParameter(msg)
-    return next(iter(found), None)
+    try:
+        return find_transformed_workplan(root)
+    except CstarError as ex:
+        raise typer.BadParameter(str(ex)) from ex
 
 
 def _load_workplan(path: Path | None) -> LiveWorkplan | None:

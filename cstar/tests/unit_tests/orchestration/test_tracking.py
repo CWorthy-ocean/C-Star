@@ -1800,6 +1800,74 @@ def test_workplanrun_transformed_workplan_is_named_for_the_authored_stem(
         _make_workplan_run(tmp_path, "trx").trx_workplan_path
 
 
+@pytest.mark.parametrize("legacy", [True, False])
+def test_workplanrun_finds_the_yml_transformed_workplan_of_cstar_0_17(
+    tmp_path: Path, legacy: bool
+) -> None:
+    """Verify a run of 0.17 whose plan is `plan_transformed.yml` is found by its
+    directory, with a record that still holds the path it was written at and
+    with a fresh one whose `legacy` is empty, and that the `.yaml` this release
+    wrote on re-entering the run wins over the `.yml` beside it.
+
+    Parameters
+    ----------
+    legacy : bool
+        Whether the record holds the 0.17 path of the plan.
+    """
+    root = tmp_path / "output"
+    _write_manifest(root, "yml", workplan_path="/some/where/plan.yml")
+    trx = root / "plan_transformed.yml"
+    trx.touch()
+    overrides = {"legacy": {"trx_workplan_path": trx}} if legacy else {}
+
+    run = _make_workplan_run(tmp_path, "yml", **overrides)
+    assert run.trx_workplan_path == trx
+    assert (run.legacy.trx_workplan_path == trx) is legacy
+
+    rewritten = root / "plan_transformed.yaml"
+    rewritten.touch()
+    assert _make_workplan_run(tmp_path, "yml", **overrides).trx_workplan_path == (
+        rewritten
+    )
+
+
+def test_workplanrun_chooses_among_several_transformed_workplans_by_the_manifest(
+    tmp_path: Path,
+) -> None:
+    """Verify, of several plans, the one named for the authored stem the manifest
+    records is the run's, a `.yml` authored workplan included.
+    """
+    root = tmp_path / "output"
+    _write_manifest(root, "several", workplan_path="/some/where/plan.yml")
+    (root / "other_transformed.yml").touch()
+    named = root / "plan_transformed.yml"
+    named.touch()
+
+    assert _make_workplan_run(tmp_path, "several").trx_workplan_path == named
+
+
+def test_workplanrun_prefers_the_legacy_path_to_refusing_several_transformed_workplans(
+    tmp_path: Path,
+) -> None:
+    """Verify the path a record of an older release holds answers when the
+    directory holds several plans and the manifest names none of them, and that
+    without it the refusal stands.
+    """
+    root = tmp_path / "output"
+    _write_manifest(root, "several-legacy")
+    (root / "a_transformed.yml").touch()
+    (root / "b_transformed.yaml").touch()
+    recorded = root / "a_transformed.yml"
+
+    with pytest.raises(CstarError, match="more than one transformed workplan"):
+        _make_workplan_run(tmp_path, "several-legacy").trx_workplan_path
+
+    run = _make_workplan_run(
+        tmp_path, "several-legacy", legacy={"trx_workplan_path": recorded}
+    )
+    assert run.trx_workplan_path == recorded
+
+
 def test_workplanrun_workplan_path_falls_back_to_the_transformed_workplan(
     tmp_path: Path,
 ) -> None:

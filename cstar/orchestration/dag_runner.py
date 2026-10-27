@@ -38,7 +38,6 @@ from cstar.orchestration.manifest import (
     ATTEMPT_VARIABLES_NAME,
     ATTEMPT_WORKPLAN_NAME,
     RUN_MANIFEST_NAME,
-    TRANSFORMED_WORKPLAN_GLOB,
     CarriedInputs,
     RunManifest,
     StepFacts,
@@ -54,6 +53,7 @@ from cstar.orchestration.manifest import (
     read_run_manifest,
     record_submission,
     transformed_workplan_path,
+    transformed_workplans,
     workplan_content_hash,
     write_run_manifest,
 )
@@ -1620,7 +1620,7 @@ async def refuse_stale_run_state(run_id: str, root: Path) -> None:
     CstarExpectationFailed
         If the run root holds no transformed workplan and the run-id has sentinels.
     """
-    if any(root.glob(TRANSFORMED_WORKPLAN_GLOB)):
+    if transformed_workplans(root):
         return
     if not await StateRepository().has_sentinels(run_id=run_id):
         return

@@ -41,6 +41,7 @@ from cstar.orchestration.manifest import (
     RUN_MANIFEST_NAME,
     RunManifest,
     compute_product_digests,
+    find_transformed_workplan,
     fold_step_records,
     manifest_lock,
     read_run_manifest,
@@ -48,7 +49,6 @@ from cstar.orchestration.manifest import (
 )
 from cstar.orchestration.orchestration import LiveWorkplan
 from cstar.orchestration.run_check import (
-    TRANSFORMED_WORKPLAN_GLOB,
     FindingKind,
     RunCheckReport,
     check_run,
@@ -179,16 +179,12 @@ def _directory_target(target: str) -> CheckTarget:
         )
         raise typer.BadParameter(msg)
 
-    workplans = sorted(run_root.glob(TRANSFORMED_WORKPLAN_GLOB))
-    if len(workplans) > 1:
-        names = ", ".join(p.name for p in workplans)
-        msg = (
-            f"{str(run_root)!r} holds more than one transformed workplan ({names}); "
-            "remove the stale ones."
-        )
-        raise typer.BadParameter(msg)
+    try:
+        workplan = find_transformed_workplan(run_root)
+    except CstarError as ex:
+        raise typer.BadParameter(str(ex)) from ex
 
-    return CheckTarget(run_root, None, next(iter(workplans), None))
+    return CheckTarget(run_root, None, workplan)
 
 
 def _tracked_target(run: WorkplanRun) -> CheckTarget:

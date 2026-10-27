@@ -568,6 +568,22 @@ def test_a_directory_with_two_transformed_workplans_is_ambiguous(
     assert "more than one transformed workplan" in flatten_cli_output(result.stderr)
 
 
+def test_a_directory_with_a_yml_transformed_workplan_is_checked_against_it(
+    run: FakeRun,
+) -> None:
+    """Verify the plan a 0.17 run wrote for a `.yml` workplan is found, loaded for
+    the checks that need it and scanned for absolute paths, as a `.yaml` one is.
+    """
+    yml = run.trx_path.rename(run.trx_path.with_suffix(".yml"))
+
+    result = invoke(str(run.root))
+
+    assert result.exit_code == EXIT_FINDINGS, result.output
+    assert f"{yml}:" in result.stdout
+    assert "Skipped step directories and orphans" not in result.stdout
+    assert f"  {run.root}/tasks/stale\n" in result.stdout
+
+
 def test_a_run_whose_directory_is_gone_suggests_the_path(
     run: FakeRun, flatten_cli_output: t.Callable[[str], str]
 ) -> None:

@@ -83,6 +83,7 @@ from cstar.orchestration.manifest import (
     describe_steps,
     latest_attempt_dir,
     read_run_manifest,
+    transformed_workplans,
     write_run_manifest,
     write_step_record,
 )
@@ -109,7 +110,6 @@ from cstar.orchestration.orchestration import (
     check_environment,
     configure_environment,
 )
-from cstar.orchestration.run_check import TRANSFORMED_WORKPLAN_GLOB
 from cstar.orchestration.serialization import (
     deserialize,
     model_to_yaml,
@@ -1137,7 +1137,7 @@ async def test_prepare_workplan_names_the_run_root_plan_yaml(
     prepared, trx_path, _, _ = await prepare_workplan(wp_path, output_dir)
 
     assert trx_path == output_dir / "plan_transformed.yaml"
-    assert sorted(output_dir.glob(TRANSFORMED_WORKPLAN_GLOB)) == [trx_path]
+    assert transformed_workplans(output_dir) == [trx_path]
     assert LiveWorkplan.load(trx_path) == prepared
 
 
@@ -2673,7 +2673,7 @@ async def test_build_dag_refuses_the_state_of_a_run_whose_directory_is_gone(
     assert str(sentinel.parent) in msg
     assert f"cstar admin clean {ARG_RUN_ID} {mock_run_id}" in msg
     assert f"{ARG_RUN_ID} <other-id>" in msg
-    assert not list(output_dir.glob(TRANSFORMED_WORKPLAN_GLOB))
+    assert not transformed_workplans(output_dir)
 
 
 @pytest.mark.asyncio
@@ -2749,7 +2749,7 @@ async def test_build_dag_refuses_to_relaunch_an_attached_run(
     msg = str(exc_info.value)
     assert repr(mock_run_id) in msg
     assert f"attached from {attached_from}" in msg
-    assert not list(output_dir.glob(TRANSFORMED_WORKPLAN_GLOB))
+    assert not transformed_workplans(output_dir)
     assert not (output_dir / ATTEMPTS_DIR_NAME).exists()
 
 
@@ -2768,7 +2768,7 @@ async def test_build_dag_relaunches_a_run_that_was_not_attached(
     with mock.patch("cstar.orchestration.dag_runner.check_environment"):
         await build_dag(wp_path, mock_run_id)
 
-    assert list(output_dir.glob(TRANSFORMED_WORKPLAN_GLOB))
+    assert transformed_workplans(output_dir)
 
 
 @pytest.mark.asyncio
@@ -2787,20 +2787,27 @@ async def test_build_dag_launches_over_a_run_record_it_cannot_read(
     with mock.patch("cstar.orchestration.dag_runner.check_environment"):
         await build_dag(wp_path, mock_run_id)
 
-    assert list(output_dir.glob(TRANSFORMED_WORKPLAN_GLOB))
+    assert transformed_workplans(output_dir)
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("suffix", [".yaml", ".yml"])
 async def test_build_dag_re_enters_a_run_directory_that_has_no_manifest(
-    tmp_path: Path, mock_run_id: str, hello_world_bp_path: Path
+    tmp_path: Path, mock_run_id: str, hello_world_bp_path: Path, suffix: str
 ) -> None:
     """Verify a run directory that still holds its transformed workplan is
     re-entered with its sentinels, even without a manifest: one could not be
-    written, or the run predates manifests.
+    written, or the run predates manifests. A `.yml` plan, as 0.17 named one
+    for a `.yml` workplan, is the earlier run too.
+
+    Parameters
+    ----------
+    suffix : str
+        The suffix of the transformed workplan the run directory holds.
     """
     wp_path, output_dir = _build_guarded(tmp_path, mock_run_id, hello_world_bp_path)
     _leave_sentinel(mock_run_id, "hello")
-    (output_dir / f"{wp_path.stem}_transformed.yaml").write_text(wp_path.read_text())
+    (output_dir / f"{wp_path.stem}_transformed{suffix}").write_text(wp_path.read_text())
 
     with mock.patch("cstar.orchestration.dag_runner.check_environment"):
         await build_dag(wp_path, mock_run_id)
@@ -2824,7 +2831,7 @@ async def test_build_dag_refuses_a_corrupt_manifest_before_writing_anything(
     ):
         await build_dag(wp_path, mock_run_id)
 
-    assert not list(output_dir.glob("*_transformed.yaml*"))
+    assert not transformed_workplans(output_dir)
     assert not (output_dir / ATTEMPTS_DIR_NAME).exists()
 
 
@@ -2849,7 +2856,7 @@ async def test_build_dag_refuses_a_too_new_manifest_with_upgrade_guidance(
 
     assert "remove the file" not in str(exc_info.value)
     assert ARG_RUN_ID in str(exc_info.value)
-    assert not list(output_dir.glob("*_transformed.yaml*"))
+    assert not transformed_workplans(output_dir)
     assert not (output_dir / ATTEMPTS_DIR_NAME).exists()
 
 
@@ -2876,12 +2883,12 @@ async def test_build_dag_refuses_an_edited_done_step_before_writing_anything(
         ):
             await build_dag(wp_path, mock_run_id)
 
-        assert not list(output_dir.glob("*_transformed.yaml*"))
+        assert not transformed_workplans(output_dir)
         assert not (output_dir / ATTEMPTS_DIR_NAME).exists()
 
         await build_dag(wp_path, mock_run_id, clobber_steps=["hello"])
 
-    assert list(output_dir.glob("*_transformed.yaml*"))
+    assert transformed_workplans(output_dir)
     assert len(list((output_dir / ATTEMPTS_DIR_NAME).iterdir())) == 1
 
 
@@ -2911,12 +2918,12 @@ async def test_build_dag_refuses_an_edited_queued_step_before_writing_anything(
         with pytest.raises(CstarExpectationFailed, match="pass --again to cancel"):
             await build_dag(wp_path, mock_run_id, clobber_hint=lambda _: "--again")
 
-        assert not list(output_dir.glob("*_transformed.yaml*"))
+        assert not transformed_workplans(output_dir)
         assert not (output_dir / ATTEMPTS_DIR_NAME).exists()
 
         await build_dag(wp_path, mock_run_id, clobber_steps=["hello"])
 
-    assert list(output_dir.glob("*_transformed.yaml*"))
+    assert transformed_workplans(output_dir)
     assert len(list((output_dir / ATTEMPTS_DIR_NAME).iterdir())) == 1
 
 
