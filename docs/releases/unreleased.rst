@@ -469,6 +469,7 @@ Bug Fixes
 - Runs made by cstar 0.17 from a ``.yml`` workplan, whose transformed workplan is ``<name>_transformed.yml``, work again with ``cstar run status``, ``show``, ``check``, ``attach``, ``promote`` and ``--resume``, and as cross-run references. (`#866 <https://github.com/CWorthy-ocean/C-Star/pull/866>`_)
 - ``cdr_metrics`` no longer counts CDR carbon in a domain's boundary rows and columns, which double-counted it across nested domains and kept the combined ``closure_residual`` from closing. (`#863 <https://github.com/CWorthy-ocean/C-Star/pull/863>`_)
 - ``nest_ic`` fills child levels below the parent's bottom from the nearest deep-enough parent column instead of repeating the parent's deepest water. (`#863 <https://github.com/CWorthy-ocean/C-Star/pull/863>`_)
+- ``cstar run attach`` no longer lists every step directory of a copied or moved run under "Step directories no step accounts for". (`#868 <https://github.com/CWorthy-ocean/C-Star/pull/868>`_)
 
 
 
