@@ -318,6 +318,12 @@ New features
   - The "Automatic tiling" option is the first field marked experimental.
 
 - The Workplan page shows an "Under development" notice under its status bar: the page works but is still being improved, so check the saved workplan before running it. (`#851 <https://github.com/CWorthy-ocean/C-Star/pull/851>`_)
+- ``CSTAR_SYSTEM`` names the system C-Star uses on a machine and takes precedence over detection; set it with ``cstar env set CSTAR_SYSTEM <name>``. (`#852 <https://github.com/CWorthy-ocean/C-Star/pull/852>`_)
+
+  - An unknown name is refused with the list of systems C-Star knows (for example ``perlmutter``, ``anvil``, ``linux_x86_64``).
+  - ``cstar env show`` prints the system in use and how it was chosen.
+  - ``cstar init`` shows the system and, when C-Star doesn't recognise it, offers to set ``CSTAR_SYSTEM``.
+
 
 
 
@@ -430,6 +436,7 @@ Bug Fixes
 - Steps started by ``cstar workplan submit`` on a workstation keep running after the launching terminal or tmux pane closes; before, every step still waiting on a dependency was killed. (`#848 <https://github.com/CWorthy-ocean/C-Star/pull/848>`_)
 - ``cstar run status`` no longer records a step that is still waiting on its dependencies as Running, and no longer rewrites a step's start time in a different format. (`#848 <https://github.com/CWorthy-ocean/C-Star/pull/848>`_)
 - A ForcingSpec in the pre-v8 shape (``initial_conditions.bgc_source``, a list-shaped ``forcing.boundary``) failed with a validation error when passed to ``build_forge_blueprint`` outside the wizard; it is now migrated. (`#850 <https://github.com/CWorthy-ocean/C-Star/pull/850>`_)
+- On a Linux cluster with Lmod that C-Star doesn't list, C-Star reset the user's loaded modules and then crashed looking for a module list that doesn't exist. (`#852 <https://github.com/CWorthy-ocean/C-Star/pull/852>`_)
 
 
 
@@ -518,6 +525,12 @@ Improvements
 - ``cstar run status --no-refresh`` now shows the run without writing anything back to its records. (`#848 <https://github.com/CWorthy-ocean/C-Star/pull/848>`_)
 - A step waiting on a dependency logs "Awaiting process" once instead of every few seconds. (`#848 <https://github.com/CWorthy-ocean/C-Star/pull/848>`_)
 - The legacy ``cdr_tracer_output`` section in an OutputSpec or a ModelSpec's settings is renamed once when the spec is read, with one warning, instead of on every resolver call. (`#850 <https://github.com/CWorthy-ocean/C-Star/pull/850>`_)
+- On a cluster C-Star doesn't recognise, it falls back to the generic Linux system with one warning per command instead of refusing to run. (`#852 <https://github.com/CWorthy-ocean/C-Star/pull/852>`_)
+
+  - The generic system loads no modules and builds UCLA-ROMS with the compilers, MPI and netCDF of your conda environment.
+  - When ROMS starts outside a scheduler job on such a cluster's login node, C-Star warns once; ``CSTAR_ALLOW_LOGIN_NODE_RUN=1`` silences it.
+  - Running a workplan there warns that every step runs on the node where you started it.
+
 
 
 
@@ -638,4 +651,5 @@ Miscellaneous
 - The nesting and upscaling tutorial says that closing the terminal does not stop a submitted run. (`#848 <https://github.com/CWorthy-ocean/C-Star/pull/848>`_)
 - The Tier 3 nesting test requires the CDR closure residual to be under 0.1 % of the uptake (was 10 %), or under 15 % for ucla-roms 0.11.0 and 0.12.0, whose upscaling export leaves out the mixing flux. (`#843 <https://github.com/CWorthy-ocean/C-Star/pull/843>`_)
 - Bundled specs and the integration-test catalog carry ``schema_version``; the catalog page and the contributing guide's compatibility section describe spec versions and spec migrations. (`#850 <https://github.com/CWorthy-ocean/C-Star/pull/850>`_)
+- New "On a cluster that isn't listed" section on the supported machines page, with pointers from the installation and system registration pages. (`#852 <https://github.com/CWorthy-ocean/C-Star/pull/852>`_)
 
