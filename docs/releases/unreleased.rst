@@ -691,4 +691,9 @@ Miscellaneous
 - The wizard labels the ``wrt_swflx`` switch "Freshwater flux (P-E)", what ROMS writes, instead of "Shortwave flux". (`#854 <https://github.com/CWorthy-ocean/C-Star/pull/854>`_)
 - ``cstar init`` asks for the "Default walltime limit per job" instead of the "Maximum walltime per job". (`#854 <https://github.com/CWorthy-ocean/C-Star/pull/854>`_)
 - The CCS tutorial page explains the child's sponge choice and marks its resource and CDR numbers for a refresh after a rerun on 0.13.0. (`#854 <https://github.com/CWorthy-ocean/C-Star/pull/854>`_)
+- New landing page for the Guided tutorials, listing the setup steps and summarizing each of the four tutorials in the order they should be run. (`#856 <https://github.com/CWorthy-ocean/C-Star/pull/856>`_)
+
+  - Clicking the "Guided tutorials" heading in the sidebar opens it; the page itself is not listed in the sidebar.
+  - Setup steps: install C-Star, run ``cstar init``, and register for Copernicus Marine and run ``copernicusmarine login`` (TPXO is not needed for the tutorials).
+
 
