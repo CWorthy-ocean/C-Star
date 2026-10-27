@@ -35,6 +35,7 @@ from cstar.applications.forge.namelist_model import (
     RunTimeSettingsV0_13_0,
 )
 from cstar.applications.forge.resolve import build_forge_blueprint, cfl_dt
+from cstar.catalog.spec_schema import known_spec_keys
 from cstar.wizard.wizard import (
     _ACCORDION_EXCLUDED_FIELDS,
     _BOUNDARY_NONE,
@@ -6340,6 +6341,26 @@ def test_extract_data_nesting_fields_never_become_overrides():
     wiz2._populate_from(cfg.model_copy(update={"model_settings": settings}))
     assert ("extract_data", "n_chd") not in wiz2._overrides
     assert wiz2._overrides[("extract_data", "nrpf")] == 48
+
+
+def test_the_specs_the_wizard_saves_have_only_known_keys():
+    """A spec at a newer minor with a key this build does not know is refused, so
+    every key a writer saves must be in ``known_spec_keys`` -- here for a nested
+    domain with every optional key, and for the forcing the editor holds.
+    """
+    wiz = _new_wizard()
+    wiz.nest_enable.value = True
+    wiz.nest_pressure_fluxes.value = True
+    wiz.parent_enable.value = True
+    wiz._rebuild()
+    assert wiz.config is not None, wiz.derived.value
+
+    domain = wiz._domain_spec_data()
+    assert {"grid_kwargs_parent", "grid_kwargs_child", "metadata_child"} <= set(domain)
+    assert domain["nesting_include_pressure_fluxes"] is True
+    assert set(domain) <= known_spec_keys("DomainSpec")
+    forcing = {"description", *wiz._forcing_editor.gather()}
+    assert forcing <= known_spec_keys("ForcingSpec")
 
 
 # ---------------------------------------------------------------------------
