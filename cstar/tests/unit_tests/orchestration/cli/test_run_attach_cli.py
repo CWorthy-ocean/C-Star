@@ -157,6 +157,22 @@ def test_attach_writes_nothing_into_the_run(
     assert built.manifest_bytes == manifest
 
 
+def test_the_steps_of_a_copied_run_are_found_in_its_directory(
+    elsewhere: t.Callable[..., BuiltRun],
+) -> None:
+    """Verify the transformed workplan, which names the run's old directory, is
+    rebased onto the copy: its step directories are the steps', not orphans.
+    """
+    built = elsewhere(steps=(STEP, "second"))
+    built.step_dir("second").mkdir(parents=True, exist_ok=True)
+
+    result = invoke("attach", str(built.root))
+
+    assert result.exit_code == 0, result.output
+    assert "no step accounts for" not in result.output
+    assert "Steps without a directory" not in result.output
+
+
 def test_the_path_keeps_its_symlinks(
     elsewhere: t.Callable[..., BuiltRun], tmp_path: Path
 ) -> None:
