@@ -334,7 +334,9 @@ def is_run_path(text: str, run_root: Path, recorded_root: Path | None) -> bool:
     written under (the source of a copy), names the run's own files. The
     transformed workplan and the blueprints that hold such paths are rebased
     when they are read, so they keep working when the run is moved; a path
-    anywhere else does not move with the run.
+    anywhere else does not move with the run. A path spelled through a symlink
+    to the run, as through a data home on a scratch file system, is resolved
+    before it is compared.
 
     Parameters
     ----------
@@ -351,7 +353,11 @@ def is_run_path(text: str, run_root: Path, recorded_root: Path | None) -> bool:
     """
     roots = (run_root, *((recorded_root,) if recorded_root else ()))
     prefixes = tuple(dict.fromkeys(p for r in roots for p in _prefixes(r)))
-    return _relative_to_prefix(text, prefixes) is not None
+    if _relative_to_prefix(text, prefixes) is not None:
+        return True
+
+    # the recorded root is resolved, while a file may name the run through an alias
+    return _relative_to_prefix(os.path.realpath(text), prefixes) is not None
 
 
 def _absolute_path_pattern(run_root: Path) -> re.Pattern[str]:

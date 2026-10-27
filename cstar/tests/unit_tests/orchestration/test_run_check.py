@@ -1131,6 +1131,33 @@ def test_a_run_path_is_bounded_by_the_run_and_its_recorded_root(
     assert not is_run_path(f"{root}/../run-2/x", root, recorded)
 
 
+def test_a_path_through_an_alias_of_the_data_home_is_the_runs_own(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Verify a run whose files name it through a symlinked data home, while its
+    transformed workplan records the resolved root, is checked by its physical
+    directory with those paths counted as its own.
+    """
+    real = tmp_path / "scratch" / "data"
+    alias = tmp_path / "home-data"
+    real.mkdir(parents=True)
+    alias.symlink_to(real)
+    monkeypatch.setattr(DirectoryManager, "data_home", classmethod(lambda cls: alias))
+    root = real / "workplan_runs" / "src"
+    write(root / f"wp{TRANSFORMED_WORKPLAN_SUFFIX}.yaml", f"name: wp\nroot: {root}\n")
+    output = write(
+        root / "tasks" / "a" / "output" / "r.yaml",
+        f"own: {alias}/workplan_runs/src/tasks/a/output/x.nc\n",
+    )
+
+    report = check_run(root, workplan=None, run_id=None, all_files=False)
+
+    assert [(f.kind, f.file) for f in report.findings if f.file == output] == [
+        (RUN_PATH, output)
+    ]
+    assert report.clean
+
+
 def test_a_workplan_without_a_recorded_root_records_none(run: FakeRun) -> None:
     """Verify a transformed workplan written before the root was recorded has none."""
     assert recorded_run_root(run.root) is None

@@ -123,7 +123,7 @@ pass its directory. A run attached read-only takes neither.
 
 To validate a workplan file, use `cstar workplan check <file>` instead.
 
-Exit code 0: nothing to fix. 1: findings remain. 2: bad arguments.
+Exit code 0: nothing to fix. 1: problems remain. 2: bad arguments.
 """
 
 _HEADINGS: t.Final[dict[FindingKind, str]] = {
