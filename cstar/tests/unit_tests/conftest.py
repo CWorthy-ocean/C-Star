@@ -29,6 +29,7 @@ from cstar.base.env import (
     ENV_CSTAR_PROJECT_HOME,
     ENV_CSTAR_RUNID,
     ENV_CSTAR_STATE_HOME,
+    ENV_CSTAR_SYSTEM,
     FLAG_ON,
     USER_CONFIG_FILENAME,
     load_user_config,
@@ -57,6 +58,7 @@ from cstar.orchestration.tracking import TrackingRepository, WorkplanRun
 from cstar.pio.external_codebase import PIOExternalCodeBase
 from cstar.roms.file_system import RomsFileSystemManager
 from cstar.roms.namelist import _LOGGED_NEWER_THAN_KNOWN, release_ref_for_remote
+from cstar.system.manager import _WARNED_SYSTEM
 from cstar.tests.unit_tests.fake_abc_subclasses import (
     FakeExternalCodeBase,
     FakeInputDataset,
@@ -149,6 +151,19 @@ def _clear_newer_release_log() -> Generator[None]:
 
 
 @pytest.fixture(autouse=True)
+def _clear_system_warnings() -> Generator[None]:
+    """Forget which system warnings were logged around each unit test.
+
+    `warn_once` warns once per message per process (the generic-context fallback,
+    a launch on an unrecognised cluster's login node), so one test's warning
+    would otherwise hide the next one's.
+    """
+    _WARNED_SYSTEM.clear()
+    yield
+    _WARNED_SYSTEM.clear()
+
+
+@pytest.fixture(autouse=True)
 def _clear_deprecation_warnings() -> Generator[None]:
     """Forget which deprecations were announced around each unit test.
 
@@ -183,6 +198,17 @@ def _no_project_home(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv(ENV_CSTAR_PROJECT_HOME, raising=False)
     # the variable that `CSTAR_PROJECT_HOME` defaults to
     monkeypatch.delenv("PROJECT", raising=False)
+
+
+@pytest.fixture(autouse=True)
+def _no_system_setting(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Remove `CSTAR_SYSTEM` from the environment of each unit test.
+
+    The setting overrides system detection, so a developer's shell that sets it
+    would otherwise change which context every test builds. A test that wants a
+    chosen system sets one itself.
+    """
+    monkeypatch.delenv(ENV_CSTAR_SYSTEM, raising=False)
 
 
 @pytest.fixture(autouse=True)

@@ -19,6 +19,7 @@ from cstar.base.env import (
     ENV_CSTAR_LOG_LEVEL,
     ENV_CSTAR_PROJECT_HOME,
     ENV_CSTAR_RUNID,
+    ENV_CSTAR_SYSTEM,
     REMOVED_SETTINGS,
     load_user_config,
     read_user_config,
@@ -36,12 +37,21 @@ from cstar.orchestration.utils import (
     ENV_CSTAR_SLURM_MAX_WALLTIME,
     ENV_CSTAR_SLURM_QUEUE,
 )
-from cstar.system.manager import AnvilEnvSettings, MacOSSystemContext
+from cstar.system.manager import (
+    CTX_REGISTRY,
+    AnvilEnvSettings,
+    MacOSSystemContext,
+    SystemSelection,
+    SystemSource,
+    get_registered_sys_contexts,
+)
 from cstar.system.scheduler import SlurmPartition, SlurmScheduler
 from cstar.tests.unit_tests.orchestration.cli.conftest import FakeEntryPoint
 
 REAL_QUERY_SLURM = init_module.query_slurm
 """The SLURM lookup as written, captured before the autouse fixture stubs it."""
+REAL_SELECT_SYSTEM = init_module.select_system
+"""The system choice as written, captured before the autouse fixture stubs it."""
 SCRATCH_VARIABLES = ("SCRATCH", "SCRATCH_DIR", "LOCAL_SCRATCH")
 CLEARED_VARIABLES = (
     ENV_CSTAR_SLURM_ACCOUNT,
@@ -101,17 +111,20 @@ class Recorder:
         self.kernels: list[dict[str, t.Any]] = []
 
 
-def use_context(monkeypatch: pytest.MonkeyPatch, context: t.Any) -> None:
-    """Make `context` the system, for `init` and for the scratch lookup."""
-    for target in (
-        "cstar.cli.init.get_system_context",
-        "cstar.system.manager.get_system_context",
-    ):
-        monkeypatch.setattr(target, lambda: context)
+def use_context(
+    monkeypatch: pytest.MonkeyPatch,
+    context: t.Any,
+    source: SystemSource = SystemSource.DETECTED,
+    detected: str = "",
+) -> None:
+    """Make the class `context` the system, for `init` and for the scratch lookup."""
+    selection = SystemSelection(context, source, detected)
+    monkeypatch.setattr("cstar.cli.init.select_system", lambda: selection)
+    monkeypatch.setattr("cstar.system.manager.get_system_context", lambda: context())
 
 
 def raise_unknown_system() -> t.NoReturn:
-    raise CstarError("Unknown system requested: x")
+    raise CstarError("C-Star does not recognise the system 'x'")
 
 
 @pytest.fixture(autouse=True)
@@ -122,8 +135,9 @@ def safe_environment(monkeypatch: pytest.MonkeyPatch) -> Recorder:
     for name in CLEARED_VARIABLES:
         monkeypatch.delenv(name, raising=False)
 
-    use_context(monkeypatch, MacOSSystemContext())
+    use_context(monkeypatch, MacOSSystemContext)
     monkeypatch.setattr("cstar.cli.init.query_slurm", lambda args: [])
+    monkeypatch.setattr("cstar.system.manager.visible_scheduler", lambda environ: "")
 
     recorder = Recorder()
     monkeypatch.setattr(shell_init, "detect_shell", lambda: Shell.ZSH)
@@ -165,6 +179,21 @@ def run_init() -> Callable[..., Result]:
 def slurm(monkeypatch: pytest.MonkeyPatch) -> None:
     """Make the system a SLURM cluster."""
     use_context(monkeypatch, FakeSlurmContext)
+
+
+@pytest.fixture
+def fallback(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Make the system a generic context that C-Star fell back to."""
+    use_context(
+        monkeypatch, MacOSSystemContext, SystemSource.FALLBACK, detected="mycluster"
+    )
+
+
+@pytest.fixture
+def fake_slurm_system(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Register `FakeSlurmContext`, so naming it selects a SLURM system."""
+    registry = t.cast("dict[str, t.Any]", CTX_REGISTRY)
+    monkeypatch.setitem(registry, FakeSlurmContext.name, FakeSlurmContext)
 
 
 @pytest.fixture
@@ -607,17 +636,317 @@ def test_unknown_system_skips_scheduler_settings(
     isolate_user_config: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """An unrecognised system gets no SLURM prompts, but the file is still written."""
-    monkeypatch.setattr("cstar.cli.init.get_system_context", raise_unknown_system)
+    """A system C-Star cannot choose gets no SLURM prompts, but the System section
+    explains why and the file is still written.
+    """
+    monkeypatch.setattr("cstar.cli.init.select_system", raise_unknown_system)
 
     result = run_init("--yes")
     output = flatten_cli_output(result.output)
 
     assert result.exit_code == 0, result.output
     assert "System: unknown; scheduler: none" in output
-    assert "Unknown system requested: x" in output
+    assert "C-Star does not recognise the system 'x'" in output
+    assert "Name the system to use." in output
+    assert "C-Star does not recognise this system; scheduler settings are skipped." in (
+        output
+    )
     assert "SLURM account" not in output
     assert isolate_user_config.is_file()
+
+
+def test_detected_system_has_no_system_section(
+    run_init: Callable[..., Result],
+    flatten_cli_output: Callable[[str], str],
+) -> None:
+    """A registered system is shown in the banner and never asked about."""
+    result = run_init("--yes")
+    output = flatten_cli_output(result.output)
+
+    assert result.exit_code == 0, result.output
+    assert "System: darwin_arm64; scheduler: none" in output
+    assert "Registered systems:" not in output
+
+
+def test_fallback_names_the_generic_context_and_keeps_it_under_yes(
+    run_init: Callable[..., Result],
+    flatten_cli_output: Callable[[str], str],
+    isolate_user_config: Path,
+    laptop_data_home: None,
+    fallback: None,
+) -> None:
+    """The banner and the System section say which system was not recognised and
+    list the registered ones; `--yes` keeps the fallback, so no `CSTAR_SYSTEM` line
+    is written, and nothing is recommended without a visible scheduler.
+    """
+    path = isolate_user_config
+
+    result = run_init("--yes")
+    output = flatten_cli_output(result.output)
+
+    assert result.exit_code == 0, result.output
+    assert (
+        "System: darwin_arm64 (generic; 'mycluster' is not a registered system); "
+        "scheduler: none"
+    ) in output
+    assert (
+        "C-Star does not recognise 'mycluster' and uses the generic darwin_arm64 "
+        "context, which submits no jobs."
+    ) in output
+    names = sorted(klass.name for klass in get_registered_sys_contexts())
+    assert f"Registered systems: {', '.join(names)}" in output
+    assert "without the warning other commands print, enter darwin_arm64." in output
+    assert "Press Enter to keep" not in output
+    assert "scheduler that the generic context cannot submit to" not in output
+    assert "Recommended" not in output
+    assert ENV_CSTAR_SYSTEM not in read_user_config(path)
+    assert not any(
+        line.startswith(f"{ENV_CSTAR_SYSTEM}=")
+        for line in path.read_text().splitlines()
+    )
+
+
+def test_fallback_with_a_visible_scheduler_says_to_run_in_a_job_and_recommends_scratch(
+    run_init: Callable[..., Result],
+    flatten_cli_output: Callable[[str], str],
+    laptop_data_home: None,
+    fallback: None,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A fallback on a machine that shows a scheduler the generic context cannot
+    submit to says so, and treats the machine as a cluster for the scratch advice.
+    """
+    monkeypatch.setattr(
+        "cstar.system.manager.visible_scheduler", lambda environ: "SLURM"
+    )
+
+    result = run_init("--yes")
+    output = flatten_cli_output(result.output)
+
+    assert result.exit_code == 0, result.output
+    assert (
+        "This machine has a SLURM scheduler that the generic context cannot submit "
+        "to: run ROMS inside a SLURM job"
+    ) in output
+    assert "batch script), not on a login node." in output
+    assert "Recommended: no scratch file system was found" in output
+
+
+def test_fallback_enter_keeps_the_generic_context_unpinned(
+    run_init: Callable[..., Result],
+    flatten_cli_output: Callable[[str], str],
+    isolate_user_config: Path,
+    laptop_data_home: None,
+    fallback: None,
+) -> None:
+    """Enter at the System prompt keeps what is in effect, so it writes nothing."""
+    result = run_init(input="\ny\nn\nn\n")
+    output = flatten_cli_output(result.output)
+
+    assert result.exit_code == 0, result.output
+    assert "Press Enter to keep the value in brackets" in output
+    assert "Using " not in output
+    assert read_user_config(isolate_user_config) == {}
+
+
+def test_fallback_answered_with_the_generic_name_pins_it(
+    run_init: Callable[..., Result],
+    flatten_cli_output: Callable[[str], str],
+    isolate_user_config: Path,
+    laptop_data_home: None,
+    fallback: None,
+) -> None:
+    """Naming the generic context keeps it without the fallback warning."""
+    result = run_init(input="darwin_arm64\ny\nn\nn\n")
+    output = flatten_cli_output(result.output)
+
+    assert result.exit_code == 0, result.output
+    assert "Using darwin_arm64 (set by CSTAR_SYSTEM) for the rest of the setup." in (
+        output
+    )
+    assert read_user_config(isolate_user_config) == {ENV_CSTAR_SYSTEM: "darwin_arm64"}
+
+
+def test_fallback_answered_with_a_slurm_system_continues_with_its_prompts(
+    run_init: Callable[..., Result],
+    flatten_cli_output: Callable[[str], str],
+    isolate_user_config: Path,
+    laptop_data_home: None,
+    fallback: None,
+    fake_slurm_system: None,
+) -> None:
+    """The name is normalised, written to the file, and the rest of the setup is
+    that system's: the SLURM prompts follow.
+    """
+    result = run_init(input="  FakeSLURM  \nm1234\n\n\nn\n\n\n\nn\nn\n")
+    output = flatten_cli_output(result.output)
+
+    assert result.exit_code == 0, result.output
+    assert "Using fakeslurm (set by CSTAR_SYSTEM) for the rest of the setup." in output
+    assert "SLURM account (required on this system)" in output
+    assert read_user_config(isolate_user_config) == {
+        ENV_CSTAR_SYSTEM: "fakeslurm",
+        ENV_CSTAR_SLURM_ACCOUNT: "m1234",
+    }
+
+
+def test_fallback_asks_again_after_an_unknown_name(
+    run_init: Callable[..., Result],
+    flatten_cli_output: Callable[[str], str],
+    isolate_user_config: Path,
+    laptop_data_home: None,
+    fallback: None,
+    fake_slurm_system: None,
+) -> None:
+    """A name that is not registered is refused with the registered ones listed,
+    and the prompt comes back until the answer is a registered system.
+    """
+    result = run_init(input="nope\nfakeslurm\nm1234\n\n\nn\n\n\n\nn\nn\n")
+    output = flatten_cli_output(result.output)
+
+    assert result.exit_code == 0, result.output
+    names = ", ".join(sorted(CTX_REGISTRY))
+    assert (
+        f"'nope' is not a registered system; {ENV_CSTAR_SYSTEM} must name one of: "
+        f"{names}."
+    ) in output
+    assert output.count(f"System ({ENV_CSTAR_SYSTEM}):") == 2
+    assert read_user_config(isolate_user_config)[ENV_CSTAR_SYSTEM] == "fakeslurm"
+
+
+def test_yes_keeps_a_bad_system_setting_and_skips_scheduler_settings(
+    run_init: Callable[..., Result],
+    flatten_cli_output: Callable[[str], str],
+    isolate_user_config: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A `CSTAR_SYSTEM` that names no registered system does not stop `init`: the
+    error is shown, and `--yes` leaves the line for the user to fix.
+    """
+    monkeypatch.setattr("cstar.cli.init.select_system", REAL_SELECT_SYSTEM)
+    path = isolate_user_config
+    path.write_text(f"{ENV_CSTAR_SYSTEM}=nowhere\n")
+
+    result = run_init("--yes")
+    output = flatten_cli_output(result.output)
+
+    assert result.exit_code == 0, result.output
+    assert "System: unknown; scheduler: none" in output
+    assert "'nowhere' is not a registered system" in output
+    assert "scheduler settings are skipped" in output
+    assert read_user_config(path)[ENV_CSTAR_SYSTEM] == "nowhere"
+    assert f"{ENV_CSTAR_SYSTEM}=nowhere" in path.read_text().splitlines()
+
+
+def test_dash_unsets_a_bad_system_setting_and_detects_the_system(
+    run_init: Callable[..., Result],
+    flatten_cli_output: Callable[[str], str],
+    isolate_user_config: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Answering `-` comments the bad line out and carries on with the system
+    C-Star detects.
+    """
+    monkeypatch.setattr("cstar.cli.init.select_system", REAL_SELECT_SYSTEM)
+    monkeypatch.setattr(
+        "cstar.cli.init.detect_system",
+        lambda: SystemSelection(MacOSSystemContext, SystemSource.DETECTED),
+    )
+    path = isolate_user_config
+    path.write_text(f"{ENV_CSTAR_SYSTEM}=nowhere\n")
+
+    result = run_init(input="-\ny\nn\nn\n")
+    output = flatten_cli_output(result.output)
+
+    assert result.exit_code == 0, result.output
+    assert "'nowhere' is not a registered system" in output
+    assert "Using darwin_arm64 for the rest of the setup." in output
+    assert "scheduler settings are skipped" not in output
+    assert ENV_CSTAR_SYSTEM not in read_user_config(path)
+    assert f"# {ENV_CSTAR_SYSTEM}=" in path.read_text().splitlines()
+
+
+def test_yes_never_moves_a_bad_exported_system_into_the_file(
+    run_init: Callable[..., Result],
+    flatten_cli_output: Callable[[str], str],
+    isolate_user_config: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A `CSTAR_SYSTEM` exported in the shell that names no registered system is
+    shown as the problem, and `--yes` does not copy it into the file.
+    """
+    monkeypatch.setattr("cstar.cli.init.select_system", REAL_SELECT_SYSTEM)
+    monkeypatch.setenv(ENV_CSTAR_SYSTEM, "bogus")
+    path = isolate_user_config
+
+    result = run_init("--yes")
+    output = flatten_cli_output(result.output)
+
+    assert result.exit_code == 0, result.output
+    assert "'bogus' is not a registered system" in output
+    assert "scheduler settings are skipped" in output
+    assert ENV_CSTAR_SYSTEM not in read_user_config(path)
+    assert f"{ENV_CSTAR_SYSTEM}=bogus" not in path.read_text()
+    assert f"{ENV_CSTAR_SYSTEM}: exported in your shell" not in output
+    assert f"{ENV_CSTAR_SYSTEM}=bogus" not in output
+
+
+def test_enter_does_not_accept_a_bad_system_setting(
+    run_init: Callable[..., Result],
+    flatten_cli_output: Callable[[str], str],
+    isolate_user_config: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Enter keeps the value in effect, which here names no registered system, so
+    the prompt says so and asks again until the answer is a registered system.
+    """
+    monkeypatch.setattr("cstar.cli.init.select_system", REAL_SELECT_SYSTEM)
+    path = isolate_user_config
+    path.write_text(f"{ENV_CSTAR_SYSTEM}=bogus\n")
+
+    result = run_init(input="\ndarwin_arm64\ny\nn\nn\n")
+    output = flatten_cli_output(result.output)
+
+    assert result.exit_code == 0, result.output
+    assert (
+        f"{ENV_CSTAR_SYSTEM}=bogus names no registered system; name one, or type - "
+        "to unset it."
+    ) in output
+    assert output.count(f"System ({ENV_CSTAR_SYSTEM}) [bogus]:") == 2
+    assert "Using darwin_arm64 (set by CSTAR_SYSTEM) for the rest of the setup." in (
+        output
+    )
+    assert read_user_config(path)[ENV_CSTAR_SYSTEM] == "darwin_arm64"
+    assert f"{ENV_CSTAR_SYSTEM}=bogus" not in path.read_text()
+
+
+def test_retyping_a_bad_system_setting_asks_again_until_it_is_unset(
+    run_init: Callable[..., Result],
+    flatten_cli_output: Callable[[str], str],
+    isolate_user_config: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Typing the value in effect is the same as pressing Enter: it names no
+    registered system, so the prompt asks again, and `-` then unsets it.
+    """
+    monkeypatch.setattr("cstar.cli.init.select_system", REAL_SELECT_SYSTEM)
+    monkeypatch.setattr(
+        "cstar.cli.init.detect_system",
+        lambda: SystemSelection(MacOSSystemContext, SystemSource.DETECTED),
+    )
+    path = isolate_user_config
+    path.write_text(f"{ENV_CSTAR_SYSTEM}=bogus\n")
+
+    result = run_init(input="bogus\n-\ny\nn\nn\n")
+    output = flatten_cli_output(result.output)
+
+    assert result.exit_code == 0, result.output
+    message = f"{ENV_CSTAR_SYSTEM}=bogus names no registered system"
+    assert output.count(message) == 1
+    assert output.count(f"System ({ENV_CSTAR_SYSTEM}) [bogus]:") == 2
+    assert "Using darwin_arm64 for the rest of the setup." in output
+    assert ENV_CSTAR_SYSTEM not in read_user_config(path)
+    assert f"# {ENV_CSTAR_SYSTEM}=" in path.read_text().splitlines()
 
 
 def test_recommends_scratch_on_slurm_without_a_scratch_file_system(

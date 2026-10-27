@@ -8,6 +8,7 @@ from rich import print
 from rich.markup import escape
 
 from cstar.base.env import NOT_SET, env_var_groups, load_user_config_for_repair
+from cstar.system.manager import system_label
 
 if t.TYPE_CHECKING:
     from cstar.base.env import EnvItem, UserConfig
@@ -60,6 +61,7 @@ def _interactive(all_config: dict[str, list["EnvItem"]], config: "UserConfig") -
 
     state = "" if config.path.is_file() else " (not found)"
     print(escape(f"Configuration file: {config.path}{state}"))
+    print(escape(f"System: {system_label()}"))
     print(
         escape(
             f"Each value is marked with its source: [{SOURCE_ENV}] exported in the "

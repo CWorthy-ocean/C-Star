@@ -23,6 +23,7 @@ from cstar.base.env import (
     ENV_CSTAR_DATA_HOME,
     ENV_CSTAR_PROJECT_HOME,
     ENV_CSTAR_SCRATCH_DIRS,
+    ENV_CSTAR_SYSTEM,
     EnvItem,
     UserConfig,
     get_env_item,
@@ -50,7 +51,15 @@ from cstar.orchestration.utils import (
     ENV_CSTAR_SLURM_QUEUE,
 )
 from cstar.system.environment import SlurmSettingsBase
-from cstar.system.manager import current_user, get_system_context
+from cstar.system.manager import (
+    SystemSelection,
+    SystemSource,
+    current_user,
+    detect_system,
+    registered_context,
+    registered_names,
+    select_system,
+)
 from cstar.system.scheduler import PBSScheduler, SlurmScheduler
 
 if t.TYPE_CHECKING:
@@ -76,6 +85,11 @@ Every prompt defaults to the value in effect now, so re-running the command revi
 
 UNSET_ANSWER: t.Final[str] = "-"
 """The answer that leaves a setting unset when a value is offered as the default."""
+PROMPT_HINT: t.Final[str] = (
+    f"Press Enter to keep the value in brackets; type {UNSET_ANSWER} to leave a "
+    "setting unset."
+)
+"""The line that explains how to answer the prompts that follow it."""
 HINT_TIMEOUT: t.Final[float] = 5.0
 """Seconds to wait for a SLURM lookup made only to show a hint."""
 DOCS_PRECEDENCE_URL: t.Final[str] = (
@@ -275,6 +289,98 @@ def required_slurm_settings(context: "SystemContext") -> set[str]:
     return klass.required_settings()
 
 
+def system_section(
+    selection: SystemSelection | None,
+    problem: str,
+    config: UserConfig,
+    yes: bool,
+) -> tuple[Decision | None, SystemSelection | None]:
+    """Offer to name the system when C-Star fell back to a generic context or
+    could not choose one.
+
+    Enter keeps the system in effect, so it never pins the generic context, and
+    `--yes` keeps it too. A name must be a registered system; an unknown one,
+    including a `CSTAR_SYSTEM` in effect that names none, is asked again, and
+    `UNSET_ANSWER` removes the setting and detects the system afresh. Under
+    `--yes` such a setting is left where it is, never moved into the file.
+
+    Parameters
+    ----------
+    selection : SystemSelection | None
+        The system C-Star chose, or `None` when it could not choose one.
+    problem : str
+        Why no system could be chosen; empty when `selection` is not `None`.
+    config : UserConfig
+        What the loader exported from the configuration file.
+    yes : bool
+        Whether to keep the system in effect without asking.
+
+    Returns
+    -------
+    tuple[Decision | None, SystemSelection | None]
+        The decision on `CSTAR_SYSTEM` (`None` to leave the file's line as it is),
+        and the system the rest of the setup uses.
+    """
+    header("System")
+    if selection is None:
+        echo(problem)
+    else:
+        echo(
+            f"C-Star does not recognise {selection.detected!r} and uses the generic "
+            f"{selection.context.name} context, which submits no jobs."
+        )
+    echo(f"Registered systems: {', '.join(registered_names())}")
+    if selection is None:
+        echo("Name the system to use.")
+    else:
+        echo("If this machine is one of them, name it. To keep the generic context")
+        echo(
+            f"without the warning other commands print, enter {selection.context.name}."
+        )
+    if selection is not None and (
+        family := selection.unsupported_scheduler(os.environ)
+    ):
+        echo(f"This machine has a {family} scheduler that the generic context cannot")
+        echo(f"submit to: run ROMS inside a {family} job (an interactive session or a")
+        echo("batch script), not on a login node.")
+    if not yes:
+        echo(PROMPT_HINT)
+
+    resolved = resolve(ENV_CSTAR_SYSTEM, config, None)
+    final = selection
+    while True:
+        decision = ask(f"System ({ENV_CSTAR_SYSTEM})", resolved, yes)
+        if decision.kept:
+            if selection is not None or not resolved.value:
+                return decision, final
+            if yes:
+                return None, None
+            echo(
+                f"{ENV_CSTAR_SYSTEM}={resolved.value} names no registered system; "
+                f"name one, or type {UNSET_ANSWER} to unset it."
+            )
+            continue
+        if decision.value is None:
+            try:
+                final = detect_system()
+            except (CstarError, OSError) as ex:
+                final = None
+                echo(str(ex))
+            break
+        try:
+            klass = registered_context(decision.value)
+        except CstarError as ex:
+            echo(str(ex))
+            continue
+        decision = Decision(resolved, kept=False, value=klass.name)
+        final = SystemSelection(klass, SystemSource.SETTING)
+        break
+
+    if final is not None and final != selection:
+        echo(f"Using {final.describe()} for the rest of the setup.")
+    return decision, final
+
+
 def scheduler_section(
     context: "SystemContext", config: UserConfig, yes: bool
 ) -> list[Decision]:
@@ -284,10 +390,7 @@ def scheduler_section(
     echo("workplan can override them per step.")
     slurm_hints()
     if not yes:
-        echo(
-            f"Press Enter to keep the value in brackets; type {UNSET_ANSWER} to "
-            "leave a setting unset."
-        )
+        echo(PROMPT_HINT)
     required = required_slurm_settings(context)
     prompts = (
         (ENV_CSTAR_SLURM_ACCOUNT, "SLURM account"),
@@ -313,7 +416,7 @@ def scheduler_section(
 
 def locations_section(
     context: "SystemContext | None",
-    scheduler: "Scheduler | None",
+    cluster: bool,
     config: UserConfig,
     yes: bool,
 ) -> list[Decision]:
@@ -328,9 +431,7 @@ def locations_section(
         echo(f"{r.item.name}: {value}  [{r.origin}]")
         echo(LOCATION_PURPOSES[r.item.name], indent=4)
 
-    recommend = (
-        scheduler is not None and not resolved[0].explicit and not hpc_data_directory()
-    )
+    recommend = cluster and not resolved[0].explicit and not hpc_data_directory()
     if recommend:
         echo()
         echo("Recommended: no scratch file system was found, so run output would go")
@@ -516,6 +617,16 @@ def scheduler_name(scheduler: "Scheduler | None") -> str:
     return "none"
 
 
+def system_context(
+    selection: SystemSelection | None,
+) -> "tuple[SystemContext | None, Scheduler | None]":
+    """The context a selection names and its scheduler; neither when there is none."""
+    if selection is None:
+        return None, None
+    context = selection.context()
+    return context, context.create_scheduler()
+
+
 def init(
     yes: t.Annotated[
         bool,
@@ -531,24 +642,18 @@ def init(
     # empty record, and carried_settings stops below.
     config = load_user_config_for_repair()
 
-    context: SystemContext | None
+    selection: SystemSelection | None
     try:
-        context = get_system_context()
+        selection = select_system()
     except (CstarError, OSError) as ex:
-        context = None
-        system, scheduler = "unknown", None
-        unknown = str(ex)
+        selection, problem = None, str(ex)
     else:
-        system, scheduler = context.name, context.create_scheduler()
-        unknown = ""
+        problem = ""
+    context, scheduler = system_context(selection)
 
     typer.echo(f"C-Star {cstar.__version__}")
+    system = selection.describe() if selection else "unknown"
     typer.echo(f"System: {system}; scheduler: {scheduler_name(scheduler)}")
-    if unknown:
-        typer.echo(f"  {unknown}")
-        typer.echo(
-            "  C-Star does not recognise this system; scheduler settings are skipped."
-        )
     state = (
         "exists; this run reviews and updates it"
         if config.path.is_file()
@@ -559,9 +664,21 @@ def init(
     carried = carried_settings(config.path)
 
     decisions: list[Decision] = []
+    if selection is None or selection.source is SystemSource.FALLBACK:
+        decision, selection = system_section(selection, problem, config, yes)
+        if decision is not None:
+            decisions.append(decision)
+        context, scheduler = system_context(selection)
+        if selection is None:
+            echo(
+                "C-Star does not recognise this system; scheduler settings are skipped."
+            )
     if context is not None and isinstance(scheduler, SlurmScheduler):
         decisions += scheduler_section(context, config, yes)
-    decisions += locations_section(context, scheduler, config, yes)
+    cluster = scheduler is not None or bool(
+        selection and selection.unsupported_scheduler(os.environ)
+    )
+    decisions += locations_section(context, cluster, config, yes)
     written = write_section(config, carried, decisions)
     shell_outcome = shell_section(yes)
     kernel_outcome = kernel_section(yes)

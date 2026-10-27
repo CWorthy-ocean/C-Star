@@ -10,6 +10,7 @@ from cstar.base.env import (
     ENV_CSTAR_LOG_LEVEL,
     ENV_CSTAR_RUNID,
     ENV_CSTAR_SCRATCH_DIRS,
+    ENV_CSTAR_SYSTEM,
     GROUP_INTERNAL,
     REMOVED_SETTINGS,
     discover_env_vars,
@@ -75,6 +76,18 @@ def test_only_internal_settings_and_config_home_are_not_persistable() -> None:
         ENV_CSTAR_CONFIG_REPORTED,
         ENV_CSTAR_CONFIG_HOME,
     }
+
+
+def test_system_setting_is_persistable_and_empty_when_unset(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Verify `CSTAR_SYSTEM` can be persisted and, unset, leaves detection to C-Star."""
+    monkeypatch.delenv(ENV_CSTAR_SYSTEM, raising=False)
+
+    item = get_env_item(ENV_CSTAR_SYSTEM)
+
+    assert item.persistable is True
+    assert item.value == ""
 
 
 def test_env_item_keeps_name_and_reads_environment(
@@ -204,7 +217,7 @@ class TestHpcDataDirectorySystemFallback:
         from cstar.base.exceptions import CstarError
 
         def _unknown():
-            raise CstarError("Unknown system requested: nowhere")
+            raise CstarError("'nowhere' is not a registered system")
 
         monkeypatch.setattr("cstar.system.manager.get_system_context", _unknown)
         assert hpc_data_directory() is None

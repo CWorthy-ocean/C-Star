@@ -28,6 +28,8 @@ from cstar.system.manager import (
     MacOSSystemContext,
     PerlmutterSystemContext,
     SystemContext,
+    SystemSelection,
+    SystemSource,
 )
 
 
@@ -106,9 +108,9 @@ class TestEnvironmentProperty:
         expected_attributes: dict[str, str],
     ) -> None:
         """Verify that environment attributes are correctly initialized."""
-        mock_get_sys_ctx = mock.MagicMock(return_value=system_ctx())
+        selection = SystemSelection(system_ctx, SystemSource.DETECTED)
 
-        with mock.patch("cstar.system.manager.get_system_context", mock_get_sys_ctx):
+        with mock.patch("cstar.system.manager.select_system", return_value=selection):
             system = CStarSystemManager()
 
         environment = system.environment

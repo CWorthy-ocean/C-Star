@@ -169,9 +169,9 @@ def _system_scratch_root() -> str | None:
 
     Imported lazily: ``cstar.system.manager`` imports this module (through
     ``cstar.base.log``), so a module-level import would be circular. A system
-    that cannot be identified (``CstarError`` for an unregistered name,
-    ``OSError`` when no name can be determined at all) has no context and
-    contributes nothing.
+    that cannot be identified (``CstarError`` for an unknown ``CSTAR_SYSTEM`` or
+    a platform with no generic context, ``OSError`` when no name can be
+    determined at all) has no context and contributes nothing.
     """
     from cstar.base.exceptions import CstarError
     from cstar.system.manager import get_system_context
@@ -231,14 +231,27 @@ ENV_CSTAR_ALLOW_LOGIN_NODE_RUN: t.Annotated[
     t.Literal["CSTAR_ALLOW_LOGIN_NODE_RUN"],
     EnvVar(
         "Set to `1` to let ROMS launch outside a scheduler job on a system that "
-        "has a scheduler (for example a login node). Use it only for a run small "
-        "enough for a login node, or when C-Star wrongly concludes it is not "
-        "inside a job.",
+        "has a scheduler (for example on a login node), and to launch it there "
+        "without a warning on a cluster C-Star does not recognise. Use it only "
+        "for a run small enough for a login node, or when C-Star wrongly "
+        "concludes it is not inside a job.",
         GROUP_SIM,
         default=FLAG_OFF,
     ),
 ] = "CSTAR_ALLOW_LOGIN_NODE_RUN"
 """Set to `1` to let ROMS launch outside a scheduler job on a system that has a scheduler."""
+
+ENV_CSTAR_SYSTEM: t.Annotated[
+    t.Literal["CSTAR_SYSTEM"],
+    EnvVar(
+        "The name of the system C-Star should use on this machine (for example "
+        "`perlmutter`, or `linux_x86_64` for a generic Linux machine) instead of "
+        "the one it detects. Unset, C-Star detects the system, and uses the "
+        "generic context for the platform when it does not recognise it.",
+        GROUP_SIM,
+    ),
+] = "CSTAR_SYSTEM"
+"""The name of the system C-Star should use on this machine instead of the one it detects."""
 
 ENV_CSTAR_DEBUG_BUILD_MODE: t.Annotated[
     t.Literal["CSTAR_DEBUG_BUILD_MODE"],

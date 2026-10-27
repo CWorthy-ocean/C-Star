@@ -26,6 +26,10 @@ Pick the variant that matches your machine:
 
    .. tab-item:: HPC system
 
+      On a cluster that isn't in the :doc:`list of supported systems
+      <../deployments/machines>`, use the laptop or workstation install instead
+      (see :ref:`machines_unlisted`).
+
       On a supported HPC system the compiler, MPI and netCDF toolchain comes
       from the site's environment modules, so install just ``cstar-ocean``:
 
@@ -34,10 +38,10 @@ Pick the variant that matches your machine:
          conda create -n cstar-env -c conda-forge cstar-ocean
 
       Do not install ``cstar-ocean-standalone`` or the conda ``compilers``
-      packages into an environment you will activate on a cluster. They export
-      ``CC``, ``CXX`` and ``FC`` on activation and put their own ``mpif90``
-      ahead of the module toolchain on ``PATH``, which silently hijacks ROMS
-      builds that should use the cluster's compilers.
+      packages into an environment you will activate on a supported cluster.
+      They export ``CC``, ``CXX`` and ``FC`` on activation and put their own
+      ``mpif90`` ahead of the module toolchain on ``PATH``, which silently
+      hijacks ROMS builds that should use the cluster's compilers.
 
 Then activate the environment:
 

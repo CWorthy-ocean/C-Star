@@ -124,7 +124,14 @@ from cstar.orchestration.utils import (
     get_run_id,
 )
 from cstar.system.environment import EnvSettingsBase, SlurmSettingsBase
-from cstar.system.manager import AnvilEnvSettings
+from cstar.system.manager import (
+    AnvilEnvSettings,
+    AnvilSystemContext,
+    LinuxSystemContext,
+    SystemContext,
+    SystemSelection,
+    SystemSource,
+)
 from cstar.tests.unit_tests.orchestration.conftest import (
     EXTERNAL_TOKEN,
     ExternalTaskFactory,
@@ -4152,6 +4159,151 @@ def test_get_launcher_warns_on_local_with_scheduler(
         _ = get_launcher(wp)
 
     assert "local launcher" in caplog.text
+
+
+def _unsupported_scheduler_machine(
+    monkeypatch: pytest.MonkeyPatch,
+    selection: SystemSelection,
+    scheduler: str,
+    job_id_var: str = "",
+) -> None:
+    """Make this process a node of a machine that shows `scheduler`, outside any job
+    unless `job_id_var` is set, where the system in use is `selection` and has none.
+    """
+    for name in ("SLURM_JOB_ID", "SLURM_JOBID", "PBS_JOBID"):
+        monkeypatch.delenv(name, raising=False)
+    if job_id_var:
+        monkeypatch.setenv(job_id_var, "12345")
+    monkeypatch.setattr("cstar.system.manager.visible_scheduler", lambda _: scheduler)
+    monkeypatch.setattr(
+        "cstar.system.manager.CStarSystemManager.selection",
+        mock.PropertyMock(return_value=selection),
+    )
+    monkeypatch.setattr(
+        "cstar.system.manager.CStarSystemManager.scheduler",
+        mock.PropertyMock(return_value=None),
+    )
+
+
+@pytest.mark.parametrize(
+    ("context", "source", "scheduler", "job_id_var", "warns"),
+    [
+        pytest.param(
+            LinuxSystemContext, SystemSource.FALLBACK, "SLURM", "", True, id="fallback"
+        ),
+        pytest.param(
+            LinuxSystemContext,
+            SystemSource.FALLBACK,
+            "PBS",
+            "",
+            True,
+            id="fallback-pbs",
+        ),
+        pytest.param(
+            LinuxSystemContext, SystemSource.SETTING, "SLURM", "", True, id="setting"
+        ),
+        pytest.param(
+            LinuxSystemContext,
+            SystemSource.FALLBACK,
+            "",
+            "",
+            False,
+            id="fallback-no-scheduler",
+        ),
+        pytest.param(
+            LinuxSystemContext,
+            SystemSource.FALLBACK,
+            "SLURM",
+            "SLURM_JOB_ID",
+            False,
+            id="fallback-in-job",
+        ),
+        pytest.param(
+            LinuxSystemContext, SystemSource.DETECTED, "SLURM", "", False, id="detected"
+        ),
+        pytest.param(
+            AnvilSystemContext,
+            SystemSource.SETTING,
+            "SLURM",
+            "",
+            False,
+            id="setting-slurm",
+        ),
+    ],
+)
+def test_get_orchestrator_hints_when_every_step_runs_on_an_unsupported_scheduler_machine(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+    context: type[SystemContext],
+    source: SystemSource,
+    scheduler: str,
+    job_id_var: str,
+    warns: bool,
+) -> None:
+    """Verify the orchestrator of a run says once that every step runs on this node,
+    when the context in use has no scheduler, was not detected (the generic
+    fallback, or `CSTAR_SYSTEM`), the machine shows a scheduler and the run is not
+    already inside a job.
+    """
+    selection = SystemSelection(context, source, "frontera")
+    _unsupported_scheduler_machine(monkeypatch, selection, scheduler, job_id_var)
+    wp = _env_workplan(tmp_path, {})
+
+    with caplog.at_level("WARNING"):
+        orchestrator = get_orchestrator(Planner(wp), root=tmp_path, run_uuid="")
+
+    assert type(orchestrator.launcher) is LocalLauncher
+    assert caplog.text.count("Every step runs on this node") == (1 if warns else 0)
+    if warns:
+        assert scheduler in caplog.text
+        assert selection.describe() in caplog.text
+
+
+@pytest.mark.parametrize(
+    ("pre_run", "warns"),
+    [pytest.param(True, False, id="pre-run"), pytest.param(False, True, id="regular")],
+)
+def test_get_orchestrator_hints_only_when_the_workplan_will_launch(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+    pre_run: bool,
+    warns: bool,
+) -> None:
+    """Verify a pre-run workplan, which only prepares its steps, is not told that
+    every step runs on this node, on a machine where a regular run would be.
+    """
+    selection = SystemSelection(LinuxSystemContext, SystemSource.FALLBACK, "frontera")
+    _unsupported_scheduler_machine(monkeypatch, selection, "SLURM")
+    wp = _make_workplan([_roms_step(tmp_path, "Roms")])
+    if pre_run:
+        apply_pre_run_overrides(wp)
+    assert wp.pre_run is pre_run
+
+    with caplog.at_level("WARNING"):
+        orchestrator = get_orchestrator(Planner(wp), root=tmp_path, run_uuid="")
+
+    assert type(orchestrator.launcher) is LocalLauncher
+    assert caplog.text.count("Every step runs on this node") == (1 if warns else 0)
+
+
+def test_get_launcher_does_not_hint_about_an_unsupported_scheduler(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Verify choosing a launcher, which read-only commands also do, logs nothing
+    about every step running on this node; only starting a run does.
+    """
+    selection = SystemSelection(LinuxSystemContext, SystemSource.FALLBACK, "frontera")
+    _unsupported_scheduler_machine(monkeypatch, selection, "SLURM")
+
+    with caplog.at_level("WARNING"):
+        launcher = get_launcher(_env_workplan(tmp_path, {}))
+
+    assert type(launcher) is LocalLauncher
+    assert "Every step runs on this node" not in caplog.text
 
 
 @pytest.mark.parametrize(
