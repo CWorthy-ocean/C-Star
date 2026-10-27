@@ -75,7 +75,7 @@ Loading a model spec
 --------------------
 
 The model specs in the :doc:`catalog <../catalog_wizard/catalog>` are the YAML files under
-``ModelSpec/`` (see :doc:`../applications/forge/specs`). ``load_models_yaml`` reads one into a
+``specs/ModelSpec/`` (see :doc:`../applications/forge/specs`). ``load_models_yaml`` reads one into a
 validated ``ModelSpec``, which is a quick way to see what code and settings
 a spec pins:
 
@@ -85,7 +85,7 @@ a spec pins:
    from cstar.applications.forge.models import load_models_yaml
 
    spec = load_models_yaml(
-       Path("~/cstar/catalog/ModelSpec/my-model.yaml").expanduser(), "my-model"
+       Path("~/cstar/catalog/specs/ModelSpec/my-model.yaml").expanduser(), "my-model"
    )
    print(spec.code.roms.location, spec.code.roms.commit, spec.bgc_mode, spec.use_pio)
 

@@ -15,28 +15,28 @@ values in full. Editing a spec afterwards does not change blueprints already
 built from it.
 
 Specs live in the :doc:`catalog <../../catalog_wizard/catalog>` as one file per entry,
-``<Kind>/<name>.yaml``. C-Star bundles a small set of each kind to start
+``specs/<Kind>/<name>.yaml``. C-Star bundles a small set of each kind to start
 from; save your own from the wizard's Review section or copy a bundled file
 and edit it.
 
 Types of specs
 --------------
 
-ModelSpec (``ModelSpec/<name>.yaml``)
+ModelSpec (``specs/ModelSpec/<name>.yaml``)
    A trusted model configuration: the pinned ROMS, MARBL and PIO code,
    the default biogeochemistry and PIO modes, and the
    model-level default settings. Choosing a model preset in the wizard
    selects one of these. Detailed below.
 
-DomainSpec (``DomainSpec/<name>.yaml``)
+DomainSpec (``specs/DomainSpec/<name>.yaml``)
    A grid: its horizontal extent, resolution and rotation (``grid_kwargs``),
    number of vertical levels, which boundaries are open, the processor
    layout, and a default run window. The bundled ``wio-toy`` domain is:
 
-   .. literalinclude:: ../../../cstar/catalog/bundled/DomainSpec/wio-toy.yaml
+   .. literalinclude:: ../../../cstar/catalog/bundled/specs/DomainSpec/wio-toy.yaml
       :language: yaml
 
-ForcingSpec (``ForcingSpec/<name>.yaml``)
+ForcingSpec (``specs/ForcingSpec/<name>.yaml``)
    Which datasets supply the initial conditions and the surface, boundary,
    tidal and river forcing, including biogeochemical sources and the
    interpolation method for each. The bundled entries pair GLORYS and ERA5
@@ -45,14 +45,14 @@ ForcingSpec (``ForcingSpec/<name>.yaml``)
    for ``bgc_mode`` ``none`` and ``cdr_lite``. See :doc:`source_datasets` for
    the sources.
 
-OutputSpec (``OutputSpec/<name>.yaml``)
+OutputSpec (``specs/OutputSpec/<name>.yaml``)
    Which fields the model writes, how often, and how files are packed, per
    output stream, plus the restart frequency. The bundled ``standard``,
    ``daily-restarts``, ``weekly-restarts`` and ``monthly-restarts`` entries
    differ in restart cadence, with every stream chosen so restart boundaries
    never truncate a partially written file.
 
-CdrSpec (``CdrSpec/<name>.yaml``)
+CdrSpec (``specs/CdrSpec/<name>.yaml``)
    Optional carbon dioxide removal forcing. Nothing is bundled; the wizard's
    Run setup section creates one from a netCDF file or by hand.
 
@@ -168,7 +168,7 @@ dropdown lists them only when "Show archived" is checked (loading a blueprint
 that uses one checks the box for you). ``archived`` works the same way in a
 spec of your own catalog.
 
-.. literalinclude:: ../../../cstar/catalog/bundled/ModelSpec/roms-marbl-0.13-default.yaml
+.. literalinclude:: ../../../cstar/catalog/bundled/specs/ModelSpec/roms-marbl-0.13-default.yaml
    :language: yaml
    :lines: 1-36
 

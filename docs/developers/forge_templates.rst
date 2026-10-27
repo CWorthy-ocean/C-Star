@@ -6,7 +6,7 @@ Forge internals: render templates and pinning
 Rendering templates
 -----------------------
 
-A model specification (a ``ModelSpec/<name>.yaml`` file) references its code templates under
+A model specification (a ``specs/ModelSpec/<name>.yaml`` file) references its code templates under
 ``code.templates_compile_time`` and ``code.templates_run_time``.
 
 Compile-time options use a Jinja2 template, ``cppdefs.opt.j2``, which renders

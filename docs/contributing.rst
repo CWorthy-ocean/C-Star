@@ -117,7 +117,7 @@ Adding an integration case
 
 1. Add a ``DomainSpec`` and a ``ForcingSpec`` under
    ``cstar/tests/integration_tests/catalog/`` (a file per spec,
-   ``DomainSpec/<name>.yaml`` or ``ForcingSpec/<name>.yaml``), pointing at files from
+   ``specs/DomainSpec/<name>.yaml`` or ``specs/ForcingSpec/<name>.yaml``), pointing at files from
    the data registry through ``${TEST_DATA}``.
 2. Add a ``ForgeCase`` entry to ``FORGE_CASES`` in ``cases.py``, with
    ``compile_time_overrides`` if the case changes ``cppdefs``,

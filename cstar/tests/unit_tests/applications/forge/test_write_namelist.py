@@ -32,6 +32,7 @@ from cstar.roms.namelist import (
 _MODEL_PATH = (
     Path(cstar.catalog.__file__).parent
     / "bundled"
+    / "specs"
     / "ModelSpec"
     / "cson_roms-marbl_v0.1.yaml"
 )

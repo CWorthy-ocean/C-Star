@@ -1,7 +1,7 @@
 """
 Pydantic models for the ModelSpec catalog format.
 
-A ModelSpec is a single YAML file (``ModelSpec/<name>.yaml`` in a catalog) with
+A ModelSpec is a single YAML file (``specs/ModelSpec/<name>.yaml`` in a catalog) with
 two top-level sections:
 ``code`` (roms/marbl/pio source pins + template refs) and ``model_settings``
 (flat, mirrors ``ForgeBlueprint.model_settings`` 1:1). It intentionally holds

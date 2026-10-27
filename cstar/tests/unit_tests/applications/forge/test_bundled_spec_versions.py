@@ -26,7 +26,7 @@ _CATALOGS = (
     _CSTAR / "catalog" / "bundled",
     _CSTAR / "tests" / "integration_tests" / "catalog",
 )
-_SPEC_FILES = sorted(p for root in _CATALOGS for p in root.glob("*Spec/*.yaml"))
+_SPEC_FILES = sorted(p for root in _CATALOGS for p in root.glob("specs/*Spec/*.yaml"))
 
 assert _SPEC_FILES, "no spec files found: the catalog globs are stale"
 
