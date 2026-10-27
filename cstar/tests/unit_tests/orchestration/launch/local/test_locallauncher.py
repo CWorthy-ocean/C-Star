@@ -34,7 +34,7 @@ from cstar.orchestration.orchestration import (
     Task,
     Workplan,
 )
-from cstar.orchestration.serialization import deserialize
+from cstar.orchestration.serialization import deserialize, model_to_yaml
 from cstar.orchestration.state import StateRepository
 
 WHICH = "cstar.orchestration.launch.local.shutil.which"
@@ -786,6 +786,105 @@ async def test_status_expired_nonterminal_handle_checks_process_liveness(
 
     with mock.patch.object(LocalLauncher, "_is_alive", return_value=alive):
         assert await LocalLauncher._status(handle) == expected
+
+
+_STARTED = datetime.datetime(2026, 10, 27, 12, tzinfo=datetime.UTC)
+"""When the handle of the sentinel re-read tests started."""
+
+
+@pytest.mark.parametrize(
+    ("on_disk", "expected"),
+    [
+        pytest.param({"status": Status.Done}, "COMPLETED", id="done"),
+        pytest.param({"status": Status.Failed}, "FAILED", id="failed"),
+        pytest.param({"status": Status.Cancelled}, "CANCELLED", id="cancelled"),
+        pytest.param({"status": Status.Running}, "FAILED", id="not_terminal"),
+        pytest.param(
+            {"pid": "54321", "status": Status.Done}, "FAILED", id="another_process"
+        ),
+        pytest.param(
+            {
+                "start_at": _STARTED + datetime.timedelta(seconds=5),
+                "status": Status.Done,
+            },
+            "FAILED",
+            id="recycled_pid",
+        ),
+        pytest.param(None, "FAILED", id="missing"),
+        pytest.param("status: [unclosed", "FAILED", id="corrupt_yaml"),
+        pytest.param("just text", "FAILED", id="not_a_handle"),
+    ],
+)
+async def test_status_expired_handle_rereads_sentinel_of_gone_process(
+    mock_run_id: str, on_disk: dict[str, t.Any] | str | None, expected: str
+) -> None:
+    """A status read that loaded a handle while the step ran can find the process
+    gone after the proxy recorded its final status (it writes before it exits):
+    the sentinel on disk decides, so the stale status is not persisted over it.
+    A missing or unreadable sentinel, a non-terminal status or one written for
+    another process (another pid, or the same pid started later) leaves the step
+    failed.
+    """
+    handle = LocalHandle(
+        pid="12345",
+        name="step",
+        run_id=mock_run_id,
+        start_at=_STARTED,
+        status=Status.Running,
+    )
+    match on_disk:
+        case dict():
+            await StateRepository().put_sentinel(handle.model_copy(update=on_disk))
+        case str():
+            path = StateRepository.sentinel_path(handle)
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(on_disk)
+
+    with mock.patch.object(LocalLauncher, "_is_alive", return_value=False):
+        assert await LocalLauncher._status(handle) == expected
+
+
+async def test_status_expired_handle_reads_sentinel_of_its_own_run(
+    mock_run_id: str,
+) -> None:
+    """The sentinel is looked up under the handle's run-id, not the ambient one."""
+    handle = LocalHandle(
+        pid="12345",
+        name="step",
+        run_id=f"{mock_run_id}-other",
+        start_at=datetime.datetime.now(tz=datetime.UTC),
+        status=Status.Running,
+    )
+    path = StateRepository.sentinel_path(handle, run_id=handle.run_id)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(model_to_yaml(handle.model_copy(update={"status": Status.Done})))
+
+    with mock.patch.object(LocalLauncher, "_is_alive", return_value=False):
+        assert await LocalLauncher._status(handle) == "COMPLETED"
+
+
+async def test_update_status_adopts_status_finalized_after_the_handle_was_read(
+    mock_run_id: str,
+) -> None:
+    """Verify a handle read as running is reported changed, and ends up Done,
+    when the proxy finished and exited before the status was queried.
+    """
+    handle = LocalHandle(
+        pid="12345",
+        name="step",
+        run_id=mock_run_id,
+        start_at=datetime.datetime.now(tz=datetime.UTC),
+        status=Status.Running,
+    )
+    await StateRepository().put_sentinel(
+        handle.model_copy(update={"status": Status.Done})
+    )
+
+    with mock.patch.object(LocalLauncher, "_is_alive", return_value=False):
+        changed, updated = await LocalLauncher.update_status(handle)
+
+    assert changed
+    assert updated.status == Status.Done
 
 
 @pytest.mark.parametrize(

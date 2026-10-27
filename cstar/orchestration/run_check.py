@@ -33,9 +33,9 @@ from cstar.execution.file_system import (
 from cstar.orchestration.manifest import (
     RUN_MANIFEST_NAME,
     STEP_RECORD_NAME,
-    TRANSFORMED_WORKPLAN_GLOB,
     carried_digest,
     product_digest,
+    transformed_workplans,
 )
 from cstar.orchestration.orchestration import Status
 from cstar.orchestration.state import StateRepository
@@ -291,7 +291,7 @@ def find_absolute_paths(run_root: Path, *, all_files: bool) -> list[Finding]:
 
     Only the emitted files that refer to other files are scanned: each step's
     `output/*.yaml`, `blueprints/B_*.yaml` and `work/cstar_generated_roms.nml`,
-    and the run's `*_transformed.yaml`. With `all_files`, the launch artifacts
+    and the run's transformed workplans. With `all_files`, the launch artifacts
     that launchers regenerate are scanned too.
 
     Parameters
@@ -310,7 +310,7 @@ def find_absolute_paths(run_root: Path, *, all_files: bool) -> list[Finding]:
     pattern = _absolute_path_pattern(run_root)
     globs = (*REFERENCE_FILES, *(LAUNCH_FILES if all_files else ()))
 
-    candidates = [*root.glob(TRANSFORMED_WORKPLAN_GLOB)]
+    candidates = transformed_workplans(root)
     for step_dir in _step_dirs(root):
         candidates.extend(p for g in globs for p in step_dir.glob(g))
 

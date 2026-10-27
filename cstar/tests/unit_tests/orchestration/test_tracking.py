@@ -15,7 +15,7 @@ import pytest
 import yaml
 
 from cstar.base.env import ENV_CSTAR_STATE_HOME
-from cstar.base.exceptions import CstarError
+from cstar.base.exceptions import CstarError, CstarExpectationFailed
 from cstar.base.utils import slugify
 from cstar.execution.file_system import StateDirectoryManager
 from cstar.orchestration.manifest import (
@@ -51,6 +51,7 @@ from cstar.orchestration.tracking import (
     WorkplanRun,
     measure_step_sizes,
     read_run_record,
+    require_relaunchable,
     require_writable,
 )
 from cstar.system.migration import CstarSchemaTooNewError
@@ -1431,6 +1432,25 @@ def test_require_writable_refuses_a_read_only_run(tmp_path: Path) -> None:
     assert "--own" in message
 
 
+def test_require_relaunchable_lets_a_scheduled_run_through(tmp_path: Path) -> None:
+    """Verify a run that was not attached may be relaunched."""
+    require_relaunchable(_make_workplan_run(tmp_path, "mine"))
+
+
+def test_require_relaunchable_refuses_an_attached_run(tmp_path: Path) -> None:
+    """Verify the refusal names the run and where it was attached from, and says
+    to start a new run that references it.
+    """
+    run = _make_workplan_run(tmp_path, "theirs", attached=True)
+
+    with pytest.raises(CstarExpectationFailed, match="'theirs' was attached from") as e:
+        require_relaunchable(run)
+
+    message = str(e.value)
+    assert str(run.output_path) in message
+    assert "--run-id <new>" in message
+
+
 def test_workplanrun_manifest_is_read_on_every_access(tmp_path: Path) -> None:
     """Verify the manifest is the one in the run directory now, not a kept one."""
     manifest = _write_manifest(tmp_path / "output", "manifest-read")
@@ -1778,6 +1798,74 @@ def test_workplanrun_transformed_workplan_is_named_for_the_authored_stem(
     (root / "third_transformed.yaml").touch()
     with pytest.raises(CstarError, match="more than one transformed workplan"):
         _make_workplan_run(tmp_path, "trx").trx_workplan_path
+
+
+@pytest.mark.parametrize("legacy", [True, False])
+def test_workplanrun_finds_the_yml_transformed_workplan_of_cstar_0_17(
+    tmp_path: Path, legacy: bool
+) -> None:
+    """Verify a run of 0.17 whose plan is `plan_transformed.yml` is found by its
+    directory, with a record that still holds the path it was written at and
+    with a fresh one whose `legacy` is empty, and that the `.yaml` this release
+    wrote on re-entering the run wins over the `.yml` beside it.
+
+    Parameters
+    ----------
+    legacy : bool
+        Whether the record holds the 0.17 path of the plan.
+    """
+    root = tmp_path / "output"
+    _write_manifest(root, "yml", workplan_path="/some/where/plan.yml")
+    trx = root / "plan_transformed.yml"
+    trx.touch()
+    overrides = {"legacy": {"trx_workplan_path": trx}} if legacy else {}
+
+    run = _make_workplan_run(tmp_path, "yml", **overrides)
+    assert run.trx_workplan_path == trx
+    assert (run.legacy.trx_workplan_path == trx) is legacy
+
+    rewritten = root / "plan_transformed.yaml"
+    rewritten.touch()
+    assert _make_workplan_run(tmp_path, "yml", **overrides).trx_workplan_path == (
+        rewritten
+    )
+
+
+def test_workplanrun_chooses_among_several_transformed_workplans_by_the_manifest(
+    tmp_path: Path,
+) -> None:
+    """Verify, of several plans, the one named for the authored stem the manifest
+    records is the run's, a `.yml` authored workplan included.
+    """
+    root = tmp_path / "output"
+    _write_manifest(root, "several", workplan_path="/some/where/plan.yml")
+    (root / "other_transformed.yml").touch()
+    named = root / "plan_transformed.yml"
+    named.touch()
+
+    assert _make_workplan_run(tmp_path, "several").trx_workplan_path == named
+
+
+def test_workplanrun_prefers_the_legacy_path_to_refusing_several_transformed_workplans(
+    tmp_path: Path,
+) -> None:
+    """Verify the path a record of an older release holds answers when the
+    directory holds several plans and the manifest names none of them, and that
+    without it the refusal stands.
+    """
+    root = tmp_path / "output"
+    _write_manifest(root, "several-legacy")
+    (root / "a_transformed.yml").touch()
+    (root / "b_transformed.yaml").touch()
+    recorded = root / "a_transformed.yml"
+
+    with pytest.raises(CstarError, match="more than one transformed workplan"):
+        _make_workplan_run(tmp_path, "several-legacy").trx_workplan_path
+
+    run = _make_workplan_run(
+        tmp_path, "several-legacy", legacy={"trx_workplan_path": recorded}
+    )
+    assert run.trx_workplan_path == recorded
 
 
 def test_workplanrun_workplan_path_falls_back_to_the_transformed_workplan(
