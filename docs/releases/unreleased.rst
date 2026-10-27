@@ -103,6 +103,9 @@ Breaking Changes
 
   - Queued steps waiting on the clobbered step are cancelled and queued again behind its new job.
 
+- A ModelSpec file with a key a ModelSpec does not have is now refused with an error naming the key, on every read (catalog, wizard, ``cstar forge``); before, unknown keys were silently dropped. (`#850 <https://github.com/CWorthy-ocean/C-Star/pull/850>`_)
+- Spec files written by this release (the wizard's saved specs, every ``register_*``) start with ``schema_version``, which cstar-ocean 0.17 and earlier do not know: a CdrSpec written by this release is refused there, so share catalogs between releases with care. (`#850 <https://github.com/CWorthy-ocean/C-Star/pull/850>`_)
+
 
 
 
@@ -301,6 +304,16 @@ New features
   - After a spec moves, its ``Assets/`` directory is removed if it holds nothing but ``.gitkeep``, then the emptied entry directory.
   - Anything else, such as a file kept in ``Assets/`` or an entry whose new name is already taken, is left in place and reported; ``--dry-run`` shows the plan without changing anything.
 
+- Each catalog spec file records the ``schema_version`` of its kind; a file without one reads as 1.0.0. (`#850 <https://github.com/CWorthy-ocean/C-Star/pull/850>`_)
+
+  - A spec from an older release is migrated in memory, with one warning naming the file.
+  - A spec from a newer major release is refused with "upgrade cstar-ocean"; one from a newer minor release is refused only if it uses a key this release does not know, which the error names.
+
+- ``cstar admin migrate-catalog`` rewrites every spec file that a schema migration changes at its kind's current version, keeping the previous file as ``<file>.bak``. (`#850 <https://github.com/CWorthy-ocean/C-Star/pull/850>`_)
+
+  - Files already current (versioned or not) are left untouched, and so is a file written by a newer cstar-ocean; ``--dry-run`` reports without writing.
+
+
 
 
 
@@ -410,6 +423,7 @@ Bug Fixes
 - A forge step with workplan overrides (dates, tiling, a ucla-roms commit) no longer warns that its blueprint "appears to have been hand-edited". (`#849 <https://github.com/CWorthy-ocean/C-Star/pull/849>`_)
 - Steps started by ``cstar workplan submit`` on a workstation keep running after the launching terminal or tmux pane closes; before, every step still waiting on a dependency was killed. (`#848 <https://github.com/CWorthy-ocean/C-Star/pull/848>`_)
 - ``cstar run status`` no longer records a step that is still waiting on its dependencies as Running, and no longer rewrites a step's start time in a different format. (`#848 <https://github.com/CWorthy-ocean/C-Star/pull/848>`_)
+- A ForcingSpec in the pre-v8 shape (``initial_conditions.bgc_source``, a list-shaped ``forcing.boundary``) failed with a validation error when passed to ``build_forge_blueprint`` outside the wizard; it is now migrated. (`#850 <https://github.com/CWorthy-ocean/C-Star/pull/850>`_)
 
 
 
@@ -497,6 +511,7 @@ Improvements
 - A forge blueprint that really was edited by hand is reported once, before workplan overrides or a migration rewrite it, rather than twice. (`#849 <https://github.com/CWorthy-ocean/C-Star/pull/849>`_)
 - ``cstar run status --no-refresh`` now shows the run without writing anything back to its records. (`#848 <https://github.com/CWorthy-ocean/C-Star/pull/848>`_)
 - A step waiting on a dependency logs "Awaiting process" once instead of every few seconds. (`#848 <https://github.com/CWorthy-ocean/C-Star/pull/848>`_)
+- The legacy ``cdr_tracer_output`` section in an OutputSpec or a ModelSpec's settings is renamed once when the spec is read, with one warning, instead of on every resolver call. (`#850 <https://github.com/CWorthy-ocean/C-Star/pull/850>`_)
 
 
 
@@ -616,4 +631,5 @@ Miscellaneous
 - The wizard pages point to the nesting and upscaling tutorial for building an upscaled rerun by hand. (`#849 <https://github.com/CWorthy-ocean/C-Star/pull/849>`_)
 - The nesting and upscaling tutorial says that closing the terminal does not stop a submitted run. (`#848 <https://github.com/CWorthy-ocean/C-Star/pull/848>`_)
 - The Tier 3 nesting test requires the CDR closure residual to be under 0.1 % of the uptake (was 10 %), or under 15 % for ucla-roms 0.11.0 and 0.12.0, whose upscaling export leaves out the mixing flux. (`#843 <https://github.com/CWorthy-ocean/C-Star/pull/843>`_)
+- Bundled specs and the integration-test catalog carry ``schema_version``; the catalog page and the contributing guide's compatibility section describe spec versions and spec migrations. (`#850 <https://github.com/CWorthy-ocean/C-Star/pull/850>`_)
 
