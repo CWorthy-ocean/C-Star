@@ -1,6 +1,7 @@
 import asyncio
 import hashlib
 import json
+import logging
 import os
 import shutil
 import typing as t
@@ -27,7 +28,7 @@ from cstar.base.env import (
     capture_environment,
     load_user_config,
 )
-from cstar.base.exceptions import CstarExpectationFailed
+from cstar.base.exceptions import CstarError, CstarExpectationFailed
 from cstar.cli.common import normalize_runid
 from cstar.cli.workplan.run import (
     COMMAND_SUBMIT,
@@ -38,7 +39,13 @@ from cstar.cli.workplan.run import (
     migrate_steps,
     refuse_run_id_collision,
 )
-from cstar.entrypoint.utils import ARG_CLOBBER, ARG_PRE_RUN, ARG_RESUME, ARG_RUN_ID
+from cstar.entrypoint.utils import (
+    ARG_CLOBBER,
+    ARG_LOGLEVEL_LONG,
+    ARG_PRE_RUN,
+    ARG_RESUME,
+    ARG_RUN_ID,
+)
 from cstar.execution.file_system import StateDirectoryManager
 from cstar.orchestration.dag_runner import (
     DagStatus,
@@ -79,7 +86,7 @@ from cstar.system.migration import CstarSchemaTooNewError
 from cstar.tests.unit_tests.orchestration.manifest_runs import write_identity
 
 if t.TYPE_CHECKING:
-    from collections.abc import Mapping, Sequence
+    from collections.abc import Generator, Mapping, Sequence
 
 
 def _slurm_launcher(
@@ -4420,6 +4427,149 @@ def test_workplan_run_refuses_to_launch_over_an_attached_run(
     assert tracked is not None
     assert tracked.attached
     assert tracked.output_path == root
+
+
+@pytest.fixture
+def restore_log_levels() -> "Generator[None]":
+    """Restore the logger levels and `CSTAR_LOG_LEVEL` a `--log-level` changes."""
+    loggers = [logging.getLogger()] + [
+        logging.getLogger(name) for name in logging.root.manager.loggerDict
+    ]
+    levels = {logger: logger.level for logger in loggers}
+    with mock.patch.dict(os.environ):
+        yield
+    for logger, level in levels.items():
+        logger.setLevel(level)
+
+
+class _Records(logging.Handler):
+    """Keeps every record a logger emits, whatever the level of the root's handlers."""
+
+    def __init__(self) -> None:
+        super().__init__(logging.DEBUG)
+        self.records: list[logging.LogRecord] = []
+
+    def emit(self, record: logging.LogRecord) -> None:
+        self.records.append(record)
+
+
+@pytest.fixture
+def run_log() -> "Generator[list[logging.LogRecord]]":
+    """Fixture providing the records `cstar workplan run` logs.
+
+    `get_logger` holds the root's handlers, pytest's included, at WARNING, so
+    the records are read from a handler on the command's own logger.
+    """
+    handler = _Records()
+    logger = logging.getLogger("cstar.cli.workplan.run")
+    logger.addHandler(handler)
+    yield handler.records
+    logger.removeHandler(handler)
+
+
+def _attached_refusal(
+    tmp_path: Path, hello_world_bp_path: Path, *extra: str
+) -> tuple[t.Any, str]:
+    """Submit a workplan over a run attached from elsewhere, which is refused.
+
+    Returns
+    -------
+    tuple[Result, str]
+        The command's result and the refusal's first sentence.
+    """
+    step = Step(
+        name="Say Hello", application="hello_world", blueprint=hello_world_bp_path
+    )
+    wp_path = _write_workplan(tmp_path / "hw-workplan.yaml", [step])
+    run_id = "attached-elsewhere"
+    root = tmp_path / "colleague" / run_id
+    TrackingRepository().put_workplan_run_sync(
+        _recorded_run(run_id, wp_path, root, attached=True)
+    )
+
+    with (
+        mock.patch("cstar.orchestration.dag_runner.check_environment"),
+        mock.patch("cstar.orchestration.dag_runner.run_dag"),
+    ):
+        result = CliRunner().invoke(
+            app, [wp_path.as_posix(), ARG_RUN_ID, run_id, *extra], color=False
+        )
+    return result, f"Run '{run_id}' was attached from {root}"
+
+
+def test_workplan_run_refusal_is_one_line_without_a_traceback(
+    tmp_path: Path,
+    hello_world_bp_path: Path,
+    squash_cli_output: Callable[[str], str],
+    run_log: list[logging.LogRecord],
+) -> None:
+    """Verify a refused re-entry prints its message once and logs no error or
+    traceback at the default log level.
+    """
+    result, refusal = _attached_refusal(tmp_path, hello_world_bp_path)
+
+    assert result.exit_code == 1, result.output
+    assert squash_cli_output(result.output).count(squash_cli_output(refusal)) == 1
+    assert "Traceback" not in result.output
+    assert not [r for r in run_log if r.levelno >= logging.ERROR or r.exc_info]
+
+
+@pytest.mark.usefixtures("restore_log_levels")
+def test_workplan_run_refusal_traceback_is_logged_at_debug(
+    tmp_path: Path,
+    hello_world_bp_path: Path,
+    run_log: list[logging.LogRecord],
+) -> None:
+    """Verify `--log-level DEBUG` still logs the traceback of a refused re-entry."""
+    result, _ = _attached_refusal(
+        tmp_path, hello_world_bp_path, ARG_LOGLEVEL_LONG, "DEBUG"
+    )
+
+    assert result.exit_code == 1, result.output
+    logged = [r for r in run_log if r.exc_info]
+    assert [r.levelno for r in logged] == [logging.DEBUG]
+    assert logged[0].exc_info is not None
+    assert logged[0].exc_info[0] is CstarExpectationFailed
+
+
+@pytest.mark.parametrize(
+    ("error", "exit_code"),
+    [
+        pytest.param(CstarExpectationFailed("Undo the edit"), 1, id="refused"),
+        pytest.param(ValueError("Unknown clobber step selection"), 2, id="invalid"),
+        pytest.param(CstarError("The run record cannot be read"), 3, id="failed"),
+    ],
+)
+def test_workplan_run_failure_is_one_message(
+    tmp_path: Path,
+    hello_world_bp_path: Path,
+    flatten_cli_output: Callable[[str], str],
+    run_log: list[logging.LogRecord],
+    error: Exception,
+    exit_code: int,
+) -> None:
+    """Verify each failure `cstar workplan run` reports is printed once, with its
+    exit code, and its traceback is not logged at the default log level.
+
+    Parameters
+    ----------
+    error : Exception
+        The error scheduling the workplan raises.
+    exit_code : int
+        The exit code the command reports it with.
+    """
+    step = Step(
+        name="Say Hello", application="hello_world", blueprint=hello_world_bp_path
+    )
+    wp_path = _write_workplan(tmp_path / "hw-workplan.yaml", [step])
+
+    with mock.patch("cstar.cli.workplan.run.build_and_run_dag", side_effect=error):
+        result = CliRunner().invoke(app, [wp_path.as_posix()], color=False)
+
+    assert result.exit_code == exit_code, result.output
+    assert flatten_cli_output(result.output).count(str(error)) == 1
+    assert "Traceback" not in result.output
+    assert not [r for r in run_log if r.levelno >= logging.ERROR or r.exc_info]
 
 
 def test_handle_run_reloading_refuses_an_attached_run(

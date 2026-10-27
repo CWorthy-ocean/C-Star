@@ -1064,8 +1064,10 @@ def submit_workplan(
         console.print(str(ex))
         return
     except CstarExpectationFailed as ex:
+        # a refused request (an edited finished step, an attached run, ...):
+        # the message says what to do, so the traceback is only for debugging
         msg = f"An invalid request was made: {ex}"
-        log.exception(msg)
+        log.debug(msg, exc_info=True)
         print(msg)
         raise typer.Exit(1) from ex
     except CstarSchemaTooNewError as ex:
@@ -1080,12 +1082,11 @@ def submit_workplan(
         msg = f"{ex.title} failed validation: {format_validation_errors(ex)}"
         raise typer.BadParameter(msg) from ex
     except ValueError as ex:
-        msg = "Invalid inputs encountered while running the dag"
-        log.exception(msg)
+        log.debug("Invalid inputs encountered while running the dag", exc_info=True)
         raise typer.BadParameter(str(ex)) from ex
     except Exception as ex:
         msg = f"Workplan run {run_id!r} has failed: {ex}"
-        log.exception(msg)
+        log.debug(msg, exc_info=True)
         print(msg)
         raise typer.Exit(3) from ex
 
