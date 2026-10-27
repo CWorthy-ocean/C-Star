@@ -30,7 +30,7 @@ import os
 import re
 import typing
 import warnings
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import date, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Final, get_args, get_origin
@@ -1712,8 +1712,9 @@ def _section_header_html(
 @dataclass(frozen=True)
 class _EditorKey:
     """What a built settings editor depends on: it is rebuilt when any of these
-    changes. A failed resolve knows all but ``settings_cls`` (see
-    ``ForgeBlueprintWizard._hide_stale_editor``).
+    changes. A failed resolve knows all of them but builds an unresolved editor
+    (see ``ForgeBlueprintWizard._show_unresolved_editor``), which the next valid
+    resolve replaces.
     """
 
     model: str | None
@@ -1721,6 +1722,8 @@ class _EditorKey:
     bgc_mode: str
     is_parent: bool
     is_child: bool
+    resolved: bool
+    """Built from the resolved settings, not the ModelSpec's Model card settings."""
 
 
 class _SettingsEditor:
@@ -4786,7 +4789,8 @@ class ForgeBlueprintWizard:
         )
         # The time-interpolation switch: the settings editor's own widget (its
         # model_box), mounted on each editor rebuild, so it shows only where the
-        # ucla-roms release has the switch and the ModelSpec declares it.
+        # ucla-roms release has the switch and the ModelSpec declares it -- on an
+        # invalid blueprint too (see _show_unresolved_editor).
         self.cs_interp_box = W.VBox([])
         self.cs_interp_note = W.HTML(
             "<div class='forge-hint' style='margin-bottom:10px'>Leave this off if "
@@ -7742,35 +7746,91 @@ class ForgeBlueprintWizard:
             return False, False
         return bool(self.nest_enable.value), bool(self.parent_enable.value)
 
-    def _hide_stale_editor(self) -> None:
-        """After a failed resolve, replace an editor built for another model or BGC
-        mode, or for another nesting role, with a placeholder (the next valid resolve
-        rebuilds it): it would keep showing streams that no longer apply, e.g. the
-        MARBL ones after a switch to ``cdr_lite`` that still lacks its CDR forcing, or
-        no child-grid extraction after "This grid is a parent" is ticked on an invalid
-        blueprint. Overrides are applied after the resolve, never fed to it, so no
-        failure comes from an editor value and nothing is lost; the user's record
-        stays. Everything in the key but ``settings_cls`` is known without a resolved
-        config; an editor still matching it stays.
+    def _show_editor(self, settings: dict[str, Any], key: _EditorKey) -> dict[str, Any]:
+        """Show ``settings``, with the active overrides over them, in the settings
+        editor for ``key``, building that editor first when the current one is for
+        another key; return the effective settings shown. A resolved editor fills the
+        Advanced panes, the Output card and the Model card; an unresolved one (see
+        ``_show_unresolved_editor``) only the Model card, with a placeholder in the
+        other two.
         """
-        key = self._editor_key
-        if key is None or (key.model, key.bgc_mode, key.is_parent, key.is_child) == (
+        if self.editor is None or self._editor_key != key:
+            self.editor = _SettingsEditor(
+                self.W,
+                settings,
+                on_edit=self._on_editor_edit,
+                settings_cls=key.settings_cls,
+                bgc_mode=key.bgc_mode,
+                is_parent=key.is_parent,
+                is_child=key.is_child,
+            )
+            self._editor_key = key
+            if key.resolved:
+                self.editor_box.children = [self.editor.accordion]
+                self.output_editor_box.children = [self.editor.output_box]
+            else:
+                placeholder = components.banner_widget(
+                    self.W,
+                    "info",
+                    "Settings for this selection appear once the blueprint is valid "
+                    "— see the status above.",
+                )
+                self.editor_box.children = [placeholder]
+                self.output_editor_box.children = [placeholder]
+            self.cs_interp_box.children = (
+                [self.editor.model_box, self.cs_interp_note]
+                if _MODEL_CARD in self.editor._group_fields
+                else []
+            )
+        self._seed_wizard_defaults()
+
+        effective = _apply_overrides(settings, self._active_overrides)
+        self._syncing = True
+        try:
+            self.editor.sync(effective)  # display effective; don't re-record as edits
+        finally:
+            self._syncing = False
+        return effective
+
+    def _show_unresolved_editor(self) -> None:
+        """After a failed resolve, replace an editor built for another model, BGC
+        mode, nesting role or ucla-roms tier with one built from the selected
+        ModelSpec's Model card settings alone (see :data:`_MODEL_CARD_FIELDS`), so
+        the Model card keeps its settings on an invalid blueprint: the carbonate
+        sensitivity switch shows as soon as ``cdr_lite`` is picked, before a CDR
+        forcing makes the blueprint valid. The Advanced panes and the Output card
+        show a placeholder until the next valid resolve rebuilds the editor: the old
+        one would keep showing streams that no longer apply, e.g. the MARBL ones
+        after a switch to ``cdr_lite``, or no child-grid extraction after "This grid
+        is a parent" is ticked. Overrides are applied after the resolve, never fed to
+        it, so no failure comes from an editor value and nothing is lost; the user's
+        record stays. An editor still matching the selection stays, resolved or not.
+        """
+        is_parent, is_child = self._nesting_role()
+        key = _EditorKey(
             self.model_dd.value,
+            _wizard_settings_cls_for_ref(self._effective_roms_ref()),
             self.bgc_dd.value,
-            *self._nesting_role(),
+            is_parent,
+            is_child,
+            resolved=False,
+        )
+        if self._editor_key is not None and (
+            replace(self._editor_key, resolved=False) == key
         ):
             return
-        placeholder = components.banner_widget(
-            self.W,
-            "info",
-            "Settings for this selection appear once the blueprint is valid — see "
-            "the status above.",
+        try:
+            spec = self.catalog.model_data(self.model_dd.value)["model_settings"]
+        except Exception:  # an unreadable spec: the failed resolve reports it
+            spec = {}
+        self._show_editor(
+            {
+                section: {f: v for f, v in spec[section].items() if f in fields}
+                for section, fields in _MODEL_CARD_FIELDS.items()
+                if section in spec
+            },
+            key,
         )
-        self.editor_box.children = [placeholder]
-        self.output_editor_box.children = [placeholder]
-        self.cs_interp_box.children = []
-        self.editor = None
-        self._editor_key = None
 
     def _rebuild(self, *_):
         if getattr(self, "_suspended", False):
@@ -7795,7 +7855,7 @@ class ForgeBlueprintWizard:
             self.derived.value = "<i>Set start and end dates…</i>"
             self.download_link.value = ""
             self.download_link_review.value = ""
-            self._hide_stale_editor()
+            self._show_unresolved_editor()
             self._update_status(None)
             return
         try:
@@ -7810,7 +7870,7 @@ class ForgeBlueprintWizard:
             error = lines[0][:200]
             if len(lines) > 1 or len(lines[0]) > len(error):
                 error += " — full message in the preview below"
-            self._hide_stale_editor()
+            self._show_unresolved_editor()
             self._update_status(None, error=error)
             return
 
@@ -7839,35 +7899,15 @@ class ForgeBlueprintWizard:
         settings_cls = _wizard_settings_cls_for_ref(effective_roms_ref)
         is_parent, is_child = self._nesting_role()
         key = _EditorKey(
-            self.model_dd.value, settings_cls, self.bgc_dd.value, is_parent, is_child
+            self.model_dd.value,
+            settings_cls,
+            self.bgc_dd.value,
+            is_parent,
+            is_child,
+            resolved=True,
         )
-        if self.editor is None or self._editor_key != key:
-            self.editor = _SettingsEditor(
-                self.W,
-                composed,
-                on_edit=self._on_editor_edit,
-                settings_cls=settings_cls,
-                bgc_mode=key.bgc_mode,
-                is_parent=is_parent,
-                is_child=is_child,
-            )
-            self._editor_key = key
-            self.editor_box.children = [self.editor.accordion]
-            self.output_editor_box.children = [self.editor.output_box]
-            self.cs_interp_box.children = (
-                [self.editor.model_box, self.cs_interp_note]
-                if _MODEL_CARD in self.editor._group_fields
-                else []
-            )
-        self._seed_wizard_defaults()
-
+        effective = self._show_editor(composed, key)
         active_overrides = self._active_overrides
-        effective = _apply_overrides(composed, active_overrides)
-        self._syncing = True
-        try:
-            self.editor.sync(effective)  # display effective; don't re-record as edits
-        finally:
-            self._syncing = False
 
         # composition.*.modified: "did the user deviate from what the catalog spec
         # seeded" -- editing then reverting clears the flag. Model/output share the
