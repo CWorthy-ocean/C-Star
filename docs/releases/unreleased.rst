@@ -500,6 +500,11 @@ Bug Fixes
   - A warning names the copy used and the copies passed over; name a copy by its run-id or directory to use another.
 
 - Naming the directory of an attached copy finds that copy's own record (and its read-only setting) even when the original is tracked too. (`#872 <https://github.com/CWorthy-ocean/C-Star/pull/872>`_)
+- Refused re-entries (an edited finished or running step, a purged or attached run, another run's name) no longer print a traceback and the message twice; they print one line saying what to do. (`#873 <https://github.com/CWorthy-ocean/C-Star/pull/873>`_)
+
+  - Other failures of ``cstar workplan submit`` (an unknown ``--clobber`` step, bad variables, a run record that cannot be read) are also one message, with the traceback at ``--log-level DEBUG``.
+
+- ``cstar run status`` on a run whose workplan or blueprint file is missing prints one line naming the file instead of a traceback. (`#873 <https://github.com/CWorthy-ocean/C-Star/pull/873>`_)
 
 
 
