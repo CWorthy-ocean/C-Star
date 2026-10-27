@@ -541,6 +541,11 @@ Improvements
 - On ucla-roms 0.13.0 and newer, the CDR output Forge turns on for a CDR forcing averages over whole MARBL steps (every 2 hours instead of hourly when ``dt`` is 2 hours), with fewer records per file so each file covers the same time. (`#854 <https://github.com/CWorthy-ocean/C-Star/pull/854>`_)
 - Forge refuses a ``_cdr`` or ``_bgc_dia_avg`` averaging period that is not a whole multiple of the MARBL timestep when the pinned ucla-roms is 0.13.0 or newer, in the wizard and before generating inputs, instead of at ROMS startup. (`#854 <https://github.com/CWorthy-ocean/C-Star/pull/854>`_)
 - The CCS and tiny nesting/upscaling examples move to ucla-roms 0.13.0, and their upscaled child uses a currents-only sponge (``v_sponge_trc: 0.0``); the parents keep the full sponge. (`#854 <https://github.com/CWorthy-ocean/C-Star/pull/854>`_)
+- Each catalog spec is one file at ``specs/<Kind>/<name>.yaml`` (for example ``specs/ModelSpec/roms-marbl-0.13-default.yaml``); the wizard and ``register_*`` calls save new specs there. (`#859 <https://github.com/CWorthy-ocean/C-Star/pull/859>`_)
+- ``cstar admin migrate-catalog`` moves 0.17 spec directories into ``specs/``, removes the emptied directories, and leaves anything else (an asset, a ``.bak``) in place and reported. (`#859 <https://github.com/CWorthy-ocean/C-Star/pull/859>`_)
+
+  - Two old files for the same spec are never moved onto one another: the one C-Star reads moves, the other is reported as a collision.
+
 
 
 Miscellaneous
@@ -655,5 +660,6 @@ Miscellaneous
   - Setup steps: install C-Star, run ``cstar init``, and register for Copernicus Marine and run ``copernicusmarine login`` (TPXO is not needed for the tutorials).
 
 - The wizard's carbonate-sensitivity test reads the default model from the wizard module instead of naming it, which repairs the unit-test job on ``main``. (`#857 <https://github.com/CWorthy-ocean/C-Star/pull/857>`_)
+- The bundled catalog and the integration-test catalog keep their specs under ``specs/``; the catalog, spec, contributing and Python reference pages show the new paths. (`#859 <https://github.com/CWorthy-ocean/C-Star/pull/859>`_)
 
 
