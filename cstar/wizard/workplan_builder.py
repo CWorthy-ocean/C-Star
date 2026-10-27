@@ -4044,7 +4044,14 @@ class WorkplanBuilderPage:
         self.sticky_bar.add_class("forge-sticky-html")
         sticky = W.HBox([self.sticky_bar, self.sticky_download])
         sticky.add_class("forge-sticky")
-        self._head = [components.style_widget(W), sticky]
+        # in the head, so every preview placement keeps it at the top
+        notice = components.banner_widget(
+            W,
+            "warn",
+            "<b>Under development.</b> The Workplan page works, but is still being "
+            "improved. Check the saved workplan before you run it.",
+        )
+        self._head = [components.style_widget(W), sticky, notice]
         self._intro = intro
         self.widget = W.VBox([*self._head, intro, self.columns])
         self.widget.add_class("forge-app")

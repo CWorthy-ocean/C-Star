@@ -8,7 +8,7 @@ then resolves both from the same package.
 
 Each "page" (currently only "blueprint-wizard") is a YAML file with two top-level
 keys: ``sections`` (mapping a card/subsection id to a title/desc/required) and
-``fields`` (mapping a widget key to a label/symbol/unit/hint/required). Keys
+``fields`` (mapping a widget key to a label/symbol/unit/hint/required/experimental). Keys
 use dotted namespaces -- bare wizard attribute names (``model_dd``), grid
 kwargs shared by the main/child/parent grids (``grid.nx``), per-row forcing
 widgets (``forcing.row.name``), the initial-conditions/boundary-forcing scalar
@@ -35,7 +35,7 @@ from typing import Any
 import yaml
 
 #: Per-entry keys allowed in a ``fields`` mapping entry.
-_ALLOWED_FIELD_KEYS = {"label", "symbol", "unit", "hint", "required"}
+_ALLOWED_FIELD_KEYS = {"label", "symbol", "unit", "hint", "required", "experimental"}
 #: Per-entry keys allowed in a ``sections`` mapping entry.
 _ALLOWED_SECTION_KEYS = {"title", "desc", "required"}
 
@@ -49,6 +49,7 @@ class Label:
     unit: str | None = None
     hint: str | None = None
     required: bool = False
+    experimental: bool = False
 
 
 @dataclass(frozen=True)
@@ -103,7 +104,7 @@ def _parse(data: dict[str, Any]) -> dict[str, Any]:
     raw_fields = _as_mapping(
         data.get("fields") or {},
         "'fields' must be a mapping of key -> "
-        "{label, symbol?, unit?, hint?, required?}",
+        "{label, symbol?, unit?, hint?, required?, experimental?}",
     )
     for key, entry in raw_fields.items():
         entry = _as_mapping(
@@ -120,6 +121,7 @@ def _parse(data: dict[str, Any]) -> dict[str, Any]:
             unit=entry.get("unit"),
             hint=entry.get("hint"),
             required=bool(entry.get("required", False)),
+            experimental=bool(entry.get("experimental", False)),
         )
 
     return {"sections": sections, "fields": fields}

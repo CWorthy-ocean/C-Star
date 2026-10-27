@@ -2468,16 +2468,24 @@ def _root_order(page) -> list:
             labels.append("bar")
         elif "forge-style" in child._dom_classes:
             labels.append("style")
+        elif "forge-banner-w" in child._dom_classes:
+            labels.append("notice")
         else:
             labels.append("other")
     return labels
+
+
+def test_under_development_notice_sits_under_the_bar(page):
+    (notice,) = (c for c in page.widget.children if "forge-banner-w" in c._dom_classes)
+    assert "forge-banner warn" in notice.value
+    assert "Under development" in notice.value
 
 
 def test_placement_defaults_to_a_pinned_right_column(page):
     assert list(page.placement.options) == ["Right", "Bottom", "Top", "Hidden"]
     assert page.placement.value == "Right" and page.pinned.value is True
     assert page.pinned.description == "Keep preview visible"
-    assert _root_order(page) == ["style", "bar", "intro", "columns"]
+    assert _root_order(page) == ["style", "bar", "notice", "intro", "columns"]
     assert list(page.columns.children) == [page.left, page.side]
     assert {"forge-side", "forge-side-right", "forge-pinned"} <= set(
         page.side._dom_classes
@@ -2486,7 +2494,14 @@ def test_placement_defaults_to_a_pinned_right_column(page):
 
 def test_placement_reparents_the_pane_for_each_value(page):
     page.placement.value = "Bottom"
-    assert _root_order(page) == ["style", "bar", "intro", "left", "side"]  # last child
+    assert _root_order(page) == [
+        "style",
+        "bar",
+        "notice",
+        "intro",
+        "left",
+        "side",
+    ]  # last child
     assert list(page.columns.children) == []
     assert "forge-side-bottom" in page.side._dom_classes
     assert "forge-side-right" not in page.side._dom_classes
@@ -2495,6 +2510,7 @@ def test_placement_reparents_the_pane_for_each_value(page):
     assert _root_order(page) == [
         "style",
         "bar",
+        "notice",
         "side",
         "intro",
         "left",
@@ -2503,6 +2519,7 @@ def test_placement_reparents_the_pane_for_each_value(page):
     assert "forge-side-bottom" not in page.side._dom_classes
 
     page.placement.value = "Hidden"
+    assert _root_order(page)[:3] == ["style", "bar", "notice"]
     assert _root_order(page)[-1] == "side"  # only the controls strip remains
     assert page.pane_body.layout.display == "none"
     assert page.view.layout.display == "none"
@@ -2510,7 +2527,7 @@ def test_placement_reparents_the_pane_for_each_value(page):
     assert "forge-side-hidden" in page.side._dom_classes
 
     page.placement.value = "Right"
-    assert _root_order(page) == ["style", "bar", "intro", "columns"]
+    assert _root_order(page) == ["style", "bar", "notice", "intro", "columns"]
     assert list(page.columns.children) == [page.left, page.side]
     assert page.pane_body.layout.display != "none"
     assert "forge-side-hidden" not in page.side._dom_classes
