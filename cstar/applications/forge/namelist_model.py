@@ -627,14 +627,29 @@ def cppdefs_for_precheck(
     return result
 
 
-def check_output_streams_divide_rst(settings: Any, cppdefs: Any = None) -> None:
+def check_output_streams_divide_rst(
+    settings: Any,
+    cppdefs: Any = None,
+    *,
+    settings_cls: type[_RunTimeSettingsCommon] | None = None,
+) -> None:
     """Forge-side entry to ``cstar.roms.precheck.check_output_streams_divide_rst``.
 
     The general ucla-roms output-stream / restart-rollover precheck lives in
     C-Star; this keeps the resolver and executor on one forge-side import path
-    alongside the forge-shaped helpers above.
+    alongside the forge-shaped helpers above. ``settings_cls`` (the pinned
+    tier) selects the namelist schema whose rows apply (the ``sflx`` gate grew
+    in ucla-roms 0.13.0); ``None`` checks against the newest one.
     """
-    _check_output_streams_divide_rst(settings, cppdefs)
+    _check_output_streams_divide_rst(
+        settings,
+        cppdefs,
+        schema=(
+            None
+            if settings_cls is None
+            else _NAMELIST_SCHEMA_BY_RUN_TIME_SETTINGS[settings_cls]
+        ),
+    )
 
 
 def check_marbl_step_averages(
@@ -1509,7 +1524,7 @@ class RandomOutputCfg(_SettingsSection):
     nrpf: int = Field(serialization_alias="nrpf_random")
 
 
-class SurfFluxCfg(_SettingsSection):
+class _SurfFluxCfgCommon(_SettingsSection):
     wrt_smflx: bool
     wrt_stflx: bool
     wrt_rstflx: bool
@@ -1517,6 +1532,62 @@ class SurfFluxCfg(_SettingsSection):
     sflx_avg: bool
     output_period: float = Field(serialization_alias="output_period_sflx")
     nrpf: int = Field(serialization_alias="nrpf_sflx")
+
+
+class SurfFluxCfg(_SurfFluxCfgCommon):
+    """``surf_flux`` settings for ucla-roms < 0.13.0, which reads ``wrt_rstflx``
+    but writes no restoring flux (its output code was commented out until PR
+    #407).
+    """
+
+    @model_validator(mode="after")
+    def _reject_restoring_flux(self) -> SurfFluxCfg:
+        """Fail loudly on ``wrt_rstflx: true``, which this release ignores."""
+        if self.wrt_rstflx:
+            version = ".".join(str(part) for part in UCLA_ROMS_0_13_0)
+            raise ValueError(
+                f"surf_flux.wrt_rstflx requires ucla-roms >= {version}; the pinned "
+                "ucla-roms release writes no restoring flux. Turn it off, or pin a "
+                "newer release."
+            )
+        return self
+
+
+class SurfFluxCfgV0_13_0(_SurfFluxCfgCommon):
+    """``surf_flux`` settings for ucla-roms >= 0.13.0, which writes the surface
+    restoring fluxes with ``wrt_rstflx`` (PR #407); :func:`check_restoring_flux_output`
+    keeps it to builds that restore something.
+    """
+
+
+def check_restoring_flux_output(
+    surf_flux: Mapping[str, Any],
+    *,
+    sal_restore: bool,
+    settings_cls: type[_RunTimeSettingsCommon],
+) -> None:
+    """Reject ``surf_flux.wrt_rstflx`` in a build with no restoring term, which
+    ucla-roms >= 0.13.0 stops on at startup.
+
+    ucla-roms writes one field per compiled-in restoring term: heat
+    (QCORRECTION), salt (SFLX_CORR) and DIC/ALK (CFLX_CORR with MARBL), each only
+    with BULK_FRC. Forge's cppdefs template always defines BULK_FRC and never
+    QCORRECTION or CFLX_CORR, so its one restoring term is the salt one, which
+    ``cppdefs.sal_restore`` switches on. Releases before 0.13.0 refuse the
+    switch in their own :class:`SurfFluxCfg`, so they are not checked here.
+    Shared by the resolver, :func:`validate_run_time_sections` and the
+    executor's ``configure_build``, like :func:`check_constant_fe`.
+    """
+    if not issubclass(settings_cls, RunTimeSettingsV0_13_0):
+        return
+    if surf_flux.get("wrt_rstflx") and not sal_restore:
+        raise ValueError(
+            "surf_flux.wrt_rstflx is set but the build restores nothing "
+            "(cppdefs.sal_restore=False): ucla-roms writes the surface restoring "
+            "fluxes of the restoring terms it compiles in, and stops at startup "
+            "without one. Add a surface forcing of type 'restoring' with 'sss' in "
+            "restoring_forces, or turn wrt_rstflx off."
+        )
 
 
 class PipeFrcCfg(_SettingsSection):
@@ -1740,8 +1811,9 @@ class _RunTimeSettingsCommon(_SettingsSection):
     Not meant to be used directly: the version-varying sections (``param``,
     ``ocean_vars``, ``particles``) are typed as the loose common models here,
     ``marbl_bgc`` as the pre-0.11.0 :class:`MarblBgcCfg` (retyped by
-    :class:`RunTimeSettingsV0_11_0`), ``v_sponge`` as the pre-0.13.0
-    :class:`VSpongeCfg` (retyped by :class:`RunTimeSettingsV0_13_0`), and version-varying
+    :class:`RunTimeSettingsV0_11_0`), ``v_sponge`` and ``surf_flux`` as the pre-0.13.0
+    :class:`VSpongeCfg` and :class:`SurfFluxCfg` (retyped by
+    :class:`RunTimeSettingsV0_13_0`), and version-varying
     sections that some schemas lack entirely (``pio_settings``, added by
     :class:`RunTimeSettingsV0_6_0`; ``cdr_lite_output``/``cdr_gas_exch_output``,
     added by :class:`RunTimeSettingsV0_7_0`; ``cdr_lite``, added by
@@ -1935,10 +2007,12 @@ class RunTimeSettingsV0_13_0(RunTimeSettingsV0_12_0):
     Mirrors C-Star's ``RomsNamelistV0_13_0(RomsNamelistV0_12_0)``. Types
     ``v_sponge`` as :class:`VSpongeCfgV0_13_0`, which adds ``v_sponge_trc``
     (``&V_SPONGE_SETTINGS``) with its default, so a blueprint saved before it
-    existed still validates.
+    existed still validates, and ``surf_flux`` as :class:`SurfFluxCfgV0_13_0`,
+    which accepts ``wrt_rstflx``.
     """
 
     v_sponge: VSpongeCfgV0_13_0
+    surf_flux: SurfFluxCfgV0_13_0
 
 
 # Maps each namelist schema class (C-Star, keyed by ucla-roms version range) to
@@ -2489,6 +2563,16 @@ def validate_run_time_sections(
             check_constant_fe(
                 settings["marbl_bgc"] or {},
                 bgc_mode_is_marbl=bool((settings["cppdefs"] or {}).get("marbl", False)),
+            )
+        except ValueError as exc:
+            errors.append(str(exc))
+    # And the restoring-flux output vs the restoring terms (surf_flux vs cppdefs).
+    if "surf_flux" in settings and "cppdefs" in settings:
+        try:
+            check_restoring_flux_output(
+                settings["surf_flux"] or {},
+                sal_restore=bool((settings["cppdefs"] or {}).get("sal_restore", False)),
+                settings_cls=settings_cls,
             )
         except ValueError as exc:
             errors.append(str(exc))

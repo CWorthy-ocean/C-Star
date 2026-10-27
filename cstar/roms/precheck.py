@@ -16,8 +16,10 @@ further gated on a ucla-roms compile-time cppdef (``DIAGNOSTICS``, and the
 five MARBL/BGC-diagnostics groups: ``cdr``, the 0.7/0.8-only ``cdrtrc``,
 ``cdrgas``, ``upscale``, and ``bgc``). ucla-roms >= 0.9.0 compiles its
 replacement for ``cdrtrc`` (``&CDR_LITE_OUTPUT_SETTINGS``) unconditionally, so
-it has a second, unguarded ``cdrtrc`` row. :func:`applies_to` owns the
-">= 0.5.0" schema gate.
+it has a second, unguarded ``cdrtrc`` row. ucla-roms >= 0.13.0 writes, and so
+checks, the surface-flux file for any of its four switches, not only
+``wrt_smflx``/``wrt_stflx``, so ``sflx`` has one row per schema range.
+:func:`applies_to` owns the ">= 0.5.0" schema gate.
 
 Rule B -- :func:`check_restart_period_divisible_by_dt` is not a ucla-roms
 abort (ucla-roms' restart trigger is a running-clock threshold, not a
@@ -61,6 +63,7 @@ from cstar.roms.namelist import (
     UCLA_ROMS_0_13_0,
     RomsNamelist,
     RomsNamelistBase,
+    RomsNamelistV0_13_0,
     is_commit_hash,
     roms_version_from_ref,
 )
@@ -161,7 +164,8 @@ class _StreamCheck:
     gate_fields
         Real Fortran namelist key(s), read off ``section``, that gate whether
         ucla-roms writes this stream at all. Combined with ``.or.`` when
-        there is more than one (``sflx``: ``wrt_smflx .or. wrt_stflx``;
+        there is more than one (``sflx``: ``wrt_smflx .or. wrt_stflx`` before
+        ucla-roms 0.13.0, ``do_sflx``'s four switches since;
         ``diagnostics``: ``diag_uv .or. diag_trc``).
     period_field
         Real Fortran namelist key (on ``section``) holding the stream's
@@ -173,6 +177,10 @@ class _StreamCheck:
         Cppdef name(s) that must all be active (looked up in the ``cppdefs``
         mapping) for ucla-roms to even compile this stream's write calls.
         ``()`` for the groups with no cppdef guard.
+    since, before
+        For a row whose gate changed between releases: the namelist schema
+        must subclass ``since`` and must not subclass ``before``. ``None``
+        leaves that side open.
     """
 
     label: str
@@ -181,6 +189,16 @@ class _StreamCheck:
     period_field: str
     nrpf_field: str
     cppdef_guard: tuple[str, ...] = ()
+    since: type[RomsNamelistBase] | None = None
+    before: type[RomsNamelistBase] | None = None
+
+    def applies_to(self, schema: type[RomsNamelistBase] | None) -> bool:
+        """True if this row is in ``schema``'s call list; ``None`` is the newest."""
+        if schema is None:
+            return self.before is None
+        if self.since is not None and not issubclass(schema, self.since):
+            return False
+        return self.before is None or not issubclass(schema, self.before)
 
 
 # The `do_precheck` call list (ucla-roms `src/precheck.F90`), keyed on C-Star's
@@ -239,6 +257,16 @@ _STREAM_CHECKS: tuple[_StreamCheck, ...] = (
         ("wrt_smflx", "wrt_stflx"),
         "output_period_sflx",
         "nrpf_sflx",
+        before=RomsNamelistV0_13_0,
+    ),
+    # ucla-roms >= 0.13.0 (PR #407): `do_sflx`, set by any of the four switches
+    _StreamCheck(
+        "sflx",
+        "surf_flx_output_settings",
+        ("wrt_smflx", "wrt_stflx", "wrt_swflx", "wrt_rstflx"),
+        "output_period_sflx",
+        "nrpf_sflx",
+        since=RomsNamelistV0_13_0,
     ),
     _StreamCheck(
         "particles",
@@ -359,6 +387,8 @@ def _cppdef_guard_satisfied(guard: tuple[str, ...], cppdefs: Mapping[str, Any]) 
 def check_output_streams_divide_rst(
     settings: RomsNamelistBase | Mapping[str, Any],
     cppdefs: Mapping[str, Any] | None = None,
+    *,
+    schema: type[RomsNamelistBase] | None = None,
 ) -> None:
     """Raise ``NamelistConsistencyError`` if any enabled ucla-roms output
     stream's file rollover frequency (``nrpf * output_period``) would not
@@ -390,13 +420,19 @@ def check_output_streams_divide_rst(
         just omit them -- the cppdef-gated groups are then always skipped,
         exactly as ucla-roms itself would (it never compiles their write
         calls).
+    schema
+        The namelist schema of the pinned release, which selects the rows whose
+        gate changed between releases (``sflx``). Defaults to
+        ``type(settings)`` for a live ``RomsNamelistBase``; ``None`` otherwise
+        counts as the newest schema, as a branch pin does.
 
     Notes
     -----
     - Global gate: if ``basic_output_settings.wrt_file_rst`` is false/missing,
       this function returns immediately without checking anything (mirrors
       ``if (.not. wrt_file_rst) return`` in the Fortran).
-    - Each stream is additionally skipped if: its cppdef guard (if any) is
+    - Each stream is additionally skipped if: its row is not in ``schema``'s
+      call list; its cppdef guard (if any) is
       not fully satisfied; its section is absent from ``settings`` (a
       namelist carries only one of the two ``cdrtrc`` groups, which is what
       lets both rows coexist); its own enable gate reads as false (a missing gate
@@ -423,8 +459,12 @@ def check_output_streams_divide_rst(
         return
 
     cppdefs = cppdefs or {}
+    if schema is None and isinstance(settings, RomsNamelistBase):
+        schema = type(settings)
 
     for check in _STREAM_CHECKS:
+        if not check.applies_to(schema):
+            continue
         if check.cppdef_guard and not _cppdef_guard_satisfied(
             check.cppdef_guard, cppdefs
         ):

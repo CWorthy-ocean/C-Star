@@ -4221,6 +4221,32 @@ class TestGoldenNamelist:
         else:
             self._configure_build_for(cfg, builder)
 
+    @pytest.mark.parametrize(
+        ("sal_restore", "rejected"), [(False, True), (True, False)]
+    )
+    def test_configure_build_checks_restoring_flux_output_end_to_end(
+        self, mock_grid, tmp_path, sal_restore, rejected
+    ):
+        """The net for stored blueprints: ``wrt_rstflx`` on a 0.13.0 build that
+        restores nothing, which ucla-roms stops on at startup.
+        """
+        cfg, builder = self._generate_inputs_no_cdr_forcing(
+            mock_grid, tmp_path, model_path=_MODEL_PATH_ROMS0130
+        )
+        rst_period = cfg.model_settings["ocean_vars"]["output_period_rst"]
+        cfg.model_settings["surf_flux"].update(
+            wrt_rstflx=True, output_period=rst_period, nrpf=1
+        )
+        cfg.model_settings["cppdefs"]["sal_restore"] = sal_restore
+
+        if rejected:
+            with pytest.raises(ValueError, match=r"wrt_rstflx .*restores nothing"):
+                self._configure_build_for(cfg, builder)
+        else:
+            self._configure_build_for(cfg, builder)
+            nml = f90nml.read(builder.run_time_code_dir / "namelist.nml")
+            assert nml["surf_flx_output_settings"]["wrt_rstflx"] is True
+
     def test_configure_build_accepts_constant_fe_with_marbl_end_to_end(
         self, mock_grid, tmp_path
     ):

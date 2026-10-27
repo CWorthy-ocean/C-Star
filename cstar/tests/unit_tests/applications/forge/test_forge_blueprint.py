@@ -2779,6 +2779,70 @@ def test_resolver_refuses_a_cdr_average_no_marbl_step_fits():
         _build(model_path=_MODEL_PATH_ROMS0130, dt=480, cdr={"mode": "upscaled"})
 
 
+_RESTORING_FLUX_ON = {"surf_flux": {"wrt_rstflx": True}}
+
+
+def _forcing_without_restoring():
+    """``glorys-era5-unified`` without its SSS restoring source."""
+    forcing = _CATALOG.forcing_data("glorys-era5-unified")
+    forcing["forcing"] = dict(forcing["forcing"])
+    forcing["forcing"]["surface"] = [
+        it for it in forcing["forcing"]["surface"] if it.get("type") != "restoring"
+    ]
+    return forcing
+
+
+def test_resolver_keeps_restoring_flux_output_with_sss_restoring():
+    """``glorys-era5-unified`` restores SSS, the one restoring term a Forge build
+    compiles in (SFLX_CORR), so ucla-roms 0.13.0 writes its restoring flux.
+    """
+    cfg = _build(
+        model_path=_MODEL_PATH_ROMS0130,
+        output_settings=_CATALOG.output_data("daily-restarts"),
+        run_time_overrides=_RESTORING_FLUX_ON,
+    )
+    assert cfg.model_settings["cppdefs"]["sal_restore"] is True
+    assert cfg.model_settings["surf_flux"]["wrt_rstflx"] is True
+
+
+def test_resolver_rejects_restoring_flux_output_without_a_restoring_term():
+    with pytest.raises(ValueError, match=r"wrt_rstflx .*restores nothing"):
+        _build(
+            model_path=_MODEL_PATH_ROMS0130,
+            forcing_inputs=_forcing_without_restoring(),
+            output_settings=_CATALOG.output_data("daily-restarts"),
+            run_time_overrides=_RESTORING_FLUX_ON,
+        )
+
+
+def test_resolver_rejects_restoring_flux_output_before_0_13_0():
+    with pytest.raises(
+        ValueError, match=r"surf_flux\.wrt_rstflx requires ucla-roms >= 0\.13\.0"
+    ):
+        _build(
+            model_path=_MODEL_PATH_ROMS0120,
+            output_settings=_CATALOG.output_data("daily-restarts"),
+            run_time_overrides=_RESTORING_FLUX_ON,
+        )
+
+
+@pytest.mark.parametrize(
+    ("model_path", "rejected"),
+    [(_MODEL_PATH_ROMS0130, True), (_MODEL_PATH_ROMS0120, False)],
+)
+def test_resolver_checks_the_freshwater_flux_file_from_0_13_0(model_path, rejected):
+    """``wrt_swflx`` alone writes the surface-flux file from ucla-roms 0.13.0 (PR
+    #407), which then checks its file length against the restart period: the
+    ``standard`` OutputSpec's ten-year files do not divide its daily restarts.
+    """
+    overrides = {"surf_flux": {"wrt_swflx": True}}
+    if rejected:
+        with pytest.raises(NamelistConsistencyError, match="surf_flx_output_settings"):
+            _build(model_path=model_path, run_time_overrides=overrides)
+    else:
+        _build(model_path=model_path, run_time_overrides=overrides)
+
+
 def test_resolver_0_11_model_spec_carries_the_constant_fe_keys():
     cfg = _build(model_path=_MODEL_PATH_ROMS0110)
     assert cfg.code.roms.commit == "0.11.0"

@@ -21,6 +21,7 @@ from pathlib import Path
 import pytest
 
 from cstar.roms.namelist import (
+    NAMELIST_SCHEMA_REGISTRY,
     RomsNamelist,
     RomsNamelistV0_4_0,
     RomsNamelistV0_5_0,
@@ -44,6 +45,7 @@ from cstar.roms.precheck import (
 V0_5_0_NAMELIST = Path(__file__).parent / "fixtures" / "example_namelist_v0_5_0.nml"
 V0_9_0_NAMELIST = Path(__file__).parent / "fixtures" / "example_namelist_v0_9_0.nml"
 V0_12_0_NAMELIST = Path(__file__).parent / "fixtures" / "example_namelist_v0_12_0.nml"
+V0_13_0_NAMELIST = Path(__file__).parent / "fixtures" / "example_namelist_v0_13_0.nml"
 
 
 def _base_settings(**overrides):
@@ -474,6 +476,15 @@ def _settings_for_row(row, *, nrpf, period):
     return settings
 
 
+def _schema_for_row(row):
+    """The newest registered namelist schema whose call list has `row`."""
+    return next(
+        schema
+        for *_, schema in reversed(NAMELIST_SCHEMA_REGISTRY)
+        if row.applies_to(schema)
+    )
+
+
 def _cppdefs_for_row(row):
     """A cppdefs mapping that satisfies `row`'s cppdef guard (empty if none)."""
     cppdefs = {}
@@ -490,13 +501,17 @@ def test_every_stream_row_raises_when_enabled_active_and_non_dividing(row):
         row, nrpf=_NON_DIVIDING_NRPF, period=_NON_DIVIDING_PERIOD
     )
     with pytest.raises(ValueError, match=row.label):
-        check_output_streams_divide_rst(settings, cppdefs=_cppdefs_for_row(row))
+        check_output_streams_divide_rst(
+            settings, cppdefs=_cppdefs_for_row(row), schema=_schema_for_row(row)
+        )
 
 
 @pytest.mark.parametrize("row", _STREAM_CHECKS, ids=lambda r: r.label)
 def test_every_stream_row_passes_when_enabled_active_and_dividing(row):
     settings = _settings_for_row(row, nrpf=_DIVIDING_NRPF, period=_DIVIDING_PERIOD)
-    check_output_streams_divide_rst(settings, cppdefs=_cppdefs_for_row(row))
+    check_output_streams_divide_rst(
+        settings, cppdefs=_cppdefs_for_row(row), schema=_schema_for_row(row)
+    )
 
 
 @pytest.mark.parametrize(
@@ -510,7 +525,52 @@ def test_every_guarded_row_skipped_when_cppdef_inactive(row):
     settings = _settings_for_row(
         row, nrpf=_NON_DIVIDING_NRPF, period=_NON_DIVIDING_PERIOD
     )
-    check_output_streams_divide_rst(settings, cppdefs={})
+    check_output_streams_divide_rst(settings, cppdefs={}, schema=_schema_for_row(row))
+
+
+@pytest.mark.parametrize("switch", ["wrt_swflx", "wrt_rstflx"])
+@pytest.mark.parametrize(
+    ("schema", "checked"),
+    [(RomsNamelistV0_12_0, False), (RomsNamelistV0_13_0, True), (None, True)],
+)
+def test_sflx_gate_counts_every_switch_from_0_13_0(switch, schema, checked):
+    """ucla-roms >= 0.13.0 (PR #407) writes the surface-flux file, and checks its
+    period, for any of its four switches; earlier releases only for
+    `wrt_smflx` or `wrt_stflx`. No schema counts as the newest.
+    """
+    settings = {
+        "basic_output_settings": {"wrt_file_rst": True, "output_period_rst": 86400},
+        "surf_flx_output_settings": {
+            switch: True,
+            "output_period_sflx": 1000,
+            "nrpf_sflx": 3,
+        },
+    }
+    if checked:
+        with pytest.raises(NamelistConsistencyError, match="surf_flx_output_settings"):
+            check_output_streams_divide_rst(settings, cppdefs={}, schema=schema)
+    else:
+        check_output_streams_divide_rst(settings, cppdefs={}, schema=schema)
+
+
+@pytest.mark.parametrize(
+    ("schema", "fixture", "checked"),
+    [
+        (RomsNamelistV0_12_0, V0_12_0_NAMELIST, False),
+        (RomsNamelistV0_13_0, V0_13_0_NAMELIST, True),
+    ],
+)
+def test_live_namelist_sflx_gate_follows_its_schema(schema, fixture, checked):
+    """A live namelist selects its rows by its own type."""
+    nml = schema.read(fixture)
+    nml.surf_flx_output_settings.wrt_swflx = True
+    nml.surf_flx_output_settings.nrpf_sflx = 3
+    nml.surf_flx_output_settings.output_period_sflx = 1000
+    if checked:
+        with pytest.raises(NamelistConsistencyError, match="surf_flx_output_settings"):
+            check_output_streams_divide_rst(nml, cppdefs={})
+    else:
+        check_output_streams_divide_rst(nml, cppdefs={})
 
 
 def test_live_namelist_conforming_passes():

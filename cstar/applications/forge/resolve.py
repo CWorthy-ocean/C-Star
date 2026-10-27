@@ -82,6 +82,7 @@ from cstar.applications.forge.namelist_model import (
     check_marbl_only_outputs,
     check_marbl_step_averages,
     check_output_streams_divide_rst,
+    check_restoring_flux_output,
     check_rst_period_divisible,
     check_upscaled_cdr_lite_tracer_counts,
     cppdefs_for_precheck,
@@ -1390,6 +1391,15 @@ def build_forge_blueprint(
         bgc_mode_is_marbl=settings["cppdefs"].get("marbl", False),
     )
 
+    # ----- restoring-flux output needs a restoring term ----------------------
+    # ucla-roms >= 0.13.0 stops at startup on wrt_rstflx without one; in a Forge
+    # build that is SSS restoring (cppdefs.sal_restore, derived above).
+    check_restoring_flux_output(
+        settings.get("surf_flux") or {},
+        sal_restore=settings["cppdefs"].get("sal_restore", False),
+        settings_cls=settings_cls,
+    )
+
     # ----- restart period consistency ----------------------------------------
     # Fail fast at authoring time (mirrors the executor's net for hand-edited
     # blueprints): restart writes must land on a timestep.
@@ -1436,6 +1446,7 @@ def build_forge_blueprint(
                 cppdefs_for_precheck(
                     settings.get("cppdefs", {}), settings.get("upscale_output", {})
                 ),
+                settings_cls=settings_cls,
             )
         except NamelistConsistencyError as exc:
             if exc.section == "extract_data_settings":

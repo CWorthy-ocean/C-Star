@@ -54,6 +54,7 @@ from cstar.applications.forge.namelist_model import (
     check_marbl_only_outputs,
     check_marbl_step_averages,
     check_output_streams_divide_rst,
+    check_restoring_flux_output,
     check_river_tracer_counts,
     check_rst_period_divisible,
     check_upscaled_cdr_lite_tracer_counts,
@@ -2621,6 +2622,14 @@ class ForgeExecutor(BaseModel):
             bgc_mode_is_marbl=cppdefs.get("marbl", False),
         )
 
+        # Restoring-flux output net, mirroring the resolver's, on the cppdefs
+        # generation left (it sets sal_restore for an SSS restoring file).
+        check_restoring_flux_output(
+            self._settings_run_time.get("surf_flux") or {},
+            sal_restore=cppdefs.get("sal_restore", False),
+            settings_cls=settings_cls,
+        )
+
         # Derive n_tracers up front: prefer the value passed by the caller;
         # otherwise derive it from the live run-time settings (T + S + BGC +
         # passive + CDR tracers), which carry the CDR tracer counts the generation
@@ -2672,6 +2681,7 @@ class ForgeExecutor(BaseModel):
                     self._settings_compile_time.get("cppdefs", {}),
                     self._settings_run_time.get("upscale_output", {}),
                 ),
+                settings_cls=settings_cls,
             )
         # Averaged MARBL streams vs the MARBL timestep net (ucla-roms >= 0.13.0's
         # check_avg_ends_on_marbl_step), mirroring the resolver's guard for stored

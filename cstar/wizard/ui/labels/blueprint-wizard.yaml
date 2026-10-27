@@ -980,7 +980,7 @@ fields:
     label: Restoring tracer flux
     symbol: wrt_rstflx
   settings.surf_flux.wrt_swflx:
-    label: Shortwave flux
+    label: Freshwater flux (P-E)
     symbol: wrt_swflx
   settings.surf_flux.sflx_avg:
     label: Write averages

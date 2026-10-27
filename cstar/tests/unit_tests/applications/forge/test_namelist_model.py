@@ -7,12 +7,13 @@ Tests for the Pydantic namelist/settings models (``cstar.applications.forge.name
 * defaults come from the YAML, not the models
 """
 
+import re
 from pathlib import Path
 from unittest import mock
 
 import pytest
 import yaml
-from pydantic import ValidationError
+from pydantic import TypeAdapter, ValidationError
 
 import cstar.catalog
 from cstar.applications.forge.namelist_model import (
@@ -57,6 +58,7 @@ from cstar.applications.forge.namelist_model import (
     check_cdr_output_sections,
     check_constant_fe,
     check_marbl_only_outputs,
+    check_restoring_flux_output,
     check_river_tracer_counts,
     check_upscaled_cdr_lite_tracer_counts,
     n_tracers_from_param,
@@ -2485,3 +2487,85 @@ def test_precheck_sections_match_what_build_namelist_writes(roms_ref):
     for group, keys in canonical.items():
         written = getattr(nml, group).model_dump()
         assert keys == {k: written[k] for k in keys}, (roms_ref, group)
+
+
+def _surf_flux(**switches):
+    """The bundled ``daily-restarts`` surface-flux section with ``switches`` set."""
+    return {**default_catalog.output_data("daily-restarts")["surf_flux"], **switches}
+
+
+@pytest.mark.parametrize("settings_cls", _ALL_SETTINGS_TIERS[:-1])
+def test_pre_0_13_0_tiers_reject_wrt_rstflx(settings_cls):
+    """ucla-roms < 0.13.0 reads ``wrt_rstflx`` but writes no restoring flux."""
+    annotation = settings_cls.model_fields["surf_flux"].annotation
+    with pytest.raises(
+        ValidationError, match=r"surf_flux\.wrt_rstflx requires ucla-roms >= 0\.13\.0"
+    ):
+        TypeAdapter(annotation).validate_python(_surf_flux(wrt_rstflx=True))
+    TypeAdapter(annotation).validate_python(_surf_flux(wrt_rstflx=False))
+
+
+def test_0_13_0_tier_writes_wrt_rstflx():
+    d = _populated_rt_dict()
+    d["surf_flux"] = _surf_flux(wrt_rstflx=True)
+    nml = build_namelist(RunTimeSettingsV0_13_0.model_validate(d), 7)
+    assert nml.surf_flx_output_settings.wrt_rstflx is True
+
+
+@pytest.mark.parametrize(
+    ("settings_cls", "sal_restore", "rejected"),
+    [
+        (RunTimeSettingsV0_13_0, False, True),
+        (RunTimeSettingsV0_13_0, True, False),
+        # The tier refuses the switch itself (test_pre_0_13_0_tiers_reject_wrt_rstflx).
+        (RunTimeSettingsV0_12_0, False, False),
+    ],
+)
+def test_check_restoring_flux_output_needs_a_restoring_term(
+    settings_cls, sal_restore, rejected
+):
+    """ucla-roms >= 0.13.0 stops at startup on ``wrt_rstflx`` with no restoring term
+    compiled in; SSS restoring (SFLX_CORR) is the one a Forge build can have.
+    """
+    surf_flux = _surf_flux(wrt_rstflx=True)
+    if rejected:
+        with pytest.raises(ValueError, match=r"wrt_rstflx .*restores nothing"):
+            check_restoring_flux_output(
+                surf_flux, sal_restore=sal_restore, settings_cls=settings_cls
+            )
+    else:
+        check_restoring_flux_output(
+            surf_flux, sal_restore=sal_restore, settings_cls=settings_cls
+        )
+    check_restoring_flux_output(
+        _surf_flux(wrt_rstflx=False), sal_restore=False, settings_cls=settings_cls
+    )
+
+
+@pytest.mark.parametrize(
+    ("roms_ref", "expected"),
+    [
+        ("0.13.0", r"wrt_rstflx .*restores nothing"),
+        ("0.12.0", r"surf_flux\.wrt_rstflx requires ucla-roms >= 0\.13\.0"),
+    ],
+)
+def test_validate_run_time_sections_reports_the_restoring_flux_switch(
+    roms_ref, expected
+):
+    """Stored blueprints fail before generation, with one error naming the fix."""
+    errors = validate_run_time_sections(
+        {"surf_flux": _surf_flux(wrt_rstflx=True), "cppdefs": {"sal_restore": False}},
+        roms_ref=roms_ref,
+    )
+    assert len(errors) == 1, errors
+    assert re.search(expected, errors[0]), errors
+    assert (
+        validate_run_time_sections(
+            {
+                "surf_flux": _surf_flux(wrt_rstflx=True),
+                "cppdefs": {"sal_restore": True},
+            },
+            roms_ref="0.13.0",
+        )
+        == []
+    )
