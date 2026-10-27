@@ -28,6 +28,7 @@ dependencies:
   # toolchain: provided by modules on HPC
   - compilers
   - cmake
+  - pkg-config   # ParallelIO's CMake configure needs it (find_package(PkgConfig))
   - mpich
   # mpicc / mpifort flavors needed to ensure we get the matching compilers on macos
   - mpich-mpicc
