@@ -531,6 +531,13 @@ Improvements
   - When ROMS starts outside a scheduler job on such a cluster's login node, C-Star warns once; ``CSTAR_ALLOW_LOGIN_NODE_RUN=1`` silences it.
   - Running a workplan there warns that every step runs on the node where you started it.
 
+- The wizard shows "Interpolate carbonate sensitivities in time" in the Model card's Carbonate sensitivities group, below the sensitivity source and files. (`#855 <https://github.com/CWorthy-ocean/C-Star/pull/855>`_)
+
+  - A note under the switch says to leave it off for time-averaged sensitivity files and turn it on for instantaneous ones.
+  - In ``cdr_lite`` mode the wizard starts the switch off, because UCLA-ROMS writes the sensitivities time-averaged by default (``wrt_cdr_gas_avg``).
+  - Your own choice, and the value in a loaded blueprint, are kept.
+
+
 
 
 
@@ -652,4 +659,5 @@ Miscellaneous
 - The Tier 3 nesting test requires the CDR closure residual to be under 0.1 % of the uptake (was 10 %), or under 15 % for ucla-roms 0.11.0 and 0.12.0, whose upscaling export leaves out the mixing flux. (`#843 <https://github.com/CWorthy-ocean/C-Star/pull/843>`_)
 - Bundled specs and the integration-test catalog carry ``schema_version``; the catalog page and the contributing guide's compatibility section describe spec versions and spec migrations. (`#850 <https://github.com/CWorthy-ocean/C-Star/pull/850>`_)
 - New "On a cluster that isn't listed" section on the supported machines page, with pointers from the installation and system registration pages. (`#852 <https://github.com/CWorthy-ocean/C-Star/pull/852>`_)
+- The wizard page of the docs describes the switch and its default. (`#855 <https://github.com/CWorthy-ocean/C-Star/pull/855>`_)
 
