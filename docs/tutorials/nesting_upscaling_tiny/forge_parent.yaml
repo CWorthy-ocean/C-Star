@@ -506,16 +506,16 @@ code:
     branch: null
   templates_compile_time:
     location: https://github.com/CWorthy-ocean/C-Star.git
-    commit: d35d06265515965c7daaa54c111ee0185166bca4
+    commit: d47142ec249bce91aac938030dfd5ea3f7dacfd4
     branch: null
     directory: cstar/additional_files/templates/forge/compile-time
     files:
     - cppdefs.opt.j2
     file_hashes:
-      cppdefs.opt.j2: 115f044081ac9c04c8803ae2d83a6e6f39a92da83c2caf7b305a7cb8b1bbfbdd
+      cppdefs.opt.j2: 7665373d4eaad6d94215660775ca66dd87f1c2309e15edc0039c9051b20b0f00
   templates_run_time:
     location: https://github.com/CWorthy-ocean/C-Star.git
-    commit: d35d06265515965c7daaa54c111ee0185166bca4
+    commit: d47142ec249bce91aac938030dfd5ea3f7dacfd4
     branch: null
     directory: cstar/additional_files/templates/forge/run-time
     files:
@@ -551,5 +551,5 @@ provenance:
   cstar_version: null
   roms_tools_version: null
   override_files_applied: []
-  content_hash: bp-v2:6856d000d20f373a7de9186b8aaf1175db78e77ba053e5199743cdca4bc023ad
+  content_hash: bp-v2:c583378fe61257270148c0f7eef592d9075d093370f6ebc87c907ddcd395c6d0
   notes: null
