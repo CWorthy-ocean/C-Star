@@ -31,6 +31,7 @@ from cstar.orchestration.manifest import (
 )
 from cstar.orchestration.models import BlueprintIdentity
 from cstar.orchestration.orchestration import ProcessHandle, Status
+from cstar.orchestration.promotion import staging_dir
 from cstar.orchestration.run_check import Finding, FindingKind, RunCheckReport
 from cstar.orchestration.serialization import serialize
 from cstar.orchestration.state import StateRepository
@@ -356,6 +357,24 @@ def test_a_copy_still_leaves_a_stray_file_behind(
     assert not (
         project_runs / built.run_id / "tasks" / "spin-up" / "output" / "extra.txt"
     ).exists()
+
+
+def test_a_yml_transformed_workplan_of_cstar_0_17_is_copied(
+    elsewhere: t.Callable[..., BuiltRun], project_runs: Path
+) -> None:
+    """Verify an untracked run whose plan 0.17 named `<stem>_transformed.yml` is
+    promoted with it, and the copy is found by its directory.
+    """
+    built = elsewhere()
+    plan = built.root / f"{built.run_id}_transformed.yaml"
+    yml = plan.rename(plan.with_suffix(".yml"))
+
+    result = invoke("promote", str(built.root))
+
+    assert result.exit_code == 0, result.output + result.stderr
+    destination = project_runs / built.run_id
+    assert (destination / yml.name).is_file()
+    assert not (destination / plan.name).exists()
 
 
 def test_a_second_transformed_workplan_is_refused_before_the_copy(
@@ -726,6 +745,103 @@ def test_gathered_output_is_rebuilt_in_the_copy(
     link = destination / "gathered_output" / "only.dat"
     assert link.is_symlink()
     assert link.resolve() == (destination / "tasks" / "spin-up" / PRODUCT).resolve()
+
+
+def test_a_failed_copy_exits_1_and_leaves_nothing(
+    elsewhere: t.Callable[..., BuiltRun],
+    project_runs: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Verify a file system error while copying is one line and exit 1, not a traceback."""
+    built = elsewhere()
+    destination = project_runs / built.run_id
+
+    def refuse(source: Path, target: Path) -> t.NoReturn:
+        raise OSError("no space left on device")
+
+    monkeypatch.setattr("cstar.orchestration.promotion._copy_file", refuse)
+
+    result = invoke("promote", str(built.root))
+
+    assert result.exit_code == 1
+    assert isinstance(result.exception, SystemExit)
+    message = result.stderr.strip()
+    assert message == "Error: no space left on device"
+    assert not destination.exists()
+    assert not staging_dir(destination).exists()
+
+
+@pytest.mark.parametrize("extra", [[], ["--dry-run"]])
+def test_a_step_directory_outside_the_run_exits_1(
+    elsewhere: t.Callable[..., BuiltRun],
+    project_runs: Path,
+    flatten_cli_output: t.Callable[[str], str],
+    extra: list[str],
+) -> None:
+    """Verify a manifest that records an absolute step directory is one line and exit 1."""
+    built = elsewhere()
+    manifest = read_run_manifest(built.root)
+    assert manifest is not None
+    manifest.steps[0].working_dir = str(built.step_dir(STEP))
+    write_run_manifest(built.root, manifest)
+
+    result = invoke("promote", str(built.root), *extra)
+
+    assert result.exit_code == 1, result.output + result.stderr
+    assert isinstance(result.exception, SystemExit)
+    message = flatten_cli_output(result.stderr)
+    assert message.startswith("Error: The path ")
+    assert "leaves the run directory" in message
+    assert "\n" not in result.stderr.strip()
+    assert not project_runs.exists()
+
+
+def test_a_failure_after_the_copy_says_where_the_copy_is(
+    elsewhere: t.Callable[..., BuiltRun],
+    project_runs: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    flatten_cli_output: t.Callable[[str], str],
+) -> None:
+    """Verify an error after the copy was renamed into place names the copy, exit 1."""
+    built = elsewhere()
+    (built.root / "gathered_output").mkdir()
+    destination = project_runs / built.run_id
+
+    def refuse(*args: t.Any, **kwargs: t.Any) -> t.NoReturn:
+        raise OSError("permission denied")
+
+    monkeypatch.setattr("cstar.cli.run.promote._regather", refuse)
+
+    result = invoke("promote", str(built.root))
+
+    assert result.exit_code == 1
+    assert isinstance(result.exception, SystemExit)
+    message = flatten_cli_output(result.stderr)
+    assert message == (
+        f"Copied to {destination}, but the promotion did not finish: permission denied"
+    )
+    assert destination.is_dir()
+    assert built.root.is_dir()
+
+
+def test_a_link_that_cannot_be_made_exits_1(
+    elsewhere: t.Callable[..., BuiltRun],
+    project_runs: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Verify a file system error while linking is one line and exit 1, not a traceback."""
+    built = elsewhere()
+
+    def refuse(*args: t.Any, **kwargs: t.Any) -> t.NoReturn:
+        raise PermissionError("read-only file system")
+
+    monkeypatch.setattr("cstar.cli.run.promote.link_run", refuse)
+
+    result = invoke("promote", str(built.root), "--mode", "link")
+
+    assert result.exit_code == 1
+    assert isinstance(result.exception, SystemExit)
+    assert result.stderr.strip() == "Error: read-only file system"
 
 
 def test_an_unknown_include_is_refused(

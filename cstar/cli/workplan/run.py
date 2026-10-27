@@ -97,7 +97,11 @@ from cstar.orchestration.serialization import (
     try_deserialize,
     validate_serialized_entity,
 )
-from cstar.orchestration.tracking import TrackingRepository, WorkplanRun
+from cstar.orchestration.tracking import (
+    TrackingRepository,
+    WorkplanRun,
+    require_relaunchable,
+)
 from cstar.orchestration.transforms import (
     PLACEHOLDER_RE,
     anchor_blueprint_path,
@@ -773,14 +777,10 @@ async def handle_run_reloading(run_id: str) -> WorkplanRun:
     if wp_run is None:
         msg = f"No runs with the id `{run_id}` could be found."
         raise typer.BadParameter(msg)
-    if wp_run.attached:
-        msg = (
-            f"Run {run_id!r} was attached from {wp_run.output_path}: attached runs "
-            "can be inspected and referenced, and relaunching after a move is not "
-            "supported. Start a new run with `--run-id <new>` that references it "
-            "(see 'Extending a finished run' in the workplan docs)."
-        )
-        raise typer.BadParameter(msg)
+    try:
+        require_relaunchable(wp_run)
+    except CstarExpectationFailed as ex:
+        raise typer.BadParameter(str(ex)) from ex
 
     try:
         source = wp_run.workplan_path

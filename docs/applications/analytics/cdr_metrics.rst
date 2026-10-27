@@ -173,14 +173,16 @@ mark each parent with ``source_role: transfer``:
 Each domain is analysed on its own grid, and the results are combined with roms-tools'
 ``UpscaledCDR``: the CO2 uptake of all domains is summed, and the efficiency is the total
 uptake divided by the cumulative source of the release domain only, so the transferred
-alkalinity is not counted twice. ``cdr_metrics.nc`` then also holds each domain's
+alkalinity is not counted twice. With roms-tools 5.3.0 or later, each domain's uptake
+leaves out its outermost row of cells on every side. In a child, the perturbation in that
+row has already been handed to the parent, so it is counted once, in the parent.
+``cdr_metrics.nc`` then also holds each domain's
 uptake series and two diagnostics. ``closure_residual`` is the combined flux-based minus
 DIC-difference-based uptake; the two are independent views of the same perturbation, so a
 residual small against the uptake is the sign that the domains were combined
 consistently. ``<parent>_DIC_difference_inside_<child>`` is the DIC perturbation a parent
-carries in its cells inside the child's footprint. It is normally nonzero: the upscaler
-re-injects what leaves the child along the child's boundary, which lies inside that
-footprint, and the child's own inventory no longer holds it. A parent must be a MARBL
+carries in its cells inside the child's interior. It is small but normally nonzero, because
+anomaly that enters the parent along the child's boundary can spread into those cells. A parent must be a MARBL
 run writing ``_cdr`` output; a CDR-lite parent writes ``_cdrtrc`` output, which the
 metrics cannot use.
 
