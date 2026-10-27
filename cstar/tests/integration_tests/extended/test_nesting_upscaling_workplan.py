@@ -17,6 +17,7 @@ import re
 import shutil
 import time
 import typing as t
+import warnings
 from collections.abc import Iterator, Sequence
 from dataclasses import dataclass
 from datetime import datetime
@@ -37,6 +38,7 @@ from cstar.applications.upscaler import (
 )
 from cstar.base.utils import slugify
 from cstar.orchestration.launch.local import find_timeout_exe
+from cstar.roms.namelist import RomsNamelistV0_13_0, namelist_schema_for_ref
 from cstar.tests.integration_tests.cases import ROMS_REF
 from cstar.tests.integration_tests.cli_harness import (
     DONE,
@@ -208,13 +210,47 @@ def with_registry_sources(
     return blueprint
 
 
+def without_v_sponge_trc_before_0_13(
+    blueprint: dict[str, t.Any], roms_ref: str
+) -> dict[str, t.Any]:
+    """Drop ``v_sponge_trc`` from ``blueprint`` when ``roms_ref`` predates ucla-roms 0.13.0.
+
+    The example's child sets ``v_sponge_trc: 0.0`` (a sponge on currents only), a key
+    that releases before 0.13.0 stop on and that Forge rejects for them. A ref below that
+    tier runs the full sponge, as the example did before the key existed, so the key goes
+    from ``model_settings.v_sponge`` and from ``composition.overrides``. The tier is the
+    one C-Star selects for the ref, so a branch such as ``main`` (the newest tier) keeps it.
+
+    Returns
+    -------
+    dict
+        ``blueprint``, changed in place.
+    """
+    # A branch or commit-hash ref selects the newest tier here, so it keeps the key: it must
+    # contain the ucla-roms change that adds v_sponge_trc, or ROMS (or Forge, for a hash
+    # below 0.13.0) stops on it.
+    with warnings.catch_warnings():  # a branch ref warns that it is not a release tag
+        warnings.simplefilter("ignore")
+        schema = namelist_schema_for_ref(roms_ref)
+    if issubclass(schema, RomsNamelistV0_13_0):
+        return blueprint
+    blueprint["model_settings"].get("v_sponge", {}).pop("v_sponge_trc", None)
+    overrides = blueprint.get("composition", {}).get("overrides", {})
+    if "v_sponge" in overrides:
+        overrides["v_sponge"].pop("v_sponge_trc", None)
+        if not overrides["v_sponge"]:
+            del overrides["v_sponge"]
+    return blueprint
+
+
 def write_workplan(path: Path, data: dict[str, Path]) -> Path:
     """Write a copy of the example workplan and its forge blueprints for the run under test.
 
-    The example's forge blueprints come from the bundled ``roms-marbl-0.11-default``
-    ModelSpec, so they build ucla-roms 0.11.0, the default ref of this suite
-    (``PINNED_ROMS_REF``), which conserves the upscaled flux. The weekly workflow sets
-    ``CSTAR_IT_ROMS_REF`` to each ref it covers (0.11.0 and main), so every forge step
+    The example's forge blueprints come from the bundled ``roms-marbl-0.13-default``
+    ModelSpec, so they build ucla-roms 0.13.0 unless ``CSTAR_IT_ROMS_REF`` (default
+    ``PINNED_ROMS_REF``) says otherwise; a ref below 0.13.0 loses the child's
+    ``v_sponge_trc`` (`without_v_sponge_trc_before_0_13`). The weekly workflow sets
+    ``CSTAR_IT_ROMS_REF`` to each ref it covers (0.12.0 and main), so every forge step
     adds ``code.roms.commit`` to its ``blueprint_overrides``: the published blueprints,
     and with them the ROMS the next steps build, are for that ref. The blueprint copies
     sit next to the workplan copy and read the pinned registry data
@@ -233,7 +269,12 @@ def write_workplan(path: Path, data: dict[str, Path]) -> Path:
         blueprint = yaml.safe_load((EXAMPLE_DIR / name).read_text())
         copy = path.parent / name
         copy.write_text(
-            yaml.safe_dump(with_registry_sources(blueprint, data), sort_keys=False)
+            yaml.safe_dump(
+                without_v_sponge_trc_before_0_13(
+                    with_registry_sources(blueprint, data), ROMS_REF
+                ),
+                sort_keys=False,
+            )
         )
         step["blueprint"] = str(copy)
         step["blueprint_overrides"] = {

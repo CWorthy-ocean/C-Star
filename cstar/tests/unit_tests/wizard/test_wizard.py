@@ -32,6 +32,7 @@ from cstar.applications.forge.namelist_model import (
     RunTimeSettingsV0_9_0,
     RunTimeSettingsV0_11_0,
     RunTimeSettingsV0_12_0,
+    RunTimeSettingsV0_13_0,
 )
 from cstar.applications.forge.resolve import build_forge_blueprint, cfl_dt
 from cstar.wizard.wizard import (
@@ -1879,11 +1880,11 @@ class TestBgcModeSettings:
 
 def test_use_pio_chk_default_seeded_from_model_spec():
     """use_pio_chk mirrors bgc_dd: it is seeded from the selected ModelSpec's
-    top-level use_pio (True for roms-marbl-0.12-default, the wizard's default
+    top-level use_pio (True for roms-marbl-0.13-default, the wizard's default
     model; False for cson_roms-marbl_v0.1), and reseeded on a model switch.
     """
     wiz = ForgeBlueprintWizard()
-    assert wiz.model_dd.value == "roms-marbl-0.12-default"
+    assert wiz.model_dd.value == "roms-marbl-0.13-default"
     assert wiz.use_pio_chk.value is True
     assert wiz._model_default_use_pio() is True
 
@@ -1904,15 +1905,15 @@ def test_model_dd_hides_archived_specs_by_default():
     assert set(wiz._dd_values(wiz.model_dd)) == set(wiz.catalog.model_names) - set(
         archived
     )
-    assert wiz.model_dd.value == "roms-marbl-0.12-default"
+    assert wiz.model_dd.value == "roms-marbl-0.13-default"
 
     wiz.show_archived_models.value = True
     assert wiz._dd_values(wiz.model_dd) == list(wiz.catalog.model_names)
-    assert wiz.model_dd.value == "roms-marbl-0.12-default"
+    assert wiz.model_dd.value == "roms-marbl-0.13-default"
     labels = {value: label for label, value in wiz.model_dd.options}
     for name in archived:
         assert labels[name] == f"{name} (bundled, archived)"
-    assert labels["roms-marbl-0.12-default"] == "roms-marbl-0.12-default (bundled)"
+    assert labels["roms-marbl-0.13-default"] == "roms-marbl-0.13-default (bundled)"
 
     wiz.show_archived_models.value = False
     assert set(wiz._dd_values(wiz.model_dd)) == set(wiz.catalog.model_names) - set(
@@ -1946,7 +1947,7 @@ def test_unchecking_show_archived_keeps_an_archived_selection():
     # re-optioning is not a model switch: overrides are kept
     assert wiz._overrides == overrides
 
-    wiz.model_dd.value = "roms-marbl-0.12-default"
+    wiz.model_dd.value = "roms-marbl-0.13-default"
     wiz.show_archived_models.value = True
     wiz.show_archived_models.value = False
     assert "roms-marbl-0.7-default" not in wiz._dd_values(wiz.model_dd)
@@ -1982,7 +1983,7 @@ def test_use_pio_chk_emit_is_unconditional():
     wiz = ForgeBlueprintWizard()
     wiz.start.value = date(2012, 1, 1)
     wiz.end.value = date(2012, 1, 2)
-    # roms-marbl-0.12-default (the default model) declares use_pio: true --
+    # roms-marbl-0.13-default (the default model) declares use_pio: true --
     # exactly the ModelSpec this test guards against: unchecking must emit an
     # explicit False, not fall back to the ModelSpec default.
     assert wiz.use_pio_chk.value is True
@@ -3225,11 +3226,11 @@ def test_output_spec_defaults_to_daily_restarts():
 
 
 def test_default_model_uses_latest_settings_schema():
-    """The default catalog model (``roms-marbl-0.12-default``) is pinned to
-    ucla-roms ``0.12.0`` -- the newest registered schema boundary, which both
+    """The default catalog model (``roms-marbl-0.13-default``) is pinned to
+    ucla-roms ``0.13.0`` -- a registered schema boundary, which both
     the wizard and the executor (``write_roms_namelist`` ->
     ``run_time_settings_for_ref``) resolve to the *latest* known schema
-    (currently ``RunTimeSettingsV0_12_0``), not the legacy one. This is an
+    (currently ``RunTimeSettingsV0_13_0``), not the legacy one. This is an
     intentional behavior change from before this ref-awareness was added (the
     editor used to hardcode legacy ``RunTimeSettings``) -- it pins that the
     wizard now agrees with what the executor will actually write. (The tests in tests/test_forge_blueprint.py
@@ -3240,7 +3241,7 @@ def test_default_model_uses_latest_settings_schema():
     wiz.start.value = date(2012, 1, 1)
     wiz.end.value = date(2012, 1, 2)
     wiz._rebuild()
-    assert wiz._editor_key.settings_cls is RunTimeSettingsV0_12_0
+    assert wiz._editor_key.settings_cls is RunTimeSettingsV0_13_0
     assert ("ocean_vars", "nrpf_rst") not in wiz.editor._widgets
 
 
@@ -3255,6 +3256,7 @@ def test_default_model_uses_latest_settings_schema():
         RunTimeSettingsV0_9_0,
         RunTimeSettingsV0_11_0,
         RunTimeSettingsV0_12_0,
+        RunTimeSettingsV0_13_0,
     ],
 )
 def test_namelist_tooltip_for_every_settings_field(settings_cls):
@@ -3806,6 +3808,10 @@ def test_wizard_editor_cdr_output_streams_gated_by_model_spec_pin():
             "roms-marbl-0.12-default",
             {"cdr_carbonate_sensitivity_time_interpolation": True},
         ),
+        (
+            "roms-marbl-0.13-default",
+            {"cdr_carbonate_sensitivity_time_interpolation": True},
+        ),
     ):
         wiz.model_dd.value = model
         wiz._rebuild()
@@ -4020,6 +4026,93 @@ def test_constant_fe_widgets_absent_for_the_0_10_model():
     assert "use_constant_fe" not in wiz.config.model_settings["marbl_bgc"]
     assert ("marbl_bgc", "use_constant_fe") not in wiz.editor._widgets
     assert ("marbl_bgc", "constant_fe_value") not in wiz.editor._widgets
+
+
+_V_SPONGE_TRC_KEY = ("v_sponge", "v_sponge_trc")
+
+
+def test_v_sponge_trc_widget_built_for_the_0_13_model():
+    """``v_sponge.v_sponge_trc`` (ucla-roms >= 0.13.0) gets an Advanced-settings
+    widget in the Physics pane for ``roms-marbl-0.13-default``, which declares it:
+    the label comes from the labels file (symbol + unit appended), the tooltip from
+    the C-Star field docstring. ``v_sponge`` itself keeps its dedicated widget and
+    gets no accordion one.
+    """
+    wiz = ForgeBlueprintWizard()
+    wiz.start.value = date(2012, 1, 1)
+    wiz.end.value = date(2012, 1, 2)
+    wiz.model_dd.value = "roms-marbl-0.13-default"
+    wiz._rebuild()
+    assert wiz.config is not None
+    assert wiz._editor_key.settings_cls is RunTimeSettingsV0_13_0
+    assert wiz.config.model_settings["v_sponge"]["v_sponge_trc"] == -1.0
+
+    widget, _ = wiz.editor._widgets[_V_SPONGE_TRC_KEY]
+    assert widget.value == -1.0
+    assert widget.description == "Sponge tracer diffusivity (m²/s)"
+    assert widget.tooltip.startswith("v_sponge_trc")
+    assert "0 for a sponge on currents only" in widget.tooltip
+    assert ("v_sponge", "v_sponge") not in wiz.editor._widgets
+    assert "v_sponge" in wiz.editor._pane_sections["Physics & subgrid tuning"]
+
+
+def test_v_sponge_trc_widget_absent_for_the_0_12_model():
+    """``roms-marbl-0.12-default`` pins a ucla-roms that stops on the unknown key:
+    its ModelSpec does not declare it, so the editor builds no widget (and the
+    section, whose ``v_sponge`` has its own widget, no pane entry).
+    """
+    wiz = ForgeBlueprintWizard()
+    wiz.start.value = date(2012, 1, 1)
+    wiz.end.value = date(2012, 1, 2)
+    wiz.model_dd.value = "roms-marbl-0.12-default"
+    wiz._rebuild()
+    assert wiz.config is not None
+    assert "v_sponge_trc" not in wiz.config.model_settings["v_sponge"]
+    assert _V_SPONGE_TRC_KEY not in wiz.editor._widgets
+    assert "v_sponge" not in wiz.editor._pane_sections["Physics & subgrid tuning"]
+
+
+def test_v_sponge_trc_edit_reaches_the_blueprint_beside_the_domain_v_sponge():
+    """Editing the widget records an override that lands in ``model_settings`` next
+    to the grid-derived ``v_sponge`` (which it neither replaces nor reads), and
+    loading the saved blueprint rebuilds the same override.
+    """
+    wiz = ForgeBlueprintWizard()
+    wiz.start.value = date(2012, 1, 1)
+    wiz.end.value = date(2012, 1, 2)
+    wiz.model_dd.value = "roms-marbl-0.13-default"
+    wiz._rebuild()
+    assert wiz.config is not None
+    v_sponge = wiz.config.model_settings["v_sponge"]["v_sponge"]
+
+    widget, _ = wiz.editor._widgets[_V_SPONGE_TRC_KEY]
+    widget.value = 0.0
+    assert wiz._overrides[_V_SPONGE_TRC_KEY] == 0.0
+    assert wiz.config is not None
+    assert wiz.config.model_settings["v_sponge"] == {
+        "v_sponge": v_sponge,
+        "v_sponge_trc": 0.0,
+    }
+
+    from cstar.wizard.wizard import _diff_overrides
+
+    composed = wiz.config.model_settings
+    spec_default = {
+        **composed,
+        "v_sponge": {"v_sponge": v_sponge, "v_sponge_trc": -1.0},
+    }
+    assert _diff_overrides(composed, spec_default) == {_V_SPONGE_TRC_KEY: 0.0}
+
+
+def test_saving_a_model_spec_keeps_v_sponge_trc_and_drops_the_derived_v_sponge():
+    from cstar.wizard.wizard import _model_owned_settings
+
+    owned = _model_owned_settings(
+        {"v_sponge": {"v_sponge": 4000.0, "v_sponge_trc": 0.0}}
+    )
+    assert owned["v_sponge"] == {"v_sponge_trc": 0.0}
+    # a spec without the key (ucla-roms < 0.13.0) keeps no section at all
+    assert "v_sponge" not in _model_owned_settings({"v_sponge": {"v_sponge": 4000.0}})
 
 
 def test_constant_fe_value_hidden_until_use_constant_fe_is_on():

@@ -28,7 +28,7 @@ jobs:
       matrix:
         os: [ubuntu-latest, macos-latest]
         python-version: ["3.12", "3.13", "3.14"]
-        roms_ref: ["0.12.0", "main"]
+        roms_ref: ["0.13.0", "main"]
         # macOS runs only the newest Python, against both ucla-roms refs
         exclude:
           - os: macos-latest

@@ -87,6 +87,9 @@ _MODEL_PATH_ROMS0100 = _BUNDLED_CATALOG / "ModelSpec" / "roms-marbl-0.10-default
 # test below.
 _MODEL_PATH_ROMS0110 = _BUNDLED_CATALOG / "ModelSpec" / "roms-marbl-0.11-default.yaml"
 _MODEL_PATH_ROMS0120 = _BUNDLED_CATALOG / "ModelSpec" / "roms-marbl-0.12-default.yaml"
+# ucla-roms >= 0.13.0 ModelSpec (adds v_sponge.v_sponge_trc to &V_SPONGE_SETTINGS) --
+# used by the versioned-namelist golden test below.
+_MODEL_PATH_ROMS0130 = _BUNDLED_CATALOG / "ModelSpec" / "roms-marbl-0.13-default.yaml"
 _GRID_KWARGS = dict(
     nx=6,
     ny=2,
@@ -2554,7 +2557,290 @@ def test_golden_model_settings_test_tiny_roms0120():
     )
 
 
+def test_golden_model_settings_test_tiny_roms0130():
+    """Behavior-preservation snapshot for the ``roms-marbl-0.13-default`` ModelSpec
+    (ucla-roms >= 0.13.0), resolved from the same test-tiny domain/forcing/output
+    setup as ``test_golden_model_settings_test_tiny_roms0120``.
+
+    The difference from that fixture is ``v_sponge.v_sponge_trc``, which the
+    ModelSpec declares (-1: tracers get ``v_sponge``, the ucla-roms reference
+    value). Regenerate the fixture with
+    ``json.dumps(cfg.model_settings, indent=2, sort_keys=True, default=str)``
+    plus a trailing newline, from ``_build(model_path=_MODEL_PATH_ROMS0130)``.
+    """
+    import json
+
+    golden_path = (
+        Path(__file__).parent
+        / "fixtures"
+        / "golden_model_settings_test-tiny-roms0130.json"
+    )
+    golden = json.loads(golden_path.read_text())
+    cfg = _build(model_path=_MODEL_PATH_ROMS0130)  # test-tiny, dt=7200
+    got = json.loads(json.dumps(cfg.model_settings, sort_keys=True, default=str))
+    assert got == golden, (
+        "Resolved model_settings for test-tiny (roms-marbl-0.13-default) drifted "
+        "from the golden fixture. If this is an intentional schema/default "
+        "change, regenerate tests/fixtures/golden_model_settings_test-tiny-"
+        "roms0130.json; otherwise the change is a regression in the settings the "
+        "executor feeds to namelist.nml / cppdefs.opt."
+    )
+
+
+def test_resolver_0_13_model_spec_carries_v_sponge_trc_beside_the_derived_v_sponge():
+    """v_sponge stays domain-owned (derived from the grid spacing); v_sponge_trc is
+    the ModelSpec's, and is not derived.
+    """
+    cfg = _build(model_path=_MODEL_PATH_ROMS0130)
+    assert cfg.code.roms.commit == "0.13.0"
+    assert cfg.model_settings["v_sponge"] == {
+        "v_sponge": cfg.domain.v_sponge,
+        "v_sponge_trc": -1.0,
+    }
+
+
+def test_resolver_pre_0_13_model_specs_have_no_v_sponge_trc():
+    cfg = _build(model_path=_MODEL_PATH_ROMS0120)
+    assert cfg.model_settings["v_sponge"] == {"v_sponge": cfg.domain.v_sponge}
+
+
+def _model_spec_with_v_sponge_trc(tmp_path: Path, value: float) -> Path:
+    spec = yaml.safe_load(_MODEL_PATH_ROMS0130.read_text())
+    spec["model_settings"]["v_sponge"]["v_sponge_trc"] = value
+    path = tmp_path / "roms-marbl-0.13-sponge.yaml"
+    path.write_text(yaml.safe_dump(spec))
+    return path
+
+
+@pytest.mark.parametrize("explicit_v_sponge", [None, 123.0])
+def test_resolver_keeps_a_model_spec_v_sponge_trc_beside_the_domain_v_sponge(
+    tmp_path, explicit_v_sponge
+):
+    """The resolver replaces the section's ``v_sponge`` leaf with the domain's
+    (grid-derived, or the caller's explicit value) and keeps the rest: a
+    ModelSpec's ``v_sponge_trc`` must not be dropped with the section.
+    """
+    path = _model_spec_with_v_sponge_trc(tmp_path, 0.0)
+    cfg = _build(model_path=path, v_sponge=explicit_v_sponge)
+    section = cfg.model_settings["v_sponge"]
+    assert section["v_sponge_trc"] == 0.0
+    assert section["v_sponge"] == cfg.domain.v_sponge
+    if explicit_v_sponge is not None:
+        assert section["v_sponge"] == explicit_v_sponge
+
+
+def test_resolver_domain_v_sponge_wins_over_the_model_spec_leaf(tmp_path):
+    spec = yaml.safe_load(_MODEL_PATH_ROMS0130.read_text())
+    spec["model_settings"]["v_sponge"]["v_sponge"] = 1.0
+    path = tmp_path / "spec.yaml"
+    path.write_text(yaml.safe_dump(spec))
+    cfg = _build(model_path=path)
+    assert cfg.model_settings["v_sponge"]["v_sponge"] == cfg.domain.v_sponge != 1.0
+
+
+def test_v_sponge_trc_override_survives_into_model_settings():
+    """An override ``v_sponge: {v_sponge_trc: 0.0}`` (currents-only sponge) lands
+    beside the derived ``v_sponge``, which it does not replace, and the domain
+    keeps the same ``v_sponge``.
+    """
+    cfg = _build(
+        model_path=_MODEL_PATH_ROMS0130,
+        run_time_overrides={"v_sponge": {"v_sponge_trc": 0.0}},
+    )
+    assert cfg.model_settings["v_sponge"] == {
+        "v_sponge": cfg.domain.v_sponge,
+        "v_sponge_trc": 0.0,
+    }
+    problems = validate_run_time_sections(
+        cfg.model_settings, roms_ref=cfg.code.roms.commit
+    )
+    assert problems == []
+
+
+def test_v_sponge_trc_is_not_derived_from_the_grid():
+    """It keeps the ModelSpec's value whatever the grid spacing, unlike v_sponge."""
+    coarse = _build(
+        model_path=_MODEL_PATH_ROMS0130,
+        grid_kwargs={**_GRID_KWARGS, "size_x": 2000, "size_y": 4000},
+    )
+    fine = _build(model_path=_MODEL_PATH_ROMS0130)
+    coarse_v_sponge = coarse.model_settings["v_sponge"]["v_sponge"]
+    assert coarse_v_sponge != fine.model_settings["v_sponge"]["v_sponge"]
+    assert coarse.model_settings["v_sponge"]["v_sponge_trc"] == -1.0
+    assert fine.model_settings["v_sponge"]["v_sponge_trc"] == -1.0
+
+
+def test_requested_v_sponge_trc_on_a_pre_0_13_0_pin_is_reported_by_run_time_validation():
+    """A pre-0.13.0 pin has no tracer sponge of its own: the request is stored in
+    the blueprint's settings, and the validation ``process_forge_blueprint`` runs
+    before any data work reports it, naming the release that supports it.
+    """
+    cfg = _build(
+        model_path=_MODEL_PATH_ROMS0120,
+        run_time_overrides={"v_sponge": {"v_sponge_trc": 0.0}},
+    )
+    problems = validate_run_time_sections(
+        cfg.model_settings, roms_ref=cfg.code.roms.commit
+    )
+    assert len(problems) == 1
+    assert "v_sponge.v_sponge_trc=0.0 requires ucla-roms >= 0.13.0" in problems[0]
+
+
+def test_shared_pio_dev_spec_passes_a_pre_0_13_0_pin():
+    """``pio-dev`` carries ``v_sponge_trc: -1`` ("same as v_sponge"); an older
+    ref pinned over it drops the key without complaint.
+    """
+    cfg = _build(
+        model_path=_BUNDLED_CATALOG / "ModelSpec" / "pio-dev.yaml", roms_ref="0.12.0"
+    )
+    assert cfg.model_settings["v_sponge"]["v_sponge_trc"] == -1.0
+    assert validate_run_time_sections(cfg.model_settings, roms_ref="0.12.0") == []
+
+
 _CONSTANT_FE_ON = {"marbl_bgc": {"use_constant_fe": True}}
+
+
+def _bgc_diagnostics_averaged_every(period: float) -> dict:
+    """Run-time overrides turning the ``_bgc_dia_avg`` stream on at ``period``."""
+    return {"bgc": {"wrt_avg_dia": True, "output_period_avg_dia": period}}
+
+
+def test_resolver_rejects_averages_that_end_off_the_marbl_step():
+    """ucla-roms >= 0.13.0 stops at startup unless the ``_bgc_dia_avg`` period is a
+    whole multiple of the MARBL step: ``_build``'s ``dt`` of 7200 s steps MARBL
+    every 7200 s (its 3600 s ``marbl_timestep`` is below one ``dt``).
+    """
+    with pytest.raises(
+        NamelistConsistencyError,
+        match=r"bgc_settings\.output_period_bgc_avg_dia \(60(\.0)? s\).*7200",
+    ):
+        _build(
+            model_path=_MODEL_PATH_ROMS0130,
+            run_time_overrides=_bgc_diagnostics_averaged_every(60),
+        )
+    cfg = _build(
+        model_path=_MODEL_PATH_ROMS0130,
+        run_time_overrides=_bgc_diagnostics_averaged_every(86400),
+    )
+    assert cfg.model_settings["bgc"]["wrt_avg_dia"] is True
+
+
+def test_resolver_leaves_averages_off_the_marbl_step_to_older_releases():
+    cfg = _build(
+        model_path=_MODEL_PATH_ROMS0120,
+        run_time_overrides=_bgc_diagnostics_averaged_every(60),
+    )
+    assert cfg.model_settings["bgc"]["output_period_avg_dia"] == 60
+
+
+def test_resolver_moves_the_cdr_average_it_turns_on_onto_marbl_steps(caplog):
+    """An active CDR forcing turns ``_cdr`` output on at the OutputSpec's hourly
+    period; with ``_build``'s 7200 s ``dt`` ucla-roms 0.13.0 steps MARBL every
+    7200 s, so the resolver averages over 7200 s, 12 records per file, keeping the
+    daily file length the restart precheck checks.
+    """
+    with caplog.at_level(logging.INFO, logger="cstar.applications.forge.resolve"):
+        cfg = _build(model_path=_MODEL_PATH_ROMS0130, cdr={"mode": "upscaled"})
+    cdr_out = cfg.model_settings["cdr_output"]
+    assert cdr_out["do_cdr_output"] is True
+    assert (cdr_out["output_period"], cdr_out["nrpf"]) == (7200, 12)
+    assert "Writing the _cdr averages every 7200 s (12 per file)" in caplog.text
+
+
+def test_resolver_keeps_the_cdr_average_before_0_13_0():
+    cfg = _build(model_path=_MODEL_PATH_ROMS0120, cdr={"mode": "upscaled"})
+    cdr_out = cfg.model_settings["cdr_output"]
+    assert (cdr_out["output_period"], cdr_out["nrpf"]) == (3600, 24)
+
+
+@pytest.mark.parametrize(
+    "cdr_output",
+    [
+        {"output_period": 3600},
+        {"nrpf": 24},
+        {"do_cdr_output": True},
+    ],
+)
+def test_resolver_checks_a_cdr_average_the_caller_set(cdr_output):
+    """A ``_cdr`` stream or period the caller chose is checked as given."""
+    with pytest.raises(NamelistConsistencyError, match="output_period_cdr"):
+        _build(
+            model_path=_MODEL_PATH_ROMS0130,
+            cdr={"mode": "upscaled"},
+            run_time_overrides={"cdr_output": cdr_output},
+        )
+
+
+def test_resolver_refuses_a_cdr_average_no_marbl_step_fits():
+    """With ``dt`` 480 s MARBL steps every 3360 s, and no multiple of that divides
+    the daily file length, so nothing is moved and the precheck refuses.
+    """
+    with pytest.raises(NamelistConsistencyError, match="3360"):
+        _build(model_path=_MODEL_PATH_ROMS0130, dt=480, cdr={"mode": "upscaled"})
+
+
+_RESTORING_FLUX_ON = {"surf_flux": {"wrt_rstflx": True}}
+
+
+def _forcing_without_restoring():
+    """``glorys-era5-unified`` without its SSS restoring source."""
+    forcing = _CATALOG.forcing_data("glorys-era5-unified")
+    forcing["forcing"] = dict(forcing["forcing"])
+    forcing["forcing"]["surface"] = [
+        it for it in forcing["forcing"]["surface"] if it.get("type") != "restoring"
+    ]
+    return forcing
+
+
+def test_resolver_keeps_restoring_flux_output_with_sss_restoring():
+    """``glorys-era5-unified`` restores SSS, the one restoring term a Forge build
+    compiles in (SFLX_CORR), so ucla-roms 0.13.0 writes its restoring flux.
+    """
+    cfg = _build(
+        model_path=_MODEL_PATH_ROMS0130,
+        output_settings=_CATALOG.output_data("daily-restarts"),
+        run_time_overrides=_RESTORING_FLUX_ON,
+    )
+    assert cfg.model_settings["cppdefs"]["sal_restore"] is True
+    assert cfg.model_settings["surf_flux"]["wrt_rstflx"] is True
+
+
+def test_resolver_rejects_restoring_flux_output_without_a_restoring_term():
+    with pytest.raises(ValueError, match=r"wrt_rstflx .*restores nothing"):
+        _build(
+            model_path=_MODEL_PATH_ROMS0130,
+            forcing_inputs=_forcing_without_restoring(),
+            output_settings=_CATALOG.output_data("daily-restarts"),
+            run_time_overrides=_RESTORING_FLUX_ON,
+        )
+
+
+def test_resolver_rejects_restoring_flux_output_before_0_13_0():
+    with pytest.raises(
+        ValueError, match=r"surf_flux\.wrt_rstflx requires ucla-roms >= 0\.13\.0"
+    ):
+        _build(
+            model_path=_MODEL_PATH_ROMS0120,
+            output_settings=_CATALOG.output_data("daily-restarts"),
+            run_time_overrides=_RESTORING_FLUX_ON,
+        )
+
+
+@pytest.mark.parametrize(
+    ("model_path", "rejected"),
+    [(_MODEL_PATH_ROMS0130, True), (_MODEL_PATH_ROMS0120, False)],
+)
+def test_resolver_checks_the_freshwater_flux_file_from_0_13_0(model_path, rejected):
+    """``wrt_swflx`` alone writes the surface-flux file from ucla-roms 0.13.0 (PR
+    #407), which then checks its file length against the restart period: the
+    ``standard`` OutputSpec's ten-year files do not divide its daily restarts.
+    """
+    overrides = {"surf_flux": {"wrt_swflx": True}}
+    if rejected:
+        with pytest.raises(NamelistConsistencyError, match="surf_flx_output_settings"):
+            _build(model_path=model_path, run_time_overrides=overrides)
+    else:
+        _build(model_path=model_path, run_time_overrides=overrides)
 
 
 def test_resolver_0_11_model_spec_carries_the_constant_fe_keys():
@@ -3607,6 +3893,7 @@ def test_bundled_output_specs_satisfy_roms_divides_rst_precheck(spec_name):
         "roms-marbl-0.10-default",
         "roms-marbl-0.11-default",
         "roms-marbl-0.12-default",
+        "roms-marbl-0.13-default",
     ],
 )
 def test_model_spec_streams_satisfy_roms_divides_rst_precheck(
@@ -4496,7 +4783,7 @@ def test_resolver_bgc_mode_cdr_lite_gate_applies_to_a_pinned_older_model_spec():
 
 def test_resolver_bgc_mode_cdr_lite_gate_follows_the_named_constant(monkeypatch):
     """The gate reads ``CDR_LITE_MODE_MIN_ROMS``, not a copy of 0.10.0."""
-    import cstar.applications.forge.namelist_model as namelist_model
+    from cstar.applications.forge import namelist_model
 
     assert _build_cdr_lite(roms_ref="0.10.0")
     monkeypatch.setattr(namelist_model, "CDR_LITE_MODE_MIN_ROMS", (0, 10, 1))
@@ -5829,6 +6116,7 @@ def test_resolved_templates_carry_modelspec_authored_hashes():
         ("roms-marbl-0.10-default", True),
         ("roms-marbl-0.11-default", True),
         ("roms-marbl-0.12-default", True),
+        ("roms-marbl-0.13-default", True),
         ("pio-dev", True),
     ],
 )
@@ -5939,7 +6227,7 @@ def test_committed_example_validates():
     if not example.exists():
         pytest.skip("example file not present")
     cfg = ForgeBlueprint.from_yaml(example)
-    assert cfg.composition.model.name == "roms-marbl-0.12-default"
+    assert cfg.composition.model.name == "roms-marbl-0.13-default"
     assert cfg.composition.model.origin == "catalog"
 
 
@@ -6228,8 +6516,8 @@ class TestGenerationHelpers:
         assert fb.generation_versions() == {"cstar-ocean": "1.2.3"}
 
     def test_system_name_is_the_hosts_name(self, monkeypatch):
-        import cstar.system.manager as manager
         from cstar.applications.forge import blueprint as fb
+        from cstar.system import manager
 
         class _Host:
             name = "anvil"
@@ -6238,8 +6526,8 @@ class TestGenerationHelpers:
         assert fb._system_name() == "anvil"
 
     def test_system_name_is_empty_when_the_host_cannot_be_named(self, monkeypatch):
-        import cstar.system.manager as manager
         from cstar.applications.forge import blueprint as fb
+        from cstar.system import manager
 
         class _Unknown:
             @property

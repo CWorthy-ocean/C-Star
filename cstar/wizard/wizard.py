@@ -851,7 +851,6 @@ def _overrides_nested(overrides: dict[Any, Any]) -> dict[str, Any]:
 # applies on top of a ModelSpec's model_settings (forge_blueprint_resolve.py).
 _RESOLVER_DERIVED_SECTIONS = (
     "time_stepping",
-    "v_sponge",
     "river_frc",
     "cdr_frc",
     "extract_data",
@@ -877,6 +876,9 @@ _CPPDEFS_DERIVED_LEAVES = frozenset(
     }
 )
 _TIDES_DERIVED_LEAVES = frozenset({"ntides"})
+# ``v_sponge.v_sponge`` is the domain's (grid-derived or explicit); ``v_sponge_trc``
+# is the model's.
+_V_SPONGE_DERIVED_LEAVES = frozenset({"v_sponge"})
 
 
 def _model_owned_settings(effective: dict[str, Any]) -> dict[str, Any]:
@@ -887,7 +889,7 @@ def _model_owned_settings(effective: dict[str, Any]) -> dict[str, Any]:
     every OUTPUT section/partial-output field (an OutputSpec's job), and the
     resolver-derived leaves within otherwise-kept sections (``param``'s grid/
     partitioning dims, ``cppdefs``'s domain/forcing/bgc-driven flags, ``tides``'s
-    ``ntides``). What remains is safe to bake into a new ModelSpec's
+    ``ntides``, ``v_sponge``'s ``v_sponge``). What remains is safe to bake into a new ModelSpec's
     ``model_settings`` and reusable across domains/forcing/output selections.
     """
     out = copy.deepcopy(effective)
@@ -904,6 +906,11 @@ def _model_owned_settings(effective: dict[str, Any]) -> dict[str, Any]:
     if "tides" in out:
         for leaf in _TIDES_DERIVED_LEAVES:
             out["tides"].pop(leaf, None)
+    if "v_sponge" in out:
+        for leaf in _V_SPONGE_DERIVED_LEAVES:
+            out["v_sponge"].pop(leaf, None)
+        if not out["v_sponge"]:  # nothing model-owned left (ucla-roms < 0.13.0)
+            del out["v_sponge"]
     for sec, fields in PARTIAL_OUTPUT_SECTIONS.items():
         if sec in out:
             for f in fields:
@@ -1083,8 +1090,9 @@ _FORCED_ON_BY_BGC_MODE: dict[str, dict[tuple[str, str], str]] = {
 # a user override can never collide with a resolver-owned flag. The two advection
 # fields only render for ModelSpecs that declare them (``roms-marbl-0.8-default``,
 # ``roms-marbl-0.9-default``, ``roms-marbl-0.10-default``, ``roms-marbl-0.11-default``,
-# ``roms-marbl-0.12-default``, ``pio-dev``) -- the editor type-infers a checkbox from the composed bool, so a spec
-# that omits the key shows no widget for it.
+# ``roms-marbl-0.12-default``, ``roms-marbl-0.13-default``, ``pio-dev``) -- the editor
+# type-infers a checkbox from the composed bool, so a spec that omits the key shows no
+# widget for it.
 #
 # ``bgc``/``marbl_bgc`` are SPLIT at field granularity along the existing
 # ``PARTIAL_OUTPUT_SECTIONS`` seam (the same split the OutputSpec dropdown seeds):
@@ -1098,10 +1106,11 @@ _ADVANCED_CATEGORIES: tuple[tuple[str, tuple[str, ...]], ...] = (
             "vertical_mixing",
             "tracer_diff2",
             "bottom_drag",
-            # v_sponge is deliberately absent: it's a first-class domain property
-            # with its own dedicated widget in "Domain-derived properties"
-            # (self.v_sponge), not a generic model-settings override -- see
-            # _ACCORDION_EXCLUDED_FIELDS.
+            # v_sponge's own field is a first-class domain property with a dedicated
+            # widget in "Domain-derived properties" (self.v_sponge), left out of this
+            # pane by _ACCORDION_EXCLUDED_FIELDS; the section shows only v_sponge_trc
+            # (ucla-roms >= 0.13.0), for ModelSpecs that declare it.
+            "v_sponge",
             "sponge_tune",
             "gamma2",
             "ubind",
@@ -4049,9 +4058,9 @@ class _ForcingEditor:
 
 # Preselected in the Model dropdown when present in the catalog (falls back to
 # the first catalog model otherwise): it's the newest tagged-release ModelSpec
-# (ucla-roms 0.12.0). 'pio-dev' (ucla-roms branch `main`) remains available in the
+# (ucla-roms 0.13.0). 'pio-dev' (ucla-roms branch `main`) remains available in the
 # catalog but is no longer the default.
-_DEFAULT_MODEL = "roms-marbl-0.12-default"
+_DEFAULT_MODEL = "roms-marbl-0.13-default"
 
 # Preselected in the Output dropdown when present in the catalog (falls back to
 # the first catalog spec otherwise). 'daily-restarts' conforms to the

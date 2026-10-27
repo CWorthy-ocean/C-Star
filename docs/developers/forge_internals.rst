@@ -375,14 +375,14 @@ Each ucla-roms release that changes ``namelist.nml`` gets its own schema
 older ROMS stops on a key it doesn't know.
 
 - **C-Star** keeps the tiers in ``cstar/roms/namelist.py`` (``RomsNamelist`` and
-  ``RomsNamelistV0_4_0`` through ``RomsNamelistV0_12_0``, each a subclass of an
+  ``RomsNamelistV0_4_0`` through ``RomsNamelistV0_13_0``, each a subclass of an
   earlier one), registered in ``NAMELIST_SCHEMA_REGISTRY``.
   ``namelist_schema_for_ref`` picks the tier for a ucla-roms pin: a release tag
   selects that release; a commit hash the release it descends from (``git
   describe``); a branch, an unresolvable hash, or a release newer than
   ``NEWEST_KNOWN_UCLA_ROMS`` gets the newest tier with a warning.
 - **Forge** mirrors the tiers in ``namelist_model.py`` (``RunTimeSettings`` through
-  ``RunTimeSettingsV0_12_0``), selected by ``run_time_settings_for_ref``. C-Star's
+  ``RunTimeSettingsV0_13_0``), selected by ``run_time_settings_for_ref``. C-Star's
   registry is the single source of the version boundaries. Forge has no ucla-roms
   clone, so ``process_forge_blueprint`` and ``configure_build`` resolve a hash pin
   to its release tag with ``release_ref_for_remote``; the resolver, called on every
@@ -439,7 +439,7 @@ diff is a behavior change to justify, not noise:
   byte, from the real ``generate_inputs()`` -> ``configure_build()`` chain with
   only the roms-tools classes mocked.
 
-Each comes in one variant per namelist tier (``-roms050`` through ``-roms0120``)
+Each comes in one variant per namelist tier (``-roms050`` through ``-roms0130``)
 plus a ``bgc_mode: cdr_lite`` variant, all under
 ``cstar/tests/unit_tests/applications/forge/fixtures/``. Regenerate one at a time
 with ``UPDATE_GOLDEN=1`` and ``-k <test name>``; the run fails after writing, and a

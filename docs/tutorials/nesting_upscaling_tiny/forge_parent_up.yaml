@@ -318,6 +318,8 @@ model_settings:
     - CO3_ALT_CO2
     - co3_sat_arag
     - co3_sat_calc
+  cdr_lite:
+    cdr_carbonate_sensitivity_time_interpolation: true
   time_stepping:
     ntimes: 3240
     dt: 60.0
@@ -325,6 +327,7 @@ model_settings:
     ninfo: 1
   v_sponge:
     v_sponge: 1666.6666666666667
+    v_sponge_trc: -1.0
   river_frc:
     river_source: false
     analytical: false
@@ -484,7 +487,7 @@ model_settings:
 code:
   roms:
     location: https://github.com/CWorthy-ocean/ucla-roms.git
-    commit: 0.11.0
+    commit: 0.13.0
     branch: null
   marbl:
     location: https://github.com/CWorthy-ocean/MARBL.git
@@ -496,16 +499,16 @@ code:
     branch: null
   templates_compile_time:
     location: https://github.com/CWorthy-ocean/C-Star.git
-    commit: d35d06265515965c7daaa54c111ee0185166bca4
+    commit: d47142ec249bce91aac938030dfd5ea3f7dacfd4
     branch: null
     directory: cstar/additional_files/templates/forge/compile-time
     files:
     - cppdefs.opt.j2
     file_hashes:
-      cppdefs.opt.j2: 115f044081ac9c04c8803ae2d83a6e6f39a92da83c2caf7b305a7cb8b1bbfbdd
+      cppdefs.opt.j2: 7665373d4eaad6d94215660775ca66dd87f1c2309e15edc0039c9051b20b0f00
   templates_run_time:
     location: https://github.com/CWorthy-ocean/C-Star.git
-    commit: d35d06265515965c7daaa54c111ee0185166bca4
+    commit: d47142ec249bce91aac938030dfd5ea3f7dacfd4
     branch: null
     directory: cstar/additional_files/templates/forge/run-time
     files:
@@ -514,7 +517,7 @@ code:
       marbl_in: 218976e818e81001b798c1eecbbc2f659c6e3f311db24da50d990cd69c300f8f
 composition:
   model:
-    name: roms-marbl-0.11-default
+    name: roms-marbl-0.13-default
     origin: catalog
     modified: true
   domain:
@@ -541,5 +544,5 @@ provenance:
   cstar_version: null
   roms_tools_version: null
   override_files_applied: []
-  content_hash: bp-v2:38a4958e29433fb7106765e25dd9aabca92f2ec2916056387364e42f66fa53a1
+  content_hash: bp-v2:9552b78652642704f221539ed89eccf8edeed9e0195dcff0027d197cb04c66ec
   notes: null

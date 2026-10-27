@@ -29,6 +29,7 @@ from __future__ import annotations
 
 import copy
 import logging
+import math
 import warnings
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, get_args
@@ -79,7 +80,9 @@ from cstar.applications.forge.namelist_model import (
     check_cdr_output_sections,
     check_constant_fe,
     check_marbl_only_outputs,
+    check_marbl_step_averages,
     check_output_streams_divide_rst,
+    check_restoring_flux_output,
     check_rst_period_divisible,
     check_upscaled_cdr_lite_tracer_counts,
     cppdefs_for_precheck,
@@ -100,7 +103,12 @@ from cstar.applications.forge.source_registry import (
     resolve_source,
 )
 from cstar.base.utils import netcdf_format
-from cstar.roms.namelist import is_commit_hash
+from cstar.roms.namelist import is_commit_hash, roms_version_from_ref
+from cstar.roms.precheck import (
+    AVERAGES_END_ON_MARBL_STEP_MIN_ROMS,
+    is_whole_multiple,
+    marbl_step,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -619,6 +627,62 @@ def with_cdr_lite_tracer_set(cdr_spec: CdrSpec) -> CdrSpec:
     return cdr_spec.model_copy(update={"cdr_forcing": forcing})
 
 
+def _align_cdr_output_to_marbl_step(
+    settings: dict[str, Any], *, roms_ref: str | None
+) -> None:
+    """Move the averaged ``_cdr`` stream of ``settings`` onto MARBL steps.
+
+    For a stream Forge turns on itself: ucla-roms >= 0.13.0 stops at startup
+    unless ``cdr_output.output_period`` is a whole multiple of the MARBL timestep
+    it uses (see
+    :func:`~cstar.applications.forge.namelist_model.check_marbl_step_averages`). The period becomes the
+    shortest such multiple, not shorter than the period, that divides the stream's
+    file length (``nrpf * output_period``), and ``nrpf`` shrinks so each file
+    still covers that length, which keeps the restart-rollover precheck satisfied.
+    When no multiple fits, ``settings`` is left for the precheck to report.
+    Releases before 0.13.0 are left alone; aligning refuses nothing, so an
+    unresolved commit hash counts as the latest release.
+    """
+    version = roms_version_from_ref(roms_ref)
+    if version is not None and version < AVERAGES_END_ON_MARBL_STEP_MIN_ROMS:
+        return
+    cdr_out = settings.get("cdr_output") or {}
+    if not cdr_out.get("do_avg") or cdr_out.get("monthly_averages"):
+        return
+    dt = (settings.get("time_stepping") or {}).get("dt")
+    marbl_timestep = (settings.get("marbl_bgc") or {}).get("marbl_timestep")
+    period = cdr_out.get("output_period")
+    nrpf = cdr_out.get("nrpf")
+    if dt is None or marbl_timestep is None or period is None or nrpf is None:
+        return
+    if dt <= 0 or period <= 0:
+        return
+    step = marbl_step(dt, marbl_timestep)
+    if is_whole_multiple(period, step):
+        return
+    file_length = nrpf * period
+    multiple = math.ceil(period / step)
+    while multiple * step <= file_length:
+        if is_whole_multiple(file_length, multiple * step):
+            cdr_out["output_period"] = multiple * step
+            cdr_out["nrpf"] = round(file_length / (multiple * step))
+            log.info(
+                "Writing the _cdr averages every %g s (%d per file) instead of every "
+                "%g s (%d per file): ucla-roms >= 0.13.0 averages only over whole "
+                "MARBL steps, here %g s (marbl_timestep %g s rounded down to a "
+                "multiple of dt %g s).",
+                cdr_out["output_period"],
+                cdr_out["nrpf"],
+                period,
+                nrpf,
+                step,
+                marbl_timestep,
+                dt,
+            )
+            return
+        multiple += 1
+
+
 def build_forge_blueprint(
     *,
     model_path: str | Path,
@@ -982,7 +1046,10 @@ def build_forge_blueprint(
     for sec in _PROCESSING_FILLED_SECTIONS:
         settings.pop(sec, None)
     settings["time_stepping"] = {"ntimes": ntimes, "dt": dt, "ndtfast": 60, "ninfo": 1}
-    settings["v_sponge"] = {"v_sponge": v_sponge}
+    # v_sponge is domain-owned (grid-derived or the caller's explicit value), so it
+    # replaces whatever the ModelSpec carries; the section's other keys
+    # (v_sponge_trc) are the ModelSpec's, kept for the overrides below.
+    settings["v_sponge"] = {**(settings.get("v_sponge") or {}), "v_sponge": v_sponge}
 
     # ----- schema selection inputs -------------------------------------------
     # The pinned ucla-roms ref decides which run-time settings tier applies (it
@@ -1151,11 +1218,13 @@ def build_forge_blueprint(
             settings["cppdefs"],
             compile_time_overrides.get("cppdefs", compile_time_overrides),
         )
-    if run_time_overrides:
-        _deep_merge(
-            settings,
-            _with_current_section_names(run_time_overrides, "run_time_overrides"),
-        )
+    current_run_time_overrides = (
+        _with_current_section_names(run_time_overrides, "run_time_overrides")
+        if run_time_overrides
+        else {}
+    )
+    if current_run_time_overrides:
+        _deep_merge(settings, current_run_time_overrides)
 
     # A child grid (has a parent) gets its boundaries from the parent's nesting.nc
     # extraction: no boundary tides and no sponge ub_tune. Force both off after the
@@ -1207,8 +1276,19 @@ def build_forge_blueprint(
     # After the version gate, so a pin too old for the mode is reported as such.
     if bgc_mode == "cdr_lite" and cdr_spec.mode == "upscaled":
         check_upscaled_cdr_lite_tracer_counts(settings.get("param") or {})
-    do_cdr_output = bool(cdr_out.get("do_cdr_output")) or implied_cdr_output
+    requested_cdr_output = bool(cdr_out.get("do_cdr_output"))
+    do_cdr_output = requested_cdr_output or implied_cdr_output
     cdr_out["do_cdr_output"] = do_cdr_output
+    # A _cdr stream Forge turns on itself averages over the OutputSpec's period,
+    # which nobody chose for this dt: move it onto MARBL steps rather than refuse
+    # it below. A stream or period the caller set is checked as given.
+    if (
+        implied_cdr_output
+        and not requested_cdr_output
+        and not {"output_period", "nrpf"}
+        & set(current_run_time_overrides.get("cdr_output") or {})
+    ):
+        _align_cdr_output_to_marbl_step(settings, roms_ref=effective_roms_ref)
     check_marbl_only_outputs(settings, bgc_mode_is_marbl=bgc_mode == "marbl")
     if do_cdr_output:
         settings["cppdefs"]["cdr_forcing"] = True
@@ -1311,6 +1391,15 @@ def build_forge_blueprint(
         bgc_mode_is_marbl=settings["cppdefs"].get("marbl", False),
     )
 
+    # ----- restoring-flux output needs a restoring term ----------------------
+    # ucla-roms >= 0.13.0 stops at startup on wrt_rstflx without one; in a Forge
+    # build that is SSS restoring (cppdefs.sal_restore, derived above).
+    check_restoring_flux_output(
+        settings.get("surf_flux") or {},
+        sal_restore=settings["cppdefs"].get("sal_restore", False),
+        settings_cls=settings_cls,
+    )
+
     # ----- restart period consistency ----------------------------------------
     # Fail fast at authoring time (mirrors the executor's net for hand-edited
     # blueprints): restart writes must land on a timestep.
@@ -1357,6 +1446,7 @@ def build_forge_blueprint(
                 cppdefs_for_precheck(
                     settings.get("cppdefs", {}), settings.get("upscale_output", {})
                 ),
+                settings_cls=settings_cls,
             )
         except NamelistConsistencyError as exc:
             if exc.section == "extract_data_settings":
@@ -1372,6 +1462,12 @@ def build_forge_blueprint(
                     keys=exc.keys,
                 ) from exc
             raise
+    # Averaged MARBL streams vs the MARBL timestep (ucla-roms >= 0.13.0's
+    # check_avg_ends_on_marbl_step, precheck.F90): checked after do_cdr_output
+    # and dt are final, before any generation.
+    check_marbl_step_averages(
+        settings, settings_cls=settings_cls, roms_ref=effective_roms_ref
+    )
 
     # ----- forcing (initial conditions + surface/boundary/tidal/river) --------
     # A child grid (has a parent) receives its boundary values from the parent's

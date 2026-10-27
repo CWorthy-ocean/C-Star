@@ -46,6 +46,11 @@ model_settings:
     rdrg: 0.0
     rdrg2: 0.001
     zob: 0.01
+  v_sponge:
+    # Maximum tracer diffusivity in the sponge layer (ucla-roms >= 0.13.0, on main): 0 for
+    # a sponge on currents only, negative for the same as v_sponge (what earlier releases
+    # always did). v_sponge itself is derived from the grid spacing.
+    v_sponge_trc: -1.0
   gamma2: 1.0
   ubind: 0.1
   param:

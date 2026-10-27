@@ -902,8 +902,9 @@ class ROMSSimulation(Simulation):
 
         ROMS runs from `run_dir`, so a path inside this simulation's root directory
         is written relative to it (e.g. `../input/input_datasets/grid.nc`). That
-        keeps the string short (ucla-roms builds filenames in 99-character
-        buffers) and valid when the run directory is moved or copied as a unit. A
+        keeps the string short (ucla-roms reads at most 255 characters of a file
+        name; releases before 0.13.0 cut a longer one off silently) and valid when
+        the run directory is moved or copied as a unit. A
         path outside the root, such as an input dataset used from where it was
         authored, keeps its absolute form rather than a chain of `..`.
 

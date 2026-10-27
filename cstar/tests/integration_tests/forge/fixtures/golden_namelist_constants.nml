@@ -326,6 +326,7 @@
 
 &v_sponge_settings
     v_sponge = 5000.0
+    v_sponge_trc = -1.0
 /
 
 &vertical_mixing_settings

@@ -395,7 +395,7 @@ def scheduler_section(
     prompts = (
         (ENV_CSTAR_SLURM_ACCOUNT, "SLURM account"),
         (ENV_CSTAR_SLURM_QUEUE, "SLURM queue or partition"),
-        (ENV_CSTAR_SLURM_MAX_WALLTIME, "Maximum walltime per job (HH:MM:SS)"),
+        (ENV_CSTAR_SLURM_MAX_WALLTIME, "Default walltime limit per job (HH:MM:SS)"),
     )
     decisions: list[Decision] = []
     for name, label in prompts:

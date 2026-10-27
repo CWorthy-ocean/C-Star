@@ -80,6 +80,7 @@ from cstar.roms.namelist import (
     RomsNamelistV0_9_0,
     RomsNamelistV0_11_0,
     RomsNamelistV0_12_0,
+    RomsNamelistV0_13_0,
 )
 
 requires_cstar_pio = pytest.mark.skipif(
@@ -112,6 +113,9 @@ _MODEL_PATH_ROMS0100 = _BUNDLED_CATALOG / "ModelSpec" / "roms-marbl-0.10-default
 # test below.
 _MODEL_PATH_ROMS0110 = _BUNDLED_CATALOG / "ModelSpec" / "roms-marbl-0.11-default.yaml"
 _MODEL_PATH_ROMS0120 = _BUNDLED_CATALOG / "ModelSpec" / "roms-marbl-0.12-default.yaml"
+# ucla-roms >= 0.13.0 ModelSpec (adds v_sponge.v_sponge_trc to &V_SPONGE_SETTINGS) --
+# used by the versioned-namelist golden test below.
+_MODEL_PATH_ROMS0130 = _BUNDLED_CATALOG / "ModelSpec" / "roms-marbl-0.13-default.yaml"
 # ModelSpec no longer embeds a default forcing/output selection -- these tests just
 # need a valid, representative pair from the bundled catalog.
 _FORCING_INPUTS = _CATALOG.forcing_data("glorys-era5-unified")
@@ -3689,6 +3693,7 @@ class TestGoldenNamelist:
         cdr_lite: bool = False,
         carbonate_sensitivity: Any = None,
         capture: dict[str, Any] | None = None,
+        run_time_overrides: dict[str, Any] | None = None,
     ) -> str:
         """Shared body for the golden namelist tests: drives the real
         ``generate_inputs()`` -> ``configure_build()`` chain against ``model_path``
@@ -3717,6 +3722,7 @@ class TestGoldenNamelist:
         receives the run's objects -- ``cfg`` (the resolved ForgeBlueprint),
         ``builder`` (the ForgeExecutor) and ``emitted`` (the ucla_roms blueprint
         ``generate_inputs`` returned) -- for assertions beyond the namelist.
+        ``run_time_overrides`` is handed to ``build_forge_blueprint`` as is.
         """
         mode_kwargs: dict[str, Any] = (
             {
@@ -3739,6 +3745,7 @@ class TestGoldenNamelist:
             forcing_inputs=_CDR_LITE_FORCING_INPUTS if cdr_lite else _FORCING_INPUTS,
             output_settings=_OUTPUT_SETTINGS,
             carbonate_sensitivity=carbonate_sensitivity,
+            run_time_overrides=run_time_overrides,
             **mode_kwargs,
             # Explicit False (matches cson_roms-marbl_v0.1's own default) so both
             # golden cases stay decoupled from PIO: roms-marbl-0.5-default bakes in
@@ -4190,6 +4197,56 @@ class TestGoldenNamelist:
         ):
             self._configure_build_for(cfg, builder)
 
+    @pytest.mark.parametrize(
+        ("model_path", "rejected"),
+        [(_MODEL_PATH_ROMS0130, True), (_MODEL_PATH_ROMS0120, False)],
+    )
+    def test_configure_build_checks_averages_against_the_marbl_step_end_to_end(
+        self, mock_grid, tmp_path, model_path, rejected
+    ):
+        """The net for stored blueprints: an accordion edit after the resolver ran
+        turns on a ``_bgc_dia_avg`` window shorter than the MARBL step, which
+        ucla-roms >= 0.13.0 stops on at startup and 0.12.0 runs.
+        """
+        cfg, builder = self._generate_inputs_no_cdr_forcing(
+            mock_grid, tmp_path, model_path=model_path
+        )
+        cfg.model_settings["bgc"].update(wrt_avg_dia=True, output_period_avg_dia=60)
+
+        if rejected:
+            with pytest.raises(
+                ValueError, match=r"bgc_settings\.output_period_bgc_avg_dia"
+            ):
+                self._configure_build_for(cfg, builder)
+        else:
+            self._configure_build_for(cfg, builder)
+
+    @pytest.mark.parametrize(
+        ("sal_restore", "rejected"), [(False, True), (True, False)]
+    )
+    def test_configure_build_checks_restoring_flux_output_end_to_end(
+        self, mock_grid, tmp_path, sal_restore, rejected
+    ):
+        """The net for stored blueprints: ``wrt_rstflx`` on a 0.13.0 build that
+        restores nothing, which ucla-roms stops on at startup.
+        """
+        cfg, builder = self._generate_inputs_no_cdr_forcing(
+            mock_grid, tmp_path, model_path=_MODEL_PATH_ROMS0130
+        )
+        rst_period = cfg.model_settings["ocean_vars"]["output_period_rst"]
+        cfg.model_settings["surf_flux"].update(
+            wrt_rstflx=True, output_period=rst_period, nrpf=1
+        )
+        cfg.model_settings["cppdefs"]["sal_restore"] = sal_restore
+
+        if rejected:
+            with pytest.raises(ValueError, match=r"wrt_rstflx .*restores nothing"):
+                self._configure_build_for(cfg, builder)
+        else:
+            self._configure_build_for(cfg, builder)
+            nml = f90nml.read(builder.run_time_code_dir / "namelist.nml")
+            assert nml["surf_flx_output_settings"]["wrt_rstflx"] is True
+
     def test_configure_build_accepts_constant_fe_with_marbl_end_to_end(
         self, mock_grid, tmp_path
     ):
@@ -4477,7 +4534,8 @@ class TestGoldenNamelist:
         Test name note: this must NOT contain ``roms050``/``roms060`` -- the
         legacy golden is selected with ``-k "golden_namelist_test_tiny and not
         roms050 and not roms060 and not roms070 and not roms090 and not
-        roms0110 and not roms0120"``, which would otherwise also catch this test.
+        roms0110 and not roms0120 and not roms0130"``, which would otherwise also
+        catch this test.
         """
         normalized = self._run_golden_namelist_case(
             mock_grid,
@@ -4654,6 +4712,58 @@ class TestGoldenNamelist:
         assert nml.cdr_lite_settings.cdr_carbonate_sensitivity_time_interpolation
         assert nml.marbl_biogeochemistry_settings.use_constant_fe is False
         assert isinstance(nml.extract_data_settings.extract_file, str)
+
+    def test_golden_namelist_test_tiny_roms0130(self, mock_grid, tmp_path):
+        """Same test-tiny domain/forcing/output, but resolved against the
+        ``roms-marbl-0.13-default`` ModelSpec (ucla-roms >= 0.13.0) -- proves the
+        versioned namelist path selects ``RunTimeSettingsV0_13_0``/
+        ``RomsNamelistV0_13_0`` end to end.
+
+        The one schema-visible difference from the roms0120 golden is
+        ``v_sponge_trc`` in ``&v_sponge_settings``, always written (here at its
+        default, -1: tracers get ``v_sponge``) -- the ModelSpec declares it.
+
+        Test name note: contains ``roms0130`` so the legacy golden's ``-k``
+        selector (``... and not roms0130``) excludes it, like the other tiers.
+        """
+        normalized = self._run_golden_namelist_case(
+            mock_grid,
+            tmp_path,
+            _MODEL_PATH_ROMS0130,
+            "golden_namelist_test-tiny-roms0130.nml",
+        )
+
+        v_sponge = normalized.split("&v_sponge_settings")[1].split("/", 1)[0]
+        assert "v_sponge_trc = -1.0" in v_sponge
+
+        # Read back through the 0.13 schema: every group validates (extra="forbid").
+        namelist_path = tmp_path / "golden_roms0130.nml"
+        namelist_path.write_text(normalized)
+        nml = RomsNamelistV0_13_0.read(namelist_path)
+        assert nml.v_sponge_settings.v_sponge_trc == -1.0
+        assert nml.cdr_lite_settings.cdr_carbonate_sensitivity_time_interpolation
+
+    def test_v_sponge_trc_override_reaches_the_written_namelist(
+        self, mock_grid, tmp_path
+    ):
+        """A ``v_sponge: {v_sponge_trc: 0.0}`` override (a currents-only sponge) is
+        carried by the blueprint's ``model_settings`` and written to
+        ``&v_sponge_settings`` beside the grid-derived ``v_sponge``.
+        """
+        capture: dict[str, Any] = {}
+        normalized = self._run_golden_namelist_case(
+            mock_grid,
+            tmp_path,
+            _MODEL_PATH_ROMS0130,
+            None,
+            run_time_overrides={"v_sponge": {"v_sponge_trc": 0.0}},
+            capture=capture,
+        )
+
+        assert capture["cfg"].model_settings["v_sponge"]["v_sponge_trc"] == 0.0
+        v_sponge = normalized.split("&v_sponge_settings")[1].split("/", 1)[0]
+        assert "v_sponge_trc = 0.0" in v_sponge
+        assert f"v_sponge = {capture['cfg'].domain.v_sponge}" in v_sponge
 
     @staticmethod
     def _cdrgas_sources(directory: Path) -> list[Path]:
@@ -4915,7 +5025,7 @@ class TestGoldenNamelist:
     def test_configure_build_cdr_lite_gate_follows_the_named_constant(
         self, mock_grid, tmp_path, monkeypatch
     ):
-        import cstar.applications.forge.namelist_model as namelist_model
+        from cstar.applications.forge import namelist_model
 
         cfg, builder = self._cdr_lite_builder(mock_grid, tmp_path)
         monkeypatch.setattr(namelist_model, "CDR_LITE_MODE_MIN_ROMS", (0, 10, 2))

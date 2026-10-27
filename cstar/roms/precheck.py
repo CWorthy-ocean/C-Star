@@ -16,8 +16,10 @@ further gated on a ucla-roms compile-time cppdef (``DIAGNOSTICS``, and the
 five MARBL/BGC-diagnostics groups: ``cdr``, the 0.7/0.8-only ``cdrtrc``,
 ``cdrgas``, ``upscale``, and ``bgc``). ucla-roms >= 0.9.0 compiles its
 replacement for ``cdrtrc`` (``&CDR_LITE_OUTPUT_SETTINGS``) unconditionally, so
-it has a second, unguarded ``cdrtrc`` row. :func:`applies_to` owns the
-">= 0.5.0" schema gate.
+it has a second, unguarded ``cdrtrc`` row. ucla-roms >= 0.13.0 writes, and so
+checks, the surface-flux file for any of its four switches, not only
+``wrt_smflx``/``wrt_stflx``, so ``sflx`` has one row per schema range.
+:func:`applies_to` owns the ">= 0.5.0" schema gate.
 
 Rule B -- :func:`check_restart_period_divisible_by_dt` is not a ucla-roms
 abort (ucla-roms' restart trigger is a running-clock threshold, not a
@@ -25,12 +27,19 @@ step-count division -- a non-multiple period just drifts the actual restart
 time by up to one ``dt``); it is a reproducibility convention, ungated by
 schema version.
 
-Both are plain functions, not Pydantic ``model_validator``s -- they must not
-run on every model construction (old blueprints/tests would break), and Rule
-A needs an explicit, caller-supplied set of active cppdefs to know which
+Rule C -- :func:`check_averages_end_on_marbl_step` mirrors ucla-roms >= 0.13.0's
+``check_avg_ends_on_marbl_step`` (``src/precheck.F90``, PR #400): the averaged
+``_cdr`` and ``_bgc_dia_avg`` streams must average over whole MARBL timesteps.
+:func:`averages_end_on_marbl_step_applies_to` gates it on the pinned release
+rather than on the 0.13.0 schema, so that an unresolved commit hash, which
+selects the newest schema, is not checked.
+
+All are plain functions, not Pydantic ``model_validator``s -- they must not
+run on every model construction (old blueprints/tests would break), and Rules
+A and C need an explicit, caller-supplied set of active cppdefs to know which
 cppdef-gated groups actually apply.
 
-Both operate on C-Star's CANONICAL namelist vocabulary: a mapping (or a live
+All operate on C-Star's CANONICAL namelist vocabulary: a mapping (or a live
 ``RomsNamelistBase``) of group field name (the ``&<group>`` header in
 ``namelist.nml``, e.g. ``"frc_output_settings"``) to that group's real Fortran
 namelist keys (e.g. ``"output_period_frc"``, ``"nrpf_frc"``) -- exactly the
@@ -50,7 +59,17 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any
 
-from cstar.roms.namelist import RomsNamelist, RomsNamelistBase
+from cstar.roms.namelist import (
+    UCLA_ROMS_0_13_0,
+    RomsNamelist,
+    RomsNamelistBase,
+    RomsNamelistV0_13_0,
+    is_commit_hash,
+    roms_version_from_ref,
+)
+
+AVERAGES_END_ON_MARBL_STEP_MIN_ROMS: tuple[int, int, int] = UCLA_ROMS_0_13_0
+"""ucla-roms release from which ROMS checks Rule C at startup (PR #400)."""
 
 
 class NamelistConsistencyError(ValueError):
@@ -63,8 +82,8 @@ class NamelistConsistencyError(ValueError):
     namelist key(s) within that group) -- so a consumer that edits a
     different vocabulary (e.g. Forge's settings dict) can point a user at the
     field it actually exposes, without this module knowing that vocabulary
-    exists. ``rule`` names which check raised (``"output_streams_divide_rst"``
-    or ``"restart_period_divisible_by_dt"``).
+    exists. ``rule`` names which check raised (``"output_streams_divide_rst"``,
+    ``"restart_period_divisible_by_dt"`` or ``"averages_end_on_marbl_step"``).
     """
 
     def __init__(
@@ -85,13 +104,31 @@ def applies_to(schema: type[RomsNamelistBase]) -> bool:
     ``RomsNamelist`` (< 0.4.0), which ``RomsNamelistV0_4_0`` (< 0.5.0)
     subclasses -- every >= 0.5.0 schema (``RomsNamelistV0_5_0``,
     ``RomsNamelistV0_6_0``, ``RomsNamelistV0_7_0``, ``RomsNamelistV0_9_0``,
-    ``RomsNamelistV0_11_0``, ``RomsNamelistV0_12_0``) subclasses
+    ``RomsNamelistV0_11_0``, ``RomsNamelistV0_12_0``, ``RomsNamelistV0_13_0``) subclasses
     ``RomsNamelistBase`` directly (or a later version), never ``RomsNamelist``,
     so ``issubclass`` here is exactly the >= 0.5.0 gate.
     Rule B is ungated -- it is not version-specific (see the module
     docstring) -- so it has no ``applies_to`` counterpart.
     """
     return not issubclass(schema, RomsNamelist)
+
+
+def averages_end_on_marbl_step_applies_to(roms_ref: str | None) -> bool:
+    """True if Rule C (:func:`check_averages_end_on_marbl_step`) applies to the
+    ucla-roms pin ``roms_ref``.
+
+    That is a release tag at or above :data:`AVERAGES_END_ON_MARBL_STEP_MIN_ROMS`,
+    or a branch or ``None``, which counts as the latest release, as in Forge's
+    other release-gated checks. A commit hash is not checked: the rule refuses
+    runs, and a hash from before 0.13.0 must not be refused for one its release
+    accepts. A caller that can resolve the hash (``process_forge_blueprint``,
+    ``configure_build``) passes the release tag it resolves to, as the resolver
+    leaves the hash-dependent ``cdr_nz_chd`` default to them.
+    """
+    if is_commit_hash(roms_ref):
+        return False
+    version = roms_version_from_ref(roms_ref)
+    return version is None or version >= AVERAGES_END_ON_MARBL_STEP_MIN_ROMS
 
 
 def _section(container: Any, name: str) -> Any:
@@ -127,7 +164,8 @@ class _StreamCheck:
     gate_fields
         Real Fortran namelist key(s), read off ``section``, that gate whether
         ucla-roms writes this stream at all. Combined with ``.or.`` when
-        there is more than one (``sflx``: ``wrt_smflx .or. wrt_stflx``;
+        there is more than one (``sflx``: ``wrt_smflx .or. wrt_stflx`` before
+        ucla-roms 0.13.0, ``do_sflx``'s four switches since;
         ``diagnostics``: ``diag_uv .or. diag_trc``).
     period_field
         Real Fortran namelist key (on ``section``) holding the stream's
@@ -139,6 +177,10 @@ class _StreamCheck:
         Cppdef name(s) that must all be active (looked up in the ``cppdefs``
         mapping) for ucla-roms to even compile this stream's write calls.
         ``()`` for the groups with no cppdef guard.
+    since, before
+        For a row whose gate changed between releases: the namelist schema
+        must subclass ``since`` and must not subclass ``before``. ``None``
+        leaves that side open.
     """
 
     label: str
@@ -147,6 +189,16 @@ class _StreamCheck:
     period_field: str
     nrpf_field: str
     cppdef_guard: tuple[str, ...] = ()
+    since: type[RomsNamelistBase] | None = None
+    before: type[RomsNamelistBase] | None = None
+
+    def applies_to(self, schema: type[RomsNamelistBase] | None) -> bool:
+        """True if this row is in ``schema``'s call list; ``None`` is the newest."""
+        if schema is None:
+            return self.before is None
+        if self.since is not None and not issubclass(schema, self.since):
+            return False
+        return self.before is None or not issubclass(schema, self.before)
 
 
 # The `do_precheck` call list (ucla-roms `src/precheck.F90`), keyed on C-Star's
@@ -205,6 +257,16 @@ _STREAM_CHECKS: tuple[_StreamCheck, ...] = (
         ("wrt_smflx", "wrt_stflx"),
         "output_period_sflx",
         "nrpf_sflx",
+        before=RomsNamelistV0_13_0,
+    ),
+    # ucla-roms >= 0.13.0 (PR #407): `do_sflx`, set by any of the four switches
+    _StreamCheck(
+        "sflx",
+        "surf_flx_output_settings",
+        ("wrt_smflx", "wrt_stflx", "wrt_swflx", "wrt_rstflx"),
+        "output_period_sflx",
+        "nrpf_sflx",
+        since=RomsNamelistV0_13_0,
     ),
     _StreamCheck(
         "particles",
@@ -325,6 +387,8 @@ def _cppdef_guard_satisfied(guard: tuple[str, ...], cppdefs: Mapping[str, Any]) 
 def check_output_streams_divide_rst(
     settings: RomsNamelistBase | Mapping[str, Any],
     cppdefs: Mapping[str, Any] | None = None,
+    *,
+    schema: type[RomsNamelistBase] | None = None,
 ) -> None:
     """Raise ``NamelistConsistencyError`` if any enabled ucla-roms output
     stream's file rollover frequency (``nrpf * output_period``) would not
@@ -356,13 +420,19 @@ def check_output_streams_divide_rst(
         just omit them -- the cppdef-gated groups are then always skipped,
         exactly as ucla-roms itself would (it never compiles their write
         calls).
+    schema
+        The namelist schema of the pinned release, which selects the rows whose
+        gate changed between releases (``sflx``). Defaults to
+        ``type(settings)`` for a live ``RomsNamelistBase``; ``None`` otherwise
+        counts as the newest schema, as a branch pin does.
 
     Notes
     -----
     - Global gate: if ``basic_output_settings.wrt_file_rst`` is false/missing,
       this function returns immediately without checking anything (mirrors
       ``if (.not. wrt_file_rst) return`` in the Fortran).
-    - Each stream is additionally skipped if: its cppdef guard (if any) is
+    - Each stream is additionally skipped if: its row is not in ``schema``'s
+      call list; its cppdef guard (if any) is
       not fully satisfied; its section is absent from ``settings`` (a
       namelist carries only one of the two ``cdrtrc`` groups, which is what
       lets both rows coexist); its own enable gate reads as false (a missing gate
@@ -389,8 +459,12 @@ def check_output_streams_divide_rst(
         return
 
     cppdefs = cppdefs or {}
+    if schema is None and isinstance(settings, RomsNamelistBase):
+        schema = type(settings)
 
     for check in _STREAM_CHECKS:
+        if not check.applies_to(schema):
+            continue
         if check.cppdef_guard and not _cppdef_guard_satisfied(
             check.cppdef_guard, cppdefs
         ):
@@ -478,3 +552,132 @@ def check_restart_period_divisible_by_dt(
             section="basic_output_settings",
             keys=("output_period_rst",),
         )
+
+
+def marbl_step(dt: float, marbl_timestep: float) -> float:
+    """The MARBL timestep ucla-roms uses: ``marbl_timestep`` rounded down to a whole
+    multiple of ``dt``, at least one ``dt`` (``marbldrv_configure_tracers``).
+    """
+    return dt * max(1, int(marbl_timestep / dt))
+
+
+def is_whole_multiple(value: float, step: float) -> bool:
+    """Whether ``value`` is a whole multiple of ``step`` (0 included), to round-off."""
+    ratio = value / step
+    return abs(ratio - round(ratio)) <= 1e-9
+
+
+@dataclass(frozen=True)
+class _AverageCheck:
+    """One ``check_avg_ends_on_marbl_step`` call in ucla-roms' ``do_precheck``.
+
+    Parameters
+    ----------
+    section
+        ``RomsNamelistBase`` group field name the stream's fields live in.
+    gate_fields
+        Real Fortran namelist keys that must all be true for ROMS to check the
+        stream (``.and.``-ed, as in the Fortran call).
+    off_fields
+        Real Fortran namelist keys that must all be false for ROMS to check it.
+    period_field
+        Real Fortran namelist key holding the averaging period.
+    cppdef_guard
+        Cppdef names that must all be active for ROMS to compile the call.
+    """
+
+    section: str
+    gate_fields: tuple[str, ...]
+    off_fields: tuple[str, ...]
+    period_field: str
+    cppdef_guard: tuple[str, ...]
+
+
+_AVERAGE_CHECKS: tuple[_AverageCheck, ...] = (
+    _AverageCheck(
+        "cdr_output_settings",
+        ("do_cdr_output", "wrt_cdr_avg"),
+        ("cdr_monthly_averages",),
+        "output_period_cdr",
+        ("marbl", "marbl_diags", "cdr_forcing"),
+    ),
+    _AverageCheck(
+        "bgc_settings",
+        ("wrt_bgc_dia_avg",),
+        (),
+        "output_period_bgc_avg_dia",
+        ("marbl", "marbl_diags"),
+    ),
+)
+
+
+def check_averages_end_on_marbl_step(
+    settings: RomsNamelistBase | Mapping[str, Any],
+    cppdefs: Mapping[str, Any] | None = None,
+) -> None:
+    """Raise ``NamelistConsistencyError`` if an averaged MARBL stream's period is
+    not a whole multiple of the MARBL timestep ROMS uses -- mirrors ucla-roms >=
+    0.13.0's ``check_avg_ends_on_marbl_step`` (``src/precheck.F90``), which
+    aborts the run at startup otherwise.
+
+    ROMS rounds ``marbl_timestep`` down to a whole multiple of ``dt`` (at least
+    one ``dt``) and checks the ``_cdr`` average (``do_cdr_output`` and
+    ``wrt_cdr_avg`` on, ``cdr_monthly_averages`` off; built with MARBL,
+    MARBL_DIAGS and CDR_FORCING) and the ``_bgc_dia_avg`` average
+    (``wrt_bgc_dia_avg`` on; built with MARBL and MARBL_DIAGS) against it.
+    Unlike Rule A, it does not depend on ``wrt_file_rst``. Gate the call on the
+    pinned release with :func:`averages_end_on_marbl_step_applies_to`.
+
+    Parameters
+    ----------
+    settings
+        A canonical namelist dump, as for :func:`check_output_streams_divide_rst`.
+        Reads ``time_stepping.dt``, ``marbl_biogeochemistry_settings.marbl_timestep``
+        and the two streams' groups; a missing group or field skips what needs it.
+    cppdefs
+        Mapping of cppdef name -> whether it is active in this build, as for
+        :func:`check_output_streams_divide_rst`.
+
+    Notes
+    -----
+    Raises on the first violating stream, in ``do_precheck``'s call order.
+    """
+    dt = _section(_section(settings, "time_stepping"), "dt")
+    marbl_timestep = _section(
+        _section(settings, "marbl_biogeochemistry_settings"), "marbl_timestep"
+    )
+    if dt is None or marbl_timestep is None or dt <= 0:
+        return
+    marbl_dt = marbl_step(dt, marbl_timestep)
+
+    cppdefs = cppdefs or {}
+    for check in _AVERAGE_CHECKS:
+        if not _cppdef_guard_satisfied(check.cppdef_guard, cppdefs):
+            continue
+        section = _section(settings, check.section)
+        if section is None:
+            continue
+        if not all(_section(section, f) for f in check.gate_fields) or any(
+            _section(section, f) for f in check.off_fields
+        ):
+            continue
+        period = _section(section, check.period_field)
+        if period is None:
+            continue
+        if not is_whole_multiple(period, marbl_dt):
+            minimum = ".".join(
+                str(part) for part in AVERAGES_END_ON_MARBL_STEP_MIN_ROMS
+            )
+            raise NamelistConsistencyError(
+                f"{check.section}.{check.period_field} ({period} s) is not a whole "
+                f"multiple of the MARBL timestep ROMS uses, {marbl_dt} s "
+                "(marbl_biogeochemistry_settings.marbl_timestep "
+                f"{marbl_timestep} s rounded down to a multiple of "
+                f"time_stepping.dt {dt} s): ucla-roms >= {minimum} aborts at startup "
+                "otherwise (check_avg_ends_on_marbl_step). Adjust "
+                f"{check.section}.{check.period_field} or "
+                "marbl_biogeochemistry_settings.marbl_timestep.",
+                rule="averages_end_on_marbl_step",
+                section=check.section,
+                keys=(check.period_field,),
+            )

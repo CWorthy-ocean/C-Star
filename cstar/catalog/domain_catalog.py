@@ -235,7 +235,7 @@ class DomainCatalog:
 
         catalog/
         ├── ModelSpec/
-        │   └── roms-marbl-0.12-default.yaml   (code + model_settings)
+        │   └── roms-marbl-0.13-default.yaml   (code + model_settings)
         ├── DomainSpec/
         │   ├── ccs-12km.yaml
         │   └── PAC_2fth_deg.yaml
