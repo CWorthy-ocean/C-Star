@@ -364,7 +364,7 @@ def create_parser() -> argparse.ArgumentParser:
         ARG_LOGLEVEL_SHORT,
         ARG_LOGLEVEL_LONG,
         default=get_env_item(ENV_CSTAR_LOG_LEVEL).value,
-        type=str,
+        type=str.upper,
         required=False,
         help=ARG_LOGLEVEL_HELP,
         choices=list(LogLevelChoices),

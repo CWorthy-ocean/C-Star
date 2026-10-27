@@ -5,27 +5,22 @@ import typer
 from pydantic import ValidationError
 
 from cstar.applications.core import get_application
-from cstar.base.env import ENV_CSTAR_LOG_LEVEL
-from cstar.base.log import LogLevelChoices, get_logger
+from cstar.base.log import get_logger
 from cstar.cli.common import (
+    DEFAULT_LOG_LEVEL_CHOICE,
     SCHEMA_ERRORS,
+    LogLevelOption,
     MigrationRequest,
-    cb_pipeline,
     console,
     execute_migration,
     exit_on_refused_settings,
     format_validation_errors,
     report_schema_error,
-    set_env,
-    update_loggers,
 )
 from cstar.entrypoint.utils import (
     ARG_CLOBBER,
     ARG_CLOBBER_HELP,
     ARG_DRY_RUN,
-    ARG_LOGLEVEL_HELP,
-    ARG_LOGLEVEL_LONG,
-    ARG_LOGLEVEL_SHORT,
     ARG_VERBOSE,
     ARG_VERBOSE_HELP,
 )
@@ -214,17 +209,7 @@ def migrate(
             is_eager=True,
         ),
     ] = False,
-    log_level: t.Annotated[
-        LogLevelChoices,
-        typer.Option(
-            ARG_LOGLEVEL_LONG,
-            ARG_LOGLEVEL_SHORT,
-            callback=cb_pipeline(set_env(ENV_CSTAR_LOG_LEVEL), update_loggers),
-            help=ARG_LOGLEVEL_HELP,
-            envvar=ENV_CSTAR_LOG_LEVEL,
-            is_eager=True,
-        ),
-    ] = LogLevelChoices.INFO,
+    log_level: LogLevelOption = DEFAULT_LOG_LEVEL_CHOICE,
 ) -> None:
     """Migrate the schema of an old blueprint to the latest version."""
     report_inplace_conflicts(in_place, clobber)

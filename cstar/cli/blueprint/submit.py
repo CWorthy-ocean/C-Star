@@ -4,14 +4,14 @@ from pathlib import Path
 import typer
 from click.core import ParameterSource
 
-from cstar.base.env import ENV_CSTAR_LOG_LEVEL, ENV_CSTAR_RUNID
-from cstar.base.log import LogLevelChoices
+from cstar.base.env import ENV_CSTAR_RUNID
 from cstar.cli.common import (
+    DEFAULT_LOG_LEVEL_CHOICE,
+    LogLevelOption,
     cb_pipeline,
     exit_on_refused_settings,
     normalize_runid,
     set_env,
-    update_loggers,
 )
 from cstar.cli.workplan.run import (
     composed_workplan_name,
@@ -23,9 +23,6 @@ from cstar.cli.workplan.shared import list_runs
 from cstar.entrypoint.utils import (
     ARG_CLOBBER,
     ARG_CLOBBER_HELP,
-    ARG_LOGLEVEL_HELP,
-    ARG_LOGLEVEL_LONG,
-    ARG_LOGLEVEL_SHORT,
     ARG_PRE_RUN,
     ARG_PRE_RUN_BLUEPRINT_SUBMIT_HELP,
     ARG_RESUME,
@@ -151,16 +148,7 @@ def submit(
             ),
         ),
     ] = "",
-    log_level: t.Annotated[
-        LogLevelChoices,
-        typer.Option(
-            ARG_LOGLEVEL_LONG,
-            ARG_LOGLEVEL_SHORT,
-            callback=cb_pipeline(set_env(ENV_CSTAR_LOG_LEVEL), update_loggers),
-            help=ARG_LOGLEVEL_HELP,
-            envvar=ENV_CSTAR_LOG_LEVEL,
-        ),
-    ] = LogLevelChoices.INFO,
+    log_level: LogLevelOption = DEFAULT_LOG_LEVEL_CHOICE,
     clobber: t.Annotated[
         bool,
         typer.Option(ARG_CLOBBER, help=ARG_CLOBBER_HELP),

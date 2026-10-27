@@ -6,6 +6,7 @@ import typer
 
 from cstar.base.env import (
     USER_CONFIG_HEADER,
+    canonical_user_config_value,
     format_user_config_value,
     get_env_item,
     load_user_config_for_repair,
@@ -154,10 +155,15 @@ def set_value(
 
     The file is located through the loader's record, so the path is the one
     this process read. A shell that exports the same setting still takes
-    precedence over the file. The name is checked strictly, so a typo is caught
-    here rather than skipped by every later command.
+    precedence over the file. The name and the value are checked strictly, so a
+    typo is caught here rather than skipped by every later command; a value is
+    stored in its canonical form (``debug`` is stored as ``DEBUG``).
     """
     name = _validated_name(name)
+    try:
+        value = canonical_user_config_value(name, value)
+    except ValueError as ex:
+        raise typer.BadParameter(str(ex)) from ex
     config = load_user_config_for_repair()
     path = config.path
 

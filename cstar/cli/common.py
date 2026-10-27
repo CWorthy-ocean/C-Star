@@ -20,12 +20,18 @@ from cstar.base.env import (
     ENV_CSTAR_DISABLE_MIGRATION,
     ENV_CSTAR_LOG_LEVEL,
     REMOVED_SETTINGS,
+    get_env_item,
     load_user_config,
 )
 from cstar.base.exceptions import CstarExpectationFailed, CstarUserConfigError
 from cstar.base.feature import is_flag_enabled
 from cstar.base.log import LogLevelChoices, get_logger, reset_log_level
 from cstar.base.utils import slugify
+from cstar.entrypoint.utils import (
+    ARG_LOGLEVEL_HELP,
+    ARG_LOGLEVEL_LONG,
+    ARG_LOGLEVEL_SHORT,
+)
 from cstar.execution.file_system import (
     DirectoryManager,
     get_backup_path,
@@ -229,7 +235,8 @@ def common_callback(
     `deprecated` also emits would repeat it, with a source line, on the terminal.
 
     The file is loaded before any command's options are parsed, so an option's
-    ``envvar`` binding sees it; an exported variable still wins over it. A file
+    ``envvar`` binding sees it; an exported variable still wins over it. A log
+    level the file sets is applied to the loggers that already exist. A file
     the loader refuses (one it cannot read) stops every command except the ones
     that manage it, ``cstar init`` and ``cstar env``.
 
@@ -240,7 +247,7 @@ def common_callback(
     """
     warnings.simplefilter("ignore", CstarDeprecationWarning)
     try:
-        load_user_config()
+        config = load_user_config()
     except CstarUserConfigError as ex:
         from cstar.cli.environment import NAME as NAME_ENV
         from cstar.cli.init import COMMAND_INIT
@@ -248,6 +255,10 @@ def common_callback(
         typer.echo(str(ex), err=True)
         if ctx.invoked_subcommand not in {NAME_ENV, COMMAND_INIT}:
             raise typer.Exit(2) from ex
+    else:
+        # the module loggers were created at import, before the file was loaded
+        if ENV_CSTAR_LOG_LEVEL in config.applied:
+            reset_log_level(LogLevelChoices(config.applied[ENV_CSTAR_LOG_LEVEL]))
 
     for name in sorted(REMOVED_SETTINGS.keys() & os.environ.keys()):
         typer.echo(f"{name} has no effect; {REMOVED_SETTINGS[name].guidance}", err=True)
@@ -405,11 +416,30 @@ def set_env(
 
 def update_loggers(ctx: typer.Context, value: str) -> str:
     """Perform a log-level reset on all loggers if the log level is updated via CLI."""
-    reset_log_level(LogLevelChoices[value])
+    reset_log_level(LogLevelChoices(value))
     return value
 
 
 log_level_callback = cb_pipeline(set_env(ENV_CSTAR_LOG_LEVEL), update_loggers)
+
+LogLevelOption = t.Annotated[
+    LogLevelChoices,
+    typer.Option(
+        ARG_LOGLEVEL_LONG,
+        ARG_LOGLEVEL_SHORT,
+        callback=log_level_callback,
+        case_sensitive=False,
+        envvar=ENV_CSTAR_LOG_LEVEL,
+        help=ARG_LOGLEVEL_HELP,
+        is_eager=True,
+    ),
+]
+"""The ``--log-level`` option; the command writes its default, `DEFAULT_LOG_LEVEL_CHOICE`."""
+
+DEFAULT_LOG_LEVEL_CHOICE: t.Final[LogLevelChoices] = LogLevelChoices(
+    get_env_item(ENV_CSTAR_LOG_LEVEL).default
+)
+"""The log level a command runs at when neither the option nor the environment names one."""
 
 
 def path_callback(value: str | None) -> str | None:

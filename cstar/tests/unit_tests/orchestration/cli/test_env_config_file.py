@@ -368,3 +368,46 @@ def test_rejected_names_create_no_file(
 
     assert result.exit_code == 2
     assert not path.exists()
+
+
+def test_set_refuses_a_value_that_is_not_a_log_level(
+    runner: CliRunner, isolate_user_config: Path
+) -> None:
+    """A refused value creates no file and names the levels the setting accepts."""
+    path = isolate_user_config
+
+    result = runner.invoke(app_set, [ENV_CSTAR_LOG_LEVEL, "loud"], color=False)
+
+    assert result.exit_code == 2
+    assert "is not a log level" in result.stderr.replace("\n", "")
+    assert not path.exists()
+
+
+def test_set_leaves_an_existing_file_alone_when_refusing_a_value(
+    runner: CliRunner, isolate_user_config: Path
+) -> None:
+    """A refused value does not rewrite a file that already holds the setting."""
+    path = isolate_user_config
+    path.write_text(EXISTING_FILE)
+
+    result = runner.invoke(app_set, [ENV_CSTAR_LOG_LEVEL, "loud"], color=False)
+
+    assert result.exit_code == 2
+    assert path.read_text() == EXISTING_FILE
+
+
+def test_set_stores_a_log_level_in_upper_case(
+    runner: CliRunner, isolate_user_config: Path
+) -> None:
+    """A log level typed in lower case is written, reported and read back as its
+    upper-case name, with no "reads back as" note.
+    """
+    path = isolate_user_config
+
+    result = runner.invoke(app_set, [ENV_CSTAR_LOG_LEVEL, "debug"], color=False)
+
+    assert result.exit_code == 0
+    assert f"{ENV_CSTAR_LOG_LEVEL}=DEBUG\n" in path.read_text()
+    assert f"Set {ENV_CSTAR_LOG_LEVEL}=DEBUG in" in result.stdout
+    assert "reads back as" not in result.stdout
+    assert read_user_config(path) == {ENV_CSTAR_LOG_LEVEL: "DEBUG"}

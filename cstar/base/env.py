@@ -208,12 +208,13 @@ def generate_run_id() -> str:
 ENV_CSTAR_LOG_LEVEL: t.Annotated[
     t.Literal["CSTAR_LOG_LEVEL"],
     EnvVar(
-        "Specify the logging level for terminal messages. Options: DEBUG, INFO, WARNING, ERROR, CRITICAL.",
+        "Specify the logging level for terminal messages. Options: TRACE, DEBUG, "
+        "INFO, WARNING, ERROR, CRITICAL; any case is accepted.",
         GROUP_SIM,
         default="INFO",
     ),
 ] = "CSTAR_LOG_LEVEL"
-"""Specify the logging level for terminal messages. Options: DEBUG, INFO, WARNING, ERROR, CRITICAL."""
+"""Specify the logging level for terminal messages. Options: TRACE, DEBUG, INFO, WARNING, ERROR, CRITICAL; any case is accepted."""
 
 ENV_CSTAR_DISABLE_BUILD_VERIFICATION: t.Annotated[
     t.Literal["CSTAR_DISABLE_BUILD_VERIFICATION"],
@@ -589,15 +590,55 @@ def missing_value_problem(name: str) -> str:
     return f"{name} has no value; write {name}=<value> or comment the line out"
 
 
+def canonical_user_config_value(name: str, value: str) -> str:
+    """Return `value` as the configuration file stores it for the setting `name`.
+
+    A setting whose reader accepts several spellings of one value is stored in
+    one: a log level in upper case. Every other setting's value is returned as
+    it is.
+
+    Parameters
+    ----------
+    name : str
+        The setting's name.
+    value : str
+        The value as given.
+
+    Returns
+    -------
+    str
+        The value to store.
+
+    Raises
+    ------
+    ValueError
+        Naming the setting, the value and what the setting accepts, when `value`
+        is not one the setting can take.
+    """
+    if name == ENV_CSTAR_LOG_LEVEL:
+        # imported lazily: cstar.base.log imports this module
+        from cstar.base.log import LogLevelChoices
+
+        try:
+            return LogLevelChoices(value).value
+        except ValueError as ex:
+            accepted = ", ".join(LogLevelChoices)
+            msg = f"{name}={value!r} is not a log level; use one of {accepted}"
+            raise ValueError(msg) from ex
+    return value
+
+
 def parse_user_config(path: Path) -> tuple[dict[str, str], dict[str, str]]:
     """Parse the configuration file at `path`, sorting its keys.
 
     A key that `user_config_problems` rejects is skipped rather than refused:
     the file may be shared with another version of C-Star, which may read a
     name this one removed or does not know yet. Values have ``~`` and ``$VAR``
-    references expanded against the process environment. A key written without
-    a value (``CSTAR_X=``) yields an empty string, as an exported empty variable
-    would; a name with no ``=`` is skipped too, rather than guessed at.
+    references expanded against the process environment, then go through
+    `canonical_user_config_value`; a value it rejects is skipped like a bad
+    name. A key written without a value (``CSTAR_X=``) yields an empty string,
+    as an exported empty variable would; a name with no ``=`` is skipped too,
+    rather than guessed at.
 
     Parameters
     ----------
@@ -632,7 +673,11 @@ def parse_user_config(path: Path) -> tuple[dict[str, str], dict[str, str]]:
         elif value is None:
             skipped[name] = missing_value_problem(name)
         else:
-            values[name] = os.path.expandvars(os.path.expanduser(value))
+            expanded = os.path.expandvars(os.path.expanduser(value))
+            try:
+                values[name] = canonical_user_config_value(name, expanded)
+            except ValueError as ex:
+                skipped[name] = str(ex)
     return values, skipped
 
 

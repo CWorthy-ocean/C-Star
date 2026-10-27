@@ -13,6 +13,7 @@ from typer.main import get_command
 from typer.testing import CliRunner, Result
 
 from cstar.base.deprecation import CstarDeprecationWarning, deprecated
+from cstar.base.env import UserConfig
 from cstar.cli.blueprint import ALIAS as ALIAS_BLUEPRINT
 from cstar.cli.cli import attach_subcommands
 from cstar.cli.common import common_callback
@@ -366,7 +367,10 @@ def test_cli_reports_a_deprecation_by_its_log_line_alone(monkeypatch, caplog):
     """The root callback silences the Python warning `deprecated` emits beside its
     log line, so the terminal shows one line.
     """
-    monkeypatch.setattr("cstar.cli.common.load_user_config", lambda: None)
+    monkeypatch.setattr(
+        "cstar.cli.common.load_user_config",
+        lambda: UserConfig(path=Path("config.env"), applied={}, skipped={}),
+    )
     with warnings.catch_warnings(record=True) as record:
         warnings.simplefilter("always")
         common_callback(MagicMock())
