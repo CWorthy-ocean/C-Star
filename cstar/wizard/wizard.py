@@ -4354,7 +4354,7 @@ class ForgeBlueprintWizard:
             indent=False,
             tooltip="Pick the MPI tiling at runtime from the land mask "
             "(ucla-roms >= 0.5.0 MPI_MASKING). Requires PIO -- forces it on and "
-            "locks it. In development.",
+            "locks it. Experimental.",
         )
         self.n_cores = W.IntText(
             value=1,

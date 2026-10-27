@@ -272,6 +272,7 @@ fields:
     hint: 'Builds ROMS against the ParallelIO library: inputs are written as classic-format (CDF-5) netCDF and ROMS reads/writes joined files.'
   auto_tiling_chk:
     label: Automatic tiling
+    experimental: true
     hint: Picks the MPI tiling at runtime from the land mask (ucla-roms >= 0.5.0).
   n_cores:
     label: Total processors

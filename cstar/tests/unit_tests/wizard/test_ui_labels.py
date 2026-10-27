@@ -130,11 +130,16 @@ def test_parse_accepts_well_formed_entries():
     parsed = labels._parse(
         {
             "sections": {"s": {"title": "S", "desc": "d", "required": True}},
-            "fields": {"f": {"label": "F", "symbol": "f", "required": True}},
+            "fields": {
+                "f": {"label": "F", "symbol": "f", "required": True},
+                "x": {"label": "X", "experimental": True},
+            },
         }
     )
     assert parsed["sections"]["s"].title == "S"
     assert parsed["fields"]["f"].label == "F"
+    assert parsed["fields"]["f"].experimental is False
+    assert parsed["fields"]["x"].experimental is True
 
 
 def test_label_for_missing_key_falls_back_to_last_segment():

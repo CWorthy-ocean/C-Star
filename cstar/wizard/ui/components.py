@@ -122,6 +122,7 @@ body[data-voila] .forge-shell {{ max-width: {SHELL_MAX_WIDTH}; margin: 0 auto; p
 .forge-app .forge-field .flab .widget-html-content {{ padding-top: 5px; line-height: 1.25; }}
 .forge-app .forge-field .w {{ font-size: 13px; font-weight: 500; }}
 .forge-app .forge-field .w .req {{ color: {branding.BRAND_RED}; font-weight: 700; margin-left: 4px; }}
+.forge-app .forge-field .exp {{ margin-top: 3px; }}
 .forge-app .forge-field .sym {{
     font-family: Menlo, Consolas, monospace;
     font-size: 11.5px;
@@ -450,9 +451,18 @@ def style_widget(W: Any) -> Any:
     return widget
 
 
-def chip(text: str, kind: str) -> str:
-    """An inline ``<span class='forge-chip {kind}'>`` HTML chip."""
-    return f"<span class='forge-chip {kind}'>{text}</span>"
+def chip(text: str, kind: str, *, title: str = "") -> str:
+    """An inline ``<span class='forge-chip {kind}'>`` HTML chip; ``title`` is its tooltip."""
+    title_attr = f" title='{title}'" if title else ""
+    return f"<span class='forge-chip {kind}'{title_attr}>{text}</span>"
+
+
+#: The chip a glossary entry with ``experimental: true`` puts under its label.
+EXPERIMENTAL_CHIP = chip(
+    "Experimental",
+    "warn",
+    title="This feature is experimental and may not work correctly.",
+)
 
 
 def banner(kind: str, html: str) -> str:
@@ -468,11 +478,13 @@ def banner_widget(W: Any, kind: str, html: str) -> Any:
 
 
 def _field_label_html(label) -> str:
-    """The label-column HTML for one :func:`field_row` (word + symbol)."""
+    """The label-column HTML for one :func:`field_row` (word + symbol + experimental chip)."""
     req = "<span class='req'>*</span>" if label.required else ""
     html = f"<div class='w'>{label.label}{req}</div>"
     if label.symbol:
         html += f"<div class='sym'>{label.symbol}</div>"
+    if label.experimental:
+        html += f"<div class='exp'>{EXPERIMENTAL_CHIP}</div>"
     return html
 
 
@@ -495,7 +507,8 @@ def field_row(
 
     ``widget.description`` is cleared (the label column replaces it). The
     label, symbol, unit, and required marker come from
-    :func:`cstar.wizard.ui.labels.label_for`; ``hint`` falls back to
+    :func:`cstar.wizard.ui.labels.label_for`, plus an "Experimental" chip
+    for an entry flagged ``experimental``; ``hint`` falls back to
     ``default_hint`` when the glossary has none. ``widget.layout.display`` is
     mirrored onto the row's own layout (both now and on every future change),
     so existing code that hides ``widget`` (``widget.layout.display =
